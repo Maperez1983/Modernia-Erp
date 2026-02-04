@@ -47,6 +47,7 @@ const state = {
   clientesShowAll: false,
   gestoriaCrmFull: false,
   gestoriaCrmTab: "all",
+  segurosTab: "dashboard",
 };
 
 const empresaSelect = document.getElementById("empresaSelect");
@@ -4839,6 +4840,28 @@ const setGestoriaCrmTab = (tabName = "autonomo") => {
   }
 };
 
+const initSegurosTabs = () => {
+  const tabs = document.getElementById("segurosTabs");
+  if (!tabs || tabs.dataset.ready === "1") return;
+  tabs.dataset.ready = "1";
+  const sections = Array.from(document.querySelectorAll(".seguros-tab"));
+  const setTab = (name) => {
+    state.segurosTab = name;
+    tabs.querySelectorAll(".tab").forEach((btn) => {
+      btn.classList.toggle("active", btn.dataset.segurosTab === name);
+    });
+    sections.forEach((section) => {
+      section.classList.toggle("active", section.dataset.segurosTab === name);
+    });
+  };
+  tabs.addEventListener("click", (event) => {
+    const btn = event.target.closest(".tab");
+    if (!btn || !btn.dataset.segurosTab) return;
+    setTab(btn.dataset.segurosTab);
+  });
+  setTab(state.segurosTab || "dashboard");
+};
+
 const setGestoriaClientModuleTab = (tabName = "") => {
   if (!gestoriaModuleTabs) return;
   const map = {
@@ -5003,7 +5026,7 @@ const updateTableVisibility = () => {
     state.empresas.find((e) => e.id === empresaSelect.value)?.nombre ||
     "";
   if (viewTabs) {
-    viewTabs.classList.toggle("hidden", isClientePage);
+    viewTabs.classList.toggle("hidden", isClientePage || currentTab === "seguros-crm");
   }
   if (companySummary) {
     companySummary.classList.toggle("hidden", isClientePage || isServiceCrm);
@@ -9804,6 +9827,7 @@ const init = async () => {
     renderUsuariosTable();
     initFinSimulator();
     setGestoriaCrmTab(state.gestoriaCrmTab || "autonomo");
+    initSegurosTabs();
     await safe(loadFincasRenewalAlert());
     setupCatalogoInputs();
     renderCompanyCards();
