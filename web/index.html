@@ -1,0 +1,3376 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>LIV</title>
+    <link rel="stylesheet" href="styles.css?v=108" />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600;700&family=Source+Sans+3:wght@300;400;500;600;700&display=swap" />
+  </head>
+  <body>
+    <header>
+      <div class="brand" id="brandHome">
+        <img src="/assets/liv_logo.svg" alt="LIV" />
+        <div>
+          <p>Software verificado · Versión 1.0</p>
+        </div>
+      </div>
+      <div class="meta">
+        <div>Panel operativo</div>
+        <div class="muted">UI v4</div>
+        <div class="muted">
+          Usuario:
+          <select id="userSelect"></select>
+        </div>
+        <div id="dbStatus">Conectando a base de datos...</div>
+      </div>
+    </header>
+    <div id="renewalAlert" class="alert hidden"></div>
+
+    <main>
+      <section class="hero" id="homeSection">
+        <h2>Visión general <span class="pill">Fase 1</span></h2>
+        <p>Accede a los servicios, al módulo de clientes y al histórico de empresas.</p>
+        <div class="toolbar" id="tableToolbar">
+          <span class="pill">Año</span>
+          <select id="yearSelect"></select>
+        </div>
+        <div class="home-block">
+          <h3>Módulos clave</h3>
+          <p class="muted">Herramientas transversales del grupo.</p>
+          <div id="coreCards" class="grid"></div>
+        </div>
+      </section>
+      <section id="holdingSection" class="hidden">
+        <div class="section-head">
+          <div>
+            <h2>Histórico de empresas</h2>
+            <p class="muted">Consulta por sociedades y evolución histórica.</p>
+          </div>
+          <button id="holdingBackBtn" class="secondary ghost">Volver a home</button>
+        </div>
+        <div class="form-card">
+          <h3>Organigrama</h3>
+          <p class="muted">Estructura societaria.</p>
+          <div id="holdingOrgChart" class="org-chart"></div>
+        </div>
+      </section>
+      <section id="agendaSection" class="hidden">
+        <div class="section-head">
+          <div>
+            <h2>Agenda</h2>
+            <p class="muted">Vista centralizada de tareas y seguimientos.</p>
+          </div>
+          <button id="agendaBackBtn" class="secondary ghost">Volver a home</button>
+        </div>
+        <div class="form-card">
+          <h3>Agenda general</h3>
+          <p class="muted">Enlazaremos aquí la agenda de cada servicio.</p>
+          <div id="agendaGeneral"></div>
+        </div>
+      </section>
+      <section id="adminSection" class="hidden">
+        <div class="section-head">
+          <div>
+            <h2>Panel admin</h2>
+            <p class="muted">Gestión de usuarios y permisos.</p>
+          </div>
+          <button id="adminBackBtn" class="secondary ghost">Volver a home</button>
+        </div>
+        <div class="form-card">
+          <h3>Usuarios</h3>
+          <form id="adminUserForm" class="form-grid">
+            <label>
+              Nombre
+              <input name="nombre" required />
+            </label>
+            <label>
+              Apellido
+              <input name="apellido" required />
+            </label>
+            <label>
+              Usuario
+              <input name="usuario" required />
+            </label>
+            <label>
+              Email
+              <input name="email" type="email" required />
+            </label>
+            <label>
+              Servicio
+              <select name="servicio">
+                <option>Gestoría</option>
+                <option>Seguros</option>
+                <option>Inmobiliaria</option>
+                <option>Financiaciones</option>
+                <option>Administración Fincas</option>
+                <option>Dirección</option>
+                <option>Administración</option>
+              </select>
+            </label>
+            <label>
+              Rol
+              <select name="rol">
+                <option>Administrador</option>
+                <option>Gestoría</option>
+                <option>Seguros</option>
+                <option>Inmobiliaria</option>
+                <option>Financiaciones</option>
+                <option>Lectura</option>
+              </select>
+            </label>
+            <label>
+              Contraseña
+              <div class="input-with-icon">
+                <input name="password" id="adminPasswordInput" type="password" required />
+                <button type="button" class="icon-btn" id="adminPasswordToggle" aria-label="Mostrar contraseña">👁</button>
+              </div>
+            </label>
+            <label>
+              Estado
+              <select name="activo">
+                <option value="1">Activo</option>
+                <option value="0">Inactivo</option>
+              </select>
+            </label>
+            <div class="form-actions">
+              <button type="submit">Crear usuario</button>
+              <span id="adminUserStatus" class="muted"></span>
+            </div>
+          </form>
+          <div id="adminUsersTable"></div>
+          <div class="footer" id="adminUsersInfo"></div>
+        </div>
+      </section>
+
+      <section id="explorerSection" class="hidden">
+        <div class="section-head">
+          <div>
+            <h2 id="explorerTitle">Explorador de datos</h2>
+            <p class="muted" id="explorerSubtitle">
+              Filtra por empresa, módulo y texto.
+            </p>
+          </div>
+          <button id="homeBtn" class="secondary ghost">Volver a home</button>
+        </div>
+        <div id="companySummary" class="company-summary hidden">
+          <div>
+            <h3 id="companySummaryTitle">Empresa</h3>
+            <p class="muted" id="companySummarySubtitle">Gestion operativa y control diario.</p>
+          </div>
+          <div class="company-summary-meta" id="companySummaryMeta"></div>
+        </div>
+        <div class="tabs" id="viewTabs">
+          <button class="tab active" data-tab="operativa">Dashboard</button>
+          <button class="tab hidden" data-tab="crm" id="crmTab">CRM</button>
+          <button class="tab hidden" data-tab="gestoria-dash" id="gestoriaDashTab">Dashboard Gestoría</button>
+          <button class="tab hidden" data-tab="gestoria-crm" id="fincasCrmTab">CRM Gestoría</button>
+          <button class="tab hidden" data-tab="gestoria-agenda" id="gestoriaAgendaTab">Agenda Gestoría</button>
+          <button class="tab hidden" data-tab="seguros-crm" id="segurosCrmTab">CRM Seguros</button>
+          <button class="tab hidden" data-tab="fin-crm" id="finCrmTab">CRM Financiaciones</button>
+          <button class="tab hidden" data-tab="gestoria-fact" id="gestoriaFactTab">Facturación Gestoría</button>
+          <button class="tab hidden" data-tab="gestoria-conta" id="gestoriaContaTab">Contabilidad Gestoría</button>
+          <button class="tab" data-tab="bdt">BDT</button>
+          <button class="tab" data-tab="alta">Alta</button>
+          <button class="tab hidden" data-tab="fin-sim" id="finSimTab">Simulador</button>
+          <button class="tab hidden" data-tab="aie" id="aieTab">Personal AIE</button>
+        </div>
+        <div id="crmSection" class="hidden">
+          <div class="crm-header crm-header-stack">
+            <div>
+              <h3>CRM Inmobiliario</h3>
+              <p class="muted">Control de captaciones, inmuebles, demandas y visitas.</p>
+            </div>
+            <div class="crm-actions">
+              <button type="button" id="crmNuevaCaptacionBtn">Nueva captación</button>
+              <button type="button" id="crmNuevaDemandaBtn" class="secondary">Nueva demanda</button>
+            </div>
+          </div>
+          <div class="grid crm-kpis">
+            <div class="card kpi-card">
+              <h3>Captaciones activas</h3>
+              <div class="kpi-value" id="crmKpiCaptaciones">0</div>
+              <div class="muted">Pipeline</div>
+            </div>
+            <div class="card kpi-card">
+              <h3>Inmuebles activos</h3>
+              <div class="kpi-value" id="crmKpiInmuebles">0</div>
+              <div class="muted">Inventario</div>
+            </div>
+            <div class="card kpi-card">
+              <h3>Etapa más activa</h3>
+              <div class="kpi-value" id="crmKpiEtapa">-</div>
+              <div class="muted">Captaciones</div>
+            </div>
+          </div>
+          <div class="form-card">
+            <div class="section-head">
+              <div>
+                <h3>Pipeline de captación</h3>
+                <p class="muted">Arrastra para avanzar el estado de cada captación.</p>
+              </div>
+              <select id="crmEtapaFilter">
+                <option value="">Todas las etapas</option>
+                <option>Prospecto</option>
+                <option>Contactado</option>
+                <option>Visita/Valoración</option>
+                <option>Negociación</option>
+                <option>Encargo firmado</option>
+                <option>Publicado</option>
+                <option>Perdido</option>
+              </select>
+            </div>
+            <div id="crmPipeline" class="crm-pipeline"></div>
+            <div id="crmKanban" class="crm-kanban"></div>
+          </div>
+          <div class="crm-split">
+            <div class="form-card">
+              <div class="section-head">
+                <div>
+                  <h3>Inmuebles</h3>
+                  <p class="muted">Busca por referencia, dirección, zona o estado.</p>
+                </div>
+                <input id="crmInmuebleSearch" placeholder="Buscar inmueble..." />
+              </div>
+              <div id="crmInmueblesTable"></div>
+              <div class="footer" id="crmInmueblesInfo"></div>
+            </div>
+            <div class="form-card">
+              <div class="section-head">
+                <div>
+                  <h3>Últimos inmuebles</h3>
+                  <p class="muted">Accesos rápidos a fichas recientes.</p>
+                </div>
+              </div>
+              <div id="crmInmueblesRecent" class="crm-recent"></div>
+            </div>
+          </div>
+          <div id="inmuebleDetail" class="form-card hidden">
+            <div class="section-head">
+              <div>
+                <h3 id="inmuebleTitle">Ficha de inmueble</h3>
+                <p class="muted" id="inmuebleSubtitle">Detalle completo.</p>
+              </div>
+              <div class="form-actions">
+                <span id="inmuebleSaveStatus" class="muted"></span>
+                <button class="ghost" type="button" id="inmuebleBackBtn">Volver</button>
+              </div>
+            </div>
+            <div class="tabs" id="inmuebleTabs">
+              <button class="tab active" type="button" data-tab="datos">Datos</button>
+              <button class="tab" type="button" data-tab="captacion">Captación</button>
+              <button class="tab" type="button" data-tab="demandas">Demandas</button>
+              <button class="tab" type="button" data-tab="visitas">Visitas</button>
+              <button class="tab" type="button" data-tab="actividad">Actividad</button>
+              <button class="tab" type="button" data-tab="mapa">Mapa</button>
+              <button class="tab" type="button" data-tab="docs">Documentos</button>
+              <button class="tab" type="button" data-tab="estado">Estado</button>
+            </div>
+            <div id="inmuebleTabDatos">
+              <div class="grid" id="inmuebleDatosGrid"></div>
+            </div>
+            <div id="inmuebleTabCaptacion" class="hidden">
+              <div class="grid" id="inmuebleCaptacionGrid"></div>
+            </div>
+            <div id="inmuebleTabDemandas" class="hidden">
+              <div class="form-card">
+                <h3>Demandas compatibles</h3>
+                <div id="inmuebleDemandasTable"></div>
+              </div>
+              <div class="form-card">
+                <h3>Nueva demanda</h3>
+                <form id="inmuebleDemandaForm">
+                  <div class="form-grid">
+                    <label>
+                      Cliente
+                      <select id="inmuebleDemandaCliente" name="cliente_id"></select>
+                    </label>
+                    <label>
+                      Tipo
+                      <select name="tipo">
+                        <option>Compra</option>
+                        <option>Alquiler</option>
+                      </select>
+                    </label>
+                    <label>
+                      Zona
+                      <input name="zona" />
+                    </label>
+                    <label>
+                      Precio máximo
+                      <input name="precio_max" type="number" step="0.01" />
+                    </label>
+                    <label>
+                      m² mínimo
+                      <input name="m2_min" type="number" step="0.01" />
+                    </label>
+                    <label>
+                      Habitaciones mín.
+                      <input name="habitaciones_min" type="number" min="0" />
+                    </label>
+                    <label>
+                      Baños mín.
+                      <input name="banos_min" type="number" min="0" />
+                    </label>
+                    <label>
+                      Estado
+                      <select name="estado">
+                        <option>Activa</option>
+                        <option>En negociación</option>
+                        <option>Cancelada</option>
+                      </select>
+                    </label>
+                    <label>
+                      Prioridad
+                      <select name="prioridad">
+                        <option>Media</option>
+                        <option>Alta</option>
+                        <option>Baja</option>
+                      </select>
+                    </label>
+                    <label>
+                      Notas
+                      <textarea name="notas" rows="3"></textarea>
+                    </label>
+                  </div>
+                  <div class="form-actions">
+                    <button type="submit">Guardar</button>
+                    <span id="inmuebleDemandaStatus" class="muted"></span>
+                  </div>
+                </form>
+              </div>
+            </div>
+            <div id="inmuebleTabVisitas" class="hidden">
+              <div class="form-card">
+                <h3>Agenda de visitas</h3>
+                <form id="inmuebleVisitaForm" class="form-grid">
+                  <label>
+                    Demanda
+                    <select id="inmuebleVisitaDemanda" name="demanda_id"></select>
+                  </label>
+                  <label>
+                    Fecha
+                    <input name="fecha" type="date" required />
+                  </label>
+                  <label>
+                    Hora
+                    <input name="hora" type="time" />
+                  </label>
+                  <label>
+                    Estado
+                    <select name="estado">
+                      <option>Programada</option>
+                      <option>Realizada</option>
+                      <option>Cancelada</option>
+                    </select>
+                  </label>
+                  <label>
+                    Asesor
+                    <input name="asesor" />
+                  </label>
+                  <label>
+                    Notas
+                    <textarea name="notas" rows="2"></textarea>
+                  </label>
+                  <div class="form-actions">
+                    <button type="submit">Guardar visita</button>
+                    <span id="inmuebleVisitaStatus" class="muted"></span>
+                  </div>
+                </form>
+              </div>
+              <div class="form-card">
+                <h3>Historial de visitas</h3>
+                <div id="inmuebleVisitasTable"></div>
+                <div class="footer" id="inmuebleVisitasInfo"></div>
+              </div>
+            </div>
+            <div id="inmuebleTabActividad" class="hidden">
+              <div class="form-card">
+                <h3>Actividad</h3>
+                <p class="muted">Acciones y seguimiento asociado al inmueble.</p>
+                <div id="inmuebleActividadTimeline" class="crm-timeline"></div>
+                <div id="inmuebleActividadTable"></div>
+                <div class="footer" id="inmuebleActividadInfo"></div>
+              </div>
+              <div class="form-card">
+                <h3>Nueva actividad</h3>
+                <form id="inmuebleActividadForm" class="form-grid">
+                  <label>
+                    Cliente (opcional)
+                    <input id="inmuebleActividadClienteInput" list="inmuebleActividadClientes" />
+                    <datalist id="inmuebleActividadClientes"></datalist>
+                    <input type="hidden" name="cliente_id" id="inmuebleActividadClienteId" />
+                  </label>
+                  <label>
+                    Fecha
+                    <input name="fecha" type="date" required />
+                  </label>
+                  <label>
+                    Hora
+                    <input name="hora" type="time" />
+                  </label>
+                  <label>
+                    Tipo
+                    <select name="tipo">
+                      <option>Llamada</option>
+                      <option>Visita</option>
+                      <option>Email</option>
+                      <option>Nota interna</option>
+                      <option>Seguimiento</option>
+                    </select>
+                  </label>
+                  <label>
+                    Responsable
+                    <select name="responsable" class="responsable-select" data-service="Inmobiliaria"></select>
+                  </label>
+                  <label>
+                    Estado
+                    <select name="estado">
+                      <option>Pendiente</option>
+                      <option>Completada</option>
+                      <option>Cancelada</option>
+                    </select>
+                  </label>
+                  <label class="span-2">
+                    Notas
+                    <textarea name="notas" rows="2"></textarea>
+                  </label>
+                  <div class="form-actions">
+                    <button type="submit">Guardar actividad</button>
+                    <span id="inmuebleActividadStatus" class="muted"></span>
+                  </div>
+                </form>
+              </div>
+            </div>
+            <div id="inmuebleTabMapa" class="hidden">
+              <div id="inmuebleMap" class="map-box"></div>
+            </div>
+            <div id="inmuebleTabDocs" class="hidden">
+              <div class="form-card">
+                <h3>Documentación</h3>
+                <p class="muted">Sube escrituras, nota simple, contratos y fotos.</p>
+                <form id="inmuebleDocsForm" class="form-grid">
+                  <label>
+                    Tipo
+                    <select name="tipo">
+                      <option>Escritura</option>
+                      <option>Nota simple</option>
+                      <option>Contrato</option>
+                      <option>Fotos</option>
+                      <option>Otros</option>
+                    </select>
+                  </label>
+                  <label>
+                    Nombre documento
+                    <input name="nombre" placeholder="Ej: Nota simple noviembre" />
+                  </label>
+                  <label class="span-2">
+                    Archivo
+                    <input name="archivo" id="inmuebleDocsFile" type="file" />
+                  </label>
+                  <div class="form-actions">
+                    <button type="submit">Subir documento</button>
+                    <span id="inmuebleDocsStatus" class="muted"></span>
+                  </div>
+                </form>
+              </div>
+              <div class="form-card">
+                <h3>Archivos del inmueble</h3>
+                <div id="inmuebleDocsList"></div>
+              </div>
+            </div>
+            <div id="inmuebleTabEstado" class="hidden">
+              <div class="form-card">
+                <div class="section-head">
+                  <div>
+                    <h3>Checklist por etapa</h3>
+                    <p class="muted">Tareas sugeridas para la fase actual.</p>
+                  </div>
+                  <button type="button" id="inmuebleChecklistBtn">Generar checklist</button>
+                </div>
+                <div id="inmuebleChecklistTable"></div>
+                <div class="footer" id="inmuebleChecklistInfo"></div>
+              </div>
+              <div id="inmuebleEstadoInfo" class="muted"></div>
+            </div>
+          </div>
+        </div>
+        <div id="gestoriaCrmSection" class="hidden">
+          <div class="crm-header">
+            <div>
+              <h3>CRM Gestoría</h3>
+              <p class="muted">Clientes asignados y estado de gestión.</p>
+            </div>
+          </div>
+          <div class="form-card">
+            <div class="section-head">
+              <div>
+                <h3>Clientes en gestión</h3>
+                <p class="muted">Búsqueda por cliente, tipo, perfil o estado.</p>
+              </div>
+            </div>
+            <div class="tabs" id="gestoriaCrmTabs">
+              <button type="button" class="tab active" data-gestoria-tab="all">Todos</button>
+              <button type="button" class="tab" data-gestoria-tab="autonomo">Autónomo</button>
+              <button type="button" class="tab" data-gestoria-tab="empresa">Empresa</button>
+              <button type="button" class="tab" data-gestoria-tab="renta">Cliente Renta</button>
+              <button type="button" class="tab" data-gestoria-tab="admin">Gestiones Administrativas</button>
+            </div>
+            <form id="gestoriaCrmForm" class="form-grid">
+              <label>
+                Cliente
+                <select id="gestoriaCrmCliente" name="cliente" required></select>
+              </label>
+              <label>
+                Fecha alta
+                <input name="fecha" type="date" />
+              </label>
+              <label>
+                Tipo
+                <select name="tipo">
+                  <option>Cuota mensual</option>
+                  <option>Gestión administrativa</option>
+                </select>
+              </label>
+              <label>
+                Perfil
+                <select name="perfil">
+                  <option>Autónomo</option>
+                  <option>Empresa</option>
+                  <option>Cliente Renta</option>
+                  <option>Gestiones Administrativas</option>
+                </select>
+              </label>
+              <label>
+                Cuota
+                <input name="cuota" />
+              </label>
+              <label>
+                Precio
+                <input name="precio" type="number" step="0.01" />
+              </label>
+              <label>
+                Estado
+                <select name="estado">
+                  <option>Alta</option>
+                  <option>Baja</option>
+                </select>
+              </label>
+              <label>
+                Fecha baja
+                <input name="fecha_baja" type="date" />
+              </label>
+              <div class="form-actions">
+                <button type="submit">Asignar cliente</button>
+                <span id="gestoriaCrmStatus" class="muted"></span>
+              </div>
+            </form>
+            <div class="toolbar">
+              <div class="quick-search">
+                <input id="gestoriaCrmSearch" list="gestoriaCrmClientes" placeholder="Buscar cliente..." autocomplete="off" />
+                <datalist id="gestoriaCrmClientes"></datalist>
+              </div>
+              <select id="gestoriaCrmTipo">
+                <option value="">Grupo (todos)</option>
+                <option>Cuota mensual</option>
+                <option>Gestión administrativa</option>
+              </select>
+              <select id="gestoriaCrmSubtipo">
+                <option value="">Subtipo (todos)</option>
+              </select>
+              <select id="gestoriaCrmEstado">
+                <option value="">Estado (todos)</option>
+                <option>Alta</option>
+                <option>Baja</option>
+              </select>
+              <select id="gestoriaCrmLimit">
+                <option value="25">Ver 25</option>
+                <option value="50" selected>Ver 50</option>
+                <option value="100">Ver 100</option>
+                <option value="200">Ver 200</option>
+              </select>
+              <button type="button" class="secondary ghost" id="gestoriaCrmToggleView">Ver tabla completa</button>
+              <button type="button" id="gestoriaCrmApply">Aplicar</button>
+              <button type="button" class="secondary" id="gestoriaCrmReset">Reset</button>
+            </div>
+            <div id="gestoriaCrmSummary"></div>
+            <div id="gestoriaCrmTable"></div>
+            <div class="footer" id="gestoriaCrmInfo"></div>
+          </div>
+          <div class="crm-split">
+            <div class="form-card">
+              <h3>Gestiones activas</h3>
+              <p class="muted">Trabajos en curso y seguimiento operativo.</p>
+              <div class="toolbar">
+                <select id="gestoriaTrabajosTipoFilter">
+                  <option value="">Tipo (todos)</option>
+                  <option>Laboral</option>
+                  <option>Fiscal</option>
+                  <option>Contable</option>
+                  <option>Modelos Hacienda</option>
+                  <option>Registro Mercantil</option>
+                  <option>Renta</option>
+                  <option>Tráfico</option>
+                  <option>Herencias</option>
+                  <option>Constitución sociedad</option>
+                  <option>Otros</option>
+                </select>
+                <select id="gestoriaTrabajosEstadoFilter">
+                  <option value="">Estado (todos)</option>
+                  <option>En curso</option>
+                  <option>En espera</option>
+                  <option>Completado</option>
+                </select>
+                <select id="gestoriaTrabajosLimit">
+                  <option value="10">Ver 10</option>
+                  <option value="20" selected>Ver 20</option>
+                  <option value="50">Ver 50</option>
+                </select>
+              </div>
+              <form id="gestoriaTrabajoForm" class="form-grid">
+                <label>
+                  Cliente
+                  <select id="gestoriaTrabajoCliente" name="cliente_id" required></select>
+                </label>
+                <label>
+                  Tipo de gestión
+                  <select name="tipo_trabajo">
+                    <option>Laboral</option>
+                    <option>Fiscal</option>
+                    <option>Contable</option>
+                    <option>Modelos Hacienda</option>
+                    <option>Registro Mercantil</option>
+                    <option>Renta</option>
+                    <option>Tráfico</option>
+                    <option>Herencias</option>
+                    <option>Constitución sociedad</option>
+                    <option>Otros</option>
+                  </select>
+                </label>
+                <label>
+                  Estado
+                  <select name="estado">
+                    <option>En curso</option>
+                    <option>En espera</option>
+                    <option>Completado</option>
+                  </select>
+                </label>
+                <label>
+                  Inicio
+                  <input name="fecha_inicio" type="date" />
+                </label>
+                <label>
+                  Fin previsto
+                  <input name="fecha_fin" type="date" />
+                </label>
+                <label>
+                  Responsable
+                  <select name="responsable" class="responsable-select"></select>
+                </label>
+                <label>
+                  Importe
+                  <input name="importe" type="number" step="0.01" />
+                </label>
+                <label>
+                  SLA (días)
+                  <input name="sla_dias" type="number" min="0" />
+                </label>
+                <label>
+                  Notas
+                  <input name="notas" />
+                </label>
+                <div class="form-actions">
+                  <button type="submit">Añadir gestión</button>
+                  <span id="gestoriaTrabajoStatus" class="muted"></span>
+                </div>
+              </form>
+              <div id="gestoriaTrabajosTable"></div>
+              <div class="footer" id="gestoriaTrabajosInfo"></div>
+            </div>
+            <div class="form-card">
+              <h3>Modelos fiscales próximos</h3>
+              <p class="muted">Vencimientos próximos y seguimiento.</p>
+              <div id="gestoriaModelosTable"></div>
+              <div class="footer" id="gestoriaModelosInfo"></div>
+            </div>
+          </div>
+          <div class="form-card">
+              <div class="section-head">
+                <div>
+                  <h3>Pipeline de servicios</h3>
+                  <p class="muted">Organiza las gestiones por estado y servicio.</p>
+                </div>
+                <div class="toolbar">
+                  <select id="gestoriaPipelineGroup">
+                    <option value="estado">Agrupar por estado</option>
+                    <option value="responsable">Agrupar por responsable</option>
+                  </select>
+                  <select id="gestoriaPipelineServicio">
+                    <option value="">Todos los servicios</option>
+                    <option>Laboral</option>
+                  <option>Fiscal</option>
+                  <option>Contable</option>
+                  <option>Modelos Hacienda</option>
+                  <option>Registro Mercantil</option>
+                  <option>Renta</option>
+                  <option>Tráfico</option>
+                  <option>Herencias</option>
+                  <option>Constitución sociedad</option>
+                  <option>Otros</option>
+                </select>
+              </div>
+            </div>
+            <div id="gestoriaPipeline"></div>
+          </div>
+          <div class="crm-split">
+            <div class="form-card">
+              <h3>Documentos recientes</h3>
+              <p class="muted">Últimos documentos subidos en gestoría.</p>
+              <div id="gestoriaDocsRecent"></div>
+              <div class="footer" id="gestoriaDocsRecentInfo"></div>
+            </div>
+            <div class="form-card">
+              <h3>Alta documento</h3>
+              <form id="gestoriaDocsForm" class="form-grid">
+                <label>
+                  Cliente
+                  <select id="gestoriaDocsCliente" name="cliente_id" required></select>
+                </label>
+                <label>
+                  Nombre documento
+                  <input name="nombre" required />
+                </label>
+                <label>
+                  Tipo
+                  <input name="tipo" placeholder="Contrato, DNI, etc." />
+                </label>
+                <label>
+                  Fecha
+                  <input name="fecha" type="date" />
+                </label>
+                <label>
+                  Estado
+                  <select name="estado">
+                    <option>Pendiente</option>
+                    <option>Recibido</option>
+                    <option>Validado</option>
+                  </select>
+                </label>
+                <label>
+                  Notas
+                  <input name="notas" />
+                </label>
+                <div class="form-actions">
+                  <button type="submit">Guardar documento</button>
+                  <span id="gestoriaDocsStatus" class="muted"></span>
+                </div>
+              </form>
+            </div>
+          </div>
+          <div class="form-card">
+            <h3>Actividad reciente</h3>
+            <p class="muted">Cambios y movimientos recientes del equipo.</p>
+            <div id="gestoriaAuditTable"></div>
+            <div class="footer" id="gestoriaAuditInfo"></div>
+          </div>
+        </div>
+        <div id="gestoriaDashboardSection" class="hidden">
+          <div class="crm-header">
+            <div>
+              <h3>Dashboard · Gestoría</h3>
+              <p class="muted">KPIs, alertas y vencimientos.</p>
+            </div>
+          </div>
+          <div class="form-card">
+            <div class="section-head">
+              <div>
+                <h3>Resumen operativo</h3>
+                <p class="muted">Seguimiento mensual y alertas.</p>
+              </div>
+            </div>
+            <div class="grid crm-kpis">
+              <div class="card kpi-card">
+                <h3>Clientes gestoría</h3>
+                <div class="kpi-value" id="gestoriaKpiTotal">0</div>
+                <div class="muted">Total activos + en baja</div>
+              </div>
+              <div class="card kpi-card">
+                <h3>Clientes activos</h3>
+                <div class="kpi-value" id="gestoriaKpiActivos">0</div>
+                <div class="muted">Con servicio activo</div>
+              </div>
+              <div class="card kpi-card">
+                <h3>Autónomos</h3>
+                <div class="kpi-value" id="gestoriaKpiAutonomos">0</div>
+                <div class="muted">Gestión mensual</div>
+              </div>
+              <div class="card kpi-card">
+                <h3>Empresas</h3>
+                <div class="kpi-value" id="gestoriaKpiEmpresas">0</div>
+                <div class="muted">Gestión mensual</div>
+              </div>
+              <div class="card kpi-card">
+                <h3>Clientes puntuales</h3>
+                <div class="kpi-value" id="gestoriaKpiPuntuales">0</div>
+                <div class="muted">Trámites aislados</div>
+              </div>
+              <div class="card kpi-card">
+                <h3>Modelos este mes</h3>
+                <div class="kpi-value" id="gestoriaKpiModelosMes">0</div>
+                <div class="muted">Próximas presentaciones</div>
+              </div>
+              <div class="card kpi-card">
+                <h3>Gestiones en curso</h3>
+                <div class="kpi-value" id="gestoriaKpiGestionesCurso">0</div>
+                <div class="muted">Trabajo activo</div>
+              </div>
+              <div class="card kpi-card">
+                <h3>Gestiones en espera</h3>
+                <div class="kpi-value" id="gestoriaKpiGestionesEspera">0</div>
+                <div class="muted">Pendientes de respuesta</div>
+              </div>
+              <div class="card kpi-card">
+                <h3>Gestiones vencidas</h3>
+                <div class="kpi-value" id="gestoriaKpiGestionesVencidas">0</div>
+                <div class="muted">Fuera de plazo</div>
+              </div>
+            </div>
+            <div class="crm-split">
+              <div class="form-card">
+                <h3>Alertas · Modelos próximos</h3>
+                <p class="muted">Vencimientos en los próximos 30 días.</p>
+                <div id="gestoriaAlertModelos"></div>
+              </div>
+              <div class="form-card">
+                <h3>Agenda pendiente</h3>
+                <p class="muted">Acciones previstas en los próximos 14 días.</p>
+                <div id="gestoriaAlertAcciones"></div>
+              </div>
+            </div>
+            <div class="crm-split">
+              <div class="form-card">
+                <h3>Vencidos · Modelos</h3>
+                <p class="muted">Presentaciones fuera de plazo.</p>
+                <div id="gestoriaAlertModelosOverdue"></div>
+              </div>
+              <div class="form-card">
+                <h3>Vencidos · Acciones</h3>
+                <p class="muted">Tareas con fecha pasada.</p>
+                <div id="gestoriaAlertAccionesOverdue"></div>
+              </div>
+            </div>
+            <div class="form-card">
+              <h3>Gestiones vencidas</h3>
+              <p class="muted">Tareas de gestoría fuera de plazo.</p>
+              <div id="gestoriaAlertGestiones"></div>
+            </div>
+            <div class="form-card">
+              <div class="section-head">
+                <div>
+                  <h3>Gestiones próximas</h3>
+                  <p class="muted">Alertas configurables por fecha límite.</p>
+                </div>
+                <div class="toolbar">
+                  <select id="gestoriaAlertDays">
+                    <option value="7">7 días</option>
+                    <option value="14" selected>14 días</option>
+                    <option value="30">30 días</option>
+                    <option value="60">60 días</option>
+                  </select>
+                </div>
+              </div>
+              <div id="gestoriaAlertGestionesProximas"></div>
+            </div>
+            <div class="form-card">
+              <h3>Carga por gestor</h3>
+              <p class="muted">Gestiones activas por responsable.</p>
+              <div id="gestoriaResponsablesTable"></div>
+            </div>
+          </div>
+        </div>
+        <div id="gestoriaContaSection" class="hidden">
+          <div class="crm-header">
+            <div>
+              <h3>Contabilidad · Gestoría</h3>
+              <p class="muted">Anotaciones contables (histórico).</p>
+            </div>
+          </div>
+          <div class="form-card">
+            <div class="section-head">
+              <div>
+                <h3>Cola contable</h3>
+                <p class="muted">Checklist pendiente por cliente.</p>
+              </div>
+              <div class="toolbar">
+                <select id="gestoriaContaQueueFilter">
+                  <option value="">Todas</option>
+                  <option>Pendiente</option>
+                  <option>En curso</option>
+                  <option>Completada</option>
+                </select>
+              </div>
+            </div>
+            <div id="gestoriaContaQueueTable"></div>
+            <div class="footer" id="gestoriaContaQueueInfo"></div>
+          </div>
+          <div class="form-card">
+            <form id="gestoriaContabilidadForm" class="form-grid">
+              <label>
+                Fecha
+                <input name="fecha" type="date" required />
+              </label>
+              <label>
+                Concepto
+                <input name="concepto" required />
+              </label>
+              <label>
+                Gestión realizada
+                <select name="gestion">
+                  <option value="">Selecciona gestión</option>
+                  <option>Herencias</option>
+                  <option>Tráfico</option>
+                  <option>Renta</option>
+                  <option>Modelos Hacienda</option>
+                  <option>Laboral</option>
+                  <option>Fiscal</option>
+                  <option>Contable</option>
+                  <option>Registro Mercantil</option>
+                  <option>Presentación cuentas</option>
+                  <option>Constitución sociedad</option>
+                  <option>Bajas/Altas</option>
+                  <option>Otros</option>
+                </select>
+              </label>
+              <label>
+                Tipo
+                <select name="tipo">
+                  <option>Ingreso</option>
+                  <option>Gasto</option>
+                </select>
+              </label>
+              <label>
+                Importe
+                <input name="importe" type="number" step="0.01" min="0" required />
+              </label>
+              <label class="span-2">
+                Cliente (opcional)
+                <select id="gestoriaContabilidadCliente" name="cliente_id"></select>
+              </label>
+              <label>
+                Notas
+                <input name="notas" />
+              </label>
+              <div class="form-actions">
+                <button type="submit">Añadir anotación</button>
+                <span id="gestoriaContabilidadStatus" class="muted"></span>
+              </div>
+            </form>
+            <div id="gestoriaContabilidadTable"></div>
+            <div class="footer" id="gestoriaContabilidadInfo"></div>
+          </div>
+        </div>
+        <div id="gestoriaAgendaSection" class="hidden">
+          <div class="crm-header">
+            <div>
+              <h3>Agenda · Gestoría</h3>
+              <p class="muted">Acciones y recordatorios.</p>
+            </div>
+          </div>
+          <div class="form-card">
+            <form id="gestoriaAgendaForm" class="form-grid">
+              <label>
+                Cliente
+                <input id="gestoriaAgendaClienteInput" name="cliente_nombre" list="gestoriaAgendaClientes" autocomplete="off" />
+                <input id="gestoriaAgendaClienteId" type="hidden" name="cliente_id" />
+                <datalist id="gestoriaAgendaClientes"></datalist>
+              </label>
+              <label>
+                Fecha
+                <input name="fecha" type="date" required />
+              </label>
+              <label>
+                Hora
+                <input name="hora" type="time" />
+              </label>
+              <label>
+                Tipo
+                <select name="tipo">
+                  <option>Llamada</option>
+                  <option>Reunión</option>
+                  <option>Documentación</option>
+                  <option>Seguimiento</option>
+                </select>
+              </label>
+              <label>
+                Responsable
+                <select name="responsable" class="responsable-select" data-service="Gestoría"></select>
+              </label>
+              <label>
+                Estado
+                <select name="estado">
+                  <option>Pendiente</option>
+                  <option>Hecho</option>
+                  <option>Cancelado</option>
+                </select>
+              </label>
+              <label>
+                Notas
+                <textarea name="notas" rows="2"></textarea>
+              </label>
+              <div class="form-actions">
+                <button type="submit">Guardar</button>
+                <span id="gestoriaAgendaStatus" class="muted"></span>
+              </div>
+            </form>
+            <div id="gestoriaAgendaTable"></div>
+            <div class="footer" id="gestoriaAgendaInfo"></div>
+          </div>
+        </div>
+        <div id="gestoriaFactSection" class="hidden">
+          <div class="crm-header">
+            <div>
+              <h3>Facturación · Gestoría</h3>
+              <p class="muted">Preparado para fase 2 de facturación.</p>
+            </div>
+          </div>
+          <div class="form-card">
+            <h3>Facturas del servicio</h3>
+            <p class="muted">En la fase 2 se conectará con el software de facturación.</p>
+            <div id="gestoriaFacturasTable"></div>
+          </div>
+        </div>
+        <div id="segurosCrmSection" class="hidden">
+          <div class="crm-header">
+            <div>
+              <h3>CRM Seguros</h3>
+              <p class="muted">Pólizas, seguimiento y oportunidades.</p>
+            </div>
+          </div>
+          <div class="form-card">
+            <h3>Actualizar póliza existente</h3>
+            <p class="muted">Sube el PDF para completar datos faltantes en la BDT.</p>
+            <div class="form-grid">
+              <label>
+                Póliza
+                <select id="segurosUpdateSelect"></select>
+              </label>
+              <label>
+                PDF de póliza
+                <input id="segurosUpdateFile" type="file" accept="application/pdf" />
+              </label>
+            </div>
+            <div class="form-actions">
+              <button type="button" id="segurosUpdateButton">Leer y completar</button>
+              <span id="segurosUpdateStatus" class="muted"></span>
+            </div>
+          </div>
+          <div class="form-card">
+            <div class="section-head">
+              <div>
+                <h3>Lectura automática de pólizas</h3>
+                <p class="muted">Sube un PDF y extrae datos básicos.</p>
+              </div>
+              <div class="form-actions">
+                <button type="button" id="segurosOcrButton">Extraer datos</button>
+                <button type="button" id="segurosOcrPreview" disabled>Vista previa</button>
+                <span id="segurosOcrStatus" class="muted"></span>
+              </div>
+            </div>
+            <div class="form-grid">
+              <label>
+                PDF de póliza
+                <input id="segurosOcrFile" type="file" accept="application/pdf" />
+              </label>
+              <label>
+                Estado
+                <select id="seguroOcrEstado">
+                  <option value="Presupuesto">Presupuesto</option>
+                  <option value="Proyecto">Proyecto</option>
+                  <option value="En vigor">En vigor</option>
+                </select>
+              </label>
+              <label>
+                Producción
+                <select id="seguroOcrProduccion">
+                  <option value="Nueva producción">Nueva producción</option>
+                  <option value="Cambio mediador">Cambio mediador</option>
+                </select>
+              </label>
+              <label>
+                Ramo
+                <input id="seguroOcrRamo" placeholder="Hogar, Auto, RC..." />
+              </label>
+              <label>
+                Colaborador
+                <input id="seguroOcrColaborador" placeholder="Opcional" />
+              </label>
+            </div>
+            <div class="form-grid" id="segurosOcrFields">
+              <label>
+                Tomador
+                <input id="seguroOcrTomador" />
+              </label>
+              <label>
+                DNI/CIF
+                <input id="seguroOcrDni" />
+              </label>
+              <label>
+                Teléfono
+                <input id="seguroOcrTelefono" />
+              </label>
+              <label>
+                Email
+                <input id="seguroOcrEmail" />
+              </label>
+              <label>
+                Compañía
+                <input id="seguroOcrCompania" />
+              </label>
+              <label>
+                Nº póliza
+                <input id="seguroOcrPoliza" />
+              </label>
+              <label>
+                Dirección
+                <input id="seguroOcrDireccion" />
+              </label>
+              <label>
+                Fecha nacimiento
+                <input id="seguroOcrNacimiento" type="date" />
+              </label>
+              <label>
+                Fecha efecto
+                <input id="seguroOcrFechaEfecto" type="date" />
+              </label>
+              <label>
+                Fecha vencimiento
+                <input id="seguroOcrFechaVencimiento" type="date" />
+              </label>
+              <label>
+                Prima neta
+                <input id="seguroOcrPrimaNeta" />
+              </label>
+              <label>
+                Prima total
+                <input id="seguroOcrPrimaTotal" />
+              </label>
+            </div>
+            <div class="form-actions">
+              <button type="button" id="segurosOcrSave">Guardar en BDT</button>
+              <span id="segurosOcrSaveStatus" class="muted"></span>
+            </div>
+            <textarea id="segurosOcrRaw" class="hidden" rows="6" readonly></textarea>
+          </div>
+          <div class="form-card">
+            <div class="section-head">
+              <div>
+                <h3>Pólizas</h3>
+                <p class="muted">Listado por asegurado, compañía o estado.</p>
+              </div>
+              <div class="crm-actions">
+                <div class="quick-search">
+                  <input id="segurosCrmClienteInput" list="segurosCrmClientes" placeholder="Buscar cliente..." autocomplete="off" />
+                  <input id="segurosCrmClienteId" type="hidden" />
+                  <datalist id="segurosCrmClientes"></datalist>
+                </div>
+                <button type="button" id="segurosCrmClienteOpen" class="secondary">Abrir ficha</button>
+                <input id="segurosCrmSearch" placeholder="Buscar póliza..." />
+              </div>
+            </div>
+            <div id="segurosCrmTable"></div>
+            <div class="footer" id="segurosCrmInfo"></div>
+          </div>
+          <div class="form-card">
+            <h3>Oportunidades de venta cruzada</h3>
+            <p class="muted">Clientes de gestoría sin póliza asignada.</p>
+            <div id="segurosCrmOportunidades"></div>
+          </div>
+          <div class="form-card">
+            <h3>Perfil de cliente</h3>
+            <p class="muted">Preferencias para personalizar propuestas.</p>
+            <form id="segurosPreferenciasForm" class="form-grid">
+              <label>
+                Cliente
+                <input id="segurosPreferenciasClienteInput" list="segurosPreferenciasClientes" />
+                <input id="segurosPreferenciasClienteId" type="hidden" name="cliente_id" />
+                <datalist id="segurosPreferenciasClientes"></datalist>
+              </label>
+              <label>
+                Prioriza precio
+                <select name="prioridad_precio">
+                  <option value="0">No</option>
+                  <option value="1">Sí</option>
+                </select>
+              </label>
+              <label>
+                Prioriza compañía
+                <select name="prioridad_compania">
+                  <option value="0">No</option>
+                  <option value="1">Sí</option>
+                </select>
+              </label>
+              <label>
+                Prioriza coberturas
+                <select name="prioridad_coberturas">
+                  <option value="0">No</option>
+                  <option value="1">Sí</option>
+                </select>
+              </label>
+              <label class="span-2">
+                Notas
+                <textarea name="notas" rows="2"></textarea>
+              </label>
+              <div class="form-actions">
+                <button type="submit">Guardar preferencias</button>
+                <span id="segurosPreferenciasStatus" class="muted"></span>
+              </div>
+            </form>
+          </div>
+          <div class="form-card">
+            <h3>Histórico de ofrecimientos</h3>
+            <p class="muted">Registro de propuestas para no repetir ofertas.</p>
+            <form id="segurosOfertasForm" class="form-grid">
+              <label>
+                Cliente
+                <input id="segurosOfertasClienteInput" list="segurosOfertasClientes" />
+                <input id="segurosOfertasClienteId" type="hidden" name="cliente_id" />
+                <datalist id="segurosOfertasClientes"></datalist>
+              </label>
+              <label>
+                Ramo
+                <input name="ramo" />
+              </label>
+              <label>
+                Compañía
+                <input name="compania" />
+              </label>
+              <label>
+                Propuesta
+                <input name="propuesta" />
+              </label>
+              <label>
+                Estado
+                <select name="estado">
+                  <option>Enviado</option>
+                  <option>Aceptado</option>
+                  <option>Rechazado</option>
+                  <option>Sin respuesta</option>
+                </select>
+              </label>
+              <label>
+                Motivo
+                <input name="motivo" />
+              </label>
+              <label>
+                Fecha
+                <input name="fecha" type="date" />
+              </label>
+              <label>
+                Responsable
+                <select name="responsable" class="responsable-select" data-service="Seguros"></select>
+              </label>
+              <label class="span-2">
+                Notas
+                <textarea name="notas" rows="2"></textarea>
+              </label>
+              <div class="form-actions">
+                <button type="submit">Guardar ofrecimiento</button>
+                <span id="segurosOfertasStatus" class="muted"></span>
+              </div>
+            </form>
+            <div class="table-tools">
+              <input id="segurosOfertasSearch" placeholder="Filtrar ofrecimientos..." />
+            </div>
+            <div id="segurosOfertasTable"></div>
+            <div class="footer" id="segurosOfertasInfo"></div>
+          </div>
+          <div class="form-card">
+            <h3>Referidos</h3>
+            <p class="muted">Clientes que aportan otros clientes.</p>
+            <form id="segurosReferidosForm" class="form-grid">
+              <label>
+                Cliente
+                <input id="segurosReferidosClienteInput" list="segurosReferidosClientes" />
+                <input id="segurosReferidosClienteId" type="hidden" name="cliente_id" />
+                <datalist id="segurosReferidosClientes"></datalist>
+              </label>
+              <label>
+                Referido por
+                <input name="referido_por" placeholder="Nombre del referente" />
+              </label>
+              <label class="span-2">
+                Notas
+                <textarea name="notas" rows="2"></textarea>
+              </label>
+              <div class="form-actions">
+                <button type="submit">Guardar referido</button>
+                <span id="segurosReferidosStatus" class="muted"></span>
+              </div>
+            </form>
+            <div class="table-tools">
+              <input id="segurosReferidosSearch" placeholder="Filtrar referidos..." />
+            </div>
+            <div id="segurosReferidosTable"></div>
+            <div class="footer" id="segurosReferidosInfo"></div>
+          </div>
+          <div class="form-card">
+            <h3>Campañas de compañías</h3>
+            <p class="muted">Crea campañas recibidas por email.</p>
+            <form id="segurosCampanasForm" class="form-grid">
+              <label>
+                Compañía
+                <input name="compania" />
+              </label>
+              <label>
+                Nombre campaña
+                <input name="nombre" />
+              </label>
+              <label>
+                Ramo
+                <input name="ramo" />
+              </label>
+              <label>
+                Origen
+                <select name="origen">
+                  <option>Correo</option>
+                  <option>Acuerdo mediador</option>
+                  <option>Portal</option>
+                  <option>Manual</option>
+                </select>
+              </label>
+              <label>
+                Inicio
+                <input name="fecha_inicio" type="date" />
+              </label>
+              <label>
+                Fin
+                <input name="fecha_fin" type="date" />
+              </label>
+              <label class="span-2">
+                Descripción
+                <textarea name="descripcion" rows="2"></textarea>
+              </label>
+              <label class="span-2">
+                URL
+                <input name="url" placeholder="https://..." />
+              </label>
+              <div class="form-actions">
+                <button type="submit">Guardar campaña</button>
+                <span id="segurosCampanasStatus" class="muted"></span>
+              </div>
+            </form>
+            <div class="table-tools">
+              <input id="segurosCampanasSearch" placeholder="Filtrar campañas..." />
+            </div>
+            <div id="segurosCampanasTable"></div>
+            <div class="footer" id="segurosCampanasInfo"></div>
+          </div>
+          <div class="form-card">
+            <h3>Comisiones por compañía</h3>
+            <p class="muted">Registro de comisionados por ramo.</p>
+            <form id="segurosComisionesForm" class="form-grid">
+              <label>
+                Compañía
+                <input name="compania" />
+              </label>
+              <label>
+                Ramo
+                <input name="ramo" />
+              </label>
+              <label>
+                % Comisión
+                <input name="porcentaje" type="number" step="0.01" />
+              </label>
+              <label>
+                Vigencia desde
+                <input name="vigencia_desde" type="date" />
+              </label>
+              <label>
+                Vigencia hasta
+                <input name="vigencia_hasta" type="date" />
+              </label>
+              <label class="span-2">
+                Notas
+                <textarea name="notas" rows="2"></textarea>
+              </label>
+              <div class="form-actions">
+                <button type="submit">Guardar comisión</button>
+                <span id="segurosComisionesStatus" class="muted"></span>
+              </div>
+            </form>
+            <div class="table-tools">
+              <input id="segurosComisionesSearch" placeholder="Filtrar comisiones..." />
+            </div>
+            <div id="segurosComisionesTable"></div>
+            <div class="footer" id="segurosComisionesInfo"></div>
+          </div>
+          <div class="form-card">
+            <h3>Insights de mercado</h3>
+            <p class="muted">Distribución de pólizas por ramo y compañía.</p>
+            <div id="segurosInsights"></div>
+          </div>
+          <div class="form-card">
+            <h3>Agenda · Seguros</h3>
+            <form id="segurosAgendaForm" class="form-grid">
+              <label>
+                Cliente
+                <input id="segurosAgendaClienteInput" name="cliente_nombre" list="segurosAgendaClientes" autocomplete="off" />
+                <input id="segurosAgendaClienteId" type="hidden" name="cliente_id" />
+                <datalist id="segurosAgendaClientes"></datalist>
+              </label>
+              <label>
+                Fecha
+                <input name="fecha" type="date" required />
+              </label>
+              <label>
+                Hora
+                <input name="hora" type="time" />
+              </label>
+              <label>
+                Tipo
+                <select name="tipo">
+                  <option>Llamada</option>
+                  <option>Reunión</option>
+                  <option>Seguimiento</option>
+                  <option>Renovación</option>
+                </select>
+              </label>
+              <label>
+                Responsable
+                <select name="responsable" class="responsable-select" data-service="Seguros"></select>
+              </label>
+              <label>
+                Estado
+                <select name="estado">
+                  <option>Pendiente</option>
+                  <option>Hecho</option>
+                  <option>Cancelado</option>
+                </select>
+              </label>
+              <label>
+                Notas
+                <textarea name="notas" rows="2"></textarea>
+              </label>
+              <div class="form-actions">
+                <button type="submit">Guardar</button>
+                <span id="segurosAgendaStatus" class="muted"></span>
+              </div>
+            </form>
+            <div id="segurosAgendaTable"></div>
+            <div class="footer" id="segurosAgendaInfo"></div>
+          </div>
+        </div>
+        <div id="finCrmSection" class="hidden">
+          <div class="crm-header">
+            <div>
+              <h3>CRM Financiaciones</h3>
+              <p class="muted">Hipotecas y seguimiento comercial.</p>
+            </div>
+          </div>
+          <div class="form-card">
+            <div class="section-head">
+              <div>
+                <h3>Operaciones</h3>
+                <p class="muted">Listado de hipotecas firmadas y en curso.</p>
+              </div>
+              <div class="crm-actions">
+                <div class="quick-search">
+                  <input id="finCrmClienteInput" list="finCrmClientes" placeholder="Buscar cliente..." autocomplete="off" />
+                  <input id="finCrmClienteId" type="hidden" />
+                  <datalist id="finCrmClientes"></datalist>
+                </div>
+                <button type="button" id="finCrmClienteOpen" class="secondary">Abrir ficha</button>
+                <input id="finCrmSearch" placeholder="Buscar hipoteca..." />
+              </div>
+            </div>
+            <div id="finCrmTable"></div>
+            <div class="footer" id="finCrmInfo"></div>
+          </div>
+          <div class="form-card">
+            <h3>Agenda · Financiaciones</h3>
+            <form id="finAgendaForm" class="form-grid">
+              <label>
+                Cliente
+                <input id="finAgendaClienteInput" name="cliente_nombre" list="finAgendaClientes" autocomplete="off" />
+                <input id="finAgendaClienteId" type="hidden" name="cliente_id" />
+                <datalist id="finAgendaClientes"></datalist>
+              </label>
+              <label>
+                Fecha
+                <input name="fecha" type="date" required />
+              </label>
+              <label>
+                Hora
+                <input name="hora" type="time" />
+              </label>
+              <label>
+                Tipo
+                <select name="tipo">
+                  <option>Llamada</option>
+                  <option>Reunión</option>
+                  <option>Documentación</option>
+                  <option>Firma</option>
+                </select>
+              </label>
+              <label>
+                Responsable
+                <select name="responsable" class="responsable-select" data-service="Financiaciones"></select>
+              </label>
+              <label>
+                Estado
+                <select name="estado">
+                  <option>Pendiente</option>
+                  <option>Hecho</option>
+                  <option>Cancelado</option>
+                </select>
+              </label>
+              <label>
+                Notas
+                <textarea name="notas" rows="2"></textarea>
+              </label>
+              <div class="form-actions">
+                <button type="submit">Guardar</button>
+                <span id="finAgendaStatus" class="muted"></span>
+              </div>
+            </form>
+            <div id="finAgendaTable"></div>
+            <div class="footer" id="finAgendaInfo"></div>
+          </div>
+        </div>
+        <div id="dashboardSection" class="dashboard hidden">
+          <div class="dashboard-head">
+            <div>
+              <h3 id="dashboardTitle">Dashboard</h3>
+              <p class="muted">Resumen anual de la inmobiliaria.</p>
+            </div>
+            <div class="status"><span></span>Datos por año</div>
+          </div>
+          <div class="grid dashboard-kpis" id="dashboardKpis"></div>
+          <div class="grid dashboard-charts">
+            <div class="chart-card">
+              <h4>Ventas por año</h4>
+              <canvas id="ventasChart"></canvas>
+            </div>
+            <div class="chart-card">
+              <h4>Facturado vs Gastos</h4>
+              <canvas id="facturadoChart"></canvas>
+            </div>
+            <div class="chart-card">
+              <h4>Alquileres por año</h4>
+              <canvas id="alquileresChart"></canvas>
+            </div>
+          </div>
+          <div class="grid dashboard-charts">
+            <div class="chart-card">
+              <h4>Progreso facturado vs año anterior</h4>
+              <div id="facturadoProgress" class="progress-card"></div>
+            </div>
+            <div class="chart-card">
+              <h4>Variación ventas %</h4>
+              <canvas id="ventasVarChart"></canvas>
+            </div>
+            <div class="chart-card">
+              <h4>Variación alquileres %</h4>
+              <canvas id="alquileresVarChart"></canvas>
+            </div>
+            <div class="chart-card">
+              <h4>Variación facturado %</h4>
+              <canvas id="facturadoVarChart"></canvas>
+            </div>
+          </div>
+        </div>
+        <div id="finDashboardSection" class="dashboard hidden">
+          <div class="dashboard-head">
+            <div>
+              <h3>Dashboard · Financiaciones Modernia</h3>
+              <p class="muted">Resumen anual de hipotecas.</p>
+            </div>
+            <div class="status"><span></span>Datos por año</div>
+          </div>
+          <div class="grid dashboard-kpis" id="finDashboardKpis"></div>
+          <div class="grid dashboard-charts">
+            <div class="chart-card">
+              <h4>Hipotecas firmadas por año</h4>
+              <canvas id="finHipotecasChart"></canvas>
+            </div>
+            <div class="chart-card">
+              <h4>Comisión total por año</h4>
+              <canvas id="finComisionChart"></canvas>
+            </div>
+            <div class="chart-card">
+              <h4>Firmadas por entidad</h4>
+              <canvas id="finEntidadChart"></canvas>
+            </div>
+            <div class="chart-card">
+              <h4>Firmadas por oficina</h4>
+              <canvas id="finOficinaChart"></canvas>
+            </div>
+          </div>
+        </div>
+        <div id="fincasDashboardSection" class="dashboard hidden">
+          <div class="dashboard-head">
+            <div>
+              <h3>Dashboard · Fincas Velazquez</h3>
+              <p class="muted">Conversión anual de seguros.</p>
+            </div>
+            <div class="status"><span></span>Datos por año</div>
+          </div>
+          <div class="grid dashboard-kpis" id="fincasDashboardKpis"></div>
+          <div class="grid dashboard-charts">
+            <div class="chart-card">
+              <h4>Conversión presupuestos → pólizas</h4>
+              <canvas id="fincasConversionChart"></canvas>
+            </div>
+            <div class="chart-card">
+              <h4>Estados de seguros por año</h4>
+              <canvas id="fincasEstadoChart"></canvas>
+            </div>
+          </div>
+        </div>
+        <div id="bdtSection">
+          <div id="fincasBdtTabs" class="tabs hidden">
+            <button class="tab" type="button" data-table="movimientos">BDT</button>
+          </div>
+          <div class="toolbar" id="tableToolbar">
+            <select id="empresaSelect"></select>
+            <select id="tablaSelect"></select>
+            <select id="bdtYearFilter" class="hidden"></select>
+            <select id="bdtFieldFilter" class="hidden">
+              <option value="">Buscar en todos</option>
+              <option value="concepto">Concepto</option>
+              <option value="pisos_vendidos">Dirección</option>
+            </select>
+            <input id="searchInput" placeholder="Buscar por texto o número..." />
+            <button id="applyBtn">Aplicar</button>
+            <button id="resetBtn" class="secondary">Reset</button>
+            <button id="clientesColumnsBtn" class="ghost columns-toggle">Ajustes</button>
+            <button id="clientesShowAllBtn" class="ghost columns-toggle">Ver lista completa</button>
+          </div>
+          <div id="clientesColumnsPanel" class="form-card hidden">
+            <h3>Columnas visibles</h3>
+            <div class="grid" id="clientesColumnsList"></div>
+          </div>
+          <div id="tableContainer"></div>
+          <div class="footer" id="tableInfo"></div>
+        </div>
+        <div id="altaSection" class="hidden">
+          <div id="estudioAltaTabs" class="tabs">
+            <button class="tab active" type="button" data-section="bdt">BDT</button>
+            <button class="tab" type="button" data-section="captacion">Captación</button>
+            <button class="tab" type="button" data-section="demanda">Demanda</button>
+          </div>
+          <div id="estudioAltaBdt">
+            <div class="form-card">
+              <h3>Alta BDT · Estudio Velazquez 2012 SL</h3>
+              <p class="muted">Registro directo de ingresos y gastos.</p>
+              <form id="bdtForm">
+                <div class="form-grid">
+                  <label>
+                    Concepto
+                    <input name="concepto" required />
+                  </label>
+                  <label>
+                    Tipo
+                    <select name="tipo" required>
+                      <option value="Ingreso">Ingreso</option>
+                      <option value="Gasto">Gasto</option>
+                    </select>
+                  </label>
+                  <label>
+                    Comisión
+                    <input name="comision" type="number" step="0.01" />
+                  </label>
+                  <label>
+                    Pisos vendidos
+                    <input name="pisos_vendidos" />
+                  </label>
+                  <label>
+                    Asesor
+                    <input name="asesor" />
+                  </label>
+                  <label>
+                    Año
+                    <input name="anio" type="number" min="2000" max="2100" />
+                  </label>
+                  <label>
+                    Mes
+                    <select name="mes">
+                      <option>Enero</option>
+                      <option>Febrero</option>
+                      <option>Marzo</option>
+                      <option>Abril</option>
+                      <option>Mayo</option>
+                      <option>Junio</option>
+                      <option>Julio</option>
+                      <option>Agosto</option>
+                      <option>Septiembre</option>
+                      <option>Octubre</option>
+                      <option>Noviembre</option>
+                      <option>Diciembre</option>
+                    </select>
+                  </label>
+                  <label>
+                    SL
+                    <input name="sl" value="Estudio Velazquez" />
+                  </label>
+                </div>
+                <div class="form-actions">
+                  <button type="submit">Guardar</button>
+                  <span id="bdtFormStatus" class="muted"></span>
+                </div>
+              </form>
+            </div>
+          </div>
+          <div id="estudioAltaCaptacion" class="hidden">
+            <div class="form-card">
+              <h3>Alta Captación · Estudio Velazquez 2012 SL</h3>
+              <p class="muted">Registro de captaciones en fase inicial.</p>
+              <form id="captacionForm">
+                <div class="form-grid">
+                  <label>
+                    Propietario
+                    <input name="propietario" required />
+                  </label>
+                  <label>
+                    Propietarios (clientes)
+                    <select id="captacionPropietarios" name="propietarios" multiple></select>
+                  </label>
+                  <label>
+                    Tipo inmueble
+                    <select name="tipo_inmueble">
+                      <option>Piso</option>
+                      <option>Casa</option>
+                      <option>Local</option>
+                      <option>Oficina</option>
+                      <option>Terreno</option>
+                      <option>Otro</option>
+                    </select>
+                  </label>
+                  <label>
+                    Dirección
+                    <input name="direccion" />
+                  </label>
+                  <label>
+                    Referencia catastral
+                    <input name="referencia" />
+                  </label>
+                  <label>
+                    Zona
+                    <input name="zona" />
+                  </label>
+                  <label>
+                    m²
+                    <input name="m2" type="number" step="0.01" />
+                  </label>
+                  <label>
+                    Habitaciones
+                    <input name="habitaciones" type="number" min="0" />
+                  </label>
+                  <label>
+                    Baños
+                    <input name="banos" type="number" min="0" />
+                  </label>
+                  <label>
+                    Precio objetivo
+                    <input name="precio_objetivo" type="number" step="0.01" />
+                  </label>
+                  <label>
+                    Precio valoración
+                    <input name="precio_valoracion" type="number" step="0.01" />
+                  </label>
+                  <label>
+                    Latitud
+                    <input name="lat" type="number" step="0.000001" />
+                  </label>
+                  <label>
+                    Longitud
+                    <input name="lon" type="number" step="0.000001" />
+                  </label>
+                  <label>
+                    Urgencia
+                    <select name="urgencia">
+                      <option>Baja</option>
+                      <option>Media</option>
+                      <option>Alta</option>
+                    </select>
+                  </label>
+                  <label>
+                    Motivo
+                    <input name="motivo" />
+                  </label>
+                  <label>
+                    Canal
+                    <select name="canal">
+                      <option>Referencia</option>
+                      <option>Web</option>
+                      <option>Portal</option>
+                      <option>Cartelería</option>
+                      <option>Llamada</option>
+                      <option>Otro</option>
+                    </select>
+                  </label>
+                  <label>
+                    Etapa
+                    <select name="etapa">
+                      <option>Prospecto</option>
+                      <option>Contactado</option>
+                      <option>Visita/Valoración</option>
+                      <option>Negociación</option>
+                      <option>Encargo firmado</option>
+                      <option>Publicado</option>
+                      <option>Perdido</option>
+                    </select>
+                  </label>
+                  <label>
+                    Probabilidad (%)
+                    <input name="probabilidad" type="number" min="0" max="100" step="1" />
+                  </label>
+                  <label>
+                    Próxima acción
+                    <input name="proxima_accion" />
+                  </label>
+                  <label>
+                    Fecha contacto
+                    <input name="fecha_contacto" type="date" />
+                  </label>
+                  <label>
+                    Asesor
+                    <input name="asesor" />
+                  </label>
+                  <label>
+                    Notas
+                    <textarea name="notas" rows="3"></textarea>
+                  </label>
+                </div>
+                <div class="form-actions">
+                  <button type="submit">Guardar</button>
+                  <span id="captacionFormStatus" class="muted"></span>
+                </div>
+              </form>
+            </div>
+          </div>
+          <div id="estudioAltaDemanda" class="hidden">
+            <div class="form-card">
+              <h3>Alta Demanda · Estudio Velazquez 2012 SL</h3>
+              <p class="muted">Registro de compradores e inquilinos.</p>
+              <form id="demandaForm">
+                <div class="form-grid">
+                  <label>
+                    Cliente
+                    <select id="demandaCliente" name="cliente_id"></select>
+                  </label>
+                  <label>
+                    Tipo
+                    <select name="tipo">
+                      <option>Compra</option>
+                      <option>Alquiler</option>
+                    </select>
+                  </label>
+                  <label>
+                    Zona
+                    <input name="zona" />
+                  </label>
+                  <label>
+                    Precio máximo
+                    <input name="precio_max" type="number" step="0.01" />
+                  </label>
+                  <label>
+                    m² mínimo
+                    <input name="m2_min" type="number" step="0.01" />
+                  </label>
+                  <label>
+                    Habitaciones mín.
+                    <input name="habitaciones_min" type="number" min="0" />
+                  </label>
+                  <label>
+                    Baños mín.
+                    <input name="banos_min" type="number" min="0" />
+                  </label>
+                  <label>
+                    Estado
+                    <select name="estado">
+                      <option>Activa</option>
+                      <option>En negociación</option>
+                      <option>Cancelada</option>
+                    </select>
+                  </label>
+                  <label>
+                    Prioridad
+                    <select name="prioridad">
+                      <option>Media</option>
+                      <option>Alta</option>
+                      <option>Baja</option>
+                    </select>
+                  </label>
+                  <label>
+                    Notas
+                    <textarea name="notas" rows="3"></textarea>
+                  </label>
+                </div>
+                <div class="form-actions">
+                  <button type="submit">Guardar</button>
+                  <span id="demandaFormStatus" class="muted"></span>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+        <div id="clientesAltaSection" class="hidden">
+          <div class="form-card">
+            <h3>Alta Cliente</h3>
+            <p class="muted">Registro único de clientes para todo el grupo.</p>
+            <form id="clientesForm">
+              <div class="form-grid">
+                <label>
+                  Tipo persona
+                  <select name="tipo_persona" id="clienteTipoPersona">
+                    <option value="Física">Física</option>
+                    <option value="Jurídica">Jurídica</option>
+                  </select>
+                </label>
+                <label data-cliente-persona="fisica">
+                  Apellido 1
+                  <input name="apellido1" />
+                </label>
+                <label data-cliente-persona="fisica">
+                  Apellido 2
+                  <input name="apellido2" />
+                </label>
+                <label>
+                  Nombre / Razón social
+                  <input name="nombre" required />
+                </label>
+                <label>
+                  DNI/NIF
+                  <input name="nif" />
+                </label>
+                <label>
+                  Teléfono
+                  <input name="telefono" />
+                </label>
+                <label>
+                  Email
+                  <input name="email" type="email" />
+                </label>
+                <label>
+                  Fecha nacimiento
+                  <input name="fecha_nacimiento" type="date" />
+                </label>
+                <label>
+                  Dirección
+                  <input name="direccion" />
+                </label>
+                <label>
+                  Código postal
+                  <input name="codigo_postal" />
+                </label>
+                <label>
+                  Población
+                  <input name="poblacion" />
+                </label>
+                <label>
+                  Provincia
+                  <input name="provincia" />
+                </label>
+              </div>
+              <div class="form-actions">
+                <button type="submit">Guardar</button>
+                <span id="clientesFormStatus" class="muted"></span>
+              </div>
+            </form>
+          </div>
+          <div class="form-card">
+            <h3>Asignar cliente a empresa</h3>
+            <p class="muted">Comparte el cliente con una o varias empresas.</p>
+            <form id="clientesLinkForm">
+              <div class="form-grid">
+                <label>
+                  Cliente
+                  <select id="clientesSelect" name="cliente_id" required></select>
+                </label>
+              </div>
+              <div id="clientesLinkRows" class="stack"></div>
+              <div class="form-actions">
+                <button type="button" id="clientesLinkAdd" class="ghost">Añadir servicio</button>
+              </div>
+              <div class="form-actions">
+                <button type="submit">Vincular</button>
+                <span id="clientesLinkFormStatus" class="muted"></span>
+              </div>
+            </form>
+          </div>
+        </div>
+        <div id="fincasAltaSection" class="hidden">
+          <div id="fincasAltaTabs" class="tabs">
+            <button class="tab active" type="button" data-section="movimientos">Ingresos/Gastos</button>
+            <button class="tab" type="button" data-section="gestoria">Clientes Gestoría</button>
+            <button class="tab" type="button" data-section="seguros">Seguros</button>
+          </div>
+          <div id="fincasAltaMovimientos">
+          <div class="form-card">
+            <h3>Alta BDT · Fincas Velazquez</h3>
+            <p class="muted">Registro directo de ingresos y gastos.</p>
+            <form id="fincasBdtForm">
+              <div class="form-grid">
+                <label>
+                  Concepto
+                  <input name="concepto" required />
+                </label>
+                <label>
+                  Tipo
+                  <select name="tipo" required>
+                    <option value="Ingreso">Ingreso</option>
+                    <option value="Gasto">Gasto</option>
+                  </select>
+                </label>
+                <label>
+                  Comisión
+                  <input name="comision" type="number" step="0.01" />
+                </label>
+                <label>
+                  Asesor
+                  <input name="asesor" />
+                </label>
+                <label>
+                  Año
+                  <input name="anio" type="number" min="2000" max="2100" />
+                </label>
+                <label>
+                  Mes
+                  <select name="mes">
+                    <option>Enero</option>
+                    <option>Febrero</option>
+                    <option>Marzo</option>
+                    <option>Abril</option>
+                    <option>Mayo</option>
+                    <option>Junio</option>
+                    <option>Julio</option>
+                    <option>Agosto</option>
+                    <option>Septiembre</option>
+                    <option>Octubre</option>
+                    <option>Noviembre</option>
+                    <option>Diciembre</option>
+                  </select>
+                </label>
+                <label>
+                  SL
+                  <input name="sl" value="Fincas Velazquez" />
+                </label>
+              </div>
+              <div class="form-actions">
+                <button type="submit">Guardar</button>
+                <span id="fincasBdtFormStatus" class="muted"></span>
+              </div>
+            </form>
+          </div>
+          </div>
+          <div id="fincasAltaGestoria" class="hidden">
+            <div class="form-card">
+              <h3>Alta Cliente · Gestoría</h3>
+              <p class="muted">Registro de clientes de la gestoría.</p>
+              <form id="fincasGestoriaForm">
+                <div class="form-grid">
+                  <label>
+                    Cliente
+                    <input name="cliente" required />
+                  </label>
+                  <label>
+                    Fecha
+                    <input name="fecha" type="date" />
+                  </label>
+                  <label>
+                    Cuota
+                    <input name="cuota" />
+                  </label>
+                  <label>
+                    Precio
+                    <input name="precio" type="number" step="0.01" />
+                  </label>
+                  <label>
+                    Tipo
+                    <select name="tipo">
+                      <option value="Autonomo">Autónomo</option>
+                      <option value="Empresa">Empresa</option>
+                      <option value="Comunidad de propietarios">Comunidad</option>
+                    </select>
+                  </label>
+                  <label>
+                    Perfil
+                    <input name="perfil" />
+                  </label>
+                  <label>
+                    Estado
+                    <select name="estado">
+                      <option value="Alta">Alta</option>
+                      <option value="Baja">Baja</option>
+                    </select>
+                  </label>
+                  <label>
+                    Fecha baja
+                    <input name="fecha_baja" type="date" />
+                  </label>
+                </div>
+                <div class="form-actions">
+                  <button type="submit">Guardar</button>
+                  <span id="fincasGestoriaFormStatus" class="muted"></span>
+                </div>
+              </form>
+            </div>
+          </div>
+          <div id="fincasAltaSeguros" class="hidden">
+            <div class="form-card">
+              <h3>Alta Póliza · Seguros</h3>
+              <p class="muted">Registro de pólizas en la BDT de seguros.</p>
+              <form id="fincasSegurosForm">
+                <div class="form-grid">
+                  <label>
+                    Mes creación
+                    <select name="mes_creacion">
+                      <option>Enero</option>
+                      <option>Febrero</option>
+                      <option>Marzo</option>
+                      <option>Abril</option>
+                      <option>Mayo</option>
+                      <option>Junio</option>
+                      <option>Julio</option>
+                      <option>Agosto</option>
+                      <option>Septiembre</option>
+                      <option>Octubre</option>
+                      <option>Noviembre</option>
+                      <option>Diciembre</option>
+                    </select>
+                  </label>
+                  <label>
+                    Fecha efecto
+                    <input name="fecha_efecto" type="date" />
+                  </label>
+                  <label>
+                    Fecha vencimiento
+                    <input name="fecha_vencimiento" type="date" />
+                  </label>
+                  <label>
+                    Tomador
+                    <input name="tomador" required />
+                  </label>
+                  <label>
+                    Compañía
+                    <input name="compania" />
+                  </label>
+                  <label>
+                    Ramo
+                    <input name="ramo" />
+                  </label>
+                  <label>
+                    Nº Póliza
+                    <input name="poliza_numero" />
+                  </label>
+                  <label>
+                    Prima neta
+                    <input name="prima_neta" type="number" step="0.01" />
+                  </label>
+                  <label>
+                    Prima total
+                    <input name="prima_total" type="number" step="0.01" />
+                  </label>
+                  <label>
+                    Comisión
+                    <input name="comision" type="number" step="0.01" />
+                  </label>
+                  <label>
+                    Producción
+                    <select name="produccion">
+                      <option>Nueva producción</option>
+                      <option>Cambio de mediador</option>
+                    </select>
+                  </label>
+                  <label>
+                    Colaborador
+                    <input name="colaborador" />
+                  </label>
+                  <label>
+                    Estado
+                    <select name="estado">
+                      <option>Presupuesto</option>
+                      <option>Contratada</option>
+                      <option>En vigor</option>
+                    </select>
+                  </label>
+                  <label>
+                    Estado renovación
+                    <select name="estado_renovacion">
+                      <option>Pendiente</option>
+                      <option>Renovada</option>
+                      <option>Cambio compania</option>
+                      <option>Baja</option>
+                    </select>
+                  </label>
+                  <label>
+                    Fecha renovación
+                    <input name="renovacion_fecha" type="date" />
+                  </label>
+                  <label>
+                    Nueva póliza ref.
+                    <input name="nueva_poliza_ref" />
+                  </label>
+                </div>
+                <div class="form-actions">
+                  <button type="submit">Guardar</button>
+                  <span id="fincasSegurosFormStatus" class="muted"></span>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+        <div id="hipotecaSection" class="hidden">
+          <div class="form-card">
+            <div class="section-head">
+              <div>
+                <h3>Asesoramientos previos</h3>
+                <p class="muted">Alta de clientes desde la ficha de asesoramiento.</p>
+              </div>
+              <div class="crm-actions">
+                <input id="finAsesoramientosSearch" placeholder="Buscar asesoramiento..." />
+              </div>
+            </div>
+            <div class="form-grid">
+              <div class="span-2">
+                <div class="inline-actions">
+                  <button type="button" id="finAsesorOcrButton">Extraer datos</button>
+                  <button type="button" id="finAsesorOcrAutoButton" class="secondary">Auto-recortar</button>
+                  <button type="button" id="finAsesorOcrPreview" class="secondary" disabled>Vista previa</button>
+                  <span id="finAsesorOcrStatus" class="muted"></span>
+                </div>
+                <input id="finAsesorOcrFile" type="file" accept="application/pdf,image/*" />
+              </div>
+            </div>
+            <div class="form-grid">
+              <div class="span-2">
+                <label class="muted" style="display:flex;gap:8px;align-items:center;">
+                  <input type="checkbox" id="finAsesorOcrExternal" />
+                  Usar OCR externo (Google Vision) para manuscritos.
+                </label>
+              </div>
+              <label>
+                Motor OCR
+                <select id="finAsesorOcrMode">
+                  <option value="vision">Vision</option>
+                  <option value="docai">Document AI (Form Parser)</option>
+                  <option value="hybrid">Híbrido (Vision + DocAI)</option>
+                  <option value="tesseract">Tesseract local</option>
+                </select>
+              </label>
+              <details class="span-2">
+                <summary>Modo avanzado: recortes manuales</summary>
+                <div class="form-grid" style="margin-top:12px;">
+                  <label>
+                    Recorte · Cabecera
+                    <input id="finAsesorOcrGuidedHeader" type="file" accept="image/*" />
+                  </label>
+                  <label>
+                    Recorte · Cliente 1
+                    <input id="finAsesorOcrGuidedCliente1" type="file" accept="image/*" />
+                  </label>
+                  <label>
+                    Recorte · Cliente 2
+                    <input id="finAsesorOcrGuidedCliente2" type="file" accept="image/*" />
+                  </label>
+                  <label>
+                    Recorte · Resumen
+                    <input id="finAsesorOcrGuidedResumen" type="file" accept="image/*" />
+                  </label>
+                  <div class="span-2 inline-actions">
+                    <button type="button" id="finAsesorOcrGuidedButton" class="secondary">Extraer con recortes</button>
+                    <span id="finAsesorOcrGuidedStatus" class="muted"></span>
+                  </div>
+                </div>
+              </details>
+            </div>
+            <form id="finAsesoramientoForm" class="form-grid">
+              <input id="finAsesoramientoId" type="hidden" name="id" />
+              <label>
+                Inmobiliaria/Asesor
+                <select name="inmobiliaria_asesor" id="finAsesorInmobiliaria"></select>
+              </label>
+              <label>
+                Asesor
+                <input name="asesor" />
+              </label>
+              <label>
+                Fecha
+                <input name="fecha" type="date" />
+              </label>
+              <label>
+                Origen
+                <select name="origen">
+                  <option>Presencial</option>
+                  <option>Teléfono</option>
+                  <option>Email</option>
+                  <option>Portal</option>
+                </select>
+              </label>
+              <label>
+                Estado
+                <select name="estado">
+                  <option>En estudio</option>
+                  <option>Aprobado</option>
+                  <option>Descartado</option>
+                  <option>Convertido</option>
+                </select>
+              </label>
+              <div class="form-section">Cliente 1</div>
+              <label>
+                Nombre y apellidos
+                <input name="cliente1_nombre" />
+              </label>
+              <label>
+                DNI
+                <input name="cliente1_dni" />
+              </label>
+              <label>
+                Teléfono
+                <input name="cliente1_telefono" />
+              </label>
+              <label>
+                Email
+                <input name="cliente1_email" />
+              </label>
+              <label>
+                Fecha nacimiento
+                <input name="cliente1_fecha_nacimiento" type="date" />
+              </label>
+              <label>
+                Estado civil
+                <select name="cliente1_estado_civil">
+                  <option value=""></option>
+                  <option>Soltero</option>
+                  <option>Casado</option>
+                </select>
+              </label>
+              <label>
+                Régimen (si casado)
+                <select name="cliente1_regimen">
+                  <option value=""></option>
+                  <option>Separación de bienes</option>
+                  <option>Gananciales</option>
+                </select>
+              </label>
+              <label>
+                Hijos
+                <input name="cliente1_hijos" />
+              </label>
+              <label>
+                Profesión
+                <input name="cliente1_profesion" />
+              </label>
+              <label>
+                Tipo contrato
+                <select name="cliente1_tipo_contrato">
+                  <option value=""></option>
+                  <option>Eventual</option>
+                  <option>Indefinido</option>
+                </select>
+              </label>
+              <label>
+                Tiempo contrato
+                <input name="cliente1_tiempo_contrato" placeholder="Ej: 6 meses / 2 años" />
+              </label>
+              <label>
+                Ingresos/Nómina
+                <input name="cliente1_ingresos" type="text" inputmode="decimal" data-money="1" />
+              </label>
+              <label class="span-2">
+                Patrimonio/Alquiler
+                <input name="cliente1_patrimonio" />
+              </label>
+              <label class="span-2">
+                Préstamos
+                <input name="cliente1_prestamos" />
+              </label>
+              <label>
+                Préstamo activo
+                <select name="cliente1_prestamo_activo" data-loan-toggle="cliente1">
+                  <option value=""></option>
+                  <option>Si</option>
+                  <option>No</option>
+                </select>
+              </label>
+              <label data-loan-field="cliente1">
+                Entidad préstamo
+                <input name="cliente1_prestamo_entidad" list="bankList" />
+              </label>
+              <label data-loan-field="cliente1">
+                Cantidad restante
+                <input name="cliente1_prestamo_resto" type="text" inputmode="decimal" data-money="1" />
+              </label>
+              <div class="form-section">Cliente 2</div>
+              <label>
+                Nombre y apellidos
+                <input name="cliente2_nombre" />
+              </label>
+              <label>
+                DNI
+                <input name="cliente2_dni" />
+              </label>
+              <label>
+                Teléfono
+                <input name="cliente2_telefono" />
+              </label>
+              <label>
+                Email
+                <input name="cliente2_email" />
+              </label>
+              <label>
+                Fecha nacimiento
+                <input name="cliente2_fecha_nacimiento" type="date" />
+              </label>
+              <label>
+                Estado civil
+                <select name="cliente2_estado_civil">
+                  <option value=""></option>
+                  <option>Soltero</option>
+                  <option>Casado</option>
+                </select>
+              </label>
+              <label>
+                Régimen (si casado)
+                <select name="cliente2_regimen">
+                  <option value=""></option>
+                  <option>Separación de bienes</option>
+                  <option>Gananciales</option>
+                </select>
+              </label>
+              <label>
+                Hijos
+                <input name="cliente2_hijos" />
+              </label>
+              <label>
+                Profesión
+                <input name="cliente2_profesion" />
+              </label>
+              <label>
+                Tipo contrato
+                <select name="cliente2_tipo_contrato">
+                  <option value=""></option>
+                  <option>Eventual</option>
+                  <option>Indefinido</option>
+                </select>
+              </label>
+              <label>
+                Tiempo contrato
+                <input name="cliente2_tiempo_contrato" placeholder="Ej: 6 meses / 2 años" />
+              </label>
+              <label>
+                Ingresos/Nómina
+                <input name="cliente2_ingresos" type="text" inputmode="decimal" data-money="1" />
+              </label>
+              <label class="span-2">
+                Patrimonio/Alquiler
+                <input name="cliente2_patrimonio" />
+              </label>
+              <label class="span-2">
+                Préstamos
+                <input name="cliente2_prestamos" />
+              </label>
+              <label>
+                Préstamo activo
+                <select name="cliente2_prestamo_activo" data-loan-toggle="cliente2">
+                  <option value=""></option>
+                  <option>Si</option>
+                  <option>No</option>
+                </select>
+              </label>
+              <label data-loan-field="cliente2">
+                Entidad préstamo
+                <input name="cliente2_prestamo_entidad" list="bankList" />
+              </label>
+              <label data-loan-field="cliente2">
+                Cantidad restante
+                <input name="cliente2_prestamo_resto" type="text" inputmode="decimal" data-money="1" />
+              </label>
+              <div class="form-section">Resumen financiero</div>
+              <label>
+                Ingresos conjuntos
+                <input name="ingresos_conjuntos" type="text" inputmode="decimal" data-money="1" />
+              </label>
+              <label>
+                Aportación CV
+                <input name="aportacion_cv" type="text" inputmode="decimal" data-money="1" />
+              </label>
+              <label class="span-2">
+                Entidades financieras
+                <input name="entidades_financieras" />
+              </label>
+              <label class="span-2">
+                Avalistas/Cotitulares
+                <input name="avalistas" />
+              </label>
+              <label class="span-2">
+                Notas
+                <textarea name="notas" rows="2"></textarea>
+              </label>
+              <label class="span-2">
+                Texto OCR
+                <textarea id="finAsesorOcrRaw" name="notas_ocr" rows="3"></textarea>
+              </label>
+              <div class="form-actions span-2">
+                <button type="submit">Guardar asesoramiento</button>
+                <button type="button" id="finAsesoramientoConvert" class="secondary">Convertir a hipoteca</button>
+                <span id="finAsesoramientoStatus" class="muted"></span>
+              </div>
+            </form>
+            <div id="finAsesoramientosTable"></div>
+            <div class="footer" id="finAsesoramientosInfo"></div>
+          </div>
+          <div class="form-card">
+            <h3>Alta Hipoteca · Financiaciones Modernia</h3>
+            <p class="muted">Registro directo de hipotecas firmadas.</p>
+            <form id="hipotecaForm">
+              <div class="form-grid">
+                <label>
+                  Cliente
+                  <input name="cliente" required />
+                </label>
+                <label>
+                  Banco
+                  <input name="banco" list="bankList" />
+                </label>
+                <label>
+                  Oficina
+                  <input name="oficina" list="officeList" />
+                </label>
+                <label>
+                  Precio
+                  <input name="precio" type="number" step="0.01" />
+                </label>
+                <label>
+                  Importe hipoteca
+                  <input name="importe_hipoteca" type="number" step="0.01" />
+                </label>
+                <label>
+                  Porcentaje
+                  <input name="porcentaje" type="number" step="0.01" />
+                </label>
+                <label>
+                  Entrada
+                  <input name="entrada" type="number" step="0.01" />
+                </label>
+                <label>
+                  Comisión
+                  <input name="comision" type="number" step="0.01" />
+                </label>
+                <label>
+                  Comisión Juan
+                  <input name="comision_juan" type="number" step="0.01" />
+                </label>
+                <label>
+                  Comisión Modernia
+                  <input name="comision_modernia" type="number" step="0.01" />
+                </label>
+                <label>
+                  Fecha encargo
+                  <input name="fecha_encargo" type="date" />
+                </label>
+                <label>
+                  Encargo
+                  <input name="encargo" />
+                </label>
+                <label>
+                  Tipo hipoteca
+                  <input name="tipo_hipoteca" />
+                </label>
+                <label>
+                  Fecha firma
+                  <input name="fecha_firma" type="date" />
+                </label>
+                <label>
+                  Cesión
+                  <input name="cesion" type="number" step="0.01" />
+                </label>
+                <label>
+                  Inmobiliaria compra
+                  <input name="inmobiliaria_compra" />
+                </label>
+                <label>
+                  Año
+                  <input name="anio" type="number" min="2000" max="2100" />
+                </label>
+                <label>
+                  Asesor
+                  <input name="asesor" />
+                </label>
+                <label>
+                  Estado
+                  <select name="estado">
+                    <option>Firmado</option>
+                    <option>Indemnización</option>
+                    <option>Pendiente</option>
+                  </select>
+                </label>
+              </div>
+              <div class="form-actions">
+                <button type="submit">Guardar</button>
+                <span id="hipotecaFormStatus" class="muted"></span>
+              </div>
+            </form>
+            <datalist id="bankList">
+              <option value="Banco Santander"></option>
+              <option value="BBVA"></option>
+              <option value="CaixaBank"></option>
+              <option value="Banco Sabadell"></option>
+              <option value="Bankinter"></option>
+              <option value="Unicaja Banco"></option>
+              <option value="Abanca"></option>
+              <option value="Ibercaja Banco"></option>
+              <option value="Kutxabank"></option>
+              <option value="Cajamar Caja Rural"></option>
+              <option value="Banco Cooperativo Español"></option>
+              <option value="Laboral Kutxa"></option>
+              <option value="ING"></option>
+              <option value="Openbank"></option>
+              <option value="Banco Mediolanum"></option>
+              <option value="Deutsche Bank España"></option>
+              <option value="Banco Popular (Santander)"></option>
+              <option value="Banca March"></option>
+              <option value="Targobank"></option>
+              <option value="Evo Banco"></option>
+              <option value="Triodos Bank"></option>
+              <option value="MyInvestor"></option>
+              <option value="Cetelem"></option>
+              <option value="UCI"></option>
+              <option value="Caja Rural de Granada"></option>
+              <option value="Caja Rural del Sur"></option>
+              <option value="Caja de Ingenieros"></option>
+              <option value="Renta 4 Banco"></option>
+              <option value="BFF Bank"></option>
+            </datalist>
+            <datalist id="officeList">
+              <option value="MALAGA OESTE"></option>
+              <option value="MALAGA CENTRO"></option>
+              <option value="MÁLAGA NORTE"></option>
+              <option value="MALAGA NORTE"></option>
+              <option value="MALAGA VALLE DEL GUADALHORCE"></option>
+              <option value="VALLE DEL GUADALHORCE"></option>
+              <option value="MODERNIA VALLE DEL GUADALHORCE"></option>
+              <option value="PARTICULAR"></option>
+              <option value="TECNOCASA ALHAURIN"></option>
+              <option value="TECNOCASA CIUDAD JARDIN"></option>
+              <option value="TECNOCASA TORCAL"></option>
+              <option value="TECNOCASA ALHAURIN"></option>
+              <option value="CASA AXARQUIA"></option>
+              <option value="BONILLA"></option>
+              <option value="MAMBO"></option>
+              <option value="ALEX SERRATO"></option>
+              <option value="MARCELO VARGAS"></option>
+            </datalist>
+          </div>
+        </div>
+        <div id="finSimSection" class="hidden">
+          <div class="form-card" id="finSimCard">
+            <div class="section-head">
+              <div>
+                <h3>Simulador de hipotecas y gastos</h3>
+                <p class="muted">Cálculo de gastos, cuotas y ratios (igual que en Excel).</p>
+              </div>
+            </div>
+            <form id="finSimForm" class="form-grid">
+              <div class="form-section">Parámetros generales</div>
+              <label>
+                Promoción nueva (s/n)
+                <select name="sim_promo_nueva">
+                  <option>N</option>
+                  <option>S</option>
+                </select>
+              </label>
+              <label>
+                Inmobiliaria (comisión 3%/4%)
+                <select name="sim_tecnocasa">
+                  <option>N</option>
+                  <option>S</option>
+                </select>
+              </label>
+              <label>
+                Número de intervinientes
+                <input name="sim_intervinientes" type="number" min="1" step="1" />
+              </label>
+              <label>
+                Comisión Modernia Financiaciones
+                <input name="sim_comision_modernia" type="text" inputmode="decimal" data-money="1" />
+              </label>
+              <div class="form-section">Compra-venta e hipoteca</div>
+              <label>
+                Compra-Venta
+                <input name="sim_compra_venta" type="text" inputmode="decimal" data-money="1" />
+              </label>
+              <label>
+                Hipoteca
+                <input name="sim_hipoteca_importe" type="text" inputmode="decimal" data-money="1" />
+              </label>
+              <label>
+                Escrituración
+                <input name="sim_escrituracion" type="text" inputmode="decimal" data-money="1" />
+              </label>
+              <label>
+                Valor tasación (inmueble)
+                <input name="sim_tasacion_valor" type="text" inputmode="decimal" data-money="1" />
+              </label>
+              <label>
+                % financiación
+                <input name="sim_fin_pct" type="number" step="0.01" />
+              </label>
+              <label>
+                % financiación (rápido)
+                <select id="simFinPctQuick">
+                  <option value=""></option>
+                  <option value="0.6">60%</option>
+                  <option value="0.7">70%</option>
+                  <option value="0.75">75%</option>
+                  <option value="0.8">80%</option>
+                  <option value="0.85">85%</option>
+                  <option value="0.9">90%</option>
+                  <option value="0.95">95%</option>
+                  <option value="1">100%</option>
+                </select>
+              </label>
+              <label>
+                Base bancaria
+                <input name="sim_base_bancaria" type="text" inputmode="decimal" data-money="1" readonly />
+              </label>
+              <label>
+                Bonificación Fiscal (s/n)
+                <select name="sim_bonificacion">
+                  <option>S</option>
+                  <option>N</option>
+                </select>
+              </label>
+              <label>
+                IVA Inmobiliaria (s/n)
+                <select name="sim_iva_tecnocasa">
+                  <option>S</option>
+                  <option>N</option>
+                </select>
+              </label>
+              <label>
+                % Comisión Inmobiliaria
+                <input name="sim_inmobiliaria_pct" type="number" step="0.01" />
+              </label>
+              <label>
+                Com. Apertura
+                <input name="sim_com_apertura" type="number" step="0.0001" />
+              </label>
+              <label>
+                Coste tasación
+                <input name="sim_tasacion" type="text" inputmode="decimal" data-money="1" />
+              </label>
+              <label>
+                Seguros (importe)
+                <input name="sim_seguros" type="text" inputmode="decimal" data-money="1" />
+              </label>
+              <label>
+                ENTRADA
+                <input name="sim_entrada" type="text" inputmode="decimal" data-money="1" />
+              </label>
+              <label>
+                Otros
+                <input name="sim_otros" type="text" inputmode="decimal" data-money="1" />
+              </label>
+              <div class="form-section">Cálculo de cuotas</div>
+              <label>
+                Interés de salida
+                <input name="sim_interes_salida" type="number" step="0.0001" />
+              </label>
+              <label>
+                Revisión
+                <input name="sim_revision" type="number" step="0.0001" />
+              </label>
+              <label>
+                Interés ratio
+                <input name="sim_interes_ratio" type="number" step="0.0001" />
+              </label>
+              <label>
+                Cuota ptmo. vigente
+                <input name="sim_cuota_vigente" type="text" inputmode="decimal" data-money="1" />
+              </label>
+            </form>
+            <div class="form-grid" style="margin-top:16px;">
+              <div class="span-2">
+                <h4>Gastos compraventa</h4>
+                <table class="data-table">
+                  <thead>
+                    <tr><th>Concepto</th><th>Importe</th></tr>
+                  </thead>
+                  <tbody>
+                    <tr><td>Notaria</td><td><span id="simCvNotaria"></span></td></tr>
+                    <tr><td>Registro</td><td><span id="simCvRegistro"></span></td></tr>
+                    <tr><td>Gestoria</td><td><span id="simCvGestoria"></span></td></tr>
+                    <tr><td><span id="simCvIvaLabel">ITP</span></td><td><span id="simCvIva"></span></td></tr>
+                    <tr><td>Inmobiliaria</td><td><span id="simCvTecnocasa"></span></td></tr>
+                    <tr><td>AJD</td><td><span id="simCvAjd"></span></td></tr>
+                    <tr><td><strong>Total gastos</strong></td><td><strong id="simCvTotal"></strong></td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <div class="span-2">
+                <h4>Gastos hipoteca</h4>
+                <table class="data-table">
+                  <thead>
+                    <tr><th>Concepto</th><th>Importe</th></tr>
+                  </thead>
+                  <tbody>
+                    <tr><td>Notaria</td><td><span id="simHipNotaria"></span></td></tr>
+                    <tr><td>Registro</td><td><span id="simHipRegistro"></span></td></tr>
+                    <tr><td>Gestoria</td><td><span id="simHipGestoria"></span></td></tr>
+                    <tr><td>AJD</td><td><span id="simHipAjd"></span></td></tr>
+                    <tr><td>Com. Apertura</td><td><span id="simHipComApertura"></span></td></tr>
+                    <tr><td>Tasación</td><td><span id="simHipTasacion"></span></td></tr>
+                    <tr><td>Seguros</td><td><span id="simHipSeguros"></span></td></tr>
+                    <tr><td>Comisión Modernia Financiaciones</td><td><span id="simHipKiron"></span></td></tr>
+                    <tr><td><strong>Total gastos</strong></td><td><strong id="simHipTotal"></strong></td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <div class="span-2">
+                <h4>Totales</h4>
+                <table class="data-table">
+                  <tbody>
+                    <tr><td>TOTAL GASTOS</td><td><span id="simTotalGastos"></span></td></tr>
+                    <tr><td>Precio C/V</td><td><span id="simPrecioCv"></span></td></tr>
+                    <tr><td>Gastos</td><td><span id="simGastos"></span></td></tr>
+                    <tr><td>ENTRADA</td><td><span id="simEntrada"></span></td></tr>
+                    <tr><td>Otros</td><td><span id="simOtros"></span></td></tr>
+                    <tr><td>Total Hipoteca</td><td><span id="simTotalHipoteca"></span></td></tr>
+                    <tr><td>Faltante / Sobrante en Cuenta</td><td><span id="simFaltante"></span></td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <div class="span-2">
+                <h4>Cuotas resultantes (interés de salida)</h4>
+                <table class="data-table">
+                  <thead>
+                    <tr><th>Años</th><th>Cuota</th><th>Años</th><th>Cuota</th><th>Carencia</th></tr>
+                  </thead>
+                  <tbody>
+                    <tr><td>5</td><td><span id="simCuota5"></span></td><td>25</td><td><span id="simCuota25"></span></td><td><span id="simCarencia"></span></td></tr>
+                    <tr><td>10</td><td><span id="simCuota10"></span></td><td>30</td><td><span id="simCuota30"></span></td><td></td></tr>
+                    <tr><td>15</td><td><span id="simCuota15"></span></td><td>35</td><td><span id="simCuota35"></span></td><td></td></tr>
+                    <tr><td>20</td><td><span id="simCuota20"></span></td><td>40</td><td><span id="simCuota40"></span></td><td></td></tr>
+                    <tr><td>18</td><td><span id="simCuota18"></span></td><td></td><td></td><td></td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <div class="span-2">
+                <h4>Cuota futura (variable/mixta)</h4>
+                <table class="data-table">
+                  <thead>
+                    <tr><th>Años</th><th>Cuota</th></tr>
+                  </thead>
+                  <tbody>
+                    <tr><td>20</td><td><span id="simRev20"></span></td></tr>
+                    <tr><td>25</td><td><span id="simRev25"></span></td></tr>
+                    <tr><td>30</td><td><span id="simRev30"></span></td></tr>
+                    <tr><td>35</td><td><span id="simRev35"></span></td></tr>
+                    <tr><td>40</td><td><span id="simRev40"></span></td></tr>
+                    <tr><td><span id="simRevAniosExtra"></span></td><td><span id="simRevExtra"></span></td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <div class="span-2">
+                <h4>Demostración de ingresos</h4>
+                <table class="data-table">
+                  <thead>
+                    <tr><th>Años</th><th>Ingresos</th><th>Años</th><th>Ingresos</th></tr>
+                  </thead>
+                  <tbody>
+                    <tr><td>5</td><td><span id="simIng5"></span></td><td>25</td><td><span id="simIng25"></span></td></tr>
+                    <tr><td>10</td><td><span id="simIng10"></span></td><td>30</td><td><span id="simIng30"></span></td></tr>
+                    <tr><td>15</td><td><span id="simIng15"></span></td><td>35</td><td><span id="simIng35"></span></td></tr>
+                    <tr><td>20</td><td><span id="simIng20"></span></td><td>40</td><td><span id="simIng40"></span></td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div id="aieSection" class="hidden">
+          <div class="form-card">
+            <h3>Gastos de personal · Inmovere Gestión AIE</h3>
+            <p class="muted">Registro de costes de personal (desde Febrero 2026).</p>
+            <form id="aieForm">
+              <div class="form-grid">
+                <label>
+                  Concepto
+                  <input name="concepto" value="Personal" required />
+                </label>
+                <label>
+                  Importe
+                  <input name="comision" type="number" step="0.01" required />
+                </label>
+                <label>
+                  Responsable
+                  <input name="asesor" />
+                </label>
+                <label>
+                  Año
+                  <input name="anio" type="number" min="2026" max="2100" required />
+                </label>
+                <label>
+                  Mes
+                  <select name="mes" required>
+                    <option>Enero</option>
+                    <option>Febrero</option>
+                    <option>Marzo</option>
+                    <option>Abril</option>
+                    <option>Mayo</option>
+                    <option>Junio</option>
+                    <option>Julio</option>
+                    <option>Agosto</option>
+                    <option>Septiembre</option>
+                    <option>Octubre</option>
+                    <option>Noviembre</option>
+                    <option>Diciembre</option>
+                  </select>
+                </label>
+              </div>
+              <input type="hidden" name="tipo" value="Gasto" />
+              <input type="hidden" name="sl" value="Inmovere Gestión AIE" />
+              <div class="form-actions">
+                <button type="submit">Guardar</button>
+                <span id="aieFormStatus" class="muted"></span>
+              </div>
+            </form>
+          </div>
+        </div>
+      </section>
+      <section id="clientePage" class="hidden">
+        <div id="clientesDetail" class="form-card hidden">
+          <div class="section-head">
+            <div>
+              <h3 id="clienteDetailTitle">Ficha de cliente</h3>
+              <p class="muted" id="clienteDetailSubtitle">Información general y asignaciones.</p>
+            </div>
+            <button class="ghost" type="button" id="clienteDetailBack">Volver</button>
+          </div>
+          <div class="tabs" id="clienteTabs">
+            <button class="tab active" type="button" data-tab="datos">Datos personales</button>
+            <button class="tab" type="button" data-tab="profesional">Gestoría</button>
+            <button class="tab hidden" type="button" data-tab="seguros">Seguros</button>
+            <button class="tab hidden" type="button" data-tab="inmobiliaria">Inmobiliaria</button>
+            <button class="tab hidden" type="button" data-tab="hipotecas">Hipotecas</button>
+            <button class="tab" type="button" data-tab="facturas">Facturas servicios</button>
+            <button class="tab" type="button" data-tab="trabajos">Trabajos realizados</button>
+          </div>
+          <div id="clienteTabDatos">
+            <div class="grid" id="clienteDetailGrid"></div>
+            <div class="form-actions">
+              <button type="button" id="clienteSaveBtn">Guardar cambios</button>
+              <span id="clienteSaveStatus" class="muted"></span>
+            </div>
+            <div class="form-card">
+              <h3>Servicios asignados</h3>
+              <div id="clienteEmpresasList"></div>
+            </div>
+            <div class="form-card">
+              <h3>Asignar nuevo servicio</h3>
+              <p class="muted">Vincula el cliente a un servicio y empresa.</p>
+              <form id="clienteAssignForm" class="form-grid">
+                <label>
+                  Servicio
+                  <select id="clienteAssignServicio" name="servicio" required></select>
+                </label>
+                <label>
+                  Empresa
+                  <select id="clienteAssignEmpresa" name="empresa_id" required></select>
+                </label>
+                <label>
+                  Estado
+                  <input name="estado" placeholder="Activo" />
+                </label>
+                <label>
+                  Fecha inicio
+                  <input name="fecha_inicio" type="date" />
+                </label>
+                <label>
+                  Fecha fin
+                  <input name="fecha_fin" type="date" />
+                </label>
+                <div class="form-actions">
+                  <button type="submit">Añadir servicio</button>
+                  <span id="clienteAssignStatus" class="muted"></span>
+                </div>
+              </form>
+            </div>
+          </div>
+          <div id="clienteTabProfesional" class="hidden">
+            <div class="form-card">
+              <h3>Gestoría · Configuración del servicio</h3>
+              <p class="muted">Selecciona el tipo de cliente y activa los módulos que se gestionan.</p>
+              <form id="clienteGestoriaForm">
+                <div class="service-config">
+                  <div class="service-config-card">
+                    <h4>Tipo de cliente</h4>
+                    <div class="pill-group">
+                      <label class="pill-option">
+                        <input type="radio" name="tipo_cliente" value="Autónomo" />
+                        Autónomo
+                      </label>
+                      <label class="pill-option">
+                        <input type="radio" name="tipo_cliente" value="Empresa" />
+                        Empresa
+                      </label>
+                      <label class="pill-option">
+                        <input type="radio" name="tipo_cliente" value="Cliente Renta" />
+                        Cliente Renta
+                      </label>
+                      <label class="pill-option">
+                        <input type="radio" name="tipo_cliente" value="Gestiones Administrativas" />
+                        Gestiones Administrativas
+                      </label>
+                    </div>
+                  </div>
+                  <div class="service-config-card">
+                    <h4>Módulos activos</h4>
+                    <div class="pill-group">
+                      <label class="pill-option">
+                        <input type="checkbox" name="mod_fiscal" /> Fiscal
+                      </label>
+                      <label class="pill-option">
+                        <input type="checkbox" name="mod_laboral" /> Laboral
+                      </label>
+                      <label class="pill-option">
+                        <input type="checkbox" name="mod_contable" /> Contable
+                      </label>
+                      <label class="pill-option">
+                        <input type="checkbox" name="mod_renta" /> Renta
+                      </label>
+                      <label class="pill-option">
+                        <input type="checkbox" name="mod_registro" /> Registro Mercantil
+                      </label>
+                      <label class="pill-option">
+                        <input type="checkbox" name="mod_trafico" /> Tráfico
+                      </label>
+                      <label class="pill-option">
+                        <input type="checkbox" name="mod_puntuales" /> Gestiones administrativas
+                      </label>
+                    </div>
+                  </div>
+                </div>
+                <div class="form-actions">
+                  <button type="submit">Guardar</button>
+                  <span id="clienteGestoriaStatus" class="muted"></span>
+                </div>
+              </form>
+            </div>
+            <div class="form-card" id="clienteProfesionalSection">
+              <h3>Datos profesionales · Gestoría</h3>
+              <p class="muted" id="clienteProfesionalHint">Asigna el cliente a Gestoría para activar estos datos.</p>
+              <div class="form-actions">
+                <span id="clienteProfesionalStatus" class="muted"></span>
+              </div>
+              <div class="grid">
+                <form id="clienteProfesionalCnaeForm" class="form-card">
+                  <h4>CNAE</h4>
+                  <label>
+                    Código CNAE
+                    <input name="cnae" list="cnaeCatalogo" />
+                  </label>
+                  <div class="muted" id="cnaeSuggest"></div>
+                  <div class="form-actions">
+                    <button type="submit">Añadir CNAE</button>
+                  </div>
+                </form>
+                <form id="clienteProfesionalIaeForm" class="form-card">
+                  <h4>IAE</h4>
+                  <label>
+                    Código IAE
+                    <input name="iae" list="iaeCatalogo" />
+                  </label>
+                  <div class="muted" id="iaeSuggest"></div>
+                  <div class="form-actions">
+                    <button type="submit">Añadir IAE</button>
+                  </div>
+                </form>
+                <form id="clienteProfesionalActividadForm" class="form-card">
+                  <h4>Actividad</h4>
+                  <label>
+                    Actividad
+                    <input name="actividad" />
+                  </label>
+                  <div class="muted" id="actividadSuggest"></div>
+                  <div class="form-actions">
+                    <button type="submit">Añadir actividad</button>
+                  </div>
+                </form>
+                <form id="clienteProfesionalIbanForm" class="form-card">
+                  <h4>IBAN</h4>
+                  <label>
+                    IBAN
+                    <input name="iban" />
+                  </label>
+                  <label>
+                    Principal
+                    <select name="principal">
+                      <option value="0">No</option>
+                      <option value="1">Sí</option>
+                    </select>
+                  </label>
+                  <div class="form-actions">
+                    <button type="submit">Añadir IBAN</button>
+                  </div>
+                </form>
+              </div>
+              <div id="clienteProfesionalList"></div>
+            </div>
+            <datalist id="cnaeCatalogo"></datalist>
+            <datalist id="iaeCatalogo"></datalist>
+            <div class="form-card">
+              <h3>Módulos activos</h3>
+              <p class="muted">Accede a la operativa específica del cliente.</p>
+              <div class="tabs" id="gestoriaModuleTabs">
+                <button class="tab" type="button" data-gestoria-module="contabilidad">Contabilidad</button>
+                <button class="tab" type="button" data-gestoria-module="fiscal">Fiscal</button>
+                <button class="tab" type="button" data-gestoria-module="laboral">Laboral</button>
+                <button class="tab" type="button" data-gestoria-module="renta">Renta</button>
+                <button class="tab" type="button" data-gestoria-module="admin">Gestiones administrativas</button>
+              </div>
+              <div id="gestoriaModuleContabilidad">
+                <div class="form-card">
+                  <h3>Contabilidad · Configuración del periodo</h3>
+                  <p class="muted">Define el ciclo contable activo para este cliente.</p>
+                  <form id="gestoriaContaConfigForm" class="form-grid">
+                    <label>
+                      Periodo
+                      <select name="periodo">
+                        <option>Mensual</option>
+                        <option>Trimestral</option>
+                        <option>Anual</option>
+                      </select>
+                    </label>
+                    <label>
+                      Inicio del periodo
+                      <input name="fecha_inicio" type="date" />
+                    </label>
+                    <label>
+                      Responsable
+                      <select name="responsable" class="responsable-select" data-service="Gestoría"></select>
+                    </label>
+                    <div class="form-actions">
+                      <button type="submit">Guardar configuración</button>
+                      <button type="button" class="ghost" id="gestoriaContaTasksBtn">Crear checklist</button>
+                      <button type="button" class="ghost" id="gestoriaContaQueueBtn">Ver cola en CRM</button>
+                      <span id="gestoriaContaConfigStatus" class="muted"></span>
+                    </div>
+                  </form>
+                </div>
+                <div class="form-card">
+                  <div class="section-head">
+                    <div>
+                      <h3>Checklist contable</h3>
+                      <p class="muted">Tareas recurrentes del periodo en curso.</p>
+                    </div>
+                  </div>
+                  <div id="gestoriaContaTasksTable"></div>
+                  <div class="footer" id="gestoriaContaTasksInfo"></div>
+                </div>
+                <div class="form-card">
+                  <h3>Resumen del periodo</h3>
+                  <div class="grid crm-kpis">
+                    <div class="card kpi-card">
+                      <h3>Tareas completadas</h3>
+                      <div class="kpi-value" id="gestoriaContaSummaryDone">0</div>
+                      <div class="muted">Checklist contable</div>
+                    </div>
+                    <div class="card kpi-card">
+                      <h3>Tareas pendientes</h3>
+                      <div class="kpi-value" id="gestoriaContaSummaryPending">0</div>
+                      <div class="muted">En curso o sin iniciar</div>
+                    </div>
+                    <div class="card kpi-card">
+                      <h3>Próximo vencimiento</h3>
+                      <div class="kpi-value" id="gestoriaContaSummaryNext">-</div>
+                      <div class="muted">Fecha límite más cercana</div>
+                    </div>
+                  </div>
+                </div>
+                <div class="form-card">
+                  <h3>Dashboard · Contabilidad</h3>
+                  <p class="muted">Resumen operativo del cliente.</p>
+                  <div class="grid crm-kpis" id="gestoriaClienteKpis">
+                    <div class="card kpi-card">
+                      <h3>Modelos activos</h3>
+                      <div class="kpi-value" id="gestoriaClienteKpiModelos">0</div>
+                      <div class="muted">Obligaciones fiscales</div>
+                    </div>
+                    <div class="card kpi-card">
+                      <h3>Vencen en 30 días</h3>
+                      <div class="kpi-value" id="gestoriaClienteKpiVencen">0</div>
+                      <div class="muted">Modelos próximos</div>
+                    </div>
+                    <div class="card kpi-card">
+                      <h3>Gestiones en curso</h3>
+                      <div class="kpi-value" id="gestoriaClienteKpiGestiones">0</div>
+                      <div class="muted">Encargos activos</div>
+                    </div>
+                    <div class="card kpi-card">
+                      <h3>Documentos pendientes</h3>
+                      <div class="kpi-value" id="gestoriaClienteKpiDocs">0</div>
+                      <div class="muted">Revisión pendiente</div>
+                    </div>
+                  </div>
+                  <div class="inline-list" id="gestoriaClienteAlerts"></div>
+                </div>
+                <div class="form-card">
+                  <h3>Modelos fiscales</h3>
+                  <p class="muted">Resumen de modelos del cliente.</p>
+                  <div id="gestoriaModelosTable"></div>
+                </div>
+                <div class="form-card">
+                  <h3>Gestiones</h3>
+                  <p class="muted">Encargos en curso y finalizados.</p>
+                  <div id="gestoriaTrabajosTable"></div>
+                </div>
+                <div class="form-card">
+                  <h3>Documentos</h3>
+                  <p class="muted">Documentación y estado.</p>
+                  <div id="gestoriaDocsTable"></div>
+                </div>
+                <div class="form-card">
+                  <h3>Agenda del cliente</h3>
+                  <p class="muted">Acciones y recordatorios asociados.</p>
+                  <div id="gestoriaClienteAgendaTable"></div>
+                  <div class="footer" id="gestoriaClienteAgendaInfo"></div>
+                </div>
+              </div>
+              <div id="gestoriaModuleFiscal" class="hidden">
+                <div class="form-card">
+                  <h3>Fiscal</h3>
+                  <p class="muted">Pendiente de configurar.</p>
+                </div>
+              </div>
+              <div id="gestoriaModuleLaboral" class="hidden">
+                <div class="form-card">
+                  <h3>Laboral</h3>
+                  <p class="muted">Pendiente de configurar.</p>
+                </div>
+              </div>
+              <div id="gestoriaModuleRenta" class="hidden">
+                <div class="form-card">
+                  <h3>Renta</h3>
+                  <p class="muted">Pendiente de configurar.</p>
+                </div>
+              </div>
+              <div id="gestoriaModuleAdmin" class="hidden">
+                <div class="form-card">
+                  <h3>Gestiones administrativas</h3>
+                  <p class="muted">Pendiente de configurar.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div id="clienteTabSeguros" class="hidden">
+            <div class="form-card">
+              <h3>Ficha Seguros</h3>
+              <p class="muted">Pólizas, renovaciones y estado del asegurado.</p>
+              <div id="clienteSegurosFicha"></div>
+            </div>
+          </div>
+          <div id="clienteTabInmobiliaria" class="hidden">
+            <div class="form-card">
+              <h3>Ficha Inmobiliaria</h3>
+              <p class="muted">Perfil, demandas y operaciones vinculadas.</p>
+              <div id="clienteInmoFicha"></div>
+            </div>
+          </div>
+          <div id="clienteTabHipotecas" class="hidden">
+            <div class="form-card">
+              <h3>Ficha Hipotecas</h3>
+              <p class="muted">Operaciones, estados y entidades financieras.</p>
+              <div id="clienteHipotecaFicha"></div>
+            </div>
+          </div>
+          <div id="clienteTabFacturas" class="hidden">
+            <div class="form-card">
+              <h3>Facturas por servicio</h3>
+              <div id="clienteFacturas"></div>
+            </div>
+          </div>
+          <div id="clienteTabTrabajos" class="hidden">
+            <div class="form-card">
+              <h3>Trabajos realizados</h3>
+              <div id="clienteTrabajos"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+    <footer class="app-footer">
+      <div>by Lex &amp; Vere</div>
+      <img src="/assets/lexvere_logo.svg" alt="Lex &amp; Vere" />
+    </footer>
+    <div id="actionModal" class="modal hidden">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3>Editar acción</h3>
+          <button type="button" id="actionModalClose" class="ghost">✕</button>
+        </div>
+        <div class="modal-body form-grid">
+          <label>
+            Cliente
+            <input id="actionModalClienteInput" list="actionModalClientes" autocomplete="off" />
+            <input id="actionModalClienteId" type="hidden" />
+            <datalist id="actionModalClientes"></datalist>
+          </label>
+          <label>
+            Servicio
+            <select id="actionModalServicioSelect">
+              <option value="">Selecciona servicio</option>
+              <option value="gestoria">Gestoría</option>
+              <option value="seguros">Seguros</option>
+              <option value="financiaciones">Financiaciones</option>
+            </select>
+          </label>
+          <label>
+            Fecha
+            <input id="actionModalFecha" type="date" />
+          </label>
+          <label>
+            Hora
+            <input id="actionModalHora" type="time" />
+          </label>
+          <label>
+            Tipo
+            <input id="actionModalTipo" />
+          </label>
+          <label>
+            Responsable
+            <select id="actionModalResponsable"></select>
+          </label>
+          <label>
+            Estado
+            <select id="actionModalEstado">
+              <option>Pendiente</option>
+              <option>En curso</option>
+              <option>En espera</option>
+              <option>Hecho</option>
+              <option>Completado</option>
+              <option>Cancelado</option>
+            </select>
+          </label>
+          <label>
+            Recordatorio (min)
+            <input id="actionModalRecordatorio" type="number" min="0" />
+          </label>
+          <label>
+            Notas
+            <textarea id="actionModalNotas" rows="2"></textarea>
+          </label>
+        </div>
+        <div class="modal-actions">
+          <button type="button" id="actionModalOpenCliente" class="secondary">Abrir cliente</button>
+          <button type="button" id="actionModalSave">Guardar cambios</button>
+          <span id="actionModalStatus" class="muted"></span>
+        </div>
+      </div>
+    </div>
+
+    <script src="app.js?v=293"></script>
+  </body>
+</html>
