@@ -5693,10 +5693,8 @@ const loadHomeDashboard = () => {
     return;
   }
 
-  api(`/api/dashboard?empresa_id=${estudio.id}`).then((data) => {
-    state.homeDashboard = data;
-    const years = buildYearIndex([data.ventas, data.ingresos, data.gastos, data.alquileres]);
-    state.homeYears = years;
+  const currentYear = String(new Date().getFullYear());
+  const setYears = (years) => {
     yearSelect.innerHTML = "";
     if (!years.length) {
       yearSelect.appendChild(createOption("", "Sin datos"));
@@ -5708,12 +5706,33 @@ const loadHomeDashboard = () => {
     years.forEach((year) => {
       yearSelect.appendChild(createOption(year, year));
     });
-    const currentYear = String(new Date().getFullYear());
     yearSelect.value = years.includes(currentYear)
       ? currentYear
       : years[years.length - 1];
     renderCompanyCards();
     updateBdtFiltersVisibility();
+  };
+
+  api(`/api/years`)
+    .then((data) => {
+      const years = (data.years || []).map(String);
+      if (years.length) {
+        state.homeYears = years;
+        setYears(years);
+      }
+    })
+    .catch(() => {});
+
+  api(`/api/dashboard?empresa_id=${estudio.id}`).then((data) => {
+    state.homeDashboard = data;
+    if (!state.homeYears.length) {
+      const years = buildYearIndex([data.ventas, data.ingresos, data.gastos, data.alquileres]);
+      state.homeYears = years;
+      setYears(years);
+    } else {
+      renderCompanyCards();
+      updateBdtFiltersVisibility();
+    }
   });
 };
 

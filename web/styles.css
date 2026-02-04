@@ -1,21 +1,22 @@
 :root {
   --gold: #c9a24d;
   --gold-deep: #a8792d;
-  --gold-soft: #f1e3c4;
+  --gold-soft: #efe2c4;
   --black: #0d0c0b;
   --charcoal: #191613;
-  --ink: #1f1b16;
-  --ink-soft: #2f2a24;
-  --paper: #ffffff;
-  --cream: #f5f5f5;
-  --cloud: #ffffff;
-  --line: #e5e2dc;
-  --muted: #7a7166;
+  --ink: #1f1c17;
+  --ink-soft: #342f29;
+  --paper: #f6f2ea;
+  --cream: #efe9df;
+  --cloud: #fdfbf7;
+  --line: #d9d3c7;
+  --muted: #7b7165;
   --oxblood: #4b3428;
-  --sage: #6a6b62;
-  --shadow: rgba(16, 12, 8, 0.12);
+  --sage: #5e6b54;
+  --shadow: rgba(18, 14, 10, 0.16);
   --font-body: "Source Sans 3", "Segoe UI", sans-serif;
   --font-display: "Playfair Display", "Times New Roman", serif;
+  --font-ui: "Space Grotesk", "Source Sans 3", sans-serif;
 }
 
 * {
@@ -27,9 +28,9 @@ body {
   font-family: var(--font-body);
   color: var(--ink);
   background:
-    radial-gradient(circle at 15% -10%, rgba(201, 162, 77, 0.12), transparent 45%),
-    radial-gradient(circle at 90% 10%, rgba(0, 0, 0, 0.04), transparent 45%),
-    linear-gradient(180deg, #f8f8f8 0%, #efefef 100%);
+    radial-gradient(circle at 10% -5%, rgba(201, 162, 77, 0.16), transparent 48%),
+    radial-gradient(circle at 85% 0%, rgba(94, 107, 84, 0.18), transparent 46%),
+    linear-gradient(180deg, #f6f2ea 0%, #efe9df 100%);
   min-height: 100vh;
 }
 
@@ -39,10 +40,11 @@ header {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 28px 32px;
-  border-bottom: 1px solid rgba(201, 162, 77, 0.2);
+  padding: 28px 32px 26px;
+  border-bottom: 1px solid rgba(201, 162, 77, 0.28);
   background:
-    linear-gradient(120deg, #0c0b0a 0%, #161310 55%, #1c1916 100%);
+    radial-gradient(circle at 10% 20%, rgba(201, 162, 77, 0.2), transparent 40%),
+    linear-gradient(120deg, #0b0a09 0%, #15120f 55%, #1b1815 100%);
   color: #f7f4ee;
 }
 
@@ -54,8 +56,8 @@ header {
 }
 
 .brand img {
-  width: 58px;
-  height: 58px;
+  width: 88px;
+  height: 88px;
   object-fit: contain;
   border-radius: 0;
   background: transparent;
@@ -85,6 +87,7 @@ header {
   color: var(--gold);
   font-size: 13px;
   letter-spacing: 0.3px;
+  font-family: var(--font-ui);
 }
 
 main {
@@ -100,8 +103,138 @@ section {
   border: 1px solid var(--line);
   border-radius: 18px;
   padding: 20px 22px 24px;
-  box-shadow: 0 18px 40px rgba(12, 10, 8, 0.08);
-  border-top: 3px solid rgba(201, 162, 77, 0.35);
+  box-shadow: 0 20px 50px rgba(12, 10, 8, 0.12);
+  border-top: 3px solid rgba(201, 162, 77, 0.4);
+  animation: fadeUp 0.6s ease both;
+}
+
+h2, h3, h4 {
+  font-family: var(--font-display);
+  letter-spacing: 0.2px;
+}
+
+.card,
+.form-card,
+.data-card,
+.dashboard-card {
+  background: var(--cloud);
+  border: 1px solid rgba(217, 211, 199, 0.8);
+  border-radius: 18px;
+  box-shadow: 0 16px 35px rgba(12, 10, 8, 0.1);
+}
+
+.muted {
+  color: var(--muted);
+  letter-spacing: 0.2px;
+}
+
+button,
+.btn,
+.tab,
+input,
+select,
+textarea {
+  font-family: var(--font-ui);
+}
+
+button,
+.btn {
+  background: linear-gradient(135deg, var(--gold) 0%, var(--gold-deep) 100%);
+  color: var(--black);
+  border: none;
+  border-radius: 14px;
+  padding: 10px 16px;
+  box-shadow: 0 10px 20px rgba(201, 162, 77, 0.24);
+  transition: transform 0.18s ease, box-shadow 0.18s ease, opacity 0.18s ease;
+}
+
+button:hover,
+.btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 26px rgba(201, 162, 77, 0.32);
+}
+
+button.secondary,
+.btn.secondary {
+  background: transparent;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  box-shadow: none;
+}
+
+.tabs,
+.tab-group {
+  background: rgba(253, 251, 247, 0.7);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 6px;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.6);
+}
+
+.tab {
+  border-radius: 14px;
+  padding: 8px 16px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--ink);
+  transition: all 0.18s ease;
+}
+
+.tab.active {
+  background: var(--gold);
+  color: var(--black);
+  border-color: rgba(201, 162, 77, 0.6);
+  box-shadow: 0 10px 20px rgba(201, 162, 77, 0.25);
+}
+
+input,
+select,
+textarea {
+  background: rgba(253, 251, 247, 0.9);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px 12px;
+  color: var(--ink);
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: rgba(201, 162, 77, 0.8);
+  box-shadow: 0 0 0 3px rgba(201, 162, 77, 0.18);
+}
+
+.data-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  background: var(--cloud);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+.data-table th {
+  background: rgba(201, 162, 77, 0.15);
+  font-family: var(--font-ui);
+  letter-spacing: 0.3px;
+}
+
+.data-table td,
+.data-table th {
+  padding: 10px 12px;
+}
+
+.section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.fade-up {
   animation: fadeUp 0.6s ease both;
 }
 
@@ -482,32 +615,31 @@ h2 {
   padding: 12px;
   border: 1px solid var(--line);
   border-radius: 12px;
-  background: #fff;
+  background: var(--cloud);
 }
 .tab {
-  border: none;
+  border: 1px solid transparent;
   background: transparent;
-  padding: 10px 2px;
-  border-radius: 0;
+  padding: 8px 16px;
+  border-radius: 14px;
   color: var(--ink);
   font-size: 12px;
   font-weight: 600;
-  letter-spacing: 0.2px;
+  letter-spacing: 0.3px;
   cursor: pointer;
-  border-bottom: 3px solid transparent;
-  transition: color 0.15s ease, border-color 0.15s ease;
+  transition: all 0.18s ease;
 }
 
 .tab.active {
-  background: transparent;
-  color: var(--ink);
-  border-bottom-color: var(--gold);
-  box-shadow: none;
+  background: var(--gold);
+  color: var(--black);
+  border-color: rgba(201, 162, 77, 0.6);
+  box-shadow: 0 10px 20px rgba(201, 162, 77, 0.25);
 }
 
 .tab:hover {
   color: var(--ink);
-  border-bottom-color: rgba(201, 162, 77, 0.5);
+  border-color: rgba(201, 162, 77, 0.5);
 }
 
 .toolbar select,
@@ -515,7 +647,7 @@ h2 {
   border: 1px solid var(--line);
   border-radius: 999px;
   padding: 8px 14px;
-  background: #ffffff;
+  background: var(--cloud);
   min-width: 200px;
   font-size: 13px;
 }

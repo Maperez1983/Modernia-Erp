@@ -4585,6 +4585,51 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, [dict(r) for r in rows])
             return
 
+        if path == "/api/years":
+            years = set()
+            tables = [
+                "movimientos",
+                "hipotecas",
+                "alquileres",
+                "seguros",
+                "captaciones",
+                "gestoria_contabilidad",
+                "gestoria_trabajos",
+                "gestoria_modelos",
+                "asesoramientos_financiacion",
+                "inmuebles",
+                "demandas",
+                "visitas",
+            ]
+            for table in tables:
+                try:
+                    cols = {
+                        row["name"]
+                        for row in conn.execute(f"PRAGMA table_info({table})").fetchall()
+                    }
+                except sqlite3.Error:
+                    continue
+                if "anio" in cols:
+                    try:
+                        for row in conn.execute(
+                            f"SELECT DISTINCT anio AS y FROM {table} WHERE anio IS NOT NULL"
+                        ).fetchall():
+                            if row["y"] is not None:
+                                years.add(str(row["y"]))
+                    except sqlite3.Error:
+                        pass
+                elif "fecha" in cols:
+                    try:
+                        for row in conn.execute(
+                            f"SELECT DISTINCT strftime('%Y', fecha) AS y FROM {table} WHERE fecha IS NOT NULL"
+                        ).fetchall():
+                            if row["y"]:
+                                years.add(str(row["y"]))
+                    except sqlite3.Error:
+                        pass
+            json_response(self, {"years": sorted(years)})
+            return
+
         if path == "/api/tablas":
             json_response(self, TABLES)
             return
