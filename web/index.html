@@ -522,55 +522,6 @@
               <button type="button" class="tab" data-gestoria-tab="renta">Cliente Renta</button>
               <button type="button" class="tab" data-gestoria-tab="admin">Gestiones Administrativas</button>
             </div>
-            <form id="gestoriaCrmForm" class="form-grid">
-              <label>
-                Cliente
-                <select id="gestoriaCrmCliente" name="cliente" required></select>
-              </label>
-              <label>
-                Fecha alta
-                <input name="fecha" type="date" />
-              </label>
-              <label>
-                Tipo
-                <select name="tipo">
-                  <option>Cuota mensual</option>
-                  <option>Gestión administrativa</option>
-                </select>
-              </label>
-              <label>
-                Perfil
-                <select name="perfil">
-                  <option>Autónomo</option>
-                  <option>Empresa</option>
-                  <option>Cliente Renta</option>
-                  <option>Gestiones Administrativas</option>
-                </select>
-              </label>
-              <label>
-                Cuota
-                <input name="cuota" />
-              </label>
-              <label>
-                Precio
-                <input name="precio" type="number" step="0.01" />
-              </label>
-              <label>
-                Estado
-                <select name="estado">
-                  <option>Alta</option>
-                  <option>Baja</option>
-                </select>
-              </label>
-              <label>
-                Fecha baja
-                <input name="fecha_baja" type="date" />
-              </label>
-              <div class="form-actions">
-                <button type="submit">Asignar cliente</button>
-                <span id="gestoriaCrmStatus" class="muted"></span>
-              </div>
-            </form>
             <div class="toolbar">
               <div class="quick-search">
                 <input id="gestoriaCrmSearch" list="gestoriaCrmClientes" placeholder="Buscar cliente..." autocomplete="off" />
@@ -3326,6 +3277,6 @@
       </div>
     </div>
 
-    <script src="app.js?v=301"></script>
+    <script src="app.js?v=302"></script>
   </body>
 </html>

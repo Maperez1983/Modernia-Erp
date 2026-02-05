@@ -5945,7 +5945,13 @@ const loadClientesStats = () =>
 
 const loadClientesList = () =>
   api("/api/clientes_list").then((data) => {
-    state.clientesList = data || [];
+    const list = data || [];
+    list.sort((a, b) => {
+      const nameA = normalizeNombre(formatNombreCliente(a.nombre));
+      const nameB = normalizeNombre(formatNombreCliente(b.nombre));
+      return nameA.localeCompare(nameB, "es", { numeric: true, sensitivity: "base" });
+    });
+    state.clientesList = list;
     return state.clientesList;
   });
 
