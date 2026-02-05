@@ -2823,6 +2823,29 @@ class Handler(BaseHTTPRequestHandler):
                         method = "vision" if external_ocr_available() else "tesseract"
                     elif ocr_err and not err_detail:
                         err_detail = ocr_err
+                cliente_match = False
+                cliente_id = None
+                tomador = (fields.get("tomador") or "").strip()
+                nif = (fields.get("nif") or fields.get("dni") or "").strip()
+                if tomador or nif:
+                    if nif:
+                        nif_norm = re.sub(r"\s+", "", nif).upper()
+                        row = conn.execute(
+                            "SELECT id FROM clientes WHERE REPLACE(UPPER(nif), ' ', '') = ?",
+                            (nif_norm,),
+                        ).fetchone()
+                        if row:
+                            cliente_id = row["id"]
+                            cliente_match = True
+                    if not cliente_match and tomador:
+                        nombre_norm = re.sub(r"\s+", " ", tomador).strip().upper()
+                        row = conn.execute(
+                            "SELECT id FROM clientes WHERE TRIM(UPPER(nombre)) = ?",
+                            (nombre_norm,),
+                        ).fetchone()
+                        if row:
+                            cliente_id = row["id"]
+                            cliente_match = True
                 json_response(
                     self,
                     {
@@ -2830,6 +2853,8 @@ class Handler(BaseHTTPRequestHandler):
                         "text": text,
                         "language": detect_ocr_lang(),
                         "method": method,
+                        "cliente_id": cliente_id,
+                        "cliente_match": cliente_match,
                     },
                 )
                 return
@@ -3263,6 +3288,7 @@ class Handler(BaseHTTPRequestHandler):
                 if tmp_path and os.path.exists(tmp_path):
                     os.unlink(tmp_path)
         elif parsed.path == "/api/seguros":
+            poliza_id = os.urandom(16).hex()
             conn.execute(
                 """
                 INSERT INTO seguros (
@@ -3277,7 +3303,7 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 """,
                 (
-                    os.urandom(16).hex(),
+                    poliza_id,
                     empresa["id"],
                     payload.get("mes_creacion"),
                     payload.get("fecha_efecto"),
@@ -3301,7 +3327,7 @@ class Handler(BaseHTTPRequestHandler):
                     now,
                 ),
             )
-            ensure_cliente_for_seguro(
+            cliente_id = ensure_cliente_for_seguro(
                 conn,
                 empresa["id"],
                 payload.get("tomador"),
@@ -3314,6 +3340,55 @@ class Handler(BaseHTTPRequestHandler):
                     "direccion": payload.get("direccion"),
                 },
             )
+            poliza_key = payload.get("poliza_key") or ""
+            poliza_url = payload.get("poliza_url") or ""
+            if cliente_id and (poliza_key or poliza_url):
+                where = ["cliente_id = ?", "empresa_id = ?"]
+                values = [cliente_id, empresa["id"]]
+                key_or_url = []
+                if poliza_key:
+                    key_or_url.append("doc_key = ?")
+                    values.append(poliza_key)
+                if poliza_url:
+                    key_or_url.append("doc_url = ?")
+                    values.append(poliza_url)
+                if key_or_url:
+                    where.append(f"({' OR '.join(key_or_url)})")
+                where_clause = " AND ".join(where)
+                exists = conn.execute(
+                    f"SELECT id FROM gestoria_docs WHERE {where_clause}",
+                    values,
+                ).fetchone()
+                if not exists:
+                    nombre_doc = payload.get("poliza_numero") or payload.get("tomador") or "Póliza seguro"
+                    estado_doc = payload.get("estado") or "En vigor"
+                    notas_doc = " · ".join(
+                        [value for value in (payload.get("compania"), payload.get("ramo")) if value]
+                    )
+                    conn.execute(
+                        """
+                        INSERT INTO gestoria_docs (
+                          id, empresa_id, cliente_id, nombre, tipo, fecha, estado, notas, doc_key, doc_url,
+                          created_at, updated_at
+                        ) VALUES (
+                          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                        )
+                        """,
+                        (
+                            os.urandom(16).hex(),
+                            empresa["id"],
+                            cliente_id,
+                            nombre_doc,
+                            "Seguros",
+                            payload.get("fecha_efecto") or payload.get("mes_creacion"),
+                            estado_doc,
+                            notas_doc,
+                            poliza_key or None,
+                            poliza_url or None,
+                            now,
+                            now,
+                        ),
+                    )
         elif parsed.path == "/api/fin_asesoramientos":
             cliente1_id = ensure_cliente_for_financiacion(
                 conn,
