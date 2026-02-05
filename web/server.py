@@ -2776,41 +2776,50 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "Base64 invalido"}, status=400)
                 return
             tmp_path = None
+            text = ""
+            err_detail = ""
+            method = ""
             try:
                 with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp_file:
                     tmp_file.write(pdf_bytes)
                     tmp_path = tmp_file.name
                 text, err_detail, method = extract_pdf_text(tmp_path)
-            finally:
-                if tmp_path and os.path.exists(tmp_path):
-                    os.unlink(tmp_path)
-            if not text:
+                if not text:
+                    json_response(
+                        self,
+                        {
+                            "error": "No se pudo extraer texto.",
+                            "detail": err_detail or "Verifica tesseract y spa.traineddata.",
+                            "language": detect_ocr_lang(),
+                        },
+                        status=400,
+                    )
+                    return
+                fields = parse_poliza_text(text)
+                if not any(str(value or "").strip() for value in fields.values()):
+                    ocr_text, ocr_err = ocr_pdf_all_pages(tmp_path)
+                    if ocr_text:
+                        fields = parse_poliza_text(ocr_text)
+                        text = ocr_text
+                        method = "tesseract"
+                    elif ocr_err and not err_detail:
+                        err_detail = ocr_err
                 json_response(
                     self,
                     {
-                        "error": "No se pudo extraer texto.",
-                        "detail": err_detail or "Verifica tesseract y spa.traineddata.",
+                        "fields": fields,
+                        "text": text,
                         "language": detect_ocr_lang(),
+                        "method": method,
                     },
-                    status=400,
                 )
                 return
-            fields = parse_poliza_text(text)
-            if not any(str(value or "").strip() for value in fields.values()):
-                ocr_text, ocr_err = ocr_pdf_all_pages(tmp_path)
-                if ocr_text:
-                    fields = parse_poliza_text(ocr_text)
-                    text = ocr_text
-                    method = "tesseract"
-            json_response(
-                self,
-                {
-                    "fields": fields,
-                    "text": text,
-                    "language": detect_ocr_lang(),
-                    "method": method,
-                },
-            )
+            except Exception as exc:
+                json_response(self, {"error": "No se pudo procesar el PDF.", "detail": str(exc)}, status=400)
+                return
+            finally:
+                if tmp_path and os.path.exists(tmp_path):
+                    os.unlink(tmp_path)
         elif parsed.path == "/api/fin_asesoramiento_ocr":
             data_uri = payload.get("file_base64") or payload.get("data")
             if not data_uri:
