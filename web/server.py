@@ -4200,6 +4200,7 @@ class Handler(BaseHTTPRequestHandler):
             if not nombre:
                 json_response(self, {"error": "nombre requerido"}, status=400)
                 return
+            cliente_id = payload.get("id") or os.urandom(16).hex()
             conn.execute(
                 """
                 INSERT INTO clientes (
@@ -4210,7 +4211,7 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 """,
                 (
-                    os.urandom(16).hex(),
+                    cliente_id,
                     nombre,
                     payload.get("tipo_persona"),
                     payload.get("nif"),
@@ -4228,6 +4229,9 @@ class Handler(BaseHTTPRequestHandler):
                     now,
                 ),
             )
+            json_response(self, {"ok": True, "id": cliente_id})
+            conn.commit()
+            return
         elif parsed.path == "/api/clientes_link":
             cliente_id = payload.get("cliente_id")
             empresa_id = payload.get("empresa_id")
