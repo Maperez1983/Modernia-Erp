@@ -270,7 +270,11 @@ const gestoriaDocsRecent = document.getElementById("gestoriaDocsRecent");
 const gestoriaDocsRecentInfo = document.getElementById("gestoriaDocsRecentInfo");
 const gestoriaDocsForm = document.getElementById("gestoriaDocsForm");
 const gestoriaDocsCliente = document.getElementById("gestoriaDocsCliente");
+const gestoriaDocsFile = document.getElementById("gestoriaDocsFile");
 const gestoriaDocsStatus = document.getElementById("gestoriaDocsStatus");
+const gestoriaClienteDocsForm = document.getElementById("gestoriaClienteDocsForm");
+const gestoriaClienteDocsFile = document.getElementById("gestoriaClienteDocsFile");
+const gestoriaClienteDocsStatus = document.getElementById("gestoriaClienteDocsStatus");
 const gestoriaAuditTable = document.getElementById("gestoriaAuditTable");
 const gestoriaAuditInfo = document.getElementById("gestoriaAuditInfo");
 const gestoriaDocForm = document.getElementById("gestoriaDocForm");
@@ -3085,6 +3089,80 @@ const fetchPostalLookup = (value) => {
     .catch(() => null);
 };
 
+const bindPostalLookup = (formEl) => {
+  if (!formEl) return;
+  const postalInput = formEl.querySelector('[name="codigo_postal"]');
+  const poblacionInput = formEl.querySelector('[name="poblacion"]');
+  const provinciaInput = formEl.querySelector('[name="provincia"]');
+  if (!postalInput || !poblacionInput || !provinciaInput) return;
+  let poblacionSelect = null;
+  const label = poblacionInput.closest("label");
+  if (label) {
+    poblacionSelect = document.createElement("select");
+    poblacionSelect.className = "postal-options hidden";
+    poblacionSelect.appendChild(createOption("", "Selecciona población"));
+    label.appendChild(poblacionSelect);
+    poblacionSelect.addEventListener("change", () => {
+      const value = poblacionSelect.value;
+      if (!value) return;
+      poblacionInput.value = value;
+      poblacionInput.dataset.auto = "0";
+      if (poblacionSelect.dataset.provincia && provinciaInput) {
+        provinciaInput.value = poblacionSelect.dataset.provincia;
+      }
+    });
+  }
+  poblacionInput.addEventListener("input", () => {
+    poblacionInput.dataset.auto = "0";
+  });
+  const applyPostal = () => {
+    const fallback = getPostalInfo(postalInput.value);
+    fetchPostalLookup(postalInput.value).then((info) => {
+      const resolved = info || fallback;
+      if (!resolved) return;
+      const provinciaValue = resolved.provincia || fallback?.provincia || "";
+      const poblacionValue = resolved.poblacion || fallback?.poblacion || "";
+      if (provinciaInput && provinciaValue) {
+        provinciaInput.value = provinciaValue;
+      }
+      if (poblacionInput && poblacionValue) {
+        const shouldAuto =
+          !poblacionInput.value || poblacionInput.dataset.auto === "1";
+        if (shouldAuto) {
+          poblacionInput.value = poblacionValue;
+          poblacionInput.dataset.auto = "1";
+        }
+      }
+      if (poblacionSelect) {
+        const options = (info && info.opciones) || [];
+        const unique = Array.from(
+          new Set(options.map((opt) => opt.poblacion).filter(Boolean))
+        );
+        poblacionSelect.innerHTML = "";
+        poblacionSelect.appendChild(createOption("", "Selecciona población"));
+        unique.forEach((name) => {
+          poblacionSelect.appendChild(createOption(name, name));
+        });
+        if (unique.length > 1) {
+          poblacionSelect.classList.remove("hidden");
+          poblacionSelect.dataset.provincia = provinciaValue || "";
+        } else {
+          poblacionSelect.classList.add("hidden");
+          poblacionSelect.dataset.provincia = "";
+        }
+      }
+    });
+  };
+  postalInput.addEventListener("input", () => {
+    postalInput.value = normalizePostalCode(postalInput.value);
+    applyPostal();
+  });
+  postalInput.addEventListener("blur", () => {
+    postalInput.value = normalizePostalCode(postalInput.value);
+    applyPostal();
+  });
+};
+
 const GESTORIA_SUBTIPOS = {
   "Cuota mensual": ["Autónomo", "Empresa"],
   "Gestión administrativa": ["Cliente Renta", "Gestiones Administrativas", "Renta", "Puntual"],
@@ -4535,7 +4613,7 @@ const loadGestoriaDocsRecent = () => {
     const table = document.createElement("table");
     const thead = document.createElement("thead");
     const trHead = document.createElement("tr");
-    ["cliente", "nombre", "tipo", "fecha", "estado"].forEach((col) => {
+    ["cliente", "nombre", "tipo", "fecha", "estado", "pdf"].forEach((col) => {
       const th = document.createElement("th");
       th.textContent = formatHeader(col);
       trHead.appendChild(th);
@@ -4559,6 +4637,20 @@ const loadGestoriaDocsRecent = () => {
         td.textContent = formatted === null ? "" : formatted;
         tr.appendChild(td);
       });
+      const pdfTd = document.createElement("td");
+      if (row.doc_key || row.doc_url) {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "secondary";
+        btn.textContent = "Ver";
+        btn.addEventListener("click", () => {
+          openS3File(row.doc_key, row.doc_url);
+        });
+        pdfTd.appendChild(btn);
+      } else {
+        pdfTd.textContent = "-";
+      }
+      tr.appendChild(pdfTd);
       tbody.appendChild(tr);
     });
     table.appendChild(tbody);
@@ -8934,7 +9026,7 @@ const loadGestoriaDocs = (clienteId) => {
     const table = document.createElement("table");
     const thead = document.createElement("thead");
     const trHead = document.createElement("tr");
-    ["Documento", "Tipo", "Fecha", "Estado", "Notas"]
+    ["Documento", "Tipo", "Fecha", "Estado", "Notas", "PDF"]
       .concat(readonly ? [] : ["Accion"])
       .forEach((col) => {
       const th = document.createElement("th");
@@ -9009,6 +9101,21 @@ const loadGestoriaDocs = (clienteId) => {
         notasTd.appendChild(buildInput(row.notas, "notas"));
       }
       tr.appendChild(notasTd);
+
+      const pdfTd = document.createElement("td");
+      if (row.doc_key || row.doc_url) {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "secondary";
+        btn.textContent = "Ver";
+        btn.addEventListener("click", () => {
+          openS3File(row.doc_key, row.doc_url);
+        });
+        pdfTd.appendChild(btn);
+      } else {
+        pdfTd.textContent = "-";
+      }
+      tr.appendChild(pdfTd);
 
       if (!readonly) {
         const actionTd = document.createElement("td");
@@ -11467,7 +11574,7 @@ if (gestoriaModeloForm) {
 }
 
 if (gestoriaDocsForm) {
-  gestoriaDocsForm.addEventListener("submit", (event) => {
+  gestoriaDocsForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (gestoriaDocsStatus) {
       gestoriaDocsStatus.textContent = "Guardando...";
@@ -11476,6 +11583,24 @@ if (gestoriaDocsForm) {
     const payload = Object.fromEntries(formData.entries());
     payload.empresa_nombre = FINCAS_COMPANY;
     payload.usuario = getCurrentUser();
+    const file =
+      gestoriaDocsFile && gestoriaDocsFile.files && gestoriaDocsFile.files.length
+        ? gestoriaDocsFile.files[0]
+        : null;
+    if (file) {
+      try {
+        const upload = await uploadFileToS3(file, "gestoria", gestoriaDocsStatus);
+        if (upload) {
+          payload.doc_key = upload.key || "";
+          payload.doc_url = upload.public_url || "";
+        }
+      } catch (err) {
+        if (gestoriaDocsStatus) {
+          gestoriaDocsStatus.textContent = `Error al subir: ${err.message}`;
+        }
+        return;
+      }
+    }
     fetch("/api/gestoria_docs", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -11498,6 +11623,71 @@ if (gestoriaDocsForm) {
       .catch(() => {
         if (gestoriaDocsStatus) {
           gestoriaDocsStatus.textContent = "Error al guardar.";
+        }
+      });
+  });
+}
+
+if (gestoriaClienteDocsForm) {
+  gestoriaClienteDocsForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (!state.currentClienteId) {
+      if (gestoriaClienteDocsStatus) {
+        gestoriaClienteDocsStatus.textContent = "Selecciona un cliente.";
+      }
+      return;
+    }
+    if (gestoriaClienteDocsStatus) {
+      gestoriaClienteDocsStatus.textContent = "Guardando...";
+    }
+    const formData = new FormData(gestoriaClienteDocsForm);
+    const payload = Object.fromEntries(formData.entries());
+    payload.empresa_nombre = FINCAS_COMPANY;
+    payload.usuario = getCurrentUser();
+    payload.cliente_id = state.currentClienteId;
+    const file =
+      gestoriaClienteDocsFile &&
+      gestoriaClienteDocsFile.files &&
+      gestoriaClienteDocsFile.files.length
+        ? gestoriaClienteDocsFile.files[0]
+        : null;
+    if (file) {
+      try {
+        const upload = await uploadFileToS3(file, "gestoria", gestoriaClienteDocsStatus);
+        if (upload) {
+          payload.doc_key = upload.key || "";
+          payload.doc_url = upload.public_url || "";
+        }
+      } catch (err) {
+        if (gestoriaClienteDocsStatus) {
+          gestoriaClienteDocsStatus.textContent = `Error al subir: ${err.message}`;
+        }
+        return;
+      }
+    }
+    fetch("/api/gestoria_docs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.error) {
+          if (gestoriaClienteDocsStatus) {
+            gestoriaClienteDocsStatus.textContent = data.error;
+          }
+          return;
+        }
+        if (gestoriaClienteDocsStatus) {
+          gestoriaClienteDocsStatus.textContent = "Guardado.";
+        }
+        gestoriaClienteDocsForm.reset();
+        loadGestoriaDocs(state.currentClienteId);
+        loadGestoriaDocsRecent();
+      })
+      .catch(() => {
+        if (gestoriaClienteDocsStatus) {
+          gestoriaClienteDocsStatus.textContent = "Error al guardar.";
         }
       });
   });
@@ -12288,6 +12478,7 @@ if (bdtForm) {
 }
 
 if (captacionForm) {
+  bindPostalLookup(captacionForm);
   captacionForm.addEventListener("submit", (event) => {
     event.preventDefault();
     if (captacionFormStatus) {
@@ -12529,81 +12720,7 @@ if (fincasSegurosForm) {
 }
 
 if (clientesForm) {
-  const postalInput = clientesForm.querySelector('[name="codigo_postal"]');
-  const poblacionInput = clientesForm.querySelector('[name="poblacion"]');
-  const provinciaInput = clientesForm.querySelector('[name="provincia"]');
-  let poblacionSelect = null;
-  if (poblacionInput) {
-    const label = poblacionInput.closest("label");
-    if (label) {
-      poblacionSelect = document.createElement("select");
-      poblacionSelect.className = "postal-options hidden";
-      poblacionSelect.appendChild(createOption("", "Selecciona población"));
-      label.appendChild(poblacionSelect);
-      poblacionSelect.addEventListener("change", () => {
-        const value = poblacionSelect.value;
-        if (!value) return;
-        poblacionInput.value = value;
-        poblacionInput.dataset.auto = "0";
-        if (poblacionSelect.dataset.provincia && provinciaInput) {
-          provinciaInput.value = poblacionSelect.dataset.provincia;
-        }
-      });
-    }
-  }
-  if (poblacionInput) {
-    poblacionInput.addEventListener("input", () => {
-      poblacionInput.dataset.auto = "0";
-    });
-  }
-  if (postalInput) {
-    const applyPostal = () => {
-      const fallback = getPostalInfo(postalInput.value);
-      fetchPostalLookup(postalInput.value).then((info) => {
-        const resolved = info || fallback;
-        if (!resolved) return;
-        const provinciaValue = resolved.provincia || fallback?.provincia || "";
-        const poblacionValue = resolved.poblacion || fallback?.poblacion || "";
-        if (provinciaInput && provinciaValue) {
-          provinciaInput.value = provinciaValue;
-        }
-        if (poblacionInput && poblacionValue) {
-          const shouldAuto =
-            !poblacionInput.value || poblacionInput.dataset.auto === "1";
-          if (shouldAuto) {
-            poblacionInput.value = poblacionValue;
-            poblacionInput.dataset.auto = "1";
-          }
-        }
-        if (poblacionSelect) {
-          const options = (info && info.opciones) || [];
-          const unique = Array.from(
-            new Set(options.map((opt) => opt.poblacion).filter(Boolean))
-          );
-          poblacionSelect.innerHTML = "";
-          poblacionSelect.appendChild(createOption("", "Selecciona población"));
-          unique.forEach((name) => {
-            poblacionSelect.appendChild(createOption(name, name));
-          });
-          if (unique.length > 1) {
-            poblacionSelect.classList.remove("hidden");
-            poblacionSelect.dataset.provincia = provinciaValue || "";
-          } else {
-            poblacionSelect.classList.add("hidden");
-            poblacionSelect.dataset.provincia = "";
-          }
-        }
-      });
-    };
-    postalInput.addEventListener("input", () => {
-      postalInput.value = normalizePostalCode(postalInput.value);
-      applyPostal();
-    });
-    postalInput.addEventListener("blur", () => {
-      postalInput.value = normalizePostalCode(postalInput.value);
-      applyPostal();
-    });
-  }
+  bindPostalLookup(clientesForm);
   clientesForm.addEventListener("submit", (event) => {
     event.preventDefault();
     if (clientesFormStatus) {

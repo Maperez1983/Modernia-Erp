@@ -169,6 +169,11 @@ def detect_ocr_lang():
         has_spa = os.path.exists(os.path.join(TESSDATA_DIR, "spa.traineddata"))
         has_eng = os.path.exists(os.path.join(TESSDATA_DIR, "eng.traineddata"))
         if has_spa and has_eng:
+            return "spa+eng"
+        if has_spa:
+            return "spa"
+        if has_eng:
+            return "eng"
     return "spa+eng"
 
 
@@ -1661,6 +1666,26 @@ def ensure_tables(db_path):
         )
         """
     )
+    try:
+        cap_cols = [row[1] for row in conn.execute("PRAGMA table_info(captaciones)").fetchall()]
+        if "codigo_postal" not in cap_cols:
+            conn.execute("ALTER TABLE captaciones ADD COLUMN codigo_postal TEXT")
+        if "poblacion" not in cap_cols:
+            conn.execute("ALTER TABLE captaciones ADD COLUMN poblacion TEXT")
+        if "provincia" not in cap_cols:
+            conn.execute("ALTER TABLE captaciones ADD COLUMN provincia TEXT")
+    except sqlite3.Error:
+        pass
+    try:
+        inm_cols = [row[1] for row in conn.execute("PRAGMA table_info(inmuebles)").fetchall()]
+        if "codigo_postal" not in inm_cols:
+            conn.execute("ALTER TABLE inmuebles ADD COLUMN codigo_postal TEXT")
+        if "poblacion" not in inm_cols:
+            conn.execute("ALTER TABLE inmuebles ADD COLUMN poblacion TEXT")
+        if "provincia" not in inm_cols:
+            conn.execute("ALTER TABLE inmuebles ADD COLUMN provincia TEXT")
+    except sqlite3.Error:
+        pass
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS gestoria_docs (
@@ -1672,11 +1697,21 @@ def ensure_tables(db_path):
           fecha TEXT,
           estado TEXT,
           notas TEXT,
+          doc_key TEXT,
+          doc_url TEXT,
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL
         )
         """
     )
+    try:
+        docs_cols = [row[1] for row in conn.execute("PRAGMA table_info(gestoria_docs)").fetchall()]
+        if "doc_key" not in docs_cols:
+            conn.execute("ALTER TABLE gestoria_docs ADD COLUMN doc_key TEXT")
+        if "doc_url" not in docs_cols:
+            conn.execute("ALTER TABLE gestoria_docs ADD COLUMN doc_url TEXT")
+    except sqlite3.Error:
+        pass
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS asesoramientos_financiacion (
@@ -2455,10 +2490,10 @@ class Handler(BaseHTTPRequestHandler):
             conn.execute(
                 """
                 INSERT INTO gestoria_docs (
-                  id, empresa_id, cliente_id, nombre, tipo, fecha, estado, notas,
+                  id, empresa_id, cliente_id, nombre, tipo, fecha, estado, notas, doc_key, doc_url,
                   created_at, updated_at
                 ) VALUES (
-                  ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
                 )
                 """,
                 (
@@ -2470,6 +2505,8 @@ class Handler(BaseHTTPRequestHandler):
                     payload.get("fecha"),
                     payload.get("estado"),
                     payload.get("notas"),
+                    payload.get("doc_key"),
+                    payload.get("doc_url"),
                     now,
                     now,
                 ),
@@ -2480,7 +2517,7 @@ class Handler(BaseHTTPRequestHandler):
             if not doc_id:
                 json_response(self, {"error": "id requerido"}, status=400)
                 return
-            allowed = ("nombre", "tipo", "fecha", "estado", "notas")
+            allowed = ("nombre", "tipo", "fecha", "estado", "notas", "doc_key", "doc_url")
             updates = []
             values = []
             for field in allowed:
@@ -3781,12 +3818,12 @@ class Handler(BaseHTTPRequestHandler):
             conn.execute(
                 """
                 INSERT INTO captaciones (
-                  id, empresa_id, inmueble_id, propietario, tipo_inmueble, direccion, zona, m2,
+                  id, empresa_id, inmueble_id, propietario, tipo_inmueble, direccion, codigo_postal, poblacion, provincia, zona, m2,
                   habitaciones, banos, precio_objetivo, precio_valoracion, urgencia,
                   motivo, canal, etapa, probabilidad, proxima_accion, fecha_contacto,
                   asesor, notas, created_at, updated_at
                 ) VALUES (
-                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
                 )
                 """,
                 (
@@ -3796,6 +3833,9 @@ class Handler(BaseHTTPRequestHandler):
                     payload.get("propietario"),
                     payload.get("tipo_inmueble"),
                     payload.get("direccion"),
+                    payload.get("codigo_postal"),
+                    payload.get("poblacion"),
+                    payload.get("provincia"),
                     payload.get("zona"),
                     payload.get("m2"),
                     payload.get("habitaciones"),
@@ -3818,11 +3858,11 @@ class Handler(BaseHTTPRequestHandler):
             conn.execute(
                 """
                 INSERT INTO inmuebles (
-                  id, empresa_id, referencia, direccion, zona, tipo_inmueble,
+                  id, empresa_id, referencia, direccion, codigo_postal, poblacion, provincia, zona, tipo_inmueble,
                   m2, habitaciones, banos, precio_objetivo, precio_valoracion,
                   valor_referencia, estado, lat, lon, created_at, updated_at
                 ) VALUES (
-                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
                 )
                 """,
                 (
@@ -3830,6 +3870,9 @@ class Handler(BaseHTTPRequestHandler):
                     empresa["id"],
                     payload.get("referencia"),
                     payload.get("direccion"),
+                    payload.get("codigo_postal"),
+                    payload.get("poblacion"),
+                    payload.get("provincia"),
                     payload.get("zona"),
                     payload.get("tipo_inmueble"),
                     payload.get("m2"),
@@ -3879,6 +3922,9 @@ class Handler(BaseHTTPRequestHandler):
                 "propietario",
                 "tipo_inmueble",
                 "direccion",
+                "codigo_postal",
+                "poblacion",
+                "provincia",
                 "zona",
                 "m2",
                 "habitaciones",
@@ -3908,6 +3954,9 @@ class Handler(BaseHTTPRequestHandler):
             shared = (
                 "tipo_inmueble",
                 "direccion",
+                "codigo_postal",
+                "poblacion",
+                "provincia",
                 "zona",
                 "m2",
                 "habitaciones",
@@ -3933,6 +3982,9 @@ class Handler(BaseHTTPRequestHandler):
             allowed = (
                 "referencia",
                 "direccion",
+                "codigo_postal",
+                "poblacion",
+                "provincia",
                 "zona",
                 "tipo_inmueble",
                 "m2",
@@ -3958,6 +4010,9 @@ class Handler(BaseHTTPRequestHandler):
             shared = (
                 "tipo_inmueble",
                 "direccion",
+                "codigo_postal",
+                "poblacion",
+                "provincia",
                 "zona",
                 "m2",
                 "habitaciones",

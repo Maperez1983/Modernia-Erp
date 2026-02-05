@@ -760,6 +760,10 @@
                   Notas
                   <input name="notas" />
                 </label>
+                <label class="span-2">
+                  Archivo
+                  <input name="archivo" id="gestoriaDocsFile" type="file" />
+                </label>
                 <div class="form-actions">
                   <button type="submit">Guardar documento</button>
                   <span id="gestoriaDocsStatus" class="muted"></span>
@@ -1743,12 +1747,12 @@
               <h3>Alta Captación · Estudio Velazquez 2012 SL</h3>
               <p class="muted">Registro de captaciones en fase inicial.</p>
               <form id="captacionForm">
-                <div class="form-grid">
+                <div class="form-grid inmo-grid">
                   <label>
                     Propietario
                     <input name="propietario" required />
                   </label>
-                  <label>
+                  <label class="span-2">
                     Propietarios (clientes)
                     <select id="captacionPropietarios" name="propietarios" multiple></select>
                   </label>
@@ -1763,9 +1767,21 @@
                       <option>Otro</option>
                     </select>
                   </label>
-                  <label>
+                  <label class="span-2">
                     Dirección
                     <input name="direccion" />
+                  </label>
+                  <label>
+                    Código postal
+                    <input name="codigo_postal" />
+                  </label>
+                  <label>
+                    Población
+                    <input name="poblacion" />
+                  </label>
+                  <label>
+                    Provincia
+                    <input name="provincia" />
                   </label>
                   <label>
                     Referencia catastral
@@ -1854,7 +1870,7 @@
                     Asesor
                     <input name="asesor" />
                   </label>
-                  <label>
+                  <label class="span-2">
                     Notas
                     <textarea name="notas" rows="3"></textarea>
                   </label>
@@ -3247,6 +3263,40 @@
                 <div class="form-card">
                   <h3>Documentos</h3>
                   <p class="muted">Documentación y estado.</p>
+                  <form id="gestoriaClienteDocsForm" class="form-grid">
+                    <label>
+                      Nombre documento
+                      <input name="nombre" required />
+                    </label>
+                    <label>
+                      Tipo
+                      <input name="tipo" placeholder="Contrato, DNI, etc." />
+                    </label>
+                    <label>
+                      Fecha
+                      <input name="fecha" type="date" />
+                    </label>
+                    <label>
+                      Estado
+                      <select name="estado">
+                        <option>Pendiente</option>
+                        <option>Recibido</option>
+                        <option>Validado</option>
+                      </select>
+                    </label>
+                    <label>
+                      Notas
+                      <input name="notas" />
+                    </label>
+                    <label class="span-2">
+                      Archivo
+                      <input name="archivo" id="gestoriaClienteDocsFile" type="file" />
+                    </label>
+                    <div class="form-actions">
+                      <button type="submit">Subir documento</button>
+                      <span id="gestoriaClienteDocsStatus" class="muted"></span>
+                    </div>
+                  </form>
                   <div id="gestoriaDocsTable"></div>
                 </div>
                 <div class="form-card">
@@ -3388,6 +3438,6 @@
       </div>
     </div>
 
-    <script src="app.js?v=296"></script>
+    <script src="app.js?v=298"></script>
   </body>
 </html>

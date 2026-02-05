@@ -511,6 +511,14 @@ h2 {
   gap: 12px;
 }
 
+.form-grid.inmo-grid {
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.form-grid.inmo-grid select[multiple] {
+  min-height: 110px;
+}
+
 .form-grid label {
   display: grid;
   gap: 6px;
