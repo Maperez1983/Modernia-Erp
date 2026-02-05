@@ -196,7 +196,7 @@ def s3_safe_key(prefix, filename):
     return f"{prefix}/{stamp}_{rand}_{safe}"
 
 def preprocess_image_for_ocr(src_path, out_path=None):
-    tmp_base = "/private/tmp"
+    tmp_base = tempfile.gettempdir()
     created = False
     if not out_path:
         tmp_file = tempfile.NamedTemporaryFile(suffix=".png", delete=False, dir=tmp_base)
@@ -265,7 +265,7 @@ def ocr_image_file(image_path):
     env = os.environ.copy()
     if os.path.isdir(TESSDATA_DIR):
         env["TESSDATA_PREFIX"] = TESSDATA_DIR
-    tmp_base = "/private/tmp"
+    tmp_base = tempfile.gettempdir()
     with tempfile.TemporaryDirectory(dir=tmp_base) as tmpdir:
         processed, created = preprocess_image_for_ocr(image_path)
         def run_tesseract(psm):
@@ -760,7 +760,7 @@ def pdftotext_extract(pdf_path, pages=None):
     )
     if not cmd or not os.path.exists(cmd):
         return "", "pdftotext no encontrado"
-    tmp_base = "/private/tmp"
+    tmp_base = tempfile.gettempdir()
     with tempfile.TemporaryDirectory(dir=tmp_base) as tmpdir:
         out_txt = os.path.join(tmpdir, "out.txt")
         args = [cmd, "-layout", "-nopgbrk"]
@@ -822,7 +822,7 @@ def pdftotext_crop(pdf_path, x, y, w, h):
     )
     if not cmd or not os.path.exists(cmd):
         return ""
-    tmp_base = "/private/tmp"
+    tmp_base = tempfile.gettempdir()
     with tempfile.TemporaryDirectory(dir=tmp_base) as tmpdir:
         out_txt = os.path.join(tmpdir, "crop.txt")
         args = [
@@ -1213,7 +1213,7 @@ def parse_asesoramiento_template_image(image_path):
     base_boxes = asesoramiento_image_boxes(width, height)
     shifts = (-0.015, 0.0, 0.015)
     fields = {}
-    tmp_base = "/private/tmp"
+    tmp_base = tempfile.gettempdir()
     with tempfile.TemporaryDirectory(dir=tmp_base) as tmpdir:
         processed, created = preprocess_image_for_ocr(image_path)
         for dy in shifts:
