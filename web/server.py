@@ -4202,6 +4202,23 @@ class Handler(BaseHTTPRequestHandler):
             if not nombre:
                 json_response(self, {"error": "nombre requerido"}, status=400)
                 return
+            nombre_norm = re.sub(r"\s+", " ", str(nombre)).strip()
+            nif = (payload.get("nif") or "").strip()
+            dup = None
+            if nif:
+                nif_norm = re.sub(r"\s+", "", nif).upper()
+                dup = conn.execute(
+                    "SELECT id FROM clientes WHERE REPLACE(UPPER(nif), ' ', '') = ?",
+                    (nif_norm,),
+                ).fetchone()
+            if not dup:
+                dup = conn.execute(
+                    "SELECT id FROM clientes WHERE TRIM(UPPER(nombre)) = ?",
+                    (nombre_norm.upper(),),
+                ).fetchone()
+            if dup:
+                json_response(self, {"error": "Cliente duplicado", "id": dup["id"]}, status=409)
+                return
             cliente_id = payload.get("id") or os.urandom(16).hex()
             conn.execute(
                 """
@@ -5551,6 +5568,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/clientes":
             empresa_id = params.get("empresa_id", [""])[0]
             q = params.get("q", [""])[0].strip()
+            estado = params.get("estado", [""])[0].strip()
             include_id = params.get("include_id", [""])[0] == "1"
             limit_param = params.get("limit", [""])[0].strip()
             where = []
@@ -5563,6 +5581,9 @@ class Handler(BaseHTTPRequestHandler):
                     "(c.nombre LIKE ? OR c.nif LIKE ? OR c.telefono LIKE ? OR c.email LIKE ?)"
                 )
                 values.extend([f"%{q}%"] * 4)
+            if estado:
+                where.append("c.estado = ?")
+                values.append(estado)
             where_clause = f"WHERE {' AND '.join(where)}" if where else ""
             select_id = "c.id, " if include_id else ""
             limit_clause = "LIMIT 500"

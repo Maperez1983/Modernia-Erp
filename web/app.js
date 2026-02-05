@@ -128,6 +128,7 @@ const yearSelect = document.getElementById("yearSelect");
 const dbStatus = document.getElementById("dbStatus");
 const bdtYearFilter = document.getElementById("bdtYearFilter");
 const bdtFieldFilter = document.getElementById("bdtFieldFilter");
+const clientesEstadoFilter = document.getElementById("clientesEstadoFilter");
 const explorerTitle = document.getElementById("explorerTitle");
 const explorerSubtitle = document.getElementById("explorerSubtitle");
 const homeSection = document.getElementById("homeSection");
@@ -924,6 +925,10 @@ const renderAgendaCalendar = (container, events, label = "") => {
     if (minutes < 0 || minutes > Number(ev.recordatorio_min)) return false;
     const estado = normalizeSimple(ev.estado);
     if (["hecho", "completado", "finalizado", "cancelado"].includes(estado)) return false;
+    const currentUser = getCurrentUser();
+    if (currentUser && ev.responsable && ev.responsable !== currentUser) {
+      return false;
+    }
     return true;
   });
 
@@ -5296,6 +5301,9 @@ const updateTableVisibility = () => {
   if (tableToolbar) {
     tableToolbar.classList.toggle("hidden", isClientePage || isFinSim);
   }
+  if (clientesEstadoFilter) {
+    clientesEstadoFilter.classList.toggle("hidden", state.currentModule !== "clientes");
+  }
   const isClientesAlta = state.currentModule === "clientes" && currentTab === "alta";
   if (tableContainer) {
     const hideTable = isClientePage || isClientesAlta || isFinSim;
@@ -6168,6 +6176,7 @@ const refreshClientesLinkRows = () => {
 const loadClientesTable = () => {
   const empresaId = empresaSelect.value || "";
   const q = searchInput.value.trim();
+  const estado = clientesEstadoFilter ? clientesEstadoFilter.value.trim() : "";
   if (!q && !empresaId && !state.clientesShowAll) {
     tableContainer.innerHTML = "<p class='muted'>Usa búsqueda o filtros para cargar clientes.</p>";
     if (tableInfo) {
@@ -6186,22 +6195,13 @@ const loadClientesTable = () => {
   if (q) {
     params.set("q", q);
   }
+  if (estado) {
+    params.set("estado", estado);
+  }
   return api(`/api/clientes?${params.toString()}`).then((data) => {
     const rows = data.rows || [];
     const dataColumns = Array.isArray(data.columns) ? data.columns : null;
-    const table = document.createElement("table");
-    const thead = document.createElement("thead");
-    const trHead = document.createElement("tr");
-    [...visibleColumns, "accion"].forEach((col) => {
-      const th = document.createElement("th");
-      th.textContent = formatHeader(col);
-      trHead.appendChild(th);
-    });
-    thead.appendChild(trHead);
-    table.appendChild(thead);
-
-    const tbody = document.createElement("tbody");
-    rows.forEach((row) => {
+    const getRowMeta = (row) => {
       let hasId = row.length === CLIENTES_SOURCE_COLUMNS.length + 1;
       const looksLikeId =
         typeof row[0] === "string" && /^[0-9a-f]{32}$/i.test(row[0]);
@@ -6209,11 +6209,6 @@ const loadClientesTable = () => {
         hasId = true;
       }
       const offset = hasId ? 1 : 0;
-      let rowId = hasId ? row[0] : "";
-      if (!rowId) {
-        const nameValue = row[0] || "";
-        rowId = state.clientesList.find((c) => c.nombre === nameValue)?.id || "";
-      }
       const getValue = (col) => {
         if (dataColumns) {
           const idx = dataColumns.indexOf(col);
@@ -6227,6 +6222,45 @@ const loadClientesTable = () => {
       const fullName = getValue("nombre");
       const tipoPersona = getValue("tipo_persona");
       const nameParts = splitNombreApellidos(fullName, tipoPersona);
+      return {
+        row,
+        hasId,
+        offset,
+        getValue,
+        fullName,
+        tipoPersona,
+        nameParts,
+      };
+    };
+    const sortedRows = rows
+      .map(getRowMeta)
+      .sort((a, b) => {
+        const aLast = (a.nameParts.apellidos || "").toLowerCase();
+        const bLast = (b.nameParts.apellidos || "").toLowerCase();
+        if (aLast !== bLast) return aLast.localeCompare(bLast, "es");
+        const aName = (a.nameParts.nombre || "").toLowerCase();
+        const bName = (b.nameParts.nombre || "").toLowerCase();
+        return aName.localeCompare(bName, "es");
+      });
+    const table = document.createElement("table");
+    const thead = document.createElement("thead");
+    const trHead = document.createElement("tr");
+    [...visibleColumns, "accion"].forEach((col) => {
+      const th = document.createElement("th");
+      th.textContent = formatHeader(col);
+      trHead.appendChild(th);
+    });
+    thead.appendChild(trHead);
+    table.appendChild(thead);
+
+    const tbody = document.createElement("tbody");
+    sortedRows.forEach((meta) => {
+      const { row, hasId, offset, getValue, tipoPersona, nameParts } = meta;
+      let rowId = hasId ? row[0] : "";
+      if (!rowId) {
+        const nameValue = row[0] || "";
+        rowId = state.clientesList.find((c) => c.nombre === nameValue)?.id || "";
+      }
       const tr = document.createElement("tr");
       visibleColumns.forEach((col) => {
         const td = document.createElement("td");
@@ -10476,6 +10510,13 @@ if (gestoriaCrmSubtipo) {
 if (gestoriaCrmApply) {
   gestoriaCrmApply.addEventListener("click", () => {
     loadGestoriaCrm();
+  });
+}
+if (clientesEstadoFilter) {
+  clientesEstadoFilter.addEventListener("change", () => {
+    if (state.currentModule === "clientes") {
+      loadClientesTable();
+    }
   });
 }
 if (gestoriaCrmReset) {
