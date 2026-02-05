@@ -1125,24 +1125,6 @@
           </div>
           <div class="seguros-tab active" data-seguros-tab="alta">
           <div class="form-card">
-            <h3>Actualizar póliza existente</h3>
-            <p class="muted">Sube el PDF para completar datos faltantes en la BDT.</p>
-            <div class="form-grid">
-              <label>
-                Póliza
-                <select id="segurosUpdateSelect"></select>
-              </label>
-              <label>
-                PDF de póliza
-                <input id="segurosUpdateFile" type="file" accept="application/pdf" />
-              </label>
-            </div>
-            <div class="form-actions">
-              <button type="button" id="segurosUpdateButton">Leer y completar</button>
-              <span id="segurosUpdateStatus" class="muted"></span>
-            </div>
-          </div>
-          <div class="form-card">
             <div class="section-head">
               <div>
                 <h3>Lectura automática de pólizas</h3>
@@ -1241,6 +1223,68 @@
           </div>
           </div>
           <div class="seguros-tab" data-seguros-tab="bdt">
+          <div class="form-card">
+            <div class="section-head">
+              <div>
+                <h3>Asociar póliza OCR a BDT</h3>
+                <p class="muted">Sube el PDF, localiza el registro y completa lo que falte.</p>
+              </div>
+              <div class="form-actions">
+                <button type="button" id="segurosBdtOcrButton">Extraer datos</button>
+                <span id="segurosBdtOcrStatus" class="muted"></span>
+              </div>
+            </div>
+            <div class="form-grid">
+              <label>
+                PDF de póliza
+                <input id="segurosBdtOcrFile" type="file" accept="application/pdf" />
+              </label>
+              <label>
+                Tomador
+                <input id="segurosBdtOcrTomador" />
+              </label>
+              <label>
+                DNI/CIF
+                <input id="segurosBdtOcrDni" />
+              </label>
+              <label>
+                Compañía
+                <input id="segurosBdtOcrCompania" />
+              </label>
+              <label>
+                Nº póliza
+                <input id="segurosBdtOcrPoliza" />
+              </label>
+              <label>
+                Ramo
+                <input id="segurosBdtOcrRamo" />
+              </label>
+              <label>
+                Fecha efecto
+                <input id="segurosBdtOcrFechaEfecto" type="date" />
+              </label>
+              <label>
+                Fecha vencimiento
+                <input id="segurosBdtOcrFechaVencimiento" type="date" />
+              </label>
+              <label>
+                Prima neta
+                <input id="segurosBdtOcrPrimaNeta" />
+              </label>
+              <label>
+                Prima total
+                <input id="segurosBdtOcrPrimaTotal" />
+              </label>
+              <label>
+                Registro BDT
+                <select id="segurosBdtOcrSelect"></select>
+              </label>
+            </div>
+            <div class="form-actions">
+              <button type="button" id="segurosBdtOcrMatchButton" class="secondary">Buscar coincidencia</button>
+              <button type="button" id="segurosBdtOcrLink">Vincular a BDT</button>
+            </div>
+          </div>
           <div class="form-card">
             <div class="section-head">
               <div>

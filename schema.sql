@@ -68,6 +68,7 @@ CREATE TABLE IF NOT EXISTS movimientos (
 CREATE TABLE IF NOT EXISTS seguros (
   id TEXT PRIMARY KEY,
   empresa_id TEXT,
+  cliente_id TEXT,
   mes_creacion TEXT,
   fecha_efecto TEXT,
   fecha_vencimiento TEXT,

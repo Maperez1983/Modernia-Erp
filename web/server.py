@@ -964,11 +964,93 @@ def parse_poliza_text(text):
             if m:
                 return m.group(1).strip()
         return ""
+    def normalize_ocr_digits(value):
+        if not value:
+            return ""
+        raw = str(value).strip()
+        if not raw:
+            return ""
+        confusable = set("OoIlSB")
+        ratio = sum(1 for ch in raw if ch.isdigit() or ch in confusable) / max(len(raw), 1)
+        if ratio < 0.6:
+            return raw
+        table = str.maketrans({"O": "0", "o": "0", "I": "1", "l": "1", "S": "5", "B": "8"})
+        return raw.translate(table)
+    def normalize_ocr_date(value):
+        if not value:
+            return ""
+        raw = str(value).strip()
+        if not raw:
+            return ""
+        raw = normalize_ocr_digits(raw)
+        raw = re.sub(r"[.\-]", "/", raw)
+        return raw
+    def normalize_poliza_number(value, compania=""):
+        if not value:
+            return ""
+        raw = normalize_ocr_digits(value)
+        raw = re.sub(r"\s+", "", raw).strip()
+        if not raw:
+            return ""
+        raw = re.sub(r"^(N[ºo]\s*)", "", raw, flags=re.IGNORECASE)
+        raw = re.sub(r"^POLIZA", "", raw, flags=re.IGNORECASE)
+        raw = raw.strip(":-#")
+        candidates = re.split(r"[ \t,/]+", raw)
+        candidates = [c for c in candidates if c]
+        if not candidates:
+            candidates = [raw]
+        normalized_company = (compania or "").upper().strip()
+        numeric_only = {
+            "LINEA DIRECTA",
+            "DIRECT SEGUROS",
+            "FENIX DIRECTO",
+            "MAPFRE",
+            "OCASO",
+            "SANTA LUCIA",
+            "SANTALUCIA",
+        }
+        if normalized_company in numeric_only:
+            digit_runs = re.findall(r"\d{5,}", raw)
+            if digit_runs:
+                return max(digit_runs, key=len)
+        # Prefer token with most digits and length between 5 and 20
+        def score_token(token):
+            digits = len(re.findall(r"\d", token))
+            length = len(token)
+            if length < 5 or length > 24:
+                return -1
+            return digits * 2 + length
+        best = max(candidates, key=score_token)
+        return best
+    def line_pick(keys):
+        if not keys:
+            return ""
+        key_pattern = "|".join([re.escape(k) for k in keys])
+        for line in text.splitlines():
+            if re.search(rf"\\b({key_pattern})\\b", line, re.IGNORECASE):
+                parts = re.split(r"[:\\-]", line, maxsplit=1)
+                if len(parts) > 1:
+                    value = parts[1].strip()
+                    if value:
+                        return value
+                cleaned_line = re.sub(rf".*?\\b({key_pattern})\\b", "", line, flags=re.IGNORECASE).strip()
+                if cleaned_line:
+                    return cleaned_line
+        return ""
+    def pick_date_range(value):
+        if not value:
+            return "", ""
+        dates = re.findall(r"\\d{1,2}[/-]\\d{1,2}[/-]\\d{2,4}", value)
+        if len(dates) >= 2:
+            return dates[0], dates[1]
+        return "", ""
     fields = {}
     fields["tomador"] = pick([
         r"Nombre y apellidos\s*:\s*([^\n]+)",
         r"Titular\s*de\s*la\s*p[oó]liza\s*:\s*([^\n]+)",
         r"Datos\s+del\s+asegurado\s*[:\-]?\s*([^\n]+)",
+        r"Asegurado/Tomador\s*[:\-]?\s*([^\n]+)",
+        r"Tomador\s*y\s+Asegurado\s*[:\-]?\s*([^\n]+)",
         r"Datos\s+Tomador\s*/\s*Conductor\s*Nombre\s*([A-ZÁÉÍÓÚÑ\s]+?)\s+Doc",
         r"Nombre\s+([A-ZÁÉÍÓÚÑ\s]+?)\s+Doc\.?\s+Identificaci[oó]n",
         r"Tomador\s*de\s*seguro\s*:\s*([^\n]+)",
@@ -977,16 +1059,20 @@ def parse_poliza_text(text):
         r"Asegurado\s*principal\s*:\s*([^\n]+)",
         r"Titular\s*[:\-]?\s*([A-ZÁÉÍÓÚÑ\s]+)",
         r"Nombre\s*[:\-]?\s*([A-ZÁÉÍÓÚÑ\s]+)",
+        r"Asegurado\s+y\s+Tomador\s*[:\-]?\s*([^\n]+)",
+        r"Contratante\s*[:\-]?\s*([^\n]+)",
     ])
     fields["dni"] = pick([
         r"Doc\.?\s*Identificaci[oó]n\s*[:\-]?\s*([A-Z0-9\-]+)",
         r"NIF/CIF\s*[:\-]?\s*([A-Z0-9\-]+)",
         r"DNI\s*[:\-]?\s*([0-9]{8}[A-Z])",
         r"NIF\s*[:\-]?\s*([A-Z0-9\-]+)",
+        r"CIF\s*[:\-]?\s*([A-Z0-9\-]+)",
         r"DNI/NIF\s*[:\-]?\s*([A-Z0-9\-]+)",
         r"Documento\s*[:\-]?\s*([A-Z0-9\-]+)",
         r"\b([0-9]{8}[A-Z])\b",
         r"\b([ABCDEFGHJNPQRSUVW][0-9]{7}[0-9A-Z])\b",
+        r"\b([XYZ][0-9]{7}[A-Z])\b",
     ])
     fields["telefono"] = pick([
         r"Tel[eé]fono\s*[:\-]?\s*([0-9\s]{9,})",
@@ -1005,6 +1091,8 @@ def parse_poliza_text(text):
         r"Fecha de nacimiento\s*[:\-]?\s*([0-9]{1,2}[/-][0-9]{1,2}[/-][0-9]{2,4})",
         r"F\.?\s*nacimiento\s*[:\-]?\s*([0-9]{1,2}[/-][0-9]{1,2}[/-][0-9]{2,4})",
     ])
+    if fields["fecha_nacimiento"]:
+        fields["fecha_nacimiento"] = normalize_ocr_date(fields["fecha_nacimiento"])
     fields["poliza_numero"] = pick([
         r"N[ºo]\s*de\s*p[oó]liza\s*[:#]?\s*([A-Z0-9/.\-]+)",
         r"N[ºo]\s*p[oó]liza\s*[:#]?\s*([A-Z0-9/.\-]+)",
@@ -1013,18 +1101,81 @@ def parse_poliza_text(text):
         r"N[ºo]\s+P[oó]liza\s*[:#]?\s*([0-9]{5,})",
         r"(?:P[oó]liza|P[oó]liza\s*n[ºo]|N[ºo] P[oó]liza)\s*[:#]?\s*([A-Z0-9/.\-]+)",
         r"P[oó]liza\s*[:#]?\s*([A-Z0-9/.\-]+)",
+        r"P[oó]liza\s*N[úu]m\.?\s*[:#]?\s*([A-Z0-9/.\-]+)",
+        r"Poliza\s*No\.?\s*[:#]?\s*([A-Z0-9/.\-]+)",
+        r"N[úu]m\.?\s*P[oó]liza\s*[:#]?\s*([A-Z0-9/.\-]+)",
         r"N[úu]mero\s*de\s*p[oó]liza\s*[:#]?\s*([A-Z0-9/.\-]+)",
     ])
     fields["compania"] = ""
-    for name in ["ZURICH", "MAPFRE", "AXA", "ALLIANZ", "GENERALI", "REALE", "OCASO", "PELayo", "SANTA LUCIA", "FIATC", "LINEA DIRECTA"]:
-        if re.search(rf"{name}", cleaned, re.IGNORECASE):
-            fields["compania"] = name.title() if name.isupper() else name
+    company_aliases = [
+        (r"\bZURICH\b", "Zurich"),
+        (r"\bMAPFRE\b", "Mapfre"),
+        (r"\bAXA\b", "AXA"),
+        (r"\bALLIANZ\b", "Allianz"),
+        (r"\bGENERALI\b", "Generali"),
+        (r"\bREALE\b", "Reale"),
+        (r"\bOCASO\b", "Ocaso"),
+        (r"\bPELAYO\b", "Pelayo"),
+        (r"\bSANTA\s*LUCIA\b|\bSANTALUCIA\b", "Santa Lucia"),
+        (r"\bFIATC\b", "Fiatc"),
+        (r"\bLINEA\s*DIRECTA\b", "Línea Directa"),
+        (r"\bLIBERTY\b", "Liberty"),
+        (r"\bMUTUA\s*MADRILE[NÑ]A\b", "Mutua Madrileña"),
+        (r"\bCAJA\s*RURAL\b", "Caja Rural"),
+        (r"\bCASER\b", "Caser"),
+        (r"\bPLUS\s*ULTRA\b", "Plus Ultra"),
+        (r"\bFENIX\s*DIRECTO\b", "Fénix Directo"),
+        (r"\bDIRECT\s*SEGUROS\b", "Direct Seguros"),
+        (r"\bHEL\s*VETIA\b|\bHELVETIA\b", "Helvetia"),
+        (r"\bGROUPAMA\b", "Groupama"),
+        (r"\bNATIONALE\s*NEDERLANDEN\b", "Nationale Nederlanden"),
+        (r"\bREALE\s*SEGUROS\b", "Reale"),
+        (r"\bREALE\s*MUTUA\b", "Reale"),
+        (r"\bSANTA\s*LUC[IÍ]A\b", "Santa Lucia"),
+        (r"\bDAS\b", "DAS"),
+        (r"\bARAG\b", "ARAG"),
+        (r"\bPREVISORA\b", "Previsora General"),
+        (r"\bPREVISORA\s*GENERAL\b", "Previsora General"),
+        (r"\bSANITAS\b", "Sanitas"),
+        (r"\bDKV\b", "DKV"),
+        (r"\bADESLAS\b", "Adeslas"),
+        (r"\bASISA\b", "Asisa"),
+        (r"\bCATALANA\s*OCCIDENTE\b", "Catalana Occidente"),
+        (r"\bNORTEHISPANA\b", "NorteHispana"),
+        (r"\bSEGUROS\s*BILBAO\b", "Seguros Bilbao"),
+        (r"\bBILBAO\s*SEGUROS\b", "Seguros Bilbao"),
+        (r"\bSEGUROS\s*PELayo\b", "Pelayo"),
+    ]
+    for pattern, name in company_aliases:
+        if re.search(pattern, cleaned, re.IGNORECASE):
+            fields["compania"] = name
             break
     if not fields["compania"]:
         fields["compania"] = pick([
             r"Compa[ñn]ia\s*[:\-]?\s*([A-Z0-9\s\-]+)",
             r"Aseguradora\s*[:\-]?\s*([A-Z0-9\s\-]+)",
+            r"Entidad\s+aseguradora\s*[:\-]?\s*([A-Z0-9\s\-]+)",
+            r"Compa[ñn]ia\s+aseguradora\s*[:\-]?\s*([A-Z0-9\s\-]+)",
         ])
+    if fields["compania"]:
+        normalized = re.sub(r"[^A-Z0-9 ]+", " ", fields["compania"].upper())
+        normalized = re.sub(r"\s+", " ", normalized).strip()
+        aliases = {
+            "SANTALUCIA": "Santa Lucia",
+            "SANTA LUCIA": "Santa Lucia",
+            "MUTUA MADRILENA": "Mutua Madrileña",
+            "MUTUA MADRILEÑA": "Mutua Madrileña",
+            "LINEA DIRECTA": "Línea Directa",
+            "DIRECT SEGUROS": "Direct Seguros",
+            "FENIX DIRECTO": "Fénix Directo",
+            "NATIONALE NEDERLANDEN": "Nationale Nederlanden",
+            "CAJA RURAL": "Caja Rural",
+            "PLUS ULTRA": "Plus Ultra",
+            "HEL VETIA": "Helvetia",
+            "SEGUROS BILBAO": "Seguros Bilbao",
+            "CATALANA OCCIDENTE": "Catalana Occidente",
+        }
+        fields["compania"] = aliases.get(normalized, fields["compania"].strip())
     fields["fecha_efecto"] = pick([
         r"Fecha de efecto\s*:\s*([0-9]{1,2}[/-][0-9]{1,2}[/-][0-9]{2,4})",
         r"Efecto\s*:\s*([0-9]{1,2}[/-][0-9]{1,2}[/-][0-9]{2,4})",
@@ -1034,6 +1185,23 @@ def parse_poliza_text(text):
         r"Per[ií]odo\s*del\s*seguro\s*([0-9]{1,2}[/-][0-9]{1,2}[/-][0-9]{2,4})",
         r"Per[ií]odo\s*del\s*seguro\s*([0-9]{1,2}[/-][0-9]{1,2}[/-][0-9]{2,4})\s*[0-9:]*",
     ])
+    fields["fecha_vencimiento"] = pick([
+        r"Fecha de vencimiento\s*[:\-]?\s*([0-9]{1,2}[/-][0-9]{1,2}[/-][0-9]{2,4})",
+        r"Vencimiento\s*[:\-]?\s*([0-9]{1,2}[/-][0-9]{1,2}[/-][0-9]{2,4})",
+        r"Fin\s*vigencia\s*[:\-]?\s*([0-9]{1,2}[/-][0-9]{1,2}[/-][0-9]{2,4})",
+        r"Vigencia\s*hasta\s*[:\-]?\s*([0-9]{1,2}[/-][0-9]{1,2}[/-][0-9]{2,4})",
+    ])
+    if fields["fecha_efecto"]:
+        fields["fecha_efecto"] = normalize_ocr_date(fields["fecha_efecto"])
+    if fields["fecha_vencimiento"]:
+        fields["fecha_vencimiento"] = normalize_ocr_date(fields["fecha_vencimiento"])
+    if not fields["fecha_efecto"] or not fields["fecha_vencimiento"]:
+        vigencia_line = line_pick(["Vigencia", "Periodo", "Período", "Duración"])
+        start_date, end_date = pick_date_range(vigencia_line)
+        if start_date and not fields["fecha_efecto"]:
+            fields["fecha_efecto"] = start_date
+        if end_date and not fields["fecha_vencimiento"]:
+            fields["fecha_vencimiento"] = end_date
     fields["ramo"] = pick([
         r"Ramo\s*[:\-]?\s*([^\n]+)",
         r"Modalidad\s*[:\-]?\s*([^\n]+)",
@@ -1057,6 +1225,12 @@ def parse_poliza_text(text):
             "Pymes",
             "Multirriesgo",
             "Ciber",
+            "Mascotas",
+            "Moto",
+            "Coche",
+            "Agro",
+            "Construcción",
+            "Transportes",
         ]
         for keyword in ramo_keywords:
             if re.search(rf"\\b{re.escape(keyword)}\\b", cleaned, re.IGNORECASE):
@@ -1066,6 +1240,7 @@ def parse_poliza_text(text):
         r"Prima neta\s*[:€]?\s*([0-9\.,]+)",
         r"Importe\s*prima\s*neta\s*[:€]?\s*([0-9\.,]+)",
         r"Neta\s*[:€]?\s*([0-9\.,]+)",
+        r"Prima\s+neta\s+anual\s*[:€]?\s*([0-9\.,]+)",
     ])
     fields["prima_total"] = pick([
         r"Prima total\s*[:€]?\s*([0-9\.,]+)",
@@ -1073,6 +1248,7 @@ def parse_poliza_text(text):
         r"Importe\s*total\s*[:€]?\s*([0-9\.,]+)",
         r"Total\s*[:€]?\s*([0-9\.,]+)",
         r"Prima\s*total\s*anual\s*[:€]?\s*([0-9\.,]+)",
+        r"Total\s+recibo\s*[:€]?\s*([0-9\.,]+)",
     ])
     if fields["tomador"]:
         tomador = fields["tomador"].splitlines()[0].strip()
@@ -1085,6 +1261,10 @@ def parse_poliza_text(text):
         postal_match = re.search(r"\b\d{5}\s+[A-ZÁÉÍÓÚÑ\s]+\b", cleaned)
         if postal_match and postal_match.group(0) not in fields["direccion"]:
             fields["direccion"] = f"{fields['direccion']} {postal_match.group(0)}".strip()
+    if fields["telefono"]:
+        fields["telefono"] = re.sub(r"\D+", "", fields["telefono"])
+    if fields["email"]:
+        fields["email"] = fields["email"].strip().lower()
     if fields["poliza_numero"]:
         if not re.search(r"\\d", fields["poliza_numero"]):
             fields["poliza_numero"] = ""
@@ -1097,7 +1277,7 @@ def parse_poliza_text(text):
     if fields["dni"]:
         dni = fields["dni"].strip()
         if not re.match(r"^[0-9]{8}[A-Z]$", dni):
-            if re.match(r"^[A-Z][0-9]{7}[0-9A-Z]$", dni):
+            if re.match(r"^[A-Z][0-9]{7}[0-9A-Z]$", dni) or re.match(r"^[XYZ][0-9]{7}[A-Z]$", dni):
                 pass
             else:
                 fields["dni"] = ""
@@ -1136,6 +1316,31 @@ def parse_poliza_text(text):
                     if not fields["ramo"]:
                         fields["ramo"] = cols[-1]
                 break
+    if not fields["tomador"]:
+        fields["tomador"] = line_pick(["Tomador", "Asegurado", "Titular", "Contratante"])
+    if not fields["dni"]:
+        fields["dni"] = line_pick(["DNI", "NIF", "CIF", "Documento"])
+    if not fields["compania"]:
+        fields["compania"] = line_pick(["Compañia", "Compania", "Aseguradora", "Entidad aseguradora"])
+    if not fields["poliza_numero"]:
+        fields["poliza_numero"] = line_pick(["Póliza", "Poliza", "Nº póliza", "Numero de poliza"])
+    if not fields["ramo"]:
+        fields["ramo"] = line_pick(["Ramo", "Modalidad", "Producto"])
+    if not fields["fecha_efecto"]:
+        fields["fecha_efecto"] = line_pick(["Fecha efecto", "Efecto", "Inicio vigencia", "Fecha inicio"])
+    if not fields["fecha_vencimiento"]:
+        fields["fecha_vencimiento"] = line_pick(["Vencimiento", "Fin vigencia", "Vigencia hasta"])
+    if not fields["prima_total"]:
+        fields["prima_total"] = line_pick(["Prima total", "Total recibo", "Total"])
+    if not fields["prima_neta"]:
+        fields["prima_neta"] = line_pick(["Prima neta", "Neta"])
+    for key in ("fecha_efecto", "fecha_vencimiento", "fecha_nacimiento"):
+        if fields.get(key):
+            fields[key] = normalize_ocr_date(fields[key])
+    if fields.get("poliza_numero"):
+        fields["poliza_numero"] = normalize_poliza_number(fields["poliza_numero"], fields.get("compania"))
+    if fields["dni"] and not fields.get("nif"):
+        fields["nif"] = fields["dni"]
     return fields
 
 def parse_asesoramiento_block(block):
@@ -1992,6 +2197,8 @@ def ensure_tables(db_path):
             conn.execute("ALTER TABLE seguros ADD COLUMN poliza_key TEXT")
         if "poliza_url" not in seguros_cols:
             conn.execute("ALTER TABLE seguros ADD COLUMN poliza_url TEXT")
+        if "cliente_id" not in seguros_cols:
+            conn.execute("ALTER TABLE seguros ADD COLUMN cliente_id TEXT")
     except sqlite3.Error:
         pass
     conn.execute(
@@ -2871,7 +3078,9 @@ class Handler(BaseHTTPRequestHandler):
                     )
                     return
                 fields = parse_poliza_text(text)
-                if not any(str(value or "").strip() for value in fields.values()):
+                if not any(str(value or "").strip() for value in fields.values()) or (
+                    not fields.get("poliza_numero") and not fields.get("tomador")
+                ):
                     ocr_text, ocr_err = ocr_pdf_all_pages(tmp_path, use_external=external_ocr_available())
                     if ocr_text:
                         fields = parse_poliza_text(ocr_text)
@@ -3345,22 +3554,45 @@ class Handler(BaseHTTPRequestHandler):
                     os.unlink(tmp_path)
         elif parsed.path == "/api/seguros":
             poliza_id = os.urandom(16).hex()
+            cliente_id = payload.get("cliente_id")
+            if cliente_id:
+                exists = conn.execute(
+                    "SELECT id FROM clientes WHERE id = ? AND empresa_id = ?",
+                    (cliente_id, empresa["id"]),
+                ).fetchone()
+                if not exists:
+                    cliente_id = None
+            if not cliente_id:
+                cliente_id = ensure_cliente_for_seguro(
+                    conn,
+                    empresa["id"],
+                    payload.get("tomador"),
+                    payload.get("nif") or payload.get("dni"),
+                    now,
+                    {
+                        "telefono": payload.get("telefono"),
+                        "email": payload.get("email"),
+                        "fecha_nacimiento": payload.get("fecha_nacimiento"),
+                        "direccion": payload.get("direccion"),
+                    },
+                )
             conn.execute(
                 """
                 INSERT INTO seguros (
-                  id, empresa_id, mes_creacion, fecha_efecto, fecha_vencimiento,
+                  id, empresa_id, cliente_id, mes_creacion, fecha_efecto, fecha_vencimiento,
                   tomador, compania, ramo, poliza_numero, prima_neta,
                   prima_total, comision, produccion, colaborador, estado,
                   estado_renovacion, renovacion_fecha, nueva_poliza_ref,
                   poliza_key, poliza_url,
                   created_at, updated_at
                 ) VALUES (
-                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
                 )
                 """,
                 (
                     poliza_id,
                     empresa["id"],
+                    cliente_id,
                     payload.get("mes_creacion"),
                     payload.get("fecha_efecto"),
                     payload.get("fecha_vencimiento"),
@@ -3382,19 +3614,6 @@ class Handler(BaseHTTPRequestHandler):
                     now,
                     now,
                 ),
-            )
-            cliente_id = ensure_cliente_for_seguro(
-                conn,
-                empresa["id"],
-                payload.get("tomador"),
-                payload.get("nif") or payload.get("dni"),
-                now,
-                {
-                    "telefono": payload.get("telefono"),
-                    "email": payload.get("email"),
-                    "fecha_nacimiento": payload.get("fecha_nacimiento"),
-                    "direccion": payload.get("direccion"),
-                },
             )
             poliza_key = payload.get("poliza_key") or ""
             poliza_url = payload.get("poliza_url") or ""
@@ -3722,6 +3941,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             updates = {}
             for key in (
+                "cliente_id",
                 "estado",
                 "fecha_efecto",
                 "fecha_vencimiento",
@@ -3756,6 +3976,7 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "Registro no encontrado"}, status=404)
                 return
             allowed = (
+                "cliente_id",
                 "tomador",
                 "compania",
                 "ramo",

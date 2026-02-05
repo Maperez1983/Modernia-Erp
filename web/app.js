@@ -93,6 +93,9 @@ const state = {
   gestoriaCrmTab: "all",
   gestoriaCrmView: "crm",
   segurosTab: "dashboard",
+  segurosBdtCache: null,
+  segurosOcrClienteId: "",
+  segurosBdtOcrClienteId: "",
 };
 
 const empresaSelect = document.getElementById("empresaSelect");
@@ -438,6 +441,21 @@ const seguroOcrFechaEfecto = document.getElementById("seguroOcrFechaEfecto");
 const seguroOcrFechaVencimiento = document.getElementById("seguroOcrFechaVencimiento");
 const seguroOcrPrimaNeta = document.getElementById("seguroOcrPrimaNeta");
 const seguroOcrPrimaTotal = document.getElementById("seguroOcrPrimaTotal");
+const segurosBdtOcrFile = document.getElementById("segurosBdtOcrFile");
+const segurosBdtOcrButton = document.getElementById("segurosBdtOcrButton");
+const segurosBdtOcrStatus = document.getElementById("segurosBdtOcrStatus");
+const segurosBdtOcrTomador = document.getElementById("segurosBdtOcrTomador");
+const segurosBdtOcrDni = document.getElementById("segurosBdtOcrDni");
+const segurosBdtOcrCompania = document.getElementById("segurosBdtOcrCompania");
+const segurosBdtOcrPoliza = document.getElementById("segurosBdtOcrPoliza");
+const segurosBdtOcrRamo = document.getElementById("segurosBdtOcrRamo");
+const segurosBdtOcrFechaEfecto = document.getElementById("segurosBdtOcrFechaEfecto");
+const segurosBdtOcrFechaVencimiento = document.getElementById("segurosBdtOcrFechaVencimiento");
+const segurosBdtOcrPrimaNeta = document.getElementById("segurosBdtOcrPrimaNeta");
+const segurosBdtOcrPrimaTotal = document.getElementById("segurosBdtOcrPrimaTotal");
+const segurosBdtOcrSelect = document.getElementById("segurosBdtOcrSelect");
+const segurosBdtOcrMatchButton = document.getElementById("segurosBdtOcrMatchButton");
+const segurosBdtOcrLink = document.getElementById("segurosBdtOcrLink");
 const segurosAgendaForm = document.getElementById("segurosAgendaForm");
 const segurosAgendaStatus = document.getElementById("segurosAgendaStatus");
 const segurosAgendaClienteInput = document.getElementById("segurosAgendaClienteInput");
@@ -8367,9 +8385,302 @@ const renderSegurosUpdateSelect = (data) => {
   });
 };
 
+const getSegurosBdtOcrFields = () => {
+  const primaNetaRaw = segurosBdtOcrPrimaNeta ? segurosBdtOcrPrimaNeta.value.trim() : "";
+  const primaTotalRaw = segurosBdtOcrPrimaTotal ? segurosBdtOcrPrimaTotal.value.trim() : "";
+  return {
+    tomador: segurosBdtOcrTomador ? segurosBdtOcrTomador.value.trim() : "",
+    nif: segurosBdtOcrDni ? segurosBdtOcrDni.value.trim() : "",
+    cliente_id: state.segurosBdtOcrClienteId || "",
+    compania: segurosBdtOcrCompania ? segurosBdtOcrCompania.value.trim() : "",
+    ramo: segurosBdtOcrRamo ? segurosBdtOcrRamo.value.trim() : "",
+    poliza_numero: segurosBdtOcrPoliza ? segurosBdtOcrPoliza.value.trim() : "",
+    fecha_efecto: segurosBdtOcrFechaEfecto ? segurosBdtOcrFechaEfecto.value : "",
+    fecha_vencimiento: segurosBdtOcrFechaVencimiento ? segurosBdtOcrFechaVencimiento.value : "",
+    prima_neta: primaNetaRaw ? toNumber(primaNetaRaw) : "",
+    prima_total: primaTotalRaw ? toNumber(primaTotalRaw) : "",
+  };
+};
+
+const fillSegurosBdtOcrFields = (fields = {}) => {
+  if (segurosBdtOcrTomador) segurosBdtOcrTomador.value = fields.tomador || "";
+  if (segurosBdtOcrDni) segurosBdtOcrDni.value = fields.dni || fields.nif || "";
+  if (segurosBdtOcrCompania) segurosBdtOcrCompania.value = fields.compania || "";
+  if (segurosBdtOcrRamo) segurosBdtOcrRamo.value = fields.ramo || "";
+  if (segurosBdtOcrPoliza) segurosBdtOcrPoliza.value = fields.poliza_numero || "";
+  if (segurosBdtOcrFechaEfecto) {
+    segurosBdtOcrFechaEfecto.value = normalizeDateInput(fields.fecha_efecto || "");
+  }
+  if (segurosBdtOcrFechaVencimiento) {
+    if (fields.fecha_vencimiento) {
+      segurosBdtOcrFechaVencimiento.value = normalizeDateInput(fields.fecha_vencimiento || "");
+    } else if (segurosBdtOcrFechaEfecto && segurosBdtOcrFechaEfecto.value) {
+      segurosBdtOcrFechaVencimiento.value = addOneYear(segurosBdtOcrFechaEfecto.value);
+    }
+  }
+  if (segurosBdtOcrPrimaNeta) segurosBdtOcrPrimaNeta.value = fields.prima_neta || "";
+  if (segurosBdtOcrPrimaTotal) segurosBdtOcrPrimaTotal.value = fields.prima_total || "";
+};
+
+const formatSegurosBdtLabel = (row, columns) => {
+  const tomadorIndex = columns.indexOf("tomador");
+  const companiaIndex = columns.indexOf("compania");
+  const polizaIndex = columns.indexOf("poliza_numero");
+  const tomador = (tomadorIndex >= 0 ? row[tomadorIndex] : "") || "Cliente";
+  const compania = (companiaIndex >= 0 ? row[companiaIndex] : "") || "-";
+  const poliza = (polizaIndex >= 0 ? row[polizaIndex] : "") || "-";
+  return `${tomador} · ${compania} · ${poliza}`;
+};
+
+const populateSegurosBdtSelect = (rows, columns, selectedId = "") => {
+  if (!segurosBdtOcrSelect) return;
+  const idIndex = columns.indexOf("id");
+  segurosBdtOcrSelect.innerHTML = "";
+  segurosBdtOcrSelect.appendChild(createOption("", "Selecciona póliza"));
+  rows.forEach((row) => {
+    const id = idIndex >= 0 ? row[idIndex] : "";
+    if (!id) return;
+    const label = formatSegurosBdtLabel(row, columns);
+    segurosBdtOcrSelect.appendChild(createOption(id, label));
+  });
+  if (selectedId) {
+    segurosBdtOcrSelect.value = selectedId;
+  }
+};
+
+const pickColumnValue = (row, columns, names = []) => {
+  for (const name of names) {
+    const idx = columns.indexOf(name);
+    if (idx >= 0) return row[idx];
+  }
+  return "";
+};
+
+const levenshtein = (a, b) => {
+  const s = String(a || "");
+  const t = String(b || "");
+  if (!s.length) return t.length;
+  if (!t.length) return s.length;
+  const v0 = new Array(t.length + 1).fill(0);
+  const v1 = new Array(t.length + 1).fill(0);
+  for (let i = 0; i <= t.length; i += 1) v0[i] = i;
+  for (let i = 0; i < s.length; i += 1) {
+    v1[0] = i + 1;
+    for (let j = 0; j < t.length; j += 1) {
+      const cost = s[i] === t[j] ? 0 : 1;
+      v1[j + 1] = Math.min(v1[j] + 1, v0[j + 1] + 1, v0[j] + cost);
+    }
+    for (let j = 0; j <= t.length; j += 1) v0[j] = v1[j];
+  }
+  return v1[t.length];
+};
+
+const scoreSegurosBdtMatch = (row, columns, fields) => {
+  const rowTomadorRaw = pickColumnValue(row, columns, ["tomador", "asegurado", "titular"]);
+  const rowCompaniaRaw = pickColumnValue(row, columns, ["compania", "aseguradora"]);
+  const rowRamoRaw = pickColumnValue(row, columns, ["ramo", "modalidad", "producto"]);
+  const rowPolizaRaw = pickColumnValue(row, columns, ["poliza_numero", "poliza", "numero_poliza"]);
+  const rowNifRaw = pickColumnValue(row, columns, ["nif", "dni", "documento"]);
+  const rowFechaEfectoRaw = pickColumnValue(row, columns, ["fecha_efecto", "fecha_inicio", "efecto"]);
+  const rowFechaVencRaw = pickColumnValue(row, columns, ["fecha_vencimiento", "vencimiento"]);
+  const rowClienteIdRaw = pickColumnValue(row, columns, ["cliente_id"]);
+
+  const rowTomador = normalizeName(rowTomadorRaw);
+  const rowCompania = normalizeName(rowCompaniaRaw);
+  const rowRamo = normalizeName(rowRamoRaw);
+  const rowPoliza = normalizeMatch(rowPolizaRaw);
+  const rowFechaEfecto = normalizeDateInput(rowFechaEfectoRaw || "");
+  const rowFechaVenc = normalizeDateInput(rowFechaVencRaw || "");
+
+  const wantTomador = normalizeName(fields.tomador || "");
+  const wantNif = normalizeMatch(fields.nif || "");
+  const wantCompania = normalizeName(fields.compania || "");
+  const wantRamo = normalizeName(fields.ramo || "");
+  const wantPoliza = normalizeMatch(fields.poliza_numero || "");
+  const wantClienteId = String(fields.cliente_id || "").trim();
+  const wantFechaEfecto = normalizeDateInput(fields.fecha_efecto || "");
+  const wantFechaVenc = normalizeDateInput(fields.fecha_vencimiento || "");
+
+  const digits = (value) => String(value || "").replace(/\D/g, "");
+  const tokenSet = (value) =>
+    normalizeName(value)
+      .split(/\s+/)
+      .filter(Boolean);
+  const jaccard = (a, b) => {
+    if (!a.length || !b.length) return 0;
+    const aSet = new Set(a);
+    const bSet = new Set(b);
+    let inter = 0;
+    aSet.forEach((t) => {
+      if (bSet.has(t)) inter += 1;
+    });
+    const union = new Set([...aSet, ...bSet]).size || 1;
+    return inter / union;
+  };
+
+  let score = 0;
+
+  if (wantClienteId && rowClienteIdRaw) {
+    if (String(rowClienteIdRaw) === wantClienteId) score += 15;
+  }
+
+  if (wantNif && rowNifRaw) {
+    const rowNif = normalizeMatch(rowNifRaw);
+    if (rowNif === wantNif) score += 10;
+    else if (rowNif.includes(wantNif) || wantNif.includes(rowNif)) score += 6;
+  }
+
+  if (wantPoliza && rowPoliza) {
+    const rowDigits = digits(rowPolizaRaw);
+    const wantDigits = digits(fields.poliza_numero || "");
+    if (rowPoliza === wantPoliza) score += 10;
+    else if (rowPoliza.includes(wantPoliza) || wantPoliza.includes(rowPoliza)) score += 6;
+    if (rowPoliza.length >= 6 && wantPoliza.length >= 6) {
+      const dist = levenshtein(rowPoliza, wantPoliza);
+      const maxLen = Math.max(rowPoliza.length, wantPoliza.length) || 1;
+      const similarity = 1 - dist / maxLen;
+      if (similarity >= 0.85) score += 5;
+      else if (similarity >= 0.7) score += 3;
+    }
+    if (rowDigits && wantDigits) {
+      if (rowDigits === wantDigits) score += 8;
+      else if (
+        rowDigits.length >= 5 &&
+        wantDigits.length >= 5 &&
+        rowDigits.slice(-5) === wantDigits.slice(-5)
+      ) {
+        score += 4;
+      }
+    }
+  }
+
+  if (wantTomador && rowTomador) {
+    if (rowTomador === wantTomador) score += 5;
+    else if (rowTomador.includes(wantTomador) || wantTomador.includes(rowTomador)) score += 3;
+    score += Math.round(jaccard(tokenSet(rowTomadorRaw), tokenSet(fields.tomador || "")) * 4);
+    if (rowTomador.length >= 5 && wantTomador.length >= 5) {
+      const dist = levenshtein(rowTomador, wantTomador);
+      const maxLen = Math.max(rowTomador.length, wantTomador.length) || 1;
+      const similarity = 1 - dist / maxLen;
+      if (similarity >= 0.9) score += 4;
+      else if (similarity >= 0.8) score += 2;
+    }
+  }
+
+  if (wantCompania && rowCompania) {
+    if (rowCompania === wantCompania) score += 4;
+    else if (rowCompania.includes(wantCompania) || wantCompania.includes(rowCompania)) score += 2;
+    score += Math.round(jaccard(tokenSet(rowCompaniaRaw), tokenSet(fields.compania || "")) * 3);
+    if (rowCompania.length >= 4 && wantCompania.length >= 4) {
+      const dist = levenshtein(rowCompania, wantCompania);
+      const maxLen = Math.max(rowCompania.length, wantCompania.length) || 1;
+      const similarity = 1 - dist / maxLen;
+      if (similarity >= 0.9) score += 2;
+    }
+  }
+
+  if (wantRamo && rowRamo) {
+    if (rowRamo === wantRamo) score += 2;
+    else if (rowRamo.includes(wantRamo) || wantRamo.includes(rowRamo)) score += 1;
+  }
+
+  if (wantFechaEfecto && rowFechaEfecto) {
+    if (rowFechaEfecto === wantFechaEfecto) score += 2;
+    else if (rowFechaEfecto.slice(0, 7) === wantFechaEfecto.slice(0, 7)) score += 1;
+  }
+  if (wantFechaVenc && rowFechaVenc) {
+    if (rowFechaVenc === wantFechaVenc) score += 2;
+    else if (rowFechaVenc.slice(0, 7) === wantFechaVenc.slice(0, 7)) score += 1;
+  }
+
+  return score;
+};
+
+const ensureSegurosBdtData = async () => {
+  const empresa = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
+  if (!empresa) return null;
+  if (state.segurosBdtCache && state.segurosBdtCache.empresaId === empresa.id) {
+    return state.segurosBdtCache.data;
+  }
+  const params = new URLSearchParams({
+    tabla: "seguros",
+    empresa_id: empresa.id,
+    include_id: "1",
+    limit: "1000",
+  });
+  const data = await api(`/api/tabla?${params.toString()}`);
+  if (!data?.error) {
+    state.segurosBdtCache = { empresaId: empresa.id, data, ts: Date.now() };
+  }
+  return data;
+};
+
+const matchSegurosBdtFromFields = async () => {
+  if (segurosBdtOcrStatus) segurosBdtOcrStatus.textContent = "";
+  const data = await ensureSegurosBdtData();
+  if (!data || data.error) {
+    if (segurosBdtOcrStatus) {
+      segurosBdtOcrStatus.textContent = data?.error || "No se pudo cargar BDT.";
+    }
+    return;
+  }
+  const fields = getSegurosBdtOcrFields();
+  const columns = data.columns || [];
+  const rows = data.rows || [];
+  const idIndex = columns.indexOf("id");
+  if (idIndex < 0) {
+    if (segurosBdtOcrStatus) segurosBdtOcrStatus.textContent = "BDT sin identificador.";
+    return;
+  }
+  const hasInput =
+    fields.poliza_numero ||
+    fields.tomador ||
+    fields.nif ||
+    fields.cliente_id ||
+    fields.compania ||
+    fields.ramo ||
+    fields.fecha_efecto ||
+    fields.fecha_vencimiento ||
+    fields.prima_neta ||
+    fields.prima_total;
+  if (!hasInput) {
+    populateSegurosBdtSelect(rows, columns);
+    if (segurosBdtOcrStatus) {
+      segurosBdtOcrStatus.textContent = "Completa campos para buscar o selecciona manualmente.";
+    }
+    return;
+  }
+  const matches = rows
+    .map((row) => ({
+      row,
+      score: scoreSegurosBdtMatch(row, columns, fields),
+    }))
+    .filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score);
+  if (!matches.length) {
+    populateSegurosBdtSelect(rows, columns);
+    if (segurosBdtOcrStatus) {
+      segurosBdtOcrStatus.textContent = "Sin coincidencias. Completa campos o selecciona manualmente.";
+    }
+    return;
+  }
+  const best = matches[0];
+  const next = matches[1];
+  const bestId = best.row[idIndex];
+  const bestLabel = formatSegurosBdtLabel(best.row, columns);
+  const topRows = matches.slice(0, 12).map((item) => item.row);
+  populateSegurosBdtSelect(topRows, columns, bestId);
+  const isStrong = best.score >= 12 && (!next || best.score >= next.score + 3);
+  if (segurosBdtOcrStatus) {
+    segurosBdtOcrStatus.textContent = isStrong
+      ? `Coincidencia automática: ${bestLabel}.`
+      : "Varias coincidencias. Selecciona la correcta.";
+  }
+};
+
 const fillSegurosOcrFields = (fields = {}) => {
   if (seguroOcrTomador) seguroOcrTomador.value = fields.tomador || "";
-  if (seguroOcrDni) seguroOcrDni.value = fields.dni || "";
+  if (seguroOcrDni) seguroOcrDni.value = fields.dni || fields.nif || "";
   if (seguroOcrTelefono) seguroOcrTelefono.value = fields.telefono || "";
   if (seguroOcrEmail) seguroOcrEmail.value = fields.email || "";
   if (seguroOcrCompania) seguroOcrCompania.value = fields.compania || "";
@@ -8385,8 +8696,9 @@ const fillSegurosOcrFields = (fields = {}) => {
     seguroOcrFechaEfecto.value = normalizeDateInput(fields.fecha_efecto || "");
   }
   if (seguroOcrFechaVencimiento) {
-    const current = seguroOcrFechaVencimiento.value;
-    if (!current && seguroOcrFechaEfecto && seguroOcrFechaEfecto.value) {
+    if (fields.fecha_vencimiento) {
+      seguroOcrFechaVencimiento.value = normalizeDateInput(fields.fecha_vencimiento || "");
+    } else if (seguroOcrFechaEfecto && seguroOcrFechaEfecto.value) {
       seguroOcrFechaVencimiento.value = addOneYear(seguroOcrFechaEfecto.value);
     }
   }
@@ -8511,6 +8823,7 @@ const saveSegurosOcrRecord = async () => {
     : addOneYear(fechaEfecto);
   const payload = {
     empresa_nombre: FINCAS_COMPANY,
+    cliente_id: state.segurosOcrClienteId || "",
     mes_creacion: mesCreacion,
     fecha_efecto: fechaEfecto,
     fecha_vencimiento: fechaVencimiento,
@@ -8566,6 +8879,7 @@ const saveSegurosOcrRecord = async () => {
       if (segurosOcrSaveStatus) {
         segurosOcrSaveStatus.textContent = "Guardado en BDT.";
       }
+      state.segurosOcrClienteId = "";
       loadSegurosCrm();
     })
     .catch(() => {
@@ -11036,6 +11350,7 @@ if (segurosOcrButton) {
     if (segurosOcrSaveStatus) {
       segurosOcrSaveStatus.textContent = "";
     }
+    state.segurosOcrClienteId = "";
     if (!segurosOcrFile || !segurosOcrFile.files || !segurosOcrFile.files.length) {
       if (segurosOcrStatus) {
         segurosOcrStatus.textContent = "Selecciona un PDF.";
@@ -11067,8 +11382,10 @@ if (segurosOcrButton) {
                 ? `${data.error} ${data.detail}`
                 : data.error;
             }
+            state.segurosOcrClienteId = "";
             return;
           }
+          state.segurosOcrClienteId = data.cliente_id || "";
           fillSegurosOcrFields(data.fields || {});
           if (segurosOcrRaw) {
             segurosOcrRaw.value = (data.text || "").trim();
@@ -11092,6 +11409,7 @@ if (segurosOcrButton) {
           if (segurosOcrStatus) {
             segurosOcrStatus.textContent = "No se pudo procesar el PDF.";
           }
+          state.segurosOcrClienteId = "";
         });
     };
     reader.onerror = () => {
@@ -11103,11 +11421,68 @@ if (segurosOcrButton) {
   });
 }
 
+if (segurosBdtOcrButton) {
+  segurosBdtOcrButton.addEventListener("click", () => {
+    if (segurosBdtOcrStatus) segurosBdtOcrStatus.textContent = "";
+    state.segurosBdtOcrClienteId = "";
+    if (!segurosBdtOcrFile || !segurosBdtOcrFile.files || !segurosBdtOcrFile.files.length) {
+      if (segurosBdtOcrStatus) segurosBdtOcrStatus.textContent = "Selecciona un PDF.";
+      return;
+    }
+    const file = segurosBdtOcrFile.files[0];
+    if (!file.name.toLowerCase().endsWith(".pdf")) {
+      if (segurosBdtOcrStatus) segurosBdtOcrStatus.textContent = "El archivo debe ser PDF.";
+      return;
+    }
+    if (segurosBdtOcrStatus) segurosBdtOcrStatus.textContent = "Procesando OCR...";
+    const reader = new FileReader();
+    reader.onload = () => {
+      fetch("/api/seguros_ocr", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ file_base64: reader.result, filename: file.name }),
+      })
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.error) {
+            if (segurosBdtOcrStatus) {
+              segurosBdtOcrStatus.textContent = data.detail
+                ? `${data.error} ${data.detail}`
+                : data.error;
+            }
+            state.segurosBdtOcrClienteId = "";
+            return;
+          }
+          state.segurosBdtOcrClienteId = data.cliente_id || "";
+          fillSegurosBdtOcrFields(data.fields || {});
+          matchSegurosBdtFromFields().catch(() => {});
+        })
+        .catch(() => {
+          if (segurosBdtOcrStatus) segurosBdtOcrStatus.textContent = "No se pudo procesar el PDF.";
+          state.segurosBdtOcrClienteId = "";
+        });
+    };
+    reader.onerror = () => {
+      if (segurosBdtOcrStatus) segurosBdtOcrStatus.textContent = "Error al leer el archivo.";
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 if (seguroOcrFechaEfecto) {
   seguroOcrFechaEfecto.addEventListener("change", () => {
     if (!seguroOcrFechaVencimiento) return;
     if (!seguroOcrFechaVencimiento.value) {
       seguroOcrFechaVencimiento.value = addOneYear(seguroOcrFechaEfecto.value);
+    }
+  });
+}
+
+if (segurosBdtOcrFechaEfecto) {
+  segurosBdtOcrFechaEfecto.addEventListener("change", () => {
+    if (!segurosBdtOcrFechaVencimiento) return;
+    if (!segurosBdtOcrFechaVencimiento.value) {
+      segurosBdtOcrFechaVencimiento.value = addOneYear(segurosBdtOcrFechaEfecto.value);
     }
   });
 }
@@ -11169,6 +11544,70 @@ if (segurosOcrSave) {
       return;
     }
     saveSegurosOcrRecord().catch(() => {});
+  });
+}
+
+if (segurosBdtOcrMatchButton) {
+  segurosBdtOcrMatchButton.addEventListener("click", () => {
+    matchSegurosBdtFromFields().catch(() => {});
+  });
+}
+
+if (segurosBdtOcrLink) {
+  segurosBdtOcrLink.addEventListener("click", async () => {
+    if (segurosBdtOcrStatus) segurosBdtOcrStatus.textContent = "";
+    const recordId = segurosBdtOcrSelect ? segurosBdtOcrSelect.value : "";
+    if (!recordId) {
+      if (segurosBdtOcrStatus) segurosBdtOcrStatus.textContent = "Selecciona una póliza.";
+      return;
+    }
+    const fields = getSegurosBdtOcrFields();
+    const file =
+      segurosBdtOcrFile && segurosBdtOcrFile.files && segurosBdtOcrFile.files.length
+        ? segurosBdtOcrFile.files[0]
+        : null;
+    if (segurosBdtOcrStatus) segurosBdtOcrStatus.textContent = "Vinculando...";
+    let upload = null;
+    if (file) {
+      try {
+        upload = await uploadFileToS3(file, "seguros", segurosBdtOcrStatus);
+      } catch (err) {
+        if (segurosBdtOcrStatus) {
+          segurosBdtOcrStatus.textContent = `Error al subir: ${err.message}`;
+        }
+        return;
+      }
+    }
+    fetch("/api/seguros_enrich", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: recordId, ...fields }),
+    })
+      .then((res) => res.json())
+      .then((resp) => {
+        if (resp.error) {
+          if (segurosBdtOcrStatus) segurosBdtOcrStatus.textContent = resp.error;
+          return;
+        }
+        if (upload) {
+          fetch("/api/seguros_update", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              id: recordId,
+              poliza_key: upload.key || "",
+              poliza_url: upload.public_url || "",
+            }),
+          }).catch(() => {});
+        }
+        if (segurosBdtOcrStatus) segurosBdtOcrStatus.textContent = "Vinculado a BDT.";
+        state.segurosBdtOcrClienteId = "";
+        state.segurosBdtCache = null;
+        loadSegurosCrm();
+      })
+      .catch(() => {
+        if (segurosBdtOcrStatus) segurosBdtOcrStatus.textContent = "Error al vincular.";
+      });
   });
 }
 
@@ -13562,3 +14001,6 @@ window.addEventListener("resize", () => {
     );
   }
 });
+  if (wantClienteId && rowClienteIdRaw) {
+    if (String(rowClienteIdRaw) === wantClienteId) score += 15;
+  }
