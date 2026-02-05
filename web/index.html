@@ -647,8 +647,8 @@
             <div class="form-card">
               <h3>Modelos fiscales próximos</h3>
               <p class="muted">Vencimientos próximos y seguimiento.</p>
-              <div id="gestoriaModelosTable"></div>
-              <div class="footer" id="gestoriaModelosInfo"></div>
+              <div id="gestoriaModelosOverviewTable"></div>
+              <div class="footer" id="gestoriaModelosOverviewInfo"></div>
             </div>
           </div>
           <div class="form-card">
@@ -3090,11 +3090,6 @@
                   <div class="inline-list" id="gestoriaClienteAlerts"></div>
                 </div>
                 <div class="form-card">
-                  <h3>Modelos fiscales</h3>
-                  <p class="muted">Resumen de modelos del cliente.</p>
-                  <div id="gestoriaModelosTable"></div>
-                </div>
-                <div class="form-card">
                   <h3>Gestiones</h3>
                   <p class="muted">Encargos en curso y finalizados.</p>
                   <div id="gestoriaTrabajosTable"></div>
@@ -3147,26 +3142,230 @@
               </div>
               <div id="gestoriaModuleFiscal" class="hidden">
                 <div class="form-card">
-                  <h3>Fiscal</h3>
-                  <p class="muted">Pendiente de configurar.</p>
+                  <h3>Fiscal · Obligaciones y modelos</h3>
+                  <p class="muted">Modelos, periodicidad y próximas presentaciones.</p>
+                  <form id="gestoriaModeloForm" class="form-grid">
+                    <label>
+                      Modelo
+                      <input name="modelo" placeholder="303, 130, 111..." />
+                    </label>
+                    <label>
+                      Periodicidad
+                      <select name="periodicidad">
+                        <option>Mensual</option>
+                        <option>Trimestral</option>
+                        <option>Anual</option>
+                        <option>Puntual</option>
+                      </select>
+                    </label>
+                    <label>
+                      Próxima fecha
+                      <input name="proxima_fecha" type="date" />
+                    </label>
+                    <label>
+                      Responsable
+                      <select name="responsable" class="responsable-select" data-service="Gestoría"></select>
+                    </label>
+                    <label>
+                      Estado
+                      <select name="estado">
+                        <option>Pendiente</option>
+                        <option>En curso</option>
+                        <option>Presentado</option>
+                      </select>
+                    </label>
+                    <label class="span-2">
+                      Notas
+                      <input name="notas" />
+                    </label>
+                    <div class="form-actions">
+                      <button type="submit">Añadir modelo</button>
+                      <span id="gestoriaModeloStatus" class="muted"></span>
+                    </div>
+                  </form>
+                  <div id="gestoriaModelosTable"></div>
+                  <div class="footer" id="gestoriaModelosInfo"></div>
+                </div>
+                <div class="form-card">
+                  <h3>Incidencias y requerimientos</h3>
+                  <p class="muted">Requerimientos AEAT, notificaciones y pendientes.</p>
+                  <div id="gestoriaFiscalTrabajosTable"></div>
+                  <div class="footer" id="gestoriaFiscalTrabajosInfo"></div>
                 </div>
               </div>
               <div id="gestoriaModuleLaboral" class="hidden">
                 <div class="form-card">
-                  <h3>Laboral</h3>
-                  <p class="muted">Pendiente de configurar.</p>
+                  <h3>Laboral · Altas, bajas y contratos</h3>
+                  <p class="muted">Gestión de personal y obligaciones laborales.</p>
+                  <form id="gestoriaLaboralForm" class="form-grid">
+                    <label>
+                      Tipo de gestión
+                      <select name="tipo_trabajo">
+                        <option>Altas/Bajas</option>
+                        <option>Contratos</option>
+                        <option>Nóminas</option>
+                        <option>Seguros sociales</option>
+                        <option>IT/Bajas médicas</option>
+                        <option>Finiquitos</option>
+                        <option>Otros laboral</option>
+                      </select>
+                    </label>
+                    <label>
+                      Estado
+                      <select name="estado">
+                        <option>Presupuesto</option>
+                        <option>En curso</option>
+                        <option>Finalizado</option>
+                        <option>Cancelado</option>
+                      </select>
+                    </label>
+                    <label>
+                      Inicio
+                      <input name="fecha_inicio" type="date" />
+                    </label>
+                    <label>
+                      Fin previsto
+                      <input name="fecha_fin" type="date" />
+                    </label>
+                    <label>
+                      Responsable
+                      <select name="responsable" class="responsable-select" data-service="Gestoría"></select>
+                    </label>
+                    <label>
+                      Importe
+                      <input name="importe" type="number" step="0.01" />
+                    </label>
+                    <label class="span-2">
+                      Notas
+                      <input name="notas" />
+                    </label>
+                    <div class="form-actions">
+                      <button type="submit">Añadir gestión</button>
+                      <span id="gestoriaLaboralStatus" class="muted"></span>
+                    </div>
+                  </form>
+                  <div id="gestoriaLaboralTable"></div>
+                  <div class="footer" id="gestoriaLaboralInfo"></div>
                 </div>
               </div>
               <div id="gestoriaModuleRenta" class="hidden">
                 <div class="form-card">
-                  <h3>Renta</h3>
-                  <p class="muted">Pendiente de configurar.</p>
+                  <h3>Renta · Campañas y expedientes</h3>
+                  <p class="muted">Seguimiento anual y requerimientos.</p>
+                  <form id="gestoriaRentaForm" class="form-grid">
+                    <label>
+                      Tipo
+                      <select name="tipo_trabajo">
+                        <option>Declaración en periodo</option>
+                        <option>Declaración extemporánea</option>
+                        <option>Requerimiento</option>
+                        <option>Complementaria</option>
+                        <option>Rectificativa</option>
+                        <option>Otros renta</option>
+                      </select>
+                    </label>
+                    <label>
+                      Estado
+                      <select name="estado">
+                        <option>Presupuesto</option>
+                        <option>En curso</option>
+                        <option>Finalizado</option>
+                        <option>Cancelado</option>
+                      </select>
+                    </label>
+                    <label>
+                      Inicio
+                      <input name="fecha_inicio" type="date" />
+                    </label>
+                    <label>
+                      Fin previsto
+                      <input name="fecha_fin" type="date" />
+                    </label>
+                    <label>
+                      Responsable
+                      <select name="responsable" class="responsable-select" data-service="Gestoría"></select>
+                    </label>
+                    <label>
+                      Importe
+                      <input name="importe" type="number" step="0.01" />
+                    </label>
+                    <label class="span-2">
+                      Notas
+                      <input name="notas" />
+                    </label>
+                    <div class="form-actions">
+                      <button type="submit">Añadir renta</button>
+                      <span id="gestoriaRentaStatus" class="muted"></span>
+                    </div>
+                  </form>
+                  <form id="gestoriaRentaDetallesForm" class="form-grid">
+                    <label class="span-2">
+                      Detalles de renta (venta vivienda, deducciones, etc.)
+                      <textarea name="renta_detalles" rows="3"></textarea>
+                    </label>
+                    <div class="form-actions">
+                      <button type="submit">Guardar detalles</button>
+                      <span id="gestoriaRentaDetallesStatus" class="muted"></span>
+                    </div>
+                  </form>
+                  <div id="gestoriaRentaTable"></div>
+                  <div class="footer" id="gestoriaRentaInfo"></div>
                 </div>
               </div>
               <div id="gestoriaModuleAdmin" class="hidden">
                 <div class="form-card">
                   <h3>Gestiones administrativas</h3>
-                  <p class="muted">Pendiente de configurar.</p>
+                  <p class="muted">Trámites puntuales y seguimiento.</p>
+                  <form id="gestoriaAdminForm" class="form-grid">
+                    <label>
+                      Tipo de gestión
+                      <select name="tipo_trabajo">
+                        <option>Tráfico - Transferencias</option>
+                        <option>Tráfico - Matriculaciones</option>
+                        <option>Herencias</option>
+                        <option>Extinción de condominio</option>
+                        <option>IMV</option>
+                        <option>Becas</option>
+                        <option>Complemento brecha de género</option>
+                        <option>Otros administrativos</option>
+                      </select>
+                    </label>
+                    <label>
+                      Estado
+                      <select name="estado">
+                        <option>Presupuesto</option>
+                        <option>En curso</option>
+                        <option>Finalizado</option>
+                        <option>Cancelado</option>
+                      </select>
+                    </label>
+                    <label>
+                      Inicio
+                      <input name="fecha_inicio" type="date" />
+                    </label>
+                    <label>
+                      Fin previsto
+                      <input name="fecha_fin" type="date" />
+                    </label>
+                    <label>
+                      Responsable
+                      <select name="responsable" class="responsable-select" data-service="Gestoría"></select>
+                    </label>
+                    <label>
+                      Importe
+                      <input name="importe" type="number" step="0.01" />
+                    </label>
+                    <label class="span-2">
+                      Notas
+                      <input name="notas" />
+                    </label>
+                    <div class="form-actions">
+                      <button type="submit">Añadir gestión</button>
+                      <span id="gestoriaAdminStatus" class="muted"></span>
+                    </div>
+                  </form>
+                  <div id="gestoriaAdminTable"></div>
+                  <div class="footer" id="gestoriaAdminInfo"></div>
                 </div>
               </div>
             </div>
@@ -3277,6 +3476,6 @@
       </div>
     </div>
 
-    <script src="app.js?v=302"></script>
+    <script src="app.js?v=303"></script>
   </body>
 </html>

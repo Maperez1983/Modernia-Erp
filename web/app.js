@@ -275,6 +275,8 @@ const gestoriaTrabajosTable = document.getElementById("gestoriaTrabajosTable");
 const gestoriaTrabajosInfo = document.getElementById("gestoriaTrabajosInfo");
 const gestoriaModelosTable = document.getElementById("gestoriaModelosTable");
 const gestoriaModelosInfo = document.getElementById("gestoriaModelosInfo");
+const gestoriaModelosOverviewTable = document.getElementById("gestoriaModelosOverviewTable");
+const gestoriaModelosOverviewInfo = document.getElementById("gestoriaModelosOverviewInfo");
 const gestoriaTrabajosTipoFilter = document.getElementById("gestoriaTrabajosTipoFilter");
 const gestoriaTrabajosEstadoFilter = document.getElementById("gestoriaTrabajosEstadoFilter");
 const gestoriaTrabajosLimit = document.getElementById("gestoriaTrabajosLimit");
@@ -307,6 +309,22 @@ const gestoriaModuleFiscal = document.getElementById("gestoriaModuleFiscal");
 const gestoriaModuleLaboral = document.getElementById("gestoriaModuleLaboral");
 const gestoriaModuleRenta = document.getElementById("gestoriaModuleRenta");
 const gestoriaModuleAdmin = document.getElementById("gestoriaModuleAdmin");
+const gestoriaFiscalTrabajosTable = document.getElementById("gestoriaFiscalTrabajosTable");
+const gestoriaFiscalTrabajosInfo = document.getElementById("gestoriaFiscalTrabajosInfo");
+const gestoriaLaboralForm = document.getElementById("gestoriaLaboralForm");
+const gestoriaLaboralStatus = document.getElementById("gestoriaLaboralStatus");
+const gestoriaLaboralTable = document.getElementById("gestoriaLaboralTable");
+const gestoriaLaboralInfo = document.getElementById("gestoriaLaboralInfo");
+const gestoriaRentaForm = document.getElementById("gestoriaRentaForm");
+const gestoriaRentaStatus = document.getElementById("gestoriaRentaStatus");
+const gestoriaRentaTable = document.getElementById("gestoriaRentaTable");
+const gestoriaRentaInfo = document.getElementById("gestoriaRentaInfo");
+const gestoriaRentaDetallesForm = document.getElementById("gestoriaRentaDetallesForm");
+const gestoriaRentaDetallesStatus = document.getElementById("gestoriaRentaDetallesStatus");
+const gestoriaAdminForm = document.getElementById("gestoriaAdminForm");
+const gestoriaAdminStatus = document.getElementById("gestoriaAdminStatus");
+const gestoriaAdminTable = document.getElementById("gestoriaAdminTable");
+const gestoriaAdminInfo = document.getElementById("gestoriaAdminInfo");
 const gestoriaClienteAgendaForm = document.getElementById("gestoriaClienteAgendaForm");
 const gestoriaClienteAgendaStatus = document.getElementById("gestoriaClienteAgendaStatus");
 const gestoriaClienteAgendaTable = document.getElementById("gestoriaClienteAgendaTable");
@@ -4487,18 +4505,18 @@ const loadGestoriaTrabajosOverview = () => {
 };
 
 const loadGestoriaModelosOverview = () => {
-  if (!gestoriaModelosTable || !gestoriaModelosInfo) return;
+  if (!gestoriaModelosOverviewTable || !gestoriaModelosOverviewInfo) return;
   const empresa = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
   if (!empresa) {
-    gestoriaModelosTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
+    gestoriaModelosOverviewTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
     return;
   }
   const params = new URLSearchParams({ empresa_id: empresa.id, scope: "proximos" });
   api(`/api/gestoria_modelos?${params.toString()}`).then((data) => {
     const rows = data.rows || [];
     if (!rows.length) {
-      gestoriaModelosTable.innerHTML = "<p class='muted'>Sin vencimientos próximos.</p>";
-      gestoriaModelosInfo.textContent = "";
+      gestoriaModelosOverviewTable.innerHTML = "<p class='muted'>Sin vencimientos próximos.</p>";
+      gestoriaModelosOverviewInfo.textContent = "";
       return;
     }
     const table = document.createElement("table");
@@ -4531,9 +4549,9 @@ const loadGestoriaModelosOverview = () => {
       tbody.appendChild(tr);
     });
     table.appendChild(tbody);
-    gestoriaModelosTable.innerHTML = "";
-    gestoriaModelosTable.appendChild(table);
-    gestoriaModelosInfo.textContent = `Mostrando ${Math.min(rows.length, 20)} modelos próximos.`;
+    gestoriaModelosOverviewTable.innerHTML = "";
+    gestoriaModelosOverviewTable.appendChild(table);
+    gestoriaModelosOverviewInfo.textContent = `Mostrando ${Math.min(rows.length, 20)} modelos próximos.`;
   });
 };
 
@@ -5064,6 +5082,60 @@ const setGestoriaClientModuleTab = (tabName = "") => {
     if (!section) return;
     section.classList.toggle("hidden", key !== target);
   });
+  if (!state.currentClienteId) return;
+  if (target === "fiscal") {
+    loadGestoriaModelos(state.currentClienteId);
+    loadGestoriaTrabajosFiltered(
+      state.currentClienteId,
+      ["Fiscal", "Modelos Hacienda", "Registro Mercantil"],
+      gestoriaFiscalTrabajosTable,
+      gestoriaFiscalTrabajosInfo,
+      "incidencias fiscales"
+    );
+  }
+  if (target === "laboral") {
+    loadGestoriaTrabajosFiltered(
+      state.currentClienteId,
+      ["Altas/Bajas", "Contratos", "Nóminas", "Seguros sociales", "IT/Bajas médicas", "Finiquitos", "Otros laboral"],
+      gestoriaLaboralTable,
+      gestoriaLaboralInfo,
+      "gestiones laborales"
+    );
+  }
+  if (target === "renta") {
+    loadGestoriaTrabajosFiltered(
+      state.currentClienteId,
+      [
+        "Declaración en periodo",
+        "Declaración extemporánea",
+        "Requerimiento",
+        "Complementaria",
+        "Rectificativa",
+        "Otros renta",
+      ],
+      gestoriaRentaTable,
+      gestoriaRentaInfo,
+      "expedientes de renta"
+    );
+  }
+  if (target === "admin") {
+    loadGestoriaTrabajosFiltered(
+      state.currentClienteId,
+      [
+        "Tráfico - Transferencias",
+        "Tráfico - Matriculaciones",
+        "Herencias",
+        "Extinción de condominio",
+        "IMV",
+        "Becas",
+        "Complemento brecha de género",
+        "Otros administrativos",
+      ],
+      gestoriaAdminTable,
+      gestoriaAdminInfo,
+      "gestiones administrativas"
+    );
+  }
 };
 
 const updateGestoriaModuleTabsFromForm = () => {
@@ -9072,6 +9144,83 @@ const loadGestoriaTrabajos = (clienteId) => {
   });
 };
 
+const loadGestoriaTrabajosFiltered = (clienteId, tipos, container, infoEl, label) => {
+  if (!container || !clienteId) return;
+  api(`/api/gestoria_trabajos?cliente_id=${clienteId}`).then((data) => {
+    const rows = (data.rows || []).filter((row) => {
+      if (!tipos || !tipos.length) return true;
+      return tipos.includes(String(row.tipo_trabajo || ""));
+    });
+    if (!rows.length) {
+      container.innerHTML = `<p class='muted'>Sin ${label || "gestiones"} registradas.</p>`;
+      if (infoEl) infoEl.textContent = "";
+      return;
+    }
+    const table = document.createElement("table");
+    const thead = document.createElement("thead");
+    const trHead = document.createElement("tr");
+    ["Gestión", "Estado", "Inicio", "Fin", "Responsable", "Importe", "Notas"].forEach((col) => {
+      const th = document.createElement("th");
+      th.textContent = col;
+      trHead.appendChild(th);
+    });
+    thead.appendChild(trHead);
+    table.appendChild(thead);
+    const tbody = document.createElement("tbody");
+    rows.forEach((row) => {
+      const tr = document.createElement("tr");
+      const cells = [
+        row.tipo_trabajo || "",
+        row.estado || "",
+        row.fecha_inicio || "",
+        row.fecha_fin || "",
+        row.responsable || "",
+        row.importe || "",
+        row.notas || "",
+      ];
+      cells.forEach((value) => {
+        const td = document.createElement("td");
+        td.textContent = value;
+        tr.appendChild(td);
+      });
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    container.innerHTML = "";
+    container.appendChild(table);
+    if (infoEl) infoEl.textContent = `Mostrando ${rows.length} ${label || "gestiones"}.`;
+  });
+};
+
+const submitGestoriaTrabajoForm = async (form, statusEl, afterSubmit) => {
+  if (!form) return;
+  if (!state.currentClienteId) {
+    if (statusEl) statusEl.textContent = "Selecciona un cliente.";
+    return;
+  }
+  if (statusEl) statusEl.textContent = "Guardando...";
+  const formData = new FormData(form);
+  const payload = Object.fromEntries(formData.entries());
+  payload.cliente_id = state.currentClienteId;
+  payload.empresa_nombre = FINCAS_COMPANY;
+  payload.usuario = getCurrentUser();
+  try {
+    const res = await fetch("/api/gestoria_trabajos", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (statusEl) statusEl.textContent = data.error || "Guardado.";
+    if (!data.error) {
+      form.reset();
+      if (typeof afterSubmit === "function") afterSubmit();
+    }
+  } catch (error) {
+    if (statusEl) statusEl.textContent = "Error al guardar.";
+  }
+};
+
 const loadGestoriaDocs = (clienteId) => {
   if (!gestoriaDocsTable) return;
   api(`/api/gestoria_docs?cliente_id=${clienteId}`).then((data) => {
@@ -9322,6 +9471,12 @@ const loadClienteGestoria = (clienteId) => {
     setCheck("mod_registro", row.mod_registro);
     setCheck("mod_trafico", row.mod_trafico);
     setCheck("mod_puntuales", row.mod_puntuales);
+    if (gestoriaRentaDetallesForm) {
+      const rentaInput = gestoriaRentaDetallesForm.querySelector('[name="renta_detalles"]');
+      if (rentaInput) {
+        rentaInput.value = row.renta_detalles || "";
+      }
+    }
     updateGestoriaModuleTabsFromForm();
   });
 };
@@ -11623,6 +11778,101 @@ if (gestoriaModeloForm) {
       .catch(() => {
         if (gestoriaModeloStatus) {
           gestoriaModeloStatus.textContent = "Error al guardar.";
+        }
+      });
+  });
+}
+
+if (gestoriaLaboralForm) {
+  gestoriaLaboralForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    submitGestoriaTrabajoForm(gestoriaLaboralForm, gestoriaLaboralStatus, () => {
+      loadGestoriaTrabajosFiltered(
+        state.currentClienteId,
+        ["Altas/Bajas", "Contratos", "Nóminas", "Seguros sociales", "IT/Bajas médicas", "Finiquitos", "Otros laboral"],
+        gestoriaLaboralTable,
+        gestoriaLaboralInfo,
+        "gestiones laborales"
+      );
+    });
+  });
+}
+
+if (gestoriaRentaForm) {
+  gestoriaRentaForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    submitGestoriaTrabajoForm(gestoriaRentaForm, gestoriaRentaStatus, () => {
+      loadGestoriaTrabajosFiltered(
+        state.currentClienteId,
+        [
+          "Declaración en periodo",
+          "Declaración extemporánea",
+          "Requerimiento",
+          "Complementaria",
+          "Rectificativa",
+          "Otros renta",
+        ],
+        gestoriaRentaTable,
+        gestoriaRentaInfo,
+        "expedientes de renta"
+      );
+    });
+  });
+}
+
+if (gestoriaAdminForm) {
+  gestoriaAdminForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    submitGestoriaTrabajoForm(gestoriaAdminForm, gestoriaAdminStatus, () => {
+      loadGestoriaTrabajosFiltered(
+        state.currentClienteId,
+        [
+          "Tráfico - Transferencias",
+          "Tráfico - Matriculaciones",
+          "Herencias",
+          "Extinción de condominio",
+          "IMV",
+          "Becas",
+          "Complemento brecha de género",
+          "Otros administrativos",
+        ],
+        gestoriaAdminTable,
+        gestoriaAdminInfo,
+        "gestiones administrativas"
+      );
+    });
+  });
+}
+
+if (gestoriaRentaDetallesForm) {
+  gestoriaRentaDetallesForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    if (!state.currentClienteId) {
+      if (gestoriaRentaDetallesStatus) {
+        gestoriaRentaDetallesStatus.textContent = "Selecciona un cliente.";
+      }
+      return;
+    }
+    if (gestoriaRentaDetallesStatus) {
+      gestoriaRentaDetallesStatus.textContent = "Guardando...";
+    }
+    const formData = new FormData(gestoriaRentaDetallesForm);
+    const payload = Object.fromEntries(formData.entries());
+    payload.cliente_id = state.currentClienteId;
+    fetch("/api/cliente_gestoria_update", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (gestoriaRentaDetallesStatus) {
+          gestoriaRentaDetallesStatus.textContent = data.error || "Guardado.";
+        }
+      })
+      .catch(() => {
+        if (gestoriaRentaDetallesStatus) {
+          gestoriaRentaDetallesStatus.textContent = "Error al guardar.";
         }
       });
   });

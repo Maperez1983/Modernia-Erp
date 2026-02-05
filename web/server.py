@@ -1627,6 +1627,8 @@ def ensure_tables(db_path):
     cliente_gestoria_cols = [row[1] for row in conn.execute("PRAGMA table_info(cliente_gestoria)").fetchall()]
     if "mod_renta" not in cliente_gestoria_cols:
         conn.execute("ALTER TABLE cliente_gestoria ADD COLUMN mod_renta INTEGER")
+    if "renta_detalles" not in cliente_gestoria_cols:
+        conn.execute("ALTER TABLE cliente_gestoria ADD COLUMN renta_detalles TEXT")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS gestoria_modelos (
@@ -4330,6 +4332,7 @@ class Handler(BaseHTTPRequestHandler):
                 "mod_registro",
                 "mod_trafico",
                 "mod_puntuales",
+                "renta_detalles",
             )
             updates = {key: payload.get(key) for key in allowed if key in payload}
             if not updates:
@@ -4352,9 +4355,9 @@ class Handler(BaseHTTPRequestHandler):
                     """
                     INSERT INTO cliente_gestoria (
                       id, cliente_id, tipo_cliente, mod_fiscal, mod_laboral, mod_contable,
-                      mod_renta, mod_registro, mod_trafico, mod_puntuales, created_at, updated_at
+                      mod_renta, mod_registro, mod_trafico, mod_puntuales, renta_detalles, created_at, updated_at
                     ) VALUES (
-                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
                     )
                     """,
                     (
@@ -4368,6 +4371,7 @@ class Handler(BaseHTTPRequestHandler):
                         updates.get("mod_registro"),
                         updates.get("mod_trafico"),
                         updates.get("mod_puntuales"),
+                        updates.get("renta_detalles"),
                         now,
                         now,
                     ),
@@ -4889,7 +4893,7 @@ class Handler(BaseHTTPRequestHandler):
             row = conn.execute(
                 """
                 SELECT tipo_cliente, mod_fiscal, mod_laboral, mod_contable,
-                       mod_renta, mod_registro, mod_trafico, mod_puntuales
+                       mod_renta, mod_registro, mod_trafico, mod_puntuales, renta_detalles
                 FROM cliente_gestoria
                 WHERE cliente_id = ?
                 """,
