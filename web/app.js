@@ -1,5 +1,11 @@
 const api = (path) => fetch(path).then((res) => res.json());
 
+const randomId = () => {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+};
+
 const uploadFileToS3 = async (file, prefix, statusEl) => {
   if (!file) return null;
   if (statusEl) statusEl.textContent = "Firmando subida...";
@@ -77,6 +83,7 @@ const state = {
   usersList: [],
   currentUser: "",
   currentClienteId: "",
+  lastCreatedClientId: "",
   currentPage: "home",
   prevPage: "home",
   prevModule: "empresas",
@@ -84,6 +91,7 @@ const state = {
   clientesShowAll: false,
   gestoriaCrmFull: false,
   gestoriaCrmTab: "all",
+  gestoriaCrmView: "crm",
   segurosTab: "dashboard",
 };
 
@@ -140,7 +148,6 @@ const viewTabs = document.getElementById("viewTabs");
 const altaSection = document.getElementById("altaSection");
 const bdtForm = document.getElementById("bdtForm");
 const bdtFormStatus = document.getElementById("bdtFormStatus");
-const fincasAltaSection = document.getElementById("fincasAltaSection");
 const fincasBdtForm = document.getElementById("fincasBdtForm");
 const fincasBdtFormStatus = document.getElementById("fincasBdtFormStatus");
 const estudioAltaTabs = document.getElementById("estudioAltaTabs");
@@ -209,16 +216,12 @@ const cnaeSuggest = document.getElementById("cnaeSuggest");
 const iaeSuggest = document.getElementById("iaeSuggest");
 const actividadSuggest = document.getElementById("actividadSuggest");
 const captacionPropietarios = document.getElementById("captacionPropietarios");
-const fincasAltaTabs = document.getElementById("fincasAltaTabs");
-const fincasAltaMovimientos = document.getElementById("fincasAltaMovimientos");
-const fincasAltaGestoria = document.getElementById("fincasAltaGestoria");
-const fincasAltaSeguros = document.getElementById("fincasAltaSeguros");
-const fincasGestoriaForm = document.getElementById("fincasGestoriaForm");
-const fincasGestoriaFormStatus = document.getElementById("fincasGestoriaFormStatus");
 const fincasSegurosForm = document.getElementById("fincasSegurosForm");
 const fincasSegurosFormStatus = document.getElementById("fincasSegurosFormStatus");
 const aieTab = document.getElementById("aieTab");
 const operativaTab = document.querySelector('#viewTabs [data-tab="operativa"]');
+const bdtTab = document.querySelector('#viewTabs [data-tab="bdt"]');
+const altaTab = document.querySelector('#viewTabs [data-tab="alta"]');
 const crmTab = document.getElementById("crmTab");
 const fincasCrmTab = document.getElementById("fincasCrmTab");
 const segurosCrmTab = document.getElementById("segurosCrmTab");
@@ -230,6 +233,18 @@ const gestoriaDashTab = document.getElementById("gestoriaDashTab");
 const gestoriaAgendaTab = document.getElementById("gestoriaAgendaTab");
 const crmSection = document.getElementById("crmSection");
 const gestoriaCrmSection = document.getElementById("gestoriaCrmSection");
+const gestoriaCrmViews = document.getElementById("gestoriaCrmViews");
+const gestoriaCrmViewCrm = document.getElementById("gestoriaCrmViewCrm");
+const gestoriaCrmViewBdt = document.getElementById("gestoriaCrmViewBdt");
+const gestoriaCrmViewAlta = document.getElementById("gestoriaCrmViewAlta");
+const gestoriaBdtTable = document.getElementById("gestoriaBdtTable");
+const gestoriaBdtInfo = document.getElementById("gestoriaBdtInfo");
+const gestoriaAltaForm = document.getElementById("gestoriaAltaForm");
+const gestoriaAltaStatus = document.getElementById("gestoriaAltaStatus");
+const gestoriaAltaTipoPersona = document.getElementById("gestoriaAltaTipoPersona");
+const gestoriaAltaPersonaFields = gestoriaAltaForm
+  ? gestoriaAltaForm.querySelectorAll('[data-gestoria-persona="fisica"]')
+  : [];
 const gestoriaDashboardSection = document.getElementById("gestoriaDashboardSection");
 const gestoriaContaSection = document.getElementById("gestoriaContaSection");
 const gestoriaAgendaSection = document.getElementById("gestoriaAgendaSection");
@@ -1578,6 +1593,9 @@ const updateExplorerHeader = (empresaName) => {
       setTab("gestoria-dash");
     }
   }
+  if (empresaName === FINCAS_COMPANY && currentTab === "alta") {
+    setTab("gestoria-crm");
+  }
   if (crmTab) {
     const showCrm = empresaName === DASHBOARD_COMPANY;
     crmTab.classList.toggle("hidden", !showCrm);
@@ -2810,6 +2828,20 @@ const splitNombreApellidos = (value, tipoPersona = "") => {
     return { apellidos: parts[1], nombre: parts[0] };
   }
   return { apellidos: "", nombre: parts[0] || "" };
+};
+
+const buildDisplayName = (payload) => {
+  const tipoPersona = String(payload.tipo_persona || "").toLowerCase();
+  const nombreBase = String(payload.nombre || "").trim();
+  const apellido1 = String(payload.apellido1 || "").trim();
+  const apellido2 = String(payload.apellido2 || "").trim();
+  if (tipoPersona === "jurídica") {
+    return nombreBase;
+  }
+  const apellidos = [apellido1, apellido2].filter(Boolean).join(" ").trim();
+  return apellidos || nombreBase
+    ? `${apellidos}${apellidos && nombreBase ? ", " : ""}${nombreBase}`.trim()
+    : "";
 };
 
 const isValidDocumento = (value) => {
@@ -4969,6 +5001,30 @@ const setGestoriaCrmTab = (tabName = "autonomo") => {
   }
 };
 
+const setGestoriaCrmView = (viewName = "crm") => {
+  state.gestoriaCrmView = viewName;
+  if (gestoriaCrmViews) {
+    gestoriaCrmViews.querySelectorAll(".tab").forEach((btn) => {
+      btn.classList.toggle("active", btn.dataset.gestoriaView === viewName);
+    });
+  }
+  if (gestoriaCrmViewCrm) {
+    gestoriaCrmViewCrm.classList.toggle("hidden", viewName !== "crm");
+  }
+  if (gestoriaCrmViewBdt) {
+    gestoriaCrmViewBdt.classList.toggle("hidden", viewName !== "bdt");
+  }
+  if (gestoriaCrmViewAlta) {
+    gestoriaCrmViewAlta.classList.toggle("hidden", viewName !== "alta");
+  }
+  if (viewName === "bdt") {
+    loadGestoriaBdt();
+  }
+  if (viewName === "crm") {
+    loadGestoriaCrm();
+  }
+};
+
 const initSegurosTabs = () => {
   const tabs = document.getElementById("segurosTabs");
   if (!tabs || tabs.dataset.ready === "1") return;
@@ -5157,6 +5213,11 @@ const updateTableVisibility = () => {
   if (viewTabs) {
     viewTabs.classList.toggle("hidden", isClientePage || currentTab === "seguros-crm");
   }
+  if (altaTab) {
+    const company = state.empresas.find((e) => e.id === empresaSelect.value)?.nombre;
+    const hideAlta = !isClientesModule && company === FINCAS_COMPANY;
+    altaTab.classList.toggle("hidden", hideAlta);
+  }
   if (companySummary) {
     companySummary.classList.toggle("hidden", isClientePage || isServiceCrm);
   }
@@ -5196,6 +5257,9 @@ const updateTableVisibility = () => {
       "hidden",
       currentTab !== "gestoria-crm" || isClientePage
     );
+  }
+  if (currentTab === "gestoria-crm" && !isClientePage) {
+    setGestoriaCrmView(state.gestoriaCrmView || "crm");
   }
   if (gestoriaDashboardSection) {
     gestoriaDashboardSection.classList.toggle(
@@ -5249,13 +5313,6 @@ const updateTableVisibility = () => {
       isClientePage || currentTab !== "alta" || company !== DASHBOARD_COMPANY
     );
   }
-  if (fincasAltaSection) {
-    const company = state.empresas.find((e) => e.id === empresaSelect.value)?.nombre;
-    fincasAltaSection.classList.toggle(
-      "hidden",
-      isClientePage || currentTab !== "alta" || company !== FINCAS_COMPANY
-    );
-  }
   // clientesAltaSection visibility handled above for clientes module
   if (aieSection) {
     aieSection.classList.toggle("hidden", currentTab !== "aie" || isClientePage);
@@ -5269,7 +5326,6 @@ const updateTableVisibility = () => {
   }
   updateFincasBdtTabs();
   updateEstudioAltaTabs();
-  updateFincasAltaTabs();
   if (state.currentModule === "clientes") {
     if (dashboardSection) dashboardSection.classList.add("hidden");
     if (finDashboardSection) finDashboardSection.classList.add("hidden");
@@ -5350,36 +5406,6 @@ const updateEstudioAltaTabs = () => {
     estudioAltaDemanda.classList.toggle("hidden", active !== "demanda");
   }
   estudioAltaTabs.querySelectorAll(".tab").forEach((btn) => {
-    btn.classList.toggle("active", btn.dataset.section === active);
-  });
-};
-
-const updateFincasAltaTabs = () => {
-  if (!fincasAltaTabs || !fincasAltaSection) {
-    return;
-  }
-  const company =
-    state.currentEmpresaName ||
-    state.empresas.find((e) => e.id === empresaSelect.value)?.nombre;
-  const showTabs = currentTab === "alta" && company === FINCAS_COMPANY;
-  fincasAltaTabs.classList.toggle("hidden", !showTabs);
-  if (!showTabs) {
-    return;
-  }
-  if (!fincasAltaSection.dataset.active) {
-    fincasAltaSection.dataset.active = "movimientos";
-  }
-  const active = fincasAltaSection.dataset.active;
-  if (fincasAltaMovimientos) {
-    fincasAltaMovimientos.classList.toggle("hidden", active !== "movimientos");
-  }
-  if (fincasAltaGestoria) {
-    fincasAltaGestoria.classList.toggle("hidden", active !== "gestoria");
-  }
-  if (fincasAltaSeguros) {
-    fincasAltaSeguros.classList.toggle("hidden", active !== "seguros");
-  }
-  fincasAltaTabs.querySelectorAll(".tab").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.section === active);
   });
 };
@@ -8254,6 +8280,32 @@ const fillSegurosOcrFields = (fields = {}) => {
   }
 };
 
+const loadGestoriaBdt = async () => {
+  if (!gestoriaBdtTable || !gestoriaBdtInfo) {
+    return;
+  }
+  const empresa = state.empresas.find((item) => item.nombre === FINCAS_COMPANY);
+  if (!empresa) {
+    gestoriaBdtTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
+    gestoriaBdtInfo.textContent = "";
+    return;
+  }
+  gestoriaBdtInfo.textContent = "Cargando...";
+  try {
+    const params = new URLSearchParams({ tabla: "gestoria", empresa_id: empresa.id });
+    const data = await api(`/api/tabla?${params}`);
+    if (data?.error) {
+      gestoriaBdtTable.innerHTML = `<p class='muted'>${data.error}</p>`;
+      gestoriaBdtInfo.textContent = "";
+      return;
+    }
+    renderTableInto(data, gestoriaBdtTable, gestoriaBdtInfo, "Gestoria");
+  } catch (error) {
+    gestoriaBdtTable.innerHTML = "<p class='muted'>Error al cargar.</p>";
+    gestoriaBdtInfo.textContent = "";
+  }
+};
+
 const fillFinAsesoramientoOcrFields = (fields = {}) => {
   if (!finAsesoramientoForm) return;
   const set = (name, value, isDate = false) => {
@@ -10200,17 +10252,6 @@ if (estudioAltaTabs) {
   });
 }
 
-if (fincasAltaTabs) {
-  fincasAltaTabs.addEventListener("click", (event) => {
-    const btn = event.target.closest("[data-section]");
-    if (!btn) return;
-    if (fincasAltaSection) {
-      fincasAltaSection.dataset.active = btn.dataset.section;
-    }
-    updateFincasAltaTabs();
-  });
-}
-
 if (crmNuevaCaptacionBtn) {
   crmNuevaCaptacionBtn.addEventListener("click", () => {
     if (altaSection) {
@@ -10330,6 +10371,14 @@ if (gestoriaCrmTabs) {
     if (gestoriaCrmLimit) gestoriaCrmLimit.value = "50";
     setGestoriaCrmTab(btn.dataset.gestoriaTab);
     loadGestoriaCrm();
+  });
+}
+
+if (gestoriaCrmViews) {
+  gestoriaCrmViews.addEventListener("click", (event) => {
+    const btn = event.target.closest("[data-gestoria-view]");
+    if (!btn) return;
+    setGestoriaCrmView(btn.dataset.gestoriaView || "crm");
   });
 }
 
@@ -12644,38 +12693,107 @@ if (fincasBdtForm) {
   });
 }
 
-if (fincasGestoriaForm) {
-  fincasGestoriaForm.addEventListener("submit", (event) => {
-    event.preventDefault();
-    if (fincasGestoriaFormStatus) {
-      fincasGestoriaFormStatus.textContent = "Guardando...";
+if (gestoriaAltaForm) {
+  bindPostalLookup(gestoriaAltaForm);
+  const updateGestoriaAltaPersona = () => {
+    if (!gestoriaAltaTipoPersona || !gestoriaAltaPersonaFields.length) {
+      return;
     }
-    const formData = new FormData(fincasGestoriaForm);
+    const isJuridica =
+      String(gestoriaAltaTipoPersona.value || "").toLowerCase() === "jurídica";
+    gestoriaAltaPersonaFields.forEach((field) => {
+      field.classList.toggle("hidden", isJuridica);
+    });
+  };
+  updateGestoriaAltaPersona();
+  if (gestoriaAltaTipoPersona) {
+    gestoriaAltaTipoPersona.addEventListener("change", updateGestoriaAltaPersona);
+  }
+  gestoriaAltaForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (gestoriaAltaStatus) {
+      gestoriaAltaStatus.textContent = "Guardando...";
+    }
+    const formData = new FormData(gestoriaAltaForm);
     const payload = Object.fromEntries(formData.entries());
-    payload.empresa_nombre = FINCAS_COMPANY;
-    fetch("/api/gestoria", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    })
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.error) {
-          if (fincasGestoriaFormStatus) {
-            fincasGestoriaFormStatus.textContent = data.error;
-          }
-          return;
-        }
-        if (fincasGestoriaFormStatus) {
-          fincasGestoriaFormStatus.textContent = "Guardado.";
-        }
-        fincasGestoriaForm.reset();
-      })
-      .catch(() => {
-        if (fincasGestoriaFormStatus) {
-          fincasGestoriaFormStatus.textContent = "Error al guardar.";
-        }
+    const fincas = state.empresas.find((empresa) => empresa.nombre === FINCAS_COMPANY);
+    if (!fincas) {
+      if (gestoriaAltaStatus) {
+        gestoriaAltaStatus.textContent = "Empresa gestoría no encontrada.";
+      }
+      return;
+    }
+    const clienteId = randomId();
+    const clientePayload = {
+      id: clienteId,
+      tipo_persona: payload.tipo_persona || "Física",
+      apellido1: payload.apellido1 || "",
+      apellido2: payload.apellido2 || "",
+      nombre: payload.nombre || "",
+      nif: payload.nif || "",
+      telefono: payload.telefono || "",
+      email: payload.email || "",
+      direccion: payload.direccion || "",
+      codigo_postal: payload.codigo_postal || "",
+      poblacion: payload.poblacion || "",
+      provincia: payload.provincia || "",
+    };
+    if (!String(clientePayload.nombre).trim()) {
+      if (gestoriaAltaStatus) {
+        gestoriaAltaStatus.textContent = "Indica el nombre o razón social.";
+      }
+      return;
+    }
+    try {
+      const clienteRes = await fetch("/api/clientes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(clientePayload),
       });
+      const clienteData = await clienteRes.json();
+      if (clienteData.error) {
+        if (gestoriaAltaStatus) gestoriaAltaStatus.textContent = clienteData.error;
+        return;
+      }
+      await fetch("/api/clientes_link", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          cliente_id: clienteId,
+          empresa_id: fincas.id,
+          servicio: "Gestoría",
+          estado: payload.estado || "Alta",
+          fecha_inicio: payload.fecha || "",
+          fecha_fin: payload.fecha_baja || "",
+        }),
+      });
+      await fetch("/api/gestoria", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          empresa_nombre: FINCAS_COMPANY,
+          cliente: buildDisplayName(clientePayload),
+          fecha: payload.fecha || "",
+          cuota: payload.cuota || "",
+          precio: payload.precio || "",
+          tipo: payload.tipo || "",
+          perfil: payload.perfil || "",
+          estado: payload.estado || "",
+          fecha_baja: payload.fecha_baja || "",
+        }),
+      });
+      if (gestoriaAltaStatus) {
+        gestoriaAltaStatus.textContent = "Cliente creado y asignado.";
+      }
+      gestoriaAltaForm.reset();
+      updateGestoriaAltaPersona();
+      loadGestoriaCrm();
+      loadClientesList();
+    } catch (error) {
+      if (gestoriaAltaStatus) {
+        gestoriaAltaStatus.textContent = "Error al guardar.";
+      }
+    }
   });
 }
 
@@ -12767,6 +12885,8 @@ if (clientesForm) {
     }
     delete payload.apellido1;
     delete payload.apellido2;
+    const newClienteId = randomId();
+    payload.id = newClienteId;
     fetch("/api/clientes", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -12781,8 +12901,9 @@ if (clientesForm) {
           return;
         }
         if (clientesFormStatus) {
-          clientesFormStatus.textContent = "Guardado.";
+          clientesFormStatus.textContent = "Guardado. Vincula servicios abajo si aplica.";
         }
+        state.lastCreatedClientId = data.id || newClienteId;
         clientesForm.reset();
         updateClienteAltaPersona();
         Promise.all([loadClientesStats(), loadClientesList()]).then(([_, list]) => {
@@ -12818,10 +12939,12 @@ if (clientesLinkForm) {
     if (clientesLinkFormStatus) {
       clientesLinkFormStatus.textContent = "Guardando...";
     }
-    const clienteId = clientesSelect ? clientesSelect.value : "";
+    const clienteId = clientesSelect && clientesSelect.value
+      ? clientesSelect.value
+      : (state.currentClienteId || state.lastCreatedClientId || "");
     if (!clienteId) {
       if (clientesLinkFormStatus) {
-        clientesLinkFormStatus.textContent = "Selecciona un cliente.";
+        clientesLinkFormStatus.textContent = "Guarda el cliente primero.";
       }
       return;
     }
@@ -12873,44 +12996,10 @@ if (clientesLinkForm) {
           clientesLinkRows.innerHTML = "";
         }
         buildClientesLinkRow();
+        if (state.lastCreatedClientId === clienteId) {
+          state.lastCreatedClientId = "";
+        }
         loadClientesTable();
-      })
-      .catch(() => {
-        if (clientesLinkFormStatus) {
-          clientesLinkFormStatus.textContent = "Error al vincular.";
-        }
-      });
-  });
-}
-
-if (clientesLinkForm) {
-  clientesLinkForm.addEventListener("submit", (event) => {
-    event.preventDefault();
-    if (clientesLinkFormStatus) {
-      clientesLinkFormStatus.textContent = "Vinculando...";
-    }
-    const formData = new FormData(clientesLinkForm);
-    const payload = Object.fromEntries(formData.entries());
-    fetch("/api/clientes_link", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    })
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.error) {
-          if (clientesLinkFormStatus) {
-            clientesLinkFormStatus.textContent = data.error;
-          }
-          return;
-        }
-        if (clientesLinkFormStatus) {
-          clientesLinkFormStatus.textContent = "Vinculado.";
-        }
-        clientesLinkForm.reset();
-        if (state.currentModule === "clientes") {
-          loadClientesTable();
-        }
       })
       .catch(() => {
         if (clientesLinkFormStatus) {

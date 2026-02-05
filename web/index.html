@@ -502,6 +502,12 @@
               <p class="muted">Clientes asignados y estado de gestión.</p>
             </div>
           </div>
+          <div class="tabs" id="gestoriaCrmViews">
+            <button type="button" class="tab active" data-gestoria-view="crm">CRM</button>
+            <button type="button" class="tab" data-gestoria-view="bdt">BDT</button>
+            <button type="button" class="tab" data-gestoria-view="alta">Alta</button>
+          </div>
+          <div id="gestoriaCrmViewCrm">
           <div class="form-card">
             <div class="section-head">
               <div>
@@ -777,6 +783,115 @@
             <div id="gestoriaAuditTable"></div>
             <div class="footer" id="gestoriaAuditInfo"></div>
           </div>
+        </div>
+        <div id="gestoriaCrmViewBdt" class="hidden">
+          <div class="form-card">
+            <h3>BDT Gestoría</h3>
+            <p class="muted">Histórico de clientes importados.</p>
+            <div id="gestoriaBdtTable"></div>
+            <div class="footer" id="gestoriaBdtInfo"></div>
+          </div>
+        </div>
+        <div id="gestoriaCrmViewAlta" class="hidden">
+          <div class="form-card">
+            <h3>Alta Cliente · Gestoría</h3>
+            <p class="muted">El cliente se asigna directamente al servicio de gestoría.</p>
+            <form id="gestoriaAltaForm">
+              <div class="form-grid">
+                <label>
+                  Tipo persona
+                  <select name="tipo_persona" id="gestoriaAltaTipoPersona">
+                    <option value="Física">Física</option>
+                    <option value="Jurídica">Jurídica</option>
+                  </select>
+                </label>
+                <label data-gestoria-persona="fisica">
+                  Apellido 1
+                  <input name="apellido1" />
+                </label>
+                <label data-gestoria-persona="fisica">
+                  Apellido 2
+                  <input name="apellido2" />
+                </label>
+                <label>
+                  Nombre / Razón social
+                  <input name="nombre" required />
+                </label>
+                <label>
+                  DNI/NIF
+                  <input name="nif" />
+                </label>
+                <label>
+                  Teléfono
+                  <input name="telefono" />
+                </label>
+                <label>
+                  Email
+                  <input name="email" type="email" />
+                </label>
+                <label>
+                  Dirección
+                  <input name="direccion" />
+                </label>
+                <label>
+                  Código postal
+                  <input name="codigo_postal" />
+                </label>
+                <label>
+                  Población
+                  <input name="poblacion" />
+                </label>
+                <label>
+                  Provincia
+                  <input name="provincia" />
+                </label>
+                <label>
+                  Fecha alta
+                  <input name="fecha" type="date" />
+                </label>
+                <label>
+                  Tipo servicio
+                  <select name="tipo">
+                    <option>Cuota mensual</option>
+                    <option>Gestión administrativa</option>
+                  </select>
+                </label>
+                <label>
+                  Perfil
+                  <select name="perfil">
+                    <option>Autónomo</option>
+                    <option>Empresa</option>
+                    <option>Cliente Renta</option>
+                    <option>Gestiones Administrativas</option>
+                  </select>
+                </label>
+                <label>
+                  Cuota
+                  <input name="cuota" />
+                </label>
+                <label>
+                  Precio
+                  <input name="precio" type="number" step="0.01" />
+                </label>
+                <label>
+                  Estado
+                  <select name="estado">
+                    <option>Alta</option>
+                    <option>Baja</option>
+                  </select>
+                </label>
+                <label>
+                  Fecha baja
+                  <input name="fecha_baja" type="date" />
+                </label>
+              </div>
+              <div class="form-actions">
+                <button type="submit">Guardar y asignar</button>
+                <span id="gestoriaAltaStatus" class="muted"></span>
+              </div>
+            </form>
+          </div>
+        </div>
         </div>
         <div id="gestoriaDashboardSection" class="hidden">
           <div class="crm-header">
@@ -2013,15 +2128,9 @@
             </form>
           </div>
           <div class="form-card">
-            <h3>Asignar cliente a empresa</h3>
-            <p class="muted">Comparte el cliente con una o varias empresas.</p>
+            <h3>Servicios del nuevo cliente</h3>
+            <p class="muted">Añade los servicios que se asignan al cliente que acabas de crear.</p>
             <form id="clientesLinkForm">
-              <div class="form-grid">
-                <label>
-                  Cliente
-                  <select id="clientesSelect" name="cliente_id" required></select>
-                </label>
-              </div>
               <div id="clientesLinkRows" class="stack"></div>
               <div class="form-actions">
                 <button type="button" id="clientesLinkAdd" class="ghost">Añadir servicio</button>
@@ -2031,227 +2140,6 @@
                 <span id="clientesLinkFormStatus" class="muted"></span>
               </div>
             </form>
-          </div>
-        </div>
-        <div id="fincasAltaSection" class="hidden">
-          <div id="fincasAltaTabs" class="tabs">
-            <button class="tab active" type="button" data-section="movimientos">Ingresos/Gastos</button>
-            <button class="tab" type="button" data-section="gestoria">Clientes Gestoría</button>
-            <button class="tab" type="button" data-section="seguros">Seguros</button>
-          </div>
-          <div id="fincasAltaMovimientos">
-          <div class="form-card">
-            <h3>Alta BDT · Fincas Velazquez</h3>
-            <p class="muted">Registro directo de ingresos y gastos.</p>
-            <form id="fincasBdtForm">
-              <div class="form-grid">
-                <label>
-                  Concepto
-                  <input name="concepto" required />
-                </label>
-                <label>
-                  Tipo
-                  <select name="tipo" required>
-                    <option value="Ingreso">Ingreso</option>
-                    <option value="Gasto">Gasto</option>
-                  </select>
-                </label>
-                <label>
-                  Comisión
-                  <input name="comision" type="number" step="0.01" />
-                </label>
-                <label>
-                  Asesor
-                  <input name="asesor" />
-                </label>
-                <label>
-                  Año
-                  <input name="anio" type="number" min="2000" max="2100" />
-                </label>
-                <label>
-                  Mes
-                  <select name="mes">
-                    <option>Enero</option>
-                    <option>Febrero</option>
-                    <option>Marzo</option>
-                    <option>Abril</option>
-                    <option>Mayo</option>
-                    <option>Junio</option>
-                    <option>Julio</option>
-                    <option>Agosto</option>
-                    <option>Septiembre</option>
-                    <option>Octubre</option>
-                    <option>Noviembre</option>
-                    <option>Diciembre</option>
-                  </select>
-                </label>
-                <label>
-                  SL
-                  <input name="sl" value="Fincas Velazquez" />
-                </label>
-              </div>
-              <div class="form-actions">
-                <button type="submit">Guardar</button>
-                <span id="fincasBdtFormStatus" class="muted"></span>
-              </div>
-            </form>
-          </div>
-          </div>
-          <div id="fincasAltaGestoria" class="hidden">
-            <div class="form-card">
-              <h3>Alta Cliente · Gestoría</h3>
-              <p class="muted">Registro de clientes de la gestoría.</p>
-              <form id="fincasGestoriaForm">
-                <div class="form-grid">
-                  <label>
-                    Cliente
-                    <input name="cliente" required />
-                  </label>
-                  <label>
-                    Fecha
-                    <input name="fecha" type="date" />
-                  </label>
-                  <label>
-                    Cuota
-                    <input name="cuota" />
-                  </label>
-                  <label>
-                    Precio
-                    <input name="precio" type="number" step="0.01" />
-                  </label>
-                  <label>
-                    Tipo
-                    <select name="tipo">
-                      <option value="Autonomo">Autónomo</option>
-                      <option value="Empresa">Empresa</option>
-                      <option value="Comunidad de propietarios">Comunidad</option>
-                    </select>
-                  </label>
-                  <label>
-                    Perfil
-                    <input name="perfil" />
-                  </label>
-                  <label>
-                    Estado
-                    <select name="estado">
-                      <option value="Alta">Alta</option>
-                      <option value="Baja">Baja</option>
-                    </select>
-                  </label>
-                  <label>
-                    Fecha baja
-                    <input name="fecha_baja" type="date" />
-                  </label>
-                </div>
-                <div class="form-actions">
-                  <button type="submit">Guardar</button>
-                  <span id="fincasGestoriaFormStatus" class="muted"></span>
-                </div>
-              </form>
-            </div>
-          </div>
-          <div id="fincasAltaSeguros" class="hidden">
-            <div class="form-card">
-              <h3>Alta Póliza · Seguros</h3>
-              <p class="muted">Registro de pólizas en la BDT de seguros.</p>
-              <form id="fincasSegurosForm">
-                <div class="form-grid">
-                  <label>
-                    Mes creación
-                    <select name="mes_creacion">
-                      <option>Enero</option>
-                      <option>Febrero</option>
-                      <option>Marzo</option>
-                      <option>Abril</option>
-                      <option>Mayo</option>
-                      <option>Junio</option>
-                      <option>Julio</option>
-                      <option>Agosto</option>
-                      <option>Septiembre</option>
-                      <option>Octubre</option>
-                      <option>Noviembre</option>
-                      <option>Diciembre</option>
-                    </select>
-                  </label>
-                  <label>
-                    Fecha efecto
-                    <input name="fecha_efecto" type="date" />
-                  </label>
-                  <label>
-                    Fecha vencimiento
-                    <input name="fecha_vencimiento" type="date" />
-                  </label>
-                  <label>
-                    Tomador
-                    <input name="tomador" required />
-                  </label>
-                  <label>
-                    Compañía
-                    <input name="compania" />
-                  </label>
-                  <label>
-                    Ramo
-                    <input name="ramo" />
-                  </label>
-                  <label>
-                    Nº Póliza
-                    <input name="poliza_numero" />
-                  </label>
-                  <label>
-                    Prima neta
-                    <input name="prima_neta" type="number" step="0.01" />
-                  </label>
-                  <label>
-                    Prima total
-                    <input name="prima_total" type="number" step="0.01" />
-                  </label>
-                  <label>
-                    Comisión
-                    <input name="comision" type="number" step="0.01" />
-                  </label>
-                  <label>
-                    Producción
-                    <select name="produccion">
-                      <option>Nueva producción</option>
-                      <option>Cambio de mediador</option>
-                    </select>
-                  </label>
-                  <label>
-                    Colaborador
-                    <input name="colaborador" />
-                  </label>
-                  <label>
-                    Estado
-                    <select name="estado">
-                      <option>Presupuesto</option>
-                      <option>Contratada</option>
-                      <option>En vigor</option>
-                    </select>
-                  </label>
-                  <label>
-                    Estado renovación
-                    <select name="estado_renovacion">
-                      <option>Pendiente</option>
-                      <option>Renovada</option>
-                      <option>Cambio compania</option>
-                      <option>Baja</option>
-                    </select>
-                  </label>
-                  <label>
-                    Fecha renovación
-                    <input name="renovacion_fecha" type="date" />
-                  </label>
-                  <label>
-                    Nueva póliza ref.
-                    <input name="nueva_poliza_ref" />
-                  </label>
-                </div>
-                <div class="form-actions">
-                  <button type="submit">Guardar</button>
-                  <span id="fincasSegurosFormStatus" class="muted"></span>
-                </div>
-              </form>
-            </div>
           </div>
         </div>
         <div id="hipotecaSection" class="hidden">
@@ -3438,6 +3326,6 @@
       </div>
     </div>
 
-    <script src="app.js?v=298"></script>
+    <script src="app.js?v=301"></script>
   </body>
 </html>
