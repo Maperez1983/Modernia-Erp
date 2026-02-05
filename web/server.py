@@ -362,6 +362,15 @@ def ocr_image_external(image_bytes):
     except Exception:
         return "", "OCR externo: sin texto"
 
+def external_ocr_available():
+    credentials_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+    api_key = os.environ.get("GOOGLE_VISION_API_KEY") or os.environ.get("VISION_API_KEY")
+    return bool(api_key) or (credentials_path and os.path.exists(credentials_path))
+
+def docai_available():
+    processor_id = os.environ.get("DOCUMENTAI_PROCESSOR_ID") or os.environ.get("DOC_AI_PROCESSOR_ID")
+    return bool(processor_id)
+
 def normalize_field_label(value):
     value = value or ""
     value = value.lower()
@@ -672,81 +681,81 @@ def ocr_best_block(image_path, box, use_external):
 
 def ocr_pdf_first_page(pdf_path):
     tmp_base = "/private/tmp"
-    with tempfile.TemporaryDirectory(dir=tmp_base) as tmpdir:
-        img_path = os.path.join(tmpdir, "page.png")
+    is_pdf = str(pdf_path).lower().endswith(".pdf")
+    tmpdir = None
+    img_path = pdf_path
+    if is_pdf:
         try:
-            subprocess.run(
-                ["sips", "-s", "format", "png", pdf_path, "--out", img_path],
-                check=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-            )
-        except subprocess.CalledProcessError as err:
-            return "", f"sips: {err.stderr.strip()}"
+            tmpdir = tempfile.TemporaryDirectory(dir=tmp_base)
+            images, img_err = pdftoppm_first_page(pdf_path, pages=1)
+            if not images:
+                if tmpdir:
+                    tmpdir.cleanup()
+                return "", img_err or "pdftoppm: sin imagen"
+            img_path = images[0]
         except Exception as err:
-            return "", f"sips: {err}"
-        try:
-            subprocess.run(
-                ["sips", "-Z", "2400", img_path, "--out", img_path],
-                check=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-        except Exception:
-            pass
-        if not os.path.exists(img_path):
-            return "", "sips: no se generó la imagen"
-        lang = detect_ocr_lang()
-        tesseract_cmd = (
-            shutil.which("tesseract")
-            or "/opt/homebrew/bin/tesseract"
-            or "/usr/local/bin/tesseract"
+            if tmpdir:
+                tmpdir.cleanup()
+            return "", f"pdftoppm: {err}"
+    if not os.path.exists(img_path):
+        if tmpdir:
+            tmpdir.cleanup()
+        return "", "imagen no encontrada para OCR"
+    lang = detect_ocr_lang()
+    tesseract_cmd = (
+        shutil.which("tesseract")
+        or "/opt/homebrew/bin/tesseract"
+        or "/usr/local/bin/tesseract"
+    )
+    if not tesseract_cmd or not os.path.exists(tesseract_cmd):
+        if tmpdir:
+            tmpdir.cleanup()
+        return "", "tesseract no encontrado en PATH"
+    env = os.environ.copy()
+    if os.path.isdir(TESSDATA_DIR):
+        env["TESSDATA_PREFIX"] = TESSDATA_DIR
+    def run_tesseract(psm):
+        result = subprocess.run(
+            [
+                tesseract_cmd,
+                img_path,
+                "stdout",
+                "-l",
+                lang,
+                "--oem",
+                "1",
+                "--psm",
+                str(psm),
+                "-c",
+                "user_defined_dpi=300",
+                "-c",
+                "preserve_interword_spaces=1",
+            ],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=env,
+            text=True,
         )
-        if not tesseract_cmd or not os.path.exists(tesseract_cmd):
-            return "", "tesseract no encontrado en PATH"
-        env = os.environ.copy()
-        if os.path.isdir(TESSDATA_DIR):
-            env["TESSDATA_PREFIX"] = TESSDATA_DIR
-        def run_tesseract(psm):
-            result = subprocess.run(
-                [
-                    tesseract_cmd,
-                    img_path,
-                    "stdout",
-                    "-l",
-                    lang,
-                    "--oem",
-                    "1",
-                    "--psm",
-                    str(psm),
-                    "-c",
-                    "user_defined_dpi=300",
-                    "-c",
-                    "preserve_interword_spaces=1",
-                ],
-                check=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                env=env,
-                text=True,
-            )
-            return result.stdout or ""
-        try:
-            candidates = []
-            for psm in (6, 4, 11):
-                try:
-                    candidates.append(run_tesseract(psm))
-                except subprocess.CalledProcessError:
-                    continue
-            if not candidates:
-                return "", "tesseract: sin salida"
-            best = max(candidates, key=lambda t: (len(t.strip()), sum(ch.isdigit() for ch in t)))
-            return best, ""
-        except subprocess.CalledProcessError as err:
-            return "", f"tesseract: {err.stderr.strip()}"
-        except Exception as err:
-            return "", f"tesseract: {err}"
+        return result.stdout or ""
+    try:
+        candidates = []
+        for psm in (6, 4, 11):
+            try:
+                candidates.append(run_tesseract(psm))
+            except subprocess.CalledProcessError:
+                continue
+        if not candidates:
+            return "", "tesseract: sin salida"
+        best = max(candidates, key=lambda t: (len(t.strip()), sum(ch.isdigit() for ch in t)))
+        return best, ""
+    except subprocess.CalledProcessError as err:
+        return "", f"tesseract: {err.stderr.strip()}"
+    except Exception as err:
+        return "", f"tesseract: {err}"
+    finally:
+        if tmpdir:
+            tmpdir.cleanup()
 
 def pdftotext_extract(pdf_path, pages=None):
     cmd = (
@@ -909,17 +918,27 @@ def extract_pdf_text(pdf_path):
         return text, "", "tesseract"
     return "", err or img_err or ocr_err, "tesseract"
 
-def ocr_pdf_all_pages(pdf_path):
+def ocr_pdf_all_pages(pdf_path, use_external=False):
     images, img_err = pdftoppm_first_page(pdf_path, pages=None)
     if images:
         combined = []
+        last_err = ""
         for img_path in images:
-            page_text, ocr_err = ocr_pdf_first_page(img_path)
+            page_text = ""
+            ocr_err = ""
+            if use_external:
+                vision_bytes = prepare_image_bytes_for_vision(img_path)
+                if vision_bytes:
+                    page_text, ocr_err = ocr_image_external(vision_bytes)
+            if not page_text:
+                page_text, ocr_err = ocr_pdf_first_page(img_path)
             if page_text:
                 combined.append(page_text)
+            elif ocr_err:
+                last_err = ocr_err
         if combined:
             return "\n".join(combined), ""
-        return "", ocr_err or img_err
+        return "", last_err or img_err
     text, ocr_err = ocr_pdf_first_page(pdf_path)
     if text:
         return text, ""
@@ -2797,11 +2816,11 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 fields = parse_poliza_text(text)
                 if not any(str(value or "").strip() for value in fields.values()):
-                    ocr_text, ocr_err = ocr_pdf_all_pages(tmp_path)
+                    ocr_text, ocr_err = ocr_pdf_all_pages(tmp_path, use_external=external_ocr_available())
                     if ocr_text:
                         fields = parse_poliza_text(ocr_text)
                         text = ocr_text
-                        method = "tesseract"
+                        method = "vision" if external_ocr_available() else "tesseract"
                     elif ocr_err and not err_detail:
                         err_detail = ocr_err
                 json_response(
@@ -2827,6 +2846,20 @@ class Handler(BaseHTTPRequestHandler):
                 return
             use_external = bool(payload.get("use_external"))
             ocr_mode = (payload.get("ocr_mode") or "").strip().lower()
+            if external_ocr_available() and not use_external:
+                use_external = True
+            if not ocr_mode:
+                if external_ocr_available() and docai_available():
+                    ocr_mode = "hybrid"
+                elif docai_available():
+                    ocr_mode = "docai"
+            if external_ocr_available() and not use_external:
+                use_external = True
+            if not ocr_mode:
+                if external_ocr_available() and docai_available():
+                    ocr_mode = "hybrid"
+                elif docai_available():
+                    ocr_mode = "docai"
             mime = ""
             if "," in data_uri:
                 header, data_uri = data_uri.split(",", 1)
