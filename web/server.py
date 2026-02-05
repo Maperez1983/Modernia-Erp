@@ -23,6 +23,8 @@ UPLOADS = ROOT / "uploads"
 DB_DEFAULT = ROOT.parent / "data" / "erp_import2.sqlite"
 TESSDATA_DIR = "/opt/homebrew/share/tessdata"
 POSTAL_CATALOG_PATH = ROOT.parent / "data" / "catalogos" / "postal_catalogo.csv"
+S3_BUCKET = os.environ.get("AWS_S3_BUCKET") or os.environ.get("S3_BUCKET")
+S3_REGION = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION")
 
 POSTAL_PROVINCES = {
     "01": "Álava",
@@ -167,7 +169,26 @@ def detect_ocr_lang():
         has_spa = os.path.exists(os.path.join(TESSDATA_DIR, "spa.traineddata"))
         has_eng = os.path.exists(os.path.join(TESSDATA_DIR, "eng.traineddata"))
         if has_spa and has_eng:
-            return "spa+eng"
+    return "spa+eng"
+
+
+def s3_client():
+    try:
+        import boto3
+    except ImportError:
+        return None
+    if not S3_BUCKET or not S3_REGION:
+        return None
+    return boto3.client("s3", region_name=S3_REGION)
+
+
+def s3_safe_key(prefix, filename):
+    base = os.path.basename(filename or "archivo.pdf")
+    safe = re.sub(r"[^A-Za-z0-9._-]", "_", base)
+    stamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    rand = os.urandom(4).hex()
+    prefix = prefix.strip("/").strip() if prefix else "seguros"
+    return f"{prefix}/{stamp}_{rand}_{safe}"
         if has_spa:
             return "spa"
         if os.path.exists(os.path.join(TESSDATA_DIR, "eng.traineddata")):
@@ -1858,6 +1879,14 @@ def ensure_tables(db_path):
     campanas_cols = [row[1] for row in conn.execute("PRAGMA table_info(seguros_campanas)").fetchall()]
     if "origen" not in campanas_cols:
         conn.execute("ALTER TABLE seguros_campanas ADD COLUMN origen TEXT")
+    try:
+        seguros_cols = [row[1] for row in conn.execute("PRAGMA table_info(seguros)").fetchall()]
+        if "poliza_key" not in seguros_cols:
+            conn.execute("ALTER TABLE seguros ADD COLUMN poliza_key TEXT")
+        if "poliza_url" not in seguros_cols:
+            conn.execute("ALTER TABLE seguros ADD COLUMN poliza_url TEXT")
+    except sqlite3.Error:
+        pass
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS seguros_comisiones (
@@ -2090,6 +2119,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/seguros_comisiones",
             "/api/seguros_comisiones_update",
             "/api/seguros_comisiones_delete",
+            "/api/s3_presign",
             "/api/clientes",
             "/api/clientes_link",
             "/api/cliente_update",
@@ -2181,6 +2211,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/seguros_comisiones",
             "/api/seguros_comisiones_update",
             "/api/seguros_comisiones_delete",
+            "/api/s3_presign",
         ):
             if not empresa_nombre:
                 json_response(self, {"error": "empresa_nombre requerido"}, status=400)
@@ -2243,6 +2274,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/fin_asesoramiento_ocr",
             "/api/fin_asesoramiento_ocr_guided",
             "/api/fin_asesoramiento_ocr_auto",
+            "/api/s3_presign",
             "/api/inmueble_checklist_generate",
             "/api/inmueble_checklist_update",
         ):
@@ -2275,6 +2307,31 @@ class Handler(BaseHTTPRequestHandler):
                     now,
                 ),
             )
+        if parsed.path == "/api/s3_presign":
+            filename = payload.get("filename") or "archivo.pdf"
+            content_type = payload.get("content_type") or "application/pdf"
+            prefix = payload.get("prefix") or "seguros"
+            client = s3_client()
+            if not client:
+                json_response(self, {"error": "S3 no configurado"}, status=400)
+                return
+            key = s3_safe_key(prefix, filename)
+            try:
+                url = client.generate_presigned_url(
+                    "put_object",
+                    Params={
+                        "Bucket": S3_BUCKET,
+                        "Key": key,
+                        "ContentType": content_type,
+                    },
+                    ExpiresIn=900,
+                )
+            except Exception:
+                json_response(self, {"error": "No se pudo firmar la subida"}, status=500)
+                return
+            public_url = f"https://{S3_BUCKET}.s3.{S3_REGION}.amazonaws.com/{key}"
+            json_response(self, {"url": url, "key": key, "public_url": public_url})
+            return
         if parsed.path == "/api/movimientos":
             conn.execute(
                 """
@@ -3137,9 +3194,10 @@ class Handler(BaseHTTPRequestHandler):
                   tomador, compania, ramo, poliza_numero, prima_neta,
                   prima_total, comision, produccion, colaborador, estado,
                   estado_renovacion, renovacion_fecha, nueva_poliza_ref,
+                  poliza_key, poliza_url,
                   created_at, updated_at
                 ) VALUES (
-                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
                 )
                 """,
                 (
@@ -3161,6 +3219,8 @@ class Handler(BaseHTTPRequestHandler):
                     payload.get("estado_renovacion"),
                     payload.get("renovacion_fecha"),
                     payload.get("nueva_poliza_ref"),
+                    payload.get("poliza_key"),
+                    payload.get("poliza_url"),
                     now,
                     now,
                 ),
@@ -3462,6 +3522,8 @@ class Handler(BaseHTTPRequestHandler):
                 "renovacion_fecha",
                 "nueva_poliza_ref",
                 "poliza_numero",
+                "poliza_key",
+                "poliza_url",
             ):
                 if key in payload:
                     updates[key] = payload.get(key)
@@ -4628,6 +4690,27 @@ class Handler(BaseHTTPRequestHandler):
                     except sqlite3.Error:
                         pass
             json_response(self, {"years": sorted(years)})
+            return
+
+        if path == "/api/s3_url":
+            key = params.get("key", [""])[0]
+            if not key:
+                json_response(self, {"error": "key requerido"}, status=400)
+                return
+            client = s3_client()
+            if not client:
+                json_response(self, {"error": "S3 no configurado"}, status=400)
+                return
+            try:
+                url = client.generate_presigned_url(
+                    "get_object",
+                    Params={"Bucket": S3_BUCKET, "Key": key},
+                    ExpiresIn=3600,
+                )
+            except Exception:
+                json_response(self, {"error": "No se pudo firmar el archivo"}, status=500)
+                return
+            json_response(self, {"url": url})
             return
 
         if path == "/api/tablas":

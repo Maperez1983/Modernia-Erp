@@ -1,5 +1,42 @@
 const api = (path) => fetch(path).then((res) => res.json());
 
+const uploadFileToS3 = async (file, prefix, statusEl) => {
+  if (!file) return null;
+  if (statusEl) statusEl.textContent = "Firmando subida...";
+  const presign = await fetch("/api/s3_presign", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      filename: file.name || "archivo.pdf",
+      content_type: file.type || "application/pdf",
+      prefix: prefix || "seguros",
+    }),
+  }).then((res) => res.json());
+  if (presign.error) {
+    throw new Error(presign.error);
+  }
+  if (statusEl) statusEl.textContent = "Subiendo a la nube...";
+  await fetch(presign.url, {
+    method: "PUT",
+    headers: { "Content-Type": file.type || "application/pdf" },
+    body: file,
+  });
+  return presign;
+};
+
+const openS3File = async (key, fallbackUrl) => {
+  if (key) {
+    const data = await api(`/api/s3_url?key=${encodeURIComponent(key)}`);
+    if (data && data.url) {
+      window.open(data.url, "_blank", "noopener");
+      return;
+    }
+  }
+  if (fallbackUrl) {
+    window.open(fallbackUrl, "_blank", "noopener");
+  }
+};
+
 const getCurrentUser = () => {
   if (state.currentUser) {
     return state.currentUser;
@@ -6155,7 +6192,7 @@ const renderTable = (data, options = {}) => {
   const thead = document.createElement("thead");
   const trHead = document.createElement("tr");
   columns.forEach((col) => {
-    if (col === "id") {
+    if (col === "id" || col === "poliza_key" || col === "poliza_url") {
       return;
     }
     const th = document.createElement("th");
@@ -6176,7 +6213,7 @@ const renderTable = (data, options = {}) => {
     let rowId = "";
     row.forEach((cell, idx) => {
       const colName = columns[idx] || "";
-      if (colName === "id") {
+      if (colName === "id" || colName === "poliza_key" || colName === "poliza_url") {
         rowId = cell;
         return;
       }
@@ -6258,17 +6295,27 @@ const renderTableInto = (data, container, infoEl, label) => {
     return;
   }
   const { columns, rows } = data;
+  const hasPolizaKey = columns.includes("poliza_key");
+  const hasPolizaUrl = columns.includes("poliza_url");
+  const polizaKeyIndex = columns.indexOf("poliza_key");
+  const polizaUrlIndex = columns.indexOf("poliza_url");
+  const showPdf = label === "Seguros" && (hasPolizaKey || hasPolizaUrl);
   const table = document.createElement("table");
   const thead = document.createElement("thead");
   const trHead = document.createElement("tr");
   columns.forEach((col) => {
-    if (col === "id") {
+    if (col === "id" || col === "poliza_key" || col === "poliza_url") {
       return;
     }
     const th = document.createElement("th");
     th.textContent = formatHeader(col);
     trHead.appendChild(th);
   });
+  if (showPdf) {
+    const th = document.createElement("th");
+    th.textContent = "PDF";
+    trHead.appendChild(th);
+  }
   thead.appendChild(trHead);
   table.appendChild(thead);
 
@@ -6277,7 +6324,7 @@ const renderTableInto = (data, container, infoEl, label) => {
     const tr = document.createElement("tr");
     row.forEach((cell, idx) => {
       const colName = columns[idx] || "";
-      if (colName === "id") {
+      if (colName === "id" || colName === "poliza_key" || colName === "poliza_url") {
         return;
       }
       const td = document.createElement("td");
@@ -6285,6 +6332,24 @@ const renderTableInto = (data, container, infoEl, label) => {
       td.textContent = formatted === null ? "" : formatted;
       tr.appendChild(td);
     });
+    if (showPdf) {
+      const td = document.createElement("td");
+      const key = polizaKeyIndex >= 0 ? row[polizaKeyIndex] : "";
+      const url = polizaUrlIndex >= 0 ? row[polizaUrlIndex] : "";
+      if (key || url) {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "secondary";
+        btn.textContent = "Ver";
+        btn.addEventListener("click", () => {
+          openS3File(key, url);
+        });
+        td.appendChild(btn);
+      } else {
+        td.textContent = "-";
+      }
+      tr.appendChild(td);
+    }
     tbody.appendChild(tr);
   });
   table.appendChild(tbody);
@@ -8170,7 +8235,7 @@ const fillFinAsesoramientoOcrFields = (fields = {}) => {
   applyPrestamoFromOcr(fields, "cliente2");
 };
 
-const saveSegurosOcrRecord = () => {
+const saveSegurosOcrRecord = async () => {
   if (segurosOcrSaveStatus) {
     segurosOcrSaveStatus.textContent = "";
   }
@@ -8208,6 +8273,24 @@ const saveSegurosOcrRecord = () => {
     colaborador: seguroOcrColaborador ? seguroOcrColaborador.value.trim() : "",
     estado: seguroOcrEstado ? seguroOcrEstado.value : "",
   };
+  const file =
+    segurosOcrFile && segurosOcrFile.files && segurosOcrFile.files.length
+      ? segurosOcrFile.files[0]
+      : null;
+  if (file) {
+    try {
+      const upload = await uploadFileToS3(file, "seguros", segurosOcrSaveStatus);
+      if (upload) {
+        payload.poliza_key = upload.key || "";
+        payload.poliza_url = upload.public_url || "";
+      }
+    } catch (err) {
+      if (segurosOcrSaveStatus) {
+        segurosOcrSaveStatus.textContent = `Error al subir: ${err.message}`;
+      }
+      return;
+    }
+  }
   if (segurosOcrSaveStatus) {
     segurosOcrSaveStatus.textContent = "Guardando...";
   }
@@ -10645,7 +10728,7 @@ if (segurosOcrButton) {
               segurosOcrStatus.textContent = `No se detectaron campos${lang}${method}.`;
             }
           }
-          saveSegurosOcrRecord();
+          saveSegurosOcrRecord().catch(() => {});
         })
         .catch(() => {
           if (segurosOcrStatus) {
@@ -10672,7 +10755,7 @@ if (seguroOcrFechaEfecto) {
 }
 
 if (segurosOcrSave) {
-  segurosOcrSave.addEventListener("click", () => {
+  segurosOcrSave.addEventListener("click", async () => {
     const recordId = segurosOcrSave.dataset.recordId;
     if (recordId) {
       const payload = {
@@ -10682,6 +10765,24 @@ if (segurosOcrSave) {
         fecha_vencimiento: seguroOcrFechaVencimiento ? seguroOcrFechaVencimiento.value : "",
         poliza_numero: seguroOcrPoliza ? seguroOcrPoliza.value.trim() : "",
       };
+      const file =
+        segurosOcrFile && segurosOcrFile.files && segurosOcrFile.files.length
+          ? segurosOcrFile.files[0]
+          : null;
+      if (file) {
+        try {
+          const upload = await uploadFileToS3(file, "seguros", segurosOcrSaveStatus);
+          if (upload) {
+            payload.poliza_key = upload.key || "";
+            payload.poliza_url = upload.public_url || "";
+          }
+        } catch (err) {
+          if (segurosOcrSaveStatus) {
+            segurosOcrSaveStatus.textContent = `Error al subir: ${err.message}`;
+          }
+          return;
+        }
+      }
       fetch("/api/seguros_update", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -10709,7 +10810,7 @@ if (segurosOcrSave) {
         });
       return;
     }
-    saveSegurosOcrRecord();
+    saveSegurosOcrRecord().catch(() => {});
   });
 }
 
@@ -10732,11 +10833,20 @@ if (segurosUpdateButton) {
     }
     if (segurosUpdateStatus) segurosUpdateStatus.textContent = "Procesando OCR...";
     const reader = new FileReader();
-    reader.onload = () => {
+    reader.onload = async () => {
       const payload = {
         filename: file.name,
         content: reader.result,
       };
+      let upload = null;
+      try {
+        upload = await uploadFileToS3(file, "seguros", segurosUpdateStatus);
+      } catch (err) {
+        if (segurosUpdateStatus) {
+          segurosUpdateStatus.textContent = `Error al subir: ${err.message}`;
+        }
+        return;
+      }
       fetch("/api/seguros_ocr", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -10767,6 +10877,17 @@ if (segurosUpdateButton) {
             fecha_efecto: fields.fecha_efecto || "",
             fecha_vencimiento: fields.fecha_vencimiento || "",
           };
+          if (upload) {
+            fetch("/api/seguros_update", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                id: recordId,
+                poliza_key: upload.key || "",
+                poliza_url: upload.public_url || "",
+              }),
+            }).catch(() => {});
+          }
           fetch("/api/seguros_enrich", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
