@@ -969,6 +969,8 @@ def parse_poliza_text(text):
         r"Nombre y apellidos\s*:\s*([^\n]+)",
         r"Titular\s*de\s*la\s*p[oó]liza\s*:\s*([^\n]+)",
         r"Datos\s+del\s+asegurado\s*[:\-]?\s*([^\n]+)",
+        r"Datos\s+Tomador\s*/\s*Conductor\s*Nombre\s*([A-ZÁÉÍÓÚÑ\s]+?)\s+Doc",
+        r"Nombre\s+([A-ZÁÉÍÓÚÑ\s]+?)\s+Doc\.?\s+Identificaci[oó]n",
         r"Tomador\s*de\s*seguro\s*:\s*([^\n]+)",
         r"Tomador\s*:\s*([^\n]+)",
         r"Asegurado\s*:\s*([^\n]+)",
@@ -995,6 +997,8 @@ def parse_poliza_text(text):
     ])
     fields["direccion"] = pick([
         r"Direcci[oó]n\s*[:\-]?\s*([^\n]+)",
+        r"Direcci[oó]n\s+([A-Z0-9ÁÉÍÓÚÑ\s,./-]+?\s+\d{5}\s+[A-ZÁÉÍÓÚÑ\s]+)",
+        r"Direcci[oó]n\s+([A-Z0-9ÁÉÍÓÚÑ\s,./-]+?)(?:\\s+Uso\\s+|\\s+Beneficiario|\\s+Cl[aá]usulas|\\s+Datos|\\n)",
         r"Domicilio\s*[:\-]?\s*([^\n]+)",
     ])
     fields["fecha_nacimiento"] = pick([
@@ -1004,6 +1008,9 @@ def parse_poliza_text(text):
     fields["poliza_numero"] = pick([
         r"N[ºo]\s*de\s*p[oó]liza\s*[:#]?\s*([A-Z0-9/.\-]+)",
         r"N[ºo]\s*p[oó]liza\s*[:#]?\s*([A-Z0-9/.\-]+)",
+        r"N[ºo]\s*de\s*P[oó]liza\s*([A-Z0-9/.\-]+)",
+        r"N[ºo]\s+de\s+P[oó]liza\s+([A-Z0-9/.\-]+)",
+        r"N[ºo]\s+P[oó]liza\s*[:#]?\s*([0-9]{5,})",
         r"(?:P[oó]liza|P[oó]liza\s*n[ºo]|N[ºo] P[oó]liza)\s*[:#]?\s*([A-Z0-9/.\-]+)",
         r"P[oó]liza\s*[:#]?\s*([A-Z0-9/.\-]+)",
         r"N[úu]mero\s*de\s*p[oó]liza\s*[:#]?\s*([A-Z0-9/.\-]+)",
@@ -1025,12 +1032,14 @@ def parse_poliza_text(text):
         r"Fecha\s*inicio\s*[:\-]?\s*([0-9]{1,2}[/-][0-9]{1,2}[/-][0-9]{2,4})",
         r"Inicio\s*vigencia\s*[:\-]?\s*([0-9]{1,2}[/-][0-9]{1,2}[/-][0-9]{2,4})",
         r"Per[ií]odo\s*del\s*seguro\s*([0-9]{1,2}[/-][0-9]{1,2}[/-][0-9]{2,4})",
+        r"Per[ií]odo\s*del\s*seguro\s*([0-9]{1,2}[/-][0-9]{1,2}[/-][0-9]{2,4})\s*[0-9:]*",
     ])
     fields["ramo"] = pick([
         r"Ramo\s*[:\-]?\s*([^\n]+)",
         r"Modalidad\s*[:\-]?\s*([^\n]+)",
+        r"Modalidad\s+([A-ZÁÉÍÓÚÑa-z\s]+?)\s+Datos\s+Tomador",
         r"Producto\s*[:\-]?\s*([^\n]+)",
-        r"Seguro\s*de\s*([A-ZÁÉÍÓÚÑa-z\s]+)",
+        r"Seguro\s*de\s*([A-ZÁÉÍÓÚÑa-z\s]+?)(?:\\.|\\n|Datos)",
     ])
     if not fields["ramo"]:
         ramo_keywords = [
@@ -1071,6 +1080,20 @@ def parse_poliza_text(text):
             if cut in tomador:
                 tomador = tomador.split(cut)[0].strip()
         fields["tomador"] = tomador
+    if fields["direccion"]:
+        fields["direccion"] = re.sub(r"\s{2,}.*$", "", fields["direccion"]).strip()
+        postal_match = re.search(r"\b\d{5}\s+[A-ZÁÉÍÓÚÑ\s]+\b", cleaned)
+        if postal_match and postal_match.group(0) not in fields["direccion"]:
+            fields["direccion"] = f"{fields['direccion']} {postal_match.group(0)}".strip()
+    if fields["poliza_numero"]:
+        if not re.search(r"\\d", fields["poliza_numero"]):
+            fields["poliza_numero"] = ""
+    if not fields["poliza_numero"]:
+        pol_match = re.search(r"N[ºo]\\s*P[oó]liza\\s*[:#]?\\s*([0-9]{5,})", cleaned, re.IGNORECASE)
+        if not pol_match:
+            pol_match = re.search(r"N[ºo]\\s*P[oó]liza\\s*[:#]?\\s*([0-9]{5,})", text, re.IGNORECASE)
+        if pol_match:
+            fields["poliza_numero"] = pol_match.group(1).strip()
     if fields["dni"]:
         dni = fields["dni"].strip()
         if not re.match(r"^[0-9]{8}[A-Z]$", dni):
@@ -1086,6 +1109,33 @@ def parse_poliza_text(text):
             cif_match = re.search(r"\b([ABCDEFGHJNPQRSUVW][0-9]{7}[0-9A-Z])\b", text)
             if cif_match:
                 fields["dni"] = cif_match.group(1)
+    if fields["ramo"] and "@" in fields["ramo"]:
+        fields["ramo"] = ""
+    if fields["ramo"]:
+        fields["ramo"] = fields["ramo"].splitlines()[0].strip()
+    if not fields["ramo"]:
+        modal_match = re.search(
+            r"Modalidad\s+([A-ZÁÉÍÓÚÑa-z\s]+?)\s+Datos\s+Tomador",
+            cleaned,
+            re.IGNORECASE,
+        )
+        if modal_match:
+            fields["ramo"] = modal_match.group(1).strip()
+    if not fields["poliza_numero"] or not fields["ramo"] or not fields["fecha_efecto"]:
+        lines = text.splitlines()
+        for idx, line in enumerate(lines):
+            if "Modalidad" in line and idx + 1 < len(lines):
+                cols = [c for c in re.split(r"\s{2,}", lines[idx + 1].strip()) if c]
+                if len(cols) >= 4:
+                    if not fields["poliza_numero"] and re.search(r"\d{5,}", cols[1]):
+                        fields["poliza_numero"] = re.search(r"\d{5,}", cols[1]).group(0)
+                    if not fields["fecha_efecto"]:
+                        fecha_match = re.search(r"\d{1,2}/\d{1,2}/\d{2,4}", cols[2])
+                        if fecha_match:
+                            fields["fecha_efecto"] = fecha_match.group(0)
+                    if not fields["ramo"]:
+                        fields["ramo"] = cols[-1]
+                break
     return fields
 
 def parse_asesoramiento_block(block):
