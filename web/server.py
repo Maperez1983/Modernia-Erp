@@ -194,11 +194,6 @@ def s3_safe_key(prefix, filename):
     rand = os.urandom(4).hex()
     prefix = prefix.strip("/").strip() if prefix else "seguros"
     return f"{prefix}/{stamp}_{rand}_{safe}"
-        if has_spa:
-            return "spa"
-        if os.path.exists(os.path.join(TESSDATA_DIR, "eng.traineddata")):
-            return "eng"
-    return "eng"
 
 def preprocess_image_for_ocr(src_path, out_path=None):
     tmp_base = "/private/tmp"
