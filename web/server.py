@@ -865,7 +865,7 @@ def pdftoppm_first_page(pdf_path, pages=None):
     )
     if not cmd or not os.path.exists(cmd):
         return [], "pdftoppm no encontrado", ""
-    tmp_base = "/private/tmp"
+    tmp_base = tempfile.gettempdir()
     tmpdir = tempfile.mkdtemp(dir=tmp_base)
     base = os.path.join(tmpdir, "page")
     args = [cmd, "-f", "1"]
