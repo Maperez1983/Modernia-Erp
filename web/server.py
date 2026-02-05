@@ -680,26 +680,21 @@ def ocr_best_block(image_path, box, use_external):
     return best, best_err
 
 def ocr_pdf_first_page(pdf_path):
-    tmp_base = "/private/tmp"
     is_pdf = str(pdf_path).lower().endswith(".pdf")
     tmpdir = None
+    tmp_generated = ""
     img_path = pdf_path
     if is_pdf:
         try:
-            tmpdir = tempfile.TemporaryDirectory(dir=tmp_base)
-            images, img_err = pdftoppm_first_page(pdf_path, pages=1)
+            images, img_err, tmp_generated = pdftoppm_first_page(pdf_path, pages=1)
             if not images:
-                if tmpdir:
-                    tmpdir.cleanup()
                 return "", img_err or "pdftoppm: sin imagen"
             img_path = images[0]
         except Exception as err:
-            if tmpdir:
-                tmpdir.cleanup()
             return "", f"pdftoppm: {err}"
     if not os.path.exists(img_path):
-        if tmpdir:
-            tmpdir.cleanup()
+        if tmp_generated:
+            shutil.rmtree(tmp_generated, ignore_errors=True)
         return "", "imagen no encontrada para OCR"
     lang = detect_ocr_lang()
     tesseract_cmd = (
@@ -708,8 +703,8 @@ def ocr_pdf_first_page(pdf_path):
         or "/usr/local/bin/tesseract"
     )
     if not tesseract_cmd or not os.path.exists(tesseract_cmd):
-        if tmpdir:
-            tmpdir.cleanup()
+        if tmp_generated:
+            shutil.rmtree(tmp_generated, ignore_errors=True)
         return "", "tesseract no encontrado en PATH"
     env = os.environ.copy()
     if os.path.isdir(TESSDATA_DIR):
@@ -754,8 +749,8 @@ def ocr_pdf_first_page(pdf_path):
     except Exception as err:
         return "", f"tesseract: {err}"
     finally:
-        if tmpdir:
-            tmpdir.cleanup()
+        if tmp_generated:
+            shutil.rmtree(tmp_generated, ignore_errors=True)
 
 def pdftotext_extract(pdf_path, pages=None):
     cmd = (
@@ -869,76 +864,87 @@ def pdftoppm_first_page(pdf_path, pages=None):
         or "/usr/local/bin/pdftoppm"
     )
     if not cmd or not os.path.exists(cmd):
-        return "", "pdftoppm no encontrado"
+        return [], "pdftoppm no encontrado", ""
     tmp_base = "/private/tmp"
-    with tempfile.TemporaryDirectory(dir=tmp_base) as tmpdir:
-        base = os.path.join(tmpdir, "page")
-        args = [cmd, "-f", "1"]
-        if pages and isinstance(pages, int):
-            args.extend(["-l", str(pages)])
-        try:
-            subprocess.run(
-                [*args, "-r", "400", "-gray", "-png", pdf_path, base],
-                check=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
-                text=True,
-            )
-        except subprocess.CalledProcessError as err:
-            return "", f"pdftoppm: {err.stderr.strip()}"
-        except Exception as err:
-            return "", f"pdftoppm: {err}"
-        images = sorted(
-            [
-                os.path.join(tmpdir, name)
-                for name in os.listdir(tmpdir)
-                if name.startswith("page-") and name.endswith(".png")
-            ]
+    tmpdir = tempfile.mkdtemp(dir=tmp_base)
+    base = os.path.join(tmpdir, "page")
+    args = [cmd, "-f", "1"]
+    if pages and isinstance(pages, int):
+        args.extend(["-l", str(pages)])
+    try:
+        subprocess.run(
+            [*args, "-r", "400", "-gray", "-png", pdf_path, base],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
         )
-        if not images:
-            return "", "pdftoppm: sin imagen"
-        return images, ""
+    except subprocess.CalledProcessError as err:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+        return [], f"pdftoppm: {err.stderr.strip()}", ""
+    except Exception as err:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+        return [], f"pdftoppm: {err}", ""
+    images = sorted(
+        [
+            os.path.join(tmpdir, name)
+            for name in os.listdir(tmpdir)
+            if name.startswith("page-") and name.endswith(".png")
+        ]
+    )
+    if not images:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+        return [], "pdftoppm: sin imagen", ""
+    return images, "", tmpdir
 
 def extract_pdf_text(pdf_path):
     text, err = pdftotext_extract(pdf_path, pages=None)
     if text and len(text.strip()) >= 30:
         return text, "", "pdftotext"
-    images, img_err = pdftoppm_first_page(pdf_path, pages=None)
+    images, img_err, tmpdir = pdftoppm_first_page(pdf_path, pages=None)
     if images:
         combined = []
-        for img_path in images:
-            page_text, ocr_err = ocr_pdf_first_page(img_path)
-            if page_text:
-                combined.append(page_text)
-        if combined:
-            return "\n".join(combined), "", "tesseract"
-        return "", ocr_err, "tesseract"
+        try:
+            for img_path in images:
+                page_text, ocr_err = ocr_pdf_first_page(img_path)
+                if page_text:
+                    combined.append(page_text)
+            if combined:
+                return "\n".join(combined), "", "tesseract"
+            return "", ocr_err, "tesseract"
+        finally:
+            if tmpdir:
+                shutil.rmtree(tmpdir, ignore_errors=True)
     text, ocr_err = ocr_pdf_first_page(pdf_path)
     if text:
         return text, "", "tesseract"
     return "", err or img_err or ocr_err, "tesseract"
 
 def ocr_pdf_all_pages(pdf_path, use_external=False):
-    images, img_err = pdftoppm_first_page(pdf_path, pages=None)
+    images, img_err, tmpdir = pdftoppm_first_page(pdf_path, pages=None)
     if images:
         combined = []
         last_err = ""
-        for img_path in images:
-            page_text = ""
-            ocr_err = ""
-            if use_external:
-                vision_bytes = prepare_image_bytes_for_vision(img_path)
-                if vision_bytes:
-                    page_text, ocr_err = ocr_image_external(vision_bytes)
-            if not page_text:
-                page_text, ocr_err = ocr_pdf_first_page(img_path)
-            if page_text:
-                combined.append(page_text)
-            elif ocr_err:
-                last_err = ocr_err
-        if combined:
-            return "\n".join(combined), ""
-        return "", last_err or img_err
+        try:
+            for img_path in images:
+                page_text = ""
+                ocr_err = ""
+                if use_external:
+                    vision_bytes = prepare_image_bytes_for_vision(img_path)
+                    if vision_bytes:
+                        page_text, ocr_err = ocr_image_external(vision_bytes)
+                if not page_text:
+                    page_text, ocr_err = ocr_pdf_first_page(img_path)
+                if page_text:
+                    combined.append(page_text)
+                elif ocr_err:
+                    last_err = ocr_err
+            if combined:
+                return "\n".join(combined), ""
+            return "", last_err or img_err
+        finally:
+            if tmpdir:
+                shutil.rmtree(tmpdir, ignore_errors=True)
     text, ocr_err = ocr_pdf_first_page(pdf_path)
     if text:
         return text, ""
