@@ -1869,6 +1869,11 @@ const openSegurosCrm = () => {
   openCompany(FINCAS_COMPANY);
   setTab("seguros-crm");
   updateTableVisibility();
+  if (viewTabs) viewTabs.classList.add("hidden");
+  if (segurosCrmSection) segurosCrmSection.classList.remove("hidden");
+  if (tableToolbar) tableToolbar.classList.add("hidden");
+  if (tableContainer) tableContainer.classList.add("hidden");
+  if (tableInfo) tableInfo.classList.add("hidden");
   loadSegurosCrm();
   if (state.currentEmpresaId) {
     renderFincasDashboard(state.currentEmpresaId);
@@ -1879,6 +1884,11 @@ const openFinCrm = () => {
   openCompany(FIN_COMPANY);
   setTab("fin-crm");
   updateTableVisibility();
+  if (viewTabs) viewTabs.classList.add("hidden");
+  if (finCrmSection) finCrmSection.classList.remove("hidden");
+  if (tableToolbar) tableToolbar.classList.add("hidden");
+  if (tableContainer) tableContainer.classList.add("hidden");
+  if (tableInfo) tableInfo.classList.add("hidden");
   loadFinCrm();
 };
 
