@@ -5337,10 +5337,16 @@ const updateTableVisibility = () => {
     state.currentEmpresaName ||
     state.empresas.find((e) => e.id === empresaSelect.value)?.nombre ||
     "";
+  const isSegurosCrmVisible = segurosCrmSection && !segurosCrmSection.classList.contains("hidden");
+  const isFinCrmVisible = finCrmSection && !finCrmSection.classList.contains("hidden");
   if (viewTabs) {
     viewTabs.classList.toggle(
       "hidden",
-      isClientePage || currentTab === "seguros-crm" || currentTab === "fin-crm"
+      isClientePage ||
+        currentTab === "seguros-crm" ||
+        currentTab === "fin-crm" ||
+        isSegurosCrmVisible ||
+        isFinCrmVisible
     );
   }
   if (altaTab) {
