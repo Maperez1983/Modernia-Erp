@@ -8264,7 +8264,12 @@ def main():
     parser = argparse.ArgumentParser(description="ERP Modernia local server.")
     parser.add_argument("--db", default=str(DB_DEFAULT), help="SQLite path.")
     parser.add_argument("--host", default="127.0.0.1", help="Host.")
-    parser.add_argument("--port", type=int, default=8000, help="Port.")
+    env_port = os.environ.get("PORT")
+    try:
+        env_port = int(env_port) if env_port else None
+    except ValueError:
+        env_port = None
+    parser.add_argument("--port", type=int, default=env_port or 8000, help="Port.")
     args = parser.parse_args()
 
     ensure_tables(args.db)
