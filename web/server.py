@@ -343,13 +343,20 @@ def s3_client():
     global S3_BOTO3_AVAILABLE
     try:
         import boto3
+        from botocore.config import Config
     except ImportError:
         S3_BOTO3_AVAILABLE = False
         return None
     bucket, region = s3_config()
     if not bucket or not region:
         return None
-    return boto3.client("s3", region_name=region)
+    endpoint = f"https://s3.{region}.amazonaws.com"
+    return boto3.client(
+        "s3",
+        region_name=region,
+        endpoint_url=endpoint,
+        config=Config(signature_version="s3v4"),
+    )
 
 
 def s3_safe_key(prefix, filename):

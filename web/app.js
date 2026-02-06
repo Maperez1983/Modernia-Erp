@@ -14584,6 +14584,3 @@ window.addEventListener("resize", () => {
     );
   }
 });
-  if (wantClienteId && rowClienteIdRaw) {
-    if (String(rowClienteIdRaw) === wantClienteId) score += 15;
-  }
