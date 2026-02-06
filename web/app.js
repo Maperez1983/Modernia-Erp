@@ -21,12 +21,26 @@ const uploadFileToS3 = async (file, prefix, statusEl) => {
   if (presign.error) {
     throw new Error(presign.error);
   }
+  if (!presign.url) {
+    throw new Error("Presign inválido.");
+  }
   if (statusEl) statusEl.textContent = "Subiendo a la nube...";
-  await fetch(presign.url, {
+  const putRes = await fetch(presign.url, {
     method: "PUT",
     headers: { "Content-Type": file.type || "application/pdf" },
     body: file,
   });
+  if (!putRes.ok) {
+    let message = `S3 error ${putRes.status}`;
+    try {
+      const text = await putRes.text();
+      const msgMatch = text.match(/<Message>([^<]+)<\/Message>/i);
+      if (msgMatch && msgMatch[1]) {
+        message = msgMatch[1];
+      }
+    } catch {}
+    throw new Error(message);
+  }
   return presign;
 };
 
