@@ -504,6 +504,16 @@ const finAsesoramientoStatus = document.getElementById("finAsesoramientoStatus")
 const finAsesoramientoConvert = document.getElementById("finAsesoramientoConvert");
 const finAsesoramientosTable = document.getElementById("finAsesoramientosTable");
 const finAsesoramientosInfo = document.getElementById("finAsesoramientosInfo");
+const finAsesorKpis = document.getElementById("finAsesorKpis");
+const finChecklistGenerate = document.getElementById("finChecklistGenerate");
+const finChecklistStatus = document.getElementById("finChecklistStatus");
+const finChecklistTable = document.getElementById("finChecklistTable");
+const finChecklistInfo = document.getElementById("finChecklistInfo");
+const finAlertsTable = document.getElementById("finAlertsTable");
+const finAlertsInfo = document.getElementById("finAlertsInfo");
+const finCopilotForm = document.getElementById("finCopilotForm");
+const finCopilotStatus = document.getElementById("finCopilotStatus");
+const finCopilotOutput = document.getElementById("finCopilotOutput");
 const finCrmTable = document.getElementById("finCrmTable");
 const finCrmInfo = document.getElementById("finCrmInfo");
 const finAgendaForm = document.getElementById("finAgendaForm");
@@ -9286,6 +9296,144 @@ const fillFinAsesoramientoForm = (row) => {
     }
     el.value = row[key] !== null && row[key] !== undefined ? row[key] : "";
   });
+  if (row.id) {
+    loadFinChecklist(row.id);
+  }
+};
+
+const renderFinAsesorKpis = (empresaId) => {
+  if (!finAsesorKpis || !empresaId) return;
+  api(`/api/fin_kpis?empresa_id=${empresaId}`).then((data) => {
+    const kpis = [
+      { title: "Asesoramientos", value: numberFormatter.format(data.total || 0), note: "Total" },
+      { title: "En estudio", value: numberFormatter.format(data.estados?.en_estudio || 0), note: "Pendientes" },
+      { title: "Aprobados", value: numberFormatter.format(data.estados?.aprobado || 0), note: "OK" },
+      { title: "Faltantes", value: numberFormatter.format(data.faltantes || 0), note: "Campos obligatorios" },
+    ];
+    finAsesorKpis.innerHTML = "";
+    kpis.forEach((kpi) => {
+      const card = document.createElement("div");
+      card.className = "card";
+      card.innerHTML = `
+        <h3>${kpi.title}</h3>
+        <div class="muted">${kpi.value}</div>
+        <div class="muted">${kpi.note}</div>
+      `;
+      finAsesorKpis.appendChild(card);
+    });
+  });
+};
+
+const loadFinAlerts = (empresaId) => {
+  if (!finAlertsTable || !finAlertsInfo || !empresaId) return;
+  api(`/api/fin_alertas?empresa_id=${empresaId}`).then((data) => {
+    const rows = data.items || [];
+    if (!rows.length) {
+      finAlertsTable.innerHTML = "<p class='muted'>Sin alertas activas.</p>";
+      finAlertsInfo.textContent = "";
+      return;
+    }
+    const table = document.createElement("table");
+    const thead = document.createElement("thead");
+    const trHead = document.createElement("tr");
+    ["fecha", "cliente1", "estado", "alerta"].forEach((col) => {
+      const th = document.createElement("th");
+      th.textContent = formatHeader(col);
+      trHead.appendChild(th);
+    });
+    thead.appendChild(trHead);
+    table.appendChild(thead);
+    const tbody = document.createElement("tbody");
+    rows.forEach((row) => {
+      const tr = document.createElement("tr");
+      const alerta = row.alerta_tipo === "faltantes"
+        ? `Faltan: ${(row.missing_fields || []).join(", ")}`
+        : "Seguimiento pendiente";
+      const values = [
+        row.fecha || "-",
+        row.cliente1_nombre || "-",
+        row.estado || "-",
+        alerta,
+      ];
+      values.forEach((value) => {
+        const td = document.createElement("td");
+        td.textContent = value === null ? "" : value;
+        tr.appendChild(td);
+      });
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    finAlertsTable.innerHTML = "";
+    finAlertsTable.appendChild(table);
+    finAlertsInfo.textContent = `Mostrando ${rows.length} alertas.`;
+  });
+};
+
+const loadFinChecklist = (asesoramientoId) => {
+  if (!finChecklistTable || !finChecklistInfo) return;
+  if (!asesoramientoId) {
+    finChecklistTable.innerHTML = "<p class='muted'>Selecciona un asesoramiento.</p>";
+    finChecklistInfo.textContent = "";
+    return;
+  }
+  api(`/api/fin_checklist?asesoramiento_id=${asesoramientoId}`).then((data) => {
+    const rows = data.rows || [];
+    if (!rows.length) {
+      finChecklistTable.innerHTML = "<p class='muted'>Checklist vacío.</p>";
+      finChecklistInfo.textContent = "";
+      return;
+    }
+    const table = document.createElement("table");
+    const thead = document.createElement("thead");
+    const trHead = document.createElement("tr");
+    ["tarea", "estado", "responsable", "fecha límite"].forEach((col) => {
+      const th = document.createElement("th");
+      th.textContent = formatHeader(col);
+      trHead.appendChild(th);
+    });
+    thead.appendChild(trHead);
+    table.appendChild(thead);
+    const tbody = document.createElement("tbody");
+    rows.forEach((row) => {
+      const tr = document.createElement("tr");
+      const tdTask = document.createElement("td");
+      tdTask.textContent = row.tarea || "-";
+      tr.appendChild(tdTask);
+      const tdEstado = document.createElement("td");
+      const select = document.createElement("select");
+      ["Pendiente", "En curso", "Hecho"].forEach((opt) => {
+        const option = document.createElement("option");
+        option.value = opt;
+        option.textContent = opt;
+        if ((row.estado || "") === opt) option.selected = true;
+        select.appendChild(option);
+      });
+      select.addEventListener("change", () => {
+        fetch("/api/fin_checklist_update", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            id: row.id,
+            estado: select.value,
+            empresa_nombre: FIN_COMPANY,
+          }),
+        }).catch(() => {});
+      });
+      tdEstado.appendChild(select);
+      tr.appendChild(tdEstado);
+      const tdResp = document.createElement("td");
+      tdResp.textContent = row.responsable || "-";
+      tr.appendChild(tdResp);
+      const tdFecha = document.createElement("td");
+      tdFecha.textContent = row.fecha_limite || "-";
+      tr.appendChild(tdFecha);
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    finChecklistTable.innerHTML = "";
+    finChecklistTable.appendChild(table);
+    finChecklistInfo.textContent = `Mostrando ${rows.length} tareas.`;
+  });
 };
 
 const loadFinAsesoramientos = (empresaId) => {
@@ -9297,6 +9445,8 @@ const loadFinAsesoramientos = (empresaId) => {
     if (!rows.length) {
       finAsesoramientosTable.innerHTML = "<p class='muted'>Sin asesoramientos aún.</p>";
       finAsesoramientosInfo.textContent = "";
+      renderFinAsesorKpis(empresaId);
+      loadFinAlerts(empresaId);
       return;
     }
     const table = document.createElement("table");
@@ -9309,6 +9459,7 @@ const loadFinAsesoramientos = (empresaId) => {
       "telefono",
       "ingresos",
       "estado",
+      "faltantes",
       "asesor",
       "acciones",
     ].forEach((col) => {
@@ -9330,6 +9481,7 @@ const loadFinAsesoramientos = (empresaId) => {
         telefono,
         ingresos,
         row.estado || "-",
+        row.missing_count ? String(row.missing_count) : "-",
         row.asesor || row.inmobiliaria_asesor || "-",
       ];
       values.forEach((value, idx) => {
@@ -9383,6 +9535,8 @@ const loadFinAsesoramientos = (empresaId) => {
     finAsesoramientosTable.innerHTML = "";
     finAsesoramientosTable.appendChild(table);
     finAsesoramientosInfo.textContent = `Mostrando ${rows.length} asesoramientos.`;
+    renderFinAsesorKpis(empresaId);
+    loadFinAlerts(empresaId);
   });
 };
 
@@ -12387,13 +12541,26 @@ if (finAsesoramientoForm) {
       .then((res) => res.json())
       .then((data) => {
         if (finAsesoramientoStatus) {
-          finAsesoramientoStatus.textContent = data.error || "Guardado.";
+          let msg = data.error || "Guardado.";
+          if (data.duplicate_of) {
+            msg = "Duplicado: se actualizó el asesoramiento existente.";
+          }
+          if (Array.isArray(data.missing) && data.missing.length) {
+            msg = `${msg} Faltan: ${data.missing.join(", ")}.`;
+          }
+          finAsesoramientoStatus.textContent = msg;
         }
         if (!data.error) {
-          if (!recordId) {
+          if (data.id && finAsesoramientoId) {
+            finAsesoramientoId.value = data.id;
+            if (finAsesoramientoConvert) finAsesoramientoConvert.disabled = false;
+            loadFinChecklist(data.id);
+          }
+          if (!recordId && !data.duplicate_of) {
             finAsesoramientoForm.reset();
             if (finAsesoramientoId) finAsesoramientoId.value = "";
             if (finAsesoramientoConvert) finAsesoramientoConvert.disabled = true;
+            loadFinChecklist("");
           }
           loadFinCrm();
         }
@@ -12440,6 +12607,68 @@ if (finAsesoramientoConvert) {
         if (finAsesoramientoStatus) {
           finAsesoramientoStatus.textContent = "Error al convertir.";
         }
+      });
+  });
+}
+
+if (finChecklistGenerate) {
+  finChecklistGenerate.addEventListener("click", () => {
+    if (finChecklistStatus) finChecklistStatus.textContent = "";
+    const recordId = finAsesoramientoId ? finAsesoramientoId.value : "";
+    if (!recordId) {
+      if (finChecklistStatus) finChecklistStatus.textContent = "Selecciona un asesoramiento.";
+      return;
+    }
+    if (finChecklistStatus) finChecklistStatus.textContent = "Generando checklist...";
+    fetch("/api/fin_checklist_generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        asesoramiento_id: recordId,
+        empresa_nombre: FIN_COMPANY,
+      }),
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (finChecklistStatus) {
+          finChecklistStatus.textContent = data.error || "Checklist generado.";
+        }
+        if (!data.error) {
+          loadFinChecklist(recordId);
+        }
+      })
+      .catch(() => {
+        if (finChecklistStatus) finChecklistStatus.textContent = "No se pudo generar.";
+      });
+  });
+}
+
+if (finCopilotForm) {
+  finCopilotForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    if (finCopilotStatus) finCopilotStatus.textContent = "";
+    const recordId = finAsesoramientoId ? finAsesoramientoId.value : "";
+    if (!recordId) {
+      if (finCopilotStatus) finCopilotStatus.textContent = "Selecciona un asesoramiento.";
+      return;
+    }
+    const formData = new FormData(finCopilotForm);
+    const payload = Object.fromEntries(formData.entries());
+    payload.asesoramiento_id = recordId;
+    payload.empresa_nombre = FIN_COMPANY;
+    if (finCopilotStatus) finCopilotStatus.textContent = "Generando...";
+    fetch("/api/ai_fin_copilot", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (finCopilotStatus) finCopilotStatus.textContent = data.error || "Listo.";
+        if (finCopilotOutput) finCopilotOutput.value = data.output || "";
+      })
+      .catch(() => {
+        if (finCopilotStatus) finCopilotStatus.textContent = "Error al generar.";
       });
   });
 }

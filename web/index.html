@@ -2507,6 +2507,46 @@
             <div class="footer" id="finAsesoramientosInfo"></div>
           </div>
           <div class="form-card">
+            <h3>Alertas y checklist · Asesoramientos</h3>
+            <p class="muted">Seguimiento de documentación y faltantes.</p>
+            <div class="grid" id="finAsesorKpis"></div>
+            <div class="inline-actions" style="margin-top:12px;">
+              <button type="button" id="finChecklistGenerate">Generar checklist</button>
+              <span id="finChecklistStatus" class="muted"></span>
+            </div>
+            <div id="finChecklistTable"></div>
+            <div class="footer" id="finChecklistInfo"></div>
+            <h3 style="margin-top:16px;">Alertas</h3>
+            <div id="finAlertsTable"></div>
+            <div class="footer" id="finAlertsInfo"></div>
+          </div>
+          <div class="form-card">
+            <h3>Copiloto · Financiaciones</h3>
+            <p class="muted">Resumen, faltantes y documentación sugerida.</p>
+            <form id="finCopilotForm" class="form-grid">
+              <label>
+                Acción
+                <select name="task">
+                  <option value="resumen">Resumen asesoramiento</option>
+                  <option value="faltantes">Campos faltantes</option>
+                  <option value="documentacion">Checklist documentación</option>
+                </select>
+              </label>
+              <label class="span-2">
+                Instrucciones extra
+                <textarea name="extra" rows="2"></textarea>
+              </label>
+              <div class="form-actions span-2">
+                <button type="submit">Generar</button>
+                <span id="finCopilotStatus" class="muted"></span>
+              </div>
+            </form>
+            <label>
+              Resultado
+              <textarea id="finCopilotOutput" rows="5" readonly></textarea>
+            </label>
+          </div>
+          <div class="form-card">
             <h3>Alta Hipoteca · Financiaciones Modernia</h3>
             <p class="muted">Registro directo de hipotecas firmadas.</p>
             <form id="hipotecaForm">

@@ -152,6 +152,97 @@ def normalize_company_key(value):
     text = re.sub(r"[^A-Z0-9]", "", text)
     return text
 
+def normalize_fin_nif(value):
+    if not value:
+        return ""
+    raw = str(value).strip().upper()
+    if not raw:
+        return ""
+    raw = raw.replace(" ", "").replace("-", "").replace(".", "")
+    raw = raw.replace("O", "0").replace("I", "1").replace("L", "1").replace("S", "5")
+    raw = re.sub(r"[^A-Z0-9]", "", raw)
+    if len(raw) > 9:
+        raw = raw[:9]
+    return raw
+
+FIN_REQUIRED_FIELDS = [
+    ("cliente1_nombre", "Nombre cliente 1"),
+    ("cliente1_dni", "DNI cliente 1"),
+    ("cliente1_telefono", "Teléfono cliente 1"),
+    ("fecha", "Fecha"),
+    ("ingresos_conjuntos", "Ingresos conjuntos"),
+]
+
+def fin_missing_fields(row):
+    missing = []
+    if not row:
+        return missing
+    for key, label in FIN_REQUIRED_FIELDS:
+        value = row.get(key) if isinstance(row, dict) else row[key]
+        if value is None or str(value).strip() == "":
+            missing.append(label)
+    return missing
+
+def fin_sync_missing_action(conn, empresa_id, asesoramiento_id, cliente_id, cliente_nombre, missing, now):
+    if missing:
+        notas = f"Completar datos asesoramiento ({', '.join(missing)}). Asesoramiento ID: {asesoramiento_id}"
+        exists = conn.execute(
+            """
+            SELECT id, estado FROM acciones
+            WHERE servicio = 'Financiaciones'
+              AND tipo = 'Completar datos asesoramiento'
+              AND notas LIKE ?
+            LIMIT 1
+            """,
+            (f"%{asesoramiento_id}%",),
+        ).fetchone()
+        if exists:
+            if (exists["estado"] or "").lower() != "pendiente":
+                conn.execute(
+                    "UPDATE acciones SET estado = 'Pendiente', updated_at = datetime(?) WHERE id = ?",
+                    (now, exists["id"]),
+                )
+            return
+        today = datetime.now().strftime("%Y-%m-%d")
+        conn.execute(
+            """
+            INSERT INTO acciones (
+              id, empresa_id, servicio, cliente_id, inmueble_id, cliente_nombre,
+              fecha, hora, tipo, responsable, estado, notas, recordatorio_min, created_at, updated_at
+            ) VALUES (
+              ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+            )
+            """,
+            (
+                os.urandom(16).hex(),
+                empresa_id,
+                "Financiaciones",
+                cliente_id,
+                None,
+                cliente_nombre or "",
+                today,
+                None,
+                "Completar datos asesoramiento",
+                None,
+                "Pendiente",
+                notas,
+                None,
+                now,
+                now,
+            ),
+        )
+    else:
+        conn.execute(
+            """
+            UPDATE acciones
+            SET estado = 'Hecho', updated_at = datetime(?)
+            WHERE servicio = 'Financiaciones'
+              AND tipo = 'Completar datos asesoramiento'
+              AND notas LIKE ?
+            """,
+            (now, f"%{asesoramiento_id}%"),
+        )
+
 def normalize_header(value):
     return re.sub(r"[^a-z0-9]", "", str(value or "").lower())
 
@@ -2625,6 +2716,21 @@ def ensure_tables(db_path):
     )
     conn.execute(
         """
+        CREATE TABLE IF NOT EXISTS fin_checklist (
+          id TEXT PRIMARY KEY,
+          asesoramiento_id TEXT NOT NULL,
+          tarea TEXT,
+          estado TEXT,
+          responsable TEXT,
+          fecha_limite TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          FOREIGN KEY (asesoramiento_id) REFERENCES asesoramientos_financiacion(id)
+        )
+        """
+    )
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS auditoria (
           id TEXT PRIMARY KEY,
           empresa_id TEXT,
@@ -2842,7 +2948,10 @@ class Handler(BaseHTTPRequestHandler):
             "/api/seguros_comisiones_delete",
             "/api/seguros_checklist_generate",
             "/api/seguros_checklist_update",
+            "/api/fin_checklist_generate",
+            "/api/fin_checklist_update",
             "/api/ai_seguros_copilot",
+            "/api/ai_fin_copilot",
             "/api/s3_presign",
             "/api/clientes",
             "/api/clientes_link",
@@ -2935,6 +3044,9 @@ class Handler(BaseHTTPRequestHandler):
             "/api/seguros_comisiones",
             "/api/seguros_comisiones_update",
             "/api/seguros_comisiones_delete",
+            "/api/fin_checklist_generate",
+            "/api/fin_checklist_update",
+            "/api/ai_fin_copilot",
             "/api/s3_presign",
         ):
             if not empresa_nombre:
@@ -4328,80 +4440,210 @@ class Handler(BaseHTTPRequestHandler):
                     "fecha_nacimiento": payload.get("cliente2_fecha_nacimiento"),
                 },
             )
-            conn.execute(
-                """
-                INSERT INTO asesoramientos_financiacion (
-                  id, empresa_id, origen, inmobiliaria_asesor, asesor, fecha, estado,
-                  cliente1_id, cliente1_nombre, cliente1_dni, cliente1_telefono, cliente1_email,
-                  cliente1_fecha_nacimiento, cliente1_estado_civil, cliente1_regimen, cliente1_hijos, cliente1_profesion,
-                  cliente1_tipo_contrato, cliente1_tiempo_contrato, cliente1_ingresos, cliente1_patrimonio, cliente1_prestamos,
-                  cliente1_prestamo_activo, cliente1_prestamo_entidad, cliente1_prestamo_resto,
-                  cliente2_id, cliente2_nombre, cliente2_dni, cliente2_telefono, cliente2_email,
-                  cliente2_fecha_nacimiento, cliente2_estado_civil, cliente2_regimen, cliente2_hijos, cliente2_profesion,
-                  cliente2_tipo_contrato, cliente2_tiempo_contrato, cliente2_ingresos, cliente2_patrimonio, cliente2_prestamos,
-                  cliente2_prestamo_activo, cliente2_prestamo_entidad, cliente2_prestamo_resto,
-                  ingresos_conjuntos, entidades_financieras, avalistas, aportacion_cv,
-                  notas, notas_ocr, calidad_ocr, campos_ocr, created_at, updated_at
-                ) VALUES (
-                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
-                )
-                """,
-                (
-                    os.urandom(16).hex(),
-                    empresa["id"],
-                    payload.get("origen"),
-                    payload.get("inmobiliaria_asesor"),
-                    payload.get("asesor"),
-                    payload.get("fecha"),
-                    payload.get("estado") or "En estudio",
-                    cliente1_id,
-                    payload.get("cliente1_nombre"),
-                    payload.get("cliente1_dni"),
-                    payload.get("cliente1_telefono"),
-                    payload.get("cliente1_email"),
-                    payload.get("cliente1_fecha_nacimiento"),
-                    payload.get("cliente1_estado_civil"),
-                    payload.get("cliente1_regimen"),
-                    payload.get("cliente1_hijos"),
-                    payload.get("cliente1_profesion"),
-                    payload.get("cliente1_tipo_contrato"),
-                    payload.get("cliente1_tiempo_contrato"),
-                    payload.get("cliente1_ingresos"),
-                    payload.get("cliente1_patrimonio"),
-                    payload.get("cliente1_prestamos"),
-                    payload.get("cliente1_prestamo_activo"),
-                    payload.get("cliente1_prestamo_entidad"),
-                    payload.get("cliente1_prestamo_resto"),
-                    cliente2_id,
-                    payload.get("cliente2_nombre"),
-                    payload.get("cliente2_dni"),
-                    payload.get("cliente2_telefono"),
-                    payload.get("cliente2_email"),
-                    payload.get("cliente2_fecha_nacimiento"),
-                    payload.get("cliente2_estado_civil"),
-                    payload.get("cliente2_regimen"),
-                    payload.get("cliente2_hijos"),
-                    payload.get("cliente2_profesion"),
-                    payload.get("cliente2_tipo_contrato"),
-                    payload.get("cliente2_tiempo_contrato"),
-                    payload.get("cliente2_ingresos"),
-                    payload.get("cliente2_patrimonio"),
-                    payload.get("cliente2_prestamos"),
-                    payload.get("cliente2_prestamo_activo"),
-                    payload.get("cliente2_prestamo_entidad"),
-                    payload.get("cliente2_prestamo_resto"),
-                    payload.get("ingresos_conjuntos"),
-                    payload.get("entidades_financieras"),
-                    payload.get("avalistas"),
-                    payload.get("aportacion_cv"),
-                    payload.get("notas"),
-                    payload.get("notas_ocr"),
-                    payload.get("calidad_ocr"),
-                    payload.get("campos_ocr"),
-                    now,
-                    now,
-                ),
+            dup_id = None
+            dni1 = normalize_fin_nif(payload.get("cliente1_dni"))
+            dni2 = normalize_fin_nif(payload.get("cliente2_dni"))
+            nombre1 = normalize_person_name(payload.get("cliente1_nombre")).lower()
+            telefono1 = normalize_phone(payload.get("cliente1_telefono"))
+            fecha = (payload.get("fecha") or "").strip()
+            candidates = conn.execute(
+                "SELECT * FROM asesoramientos_financiacion WHERE empresa_id = ?",
+                (empresa["id"],),
+            ).fetchall()
+            for row in candidates:
+                score = 0
+                row_dni1 = normalize_fin_nif(row["cliente1_dni"])
+                row_dni2 = normalize_fin_nif(row["cliente2_dni"])
+                if dni1 and (dni1 == row_dni1 or dni1 == row_dni2):
+                    score += 3
+                if dni2 and (dni2 == row_dni2 or dni2 == row_dni1):
+                    score += 2
+                if fecha and row["fecha"] and row["fecha"] == fecha:
+                    score += 1
+                if nombre1 and normalize_person_name(row["cliente1_nombre"]).lower() == nombre1:
+                    score += 1
+                if telefono1 and normalize_phone(row["cliente1_telefono"]) == telefono1:
+                    score += 1
+                if score >= 3:
+                    dup_id = row["id"]
+                    break
+
+            allowed_fields = (
+                "origen",
+                "inmobiliaria_asesor",
+                "asesor",
+                "fecha",
+                "estado",
+                "cliente1_id",
+                "cliente1_nombre",
+                "cliente1_dni",
+                "cliente1_telefono",
+                "cliente1_email",
+                "cliente1_fecha_nacimiento",
+                "cliente1_estado_civil",
+                "cliente1_regimen",
+                "cliente1_hijos",
+                "cliente1_profesion",
+                "cliente1_tipo_contrato",
+                "cliente1_tiempo_contrato",
+                "cliente1_ingresos",
+                "cliente1_patrimonio",
+                "cliente1_prestamos",
+                "cliente1_prestamo_activo",
+                "cliente1_prestamo_entidad",
+                "cliente1_prestamo_resto",
+                "cliente2_id",
+                "cliente2_nombre",
+                "cliente2_dni",
+                "cliente2_telefono",
+                "cliente2_email",
+                "cliente2_fecha_nacimiento",
+                "cliente2_estado_civil",
+                "cliente2_regimen",
+                "cliente2_hijos",
+                "cliente2_profesion",
+                "cliente2_tipo_contrato",
+                "cliente2_tiempo_contrato",
+                "cliente2_ingresos",
+                "cliente2_patrimonio",
+                "cliente2_prestamos",
+                "cliente2_prestamo_activo",
+                "cliente2_prestamo_entidad",
+                "cliente2_prestamo_resto",
+                "ingresos_conjuntos",
+                "entidades_financieras",
+                "avalistas",
+                "aportacion_cv",
+                "notas",
+                "notas_ocr",
+                "calidad_ocr",
+                "campos_ocr",
             )
+            if dup_id:
+                row = conn.execute(
+                    "SELECT * FROM asesoramientos_financiacion WHERE id = ?",
+                    (dup_id,),
+                ).fetchone()
+                updates = {}
+                for key in allowed_fields:
+                    incoming = payload.get(key)
+                    if incoming in (None, ""):
+                        continue
+                    current = row[key] if key in row.keys() else None
+                    if current is None or str(current).strip() == "":
+                        updates[key] = incoming
+                if cliente1_id:
+                    updates["cliente1_id"] = cliente1_id
+                if cliente2_id:
+                    updates["cliente2_id"] = cliente2_id
+                if updates:
+                    set_clause = ", ".join([f"{key} = ?" for key in updates])
+                    values = list(updates.values()) + [now, dup_id]
+                    conn.execute(
+                        f"UPDATE asesoramientos_financiacion SET {set_clause}, updated_at = datetime(?) WHERE id = ?",
+                        values,
+                    )
+                asesoramiento_id = dup_id
+            else:
+                asesoramiento_id = os.urandom(16).hex()
+                conn.execute(
+                    """
+                    INSERT INTO asesoramientos_financiacion (
+                      id, empresa_id, origen, inmobiliaria_asesor, asesor, fecha, estado,
+                      cliente1_id, cliente1_nombre, cliente1_dni, cliente1_telefono, cliente1_email,
+                      cliente1_fecha_nacimiento, cliente1_estado_civil, cliente1_regimen, cliente1_hijos, cliente1_profesion,
+                      cliente1_tipo_contrato, cliente1_tiempo_contrato, cliente1_ingresos, cliente1_patrimonio, cliente1_prestamos,
+                      cliente1_prestamo_activo, cliente1_prestamo_entidad, cliente1_prestamo_resto,
+                      cliente2_id, cliente2_nombre, cliente2_dni, cliente2_telefono, cliente2_email,
+                      cliente2_fecha_nacimiento, cliente2_estado_civil, cliente2_regimen, cliente2_hijos, cliente2_profesion,
+                      cliente2_tipo_contrato, cliente2_tiempo_contrato, cliente2_ingresos, cliente2_patrimonio, cliente2_prestamos,
+                      cliente2_prestamo_activo, cliente2_prestamo_entidad, cliente2_prestamo_resto,
+                      ingresos_conjuntos, entidades_financieras, avalistas, aportacion_cv,
+                      notas, notas_ocr, calidad_ocr, campos_ocr, created_at, updated_at
+                    ) VALUES (
+                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                    )
+                    """,
+                    (
+                        asesoramiento_id,
+                        empresa["id"],
+                        payload.get("origen"),
+                        payload.get("inmobiliaria_asesor"),
+                        payload.get("asesor"),
+                        payload.get("fecha"),
+                        payload.get("estado") or "En estudio",
+                        cliente1_id,
+                        payload.get("cliente1_nombre"),
+                        payload.get("cliente1_dni"),
+                        payload.get("cliente1_telefono"),
+                        payload.get("cliente1_email"),
+                        payload.get("cliente1_fecha_nacimiento"),
+                        payload.get("cliente1_estado_civil"),
+                        payload.get("cliente1_regimen"),
+                        payload.get("cliente1_hijos"),
+                        payload.get("cliente1_profesion"),
+                        payload.get("cliente1_tipo_contrato"),
+                        payload.get("cliente1_tiempo_contrato"),
+                        payload.get("cliente1_ingresos"),
+                        payload.get("cliente1_patrimonio"),
+                        payload.get("cliente1_prestamos"),
+                        payload.get("cliente1_prestamo_activo"),
+                        payload.get("cliente1_prestamo_entidad"),
+                        payload.get("cliente1_prestamo_resto"),
+                        cliente2_id,
+                        payload.get("cliente2_nombre"),
+                        payload.get("cliente2_dni"),
+                        payload.get("cliente2_telefono"),
+                        payload.get("cliente2_email"),
+                        payload.get("cliente2_fecha_nacimiento"),
+                        payload.get("cliente2_estado_civil"),
+                        payload.get("cliente2_regimen"),
+                        payload.get("cliente2_hijos"),
+                        payload.get("cliente2_profesion"),
+                        payload.get("cliente2_tipo_contrato"),
+                        payload.get("cliente2_tiempo_contrato"),
+                        payload.get("cliente2_ingresos"),
+                        payload.get("cliente2_patrimonio"),
+                        payload.get("cliente2_prestamos"),
+                        payload.get("cliente2_prestamo_activo"),
+                        payload.get("cliente2_prestamo_entidad"),
+                        payload.get("cliente2_prestamo_resto"),
+                        payload.get("ingresos_conjuntos"),
+                        payload.get("entidades_financieras"),
+                        payload.get("avalistas"),
+                        payload.get("aportacion_cv"),
+                        payload.get("notas"),
+                        payload.get("notas_ocr"),
+                        payload.get("calidad_ocr"),
+                        payload.get("campos_ocr"),
+                        now,
+                        now,
+                    ),
+                )
+            row = conn.execute(
+                "SELECT * FROM asesoramientos_financiacion WHERE id = ?",
+                (asesoramiento_id,),
+            ).fetchone()
+            missing = fin_missing_fields(row)
+            fin_sync_missing_action(
+                conn,
+                empresa["id"],
+                asesoramiento_id,
+                cliente1_id or row["cliente1_id"],
+                row["cliente1_nombre"] if row else "",
+                missing,
+                now,
+            )
+            json_response(
+                self,
+                {
+                    "ok": True,
+                    "id": asesoramiento_id,
+                    "duplicate_of": dup_id,
+                    "missing": missing,
+                },
+            )
+            return
         elif parsed.path == "/api/fin_asesoramientos_update":
             record_id = payload.get("id")
             if not record_id:
@@ -4496,6 +4738,21 @@ class Handler(BaseHTTPRequestHandler):
                 f"UPDATE asesoramientos_financiacion SET {set_clause}, updated_at = datetime(?) WHERE id = ?",
                 values,
             )
+            row = conn.execute(
+                "SELECT * FROM asesoramientos_financiacion WHERE id = ?",
+                (record_id,),
+            ).fetchone()
+            if row:
+                missing = fin_missing_fields(row)
+                fin_sync_missing_action(
+                    conn,
+                    empresa["id"],
+                    record_id,
+                    row["cliente1_id"],
+                    row["cliente1_nombre"],
+                    missing,
+                    now,
+                )
         elif parsed.path == "/api/fin_asesoramientos_convert":
             record_id = payload.get("id")
             if not record_id:
@@ -4932,6 +5189,64 @@ class Handler(BaseHTTPRequestHandler):
                 values,
             )
             return
+        elif parsed.path == "/api/fin_checklist_generate":
+            asesoramiento_id = payload.get("asesoramiento_id")
+            if not asesoramiento_id:
+                json_response(self, {"error": "asesoramiento_id requerido"}, status=400)
+                return
+            conn.execute(
+                "DELETE FROM fin_checklist WHERE asesoramiento_id = ?",
+                (asesoramiento_id,),
+            )
+            tasks = [
+                "DNI clientes",
+                "Vida laboral",
+                "Nóminas últimos meses",
+                "Declaración de la renta",
+                "Preaprobación bancaria",
+                "Tasación",
+            ]
+            for tarea in tasks:
+                conn.execute(
+                    """
+                    INSERT INTO fin_checklist (
+                      id, asesoramiento_id, tarea, estado, responsable, fecha_limite, created_at, updated_at
+                    ) VALUES (
+                      ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                    )
+                    """,
+                    (
+                        os.urandom(16).hex(),
+                        asesoramiento_id,
+                        tarea,
+                        "Pendiente",
+                        payload.get("responsable"),
+                        payload.get("fecha_limite"),
+                        now,
+                        now,
+                    ),
+                )
+            json_response(self, {"ok": True})
+            return
+        elif parsed.path == "/api/fin_checklist_update":
+            record_id = payload.get("id")
+            if not record_id:
+                json_response(self, {"error": "id requerido"}, status=400)
+                return
+            updates = {}
+            for key in ("estado", "responsable", "fecha_limite"):
+                if key in payload:
+                    updates[key] = payload.get(key)
+            if not updates:
+                json_response(self, {"error": "sin cambios"}, status=400)
+                return
+            set_clause = ", ".join([f"{key} = ?" for key in updates])
+            values = list(updates.values()) + [now, record_id]
+            conn.execute(
+                f"UPDATE fin_checklist SET {set_clause}, updated_at = datetime(?) WHERE id = ?",
+                values,
+            )
+            return
         elif parsed.path == "/api/ai_seguros_copilot":
             if not openai_available():
                 json_response(self, {"error": "OPENAI_API_KEY no configurada"}, status=400)
@@ -4974,6 +5289,67 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 prompt = (
                     "Genera un resumen claro de la póliza: tomador, compañía, ramo, fechas, prima y estado. "
+                    "Si falta algún dato, indícalo. No inventes datos.\n\n"
+                    f"Contexto: {json.dumps(context, ensure_ascii=False)}\n"
+                    f"Instrucciones extra: {extra}"
+                )
+            output, err = call_openai(prompt)
+            if err:
+                json_response(self, {"error": err}, status=400)
+                return
+            json_response(self, {"output": output})
+            return
+        elif parsed.path == "/api/ai_fin_copilot":
+            if not openai_available():
+                json_response(self, {"error": "OPENAI_API_KEY no configurada"}, status=400)
+                return
+            asesoramiento_id = payload.get("asesoramiento_id")
+            if not asesoramiento_id:
+                json_response(self, {"error": "asesoramiento_id requerido"}, status=400)
+                return
+            task = (payload.get("task") or "resumen").strip().lower()
+            extra = (payload.get("extra") or "").strip()
+            ases = conn.execute(
+                "SELECT * FROM asesoramientos_financiacion WHERE id = ?",
+                (asesoramiento_id,),
+            ).fetchone()
+            if not ases:
+                json_response(self, {"error": "Asesoramiento no encontrado"}, status=404)
+                return
+            cliente1 = None
+            cliente2 = None
+            if ases.get("cliente1_id"):
+                cliente1 = conn.execute(
+                    "SELECT id, nombre, nif, telefono, email FROM clientes WHERE id = ?",
+                    (ases["cliente1_id"],),
+                ).fetchone()
+            if ases.get("cliente2_id"):
+                cliente2 = conn.execute(
+                    "SELECT id, nombre, nif, telefono, email FROM clientes WHERE id = ?",
+                    (ases["cliente2_id"],),
+                ).fetchone()
+            context = {
+                "asesoramiento": dict(ases),
+                "cliente1": dict(cliente1) if cliente1 else {},
+                "cliente2": dict(cliente2) if cliente2 else {},
+            }
+            if task == "faltantes":
+                prompt = (
+                    "Lista los campos obligatorios faltantes del asesoramiento financiero. "
+                    "Si no falta ninguno, indícalo. No inventes datos.\n\n"
+                    f"Contexto: {json.dumps(context, ensure_ascii=False)}\n"
+                    f"Instrucciones extra: {extra}"
+                )
+            elif task == "documentacion":
+                prompt = (
+                    "Genera un checklist breve de documentación necesaria para este asesoramiento "
+                    "según el perfil del cliente. No inventes datos.\n\n"
+                    f"Contexto: {json.dumps(context, ensure_ascii=False)}\n"
+                    f"Instrucciones extra: {extra}"
+                )
+            else:
+                prompt = (
+                    "Genera un resumen claro del asesoramiento: clientes, ingresos, estado y próximos pasos. "
                     "Si falta algún dato, indícalo. No inventes datos.\n\n"
                     f"Contexto: {json.dumps(context, ensure_ascii=False)}\n"
                     f"Instrucciones extra: {extra}"
@@ -6139,7 +6515,13 @@ class Handler(BaseHTTPRequestHandler):
                 """,
                 (empresa_id,),
             ).fetchall()
-            data = [dict(r) for r in rows]
+            data = []
+            for row in rows:
+                row_dict = dict(row)
+                missing = fin_missing_fields(row_dict)
+                row_dict["missing_fields"] = missing
+                row_dict["missing_count"] = len(missing)
+                data.append(row_dict)
             if q:
                 filtered = []
                 for row in data:
@@ -7597,6 +7979,112 @@ class Handler(BaseHTTPRequestHandler):
                 (poliza_id,),
             ).fetchall()
             json_response(self, {"rows": [dict(r) for r in rows]})
+            return
+
+        if path == "/api/fin_checklist":
+            asesoramiento_id = params.get("asesoramiento_id", [""])[0]
+            if not asesoramiento_id:
+                json_response(self, {"error": "asesoramiento_id requerido"}, status=400)
+                return
+            rows = conn.execute(
+                """
+                SELECT id, asesoramiento_id, tarea, estado, responsable, fecha_limite
+                FROM fin_checklist
+                WHERE asesoramiento_id = ?
+                ORDER BY created_at ASC
+                """,
+                (asesoramiento_id,),
+            ).fetchall()
+            json_response(self, {"rows": [dict(r) for r in rows]})
+            return
+
+        if path == "/api/fin_alertas":
+            empresa_id = params.get("empresa_id", [""])[0]
+            days = params.get("days", ["30"])[0]
+            if not empresa_id:
+                json_response(self, {"error": "empresa_id requerido"}, status=400)
+                return
+            try:
+                days_int = int(days)
+            except Exception:
+                days_int = 30
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM asesoramientos_financiacion
+                WHERE empresa_id = ?
+                ORDER BY created_at DESC
+                LIMIT 200
+                """,
+                (empresa_id,),
+            ).fetchall()
+            alerts = []
+            cutoff = datetime.now() - timedelta(days=days_int)
+            for row in rows:
+                row_dict = dict(row)
+                missing = fin_missing_fields(row_dict)
+                if missing:
+                    row_dict["alerta_tipo"] = "faltantes"
+                    row_dict["missing_fields"] = missing
+                    alerts.append(row_dict)
+                    continue
+                estado = (row_dict.get("estado") or "").strip().lower()
+                if estado in ("en estudio", "pendiente"):
+                    fecha_raw = str(row_dict.get("fecha") or "").strip()
+                    fecha_dt = None
+                    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y"):
+                        try:
+                            fecha_dt = datetime.strptime(fecha_raw, fmt)
+                            break
+                        except Exception:
+                            continue
+                    if fecha_dt and fecha_dt <= cutoff:
+                        row_dict["alerta_tipo"] = "seguimiento"
+                        alerts.append(row_dict)
+            json_response(self, {"count": len(alerts), "items": alerts})
+            return
+
+        if path == "/api/fin_kpis":
+            empresa_id = params.get("empresa_id", [""])[0]
+            if not empresa_id:
+                json_response(self, {"error": "empresa_id requerido"}, status=400)
+                return
+            rows = conn.execute(
+                "SELECT estado, calidad_ocr, cliente1_nombre, cliente1_dni, cliente1_telefono, fecha, ingresos_conjuntos FROM asesoramientos_financiacion WHERE empresa_id = ?",
+                (empresa_id,),
+            ).fetchall()
+            total = len(rows)
+            estados = {"en_estudio": 0, "aprobado": 0, "descartado": 0, "convertido": 0, "otros": 0}
+            faltantes = 0
+            quality = {"alta": 0, "media": 0, "baja": 0, "desconocida": 0}
+            for row in rows:
+                estado = (row["estado"] or "").strip().lower()
+                if estado in ("en estudio", "estudio"):
+                    estados["en_estudio"] += 1
+                elif estado in ("aprobado",):
+                    estados["aprobado"] += 1
+                elif estado in ("descartado", "rechazado"):
+                    estados["descartado"] += 1
+                elif estado in ("convertido",):
+                    estados["convertido"] += 1
+                else:
+                    estados["otros"] += 1
+                missing = fin_missing_fields(dict(row))
+                if missing:
+                    faltantes += 1
+                key = (row["calidad_ocr"] or "desconocida").lower()
+                if key not in quality:
+                    key = "desconocida"
+                quality[key] += 1
+            json_response(
+                self,
+                {
+                    "total": total,
+                    "estados": estados,
+                    "faltantes": faltantes,
+                    "ocr_quality": quality,
+                },
+            )
             return
 
         if path == "/api/dashboard":

@@ -396,6 +396,18 @@ CREATE TABLE IF NOT EXISTS seguros_checklist (
   FOREIGN KEY (poliza_id) REFERENCES seguros(id)
 );
 
+CREATE TABLE IF NOT EXISTS fin_checklist (
+  id TEXT PRIMARY KEY,
+  asesoramiento_id TEXT NOT NULL,
+  tarea TEXT,
+  estado TEXT,
+  responsable TEXT,
+  fecha_limite TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (asesoramiento_id) REFERENCES asesoramientos_financiacion(id)
+);
+
 CREATE TABLE IF NOT EXISTS demandas (
   id TEXT PRIMARY KEY,
   empresa_id TEXT NOT NULL,
