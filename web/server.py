@@ -338,9 +338,11 @@ def s3_client():
         import boto3
     except ImportError:
         return None
-    if not S3_BUCKET or not S3_REGION:
+    bucket = os.environ.get("AWS_S3_BUCKET") or os.environ.get("S3_BUCKET") or S3_BUCKET
+    region = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION") or S3_REGION
+    if not bucket or not region:
         return None
-    return boto3.client("s3", region_name=S3_REGION)
+    return boto3.client("s3", region_name=region)
 
 
 def s3_safe_key(prefix, filename):
