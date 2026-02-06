@@ -1307,6 +1307,67 @@
           </div>
           <div class="seguros-tab" data-seguros-tab="dashboard">
           <div class="form-card">
+            <div class="section-head">
+              <div>
+                <h3>Copiloto Seguros</h3>
+                <p class="muted">Resúmenes, emails y ayuda rápida para pólizas.</p>
+              </div>
+            </div>
+            <div class="form-grid">
+              <label>
+                Póliza
+                <select id="segurosAiPoliza"></select>
+              </label>
+              <label>
+                Tarea
+                <select id="segurosAiTask">
+                  <option value="resumen">Resumen póliza</option>
+                  <option value="email_renovacion">Email renovación</option>
+                  <option value="faltantes">Campos faltantes</option>
+                </select>
+              </label>
+              <label class="span-2">
+                Instrucciones extra
+                <input id="segurosAiExtra" placeholder="Opcional" />
+              </label>
+            </div>
+            <div class="form-actions">
+              <button type="button" id="segurosAiRun">Generar</button>
+              <span id="segurosAiStatus" class="muted"></span>
+            </div>
+            <textarea id="segurosAiOutput" rows="6" readonly></textarea>
+          </div>
+          <div class="form-card">
+            <h3>KPIs y calidad OCR</h3>
+            <p class="muted">Resumen de pólizas y calidad de extracción.</p>
+            <div id="segurosKpis"></div>
+            <div id="segurosOcrQuality"></div>
+          </div>
+          <div class="form-card">
+            <h3>Alertas de vencimiento</h3>
+            <p class="muted">Pólizas que vencen en los próximos 30 días.</p>
+            <div id="segurosAlertasList"></div>
+          </div>
+          <div class="form-card">
+            <div class="section-head">
+              <div>
+                <h3>Checklist póliza</h3>
+                <p class="muted">Seguimiento de documentación por póliza.</p>
+              </div>
+              <div class="form-actions">
+                <button type="button" id="segurosChecklistGenerate">Generar checklist</button>
+              </div>
+            </div>
+            <div class="form-grid">
+              <label>
+                Póliza
+                <select id="segurosChecklistPoliza"></select>
+              </label>
+            </div>
+            <div id="segurosChecklistTable"></div>
+            <div class="footer" id="segurosChecklistInfo"></div>
+          </div>
+          <div class="form-card">
             <h3>Oportunidades de venta cruzada</h3>
             <p class="muted">Clientes de gestoría sin póliza asignada.</p>
             <div id="segurosCrmOportunidades"></div>
@@ -2174,6 +2235,7 @@
               <label>
                 Motor OCR
                 <select id="finAsesorOcrMode">
+                  <option value="handwritten">Manuscrito (recomendado)</option>
                   <option value="vision">Vision</option>
                   <option value="docai">Document AI (Form Parser)</option>
                   <option value="hybrid">Híbrido (Vision + DocAI)</option>
@@ -2208,6 +2270,8 @@
             </div>
             <form id="finAsesoramientoForm" class="form-grid">
               <input id="finAsesoramientoId" type="hidden" name="id" />
+              <input type="hidden" name="calidad_ocr" />
+              <input type="hidden" name="campos_ocr" />
               <label>
                 Inmobiliaria/Asesor
                 <select name="inmobiliaria_asesor" id="finAsesorInmobiliaria"></select>

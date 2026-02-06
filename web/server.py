@@ -23,6 +23,26 @@ UPLOADS = ROOT / "uploads"
 DB_DEFAULT = ROOT.parent / "data" / "erp_import2.sqlite"
 TESSDATA_DIR = "/opt/homebrew/share/tessdata"
 POSTAL_CATALOG_PATH = ROOT.parent / "data" / "catalogos" / "postal_catalogo.csv"
+ENV_PATH = ROOT.parent / ".env"
+
+def load_env_file():
+    if not ENV_PATH.exists():
+        return
+    try:
+        with ENV_PATH.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                raw = line.strip()
+                if not raw or raw.startswith("#") or "=" not in raw:
+                    continue
+                key, value = raw.split("=", 1)
+                key = key.strip()
+                value = value.strip().strip('"').strip("'")
+                if key and key not in os.environ:
+                    os.environ[key] = value
+    except Exception:
+        return
+
+load_env_file()
 S3_BUCKET = os.environ.get("AWS_S3_BUCKET") or os.environ.get("S3_BUCKET")
 S3_REGION = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION")
 
@@ -86,6 +106,51 @@ def normalize_postal_code(value):
     if len(code) == 4:
         code = f"0{code}"
     return code if len(code) == 5 else ""
+
+def normalize_phone(value):
+    if not value:
+        return ""
+    digits = re.sub(r"\D+", "", str(value))
+    if not digits:
+        return ""
+    if digits.startswith("34") and len(digits) > 9:
+        digits = digits[-9:]
+    if len(digits) == 9:
+        return digits
+    return digits
+
+def normalize_email(value):
+    if not value:
+        return ""
+    return str(value).strip().lower()
+
+def normalize_person_name(value):
+    if not value:
+        return ""
+    text = str(value).strip()
+    text = re.sub(r"\s+", " ", text)
+    return text
+
+def normalize_company_name(value):
+    if not value:
+        return ""
+    text = str(value).strip()
+    text = re.sub(r"\s+", " ", text)
+    return text
+
+def normalize_poliza_key(value):
+    if not value:
+        return ""
+    text = re.sub(r"\s+", "", str(value).upper())
+    text = re.sub(r"[^A-Z0-9]", "", text)
+    return text
+
+def normalize_company_key(value):
+    if not value:
+        return ""
+    text = normalize_company_name(value).upper()
+    text = re.sub(r"[^A-Z0-9]", "", text)
+    return text
 
 def normalize_header(value):
     return re.sub(r"[^a-z0-9]", "", str(value or "").lower())
@@ -518,6 +583,205 @@ def map_docai_fields(doc_fields):
     fields["cliente2_prestamos"] = doc_pick("prestamos", 2)
     return fields
 
+def map_docai_poliza_fields(doc_fields):
+    doc_fields = doc_fields or {}
+    def doc_pick(labels):
+        for label in labels:
+            key = normalize_field_label(label)
+            if doc_fields.get(key):
+                return doc_fields.get(key)
+        return ""
+    fields = {}
+    fields["tomador"] = doc_pick([
+        "tomador",
+        "asegurado",
+        "asegurado principal",
+        "titular",
+        "contratante",
+        "nombre",
+        "nombre y apellidos",
+    ])
+    fields["dni"] = doc_pick(["dni", "nif", "cif", "documento", "doc identificacion"])
+    fields["telefono"] = doc_pick(["telefono", "móvil", "movil"])
+    fields["email"] = doc_pick(["correo electronico", "email"])
+    fields["direccion"] = doc_pick(["direccion", "domicilio"])
+    fields["compania"] = doc_pick(["compania", "compañia", "aseguradora", "entidad aseguradora"])
+    fields["ramo"] = doc_pick(["ramo", "modalidad", "producto"])
+    fields["poliza_numero"] = doc_pick([
+        "poliza",
+        "numero poliza",
+        "nº poliza",
+        "número poliza",
+        "certificado",
+        "contrato",
+    ])
+    fields["fecha_efecto"] = doc_pick([
+        "fecha efecto",
+        "efecto",
+        "inicio vigencia",
+        "fecha inicio",
+        "vigencia desde",
+    ])
+    fields["fecha_vencimiento"] = doc_pick([
+        "fecha vencimiento",
+        "vencimiento",
+        "fin vigencia",
+        "vigencia hasta",
+    ])
+    fields["prima_neta"] = doc_pick(["prima neta", "neta"])
+    fields["prima_total"] = doc_pick(["prima total", "prima anual", "total recibo", "total"])
+    return fields
+
+def compute_ocr_quality(fields, required_keys=None):
+    fields = fields or {}
+    required_keys = required_keys or ()
+    provided = [key for key, value in fields.items() if str(value or "").strip()]
+    required_filled = [key for key in required_keys if str(fields.get(key) or "").strip()]
+    total_required = len(required_keys)
+    ratio = (len(required_filled) / total_required) if total_required else 0
+    if total_required and ratio >= 0.75:
+        calidad = "alta"
+    elif total_required and ratio >= 0.45:
+        calidad = "media"
+    elif total_required:
+        calidad = "baja"
+    else:
+        calidad = "desconocida"
+    return {
+        "calidad": calidad,
+        "campos": provided,
+        "required_filled": required_filled,
+    }
+
+def compute_fin_quality(fields):
+    required = (
+        "inmobiliaria_asesor",
+        "fecha",
+        "asesor",
+        "cliente1_nombre",
+        "cliente1_dni",
+        "cliente1_telefono",
+        "cliente1_email",
+        "cliente1_ingresos",
+    )
+    return compute_ocr_quality(fields, required)
+
+def openai_available():
+    return bool(os.environ.get("OPENAI_API_KEY"))
+
+def extract_openai_output(resp):
+    if not resp:
+        return ""
+    if isinstance(resp, dict):
+        if resp.get("output_text"):
+            return resp.get("output_text")
+        output = resp.get("output") or []
+        parts = []
+        for item in output:
+            content = item.get("content") or []
+            for block in content:
+                if block.get("type") == "output_text":
+                    parts.append(block.get("text", ""))
+        if parts:
+            return "\n".join(parts).strip()
+    return ""
+
+def call_openai(prompt, model=None, temperature=0.2, max_tokens=600):
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        return "", "OPENAI_API_KEY no configurada"
+    model = model or os.environ.get("OPENAI_MODEL") or "gpt-4o-mini"
+    payload = {
+        "model": model,
+        "input": [
+            {
+                "role": "system",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "Eres un copiloto interno para un CRM de seguros. Responde en español.",
+                    }
+                ],
+            },
+            {"role": "user", "content": [{"type": "text", "text": prompt}]},
+        ],
+        "temperature": temperature,
+        "max_output_tokens": max_tokens,
+        "store": False,
+    }
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        "https://api.openai.com/v1/responses",
+        data=data,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            res = json.loads(resp.read().decode("utf-8"))
+    except Exception as err:
+        return "", f"OpenAI error: {err}"
+    return extract_openai_output(res), ""
+
+def call_openai_extract_fin(text, extra=""):
+    prompt = (
+        "Extrae datos de un asesoramiento financiero manuscrito. Responde solo JSON con claves conocidas, "
+        "sin inventar. Usa los campos existentes del formulario (cliente1_nombre, cliente1_dni, cliente1_telefono, "
+        "cliente1_email, cliente1_fecha_nacimiento, cliente1_estado_civil, cliente1_regimen, cliente1_hijos, "
+        "cliente1_profesion, cliente1_tipo_contrato, cliente1_tiempo_contrato, cliente1_ingresos, cliente1_patrimonio, "
+        "cliente1_prestamos, cliente1_prestamo_activo, cliente1_prestamo_entidad, cliente1_prestamo_resto, "
+        "cliente2_nombre, cliente2_dni, cliente2_telefono, cliente2_email, cliente2_fecha_nacimiento, "
+        "cliente2_estado_civil, cliente2_regimen, cliente2_hijos, cliente2_profesion, cliente2_tipo_contrato, "
+        "cliente2_tiempo_contrato, cliente2_ingresos, cliente2_patrimonio, cliente2_prestamos, cliente2_prestamo_activo, "
+        "cliente2_prestamo_entidad, cliente2_prestamo_resto, ingresos_conjuntos, entidades_financieras, avalistas, "
+        "aportacion_cv, inmobiliaria_asesor, asesor, fecha). "
+        "Si no ves un dato, deja el valor vacío.\n\n"
+        f"Texto OCR:\n{text}\n\n"
+        f"Instrucciones extra: {extra}"
+    )
+    output, err = call_openai(prompt, temperature=0.1, max_tokens=800)
+    if err:
+        return {}, err
+    try:
+        data = json.loads(output)
+        if isinstance(data, dict):
+            return data, ""
+    except Exception:
+        return {}, "OpenAI no devolvió JSON válido"
+    return {}, "OpenAI no devolvió JSON"
+
+def classify_seguros_document(text):
+    cleaned = (text or "").lower()
+    if not cleaned:
+        return "otro"
+    presupuesto_hits = [
+        "presupuesto",
+        "propuesta",
+        "cotizacion",
+        "cotización",
+        "oferta",
+        "simulacion",
+        "simulación",
+    ]
+    poliza_hits = [
+        "poliza",
+        "póliza",
+        "certificado",
+        "contrato",
+        "vigencia",
+        "fecha de efecto",
+        "fecha de vencimiento",
+    ]
+    score_presupuesto = sum(1 for key in presupuesto_hits if key in cleaned)
+    score_poliza = sum(1 for key in poliza_hits if key in cleaned)
+    if score_presupuesto > score_poliza:
+        return "presupuesto"
+    if score_poliza > 0:
+        return "poliza"
+    return "otro"
+
 def merge_fields(base_fields, extra_fields):
     base_fields = base_fields or {}
     extra_fields = extra_fields or {}
@@ -525,6 +789,19 @@ def merge_fields(base_fields, extra_fields):
     for key, value in extra_fields.items():
         if not str(merged.get(key, "") or "").strip() and str(value or "").strip():
             merged[key] = value
+    return merged
+
+def merge_many_fields(*field_sets):
+    merged = {}
+    for fields in field_sets:
+        for key, value in (fields or {}).items():
+            if value is None:
+                continue
+            val = str(value).strip()
+            if not val:
+                continue
+            if key not in merged or not str(merged.get(key) or "").strip():
+                merged[key] = value
     return merged
 
 def get_image_size(image_path):
@@ -976,6 +1253,37 @@ def parse_poliza_text(text):
             return raw
         table = str.maketrans({"O": "0", "o": "0", "I": "1", "l": "1", "S": "5", "B": "8"})
         return raw.translate(table)
+    def normalize_nif_ocr(value):
+        if not value:
+            return ""
+        raw = str(value).strip().upper()
+        if not raw:
+            return ""
+        raw = raw.replace(" ", "").replace("-", "").replace(".", "")
+        raw = raw.replace("O", "0").replace("I", "1").replace("L", "1").replace("S", "5").replace("B", "8")
+        raw = re.sub(r"[^A-Z0-9]", "", raw)
+        if len(raw) > 9:
+            raw = raw[:9]
+        return raw
+    def is_valid_nif(value):
+        if not value:
+            return False
+        return bool(
+            re.match(r"^[0-9]{8}[A-Z]$", value)
+            or re.match(r"^[XYZ][0-9]{7}[A-Z]$", value)
+            or re.match(r"^[ABCDEFGHJNPQRSUVW][0-9]{7}[0-9A-Z]$", value)
+        )
+    def normalize_nif_candidate(value):
+        if not value:
+            return ""
+        candidate = normalize_nif_ocr(value)
+        if is_valid_nif(candidate):
+            return candidate
+        if len(candidate) >= 9:
+            candidate = candidate[:9]
+            if is_valid_nif(candidate):
+                return candidate
+        return ""
     def normalize_ocr_date(value):
         if not value:
             return ""
@@ -984,7 +1292,25 @@ def parse_poliza_text(text):
             return ""
         raw = normalize_ocr_digits(raw)
         raw = re.sub(r"[.\-]", "/", raw)
+        raw = re.sub(r"(\d)\s+(\d)", r"\1/\2", raw)
         return raw
+    def extract_date_range(text_value):
+        if not text_value:
+            return "", ""
+        value = normalize_ocr_date(text_value)
+        value = value.replace(" a ", " hasta ").replace(" al ", " hasta ")
+        match = re.search(
+            r"(?:desde|vigencia\s+desde|periodo\s+del\s+seguro)\s*[:\-]?\s*(\d{1,2}[/-]\d{1,2}[/-]\d{2,4}).*?"
+            r"(?:hasta|a)\s*(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})",
+            value,
+            re.IGNORECASE,
+        )
+        if match:
+            return match.group(1), match.group(2)
+        dates = re.findall(r"\d{1,2}[/-]\d{1,2}[/-]\d{2,4}", value)
+        if len(dates) >= 2:
+            return dates[0], dates[1]
+        return "", ""
     def normalize_poliza_number(value, compania=""):
         if not value:
             return ""
@@ -1009,10 +1335,26 @@ def parse_poliza_text(text):
             "SANTA LUCIA",
             "SANTALUCIA",
         }
+        alnum_structured = {
+            "AXA",
+            "ALLIANZ",
+            "GENERALI",
+            "REALE",
+            "ZURICH",
+            "HELVETIA",
+            "CASER",
+            "LIBERTY",
+            "MUTUA MADRILEÑA",
+            "MUTUA MADRILENA",
+        }
         if normalized_company in numeric_only:
             digit_runs = re.findall(r"\d{5,}", raw)
             if digit_runs:
                 return max(digit_runs, key=len)
+        if normalized_company in alnum_structured:
+            alnum = re.findall(r"[A-Z0-9]{6,}", raw)
+            if alnum:
+                return max(alnum, key=len)
         # Prefer token with most digits and length between 5 and 20
         def score_token(token):
             digits = len(re.findall(r"\d", token))
@@ -1062,6 +1404,8 @@ def parse_poliza_text(text):
         r"Asegurado\s+y\s+Tomador\s*[:\-]?\s*([^\n]+)",
         r"Contratante\s*[:\-]?\s*([^\n]+)",
     ])
+    if fields["tomador"]:
+        fields["tomador"] = normalize_person_name(fields["tomador"])
     fields["dni"] = pick([
         r"Doc\.?\s*Identificaci[oó]n\s*[:\-]?\s*([A-Z0-9\-]+)",
         r"NIF/CIF\s*[:\-]?\s*([A-Z0-9\-]+)",
@@ -1088,8 +1432,8 @@ def parse_poliza_text(text):
         r"Domicilio\s*[:\-]?\s*([^\n]+)",
     ])
     fields["fecha_nacimiento"] = pick([
-        r"Fecha de nacimiento\s*[:\-]?\s*([0-9]{1,2}[/-][0-9]{1,2}[/-][0-9]{2,4})",
-        r"F\.?\s*nacimiento\s*[:\-]?\s*([0-9]{1,2}[/-][0-9]{1,2}[/-][0-9]{2,4})",
+        r"Fecha de nacimiento\s*[:\-]?\s*([0-9]{1,2}[ /.-][0-9]{1,2}[ /.-][0-9]{2,4})",
+        r"F\.?\s*nacimiento\s*[:\-]?\s*([0-9]{1,2}[ /.-][0-9]{1,2}[ /.-][0-9]{2,4})",
     ])
     if fields["fecha_nacimiento"]:
         fields["fecha_nacimiento"] = normalize_ocr_date(fields["fecha_nacimiento"])
@@ -1105,6 +1449,10 @@ def parse_poliza_text(text):
         r"Poliza\s*No\.?\s*[:#]?\s*([A-Z0-9/.\-]+)",
         r"N[úu]m\.?\s*P[oó]liza\s*[:#]?\s*([A-Z0-9/.\-]+)",
         r"N[úu]mero\s*de\s*p[oó]liza\s*[:#]?\s*([A-Z0-9/.\-]+)",
+        r"Certificado\s*[:#]?\s*([A-Z0-9/.\-]+)",
+        r"N[ºo]\s*de\s*certificado\s*[:#]?\s*([A-Z0-9/.\-]+)",
+        r"N[ºo]\s*de\s*contrato\s*[:#]?\s*([A-Z0-9/.\-]+)",
+        r"Contrato\s*[:#]?\s*([A-Z0-9/.\-]+)",
     ])
     fields["compania"] = ""
     company_aliases = [
@@ -1176,20 +1524,24 @@ def parse_poliza_text(text):
             "CATALANA OCCIDENTE": "Catalana Occidente",
         }
         fields["compania"] = aliases.get(normalized, fields["compania"].strip())
+    if fields["compania"]:
+        fields["compania"] = normalize_company_name(fields["compania"])
     fields["fecha_efecto"] = pick([
-        r"Fecha de efecto\s*:\s*([0-9]{1,2}[/-][0-9]{1,2}[/-][0-9]{2,4})",
-        r"Efecto\s*:\s*([0-9]{1,2}[/-][0-9]{1,2}[/-][0-9]{2,4})",
-        r"Vigencia\s*desde\s*[:\-]?\s*([0-9]{1,2}[/-][0-9]{1,2}[/-][0-9]{2,4})",
-        r"Fecha\s*inicio\s*[:\-]?\s*([0-9]{1,2}[/-][0-9]{1,2}[/-][0-9]{2,4})",
-        r"Inicio\s*vigencia\s*[:\-]?\s*([0-9]{1,2}[/-][0-9]{1,2}[/-][0-9]{2,4})",
-        r"Per[ií]odo\s*del\s*seguro\s*([0-9]{1,2}[/-][0-9]{1,2}[/-][0-9]{2,4})",
-        r"Per[ií]odo\s*del\s*seguro\s*([0-9]{1,2}[/-][0-9]{1,2}[/-][0-9]{2,4})\s*[0-9:]*",
+        r"Fecha de efecto\s*:\s*([0-9]{1,2}[ /.-][0-9]{1,2}[ /.-][0-9]{2,4})",
+        r"Efecto\s*:\s*([0-9]{1,2}[ /.-][0-9]{1,2}[ /.-][0-9]{2,4})",
+        r"Vigencia\s*desde\s*[:\-]?\s*([0-9]{1,2}[ /.-][0-9]{1,2}[ /.-][0-9]{2,4})",
+        r"Fecha\s*inicio\s*[:\-]?\s*([0-9]{1,2}[ /.-][0-9]{1,2}[ /.-][0-9]{2,4})",
+        r"Inicio\s*vigencia\s*[:\-]?\s*([0-9]{1,2}[ /.-][0-9]{1,2}[ /.-][0-9]{2,4})",
+        r"Per[ií]odo\s*del\s*seguro\s*([0-9]{1,2}[ /.-][0-9]{1,2}[ /.-][0-9]{2,4})",
+        r"Per[ií]odo\s*del\s*seguro\s*([0-9]{1,2}[ /.-][0-9]{1,2}[ /.-][0-9]{2,4})\s*[0-9:]*",
+        r"Desde\s*[:\-]?\s*([0-9]{1,2}[ /.-][0-9]{1,2}[ /.-][0-9]{2,4})",
     ])
     fields["fecha_vencimiento"] = pick([
-        r"Fecha de vencimiento\s*[:\-]?\s*([0-9]{1,2}[/-][0-9]{1,2}[/-][0-9]{2,4})",
-        r"Vencimiento\s*[:\-]?\s*([0-9]{1,2}[/-][0-9]{1,2}[/-][0-9]{2,4})",
-        r"Fin\s*vigencia\s*[:\-]?\s*([0-9]{1,2}[/-][0-9]{1,2}[/-][0-9]{2,4})",
-        r"Vigencia\s*hasta\s*[:\-]?\s*([0-9]{1,2}[/-][0-9]{1,2}[/-][0-9]{2,4})",
+        r"Fecha de vencimiento\s*[:\-]?\s*([0-9]{1,2}[ /.-][0-9]{1,2}[ /.-][0-9]{2,4})",
+        r"Vencimiento\s*[:\-]?\s*([0-9]{1,2}[ /.-][0-9]{1,2}[ /.-][0-9]{2,4})",
+        r"Fin\s*vigencia\s*[:\-]?\s*([0-9]{1,2}[ /.-][0-9]{1,2}[ /.-][0-9]{2,4})",
+        r"Vigencia\s*hasta\s*[:\-]?\s*([0-9]{1,2}[ /.-][0-9]{1,2}[ /.-][0-9]{2,4})",
+        r"Hasta\s*[:\-]?\s*([0-9]{1,2}[ /.-][0-9]{1,2}[ /.-][0-9]{2,4})",
     ])
     if fields["fecha_efecto"]:
         fields["fecha_efecto"] = normalize_ocr_date(fields["fecha_efecto"])
@@ -1262,9 +1614,9 @@ def parse_poliza_text(text):
         if postal_match and postal_match.group(0) not in fields["direccion"]:
             fields["direccion"] = f"{fields['direccion']} {postal_match.group(0)}".strip()
     if fields["telefono"]:
-        fields["telefono"] = re.sub(r"\D+", "", fields["telefono"])
+        fields["telefono"] = normalize_phone(fields["telefono"])
     if fields["email"]:
-        fields["email"] = fields["email"].strip().lower()
+        fields["email"] = normalize_email(fields["email"])
     if fields["poliza_numero"]:
         if not re.search(r"\\d", fields["poliza_numero"]):
             fields["poliza_numero"] = ""
@@ -1275,20 +1627,16 @@ def parse_poliza_text(text):
         if pol_match:
             fields["poliza_numero"] = pol_match.group(1).strip()
     if fields["dni"]:
-        dni = fields["dni"].strip()
-        if not re.match(r"^[0-9]{8}[A-Z]$", dni):
-            if re.match(r"^[A-Z][0-9]{7}[0-9A-Z]$", dni) or re.match(r"^[XYZ][0-9]{7}[A-Z]$", dni):
-                pass
-            else:
-                fields["dni"] = ""
+        dni = normalize_nif_candidate(fields["dni"])
+        fields["dni"] = dni
     if not fields["dni"]:
         dni_match = re.search(r"\b([0-9]{8}[A-Z])\b", text)
         if dni_match:
-            fields["dni"] = dni_match.group(1)
+            fields["dni"] = normalize_nif_candidate(dni_match.group(1))
         else:
             cif_match = re.search(r"\b([ABCDEFGHJNPQRSUVW][0-9]{7}[0-9A-Z])\b", text)
             if cif_match:
-                fields["dni"] = cif_match.group(1)
+                fields["dni"] = normalize_nif_candidate(cif_match.group(1))
     if fields["ramo"] and "@" in fields["ramo"]:
         fields["ramo"] = ""
     if fields["ramo"]:
@@ -1316,14 +1664,26 @@ def parse_poliza_text(text):
                     if not fields["ramo"]:
                         fields["ramo"] = cols[-1]
                 break
+    if not fields["fecha_efecto"] or not fields["fecha_vencimiento"]:
+        start_date, end_date = extract_date_range(cleaned)
+        if start_date and not fields["fecha_efecto"]:
+            fields["fecha_efecto"] = start_date
+        if end_date and not fields["fecha_vencimiento"]:
+            fields["fecha_vencimiento"] = end_date
     if not fields["tomador"]:
         fields["tomador"] = line_pick(["Tomador", "Asegurado", "Titular", "Contratante"])
+    if fields["tomador"]:
+        fields["tomador"] = normalize_person_name(fields["tomador"])
     if not fields["dni"]:
         fields["dni"] = line_pick(["DNI", "NIF", "CIF", "Documento"])
     if not fields["compania"]:
         fields["compania"] = line_pick(["Compañia", "Compania", "Aseguradora", "Entidad aseguradora"])
+    if fields["compania"]:
+        fields["compania"] = normalize_company_name(fields["compania"])
     if not fields["poliza_numero"]:
-        fields["poliza_numero"] = line_pick(["Póliza", "Poliza", "Nº póliza", "Numero de poliza"])
+        fields["poliza_numero"] = line_pick(
+            ["Póliza", "Poliza", "Nº póliza", "Numero de poliza", "Certificado", "Contrato"]
+        )
     if not fields["ramo"]:
         fields["ramo"] = line_pick(["Ramo", "Modalidad", "Producto"])
     if not fields["fecha_efecto"]:
@@ -1334,6 +1694,18 @@ def parse_poliza_text(text):
         fields["prima_total"] = line_pick(["Prima total", "Total recibo", "Total"])
     if not fields["prima_neta"]:
         fields["prima_neta"] = line_pick(["Prima neta", "Neta"])
+    if not fields["direccion"]:
+        fields["direccion"] = line_pick(["Direccion", "Domicilio"])
+    if fields["direccion"]:
+        fields["direccion"] = re.sub(r"\s{2,}.*$", "", fields["direccion"]).strip()
+    if not fields["telefono"]:
+        fields["telefono"] = line_pick(["Telefono", "Teléfono", "Movil", "Móvil", "Tfno", "Tlf"])
+    if fields["telefono"]:
+        fields["telefono"] = normalize_phone(fields["telefono"])
+    if not fields["email"]:
+        fields["email"] = line_pick(["Email", "Correo", "Correo electronico", "Correo electrónico"])
+    if fields["email"]:
+        fields["email"] = normalize_email(fields["email"])
     for key in ("fecha_efecto", "fecha_vencimiento", "fecha_nacimiento"):
         if fields.get(key):
             fields[key] = normalize_ocr_date(fields[key])
@@ -1341,6 +1713,8 @@ def parse_poliza_text(text):
         fields["poliza_numero"] = normalize_poliza_number(fields["poliza_numero"], fields.get("compania"))
     if fields["dni"] and not fields.get("nif"):
         fields["nif"] = fields["dni"]
+    if fields.get("nif"):
+        fields["nif"] = normalize_nif_candidate(fields["nif"]) or fields["nif"]
     return fields
 
 def parse_asesoramiento_block(block):
@@ -1969,6 +2343,8 @@ def ensure_tables(db_path):
           id TEXT PRIMARY KEY,
           empresa_id TEXT,
           cliente_id TEXT,
+          referencia_tipo TEXT,
+          referencia_id TEXT,
           nombre TEXT,
           tipo TEXT,
           fecha TEXT,
@@ -1976,6 +2352,8 @@ def ensure_tables(db_path):
           notas TEXT,
           doc_key TEXT,
           doc_url TEXT,
+          calidad_ocr TEXT,
+          campos_ocr TEXT,
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL
         )
@@ -1987,6 +2365,14 @@ def ensure_tables(db_path):
             conn.execute("ALTER TABLE gestoria_docs ADD COLUMN doc_key TEXT")
         if "doc_url" not in docs_cols:
             conn.execute("ALTER TABLE gestoria_docs ADD COLUMN doc_url TEXT")
+        if "referencia_tipo" not in docs_cols:
+            conn.execute("ALTER TABLE gestoria_docs ADD COLUMN referencia_tipo TEXT")
+        if "referencia_id" not in docs_cols:
+            conn.execute("ALTER TABLE gestoria_docs ADD COLUMN referencia_id TEXT")
+        if "calidad_ocr" not in docs_cols:
+            conn.execute("ALTER TABLE gestoria_docs ADD COLUMN calidad_ocr TEXT")
+        if "campos_ocr" not in docs_cols:
+            conn.execute("ALTER TABLE gestoria_docs ADD COLUMN campos_ocr TEXT")
     except sqlite3.Error:
         pass
     conn.execute(
@@ -2041,6 +2427,8 @@ def ensure_tables(db_path):
           aportacion_cv REAL,
           notas TEXT,
           notas_ocr TEXT,
+          calidad_ocr TEXT,
+          campos_ocr TEXT,
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL
         )
@@ -2067,6 +2455,10 @@ def ensure_tables(db_path):
         conn.execute("ALTER TABLE asesoramientos_financiacion ADD COLUMN cliente2_prestamo_entidad TEXT")
     if "cliente2_prestamo_resto" not in ases_cols:
         conn.execute("ALTER TABLE asesoramientos_financiacion ADD COLUMN cliente2_prestamo_resto REAL")
+    if "calidad_ocr" not in ases_cols:
+        conn.execute("ALTER TABLE asesoramientos_financiacion ADD COLUMN calidad_ocr TEXT")
+    if "campos_ocr" not in ases_cols:
+        conn.execute("ALTER TABLE asesoramientos_financiacion ADD COLUMN campos_ocr TEXT")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS gestoria_contabilidad (
@@ -2213,6 +2605,21 @@ def ensure_tables(db_path):
           notas TEXT,
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS seguros_checklist (
+          id TEXT PRIMARY KEY,
+          poliza_id TEXT NOT NULL,
+          tarea TEXT,
+          estado TEXT,
+          responsable TEXT,
+          fecha_limite TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          FOREIGN KEY (poliza_id) REFERENCES seguros(id)
         )
         """
     )
@@ -2433,6 +2840,9 @@ class Handler(BaseHTTPRequestHandler):
             "/api/seguros_comisiones",
             "/api/seguros_comisiones_update",
             "/api/seguros_comisiones_delete",
+            "/api/seguros_checklist_generate",
+            "/api/seguros_checklist_update",
+            "/api/ai_seguros_copilot",
             "/api/s3_presign",
             "/api/clientes",
             "/api/clientes_link",
@@ -2769,16 +3179,19 @@ class Handler(BaseHTTPRequestHandler):
             conn.execute(
                 """
                 INSERT INTO gestoria_docs (
-                  id, empresa_id, cliente_id, nombre, tipo, fecha, estado, notas, doc_key, doc_url,
-                  created_at, updated_at
+                  id, empresa_id, cliente_id, referencia_tipo, referencia_id,
+                  nombre, tipo, fecha, estado, notas, doc_key, doc_url,
+                  calidad_ocr, campos_ocr, created_at, updated_at
                 ) VALUES (
-                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
                 )
                 """,
                 (
                     os.urandom(16).hex(),
                     empresa["id"],
                     payload.get("cliente_id"),
+                    payload.get("referencia_tipo"),
+                    payload.get("referencia_id"),
                     payload.get("nombre"),
                     payload.get("tipo"),
                     payload.get("fecha"),
@@ -2786,6 +3199,8 @@ class Handler(BaseHTTPRequestHandler):
                     payload.get("notas"),
                     payload.get("doc_key"),
                     payload.get("doc_url"),
+                    payload.get("calidad_ocr"),
+                    payload.get("campos_ocr"),
                     now,
                     now,
                 ),
@@ -2796,7 +3211,19 @@ class Handler(BaseHTTPRequestHandler):
             if not doc_id:
                 json_response(self, {"error": "id requerido"}, status=400)
                 return
-            allowed = ("nombre", "tipo", "fecha", "estado", "notas", "doc_key", "doc_url")
+            allowed = (
+                "nombre",
+                "referencia_tipo",
+                "referencia_id",
+                "tipo",
+                "fecha",
+                "estado",
+                "notas",
+                "doc_key",
+                "doc_url",
+                "calidad_ocr",
+                "campos_ocr",
+            )
             updates = []
             values = []
             for field in allowed:
@@ -3061,6 +3488,7 @@ class Handler(BaseHTTPRequestHandler):
             text = ""
             err_detail = ""
             method = ""
+            required_keys = ("tomador", "poliza_numero", "compania", "fecha_efecto")
             try:
                 with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp_file:
                     tmp_file.write(pdf_bytes)
@@ -3079,7 +3507,10 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 fields = parse_poliza_text(text)
                 if not any(str(value or "").strip() for value in fields.values()) or (
-                    not fields.get("poliza_numero") and not fields.get("tomador")
+                    not fields.get("poliza_numero")
+                    or not fields.get("tomador")
+                    or not fields.get("compania")
+                    or not fields.get("fecha_efecto")
                 ):
                     ocr_text, ocr_err = ocr_pdf_all_pages(tmp_path, use_external=external_ocr_available())
                     if ocr_text:
@@ -3088,6 +3519,26 @@ class Handler(BaseHTTPRequestHandler):
                         method = "vision" if external_ocr_available() else "tesseract"
                     elif ocr_err and not err_detail:
                         err_detail = ocr_err
+                doc_text = ""
+                missing_required = any(not fields.get(key) for key in required_keys)
+                if missing_required and docai_available():
+                    doc_text, doc_fields, doc_err = ocr_image_docai(pdf_bytes, "application/pdf")
+                    if doc_err and not err_detail:
+                        err_detail = doc_err
+                    doc_mapped = map_docai_poliza_fields(doc_fields)
+                    doc_parsed = parse_poliza_text(doc_text) if doc_text else {}
+                    for key, value in doc_mapped.items():
+                        if value and not fields.get(key):
+                            fields[key] = value
+                    for key, value in doc_parsed.items():
+                        if value and not fields.get(key):
+                            fields[key] = value
+                    if doc_text and doc_text.strip():
+                        method = "docai"
+                doc_type = classify_seguros_document(text)
+                if doc_type == "otro" and doc_text:
+                    doc_type = classify_seguros_document(doc_text)
+                ocr_quality = compute_ocr_quality(fields, required_keys)
                 cliente_match = False
                 cliente_id = None
                 tomador = (fields.get("tomador") or "").strip()
@@ -3118,6 +3569,8 @@ class Handler(BaseHTTPRequestHandler):
                         "text": text,
                         "language": detect_ocr_lang(),
                         "method": method,
+                        "doc_type": doc_type,
+                        "ocr_quality": ocr_quality,
                         "cliente_id": cliente_id,
                         "cliente_match": cliente_match,
                     },
@@ -3136,6 +3589,9 @@ class Handler(BaseHTTPRequestHandler):
                 return
             use_external = bool(payload.get("use_external"))
             ocr_mode = (payload.get("ocr_mode") or "").strip().lower()
+            if ocr_mode == "handwritten":
+                use_external = True
+                ocr_mode = "hybrid"
             if external_ocr_available() and not use_external:
                 use_external = True
             if not ocr_mode:
@@ -3213,9 +3669,17 @@ class Handler(BaseHTTPRequestHandler):
                         template_fields = parse_asesoramiento_template_image(tmp_path)
                     if "fields" not in locals():
                         fields = parse_asesoramiento_text(text) if text else {}
+                    if openai_available() and text:
+                        ai_fields, ai_err = call_openai_extract_fin(text)
+                        if ai_fields:
+                            fields = merge_many_fields(fields, ai_fields)
                     for key, value in template_fields.items():
                         if not str(fields.get(key, "") or "").strip() and str(value or "").strip():
                             fields[key] = value
+                    if openai_available() and text:
+                        ai_fields, ai_err = call_openai_extract_fin(text)
+                        if ai_fields:
+                            fields = merge_many_fields(fields, ai_fields)
                 else:
                     text, err_detail, method = extract_pdf_text(tmp_path)
                     if not text:
@@ -3236,17 +3700,35 @@ class Handler(BaseHTTPRequestHandler):
                         if not str(fields.get(key, "") or "").strip() and str(value or "").strip():
                             fields[key] = value
                     filled = sum(1 for value in fields.values() if str(value or "").strip())
-                    if filled < 6:
-                        ocr_text, ocr_err = ocr_pdf_all_pages(tmp_path)
+                    if filled < 8 or use_external:
+                        ocr_text, ocr_err = ocr_pdf_all_pages(tmp_path, use_external=use_external)
                         if ocr_text:
                             ocr_fields = parse_asesoramiento_text(ocr_text)
                             for key, value in ocr_fields.items():
                                 if not str(fields.get(key, "") or "").strip() and str(value or "").strip():
                                     fields[key] = value
                             text = ocr_text
-                            method = "tesseract"
+                            method = "vision" if use_external else "tesseract"
+                            external_used = external_used or bool(use_external)
                         elif ocr_err:
                             err_detail = ocr_err
+                    doc_text = ""
+                    if docai_available() and (use_external or filled < 10):
+                        doc_text, doc_fields, doc_err = ocr_image_docai(pdf_bytes, "application/pdf")
+                        if doc_err and not err_detail:
+                            err_detail = doc_err
+                        doc_mapped = map_docai_fields(doc_fields)
+                        for key, value in doc_mapped.items():
+                            if not str(fields.get(key, "") or "").strip() and str(value or "").strip():
+                                fields[key] = value
+                    if doc_text:
+                        text = text or doc_text
+                        method = "hybrid" if use_external else "docai"
+                        external_used = external_used or bool(doc_text)
+                    if openai_available() and text:
+                        ai_fields, ai_err = call_openai_extract_fin(text)
+                        if ai_fields:
+                            fields = merge_many_fields(fields, ai_fields)
                 if not text and not any(str(value or "").strip() for value in fields.values()):
                     json_response(
                         self,
@@ -3259,6 +3741,7 @@ class Handler(BaseHTTPRequestHandler):
                         status=400,
                     )
                     return
+                fin_quality = compute_fin_quality(fields)
                 json_response(
                     self,
                     {
@@ -3268,6 +3751,7 @@ class Handler(BaseHTTPRequestHandler):
                         "method": method,
                         "external_error": external_error,
                         "external_used": external_used,
+                        "ocr_quality": fin_quality,
                     },
                 )
             finally:
@@ -3276,6 +3760,9 @@ class Handler(BaseHTTPRequestHandler):
         elif parsed.path == "/api/fin_asesoramiento_ocr_guided":
             sections = payload.get("sections") or {}
             use_external = bool(payload.get("use_external"))
+            ocr_mode = (payload.get("ocr_mode") or "").strip().lower()
+            if ocr_mode == "handwritten":
+                use_external = True
             allowed = {
                 "header": "Cabecera",
                 "cliente1": "Cliente 1",
@@ -3375,16 +3862,21 @@ class Handler(BaseHTTPRequestHandler):
                     for field in ("ingresos_conjuntos", "entidades_financieras", "avalistas", "aportacion_cv"):
                         if resumen_fields.get(field) and not fields.get(field):
                             fields[field] = resumen_fields.get(field)
-            if not any(str(value or "").strip() for value in fields.values()):
-                json_response(
-                    self,
-                    {
-                        "error": "No se pudieron detectar campos.",
-                        "detail": "Sube recortes más cercanos a cada bloque.",
-                    },
-                    status=400,
-                )
-                return
+                if not any(str(value or "").strip() for value in fields.values()):
+                    json_response(
+                        self,
+                        {
+                            "error": "No se pudieron detectar campos.",
+                            "detail": "Sube recortes más cercanos a cada bloque.",
+                        },
+                        status=400,
+                    )
+                    return
+                if openai_available() and texts:
+                    ai_fields, ai_err = call_openai_extract_fin("\n\n".join(texts))
+                    if ai_fields:
+                        fields = merge_many_fields(fields, ai_fields)
+                fin_quality = compute_fin_quality(fields)
             json_response(
                 self,
                 {
@@ -3394,6 +3886,7 @@ class Handler(BaseHTTPRequestHandler):
                     "method": "guided",
                     "external_error": external_error,
                     "external_used": external_used,
+                    "ocr_quality": fin_quality,
                 },
             )
         elif parsed.path == "/api/fin_asesoramiento_ocr_auto":
@@ -3403,6 +3896,9 @@ class Handler(BaseHTTPRequestHandler):
                 return
             use_external = bool(payload.get("use_external"))
             ocr_mode = (payload.get("ocr_mode") or "").strip().lower()
+            if ocr_mode == "handwritten":
+                use_external = True
+                ocr_mode = "hybrid"
             external_error = ""
             external_used = False
             mime = ""
@@ -3427,6 +3923,7 @@ class Handler(BaseHTTPRequestHandler):
                 if ocr_mode == "docai":
                     text, doc_fields, err_detail = ocr_image_docai(image_bytes, mime)
                     fields = map_docai_fields(doc_fields) if doc_fields else parse_asesoramiento_text(text)
+                    fin_quality = compute_fin_quality(fields)
                     json_response(
                         self,
                         {
@@ -3436,6 +3933,7 @@ class Handler(BaseHTTPRequestHandler):
                             "method": "docai",
                             "external_error": err_detail,
                             "external_used": True if text else False,
+                            "ocr_quality": fin_quality,
                         },
                     )
                     return
@@ -3454,6 +3952,7 @@ class Handler(BaseHTTPRequestHandler):
                     fields = map_docai_fields(doc_fields)
                     vision_fields = parse_asesoramiento_text(vision_text) if vision_text else {}
                     fields = merge_fields(vision_fields, fields)
+                    fin_quality = compute_fin_quality(fields)
                     json_response(
                         self,
                         {
@@ -3463,6 +3962,7 @@ class Handler(BaseHTTPRequestHandler):
                             "method": "hybrid",
                             "external_error": external_error,
                             "external_used": external_used,
+                            "ocr_quality": fin_quality,
                         },
                     )
                     return
@@ -3538,6 +4038,7 @@ class Handler(BaseHTTPRequestHandler):
                         status=400,
                     )
                     return
+                fin_quality = compute_fin_quality(fields)
                 json_response(
                     self,
                     {
@@ -3547,6 +4048,7 @@ class Handler(BaseHTTPRequestHandler):
                         "method": "auto",
                         "external_error": external_error,
                         "external_used": external_used,
+                        "ocr_quality": fin_quality,
                     },
                 )
             finally:
@@ -3576,47 +4078,114 @@ class Handler(BaseHTTPRequestHandler):
                         "direccion": payload.get("direccion"),
                     },
                 )
-            conn.execute(
-                """
-                INSERT INTO seguros (
-                  id, empresa_id, cliente_id, mes_creacion, fecha_efecto, fecha_vencimiento,
-                  tomador, compania, ramo, poliza_numero, prima_neta,
-                  prima_total, comision, produccion, colaborador, estado,
-                  estado_renovacion, renovacion_fecha, nueva_poliza_ref,
-                  poliza_key, poliza_url,
-                  created_at, updated_at
-                ) VALUES (
-                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
-                )
-                """,
-                (
-                    poliza_id,
-                    empresa["id"],
-                    cliente_id,
-                    payload.get("mes_creacion"),
-                    payload.get("fecha_efecto"),
-                    payload.get("fecha_vencimiento"),
-                    payload.get("tomador"),
-                    payload.get("compania"),
-                    payload.get("ramo"),
-                    payload.get("poliza_numero"),
-                    payload.get("prima_neta"),
-                    payload.get("prima_total"),
-                    payload.get("comision"),
-                    payload.get("produccion"),
-                    payload.get("colaborador"),
-                    payload.get("estado"),
-                    payload.get("estado_renovacion"),
-                    payload.get("renovacion_fecha"),
-                    payload.get("nueva_poliza_ref"),
-                    payload.get("poliza_key"),
-                    payload.get("poliza_url"),
-                    now,
-                    now,
-                ),
-            )
             poliza_key = payload.get("poliza_key") or ""
             poliza_url = payload.get("poliza_url") or ""
+            ocr_quality = payload.get("ocr_quality") or {}
+            calidad_ocr = ocr_quality.get("calidad") if isinstance(ocr_quality, dict) else payload.get("calidad_ocr")
+            campos_ocr = ""
+            if isinstance(ocr_quality, dict):
+                campos_list = ocr_quality.get("campos") or []
+                if isinstance(campos_list, list):
+                    campos_ocr = ",".join(campos_list)
+                else:
+                    campos_ocr = str(campos_list)
+            else:
+                campos_ocr = payload.get("campos_ocr") or ""
+            # Deduplicación suave: si existe póliza con mismo nº y compañía, actualizar campos vacíos
+            dup_id = None
+            poliza_norm = normalize_poliza_key(payload.get("poliza_numero"))
+            compania_norm = normalize_company_key(payload.get("compania"))
+            if poliza_norm:
+                candidates = conn.execute(
+                    "SELECT id, poliza_numero, compania, cliente_id FROM seguros WHERE empresa_id = ?",
+                    (empresa["id"],),
+                ).fetchall()
+                for row in candidates:
+                    row_poliza = normalize_poliza_key(row["poliza_numero"])
+                    if not row_poliza or row_poliza != poliza_norm:
+                        continue
+                    row_comp = normalize_company_key(row["compania"])
+                    if compania_norm and row_comp and compania_norm != row_comp:
+                        continue
+                    if cliente_id and row["cliente_id"] and row["cliente_id"] != cliente_id:
+                        continue
+                    dup_id = row["id"]
+                    break
+
+            if dup_id:
+                # Enriquecer la póliza existente con campos vacíos
+                row = conn.execute("SELECT * FROM seguros WHERE id = ?", (dup_id,)).fetchone()
+                updates = {}
+                for key in (
+                    "estado",
+                    "fecha_efecto",
+                    "fecha_vencimiento",
+                    "estado_renovacion",
+                    "renovacion_fecha",
+                    "nueva_poliza_ref",
+                    "poliza_numero",
+                    "poliza_key",
+                    "poliza_url",
+                    "tomador",
+                    "compania",
+                    "ramo",
+                    "prima_neta",
+                    "prima_total",
+                ):
+                    incoming = payload.get(key)
+                    if incoming in (None, ""):
+                        continue
+                    current = row[key] if key in row.keys() else None
+                    if current is None or str(current).strip() == "":
+                        updates[key] = incoming
+                if updates:
+                    set_clause = ", ".join([f\"{key} = ?\" for key in updates])
+                    values = list(updates.values()) + [now, dup_id]
+                    conn.execute(
+                        f\"UPDATE seguros SET {set_clause}, updated_at = datetime(?) WHERE id = ?\",
+                        values,
+                    )
+                poliza_id = dup_id
+            else:
+                conn.execute(
+                    """
+                    INSERT INTO seguros (
+                      id, empresa_id, cliente_id, mes_creacion, fecha_efecto, fecha_vencimiento,
+                      tomador, compania, ramo, poliza_numero, prima_neta,
+                      prima_total, comision, produccion, colaborador, estado,
+                      estado_renovacion, renovacion_fecha, nueva_poliza_ref,
+                      poliza_key, poliza_url,
+                      created_at, updated_at
+                    ) VALUES (
+                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                    )
+                    """,
+                    (
+                        poliza_id,
+                        empresa["id"],
+                        cliente_id,
+                        payload.get("mes_creacion"),
+                        payload.get("fecha_efecto"),
+                        payload.get("fecha_vencimiento"),
+                        payload.get("tomador"),
+                        payload.get("compania"),
+                        payload.get("ramo"),
+                        payload.get("poliza_numero"),
+                        payload.get("prima_neta"),
+                        payload.get("prima_total"),
+                        payload.get("comision"),
+                        payload.get("produccion"),
+                        payload.get("colaborador"),
+                        payload.get("estado"),
+                        payload.get("estado_renovacion"),
+                        payload.get("renovacion_fecha"),
+                        payload.get("nueva_poliza_ref"),
+                        payload.get("poliza_key"),
+                        payload.get("poliza_url"),
+                        now,
+                        now,
+                    ),
+                )
             if cliente_id and (poliza_key or poliza_url):
                 where = ["cliente_id = ?", "empresa_id = ?"]
                 values = [cliente_id, empresa["id"]]
@@ -3634,25 +4203,30 @@ class Handler(BaseHTTPRequestHandler):
                     f"SELECT id FROM gestoria_docs WHERE {where_clause}",
                     values,
                 ).fetchone()
+                doc_id = None
                 if not exists:
                     nombre_doc = payload.get("poliza_numero") or payload.get("tomador") or "Póliza seguro"
                     estado_doc = payload.get("estado") or "En vigor"
                     notas_doc = " · ".join(
                         [value for value in (payload.get("compania"), payload.get("ramo")) if value]
                     )
+                    doc_id = os.urandom(16).hex()
                     conn.execute(
                         """
                         INSERT INTO gestoria_docs (
-                          id, empresa_id, cliente_id, nombre, tipo, fecha, estado, notas, doc_key, doc_url,
-                          created_at, updated_at
+                          id, empresa_id, cliente_id, referencia_tipo, referencia_id,
+                          nombre, tipo, fecha, estado, notas, doc_key, doc_url,
+                          calidad_ocr, campos_ocr, created_at, updated_at
                         ) VALUES (
-                          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
                         )
                         """,
                         (
-                            os.urandom(16).hex(),
+                            doc_id,
                             empresa["id"],
                             cliente_id,
+                            "seguros",
+                            poliza_id,
                             nombre_doc,
                             "Seguros",
                             payload.get("fecha_efecto") or payload.get("mes_creacion"),
@@ -3660,10 +4234,75 @@ class Handler(BaseHTTPRequestHandler):
                             notas_doc,
                             poliza_key or None,
                             poliza_url or None,
+                            calidad_ocr,
+                            campos_ocr,
                             now,
                             now,
                         ),
                     )
+                json_response(
+                    self,
+                    {
+                        "ok": True,
+                        "id": poliza_id,
+                        "doc_id": doc_id,
+                        "ocr_quality": ocr_quality,
+                        "duplicate_of": dup_id,
+                    },
+                )
+                return
+            # Crear acción si faltan campos obligatorios
+            poliza_row = conn.execute("SELECT * FROM seguros WHERE id = ?", (poliza_id,)).fetchone()
+            missing = []
+            for key in ("tomador", "poliza_numero", "compania", "fecha_efecto"):
+                if poliza_row and not str(poliza_row[key] or "").strip():
+                    missing.append(key)
+            if missing:
+                notas = f"Completar datos póliza ({', '.join(missing)}). Poliza ID: {poliza_id}"
+                if poliza_row and poliza_row["poliza_numero"]:
+                    notas = f"Completar datos póliza {poliza_row['poliza_numero']} ({', '.join(missing)}). Poliza ID: {poliza_id}"
+                exists = conn.execute(
+                    """
+                    SELECT id FROM acciones
+                    WHERE servicio = 'Seguros'
+                      AND cliente_id = ?
+                      AND tipo = 'Completar datos póliza'
+                      AND notas LIKE ?
+                    LIMIT 1
+                    """,
+                    (cliente_id, f"%{poliza_id}%"),
+                ).fetchone()
+                if not exists:
+                    today = datetime.now().strftime("%Y-%m-%d")
+                    conn.execute(
+                        """
+                        INSERT INTO acciones (
+                          id, empresa_id, servicio, cliente_id, inmueble_id, cliente_nombre,
+                          fecha, hora, tipo, responsable, estado, notas, recordatorio_min, created_at, updated_at
+                        ) VALUES (
+                          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                        )
+                        """,
+                        (
+                            os.urandom(16).hex(),
+                            empresa["id"],
+                            "Seguros",
+                            cliente_id,
+                            None,
+                            poliza_row["tomador"] if poliza_row else "",
+                            today,
+                            None,
+                            "Completar datos póliza",
+                            None,
+                            "Pendiente",
+                            notas,
+                            None,
+                            now,
+                            now,
+                        ),
+                    )
+            json_response(self, {"ok": True, "id": poliza_id, "duplicate_of": dup_id})
+            return
         elif parsed.path == "/api/fin_asesoramientos":
             cliente1_id = ensure_cliente_for_financiacion(
                 conn,
@@ -3702,9 +4341,9 @@ class Handler(BaseHTTPRequestHandler):
                   cliente2_tipo_contrato, cliente2_tiempo_contrato, cliente2_ingresos, cliente2_patrimonio, cliente2_prestamos,
                   cliente2_prestamo_activo, cliente2_prestamo_entidad, cliente2_prestamo_resto,
                   ingresos_conjuntos, entidades_financieras, avalistas, aportacion_cv,
-                  notas, notas_ocr, created_at, updated_at
+                  notas, notas_ocr, calidad_ocr, campos_ocr, created_at, updated_at
                 ) VALUES (
-                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
                 )
                 """,
                 (
@@ -3757,6 +4396,8 @@ class Handler(BaseHTTPRequestHandler):
                     payload.get("aportacion_cv"),
                     payload.get("notas"),
                     payload.get("notas_ocr"),
+                    payload.get("calidad_ocr"),
+                    payload.get("campos_ocr"),
                     now,
                     now,
                 ),
@@ -3838,6 +4479,8 @@ class Handler(BaseHTTPRequestHandler):
                 "aportacion_cv",
                 "notas",
                 "notas_ocr",
+                "calidad_ocr",
+                "campos_ocr",
             )
             updates = {key: payload.get(key) for key in allowed if key in payload}
             if cliente1_id:
@@ -3963,6 +4606,23 @@ class Handler(BaseHTTPRequestHandler):
                 f"UPDATE seguros SET {set_clause}, updated_at = datetime(?) WHERE id = ?",
                 values,
             )
+            row = conn.execute("SELECT * FROM seguros WHERE id = ?", (record_id,)).fetchone()
+            if row:
+                missing = []
+                for key in ("tomador", "poliza_numero", "compania", "fecha_efecto"):
+                    if not str(row[key] or "").strip():
+                        missing.append(key)
+                if not missing:
+                    conn.execute(
+                        """
+                        UPDATE acciones
+                        SET estado = 'Hecho', updated_at = datetime(?)
+                        WHERE servicio = 'Seguros'
+                          AND tipo = 'Completar datos póliza'
+                          AND notas LIKE ?
+                        """,
+                        (now, f"%{record_id}%"),
+                    )
         elif parsed.path == "/api/seguros_enrich":
             record_id = payload.get("id")
             if not record_id:
@@ -4001,6 +4661,23 @@ class Handler(BaseHTTPRequestHandler):
                     f"UPDATE seguros SET {set_clause}, updated_at = datetime(?) WHERE id = ?",
                     values,
                 )
+            row = conn.execute("SELECT * FROM seguros WHERE id = ?", (record_id,)).fetchone()
+            if row:
+                missing = []
+                for key in ("tomador", "poliza_numero", "compania", "fecha_efecto"):
+                    if not str(row[key] or "").strip():
+                        missing.append(key)
+                if not missing:
+                    conn.execute(
+                        """
+                        UPDATE acciones
+                        SET estado = 'Hecho', updated_at = datetime(?)
+                        WHERE servicio = 'Seguros'
+                          AND tipo = 'Completar datos póliza'
+                          AND notas LIKE ?
+                        """,
+                        (now, f"%{record_id}%"),
+                    )
         elif parsed.path == "/api/seguros_ofertas":
             conn.execute(
                 """
@@ -4201,6 +4878,112 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "id requerido"}, status=400)
                 return
             conn.execute("DELETE FROM seguros_comisiones WHERE id = ?", (record_id,))
+        elif parsed.path == "/api/seguros_checklist_generate":
+            poliza_id = payload.get("poliza_id")
+            if not poliza_id:
+                json_response(self, {"error": "poliza_id requerido"}, status=400)
+                return
+            conn.execute("DELETE FROM seguros_checklist WHERE poliza_id = ?", (poliza_id,))
+            tasks = [
+                "Póliza firmada",
+                "Documento identidad",
+                "Recibo emitido",
+                "Pago prima",
+                "Suplementos/Anexos",
+            ]
+            for tarea in tasks:
+                conn.execute(
+                    """
+                    INSERT INTO seguros_checklist (
+                      id, poliza_id, tarea, estado, responsable, fecha_limite, created_at, updated_at
+                    ) VALUES (
+                      ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                    )
+                    """,
+                    (
+                        os.urandom(16).hex(),
+                        poliza_id,
+                        tarea,
+                        "Pendiente",
+                        payload.get("responsable"),
+                        payload.get("fecha_limite"),
+                        now,
+                        now,
+                    ),
+                )
+            json_response(self, {"ok": True})
+            return
+        elif parsed.path == "/api/seguros_checklist_update":
+            record_id = payload.get("id")
+            if not record_id:
+                json_response(self, {"error": "id requerido"}, status=400)
+                return
+            updates = {}
+            for key in ("estado", "responsable", "fecha_limite"):
+                if key in payload:
+                    updates[key] = payload.get(key)
+            if not updates:
+                json_response(self, {"error": "sin cambios"}, status=400)
+                return
+            set_clause = ", ".join([f"{key} = ?" for key in updates])
+            values = list(updates.values()) + [now, record_id]
+            conn.execute(
+                f"UPDATE seguros_checklist SET {set_clause}, updated_at = datetime(?) WHERE id = ?",
+                values,
+            )
+            return
+        elif parsed.path == "/api/ai_seguros_copilot":
+            if not openai_available():
+                json_response(self, {"error": "OPENAI_API_KEY no configurada"}, status=400)
+                return
+            poliza_id = payload.get("poliza_id")
+            if not poliza_id:
+                json_response(self, {"error": "poliza_id requerido"}, status=400)
+                return
+            task = (payload.get("task") or "resumen").strip().lower()
+            extra = (payload.get("extra") or "").strip()
+            poliza = conn.execute("SELECT * FROM seguros WHERE id = ?", (poliza_id,)).fetchone()
+            if not poliza:
+                json_response(self, {"error": "Póliza no encontrada"}, status=404)
+                return
+            cliente = None
+            if poliza.get("cliente_id"):
+                cliente = conn.execute(
+                    "SELECT id, nombre, nif, telefono, email FROM clientes WHERE id = ?",
+                    (poliza["cliente_id"],),
+                ).fetchone()
+            context = {
+                "poliza": dict(poliza),
+                "cliente": dict(cliente) if cliente else {},
+            }
+            if task == "email_renovacion":
+                prompt = (
+                    "Redacta un email breve de renovación de póliza. Incluye nombre del cliente, "
+                    "número de póliza, compañía y fecha de vencimiento si está disponible. "
+                    "Tono profesional y cercano. No inventes datos.\n\n"
+                    f"Contexto: {json.dumps(context, ensure_ascii=False)}\n"
+                    f"Instrucciones extra: {extra}"
+                )
+            elif task == "faltantes":
+                prompt = (
+                    "Lista los campos obligatorios faltantes de la póliza (tomador, poliza_numero, compania, fecha_efecto). "
+                    "Si no falta ninguno, indícalo. No inventes datos.\n\n"
+                    f"Contexto: {json.dumps(context, ensure_ascii=False)}\n"
+                    f"Instrucciones extra: {extra}"
+                )
+            else:
+                prompt = (
+                    "Genera un resumen claro de la póliza: tomador, compañía, ramo, fechas, prima y estado. "
+                    "Si falta algún dato, indícalo. No inventes datos.\n\n"
+                    f"Contexto: {json.dumps(context, ensure_ascii=False)}\n"
+                    f"Instrucciones extra: {extra}"
+                )
+            output, err = call_openai(prompt)
+            if err:
+                json_response(self, {"error": err}, status=400)
+                return
+            json_response(self, {"output": output})
+            return
         elif parsed.path == "/api/captaciones":
             inmueble_id = os.urandom(16).hex()
             propietarios = payload.get("propietarios") or []
@@ -6682,6 +7465,138 @@ class Handler(BaseHTTPRequestHandler):
                     "items": [dict(r) for r in rows],
                 },
             )
+            return
+
+        if path == "/api/seguros_alertas":
+            empresa_id = params.get("empresa_id", [""])[0]
+            days = params.get("days", ["30"])[0]
+            if not empresa_id:
+                json_response(self, {"error": "empresa_id requerido"}, status=400)
+                return
+            try:
+                days_int = int(days)
+            except Exception:
+                days_int = 30
+            rows = conn.execute(
+                f"""
+                SELECT
+                  id,
+                  cliente_id,
+                  tomador,
+                  poliza_numero,
+                  compania,
+                  fecha_efecto,
+                  COALESCE(fecha_vencimiento, DATE(fecha_efecto, '+1 year')) AS fecha_vencimiento
+                FROM seguros
+                WHERE empresa_id = ?
+                  AND COALESCE(fecha_vencimiento, DATE(fecha_efecto, '+1 year')) IS NOT NULL
+                  AND DATE(COALESCE(fecha_vencimiento, DATE(fecha_efecto, '+1 year'))) BETWEEN DATE('now','localtime')
+                      AND DATE('now','localtime', '+{days_int} days')
+                ORDER BY DATE(COALESCE(fecha_vencimiento, DATE(fecha_efecto, '+1 year'))) ASC
+                LIMIT 50
+                """,
+                (empresa_id,),
+            ).fetchall()
+            json_response(self, {"count": len(rows), "items": [dict(r) for r in rows]})
+            return
+
+        if path == "/api/seguros_kpis":
+            empresa_id = params.get("empresa_id", [""])[0]
+            if not empresa_id:
+                json_response(self, {"error": "empresa_id requerido"}, status=400)
+                return
+            estado_expr = "LOWER(TRIM(estado))"
+            total = conn.execute(
+                "SELECT COUNT(*) AS total FROM seguros WHERE empresa_id = ?",
+                (empresa_id,),
+            ).fetchone()
+            en_vigor = conn.execute(
+                f"""
+                SELECT COUNT(*) AS total
+                FROM seguros
+                WHERE empresa_id = ?
+                  AND {estado_expr} IN ('en vigor', 'en_vigor', 'vigente', 'poliza', 'póliza')
+                """,
+                (empresa_id,),
+            ).fetchone()
+            presupuesto = conn.execute(
+                f"""
+                SELECT COUNT(*) AS total
+                FROM seguros
+                WHERE empresa_id = ?
+                  AND {estado_expr} IN ('presupuesto', 'presupuestos')
+                """,
+                (empresa_id,),
+            ).fetchone()
+            vencen_30 = conn.execute(
+                """
+                SELECT COUNT(*) AS total
+                FROM seguros
+                WHERE empresa_id = ?
+                  AND COALESCE(fecha_vencimiento, DATE(fecha_efecto, '+1 year')) IS NOT NULL
+                  AND DATE(COALESCE(fecha_vencimiento, DATE(fecha_efecto, '+1 year'))) BETWEEN DATE('now','localtime')
+                      AND DATE('now','localtime','+30 days')
+                """,
+                (empresa_id,),
+            ).fetchone()
+            faltantes = conn.execute(
+                """
+                SELECT COUNT(*) AS total
+                FROM seguros
+                WHERE empresa_id = ?
+                  AND (
+                    tomador IS NULL OR TRIM(tomador) = '' OR
+                    poliza_numero IS NULL OR TRIM(poliza_numero) = '' OR
+                    compania IS NULL OR TRIM(compania) = '' OR
+                    fecha_efecto IS NULL OR TRIM(fecha_efecto) = ''
+                  )
+                """,
+                (empresa_id,),
+            ).fetchone()
+            quality_rows = conn.execute(
+                """
+                SELECT calidad_ocr, COUNT(*) AS total
+                FROM gestoria_docs
+                WHERE empresa_id = ?
+                  AND (referencia_tipo = 'seguros' OR tipo = 'Seguros')
+                GROUP BY calidad_ocr
+                """,
+                (empresa_id,),
+            ).fetchall()
+            quality = {"alta": 0, "media": 0, "baja": 0, "desconocida": 0}
+            for row in quality_rows:
+                key = (row["calidad_ocr"] or "desconocida").lower()
+                if key not in quality:
+                    key = "desconocida"
+                quality[key] += row["total"] or 0
+            json_response(
+                self,
+                {
+                    "total": total["total"] if total else 0,
+                    "en_vigor": en_vigor["total"] if en_vigor else 0,
+                    "presupuesto": presupuesto["total"] if presupuesto else 0,
+                    "vencen_30": vencen_30["total"] if vencen_30 else 0,
+                    "faltantes": faltantes["total"] if faltantes else 0,
+                    "ocr_quality": quality,
+                },
+            )
+            return
+
+        if path == "/api/seguros_checklist":
+            poliza_id = params.get("poliza_id", [""])[0]
+            if not poliza_id:
+                json_response(self, {"error": "poliza_id requerido"}, status=400)
+                return
+            rows = conn.execute(
+                """
+                SELECT id, poliza_id, tarea, estado, responsable, fecha_limite
+                FROM seguros_checklist
+                WHERE poliza_id = ?
+                ORDER BY created_at
+                """,
+                (poliza_id,),
+            ).fetchall()
+            json_response(self, {"rows": [dict(r) for r in rows]})
             return
 
         if path == "/api/dashboard":

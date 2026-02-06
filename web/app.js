@@ -96,6 +96,7 @@ const state = {
   segurosBdtCache: null,
   segurosOcrClienteId: "",
   segurosBdtOcrClienteId: "",
+  segurosOcrQuality: null,
 };
 
 const empresaSelect = document.getElementById("empresaSelect");
@@ -414,6 +415,19 @@ const segurosComisionesTable = document.getElementById("segurosComisionesTable")
 const segurosComisionesInfo = document.getElementById("segurosComisionesInfo");
 const segurosComisionesSearch = document.getElementById("segurosComisionesSearch");
 const segurosInsights = document.getElementById("segurosInsights");
+const segurosAlertasList = document.getElementById("segurosAlertasList");
+const segurosChecklistPoliza = document.getElementById("segurosChecklistPoliza");
+const segurosChecklistGenerate = document.getElementById("segurosChecklistGenerate");
+const segurosChecklistTable = document.getElementById("segurosChecklistTable");
+const segurosChecklistInfo = document.getElementById("segurosChecklistInfo");
+const segurosAiPoliza = document.getElementById("segurosAiPoliza");
+const segurosAiTask = document.getElementById("segurosAiTask");
+const segurosAiExtra = document.getElementById("segurosAiExtra");
+const segurosAiRun = document.getElementById("segurosAiRun");
+const segurosAiStatus = document.getElementById("segurosAiStatus");
+const segurosAiOutput = document.getElementById("segurosAiOutput");
+const segurosKpis = document.getElementById("segurosKpis");
+const segurosOcrQuality = document.getElementById("segurosOcrQuality");
 const segurosUpdateSelect = document.getElementById("segurosUpdateSelect");
 const segurosUpdateFile = document.getElementById("segurosUpdateFile");
 const segurosUpdateButton = document.getElementById("segurosUpdateButton");
@@ -7972,6 +7986,8 @@ const loadSegurosCrm = () => {
     }
     renderTableInto({ columns, rows }, segurosCrmTable, segurosCrmInfo, "Seguros");
     renderSegurosUpdateSelect(data);
+    renderSegurosChecklistSelect(data);
+    renderSegurosAiSelect(data);
     loadSegurosOportunidades(empresa.id);
     loadAcciones("seguros", empresa.id, segurosAgendaTable, segurosAgendaInfo);
     loadSegurosOfertas();
@@ -7979,6 +7995,8 @@ const loadSegurosCrm = () => {
     loadSegurosCampanas();
     loadSegurosComisiones();
     loadSegurosInsights(empresa.id);
+    loadSegurosAlertas();
+    loadSegurosKpis();
     if (segurosPreferenciasClientes) {
       populateAgendaClientes(
         segurosPreferenciasClientes,
@@ -8000,6 +8018,171 @@ const loadSegurosCrm = () => {
         segurosReferidosClienteId
       );
     }
+  });
+};
+
+const loadSegurosKpis = () => {
+  if (!segurosKpis || !segurosOcrQuality) return;
+  const empresa = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
+  if (!empresa) {
+    segurosKpis.innerHTML = "<p class='muted'>Sin empresa.</p>";
+    segurosOcrQuality.innerHTML = "";
+    return;
+  }
+  const params = new URLSearchParams({ empresa_id: empresa.id });
+  api(`/api/seguros_kpis?${params.toString()}`).then((data) => {
+    const wrapper = document.createElement("div");
+    wrapper.className = "grid crm-kpis";
+    const addKpi = (label, value) => {
+      const card = document.createElement("div");
+      card.className = "kpi-card";
+      card.innerHTML = `<div class="kpi-label">${label}</div><div class="kpi-value">${value}</div>`;
+      wrapper.appendChild(card);
+    };
+    addKpi("Pólizas total", data.total || 0);
+    addKpi("En vigor", data.en_vigor || 0);
+    addKpi("Presupuestos", data.presupuesto || 0);
+    addKpi("Vencen 30 días", data.vencen_30 || 0);
+    addKpi("Con faltantes", data.faltantes || 0);
+    segurosKpis.innerHTML = "";
+    segurosKpis.appendChild(wrapper);
+
+    const quality = data.ocr_quality || {};
+    const list = document.createElement("div");
+    list.className = "inline-list";
+    [
+      ["Alta", quality.alta || 0],
+      ["Media", quality.media || 0],
+      ["Baja", quality.baja || 0],
+      ["Desconocida", quality.desconocida || 0],
+    ].forEach(([label, value]) => {
+      const row = document.createElement("div");
+      row.className = "inline-row";
+      row.innerHTML = `<div>${label}</div><div class="muted">${value}</div>`;
+      list.appendChild(row);
+    });
+    segurosOcrQuality.innerHTML = "";
+    segurosOcrQuality.appendChild(list);
+  });
+};
+
+const loadSegurosAlertas = () => {
+  if (!segurosAlertasList) return;
+  const empresa = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
+  if (!empresa) {
+    segurosAlertasList.innerHTML = "<p class='muted'>Sin empresa.</p>";
+    return;
+  }
+  const params = new URLSearchParams({ empresa_id: empresa.id });
+  api(`/api/seguros_alertas?${params.toString()}`).then((data) => {
+    const items = data.items || [];
+    if (!items.length) {
+      segurosAlertasList.innerHTML = "<p class='muted'>Sin vencimientos próximos.</p>";
+      return;
+    }
+    const list = document.createElement("div");
+    list.className = "inline-list";
+    items.forEach((row) => {
+      const item = document.createElement("div");
+      item.className = "inline-row";
+      const title = document.createElement("div");
+      const tomador = row.tomador || "Cliente";
+      const poliza = row.poliza_numero || "-";
+      const fecha = row.fecha_vencimiento || "-";
+      title.innerHTML = `<strong>${tomador}</strong><div class="muted">${poliza} · vence ${fecha}</div>`;
+      const actions = document.createElement("div");
+      actions.className = "inline-actions";
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "secondary";
+      btn.textContent = "Crear acción";
+      btn.addEventListener("click", () => {
+        const payload = {
+          servicio: "Seguros",
+          cliente_id: row.cliente_id || "",
+          cliente_nombre: tomador,
+          fecha: row.fecha_vencimiento || "",
+          tipo: "Renovación",
+          estado: "Pendiente",
+          notas: `Renovación póliza ${poliza}`,
+        };
+        fetch("/api/acciones", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        })
+          .then((res) => res.json())
+          .then(() => loadSegurosCrm())
+          .catch(() => {});
+      });
+      actions.appendChild(btn);
+      item.appendChild(title);
+      item.appendChild(actions);
+      list.appendChild(item);
+    });
+    segurosAlertasList.innerHTML = "";
+    segurosAlertasList.appendChild(list);
+  });
+};
+
+const loadSegurosChecklist = (polizaId) => {
+  if (!segurosChecklistTable || !segurosChecklistInfo) return;
+  if (!polizaId) {
+    segurosChecklistTable.innerHTML = "<p class='muted'>Selecciona una póliza.</p>";
+    segurosChecklistInfo.textContent = "";
+    return;
+  }
+  const params = new URLSearchParams({ poliza_id: polizaId });
+  api(`/api/seguros_checklist?${params.toString()}`).then((data) => {
+    const rows = data.rows || [];
+    if (!rows.length) {
+      segurosChecklistTable.innerHTML = "<p class='muted'>Sin checklist.</p>";
+      segurosChecklistInfo.textContent = "";
+      return;
+    }
+    const table = document.createElement("table");
+    const thead = document.createElement("thead");
+    const trHead = document.createElement("tr");
+    ["tarea", "estado", "responsable", "fecha_limite"].forEach((col) => {
+      const th = document.createElement("th");
+      th.textContent = formatHeader(col);
+      trHead.appendChild(th);
+    });
+    thead.appendChild(trHead);
+    table.appendChild(thead);
+    const tbody = document.createElement("tbody");
+    rows.forEach((row) => {
+      const tr = document.createElement("tr");
+      const tarea = document.createElement("td");
+      tarea.textContent = row.tarea || "";
+      const estado = document.createElement("td");
+      const estadoSelect = document.createElement("select");
+      ["Pendiente", "En curso", "Hecho"].forEach((opt) => {
+        estadoSelect.appendChild(createOption(opt, opt));
+      });
+      estadoSelect.value = row.estado || "Pendiente";
+      estadoSelect.addEventListener("change", () => {
+        fetch("/api/seguros_checklist_update", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: row.id, estado: estadoSelect.value }),
+        }).catch(() => {});
+      });
+      estado.appendChild(estadoSelect);
+      const responsable = document.createElement("td");
+      responsable.textContent = row.responsable || "-";
+      const fecha = document.createElement("td");
+      fecha.textContent = row.fecha_limite || "-";
+      tr.appendChild(tarea);
+      tr.appendChild(estado);
+      tr.appendChild(responsable);
+      tr.appendChild(fecha);
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    segurosChecklistTable.innerHTML = "";
+    segurosChecklistTable.appendChild(table);
+    segurosChecklistInfo.textContent = `Mostrando ${rows.length} tareas.`;
   });
 };
 
@@ -8382,6 +8565,48 @@ const renderSegurosUpdateSelect = (data) => {
     const compania = row[companiaIndex] || "-";
     const label = `${tomador} · ${compania} · ${poliza}`;
     segurosUpdateSelect.appendChild(createOption(id, label));
+  });
+};
+
+const renderSegurosChecklistSelect = (data) => {
+  if (!segurosChecklistPoliza) return;
+  const columns = data.columns || [];
+  const rows = data.rows || [];
+  const idIndex = columns.indexOf("id");
+  const tomadorIndex = columns.indexOf("tomador");
+  const polizaIndex = columns.indexOf("poliza_numero");
+  const companiaIndex = columns.indexOf("compania");
+  segurosChecklistPoliza.innerHTML = "";
+  segurosChecklistPoliza.appendChild(createOption("", "Selecciona póliza"));
+  rows.forEach((row) => {
+    const id = idIndex >= 0 ? row[idIndex] : "";
+    if (!id) return;
+    const tomador = row[tomadorIndex] || "Cliente";
+    const poliza = row[polizaIndex] || "-";
+    const compania = row[companiaIndex] || "-";
+    const label = `${tomador} · ${compania} · ${poliza}`;
+    segurosChecklistPoliza.appendChild(createOption(id, label));
+  });
+};
+
+const renderSegurosAiSelect = (data) => {
+  if (!segurosAiPoliza) return;
+  const columns = data.columns || [];
+  const rows = data.rows || [];
+  const idIndex = columns.indexOf("id");
+  const tomadorIndex = columns.indexOf("tomador");
+  const polizaIndex = columns.indexOf("poliza_numero");
+  const companiaIndex = columns.indexOf("compania");
+  segurosAiPoliza.innerHTML = "";
+  segurosAiPoliza.appendChild(createOption("", "Selecciona póliza"));
+  rows.forEach((row) => {
+    const id = idIndex >= 0 ? row[idIndex] : "";
+    if (!id) return;
+    const tomador = row[tomadorIndex] || "Cliente";
+    const poliza = row[polizaIndex] || "-";
+    const compania = row[companiaIndex] || "-";
+    const label = `${tomador} · ${compania} · ${poliza}`;
+    segurosAiPoliza.appendChild(createOption(id, label));
   });
 };
 
@@ -8824,6 +9049,7 @@ const saveSegurosOcrRecord = async () => {
   const payload = {
     empresa_nombre: FINCAS_COMPANY,
     cliente_id: state.segurosOcrClienteId || "",
+    ocr_quality: state.segurosOcrQuality || null,
     mes_creacion: mesCreacion,
     fecha_efecto: fechaEfecto,
     fecha_vencimiento: fechaVencimiento,
@@ -8880,6 +9106,7 @@ const saveSegurosOcrRecord = async () => {
         segurosOcrSaveStatus.textContent = "Guardado en BDT.";
       }
       state.segurosOcrClienteId = "";
+      state.segurosOcrQuality = null;
       loadSegurosCrm();
     })
     .catch(() => {
@@ -11095,6 +11322,73 @@ if (segurosCrmClienteInput) {
   });
 }
 
+if (segurosChecklistPoliza) {
+  segurosChecklistPoliza.addEventListener("change", () => {
+    loadSegurosChecklist(segurosChecklistPoliza.value);
+  });
+}
+
+if (segurosChecklistGenerate) {
+  segurosChecklistGenerate.addEventListener("click", () => {
+    const polizaId = segurosChecklistPoliza ? segurosChecklistPoliza.value : "";
+    if (!polizaId) {
+      if (segurosChecklistInfo) segurosChecklistInfo.textContent = "Selecciona una póliza.";
+      return;
+    }
+    fetch("/api/seguros_checklist_generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ poliza_id: polizaId }),
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.error) {
+          if (segurosChecklistInfo) segurosChecklistInfo.textContent = data.error;
+          return;
+        }
+        loadSegurosChecklist(polizaId);
+      })
+      .catch(() => {
+        if (segurosChecklistInfo) segurosChecklistInfo.textContent = "Error al generar.";
+      });
+  });
+}
+
+if (segurosAiRun) {
+  segurosAiRun.addEventListener("click", () => {
+    if (segurosAiStatus) segurosAiStatus.textContent = "";
+    if (segurosAiOutput) segurosAiOutput.value = "";
+    const polizaId = segurosAiPoliza ? segurosAiPoliza.value : "";
+    const task = segurosAiTask ? segurosAiTask.value : "resumen";
+    if (!polizaId) {
+      if (segurosAiStatus) segurosAiStatus.textContent = "Selecciona una póliza.";
+      return;
+    }
+    if (segurosAiStatus) segurosAiStatus.textContent = "Generando...";
+    fetch("/api/ai_seguros_copilot", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        poliza_id: polizaId,
+        task,
+        extra: segurosAiExtra ? segurosAiExtra.value.trim() : "",
+      }),
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.error) {
+          if (segurosAiStatus) segurosAiStatus.textContent = data.error;
+          return;
+        }
+        if (segurosAiStatus) segurosAiStatus.textContent = "Listo.";
+        if (segurosAiOutput) segurosAiOutput.value = data.output || "";
+      })
+      .catch(() => {
+        if (segurosAiStatus) segurosAiStatus.textContent = "Error al generar.";
+      });
+  });
+}
+
 if (segurosPreferenciasClienteInput) {
   segurosPreferenciasClienteInput.addEventListener("change", () => {
     const clienteData = resolveClienteFromInput(
@@ -11386,6 +11680,7 @@ if (segurosOcrButton) {
             return;
           }
           state.segurosOcrClienteId = data.cliente_id || "";
+          state.segurosOcrQuality = data.ocr_quality || null;
           fillSegurosOcrFields(data.fields || {});
           if (segurosOcrRaw) {
             segurosOcrRaw.value = (data.text || "").trim();
@@ -11393,14 +11688,23 @@ if (segurosOcrButton) {
           if (segurosOcrStatus) {
             const lang = data.language ? ` (${data.language})` : "";
             const method = data.method ? ` · ${data.method}` : "";
+            const docType = data.doc_type ? ` · ${data.doc_type}` : "";
+            const calidad = data.ocr_quality?.calidad ? ` · ${data.ocr_quality.calidad}` : "";
             const fields = data.fields || {};
             const filled = Object.entries(fields)
               .filter(([, value]) => String(value || "").trim().length)
               .map(([key]) => key);
             if (filled.length) {
-              segurosOcrStatus.textContent = `Datos extraídos${lang}${method}: ${filled.join(", ")}.`;
+              segurosOcrStatus.textContent = `Datos extraídos${lang}${method}${docType}${calidad}: ${filled.join(", ")}.`;
             } else {
-              segurosOcrStatus.textContent = `No se detectaron campos${lang}${method}.`;
+              segurosOcrStatus.textContent = `No se detectaron campos${lang}${method}${docType}${calidad}.`;
+            }
+          }
+          if (seguroOcrEstado && data.doc_type) {
+            if (data.doc_type === "presupuesto") {
+              seguroOcrEstado.value = "Presupuesto";
+            } else if (data.doc_type === "poliza") {
+              seguroOcrEstado.value = "En vigor";
             }
           }
           saveSegurosOcrRecord().catch(() => {});
@@ -11410,6 +11714,7 @@ if (segurosOcrButton) {
             segurosOcrStatus.textContent = "No se pudo procesar el PDF.";
           }
           state.segurosOcrClienteId = "";
+          state.segurosOcrQuality = null;
         });
     };
     reader.onerror = () => {
@@ -11455,6 +11760,11 @@ if (segurosBdtOcrButton) {
           }
           state.segurosBdtOcrClienteId = data.cliente_id || "";
           fillSegurosBdtOcrFields(data.fields || {});
+          if (segurosBdtOcrStatus && (data.doc_type || data.ocr_quality?.calidad)) {
+            const docType = data.doc_type ? ` · ${data.doc_type}` : "";
+            const calidad = data.ocr_quality?.calidad ? ` · ${data.ocr_quality.calidad}` : "";
+            segurosBdtOcrStatus.textContent = `OCR listo${docType}${calidad}.`;
+          }
           matchSegurosBdtFromFields().catch(() => {});
         })
         .catch(() => {
@@ -11838,6 +12148,15 @@ if (finAsesorOcrPreview) {
   });
 }
 
+if (finAsesorOcrExternal) {
+  finAsesorOcrExternal.addEventListener("change", () => {
+    if (!finAsesorOcrMode) return;
+    if (finAsesorOcrExternal.checked) {
+      finAsesorOcrMode.value = "handwritten";
+    }
+  });
+}
+
 const readFileAsDataUrl = (file) =>
   new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -11893,7 +12212,14 @@ if (finAsesorOcrButton) {
             const fields = data.fields || {};
             const filled = Object.values(fields).filter((value) => String(value || "").trim().length).length;
             const extra = data.external_error ? ` (${data.external_error})` : "";
-            finAsesorOcrStatus.textContent = `OCR listo${lang}${method}. Campos detectados: ${filled}.${extra}`;
+            const quality = data.ocr_quality?.calidad ? ` · ${data.ocr_quality.calidad}` : "";
+            finAsesorOcrStatus.textContent = `OCR listo${lang}${method}${quality}. Campos detectados: ${filled}.${extra}`;
+          }
+          if (finAsesoramientoForm && data.ocr_quality) {
+            const qualityInput = finAsesoramientoForm.querySelector("[name='calidad_ocr']");
+            const camposInput = finAsesoramientoForm.querySelector("[name='campos_ocr']");
+            if (qualityInput) qualityInput.value = data.ocr_quality.calidad || "";
+            if (camposInput) camposInput.value = (data.ocr_quality.campos || []).join(",");
           }
         })
         .catch(() => {
@@ -11950,7 +12276,14 @@ if (finAsesorOcrAutoButton) {
             const fields = data.fields || {};
             const filled = Object.values(fields).filter((value) => String(value || "").trim().length).length;
             const extra = data.external_error ? ` (${data.external_error})` : "";
-            finAsesorOcrStatus.textContent = `OCR listo${lang}${method}. Campos detectados: ${filled}.${extra}`;
+            const quality = data.ocr_quality?.calidad ? ` · ${data.ocr_quality.calidad}` : "";
+            finAsesorOcrStatus.textContent = `OCR listo${lang}${method}${quality}. Campos detectados: ${filled}.${extra}`;
+          }
+          if (finAsesoramientoForm && data.ocr_quality) {
+            const qualityInput = finAsesoramientoForm.querySelector("[name='calidad_ocr']");
+            const camposInput = finAsesoramientoForm.querySelector("[name='campos_ocr']");
+            if (qualityInput) qualityInput.value = data.ocr_quality.calidad || "";
+            if (camposInput) camposInput.value = (data.ocr_quality.campos || []).join(",");
           }
         })
         .catch(() => {
@@ -12014,7 +12347,14 @@ if (finAsesorOcrGuidedButton) {
           const fields = data.fields || {};
           const filled = Object.values(fields).filter((value) => String(value || "").trim().length).length;
           const extra = data.external_error ? ` (${data.external_error})` : "";
-          finAsesorOcrGuidedStatus.textContent = `Recortes listos. Campos detectados: ${filled}.${extra}`;
+          const quality = data.ocr_quality?.calidad ? ` · ${data.ocr_quality.calidad}` : "";
+          finAsesorOcrGuidedStatus.textContent = `Recortes listos${quality}. Campos detectados: ${filled}.${extra}`;
+        }
+        if (finAsesoramientoForm && data.ocr_quality) {
+          const qualityInput = finAsesoramientoForm.querySelector("[name='calidad_ocr']");
+          const camposInput = finAsesoramientoForm.querySelector("[name='campos_ocr']");
+          if (qualityInput) qualityInput.value = data.ocr_quality.calidad || "";
+          if (camposInput) camposInput.value = (data.ocr_quality.campos || []).join(",");
         }
       })
       .catch(() => {

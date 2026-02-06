@@ -158,11 +158,17 @@ CREATE TABLE IF NOT EXISTS gestoria_docs (
   id TEXT PRIMARY KEY,
   empresa_id TEXT,
   cliente_id TEXT,
+  referencia_tipo TEXT,
+  referencia_id TEXT,
   nombre TEXT,
   tipo TEXT,
   fecha TEXT,
   estado TEXT,
   notas TEXT,
+  doc_key TEXT,
+  doc_url TEXT,
+  calidad_ocr TEXT,
+  campos_ocr TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   FOREIGN KEY (cliente_id) REFERENCES clientes(id),
@@ -378,6 +384,18 @@ CREATE TABLE IF NOT EXISTS seguros_comisiones (
   updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS seguros_checklist (
+  id TEXT PRIMARY KEY,
+  poliza_id TEXT NOT NULL,
+  tarea TEXT,
+  estado TEXT,
+  responsable TEXT,
+  fecha_limite TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (poliza_id) REFERENCES seguros(id)
+);
+
 CREATE TABLE IF NOT EXISTS demandas (
   id TEXT PRIMARY KEY,
   empresa_id TEXT NOT NULL,
@@ -514,6 +532,8 @@ CREATE TABLE IF NOT EXISTS asesoramientos_financiacion (
   aportacion_cv REAL,
   notas TEXT,
   notas_ocr TEXT,
+  calidad_ocr TEXT,
+  campos_ocr TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   FOREIGN KEY (empresa_id) REFERENCES empresas(id)
