@@ -333,13 +333,17 @@ def detect_ocr_lang():
     return "spa+eng"
 
 
+def s3_config():
+    bucket = os.environ.get("AWS_S3_BUCKET") or os.environ.get("S3_BUCKET") or S3_BUCKET
+    region = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION") or S3_REGION
+    return bucket, region
+
 def s3_client():
     try:
         import boto3
     except ImportError:
         return None
-    bucket = os.environ.get("AWS_S3_BUCKET") or os.environ.get("S3_BUCKET") or S3_BUCKET
-    region = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION") or S3_REGION
+    bucket, region = s3_config()
     if not bucket or not region:
         return None
     return boto3.client("s3", region_name=region)
@@ -3151,14 +3155,22 @@ class Handler(BaseHTTPRequestHandler):
             prefix = payload.get("prefix") or "seguros"
             client = s3_client()
             if not client:
-                json_response(self, {"error": "S3 no configurado"}, status=400)
+                bucket, region = s3_config()
+                missing = []
+                if not bucket:
+                    missing.append("AWS_S3_BUCKET")
+                if not region:
+                    missing.append("AWS_REGION")
+                detail = f" (faltan: {', '.join(missing)})" if missing else ""
+                json_response(self, {"error": f"S3 no configurado{detail}"}, status=400)
                 return
+            bucket, region = s3_config()
             key = s3_safe_key(prefix, filename)
             try:
                 url = client.generate_presigned_url(
                     "put_object",
                     Params={
-                        "Bucket": S3_BUCKET,
+                        "Bucket": bucket,
                         "Key": key,
                         "ContentType": content_type,
                     },
@@ -3167,7 +3179,7 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 json_response(self, {"error": "No se pudo firmar la subida"}, status=500)
                 return
-            public_url = f"https://{S3_BUCKET}.s3.{S3_REGION}.amazonaws.com/{key}"
+            public_url = f"https://{bucket}.s3.{region}.amazonaws.com/{key}"
             json_response(self, {"url": url, "key": key, "public_url": public_url})
             return
         if parsed.path == "/api/movimientos":
@@ -6329,12 +6341,20 @@ class Handler(BaseHTTPRequestHandler):
                 return
             client = s3_client()
             if not client:
-                json_response(self, {"error": "S3 no configurado"}, status=400)
+                bucket, region = s3_config()
+                missing = []
+                if not bucket:
+                    missing.append("AWS_S3_BUCKET")
+                if not region:
+                    missing.append("AWS_REGION")
+                detail = f" (faltan: {', '.join(missing)})" if missing else ""
+                json_response(self, {"error": f"S3 no configurado{detail}"}, status=400)
                 return
+            bucket, _region = s3_config()
             try:
                 url = client.generate_presigned_url(
                     "get_object",
-                    Params={"Bucket": S3_BUCKET, "Key": key},
+                    Params={"Bucket": bucket, "Key": key},
                     ExpiresIn=3600,
                 )
             except Exception:
