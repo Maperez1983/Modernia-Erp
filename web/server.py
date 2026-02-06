@@ -4139,10 +4139,10 @@ class Handler(BaseHTTPRequestHandler):
                     if current is None or str(current).strip() == "":
                         updates[key] = incoming
                 if updates:
-                    set_clause = ", ".join([f\"{key} = ?\" for key in updates])
+                    set_clause = ", ".join([f"{key} = ?" for key in updates])
                     values = list(updates.values()) + [now, dup_id]
                     conn.execute(
-                        f\"UPDATE seguros SET {set_clause}, updated_at = datetime(?) WHERE id = ?\",
+                        f"UPDATE seguros SET {set_clause}, updated_at = datetime(?) WHERE id = ?",
                         values,
                     )
                 poliza_id = dup_id
