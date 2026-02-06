@@ -1734,16 +1734,10 @@ const updateExplorerHeader = (empresaName) => {
   if (segurosCrmTab) {
     // CRM Seguros se accede desde la home, no como pestaña interna
     segurosCrmTab.classList.add("hidden");
-    if (currentTab === "seguros-crm") {
-      setTab("operativa");
-    }
   }
   if (finCrmTab) {
     // CRM Financiaciones se accede desde la home, no como pestaña interna
     finCrmTab.classList.add("hidden");
-    if (currentTab === "fin-crm") {
-      setTab("operativa");
-    }
   }
   if (finSimTab) {
     const showSim = empresaName === FIN_COMPANY;
@@ -5344,7 +5338,10 @@ const updateTableVisibility = () => {
     state.empresas.find((e) => e.id === empresaSelect.value)?.nombre ||
     "";
   if (viewTabs) {
-    viewTabs.classList.toggle("hidden", isClientePage || currentTab === "seguros-crm");
+    viewTabs.classList.toggle(
+      "hidden",
+      isClientePage || currentTab === "seguros-crm" || currentTab === "fin-crm"
+    );
   }
   if (altaTab) {
     const company = state.empresas.find((e) => e.id === empresaSelect.value)?.nombre;
