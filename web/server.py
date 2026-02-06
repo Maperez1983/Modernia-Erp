@@ -24,6 +24,7 @@ DB_DEFAULT = ROOT.parent / "data" / "erp_import2.sqlite"
 TESSDATA_DIR = "/opt/homebrew/share/tessdata"
 POSTAL_CATALOG_PATH = ROOT.parent / "data" / "catalogos" / "postal_catalogo.csv"
 ENV_PATH = ROOT.parent / ".env"
+S3_BOTO3_AVAILABLE = True
 
 def load_env_file():
     if not ENV_PATH.exists():
@@ -339,9 +340,11 @@ def s3_config():
     return bucket, region
 
 def s3_client():
+    global S3_BOTO3_AVAILABLE
     try:
         import boto3
     except ImportError:
+        S3_BOTO3_AVAILABLE = False
         return None
     bucket, region = s3_config()
     if not bucket or not region:
@@ -3161,6 +3164,8 @@ class Handler(BaseHTTPRequestHandler):
                     missing.append("AWS_S3_BUCKET")
                 if not region:
                     missing.append("AWS_REGION")
+                if not S3_BOTO3_AVAILABLE:
+                    missing.append("boto3")
                 detail = f" (faltan: {', '.join(missing)})" if missing else ""
                 json_response(self, {"error": f"S3 no configurado{detail}"}, status=400)
                 return
@@ -6347,6 +6352,8 @@ class Handler(BaseHTTPRequestHandler):
                     missing.append("AWS_S3_BUCKET")
                 if not region:
                     missing.append("AWS_REGION")
+                if not S3_BOTO3_AVAILABLE:
+                    missing.append("boto3")
                 detail = f" (faltan: {', '.join(missing)})" if missing else ""
                 json_response(self, {"error": f"S3 no configurado{detail}"}, status=400)
                 return
