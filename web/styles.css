@@ -473,6 +473,13 @@ body.crm-fin #viewTabs {
   display: none !important;
 }
 
+body.crm-seguros #explorerSection > .section-head,
+body.crm-fin #explorerSection > .section-head,
+body.crm-seguros #companySummary,
+body.crm-fin #companySummary {
+  display: none !important;
+}
+
 .form-card {
   border: 1px solid var(--line);
   border-radius: 16px;
