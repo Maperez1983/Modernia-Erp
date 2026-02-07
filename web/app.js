@@ -8079,11 +8079,10 @@ const loadSegurosCrm = () => {
 };
 
 const loadSegurosKpis = () => {
-  if (!segurosKpis || !segurosOcrQuality) return;
+  if (!segurosKpis) return;
   const empresa = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
   if (!empresa) {
     segurosKpis.innerHTML = "<p class='muted'>Sin empresa.</p>";
-    segurosOcrQuality.innerHTML = "";
     return;
   }
   const params = new URLSearchParams({ empresa_id: empresa.id });
@@ -8103,23 +8102,6 @@ const loadSegurosKpis = () => {
     addKpi("Con faltantes", data.faltantes || 0);
     segurosKpis.innerHTML = "";
     segurosKpis.appendChild(wrapper);
-
-    const quality = data.ocr_quality || {};
-    const list = document.createElement("div");
-    list.className = "inline-list";
-    [
-      ["Alta", quality.alta || 0],
-      ["Media", quality.media || 0],
-      ["Baja", quality.baja || 0],
-      ["Desconocida", quality.desconocida || 0],
-    ].forEach(([label, value]) => {
-      const row = document.createElement("div");
-      row.className = "inline-row";
-      row.innerHTML = `<div>${label}</div><div class="muted">${value}</div>`;
-      list.appendChild(row);
-    });
-    segurosOcrQuality.innerHTML = "";
-    segurosOcrQuality.appendChild(list);
   });
 };
 
