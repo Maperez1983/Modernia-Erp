@@ -982,6 +982,62 @@ body.crm-fin #companySummary {
   background: #ffffff;
 }
 
+.company-cell {
+  white-space: nowrap;
+}
+
+.company-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: #fffdfa;
+  font-size: 12px;
+}
+
+.company-badge.compact {
+  padding: 2px 6px;
+  gap: 6px;
+}
+
+.company-logo {
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+}
+
+.company-badge.compact .company-logo {
+  width: 16px;
+  height: 16px;
+}
+
+.company-initials {
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: #f2eadc;
+  color: var(--ink);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.company-badge.compact .company-initials {
+  width: 16px;
+  height: 16px;
+  font-size: 9px;
+}
+
+.company-name {
+  color: inherit;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
 .inline-row button {
   padding: 6px 10px;
   border-radius: 999px;

@@ -2800,6 +2800,117 @@ const formatCell = (col, value, tipoPersona = "") => {
   return value;
 };
 
+const COMPANY_LOGOS = {
+  ALLIANZ: "https://upload.wikimedia.org/wikipedia/commons/0/0f/Allianz_logo.svg",
+  AXA: "https://upload.wikimedia.org/wikipedia/commons/8/8b/AXA_Logo.svg",
+  MAPFRE: "https://upload.wikimedia.org/wikipedia/commons/1/1d/Mapfre_logo.svg",
+  ZURICH: "https://upload.wikimedia.org/wikipedia/commons/8/8a/Zurich_Insurance_Group_logo.svg",
+  GENERALI: "https://upload.wikimedia.org/wikipedia/commons/1/1b/Assicurazioni_Generali_logo.svg",
+  SANITAS: "https://upload.wikimedia.org/wikipedia/commons/4/46/Sanitas_Logo.svg",
+  DKV: "https://upload.wikimedia.org/wikipedia/commons/1/1d/DKV_Logo.svg",
+  OCASO: "https://upload.wikimedia.org/wikipedia/commons/4/4f/Ocaso_logo.png",
+  REALE: "https://upload.wikimedia.org/wikipedia/commons/8/8b/Reale_MutuA_logo.svg",
+};
+
+const COMPANY_ALIASES = {
+  "ALLIANZ SEGUROS": "ALLIANZ",
+  "MAPFRE SEGUROS": "MAPFRE",
+  "ZURICH SEGUROS": "ZURICH",
+  "SANTA LUCIA": "SANTA LUCIA",
+  "SANTA LUCÍA": "SANTA LUCIA",
+  "LINEA DIRECTA": "LINEA DIRECTA",
+  "LINEA DIRECTA ASEGURADORA": "LINEA DIRECTA",
+  "MUTUA PROPIETARIOS": "MUTUA PROPIETARIOS",
+  "CATALANA OCCIDENTE": "OCCIDENT",
+  "CATALANA OCCIDENT": "OCCIDENT",
+};
+
+const normalizeCompanyName = (value) => {
+  if (!value) return "";
+  let text = String(value).trim();
+  text = text.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  text = text.toUpperCase();
+  text = text.replace(/[^A-Z0-9 ]+/g, " ");
+  text = text.replace(/\s+/g, " ").trim();
+  return text;
+};
+
+const resolveCompanyKey = (value) => {
+  const normalized = normalizeCompanyName(value);
+  return COMPANY_ALIASES[normalized] || normalized;
+};
+
+const getCompanyLogo = (value) => {
+  const key = resolveCompanyKey(value);
+  return COMPANY_LOGOS[key] || "";
+};
+
+const getCompanyInitials = (value) => {
+  const normalized = normalizeCompanyName(value);
+  if (!normalized) return "";
+  const parts = normalized.split(" ").filter(Boolean);
+  if (!parts.length) return "";
+  if (parts.length === 1) return parts[0].slice(0, 2);
+  return `${parts[0][0]}${parts[1][0]}`.slice(0, 2);
+};
+
+const isCompanyColumn = (colName = "") => {
+  const lower = colName.toLowerCase();
+  return (
+    lower.includes("compania") ||
+    lower.includes("compañia") ||
+    lower.includes("aseguradora") ||
+    lower.includes("asegurador")
+  );
+};
+
+const createCompanyBadge = (value, options = {}) => {
+  const name = String(value || "-").trim() || "-";
+  const wrapper = document.createElement("span");
+  wrapper.className = `company-badge${options.compact ? " compact" : ""}`;
+  if (!name || name === "-") {
+    wrapper.textContent = "-";
+    return wrapper;
+  }
+  const logoUrl = getCompanyLogo(name);
+  if (logoUrl) {
+    const img = document.createElement("img");
+    img.src = logoUrl;
+    img.alt = name;
+    img.loading = "lazy";
+    img.decoding = "async";
+    img.referrerPolicy = "no-referrer";
+    img.className = "company-logo";
+    img.addEventListener("error", () => {
+      img.remove();
+      if (!wrapper.querySelector(".company-initials")) {
+        const initials = document.createElement("span");
+        initials.className = "company-initials";
+        initials.textContent = getCompanyInitials(name);
+        wrapper.insertBefore(initials, wrapper.firstChild);
+      }
+    });
+    wrapper.appendChild(img);
+  } else {
+    const initials = document.createElement("span");
+    initials.className = "company-initials";
+    initials.textContent = getCompanyInitials(name);
+    wrapper.appendChild(initials);
+  }
+  const label = document.createElement("span");
+  label.className = "company-name";
+  label.textContent = name;
+  wrapper.appendChild(label);
+  return wrapper;
+};
+
+const applyCompanyCell = (td, colName, value, options = {}) => {
+  if (!isCompanyColumn(colName)) return false;
+  td.classList.add("company-cell");
+  td.appendChild(createCompanyBadge(value, options));
+  return true;
+};
+
 const filterRowsByQuery = (rows, query, fields = []) => {
   const q = (query || "").trim().toLowerCase();
   if (!q) return rows;
@@ -4567,8 +4678,10 @@ const loadGestoriaTrabajosOverview = () => {
       const cols = ["cliente", "tipo_trabajo", "estado", "fecha_inicio", "fecha_fin", "responsable", "importe"];
       values.forEach((value, idx) => {
         const td = document.createElement("td");
-        const formatted = formatCell(cols[idx], value);
-        td.textContent = formatted === null ? "" : formatted;
+        if (!applyCompanyCell(td, cols[idx], value, { compact: true })) {
+          const formatted = formatCell(cols[idx], value);
+          td.textContent = formatted === null ? "" : formatted;
+        }
         tr.appendChild(td);
       });
       tbody.appendChild(tr);
@@ -6639,8 +6752,10 @@ const renderTableInto = (data, container, infoEl, label) => {
         return;
       }
       const td = document.createElement("td");
-      const formatted = formatCell(colName, cell);
-      td.textContent = formatted === null ? "" : formatted;
+      if (!applyCompanyCell(td, colName, cell)) {
+        const formatted = formatCell(colName, cell);
+        td.textContent = formatted === null ? "" : formatted;
+      }
       tr.appendChild(td);
     });
     if (showPdf) {
@@ -8374,8 +8489,10 @@ const loadSegurosCampanas = () => {
           a.textContent = "Ver";
           td.appendChild(a);
         } else {
-          const formatted = formatCell(cols[idx], value);
-          td.textContent = formatted === null ? "" : formatted;
+          if (!applyCompanyCell(td, cols[idx], value, { compact: true })) {
+            const formatted = formatCell(cols[idx], value);
+            td.textContent = formatted === null ? "" : formatted;
+          }
         }
         tr.appendChild(td);
       });
@@ -8425,8 +8542,10 @@ const loadSegurosComisiones = () => {
       const cols = ["compania", "ramo", "porcentaje", "vigencia_desde", "vigencia_hasta"];
       values.forEach((value, idx) => {
         const td = document.createElement("td");
-        const formatted = formatCell(cols[idx], value);
-        td.textContent = formatted === null ? "" : formatted;
+        if (!applyCompanyCell(td, cols[idx], value, { compact: true })) {
+          const formatted = formatCell(cols[idx], value);
+          td.textContent = formatted === null ? "" : formatted;
+        }
         tr.appendChild(td);
       });
       tbody.appendChild(tr);
@@ -8456,7 +8575,17 @@ const loadSegurosInsights = (empresaId) => {
       rows.slice(0, 8).forEach((row) => {
         const item = document.createElement("div");
         item.className = "inline-row";
-        item.innerHTML = `<div>${row[key] || "-"}</div><div class="muted">${row.total}</div>`;
+        const label = document.createElement("div");
+        if (key === "compania") {
+          label.appendChild(createCompanyBadge(row[key] || "-", { compact: true }));
+        } else {
+          label.textContent = row[key] || "-";
+        }
+        const total = document.createElement("div");
+        total.className = "muted";
+        total.textContent = row.total;
+        item.appendChild(label);
+        item.appendChild(total);
         list.appendChild(item);
       });
       card.appendChild(list);
@@ -8517,7 +8646,14 @@ const renderSegurosPresupuestos = (data) => {
     const ramo = row[ramoIndex] || "-";
     const prima = row[primaIndex] ? euroFormatter.format(Number(row[primaIndex]) || 0) : "-";
     const poliza = row[polizaIndex] || "-";
-    title.innerHTML = `<strong>${tomador}</strong><div class="muted">${compania} · ${ramo} · ${poliza} · ${prima}</div>`;
+    const main = document.createElement("strong");
+    main.textContent = tomador;
+    const meta = document.createElement("div");
+    meta.className = "muted";
+    meta.appendChild(createCompanyBadge(compania, { compact: true }));
+    meta.appendChild(document.createTextNode(` · ${ramo} · ${poliza} · ${prima}`));
+    title.appendChild(main);
+    title.appendChild(meta);
     const actions = document.createElement("div");
     actions.className = "inline-actions";
     const editBtn = document.createElement("button");
@@ -10597,9 +10733,12 @@ const loadClienteSeguros = (cliente, empresaId) => {
         row[estadoIndex] || "-",
         row[primaIndex] ? euroFormatter.format(Number(row[primaIndex]) || 0) : "-",
       ];
-      values.forEach((value) => {
+      const cols = ["poliza", "compania", "efecto", "vencimiento", "estado", "prima"];
+      values.forEach((value, idx) => {
         const td = document.createElement("td");
-        td.textContent = value;
+        if (!applyCompanyCell(td, cols[idx], value, { compact: true })) {
+          td.textContent = value;
+        }
         tr.appendChild(td);
       });
       tbody.appendChild(tr);
