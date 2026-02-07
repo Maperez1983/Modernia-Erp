@@ -5144,6 +5144,12 @@ const initSegurosTabs = () => {
   setSegurosTab(state.segurosTab || "dashboard");
 };
 
+document.addEventListener("click", (event) => {
+  const btn = event.target.closest("[data-seguros-tab]");
+  if (!btn) return;
+  setSegurosTab(btn.dataset.segurosTab);
+});
+
 const setGestoriaClientModuleTab = (tabName = "") => {
   if (!gestoriaModuleTabs) return;
   const map = {
