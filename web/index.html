@@ -1318,6 +1318,23 @@
             <p class="muted">Distribución de pólizas por ramo y compañía.</p>
             <div id="segurosInsights"></div>
           </div>
+          <div class="form-card">
+            <h3>Gráficos</h3>
+            <p class="muted">Conversión y estados por año.</p>
+            <div id="fincasDashboardSection" class="dashboard">
+              <div class="grid dashboard-kpis hidden" id="fincasDashboardKpis"></div>
+              <div class="grid dashboard-charts">
+                <div class="chart-card">
+                  <h4>Conversión presupuestos → pólizas</h4>
+                  <canvas id="fincasConversionChart"></canvas>
+                </div>
+                <div class="chart-card">
+                  <h4>Estados de seguros por año</h4>
+                  <canvas id="fincasEstadoChart"></canvas>
+                </div>
+              </div>
+            </div>
+          </div>
           </div>
           <div class="seguros-tab" data-seguros-tab="gestion">
           <div class="form-card">
@@ -1799,26 +1816,6 @@
             <div class="chart-card">
               <h4>Firmadas por oficina</h4>
               <canvas id="finOficinaChart"></canvas>
-            </div>
-          </div>
-        </div>
-        <div id="fincasDashboardSection" class="dashboard hidden">
-          <div class="dashboard-head">
-            <div>
-              <h3>Dashboard · Fincas Velazquez</h3>
-              <p class="muted">Conversión anual de seguros.</p>
-            </div>
-            <div class="status"><span></span>Datos por año</div>
-          </div>
-          <div class="grid dashboard-kpis" id="fincasDashboardKpis"></div>
-          <div class="grid dashboard-charts">
-            <div class="chart-card">
-              <h4>Conversión presupuestos → pólizas</h4>
-              <canvas id="fincasConversionChart"></canvas>
-            </div>
-            <div class="chart-card">
-              <h4>Estados de seguros por año</h4>
-              <canvas id="fincasEstadoChart"></canvas>
             </div>
           </div>
         </div>
