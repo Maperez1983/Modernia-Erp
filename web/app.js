@@ -2920,8 +2920,7 @@ const getRamoIcon = (value) => {
 
 const isRamoColumn = (colName = "") => colName.toLowerCase().includes("ramo");
 
-const applyRamoCell = (td, colName, value) => {
-  if (!isRamoColumn(colName)) return false;
+const createRamoBadge = (value) => {
   const wrapper = document.createElement("span");
   wrapper.className = "ramo-badge";
   const icon = document.createElement("span");
@@ -2931,7 +2930,12 @@ const applyRamoCell = (td, colName, value) => {
   label.textContent = value || "-";
   wrapper.appendChild(icon);
   wrapper.appendChild(label);
-  td.appendChild(wrapper);
+  return wrapper;
+};
+
+const applyRamoCell = (td, colName, value) => {
+  if (!isRamoColumn(colName)) return false;
+  td.appendChild(createRamoBadge(value));
   return true;
 };
 
@@ -8652,6 +8656,8 @@ const loadSegurosInsights = (empresaId) => {
         const label = document.createElement("div");
         if (key === "compania") {
           label.appendChild(createCompanyBadge(row[key] || "-", { compact: true }));
+        } else if (key === "ramo") {
+          label.appendChild(createRamoBadge(row[key] || "-"));
         } else {
           label.textContent = row[key] || "-";
         }
