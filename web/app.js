@@ -2887,6 +2887,54 @@ const isCompanyColumn = (colName = "") => {
   );
 };
 
+const RAMO_ICONS = [
+  { key: "hogar", icon: "🏠" },
+  { key: "auto", icon: "🚗" },
+  { key: "coche", icon: "🚗" },
+  { key: "moto", icon: "🏍️" },
+  { key: "salud", icon: "🩺" },
+  { key: "vida", icon: "❤️" },
+  { key: "decesos", icon: "⚰️" },
+  { key: "comercio", icon: "🏬" },
+  { key: "pyme", icon: "🏢" },
+  { key: "empresa", icon: "🏢" },
+  { key: "responsabilidad civil", icon: "🛡️" },
+  { key: "rc", icon: "🛡️" },
+  { key: "viaje", icon: "✈️" },
+  { key: "impago", icon: "💳" },
+  { key: "alquiler", icon: "🏘️" },
+  { key: "accidentes", icon: "🦺" },
+  { key: "mascotas", icon: "🐾" },
+  { key: "dental", icon: "🦷" },
+  { key: "ciber", icon: "🛡️" },
+  { key: "embarcaciones", icon: "⛵" },
+  { key: "subsidio", icon: "💶" },
+];
+
+const getRamoIcon = (value) => {
+  const text = String(value || "").toLowerCase();
+  if (!text) return "";
+  const hit = RAMO_ICONS.find((item) => text.includes(item.key));
+  return hit ? hit.icon : "📄";
+};
+
+const isRamoColumn = (colName = "") => colName.toLowerCase().includes("ramo");
+
+const applyRamoCell = (td, colName, value) => {
+  if (!isRamoColumn(colName)) return false;
+  const wrapper = document.createElement("span");
+  wrapper.className = "ramo-badge";
+  const icon = document.createElement("span");
+  icon.className = "ramo-icon";
+  icon.textContent = getRamoIcon(value);
+  const label = document.createElement("span");
+  label.textContent = value || "-";
+  wrapper.appendChild(icon);
+  wrapper.appendChild(label);
+  td.appendChild(wrapper);
+  return true;
+};
+
 const createCompanyBadge = (value, options = {}) => {
   const name = String(value || "-").trim() || "-";
   const wrapper = document.createElement("span");
@@ -4701,7 +4749,7 @@ const loadGestoriaTrabajosOverview = () => {
       const cols = ["cliente", "tipo_trabajo", "estado", "fecha_inicio", "fecha_fin", "responsable", "importe"];
       values.forEach((value, idx) => {
         const td = document.createElement("td");
-        if (!applyCompanyCell(td, cols[idx], value, { compact: true })) {
+        if (!applyCompanyCell(td, cols[idx], value, { compact: true }) && !applyRamoCell(td, cols[idx], value)) {
           const formatted = formatCell(cols[idx], value);
           td.textContent = formatted === null ? "" : formatted;
         }
@@ -6780,7 +6828,7 @@ const renderTableInto = (data, container, infoEl, label) => {
         return;
       }
       const td = document.createElement("td");
-      if (!applyCompanyCell(td, colName, cell)) {
+      if (!applyCompanyCell(td, colName, cell) && !applyRamoCell(td, colName, cell)) {
         const formatted = formatCell(colName, cell);
         td.textContent = formatted === null ? "" : formatted;
       }
@@ -8515,7 +8563,7 @@ const loadSegurosCampanas = () => {
           a.textContent = "Ver";
           td.appendChild(a);
         } else {
-          if (!applyCompanyCell(td, cols[idx], value, { compact: true })) {
+          if (!applyCompanyCell(td, cols[idx], value, { compact: true }) && !applyRamoCell(td, cols[idx], value)) {
             const formatted = formatCell(cols[idx], value);
             td.textContent = formatted === null ? "" : formatted;
           }
@@ -8568,7 +8616,7 @@ const loadSegurosComisiones = () => {
       const cols = ["compania", "ramo", "porcentaje", "vigencia_desde", "vigencia_hasta"];
       values.forEach((value, idx) => {
         const td = document.createElement("td");
-        if (!applyCompanyCell(td, cols[idx], value, { compact: true })) {
+        if (!applyCompanyCell(td, cols[idx], value, { compact: true }) && !applyRamoCell(td, cols[idx], value)) {
           const formatted = formatCell(cols[idx], value);
           td.textContent = formatted === null ? "" : formatted;
         }

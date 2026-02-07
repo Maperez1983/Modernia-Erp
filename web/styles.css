@@ -1038,6 +1038,23 @@ body.crm-fin #companySummary {
   letter-spacing: 0.01em;
 }
 
+.ramo-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: #f7f1e6;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.ramo-icon {
+  font-size: 13px;
+  line-height: 1;
+}
+
 .inline-row button {
   padding: 6px 10px;
   border-radius: 999px;
