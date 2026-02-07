@@ -5971,7 +5971,7 @@ const renderFincasDashboard = (empresaId) => {
       {
         title: `Conversión ${current.year || selectedYear}`,
         value: `${(current.conversion || 0).toFixed(1)}%`,
-        note: "Pólizas / total de oportunidades",
+        note: "Pólizas en vigor / oportunidades",
       },
       {
         title: `Presupuestos ${current.year || selectedYear}`,
@@ -5979,14 +5979,19 @@ const renderFincasDashboard = (empresaId) => {
         note: "En estado Presupuesto",
       },
       {
-        title: `Contratadas ${current.year || selectedYear}`,
-        value: numberFormatter.format(current.contratada || 0),
-        note: "En estado Contratada",
-      },
-      {
         title: `En vigor ${current.year || selectedYear}`,
         value: numberFormatter.format(current.en_vigor || 0),
         note: "Pólizas activas",
+      },
+      {
+        title: "Conversión total",
+        value: `${(current.conversion_total || 0).toFixed(1)}%`,
+        note: "Histórico completo",
+      },
+      {
+        title: "Presupuestos total",
+        value: numberFormatter.format(current.presupuesto_total || 0),
+        note: "Histórico completo",
       },
     ];
     kpis.forEach((kpi) => {

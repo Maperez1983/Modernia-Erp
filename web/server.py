@@ -7786,7 +7786,9 @@ class Handler(BaseHTTPRequestHandler):
                 ).fetchone()["y"]
 
             estado_expr = "LOWER(TRIM(estado))"
+            compania_expr = "LOWER(TRIM(compania))"
             year_expr = "COALESCE(STRFTIME('%Y', fecha_efecto), STRFTIME('%Y', created_at))"
+            exclude_sin_seguro = f"({compania_expr} IS NULL OR {compania_expr} = '' OR {compania_expr} != 'sin seguro')"
 
             current = conn.execute(
                 f"""
@@ -7797,8 +7799,22 @@ class Handler(BaseHTTPRequestHandler):
                 FROM seguros
                 WHERE empresa_id = ?
                   AND {year_expr} = ?
+                  AND {exclude_sin_seguro}
                 """,
                 (empresa_id, year),
+            ).fetchone()
+
+            totals = conn.execute(
+                f"""
+                SELECT
+                  SUM(CASE WHEN {estado_expr} IN ('presupuesto', 'presupuestos') THEN 1 ELSE 0 END) AS presupuesto,
+                  SUM(CASE WHEN {estado_expr} IN ('contratada', 'contratado', 'contrato', 'proyecto') THEN 1 ELSE 0 END) AS contratada,
+                  SUM(CASE WHEN {estado_expr} IN ('en vigor', 'en_vigor', 'vigente', 'poliza', 'póliza', 'poliza en vigor') THEN 1 ELSE 0 END) AS en_vigor
+                FROM seguros
+                WHERE empresa_id = ?
+                  AND {exclude_sin_seguro}
+                """,
+                (empresa_id,),
             ).fetchone()
 
             series = conn.execute(
@@ -7811,6 +7827,7 @@ class Handler(BaseHTTPRequestHandler):
                 FROM seguros
                 WHERE empresa_id = ?
                   AND {year_expr} IS NOT NULL
+                  AND {exclude_sin_seguro}
                 GROUP BY {year_expr}
                 ORDER BY {year_expr}
                 """,
@@ -7822,6 +7839,11 @@ class Handler(BaseHTTPRequestHandler):
             en_vigor = current["en_vigor"] if current else 0
             total = (presupuesto or 0) + (contratada or 0) + (en_vigor or 0)
             conversion = (en_vigor / total * 100) if total else 0
+            total_presupuesto = totals["presupuesto"] if totals else 0
+            total_contratada = totals["contratada"] if totals else 0
+            total_en_vigor = totals["en_vigor"] if totals else 0
+            total_global = (total_presupuesto or 0) + (total_contratada or 0) + (total_en_vigor or 0)
+            conversion_global = (total_en_vigor / total_global * 100) if total_global else 0
 
             series_payload = []
             for row in series:
@@ -7846,6 +7868,7 @@ class Handler(BaseHTTPRequestHandler):
                 FROM seguros
                 WHERE empresa_id = ?
                   AND {estado_expr} IN ('en vigor', 'en_vigor', 'vigente', 'poliza', 'póliza', 'poliza en vigor')
+                  AND {exclude_sin_seguro}
                 GROUP BY COALESCE(NULLIF(TRIM(colaborador), ''), 'Sin responsable')
                 ORDER BY total DESC
                 LIMIT 10
@@ -7863,6 +7886,10 @@ class Handler(BaseHTTPRequestHandler):
                         "en_vigor": en_vigor or 0,
                         "total": total,
                         "conversion": conversion,
+                        "presupuesto_total": total_presupuesto or 0,
+                        "en_vigor_total": total_en_vigor or 0,
+                        "total_global": total_global or 0,
+                        "conversion_total": conversion_global,
                     },
                     "series": series_payload,
                     "responsables": [dict(r) for r in responsables],
