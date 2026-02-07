@@ -2801,15 +2801,20 @@ const formatCell = (col, value, tipoPersona = "") => {
 };
 
 const COMPANY_LOGOS = {
-  ALLIANZ: "https://upload.wikimedia.org/wikipedia/commons/0/0f/Allianz_logo.svg",
-  AXA: "https://upload.wikimedia.org/wikipedia/commons/8/8b/AXA_Logo.svg",
-  MAPFRE: "https://upload.wikimedia.org/wikipedia/commons/1/1d/Mapfre_logo.svg",
-  ZURICH: "https://upload.wikimedia.org/wikipedia/commons/8/8a/Zurich_Insurance_Group_logo.svg",
-  GENERALI: "https://upload.wikimedia.org/wikipedia/commons/1/1b/Assicurazioni_Generali_logo.svg",
-  SANITAS: "https://upload.wikimedia.org/wikipedia/commons/4/46/Sanitas_Logo.svg",
-  DKV: "https://upload.wikimedia.org/wikipedia/commons/1/1d/DKV_Logo.svg",
-  OCASO: "https://upload.wikimedia.org/wikipedia/commons/4/4f/Ocaso_logo.png",
-  REALE: "https://upload.wikimedia.org/wikipedia/commons/8/8b/Reale_MutuA_logo.svg",
+  ALLIANZ: "/assets/logos/allianz.svg",
+  ARAG: "/assets/logos/arag.svg",
+  AXA: "/assets/logos/axa.svg",
+  "CATALANA OCCIDENTE": "/assets/logos/catalana-occidente.svg",
+  DKV: "/assets/logos/dkv.svg",
+  GENERALI: "/assets/logos/generali.svg",
+  "LINEA DIRECTA": "/assets/logos/linea-directa.png",
+  MAPFRE: "/assets/logos/mapfre.svg",
+  OCASO: "/assets/logos/ocaso.png",
+  OCCIDENT: "/assets/logos/occident.svg",
+  REALE: "/assets/logos/reale.jpg",
+  SANITAS: "/assets/logos/sanitas.svg",
+  "SANTA LUCIA": "/assets/logos/santalucia.svg",
+  ZURICH: "/assets/logos/zurich.svg",
 };
 
 const COMPANY_ALIASES = {
@@ -2821,8 +2826,9 @@ const COMPANY_ALIASES = {
   "LINEA DIRECTA": "LINEA DIRECTA",
   "LINEA DIRECTA ASEGURADORA": "LINEA DIRECTA",
   "MUTUA PROPIETARIOS": "MUTUA PROPIETARIOS",
-  "CATALANA OCCIDENTE": "OCCIDENT",
-  "CATALANA OCCIDENT": "OCCIDENT",
+  "CATALANA OCCIDENTE": "CATALANA OCCIDENTE",
+  "CATALANA OCCIDENT": "CATALANA OCCIDENTE",
+  "CATALANA": "CATALANA OCCIDENTE",
 };
 
 const normalizeCompanyName = (value) => {
