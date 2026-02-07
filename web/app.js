@@ -1877,6 +1877,7 @@ const openSegurosCrm = () => {
   setTab("seguros-crm");
   updateTableVisibility();
   setCrmMode("seguros");
+  state.segurosTab = "dashboard";
   if (viewTabs) viewTabs.classList.add("hidden");
   if (segurosCrmSection) segurosCrmSection.classList.remove("hidden");
   if (tableToolbar) tableToolbar.classList.add("hidden");
