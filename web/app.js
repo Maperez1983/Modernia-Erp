@@ -1877,7 +1877,7 @@ const openSegurosCrm = () => {
   setTab("seguros-crm");
   updateTableVisibility();
   setCrmMode("seguros");
-  state.segurosTab = "dashboard";
+  setSegurosTab("dashboard");
   if (viewTabs) viewTabs.classList.add("hidden");
   if (segurosCrmSection) segurosCrmSection.classList.remove("hidden");
   if (tableToolbar) tableToolbar.classList.add("hidden");
@@ -5119,26 +5119,29 @@ const setGestoriaCrmView = (viewName = "crm") => {
   }
 };
 
+const setSegurosTab = (name) => {
+  const tabs = document.getElementById("segurosTabs");
+  if (!tabs) return;
+  const sections = Array.from(document.querySelectorAll(".seguros-tab"));
+  state.segurosTab = name;
+  tabs.querySelectorAll(".tab").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.segurosTab === name);
+  });
+  sections.forEach((section) => {
+    section.classList.toggle("active", section.dataset.segurosTab === name);
+  });
+};
+
 const initSegurosTabs = () => {
   const tabs = document.getElementById("segurosTabs");
   if (!tabs || tabs.dataset.ready === "1") return;
   tabs.dataset.ready = "1";
-  const sections = Array.from(document.querySelectorAll(".seguros-tab"));
-  const setTab = (name) => {
-    state.segurosTab = name;
-    tabs.querySelectorAll(".tab").forEach((btn) => {
-      btn.classList.toggle("active", btn.dataset.segurosTab === name);
-    });
-    sections.forEach((section) => {
-      section.classList.toggle("active", section.dataset.segurosTab === name);
-    });
-  };
   tabs.addEventListener("click", (event) => {
     const btn = event.target.closest(".tab");
     if (!btn || !btn.dataset.segurosTab) return;
-    setTab(btn.dataset.segurosTab);
+    setSegurosTab(btn.dataset.segurosTab);
   });
-  setTab(state.segurosTab || "dashboard");
+  setSegurosTab(state.segurosTab || "dashboard");
 };
 
 const setGestoriaClientModuleTab = (tabName = "") => {
