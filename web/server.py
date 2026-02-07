@@ -6656,21 +6656,28 @@ class Handler(BaseHTTPRequestHandler):
             if not empresa_id:
                 json_response(self, {"error": "empresa_id requerido"}, status=400)
                 return
+            estado_expr = "LOWER(TRIM(estado))"
+            compania_expr = "LOWER(TRIM(compania))"
+            exclude_sin_seguro = f"({compania_expr} IS NULL OR {compania_expr} = '' OR {compania_expr} != 'sin seguro')"
             por_ramo = conn.execute(
-                """
+                f"""
                 SELECT ramo, COUNT(*) AS total
                 FROM seguros
                 WHERE empresa_id = ?
+                  AND {estado_expr} IN ('en vigor', 'en_vigor', 'vigente', 'poliza', 'póliza', 'poliza en vigor')
+                  AND {exclude_sin_seguro}
                 GROUP BY ramo
                 ORDER BY total DESC
                 """,
                 (empresa_id,),
             ).fetchall()
             por_compania = conn.execute(
-                """
+                f"""
                 SELECT compania, COUNT(*) AS total
                 FROM seguros
                 WHERE empresa_id = ?
+                  AND {estado_expr} IN ('en vigor', 'en_vigor', 'vigente', 'poliza', 'póliza', 'poliza en vigor')
+                  AND {exclude_sin_seguro}
                 GROUP BY compania
                 ORDER BY total DESC
                 """,

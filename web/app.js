@@ -645,6 +645,7 @@ const fincasDashboardSection = document.getElementById("fincasDashboardSection")
 const fincasDashboardKpis = document.getElementById("fincasDashboardKpis");
 const fincasPresupuestoChart = document.getElementById("fincasPresupuestoChart");
 const fincasResponsableChart = document.getElementById("fincasResponsableChart");
+const fincasConversionChart = document.getElementById("fincasConversionChart");
 const fincasBdtTabs = document.getElementById("fincasBdtTabs");
 const renewalAlert = document.getElementById("renewalAlert");
 const companySummary = document.getElementById("companySummary");
@@ -5318,6 +5319,11 @@ const setSegurosTab = (name) => {
   sections.forEach((section) => {
     section.classList.toggle("active", section.dataset.segurosTab === name);
   });
+  if (name === "dashboard" && state.currentEmpresaId) {
+    window.requestAnimationFrame(() => {
+      renderFincasDashboard(state.currentEmpresaId);
+    });
+  }
 };
 
 const initSegurosTabs = () => {
@@ -6058,6 +6064,11 @@ const renderFincasDashboard = (empresaId) => {
     });
 
     requestAnimationFrame(() => {
+      const chartRect = fincasPresupuestoChart?.getBoundingClientRect();
+      if (!chartRect || chartRect.width < 10 || chartRect.height < 10) {
+        window.setTimeout(() => renderFincasDashboard(empresaId), 200);
+        return;
+      }
       const series = data.series || [];
       const years = buildYearIndex([series]);
       const presupuestos = years.map((year) => {
@@ -6101,6 +6112,24 @@ const renderFincasDashboard = (empresaId) => {
             values: respValues,
             color: "#d7b04c",
             format: (value) => numberFormatter.format(value),
+          },
+        ],
+        { legend: false, showValues: true }
+      );
+
+      const conversion = years.map((year) => {
+        const found = series.find((item) => String(item.year) === String(year));
+        return found ? Number(found.conversion || 0) : 0;
+      });
+      drawBarChart(
+        fincasConversionChart,
+        years,
+        [
+          {
+            label: "Conversión",
+            values: conversion,
+            color: "#3f5d5a",
+            format: (value) => `${Number(value || 0).toFixed(1)}%`,
           },
         ],
         { legend: false, showValues: true }
