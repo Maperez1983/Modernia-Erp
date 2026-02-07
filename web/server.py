@@ -7838,6 +7838,21 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 series_payload.append(row_dict)
 
+            responsables = conn.execute(
+                f"""
+                SELECT
+                  COALESCE(NULLIF(TRIM(colaborador), ''), 'Sin responsable') AS label,
+                  COUNT(*) AS total
+                FROM seguros
+                WHERE empresa_id = ?
+                  AND {estado_expr} IN ('en vigor', 'en_vigor', 'vigente', 'poliza', 'póliza', 'poliza en vigor')
+                GROUP BY COALESCE(NULLIF(TRIM(colaborador), ''), 'Sin responsable')
+                ORDER BY total DESC
+                LIMIT 10
+                """,
+                (empresa_id,),
+            ).fetchall()
+
             json_response(
                 self,
                 {
@@ -7850,6 +7865,7 @@ class Handler(BaseHTTPRequestHandler):
                         "conversion": conversion,
                     },
                     "series": series_payload,
+                    "responsables": [dict(r) for r in responsables],
                 },
             )
             return
@@ -7981,6 +7997,14 @@ class Handler(BaseHTTPRequestHandler):
                 """,
                 (empresa_id,),
             ).fetchall()
+            primas = conn.execute(
+                """
+                SELECT SUM(prima_total) AS total
+                FROM seguros
+                WHERE empresa_id = ?
+                """,
+                (empresa_id,),
+            ).fetchone()
             quality = {"alta": 0, "media": 0, "baja": 0, "desconocida": 0}
             for row in quality_rows:
                 key = (row["calidad_ocr"] or "desconocida").lower()
@@ -7995,6 +8019,7 @@ class Handler(BaseHTTPRequestHandler):
                     "presupuesto": presupuesto["total"] if presupuesto else 0,
                     "vencen_30": vencen_30["total"] if vencen_30 else 0,
                     "faltantes": faltantes["total"] if faltantes else 0,
+                    "prima_total": primas["total"] if primas and primas["total"] is not None else 0,
                     "ocr_quality": quality,
                 },
             )

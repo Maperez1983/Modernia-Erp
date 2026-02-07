@@ -643,8 +643,8 @@ const finEntidadChart = document.getElementById("finEntidadChart");
 const finOficinaChart = document.getElementById("finOficinaChart");
 const fincasDashboardSection = document.getElementById("fincasDashboardSection");
 const fincasDashboardKpis = document.getElementById("fincasDashboardKpis");
-const fincasConversionChart = document.getElementById("fincasConversionChart");
-const fincasEstadoChart = document.getElementById("fincasEstadoChart");
+const fincasPresupuestoChart = document.getElementById("fincasPresupuestoChart");
+const fincasResponsableChart = document.getElementById("fincasResponsableChart");
 const fincasBdtTabs = document.getElementById("fincasBdtTabs");
 const renewalAlert = document.getElementById("renewalAlert");
 const companySummary = document.getElementById("companySummary");
@@ -5867,58 +5867,50 @@ const renderFincasDashboard = (empresaId) => {
     requestAnimationFrame(() => {
       const series = data.series || [];
       const years = buildYearIndex([series]);
-      const conversionSeries = years.map((year) => {
+      const presupuestos = years.map((year) => {
         const found = series.find((item) => String(item.year) === String(year));
-        return found ? found.conversion || 0 : 0;
+        return found ? found.presupuesto || 0 : 0;
+      });
+      const enVigor = years.map((year) => {
+        const found = series.find((item) => String(item.year) === String(year));
+        return found ? found.en_vigor || 0 : 0;
       });
 
       drawBarChart(
-        fincasConversionChart,
-        years,
-        [
-          {
-            label: "Conversión",
-            values: conversionSeries,
-            color: "#824c45",
-            format: (value) => `${value.toFixed(1)}%`,
-          },
-        ],
-        { legend: false, showValues: true }
-      );
-
-      drawBarChart(
-        fincasEstadoChart,
+        fincasPresupuestoChart,
         years,
         [
           {
             label: "Presupuesto",
-            values: years.map((year) => {
-              const found = series.find((item) => String(item.year) === String(year));
-              return found ? found.presupuesto || 0 : 0;
-            }),
+            values: presupuestos,
             color: "#7e8878",
             format: (value) => numberFormatter.format(value),
           },
           {
-            label: "Contratada",
-            values: years.map((year) => {
-              const found = series.find((item) => String(item.year) === String(year));
-              return found ? found.contratada || 0 : 0;
-            }),
-            color: "#d7b04c",
-            format: (value) => numberFormatter.format(value),
-          },
-          {
             label: "En vigor",
-            values: years.map((year) => {
-              const found = series.find((item) => String(item.year) === String(year));
-              return found ? found.en_vigor || 0 : 0;
-            }),
+            values: enVigor,
             color: "#824c45",
             format: (value) => numberFormatter.format(value),
           },
         ],
         { legend: true, showValues: true }
+      );
+
+      const responsables = data.responsables || [];
+      const respLabels = responsables.map((item) => item.label);
+      const respValues = responsables.map((item) => item.total);
+      drawBarChart(
+        fincasResponsableChart,
+        respLabels,
+        [
+          {
+            label: "Pólizas",
+            values: respValues,
+            color: "#d7b04c",
+            format: (value) => numberFormatter.format(value),
+          },
+        ],
+        { legend: false, showValues: true }
       );
     });
   });
@@ -8100,6 +8092,9 @@ const loadSegurosKpis = () => {
     addKpi("Presupuestos", data.presupuesto || 0);
     addKpi("Vencen 30 días", data.vencen_30 || 0);
     addKpi("Con faltantes", data.faltantes || 0);
+    if (data.prima_total !== undefined && data.prima_total !== null) {
+      addKpi("Prima total", euroFormatter.format(data.prima_total || 0));
+    }
     segurosKpis.innerHTML = "";
     segurosKpis.appendChild(wrapper);
   });
