@@ -7998,10 +7998,11 @@ class Handler(BaseHTTPRequestHandler):
                 (empresa_id,),
             ).fetchall()
             primas = conn.execute(
-                """
+                f"""
                 SELECT SUM(prima_total) AS total
                 FROM seguros
                 WHERE empresa_id = ?
+                  AND {estado_expr} IN ('en vigor', 'en_vigor', 'vigente', 'poliza', 'póliza', 'poliza en vigor')
                 """,
                 (empresa_id,),
             ).fetchone()
