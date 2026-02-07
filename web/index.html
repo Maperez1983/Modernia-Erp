@@ -1120,10 +1120,11 @@
             <button class="tab active" type="button" data-seguros-tab="dashboard">Dashboard Seguros</button>
             <button class="tab" type="button" data-seguros-tab="bdt">BDT Seguros</button>
             <button class="tab" type="button" data-seguros-tab="alta">Alta pólizas</button>
+            <button class="tab" type="button" data-seguros-tab="gestion">Gestión</button>
             <button class="tab" type="button" data-seguros-tab="campanas">Campañas</button>
             <button class="tab" type="button" data-seguros-tab="contabilidad">Contabilidad Seguros</button>
           </div>
-          <div class="seguros-tab active" data-seguros-tab="alta">
+          <div class="seguros-tab" data-seguros-tab="alta">
           <div class="form-card">
             <div class="section-head">
               <div>
@@ -1305,7 +1306,30 @@
             <div class="footer" id="segurosCrmInfo"></div>
           </div>
           </div>
-          <div class="seguros-tab" data-seguros-tab="dashboard">
+          <div class="seguros-tab active" data-seguros-tab="dashboard">
+          <div class="form-card">
+            <h3>KPIs y calidad OCR</h3>
+            <p class="muted">Resumen de pólizas y calidad de extracción.</p>
+            <div id="segurosKpis"></div>
+            <div id="segurosOcrQuality"></div>
+          </div>
+          <div class="form-card">
+            <h3>Alertas de vencimiento</h3>
+            <p class="muted">Pólizas que vencen en los próximos 30 días.</p>
+            <div id="segurosAlertasList"></div>
+          </div>
+          <div class="form-card">
+            <h3>Insights de mercado</h3>
+            <p class="muted">Distribución de pólizas por ramo y compañía.</p>
+            <div id="segurosInsights"></div>
+          </div>
+          <div class="form-card">
+            <h3>Oportunidades de venta cruzada</h3>
+            <p class="muted">Clientes de gestoría sin póliza asignada.</p>
+            <div id="segurosCrmOportunidades"></div>
+          </div>
+          </div>
+          <div class="seguros-tab" data-seguros-tab="gestion">
           <div class="form-card">
             <div class="section-head">
               <div>
@@ -1338,17 +1362,6 @@
             <textarea id="segurosAiOutput" rows="6" readonly></textarea>
           </div>
           <div class="form-card">
-            <h3>KPIs y calidad OCR</h3>
-            <p class="muted">Resumen de pólizas y calidad de extracción.</p>
-            <div id="segurosKpis"></div>
-            <div id="segurosOcrQuality"></div>
-          </div>
-          <div class="form-card">
-            <h3>Alertas de vencimiento</h3>
-            <p class="muted">Pólizas que vencen en los próximos 30 días.</p>
-            <div id="segurosAlertasList"></div>
-          </div>
-          <div class="form-card">
             <div class="section-head">
               <div>
                 <h3>Checklist póliza</h3>
@@ -1366,11 +1379,6 @@
             </div>
             <div id="segurosChecklistTable"></div>
             <div class="footer" id="segurosChecklistInfo"></div>
-          </div>
-          <div class="form-card">
-            <h3>Oportunidades de venta cruzada</h3>
-            <p class="muted">Clientes de gestoría sin póliza asignada.</p>
-            <div id="segurosCrmOportunidades"></div>
           </div>
           <div class="form-card">
             <h3>Perfil de cliente</h3>
@@ -1499,11 +1507,6 @@
             </div>
             <div id="segurosReferidosTable"></div>
             <div class="footer" id="segurosReferidosInfo"></div>
-          </div>
-          <div class="form-card">
-            <h3>Insights de mercado</h3>
-            <p class="muted">Distribución de pólizas por ramo y compañía.</p>
-            <div id="segurosInsights"></div>
           </div>
           <div class="form-card">
             <h3>Agenda · Seguros</h3>
