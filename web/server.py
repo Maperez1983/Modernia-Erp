@@ -7941,7 +7941,12 @@ class Handler(BaseHTTPRequestHandler):
                 return
             estado_expr = "LOWER(TRIM(estado))"
             total = conn.execute(
-                "SELECT COUNT(*) AS total FROM seguros WHERE empresa_id = ?",
+                f"""
+                SELECT COUNT(*) AS total
+                FROM seguros
+                WHERE empresa_id = ?
+                  AND {estado_expr} IN ('en vigor', 'en_vigor', 'vigente', 'poliza', 'póliza')
+                """,
                 (empresa_id,),
             ).fetchone()
             en_vigor = conn.execute(
@@ -7953,28 +7958,20 @@ class Handler(BaseHTTPRequestHandler):
                 """,
                 (empresa_id,),
             ).fetchone()
-            presupuesto = conn.execute(
+            vencen_30 = conn.execute(
                 f"""
                 SELECT COUNT(*) AS total
                 FROM seguros
                 WHERE empresa_id = ?
-                  AND {estado_expr} IN ('presupuesto', 'presupuestos')
-                """,
-                (empresa_id,),
-            ).fetchone()
-            vencen_30 = conn.execute(
-                """
-                SELECT COUNT(*) AS total
-                FROM seguros
-                WHERE empresa_id = ?
                   AND COALESCE(fecha_vencimiento, DATE(fecha_efecto, '+1 year')) IS NOT NULL
+                  AND {estado_expr} IN ('en vigor', 'en_vigor', 'vigente', 'poliza', 'póliza', 'poliza en vigor')
                   AND DATE(COALESCE(fecha_vencimiento, DATE(fecha_efecto, '+1 year'))) BETWEEN DATE('now','localtime')
                       AND DATE('now','localtime','+30 days')
                 """,
                 (empresa_id,),
             ).fetchone()
             faltantes = conn.execute(
-                """
+                f"""
                 SELECT COUNT(*) AS total
                 FROM seguros
                 WHERE empresa_id = ?
@@ -7984,6 +7981,7 @@ class Handler(BaseHTTPRequestHandler):
                     compania IS NULL OR TRIM(compania) = '' OR
                     fecha_efecto IS NULL OR TRIM(fecha_efecto) = ''
                   )
+                  AND {estado_expr} IN ('en vigor', 'en_vigor', 'vigente', 'poliza', 'póliza', 'poliza en vigor')
                 """,
                 (empresa_id,),
             ).fetchone()
@@ -8017,7 +8015,6 @@ class Handler(BaseHTTPRequestHandler):
                 {
                     "total": total["total"] if total else 0,
                     "en_vigor": en_vigor["total"] if en_vigor else 0,
-                    "presupuesto": presupuesto["total"] if presupuesto else 0,
                     "vencen_30": vencen_30["total"] if vencen_30 else 0,
                     "faltantes": faltantes["total"] if faltantes else 0,
                     "prima_total": primas["total"] if primas and primas["total"] is not None else 0,

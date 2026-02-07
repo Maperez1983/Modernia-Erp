@@ -8225,9 +8225,7 @@ const loadSegurosKpis = () => {
       card.innerHTML = `<div class="kpi-label">${label}</div><div class="kpi-value">${value}</div>`;
       wrapper.appendChild(card);
     };
-    addKpi("Pólizas total", data.total || 0);
-    addKpi("En vigor", data.en_vigor || 0);
-    addKpi("Presupuestos", data.presupuesto || 0);
+    addKpi("Pólizas en vigor", data.en_vigor || 0);
     addKpi("Vencen 30 días", data.vencen_30 || 0);
     addKpi("Con faltantes", data.faltantes || 0);
     if (data.prima_total !== undefined && data.prima_total !== null) {
