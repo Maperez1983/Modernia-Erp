@@ -6,6 +6,12 @@ const randomId = () => {
   return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 };
 
+const setCrmMode = (mode = "") => {
+  if (!document.body) return;
+  document.body.classList.toggle("crm-seguros", mode === "seguros");
+  document.body.classList.toggle("crm-fin", mode === "fin");
+};
+
 const uploadFileToS3 = async (file, prefix, statusEl) => {
   if (!file) return null;
   if (statusEl) statusEl.textContent = "Firmando subida...";
@@ -1788,6 +1794,7 @@ const setPage = (page) => {
 };
 
 const openCompany = (empresaName) => {
+  setCrmMode("");
   const empresa = state.empresas.find((e) => e.nombre === empresaName);
   if (!empresa) {
     if (!state.empresas.length) {
@@ -1869,6 +1876,7 @@ const openSegurosCrm = () => {
   openCompany(FINCAS_COMPANY);
   setTab("seguros-crm");
   updateTableVisibility();
+  setCrmMode("seguros");
   if (viewTabs) viewTabs.classList.add("hidden");
   if (segurosCrmSection) segurosCrmSection.classList.remove("hidden");
   if (tableToolbar) tableToolbar.classList.add("hidden");
@@ -1884,6 +1892,7 @@ const openFinCrm = () => {
   openCompany(FIN_COMPANY);
   setTab("fin-crm");
   updateTableVisibility();
+  setCrmMode("fin");
   if (viewTabs) viewTabs.classList.add("hidden");
   if (finCrmSection) finCrmSection.classList.remove("hidden");
   if (tableToolbar) tableToolbar.classList.add("hidden");
@@ -1969,6 +1978,7 @@ const openAdmin = () => {
 };
 
 const goHome = () => {
+  setCrmMode("");
   setModule("empresas");
   empresaSelect.value = "";
   state.currentEmpresaId = "";
