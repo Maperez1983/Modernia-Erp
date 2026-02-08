@@ -6048,7 +6048,7 @@ const renderFincasDashboard = (empresaId) => {
       {
         title: `Conversión ${current.year || selectedYear}`,
         value: `${(current.conversion || 0).toFixed(1)}%`,
-        note: "Pólizas en vigor / oportunidades",
+        note: "En vigor / presupuestos",
       },
       {
         title: `Presupuestos ${current.year || selectedYear}`,
@@ -6063,7 +6063,7 @@ const renderFincasDashboard = (empresaId) => {
       {
         title: "Conversión total",
         value: `${(current.conversion_total || 0).toFixed(1)}%`,
-        note: "Histórico completo",
+        note: "En vigor / presupuestos",
       },
       {
         title: "Presupuestos total",

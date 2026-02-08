@@ -7854,25 +7854,19 @@ class Handler(BaseHTTPRequestHandler):
             presupuesto = current["presupuesto"] if current else 0
             contratada = current["contratada"] if current else 0
             en_vigor = current["en_vigor"] if current else 0
-            total = (presupuesto or 0) + (contratada or 0) + (en_vigor or 0)
-            conversion = (en_vigor / total * 100) if total else 0
+            conversion = (en_vigor / presupuesto * 100) if presupuesto else 0
             total_presupuesto = totals["presupuesto"] if totals else 0
             total_contratada = totals["contratada"] if totals else 0
             total_en_vigor = totals["en_vigor"] if totals else 0
             total_global = (total_presupuesto or 0) + (total_contratada or 0) + (total_en_vigor or 0)
-            conversion_global = (total_en_vigor / total_global * 100) if total_global else 0
+            conversion_global = (total_en_vigor / total_presupuesto * 100) if total_presupuesto else 0
 
             series_payload = []
             for row in series:
                 row_dict = dict(row)
-                total_row = (
-                    (row_dict.get("presupuesto") or 0)
-                    + (row_dict.get("contratada") or 0)
-                    + (row_dict.get("en_vigor") or 0)
-                )
                 row_dict["conversion"] = (
-                    (row_dict.get("en_vigor") or 0) / total_row * 100
-                    if total_row
+                    (row_dict.get("en_vigor") or 0) / (row_dict.get("presupuesto") or 0) * 100
+                    if (row_dict.get("presupuesto") or 0)
                     else 0
                 )
                 series_payload.append(row_dict)
@@ -7901,7 +7895,6 @@ class Handler(BaseHTTPRequestHandler):
                         "presupuesto": presupuesto or 0,
                         "contratada": contratada or 0,
                         "en_vigor": en_vigor or 0,
-                        "total": total,
                         "conversion": conversion,
                         "presupuesto_total": total_presupuesto or 0,
                         "en_vigor_total": total_en_vigor or 0,
