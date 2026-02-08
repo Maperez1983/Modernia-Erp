@@ -3528,8 +3528,16 @@ const alignSeries = (years, items) => {
 const prepareCanvas = (canvas) => {
   const ratio = window.devicePixelRatio || 1;
   const rect = canvas.getBoundingClientRect();
-  canvas.width = rect.width * ratio;
-  canvas.height = rect.height * ratio;
+  let width = rect.width;
+  let height = rect.height;
+  if (width < 10 || height < 10) {
+    const parent = canvas.parentElement;
+    const parentWidth = parent ? parent.clientWidth : 0;
+    width = parentWidth && parentWidth > 10 ? parentWidth : 600;
+    height = height && height > 10 ? height : 300;
+  }
+  canvas.width = width * ratio;
+  canvas.height = height * ratio;
   const ctx = canvas.getContext("2d");
   ctx.scale(ratio, ratio);
   return ctx;
