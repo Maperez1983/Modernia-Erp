@@ -5671,12 +5671,6 @@ const updateTableVisibility = () => {
       currentTab !== "seguros-crm" || isClientePage
     );
   }
-  if (fincasDashboardSection) {
-    fincasDashboardSection.classList.toggle(
-      "hidden",
-      currentTab !== "seguros-crm" || isClientePage
-    );
-  }
   if (finCrmSection) {
     finCrmSection.classList.toggle("hidden", currentTab !== "fin-crm" || isClientePage);
   }
@@ -5717,12 +5711,10 @@ const updateTableVisibility = () => {
     if (currentTab !== "operativa") {
       if (dashboardSection) dashboardSection.classList.add("hidden");
       if (finDashboardSection) finDashboardSection.classList.add("hidden");
-      if (fincasDashboardSection) fincasDashboardSection.classList.add("hidden");
     }
     if (isServiceCrm) {
       if (dashboardSection) dashboardSection.classList.add("hidden");
       if (finDashboardSection) finDashboardSection.classList.add("hidden");
-      if (fincasDashboardSection) fincasDashboardSection.classList.add("hidden");
     }
   }
   if (clientesDetail) {
