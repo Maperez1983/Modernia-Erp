@@ -50,6 +50,61 @@ const uploadFileToS3 = async (file, prefix, statusEl) => {
   return presign;
 };
 
+const runSegurosBdtRowOcr = async (recordId, file, statusEl) => {
+  if (!recordId || !file) return;
+  if (statusEl) statusEl.textContent = "Procesando OCR...";
+  let data;
+  try {
+    const formData = new FormData();
+    formData.append("file", file);
+    data = await fetch("/api/seguros_ocr", {
+      method: "POST",
+      body: formData,
+    }).then((res) => res.json());
+  } catch {
+    if (statusEl) statusEl.textContent = "Error al procesar OCR.";
+    return;
+  }
+  if (data?.error) {
+    if (statusEl) statusEl.textContent = data.detail || data.error || "OCR falló.";
+    return;
+  }
+  const fields = data.fields || {};
+  const enrichPayload = { id: recordId, ...fields };
+  if (data.cliente_id) {
+    enrichPayload.cliente_id = data.cliente_id;
+  }
+  let upload = null;
+  try {
+    upload = await uploadFileToS3(file, "seguros", statusEl);
+  } catch (err) {
+    if (statusEl) statusEl.textContent = `OCR aplicado. Error al subir: ${err.message}`;
+  }
+  try {
+    await fetch("/api/seguros_enrich", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(enrichPayload),
+    }).then((res) => res.json());
+  } catch {
+    if (statusEl) statusEl.textContent = "OCR aplicado, pero fallo al actualizar BDT.";
+    return;
+  }
+  if (upload && upload.key) {
+    await fetch("/api/seguros_update", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: recordId,
+        poliza_key: upload.key,
+        poliza_url: upload.public_url || "",
+      }),
+    }).then((res) => res.json());
+  }
+  if (statusEl) statusEl.textContent = "OCR aplicado y póliza cargada.";
+  loadSegurosCrm();
+};
+
 const openS3File = async (key, fallbackUrl) => {
   if (key) {
     const data = await api(`/api/s3_url?key=${encodeURIComponent(key)}`);
@@ -6971,6 +7026,9 @@ const renderTableInto = (data, container, infoEl, label) => {
   const polizaKeyIndex = columns.indexOf("poliza_key");
   const polizaUrlIndex = columns.indexOf("poliza_url");
   const showPdf = label === "Seguros" && (hasPolizaKey || hasPolizaUrl);
+  const showOcr =
+    label === "Seguros" && currentTab === "seguros-crm" && state.segurosTab === "bdt";
+  const idIndex = columns.indexOf("id");
   const table = document.createElement("table");
   const thead = document.createElement("thead");
   const trHead = document.createElement("tr");
@@ -6985,6 +7043,11 @@ const renderTableInto = (data, container, infoEl, label) => {
   if (showPdf) {
     const th = document.createElement("th");
     th.textContent = "PDF";
+    trHead.appendChild(th);
+  }
+  if (showOcr) {
+    const th = document.createElement("th");
+    th.textContent = "OCR";
     trHead.appendChild(th);
   }
   thead.appendChild(trHead);
@@ -7021,6 +7084,41 @@ const renderTableInto = (data, container, infoEl, label) => {
       } else {
         td.textContent = "-";
       }
+      tr.appendChild(td);
+    }
+    if (showOcr) {
+      const td = document.createElement("td");
+      const recordId = idIndex >= 0 ? row[idIndex] : "";
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "secondary";
+      btn.textContent = "OCR + cargar";
+      const status = document.createElement("span");
+      status.className = "muted";
+      status.style.marginLeft = "8px";
+      const fileInput = document.createElement("input");
+      fileInput.type = "file";
+      fileInput.accept = "application/pdf";
+      fileInput.className = "hidden";
+      btn.addEventListener("click", () => {
+        if (!recordId) {
+          status.textContent = "Sin id.";
+          return;
+        }
+        fileInput.click();
+      });
+      fileInput.addEventListener("change", () => {
+        const file = fileInput.files && fileInput.files[0];
+        if (!file) return;
+        if (!/pdf$/i.test(file.type) && !/\.pdf$/i.test(file.name || "")) {
+          status.textContent = "Solo PDF.";
+          return;
+        }
+        runSegurosBdtRowOcr(recordId, file, status);
+      });
+      td.appendChild(btn);
+      td.appendChild(status);
+      td.appendChild(fileInput);
       tr.appendChild(td);
     }
     tbody.appendChild(tr);
@@ -8383,6 +8481,7 @@ const loadSegurosCrm = () => {
     empresa_id: empresa.id,
     q,
   });
+  params.set("include_id", "1");
   api(`/api/tabla?${params.toString()}`).then((data) => {
     const columns = data.columns || [];
     let rows = data.rows || [];
