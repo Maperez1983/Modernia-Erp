@@ -6130,6 +6130,22 @@ const renderFincasDashboard = (empresaId) => {
     const current = data.current || {};
     const currentTotal =
       (current.presupuesto || 0) + (current.contratada || 0) + (current.en_vigor || 0);
+    const targetYear = String(new Date().getFullYear());
+    const targetEntry = series.find(
+      (item) => String(item.year) === targetYear
+    );
+    const targetTotal = targetEntry
+      ? (targetEntry.presupuesto || 0) +
+        (targetEntry.contratada || 0) +
+        (targetEntry.en_vigor || 0)
+      : 0;
+    if (targetTotal && selectedYear !== targetYear) {
+      if (yearSelect) {
+        yearSelect.value = targetYear;
+      }
+      renderFincasDashboard(empresaId);
+      return;
+    }
     if (!currentTotal && series.length) {
       const lastYear = String(series[series.length - 1].year || "");
       if (lastYear && lastYear !== selectedYear) {
