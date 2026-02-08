@@ -50,7 +50,44 @@ const uploadFileToS3 = async (file, prefix, statusEl) => {
   return presign;
 };
 
-const runSegurosBdtRowOcr = async (recordId, file, statusEl) => {
+const buildRowMap = (row, columns) =>
+  columns.reduce((acc, col, idx) => {
+    acc[col] = row[idx];
+    return acc;
+  }, {});
+
+const compareOcrToRow = (rowMap, fields) => {
+  const issues = [];
+  let score = 0;
+  const rowTomador = normalizeName(rowMap.tomador || "");
+  const ocrTomador = normalizeName(fields.tomador || "");
+  if (rowTomador && ocrTomador) {
+    const sim = jaccard(tokenSet(rowTomador), tokenSet(ocrTomador));
+    if (sim < 0.35) issues.push("Tomador no coincide");
+    else score += sim * 3;
+  }
+  const rowNif = normalizeDocumento(rowMap.nif || rowMap.dni || "");
+  const ocrNif = normalizeDocumento(fields.nif || fields.dni || "");
+  if (rowNif && ocrNif) {
+    if (rowNif !== ocrNif) issues.push("DNI/NIF no coincide");
+    else score += 3;
+  }
+  const rowPoliza = String(rowMap.poliza_numero || "").trim();
+  const ocrPoliza = String(fields.poliza_numero || "").trim();
+  if (rowPoliza && ocrPoliza) {
+    if (rowPoliza !== ocrPoliza) issues.push("Nº póliza no coincide");
+    else score += 3;
+  }
+  const rowComp = resolveCompanyKey(rowMap.compania || "");
+  const ocrComp = resolveCompanyKey(fields.compania || "");
+  if (rowComp && ocrComp) {
+    if (rowComp !== ocrComp) issues.push("Compañía no coincide");
+    else score += 2;
+  }
+  return { issues, score };
+};
+
+const runSegurosBdtRowOcr = async (recordId, file, statusEl, rowMap = {}) => {
   if (!recordId || !file) return;
   if (statusEl) statusEl.textContent = "Procesando OCR...";
   let data;
@@ -70,6 +107,22 @@ const runSegurosBdtRowOcr = async (recordId, file, statusEl) => {
     return;
   }
   const fields = data.fields || {};
+  const required = ["tomador", "compania", "poliza_numero", "fecha_efecto"];
+  const missing = required.filter((key) => !String(fields[key] || "").trim());
+  const compare = compareOcrToRow(rowMap, fields);
+  if (missing.length || compare.issues.length) {
+    const msg = [
+      missing.length ? `OCR incompleto (${missing.join(", ")})` : "",
+      compare.issues.length ? `No coinciden: ${compare.issues.join(", ")}` : "",
+    ]
+      .filter(Boolean)
+      .join(" · ");
+    if (statusEl) statusEl.textContent = msg;
+    const ok = window.confirm(
+      `${msg}\n\n¿Quieres aplicar el OCR igualmente?`
+    );
+    if (!ok) return;
+  }
   const enrichPayload = { id: recordId, ...fields };
   if (data.cliente_id) {
     enrichPayload.cliente_id = data.cliente_id;
@@ -7089,6 +7142,7 @@ const renderTableInto = (data, container, infoEl, label) => {
     if (showOcr) {
       const td = document.createElement("td");
       const recordId = idIndex >= 0 ? row[idIndex] : "";
+      const rowMap = buildRowMap(row, columns);
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "secondary";
@@ -7114,7 +7168,7 @@ const renderTableInto = (data, container, infoEl, label) => {
           status.textContent = "Solo PDF.";
           return;
         }
-        runSegurosBdtRowOcr(recordId, file, status);
+        runSegurosBdtRowOcr(recordId, file, status, rowMap);
       });
       td.appendChild(btn);
       td.appendChild(status);
