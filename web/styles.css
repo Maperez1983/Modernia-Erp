@@ -1741,6 +1741,19 @@ body.crm-fin #companySummary {
   height: 300px;
 }
 
+.chart-tooltip {
+  position: absolute;
+  z-index: 5;
+  background: rgba(26, 23, 20, 0.92);
+  color: #f8f4ec;
+  font-size: 12px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  pointer-events: none;
+  min-width: 120px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+}
+
 .progress-card {
   display: grid;
   gap: 8px;

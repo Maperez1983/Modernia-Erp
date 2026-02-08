@@ -3567,9 +3567,10 @@ const drawBarChart = (canvas, labels, datasets, options = {}) => {
   };
   const chartWidth = width - padding.left - padding.right;
   const chartHeight = height - padding.top - padding.bottom;
+  const barSets = datasets.filter((set) => set.type !== "line");
   const maxValue = Math.max(
     1,
-    ...datasets.flatMap((set) => set.values.map((val) => Math.abs(val)))
+    ...barSets.flatMap((set) => set.values.map((val) => Math.abs(val)))
   );
 
   const gridLines = 4;
@@ -3592,11 +3593,11 @@ const drawBarChart = (canvas, labels, datasets, options = {}) => {
   ctx.stroke();
 
   const groupWidth = chartWidth / Math.max(1, labels.length);
-  const barWidth = Math.max(6, (groupWidth - 18) / datasets.length);
+  const barWidth = Math.max(6, (groupWidth - 18) / Math.max(1, barSets.length));
 
   labels.forEach((label, i) => {
     const xBase = padding.left + i * groupWidth;
-    datasets.forEach((dataset, j) => {
+    barSets.forEach((dataset, j) => {
       const value = dataset.values[i];
       const barHeight = (Math.abs(value) / maxValue) * chartHeight;
       const x = xBase + 5 + j * barWidth;
@@ -3642,6 +3643,41 @@ const drawBarChart = (canvas, labels, datasets, options = {}) => {
     }
   });
 
+  const lineSets = datasets.filter((set) => set.type === "line");
+  if (lineSets.length) {
+    lineSets.forEach((dataset) => {
+      ctx.strokeStyle = dataset.color || "#3f5d5a";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      dataset.values.forEach((value, i) => {
+        const normalized = dataset.scale === "percent" ? (value / 100) * maxValue : value;
+        const y =
+          height -
+          padding.bottom -
+          (Math.abs(normalized) / maxValue) * chartHeight;
+        const x = padding.left + i * groupWidth + groupWidth / 2;
+        if (i === 0) {
+          ctx.moveTo(x, y);
+        } else {
+          ctx.lineTo(x, y);
+        }
+      });
+      ctx.stroke();
+      dataset.values.forEach((value, i) => {
+        const normalized = dataset.scale === "percent" ? (value / 100) * maxValue : value;
+        const y =
+          height -
+          padding.bottom -
+          (Math.abs(normalized) / maxValue) * chartHeight;
+        const x = padding.left + i * groupWidth + groupWidth / 2;
+        ctx.fillStyle = dataset.color || "#3f5d5a";
+        ctx.beginPath();
+        ctx.arc(x, y, 3, 0, Math.PI * 2);
+        ctx.fill();
+      });
+    });
+  }
+
   if (options.legend) {
     let offsetX = padding.left;
     const offsetY = padding.top - 12;
@@ -3654,6 +3690,53 @@ const drawBarChart = (canvas, labels, datasets, options = {}) => {
       offsetX += ctx.measureText(dataset.label).width + 30;
     });
   }
+
+  if (options.tooltip) {
+    attachChartTooltip(canvas, {
+      labels,
+      datasets,
+      groupWidth,
+      padding,
+    });
+  }
+};
+
+const attachChartTooltip = (canvas, meta) => {
+  if (!canvas || canvas.dataset.tooltip === "1") return;
+  canvas.dataset.tooltip = "1";
+  const tooltip = document.createElement("div");
+  tooltip.className = "chart-tooltip hidden";
+  canvas.parentElement?.appendChild(tooltip);
+
+  const formatValue = (dataset, value) =>
+    dataset.format ? dataset.format(value) : numberFormatter.format(value);
+
+  const handleMove = (event) => {
+    const rect = canvas.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const index = Math.floor((x - meta.padding.left) / meta.groupWidth);
+    if (index < 0 || index >= meta.labels.length) {
+      tooltip.classList.add("hidden");
+      return;
+    }
+    const label = meta.labels[index];
+    const lines = [`${label}`];
+    meta.datasets.forEach((dataset) => {
+      const value = dataset.values[index];
+      lines.push(`${dataset.label}: ${formatValue(dataset, value)}`);
+    });
+    tooltip.innerHTML = lines.map((line) => `<div>${line}</div>`).join("");
+    tooltip.style.left = `${Math.min(rect.width - 140, Math.max(12, x + 12))}px`;
+    tooltip.style.top = `${Math.max(12, event.clientY - rect.top - 40)}px`;
+    tooltip.classList.remove("hidden");
+  };
+
+  const handleLeave = () => {
+    tooltip.classList.add("hidden");
+  };
+
+  canvas.addEventListener("mousemove", handleMove);
+  canvas.addEventListener("mouseleave", handleLeave);
 };
 
 const saveTimers = new Map();
@@ -6098,6 +6181,10 @@ const renderFincasDashboard = (empresaId) => {
         const found = series.find((item) => String(item.year) === String(year));
         return found ? found.en_vigor || 0 : 0;
       });
+      const conversion = years.map((year) => {
+        const found = series.find((item) => String(item.year) === String(year));
+        return found ? Number(found.conversion || 0) : 0;
+      });
 
       drawBarChart(
         fincasPresupuestoChart,
@@ -6115,8 +6202,16 @@ const renderFincasDashboard = (empresaId) => {
             color: "#824c45",
             format: (value) => numberFormatter.format(value),
           },
+          {
+            label: "Conversión",
+            values: conversion,
+            color: "#3f5d5a",
+            format: (value) => `${Number(value || 0).toFixed(1)}%`,
+            type: "line",
+            scale: "percent",
+          },
         ],
-        { legend: true, showValues: true }
+        { legend: true, showValues: true, tooltip: true }
       );
 
       const responsables = data.responsables || [];
@@ -6136,10 +6231,6 @@ const renderFincasDashboard = (empresaId) => {
         { legend: false, showValues: true }
       );
 
-      const conversion = years.map((year) => {
-        const found = series.find((item) => String(item.year) === String(year));
-        return found ? Number(found.conversion || 0) : 0;
-      });
       drawBarChart(
         fincasConversionChart,
         years,
@@ -6151,7 +6242,7 @@ const renderFincasDashboard = (empresaId) => {
             format: (value) => `${Number(value || 0).toFixed(1)}%`,
           },
         ],
-        { legend: false, showValues: true }
+        { legend: false, showValues: true, tooltip: true }
       );
     });
   });
