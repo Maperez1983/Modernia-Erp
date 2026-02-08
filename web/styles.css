@@ -1754,6 +1754,70 @@ body.crm-fin #companySummary {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
 }
 
+.ocr-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.ocr-badge.alta {
+  background: #e3f3e8;
+  color: #2f7a50;
+}
+
+.ocr-badge.media {
+  background: #fff1d6;
+  color: #c4871c;
+}
+
+.ocr-badge.baja {
+  background: #fde6e3;
+  color: #b33b2e;
+}
+
+.ocr-compare-content {
+  max-width: 720px;
+}
+
+.ocr-compare-summary {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.ocr-compare-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.ocr-compare-row {
+  display: grid;
+  grid-template-columns: 140px 1fr 1fr;
+  gap: 12px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: #fffdf8;
+  font-size: 12px;
+}
+
+.ocr-compare-label {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.ocr-compare-val {
+  color: var(--ink-soft);
+  word-break: break-word;
+}
+
 .progress-card {
   display: grid;
   gap: 8px;

@@ -58,34 +58,136 @@ const buildRowMap = (row, columns) =>
 
 const compareOcrToRow = (rowMap, fields) => {
   const issues = [];
-  let score = 0;
+  let score = 100;
   const rowTomador = normalizeName(rowMap.tomador || "");
   const ocrTomador = normalizeName(fields.tomador || "");
   if (rowTomador && ocrTomador) {
     const sim = jaccard(tokenSet(rowTomador), tokenSet(ocrTomador));
-    if (sim < 0.35) issues.push("Tomador no coincide");
-    else score += sim * 3;
+    if (sim < 0.35) {
+      issues.push("Tomador no coincide");
+      score -= 15;
+    }
   }
   const rowNif = normalizeDocumento(rowMap.nif || rowMap.dni || "");
   const ocrNif = normalizeDocumento(fields.nif || fields.dni || "");
   if (rowNif && ocrNif) {
-    if (rowNif !== ocrNif) issues.push("DNI/NIF no coincide");
-    else score += 3;
+    if (rowNif !== ocrNif) {
+      issues.push("DNI/NIF no coincide");
+      score -= 15;
+    }
   }
   const rowPoliza = String(rowMap.poliza_numero || "").trim();
   const ocrPoliza = String(fields.poliza_numero || "").trim();
   if (rowPoliza && ocrPoliza) {
-    if (rowPoliza !== ocrPoliza) issues.push("Nº póliza no coincide");
-    else score += 3;
+    if (rowPoliza !== ocrPoliza) {
+      issues.push("Nº póliza no coincide");
+      score -= 15;
+    }
   }
   const rowComp = resolveCompanyKey(rowMap.compania || "");
   const ocrComp = resolveCompanyKey(fields.compania || "");
   if (rowComp && ocrComp) {
-    if (rowComp !== ocrComp) issues.push("Compañía no coincide");
-    else score += 2;
+    if (rowComp !== ocrComp) {
+      issues.push("Compañía no coincide");
+      score -= 12;
+    }
   }
+  score = Math.max(0, Math.min(100, score));
   return { issues, score };
 };
+
+const getOcrLevel = (score, missingCount) => {
+  if (missingCount >= 3) return { level: "baja", label: "Baja", color: "#b33b2e" };
+  if (score >= 80) return { level: "alta", label: "Alta", color: "#2f7a50" };
+  if (score >= 55) return { level: "media", label: "Media", color: "#c4871c" };
+  return { level: "baja", label: "Baja", color: "#b33b2e" };
+};
+
+const getOrDash = (value) => (value === null || value === undefined || value === "" ? "-" : value);
+
+const showOcrCompareModal = (rowMap, fields, meta = {}) =>
+  new Promise((resolve) => {
+    let modal = document.getElementById("ocrCompareModal");
+    if (!modal) {
+      modal = document.createElement("div");
+      modal.id = "ocrCompareModal";
+      modal.className = "modal";
+      modal.innerHTML = `
+        <div class="modal-content ocr-compare-content">
+          <div class="modal-header">
+            <h3>Comparativa OCR</h3>
+            <button type="button" class="ghost" data-ocr-close>✕</button>
+          </div>
+          <div class="modal-body">
+            <div class="ocr-compare-summary"></div>
+            <div class="ocr-compare-grid"></div>
+          </div>
+          <div class="modal-actions">
+            <button type="button" class="secondary" data-ocr-cancel>Cancelar</button>
+            <button type="button" data-ocr-apply>Aplicar OCR</button>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(modal);
+    }
+    const summary = modal.querySelector(".ocr-compare-summary");
+    const grid = modal.querySelector(".ocr-compare-grid");
+    const closeBtn = modal.querySelector("[data-ocr-close]");
+    const cancelBtn = modal.querySelector("[data-ocr-cancel]");
+    const applyBtn = modal.querySelector("[data-ocr-apply]");
+
+    const badge = `
+      <span class="ocr-badge ${meta.level || "media"}">
+        ${meta.label || "Media"} · ${Math.round(meta.score || 0)}%
+      </span>
+    `;
+    const missingText = meta.missing?.length
+      ? `Campos faltantes: ${meta.missing.join(", ")}`
+      : "OCR completo en campos clave.";
+    const issueText = meta.issues?.length
+      ? `No coinciden: ${meta.issues.join(", ")}`
+      : "Coincidencias principales correctas.";
+    summary.innerHTML = `
+      <div class="ocr-compare-line">${badge}</div>
+      <div class="muted">${missingText}</div>
+      <div class="muted">${issueText}</div>
+    `;
+
+    const rows = [
+      { label: "Tomador", row: rowMap.tomador, ocr: fields.tomador },
+      { label: "DNI/NIF", row: rowMap.nif || rowMap.dni, ocr: fields.nif || fields.dni },
+      { label: "Compañía", row: rowMap.compania, ocr: fields.compania },
+      { label: "Ramo", row: rowMap.ramo, ocr: fields.ramo },
+      { label: "Nº póliza", row: rowMap.poliza_numero, ocr: fields.poliza_numero },
+      { label: "Fecha efecto", row: rowMap.fecha_efecto, ocr: fields.fecha_efecto },
+      { label: "Fecha vencimiento", row: rowMap.fecha_vencimiento, ocr: fields.fecha_vencimiento },
+      { label: "Prima total", row: rowMap.prima_total, ocr: fields.prima_total },
+    ];
+    grid.innerHTML = rows
+      .map(
+        (row) => `
+        <div class="ocr-compare-row">
+          <div class="ocr-compare-label">${row.label}</div>
+          <div class="ocr-compare-val">${getOrDash(row.row)}</div>
+          <div class="ocr-compare-val">${getOrDash(row.ocr)}</div>
+        </div>
+      `
+      )
+      .join("");
+
+    const close = (value) => {
+      modal.classList.remove("open");
+      modal.classList.add("hidden");
+      resolve(value);
+    };
+
+    closeBtn.onclick = () => close(false);
+    cancelBtn.onclick = () => close(false);
+    applyBtn.onclick = () => close(true);
+
+    modal.classList.remove("hidden");
+    modal.classList.add("open");
+  });
 
 const runSegurosBdtRowOcr = async (recordId, file, statusEl, rowMap = {}) => {
   if (!recordId || !file) return;
@@ -110,19 +212,18 @@ const runSegurosBdtRowOcr = async (recordId, file, statusEl, rowMap = {}) => {
   const required = ["tomador", "compania", "poliza_numero", "fecha_efecto"];
   const missing = required.filter((key) => !String(fields[key] || "").trim());
   const compare = compareOcrToRow(rowMap, fields);
-  if (missing.length || compare.issues.length) {
-    const msg = [
-      missing.length ? `OCR incompleto (${missing.join(", ")})` : "",
-      compare.issues.length ? `No coinciden: ${compare.issues.join(", ")}` : "",
-    ]
-      .filter(Boolean)
-      .join(" · ");
-    if (statusEl) statusEl.textContent = msg;
-    const ok = window.confirm(
-      `${msg}\n\n¿Quieres aplicar el OCR igualmente?`
-    );
-    if (!ok) return;
+  const levelMeta = getOcrLevel(compare.score, missing.length);
+  if (statusEl) {
+    statusEl.innerHTML = `<span class="ocr-badge ${levelMeta.level}">${levelMeta.label}</span>`;
   }
+  const ok = await showOcrCompareModal(rowMap, fields, {
+    missing,
+    issues: compare.issues,
+    score: compare.score,
+    level: levelMeta.level,
+    label: levelMeta.label,
+  });
+  if (!ok) return;
   const enrichPayload = { id: recordId, ...fields };
   if (data.cliente_id) {
     enrichPayload.cliente_id = data.cliente_id;
