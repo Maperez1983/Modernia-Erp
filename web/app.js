@@ -337,6 +337,7 @@ const state = {
   currentUserServices: [],
   currentUserServiceLabel: "",
   currentClienteId: "",
+  currentClienteServices: [],
   lastCreatedClientId: "",
   currentPage: "home",
   prevPage: "home",
@@ -1062,6 +1063,29 @@ const getServiceLabelFromNormalized = (value) => {
     (service) => normalizeSimple(service) === normalized
   );
   return match || "";
+};
+
+const getAllowedServiceKeys = () => {
+  if (!state.currentUserServices || !state.currentUserServices.length) {
+    return null;
+  }
+  return new Set(state.currentUserServices.map((value) => normalizeSimple(value)));
+};
+
+const getVisibleServiceKeys = () => {
+  const allowed = getAllowedServiceKeys();
+  const clientServices = (state.currentClienteServices || []).map((value) =>
+    normalizeSimple(value)
+  );
+  if (!allowed) {
+    return clientServices.length ? new Set(clientServices) : null;
+  }
+  if (!clientServices.length) return allowed;
+  const intersection = new Set();
+  clientServices.forEach((value) => {
+    if (allowed.has(value)) intersection.add(value);
+  });
+  return intersection;
 };
 
 const isPrivilegedService = (value) => {
@@ -2324,30 +2348,36 @@ const loadClienteDocsByService = (clienteId, service, container) => {
 const setClienteDocsTab = (tab) => {
   if (!clienteDocsTabs) return;
   const normalized = tab || "seguros";
-  state.clienteDocsTab = normalized;
+  const allowed = getVisibleServiceKeys();
+  const fallback = allowed ? Array.from(allowed)[0] || "seguros" : normalized;
+  const targetTab = allowed && !allowed.has(normalizeSimple(normalized)) ? fallback : normalized;
+  state.clienteDocsTab = targetTab;
   clienteDocsTabs.querySelectorAll(".tab").forEach((btn) => {
-    btn.classList.toggle("active", btn.dataset.docsTab === normalized);
+    const key = normalizeSimple(btn.dataset.docsTab || "");
+    const isAllowed = !allowed || allowed.has(key);
+    btn.classList.toggle("hidden", !isAllowed);
+    btn.classList.toggle("active", btn.dataset.docsTab === targetTab);
   });
   if (clienteDocsSeguros) {
-    clienteDocsSeguros.classList.toggle("hidden", normalized !== "seguros");
+    clienteDocsSeguros.classList.toggle("hidden", targetTab !== "seguros");
   }
   if (clienteDocsGestoria) {
-    clienteDocsGestoria.classList.toggle("hidden", normalized !== "gestoria");
+    clienteDocsGestoria.classList.toggle("hidden", targetTab !== "gestoria");
   }
   if (clienteDocsFin) {
-    clienteDocsFin.classList.toggle("hidden", normalized !== "financiaciones");
+    clienteDocsFin.classList.toggle("hidden", targetTab !== "financiaciones");
   }
   if (clienteDocsInmo) {
-    clienteDocsInmo.classList.toggle("hidden", normalized !== "inmobiliaria");
+    clienteDocsInmo.classList.toggle("hidden", targetTab !== "inmobiliaria");
   }
   const clienteId = state.currentClienteId;
-  if (normalized === "seguros") {
+  if (targetTab === "seguros") {
     loadClienteDocsByService(clienteId, "seguros", clienteDocsSeguros);
-  } else if (normalized === "gestoria") {
+  } else if (targetTab === "gestoria") {
     loadClienteDocsByService(clienteId, "gestoria", clienteDocsGestoria);
-  } else if (normalized === "financiaciones") {
+  } else if (targetTab === "financiaciones") {
     loadClienteDocsByService(clienteId, "financiaciones", clienteDocsFin);
-  } else if (normalized === "inmobiliaria") {
+  } else if (targetTab === "inmobiliaria") {
     loadClienteDocsByService(clienteId, "inmobiliaria", clienteDocsInmo);
   }
 };
@@ -11766,6 +11796,7 @@ const openClienteDetail = (id) => {
       const serviceSet = new Set(
         empresas.map((row) => (row.servicio || "").toLowerCase())
       );
+      state.currentClienteServices = Array.from(serviceSet);
       hasGestoria = serviceSet.has("gestoría");
       hasSeguros = serviceSet.has("seguros");
       hasInmo = serviceSet.has("inmobiliaria");
@@ -11973,6 +12004,7 @@ const openClienteDetail = (id) => {
 
 const closeClienteDetail = () => {
   state.currentClienteId = "";
+  state.currentClienteServices = [];
   const returnPage = state.prevPage || "empresa";
   const returnModule = state.prevModule || "clientes";
   const returnTab = state.prevTab || "bdt";
