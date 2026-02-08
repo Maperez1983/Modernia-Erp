@@ -7804,7 +7804,7 @@ class Handler(BaseHTTPRequestHandler):
 
             estado_expr = "LOWER(TRIM(estado))"
             compania_expr = "LOWER(TRIM(compania))"
-            year_expr = "COALESCE(STRFTIME('%Y', fecha_efecto), STRFTIME('%Y', created_at))"
+            year_expr = "STRFTIME('%Y', created_at)"
             exclude_sin_seguro = f"({compania_expr} IS NULL OR {compania_expr} = '' OR {compania_expr} != 'sin seguro')"
 
             current = conn.execute(
