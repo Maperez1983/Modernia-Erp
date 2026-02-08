@@ -243,9 +243,7 @@ const runSegurosBdtRowOcr = async (recordId, file, statusEl, rowMap = {}) => {
   });
   if (!ok) return;
   const enrichPayload = { id: recordId, ...fields };
-  if (data.cliente_id) {
-    enrichPayload.cliente_id = data.cliente_id;
-  } else if (fields.nif || fields.dni) {
+  if (fields.nif || fields.dni) {
     const lookup = await lookupClienteByNif(fields.nif || fields.dni);
     if (lookup?.found) {
       enrichPayload.cliente_id = lookup.cliente?.id || "";
