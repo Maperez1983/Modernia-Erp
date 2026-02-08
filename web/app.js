@@ -6126,7 +6126,20 @@ const renderFincasDashboard = (empresaId) => {
       return;
     }
     fincasDashboardKpis.innerHTML = "";
+    const series = data.series || [];
     const current = data.current || {};
+    const currentTotal =
+      (current.presupuesto || 0) + (current.contratada || 0) + (current.en_vigor || 0);
+    if (!currentTotal && series.length) {
+      const lastYear = String(series[series.length - 1].year || "");
+      if (lastYear && lastYear !== selectedYear) {
+        if (yearSelect) {
+          yearSelect.value = lastYear;
+        }
+        renderFincasDashboard(empresaId);
+        return;
+      }
+    }
     const kpis = [
       {
         title: `Conversión ${current.year || selectedYear}`,
@@ -6171,7 +6184,6 @@ const renderFincasDashboard = (empresaId) => {
         window.setTimeout(() => renderFincasDashboard(empresaId), 250);
         return;
       }
-      const series = data.series || [];
       const years = buildYearIndex([series]);
       const presupuestos = years.map((year) => {
         const found = series.find((item) => String(item.year) === String(year));
