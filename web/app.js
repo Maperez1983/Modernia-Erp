@@ -1054,6 +1054,16 @@ const expandServiceAliases = (services) => {
   return Array.from(set);
 };
 
+const getServiceLabelFromNormalized = (value) => {
+  const normalized = normalizeSimple(value);
+  if (!normalized) return "";
+  if (SERVICE_LABELS[normalized]) return SERVICE_LABELS[normalized];
+  const match = SERVICE_OPTIONS.find(
+    (service) => normalizeSimple(service) === normalized
+  );
+  return match || "";
+};
+
 const isPrivilegedService = (value) => {
   const normalized = normalizeSimple(value);
   return ["direccion", "administracion"].includes(normalized);
@@ -6954,8 +6964,21 @@ const buildClientesLinkRow = (data = {}) => {
   servicioLabel.textContent = "Servicio";
   const servicioSelect = document.createElement("select");
   servicioSelect.dataset.field = "servicio";
-  populateServiciosSelect(servicioSelect, data.servicio || "");
+  let defaultService = data.servicio || "";
+  if (!defaultService) {
+    const user = getUserByValue(getCurrentUser());
+    if (user && !isPrivilegedService(user.servicio)) {
+      const services = expandServiceAliases(parseServiceList(user.servicio || ""));
+      defaultService = getServiceLabelFromNormalized(services[0] || "") || "";
+    }
+  }
+  populateServiciosSelect(servicioSelect, defaultService);
   servicioLabel.appendChild(servicioSelect);
+  if (!data.empresa_id && defaultService) {
+    const targetName = SERVICE_COMPANY_MAP[defaultService];
+    const match = state.empresas.find((e) => e.nombre === targetName);
+    if (match) empresaSelect.value = match.id;
+  }
 
   const estadoLabel = document.createElement("label");
   estadoLabel.textContent = "Estado";
@@ -7023,6 +7046,37 @@ const refreshClientesLinkRows = () => {
       populateServiciosSelect(servicioSelect, current || "");
     }
   });
+};
+
+const autoLinkCurrentUserServices = async (clienteId) => {
+  const user = getUserByValue(getCurrentUser());
+  if (!user || isPrivilegedService(user.servicio)) return;
+  const services = expandServiceAliases(parseServiceList(user.servicio || ""));
+  if (!services.length) return;
+  const requests = [];
+  services.forEach((serviceNorm) => {
+    const label = getServiceLabelFromNormalized(serviceNorm);
+    if (!label) return;
+    const companyName = SERVICE_COMPANY_MAP[label];
+    const empresa = state.empresas.find((e) => e.nombre === companyName);
+    if (!empresa) return;
+    requests.push(
+      fetch("/api/clientes_link", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          cliente_id: clienteId,
+          empresa_id: empresa.id,
+          servicio: label,
+          estado: "Activo",
+          fecha_inicio: new Date().toISOString().slice(0, 10),
+        }),
+      }).then((res) => res.json())
+    );
+  });
+  if (requests.length) {
+    await Promise.all(requests);
+  }
 };
 
 const loadClientesTable = () => {
@@ -15381,17 +15435,26 @@ if (clientesForm) {
       body: JSON.stringify(payload),
     })
       .then((res) => res.json())
-      .then((data) => {
+      .then(async (data) => {
         if (data.error) {
           if (clientesFormStatus) {
             clientesFormStatus.textContent = data.error;
           }
           return;
         }
-        if (clientesFormStatus) {
-          clientesFormStatus.textContent = "Guardado. Vincula servicios abajo si aplica.";
-        }
         state.lastCreatedClientId = data.id || newClienteId;
+        await autoLinkCurrentUserServices(state.lastCreatedClientId);
+        if (clientesFormStatus) {
+          const user = getUserByValue(getCurrentUser());
+          const services = user && !isPrivilegedService(user.servicio)
+            ? expandServiceAliases(parseServiceList(user.servicio || ""))
+                .map((service) => getServiceLabelFromNormalized(service))
+                .filter(Boolean)
+            : [];
+          clientesFormStatus.textContent = services.length
+            ? `Guardado y asignado a ${services.join(", ")}.`
+            : "Guardado. Vincula servicios abajo si aplica.";
+        }
         clientesForm.reset();
         updateClienteAltaPersona();
         Promise.all([loadClientesStats(), loadClientesList()]).then(([_, list]) => {
