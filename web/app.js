@@ -6029,6 +6029,16 @@ const renderFincasDashboard = (empresaId) => {
   if (!fincasDashboardSection) {
     return;
   }
+  if (state.segurosTab && state.segurosTab !== "dashboard") {
+    return;
+  }
+  if (segurosCrmSection) {
+    segurosCrmSection.classList.remove("hidden");
+  }
+  const dashSection = document.querySelector('.seguros-tab[data-seguros-tab="dashboard"]');
+  if (dashSection && !dashSection.classList.contains("active")) {
+    setSegurosTab("dashboard");
+  }
   fincasDashboardSection.classList.remove("hidden");
   updateTableVisibility();
   const selectedYear = yearSelect?.value || String(new Date().getFullYear());
@@ -6083,7 +6093,7 @@ const renderFincasDashboard = (empresaId) => {
     requestAnimationFrame(() => {
       const chartRect = fincasPresupuestoChart?.getBoundingClientRect();
       if (!chartRect || chartRect.width < 10 || chartRect.height < 10) {
-        window.setTimeout(() => renderFincasDashboard(empresaId), 200);
+        window.setTimeout(() => renderFincasDashboard(empresaId), 250);
         return;
       }
       const series = data.series || [];
