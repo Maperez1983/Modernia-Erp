@@ -3535,6 +3535,8 @@ const prepareCanvas = (canvas) => {
     const parentWidth = parent ? parent.clientWidth : 0;
     width = parentWidth && parentWidth > 10 ? parentWidth : 600;
     height = height && height > 10 ? height : 300;
+    canvas.style.width = `${width}px`;
+    canvas.style.height = `${height}px`;
   }
   canvas.width = width * ratio;
   canvas.height = height * ratio;
@@ -3546,8 +3548,15 @@ const prepareCanvas = (canvas) => {
 const drawBarChart = (canvas, labels, datasets, options = {}) => {
   if (!canvas) return;
   const ctx = prepareCanvas(canvas);
-  const width = canvas.getBoundingClientRect().width;
-  const height = canvas.getBoundingClientRect().height;
+  const rect = canvas.getBoundingClientRect();
+  let width = rect.width;
+  let height = rect.height;
+  if (width < 10 || height < 10) {
+    width = canvas.width || 600;
+    height = canvas.height || 300;
+    canvas.style.width = `${width}px`;
+    canvas.style.height = `${height}px`;
+  }
   ctx.clearRect(0, 0, width, height);
 
   const padding = {
