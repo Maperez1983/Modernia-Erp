@@ -50,6 +50,24 @@ const uploadFileToS3 = async (file, prefix, statusEl) => {
   return presign;
 };
 
+const fileToBase64 = (file) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error("No se pudo leer el archivo."));
+    reader.readAsDataURL(file);
+  });
+
+const normalizeServicio = (value) => String(value || "").toLowerCase();
+
+const buildClienteNombreFromTomador = (tomador) => {
+  const split = splitNombreApellidos(tomador || "", "Física");
+  const apellidos = split.apellidos || "";
+  const nombre = split.nombre || "";
+  if (apellidos && nombre) return `${apellidos}, ${nombre}`.trim();
+  return (tomador || "").trim();
+};
+
 const buildRowMap = (row, columns) =>
   columns.reduce((acc, col, idx) => {
     acc[col] = row[idx];
@@ -194,11 +212,11 @@ const runSegurosBdtRowOcr = async (recordId, file, statusEl, rowMap = {}) => {
   if (statusEl) statusEl.textContent = "Procesando OCR...";
   let data;
   try {
-    const formData = new FormData();
-    formData.append("file", file);
+    const fileBase64 = await fileToBase64(file);
     data = await fetch("/api/seguros_ocr", {
       method: "POST",
-      body: formData,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_base64: fileBase64, filename: file.name }),
     }).then((res) => res.json());
   } catch {
     if (statusEl) statusEl.textContent = "Error al procesar OCR.";
@@ -227,6 +245,11 @@ const runSegurosBdtRowOcr = async (recordId, file, statusEl, rowMap = {}) => {
   const enrichPayload = { id: recordId, ...fields };
   if (data.cliente_id) {
     enrichPayload.cliente_id = data.cliente_id;
+  } else if (fields.nif || fields.dni) {
+    const lookup = await lookupClienteByNif(fields.nif || fields.dni);
+    if (lookup?.found) {
+      enrichPayload.cliente_id = lookup.cliente?.id || "";
+    }
   }
   let upload = null;
   try {
@@ -311,6 +334,8 @@ const state = {
   demandasList: [],
   usersList: [],
   currentUser: "",
+  currentUserServices: [],
+  currentUserServiceLabel: "",
   currentClienteId: "",
   lastCreatedClientId: "",
   currentPage: "home",
@@ -322,6 +347,7 @@ const state = {
   gestoriaCrmTab: "all",
   gestoriaCrmView: "crm",
   segurosTab: "dashboard",
+  clienteDocsTab: "seguros",
   segurosBdtCache: null,
   segurosOcrClienteId: "",
   segurosBdtOcrClienteId: "",
@@ -420,8 +446,14 @@ const clienteTabProfesional = document.getElementById("clienteTabProfesional");
 const clienteTabSeguros = document.getElementById("clienteTabSeguros");
 const clienteTabInmobiliaria = document.getElementById("clienteTabInmobiliaria");
 const clienteTabHipotecas = document.getElementById("clienteTabHipotecas");
+const clienteTabDocs = document.getElementById("clienteTabDocs");
 const clienteTabFacturas = document.getElementById("clienteTabFacturas");
 const clienteTabTrabajos = document.getElementById("clienteTabTrabajos");
+const clienteDocsTabs = document.getElementById("clienteDocsTabs");
+const clienteDocsSeguros = document.getElementById("clienteDocsSeguros");
+const clienteDocsGestoria = document.getElementById("clienteDocsGestoria");
+const clienteDocsFin = document.getElementById("clienteDocsFin");
+const clienteDocsInmo = document.getElementById("clienteDocsInmo");
 const clienteGestoriaForm = document.getElementById("clienteGestoriaForm");
 const clienteGestoriaStatus = document.getElementById("clienteGestoriaStatus");
 const gestoriaModeloForm = document.getElementById("gestoriaModeloForm");
@@ -667,6 +699,10 @@ const segurosOcrPreview = document.getElementById("segurosOcrPreview");
 const segurosOcrStatus = document.getElementById("segurosOcrStatus");
 const segurosOcrSave = document.getElementById("segurosOcrSave");
 const segurosOcrSaveStatus = document.getElementById("segurosOcrSaveStatus");
+const segurosOcrClienteStatus = document.getElementById("segurosOcrClienteStatus");
+const segurosOcrClienteCreate = document.getElementById("segurosOcrClienteCreate");
+const segurosOcrClienteAddService = document.getElementById("segurosOcrClienteAddService");
+const segurosOcrClienteOpen = document.getElementById("segurosOcrClienteOpen");
 const segurosOcrRaw = document.getElementById("segurosOcrRaw");
 const seguroOcrEstado = document.getElementById("seguroOcrEstado");
 const seguroOcrProduccion = document.getElementById("seguroOcrProduccion");
@@ -687,6 +723,10 @@ const seguroOcrPrimaTotal = document.getElementById("seguroOcrPrimaTotal");
 const segurosBdtOcrFile = document.getElementById("segurosBdtOcrFile");
 const segurosBdtOcrButton = document.getElementById("segurosBdtOcrButton");
 const segurosBdtOcrStatus = document.getElementById("segurosBdtOcrStatus");
+const segurosBdtOcrClienteStatus = document.getElementById("segurosBdtOcrClienteStatus");
+const segurosBdtOcrClienteCreate = document.getElementById("segurosBdtOcrClienteCreate");
+const segurosBdtOcrClienteAddService = document.getElementById("segurosBdtOcrClienteAddService");
+const segurosBdtOcrClienteOpen = document.getElementById("segurosBdtOcrClienteOpen");
 const segurosBdtOcrTomador = document.getElementById("segurosBdtOcrTomador");
 const segurosBdtOcrDni = document.getElementById("segurosBdtOcrDni");
 const segurosBdtOcrCompania = document.getElementById("segurosBdtOcrCompania");
@@ -998,6 +1038,59 @@ const normalizeSimple = (value) =>
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .trim();
+
+const parseServiceList = (value) =>
+  String(value || "")
+    .split(/[|,/;]+/)
+    .map((item) => normalizeSimple(item))
+    .filter(Boolean);
+
+const expandServiceAliases = (services) => {
+  const set = new Set(services || []);
+  if (set.has("financiaciones")) set.add("hipotecas");
+  if (set.has("hipotecas")) set.add("financiaciones");
+  if (set.has("administracion fincas")) set.add("administracion de fincas");
+  if (set.has("administracion de fincas")) set.add("administracion fincas");
+  return Array.from(set);
+};
+
+const isPrivilegedService = (value) => {
+  const normalized = normalizeSimple(value);
+  return ["direccion", "administracion"].includes(normalized);
+};
+
+const getUserByValue = (value) => {
+  const normalized = normalizeSimple(value);
+  return (state.usersList || []).find((user) => {
+    const usuario = normalizeSimple(user.usuario || "");
+    const nombre = normalizeSimple(user.nombre || "");
+    const full = normalizeSimple(`${user.nombre || ""} ${user.apellido || ""}`.trim());
+    return (
+      (usuario && usuario === normalized) ||
+      (full && full === normalized) ||
+      (nombre && nombre === normalized)
+    );
+  });
+};
+
+const syncCurrentUserScope = () => {
+  const user = getUserByValue(getCurrentUser());
+  if (!user) {
+    state.currentUserServices = [];
+    state.currentUserServiceLabel = "";
+    return;
+  }
+  state.currentUserServiceLabel = user.servicio || "";
+  state.currentUserServices = expandServiceAliases(parseServiceList(user.servicio || ""));
+};
+
+const getServiceFilterParam = () => {
+  const user = getUserByValue(getCurrentUser());
+  if (!user) return "";
+  if (isPrivilegedService(user.servicio)) return "";
+  const services = expandServiceAliases(parseServiceList(user.servicio || ""));
+  return services.join(",");
+};
 
 const normalizeMatch = (value) =>
   String(value || "")
@@ -2143,8 +2236,110 @@ const setClienteTab = (tab) => {
   if (clienteTabSeguros) clienteTabSeguros.classList.toggle("hidden", tab !== "seguros");
   if (clienteTabInmobiliaria) clienteTabInmobiliaria.classList.toggle("hidden", tab !== "inmobiliaria");
   if (clienteTabHipotecas) clienteTabHipotecas.classList.toggle("hidden", tab !== "hipotecas");
+  if (clienteTabDocs) clienteTabDocs.classList.toggle("hidden", tab !== "docs");
   if (clienteTabFacturas) clienteTabFacturas.classList.toggle("hidden", tab !== "facturas");
   if (clienteTabTrabajos) clienteTabTrabajos.classList.toggle("hidden", tab !== "trabajos");
+  if (tab === "docs") {
+    setClienteDocsTab(state.clienteDocsTab || "seguros");
+  }
+};
+
+const renderClienteDocsTable = (rows, container) => {
+  if (!container) return;
+  if (!rows.length) {
+    container.innerHTML = "<p class='muted'>Sin documentación registrada.</p>";
+    return;
+  }
+  const table = document.createElement("table");
+  const thead = document.createElement("thead");
+  const trHead = document.createElement("tr");
+  ["Documento", "Tipo", "Fecha", "Estado", "Notas", "PDF"].forEach((col) => {
+    const th = document.createElement("th");
+    th.textContent = col;
+    trHead.appendChild(th);
+  });
+  thead.appendChild(trHead);
+  table.appendChild(thead);
+  const tbody = document.createElement("tbody");
+  rows.forEach((row) => {
+    const tr = document.createElement("tr");
+    const cells = [
+      row.nombre || "",
+      row.tipo || "",
+      row.fecha || "",
+      row.estado || "",
+      row.notas || "",
+    ];
+    cells.forEach((value) => {
+      const td = document.createElement("td");
+      td.textContent = value;
+      tr.appendChild(td);
+    });
+    const pdfTd = document.createElement("td");
+    if (row.doc_key || row.doc_url) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "secondary";
+      btn.textContent = "Ver";
+      btn.addEventListener("click", () => {
+        openS3File(row.doc_key, row.doc_url);
+      });
+      pdfTd.appendChild(btn);
+    } else {
+      pdfTd.textContent = "-";
+    }
+    tr.appendChild(pdfTd);
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  container.innerHTML = "";
+  container.appendChild(table);
+};
+
+const loadClienteDocsByService = (clienteId, service, container) => {
+  if (!container) return;
+  if (!clienteId) {
+    container.innerHTML = "<p class='muted'>Selecciona un cliente.</p>";
+    return;
+  }
+  const query = new URLSearchParams({
+    cliente_id: clienteId,
+    service,
+  });
+  api(`/api/gestoria_docs?${query.toString()}`).then((data) => {
+    renderClienteDocsTable(data.rows || [], container);
+  });
+};
+
+const setClienteDocsTab = (tab) => {
+  if (!clienteDocsTabs) return;
+  const normalized = tab || "seguros";
+  state.clienteDocsTab = normalized;
+  clienteDocsTabs.querySelectorAll(".tab").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.docsTab === normalized);
+  });
+  if (clienteDocsSeguros) {
+    clienteDocsSeguros.classList.toggle("hidden", normalized !== "seguros");
+  }
+  if (clienteDocsGestoria) {
+    clienteDocsGestoria.classList.toggle("hidden", normalized !== "gestoria");
+  }
+  if (clienteDocsFin) {
+    clienteDocsFin.classList.toggle("hidden", normalized !== "financiaciones");
+  }
+  if (clienteDocsInmo) {
+    clienteDocsInmo.classList.toggle("hidden", normalized !== "inmobiliaria");
+  }
+  const clienteId = state.currentClienteId;
+  if (normalized === "seguros") {
+    loadClienteDocsByService(clienteId, "seguros", clienteDocsSeguros);
+  } else if (normalized === "gestoria") {
+    loadClienteDocsByService(clienteId, "gestoria", clienteDocsGestoria);
+  } else if (normalized === "financiaciones") {
+    loadClienteDocsByService(clienteId, "financiaciones", clienteDocsFin);
+  } else if (normalized === "inmobiliaria") {
+    loadClienteDocsByService(clienteId, "inmobiliaria", clienteDocsInmo);
+  }
 };
 
 const openHolding = () => {
@@ -5401,6 +5596,7 @@ const renderUsuariosSelect = () => {
     userSelect.value = state.usersList[0].nombre;
     setCurrentUser(state.usersList[0].nombre);
   }
+  syncCurrentUserScope();
 };
 
 const renderUsuariosTable = () => {
@@ -6668,13 +6864,18 @@ const loadHomeFincasStats = (year) => {
   });
 };
 
-const loadClientesStats = () =>
-  api("/api/clientes_stats").then((data) => {
+const loadClientesStats = () => {
+  const serviceParam = getServiceFilterParam();
+  const params = serviceParam ? `?servicio=${encodeURIComponent(serviceParam)}` : "";
+  return api(`/api/clientes_stats${params}`).then((data) => {
     state.clientesStats = data;
   });
+};
 
-const loadClientesList = () =>
-  api("/api/clientes_list").then((data) => {
+const loadClientesList = () => {
+  const serviceParam = getServiceFilterParam();
+  const params = serviceParam ? `?servicio=${encodeURIComponent(serviceParam)}` : "";
+  return api(`/api/clientes_list${params}`).then((data) => {
     const list = data || [];
     list.sort((a, b) => {
       const nameA = normalizeNombre(formatNombreCliente(a.nombre));
@@ -6684,6 +6885,7 @@ const loadClientesList = () =>
     state.clientesList = list;
     return state.clientesList;
   });
+};
 
 const renderClientesSelects = (clientes) => {
   if (clientesSelect) {
@@ -6847,6 +7049,10 @@ const loadClientesTable = () => {
   }
   if (estado) {
     params.set("estado", estado);
+  }
+  const serviceParam = getServiceFilterParam();
+  if (serviceParam) {
+    params.set("servicio", serviceParam);
   }
   return api(`/api/clientes?${params.toString()}`).then((data) => {
     const rows = data.rows || [];
@@ -9492,6 +9698,200 @@ const scoreSegurosBdtMatch = (row, columns, fields) => {
   return score;
 };
 
+const getSegurosOcrClienteFields = () => ({
+  tomador: seguroOcrTomador ? seguroOcrTomador.value.trim() : "",
+  nif: seguroOcrDni ? seguroOcrDni.value.trim() : "",
+  telefono: seguroOcrTelefono ? seguroOcrTelefono.value.trim() : "",
+  email: seguroOcrEmail ? seguroOcrEmail.value.trim() : "",
+  direccion: seguroOcrDireccion ? seguroOcrDireccion.value.trim() : "",
+  fecha_nacimiento: seguroOcrNacimiento ? seguroOcrNacimiento.value.trim() : "",
+});
+
+const getSegurosBdtOcrClienteFields = () => ({
+  tomador: segurosBdtOcrTomador ? segurosBdtOcrTomador.value.trim() : "",
+  nif: segurosBdtOcrDni ? segurosBdtOcrDni.value.trim() : "",
+});
+
+const getOcrClienteContext = (type) => {
+  if (type === "bdt") {
+    return {
+      statusEl: segurosBdtOcrClienteStatus,
+      createBtn: segurosBdtOcrClienteCreate,
+      addServiceBtn: segurosBdtOcrClienteAddService,
+      openBtn: segurosBdtOcrClienteOpen,
+      setId: (id) => {
+        state.segurosBdtOcrClienteId = id || "";
+      },
+      getId: () => state.segurosBdtOcrClienteId,
+    };
+  }
+  return {
+    statusEl: segurosOcrClienteStatus,
+    createBtn: segurosOcrClienteCreate,
+    addServiceBtn: segurosOcrClienteAddService,
+    openBtn: segurosOcrClienteOpen,
+    setId: (id) => {
+      state.segurosOcrClienteId = id || "";
+    },
+    getId: () => state.segurosOcrClienteId,
+  };
+};
+
+const setOcrClienteUi = (ctx, { status = "", showCreate = false, showAdd = false, showOpen = false } = {}) => {
+  if (!ctx) return;
+  if (ctx.statusEl) ctx.statusEl.textContent = status;
+  if (ctx.createBtn) ctx.createBtn.classList.toggle("hidden", !showCreate);
+  if (ctx.addServiceBtn) ctx.addServiceBtn.classList.toggle("hidden", !showAdd);
+  if (ctx.openBtn) ctx.openBtn.classList.toggle("hidden", !showOpen);
+};
+
+const lookupClienteByNif = async (nif) => {
+  if (!nif) return null;
+  const serviceParam = getServiceFilterParam();
+  const params = new URLSearchParams({ nif });
+  if (serviceParam) {
+    params.set("servicio", serviceParam);
+  }
+  try {
+    return await api(`/api/cliente_lookup?${params.toString()}`);
+  } catch {
+    return null;
+  }
+};
+
+const resolveOcrClienteMatch = async (type, fields) => {
+  const ctx = getOcrClienteContext(type);
+  if (!ctx) return;
+  const nifRaw = fields.nif || fields.dni || "";
+  const nif = String(nifRaw || "").trim();
+  if (!nif) {
+    ctx.setId("");
+    setOcrClienteUi(ctx, {
+      status: "DNI no detectado. Introduce el DNI para validar el cliente.",
+      showCreate: false,
+      showAdd: false,
+      showOpen: false,
+    });
+    return;
+  }
+  setOcrClienteUi(ctx, { status: "Comprobando cliente..." });
+  const data = await lookupClienteByNif(nif);
+  if (!data || !data.found) {
+    ctx.setId("");
+    setOcrClienteUi(ctx, {
+      status: "Cliente no encontrado. Puedes crearlo desde aquí.",
+      showCreate: true,
+      showAdd: false,
+      showOpen: false,
+    });
+    return;
+  }
+  const cliente = data.cliente || {};
+  const servicios = data.servicios || [];
+  const hasSeguros = servicios.some((row) => normalizeServicio(row.servicio) === "seguros");
+  ctx.setId(cliente.id || "");
+  setOcrClienteUi(ctx, {
+    status: `Cliente encontrado: ${cliente.nombre || "Sin nombre"} · ${cliente.nif || nif}`,
+    showCreate: false,
+    showAdd: !hasSeguros,
+    showOpen: true,
+  });
+};
+
+const linkClienteSegurosService = async (clienteId, ctx) => {
+  const fincas = state.empresas.find((empresa) => empresa.nombre === FINCAS_COMPANY);
+  if (!fincas) {
+    if (ctx?.statusEl) ctx.statusEl.textContent = "Empresa seguros no encontrada.";
+    return;
+  }
+  if (!clienteId) {
+    if (ctx?.statusEl) ctx.statusEl.textContent = "Cliente no seleccionado.";
+    return;
+  }
+  if (ctx?.statusEl) ctx.statusEl.textContent = "Asignando servicio Seguros...";
+  try {
+    const res = await fetch("/api/clientes_link", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        cliente_id: clienteId,
+        empresa_id: fincas.id,
+        servicio: "Seguros",
+        estado: "Activo",
+        fecha_inicio: new Date().toISOString().slice(0, 10),
+      }),
+    });
+    const data = await res.json();
+    if (data.error) {
+      if (ctx?.statusEl) ctx.statusEl.textContent = data.error;
+      return;
+    }
+    setOcrClienteUi(ctx, {
+      status: "Servicio Seguros asignado.",
+      showCreate: false,
+      showAdd: false,
+      showOpen: true,
+    });
+  } catch {
+    if (ctx?.statusEl) ctx.statusEl.textContent = "Error al asignar el servicio.";
+  }
+};
+
+const createClienteFromOcr = async (type, fields) => {
+  const ctx = getOcrClienteContext(type);
+  if (!ctx) return;
+  const nif = String(fields.nif || "").trim();
+  const tomador = String(fields.tomador || "").trim();
+  const nombre = buildClienteNombreFromTomador(tomador);
+  if (!nombre) {
+    if (ctx.statusEl) ctx.statusEl.textContent = "Introduce el nombre del tomador.";
+    return;
+  }
+  if (!nif) {
+    if (ctx.statusEl) ctx.statusEl.textContent = "Introduce el DNI/NIF para crear el cliente.";
+    return;
+  }
+  if (ctx.statusEl) ctx.statusEl.textContent = "Creando cliente...";
+  const clienteId = randomId();
+  const payload = {
+    id: clienteId,
+    nombre,
+    tipo_persona: "Física",
+    nif,
+    telefono: fields.telefono || "",
+    email: fields.email || "",
+    direccion: fields.direccion || "",
+    fecha_nacimiento: fields.fecha_nacimiento || "",
+  };
+  try {
+    const res = await fetch("/api/clientes", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    let finalId = clienteId;
+    if (data.error) {
+      if (res.status === 409 && data.id) {
+        finalId = data.id;
+      } else {
+        if (ctx.statusEl) ctx.statusEl.textContent = data.error;
+        return;
+      }
+    }
+    ctx.setId(finalId);
+    await linkClienteSegurosService(finalId, ctx);
+    setOcrClienteUi(ctx, {
+      status: "Cliente creado y asignado a Seguros.",
+      showCreate: false,
+      showAdd: false,
+      showOpen: true,
+    });
+  } catch {
+    if (ctx.statusEl) ctx.statusEl.textContent = "Error al crear cliente.";
+  }
+};
+
 const ensureSegurosBdtData = async () => {
   const empresa = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
   if (!empresa) return null;
@@ -11166,12 +11566,23 @@ const loadAgendaGeneral = () => {
   const fincas = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
   const fin = state.empresas.find((e) => e.nombre === FIN_COMPANY);
   const tasks = [];
+  const allowed = state.currentUserServices || [];
+  const allowService = (value) => {
+    if (!allowed.length) return true;
+    return allowed.includes(normalizeSimple(value));
+  };
   if (fincas) {
-    tasks.push(api(`/api/acciones?servicio=gestoria&empresa_id=${fincas.id}`));
-    tasks.push(api(`/api/acciones?servicio=seguros&empresa_id=${fincas.id}`));
+    if (allowService("gestoria")) {
+      tasks.push(api(`/api/acciones?servicio=gestoria&empresa_id=${fincas.id}`));
+    }
+    if (allowService("seguros")) {
+      tasks.push(api(`/api/acciones?servicio=seguros&empresa_id=${fincas.id}`));
+    }
   }
   if (fin) {
-    tasks.push(api(`/api/acciones?servicio=financiaciones&empresa_id=${fin.id}`));
+    if (allowService("financiaciones")) {
+      tasks.push(api(`/api/acciones?servicio=financiaciones&empresa_id=${fin.id}`));
+    }
   }
   if (!tasks.length) {
     agendaGeneral.innerHTML = "<p class='muted'>Sin empresas cargadas.</p>";
@@ -11261,7 +11672,12 @@ const openClienteDetail = (id) => {
   setPage("cliente");
   updateTableVisibility();
   setUrlParams(new URLSearchParams({ cliente: id }));
-  api(`/api/cliente?id=${id}`).then((data) => {
+  const serviceParam = getServiceFilterParam();
+  const params = new URLSearchParams({ id });
+  if (serviceParam) {
+    params.set("servicio", serviceParam);
+  }
+  api(`/api/cliente?${params.toString()}`).then((data) => {
     if (data.error) {
       if (clienteDetailSubtitle) {
         clienteDetailSubtitle.textContent = data.error;
@@ -11420,10 +11836,12 @@ const openClienteDetail = (id) => {
       const segurosTab = clienteTabs.querySelector('[data-tab="seguros"]');
       const inmoTab = clienteTabs.querySelector('[data-tab="inmobiliaria"]');
       const hipotecasTab = clienteTabs.querySelector('[data-tab="hipotecas"]');
+      const docsTab = clienteTabs.querySelector('[data-tab="docs"]');
       if (gestoriaTab) gestoriaTab.classList.toggle("hidden", !hasGestoria);
       if (segurosTab) segurosTab.classList.toggle("hidden", !hasSeguros);
       if (inmoTab) inmoTab.classList.toggle("hidden", !hasInmo);
       if (hipotecasTab) hipotecasTab.classList.toggle("hidden", !hasHipotecas);
+      if (docsTab) docsTab.classList.toggle("hidden", false);
     }
     if (clienteTabSeguros) {
       clienteTabSeguros.classList.toggle("hidden", !hasSeguros);
@@ -11433,6 +11851,9 @@ const openClienteDetail = (id) => {
     }
     if (clienteTabHipotecas) {
       clienteTabHipotecas.classList.toggle("hidden", !hasHipotecas);
+    }
+    if (clienteTabDocs) {
+      clienteTabDocs.classList.toggle("hidden", false);
     }
     if (clienteProfesionalList) {
       if (hasGestoria) {
@@ -11471,6 +11892,16 @@ const openClienteDetail = (id) => {
     } else if (clienteSegurosFicha) {
       clienteSegurosFicha.innerHTML = "<p class='muted'>Sin pólizas vinculadas.</p>";
     }
+    const docsDefault = hasSeguros
+      ? "seguros"
+      : hasGestoria
+        ? "gestoria"
+        : hasHipotecas
+          ? "financiaciones"
+          : hasInmo
+            ? "inmobiliaria"
+            : "seguros";
+    setClienteDocsTab(docsDefault);
     clientesDetail.classList.remove("hidden");
     const defaultTab = hasInmo
       ? "inmobiliaria"
@@ -11604,6 +12035,9 @@ const init = async () => {
     await safe(loadHomeDashboard());
     await safe(loadHomeHipotecaStats());
     await safe(loadHomeFincasStats(yearSelect?.value));
+    await safe(loadUsuarios());
+    renderUsuariosSelect();
+    renderUsuariosTable();
     await safe(loadClientesStats());
     const clientes = (await safe(loadClientesList())) || [];
     renderClientesSelects(clientes);
@@ -11618,9 +12052,6 @@ const init = async () => {
     populateClientesSelect(gestoriaContabilidadCliente);
     populateServiciosSelect(clientesServicioSelect);
     refreshClientesAltaSelects();
-    await safe(loadUsuarios());
-    renderUsuariosSelect();
-    renderUsuariosTable();
     initFinSimulator();
     setGestoriaCrmTab(state.gestoriaCrmTab || "autonomo");
     initSegurosTabs();
@@ -12463,6 +12894,7 @@ if (segurosOcrButton) {
       segurosOcrSaveStatus.textContent = "";
     }
     state.segurosOcrClienteId = "";
+    setOcrClienteUi(getOcrClienteContext("alta"), { status: "" });
     if (!segurosOcrFile || !segurosOcrFile.files || !segurosOcrFile.files.length) {
       if (segurosOcrStatus) {
         segurosOcrStatus.textContent = "Selecciona un PDF.";
@@ -12497,12 +12929,19 @@ if (segurosOcrButton) {
             state.segurosOcrClienteId = "";
             return;
           }
-          state.segurosOcrClienteId = data.cliente_id || "";
           state.segurosOcrQuality = data.ocr_quality || null;
           fillSegurosOcrFields(data.fields || {});
           if (segurosOcrRaw) {
             segurosOcrRaw.value = (data.text || "").trim();
           }
+          resolveOcrClienteMatch("alta", data.fields || {}).then(() => {
+            if (state.segurosOcrClienteId) {
+              saveSegurosOcrRecord().catch(() => {});
+            } else if (segurosOcrSaveStatus) {
+              segurosOcrSaveStatus.textContent =
+                "Revisa el cliente (DNI) antes de guardar la póliza.";
+            }
+          });
           if (segurosOcrStatus) {
             const lang = data.language ? ` (${data.language})` : "";
             const method = data.method ? ` · ${data.method}` : "";
@@ -12525,7 +12964,6 @@ if (segurosOcrButton) {
               seguroOcrEstado.value = "En vigor";
             }
           }
-          saveSegurosOcrRecord().catch(() => {});
         })
         .catch(() => {
           if (segurosOcrStatus) {
@@ -12548,6 +12986,7 @@ if (segurosBdtOcrButton) {
   segurosBdtOcrButton.addEventListener("click", () => {
     if (segurosBdtOcrStatus) segurosBdtOcrStatus.textContent = "";
     state.segurosBdtOcrClienteId = "";
+    setOcrClienteUi(getOcrClienteContext("bdt"), { status: "" });
     if (!segurosBdtOcrFile || !segurosBdtOcrFile.files || !segurosBdtOcrFile.files.length) {
       if (segurosBdtOcrStatus) segurosBdtOcrStatus.textContent = "Selecciona un PDF.";
       return;
@@ -12576,8 +13015,8 @@ if (segurosBdtOcrButton) {
             state.segurosBdtOcrClienteId = "";
             return;
           }
-          state.segurosBdtOcrClienteId = data.cliente_id || "";
           fillSegurosBdtOcrFields(data.fields || {});
+          resolveOcrClienteMatch("bdt", data.fields || {});
           if (segurosBdtOcrStatus && (data.doc_type || data.ocr_quality?.calidad)) {
             const docType = data.doc_type ? ` · ${data.doc_type}` : "";
             const calidad = data.ocr_quality?.calidad ? ` · ${data.ocr_quality.calidad}` : "";
@@ -12739,6 +13178,60 @@ if (segurosBdtOcrLink) {
   });
 }
 
+if (segurosOcrClienteCreate) {
+  segurosOcrClienteCreate.addEventListener("click", () => {
+    createClienteFromOcr("alta", getSegurosOcrClienteFields());
+  });
+}
+
+if (segurosOcrClienteAddService) {
+  segurosOcrClienteAddService.addEventListener("click", () => {
+    const ctx = getOcrClienteContext("alta");
+    linkClienteSegurosService(state.segurosOcrClienteId, ctx);
+  });
+}
+
+if (segurosOcrClienteOpen) {
+  segurosOcrClienteOpen.addEventListener("click", () => {
+    if (state.segurosOcrClienteId) {
+      openClienteDetail(state.segurosOcrClienteId);
+    }
+  });
+}
+
+if (segurosBdtOcrClienteCreate) {
+  segurosBdtOcrClienteCreate.addEventListener("click", () => {
+    createClienteFromOcr("bdt", getSegurosBdtOcrClienteFields());
+  });
+}
+
+if (segurosBdtOcrClienteAddService) {
+  segurosBdtOcrClienteAddService.addEventListener("click", () => {
+    const ctx = getOcrClienteContext("bdt");
+    linkClienteSegurosService(state.segurosBdtOcrClienteId, ctx);
+  });
+}
+
+if (segurosBdtOcrClienteOpen) {
+  segurosBdtOcrClienteOpen.addEventListener("click", () => {
+    if (state.segurosBdtOcrClienteId) {
+      openClienteDetail(state.segurosBdtOcrClienteId);
+    }
+  });
+}
+
+if (seguroOcrDni) {
+  seguroOcrDni.addEventListener("change", () => {
+    resolveOcrClienteMatch("alta", getSegurosOcrClienteFields());
+  });
+}
+
+if (segurosBdtOcrDni) {
+  segurosBdtOcrDni.addEventListener("change", () => {
+    resolveOcrClienteMatch("bdt", getSegurosBdtOcrClienteFields());
+  });
+}
+
 if (segurosUpdateButton) {
   segurosUpdateButton.addEventListener("click", () => {
     if (segurosUpdateStatus) segurosUpdateStatus.textContent = "";
@@ -12882,6 +13375,14 @@ if (clienteTabs) {
     const btn = event.target.closest("[data-tab]");
     if (!btn) return;
     setClienteTab(btn.dataset.tab);
+  });
+}
+
+if (clienteDocsTabs) {
+  clienteDocsTabs.addEventListener("click", (event) => {
+    const btn = event.target.closest("[data-docs-tab]");
+    if (!btn) return;
+    setClienteDocsTab(btn.dataset.docsTab);
   });
 }
 
@@ -13753,6 +14254,24 @@ if (adminUserForm) {
 if (userSelect) {
   userSelect.addEventListener("change", () => {
     setCurrentUser(userSelect.value);
+    syncCurrentUserScope();
+    loadClientesStats();
+    loadClientesList().then((clientes) => {
+      renderClientesSelects(clientes || []);
+      populateGestoriaClientes();
+      populateAgendaClientes(segurosAgendaClientes, segurosAgendaClienteInput, segurosAgendaClienteId);
+      populateAgendaClientes(gestoriaAgendaClientes, gestoriaAgendaClienteInput, gestoriaAgendaClienteId);
+      populateAgendaClientes(finAgendaClientes, finAgendaClienteInput, finAgendaClienteId);
+      populateAgendaClientes(actionModalClientes, actionModalClienteInput, actionModalClienteId);
+      populateAgendaClientes(segurosCrmClientes, segurosCrmClienteInput, segurosCrmClienteId);
+      populateAgendaClientes(gestoriaCrmClientes, gestoriaCrmSearch, null);
+      populateAgendaClientes(finCrmClientes, finCrmClienteInput, finCrmClienteId);
+      populateClientesSelect(gestoriaContabilidadCliente);
+      refreshClientesAltaSelects();
+    });
+    if (state.currentModule === "clientes") {
+      loadClientesTable();
+    }
   });
 }
 

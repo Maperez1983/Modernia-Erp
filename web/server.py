@@ -118,6 +118,41 @@ def normalize_phone(value):
         digits = digits[-9:]
     if len(digits) == 9:
         return digits
+
+def parse_services_param(raw):
+    if not raw:
+        return []
+    parts = re.split(r"[|,;/]+", str(raw))
+    services = [p.strip().lower() for p in parts if p and p.strip()]
+    aliases = {
+        "gestoria": "gestoría",
+        "administracion fincas": "administración fincas",
+        "administracion de fincas": "administración de fincas",
+        "inversion": "inversión",
+        "direccion": "dirección",
+    }
+    expanded = []
+    for service in services:
+        expanded.append(service)
+        if service in aliases:
+            expanded.append(aliases[service])
+    return list(dict.fromkeys(expanded))
+
+def cliente_has_servicio(conn, cliente_id, servicios):
+    if not cliente_id or not servicios:
+        return True
+    placeholders = ",".join(["?"] * len(servicios))
+    row = conn.execute(
+        f"""
+        SELECT 1
+        FROM clientes_empresas
+        WHERE cliente_id = ?
+          AND LOWER(servicio) IN ({placeholders})
+        LIMIT 1
+        """,
+        [cliente_id, *servicios],
+    ).fetchone()
+    return bool(row)
     return digits
 
 def normalize_email(value):
@@ -4900,6 +4935,57 @@ class Handler(BaseHTTPRequestHandler):
                 values,
             )
             row = conn.execute("SELECT * FROM seguros WHERE id = ?", (record_id,)).fetchone()
+            if row and (row["poliza_key"] or row["poliza_url"]) and row["cliente_id"]:
+                where = ["cliente_id = ?", "empresa_id = ?"]
+                values = [row["cliente_id"], row["empresa_id"]]
+                key_or_url = []
+                if row["poliza_key"]:
+                    key_or_url.append("doc_key = ?")
+                    values.append(row["poliza_key"])
+                if row["poliza_url"]:
+                    key_or_url.append("doc_url = ?")
+                    values.append(row["poliza_url"])
+                if key_or_url:
+                    where.append(f"({' OR '.join(key_or_url)})")
+                where_clause = " AND ".join(where)
+                exists = conn.execute(
+                    f"SELECT id FROM gestoria_docs WHERE {where_clause}",
+                    values,
+                ).fetchone()
+                if not exists:
+                    nombre_doc = row["poliza_numero"] or row["tomador"] or "Póliza seguro"
+                    notas_doc = " · ".join(
+                        [value for value in (row["compania"], row["ramo"]) if value]
+                    )
+                    conn.execute(
+                        """
+                        INSERT INTO gestoria_docs (
+                          id, empresa_id, cliente_id, referencia_tipo, referencia_id,
+                          nombre, tipo, fecha, estado, notas, doc_key, doc_url,
+                          calidad_ocr, campos_ocr, created_at, updated_at
+                        ) VALUES (
+                          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                        )
+                        """,
+                        (
+                            os.urandom(16).hex(),
+                            row["empresa_id"],
+                            row["cliente_id"],
+                            "seguros",
+                            record_id,
+                            nombre_doc,
+                            "seguros",
+                            row["fecha_efecto"] or row["mes_creacion"],
+                            row["estado"] or "En vigor",
+                            notas_doc,
+                            row["poliza_key"],
+                            row["poliza_url"],
+                            None,
+                            None,
+                            now,
+                            now,
+                        ),
+                    )
             if row:
                 missing = []
                 for key in ("tomador", "poliza_numero", "compania", "fecha_efecto"):
@@ -6410,7 +6496,21 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/clientes_stats":
-            total = conn.execute("SELECT COUNT(*) AS total FROM clientes").fetchone()
+            servicio = (params.get("servicio", [""])[0] or "").strip()
+            services = parse_services_param(servicio)
+            if services:
+                placeholders = ",".join(["?"] * len(services))
+                total = conn.execute(
+                    f"""
+                    SELECT COUNT(DISTINCT c.id) AS total
+                    FROM clientes c
+                    JOIN clientes_empresas ce ON ce.cliente_id = c.id
+                    WHERE LOWER(ce.servicio) IN ({placeholders})
+                    """,
+                    services,
+                ).fetchone()
+            else:
+                total = conn.execute("SELECT COUNT(*) AS total FROM clientes").fetchone()
             json_response(self, {"total": total["total"] if total else 0})
             return
 
@@ -6451,9 +6551,24 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/clientes_list":
-            rows = conn.execute(
-                "SELECT id, nombre FROM clientes ORDER BY nombre"
-            ).fetchall()
+            servicio = (params.get("servicio", [""])[0] or "").strip()
+            services = parse_services_param(servicio)
+            if services:
+                placeholders = ",".join(["?"] * len(services))
+                rows = conn.execute(
+                    f"""
+                    SELECT DISTINCT c.id, c.nombre
+                    FROM clientes c
+                    JOIN clientes_empresas ce ON ce.cliente_id = c.id
+                    WHERE LOWER(ce.servicio) IN ({placeholders})
+                    ORDER BY c.nombre
+                    """,
+                    services,
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT id, nombre FROM clientes ORDER BY nombre"
+                ).fetchall()
             json_response(self, [dict(r) for r in rows])
             return
 
@@ -6474,6 +6589,11 @@ class Handler(BaseHTTPRequestHandler):
             if not cliente_id:
                 json_response(self, {"error": "id requerido"}, status=400)
                 return
+            servicio = (params.get("servicio", [""])[0] or "").strip()
+            services = parse_services_param(servicio)
+            if services and not cliente_has_servicio(conn, cliente_id, services):
+                json_response(self, {"error": "Cliente no disponible para este servicio"}, status=404)
+                return
             cliente = conn.execute(
                 "SELECT * FROM clientes WHERE id = ?",
                 (cliente_id,),
@@ -6481,22 +6601,74 @@ class Handler(BaseHTTPRequestHandler):
             if not cliente:
                 json_response(self, {"error": "Cliente no encontrado"}, status=404)
                 return
-            empresas = conn.execute(
-                """
-                SELECT ce.id AS rel_id, e.nombre AS empresa, ce.servicio, ce.estado,
-                       ce.fecha_inicio, ce.fecha_fin
-                FROM clientes_empresas ce
-                LEFT JOIN empresas e ON e.id = ce.empresa_id
-                WHERE ce.cliente_id = ?
-                ORDER BY e.nombre
-                """,
-                (cliente_id,),
-            ).fetchall()
+            if services:
+                placeholders = ",".join(["?"] * len(services))
+                empresas = conn.execute(
+                    f"""
+                    SELECT ce.id AS rel_id, e.nombre AS empresa, ce.servicio, ce.estado,
+                           ce.fecha_inicio, ce.fecha_fin
+                    FROM clientes_empresas ce
+                    LEFT JOIN empresas e ON e.id = ce.empresa_id
+                    WHERE ce.cliente_id = ?
+                      AND LOWER(ce.servicio) IN ({placeholders})
+                    ORDER BY e.nombre
+                    """,
+                    [cliente_id, *services],
+                ).fetchall()
+            else:
+                empresas = conn.execute(
+                    """
+                    SELECT ce.id AS rel_id, e.nombre AS empresa, ce.servicio, ce.estado,
+                           ce.fecha_inicio, ce.fecha_fin
+                    FROM clientes_empresas ce
+                    LEFT JOIN empresas e ON e.id = ce.empresa_id
+                    WHERE ce.cliente_id = ?
+                    ORDER BY e.nombre
+                    """,
+                    (cliente_id,),
+                ).fetchall()
             json_response(
                 self,
                 {
                     "cliente": dict(cliente),
                     "empresas": [dict(r) for r in empresas],
+                },
+            )
+            return
+
+        if path == "/api/cliente_lookup":
+            nif = (params.get("nif", [""])[0] or "").strip()
+            if not nif:
+                json_response(self, {"error": "nif requerido"}, status=400)
+                return
+            servicio = (params.get("servicio", [""])[0] or "").strip()
+            services = parse_services_param(servicio)
+            nif_norm = re.sub(r"\s+", "", nif).upper()
+            row = conn.execute(
+                "SELECT id, nombre, nif, telefono, email FROM clientes WHERE REPLACE(UPPER(nif), ' ', '') = ?",
+                (nif_norm,),
+            ).fetchone()
+            if not row:
+                json_response(self, {"found": False})
+                return
+            if services and not cliente_has_servicio(conn, row["id"], services):
+                json_response(self, {"found": False})
+                return
+            servicios = conn.execute(
+                """
+                SELECT ce.servicio, ce.estado, ce.empresa_id, e.nombre AS empresa
+                FROM clientes_empresas ce
+                LEFT JOIN empresas e ON e.id = ce.empresa_id
+                WHERE ce.cliente_id = ?
+                """,
+                (row["id"],),
+            ).fetchall()
+            json_response(
+                self,
+                {
+                    "found": True,
+                    "cliente": dict(row),
+                    "servicios": [dict(r) for r in servicios],
                 },
             )
             return
@@ -6820,19 +6992,29 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/gestoria_docs":
             cliente_id = params.get("cliente_id", [""])[0]
             empresa_id = params.get("empresa_id", [""])[0]
+            service = (params.get("service", [""])[0] or "").strip().lower()
             limit = params.get("limit", [""])[0]
             if not cliente_id and not empresa_id:
                 json_response(self, {"error": "cliente_id o empresa_id requerido"}, status=400)
                 return
             if cliente_id:
+                where = ["cliente_id = ?"]
+                values = [cliente_id]
+                if service:
+                    where.append(
+                        "(LOWER(COALESCE(referencia_tipo, '')) = ? OR LOWER(COALESCE(tipo, '')) = ?)"
+                    )
+                    values.extend([service, service])
+                where_clause = " AND ".join(where)
                 rows = conn.execute(
-                    """
-                    SELECT id, nombre, tipo, fecha, estado, notas
+                    f"""
+                    SELECT id, nombre, tipo, fecha, estado, notas, doc_key, doc_url,
+                           referencia_tipo, referencia_id
                     FROM gestoria_docs
-                    WHERE cliente_id = ?
+                    WHERE {where_clause}
                     ORDER BY created_at DESC
                     """,
-                    (cliente_id,),
+                    values,
                 ).fetchall()
                 json_response(self, {"rows": [dict(r) for r in rows]})
                 return
@@ -7181,10 +7363,16 @@ class Handler(BaseHTTPRequestHandler):
             empresa_id = params.get("empresa_id", [""])[0]
             q = params.get("q", [""])[0].strip()
             estado = params.get("estado", [""])[0].strip()
+            servicio = params.get("servicio", [""])[0].strip()
+            services = parse_services_param(servicio)
             include_id = params.get("include_id", [""])[0] == "1"
             limit_param = params.get("limit", [""])[0].strip()
             where = []
             values = []
+            if services:
+                placeholders = ",".join(["?"] * len(services))
+                where.append(f"LOWER(ce.servicio) IN ({placeholders})")
+                values.extend(services)
             if empresa_id:
                 where.append("ce.empresa_id = ?")
                 values.append(empresa_id)
@@ -7197,6 +7385,7 @@ class Handler(BaseHTTPRequestHandler):
                 where.append("c.estado = ?")
                 values.append(estado)
             where_clause = f"WHERE {' AND '.join(where)}" if where else ""
+            join_clause = "JOIN clientes_empresas ce ON ce.cliente_id = c.id" if services else "LEFT JOIN clientes_empresas ce ON ce.cliente_id = c.id"
             select_id = "c.id, " if include_id else ""
             limit_clause = "LIMIT 500"
             if limit_param.isdigit():
@@ -7218,7 +7407,7 @@ class Handler(BaseHTTPRequestHandler):
                   GROUP_CONCAT(e.nombre, ' | ') AS empresas,
                   GROUP_CONCAT(ce.servicio, ' | ') AS servicios
                 FROM clientes c
-                LEFT JOIN clientes_empresas ce ON ce.cliente_id = c.id
+                {join_clause}
                 LEFT JOIN empresas e ON e.id = ce.empresa_id
                 {where_clause}
                 GROUP BY c.id

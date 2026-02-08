@@ -1217,6 +1217,12 @@
               </label>
             </div>
             <div class="form-actions">
+              <button type="button" id="segurosOcrClienteCreate" class="secondary hidden">Crear cliente</button>
+              <button type="button" id="segurosOcrClienteAddService" class="secondary hidden">Asignar Seguros</button>
+              <button type="button" id="segurosOcrClienteOpen" class="ghost hidden">Abrir ficha</button>
+              <span id="segurosOcrClienteStatus" class="muted"></span>
+            </div>
+            <div class="form-actions">
               <button type="button" id="segurosOcrSave">Guardar en BDT</button>
               <span id="segurosOcrSaveStatus" class="muted"></span>
             </div>
@@ -1280,6 +1286,12 @@
                 Registro BDT
                 <select id="segurosBdtOcrSelect"></select>
               </label>
+            </div>
+            <div class="form-actions">
+              <button type="button" id="segurosBdtOcrClienteCreate" class="secondary hidden">Crear cliente</button>
+              <button type="button" id="segurosBdtOcrClienteAddService" class="secondary hidden">Asignar Seguros</button>
+              <button type="button" id="segurosBdtOcrClienteOpen" class="ghost hidden">Abrir ficha</button>
+              <span id="segurosBdtOcrClienteStatus" class="muted"></span>
             </div>
             <div class="form-actions">
               <button type="button" id="segurosBdtOcrMatchButton" class="secondary">Buscar coincidencia</button>
@@ -2983,6 +2995,7 @@
             <button class="tab hidden" type="button" data-tab="seguros">Seguros</button>
             <button class="tab hidden" type="button" data-tab="inmobiliaria">Inmobiliaria</button>
             <button class="tab hidden" type="button" data-tab="hipotecas">Hipotecas</button>
+            <button class="tab" type="button" data-tab="docs">Documentación</button>
             <button class="tab" type="button" data-tab="facturas">Facturas servicios</button>
             <button class="tab" type="button" data-tab="trabajos">Trabajos realizados</button>
           </div>
@@ -3545,6 +3558,22 @@
               <h3>Ficha Hipotecas</h3>
               <p class="muted">Operaciones, estados y entidades financieras.</p>
               <div id="clienteHipotecaFicha"></div>
+            </div>
+          </div>
+          <div id="clienteTabDocs" class="hidden">
+            <div class="form-card">
+              <h3>Documentación del cliente</h3>
+              <p class="muted">Archivos por servicio (seguros, gestoría, financiaciones e inmobiliaria).</p>
+              <div class="tabs" id="clienteDocsTabs">
+                <button class="tab active" type="button" data-docs-tab="seguros">Seguros</button>
+                <button class="tab" type="button" data-docs-tab="gestoria">Gestoría</button>
+                <button class="tab" type="button" data-docs-tab="financiaciones">Financiaciones</button>
+                <button class="tab" type="button" data-docs-tab="inmobiliaria">Inmobiliaria</button>
+              </div>
+              <div id="clienteDocsSeguros" class="hidden"></div>
+              <div id="clienteDocsGestoria" class="hidden"></div>
+              <div id="clienteDocsFin" class="hidden"></div>
+              <div id="clienteDocsInmo" class="hidden"></div>
             </div>
           </div>
           <div id="clienteTabFacturas" class="hidden">
