@@ -2961,6 +2961,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
+        if parsed.path in ("/health", "/api/health"):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(b"ok")
+            return
         if parsed.path.startswith("/api/"):
             self.handle_api(parsed)
             return
