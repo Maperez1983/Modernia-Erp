@@ -12,6 +12,8 @@ import subprocess
 import tempfile
 import shutil
 import urllib.request
+import threading
+import time
 from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
 from pathlib import Path
@@ -414,6 +416,197 @@ def s3_get_object_bytes(key):
         return obj["Body"].read(), ""
     except Exception as exc:
         return None, str(exc)
+
+
+def decode_seguros_payload(payload):
+    data_uri = payload.get("file_base64") or payload.get("data")
+    s3_key = (payload.get("s3_key") or "").strip()
+    pdf_bytes = None
+    if s3_key:
+        pdf_bytes, s3_err = s3_get_object_bytes(s3_key)
+        if not pdf_bytes:
+            raise ValueError(f"S3: {s3_err}")
+    else:
+        if not data_uri:
+            raise ValueError("Archivo requerido")
+        if "," in data_uri:
+            data_uri = data_uri.split(",", 1)[1]
+        try:
+            pdf_bytes = base64.b64decode(data_uri)
+        except Exception:
+            raise ValueError("Base64 invalido")
+    return pdf_bytes
+
+
+def process_seguros_ocr(payload, conn):
+    pdf_bytes = decode_seguros_payload(payload)
+    tmp_path = None
+    text = ""
+    err_detail = ""
+    method = ""
+    required_keys = ("tomador", "poliza_numero", "compania", "fecha_efecto")
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp_file:
+            tmp_file.write(pdf_bytes)
+            tmp_path = tmp_file.name
+        text, err_detail, method = extract_pdf_text(tmp_path)
+        if not text:
+            raise RuntimeError(err_detail or "No se pudo extraer texto")
+        fields = parse_poliza_text(text)
+        if not any(str(value or "").strip() for value in fields.values()) or (
+            not fields.get("poliza_numero")
+            or not fields.get("tomador")
+            or not fields.get("compania")
+            or not fields.get("fecha_efecto")
+        ):
+            ocr_text, ocr_err = ocr_pdf_all_pages(tmp_path, use_external=external_ocr_available())
+            if ocr_text:
+                fields = parse_poliza_text(ocr_text)
+                text = ocr_text
+                method = "vision" if external_ocr_available() else "tesseract"
+            elif ocr_err and not err_detail:
+                err_detail = ocr_err
+        doc_text = ""
+        missing_required = any(not fields.get(key) for key in required_keys)
+        if missing_required and docai_available():
+            doc_text, doc_fields, doc_err = ocr_image_docai(pdf_bytes, "application/pdf")
+            if doc_err and not err_detail:
+                err_detail = doc_err
+            doc_mapped = map_docai_poliza_fields(doc_fields)
+            doc_parsed = parse_poliza_text(doc_text) if doc_text else {}
+            for key, value in doc_mapped.items():
+                if value and not fields.get(key):
+                    fields[key] = value
+            for key, value in doc_parsed.items():
+                if value and not fields.get(key):
+                    fields[key] = value
+            if doc_text and doc_text.strip():
+                method = "docai"
+        doc_type = classify_seguros_document(text)
+        if doc_type == "otro" and doc_text:
+            doc_type = classify_seguros_document(doc_text)
+        ocr_quality = compute_ocr_quality(fields, required_keys)
+        cliente_match = False
+        cliente_id = None
+        tomador = (fields.get("tomador") or "").strip()
+        nif = (fields.get("nif") or fields.get("dni") or "").strip()
+        if tomador or nif:
+            if nif:
+                nif_norm = re.sub(r"\s+", "", nif).upper()
+                row = conn.execute(
+                    "SELECT id FROM clientes WHERE REPLACE(UPPER(nif), ' ', '') = ?",
+                    (nif_norm,),
+                ).fetchone()
+                if row:
+                    cliente_id = row["id"]
+                    cliente_match = True
+            if not cliente_match and tomador:
+                nombre_norm = re.sub(r"\s+", " ", tomador).strip().upper()
+                row = conn.execute(
+                    "SELECT id FROM clientes WHERE TRIM(UPPER(nombre)) = ?",
+                    (nombre_norm,),
+                ).fetchone()
+                if row:
+                    cliente_id = row["id"]
+                    cliente_match = True
+        return {
+            "fields": fields,
+            "text": text,
+            "language": detect_ocr_lang(),
+            "method": method,
+            "doc_type": doc_type,
+            "ocr_quality": ocr_quality,
+            "cliente_id": cliente_id,
+            "cliente_match": cliente_match,
+        }
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+
+
+def enqueue_ocr_job(db_path, kind, payload):
+    job_id = os.urandom(16).hex()
+    now = datetime.utcnow().isoformat()
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """
+        INSERT INTO ocr_jobs (id, kind, status, payload_json, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (job_id, kind, "pending", json.dumps(payload), now, now),
+    )
+    conn.commit()
+    conn.close()
+    return job_id
+
+
+def fetch_next_ocr_job(conn):
+    row = conn.execute(
+        """
+        SELECT id, kind, payload_json
+        FROM ocr_jobs
+        WHERE status = 'pending'
+        ORDER BY created_at ASC
+        LIMIT 1
+        """
+    ).fetchone()
+    return row
+
+
+def update_ocr_job(conn, job_id, status, result=None, error=None):
+    now = datetime.utcnow().isoformat()
+    conn.execute(
+        """
+        UPDATE ocr_jobs
+        SET status = ?, result_json = COALESCE(?, result_json), error = ?, updated_at = ?,
+            started_at = CASE WHEN started_at IS NULL THEN ? ELSE started_at END,
+            finished_at = CASE WHEN ? IN ('done','error') THEN ? ELSE finished_at END
+        WHERE id = ?
+        """,
+        (
+            status,
+            json.dumps(result) if result is not None else None,
+            error,
+            now,
+            now,
+            status,
+            now,
+            job_id,
+        ),
+    )
+
+
+def ocr_worker_loop(db_path):
+    while True:
+        try:
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            row = fetch_next_ocr_job(conn)
+            if not row:
+                conn.close()
+                time.sleep(1.5)
+                continue
+            job_id = row["id"]
+            kind = row["kind"]
+            payload = json.loads(row["payload_json"] or "{}")
+            update_ocr_job(conn, job_id, "processing")
+            conn.commit()
+            if kind == "seguros":
+                result = process_seguros_ocr(payload, conn)
+            else:
+                raise RuntimeError("Tipo OCR no soportado")
+            update_ocr_job(conn, job_id, "done", result=result, error=None)
+            conn.commit()
+            conn.close()
+        except Exception as exc:
+            try:
+                if "conn" in locals():
+                    update_ocr_job(conn, job_id, "error", result=None, error=str(exc))
+                    conn.commit()
+                    conn.close()
+            except Exception:
+                pass
+            time.sleep(1.5)
 
 def preprocess_image_for_ocr(src_path, out_path=None):
     tmp_base = tempfile.gettempdir()
@@ -2417,6 +2610,22 @@ def ensure_tables(db_path):
     conn = sqlite3.connect(db_path)
     conn.execute(
         """
+        CREATE TABLE IF NOT EXISTS ocr_jobs (
+          id TEXT PRIMARY KEY,
+          kind TEXT,
+          status TEXT,
+          payload_json TEXT,
+          result_json TEXT,
+          error TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          started_at TEXT,
+          finished_at TEXT
+        )
+        """
+    )
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS cliente_gestoria (
           id TEXT PRIMARY KEY,
           cliente_id TEXT UNIQUE,
@@ -3015,6 +3224,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/gestoria_contabilidad_delete",
             "/api/gestoria_update",
             "/api/seguros_ocr",
+            "/api/seguros_ocr_async",
             "/api/fin_asesoramiento_ocr",
             "/api/fin_asesoramiento_ocr_guided",
             "/api/fin_asesoramiento_ocr_auto",
@@ -3119,6 +3329,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/gestoria_conta_tasks_bulk",
             "/api/gestoria_conta_task_update",
             "/api/seguros_ocr",
+            "/api/seguros_ocr_async",
             "/api/fin_asesoramiento_ocr",
             "/api/fin_asesoramiento_ocr_guided",
             "/api/fin_asesoramiento_ocr_auto",
@@ -3196,6 +3407,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/auditoria",
             "/api/acciones",
             "/api/seguros_ocr",
+            "/api/seguros_ocr_async",
             "/api/fin_asesoramiento_ocr",
             "/api/fin_asesoramiento_ocr_guided",
             "/api/fin_asesoramiento_ocr_auto",
@@ -3460,6 +3672,9 @@ class Handler(BaseHTTPRequestHandler):
                 return
             conn.execute("DELETE FROM gestoria_docs WHERE id = ?", (doc_id,))
             audit("gestoria_doc", doc_id, "eliminar", None, payload.get("usuario"))
+        elif parsed.path == "/api/ocr_job":
+            json_response(self, {"error": "Usa GET"}, status=405)
+            return
         elif parsed.path == "/api/usuarios":
             nombre = payload.get("nombre")
             apellido = payload.get("apellido")
@@ -3684,123 +3899,21 @@ class Handler(BaseHTTPRequestHandler):
             )
             audit("gestoria_conta_tasks", record_id, "Actualizar tarea contable", usuario=payload.get("usuario"))
         elif parsed.path == "/api/seguros_ocr":
-            data_uri = payload.get("file_base64") or payload.get("data")
-            s3_key = (payload.get("s3_key") or "").strip()
-            pdf_bytes = None
-            if s3_key:
-                pdf_bytes, s3_err = s3_get_object_bytes(s3_key)
-                if not pdf_bytes:
-                    json_response(self, {"error": "No se pudo leer S3", "detail": s3_err}, status=400)
-                    return
-            else:
-                if not data_uri:
-                    json_response(self, {"error": "Archivo requerido"}, status=400)
-                    return
-                if "," in data_uri:
-                    data_uri = data_uri.split(",", 1)[1]
-                try:
-                    pdf_bytes = base64.b64decode(data_uri)
-                except Exception:
-                    json_response(self, {"error": "Base64 invalido"}, status=400)
-                    return
-            tmp_path = None
-            text = ""
-            err_detail = ""
-            method = ""
-            required_keys = ("tomador", "poliza_numero", "compania", "fecha_efecto")
             try:
-                with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp_file:
-                    tmp_file.write(pdf_bytes)
-                    tmp_path = tmp_file.name
-                text, err_detail, method = extract_pdf_text(tmp_path)
-                if not text:
-                    json_response(
-                        self,
-                        {
-                            "error": "No se pudo extraer texto.",
-                            "detail": err_detail or "Verifica tesseract y spa.traineddata.",
-                            "language": detect_ocr_lang(),
-                        },
-                        status=400,
-                    )
-                    return
-                fields = parse_poliza_text(text)
-                if not any(str(value or "").strip() for value in fields.values()) or (
-                    not fields.get("poliza_numero")
-                    or not fields.get("tomador")
-                    or not fields.get("compania")
-                    or not fields.get("fecha_efecto")
-                ):
-                    ocr_text, ocr_err = ocr_pdf_all_pages(tmp_path, use_external=external_ocr_available())
-                    if ocr_text:
-                        fields = parse_poliza_text(ocr_text)
-                        text = ocr_text
-                        method = "vision" if external_ocr_available() else "tesseract"
-                    elif ocr_err and not err_detail:
-                        err_detail = ocr_err
-                doc_text = ""
-                missing_required = any(not fields.get(key) for key in required_keys)
-                if missing_required and docai_available():
-                    doc_text, doc_fields, doc_err = ocr_image_docai(pdf_bytes, "application/pdf")
-                    if doc_err and not err_detail:
-                        err_detail = doc_err
-                    doc_mapped = map_docai_poliza_fields(doc_fields)
-                    doc_parsed = parse_poliza_text(doc_text) if doc_text else {}
-                    for key, value in doc_mapped.items():
-                        if value and not fields.get(key):
-                            fields[key] = value
-                    for key, value in doc_parsed.items():
-                        if value and not fields.get(key):
-                            fields[key] = value
-                    if doc_text and doc_text.strip():
-                        method = "docai"
-                doc_type = classify_seguros_document(text)
-                if doc_type == "otro" and doc_text:
-                    doc_type = classify_seguros_document(doc_text)
-                ocr_quality = compute_ocr_quality(fields, required_keys)
-                cliente_match = False
-                cliente_id = None
-                tomador = (fields.get("tomador") or "").strip()
-                nif = (fields.get("nif") or fields.get("dni") or "").strip()
-                if tomador or nif:
-                    if nif:
-                        nif_norm = re.sub(r"\s+", "", nif).upper()
-                        row = conn.execute(
-                            "SELECT id FROM clientes WHERE REPLACE(UPPER(nif), ' ', '') = ?",
-                            (nif_norm,),
-                        ).fetchone()
-                        if row:
-                            cliente_id = row["id"]
-                            cliente_match = True
-                    if not cliente_match and tomador:
-                        nombre_norm = re.sub(r"\s+", " ", tomador).strip().upper()
-                        row = conn.execute(
-                            "SELECT id FROM clientes WHERE TRIM(UPPER(nombre)) = ?",
-                            (nombre_norm,),
-                        ).fetchone()
-                        if row:
-                            cliente_id = row["id"]
-                            cliente_match = True
-                json_response(
-                    self,
-                    {
-                        "fields": fields,
-                        "text": text,
-                        "language": detect_ocr_lang(),
-                        "method": method,
-                        "doc_type": doc_type,
-                        "ocr_quality": ocr_quality,
-                        "cliente_id": cliente_id,
-                        "cliente_match": cliente_match,
-                    },
-                )
+                result = process_seguros_ocr(payload, conn)
+                json_response(self, result)
                 return
             except Exception as exc:
                 json_response(self, {"error": "No se pudo procesar el PDF.", "detail": str(exc)}, status=400)
                 return
-            finally:
-                if tmp_path and os.path.exists(tmp_path):
-                    os.unlink(tmp_path)
+        elif parsed.path == "/api/seguros_ocr_async":
+            try:
+                job_id = enqueue_ocr_job(Handler.db_path, "seguros", payload)
+                json_response(self, {"job_id": job_id})
+                return
+            except Exception as exc:
+                json_response(self, {"error": "No se pudo encolar OCR", "detail": str(exc)}, status=400)
+                return
         elif parsed.path == "/api/fin_asesoramiento_ocr":
             data_uri = payload.get("file_base64") or payload.get("data")
             if not data_uri:
@@ -6709,6 +6822,43 @@ class Handler(BaseHTTPRequestHandler):
             )
             return
 
+        if path == "/api/ocr_job":
+            job_id = params.get("id", [""])[0]
+            if not job_id:
+                json_response(self, {"error": "id requerido"}, status=400)
+                return
+            row = conn.execute(
+                """
+                SELECT id, kind, status, result_json, error, created_at, started_at, finished_at
+                FROM ocr_jobs
+                WHERE id = ?
+                """,
+                (job_id,),
+            ).fetchone()
+            if not row:
+                json_response(self, {"error": "job no encontrado"}, status=404)
+                return
+            result = None
+            if row["result_json"]:
+                try:
+                    result = json.loads(row["result_json"])
+                except Exception:
+                    result = None
+            json_response(
+                self,
+                {
+                    "id": row["id"],
+                    "kind": row["kind"],
+                    "status": row["status"],
+                    "result": result,
+                    "error": row["error"],
+                    "created_at": row["created_at"],
+                    "started_at": row["started_at"],
+                    "finished_at": row["finished_at"],
+                },
+            )
+            return
+
         if path == "/api/cliente_gestoria":
             cliente_id = params.get("cliente_id", [""])[0]
             if not cliente_id:
@@ -8566,6 +8716,8 @@ def main():
 
     ensure_tables(args.db)
     Handler.db_path = args.db
+    worker = threading.Thread(target=ocr_worker_loop, args=(args.db,), daemon=True)
+    worker.start()
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     print(f"Servidor activo en http://{args.host}:{args.port}")
     server.serve_forever()

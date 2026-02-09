@@ -76,6 +76,31 @@ const buildSegurosOcrPayload = async (file, statusEl) => {
   return { file_base64: fileBase64, filename: file.name };
 };
 
+const startSegurosOcrJob = async (payload) =>
+  fetch("/api/seguros_ocr_async", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  }).then((res) => res.json());
+
+const pollOcrJob = async (jobId, onUpdate, timeoutMs = 10 * 60 * 1000) => {
+  const started = Date.now();
+  let delay = 1200;
+  while (Date.now() - started < timeoutMs) {
+    const data = await api(`/api/ocr_job?id=${encodeURIComponent(jobId)}`);
+    if (onUpdate) onUpdate(data);
+    if (data.status === "done") {
+      return data.result || null;
+    }
+    if (data.status === "error") {
+      throw new Error(data.error || "OCR falló");
+    }
+    await new Promise((resolve) => setTimeout(resolve, delay));
+    delay = Math.min(delay + 300, 4000);
+  }
+  throw new Error("OCR tardó demasiado");
+};
+
 const normalizeServicio = (value) => String(value || "").toLowerCase();
 
 const buildClienteNombreFromTomador = (tomador) => {
@@ -232,13 +257,19 @@ const runSegurosBdtRowOcr = async (recordId, file, statusEl, rowMap = {}) => {
   try {
     const payload = await buildSegurosOcrPayload(file, statusEl);
     if (!payload) return;
-    data = await fetch("/api/seguros_ocr", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    }).then((res) => res.json());
-  } catch {
-    if (statusEl) statusEl.textContent = "Error al procesar OCR.";
+    const job = await startSegurosOcrJob(payload);
+    if (!job || job.error || !job.job_id) {
+      if (statusEl) statusEl.textContent = job?.detail || job?.error || "No se pudo iniciar OCR.";
+      return;
+    }
+    if (statusEl) statusEl.textContent = "OCR en cola...";
+    data = await pollOcrJob(job.job_id, (row) => {
+      if (statusEl && row.status === "processing") {
+        statusEl.textContent = "Procesando OCR...";
+      }
+    });
+  } catch (err) {
+    if (statusEl) statusEl.textContent = err?.message || "Error al procesar OCR.";
     return;
   }
   if (data?.error) {
@@ -13027,18 +13058,29 @@ if (segurosOcrButton) {
     buildSegurosOcrPayload(file, segurosOcrStatus)
       .then((payload) => {
         if (!payload) return null;
-        return fetch("/api/seguros_ocr", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        }).then((res) => res.json());
+        return startSegurosOcrJob(payload);
+      })
+      .then(async (job) => {
+        if (!job || job.error || !job.job_id) {
+          if (segurosOcrStatus) {
+            segurosOcrStatus.textContent = job?.detail || job?.error || "No se pudo iniciar OCR.";
+          }
+          return null;
+        }
+        if (segurosOcrStatus) segurosOcrStatus.textContent = "OCR en cola...";
+        const result = await pollOcrJob(job.job_id, (data) => {
+          if (segurosOcrStatus && data.status === "processing") {
+            segurosOcrStatus.textContent = "Procesando OCR...";
+          }
+        });
+        return result;
       })
       .then((data) => {
         if (!data) return;
-          if (data.error) {
-            if (segurosOcrStatus) {
-              segurosOcrStatus.textContent = data.detail
-                ? `${data.error} ${data.detail}`
+        if (data.error) {
+          if (segurosOcrStatus) {
+            segurosOcrStatus.textContent = data.detail
+              ? `${data.error} ${data.detail}`
                 : data.error;
             }
             state.segurosOcrClienteId = "";
@@ -13080,12 +13122,12 @@ if (segurosOcrButton) {
             }
           }
       })
-      .catch(() => {
-          if (segurosOcrStatus) {
-            segurosOcrStatus.textContent = "No se pudo procesar el PDF.";
-          }
-          state.segurosOcrClienteId = "";
-          state.segurosOcrQuality = null;
+      .catch((err) => {
+        if (segurosOcrStatus) {
+          segurosOcrStatus.textContent = err?.message || "No se pudo procesar el PDF.";
+        }
+        state.segurosOcrClienteId = "";
+        state.segurosOcrQuality = null;
       });
   });
 }
@@ -13108,18 +13150,29 @@ if (segurosBdtOcrButton) {
     buildSegurosOcrPayload(file, segurosBdtOcrStatus)
       .then((payload) => {
         if (!payload) return null;
-        return fetch("/api/seguros_ocr", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        }).then((res) => res.json());
+        return startSegurosOcrJob(payload);
+      })
+      .then(async (job) => {
+        if (!job || job.error || !job.job_id) {
+          if (segurosBdtOcrStatus) {
+            segurosBdtOcrStatus.textContent = job?.detail || job?.error || "No se pudo iniciar OCR.";
+          }
+          return null;
+        }
+        if (segurosBdtOcrStatus) segurosBdtOcrStatus.textContent = "OCR en cola...";
+        const result = await pollOcrJob(job.job_id, (data) => {
+          if (segurosBdtOcrStatus && data.status === "processing") {
+            segurosBdtOcrStatus.textContent = "Procesando OCR...";
+          }
+        });
+        return result;
       })
       .then((data) => {
         if (!data) return;
-          if (data.error) {
-            if (segurosBdtOcrStatus) {
-              segurosBdtOcrStatus.textContent = data.detail
-                ? `${data.error} ${data.detail}`
+        if (data.error) {
+          if (segurosBdtOcrStatus) {
+            segurosBdtOcrStatus.textContent = data.detail
+              ? `${data.error} ${data.detail}`
                 : data.error;
             }
             state.segurosBdtOcrClienteId = "";
@@ -13134,9 +13187,11 @@ if (segurosBdtOcrButton) {
           }
           matchSegurosBdtFromFields().catch(() => {});
       })
-      .catch(() => {
-          if (segurosBdtOcrStatus) segurosBdtOcrStatus.textContent = "No se pudo procesar el PDF.";
-          state.segurosBdtOcrClienteId = "";
+      .catch((err) => {
+        if (segurosBdtOcrStatus) {
+          segurosBdtOcrStatus.textContent = err?.message || "No se pudo procesar el PDF.";
+        }
+        state.segurosBdtOcrClienteId = "";
       });
   });
 }
