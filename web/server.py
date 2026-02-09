@@ -13,7 +13,7 @@ import tempfile
 import shutil
 import urllib.request
 from datetime import datetime, timedelta
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
 from pathlib import Path
 
 
@@ -2951,6 +2951,15 @@ class Handler(BaseHTTPRequestHandler):
 
     def log_message(self, format, *args):
         return
+
+    def do_HEAD(self):
+        parsed = urllib.parse.urlparse(self.path)
+        if parsed.path in ("/health", "/api/health"):
+            self.send_response(200)
+            self.end_headers()
+            return
+        self.send_response(200)
+        self.end_headers()
 
     def do_OPTIONS(self):
         self.send_response(204)
@@ -8557,7 +8566,7 @@ def main():
 
     ensure_tables(args.db)
     Handler.db_path = args.db
-    server = HTTPServer((args.host, args.port), Handler)
+    server = ThreadingHTTPServer((args.host, args.port), Handler)
     print(f"Servidor activo en http://{args.host}:{args.port}")
     server.serve_forever()
 
