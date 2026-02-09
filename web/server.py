@@ -203,6 +203,19 @@ def normalize_fin_nif(value):
         raw = raw[:9]
     return raw
 
+def normalize_nif(value):
+    if not value:
+        return ""
+    raw = str(value).strip().upper()
+    if not raw:
+        return ""
+    raw = raw.replace(" ", "").replace("-", "").replace(".", "")
+    raw = raw.replace("O", "0").replace("I", "1").replace("L", "1").replace("S", "5")
+    raw = re.sub(r"[^A-Z0-9]", "", raw)
+    if len(raw) > 12:
+        raw = raw[:12]
+    return raw
+
 FIN_REQUIRED_FIELDS = [
     ("cliente1_nombre", "Nombre cliente 1"),
     ("cliente1_dni", "DNI cliente 1"),
@@ -2400,26 +2413,31 @@ def parse_asesoramiento_text(text):
 def ensure_cliente_for_seguro(conn, empresa_id, tomador, nif, now, extra=None):
     if not tomador:
         return None
-    tomador = tomador.strip()
+    tomador = normalize_person_name(tomador)
     nif = (nif or "").strip()
     extra = extra or {}
     cliente = None
-    if nif:
+    nif_norm = normalize_nif(nif)
+    if nif_norm:
         cliente = conn.execute(
-            "SELECT id FROM clientes WHERE nif = ?",
-            (nif,),
+            """
+            SELECT id FROM clientes
+            WHERE REPLACE(REPLACE(REPLACE(UPPER(nif), ' ', ''), '-', ''), '.', '') = ?
+            """,
+            (nif_norm,),
         ).fetchone()
     if not cliente:
+        nombre_norm = normalize_person_name(tomador).upper()
         cliente = conn.execute(
-            "SELECT id FROM clientes WHERE nombre = ?",
-            (tomador,),
+            "SELECT id FROM clientes WHERE TRIM(UPPER(nombre)) = ?",
+            (nombre_norm,),
         ).fetchone()
     if not cliente:
         tipo_persona = None
-        if nif:
-            if re.match(r"^[0-9]{8}[A-Z]$", nif):
+        if nif_norm:
+            if re.match(r"^[0-9]{8}[A-Z]$", nif_norm):
                 tipo_persona = "Física"
-            elif re.match(r"^[A-Z][0-9]{7}[0-9A-Z]$", nif):
+            elif re.match(r"^[A-Z][0-9]{7}[0-9A-Z]$", nif_norm):
                 tipo_persona = "Jurídica"
         cliente_id = os.urandom(16).hex()
         conn.execute(
@@ -2434,7 +2452,7 @@ def ensure_cliente_for_seguro(conn, empresa_id, tomador, nif, now, extra=None):
                 cliente_id,
                 tomador,
                 tipo_persona,
-                nif or None,
+                nif_norm or None,
                 extra.get("telefono"),
                 extra.get("email"),
                 extra.get("fecha_nacimiento"),
@@ -2447,8 +2465,8 @@ def ensure_cliente_for_seguro(conn, empresa_id, tomador, nif, now, extra=None):
     else:
         cliente_id = cliente["id"]
         updates = {}
-        if nif:
-            updates["nif"] = nif
+        if nif_norm:
+            updates["nif"] = nif_norm
         for key in ("telefono", "email", "fecha_nacimiento", "direccion"):
             value = extra.get(key)
             if value:
@@ -6792,16 +6810,31 @@ class Handler(BaseHTTPRequestHandler):
                 return
             servicio = (params.get("servicio", [""])[0] or "").strip()
             services = parse_services_param(servicio)
-            nif_norm = re.sub(r"\s+", "", nif).upper()
+            nif_norm = normalize_nif(nif)
             row = conn.execute(
-                "SELECT id, nombre, nif, telefono, email FROM clientes WHERE REPLACE(UPPER(nif), ' ', '') = ?",
+                """
+                SELECT id, nombre, nif, telefono, email
+                FROM clientes
+                WHERE REPLACE(REPLACE(REPLACE(UPPER(nif), ' ', ''), '-', ''), '.', '') = ?
+                """,
                 (nif_norm,),
             ).fetchone()
             if not row:
                 json_response(self, {"found": False})
                 return
-            if services and not cliente_has_servicio(conn, row["id"], services):
-                json_response(self, {"found": False})
+            has_service = True
+            if services:
+                has_service = cliente_has_servicio(conn, row["id"], services)
+            if not has_service:
+                json_response(
+                    self,
+                    {
+                        "found": True,
+                        "restricted": True,
+                        "cliente": {"id": row["id"]},
+                        "has_servicio": False,
+                    },
+                )
                 return
             servicios = conn.execute(
                 """
@@ -6818,6 +6851,7 @@ class Handler(BaseHTTPRequestHandler):
                     "found": True,
                     "cliente": dict(row),
                     "servicios": [dict(r) for r in servicios],
+                    "has_servicio": True,
                 },
             )
             return

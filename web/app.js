@@ -9930,8 +9930,17 @@ const resolveOcrClienteMatch = async (type, fields) => {
   }
   const cliente = data.cliente || {};
   const servicios = data.servicios || [];
-  const hasSeguros = servicios.some((row) => normalizeServicio(row.servicio) === "seguros");
-  ctx.setId(cliente.id || "");
+  const hasSeguros = data.has_servicio === false ? false : servicios.some((row) => normalizeServicio(row.servicio) === "seguros");
+  ctx.setId(cliente.id || data.cliente_id || "");
+  if (data.restricted || data.has_servicio === false) {
+    setOcrClienteUi(ctx, {
+      status: "Cliente existe en el sistema. Puedes asignar Seguros.",
+      showCreate: false,
+      showAdd: true,
+      showOpen: false,
+    });
+    return;
+  }
   setOcrClienteUi(ctx, {
     status: `Cliente encontrado: ${cliente.nombre || "Sin nombre"} · ${cliente.nif || nif}`,
     showCreate: false,
@@ -10013,9 +10022,11 @@ const createClienteFromOcr = async (type, fields) => {
     });
     const data = await res.json();
     let finalId = clienteId;
+    let existed = false;
     if (data.error) {
       if (res.status === 409 && data.id) {
         finalId = data.id;
+        existed = true;
       } else {
         if (ctx.statusEl) ctx.statusEl.textContent = data.error;
         return;
@@ -10024,7 +10035,7 @@ const createClienteFromOcr = async (type, fields) => {
     ctx.setId(finalId);
     await linkClienteSegurosService(finalId, ctx);
     setOcrClienteUi(ctx, {
-      status: "Cliente creado y asignado a Seguros.",
+      status: existed ? "Cliente ya existía. Servicio Seguros asignado." : "Cliente creado y asignado a Seguros.",
       showCreate: false,
       showAdd: false,
       showOpen: true,
@@ -10281,6 +10292,16 @@ const saveSegurosOcrRecord = async () => {
     colaborador: seguroOcrColaborador ? seguroOcrColaborador.value.trim() : "",
     estado: seguroOcrEstado ? seguroOcrEstado.value : "",
   };
+  if (!payload.cliente_id && payload.nif) {
+    const data = await lookupClienteByNif(payload.nif);
+    if (data && data.found) {
+      const foundId = (data.cliente && data.cliente.id) || data.cliente_id;
+      if (foundId) {
+        payload.cliente_id = foundId;
+        state.segurosOcrClienteId = foundId;
+      }
+    }
+  }
   const file =
     segurosOcrFile && segurosOcrFile.files && segurosOcrFile.files.length
       ? segurosOcrFile.files[0]
