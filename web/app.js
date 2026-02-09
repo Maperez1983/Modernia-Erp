@@ -58,6 +58,24 @@ const fileToBase64 = (file) =>
     reader.readAsDataURL(file);
   });
 
+const buildSegurosOcrPayload = async (file, statusEl) => {
+  const maxInline = 2_000_000;
+  if (!file) return null;
+  if (file.size > maxInline) {
+    try {
+      const upload = await uploadFileToS3(file, "seguros", statusEl);
+      if (upload?.key) {
+        return { s3_key: upload.key, filename: file.name };
+      }
+    } catch (err) {
+      if (statusEl) statusEl.textContent = `Error al subir: ${err.message}`;
+      return null;
+    }
+  }
+  const fileBase64 = await fileToBase64(file);
+  return { file_base64: fileBase64, filename: file.name };
+};
+
 const normalizeServicio = (value) => String(value || "").toLowerCase();
 
 const buildClienteNombreFromTomador = (tomador) => {
@@ -212,11 +230,12 @@ const runSegurosBdtRowOcr = async (recordId, file, statusEl, rowMap = {}) => {
   if (statusEl) statusEl.textContent = "Procesando OCR...";
   let data;
   try {
-    const fileBase64 = await fileToBase64(file);
+    const payload = await buildSegurosOcrPayload(file, statusEl);
+    if (!payload) return;
     data = await fetch("/api/seguros_ocr", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ file_base64: fileBase64, filename: file.name }),
+      body: JSON.stringify(payload),
     }).then((res) => res.json());
   } catch {
     if (statusEl) statusEl.textContent = "Error al procesar OCR.";
@@ -13005,15 +13024,17 @@ if (segurosOcrButton) {
     if (segurosOcrStatus) {
       segurosOcrStatus.textContent = "Procesando OCR...";
     }
-    const reader = new FileReader();
-    reader.onload = () => {
-      fetch("/api/seguros_ocr", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ file_base64: reader.result, filename: file.name }),
+    buildSegurosOcrPayload(file, segurosOcrStatus)
+      .then((payload) => {
+        if (!payload) return null;
+        return fetch("/api/seguros_ocr", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }).then((res) => res.json());
       })
-        .then((res) => res.json())
-        .then((data) => {
+      .then((data) => {
+        if (!data) return;
           if (data.error) {
             if (segurosOcrStatus) {
               segurosOcrStatus.textContent = data.detail
@@ -13058,21 +13079,14 @@ if (segurosOcrButton) {
               seguroOcrEstado.value = "En vigor";
             }
           }
-        })
-        .catch(() => {
+      })
+      .catch(() => {
           if (segurosOcrStatus) {
             segurosOcrStatus.textContent = "No se pudo procesar el PDF.";
           }
           state.segurosOcrClienteId = "";
           state.segurosOcrQuality = null;
-        });
-    };
-    reader.onerror = () => {
-      if (segurosOcrStatus) {
-        segurosOcrStatus.textContent = "Error al leer el archivo.";
-      }
-    };
-    reader.readAsDataURL(file);
+      });
   });
 }
 
@@ -13091,15 +13105,17 @@ if (segurosBdtOcrButton) {
       return;
     }
     if (segurosBdtOcrStatus) segurosBdtOcrStatus.textContent = "Procesando OCR...";
-    const reader = new FileReader();
-    reader.onload = () => {
-      fetch("/api/seguros_ocr", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ file_base64: reader.result, filename: file.name }),
+    buildSegurosOcrPayload(file, segurosBdtOcrStatus)
+      .then((payload) => {
+        if (!payload) return null;
+        return fetch("/api/seguros_ocr", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }).then((res) => res.json());
       })
-        .then((res) => res.json())
-        .then((data) => {
+      .then((data) => {
+        if (!data) return;
           if (data.error) {
             if (segurosBdtOcrStatus) {
               segurosBdtOcrStatus.textContent = data.detail
@@ -13117,16 +13133,11 @@ if (segurosBdtOcrButton) {
             segurosBdtOcrStatus.textContent = `OCR listo${docType}${calidad}.`;
           }
           matchSegurosBdtFromFields().catch(() => {});
-        })
-        .catch(() => {
+      })
+      .catch(() => {
           if (segurosBdtOcrStatus) segurosBdtOcrStatus.textContent = "No se pudo procesar el PDF.";
           state.segurosBdtOcrClienteId = "";
-        });
-    };
-    reader.onerror = () => {
-      if (segurosBdtOcrStatus) segurosBdtOcrStatus.textContent = "Error al leer el archivo.";
-    };
-    reader.readAsDataURL(file);
+      });
   });
 }
 

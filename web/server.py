@@ -402,6 +402,19 @@ def s3_safe_key(prefix, filename):
     prefix = prefix.strip("/").strip() if prefix else "seguros"
     return f"{prefix}/{stamp}_{rand}_{safe}"
 
+def s3_get_object_bytes(key):
+    client = s3_client()
+    if not client:
+        return None, "S3 no configurado"
+    bucket, _region = s3_config()
+    if not bucket:
+        return None, "S3 sin bucket"
+    try:
+        obj = client.get_object(Bucket=bucket, Key=key)
+        return obj["Body"].read(), ""
+    except Exception as exc:
+        return None, str(exc)
+
 def preprocess_image_for_ocr(src_path, out_path=None):
     tmp_base = tempfile.gettempdir()
     created = False
@@ -3657,16 +3670,24 @@ class Handler(BaseHTTPRequestHandler):
             audit("gestoria_conta_tasks", record_id, "Actualizar tarea contable", usuario=payload.get("usuario"))
         elif parsed.path == "/api/seguros_ocr":
             data_uri = payload.get("file_base64") or payload.get("data")
-            if not data_uri:
-                json_response(self, {"error": "Archivo requerido"}, status=400)
-                return
-            if "," in data_uri:
-                data_uri = data_uri.split(",", 1)[1]
-            try:
-                pdf_bytes = base64.b64decode(data_uri)
-            except Exception:
-                json_response(self, {"error": "Base64 invalido"}, status=400)
-                return
+            s3_key = (payload.get("s3_key") or "").strip()
+            pdf_bytes = None
+            if s3_key:
+                pdf_bytes, s3_err = s3_get_object_bytes(s3_key)
+                if not pdf_bytes:
+                    json_response(self, {"error": "No se pudo leer S3", "detail": s3_err}, status=400)
+                    return
+            else:
+                if not data_uri:
+                    json_response(self, {"error": "Archivo requerido"}, status=400)
+                    return
+                if "," in data_uri:
+                    data_uri = data_uri.split(",", 1)[1]
+                try:
+                    pdf_bytes = base64.b64decode(data_uri)
+                except Exception:
+                    json_response(self, {"error": "Base64 invalido"}, status=400)
+                    return
             tmp_path = None
             text = ""
             err_detail = ""
