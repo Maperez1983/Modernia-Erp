@@ -1091,6 +1091,16 @@ const isPrivilegedService = (value) => {
   return ["direccion", "administracion"].includes(normalized);
 };
 
+const isPrivilegedRole = (value) => {
+  const normalized = normalizeSimple(value);
+  return ["administrador", "direccion", "administracion"].includes(normalized);
+};
+
+const isPrivilegedUser = (user) => {
+  if (!user) return false;
+  return isPrivilegedService(user.servicio) || isPrivilegedRole(user.rol);
+};
+
 const getUserByValue = (value) => {
   const normalized = normalizeSimple(value);
   return (state.usersList || []).find((user) => {
@@ -1119,7 +1129,7 @@ const syncCurrentUserScope = () => {
 const getServiceFilterParam = () => {
   const user = getUserByValue(getCurrentUser());
   if (!user) return "";
-  if (isPrivilegedService(user.servicio)) return "";
+  if (isPrivilegedUser(user)) return "";
   const services = expandServiceAliases(parseServiceList(user.servicio || ""));
   return services.join(",");
 };
@@ -6995,7 +7005,7 @@ const buildClientesLinkRow = (data = {}) => {
   let defaultService = data.servicio || "";
   if (!defaultService) {
     const user = getUserByValue(getCurrentUser());
-    if (user && !isPrivilegedService(user.servicio)) {
+    if (user && !isPrivilegedUser(user)) {
       const services = expandServiceAliases(parseServiceList(user.servicio || ""));
       defaultService = getServiceLabelFromNormalized(services[0] || "") || "";
     }
@@ -7078,7 +7088,7 @@ const refreshClientesLinkRows = () => {
 
 const autoLinkCurrentUserServices = async (clienteId) => {
   const user = getUserByValue(getCurrentUser());
-  if (!user || isPrivilegedService(user.servicio)) return;
+  if (!user || isPrivilegedUser(user)) return;
   const services = expandServiceAliases(parseServiceList(user.servicio || ""));
   if (!services.length) return;
   const requests = [];
