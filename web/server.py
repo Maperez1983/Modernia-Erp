@@ -6878,6 +6878,40 @@ class Handler(BaseHTTPRequestHandler):
             if not row:
                 json_response(self, {"error": "job no encontrado"}, status=404)
                 return
+            if row["status"] == "pending" and not row["started_at"]:
+                payload_row = conn.execute(
+                    "SELECT payload_json, kind FROM ocr_jobs WHERE id = ?",
+                    (job_id,),
+                ).fetchone()
+                payload = {}
+                if payload_row and payload_row["payload_json"]:
+                    try:
+                        payload = json.loads(payload_row["payload_json"])
+                    except Exception:
+                        payload = {}
+                try:
+                    update_ocr_job(conn, job_id, "processing")
+                    conn.commit()
+                    if payload_row and payload_row["kind"] == "seguros":
+                        result_data = process_seguros_ocr(payload, conn)
+                        update_ocr_job(conn, job_id, "done", result=result_data, error=None)
+                    else:
+                        update_ocr_job(conn, job_id, "error", result=None, error="Tipo OCR no soportado")
+                    conn.commit()
+                except Exception as exc:
+                    try:
+                        update_ocr_job(conn, job_id, "error", result=None, error=str(exc))
+                        conn.commit()
+                    except Exception:
+                        pass
+                row = conn.execute(
+                    """
+                    SELECT id, kind, status, result_json, error, created_at, started_at, finished_at
+                    FROM ocr_jobs
+                    WHERE id = ?
+                    """,
+                    (job_id,),
+                ).fetchone()
             result = None
             if row["result_json"]:
                 try:
