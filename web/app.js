@@ -13079,7 +13079,7 @@ if (segurosOcrButton) {
     buildSegurosOcrPayload(file, segurosOcrStatus)
       .then((payload) => {
         if (!payload) return null;
-        return startSegurosOcrJob(payload);
+        return startSegurosOcrJob({ ...payload, empresa_nombre: FINCAS_COMPANY });
       })
       .then(async (job) => {
         if (!job || job.error || !job.job_id) {
@@ -13171,7 +13171,7 @@ if (segurosBdtOcrButton) {
     buildSegurosOcrPayload(file, segurosBdtOcrStatus)
       .then((payload) => {
         if (!payload) return null;
-        return startSegurosOcrJob(payload);
+        return startSegurosOcrJob({ ...payload, empresa_nombre: FINCAS_COMPANY });
       })
       .then(async (job) => {
         if (!job || job.error || !job.job_id) {
