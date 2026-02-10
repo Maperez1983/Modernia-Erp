@@ -3932,6 +3932,9 @@ class Handler(BaseHTTPRequestHandler):
                 return
         elif parsed.path == "/api/seguros_ocr_async":
             try:
+                if not (payload.get("file_base64") or payload.get("data") or payload.get("s3_key")):
+                    json_response(self, {"error": "Archivo requerido"}, status=400)
+                    return
                 job_id = enqueue_ocr_job(Handler.db_path, "seguros", payload)
                 json_response(self, {"job_id": job_id})
                 return
