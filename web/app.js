@@ -69,7 +69,13 @@ const buildSegurosOcrPayload = async (file, statusEl) => {
       }
     } catch (err) {
       if (statusEl) statusEl.textContent = `Error al subir: ${err.message}`;
-      return null;
+      // Intentar fallback a base64 si la subida falla
+      try {
+        const fileBase64 = await fileToBase64(file);
+        return { file_base64: fileBase64, filename: file.name };
+      } catch {
+        return null;
+      }
     }
   }
   const fileBase64 = await fileToBase64(file);
@@ -13078,7 +13084,12 @@ if (segurosOcrButton) {
     }
     buildSegurosOcrPayload(file, segurosOcrStatus)
       .then((payload) => {
-        if (!payload) return null;
+        if (!payload) {
+          if (segurosOcrStatus) {
+            segurosOcrStatus.textContent = "No se pudo preparar el PDF para OCR.";
+          }
+          return null;
+        }
         return startSegurosOcrJob({ ...payload, empresa_nombre: FINCAS_COMPANY });
       })
       .then(async (job) => {
@@ -13170,7 +13181,12 @@ if (segurosBdtOcrButton) {
     if (segurosBdtOcrStatus) segurosBdtOcrStatus.textContent = "Procesando OCR...";
     buildSegurosOcrPayload(file, segurosBdtOcrStatus)
       .then((payload) => {
-        if (!payload) return null;
+        if (!payload) {
+          if (segurosBdtOcrStatus) {
+            segurosBdtOcrStatus.textContent = "No se pudo preparar el PDF para OCR.";
+          }
+          return null;
+        }
         return startSegurosOcrJob({ ...payload, empresa_nombre: FINCAS_COMPANY });
       })
       .then(async (job) => {
