@@ -3165,12 +3165,18 @@ def send_file(handler, path):
     elif path.suffix == ".svg":
         content_type = "image/svg+xml"
 
-    data = path.read_bytes()
-    handler.send_response(200)
-    handler.send_header("Content-Type", content_type)
-    handler.send_header("Content-Length", str(len(data)))
-    handler.end_headers()
-    handler.wfile.write(data)
+    try:
+        data = path.read_bytes()
+        handler.send_response(200)
+        handler.send_header("Content-Type", content_type)
+        handler.send_header("Content-Length", str(len(data)))
+        handler.end_headers()
+        handler.wfile.write(data)
+    except Exception:
+        handler.send_response(500)
+        handler.send_header("Content-Type", "text/plain; charset=utf-8")
+        handler.end_headers()
+        handler.wfile.write(b"Failed to read file")
 
 
 class Handler(BaseHTTPRequestHandler):
