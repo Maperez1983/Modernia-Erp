@@ -3372,7 +3372,10 @@ const resolveCompanyKey = (value) => {
   return COMPANY_ALIASES[normalized] || normalized;
 };
 
+let companyLogosDisabled = false;
+
 const getCompanyLogo = (value) => {
+  if (companyLogosDisabled) return "";
   const key = resolveCompanyKey(value);
   return COMPANY_LOGOS[key] || "";
 };
@@ -3459,13 +3462,13 @@ const createCompanyBadge = (value, options = {}) => {
   const logoUrl = getCompanyLogo(name);
   if (logoUrl) {
     const img = document.createElement("img");
-    img.src = logoUrl;
     img.alt = name;
     img.loading = "lazy";
     img.decoding = "async";
     img.referrerPolicy = "no-referrer";
     img.className = "company-logo";
     img.addEventListener("error", () => {
+      companyLogosDisabled = true;
       img.remove();
       if (!wrapper.querySelector(".company-initials")) {
         const initials = document.createElement("span");
@@ -3474,6 +3477,7 @@ const createCompanyBadge = (value, options = {}) => {
         wrapper.insertBefore(initials, wrapper.firstChild);
       }
     });
+    img.src = logoUrl;
     wrapper.appendChild(img);
   } else {
     const initials = document.createElement("span");
