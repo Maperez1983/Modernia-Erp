@@ -17,6 +17,7 @@ import time
 from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
 from pathlib import Path
+import unicodedata
 
 
 ROOT = Path(__file__).resolve().parent
@@ -26,6 +27,7 @@ DB_DEFAULT = ROOT.parent / "data" / "erp_import2.sqlite"
 TESSDATA_DIR = "/opt/homebrew/share/tessdata"
 POSTAL_CATALOG_PATH = ROOT.parent / "data" / "catalogos" / "postal_catalogo.csv"
 ENV_PATH = ROOT.parent / ".env"
+SEGUROS_COMPANY_HINTS_PATH = ROOT.parent / "data" / "seguros_company_hints.json"
 S3_BOTO3_AVAILABLE = True
 
 def load_env_file():
@@ -48,6 +50,43 @@ def load_env_file():
 load_env_file()
 S3_BUCKET = os.environ.get("AWS_S3_BUCKET") or os.environ.get("S3_BUCKET")
 S3_REGION = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION")
+OCR_SUBPROCESS_TIMEOUT_SECONDS = max(15, int(os.environ.get("OCR_SUBPROCESS_TIMEOUT_SECONDS", "90")))
+OCR_JOB_STALE_MINUTES = max(1, int(os.environ.get("OCR_JOB_STALE_MINUTES", "15")))
+
+COMPANY_ALIAS_PATTERNS = [
+    (r"\bZURICH\b", "Zurich"),
+    (r"\bMAPFRE\b", "Mapfre"),
+    (r"\bAXA\b", "AXA"),
+    (r"\bALLIANZ\b", "Allianz"),
+    (r"\bGENERALI\b", "Generali"),
+    (r"\bREALE\b", "Reale"),
+    (r"\bOCASO\b", "Ocaso"),
+    (r"\bPELAYO\b", "Pelayo"),
+    (r"\bSANTA\s*LUCIA\b|\bSANTALUCIA\b", "Santa Lucia"),
+    (r"\bFIATC\b", "Fiatc"),
+    (r"\bLINEA\s*DIRECTA\b", "Línea Directa"),
+    (r"\bLIBERTY\b", "Liberty"),
+    (r"\bMUTUA\s*MADRILE[NÑ]A\b", "Mutua Madrileña"),
+    (r"\bCAJA\s*RURAL\b", "Caja Rural"),
+    (r"\bCASER\b", "Caser"),
+    (r"\bPLUS\s*ULTRA\b", "Plus Ultra"),
+    (r"\bFENIX\s*DIRECTO\b", "Fénix Directo"),
+    (r"\bDIRECT\s*SEGUROS\b", "Direct Seguros"),
+    (r"\bHEL\s*VETIA\b|\bHELVETIA\b", "Helvetia"),
+    (r"\bGROUPAMA\b", "Groupama"),
+    (r"\bNATIONALE\s*NEDERLANDEN\b", "Nationale Nederlanden"),
+    (r"\bDAS\b", "DAS"),
+    (r"\bARAG\b", "ARAG"),
+    (r"\bPREVISORA\b", "Previsora General"),
+    (r"\bPREVISORA\s*GENERAL\b", "Previsora General"),
+    (r"\bSANITAS\b", "Sanitas"),
+    (r"\bDKV\b", "DKV"),
+    (r"\bADESLAS\b", "Adeslas"),
+    (r"\bASISA\b", "Asisa"),
+    (r"\bCATALANA\s*OCCIDENTE\b", "Catalana Occidente"),
+    (r"\bNORTEHISPANA\b", "NorteHispana"),
+    (r"\bSEGUROS\s*BILBAO\b|\bBILBAO\s*SEGUROS\b", "Seguros Bilbao"),
+]
 
 POSTAL_PROVINCES = {
     "01": "Álava",
@@ -189,6 +228,64 @@ def normalize_company_key(value):
     text = normalize_company_name(value).upper()
     text = re.sub(r"[^A-Z0-9]", "", text)
     return text
+
+
+def normalize_lookup_text(value):
+    if not value:
+        return ""
+    text = str(value)
+    text = unicodedata.normalize("NFD", text)
+    text = "".join(ch for ch in text if unicodedata.category(ch) != "Mn")
+    text = text.upper()
+    text = re.sub(r"[^A-Z0-9]+", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def load_seguros_company_hints(path=SEGUROS_COMPANY_HINTS_PATH):
+    hints = {}
+    if not path.exists():
+        return hints
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            payload = json.load(handle) or {}
+    except Exception:
+        return hints
+    raw_hints = payload.get("hints") if isinstance(payload, dict) else {}
+    if not isinstance(raw_hints, dict):
+        return hints
+    for token, company in raw_hints.items():
+        norm_token = normalize_lookup_text(token)
+        if norm_token and company:
+            hints[norm_token] = normalize_company_name(company)
+    return hints
+
+
+LEARNED_COMPANY_HINTS = load_seguros_company_hints()
+
+
+def detect_company_from_text(text):
+    cleaned = normalize_lookup_text(text)
+    if not cleaned:
+        return ""
+    for pattern, name in COMPANY_ALIAS_PATTERNS:
+        if re.search(pattern, cleaned, re.IGNORECASE):
+            return name
+    return ""
+
+
+def detect_company_from_metadata(*values):
+    joined = " ".join(str(v or "") for v in values).strip()
+    if not joined:
+        return ""
+    cleaned = normalize_lookup_text(joined)
+    if not cleaned:
+        return ""
+    if LEARNED_COMPANY_HINTS:
+        for token, company in sorted(LEARNED_COMPANY_HINTS.items(), key=lambda it: len(it[0]), reverse=True):
+            if token and token in cleaned:
+                return company
+    return detect_company_from_text(cleaned)
 
 def normalize_fin_nif(value):
     if not value:
@@ -384,6 +481,26 @@ def detect_ocr_lang():
     return "spa+eng"
 
 
+def run_subprocess(args, **kwargs):
+    kwargs.setdefault("timeout", OCR_SUBPROCESS_TIMEOUT_SECONDS)
+    return subprocess.run(args, **kwargs)
+
+
+def is_stale_ocr_job(started_at):
+    if not started_at:
+        return False
+    raw = str(started_at).strip()
+    if not raw:
+        return False
+    if raw.endswith("Z"):
+        raw = raw[:-1]
+    try:
+        started_dt = datetime.fromisoformat(raw)
+    except Exception:
+        return False
+    return datetime.utcnow() - started_dt > timedelta(minutes=OCR_JOB_STALE_MINUTES)
+
+
 def s3_config():
     bucket = os.environ.get("AWS_S3_BUCKET") or os.environ.get("S3_BUCKET") or S3_BUCKET
     region = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION") or S3_REGION
@@ -457,7 +574,22 @@ def process_seguros_ocr(payload, conn):
     text = ""
     err_detail = ""
     method = ""
+    source_hint = " ".join(
+        [
+            str(payload.get("filename") or ""),
+            str(payload.get("s3_key") or ""),
+            str(payload.get("source_hint") or ""),
+        ]
+    ).strip()
+    hinted_company = detect_company_from_metadata(source_hint)
     required_keys = ("tomador", "poliza_numero", "compania", "fecha_efecto")
+    def candidate_score(quality):
+        if not isinstance(quality, dict):
+            return 0
+        required_valid = len(quality.get("required_valid") or [])
+        required_filled = len(quality.get("required_filled") or [])
+        confidence = float(quality.get("confidence") or 0)
+        return required_valid * 100 + required_filled * 10 + int(confidence * 100)
     try:
         with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp_file:
             tmp_file.write(pdf_bytes)
@@ -465,7 +597,8 @@ def process_seguros_ocr(payload, conn):
         text, err_detail, method = extract_pdf_text(tmp_path)
         if not text:
             raise RuntimeError(err_detail or "No se pudo extraer texto")
-        fields = parse_poliza_text(text)
+        fields = parse_poliza_text(text, source_hint=source_hint, hinted_company=hinted_company)
+        best_quality = compute_ocr_quality(fields, required_keys)
         if not any(str(value or "").strip() for value in fields.values()) or (
             not fields.get("poliza_numero")
             or not fields.get("tomador")
@@ -474,27 +607,38 @@ def process_seguros_ocr(payload, conn):
         ):
             ocr_text, ocr_err = ocr_pdf_all_pages(tmp_path, use_external=external_ocr_available())
             if ocr_text:
-                fields = parse_poliza_text(ocr_text)
-                text = ocr_text
-                method = "vision" if external_ocr_available() else "tesseract"
+                ocr_fields = parse_poliza_text(ocr_text, source_hint=source_hint, hinted_company=hinted_company)
+                ocr_quality = compute_ocr_quality(ocr_fields, required_keys)
+                if candidate_score(ocr_quality) >= candidate_score(best_quality):
+                    fields = ocr_fields
+                    best_quality = ocr_quality
+                    text = ocr_text
+                    method = "vision" if external_ocr_available() else "tesseract"
             elif ocr_err and not err_detail:
                 err_detail = ocr_err
         doc_text = ""
         missing_required = any(not fields.get(key) for key in required_keys)
-        if missing_required and docai_available():
+        if (missing_required or candidate_score(best_quality) < 250) and docai_available():
             doc_text, doc_fields, doc_err = ocr_image_docai(pdf_bytes, "application/pdf")
             if doc_err and not err_detail:
                 err_detail = doc_err
             doc_mapped = map_docai_poliza_fields(doc_fields)
-            doc_parsed = parse_poliza_text(doc_text) if doc_text else {}
+            doc_parsed = parse_poliza_text(doc_text, source_hint=source_hint, hinted_company=hinted_company) if doc_text else {}
+            merged = dict(fields)
             for key, value in doc_mapped.items():
-                if value and not fields.get(key):
-                    fields[key] = value
+                if value and not merged.get(key):
+                    merged[key] = value
             for key, value in doc_parsed.items():
-                if value and not fields.get(key):
-                    fields[key] = value
+                if value and not merged.get(key):
+                    merged[key] = value
+            merged_quality = compute_ocr_quality(merged, required_keys)
+            if candidate_score(merged_quality) >= candidate_score(best_quality):
+                fields = merged
+                best_quality = merged_quality
             if doc_text and doc_text.strip():
                 method = "docai"
+        if hinted_company and not fields.get("compania"):
+            fields["compania"] = hinted_company
         doc_type = classify_seguros_document(text)
         if doc_type == "otro" and doc_text:
             doc_type = classify_seguros_document(doc_text)
@@ -554,14 +698,17 @@ def enqueue_ocr_job(db_path, kind, payload):
 
 
 def fetch_next_ocr_job(conn):
+    cutoff = (datetime.utcnow() - timedelta(minutes=OCR_JOB_STALE_MINUTES)).isoformat()
     row = conn.execute(
         """
         SELECT id, kind, payload_json
         FROM ocr_jobs
         WHERE status = 'pending'
+           OR (status = 'processing' AND finished_at IS NULL AND started_at IS NOT NULL AND started_at < ?)
         ORDER BY created_at ASC
         LIMIT 1
-        """
+        """,
+        (cutoff,),
     ).fetchone()
     return row
 
@@ -572,7 +719,11 @@ def update_ocr_job(conn, job_id, status, result=None, error=None):
         """
         UPDATE ocr_jobs
         SET status = ?, result_json = COALESCE(?, result_json), error = ?, updated_at = ?,
-            started_at = CASE WHEN started_at IS NULL THEN ? ELSE started_at END,
+            started_at = CASE
+                WHEN ? = 'processing' THEN ?
+                WHEN started_at IS NULL THEN ?
+                ELSE started_at
+            END,
             finished_at = CASE WHEN ? IN ('done','error') THEN ? ELSE finished_at END
         WHERE id = ?
         """,
@@ -580,6 +731,8 @@ def update_ocr_job(conn, job_id, status, result=None, error=None):
             status,
             json.dumps(result) if result is not None else None,
             error,
+            now,
+            status,
             now,
             now,
             status,
@@ -632,7 +785,7 @@ def preprocess_image_for_ocr(src_path, out_path=None):
     magick = shutil.which("magick") or shutil.which("convert")
     if magick and os.path.exists(magick):
         try:
-            subprocess.run(
+            run_subprocess(
                 [
                     magick,
                     src_path,
@@ -659,7 +812,7 @@ def preprocess_image_for_ocr(src_path, out_path=None):
         except Exception:
             pass
     try:
-        subprocess.run(
+        run_subprocess(
             ["sips", "-s", "format", "png", src_path, "--out", out_path],
             check=True,
             stdout=subprocess.PIPE,
@@ -667,7 +820,7 @@ def preprocess_image_for_ocr(src_path, out_path=None):
             text=True,
         )
         try:
-            subprocess.run(
+            run_subprocess(
                 ["sips", "-Z", "2400", out_path, "--out", out_path],
                 check=True,
                 stdout=subprocess.DEVNULL,
@@ -695,7 +848,7 @@ def ocr_image_file(image_path):
     with tempfile.TemporaryDirectory(dir=tmp_base) as tmpdir:
         processed, created = preprocess_image_for_ocr(image_path)
         def run_tesseract(psm):
-            result = subprocess.run(
+            result = run_subprocess(
                 [
                     tesseract_cmd,
                     processed,
@@ -996,10 +1149,51 @@ def map_docai_poliza_fields(doc_fields):
 def compute_ocr_quality(fields, required_keys=None):
     fields = fields or {}
     required_keys = required_keys or ()
+    def is_valid_date(value):
+        if not value:
+            return False
+        return bool(re.search(r"\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b", str(value)))
+    def is_valid_poliza(value):
+        if not value:
+            return False
+        token = re.sub(r"[^A-Z0-9]", "", str(value).upper())
+        return len(token) >= 6 and bool(re.search(r"\d", token))
+    def is_valid_company(value):
+        if not value:
+            return False
+        company = normalize_company_name(value)
+        if len(company) < 3:
+            return False
+        lowered = company.lower()
+        banned = ("compania", "compañia", "aseguradora", "seguro", "poliza", "póliza")
+        return lowered not in banned
+    def is_valid_nif_any(value):
+        if not value:
+            return False
+        raw = normalize_nif(value)
+        return bool(
+            re.match(r"^[0-9]{8}[A-Z]$", raw)
+            or re.match(r"^[XYZ][0-9]{7}[A-Z]$", raw)
+            or re.match(r"^[ABCDEFGHJNPQRSUVW][0-9]{7}[0-9A-Z]$", raw)
+        )
+    def field_is_valid(key, value):
+        if not str(value or "").strip():
+            return False
+        if key in ("fecha_efecto", "fecha_vencimiento", "fecha_nacimiento"):
+            return is_valid_date(value)
+        if key in ("poliza_numero",):
+            return is_valid_poliza(value)
+        if key in ("compania",):
+            return is_valid_company(value)
+        if key in ("dni", "nif"):
+            return is_valid_nif_any(value)
+        return True
     provided = [key for key, value in fields.items() if str(value or "").strip()]
     required_filled = [key for key in required_keys if str(fields.get(key) or "").strip()]
+    required_valid = [key for key in required_keys if field_is_valid(key, fields.get(key))]
+    invalid_required = [key for key in required_filled if key not in required_valid]
     total_required = len(required_keys)
-    ratio = (len(required_filled) / total_required) if total_required else 0
+    ratio = (len(required_valid) / total_required) if total_required else 0
     if total_required and ratio >= 0.75:
         calidad = "alta"
     elif total_required and ratio >= 0.45:
@@ -1008,10 +1202,15 @@ def compute_ocr_quality(fields, required_keys=None):
         calidad = "baja"
     else:
         calidad = "desconocida"
+    confidence = round((len(required_valid) / total_required), 3) if total_required else 0
     return {
         "calidad": calidad,
         "campos": provided,
         "required_filled": required_filled,
+        "required_valid": required_valid,
+        "required_invalid": invalid_required,
+        "missing_required": [key for key in required_keys if key not in required_filled],
+        "confidence": confidence,
     }
 
 def compute_fin_quality(fields):
@@ -1167,7 +1366,7 @@ def merge_many_fields(*field_sets):
 
 def get_image_size(image_path):
     try:
-        result = subprocess.run(
+        result = run_subprocess(
             ["sips", "-g", "pixelWidth", "-g", "pixelHeight", image_path],
             check=True,
             stdout=subprocess.PIPE,
@@ -1195,7 +1394,7 @@ def crop_image_region(image_path, x, y, w, h, out_path):
     magick = shutil.which("magick") or shutil.which("convert")
     if magick and os.path.exists(magick):
         try:
-            subprocess.run(
+            run_subprocess(
                 [
                     magick,
                     image_path,
@@ -1213,7 +1412,7 @@ def crop_image_region(image_path, x, y, w, h, out_path):
         except Exception:
             pass
     try:
-        subprocess.run(
+        run_subprocess(
             [
                 "sips",
                 "-c",
@@ -1242,7 +1441,7 @@ def prepare_image_bytes_for_vision(image_path):
         try:
             with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp_file:
                 tmp = tmp_file.name
-            subprocess.run(
+            run_subprocess(
                 [
                     magick,
                     image_path,
@@ -1348,7 +1547,7 @@ def ocr_pdf_first_page(pdf_path):
     if os.path.isdir(TESSDATA_DIR):
         env["TESSDATA_PREFIX"] = TESSDATA_DIR
     def run_tesseract(psm):
-        result = subprocess.run(
+        result = run_subprocess(
             [
                 tesseract_cmd,
                 img_path,
@@ -1405,7 +1604,7 @@ def pdftotext_extract(pdf_path, pages=None):
         if pages and isinstance(pages, int):
             args.extend(["-f", "1", "-l", str(pages)])
         try:
-            subprocess.run(
+            run_subprocess(
                 [*args, pdf_path, out_txt],
                 check=True,
                 stdout=subprocess.DEVNULL,
@@ -1433,7 +1632,7 @@ def pdfinfo_page_size(pdf_path):
     if not cmd or not os.path.exists(cmd):
         return None
     try:
-        result = subprocess.run(
+        result = run_subprocess(
             [cmd, pdf_path],
             check=True,
             stdout=subprocess.PIPE,
@@ -1481,7 +1680,7 @@ def pdftotext_crop(pdf_path, x, y, w, h):
             str(int(h)),
         ]
         try:
-            subprocess.run(
+            run_subprocess(
                 [*args, pdf_path, out_txt],
                 check=True,
                 stdout=subprocess.DEVNULL,
@@ -1510,7 +1709,7 @@ def pdftoppm_first_page(pdf_path, pages=None):
     if pages and isinstance(pages, int):
         args.extend(["-l", str(pages)])
     try:
-        subprocess.run(
+        run_subprocess(
             [*args, "-r", "400", "-gray", "-png", pdf_path, base],
             check=True,
             stdout=subprocess.DEVNULL,
@@ -1588,7 +1787,7 @@ def ocr_pdf_all_pages(pdf_path, use_external=False):
         return text, ""
     return "", ocr_err or img_err
 
-def parse_poliza_text(text):
+def parse_poliza_text(text, source_hint="", hinted_company=""):
     cleaned = text.replace("\u00a0", " ")
     cleaned = re.sub(r"\s+", " ", cleaned)
     cleaned = cleaned.replace("N°", "Nº").replace("Nº", "Nº")
@@ -1815,50 +2014,7 @@ def parse_poliza_text(text):
         r"N[ºo]\s*de\s*contrato\s*[:#]?\s*([A-Z0-9/.\-]+)",
         r"Contrato\s*[:#]?\s*([A-Z0-9/.\-]+)",
     ])
-    fields["compania"] = ""
-    company_aliases = [
-        (r"\bZURICH\b", "Zurich"),
-        (r"\bMAPFRE\b", "Mapfre"),
-        (r"\bAXA\b", "AXA"),
-        (r"\bALLIANZ\b", "Allianz"),
-        (r"\bGENERALI\b", "Generali"),
-        (r"\bREALE\b", "Reale"),
-        (r"\bOCASO\b", "Ocaso"),
-        (r"\bPELAYO\b", "Pelayo"),
-        (r"\bSANTA\s*LUCIA\b|\bSANTALUCIA\b", "Santa Lucia"),
-        (r"\bFIATC\b", "Fiatc"),
-        (r"\bLINEA\s*DIRECTA\b", "Línea Directa"),
-        (r"\bLIBERTY\b", "Liberty"),
-        (r"\bMUTUA\s*MADRILE[NÑ]A\b", "Mutua Madrileña"),
-        (r"\bCAJA\s*RURAL\b", "Caja Rural"),
-        (r"\bCASER\b", "Caser"),
-        (r"\bPLUS\s*ULTRA\b", "Plus Ultra"),
-        (r"\bFENIX\s*DIRECTO\b", "Fénix Directo"),
-        (r"\bDIRECT\s*SEGUROS\b", "Direct Seguros"),
-        (r"\bHEL\s*VETIA\b|\bHELVETIA\b", "Helvetia"),
-        (r"\bGROUPAMA\b", "Groupama"),
-        (r"\bNATIONALE\s*NEDERLANDEN\b", "Nationale Nederlanden"),
-        (r"\bREALE\s*SEGUROS\b", "Reale"),
-        (r"\bREALE\s*MUTUA\b", "Reale"),
-        (r"\bSANTA\s*LUC[IÍ]A\b", "Santa Lucia"),
-        (r"\bDAS\b", "DAS"),
-        (r"\bARAG\b", "ARAG"),
-        (r"\bPREVISORA\b", "Previsora General"),
-        (r"\bPREVISORA\s*GENERAL\b", "Previsora General"),
-        (r"\bSANITAS\b", "Sanitas"),
-        (r"\bDKV\b", "DKV"),
-        (r"\bADESLAS\b", "Adeslas"),
-        (r"\bASISA\b", "Asisa"),
-        (r"\bCATALANA\s*OCCIDENTE\b", "Catalana Occidente"),
-        (r"\bNORTEHISPANA\b", "NorteHispana"),
-        (r"\bSEGUROS\s*BILBAO\b", "Seguros Bilbao"),
-        (r"\bBILBAO\s*SEGUROS\b", "Seguros Bilbao"),
-        (r"\bSEGUROS\s*PELayo\b", "Pelayo"),
-    ]
-    for pattern, name in company_aliases:
-        if re.search(pattern, cleaned, re.IGNORECASE):
-            fields["compania"] = name
-            break
+    fields["compania"] = detect_company_from_text(cleaned) or hinted_company or detect_company_from_metadata(source_hint)
     if not fields["compania"]:
         fields["compania"] = pick([
             r"Compa[ñn]ia\s*[:\-]?\s*([A-Z0-9\s\-]+)",
@@ -6881,6 +7037,18 @@ class Handler(BaseHTTPRequestHandler):
             if not row:
                 json_response(self, {"error": "job no encontrado"}, status=404)
                 return
+            if row["status"] == "processing" and is_stale_ocr_job(row["started_at"]):
+                timeout_msg = f"OCR excedió el tiempo máximo ({OCR_JOB_STALE_MINUTES} min)"
+                update_ocr_job(conn, job_id, "error", result=None, error=timeout_msg)
+                conn.commit()
+                row = conn.execute(
+                    """
+                    SELECT id, kind, status, result_json, error, created_at, started_at, finished_at
+                    FROM ocr_jobs
+                    WHERE id = ?
+                    """,
+                    (job_id,),
+                ).fetchone()
             if row["status"] == "pending" and not row["started_at"]:
                 payload_row = conn.execute(
                     "SELECT payload_json, kind FROM ocr_jobs WHERE id = ?",

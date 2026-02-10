@@ -1,0 +1,28 @@
+{
+  "source_root": "/Users/miguelperezrodriguez/Library/CloudStorage/OneDrive-Personal/FINCAS VELAZQUEZ/SEGUROS/POLIZAS EMITIDAS",
+  "total_files": 114,
+  "companies": {
+    "Mapfre": 12,
+    "Reale": 9,
+    "Ocaso": 9,
+    "AXA": 6,
+    "Zurich": 5,
+    "Allianz": 4,
+    "Pelayo": 3,
+    "DKV": 1,
+    "ARAG": 1,
+    "Generali": 1
+  },
+  "hints": {
+    "MAPFRE": "Mapfre",
+    "DKV": "DKV",
+    "ZURICH": "Zurich",
+    "ALLIANZ": "Allianz",
+    "AXA": "AXA",
+    "REALE": "Reale",
+    "OCASO": "Ocaso",
+    "PELAYO": "Pelayo",
+    "ARAG": "ARAG",
+    "GENERALI": "Generali"
+  }
+}
