@@ -7037,19 +7037,11 @@ class Handler(BaseHTTPRequestHandler):
             if not row:
                 json_response(self, {"error": "job no encontrado"}, status=404)
                 return
-            if row["status"] == "processing" and is_stale_ocr_job(row["started_at"]):
-                timeout_msg = f"OCR excedió el tiempo máximo ({OCR_JOB_STALE_MINUTES} min)"
-                update_ocr_job(conn, job_id, "error", result=None, error=timeout_msg)
-                conn.commit()
-                row = conn.execute(
-                    """
-                    SELECT id, kind, status, result_json, error, created_at, started_at, finished_at
-                    FROM ocr_jobs
-                    WHERE id = ?
-                    """,
-                    (job_id,),
-                ).fetchone()
-            if row["status"] == "pending" and not row["started_at"]:
+            should_run_inline = row["status"] == "pending" and not row["started_at"]
+            stale_processing = row["status"] == "processing" and is_stale_ocr_job(row["started_at"])
+            if stale_processing:
+                should_run_inline = True
+            if should_run_inline:
                 payload_row = conn.execute(
                     "SELECT payload_json, kind FROM ocr_jobs WHERE id = ?",
                     (job_id,),
