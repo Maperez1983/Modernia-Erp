@@ -4757,6 +4757,7 @@ class Handler(BaseHTTPRequestHandler):
                             now,
                         ),
                     )
+                conn.commit()
                 json_response(
                     self,
                     {
@@ -4818,6 +4819,7 @@ class Handler(BaseHTTPRequestHandler):
                             now,
                         ),
                     )
+            conn.commit()
             json_response(self, {"ok": True, "id": poliza_id, "duplicate_of": dup_id})
             return
         elif parsed.path == "/api/fin_asesoramientos":
