@@ -52,6 +52,29 @@ S3_BUCKET = os.environ.get("AWS_S3_BUCKET") or os.environ.get("S3_BUCKET")
 S3_REGION = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION")
 OCR_SUBPROCESS_TIMEOUT_SECONDS = max(15, int(os.environ.get("OCR_SUBPROCESS_TIMEOUT_SECONDS", "90")))
 OCR_JOB_STALE_MINUTES = max(1, int(os.environ.get("OCR_JOB_STALE_MINUTES", "15")))
+OCR_PDF_MAX_PAGES = max(0, int(os.environ.get("OCR_PDF_MAX_PAGES", "4")))
+OCR_PDF_DPI = max(120, int(os.environ.get("OCR_PDF_DPI", "280")))
+
+
+def parse_ocr_psms(raw):
+    value = (raw or "").strip()
+    if not value:
+        return (6, 11)
+    psms = []
+    for item in value.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        try:
+            psm = int(item)
+        except ValueError:
+            continue
+        if 0 <= psm <= 13 and psm not in psms:
+            psms.append(psm)
+    return tuple(psms) if psms else (6, 11)
+
+
+OCR_TESSERACT_PSMS = parse_ocr_psms(os.environ.get("OCR_TESSERACT_PSMS", "6,11"))
 
 COMPANY_ALIAS_PATTERNS = [
     (r"\bZURICH\b", "Zurich"),
@@ -875,7 +898,7 @@ def ocr_image_file(image_path):
             return result.stdout or ""
         try:
             candidates = []
-            for psm in (6, 4, 11):
+            for psm in OCR_TESSERACT_PSMS:
                 try:
                     candidates.append(run_tesseract(psm))
                 except subprocess.CalledProcessError:
@@ -1574,7 +1597,7 @@ def ocr_pdf_first_page(pdf_path):
         return result.stdout or ""
     try:
         candidates = []
-        for psm in (6, 4, 11):
+        for psm in OCR_TESSERACT_PSMS:
             try:
                 candidates.append(run_tesseract(psm))
             except subprocess.CalledProcessError:
@@ -1708,11 +1731,13 @@ def pdftoppm_first_page(pdf_path, pages=None):
     tmpdir = tempfile.mkdtemp(dir=tmp_base)
     base = os.path.join(tmpdir, "page")
     args = [cmd, "-f", "1"]
+    if pages is None and OCR_PDF_MAX_PAGES > 0:
+        pages = OCR_PDF_MAX_PAGES
     if pages and isinstance(pages, int):
         args.extend(["-l", str(pages)])
     try:
         run_subprocess(
-            [*args, "-r", "400", "-gray", "-png", pdf_path, base],
+            [*args, "-r", str(OCR_PDF_DPI), "-gray", "-png", pdf_path, base],
             check=True,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
