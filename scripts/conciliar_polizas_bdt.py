@@ -19,6 +19,15 @@ from web import server as srv  # noqa: E402
 
 
 VALID_EXTS = {".pdf", ".jpg", ".jpeg", ".png"}
+SKIP_KEYWORDS = (
+    "CARNET",
+    "DNI",
+    "PASAPORTE",
+    "NIE",
+    "RECIBO",
+    "JUSTIFICANTE",
+    "TRANSFERENCIA",
+)
 
 
 def norm_text(value):
@@ -58,6 +67,57 @@ def list_policy_files(roots):
                 continue
             files.append(path)
     return sorted(files)
+
+
+def is_policy_candidate(path):
+    normalized = norm_text(str(path))
+    return not any(k in normalized for k in SKIP_KEYWORDS)
+
+
+def path_hints(path):
+    text = norm_text(str(path))
+    stem = Path(path).stem
+    stem_norm = norm_text(stem)
+    company = srv.detect_company_from_metadata(str(path))
+    policy = ""
+    token_candidates = re.findall(r"[A-Z0-9]{6,}", re.sub(r"[^A-Za-z0-9]+", " ", str(path).upper()))
+    for token in token_candidates:
+        pol = norm_policy(token)
+        if len(pol) >= 6 and re.search(r"\d", pol):
+            policy = pol
+            break
+    name = ""
+    parts = [p.strip() for p in re.split(r"[-_/]+", stem_norm) if p.strip()]
+    stop = {
+        "POLIZA",
+        "POLIZA AUTO",
+        "POLIZA HOGAR",
+        "SEGURO",
+        "SEGUROS",
+        "HOGAR",
+        "AUTO",
+        "COCHE",
+        "MOTO",
+        "MAPFRE",
+        "AXA",
+        "ALLIANZ",
+        "REALE",
+        "OCASO",
+        "PELAYO",
+        "SANTA LUCIA",
+        "OCCIDENT",
+        "MUTUA PROPIETARIOS",
+    }
+    for part in reversed(parts):
+        if part in stop:
+            continue
+        if len(part) < 5:
+            continue
+        if re.search(r"\d", part):
+            continue
+        name = part
+        break
+    return {"tomador": name, "compania": company, "poliza_numero": policy}
 
 
 def choose_unique(rows):
@@ -227,6 +287,9 @@ def main():
     now = datetime.now(timezone.utc).isoformat()
 
     for path in files:
+        if not is_policy_candidate(path):
+            stats["skipped_non_policy"] += 1
+            continue
         stats["files_total"] += 1
         try:
             result = parse_policy_file(path, conn)
@@ -235,6 +298,13 @@ def main():
             unresolved.append((str(path), "ocr_error"))
             continue
         fields = (result or {}).get("fields") or {}
+        hints = path_hints(path)
+        if hints.get("compania") and not fields.get("compania"):
+            fields["compania"] = hints["compania"]
+        if hints.get("poliza_numero") and not fields.get("poliza_numero"):
+            fields["poliza_numero"] = hints["poliza_numero"]
+        if hints.get("tomador") and not fields.get("tomador"):
+            fields["tomador"] = hints["tomador"]
         if not any(str(v or "").strip() for v in fields.values()):
             stats["empty_fields"] += 1
             unresolved.append((str(path), "empty_fields"))
@@ -354,6 +424,7 @@ def main():
 
     print(f"empresa_id={empresa_id}")
     print(f"files_total={stats['files_total']}")
+    print(f"skipped_non_policy={stats['skipped_non_policy']}")
     print(f"rows_updated={stats['rows_updated']}")
     print(f"fields_updated={stats['fields_updated']}")
     print(f"rows_unchanged={stats['rows_unchanged']}")
