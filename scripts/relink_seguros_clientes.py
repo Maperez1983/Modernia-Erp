@@ -50,27 +50,28 @@ def split_name_variants(name):
     return [v for v in variants if v]
 
 
-def scan_policy_paths(root):
+def scan_policy_paths(roots):
     by_policy = defaultdict(list)
     paths = []
-    if not root:
+    if not roots:
         return by_policy, paths
-    base = Path(root).expanduser()
-    if not base.exists():
-        return by_policy, paths
-    for path in base.rglob("*"):
-        if not path.is_file():
+    for root in roots:
+        base = Path(root).expanduser()
+        if not base.exists():
             continue
-        if path.suffix.lower() not in VALID_EXTS:
-            continue
-        rel = str(path.relative_to(base))
-        normalized = norm_text(rel)
-        paths.append((str(path), normalized))
-        raw_tokens = re.findall(r"[A-Z0-9]{6,}", re.sub(r"[^A-Za-z0-9]+", " ", rel.upper()))
-        for token in raw_tokens:
-            pol = norm_policy(token)
-            if len(pol) >= 6:
-                by_policy[pol].append((str(path), normalized))
+        for path in base.rglob("*"):
+            if not path.is_file():
+                continue
+            if path.suffix.lower() not in VALID_EXTS:
+                continue
+            rel = str(path.relative_to(base))
+            normalized = norm_text(rel)
+            paths.append((str(path), normalized))
+            raw_tokens = re.findall(r"[A-Z0-9]{6,}", re.sub(r"[^A-Za-z0-9]+", " ", rel.upper()))
+            for token in raw_tokens:
+                pol = norm_policy(token)
+                if len(pol) >= 6:
+                    by_policy[pol].append((str(path), normalized))
     return by_policy, paths
 
 
@@ -84,7 +85,12 @@ def main():
     parser.add_argument("--db", required=True, help="SQLite database path.")
     parser.add_argument("--empresa-id", default="", help="Filter by empresa_id.")
     parser.add_argument("--empresa-nombre-like", default="", help="Resolve empresa_id by company name LIKE.")
-    parser.add_argument("--polizas-root", default="", help="Optional folder with policy files for extra matching.")
+    parser.add_argument(
+        "--polizas-root",
+        action="append",
+        default=[],
+        help="Optional folder with policy files for extra matching. Repeat flag for multiple roots.",
+    )
     parser.add_argument("--create-missing", action="store_true", help="Create customer if no unique match found.")
     parser.add_argument("--apply", action="store_true", help="Apply changes (default is dry-run).")
     parser.add_argument("--limit", type=int, default=0, help="Limit rows to process.")
@@ -265,6 +271,7 @@ def main():
     print(f"db={args.db}")
     print(f"empresa_id={empresa_id or '(all)'}")
     print(f"rows_without_cliente_id={len(seguros)}")
+    print(f"policy_files_scanned={len(normalized_paths)}")
     print(f"matched={len(updates)}")
     print(f"created_clientes={len(created)}")
     print(f"unresolved={len(unresolved)}")
