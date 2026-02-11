@@ -14,7 +14,7 @@ import shutil
 import urllib.request
 import threading
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
 from pathlib import Path
 import unicodedata
@@ -498,7 +498,9 @@ def is_stale_ocr_job(started_at):
         started_dt = datetime.fromisoformat(raw)
     except Exception:
         return False
-    return datetime.utcnow() - started_dt > timedelta(minutes=OCR_JOB_STALE_MINUTES)
+    if started_dt.tzinfo is None:
+        started_dt = started_dt.replace(tzinfo=timezone.utc)
+    return datetime.now(timezone.utc) - started_dt > timedelta(minutes=OCR_JOB_STALE_MINUTES)
 
 
 def s3_config():
@@ -529,7 +531,7 @@ def s3_client():
 def s3_safe_key(prefix, filename):
     base = os.path.basename(filename or "archivo.pdf")
     safe = re.sub(r"[^A-Za-z0-9._-]", "_", base)
-    stamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     rand = os.urandom(4).hex()
     prefix = prefix.strip("/").strip() if prefix else "seguros"
     return f"{prefix}/{stamp}_{rand}_{safe}"
@@ -683,7 +685,7 @@ def process_seguros_ocr(payload, conn):
 
 def enqueue_ocr_job(db_path, kind, payload):
     job_id = os.urandom(16).hex()
-    now = datetime.utcnow().isoformat()
+    now = datetime.now(timezone.utc).isoformat()
     conn = sqlite3.connect(db_path)
     conn.execute(
         """
@@ -698,7 +700,7 @@ def enqueue_ocr_job(db_path, kind, payload):
 
 
 def fetch_next_ocr_job(conn):
-    cutoff = (datetime.utcnow() - timedelta(minutes=OCR_JOB_STALE_MINUTES)).isoformat()
+    cutoff = (datetime.now(timezone.utc) - timedelta(minutes=OCR_JOB_STALE_MINUTES)).isoformat()
     row = conn.execute(
         """
         SELECT id, kind, payload_json
@@ -714,7 +716,7 @@ def fetch_next_ocr_job(conn):
 
 
 def update_ocr_job(conn, job_id, status, result=None, error=None):
-    now = datetime.utcnow().isoformat()
+    now = datetime.now(timezone.utc).isoformat()
     conn.execute(
         """
         UPDATE ocr_jobs
