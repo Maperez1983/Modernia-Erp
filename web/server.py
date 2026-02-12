@@ -7379,6 +7379,8 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/seguros_cliente":
             cliente_id = params.get("cliente_id", [""])[0]
             empresa_id = params.get("empresa_id", [""])[0]
+            tomador = (params.get("tomador", [""])[0] or "").strip()
+            autolink = (params.get("autolink", ["0"])[0] or "").strip() in ("1", "true", "yes")
             if not cliente_id:
                 json_response(self, {"error": "cliente_id requerido"}, status=400)
                 return
@@ -7396,6 +7398,57 @@ class Handler(BaseHTTPRequestHandler):
                 """,
                 values,
             ).fetchall()
+            if not rows and tomador:
+                tomador_rows = conn.execute(
+                    """
+                    SELECT id, cliente_id, compania, poliza_numero, fecha_efecto, fecha_vencimiento, estado, prima_total, tomador, empresa_id
+                    FROM seguros
+                    WHERE UPPER(TRIM(tomador)) = UPPER(TRIM(?))
+                      AND (? = '' OR empresa_id = ?)
+                    ORDER BY COALESCE(fecha_efecto, created_at) DESC
+                    """,
+                    (tomador, empresa_id, empresa_id),
+                ).fetchall()
+                if tomador_rows and autolink:
+                    distinct_cliente_ids = {
+                        str(r["cliente_id"] or "").strip()
+                        for r in tomador_rows
+                        if str(r["cliente_id"] or "").strip()
+                    }
+                    # Solo relink automático si la coincidencia es clara.
+                    can_relink = len(tomador_rows) == 1 or len(distinct_cliente_ids) <= 1
+                    if can_relink:
+                        conn.executemany(
+                            "UPDATE seguros SET cliente_id = ?, updated_at = datetime(?) WHERE id = ?",
+                            [(cliente_id, now, r["id"]) for r in tomador_rows],
+                        )
+                        if empresa_id:
+                            ensure_cliente_servicio_link(conn, cliente_id, empresa_id, "seguros", now)
+                        rows = conn.execute(
+                            """
+                            SELECT id, cliente_id, compania, poliza_numero, fecha_efecto, fecha_vencimiento, estado, prima_total, tomador
+                            FROM seguros
+                            WHERE cliente_id = ?
+                              AND (? = '' OR empresa_id = ?)
+                            ORDER BY COALESCE(fecha_efecto, created_at) DESC
+                            """,
+                            (cliente_id, empresa_id, empresa_id),
+                        ).fetchall()
+                if not rows:
+                    rows = [
+                        {
+                            "id": r["id"],
+                            "cliente_id": r["cliente_id"],
+                            "compania": r["compania"],
+                            "poliza_numero": r["poliza_numero"],
+                            "fecha_efecto": r["fecha_efecto"],
+                            "fecha_vencimiento": r["fecha_vencimiento"],
+                            "estado": r["estado"],
+                            "prima_total": r["prima_total"],
+                            "tomador": r["tomador"],
+                        }
+                        for r in tomador_rows
+                    ]
             json_response(self, {"rows": [dict(r) for r in rows]})
             return
 

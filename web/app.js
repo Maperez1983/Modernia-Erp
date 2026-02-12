@@ -11848,8 +11848,13 @@ const loadClienteSeguros = (cliente, empresaId) => {
     return;
   }
   const params = new URLSearchParams({ cliente_id: clienteId });
+  const tomador = String(cliente.nombre || "").trim();
   if (empresaId) {
     params.set("empresa_id", empresaId);
+  }
+  if (tomador) {
+    params.set("tomador", tomador);
+    params.set("autolink", "1");
   }
   api(`/api/seguros_cliente?${params.toString()}`)
     .then(async (data) => {
