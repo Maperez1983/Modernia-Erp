@@ -10055,10 +10055,10 @@ const createClienteFromOcr = async (type, fields) => {
   }
 };
 
-const ensureSegurosBdtData = async () => {
+const ensureSegurosBdtData = async (forceRefresh = false) => {
   const empresa = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
   if (!empresa) return null;
-  if (state.segurosBdtCache && state.segurosBdtCache.empresaId === empresa.id) {
+  if (!forceRefresh && state.segurosBdtCache && state.segurosBdtCache.empresaId === empresa.id) {
     return state.segurosBdtCache.data;
   }
   const params = new URLSearchParams({
@@ -10076,7 +10076,7 @@ const ensureSegurosBdtData = async () => {
 
 const matchSegurosBdtFromFields = async () => {
   if (segurosBdtOcrStatus) segurosBdtOcrStatus.textContent = "";
-  const data = await ensureSegurosBdtData();
+  let data = await ensureSegurosBdtData(true);
   if (!data || data.error) {
     if (segurosBdtOcrStatus) {
       segurosBdtOcrStatus.textContent = data?.error || "No se pudo cargar BDT.";
@@ -10117,6 +10117,27 @@ const matchSegurosBdtFromFields = async () => {
     .filter((item) => item.score > 0)
     .sort((a, b) => b.score - a.score);
   if (!matches.length) {
+    // Retry once with fresh data in case cache/data became stale between saves.
+    data = await ensureSegurosBdtData(true);
+    const retryColumns = data.columns || [];
+    const retryRows = data.rows || [];
+    const retryIdIndex = retryColumns.indexOf("id");
+    if (retryIdIndex >= 0) {
+      const retryMatches = retryRows
+        .map((row) => ({ row, score: scoreSegurosBdtMatch(row, retryColumns, fields) }))
+        .filter((item) => item.score > 0)
+        .sort((a, b) => b.score - a.score);
+      if (retryMatches.length) {
+        const retryBest = retryMatches[0];
+        const retryBestId = retryBest.row[retryIdIndex];
+        const retryBestLabel = formatSegurosBdtLabel(retryBest.row, retryColumns);
+        populateSegurosBdtSelect(retryMatches.slice(0, 12).map((item) => item.row), retryColumns, retryBestId);
+        if (segurosBdtOcrStatus) {
+          segurosBdtOcrStatus.textContent = `Coincidencia automática: ${retryBestLabel}.`;
+        }
+        return;
+      }
+    }
     populateSegurosBdtSelect(rows, columns);
     if (segurosBdtOcrStatus) {
       segurosBdtOcrStatus.textContent = "Sin coincidencias. Completa campos o selecciona manualmente.";
