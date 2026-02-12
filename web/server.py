@@ -7381,6 +7381,7 @@ class Handler(BaseHTTPRequestHandler):
             empresa_id = params.get("empresa_id", [""])[0]
             tomador = (params.get("tomador", [""])[0] or "").strip()
             autolink = (params.get("autolink", ["0"])[0] or "").strip() in ("1", "true", "yes")
+            now = datetime.now(timezone.utc).isoformat()
             if not cliente_id:
                 json_response(self, {"error": "cliente_id requerido"}, status=400)
                 return
