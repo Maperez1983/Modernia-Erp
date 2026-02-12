@@ -7410,6 +7410,37 @@ class Handler(BaseHTTPRequestHandler):
                     """,
                     (tomador, empresa_id, empresa_id),
                 ).fetchall()
+                if not tomador_rows:
+                    # Fallback robusto: coincidencia por tokens normalizados de nombre (orden flexible).
+                    wanted_tokens = [t for t in normalize_lookup_text(tomador).split(" ") if len(t) >= 3]
+                    if wanted_tokens:
+                        candidates = conn.execute(
+                            """
+                            SELECT id, cliente_id, compania, poliza_numero, fecha_efecto, fecha_vencimiento, estado, prima_total, tomador, empresa_id
+                            FROM seguros
+                            WHERE tomador IS NOT NULL AND TRIM(tomador) <> ''
+                              AND (? = '' OR empresa_id = ?)
+                            ORDER BY COALESCE(fecha_efecto, created_at) DESC
+                            """,
+                            (empresa_id, empresa_id),
+                        ).fetchall()
+                        matched = []
+                        wanted_set = set(wanted_tokens)
+                        for cand in candidates:
+                            cand_tokens = {
+                                t for t in normalize_lookup_text(cand["tomador"] or "").split(" ") if len(t) >= 3
+                            }
+                            if not cand_tokens:
+                                continue
+                            # Aceptamos cuando todos los tokens buscados están presentes.
+                            if wanted_set.issubset(cand_tokens):
+                                matched.append(cand)
+                                continue
+                            # O cuando el solape es muy alto para evitar falsos negativos.
+                            overlap = len(wanted_set.intersection(cand_tokens))
+                            if wanted_set and (overlap / max(1, len(wanted_set))) >= 0.8 and overlap >= 2:
+                                matched.append(cand)
+                        tomador_rows = matched
                 if tomador_rows and autolink:
                     distinct_cliente_ids = {
                         str(r["cliente_id"] or "").strip()
