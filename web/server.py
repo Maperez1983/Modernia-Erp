@@ -253,6 +253,29 @@ def normalize_company_key(value):
     return text
 
 
+def find_existing_seguro_id(conn, empresa_id, poliza_numero, compania, exclude_id=None):
+    poliza_norm = normalize_poliza_key(poliza_numero)
+    if not poliza_norm:
+        return ""
+    compania_norm = normalize_company_key(compania)
+    rows = conn.execute(
+        "SELECT id, poliza_numero, compania FROM seguros WHERE empresa_id = ?",
+        (empresa_id,),
+    ).fetchall()
+    for row in rows:
+        row_id = row["id"]
+        if exclude_id and row_id == exclude_id:
+            continue
+        row_poliza = normalize_poliza_key(row["poliza_numero"])
+        if not row_poliza or row_poliza != poliza_norm:
+            continue
+        row_comp = normalize_company_key(row["compania"])
+        if compania_norm and row_comp and compania_norm != row_comp:
+            continue
+        return row_id
+    return ""
+
+
 def normalize_lookup_text(value):
     if not value:
         return ""
@@ -2692,6 +2715,41 @@ def ensure_cliente_for_seguro(conn, empresa_id, tomador, nif, now, extra=None):
         )
     return cliente_id
 
+
+def ensure_cliente_servicio_link(conn, cliente_id, empresa_id, servicio, now, estado="Activo"):
+    if not cliente_id or not empresa_id or not servicio:
+        return
+    existing = conn.execute(
+        """
+        SELECT id FROM clientes_empresas
+        WHERE cliente_id = ? AND empresa_id = ? AND LOWER(servicio) = LOWER(?)
+        LIMIT 1
+        """,
+        (cliente_id, empresa_id, servicio),
+    ).fetchone()
+    if existing:
+        return
+    conn.execute(
+        """
+        INSERT INTO clientes_empresas (
+          id, cliente_id, empresa_id, servicio, estado, fecha_inicio, fecha_fin, created_at, updated_at
+        ) VALUES (
+          ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+        )
+        """,
+        (
+            os.urandom(16).hex(),
+            cliente_id,
+            empresa_id,
+            servicio,
+            estado,
+            None,
+            None,
+            now,
+            now,
+        ),
+    )
+
 def ensure_cliente_for_financiacion(conn, empresa_id, nombre, nif, now, extra=None):
     if not nombre:
         return None
@@ -4601,8 +4659,8 @@ class Handler(BaseHTTPRequestHandler):
             cliente_id = payload.get("cliente_id")
             if cliente_id:
                 exists = conn.execute(
-                    "SELECT id FROM clientes WHERE id = ? AND empresa_id = ?",
-                    (cliente_id, empresa["id"]),
+                    "SELECT id FROM clientes WHERE id = ?",
+                    (cliente_id,),
                 ).fetchone()
                 if not exists:
                     cliente_id = None
@@ -4620,6 +4678,8 @@ class Handler(BaseHTTPRequestHandler):
                         "direccion": payload.get("direccion"),
                     },
                 )
+            else:
+                ensure_cliente_servicio_link(conn, cliente_id, empresa["id"], "seguros", now)
             poliza_key = payload.get("poliza_key") or ""
             poliza_url = payload.get("poliza_url") or ""
             ocr_quality = payload.get("ocr_quality") or {}
@@ -4634,31 +4694,19 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 campos_ocr = payload.get("campos_ocr") or ""
             # Deduplicación suave: si existe póliza con mismo nº y compañía, actualizar campos vacíos
-            dup_id = None
-            poliza_norm = normalize_poliza_key(payload.get("poliza_numero"))
-            compania_norm = normalize_company_key(payload.get("compania"))
-            if poliza_norm:
-                candidates = conn.execute(
-                    "SELECT id, poliza_numero, compania, cliente_id FROM seguros WHERE empresa_id = ?",
-                    (empresa["id"],),
-                ).fetchall()
-                for row in candidates:
-                    row_poliza = normalize_poliza_key(row["poliza_numero"])
-                    if not row_poliza or row_poliza != poliza_norm:
-                        continue
-                    row_comp = normalize_company_key(row["compania"])
-                    if compania_norm and row_comp and compania_norm != row_comp:
-                        continue
-                    if cliente_id and row["cliente_id"] and row["cliente_id"] != cliente_id:
-                        continue
-                    dup_id = row["id"]
-                    break
+            dup_id = find_existing_seguro_id(
+                conn,
+                empresa["id"],
+                payload.get("poliza_numero"),
+                payload.get("compania"),
+            )
 
             if dup_id:
                 # Enriquecer la póliza existente con campos vacíos
                 row = conn.execute("SELECT * FROM seguros WHERE id = ?", (dup_id,)).fetchone()
                 updates = {}
                 for key in (
+                    "cliente_id",
                     "estado",
                     "fecha_efecto",
                     "fecha_vencimiento",
@@ -5271,6 +5319,10 @@ class Handler(BaseHTTPRequestHandler):
             if not record_id:
                 json_response(self, {"error": "id requerido"}, status=400)
                 return
+            current_row = conn.execute("SELECT * FROM seguros WHERE id = ?", (record_id,)).fetchone()
+            if not current_row:
+                json_response(self, {"error": "Registro no encontrado"}, status=404)
+                return
             updates = {}
             for key in (
                 "cliente_id",
@@ -5289,6 +5341,34 @@ class Handler(BaseHTTPRequestHandler):
             if not updates:
                 json_response(self, {"error": "Sin cambios"}, status=400)
                 return
+            incoming_cliente_id = updates.get("cliente_id")
+            if incoming_cliente_id:
+                cliente_exists = conn.execute(
+                    "SELECT id FROM clientes WHERE id = ?",
+                    (incoming_cliente_id,),
+                ).fetchone()
+                if not cliente_exists:
+                    json_response(self, {"error": "cliente_id no válido"}, status=400)
+                    return
+            poliza_candidate = updates.get("poliza_numero", current_row["poliza_numero"])
+            compania_candidate = updates.get("compania", current_row["compania"])
+            dup_id = find_existing_seguro_id(
+                conn,
+                current_row["empresa_id"],
+                poliza_candidate,
+                compania_candidate,
+                exclude_id=record_id,
+            )
+            if dup_id:
+                json_response(
+                    self,
+                    {
+                        "error": "Ya existe una póliza con ese número y compañía",
+                        "duplicate_of": dup_id,
+                    },
+                    status=409,
+                )
+                return
             set_clause = ", ".join([f"{key} = ?" for key in updates])
             values = list(updates.values()) + [now, record_id]
             conn.execute(
@@ -5296,6 +5376,8 @@ class Handler(BaseHTTPRequestHandler):
                 values,
             )
             row = conn.execute("SELECT * FROM seguros WHERE id = ?", (record_id,)).fetchone()
+            if row and row["cliente_id"]:
+                ensure_cliente_servicio_link(conn, row["cliente_id"], row["empresa_id"], "seguros", now)
             if row and (row["poliza_key"] or row["poliza_url"]) and row["cliente_id"]:
                 where = ["cliente_id = ?", "empresa_id = ?"]
                 values = [row["cliente_id"], row["empresa_id"]]
@@ -5403,6 +5485,8 @@ class Handler(BaseHTTPRequestHandler):
                 )
             row = conn.execute("SELECT * FROM seguros WHERE id = ?", (record_id,)).fetchone()
             if row:
+                if row["cliente_id"]:
+                    ensure_cliente_servicio_link(conn, row["cliente_id"], row["empresa_id"], "seguros", now)
                 missing = []
                 for key in ("tomador", "poliza_numero", "compania", "fecha_efecto"):
                     if not str(row[key] or "").strip():
