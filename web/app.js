@@ -11850,6 +11850,7 @@ const loadClienteSeguros = (cliente, empresaId) => {
   api(`/api/tabla?${params.toString()}`).then((data) => {
     const columns = data.columns || [];
     const rows = data.rows || [];
+    const clienteIdIndex = columns.indexOf("cliente_id");
     const tomadorIndex = columns.indexOf("tomador");
     const companiaIndex = columns.indexOf("compania");
     const polizaIndex = columns.indexOf("poliza_numero");
@@ -11858,9 +11859,14 @@ const loadClienteSeguros = (cliente, empresaId) => {
     const estadoIndex = columns.indexOf("estado");
     const primaIndex = columns.indexOf("prima_total");
     const target = normalizeName(cliente.nombre || "");
+    const wantedClienteId = String(cliente.id || "").trim();
     const matches = rows.filter((row) => {
+      const rowClienteId = String(row[clienteIdIndex] || "").trim();
+      if (wantedClienteId && rowClienteId && rowClienteId === wantedClienteId) {
+        return true;
+      }
       const tomador = normalizeName(row[tomadorIndex] || "");
-      return tomador && (tomador === target || tomador.includes(target));
+      return tomador && target && (tomador === target || tomador.includes(target) || target.includes(tomador));
     });
     if (!matches.length) {
       clienteSegurosFicha.innerHTML = "<p class='muted'>Sin pólizas vinculadas.</p>";
