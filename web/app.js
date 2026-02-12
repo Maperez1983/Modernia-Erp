@@ -13426,13 +13426,13 @@ if (segurosBdtOcrLink) {
       body: JSON.stringify({ id: recordId, ...fields }),
     })
       .then((res) => res.json())
-      .then((resp) => {
+      .then(async (resp) => {
         if (resp.error) {
           if (segurosBdtOcrStatus) segurosBdtOcrStatus.textContent = resp.error;
           return;
         }
         if (upload) {
-          fetch("/api/seguros_update", {
+          const updateResp = await fetch("/api/seguros_update", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -13440,15 +13440,20 @@ if (segurosBdtOcrLink) {
               poliza_key: upload.key || "",
               poliza_url: upload.public_url || "",
             }),
-          }).catch(() => {});
+          }).then((res) => res.json());
+          if (updateResp?.error) {
+            throw new Error(updateResp.error || "No se pudo adjuntar la póliza al registro.");
+          }
         }
         if (segurosBdtOcrStatus) segurosBdtOcrStatus.textContent = "Vinculado a BDT.";
         state.segurosBdtOcrClienteId = "";
         state.segurosBdtCache = null;
         loadSegurosCrm();
       })
-      .catch(() => {
-        if (segurosBdtOcrStatus) segurosBdtOcrStatus.textContent = "Error al vincular.";
+      .catch((err) => {
+        if (segurosBdtOcrStatus) {
+          segurosBdtOcrStatus.textContent = err?.message || "Error al vincular.";
+        }
       });
   });
 }
