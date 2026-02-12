@@ -11846,28 +11846,10 @@ const loadClienteSeguros = (cliente, empresaId) => {
     clienteSegurosFicha.innerHTML = "<p class='muted'>Sin empresa de seguros.</p>";
     return;
   }
-  const params = new URLSearchParams({ tabla: "seguros", empresa_id: empresaId });
-  api(`/api/tabla?${params.toString()}`).then((data) => {
-    const columns = data.columns || [];
-    const rows = data.rows || [];
-    const clienteIdIndex = columns.indexOf("cliente_id");
-    const tomadorIndex = columns.indexOf("tomador");
-    const companiaIndex = columns.indexOf("compania");
-    const polizaIndex = columns.indexOf("poliza_numero");
-    const efectoIndex = columns.indexOf("fecha_efecto");
-    const vencIndex = columns.indexOf("fecha_vencimiento");
-    const estadoIndex = columns.indexOf("estado");
-    const primaIndex = columns.indexOf("prima_total");
-    const target = normalizeName(cliente.nombre || "");
-    const wantedClienteId = String(cliente.id || "").trim();
-    const matches = rows.filter((row) => {
-      const rowClienteId = String(row[clienteIdIndex] || "").trim();
-      if (wantedClienteId && rowClienteId && rowClienteId === wantedClienteId) {
-        return true;
-      }
-      const tomador = normalizeName(row[tomadorIndex] || "");
-      return tomador && target && (tomador === target || tomador.includes(target) || target.includes(tomador));
-    });
+  const clienteId = String(cliente.id || "").trim();
+  const params = new URLSearchParams({ cliente_id: clienteId, empresa_id: empresaId });
+  api(`/api/seguros_cliente?${params.toString()}`).then((data) => {
+    let matches = data.rows || [];
     if (!matches.length) {
       clienteSegurosFicha.innerHTML = "<p class='muted'>Sin pólizas vinculadas.</p>";
       return;
@@ -11886,12 +11868,12 @@ const loadClienteSeguros = (cliente, empresaId) => {
     matches.forEach((row) => {
       const tr = document.createElement("tr");
       const values = [
-        row[polizaIndex] || "-",
-        row[companiaIndex] || "-",
-        row[efectoIndex] || "-",
-        row[vencIndex] || "-",
-        row[estadoIndex] || "-",
-        row[primaIndex] ? euroFormatter.format(Number(row[primaIndex]) || 0) : "-",
+        row.poliza_numero || "-",
+        row.compania || "-",
+        row.fecha_efecto || "-",
+        row.fecha_vencimiento || "-",
+        row.estado || "-",
+        row.prima_total ? euroFormatter.format(Number(row.prima_total) || 0) : "-",
       ];
       const cols = ["poliza", "compania", "efecto", "vencimiento", "estado", "prima"];
       values.forEach((value, idx) => {

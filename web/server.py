@@ -7369,6 +7369,29 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, {"rows": [dict(r) for r in rows]})
             return
 
+        if path == "/api/seguros_cliente":
+            cliente_id = params.get("cliente_id", [""])[0]
+            empresa_id = params.get("empresa_id", [""])[0]
+            if not cliente_id:
+                json_response(self, {"error": "cliente_id requerido"}, status=400)
+                return
+            where = ["cliente_id = ?"]
+            values = [cliente_id]
+            if empresa_id:
+                where.append("empresa_id = ?")
+                values.append(empresa_id)
+            rows = conn.execute(
+                f"""
+                SELECT id, cliente_id, compania, poliza_numero, fecha_efecto, fecha_vencimiento, estado, prima_total, tomador
+                FROM seguros
+                WHERE {' AND '.join(where)}
+                ORDER BY COALESCE(fecha_efecto, created_at) DESC
+                """,
+                values,
+            ).fetchall()
+            json_response(self, {"rows": [dict(r) for r in rows]})
+            return
+
         if path == "/api/seguros_insights":
             empresa_id = params.get("empresa_id", [""])[0]
             if not empresa_id:
