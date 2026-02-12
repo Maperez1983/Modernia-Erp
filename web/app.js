@@ -10415,10 +10415,15 @@ const saveSegurosOcrRecord = async () => {
         }
         return;
       }
+      if (data.cliente_id) {
+        state.segurosOcrClienteId = data.cliente_id;
+      }
       if (segurosOcrSaveStatus) {
         segurosOcrSaveStatus.textContent = "Guardado en BDT.";
       }
-      state.segurosOcrClienteId = "";
+      if (!data.cliente_id) {
+        state.segurosOcrClienteId = "";
+      }
       state.segurosOcrQuality = null;
       loadSegurosCrm();
     })

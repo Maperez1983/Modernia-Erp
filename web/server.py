@@ -4723,6 +4723,8 @@ class Handler(BaseHTTPRequestHandler):
                     "prima_total",
                 ):
                     incoming = payload.get(key)
+                    if key == "cliente_id" and not str(incoming or "").strip():
+                        incoming = cliente_id
                     if incoming in (None, ""):
                         continue
                     current = row[key] if key in row.keys() else None
@@ -4842,6 +4844,7 @@ class Handler(BaseHTTPRequestHandler):
                     {
                         "ok": True,
                         "id": poliza_id,
+                        "cliente_id": cliente_id,
                         "doc_id": doc_id,
                         "ocr_quality": ocr_quality,
                         "duplicate_of": dup_id,
@@ -4899,7 +4902,15 @@ class Handler(BaseHTTPRequestHandler):
                         ),
                     )
             conn.commit()
-            json_response(self, {"ok": True, "id": poliza_id, "duplicate_of": dup_id})
+            json_response(
+                self,
+                {
+                    "ok": True,
+                    "id": poliza_id,
+                    "cliente_id": cliente_id,
+                    "duplicate_of": dup_id,
+                },
+            )
             return
         elif parsed.path == "/api/fin_asesoramientos":
             cliente1_id = ensure_cliente_for_financiacion(
