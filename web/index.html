@@ -1124,6 +1124,25 @@
             <button class="tab" type="button" data-seguros-tab="campanas">Campañas</button>
             <button class="tab" type="button" data-seguros-tab="contabilidad">Contabilidad Seguros</button>
           </div>
+          <datalist id="segurosCompaniasList">
+            <option value="Allianz"></option>
+            <option value="AXA"></option>
+            <option value="Mapfre"></option>
+            <option value="Reale"></option>
+            <option value="Occident"></option>
+            <option value="Ocaso"></option>
+            <option value="Pelayo"></option>
+            <option value="Santa Lucia"></option>
+            <option value="Zurich"></option>
+            <option value="Generali"></option>
+            <option value="Mutua Propietarios"></option>
+            <option value="Adeslas"></option>
+            <option value="Sanitas"></option>
+            <option value="DKV"></option>
+            <option value="ARAG"></option>
+            <option value="Fiatc"></option>
+            <option value="Lloyd's"></option>
+          </datalist>
           <div class="seguros-tab" data-seguros-tab="alta">
           <div class="form-card">
             <div class="section-head">
@@ -1185,7 +1204,7 @@
               </label>
               <label>
                 Compañía
-                <input id="seguroOcrCompania" />
+                <input id="seguroOcrCompania" list="segurosCompaniasList" />
               </label>
               <label>
                 Nº póliza
@@ -1256,7 +1275,7 @@
               </label>
               <label>
                 Compañía
-                <input id="segurosBdtOcrCompania" />
+                <input id="segurosBdtOcrCompania" list="segurosCompaniasList" />
               </label>
               <label>
                 Nº póliza
@@ -1469,7 +1488,7 @@
               </label>
               <label>
                 Compañía
-                <input name="compania" />
+                <input name="compania" list="segurosCompaniasList" />
               </label>
               <label>
                 Propuesta
@@ -1598,7 +1617,7 @@
             <form id="segurosCampanasForm" class="form-grid">
               <label>
                 Compañía
-                <input name="compania" />
+                <input name="compania" list="segurosCompaniasList" />
               </label>
               <label>
                 Nombre campaña
@@ -1652,7 +1671,7 @@
             <form id="segurosComisionesForm" class="form-grid">
               <label>
                 Compañía
-                <input name="compania" />
+                <input name="compania" list="segurosCompaniasList" />
               </label>
               <label>
                 Ramo
