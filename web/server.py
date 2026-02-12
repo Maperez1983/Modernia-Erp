@@ -7083,6 +7083,7 @@ class Handler(BaseHTTPRequestHandler):
                 {
                     "cliente": dict(cliente),
                     "empresas": [dict(r) for r in empresas],
+                    "servicios": [dict(r) for r in empresas],
                 },
             )
             return

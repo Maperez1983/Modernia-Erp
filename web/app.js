@@ -9946,7 +9946,7 @@ const getClienteServicios = async (clienteId) => {
   if (!clienteId) return [];
   try {
     const data = await api(`/api/cliente?id=${encodeURIComponent(clienteId)}`);
-    return data?.servicios || [];
+    return data?.servicios || data?.empresas || [];
   } catch {
     return [];
   }
@@ -12080,13 +12080,13 @@ const openClienteDetail = (id) => {
       const hipotecasTab = clienteTabs.querySelector('[data-tab="hipotecas"]');
       const docsTab = clienteTabs.querySelector('[data-tab="docs"]');
       if (gestoriaTab) gestoriaTab.classList.toggle("hidden", !hasGestoria);
-      if (segurosTab) segurosTab.classList.toggle("hidden", !hasSeguros);
+      if (segurosTab) segurosTab.classList.toggle("hidden", false);
       if (inmoTab) inmoTab.classList.toggle("hidden", !hasInmo);
       if (hipotecasTab) hipotecasTab.classList.toggle("hidden", !hasHipotecas);
       if (docsTab) docsTab.classList.toggle("hidden", false);
     }
     if (clienteTabSeguros) {
-      clienteTabSeguros.classList.toggle("hidden", !hasSeguros);
+      clienteTabSeguros.classList.toggle("hidden", false);
     }
     if (clienteTabInmobiliaria) {
       clienteTabInmobiliaria.classList.toggle("hidden", !hasInmo);
@@ -12129,11 +12129,7 @@ const openClienteDetail = (id) => {
         gestoriaClienteAgendaInfo.textContent = "";
       }
     }
-    if (hasSeguros) {
-      loadClienteSeguros(cliente, fincasEmpresaId);
-    } else if (clienteSegurosFicha) {
-      clienteSegurosFicha.innerHTML = "<p class='muted'>Sin pólizas vinculadas.</p>";
-    }
+    loadClienteSeguros(cliente, fincasEmpresaId);
     const docsDefault = hasSeguros
       ? "seguros"
       : hasGestoria
