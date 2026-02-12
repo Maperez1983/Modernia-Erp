@@ -9911,24 +9911,74 @@ const lookupClienteByNif = async (nif) => {
   }
 };
 
+const lookupClienteByNombre = async (nombre) => {
+  const text = String(nombre || "").trim();
+  if (!text) return null;
+  const params = new URLSearchParams({
+    q: text,
+    include_id: "1",
+    limit: "100",
+  });
+  try {
+    const data = await api(`/api/clientes?${params.toString()}`);
+    const columns = data?.columns || [];
+    const rows = data?.rows || [];
+    const idIndex = columns.indexOf("id");
+    const nombreIndex = columns.indexOf("nombre");
+    if (idIndex < 0 || nombreIndex < 0) return null;
+    const wanted = normalizeName(text);
+    const exact = rows.find((row) => normalizeName(row[nombreIndex] || "") === wanted);
+    if (exact) {
+      return { id: exact[idIndex], nombre: exact[nombreIndex] || text };
+    }
+    const soft = rows.find((row) => {
+      const n = normalizeName(row[nombreIndex] || "");
+      return n && (n.includes(wanted) || wanted.includes(n));
+    });
+    if (soft) {
+      return { id: soft[idIndex], nombre: soft[nombreIndex] || text };
+    }
+  } catch {}
+  return null;
+};
+
+const getClienteServicios = async (clienteId) => {
+  if (!clienteId) return [];
+  try {
+    const data = await api(`/api/cliente?id=${encodeURIComponent(clienteId)}`);
+    return data?.servicios || [];
+  } catch {
+    return [];
+  }
+};
+
 const resolveOcrClienteMatch = async (type, fields) => {
   const ctx = getOcrClienteContext(type);
   if (!ctx) return;
   const nifRaw = fields.nif || fields.dni || "";
   const nif = String(nifRaw || "").trim();
-  if (!nif) {
-    ctx.setId("");
-    setOcrClienteUi(ctx, {
-      status: "DNI no detectado. Introduce el DNI para validar el cliente.",
-      showCreate: false,
-      showAdd: false,
-      showOpen: false,
-    });
-    return;
-  }
   setOcrClienteUi(ctx, { status: "Comprobando cliente..." });
-  const data = await lookupClienteByNif(nif);
-  if (!data || !data.found) {
+  let clienteId = "";
+  let clienteNombre = "";
+  let servicios = [];
+  if (nif) {
+    const data = await lookupClienteByNif(nif);
+    if (data && data.found) {
+      const cliente = data.cliente || {};
+      clienteId = cliente.id || data.cliente_id || "";
+      clienteNombre = cliente.nombre || "";
+      servicios = data.servicios || [];
+    }
+  }
+  if (!clienteId) {
+    const byName = await lookupClienteByNombre(fields.tomador || "");
+    if (byName && byName.id) {
+      clienteId = byName.id;
+      clienteNombre = byName.nombre || "";
+      servicios = await getClienteServicios(clienteId);
+    }
+  }
+  if (!clienteId) {
     ctx.setId("");
     setOcrClienteUi(ctx, {
       status: "Cliente no encontrado. Puedes crearlo desde aquí.",
@@ -9938,23 +9988,21 @@ const resolveOcrClienteMatch = async (type, fields) => {
     });
     return;
   }
-  const cliente = data.cliente || {};
-  const servicios = data.servicios || [];
-  const hasSeguros = data.has_servicio === false ? false : servicios.some((row) => normalizeServicio(row.servicio) === "seguros");
-  ctx.setId(cliente.id || data.cliente_id || "");
-  if (data.restricted || data.has_servicio === false) {
+  ctx.setId(clienteId);
+  const hasSeguros = servicios.some((row) => normalizeServicio(row.servicio) === "seguros");
+  if (!hasSeguros) {
     setOcrClienteUi(ctx, {
       status: "Cliente existe en el sistema. Puedes asignar Seguros.",
       showCreate: false,
       showAdd: true,
-      showOpen: false,
+      showOpen: true,
     });
     return;
   }
   setOcrClienteUi(ctx, {
-    status: `Cliente encontrado: ${cliente.nombre || "Sin nombre"} · ${cliente.nif || nif}`,
+    status: `Cliente encontrado: ${clienteNombre || "Sin nombre"}${nif ? ` · ${nif}` : ""}`,
     showCreate: false,
-    showAdd: !hasSeguros,
+    showAdd: false,
     showOpen: true,
   });
 };
@@ -13350,7 +13398,12 @@ if (segurosBdtOcrLink) {
       if (segurosBdtOcrStatus) segurosBdtOcrStatus.textContent = "Selecciona una póliza.";
       return;
     }
-    const fields = getSegurosBdtOcrFields();
+    let fields = getSegurosBdtOcrFields();
+    await resolveOcrClienteMatch("bdt", getSegurosBdtOcrClienteFields());
+    fields = {
+      ...fields,
+      cliente_id: state.segurosBdtOcrClienteId || fields.cliente_id || "",
+    };
     const file =
       segurosBdtOcrFile && segurosBdtOcrFile.files && segurosBdtOcrFile.files.length
         ? segurosBdtOcrFile.files[0]
