@@ -13408,14 +13408,26 @@ if (segurosBdtOcrLink) {
         return;
       }
     }
-    fetch("/api/seguros_enrich", {
+    fetch("/api/seguros_update", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: recordId, ...fields }),
+      body: JSON.stringify({
+        id: recordId,
+        cliente_id: fields.cliente_id || "",
+      }),
     })
       .then((res) => res.json())
-      .then(async (resp) => {
-        if (resp.error) {
+      .then(async (bindResp) => {
+        if (bindResp?.error) {
+          if (segurosBdtOcrStatus) segurosBdtOcrStatus.textContent = bindResp.error;
+          return;
+        }
+        const resp = await fetch("/api/seguros_enrich", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: recordId, ...fields }),
+        }).then((res) => res.json());
+        if (resp?.error) {
           if (segurosBdtOcrStatus) segurosBdtOcrStatus.textContent = resp.error;
           return;
         }
@@ -13425,6 +13437,7 @@ if (segurosBdtOcrLink) {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               id: recordId,
+              cliente_id: fields.cliente_id || "",
               poliza_key: upload.key || "",
               poliza_url: upload.public_url || "",
             }),
