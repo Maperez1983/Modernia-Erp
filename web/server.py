@@ -4726,6 +4726,12 @@ class Handler(BaseHTTPRequestHandler):
                     if incoming in (None, ""):
                         continue
                     current = row[key] if key in row.keys() else None
+                    if key == "cliente_id":
+                        # En altas manuales, si ya existe la póliza, priorizamos el vínculo
+                        # explícito al cliente actual para evitar "alta correcta" sin reflejo en ficha.
+                        if str(incoming).strip() and str(current or "").strip() != str(incoming).strip():
+                            updates[key] = incoming
+                        continue
                     if current is None or str(current).strip() == "":
                         updates[key] = incoming
                 if updates:

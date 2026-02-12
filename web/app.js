@@ -11842,57 +11842,64 @@ const loadClienteSeguros = (cliente, empresaId) => {
   if (!clienteSegurosFicha) {
     return;
   }
-  if (!empresaId) {
-    clienteSegurosFicha.innerHTML = "<p class='muted'>Sin empresa de seguros.</p>";
+  const clienteId = String(cliente.id || "").trim();
+  if (!clienteId) {
+    clienteSegurosFicha.innerHTML = "<p class='muted'>Cliente sin identificador.</p>";
     return;
   }
-  const clienteId = String(cliente.id || "").trim();
-  const params = new URLSearchParams({ cliente_id: clienteId, empresa_id: empresaId });
-  api(`/api/seguros_cliente?${params.toString()}`).then(async (data) => {
-    let matches = data.rows || [];
-    if (!matches.length && clienteId) {
-      const fallback = await api(`/api/seguros_cliente?cliente_id=${encodeURIComponent(clienteId)}`);
-      matches = fallback.rows || [];
-    }
-    if (!matches.length) {
-      clienteSegurosFicha.innerHTML = "<p class='muted'>Sin pólizas vinculadas.</p>";
-      return;
-    }
-    const table = document.createElement("table");
-    const thead = document.createElement("thead");
-    const trHead = document.createElement("tr");
-    ["poliza", "compania", "efecto", "vencimiento", "estado", "prima"].forEach((col) => {
-      const th = document.createElement("th");
-      th.textContent = formatHeader(col);
-      trHead.appendChild(th);
-    });
-    thead.appendChild(trHead);
-    table.appendChild(thead);
-    const tbody = document.createElement("tbody");
-    matches.forEach((row) => {
-      const tr = document.createElement("tr");
-      const values = [
-        row.poliza_numero || "-",
-        row.compania || "-",
-        row.fecha_efecto || "-",
-        row.fecha_vencimiento || "-",
-        row.estado || "-",
-        row.prima_total ? euroFormatter.format(Number(row.prima_total) || 0) : "-",
-      ];
-      const cols = ["poliza", "compania", "efecto", "vencimiento", "estado", "prima"];
-      values.forEach((value, idx) => {
-        const td = document.createElement("td");
-        if (!applyCompanyCell(td, cols[idx], value, { compact: true })) {
-          td.textContent = value;
-        }
-        tr.appendChild(td);
+  const params = new URLSearchParams({ cliente_id: clienteId });
+  if (empresaId) {
+    params.set("empresa_id", empresaId);
+  }
+  api(`/api/seguros_cliente?${params.toString()}`)
+    .then(async (data) => {
+      let matches = data.rows || [];
+      if (!matches.length && empresaId) {
+        const fallback = await api(`/api/seguros_cliente?cliente_id=${encodeURIComponent(clienteId)}`);
+        matches = fallback.rows || [];
+      }
+      if (!matches.length) {
+        clienteSegurosFicha.innerHTML = "<p class='muted'>Sin pólizas vinculadas.</p>";
+        return;
+      }
+      const table = document.createElement("table");
+      const thead = document.createElement("thead");
+      const trHead = document.createElement("tr");
+      ["poliza", "compania", "efecto", "vencimiento", "estado", "prima"].forEach((col) => {
+        const th = document.createElement("th");
+        th.textContent = formatHeader(col);
+        trHead.appendChild(th);
       });
-      tbody.appendChild(tr);
+      thead.appendChild(trHead);
+      table.appendChild(thead);
+      const tbody = document.createElement("tbody");
+      matches.forEach((row) => {
+        const tr = document.createElement("tr");
+        const values = [
+          row.poliza_numero || "-",
+          row.compania || "-",
+          row.fecha_efecto || "-",
+          row.fecha_vencimiento || "-",
+          row.estado || "-",
+          row.prima_total ? euroFormatter.format(Number(row.prima_total) || 0) : "-",
+        ];
+        const cols = ["poliza", "compania", "efecto", "vencimiento", "estado", "prima"];
+        values.forEach((value, idx) => {
+          const td = document.createElement("td");
+          if (!applyCompanyCell(td, cols[idx], value, { compact: true })) {
+            td.textContent = value;
+          }
+          tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+      clienteSegurosFicha.innerHTML = "";
+      clienteSegurosFicha.appendChild(table);
+    })
+    .catch(() => {
+      clienteSegurosFicha.innerHTML = "<p class='muted'>No se pudieron cargar las pólizas.</p>";
     });
-    table.appendChild(tbody);
-    clienteSegurosFicha.innerHTML = "";
-    clienteSegurosFicha.appendChild(table);
-  });
 };
 
 const openClienteDetail = (id) => {
