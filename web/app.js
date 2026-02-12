@@ -11848,8 +11848,12 @@ const loadClienteSeguros = (cliente, empresaId) => {
   }
   const clienteId = String(cliente.id || "").trim();
   const params = new URLSearchParams({ cliente_id: clienteId, empresa_id: empresaId });
-  api(`/api/seguros_cliente?${params.toString()}`).then((data) => {
+  api(`/api/seguros_cliente?${params.toString()}`).then(async (data) => {
     let matches = data.rows || [];
+    if (!matches.length && clienteId) {
+      const fallback = await api(`/api/seguros_cliente?cliente_id=${encodeURIComponent(clienteId)}`);
+      matches = fallback.rows || [];
+    }
     if (!matches.length) {
       clienteSegurosFicha.innerHTML = "<p class='muted'>Sin pólizas vinculadas.</p>";
       return;
