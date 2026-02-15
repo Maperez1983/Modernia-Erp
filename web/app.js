@@ -503,6 +503,8 @@ const clienteTabServicios = document.getElementById("clienteTabServicios");
 const clienteTabDocs = document.getElementById("clienteTabDocs");
 const clienteTabFacturas = document.getElementById("clienteTabFacturas");
 const clienteTabTrabajos = document.getElementById("clienteTabTrabajos");
+const clienteTrabajosPlanificados = document.getElementById("clienteTrabajosPlanificados");
+const clienteProfesionalOperativaBlock = document.getElementById("clienteProfesionalOperativaBlock");
 const clienteDocsTabs = document.getElementById("clienteDocsTabs");
 const clienteDocsSeguros = document.getElementById("clienteDocsSeguros");
 const clienteDocsGestoria = document.getElementById("clienteDocsGestoria");
@@ -12435,6 +12437,147 @@ const loadClienteHistoricoServicios = async (clienteId, empresas = [], prefetche
   clienteTrabajos.appendChild(table);
 };
 
+const loadClienteTrabajosPlanificados = async (clienteId, empresas = []) => {
+  if (!clienteTrabajosPlanificados) return;
+  if (!clienteId) {
+    clienteTrabajosPlanificados.innerHTML = "<p class='muted'>Sin cliente seleccionado.</p>";
+    return;
+  }
+  const serviceSet = new Set((empresas || []).map((row) => normalizeSimple(row.servicio || "")));
+  if (!serviceSet.size) {
+    clienteTrabajosPlanificados.innerHTML = "<p class='muted'>Sin servicios asignados.</p>";
+    return;
+  }
+  const hasGestoria = serviceSet.has("gestoria") || serviceSet.has("gestoría");
+  const hasSeguros = serviceSet.has("seguros");
+  const hasFin = serviceSet.has("financiaciones") || serviceSet.has("hipotecas");
+  const hasInmo = serviceSet.has("inmobiliaria");
+  try {
+    const [
+      gestoriaCfg,
+      contaTasks,
+      modelos,
+      trabajosGestoria,
+      accionesGestoria,
+      accionesSeguros,
+      accionesFin,
+      accionesInmo,
+    ] = await Promise.all([
+      hasGestoria
+        ? api(`/api/cliente_gestoria?cliente_id=${encodeURIComponent(clienteId)}`).catch(() => ({ row: {} }))
+        : Promise.resolve({ row: {} }),
+      hasGestoria
+        ? api(`/api/gestoria_conta_tasks?cliente_id=${encodeURIComponent(clienteId)}`).catch(() => ({ rows: [] }))
+        : Promise.resolve({ rows: [] }),
+      hasGestoria
+        ? api(`/api/gestoria_modelos?cliente_id=${encodeURIComponent(clienteId)}`).catch(() => ({ rows: [] }))
+        : Promise.resolve({ rows: [] }),
+      hasGestoria
+        ? api(`/api/gestoria_trabajos?cliente_id=${encodeURIComponent(clienteId)}`).catch(() => ({ rows: [] }))
+        : Promise.resolve({ rows: [] }),
+      hasGestoria
+        ? api(`/api/acciones?servicio=gestoria&cliente_id=${encodeURIComponent(clienteId)}`).catch(() => ({ rows: [] }))
+        : Promise.resolve({ rows: [] }),
+      hasSeguros
+        ? api(`/api/acciones?servicio=seguros&cliente_id=${encodeURIComponent(clienteId)}`).catch(() => ({ rows: [] }))
+        : Promise.resolve({ rows: [] }),
+      hasFin
+        ? api(`/api/acciones?servicio=financiaciones&cliente_id=${encodeURIComponent(clienteId)}`).catch(() => ({ rows: [] }))
+        : Promise.resolve({ rows: [] }),
+      hasInmo
+        ? api(`/api/acciones?servicio=inmobiliaria&cliente_id=${encodeURIComponent(clienteId)}`).catch(() => ({ rows: [] }))
+        : Promise.resolve({ rows: [] }),
+    ]);
+    const cfg = gestoriaCfg.row || {};
+    const pendingConta = (contaTasks.rows || []).filter((row) => {
+      const estado = normalizeSimple(row.estado || "");
+      return !estado || (!estado.includes("hecho") && !estado.includes("presentado") && !estado.includes("final"));
+    }).length;
+    const pendingModelos = (modelos.rows || []).filter((row) => {
+      const estado = normalizeSimple(row.estado || "");
+      return !estado || (!estado.includes("presentado") && !estado.includes("hecho"));
+    }).length;
+    const pendingGestoriaJobs = (trabajosGestoria.rows || []).filter((row) => {
+      const estado = normalizeSimple(row.estado || "");
+      return !estado || (!estado.includes("final") && !estado.includes("cancel"));
+    }).length;
+    const pendingGestoriaAcciones = (accionesGestoria.rows || []).filter((row) => {
+      const estado = normalizeSimple(row.estado || "");
+      return !estado || (!estado.includes("hecho") && !estado.includes("final") && !estado.includes("cancel"));
+    }).length;
+    const pendingSegurosAcciones = (accionesSeguros.rows || []).filter((row) => {
+      const estado = normalizeSimple(row.estado || "");
+      return !estado || (!estado.includes("hecho") && !estado.includes("final") && !estado.includes("cancel"));
+    }).length;
+    const pendingFinAcciones = (accionesFin.rows || []).filter((row) => {
+      const estado = normalizeSimple(row.estado || "");
+      return !estado || (!estado.includes("hecho") && !estado.includes("final") && !estado.includes("cancel"));
+    }).length;
+    const pendingInmoAcciones = (accionesInmo.rows || []).filter((row) => {
+      const estado = normalizeSimple(row.estado || "");
+      return !estado || (!estado.includes("hecho") && !estado.includes("final") && !estado.includes("cancel"));
+    }).length;
+
+    const planRows = [];
+    if (hasGestoria) {
+      if (Number(cfg.mod_contable || 0)) {
+        planRows.push({ servicio: "Gestoría", tarea: "Contabilidad periódica", indicador: `${pendingConta} pendientes`, estado: pendingConta ? "En curso" : "Al día" });
+      }
+      if (Number(cfg.mod_fiscal || 0)) {
+        planRows.push({ servicio: "Gestoría", tarea: "Modelos fiscales", indicador: `${pendingModelos} pendientes`, estado: pendingModelos ? "Pendiente" : "Al día" });
+      }
+      if (Number(cfg.mod_laboral || 0)) {
+        planRows.push({ servicio: "Gestoría", tarea: "Gestiones laborales", indicador: `${pendingGestoriaJobs} en curso`, estado: pendingGestoriaJobs ? "En curso" : "Sin carga" });
+      }
+      if (Number(cfg.mod_renta || 0)) {
+        planRows.push({ servicio: "Gestoría", tarea: "Campaña renta / expedientes", indicador: `${pendingGestoriaAcciones} acciones`, estado: pendingGestoriaAcciones ? "Seguimiento" : "Sin pendientes" });
+      }
+      if (Number(cfg.mod_registro || 0) || Number(cfg.mod_trafico || 0) || Number(cfg.mod_puntuales || 0)) {
+        planRows.push({ servicio: "Gestoría", tarea: "Gestiones administrativas", indicador: `${pendingGestoriaAcciones} acciones`, estado: pendingGestoriaAcciones ? "Seguimiento" : "Sin pendientes" });
+      }
+    }
+    if (hasSeguros) {
+      planRows.push({ servicio: "Seguros", tarea: "Seguimiento de pólizas y renovaciones", indicador: `${pendingSegurosAcciones} acciones`, estado: pendingSegurosAcciones ? "Seguimiento" : "Sin pendientes" });
+    }
+    if (hasFin) {
+      planRows.push({ servicio: "Financiaciones", tarea: "Seguimiento de expedientes", indicador: `${pendingFinAcciones} acciones`, estado: pendingFinAcciones ? "Seguimiento" : "Sin pendientes" });
+    }
+    if (hasInmo) {
+      planRows.push({ servicio: "Inmobiliaria", tarea: "Gestión comercial activa", indicador: `${pendingInmoAcciones} acciones`, estado: pendingInmoAcciones ? "Seguimiento" : "Sin pendientes" });
+    }
+
+    if (!planRows.length) {
+      clienteTrabajosPlanificados.innerHTML = "<p class='muted'>No hay módulos configurados aún para generar plan de trabajo.</p>";
+      return;
+    }
+    const table = document.createElement("table");
+    const thead = document.createElement("thead");
+    const trHead = document.createElement("tr");
+    ["Servicio", "Trabajo a realizar", "Indicador", "Estado"].forEach((col) => {
+      const th = document.createElement("th");
+      th.textContent = col;
+      trHead.appendChild(th);
+    });
+    thead.appendChild(trHead);
+    table.appendChild(thead);
+    const tbody = document.createElement("tbody");
+    planRows.forEach((row) => {
+      const tr = document.createElement("tr");
+      [row.servicio, row.tarea, row.indicador, row.estado].forEach((value) => {
+        const td = document.createElement("td");
+        td.textContent = value;
+        tr.appendChild(td);
+      });
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    clienteTrabajosPlanificados.innerHTML = "";
+    clienteTrabajosPlanificados.appendChild(table);
+  } catch {
+    clienteTrabajosPlanificados.innerHTML = "<p class='muted'>No se pudo cargar el plan operativo.</p>";
+  }
+};
+
 const renderClienteProfesionalScope = (empresas = []) => {
   if (!clienteProfesionalScope) return;
   const serviceSet = new Set((empresas || []).map((row) => normalizeSimple(row.servicio || "")));
@@ -12851,13 +12994,14 @@ const openClienteDetail = (id) => {
       populateEmpresasSelect(clienteAssignEmpresa);
     }
     loadClienteFacturasServicios(id, data.empresas || [], data.facturas || []);
+    loadClienteTrabajosPlanificados(id, data.empresas || []);
     loadClienteHistoricoServicios(id, data.empresas || [], data.historico || []);
     if (clienteProfesionalHint) {
       if (hasGestoria) {
-        clienteProfesionalHint.textContent = "Gestoría activa: gestiona CNAE, IAE, actividad e IBAN.";
+        clienteProfesionalHint.textContent = "Gestoría activa: configura CNAE, IAE, actividad e IBAN. La ejecución diaria está en la pestaña Trabajos.";
       } else if (hasSeguros || hasHipotecas || hasInmo) {
         clienteProfesionalHint.textContent =
-          "Vista profesional activa por servicios adscritos. Los formularios de Gestoría se muestran al asignar ese servicio.";
+          "Aquí configuras datos profesionales por servicio. El seguimiento operativo está en la pestaña Trabajos.";
       } else {
         clienteProfesionalHint.textContent = "Asigna servicios al cliente para activar datos profesionales.";
       }
@@ -12867,6 +13011,9 @@ const openClienteDetail = (id) => {
     }
     if (clienteGestoriaForm) {
       clienteGestoriaForm.classList.toggle("hidden", !hasGestoria);
+    }
+    if (clienteProfesionalOperativaBlock) {
+      clienteProfesionalOperativaBlock.classList.add("hidden");
     }
     if (gestoriaModeloForm) {
       gestoriaModeloForm.classList.toggle("hidden", !hasGestoria);

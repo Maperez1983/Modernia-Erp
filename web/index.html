@@ -3015,7 +3015,7 @@
             <button class="tab" type="button" data-tab="servicios">Servicios</button>
             <button class="tab" type="button" data-tab="docs">Documentación</button>
             <button class="tab" type="button" data-tab="facturas">Facturas servicios</button>
-            <button class="tab" type="button" data-tab="trabajos">Histórico trabajos</button>
+            <button class="tab" type="button" data-tab="trabajos">Trabajos</button>
           </div>
           <div id="clienteTabDatos">
             <div class="grid" id="clienteDetailGrid"></div>
@@ -3220,6 +3220,10 @@
             <datalist id="cnaeCatalogo"></datalist>
             <datalist id="iaeCatalogo"></datalist>
             <div class="form-card">
+              <h3>Operativa de trabajos</h3>
+              <p class="muted">La ejecución diaria se gestiona en la pestaña Trabajos, según la configuración de servicios.</p>
+            </div>
+            <div class="form-card hidden" id="clienteProfesionalOperativaBlock">
               <h3>Módulos activos</h3>
               <p class="muted">Accede a la operativa específica del cliente.</p>
               <div class="tabs" id="gestoriaModuleTabs">
@@ -3637,7 +3641,12 @@
           </div>
           <div id="clienteTabTrabajos" class="hidden">
             <div class="form-card">
-              <h3>Trabajos realizados</h3>
+              <h3>Trabajos a realizar</h3>
+              <p class="muted">Plan operativo generado desde la configuración de servicios del cliente.</p>
+              <div id="clienteTrabajosPlanificados"></div>
+            </div>
+            <div class="form-card">
+              <h3>Histórico de trabajos</h3>
               <div id="clienteTrabajos"></div>
             </div>
           </div>
