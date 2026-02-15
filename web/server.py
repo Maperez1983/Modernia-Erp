@@ -7403,7 +7403,11 @@ class Handler(BaseHTTPRequestHandler):
                 values.append(empresa_id)
             rows = conn.execute(
                 f"""
-                SELECT id, cliente_id, compania, poliza_numero, fecha_efecto, fecha_vencimiento, estado, prima_total, tomador
+                SELECT
+                  id, cliente_id, empresa_id, compania, ramo, poliza_numero,
+                  fecha_efecto, fecha_vencimiento, estado, prima_neta, prima_total,
+                  tomador, estado_renovacion, renovacion_fecha, nueva_poliza_ref,
+                  colaborador, produccion, mes_creacion
                 FROM seguros
                 WHERE {' AND '.join(where)}
                 ORDER BY COALESCE(fecha_efecto, created_at) DESC
@@ -7469,7 +7473,11 @@ class Handler(BaseHTTPRequestHandler):
                             ensure_cliente_servicio_link(conn, cliente_id, empresa_id, "seguros", now)
                         rows = conn.execute(
                             """
-                            SELECT id, cliente_id, compania, poliza_numero, fecha_efecto, fecha_vencimiento, estado, prima_total, tomador
+                            SELECT
+                              id, cliente_id, empresa_id, compania, ramo, poliza_numero,
+                              fecha_efecto, fecha_vencimiento, estado, prima_neta, prima_total,
+                              tomador, estado_renovacion, renovacion_fecha, nueva_poliza_ref,
+                              colaborador, produccion, mes_creacion
                             FROM seguros
                             WHERE cliente_id = ?
                               AND (? = '' OR empresa_id = ?)
@@ -7482,13 +7490,22 @@ class Handler(BaseHTTPRequestHandler):
                         {
                             "id": r["id"],
                             "cliente_id": r["cliente_id"],
+                            "empresa_id": r["empresa_id"],
                             "compania": r["compania"],
+                            "ramo": r["ramo"],
                             "poliza_numero": r["poliza_numero"],
                             "fecha_efecto": r["fecha_efecto"],
                             "fecha_vencimiento": r["fecha_vencimiento"],
                             "estado": r["estado"],
+                            "prima_neta": r["prima_neta"],
                             "prima_total": r["prima_total"],
                             "tomador": r["tomador"],
+                            "estado_renovacion": r["estado_renovacion"],
+                            "renovacion_fecha": r["renovacion_fecha"],
+                            "nueva_poliza_ref": r["nueva_poliza_ref"],
+                            "colaborador": r["colaborador"],
+                            "produccion": r["produccion"],
+                            "mes_creacion": r["mes_creacion"],
                         }
                         for r in tomador_rows
                     ]

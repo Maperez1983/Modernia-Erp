@@ -1439,6 +1439,38 @@ body.crm-fin #companySummary {
   justify-content: flex-end;
 }
 
+.cliente-seguro-modal-content {
+  max-height: 80vh;
+  overflow: auto;
+}
+
+.cliente-seguro-meta {
+  display: grid;
+  gap: 6px;
+}
+
+.cliente-seguro-meta-line {
+  font-size: 14px;
+  color: var(--ink);
+}
+
+.cliente-seguro-highlights {
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.cliente-seguro-highlights h4 {
+  margin: 0;
+}
+
+.cliente-seguro-highlights ul {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--muted);
+}
+
 .agenda-time {
   font-weight: 600;
 }

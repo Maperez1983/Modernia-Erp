@@ -11843,6 +11843,109 @@ const loadAgendaGeneral = () => {
   });
 };
 
+const resolveSeguroVencimiento = (row) => {
+  const vencimiento = normalizeDateInput(row.fecha_vencimiento || "");
+  if (vencimiento) return vencimiento;
+  const calculado = addOneYear(row.fecha_efecto || "");
+  return calculado || "";
+};
+
+const buildSeguroHighlights = (row, cliente = {}) => {
+  const ramo = normalizeSimple(row.ramo || "");
+  const items = [];
+  if (ramo.includes("hogar")) {
+    items.push(`Direccion riesgo: ${String(cliente.direccion || "").trim() || "No informada"}`);
+    items.push(`Tomador: ${row.tomador || cliente.nombre || "-"}`);
+  } else if (ramo.includes("auto") || ramo.includes("vehiculo") || ramo.includes("coche")) {
+    items.push(`Tomador: ${row.tomador || cliente.nombre || "-"}`);
+    items.push(`Compania: ${row.compania || "-"}`);
+  } else if (ramo.includes("salud") || ramo.includes("vida")) {
+    items.push(`Asegurado principal: ${row.tomador || cliente.nombre || "-"}`);
+    items.push(`Estado: ${row.estado || "-"}`);
+  } else {
+    items.push(`Tomador: ${row.tomador || cliente.nombre || "-"}`);
+    items.push(`Ramo: ${row.ramo || "General"}`);
+  }
+  return items;
+};
+
+const openClienteSeguroDetail = (row, cliente = {}) => {
+  let modal = document.getElementById("clienteSeguroDetailModal");
+  if (!modal) {
+    modal = document.createElement("div");
+    modal.id = "clienteSeguroDetailModal";
+    modal.className = "modal hidden";
+    modal.innerHTML = `
+      <div class="modal-content cliente-seguro-modal-content">
+        <div class="modal-header">
+          <h3 class="cliente-seguro-modal-title"></h3>
+          <button type="button" class="ghost" data-close-cliente-seguro>Cerrar</button>
+        </div>
+        <div class="cliente-seguro-meta"></div>
+        <div class="cliente-seguro-highlights"></div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+    const close = () => {
+      modal.classList.add("hidden");
+      modal.classList.remove("open");
+    };
+    const closeBtn = modal.querySelector("[data-close-cliente-seguro]");
+    if (closeBtn) closeBtn.addEventListener("click", close);
+    modal.addEventListener("click", (event) => {
+      if (event.target === modal) close();
+    });
+  }
+  const title = modal.querySelector(".cliente-seguro-modal-title");
+  const meta = modal.querySelector(".cliente-seguro-meta");
+  const highlights = modal.querySelector(".cliente-seguro-highlights");
+  const vencimiento = resolveSeguroVencimiento(row) || "-";
+  if (title) {
+    title.textContent = `${row.compania || "Seguro"} · ${row.poliza_numero || "Sin numero"}`;
+  }
+  if (meta) {
+    meta.innerHTML = "";
+    const details = [
+      ["Tomador", row.tomador || cliente.nombre || "-"],
+      ["Ramo", row.ramo || "-"],
+      ["Estado", row.estado || "-"],
+      ["Fecha efecto", row.fecha_efecto || "-"],
+      ["Fecha vencimiento", vencimiento],
+      ["Prima neta", row.prima_neta ? euroFormatter.format(Number(row.prima_neta) || 0) : "-"],
+      ["Prima total", row.prima_total ? euroFormatter.format(Number(row.prima_total) || 0) : "-"],
+      ["Estado renovacion", row.estado_renovacion || "-"],
+      ["Fecha renovacion", row.renovacion_fecha || "-"],
+      ["Nueva poliza", row.nueva_poliza_ref || "-"],
+    ];
+    details.forEach(([label, value]) => {
+      const line = document.createElement("div");
+      line.className = "cliente-seguro-meta-line";
+      const strong = document.createElement("strong");
+      strong.textContent = `${label}: `;
+      const span = document.createElement("span");
+      span.textContent = value || "-";
+      line.appendChild(strong);
+      line.appendChild(span);
+      meta.appendChild(line);
+    });
+  }
+  if (highlights) {
+    highlights.innerHTML = "";
+    const titleEl = document.createElement("h4");
+    titleEl.textContent = "Aspectos relevantes";
+    highlights.appendChild(titleEl);
+    const list = document.createElement("ul");
+    buildSeguroHighlights(row, cliente).forEach((item) => {
+      const li = document.createElement("li");
+      li.textContent = item;
+      list.appendChild(li);
+    });
+    highlights.appendChild(list);
+  }
+  modal.classList.remove("hidden");
+  modal.classList.add("open");
+};
+
 const loadClienteSeguros = (cliente, empresaId) => {
   if (!clienteSegurosFicha) {
     return;
@@ -11875,7 +11978,7 @@ const loadClienteSeguros = (cliente, empresaId) => {
       const table = document.createElement("table");
       const thead = document.createElement("thead");
       const trHead = document.createElement("tr");
-      ["poliza", "compania", "efecto", "vencimiento", "estado", "prima"].forEach((col) => {
+      ["poliza", "compania", "ramo", "efecto", "vencimiento", "estado", "prima", "detalle"].forEach((col) => {
         const th = document.createElement("th");
         th.textContent = formatHeader(col);
         trHead.appendChild(th);
@@ -11885,15 +11988,17 @@ const loadClienteSeguros = (cliente, empresaId) => {
       const tbody = document.createElement("tbody");
       matches.forEach((row) => {
         const tr = document.createElement("tr");
+        const vencimiento = resolveSeguroVencimiento(row) || "-";
         const values = [
           row.poliza_numero || "-",
           row.compania || "-",
+          row.ramo || "-",
           row.fecha_efecto || "-",
-          row.fecha_vencimiento || "-",
+          vencimiento,
           row.estado || "-",
           row.prima_total ? euroFormatter.format(Number(row.prima_total) || 0) : "-",
         ];
-        const cols = ["poliza", "compania", "efecto", "vencimiento", "estado", "prima"];
+        const cols = ["poliza", "compania", "ramo", "efecto", "vencimiento", "estado", "prima"];
         values.forEach((value, idx) => {
           const td = document.createElement("td");
           if (!applyCompanyCell(td, cols[idx], value, { compact: true })) {
@@ -11901,6 +12006,18 @@ const loadClienteSeguros = (cliente, empresaId) => {
           }
           tr.appendChild(td);
         });
+        const actionTd = document.createElement("td");
+        const openBtn = document.createElement("button");
+        openBtn.type = "button";
+        openBtn.className = "secondary";
+        openBtn.textContent = "Abrir";
+        openBtn.addEventListener("click", (event) => {
+          event.stopPropagation();
+          openClienteSeguroDetail(row, cliente);
+        });
+        actionTd.appendChild(openBtn);
+        tr.appendChild(actionTd);
+        tr.addEventListener("click", () => openClienteSeguroDetail(row, cliente));
         tbody.appendChild(tr);
       });
       table.appendChild(tbody);
