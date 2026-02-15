@@ -11850,8 +11850,41 @@ const resolveSeguroVencimiento = (row) => {
   return calculado || "";
 };
 
+const hasSeguroRenewalAction = (row) => {
+  const estado = normalizeSimple(row.estado || "");
+  const estadoRenovacion = normalizeSimple(row.estado_renovacion || "");
+  if (row.renovacion_fecha || row.nueva_poliza_ref) return true;
+  if (estado.includes("baja") || estado.includes("cancel") || estado.includes("anulad")) return true;
+  if (!estadoRenovacion) return false;
+  return !estadoRenovacion.includes("autom");
+};
+
+const computeSeguroDisplayState = (row) => {
+  const baseVencimiento = resolveSeguroVencimiento(row);
+  const baseEstado = row.estado || "-";
+  if (!baseVencimiento) {
+    return { estado: baseEstado, vencimiento: "-" };
+  }
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  let vencDate = new Date(baseVencimiento);
+  if (Number.isNaN(vencDate.getTime())) {
+    return { estado: baseEstado, vencimiento: baseVencimiento };
+  }
+  const hasAction = hasSeguroRenewalAction(row);
+  if (vencDate < today && !hasAction) {
+    // Renovación tácita anual mientras no exista acción explícita.
+    while (vencDate < today) {
+      vencDate.setFullYear(vencDate.getFullYear() + 1);
+    }
+    return { estado: "Renovada auto", vencimiento: vencDate.toISOString().slice(0, 10) };
+  }
+  return { estado: baseEstado, vencimiento: baseVencimiento };
+};
+
 const buildSeguroHighlights = (row, cliente = {}) => {
   const ramo = normalizeSimple(row.ramo || "");
+  const computed = computeSeguroDisplayState(row);
   const items = [];
   if (ramo.includes("hogar")) {
     items.push(`Direccion riesgo: ${String(cliente.direccion || "").trim() || "No informada"}`);
@@ -11861,7 +11894,7 @@ const buildSeguroHighlights = (row, cliente = {}) => {
     items.push(`Compania: ${row.compania || "-"}`);
   } else if (ramo.includes("salud") || ramo.includes("vida")) {
     items.push(`Asegurado principal: ${row.tomador || cliente.nombre || "-"}`);
-    items.push(`Estado: ${row.estado || "-"}`);
+    items.push(`Estado: ${computed.estado || "-"}`);
   } else {
     items.push(`Tomador: ${row.tomador || cliente.nombre || "-"}`);
     items.push(`Ramo: ${row.ramo || "General"}`);
@@ -11899,7 +11932,8 @@ const openClienteSeguroDetail = (row, cliente = {}) => {
   const title = modal.querySelector(".cliente-seguro-modal-title");
   const meta = modal.querySelector(".cliente-seguro-meta");
   const highlights = modal.querySelector(".cliente-seguro-highlights");
-  const vencimiento = resolveSeguroVencimiento(row) || "-";
+  const computed = computeSeguroDisplayState(row);
+  const vencimiento = computed.vencimiento || "-";
   if (title) {
     title.textContent = `${row.compania || "Seguro"} · ${row.poliza_numero || "Sin numero"}`;
   }
@@ -11908,7 +11942,7 @@ const openClienteSeguroDetail = (row, cliente = {}) => {
     const details = [
       ["Tomador", row.tomador || cliente.nombre || "-"],
       ["Ramo", row.ramo || "-"],
-      ["Estado", row.estado || "-"],
+      ["Estado", computed.estado || "-"],
       ["Fecha efecto", row.fecha_efecto || "-"],
       ["Fecha vencimiento", vencimiento],
       ["Prima neta", row.prima_neta ? euroFormatter.format(Number(row.prima_neta) || 0) : "-"],
@@ -11988,14 +12022,14 @@ const loadClienteSeguros = (cliente, empresaId) => {
       const tbody = document.createElement("tbody");
       matches.forEach((row) => {
         const tr = document.createElement("tr");
-        const vencimiento = resolveSeguroVencimiento(row) || "-";
+        const computed = computeSeguroDisplayState(row);
         const values = [
           row.poliza_numero || "-",
           row.compania || "-",
           row.ramo || "-",
           row.fecha_efecto || "-",
-          vencimiento,
-          row.estado || "-",
+          computed.vencimiento || "-",
+          computed.estado || "-",
           row.prima_total ? euroFormatter.format(Number(row.prima_total) || 0) : "-",
         ];
         const cols = ["poliza", "compania", "ramo", "efecto", "vencimiento", "estado", "prima"];
