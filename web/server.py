@@ -3898,6 +3898,10 @@ class Handler(BaseHTTPRequestHandler):
             "/api/ai_seguros_copilot",
             "/api/ai_fin_copilot",
             "/api/s3_presign",
+            "/api/s3_multipart_start",
+            "/api/s3_multipart_presign",
+            "/api/s3_multipart_complete",
+            "/api/s3_multipart_abort",
             "/api/clientes",
             "/api/clientes_link",
             "/api/cliente_update",
@@ -3994,6 +3998,10 @@ class Handler(BaseHTTPRequestHandler):
             "/api/fin_checklist_update",
             "/api/ai_fin_copilot",
             "/api/s3_presign",
+            "/api/s3_multipart_start",
+            "/api/s3_multipart_presign",
+            "/api/s3_multipart_complete",
+            "/api/s3_multipart_abort",
         ):
             if not empresa_nombre:
                 json_response(self, {"error": "empresa_nombre requerido"}, status=400)
@@ -4058,6 +4066,10 @@ class Handler(BaseHTTPRequestHandler):
             "/api/fin_asesoramiento_ocr_guided",
             "/api/fin_asesoramiento_ocr_auto",
             "/api/s3_presign",
+            "/api/s3_multipart_start",
+            "/api/s3_multipart_presign",
+            "/api/s3_multipart_complete",
+            "/api/s3_multipart_abort",
             "/api/inmueble_checklist_generate",
             "/api/inmueble_checklist_update",
         ):
@@ -4124,6 +4136,146 @@ class Handler(BaseHTTPRequestHandler):
                 return
             public_url = f"https://{bucket}.s3.{region}.amazonaws.com/{key}"
             json_response(self, {"url": url, "key": key, "public_url": public_url})
+            return
+        if parsed.path == "/api/s3_multipart_start":
+            filename = payload.get("filename") or "archivo.pdf"
+            content_type = payload.get("content_type") or "application/pdf"
+            prefix = payload.get("prefix") or "docs"
+            file_size = int(payload.get("size") or 0)
+            client = s3_client()
+            if not client:
+                bucket, region = s3_config()
+                missing = []
+                if not bucket:
+                    missing.append("AWS_S3_BUCKET")
+                if not region:
+                    missing.append("AWS_REGION")
+                if not S3_BOTO3_AVAILABLE:
+                    missing.append("boto3")
+                detail = f" (faltan: {', '.join(missing)})" if missing else ""
+                json_response(self, {"error": f"S3 no configurado{detail}"}, status=400)
+                return
+            bucket, region = s3_config()
+            key = s3_safe_key(prefix, filename)
+            part_size = max(5 * 1024 * 1024, int(payload.get("part_size") or 8 * 1024 * 1024))
+            max_parts = 10000
+            if file_size and (file_size / part_size) > max_parts:
+                part_size = int((file_size / max_parts) + 1)
+            try:
+                created = client.create_multipart_upload(
+                    Bucket=bucket,
+                    Key=key,
+                    ContentType=content_type,
+                )
+            except Exception:
+                json_response(self, {"error": "No se pudo iniciar subida multipart"}, status=500)
+                return
+            upload_id = created.get("UploadId")
+            if not upload_id:
+                json_response(self, {"error": "UploadId no disponible"}, status=500)
+                return
+            public_url = f"https://{bucket}.s3.{region}.amazonaws.com/{key}"
+            json_response(
+                self,
+                {
+                    "key": key,
+                    "upload_id": upload_id,
+                    "part_size": part_size,
+                    "public_url": public_url,
+                },
+            )
+            return
+        if parsed.path == "/api/s3_multipart_presign":
+            key = (payload.get("key") or "").strip()
+            upload_id = (payload.get("upload_id") or "").strip()
+            try:
+                part_number = int(payload.get("part_number") or 0)
+            except Exception:
+                part_number = 0
+            if not key or not upload_id or part_number <= 0 or part_number > 10000:
+                json_response(self, {"error": "key, upload_id y part_number válidos requeridos"}, status=400)
+                return
+            client = s3_client()
+            bucket, region = s3_config()
+            if not client or not bucket or not region:
+                json_response(self, {"error": "S3 no configurado"}, status=400)
+                return
+            try:
+                url = client.generate_presigned_url(
+                    "upload_part",
+                    Params={
+                        "Bucket": bucket,
+                        "Key": key,
+                        "UploadId": upload_id,
+                        "PartNumber": part_number,
+                    },
+                    ExpiresIn=900,
+                )
+            except Exception:
+                json_response(self, {"error": "No se pudo firmar la parte"}, status=500)
+                return
+            json_response(self, {"url": url, "part_number": part_number})
+            return
+        if parsed.path == "/api/s3_multipart_complete":
+            key = (payload.get("key") or "").strip()
+            upload_id = (payload.get("upload_id") or "").strip()
+            if not key or not upload_id:
+                json_response(self, {"error": "key y upload_id requeridos"}, status=400)
+                return
+            client = s3_client()
+            bucket, region = s3_config()
+            if not client or not bucket or not region:
+                json_response(self, {"error": "S3 no configurado"}, status=400)
+                return
+            try:
+                parts = []
+                kwargs = {"Bucket": bucket, "Key": key, "UploadId": upload_id}
+                while True:
+                    listed = client.list_parts(**kwargs)
+                    for p in listed.get("Parts", []) or []:
+                        if p.get("PartNumber") and p.get("ETag"):
+                            parts.append({"PartNumber": p["PartNumber"], "ETag": p["ETag"]})
+                    if listed.get("IsTruncated"):
+                        kwargs["PartNumberMarker"] = listed.get("NextPartNumberMarker")
+                    else:
+                        break
+                if not parts:
+                    json_response(self, {"error": "No hay partes subidas para completar"}, status=400)
+                    return
+                parts.sort(key=lambda p: p["PartNumber"])
+                client.complete_multipart_upload(
+                    Bucket=bucket,
+                    Key=key,
+                    UploadId=upload_id,
+                    MultipartUpload={"Parts": parts},
+                )
+            except Exception:
+                json_response(self, {"error": "No se pudo completar la subida multipart"}, status=500)
+                return
+            public_url = f"https://{bucket}.s3.{region}.amazonaws.com/{key}"
+            json_response(self, {"ok": True, "key": key, "public_url": public_url})
+            return
+        if parsed.path == "/api/s3_multipart_abort":
+            key = (payload.get("key") or "").strip()
+            upload_id = (payload.get("upload_id") or "").strip()
+            if not key or not upload_id:
+                json_response(self, {"error": "key y upload_id requeridos"}, status=400)
+                return
+            client = s3_client()
+            bucket, region = s3_config()
+            if not client or not bucket or not region:
+                json_response(self, {"error": "S3 no configurado"}, status=400)
+                return
+            try:
+                client.abort_multipart_upload(
+                    Bucket=bucket,
+                    Key=key,
+                    UploadId=upload_id,
+                )
+            except Exception:
+                json_response(self, {"error": "No se pudo abortar la subida multipart"}, status=500)
+                return
+            json_response(self, {"ok": True})
             return
         if parsed.path == "/api/movimientos":
             conn.execute(

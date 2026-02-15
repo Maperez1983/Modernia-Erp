@@ -15,6 +15,8 @@ const setCrmMode = (mode = "") => {
 const UPLOAD_IMAGE_COMPRESS_MIN_BYTES = 500 * 1024;
 const UPLOAD_IMAGE_MAX_SIDE = 2200;
 const UPLOAD_IMAGE_QUALITY = 0.82;
+const S3_MULTIPART_MIN_BYTES = 10 * 1024 * 1024;
+const S3_MULTIPART_CONCURRENCY = 3;
 
 const isCompressibleImage = (file) => {
   const mime = String(file?.type || "").toLowerCase();
@@ -100,10 +102,152 @@ const uploadBlobToSignedUrl = (url, file, statusEl) =>
     xhr.send(file);
   });
 
+const uploadMultipartPartToSignedUrl = (url, blob, onPartProgress) =>
+  new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("PUT", url, true);
+    xhr.setRequestHeader("Content-Type", "application/octet-stream");
+    xhr.upload.onprogress = (event) => {
+      if (!event.lengthComputable) return;
+      onPartProgress?.(event.loaded);
+    };
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        onPartProgress?.(blob.size);
+        resolve();
+        return;
+      }
+      let message = `S3 part error ${xhr.status}`;
+      const text = String(xhr.responseText || "");
+      const msgMatch = text.match(/<Message>([^<]+)<\/Message>/i);
+      if (msgMatch && msgMatch[1]) {
+        message = msgMatch[1];
+      }
+      reject(new Error(message));
+    };
+    xhr.onerror = () => reject(new Error("Error de red durante subida multipart."));
+    xhr.send(blob);
+  });
+
+const uploadFileMultipartToS3 = async (file, prefix, statusEl) => {
+  const start = await fetch("/api/s3_multipart_start", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      filename: file.name || "archivo.bin",
+      content_type: file.type || "application/octet-stream",
+      prefix: prefix || "docs",
+      size: file.size || 0,
+    }),
+  }).then((res) => res.json());
+  if (start.error) {
+    throw new Error(start.error);
+  }
+  const key = start.key || "";
+  const uploadId = start.upload_id || "";
+  const partSize = Math.max(5 * 1024 * 1024, Number(start.part_size || 8 * 1024 * 1024));
+  if (!key || !uploadId) {
+    throw new Error("No se pudo iniciar multipart.");
+  }
+
+  const partCount = Math.max(1, Math.ceil(file.size / partSize));
+  const loadedByPart = new Array(partCount).fill(0);
+  let nextPart = 1;
+
+  const updateOverallProgress = () => {
+    if (!statusEl) return;
+    const loaded = loadedByPart.reduce((sum, value) => sum + value, 0);
+    const pct = file.size
+      ? Math.max(0, Math.min(100, Math.round((loaded / file.size) * 100)))
+      : 0;
+    statusEl.textContent = `Subiendo a la nube... ${pct}%`;
+  };
+
+  const uploadOnePart = async (partNumber) => {
+    const startByte = (partNumber - 1) * partSize;
+    const endByte = Math.min(startByte + partSize, file.size);
+    const blob = file.slice(startByte, endByte);
+    const presign = await fetch("/api/s3_multipart_presign", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        key,
+        upload_id: uploadId,
+        part_number: partNumber,
+      }),
+    }).then((res) => res.json());
+    if (presign.error || !presign.url) {
+      throw new Error(presign.error || "No se pudo firmar parte multipart.");
+    }
+    await uploadMultipartPartToSignedUrl(presign.url, blob, (loaded) => {
+      loadedByPart[partNumber - 1] = loaded;
+      updateOverallProgress();
+    });
+  };
+
+  const worker = async () => {
+    while (true) {
+      const current = nextPart;
+      nextPart += 1;
+      if (current > partCount) return;
+      await uploadOnePart(current);
+    }
+  };
+
+  try {
+    if (statusEl) statusEl.textContent = "Preparando subida por bloques...";
+    const workers = Array.from(
+      { length: Math.min(S3_MULTIPART_CONCURRENCY, partCount) },
+      () => worker()
+    );
+    await Promise.all(workers);
+    const complete = await fetch("/api/s3_multipart_complete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        key,
+        upload_id: uploadId,
+      }),
+    }).then((res) => res.json());
+    if (complete.error) {
+      throw new Error(complete.error);
+    }
+    return {
+      key: complete.key || key,
+      public_url: complete.public_url || start.public_url || "",
+    };
+  } catch (err) {
+    try {
+      await fetch("/api/s3_multipart_abort", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          key,
+          upload_id: uploadId,
+        }),
+      });
+    } catch {}
+    throw err;
+  }
+};
+
 const uploadFileToS3 = async (file, prefix, statusEl) => {
   if (!file) return null;
   const optimized = await maybeCompressUploadFile(file, statusEl);
   const fileToUpload = optimized.file || file;
+  if ((fileToUpload.size || 0) >= S3_MULTIPART_MIN_BYTES) {
+    const multipartResult = await uploadFileMultipartToS3(fileToUpload, prefix, statusEl);
+    if (statusEl && optimized.optimized && optimized.originalSize && optimized.optimizedSize) {
+      const saved = Math.max(0, optimized.originalSize - optimized.optimizedSize);
+      const pct = optimized.originalSize
+        ? Math.round((saved / optimized.originalSize) * 100)
+        : 0;
+      statusEl.textContent = `Subida completada (multipart). Imagen optimizada (-${pct}%).`;
+    } else if (statusEl) {
+      statusEl.textContent = "Subida completada (multipart).";
+    }
+    return multipartResult;
+  }
   if (statusEl) statusEl.textContent = "Firmando subida...";
   const presign = await fetch("/api/s3_presign", {
     method: "POST",
