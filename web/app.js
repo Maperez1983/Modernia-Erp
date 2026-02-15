@@ -525,8 +525,11 @@ const clienteTrabajos = document.getElementById("clienteTrabajos");
 const clienteSegurosFicha = document.getElementById("clienteSegurosFicha");
 const clienteMiniDashboardHint = document.getElementById("clienteMiniDashboardHint");
 const clienteKpiRentabilidad = document.getElementById("clienteKpiRentabilidad");
+const clienteKpiPrimas = document.getElementById("clienteKpiPrimas");
 const clienteKpiPendientes = document.getElementById("clienteKpiPendientes");
 const clienteKpiCitas = document.getElementById("clienteKpiCitas");
+const clienteChartRentabilidad = document.getElementById("clienteChartRentabilidad");
+const clienteChartActividad = document.getElementById("clienteChartActividad");
 const clienteProfesionalScope = document.getElementById("clienteProfesionalScope");
 const responsableSelects = document.querySelectorAll(".responsable-select");
 const clienteProfesionalSection = document.getElementById("clienteProfesionalSection");
@@ -11887,17 +11890,59 @@ const getTableRowsByEmpresa = async (tabla, empresaId, q = "") => {
   };
 };
 
+const renderClienteMiniChart = (container, items = []) => {
+  if (!container) return;
+  if (!items.length) {
+    container.innerHTML = "<p class='muted'>Sin datos.</p>";
+    return;
+  }
+  const maxValue = Math.max(
+    1,
+    ...items.map((item) => Math.abs(Number(item.value) || 0))
+  );
+  const wrapper = document.createElement("div");
+  wrapper.className = "cliente-mini-chart";
+  items.forEach((item) => {
+    const row = document.createElement("div");
+    row.className = "cliente-mini-chart-row";
+    const label = document.createElement("div");
+    label.className = "cliente-mini-chart-label";
+    label.textContent = item.label || "-";
+    const track = document.createElement("div");
+    track.className = "cliente-mini-chart-track";
+    const fill = document.createElement("div");
+    fill.className = "cliente-mini-chart-fill";
+    const ratio = Math.max(0, Math.min(100, (Math.abs(Number(item.value) || 0) / maxValue) * 100));
+    fill.style.width = `${ratio}%`;
+    fill.style.background = item.color || "var(--brand)";
+    track.appendChild(fill);
+    const value = document.createElement("div");
+    value.className = "cliente-mini-chart-value";
+    value.textContent = item.display || String(item.value || 0);
+    row.appendChild(label);
+    row.appendChild(track);
+    row.appendChild(value);
+    wrapper.appendChild(row);
+  });
+  container.innerHTML = "";
+  container.appendChild(wrapper);
+};
+
 const loadClienteMiniDashboard = async (clienteId, empresas = []) => {
-  if (!clienteKpiRentabilidad || !clienteKpiPendientes || !clienteKpiCitas) {
+  if (!clienteKpiRentabilidad || !clienteKpiPendientes || !clienteKpiCitas || !clienteKpiPrimas) {
     return;
   }
   if (!clienteId) {
     clienteKpiRentabilidad.textContent = "-";
+    clienteKpiPrimas.textContent = "-";
     clienteKpiPendientes.textContent = "-";
     clienteKpiCitas.textContent = "-";
+    renderClienteMiniChart(clienteChartRentabilidad, []);
+    renderClienteMiniChart(clienteChartActividad, []);
     return;
   }
   clienteKpiRentabilidad.textContent = "Calculando...";
+  clienteKpiPrimas.textContent = "Calculando...";
   clienteKpiPendientes.textContent = "Calculando...";
   clienteKpiCitas.textContent = "Calculando...";
   if (clienteMiniDashboardHint) {
@@ -12010,7 +12055,8 @@ const loadClienteMiniDashboard = async (clienteId, empresas = []) => {
         return tipo !== "gasto";
       })
       .reduce((sum, row) => sum + parseMoneyValue(row.importe), 0);
-    const realizadoTotal = realizado + segurosCartera + finComisiones + inmoComisiones;
+    // Rentabilidad sin primas: primas se muestran aparte como KPI de cartera.
+    const realizadoTotal = realizado + finComisiones + inmoComisiones;
     const cobradoTotal = cobrado + finComisiones + inmoComisiones;
     const margen = cobradoTotal - realizadoTotal;
     const pendientesTrabajos = trabajos.filter((row) => {
@@ -12035,8 +12081,49 @@ const loadClienteMiniDashboard = async (clienteId, empresas = []) => {
       .sort()[0];
     clienteKpiRentabilidad.textContent =
       `${euroFormatter.format(realizadoTotal)} / ${euroFormatter.format(cobradoTotal)} · ${euroFormatter.format(margen)}`;
+    clienteKpiPrimas.textContent = euroFormatter.format(segurosCartera);
     clienteKpiPendientes.textContent = String(pendientesTrabajos + pendientesAcciones);
     clienteKpiCitas.textContent = nextCita ? `${citas.length} · Próxima ${nextCita}` : String(citas.length);
+    renderClienteMiniChart(clienteChartRentabilidad, [
+      {
+        label: "Realizado",
+        value: realizadoTotal,
+        display: euroFormatter.format(realizadoTotal),
+        color: "#4f46e5",
+      },
+      {
+        label: "Cobrado",
+        value: cobradoTotal,
+        display: euroFormatter.format(cobradoTotal),
+        color: "#16a34a",
+      },
+      {
+        label: "Margen",
+        value: Math.abs(margen),
+        display: euroFormatter.format(margen),
+        color: margen >= 0 ? "#0284c7" : "#dc2626",
+      },
+    ]);
+    renderClienteMiniChart(clienteChartActividad, [
+      {
+        label: "Primas",
+        value: segurosCartera,
+        display: euroFormatter.format(segurosCartera),
+        color: "#d97706",
+      },
+      {
+        label: "Pendientes",
+        value: pendientesTrabajos + pendientesAcciones,
+        display: String(pendientesTrabajos + pendientesAcciones),
+        color: "#7c3aed",
+      },
+      {
+        label: "Citas",
+        value: citas.length,
+        display: String(citas.length),
+        color: "#0ea5e9",
+      },
+    ]);
     if (clienteMiniDashboardHint) {
       const parts = [];
       if (segurosCartera) parts.push(`Seguros ${euroFormatter.format(segurosCartera)}`);
@@ -12048,8 +12135,11 @@ const loadClienteMiniDashboard = async (clienteId, empresas = []) => {
     }
   } catch {
     clienteKpiRentabilidad.textContent = "-";
+    clienteKpiPrimas.textContent = "-";
     clienteKpiPendientes.textContent = "-";
     clienteKpiCitas.textContent = "-";
+    renderClienteMiniChart(clienteChartRentabilidad, []);
+    renderClienteMiniChart(clienteChartActividad, []);
     if (clienteMiniDashboardHint) {
       clienteMiniDashboardHint.textContent = "No se pudo calcular el dashboard del cliente.";
     }
