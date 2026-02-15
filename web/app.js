@@ -588,15 +588,32 @@ const runSegurosBdtRowOcr = async (recordId, file, statusEl, rowMap = {}) => {
 };
 
 const openS3File = async (key, fallbackUrl) => {
+  let popup = null;
+  try {
+    // Abrimos primero para evitar bloqueo de popups tras await.
+    popup = window.open("", "_blank", "noopener");
+  } catch {}
   if (key) {
     const data = await api(`/api/s3_url?key=${encodeURIComponent(key)}`);
     if (data && data.url) {
-      window.open(data.url, "_blank", "noopener");
+      if (popup) {
+        popup.location.href = data.url;
+      } else {
+        window.open(data.url, "_blank", "noopener");
+      }
       return;
     }
   }
   if (fallbackUrl) {
-    window.open(fallbackUrl, "_blank", "noopener");
+    if (popup) {
+      popup.location.href = fallbackUrl;
+    } else {
+      window.open(fallbackUrl, "_blank", "noopener");
+    }
+    return;
+  }
+  if (popup) {
+    popup.close();
   }
 };
 
@@ -15704,6 +15721,9 @@ if (gestoriaDocsForm) {
         return;
       }
     }
+    if ((payload.doc_key || payload.doc_url) && (!payload.estado || normalizeSimple(payload.estado) === "pendiente")) {
+      payload.estado = "Recibido";
+    }
     fetch("/api/gestoria_docs", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -15767,6 +15787,9 @@ if (gestoriaClienteDocsForm) {
         }
         return;
       }
+    }
+    if ((payload.doc_key || payload.doc_url) && (!payload.estado || normalizeSimple(payload.estado) === "pendiente")) {
+      payload.estado = "Recibido";
     }
     fetch("/api/gestoria_docs", {
       method: "POST",
@@ -15841,6 +15864,9 @@ if (clienteDocsUploadForm) {
         }
         return;
       }
+    }
+    if ((payload.doc_key || payload.doc_url) && (!payload.estado || normalizeSimple(payload.estado) === "pendiente")) {
+      payload.estado = "Recibido";
     }
     fetch("/api/gestoria_docs", {
       method: "POST",

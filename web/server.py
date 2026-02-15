@@ -4398,6 +4398,11 @@ class Handler(BaseHTTPRequestHandler):
             conn.execute("DELETE FROM gestoria_trabajos WHERE id = ?", (trabajo_id,))
             audit("gestoria_trabajo", trabajo_id, "eliminar", None, payload.get("usuario"))
         elif parsed.path == "/api/gestoria_docs":
+            estado_doc = payload.get("estado")
+            if payload.get("doc_key") or payload.get("doc_url"):
+                estado_norm = normalize_lookup_text(estado_doc)
+                if not estado_norm or estado_norm == "PENDIENTE":
+                    estado_doc = "Recibido"
             conn.execute(
                 """
                 INSERT INTO gestoria_docs (
@@ -4417,7 +4422,7 @@ class Handler(BaseHTTPRequestHandler):
                     payload.get("nombre"),
                     payload.get("tipo"),
                     payload.get("fecha"),
-                    payload.get("estado"),
+                    estado_doc,
                     payload.get("notas"),
                     payload.get("doc_key"),
                     payload.get("doc_url"),
