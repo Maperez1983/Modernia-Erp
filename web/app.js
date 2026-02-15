@@ -497,6 +497,7 @@ const clienteSaveBtn = document.getElementById("clienteSaveBtn");
 const clienteSaveStatus = document.getElementById("clienteSaveStatus");
 const clienteTabs = document.getElementById("clienteTabs");
 const clienteTabDatos = document.getElementById("clienteTabDatos");
+const clienteTabDashboard = document.getElementById("clienteTabDashboard");
 const clienteTabProfesional = document.getElementById("clienteTabProfesional");
 const clienteTabSeguros = document.getElementById("clienteTabSeguros");
 const clienteTabInmobiliaria = document.getElementById("clienteTabInmobiliaria");
@@ -526,6 +527,7 @@ const clienteMiniDashboardHint = document.getElementById("clienteMiniDashboardHi
 const clienteKpiRentabilidad = document.getElementById("clienteKpiRentabilidad");
 const clienteKpiPendientes = document.getElementById("clienteKpiPendientes");
 const clienteKpiCitas = document.getElementById("clienteKpiCitas");
+const clienteProfesionalScope = document.getElementById("clienteProfesionalScope");
 const responsableSelects = document.querySelectorAll(".responsable-select");
 const clienteProfesionalSection = document.getElementById("clienteProfesionalSection");
 const clienteProfesionalList = document.getElementById("clienteProfesionalList");
@@ -2334,6 +2336,7 @@ const setClienteTab = (tab) => {
     btn.classList.toggle("active", btn.dataset.tab === tab);
   });
   if (clienteTabDatos) clienteTabDatos.classList.toggle("hidden", tab !== "datos");
+  if (clienteTabDashboard) clienteTabDashboard.classList.toggle("hidden", tab !== "dashboard");
   if (clienteTabProfesional) clienteTabProfesional.classList.toggle("hidden", tab !== "profesional");
   if (clienteTabSeguros) clienteTabSeguros.classList.toggle("hidden", tab !== "seguros");
   if (clienteTabInmobiliaria) clienteTabInmobiliaria.classList.toggle("hidden", tab !== "inmobiliaria");
@@ -2408,8 +2411,23 @@ const loadClienteDocsByService = (clienteId, service, container) => {
     cliente_id: clienteId,
     service,
   });
-  api(`/api/gestoria_docs?${query.toString()}`).then((data) => {
-    renderClienteDocsTable(data.rows || [], container);
+  api(`/api/gestoria_docs?${query.toString()}`).then(async (data) => {
+    let rows = data.rows || [];
+    if (!rows.length && normalizeSimple(service) === "seguros") {
+      const seguros = await api(`/api/seguros_cliente?cliente_id=${encodeURIComponent(clienteId)}`).catch(() => ({ rows: [] }));
+      rows = (seguros.rows || [])
+        .filter((row) => row.poliza_url || row.poliza_key)
+        .map((row) => ({
+          nombre: row.poliza_numero || `Póliza ${row.compania || ""}`.trim(),
+          tipo: "Seguros",
+          fecha: row.fecha_efecto || "",
+          estado: row.estado || "",
+          notas: row.ramo || "",
+          doc_key: row.poliza_key || "",
+          doc_url: row.poliza_url || "",
+        }));
+    }
+    renderClienteDocsTable(rows, container);
   });
 };
 
@@ -12038,6 +12056,205 @@ const loadClienteMiniDashboard = async (clienteId, empresas = []) => {
   }
 };
 
+const loadClienteFacturasServicios = async (clienteId, empresas = []) => {
+  if (!clienteFacturas) return;
+  if (!clienteId) {
+    clienteFacturas.innerHTML = "<p class='muted'>Sin cliente seleccionado.</p>";
+    return;
+  }
+  const empresaByName = new Map((state.empresas || []).map((item) => [item.nombre, item.id]));
+  const gestoriaEmpresaIds = (empresas || [])
+    .filter((row) => normalizeSimple(row.servicio || "") === "gestoria")
+    .map((row) => empresaByName.get(row.empresa))
+    .filter(Boolean);
+  if (!gestoriaEmpresaIds.length) {
+    clienteFacturas.innerHTML = "<p class='muted'>Sin facturación registrada para servicios adscritos.</p>";
+    return;
+  }
+  const payloads = await Promise.all(
+    gestoriaEmpresaIds.map((id) =>
+      api(`/api/gestoria_contabilidad?empresa_id=${encodeURIComponent(id)}`).catch(() => ({ rows: [] }))
+    )
+  );
+  const rows = payloads
+    .flatMap((item) => item.rows || [])
+    .filter((row) => String(row.cliente_id || "") === String(clienteId))
+    .sort((a, b) => String(b.fecha || "").localeCompare(String(a.fecha || "")));
+  if (!rows.length) {
+    clienteFacturas.innerHTML = "<p class='muted'>Sin facturas registradas.</p>";
+    return;
+  }
+  const table = document.createElement("table");
+  const thead = document.createElement("thead");
+  const trHead = document.createElement("tr");
+  ["Fecha", "Concepto", "Tipo", "Importe", "Notas"].forEach((col) => {
+    const th = document.createElement("th");
+    th.textContent = col;
+    trHead.appendChild(th);
+  });
+  thead.appendChild(trHead);
+  table.appendChild(thead);
+  const tbody = document.createElement("tbody");
+  rows.slice(0, 200).forEach((row) => {
+    const tr = document.createElement("tr");
+    const values = [
+      row.fecha || "-",
+      row.concepto || "-",
+      row.tipo || "-",
+      row.importe ? euroFormatter.format(parseMoneyValue(row.importe)) : "-",
+      row.notas || "-",
+    ];
+    values.forEach((value) => {
+      const td = document.createElement("td");
+      td.textContent = value;
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  clienteFacturas.innerHTML = "";
+  clienteFacturas.appendChild(table);
+};
+
+const loadClienteHistoricoServicios = async (clienteId, empresas = []) => {
+  if (!clienteTrabajos) return;
+  if (!clienteId) {
+    clienteTrabajos.innerHTML = "<p class='muted'>Sin cliente seleccionado.</p>";
+    return;
+  }
+  const serviceSet = new Set((empresas || []).map((row) => normalizeSimple(row.servicio || "")));
+  const tasks = [];
+  if (serviceSet.has("gestoria")) {
+    tasks.push(
+      api(`/api/gestoria_trabajos?cliente_id=${encodeURIComponent(clienteId)}`)
+        .then((data) => ({ kind: "gestoria", rows: data.rows || [] }))
+        .catch(() => ({ kind: "gestoria", rows: [] }))
+    );
+  }
+  if (serviceSet.has("seguros")) {
+    tasks.push(
+      api(`/api/seguros_cliente?cliente_id=${encodeURIComponent(clienteId)}`)
+        .then((data) => ({ kind: "seguros", rows: data.rows || [] }))
+        .catch(() => ({ kind: "seguros", rows: [] }))
+    );
+  }
+  if (!tasks.length) {
+    clienteTrabajos.innerHTML = "<p class='muted'>Sin histórico para servicios adscritos.</p>";
+    return;
+  }
+  const datasets = await Promise.all(tasks);
+  const timeline = [];
+  datasets.forEach((dataset) => {
+    if (dataset.kind === "gestoria") {
+      (dataset.rows || []).forEach((row) => {
+        timeline.push({
+          fecha: row.fecha_fin || row.fecha_inicio || "",
+          servicio: "Gestoría",
+          concepto: row.tipo_trabajo || "Trabajo",
+          estado: row.estado || "-",
+          importe: row.importe || "",
+        });
+      });
+    } else if (dataset.kind === "seguros") {
+      (dataset.rows || []).forEach((row) => {
+        const computed = computeSeguroDisplayState(row);
+        timeline.push({
+          fecha: computed.vencimiento || row.fecha_efecto || "",
+          servicio: "Seguros",
+          concepto: `${row.compania || "Seguro"} ${row.poliza_numero || ""}`.trim(),
+          estado: computed.estado || "-",
+          importe: row.prima_total || "",
+        });
+      });
+    }
+  });
+  timeline.sort((a, b) => String(b.fecha || "").localeCompare(String(a.fecha || "")));
+  if (!timeline.length) {
+    clienteTrabajos.innerHTML = "<p class='muted'>Sin histórico de trabajos realizados.</p>";
+    return;
+  }
+  const table = document.createElement("table");
+  const thead = document.createElement("thead");
+  const trHead = document.createElement("tr");
+  ["Fecha", "Servicio", "Concepto", "Estado", "Importe"].forEach((col) => {
+    const th = document.createElement("th");
+    th.textContent = col;
+    trHead.appendChild(th);
+  });
+  thead.appendChild(trHead);
+  table.appendChild(thead);
+  const tbody = document.createElement("tbody");
+  timeline.slice(0, 300).forEach((row) => {
+    const tr = document.createElement("tr");
+    const values = [
+      row.fecha || "-",
+      row.servicio || "-",
+      row.concepto || "-",
+      row.estado || "-",
+      row.importe ? euroFormatter.format(parseMoneyValue(row.importe)) : "-",
+    ];
+    values.forEach((value) => {
+      const td = document.createElement("td");
+      td.textContent = value;
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  clienteTrabajos.innerHTML = "";
+  clienteTrabajos.appendChild(table);
+};
+
+const renderClienteProfesionalScope = (empresas = []) => {
+  if (!clienteProfesionalScope) return;
+  const serviceSet = new Set((empresas || []).map((row) => normalizeSimple(row.servicio || "")));
+  if (!serviceSet.size) {
+    clienteProfesionalScope.innerHTML = "<p class='muted'>Sin servicios asignados.</p>";
+    return;
+  }
+  const defs = [
+    {
+      key: "gestoria",
+      title: "Gestoría",
+      fields: "CNAE, IAE, actividad, IBAN, módulos fiscales/laborales y trabajos.",
+    },
+    {
+      key: "seguros",
+      title: "Seguros",
+      fields: "Tomador, DNI/NIF, pólizas, ramo, efecto/vencimiento, prima y renovaciones.",
+    },
+    {
+      key: "inmobiliaria",
+      title: "Inmobiliaria",
+      fields: "Demandas, visitas, operaciones y seguimiento comercial del cliente.",
+    },
+    {
+      key: "hipotecas",
+      title: "Financiaciones",
+      fields: "Asesoramientos, estado del expediente, entidades y propuesta económica.",
+    },
+  ];
+  const list = document.createElement("div");
+  list.className = "cliente-mini-kpis";
+  defs
+    .filter((item) => serviceSet.has(item.key) || (item.key === "hipotecas" && serviceSet.has("financiaciones")))
+    .forEach((item) => {
+      const card = document.createElement("div");
+      card.className = "card";
+      const title = document.createElement("div");
+      title.className = "kpi-label";
+      title.textContent = item.title;
+      const body = document.createElement("div");
+      body.className = "muted";
+      body.textContent = item.fields;
+      card.appendChild(title);
+      card.appendChild(body);
+      list.appendChild(card);
+    });
+  clienteProfesionalScope.innerHTML = "";
+  clienteProfesionalScope.appendChild(list);
+};
+
 const resolveSeguroVencimiento = (row) => {
   const vencimiento = normalizeDateInput(row.fecha_vencimiento || "");
   if (vencimiento) return vencimiento;
@@ -12395,22 +12612,24 @@ const openClienteDetail = (id) => {
       }
     }
     loadClienteMiniDashboard(id, data.empresas || []);
+    renderClienteProfesionalScope(data.empresas || []);
     if (clienteAssignServicio) {
       populateServiciosSelect(clienteAssignServicio);
     }
     if (clienteAssignEmpresa) {
       populateEmpresasSelect(clienteAssignEmpresa);
     }
-    if (clienteFacturas) {
-      clienteFacturas.innerHTML = "<p class='muted'>Sin facturas registradas.</p>";
-    }
-    if (clienteTrabajos) {
-      clienteTrabajos.innerHTML = "<p class='muted'>Sin trabajos registrados.</p>";
-    }
+    loadClienteFacturasServicios(id, data.empresas || []);
+    loadClienteHistoricoServicios(id, data.empresas || []);
     if (clienteProfesionalHint) {
-      clienteProfesionalHint.textContent = hasGestoria
-        ? "Gestiona CNAE, IAE, actividad e IBAN."
-        : "Asigna el cliente a Gestoría para activar estos datos.";
+      if (hasGestoria) {
+        clienteProfesionalHint.textContent = "Gestoría activa: gestiona CNAE, IAE, actividad e IBAN.";
+      } else if (hasSeguros || hasHipotecas || hasInmo) {
+        clienteProfesionalHint.textContent =
+          "Vista profesional activa por servicios adscritos. Los formularios de Gestoría se muestran al asignar ese servicio.";
+      } else {
+        clienteProfesionalHint.textContent = "Asigna servicios al cliente para activar datos profesionales.";
+      }
     }
     if (clienteProfesionalSection) {
       clienteProfesionalSection.classList.toggle("hidden", !hasGestoria);
@@ -12431,19 +12650,24 @@ const openClienteDetail = (id) => {
       gestoriaClienteAgendaForm.classList.toggle("hidden", !hasGestoria);
     }
     if (clienteTabs) {
+      const dashboardTab = clienteTabs.querySelector('[data-tab="dashboard"]');
       const gestoriaTab = clienteTabs.querySelector('[data-tab="profesional"]');
       const segurosTab = clienteTabs.querySelector('[data-tab="seguros"]');
       const inmoTab = clienteTabs.querySelector('[data-tab="inmobiliaria"]');
       const hipotecasTab = clienteTabs.querySelector('[data-tab="hipotecas"]');
       const docsTab = clienteTabs.querySelector('[data-tab="docs"]');
-      if (gestoriaTab) gestoriaTab.classList.toggle("hidden", !hasGestoria);
-      if (segurosTab) segurosTab.classList.toggle("hidden", false);
+      if (dashboardTab) dashboardTab.classList.toggle("hidden", false);
+      if (gestoriaTab) gestoriaTab.classList.toggle("hidden", !(hasGestoria || hasSeguros || hasHipotecas || hasInmo));
+      if (segurosTab) segurosTab.classList.toggle("hidden", !hasSeguros);
       if (inmoTab) inmoTab.classList.toggle("hidden", !hasInmo);
       if (hipotecasTab) hipotecasTab.classList.toggle("hidden", !hasHipotecas);
       if (docsTab) docsTab.classList.toggle("hidden", false);
     }
+    if (clienteTabDashboard) {
+      clienteTabDashboard.classList.toggle("hidden", false);
+    }
     if (clienteTabSeguros) {
-      clienteTabSeguros.classList.toggle("hidden", false);
+      clienteTabSeguros.classList.toggle("hidden", !hasSeguros);
     }
     if (clienteTabInmobiliaria) {
       clienteTabInmobiliaria.classList.toggle("hidden", !hasInmo);
@@ -12486,7 +12710,11 @@ const openClienteDetail = (id) => {
         gestoriaClienteAgendaInfo.textContent = "";
       }
     }
-    loadClienteSeguros(cliente, fincasEmpresaId);
+    if (hasSeguros) {
+      loadClienteSeguros(cliente, fincasEmpresaId);
+    } else if (clienteSegurosFicha) {
+      clienteSegurosFicha.innerHTML = "<p class='muted'>Sin pólizas vinculadas.</p>";
+    }
     const docsDefault = hasSeguros
       ? "seguros"
       : hasGestoria
@@ -12498,15 +12726,7 @@ const openClienteDetail = (id) => {
             : "seguros";
     setClienteDocsTab(docsDefault);
     clientesDetail.classList.remove("hidden");
-    const defaultTab = hasInmo
-      ? "inmobiliaria"
-      : hasGestoria
-        ? "profesional"
-        : hasSeguros
-          ? "seguros"
-          : hasHipotecas
-            ? "hipotecas"
-            : "datos";
+    const defaultTab = "dashboard";
     setClienteTab(defaultTab);
     window.scrollTo({ top: clientesDetail.offsetTop - 120, behavior: "smooth" });
   });

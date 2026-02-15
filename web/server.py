@@ -7407,7 +7407,7 @@ class Handler(BaseHTTPRequestHandler):
                   id, cliente_id, empresa_id, compania, ramo, poliza_numero,
                   fecha_efecto, fecha_vencimiento, estado, prima_neta, prima_total,
                   tomador, estado_renovacion, renovacion_fecha, nueva_poliza_ref,
-                  colaborador, produccion, mes_creacion
+                  colaborador, produccion, mes_creacion, poliza_key, poliza_url
                 FROM seguros
                 WHERE {' AND '.join(where)}
                 ORDER BY COALESCE(fecha_efecto, created_at) DESC
@@ -7477,7 +7477,7 @@ class Handler(BaseHTTPRequestHandler):
                               id, cliente_id, empresa_id, compania, ramo, poliza_numero,
                               fecha_efecto, fecha_vencimiento, estado, prima_neta, prima_total,
                               tomador, estado_renovacion, renovacion_fecha, nueva_poliza_ref,
-                              colaborador, produccion, mes_creacion
+                              colaborador, produccion, mes_creacion, poliza_key, poliza_url
                             FROM seguros
                             WHERE cliente_id = ?
                               AND (? = '' OR empresa_id = ?)
@@ -7506,6 +7506,8 @@ class Handler(BaseHTTPRequestHandler):
                             "colaborador": r["colaborador"],
                             "produccion": r["produccion"],
                             "mes_creacion": r["mes_creacion"],
+                            "poliza_key": r["poliza_key"],
+                            "poliza_url": r["poliza_url"],
                         }
                         for r in tomador_rows
                     ]

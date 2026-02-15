@@ -3010,33 +3010,16 @@
           </div>
           <div class="tabs" id="clienteTabs">
             <button class="tab active" type="button" data-tab="datos">Datos personales</button>
-            <button class="tab" type="button" data-tab="profesional">Gestoría</button>
+            <button class="tab" type="button" data-tab="dashboard">Dashboard</button>
+            <button class="tab" type="button" data-tab="profesional">Datos profesionales</button>
             <button class="tab hidden" type="button" data-tab="seguros">Seguros</button>
             <button class="tab hidden" type="button" data-tab="inmobiliaria">Inmobiliaria</button>
             <button class="tab hidden" type="button" data-tab="hipotecas">Hipotecas</button>
             <button class="tab" type="button" data-tab="docs">Documentación</button>
             <button class="tab" type="button" data-tab="facturas">Facturas servicios</button>
-            <button class="tab" type="button" data-tab="trabajos">Trabajos realizados</button>
+            <button class="tab" type="button" data-tab="trabajos">Histórico trabajos</button>
           </div>
           <div id="clienteTabDatos">
-            <div class="form-card" id="clienteMiniDashboard">
-              <h3>Dashboard cliente</h3>
-              <p class="muted" id="clienteMiniDashboardHint">Resumen operativo y económico del cliente.</p>
-              <div class="cliente-mini-kpis">
-                <div class="card">
-                  <div class="kpi-label">Rentabilidad (realizado/cobrado)</div>
-                  <div class="kpi-value" id="clienteKpiRentabilidad">-</div>
-                </div>
-                <div class="card">
-                  <div class="kpi-label">Tareas pendientes</div>
-                  <div class="kpi-value" id="clienteKpiPendientes">-</div>
-                </div>
-                <div class="card">
-                  <div class="kpi-label">Citas programadas</div>
-                  <div class="kpi-value" id="clienteKpiCitas">-</div>
-                </div>
-              </div>
-            </div>
             <div class="grid" id="clienteDetailGrid"></div>
             <div class="form-actions">
               <button type="button" id="clienteSaveBtn">Guardar cambios</button>
@@ -3077,7 +3060,32 @@
               </form>
             </div>
           </div>
+          <div id="clienteTabDashboard" class="hidden">
+            <div class="form-card" id="clienteMiniDashboard">
+              <h3>Dashboard cliente</h3>
+              <p class="muted" id="clienteMiniDashboardHint">Resumen operativo y económico del cliente.</p>
+              <div class="cliente-mini-kpis">
+                <div class="card">
+                  <div class="kpi-label">Rentabilidad (realizado/cobrado)</div>
+                  <div class="kpi-value" id="clienteKpiRentabilidad">-</div>
+                </div>
+                <div class="card">
+                  <div class="kpi-label">Tareas pendientes</div>
+                  <div class="kpi-value" id="clienteKpiPendientes">-</div>
+                </div>
+                <div class="card">
+                  <div class="kpi-label">Citas programadas</div>
+                  <div class="kpi-value" id="clienteKpiCitas">-</div>
+                </div>
+              </div>
+            </div>
+          </div>
           <div id="clienteTabProfesional" class="hidden">
+            <div class="form-card">
+              <h3>Datos profesionales por servicio</h3>
+              <p class="muted">El contenido visible se adapta a los servicios asignados al cliente.</p>
+              <div id="clienteProfesionalScope"></div>
+            </div>
             <div class="form-card">
               <h3>Gestoría · Configuración del servicio</h3>
               <p class="muted">Selecciona el tipo de cliente y activa los módulos que se gestionan.</p>
