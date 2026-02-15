@@ -11858,6 +11858,17 @@ const parseMoneyValue = (value) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
+const getTableRowsByEmpresa = async (tabla, empresaId, q = "") => {
+  if (!tabla || !empresaId) return { columns: [], rows: [] };
+  const params = new URLSearchParams({ tabla, empresa_id: empresaId });
+  if (q) params.set("q", q);
+  const data = await api(`/api/tabla?${params.toString()}`);
+  return {
+    columns: data?.columns || [],
+    rows: data?.rows || [],
+  };
+};
+
 const loadClienteMiniDashboard = async (clienteId, empresas = []) => {
   if (!clienteKpiRentabilidad || !clienteKpiPendientes || !clienteKpiCitas) {
     return;
@@ -11877,6 +11888,11 @@ const loadClienteMiniDashboard = async (clienteId, empresas = []) => {
   const servicios = new Set(
     (empresas || []).map((row) => normalizeSimple(row.servicio || ""))
   );
+  const empresaByName = new Map((state.empresas || []).map((item) => [item.nombre, item.id]));
+  const clienteNombre = String(
+    ((state.clientesList || []).find((item) => item.id === clienteId)?.nombre || "")
+  ).trim();
+  const clienteNameKey = normalizeSimple(clienteNombre);
   const serviciosAgenda = ["seguros", "gestoria", "financiaciones", "inmobiliaria"].filter(
     (name) => !servicios.size || servicios.has(name)
   );
@@ -11889,9 +11905,19 @@ const loadClienteMiniDashboard = async (clienteId, empresas = []) => {
   );
   const trabajosReq = api(`/api/gestoria_trabajos?cliente_id=${encodeURIComponent(clienteId)}`)
     .catch(() => ({ rows: [] }));
+  const segurosReq = api(`/api/seguros_cliente?cliente_id=${encodeURIComponent(clienteId)}`)
+    .catch(() => ({ rows: [] }));
   const gestoriaEmpresaIds = (empresas || [])
     .filter((row) => normalizeSimple(row.servicio || "") === "gestoria")
-    .map((row) => (state.empresas || []).find((emp) => emp.nombre === row.empresa)?.id)
+    .map((row) => empresaByName.get(row.empresa))
+    .filter(Boolean);
+  const finEmpresaIds = (empresas || [])
+    .filter((row) => normalizeSimple(row.servicio || "") === "financiaciones")
+    .map((row) => empresaByName.get(row.empresa))
+    .filter(Boolean);
+  const inmoEmpresaIds = (empresas || [])
+    .filter((row) => normalizeSimple(row.servicio || "") === "inmobiliaria")
+    .map((row) => empresaByName.get(row.empresa))
     .filter(Boolean);
   const contaIds = gestoriaEmpresaIds.length
     ? gestoriaEmpresaIds
@@ -11902,15 +11928,61 @@ const loadClienteMiniDashboard = async (clienteId, empresas = []) => {
     api(`/api/gestoria_contabilidad?empresa_id=${encodeURIComponent(empresaId)}`)
       .catch(() => ({ rows: [] }))
   );
+  const finReqs = finEmpresaIds.map((empresaId) =>
+    getTableRowsByEmpresa("hipotecas", empresaId, clienteNombre).catch(() => ({ columns: [], rows: [] }))
+  );
+  const inmoReqs = inmoEmpresaIds.map((empresaId) =>
+    getTableRowsByEmpresa("movimientos", empresaId, clienteNombre).catch(() => ({ columns: [], rows: [] }))
+  );
   try {
-    const [trabajosData, ...rest] = await Promise.all([trabajosReq, ...accionesReqs, ...contaReqs]);
+    const [trabajosData, segurosData, ...rest] = await Promise.all([
+      trabajosReq,
+      segurosReq,
+      ...accionesReqs,
+      ...contaReqs,
+      ...finReqs,
+      ...inmoReqs,
+    ]);
     const accionesGroups = rest.slice(0, accionesReqs.length);
-    const contaGroups = rest.slice(accionesReqs.length);
+    const contaGroups = rest.slice(accionesReqs.length, accionesReqs.length + contaReqs.length);
+    const finGroups = rest.slice(
+      accionesReqs.length + contaReqs.length,
+      accionesReqs.length + contaReqs.length + finReqs.length
+    );
+    const inmoGroups = rest.slice(accionesReqs.length + contaReqs.length + finReqs.length);
     const trabajos = trabajosData.rows || [];
+    const seguros = segurosData.rows || [];
     const acciones = accionesGroups.flatMap((payload) => payload.rows || []);
     const movimientos = contaGroups
       .flatMap((payload) => payload.rows || [])
       .filter((row) => String(row.cliente_id || "") === String(clienteId));
+    const finComisiones = !clienteNameKey ? 0 : finGroups.reduce((sum, payload) => {
+      const cols = payload.columns || [];
+      const rows = payload.rows || [];
+      const clienteCols = ["cliente", "cliente1_nombre", "cliente2_nombre"];
+      const comisionCols = ["comision", "honorarios", "ingreso"];
+      return sum + rows.reduce((inner, row) => {
+        const clienteMatch = clienteCols.some((col) =>
+          normalizeSimple(String(pickColumnValue(row, cols, [col]) || "")).includes(clienteNameKey)
+        );
+        if (!clienteMatch) return inner;
+        return inner + parseMoneyValue(pickColumnValue(row, cols, comisionCols));
+      }, 0);
+    }, 0);
+    const inmoComisiones = !clienteNameKey ? 0 : inmoGroups.reduce((sum, payload) => {
+      const cols = payload.columns || [];
+      const rows = payload.rows || [];
+      return sum + rows.reduce((inner, row) => {
+        const concepto = normalizeSimple(String(pickColumnValue(row, cols, ["concepto"]) || ""));
+        const clienteText = normalizeSimple(
+          `${pickColumnValue(row, cols, ["cliente"]) || ""} ${pickColumnValue(row, cols, ["cliente_nombre"]) || ""}`
+        );
+        if (!concepto.includes("compraventa") && !concepto.includes("alquiler")) return inner;
+        if (!clienteText.includes(clienteNameKey)) return inner;
+        return inner + parseMoneyValue(pickColumnValue(row, cols, ["comision", "ingresos", "importe"]));
+      }, 0);
+    }, 0);
+    const segurosCartera = seguros.reduce((sum, row) => sum + parseMoneyValue(row.prima_total), 0);
     const realizado = trabajos
       .filter((row) => normalizeSimple(row.estado || "").includes("final"))
       .reduce((sum, row) => sum + parseMoneyValue(row.importe), 0);
@@ -11920,7 +11992,9 @@ const loadClienteMiniDashboard = async (clienteId, empresas = []) => {
         return tipo !== "gasto";
       })
       .reduce((sum, row) => sum + parseMoneyValue(row.importe), 0);
-    const margen = cobrado - realizado;
+    const realizadoTotal = realizado + segurosCartera + finComisiones + inmoComisiones;
+    const cobradoTotal = cobrado + finComisiones + inmoComisiones;
+    const margen = cobradoTotal - realizadoTotal;
     const pendientesTrabajos = trabajos.filter((row) => {
       const estado = normalizeSimple(row.estado || "");
       return estado && !estado.includes("final") && !estado.includes("cancel");
@@ -11942,12 +12016,17 @@ const loadClienteMiniDashboard = async (clienteId, empresas = []) => {
       .filter(Boolean)
       .sort()[0];
     clienteKpiRentabilidad.textContent =
-      `${euroFormatter.format(realizado)} / ${euroFormatter.format(cobrado)} · ${euroFormatter.format(margen)}`;
+      `${euroFormatter.format(realizadoTotal)} / ${euroFormatter.format(cobradoTotal)} · ${euroFormatter.format(margen)}`;
     clienteKpiPendientes.textContent = String(pendientesTrabajos + pendientesAcciones);
     clienteKpiCitas.textContent = nextCita ? `${citas.length} · Próxima ${nextCita}` : String(citas.length);
     if (clienteMiniDashboardHint) {
+      const parts = [];
+      if (segurosCartera) parts.push(`Seguros ${euroFormatter.format(segurosCartera)}`);
+      if (realizado) parts.push(`Gestoria ${euroFormatter.format(realizado)}`);
+      if (finComisiones) parts.push(`Fin ${euroFormatter.format(finComisiones)}`);
+      if (inmoComisiones) parts.push(`Inmo ${euroFormatter.format(inmoComisiones)}`);
       clienteMiniDashboardHint.textContent =
-        "Rentabilidad = realizado / cobrado / margen. Pendientes incluye trabajos y acciones.";
+        `Multiservicio adscrito: ${parts.length ? parts.join(" · ") : "sin importes disponibles"}.`;
     }
   } catch {
     clienteKpiRentabilidad.textContent = "-";
