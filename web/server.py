@@ -48,6 +48,7 @@ def load_env_file():
         return
 
 load_env_file()
+DB_CONFIGURED = Path(os.environ.get("DB_PATH") or os.environ.get("DATABASE_PATH") or str(DB_DEFAULT))
 S3_BUCKET = os.environ.get("AWS_S3_BUCKET") or os.environ.get("S3_BUCKET")
 S3_REGION = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION")
 OCR_SUBPROCESS_TIMEOUT_SECONDS = max(15, int(os.environ.get("OCR_SUBPROCESS_TIMEOUT_SECONDS", "90")))
@@ -286,6 +287,93 @@ def normalize_lookup_text(value):
     text = re.sub(r"[^A-Z0-9]+", " ", text)
     text = re.sub(r"\s+", " ", text).strip()
     return text
+
+
+def normalize_service_key(value):
+    text = normalize_lookup_text(value)
+    aliases = {
+        "GESTORIA": "gestoria",
+        "SEGUROS": "seguros",
+        "INMOBILIARIA": "inmobiliaria",
+        "FINANCIACIONES": "financiaciones",
+        "HIPOTECAS": "financiaciones",
+        "ADMINISTRACION FINCAS": "administracion fincas",
+        "ADMINISTRACION DE FINCAS": "administracion fincas",
+    }
+    return aliases.get(text, text.lower().strip())
+
+
+def parse_iso_date(value):
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    head = raw.split("T", 1)[0].split(" ", 1)[0]
+    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y"):
+        try:
+            return datetime.strptime(head, fmt).date()
+        except Exception:
+            continue
+    return None
+
+
+def add_year_to_date(value):
+    base = parse_iso_date(value)
+    if not base:
+        return ""
+    try:
+        return base.replace(year=base.year + 1).isoformat()
+    except ValueError:
+        # 29/02 -> 28/02 en años no bisiestos
+        return base.replace(month=2, day=28, year=base.year + 1).isoformat()
+
+
+def parse_money_value(value):
+    if value is None:
+        return 0.0
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value).strip()
+    if not text:
+        return 0.0
+    text = text.replace(".", "").replace(",", ".")
+    text = re.sub(r"[^0-9.\-]+", "", text)
+    if not text or text in ("-", "."):
+        return 0.0
+    try:
+        return float(text)
+    except ValueError:
+        return 0.0
+
+
+def has_explicit_renewal_action(seguro_row):
+    estado = normalize_lookup_text(seguro_row.get("estado"))
+    estado_ren = normalize_lookup_text(seguro_row.get("estado_renovacion"))
+    if seguro_row.get("renovacion_fecha") or seguro_row.get("nueva_poliza_ref"):
+        return True
+    if any(token in estado for token in ("BAJA", "CANCEL", "ANULAD")):
+        return True
+    if not estado_ren:
+        return False
+    return "AUTOM" not in estado_ren
+
+
+def compute_seguro_display(seguro_row):
+    fecha_efecto = seguro_row.get("fecha_efecto")
+    venc = parse_iso_date(seguro_row.get("fecha_vencimiento")) or parse_iso_date(add_year_to_date(fecha_efecto))
+    base_estado = seguro_row.get("estado") or "-"
+    if not venc:
+        return {"vencimiento_display": "", "estado_display": base_estado}
+    today = datetime.now(timezone.utc).date()
+    has_action = has_explicit_renewal_action(seguro_row)
+    while venc < today and not has_action:
+        try:
+            venc = venc.replace(year=venc.year + 1)
+        except ValueError:
+            venc = venc.replace(month=2, day=28, year=venc.year + 1)
+    estado = base_estado
+    if parse_iso_date(seguro_row.get("fecha_vencimiento")) and parse_iso_date(seguro_row.get("fecha_vencimiento")) < today and not has_action:
+        estado = "Renovada automática"
+    return {"vencimiento_display": venc.isoformat(), "estado_display": estado}
 
 
 def load_seguros_company_hints(path=SEGUROS_COMPANY_HINTS_PATH):
@@ -2750,6 +2838,299 @@ def ensure_cliente_servicio_link(conn, cliente_id, empresa_id, servicio, now, es
         ),
     )
 
+
+def ensure_seguro_doc_link(conn, seguro_row, now, calidad_ocr=None, campos_ocr=""):
+    if not seguro_row:
+        return None
+    cliente_id = seguro_row["cliente_id"]
+    empresa_id = seguro_row["empresa_id"]
+    poliza_key = (seguro_row["poliza_key"] or "").strip()
+    poliza_url = (seguro_row["poliza_url"] or "").strip()
+    if not cliente_id or not empresa_id or (not poliza_key and not poliza_url):
+        return None
+    where = ["cliente_id = ?", "empresa_id = ?", "LOWER(COALESCE(referencia_tipo, '')) = 'seguros'"]
+    values = [cliente_id, empresa_id]
+    key_or_url = []
+    if poliza_key:
+        key_or_url.append("doc_key = ?")
+        values.append(poliza_key)
+    if poliza_url:
+        key_or_url.append("doc_url = ?")
+        values.append(poliza_url)
+    if key_or_url:
+        where.append(f"({' OR '.join(key_or_url)})")
+    exists = conn.execute(
+        f"SELECT id FROM gestoria_docs WHERE {' AND '.join(where)} LIMIT 1",
+        values,
+    ).fetchone()
+    if exists:
+        return exists["id"]
+    nombre_doc = seguro_row["poliza_numero"] or seguro_row["tomador"] or "Póliza seguro"
+    notas_doc = " · ".join([value for value in (seguro_row["compania"], seguro_row["ramo"]) if value])
+    doc_id = os.urandom(16).hex()
+    conn.execute(
+        """
+        INSERT INTO gestoria_docs (
+          id, empresa_id, cliente_id, referencia_tipo, referencia_id,
+          nombre, tipo, fecha, estado, notas, doc_key, doc_url,
+          calidad_ocr, campos_ocr, created_at, updated_at
+        ) VALUES (
+          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+        )
+        """,
+        (
+            doc_id,
+            empresa_id,
+            cliente_id,
+            "seguros",
+            seguro_row["id"],
+            nombre_doc,
+            "Seguros",
+            seguro_row["fecha_efecto"] or seguro_row["mes_creacion"],
+            seguro_row["estado"] or "En vigor",
+            notas_doc,
+            poliza_key or None,
+            poliza_url or None,
+            calidad_ocr,
+            campos_ocr or "",
+            now,
+            now,
+        ),
+    )
+    return doc_id
+
+
+def build_cliente_ficha_payload(conn, cliente_id, services_filter=None):
+    cliente = conn.execute("SELECT * FROM clientes WHERE id = ?", (cliente_id,)).fetchone()
+    if not cliente:
+        return None
+    services_filter = services_filter or []
+    if services_filter and not cliente_has_servicio(conn, cliente_id, services_filter):
+        return {"error": "Cliente no disponible para este servicio"}
+
+    empresas_query = """
+        SELECT ce.id AS rel_id, ce.empresa_id, e.nombre AS empresa, ce.servicio, ce.estado,
+               ce.fecha_inicio, ce.fecha_fin
+        FROM clientes_empresas ce
+        LEFT JOIN empresas e ON e.id = ce.empresa_id
+        WHERE ce.cliente_id = ?
+    """
+    values = [cliente_id]
+    if services_filter:
+        placeholders = ",".join(["?"] * len(services_filter))
+        empresas_query += f" AND LOWER(ce.servicio) IN ({placeholders})"
+        values.extend(services_filter)
+    empresas_query += " ORDER BY e.nombre"
+    empresas = [dict(r) for r in conn.execute(empresas_query, values).fetchall()]
+
+    service_keys = []
+    for row in empresas:
+        key = normalize_service_key(row.get("servicio"))
+        if key and key not in service_keys:
+            service_keys.append(key)
+    empresa_ids = [row["empresa_id"] for row in empresas if row.get("empresa_id")]
+
+    seguros_rows = [
+        dict(r)
+        for r in conn.execute(
+            """
+            SELECT id, cliente_id, empresa_id, compania, ramo, poliza_numero, fecha_efecto, fecha_vencimiento,
+                   estado, prima_neta, prima_total, tomador, estado_renovacion, renovacion_fecha,
+                   nueva_poliza_ref, colaborador, produccion, mes_creacion, poliza_key, poliza_url
+            FROM seguros
+            WHERE cliente_id = ?
+            ORDER BY COALESCE(fecha_efecto, created_at) DESC
+            """,
+            (cliente_id,),
+        ).fetchall()
+    ]
+    for row in seguros_rows:
+        row.update(compute_seguro_display(row))
+
+    docs_rows = [
+        dict(r)
+        for r in conn.execute(
+            """
+            SELECT id, empresa_id, cliente_id, referencia_tipo, referencia_id, nombre, tipo, fecha,
+                   estado, notas, doc_key, doc_url
+            FROM gestoria_docs
+            WHERE cliente_id = ?
+            ORDER BY created_at DESC
+            """,
+            (cliente_id,),
+        ).fetchall()
+    ]
+    docs_by_service = {"seguros": [], "gestoria": [], "financiaciones": [], "inmobiliaria": [], "otros": []}
+    for row in docs_rows:
+        key = normalize_service_key(row.get("referencia_tipo") or row.get("tipo"))
+        if key not in docs_by_service:
+            key = "otros"
+        docs_by_service[key].append(row)
+
+    facturas = []
+    if empresa_ids:
+        placeholders = ",".join(["?"] * len(empresa_ids))
+        facturas = [
+            dict(r)
+            for r in conn.execute(
+                f"""
+                SELECT id, empresa_id, cliente_id, fecha, concepto, gestion, tipo, importe, notas
+                FROM gestoria_contabilidad
+                WHERE cliente_id = ?
+                  AND empresa_id IN ({placeholders})
+                ORDER BY fecha DESC, created_at DESC
+                LIMIT 500
+                """,
+                [cliente_id, *empresa_ids],
+            ).fetchall()
+        ]
+    fact_total = sum(parse_money_value(row.get("importe")) for row in facturas if normalize_lookup_text(row.get("tipo")) != "GASTO")
+
+    trabajos = [
+        dict(r)
+        for r in conn.execute(
+            """
+            SELECT id, empresa_id, cliente_id, tipo_trabajo, estado, fecha_inicio, fecha_fin, responsable, importe, notas
+            FROM gestoria_trabajos
+            WHERE cliente_id = ?
+            ORDER BY COALESCE(fecha_fin, fecha_inicio, created_at) DESC
+            LIMIT 500
+            """,
+            (cliente_id,),
+        ).fetchall()
+    ]
+
+    acciones = [
+        dict(r)
+        for r in conn.execute(
+            """
+            SELECT id, empresa_id, cliente_id, fecha, hora, tipo, responsable, estado, notas, servicio, recordatorio_min
+            FROM acciones
+            WHERE cliente_id = ?
+            ORDER BY fecha DESC, hora DESC
+            LIMIT 500
+            """,
+            (cliente_id,),
+        ).fetchall()
+    ]
+
+    historico = []
+    for row in trabajos:
+        historico.append(
+            {
+                "fecha": row.get("fecha_fin") or row.get("fecha_inicio") or "",
+                "servicio": "gestoria",
+                "concepto": row.get("tipo_trabajo") or "Trabajo",
+                "estado": row.get("estado") or "-",
+                "importe": row.get("importe"),
+            }
+        )
+    for row in seguros_rows:
+        historico.append(
+            {
+                "fecha": row.get("vencimiento_display") or row.get("fecha_efecto") or "",
+                "servicio": "seguros",
+                "concepto": f"{row.get('compania') or 'Seguro'} {row.get('poliza_numero') or ''}".strip(),
+                "estado": row.get("estado_display") or row.get("estado") or "-",
+                "importe": row.get("prima_total"),
+            }
+        )
+    historico.sort(key=lambda r: str(r.get("fecha") or ""), reverse=True)
+
+    pendientes_trabajos = sum(
+        1
+        for row in trabajos
+        if "FINAL" not in normalize_lookup_text(row.get("estado"))
+        and "CANCEL" not in normalize_lookup_text(row.get("estado"))
+    )
+    pendientes_acciones = sum(
+        1
+        for row in acciones
+        if all(
+            token not in normalize_lookup_text(row.get("estado"))
+            for token in ("HECHO", "FINAL", "CANCEL")
+        )
+    )
+    today = datetime.now(timezone.utc).date()
+    citas_programadas = [
+        row
+        for row in acciones
+        if parse_iso_date(row.get("fecha")) and parse_iso_date(row.get("fecha")) >= today
+    ]
+    primas_total = sum(parse_money_value(row.get("prima_total")) for row in seguros_rows)
+    realizado = sum(
+        parse_money_value(row.get("importe"))
+        for row in trabajos
+        if "FINAL" in normalize_lookup_text(row.get("estado"))
+    )
+    cobrado = fact_total
+    rentabilidad = cobrado - realizado
+
+    profesionales = {
+        "gestoria": {},
+        "seguros": {
+            "polizas_total": len(seguros_rows),
+            "companias": sorted(
+                {str(row.get("compania") or "").strip() for row in seguros_rows if str(row.get("compania") or "").strip()}
+            ),
+        },
+    }
+    gestoria_row = conn.execute(
+        """
+        SELECT tipo_cliente, mod_fiscal, mod_laboral, mod_contable, mod_renta, mod_registro, mod_trafico, mod_puntuales, renta_detalles
+        FROM cliente_gestoria
+        WHERE cliente_id = ?
+        """,
+        (cliente_id,),
+    ).fetchone()
+    if gestoria_row:
+        profesionales["gestoria"] = dict(gestoria_row)
+
+    return {
+        "cliente": dict(cliente),
+        "datos_personales": dict(cliente),
+        "empresas": empresas,
+        "servicios_activos": service_keys,
+        "datos_profesionales_por_servicio": profesionales,
+        "servicios": {
+            "seguros": seguros_rows,
+            "gestoria_trabajos": trabajos,
+            "acciones": acciones,
+        },
+        "documentacion": {
+            "all": docs_rows,
+            "by_service": docs_by_service,
+        },
+        "facturas": facturas,
+        "historico": historico[:500],
+        "dashboard": {
+            "rentabilidad": {
+                "realizado": realizado,
+                "cobrado": cobrado,
+                "margen": rentabilidad,
+            },
+            "primas_total": primas_total,
+            "tareas_pendientes": pendientes_trabajos + pendientes_acciones,
+            "citas_programadas": len(citas_programadas),
+            "proxima_cita": min(
+                [row["fecha"] for row in citas_programadas if row.get("fecha")],
+                default="",
+            ),
+            "series": {
+                "rentabilidad": [
+                    {"label": "Realizado", "value": realizado},
+                    {"label": "Cobrado", "value": cobrado},
+                    {"label": "Margen", "value": rentabilidad},
+                ],
+                "actividad": [
+                    {"label": "Primas", "value": primas_total},
+                    {"label": "Pendientes", "value": pendientes_trabajos + pendientes_acciones},
+                    {"label": "Citas", "value": len(citas_programadas)},
+                ],
+            },
+        },
+    }
+
 def ensure_cliente_for_financiacion(conn, empresa_id, nombre, nif, now, extra=None):
     if not nombre:
         return None
@@ -4784,75 +5165,11 @@ class Handler(BaseHTTPRequestHandler):
                         now,
                     ),
                 )
-            if cliente_id and (poliza_key or poliza_url):
-                where = ["cliente_id = ?", "empresa_id = ?"]
-                values = [cliente_id, empresa["id"]]
-                key_or_url = []
-                if poliza_key:
-                    key_or_url.append("doc_key = ?")
-                    values.append(poliza_key)
-                if poliza_url:
-                    key_or_url.append("doc_url = ?")
-                    values.append(poliza_url)
-                if key_or_url:
-                    where.append(f"({' OR '.join(key_or_url)})")
-                where_clause = " AND ".join(where)
-                exists = conn.execute(
-                    f"SELECT id FROM gestoria_docs WHERE {where_clause}",
-                    values,
-                ).fetchone()
-                doc_id = None
-                if not exists:
-                    nombre_doc = payload.get("poliza_numero") or payload.get("tomador") or "Póliza seguro"
-                    estado_doc = payload.get("estado") or "En vigor"
-                    notas_doc = " · ".join(
-                        [value for value in (payload.get("compania"), payload.get("ramo")) if value]
-                    )
-                    doc_id = os.urandom(16).hex()
-                    conn.execute(
-                        """
-                        INSERT INTO gestoria_docs (
-                          id, empresa_id, cliente_id, referencia_tipo, referencia_id,
-                          nombre, tipo, fecha, estado, notas, doc_key, doc_url,
-                          calidad_ocr, campos_ocr, created_at, updated_at
-                        ) VALUES (
-                          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
-                        )
-                        """,
-                        (
-                            doc_id,
-                            empresa["id"],
-                            cliente_id,
-                            "seguros",
-                            poliza_id,
-                            nombre_doc,
-                            "Seguros",
-                            payload.get("fecha_efecto") or payload.get("mes_creacion"),
-                            estado_doc,
-                            notas_doc,
-                            poliza_key or None,
-                            poliza_url or None,
-                            calidad_ocr,
-                            campos_ocr,
-                            now,
-                            now,
-                        ),
-                    )
-                conn.commit()
-                json_response(
-                    self,
-                    {
-                        "ok": True,
-                        "id": poliza_id,
-                        "cliente_id": cliente_id,
-                        "doc_id": doc_id,
-                        "ocr_quality": ocr_quality,
-                        "duplicate_of": dup_id,
-                    },
-                )
-                return
-            # Crear acción si faltan campos obligatorios
+            doc_id = None
             poliza_row = conn.execute("SELECT * FROM seguros WHERE id = ?", (poliza_id,)).fetchone()
+            if poliza_row:
+                doc_id = ensure_seguro_doc_link(conn, poliza_row, now, calidad_ocr=calidad_ocr, campos_ocr=campos_ocr)
+            # Crear acción si faltan campos obligatorios
             missing = []
             for key in ("tomador", "poliza_numero", "compania", "fecha_efecto"):
                 if poliza_row and not str(poliza_row[key] or "").strip():
@@ -4908,6 +5225,8 @@ class Handler(BaseHTTPRequestHandler):
                     "ok": True,
                     "id": poliza_id,
                     "cliente_id": cliente_id,
+                    "doc_id": doc_id,
+                    "ocr_quality": ocr_quality,
                     "duplicate_of": dup_id,
                 },
             )
@@ -5395,57 +5714,8 @@ class Handler(BaseHTTPRequestHandler):
             row = conn.execute("SELECT * FROM seguros WHERE id = ?", (record_id,)).fetchone()
             if row and row["cliente_id"]:
                 ensure_cliente_servicio_link(conn, row["cliente_id"], row["empresa_id"], "seguros", now)
-            if row and (row["poliza_key"] or row["poliza_url"]) and row["cliente_id"]:
-                where = ["cliente_id = ?", "empresa_id = ?"]
-                values = [row["cliente_id"], row["empresa_id"]]
-                key_or_url = []
-                if row["poliza_key"]:
-                    key_or_url.append("doc_key = ?")
-                    values.append(row["poliza_key"])
-                if row["poliza_url"]:
-                    key_or_url.append("doc_url = ?")
-                    values.append(row["poliza_url"])
-                if key_or_url:
-                    where.append(f"({' OR '.join(key_or_url)})")
-                where_clause = " AND ".join(where)
-                exists = conn.execute(
-                    f"SELECT id FROM gestoria_docs WHERE {where_clause}",
-                    values,
-                ).fetchone()
-                if not exists:
-                    nombre_doc = row["poliza_numero"] or row["tomador"] or "Póliza seguro"
-                    notas_doc = " · ".join(
-                        [value for value in (row["compania"], row["ramo"]) if value]
-                    )
-                    conn.execute(
-                        """
-                        INSERT INTO gestoria_docs (
-                          id, empresa_id, cliente_id, referencia_tipo, referencia_id,
-                          nombre, tipo, fecha, estado, notas, doc_key, doc_url,
-                          calidad_ocr, campos_ocr, created_at, updated_at
-                        ) VALUES (
-                          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
-                        )
-                        """,
-                        (
-                            os.urandom(16).hex(),
-                            row["empresa_id"],
-                            row["cliente_id"],
-                            "seguros",
-                            record_id,
-                            nombre_doc,
-                            "seguros",
-                            row["fecha_efecto"] or row["mes_creacion"],
-                            row["estado"] or "En vigor",
-                            notas_doc,
-                            row["poliza_key"],
-                            row["poliza_url"],
-                            None,
-                            None,
-                            now,
-                            now,
-                        ),
-                    )
+            if row:
+                ensure_seguro_doc_link(conn, row, now)
             if row:
                 missing = []
                 for key in ("tomador", "poliza_numero", "compania", "fecha_efecto"):
@@ -6405,27 +6675,61 @@ class Handler(BaseHTTPRequestHandler):
             if not cliente_exists or not empresa_exists:
                 json_response(self, {"error": "Cliente o empresa no encontrados"}, status=400)
                 return
-            conn.execute(
+            servicio = (payload.get("servicio") or "").strip()
+            if not servicio:
+                json_response(self, {"error": "servicio requerido"}, status=400)
+                return
+            existing = conn.execute(
                 """
-                INSERT INTO clientes_empresas (
-                  id, cliente_id, empresa_id, servicio, estado,
-                  fecha_inicio, fecha_fin, created_at, updated_at
-                ) VALUES (
-                  ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
-                )
+                SELECT id
+                FROM clientes_empresas
+                WHERE cliente_id = ?
+                  AND empresa_id = ?
+                  AND LOWER(servicio) = LOWER(?)
+                LIMIT 1
                 """,
-                (
-                    os.urandom(16).hex(),
-                    cliente_id,
-                    empresa_id,
-                    payload.get("servicio"),
-                    payload.get("estado"),
-                    payload.get("fecha_inicio"),
-                    payload.get("fecha_fin"),
-                    now,
-                    now,
-                ),
-            )
+                (cliente_id, empresa_id, servicio),
+            ).fetchone()
+            if existing:
+                conn.execute(
+                    """
+                    UPDATE clientes_empresas
+                    SET estado = COALESCE(?, estado),
+                        fecha_inicio = COALESCE(?, fecha_inicio),
+                        fecha_fin = COALESCE(?, fecha_fin),
+                        updated_at = datetime(?)
+                    WHERE id = ?
+                    """,
+                    (
+                        payload.get("estado"),
+                        payload.get("fecha_inicio"),
+                        payload.get("fecha_fin"),
+                        now,
+                        existing["id"],
+                    ),
+                )
+            else:
+                conn.execute(
+                    """
+                    INSERT INTO clientes_empresas (
+                      id, cliente_id, empresa_id, servicio, estado,
+                      fecha_inicio, fecha_fin, created_at, updated_at
+                    ) VALUES (
+                      ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                    )
+                    """,
+                    (
+                        os.urandom(16).hex(),
+                        cliente_id,
+                        empresa_id,
+                        servicio,
+                        payload.get("estado"),
+                        payload.get("fecha_inicio"),
+                        payload.get("fecha_fin"),
+                        now,
+                        now,
+                    ),
+                )
         elif parsed.path == "/api/cliente_update":
             cliente_id = payload.get("id")
             if not cliente_id:
@@ -7046,55 +7350,61 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, {"items": [row["nombre"] for row in rows if row["nombre"]]})
             return
 
-        if path == "/api/cliente":
+        if path == "/api/debug_db_path":
+            resolved = Path(self.db_path).expanduser().resolve()
+            exists = resolved.exists()
+            stat = resolved.stat() if exists else None
+            json_response(
+                self,
+                {
+                    "db_path": str(resolved),
+                    "exists": exists,
+                    "size_bytes": stat.st_size if stat else 0,
+                    "mtime": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat()
+                    if stat
+                    else "",
+                },
+            )
+            return
+
+        if path == "/api/cliente_ficha":
             cliente_id = params.get("id", [""])[0]
             if not cliente_id:
                 json_response(self, {"error": "id requerido"}, status=400)
                 return
             servicio = (params.get("servicio", [""])[0] or "").strip()
             services = parse_services_param(servicio)
-            if services and not cliente_has_servicio(conn, cliente_id, services):
-                json_response(self, {"error": "Cliente no disponible para este servicio"}, status=404)
-                return
-            cliente = conn.execute(
-                "SELECT * FROM clientes WHERE id = ?",
-                (cliente_id,),
-            ).fetchone()
-            if not cliente:
+            ficha = build_cliente_ficha_payload(conn, cliente_id, services)
+            if not ficha:
                 json_response(self, {"error": "Cliente no encontrado"}, status=404)
                 return
-            if services:
-                placeholders = ",".join(["?"] * len(services))
-                empresas = conn.execute(
-                    f"""
-                    SELECT ce.id AS rel_id, e.nombre AS empresa, ce.servicio, ce.estado,
-                           ce.fecha_inicio, ce.fecha_fin
-                    FROM clientes_empresas ce
-                    LEFT JOIN empresas e ON e.id = ce.empresa_id
-                    WHERE ce.cliente_id = ?
-                      AND LOWER(ce.servicio) IN ({placeholders})
-                    ORDER BY e.nombre
-                    """,
-                    [cliente_id, *services],
-                ).fetchall()
-            else:
-                empresas = conn.execute(
-                    """
-                    SELECT ce.id AS rel_id, e.nombre AS empresa, ce.servicio, ce.estado,
-                           ce.fecha_inicio, ce.fecha_fin
-                    FROM clientes_empresas ce
-                    LEFT JOIN empresas e ON e.id = ce.empresa_id
-                    WHERE ce.cliente_id = ?
-                    ORDER BY e.nombre
-                    """,
-                    (cliente_id,),
-                ).fetchall()
+            if ficha.get("error"):
+                json_response(self, {"error": ficha["error"]}, status=404)
+                return
+            json_response(self, ficha)
+            return
+
+        if path == "/api/cliente":
+            # Compatibilidad con frontend antiguo.
+            cliente_id = params.get("id", [""])[0]
+            if not cliente_id:
+                json_response(self, {"error": "id requerido"}, status=400)
+                return
+            servicio = (params.get("servicio", [""])[0] or "").strip()
+            services = parse_services_param(servicio)
+            ficha = build_cliente_ficha_payload(conn, cliente_id, services)
+            if not ficha:
+                json_response(self, {"error": "Cliente no encontrado"}, status=404)
+                return
+            if ficha.get("error"):
+                json_response(self, {"error": ficha["error"]}, status=404)
+                return
             json_response(
                 self,
                 {
-                    "cliente": dict(cliente),
-                    "empresas": [dict(r) for r in empresas],
-                    "servicios": [dict(r) for r in empresas],
+                    "cliente": ficha.get("cliente", {}),
+                    "empresas": ficha.get("empresas", []),
+                    "servicios": ficha.get("empresas", []),
                 },
             )
             return
@@ -7679,73 +7989,6 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "cliente_id o empresa_id requerido"}, status=400)
                 return
             if cliente_id:
-                if service == "seguros":
-                    now = datetime.now(timezone.utc).isoformat()
-                    seguros_rows = conn.execute(
-                        """
-                        SELECT id, empresa_id, cliente_id, poliza_numero, compania, ramo, estado,
-                               fecha_efecto, poliza_key, poliza_url
-                        FROM seguros
-                        WHERE cliente_id = ?
-                          AND (COALESCE(TRIM(poliza_key), '') <> '' OR COALESCE(TRIM(poliza_url), '') <> '')
-                        ORDER BY COALESCE(fecha_efecto, created_at) DESC
-                        """,
-                        (cliente_id,),
-                    ).fetchall()
-                    for srow in seguros_rows:
-                        existing = None
-                        if srow["poliza_key"]:
-                            existing = conn.execute(
-                                """
-                                SELECT id FROM gestoria_docs
-                                WHERE cliente_id = ? AND LOWER(COALESCE(referencia_tipo, '')) = 'seguros' AND doc_key = ?
-                                LIMIT 1
-                                """,
-                                (cliente_id, srow["poliza_key"]),
-                            ).fetchone()
-                        if not existing and srow["poliza_url"]:
-                            existing = conn.execute(
-                                """
-                                SELECT id FROM gestoria_docs
-                                WHERE cliente_id = ? AND LOWER(COALESCE(referencia_tipo, '')) = 'seguros' AND doc_url = ?
-                                LIMIT 1
-                                """,
-                                (cliente_id, srow["poliza_url"]),
-                            ).fetchone()
-                        if existing:
-                            continue
-                        nombre_doc = srow["poliza_numero"] or f"Póliza {srow['compania'] or ''}".strip() or "Póliza seguro"
-                        notas_doc = " · ".join([value for value in (srow["compania"], srow["ramo"]) if value])
-                        conn.execute(
-                            """
-                            INSERT INTO gestoria_docs (
-                              id, empresa_id, cliente_id, referencia_tipo, referencia_id,
-                              nombre, tipo, fecha, estado, notas, doc_key, doc_url,
-                              calidad_ocr, campos_ocr, created_at, updated_at
-                            ) VALUES (
-                              ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
-                            )
-                            """,
-                            (
-                                os.urandom(16).hex(),
-                                srow["empresa_id"],
-                                cliente_id,
-                                "seguros",
-                                srow["id"],
-                                nombre_doc,
-                                "Seguros",
-                                srow["fecha_efecto"],
-                                srow["estado"] or "En vigor",
-                                notas_doc,
-                                srow["poliza_key"] or None,
-                                srow["poliza_url"] or None,
-                                None,
-                                "",
-                                now,
-                                now,
-                            ),
-                        )
-                    conn.commit()
                 where = ["cliente_id = ?"]
                 values = [cliente_id]
                 if service:
@@ -9266,7 +9509,7 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     parser = argparse.ArgumentParser(description="ERP Modernia local server.")
-    parser.add_argument("--db", default=str(DB_DEFAULT), help="SQLite path.")
+    parser.add_argument("--db", default=str(DB_CONFIGURED), help="SQLite path.")
     parser.add_argument("--host", default="127.0.0.1", help="Host.")
     env_port = os.environ.get("PORT")
     try:
@@ -9281,7 +9524,7 @@ def main():
     worker = threading.Thread(target=ocr_worker_loop, args=(args.db,), daemon=True)
     worker.start()
     server = ThreadingHTTPServer((args.host, args.port), Handler)
-    print(f"Servidor activo en http://{args.host}:{args.port}")
+    print(f"Servidor activo en http://{args.host}:{args.port} · db={Path(args.db).resolve()}")
     server.serve_forever()
 
 
