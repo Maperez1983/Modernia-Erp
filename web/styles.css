@@ -1471,6 +1471,12 @@ body.crm-fin #companySummary {
   color: var(--muted);
 }
 
+.cliente-mini-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
+
 .agenda-time {
   font-weight: 600;
 }

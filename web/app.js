@@ -522,6 +522,10 @@ const clienteAssignStatus = document.getElementById("clienteAssignStatus");
 const clienteFacturas = document.getElementById("clienteFacturas");
 const clienteTrabajos = document.getElementById("clienteTrabajos");
 const clienteSegurosFicha = document.getElementById("clienteSegurosFicha");
+const clienteMiniDashboardHint = document.getElementById("clienteMiniDashboardHint");
+const clienteKpiRentabilidad = document.getElementById("clienteKpiRentabilidad");
+const clienteKpiPendientes = document.getElementById("clienteKpiPendientes");
+const clienteKpiCitas = document.getElementById("clienteKpiCitas");
 const responsableSelects = document.querySelectorAll(".responsable-select");
 const clienteProfesionalSection = document.getElementById("clienteProfesionalSection");
 const clienteProfesionalList = document.getElementById("clienteProfesionalList");
@@ -11843,6 +11847,118 @@ const loadAgendaGeneral = () => {
   });
 };
 
+const parseMoneyValue = (value) => {
+  const direct = Number(value);
+  if (Number.isFinite(direct)) return direct;
+  const normalized = String(value || "")
+    .replace(/[€\s]/g, "")
+    .replace(/\./g, "")
+    .replace(",", ".");
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const loadClienteMiniDashboard = async (clienteId, empresas = []) => {
+  if (!clienteKpiRentabilidad || !clienteKpiPendientes || !clienteKpiCitas) {
+    return;
+  }
+  if (!clienteId) {
+    clienteKpiRentabilidad.textContent = "-";
+    clienteKpiPendientes.textContent = "-";
+    clienteKpiCitas.textContent = "-";
+    return;
+  }
+  clienteKpiRentabilidad.textContent = "Calculando...";
+  clienteKpiPendientes.textContent = "Calculando...";
+  clienteKpiCitas.textContent = "Calculando...";
+  if (clienteMiniDashboardHint) {
+    clienteMiniDashboardHint.textContent = "Resumen operativo y económico del cliente.";
+  }
+  const servicios = new Set(
+    (empresas || []).map((row) => normalizeSimple(row.servicio || ""))
+  );
+  const serviciosAgenda = ["seguros", "gestoria", "financiaciones", "inmobiliaria"].filter(
+    (name) => !servicios.size || servicios.has(name)
+  );
+  const agendaServices = serviciosAgenda.length
+    ? serviciosAgenda
+    : ["seguros", "gestoria", "financiaciones", "inmobiliaria"];
+  const accionesReqs = agendaServices.map((servicio) =>
+    api(`/api/acciones?servicio=${encodeURIComponent(servicio)}&cliente_id=${encodeURIComponent(clienteId)}`)
+      .catch(() => ({ rows: [] }))
+  );
+  const trabajosReq = api(`/api/gestoria_trabajos?cliente_id=${encodeURIComponent(clienteId)}`)
+    .catch(() => ({ rows: [] }));
+  const gestoriaEmpresaIds = (empresas || [])
+    .filter((row) => normalizeSimple(row.servicio || "") === "gestoria")
+    .map((row) => (state.empresas || []).find((emp) => emp.nombre === row.empresa)?.id)
+    .filter(Boolean);
+  const contaIds = gestoriaEmpresaIds.length
+    ? gestoriaEmpresaIds
+    : ((state.empresas || []).find((emp) => emp.nombre === FINCAS_COMPANY)?.id
+      ? [(state.empresas || []).find((emp) => emp.nombre === FINCAS_COMPANY).id]
+      : []);
+  const contaReqs = contaIds.map((empresaId) =>
+    api(`/api/gestoria_contabilidad?empresa_id=${encodeURIComponent(empresaId)}`)
+      .catch(() => ({ rows: [] }))
+  );
+  try {
+    const [trabajosData, ...rest] = await Promise.all([trabajosReq, ...accionesReqs, ...contaReqs]);
+    const accionesGroups = rest.slice(0, accionesReqs.length);
+    const contaGroups = rest.slice(accionesReqs.length);
+    const trabajos = trabajosData.rows || [];
+    const acciones = accionesGroups.flatMap((payload) => payload.rows || []);
+    const movimientos = contaGroups
+      .flatMap((payload) => payload.rows || [])
+      .filter((row) => String(row.cliente_id || "") === String(clienteId));
+    const realizado = trabajos
+      .filter((row) => normalizeSimple(row.estado || "").includes("final"))
+      .reduce((sum, row) => sum + parseMoneyValue(row.importe), 0);
+    const cobrado = movimientos
+      .filter((row) => {
+        const tipo = normalizeSimple(row.tipo || "");
+        return tipo !== "gasto";
+      })
+      .reduce((sum, row) => sum + parseMoneyValue(row.importe), 0);
+    const margen = cobrado - realizado;
+    const pendientesTrabajos = trabajos.filter((row) => {
+      const estado = normalizeSimple(row.estado || "");
+      return estado && !estado.includes("final") && !estado.includes("cancel");
+    }).length;
+    const pendientesAcciones = acciones.filter((row) => {
+      const estado = normalizeSimple(row.estado || "");
+      return !estado || (!estado.includes("hecho") && !estado.includes("cancel") && !estado.includes("final"));
+    }).length;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const citas = acciones.filter((row) => {
+      const fecha = parseAgendaDate(row.fecha);
+      if (!fecha) return false;
+      const estado = normalizeSimple(row.estado || "");
+      return fecha >= today && !estado.includes("cancel") && !estado.includes("hecho");
+    });
+    const nextCita = citas
+      .map((row) => row.fecha)
+      .filter(Boolean)
+      .sort()[0];
+    clienteKpiRentabilidad.textContent =
+      `${euroFormatter.format(realizado)} / ${euroFormatter.format(cobrado)} · ${euroFormatter.format(margen)}`;
+    clienteKpiPendientes.textContent = String(pendientesTrabajos + pendientesAcciones);
+    clienteKpiCitas.textContent = nextCita ? `${citas.length} · Próxima ${nextCita}` : String(citas.length);
+    if (clienteMiniDashboardHint) {
+      clienteMiniDashboardHint.textContent =
+        "Rentabilidad = realizado / cobrado / margen. Pendientes incluye trabajos y acciones.";
+    }
+  } catch {
+    clienteKpiRentabilidad.textContent = "-";
+    clienteKpiPendientes.textContent = "-";
+    clienteKpiCitas.textContent = "-";
+    if (clienteMiniDashboardHint) {
+      clienteMiniDashboardHint.textContent = "No se pudo calcular el dashboard del cliente.";
+    }
+  }
+};
+
 const resolveSeguroVencimiento = (row) => {
   const vencimiento = normalizeDateInput(row.fecha_vencimiento || "");
   if (vencimiento) return vencimiento;
@@ -12199,6 +12315,7 @@ const openClienteDetail = (id) => {
         clienteEmpresasList.appendChild(table);
       }
     }
+    loadClienteMiniDashboard(id, data.empresas || []);
     if (clienteAssignServicio) {
       populateServiciosSelect(clienteAssignServicio);
     }

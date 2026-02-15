@@ -3019,6 +3019,24 @@
             <button class="tab" type="button" data-tab="trabajos">Trabajos realizados</button>
           </div>
           <div id="clienteTabDatos">
+            <div class="form-card" id="clienteMiniDashboard">
+              <h3>Dashboard cliente</h3>
+              <p class="muted" id="clienteMiniDashboardHint">Resumen operativo y económico del cliente.</p>
+              <div class="cliente-mini-kpis">
+                <div class="card">
+                  <div class="kpi-label">Rentabilidad (realizado/cobrado)</div>
+                  <div class="kpi-value" id="clienteKpiRentabilidad">-</div>
+                </div>
+                <div class="card">
+                  <div class="kpi-label">Tareas pendientes</div>
+                  <div class="kpi-value" id="clienteKpiPendientes">-</div>
+                </div>
+                <div class="card">
+                  <div class="kpi-label">Citas programadas</div>
+                  <div class="kpi-value" id="clienteKpiCitas">-</div>
+                </div>
+              </div>
+            </div>
             <div class="grid" id="clienteDetailGrid"></div>
             <div class="form-actions">
               <button type="button" id="clienteSaveBtn">Guardar cambios</button>
