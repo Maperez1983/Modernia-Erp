@@ -1086,6 +1086,10 @@ const euroFormatter = new Intl.NumberFormat("es-ES", {
 });
 
 const numberFormatter = new Intl.NumberFormat("es-ES");
+const quantityFormatter = new Intl.NumberFormat("es-ES", {
+  minimumFractionDigits: 0,
+  maximumFractionDigits: 2,
+});
 
 const formatPercent = (value) => {
   const num = Number(value) || 0;
@@ -3327,7 +3331,68 @@ const MONEY_COLUMNS = new Set([
   "cliente1_ingresos",
   "cliente2_ingresos",
   "aportacion_cv",
+  "prima_neta",
+  "prima_total",
+  "facturado",
+  "gastos",
+  "honorarios",
+  "ingresos",
+  "margen",
+  "coste",
+  "costes",
 ]);
+
+const MONEY_COLUMN_TOKENS = [
+  "importe",
+  "prima",
+  "comision",
+  "coste",
+  "gasto",
+  "ingreso",
+  "facturado",
+  "honorario",
+  "margen",
+  "valoracion",
+  "precio",
+  "entrada",
+  "cesion",
+  "cuota",
+];
+
+const QUANTITY_COLUMN_TOKENS = [
+  "total",
+  "cantidad",
+  "conteo",
+  "numero",
+  "num_",
+  "num",
+  "dias",
+  "m2",
+  "metros",
+  "pisos",
+  "clientes",
+  "polizas",
+  "unidades",
+];
+
+const CODELIKE_COLUMN_TOKENS = [
+  "nif",
+  "dni",
+  "cif",
+  "iban",
+  "codigo",
+  "postal",
+  "telefono",
+  "movil",
+  "poliza",
+  "matricula",
+  "referencia",
+  "cp",
+  "anio",
+  "year",
+];
+
+const hasToken = (text, tokens) => tokens.some((token) => text.includes(token));
 
 const formatCell = (col, value, tipoPersona = "") => {
   const lower = col.toLowerCase();
@@ -3344,15 +3409,27 @@ const formatCell = (col, value, tipoPersona = "") => {
   if (isNombreCol) {
     return formatNombreCliente(value, tipoPersona);
   }
-  if (MONEY_COLUMNS.has(lower) || lower.includes("comision")) {
-    const number = toNumber(value);
-    return number === null ? value : euroFormatter.format(number);
+  const codeLike = hasToken(lower, CODELIKE_COLUMN_TOKENS) || lower.endsWith("_id");
+  const number = toNumber(value);
+  const isMoney =
+    MONEY_COLUMNS.has(lower) ||
+    hasToken(lower, MONEY_COLUMN_TOKENS) ||
+    lower.includes("comision");
+  if (isMoney && number !== null) {
+    return euroFormatter.format(number);
   }
   if (lower.includes("porcentaje")) {
-    const number = toNumber(value);
     if (number === null) return value;
     const normalized = number > 0 && number <= 1 ? number * 100 : number;
     return `${normalized.toFixed(2)}%`;
+  }
+  if (!codeLike && number !== null) {
+    const isQuantity =
+      typeof value === "number" ||
+      hasToken(lower, QUANTITY_COLUMN_TOKENS);
+    if (isQuantity) {
+      return quantityFormatter.format(number);
+    }
   }
   return value;
 };
@@ -11198,7 +11275,8 @@ const loadGestoriaTrabajos = (clienteId) => {
 
       const importeTd = document.createElement("td");
       if (readonly) {
-        importeTd.textContent = row.importe || "";
+        const formattedImporte = formatCell("importe", row.importe || "");
+        importeTd.textContent = formattedImporte === null ? "" : formattedImporte;
       } else {
         importeTd.appendChild(buildInput(row.importe, "importe", "number"));
       }
@@ -11262,7 +11340,7 @@ const loadGestoriaTrabajosFiltered = (clienteId, tipos, container, infoEl, label
         row.fecha_inicio || "",
         row.fecha_fin || "",
         row.responsable || "",
-        row.importe || "",
+        formatCell("importe", row.importe || ""),
         row.notas || "",
       ];
       cells.forEach((value) => {
