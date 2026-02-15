@@ -653,12 +653,13 @@ def s3_client():
     bucket, region = s3_config()
     if not bucket or not region:
         return None
-    endpoint = f"https://s3.{region}.amazonaws.com"
     return boto3.client(
         "s3",
         region_name=region,
-        endpoint_url=endpoint,
-        config=Config(signature_version="s3v4"),
+        config=Config(
+            signature_version="s3v4",
+            s3={"addressing_style": "virtual"},
+        ),
     )
 
 

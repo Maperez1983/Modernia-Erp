@@ -102,6 +102,25 @@ const uploadBlobToSignedUrl = (url, file, statusEl) =>
     xhr.send(file);
   });
 
+const uploadBlobToSignedUrlWithFetch = async (url, file) => {
+  const putRes = await fetch(url, {
+    method: "PUT",
+    headers: { "Content-Type": file.type || "application/octet-stream" },
+    body: file,
+  });
+  if (!putRes.ok) {
+    let message = `S3 error ${putRes.status}`;
+    try {
+      const text = await putRes.text();
+      const msgMatch = text.match(/<Message>([^<]+)<\/Message>/i);
+      if (msgMatch && msgMatch[1]) {
+        message = msgMatch[1];
+      }
+    } catch {}
+    throw new Error(message);
+  }
+};
+
 const uploadMultipartPartToSignedUrl = (url, blob, onPartProgress) =>
   new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
@@ -264,7 +283,12 @@ const uploadFileToS3 = async (file, prefix, statusEl) => {
   if (!presign.url) {
     throw new Error("Presign inválido.");
   }
-  await uploadBlobToSignedUrl(presign.url, fileToUpload, statusEl);
+  try {
+    await uploadBlobToSignedUrl(presign.url, fileToUpload, statusEl);
+  } catch (xhrErr) {
+    if (statusEl) statusEl.textContent = "Reintentando subida...";
+    await uploadBlobToSignedUrlWithFetch(presign.url, fileToUpload);
+  }
   if (statusEl && optimized.optimized && optimized.originalSize && optimized.optimizedSize) {
     const saved = Math.max(0, optimized.originalSize - optimized.optimizedSize);
     const pct = optimized.originalSize
