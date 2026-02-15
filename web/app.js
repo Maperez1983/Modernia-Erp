@@ -505,6 +505,10 @@ const clienteTabFacturas = document.getElementById("clienteTabFacturas");
 const clienteTabTrabajos = document.getElementById("clienteTabTrabajos");
 const clienteTrabajosPlanificados = document.getElementById("clienteTrabajosPlanificados");
 const clienteProfesionalOperativaBlock = document.getElementById("clienteProfesionalOperativaBlock");
+const clienteDocsUploadForm = document.getElementById("clienteDocsUploadForm");
+const clienteDocsUploadService = document.getElementById("clienteDocsUploadService");
+const clienteDocsUploadFile = document.getElementById("clienteDocsUploadFile");
+const clienteDocsUploadStatus = document.getElementById("clienteDocsUploadStatus");
 const clienteDocsTabs = document.getElementById("clienteDocsTabs");
 const clienteDocsSeguros = document.getElementById("clienteDocsSeguros");
 const clienteDocsGestoria = document.getElementById("clienteDocsGestoria");
@@ -2457,6 +2461,9 @@ const setClienteDocsTab = (tab) => {
   const fallback = allowed ? Array.from(allowed)[0] || "seguros" : normalized;
   const targetTab = allowed && !allowed.has(normalizeSimple(normalized)) ? fallback : normalized;
   state.clienteDocsTab = targetTab;
+  if (clienteDocsUploadService) {
+    clienteDocsUploadService.value = targetTab;
+  }
   clienteDocsTabs.querySelectorAll(".tab").forEach((btn) => {
     const key = normalizeSimple(btn.dataset.docsTab || "");
     const isAllowed = !allowed || allowed.has(key);
@@ -15455,6 +15462,82 @@ if (gestoriaClienteDocsForm) {
       .catch(() => {
         if (gestoriaClienteDocsStatus) {
           gestoriaClienteDocsStatus.textContent = "Error al guardar.";
+        }
+      });
+  });
+}
+
+if (clienteDocsUploadForm) {
+  clienteDocsUploadForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (!state.currentClienteId) {
+      if (clienteDocsUploadStatus) {
+        clienteDocsUploadStatus.textContent = "Selecciona un cliente.";
+      }
+      return;
+    }
+    if (clienteDocsUploadStatus) {
+      clienteDocsUploadStatus.textContent = "Subiendo...";
+    }
+    const formData = new FormData(clienteDocsUploadForm);
+    const payload = Object.fromEntries(formData.entries());
+    const serviceKey = normalizeSimple(payload.referencia_tipo || state.clienteDocsTab || "gestoria");
+    const serviceLabel = getServiceLabelFromNormalized(serviceKey) || "Documento";
+    const uploadPrefix = ["seguros", "gestoria", "inmobiliaria", "financiaciones"].includes(serviceKey)
+      ? serviceKey
+      : "docs";
+    payload.empresa_nombre = FINCAS_COMPANY;
+    payload.usuario = getCurrentUser();
+    payload.cliente_id = state.currentClienteId;
+    payload.referencia_tipo = serviceKey;
+    if (!payload.tipo || !String(payload.tipo).trim()) {
+      payload.tipo = serviceLabel;
+    }
+    const file =
+      clienteDocsUploadFile &&
+      clienteDocsUploadFile.files &&
+      clienteDocsUploadFile.files.length
+        ? clienteDocsUploadFile.files[0]
+        : null;
+    if (file) {
+      try {
+        const upload = await uploadFileToS3(file, uploadPrefix, clienteDocsUploadStatus);
+        if (upload) {
+          payload.doc_key = upload.key || "";
+          payload.doc_url = upload.public_url || "";
+        }
+      } catch (err) {
+        if (clienteDocsUploadStatus) {
+          clienteDocsUploadStatus.textContent = `Error al subir: ${err.message}`;
+        }
+        return;
+      }
+    }
+    fetch("/api/gestoria_docs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.error) {
+          if (clienteDocsUploadStatus) {
+            clienteDocsUploadStatus.textContent = data.error;
+          }
+          return;
+        }
+        if (clienteDocsUploadStatus) {
+          clienteDocsUploadStatus.textContent = "Documento guardado.";
+        }
+        clienteDocsUploadForm.reset();
+        if (clienteDocsUploadService) {
+          clienteDocsUploadService.value = serviceKey;
+        }
+        setClienteDocsTab(serviceKey);
+      })
+      .catch(() => {
+        if (clienteDocsUploadStatus) {
+          clienteDocsUploadStatus.textContent = "Error al guardar.";
         }
       });
   });

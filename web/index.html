@@ -3621,6 +3621,49 @@
             <div class="form-card">
               <h3>Documentación del cliente</h3>
               <p class="muted">Archivos por servicio (seguros, gestoría, financiaciones e inmobiliaria).</p>
+              <form id="clienteDocsUploadForm" class="form-grid">
+                <label>
+                  Servicio destino
+                  <select name="referencia_tipo" id="clienteDocsUploadService" required>
+                    <option value="seguros">Seguros</option>
+                    <option value="gestoria">Gestoría</option>
+                    <option value="financiaciones">Financiaciones</option>
+                    <option value="inmobiliaria">Inmobiliaria</option>
+                  </select>
+                </label>
+                <label>
+                  Nombre documento
+                  <input name="nombre" required />
+                </label>
+                <label>
+                  Tipo
+                  <input name="tipo" placeholder="Póliza, DNI, contrato..." />
+                </label>
+                <label>
+                  Fecha
+                  <input name="fecha" type="date" />
+                </label>
+                <label>
+                  Estado
+                  <select name="estado">
+                    <option>Pendiente</option>
+                    <option>Recibido</option>
+                    <option>Validado</option>
+                  </select>
+                </label>
+                <label class="span-2">
+                  Notas
+                  <input name="notas" />
+                </label>
+                <label class="span-2">
+                  Archivo
+                  <input name="archivo" id="clienteDocsUploadFile" type="file" />
+                </label>
+                <div class="form-actions">
+                  <button type="submit">Subir documento</button>
+                  <span id="clienteDocsUploadStatus" class="muted"></span>
+                </div>
+              </form>
               <div class="tabs" id="clienteDocsTabs">
                 <button class="tab active" type="button" data-docs-tab="seguros">Seguros</button>
                 <button class="tab" type="button" data-docs-tab="gestoria">Gestoría</button>
