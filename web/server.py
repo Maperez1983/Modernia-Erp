@@ -7679,6 +7679,73 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "cliente_id o empresa_id requerido"}, status=400)
                 return
             if cliente_id:
+                if service == "seguros":
+                    now = datetime.now(timezone.utc).isoformat()
+                    seguros_rows = conn.execute(
+                        """
+                        SELECT id, empresa_id, cliente_id, poliza_numero, compania, ramo, estado,
+                               fecha_efecto, poliza_key, poliza_url
+                        FROM seguros
+                        WHERE cliente_id = ?
+                          AND (COALESCE(TRIM(poliza_key), '') <> '' OR COALESCE(TRIM(poliza_url), '') <> '')
+                        ORDER BY COALESCE(fecha_efecto, created_at) DESC
+                        """,
+                        (cliente_id,),
+                    ).fetchall()
+                    for srow in seguros_rows:
+                        existing = None
+                        if srow["poliza_key"]:
+                            existing = conn.execute(
+                                """
+                                SELECT id FROM gestoria_docs
+                                WHERE cliente_id = ? AND LOWER(COALESCE(referencia_tipo, '')) = 'seguros' AND doc_key = ?
+                                LIMIT 1
+                                """,
+                                (cliente_id, srow["poliza_key"]),
+                            ).fetchone()
+                        if not existing and srow["poliza_url"]:
+                            existing = conn.execute(
+                                """
+                                SELECT id FROM gestoria_docs
+                                WHERE cliente_id = ? AND LOWER(COALESCE(referencia_tipo, '')) = 'seguros' AND doc_url = ?
+                                LIMIT 1
+                                """,
+                                (cliente_id, srow["poliza_url"]),
+                            ).fetchone()
+                        if existing:
+                            continue
+                        nombre_doc = srow["poliza_numero"] or f"Póliza {srow['compania'] or ''}".strip() or "Póliza seguro"
+                        notas_doc = " · ".join([value for value in (srow["compania"], srow["ramo"]) if value])
+                        conn.execute(
+                            """
+                            INSERT INTO gestoria_docs (
+                              id, empresa_id, cliente_id, referencia_tipo, referencia_id,
+                              nombre, tipo, fecha, estado, notas, doc_key, doc_url,
+                              calidad_ocr, campos_ocr, created_at, updated_at
+                            ) VALUES (
+                              ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                            )
+                            """,
+                            (
+                                os.urandom(16).hex(),
+                                srow["empresa_id"],
+                                cliente_id,
+                                "seguros",
+                                srow["id"],
+                                nombre_doc,
+                                "Seguros",
+                                srow["fecha_efecto"],
+                                srow["estado"] or "En vigor",
+                                notas_doc,
+                                srow["poliza_key"] or None,
+                                srow["poliza_url"] or None,
+                                None,
+                                "",
+                                now,
+                                now,
+                            ),
+                        )
+                    conn.commit()
                 where = ["cliente_id = ?"]
                 values = [cliente_id]
                 if service:
