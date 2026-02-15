@@ -1969,12 +1969,15 @@ const renderCompanyCards = () => {
     const clientesCard = document.createElement("div");
     clientesCard.className = "company-card";
     clientesCard.dataset.action = "clientes";
-    const clientesCount =
+    const clientesCountRaw =
       state.clientesStats?.total ??
+      state.clientesStats?.count ??
+      state.clientesStats?.clientes_total ??
       (Array.isArray(state.clientesList) ? state.clientesList.length : 0);
+    const clientesCount = Number(clientesCountRaw) || 0;
     clientesCard.innerHTML = `
       <h3>Clientes</h3>
-      <div class="company-meta">Total registrados: ${numberFormatter.format(clientesCount)}</div>
+      <div class="company-meta">Total registrados: <strong id="clientesCardTotal">${numberFormatter.format(clientesCount)}</strong></div>
       <div class="company-meta">Módulo compartido entre CRMs.</div>
       <a class="card-link" href="?clientes=1" data-action="clientes">Entrar</a>
     `;
@@ -2001,6 +2004,18 @@ const renderCompanyCards = () => {
     `;
     coreCards.appendChild(adminCard);
   }
+};
+
+const refreshClientesCardCount = () => {
+  const el = document.getElementById("clientesCardTotal");
+  if (!el) return;
+  const clientesCountRaw =
+    state.clientesStats?.total ??
+    state.clientesStats?.count ??
+    state.clientesStats?.clientes_total ??
+    (Array.isArray(state.clientesList) ? state.clientesList.length : 0);
+  const clientesCount = Number(clientesCountRaw) || 0;
+  el.textContent = numberFormatter.format(clientesCount);
 };
 
 const renderHoldingOrgChart = () => {
@@ -7001,6 +7016,7 @@ const loadClientesStats = () => {
   const params = serviceParam ? `?servicio=${encodeURIComponent(serviceParam)}` : "";
   return api(`/api/clientes_stats${params}`).then((data) => {
     state.clientesStats = data;
+    refreshClientesCardCount();
   });
 };
 
@@ -7015,6 +7031,7 @@ const loadClientesList = () => {
       return nameA.localeCompare(nameB, "es", { numeric: true, sensitivity: "base" });
     });
     state.clientesList = list;
+    refreshClientesCardCount();
     return state.clientesList;
   });
 };
