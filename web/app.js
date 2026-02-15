@@ -12,15 +12,105 @@ const setCrmMode = (mode = "") => {
   document.body.classList.toggle("crm-fin", mode === "fin");
 };
 
+const UPLOAD_IMAGE_COMPRESS_MIN_BYTES = 500 * 1024;
+const UPLOAD_IMAGE_MAX_SIDE = 2200;
+const UPLOAD_IMAGE_QUALITY = 0.82;
+
+const isCompressibleImage = (file) => {
+  const mime = String(file?.type || "").toLowerCase();
+  if (!mime.startsWith("image/")) return false;
+  if (mime.includes("gif") || mime.includes("svg")) return false;
+  return true;
+};
+
+const loadImageElement = (file) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error("No se pudo leer la imagen."));
+      img.src = reader.result;
+    };
+    reader.onerror = () => reject(new Error("No se pudo leer la imagen."));
+    reader.readAsDataURL(file);
+  });
+
+const maybeCompressUploadFile = async (file, statusEl) => {
+  if (!file || !isCompressibleImage(file) || file.size < UPLOAD_IMAGE_COMPRESS_MIN_BYTES) {
+    return { file, optimized: false };
+  }
+  try {
+    if (statusEl) statusEl.textContent = "Optimizando imagen...";
+    const img = await loadImageElement(file);
+    const width = img.naturalWidth || img.width || 0;
+    const height = img.naturalHeight || img.height || 0;
+    if (!width || !height) return { file, optimized: false };
+    const scale = Math.min(1, UPLOAD_IMAGE_MAX_SIDE / Math.max(width, height));
+    const targetW = Math.max(1, Math.round(width * scale));
+    const targetH = Math.max(1, Math.round(height * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = targetW;
+    canvas.height = targetH;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return { file, optimized: false };
+    ctx.drawImage(img, 0, 0, targetW, targetH);
+    const compressedBlob = await new Promise((resolve) => {
+      canvas.toBlob(resolve, "image/jpeg", UPLOAD_IMAGE_QUALITY);
+    });
+    if (!compressedBlob) return { file, optimized: false };
+    if (compressedBlob.size >= file.size * 0.95) {
+      return { file, optimized: false };
+    }
+    const baseName = (file.name || "imagen").replace(/\.[^.]+$/, "");
+    const optimizedFile = new File([compressedBlob], `${baseName}.jpg`, {
+      type: "image/jpeg",
+      lastModified: Date.now(),
+    });
+    return { file: optimizedFile, optimized: true, originalSize: file.size, optimizedSize: optimizedFile.size };
+  } catch {
+    return { file, optimized: false };
+  }
+};
+
+const uploadBlobToSignedUrl = (url, file, statusEl) =>
+  new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("PUT", url, true);
+    xhr.setRequestHeader("Content-Type", file.type || "application/octet-stream");
+    xhr.upload.onprogress = (event) => {
+      if (!statusEl || !event.lengthComputable) return;
+      const pct = Math.max(0, Math.min(100, Math.round((event.loaded / event.total) * 100)));
+      statusEl.textContent = `Subiendo a la nube... ${pct}%`;
+    };
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve();
+        return;
+      }
+      let message = `S3 error ${xhr.status}`;
+      const text = String(xhr.responseText || "");
+      const msgMatch = text.match(/<Message>([^<]+)<\/Message>/i);
+      if (msgMatch && msgMatch[1]) {
+        message = msgMatch[1];
+      }
+      reject(new Error(message));
+    };
+    xhr.onerror = () => reject(new Error("Error de red durante la subida."));
+    xhr.send(file);
+  });
+
 const uploadFileToS3 = async (file, prefix, statusEl) => {
   if (!file) return null;
+  const optimized = await maybeCompressUploadFile(file, statusEl);
+  const fileToUpload = optimized.file || file;
   if (statusEl) statusEl.textContent = "Firmando subida...";
   const presign = await fetch("/api/s3_presign", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      filename: file.name || "archivo.pdf",
-      content_type: file.type || "application/pdf",
+      filename: fileToUpload.name || "archivo.pdf",
+      content_type: fileToUpload.type || "application/pdf",
       prefix: prefix || "seguros",
     }),
   }).then((res) => res.json());
@@ -30,22 +120,15 @@ const uploadFileToS3 = async (file, prefix, statusEl) => {
   if (!presign.url) {
     throw new Error("Presign inválido.");
   }
-  if (statusEl) statusEl.textContent = "Subiendo a la nube...";
-  const putRes = await fetch(presign.url, {
-    method: "PUT",
-    headers: { "Content-Type": file.type || "application/pdf" },
-    body: file,
-  });
-  if (!putRes.ok) {
-    let message = `S3 error ${putRes.status}`;
-    try {
-      const text = await putRes.text();
-      const msgMatch = text.match(/<Message>([^<]+)<\/Message>/i);
-      if (msgMatch && msgMatch[1]) {
-        message = msgMatch[1];
-      }
-    } catch {}
-    throw new Error(message);
+  await uploadBlobToSignedUrl(presign.url, fileToUpload, statusEl);
+  if (statusEl && optimized.optimized && optimized.originalSize && optimized.optimizedSize) {
+    const saved = Math.max(0, optimized.originalSize - optimized.optimizedSize);
+    const pct = optimized.originalSize
+      ? Math.round((saved / optimized.originalSize) * 100)
+      : 0;
+    statusEl.textContent = `Subida completada. Imagen optimizada (-${pct}%).`;
+  } else if (statusEl) {
+    statusEl.textContent = "Subida completada.";
   }
   return presign;
 };
