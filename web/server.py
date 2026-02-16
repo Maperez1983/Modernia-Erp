@@ -720,6 +720,8 @@ def process_seguros_ocr(payload, conn):
     ).strip()
     hinted_company = detect_company_from_metadata(source_hint)
     required_keys = ("tomador", "poliza_numero", "compania", "fecha_efecto")
+    ai_used = False
+    ai_error = ""
     def candidate_score(quality):
         if not isinstance(quality, dict):
             return 0
@@ -776,6 +778,29 @@ def process_seguros_ocr(payload, conn):
                 method = "docai"
         if hinted_company and not fields.get("compania"):
             fields["compania"] = hinted_company
+        missing_required = any(not fields.get(key) for key in required_keys)
+        if openai_available() and (missing_required or candidate_score(best_quality) < 320):
+            ai_text = text or ""
+            if doc_text and doc_text.strip():
+                ai_text = f"{ai_text}\n\n{doc_text}".strip()
+            if ai_text:
+                ai_fields, ai_error_msg = call_openai_extract_seguro(
+                    ai_text,
+                    source_hint=source_hint,
+                    hinted_company=hinted_company,
+                )
+                if ai_error_msg:
+                    ai_error = ai_error_msg
+                elif ai_fields:
+                    ai_used = True
+                    merged = dict(fields)
+                    for key, value in ai_fields.items():
+                        if value and not str(merged.get(key) or "").strip():
+                            merged[key] = value
+                    ai_quality = compute_ocr_quality(merged, required_keys)
+                    if candidate_score(ai_quality) >= candidate_score(best_quality):
+                        fields = merged
+                        best_quality = ai_quality
         doc_type = classify_seguros_document(text)
         if doc_type == "otro" and doc_text:
             doc_type = classify_seguros_document(doc_text)
@@ -812,6 +837,8 @@ def process_seguros_ocr(payload, conn):
             "ocr_quality": ocr_quality,
             "cliente_id": cliente_id,
             "cliente_match": cliente_match,
+            "ai_used": ai_used,
+            "ai_error": ai_error,
         }
     finally:
         if tmp_path and os.path.exists(tmp_path):
@@ -1289,7 +1316,10 @@ def compute_ocr_quality(fields, required_keys=None):
     def is_valid_date(value):
         if not value:
             return False
-        return bool(re.search(r"\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b", str(value)))
+        date_text = str(value).strip()
+        if re.search(r"\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b", date_text):
+            return True
+        return bool(re.search(r"\b\d{4}-\d{2}-\d{2}\b", date_text))
     def is_valid_poliza(value):
         if not value:
             return False
@@ -1448,6 +1478,66 @@ def call_openai_extract_fin(text, extra=""):
     except Exception:
         return {}, "OpenAI no devolvió JSON válido"
     return {}, "OpenAI no devolvió JSON"
+
+
+def call_openai_extract_seguro(text, source_hint="", hinted_company=""):
+    prompt = (
+        "Extrae datos de una póliza de seguros desde OCR. Responde SOLO JSON válido, sin markdown ni texto adicional. "
+        "No inventes datos. Si un campo no aparece claro, déjalo vacío.\n"
+        "Claves permitidas: tomador, dni, nif, telefono, email, direccion, compania, ramo, "
+        "poliza_numero, fecha_efecto, fecha_vencimiento, prima_neta, prima_total.\n"
+        "Formato recomendado de fechas: DD/MM/AAAA o YYYY-MM-DD.\n"
+        f"Pista de nombre/archivo: {source_hint or '-'}\n"
+        f"Compañía sugerida por metadata: {hinted_company or '-'}\n\n"
+        f"Texto OCR:\n{text}"
+    )
+    output, err = call_openai(prompt, temperature=0.0, max_tokens=700)
+    if err:
+        return {}, err
+    try:
+        data = json.loads(output)
+    except Exception:
+        return {}, "OpenAI no devolvió JSON válido"
+    if not isinstance(data, dict):
+        return {}, "OpenAI no devolvió JSON"
+    allowed = (
+        "tomador",
+        "dni",
+        "nif",
+        "telefono",
+        "email",
+        "direccion",
+        "compania",
+        "ramo",
+        "poliza_numero",
+        "fecha_efecto",
+        "fecha_vencimiento",
+        "prima_neta",
+        "prima_total",
+    )
+    normalized = {}
+    for key in allowed:
+        value = data.get(key)
+        if value is None:
+            continue
+        normalized[key] = str(value).strip()
+    if normalized.get("tomador"):
+        normalized["tomador"] = normalize_person_name(normalized.get("tomador"))
+    if normalized.get("dni"):
+        normalized["dni"] = normalize_nif(normalized.get("dni"))
+    if normalized.get("nif"):
+        normalized["nif"] = normalize_nif(normalized.get("nif"))
+    if normalized.get("telefono"):
+        normalized["telefono"] = normalize_phone(normalized.get("telefono"))
+    if normalized.get("email"):
+        normalized["email"] = normalize_email(normalized.get("email"))
+    if normalized.get("compania"):
+        normalized["compania"] = normalize_company_name(normalized.get("compania"))
+    if not normalized.get("compania") and hinted_company:
+        normalized["compania"] = normalize_company_name(hinted_company)
+    if normalized.get("poliza_numero"):
+        normalized["poliza_numero"] = str(normalized.get("poliza_numero")).strip().upper()
+    return normalized, ""
 
 def classify_seguros_document(text):
     cleaned = (text or "").lower()
