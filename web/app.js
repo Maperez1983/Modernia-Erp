@@ -587,6 +587,248 @@ const runSegurosBdtRowOcr = async (recordId, file, statusEl, rowMap = {}) => {
   loadSegurosCrm();
 };
 
+const showClienteDocOcrModal = (fields = {}, meta = {}) =>
+  new Promise((resolve) => {
+    let modal = document.getElementById("clienteDocOcrModal");
+    if (!modal) {
+      modal = document.createElement("div");
+      modal.id = "clienteDocOcrModal";
+      modal.className = "modal";
+      modal.innerHTML = `
+        <div class="modal-content ocr-compare-content">
+          <div class="modal-header">
+            <h3>OCR póliza cliente</h3>
+            <button type="button" class="ghost" data-cliente-ocr-close>✕</button>
+          </div>
+          <div class="modal-body">
+            <p class="muted cliente-ocr-hint"></p>
+            <div class="ocr-compare-grid cliente-ocr-grid"></div>
+          </div>
+          <div class="modal-actions">
+            <button type="button" class="secondary" data-cliente-ocr-cancel>Cancelar</button>
+            <button type="button" data-cliente-ocr-save>Guardar en Seguros</button>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(modal);
+    }
+    const hintEl = modal.querySelector(".cliente-ocr-hint");
+    const grid = modal.querySelector(".cliente-ocr-grid");
+    const closeBtn = modal.querySelector("[data-cliente-ocr-close]");
+    const cancelBtn = modal.querySelector("[data-cliente-ocr-cancel]");
+    const saveBtn = modal.querySelector("[data-cliente-ocr-save]");
+    if (hintEl) {
+      const quality = meta.qualityLabel || "";
+      hintEl.textContent = quality
+        ? `Revisa los campos antes de guardar. Calidad OCR: ${quality}.`
+        : "Revisa y corrige los campos antes de guardar.";
+    }
+    const inputRows = [
+      ["tomador", "Tomador"],
+      ["dni", "DNI/NIF"],
+      ["compania", "Compañía"],
+      ["ramo", "Ramo"],
+      ["poliza_numero", "Nº póliza"],
+      ["fecha_efecto", "Fecha efecto"],
+      ["fecha_vencimiento", "Fecha vencimiento"],
+      ["direccion", "Dirección riesgo"],
+      ["prima_neta", "Prima neta"],
+      ["prima_total", "Prima total"],
+    ];
+    grid.innerHTML = "";
+    inputRows.forEach(([key, label]) => {
+      const rawValue = fields[key] || "";
+      const value = key.startsWith("fecha_")
+        ? normalizeDateInput(rawValue)
+        : String(rawValue || "");
+      const type = key.startsWith("fecha_") ? "date" : "text";
+      const line = document.createElement("label");
+      line.className = "ocr-compare-row";
+      const labelEl = document.createElement("span");
+      labelEl.className = "ocr-compare-label";
+      labelEl.textContent = label;
+      const input = document.createElement("input");
+      input.type = type;
+      input.value = value;
+      input.setAttribute("data-cliente-ocr-field", key);
+      line.appendChild(labelEl);
+      line.appendChild(input);
+      grid.appendChild(line);
+    });
+
+    const close = (value) => {
+      modal.classList.remove("open");
+      modal.classList.add("hidden");
+      resolve(value);
+    };
+    closeBtn.onclick = () => close(null);
+    cancelBtn.onclick = () => close(null);
+    saveBtn.onclick = () => {
+      const out = {};
+      inputRows.forEach(([key]) => {
+        const input = modal.querySelector(`[data-cliente-ocr-field="${key}"]`);
+        out[key] = input ? String(input.value || "").trim() : "";
+      });
+      if (out.fecha_efecto && !out.fecha_vencimiento) {
+        out.fecha_vencimiento = addOneYear(out.fecha_efecto);
+      }
+      close(out);
+    };
+    modal.classList.remove("hidden");
+    modal.classList.add("open");
+  });
+
+const runClienteSegurosDocOcr = async (row, statusEl, buttonEl) => {
+  if (!row) return;
+  if (buttonEl) buttonEl.disabled = true;
+  const setStatus = (text) => {
+    if (statusEl) statusEl.textContent = text;
+  };
+  const docKey = String(row.doc_key || "").trim();
+  if (!docKey) {
+    setStatus("Documento sin clave S3. Sube el archivo desde CRM Seguros para usar OCR.");
+    if (buttonEl) buttonEl.disabled = false;
+    return;
+  }
+  try {
+    setStatus("Procesando OCR...");
+    const job = await startSegurosOcrJob({
+      s3_key: docKey,
+      filename: row.nombre || "poliza.pdf",
+    });
+    if (!job || job.error || !job.job_id) {
+      setStatus(job?.detail || job?.error || "No se pudo iniciar OCR.");
+      return;
+    }
+    const result = await pollOcrJob(job.job_id, (jobRow) => {
+      if (jobRow.status === "processing") {
+        setStatus("Leyendo póliza...");
+      }
+    });
+    if (!result || result.error) {
+      setStatus(result?.detail || result?.error || "OCR sin datos.");
+      return;
+    }
+    const extracted = result.fields || {};
+    const quality = result.ocr_quality || {};
+    const edited = await showClienteDocOcrModal(extracted, {
+      qualityLabel: quality.calidad || "",
+    });
+    if (!edited) {
+      setStatus("OCR cancelado.");
+      return;
+    }
+    const now = new Date();
+    const mesCreacion = now.toLocaleString("es-ES", { month: "long" });
+    const payloadBase = {
+      cliente_id: state.currentClienteId || row.cliente_id || "",
+      tomador: edited.tomador || "",
+      compania: edited.compania || "",
+      ramo: edited.ramo || "",
+      poliza_numero: edited.poliza_numero || "",
+      fecha_efecto: edited.fecha_efecto || "",
+      fecha_vencimiento: edited.fecha_vencimiento || "",
+      prima_neta: toNumber(edited.prima_neta || ""),
+      prima_total: toNumber(edited.prima_total || ""),
+      poliza_key: docKey,
+      poliza_url: row.doc_url || "",
+      ocr_quality: quality,
+      calidad_ocr: quality.calidad || "",
+      campos_ocr: Array.isArray(quality.campos) ? quality.campos.join(",") : "",
+    };
+    if (!payloadBase.cliente_id) {
+      setStatus("Cliente no identificado en la ficha.");
+      return;
+    }
+    let seguroId = String(row.seguro_id || row.referencia_id || "").trim();
+    if (seguroId) {
+      const enrichResp = await fetch("/api/seguros_enrich", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: seguroId,
+          cliente_id: payloadBase.cliente_id,
+          tomador: payloadBase.tomador,
+          compania: payloadBase.compania,
+          ramo: payloadBase.ramo,
+          poliza_numero: payloadBase.poliza_numero,
+          fecha_efecto: payloadBase.fecha_efecto,
+          fecha_vencimiento: payloadBase.fecha_vencimiento,
+          prima_neta: payloadBase.prima_neta,
+          prima_total: payloadBase.prima_total,
+        }),
+      }).then((res) => res.json());
+      if (enrichResp?.error) {
+        throw new Error(enrichResp.error);
+      }
+      const updateResp = await fetch("/api/seguros_update", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: seguroId,
+          cliente_id: payloadBase.cliente_id,
+          poliza_numero: payloadBase.poliza_numero,
+          fecha_efecto: payloadBase.fecha_efecto,
+          fecha_vencimiento: payloadBase.fecha_vencimiento,
+          poliza_key: payloadBase.poliza_key,
+          poliza_url: payloadBase.poliza_url,
+        }),
+      }).then((res) => res.json());
+      if (updateResp?.error) {
+        throw new Error(updateResp.error);
+      }
+    } else {
+      const createResp = await fetch("/api/seguros", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          empresa_nombre: FINCAS_COMPANY,
+          cliente_id: payloadBase.cliente_id,
+          mes_creacion: mesCreacion,
+          estado: "En vigor",
+          tomador: payloadBase.tomador,
+          compania: payloadBase.compania,
+          ramo: payloadBase.ramo,
+          poliza_numero: payloadBase.poliza_numero,
+          fecha_efecto: payloadBase.fecha_efecto,
+          fecha_vencimiento: payloadBase.fecha_vencimiento,
+          prima_neta: payloadBase.prima_neta,
+          prima_total: payloadBase.prima_total,
+          poliza_key: payloadBase.poliza_key,
+          poliza_url: payloadBase.poliza_url,
+          ocr_quality: payloadBase.ocr_quality,
+        }),
+      }).then((res) => res.json());
+      if (createResp?.error) {
+        throw new Error(createResp.error);
+      }
+      seguroId = String(createResp.id || "").trim();
+    }
+    if (row.id) {
+      await fetch("/api/gestoria_docs_update", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: row.id,
+          referencia_tipo: "seguros",
+          referencia_id: seguroId || row.referencia_id || "",
+          estado: "Recibido",
+          calidad_ocr: payloadBase.calidad_ocr,
+          campos_ocr: payloadBase.campos_ocr,
+        }),
+      }).then((res) => res.json());
+    }
+    setStatus("Póliza procesada y vinculada.");
+    if (state.currentClienteId) {
+      openClienteDetail(state.currentClienteId);
+    }
+  } catch (err) {
+    setStatus(err?.message || "Error al aplicar OCR.");
+  } finally {
+    if (buttonEl) buttonEl.disabled = false;
+  }
+};
+
 const openS3File = async (key, fallbackUrl) => {
   let popup = null;
   try {
@@ -2644,8 +2886,9 @@ const setClienteTab = (tab) => {
   }
 };
 
-const renderClienteDocsTable = (rows, container) => {
+const renderClienteDocsTable = (rows, container, options = {}) => {
   if (!container) return;
+  const enableOcr = !!options.enableOcr;
   if (!rows.length) {
     container.innerHTML = "<p class='muted'>Sin documentación registrada.</p>";
     return;
@@ -2653,7 +2896,11 @@ const renderClienteDocsTable = (rows, container) => {
   const table = document.createElement("table");
   const thead = document.createElement("thead");
   const trHead = document.createElement("tr");
-  ["Documento", "Tipo", "Fecha", "Estado", "Notas", "PDF"].forEach((col) => {
+  const columns = ["Documento", "Tipo", "Fecha", "Estado", "Notas", "PDF"];
+  if (enableOcr) {
+    columns.push("OCR");
+  }
+  columns.forEach((col) => {
     const th = document.createElement("th");
     th.textContent = col;
     trHead.appendChild(th);
@@ -2689,6 +2936,26 @@ const renderClienteDocsTable = (rows, container) => {
       pdfTd.textContent = "-";
     }
     tr.appendChild(pdfTd);
+    if (enableOcr) {
+      const ocrTd = document.createElement("td");
+      const ocrBtn = document.createElement("button");
+      ocrBtn.type = "button";
+      ocrBtn.className = "secondary";
+      ocrBtn.textContent = "OCR";
+      const hasDoc = Boolean(row.doc_key || row.doc_url);
+      ocrBtn.disabled = !hasDoc;
+      const ocrStatus = document.createElement("div");
+      ocrStatus.className = "muted";
+      if (!hasDoc) {
+        ocrStatus.textContent = "Sin archivo";
+      }
+      ocrBtn.addEventListener("click", () => {
+        runClienteSegurosDocOcr(row, ocrStatus, ocrBtn);
+      });
+      ocrTd.appendChild(ocrBtn);
+      ocrTd.appendChild(ocrStatus);
+      tr.appendChild(ocrTd);
+    }
     tbody.appendChild(tr);
   });
   table.appendChild(tbody);
@@ -2713,6 +2980,9 @@ const loadClienteDocsByService = (clienteId, service, container) => {
       rows = (seguros.rows || [])
         .filter((row) => row.poliza_url || row.poliza_key)
         .map((row) => ({
+          seguro_id: row.id || "",
+          referencia_id: row.id || "",
+          cliente_id: row.cliente_id || clienteId,
           nombre: row.poliza_numero || `Póliza ${row.compania || ""}`.trim(),
           tipo: "Seguros",
           fecha: row.fecha_efecto || "",
@@ -2722,7 +2992,16 @@ const loadClienteDocsByService = (clienteId, service, container) => {
           doc_url: row.poliza_url || "",
         }));
     }
-    renderClienteDocsTable(rows, container);
+    if (normalizeSimple(service) === "seguros") {
+      rows = rows.map((row) => ({
+        ...row,
+        seguro_id: row.seguro_id || row.referencia_id || "",
+        cliente_id: row.cliente_id || clienteId,
+      }));
+    }
+    renderClienteDocsTable(rows, container, {
+      enableOcr: normalizeSimple(service) === "seguros",
+    });
   });
 };
 
