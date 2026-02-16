@@ -80,6 +80,20 @@ def norm_company(value):
     return srv.normalize_company_key(value)
 
 
+def token_set(value):
+    return {t for t in norm_text(value).split() if len(t) >= 2}
+
+
+def jaccard(a, b):
+    sa = set(a or set())
+    sb = set(b or set())
+    if not sa and not sb:
+        return 0.0
+    inter = len(sa.intersection(sb))
+    union = len(sa.union(sb)) or 1
+    return inter / union
+
+
 def list_policy_files(roots):
     files = []
     for root in roots:
@@ -192,6 +206,7 @@ def write_report_csv(path, rows):
         "ocr_error",
         "ai_used",
         "ai_error",
+        "soft_score",
     ]
     with out.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=columns)
@@ -268,6 +283,83 @@ def match_seguro(fields, indexes):
     return None, ""
 
 
+def score_soft_match(row, fields):
+    def rowv(key):
+        try:
+            return row[key]
+        except Exception:
+            return ""
+    score = 0.0
+    pol_row = norm_policy(rowv("poliza_numero"))
+    pol_in = norm_policy(fields.get("poliza_numero"))
+    comp_row = norm_company(rowv("compania"))
+    comp_in = norm_company(fields.get("compania"))
+    tom_row = token_set(rowv("tomador"))
+    tom_in = token_set(fields.get("tomador"))
+    ef_row = str(rowv("fecha_efecto") or "").strip()
+    ef_in = str(fields.get("fecha_efecto") or "").strip()
+    ramo_row = norm_text(rowv("ramo"))
+    ramo_in = norm_text(fields.get("ramo"))
+
+    if pol_row and pol_in:
+        if pol_row == pol_in:
+            score += 55
+        elif pol_row.endswith(pol_in[-8:]) and len(pol_in) >= 8:
+            score += 30
+        elif pol_in.endswith(pol_row[-8:]) and len(pol_row) >= 8:
+            score += 30
+        elif pol_row[-6:] == pol_in[-6:] and len(pol_row) >= 6 and len(pol_in) >= 6:
+            score += 18
+
+    if comp_row and comp_in:
+        if comp_row == comp_in:
+            score += 18
+        elif comp_row in comp_in or comp_in in comp_row:
+            score += 10
+
+    if tom_row and tom_in:
+        sim = jaccard(tom_row, tom_in)
+        score += sim * 30
+        if sim >= 0.8:
+            score += 8
+
+    if ef_row and ef_in:
+        if ef_row == ef_in:
+            score += 8
+        elif ef_row[:7] and ef_in[:7] and ef_row[:7] == ef_in[:7]:
+            score += 4
+        elif ef_row[-4:] and ef_in[-4:] and ef_row[-4:] == ef_in[-4:]:
+            score += 2
+
+    if ramo_row and ramo_in:
+        if ramo_row == ramo_in:
+            score += 6
+        elif ramo_row in ramo_in or ramo_in in ramo_row:
+            score += 3
+
+    return round(score, 2)
+
+
+def match_seguro_soft(fields, rows, threshold=55.0, min_gap=12.0):
+    if not rows:
+        return None, "", 0.0, []
+    scored = []
+    for row in rows:
+        sc = score_soft_match(row, fields)
+        if sc > 0:
+            scored.append((sc, row))
+    if not scored:
+        return None, "", 0.0, []
+    scored.sort(key=lambda item: item[0], reverse=True)
+    best_score, best_row = scored[0]
+    second_score = scored[1][0] if len(scored) > 1 else 0.0
+    if best_score < threshold:
+        return None, "", best_score, scored[:5]
+    if (best_score - second_score) < min_gap:
+        return None, "", best_score, scored[:5]
+    return best_row, "soft", best_score, scored[:5]
+
+
 def parse_policy_file(path, conn):
     data = path.read_bytes()
     payload = {
@@ -335,6 +427,9 @@ def main():
     parser.add_argument("--learn-hints-out", default="", help="Guardar hints aprendidos de compania en JSON.")
     parser.add_argument("--learn-min-count", type=int, default=2, help="Min apariciones token->compania para hint.")
     parser.add_argument("--learn-min-ratio", type=float, default=0.85, help="Min ratio dominio token->compania.")
+    parser.add_argument("--soft-match", action="store_true", help="Activa matching flexible con score.")
+    parser.add_argument("--soft-threshold", type=float, default=55.0, help="Score mínimo para aceptar soft match.")
+    parser.add_argument("--soft-min-gap", type=float, default=12.0, help="Diferencia mínima entre mejor y segundo.")
     args = parser.parse_args()
 
     conn = sqlite3.connect(args.db)
@@ -422,6 +517,15 @@ def main():
             continue
 
         row, reason = match_seguro(fields, indexes)
+        soft_score = 0.0
+        soft_top = []
+        if not row and args.soft_match:
+            row, reason, soft_score, soft_top = match_seguro_soft(
+                fields,
+                seguros,
+                threshold=args.soft_threshold,
+                min_gap=args.soft_min_gap,
+            )
         if not row and args.create_missing_seguros:
             cliente_id = None
             if args.apply and fields.get("tomador"):
@@ -486,6 +590,7 @@ def main():
                     "ocr_error": "",
                     "ai_used": "1" if ai_used else "0",
                     "ai_error": ai_error,
+                    "soft_score": soft_score,
                 }
             )
             stats["created_seguros"] += 1
@@ -493,6 +598,14 @@ def main():
         if not row:
             stats["unmatched"] += 1
             unresolved.append((str(path), "unmatched"))
+            top_hint = ""
+            if soft_top:
+                preview = []
+                for sc, cand in soft_top[:3]:
+                    preview.append(
+                        f"{cand['id']}:{cand['poliza_numero'] or '-'}:{cand['tomador'] or '-'}:{sc}"
+                    )
+                top_hint = " | ".join(preview)
             detailed_rows.append(
                 {
                     "file": str(path),
@@ -508,7 +621,8 @@ def main():
                     "missing_required": ",".join([k for k in required_keys if not str(fields.get(k) or "").strip()]),
                     "ocr_error": "",
                     "ai_used": "1" if ai_used else "0",
-                    "ai_error": ai_error,
+                    "ai_error": ai_error if not top_hint else f"{ai_error} | top={top_hint}".strip(" |"),
+                    "soft_score": soft_score,
                 }
             )
             continue
@@ -582,6 +696,7 @@ def main():
                 "ocr_error": "",
                 "ai_used": "1" if ai_used else "0",
                 "ai_error": ai_error,
+                "soft_score": soft_score,
             }
         )
 
