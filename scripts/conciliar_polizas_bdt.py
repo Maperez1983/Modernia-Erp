@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 import argparse
 import base64
+import csv
+import json
 import os
 import re
 import sqlite3
@@ -28,6 +30,30 @@ SKIP_KEYWORDS = (
     "JUSTIFICANTE",
     "TRANSFERENCIA",
 )
+HINT_STOPWORDS = {
+    "POLIZA",
+    "POLIZA",
+    "SEGURO",
+    "SEGUROS",
+    "HOGAR",
+    "AUTO",
+    "COCHE",
+    "MOTO",
+    "RC",
+    "RECIBO",
+    "DNI",
+    "NIF",
+    "CIF",
+    "IMG",
+    "PDF",
+    "JPG",
+    "JPEG",
+    "PNG",
+    "MANDATO",
+    "BANCO",
+    "IMPAGO",
+    "ANEXO",
+}
 
 
 def norm_text(value):
@@ -118,6 +144,60 @@ def path_hints(path):
         name = part
         break
     return {"tomador": name, "compania": company, "poliza_numero": policy}
+
+
+def path_company_tokens(path):
+    text = norm_text(str(path))
+    words = [w for w in text.split() if len(w) >= 3 and not w.isdigit()]
+    words = [w for w in words if w not in HINT_STOPWORDS]
+    tokens = set()
+    for i in range(len(words)):
+        tokens.add(words[i])
+        if i + 1 < len(words):
+            tokens.add(f"{words[i]} {words[i + 1]}")
+        if i + 2 < len(words):
+            tokens.add(f"{words[i]} {words[i + 1]} {words[i + 2]}")
+    return tokens
+
+
+def safe_value(value):
+    return "" if value is None else str(value)
+
+
+def write_report_json(path, payload):
+    if not path:
+        return
+    out = Path(path).expanduser()
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def write_report_csv(path, rows):
+    if not path:
+        return
+    out = Path(path).expanduser()
+    out.parent.mkdir(parents=True, exist_ok=True)
+    columns = [
+        "file",
+        "status",
+        "match_reason",
+        "seguro_id",
+        "seguro_company",
+        "ocr_company",
+        "seguro_policy",
+        "ocr_policy",
+        "seguro_tomador",
+        "ocr_tomador",
+        "missing_required",
+        "ocr_error",
+        "ai_used",
+        "ai_error",
+    ]
+    with out.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=columns)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({col: safe_value(row.get(col, "")) for col in columns})
 
 
 def choose_unique(rows):
@@ -250,6 +330,11 @@ def main():
     parser.add_argument("--overwrite", action="store_true", help="Sobrescribe datos distintos si OCR aporta valor.")
     parser.add_argument("--create-missing-seguros", action="store_true", help="Crea registro nuevo si no hay match.")
     parser.add_argument("--apply", action="store_true", help="Aplicar cambios (default dry-run).")
+    parser.add_argument("--report-out", default="", help="JSON report output path.")
+    parser.add_argument("--report-csv", default="", help="CSV report output path.")
+    parser.add_argument("--learn-hints-out", default="", help="Guardar hints aprendidos de compania en JSON.")
+    parser.add_argument("--learn-min-count", type=int, default=2, help="Min apariciones token->compania para hint.")
+    parser.add_argument("--learn-min-ratio", type=float, default=0.85, help="Min ratio dominio token->compania.")
     args = parser.parse_args()
 
     conn = sqlite3.connect(args.db)
@@ -284,6 +369,9 @@ def main():
 
     stats = defaultdict(int)
     unresolved = []
+    detailed_rows = []
+    required_keys = ("tomador", "poliza_numero", "compania", "fecha_efecto")
+    hint_votes = defaultdict(lambda: defaultdict(int))
     now = datetime.now(timezone.utc).isoformat()
 
     for path in files:
@@ -293,11 +381,23 @@ def main():
         stats["files_total"] += 1
         try:
             result = parse_policy_file(path, conn)
-        except Exception:
+        except Exception as exc:
             stats["ocr_error"] += 1
             unresolved.append((str(path), "ocr_error"))
+            detailed_rows.append(
+                {
+                    "file": str(path),
+                    "status": "ocr_error",
+                    "ocr_error": str(exc),
+                    "missing_required": ",".join(required_keys),
+                    "ai_used": "",
+                    "ai_error": "",
+                }
+            )
             continue
         fields = (result or {}).get("fields") or {}
+        ai_used = bool((result or {}).get("ai_used"))
+        ai_error = (result or {}).get("ai_error") or ""
         hints = path_hints(path)
         if hints.get("compania") and not fields.get("compania"):
             fields["compania"] = hints["compania"]
@@ -308,6 +408,17 @@ def main():
         if not any(str(v or "").strip() for v in fields.values()):
             stats["empty_fields"] += 1
             unresolved.append((str(path), "empty_fields"))
+            detailed_rows.append(
+                {
+                    "file": str(path),
+                    "status": "empty_fields",
+                    "match_reason": "",
+                    "missing_required": ",".join(required_keys),
+                    "ocr_error": "",
+                    "ai_used": "1" if ai_used else "0",
+                    "ai_error": ai_error,
+                }
+            )
             continue
 
         row, reason = match_seguro(fields, indexes)
@@ -359,14 +470,54 @@ def main():
                         now,
                     ),
                 )
+            detailed_rows.append(
+                {
+                    "file": str(path),
+                    "status": "created",
+                    "match_reason": "create_missing",
+                    "seguro_id": seguro_id if args.apply else "",
+                    "seguro_company": fields.get("compania") or "",
+                    "ocr_company": fields.get("compania") or "",
+                    "seguro_policy": fields.get("poliza_numero") or "",
+                    "ocr_policy": fields.get("poliza_numero") or "",
+                    "seguro_tomador": fields.get("tomador") or "",
+                    "ocr_tomador": fields.get("tomador") or "",
+                    "missing_required": ",".join([k for k in required_keys if not str(fields.get(k) or "").strip()]),
+                    "ocr_error": "",
+                    "ai_used": "1" if ai_used else "0",
+                    "ai_error": ai_error,
+                }
+            )
             stats["created_seguros"] += 1
             continue
         if not row:
             stats["unmatched"] += 1
             unresolved.append((str(path), "unmatched"))
+            detailed_rows.append(
+                {
+                    "file": str(path),
+                    "status": "unmatched",
+                    "match_reason": "",
+                    "seguro_id": "",
+                    "seguro_company": "",
+                    "ocr_company": fields.get("compania") or "",
+                    "seguro_policy": "",
+                    "ocr_policy": fields.get("poliza_numero") or "",
+                    "seguro_tomador": "",
+                    "ocr_tomador": fields.get("tomador") or "",
+                    "missing_required": ",".join([k for k in required_keys if not str(fields.get(k) or "").strip()]),
+                    "ocr_error": "",
+                    "ai_used": "1" if ai_used else "0",
+                    "ai_error": ai_error,
+                }
+            )
             continue
 
         stats[f"matched_{reason}"] += 1
+        row_company = row["compania"] or ""
+        for token in path_company_tokens(path):
+            if token and row_company:
+                hint_votes[token][row_company] += 1
         updates = {}
         map_fields = (
             "tomador",
@@ -415,6 +566,24 @@ def main():
                     ensure_link(conn, updates["cliente_id"], empresa_id)
         else:
             stats["rows_unchanged"] += 1
+        detailed_rows.append(
+            {
+                "file": str(path),
+                "status": "updated" if updates else "matched_unchanged",
+                "match_reason": reason,
+                "seguro_id": row["id"],
+                "seguro_company": row["compania"] or "",
+                "ocr_company": fields.get("compania") or "",
+                "seguro_policy": row["poliza_numero"] or "",
+                "ocr_policy": fields.get("poliza_numero") or "",
+                "seguro_tomador": row["tomador"] or "",
+                "ocr_tomador": fields.get("tomador") or "",
+                "missing_required": ",".join([k for k in required_keys if not str(fields.get(k) or "").strip()]),
+                "ocr_error": "",
+                "ai_used": "1" if ai_used else "0",
+                "ai_error": ai_error,
+            }
+        )
 
     if args.apply:
         conn.commit()
@@ -439,6 +608,43 @@ def main():
         print("\nUnresolved sample (up to 25):")
         for item in unresolved[:25]:
             print(f"- {item[1]} | {item[0]}")
+
+    company_summary = defaultdict(lambda: defaultdict(int))
+    for row in detailed_rows:
+        company = row.get("seguro_company") or row.get("ocr_company") or "(sin_compania)"
+        company_summary[company]["total"] += 1
+        company_summary[company][row.get("status") or "unknown"] += 1
+
+    learned_hints = {}
+    for token, votes in hint_votes.items():
+        total = sum(votes.values())
+        if total < max(1, args.learn_min_count):
+            continue
+        best_company, best_count = max(votes.items(), key=lambda it: it[1])
+        ratio = best_count / total
+        if ratio < args.learn_min_ratio:
+            continue
+        learned_hints[token] = {"company": best_company, "count": best_count, "total": total, "ratio": round(ratio, 3)}
+
+    report_payload = {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "empresa_id": empresa_id,
+        "stats": dict(stats),
+        "by_company": {k: dict(v) for k, v in sorted(company_summary.items(), key=lambda it: it[0])},
+        "learned_hints": learned_hints,
+        "rows": detailed_rows,
+    }
+    write_report_json(args.report_out, report_payload)
+    write_report_csv(args.report_csv, detailed_rows)
+    if args.learn_hints_out:
+        hints_payload = {
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "source": "conciliar_polizas_bdt.py",
+            "total_hints": len(learned_hints),
+            "hints": {token: data["company"] for token, data in sorted(learned_hints.items())},
+            "meta": learned_hints,
+        }
+        write_report_json(args.learn_hints_out, hints_payload)
 
 
 if __name__ == "__main__":
