@@ -2175,6 +2175,106 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
         if len(dates) >= 2:
             return dates[0], dates[1]
         return "", ""
+    def clean_tomador_value(value):
+        raw = normalize_person_name(value)
+        if not raw:
+            return ""
+        raw = re.sub(r"^(NOMBRE|TOMADOR|ASEGURADO|CONTRATANTE|TITULAR)\s*[:\-]?\s*", "", raw, flags=re.IGNORECASE)
+        stop_match = re.search(
+            r"\b("
+            r"DOCUMENTO|DOC\.?|NIF|DNI|CIF|MATRICULA|MATRÍCULA|VEHICULO|VEHÍCULO|"
+            r"TIPO|RIESGO|PLANTA|SITUACION|SITUACIÓN|USO|COBERTURAS|GARANTIAS|GARANTÍAS|"
+            r"DECLARACION|DECLARACIÓN|BENEFICIARIO|CLAUSULAS|CLÁUSULAS"
+            r")\b",
+            raw,
+            re.IGNORECASE,
+        )
+        if stop_match:
+            raw = raw[: stop_match.start()].strip()
+        raw = re.sub(r"\s{2,}", " ", raw).strip(" ,;:-")
+        raw_upper = normalize_lookup_text(raw)
+        banned_fragments = (
+            "DE ESTA POLIZA",
+            "SISTEMA DE REGULARIZACION",
+            "LIBRO REGISTRO",
+            "DECLARACION DE SALUD",
+            "COBERTURAS Y GARANTIAS",
+            "COBERTURAS",
+            "GARANTIAS",
+            "TIPO DE RIESGO",
+            "VIVIENDA EN VECINDAD",
+        )
+        if any(fragment in raw_upper for fragment in banned_fragments):
+            return ""
+        words = raw.split()
+        if not words:
+            return ""
+        if len(words) == 1:
+            token = normalize_lookup_text(words[0])
+            allowed_single = ("SL", "S L", "SA", "S A", "SCP", "S C P", "CB", "C B")
+            if token in ("DE", "DEL", "LA", "EL", "UNA", "UNO", "VENEZUELA"):
+                return ""
+            if len(token) < 4:
+                return ""
+            if token not in allowed_single and len(token) < 7:
+                return ""
+        if len(words) > 9:
+            raw = " ".join(words[:9])
+        return raw
+    def company_specific_poliza(compania, base_text):
+        comp_key = normalize_company_key(compania or "")
+        if not comp_key:
+            return ""
+        patterns_common = [
+            r"(?:N[ºO]\s*(?:DE\s*)?P[ÓO]LIZA|P[ÓO]LIZA|CONTRATO|CERTIFICADO)\s*[:#]?\s*([A-Z0-9][A-Z0-9/\- ]{6,})",
+        ]
+        patterns = []
+        if comp_key == "MAPFRE":
+            patterns = [
+                r"\b([0-9]{10,13}(?:\s*/\s*[0-9]{3})?)\b",
+                r"\b([0-9]{4,6}[A-Z]?[0-9]{5,8})\b",
+            ]
+        elif comp_key == "REALE":
+            patterns = [
+                r"\b([0-9]{12,14}(?:\s*[/-]?\s*[0-9]{1,3})?)\b",
+            ]
+        elif comp_key == "OCASO":
+            patterns = [
+                r"\b([0-9]\s*[A-Z]-[A-Z0-9]{7,})\b",
+                r"\b([A-Z0-9]{1,3}\s*[A-Z]-[A-Z0-9]{7,})\b",
+            ]
+        elif comp_key == "AXA":
+            patterns = [
+                r"\b([0-9]{6,8}(?:\s*/\s*[0-9]{1,3})?)\b",
+                r"\b([A-Z0-9]{6,12}(?:\s*/\s*[0-9]{1,3})?)\b",
+            ]
+        elif comp_key == "ALLIANZ":
+            patterns = [
+                r"\b([A-Z][0-9]{6,8}\s*[-/]\s*[0-9]{3,4})\b",
+                r"\b([A-Z][0-9]{6,8})\b",
+            ]
+        for pat in [*patterns_common, *patterns]:
+            for target in (base_text, cleaned):
+                m = re.search(pat, target, re.IGNORECASE)
+                if not m:
+                    continue
+                candidate = normalize_poliza_number(m.group(1), compania)
+                if candidate and len(candidate) >= 6 and re.search(r"\d", candidate):
+                    return candidate
+        return ""
+    def company_specific_tomador(base_text):
+        patterns = [
+            r"\bNombre\s+([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s]{4,}?)(?:\s+Documento|\s+Doc\.?|\s+NIF|\s+DNI|\s+CIF)",
+            r"\b(?:Tomador|Asegurado(?:\s+principal)?|Contratante|Titular)\s*[:\-]\s*([^\n]+)",
+        ]
+        for pat in patterns:
+            for target in (base_text, cleaned):
+                m = re.search(pat, target, re.IGNORECASE)
+                if m:
+                    candidate = clean_tomador_value(m.group(1))
+                    if candidate and len(candidate) >= 5:
+                        return candidate
+        return ""
     fields = {}
     fields["tomador"] = pick([
         r"Nombre y apellidos\s*:\s*([^\n]+)",
@@ -2353,7 +2453,7 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
         for cut in ["Marca", "Matrícula", "Doc."]:
             if cut in tomador:
                 tomador = tomador.split(cut)[0].strip()
-        fields["tomador"] = tomador
+        fields["tomador"] = clean_tomador_value(tomador)
     if fields["direccion"]:
         fields["direccion"] = re.sub(r"\s{2,}.*$", "", fields["direccion"]).strip()
         postal_match = re.search(r"\b\d{5}\s+[A-ZÁÉÍÓÚÑ\s]+\b", cleaned)
@@ -2419,7 +2519,7 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
     if not fields["tomador"]:
         fields["tomador"] = line_pick(["Tomador", "Asegurado", "Titular", "Contratante"])
     if fields["tomador"]:
-        fields["tomador"] = normalize_person_name(fields["tomador"])
+        fields["tomador"] = clean_tomador_value(fields["tomador"])
     if not fields["dni"]:
         fields["dni"] = line_pick(["DNI", "NIF", "CIF", "Documento"])
     if not fields["compania"]:
@@ -2452,6 +2552,18 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
         fields["email"] = line_pick(["Email", "Correo", "Correo electronico", "Correo electrónico"])
     if fields["email"]:
         fields["email"] = normalize_email(fields["email"])
+    if not fields.get("tomador") or len((fields.get("tomador") or "").split()) <= 1:
+        better_tomador = company_specific_tomador(text)
+        if better_tomador:
+            fields["tomador"] = better_tomador
+    if fields.get("tomador"):
+        fields["tomador"] = clean_tomador_value(fields["tomador"])
+    if not fields.get("poliza_numero") or len(normalize_poliza_key(fields.get("poliza_numero"))) < 6:
+        better_poliza = company_specific_poliza(fields.get("compania"), text)
+        if not better_poliza and source_hint:
+            better_poliza = company_specific_poliza(fields.get("compania"), source_hint)
+        if better_poliza:
+            fields["poliza_numero"] = better_poliza
     for key in ("fecha_efecto", "fecha_vencimiento", "fecha_nacimiento"):
         if fields.get(key):
             fields[key] = normalize_ocr_date(fields[key])
