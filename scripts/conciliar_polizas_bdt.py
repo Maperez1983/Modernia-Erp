@@ -217,12 +217,78 @@ def write_report_csv(path, rows):
         "ai_used",
         "ai_error",
         "soft_score",
+        "candidate_top_id",
+        "candidate_top_score",
+        "candidate_top_poliza",
+        "candidate_top_tomador",
+        "review_action",
+        "review_match_id",
     ]
     with out.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=columns)
         writer.writeheader()
         for row in rows:
             writer.writerow({col: safe_value(row.get(col, "")) for col in columns})
+
+
+def write_review_template_csv(path, rows):
+    if not path:
+        return
+    out = Path(path).expanduser()
+    out.parent.mkdir(parents=True, exist_ok=True)
+    columns = [
+        "file",
+        "ocr_company",
+        "ocr_policy",
+        "ocr_tomador",
+        "candidate_top_id",
+        "candidate_top_score",
+        "candidate_top_poliza",
+        "candidate_top_tomador",
+        "review_action",
+        "review_match_id",
+    ]
+    with out.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=columns)
+        writer.writeheader()
+        for row in rows:
+            if row.get("status") != "unmatched":
+                continue
+            writer.writerow(
+                {
+                    "file": row.get("file", ""),
+                    "ocr_company": row.get("ocr_company", ""),
+                    "ocr_policy": row.get("ocr_policy", ""),
+                    "ocr_tomador": row.get("ocr_tomador", ""),
+                    "candidate_top_id": row.get("candidate_top_id", ""),
+                    "candidate_top_score": row.get("candidate_top_score", ""),
+                    "candidate_top_poliza": row.get("candidate_top_poliza", ""),
+                    "candidate_top_tomador": row.get("candidate_top_tomador", ""),
+                    "review_action": "",
+                    "review_match_id": "",
+                }
+            )
+
+
+def load_review_decisions(path):
+    decisions = {}
+    if not path:
+        return decisions
+    review = Path(path).expanduser()
+    if not review.exists():
+        return decisions
+    with review.open("r", encoding="utf-8") as handle:
+        reader = csv.DictReader(handle)
+        for row in reader:
+            file_path = (row.get("file") or "").strip()
+            if not file_path:
+                continue
+            action = (row.get("review_action") or "").strip().lower()
+            match_id = (row.get("review_match_id") or "").strip()
+            if action not in ("link", "skip"):
+                continue
+            decisions[file_path] = {"action": action, "match_id": match_id}
+    return decisions
 
 
 def choose_unique(rows):
@@ -440,7 +506,10 @@ def main():
     parser.add_argument("--soft-match", action="store_true", help="Activa matching flexible con score.")
     parser.add_argument("--soft-threshold", type=float, default=55.0, help="Score mínimo para aceptar soft match.")
     parser.add_argument("--soft-min-gap", type=float, default=12.0, help="Diferencia mínima entre mejor y segundo.")
+    parser.add_argument("--review-csv-out", default="", help="CSV plantilla para revisión manual de unmatched.")
+    parser.add_argument("--apply-review-csv", default="", help="CSV de revisión para aplicar solo vínculos confirmados.")
     args = parser.parse_args()
+    review_decisions = load_review_decisions(args.apply_review_csv)
 
     conn = sqlite3.connect(args.db)
     conn.row_factory = sqlite3.Row
@@ -529,6 +598,7 @@ def main():
         row, reason = match_seguro(fields, indexes)
         soft_score = 0.0
         soft_top = []
+        candidate_top = {}
         if not row and args.soft_match:
             row, reason, soft_score, soft_top = match_seguro_soft(
                 fields,
@@ -536,6 +606,29 @@ def main():
                 threshold=args.soft_threshold,
                 min_gap=args.soft_min_gap,
             )
+            if soft_top:
+                top_score, top_row = soft_top[0]
+                candidate_top = {
+                    "candidate_top_id": top_row["id"],
+                    "candidate_top_score": top_score,
+                    "candidate_top_poliza": top_row["poliza_numero"] or "",
+                    "candidate_top_tomador": top_row["tomador"] or "",
+                }
+        review = review_decisions.get(str(path), {})
+        if review.get("action") == "link":
+            wanted = review.get("match_id")
+            if wanted:
+                forced = conn.execute(
+                    "SELECT * FROM seguros WHERE id = ? AND empresa_id = ?",
+                    (wanted, empresa_id),
+                ).fetchone()
+                if forced:
+                    row = forced
+                    reason = "review_link"
+                    soft_score = soft_score or float(candidate_top.get("candidate_top_score") or 0.0)
+        elif review.get("action") == "skip":
+            row = None
+            reason = ""
         if not row and args.create_missing_seguros:
             cliente_id = None
             if args.apply and fields.get("tomador"):
@@ -633,6 +726,9 @@ def main():
                     "ai_used": "1" if ai_used else "0",
                     "ai_error": ai_error if not top_hint else f"{ai_error} | top={top_hint}".strip(" |"),
                     "soft_score": soft_score,
+                    **candidate_top,
+                    "review_action": review.get("action", ""),
+                    "review_match_id": review.get("match_id", ""),
                 }
             )
             continue
@@ -707,6 +803,9 @@ def main():
                 "ai_used": "1" if ai_used else "0",
                 "ai_error": ai_error,
                 "soft_score": soft_score,
+                **candidate_top,
+                "review_action": review.get("action", ""),
+                "review_match_id": review.get("match_id", ""),
             }
         )
 
@@ -761,6 +860,7 @@ def main():
     }
     write_report_json(args.report_out, report_payload)
     write_report_csv(args.report_csv, detailed_rows)
+    write_review_template_csv(args.review_csv_out, detailed_rows)
     if args.learn_hints_out:
         hints_payload = {
             "generated_at": datetime.now(timezone.utc).isoformat(),
