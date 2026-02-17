@@ -2354,8 +2354,12 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
             "TITULAR DEL INTERES",
             "DATOS DE TU MEDIADOR",
             "BENEFICIARIOS OTROS",
+            "INCLUIDO",
+            "NO INCLUIDO",
         )
         if any(fragment in raw_upper for fragment in banned_fragments):
+            return ""
+        if "€" in raw or re.search(r"\d{2,}", raw):
             return ""
         words = raw.split()
         if not words:
@@ -2463,6 +2467,14 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
             tail = clean_tomador_value(tail)
             if tail and len(tail) >= 5:
                 out["tomador"] = tail
+        if " RC " in f" {upper} ":
+            out["ramo"] = "Responsabilidad civil"
+        elif " HOGAR " in f" {upper} ":
+            out["ramo"] = "Hogar"
+        elif " AUTO " in f" {upper} ":
+            out["ramo"] = "Auto"
+        elif " COMERCIO " in f" {upper} ":
+            out["ramo"] = "Comercio"
         return out
     def company_specific_poliza(compania, base_text):
         comp_key = normalize_company_key(compania or "")
@@ -2507,6 +2519,7 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
         return ""
     def company_specific_tomador(base_text):
         patterns = [
+            r"\bPresentado\s+al\s+SR\.?/Sra\.?\s*([A-ZÁÉÍÓÚÑ ,.'\-]+?)\s+N[º°]?\s*Documento",
             r"\bNombre\s+([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s]{4,}?)(?:\s+Documento|\s+Doc\.?|\s+NIF|\s+DNI|\s+CIF)",
             r"\b(?:Tomador|Asegurado(?:\s+principal)?|Contratante|Titular)\s*[:\-]\s*([^\n]+)",
         ]
@@ -2520,6 +2533,7 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
         return ""
     fields = {}
     fields["tomador"] = pick([
+        r"Presentado\s+al\s+SR\.?/Sra\.?\s*([A-ZÁÉÍÓÚÑ ,.'\-]+?)\s+N[º°]?\s*Documento",
         r"Nombre y apellidos\s*:\s*([^\n]+)",
         r"Titular\s*de\s*la\s*p[oó]liza\s*:\s*([^\n]+)",
         r"Datos\s+del\s+asegurado\s*[:\-]?\s*([^\n]+)",
@@ -2650,6 +2664,8 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
         if end_date and not fields["fecha_vencimiento"]:
             fields["fecha_vencimiento"] = end_date
     fields["ramo"] = pick([
+        r"(MULTIRRIESGO\s+COMERCIOS?\s+Y\s+AUTOEMPRENDEDORES)",
+        r"(MULTIRRIESGO\s+COMERCIOS?)",
         r"Condiciones\s+Particulares\s+Ocaso\s+([A-ZÁÉÍÓÚÑa-z\s]{4,})",
         r"Ramo\s*[:\-]?\s*([^\n]+)",
         r"Modalidad\s*[:\-]?\s*([^\n]+)",
@@ -2740,6 +2756,8 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
         fields["ramo"] = ""
     if fields["ramo"]:
         fields["ramo"] = fields["ramo"].splitlines()[0].strip()
+        if "€" in fields["ramo"] or re.search(r"\d{2,}", fields["ramo"]):
+            fields["ramo"] = ""
         if len(fields["ramo"]) > 48 and "seguro" in normalize_lookup_text(fields["ramo"]):
             fields["ramo"] = ""
         ramo_inline = re.match(r"^[A-Z0-9/.\-]{5,}\s*-\s*(.+)$", fields["ramo"], re.IGNORECASE)
@@ -2754,6 +2772,10 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
             fields["ramo"] = "Hogar"
         elif "ALQUILER" in ramo_upper:
             fields["ramo"] = "Alquiler"
+        elif "MULTIRRIESGO COMERCIOS" in ramo_upper:
+            fields["ramo"] = "Comercio"
+        elif "RESPONSABILIDAD CIVIL" in ramo_upper or ramo_upper == "RC":
+            fields["ramo"] = "Responsabilidad civil"
     if not fields["ramo"]:
         modal_match = re.search(
             r"Modalidad\s+([A-ZÁÉÍÓÚÑa-z\s]+?)\s+Datos\s+Tomador",
@@ -2863,6 +2885,8 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
             fields["poliza_numero"] = better_poliza
     if (not fields.get("tomador") or len((fields.get("tomador") or "").split()) <= 1) and source_fields.get("tomador"):
         fields["tomador"] = source_fields.get("tomador")
+    if (not fields.get("ramo")) and source_fields.get("ramo"):
+        fields["ramo"] = source_fields.get("ramo")
     if fields.get("compania"):
         # Prefer company from filename when OCR text gives a conflicting generic label.
         source_company = source_fields.get("compania") or hinted_company or detect_company_from_metadata(source_hint)
