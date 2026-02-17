@@ -2153,6 +2153,31 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
             return digits * 2 + length
         best = max(candidates, key=score_token)
         return best
+    def is_valid_poliza_candidate(value):
+        token = normalize_poliza_key(value)
+        if not token or len(token) < 6:
+            return False
+        if not re.search(r"\d", token):
+            return False
+        month_noise = (
+            "ENERO",
+            "FEBRERO",
+            "MARZO",
+            "ABRIL",
+            "MAYO",
+            "JUNIO",
+            "JULIO",
+            "AGOSTO",
+            "SEPTIEMBRE",
+            "OCTUBRE",
+            "NOVIEMBRE",
+            "DICIEMBRE",
+        )
+        if any(m in token for m in month_noise):
+            return False
+        if token in ("POLIZA", "IMPAGO", "HOGAR", "AUTO", "SEGURO"):
+            return False
+        return True
     def line_pick(keys):
         if not keys:
             return ""
@@ -2203,6 +2228,11 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
             "GARANTIAS",
             "TIPO DE RIESGO",
             "VIVIENDA EN VECINDAD",
+            "PERSONA FISICA O JURIDICA",
+            "EL TOMADOR DEL SEGURO",
+            "TITULAR DEL INTERES",
+            "DATOS DE TU MEDIADOR",
+            "BENEFICIARIOS OTROS",
         )
         if any(fragment in raw_upper for fragment in banned_fragments):
             return ""
@@ -2221,6 +2251,96 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
         if len(words) > 9:
             raw = " ".join(words[:9])
         return raw
+    def parse_from_source_hint():
+        out = {}
+        raw = str(source_hint or "").strip()
+        if not raw:
+            return out
+        name = Path(raw).name
+        stem = Path(name).stem
+        upper = stem.upper()
+        if "SANTA LUCIA" in upper or "STA LUCIA" in upper or "SANTALUCIA" in upper:
+            out["compania"] = "Santa Lucia"
+        elif "FIATC" in upper or "FIACT" in upper:
+            out["compania"] = "Fiatc"
+        elif "IPTIQ" in upper or "GALLEN" in upper:
+            out["compania"] = "iptiQ EMEA P"
+        elif "ARAG" in upper:
+            out["compania"] = "ARAG"
+        elif "OCASO" in upper:
+            out["compania"] = "Ocaso"
+        elif "REALE" in upper:
+            out["compania"] = "Reale"
+        elif "MAPFRE" in upper:
+            out["compania"] = "Mapfre"
+        elif "PELAYO" in upper:
+            out["compania"] = "Pelayo"
+        elif "AXA" in upper:
+            out["compania"] = "AXA"
+        elif "ALLIANZ" in upper:
+            out["compania"] = "Allianz"
+        elif "ZURICH" in upper:
+            out["compania"] = "Zurich"
+        elif "OCCIDENT" in upper:
+            out["compania"] = "Catalana Occidente"
+        tokens = re.findall(r"[A-Z0-9][A-Z0-9/_-]{5,}", upper)
+        candidate_polizas = []
+        for token in tokens:
+            cleaned = token.strip("_-/")
+            cleaned = cleaned.replace("_", "/")
+            if is_valid_poliza_candidate(cleaned):
+                candidate_polizas.append(cleaned)
+        if candidate_polizas:
+            candidate_polizas.sort(key=lambda t: (len(re.sub(r"\D", "", t)), len(t)), reverse=True)
+            out["poliza_numero"] = candidate_polizas[0]
+        temp = upper
+        for junk in (
+            "POLIZA",
+            "SEGURO",
+            "IMPAGO",
+            "HOGAR",
+            "AUTO",
+            "RC",
+            "SALUD",
+            "STA LUCIA",
+            "SANTA LUCIA",
+            "SANTALUCIA",
+            "MAPFRE",
+            "REALE",
+            "OCASO",
+            "PELAYO",
+            "AXA",
+            "ALLIANZ",
+            "FIATC",
+            "FIACT",
+            "IPTIQ",
+            "GALLEN",
+            "ARAG",
+            "ZURICH",
+            "OCCIDENT",
+            "CATALANA",
+            "EUROINS",
+            "DOCUMENTACION",
+            "EMISION",
+            "MANDATO",
+            "SEPA",
+            "CERTIFICADO",
+            "CONDICIONES",
+            "PARTICULARES",
+            "GENERALES",
+        ):
+            temp = re.sub(rf"\b{re.escape(junk)}\b", " ", temp)
+        temp = re.sub(r"\b\d{1,4}\b", " ", temp)
+        temp = re.sub(r"[_\-]+", " ", temp)
+        temp = re.sub(r"\s+", " ", temp).strip()
+        parts = [p for p in temp.split(" ") if p and len(p) >= 3]
+        if parts:
+            # Prefer final words as they are usually the person/entity name in filenames.
+            tail = " ".join(parts[-4:])
+            tail = clean_tomador_value(tail)
+            if tail and len(tail) >= 5:
+                out["tomador"] = tail
+        return out
     def company_specific_poliza(compania, base_text):
         comp_key = normalize_company_key(compania or "")
         if not comp_key:
@@ -2343,7 +2463,8 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
         r"N[ºo]\s*de\s*contrato\s*[:#]?\s*([A-Z0-9/.\-]+)",
         r"Contrato\s*[:#]?\s*([A-Z0-9/.\-]+)",
     ])
-    fields["compania"] = detect_company_from_text(cleaned) or hinted_company or detect_company_from_metadata(source_hint)
+    source_fields = parse_from_source_hint()
+    fields["compania"] = hinted_company or detect_company_from_metadata(source_hint) or source_fields.get("compania") or detect_company_from_text(cleaned)
     if not fields["compania"]:
         fields["compania"] = pick([
             r"Compa[ñn]ia\s*[:\-]?\s*([A-Z0-9\s\-]+)",
@@ -2562,13 +2683,27 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
         better_poliza = company_specific_poliza(fields.get("compania"), text)
         if not better_poliza and source_hint:
             better_poliza = company_specific_poliza(fields.get("compania"), source_hint)
+        if not better_poliza and source_fields.get("poliza_numero"):
+            better_poliza = source_fields.get("poliza_numero")
         if better_poliza:
             fields["poliza_numero"] = better_poliza
+    if (not fields.get("tomador") or len((fields.get("tomador") or "").split()) <= 1) and source_fields.get("tomador"):
+        fields["tomador"] = source_fields.get("tomador")
+    if fields.get("compania"):
+        # Prefer company from filename when OCR text gives a conflicting generic label.
+        source_company = source_fields.get("compania") or hinted_company or detect_company_from_metadata(source_hint)
+        if source_company:
+            src_key = normalize_company_key(source_company)
+            cur_key = normalize_company_key(fields.get("compania"))
+            if src_key and cur_key and src_key != cur_key:
+                fields["compania"] = normalize_company_name(source_company)
     for key in ("fecha_efecto", "fecha_vencimiento", "fecha_nacimiento"):
         if fields.get(key):
             fields[key] = normalize_ocr_date(fields[key])
     if fields.get("poliza_numero"):
         fields["poliza_numero"] = normalize_poliza_number(fields["poliza_numero"], fields.get("compania"))
+        if not is_valid_poliza_candidate(fields.get("poliza_numero")):
+            fields["poliza_numero"] = ""
     if fields["dni"] and not fields.get("nif"):
         fields["nif"] = fields["dni"]
     if fields.get("nif"):
