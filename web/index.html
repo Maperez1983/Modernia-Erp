@@ -1143,6 +1143,23 @@
             <option value="Fiatc"></option>
             <option value="Lloyd's"></option>
           </datalist>
+          <datalist id="segurosRamosList">
+            <option value="Hogar"></option>
+            <option value="Hogar alquiler"></option>
+            <option value="Auto"></option>
+            <option value="Moto"></option>
+            <option value="Comercio"></option>
+            <option value="Comunidad"></option>
+            <option value="Impago alquiler"></option>
+            <option value="Responsabilidad civil"></option>
+            <option value="Decesos"></option>
+            <option value="Salud"></option>
+            <option value="Vida"></option>
+            <option value="Accidentes"></option>
+            <option value="Defensa jurídica"></option>
+            <option value="Viaje"></option>
+            <option value="Ciber"></option>
+          </datalist>
           <datalist id="segurosColaboradoresList"></datalist>
           <div class="seguros-tab" data-seguros-tab="alta">
           <div class="form-card">
@@ -1179,7 +1196,7 @@
               </label>
               <label>
                 Ramo
-                <input id="seguroOcrRamo" placeholder="Hogar, Auto, RC..." />
+                <input id="seguroOcrRamo" list="segurosRamosList" placeholder="Hogar, Auto, RC..." />
               </label>
               <label>
                 Colaborador
@@ -1284,7 +1301,7 @@
               </label>
               <label>
                 Ramo
-                <input id="segurosBdtOcrRamo" />
+                <input id="segurosBdtOcrRamo" list="segurosRamosList" />
               </label>
               <label>
                 Fecha efecto

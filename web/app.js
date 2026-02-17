@@ -914,6 +914,7 @@ const state = {
   segurosTab: "dashboard",
   clienteDocsTab: "seguros",
   segurosBdtCache: null,
+  segurosRamosSource: null,
   segurosOcrClienteId: "",
   segurosBdtOcrClienteId: "",
   segurosOcrQuality: null,
@@ -1295,6 +1296,7 @@ const seguroOcrDni = document.getElementById("seguroOcrDni");
 const seguroOcrTelefono = document.getElementById("seguroOcrTelefono");
 const seguroOcrEmail = document.getElementById("seguroOcrEmail");
 const seguroOcrCompania = document.getElementById("seguroOcrCompania");
+const segurosRamosList = document.getElementById("segurosRamosList");
 const seguroOcrPoliza = document.getElementById("seguroOcrPoliza");
 const seguroOcrDireccion = document.getElementById("seguroOcrDireccion");
 const seguroOcrNacimiento = document.getElementById("seguroOcrNacimiento");
@@ -1590,6 +1592,23 @@ const SEGUROS_RESPONSABLES_FIJOS = [
   "MODERNIA MALAGA NORTE",
   "MODERNIA MALAGA CENTRO",
 ];
+const SEGUROS_RAMOS_CATALOGO = [
+  "Hogar",
+  "Hogar alquiler",
+  "Auto",
+  "Moto",
+  "Comercio",
+  "Comunidad",
+  "Impago alquiler",
+  "Responsabilidad civil",
+  "Decesos",
+  "Salud",
+  "Vida",
+  "Accidentes",
+  "Defensa jurídica",
+  "Viaje",
+  "Ciber",
+];
 
 const createOption = (value, label) => {
   const option = document.createElement("option");
@@ -1626,6 +1645,30 @@ const refreshSegurosColaboradoresList = (columns = [], rows = []) => {
   ordered.forEach((value) => {
     segurosColaboradoresList.appendChild(createOption(value, value));
   });
+};
+
+const refreshSegurosRamosList = (columns = [], rows = [], company = "") => {
+  if (!segurosRamosList) return;
+  const companyKey = normalizeSimple(company);
+  const ramoIndex = columns.indexOf("ramo");
+  const companyIndex = columns.indexOf("compania");
+  const priority = [];
+  const rest = new Set(SEGUROS_RAMOS_CATALOGO);
+  if (ramoIndex >= 0) {
+    rows.forEach((row) => {
+      const ramo = String(row[ramoIndex] || "").trim();
+      if (!ramo) return;
+      const rowCompany = companyIndex >= 0 ? normalizeSimple(row[companyIndex] || "") : "";
+      if (!companyKey || (rowCompany && rowCompany === companyKey)) {
+        if (!priority.includes(ramo)) priority.push(ramo);
+      } else {
+        rest.add(ramo);
+      }
+    });
+  }
+  const ordered = [...priority, ...Array.from(rest).filter((item) => !priority.includes(item))];
+  segurosRamosList.innerHTML = "";
+  ordered.forEach((ramo) => segurosRamosList.appendChild(createOption(ramo, ramo)));
 };
 
 const euroFormatter = new Intl.NumberFormat("es-ES", {
@@ -3427,6 +3470,15 @@ const toNumber = (value) => {
   }
   const parsed = Number(text);
   return Number.isNaN(parsed) ? null : parsed;
+};
+
+const formatMoneyInputValue = (value) => {
+  const number = toNumber(value);
+  if (number === null) return String(value || "").trim();
+  return `${number.toLocaleString("es-ES", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })} €`;
 };
 
 const FIN_SIM_HIPOTECA_TARIFAS = [{"importe":0.0,"notaria":210.0,"registro":39.07,"gestoria":174.0},{"importe":5001.0,"notaria":277.14,"registro":71.45,"gestoria":174.0},{"importe":10001.0,"notaria":327.54,"registro":93.5,"gestoria":174.0},{"importe":15001.0,"notaria":377.94,"registro":115.55,"gestoria":174.0},{"importe":20001.0,"notaria":428.34,"registro":137.6,"gestoria":174.0},{"importe":25001.0,"notaria":478.74,"registro":159.65,"gestoria":174.0},{"importe":30001.0,"notaria":527.85,"registro":220.59,"gestoria":174.0},{"importe":35001.0,"notaria":544.05,"registro":234.09,"gestoria":174.0},{"importe":40001.0,"notaria":560.25,"registro":247.59,"gestoria":174.0},{"importe":45001.0,"notaria":576.45,"registro":261.09,"gestoria":174.0},{"importe":50001.0,"notaria":592.65,"registro":274.59,"gestoria":174.0},{"importe":55001.0,"notaria":608.85,"registro":288.09,"gestoria":174.0},{"importe":60001.0,"notaria":645.0,"registro":312.29,"gestoria":174.0},{"importe":65001.0,"notaria":655.8,"registro":320.39,"gestoria":179.8},{"importe":70001.0,"notaria":666.6,"registro":328.49,"gestoria":185.60000000000002},{"importe":75001.0,"notaria":677.4,"registro":336.59,"gestoria":191.40000000000003},{"importe":80001.0,"notaria":688.2,"registro":344.69,"gestoria":197.20000000000005},{"importe":85001.0,"notaria":699.0,"registro":352.79,"gestoria":203.00000000000006},{"importe":90001.0,"notaria":709.8,"registro":360.89,"gestoria":208.80000000000007},{"importe":95001.0,"notaria":720.6,"registro":368.99,"gestoria":214.60000000000008},{"importe":100001.0,"notaria":731.4,"registro":377.09,"gestoria":220.4000000000001},{"importe":105001.0,"notaria":742.2,"registro":385.19,"gestoria":226.2000000000001},{"importe":110001.0,"notaria":753.0,"registro":393.29,"gestoria":232.0000000000001},{"importe":115001.0,"notaria":763.8,"registro":401.39,"gestoria":237.80000000000013},{"importe":120001.0,"notaria":774.6,"registro":409.49,"gestoria":243.60000000000014},{"importe":125001.0,"notaria":785.4,"registro":417.59,"gestoria":249.40000000000015},{"importe":130001.0,"notaria":796.2,"registro":425.69,"gestoria":255.20000000000016},{"importe":135001.0,"notaria":807.0,"registro":433.79,"gestoria":261.00000000000017},{"importe":140001.0,"notaria":817.8,"registro":441.89,"gestoria":266.8000000000002},{"importe":145001.0,"notaria":828.6,"registro":449.99,"gestoria":272.6000000000002},{"importe":150001.0,"notaria":834.28,"registro":458.09,"gestoria":278.4000000000002},{"importe":155001.0,"notaria":839.68,"registro":466.19,"gestoria":284.2000000000002},{"importe":160001.0,"notaria":845.08,"registro":474.29,"gestoria":290.0000000000002},{"importe":165001.0,"notaria":850.48,"registro":482.39,"gestoria":295.80000000000024},{"importe":170001.0,"notaria":855.88,"registro":490.49,"gestoria":301.60000000000025},{"importe":175001.0,"notaria":861.28,"registro":498.59,"gestoria":307.40000000000026},{"importe":180001.0,"notaria":866.68,"registro":506.69,"gestoria":313.2000000000003},{"importe":185001.0,"notaria":872.08,"registro":514.79,"gestoria":319.0000000000003},{"importe":190001.0,"notaria":877.48,"registro":522.89,"gestoria":324.8000000000003},{"importe":195001.0,"notaria":882.88,"registro":530.99,"gestoria":330.6000000000003},{"importe":200001.0,"notaria":888.28,"registro":539.09,"gestoria":336.4000000000003},{"importe":205001.0,"notaria":893.68,"registro":547.19,"gestoria":342.20000000000033},{"importe":210001.0,"notaria":899.08,"registro":555.29,"gestoria":348.0},{"importe":215001.0,"notaria":904.48,"registro":563.39,"gestoria":348.0},{"importe":220001.0,"notaria":909.88,"registro":571.49,"gestoria":348.0},{"importe":225001.0,"notaria":915.28,"registro":579.59,"gestoria":348.0},{"importe":230001.0,"notaria":920.68,"registro":587.69,"gestoria":348.0},{"importe":235001.0,"notaria":926.08,"registro":595.79,"gestoria":348.0},{"importe":240001.0,"notaria":931.48,"registro":603.89,"gestoria":348.0},{"importe":245001.0,"notaria":936.88,"registro":611.99,"gestoria":348.0}];
@@ -9728,6 +9780,7 @@ const loadSegurosCrm = () => {
   api(`/api/tabla?${params.toString()}`).then((data) => {
     const columns = data.columns || [];
     let rows = data.rows || [];
+    state.segurosRamosSource = { columns, rows };
     const filtroCliente = segurosCrmClienteInput ? segurosCrmClienteInput.value.trim().toLowerCase() : "";
     if (filtroCliente) {
       const tomadorIndex = columns.indexOf("tomador");
@@ -9739,6 +9792,7 @@ const loadSegurosCrm = () => {
     }
     renderTableInto({ columns, rows }, segurosCrmTable, segurosCrmInfo, "Seguros");
     refreshSegurosColaboradoresList(columns, rows);
+    refreshSegurosRamosList(columns, rows, seguroOcrCompania ? seguroOcrCompania.value : "");
     renderSegurosUpdateSelect(data);
     renderSegurosChecklistSelect(data);
     renderSegurosAiSelect(data);
@@ -10391,6 +10445,13 @@ const fillSegurosBdtOcrFields = (fields = {}) => {
   if (segurosBdtOcrTomador) segurosBdtOcrTomador.value = fields.tomador || "";
   if (segurosBdtOcrDni) segurosBdtOcrDni.value = fields.dni || fields.nif || "";
   if (segurosBdtOcrCompania) segurosBdtOcrCompania.value = fields.compania || "";
+  if (state.segurosRamosSource) {
+    refreshSegurosRamosList(
+      state.segurosRamosSource.columns || [],
+      state.segurosRamosSource.rows || [],
+      segurosBdtOcrCompania ? segurosBdtOcrCompania.value : ""
+    );
+  }
   if (segurosBdtOcrRamo) segurosBdtOcrRamo.value = fields.ramo || "";
   if (segurosBdtOcrPoliza) segurosBdtOcrPoliza.value = fields.poliza_numero || "";
   if (segurosBdtOcrFechaEfecto) {
@@ -10403,8 +10464,8 @@ const fillSegurosBdtOcrFields = (fields = {}) => {
       segurosBdtOcrFechaVencimiento.value = addOneYear(segurosBdtOcrFechaEfecto.value);
     }
   }
-  if (segurosBdtOcrPrimaNeta) segurosBdtOcrPrimaNeta.value = fields.prima_neta || "";
-  if (segurosBdtOcrPrimaTotal) segurosBdtOcrPrimaTotal.value = fields.prima_total || "";
+  if (segurosBdtOcrPrimaNeta) segurosBdtOcrPrimaNeta.value = formatMoneyInputValue(fields.prima_neta || "");
+  if (segurosBdtOcrPrimaTotal) segurosBdtOcrPrimaTotal.value = formatMoneyInputValue(fields.prima_total || "");
 };
 
 const formatSegurosBdtLabel = (row, columns) => {
@@ -10979,14 +11040,21 @@ const fillSegurosOcrFields = (fields = {}) => {
   if (seguroOcrTelefono) seguroOcrTelefono.value = fields.telefono || "";
   if (seguroOcrEmail) seguroOcrEmail.value = fields.email || "";
   if (seguroOcrCompania) seguroOcrCompania.value = fields.compania || "";
+  if (state.segurosRamosSource) {
+    refreshSegurosRamosList(
+      state.segurosRamosSource.columns || [],
+      state.segurosRamosSource.rows || [],
+      seguroOcrCompania ? seguroOcrCompania.value : ""
+    );
+  }
   if (seguroOcrRamo) seguroOcrRamo.value = fields.ramo || "";
   if (seguroOcrPoliza) seguroOcrPoliza.value = fields.poliza_numero || "";
   if (seguroOcrDireccion) seguroOcrDireccion.value = fields.direccion || "";
   if (seguroOcrNacimiento) {
     seguroOcrNacimiento.value = normalizeDateInput(fields.fecha_nacimiento || "");
   }
-  if (seguroOcrPrimaNeta) seguroOcrPrimaNeta.value = fields.prima_neta || "";
-  if (seguroOcrPrimaTotal) seguroOcrPrimaTotal.value = fields.prima_total || "";
+  if (seguroOcrPrimaNeta) seguroOcrPrimaNeta.value = formatMoneyInputValue(fields.prima_neta || "");
+  if (seguroOcrPrimaTotal) seguroOcrPrimaTotal.value = formatMoneyInputValue(fields.prima_total || "");
   if (seguroOcrFechaEfecto) {
     seguroOcrFechaEfecto.value = normalizeDateInput(fields.fecha_efecto || "");
   }
@@ -11221,8 +11289,8 @@ const openSegurosPresupuestoEdit = (columns, row) => {
     const fecha = normalizeDateInput(getVal("fecha_vencimiento") || "");
     seguroOcrFechaVencimiento.value = fecha || (seguroOcrFechaEfecto?.value ? addOneYear(seguroOcrFechaEfecto.value) : "");
   }
-  if (seguroOcrPrimaNeta) seguroOcrPrimaNeta.value = getVal("prima_neta") || "";
-  if (seguroOcrPrimaTotal) seguroOcrPrimaTotal.value = getVal("prima_total") || "";
+  if (seguroOcrPrimaNeta) seguroOcrPrimaNeta.value = formatMoneyInputValue(getVal("prima_neta") || "");
+  if (seguroOcrPrimaTotal) seguroOcrPrimaTotal.value = formatMoneyInputValue(getVal("prima_total") || "");
   if (seguroOcrProduccion) seguroOcrProduccion.value = getVal("produccion") || "";
   if (seguroOcrColaborador) seguroOcrColaborador.value = getVal("colaborador") || "";
   if (seguroOcrEstado) seguroOcrEstado.value = "Presupuesto";
@@ -15199,6 +15267,28 @@ if (seguroOcrDni) {
 if (segurosBdtOcrDni) {
   segurosBdtOcrDni.addEventListener("change", () => {
     resolveOcrClienteMatch("bdt", getSegurosBdtOcrClienteFields());
+  });
+}
+
+if (seguroOcrCompania) {
+  seguroOcrCompania.addEventListener("change", () => {
+    if (!state.segurosRamosSource) return;
+    refreshSegurosRamosList(
+      state.segurosRamosSource.columns || [],
+      state.segurosRamosSource.rows || [],
+      seguroOcrCompania.value || ""
+    );
+  });
+}
+
+if (segurosBdtOcrCompania) {
+  segurosBdtOcrCompania.addEventListener("change", () => {
+    if (!state.segurosRamosSource) return;
+    refreshSegurosRamosList(
+      state.segurosRamosSource.columns || [],
+      state.segurosRamosSource.rows || [],
+      segurosBdtOcrCompania.value || ""
+    );
   });
 }
 

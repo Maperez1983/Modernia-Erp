@@ -2748,10 +2748,12 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
         ramo_upper = normalize_lookup_text(fields["ramo"])
         if "IMPAGO" in ramo_upper and "ALQUILER" in ramo_upper:
             fields["ramo"] = "Impago alquiler"
-        elif "ALQUILER" in ramo_upper:
-            fields["ramo"] = "Alquiler"
+        elif "HOGAR" in ramo_upper and "ALQUILER" in ramo_upper:
+            fields["ramo"] = "Hogar alquiler"
         elif "HOGAR" in ramo_upper:
             fields["ramo"] = "Hogar"
+        elif "ALQUILER" in ramo_upper:
+            fields["ramo"] = "Alquiler"
     if not fields["ramo"]:
         modal_match = re.search(
             r"Modalidad\s+([A-ZÁÉÍÓÚÑa-z\s]+?)\s+Datos\s+Tomador",
