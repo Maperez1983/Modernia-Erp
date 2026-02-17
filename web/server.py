@@ -115,6 +115,7 @@ COMPANY_ALIAS_PATTERNS = [
     (r"\bLINEA\s*DIRECTA\b", "Línea Directa"),
     (r"\bLIBERTY\b", "Liberty"),
     (r"\bMUTUA\s*MADRILE[NÑ]A\b", "Mutua Madrileña"),
+    (r"\bGRUPO\s+MUTUA\s+PROPIETARIOS\b|\bMUTUA\s+PROPIETARIOS\b", "Mutua Propietarios"),
     (r"\bCAJA\s*RURAL\b", "Caja Rural"),
     (r"\bCASER\b", "Caser"),
     (r"\bPLUS\s*ULTRA\b", "Plus Ultra"),
@@ -2303,20 +2304,20 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
             return ""
         key_pattern = "|".join([re.escape(k) for k in keys])
         for line in text.splitlines():
-            if re.search(rf"\\b({key_pattern})\\b", line, re.IGNORECASE):
-                parts = re.split(r"[:\\-]", line, maxsplit=1)
+            if re.search(rf"\b({key_pattern})\b", line, re.IGNORECASE):
+                parts = re.split(r"[:\-]", line, maxsplit=1)
                 if len(parts) > 1:
                     value = parts[1].strip()
                     if value:
                         return value
-                cleaned_line = re.sub(rf".*?\\b({key_pattern})\\b", "", line, flags=re.IGNORECASE).strip()
+                cleaned_line = re.sub(rf".*?\b({key_pattern})\b", "", line, flags=re.IGNORECASE).strip()
                 if cleaned_line:
                     return cleaned_line
         return ""
     def pick_date_range(value):
         if not value:
             return "", ""
-        dates = re.findall(r"\\d{1,2}[/-]\\d{1,2}[/-]\\d{2,4}", value)
+        dates = re.findall(r"\d{1,2}[/-]\d{1,2}[/-]\d{2,4}", value)
         if len(dates) >= 2:
             return dates[0], dates[1]
         return "", ""
@@ -2401,6 +2402,8 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
             out["compania"] = "Allianz"
         elif "ZURICH" in upper:
             out["compania"] = "Zurich"
+        elif "MUTUA PROPIETARIOS" in upper:
+            out["compania"] = "Mutua Propietarios"
         elif "OCCIDENT" in upper:
             out["compania"] = "Catalana Occidente"
         tokens = re.findall(r"[A-Z0-9][A-Z0-9/_-]{5,}", upper)
@@ -2557,7 +2560,7 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
     fields["direccion"] = pick([
         r"Direcci[oó]n\s*[:\-]?\s*([^\n]+)",
         r"Direcci[oó]n\s+([A-Z0-9ÁÉÍÓÚÑ\s,./-]+?\s+\d{5}\s+[A-ZÁÉÍÓÚÑ\s]+)",
-        r"Direcci[oó]n\s+([A-Z0-9ÁÉÍÓÚÑ\s,./-]+?)(?:\\s+Uso\\s+|\\s+Beneficiario|\\s+Cl[aá]usulas|\\s+Datos|\\n)",
+        r"Direcci[oó]n\s+([A-Z0-9ÁÉÍÓÚÑ\s,./-]+?)(?:\s+Uso\s+|\s+Beneficiario|\s+Cl[aá]usulas|\s+Datos|\n)",
         r"Domicilio\s*[:\-]?\s*([^\n]+)",
     ])
     fields["fecha_nacimiento"] = pick([
@@ -2567,6 +2570,8 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
     if fields["fecha_nacimiento"]:
         fields["fecha_nacimiento"] = normalize_ocr_date(fields["fecha_nacimiento"])
     fields["poliza_numero"] = pick([
+        r"P[oó]liza\s*/\s*Producto\s*[:#]?\s*([0-9]{6,})",
+        r"P[oó]liza\s*/\s*Producto\s*[:#]?\s*([A-Z0-9][A-Z0-9/.\-\s]{5,}?)(?:\s{2,}[A-ZÁÉÍÓÚÑ]|$)",
         r"N[ºo]\s*de\s*p[oó]liza\s*[:#]?\s*([A-Z0-9/.\-]+)",
         r"N[ºo]\s*p[oó]liza\s*[:#]?\s*([A-Z0-9/.\-]+)",
         r"N[ºo]\s*de\s*P[oó]liza\s*([A-Z0-9/.\-]+)",
@@ -2614,6 +2619,7 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
     if fields["compania"]:
         fields["compania"] = normalize_company_name(fields["compania"])
     fields["fecha_efecto"] = pick([
+        r"Fecha\s*Efecto\s*[:\-]?\s*([0-9]{1,2}[ /.-][0-9]{1,2}[ /.-][0-9]{2,4})",
         r"Fecha de efecto\s*:\s*([0-9]{1,2}[ /.-][0-9]{1,2}[ /.-][0-9]{2,4})",
         r"Efecto\s*:\s*([0-9]{1,2}[ /.-][0-9]{1,2}[ /.-][0-9]{2,4})",
         r"Vigencia\s*desde\s*[:\-]?\s*([0-9]{1,2}[ /.-][0-9]{1,2}[ /.-][0-9]{2,4})",
@@ -2705,12 +2711,12 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
     if fields["email"]:
         fields["email"] = normalize_email(fields["email"])
     if fields["poliza_numero"]:
-        if not re.search(r"\\d", fields["poliza_numero"]):
+        if not re.search(r"\d", fields["poliza_numero"]):
             fields["poliza_numero"] = ""
     if not fields["poliza_numero"]:
-        pol_match = re.search(r"N[ºo]\\s*P[oó]liza\\s*[:#]?\\s*([0-9]{5,})", cleaned, re.IGNORECASE)
+        pol_match = re.search(r"N[ºo]\s*P[oó]liza\s*[:#]?\s*([0-9]{5,})", cleaned, re.IGNORECASE)
         if not pol_match:
-            pol_match = re.search(r"N[ºo]\\s*P[oó]liza\\s*[:#]?\\s*([0-9]{5,})", text, re.IGNORECASE)
+            pol_match = re.search(r"N[ºo]\s*P[oó]liza\s*[:#]?\s*([0-9]{5,})", text, re.IGNORECASE)
         if pol_match:
             fields["poliza_numero"] = pol_match.group(1).strip()
     if fields["dni"]:
@@ -2728,6 +2734,16 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
         fields["ramo"] = ""
     if fields["ramo"]:
         fields["ramo"] = fields["ramo"].splitlines()[0].strip()
+        ramo_inline = re.match(r"^[A-Z0-9/.\-]{5,}\s*-\s*(.+)$", fields["ramo"], re.IGNORECASE)
+        if ramo_inline:
+            fields["ramo"] = ramo_inline.group(1).strip()
+        ramo_upper = normalize_lookup_text(fields["ramo"])
+        if "IMPAGO" in ramo_upper and "ALQUILER" in ramo_upper:
+            fields["ramo"] = "Impago alquiler"
+        elif "ALQUILER" in ramo_upper:
+            fields["ramo"] = "Alquiler"
+        elif "HOGAR" in ramo_upper:
+            fields["ramo"] = "Hogar"
     if not fields["ramo"]:
         modal_match = re.search(
             r"Modalidad\s+([A-ZÁÉÍÓÚÑa-z\s]+?)\s+Datos\s+Tomador",
