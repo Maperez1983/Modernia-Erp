@@ -10716,6 +10716,31 @@ const resetSegurosOcrAggregator = () => {
   }
 };
 
+const resetSegurosBdtOcrAggregator = () => {
+  const clearValue = (el) => {
+    if (el) el.value = "";
+  };
+  clearValue(segurosBdtOcrTomador);
+  clearValue(segurosBdtOcrDni);
+  clearValue(segurosBdtOcrCompania);
+  clearValue(segurosBdtOcrRamo);
+  clearValue(segurosBdtOcrPoliza);
+  clearValue(segurosBdtOcrFechaEfecto);
+  clearValue(segurosBdtOcrFechaVencimiento);
+  clearValue(segurosBdtOcrPrimaNeta);
+  clearValue(segurosBdtOcrPrimaTotal);
+  if (segurosBdtOcrFile) segurosBdtOcrFile.value = "";
+  if (segurosBdtOcrSelect) segurosBdtOcrSelect.value = "";
+  state.segurosBdtOcrClienteId = "";
+  state.segurosBdtCache = null;
+  setOcrClienteUi(getOcrClienteContext("bdt"), { status: "", showCreate: false, showAdd: false, showOpen: false });
+};
+
+const resetSegurosUpdatePanel = () => {
+  if (segurosUpdateFile) segurosUpdateFile.value = "";
+  if (segurosUpdateSelect) segurosUpdateSelect.value = "";
+};
+
 const lookupClienteByNif = async (nif) => {
   if (!nif) return null;
   const serviceParam = getServiceFilterParam();
@@ -15107,6 +15132,7 @@ if (segurosOcrSave) {
           if (segurosOcrSaveStatus) {
             segurosOcrSaveStatus.textContent = "Presupuesto convertido.";
           }
+          resetSegurosOcrAggregator();
           segurosOcrSave.removeAttribute("data-record-id");
           segurosOcrSave.textContent = "Guardar";
           loadSegurosCrm();
@@ -15196,9 +15222,8 @@ if (segurosBdtOcrLink) {
             throw new Error(updateResp.error || "No se pudo adjuntar la póliza al registro.");
           }
         }
+        resetSegurosBdtOcrAggregator();
         if (segurosBdtOcrStatus) segurosBdtOcrStatus.textContent = "Vinculado a BDT.";
-        state.segurosBdtOcrClienteId = "";
-        state.segurosBdtCache = null;
         loadSegurosCrm();
       })
       .catch((err) => {
@@ -15375,6 +15400,7 @@ if (segurosUpdateButton) {
               if (segurosUpdateStatus) {
                 segurosUpdateStatus.textContent = "Datos completados.";
               }
+              resetSegurosUpdatePanel();
               loadSegurosCrm();
             })
             .catch(() => {
