@@ -1289,6 +1289,7 @@ const seguroOcrEstado = document.getElementById("seguroOcrEstado");
 const seguroOcrProduccion = document.getElementById("seguroOcrProduccion");
 const seguroOcrRamo = document.getElementById("seguroOcrRamo");
 const seguroOcrColaborador = document.getElementById("seguroOcrColaborador");
+const segurosColaboradoresList = document.getElementById("segurosColaboradoresList");
 const seguroOcrTomador = document.getElementById("seguroOcrTomador");
 const seguroOcrDni = document.getElementById("seguroOcrDni");
 const seguroOcrTelefono = document.getElementById("seguroOcrTelefono");
@@ -1586,6 +1587,35 @@ const createOption = (value, label) => {
   option.value = value;
   option.textContent = label;
   return option;
+};
+
+const refreshSegurosColaboradoresList = (columns = [], rows = []) => {
+  if (!segurosColaboradoresList) return;
+  const values = new Set();
+  const colaboradorIndex = columns.indexOf("colaborador");
+  if (colaboradorIndex >= 0) {
+    rows.forEach((row) => {
+      const value = String(row[colaboradorIndex] || "").trim();
+      if (value) values.add(value);
+    });
+  }
+  (state.usersList || []).forEach((user) => {
+    const services = expandServiceAliases(parseServiceList(user.servicio || ""));
+    const isSegurosUser =
+      !services.length ||
+      services.includes("seguros") ||
+      services.includes("direccion") ||
+      services.includes("administracion");
+    if (!isSegurosUser) return;
+    const label = `${user.nombre || ""} ${user.apellido || ""}`.trim();
+    const value = label || String(user.usuario || "").trim();
+    if (value) values.add(value);
+  });
+  const ordered = Array.from(values).sort((a, b) => a.localeCompare(b, "es", { sensitivity: "base" }));
+  segurosColaboradoresList.innerHTML = "";
+  ordered.forEach((value) => {
+    segurosColaboradoresList.appendChild(createOption(value, value));
+  });
 };
 
 const euroFormatter = new Intl.NumberFormat("es-ES", {
@@ -9682,6 +9712,7 @@ const loadSegurosCrm = () => {
       }
     }
     renderTableInto({ columns, rows }, segurosCrmTable, segurosCrmInfo, "Seguros");
+    refreshSegurosColaboradoresList(columns, rows);
     renderSegurosUpdateSelect(data);
     renderSegurosChecklistSelect(data);
     renderSegurosAiSelect(data);
