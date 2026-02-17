@@ -77,6 +77,30 @@ def parse_ocr_psms(raw):
 
 OCR_TESSERACT_PSMS = parse_ocr_psms(os.environ.get("OCR_TESSERACT_PSMS", "6,11"))
 
+
+def parse_ocr_dpis(raw, base_dpi):
+    value = (raw or "").strip()
+    dpis = []
+    if value:
+        for item in value.split(","):
+            item = item.strip()
+            if not item:
+                continue
+            try:
+                dpi = int(item)
+            except ValueError:
+                continue
+            if dpi >= 120 and dpi not in dpis:
+                dpis.append(dpi)
+    if base_dpi not in dpis:
+        dpis.insert(0, base_dpi)
+    if not dpis:
+        dpis = [base_dpi, 340]
+    return tuple(dpis)
+
+
+OCR_PDF_DPI_VARIANTS = parse_ocr_dpis(os.environ.get("OCR_PDF_DPI_VARIANTS", ""), OCR_PDF_DPI)
+
 COMPANY_ALIAS_PATTERNS = [
     (r"\bZURICH\b", "Zurich"),
     (r"\bMAPFRE\b", "Mapfre"),
@@ -776,6 +800,26 @@ def process_seguros_ocr(payload, conn):
                 best_quality = merged_quality
             if doc_text and doc_text.strip():
                 method = "docai"
+        missing_required = any(not fields.get(key) for key in required_keys)
+        if missing_required or candidate_score(best_quality) < 320:
+            zones_text, zones_err = ocr_poliza_key_regions(tmp_path, use_external=external_ocr_available())
+            if zones_text:
+                zones_fields = parse_poliza_text(
+                    zones_text,
+                    source_hint=source_hint,
+                    hinted_company=hinted_company,
+                )
+                zones_merged = merge_fields(fields, zones_fields)
+                zones_quality = compute_ocr_quality(zones_merged, required_keys)
+                if candidate_score(zones_quality) >= candidate_score(best_quality):
+                    fields = zones_merged
+                    best_quality = zones_quality
+                    if method:
+                        method = f"{method}+zones"
+                    else:
+                        method = "zones"
+            elif zones_err and not err_detail:
+                err_detail = zones_err
         if hinted_company and not fields.get("compania"):
             fields["compania"] = hinted_company
         missing_required = any(not fields.get(key) for key in required_keys)
@@ -1011,11 +1055,33 @@ def ocr_image_file(image_path):
     tmp_base = tempfile.gettempdir()
     with tempfile.TemporaryDirectory(dir=tmp_base) as tmpdir:
         processed, created = preprocess_image_for_ocr(image_path)
-        def run_tesseract(psm):
+        variants = [processed]
+        magick = shutil.which("magick") or shutil.which("convert")
+        if magick and os.path.exists(magick) and os.path.exists(processed):
+            for idx, extra in enumerate(
+                (
+                    ["-threshold", "55%", "-despeckle"],
+                    ["-adaptive-threshold", "15x15+10%", "-sharpen", "0x1.2"],
+                )
+            ):
+                out_variant = os.path.join(tmpdir, f"ocr_var_{idx}.png")
+                try:
+                    run_subprocess(
+                        [magick, processed, *extra, out_variant],
+                        check=True,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                    )
+                    if os.path.exists(out_variant):
+                        variants.append(out_variant)
+                except Exception:
+                    continue
+        def run_tesseract(psm, source_path):
             result = run_subprocess(
                 [
                     tesseract_cmd,
-                    processed,
+                    source_path,
                     "stdout",
                     "-l",
                     lang,
@@ -1037,11 +1103,12 @@ def ocr_image_file(image_path):
             return result.stdout or ""
         try:
             candidates = []
-            for psm in OCR_TESSERACT_PSMS:
-                try:
-                    candidates.append(run_tesseract(psm))
-                except subprocess.CalledProcessError:
-                    continue
+            for source_path in variants:
+                for psm in OCR_TESSERACT_PSMS:
+                    try:
+                        candidates.append(run_tesseract(psm, source_path))
+                    except subprocess.CalledProcessError:
+                        continue
             if not candidates:
                 return "", "tesseract: sin salida"
             best = max(candidates, key=lambda t: (len(t.strip()), sum(ch.isdigit() for ch in t)))
@@ -1743,6 +1810,58 @@ def ocr_best_block(image_path, box, use_external):
                     pass
     return best, best_err
 
+
+def poliza_image_boxes(width, height):
+    return {
+        "header_left": (0.02 * width, 0.03 * height, 0.52 * width, 0.34 * height),
+        "header_right": (0.54 * width, 0.03 * height, 0.44 * width, 0.34 * height),
+        "mid_full": (0.02 * width, 0.30 * height, 0.96 * width, 0.38 * height),
+        "footer_full": (0.02 * width, 0.62 * height, 0.96 * width, 0.34 * height),
+    }
+
+
+def ocr_poliza_key_regions(path, use_external=False):
+    images = []
+    tmpdirs = []
+    path_str = str(path or "")
+    if path_str.lower().endswith(".pdf"):
+        for dpi in OCR_PDF_DPI_VARIANTS:
+            dpi_images, _err, tmpdir = pdftoppm_first_page(path_str, pages=1, dpi=dpi)
+            if dpi_images:
+                images.extend(dpi_images[:1])
+            if tmpdir:
+                tmpdirs.append(tmpdir)
+    else:
+        if os.path.exists(path_str):
+            images.append(path_str)
+    best_text = ""
+    best_err = ""
+    try:
+        for image_path in images:
+            size = get_image_size(image_path)
+            if not size:
+                continue
+            width, height = size
+            boxes = poliza_image_boxes(width, height)
+            chunks = []
+            for box in boxes.values():
+                block_text, block_err = ocr_best_block(image_path, box, use_external)
+                if block_text and len(block_text.strip()) >= 12:
+                    chunks.append(block_text.strip())
+                elif block_err and not best_err:
+                    best_err = block_err
+            joined = "\n".join(dict.fromkeys(chunks))
+            if not joined:
+                continue
+            current_score = (len(joined.strip()), sum(ch.isdigit() for ch in joined))
+            best_score = (len(best_text.strip()), sum(ch.isdigit() for ch in best_text))
+            if current_score > best_score:
+                best_text = joined
+        return best_text, best_err
+    finally:
+        for tmpdir in tmpdirs:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
 def ocr_pdf_first_page(pdf_path):
     is_pdf = str(pdf_path).lower().endswith(".pdf")
     tmpdir = None
@@ -1921,7 +2040,7 @@ def pdftotext_crop(pdf_path, x, y, w, h):
         except Exception:
             return ""
 
-def pdftoppm_first_page(pdf_path, pages=None):
+def pdftoppm_first_page(pdf_path, pages=None, dpi=None):
     cmd = (
         shutil.which("pdftoppm")
         or "/opt/homebrew/bin/pdftoppm"
@@ -1937,9 +2056,10 @@ def pdftoppm_first_page(pdf_path, pages=None):
         pages = OCR_PDF_MAX_PAGES
     if pages and isinstance(pages, int):
         args.extend(["-l", str(pages)])
+    render_dpi = dpi or OCR_PDF_DPI
     try:
         run_subprocess(
-            [*args, "-r", str(OCR_PDF_DPI), "-gray", "-png", pdf_path, base],
+            [*args, "-r", str(render_dpi), "-gray", "-png", pdf_path, base],
             check=True,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
