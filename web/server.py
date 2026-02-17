@@ -2536,6 +2536,7 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
         return ""
     fields = {}
     fields["tomador"] = pick([
+        r"TOMADOR\s+([A-ZÁÉÍÓÚÑ ,.'\-]{5,}?)\s+NIF\b",
         r"Presentado\s+al\s+SR\.?/Sra\.?\s*([A-ZÁÉÍÓÚÑ ,.'\-]+?)\s+N[º°]?\s*Documento",
         r"Nombre y apellidos\s*:\s*([^\n]+)",
         r"Titular\s*de\s*la\s*p[oó]liza\s*:\s*([^\n]+)",
@@ -2588,6 +2589,7 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
     if fields["fecha_nacimiento"]:
         fields["fecha_nacimiento"] = normalize_ocr_date(fields["fecha_nacimiento"])
     fields["poliza_numero"] = pick([
+        r"N[ºo]\s*POLIZA/SPTO\.?\s*[:#]?\s*([0-9]{8,14}(?:\s*/\s*[0-9]{1,3})?)",
         r"P[oó]liza\s*/\s*Producto\s*[:#]?\s*([0-9]{6,})",
         r"P[oó]liza\s*/\s*Producto\s*[:#]?\s*([A-Z0-9][A-Z0-9/.\-\s]{5,}?)(?:\s{2,}[A-ZÁÉÍÓÚÑ]|$)",
         r"N[ºo]\s*de\s*p[oó]liza\s*[:#]?\s*([A-Z0-9/.\-]+)",
@@ -2720,6 +2722,17 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
         r"Prima\s*total\s*anual\s*[:€]?\s*([0-9\.,]+)",
         r"Total\s+recibo\s*[:€]?\s*([0-9\.,]+)",
     ])
+    # Table rows like "Del dd-mm-yyyy al dd-mm-yyyy ... Prima ... Total"
+    # are usually the most reliable source for net/total amounts.
+    amount_token = r"[0-9]{1,3}(?:\.[0-9]{3})*,[0-9]{2}"
+    for line in text.splitlines():
+        if not re.search(r"\bDel\s+\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\s+al\s+\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b", line, re.IGNORECASE):
+            continue
+        amounts = re.findall(amount_token, line)
+        if len(amounts) >= 2:
+            fields["prima_neta"] = amounts[0]
+            fields["prima_total"] = amounts[-1]
+            break
     if fields["tomador"]:
         tomador = fields["tomador"].splitlines()[0].strip()
         for cut in ["Marca", "Matrícula", "Doc."]:
@@ -2759,6 +2772,8 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
         fields["ramo"] = ""
     if fields["ramo"]:
         fields["ramo"] = fields["ramo"].splitlines()[0].strip()
+        if re.match(r"^\d+[.)]?\s+", fields["ramo"]):
+            fields["ramo"] = ""
         if "€" in fields["ramo"] or re.search(r"\d{2,}", fields["ramo"]):
             fields["ramo"] = ""
         if len(fields["ramo"]) > 48 and "seguro" in normalize_lookup_text(fields["ramo"]):
