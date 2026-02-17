@@ -1609,6 +1609,7 @@ const SEGUROS_RAMOS_CATALOGO = [
   "Viaje",
   "Ciber",
 ];
+const SEGUROS_LEGACY_STATUS_KEY = "migrado legado";
 
 const createOption = (value, label) => {
   const option = document.createElement("option");
@@ -3457,6 +3458,17 @@ const formatMoneyInputValue = (value) => {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })} €`;
+};
+
+const isLegacySeguroRow = (row, columns = []) => {
+  const estadoIndex = columns.indexOf("estado");
+  if (estadoIndex < 0) return false;
+  const estado = normalizeSimple(row[estadoIndex] || "");
+  return (
+    estado === SEGUROS_LEGACY_STATUS_KEY ||
+    estado.includes("legacy") ||
+    estado.includes("legado")
+  );
 };
 
 const FIN_SIM_HIPOTECA_TARIFAS = [{"importe":0.0,"notaria":210.0,"registro":39.07,"gestoria":174.0},{"importe":5001.0,"notaria":277.14,"registro":71.45,"gestoria":174.0},{"importe":10001.0,"notaria":327.54,"registro":93.5,"gestoria":174.0},{"importe":15001.0,"notaria":377.94,"registro":115.55,"gestoria":174.0},{"importe":20001.0,"notaria":428.34,"registro":137.6,"gestoria":174.0},{"importe":25001.0,"notaria":478.74,"registro":159.65,"gestoria":174.0},{"importe":30001.0,"notaria":527.85,"registro":220.59,"gestoria":174.0},{"importe":35001.0,"notaria":544.05,"registro":234.09,"gestoria":174.0},{"importe":40001.0,"notaria":560.25,"registro":247.59,"gestoria":174.0},{"importe":45001.0,"notaria":576.45,"registro":261.09,"gestoria":174.0},{"importe":50001.0,"notaria":592.65,"registro":274.59,"gestoria":174.0},{"importe":55001.0,"notaria":608.85,"registro":288.09,"gestoria":174.0},{"importe":60001.0,"notaria":645.0,"registro":312.29,"gestoria":174.0},{"importe":65001.0,"notaria":655.8,"registro":320.39,"gestoria":179.8},{"importe":70001.0,"notaria":666.6,"registro":328.49,"gestoria":185.60000000000002},{"importe":75001.0,"notaria":677.4,"registro":336.59,"gestoria":191.40000000000003},{"importe":80001.0,"notaria":688.2,"registro":344.69,"gestoria":197.20000000000005},{"importe":85001.0,"notaria":699.0,"registro":352.79,"gestoria":203.00000000000006},{"importe":90001.0,"notaria":709.8,"registro":360.89,"gestoria":208.80000000000007},{"importe":95001.0,"notaria":720.6,"registro":368.99,"gestoria":214.60000000000008},{"importe":100001.0,"notaria":731.4,"registro":377.09,"gestoria":220.4000000000001},{"importe":105001.0,"notaria":742.2,"registro":385.19,"gestoria":226.2000000000001},{"importe":110001.0,"notaria":753.0,"registro":393.29,"gestoria":232.0000000000001},{"importe":115001.0,"notaria":763.8,"registro":401.39,"gestoria":237.80000000000013},{"importe":120001.0,"notaria":774.6,"registro":409.49,"gestoria":243.60000000000014},{"importe":125001.0,"notaria":785.4,"registro":417.59,"gestoria":249.40000000000015},{"importe":130001.0,"notaria":796.2,"registro":425.69,"gestoria":255.20000000000016},{"importe":135001.0,"notaria":807.0,"registro":433.79,"gestoria":261.00000000000017},{"importe":140001.0,"notaria":817.8,"registro":441.89,"gestoria":266.8000000000002},{"importe":145001.0,"notaria":828.6,"registro":449.99,"gestoria":272.6000000000002},{"importe":150001.0,"notaria":834.28,"registro":458.09,"gestoria":278.4000000000002},{"importe":155001.0,"notaria":839.68,"registro":466.19,"gestoria":284.2000000000002},{"importe":160001.0,"notaria":845.08,"registro":474.29,"gestoria":290.0000000000002},{"importe":165001.0,"notaria":850.48,"registro":482.39,"gestoria":295.80000000000024},{"importe":170001.0,"notaria":855.88,"registro":490.49,"gestoria":301.60000000000025},{"importe":175001.0,"notaria":861.28,"registro":498.59,"gestoria":307.40000000000026},{"importe":180001.0,"notaria":866.68,"registro":506.69,"gestoria":313.2000000000003},{"importe":185001.0,"notaria":872.08,"registro":514.79,"gestoria":319.0000000000003},{"importe":190001.0,"notaria":877.48,"registro":522.89,"gestoria":324.8000000000003},{"importe":195001.0,"notaria":882.88,"registro":530.99,"gestoria":330.6000000000003},{"importe":200001.0,"notaria":888.28,"registro":539.09,"gestoria":336.4000000000003},{"importe":205001.0,"notaria":893.68,"registro":547.19,"gestoria":342.20000000000033},{"importe":210001.0,"notaria":899.08,"registro":555.29,"gestoria":348.0},{"importe":215001.0,"notaria":904.48,"registro":563.39,"gestoria":348.0},{"importe":220001.0,"notaria":909.88,"registro":571.49,"gestoria":348.0},{"importe":225001.0,"notaria":915.28,"registro":579.59,"gestoria":348.0},{"importe":230001.0,"notaria":920.68,"registro":587.69,"gestoria":348.0},{"importe":235001.0,"notaria":926.08,"registro":595.79,"gestoria":348.0},{"importe":240001.0,"notaria":931.48,"registro":603.89,"gestoria":348.0},{"importe":245001.0,"notaria":936.88,"registro":611.99,"gestoria":348.0}];
@@ -9757,7 +9769,8 @@ const loadSegurosCrm = () => {
   params.set("include_id", "1");
   api(`/api/tabla?${params.toString()}`).then((data) => {
     const columns = data.columns || [];
-    let rows = data.rows || [];
+    const allRows = data.rows || [];
+    let rows = allRows.filter((row) => !isLegacySeguroRow(row, columns));
     state.segurosRamosSource = { columns, rows };
     const filtroCliente = segurosCrmClienteInput ? segurosCrmClienteInput.value.trim().toLowerCase() : "";
     if (filtroCliente) {
@@ -10922,10 +10935,12 @@ const ensureSegurosBdtData = async (forceRefresh = false) => {
     limit: "1000",
   });
   const data = await api(`/api/tabla?${params.toString()}`);
-  if (!data?.error) {
-    state.segurosBdtCache = { empresaId: empresa.id, data, ts: Date.now() };
-  }
-  return data;
+  if (data?.error) return data;
+  const columns = data.columns || [];
+  const filteredRows = (data.rows || []).filter((row) => !isLegacySeguroRow(row, columns));
+  const filtered = { ...data, rows: filteredRows };
+  state.segurosBdtCache = { empresaId: empresa.id, data: filtered, ts: Date.now() };
+  return filtered;
 };
 
 const matchSegurosBdtFromFields = async () => {

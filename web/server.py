@@ -285,12 +285,15 @@ def find_existing_seguro_id(conn, empresa_id, poliza_numero, compania, exclude_i
         return ""
     compania_norm = normalize_company_key(compania)
     rows = conn.execute(
-        "SELECT id, poliza_numero, compania FROM seguros WHERE empresa_id = ?",
+        "SELECT id, poliza_numero, compania, estado FROM seguros WHERE empresa_id = ?",
         (empresa_id,),
     ).fetchall()
     for row in rows:
         row_id = row["id"]
         if exclude_id and row_id == exclude_id:
+            continue
+        estado_key = normalize_lookup_text(row["estado"] or "")
+        if "MIGRADO LEGADO" in estado_key or "LEGACY" in estado_key:
             continue
         row_poliza = normalize_poliza_key(row["poliza_numero"])
         if not row_poliza or row_poliza != poliza_norm:
