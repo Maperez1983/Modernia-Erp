@@ -1619,30 +1619,8 @@ const createOption = (value, label) => {
 
 const refreshSegurosColaboradoresList = (columns = [], rows = []) => {
   if (!segurosColaboradoresList) return;
-  const values = new Set();
-  SEGUROS_RESPONSABLES_FIJOS.forEach((name) => values.add(name));
-  const colaboradorIndex = columns.indexOf("colaborador");
-  if (colaboradorIndex >= 0) {
-    rows.forEach((row) => {
-      const value = String(row[colaboradorIndex] || "").trim();
-      if (value) values.add(value);
-    });
-  }
-  (state.usersList || []).forEach((user) => {
-    const services = expandServiceAliases(parseServiceList(user.servicio || ""));
-    const isSegurosUser =
-      !services.length ||
-      services.includes("seguros") ||
-      services.includes("direccion") ||
-      services.includes("administracion");
-    if (!isSegurosUser) return;
-    const label = `${user.nombre || ""} ${user.apellido || ""}`.trim();
-    const value = label || String(user.usuario || "").trim();
-    if (value) values.add(value);
-  });
-  const ordered = Array.from(values).sort((a, b) => a.localeCompare(b, "es", { sensitivity: "base" }));
   segurosColaboradoresList.innerHTML = "";
-  ordered.forEach((value) => {
+  SEGUROS_RESPONSABLES_FIJOS.forEach((value) => {
     segurosColaboradoresList.appendChild(createOption(value, value));
   });
 };
