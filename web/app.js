@@ -10602,6 +10602,42 @@ const setOcrClienteUi = (ctx, { status = "", showCreate = false, showAdd = false
   if (ctx.openBtn) ctx.openBtn.classList.toggle("hidden", !showOpen);
 };
 
+const resetSegurosOcrAggregator = () => {
+  const clearValue = (el) => {
+    if (el) el.value = "";
+  };
+  clearValue(seguroOcrTomador);
+  clearValue(seguroOcrDni);
+  clearValue(seguroOcrTelefono);
+  clearValue(seguroOcrEmail);
+  clearValue(seguroOcrCompania);
+  clearValue(seguroOcrRamo);
+  clearValue(seguroOcrPoliza);
+  clearValue(seguroOcrDireccion);
+  clearValue(seguroOcrNacimiento);
+  clearValue(seguroOcrFechaEfecto);
+  clearValue(seguroOcrFechaVencimiento);
+  clearValue(seguroOcrPrimaNeta);
+  clearValue(seguroOcrPrimaTotal);
+  clearValue(seguroOcrColaborador);
+  if (seguroOcrEstado) seguroOcrEstado.value = "En vigor";
+  if (seguroOcrProduccion) seguroOcrProduccion.value = "Nueva producción";
+  if (segurosOcrFile) segurosOcrFile.value = "";
+  if (typeof segurosOcrPreviewUrl !== "undefined" && segurosOcrPreviewUrl) {
+    URL.revokeObjectURL(segurosOcrPreviewUrl);
+    segurosOcrPreviewUrl = "";
+  }
+  if (segurosOcrPreview) segurosOcrPreview.disabled = true;
+  if (segurosOcrRaw) segurosOcrRaw.value = "";
+  state.segurosOcrClienteId = "";
+  state.segurosOcrQuality = null;
+  setOcrClienteUi(getOcrClienteContext(), { status: "", showCreate: false, showAdd: false, showOpen: false });
+  if (segurosOcrSave) {
+    segurosOcrSave.removeAttribute("data-record-id");
+    segurosOcrSave.textContent = "Guardar en BDT";
+  }
+};
+
 const lookupClienteByNif = async (nif) => {
   if (!nif) return null;
   const serviceParam = getServiceFilterParam();
@@ -11126,10 +11162,7 @@ const saveSegurosOcrRecord = async () => {
       if (segurosOcrSaveStatus) {
         segurosOcrSaveStatus.textContent = "Guardado en BDT.";
       }
-      if (!data.cliente_id) {
-        state.segurosOcrClienteId = "";
-      }
-      state.segurosOcrQuality = null;
+      resetSegurosOcrAggregator();
       loadSegurosCrm();
     })
     .catch(() => {
