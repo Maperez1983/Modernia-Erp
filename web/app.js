@@ -14961,7 +14961,10 @@ if (segurosOcrButton) {
           }
           resolveOcrClienteMatch("alta", data.fields || {}).then(() => {
             if (state.segurosOcrClienteId) {
-              saveSegurosOcrRecord().catch(() => {});
+              if (segurosOcrSaveStatus) {
+                segurosOcrSaveStatus.textContent =
+                  "Cliente detectado. Revisa datos y pulsa Guardar en BDT.";
+              }
             } else if (segurosOcrSaveStatus) {
               segurosOcrSaveStatus.textContent =
                 "Revisa el cliente (DNI) antes de guardar la póliza.";
