@@ -2539,6 +2539,7 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
     if fields["tomador"]:
         fields["tomador"] = normalize_person_name(fields["tomador"])
     fields["dni"] = pick([
+        r"DOC\.?\s*ID\.?\s*[:\-]?\s*([A-Z0-9\-]+)",
         r"Doc\.?\s*Identificaci[oó]n\s*[:\-]?\s*([A-Z0-9\-]+)",
         r"NIF/CIF\s*[:\-]?\s*([A-Z0-9\-]+)",
         r"DNI\s*[:\-]?\s*([0-9]{8}[A-Z])",
@@ -2632,6 +2633,7 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
     fields["fecha_vencimiento"] = pick([
         r"Fecha de vencimiento\s*[:\-]?\s*([0-9]{1,2}[ /.-][0-9]{1,2}[ /.-][0-9]{2,4})",
         r"Vencimiento\s*[:\-]?\s*([0-9]{1,2}[ /.-][0-9]{1,2}[ /.-][0-9]{2,4})",
+        r"Hasta\s+las\s+\d+\s+horas\s+del\s+([0-9]{1,2}[ /.-][0-9]{1,2}[ /.-][0-9]{2,4})",
         r"Fin\s*vigencia\s*[:\-]?\s*([0-9]{1,2}[ /.-][0-9]{1,2}[ /.-][0-9]{2,4})",
         r"Vigencia\s*hasta\s*[:\-]?\s*([0-9]{1,2}[ /.-][0-9]{1,2}[ /.-][0-9]{2,4})",
         r"Hasta\s*[:\-]?\s*([0-9]{1,2}[ /.-][0-9]{1,2}[ /.-][0-9]{2,4})",
@@ -2648,6 +2650,7 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
         if end_date and not fields["fecha_vencimiento"]:
             fields["fecha_vencimiento"] = end_date
     fields["ramo"] = pick([
+        r"Condiciones\s+Particulares\s+Ocaso\s+([A-ZÁÉÍÓÚÑa-z\s]{4,})",
         r"Ramo\s*[:\-]?\s*([^\n]+)",
         r"Modalidad\s*[:\-]?\s*([^\n]+)",
         r"Modalidad\s+([A-ZÁÉÍÓÚÑa-z\s]+?)\s+Datos\s+Tomador",
@@ -2683,12 +2686,15 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
                 break
     fields["prima_neta"] = pick([
         r"Prima neta\s*[:€]?\s*([0-9\.,]+)",
+        r"Prima\s+neta.*?Total\s+Recibo.*?\bAnual\b[^\d]*([0-9]{1,3}(?:\.[0-9]{3})*,[0-9]{2})\s*€",
         r"Importe\s*prima\s*neta\s*[:€]?\s*([0-9\.,]+)",
         r"Neta\s*[:€]?\s*([0-9\.,]+)",
         r"Prima\s+neta\s+anual\s*[:€]?\s*([0-9\.,]+)",
     ])
     fields["prima_total"] = pick([
         r"Prima total\s*[:€]?\s*([0-9\.,]+)",
+        r"Total\s+Recibo.*?\bAnual\b.*?([0-9]{1,3}(?:\.[0-9]{3})*,[0-9]{2})\s*€\s*$",
+        r"Prima\s+neta.*?Total\s+Recibo.*?\bAnual\b.*?([0-9]{1,3}(?:\.[0-9]{3})*,[0-9]{2})\s*€",
         r"Prima anual\s*[:€]?\s*([0-9\.,]+)",
         r"Importe\s*total\s*[:€]?\s*([0-9\.,]+)",
         r"Total\s*[:€]?\s*([0-9\.,]+)",
@@ -2734,6 +2740,8 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
         fields["ramo"] = ""
     if fields["ramo"]:
         fields["ramo"] = fields["ramo"].splitlines()[0].strip()
+        if len(fields["ramo"]) > 48 and "seguro" in normalize_lookup_text(fields["ramo"]):
+            fields["ramo"] = ""
         ramo_inline = re.match(r"^[A-Z0-9/.\-]{5,}\s*-\s*(.+)$", fields["ramo"], re.IGNORECASE)
         if ramo_inline:
             fields["ramo"] = ramo_inline.group(1).strip()
@@ -2809,6 +2817,34 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
         fields["email"] = line_pick(["Email", "Correo", "Correo electronico", "Correo electrónico"])
     if fields["email"]:
         fields["email"] = normalize_email(fields["email"])
+    if fields["email"] and normalize_lookup_text(fields["email"]) in ("OCASO OCASO ES",):
+        preferred = pick([r"Medio\/s\s+de\s+Contacto\s*:\s*([A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,})"])
+        fields["email"] = normalize_email(preferred) if preferred else ""
+    money_token = re.compile(r"^\d{1,3}(?:\.\d{3})*,\d{2}$|^\d+,\d{2}$|^\d+(?:\.\d+)?$")
+    if fields["prima_neta"] and not money_token.match(str(fields["prima_neta"]).strip()):
+        fallback = re.search(
+            r"Prima\s+neta.*?Total\s+Recibo.*?\bAnual\b[^\d]*([0-9]{1,3}(?:\.[0-9]{3})*,[0-9]{2})\s*€",
+            text,
+            re.IGNORECASE | re.DOTALL,
+        )
+        fields["prima_neta"] = fallback.group(1) if fallback else ""
+    if fields["prima_total"] and not money_token.match(str(fields["prima_total"]).strip()):
+        fallback = re.search(
+            r"Prima\s+neta.*?Total\s+Recibo.*?\bAnual\b.*?([0-9]{1,3}(?:\.[0-9]{3})*,[0-9]{2})\s*€",
+            text,
+            re.IGNORECASE | re.DOTALL,
+        )
+        fields["prima_total"] = fallback.group(1) if fallback else ""
+    anual_row = re.search(r"\bAnual\b(.{0,4000})", text, re.IGNORECASE | re.DOTALL)
+    if anual_row:
+        amounts = re.findall(r"([0-9]{1,3}(?:\.[0-9]{3})*,[0-9]{2})\s*€", anual_row.group(1))
+        if amounts:
+            if (not fields.get("prima_neta")) or (not money_token.match(str(fields.get("prima_neta")).strip())):
+                fields["prima_neta"] = amounts[0]
+            if (not fields.get("prima_total")) or (not money_token.match(str(fields.get("prima_total")).strip())):
+                fields["prima_total"] = amounts[-1]
+            if fields.get("prima_total") == fields.get("prima_neta") and len(amounts) >= 2:
+                fields["prima_total"] = amounts[-1]
     if not fields.get("tomador") or len((fields.get("tomador") or "").split()) <= 1:
         better_tomador = company_specific_tomador(text)
         if better_tomador:
