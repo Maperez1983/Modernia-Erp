@@ -1581,6 +1581,15 @@ const DASHBOARD_COMPANY = "Estudio Velazquez 2012 SL";
 const AIE_COMPANY = "Inmovere Gestión AIE";
 const FIN_COMPANY = "Financiaciones Modernia";
 const FINCAS_COMPANY = "Fincas Velazquez";
+const SEGUROS_RESPONSABLES_FIJOS = [
+  "SEBAS LALLANA",
+  "DANI GARCIA",
+  "RUBEN MIERA",
+  "MIGUEL ANGEL PÉREZ",
+  "IRENE CAÑAMERO",
+  "MODERNIA MALAGA NORTE",
+  "MODERNIA MALAGA CENTRO",
+];
 
 const createOption = (value, label) => {
   const option = document.createElement("option");
@@ -1592,6 +1601,7 @@ const createOption = (value, label) => {
 const refreshSegurosColaboradoresList = (columns = [], rows = []) => {
   if (!segurosColaboradoresList) return;
   const values = new Set();
+  SEGUROS_RESPONSABLES_FIJOS.forEach((name) => values.add(name));
   const colaboradorIndex = columns.indexOf("colaborador");
   if (colaboradorIndex >= 0) {
     rows.forEach((row) => {
@@ -6359,8 +6369,21 @@ const populateResponsableSelects = () => {
     if (!selectEl) return;
     const serviceFilter = normalizeSimple(selectEl.dataset.service || "");
     const current = selectEl.value;
+    const currentNorm = normalizeSimple(current);
+    const used = new Set();
+    const addOptionUnique = (value, label) => {
+      const finalValue = String(value || "").trim();
+      if (!finalValue) return;
+      const key = normalizeSimple(finalValue);
+      if (used.has(key)) return;
+      used.add(key);
+      selectEl.appendChild(createOption(finalValue, label || finalValue));
+    };
     selectEl.innerHTML = "";
     selectEl.appendChild(createOption("", "Selecciona responsable"));
+    if (serviceFilter === "seguros") {
+      SEGUROS_RESPONSABLES_FIJOS.forEach((name) => addOptionUnique(name, name));
+    }
     users
       .filter((user) => {
         if (!serviceFilter) return true;
@@ -6375,11 +6398,14 @@ const populateResponsableSelects = () => {
       .forEach((user) => {
       const label = `${user.nombre || ""} ${user.apellido || ""}`.trim();
       const value = user.usuario || label || user.nombre || "";
-      if (!value) return;
-      selectEl.appendChild(createOption(value, label || value));
+      addOptionUnique(value, label || value);
     });
     if (current) {
       selectEl.value = current;
+      if (normalizeSimple(selectEl.value) !== currentNorm) {
+        addOptionUnique(current, current);
+        selectEl.value = current;
+      }
     }
   });
 };
