@@ -57,6 +57,7 @@ OCR_PDF_MAX_PAGES = max(0, int(os.environ.get("OCR_PDF_MAX_PAGES", "4")))
 OCR_PDF_DPI = max(120, int(os.environ.get("OCR_PDF_DPI", "280")))
 OCR_OPENAI_VISION_PAGES = max(0, int(os.environ.get("OCR_OPENAI_VISION_PAGES", "2")))
 OCR_OPENAI_VISION_DPI = max(120, int(os.environ.get("OCR_OPENAI_VISION_DPI", "220")))
+OCR_EXPERT_MODE = os.environ.get("OCR_EXPERT_MODE", "1").strip().lower() not in ("0", "false", "no", "off")
 
 
 def parse_ocr_psms(raw):
@@ -752,6 +753,8 @@ def process_seguros_ocr(payload, conn):
     required_keys = ("tomador", "poliza_numero", "compania", "fecha_efecto")
     ai_used = False
     ai_error = ""
+    field_sources = {}
+    candidate_fields = []
     def candidate_score(quality):
         if not isinstance(quality, dict):
             return 0
@@ -767,6 +770,7 @@ def process_seguros_ocr(payload, conn):
         if not text:
             raise RuntimeError(err_detail or "No se pudo extraer texto")
         fields = parse_poliza_text(text, source_hint=source_hint, hinted_company=hinted_company)
+        candidate_fields.append(("pdf_text", normalize_extracted_fields(fields), 1.0))
         best_quality = compute_ocr_quality(fields, required_keys)
         if not any(str(value or "").strip() for value in fields.values()) or (
             not fields.get("poliza_numero")
@@ -777,6 +781,7 @@ def process_seguros_ocr(payload, conn):
             ocr_text, ocr_err = ocr_pdf_all_pages(tmp_path, use_external=external_ocr_available())
             if ocr_text:
                 ocr_fields = parse_poliza_text(ocr_text, source_hint=source_hint, hinted_company=hinted_company)
+                candidate_fields.append(("ocr_all_pages", normalize_extracted_fields(ocr_fields), 1.05))
                 ocr_quality = compute_ocr_quality(ocr_fields, required_keys)
                 if candidate_score(ocr_quality) >= candidate_score(best_quality):
                     fields = ocr_fields
@@ -793,6 +798,8 @@ def process_seguros_ocr(payload, conn):
                 err_detail = doc_err
             doc_mapped = map_docai_poliza_fields(doc_fields)
             doc_parsed = parse_poliza_text(doc_text, source_hint=source_hint, hinted_company=hinted_company) if doc_text else {}
+            candidate_fields.append(("docai_fields", normalize_extracted_fields(doc_mapped), 1.1))
+            candidate_fields.append(("docai_parsed", normalize_extracted_fields(doc_parsed), 1.05))
             merged = dict(fields)
             for key, value in doc_mapped.items():
                 if value and not merged.get(key):
@@ -815,6 +822,7 @@ def process_seguros_ocr(payload, conn):
                     source_hint=source_hint,
                     hinted_company=hinted_company,
                 )
+                candidate_fields.append(("zones", normalize_extracted_fields(zones_fields), 1.08))
                 zones_merged = merge_fields(fields, zones_fields)
                 zones_quality = compute_ocr_quality(zones_merged, required_keys)
                 if candidate_score(zones_quality) >= candidate_score(best_quality):
@@ -850,6 +858,7 @@ def process_seguros_ocr(payload, conn):
                         ai_error = ai_vision_err
                     elif ai_vision_fields:
                         ai_used = True
+                        candidate_fields.append(("openai_vision", normalize_extracted_fields(ai_vision_fields), 1.18))
                         merged = dict(fields)
                         for key, value in ai_vision_fields.items():
                             if value and not str(merged.get(key) or "").strip():
@@ -870,6 +879,7 @@ def process_seguros_ocr(payload, conn):
                     ai_error = ai_error_msg
                 elif ai_fields:
                     ai_used = True
+                    candidate_fields.append(("openai_text", normalize_extracted_fields(ai_fields), 0.98))
                     merged = dict(fields)
                     for key, value in ai_fields.items():
                         if value and not str(merged.get(key) or "").strip():
@@ -878,10 +888,19 @@ def process_seguros_ocr(payload, conn):
                     if candidate_score(ai_quality) >= candidate_score(best_quality):
                         fields = merged
                         best_quality = ai_quality
+        if OCR_EXPERT_MODE and candidate_fields:
+            expert_fields, expert_sources = blend_ocr_field_candidates(candidate_fields, required_keys)
+            expert_quality = compute_ocr_quality(expert_fields, required_keys)
+            if candidate_score(expert_quality) >= candidate_score(best_quality):
+                fields = expert_fields
+                best_quality = expert_quality
+                field_sources = expert_sources
         doc_type = classify_seguros_document(text)
         if doc_type == "otro" and doc_text:
             doc_type = classify_seguros_document(doc_text)
         ocr_quality = compute_ocr_quality(fields, required_keys)
+        if field_sources:
+            ocr_quality["field_sources"] = field_sources
         cliente_match = False
         cliente_id = None
         tomador = (fields.get("tomador") or "").strip()
@@ -1479,6 +1498,133 @@ def compute_ocr_quality(fields, required_keys=None):
         "missing_required": [key for key in required_keys if key not in required_filled],
         "confidence": confidence,
     }
+
+
+def is_valid_ocr_field(key, value):
+    raw = str(value or "").strip()
+    if not raw:
+        return False
+    if key in ("fecha_efecto", "fecha_vencimiento", "fecha_nacimiento"):
+        return bool(
+            re.search(r"\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b", raw)
+            or re.search(r"\b\d{4}-\d{2}-\d{2}\b", raw)
+        )
+    if key == "poliza_numero":
+        token = normalize_poliza_key(raw)
+        if len(token) < 6 or not re.search(r"\d", token):
+            return False
+        if any(month in token for month in ("ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE")):
+            return False
+        return True
+    if key == "compania":
+        company = normalize_company_name(raw)
+        if len(company) < 3:
+            return False
+        return normalize_lookup_text(company) not in ("COMPANIA", "ASEGURADORA", "SEGURO", "POLIZA")
+    if key in ("dni", "nif"):
+        nif = normalize_nif(raw)
+        return bool(
+            re.match(r"^[0-9]{8}[A-Z]$", nif)
+            or re.match(r"^[XYZ][0-9]{7}[A-Z]$", nif)
+            or re.match(r"^[ABCDEFGHJNPQRSUVW][0-9]{7}[0-9A-Z]$", nif)
+        )
+    if key in ("telefono",):
+        return bool(re.match(r"^[0-9]{9}$", normalize_phone(raw) or ""))
+    if key in ("email",):
+        return bool(re.match(r"^[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}$", raw.upper()))
+    if key in ("prima_neta", "prima_total"):
+        return bool(re.match(r"^\d{1,3}(?:\.\d{3})*,\d{2}$|^\d+,\d{2}$|^\d+(?:\.\d+)?$", raw))
+    if key == "ramo":
+        if len(raw) > 48:
+            return False
+        if "@" in raw or "€" in raw:
+            return False
+        if re.search(r"\d{2,}", raw):
+            return False
+        return True
+    return True
+
+
+def normalize_extracted_fields(fields):
+    fields = dict(fields or {})
+    if fields.get("tomador"):
+        fields["tomador"] = normalize_person_name(fields["tomador"])
+    if fields.get("dni"):
+        fields["dni"] = normalize_nif(fields["dni"])
+    if fields.get("nif"):
+        fields["nif"] = normalize_nif(fields["nif"])
+    if fields.get("telefono"):
+        fields["telefono"] = normalize_phone(fields["telefono"])
+    if fields.get("email"):
+        fields["email"] = normalize_email(fields["email"])
+    if fields.get("compania"):
+        fields["compania"] = normalize_company_name(fields["compania"])
+    if fields.get("fecha_efecto"):
+        fields["fecha_efecto"] = str(fields["fecha_efecto"]).strip()
+    if fields.get("fecha_vencimiento"):
+        fields["fecha_vencimiento"] = str(fields["fecha_vencimiento"]).strip()
+    if fields.get("fecha_nacimiento"):
+        fields["fecha_nacimiento"] = str(fields["fecha_nacimiento"]).strip()
+    if fields.get("poliza_numero"):
+        fields["poliza_numero"] = normalize_poliza_key(fields["poliza_numero"])
+    return fields
+
+
+def blend_ocr_field_candidates(candidates, required_keys=None):
+    required_keys = tuple(required_keys or ())
+    keys = (
+        "tomador",
+        "dni",
+        "nif",
+        "telefono",
+        "email",
+        "direccion",
+        "compania",
+        "ramo",
+        "poliza_numero",
+        "fecha_efecto",
+        "fecha_vencimiento",
+        "prima_neta",
+        "prima_total",
+    )
+    merged = {}
+    debug = {}
+    for key in keys:
+        ranked = []
+        for source_name, source_fields, source_weight in candidates:
+            val = str((source_fields or {}).get(key) or "").strip()
+            if not val:
+                continue
+            score = float(source_weight)
+            valid = is_valid_ocr_field(key, val)
+            if valid:
+                score += 2.0
+            else:
+                score -= 1.25
+            if key in required_keys:
+                score += 0.8
+            if key in ("tomador", "direccion") and len(val) >= 8:
+                score += 0.2
+            if key == "ramo":
+                ramo_up = normalize_lookup_text(val)
+                if ramo_up in ("HOGAR", "AUTO", "RESPONSABILIDAD CIVIL", "IMPAGO ALQUILER", "ALQUILER", "COMERCIO"):
+                    score += 0.6
+            if key == "compania":
+                if normalize_company_key(val):
+                    score += 0.4
+            ranked.append((score, valid, source_name, val))
+        if not ranked:
+            continue
+        ranked.sort(key=lambda item: (item[0], item[1], len(item[3])), reverse=True)
+        best = ranked[0]
+        merged[key] = best[3]
+        debug[key] = {
+            "source": best[2],
+            "score": round(best[0], 3),
+            "valid": bool(best[1]),
+        }
+    merged = normalize_extracted_fields(merged)
+    return merged, debug
 
 def compute_fin_quality(fields):
     required = (
@@ -3016,6 +3162,17 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
         # Remove long cadastral/alphanumeric refs appended to the street line.
         fields["direccion"] = re.sub(r"\b[A-Z0-9]{12,}\b", "", fields["direccion"]).strip()
         fields["direccion"] = re.sub(r"\s{2,}", " ", fields["direccion"]).strip(" ,;:-")
+        dir_upper = normalize_lookup_text(fields["direccion"])
+        if any(
+            token in dir_upper
+            for token in (
+                "DOMICILIO SOCIAL",
+                "CARRETERA DE POZUELO",
+                "MAJADAHONDA MADRID",
+                "DATOS DE TU MEDIADOR",
+            )
+        ):
+            fields["direccion"] = ""
         postal_match = re.search(r"\b\d{5}\s+[A-ZÁÉÍÓÚÑ\s]+\b", cleaned)
         if postal_match:
             postal_chunk = postal_match.group(0).strip()
@@ -3145,6 +3302,17 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
         fields["direccion"] = line_pick(["Direccion", "Domicilio"])
     if fields["direccion"]:
         fields["direccion"] = re.sub(r"\s{2,}.*$", "", fields["direccion"]).strip()
+        dir_upper2 = normalize_lookup_text(fields["direccion"])
+        if any(
+            token in dir_upper2
+            for token in (
+                "DOMICILIO SOCIAL",
+                "CARRETERA DE POZUELO",
+                "MAJADAHONDA MADRID",
+                "DATOS DE TU MEDIADOR",
+            )
+        ):
+            fields["direccion"] = ""
     if not fields["telefono"]:
         fields["telefono"] = line_pick(["Telefono", "Teléfono", "Movil", "Móvil", "Tfno", "Tlf"])
     if fields["telefono"]:
