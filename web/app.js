@@ -3057,9 +3057,14 @@ const loadClienteDocsByService = (clienteId, service, container) => {
   });
   api(`/api/gestoria_docs?${query.toString()}`).then(async (data) => {
     let rows = data.rows || [];
-    if (!rows.length && normalizeSimple(service) === "seguros") {
+    if (normalizeSimple(service) === "seguros") {
+      rows = rows.map((row) => ({
+        ...row,
+        seguro_id: row.seguro_id || row.referencia_id || "",
+        cliente_id: row.cliente_id || clienteId,
+      }));
       const seguros = await api(`/api/seguros_cliente?cliente_id=${encodeURIComponent(clienteId)}`).catch(() => ({ rows: [] }));
-      rows = (seguros.rows || [])
+      const fromSeguros = (seguros.rows || [])
         .filter((row) => row.poliza_url || row.poliza_key)
         .map((row) => ({
           seguro_id: row.id || "",
@@ -3073,13 +3078,15 @@ const loadClienteDocsByService = (clienteId, service, container) => {
           doc_key: row.poliza_key || "",
           doc_url: row.poliza_url || "",
         }));
-    }
-    if (normalizeSimple(service) === "seguros") {
-      rows = rows.map((row) => ({
-        ...row,
-        seguro_id: row.seguro_id || row.referencia_id || "",
-        cliente_id: row.cliente_id || clienteId,
-      }));
+      const seen = new Set(
+        rows.map((row) => String(row.seguro_id || row.referencia_id || row.doc_key || row.doc_url || "").trim())
+      );
+      fromSeguros.forEach((row) => {
+        const key = String(row.seguro_id || row.referencia_id || row.doc_key || row.doc_url || "").trim();
+        if (!key || seen.has(key)) return;
+        seen.add(key);
+        rows.push(row);
+      });
     }
     renderClienteDocsTable(rows, container, {
       enableOcr: normalizeSimple(service) === "seguros",
