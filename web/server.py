@@ -3531,7 +3531,8 @@ def build_cliente_ficha_payload(conn, cliente_id, services_filter=None):
             """
             SELECT id, cliente_id, empresa_id, compania, ramo, poliza_numero, fecha_efecto, fecha_vencimiento,
                    estado, prima_neta, prima_total, tomador, estado_renovacion, renovacion_fecha,
-                   nueva_poliza_ref, colaborador, produccion, mes_creacion, poliza_key, poliza_url
+                   nueva_poliza_ref, colaborador, produccion, mes_creacion,
+                   poliza_key, poliza_url, fecha_baja, motivo_baja
             FROM seguros
             WHERE cliente_id = ?
             ORDER BY COALESCE(fecha_efecto, created_at) DESC
@@ -4190,6 +4191,10 @@ def ensure_tables(db_path):
             conn.execute("ALTER TABLE seguros ADD COLUMN poliza_url TEXT")
         if "cliente_id" not in seguros_cols:
             conn.execute("ALTER TABLE seguros ADD COLUMN cliente_id TEXT")
+        if "fecha_baja" not in seguros_cols:
+            conn.execute("ALTER TABLE seguros ADD COLUMN fecha_baja TEXT")
+        if "motivo_baja" not in seguros_cols:
+            conn.execute("ALTER TABLE seguros ADD COLUMN motivo_baja TEXT")
     except sqlite3.Error:
         pass
     conn.execute(
@@ -6419,6 +6424,8 @@ class Handler(BaseHTTPRequestHandler):
                 "ramo",
                 "fecha_efecto",
                 "fecha_vencimiento",
+                "fecha_baja",
+                "motivo_baja",
                 "estado_renovacion",
                 "renovacion_fecha",
                 "nueva_poliza_ref",
@@ -8471,7 +8478,8 @@ class Handler(BaseHTTPRequestHandler):
                   id, cliente_id, empresa_id, compania, ramo, poliza_numero,
                   fecha_efecto, fecha_vencimiento, estado, prima_neta, prima_total,
                   tomador, estado_renovacion, renovacion_fecha, nueva_poliza_ref,
-                  colaborador, produccion, mes_creacion, poliza_key, poliza_url
+                  colaborador, produccion, mes_creacion, poliza_key, poliza_url,
+                  fecha_baja, motivo_baja
                 FROM seguros
                 WHERE {' AND '.join(where)}
                 ORDER BY COALESCE(fecha_efecto, created_at) DESC
@@ -8485,7 +8493,8 @@ class Handler(BaseHTTPRequestHandler):
                       id, cliente_id, empresa_id, compania, ramo, poliza_numero,
                       fecha_efecto, fecha_vencimiento, estado, prima_neta, prima_total,
                       tomador, estado_renovacion, renovacion_fecha, nueva_poliza_ref,
-                      colaborador, produccion, mes_creacion, poliza_key, poliza_url
+                      colaborador, produccion, mes_creacion, poliza_key, poliza_url,
+                      fecha_baja, motivo_baja
                     FROM seguros
                     WHERE UPPER(TRIM(tomador)) = UPPER(TRIM(?))
                       AND (? = '' OR empresa_id = ?)
@@ -8503,7 +8512,8 @@ class Handler(BaseHTTPRequestHandler):
                               id, cliente_id, empresa_id, compania, ramo, poliza_numero,
                               fecha_efecto, fecha_vencimiento, estado, prima_neta, prima_total,
                               tomador, estado_renovacion, renovacion_fecha, nueva_poliza_ref,
-                              colaborador, produccion, mes_creacion, poliza_key, poliza_url
+                              colaborador, produccion, mes_creacion, poliza_key, poliza_url,
+                              fecha_baja, motivo_baja
                             FROM seguros
                             WHERE tomador IS NOT NULL AND TRIM(tomador) <> ''
                               AND (? = '' OR empresa_id = ?)
@@ -8549,7 +8559,8 @@ class Handler(BaseHTTPRequestHandler):
                               id, cliente_id, empresa_id, compania, ramo, poliza_numero,
                               fecha_efecto, fecha_vencimiento, estado, prima_neta, prima_total,
                               tomador, estado_renovacion, renovacion_fecha, nueva_poliza_ref,
-                              colaborador, produccion, mes_creacion, poliza_key, poliza_url
+                              colaborador, produccion, mes_creacion, poliza_key, poliza_url,
+                              fecha_baja, motivo_baja
                             FROM seguros
                             WHERE cliente_id = ?
                               AND (? = '' OR empresa_id = ?)
@@ -8580,6 +8591,8 @@ class Handler(BaseHTTPRequestHandler):
                             "mes_creacion": r["mes_creacion"],
                             "poliza_key": r["poliza_key"],
                             "poliza_url": r["poliza_url"],
+                            "fecha_baja": r["fecha_baja"],
+                            "motivo_baja": r["motivo_baja"],
                         }
                         for r in tomador_rows
                     ]

@@ -13557,6 +13557,8 @@ const openClienteSeguroDetail = (row, cliente = {}) => {
       ["Estado renovacion", row.estado_renovacion || "-"],
       ["Fecha renovacion", row.renovacion_fecha || "-"],
       ["Nueva poliza", row.nueva_poliza_ref || "-"],
+      ["Fecha anulación", row.fecha_baja || "-"],
+      ["Motivo anulación", row.motivo_baja || "-"],
     ];
     details.forEach(([label, value]) => {
       const line = document.createElement("div");
@@ -13599,6 +13601,27 @@ const openClienteSeguroDetail = (row, cliente = {}) => {
     refInput.placeholder = "Nueva póliza (opcional)";
     form.appendChild(refInput);
 
+    const anulaDateInput = document.createElement("input");
+    anulaDateInput.type = "date";
+    anulaDateInput.value = new Date().toISOString().slice(0, 10);
+    anulaDateInput.className = "hidden";
+    form.appendChild(anulaDateInput);
+
+    const anulaReasonSelect = document.createElement("select");
+    anulaReasonSelect.className = "hidden";
+    anulaReasonSelect.innerHTML = `
+      <option value="precio">Motivo: precio</option>
+      <option value="siniestralidad">Motivo: siniestralidad</option>
+      <option value="otros">Motivo: otros</option>
+    `;
+    form.appendChild(anulaReasonSelect);
+
+    const anulaOtherInput = document.createElement("input");
+    anulaOtherInput.type = "text";
+    anulaOtherInput.placeholder = "Detalle motivo (otros)";
+    anulaOtherInput.className = "hidden";
+    form.appendChild(anulaOtherInput);
+
     const saveBtn = document.createElement("button");
     saveBtn.type = "button";
     saveBtn.className = "secondary";
@@ -13612,6 +13635,12 @@ const openClienteSeguroDetail = (row, cliente = {}) => {
       const mode = actionSelect.value;
       companiaInput.classList.toggle("hidden", mode !== "cambiar_compania");
       refInput.classList.toggle("hidden", mode === "anular");
+      anulaDateInput.classList.toggle("hidden", mode !== "anular");
+      anulaReasonSelect.classList.toggle("hidden", mode !== "anular");
+      anulaOtherInput.classList.toggle(
+        "hidden",
+        !(mode === "anular" && anulaReasonSelect.value === "otros")
+      );
       if (mode === "renovar") {
         refInput.placeholder = "Nueva póliza (opcional)";
       } else if (mode === "cambiar_compania") {
@@ -13619,12 +13648,13 @@ const openClienteSeguroDetail = (row, cliente = {}) => {
       }
     };
     actionSelect.addEventListener("change", refreshActionFields);
+    anulaReasonSelect.addEventListener("change", refreshActionFields);
     refreshActionFields();
 
     saveBtn.addEventListener("click", async () => {
       status.textContent = "";
       const mode = actionSelect.value;
-      const payload = { id: row.id };
+      const payload = { id: row.id, empresa_nombre: FINCAS_COMPANY };
       const today = new Date().toISOString().slice(0, 10);
       if (mode === "renovar") {
         payload.estado = "En vigor";
@@ -13642,9 +13672,26 @@ const openClienteSeguroDetail = (row, cliente = {}) => {
         payload.renovacion_fecha = today;
         if (refInput.value.trim()) payload.nueva_poliza_ref = refInput.value.trim();
       } else if (mode === "anular") {
+        if (!anulaDateInput.value) {
+          status.textContent = "Indica la fecha de anulación.";
+          return;
+        }
+        const motivo = anulaReasonSelect.value;
+        if (!motivo) {
+          status.textContent = "Selecciona un motivo.";
+          return;
+        }
+        if (motivo === "otros" && !anulaOtherInput.value.trim()) {
+          status.textContent = "Detalla el motivo en 'otros'.";
+          return;
+        }
         payload.estado = "Anulada";
-        payload.estado_renovacion = "Anulada";
-        payload.renovacion_fecha = today;
+        payload.fecha_baja = anulaDateInput.value;
+        payload.motivo_baja =
+          motivo === "otros" ? `Otros: ${anulaOtherInput.value.trim()}` : motivo;
+        payload.estado_renovacion =
+          motivo === "otros" ? "Anulada (otros)" : `Anulada (${motivo})`;
+        payload.renovacion_fecha = anulaDateInput.value || today;
       }
       status.textContent = "Guardando...";
       try {
