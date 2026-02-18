@@ -267,6 +267,11 @@ def normalize_company_name(value):
     text = re.sub(r"\s+", " ", text)
     return text
 
+
+def uploaded_policy_filter(alias=""):
+    prefix = f"{alias}." if alias else ""
+    return f"(COALESCE({prefix}poliza_key, '') <> '' OR COALESCE({prefix}poliza_url, '') <> '')"
+
 def normalize_poliza_key(value):
     if not value:
         return ""
@@ -9007,6 +9012,8 @@ class Handler(BaseHTTPRequestHandler):
             tomador = (params.get("tomador", [""])[0] or "").strip()
             autolink = (params.get("autolink", ["0"])[0] or "").strip() in ("1", "true", "yes")
             now = datetime.now(timezone.utc).isoformat()
+            uploaded_only = (params.get("uploaded_only", ["1"])[0] or "1").strip() in ("1", "true", "yes")
+            uploaded_filter_sql = uploaded_policy_filter()
             if not cliente_id:
                 json_response(self, {"error": "cliente_id requerido"}, status=400)
                 return
@@ -9015,6 +9022,8 @@ class Handler(BaseHTTPRequestHandler):
             if empresa_id:
                 where.append("empresa_id = ?")
                 values.append(empresa_id)
+            if uploaded_only:
+                where.append(uploaded_policy_filter())
             rows = conn.execute(
                 f"""
                 SELECT
@@ -9031,7 +9040,7 @@ class Handler(BaseHTTPRequestHandler):
             ).fetchall()
             if not rows and tomador:
                 tomador_rows = conn.execute(
-                    """
+                    f"""
                     SELECT
                       id, cliente_id, empresa_id, compania, ramo, poliza_numero,
                       fecha_efecto, fecha_vencimiento, estado, prima_neta, prima_total,
@@ -9041,16 +9050,17 @@ class Handler(BaseHTTPRequestHandler):
                     FROM seguros
                     WHERE UPPER(TRIM(tomador)) = UPPER(TRIM(?))
                       AND (? = '' OR empresa_id = ?)
+                      AND ({uploaded_filter_sql} OR ? = 0)
                     ORDER BY COALESCE(fecha_efecto, created_at) DESC
                     """,
-                    (tomador, empresa_id, empresa_id),
+                    (tomador, empresa_id, empresa_id, 1 if uploaded_only else 0),
                 ).fetchall()
                 if not tomador_rows:
                     # Fallback robusto: coincidencia por tokens normalizados de nombre (orden flexible).
                     wanted_tokens = [t for t in normalize_lookup_text(tomador).split(" ") if len(t) >= 3]
                     if wanted_tokens:
                         candidates = conn.execute(
-                            """
+                            f"""
                             SELECT
                               id, cliente_id, empresa_id, compania, ramo, poliza_numero,
                               fecha_efecto, fecha_vencimiento, estado, prima_neta, prima_total,
@@ -9060,9 +9070,10 @@ class Handler(BaseHTTPRequestHandler):
                             FROM seguros
                             WHERE tomador IS NOT NULL AND TRIM(tomador) <> ''
                               AND (? = '' OR empresa_id = ?)
+                              AND ({uploaded_filter_sql} OR ? = 0)
                             ORDER BY COALESCE(fecha_efecto, created_at) DESC
                             """,
-                            (empresa_id, empresa_id),
+                            (empresa_id, empresa_id, 1 if uploaded_only else 0),
                         ).fetchall()
                         matched = []
                         wanted_set = set(wanted_tokens)
@@ -9097,7 +9108,7 @@ class Handler(BaseHTTPRequestHandler):
                         if empresa_id:
                             ensure_cliente_servicio_link(conn, cliente_id, empresa_id, "seguros", now)
                         rows = conn.execute(
-                            """
+                            f"""
                             SELECT
                               id, cliente_id, empresa_id, compania, ramo, poliza_numero,
                               fecha_efecto, fecha_vencimiento, estado, prima_neta, prima_total,
@@ -9107,9 +9118,10 @@ class Handler(BaseHTTPRequestHandler):
                             FROM seguros
                             WHERE cliente_id = ?
                               AND (? = '' OR empresa_id = ?)
+                              AND ({uploaded_filter_sql} OR ? = 0)
                             ORDER BY COALESCE(fecha_efecto, created_at) DESC
                             """,
-                            (cliente_id, empresa_id, empresa_id),
+                            (cliente_id, empresa_id, empresa_id, 1 if uploaded_only else 0),
                         ).fetchall()
                 if not rows:
                     rows = [
@@ -9149,35 +9161,39 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/seguros_insights":
             empresa_id = params.get("empresa_id", [""])[0]
+            uploaded_only = (params.get("uploaded_only", ["1"])[0] or "1").strip() in ("1", "true", "yes")
             if not empresa_id:
                 json_response(self, {"error": "empresa_id requerido"}, status=400)
                 return
             estado_expr = "LOWER(TRIM(estado))"
             compania_expr = "LOWER(TRIM(compania))"
             exclude_sin_seguro = f"({compania_expr} IS NULL OR {compania_expr} = '' OR {compania_expr} != 'sin seguro')"
+            uploaded_clause = uploaded_policy_filter()
             por_ramo = conn.execute(
                 f"""
                 SELECT ramo, COUNT(*) AS total
                 FROM seguros
                 WHERE empresa_id = ?
+                  AND ({uploaded_clause} OR ? = 0)
                   AND {estado_expr} IN ('en vigor', 'en_vigor', 'vigente', 'poliza', 'póliza', 'poliza en vigor')
                   AND {exclude_sin_seguro}
                 GROUP BY ramo
                 ORDER BY total DESC
                 """,
-                (empresa_id,),
+                (empresa_id, 1 if uploaded_only else 0),
             ).fetchall()
             por_compania = conn.execute(
                 f"""
                 SELECT compania, COUNT(*) AS total
                 FROM seguros
                 WHERE empresa_id = ?
+                  AND ({uploaded_clause} OR ? = 0)
                   AND {estado_expr} IN ('en vigor', 'en_vigor', 'vigente', 'poliza', 'póliza', 'poliza en vigor')
                   AND {exclude_sin_seguro}
                 GROUP BY compania
                 ORDER BY total DESC
                 """,
-                (empresa_id,),
+                (empresa_id, 1 if uploaded_only else 0),
             ).fetchall()
             ofertas_estado = conn.execute(
                 """
@@ -10205,6 +10221,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/fincas_stats":
             empresa_id = params.get("empresa_id", [""])[0]
             year = params.get("year", [""])[0]
+            uploaded_only = (params.get("uploaded_only", ["1"])[0] or "1").strip() in ("1", "true", "yes")
             if not empresa_id:
                 json_response(self, {"error": "empresa_id requerido"}, status=400)
                 return
@@ -10275,9 +10292,10 @@ class Handler(BaseHTTPRequestHandler):
                 SELECT COUNT(*) AS total
                 FROM seguros
                 WHERE empresa_id = ?
+                  AND (COALESCE(poliza_key, '') <> '' OR COALESCE(poliza_url, '') <> '' OR ? = 0)
                   AND LOWER(TRIM(estado)) IN ('en vigor', 'vigente', 'en_vigor')
                 """,
-                (empresa_id,),
+                (empresa_id, 1 if uploaded_only else 0),
             ).fetchone()
 
             json_response(
@@ -10297,6 +10315,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/fincas_seguros_dashboard":
             empresa_id = params.get("empresa_id", [""])[0]
             year = params.get("year", [""])[0]
+            uploaded_only = (params.get("uploaded_only", ["1"])[0] or "1").strip() in ("1", "true", "yes")
             if not empresa_id:
                 json_response(self, {"error": "empresa_id requerido"}, status=400)
                 return
@@ -10309,6 +10328,7 @@ class Handler(BaseHTTPRequestHandler):
             compania_expr = "LOWER(TRIM(compania))"
             year_expr = "STRFTIME('%Y', created_at)"
             exclude_sin_seguro = f"({compania_expr} IS NULL OR {compania_expr} = '' OR {compania_expr} != 'sin seguro')"
+            uploaded_clause = uploaded_policy_filter()
 
             current = conn.execute(
                 f"""
@@ -10318,10 +10338,11 @@ class Handler(BaseHTTPRequestHandler):
                   SUM(CASE WHEN {estado_expr} IN ('en vigor', 'en_vigor', 'vigente', 'poliza', 'póliza', 'poliza en vigor') THEN 1 ELSE 0 END) AS en_vigor
                 FROM seguros
                 WHERE empresa_id = ?
+                  AND ({uploaded_clause} OR ? = 0)
                   AND {year_expr} = ?
                   AND {exclude_sin_seguro}
                 """,
-                (empresa_id, year),
+                (empresa_id, 1 if uploaded_only else 0, year),
             ).fetchone()
 
             totals = conn.execute(
@@ -10332,9 +10353,10 @@ class Handler(BaseHTTPRequestHandler):
                   SUM(CASE WHEN {estado_expr} IN ('en vigor', 'en_vigor', 'vigente', 'poliza', 'póliza', 'poliza en vigor') THEN 1 ELSE 0 END) AS en_vigor
                 FROM seguros
                 WHERE empresa_id = ?
+                  AND ({uploaded_clause} OR ? = 0)
                   AND {exclude_sin_seguro}
                 """,
-                (empresa_id,),
+                (empresa_id, 1 if uploaded_only else 0),
             ).fetchone()
 
             series = conn.execute(
@@ -10346,12 +10368,13 @@ class Handler(BaseHTTPRequestHandler):
                   SUM(CASE WHEN {estado_expr} IN ('en vigor', 'en_vigor', 'vigente', 'poliza', 'póliza', 'poliza en vigor') THEN 1 ELSE 0 END) AS en_vigor
                 FROM seguros
                 WHERE empresa_id = ?
+                  AND ({uploaded_clause} OR ? = 0)
                   AND {year_expr} IS NOT NULL
                   AND {exclude_sin_seguro}
                 GROUP BY {year_expr}
                 ORDER BY {year_expr}
                 """,
-                (empresa_id,),
+                (empresa_id, 1 if uploaded_only else 0),
             ).fetchall()
 
             presupuesto = current["presupuesto"] if current else 0
@@ -10381,13 +10404,14 @@ class Handler(BaseHTTPRequestHandler):
                   COUNT(*) AS total
                 FROM seguros
                 WHERE empresa_id = ?
+                  AND ({uploaded_clause} OR ? = 0)
                   AND {estado_expr} IN ('en vigor', 'en_vigor', 'vigente', 'poliza', 'póliza', 'poliza en vigor')
                   AND {exclude_sin_seguro}
                 GROUP BY COALESCE(NULLIF(TRIM(colaborador), ''), 'Sin responsable')
                 ORDER BY total DESC
                 LIMIT 10
                 """,
-                (empresa_id,),
+                (empresa_id, 1 if uploaded_only else 0),
             ).fetchall()
 
             json_response(
@@ -10444,6 +10468,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/seguros_alertas":
             empresa_id = params.get("empresa_id", [""])[0]
             days = params.get("days", ["30"])[0]
+            uploaded_only = (params.get("uploaded_only", ["1"])[0] or "1").strip() in ("1", "true", "yes")
             if not empresa_id:
                 json_response(self, {"error": "empresa_id requerido"}, status=400)
                 return
@@ -10463,58 +10488,65 @@ class Handler(BaseHTTPRequestHandler):
                   COALESCE(fecha_vencimiento, DATE(fecha_efecto, '+1 year')) AS fecha_vencimiento
                 FROM seguros
                 WHERE empresa_id = ?
+                  AND ({uploaded_policy_filter()} OR ? = 0)
                   AND COALESCE(fecha_vencimiento, DATE(fecha_efecto, '+1 year')) IS NOT NULL
                   AND DATE(COALESCE(fecha_vencimiento, DATE(fecha_efecto, '+1 year'))) BETWEEN DATE('now','localtime')
                       AND DATE('now','localtime', '+{days_int} days')
                 ORDER BY DATE(COALESCE(fecha_vencimiento, DATE(fecha_efecto, '+1 year'))) ASC
                 LIMIT 50
                 """,
-                (empresa_id,),
+                (empresa_id, 1 if uploaded_only else 0),
             ).fetchall()
             json_response(self, {"count": len(rows), "items": [dict(r) for r in rows]})
             return
 
         if path == "/api/seguros_kpis":
             empresa_id = params.get("empresa_id", [""])[0]
+            uploaded_only = (params.get("uploaded_only", ["1"])[0] or "1").strip() in ("1", "true", "yes")
             if not empresa_id:
                 json_response(self, {"error": "empresa_id requerido"}, status=400)
                 return
             estado_expr = "LOWER(TRIM(estado))"
+            uploaded_clause = uploaded_policy_filter()
             total = conn.execute(
                 f"""
                 SELECT COUNT(*) AS total
                 FROM seguros
                 WHERE empresa_id = ?
+                  AND ({uploaded_clause} OR ? = 0)
                   AND {estado_expr} IN ('en vigor', 'en_vigor', 'vigente', 'poliza', 'póliza')
                 """,
-                (empresa_id,),
+                (empresa_id, 1 if uploaded_only else 0),
             ).fetchone()
             en_vigor = conn.execute(
                 f"""
                 SELECT COUNT(*) AS total
                 FROM seguros
                 WHERE empresa_id = ?
+                  AND ({uploaded_clause} OR ? = 0)
                   AND {estado_expr} IN ('en vigor', 'en_vigor', 'vigente', 'poliza', 'póliza')
                 """,
-                (empresa_id,),
+                (empresa_id, 1 if uploaded_only else 0),
             ).fetchone()
             vencen_30 = conn.execute(
                 f"""
                 SELECT COUNT(*) AS total
                 FROM seguros
                 WHERE empresa_id = ?
+                  AND ({uploaded_clause} OR ? = 0)
                   AND COALESCE(fecha_vencimiento, DATE(fecha_efecto, '+1 year')) IS NOT NULL
                   AND {estado_expr} IN ('en vigor', 'en_vigor', 'vigente', 'poliza', 'póliza', 'poliza en vigor')
                   AND DATE(COALESCE(fecha_vencimiento, DATE(fecha_efecto, '+1 year'))) BETWEEN DATE('now','localtime')
                       AND DATE('now','localtime','+30 days')
                 """,
-                (empresa_id,),
+                (empresa_id, 1 if uploaded_only else 0),
             ).fetchone()
             faltantes = conn.execute(
                 f"""
                 SELECT COUNT(*) AS total
                 FROM seguros
                 WHERE empresa_id = ?
+                  AND ({uploaded_clause} OR ? = 0)
                   AND (
                     tomador IS NULL OR TRIM(tomador) = '' OR
                     poliza_numero IS NULL OR TRIM(poliza_numero) = '' OR
@@ -10523,7 +10555,7 @@ class Handler(BaseHTTPRequestHandler):
                   )
                   AND {estado_expr} IN ('en vigor', 'en_vigor', 'vigente', 'poliza', 'póliza', 'poliza en vigor')
                 """,
-                (empresa_id,),
+                (empresa_id, 1 if uploaded_only else 0),
             ).fetchone()
             quality_rows = conn.execute(
                 """
@@ -10540,9 +10572,10 @@ class Handler(BaseHTTPRequestHandler):
                 SELECT SUM(prima_total) AS total
                 FROM seguros
                 WHERE empresa_id = ?
+                  AND ({uploaded_clause} OR ? = 0)
                   AND {estado_expr} IN ('en vigor', 'en_vigor', 'vigente', 'poliza', 'póliza', 'poliza en vigor')
                 """,
-                (empresa_id,),
+                (empresa_id, 1 if uploaded_only else 0),
             ).fetchone()
             quality = {"alta": 0, "media": 0, "baja": 0, "desconocida": 0}
             for row in quality_rows:
