@@ -5079,6 +5079,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/fin_asesoramiento_ocr_auto",
             "/api/seguros",
             "/api/seguros_update",
+            "/api/seguros_delete",
             "/api/seguros_enrich",
             "/api/fin_asesoramientos",
             "/api/fin_asesoramientos_update",
@@ -5107,6 +5108,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/s3_multipart_abort",
             "/api/clientes",
             "/api/clientes_link",
+            "/api/clientes_link_delete",
             "/api/cliente_update",
             "/api/cliente_empresa_update",
             "/api/acciones",
@@ -5148,6 +5150,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/hipotecas/firmar",
             "/api/clientes",
             "/api/clientes_link",
+            "/api/clientes_link_delete",
             "/api/inmueble_update",
             "/api/inmueble_propietarios_update",
             "/api/captacion_update",
@@ -5242,6 +5245,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/hipotecas/firmar",
             "/api/clientes",
             "/api/clientes_link",
+            "/api/clientes_link_delete",
             "/api/cliente_update",
             "/api/cliente_empresa_update",
             "/api/cliente_gestoria_update",
@@ -5259,6 +5263,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/gestoria_trabajos_delete",
             "/api/gestoria_docs_update",
             "/api/gestoria_docs_delete",
+            "/api/seguros_delete",
             "/api/gestoria_contabilidad_update",
             "/api/gestoria_contabilidad_delete",
             "/api/auditoria",
@@ -7102,6 +7107,44 @@ class Handler(BaseHTTPRequestHandler):
                         """,
                         (now, f"%{record_id}%"),
                     )
+        elif parsed.path == "/api/seguros_delete":
+            record_id = payload.get("id")
+            if not record_id:
+                json_response(self, {"error": "id requerido"}, status=400)
+                return
+            row = conn.execute("SELECT * FROM seguros WHERE id = ?", (record_id,)).fetchone()
+            if not row:
+                json_response(self, {"error": "Registro no encontrado"}, status=404)
+                return
+            conn.execute("DELETE FROM seguros_checklist WHERE poliza_id = ?", (record_id,))
+            conn.execute(
+                """
+                DELETE FROM acciones
+                WHERE servicio = 'Seguros'
+                  AND notas LIKE ?
+                """,
+                (f"%{record_id}%",),
+            )
+            conn.execute(
+                """
+                DELETE FROM gestoria_docs
+                WHERE referencia_tipo = 'seguros'
+                  AND referencia_id = ?
+                """,
+                (record_id,),
+            )
+            conn.execute("DELETE FROM seguros WHERE id = ?", (record_id,))
+            json_response(
+                self,
+                {
+                    "ok": True,
+                    "id": record_id,
+                    "cliente_id": row["cliente_id"],
+                    "empresa_id": row["empresa_id"],
+                },
+            )
+            conn.commit()
+            return
         elif parsed.path == "/api/seguros_enrich":
             record_id = payload.get("id")
             if not record_id:
@@ -8107,6 +8150,31 @@ class Handler(BaseHTTPRequestHandler):
             if normalize_service_key(servicio) == "seguros":
                 sync = autolink_uploaded_seguros_for_cliente(conn, cliente_id, empresa_id, now)
             json_response(self, {"ok": True, "cliente_id": cliente_id, "empresa_id": empresa_id, "servicio": servicio, "sync": sync})
+            conn.commit()
+            return
+        elif parsed.path == "/api/clientes_link_delete":
+            rel_id = payload.get("id")
+            if not rel_id:
+                json_response(self, {"error": "id requerido"}, status=400)
+                return
+            row = conn.execute(
+                "SELECT * FROM clientes_empresas WHERE id = ?",
+                (rel_id,),
+            ).fetchone()
+            if not row:
+                json_response(self, {"error": "Vínculo no encontrado"}, status=404)
+                return
+            conn.execute("DELETE FROM clientes_empresas WHERE id = ?", (rel_id,))
+            json_response(
+                self,
+                {
+                    "ok": True,
+                    "id": rel_id,
+                    "cliente_id": row["cliente_id"],
+                    "empresa_id": row["empresa_id"],
+                    "servicio": row["servicio"],
+                },
+            )
             conn.commit()
             return
         elif parsed.path == "/api/cliente_update":

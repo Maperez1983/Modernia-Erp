@@ -2951,6 +2951,8 @@ const setClienteTab = (tab) => {
 const renderClienteDocsTable = (rows, container, options = {}) => {
   if (!container) return;
   const enableOcr = !!options.enableOcr;
+  const enableDelete = !!options.enableDelete;
+  const onDelete = typeof options.onDelete === "function" ? options.onDelete : null;
   if (!rows.length) {
     container.innerHTML = "<p class='muted'>Sin documentación registrada.</p>";
     return;
@@ -2959,6 +2961,9 @@ const renderClienteDocsTable = (rows, container, options = {}) => {
   const thead = document.createElement("thead");
   const trHead = document.createElement("tr");
   const columns = ["Documento", "Tipo", "Fecha", "Estado", "Notas", "PDF"];
+  if (enableDelete) {
+    columns.push("Acción");
+  }
   if (enableOcr) {
     columns.push("OCR");
   }
@@ -2998,6 +3003,21 @@ const renderClienteDocsTable = (rows, container, options = {}) => {
       pdfTd.textContent = "-";
     }
     tr.appendChild(pdfTd);
+    if (enableDelete) {
+      const delTd = document.createElement("td");
+      const delBtn = document.createElement("button");
+      delBtn.type = "button";
+      delBtn.className = "ghost";
+      delBtn.textContent = "Borrar";
+      const canDelete = Boolean(row.id);
+      delBtn.disabled = !canDelete;
+      delBtn.addEventListener("click", async () => {
+        if (!row.id || !onDelete) return;
+        await onDelete(row);
+      });
+      delTd.appendChild(delBtn);
+      tr.appendChild(delTd);
+    }
     if (enableOcr) {
       const ocrTd = document.createElement("td");
       const ocrBtn = document.createElement("button");
@@ -3063,6 +3083,22 @@ const loadClienteDocsByService = (clienteId, service, container) => {
     }
     renderClienteDocsTable(rows, container, {
       enableOcr: normalizeSimple(service) === "seguros",
+      enableDelete: true,
+      onDelete: async (row) => {
+        if (!row?.id) return;
+        if (!window.confirm("¿Borrar este documento?")) return;
+        const payload = { id: row.id, usuario: getCurrentUser() };
+        const data = await fetch("/api/gestoria_docs_delete", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }).then((res) => res.json());
+        if (data?.error) {
+          alert(data.error);
+          return;
+        }
+        loadClienteDocsByService(clienteId, service, container);
+      },
     });
   });
 };
@@ -12551,6 +12587,22 @@ const deleteGestoriaDoc = (id) => {
     });
 };
 
+const deleteClienteEmpresaLink = (id) => {
+  return fetch("/api/clientes_link_delete", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id }),
+  }).then((res) => res.json());
+};
+
+const deleteSeguro = (id) => {
+  return fetch("/api/seguros_delete", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id }),
+  }).then((res) => res.json());
+};
+
 const saveGestoriaContabilidadField = (id, field, value) => {
   fetch("/api/gestoria_contabilidad_update", {
     method: "POST",
@@ -13903,6 +13955,25 @@ const loadClienteSeguros = (cliente, empresaId) => {
           openClienteSeguroDetail(row, cliente);
         });
         actionTd.appendChild(openBtn);
+        const deleteBtn = document.createElement("button");
+        deleteBtn.type = "button";
+        deleteBtn.className = "ghost";
+        deleteBtn.textContent = "Eliminar";
+        deleteBtn.addEventListener("click", async (event) => {
+          event.stopPropagation();
+          if (!row.id) return;
+          if (!window.confirm("¿Eliminar esta póliza?")) return;
+          const resp = await deleteSeguro(row.id);
+          if (resp?.error) {
+            alert(resp.error);
+            return;
+          }
+          loadClienteSeguros(cliente, empresaId);
+          if (state.currentClienteId === String(cliente.id || "")) {
+            loadClienteDocsByService(String(cliente.id || ""), "seguros", clienteDocsSeguros);
+          }
+        });
+        actionTd.appendChild(deleteBtn);
         tr.appendChild(actionTd);
         tr.addEventListener("click", () => openClienteSeguroDetail(row, cliente));
         tbody.appendChild(tr);
@@ -14043,6 +14114,23 @@ const openClienteDetail = (id) => {
             openServiceCrm(servicio);
           });
           actionTd.appendChild(actionBtn);
+          const deleteBtn = document.createElement("button");
+          deleteBtn.type = "button";
+          deleteBtn.className = "ghost";
+          deleteBtn.textContent = "Quitar";
+          deleteBtn.addEventListener("click", async () => {
+            if (!row.rel_id) return;
+            if (!window.confirm("¿Quitar este servicio del cliente?")) return;
+            const resp = await deleteClienteEmpresaLink(row.rel_id);
+            if (resp?.error) {
+              alert(resp.error);
+              return;
+            }
+            if (state.currentClienteId) {
+              openClienteDetail(state.currentClienteId);
+            }
+          });
+          actionTd.appendChild(deleteBtn);
           tr.appendChild(actionTd);
 
           tbody.appendChild(tr);
