@@ -1471,6 +1471,21 @@ body.crm-fin #companySummary {
   color: var(--muted);
 }
 
+.cliente-seguro-actions {
+  margin-top: 12px;
+}
+
+.cliente-seguro-actions h4 {
+  margin: 0 0 8px;
+}
+
+.cliente-seguro-actions-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 8px;
+  align-items: center;
+}
+
 .cliente-mini-kpis {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));

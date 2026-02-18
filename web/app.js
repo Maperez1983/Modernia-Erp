@@ -10851,7 +10851,7 @@ const resolveOcrClienteMatch = async (type, fields) => {
   });
 };
 
-const linkClienteSegurosService = async (clienteId, ctx) => {
+const linkClienteSegurosService = async (clienteId, ctx, tomador = "") => {
   const fincas = state.empresas.find((empresa) => empresa.nombre === FINCAS_COMPANY);
   if (!fincas) {
     if (ctx?.statusEl) ctx.statusEl.textContent = "Empresa seguros no encontrada.";
@@ -10879,8 +10879,20 @@ const linkClienteSegurosService = async (clienteId, ctx) => {
       if (ctx?.statusEl) ctx.statusEl.textContent = data.error;
       return;
     }
+    const nombreTomador = String(tomador || "").trim();
+    if (nombreTomador) {
+      const params = new URLSearchParams({
+        cliente_id: clienteId,
+        tomador: nombreTomador,
+        autolink: "1",
+      });
+      if (fincas?.id) params.set("empresa_id", fincas.id);
+      try {
+        await api(`/api/seguros_cliente?${params.toString()}`);
+      } catch {}
+    }
     setOcrClienteUi(ctx, {
-      status: "Servicio Seguros asignado.",
+      status: "Servicio Seguros asignado y pólizas revisadas.",
       showCreate: false,
       showAdd: false,
       showOpen: true,
@@ -13508,6 +13520,7 @@ const openClienteSeguroDetail = (row, cliente = {}) => {
           <button type="button" class="ghost" data-close-cliente-seguro>Cerrar</button>
         </div>
         <div class="cliente-seguro-meta"></div>
+        <div class="cliente-seguro-actions"></div>
         <div class="cliente-seguro-highlights"></div>
       </div>
     `;
@@ -13524,6 +13537,7 @@ const openClienteSeguroDetail = (row, cliente = {}) => {
   }
   const title = modal.querySelector(".cliente-seguro-modal-title");
   const meta = modal.querySelector(".cliente-seguro-meta");
+  const actions = modal.querySelector(".cliente-seguro-actions");
   const highlights = modal.querySelector(".cliente-seguro-highlights");
   const computed = computeSeguroDisplayState(row);
   const vencimiento = computed.vencimiento || "-";
@@ -13555,6 +13569,106 @@ const openClienteSeguroDetail = (row, cliente = {}) => {
       line.appendChild(span);
       meta.appendChild(line);
     });
+  }
+  if (actions) {
+    actions.innerHTML = "";
+    const heading = document.createElement("h4");
+    heading.textContent = "Acciones manuales";
+    actions.appendChild(heading);
+
+    const form = document.createElement("div");
+    form.className = "cliente-seguro-actions-form";
+
+    const actionSelect = document.createElement("select");
+    actionSelect.innerHTML = `
+      <option value="renovar">Renovar</option>
+      <option value="cambiar_compania">Cambiar compañía</option>
+      <option value="anular">Anular</option>
+    `;
+    form.appendChild(actionSelect);
+
+    const companiaInput = document.createElement("input");
+    companiaInput.type = "text";
+    companiaInput.placeholder = "Nueva compañía";
+    companiaInput.value = row.compania || "";
+    companiaInput.className = "hidden";
+    form.appendChild(companiaInput);
+
+    const refInput = document.createElement("input");
+    refInput.type = "text";
+    refInput.placeholder = "Nueva póliza (opcional)";
+    form.appendChild(refInput);
+
+    const saveBtn = document.createElement("button");
+    saveBtn.type = "button";
+    saveBtn.className = "secondary";
+    saveBtn.textContent = "Aplicar";
+    form.appendChild(saveBtn);
+
+    const status = document.createElement("div");
+    status.className = "muted";
+
+    const refreshActionFields = () => {
+      const mode = actionSelect.value;
+      companiaInput.classList.toggle("hidden", mode !== "cambiar_compania");
+      refInput.classList.toggle("hidden", mode === "anular");
+      if (mode === "renovar") {
+        refInput.placeholder = "Nueva póliza (opcional)";
+      } else if (mode === "cambiar_compania") {
+        refInput.placeholder = "Nº póliza nuevo (opcional)";
+      }
+    };
+    actionSelect.addEventListener("change", refreshActionFields);
+    refreshActionFields();
+
+    saveBtn.addEventListener("click", async () => {
+      status.textContent = "";
+      const mode = actionSelect.value;
+      const payload = { id: row.id };
+      const today = new Date().toISOString().slice(0, 10);
+      if (mode === "renovar") {
+        payload.estado = "En vigor";
+        payload.estado_renovacion = "Renovada manual";
+        payload.renovacion_fecha = today;
+        if (refInput.value.trim()) payload.nueva_poliza_ref = refInput.value.trim();
+      } else if (mode === "cambiar_compania") {
+        const newCompany = companiaInput.value.trim();
+        if (!newCompany) {
+          status.textContent = "Indica la nueva compañía.";
+          return;
+        }
+        payload.compania = newCompany;
+        payload.estado_renovacion = "Cambio compañía";
+        payload.renovacion_fecha = today;
+        if (refInput.value.trim()) payload.nueva_poliza_ref = refInput.value.trim();
+      } else if (mode === "anular") {
+        payload.estado = "Anulada";
+        payload.estado_renovacion = "Anulada";
+        payload.renovacion_fecha = today;
+      }
+      status.textContent = "Guardando...";
+      try {
+        const resp = await fetch("/api/seguros_update", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }).then((r) => r.json());
+        if (resp?.error) {
+          status.textContent = resp.error;
+          return;
+        }
+        status.textContent = "Acción aplicada.";
+        if (state.currentClienteId) {
+          const fincasEmpresa = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
+          loadClienteSeguros(cliente, fincasEmpresa ? fincasEmpresa.id : "");
+        }
+      } catch {
+        status.textContent = "Error al aplicar la acción.";
+      }
+    });
+
+    actions.appendChild(form);
+    actions.appendChild(status);
   }
   if (highlights) {
     highlights.innerHTML = "";
@@ -15246,7 +15360,11 @@ if (segurosOcrClienteCreate) {
 if (segurosOcrClienteAddService) {
   segurosOcrClienteAddService.addEventListener("click", () => {
     const ctx = getOcrClienteContext("alta");
-    linkClienteSegurosService(state.segurosOcrClienteId, ctx);
+    linkClienteSegurosService(
+      state.segurosOcrClienteId,
+      ctx,
+      seguroOcrTomador ? seguroOcrTomador.value : ""
+    );
   });
 }
 
@@ -15267,7 +15385,11 @@ if (segurosBdtOcrClienteCreate) {
 if (segurosBdtOcrClienteAddService) {
   segurosBdtOcrClienteAddService.addEventListener("click", () => {
     const ctx = getOcrClienteContext("bdt");
-    linkClienteSegurosService(state.segurosBdtOcrClienteId, ctx);
+    linkClienteSegurosService(
+      state.segurosBdtOcrClienteId,
+      ctx,
+      segurosBdtOcrTomador ? segurosBdtOcrTomador.value : ""
+    );
   });
 }
 

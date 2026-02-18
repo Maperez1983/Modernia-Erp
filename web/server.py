@@ -2729,9 +2729,33 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
         r"Prima\s*total\s*anual\s*[:€]?\s*([0-9\.,]+)",
         r"Total\s+recibo\s*[:€]?\s*([0-9\.,]+)",
     ])
+    # MAPFRE/others may render currency as "¤" and place amounts in the next line
+    # under "PRIMA DEL SEGURO" table headers.
+    amount_token = r"[0-9]{1,3}(?:\.[0-9]{3})*,[0-9]{2}"
+    prima_table = re.search(r"PRIMA\s+DEL\s+SEGURO", text, re.IGNORECASE)
+    if prima_table:
+        window = text[prima_table.start() : prima_table.start() + 1800]
+        amounts = re.findall(amount_token, window)
+        if amounts:
+            def _money_value(raw):
+                try:
+                    return float(raw.replace(".", "").replace(",", "."))
+                except Exception:
+                    return 0.0
+            if not fields.get("prima_neta"):
+                fields["prima_neta"] = amounts[0]
+            if not fields.get("prima_total"):
+                fields["prima_total"] = max(amounts, key=_money_value)
+    if (not fields.get("prima_total")):
+        primer_recibo = re.search(
+            rf"Importe\s+a\s+pagar\s+del\s+primer\s+recibo\s*({amount_token})",
+            text,
+            re.IGNORECASE,
+        )
+        if primer_recibo:
+            fields["prima_total"] = primer_recibo.group(1)
     # Table rows like "Del dd-mm-yyyy al dd-mm-yyyy ... Prima ... Total"
     # are usually the most reliable source for net/total amounts.
-    amount_token = r"[0-9]{1,3}(?:\.[0-9]{3})*,[0-9]{2}"
     for line in text.splitlines():
         if not re.search(r"\bDel\s+\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\s+al\s+\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b", line, re.IGNORECASE):
             continue
@@ -6391,6 +6415,8 @@ class Handler(BaseHTTPRequestHandler):
             for key in (
                 "cliente_id",
                 "estado",
+                "compania",
+                "ramo",
                 "fecha_efecto",
                 "fecha_vencimiento",
                 "estado_renovacion",
@@ -8455,7 +8481,11 @@ class Handler(BaseHTTPRequestHandler):
             if not rows and tomador:
                 tomador_rows = conn.execute(
                     """
-                    SELECT id, cliente_id, compania, poliza_numero, fecha_efecto, fecha_vencimiento, estado, prima_total, tomador, empresa_id
+                    SELECT
+                      id, cliente_id, empresa_id, compania, ramo, poliza_numero,
+                      fecha_efecto, fecha_vencimiento, estado, prima_neta, prima_total,
+                      tomador, estado_renovacion, renovacion_fecha, nueva_poliza_ref,
+                      colaborador, produccion, mes_creacion, poliza_key, poliza_url
                     FROM seguros
                     WHERE UPPER(TRIM(tomador)) = UPPER(TRIM(?))
                       AND (? = '' OR empresa_id = ?)
@@ -8469,7 +8499,11 @@ class Handler(BaseHTTPRequestHandler):
                     if wanted_tokens:
                         candidates = conn.execute(
                             """
-                            SELECT id, cliente_id, compania, poliza_numero, fecha_efecto, fecha_vencimiento, estado, prima_total, tomador, empresa_id
+                            SELECT
+                              id, cliente_id, empresa_id, compania, ramo, poliza_numero,
+                              fecha_efecto, fecha_vencimiento, estado, prima_neta, prima_total,
+                              tomador, estado_renovacion, renovacion_fecha, nueva_poliza_ref,
+                              colaborador, produccion, mes_creacion, poliza_key, poliza_url
                             FROM seguros
                             WHERE tomador IS NOT NULL AND TRIM(tomador) <> ''
                               AND (? = '' OR empresa_id = ?)
@@ -8549,7 +8583,12 @@ class Handler(BaseHTTPRequestHandler):
                         }
                         for r in tomador_rows
                     ]
-            json_response(self, {"rows": [dict(r) for r in rows]})
+            rows_dict = [dict(r) for r in rows]
+            for row in rows_dict:
+                if row.get("cliente_id"):
+                    ensure_cliente_servicio_link(conn, row.get("cliente_id"), row.get("empresa_id"), "seguros", now)
+                    ensure_seguro_doc_link(conn, row, now)
+            json_response(self, {"rows": rows_dict})
             return
 
         if path == "/api/seguros_insights":
