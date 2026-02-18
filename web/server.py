@@ -3906,6 +3906,70 @@ def ensure_cliente_servicio_link(conn, cliente_id, empresa_id, servicio, now, es
     )
 
 
+def autolink_uploaded_seguros_for_cliente(conn, cliente_id, empresa_id, now):
+    if not cliente_id or not empresa_id:
+        return {"linked": 0, "docs": 0}
+    cliente = conn.execute(
+        "SELECT id, nombre FROM clientes WHERE id = ?",
+        (cliente_id,),
+    ).fetchone()
+    if not cliente:
+        return {"linked": 0, "docs": 0}
+    wanted_tokens = {t for t in normalize_lookup_text(cliente["nombre"] or "").split(" ") if len(t) >= 3}
+    if not wanted_tokens:
+        return {"linked": 0, "docs": 0}
+    rows = conn.execute(
+        f"""
+        SELECT *
+        FROM seguros
+        WHERE empresa_id = ?
+          AND ({uploaded_policy_filter()})
+          AND (
+            cliente_id IS NULL OR TRIM(cliente_id) = '' OR cliente_id = ?
+          )
+          AND tomador IS NOT NULL AND TRIM(tomador) <> ''
+        ORDER BY COALESCE(fecha_efecto, created_at) DESC
+        """,
+        (empresa_id, cliente_id),
+    ).fetchall()
+    to_link = []
+    for row in rows:
+        cand_tokens = {t for t in normalize_lookup_text(row["tomador"] or "").split(" ") if len(t) >= 3}
+        if not cand_tokens:
+            continue
+        if wanted_tokens.issubset(cand_tokens):
+            to_link.append(row["id"])
+            continue
+        overlap = len(wanted_tokens.intersection(cand_tokens))
+        if overlap >= 2 and (overlap / max(1, len(wanted_tokens))) >= 0.8:
+            to_link.append(row["id"])
+    linked = 0
+    if to_link:
+        conn.executemany(
+            "UPDATE seguros SET cliente_id = ?, updated_at = datetime(?) WHERE id = ?",
+            [(cliente_id, now, sid) for sid in to_link],
+        )
+        linked = len(to_link)
+    docs = 0
+    linked_rows = conn.execute(
+        f"""
+        SELECT *
+        FROM seguros
+        WHERE empresa_id = ?
+          AND cliente_id = ?
+          AND ({uploaded_policy_filter()})
+        """,
+        (empresa_id, cliente_id),
+    ).fetchall()
+    for row in linked_rows:
+        doc_id = ensure_seguro_doc_link(conn, row, now)
+        if doc_id:
+            docs += 1
+    if linked_rows:
+        ensure_cliente_servicio_link(conn, cliente_id, empresa_id, "seguros", now)
+    return {"linked": linked, "docs": docs}
+
+
 def ensure_seguro_doc_link(conn, seguro_row, now, calidad_ocr=None, campos_ocr=""):
     if not seguro_row:
         return None
@@ -8039,6 +8103,12 @@ class Handler(BaseHTTPRequestHandler):
                         now,
                     ),
                 )
+            sync = {"linked": 0, "docs": 0}
+            if normalize_service_key(servicio) == "seguros":
+                sync = autolink_uploaded_seguros_for_cliente(conn, cliente_id, empresa_id, now)
+            json_response(self, {"ok": True, "cliente_id": cliente_id, "empresa_id": empresa_id, "servicio": servicio, "sync": sync})
+            conn.commit()
+            return
         elif parsed.path == "/api/cliente_update":
             cliente_id = payload.get("id")
             if not cliente_id:
@@ -8069,6 +8139,24 @@ class Handler(BaseHTTPRequestHandler):
                 f"UPDATE clientes SET {set_clause}, updated_at = datetime(?) WHERE id = ?",
                 values,
             )
+            # Si el cliente ya tiene servicio seguros, reintentar autovinculación por nombre.
+            rels = conn.execute(
+                """
+                SELECT empresa_id
+                FROM clientes_empresas
+                WHERE cliente_id = ?
+                  AND LOWER(servicio) = 'seguros'
+                """,
+                (cliente_id,),
+            ).fetchall()
+            sync = {"linked": 0, "docs": 0}
+            for rel in rels:
+                partial = autolink_uploaded_seguros_for_cliente(conn, cliente_id, rel["empresa_id"], now)
+                sync["linked"] += partial.get("linked", 0)
+                sync["docs"] += partial.get("docs", 0)
+            json_response(self, {"ok": True, "id": cliente_id, "sync": sync})
+            conn.commit()
+            return
         elif parsed.path == "/api/cliente_empresa_update":
             rel_id = payload.get("id")
             if not rel_id:
@@ -8085,6 +8173,16 @@ class Handler(BaseHTTPRequestHandler):
                 f"UPDATE clientes_empresas SET {set_clause}, updated_at = datetime(?) WHERE id = ?",
                 values,
             )
+            rel = conn.execute(
+                "SELECT cliente_id, empresa_id, servicio FROM clientes_empresas WHERE id = ?",
+                (rel_id,),
+            ).fetchone()
+            sync = {"linked": 0, "docs": 0}
+            if rel and normalize_service_key(rel["servicio"]) == "seguros":
+                sync = autolink_uploaded_seguros_for_cliente(conn, rel["cliente_id"], rel["empresa_id"], now)
+            json_response(self, {"ok": True, "id": rel_id, "sync": sync})
+            conn.commit()
+            return
         elif parsed.path == "/api/cliente_gestoria_update":
             cliente_id = payload.get("cliente_id")
             if not cliente_id:
