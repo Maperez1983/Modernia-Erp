@@ -2560,6 +2560,7 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
     if fields["tomador"]:
         fields["tomador"] = normalize_person_name(fields["tomador"])
     fields["dni"] = pick([
+        r"(?:TOMADOR|ASEGURADO)[\s\S]{0,160}?NIF\s*[:\-]?\s*([A-Z0-9]{8,9})",
         r"DOC\.?\s*ID\.?\s*[:\-]?\s*([A-Z0-9\-]+)",
         r"Doc\.?\s*Identificaci[oó]n\s*[:\-]?\s*([A-Z0-9\-]+)",
         r"NIF/CIF\s*[:\-]?\s*([A-Z0-9\-]+)",
@@ -2580,11 +2581,47 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
         r"([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})",
     ])
     fields["direccion"] = pick([
+        r"TOMADOR[\s\S]{0,220}?NIF\s*:\s*[A-Z0-9]{8,9}\s*\n\s*([^\n]+)\s*\n\s*(\d{5}\s+[A-ZÁÉÍÓÚÑ\s]+)",
         r"Direcci[oó]n\s*[:\-]?\s*([^\n]+)",
         r"Direcci[oó]n\s+([A-Z0-9ÁÉÍÓÚÑ\s,./-]+?\s+\d{5}\s+[A-ZÁÉÍÓÚÑ\s]+)",
         r"Direcci[oó]n\s+([A-Z0-9ÁÉÍÓÚÑ\s,./-]+?)(?:\s+Uso\s+|\s+Beneficiario|\s+Cl[aá]usulas|\s+Datos|\n)",
         r"Domicilio\s*[:\-]?\s*([^\n]+)",
     ])
+    # REALE often provides address split into "Nombre de Vía" + "Código Postal/Población".
+    via_name = pick([r"Nombre\s+de\s+V[ií]a\s*:\s*([^\n]+)"])
+    via_cp = pick([r"C[oó]digo\s+Postal\s*:\s*(\d{5})"])
+    via_city = pick([r"Poblaci[oó]n\s*:\s*([^\n]+)"])
+    if via_city:
+        via_city = via_city.split("Titularidad")[0].strip()
+    via_compose = " ".join(part for part in [via_name, f"{via_cp} {via_city}".strip()] if part).strip()
+    if via_compose:
+        if not fields.get("direccion"):
+            fields["direccion"] = via_compose
+        else:
+            dnorm = normalize_lookup_text(fields.get("direccion"))
+            if "DE LA VIVIENDA ASEGURADA" in dnorm or "ANTONIO CHACON" in dnorm:
+                fields["direccion"] = via_compose
+    # Additional REALE-like extraction from TOMADOR block when address is split in lines.
+    tomador_block = re.search(
+        r"^\s*TOMADOR\s*$([\s\S]*?)^\s*ASEGURADO\s*$",
+        text,
+        re.IGNORECASE | re.MULTILINE,
+    )
+    if tomador_block:
+        block_lines = [ln.strip() for ln in tomador_block.group(1).splitlines() if ln.strip()]
+        street_line = ""
+        zip_city_line = ""
+        for ln in block_lines:
+            if (not street_line) and re.search(r"\b(CL|C/|AVD|AVDA|PZ|PLAZA|CALLE|PS|PASEO)\b", ln, re.IGNORECASE):
+                street_line = ln
+            if (not zip_city_line) and re.search(r"\b\d{5}\b", ln):
+                zip_city_line = ln
+        if street_line:
+            street_line = re.sub(r"\b[A-Z0-9]{12,}\b", "", street_line).strip(" ,;:-")
+            block_addr = " ".join(part for part in [street_line, zip_city_line] if part).strip()
+            dnorm = normalize_lookup_text(fields.get("direccion") or "")
+            if (not fields.get("direccion")) or "ANTONIO CHACON" in dnorm or "DE LA VIVIENDA ASEGURADA" in dnorm:
+                fields["direccion"] = block_addr
     fields["fecha_nacimiento"] = pick([
         r"Fecha de nacimiento\s*[:\-]?\s*([0-9]{1,2}[ /.-][0-9]{1,2}[ /.-][0-9]{2,4})",
         r"F\.?\s*nacimiento\s*[:\-]?\s*([0-9]{1,2}[ /.-][0-9]{1,2}[ /.-][0-9]{2,4})",
@@ -2772,9 +2809,18 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
         fields["tomador"] = clean_tomador_value(tomador)
     if fields["direccion"]:
         fields["direccion"] = re.sub(r"\s{2,}.*$", "", fields["direccion"]).strip()
+        # Remove long cadastral/alphanumeric refs appended to the street line.
+        fields["direccion"] = re.sub(r"\b[A-Z0-9]{12,}\b", "", fields["direccion"]).strip()
+        fields["direccion"] = re.sub(r"\s{2,}", " ", fields["direccion"]).strip(" ,;:-")
         postal_match = re.search(r"\b\d{5}\s+[A-ZÁÉÍÓÚÑ\s]+\b", cleaned)
-        if postal_match and postal_match.group(0) not in fields["direccion"]:
-            fields["direccion"] = f"{fields['direccion']} {postal_match.group(0)}".strip()
+        if postal_match:
+            postal_chunk = postal_match.group(0).strip()
+            postal_norm = normalize_lookup_text(postal_chunk)
+            dir_norm = normalize_lookup_text(fields["direccion"])
+            # Skip mediator/office address fragments that leak from header blocks.
+            if "ANTONIO CHACON" not in postal_norm and "DE ANDALUCIA" not in postal_norm:
+                if postal_norm not in dir_norm:
+                    fields["direccion"] = f"{fields['direccion']} {postal_chunk}".strip()
     if fields["telefono"]:
         fields["telefono"] = normalize_phone(fields["telefono"])
     if fields["email"]:
@@ -2866,6 +2912,13 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
         fields["tomador"] = clean_tomador_value(fields["tomador"])
     if not fields["dni"]:
         fields["dni"] = line_pick(["DNI", "NIF", "CIF", "Documento"])
+    if fields.get("dni"):
+        normalized_dni = normalize_nif_candidate(fields["dni"])
+        fields["dni"] = normalized_dni or ""
+    if not fields.get("dni"):
+        personal_ids = re.findall(r"\b(?:[0-9]{8}[A-Z]|[XYZ][0-9]{7}[A-Z])\b", text.upper())
+        if personal_ids:
+            fields["dni"] = personal_ids[0]
     if not fields["compania"]:
         fields["compania"] = line_pick(["Compañia", "Compania", "Aseguradora", "Entidad aseguradora"])
     if fields["compania"]:
@@ -2965,6 +3018,30 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
         fields["nif"] = fields["dni"]
     if fields.get("nif"):
         fields["nif"] = normalize_nif_candidate(fields["nif"]) or fields["nif"]
+
+    # Final ramo cleanup after all fallback assignments.
+    if fields.get("ramo"):
+        ramo = str(fields["ramo"]).splitlines()[0].strip()
+        if "€" in ramo or re.search(r"\d{2,}", ramo):
+            ramo = ""
+        ramo_upper = normalize_lookup_text(ramo)
+        if (
+            len(ramo) > 48
+            or "informacion general previa" in ramo_upper
+            or "distribuidor de seguros" in ramo_upper
+            or "ley de ordenacion" in ramo_upper
+            or "aseguradora" in ramo_upper
+        ):
+            ramo = ""
+        if "HOGAR" in ramo_upper:
+            ramo = "Hogar"
+        elif "AUTOMOVIL" in ramo_upper or "AUTOMOVILES" in ramo_upper or "AUTO" in ramo_upper:
+            ramo = "Auto"
+        elif "RESPONSABILIDAD CIVIL" in ramo_upper or ramo_upper == "RC":
+            ramo = "Responsabilidad civil"
+        fields["ramo"] = ramo
+    if (not fields.get("ramo")) and source_fields.get("ramo"):
+        fields["ramo"] = source_fields.get("ramo")
     return fields
 
 def parse_asesoramiento_block(block):
