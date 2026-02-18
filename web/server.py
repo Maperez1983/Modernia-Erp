@@ -3926,7 +3926,74 @@ def ensure_seguro_doc_link(conn, seguro_row, now, calidad_ocr=None, campos_ocr="
         values,
     ).fetchone()
     if exists:
+        conn.execute(
+            """
+            UPDATE gestoria_docs
+            SET referencia_id = COALESCE(?, referencia_id),
+                nombre = COALESCE(NULLIF(?, ''), nombre),
+                tipo = COALESCE(NULLIF(?, ''), tipo),
+                fecha = COALESCE(NULLIF(?, ''), fecha),
+                estado = COALESCE(NULLIF(?, ''), estado),
+                notas = COALESCE(NULLIF(?, ''), notas),
+                doc_key = COALESCE(NULLIF(?, ''), doc_key),
+                doc_url = COALESCE(NULLIF(?, ''), doc_url),
+                calidad_ocr = COALESCE(NULLIF(?, ''), calidad_ocr),
+                campos_ocr = COALESCE(NULLIF(?, ''), campos_ocr),
+                updated_at = datetime(?)
+            WHERE id = ?
+            """,
+            (
+                seguro_row["id"],
+                seguro_row["poliza_numero"] or seguro_row["tomador"] or "Póliza seguro",
+                "Seguros",
+                seguro_row["fecha_efecto"] or seguro_row["mes_creacion"] or "",
+                "Recibido" if (poliza_key or poliza_url) else (seguro_row["estado"] or "En vigor"),
+                " · ".join([value for value in (seguro_row["compania"], seguro_row["ramo"]) if value]),
+                poliza_key or "",
+                poliza_url or "",
+                str(calidad_ocr or ""),
+                str(campos_ocr or ""),
+                now,
+                exists["id"],
+            ),
+        )
         return exists["id"]
+    # Fallback: si ya existe doc por referencia de la póliza, actualizarlo.
+    by_ref = conn.execute(
+        """
+        SELECT id FROM gestoria_docs
+        WHERE referencia_tipo = 'seguros' AND referencia_id = ?
+        LIMIT 1
+        """,
+        (seguro_row["id"],),
+    ).fetchone()
+    if by_ref:
+        conn.execute(
+            """
+            UPDATE gestoria_docs
+            SET cliente_id = ?,
+                empresa_id = ?,
+                doc_key = COALESCE(NULLIF(?, ''), doc_key),
+                doc_url = COALESCE(NULLIF(?, ''), doc_url),
+                estado = COALESCE(NULLIF(?, ''), estado),
+                calidad_ocr = COALESCE(NULLIF(?, ''), calidad_ocr),
+                campos_ocr = COALESCE(NULLIF(?, ''), campos_ocr),
+                updated_at = datetime(?)
+            WHERE id = ?
+            """,
+            (
+                cliente_id,
+                empresa_id,
+                poliza_key or "",
+                poliza_url or "",
+                "Recibido" if (poliza_key or poliza_url) else "",
+                str(calidad_ocr or ""),
+                str(campos_ocr or ""),
+                now,
+                by_ref["id"],
+            ),
+        )
+        return by_ref["id"]
     nombre_doc = seguro_row["poliza_numero"] or seguro_row["tomador"] or "Póliza seguro"
     notas_doc = " · ".join([value for value in (seguro_row["compania"], seguro_row["ramo"]) if value])
     doc_id = os.urandom(16).hex()
@@ -6349,6 +6416,9 @@ class Handler(BaseHTTPRequestHandler):
                         values,
                     )
                 poliza_id = dup_id
+                row = conn.execute("SELECT * FROM seguros WHERE id = ?", (poliza_id,)).fetchone()
+                if row and row["cliente_id"]:
+                    ensure_cliente_servicio_link(conn, row["cliente_id"], row["empresa_id"], "seguros", now)
             else:
                 conn.execute(
                     """
@@ -6985,6 +7055,8 @@ class Handler(BaseHTTPRequestHandler):
                 "prima_total",
                 "fecha_efecto",
                 "fecha_vencimiento",
+                "poliza_key",
+                "poliza_url",
             )
             updates = {}
             for key in allowed:
@@ -7005,6 +7077,7 @@ class Handler(BaseHTTPRequestHandler):
             if row:
                 if row["cliente_id"]:
                     ensure_cliente_servicio_link(conn, row["cliente_id"], row["empresa_id"], "seguros", now)
+                ensure_seguro_doc_link(conn, row, now)
                 missing = []
                 for key in ("tomador", "poliza_numero", "compania", "fecha_efecto"):
                     if not str(row[key] or "").strip():
