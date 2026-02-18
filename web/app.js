@@ -1610,6 +1610,7 @@ const SEGUROS_RAMOS_CATALOGO = [
   "Ciber",
 ];
 const SEGUROS_LEGACY_STATUS_KEY = "migrado legado";
+const SEGUROS_ONLY_UPLOADED_MODE = true;
 
 const createOption = (value, label) => {
   const option = document.createElement("option");
@@ -3063,30 +3064,32 @@ const loadClienteDocsByService = (clienteId, service, container) => {
         seguro_id: row.seguro_id || row.referencia_id || "",
         cliente_id: row.cliente_id || clienteId,
       }));
-      const seguros = await api(`/api/seguros_cliente?cliente_id=${encodeURIComponent(clienteId)}`).catch(() => ({ rows: [] }));
-      const fromSeguros = (seguros.rows || [])
-        .filter((row) => row.poliza_url || row.poliza_key)
-        .map((row) => ({
-          seguro_id: row.id || "",
-          referencia_id: row.id || "",
-          cliente_id: row.cliente_id || clienteId,
-          nombre: row.poliza_numero || `Póliza ${row.compania || ""}`.trim(),
-          tipo: "Seguros",
-          fecha: row.fecha_efecto || "",
-          estado: row.estado || "",
-          notas: row.ramo || "",
-          doc_key: row.poliza_key || "",
-          doc_url: row.poliza_url || "",
-        }));
-      const seen = new Set(
-        rows.map((row) => String(row.seguro_id || row.referencia_id || row.doc_key || row.doc_url || "").trim())
-      );
-      fromSeguros.forEach((row) => {
-        const key = String(row.seguro_id || row.referencia_id || row.doc_key || row.doc_url || "").trim();
-        if (!key || seen.has(key)) return;
-        seen.add(key);
-        rows.push(row);
-      });
+      if (!SEGUROS_ONLY_UPLOADED_MODE) {
+        const seguros = await api(`/api/seguros_cliente?cliente_id=${encodeURIComponent(clienteId)}&uploaded_only=1`).catch(() => ({ rows: [] }));
+        const fromSeguros = (seguros.rows || [])
+          .filter((row) => row.poliza_url || row.poliza_key)
+          .map((row) => ({
+            seguro_id: row.id || "",
+            referencia_id: row.id || "",
+            cliente_id: row.cliente_id || clienteId,
+            nombre: row.poliza_numero || `Póliza ${row.compania || ""}`.trim(),
+            tipo: "Seguros",
+            fecha: row.fecha_efecto || "",
+            estado: row.estado || "",
+            notas: row.ramo || "",
+            doc_key: row.poliza_key || "",
+            doc_url: row.poliza_url || "",
+          }));
+        const seen = new Set(
+          rows.map((row) => String(row.seguro_id || row.referencia_id || row.doc_key || row.doc_url || "").trim())
+        );
+        fromSeguros.forEach((row) => {
+          const key = String(row.seguro_id || row.referencia_id || row.doc_key || row.doc_url || "").trim();
+          if (!key || seen.has(key)) return;
+          seen.add(key);
+          rows.push(row);
+        });
+      }
     }
     renderClienteDocsTable(rows, container, {
       enableOcr: normalizeSimple(service) === "seguros",
@@ -13906,7 +13909,8 @@ const loadClienteSeguros = (cliente, empresaId) => {
   if (empresaId) {
     params.set("empresa_id", empresaId);
   }
-  if (tomador) {
+  params.set("uploaded_only", "1");
+  if (tomador && !SEGUROS_ONLY_UPLOADED_MODE) {
     params.set("tomador", tomador);
     params.set("autolink", "1");
   }
@@ -13914,8 +13918,18 @@ const loadClienteSeguros = (cliente, empresaId) => {
     .then(async (data) => {
       let matches = data.rows || [];
       if (!matches.length && empresaId) {
-        const fallback = await api(`/api/seguros_cliente?cliente_id=${encodeURIComponent(clienteId)}`);
+        const fallback = await api(`/api/seguros_cliente?cliente_id=${encodeURIComponent(clienteId)}&uploaded_only=1`);
         matches = fallback.rows || [];
+      }
+      if (SEGUROS_ONLY_UPLOADED_MODE) {
+        const docQuery = new URLSearchParams({ cliente_id: clienteId, service: "seguros" });
+        const docData = await api(`/api/gestoria_docs?${docQuery.toString()}`).catch(() => ({ rows: [] }));
+        const allowed = new Set(
+          (docData.rows || [])
+            .map((row) => String(row.referencia_id || row.seguro_id || "").trim())
+            .filter(Boolean)
+        );
+        matches = matches.filter((row) => allowed.has(String(row.id || "").trim()));
       }
       if (!matches.length) {
         clienteSegurosFicha.innerHTML = "<p class='muted'>Sin pólizas vinculadas.</p>";
