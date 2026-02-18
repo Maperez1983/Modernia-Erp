@@ -55,6 +55,8 @@ OCR_SUBPROCESS_TIMEOUT_SECONDS = max(15, int(os.environ.get("OCR_SUBPROCESS_TIME
 OCR_JOB_STALE_MINUTES = max(1, int(os.environ.get("OCR_JOB_STALE_MINUTES", "15")))
 OCR_PDF_MAX_PAGES = max(0, int(os.environ.get("OCR_PDF_MAX_PAGES", "4")))
 OCR_PDF_DPI = max(120, int(os.environ.get("OCR_PDF_DPI", "280")))
+OCR_OPENAI_VISION_PAGES = max(0, int(os.environ.get("OCR_OPENAI_VISION_PAGES", "2")))
+OCR_OPENAI_VISION_DPI = max(120, int(os.environ.get("OCR_OPENAI_VISION_DPI", "220")))
 
 
 def parse_ocr_psms(raw):
@@ -831,6 +833,33 @@ def process_seguros_ocr(payload, conn):
             ai_text = text or ""
             if doc_text and doc_text.strip():
                 ai_text = f"{ai_text}\n\n{doc_text}".strip()
+            if tmp_path and OCR_OPENAI_VISION_PAGES > 0:
+                image_urls, vision_img_err = pdf_to_png_data_urls(
+                    tmp_path,
+                    max_pages=OCR_OPENAI_VISION_PAGES,
+                    dpi=OCR_OPENAI_VISION_DPI,
+                )
+                if image_urls:
+                    ai_vision_fields, ai_vision_err = call_openai_extract_seguro_vision(
+                        image_urls,
+                        text=ai_text,
+                        source_hint=source_hint,
+                        hinted_company=hinted_company,
+                    )
+                    if ai_vision_err:
+                        ai_error = ai_vision_err
+                    elif ai_vision_fields:
+                        ai_used = True
+                        merged = dict(fields)
+                        for key, value in ai_vision_fields.items():
+                            if value and not str(merged.get(key) or "").strip():
+                                merged[key] = value
+                        ai_quality = compute_ocr_quality(merged, required_keys)
+                        if candidate_score(ai_quality) >= candidate_score(best_quality):
+                            fields = merged
+                            best_quality = ai_quality
+                elif vision_img_err and not ai_error:
+                    ai_error = vision_img_err
             if ai_text:
                 ai_fields, ai_error_msg = call_openai_extract_seguro(
                     ai_text,
@@ -1523,6 +1552,86 @@ def call_openai(prompt, model=None, temperature=0.2, max_tokens=600):
         return "", f"OpenAI error: {err}"
     return extract_openai_output(res), ""
 
+
+def call_openai_content(user_content, model=None, temperature=0.0, max_tokens=700):
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        return "", "OPENAI_API_KEY no configurada"
+    model = model or os.environ.get("OPENAI_MODEL") or "gpt-4o-mini"
+    payload = {
+        "model": model,
+        "input": [
+            {
+                "role": "system",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "Eres un extractor de datos para un CRM de seguros. Responde en JSON válido cuando se solicite.",
+                    }
+                ],
+            },
+            {"role": "user", "content": user_content},
+        ],
+        "temperature": temperature,
+        "max_output_tokens": max_tokens,
+        "store": False,
+    }
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        "https://api.openai.com/v1/responses",
+        data=data,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=45) as resp:
+            res = json.loads(resp.read().decode("utf-8"))
+    except Exception as err:
+        return "", f"OpenAI error: {err}"
+    return extract_openai_output(res), ""
+
+
+def pdf_to_png_data_urls(pdf_path, max_pages=2, dpi=220):
+    if not pdf_path or max_pages <= 0:
+        return [], ""
+    tmpdir = tempfile.mkdtemp(prefix="openai-vision-")
+    prefix = os.path.join(tmpdir, "page")
+    cmd = [
+        "pdftoppm",
+        "-f",
+        "1",
+        "-l",
+        str(max_pages),
+        "-r",
+        str(dpi),
+        "-png",
+        pdf_path,
+        prefix,
+    ]
+    try:
+        run_subprocess(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    except Exception as err:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+        return [], str(err)
+    image_paths = sorted(
+        os.path.join(tmpdir, name)
+        for name in os.listdir(tmpdir)
+        if name.startswith("page-") and name.endswith(".png")
+    )
+    data_urls = []
+    try:
+        for image_path in image_paths:
+            with open(image_path, "rb") as handle:
+                b64 = base64.b64encode(handle.read()).decode("ascii")
+            data_urls.append(f"data:image/png;base64,{b64}")
+    except Exception as err:
+        return [], str(err)
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+    return data_urls, ""
+
 def call_openai_extract_fin(text, extra=""):
     prompt = (
         "Extrae datos de un asesoramiento financiero manuscrito. Responde solo JSON con claves conocidas, "
@@ -1610,6 +1719,70 @@ def call_openai_extract_seguro(text, source_hint="", hinted_company=""):
         normalized["poliza_numero"] = str(normalized.get("poliza_numero")).strip().upper()
     return normalized, ""
 
+
+def call_openai_extract_seguro_vision(image_data_urls, text="", source_hint="", hinted_company=""):
+    if not image_data_urls:
+        return {}, "Sin imágenes para visión"
+    prompt = (
+        "Extrae datos de una póliza de seguros. Responde SOLO JSON válido, sin markdown ni texto adicional. "
+        "No inventes datos. Si un campo no aparece claro, déjalo vacío.\n"
+        "Claves permitidas: tomador, dni, nif, telefono, email, direccion, compania, ramo, "
+        "poliza_numero, fecha_efecto, fecha_vencimiento, prima_neta, prima_total.\n"
+        "Usa primero la imagen; usa el texto OCR como apoyo cuando exista.\n"
+        f"Pista de nombre/archivo: {source_hint or '-'}\n"
+        f"Compañía sugerida por metadata: {hinted_company or '-'}\n\n"
+        f"Texto OCR auxiliar:\n{text[:12000] if text else '(vacío)'}"
+    )
+    content = [{"type": "text", "text": prompt}]
+    for data_url in image_data_urls[: max(1, OCR_OPENAI_VISION_PAGES)]:
+        content.append({"type": "input_image", "image_url": data_url})
+    output, err = call_openai_content(content, temperature=0.0, max_tokens=900)
+    if err:
+        return {}, err
+    try:
+        data = json.loads(output)
+    except Exception:
+        return {}, "OpenAI visión no devolvió JSON válido"
+    if not isinstance(data, dict):
+        return {}, "OpenAI visión no devolvió JSON"
+    normalized = {}
+    for key in (
+        "tomador",
+        "dni",
+        "nif",
+        "telefono",
+        "email",
+        "direccion",
+        "compania",
+        "ramo",
+        "poliza_numero",
+        "fecha_efecto",
+        "fecha_vencimiento",
+        "prima_neta",
+        "prima_total",
+    ):
+        value = data.get(key)
+        if value is None:
+            continue
+        normalized[key] = str(value).strip()
+    if normalized.get("tomador"):
+        normalized["tomador"] = normalize_person_name(normalized.get("tomador"))
+    if normalized.get("dni"):
+        normalized["dni"] = normalize_nif(normalized.get("dni"))
+    if normalized.get("nif"):
+        normalized["nif"] = normalize_nif(normalized.get("nif"))
+    if normalized.get("telefono"):
+        normalized["telefono"] = normalize_phone(normalized.get("telefono"))
+    if normalized.get("email"):
+        normalized["email"] = normalize_email(normalized.get("email"))
+    if normalized.get("compania"):
+        normalized["compania"] = normalize_company_name(normalized.get("compania"))
+    if not normalized.get("compania") and hinted_company:
+        normalized["compania"] = normalize_company_name(hinted_company)
+    if normalized.get("poliza_numero"):
+        normalized["poliza_numero"] = str(normalized.get("poliza_numero")).strip().upper()
+    return normalized, ""
+
 def classify_seguros_document(text):
     cleaned = (text or "").lower()
     if not cleaned:
@@ -1617,6 +1790,7 @@ def classify_seguros_document(text):
     presupuesto_hits = [
         "presupuesto",
         "propuesta",
+        "proyecto",
         "cotizacion",
         "cotización",
         "oferta",
@@ -2477,6 +2651,10 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
             out["ramo"] = "Hogar"
         elif " AUTO " in f" {upper} ":
             out["ramo"] = "Auto"
+        elif " MULTIRRIESGO " in f" {upper} ":
+            out["ramo"] = "Hogar"
+        elif " IMPAGO " in f" {upper} ":
+            out["ramo"] = "Impago alquiler"
         elif " COMERCIO " in f" {upper} ":
             out["ramo"] = "Comercio"
         return out
@@ -2512,6 +2690,16 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
                 r"\b([A-Z][0-9]{6,8}\s*[-/]\s*[0-9]{3,4})\b",
                 r"\b([A-Z][0-9]{6,8})\b",
             ]
+        elif comp_key == "MUTUA PROPIETARIOS":
+            patterns = [
+                r"\bPOLIZA\s*[:#]?\s*([A-Z0-9][A-Z0-9/\- ]{6,})",
+                r"\bCONTRATO\s*[:#]?\s*([A-Z0-9][A-Z0-9/\- ]{6,})",
+            ]
+        elif comp_key == "CATALANA OCCIDENTE":
+            patterns = [
+                r"\bP[ÓO]LIZA\s*[:#]?\s*([A-Z0-9][A-Z0-9/\- ]{6,})",
+                r"\bCERTIFICADO\s*[:#]?\s*([A-Z0-9][A-Z0-9/\- ]{6,})",
+            ]
         for pat in [*patterns_common, *patterns]:
             for target in (base_text, cleaned):
                 m = re.search(pat, target, re.IGNORECASE)
@@ -2534,6 +2722,20 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
                     candidate = clean_tomador_value(m.group(1))
                     if candidate and len(candidate) >= 5:
                         return candidate
+        return ""
+    def company_specific_ramo(compania, base_text):
+        comp_key = normalize_company_key(compania or "")
+        target = normalize_lookup_text(base_text)
+        if "RESPONSABILIDAD CIVIL" in target or re.search(r"\bRC\b", target):
+            return "Responsabilidad civil"
+        if "MULTIRRIESGO HOGAR" in target or ("HOGAR" in target and "ALQUILER" not in target):
+            return "Hogar"
+        if "IMPAGO" in target and "ALQUILER" in target:
+            return "Impago alquiler"
+        if "AUTOMOVIL" in target or "AUTOMOVILES" in target or re.search(r"\bAUTO\b", target):
+            return "Auto"
+        if comp_key == "MUTUA PROPIETARIOS" and ("MULTIRRIESGO" in target or "HOGAR" in target):
+            return "Hogar"
         return ""
     fields = {}
     fields["tomador"] = pick([
@@ -2630,6 +2832,7 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
         fields["fecha_nacimiento"] = normalize_ocr_date(fields["fecha_nacimiento"])
     fields["poliza_numero"] = pick([
         r"P[oó]liza/Spto\s*([0-9]{8,14})(?:\s*/\s*[0-9]{1,3})?",
+        r"Referencia\s*[:#]?\s*([A-Z0-9]{8,})",
         r"N[ºo]\s*POLIZA/SPTO\.?\s*[:#]?\s*([0-9]{8,14}(?:\s*/\s*[0-9]{1,3})?)",
         r"P[oó]liza\s*/\s*Producto\s*[:#]?\s*([0-9]{6,})",
         r"P[oó]liza\s*/\s*Producto\s*[:#]?\s*([A-Z0-9][A-Z0-9/.\-\s]{5,}?)(?:\s{2,}[A-ZÁÉÍÓÚÑ]|$)",
@@ -2712,6 +2915,7 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
         if end_date and not fields["fecha_vencimiento"]:
             fields["fecha_vencimiento"] = end_date
     fields["ramo"] = pick([
+        r"P[oó]liza\s*/\s*Producto\s*[:#]?\s*[A-Z0-9/\-]+\s*-\s*([^\n]+)",
         r"(AUTOM[ÓO]VILES?\s+PARTICULARES\s*-\s*[A-ZÁÉÍÓÚÑ ]+)",
         r"(MULTIRRIESGO\s+COMERCIOS?\s+Y\s+AUTOEMPRENDEDORES)",
         r"(MULTIRRIESGO\s+COMERCIOS?)",
@@ -2999,6 +3203,12 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
         mapfre_auto = re.search(r"AUTOM[ÓO]VILES?\s+PARTICULARES", text, re.IGNORECASE)
         if mapfre_auto:
             fields["ramo"] = "Auto"
+    if not fields.get("ramo"):
+        better_ramo = company_specific_ramo(fields.get("compania"), text)
+        if not better_ramo and source_hint:
+            better_ramo = company_specific_ramo(fields.get("compania"), source_hint)
+        if better_ramo:
+            fields["ramo"] = better_ramo
     if fields.get("compania"):
         # Prefer company from filename when OCR text gives a conflicting generic label.
         source_company = source_fields.get("compania") or hinted_company or detect_company_from_metadata(source_hint)
@@ -3042,6 +3252,18 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
         fields["ramo"] = ramo
     if (not fields.get("ramo")) and source_fields.get("ramo"):
         fields["ramo"] = source_fields.get("ramo")
+    if source_fields.get("ramo"):
+        source_ramo = str(source_fields.get("ramo") or "").strip()
+        current_ramo = str(fields.get("ramo") or "").strip()
+        if source_ramo and (
+            not current_ramo
+            or current_ramo in ("Alquiler", "Hogar alquiler")
+            or (
+                source_ramo == "Responsabilidad civil"
+                and current_ramo not in ("Responsabilidad civil",)
+            )
+        ):
+            fields["ramo"] = source_ramo
     return fields
 
 def parse_asesoramiento_block(block):
