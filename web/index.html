@@ -1118,7 +1118,7 @@
           </div>
           <div class="tabs" id="segurosTabs">
             <button class="tab active" type="button" data-seguros-tab="dashboard">Dashboard Seguros</button>
-            <button class="tab" type="button" data-seguros-tab="bdt">BDT Seguros</button>
+            <button class="tab" type="button" data-seguros-tab="bdt">Pólizas cargadas</button>
             <button class="tab" type="button" data-seguros-tab="alta">Alta pólizas</button>
             <button class="tab" type="button" data-seguros-tab="gestion">Gestión</button>
             <button class="tab" type="button" data-seguros-tab="campanas">Campañas</button>
@@ -1260,7 +1260,7 @@
               <span id="segurosOcrClienteStatus" class="muted"></span>
             </div>
             <div class="form-actions">
-              <button type="button" id="segurosOcrSave">Guardar en BDT</button>
+              <button type="button" id="segurosOcrSave">Guardar póliza</button>
               <span id="segurosOcrSaveStatus" class="muted"></span>
             </div>
             <textarea id="segurosOcrRaw" class="hidden" rows="6" readonly></textarea>
@@ -1270,7 +1270,7 @@
           <div class="form-card">
             <div class="section-head">
               <div>
-                <h3>Asociar póliza OCR a BDT</h3>
+                <h3>Asociar póliza OCR a registro</h3>
                 <p class="muted">Sube el PDF, localiza el registro y completa lo que falte.</p>
               </div>
               <div class="form-actions">
@@ -1320,7 +1320,7 @@
                 <input id="segurosBdtOcrPrimaTotal" />
               </label>
               <label>
-                Registro BDT
+                Registro póliza
                 <select id="segurosBdtOcrSelect"></select>
               </label>
             </div>
@@ -1332,7 +1332,7 @@
             </div>
             <div class="form-actions">
               <button type="button" id="segurosBdtOcrMatchButton" class="secondary">Buscar coincidencia</button>
-              <button type="button" id="segurosBdtOcrLink">Vincular a BDT</button>
+              <button type="button" id="segurosBdtOcrLink">Vincular registro</button>
             </div>
           </div>
           <div class="form-card">

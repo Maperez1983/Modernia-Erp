@@ -569,7 +569,7 @@ const runSegurosBdtRowOcr = async (recordId, file, statusEl, rowMap = {}) => {
       body: JSON.stringify(enrichPayload),
     }).then((res) => res.json());
   } catch {
-    if (statusEl) statusEl.textContent = "OCR aplicado, pero fallo al actualizar BDT.";
+    if (statusEl) statusEl.textContent = "OCR aplicado, pero falló al actualizar el registro.";
     return;
   }
   if (upload && upload.key) {
@@ -10758,7 +10758,7 @@ const resetSegurosOcrAggregator = () => {
   setOcrClienteUi(getOcrClienteContext(), { status: "", showCreate: false, showAdd: false, showOpen: false });
   if (segurosOcrSave) {
     segurosOcrSave.removeAttribute("data-record-id");
-    segurosOcrSave.textContent = "Guardar en BDT";
+    segurosOcrSave.textContent = "Guardar póliza";
   }
 };
 
@@ -11031,7 +11031,7 @@ const matchSegurosBdtFromFields = async () => {
   let data = await ensureSegurosBdtData(true);
   if (!data || data.error) {
     if (segurosBdtOcrStatus) {
-      segurosBdtOcrStatus.textContent = data?.error || "No se pudo cargar BDT.";
+      segurosBdtOcrStatus.textContent = data?.error || "No se pudo cargar registros.";
     }
     return;
   }
@@ -11040,7 +11040,7 @@ const matchSegurosBdtFromFields = async () => {
   const rows = data.rows || [];
   const idIndex = columns.indexOf("id");
   if (idIndex < 0) {
-    if (segurosBdtOcrStatus) segurosBdtOcrStatus.textContent = "BDT sin identificador.";
+    if (segurosBdtOcrStatus) segurosBdtOcrStatus.textContent = "Registros sin identificador.";
     return;
   }
   const hasInput =
@@ -11330,7 +11330,7 @@ const saveSegurosOcrRecord = async () => {
         state.segurosOcrClienteId = data.cliente_id;
       }
       if (segurosOcrSaveStatus) {
-        segurosOcrSaveStatus.textContent = "Guardado en BDT.";
+        segurosOcrSaveStatus.textContent = "Póliza guardada.";
       }
       resetSegurosOcrAggregator();
       loadSegurosCrm();
@@ -15332,7 +15332,7 @@ if (segurosOcrButton) {
             if (state.segurosOcrClienteId) {
               if (segurosOcrSaveStatus) {
                 segurosOcrSaveStatus.textContent =
-                  "Cliente detectado. Revisa datos y pulsa Guardar en BDT.";
+                  "Cliente detectado. Revisa datos y pulsa Guardar póliza.";
               }
             } else if (segurosOcrSaveStatus) {
               segurosOcrSaveStatus.textContent =
@@ -15595,7 +15595,7 @@ if (segurosBdtOcrLink) {
           }
         }
         resetSegurosBdtOcrAggregator();
-        if (segurosBdtOcrStatus) segurosBdtOcrStatus.textContent = "Vinculado a BDT.";
+        if (segurosBdtOcrStatus) segurosBdtOcrStatus.textContent = "Registro vinculado.";
         loadSegurosCrm();
       })
       .catch((err) => {
