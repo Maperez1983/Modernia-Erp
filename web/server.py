@@ -2141,6 +2141,7 @@ def ocr_pdf_all_pages(pdf_path, use_external=False):
     return "", ocr_err or img_err
 
 def parse_poliza_text(text, source_hint="", hinted_company=""):
+    DATE_TOKEN = r"(?<!\d)(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})(?!\d)"
     cleaned = text.replace("\u00a0", " ")
     cleaned = re.sub(r"\s+", " ", cleaned)
     cleaned = cleaned.replace("N°", "Nº").replace("Nº", "Nº")
@@ -2213,14 +2214,14 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
         value = normalize_ocr_date(text_value)
         value = value.replace(" a ", " hasta ").replace(" al ", " hasta ")
         match = re.search(
-            r"(?:desde|vigencia\s+desde|periodo\s+del\s+seguro)\s*[:\-]?\s*(\d{1,2}[/-]\d{1,2}[/-]\d{2,4}).*?"
-            r"(?:hasta|a)\s*(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})",
+            rf"(?:desde|vigencia\s+desde|periodo\s+del\s+seguro)\s*[:\-]?\s*{DATE_TOKEN}.*?"
+            rf"(?:hasta|a)\s*{DATE_TOKEN}",
             value,
             re.IGNORECASE,
         )
         if match:
             return match.group(1), match.group(2)
-        dates = re.findall(r"\d{1,2}[/-]\d{1,2}[/-]\d{2,4}", value)
+        dates = re.findall(DATE_TOKEN, value)
         if len(dates) >= 2:
             return dates[0], dates[1]
         return "", ""
@@ -2536,6 +2537,8 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
         return ""
     fields = {}
     fields["tomador"] = pick([
+        r"DATOS\s+DEL\s+TOMADOR\s+Y\s+PROPIETARIO\s+Nombre\s+([A-ZÁÉÍÓÚÑ ,.'\-]{5,})\s+Documento\s+ID",
+        r"P[oó]liza/Spto\s+[0-9]{8,14}\s*/\s*[0-9]{1,3}\s*\n+\s*([A-ZÁÉÍÓÚÑ ,.'\-]{5,})",
         r"TOMADOR\s+([A-ZÁÉÍÓÚÑ ,.'\-]{5,}?)\s+NIF\b",
         r"Presentado\s+al\s+SR\.?/Sra\.?\s*([A-ZÁÉÍÓÚÑ ,.'\-]+?)\s+N[º°]?\s*Documento",
         r"Nombre y apellidos\s*:\s*([^\n]+)",
@@ -2589,6 +2592,7 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
     if fields["fecha_nacimiento"]:
         fields["fecha_nacimiento"] = normalize_ocr_date(fields["fecha_nacimiento"])
     fields["poliza_numero"] = pick([
+        r"P[oó]liza/Spto\s*([0-9]{8,14})(?:\s*/\s*[0-9]{1,3})?",
         r"N[ºo]\s*POLIZA/SPTO\.?\s*[:#]?\s*([0-9]{8,14}(?:\s*/\s*[0-9]{1,3})?)",
         r"P[oó]liza\s*/\s*Producto\s*[:#]?\s*([0-9]{6,})",
         r"P[oó]liza\s*/\s*Producto\s*[:#]?\s*([A-Z0-9][A-Z0-9/.\-\s]{5,}?)(?:\s{2,}[A-ZÁÉÍÓÚÑ]|$)",
@@ -2639,23 +2643,25 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
     if fields["compania"]:
         fields["compania"] = normalize_company_name(fields["compania"])
     fields["fecha_efecto"] = pick([
-        r"Fecha\s*Efecto\s*[:\-]?\s*([0-9]{1,2}[ /.-][0-9]{1,2}[ /.-][0-9]{2,4})",
-        r"Fecha de efecto\s*:\s*([0-9]{1,2}[ /.-][0-9]{1,2}[ /.-][0-9]{2,4})",
-        r"Efecto\s*:\s*([0-9]{1,2}[ /.-][0-9]{1,2}[ /.-][0-9]{2,4})",
-        r"Vigencia\s*desde\s*[:\-]?\s*([0-9]{1,2}[ /.-][0-9]{1,2}[ /.-][0-9]{2,4})",
-        r"Fecha\s*inicio\s*[:\-]?\s*([0-9]{1,2}[ /.-][0-9]{1,2}[ /.-][0-9]{2,4})",
-        r"Inicio\s*vigencia\s*[:\-]?\s*([0-9]{1,2}[ /.-][0-9]{1,2}[ /.-][0-9]{2,4})",
-        r"Per[ií]odo\s*del\s*seguro\s*([0-9]{1,2}[ /.-][0-9]{1,2}[ /.-][0-9]{2,4})",
-        r"Per[ií]odo\s*del\s*seguro\s*([0-9]{1,2}[ /.-][0-9]{1,2}[ /.-][0-9]{2,4})\s*[0-9:]*",
-        r"Desde\s*[:\-]?\s*([0-9]{1,2}[ /.-][0-9]{1,2}[ /.-][0-9]{2,4})",
+        rf"Fecha\s+de\s+efecto\s+{DATE_TOKEN}",
+        rf"Fecha\s*Efecto\s*[:\-]?\s*{DATE_TOKEN}",
+        rf"Fecha de efecto\s*:\s*{DATE_TOKEN}",
+        rf"Efecto\s*:\s*{DATE_TOKEN}",
+        rf"Vigencia\s*desde\s*[:\-]?\s*{DATE_TOKEN}",
+        rf"Fecha\s*inicio\s*[:\-]?\s*{DATE_TOKEN}",
+        rf"Inicio\s*vigencia\s*[:\-]?\s*{DATE_TOKEN}",
+        rf"Per[ií]odo\s*del\s*seguro\s*{DATE_TOKEN}",
+        rf"Per[ií]odo\s*del\s*seguro\s*{DATE_TOKEN}\s*[0-9:]*",
+        rf"Desde\s*[:\-]?\s*{DATE_TOKEN}",
     ])
     fields["fecha_vencimiento"] = pick([
-        r"Fecha de vencimiento\s*[:\-]?\s*([0-9]{1,2}[ /.-][0-9]{1,2}[ /.-][0-9]{2,4})",
-        r"Vencimiento\s*[:\-]?\s*([0-9]{1,2}[ /.-][0-9]{1,2}[ /.-][0-9]{2,4})",
-        r"Hasta\s+las\s+\d+\s+horas\s+del\s+([0-9]{1,2}[ /.-][0-9]{1,2}[ /.-][0-9]{2,4})",
-        r"Fin\s*vigencia\s*[:\-]?\s*([0-9]{1,2}[ /.-][0-9]{1,2}[ /.-][0-9]{2,4})",
-        r"Vigencia\s*hasta\s*[:\-]?\s*([0-9]{1,2}[ /.-][0-9]{1,2}[ /.-][0-9]{2,4})",
-        r"Hasta\s*[:\-]?\s*([0-9]{1,2}[ /.-][0-9]{1,2}[ /.-][0-9]{2,4})",
+        rf"Fecha\s+de\s+vencimiento\s+{DATE_TOKEN}",
+        rf"Fecha de vencimiento\s*[:\-]?\s*{DATE_TOKEN}",
+        rf"Vencimiento\s*[:\-]?\s*{DATE_TOKEN}",
+        rf"Hasta\s+las\s+\d+\s+horas\s+del\s+{DATE_TOKEN}",
+        rf"Fin\s*vigencia\s*[:\-]?\s*{DATE_TOKEN}",
+        rf"Vigencia\s*hasta\s*[:\-]?\s*{DATE_TOKEN}",
+        rf"Hasta\s*[:\-]?\s*{DATE_TOKEN}",
     ])
     if fields["fecha_efecto"]:
         fields["fecha_efecto"] = normalize_ocr_date(fields["fecha_efecto"])
@@ -2669,6 +2675,7 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
         if end_date and not fields["fecha_vencimiento"]:
             fields["fecha_vencimiento"] = end_date
     fields["ramo"] = pick([
+        r"(AUTOM[ÓO]VILES?\s+PARTICULARES\s*-\s*[A-ZÁÉÍÓÚÑ ]+)",
         r"(MULTIRRIESGO\s+COMERCIOS?\s+Y\s+AUTOEMPRENDEDORES)",
         r"(MULTIRRIESGO\s+COMERCIOS?)",
         r"Condiciones\s+Particulares\s+Ocaso\s+([A-ZÁÉÍÓÚÑa-z\s]{4,})",
@@ -2776,6 +2783,10 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
             fields["ramo"] = ""
         if "€" in fields["ramo"] or re.search(r"\d{2,}", fields["ramo"]):
             fields["ramo"] = ""
+        if re.search(r"veh[ií]culo\s+asegurado|la\s+aseguradora|arrastrado", fields["ramo"], re.IGNORECASE):
+            fields["ramo"] = ""
+        if re.search(r"cobertura\s+total\s+o\s+parcial", fields["ramo"], re.IGNORECASE):
+            fields["ramo"] = ""
         if len(fields["ramo"]) > 48 and "seguro" in normalize_lookup_text(fields["ramo"]):
             fields["ramo"] = ""
         ramo_inline = re.match(r"^[A-Z0-9/.\-]{5,}\s*-\s*(.+)$", fields["ramo"], re.IGNORECASE)
@@ -2788,6 +2799,8 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
             fields["ramo"] = "Hogar alquiler"
         elif "HOGAR" in ramo_upper:
             fields["ramo"] = "Hogar"
+        elif "AUTOMOVIL" in ramo_upper or "AUTOMOVILES" in ramo_upper or "AUTO" in ramo_upper:
+            fields["ramo"] = "Auto"
         elif "ALQUILER" in ramo_upper:
             fields["ramo"] = "Alquiler"
         elif "MULTIRRIESGO COMERCIOS" in ramo_upper:
@@ -2905,6 +2918,10 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
         fields["tomador"] = source_fields.get("tomador")
     if (not fields.get("ramo")) and source_fields.get("ramo"):
         fields["ramo"] = source_fields.get("ramo")
+    if not fields.get("ramo"):
+        mapfre_auto = re.search(r"AUTOM[ÓO]VILES?\s+PARTICULARES", text, re.IGNORECASE)
+        if mapfre_auto:
+            fields["ramo"] = "Auto"
     if fields.get("compania"):
         # Prefer company from filename when OCR text gives a conflicting generic label.
         source_company = source_fields.get("compania") or hinted_company or detect_company_from_metadata(source_hint)
