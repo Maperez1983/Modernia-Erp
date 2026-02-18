@@ -13716,6 +13716,105 @@ const openClienteSeguroDetail = (row, cliente = {}) => {
 
     actions.appendChild(form);
     actions.appendChild(status);
+
+    const editHeading = document.createElement("h4");
+    editHeading.textContent = "Editar datos póliza";
+    actions.appendChild(editHeading);
+
+    const editForm = document.createElement("div");
+    editForm.className = "cliente-seguro-actions-form";
+    const editTomador = document.createElement("input");
+    editTomador.type = "text";
+    editTomador.placeholder = "Tomador";
+    editTomador.value = row.tomador || "";
+    editForm.appendChild(editTomador);
+    const editCompania = document.createElement("input");
+    editCompania.type = "text";
+    editCompania.placeholder = "Compañía";
+    editCompania.value = row.compania || "";
+    editForm.appendChild(editCompania);
+    const editRamo = document.createElement("input");
+    editRamo.type = "text";
+    editRamo.placeholder = "Ramo";
+    editRamo.value = row.ramo || "";
+    editForm.appendChild(editRamo);
+    const editPoliza = document.createElement("input");
+    editPoliza.type = "text";
+    editPoliza.placeholder = "Nº póliza";
+    editPoliza.value = row.poliza_numero || "";
+    editForm.appendChild(editPoliza);
+    const editEfecto = document.createElement("input");
+    editEfecto.type = "date";
+    editEfecto.value = normalizeDateInput(row.fecha_efecto || "");
+    editForm.appendChild(editEfecto);
+    const editVenc = document.createElement("input");
+    editVenc.type = "date";
+    editVenc.value = normalizeDateInput(row.fecha_vencimiento || "");
+    editForm.appendChild(editVenc);
+    const editPrimaNeta = document.createElement("input");
+    editPrimaNeta.type = "text";
+    editPrimaNeta.placeholder = "Prima neta";
+    editPrimaNeta.value = formatMoneyInputValue(row.prima_neta || "");
+    editForm.appendChild(editPrimaNeta);
+    const editPrimaTotal = document.createElement("input");
+    editPrimaTotal.type = "text";
+    editPrimaTotal.placeholder = "Prima total";
+    editPrimaTotal.value = formatMoneyInputValue(row.prima_total || "");
+    editForm.appendChild(editPrimaTotal);
+    const editEstado = document.createElement("select");
+    ["En vigor", "Presupuesto", "Anulada", "Vencida"].forEach((opt) => {
+      const o = document.createElement("option");
+      o.value = opt;
+      o.textContent = opt;
+      if ((row.estado || "") === opt) o.selected = true;
+      editEstado.appendChild(o);
+    });
+    editForm.appendChild(editEstado);
+    const editSaveBtn = document.createElement("button");
+    editSaveBtn.type = "button";
+    editSaveBtn.className = "secondary";
+    editSaveBtn.textContent = "Guardar edición";
+    editForm.appendChild(editSaveBtn);
+    actions.appendChild(editForm);
+
+    const editStatus = document.createElement("div");
+    editStatus.className = "muted";
+    actions.appendChild(editStatus);
+
+    editSaveBtn.addEventListener("click", async () => {
+      editStatus.textContent = "Guardando edición...";
+      try {
+        const payload = {
+          id: row.id,
+          empresa_nombre: FINCAS_COMPANY,
+          tomador: editTomador.value.trim(),
+          compania: editCompania.value.trim(),
+          ramo: editRamo.value.trim(),
+          poliza_numero: editPoliza.value.trim(),
+          fecha_efecto: editEfecto.value || "",
+          fecha_vencimiento: editVenc.value || "",
+          prima_neta: toNumber(editPrimaNeta.value || ""),
+          prima_total: toNumber(editPrimaTotal.value || ""),
+          estado: editEstado.value || "",
+        };
+        const resp = await fetch("/api/seguros_update", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }).then((r) => r.json());
+        if (resp?.error) {
+          editStatus.textContent = resp.error;
+          return;
+        }
+        editStatus.textContent = "Datos actualizados.";
+        if (state.currentClienteId) {
+          const fincasEmpresa = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
+          loadClienteSeguros(cliente, fincasEmpresa ? fincasEmpresa.id : "");
+        }
+      } catch {
+        editStatus.textContent = "Error al guardar edición.";
+      }
+    });
   }
   if (highlights) {
     highlights.innerHTML = "";
