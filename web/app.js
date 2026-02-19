@@ -2885,6 +2885,9 @@ const openSegurosCrm = () => {
   openCompany(FINCAS_COMPANY);
   setTab("seguros-crm");
   updateTableVisibility();
+  if (segurosCrmSearch) segurosCrmSearch.value = "";
+  if (segurosCrmClienteInput) segurosCrmClienteInput.value = "";
+  if (segurosCrmClienteId) segurosCrmClienteId.value = "";
   setCrmMode("seguros");
   setSegurosTab("dashboard");
   if (viewTabs) viewTabs.classList.add("hidden");
@@ -9816,7 +9819,7 @@ const loadSegurosCrm = () => {
   api(`/api/tabla?${params.toString()}`).then((data) => {
     const columns = data.columns || [];
     const allRows = data.rows || [];
-    let rows = allRows.filter((row) => !isLegacySeguroRow(row, columns));
+    let rows = allRows;
     state.segurosRamosSource = { columns, rows };
     const filtroCliente = segurosCrmClienteInput ? segurosCrmClienteInput.value.trim().toLowerCase() : "";
     if (filtroCliente) {
@@ -9828,6 +9831,9 @@ const loadSegurosCrm = () => {
       }
     }
     renderTableInto({ columns, rows }, segurosCrmTable, segurosCrmInfo, "Seguros");
+    if (segurosCrmInfo && (q || filtroCliente)) {
+      segurosCrmInfo.textContent = `${segurosCrmInfo.textContent} (filtro activo)`;
+    }
     refreshSegurosColaboradoresList(columns, rows);
     refreshSegurosRamosList(columns, rows, seguroOcrCompania ? seguroOcrCompania.value : "");
     renderSegurosUpdateSelect(data);
@@ -11019,11 +11025,8 @@ const ensureSegurosBdtData = async (forceRefresh = false) => {
   });
   const data = await api(`/api/tabla?${params.toString()}`);
   if (data?.error) return data;
-  const columns = data.columns || [];
-  const filteredRows = (data.rows || []).filter((row) => !isLegacySeguroRow(row, columns));
-  const filtered = { ...data, rows: filteredRows };
-  state.segurosBdtCache = { empresaId: empresa.id, data: filtered, ts: Date.now() };
-  return filtered;
+  state.segurosBdtCache = { empresaId: empresa.id, data, ts: Date.now() };
+  return data;
 };
 
 const matchSegurosBdtFromFields = async () => {
