@@ -4458,7 +4458,7 @@ def get_db(db_path):
 
 
 def open_sqlite_conn(db_path, with_row_factory=False):
-    conn = sqlite3.connect(db_path, timeout=30)
+    conn = sqlite3.connect(db_path, timeout=90)
     if with_row_factory:
         conn.row_factory = sqlite3.Row
     # Reduce bloqueos en escenarios multi-hilo (web + OCR worker).
@@ -4467,7 +4467,7 @@ def open_sqlite_conn(db_path, with_row_factory=False):
     except Exception:
         pass
     try:
-        conn.execute("PRAGMA busy_timeout=30000")
+        conn.execute("PRAGMA busy_timeout=90000")
     except Exception:
         pass
     try:
@@ -8103,8 +8103,8 @@ class Handler(BaseHTTPRequestHandler):
                     now,
                 ),
             )
-            json_response(self, {"ok": True, "id": cliente_id})
             conn.commit()
+            json_response(self, {"ok": True, "id": cliente_id})
             return
         elif parsed.path == "/api/clientes_link":
             cliente_id = payload.get("cliente_id")
@@ -8130,7 +8130,7 @@ class Handler(BaseHTTPRequestHandler):
             sync = {"linked": 0, "docs": 0}
             sync_warning = None
             link_done = False
-            for attempt in range(4):
+            for attempt in range(10):
                 try:
                     existing = conn.execute(
                         """
@@ -8192,10 +8192,10 @@ class Handler(BaseHTTPRequestHandler):
                         conn.rollback()
                     except Exception:
                         pass
-                    if attempt >= 3:
+                    if attempt >= 9:
                         json_response(self, {"error": "database is locked"}, status=503)
                         return
-                    time.sleep(0.25 * (attempt + 1))
+                    time.sleep(0.35 * (attempt + 1))
             if not link_done:
                 json_response(self, {"error": "No se pudo vincular el servicio"}, status=503)
                 return
@@ -8219,8 +8219,8 @@ class Handler(BaseHTTPRequestHandler):
             }
             if sync_warning:
                 response["warning"] = sync_warning
-            json_response(self, response)
             conn.commit()
+            json_response(self, response)
             return
         elif parsed.path == "/api/clientes_link_delete":
             rel_id = payload.get("id")
@@ -8274,7 +8274,7 @@ class Handler(BaseHTTPRequestHandler):
             sync = {"linked": 0, "docs": 0}
             sync_warning = None
             updated = False
-            for attempt in range(4):
+            for attempt in range(10):
                 try:
                     set_clause = ", ".join([f"{key} = ?" for key in updates])
                     values = list(updates.values()) + [now, cliente_id]
@@ -8309,18 +8309,18 @@ class Handler(BaseHTTPRequestHandler):
                         conn.rollback()
                     except Exception:
                         pass
-                    if attempt >= 3:
+                    if attempt >= 9:
                         json_response(self, {"error": "database is locked"}, status=503)
                         return
-                    time.sleep(0.25 * (attempt + 1))
+                    time.sleep(0.35 * (attempt + 1))
             if not updated:
                 json_response(self, {"error": "No se pudo guardar el cliente"}, status=503)
                 return
             response = {"ok": True, "id": cliente_id, "sync": sync}
             if sync_warning:
                 response["warning"] = sync_warning
-            json_response(self, response)
             conn.commit()
+            json_response(self, response)
             return
         elif parsed.path == "/api/cliente_empresa_update":
             rel_id = payload.get("id")
@@ -8334,7 +8334,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             sync = {"linked": 0, "docs": 0}
             updated = False
-            for attempt in range(4):
+            for attempt in range(10):
                 try:
                     set_clause = ", ".join([f"{key} = ?" for key in updates])
                     values = list(updates.values()) + [now, rel_id]
@@ -8357,15 +8357,15 @@ class Handler(BaseHTTPRequestHandler):
                         conn.rollback()
                     except Exception:
                         pass
-                    if attempt >= 3:
+                    if attempt >= 9:
                         json_response(self, {"error": "database is locked"}, status=503)
                         return
-                    time.sleep(0.25 * (attempt + 1))
+                    time.sleep(0.35 * (attempt + 1))
             if not updated:
                 json_response(self, {"error": "No se pudo guardar el vínculo"}, status=503)
                 return
-            json_response(self, {"ok": True, "id": rel_id, "sync": sync})
             conn.commit()
+            json_response(self, {"ok": True, "id": rel_id, "sync": sync})
             return
         elif parsed.path == "/api/cliente_gestoria_update":
             cliente_id = payload.get("cliente_id")
