@@ -8128,6 +8128,7 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "servicio requerido"}, status=400)
                 return
             sync = {"linked": 0, "docs": 0}
+            sync_warning = None
             link_done = False
             for attempt in range(4):
                 try:
@@ -8182,8 +8183,6 @@ class Handler(BaseHTTPRequestHandler):
                                 now,
                             ),
                         )
-                    if normalize_service_key(servicio) == "seguros":
-                        sync = autolink_uploaded_seguros_for_cliente(conn, cliente_id, empresa_id, now)
                     link_done = True
                     break
                 except sqlite3.OperationalError as exc:
@@ -8200,7 +8199,27 @@ class Handler(BaseHTTPRequestHandler):
             if not link_done:
                 json_response(self, {"error": "No se pudo vincular el servicio"}, status=503)
                 return
-            json_response(self, {"ok": True, "cliente_id": cliente_id, "empresa_id": empresa_id, "servicio": servicio, "sync": sync})
+            # Sincronización secundaria en best-effort para no bloquear la operación principal.
+            if normalize_service_key(servicio) == "seguros":
+                try:
+                    sync = autolink_uploaded_seguros_for_cliente(conn, cliente_id, empresa_id, now)
+                except sqlite3.OperationalError as exc:
+                    if "database is locked" in str(exc).lower():
+                        sync_warning = "sync_deferred_database_locked"
+                    else:
+                        raise
+                except Exception as exc:
+                    sync_warning = f"sync_error: {type(exc).__name__}"
+            response = {
+                "ok": True,
+                "cliente_id": cliente_id,
+                "empresa_id": empresa_id,
+                "servicio": servicio,
+                "sync": sync,
+            }
+            if sync_warning:
+                response["warning"] = sync_warning
+            json_response(self, response)
             conn.commit()
             return
         elif parsed.path == "/api/clientes_link_delete":
