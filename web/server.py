@@ -8127,60 +8127,79 @@ class Handler(BaseHTTPRequestHandler):
             if not servicio:
                 json_response(self, {"error": "servicio requerido"}, status=400)
                 return
-            existing = conn.execute(
-                """
-                SELECT id
-                FROM clientes_empresas
-                WHERE cliente_id = ?
-                  AND empresa_id = ?
-                  AND LOWER(servicio) = LOWER(?)
-                LIMIT 1
-                """,
-                (cliente_id, empresa_id, servicio),
-            ).fetchone()
-            if existing:
-                conn.execute(
-                    """
-                    UPDATE clientes_empresas
-                    SET estado = COALESCE(?, estado),
-                        fecha_inicio = COALESCE(?, fecha_inicio),
-                        fecha_fin = COALESCE(?, fecha_fin),
-                        updated_at = datetime(?)
-                    WHERE id = ?
-                    """,
-                    (
-                        payload.get("estado"),
-                        payload.get("fecha_inicio"),
-                        payload.get("fecha_fin"),
-                        now,
-                        existing["id"],
-                    ),
-                )
-            else:
-                conn.execute(
-                    """
-                    INSERT INTO clientes_empresas (
-                      id, cliente_id, empresa_id, servicio, estado,
-                      fecha_inicio, fecha_fin, created_at, updated_at
-                    ) VALUES (
-                      ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
-                    )
-                    """,
-                    (
-                        os.urandom(16).hex(),
-                        cliente_id,
-                        empresa_id,
-                        servicio,
-                        payload.get("estado"),
-                        payload.get("fecha_inicio"),
-                        payload.get("fecha_fin"),
-                        now,
-                        now,
-                    ),
-                )
             sync = {"linked": 0, "docs": 0}
-            if normalize_service_key(servicio) == "seguros":
-                sync = autolink_uploaded_seguros_for_cliente(conn, cliente_id, empresa_id, now)
+            link_done = False
+            for attempt in range(4):
+                try:
+                    existing = conn.execute(
+                        """
+                        SELECT id
+                        FROM clientes_empresas
+                        WHERE cliente_id = ?
+                          AND empresa_id = ?
+                          AND LOWER(servicio) = LOWER(?)
+                        LIMIT 1
+                        """,
+                        (cliente_id, empresa_id, servicio),
+                    ).fetchone()
+                    if existing:
+                        conn.execute(
+                            """
+                            UPDATE clientes_empresas
+                            SET estado = COALESCE(?, estado),
+                                fecha_inicio = COALESCE(?, fecha_inicio),
+                                fecha_fin = COALESCE(?, fecha_fin),
+                                updated_at = datetime(?)
+                            WHERE id = ?
+                            """,
+                            (
+                                payload.get("estado"),
+                                payload.get("fecha_inicio"),
+                                payload.get("fecha_fin"),
+                                now,
+                                existing["id"],
+                            ),
+                        )
+                    else:
+                        conn.execute(
+                            """
+                            INSERT INTO clientes_empresas (
+                              id, cliente_id, empresa_id, servicio, estado,
+                              fecha_inicio, fecha_fin, created_at, updated_at
+                            ) VALUES (
+                              ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                            )
+                            """,
+                            (
+                                os.urandom(16).hex(),
+                                cliente_id,
+                                empresa_id,
+                                servicio,
+                                payload.get("estado"),
+                                payload.get("fecha_inicio"),
+                                payload.get("fecha_fin"),
+                                now,
+                                now,
+                            ),
+                        )
+                    if normalize_service_key(servicio) == "seguros":
+                        sync = autolink_uploaded_seguros_for_cliente(conn, cliente_id, empresa_id, now)
+                    link_done = True
+                    break
+                except sqlite3.OperationalError as exc:
+                    if "database is locked" not in str(exc).lower():
+                        raise
+                    try:
+                        conn.rollback()
+                    except Exception:
+                        pass
+                    if attempt >= 3:
+                        json_response(self, {"error": "database is locked"}, status=503)
+                        return
+                    time.sleep(0.25 * (attempt + 1))
+            if not link_done:
+                json_response(self, {"error": "No se pudo vincular el servicio"}, status=503)
+                return
             json_response(self, {"ok": True, "cliente_id": cliente_id, "empresa_id": empresa_id, "servicio": servicio, "sync": sync})
             conn.commit()
             return
