@@ -1611,6 +1611,7 @@ const SEGUROS_RAMOS_CATALOGO = [
 ];
 const SEGUROS_LEGACY_STATUS_KEY = "migrado legado";
 const SEGUROS_ONLY_UPLOADED_MODE = true;
+const SEGUROS_DISABLE_BDT_LINKING = true;
 
 const createOption = (value, label) => {
   const option = document.createElement("option");
@@ -2889,7 +2890,7 @@ const openSegurosCrm = () => {
   if (segurosCrmClienteInput) segurosCrmClienteInput.value = "";
   if (segurosCrmClienteId) segurosCrmClienteId.value = "";
   setCrmMode("seguros");
-  setSegurosTab("dashboard");
+  setSegurosTab("alta");
   if (viewTabs) viewTabs.classList.add("hidden");
   if (segurosCrmSection) segurosCrmSection.classList.remove("hidden");
   if (tableToolbar) tableToolbar.classList.add("hidden");
@@ -6743,6 +6744,9 @@ const setGestoriaCrmView = (viewName = "crm") => {
 const setSegurosTab = (name) => {
   const tabs = document.getElementById("segurosTabs");
   if (!tabs) return;
+  if (SEGUROS_DISABLE_BDT_LINKING && name === "bdt") {
+    name = "alta";
+  }
   const sections = Array.from(document.querySelectorAll(".seguros-tab"));
   state.segurosTab = name;
   tabs.querySelectorAll(".tab").forEach((btn) => {
@@ -6761,13 +6765,17 @@ const setSegurosTab = (name) => {
 const initSegurosTabs = () => {
   const tabs = document.getElementById("segurosTabs");
   if (!tabs || tabs.dataset.ready === "1") return;
+  if (SEGUROS_DISABLE_BDT_LINKING) {
+    const bdtBtn = tabs.querySelector('[data-seguros-tab="bdt"]');
+    if (bdtBtn) bdtBtn.classList.add("hidden");
+  }
   tabs.dataset.ready = "1";
   tabs.addEventListener("click", (event) => {
     const btn = event.target.closest(".tab");
     if (!btn || !btn.dataset.segurosTab) return;
     setSegurosTab(btn.dataset.segurosTab);
   });
-  setSegurosTab(state.segurosTab || "dashboard");
+  setSegurosTab(state.segurosTab || "alta");
 };
 
 document.addEventListener("click", (event) => {
@@ -11299,6 +11307,12 @@ const saveSegurosOcrRecord = async () => {
     segurosOcrFile && segurosOcrFile.files && segurosOcrFile.files.length
       ? segurosOcrFile.files[0]
       : null;
+  if (!file) {
+    if (segurosOcrSaveStatus) {
+      segurosOcrSaveStatus.textContent = "Adjunta la póliza en PDF para guardarla y documentarla.";
+    }
+    return;
+  }
   if (file) {
     try {
       const upload = await uploadFileToS3(file, "seguros", segurosOcrSaveStatus);
@@ -11331,6 +11345,19 @@ const saveSegurosOcrRecord = async () => {
       }
       if (data.cliente_id) {
         state.segurosOcrClienteId = data.cliente_id;
+        const fincas = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
+        if (fincas) {
+          fetch("/api/clientes_link", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              cliente_id: data.cliente_id,
+              empresa_id: fincas.id,
+              servicio: "Seguros",
+              estado: "Activo",
+            }),
+          }).catch(() => {});
+        }
       }
       if (segurosOcrSaveStatus) {
         segurosOcrSaveStatus.textContent = "Póliza guardada.";
