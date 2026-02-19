@@ -1611,7 +1611,7 @@ const SEGUROS_RAMOS_CATALOGO = [
 ];
 const SEGUROS_LEGACY_STATUS_KEY = "migrado legado";
 const SEGUROS_ONLY_UPLOADED_MODE = true;
-const SEGUROS_DISABLE_BDT_LINKING = true;
+const SEGUROS_DISABLE_BDT_LINKING = false;
 
 const createOption = (value, label) => {
   const option = document.createElement("option");
