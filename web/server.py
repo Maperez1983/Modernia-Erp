@@ -8252,32 +8252,51 @@ class Handler(BaseHTTPRequestHandler):
             if not updates:
                 json_response(self, {"error": "Sin cambios"}, status=400)
                 return
-            set_clause = ", ".join([f"{key} = ?" for key in updates])
-            values = list(updates.values()) + [now, cliente_id]
-            conn.execute(
-                f"UPDATE clientes SET {set_clause}, updated_at = datetime(?) WHERE id = ?",
-                values,
-            )
-            # Si el cliente ya tiene servicio seguros, reintentar autovinculación por nombre.
             sync = {"linked": 0, "docs": 0}
             sync_warning = None
-            try:
-                rels = conn.execute(
-                    """
-                    SELECT empresa_id
-                    FROM clientes_empresas
-                    WHERE cliente_id = ?
-                      AND LOWER(servicio) = 'seguros'
-                    """,
-                    (cliente_id,),
-                ).fetchall()
-                for rel in rels:
-                    partial = autolink_uploaded_seguros_for_cliente(conn, cliente_id, rel["empresa_id"], now)
-                    sync["linked"] += partial.get("linked", 0)
-                    sync["docs"] += partial.get("docs", 0)
-            except Exception as exc:
-                # No bloqueamos el guardado de datos personales por un fallo en la sincronización secundaria.
-                sync_warning = f"sync_error: {type(exc).__name__}"
+            updated = False
+            for attempt in range(4):
+                try:
+                    set_clause = ", ".join([f"{key} = ?" for key in updates])
+                    values = list(updates.values()) + [now, cliente_id]
+                    conn.execute(
+                        f"UPDATE clientes SET {set_clause}, updated_at = datetime(?) WHERE id = ?",
+                        values,
+                    )
+                    # Si el cliente ya tiene servicio seguros, reintentar autovinculación por nombre.
+                    try:
+                        rels = conn.execute(
+                            """
+                            SELECT empresa_id
+                            FROM clientes_empresas
+                            WHERE cliente_id = ?
+                              AND LOWER(servicio) = 'seguros'
+                            """,
+                            (cliente_id,),
+                        ).fetchall()
+                        for rel in rels:
+                            partial = autolink_uploaded_seguros_for_cliente(conn, cliente_id, rel["empresa_id"], now)
+                            sync["linked"] += partial.get("linked", 0)
+                            sync["docs"] += partial.get("docs", 0)
+                    except Exception as exc:
+                        # No bloqueamos el guardado de datos personales por un fallo en la sincronización secundaria.
+                        sync_warning = f"sync_error: {type(exc).__name__}"
+                    updated = True
+                    break
+                except sqlite3.OperationalError as exc:
+                    if "database is locked" not in str(exc).lower():
+                        raise
+                    try:
+                        conn.rollback()
+                    except Exception:
+                        pass
+                    if attempt >= 3:
+                        json_response(self, {"error": "database is locked"}, status=503)
+                        return
+                    time.sleep(0.25 * (attempt + 1))
+            if not updated:
+                json_response(self, {"error": "No se pudo guardar el cliente"}, status=503)
+                return
             response = {"ok": True, "id": cliente_id, "sync": sync}
             if sync_warning:
                 response["warning"] = sync_warning
@@ -8294,19 +8313,38 @@ class Handler(BaseHTTPRequestHandler):
             if not updates:
                 json_response(self, {"error": "Sin cambios"}, status=400)
                 return
-            set_clause = ", ".join([f"{key} = ?" for key in updates])
-            values = list(updates.values()) + [now, rel_id]
-            conn.execute(
-                f"UPDATE clientes_empresas SET {set_clause}, updated_at = datetime(?) WHERE id = ?",
-                values,
-            )
-            rel = conn.execute(
-                "SELECT cliente_id, empresa_id, servicio FROM clientes_empresas WHERE id = ?",
-                (rel_id,),
-            ).fetchone()
             sync = {"linked": 0, "docs": 0}
-            if rel and normalize_service_key(rel["servicio"]) == "seguros":
-                sync = autolink_uploaded_seguros_for_cliente(conn, rel["cliente_id"], rel["empresa_id"], now)
+            updated = False
+            for attempt in range(4):
+                try:
+                    set_clause = ", ".join([f"{key} = ?" for key in updates])
+                    values = list(updates.values()) + [now, rel_id]
+                    conn.execute(
+                        f"UPDATE clientes_empresas SET {set_clause}, updated_at = datetime(?) WHERE id = ?",
+                        values,
+                    )
+                    rel = conn.execute(
+                        "SELECT cliente_id, empresa_id, servicio FROM clientes_empresas WHERE id = ?",
+                        (rel_id,),
+                    ).fetchone()
+                    if rel and normalize_service_key(rel["servicio"]) == "seguros":
+                        sync = autolink_uploaded_seguros_for_cliente(conn, rel["cliente_id"], rel["empresa_id"], now)
+                    updated = True
+                    break
+                except sqlite3.OperationalError as exc:
+                    if "database is locked" not in str(exc).lower():
+                        raise
+                    try:
+                        conn.rollback()
+                    except Exception:
+                        pass
+                    if attempt >= 3:
+                        json_response(self, {"error": "database is locked"}, status=503)
+                        return
+                    time.sleep(0.25 * (attempt + 1))
+            if not updated:
+                json_response(self, {"error": "No se pudo guardar el vínculo"}, status=503)
+                return
             json_response(self, {"ok": True, "id": rel_id, "sync": sync})
             conn.commit()
             return
