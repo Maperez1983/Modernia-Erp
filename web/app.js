@@ -10764,7 +10764,10 @@ const setOcrClienteUi = (ctx, { status = "", showCreate = false, showAdd = false
   if (ctx.openBtn) ctx.openBtn.classList.toggle("hidden", !showOpen);
 };
 
-const resetSegurosOcrAggregator = () => {
+const resetSegurosOcrAggregator = (options = {}) => {
+  const keepCliente = Boolean(options.keepCliente);
+  const keepStatus = String(options.status || "");
+  const previousClienteId = state.segurosOcrClienteId || "";
   const clearValue = (el) => {
     if (el) el.value = "";
   };
@@ -10791,9 +10794,18 @@ const resetSegurosOcrAggregator = () => {
   }
   if (segurosOcrPreview) segurosOcrPreview.disabled = true;
   if (segurosOcrRaw) segurosOcrRaw.value = "";
-  state.segurosOcrClienteId = "";
+  state.segurosOcrClienteId = keepCliente ? previousClienteId : "";
   state.segurosOcrQuality = null;
-  setOcrClienteUi(getOcrClienteContext(), { status: "", showCreate: false, showAdd: false, showOpen: false });
+  if (keepCliente && state.segurosOcrClienteId) {
+    setOcrClienteUi(getOcrClienteContext(), {
+      status: keepStatus || "Póliza guardada. Puedes abrir la ficha del cliente.",
+      showCreate: false,
+      showAdd: false,
+      showOpen: true,
+    });
+  } else {
+    setOcrClienteUi(getOcrClienteContext(), { status: "", showCreate: false, showAdd: false, showOpen: false });
+  }
   if (segurosOcrSave) {
     segurosOcrSave.removeAttribute("data-record-id");
     segurosOcrSave.textContent = "Guardar póliza";
@@ -11386,7 +11398,10 @@ const saveSegurosOcrRecord = async () => {
       if (segurosOcrSaveStatus) {
         segurosOcrSaveStatus.textContent = "Póliza guardada.";
       }
-      resetSegurosOcrAggregator();
+      resetSegurosOcrAggregator({
+        keepCliente: true,
+        status: "Póliza guardada. Puedes abrir la ficha del cliente.",
+      });
       loadSegurosCrm();
     })
     .catch(() => {
@@ -15576,7 +15591,10 @@ if (segurosOcrSave) {
           if (segurosOcrSaveStatus) {
             segurosOcrSaveStatus.textContent = "Presupuesto convertido.";
           }
-          resetSegurosOcrAggregator();
+          resetSegurosOcrAggregator({
+            keepCliente: true,
+            status: "Póliza guardada. Puedes abrir la ficha del cliente.",
+          });
           segurosOcrSave.removeAttribute("data-record-id");
           segurosOcrSave.textContent = "Guardar";
           loadSegurosCrm();
