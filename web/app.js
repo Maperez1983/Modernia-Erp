@@ -7825,8 +7825,18 @@ const loadHomeFincasStats = (year) => {
 
 const loadClientesStats = () => {
   const serviceParam = getServiceFilterParam();
-  const params = serviceParam ? `?servicio=${encodeURIComponent(serviceParam)}` : "";
-  return api(`/api/clientes_stats${params}`).then((data) => {
+  const params = new URLSearchParams();
+  if (serviceParam) {
+    params.set("servicio", serviceParam);
+  }
+  // En flujo actual de Seguros trabajamos solo con pólizas realmente subidas.
+  if (SEGUROS_ONLY_UPLOADED_MODE && normalizeSimple(serviceParam || "") === "seguros") {
+    const fincas = (state.empresas || []).find((e) => e.nombre === FINCAS_COMPANY);
+    if (fincas?.id) params.set("empresa_id", fincas.id);
+    params.set("source", "seguros");
+    params.set("uploaded_only", "1");
+  }
+  return api(`/api/clientes_stats?${params.toString()}`).then((data) => {
     state.clientesStats = data;
     refreshClientesCardCount();
   });
@@ -7834,8 +7844,17 @@ const loadClientesStats = () => {
 
 const loadClientesList = () => {
   const serviceParam = getServiceFilterParam();
-  const params = serviceParam ? `?servicio=${encodeURIComponent(serviceParam)}` : "";
-  return api(`/api/clientes_list${params}`).then((data) => {
+  const params = new URLSearchParams();
+  if (serviceParam) {
+    params.set("servicio", serviceParam);
+  }
+  if (SEGUROS_ONLY_UPLOADED_MODE && normalizeSimple(serviceParam || "") === "seguros") {
+    const fincas = (state.empresas || []).find((e) => e.nombre === FINCAS_COMPANY);
+    if (fincas?.id) params.set("empresa_id", fincas.id);
+    params.set("source", "seguros");
+    params.set("uploaded_only", "1");
+  }
+  return api(`/api/clientes_list?${params.toString()}`).then((data) => {
     const list = data || [];
     list.sort((a, b) => {
       const nameA = normalizeNombre(formatNombreCliente(a.nombre));

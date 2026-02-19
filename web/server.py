@@ -8798,6 +8798,29 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/clientes_stats":
             servicio = (params.get("servicio", [""])[0] or "").strip()
             services = parse_services_param(servicio)
+            source = (params.get("source", [""])[0] or "").strip().lower()
+            empresa_id = (params.get("empresa_id", [""])[0] or "").strip()
+            uploaded_only = (params.get("uploaded_only", ["1"])[0] or "1").strip() in ("1", "true", "yes")
+            normalized_services = [normalize_service_key(s) for s in services]
+            if source == "seguros" and ("seguros" in normalized_services or not normalized_services):
+                where = ["s.cliente_id IS NOT NULL"]
+                values = []
+                if empresa_id:
+                    where.append("s.empresa_id = ?")
+                    values.append(empresa_id)
+                where.append(f"({uploaded_policy_filter('s')} OR ? = 0)")
+                values.append(1 if uploaded_only else 0)
+                total = conn.execute(
+                    f"""
+                    SELECT COUNT(DISTINCT c.id) AS total
+                    FROM clientes c
+                    JOIN seguros s ON s.cliente_id = c.id
+                    WHERE {' AND '.join(where)}
+                    """,
+                    values,
+                ).fetchone()
+                json_response(self, {"total": total["total"] if total else 0})
+                return
             if services:
                 placeholders = ",".join(["?"] * len(services))
                 total = conn.execute(
@@ -8853,6 +8876,30 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/clientes_list":
             servicio = (params.get("servicio", [""])[0] or "").strip()
             services = parse_services_param(servicio)
+            source = (params.get("source", [""])[0] or "").strip().lower()
+            empresa_id = (params.get("empresa_id", [""])[0] or "").strip()
+            uploaded_only = (params.get("uploaded_only", ["1"])[0] or "1").strip() in ("1", "true", "yes")
+            normalized_services = [normalize_service_key(s) for s in services]
+            if source == "seguros" and ("seguros" in normalized_services or not normalized_services):
+                where = ["s.cliente_id IS NOT NULL"]
+                values = []
+                if empresa_id:
+                    where.append("s.empresa_id = ?")
+                    values.append(empresa_id)
+                where.append(f"({uploaded_policy_filter('s')} OR ? = 0)")
+                values.append(1 if uploaded_only else 0)
+                rows = conn.execute(
+                    f"""
+                    SELECT DISTINCT c.id, c.nombre
+                    FROM clientes c
+                    JOIN seguros s ON s.cliente_id = c.id
+                    WHERE {' AND '.join(where)}
+                    ORDER BY c.nombre
+                    """,
+                    values,
+                ).fetchall()
+                json_response(self, [dict(r) for r in rows])
+                return
             if services:
                 placeholders = ",".join(["?"] * len(services))
                 rows = conn.execute(
