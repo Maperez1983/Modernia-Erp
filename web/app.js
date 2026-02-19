@@ -340,6 +340,20 @@ const startSegurosOcrJob = async (payload) =>
     body: JSON.stringify(payload),
   }).then((res) => res.json());
 
+const runSegurosOcrDirect = async (file, extraPayload = {}) => {
+  const fileBase64 = await fileToBase64(file);
+  const resp = await fetch("/api/seguros_ocr", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      ...extraPayload,
+      file_base64: fileBase64,
+      filename: file.name || "poliza.pdf",
+    }),
+  });
+  return resp.json();
+};
+
 const pollOcrJob = async (jobId, onUpdate, timeoutMs = 10 * 60 * 1000) => {
   const started = Date.now();
   let delay = 1200;
@@ -15418,17 +15432,24 @@ if (segurosOcrButton) {
       .then(async (job) => {
         if (!job || job.error || !job.job_id) {
           if (segurosOcrStatus) {
-            segurosOcrStatus.textContent = job?.detail || job?.error || "No se pudo iniciar OCR.";
+            segurosOcrStatus.textContent = "OCR en cola falló. Reintentando en modo directo...";
           }
-          return null;
+          return runSegurosOcrDirect(file, { empresa_nombre: FINCAS_COMPANY });
         }
         if (segurosOcrStatus) segurosOcrStatus.textContent = "OCR en cola...";
-        const result = await pollOcrJob(job.job_id, (data) => {
-          if (segurosOcrStatus && data.status === "processing") {
-            segurosOcrStatus.textContent = "Procesando OCR...";
+        try {
+          const result = await pollOcrJob(job.job_id, (data) => {
+            if (segurosOcrStatus && data.status === "processing") {
+              segurosOcrStatus.textContent = "Procesando OCR...";
+            }
+          });
+          return result;
+        } catch (_err) {
+          if (segurosOcrStatus) {
+            segurosOcrStatus.textContent = "OCR asíncrono falló. Reintentando en modo directo...";
           }
-        });
-        return result;
+          return runSegurosOcrDirect(file, { empresa_nombre: FINCAS_COMPANY });
+        }
       })
       .then((data) => {
         if (!data) return;
