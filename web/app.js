@@ -678,6 +678,46 @@ const showClienteDocOcrModal = (fields = {}, meta = {}) =>
     modal.classList.add("open");
   });
 
+const postJsonWithDbRetry = async (url, payload, options = {}) => {
+  const maxRetries = Math.max(1, Number(options.maxRetries || 5));
+  const baseDelayMs = Math.max(50, Number(options.baseDelayMs || 350));
+  let lastError = null;
+  for (let attempt = 0; attempt < maxRetries; attempt += 1) {
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload || {}),
+      });
+      const text = await res.text();
+      let data = {};
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch (_) {
+        data = { error: text || `HTTP ${res.status}` };
+      }
+      const errText = String(data?.error || data?.detail || "");
+      const locked = /database is locked/i.test(errText) || res.status === 502 || res.status === 503;
+      if (!res.ok || data?.error) {
+        if (locked && attempt < maxRetries - 1) {
+          await new Promise((resolve) => setTimeout(resolve, baseDelayMs * (attempt + 1)));
+          continue;
+        }
+        throw new Error(data?.error || data?.detail || `HTTP ${res.status}`);
+      }
+      return data;
+    } catch (err) {
+      lastError = err;
+      const isLocked = /database is locked/i.test(String(err?.message || ""));
+      if (!isLocked || attempt >= maxRetries - 1) {
+        throw err;
+      }
+      await new Promise((resolve) => setTimeout(resolve, baseDelayMs * (attempt + 1)));
+    }
+  }
+  throw lastError || new Error("Error de base de datos");
+};
+
 const runClienteSegurosDocOcr = async (row, statusEl, buttonEl) => {
   if (!row) return;
   if (buttonEl) buttonEl.disabled = true;
@@ -742,10 +782,7 @@ const runClienteSegurosDocOcr = async (row, statusEl, buttonEl) => {
     }
     let seguroId = String(row.seguro_id || row.referencia_id || "").trim();
     if (seguroId) {
-      const enrichResp = await fetch("/api/seguros_enrich", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      const enrichResp = await postJsonWithDbRetry("/api/seguros_enrich", {
           id: seguroId,
           cliente_id: payloadBase.cliente_id,
           tomador: payloadBase.tomador,
@@ -756,15 +793,11 @@ const runClienteSegurosDocOcr = async (row, statusEl, buttonEl) => {
           fecha_vencimiento: payloadBase.fecha_vencimiento,
           prima_neta: payloadBase.prima_neta,
           prima_total: payloadBase.prima_total,
-        }),
-      }).then((res) => res.json());
+      });
       if (enrichResp?.error) {
         throw new Error(enrichResp.error);
       }
-      const updateResp = await fetch("/api/seguros_update", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      const updateResp = await postJsonWithDbRetry("/api/seguros_update", {
           id: seguroId,
           cliente_id: payloadBase.cliente_id,
           poliza_numero: payloadBase.poliza_numero,
@@ -772,16 +805,12 @@ const runClienteSegurosDocOcr = async (row, statusEl, buttonEl) => {
           fecha_vencimiento: payloadBase.fecha_vencimiento,
           poliza_key: payloadBase.poliza_key,
           poliza_url: payloadBase.poliza_url,
-        }),
-      }).then((res) => res.json());
+      });
       if (updateResp?.error) {
         throw new Error(updateResp.error);
       }
     } else {
-      const createResp = await fetch("/api/seguros", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      const createResp = await postJsonWithDbRetry("/api/seguros", {
           empresa_nombre: FINCAS_COMPANY,
           cliente_id: payloadBase.cliente_id,
           mes_creacion: mesCreacion,
@@ -797,26 +826,21 @@ const runClienteSegurosDocOcr = async (row, statusEl, buttonEl) => {
           poliza_key: payloadBase.poliza_key,
           poliza_url: payloadBase.poliza_url,
           ocr_quality: payloadBase.ocr_quality,
-        }),
-      }).then((res) => res.json());
+      });
       if (createResp?.error) {
         throw new Error(createResp.error);
       }
       seguroId = String(createResp.id || "").trim();
     }
     if (row.id) {
-      await fetch("/api/gestoria_docs_update", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          id: row.id,
-          referencia_tipo: "seguros",
-          referencia_id: seguroId || row.referencia_id || "",
-          estado: "Recibido",
-          calidad_ocr: payloadBase.calidad_ocr,
-          campos_ocr: payloadBase.campos_ocr,
-        }),
-      }).then((res) => res.json());
+      await postJsonWithDbRetry("/api/gestoria_docs_update", {
+        id: row.id,
+        referencia_tipo: "seguros",
+        referencia_id: seguroId || row.referencia_id || "",
+        estado: "Recibido",
+        calidad_ocr: payloadBase.calidad_ocr,
+        campos_ocr: payloadBase.campos_ocr,
+      });
     }
     setStatus("Póliza procesada y vinculada.");
     if (state.currentClienteId) {
