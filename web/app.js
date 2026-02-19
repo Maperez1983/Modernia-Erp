@@ -7848,6 +7848,14 @@ const loadClientesList = () => {
   });
 };
 
+const refreshClientesSummary = async () => {
+  try {
+    const [_, list] = await Promise.all([loadClientesStats(), loadClientesList()]);
+    renderClientesSelects(list || []);
+    renderCompanyCards();
+  } catch (_) {}
+};
+
 const renderClientesSelects = (clientes) => {
   if (clientesSelect) {
     clientesSelect.innerHTML = "";
@@ -11044,6 +11052,7 @@ const createClienteFromOcr = async (type, fields) => {
     }
     ctx.setId(finalId);
     await linkClienteSegurosService(finalId, ctx);
+    await refreshClientesSummary();
     setOcrClienteUi(ctx, {
       status: existed ? "Cliente ya existía. Servicio Seguros asignado." : "Cliente creado y asignado a Seguros.",
       showCreate: false,
@@ -11402,6 +11411,7 @@ const saveSegurosOcrRecord = async () => {
         keepCliente: true,
         status: "Póliza guardada. Puedes abrir la ficha del cliente.",
       });
+      refreshClientesSummary();
       loadSegurosCrm();
     })
     .catch(() => {
@@ -15595,6 +15605,7 @@ if (segurosOcrSave) {
             keepCliente: true,
             status: "Póliza guardada. Puedes abrir la ficha del cliente.",
           });
+          refreshClientesSummary();
           segurosOcrSave.removeAttribute("data-record-id");
           segurosOcrSave.textContent = "Guardar";
           loadSegurosCrm();
