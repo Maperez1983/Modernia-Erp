@@ -8208,21 +8208,29 @@ class Handler(BaseHTTPRequestHandler):
                 values,
             )
             # Si el cliente ya tiene servicio seguros, reintentar autovinculación por nombre.
-            rels = conn.execute(
-                """
-                SELECT empresa_id
-                FROM clientes_empresas
-                WHERE cliente_id = ?
-                  AND LOWER(servicio) = 'seguros'
-                """,
-                (cliente_id,),
-            ).fetchall()
             sync = {"linked": 0, "docs": 0}
-            for rel in rels:
-                partial = autolink_uploaded_seguros_for_cliente(conn, cliente_id, rel["empresa_id"], now)
-                sync["linked"] += partial.get("linked", 0)
-                sync["docs"] += partial.get("docs", 0)
-            json_response(self, {"ok": True, "id": cliente_id, "sync": sync})
+            sync_warning = None
+            try:
+                rels = conn.execute(
+                    """
+                    SELECT empresa_id
+                    FROM clientes_empresas
+                    WHERE cliente_id = ?
+                      AND LOWER(servicio) = 'seguros'
+                    """,
+                    (cliente_id,),
+                ).fetchall()
+                for rel in rels:
+                    partial = autolink_uploaded_seguros_for_cliente(conn, cliente_id, rel["empresa_id"], now)
+                    sync["linked"] += partial.get("linked", 0)
+                    sync["docs"] += partial.get("docs", 0)
+            except Exception as exc:
+                # No bloqueamos el guardado de datos personales por un fallo en la sincronización secundaria.
+                sync_warning = f"sync_error: {type(exc).__name__}"
+            response = {"ok": True, "id": cliente_id, "sync": sync}
+            if sync_warning:
+                response["warning"] = sync_warning
+            json_response(self, response)
             conn.commit()
             return
         elif parsed.path == "/api/cliente_empresa_update":
