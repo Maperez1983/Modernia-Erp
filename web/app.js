@@ -14086,8 +14086,13 @@ const openClienteDetail = (id) => {
     let hasHipotecas = false;
     if (clienteEmpresasList) {
       const empresas = data.empresas || [];
+      const isActiveService = (row) => {
+        const estado = normalizeSimple(row?.estado || "activo");
+        return !["inactivo", "baja", "cancelado", "anulado", "finalizado"].includes(estado);
+      };
+      const activeEmpresas = empresas.filter((row) => isActiveService(row));
       const serviceSet = new Set(
-        empresas.map((row) => normalizeSimple(row.servicio || ""))
+        activeEmpresas.map((row) => normalizeSimple(row.servicio || ""))
       );
       state.currentClienteServices = Array.from(serviceSet);
       hasGestoria = serviceSet.has("gestoria") || serviceSet.has("gestoría");
