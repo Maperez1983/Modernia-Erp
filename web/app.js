@@ -7838,7 +7838,9 @@ const loadHomeFincasStats = (year) => {
 };
 
 const loadClientesStats = () => {
-  const serviceParam = getServiceFilterParam();
+  const rawServiceParam = getServiceFilterParam();
+  const serviceParam =
+    rawServiceParam || (SEGUROS_ONLY_UPLOADED_MODE ? "seguros" : "");
   const params = new URLSearchParams();
   if (serviceParam) {
     params.set("servicio", serviceParam);
@@ -7857,7 +7859,9 @@ const loadClientesStats = () => {
 };
 
 const loadClientesList = () => {
-  const serviceParam = getServiceFilterParam();
+  const rawServiceParam = getServiceFilterParam();
+  const serviceParam =
+    rawServiceParam || (SEGUROS_ONLY_UPLOADED_MODE ? "seguros" : "");
   const params = new URLSearchParams();
   if (serviceParam) {
     params.set("servicio", serviceParam);
@@ -8096,9 +8100,19 @@ const loadClientesTable = () => {
   if (estado) {
     params.set("estado", estado);
   }
-  const serviceParam = getServiceFilterParam();
+  const rawServiceParam = getServiceFilterParam();
+  const serviceParam =
+    rawServiceParam || (SEGUROS_ONLY_UPLOADED_MODE ? "seguros" : "");
   if (serviceParam) {
     params.set("servicio", serviceParam);
+  }
+  if (SEGUROS_ONLY_UPLOADED_MODE && normalizeSimple(serviceParam || "") === "seguros") {
+    const fincas = (state.empresas || []).find((e) => e.nombre === FINCAS_COMPANY);
+    if (fincas?.id && !empresaId) {
+      params.set("empresa_id", fincas.id);
+    }
+    params.set("source", "seguros");
+    params.set("uploaded_only", "1");
   }
   return api(`/api/clientes?${params.toString()}`).then((data) => {
     const rows = data.rows || [];

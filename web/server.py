@@ -10005,57 +10005,105 @@ class Handler(BaseHTTPRequestHandler):
             estado = params.get("estado", [""])[0].strip()
             servicio = params.get("servicio", [""])[0].strip()
             services = parse_services_param(servicio)
+            source = (params.get("source", [""])[0] or "").strip().lower()
+            uploaded_only = (params.get("uploaded_only", ["1"])[0] or "1").strip() in ("1", "true", "yes")
+            normalized_services = [normalize_service_key(s) for s in services]
             include_id = params.get("include_id", [""])[0] == "1"
             limit_param = params.get("limit", [""])[0].strip()
-            where = []
-            values = []
-            if services:
-                placeholders = ",".join(["?"] * len(services))
-                where.append(f"LOWER(ce.servicio) IN ({placeholders})")
-                values.extend(services)
-            if empresa_id:
-                where.append("ce.empresa_id = ?")
-                values.append(empresa_id)
-            if q:
-                where.append(
-                    "(c.nombre LIKE ? OR c.nif LIKE ? OR c.telefono LIKE ? OR c.email LIKE ?)"
-                )
-                values.extend([f"%{q}%"] * 4)
-            if estado:
-                where.append("c.estado = ?")
-                values.append(estado)
-            where_clause = f"WHERE {' AND '.join(where)}" if where else ""
-            join_clause = "JOIN clientes_empresas ce ON ce.cliente_id = c.id" if services else "LEFT JOIN clientes_empresas ce ON ce.cliente_id = c.id"
             select_id = "c.id, " if include_id else ""
             limit_clause = "LIMIT 500"
             if limit_param.isdigit():
                 limit_clause = f"LIMIT {int(limit_param)}"
-            rows = conn.execute(
-                f"""
-                SELECT
-                  {select_id}
-                  c.nombre,
-                  c.tipo_persona,
-                  c.nif,
-                  c.telefono,
-                  c.email,
-                  c.fecha_nacimiento,
-                  c.direccion,
-                  c.codigo_postal,
-                  c.poblacion,
-                  c.provincia,
-                  GROUP_CONCAT(e.nombre, ' | ') AS empresas,
-                  GROUP_CONCAT(ce.servicio, ' | ') AS servicios
-                FROM clientes c
-                {join_clause}
-                LEFT JOIN empresas e ON e.id = ce.empresa_id
-                {where_clause}
-                GROUP BY c.id
-                ORDER BY c.nombre
-                {limit_clause}
-                """,
-                values,
-            ).fetchall()
+            if source == "seguros" and ("seguros" in normalized_services or not normalized_services):
+                where = ["s.cliente_id IS NOT NULL"]
+                values = []
+                if empresa_id:
+                    where.append("s.empresa_id = ?")
+                    values.append(empresa_id)
+                if q:
+                    where.append(
+                        "(c.nombre LIKE ? OR c.nif LIKE ? OR c.telefono LIKE ? OR c.email LIKE ?)"
+                    )
+                    values.extend([f"%{q}%"] * 4)
+                if estado:
+                    where.append("c.estado = ?")
+                    values.append(estado)
+                where.append(f"({uploaded_policy_filter('s')} OR ? = 0)")
+                values.append(1 if uploaded_only else 0)
+                where_clause = f"WHERE {' AND '.join(where)}"
+                rows = conn.execute(
+                    f"""
+                    SELECT
+                      {select_id}
+                      c.nombre,
+                      c.tipo_persona,
+                      c.nif,
+                      c.telefono,
+                      c.email,
+                      c.fecha_nacimiento,
+                      c.direccion,
+                      c.codigo_postal,
+                      c.poblacion,
+                      c.provincia,
+                      GROUP_CONCAT(e.nombre, ' | ') AS empresas,
+                      GROUP_CONCAT(COALESCE(NULLIF(ce.servicio, ''), 'seguros'), ' | ') AS servicios
+                    FROM clientes c
+                    JOIN seguros s ON s.cliente_id = c.id
+                    LEFT JOIN clientes_empresas ce ON ce.cliente_id = c.id AND ce.empresa_id = s.empresa_id
+                    LEFT JOIN empresas e ON e.id = s.empresa_id
+                    {where_clause}
+                    GROUP BY c.id
+                    ORDER BY c.nombre
+                    {limit_clause}
+                    """,
+                    values,
+                ).fetchall()
+            else:
+                where = []
+                values = []
+                if services:
+                    placeholders = ",".join(["?"] * len(services))
+                    where.append(f"LOWER(ce.servicio) IN ({placeholders})")
+                    values.extend(services)
+                if empresa_id:
+                    where.append("ce.empresa_id = ?")
+                    values.append(empresa_id)
+                if q:
+                    where.append(
+                        "(c.nombre LIKE ? OR c.nif LIKE ? OR c.telefono LIKE ? OR c.email LIKE ?)"
+                    )
+                    values.extend([f"%{q}%"] * 4)
+                if estado:
+                    where.append("c.estado = ?")
+                    values.append(estado)
+                where_clause = f"WHERE {' AND '.join(where)}" if where else ""
+                join_clause = "JOIN clientes_empresas ce ON ce.cliente_id = c.id" if services else "LEFT JOIN clientes_empresas ce ON ce.cliente_id = c.id"
+                rows = conn.execute(
+                    f"""
+                    SELECT
+                      {select_id}
+                      c.nombre,
+                      c.tipo_persona,
+                      c.nif,
+                      c.telefono,
+                      c.email,
+                      c.fecha_nacimiento,
+                      c.direccion,
+                      c.codigo_postal,
+                      c.poblacion,
+                      c.provincia,
+                      GROUP_CONCAT(e.nombre, ' | ') AS empresas,
+                      GROUP_CONCAT(ce.servicio, ' | ') AS servicios
+                    FROM clientes c
+                    {join_clause}
+                    LEFT JOIN empresas e ON e.id = ce.empresa_id
+                    {where_clause}
+                    GROUP BY c.id
+                    ORDER BY c.nombre
+                    {limit_clause}
+                    """,
+                    values,
+                ).fetchall()
             columns = [
                 "nombre",
                 "tipo_persona",
