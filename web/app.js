@@ -695,14 +695,24 @@ const showClienteDocOcrModal = (fields = {}, meta = {}) =>
 const postJsonWithDbRetry = async (url, payload, options = {}) => {
   const maxRetries = Math.max(1, Number(options.maxRetries || 5));
   const baseDelayMs = Math.max(50, Number(options.baseDelayMs || 350));
+  const timeoutMs = Math.max(3000, Number(options.timeoutMs || 20000));
   let lastError = null;
   for (let attempt = 0; attempt < maxRetries; attempt += 1) {
     try {
+      const controller =
+        typeof AbortController !== "undefined" ? new AbortController() : null;
+      const timeoutId = controller
+        ? setTimeout(() => controller.abort(), timeoutMs)
+        : null;
       const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload || {}),
+        signal: controller ? controller.signal : undefined,
       });
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
       const text = await res.text();
       let data = {};
       try {
@@ -723,7 +733,11 @@ const postJsonWithDbRetry = async (url, payload, options = {}) => {
     } catch (err) {
       lastError = err;
       const isLocked = /database is locked/i.test(String(err?.message || ""));
-      if (!isLocked || attempt >= maxRetries - 1) {
+      const isTimeout = err?.name === "AbortError";
+      if ((!isLocked && !isTimeout) || attempt >= maxRetries - 1) {
+        if (isTimeout) {
+          throw new Error("Tiempo de espera agotado. Inténtalo de nuevo.");
+        }
         throw err;
       }
       await new Promise((resolve) => setTimeout(resolve, baseDelayMs * (attempt + 1)));
@@ -16031,12 +16045,11 @@ if (clienteAssignForm) {
     const formData = new FormData(clienteAssignForm);
     const payload = Object.fromEntries(formData.entries());
     payload.cliente_id = state.currentClienteId;
-    fetch("/api/clientes_link", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+    postJsonWithDbRetry("/api/clientes_link", payload, {
+      maxRetries: 6,
+      baseDelayMs: 350,
+      timeoutMs: 20000,
     })
-      .then((res) => res.json())
       .then((data) => {
         if (data.error) {
           if (clienteAssignStatus) {
