@@ -10956,7 +10956,14 @@ const resolveOcrClienteMatch = async (type, fields) => {
 };
 
 const linkClienteSegurosService = async (clienteId, ctx, tomador = "") => {
-  const fincas = state.empresas.find((empresa) => empresa.nombre === FINCAS_COMPANY);
+  const ensureEmpresas = state.empresas && state.empresas.length
+    ? Promise.resolve(state.empresas)
+    : api("/api/empresas").then((data) => {
+        state.empresas = data || [];
+        return state.empresas;
+      });
+  const empresas = await ensureEmpresas;
+  const fincas = (empresas || []).find((empresa) => empresa.nombre === FINCAS_COMPANY);
   if (!fincas) {
     if (ctx?.statusEl) ctx.statusEl.textContent = "Empresa seguros no encontrada.";
     return;
@@ -10967,18 +10974,13 @@ const linkClienteSegurosService = async (clienteId, ctx, tomador = "") => {
   }
   if (ctx?.statusEl) ctx.statusEl.textContent = "Asignando servicio Seguros...";
   try {
-    const res = await fetch("/api/clientes_link", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        cliente_id: clienteId,
-        empresa_id: fincas.id,
-        servicio: "Seguros",
-        estado: "Activo",
-        fecha_inicio: new Date().toISOString().slice(0, 10),
-      }),
+    const data = await postJsonWithDbRetry("/api/clientes_link", {
+      cliente_id: clienteId,
+      empresa_id: fincas.id,
+      servicio: "Seguros",
+      estado: "Activo",
+      fecha_inicio: new Date().toISOString().slice(0, 10),
     });
-    const data = await res.json();
     if (data.error) {
       if (ctx?.statusEl) ctx.statusEl.textContent = data.error;
       return;
@@ -11392,15 +11394,11 @@ const saveSegurosOcrRecord = async () => {
         state.segurosOcrClienteId = data.cliente_id;
         const fincas = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
         if (fincas) {
-          fetch("/api/clientes_link", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              cliente_id: data.cliente_id,
-              empresa_id: fincas.id,
-              servicio: "Seguros",
-              estado: "Activo",
-            }),
+          postJsonWithDbRetry("/api/clientes_link", {
+            cliente_id: data.cliente_id,
+            empresa_id: fincas.id,
+            servicio: "Seguros",
+            estado: "Activo",
           }).catch(() => {});
         }
       }
@@ -18113,14 +18111,10 @@ if (clientesLinkForm) {
     }
     Promise.all(
       rows.map((row) =>
-        fetch("/api/clientes_link", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            cliente_id: clienteId,
-            ...row,
-          }),
-        }).then((res) => res.json())
+        postJsonWithDbRetry("/api/clientes_link", {
+          cliente_id: clienteId,
+          ...row,
+        })
       )
     )
       .then((results) => {
