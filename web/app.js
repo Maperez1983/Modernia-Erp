@@ -334,31 +334,96 @@ const buildSegurosOcrPayload = async (file, statusEl) => {
 };
 
 const startSegurosOcrJob = async (payload) =>
-  fetch("/api/seguros_ocr_async", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  }).then((res) => res.json());
+  postJsonWithRetryBasic("/api/seguros_ocr_async", payload, {
+    maxRetries: 5,
+    baseDelayMs: 450,
+    timeoutMs: 30000,
+  });
+
+const postJsonWithRetryBasic = async (url, payload, options = {}) => {
+  const maxRetries = Math.max(1, Number(options.maxRetries || 4));
+  const baseDelayMs = Math.max(100, Number(options.baseDelayMs || 300));
+  const timeoutMs = Math.max(5000, Number(options.timeoutMs || 30000));
+  let lastError = null;
+  for (let attempt = 0; attempt < maxRetries; attempt += 1) {
+    try {
+      const controller =
+        typeof AbortController !== "undefined" ? new AbortController() : null;
+      const timeoutId = controller
+        ? setTimeout(() => controller.abort(), timeoutMs)
+        : null;
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload || {}),
+        signal: controller ? controller.signal : undefined,
+      });
+      if (timeoutId) clearTimeout(timeoutId);
+      const text = await res.text();
+      let data = {};
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch (_) {
+        data = { error: text || `HTTP ${res.status}` };
+      }
+      const transient =
+        res.status === 502 ||
+        res.status === 503 ||
+        /database is locked/i.test(String(data?.error || data?.detail || ""));
+      if (!res.ok || data?.error) {
+        if (transient && attempt < maxRetries - 1) {
+          await new Promise((resolve) => setTimeout(resolve, baseDelayMs * (attempt + 1)));
+          continue;
+        }
+      }
+      return data;
+    } catch (err) {
+      lastError = err;
+      const timeout = err?.name === "AbortError";
+      if (attempt >= maxRetries - 1) {
+        if (timeout) throw new Error("Tiempo de espera agotado. Inténtalo de nuevo.");
+        throw err;
+      }
+      await new Promise((resolve) => setTimeout(resolve, baseDelayMs * (attempt + 1)));
+    }
+  }
+  throw lastError || new Error("Error de red");
+};
+
+const runSegurosOcrDirectPayload = async (payload, options = {}) =>
+  postJsonWithRetryBasic("/api/seguros_ocr", payload, {
+    maxRetries: options.maxRetries || 4,
+    baseDelayMs: options.baseDelayMs || 450,
+    timeoutMs: options.timeoutMs || 180000,
+  });
 
 const runSegurosOcrDirect = async (file, extraPayload = {}) => {
   const fileBase64 = await fileToBase64(file);
-  const resp = await fetch("/api/seguros_ocr", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      ...extraPayload,
-      file_base64: fileBase64,
-      filename: file.name || "poliza.pdf",
-    }),
+  return runSegurosOcrDirectPayload({
+    ...extraPayload,
+    file_base64: fileBase64,
+    filename: file.name || "poliza.pdf",
   });
-  return resp.json();
 };
 
 const pollOcrJob = async (jobId, onUpdate, timeoutMs = 10 * 60 * 1000) => {
   const started = Date.now();
   let delay = 1200;
+  let readErrors = 0;
   while (Date.now() - started < timeoutMs) {
-    const data = await api(`/api/ocr_job?id=${encodeURIComponent(jobId)}`);
+    let data = null;
+    try {
+      data = await api(`/api/ocr_job?id=${encodeURIComponent(jobId)}`);
+      readErrors = 0;
+    } catch (_err) {
+      readErrors += 1;
+      if (readErrors >= 5) {
+        throw new Error("Fallo al consultar el estado OCR.");
+      }
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      delay = Math.min(delay + 400, 5000);
+      continue;
+    }
     if (onUpdate) onUpdate(data);
     if (data.status === "done") {
       return data.result || null;
@@ -764,15 +829,20 @@ const runClienteSegurosDocOcr = async (row, statusEl, buttonEl) => {
       s3_key: docKey,
       filename: row.nombre || "poliza.pdf",
     });
+    let result = null;
     if (!job || job.error || !job.job_id) {
-      setStatus(job?.detail || job?.error || "No se pudo iniciar OCR.");
-      return;
+      setStatus("OCR en cola falló. Reintentando en modo directo...");
+      result = await runSegurosOcrDirectPayload(
+        { s3_key: docKey, filename: row.nombre || "poliza.pdf" },
+        { timeoutMs: 180000 }
+      );
+    } else {
+      result = await pollOcrJob(job.job_id, (jobRow) => {
+        if (jobRow.status === "processing") {
+          setStatus("Leyendo póliza...");
+        }
+      });
     }
-    const result = await pollOcrJob(job.job_id, (jobRow) => {
-      if (jobRow.status === "processing") {
-        setStatus("Leyendo póliza...");
-      }
-    });
     if (!result || result.error) {
       setStatus(result?.detail || result?.error || "OCR sin datos.");
       return;
@@ -15564,17 +15634,24 @@ if (segurosBdtOcrButton) {
       .then(async (job) => {
         if (!job || job.error || !job.job_id) {
           if (segurosBdtOcrStatus) {
-            segurosBdtOcrStatus.textContent = job?.detail || job?.error || "No se pudo iniciar OCR.";
+            segurosBdtOcrStatus.textContent = "OCR en cola falló. Reintentando en modo directo...";
           }
-          return null;
+          return runSegurosOcrDirect(file, { empresa_nombre: FINCAS_COMPANY });
         }
         if (segurosBdtOcrStatus) segurosBdtOcrStatus.textContent = "OCR en cola...";
-        const result = await pollOcrJob(job.job_id, (data) => {
-          if (segurosBdtOcrStatus && data.status === "processing") {
-            segurosBdtOcrStatus.textContent = "Procesando OCR...";
+        try {
+          const result = await pollOcrJob(job.job_id, (data) => {
+            if (segurosBdtOcrStatus && data.status === "processing") {
+              segurosBdtOcrStatus.textContent = "Procesando OCR...";
+            }
+          });
+          return result;
+        } catch (_err) {
+          if (segurosBdtOcrStatus) {
+            segurosBdtOcrStatus.textContent = "OCR asíncrono falló. Reintentando en modo directo...";
           }
-        });
-        return result;
+          return runSegurosOcrDirect(file, { empresa_nombre: FINCAS_COMPANY });
+        }
       })
       .then((data) => {
         if (!data) return;
