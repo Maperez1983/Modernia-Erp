@@ -949,7 +949,7 @@ def process_seguros_ocr(payload, conn):
 def enqueue_ocr_job(db_path, kind, payload):
     job_id = os.urandom(16).hex()
     now = datetime.now(timezone.utc).isoformat()
-    conn = sqlite3.connect(db_path)
+    conn = open_sqlite_conn(db_path, with_row_factory=False)
     conn.execute(
         """
         INSERT INTO ocr_jobs (id, kind, status, payload_json, created_at, updated_at)
@@ -1010,8 +1010,7 @@ def update_ocr_job(conn, job_id, status, result=None, error=None):
 def ocr_worker_loop(db_path):
     while True:
         try:
-            conn = sqlite3.connect(db_path)
-            conn.row_factory = sqlite3.Row
+            conn = open_sqlite_conn(db_path, with_row_factory=True)
             row = fetch_next_ocr_job(conn)
             if not row:
                 conn.close()
@@ -4440,13 +4439,31 @@ TABLES = [
 
 
 def get_db(db_path):
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
+    return open_sqlite_conn(db_path, with_row_factory=True)
+
+
+def open_sqlite_conn(db_path, with_row_factory=False):
+    conn = sqlite3.connect(db_path, timeout=30)
+    if with_row_factory:
+        conn.row_factory = sqlite3.Row
+    # Reduce bloqueos en escenarios multi-hilo (web + OCR worker).
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+    except Exception:
+        pass
+    try:
+        conn.execute("PRAGMA busy_timeout=30000")
+    except Exception:
+        pass
+    try:
+        conn.execute("PRAGMA synchronous=NORMAL")
+    except Exception:
+        pass
     return conn
 
 
 def ensure_tables(db_path):
-    conn = sqlite3.connect(db_path)
+    conn = open_sqlite_conn(db_path, with_row_factory=False)
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS ocr_jobs (
