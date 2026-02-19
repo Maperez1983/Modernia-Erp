@@ -14086,20 +14086,28 @@ const openClienteDetail = (id) => {
     let hasHipotecas = false;
     if (clienteEmpresasList) {
       const empresas = data.empresas || [];
+      const normalizeClienteService = (value) => {
+        const key = normalizeSimple(value || "");
+        if (key === "hipotecas") return "financiaciones";
+        return key;
+      };
       const isActiveService = (row) => {
+        if (typeof row?.is_active === "boolean") return row.is_active;
         const estado = normalizeSimple(row?.estado || "activo");
         return !["inactivo", "baja", "cancelado", "anulado", "finalizado"].includes(estado);
       };
       const activeEmpresas = empresas.filter((row) => isActiveService(row));
       const serviceSet = new Set(
-        activeEmpresas.map((row) => normalizeSimple(row.servicio || ""))
+        (data.servicios_activos || activeEmpresas.map((row) => row.servicio_key || row.servicio || ""))
+          .map((row) => normalizeClienteService(row))
+          .filter(Boolean)
       );
       state.currentClienteServices = Array.from(serviceSet);
       hasGestoria = serviceSet.has("gestoria") || serviceSet.has("gestoría");
       hasSeguros = serviceSet.has("seguros");
       hasInmo = serviceSet.has("inmobiliaria");
-      hasHipotecas = serviceSet.has("hipotecas") || serviceSet.has("financiaciones");
-      if (!empresas.length) {
+      hasHipotecas = serviceSet.has("financiaciones");
+      if (!activeEmpresas.length) {
         clienteEmpresasList.innerHTML = "<p class='muted'>Sin empresas asignadas.</p>";
       } else {
         const table = document.createElement("table");
@@ -14113,7 +14121,7 @@ const openClienteDetail = (id) => {
         thead.appendChild(trHead);
         table.appendChild(thead);
         const tbody = document.createElement("tbody");
-        empresas.forEach((row) => {
+        activeEmpresas.forEach((row) => {
           const tr = document.createElement("tr");
           const empresaTd = document.createElement("td");
           empresaTd.textContent = row.empresa || "-";
@@ -14197,17 +14205,22 @@ const openClienteDetail = (id) => {
       }
     }
     const dashboardData = data.dashboard || null;
-    loadClienteMiniDashboard(id, data.empresas || [], dashboardData);
-    renderClienteProfesionalScope(data.empresas || []);
+    const empresasActivas = (data.empresas || []).filter((row) => {
+      if (typeof row?.is_active === "boolean") return row.is_active;
+      const estado = normalizeSimple(row?.estado || "activo");
+      return !["inactivo", "baja", "cancelado", "anulado", "finalizado"].includes(estado);
+    });
+    loadClienteMiniDashboard(id, empresasActivas, dashboardData);
+    renderClienteProfesionalScope(empresasActivas);
     if (clienteAssignServicio) {
       populateServiciosSelect(clienteAssignServicio);
     }
     if (clienteAssignEmpresa) {
       populateEmpresasSelect(clienteAssignEmpresa);
     }
-    loadClienteFacturasServicios(id, data.empresas || [], data.facturas || []);
-    loadClienteTrabajosPlanificados(id, data.empresas || []);
-    loadClienteHistoricoServicios(id, data.empresas || [], data.historico || []);
+    loadClienteFacturasServicios(id, empresasActivas, data.facturas || []);
+    loadClienteTrabajosPlanificados(id, empresasActivas);
+    loadClienteHistoricoServicios(id, empresasActivas, data.historico || []);
     if (clienteProfesionalHint) {
       if (hasGestoria) {
         clienteProfesionalHint.textContent = "Gestoría activa: configura CNAE, IAE, actividad e IBAN. La ejecución diaria está en la pestaña Trabajos.";

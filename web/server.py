@@ -339,6 +339,13 @@ def normalize_service_key(value):
     return aliases.get(text, text.lower().strip())
 
 
+def is_active_service_state(value):
+    state = normalize_lookup_text(value or "")
+    if not state:
+        return True
+    return state not in {"INACTIVO", "BAJA", "CANCELADO", "ANULADO", "FINALIZADO"}
+
+
 def parse_iso_date(value):
     raw = str(value or "").strip()
     if not raw:
@@ -4121,10 +4128,18 @@ def build_cliente_ficha_payload(conn, cliente_id, services_filter=None):
     empresas = [dict(r) for r in conn.execute(empresas_query, values).fetchall()]
 
     service_keys = []
+    allowed_keys = {"gestoria", "seguros", "inmobiliaria", "financiaciones"}
     for row in empresas:
-        key = normalize_service_key(row.get("servicio"))
-        if key and key not in service_keys:
-            service_keys.append(key)
+        service_key = normalize_service_key(row.get("servicio"))
+        active = is_active_service_state(row.get("estado"))
+        row["servicio_key"] = service_key
+        row["is_active"] = active
+        if not active:
+            continue
+        if service_key == "hipotecas":
+            service_key = "financiaciones"
+        if service_key in allowed_keys and service_key not in service_keys:
+            service_keys.append(service_key)
     empresa_ids = [row["empresa_id"] for row in empresas if row.get("empresa_id")]
 
     seguros_rows = [
