@@ -14089,9 +14089,13 @@ const openClienteDetail = (id) => {
   if (!clientesDetail) {
     return;
   }
-  state.prevPage = state.currentPage;
-  state.prevModule = state.currentModule;
-  state.prevTab = currentTab;
+  // Preserve real origin page/module; avoid overwriting with "cliente"
+  // when the detail is refreshed from inside the client view.
+  if (state.currentPage !== "cliente") {
+    state.prevPage = state.currentPage;
+    state.prevModule = state.currentModule;
+    state.prevTab = currentTab;
+  }
   state.currentClienteId = id;
   setPage("cliente");
   updateTableVisibility();
@@ -14390,7 +14394,7 @@ const openClienteDetail = (id) => {
 const closeClienteDetail = () => {
   state.currentClienteId = "";
   state.currentClienteServices = [];
-  const returnPage = state.prevPage || "empresa";
+  const returnPage = state.prevPage && state.prevPage !== "cliente" ? state.prevPage : "empresa";
   const returnModule = state.prevModule || "clientes";
   const returnTab = state.prevTab || "bdt";
   setModule(returnModule);
