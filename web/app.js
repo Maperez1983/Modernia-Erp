@@ -5245,15 +5245,14 @@ const saveClienteField = (field, value) => {
       : "";
     field = "nombre";
   }
-  fetch("/api/cliente_update", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
+  postJsonWithDbRetry("/api/cliente_update", {
       id: state.currentClienteId,
       [field]: normalizedValue,
-    }),
-  })
-    .then((res) => res.json())
+    }, {
+      maxRetries: 6,
+      baseDelayMs: 350,
+      timeoutMs: 20000,
+    })
     .then((data) => {
       if (data.error) {
         if (clienteDetailSubtitle) {
@@ -5330,12 +5329,11 @@ const saveClienteForm = () => {
     }
     payload[field] = input.value;
   });
-  fetch("/api/cliente_update", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
+  postJsonWithDbRetry("/api/cliente_update", payload, {
+    maxRetries: 6,
+    baseDelayMs: 350,
+    timeoutMs: 20000,
   })
-    .then((res) => res.json())
     .then((data) => {
       if (clienteSaveStatus) {
         clienteSaveStatus.textContent = data.error || "Guardado.";
@@ -5363,15 +5361,14 @@ const saveClienteEmpresaField = (relId, field, value) => {
   if (clienteDetailSubtitle) {
     clienteDetailSubtitle.textContent = "Guardando...";
   }
-  fetch("/api/cliente_empresa_update", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
+  postJsonWithDbRetry("/api/cliente_empresa_update", {
       id: relId,
       [field]: value,
-    }),
-  })
-    .then((res) => res.json())
+    }, {
+      maxRetries: 6,
+      baseDelayMs: 350,
+      timeoutMs: 20000,
+    })
     .then((data) => {
       if (data.error) {
         if (clienteDetailSubtitle) {
