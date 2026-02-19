@@ -8187,7 +8187,12 @@ class Handler(BaseHTTPRequestHandler):
                     break
                 except sqlite3.OperationalError as exc:
                     if "database is locked" not in str(exc).lower():
-                        raise
+                        try:
+                            conn.rollback()
+                        except Exception:
+                            pass
+                        json_response(self, {"error": f"db_error: {str(exc)}"}, status=500)
+                        return
                     try:
                         conn.rollback()
                     except Exception:
@@ -8304,7 +8309,12 @@ class Handler(BaseHTTPRequestHandler):
                     break
                 except sqlite3.OperationalError as exc:
                     if "database is locked" not in str(exc).lower():
-                        raise
+                        try:
+                            conn.rollback()
+                        except Exception:
+                            pass
+                        json_response(self, {"error": f"db_error: {str(exc)}"}, status=500)
+                        return
                     try:
                         conn.rollback()
                     except Exception:
@@ -8352,7 +8362,12 @@ class Handler(BaseHTTPRequestHandler):
                     break
                 except sqlite3.OperationalError as exc:
                     if "database is locked" not in str(exc).lower():
-                        raise
+                        try:
+                            conn.rollback()
+                        except Exception:
+                            pass
+                        json_response(self, {"error": f"db_error: {str(exc)}"}, status=500)
+                        return
                     try:
                         conn.rollback()
                     except Exception:
