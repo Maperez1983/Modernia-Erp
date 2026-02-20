@@ -3783,6 +3783,48 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
             if reale_cif:
                 fields["dni"] = reale_cif.group(1).upper()
                 fields["nif"] = fields["dni"]
+    # Reglas específicas FIATC Auto (evitar captura de texto legal en ramo/tomador/fechas).
+    is_fiatc_auto = (
+        normalize_company_key(fields.get("compania") or "") == "FIATC"
+        and ("SEGURO AUTOM" in upper_text or "POLIZA AUTOM" in upper_text)
+    )
+    if is_fiatc_auto:
+        fields["compania"] = "Fiatc"
+        fields["ramo"] = "Auto"
+        tom_match = re.search(
+            r"SUSCRITA\s+ENTRE\s+([\s\S]{0,180}?)\s+Y\s+[\s\S]{0,120}?FIATC",
+            text,
+            re.IGNORECASE,
+        )
+        if tom_match:
+            tom = normalize_person_name(tom_match.group(1)).strip(" ,;:-")
+            if tom:
+                fields["tomador"] = tom
+        pol_match = re.search(
+            r"N[ºo°]\s*P[ÓO]LIZA\s*[:#]?\s*([0-9]{3,5}[-/][0-9]{6,10}[-/][0-9]{1,4})",
+            text,
+            re.IGNORECASE,
+        )
+        if pol_match:
+            fields["poliza_numero"] = pol_match.group(1)
+        if not fields.get("poliza_numero"):
+            loose_pol = re.search(r"\b([0-9]{4}[-/][0-9]{7}[-/][0-9]{1,3})\b", text)
+            if loose_pol:
+                fields["poliza_numero"] = loose_pol.group(1)
+        efecto_match = re.search(
+            r"FECHA\s+EFECTO\s*[:#]?\s*([0-9]{1,2}[./-][0-9]{1,2}[./-][0-9]{2,4})",
+            text,
+            re.IGNORECASE,
+        )
+        if efecto_match:
+            fields["fecha_efecto"] = normalize_ocr_date(efecto_match.group(1))
+        # Normalmente no trae "fecha vencimiento" clara en cabecera; derivamos +1 año.
+        if fields.get("fecha_efecto"):
+            fields["fecha_vencimiento"] = add_year_to_date(fields.get("fecha_efecto"))
+        # Evitar contaminación con datos de contacto corporativos FIATC.
+        if normalize_email(fields.get("email") or "").endswith("@fiatc.es"):
+            fields["email"] = ""
+        fields["telefono"] = ""
     # Reglas específicas pólizas EXSEL/Lloyd's RC Profesional (BASWZ...).
     is_lloyds_exsel = any(token in upper_text for token in ("BASWZ", "EXSEL UNDERWRITING", "LLOYD"))
     if is_lloyds_exsel:
