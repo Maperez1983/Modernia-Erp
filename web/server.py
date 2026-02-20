@@ -3509,6 +3509,12 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
     ):
         if not fields.get("ramo") or normalize_lookup_text(fields.get("ramo") or "") in ("DE SEGURO", "SEGURO", "ALQUILER"):
             fields["ramo"] = "Impago alquiler"
+        # En impago, a menudo OCR captura el contacto del mediador en lugar del asegurado.
+        if normalize_email(fields.get("email") or "") in ("info@fincasvelazquez.es", "fiatc@fiatc.es"):
+            fields["email"] = ""
+        phone_norm = normalize_phone(fields.get("telefono") or "")
+        if phone_norm in ("910609386",):
+            fields["telefono"] = ""
     if fields.get("tomador"):
         fields["tomador"] = clean_tomador_value(fields["tomador"])
     # Saneo final para pólizas de impago con texto legal dominante (FIATC/iptiQ).
@@ -3540,6 +3546,16 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
         efecto = parse_iso_date(fields.get("fecha_efecto"))
         venc = parse_iso_date(fields.get("fecha_vencimiento"))
         if efecto and venc and venc < efecto:
+            fields["fecha_vencimiento"] = add_year_to_date(fields.get("fecha_efecto"))
+        elif (
+            efecto
+            and venc
+            and venc == efecto
+            and (
+                normalize_poliza_key(fields.get("poliza_numero") or "").startswith("GAG")
+                or normalize_lookup_text(fields.get("ramo") or "") == "IMPAGO ALQUILER"
+            )
+        ):
             fields["fecha_vencimiento"] = add_year_to_date(fields.get("fecha_efecto"))
     if fields.get("dni"):
         dni_checked = normalize_nif_candidate(fields.get("dni"))
