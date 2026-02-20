@@ -2765,6 +2765,7 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
             "UNA PERSONA JURIDICA",
             "MAYOR DE EDAD",
             "TITULAR DEL INTERES OBJETO",
+            "PERCEPTOR DEL PAGO DE LA INDEMNIZACION",
             "CUANDO QUIEN SE OPONGA",
             "ARRENDATARIO",
             "ARRENDADOR",
@@ -2784,7 +2785,10 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
         )
         if re.search(legal_noise, raw, re.IGNORECASE):
             return ""
-        if "€" in raw or re.search(r"\d{2,}", raw):
+        looks_company = bool(
+            re.search(r"\b(SL|S\.L\.?|SLU|S\.L\.U\.?|SA|S\.A\.?|SCP|S\.C\.P\.?|CB|C\.B\.?)\b", raw, re.IGNORECASE)
+        )
+        if "€" in raw or (re.search(r"\d{2,}", raw) and not looks_company):
             return ""
         words = raw.split()
         if not words:
@@ -3496,8 +3500,78 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
             if src_key and cur_key and src_key != cur_key:
                 fields["compania"] = normalize_company_name(source_company)
 
-    # Reglas específicas Euroins Auto (evita capturar datos del mediador / DAS).
+    # Reglas específicas Reale Oficinas / Comercio.
+    is_reale = normalize_company_key(fields.get("compania") or "") == "REALE"
     upper_text = normalize_lookup_text(text)
+    if is_reale and ("REALE OFICINAS" in upper_text or "DESCRIPCION DEL RIESGO COMERCIO U OFICINA" in upper_text):
+        fields["ramo"] = "Comercio"
+        tomador_block_match = re.search(
+            r"TOMADOR([\s\S]{0,1200}?)EFECTO DEL SEGURO",
+            text,
+            re.IGNORECASE,
+        )
+        tomador_block = tomador_block_match.group(1) if tomador_block_match else ""
+        if tomador_block:
+            candidate_name = ""
+            for raw_line in tomador_block.splitlines():
+                line = re.sub(r"\s+", " ", raw_line).strip(" ,;:-")
+                if not line:
+                    continue
+                line_up = normalize_lookup_text(line)
+                if line_up in ("ASEGURADO", "TOMADOR"):
+                    continue
+                if "CIF" in line_up or "NIF" in line_up:
+                    continue
+                if re.search(r"^\d{5}\b", line):
+                    continue
+                if "MALAGA" in line_up and len(line.split()) <= 2:
+                    continue
+                if len(line) >= 4:
+                    candidate_name = line
+                    break
+            candidate_name = normalize_person_name(candidate_name).strip(" ,;:-")
+            if candidate_name:
+                fields["tomador"] = candidate_name
+            cif_match = re.search(r"\b([ABCDEFGHJNPQRSUVW][0-9]{7}[0-9A-Z])\b", tomador_block, re.IGNORECASE)
+            if cif_match:
+                fields["dni"] = cif_match.group(1).upper()
+                fields["nif"] = fields["dni"]
+            addr_line = ""
+            cp_city = ""
+            for raw_line in tomador_block.splitlines():
+                line = re.sub(r"\s+", " ", raw_line).strip(" ,;:-")
+                if not line:
+                    continue
+                if re.search(r"\b(CL|CALLE|AVD|AVDA|AVENIDA|PLAZA|PZA|CTRA|CAMINO)\b", normalize_lookup_text(line)):
+                    addr_line = line
+                if re.match(r"^\d{5}\b", line):
+                    cp_city = line
+                    break
+            if addr_line:
+                fields["direccion"] = f"{addr_line} {cp_city}".strip() if cp_city else addr_line
+            block_mail = re.search(r"\b([A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,})\b", tomador_block, re.IGNORECASE)
+            if block_mail:
+                fields["email"] = normalize_email(block_mail.group(1))
+        primas_block_match = re.search(
+            r"IMPORTE DEL RECIBO Y M[ÉE]TODO DE PAGO([\s\S]{0,900}?)DESCRIPCI[ÓO]N DEL RIESGO",
+            text,
+            re.IGNORECASE,
+        )
+        primas_block = primas_block_match.group(1) if primas_block_match else ""
+        if primas_block:
+            prima_match = re.search(r"\b([0-9]{1,3},[0-9]{2})\b", primas_block)
+            if prima_match:
+                fields["prima_neta"] = prima_match.group(1)
+            total_match = re.search(r"Total\s*[\r\n]+\s*([0-9]{1,3},[0-9]{2})\s*€", primas_block, re.IGNORECASE)
+            if total_match:
+                fields["prima_total"] = total_match.group(1)
+            elif "prima_total" not in fields or not fields.get("prima_total"):
+                amounts = re.findall(r"\b([0-9]{1,3},[0-9]{2})\b", primas_block)
+                if amounts:
+                    fields["prima_total"] = max(amounts, key=parse_money_value)
+        fields["telefono"] = ""
+
+    # Reglas específicas Euroins Auto (evita capturar datos del mediador / DAS).
     source_upper = normalize_lookup_text(str(source_hint or ""))
     is_euroins_doc = ("EUROINS" in upper_text) or ("EUROINS" in source_upper)
     if is_euroins_doc:
@@ -3670,6 +3744,18 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
         if range_dates:
             fields["fecha_efecto"] = normalize_ocr_date(range_dates.group(1))
             fields["fecha_vencimiento"] = normalize_ocr_date(range_dates.group(2))
+    if is_reale and ("REALE OFICINAS" in upper_text or "DESCRIPCION DEL RIESGO COMERCIO U OFICINA" in upper_text):
+        if not fields.get("dni"):
+            reale_block_match = re.search(
+                r"TOMADOR([\s\S]{0,1200}?)EFECTO DEL SEGURO",
+                text,
+                re.IGNORECASE,
+            )
+            reale_scope = reale_block_match.group(1) if reale_block_match else text
+            reale_cif = re.search(r"\b([ABCDEFGHJNPQRSUVW][0-9]{7}[0-9A-Z])\b", reale_scope, re.IGNORECASE)
+            if reale_cif:
+                fields["dni"] = reale_cif.group(1).upper()
+                fields["nif"] = fields["dni"]
     return fields
 
 def parse_asesoramiento_block(block):
