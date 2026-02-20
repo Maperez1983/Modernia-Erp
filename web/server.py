@@ -59,6 +59,7 @@ S3_BUCKET = os.environ.get("AWS_S3_BUCKET") or os.environ.get("S3_BUCKET")
 S3_REGION = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION")
 OCR_SUBPROCESS_TIMEOUT_SECONDS = max(15, int(os.environ.get("OCR_SUBPROCESS_TIMEOUT_SECONDS", "90")))
 OCR_JOB_STALE_MINUTES = max(1, int(os.environ.get("OCR_JOB_STALE_MINUTES", "15")))
+OCR_WORKERS = max(1, min(8, int(os.environ.get("OCR_WORKERS", "2"))))
 OCR_PDF_MAX_PAGES = max(0, int(os.environ.get("OCR_PDF_MAX_PAGES", "4")))
 OCR_PDF_DPI = max(120, int(os.environ.get("OCR_PDF_DPI", "280")))
 OCR_OPENAI_VISION_PAGES = max(0, int(os.environ.get("OCR_OPENAI_VISION_PAGES", "2")))
@@ -991,6 +992,48 @@ def fetch_next_ocr_job(conn):
     return row
 
 
+def claim_next_ocr_job(conn):
+    cutoff = (datetime.now(timezone.utc) - timedelta(minutes=OCR_JOB_STALE_MINUTES)).isoformat()
+    now = datetime.now(timezone.utc).isoformat()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            """
+            SELECT id, kind, payload_json
+            FROM ocr_jobs
+            WHERE status = 'pending'
+               OR (status = 'processing' AND finished_at IS NULL AND started_at IS NOT NULL AND started_at < ?)
+            ORDER BY created_at ASC
+            LIMIT 1
+            """,
+            (cutoff,),
+        ).fetchone()
+        if not row:
+            conn.commit()
+            return None
+        updated = conn.execute(
+            """
+            UPDATE ocr_jobs
+            SET status = 'processing', error = NULL, started_at = ?, updated_at = ?
+            WHERE id = ?
+              AND (
+                status = 'pending'
+                OR (status = 'processing' AND finished_at IS NULL AND started_at IS NOT NULL AND started_at < ?)
+              )
+            """,
+            (now, now, row["id"], cutoff),
+        ).rowcount
+        conn.commit()
+        if updated == 1:
+            return row
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+    return None
+
+
 def update_ocr_job(conn, job_id, status, result=None, error=None):
     now = datetime.now(timezone.utc).isoformat()
     conn.execute(
@@ -1026,16 +1069,14 @@ def ocr_worker_loop(jobs_db_path, main_db_path):
         job_id = None
         try:
             jobs_conn = open_sqlite_conn(jobs_db_path, with_row_factory=True)
-            row = fetch_next_ocr_job(jobs_conn)
+            row = claim_next_ocr_job(jobs_conn)
             if not row:
                 jobs_conn.close()
-                time.sleep(1.5)
+                time.sleep(0.6)
                 continue
             job_id = row["id"]
             kind = row["kind"]
             payload = json.loads(row["payload_json"] or "{}")
-            update_ocr_job(jobs_conn, job_id, "processing")
-            jobs_conn.commit()
             if kind == "seguros":
                 main_conn = open_sqlite_conn(main_db_path, with_row_factory=True)
                 try:
@@ -1059,7 +1100,7 @@ def ocr_worker_loop(jobs_db_path, main_db_path):
                     jobs_conn.close()
             except Exception:
                 pass
-            time.sleep(1.5)
+            time.sleep(1.0)
 
 def preprocess_image_for_ocr(src_path, out_path=None):
     tmp_base = tempfile.gettempdir()
@@ -11396,6 +11437,7 @@ def main():
     parser = argparse.ArgumentParser(description="ERP Modernia local server.")
     parser.add_argument("--db", default=str(DB_CONFIGURED), help="SQLite path.")
     parser.add_argument("--ocr-db", default=str(OCR_DB_CONFIGURED), help="SQLite OCR jobs path.")
+    parser.add_argument("--ocr-workers", type=int, default=OCR_WORKERS, help="Numero de workers OCR en paralelo.")
     parser.add_argument("--host", default="127.0.0.1", help="Host.")
     env_port = os.environ.get("PORT")
     try:
@@ -11409,10 +11451,22 @@ def main():
     ensure_ocr_tables(args.ocr_db)
     Handler.db_path = args.db
     Handler.ocr_db_path = args.ocr_db
-    worker = threading.Thread(target=ocr_worker_loop, args=(args.ocr_db, args.db), daemon=True)
-    worker.start()
+    ocr_workers = max(1, min(8, int(args.ocr_workers or 1)))
+    workers = []
+    for idx in range(ocr_workers):
+        worker = threading.Thread(
+            target=ocr_worker_loop,
+            args=(args.ocr_db, args.db),
+            name=f"ocr-worker-{idx+1}",
+            daemon=True,
+        )
+        worker.start()
+        workers.append(worker)
     server = ThreadingHTTPServer((args.host, args.port), Handler)
-    print(f"Servidor activo en http://{args.host}:{args.port} · db={Path(args.db).resolve()}")
+    print(
+        f"Servidor activo en http://{args.host}:{args.port} · db={Path(args.db).resolve()} · "
+        f"ocr_db={Path(args.ocr_db).resolve()} · ocr_workers={ocr_workers}"
+    )
     server.serve_forever()
 
 
