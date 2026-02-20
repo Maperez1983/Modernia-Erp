@@ -3825,6 +3825,47 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
         if normalize_email(fields.get("email") or "").endswith("@fiatc.es"):
             fields["email"] = ""
         fields["telefono"] = ""
+    # Reglas específicas FIATC Impago Alquiler.
+    is_fiatc_impago = (
+        normalize_company_key(fields.get("compania") or "") == "FIATC"
+        and ("IMPAGO DE ALQUILER" in upper_text or "CONTINGENCIAS / ALQUILERES" in upper_text)
+    )
+    if is_fiatc_impago:
+        fields["compania"] = "Fiatc"
+        fields["ramo"] = "Impago alquiler"
+        tom_match = re.search(
+            r"SUSCRITA\s+ENTRE\s*([\s\S]{0,180}?)\s+Y\s+[\s\S]{0,120}?FIATC",
+            text,
+            re.IGNORECASE,
+        )
+        if tom_match:
+            tom = normalize_person_name(tom_match.group(1)).strip(" ,;:-")
+            if tom:
+                fields["tomador"] = tom
+        pol_match = re.search(
+            r"N.?.?.?\s*P.?.?LIZA\s*([0-9]{4}[-/][0-9]{7}[-/][0-9]{1,3})",
+            text,
+            re.IGNORECASE,
+        )
+        if pol_match:
+            fields["poliza_numero"] = pol_match.group(1)
+        eff_match = re.search(
+            r"FECHA\s+EFECTO\s*([0-9]{1,2}[./-][0-9]{1,2}[./-][0-9]{2,4})",
+            text,
+            re.IGNORECASE,
+        )
+        if eff_match:
+            fields["fecha_efecto"] = normalize_ocr_date(eff_match.group(1))
+        if fields.get("fecha_efecto"):
+            fields["fecha_vencimiento"] = add_year_to_date(fields.get("fecha_efecto"))
+        nif_match = re.search(r"\bNIF\s*[:\-]?\s*([A-Z0-9]{8,9})\b", text, re.IGNORECASE)
+        if nif_match:
+            fields["dni"] = normalize_nif_candidate(nif_match.group(1)) or fields.get("dni") or ""
+            if fields.get("dni"):
+                fields["nif"] = fields["dni"]
+        if normalize_email(fields.get("email") or "").endswith("@fiatc.es"):
+            fields["email"] = ""
+        fields["telefono"] = ""
     # Reglas específicas OCCIDENT Auto (evitar contaminación por texto legal/corporativo).
     is_occident_auto = (
         ("OCCIDENT" in upper_text or normalize_company_key(fields.get("compania") or "") in ("OCCIDENT", "CATALANAOCCIDENTE"))
