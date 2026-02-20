@@ -24,6 +24,7 @@ ROOT = Path(__file__).resolve().parent
 ASSETS = ROOT.parent / "assets"
 UPLOADS = ROOT / "uploads"
 DB_DEFAULT = ROOT.parent / "data" / "erp_import2.sqlite"
+OCR_DB_DEFAULT = ROOT.parent / "data" / "ocr_jobs.sqlite"
 TESSDATA_DIR = "/opt/homebrew/share/tessdata"
 POSTAL_CATALOG_PATH = ROOT.parent / "data" / "catalogos" / "postal_catalogo.csv"
 ENV_PATH = ROOT.parent / ".env"
@@ -49,6 +50,11 @@ def load_env_file():
 
 load_env_file()
 DB_CONFIGURED = Path(os.environ.get("DB_PATH") or os.environ.get("DATABASE_PATH") or str(DB_DEFAULT))
+OCR_DB_CONFIGURED = Path(
+    os.environ.get("OCR_DB_PATH")
+    or os.environ.get("DATABASE_OCR_PATH")
+    or str(OCR_DB_DEFAULT)
+)
 S3_BUCKET = os.environ.get("AWS_S3_BUCKET") or os.environ.get("S3_BUCKET")
 S3_REGION = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION")
 OCR_SUBPROCESS_TIMEOUT_SECONDS = max(15, int(os.environ.get("OCR_SUBPROCESS_TIMEOUT_SECONDS", "90")))
@@ -1014,33 +1020,43 @@ def update_ocr_job(conn, job_id, status, result=None, error=None):
     )
 
 
-def ocr_worker_loop(db_path):
+def ocr_worker_loop(jobs_db_path, main_db_path):
     while True:
+        jobs_conn = None
+        job_id = None
         try:
-            conn = open_sqlite_conn(db_path, with_row_factory=True)
-            row = fetch_next_ocr_job(conn)
+            jobs_conn = open_sqlite_conn(jobs_db_path, with_row_factory=True)
+            row = fetch_next_ocr_job(jobs_conn)
             if not row:
-                conn.close()
+                jobs_conn.close()
                 time.sleep(1.5)
                 continue
             job_id = row["id"]
             kind = row["kind"]
             payload = json.loads(row["payload_json"] or "{}")
-            update_ocr_job(conn, job_id, "processing")
-            conn.commit()
+            update_ocr_job(jobs_conn, job_id, "processing")
+            jobs_conn.commit()
             if kind == "seguros":
-                result = process_seguros_ocr(payload, conn)
+                main_conn = open_sqlite_conn(main_db_path, with_row_factory=True)
+                try:
+                    result = process_seguros_ocr(payload, main_conn)
+                finally:
+                    main_conn.close()
             else:
                 raise RuntimeError("Tipo OCR no soportado")
-            update_ocr_job(conn, job_id, "done", result=result, error=None)
-            conn.commit()
-            conn.close()
+            update_ocr_job(jobs_conn, job_id, "done", result=result, error=None)
+            jobs_conn.commit()
+            jobs_conn.close()
         except Exception as exc:
             try:
-                if "conn" in locals():
-                    update_ocr_job(conn, job_id, "error", result=None, error=str(exc))
-                    conn.commit()
-                    conn.close()
+                if jobs_conn and job_id:
+                    update_ocr_job(jobs_conn, job_id, "error", result=None, error=str(exc))
+                    jobs_conn.commit()
+            except Exception:
+                pass
+            try:
+                if jobs_conn:
+                    jobs_conn.close()
             except Exception:
                 pass
             time.sleep(1.5)
@@ -4993,6 +5009,28 @@ def ensure_tables(db_path):
     conn.close()
 
 
+def ensure_ocr_tables(db_path):
+    conn = open_sqlite_conn(db_path, with_row_factory=False)
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS ocr_jobs (
+          id TEXT PRIMARY KEY,
+          kind TEXT,
+          status TEXT,
+          payload_json TEXT,
+          result_json TEXT,
+          error TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          started_at TEXT,
+          finished_at TEXT
+        )
+        """
+    )
+    conn.commit()
+    conn.close()
+
+
 def json_response(handler, data, status=200):
     payload = json.dumps(data, ensure_ascii=False).encode("utf-8")
     handler.send_response(status)
@@ -5038,9 +5076,32 @@ def send_file(handler, path):
 
 class Handler(BaseHTTPRequestHandler):
     db_path = DB_DEFAULT
+    ocr_db_path = OCR_DB_DEFAULT
 
     def log_message(self, format, *args):
         return
+
+    def _track_conn(self, conn):
+        if conn is None:
+            return
+        if not hasattr(self, "_tracked_conns"):
+            self._tracked_conns = []
+        self._tracked_conns.append(conn)
+
+    def _close_tracked_conns(self):
+        conns = getattr(self, "_tracked_conns", [])
+        while conns:
+            conn = conns.pop()
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    def finish(self):
+        try:
+            super().finish()
+        finally:
+            self._close_tracked_conns()
 
     def do_HEAD(self):
         parsed = urllib.parse.urlparse(self.path)
@@ -5272,6 +5333,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
         conn = get_db(self.db_path)
+        self._track_conn(conn)
         empresa = None
         if parsed.path not in (
             "/api/hipotecas/firmar",
@@ -5954,7 +6016,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not (payload.get("file_base64") or payload.get("data") or payload.get("s3_key")):
                     json_response(self, {"error": "Archivo requerido"}, status=400)
                     return
-                job_id = enqueue_ocr_job(Handler.db_path, "seguros", payload)
+                job_id = enqueue_ocr_job(Handler.ocr_db_path, "seguros", payload)
                 json_response(self, {"job_id": job_id})
                 return
             except Exception as exc:
@@ -8761,6 +8823,7 @@ class Handler(BaseHTTPRequestHandler):
         path = parsed.path
         params = urllib.parse.parse_qs(parsed.query)
         conn = get_db(self.db_path)
+        self._track_conn(conn)
 
         if path == "/api/empresas":
             rows = conn.execute(
@@ -9005,14 +9068,20 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/debug_db_path":
             resolved = Path(self.db_path).expanduser().resolve()
+            ocr_resolved = Path(self.ocr_db_path).expanduser().resolve()
             exists = resolved.exists()
             stat = resolved.stat() if exists else None
+            ocr_exists = ocr_resolved.exists()
+            ocr_stat = ocr_resolved.stat() if ocr_exists else None
             json_response(
                 self,
                 {
                     "db_path": str(resolved),
                     "exists": exists,
                     "size_bytes": stat.st_size if stat else 0,
+                    "ocr_db_path": str(ocr_resolved),
+                    "ocr_exists": ocr_exists,
+                    "ocr_size_bytes": ocr_stat.st_size if ocr_stat else 0,
                     "mtime": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat()
                     if stat
                     else "",
@@ -9120,7 +9189,9 @@ class Handler(BaseHTTPRequestHandler):
             if not job_id:
                 json_response(self, {"error": "id requerido"}, status=400)
                 return
-            row = conn.execute(
+            ocr_conn = get_db(self.ocr_db_path)
+            self._track_conn(ocr_conn)
+            row = ocr_conn.execute(
                 """
                 SELECT id, kind, status, result_json, error, created_at, started_at, finished_at
                 FROM ocr_jobs
@@ -9131,44 +9202,6 @@ class Handler(BaseHTTPRequestHandler):
             if not row:
                 json_response(self, {"error": "job no encontrado"}, status=404)
                 return
-            should_run_inline = row["status"] == "pending" and not row["started_at"]
-            stale_processing = row["status"] == "processing" and is_stale_ocr_job(row["started_at"])
-            if stale_processing:
-                should_run_inline = True
-            if should_run_inline:
-                payload_row = conn.execute(
-                    "SELECT payload_json, kind FROM ocr_jobs WHERE id = ?",
-                    (job_id,),
-                ).fetchone()
-                payload = {}
-                if payload_row and payload_row["payload_json"]:
-                    try:
-                        payload = json.loads(payload_row["payload_json"])
-                    except Exception:
-                        payload = {}
-                try:
-                    update_ocr_job(conn, job_id, "processing")
-                    conn.commit()
-                    if payload_row and payload_row["kind"] == "seguros":
-                        result_data = process_seguros_ocr(payload, conn)
-                        update_ocr_job(conn, job_id, "done", result=result_data, error=None)
-                    else:
-                        update_ocr_job(conn, job_id, "error", result=None, error="Tipo OCR no soportado")
-                    conn.commit()
-                except Exception as exc:
-                    try:
-                        update_ocr_job(conn, job_id, "error", result=None, error=str(exc))
-                        conn.commit()
-                    except Exception:
-                        pass
-                row = conn.execute(
-                    """
-                    SELECT id, kind, status, result_json, error, created_at, started_at, finished_at
-                    FROM ocr_jobs
-                    WHERE id = ?
-                    """,
-                    (job_id,),
-                ).fetchone()
             result = None
             if row["result_json"]:
                 try:
@@ -11258,6 +11291,7 @@ class Handler(BaseHTTPRequestHandler):
 def main():
     parser = argparse.ArgumentParser(description="ERP Modernia local server.")
     parser.add_argument("--db", default=str(DB_CONFIGURED), help="SQLite path.")
+    parser.add_argument("--ocr-db", default=str(OCR_DB_CONFIGURED), help="SQLite OCR jobs path.")
     parser.add_argument("--host", default="127.0.0.1", help="Host.")
     env_port = os.environ.get("PORT")
     try:
@@ -11268,8 +11302,10 @@ def main():
     args = parser.parse_args()
 
     ensure_tables(args.db)
+    ensure_ocr_tables(args.ocr_db)
     Handler.db_path = args.db
-    worker = threading.Thread(target=ocr_worker_loop, args=(args.db,), daemon=True)
+    Handler.ocr_db_path = args.ocr_db
+    worker = threading.Thread(target=ocr_worker_loop, args=(args.ocr_db, args.db), daemon=True)
     worker.start()
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     print(f"Servidor activo en http://{args.host}:{args.port} · db={Path(args.db).resolve()}")
