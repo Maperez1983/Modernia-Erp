@@ -3511,6 +3511,42 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
             fields["ramo"] = "Impago alquiler"
     if fields.get("tomador"):
         fields["tomador"] = clean_tomador_value(fields["tomador"])
+    # Saneo final para pólizas de impago con texto legal dominante (FIATC/iptiQ).
+    if fields.get("email"):
+        mail_norm = normalize_lookup_text(fields["email"])
+        if mail_norm.endswith("FIATC ES") or mail_norm.endswith("IPTIQ COM"):
+            fields["email"] = ""
+    if fields.get("direccion"):
+        dir_norm = normalize_lookup_text(fields["direccion"])
+        if (
+            "DIRECCION GENERAL DE SEGUROS" in dir_norm
+            or "DEPENDIENTE DE LA DIRECCION GENERAL" in dir_norm
+            or "FONDOS DE PENSIONES" in dir_norm
+            or "SOCIAL DE LA ENTIDAD" in dir_norm
+            or "AVENIDA DIAGONAL" in dir_norm
+            or ("BARCELONA" in dir_norm and "MALAGA" in dir_norm)
+        ):
+            fields["direccion"] = ""
+    if fields.get("dni"):
+        dni_norm = normalize_nif_candidate(fields.get("dni"))
+        tomador_norm = normalize_lookup_text(fields.get("tomador") or "")
+        looks_company_id = bool(re.match(r"^[ABCDEFGHJNPQRSUVW][0-9]{7}[0-9A-Z]$", dni_norm or ""))
+        looks_person_name = bool(tomador_norm and " SL" not in f" {tomador_norm} " and len((fields.get("tomador") or "").split()) >= 2)
+        if looks_company_id and looks_person_name:
+            fields["dni"] = ""
+            if fields.get("nif") == dni_norm:
+                fields["nif"] = ""
+    if fields.get("fecha_efecto") and fields.get("fecha_vencimiento"):
+        efecto = parse_iso_date(fields.get("fecha_efecto"))
+        venc = parse_iso_date(fields.get("fecha_vencimiento"))
+        if efecto and venc and venc < efecto:
+            fields["fecha_vencimiento"] = add_year_to_date(fields.get("fecha_efecto"))
+    if fields.get("dni"):
+        dni_checked = normalize_nif_candidate(fields.get("dni"))
+        if not is_valid_nif(dni_checked):
+            fields["dni"] = ""
+            if fields.get("nif") and not is_valid_nif(normalize_nif_candidate(fields.get("nif"))):
+                fields["nif"] = ""
     return fields
 
 def parse_asesoramiento_block(block):
