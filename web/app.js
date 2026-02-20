@@ -13825,8 +13825,11 @@ const openClienteSeguroDetail = (row, cliente = {}) => {
       ["Estado renovacion", row.estado_renovacion || "-"],
       ["Fecha renovacion", row.renovacion_fecha || "-"],
       ["Nueva poliza", row.nueva_poliza_ref || "-"],
+      ["Estado póliza", row.estado_poliza || "-"],
       ["Fecha anulación", row.fecha_baja || "-"],
       ["Motivo anulación", row.motivo_baja || "-"],
+      ["Póliza origen", row.poliza_origen_id || "-"],
+      ["Póliza sustituta", row.poliza_sustituta_id || "-"],
     ];
     details.forEach(([label, value]) => {
       const line = document.createElement("div");
@@ -13924,6 +13927,7 @@ const openClienteSeguroDetail = (row, cliente = {}) => {
       const mode = actionSelect.value;
       const payload = { id: row.id, empresa_nombre: FINCAS_COMPANY };
       const today = new Date().toISOString().slice(0, 10);
+      let endpoint = "/api/seguros_update";
       if (mode === "renovar") {
         payload.estado = "En vigor";
         payload.estado_renovacion = "Renovada manual";
@@ -13935,10 +13939,10 @@ const openClienteSeguroDetail = (row, cliente = {}) => {
           status.textContent = "Indica la nueva compañía.";
           return;
         }
-        payload.compania = newCompany;
-        payload.estado_renovacion = "Cambio compañía";
-        payload.renovacion_fecha = today;
-        if (refInput.value.trim()) payload.nueva_poliza_ref = refInput.value.trim();
+        endpoint = "/api/seguros_cambio_compania";
+        payload.nueva_compania = newCompany;
+        payload.fecha_cambio = today;
+        if (refInput.value.trim()) payload.nueva_poliza_numero = refInput.value.trim();
       } else if (mode === "anular") {
         if (!anulaDateInput.value) {
           status.textContent = "Indica la fecha de anulación.";
@@ -13963,7 +13967,7 @@ const openClienteSeguroDetail = (row, cliente = {}) => {
       }
       status.textContent = "Guardando...";
       try {
-        const resp = await fetch("/api/seguros_update", {
+        const resp = await fetch(endpoint, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),

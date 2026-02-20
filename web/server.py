@@ -5233,6 +5233,14 @@ def ensure_tables(db_path):
             conn.execute("ALTER TABLE seguros ADD COLUMN fecha_baja TEXT")
         if "motivo_baja" not in seguros_cols:
             conn.execute("ALTER TABLE seguros ADD COLUMN motivo_baja TEXT")
+        if "estado_poliza" not in seguros_cols:
+            conn.execute("ALTER TABLE seguros ADD COLUMN estado_poliza TEXT")
+        if "poliza_origen_id" not in seguros_cols:
+            conn.execute("ALTER TABLE seguros ADD COLUMN poliza_origen_id TEXT")
+        if "poliza_sustituta_id" not in seguros_cols:
+            conn.execute("ALTER TABLE seguros ADD COLUMN poliza_sustituta_id TEXT")
+        if "version_grupo" not in seguros_cols:
+            conn.execute("ALTER TABLE seguros ADD COLUMN version_grupo TEXT")
     except sqlite3.Error:
         pass
     conn.execute(
@@ -5559,6 +5567,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/fin_asesoramiento_ocr_auto",
             "/api/seguros",
             "/api/seguros_update",
+            "/api/seguros_cambio_compania",
             "/api/seguros_delete",
             "/api/seguros_enrich",
             "/api/fin_asesoramientos",
@@ -5670,6 +5679,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/fin_asesoramiento_ocr_guided",
             "/api/fin_asesoramiento_ocr_auto",
             "/api/seguros_delete",
+            "/api/seguros_cambio_compania",
             "/api/seguros_ofertas",
             "/api/seguros_ofertas_update",
             "/api/seguros_ofertas_delete",
@@ -5746,6 +5756,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/gestoria_docs_update",
             "/api/gestoria_docs_delete",
             "/api/seguros_delete",
+            "/api/seguros_cambio_compania",
             "/api/gestoria_contabilidad_update",
             "/api/gestoria_contabilidad_delete",
             "/api/auditoria",
@@ -6983,10 +6994,10 @@ class Handler(BaseHTTPRequestHandler):
                       tomador, compania, ramo, poliza_numero, prima_neta,
                       prima_total, comision, produccion, colaborador, estado,
                       estado_renovacion, renovacion_fecha, nueva_poliza_ref,
-                      poliza_key, poliza_url,
+                      poliza_key, poliza_url, estado_poliza, version_grupo,
                       created_at, updated_at
                     ) VALUES (
-                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
                     )
                     """,
                     (
@@ -7011,6 +7022,8 @@ class Handler(BaseHTTPRequestHandler):
                         payload.get("nueva_poliza_ref"),
                         payload.get("poliza_key"),
                         payload.get("poliza_url"),
+                        "activa",
+                        poliza_id,
                         now,
                         now,
                     ),
@@ -7525,6 +7538,10 @@ class Handler(BaseHTTPRequestHandler):
                 "estado_renovacion",
                 "renovacion_fecha",
                 "nueva_poliza_ref",
+                "estado_poliza",
+                "poliza_origen_id",
+                "poliza_sustituta_id",
+                "version_grupo",
                 "poliza_numero",
                 "poliza_key",
                 "poliza_url",
@@ -7589,6 +7606,147 @@ class Handler(BaseHTTPRequestHandler):
                         """,
                         (now, f"%{record_id}%"),
                     )
+        elif parsed.path == "/api/seguros_cambio_compania":
+            record_id = payload.get("id")
+            if not record_id:
+                json_response(self, {"error": "id requerido"}, status=400)
+                return
+            nueva_compania = (payload.get("nueva_compania") or payload.get("compania") or "").strip()
+            if not nueva_compania:
+                json_response(self, {"error": "nueva_compania requerida"}, status=400)
+                return
+            row = conn.execute("SELECT * FROM seguros WHERE id = ?", (record_id,)).fetchone()
+            if not row:
+                json_response(self, {"error": "Registro no encontrado"}, status=404)
+                return
+            fecha_cambio = (payload.get("fecha_cambio") or payload.get("fecha") or now[:10]).strip()
+            nueva_poliza = (payload.get("nueva_poliza_numero") or payload.get("poliza_numero") or "").strip()
+            if not nueva_poliza:
+                nueva_poliza = (payload.get("nueva_poliza_ref") or row["nueva_poliza_ref"] or row["poliza_numero"] or "").strip()
+            nueva_fecha_efecto = payload.get("nueva_fecha_efecto") or payload.get("fecha_efecto") or row["fecha_efecto"]
+            nueva_fecha_venc = payload.get("nueva_fecha_vencimiento") or payload.get("fecha_vencimiento") or row["fecha_vencimiento"]
+            nuevo_estado = payload.get("nuevo_estado") or "En vigor"
+            nuevo_cliente_id = payload.get("cliente_id") or row["cliente_id"]
+            if nuevo_cliente_id:
+                cliente_exists = conn.execute(
+                    "SELECT id FROM clientes WHERE id = ?",
+                    (nuevo_cliente_id,),
+                ).fetchone()
+                if not cliente_exists:
+                    json_response(self, {"error": "cliente_id no válido"}, status=400)
+                    return
+            version_grupo = (row["version_grupo"] or row["id"] or "").strip() or row["id"]
+            old_policy = row["poliza_numero"]
+            new_id = os.urandom(16).hex()
+            dup_id = find_existing_seguro_id(
+                conn,
+                row["empresa_id"],
+                nueva_poliza,
+                nueva_compania,
+            )
+            if dup_id:
+                json_response(
+                    self,
+                    {
+                        "error": "Ya existe una póliza con ese número y compañía",
+                        "duplicate_of": dup_id,
+                    },
+                    status=409,
+                )
+                return
+            conn.execute(
+                """
+                UPDATE seguros
+                SET
+                  estado = 'Sustituida',
+                  estado_poliza = 'sustituida',
+                  fecha_baja = ?,
+                  motivo_baja = ?,
+                  estado_renovacion = 'Cambio compañía',
+                  renovacion_fecha = ?,
+                  nueva_poliza_ref = ?,
+                  poliza_sustituta_id = ?,
+                  version_grupo = ?,
+                  updated_at = datetime(?)
+                WHERE id = ?
+                """,
+                (
+                    fecha_cambio,
+                    payload.get("motivo_baja") or "cambio_compania",
+                    fecha_cambio,
+                    nueva_poliza or "",
+                    new_id,
+                    version_grupo,
+                    now,
+                    record_id,
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO seguros (
+                  id, empresa_id, cliente_id, mes_creacion, fecha_efecto, fecha_vencimiento,
+                  tomador, compania, ramo, poliza_numero, prima_neta, prima_total,
+                  comision, produccion, colaborador, estado,
+                  estado_renovacion, renovacion_fecha, nueva_poliza_ref,
+                  poliza_key, poliza_url, fecha_baja, motivo_baja,
+                  estado_poliza, poliza_origen_id, poliza_sustituta_id, version_grupo,
+                  created_at, updated_at
+                ) VALUES (
+                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                )
+                """,
+                (
+                    new_id,
+                    row["empresa_id"],
+                    nuevo_cliente_id,
+                    row["mes_creacion"],
+                    nueva_fecha_efecto,
+                    nueva_fecha_venc,
+                    row["tomador"],
+                    nueva_compania,
+                    row["ramo"],
+                    nueva_poliza or row["poliza_numero"],
+                    row["prima_neta"],
+                    row["prima_total"],
+                    row["comision"],
+                    row["produccion"],
+                    row["colaborador"],
+                    nuevo_estado,
+                    "Alta por cambio compañía",
+                    fecha_cambio,
+                    old_policy or "",
+                    payload.get("poliza_key") or "",
+                    payload.get("poliza_url") or "",
+                    None,
+                    None,
+                    "activa",
+                    record_id,
+                    None,
+                    version_grupo,
+                    now,
+                    now,
+                ),
+            )
+            conn.execute(
+                "UPDATE seguros SET poliza_sustituta_id = ?, updated_at = datetime(?) WHERE id = ?",
+                (new_id, now, record_id),
+            )
+            new_row = conn.execute("SELECT * FROM seguros WHERE id = ?", (new_id,)).fetchone()
+            if new_row and new_row["cliente_id"]:
+                ensure_cliente_servicio_link(conn, new_row["cliente_id"], new_row["empresa_id"], "seguros", now)
+                ensure_seguro_doc_link(conn, new_row, now)
+            json_response(
+                self,
+                {
+                    "ok": True,
+                    "old_id": record_id,
+                    "new_id": new_id,
+                    "version_grupo": version_grupo,
+                },
+            )
+            conn.commit()
+            return
         elif parsed.path == "/api/seguros_delete":
             record_id = payload.get("id")
             if not record_id:
@@ -9796,7 +9954,7 @@ class Handler(BaseHTTPRequestHandler):
                   fecha_efecto, fecha_vencimiento, estado, prima_neta, prima_total,
                   tomador, estado_renovacion, renovacion_fecha, nueva_poliza_ref,
                   colaborador, produccion, mes_creacion, poliza_key, poliza_url,
-                  fecha_baja, motivo_baja
+                  fecha_baja, motivo_baja, estado_poliza, poliza_origen_id, poliza_sustituta_id, version_grupo
                 FROM seguros
                 WHERE {' AND '.join(where)}
                 ORDER BY COALESCE(fecha_efecto, created_at) DESC
@@ -9811,7 +9969,7 @@ class Handler(BaseHTTPRequestHandler):
                       fecha_efecto, fecha_vencimiento, estado, prima_neta, prima_total,
                       tomador, estado_renovacion, renovacion_fecha, nueva_poliza_ref,
                       colaborador, produccion, mes_creacion, poliza_key, poliza_url,
-                      fecha_baja, motivo_baja
+                      fecha_baja, motivo_baja, estado_poliza, poliza_origen_id, poliza_sustituta_id, version_grupo
                     FROM seguros
                     WHERE UPPER(TRIM(tomador)) = UPPER(TRIM(?))
                       AND (? = '' OR empresa_id = ?)
@@ -9831,7 +9989,7 @@ class Handler(BaseHTTPRequestHandler):
                               fecha_efecto, fecha_vencimiento, estado, prima_neta, prima_total,
                               tomador, estado_renovacion, renovacion_fecha, nueva_poliza_ref,
                               colaborador, produccion, mes_creacion, poliza_key, poliza_url,
-                              fecha_baja, motivo_baja
+                              fecha_baja, motivo_baja, estado_poliza, poliza_origen_id, poliza_sustituta_id, version_grupo
                             FROM seguros
                             WHERE tomador IS NOT NULL AND TRIM(tomador) <> ''
                               AND (? = '' OR empresa_id = ?)
@@ -9879,7 +10037,7 @@ class Handler(BaseHTTPRequestHandler):
                               fecha_efecto, fecha_vencimiento, estado, prima_neta, prima_total,
                               tomador, estado_renovacion, renovacion_fecha, nueva_poliza_ref,
                               colaborador, produccion, mes_creacion, poliza_key, poliza_url,
-                              fecha_baja, motivo_baja
+                              fecha_baja, motivo_baja, estado_poliza, poliza_origen_id, poliza_sustituta_id, version_grupo
                             FROM seguros
                             WHERE cliente_id = ?
                               AND (? = '' OR empresa_id = ?)
@@ -9913,6 +10071,10 @@ class Handler(BaseHTTPRequestHandler):
                             "poliza_url": r["poliza_url"],
                             "fecha_baja": r["fecha_baja"],
                             "motivo_baja": r["motivo_baja"],
+                            "estado_poliza": r["estado_poliza"],
+                            "poliza_origen_id": r["poliza_origen_id"],
+                            "poliza_sustituta_id": r["poliza_sustituta_id"],
+                            "version_grupo": r["version_grupo"],
                         }
                         for r in tomador_rows
                     ]
