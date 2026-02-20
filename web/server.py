@@ -2805,6 +2805,29 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
         if len(words) > 9:
             raw = " ".join(words[:9])
         return raw
+    def looks_corporate_name(value):
+        norm = normalize_lookup_text(value or "")
+        if not norm:
+            return False
+        corporate_tokens = (
+            " SL",
+            " S L",
+            " SA",
+            " S A",
+            " SLU",
+            " SCP",
+            " CB",
+            " SOCIEDAD",
+            " FINANCIACIONES",
+            " INMOBILIARIA",
+            " ESTUDIO",
+            " ESTUDIOS",
+            " COMUNIDAD",
+            " CLUB",
+            " CP ",
+            " C P ",
+        )
+        return any(token in f" {norm} " for token in corporate_tokens)
     def parse_from_source_hint():
         out = {}
         raw = str(source_hint or "").strip()
@@ -3702,7 +3725,11 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
         dni_norm = normalize_nif_candidate(fields.get("dni"))
         tomador_norm = normalize_lookup_text(fields.get("tomador") or "")
         looks_company_id = bool(re.match(r"^[ABCDEFGHJNPQRSUVW][0-9]{7}[0-9A-Z]$", dni_norm or ""))
-        looks_person_name = bool(tomador_norm and " SL" not in f" {tomador_norm} " and len((fields.get("tomador") or "").split()) >= 2)
+        looks_person_name = bool(
+            tomador_norm
+            and not looks_corporate_name(fields.get("tomador") or "")
+            and len((fields.get("tomador") or "").split()) >= 2
+        )
         if looks_company_id and looks_person_name:
             fields["dni"] = ""
             if fields.get("nif") == dni_norm:
@@ -3756,6 +3783,27 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
             if reale_cif:
                 fields["dni"] = reale_cif.group(1).upper()
                 fields["nif"] = fields["dni"]
+    # Reglas específicas pólizas EXSEL/Lloyd's RC Profesional (BASWZ...).
+    is_lloyds_exsel = any(token in upper_text for token in ("BASWZ", "EXSEL UNDERWRITING", "LLOYD"))
+    if is_lloyds_exsel:
+        fields["compania"] = "Lloyd's"
+        fields["ramo"] = "Responsabilidad civil"
+        pol_match = re.search(r"P[oó]liza\s*(?:n[ºo]\s*)?:\s*([A-Z0-9]{10,})", text, re.IGNORECASE)
+        if pol_match:
+            fields["poliza_numero"] = pol_match.group(1).upper()
+        tom_match = re.search(r"TOMADOR:\s*([^\n]+)", text, re.IGNORECASE)
+        if tom_match:
+            fields["tomador"] = normalize_person_name(tom_match.group(1)).strip(" ,;:-")
+        cif_match = re.search(r"CIF/NIF:\s*([A-Z][0-9]{8})", text, re.IGNORECASE)
+        if cif_match:
+            fields["dni"] = cif_match.group(1).upper()
+            fields["nif"] = fields["dni"]
+        phone_match = re.search(r"\+34\s*([679][0-9\s]{8,})", text, re.IGNORECASE)
+        if phone_match:
+            fields["telefono"] = normalize_phone(phone_match.group(1)) or fields.get("telefono")
+        mail_match = re.search(r"\b([A-Z0-9._%+\-]+@(?:LLOYDS|EXSEL)[A-Z0-9.\-]*\.[A-Z]{2,})\b", text, re.IGNORECASE)
+        if mail_match:
+            fields["email"] = normalize_email(mail_match.group(1))
     return fields
 
 def parse_asesoramiento_block(block):
