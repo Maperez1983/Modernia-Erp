@@ -3825,6 +3825,128 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
         if normalize_email(fields.get("email") or "").endswith("@fiatc.es"):
             fields["email"] = ""
         fields["telefono"] = ""
+    # Reglas específicas OCCIDENT Auto (evitar contaminación por texto legal/corporativo).
+    is_occident_auto = (
+        ("OCCIDENT" in upper_text or normalize_company_key(fields.get("compania") or "") in ("OCCIDENT", "CATALANAOCCIDENTE"))
+        and ("SEGURO DE AUTOMOVIL" in upper_text or "AUTOMOVIL" in upper_text)
+    )
+    if is_occident_auto:
+        fields["compania"] = "Occident"
+        fields["ramo"] = "Auto"
+        pol_match = re.search(
+            r"N\.\s*[ºo]\s*de\s*p[oó]liza\s*[:#]?\s*([A-Z0-9.\-]{8,})",
+            text,
+            re.IGNORECASE,
+        ) or re.search(
+            r"N[ºo°]\s*de\s*p[oó]liza\s*[:#]?\s*([A-Z0-9.\-]{8,})",
+            text,
+            re.IGNORECASE,
+        )
+        if pol_match:
+            fields["poliza_numero"] = pol_match.group(1).strip()
+        tomador_match = re.search(r"Tomador del seguro\s*([\s\S]{0,260})", text, re.IGNORECASE)
+        if tomador_match:
+            block = tomador_match.group(1)
+            lines = [re.sub(r"\s+", " ", ln).strip(" ,;:-") for ln in block.splitlines() if ln.strip()]
+            candidate_index = -1
+            if lines:
+                candidate = ""
+                for idx, ln in enumerate(lines):
+                    ln_up = normalize_lookup_text(ln)
+                    if any(
+                        token in ln_up
+                        for token in (
+                            "OCCIDENT",
+                            "REASEGUROS",
+                            "DOMICILIO SOCIAL",
+                            "MENDEZ ALVARO",
+                            "MADRID",
+                            "OFICINA EMISORA",
+                            "CORREDOR",
+                            "ZONA SURESTE",
+                            "FINCAS VELAZQUEZ",
+                            "TELEFONO",
+                            "FECHA DE EFECTO",
+                        )
+                    ):
+                        continue
+                    if re.match(r"^\d{5}\b", ln):
+                        continue
+                    candidate = ln
+                    candidate_index = idx
+                    break
+                if candidate:
+                    fields["tomador"] = candidate
+            nif_match = re.search(r"\bNIF\s*([A-Z0-9]{8,9})\b", block, re.IGNORECASE)
+            if nif_match:
+                fields["dni"] = nif_match.group(1).upper()
+                fields["nif"] = fields["dni"]
+            address_lines = []
+            for idx, ln in enumerate(lines):
+                if candidate_index >= 0 and idx <= candidate_index:
+                    continue
+                ln_up = normalize_lookup_text(ln)
+                if "OFICINA EMISORA" in ln_up or "CORREDOR" in ln_up:
+                    break
+                if re.search(r"\b(AVENIDA|CALLE|C/|CL\b|PLAZA|PZA|CTRA|CAMINO)\b", ln_up):
+                    address_lines.append(ln)
+                    continue
+                if re.match(r"^\d{5}\b", ln) or ln_up in ("MALAGA", "MURCIA", "MADRID"):
+                    ln_up = normalize_lookup_text(ln)
+                    address_lines.append(ln)
+            if address_lines:
+                fields["direccion"] = " ".join(address_lines[:3]).strip()
+        month_map = {
+            "enero": "01", "febrero": "02", "marzo": "03", "abril": "04",
+            "mayo": "05", "junio": "06", "julio": "07", "agosto": "08",
+            "septiembre": "09", "octubre": "10", "noviembre": "11", "diciembre": "12",
+        }
+        eff_match = re.search(
+            r"toma efecto[^\n]*?d[ií]a\s+([0-9]{1,2})\s+de\s+([a-záéíóú]+)\s+de\s+([0-9]{4})",
+            text,
+            re.IGNORECASE,
+        )
+        exp_match = re.search(
+            r"Fecha de vencimiento\s*:\s*([0-9]{1,2})\s+de\s+([a-záéíóú]+)\s+de\s+([0-9]{4})",
+            text,
+            re.IGNORECASE,
+        )
+        if eff_match:
+            d, mtxt, y = eff_match.groups()
+            mm = month_map.get(normalize_lookup_text(mtxt).lower(), "")
+            if mm:
+                fields["fecha_efecto"] = f"{int(d):02d}/{mm}/{y}"
+        if exp_match:
+            d, mtxt, y = exp_match.groups()
+            mm = month_map.get(normalize_lookup_text(mtxt).lower(), "")
+            if mm:
+                fields["fecha_vencimiento"] = f"{int(d):02d}/{mm}/{y}"
+        prima_neta = re.search(r"Prima\s+neta\s*([0-9]{1,3}(?:\.[0-9]{3})*,[0-9]{2})\s*€", text, re.IGNORECASE)
+        prima_total_poliza = re.search(
+            r"Prima\s+total\s+p[oó]liza\s*:\s*([0-9]{1,3}(?:\.[0-9]{3})*,[0-9]{2})",
+            text,
+            re.IGNORECASE,
+        )
+        prima_total_recibo = re.search(r"Prima\s+total\s*([0-9]{1,3}(?:\.[0-9]{3})*,[0-9]{2})\s*€", text, re.IGNORECASE)
+        if prima_neta:
+            fields["prima_neta"] = prima_neta.group(1)
+        if prima_total_poliza:
+            fields["prima_total"] = prima_total_poliza.group(1)
+        elif prima_total_recibo:
+            fields["prima_total"] = prima_total_recibo.group(1)
+        if not fields.get("prima_neta"):
+            desglose = re.search(
+                r"Desglose del recibo de prima([\s\S]{0,450})Prima total p[oó]liza",
+                text,
+                re.IGNORECASE,
+            )
+            if desglose:
+                nums = re.findall(r"([0-9]{1,3}(?:\.[0-9]{3})*,[0-9]{2})\s*€", desglose.group(1))
+                if nums:
+                    fields["prima_neta"] = nums[0]
+        if normalize_email(fields.get("email") or "").endswith("@gco.com"):
+            fields["email"] = ""
+        fields["telefono"] = ""
     # Reglas específicas pólizas EXSEL/Lloyd's RC Profesional (BASWZ...).
     is_lloyds_exsel = any(token in upper_text for token in ("BASWZ", "EXSEL UNDERWRITING", "LLOYD"))
     if is_lloyds_exsel:
