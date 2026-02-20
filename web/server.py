@@ -5669,6 +5669,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/fin_asesoramiento_ocr",
             "/api/fin_asesoramiento_ocr_guided",
             "/api/fin_asesoramiento_ocr_auto",
+            "/api/seguros_delete",
             "/api/seguros_ofertas",
             "/api/seguros_ofertas_update",
             "/api/seguros_ofertas_delete",
