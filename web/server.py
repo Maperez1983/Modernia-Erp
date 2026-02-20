@@ -3947,6 +3947,87 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
         if normalize_email(fields.get("email") or "").endswith("@gco.com"):
             fields["email"] = ""
         fields["telefono"] = ""
+    # Reglas específicas Santa Lucía Hogar.
+    is_santalucia_hogar = (
+        normalize_company_key(fields.get("compania") or "") in ("SANTALUCIA", "SANTALUCIA")
+        and ("SEGURO DE HOGAR" in upper_text or "HOGAR COMPLETO" in upper_text)
+    ) or ("SANTA LUCIA" in upper_text and "HOGAR" in upper_text)
+    if is_santalucia_hogar:
+        fields["compania"] = "Santa Lucia"
+        fields["ramo"] = "Hogar"
+        pol_match = re.search(
+            r"P[ÓO]LIZA\s+N[ÚU]MERO\s*[\r\n]+\s*([A-Z0-9\-]{5,})",
+            text,
+            re.IGNORECASE,
+        ) or re.search(
+            r"P[ÓO]LIZA\s+N[ÚU]MERO\s*[:#]?\s*([A-Z0-9\-]{5,})",
+            text,
+            re.IGNORECASE,
+        )
+        if pol_match:
+            fields["poliza_numero"] = pol_match.group(1).strip()
+        tom_match = re.search(
+            r"DATOS\s+DEL\s+TOMADOR\s+DEL\s+SEGURO\s*[\r\n]+\s*([^\n]+)",
+            text,
+            re.IGNORECASE,
+        )
+        if tom_match:
+            tom = normalize_person_name(tom_match.group(1)).strip(" ,;:-")
+            if tom:
+                fields["tomador"] = tom
+        nif_match = re.search(r"DATOS\s+DEL\s+TOMADOR[\s\S]{0,220}?NIF\s*:\s*([A-Z0-9]{8,9})", text, re.IGNORECASE)
+        if nif_match:
+            fields["dni"] = nif_match.group(1).upper()
+            fields["nif"] = fields["dni"]
+        month_map = {
+            "enero": "01", "febrero": "02", "marzo": "03", "abril": "04",
+            "mayo": "05", "junio": "06", "julio": "07", "agosto": "08",
+            "septiembre": "09", "octubre": "10", "noviembre": "11", "diciembre": "12",
+        }
+        eff_match = re.search(
+            r"DESDE\s+LAS\s+[0-9]{2}:[0-9]{2}\s+HORAS\s+DEL\s+DIA\s+([0-9]{1,2})\s+de\s+([a-záéíóú]+)\s+de\s+([0-9]{4})",
+            text,
+            re.IGNORECASE,
+        )
+        exp_match = re.search(
+            r"HASTA\s+LAS\s+[0-9]{2}:[0-9]{2}\s+HORAS\s+DEL\s+DIA\s+([0-9]{1,2})\s+de\s+([a-záéíóú]+)\s+de\s+([0-9]{4})",
+            text,
+            re.IGNORECASE,
+        )
+        if eff_match:
+            d, mtxt, y = eff_match.groups()
+            mm = month_map.get(normalize_lookup_text(mtxt).lower(), "")
+            if mm:
+                fields["fecha_efecto"] = f"{int(d):02d}/{mm}/{y}"
+        if exp_match:
+            d, mtxt, y = exp_match.groups()
+            mm = month_map.get(normalize_lookup_text(mtxt).lower(), "")
+            if mm:
+                fields["fecha_vencimiento"] = f"{int(d):02d}/{mm}/{y}"
+        prima_tarifa = re.search(
+            r"PRIMA\s+TARIFA\s*:\s*([0-9]{1,3}(?:\.[0-9]{3})*,[0-9]{2})",
+            text,
+            re.IGNORECASE,
+        )
+        prima_total = re.search(
+            r"PRIMA\s+TOTAL\s*:\s*([0-9]{1,3}(?:\.[0-9]{3})*,[0-9]{2})",
+            text,
+            re.IGNORECASE,
+        )
+        if prima_tarifa:
+            fields["prima_neta"] = prima_tarifa.group(1)
+        if prima_total:
+            fields["prima_total"] = prima_total.group(1)
+        risk_addr = re.search(
+            r"SITUACI[ÓO]N\s+DE\s+LA\s+VIVIENDA[\s\S]{0,180}?[\r\n]+\s*([^\n]+)",
+            text,
+            re.IGNORECASE,
+        )
+        if risk_addr:
+            fields["direccion"] = normalize_person_name(risk_addr.group(1)).strip(" ,;:-")
+        if normalize_email(fields.get("email") or "").endswith("@santalucia.es"):
+            fields["email"] = ""
+        fields["telefono"] = ""
     # Reglas específicas pólizas EXSEL/Lloyd's RC Profesional (BASWZ...).
     is_lloyds_exsel = any(token in upper_text for token in ("BASWZ", "EXSEL UNDERWRITING", "LLOYD"))
     if is_lloyds_exsel:
