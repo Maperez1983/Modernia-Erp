@@ -2579,6 +2579,19 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
         raw = re.sub(r"\s+", "", raw).strip()
         if not raw:
             return ""
+        # Formato típico en pólizas de impago (GAGxxxxx) que a veces llega contaminado.
+        gag_match = re.search(r"\bGAG[0-9O][A-Z0-9]{4,}\b", raw, re.IGNORECASE)
+        if gag_match:
+            token = gag_match.group(0).upper()
+            suffix = token[3:]
+            suffix = suffix.replace("O", "0")
+            digits = re.match(r"([0-9]{5,})", suffix)
+            if digits:
+                return f"GAG{digits.group(1)}"
+            token_digits = re.sub(r"[^0-9]", "", suffix)
+            if len(token_digits) >= 5:
+                return f"GAG{token_digits}"
+            return token
         raw = re.sub(r"^(N[ºo]\s*)", "", raw, flags=re.IGNORECASE)
         raw = re.sub(r"^POLIZA", "", raw, flags=re.IGNORECASE)
         raw = raw.strip(":-#")
@@ -2707,8 +2720,28 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
             "BENEFICIARIOS OTROS",
             "INCLUIDO",
             "NO INCLUIDO",
+            "UNA PERSONA FISICA",
+            "UNA PERSONA JURIDICA",
+            "MAYOR DE EDAD",
+            "TITULAR DEL INTERES OBJETO",
+            "CUANDO QUIEN SE OPONGA",
+            "ARRENDATARIO",
+            "ARRENDADOR",
+            "DESAHUCIO",
+            "RENTA VENCIDA",
+            "MES DE RENTA",
+            "MESES DE RENTA",
+            "NOMBRE Y APELLIDOS",
+            "Y APELLIDOS",
         )
         if any(fragment in raw_upper for fragment in banned_fragments):
+            return ""
+        if re.search(r"\buna\s+persona\s+f[ií]sica\b.*\bo\s+una\s+persona\b", raw, re.IGNORECASE):
+            return ""
+        legal_noise = (
+            r"\b(cuando|quien|oponga|arrendatari[oa]s?|arrendador|desahucio|renta|vencida|mensualidad(?:es)?)\b"
+        )
+        if re.search(legal_noise, raw, re.IGNORECASE):
             return ""
         if "€" in raw or re.search(r"\d{2,}", raw):
             return ""
@@ -3251,6 +3284,9 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
         if ramo_inline:
             fields["ramo"] = ramo_inline.group(1).strip()
         ramo_upper = normalize_lookup_text(fields["ramo"])
+        if ramo_upper in ("DE SEGURO", "SEGURO", "TIPO DE SEGURO", "DEL SEGURO"):
+            fields["ramo"] = ""
+            ramo_upper = ""
         if "IMPAGO" in ramo_upper and "ALQUILER" in ramo_upper:
             fields["ramo"] = "Impago alquiler"
         elif "HOGAR" in ramo_upper and "ALQUILER" in ramo_upper:
@@ -3315,6 +3351,10 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
         fields["poliza_numero"] = line_pick(
             ["Póliza", "Poliza", "Nº póliza", "Numero de poliza", "Certificado", "Contrato"]
         )
+    if fields.get("poliza_numero"):
+        gag_inline = re.search(r"\bGAG[0-9]{5,}\b", str(fields["poliza_numero"]), re.IGNORECASE)
+        if gag_inline:
+            fields["poliza_numero"] = gag_inline.group(0).upper()
     if not fields["ramo"]:
         fields["ramo"] = line_pick(["Ramo", "Modalidad", "Producto"])
     if not fields["fecha_efecto"]:
@@ -3459,6 +3499,18 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
             )
         ):
             fields["ramo"] = source_ramo
+    # Reglas finales para pólizas de impago (GAG/FIATC/iptiQ) con mucho texto legal.
+    source_upper = normalize_lookup_text(str(source_hint or ""))
+    current_poliza_norm = normalize_poliza_key(fields.get("poliza_numero") or "")
+    if (
+        "IMPAGO" in source_upper
+        or current_poliza_norm.startswith("GAG")
+        or "GAG" in source_upper
+    ):
+        if not fields.get("ramo") or normalize_lookup_text(fields.get("ramo") or "") in ("DE SEGURO", "SEGURO", "ALQUILER"):
+            fields["ramo"] = "Impago alquiler"
+    if fields.get("tomador"):
+        fields["tomador"] = clean_tomador_value(fields["tomador"])
     return fields
 
 def parse_asesoramiento_block(block):
