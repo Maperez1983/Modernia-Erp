@@ -2831,6 +2831,8 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
             out["compania"] = "Allianz"
         elif "ZURICH" in upper:
             out["compania"] = "Zurich"
+        elif "EUROINS" in upper:
+            out["compania"] = "Euroins"
         elif "MUTUA PROPIETARIOS" in upper:
             out["compania"] = "Mutua Propietarios"
         elif "OCCIDENT" in upper:
@@ -3493,6 +3495,54 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
             cur_key = normalize_company_key(fields.get("compania"))
             if src_key and cur_key and src_key != cur_key:
                 fields["compania"] = normalize_company_name(source_company)
+
+    # Reglas específicas Euroins Auto (evita capturar datos del mediador / DAS).
+    upper_text = normalize_lookup_text(text)
+    source_upper = normalize_lookup_text(str(source_hint or ""))
+    is_euroins_doc = ("EUROINS" in upper_text) or ("EUROINS" in source_upper)
+    if is_euroins_doc:
+        fields["compania"] = "Euroins"
+        euroins_block_match = re.search(
+            r"COMPAÑ[IÍ]A([\s\S]{0,1800}?)VEHICULO ASEGURADO",
+            text,
+            re.IGNORECASE,
+        )
+        euroins_block = euroins_block_match.group(1) if euroins_block_match else text
+        if "SEGURO DE AUTOMOVIL" in upper_text:
+            fields["ramo"] = "Auto"
+        euroins_tomador = re.search(r"Nombre y apellidos:\s*([^\n]+)", euroins_block, re.IGNORECASE)
+        if euroins_tomador:
+            cand = clean_tomador_value(euroins_tomador.group(1))
+            if cand:
+                fields["tomador"] = cand
+        euroins_nif = re.search(r"\b([0-9]{8}[A-Z]|[XYZ][0-9]{7}[A-Z])\b", euroins_block, re.IGNORECASE)
+        if euroins_nif:
+            fields["dni"] = normalize_nif_candidate(euroins_nif.group(1)) or ""
+        euroins_phone_candidates = re.findall(r"\b([679][0-9]{8})\b", euroins_block)
+        if euroins_phone_candidates:
+            fields["telefono"] = normalize_phone(euroins_phone_candidates[-1]) or ""
+        periodo_match = re.search(
+            r"PERIODO DE VIGENCIA([\s\S]{0,300}?)SEGURO DE AUTOM[ÓO]VIL",
+            text,
+            re.IGNORECASE,
+        )
+        if periodo_match:
+            periodo_dates = re.findall(r"\d{1,2}/\d{1,2}/\d{2,4}", periodo_match.group(1))
+            if len(periodo_dates) >= 2:
+                fields["fecha_efecto"] = periodo_dates[0]
+                fields["fecha_vencimiento"] = periodo_dates[1]
+        primas_window_match = re.search(r"PAGO DE PRIMAS([\s\S]{0,700}?)PERIODO DE VIGENCIA", text, re.IGNORECASE)
+        primas_window = primas_window_match.group(1) if primas_window_match else ""
+        primas_values = re.findall(r"\b([0-9]+[.,][0-9]{2})\b", primas_window)
+        if primas_values:
+            fields["prima_neta"] = primas_values[0]
+            fields["prima_total"] = primas_values[-1]
+        mail_norm = normalize_email(fields.get("email") or "")
+        if mail_norm.endswith("@das.es") or "gallen" in mail_norm:
+            fields["email"] = ""
+        phone_norm = normalize_phone(fields.get("telefono") or "")
+        if phone_norm in ("910609386",):
+            fields["telefono"] = ""
     for key in ("fecha_efecto", "fecha_vencimiento", "fecha_nacimiento"):
         if fields.get(key):
             fields[key] = normalize_ocr_date(fields[key])
@@ -3604,6 +3654,22 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
             fields["dni"] = ""
             if fields.get("nif") and not is_valid_nif(normalize_nif_candidate(fields.get("nif"))):
                 fields["nif"] = ""
+    if is_euroins_doc:
+        # En Euroins, el identificador puede venir como NIF textual aunque no pase el checksum clásico.
+        if not fields.get("dni"):
+            raw_id = re.search(r"\b([0-9]{8}[A-Z]|[XYZ][0-9]{7}[A-Z])\b", text, re.IGNORECASE)
+            if raw_id:
+                fields["dni"] = raw_id.group(1).upper()
+                if not fields.get("nif"):
+                    fields["nif"] = fields["dni"]
+        range_dates = re.search(
+            r"Desde[^\n]*?(\d{1,2}/\d{1,2}/\d{2,4})[\s\S]{0,120}?Hasta[^\n]*?(\d{1,2}/\d{1,2}/\d{2,4})",
+            text,
+            re.IGNORECASE,
+        )
+        if range_dates:
+            fields["fecha_efecto"] = normalize_ocr_date(range_dates.group(1))
+            fields["fecha_vencimiento"] = normalize_ocr_date(range_dates.group(2))
     return fields
 
 def parse_asesoramiento_block(block):
