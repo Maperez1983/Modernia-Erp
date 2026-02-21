@@ -1532,6 +1532,35 @@ body.crm-fin #companySummary {
   text-align: right;
 }
 
+.cliente-ramo-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+  margin: 10px 0;
+}
+
+.cliente-ramo-kpi-card {
+  text-align: left;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.cliente-ramo-kpi-card.active {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 2px rgba(60, 110, 113, 0.2);
+}
+
+.cliente-ramo-listado {
+  margin-top: 12px;
+}
+
+.cliente-ramo-listado h5 {
+  margin: 0 0 8px;
+}
+
 .agenda-time {
   font-weight: 600;
 }

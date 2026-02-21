@@ -1040,6 +1040,9 @@ const state = {
   segurosOcrClienteId: "",
   segurosBdtOcrClienteId: "",
   segurosOcrQuality: null,
+  currentClienteData: null,
+  currentClienteSegurosRows: [],
+  currentClienteRamoSelected: "",
 };
 
 const empresaSelect = document.getElementById("empresaSelect");
@@ -1167,6 +1170,9 @@ const clienteKpiPendientes = document.getElementById("clienteKpiPendientes");
 const clienteKpiCitas = document.getElementById("clienteKpiCitas");
 const clienteChartRentabilidad = document.getElementById("clienteChartRentabilidad");
 const clienteChartActividad = document.getElementById("clienteChartActividad");
+const clienteRamoKpis = document.getElementById("clienteRamoKpis");
+const clienteChartRamos = document.getElementById("clienteChartRamos");
+const clienteRamoListado = document.getElementById("clienteRamoListado");
 const clienteServiciosSegurosCard = document.getElementById("clienteServiciosSegurosCard");
 const clienteServiciosInmoCard = document.getElementById("clienteServiciosInmoCard");
 const clienteServiciosHipotecasCard = document.getElementById("clienteServiciosHipotecasCard");
@@ -1716,21 +1722,20 @@ const SEGUROS_RESPONSABLES_FIJOS = [
   "MODERNIA MALAGA CENTRO",
 ];
 const SEGUROS_RAMOS_CATALOGO = [
-  "Hogar",
-  "Hogar alquiler",
-  "Auto",
-  "Moto",
-  "Comercio",
-  "Comunidad",
-  "Impago alquiler",
-  "Responsabilidad civil",
-  "Decesos",
-  "Salud",
   "Vida",
   "Accidentes",
+  "Salud",
+  "Decesos",
+  "Auto",
+  "Hogar",
+  "Comercio",
+  "Comunidad",
+  "Responsabilidad civil",
   "Defensa jurídica",
+  "Protección de pagos",
   "Viaje",
-  "Ciber",
+  "Ahorro",
+  "Caza",
 ];
 const SEGUROS_LEGACY_STATUS_KEY = "migrado legado";
 const SEGUROS_ONLY_UPLOADED_MODE = true;
@@ -13043,6 +13048,135 @@ const renderClienteMiniChart = (container, items = []) => {
   container.appendChild(wrapper);
 };
 
+const getSeguroRamoLabel = (value) => {
+  const ramo = String(value || "").trim();
+  return ramo || "Sin ramo";
+};
+
+const summarizeSegurosByRamo = (rows = []) => {
+  const map = new Map();
+  rows.forEach((row) => {
+    const ramo = getSeguroRamoLabel(row.ramo);
+    if (!map.has(ramo)) {
+      map.set(ramo, { ramo, total: 0, primaTotal: 0, rows: [] });
+    }
+    const bucket = map.get(ramo);
+    bucket.total += 1;
+    bucket.primaTotal += parseMoneyValue(row.prima_total);
+    bucket.rows.push(row);
+  });
+  return Array.from(map.values()).sort((a, b) => b.total - a.total);
+};
+
+const renderClienteRamoListado = (ramoLabel, rows = [], cliente = null) => {
+  if (!clienteRamoListado) return;
+  if (!rows.length) {
+    clienteRamoListado.innerHTML = "<p class='muted'>Sin pólizas para este ramo.</p>";
+    return;
+  }
+  const title = document.createElement("h5");
+  title.textContent = `Pólizas · ${ramoLabel}`;
+  const table = document.createElement("table");
+  const thead = document.createElement("thead");
+  const trHead = document.createElement("tr");
+  ["Póliza", "Compañía", "Efecto", "Vencimiento", "Estado", "Prima", "Detalle"].forEach((col) => {
+    const th = document.createElement("th");
+    th.textContent = col;
+    trHead.appendChild(th);
+  });
+  thead.appendChild(trHead);
+  table.appendChild(thead);
+  const tbody = document.createElement("tbody");
+  rows.forEach((row) => {
+    const tr = document.createElement("tr");
+    const computed = computeSeguroDisplayState(row);
+    const values = [
+      row.poliza_numero || "-",
+      row.compania || "-",
+      row.fecha_efecto || "-",
+      computed.vencimiento || "-",
+      computed.estado || "-",
+      row.prima_total ? euroFormatter.format(Number(row.prima_total) || 0) : "-",
+    ];
+    values.forEach((value) => {
+      const td = document.createElement("td");
+      td.textContent = value;
+      tr.appendChild(td);
+    });
+    const actionTd = document.createElement("td");
+    const openBtn = document.createElement("button");
+    openBtn.type = "button";
+    openBtn.className = "secondary";
+    openBtn.textContent = "Abrir póliza";
+    openBtn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      openClienteSeguroDetail(
+        row,
+        cliente || state.currentClienteData || { id: state.currentClienteId, nombre: row.tomador || "" }
+      );
+    });
+    actionTd.appendChild(openBtn);
+    tr.appendChild(actionTd);
+    tr.addEventListener("click", () =>
+      openClienteSeguroDetail(
+        row,
+        cliente || state.currentClienteData || { id: state.currentClienteId, nombre: row.tomador || "" }
+      )
+    );
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  clienteRamoListado.innerHTML = "";
+  clienteRamoListado.appendChild(title);
+  clienteRamoListado.appendChild(table);
+};
+
+const renderClienteRamosDashboard = (rows = [], cliente = null) => {
+  if (!clienteRamoKpis || !clienteChartRamos || !clienteRamoListado) return;
+  state.currentClienteSegurosRows = Array.isArray(rows) ? [...rows] : [];
+  const summary = summarizeSegurosByRamo(state.currentClienteSegurosRows);
+  if (!summary.length) {
+    clienteRamoKpis.innerHTML = "<p class='muted'>Sin pólizas para agrupar por ramo.</p>";
+    clienteChartRamos.innerHTML = "<p class='muted'>Sin datos.</p>";
+    clienteRamoListado.innerHTML = "<p class='muted'>Selecciona una póliza en servicios para ver detalle.</p>";
+    state.currentClienteRamoSelected = "";
+    return;
+  }
+  clienteRamoKpis.innerHTML = "";
+  summary.forEach((item) => {
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = "card cliente-ramo-kpi-card";
+    if (state.currentClienteRamoSelected === item.ramo) {
+      card.classList.add("active");
+    }
+    card.innerHTML = `
+      <div class="kpi-label">${item.ramo}</div>
+      <div class="kpi-value">${item.total}</div>
+      <div class="muted">${euroFormatter.format(item.primaTotal)}</div>
+    `;
+    card.addEventListener("click", () => {
+      state.currentClienteRamoSelected = item.ramo;
+      renderClienteRamosDashboard(state.currentClienteSegurosRows, cliente || state.currentClienteData);
+      renderClienteRamoListado(item.ramo, item.rows, cliente || state.currentClienteData);
+    });
+    clienteRamoKpis.appendChild(card);
+  });
+  renderClienteMiniChart(
+    clienteChartRamos,
+    summary.map((item, idx) => ({
+      label: item.ramo,
+      value: item.total,
+      display: `${item.total} póliza${item.total === 1 ? "" : "s"}`,
+      color: ["#3C6E71", "#5F7A61", "#2B2B2B", "#8A9A8A", "#6B7C6B"][idx % 5],
+    }))
+  );
+  const selected =
+    summary.find((item) => item.ramo === state.currentClienteRamoSelected) || summary[0];
+  state.currentClienteRamoSelected = selected.ramo;
+  renderClienteRamoListado(selected.ramo, selected.rows, cliente || state.currentClienteData);
+};
+
 const renderClienteMiniDashboardFromPayload = (dashboard) => {
   if (!dashboard || !clienteKpiRentabilidad || !clienteKpiPendientes || !clienteKpiCitas || !clienteKpiPrimas) {
     return false;
@@ -13102,6 +13236,7 @@ const loadClienteMiniDashboard = async (clienteId, empresas = [], prefetched = n
     clienteKpiCitas.textContent = "-";
     renderClienteMiniChart(clienteChartRentabilidad, []);
     renderClienteMiniChart(clienteChartActividad, []);
+    renderClienteRamosDashboard([], null);
     return;
   }
   clienteKpiRentabilidad.textContent = "Calculando...";
@@ -13178,6 +13313,7 @@ const loadClienteMiniDashboard = async (clienteId, empresas = [], prefetched = n
     const inmoGroups = rest.slice(accionesReqs.length + contaReqs.length + finReqs.length);
     const trabajos = trabajosData.rows || [];
     const seguros = segurosData.rows || [];
+    renderClienteRamosDashboard(seguros, state.currentClienteData);
     const acciones = accionesGroups.flatMap((payload) => payload.rows || []);
     const movimientos = contaGroups
       .flatMap((payload) => payload.rows || [])
@@ -13303,6 +13439,7 @@ const loadClienteMiniDashboard = async (clienteId, empresas = [], prefetched = n
     clienteKpiCitas.textContent = "-";
     renderClienteMiniChart(clienteChartRentabilidad, []);
     renderClienteMiniChart(clienteChartActividad, []);
+    renderClienteRamosDashboard([], state.currentClienteData);
     if (clienteMiniDashboardHint) {
       clienteMiniDashboardHint.textContent = "No se pudo calcular el dashboard del cliente.";
     }
@@ -14150,6 +14287,7 @@ const loadClienteSeguros = (cliente, empresaId) => {
         );
         matches = matches.filter((row) => allowed.has(String(row.id || "").trim()));
       }
+      renderClienteRamosDashboard(matches, cliente);
       if (!matches.length) {
         clienteSegurosFicha.innerHTML = "<p class='muted'>Sin pólizas vinculadas.</p>";
         return;
@@ -14255,6 +14393,11 @@ const openClienteDetail = (id) => {
       return;
     }
     const cliente = data.cliente || {};
+    state.currentClienteData = cliente;
+    const prefetchedSeguros = (data.servicios && Array.isArray(data.servicios.seguros))
+      ? data.servicios.seguros
+      : [];
+    renderClienteRamosDashboard(prefetchedSeguros, cliente);
     const fincasEmpresa = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
     const fincasEmpresaId = fincasEmpresa ? fincasEmpresa.id : "";
     if (clienteDetailTitle) {
@@ -14509,6 +14652,7 @@ const openClienteDetail = (id) => {
       loadClienteSeguros(cliente, fincasEmpresaId);
     } else if (clienteSegurosFicha) {
       clienteSegurosFicha.innerHTML = "<p class='muted'>Sin pólizas vinculadas.</p>";
+      renderClienteRamosDashboard([], cliente);
     }
     if (hasInmo && clienteInmoFicha) {
       clienteInmoFicha.innerHTML = "<p class='muted'>Vista inmobiliaria en preparación para esta fase.</p>";
@@ -14536,6 +14680,9 @@ const openClienteDetail = (id) => {
 const closeClienteDetail = () => {
   state.currentClienteId = "";
   state.currentClienteServices = [];
+  state.currentClienteData = null;
+  state.currentClienteSegurosRows = [];
+  state.currentClienteRamoSelected = "";
   const returnPage = state.prevPage && state.prevPage !== "cliente" ? state.prevPage : "empresa";
   const returnModule = state.prevModule || "clientes";
   const returnTab = state.prevTab || "bdt";
