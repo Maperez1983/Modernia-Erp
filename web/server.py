@@ -3368,6 +3368,8 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
         fields["telefono"] = normalize_phone(fields["telefono"])
     if fields["email"]:
         fields["email"] = normalize_email(fields["email"])
+        if "@" not in fields["email"] or " " in fields["email"]:
+            fields["email"] = ""
     if fields["poliza_numero"]:
         if not re.search(r"\d", fields["poliza_numero"]):
             fields["poliza_numero"] = ""
@@ -3769,6 +3771,67 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
         if "MEDIADOR" in normalize_lookup_text(fields.get("direccion") or ""):
             fields["direccion"] = ""
 
+    # Reglas específicas MAPFRE RC (evita texto legal y prioriza bloque de tomador real).
+    mapfre_company_key = normalize_company_key(fields.get("compania") or "")
+    is_mapfre = mapfre_company_key == "MAPFRE" or "MAPFRE" in mapfre_company_key
+    if is_mapfre and "DATOS DEL TOMADOR Y ASEGURADO" in upper_text:
+        mapfre_block_match = re.search(
+            r"DATOS\s+DEL\s+TOMADOR\s+Y\s+ASEGURADO([\s\S]{0,2200}?)PRIMA\s+DEL\s+SEGURO",
+            text,
+            re.IGNORECASE,
+        )
+        mapfre_block = mapfre_block_match.group(1) if mapfre_block_match else text
+        mapfre_name = re.search(
+            r"Nombre\s+([^\n]+?)\s+Documento\s+ID\s+([A-Z0-9]{8,12})",
+            mapfre_block,
+            re.IGNORECASE,
+        )
+        if mapfre_name:
+            name_main = re.sub(r"\s+", " ", mapfre_name.group(1)).strip(" ,;:-")
+            name_extra_match = re.search(
+                r"Documento\s+ID\s+[A-Z0-9]{8,12}\s*\n\s*([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s]{3,})\s*\n\s*Direcci[oó]n",
+                mapfre_block,
+                re.IGNORECASE,
+            )
+            if name_extra_match:
+                name_extra = re.sub(r"\s+", " ", name_extra_match.group(1)).strip(" ,;:-")
+                if name_extra and normalize_lookup_text(name_extra) not in ("LOCALIDAD", "PROVINCIA"):
+                    name_main = f"{name_main} {name_extra}".strip()
+            if name_main:
+                fields["tomador"] = clean_tomador_value(name_main)
+            mapfre_doc = normalize_nif_candidate(mapfre_name.group(2))
+            if mapfre_doc:
+                fields["dni"] = mapfre_doc
+                fields["nif"] = mapfre_doc
+        mapfre_mobile = re.search(r"Tel[eé]fono\s+m[oó]vil\s*([+0-9 ]{9,})", mapfre_block, re.IGNORECASE)
+        if mapfre_mobile:
+            fields["telefono"] = normalize_phone(mapfre_mobile.group(1))
+        mapfre_addr = re.search(
+            r"Direcci[oó]n\s+([\s\S]{0,140}?)\s+C[oó]digo\s+postal\s+(\d{5})",
+            mapfre_block,
+            re.IGNORECASE,
+        )
+        if mapfre_addr:
+            addr_main = re.sub(r"\s+", " ", mapfre_addr.group(1)).strip(" ,;:-")
+            addr_main = re.sub(r"Tel[eé]fono\s+fijo.*$", "", addr_main, flags=re.IGNORECASE).strip(" ,;:-")
+            addr_main = re.sub(r"Tel[eé]fono\s+m[oó]vil.*$", "", addr_main, flags=re.IGNORECASE).strip(" ,;:-")
+            cp = mapfre_addr.group(2)
+            loc = ""
+            prov = ""
+            loc_m = re.search(r"Localidad\s+([A-ZÁÉÍÓÚÑ ]{3,})", mapfre_block, re.IGNORECASE)
+            if loc_m:
+                loc = re.sub(r"\s+", " ", loc_m.group(1)).strip()
+            prov_m = re.search(r"Provincia\s+([A-ZÁÉÍÓÚÑ ]{3,})", mapfre_block, re.IGNORECASE)
+            if prov_m:
+                prov = re.sub(r"\s+", " ", prov_m.group(1)).strip()
+            fields["direccion"] = " ".join([x for x in (addr_main, cp, loc, prov) if x]).strip()
+        if normalize_phone(fields.get("telefono") or "") == "918365365":
+            fields["telefono"] = ""
+        if fields.get("tomador") and "A LA FECHA DE RENOVACION" in normalize_lookup_text(fields["tomador"]):
+            fields["tomador"] = ""
+        if fields.get("email"):
+            fields["email"] = ""
+
     # Reglas específicas Euroins Auto (evita capturar datos del mediador / DAS).
     source_upper = normalize_lookup_text(str(source_hint or ""))
     is_euroins_doc = ("EUROINS" in upper_text) or ("EUROINS" in source_upper)
@@ -3883,7 +3946,12 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
     # Saneo final para pólizas de impago con texto legal dominante (FIATC/iptiQ).
     if fields.get("email"):
         mail_norm = normalize_lookup_text(fields["email"])
-        if mail_norm.endswith("FIATC ES") or mail_norm.endswith("IPTIQ COM"):
+        if (
+            ("@" not in fields["email"])
+            or mail_norm.endswith("FIATC ES")
+            or mail_norm.endswith("IPTIQ COM")
+            or "POLIZA Y SE CONSIDERARA ACEPTADA" in mail_norm
+        ):
             fields["email"] = ""
     if fields.get("direccion"):
         dir_norm = normalize_lookup_text(fields["direccion"])
@@ -3894,6 +3962,8 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
             or "SOCIAL DE LA ENTIDAD" in dir_norm
             or "AVENIDA DIAGONAL" in dir_norm
             or ("BARCELONA" in dir_norm and "MALAGA" in dir_norm)
+            or "TELEFONO FIJO" in dir_norm
+            or "TELEFONO MOVIL" in dir_norm
         ):
             fields["direccion"] = ""
     if fields.get("dni"):
