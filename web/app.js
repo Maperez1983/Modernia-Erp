@@ -16384,10 +16384,23 @@ if (segurosOcrSave) {
       const payload = {
         empresa_nombre: FINCAS_COMPANY,
         id: recordId,
+        cliente_id: state.segurosOcrClienteId || "",
         estado: "En vigor",
+        tomador: seguroOcrTomador ? seguroOcrTomador.value.trim() : "",
+        nif: seguroOcrDni ? seguroOcrDni.value.trim() : "",
+        telefono: seguroOcrTelefono ? seguroOcrTelefono.value.trim() : "",
+        email: seguroOcrEmail ? seguroOcrEmail.value.trim() : "",
+        direccion: seguroOcrDireccion ? seguroOcrDireccion.value.trim() : "",
+        fecha_nacimiento: seguroOcrNacimiento ? seguroOcrNacimiento.value.trim() : "",
+        compania: seguroOcrCompania ? seguroOcrCompania.value.trim() : "",
+        ramo: seguroOcrRamo ? seguroOcrRamo.value.trim() : "",
         fecha_efecto: seguroOcrFechaEfecto ? seguroOcrFechaEfecto.value : "",
         fecha_vencimiento: seguroOcrFechaVencimiento ? seguroOcrFechaVencimiento.value : "",
         poliza_numero: seguroOcrPoliza ? seguroOcrPoliza.value.trim() : "",
+        prima_neta: toNumber(seguroOcrPrimaNeta ? seguroOcrPrimaNeta.value : ""),
+        prima_total: toNumber(seguroOcrPrimaTotal ? seguroOcrPrimaTotal.value : ""),
+        produccion: seguroOcrProduccion ? seguroOcrProduccion.value.trim() : "",
+        colaborador: seguroOcrColaborador ? seguroOcrColaborador.value.trim() : "",
       };
       const file =
         segurosOcrFile && segurosOcrFile.files && segurosOcrFile.files.length
