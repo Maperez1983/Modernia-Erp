@@ -4027,6 +4027,68 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
         phone_norm = normalize_phone(fields.get("telefono") or "")
         if phone_norm in ("951394365", "651075059", "900300250"):
             fields["telefono"] = ""
+
+    # Reglas específicas DKV Salud (solicitud de seguro).
+    dkv_company_key = normalize_company_key(fields.get("compania") or "")
+    is_dkv = dkv_company_key == "DKV" or "DKV" in dkv_company_key
+    if is_dkv and ("SOLICITUD DE SEGURO" in upper_text or "DKV INTEGRAL" in upper_text):
+        fields["ramo"] = "Salud"
+        dkv_block_match = re.search(
+            r"Tomador\s+del\s+seguro([\s\S]{0,1200}?)Datos\s+bancarios",
+            text,
+            re.IGNORECASE,
+        )
+        dkv_block = dkv_block_match.group(1) if dkv_block_match else text
+        dkv_row = re.search(
+            r"\n\s*([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s.'\-]{2,})\s{2,}([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s.'\-]{2,})\s{2,}([A-Z0-9.\-]{8,12})\s{2,}(\d{1,2}/\d{1,2}/\d{4})",
+            dkv_block,
+            re.IGNORECASE,
+        )
+        if dkv_row:
+            apellidos = re.sub(r"\s+", " ", dkv_row.group(1)).strip(" ,;:-")
+            nombre = re.sub(r"\s+", " ", dkv_row.group(2)).strip(" ,;:-")
+            if nombre and apellidos:
+                fields["tomador"] = f"{nombre} {apellidos}".strip()
+            dkv_nif = normalize_nif_candidate(dkv_row.group(3))
+            if dkv_nif:
+                fields["dni"] = dkv_nif
+                fields["nif"] = dkv_nif
+            if not fields.get("fecha_nacimiento"):
+                fields["fecha_nacimiento"] = normalize_ocr_date(dkv_row.group(4))
+        dkv_addr = re.search(
+            r"Domicilio\s+C\.?P\.?\s+Localidad\s+Provincia[\s\S]{0,180}?\n\s*([^\n]+?)\s+(\d{4,5})\s+([A-ZÁÉÍÓÚÑa-zñ ]{3,})\s+([A-ZÁÉÍÓÚÑa-zñ ]{3,})",
+            dkv_block,
+            re.IGNORECASE,
+        )
+        if dkv_addr:
+            calle = re.sub(r"\s+", " ", dkv_addr.group(1)).strip(" ,;:-")
+            cp = dkv_addr.group(2).strip()
+            loc = re.sub(r"\s+", " ", dkv_addr.group(3)).strip(" ,;:-")
+            prov = re.sub(r"\s+", " ", dkv_addr.group(4)).strip(" ,;:-")
+            fields["direccion"] = " ".join([x for x in (calle, cp, loc, prov) if x]).strip()
+        dkv_mobile = re.search(r"\b([67][0-9]{8})\b", dkv_block)
+        if dkv_mobile:
+            fields["telefono"] = normalize_phone(dkv_mobile.group(1))
+        dkv_email = re.search(r"\b([A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,})\b", dkv_block, re.IGNORECASE)
+        if dkv_email:
+            fields["email"] = normalize_email(dkv_email.group(1))
+        if not fields.get("poliza_numero"):
+            dkv_doc = re.search(
+                r"Sucursal[\s\S]{0,200}?Documento[\s\S]{0,220}?\b([0-9]{10,15})\b",
+                text,
+                re.IGNORECASE,
+            )
+            if dkv_doc:
+                fields["poliza_numero"] = dkv_doc.group(1)
+        if not fields.get("poliza_numero"):
+            dkv_doc2 = re.search(r"\bBanco\s+([0-9]{10,15})\b", text, re.IGNORECASE)
+            if dkv_doc2:
+                fields["poliza_numero"] = dkv_doc2.group(1)
+        dkv_eff = re.search(r"Fec\.\s*efecto[\s\S]{0,120}?(\d{1,2}/\d{1,2}/\d{4})", text, re.IGNORECASE)
+        if dkv_eff:
+            fields["fecha_efecto"] = normalize_ocr_date(dkv_eff.group(1))
+            if not fields.get("fecha_vencimiento"):
+                fields["fecha_vencimiento"] = add_year_to_date(fields["fecha_efecto"])
         if fields.get("fecha_efecto") and fields.get("fecha_vencimiento") and fields["fecha_efecto"] == fields["fecha_vencimiento"]:
             fields["fecha_vencimiento"] = add_year_to_date(fields["fecha_efecto"])
 
