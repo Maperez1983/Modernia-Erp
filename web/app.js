@@ -2676,12 +2676,7 @@ const renderCompanyCards = () => {
     const clientesCard = document.createElement("div");
     clientesCard.className = "company-card";
     clientesCard.dataset.action = "clientes";
-    const clientesCountRaw =
-      state.clientesStats?.total ??
-      state.clientesStats?.count ??
-      state.clientesStats?.clientes_total ??
-      (Array.isArray(state.clientesList) ? state.clientesList.length : 0);
-    const clientesCount = Number(clientesCountRaw) || 0;
+    const clientesCount = getClientesCardCount();
     clientesCard.innerHTML = `
       <h3>Clientes</h3>
       <div class="company-meta">Total registrados: <strong id="clientesCardTotal">${numberFormatter.format(clientesCount)}</strong></div>
@@ -2713,15 +2708,22 @@ const renderCompanyCards = () => {
   }
 };
 
-const refreshClientesCardCount = () => {
-  const el = document.getElementById("clientesCardTotal");
-  if (!el) return;
+const getClientesCardCount = () => {
   const clientesCountRaw =
+    state.clientesCardStats?.total ??
+    state.clientesCardStats?.count ??
+    state.clientesCardStats?.clientes_total ??
     state.clientesStats?.total ??
     state.clientesStats?.count ??
     state.clientesStats?.clientes_total ??
     (Array.isArray(state.clientesList) ? state.clientesList.length : 0);
-  const clientesCount = Number(clientesCountRaw) || 0;
+  return Number(clientesCountRaw) || 0;
+};
+
+const refreshClientesCardCount = () => {
+  const el = document.getElementById("clientesCardTotal");
+  if (!el) return;
+  const clientesCount = getClientesCardCount();
   el.textContent = numberFormatter.format(clientesCount);
 };
 
@@ -7940,6 +7942,13 @@ const loadClientesStats = () => {
   });
 };
 
+const loadClientesCardStats = () => {
+  return api("/api/clientes_stats").then((data) => {
+    state.clientesCardStats = data || { total: 0 };
+    refreshClientesCardCount();
+  });
+};
+
 const loadClientesList = () => {
   const rawServiceParam = getServiceFilterParam();
   const serviceParam =
@@ -7969,7 +7978,7 @@ const loadClientesList = () => {
 
 const refreshClientesSummary = async () => {
   try {
-    const [_, list] = await Promise.all([loadClientesStats(), loadClientesList()]);
+    const [_, __, list] = await Promise.all([loadClientesCardStats(), loadClientesStats(), loadClientesList()]);
     renderClientesSelects(list || []);
     renderCompanyCards();
   } catch (_) {}
@@ -14646,6 +14655,7 @@ const init = async () => {
     await safe(loadUsuarios());
     renderUsuariosSelect();
     renderUsuariosTable();
+    await safe(loadClientesCardStats());
     await safe(loadClientesStats());
     const clientes = (await safe(loadClientesList())) || [];
     renderClientesSelects(clientes);
@@ -18196,7 +18206,7 @@ if (clientesForm) {
         }
         clientesForm.reset();
         updateClienteAltaPersona();
-        Promise.all([loadClientesStats(), loadClientesList()]).then(([_, list]) => {
+        Promise.all([loadClientesCardStats(), loadClientesStats(), loadClientesList()]).then(([__, _, list]) => {
           renderClientesSelects(list);
           renderCompanyCards();
           if (state.currentModule === "clientes") {
@@ -18285,6 +18295,7 @@ if (clientesLinkForm) {
         if (state.lastCreatedClientId === clienteId) {
           state.lastCreatedClientId = "";
         }
+        loadClientesCardStats().catch(() => {});
         loadClientesTable();
       })
       .catch(() => {
