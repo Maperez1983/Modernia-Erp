@@ -1037,6 +1037,8 @@ const state = {
   clienteDocsTab: "seguros",
   segurosBdtCache: null,
   segurosRamosSource: null,
+  segurosCrmData: null,
+  segurosRamoSelected: "",
   segurosOcrClienteId: "",
   segurosBdtOcrClienteId: "",
   segurosOcrQuality: null,
@@ -1398,6 +1400,9 @@ const segurosAiRun = document.getElementById("segurosAiRun");
 const segurosAiStatus = document.getElementById("segurosAiStatus");
 const segurosAiOutput = document.getElementById("segurosAiOutput");
 const segurosKpis = document.getElementById("segurosKpis");
+const segurosRamoKpis = document.getElementById("segurosRamoKpis");
+const segurosRamoChart = document.getElementById("segurosRamoChart");
+const segurosRamoListado = document.getElementById("segurosRamoListado");
 const segurosOcrQuality = document.getElementById("segurosOcrQuality");
 const segurosUpdateSelect = document.getElementById("segurosUpdateSelect");
 const segurosUpdateFile = document.getElementById("segurosUpdateFile");
@@ -9990,6 +9995,8 @@ const loadSegurosCrm = () => {
   const empresa = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
   if (!empresa) {
     segurosCrmTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
+    state.segurosCrmData = null;
+    renderSegurosRamosDashboard();
     return;
   }
   const q = segurosCrmSearch ? segurosCrmSearch.value.trim() : "";
@@ -10013,6 +10020,7 @@ const loadSegurosCrm = () => {
         );
       }
     }
+    state.segurosCrmData = { columns, rows };
     renderTableInto({ columns, rows }, segurosCrmTable, segurosCrmInfo, "Seguros");
     if (segurosCrmInfo && (q || filtroCliente)) {
       segurosCrmInfo.textContent = `${segurosCrmInfo.textContent} (filtro activo)`;
@@ -10031,6 +10039,7 @@ const loadSegurosCrm = () => {
     loadSegurosInsights(empresa.id);
     loadSegurosAlertas();
     loadSegurosKpis();
+    renderSegurosRamosDashboard();
     if (segurosPreferenciasClientes) {
       populateAgendaClientes(
         segurosPreferenciasClientes,
@@ -10081,6 +10090,149 @@ const loadSegurosKpis = () => {
     segurosKpis.innerHTML = "";
     segurosKpis.appendChild(wrapper);
   });
+};
+
+const getSegurosRamoLabel = (value) => {
+  const ramo = String(value || "").trim();
+  return ramo || "Sin ramo";
+};
+
+const renderSegurosRamoListado = (ramoLabel, items = []) => {
+  if (!segurosRamoListado) return;
+  if (!items.length) {
+    segurosRamoListado.innerHTML = "<p class='muted'>Sin pólizas para este ramo.</p>";
+    return;
+  }
+  const title = document.createElement("h5");
+  title.textContent = `Pólizas · ${ramoLabel}`;
+  const table = document.createElement("table");
+  const thead = document.createElement("thead");
+  const trHead = document.createElement("tr");
+  ["Póliza", "Tomador", "Compañía", "Efecto", "Vencimiento", "Estado", "Prima", "Acción"].forEach((col) => {
+    const th = document.createElement("th");
+    th.textContent = col;
+    trHead.appendChild(th);
+  });
+  thead.appendChild(trHead);
+  table.appendChild(thead);
+  const tbody = document.createElement("tbody");
+  items.forEach((item) => {
+    const tr = document.createElement("tr");
+    const values = [
+      item.poliza_numero || "-",
+      item.tomador || "-",
+      item.compania || "-",
+      item.fecha_efecto || "-",
+      item.fecha_vencimiento || "-",
+      item.estado || "-",
+      item.prima_total ? euroFormatter.format(parseMoneyValue(item.prima_total)) : "-",
+    ];
+    values.forEach((value) => {
+      const td = document.createElement("td");
+      td.textContent = value;
+      tr.appendChild(td);
+    });
+    const actionTd = document.createElement("td");
+    const openBtn = document.createElement("button");
+    openBtn.type = "button";
+    openBtn.className = "secondary";
+    openBtn.textContent = "Ver en listado";
+    openBtn.addEventListener("click", () => {
+      setSegurosTab("bdt");
+      if (segurosCrmSearch) {
+        segurosCrmSearch.value = item.poliza_numero || item.tomador || item.compania || "";
+      }
+      loadSegurosCrm();
+    });
+    const editBtn = document.createElement("button");
+    editBtn.type = "button";
+    editBtn.className = "ghost";
+    editBtn.textContent = "Editar";
+    editBtn.addEventListener("click", () => {
+      if (!state.segurosCrmData) return;
+      openSegurosPresupuestoEdit(state.segurosCrmData.columns || [], item.raw || []);
+    });
+    actionTd.appendChild(openBtn);
+    actionTd.appendChild(editBtn);
+    tr.appendChild(actionTd);
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  segurosRamoListado.innerHTML = "";
+  segurosRamoListado.appendChild(title);
+  segurosRamoListado.appendChild(table);
+};
+
+const renderSegurosRamosDashboard = () => {
+  if (!segurosRamoKpis || !segurosRamoChart || !segurosRamoListado) return;
+  const source = state.segurosCrmData;
+  if (!source || !Array.isArray(source.rows) || !source.rows.length) {
+    segurosRamoKpis.innerHTML = "<p class='muted'>Sin pólizas.</p>";
+    segurosRamoChart.innerHTML = "<p class='muted'>Sin datos.</p>";
+    segurosRamoListado.innerHTML = "<p class='muted'>Selecciona un ramo.</p>";
+    state.segurosRamoSelected = "";
+    return;
+  }
+  const columns = source.columns || [];
+  const ramoIndex = columns.indexOf("ramo");
+  const tomadorIndex = columns.indexOf("tomador");
+  const polizaIndex = columns.indexOf("poliza_numero");
+  const companiaIndex = columns.indexOf("compania");
+  const efectoIndex = columns.indexOf("fecha_efecto");
+  const vencIndex = columns.indexOf("fecha_vencimiento");
+  const estadoIndex = columns.indexOf("estado");
+  const primaIndex = columns.indexOf("prima_total");
+  const grouped = new Map();
+  source.rows.forEach((row) => {
+    const ramo = getSegurosRamoLabel(ramoIndex >= 0 ? row[ramoIndex] : "");
+    if (!grouped.has(ramo)) {
+      grouped.set(ramo, { ramo, total: 0, primaTotal: 0, items: [] });
+    }
+    const g = grouped.get(ramo);
+    g.total += 1;
+    g.primaTotal += parseMoneyValue(primaIndex >= 0 ? row[primaIndex] : 0);
+    g.items.push({
+      ramo,
+      tomador: tomadorIndex >= 0 ? row[tomadorIndex] : "",
+      poliza_numero: polizaIndex >= 0 ? row[polizaIndex] : "",
+      compania: companiaIndex >= 0 ? row[companiaIndex] : "",
+      fecha_efecto: efectoIndex >= 0 ? row[efectoIndex] : "",
+      fecha_vencimiento: vencIndex >= 0 ? row[vencIndex] : "",
+      estado: estadoIndex >= 0 ? row[estadoIndex] : "",
+      prima_total: primaIndex >= 0 ? row[primaIndex] : "",
+      raw: row,
+    });
+  });
+  const summary = Array.from(grouped.values()).sort((a, b) => b.total - a.total);
+  segurosRamoKpis.innerHTML = "";
+  summary.forEach((item) => {
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = "card cliente-ramo-kpi-card";
+    if (state.segurosRamoSelected === item.ramo) card.classList.add("active");
+    card.innerHTML = `
+      <div class="kpi-label">${item.ramo}</div>
+      <div class="kpi-value">${item.total}</div>
+      <div class="muted">${euroFormatter.format(item.primaTotal)}</div>
+    `;
+    card.addEventListener("click", () => {
+      state.segurosRamoSelected = item.ramo;
+      renderSegurosRamosDashboard();
+    });
+    segurosRamoKpis.appendChild(card);
+  });
+  renderClienteMiniChart(
+    segurosRamoChart,
+    summary.map((item, idx) => ({
+      label: item.ramo,
+      value: item.total,
+      display: `${item.total} póliza${item.total === 1 ? "" : "s"}`,
+      color: ["#3C6E71", "#5F7A61", "#2B2B2B", "#8A9A8A", "#6B7C6B"][idx % 5],
+    }))
+  );
+  const selected = summary.find((item) => item.ramo === state.segurosRamoSelected) || summary[0];
+  state.segurosRamoSelected = selected.ramo;
+  renderSegurosRamoListado(selected.ramo, selected.items);
 };
 
 const loadSegurosAlertas = () => {
