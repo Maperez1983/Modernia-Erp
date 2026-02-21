@@ -957,6 +957,33 @@ def process_seguros_ocr(payload, conn):
                 addr = re.search(r"\b(CL\s+calle[^\n]{5,160}?\d{5}\s+[A-ZÁÉÍÓÚÑ]{3,})", text, re.IGNORECASE)
                 if addr:
                     fields["direccion"] = re.sub(r"\s+", " ", addr.group(1)).strip()
+        if ("ALLIANZ" in company_key) and ("CERTIFICADO DE SEGURO" in text_upper or "ALLIANZ R C PYME" in text_upper or "ALLIANZ R.C.PYME" in text_upper):
+            if not fields.get("ramo"):
+                fields["ramo"] = "Responsabilidad civil"
+            pol = re.search(r"P[oó]liza\s*n[º°o]\s*:\s*([0-9]{6,12})", text, re.IGNORECASE)
+            if pol:
+                fields["poliza_numero"] = pol.group(1).strip()
+            dur = re.search(
+                r"Duraci[oó]n\s*:\s*Desde[\s\S]{0,220}?del\s+(\d{1,2}/\d{1,2}/\d{4})[\s\S]{0,240}?hasta[\s\S]{0,220}?del\s+(\d{1,2}/\d{1,2}/\d{4})",
+                text,
+                re.IGNORECASE,
+            )
+            if dur:
+                fields["fecha_efecto"] = dur.group(1)
+                fields["fecha_vencimiento"] = dur.group(2)
+            if not fields.get("tomador"):
+                m = re.search(
+                    r"Datos\s+Generales\s*\n\s*([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s,.'\-]{8,})\s*\n\s*Tomador\s+del\s+Seguro",
+                    text,
+                    re.IGNORECASE,
+                )
+                if m:
+                    name = normalize_person_name(m.group(1))
+                    name = re.sub(r"\s+", " ", name).strip(" ,;:-")
+                    if name and len(name.split()) >= 2:
+                        fields["tomador"] = name
+            if fields.get("fecha_efecto") and fields.get("fecha_vencimiento") and fields["fecha_efecto"] == fields["fecha_vencimiento"]:
+                fields["fecha_vencimiento"] = add_year_to_date(fields["fecha_efecto"])
         doc_type = classify_seguros_document(text)
         if doc_type == "otro" and doc_text:
             doc_type = classify_seguros_document(doc_text)
@@ -3879,6 +3906,103 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
         phone_norm = normalize_phone(fields.get("telefono") or "")
         if phone_norm in ("913755755", "934165046", "951394365"):
             fields["telefono"] = ""
+
+    # Reglas específicas Allianz RC PYME (certificado de seguro).
+    allianz_company_key = normalize_company_key(fields.get("compania") or "")
+    is_allianz = allianz_company_key == "ALLIANZ" or "ALLIANZ" in allianz_company_key
+    if is_allianz and ("ALLIANZ R.C.PYME" in upper_text or "CERTIFICADO DE SEGURO" in upper_text):
+        if "RESPONSABILIDAD CIVIL" in upper_text or "R C PYME" in upper_text or "R.C.PYME" in upper_text:
+            fields["ramo"] = "Responsabilidad civil"
+        cover_name = re.search(
+            r"\n\s*([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s,.'\-]{8,})\s*\n\s*P[oó]liza\s+[0-9]{6,}",
+            text,
+            re.IGNORECASE,
+        )
+        if cover_name:
+            candidate_cover = clean_tomador_value(cover_name.group(1))
+            if candidate_cover and len(candidate_cover.split()) >= 2:
+                fields["tomador"] = candidate_cover
+        allianz_block_match = re.search(
+            r"Datos\s+Generales([\s\S]{0,2200}?)Datos\s+del\s+Asegurado",
+            text,
+            re.IGNORECASE,
+        )
+        allianz_block = allianz_block_match.group(1) if allianz_block_match else text
+        allianz_lines = [ln.strip() for ln in allianz_block.splitlines() if ln.strip()]
+        for idx, ln in enumerate(allianz_lines):
+            if re.search(r"Tomador\s+del\s+Seguro\s*:", ln, re.IGNORECASE):
+                if idx > 0:
+                    prev = clean_tomador_value(allianz_lines[idx - 1])
+                    if prev and len(prev.split()) >= 2 and "POLIZA" not in normalize_lookup_text(prev):
+                        fields["tomador"] = prev
+                inline = re.split(r":", ln, maxsplit=1)
+                if len(inline) > 1:
+                    maybe_addr = inline[1].strip()
+                    if maybe_addr and not fields.get("direccion"):
+                        fields["direccion"] = maybe_addr
+                break
+        a_name_header = re.search(
+            r"Datos\s+Generales\s*\n\s*([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s,.'\-]{8,})\s*\n\s*Tomador\s+del\s+Seguro",
+            text,
+            re.IGNORECASE,
+        )
+        if a_name_header:
+            name_header = clean_tomador_value(a_name_header.group(1))
+            if name_header and len(name_header.split()) >= 2:
+                fields["tomador"] = name_header
+        if not fields.get("tomador"):
+            a_name_prev = re.search(
+                r"\n\s*([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s,.'\-]{6,})\s*\n\s*Tomador\s+del\s+Seguro\s*:",
+                allianz_block,
+                re.IGNORECASE,
+            )
+            if a_name_prev:
+                name_prev = clean_tomador_value(a_name_prev.group(1))
+                if name_prev and len(name_prev.split()) >= 2:
+                    fields["tomador"] = name_prev
+        a_tom = re.search(
+            r"Tomador\s+del\s+Seguro\s*:\s*([\s\S]{0,240}?)NIF\s*:\s*([A-Z0-9.\-]{8,16})",
+            allianz_block,
+            re.IGNORECASE,
+        )
+        if a_tom:
+            tom_raw = re.sub(r"\s+", " ", a_tom.group(1)).strip(" ,;:-")
+            if tom_raw:
+                fields["tomador"] = clean_tomador_value(tom_raw)
+            nif_val = normalize_nif_candidate(a_tom.group(2))
+            if nif_val:
+                fields["dni"] = nif_val
+                fields["nif"] = nif_val
+        a_pol = re.search(r"P[oó]liza\s*n[º°o]\s*:\s*([0-9]{6,12})", allianz_block, re.IGNORECASE)
+        if a_pol:
+            fields["poliza_numero"] = a_pol.group(1).strip()
+        a_dur = re.search(
+            r"Duraci[oó]n\s*:\s*Desde[\s\S]{0,100}?(\d{1,2}/\d{1,2}/\d{4})[\s\S]{0,120}?hasta[\s\S]{0,80}?(\d{1,2}/\d{1,2}/\d{4})",
+            allianz_block,
+            re.IGNORECASE,
+        )
+        if a_dur:
+            fields["fecha_efecto"] = normalize_ocr_date(a_dur.group(1))
+            fields["fecha_vencimiento"] = normalize_ocr_date(a_dur.group(2))
+        a_dur_global = re.search(
+            r"Duraci[oó]n\s*:\s*Desde[\s\S]{0,220}?del\s+(\d{1,2}/\d{1,2}/\d{4})[\s\S]{0,240}?hasta[\s\S]{0,220}?del\s+(\d{1,2}/\d{1,2}/\d{4})",
+            text,
+            re.IGNORECASE,
+        )
+        if a_dur_global:
+            fields["fecha_efecto"] = normalize_ocr_date(a_dur_global.group(1))
+            fields["fecha_vencimiento"] = normalize_ocr_date(a_dur_global.group(2))
+        # Evitar contacto del mediador en ficha de cliente.
+        if fields.get("email") and (
+            "grupomodernia.es" in str(fields.get("email") or "").lower()
+            or "allianz" in str(fields.get("email") or "").lower()
+        ):
+            fields["email"] = ""
+        phone_norm = normalize_phone(fields.get("telefono") or "")
+        if phone_norm in ("951394365", "651075059", "900300250"):
+            fields["telefono"] = ""
+        if fields.get("fecha_efecto") and fields.get("fecha_vencimiento") and fields["fecha_efecto"] == fields["fecha_vencimiento"]:
+            fields["fecha_vencimiento"] = add_year_to_date(fields["fecha_efecto"])
 
     # Reglas específicas Euroins Auto (evita capturar datos del mediador / DAS).
     source_upper = normalize_lookup_text(str(source_hint or ""))
