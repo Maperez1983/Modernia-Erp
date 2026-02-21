@@ -294,6 +294,131 @@ def normalize_company_key(value):
     return text
 
 
+LEGAL_RAMOS_CANONICAL = (
+    "Vida",
+    "Accidentes",
+    "Salud",
+    "Decesos",
+    "Auto",
+    "Hogar",
+    "Comercio",
+    "Comunidad",
+    "Responsabilidad civil",
+    "Defensa jurídica",
+    "Protección de pagos",
+    "Viaje",
+    "Ahorro",
+    "Caza",
+)
+
+
+def canonicalize_ramo(value):
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    key = normalize_lookup_text(raw)
+    if not key:
+        return ""
+    canonical_by_key = {normalize_lookup_text(item): item for item in LEGAL_RAMOS_CANONICAL}
+    if key in canonical_by_key:
+        return canonical_by_key[key]
+    # Basura típica OCR/legal: párrafos completos o fragmentos normativos.
+    noisy_markers = (
+        "EXPECTATIVA RAZONABLE",
+        "DIRECCION GENERAL DE SEGUROS",
+        "SE CONSIDERARA ACEPTADA",
+        "PRODUCTOS COMERCIALIZADOS",
+        "ENTRE LOS QUE ESTA EL SEGURO",
+        "FEC EFECTO PERIODO PAGO ENVIO DOC",
+    )
+    if len(key) > 42 or any(marker in key for marker in noisy_markers):
+        return ""
+    if key in ("S", "RC", "R C", "R C PYME", "RESPONSABILIDAD CIVIL PROFESIONAL"):
+        return "Responsabilidad civil"
+    if key in ("IT", "INCAPACIDAD TEMPORAL", "INCAPACIDAD PERMANENTE"):
+        return "Accidentes"
+    if "RESPONSABILIDAD CIVIL" in key:
+        return "Responsabilidad civil"
+    if "IMPAGO" in key or "PROTECCION PAGO" in key or "PROTECCION DE PAGOS" in key:
+        return "Protección de pagos"
+    if "DEFENSA JURIDICA" in key or key.startswith("ARAG"):
+        return "Defensa jurídica"
+    if "SALUD" in key or "ASISTENCIA SANITARIA" in key or "DKV INTEGRAL" in key:
+        return "Salud"
+    if "DECESOS" in key:
+        return "Decesos"
+    if "ACCIDENT" in key:
+        return "Accidentes"
+    if "VIDA" in key:
+        return "Vida"
+    if "AHORRO" in key:
+        return "Ahorro"
+    if "VIAJE" in key or "VIAJES" in key or "VIAJEROS" in key:
+        return "Viaje"
+    if "CAZA" in key:
+        return "Caza"
+    if "COMUNIDAD" in key:
+        return "Comunidad"
+    if "COMERCIO" in key or "PYME" in key or key == "LOCAL":
+        return "Comercio"
+    if "HOGAR" in key:
+        return "Hogar"
+    if (
+        "AUTO" in key
+        or "AUTOMOVIL" in key
+        or "AUTOMOVILES" in key
+        or "VEHICULO" in key
+        or "MOTO" in key
+        or "MOTOR" in key
+    ):
+        return "Auto"
+    # En modo estricto de catálogo legal, cualquier valor no reconocido se vacía.
+    return ""
+
+
+def infer_tipo_vigencia(ramo, explicit=None):
+    value = normalize_lookup_text(explicit or "")
+    if value in ("TEMPORAL_NO_RENOVABLE", "TEMPORAL", "UN_USO", "NO_RENOVABLE"):
+        return "temporal_no_renovable"
+    if value in ("ANUAL_RENOVABLE", "RENOVABLE", "ANUAL"):
+        return "anual_renovable"
+    ramo_key = normalize_lookup_text(ramo or "")
+    if any(token in ramo_key for token in ("VIAJE", "VIAJES", "CAZA EVENTUAL")):
+        return "temporal_no_renovable"
+    return "anual_renovable"
+
+
+def log_seguro_event(conn, seguro_row, event_type, now, motivo="", payload=None):
+    if not seguro_row:
+        return
+    payload_json = ""
+    if payload:
+        try:
+            payload_json = json.dumps(payload, ensure_ascii=False)
+        except Exception:
+            payload_json = str(payload)
+    conn.execute(
+        """
+        INSERT INTO seguros_eventos (
+          id, seguro_id, cliente_id, empresa_id, tipo, fecha, motivo, payload_json, created_at
+        ) VALUES (
+          ?, ?, ?, ?, ?, ?, ?, ?, datetime(?)
+        )
+        """,
+        (
+            os.urandom(16).hex(),
+            seguro_row.get("id") if isinstance(seguro_row, dict) else seguro_row["id"],
+            (seguro_row.get("cliente_id") if isinstance(seguro_row, dict) else seguro_row["cliente_id"]),
+            (seguro_row.get("empresa_id") if isinstance(seguro_row, dict) else seguro_row["empresa_id"]),
+            event_type,
+            (seguro_row.get("fecha_efecto") if isinstance(seguro_row, dict) else seguro_row["fecha_efecto"]) or now[:10],
+            motivo or "",
+            payload_json,
+            now,
+        ),
+    )
+
+
 def find_existing_seguro_id(conn, empresa_id, poliza_numero, compania, exclude_id=None):
     poliza_norm = normalize_poliza_key(poliza_numero)
     if not poliza_norm:
@@ -4645,6 +4770,8 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
         mail_match = re.search(r"\b([A-Z0-9._%+\-]+@(?:LLOYDS|EXSEL)[A-Z0-9.\-]*\.[A-Z]{2,})\b", text, re.IGNORECASE)
         if mail_match:
             fields["email"] = normalize_email(mail_match.group(1))
+    if "ramo" in fields:
+        fields["ramo"] = canonicalize_ramo(fields.get("ramo"))
     return fields
 
 def parse_asesoramiento_block(block):
@@ -6040,6 +6167,8 @@ def ensure_tables(db_path):
             conn.execute("ALTER TABLE seguros ADD COLUMN poliza_sustituta_id TEXT")
         if "version_grupo" not in seguros_cols:
             conn.execute("ALTER TABLE seguros ADD COLUMN version_grupo TEXT")
+        if "tipo_vigencia" not in seguros_cols:
+            conn.execute("ALTER TABLE seguros ADD COLUMN tipo_vigencia TEXT")
     except sqlite3.Error:
         pass
     conn.execute(
@@ -6069,6 +6198,56 @@ def ensure_tables(db_path):
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL,
           FOREIGN KEY (poliza_id) REFERENCES seguros(id)
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS seguros_eventos (
+          id TEXT PRIMARY KEY,
+          seguro_id TEXT,
+          cliente_id TEXT,
+          empresa_id TEXT,
+          tipo TEXT,
+          fecha TEXT,
+          motivo TEXT,
+          payload_json TEXT,
+          created_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS seguros_reclamaciones (
+          id TEXT PRIMARY KEY,
+          seguro_id TEXT,
+          cliente_id TEXT,
+          empresa_id TEXT,
+          estado TEXT,
+          canal TEXT,
+          fecha_apertura TEXT,
+          fecha_cierre TEXT,
+          asunto TEXT,
+          detalle TEXT,
+          resolucion TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS seguros_ipid_log (
+          id TEXT PRIMARY KEY,
+          seguro_id TEXT,
+          cliente_id TEXT,
+          empresa_id TEXT,
+          documento_key TEXT,
+          documento_url TEXT,
+          fecha_entrega TEXT,
+          metodo TEXT,
+          usuario TEXT,
+          created_at TEXT NOT NULL
         )
         """
     )
@@ -6368,7 +6547,12 @@ class Handler(BaseHTTPRequestHandler):
             "/api/seguros_update",
             "/api/seguros_cambio_compania",
             "/api/seguros_delete",
+            "/api/seguros_poliza_accion",
             "/api/seguros_enrich",
+            "/api/seguros_reclamacion",
+            "/api/seguros_reclamacion_update",
+            "/api/seguros_reclamacion_delete",
+            "/api/seguros_ipid_register",
             "/api/fin_asesoramientos",
             "/api/fin_asesoramientos_update",
             "/api/fin_asesoramientos_convert",
@@ -6479,6 +6663,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/fin_asesoramiento_ocr_auto",
             "/api/seguros_delete",
             "/api/seguros_cambio_compania",
+            "/api/seguros_poliza_accion",
             "/api/seguros_ofertas",
             "/api/seguros_ofertas_update",
             "/api/seguros_ofertas_delete",
@@ -6490,6 +6675,10 @@ class Handler(BaseHTTPRequestHandler):
             "/api/seguros_comisiones",
             "/api/seguros_comisiones_update",
             "/api/seguros_comisiones_delete",
+            "/api/seguros_reclamacion",
+            "/api/seguros_reclamacion_update",
+            "/api/seguros_reclamacion_delete",
+            "/api/seguros_ipid_register",
             "/api/fin_checklist_generate",
             "/api/fin_checklist_update",
             "/api/ai_fin_copilot",
@@ -6556,6 +6745,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/gestoria_docs_delete",
             "/api/seguros_delete",
             "/api/seguros_cambio_compania",
+            "/api/seguros_poliza_accion",
             "/api/gestoria_contabilidad_update",
             "/api/gestoria_contabilidad_delete",
             "/api/auditoria",
@@ -6572,6 +6762,10 @@ class Handler(BaseHTTPRequestHandler):
             "/api/s3_multipart_abort",
             "/api/inmueble_checklist_generate",
             "/api/inmueble_checklist_update",
+            "/api/seguros_reclamacion",
+            "/api/seguros_reclamacion_update",
+            "/api/seguros_reclamacion_delete",
+            "/api/seguros_ipid_register",
         ):
             empresa = conn.execute(
                 "SELECT id FROM empresas WHERE nombre = ?",
@@ -7757,10 +7951,15 @@ class Handler(BaseHTTPRequestHandler):
                     "tomador",
                     "compania",
                     "ramo",
+                    "tipo_vigencia",
                     "prima_neta",
                     "prima_total",
                 ):
                     incoming = payload.get(key)
+                    if key == "ramo":
+                        incoming = canonicalize_ramo(incoming)
+                    if key == "tipo_vigencia":
+                        incoming = infer_tipo_vigencia(payload.get("ramo"), incoming)
                     if key == "cliente_id" and not str(incoming or "").strip():
                         incoming = cliente_id
                     if incoming in (None, ""):
@@ -7793,10 +7992,10 @@ class Handler(BaseHTTPRequestHandler):
                       tomador, compania, ramo, poliza_numero, prima_neta,
                       prima_total, comision, produccion, colaborador, estado,
                       estado_renovacion, renovacion_fecha, nueva_poliza_ref,
-                      poliza_key, poliza_url, estado_poliza, version_grupo,
+                      poliza_key, poliza_url, estado_poliza, version_grupo, tipo_vigencia,
                       created_at, updated_at
                     ) VALUES (
-                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
                     )
                     """,
                     (
@@ -7808,7 +8007,7 @@ class Handler(BaseHTTPRequestHandler):
                         payload.get("fecha_vencimiento"),
                         payload.get("tomador"),
                         payload.get("compania"),
-                        payload.get("ramo"),
+                        canonicalize_ramo(payload.get("ramo")),
                         payload.get("poliza_numero"),
                         payload.get("prima_neta"),
                         payload.get("prima_total"),
@@ -7823,6 +8022,7 @@ class Handler(BaseHTTPRequestHandler):
                         payload.get("poliza_url"),
                         "activa",
                         poliza_id,
+                        infer_tipo_vigencia(payload.get("ramo"), payload.get("tipo_vigencia")),
                         now,
                         now,
                     ),
@@ -7831,6 +8031,7 @@ class Handler(BaseHTTPRequestHandler):
             poliza_row = conn.execute("SELECT * FROM seguros WHERE id = ?", (poliza_id,)).fetchone()
             if poliza_row:
                 doc_id = ensure_seguro_doc_link(conn, poliza_row, now, calidad_ocr=calidad_ocr, campos_ocr=campos_ocr)
+                log_seguro_event(conn, poliza_row, "alta", now, payload={"origen": "api/seguros"})
             # Crear acción si faltan campos obligatorios
             missing = []
             for key in ("tomador", "poliza_numero", "compania", "fecha_efecto"):
@@ -8344,9 +8545,17 @@ class Handler(BaseHTTPRequestHandler):
                 "poliza_numero",
                 "poliza_key",
                 "poliza_url",
+                "tipo_vigencia",
             ):
                 if key in payload:
                     updates[key] = payload.get(key)
+            if "ramo" in updates:
+                updates["ramo"] = canonicalize_ramo(updates.get("ramo"))
+            if "tipo_vigencia" in updates or "ramo" in updates:
+                updates["tipo_vigencia"] = infer_tipo_vigencia(
+                    updates.get("ramo", current_row["ramo"]),
+                    updates.get("tipo_vigencia", current_row["tipo_vigencia"] if "tipo_vigencia" in current_row.keys() else None),
+                )
             if not updates:
                 json_response(self, {"error": "Sin cambios"}, status=400)
                 return
@@ -8389,6 +8598,7 @@ class Handler(BaseHTTPRequestHandler):
                 ensure_cliente_servicio_link(conn, row["cliente_id"], row["empresa_id"], "seguros", now)
             if row:
                 ensure_seguro_doc_link(conn, row, now)
+                log_seguro_event(conn, row, "actualizacion", now, payload={"campos": sorted(list(updates.keys()))})
             if row:
                 missing = []
                 for key in ("tomador", "poliza_numero", "compania", "fecha_efecto"):
@@ -8488,11 +8698,11 @@ class Handler(BaseHTTPRequestHandler):
                   comision, produccion, colaborador, estado,
                   estado_renovacion, renovacion_fecha, nueva_poliza_ref,
                   poliza_key, poliza_url, fecha_baja, motivo_baja,
-                  estado_poliza, poliza_origen_id, poliza_sustituta_id, version_grupo,
+                  estado_poliza, poliza_origen_id, poliza_sustituta_id, version_grupo, tipo_vigencia,
                   created_at, updated_at
                 ) VALUES (
                   ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                  ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
                 )
                 """,
                 (
@@ -8523,6 +8733,7 @@ class Handler(BaseHTTPRequestHandler):
                     record_id,
                     None,
                     version_grupo,
+                    infer_tipo_vigencia(row["ramo"], row["tipo_vigencia"] if "tipo_vigencia" in row.keys() else None),
                     now,
                     now,
                 ),
@@ -8535,6 +8746,24 @@ class Handler(BaseHTTPRequestHandler):
             if new_row and new_row["cliente_id"]:
                 ensure_cliente_servicio_link(conn, new_row["cliente_id"], new_row["empresa_id"], "seguros", now)
                 ensure_seguro_doc_link(conn, new_row, now)
+            old_row = conn.execute("SELECT * FROM seguros WHERE id = ?", (record_id,)).fetchone()
+            if old_row:
+                log_seguro_event(
+                    conn,
+                    old_row,
+                    "cambio_compania_salida",
+                    now,
+                    motivo=payload.get("motivo_baja") or "cambio_compania",
+                    payload={"new_id": new_id, "nueva_compania": nueva_compania, "nueva_poliza": nueva_poliza},
+                )
+            if new_row:
+                log_seguro_event(
+                    conn,
+                    new_row,
+                    "cambio_compania_entrada",
+                    now,
+                    payload={"old_id": record_id, "compania_origen": row["compania"], "poliza_origen": old_policy},
+                )
             json_response(
                 self,
                 {
@@ -8555,6 +8784,7 @@ class Handler(BaseHTTPRequestHandler):
             if not row:
                 json_response(self, {"error": "Registro no encontrado"}, status=404)
                 return
+            log_seguro_event(conn, row, "eliminacion", now, payload={"origen": "api/seguros_delete"})
             conn.execute("DELETE FROM seguros_checklist WHERE poliza_id = ?", (record_id,))
             conn.execute(
                 """
@@ -8582,6 +8812,185 @@ class Handler(BaseHTTPRequestHandler):
                     "empresa_id": row["empresa_id"],
                 },
             )
+            conn.commit()
+            return
+        elif parsed.path == "/api/seguros_poliza_accion":
+            record_id = payload.get("id")
+            action = normalize_lookup_text(payload.get("accion") or payload.get("action"))
+            if not record_id or not action:
+                json_response(self, {"error": "id y accion requeridos"}, status=400)
+                return
+            row = conn.execute("SELECT * FROM seguros WHERE id = ?", (record_id,)).fetchone()
+            if not row:
+                json_response(self, {"error": "Registro no encontrado"}, status=404)
+                return
+            if action in ("RENOVAR", "RENEW"):
+                fecha_renovacion = (payload.get("fecha_renovacion") or payload.get("fecha") or now[:10]).strip()
+                nueva_fecha_venc = (payload.get("nueva_fecha_vencimiento") or payload.get("fecha_vencimiento") or "").strip()
+                conn.execute(
+                    """
+                    UPDATE seguros
+                    SET estado_renovacion = ?, renovacion_fecha = ?, estado_poliza = 'activa',
+                        fecha_vencimiento = COALESCE(NULLIF(?, ''), fecha_vencimiento),
+                        updated_at = datetime(?)
+                    WHERE id = ?
+                    """,
+                    ("Renovada manual", fecha_renovacion, nueva_fecha_venc, now, record_id),
+                )
+                row = conn.execute("SELECT * FROM seguros WHERE id = ?", (record_id,)).fetchone()
+                log_seguro_event(conn, row, "renovacion_manual", now, payload={"fecha": fecha_renovacion})
+                json_response(self, {"ok": True, "id": record_id, "accion": "renovar"})
+                conn.commit()
+                return
+            if action in ("ANULAR", "CANCELAR", "CANCEL"):
+                fecha_baja = (payload.get("fecha_baja") or payload.get("fecha") or now[:10]).strip()
+                motivo_baja = (payload.get("motivo_baja") or payload.get("motivo") or "otros").strip()
+                conn.execute(
+                    """
+                    UPDATE seguros
+                    SET estado = 'Anulada',
+                        estado_poliza = 'anulada',
+                        fecha_baja = ?,
+                        motivo_baja = ?,
+                        updated_at = datetime(?)
+                    WHERE id = ?
+                    """,
+                    (fecha_baja, motivo_baja, now, record_id),
+                )
+                row = conn.execute("SELECT * FROM seguros WHERE id = ?", (record_id,)).fetchone()
+                log_seguro_event(conn, row, "anulacion", now, motivo=motivo_baja, payload={"fecha_baja": fecha_baja})
+                json_response(self, {"ok": True, "id": record_id, "accion": "anular"})
+                conn.commit()
+                return
+            json_response(self, {"error": "Accion no soportada"}, status=400)
+            return
+        elif parsed.path == "/api/seguros_reclamacion":
+            seguro_id = payload.get("seguro_id")
+            cliente_id = payload.get("cliente_id")
+            empresa_id = payload.get("empresa_id")
+            if seguro_id:
+                row = conn.execute("SELECT id, cliente_id, empresa_id FROM seguros WHERE id = ?", (seguro_id,)).fetchone()
+                if not row:
+                    json_response(self, {"error": "seguro_id no encontrado"}, status=404)
+                    return
+                cliente_id = cliente_id or row["cliente_id"]
+                empresa_id = empresa_id or row["empresa_id"]
+            if not cliente_id or not empresa_id:
+                json_response(self, {"error": "cliente_id y empresa_id requeridos"}, status=400)
+                return
+            rec_id = os.urandom(16).hex()
+            estado = (payload.get("estado") or "abierta").strip()
+            fecha_apertura = (payload.get("fecha_apertura") or payload.get("fecha") or now[:10]).strip()
+            conn.execute(
+                """
+                INSERT INTO seguros_reclamaciones (
+                  id, seguro_id, cliente_id, empresa_id, estado, canal, fecha_apertura, fecha_cierre,
+                  asunto, detalle, resolucion, created_at, updated_at
+                ) VALUES (
+                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                )
+                """,
+                (
+                    rec_id,
+                    seguro_id,
+                    cliente_id,
+                    empresa_id,
+                    estado,
+                    payload.get("canal"),
+                    fecha_apertura,
+                    payload.get("fecha_cierre"),
+                    payload.get("asunto"),
+                    payload.get("detalle"),
+                    payload.get("resolucion"),
+                    now,
+                    now,
+                ),
+            )
+            if seguro_id:
+                seguro_row = conn.execute("SELECT * FROM seguros WHERE id = ?", (seguro_id,)).fetchone()
+                log_seguro_event(conn, seguro_row, "reclamacion_alta", now, payload={"reclamacion_id": rec_id, "estado": estado})
+            json_response(self, {"ok": True, "id": rec_id})
+            conn.commit()
+            return
+        elif parsed.path == "/api/seguros_reclamacion_update":
+            rec_id = payload.get("id")
+            if not rec_id:
+                json_response(self, {"error": "id requerido"}, status=400)
+                return
+            row = conn.execute("SELECT * FROM seguros_reclamaciones WHERE id = ?", (rec_id,)).fetchone()
+            if not row:
+                json_response(self, {"error": "Reclamación no encontrada"}, status=404)
+                return
+            updates = {}
+            for key in ("estado", "canal", "fecha_apertura", "fecha_cierre", "asunto", "detalle", "resolucion"):
+                if key in payload:
+                    updates[key] = payload.get(key)
+            if not updates:
+                json_response(self, {"error": "Sin cambios"}, status=400)
+                return
+            set_clause = ", ".join([f"{key} = ?" for key in updates])
+            values = list(updates.values()) + [now, rec_id]
+            conn.execute(
+                f"UPDATE seguros_reclamaciones SET {set_clause}, updated_at = datetime(?) WHERE id = ?",
+                values,
+            )
+            if row["seguro_id"]:
+                seguro_row = conn.execute("SELECT * FROM seguros WHERE id = ?", (row["seguro_id"],)).fetchone()
+                log_seguro_event(conn, seguro_row, "reclamacion_update", now, payload={"reclamacion_id": rec_id, "campos": sorted(list(updates.keys()))})
+            json_response(self, {"ok": True, "id": rec_id})
+            conn.commit()
+            return
+        elif parsed.path == "/api/seguros_reclamacion_delete":
+            rec_id = payload.get("id")
+            if not rec_id:
+                json_response(self, {"error": "id requerido"}, status=400)
+                return
+            row = conn.execute("SELECT * FROM seguros_reclamaciones WHERE id = ?", (rec_id,)).fetchone()
+            if not row:
+                json_response(self, {"error": "Reclamación no encontrada"}, status=404)
+                return
+            conn.execute("DELETE FROM seguros_reclamaciones WHERE id = ?", (rec_id,))
+            if row["seguro_id"]:
+                seguro_row = conn.execute("SELECT * FROM seguros WHERE id = ?", (row["seguro_id"],)).fetchone()
+                log_seguro_event(conn, seguro_row, "reclamacion_delete", now, payload={"reclamacion_id": rec_id})
+            json_response(self, {"ok": True, "id": rec_id})
+            conn.commit()
+            return
+        elif parsed.path == "/api/seguros_ipid_register":
+            seguro_id = payload.get("seguro_id")
+            if not seguro_id:
+                json_response(self, {"error": "seguro_id requerido"}, status=400)
+                return
+            row = conn.execute("SELECT * FROM seguros WHERE id = ?", (seguro_id,)).fetchone()
+            if not row:
+                json_response(self, {"error": "Póliza no encontrada"}, status=404)
+                return
+            ipid_id = os.urandom(16).hex()
+            fecha_entrega = (payload.get("fecha_entrega") or payload.get("fecha") or now[:10]).strip()
+            conn.execute(
+                """
+                INSERT INTO seguros_ipid_log (
+                  id, seguro_id, cliente_id, empresa_id, documento_key, documento_url,
+                  fecha_entrega, metodo, usuario, created_at
+                ) VALUES (
+                  ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?)
+                )
+                """,
+                (
+                    ipid_id,
+                    seguro_id,
+                    row["cliente_id"],
+                    row["empresa_id"],
+                    payload.get("documento_key") or row["poliza_key"],
+                    payload.get("documento_url") or row["poliza_url"],
+                    fecha_entrega,
+                    payload.get("metodo") or "digital",
+                    payload.get("usuario") or "Sistema",
+                    now,
+                ),
+            )
+            log_seguro_event(conn, row, "ipid_entregado", now, payload={"ipid_id": ipid_id, "fecha": fecha_entrega})
+            json_response(self, {"ok": True, "id": ipid_id})
             conn.commit()
             return
         elif parsed.path == "/api/seguros_enrich":
@@ -8612,6 +9021,8 @@ class Handler(BaseHTTPRequestHandler):
             updates = {}
             for key in allowed:
                 incoming = payload.get(key)
+                if key == "ramo":
+                    incoming = canonicalize_ramo(incoming)
                 if incoming in (None, ""):
                     continue
                 current = row[key] if key in row.keys() else None
@@ -8657,7 +9068,7 @@ class Handler(BaseHTTPRequestHandler):
                 (
                     os.urandom(16).hex(),
                     payload.get("cliente_id"),
-                    payload.get("ramo"),
+                    canonicalize_ramo(payload.get("ramo")),
                     payload.get("compania"),
                     payload.get("propuesta"),
                     payload.get("estado"),
@@ -8675,7 +9086,11 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "id requerido"}, status=400)
                 return
             allowed = ("ramo", "compania", "propuesta", "estado", "motivo", "fecha", "responsable", "notas", "cliente_id")
-            updates = {key: payload.get(key) for key in allowed if key in payload}
+            updates = {}
+            for key in allowed:
+                if key not in payload:
+                    continue
+                updates[key] = canonicalize_ramo(payload.get(key)) if key == "ramo" else payload.get(key)
             if not updates:
                 json_response(self, {"error": "Sin cambios"}, status=400)
                 return
@@ -8768,7 +9183,7 @@ class Handler(BaseHTTPRequestHandler):
                     os.urandom(16).hex(),
                     payload.get("compania"),
                     payload.get("nombre"),
-                    payload.get("ramo"),
+                    canonicalize_ramo(payload.get("ramo")),
                     payload.get("origen"),
                     payload.get("fecha_inicio"),
                     payload.get("fecha_fin"),
@@ -8784,7 +9199,11 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "id requerido"}, status=400)
                 return
             allowed = ("compania", "nombre", "ramo", "origen", "fecha_inicio", "fecha_fin", "descripcion", "url")
-            updates = {key: payload.get(key) for key in allowed if key in payload}
+            updates = {}
+            for key in allowed:
+                if key not in payload:
+                    continue
+                updates[key] = canonicalize_ramo(payload.get(key)) if key == "ramo" else payload.get(key)
             if not updates:
                 json_response(self, {"error": "Sin cambios"}, status=400)
                 return
@@ -8813,7 +9232,7 @@ class Handler(BaseHTTPRequestHandler):
                 (
                     os.urandom(16).hex(),
                     payload.get("compania"),
-                    payload.get("ramo"),
+                    canonicalize_ramo(payload.get("ramo")),
                     payload.get("porcentaje"),
                     payload.get("vigencia_desde"),
                     payload.get("vigencia_hasta"),
@@ -8828,7 +9247,11 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "id requerido"}, status=400)
                 return
             allowed = ("compania", "ramo", "porcentaje", "vigencia_desde", "vigencia_hasta", "notas")
-            updates = {key: payload.get(key) for key in allowed if key in payload}
+            updates = {}
+            for key in allowed:
+                if key not in payload:
+                    continue
+                updates[key] = canonicalize_ramo(payload.get(key)) if key == "ramo" else payload.get(key)
             if not updates:
                 json_response(self, {"error": "Sin cambios"}, status=400)
                 return
@@ -10753,7 +11176,7 @@ class Handler(BaseHTTPRequestHandler):
                   fecha_efecto, fecha_vencimiento, estado, prima_neta, prima_total,
                   tomador, estado_renovacion, renovacion_fecha, nueva_poliza_ref,
                   colaborador, produccion, mes_creacion, poliza_key, poliza_url,
-                  fecha_baja, motivo_baja, estado_poliza, poliza_origen_id, poliza_sustituta_id, version_grupo
+                  fecha_baja, motivo_baja, estado_poliza, poliza_origen_id, poliza_sustituta_id, version_grupo, tipo_vigencia
                 FROM seguros
                 WHERE {' AND '.join(where)}
                 ORDER BY COALESCE(fecha_efecto, created_at) DESC
@@ -10768,7 +11191,7 @@ class Handler(BaseHTTPRequestHandler):
                       fecha_efecto, fecha_vencimiento, estado, prima_neta, prima_total,
                       tomador, estado_renovacion, renovacion_fecha, nueva_poliza_ref,
                       colaborador, produccion, mes_creacion, poliza_key, poliza_url,
-                      fecha_baja, motivo_baja, estado_poliza, poliza_origen_id, poliza_sustituta_id, version_grupo
+                      fecha_baja, motivo_baja, estado_poliza, poliza_origen_id, poliza_sustituta_id, version_grupo, tipo_vigencia
                     FROM seguros
                     WHERE UPPER(TRIM(tomador)) = UPPER(TRIM(?))
                       AND (? = '' OR empresa_id = ?)
@@ -10788,7 +11211,7 @@ class Handler(BaseHTTPRequestHandler):
                               fecha_efecto, fecha_vencimiento, estado, prima_neta, prima_total,
                               tomador, estado_renovacion, renovacion_fecha, nueva_poliza_ref,
                               colaborador, produccion, mes_creacion, poliza_key, poliza_url,
-                              fecha_baja, motivo_baja, estado_poliza, poliza_origen_id, poliza_sustituta_id, version_grupo
+                              fecha_baja, motivo_baja, estado_poliza, poliza_origen_id, poliza_sustituta_id, version_grupo, tipo_vigencia
                             FROM seguros
                             WHERE tomador IS NOT NULL AND TRIM(tomador) <> ''
                               AND (? = '' OR empresa_id = ?)
@@ -10836,7 +11259,7 @@ class Handler(BaseHTTPRequestHandler):
                               fecha_efecto, fecha_vencimiento, estado, prima_neta, prima_total,
                               tomador, estado_renovacion, renovacion_fecha, nueva_poliza_ref,
                               colaborador, produccion, mes_creacion, poliza_key, poliza_url,
-                              fecha_baja, motivo_baja, estado_poliza, poliza_origen_id, poliza_sustituta_id, version_grupo
+                              fecha_baja, motivo_baja, estado_poliza, poliza_origen_id, poliza_sustituta_id, version_grupo, tipo_vigencia
                             FROM seguros
                             WHERE cliente_id = ?
                               AND (? = '' OR empresa_id = ?)
@@ -10874,6 +11297,7 @@ class Handler(BaseHTTPRequestHandler):
                             "poliza_origen_id": r["poliza_origen_id"],
                             "poliza_sustituta_id": r["poliza_sustituta_id"],
                             "version_grupo": r["version_grupo"],
+                            "tipo_vigencia": r["tipo_vigencia"],
                         }
                         for r in tomador_rows
                     ]
@@ -10946,6 +11370,101 @@ class Handler(BaseHTTPRequestHandler):
                     "por_compania": [dict(r) for r in por_compania],
                     "ofertas_estado": [dict(r) for r in ofertas_estado],
                     "preferencias": dict(preferencias) if preferencias else {},
+                },
+            )
+            return
+
+        if path == "/api/seguros_eventos":
+            seguro_id = params.get("seguro_id", [""])[0]
+            cliente_id = params.get("cliente_id", [""])[0]
+            if not seguro_id and not cliente_id:
+                json_response(self, {"error": "seguro_id o cliente_id requerido"}, status=400)
+                return
+            where = []
+            values = []
+            if seguro_id:
+                where.append("seguro_id = ?")
+                values.append(seguro_id)
+            if cliente_id:
+                where.append("cliente_id = ?")
+                values.append(cliente_id)
+            rows = conn.execute(
+                f"""
+                SELECT id, seguro_id, cliente_id, empresa_id, tipo, fecha, motivo, payload_json, created_at
+                FROM seguros_eventos
+                WHERE {' AND '.join(where)}
+                ORDER BY created_at DESC
+                LIMIT 500
+                """,
+                values,
+            ).fetchall()
+            json_response(self, {"rows": [dict(r) for r in rows]})
+            return
+
+        if path == "/api/seguros_reclamaciones":
+            seguro_id = params.get("seguro_id", [""])[0]
+            cliente_id = params.get("cliente_id", [""])[0]
+            empresa_id = params.get("empresa_id", [""])[0]
+            if not seguro_id and not cliente_id and not empresa_id:
+                json_response(self, {"error": "seguro_id, cliente_id o empresa_id requerido"}, status=400)
+                return
+            where = []
+            values = []
+            if seguro_id:
+                where.append("seguro_id = ?")
+                values.append(seguro_id)
+            if cliente_id:
+                where.append("cliente_id = ?")
+                values.append(cliente_id)
+            if empresa_id:
+                where.append("empresa_id = ?")
+                values.append(empresa_id)
+            rows = conn.execute(
+                f"""
+                SELECT id, seguro_id, cliente_id, empresa_id, estado, canal, fecha_apertura, fecha_cierre,
+                       asunto, detalle, resolucion, created_at, updated_at
+                FROM seguros_reclamaciones
+                WHERE {' AND '.join(where)}
+                ORDER BY COALESCE(fecha_apertura, created_at) DESC
+                LIMIT 500
+                """,
+                values,
+            ).fetchall()
+            json_response(self, {"rows": [dict(r) for r in rows]})
+            return
+
+        if path == "/api/seguros_compliance_kpis":
+            empresa_id = params.get("empresa_id", [""])[0]
+            if not empresa_id:
+                json_response(self, {"error": "empresa_id requerido"}, status=400)
+                return
+            uploaded_clause = uploaded_policy_filter()
+            total = conn.execute(
+                f"SELECT COUNT(*) total FROM seguros WHERE empresa_id = ? AND ({uploaded_clause})",
+                (empresa_id,),
+            ).fetchone()
+            ipid = conn.execute(
+                "SELECT COUNT(DISTINCT seguro_id) total FROM seguros_ipid_log WHERE empresa_id = ?",
+                (empresa_id,),
+            ).fetchone()
+            abiertas = conn.execute(
+                """
+                SELECT COUNT(*) total
+                FROM seguros_reclamaciones
+                WHERE empresa_id = ? AND LOWER(COALESCE(estado,'')) IN ('abierta','en curso','pendiente')
+                """,
+                (empresa_id,),
+            ).fetchone()
+            total_val = int(total["total"] if total and total["total"] is not None else 0)
+            ipid_val = int(ipid["total"] if ipid and ipid["total"] is not None else 0)
+            abiertas_val = int(abiertas["total"] if abiertas and abiertas["total"] is not None else 0)
+            json_response(
+                self,
+                {
+                    "polizas_subidas": total_val,
+                    "ipid_registrados": ipid_val,
+                    "ipid_pendientes": max(total_val - ipid_val, 0),
+                    "reclamaciones_abiertas": abiertas_val,
                 },
             )
             return
