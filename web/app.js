@@ -628,7 +628,7 @@ const runSegurosBdtRowOcr = async (recordId, file, statusEl, rowMap = {}) => {
     label: levelMeta.label,
   });
   if (!ok) return;
-  const enrichPayload = { id: recordId, ...fields };
+  const enrichPayload = { empresa_nombre: FINCAS_COMPANY, id: recordId, ...fields };
   if (fields.nif || fields.dni) {
     const lookup = await lookupClienteByNif(fields.nif || fields.dni);
     if (lookup?.found) {
@@ -656,6 +656,7 @@ const runSegurosBdtRowOcr = async (recordId, file, statusEl, rowMap = {}) => {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        empresa_nombre: FINCAS_COMPANY,
         id: recordId,
         poliza_key: upload.key,
         poliza_url: upload.public_url || "",
@@ -881,6 +882,7 @@ const runClienteSegurosDocOcr = async (row, statusEl, buttonEl) => {
     let seguroId = String(row.seguro_id || row.referencia_id || "").trim();
     if (seguroId) {
       const enrichResp = await postJsonWithDbRetry("/api/seguros_enrich", {
+          empresa_nombre: FINCAS_COMPANY,
           id: seguroId,
           cliente_id: payloadBase.cliente_id,
           tomador: payloadBase.tomador,
@@ -896,6 +898,7 @@ const runClienteSegurosDocOcr = async (row, statusEl, buttonEl) => {
         throw new Error(enrichResp.error);
       }
       const updateResp = await postJsonWithDbRetry("/api/seguros_update", {
+          empresa_nombre: FINCAS_COMPANY,
           id: seguroId,
           cliente_id: payloadBase.cliente_id,
           poliza_numero: payloadBase.poliza_numero,
@@ -10915,6 +10918,7 @@ const renderSegurosPresupuestos = (data) => {
       if (!ok) return;
       const today = formatAgendaDate(new Date());
       const payload = {
+        empresa_nombre: FINCAS_COMPANY,
         id: row[idIndex],
         estado: "En vigor",
         fecha_efecto: row[columns.indexOf("fecha_efecto")] || today,
@@ -10942,7 +10946,11 @@ const renderSegurosPresupuestos = (data) => {
       fetch("/api/seguros_update", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: row[idIndex], estado: "Descartado" }),
+        body: JSON.stringify({
+          empresa_nombre: FINCAS_COMPANY,
+          id: row[idIndex],
+          estado: "Descartado",
+        }),
       })
         .then((res) => res.json())
         .then((resp) => {
@@ -16374,6 +16382,7 @@ if (segurosOcrSave) {
     const recordId = segurosOcrSave.dataset.recordId;
     if (recordId) {
       const payload = {
+        empresa_nombre: FINCAS_COMPANY,
         id: recordId,
         estado: "En vigor",
         fecha_efecto: seguroOcrFechaEfecto ? seguroOcrFechaEfecto.value : "",
@@ -16474,6 +16483,7 @@ if (segurosBdtOcrLink) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        empresa_nombre: FINCAS_COMPANY,
         id: recordId,
         cliente_id: fields.cliente_id || "",
       }),
@@ -16487,7 +16497,7 @@ if (segurosBdtOcrLink) {
         const resp = await fetch("/api/seguros_enrich", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ id: recordId, ...fields }),
+          body: JSON.stringify({ empresa_nombre: FINCAS_COMPANY, id: recordId, ...fields }),
         }).then((res) => res.json());
         if (resp?.error) {
           if (segurosBdtOcrStatus) segurosBdtOcrStatus.textContent = resp.error;
@@ -16498,6 +16508,7 @@ if (segurosBdtOcrLink) {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
+              empresa_nombre: FINCAS_COMPANY,
               id: recordId,
               cliente_id: fields.cliente_id || "",
               poliza_key: upload.key || "",
@@ -16652,6 +16663,7 @@ if (segurosUpdateButton) {
           }
           const fields = data.fields || {};
           const enrichPayload = {
+            empresa_nombre: FINCAS_COMPANY,
             id: recordId,
             tomador: fields.tomador || "",
             nif: fields.dni || "",
@@ -16672,6 +16684,7 @@ if (segurosUpdateButton) {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
+                empresa_nombre: FINCAS_COMPANY,
                 id: recordId,
                 poliza_key: upload.key || "",
                 poliza_url: upload.public_url || "",
