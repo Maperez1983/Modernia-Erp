@@ -1548,6 +1548,11 @@ body.crm-fin #companySummary {
   cursor: pointer;
 }
 
+.cliente-ramo-kpi-card .kpi-label {
+  color: #2B2B2B;
+  font-weight: 700;
+}
+
 .cliente-ramo-kpi-card.active {
   border-color: var(--brand);
   box-shadow: 0 0 0 2px rgba(60, 110, 113, 0.2);
