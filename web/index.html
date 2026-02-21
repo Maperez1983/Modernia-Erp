@@ -1369,6 +1369,119 @@
             <div id="segurosRamoListado" class="cliente-ramo-listado"></div>
           </div>
           <div class="form-card">
+            <h3>Acciones de póliza</h3>
+            <p class="muted">Renovar o anular con trazabilidad completa.</p>
+            <form id="segurosPolizaAccionForm" class="form-grid">
+              <label>
+                Póliza
+                <select id="segurosPolizaAccionId" name="id"></select>
+              </label>
+              <label>
+                Acción
+                <select id="segurosPolizaAccionTipo" name="accion">
+                  <option value="renovar">Renovar</option>
+                  <option value="anular">Anular</option>
+                </select>
+              </label>
+              <label>
+                Fecha
+                <input id="segurosPolizaAccionFecha" name="fecha" type="date" />
+              </label>
+              <label>
+                Motivo (anulación)
+                <select id="segurosPolizaAccionMotivo" name="motivo_baja">
+                  <option value="">-</option>
+                  <option value="precio">Precio</option>
+                  <option value="siniestralidad">Siniestralidad</option>
+                  <option value="otros">Otros</option>
+                </select>
+              </label>
+              <div class="form-actions">
+                <button type="submit">Aplicar acción</button>
+                <span id="segurosPolizaAccionStatus" class="muted"></span>
+              </div>
+            </form>
+          </div>
+          <div class="form-card">
+            <h3>Compliance seguros</h3>
+            <p class="muted">Control de IPID y reclamaciones.</p>
+            <div id="segurosComplianceKpis"></div>
+          </div>
+          <div class="form-card">
+            <h3>Trazabilidad de póliza</h3>
+            <div class="form-grid">
+              <label>
+                Póliza
+                <select id="segurosEventosPolizaId"></select>
+              </label>
+              <div class="form-actions">
+                <button type="button" id="segurosEventosRefresh" class="secondary">Actualizar</button>
+              </div>
+            </div>
+            <div id="segurosEventosTable"></div>
+            <div class="footer" id="segurosEventosInfo"></div>
+          </div>
+          <div class="form-card">
+            <h3>Registro IPID</h3>
+            <form id="segurosIpidForm" class="form-grid">
+              <label>
+                Póliza
+                <select id="segurosIpidPolizaId" name="seguro_id"></select>
+              </label>
+              <label>
+                Fecha entrega
+                <input id="segurosIpidFecha" name="fecha_entrega" type="date" />
+              </label>
+              <label>
+                Método
+                <select id="segurosIpidMetodo" name="metodo">
+                  <option value="digital">Digital</option>
+                  <option value="presencial">Presencial</option>
+                  <option value="email">Email</option>
+                </select>
+              </label>
+              <div class="form-actions">
+                <button type="submit">Registrar IPID</button>
+                <span id="segurosIpidStatus" class="muted"></span>
+              </div>
+            </form>
+          </div>
+          <div class="form-card">
+            <h3>Reclamaciones</h3>
+            <form id="segurosReclamacionForm" class="form-grid">
+              <label>
+                Póliza
+                <select id="segurosReclamacionPolizaId" name="seguro_id"></select>
+              </label>
+              <label>
+                Estado
+                <select id="segurosReclamacionEstado" name="estado">
+                  <option value="abierta">Abierta</option>
+                  <option value="en curso">En curso</option>
+                  <option value="cerrada">Cerrada</option>
+                </select>
+              </label>
+              <label>
+                Canal
+                <input id="segurosReclamacionCanal" name="canal" placeholder="email / teléfono / presencial" />
+              </label>
+              <label>
+                Asunto
+                <input id="segurosReclamacionAsunto" name="asunto" />
+              </label>
+              <label class="span-2">
+                Detalle
+                <textarea id="segurosReclamacionDetalle" name="detalle" rows="2"></textarea>
+              </label>
+              <div class="form-actions">
+                <button type="submit">Crear reclamación</button>
+                <span id="segurosReclamacionStatus" class="muted"></span>
+              </div>
+            </form>
+            <div id="segurosReclamacionesTable"></div>
+            <div class="footer" id="segurosReclamacionesInfo"></div>
+          </div>
+          <div class="form-card">
             <h3>Insights de mercado</h3>
             <p class="muted">Distribución de pólizas por ramo y compañía.</p>
             <div id="segurosInsights"></div>

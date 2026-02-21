@@ -1403,6 +1403,31 @@ const segurosKpis = document.getElementById("segurosKpis");
 const segurosRamoKpis = document.getElementById("segurosRamoKpis");
 const segurosRamoChart = document.getElementById("segurosRamoChart");
 const segurosRamoListado = document.getElementById("segurosRamoListado");
+const segurosPolizaAccionForm = document.getElementById("segurosPolizaAccionForm");
+const segurosPolizaAccionId = document.getElementById("segurosPolizaAccionId");
+const segurosPolizaAccionTipo = document.getElementById("segurosPolizaAccionTipo");
+const segurosPolizaAccionFecha = document.getElementById("segurosPolizaAccionFecha");
+const segurosPolizaAccionMotivo = document.getElementById("segurosPolizaAccionMotivo");
+const segurosPolizaAccionStatus = document.getElementById("segurosPolizaAccionStatus");
+const segurosComplianceKpis = document.getElementById("segurosComplianceKpis");
+const segurosEventosPolizaId = document.getElementById("segurosEventosPolizaId");
+const segurosEventosRefresh = document.getElementById("segurosEventosRefresh");
+const segurosEventosTable = document.getElementById("segurosEventosTable");
+const segurosEventosInfo = document.getElementById("segurosEventosInfo");
+const segurosIpidForm = document.getElementById("segurosIpidForm");
+const segurosIpidPolizaId = document.getElementById("segurosIpidPolizaId");
+const segurosIpidFecha = document.getElementById("segurosIpidFecha");
+const segurosIpidMetodo = document.getElementById("segurosIpidMetodo");
+const segurosIpidStatus = document.getElementById("segurosIpidStatus");
+const segurosReclamacionForm = document.getElementById("segurosReclamacionForm");
+const segurosReclamacionPolizaId = document.getElementById("segurosReclamacionPolizaId");
+const segurosReclamacionEstado = document.getElementById("segurosReclamacionEstado");
+const segurosReclamacionCanal = document.getElementById("segurosReclamacionCanal");
+const segurosReclamacionAsunto = document.getElementById("segurosReclamacionAsunto");
+const segurosReclamacionDetalle = document.getElementById("segurosReclamacionDetalle");
+const segurosReclamacionStatus = document.getElementById("segurosReclamacionStatus");
+const segurosReclamacionesTable = document.getElementById("segurosReclamacionesTable");
+const segurosReclamacionesInfo = document.getElementById("segurosReclamacionesInfo");
 const segurosOcrQuality = document.getElementById("segurosOcrQuality");
 const segurosUpdateSelect = document.getElementById("segurosUpdateSelect");
 const segurosUpdateFile = document.getElementById("segurosUpdateFile");
@@ -9997,6 +10022,9 @@ const loadSegurosCrm = () => {
     segurosCrmTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
     state.segurosCrmData = null;
     renderSegurosRamosDashboard();
+    if (segurosComplianceKpis) segurosComplianceKpis.innerHTML = "<p class='muted'>Sin empresa.</p>";
+    if (segurosEventosTable) segurosEventosTable.innerHTML = "<p class='muted'>Sin pólizas.</p>";
+    if (segurosReclamacionesTable) segurosReclamacionesTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
     return;
   }
   const q = segurosCrmSearch ? segurosCrmSearch.value.trim() : "";
@@ -10040,6 +10068,10 @@ const loadSegurosCrm = () => {
     loadSegurosAlertas();
     loadSegurosKpis();
     renderSegurosRamosDashboard();
+    populateSegurosOperationalSelects();
+    loadSegurosComplianceKpis(empresa.id);
+    loadSegurosEventos(segurosEventosPolizaId ? segurosEventosPolizaId.value : "");
+    loadSegurosReclamaciones(empresa.id);
     if (segurosPreferenciasClientes) {
       populateAgendaClientes(
         segurosPreferenciasClientes,
@@ -10233,6 +10265,188 @@ const renderSegurosRamosDashboard = () => {
   const selected = summary.find((item) => item.ramo === state.segurosRamoSelected) || summary[0];
   state.segurosRamoSelected = selected.ramo;
   renderSegurosRamoListado(selected.ramo, selected.items);
+};
+
+const getSegurosPolizaOptions = () => {
+  const source = state.segurosCrmData;
+  if (!source || !Array.isArray(source.rows)) return [];
+  const columns = source.columns || [];
+  const idIndex = columns.indexOf("id");
+  const polizaIndex = columns.indexOf("poliza_numero");
+  const tomadorIndex = columns.indexOf("tomador");
+  const companiaIndex = columns.indexOf("compania");
+  if (idIndex < 0) return [];
+  return source.rows
+    .map((row) => {
+      const id = String(row[idIndex] || "").trim();
+      if (!id) return null;
+      const poliza = row[polizaIndex] || "-";
+      const tomador = row[tomadorIndex] || "Cliente";
+      const compania = row[companiaIndex] || "-";
+      return {
+        id,
+        label: `${tomador} · ${compania} · ${poliza}`,
+      };
+    })
+    .filter(Boolean);
+};
+
+const populateSegurosOperationalSelects = () => {
+  const options = getSegurosPolizaOptions();
+  const fill = (select) => {
+    if (!select) return;
+    const current = select.value;
+    select.innerHTML = "";
+    select.appendChild(createOption("", "Selecciona póliza"));
+    options.forEach((opt) => select.appendChild(createOption(opt.id, opt.label)));
+    if (current && options.some((opt) => opt.id === current)) {
+      select.value = current;
+    } else if (!current && options.length) {
+      select.value = options[0].id;
+    }
+  };
+  [
+    segurosPolizaAccionId,
+    segurosEventosPolizaId,
+    segurosIpidPolizaId,
+    segurosReclamacionPolizaId,
+  ].forEach(fill);
+};
+
+const loadSegurosComplianceKpis = (empresaId) => {
+  if (!segurosComplianceKpis || !empresaId) return;
+  api(`/api/seguros_compliance_kpis?empresa_id=${encodeURIComponent(empresaId)}`)
+    .then((data) => {
+      const wrapper = document.createElement("div");
+      wrapper.className = "grid crm-kpis";
+      const add = (label, value) => {
+        const card = document.createElement("div");
+        card.className = "kpi-card";
+        card.innerHTML = `<div class="kpi-label">${label}</div><div class="kpi-value">${value}</div>`;
+        wrapper.appendChild(card);
+      };
+      add("Pólizas subidas", data.polizas_subidas || 0);
+      add("IPID registrados", data.ipid_registrados || 0);
+      add("IPID pendientes", data.ipid_pendientes || 0);
+      add("Reclamaciones abiertas", data.reclamaciones_abiertas || 0);
+      segurosComplianceKpis.innerHTML = "";
+      segurosComplianceKpis.appendChild(wrapper);
+    })
+    .catch(() => {
+      segurosComplianceKpis.innerHTML = "<p class='muted'>No se pudieron cargar KPIs de compliance.</p>";
+    });
+};
+
+const loadSegurosEventos = (seguroId = "") => {
+  if (!segurosEventosTable) return;
+  if (!seguroId) {
+    segurosEventosTable.innerHTML = "<p class='muted'>Selecciona una póliza.</p>";
+    if (segurosEventosInfo) segurosEventosInfo.textContent = "";
+    return;
+  }
+  api(`/api/seguros_eventos?seguro_id=${encodeURIComponent(seguroId)}`)
+    .then((data) => {
+      const rows = data.rows || [];
+      if (!rows.length) {
+        segurosEventosTable.innerHTML = "<p class='muted'>Sin eventos para esta póliza.</p>";
+        if (segurosEventosInfo) segurosEventosInfo.textContent = "";
+        return;
+      }
+      const table = document.createElement("table");
+      const thead = document.createElement("thead");
+      const trHead = document.createElement("tr");
+      ["Fecha", "Tipo", "Motivo", "Detalle"].forEach((col) => {
+        const th = document.createElement("th");
+        th.textContent = col;
+        trHead.appendChild(th);
+      });
+      thead.appendChild(trHead);
+      table.appendChild(thead);
+      const tbody = document.createElement("tbody");
+      rows.forEach((row) => {
+        const tr = document.createElement("tr");
+        const values = [
+          row.created_at || row.fecha || "-",
+          row.tipo || "-",
+          row.motivo || "-",
+          row.payload_json || "-",
+        ];
+        values.forEach((v) => {
+          const td = document.createElement("td");
+          td.textContent = String(v || "-");
+          tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+      segurosEventosTable.innerHTML = "";
+      segurosEventosTable.appendChild(table);
+      if (segurosEventosInfo) segurosEventosInfo.textContent = `Mostrando ${rows.length} eventos.`;
+    })
+    .catch(() => {
+      segurosEventosTable.innerHTML = "<p class='muted'>No se pudieron cargar eventos.</p>";
+      if (segurosEventosInfo) segurosEventosInfo.textContent = "";
+    });
+};
+
+const loadSegurosReclamaciones = (empresaId) => {
+  if (!segurosReclamacionesTable || !empresaId) return;
+  api(`/api/seguros_reclamaciones?empresa_id=${encodeURIComponent(empresaId)}`)
+    .then((data) => {
+      const rows = data.rows || [];
+      if (!rows.length) {
+        segurosReclamacionesTable.innerHTML = "<p class='muted'>Sin reclamaciones registradas.</p>";
+        if (segurosReclamacionesInfo) segurosReclamacionesInfo.textContent = "";
+        return;
+      }
+      const table = document.createElement("table");
+      const thead = document.createElement("thead");
+      const trHead = document.createElement("tr");
+      ["Apertura", "Estado", "Canal", "Asunto", "Acción"].forEach((col) => {
+        const th = document.createElement("th");
+        th.textContent = col;
+        trHead.appendChild(th);
+      });
+      thead.appendChild(trHead);
+      table.appendChild(thead);
+      const tbody = document.createElement("tbody");
+      rows.forEach((row) => {
+        const tr = document.createElement("tr");
+        [row.fecha_apertura || "-", row.estado || "-", row.canal || "-", row.asunto || "-"].forEach((v) => {
+          const td = document.createElement("td");
+          td.textContent = String(v || "-");
+          tr.appendChild(td);
+        });
+        const actionTd = document.createElement("td");
+        if (String(row.estado || "").toLowerCase() !== "cerrada") {
+          const closeBtn = document.createElement("button");
+          closeBtn.type = "button";
+          closeBtn.className = "secondary";
+          closeBtn.textContent = "Cerrar";
+          closeBtn.addEventListener("click", async () => {
+            const resp = await postJsonWithDbRetry("/api/seguros_reclamacion_update", {
+              id: row.id,
+              estado: "cerrada",
+              fecha_cierre: formatAgendaDate(new Date()),
+            }).catch((err) => ({ error: err?.message || "Error" }));
+            if (resp?.error) return;
+            loadSegurosReclamaciones(empresaId);
+            loadSegurosComplianceKpis(empresaId);
+          });
+          actionTd.appendChild(closeBtn);
+        }
+        tr.appendChild(actionTd);
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+      segurosReclamacionesTable.innerHTML = "";
+      segurosReclamacionesTable.appendChild(table);
+      if (segurosReclamacionesInfo) segurosReclamacionesInfo.textContent = `Mostrando ${rows.length} reclamaciones.`;
+    })
+    .catch(() => {
+      segurosReclamacionesTable.innerHTML = "<p class='muted'>No se pudieron cargar reclamaciones.</p>";
+      if (segurosReclamacionesInfo) segurosReclamacionesInfo.textContent = "";
+    });
 };
 
 const loadSegurosAlertas = () => {
@@ -15517,6 +15731,120 @@ if (segurosChecklistGenerate) {
       .catch(() => {
         if (segurosChecklistInfo) segurosChecklistInfo.textContent = "Error al generar.";
       });
+  });
+}
+
+if (segurosEventosPolizaId) {
+  segurosEventosPolizaId.addEventListener("change", () => {
+    loadSegurosEventos(segurosEventosPolizaId.value || "");
+  });
+}
+
+if (segurosEventosRefresh) {
+  segurosEventosRefresh.addEventListener("click", () => {
+    loadSegurosEventos(segurosEventosPolizaId ? segurosEventosPolizaId.value : "");
+  });
+}
+
+if (segurosPolizaAccionForm) {
+  segurosPolizaAccionForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const empresa = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
+    if (!empresa) return;
+    const id = segurosPolizaAccionId ? segurosPolizaAccionId.value : "";
+    if (!id) {
+      if (segurosPolizaAccionStatus) segurosPolizaAccionStatus.textContent = "Selecciona una póliza.";
+      return;
+    }
+    const accion = segurosPolizaAccionTipo ? segurosPolizaAccionTipo.value : "renovar";
+    if (segurosPolizaAccionStatus) segurosPolizaAccionStatus.textContent = "Aplicando...";
+    const payload = {
+      id,
+      accion,
+      fecha: segurosPolizaAccionFecha ? segurosPolizaAccionFecha.value : "",
+      motivo_baja: segurosPolizaAccionMotivo ? segurosPolizaAccionMotivo.value : "",
+    };
+    const resp = await postJsonWithDbRetry("/api/seguros_poliza_accion", payload, {
+      maxRetries: 6,
+      baseDelayMs: 350,
+      timeoutMs: 20000,
+    }).catch((err) => ({ error: err?.message || "Error" }));
+    if (resp?.error) {
+      if (segurosPolizaAccionStatus) segurosPolizaAccionStatus.textContent = resp.error;
+      return;
+    }
+    if (segurosPolizaAccionStatus) segurosPolizaAccionStatus.textContent = "Acción aplicada.";
+    loadSegurosCrm();
+    loadSegurosEventos(id);
+    loadSegurosComplianceKpis(empresa.id);
+  });
+}
+
+if (segurosIpidForm) {
+  segurosIpidForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const empresa = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
+    if (!empresa) return;
+    const seguroId = segurosIpidPolizaId ? segurosIpidPolizaId.value : "";
+    if (!seguroId) {
+      if (segurosIpidStatus) segurosIpidStatus.textContent = "Selecciona una póliza.";
+      return;
+    }
+    if (segurosIpidStatus) segurosIpidStatus.textContent = "Registrando...";
+    const payload = {
+      seguro_id: seguroId,
+      fecha_entrega: segurosIpidFecha ? segurosIpidFecha.value : "",
+      metodo: segurosIpidMetodo ? segurosIpidMetodo.value : "digital",
+      usuario: state.currentUser || "Sistema",
+    };
+    const resp = await postJsonWithDbRetry("/api/seguros_ipid_register", payload, {
+      maxRetries: 6,
+      baseDelayMs: 350,
+      timeoutMs: 20000,
+    }).catch((err) => ({ error: err?.message || "Error" }));
+    if (resp?.error) {
+      if (segurosIpidStatus) segurosIpidStatus.textContent = resp.error;
+      return;
+    }
+    if (segurosIpidStatus) segurosIpidStatus.textContent = "IPID registrado.";
+    loadSegurosComplianceKpis(empresa.id);
+    loadSegurosEventos(seguroId);
+  });
+}
+
+if (segurosReclamacionForm) {
+  segurosReclamacionForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const empresa = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
+    if (!empresa) return;
+    const seguroId = segurosReclamacionPolizaId ? segurosReclamacionPolizaId.value : "";
+    if (!seguroId) {
+      if (segurosReclamacionStatus) segurosReclamacionStatus.textContent = "Selecciona una póliza.";
+      return;
+    }
+    if (segurosReclamacionStatus) segurosReclamacionStatus.textContent = "Guardando...";
+    const payload = {
+      seguro_id: seguroId,
+      estado: segurosReclamacionEstado ? segurosReclamacionEstado.value : "abierta",
+      canal: segurosReclamacionCanal ? segurosReclamacionCanal.value.trim() : "",
+      asunto: segurosReclamacionAsunto ? segurosReclamacionAsunto.value.trim() : "",
+      detalle: segurosReclamacionDetalle ? segurosReclamacionDetalle.value.trim() : "",
+      fecha_apertura: formatAgendaDate(new Date()),
+    };
+    const resp = await postJsonWithDbRetry("/api/seguros_reclamacion", payload, {
+      maxRetries: 6,
+      baseDelayMs: 350,
+      timeoutMs: 20000,
+    }).catch((err) => ({ error: err?.message || "Error" }));
+    if (resp?.error) {
+      if (segurosReclamacionStatus) segurosReclamacionStatus.textContent = resp.error;
+      return;
+    }
+    if (segurosReclamacionStatus) segurosReclamacionStatus.textContent = "Reclamación creada.";
+    if (segurosReclamacionForm) segurosReclamacionForm.reset();
+    loadSegurosReclamaciones(empresa.id);
+    loadSegurosComplianceKpis(empresa.id);
+    loadSegurosEventos(seguroId);
   });
 }
 
