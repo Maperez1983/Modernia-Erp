@@ -3832,6 +3832,54 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
         if fields.get("email"):
             fields["email"] = ""
 
+    # Reglas específicas Zurich Accidentes (prioriza bloque "Datos del tomador").
+    zurich_company_key = normalize_company_key(fields.get("compania") or "")
+    is_zurich = zurich_company_key == "ZURICH" or "ZURICH" in zurich_company_key
+    if is_zurich and ("SEGURO DE ACCIDENTES" in upper_text or "ZURICH ACCIDENTES" in upper_text):
+        if "ACCIDENTE" in upper_text:
+            fields["ramo"] = "Accidentes"
+        zurich_block_match = re.search(
+            r"Datos\s+del\s+tomador([\s\S]{0,2200}?)(?:Garant[ií]as|Coberturas|Titular/Entidad|$)",
+            text,
+            re.IGNORECASE,
+        )
+        zurich_block = zurich_block_match.group(1) if zurich_block_match else text
+        z_name = re.search(r"Nombre\s+o\s+raz[oó]n\s+social\s*:\s*([^\n]+)", zurich_block, re.IGNORECASE)
+        if z_name:
+            name = clean_tomador_value(z_name.group(1))
+            if name and len(name.split()) >= 2:
+                fields["tomador"] = name
+        z_nif = re.search(r"NIF/CIF\s*:\s*([A-Z0-9.\- ]{8,16})", zurich_block, re.IGNORECASE)
+        if z_nif:
+            nif_clean = normalize_nif_candidate(z_nif.group(1))
+            if nif_clean:
+                fields["dni"] = nif_clean
+                fields["nif"] = nif_clean
+        z_addr = re.search(r"Direcci[oó]n\s*:\s*([^\n]+)", zurich_block, re.IGNORECASE)
+        if z_addr:
+            addr = re.sub(r"\s+", " ", z_addr.group(1)).strip(" ,;:-")
+            if addr and addr != "-":
+                fields["direccion"] = addr
+        z_phone = re.search(r"Tel[eé]fono\s*:\s*([^\n]+)", zurich_block, re.IGNORECASE)
+        if z_phone:
+            phone = normalize_phone(z_phone.group(1))
+            fields["telefono"] = phone
+        z_vig = re.search(
+            r"Vigencia\s*:\s*desde[\s\S]{0,120}?(\d{1,2}/\d{1,2}/\d{4})[\s\S]{0,120}?hasta[\s\S]{0,120}?(\d{1,2}/\d{1,2}/\d{4})",
+            zurich_block,
+            re.IGNORECASE,
+        )
+        if z_vig:
+            fields["fecha_efecto"] = normalize_ocr_date(z_vig.group(1))
+            fields["fecha_vencimiento"] = normalize_ocr_date(z_vig.group(2))
+        # Correo/teléfono de siniestros o mediador no deben quedar como contacto del tomador.
+        mail_norm = normalize_email(fields.get("email") or "")
+        if mail_norm in ("aperturas@zurich.com", "miguelangelperez@grupomodernia.es"):
+            fields["email"] = ""
+        phone_norm = normalize_phone(fields.get("telefono") or "")
+        if phone_norm in ("913755755", "934165046", "951394365"):
+            fields["telefono"] = ""
+
     # Reglas específicas Euroins Auto (evita capturar datos del mediador / DAS).
     source_upper = normalize_lookup_text(str(source_hint or ""))
     is_euroins_doc = ("EUROINS" in upper_text) or ("EUROINS" in source_upper)
