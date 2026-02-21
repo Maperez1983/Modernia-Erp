@@ -16464,7 +16464,10 @@ if (segurosOcrSave) {
             return;
           }
           if (segurosOcrSaveStatus) {
-            segurosOcrSaveStatus.textContent = "Presupuesto convertido.";
+            const ramoGuardado = String(data?.ramo || payload.ramo || "").trim();
+            segurosOcrSaveStatus.textContent = ramoGuardado
+              ? `Presupuesto convertido. Ramo guardado: ${ramoGuardado}.`
+              : "Presupuesto convertido sin ramo.";
           }
           resetSegurosOcrAggregator({
             keepCliente: true,

@@ -8626,6 +8626,17 @@ class Handler(BaseHTTPRequestHandler):
                         """,
                         (now, f"%{record_id}%"),
                     )
+            conn.commit()
+            json_response(
+                self,
+                {
+                    "ok": True,
+                    "id": record_id,
+                    "ramo": row["ramo"] if row else "",
+                    "estado": row["estado"] if row else "",
+                },
+            )
+            return
         elif parsed.path == "/api/seguros_cambio_compania":
             record_id = payload.get("id")
             if not record_id:
