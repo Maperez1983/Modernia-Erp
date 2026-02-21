@@ -1,4 +1,5 @@
-const api = (path) => fetch(path).then((res) => res.json());
+const api = (path) =>
+  fetch(path, { cache: "no-store" }).then((res) => res.json());
 
 const randomId = () => {
   const bytes = new Uint8Array(16);
