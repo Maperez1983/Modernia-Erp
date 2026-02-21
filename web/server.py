@@ -339,6 +339,15 @@ def canonicalize_ramo(value):
         return "Accidentes"
     if "RESPONSABILIDAD CIVIL" in key:
         return "Responsabilidad civil"
+    if key in (
+        "ALQUILER",
+        "IMPAGO ALQUILER",
+        "PROTECCION ALQUILER",
+        "PROTECCION DE ALQUILER",
+        "PAGO ALQUILER",
+        "HOGAR ALQUILER",
+    ):
+        return "Protección de pagos"
     if "IMPAGO" in key or "PROTECCION PAGO" in key or "PROTECCION DE PAGOS" in key:
         return "Protección de pagos"
     if "DEFENSA JURIDICA" in key or key.startswith("ARAG"):
@@ -372,8 +381,8 @@ def canonicalize_ramo(value):
         or "MOTOR" in key
     ):
         return "Auto"
-    # En modo estricto de catálogo legal, cualquier valor no reconocido se vacía.
-    return ""
+    # Si no coincide pero no es ruido OCR, se conserva para no perder edición manual.
+    return raw
 
 
 def infer_tipo_vigencia(ramo, explicit=None):
