@@ -960,6 +960,12 @@ def process_seguros_ocr(payload, conn):
         if ("ALLIANZ" in company_key) and ("CERTIFICADO DE SEGURO" in text_upper or "ALLIANZ R C PYME" in text_upper or "ALLIANZ R.C.PYME" in text_upper):
             if not fields.get("ramo"):
                 fields["ramo"] = "Responsabilidad civil"
+            allianz_general = re.search(
+                r"Datos\s+Generales([\s\S]{0,2200}?)Datos\s+del\s+Asegurado",
+                text,
+                re.IGNORECASE,
+            )
+            allianz_scope = allianz_general.group(1) if allianz_general else text
             pol = re.search(r"P[oó]liza\s*n[º°o]\s*:\s*([0-9]{6,12})", text, re.IGNORECASE)
             if pol:
                 fields["poliza_numero"] = pol.group(1).strip()
@@ -971,17 +977,37 @@ def process_seguros_ocr(payload, conn):
             if dur:
                 fields["fecha_efecto"] = dur.group(1)
                 fields["fecha_vencimiento"] = dur.group(2)
-            if not fields.get("tomador"):
-                m = re.search(
-                    r"Datos\s+Generales\s*\n\s*([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s,.'\-]{8,})\s*\n\s*Tomador\s+del\s+Seguro",
-                    text,
-                    re.IGNORECASE,
-                )
-                if m:
-                    name = normalize_person_name(m.group(1))
-                    name = re.sub(r"\s+", " ", name).strip(" ,;:-")
-                    if name and len(name.split()) >= 2:
-                        fields["tomador"] = name
+            m = re.search(
+                r"Datos\s+Generales\s*\n\s*([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s,.'\-]{5,})\s*\n\s*Tomador\s+del\s+Seguro",
+                text,
+                re.IGNORECASE,
+            )
+            if m:
+                name = normalize_person_name(m.group(1))
+                name = re.sub(r"\s+", " ", name).strip(" ,;:-")
+                if name and len(name.split()) >= 2:
+                    fields["tomador"] = name
+            # Si tomador quedó como una dirección, priorizar razón social del bloque general.
+            tomador_norm = normalize_lookup_text(fields.get("tomador") or "")
+            looks_address = (
+                " CL " in f" {tomador_norm} "
+                or " CALLE " in f" {tomador_norm} "
+                or " AVDA " in f" {tomador_norm} "
+                or " AVD " in f" {tomador_norm} "
+            )
+            if looks_address or not fields.get("tomador"):
+                lines = [ln.strip() for ln in allianz_scope.splitlines() if ln.strip()]
+                for idx, ln in enumerate(lines):
+                    if re.search(r"Tomador\s+del", ln, re.IGNORECASE):
+                        if idx > 0:
+                            candidate = re.sub(r"\s+", " ", lines[idx - 1]).strip(" ,;:-")
+                            if candidate and len(candidate.split()) >= 2:
+                                fields["tomador"] = candidate
+                        break
+            nif_line = re.search(r"\bNIF\s*:\s*([A-Z0-9.\-]{8,16})", allianz_scope, re.IGNORECASE)
+            if nif_line:
+                fields["nif"] = re.sub(r"[^A-Z0-9]", "", nif_line.group(1).upper())
+                fields["dni"] = fields["nif"]
             if fields.get("fecha_efecto") and fields.get("fecha_vencimiento") and fields["fecha_efecto"] == fields["fecha_vencimiento"]:
                 fields["fecha_vencimiento"] = add_year_to_date(fields["fecha_efecto"])
         doc_type = classify_seguros_document(text)
