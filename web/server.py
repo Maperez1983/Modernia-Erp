@@ -3866,6 +3866,56 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
         if normalize_email(fields.get("email") or "").endswith("@fiatc.es"):
             fields["email"] = ""
         fields["telefono"] = ""
+    # Reglas específicas FIATC Comunidad (Propiedad de edificios / Multirriesgo comunidades).
+    is_fiatc_comunidad = (
+        normalize_company_key(fields.get("compania") or "") == "FIATC"
+        and ("PROPIEDAD DE EDIFICIOS" in upper_text or "MULTIRRIESGO COMUNIDADES" in upper_text)
+    )
+    if is_fiatc_comunidad:
+        fields["compania"] = "Fiatc"
+        fields["ramo"] = "Comunidad"
+        tom_match = re.search(
+            r"SUSCRITA\s+ENTRE\s*([\s\S]{0,180}?)\s+Y\s+[\s\S]{0,120}?FIATC",
+            text,
+            re.IGNORECASE,
+        )
+        if tom_match:
+            tom = normalize_person_name(tom_match.group(1)).strip(" ,;:-")
+            if tom:
+                fields["tomador"] = tom
+        pol_match = re.search(
+            r"N.?.?.?\s*P.?.?LIZA\s*([0-9]{4}[-/][0-9]{7}[-/][0-9]{1,3})",
+            text,
+            re.IGNORECASE,
+        )
+        if pol_match:
+            fields["poliza_numero"] = pol_match.group(1)
+        eff_match = re.search(
+            r"FECHA\s+EFECTO\s*([0-9]{1,2}[./-][0-9]{1,2}[./-][0-9]{2,4})",
+            text,
+            re.IGNORECASE,
+        )
+        if eff_match:
+            fields["fecha_efecto"] = normalize_ocr_date(eff_match.group(1))
+        if fields.get("fecha_efecto"):
+            fields["fecha_vencimiento"] = add_year_to_date(fields.get("fecha_efecto"))
+        prima_block = re.search(
+            r"PRIMA\s+NETA[\s\S]{0,420}?PRIMA\s+TOTAL[\s\S]{0,320}",
+            text,
+            re.IGNORECASE,
+        )
+        if prima_block:
+            nums = re.findall(r"([0-9]{1,3}(?:\.[0-9]{3})*,[0-9]{2})", prima_block.group(0))
+            if nums:
+                fields["prima_neta"] = nums[0]
+                fields["prima_total"] = nums[-1]
+        if not fields.get("prima_total"):
+            prima_total = re.search(r"Prima\s+total\s+anual[\s\r\n]+([0-9]{1,3}(?:\.[0-9]{3})*,[0-9]{2})", text, re.IGNORECASE)
+            if prima_total:
+                fields["prima_total"] = prima_total.group(1)
+        if normalize_email(fields.get("email") or "").endswith("@fiatc.es"):
+            fields["email"] = ""
+        fields["telefono"] = ""
     # Reglas específicas OCCIDENT Auto (evitar contaminación por texto legal/corporativo).
     is_occident_auto = (
         ("OCCIDENT" in upper_text or normalize_company_key(fields.get("compania") or "") in ("OCCIDENT", "CATALANAOCCIDENTE"))
