@@ -10264,8 +10264,12 @@ const renderSegurosRamosDashboard = () => {
       color: ["#3C6E71", "#5F7A61", "#2B2B2B", "#8A9A8A", "#6B7C6B"][idx % 5],
     }))
   );
-  const selected = summary.find((item) => item.ramo === state.segurosRamoSelected) || summary[0];
-  state.segurosRamoSelected = selected.ramo;
+  const selected = summary.find((item) => item.ramo === state.segurosRamoSelected) || null;
+  if (!selected) {
+    state.segurosRamoSelected = "";
+    segurosRamoListado.innerHTML = "<p class='muted'>Pulsa un KPI de ramo para ver su listado.</p>";
+    return;
+  }
   renderSegurosRamoListado(selected.ramo, selected.items);
 };
 
