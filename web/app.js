@@ -11930,6 +11930,9 @@ const saveSegurosOcrRecord = async () => {
 
 const openSegurosPresupuestoEdit = (columns, row) => {
   if (!row || !columns) return;
+  if (typeof setSegurosTab === "function") {
+    setSegurosTab("alta");
+  }
   if (segurosOcrSaveStatus) segurosOcrSaveStatus.textContent = "";
   if (segurosOcrStatus) segurosOcrStatus.textContent = "Edita el presupuesto y guarda para convertir.";
   const getVal = (key) => {
