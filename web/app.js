@@ -10180,7 +10180,9 @@ const renderSegurosRamoListado = (ramoLabel, items = []) => {
     editBtn.type = "button";
     editBtn.className = "ghost";
     editBtn.textContent = "Editar";
-    editBtn.addEventListener("click", () => {
+    editBtn.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
       if (!state.segurosCrmData) return;
       openSegurosPresupuestoEdit(state.segurosCrmData.columns || [], item.raw || []);
     });
@@ -10896,7 +10898,9 @@ const renderSegurosPresupuestos = (data) => {
     editBtn.type = "button";
     editBtn.className = "secondary";
     editBtn.textContent = "Editar antes de convertir";
-    editBtn.addEventListener("click", () => {
+    editBtn.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
       openSegurosPresupuestoEdit(columns, row);
     });
     const convertBtn = document.createElement("button");
@@ -11930,9 +11934,22 @@ const saveSegurosOcrRecord = async () => {
 
 const openSegurosPresupuestoEdit = (columns, row) => {
   if (!row || !columns) return;
-  if (typeof setSegurosTab === "function") {
-    setSegurosTab("alta");
-  }
+  state.segurosTab = "alta";
+  if (typeof setSegurosTab === "function") setSegurosTab("alta");
+  const forceAltaTab = () => {
+    const tabs = document.getElementById("segurosTabs");
+    if (tabs) {
+      tabs.querySelectorAll(".tab").forEach((btn) => {
+        btn.classList.toggle("active", btn.dataset.segurosTab === "alta");
+      });
+    }
+    document.querySelectorAll(".seguros-tab").forEach((section) => {
+      section.classList.toggle("active", section.dataset.segurosTab === "alta");
+    });
+  };
+  forceAltaTab();
+  window.requestAnimationFrame(forceAltaTab);
+  setTimeout(forceAltaTab, 120);
   if (segurosOcrSaveStatus) segurosOcrSaveStatus.textContent = "";
   if (segurosOcrStatus) segurosOcrStatus.textContent = "Edita el presupuesto y guarda para convertir.";
   const getVal = (key) => {
@@ -11962,6 +11979,9 @@ const openSegurosPresupuestoEdit = (columns, row) => {
   if (segurosOcrSave) {
     segurosOcrSave.dataset.recordId = getVal("id") || "";
     segurosOcrSave.textContent = "Guardar cambios y convertir";
+  }
+  if (seguroOcrTomador) {
+    window.requestAnimationFrame(() => seguroOcrTomador.focus());
   }
   const editor = document.getElementById("segurosOcrFields");
   if (editor) {
