@@ -914,6 +914,49 @@ def process_seguros_ocr(payload, conn):
                 fields = expert_fields
                 best_quality = expert_quality
                 field_sources = expert_sources
+        # Post-fix final para AXA Profesional: evita valores del mediador y fechas truncadas.
+        company_key = normalize_company_key(fields.get("compania") or hinted_company or "")
+        text_upper = normalize_lookup_text(text)
+        if ("AXA" in company_key) and ("AXA PROFESIONAL" in text_upper or "POLIZA DE SEGURO DE PROFESIONAL" in text_upper):
+            def _norm_date_local(value):
+                raw = str(value or "").strip()
+                raw = raw.replace(".", "/").replace("-", "/")
+                raw = re.sub(r"\s+", "", raw)
+                return raw
+            def _clean_name_local(value):
+                raw = normalize_person_name(value or "")
+                raw = re.sub(r"\s{2,}", " ", raw).strip(" ,;:-")
+                return raw
+            fields["ramo"] = "Profesional"
+            pol = re.search(r"p[oó]liza\s*(?:n[º°o]|no\.?)\s*([0-9]{2})[- ]?([0-9]{7,})", text, re.IGNORECASE)
+            if pol:
+                fields["poliza_numero"] = f"{pol.group(1)}-{pol.group(2)}"
+            dates = re.search(
+                r"Datos\s+de\s+la\s+Poliza[\s\S]{0,900}?Fecha\s+efecto[\s\S]{0,200}?Fecha\s+vencimiento[\s\S]{0,220}?([0-9]{1,2}[./-][0-9]{1,2}[./-]20[0-9]{2})[\s\S]{0,120}?([0-9]{1,2}[./-][0-9]{1,2}[./-]20[0-9]{2})",
+                text,
+                re.IGNORECASE,
+            )
+            if dates:
+                fields["fecha_efecto"] = _norm_date_local(dates.group(1))
+                fields["fecha_vencimiento"] = _norm_date_local(dates.group(2))
+            tom = re.search(r"Tomador\s+([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s]{6,}?)\s+Producto", text, re.IGNORECASE)
+            if tom:
+                fields["tomador"] = _clean_name_local(tom.group(1))
+            if not fields.get("tomador") or len((fields.get("tomador") or "").split()) < 3:
+                aseg = re.search(r"Nombre\s+del\s+asegurado\s*[\r\n]+\s*([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s]{8,})", text, re.IGNORECASE)
+                if aseg:
+                    fields["tomador"] = _clean_name_local(aseg.group(1))
+            if normalize_phone(fields.get("telefono") or "") == "900909014":
+                fields["telefono"] = ""
+            if "fincasvelazquez" in str(fields.get("email") or "").lower():
+                fields["email"] = ""
+            dir_norm = normalize_lookup_text(fields.get("direccion") or "")
+            if "DOMICILIO SOCIAL" in dir_norm or "MEDIADOR" in dir_norm or "PALMA DE MALLORCA" in dir_norm:
+                fields["direccion"] = ""
+            if not fields.get("direccion"):
+                addr = re.search(r"\b(CL\s+calle[^\n]{5,160}?\d{5}\s+[A-ZÁÉÍÓÚÑ]{3,})", text, re.IGNORECASE)
+                if addr:
+                    fields["direccion"] = re.sub(r"\s+", " ", addr.group(1)).strip()
         doc_type = classify_seguros_document(text)
         if doc_type == "otro" and doc_text:
             doc_type = classify_seguros_document(doc_text)
@@ -2641,6 +2684,14 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
         if not candidates:
             candidates = [raw]
         normalized_company = (compania or "").upper().strip()
+        normalized_company_key = normalize_company_key(compania or "")
+        if normalized_company_key == "AXA" or "AXA" in normalized_company_key:
+            axa_fmt = re.search(r"\b(\d{2})[- ]?(\d{7,})\b", value or "", re.IGNORECASE)
+            if axa_fmt:
+                return f"{axa_fmt.group(1)}-{axa_fmt.group(2)}"
+            digits = re.sub(r"[^0-9]", "", str(value or ""))
+            if len(digits) >= 10:
+                return f"{digits[:2]}-{digits[2:]}"
         numeric_only = {
             "LINEA DIRECTA",
             "DIRECT SEGUROS",
@@ -3107,6 +3158,7 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
     if fields["fecha_nacimiento"]:
         fields["fecha_nacimiento"] = normalize_ocr_date(fields["fecha_nacimiento"])
     fields["poliza_numero"] = pick([
+        r"p[oó]liza\s*(?:n[º°o]|no\.?)\s*[:#]?\s*([0-9]{2}-[0-9]{7,})",
         r"P[oó]liza/Spto\s*([0-9]{8,14})(?:\s*/\s*[0-9]{1,3})?",
         r"Referencia\s*[:#]?\s*([A-Z0-9]{8,})",
         r"N[ºo]\s*POLIZA/SPTO\.?\s*[:#]?\s*([0-9]{8,14}(?:\s*/\s*[0-9]{1,3})?)",
@@ -3593,6 +3645,129 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
                 if amounts:
                     fields["prima_total"] = max(amounts, key=parse_money_value)
         fields["telefono"] = ""
+
+    # Reglas especificas AXA Profesional (evita capturar datos del mediador).
+    axa_company_key = normalize_company_key(fields.get("compania") or "")
+    is_axa = axa_company_key == "AXA" or "AXA" in axa_company_key
+    if is_axa:
+        if "AXA PROFESIONAL" in upper_text or "AXA PROF" in upper_text or "POLIZA DE SEGURO DE PROFESIONAL" in upper_text:
+            fields["ramo"] = "Profesional"
+        axa_poliza = re.search(r"p[oó]liza\s*(?:n[º°o]|no\.?)\s*([0-9]{2})[- ]?([0-9]{7,})", text, re.IGNORECASE)
+        if axa_poliza:
+            fields["poliza_numero"] = f"{axa_poliza.group(1)}-{axa_poliza.group(2)}"
+        axa_tomador_info = re.search(
+            r"Tomador\s+([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s]{6,}?)\s+Producto",
+            text,
+            re.IGNORECASE,
+        )
+        if axa_tomador_info:
+            fields["tomador"] = clean_tomador_value(axa_tomador_info.group(1))
+        if not fields.get("tomador") or len((fields.get("tomador") or "").split()) < 3:
+            axa_asegurado_name = re.search(
+                r"Nombre\s+del\s+asegurado\s*[\r\n]+\s*([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s]{8,})",
+                text,
+                re.IGNORECASE,
+            )
+            if axa_asegurado_name:
+                fields["tomador"] = clean_tomador_value(axa_asegurado_name.group(1))
+        axa_policy_block = re.search(
+            r"Datos\s+de\s+la\s+P[oó]liza([\s\S]{0,900}?)Asegurado",
+            text,
+            re.IGNORECASE,
+        )
+        axa_policy_scope = axa_policy_block.group(1) if axa_policy_block else text
+        axa_policy_dates = re.search(
+            r"Fecha\s+efecto[\s\S]{0,120}?Fecha\s+vencimiento[\s\S]{0,160}?([0-9]{1,2}[./-][0-9]{1,2}[./-][0-9]{4})[\s\S]{0,80}?([0-9]{1,2}[./-][0-9]{1,2}[./-][0-9]{4})",
+            axa_policy_scope,
+            re.IGNORECASE,
+        )
+        if axa_policy_dates:
+            fields["fecha_efecto"] = normalize_ocr_date(axa_policy_dates.group(1))
+            fields["fecha_vencimiento"] = normalize_ocr_date(axa_policy_dates.group(2))
+        if (fields.get("fecha_efecto") or "").endswith("/20") or (fields.get("fecha_vencimiento") or "").endswith("/20"):
+            axa_policy_dates_global = re.search(
+                r"Fecha\s+efecto[\s\S]{0,220}?([0-9]{1,2}[./-][0-9]{1,2}[./-][0-9]{4})[\s\S]{0,220}?Fecha\s+vencimiento[\s\S]{0,220}?([0-9]{1,2}[./-][0-9]{1,2}[./-][0-9]{4})",
+                text,
+                re.IGNORECASE,
+            )
+            if axa_policy_dates_global:
+                fields["fecha_efecto"] = normalize_ocr_date(axa_policy_dates_global.group(1))
+                fields["fecha_vencimiento"] = normalize_ocr_date(axa_policy_dates_global.group(2))
+        axa_effect = re.search(
+            r"Fecha\s+efecto[^\d]*([0-9]{1,2}[./-][0-9]{1,2}[./-][0-9]{4})",
+            axa_policy_scope,
+            re.IGNORECASE,
+        )
+        if axa_effect:
+            fields["fecha_efecto"] = normalize_ocr_date(axa_effect.group(1))
+        axa_due = re.search(
+            r"Fecha\s+vencimiento[^\d]*([0-9]{1,2}[./-][0-9]{1,2}[./-][0-9]{4})",
+            axa_policy_scope,
+            re.IGNORECASE,
+        )
+        if axa_due:
+            fields["fecha_vencimiento"] = normalize_ocr_date(axa_due.group(1))
+
+        axa_tomador_block_match = re.search(
+            r"Datos\s+del\s+Tomador([\s\S]{0,2200}?)Datos\s+de\s+la\s+P[oó]liza",
+            text,
+            re.IGNORECASE,
+        )
+        axa_tomador_block = axa_tomador_block_match.group(1) if axa_tomador_block_match else ""
+        if axa_tomador_block:
+            axa_tomador_name = re.search(
+                r"Tomador\s+del\s+seguro[\s\S]{0,140}?([A-ZÁÉÍÓÚÑ]{2,}(?:\s+[A-ZÁÉÍÓÚÑ]{2,}){1,5})",
+                axa_tomador_block,
+                re.IGNORECASE,
+            )
+            if axa_tomador_name:
+                candidate_name = clean_tomador_value(axa_tomador_name.group(1))
+                if "SEGUROS Y REASEGUROS" not in normalize_lookup_text(candidate_name):
+                    fields["tomador"] = candidate_name
+            axa_tomador_nif = re.search(
+                r"\b([0-9]{8}[A-Z]|[XYZ][0-9]{7}[A-Z])\b",
+                axa_tomador_block,
+                re.IGNORECASE,
+            )
+            if axa_tomador_nif:
+                nif_val = normalize_nif_candidate(axa_tomador_nif.group(1))
+                if nif_val:
+                    fields["dni"] = nif_val
+                    fields["nif"] = nif_val
+            axa_tomador_phone = re.search(
+                r"Tel[eé]fono\s+m[oó]vil\s*[\r\n]+\s*([0-9 ]{9,})",
+                axa_tomador_block,
+                re.IGNORECASE,
+            )
+            if axa_tomador_phone:
+                fields["telefono"] = normalize_phone(axa_tomador_phone.group(1))
+            axa_tomador_dir = re.search(
+                r"Direcci[oó]n\s*[\r\n]+\s*([^\n]+)\n\s*(\d{5}\s+[A-ZÁÉÍÓÚÑ][^\n]*)\n\s*Tel[eé]fono\s+m[oó]vil",
+                axa_tomador_block,
+                re.IGNORECASE,
+            )
+            if axa_tomador_dir:
+                fields["direccion"] = f"{axa_tomador_dir.group(1).strip()} {axa_tomador_dir.group(2).strip()}".strip()
+        if not fields.get("direccion") or "MEDIADOR" in normalize_lookup_text(fields.get("direccion") or ""):
+            axa_addr_fallback = re.search(
+                r"\b(CL\s+[^\n]{5,140}?\d{5}\s+[A-ZÁÉÍÓÚÑ]{3,})",
+                text,
+                re.IGNORECASE,
+            )
+            if axa_addr_fallback:
+                candidate_addr = re.sub(r"\s+", " ", axa_addr_fallback.group(1)).strip()
+                if "ILDEFONSO" not in normalize_lookup_text(candidate_addr) and "MEDIADOR" not in normalize_lookup_text(candidate_addr):
+                    fields["direccion"] = candidate_addr
+
+        # En AXA el email suele ser del mediador, no del tomador.
+        if fields.get("email") and "fincasvelazquez" in str(fields.get("email") or "").lower():
+            fields["email"] = ""
+        if normalize_phone(fields.get("telefono") or "") == "900909014":
+            fields["telefono"] = ""
+        if "MEDIADOR" in normalize_lookup_text(fields.get("tomador") or ""):
+            fields["tomador"] = ""
+        if "MEDIADOR" in normalize_lookup_text(fields.get("direccion") or ""):
+            fields["direccion"] = ""
 
     # Reglas específicas Euroins Auto (evita capturar datos del mediador / DAS).
     source_upper = normalize_lookup_text(str(source_hint or ""))
