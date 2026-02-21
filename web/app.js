@@ -16427,10 +16427,39 @@ if (segurosOcrSave) {
         body: JSON.stringify(payload),
       })
         .then((res) => res.json())
-        .then((data) => {
+        .then(async (data) => {
           if (data.error) {
             if (segurosOcrSaveStatus) {
               segurosOcrSaveStatus.textContent = data.error;
+            }
+            return;
+          }
+          const enrichPayload = {
+            empresa_nombre: FINCAS_COMPANY,
+            id: recordId,
+            cliente_id: payload.cliente_id || "",
+            tomador: payload.tomador || "",
+            nif: payload.nif || "",
+            telefono: payload.telefono || "",
+            email: payload.email || "",
+            direccion: payload.direccion || "",
+            fecha_nacimiento: payload.fecha_nacimiento || "",
+            compania: payload.compania || "",
+            ramo: payload.ramo || "",
+            poliza_numero: payload.poliza_numero || "",
+            prima_neta: payload.prima_neta,
+            prima_total: payload.prima_total,
+            fecha_efecto: payload.fecha_efecto || "",
+            fecha_vencimiento: payload.fecha_vencimiento || "",
+          };
+          const enrichResp = await fetch("/api/seguros_enrich", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(enrichPayload),
+          }).then((r) => r.json()).catch(() => ({ error: "Error al enriquecer" }));
+          if (enrichResp?.error) {
+            if (segurosOcrSaveStatus) {
+              segurosOcrSaveStatus.textContent = enrichResp.error;
             }
             return;
           }
@@ -16445,6 +16474,10 @@ if (segurosOcrSave) {
           segurosOcrSave.removeAttribute("data-record-id");
           segurosOcrSave.textContent = "Guardar";
           loadSegurosCrm();
+          const fincas = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
+          if (fincas) {
+            setTimeout(() => renderFincasDashboard(fincas.id), 50);
+          }
         })
         .catch(() => {
           if (segurosOcrSaveStatus) {
