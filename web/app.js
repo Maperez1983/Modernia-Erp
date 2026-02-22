@@ -13514,7 +13514,13 @@ const renderClienteRamoListado = (ramoLabel, rows = [], cliente = null) => {
       event.stopPropagation();
       openClienteSeguroDetail(
         row,
-        cliente || state.currentClienteData || { id: state.currentClienteId, nombre: row.tomador || "" }
+        cliente || state.currentClienteData || { id: state.currentClienteId, nombre: row.tomador || "" },
+        {
+          onSaved: () => {
+            const fincas = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
+            if (fincas) renderFincasDashboard(fincas.id);
+          },
+        }
       );
     });
     actionTd.appendChild(openBtn);
@@ -13522,7 +13528,13 @@ const renderClienteRamoListado = (ramoLabel, rows = [], cliente = null) => {
     tr.addEventListener("click", () =>
       openClienteSeguroDetail(
         row,
-        cliente || state.currentClienteData || { id: state.currentClienteId, nombre: row.tomador || "" }
+        cliente || state.currentClienteData || { id: state.currentClienteId, nombre: row.tomador || "" },
+        {
+          onSaved: () => {
+            const fincas = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
+            if (fincas) renderFincasDashboard(fincas.id);
+          },
+        }
       )
     );
     tbody.appendChild(tr);
@@ -14323,7 +14335,7 @@ const buildSeguroHighlights = (row, cliente = {}) => {
   return items;
 };
 
-const openClienteSeguroDetail = (row, cliente = {}) => {
+const openClienteSeguroDetail = (row, cliente = {}, options = {}) => {
   let modal = document.getElementById("clienteSeguroDetailModal");
   if (!modal) {
     modal = document.createElement("div");
@@ -14355,6 +14367,23 @@ const openClienteSeguroDetail = (row, cliente = {}) => {
   const meta = modal.querySelector(".cliente-seguro-meta");
   const actions = modal.querySelector(".cliente-seguro-actions");
   const highlights = modal.querySelector(".cliente-seguro-highlights");
+  const runAfterSave = async () => {
+    if (typeof options.onSaved === "function") {
+      try {
+        await options.onSaved();
+      } catch (_) {}
+    }
+    if (state.currentClienteId) {
+      const fincasEmpresa = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
+      loadClienteSeguros(cliente, fincasEmpresa ? fincasEmpresa.id : "");
+      if (state.currentClienteId === String(cliente.id || "")) {
+        loadClienteDocsByService(String(cliente.id || ""), "seguros", clienteDocsSeguros);
+      }
+    }
+    loadSegurosCrm();
+    const fincas = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
+    if (fincas) window.requestAnimationFrame(() => renderFincasDashboard(fincas.id));
+  };
   const computed = computeSeguroDisplayState(row);
   const vencimiento = computed.vencimiento || "-";
   if (title) {
@@ -14525,10 +14554,7 @@ const openClienteSeguroDetail = (row, cliente = {}) => {
           return;
         }
         status.textContent = "Acción aplicada.";
-        if (state.currentClienteId) {
-          const fincasEmpresa = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
-          loadClienteSeguros(cliente, fincasEmpresa ? fincasEmpresa.id : "");
-        }
+        await runAfterSave();
       } catch {
         status.textContent = "Error al aplicar la acción.";
       }
@@ -14627,10 +14653,7 @@ const openClienteSeguroDetail = (row, cliente = {}) => {
           return;
         }
         editStatus.textContent = "Datos actualizados.";
-        if (state.currentClienteId) {
-          const fincasEmpresa = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
-          loadClienteSeguros(cliente, fincasEmpresa ? fincasEmpresa.id : "");
-        }
+        await runAfterSave();
       } catch {
         editStatus.textContent = "Error al guardar edición.";
       }
@@ -14732,7 +14755,9 @@ const loadClienteSeguros = (cliente, empresaId) => {
         openBtn.textContent = "Abrir";
         openBtn.addEventListener("click", (event) => {
           event.stopPropagation();
-          openClienteSeguroDetail(row, cliente);
+          openClienteSeguroDetail(row, cliente, {
+            onSaved: () => loadClienteSeguros(cliente, empresaId),
+          });
         });
         actionTd.appendChild(openBtn);
         const deleteBtn = document.createElement("button");
@@ -14755,7 +14780,11 @@ const loadClienteSeguros = (cliente, empresaId) => {
         });
         actionTd.appendChild(deleteBtn);
         tr.appendChild(actionTd);
-        tr.addEventListener("click", () => openClienteSeguroDetail(row, cliente));
+        tr.addEventListener("click", () =>
+          openClienteSeguroDetail(row, cliente, {
+            onSaved: () => loadClienteSeguros(cliente, empresaId),
+          })
+        );
         tbody.appendChild(tr);
       });
       table.appendChild(tbody);
