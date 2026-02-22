@@ -10183,12 +10183,19 @@ const renderSegurosRamoListado = (ramoLabel, items = []) => {
     const editBtn = document.createElement("button");
     editBtn.type = "button";
     editBtn.className = "ghost";
-    editBtn.textContent = "Editar";
+    editBtn.textContent = "Abrir ficha";
     editBtn.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
-      if (!state.segurosCrmData) return;
-      openSegurosPresupuestoEdit(state.segurosCrmData.columns || [], item.raw || []);
+      openClienteSeguroDetail(
+        item,
+        { id: item.cliente_id || "", nombre: item.tomador || "" },
+        {
+          onSaved: () => {
+            loadSegurosCrm();
+          },
+        }
+      );
     });
     actionTd.appendChild(openBtn);
     actionTd.appendChild(editBtn);
@@ -10220,6 +10227,19 @@ const renderSegurosRamosDashboard = () => {
   const vencIndex = columns.indexOf("fecha_vencimiento");
   const estadoIndex = columns.indexOf("estado");
   const primaIndex = columns.indexOf("prima_total");
+  const primaNetaIndex = columns.indexOf("prima_neta");
+  const idIndex = columns.indexOf("id");
+  const clienteIdIndex = columns.indexOf("cliente_id");
+  const estadoRenovacionIndex = columns.indexOf("estado_renovacion");
+  const renovacionFechaIndex = columns.indexOf("renovacion_fecha");
+  const nuevaPolizaRefIndex = columns.indexOf("nueva_poliza_ref");
+  const fechaBajaIndex = columns.indexOf("fecha_baja");
+  const motivoBajaIndex = columns.indexOf("motivo_baja");
+  const estadoPolizaIndex = columns.indexOf("estado_poliza");
+  const polizaOrigenIdIndex = columns.indexOf("poliza_origen_id");
+  const polizaSustitutaIdIndex = columns.indexOf("poliza_sustituta_id");
+  const colaboradorIndex = columns.indexOf("colaborador");
+  const produccionIndex = columns.indexOf("produccion");
   const grouped = new Map();
   source.rows.forEach((row) => {
     const ramo = getSegurosRamoLabel(ramoIndex >= 0 ? row[ramoIndex] : "");
@@ -10229,15 +10249,29 @@ const renderSegurosRamosDashboard = () => {
     const g = grouped.get(ramo);
     g.total += 1;
     g.primaTotal += parseMoneyValue(primaIndex >= 0 ? row[primaIndex] : 0);
+    const valueOf = (idx) => (idx >= 0 ? row[idx] : "");
     g.items.push({
+      id: valueOf(idIndex),
+      cliente_id: valueOf(clienteIdIndex),
       ramo,
-      tomador: tomadorIndex >= 0 ? row[tomadorIndex] : "",
-      poliza_numero: polizaIndex >= 0 ? row[polizaIndex] : "",
-      compania: companiaIndex >= 0 ? row[companiaIndex] : "",
-      fecha_efecto: efectoIndex >= 0 ? row[efectoIndex] : "",
-      fecha_vencimiento: vencIndex >= 0 ? row[vencIndex] : "",
-      estado: estadoIndex >= 0 ? row[estadoIndex] : "",
-      prima_total: primaIndex >= 0 ? row[primaIndex] : "",
+      tomador: valueOf(tomadorIndex),
+      poliza_numero: valueOf(polizaIndex),
+      compania: valueOf(companiaIndex),
+      fecha_efecto: valueOf(efectoIndex),
+      fecha_vencimiento: valueOf(vencIndex),
+      estado: valueOf(estadoIndex),
+      prima_neta: valueOf(primaNetaIndex),
+      prima_total: valueOf(primaIndex),
+      estado_renovacion: valueOf(estadoRenovacionIndex),
+      renovacion_fecha: valueOf(renovacionFechaIndex),
+      nueva_poliza_ref: valueOf(nuevaPolizaRefIndex),
+      fecha_baja: valueOf(fechaBajaIndex),
+      motivo_baja: valueOf(motivoBajaIndex),
+      estado_poliza: valueOf(estadoPolizaIndex),
+      poliza_origen_id: valueOf(polizaOrigenIdIndex),
+      poliza_sustituta_id: valueOf(polizaSustitutaIdIndex),
+      colaborador: valueOf(colaboradorIndex),
+      produccion: valueOf(produccionIndex),
       raw: row,
     });
   });
