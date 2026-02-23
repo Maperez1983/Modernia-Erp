@@ -2115,3 +2115,58 @@ tbody tr:nth-child(even) {
     grid-template-columns: 1fr;
   }
 }
+
+body.auth-locked {
+  overflow: hidden;
+}
+
+.auth-login-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background:
+    radial-gradient(circle at 15% 10%, rgba(95, 122, 97, 0.18), transparent 45%),
+    radial-gradient(circle at 85% 20%, rgba(60, 110, 113, 0.2), transparent 42%),
+    rgba(245, 245, 245, 0.92);
+  backdrop-filter: blur(6px);
+}
+
+.auth-login-card {
+  width: min(460px, 100%);
+  background: #fff;
+  border: 1px solid rgba(60, 110, 113, 0.18);
+  border-radius: 20px;
+  padding: 22px 22px 18px;
+  box-shadow: 0 20px 60px rgba(43, 43, 43, 0.12);
+}
+
+.auth-login-card h2 {
+  margin: 0 0 8px;
+}
+
+.auth-login-form {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.auth-login-form label {
+  display: grid;
+  gap: 6px;
+  font-size: 0.95rem;
+}
+
+.auth-login-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.auth-login-actions .muted {
+  min-height: 1.2em;
+}

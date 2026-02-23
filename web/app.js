@@ -1,5 +1,22 @@
-const api = (path) =>
-  fetch(path, { cache: "no-store" }).then((res) => res.json());
+const api = async (path) => {
+  const res = await fetch(path, { cache: "no-store", credentials: "same-origin" });
+  let data = null;
+  try {
+    data = await res.json();
+  } catch {
+    data = null;
+  }
+  if (!res.ok) {
+    const error = new Error((data && data.error) || `HTTP ${res.status}`);
+    error.status = res.status;
+    error.data = data;
+    if (res.status === 401) {
+      handleAuthExpired();
+    }
+    throw error;
+  }
+  return data;
+};
 
 const randomId = () => {
   const bytes = new Uint8Array(16);
@@ -1007,6 +1024,8 @@ const setCurrentUser = (name) => {
 };
 
 const state = {
+  appInitialized: false,
+  authUser: null,
   empresas: [],
   tablas: [],
   resumen: [],
@@ -1082,6 +1101,13 @@ const agendaBackBtn = document.getElementById("agendaBackBtn");
 const agendaGeneral = document.getElementById("agendaGeneral");
 const yearSelect = document.getElementById("yearSelect");
 const dbStatus = document.getElementById("dbStatus");
+const authLoginOverlay = document.getElementById("authLoginOverlay");
+const authLoginForm = document.getElementById("authLoginForm");
+const authLoginUser = document.getElementById("authLoginUser");
+const authLoginPass = document.getElementById("authLoginPass");
+const authLoginStatus = document.getElementById("authLoginStatus");
+const authSessionPill = document.getElementById("authSessionPill");
+const authLogoutBtn = document.getElementById("authLogoutBtn");
 const bdtYearFilter = document.getElementById("bdtYearFilter");
 const bdtFieldFilter = document.getElementById("bdtFieldFilter");
 const clientesEstadoFilter = document.getElementById("clientesEstadoFilter");
@@ -15237,6 +15263,119 @@ const loadTable = () => {
   });
 };
 
+const setAuthUi = (user) => {
+  state.authUser = user || null;
+  if (authSessionPill) {
+    if (user) {
+      const label = user.nombre_completo || user.usuario || user.email || "Sesión activa";
+      authSessionPill.textContent = label;
+      authSessionPill.classList.remove("hidden");
+    } else {
+      authSessionPill.textContent = "";
+      authSessionPill.classList.add("hidden");
+    }
+  }
+  if (authLogoutBtn) {
+    authLogoutBtn.classList.toggle("hidden", !user);
+  }
+};
+
+const showAuthOverlay = (message = "") => {
+  if (authLoginStatus) authLoginStatus.textContent = message || "";
+  if (authLoginOverlay) authLoginOverlay.classList.remove("hidden");
+  document.body.classList.add("auth-locked");
+  setAuthUi(null);
+};
+
+const hideAuthOverlay = () => {
+  if (authLoginOverlay) authLoginOverlay.classList.add("hidden");
+  document.body.classList.remove("auth-locked");
+};
+
+async function fetchCurrentSessionUser() {
+  const res = await fetch("/api/me", { cache: "no-store", credentials: "same-origin" });
+  let data = null;
+  try {
+    data = await res.json();
+  } catch {
+    data = null;
+  }
+  if (!res.ok) {
+    return null;
+  }
+  return data?.user || null;
+}
+
+async function ensureAuthAndBoot() {
+  const user = await fetchCurrentSessionUser();
+  if (!user) {
+    showAuthOverlay("");
+    return;
+  }
+  setAuthUi(user);
+  hideAuthOverlay();
+  if (!state.appInitialized) {
+    await init();
+    state.appInitialized = true;
+  }
+}
+
+function handleAuthExpired() {
+  if (!state.appInitialized && authLoginOverlay && !authLoginOverlay.classList.contains("hidden")) {
+    return;
+  }
+  showAuthOverlay("La sesión ha caducado. Inicia sesión de nuevo.");
+}
+
+const submitAuthLogin = async () => {
+  const usuario = authLoginUser?.value?.trim() || "";
+  const password = authLoginPass?.value || "";
+  if (!usuario || !password) {
+    if (authLoginStatus) authLoginStatus.textContent = "Introduce usuario/email y contraseña.";
+    return;
+  }
+  if (authLoginStatus) authLoginStatus.textContent = "Accediendo...";
+  try {
+    const res = await fetch("/api/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({ usuario, password }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data?.error) {
+      if (authLoginStatus) authLoginStatus.textContent = data?.error || "No se pudo iniciar sesión.";
+      return;
+    }
+    if (authLoginPass) authLoginPass.value = "";
+    if (authLoginStatus) {
+      authLoginStatus.textContent = data?.first_password_set
+        ? "Contraseña inicial guardada. Acceso correcto."
+        : "Acceso correcto.";
+    }
+    setAuthUi(data?.user || null);
+    hideAuthOverlay();
+    if (!state.appInitialized) {
+      await init();
+      state.appInitialized = true;
+    }
+  } catch {
+    if (authLoginStatus) authLoginStatus.textContent = "Error de conexión al iniciar sesión.";
+  }
+};
+
+const logoutAuthSession = async () => {
+  try {
+    await fetch("/api/logout", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: "{}",
+    });
+  } catch {}
+  showAuthOverlay("Sesión cerrada.");
+};
+
 const init = async () => {
   try {
   const results = await Promise.allSettled([
@@ -18526,7 +18665,21 @@ if (empresaSelect) {
   });
 }
 
-init();
+if (authLoginForm) {
+  authLoginForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    submitAuthLogin();
+  });
+}
+
+if (authLogoutBtn) {
+  authLogoutBtn.addEventListener("click", () => {
+    logoutAuthSession();
+  });
+}
+
+showAuthOverlay("");
+ensureAuthAndBoot();
 
 populateGestoriaSubtipos("");
 

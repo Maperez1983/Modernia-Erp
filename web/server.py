@@ -14,6 +14,7 @@ import shutil
 import urllib.request
 import threading
 import time
+import secrets
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
 from pathlib import Path
@@ -65,6 +66,13 @@ OCR_PDF_DPI = max(120, int(os.environ.get("OCR_PDF_DPI", "280")))
 OCR_OPENAI_VISION_PAGES = max(0, int(os.environ.get("OCR_OPENAI_VISION_PAGES", "2")))
 OCR_OPENAI_VISION_DPI = max(120, int(os.environ.get("OCR_OPENAI_VISION_DPI", "220")))
 OCR_EXPERT_MODE = os.environ.get("OCR_EXPERT_MODE", "1").strip().lower() not in ("0", "false", "no", "off")
+APP_SESSION_TTL_SECONDS = max(900, int(os.environ.get("APP_SESSION_TTL_SECONDS", "43200")))
+SESSION_COOKIE_NAME = os.environ.get("APP_SESSION_COOKIE", "crm_session")
+AUTH_ALLOW_FIRST_PASSWORD_SET = os.environ.get("AUTH_ALLOW_FIRST_PASSWORD_SET", "1").strip().lower() not in ("0", "false", "no", "off")
+AUTH_PUBLIC_GET_ENDPOINTS = {"/api/health", "/api/me"}
+AUTH_PUBLIC_POST_ENDPOINTS = {"/api/login", "/api/logout"}
+AUTH_SESSIONS = {}
+AUTH_SESSIONS_LOCK = threading.Lock()
 
 
 def parse_ocr_psms(raw):
@@ -785,6 +793,70 @@ def hash_password(password):
     salt = os.urandom(16).hex()
     digest = hashlib.sha256((salt + password).encode("utf-8")).hexdigest()
     return f"{salt}${digest}"
+
+
+def verify_password(password, password_hash):
+    if not password_hash or not password:
+        return False
+    raw = str(password_hash)
+    if "$" not in raw:
+        return False
+    salt, stored = raw.split("$", 1)
+    if not salt or not stored:
+        return False
+    digest = hashlib.sha256((salt + password).encode("utf-8")).hexdigest()
+    return secrets.compare_digest(digest, stored)
+
+
+def _cleanup_expired_sessions():
+    now = time.time()
+    expired = []
+    for token, session in AUTH_SESSIONS.items():
+        if float(session.get("expires_at") or 0) <= now:
+            expired.append(token)
+    for token in expired:
+        AUTH_SESSIONS.pop(token, None)
+
+
+def create_auth_session(user_row):
+    now = time.time()
+    session = {
+        "token": secrets.token_urlsafe(32),
+        "user_id": str(user_row["id"]),
+        "usuario": str(user_row["usuario"] or ""),
+        "nombre": str(user_row["nombre"] or ""),
+        "apellido": str(user_row["apellido"] or ""),
+        "rol": str(user_row["rol"] or ""),
+        "email": str(user_row["email"] or ""),
+        "servicio": str(user_row["servicio"] or ""),
+        "expires_at": now + APP_SESSION_TTL_SECONDS,
+        "created_at": now,
+    }
+    with AUTH_SESSIONS_LOCK:
+        _cleanup_expired_sessions()
+        AUTH_SESSIONS[session["token"]] = session
+    return session
+
+
+def get_auth_session(token):
+    if not token:
+        return None
+    with AUTH_SESSIONS_LOCK:
+        session = AUTH_SESSIONS.get(token)
+        if not session:
+            return None
+        if float(session.get("expires_at") or 0) <= time.time():
+            AUTH_SESSIONS.pop(token, None)
+            return None
+        session["expires_at"] = time.time() + APP_SESSION_TTL_SECONDS
+        return dict(session)
+
+
+def delete_auth_session(token):
+    if not token:
+        return
+    with AUTH_SESSIONS_LOCK:
+        AUTH_SESSIONS.pop(token, None)
 
 def detect_ocr_lang():
     if os.path.isdir(TESSDATA_DIR):
@@ -6413,12 +6485,16 @@ def ensure_ocr_tables(db_path):
     conn.close()
 
 
-def json_response(handler, data, status=200):
+def json_response(handler, data, status=200, cookies=None, extra_headers=None):
     payload = json.dumps(data, ensure_ascii=False).encode("utf-8")
     handler.send_response(status)
     handler.send_header("Access-Control-Allow-Origin", "*")
     handler.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
     handler.send_header("Access-Control-Allow-Headers", "Content-Type")
+    for key, value in (extra_headers or []):
+        handler.send_header(key, value)
+    for cookie_value in (cookies or []):
+        handler.send_header("Set-Cookie", cookie_value)
     handler.send_header("Content-Type", "application/json; charset=utf-8")
     handler.send_header("Content-Length", str(len(payload)))
     handler.end_headers()
@@ -6485,6 +6561,63 @@ class Handler(BaseHTTPRequestHandler):
         finally:
             self._close_tracked_conns()
 
+    def _parse_cookies(self):
+        raw = self.headers.get("Cookie", "") or ""
+        result = {}
+        for part in raw.split(";"):
+            if "=" not in part:
+                continue
+            key, value = part.split("=", 1)
+            key = key.strip()
+            if not key:
+                continue
+            result[key] = value.strip()
+        return result
+
+    def _session_cookie_secure(self):
+        forced = os.environ.get("APP_SESSION_COOKIE_SECURE", "").strip().lower()
+        if forced in ("1", "true", "yes", "on"):
+            return True
+        if forced in ("0", "false", "no", "off"):
+            return False
+        proto = (self.headers.get("X-Forwarded-Proto") or "").strip().lower()
+        return proto == "https" or bool(os.environ.get("RENDER"))
+
+    def _build_session_cookie(self, value, max_age=None):
+        parts = [f"{SESSION_COOKIE_NAME}={value}", "Path=/", "HttpOnly", "SameSite=Lax"]
+        if max_age is not None:
+            parts.append(f"Max-Age={int(max_age)}")
+        if self._session_cookie_secure():
+            parts.append("Secure")
+        return "; ".join(parts)
+
+    def _current_session(self):
+        token = self._parse_cookies().get(SESSION_COOKIE_NAME, "")
+        return get_auth_session(token)
+
+    def _auth_user_payload(self, session):
+        if not session:
+            return None
+        full_name = " ".join(x for x in [session.get("nombre"), session.get("apellido")] if x).strip()
+        return {
+            "id": session.get("user_id"),
+            "usuario": session.get("usuario") or "",
+            "nombre": session.get("nombre") or "",
+            "apellido": session.get("apellido") or "",
+            "nombre_completo": full_name or (session.get("usuario") or ""),
+            "rol": session.get("rol") or "",
+            "email": session.get("email") or "",
+            "servicio": session.get("servicio") or "",
+        }
+
+    def _require_api_auth(self):
+        session = self._current_session()
+        if session:
+            self.auth_session = session
+            return True
+        json_response(self, {"error": "No autenticado"}, status=401)
+        return False
+
     def do_HEAD(self):
         parsed = urllib.parse.urlparse(self.path)
         if parsed.path in ("/health", "/api/health"):
@@ -6510,6 +6643,8 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(b"ok")
             return
         if parsed.path.startswith("/api/"):
+            if parsed.path not in AUTH_PUBLIC_GET_ENDPOINTS and not self._require_api_auth():
+                return
             self.handle_api(parsed)
             return
 
@@ -6614,6 +6749,8 @@ class Handler(BaseHTTPRequestHandler):
             "/api/usuarios",
             "/api/usuarios_update",
             "/api/usuarios_delete",
+            "/api/login",
+            "/api/logout",
         ):
             json_response(self, {"error": "Endpoint no valido"}, status=404)
             return
@@ -6624,6 +6761,78 @@ class Handler(BaseHTTPRequestHandler):
             payload = json.loads(body.decode("utf-8"))
         except json.JSONDecodeError:
             json_response(self, {"error": "JSON invalido"}, status=400)
+            return
+
+        if parsed.path not in AUTH_PUBLIC_POST_ENDPOINTS and not self._require_api_auth():
+            return
+
+        if parsed.path == "/api/logout":
+            token = self._parse_cookies().get(SESSION_COOKIE_NAME, "")
+            delete_auth_session(token)
+            json_response(
+                self,
+                {"ok": True},
+                cookies=[self._build_session_cookie("", max_age=0)],
+            )
+            return
+
+        if parsed.path == "/api/login":
+            usuario_raw = str(payload.get("usuario") or payload.get("email") or "").strip()
+            password = str(payload.get("password") or "")
+            if not usuario_raw or not password:
+                json_response(self, {"error": "usuario y contraseña requeridos"}, status=400)
+                return
+            conn = get_db(self.db_path)
+            self._track_conn(conn)
+            row = conn.execute(
+                """
+                SELECT id, nombre, apellido, usuario, email, servicio, rol, activo, password_hash
+                FROM usuarios
+                WHERE activo = 1
+                  AND (
+                    LOWER(COALESCE(usuario, '')) = LOWER(?)
+                    OR LOWER(COALESCE(email, '')) = LOWER(?)
+                  )
+                LIMIT 1
+                """,
+                (usuario_raw, usuario_raw),
+            ).fetchone()
+            if not row:
+                json_response(self, {"error": "Usuario o contraseña incorrectos"}, status=401)
+                return
+            first_password_set = False
+            stored_hash = row["password_hash"]
+            if stored_hash:
+                if not verify_password(password, stored_hash):
+                    json_response(self, {"error": "Usuario o contraseña incorrectos"}, status=401)
+                    return
+            else:
+                if not AUTH_ALLOW_FIRST_PASSWORD_SET:
+                    json_response(self, {"error": "Usuario sin contraseña inicializada"}, status=403)
+                    return
+                conn.execute(
+                    "UPDATE usuarios SET password_hash = ?, updated_at = datetime('now') WHERE id = ?",
+                    (hash_password(password), row["id"]),
+                )
+                conn.commit()
+                first_password_set = True
+                row = conn.execute(
+                    """
+                    SELECT id, nombre, apellido, usuario, email, servicio, rol, activo, password_hash
+                    FROM usuarios WHERE id = ?
+                    """,
+                    (row["id"],),
+                ).fetchone()
+            session = create_auth_session(row)
+            json_response(
+                self,
+                {
+                    "ok": True,
+                    "user": self._auth_user_payload(session),
+                    "first_password_set": first_password_set,
+                },
+                cookies=[self._build_session_cookie(session["token"], max_age=APP_SESSION_TTL_SECONDS)],
+            )
             return
 
         empresa_nombre = payload.get("empresa_nombre")
@@ -10614,6 +10823,46 @@ class Handler(BaseHTTPRequestHandler):
         params = urllib.parse.parse_qs(parsed.query)
         conn = get_db(self.db_path)
         self._track_conn(conn)
+
+        if path == "/api/me":
+            session = self._current_session()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            user = conn.execute(
+                """
+                SELECT id, nombre, apellido, usuario, email, servicio, rol, activo
+                FROM usuarios
+                WHERE id = ? AND activo = 1
+                """,
+                (session.get("user_id"),),
+            ).fetchone()
+            if not user:
+                delete_auth_session(session.get("token"))
+                json_response(
+                    self,
+                    {"error": "Sesión inválida"},
+                    status=401,
+                    cookies=[self._build_session_cookie("", max_age=0)],
+                )
+                return
+            refreshed_session = dict(session)
+            refreshed_session.update(
+                {
+                    "nombre": user["nombre"] or "",
+                    "apellido": user["apellido"] or "",
+                    "usuario": user["usuario"] or "",
+                    "email": user["email"] or "",
+                    "servicio": user["servicio"] or "",
+                    "rol": user["rol"] or "",
+                }
+            )
+            with AUTH_SESSIONS_LOCK:
+                token = refreshed_session.get("token")
+                if token in AUTH_SESSIONS:
+                    AUTH_SESSIONS[token].update(refreshed_session)
+            json_response(self, {"ok": True, "user": self._auth_user_payload(refreshed_session)})
+            return
 
         if path == "/api/empresas":
             rows = conn.execute(
