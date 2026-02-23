@@ -1108,6 +1108,12 @@ const authLoginPass = document.getElementById("authLoginPass");
 const authLoginStatus = document.getElementById("authLoginStatus");
 const authSessionPill = document.getElementById("authSessionPill");
 const authLogoutBtn = document.getElementById("authLogoutBtn");
+const authActivateOverlay = document.getElementById("authActivateOverlay");
+const authActivateForm = document.getElementById("authActivateForm");
+const authActivateIntro = document.getElementById("authActivateIntro");
+const authActivatePass1 = document.getElementById("authActivatePass1");
+const authActivatePass2 = document.getElementById("authActivatePass2");
+const authActivateStatus = document.getElementById("authActivateStatus");
 const bdtYearFilter = document.getElementById("bdtYearFilter");
 const bdtFieldFilter = document.getElementById("bdtFieldFilter");
 const clientesEstadoFilter = document.getElementById("clientesEstadoFilter");
@@ -6852,7 +6858,39 @@ const renderUsuariosTable = () => {
           });
         });
     });
+    const inviteBtn = document.createElement("button");
+    inviteBtn.type = "button";
+    inviteBtn.className = "icon-action";
+    inviteBtn.setAttribute("aria-label", "Invitar");
+    inviteBtn.title = "Enviar invitación";
+    inviteBtn.textContent = "Invitar";
+    inviteBtn.addEventListener("click", async () => {
+      if (adminUsersInfo) adminUsersInfo.textContent = "Enviando invitación...";
+      try {
+        const data = await fetch("/api/usuarios_invitar", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify({ id: row.id }),
+        }).then((res) => res.json());
+        if (data.error) {
+          if (adminUsersInfo) adminUsersInfo.textContent = data.error;
+          return;
+        }
+        if (adminUsersInfo) {
+          adminUsersInfo.textContent = data.sent
+            ? "Invitación enviada por email."
+            : `SMTP no configurado. Copia este enlace: ${data.invite_link}`;
+        }
+        if (!data.sent && data.invite_link) {
+          try { await navigator.clipboard?.writeText(data.invite_link); } catch {}
+        }
+      } catch {
+        if (adminUsersInfo) adminUsersInfo.textContent = "Error al enviar invitación.";
+      }
+    });
     actionTd.appendChild(saveBtn);
+    actionTd.appendChild(inviteBtn);
     actionTd.appendChild(delBtn);
     tr.appendChild(actionTd);
     tbody.appendChild(tr);
@@ -15283,13 +15321,26 @@ const setAuthUi = (user) => {
 const showAuthOverlay = (message = "") => {
   if (authLoginStatus) authLoginStatus.textContent = message || "";
   if (authLoginOverlay) authLoginOverlay.classList.remove("hidden");
+  if (authActivateOverlay) authActivateOverlay.classList.add("hidden");
   document.body.classList.add("auth-locked");
   setAuthUi(null);
 };
 
 const hideAuthOverlay = () => {
   if (authLoginOverlay) authLoginOverlay.classList.add("hidden");
+  if (authActivateOverlay) authActivateOverlay.classList.add("hidden");
   document.body.classList.remove("auth-locked");
+};
+
+const showActivationOverlay = (introText = "") => {
+  if (authActivateIntro && introText) authActivateIntro.textContent = introText;
+  if (authActivateStatus) {
+    authActivateStatus.textContent = "";
+    authActivateStatus.classList.remove("success");
+  }
+  if (authActivateOverlay) authActivateOverlay.classList.remove("hidden");
+  if (authLoginOverlay) authLoginOverlay.classList.add("hidden");
+  document.body.classList.add("auth-locked");
 };
 
 async function fetchCurrentSessionUser() {
@@ -15307,6 +15358,12 @@ async function fetchCurrentSessionUser() {
 }
 
 async function ensureAuthAndBoot() {
+  const params = new URLSearchParams(window.location.search);
+  const activateToken = (params.get("activar_token") || "").trim();
+  if (activateToken) {
+    await prepareActivationFlow(activateToken);
+    return;
+  }
   const user = await fetchCurrentSessionUser();
   if (!user) {
     showAuthOverlay("");
@@ -15326,6 +15383,70 @@ function handleAuthExpired() {
   }
   showAuthOverlay("La sesión ha caducado. Inicia sesión de nuevo.");
 }
+
+async function prepareActivationFlow(token) {
+  showActivationOverlay("Validando invitación...");
+  try {
+    const data = await api(`/api/auth_invite_status?token=${encodeURIComponent(token)}`);
+    if (!data?.valid) {
+      if (authActivateStatus) authActivateStatus.textContent = data?.expired ? "La invitación ha caducado." : "Invitación no válida.";
+      return;
+    }
+    const user = data.user || {};
+    const label = [user.nombre, user.apellido].filter(Boolean).join(" ").trim() || user.usuario || user.email || "usuario";
+    if (authActivateIntro) {
+      authActivateIntro.textContent = `Activa el acceso de ${label} y define tu contraseña.`;
+    }
+  } catch (error) {
+    if (authActivateStatus) authActivateStatus.textContent = error?.message || "No se pudo validar la invitación.";
+  }
+}
+
+const submitActivationPassword = async () => {
+  const params = new URLSearchParams(window.location.search);
+  const token = (params.get("activar_token") || "").trim();
+  const p1 = authActivatePass1?.value || "";
+  const p2 = authActivatePass2?.value || "";
+  if (!token) {
+    if (authActivateStatus) authActivateStatus.textContent = "Token de activación no disponible.";
+    return;
+  }
+  if (!p1 || p1.length < 8) {
+    if (authActivateStatus) authActivateStatus.textContent = "La contraseña debe tener al menos 8 caracteres.";
+    return;
+  }
+  if (p1 !== p2) {
+    if (authActivateStatus) authActivateStatus.textContent = "Las contraseñas no coinciden.";
+    return;
+  }
+  if (authActivateStatus) authActivateStatus.textContent = "Activando cuenta...";
+  try {
+    const res = await fetch("/api/auth_set_password", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({ token, password: p1 }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data?.error) {
+      if (authActivateStatus) authActivateStatus.textContent = data?.error || "No se pudo activar la cuenta.";
+      return;
+    }
+    if (authActivateStatus) {
+      authActivateStatus.textContent = "Cuenta activada. Ya puedes iniciar sesión.";
+      authActivateStatus.classList.add("success");
+    }
+    if (authActivatePass1) authActivatePass1.value = "";
+    if (authActivatePass2) authActivatePass2.value = "";
+    history.replaceState({}, "", window.location.pathname);
+    setTimeout(() => {
+      if (authActivateStatus) authActivateStatus.classList.remove("success");
+      showAuthOverlay("Cuenta activada. Inicia sesión.");
+    }, 700);
+  } catch {
+    if (authActivateStatus) authActivateStatus.textContent = "Error de conexión al activar la cuenta.";
+  }
+};
 
 const submitAuthLogin = async () => {
   const usuario = authLoginUser?.value?.trim() || "";
@@ -18675,6 +18796,13 @@ if (authLoginForm) {
 if (authLogoutBtn) {
   authLogoutBtn.addEventListener("click", () => {
     logoutAuthSession();
+  });
+}
+
+if (authActivateForm) {
+  authActivateForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    submitActivationPassword();
   });
 }
 

@@ -2170,3 +2170,8 @@ body.auth-locked {
 .auth-login-actions .muted {
   min-height: 1.2em;
 }
+
+.auth-login-card .success {
+  color: #3c6e71;
+  font-weight: 600;
+}

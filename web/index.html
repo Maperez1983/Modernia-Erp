@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>LIV</title>
-    <link rel="stylesheet" href="styles.css?v=118" />
+    <link rel="stylesheet" href="styles.css?v=119" />
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600;700&family=Source+Sans+3:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" />
   </head>
   <body>
@@ -124,7 +124,7 @@
             <label>
               Contraseña
               <div class="input-with-icon">
-                <input name="password" id="adminPasswordInput" type="password" required />
+                <input name="password" id="adminPasswordInput" type="password" placeholder="Opcional si envías invitación" />
                 <button type="button" class="icon-btn" id="adminPasswordToggle" aria-label="Mostrar contraseña">👁</button>
               </div>
             </label>
@@ -3934,6 +3934,27 @@
       </div>
     </div>
 
-    <script src="app.js?v=309"></script>
+    <div id="authActivateOverlay" class="auth-login-overlay hidden">
+      <div class="auth-login-card">
+        <h2>Activar acceso</h2>
+        <p class="muted" id="authActivateIntro">Valida tu acceso y define tu contraseña.</p>
+        <form id="authActivateForm" class="auth-login-form">
+          <label>
+            Nueva contraseña
+            <input id="authActivatePass1" type="password" autocomplete="new-password" required />
+          </label>
+          <label>
+            Repetir contraseña
+            <input id="authActivatePass2" type="password" autocomplete="new-password" required />
+          </label>
+          <div class="auth-login-actions">
+            <button type="submit">Activar cuenta</button>
+            <span id="authActivateStatus" class="muted"></span>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <script src="app.js?v=310"></script>
   </body>
 </html>

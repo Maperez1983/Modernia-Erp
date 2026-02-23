@@ -15,10 +15,12 @@ import urllib.request
 import threading
 import time
 import secrets
+import smtplib
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
 from pathlib import Path
 import unicodedata
+from email.message import EmailMessage
 
 
 ROOT = Path(__file__).resolve().parent
@@ -69,8 +71,9 @@ OCR_EXPERT_MODE = os.environ.get("OCR_EXPERT_MODE", "1").strip().lower() not in 
 APP_SESSION_TTL_SECONDS = max(900, int(os.environ.get("APP_SESSION_TTL_SECONDS", "43200")))
 SESSION_COOKIE_NAME = os.environ.get("APP_SESSION_COOKIE", "crm_session")
 AUTH_ALLOW_FIRST_PASSWORD_SET = os.environ.get("AUTH_ALLOW_FIRST_PASSWORD_SET", "1").strip().lower() not in ("0", "false", "no", "off")
-AUTH_PUBLIC_GET_ENDPOINTS = {"/api/health", "/api/me"}
-AUTH_PUBLIC_POST_ENDPOINTS = {"/api/login", "/api/logout"}
+AUTH_INVITE_TTL_SECONDS = max(1800, int(os.environ.get("AUTH_INVITE_TTL_SECONDS", "172800")))
+AUTH_PUBLIC_GET_ENDPOINTS = {"/api/health", "/api/me", "/api/auth_invite_status"}
+AUTH_PUBLIC_POST_ENDPOINTS = {"/api/login", "/api/logout", "/api/auth_set_password"}
 AUTH_SESSIONS = {}
 AUTH_SESSIONS_LOCK = threading.Lock()
 
@@ -857,6 +860,44 @@ def delete_auth_session(token):
         return
     with AUTH_SESSIONS_LOCK:
         AUTH_SESSIONS.pop(token, None)
+
+
+def send_mail_smtp(subject, to_email, text_body, html_body=None):
+    host = (os.environ.get("SMTP_HOST") or "").strip()
+    if not host:
+        raise RuntimeError("SMTP_HOST no configurado")
+    port = int((os.environ.get("SMTP_PORT") or "587").strip())
+    username = (os.environ.get("SMTP_USER") or "").strip()
+    password = (os.environ.get("SMTP_PASS") or "").strip()
+    from_email = (os.environ.get("SMTP_FROM") or username or "").strip()
+    if not from_email:
+        raise RuntimeError("SMTP_FROM/SMTP_USER no configurado")
+    use_ssl = (os.environ.get("SMTP_SSL") or "").strip().lower() in ("1", "true", "yes", "on")
+    use_tls = (os.environ.get("SMTP_TLS") or "1").strip().lower() not in ("0", "false", "no", "off")
+    msg = EmailMessage()
+    msg["Subject"] = subject
+    msg["From"] = from_email
+    msg["To"] = to_email
+    msg.set_content(text_body)
+    if html_body:
+        msg.add_alternative(html_body, subtype="html")
+    if use_ssl:
+        server = smtplib.SMTP_SSL(host, port, timeout=20)
+    else:
+        server = smtplib.SMTP(host, port, timeout=20)
+    try:
+        server.ehlo()
+        if use_tls and not use_ssl:
+            server.starttls()
+            server.ehlo()
+        if username:
+            server.login(username, password)
+        server.send_message(msg)
+    finally:
+        try:
+            server.quit()
+        except Exception:
+            pass
 
 def detect_ocr_lang():
     if os.path.isdir(TESSDATA_DIR):
@@ -6400,6 +6441,12 @@ def ensure_tables(db_path):
         conn.execute("ALTER TABLE usuarios ADD COLUMN servicio TEXT")
     if "password_hash" not in user_cols:
         conn.execute("ALTER TABLE usuarios ADD COLUMN password_hash TEXT")
+    if "invite_token" not in user_cols:
+        conn.execute("ALTER TABLE usuarios ADD COLUMN invite_token TEXT")
+    if "invite_expires_at" not in user_cols:
+        conn.execute("ALTER TABLE usuarios ADD COLUMN invite_expires_at TEXT")
+    if "invite_sent_at" not in user_cols:
+        conn.execute("ALTER TABLE usuarios ADD COLUMN invite_sent_at TEXT")
     users_count = conn.execute("SELECT COUNT(*) AS total FROM usuarios").fetchone()
     total_users = 0
     if users_count:
@@ -6610,6 +6657,16 @@ class Handler(BaseHTTPRequestHandler):
             "servicio": session.get("servicio") or "",
         }
 
+    def _external_base_url(self):
+        configured = (os.environ.get("APP_BASE_URL") or "").strip().rstrip("/")
+        if configured:
+            return configured
+        proto = (self.headers.get("X-Forwarded-Proto") or "").strip() or ("https" if os.environ.get("RENDER") else "http")
+        host = (self.headers.get("X-Forwarded-Host") or self.headers.get("Host") or "").strip()
+        if host:
+            return f"{proto}://{host}"
+        return "http://localhost:8000"
+
     def _require_api_auth(self):
         session = self._current_session()
         if session:
@@ -6749,8 +6806,10 @@ class Handler(BaseHTTPRequestHandler):
             "/api/usuarios",
             "/api/usuarios_update",
             "/api/usuarios_delete",
+            "/api/usuarios_invitar",
             "/api/login",
             "/api/logout",
+            "/api/auth_set_password",
         ):
             json_response(self, {"error": "Endpoint no valido"}, status=404)
             return
@@ -6835,6 +6894,55 @@ class Handler(BaseHTTPRequestHandler):
             )
             return
 
+        if parsed.path == "/api/auth_set_password":
+            token = str(payload.get("token") or "").strip()
+            password = str(payload.get("password") or "")
+            if not token or not password:
+                json_response(self, {"error": "token y password requeridos"}, status=400)
+                return
+            if len(password) < 8:
+                json_response(self, {"error": "La contraseña debe tener al menos 8 caracteres"}, status=400)
+                return
+            conn = get_db(self.db_path)
+            self._track_conn(conn)
+            row = conn.execute(
+                """
+                SELECT id, activo, invite_expires_at
+                FROM usuarios
+                WHERE invite_token = ?
+                LIMIT 1
+                """,
+                (token,),
+            ).fetchone()
+            if not row:
+                json_response(self, {"error": "Invitación inválida"}, status=404)
+                return
+            if not row["activo"]:
+                json_response(self, {"error": "Usuario inactivo"}, status=403)
+                return
+            expires_raw = str(row["invite_expires_at"] or "").strip()
+            if expires_raw:
+                try:
+                    dt = datetime.fromisoformat(expires_raw.replace("Z", ""))
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    if dt < datetime.now(timezone.utc):
+                        json_response(self, {"error": "Invitación caducada"}, status=410)
+                        return
+                except Exception:
+                    pass
+            conn.execute(
+                """
+                UPDATE usuarios
+                SET password_hash = ?, invite_token = NULL, invite_expires_at = NULL, updated_at = datetime('now')
+                WHERE id = ?
+                """,
+                (hash_password(password), row["id"]),
+            )
+            conn.commit()
+            json_response(self, {"ok": True})
+            return
+
         empresa_nombre = payload.get("empresa_nombre")
         if parsed.path not in (
             "/api/hipotecas/firmar",
@@ -6854,6 +6962,8 @@ class Handler(BaseHTTPRequestHandler):
             "/api/usuarios",
             "/api/usuarios_update",
             "/api/usuarios_delete",
+            "/api/usuarios_invitar",
+            "/api/auth_set_password",
             "/api/cliente_gestoria_update",
             "/api/inmueble_docs",
             "/api/inmueble_checklist_generate",
@@ -6954,6 +7064,8 @@ class Handler(BaseHTTPRequestHandler):
             "/api/usuarios",
             "/api/usuarios_update",
             "/api/usuarios_delete",
+            "/api/usuarios_invitar",
+            "/api/auth_set_password",
             "/api/acciones_update",
             "/api/gestoria_modelos",
             "/api/gestoria_modelos_update",
@@ -7396,7 +7508,7 @@ class Handler(BaseHTTPRequestHandler):
             nombre = payload.get("nombre")
             apellido = payload.get("apellido")
             usuario = payload.get("usuario")
-            email = payload.get("email")
+            email = normalize_email(payload.get("email"))
             servicio = payload.get("servicio")
             password = payload.get("password")
             if not nombre:
@@ -7414,10 +7526,7 @@ class Handler(BaseHTTPRequestHandler):
             if not servicio:
                 json_response(self, {"error": "servicio requerido"}, status=400)
                 return
-            if not password:
-                json_response(self, {"error": "password requerido"}, status=400)
-                return
-            password_hash = hash_password(password)
+            password_hash = hash_password(password) if password else None
             conn.execute(
                 """
                 INSERT INTO usuarios (id, nombre, apellido, usuario, email, servicio, rol, password_hash, activo, created_at, updated_at)
@@ -7437,6 +7546,75 @@ class Handler(BaseHTTPRequestHandler):
                     now,
                 ),
             )
+        elif parsed.path == "/api/usuarios_invitar":
+            user_id = str(payload.get("id") or "").strip()
+            if not user_id:
+                json_response(self, {"error": "id requerido"}, status=400)
+                return
+            row = conn.execute(
+                """
+                SELECT id, nombre, apellido, usuario, email, activo
+                FROM usuarios
+                WHERE id = ?
+                LIMIT 1
+                """,
+                (user_id,),
+            ).fetchone()
+            if not row:
+                json_response(self, {"error": "Usuario no encontrado"}, status=404)
+                return
+            if not row["activo"]:
+                json_response(self, {"error": "Usuario inactivo"}, status=400)
+                return
+            email = normalize_email(row["email"] or "")
+            if not email:
+                json_response(self, {"error": "El usuario no tiene email válido"}, status=400)
+                return
+            token = secrets.token_urlsafe(32)
+            expires_at = (datetime.now(timezone.utc) + timedelta(seconds=AUTH_INVITE_TTL_SECONDS)).isoformat()
+            conn.execute(
+                """
+                UPDATE usuarios
+                SET invite_token = ?, invite_expires_at = ?, invite_sent_at = datetime('now'), updated_at = datetime('now')
+                WHERE id = ?
+                """,
+                (token, expires_at, user_id),
+            )
+            invite_link = f"{self._external_base_url()}/?activar_token={urllib.parse.quote(token)}"
+            sent = False
+            mail_error = None
+            try:
+                subject = "Activa tu acceso al CRM"
+                full_name = " ".join(x for x in [row["nombre"] or "", row["apellido"] or ""] if x).strip()
+                greeting = full_name or (row["usuario"] or "usuario")
+                text_body = (
+                    f"Hola {greeting},\n\n"
+                    "Te han invitado a acceder al CRM.\n"
+                    "Pulsa este enlace para validar tu acceso y definir tu contraseña:\n\n"
+                    f"{invite_link}\n\n"
+                    f"Este enlace caduca en {int(AUTH_INVITE_TTL_SECONDS/3600)} horas.\n"
+                )
+                html_body = (
+                    f"<p>Hola {greeting},</p>"
+                    "<p>Te han invitado a acceder al CRM.</p>"
+                    "<p><a href=\"%s\">Pulsa aquí para validar tu acceso y definir tu contraseña</a></p>"
+                    "<p>Si el botón no funciona, copia este enlace:</p>"
+                    f"<p>{invite_link}</p>"
+                ) % invite_link
+                send_mail_smtp(subject, email, text_body, html_body=html_body)
+                sent = True
+            except Exception as exc:
+                mail_error = str(exc)
+            json_response(
+                self,
+                {
+                    "ok": True,
+                    "sent": sent,
+                    "invite_link": invite_link,
+                    "mail_error": mail_error,
+                },
+            )
+            return
         elif parsed.path == "/api/usuarios_update":
             user_id = payload.get("id")
             if not user_id:
@@ -7450,6 +7628,8 @@ class Handler(BaseHTTPRequestHandler):
                     if field == "password":
                         updates.append("password_hash = ?")
                         values.append(hash_password(payload.get("password")))
+                        updates.append("invite_token = NULL")
+                        updates.append("invite_expires_at = NULL")
                     else:
                         updates.append(f"{field} = ?")
                         values.append(payload.get(field))
@@ -10862,6 +11042,50 @@ class Handler(BaseHTTPRequestHandler):
                 if token in AUTH_SESSIONS:
                     AUTH_SESSIONS[token].update(refreshed_session)
             json_response(self, {"ok": True, "user": self._auth_user_payload(refreshed_session)})
+            return
+
+        if path == "/api/auth_invite_status":
+            token = (params.get("token", [""])[0] or "").strip()
+            if not token:
+                json_response(self, {"error": "token requerido"}, status=400)
+                return
+            row = conn.execute(
+                """
+                SELECT id, nombre, apellido, usuario, email, activo, invite_expires_at
+                FROM usuarios
+                WHERE invite_token = ?
+                LIMIT 1
+                """,
+                (token,),
+            ).fetchone()
+            if not row:
+                json_response(self, {"error": "Invitación inválida"}, status=404)
+                return
+            expires_raw = str(row["invite_expires_at"] or "").strip()
+            expired = False
+            if expires_raw:
+                try:
+                    dt = datetime.fromisoformat(expires_raw.replace("Z", ""))
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    expired = dt < datetime.now(timezone.utc)
+                except Exception:
+                    expired = False
+            json_response(
+                self,
+                {
+                    "ok": True,
+                    "valid": bool(row["activo"]) and bool(token) and not expired,
+                    "expired": expired,
+                    "user": {
+                        "id": row["id"],
+                        "nombre": row["nombre"] or "",
+                        "apellido": row["apellido"] or "",
+                        "usuario": row["usuario"] or "",
+                        "email": row["email"] or "",
+                    },
+                },
+            )
             return
 
         if path == "/api/empresas":
