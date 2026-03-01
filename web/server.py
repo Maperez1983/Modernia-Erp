@@ -6405,21 +6405,6 @@ def ensure_tables(db_path):
     )
     conn.execute(
         """
-        CREATE TABLE IF NOT EXISTS usuarios (
-          id TEXT PRIMARY KEY,
-          nombre TEXT NOT NULL,
-          apellido TEXT NOT NULL,
-          servicio TEXT,
-          rol TEXT,
-          password_hash TEXT,
-          activo INTEGER DEFAULT 1,
-          created_at TEXT NOT NULL,
-          updated_at TEXT NOT NULL
-        )
-        """
-    )
-    conn.execute(
-        """
         CREATE TABLE IF NOT EXISTS postal_catalogo (
           codigo_postal TEXT,
           poblacion TEXT,
@@ -6430,35 +6415,7 @@ def ensure_tables(db_path):
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_postal_cp ON postal_catalogo(codigo_postal)"
     )
-    user_cols = [row[1] for row in conn.execute("PRAGMA table_info(usuarios)").fetchall()]
-    if "apellido" not in user_cols:
-        conn.execute("ALTER TABLE usuarios ADD COLUMN apellido TEXT")
-    if "usuario" not in user_cols:
-        conn.execute("ALTER TABLE usuarios ADD COLUMN usuario TEXT")
-    if "email" not in user_cols:
-        conn.execute("ALTER TABLE usuarios ADD COLUMN email TEXT")
-    if "servicio" not in user_cols:
-        conn.execute("ALTER TABLE usuarios ADD COLUMN servicio TEXT")
-    if "password_hash" not in user_cols:
-        conn.execute("ALTER TABLE usuarios ADD COLUMN password_hash TEXT")
-    if "invite_token" not in user_cols:
-        conn.execute("ALTER TABLE usuarios ADD COLUMN invite_token TEXT")
-    if "invite_expires_at" not in user_cols:
-        conn.execute("ALTER TABLE usuarios ADD COLUMN invite_expires_at TEXT")
-    if "invite_sent_at" not in user_cols:
-        conn.execute("ALTER TABLE usuarios ADD COLUMN invite_sent_at TEXT")
-    users_count = conn.execute("SELECT COUNT(*) AS total FROM usuarios").fetchone()
-    total_users = 0
-    if users_count:
-        try:
-            total_users = users_count["total"]
-        except (TypeError, KeyError, IndexError):
-            total_users = users_count[0]
-    if total_users == 0:
-        conn.execute(
-            "INSERT INTO usuarios (id, nombre, apellido, usuario, email, servicio, rol, activo, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))",
-            (os.urandom(16).hex(), "Administrador", "General", "admin", "admin@liv.local", "Administración", "Administrador", 1),
-        )
+    ensure_usuarios_schema(conn)
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS cnae_catalogo (
@@ -6508,6 +6465,58 @@ def ensure_tables(db_path):
     load_postal_catalog(conn)
     conn.commit()
     conn.close()
+
+
+def ensure_usuarios_schema(conn):
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS usuarios (
+          id TEXT PRIMARY KEY,
+          nombre TEXT NOT NULL,
+          apellido TEXT,
+          usuario TEXT UNIQUE,
+          email TEXT UNIQUE,
+          servicio TEXT,
+          rol TEXT,
+          password_hash TEXT,
+          activo INTEGER DEFAULT 1,
+          invite_token TEXT,
+          invite_expires_at TEXT,
+          invite_sent_at TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    user_cols = [row[1] for row in conn.execute("PRAGMA table_info(usuarios)").fetchall()]
+    if "apellido" not in user_cols:
+        conn.execute("ALTER TABLE usuarios ADD COLUMN apellido TEXT")
+    if "usuario" not in user_cols:
+        conn.execute("ALTER TABLE usuarios ADD COLUMN usuario TEXT")
+    if "email" not in user_cols:
+        conn.execute("ALTER TABLE usuarios ADD COLUMN email TEXT")
+    if "servicio" not in user_cols:
+        conn.execute("ALTER TABLE usuarios ADD COLUMN servicio TEXT")
+    if "password_hash" not in user_cols:
+        conn.execute("ALTER TABLE usuarios ADD COLUMN password_hash TEXT")
+    if "invite_token" not in user_cols:
+        conn.execute("ALTER TABLE usuarios ADD COLUMN invite_token TEXT")
+    if "invite_expires_at" not in user_cols:
+        conn.execute("ALTER TABLE usuarios ADD COLUMN invite_expires_at TEXT")
+    if "invite_sent_at" not in user_cols:
+        conn.execute("ALTER TABLE usuarios ADD COLUMN invite_sent_at TEXT")
+    users_count = conn.execute("SELECT COUNT(*) AS total FROM usuarios").fetchone()
+    total_users = 0
+    if users_count:
+        try:
+            total_users = users_count["total"]
+        except (TypeError, KeyError, IndexError):
+            total_users = users_count[0]
+    if total_users == 0:
+        conn.execute(
+            "INSERT INTO usuarios (id, nombre, apellido, usuario, email, servicio, rol, activo, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))",
+            (os.urandom(16).hex(), "Administrador", "General", "admin", "admin@liv.local", "Administración", "Administrador", 1),
+        )
 
 
 def ensure_ocr_tables(db_path):
@@ -6843,6 +6852,8 @@ class Handler(BaseHTTPRequestHandler):
                 return
             conn = get_db(self.db_path)
             self._track_conn(conn)
+            ensure_usuarios_schema(conn)
+            conn.commit()
             row = conn.execute(
                 """
                 SELECT id, nombre, apellido, usuario, email, servicio, rol, activo, password_hash
@@ -6905,6 +6916,8 @@ class Handler(BaseHTTPRequestHandler):
                 return
             conn = get_db(self.db_path)
             self._track_conn(conn)
+            ensure_usuarios_schema(conn)
+            conn.commit()
             row = conn.execute(
                 """
                 SELECT id, activo, invite_expires_at
@@ -7049,6 +7062,16 @@ class Handler(BaseHTTPRequestHandler):
 
         conn = get_db(self.db_path)
         self._track_conn(conn)
+        if parsed.path in (
+            "/api/login",
+            "/api/auth_set_password",
+            "/api/usuarios",
+            "/api/usuarios_update",
+            "/api/usuarios_delete",
+            "/api/usuarios_invitar",
+        ):
+            ensure_usuarios_schema(conn)
+            conn.commit()
         empresa = None
         if parsed.path not in (
             "/api/hipotecas/firmar",
@@ -11003,6 +11026,12 @@ class Handler(BaseHTTPRequestHandler):
         params = urllib.parse.parse_qs(parsed.query)
         conn = get_db(self.db_path)
         self._track_conn(conn)
+        if path in ("/api/me", "/api/auth_invite_status", "/api/usuarios"):
+            try:
+                ensure_usuarios_schema(conn)
+                conn.commit()
+            except Exception:
+                pass
 
         if path == "/api/me":
             session = self._current_session()
