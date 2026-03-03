@@ -1996,7 +1996,10 @@ const userCanAccessService = (serviceKey) => {
   const normalized = normalizeSimple(serviceKey || "");
   if (!normalized) return true;
   const user = getUserByValue(getCurrentUser());
-  if (!user || isPrivilegedUser(user)) return true;
+  if (!user) {
+    return !(state.usersList && state.usersList.length);
+  }
+  if (isPrivilegedUser(user)) return true;
   const allowed = new Set(expandServiceAliases(parseServiceList(user.servicio || "")));
   if (!allowed.size) return false;
   if (normalized === "administracion fincas") {
@@ -2727,6 +2730,10 @@ const renderCompanyCards = () => {
   if (coreCards) {
     const user = getUserByValue(getCurrentUser());
     const isPriv = isPrivilegedUser(user);
+    const canInmo = userCanAccessService("inmobiliaria");
+    const canGestoria = userCanAccessService("gestoria");
+    const canSeguros = userCanAccessService("seguros");
+    const canFin = userCanAccessService("financiaciones");
     const holdingCard = document.createElement("div");
     holdingCard.className = "company-card";
     holdingCard.dataset.action = "holding";
@@ -2749,7 +2756,7 @@ const renderCompanyCards = () => {
       <div class="company-meta">Servicio inmobiliario.</div>
       <a class="card-link" href="?crm=inmo" data-action="crm-inmo">Entrar</a>
     `;
-    if (userCanAccessService("inmobiliaria")) {
+    if (canInmo) {
       coreCards.appendChild(crmCard);
     }
 
@@ -2762,7 +2769,7 @@ const renderCompanyCards = () => {
       <div class="company-meta">Servicio de gestoría.</div>
       <a class="card-link" href="?crm=gestoria" data-action="crm-gestoria">Entrar</a>
     `;
-    if (userCanAccessService("gestoria")) {
+    if (canGestoria) {
       coreCards.appendChild(gestoriaCard);
     }
 
@@ -2775,7 +2782,7 @@ const renderCompanyCards = () => {
       <div class="company-meta">Servicio de seguros.</div>
       <a class="card-link" href="?crm=seguros" data-action="crm-seguros">Entrar</a>
     `;
-    if (userCanAccessService("seguros")) {
+    if (canSeguros) {
       coreCards.appendChild(segurosCard);
     }
 
@@ -2788,7 +2795,7 @@ const renderCompanyCards = () => {
       <div class="company-meta">Servicio financiero.</div>
       <a class="card-link" href="?crm=fin" data-action="crm-fin">Entrar</a>
     `;
-    if (userCanAccessService("financiaciones")) {
+    if (canFin) {
       coreCards.appendChild(finCard);
     }
 
