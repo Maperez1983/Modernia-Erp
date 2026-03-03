@@ -7854,6 +7854,7 @@ const renderFincasDashboard = (empresaId) => {
     empresa_id: empresaId,
     year: selectedYear,
   });
+  params.set("uploaded_only", "0");
   api(`/api/fincas_seguros_dashboard?${params.toString()}`).then((data) => {
     if (!fincasDashboardKpis) {
       return;
@@ -8184,6 +8185,7 @@ const loadHomeFincasStats = (year) => {
     return Promise.resolve();
   }
   const params = new URLSearchParams({ empresa_id: fincas.id });
+  params.set("uploaded_only", "0");
   if (year) {
     params.set("year", year);
   }
@@ -10340,6 +10342,7 @@ const loadSegurosKpis = () => {
     return;
   }
   const params = new URLSearchParams({ empresa_id: empresa.id });
+  params.set("uploaded_only", "0");
   api(`/api/seguros_kpis?${params.toString()}`).then((data) => {
     const wrapper = document.createElement("div");
     wrapper.className = "grid crm-kpis";
