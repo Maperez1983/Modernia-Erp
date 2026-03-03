@@ -1042,6 +1042,7 @@ const state = {
   clientesList: [],
   demandasList: [],
   usersList: [],
+  adminSelectedUserId: "",
   currentUser: "",
   currentUserServices: [],
   currentUserServiceLabel: "",
@@ -1091,10 +1092,15 @@ const adminUserForm = document.getElementById("adminUserForm");
 const adminUserStatus = document.getElementById("adminUserStatus");
 const adminUsersTable = document.getElementById("adminUsersTable");
 const adminUsersInfo = document.getElementById("adminUsersInfo");
+const adminUsersSearch = document.getElementById("adminUsersSearch");
 const adminServicioInput = document.getElementById("adminServicioInput");
 const adminServiceMulti = document.getElementById("adminServiceMulti");
 const adminPasswordInput = document.getElementById("adminPasswordInput");
 const adminPasswordToggle = document.getElementById("adminPasswordToggle");
+const adminUserDetailCard = document.getElementById("adminUserDetailCard");
+const adminUserDetail = document.getElementById("adminUserDetail");
+const adminUserDetailTitle = document.getElementById("adminUserDetailTitle");
+const adminUserDetailBack = document.getElementById("adminUserDetailBack");
 const holdingSection = document.getElementById("holdingSection");
 const holdingBackBtn = document.getElementById("holdingBackBtn");
 const holdingOrgChart = document.getElementById("holdingOrgChart");
@@ -1898,6 +1904,15 @@ const ADMIN_SERVICE_OPTIONS = [
   "Administración Fincas",
   "Dirección",
   "Administración",
+];
+
+const ADMIN_ROLE_OPTIONS = [
+  "Lectura",
+  "Gestoría",
+  "Seguros",
+  "Inmobiliaria",
+  "Financiaciones",
+  "Administrador",
 ];
 
 const ADMIN_SERVICE_BY_KEY = ADMIN_SERVICE_OPTIONS.reduce((acc, label) => {
@@ -6853,18 +6868,26 @@ const renderAdminServiceSelector = () => {
   adminServicioInput.value = joinAdminServices(Array.from(selected));
 };
 
-const createAdminServiceMultiSelect = (rawValue = "") => {
-  const select = document.createElement("select");
-  select.className = "inline-input admin-service-select";
-  select.multiple = true;
-  select.size = Math.min(ADMIN_SERVICE_OPTIONS.length, 6);
+const createAdminServiceCheckboxGroup = (rawValue = "") => {
+  const wrapper = document.createElement("div");
+  wrapper.className = "admin-service-inline";
   const selected = new Set(parseAdminServices(rawValue));
   ADMIN_SERVICE_OPTIONS.forEach((label) => {
-    const option = createOption(label, label);
-    option.selected = selected.has(label);
-    select.appendChild(option);
+    const item = document.createElement("label");
+    item.className = "admin-service-option";
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.value = label;
+    checkbox.checked = selected.has(label);
+    const text = document.createElement("span");
+    text.textContent = label;
+    item.appendChild(checkbox);
+    item.appendChild(text);
+    wrapper.appendChild(item);
   });
-  return select;
+  wrapper.getSelectedServices = () =>
+    Array.from(wrapper.querySelectorAll('input[type="checkbox"]:checked')).map((el) => el.value);
+  return wrapper;
 };
 
 const renderUsuariosSelect = () => {
@@ -6899,181 +6922,243 @@ const renderUsuariosTable = () => {
   if (!rows.length) {
     adminUsersTable.innerHTML = "<p class='muted'>Sin usuarios.</p>";
     adminUsersInfo.textContent = "";
+    if (adminUserDetailCard) adminUserDetailCard.classList.add("hidden");
     return;
   }
-  const table = document.createElement("table");
-  const thead = document.createElement("thead");
-  const trHead = document.createElement("tr");
-  ["nombre", "apellido", "usuario", "email", "servicio", "rol", "activo", "password", "acciones"].forEach((col) => {
-    const th = document.createElement("th");
-    th.textContent = formatHeader(col);
-    trHead.appendChild(th);
+
+  const query = normalizeSimple(adminUsersSearch ? adminUsersSearch.value : "");
+  const filtered = rows.filter((row) => {
+    if (!query) return true;
+    const haystack = normalizeSimple(
+      [
+        row.nombre || "",
+        row.apellido || "",
+        row.usuario || "",
+        row.email || "",
+        row.rol || "",
+        row.servicio || "",
+      ].join(" ")
+    );
+    return haystack.includes(query);
   });
-  thead.appendChild(trHead);
-  table.appendChild(thead);
-  const tbody = document.createElement("tbody");
-  rows.forEach((row) => {
-    const tr = document.createElement("tr");
-    const nombreInput = document.createElement("input");
-    nombreInput.className = "inline-input";
-    nombreInput.value = row.nombre || "";
-    const nombreTd = document.createElement("td");
-    nombreTd.appendChild(nombreInput);
-    tr.appendChild(nombreTd);
-    const apellidoInput = document.createElement("input");
-    apellidoInput.className = "inline-input";
-    apellidoInput.value = row.apellido || "";
-    const apellidoTd = document.createElement("td");
-    apellidoTd.appendChild(apellidoInput);
-    tr.appendChild(apellidoTd);
-    const usuarioInput = document.createElement("input");
-    usuarioInput.className = "inline-input";
-    usuarioInput.value = row.usuario || "";
-    const usuarioTd = document.createElement("td");
-    usuarioTd.appendChild(usuarioInput);
-    tr.appendChild(usuarioTd);
-    const emailInput = document.createElement("input");
-    emailInput.className = "inline-input";
-    emailInput.value = row.email || "";
-    const emailTd = document.createElement("td");
-    emailTd.appendChild(emailInput);
-    tr.appendChild(emailTd);
-    const servicioInput = createAdminServiceMultiSelect(row.servicio || "");
-    const servicioTd = document.createElement("td");
-    servicioTd.appendChild(servicioInput);
-    tr.appendChild(servicioTd);
-    const rolInput = document.createElement("input");
-    rolInput.className = "inline-input";
-    rolInput.value = row.rol || "";
-    const rolTd = document.createElement("td");
-    rolTd.appendChild(rolInput);
-    tr.appendChild(rolTd);
-    const activoSelect = document.createElement("select");
-    activoSelect.className = "inline-input";
-    activoSelect.appendChild(createOption("1", "Activo"));
-    activoSelect.appendChild(createOption("0", "Inactivo"));
-    activoSelect.value = row.activo ? "1" : "0";
-    const activoTd = document.createElement("td");
-    activoTd.appendChild(activoSelect);
-    tr.appendChild(activoTd);
-    const passwordInput = document.createElement("input");
-    passwordInput.className = "inline-input";
-    passwordInput.type = "password";
-    passwordInput.placeholder = "Nueva contraseña";
-    const passwordTd = document.createElement("td");
-    passwordTd.appendChild(passwordInput);
-    tr.appendChild(passwordTd);
-    const actionTd = document.createElement("td");
-    const saveBtn = document.createElement("button");
-    saveBtn.type = "button";
-    saveBtn.className = "icon-action";
-    saveBtn.setAttribute("aria-label", "Guardar");
-    saveBtn.title = "Guardar";
-    saveBtn.innerHTML = `
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M5 3h11l3 3v15H5V3zm2 2v4h8V5H7zm8 14v-6H9v6h6z"></path>
-      </svg>
+
+  const list = document.createElement("div");
+  list.className = "admin-users-list";
+  filtered.forEach((row) => {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "admin-user-item";
+    item.classList.toggle("active", row.id === state.adminSelectedUserId);
+    const name = `${row.nombre || ""} ${row.apellido || ""}`.trim() || row.usuario || "Usuario";
+    item.innerHTML = `
+      <div class="admin-user-name">${name}</div>
+      <div class="admin-user-meta">${row.usuario || "-"} · ${row.rol || "Sin rol"}</div>
+      <div class="admin-user-meta">${row.servicio || "Sin servicios"}</div>
     `;
-    saveBtn.addEventListener("click", () => {
-      const payload = {
-        id: row.id,
-        nombre: nombreInput.value.trim(),
-        apellido: apellidoInput.value.trim(),
-        usuario: usuarioInput.value.trim(),
-        email: emailInput.value.trim(),
-        servicio: joinAdminServices(Array.from(servicioInput.selectedOptions).map((opt) => opt.value)),
-        rol: rolInput.value.trim(),
-        activo: activoSelect.value,
-      };
-      if (passwordInput.value.trim()) {
-        payload.password = passwordInput.value.trim();
-      }
-      if (!payload.servicio) {
-        if (adminUsersInfo) adminUsersInfo.textContent = "Selecciona al menos un servicio.";
-        return;
-      }
-      fetch("/api/usuarios_update", {
+    item.addEventListener("click", () => {
+      state.adminSelectedUserId = row.id;
+      renderUsuariosTable();
+      renderAdminUserDetail();
+    });
+    list.appendChild(item);
+  });
+
+  adminUsersTable.innerHTML = "";
+  if (!filtered.length) {
+    adminUsersTable.innerHTML = "<p class='muted'>No hay usuarios con ese filtro.</p>";
+  } else {
+    adminUsersTable.appendChild(list);
+  }
+  adminUsersInfo.textContent = `Mostrando ${filtered.length} de ${rows.length} usuarios.`;
+  if (!rows.some((row) => row.id === state.adminSelectedUserId)) {
+    state.adminSelectedUserId = "";
+  }
+  renderAdminUserDetail();
+};
+
+const renderAdminUserDetail = () => {
+  if (!adminUserDetail || !adminUserDetailCard || !adminUserDetailTitle) return;
+  const user = (state.usersList || []).find((row) => row.id === state.adminSelectedUserId);
+  if (!user) {
+    adminUserDetailCard.classList.add("hidden");
+    adminUserDetail.innerHTML = "";
+    return;
+  }
+  adminUserDetailCard.classList.remove("hidden");
+  const fullName = `${user.nombre || ""} ${user.apellido || ""}`.trim() || user.usuario || "Usuario";
+  adminUserDetailTitle.textContent = `Ficha · ${fullName}`;
+  adminUserDetail.innerHTML = "";
+  const form = document.createElement("form");
+  form.className = "form-grid";
+  const status = document.createElement("span");
+  status.className = "muted";
+
+  const buildInput = (labelText, value = "", opts = {}) => {
+    const label = document.createElement("label");
+    label.textContent = labelText;
+    const input = document.createElement("input");
+    input.className = "inline-input";
+    input.type = opts.type || "text";
+    input.value = value || "";
+    if (opts.placeholder) input.placeholder = opts.placeholder;
+    label.appendChild(input);
+    return { label, input };
+  };
+  const buildSelect = (labelText, options = [], current = "") => {
+    const label = document.createElement("label");
+    label.textContent = labelText;
+    const select = document.createElement("select");
+    select.className = "inline-input";
+    options.forEach((opt) => {
+      select.appendChild(createOption(opt.value, opt.label));
+    });
+    select.value = current;
+    label.appendChild(select);
+    return { label, select };
+  };
+
+  const nombre = buildInput("Nombre", user.nombre || "");
+  const apellido = buildInput("Apellido", user.apellido || "");
+  const usuario = buildInput("Usuario", user.usuario || "");
+  const email = buildInput("Email", user.email || "", { type: "email" });
+  const rol = buildSelect(
+    "Rol",
+    ADMIN_ROLE_OPTIONS.map((item) => ({ value: item, label: item })),
+    user.rol || "Lectura"
+  );
+  const activo = buildSelect(
+    "Estado",
+    [
+      { value: "1", label: "Activo" },
+      { value: "0", label: "Inactivo" },
+    ],
+    user.activo ? "1" : "0"
+  );
+  const password = buildInput("Nueva contraseña", "", { type: "password", placeholder: "Opcional" });
+
+  const serviciosLabel = document.createElement("label");
+  serviciosLabel.textContent = "Servicios permitidos";
+  const servicios = createAdminServiceCheckboxGroup(user.servicio || "");
+  serviciosLabel.appendChild(servicios);
+
+  [
+    nombre.label,
+    apellido.label,
+    usuario.label,
+    email.label,
+    rol.label,
+    activo.label,
+    password.label,
+    serviciosLabel,
+  ].forEach((node) => form.appendChild(node));
+
+  const actions = document.createElement("div");
+  actions.className = "form-actions";
+  const saveBtn = document.createElement("button");
+  saveBtn.type = "submit";
+  saveBtn.textContent = "Guardar cambios";
+  const inviteBtn = document.createElement("button");
+  inviteBtn.type = "button";
+  inviteBtn.className = "secondary";
+  inviteBtn.textContent = "Enviar invitación";
+  const deleteBtn = document.createElement("button");
+  deleteBtn.type = "button";
+  deleteBtn.className = "secondary danger";
+  deleteBtn.textContent = "Eliminar usuario";
+  actions.appendChild(saveBtn);
+  actions.appendChild(inviteBtn);
+  actions.appendChild(deleteBtn);
+  actions.appendChild(status);
+  form.appendChild(actions);
+
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const payload = {
+      id: user.id,
+      nombre: nombre.input.value.trim(),
+      apellido: apellido.input.value.trim(),
+      usuario: usuario.input.value.trim(),
+      email: email.input.value.trim(),
+      rol: rol.select.value,
+      activo: activo.select.value,
+      servicio: joinAdminServices(servicios.getSelectedServices()),
+    };
+    if (password.input.value.trim()) {
+      payload.password = password.input.value.trim();
+    }
+    if (!payload.servicio) {
+      status.textContent = "Selecciona al menos un servicio.";
+      return;
+    }
+    status.textContent = "Guardando...";
+    try {
+      const data = await fetch("/api/usuarios_update", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
-      })
-        .then((res) => res.json())
-        .then((data) => {
-          if (data.error) return;
-          loadUsuarios().then(() => {
-            renderUsuariosSelect();
-            renderUsuariosTable();
-            renderCompanyCards();
-          });
-        });
-    });
-    const delBtn = document.createElement("button");
-    delBtn.type = "button";
-    delBtn.className = "icon-action danger";
-    delBtn.setAttribute("aria-label", "Eliminar");
-    delBtn.title = "Eliminar";
-    delBtn.innerHTML = `
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M9 3h6l1 2h4v2H4V5h4l1-2zm1 6h2v9h-2V9zm4 0h2v9h-2V9z"></path>
-      </svg>
-    `;
-    delBtn.addEventListener("click", () => {
-      fetch("/api/usuarios_delete", {
+      }).then((res) => res.json());
+      if (data.error) {
+        status.textContent = data.error;
+        return;
+      }
+      status.textContent = "Guardado.";
+      await loadUsuarios();
+      renderUsuariosSelect();
+      renderUsuariosTable();
+      renderCompanyCards();
+    } catch {
+      status.textContent = "Error al guardar.";
+    }
+  });
+
+  inviteBtn.addEventListener("click", async () => {
+    status.textContent = "Enviando invitación...";
+    try {
+      const data = await fetch("/api/usuarios_invitar", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: row.id }),
-      })
-        .then((res) => res.json())
-        .then((data) => {
-          if (data.error) return;
-          loadUsuarios().then(() => {
-            renderUsuariosSelect();
-            renderUsuariosTable();
-            renderCompanyCards();
-          });
-        });
-    });
-    const inviteBtn = document.createElement("button");
-    inviteBtn.type = "button";
-    inviteBtn.className = "icon-action";
-    inviteBtn.setAttribute("aria-label", "Invitar");
-    inviteBtn.title = "Enviar invitación";
-    inviteBtn.textContent = "Invitar";
-    inviteBtn.addEventListener("click", async () => {
-      if (adminUsersInfo) adminUsersInfo.textContent = "Enviando invitación...";
-      try {
-        const data = await fetch("/api/usuarios_invitar", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "same-origin",
-          body: JSON.stringify({ id: row.id }),
-        }).then((res) => res.json());
-        if (data.error) {
-          if (adminUsersInfo) adminUsersInfo.textContent = data.error;
-          return;
-        }
-        if (adminUsersInfo) {
-          adminUsersInfo.textContent = data.sent
-            ? "Invitación enviada por email."
-            : `SMTP no configurado. Copia este enlace: ${data.invite_link}`;
-        }
-        if (!data.sent && data.invite_link) {
-          try { await navigator.clipboard?.writeText(data.invite_link); } catch {}
-        }
-      } catch {
-        if (adminUsersInfo) adminUsersInfo.textContent = "Error al enviar invitación.";
+        credentials: "same-origin",
+        body: JSON.stringify({ id: user.id }),
+      }).then((res) => res.json());
+      if (data.error) {
+        status.textContent = data.error;
+        return;
       }
-    });
-    actionTd.appendChild(saveBtn);
-    actionTd.appendChild(inviteBtn);
-    actionTd.appendChild(delBtn);
-    tr.appendChild(actionTd);
-    tbody.appendChild(tr);
+      status.textContent = data.sent
+        ? "Invitación enviada."
+        : "SMTP no configurado. Enlace copiado al portapapeles.";
+      if (!data.sent && data.invite_link) {
+        try { await navigator.clipboard?.writeText(data.invite_link); } catch {}
+      }
+    } catch {
+      status.textContent = "Error al enviar invitación.";
+    }
   });
-  table.appendChild(tbody);
-  adminUsersTable.innerHTML = "";
-  adminUsersTable.appendChild(table);
-  adminUsersInfo.textContent = `Mostrando ${rows.length} usuarios.`;
+
+  deleteBtn.addEventListener("click", async () => {
+    if (!window.confirm("¿Eliminar este usuario?")) return;
+    status.textContent = "Eliminando...";
+    try {
+      const data = await fetch("/api/usuarios_delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: user.id }),
+      }).then((res) => res.json());
+      if (data.error) {
+        status.textContent = data.error;
+        return;
+      }
+      state.adminSelectedUserId = "";
+      await loadUsuarios();
+      renderUsuariosSelect();
+      renderUsuariosTable();
+      renderCompanyCards();
+    } catch {
+      status.textContent = "Error al eliminar.";
+    }
+  });
+
+  adminUserDetail.appendChild(form);
 };
 
 const populateGestoriaSubtipos = (groupValue = "") => {
@@ -18298,6 +18383,19 @@ if (adminUserForm) {
           adminUserStatus.textContent = "Error al guardar.";
         }
       });
+  });
+}
+
+if (adminUsersSearch) {
+  adminUsersSearch.addEventListener("input", () => {
+    renderUsuariosTable();
+  });
+}
+
+if (adminUserDetailBack) {
+  adminUserDetailBack.addEventListener("click", () => {
+    state.adminSelectedUserId = "";
+    renderUsuariosTable();
   });
 }
 

@@ -79,68 +79,87 @@
           </div>
           <button id="adminBackBtn" class="secondary ghost">Volver a home</button>
         </div>
-        <div class="form-card">
-          <h3>Usuarios</h3>
-          <form id="adminUserForm" class="form-grid">
-            <label>
-              Nombre
-              <input name="nombre" required />
-            </label>
-            <label>
-              Apellido
-              <input name="apellido" required />
-            </label>
-            <label>
-              Usuario
-              <input name="usuario" required />
-            </label>
-            <label>
-              Email
-              <input name="email" type="email" required />
-            </label>
-            <label>
-              Servicios permitidos
-              <input
-                id="adminServicioInput"
-                name="servicio"
-                placeholder="Selecciona uno o varios servicios"
-                readonly
-                required
-              />
-              <div id="adminServiceMulti" class="admin-service-multi"></div>
-            </label>
-            <label>
-              Rol
-              <select name="rol">
-                <option>Lectura</option>
-                <option>Gestoría</option>
-                <option>Seguros</option>
-                <option>Inmobiliaria</option>
-                <option>Financiaciones</option>
-                <option>Administrador</option>
-              </select>
-            </label>
-            <label>
-              Contraseña
-              <div class="input-with-icon">
-                <input name="password" id="adminPasswordInput" type="password" placeholder="Opcional si envías invitación" />
-                <button type="button" class="icon-btn" id="adminPasswordToggle" aria-label="Mostrar contraseña">👁</button>
+        <div class="admin-layout">
+          <div class="form-card">
+            <h3>Alta de usuario</h3>
+            <details open>
+              <summary class="admin-summary">Crear nuevo usuario</summary>
+              <form id="adminUserForm" class="form-grid">
+                <label>
+                  Nombre
+                  <input name="nombre" required />
+                </label>
+                <label>
+                  Apellido
+                  <input name="apellido" required />
+                </label>
+                <label>
+                  Usuario
+                  <input name="usuario" required />
+                </label>
+                <label>
+                  Email
+                  <input name="email" type="email" required />
+                </label>
+                <label>
+                  Servicios permitidos
+                  <input
+                    id="adminServicioInput"
+                    name="servicio"
+                    placeholder="Selecciona uno o varios servicios"
+                    readonly
+                    required
+                  />
+                  <div id="adminServiceMulti" class="admin-service-multi"></div>
+                </label>
+                <label>
+                  Rol
+                  <select name="rol">
+                    <option>Lectura</option>
+                    <option>Gestoría</option>
+                    <option>Seguros</option>
+                    <option>Inmobiliaria</option>
+                    <option>Financiaciones</option>
+                    <option>Administrador</option>
+                  </select>
+                </label>
+                <label>
+                  Contraseña
+                  <div class="input-with-icon">
+                    <input name="password" id="adminPasswordInput" type="password" placeholder="Opcional si envías invitación" />
+                    <button type="button" class="icon-btn" id="adminPasswordToggle" aria-label="Mostrar contraseña">👁</button>
+                  </div>
+                </label>
+                <label>
+                  Estado
+                  <select name="activo">
+                    <option value="1">Activo</option>
+                    <option value="0">Inactivo</option>
+                  </select>
+                </label>
+                <div class="form-actions">
+                  <button type="submit">Crear usuario</button>
+                  <span id="adminUserStatus" class="muted"></span>
+                </div>
+              </form>
+            </details>
+          </div>
+          <div class="form-card">
+            <h3>Listado de usuarios</h3>
+            <input id="adminUsersSearch" placeholder="Buscar por nombre, usuario, email, rol..." />
+            <div id="adminUsersTable"></div>
+            <div class="footer" id="adminUsersInfo"></div>
+          </div>
+          <div class="form-card hidden" id="adminUserDetailCard">
+            <div class="section-head">
+              <div>
+                <h3 id="adminUserDetailTitle">Ficha de usuario</h3>
+                <p class="muted">Define exactamente qué puede ver y gestionar.</p>
               </div>
-            </label>
-            <label>
-              Estado
-              <select name="activo">
-                <option value="1">Activo</option>
-                <option value="0">Inactivo</option>
-              </select>
-            </label>
-            <div class="form-actions">
-              <button type="submit">Crear usuario</button>
-              <span id="adminUserStatus" class="muted"></span>
+              <button id="adminUserDetailBack" type="button" class="secondary ghost">Volver al listado</button>
             </div>
-          </form>
-          <div id="adminUsersTable"></div>
-          <div class="footer" id="adminUsersInfo"></div>
+            <div id="adminUserDetail"></div>
+          </div>
         </div>
       </section>
 
