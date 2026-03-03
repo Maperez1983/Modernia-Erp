@@ -2787,7 +2787,7 @@ const renderCompanyCards = () => {
     coreCards.innerHTML = "";
   }
   if (coreCards) {
-    const user = getUserByValue(getCurrentUser());
+    const user = getAuthScopeUser();
     const isPriv = isPrivilegedUser(user);
     const canAdmin = canAccessAdminPanel(user);
     const canInmo = userCanAccessService("inmobiliaria");
@@ -3495,7 +3495,7 @@ const openAgenda = () => {
 };
 
 const openAdmin = () => {
-  const user = getUserByValue(getCurrentUser());
+  const user = getAuthScopeUser();
   if (!canAccessAdminPanel(user)) return;
   setModule("empresas");
   explorerSection.classList.add("hidden");
