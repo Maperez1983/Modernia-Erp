@@ -1399,6 +1399,7 @@ const segurosCrmOportunidades = document.getElementById("segurosCrmOportunidades
 const segurosCrmClienteInput = document.getElementById("segurosCrmClienteInput");
 const segurosCrmClienteId = document.getElementById("segurosCrmClienteId");
 const segurosCrmClientes = document.getElementById("segurosCrmClientes");
+const segurosEstadoFilter = document.getElementById("segurosEstadoFilter");
 const segurosCrmClienteOpen = document.getElementById("segurosCrmClienteOpen");
 const segurosPreferenciasForm = document.getElementById("segurosPreferenciasForm");
 const segurosPreferenciasStatus = document.getElementById("segurosPreferenciasStatus");
@@ -10381,9 +10382,22 @@ const loadSegurosCrm = () => {
         );
       }
     }
+    const estadoMode = segurosEstadoFilter ? segurosEstadoFilter.value : "all";
+    if (estadoMode !== "all") {
+      const estadoIndex = columns.indexOf("estado");
+      const vigorStates = new Set(["en vigor", "en_vigor", "vigente", "poliza", "póliza", "poliza en vigor"]);
+      if (estadoIndex >= 0) {
+        rows = rows.filter((row) => {
+          const estado = normalizeSimple(row[estadoIndex] || "");
+          if (estadoMode === "en_vigor") return vigorStates.has(estado);
+          if (estadoMode === "no_vigor") return !vigorStates.has(estado);
+          return true;
+        });
+      }
+    }
     state.segurosCrmData = { columns, rows };
     renderTableInto({ columns, rows }, segurosCrmTable, segurosCrmInfo, "Seguros");
-    if (segurosCrmInfo && (q || filtroCliente)) {
+    if (segurosCrmInfo && (q || filtroCliente || (segurosEstadoFilter && segurosEstadoFilter.value !== "all"))) {
       segurosCrmInfo.textContent = `${segurosCrmInfo.textContent} (filtro activo)`;
     }
     refreshSegurosColaboradoresList(columns, rows);
@@ -16321,6 +16335,12 @@ if (segurosCrmSearch) {
     scheduleSave("seguros-crm-search", () => {
       loadSegurosCrm();
     }, 300);
+  });
+}
+
+if (segurosEstadoFilter) {
+  segurosEstadoFilter.addEventListener("change", () => {
+    loadSegurosCrm();
   });
 }
 
