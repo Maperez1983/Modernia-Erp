@@ -1947,7 +1947,7 @@ const isPrivilegedUser = (user) => {
 
 const getUserByValue = (value) => {
   const normalized = normalizeSimple(value);
-  return (state.usersList || []).find((user) => {
+  let found = (state.usersList || []).find((user) => {
     const usuario = normalizeSimple(user.usuario || "");
     const nombre = normalizeSimple(user.nombre || "");
     const full = normalizeSimple(`${user.nombre || ""} ${user.apellido || ""}`.trim());
@@ -1957,6 +1957,20 @@ const getUserByValue = (value) => {
       (nombre && nombre === normalized)
     );
   });
+  if (!found && userSelect && userSelect.value) {
+    const selected = normalizeSimple(userSelect.value);
+    found = (state.usersList || []).find((user) => {
+      const usuario = normalizeSimple(user.usuario || "");
+      const nombre = normalizeSimple(user.nombre || "");
+      const full = normalizeSimple(`${user.nombre || ""} ${user.apellido || ""}`.trim());
+      return (
+        (usuario && usuario === selected) ||
+        (full && full === selected) ||
+        (nombre && nombre === selected)
+      );
+    });
+  }
+  return found;
 };
 
 const syncCurrentUserScope = () => {
@@ -6753,11 +6767,19 @@ const renderUsuariosSelect = () => {
     userSelect.appendChild(createOption(value, label));
   });
   const saved = getCurrentUser();
-  if (saved) {
+  const hasSaved = saved && state.usersList.some((user) => {
+    const value = user.usuario || `${user.nombre || ""} ${user.apellido || ""}`.trim() || user.nombre;
+    return normalizeSimple(value) === normalizeSimple(saved);
+  });
+  if (saved && hasSaved) {
     userSelect.value = saved;
   } else if (state.usersList.length) {
-    userSelect.value = state.usersList[0].nombre;
-    setCurrentUser(state.usersList[0].nombre);
+    const fallback = state.usersList[0];
+    const fallbackValue = fallback.usuario || `${fallback.nombre || ""} ${fallback.apellido || ""}`.trim() || fallback.nombre || "";
+    userSelect.value = fallbackValue;
+    setCurrentUser(fallbackValue);
+  } else {
+    setCurrentUser("");
   }
   syncCurrentUserScope();
 };
