@@ -1091,6 +1091,8 @@ const adminUserForm = document.getElementById("adminUserForm");
 const adminUserStatus = document.getElementById("adminUserStatus");
 const adminUsersTable = document.getElementById("adminUsersTable");
 const adminUsersInfo = document.getElementById("adminUsersInfo");
+const adminServicioInput = document.getElementById("adminServicioInput");
+const adminServiceMulti = document.getElementById("adminServiceMulti");
 const adminPasswordInput = document.getElementById("adminPasswordInput");
 const adminPasswordToggle = document.getElementById("adminPasswordToggle");
 const holdingSection = document.getElementById("holdingSection");
@@ -1888,6 +1890,40 @@ const parseServiceList = (value) =>
     .map((item) => normalizeSimple(item))
     .filter(Boolean);
 
+const ADMIN_SERVICE_OPTIONS = [
+  "Gestoría",
+  "Seguros",
+  "Inmobiliaria",
+  "Financiaciones",
+  "Administración Fincas",
+  "Dirección",
+  "Administración",
+];
+
+const ADMIN_SERVICE_BY_KEY = ADMIN_SERVICE_OPTIONS.reduce((acc, label) => {
+  acc[normalizeSimple(label)] = label;
+  return acc;
+}, {});
+
+const parseAdminServices = (value) => {
+  const keys = parseServiceList(value);
+  const ordered = [];
+  keys.forEach((key) => {
+    if (key === "hipotecas") key = "financiaciones";
+    if (key === "administracion de fincas") key = "administracion fincas";
+    const label = ADMIN_SERVICE_BY_KEY[key] || getServiceLabelFromNormalized(key) || key;
+    if (label && !ordered.includes(label)) {
+      ordered.push(label);
+    }
+  });
+  return ordered;
+};
+
+const joinAdminServices = (values) => {
+  const normalized = parseAdminServices((values || []).join(","));
+  return normalized.join(", ");
+};
+
 const expandServiceAliases = (services) => {
   const set = new Set(services || []);
   if (set.has("financiaciones")) set.add("hipotecas");
@@ -1942,7 +1978,23 @@ const isPrivilegedRole = (value) => {
 
 const isPrivilegedUser = (user) => {
   if (!user) return false;
-  return isPrivilegedService(user.servicio) || isPrivilegedRole(user.rol);
+  if (isPrivilegedService(user.servicio)) return true;
+  if (!isPrivilegedRole(user.rol)) return false;
+  const services = expandServiceAliases(parseServiceList(user.servicio || ""));
+  if (!services.length) return true;
+  return services.some((service) => isPrivilegedService(service));
+};
+
+const canAccessAdminPanel = (user) => {
+  if (!user) return false;
+  return isPrivilegedRole(user.rol) || isPrivilegedService(user.servicio);
+};
+
+const getAuthScopeUser = () => {
+  if (state.authUser && (state.authUser.usuario || state.authUser.id)) {
+    return state.authUser;
+  }
+  return getUserByValue(getCurrentUser());
 };
 
 const getUserByValue = (value) => {
@@ -1974,7 +2026,7 @@ const getUserByValue = (value) => {
 };
 
 const syncCurrentUserScope = () => {
-  const user = getUserByValue(getCurrentUser());
+  const user = getAuthScopeUser();
   if (!user) {
     state.currentUserServices = [];
     state.currentUserServiceLabel = "";
@@ -1985,7 +2037,7 @@ const syncCurrentUserScope = () => {
 };
 
 const getServiceFilterParam = () => {
-  const user = getUserByValue(getCurrentUser());
+  const user = getAuthScopeUser();
   if (!user) return "";
   if (isPrivilegedUser(user)) return "";
   const services = expandServiceAliases(parseServiceList(user.servicio || ""));
@@ -1995,7 +2047,7 @@ const getServiceFilterParam = () => {
 const userCanAccessService = (serviceKey) => {
   const normalized = normalizeSimple(serviceKey || "");
   if (!normalized) return true;
-  const user = getUserByValue(getCurrentUser());
+  const user = getAuthScopeUser();
   if (!user) {
     return !(state.usersList && state.usersList.length);
   }
@@ -2730,6 +2782,7 @@ const renderCompanyCards = () => {
   if (coreCards) {
     const user = getUserByValue(getCurrentUser());
     const isPriv = isPrivilegedUser(user);
+    const canAdmin = canAccessAdminPanel(user);
     const canInmo = userCanAccessService("inmobiliaria");
     const canGestoria = userCanAccessService("gestoria");
     const canSeguros = userCanAccessService("seguros");
@@ -2830,7 +2883,7 @@ const renderCompanyCards = () => {
       <div class="company-meta">Usuarios y permisos.</div>
       <a class="card-link" href="?admin=1" data-action="admin">Entrar</a>
     `;
-    if (isPriv) {
+    if (canAdmin) {
       coreCards.appendChild(adminCard);
     }
   }
@@ -3436,7 +3489,7 @@ const openAgenda = () => {
 
 const openAdmin = () => {
   const user = getUserByValue(getCurrentUser());
-  if (!isPrivilegedUser(user)) return;
+  if (!canAccessAdminPanel(user)) return;
   setModule("empresas");
   explorerSection.classList.add("hidden");
   setPage("admin");
@@ -6765,6 +6818,48 @@ const loadUsuarios = () =>
     return state.usersList;
   });
 
+const renderAdminServiceSelector = () => {
+  if (!adminServiceMulti || !adminServicioInput) return;
+  const selected = new Set(parseAdminServices(adminServicioInput.value));
+  adminServiceMulti.innerHTML = "";
+  ADMIN_SERVICE_OPTIONS.forEach((label) => {
+    const key = normalizeSimple(label);
+    const wrapper = document.createElement("label");
+    wrapper.className = "admin-service-option";
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.value = label;
+    checkbox.checked = selected.has(label);
+    checkbox.addEventListener("change", () => {
+      const picked = Array.from(
+        adminServiceMulti.querySelectorAll('input[type="checkbox"]:checked')
+      ).map((el) => el.value);
+      adminServicioInput.value = joinAdminServices(picked);
+    });
+    const span = document.createElement("span");
+    span.textContent = label;
+    wrapper.appendChild(checkbox);
+    wrapper.appendChild(span);
+    wrapper.dataset.key = key;
+    adminServiceMulti.appendChild(wrapper);
+  });
+  adminServicioInput.value = joinAdminServices(Array.from(selected));
+};
+
+const createAdminServiceMultiSelect = (rawValue = "") => {
+  const select = document.createElement("select");
+  select.className = "inline-input admin-service-select";
+  select.multiple = true;
+  select.size = Math.min(ADMIN_SERVICE_OPTIONS.length, 6);
+  const selected = new Set(parseAdminServices(rawValue));
+  ADMIN_SERVICE_OPTIONS.forEach((label) => {
+    const option = createOption(label, label);
+    option.selected = selected.has(label);
+    select.appendChild(option);
+  });
+  return select;
+};
+
 const renderUsuariosSelect = () => {
   if (!userSelect) return;
   userSelect.innerHTML = "";
@@ -6836,9 +6931,7 @@ const renderUsuariosTable = () => {
     const emailTd = document.createElement("td");
     emailTd.appendChild(emailInput);
     tr.appendChild(emailTd);
-    const servicioInput = document.createElement("input");
-    servicioInput.className = "inline-input";
-    servicioInput.value = row.servicio || "";
+    const servicioInput = createAdminServiceMultiSelect(row.servicio || "");
     const servicioTd = document.createElement("td");
     servicioTd.appendChild(servicioInput);
     tr.appendChild(servicioTd);
@@ -6881,12 +6974,16 @@ const renderUsuariosTable = () => {
         apellido: apellidoInput.value.trim(),
         usuario: usuarioInput.value.trim(),
         email: emailInput.value.trim(),
-        servicio: servicioInput.value.trim(),
+        servicio: joinAdminServices(Array.from(servicioInput.selectedOptions).map((opt) => opt.value)),
         rol: rolInput.value.trim(),
         activo: activoSelect.value,
       };
       if (passwordInput.value.trim()) {
         payload.password = passwordInput.value.trim();
+      }
+      if (!payload.servicio) {
+        if (adminUsersInfo) adminUsersInfo.textContent = "Selecciona al menos un servicio.";
+        return;
       }
       fetch("/api/usuarios_update", {
         method: "POST",
@@ -15374,6 +15471,15 @@ const loadTable = () => {
 
 const setAuthUi = (user) => {
   state.authUser = user || null;
+  if (user) {
+    const userValue =
+      (user.usuario || "").trim()
+      || (user.nombre_completo || "").trim()
+      || [user.nombre || "", user.apellido || ""].filter(Boolean).join(" ").trim();
+    if (userValue) {
+      setCurrentUser(userValue);
+    }
+  }
   if (authSessionPill) {
     if (user) {
       const label = user.nombre_completo || user.usuario || user.email || "Sesión activa";
@@ -18126,14 +18232,30 @@ if (clienteDocsUploadForm) {
   });
 }
 
+if (adminServicioInput) {
+  renderAdminServiceSelector();
+}
+
 if (adminUserForm) {
   adminUserForm.addEventListener("submit", (event) => {
     event.preventDefault();
     if (adminUserStatus) {
       adminUserStatus.textContent = "Guardando...";
     }
+    if (adminServicioInput && adminServiceMulti) {
+      const picked = Array.from(
+        adminServiceMulti.querySelectorAll('input[type="checkbox"]:checked')
+      ).map((el) => el.value);
+      adminServicioInput.value = joinAdminServices(picked);
+    }
     const formData = new FormData(adminUserForm);
     const payload = Object.fromEntries(formData.entries());
+    if (!String(payload.servicio || "").trim()) {
+      if (adminUserStatus) {
+        adminUserStatus.textContent = "Selecciona al menos un servicio.";
+      }
+      return;
+    }
     fetch("/api/usuarios", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -18151,6 +18273,10 @@ if (adminUserForm) {
           adminUserStatus.textContent = "Usuario creado.";
         }
         adminUserForm.reset();
+        if (adminServicioInput) {
+          adminServicioInput.value = "";
+          renderAdminServiceSelector();
+        }
         loadUsuarios().then(() => {
           renderUsuariosSelect();
           renderUsuariosTable();

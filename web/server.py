@@ -6690,17 +6690,20 @@ class Handler(BaseHTTPRequestHandler):
             return None
         rol = normalize_service_key(session.get("rol") or "")
         servicio_raw = str(session.get("servicio") or "")
-        if rol in {"administrador", "direccion", "administracion"}:
-            return None
-        servicio_key = normalize_service_key(servicio_raw)
-        if servicio_key in {"direccion", "administracion"}:
-            return None
         services = set()
         for item in parse_services_param(servicio_raw):
             key = normalize_service_key(item)
             if key:
                 services.add(key)
         expanded = set(services)
+        if any(item in {"direccion", "administracion"} for item in expanded):
+            return None
+        servicio_key = normalize_service_key(servicio_raw)
+        if servicio_key in {"direccion", "administracion"}:
+            return None
+        # If admin role has explicit services configured, keep service scoping.
+        if rol in {"administrador", "direccion", "administracion"} and not expanded:
+            return None
         if "gestoria" in expanded:
             expanded.add("administracion fincas")
         if "administracion fincas" in expanded:
@@ -11149,6 +11152,9 @@ class Handler(BaseHTTPRequestHandler):
             "/api/cliente_lookup",
             "/api/acciones",
         }:
+            if not allowed_services:
+                json_response(self, {"error": "Usuario sin servicios asignados"}, status=403)
+                return
             current = (params.get("servicio", [""])[0] or "").strip()
             if not current:
                 params["servicio"] = [",".join(sorted(allowed_services))]
@@ -13238,7 +13244,7 @@ class Handler(BaseHTTPRequestHandler):
                 FROM seguros
                 WHERE empresa_id = ?
                   AND (COALESCE(poliza_key, '') <> '' OR COALESCE(poliza_url, '') <> '' OR ? = 0)
-                  AND LOWER(TRIM(estado)) IN ('en vigor', 'vigente', 'en_vigor')
+                  AND LOWER(TRIM(estado)) IN ('en vigor', 'en_vigor', 'vigente', 'poliza', 'póliza', 'poliza en vigor')
                 """,
                 (empresa_id, 1 if uploaded_only else 0),
             ).fetchone()

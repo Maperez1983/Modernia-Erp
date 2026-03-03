@@ -100,26 +100,24 @@
             </label>
             <label>
               Servicios permitidos
-              <input name="servicio" placeholder="Seguros, Gestoría" list="adminServiciosList" required />
-              <datalist id="adminServiciosList">
-                <option value="Gestoría"></option>
-                <option value="Seguros"></option>
-                <option value="Inmobiliaria"></option>
-                <option value="Financiaciones"></option>
-                <option value="Administración Fincas"></option>
-                <option value="Dirección"></option>
-                <option value="Administración"></option>
-              </datalist>
+              <input
+                id="adminServicioInput"
+                name="servicio"
+                placeholder="Selecciona uno o varios servicios"
+                readonly
+                required
+              />
+              <div id="adminServiceMulti" class="admin-service-multi"></div>
             </label>
             <label>
               Rol
               <select name="rol">
-                <option>Administrador</option>
+                <option>Lectura</option>
                 <option>Gestoría</option>
                 <option>Seguros</option>
                 <option>Inmobiliaria</option>
                 <option>Financiaciones</option>
-                <option>Lectura</option>
+                <option>Administrador</option>
               </select>
             </label>
             <label>
@@ -1404,85 +1402,6 @@
                 <span id="segurosPolizaAccionStatus" class="muted"></span>
               </div>
             </form>
-          </div>
-          <div class="form-card">
-            <h3>Compliance seguros</h3>
-            <p class="muted">Control de IPID y reclamaciones.</p>
-            <div id="segurosComplianceKpis"></div>
-          </div>
-          <div class="form-card">
-            <h3>Trazabilidad de póliza</h3>
-            <div class="form-grid">
-              <label>
-                Póliza
-                <select id="segurosEventosPolizaId"></select>
-              </label>
-              <div class="form-actions">
-                <button type="button" id="segurosEventosRefresh" class="secondary">Actualizar</button>
-              </div>
-            </div>
-            <div id="segurosEventosTable"></div>
-            <div class="footer" id="segurosEventosInfo"></div>
-          </div>
-          <div class="form-card">
-            <h3>Registro IPID</h3>
-            <form id="segurosIpidForm" class="form-grid">
-              <label>
-                Póliza
-                <select id="segurosIpidPolizaId" name="seguro_id"></select>
-              </label>
-              <label>
-                Fecha entrega
-                <input id="segurosIpidFecha" name="fecha_entrega" type="date" />
-              </label>
-              <label>
-                Método
-                <select id="segurosIpidMetodo" name="metodo">
-                  <option value="digital">Digital</option>
-                  <option value="presencial">Presencial</option>
-                  <option value="email">Email</option>
-                </select>
-              </label>
-              <div class="form-actions">
-                <button type="submit">Registrar IPID</button>
-                <span id="segurosIpidStatus" class="muted"></span>
-              </div>
-            </form>
-          </div>
-          <div class="form-card">
-            <h3>Reclamaciones</h3>
-            <form id="segurosReclamacionForm" class="form-grid">
-              <label>
-                Póliza
-                <select id="segurosReclamacionPolizaId" name="seguro_id"></select>
-              </label>
-              <label>
-                Estado
-                <select id="segurosReclamacionEstado" name="estado">
-                  <option value="abierta">Abierta</option>
-                  <option value="en curso">En curso</option>
-                  <option value="cerrada">Cerrada</option>
-                </select>
-              </label>
-              <label>
-                Canal
-                <input id="segurosReclamacionCanal" name="canal" placeholder="email / teléfono / presencial" />
-              </label>
-              <label>
-                Asunto
-                <input id="segurosReclamacionAsunto" name="asunto" />
-              </label>
-              <label class="span-2">
-                Detalle
-                <textarea id="segurosReclamacionDetalle" name="detalle" rows="2"></textarea>
-              </label>
-              <div class="form-actions">
-                <button type="submit">Crear reclamación</button>
-                <span id="segurosReclamacionStatus" class="muted"></span>
-              </div>
-            </form>
-            <div id="segurosReclamacionesTable"></div>
-            <div class="footer" id="segurosReclamacionesInfo"></div>
           </div>
           <div class="form-card">
             <h3>Insights de mercado</h3>

@@ -562,6 +562,29 @@ body.crm-fin #companySummary {
   white-space: nowrap;
 }
 
+.admin-service-multi {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 6px 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+.admin-service-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--ink);
+}
+
+.admin-service-option input {
+  width: auto;
+  margin: 0;
+}
+
 .form-actions {
   display: flex;
   align-items: center;
@@ -974,6 +997,11 @@ body.crm-fin #companySummary {
   outline: none;
   border-color: var(--gold);
   box-shadow: 0 0 0 2px rgba(60, 110, 113, 0.18);
+}
+
+.admin-service-select {
+  min-width: 180px;
+  min-height: 110px;
 }
 
 .inline-list {
