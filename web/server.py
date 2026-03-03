@@ -13474,7 +13474,7 @@ class Handler(BaseHTTPRequestHandler):
                 FROM seguros
                 WHERE empresa_id = ?
                   AND ({uploaded_clause} OR ? = 0)
-                  AND {estado_expr} IN ('en vigor', 'en_vigor', 'vigente', 'poliza', 'póliza')
+                  AND {estado_expr} IN ('en vigor', 'en_vigor', 'vigente', 'poliza', 'póliza', 'poliza en vigor')
                 """,
                 (empresa_id, 1 if uploaded_only else 0),
             ).fetchone()

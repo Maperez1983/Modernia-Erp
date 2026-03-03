@@ -10436,9 +10436,7 @@ const loadSegurosKpis = () => {
     segurosKpis.innerHTML = "<p class='muted'>Sin empresa.</p>";
     return;
   }
-  const params = new URLSearchParams({ empresa_id: empresa.id });
-  params.set("uploaded_only", "0");
-  api(`/api/seguros_kpis?${params.toString()}`).then((data) => {
+  const renderKpis = (data) => {
     const wrapper = document.createElement("div");
     wrapper.className = "grid crm-kpis";
     const addKpi = (label, value) => {
@@ -10456,7 +10454,45 @@ const loadSegurosKpis = () => {
     }
     segurosKpis.innerHTML = "";
     segurosKpis.appendChild(wrapper);
-  });
+  };
+  const params = new URLSearchParams({ empresa_id: empresa.id });
+  params.set("uploaded_only", "0");
+  api(`/api/seguros_kpis?${params.toString()}`)
+    .then((data) => {
+      renderKpis(data || {});
+    })
+    .catch(() => {
+      const source = state.segurosCrmData;
+      if (!source || !Array.isArray(source.rows)) {
+        segurosKpis.innerHTML = "<p class='muted'>No se pudieron cargar los KPIs.</p>";
+        return;
+      }
+      const columns = source.columns || [];
+      const estadoIndex = columns.indexOf("estado");
+      const primaIndex = columns.indexOf("prima_total");
+      const vigorStates = new Set(["en vigor", "en_vigor", "vigente", "poliza", "póliza", "poliza en vigor"]);
+      let enVigor = 0;
+      let faltantes = 0;
+      let primaTotal = 0;
+      source.rows.forEach((row) => {
+        const estado = normalizeSimple(estadoIndex >= 0 ? row[estadoIndex] : "");
+        if (vigorStates.has(estado)) {
+          enVigor += 1;
+          const value = parseMoneyValue(primaIndex >= 0 ? row[primaIndex] : 0);
+          primaTotal += Number.isFinite(value) ? value : 0;
+          if (!row[columns.indexOf("tomador")] || !row[columns.indexOf("poliza_numero")] || !row[columns.indexOf("compania")]) {
+            faltantes += 1;
+          }
+        }
+      });
+      renderKpis({
+        total: source.rows.length,
+        en_vigor: enVigor,
+        vencen_30: 0,
+        faltantes,
+        prima_total: primaTotal,
+      });
+    });
 };
 
 const getSegurosRamoLabel = (value) => {
