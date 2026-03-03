@@ -1978,6 +1978,28 @@ const getServiceFilterParam = () => {
   return services.join(",");
 };
 
+const userCanAccessService = (serviceKey) => {
+  const normalized = normalizeSimple(serviceKey || "");
+  if (!normalized) return true;
+  const user = getUserByValue(getCurrentUser());
+  if (!user || isPrivilegedUser(user)) return true;
+  const allowed = new Set(expandServiceAliases(parseServiceList(user.servicio || "")));
+  if (!allowed.size) return false;
+  if (normalized === "administracion fincas") {
+    return allowed.has("administracion fincas") || allowed.has("gestoria");
+  }
+  if (normalized === "gestoria") {
+    return allowed.has("gestoria") || allowed.has("administracion fincas");
+  }
+  if (normalized === "hipotecas") {
+    return allowed.has("hipotecas") || allowed.has("financiaciones");
+  }
+  if (normalized === "financiaciones") {
+    return allowed.has("financiaciones") || allowed.has("hipotecas");
+  }
+  return allowed.has(normalized);
+};
+
 const normalizeMatch = (value) =>
   String(value || "")
     .normalize("NFD")
@@ -2689,6 +2711,8 @@ const renderCompanyCards = () => {
     coreCards.innerHTML = "";
   }
   if (coreCards) {
+    const user = getUserByValue(getCurrentUser());
+    const isPriv = isPrivilegedUser(user);
     const holdingCard = document.createElement("div");
     holdingCard.className = "company-card";
     holdingCard.dataset.action = "holding";
@@ -2698,7 +2722,9 @@ const renderCompanyCards = () => {
       <div class="company-meta">Dashboards por empresa (fase final).</div>
       <a class="card-link" href="?holding=1" data-action="holding">Entrar</a>
     `;
-    coreCards.appendChild(holdingCard);
+    if (isPriv) {
+      coreCards.appendChild(holdingCard);
+    }
 
     const crmCard = document.createElement("div");
     crmCard.className = "company-card";
@@ -2709,7 +2735,9 @@ const renderCompanyCards = () => {
       <div class="company-meta">Servicio inmobiliario.</div>
       <a class="card-link" href="?crm=inmo" data-action="crm-inmo">Entrar</a>
     `;
-    coreCards.appendChild(crmCard);
+    if (userCanAccessService("inmobiliaria")) {
+      coreCards.appendChild(crmCard);
+    }
 
     const gestoriaCard = document.createElement("div");
     gestoriaCard.className = "company-card";
@@ -2720,7 +2748,9 @@ const renderCompanyCards = () => {
       <div class="company-meta">Servicio de gestoría.</div>
       <a class="card-link" href="?crm=gestoria" data-action="crm-gestoria">Entrar</a>
     `;
-    coreCards.appendChild(gestoriaCard);
+    if (userCanAccessService("gestoria")) {
+      coreCards.appendChild(gestoriaCard);
+    }
 
     const segurosCard = document.createElement("div");
     segurosCard.className = "company-card";
@@ -2731,7 +2761,9 @@ const renderCompanyCards = () => {
       <div class="company-meta">Servicio de seguros.</div>
       <a class="card-link" href="?crm=seguros" data-action="crm-seguros">Entrar</a>
     `;
-    coreCards.appendChild(segurosCard);
+    if (userCanAccessService("seguros")) {
+      coreCards.appendChild(segurosCard);
+    }
 
     const finCard = document.createElement("div");
     finCard.className = "company-card";
@@ -2742,7 +2774,9 @@ const renderCompanyCards = () => {
       <div class="company-meta">Servicio financiero.</div>
       <a class="card-link" href="?crm=fin" data-action="crm-fin">Entrar</a>
     `;
-    coreCards.appendChild(finCard);
+    if (userCanAccessService("financiaciones")) {
+      coreCards.appendChild(finCard);
+    }
 
     const clientesCard = document.createElement("div");
     clientesCard.className = "company-card";
@@ -2775,7 +2809,9 @@ const renderCompanyCards = () => {
       <div class="company-meta">Usuarios y permisos.</div>
       <a class="card-link" href="?admin=1" data-action="admin">Entrar</a>
     `;
-    coreCards.appendChild(adminCard);
+    if (isPriv) {
+      coreCards.appendChild(adminCard);
+    }
   }
 };
 
@@ -3056,6 +3092,7 @@ const openClientesModule = () => {
 };
 
 const openCrmInmobiliario = () => {
+  if (!userCanAccessService("inmobiliaria")) return;
   openCompany(DASHBOARD_COMPANY);
   setTab("crm");
   updateTableVisibility();
@@ -3072,6 +3109,7 @@ const openInmuebleFromAgenda = (inmuebleId) => {
 };
 
 const openGestoriaCrm = () => {
+  if (!userCanAccessService("gestoria")) return;
   openCompany(FINCAS_COMPANY);
   setTab("gestoria-dash");
   updateTableVisibility();
@@ -3079,6 +3117,7 @@ const openGestoriaCrm = () => {
 };
 
 const openSegurosCrm = () => {
+  if (!userCanAccessService("seguros")) return;
   openCompany(FINCAS_COMPANY);
   setTab("seguros-crm");
   updateTableVisibility();
@@ -3099,6 +3138,7 @@ const openSegurosCrm = () => {
 };
 
 const openFinCrm = () => {
+  if (!userCanAccessService("financiaciones")) return;
   openCompany(FIN_COMPANY);
   setTab("fin-crm");
   updateTableVisibility();
@@ -3374,6 +3414,8 @@ const openAgenda = () => {
 };
 
 const openAdmin = () => {
+  const user = getUserByValue(getCurrentUser());
+  if (!isPrivilegedUser(user)) return;
   setModule("empresas");
   explorerSection.classList.add("hidden");
   setPage("admin");
@@ -18115,6 +18157,7 @@ if (userSelect) {
     if (state.currentModule === "clientes") {
       loadClientesTable();
     }
+    renderCompanyCards();
   });
 }
 

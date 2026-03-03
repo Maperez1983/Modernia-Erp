@@ -6684,6 +6684,117 @@ class Handler(BaseHTTPRequestHandler):
         json_response(self, {"error": "No autenticado"}, status=401)
         return False
 
+    def _auth_allowed_services(self):
+        session = getattr(self, "auth_session", None) or self._current_session()
+        if not session:
+            return None
+        rol = normalize_service_key(session.get("rol") or "")
+        servicio_raw = str(session.get("servicio") or "")
+        if rol in {"administrador", "direccion", "administracion"}:
+            return None
+        servicio_key = normalize_service_key(servicio_raw)
+        if servicio_key in {"direccion", "administracion"}:
+            return None
+        services = set()
+        for item in parse_services_param(servicio_raw):
+            key = normalize_service_key(item)
+            if key:
+                services.add(key)
+        expanded = set(services)
+        if "gestoria" in expanded:
+            expanded.add("administracion fincas")
+        if "administracion fincas" in expanded:
+            expanded.add("gestoria")
+        if "financiaciones" in expanded:
+            expanded.add("hipotecas")
+        if "hipotecas" in expanded:
+            expanded.add("financiaciones")
+        return expanded
+
+    def _service_from_tabla(self, tabla):
+        table_service_map = {
+            "seguros": "seguros",
+            "seguros_ofertas": "seguros",
+            "seguros_preferencias": "seguros",
+            "seguros_referidos": "seguros",
+            "seguros_campanas": "seguros",
+            "seguros_comisiones": "seguros",
+            "seguros_checklist": "seguros",
+            "seguros_reclamaciones": "seguros",
+            "gestoria": "gestoria",
+            "gestoria_docs": "gestoria",
+            "gestoria_trabajos": "gestoria",
+            "gestoria_contabilidad": "gestoria",
+            "gestoria_modelos": "gestoria",
+            "gestoria_conta_tasks": "gestoria",
+            "cliente_gestoria": "gestoria",
+            "hipotecas": "financiaciones",
+            "asesoramientos_financiacion": "financiaciones",
+            "fin_checklist": "financiaciones",
+            "captaciones": "inmobiliaria",
+            "inmuebles": "inmobiliaria",
+            "demandas": "inmobiliaria",
+            "visitas": "inmobiliaria",
+            "movimientos": "inmobiliaria",
+            "alquileres": "inmobiliaria",
+        }
+        return table_service_map.get(str(tabla or "").strip().lower(), "")
+
+    def _resolve_required_service(self, path, params=None, payload=None):
+        params = params or {}
+        payload = payload or {}
+        if path.startswith("/api/seguros"):
+            return "seguros"
+        if path.startswith("/api/gestoria") or path.startswith("/api/cliente_gestoria"):
+            return "gestoria"
+        if path.startswith("/api/fin_") or path.startswith("/api/hipotecas"):
+            return "financiaciones"
+        if path.startswith("/api/capt") or path.startswith("/api/inmueble") or path.startswith("/api/demandas") or path.startswith("/api/visitas"):
+            return "inmobiliaria"
+        if path in {"/api/acciones", "/api/acciones_update"}:
+            raw = payload.get("servicio") or (params.get("servicio", [""])[0] if params else "")
+            return normalize_service_key(raw)
+        if path in {"/api/clientes_link", "/api/cliente_empresa_update"}:
+            raw = payload.get("servicio") or ""
+            return normalize_service_key(raw)
+        if path == "/api/tabla":
+            tabla = params.get("tabla", [""])[0] if params else ""
+            return self._service_from_tabla(tabla)
+        return ""
+
+    def _enforce_service_access(self, path, params=None, payload=None):
+        public_paths = {
+            "/api/login",
+            "/api/logout",
+            "/api/auth_set_password",
+            "/api/me",
+            "/api/auth_invite_status",
+            "/api/usuarios",
+            "/api/usuarios_update",
+            "/api/usuarios_delete",
+            "/api/usuarios_invitar",
+            "/api/health",
+        }
+        if path in public_paths:
+            return True
+        allowed = self._auth_allowed_services()
+        if allowed is None:
+            return True
+        required = self._resolve_required_service(path, params=params, payload=payload)
+        if not required:
+            return True
+        required = normalize_service_key(required)
+        if required in {"administracion fincas", "gestoria"}:
+            if "gestoria" in allowed or "administracion fincas" in allowed:
+                return True
+        if required in {"financiaciones", "hipotecas"}:
+            if "financiaciones" in allowed or "hipotecas" in allowed:
+                return True
+        if required in allowed:
+            return True
+        json_response(self, {"error": "Sin permisos para este servicio"}, status=403)
+        return False
+
     def do_HEAD(self):
         parsed = urllib.parse.urlparse(self.path)
         if parsed.path in ("/health", "/api/health"):
@@ -6710,6 +6821,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if parsed.path.startswith("/api/"):
             if parsed.path not in AUTH_PUBLIC_GET_ENDPOINTS and not self._require_api_auth():
+                return
+            get_params = urllib.parse.parse_qs(parsed.query)
+            if not self._enforce_service_access(parsed.path, params=get_params):
                 return
             self.handle_api(parsed)
             return
@@ -6832,6 +6946,8 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if parsed.path not in AUTH_PUBLIC_POST_ENDPOINTS and not self._require_api_auth():
+            return
+        if not self._enforce_service_access(parsed.path, payload=payload):
             return
 
         if parsed.path == "/api/logout":
@@ -11024,6 +11140,18 @@ class Handler(BaseHTTPRequestHandler):
     def handle_api(self, parsed):
         path = parsed.path
         params = urllib.parse.parse_qs(parsed.query)
+        allowed_services = self._auth_allowed_services()
+        if allowed_services is not None and path in {
+            "/api/clientes",
+            "/api/clientes_list",
+            "/api/clientes_stats",
+            "/api/cliente",
+            "/api/cliente_lookup",
+            "/api/acciones",
+        }:
+            current = (params.get("servicio", [""])[0] or "").strip()
+            if not current:
+                params["servicio"] = [",".join(sorted(allowed_services))]
         conn = get_db(self.db_path)
         self._track_conn(conn)
         if path in ("/api/me", "/api/auth_invite_status", "/api/usuarios"):

@@ -99,16 +99,17 @@
               <input name="email" type="email" required />
             </label>
             <label>
-              Servicio
-              <select name="servicio">
-                <option>Gestoría</option>
-                <option>Seguros</option>
-                <option>Inmobiliaria</option>
-                <option>Financiaciones</option>
-                <option>Administración Fincas</option>
-                <option>Dirección</option>
-                <option>Administración</option>
-              </select>
+              Servicios permitidos
+              <input name="servicio" placeholder="Seguros, Gestoría" list="adminServiciosList" required />
+              <datalist id="adminServiciosList">
+                <option value="Gestoría"></option>
+                <option value="Seguros"></option>
+                <option value="Inmobiliaria"></option>
+                <option value="Financiaciones"></option>
+                <option value="Administración Fincas"></option>
+                <option value="Dirección"></option>
+                <option value="Administración"></option>
+              </datalist>
             </label>
             <label>
               Rol
