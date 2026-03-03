@@ -1978,16 +1978,23 @@ const isPrivilegedRole = (value) => {
 
 const isPrivilegedUser = (user) => {
   if (!user) return false;
-  if (isPrivilegedService(user.servicio)) return true;
-  if (!isPrivilegedRole(user.rol)) return false;
   const services = expandServiceAliases(parseServiceList(user.servicio || ""));
+  if (isPrivilegedService(user.servicio) || services.some((service) => isPrivilegedService(service))) {
+    return true;
+  }
+  if (!isPrivilegedRole(user.rol)) return false;
   if (!services.length) return true;
   return services.some((service) => isPrivilegedService(service));
 };
 
 const canAccessAdminPanel = (user) => {
   if (!user) return false;
-  return isPrivilegedRole(user.rol) || isPrivilegedService(user.servicio);
+  const services = expandServiceAliases(parseServiceList(user.servicio || ""));
+  return (
+    isPrivilegedRole(user.rol)
+    || isPrivilegedService(user.servicio)
+    || services.some((service) => isPrivilegedService(service))
+  );
 };
 
 const getAuthScopeUser = () => {
