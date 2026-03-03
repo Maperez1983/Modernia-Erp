@@ -610,6 +610,48 @@ body.crm-fin #companySummary {
   color: var(--muted);
 }
 
+.admin-detail-grid {
+  grid-template-columns: repeat(3, minmax(220px, 1fr));
+  align-items: start;
+}
+
+.admin-detail-field {
+  align-self: start;
+}
+
+.admin-detail-services {
+  grid-column: span 2;
+}
+
+.admin-detail-actions {
+  grid-column: 1 / -1;
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+
+.admin-detail-status {
+  min-width: 220px;
+}
+
+@media (max-width: 1100px) {
+  .admin-detail-grid {
+    grid-template-columns: repeat(2, minmax(220px, 1fr));
+  }
+  .admin-detail-services {
+    grid-column: span 2;
+  }
+}
+
+@media (max-width: 740px) {
+  .admin-detail-grid {
+    grid-template-columns: 1fr;
+  }
+  .admin-detail-services {
+    grid-column: span 1;
+  }
+}
+
 .admin-service-multi {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
@@ -1056,8 +1098,8 @@ body.crm-fin #companySummary {
   display: grid;
   gap: 6px 10px;
   grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-  max-height: 170px;
-  overflow: auto;
+  max-height: none;
+  overflow: visible;
   border: 1px solid var(--line);
   border-radius: 10px;
   padding: 8px 10px;

@@ -6989,12 +6989,13 @@ const renderAdminUserDetail = () => {
   adminUserDetailTitle.textContent = `Ficha · ${fullName}`;
   adminUserDetail.innerHTML = "";
   const form = document.createElement("form");
-  form.className = "form-grid";
+  form.className = "form-grid admin-detail-grid";
   const status = document.createElement("span");
-  status.className = "muted";
+  status.className = "muted admin-detail-status";
 
   const buildInput = (labelText, value = "", opts = {}) => {
     const label = document.createElement("label");
+    label.className = "admin-detail-field";
     label.textContent = labelText;
     const input = document.createElement("input");
     input.className = "inline-input";
@@ -7006,6 +7007,7 @@ const renderAdminUserDetail = () => {
   };
   const buildSelect = (labelText, options = [], current = "") => {
     const label = document.createElement("label");
+    label.className = "admin-detail-field";
     label.textContent = labelText;
     const select = document.createElement("select");
     select.className = "inline-input";
@@ -7037,6 +7039,7 @@ const renderAdminUserDetail = () => {
   const password = buildInput("Nueva contraseña", "", { type: "password", placeholder: "Opcional" });
 
   const serviciosLabel = document.createElement("label");
+  serviciosLabel.className = "admin-detail-field admin-detail-services";
   serviciosLabel.textContent = "Servicios permitidos";
   const servicios = createAdminServiceCheckboxGroup(user.servicio || "");
   serviciosLabel.appendChild(servicios);
@@ -7053,7 +7056,7 @@ const renderAdminUserDetail = () => {
   ].forEach((node) => form.appendChild(node));
 
   const actions = document.createElement("div");
-  actions.className = "form-actions";
+  actions.className = "form-actions admin-detail-actions";
   const saveBtn = document.createElement("button");
   saveBtn.type = "submit";
   saveBtn.textContent = "Guardar cambios";
