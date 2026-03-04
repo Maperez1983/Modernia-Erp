@@ -1063,6 +1063,7 @@ const state = {
   segurosRamosSource: null,
   segurosCrmData: null,
   segurosRamoSelected: "",
+  segurosKpisCache: null,
   segurosOcrClienteId: "",
   segurosBdtOcrClienteId: "",
   segurosOcrQuality: null,
@@ -7950,7 +7951,7 @@ const renderFincasDashboard = (empresaId) => {
     empresa_id: empresaId,
     year: selectedYear,
   });
-  params.set("uploaded_only", "0");
+  params.set("uploaded_only", SEGUROS_ONLY_UPLOADED_MODE ? "1" : "0");
   api(`/api/fincas_seguros_dashboard?${params.toString()}`).then((data) => {
     if (!fincasDashboardKpis) {
       return;
@@ -8281,7 +8282,7 @@ const loadHomeFincasStats = (year) => {
     return Promise.resolve();
   }
   const params = new URLSearchParams({ empresa_id: fincas.id });
-  params.set("uploaded_only", "0");
+  params.set("uploaded_only", SEGUROS_ONLY_UPLOADED_MODE ? "1" : "0");
   if (year) {
     params.set("year", year);
   }
@@ -10470,42 +10471,18 @@ const loadSegurosKpis = () => {
     segurosKpis.appendChild(wrapper);
   };
   const params = new URLSearchParams({ empresa_id: empresa.id });
-  params.set("uploaded_only", "0");
+  params.set("uploaded_only", SEGUROS_ONLY_UPLOADED_MODE ? "1" : "0");
   api(`/api/seguros_kpis?${params.toString()}`)
     .then((data) => {
+      state.segurosKpisCache = data || {};
       renderKpis(data || {});
     })
     .catch(() => {
-      const source = state.segurosCrmData;
-      if (!source || !Array.isArray(source.rows)) {
-        segurosKpis.innerHTML = "<p class='muted'>No se pudieron cargar los KPIs.</p>";
+      if (state.segurosKpisCache) {
+        renderKpis(state.segurosKpisCache);
         return;
       }
-      const columns = source.columns || [];
-      const estadoIndex = columns.indexOf("estado");
-      const primaIndex = columns.indexOf("prima_total");
-      const vigorStates = new Set(["en vigor", "en_vigor", "vigente", "poliza", "póliza", "poliza en vigor"]);
-      let enVigor = 0;
-      let faltantes = 0;
-      let primaTotal = 0;
-      source.rows.forEach((row) => {
-        const estado = normalizeSimple(estadoIndex >= 0 ? row[estadoIndex] : "");
-        if (vigorStates.has(estado)) {
-          enVigor += 1;
-          const value = parseMoneyValue(primaIndex >= 0 ? row[primaIndex] : 0);
-          primaTotal += Number.isFinite(value) ? value : 0;
-          if (!row[columns.indexOf("tomador")] || !row[columns.indexOf("poliza_numero")] || !row[columns.indexOf("compania")]) {
-            faltantes += 1;
-          }
-        }
-      });
-      renderKpis({
-        total: source.rows.length,
-        en_vigor: enVigor,
-        vencen_30: 0,
-        faltantes,
-        prima_total: primaTotal,
-      });
+      segurosKpis.innerHTML = "<p class='muted'>No se pudieron cargar los KPIs.</p>";
     });
 };
 
