@@ -10706,13 +10706,15 @@ const getSegurosPolizaOptions = ({ onlyActive = false } = {}) => {
   const vigorStates = new Set(["en vigor", "en_vigor", "vigente", "poliza", "póliza", "poliza en vigor"]);
   const today = new Date();
   today.setHours(0, 0, 0, 0);
+  const limit = new Date(today);
+  limit.setDate(limit.getDate() + 45);
   const isPendingVencimiento = (raw) => {
     const value = String(raw || "").trim();
     if (!value) return false;
     const parsed = new Date(value);
     if (Number.isNaN(parsed.getTime())) return false;
     parsed.setHours(0, 0, 0, 0);
-    return parsed >= today;
+    return parsed >= today && parsed <= limit;
   };
   return source.rows
     .map((row) => {
