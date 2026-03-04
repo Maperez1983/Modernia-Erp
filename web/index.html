@@ -1367,14 +1367,19 @@
                   <input id="segurosCrmClienteId" type="hidden" />
                   <datalist id="segurosCrmClientes"></datalist>
                 </div>
+                <button type="button" id="segurosCrmClienteOpen" class="secondary">Abrir ficha</button>
+                <input id="segurosCrmSearch" placeholder="Buscar póliza..." />
+              </div>
+            </div>
+            <div class="table-tools">
+              <label>
+                Estado póliza
                 <select id="segurosEstadoFilter">
                   <option value="all">Todas</option>
                   <option value="en_vigor">En vigor</option>
                   <option value="no_vigor">No en vigor</option>
                 </select>
-                <button type="button" id="segurosCrmClienteOpen" class="secondary">Abrir ficha</button>
-                <input id="segurosCrmSearch" placeholder="Buscar póliza..." />
-              </div>
+              </label>
             </div>
             <div id="segurosCrmTable"></div>
             <div class="footer" id="segurosCrmInfo"></div>
