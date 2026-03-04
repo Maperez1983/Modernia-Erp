@@ -10692,7 +10692,7 @@ const renderSegurosRamosDashboard = () => {
   renderSegurosRamoListado(selected.ramo, selected.items);
 };
 
-const getSegurosPolizaOptions = () => {
+const getSegurosPolizaOptions = ({ onlyActive = false } = {}) => {
   const source = state.segurosCrmData;
   if (!source || !Array.isArray(source.rows)) return [];
   const columns = source.columns || [];
@@ -10700,11 +10700,17 @@ const getSegurosPolizaOptions = () => {
   const polizaIndex = columns.indexOf("poliza_numero");
   const tomadorIndex = columns.indexOf("tomador");
   const companiaIndex = columns.indexOf("compania");
+  const estadoIndex = columns.indexOf("estado");
   if (idIndex < 0) return [];
+  const vigorStates = new Set(["en vigor", "en_vigor", "vigente", "poliza", "póliza", "poliza en vigor"]);
   return source.rows
     .map((row) => {
       const id = String(row[idIndex] || "").trim();
       if (!id) return null;
+      if (onlyActive && estadoIndex >= 0) {
+        const estado = normalizeSimple(row[estadoIndex] || "");
+        if (!vigorStates.has(estado)) return null;
+      }
       const poliza = row[polizaIndex] || "-";
       const tomador = row[tomadorIndex] || "Cliente";
       const compania = row[companiaIndex] || "-";
@@ -10717,8 +10723,9 @@ const getSegurosPolizaOptions = () => {
 };
 
 const populateSegurosOperationalSelects = () => {
-  const options = getSegurosPolizaOptions();
-  const fill = (select) => {
+  const optionsAll = getSegurosPolizaOptions();
+  const optionsActive = getSegurosPolizaOptions({ onlyActive: true });
+  const fill = (select, options = optionsAll) => {
     if (!select) return;
     const current = select.value;
     select.innerHTML = "";
@@ -10730,12 +10737,10 @@ const populateSegurosOperationalSelects = () => {
       select.value = options[0].id;
     }
   };
-  [
-    segurosPolizaAccionId,
-    segurosEventosPolizaId,
-    segurosIpidPolizaId,
-    segurosReclamacionPolizaId,
-  ].forEach(fill);
+  fill(segurosPolizaAccionId, optionsActive);
+  fill(segurosEventosPolizaId, optionsAll);
+  fill(segurosIpidPolizaId, optionsAll);
+  fill(segurosReclamacionPolizaId, optionsAll);
 };
 
 const loadSegurosComplianceKpis = (empresaId) => {
