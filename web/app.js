@@ -10701,8 +10701,19 @@ const getSegurosPolizaOptions = ({ onlyActive = false } = {}) => {
   const tomadorIndex = columns.indexOf("tomador");
   const companiaIndex = columns.indexOf("compania");
   const estadoIndex = columns.indexOf("estado");
+  const vencIndex = columns.indexOf("fecha_vencimiento");
   if (idIndex < 0) return [];
   const vigorStates = new Set(["en vigor", "en_vigor", "vigente", "poliza", "póliza", "poliza en vigor"]);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const isPendingVencimiento = (raw) => {
+    const value = String(raw || "").trim();
+    if (!value) return false;
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return false;
+    parsed.setHours(0, 0, 0, 0);
+    return parsed >= today;
+  };
   return source.rows
     .map((row) => {
       const id = String(row[idIndex] || "").trim();
@@ -10710,6 +10721,7 @@ const getSegurosPolizaOptions = ({ onlyActive = false } = {}) => {
       if (onlyActive && estadoIndex >= 0) {
         const estado = normalizeSimple(row[estadoIndex] || "");
         if (!vigorStates.has(estado)) return null;
+        if (vencIndex >= 0 && !isPendingVencimiento(row[vencIndex])) return null;
       }
       const poliza = row[polizaIndex] || "-";
       const tomador = row[tomadorIndex] || "Cliente";
