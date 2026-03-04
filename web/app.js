@@ -10390,7 +10390,19 @@ const loadSegurosCrm = () => {
     const estadoMode = segurosEstadoFilter ? segurosEstadoFilter.value : "all";
     if (estadoMode !== "all") {
       const estadoIndex = columns.indexOf("estado");
-      const vigorStates = new Set(["en vigor", "en_vigor", "vigente", "poliza", "póliza", "poliza en vigor"]);
+      const vigorStates = new Set([
+        "en vigor",
+        "en_vigor",
+        "vigente",
+        "poliza",
+        "póliza",
+        "poliza en vigor",
+        "activo",
+        "activa",
+        "alta",
+        "emitida",
+        "recibido",
+      ]);
       if (estadoIndex >= 0) {
         rows = rows.filter((row) => {
           const estado = normalizeSimple(row[estadoIndex] || "");
@@ -10445,6 +10457,12 @@ const loadSegurosCrm = () => {
         segurosReferidosClienteId
       );
     }
+  }).catch((error) => {
+    const message = error?.data?.error || error?.message || "No se pudieron cargar las pólizas.";
+    segurosCrmTable.innerHTML = `<p class='muted'>${message}</p>`;
+    segurosCrmInfo.textContent = "";
+    state.segurosCrmData = { columns: [], rows: [] };
+    renderSegurosRamosDashboard();
   });
 };
 
