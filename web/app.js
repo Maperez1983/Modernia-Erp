@@ -1061,6 +1061,7 @@ const state = {
   clienteDocsTab: "seguros",
   segurosBdtCache: null,
   segurosRamosSource: null,
+  segurosComisionesRows: null,
   segurosCrmData: null,
   segurosRamoSelected: "",
   segurosKpisCache: null,
@@ -1508,6 +1509,9 @@ const seguroOcrFechaEfecto = document.getElementById("seguroOcrFechaEfecto");
 const seguroOcrFechaVencimiento = document.getElementById("seguroOcrFechaVencimiento");
 const seguroOcrPrimaNeta = document.getElementById("seguroOcrPrimaNeta");
 const seguroOcrPrimaTotal = document.getElementById("seguroOcrPrimaTotal");
+const seguroOcrComisionPct = document.getElementById("seguroOcrComisionPct");
+const seguroOcrComisionEst = document.getElementById("seguroOcrComisionEst");
+const seguroOcrComisionSource = document.getElementById("seguroOcrComisionSource");
 const segurosBdtOcrFile = document.getElementById("segurosBdtOcrFile");
 const segurosBdtOcrButton = document.getElementById("segurosBdtOcrButton");
 const segurosBdtOcrStatus = document.getElementById("segurosBdtOcrStatus");
@@ -11160,10 +11164,108 @@ const loadSegurosCampanas = () => {
   });
 };
 
+const segurosComisionTipoFromProduccion = (produccion = "") => {
+  const value = normalizeSimple(produccion);
+  if (value.includes("cambio")) return "cartera";
+  return "nueva produccion";
+};
+
+const parseSegurosComisionRamoTipo = (value = "") => {
+  const raw = String(value || "").trim();
+  const match = raw.match(/^(.*)\[(.*)\]\s*$/);
+  if (!match) {
+    return { ramo: raw, tipo: "" };
+  }
+  return {
+    ramo: String(match[1] || "").trim(),
+    tipo: String(match[2] || "").trim(),
+  };
+};
+
+const scoreSegurosComisionMatch = (row, compania, ramo, tipo) => {
+  const rowComp = normalizeSimple(row.compania || "");
+  if (!rowComp || rowComp !== compania) return -1;
+  const parsed = parseSegurosComisionRamoTipo(row.ramo || "");
+  const rowRamo = normalizeSimple(parsed.ramo || "");
+  const rowTipo = normalizeSimple(parsed.tipo || "");
+  let score = 10;
+  if (rowRamo && ramo) {
+    if (rowRamo === ramo) score += 60;
+    else if (ramo.includes(rowRamo) || rowRamo.includes(ramo)) score += 35;
+    else score -= 20;
+  }
+  if (rowTipo === tipo) score += 30;
+  else if (rowTipo.includes("general")) score += 10;
+  else if (rowTipo.includes("variable")) score += 5;
+  else if (rowTipo) score -= 10;
+  return score;
+};
+
+const getSegurosComisionSuggestion = () => {
+  const rows = Array.isArray(state.segurosComisionesRows) ? state.segurosComisionesRows : [];
+  if (!rows.length || !seguroOcrCompania) return null;
+  const compania = normalizeSimple(seguroOcrCompania.value);
+  if (!compania) return null;
+  const ramo = normalizeSimple(seguroOcrRamo ? seguroOcrRamo.value : "");
+  const tipo = segurosComisionTipoFromProduccion(seguroOcrProduccion ? seguroOcrProduccion.value : "");
+  let best = null;
+  let bestScore = -1;
+  rows.forEach((row) => {
+    const score = scoreSegurosComisionMatch(row, compania, ramo, tipo);
+    if (score > bestScore) {
+      bestScore = score;
+      best = row;
+    }
+  });
+  if (!best || bestScore < 20) return null;
+  const pct = Number(best.porcentaje);
+  if (!Number.isFinite(pct)) return null;
+  const primaTotal = toNumber(seguroOcrPrimaTotal ? seguroOcrPrimaTotal.value : "");
+  const comisionEstimada = Number.isFinite(primaTotal) ? (primaTotal * pct) / 100 : 0;
+  return {
+    pct,
+    comisionEstimada,
+    source: `${best.compania || ""} · ${best.ramo || ""}`.trim(),
+  };
+};
+
+const getSegurosOcrComisionAmount = () => {
+  const suggestion = getSegurosComisionSuggestion();
+  if (!suggestion) return null;
+  return Number.isFinite(suggestion.comisionEstimada) ? suggestion.comisionEstimada : null;
+};
+
+const refreshSegurosOcrComisionSuggestion = () => {
+  if (!seguroOcrComisionPct || !seguroOcrComisionEst) return;
+  if (!Array.isArray(state.segurosComisionesRows)) {
+    api("/api/seguros_comisiones")
+      .then((data) => {
+        state.segurosComisionesRows = data.rows || [];
+        refreshSegurosOcrComisionSuggestion();
+      })
+      .catch(() => {});
+    return;
+  }
+  const suggestion = getSegurosComisionSuggestion();
+  if (!suggestion) {
+    seguroOcrComisionPct.value = "";
+    seguroOcrComisionEst.value = "";
+    if (seguroOcrComisionSource) seguroOcrComisionSource.textContent = "";
+    return;
+  }
+  seguroOcrComisionPct.value = `${suggestion.pct.toFixed(2)}%`;
+  seguroOcrComisionEst.value = euroFormatter.format(suggestion.comisionEstimada || 0);
+  if (seguroOcrComisionSource) {
+    seguroOcrComisionSource.textContent = `Comisión aplicada desde: ${suggestion.source}`;
+  }
+};
+
 const loadSegurosComisiones = () => {
   if (!segurosComisionesTable || !segurosComisionesInfo) return;
   api("/api/seguros_comisiones").then((data) => {
     const rawRows = data.rows || [];
+    state.segurosComisionesRows = rawRows;
+    refreshSegurosOcrComisionSuggestion();
     const rows = filterRowsByQuery(
       rawRows,
       segurosComisionesSearch ? segurosComisionesSearch.value : "",
@@ -11755,6 +11857,7 @@ const resetSegurosOcrAggregator = (options = {}) => {
     segurosOcrSave.removeAttribute("data-record-id");
     segurosOcrSave.textContent = "Guardar póliza";
   }
+  refreshSegurosOcrComisionSuggestion();
 };
 
 const resetSegurosBdtOcrAggregator = () => {
@@ -12136,6 +12239,7 @@ const fillSegurosOcrFields = (fields = {}) => {
       seguroOcrFechaVencimiento.value = addOneYear(seguroOcrFechaEfecto.value);
     }
   }
+  refreshSegurosOcrComisionSuggestion();
 };
 
 const loadGestoriaBdt = async () => {
@@ -12277,6 +12381,10 @@ const saveSegurosOcrRecord = async () => {
     colaborador: seguroOcrColaborador ? seguroOcrColaborador.value.trim() : "",
     estado: seguroOcrEstado ? seguroOcrEstado.value : "",
   };
+  const comisionEstimada = getSegurosOcrComisionAmount();
+  if (Number.isFinite(comisionEstimada)) {
+    payload.comision = comisionEstimada;
+  }
   if (!payload.cliente_id && payload.nif) {
     const data = await lookupClienteByNif(payload.nif);
     if (data && data.found) {
@@ -12400,6 +12508,7 @@ const openSegurosPresupuestoEdit = (columns, row) => {
   if (seguroOcrProduccion) seguroOcrProduccion.value = getVal("produccion") || "";
   if (seguroOcrColaborador) seguroOcrColaborador.value = getVal("colaborador") || "";
   if (seguroOcrEstado) seguroOcrEstado.value = "Presupuesto";
+  refreshSegurosOcrComisionSuggestion();
   if (segurosOcrSave) {
     segurosOcrSave.dataset.recordId = getVal("id") || "";
     segurosOcrSave.textContent = "Guardar cambios y convertir";
@@ -17054,6 +17163,10 @@ if (segurosOcrSave) {
         produccion: seguroOcrProduccion ? seguroOcrProduccion.value.trim() : "",
         colaborador: seguroOcrColaborador ? seguroOcrColaborador.value.trim() : "",
       };
+      const comisionEstimada = getSegurosOcrComisionAmount();
+      if (Number.isFinite(comisionEstimada)) {
+        payload.comision = comisionEstimada;
+      }
       const file =
         segurosOcrFile && segurosOcrFile.files && segurosOcrFile.files.length
           ? segurosOcrFile.files[0]
@@ -17296,13 +17409,29 @@ if (segurosBdtOcrDni) {
 
 if (seguroOcrCompania) {
   seguroOcrCompania.addEventListener("change", () => {
-    if (!state.segurosRamosSource) return;
-    refreshSegurosRamosList(
-      state.segurosRamosSource.columns || [],
-      state.segurosRamosSource.rows || [],
-      seguroOcrCompania.value || ""
-    );
+    if (state.segurosRamosSource) {
+      refreshSegurosRamosList(
+        state.segurosRamosSource.columns || [],
+        state.segurosRamosSource.rows || [],
+        seguroOcrCompania.value || ""
+      );
+    }
+    refreshSegurosOcrComisionSuggestion();
   });
+}
+
+if (seguroOcrRamo) {
+  seguroOcrRamo.addEventListener("input", refreshSegurosOcrComisionSuggestion);
+  seguroOcrRamo.addEventListener("change", refreshSegurosOcrComisionSuggestion);
+}
+
+if (seguroOcrProduccion) {
+  seguroOcrProduccion.addEventListener("change", refreshSegurosOcrComisionSuggestion);
+}
+
+if (seguroOcrPrimaTotal) {
+  seguroOcrPrimaTotal.addEventListener("input", refreshSegurosOcrComisionSuggestion);
+  seguroOcrPrimaTotal.addEventListener("change", refreshSegurosOcrComisionSuggestion);
 }
 
 if (segurosBdtOcrCompania) {

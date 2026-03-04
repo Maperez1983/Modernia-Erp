@@ -1,0 +1,29 @@
+compania,archivo,producto_ramo,tipo,comision_pct,condiciones,confidence
+PELAYO,"30784700 FINCAS VELAZQUEZ, SL.pdf","Autos (varios)","NP/Cartera",10.00,"Varias modalidades en cuadro de comisiones",alta
+PELAYO,"30784700 FINCAS VELAZQUEZ, SL.pdf","Autos (segmento)","NP/Cartera",6.00,"Fila específica del cuadro",media
+PELAYO,"30784700 FINCAS VELAZQUEZ, SL.pdf","Autos (segmento)","NP/Cartera",8.00,"Fila específica del cuadro",media
+PELAYO,"30784700 FINCAS VELAZQUEZ, SL.pdf","Hogar Plus/Premium","NP/Cartera",22.00,"Pisos",alta
+PELAYO,"30784700 FINCAS VELAZQUEZ, SL.pdf","Hogar Plus/Premium","NP/Cartera",20.00,"Unifamiliares",alta
+PELAYO,"30784700 FINCAS VELAZQUEZ, SL.pdf","Accidentes","NP/Cartera",25.00,"Accidentes",alta
+PELAYO,"30784700 FINCAS VELAZQUEZ, SL.pdf","Accidentes Convenio","NP/Cartera",15.00,"Convenio",alta
+PELAYO,"30784700 FINCAS VELAZQUEZ, SL.pdf","Oficinas","NP/Cartera",20.00,"Ramo oficinas",media
+PELAYO,"30784700 FINCAS VELAZQUEZ, SL.pdf","Pymes","NP/Cartera",20.00,"Ramo pymes",media
+PELAYO,"30784700 FINCAS VELAZQUEZ, SL.pdf","Comunidades Compromiso","Nueva Producción",25.00,"Bloque final de comisiones",alta
+PELAYO,"30784700 FINCAS VELAZQUEZ, SL.pdf","Comunidades Compromiso","Cartera",20.00,"Bloque final de comisiones",alta
+REALE,"ANEXO II COMISIONES.pdf","Reale Contigo (Decesos) <75","Nueva Producción",40.00,"Hasta edad 74",alta
+REALE,"ANEXO II COMISIONES.pdf","Reale Contigo (Decesos) <75","Cartera",20.00,"Hasta edad 74",alta
+REALE,"ANEXO II COMISIONES.pdf","Reale Contigo (Decesos) >=75","NP/Cartera",10.00,"Desde 75 años",alta
+REALE,"CONTRATO + COMISIONES VIDA.pdf","4104 Reale Temporal a Plazo","Primer año",20.00,"Tabla comisión total",alta
+REALE,"CONTRATO + COMISIONES VIDA.pdf","4104 Reale Temporal a Plazo","Años sucesivos",20.00,"Tabla comisión total",alta
+REALE,"CONTRATO + COMISIONES VIDA.pdf","4105 Reale Vida Global","Primer año",25.00,"Tabla comisión total",alta
+REALE,"CONTRATO + COMISIONES VIDA.pdf","4105 Reale Vida Global","Años sucesivos",25.00,"Tabla comisión total",alta
+REALE,"CONTRATO + COMISIONES VIDA.pdf","4107 Reale Vida Esencia II","Primer año",25.00,"Tabla comisión total",alta
+REALE,"CONTRATO + COMISIONES VIDA.pdf","4107 Reale Vida Esencia II","Años sucesivos",25.00,"Tabla comisión total",alta
+REALE,"CONTRATO + COMISIONES VIDA.pdf","4109 Reale Temporal a Plazo PU","Primer año",20.00,"Tabla comisión total",alta
+REALE,"CONTRATO + COMISIONES VIDA.pdf","4109 Reale Temporal a Plazo PU","Años sucesivos",0.00,"Tabla comisión total",alta
+EXSEL,"CARTA DE CONDICIONES formulario V1024.pdf","General colaboración","Sobre prima neta",17.50,"Texto literal de condiciones",alta
+EXSEL,"CARTA DE CONDICIONES formulario V1024.pdf","C044 Catalana Occidente Arquitecto Sociedades","Producto",20.00,"Tabla anexo",alta
+EXSEL,"CARTA DE CONDICIONES formulario V1024.pdf","R400 Escudo Ciber","Producto",20.00,"Tabla anexo",alta
+EXSEL,"CARTA DE CONDICIONES formulario V1024.pdf","Great American Seguro Objetos y Bienes","Producto",20.00,"Tabla anexo",alta
+EXSEL,"CARTA DE CONDICIONES formulario V1024.pdf","R555 Insurance Europe RC General","Producto",20.00,"Tabla anexo",alta
+SANTA LUCIA,"6179 FINCAS VELAZQUEZ, S.L[80].pdf","Cláusula mediador","Variable",15.00,"Indica que puede variar entre 0 y 15%",media

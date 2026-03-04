@@ -290,6 +290,19 @@ def uploaded_policy_filter(alias=""):
     prefix = f"{alias}." if alias else ""
     return f"(COALESCE({prefix}poliza_key, '') <> '' OR COALESCE({prefix}poliza_url, '') <> '')"
 
+
+def in_vigor_policy_filter(alias=""):
+    prefix = f"{alias}." if alias else ""
+    estado_expr = f"LOWER(TRIM(COALESCE({prefix}estado, '')))"
+    estado_poliza_expr = f"LOWER(TRIM(COALESCE({prefix}estado_poliza, '')))"
+    # Considera variaciones operativas reales en producción (activo/activa/alta/emitida).
+    return (
+        f"({estado_expr} IN ("
+        "'en vigor', 'en_vigor', 'vigente', 'poliza', 'póliza', 'poliza en vigor', "
+        "'activo', 'activa', 'alta', 'emitida', 'recibido'"
+        f") OR {estado_poliza_expr} IN ('activa', 'activo', 'en vigor', 'vigente'))"
+    )
+
 def normalize_poliza_key(value):
     if not value:
         return ""
@@ -8496,6 +8509,9 @@ class Handler(BaseHTTPRequestHandler):
                     "tipo_vigencia",
                     "prima_neta",
                     "prima_total",
+                    "comision",
+                    "produccion",
+                    "colaborador",
                 ):
                     incoming = payload.get(key)
                     if key == "ramo":
@@ -9073,6 +9089,9 @@ class Handler(BaseHTTPRequestHandler):
                 "tomador",
                 "prima_neta",
                 "prima_total",
+                "comision",
+                "produccion",
+                "colaborador",
                 "fecha_efecto",
                 "fecha_vencimiento",
                 "fecha_baja",
@@ -11973,7 +11992,7 @@ class Handler(BaseHTTPRequestHandler):
             if not empresa_id:
                 json_response(self, {"error": "empresa_id requerido"}, status=400)
                 return
-            estado_expr = "LOWER(TRIM(estado))"
+            in_vigor_expr = in_vigor_policy_filter()
             compania_expr = "LOWER(TRIM(compania))"
             exclude_sin_seguro = f"({compania_expr} IS NULL OR {compania_expr} = '' OR {compania_expr} != 'sin seguro')"
             uploaded_clause = uploaded_policy_filter()
@@ -11983,7 +12002,7 @@ class Handler(BaseHTTPRequestHandler):
                 FROM seguros
                 WHERE empresa_id = ?
                   AND ({uploaded_clause} OR ? = 0)
-                  AND {estado_expr} IN ('en vigor', 'en_vigor', 'vigente', 'poliza', 'póliza', 'poliza en vigor')
+                  AND {in_vigor_expr}
                   AND {exclude_sin_seguro}
                 GROUP BY ramo
                 ORDER BY total DESC
@@ -11996,7 +12015,7 @@ class Handler(BaseHTTPRequestHandler):
                 FROM seguros
                 WHERE empresa_id = ?
                   AND ({uploaded_clause} OR ? = 0)
-                  AND {estado_expr} IN ('en vigor', 'en_vigor', 'vigente', 'poliza', 'póliza', 'poliza en vigor')
+                  AND {in_vigor_expr}
                   AND {exclude_sin_seguro}
                 GROUP BY compania
                 ORDER BY total DESC
@@ -13286,7 +13305,7 @@ class Handler(BaseHTTPRequestHandler):
                 SELECT
                   SUM(CASE WHEN {estado_expr} IN ('presupuesto', 'presupuestos') THEN 1 ELSE 0 END) AS presupuesto,
                   SUM(CASE WHEN {estado_expr} IN ('contratada', 'contratado', 'contrato', 'proyecto') THEN 1 ELSE 0 END) AS contratada,
-                  SUM(CASE WHEN {estado_expr} IN ('en vigor', 'en_vigor', 'vigente', 'poliza', 'póliza', 'poliza en vigor') THEN 1 ELSE 0 END) AS en_vigor
+                  SUM(CASE WHEN {in_vigor_expr} THEN 1 ELSE 0 END) AS en_vigor
                 FROM seguros
                 WHERE empresa_id = ?
                   AND ({uploaded_clause} OR ? = 0)
@@ -13301,7 +13320,7 @@ class Handler(BaseHTTPRequestHandler):
                 SELECT
                   SUM(CASE WHEN {estado_expr} IN ('presupuesto', 'presupuestos') THEN 1 ELSE 0 END) AS presupuesto,
                   SUM(CASE WHEN {estado_expr} IN ('contratada', 'contratado', 'contrato', 'proyecto') THEN 1 ELSE 0 END) AS contratada,
-                  SUM(CASE WHEN {estado_expr} IN ('en vigor', 'en_vigor', 'vigente', 'poliza', 'póliza', 'poliza en vigor') THEN 1 ELSE 0 END) AS en_vigor
+                  SUM(CASE WHEN {in_vigor_expr} THEN 1 ELSE 0 END) AS en_vigor
                 FROM seguros
                 WHERE empresa_id = ?
                   AND ({uploaded_clause} OR ? = 0)
@@ -13316,7 +13335,7 @@ class Handler(BaseHTTPRequestHandler):
                   {year_expr} AS year,
                   SUM(CASE WHEN {estado_expr} IN ('presupuesto', 'presupuestos') THEN 1 ELSE 0 END) AS presupuesto,
                   SUM(CASE WHEN {estado_expr} IN ('contratada', 'contratado', 'contrato', 'proyecto') THEN 1 ELSE 0 END) AS contratada,
-                  SUM(CASE WHEN {estado_expr} IN ('en vigor', 'en_vigor', 'vigente', 'poliza', 'póliza', 'poliza en vigor') THEN 1 ELSE 0 END) AS en_vigor
+                  SUM(CASE WHEN {in_vigor_expr} THEN 1 ELSE 0 END) AS en_vigor
                 FROM seguros
                 WHERE empresa_id = ?
                   AND ({uploaded_clause} OR ? = 0)
@@ -13356,7 +13375,7 @@ class Handler(BaseHTTPRequestHandler):
                 FROM seguros
                 WHERE empresa_id = ?
                   AND ({uploaded_clause} OR ? = 0)
-                  AND {estado_expr} IN ('en vigor', 'en_vigor', 'vigente', 'poliza', 'póliza', 'poliza en vigor')
+                  AND {in_vigor_expr}
                   AND {exclude_sin_seguro}
                 GROUP BY COALESCE(NULLIF(TRIM(colaborador), ''), 'Sin responsable')
                 ORDER BY total DESC
@@ -13458,6 +13477,7 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "empresa_id requerido"}, status=400)
                 return
             estado_expr = "LOWER(TRIM(estado))"
+            in_vigor_expr = in_vigor_policy_filter()
             uploaded_clause = uploaded_policy_filter()
             total = conn.execute(
                 f"""
@@ -13474,7 +13494,7 @@ class Handler(BaseHTTPRequestHandler):
                 FROM seguros
                 WHERE empresa_id = ?
                   AND ({uploaded_clause} OR ? = 0)
-                  AND {estado_expr} IN ('en vigor', 'en_vigor', 'vigente', 'poliza', 'póliza', 'poliza en vigor')
+                  AND {in_vigor_expr}
                 """,
                 (empresa_id, 1 if uploaded_only else 0),
             ).fetchone()
@@ -13485,7 +13505,7 @@ class Handler(BaseHTTPRequestHandler):
                 WHERE empresa_id = ?
                   AND ({uploaded_clause} OR ? = 0)
                   AND COALESCE(fecha_vencimiento, DATE(fecha_efecto, '+1 year')) IS NOT NULL
-                  AND {estado_expr} IN ('en vigor', 'en_vigor', 'vigente', 'poliza', 'póliza', 'poliza en vigor')
+                  AND {in_vigor_expr}
                   AND DATE(COALESCE(fecha_vencimiento, DATE(fecha_efecto, '+1 year'))) BETWEEN DATE('now','localtime')
                       AND DATE('now','localtime','+30 days')
                 """,
@@ -13503,7 +13523,7 @@ class Handler(BaseHTTPRequestHandler):
                     compania IS NULL OR TRIM(compania) = '' OR
                     fecha_efecto IS NULL OR TRIM(fecha_efecto) = ''
                   )
-                  AND {estado_expr} IN ('en vigor', 'en_vigor', 'vigente', 'poliza', 'póliza', 'poliza en vigor')
+                  AND {in_vigor_expr}
                 """,
                 (empresa_id, 1 if uploaded_only else 0),
             ).fetchone()
@@ -13523,7 +13543,7 @@ class Handler(BaseHTTPRequestHandler):
                 FROM seguros
                 WHERE empresa_id = ?
                   AND ({uploaded_clause} OR ? = 0)
-                  AND {estado_expr} IN ('en vigor', 'en_vigor', 'vigente', 'poliza', 'póliza', 'poliza en vigor')
+                  AND {in_vigor_expr}
                 """,
                 (empresa_id, 1 if uploaded_only else 0),
             ).fetchone()
