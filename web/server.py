@@ -6170,6 +6170,8 @@ def ensure_tables(db_path):
           id TEXT PRIMARY KEY,
           empresa_id TEXT,
           cliente_id TEXT,
+          seguro_id TEXT,
+          poliza_numero TEXT,
           fecha TEXT,
           concepto TEXT,
           gestion TEXT,
@@ -6481,6 +6483,10 @@ def ensure_tables(db_path):
     conta_cols = [row[1] for row in conn.execute("PRAGMA table_info(gestoria_contabilidad)").fetchall()]
     if "gestion" not in conta_cols:
         conn.execute("ALTER TABLE gestoria_contabilidad ADD COLUMN gestion TEXT")
+    if "seguro_id" not in conta_cols:
+        conn.execute("ALTER TABLE gestoria_contabilidad ADD COLUMN seguro_id TEXT")
+    if "poliza_numero" not in conta_cols:
+        conn.execute("ALTER TABLE gestoria_contabilidad ADD COLUMN poliza_numero TEXT")
     load_postal_catalog(conn)
     conn.commit()
     conn.close()
@@ -7812,19 +7818,30 @@ class Handler(BaseHTTPRequestHandler):
                 return
             conn.execute("DELETE FROM usuarios WHERE id = ?", (user_id,))
         elif parsed.path == "/api/gestoria_contabilidad":
+            seguro_id = (payload.get("seguro_id") or "").strip()
+            poliza_numero = ""
+            if seguro_id:
+                seguro_row = conn.execute(
+                    "SELECT poliza_numero FROM seguros WHERE id = ? LIMIT 1",
+                    (seguro_id,),
+                ).fetchone()
+                if seguro_row:
+                    poliza_numero = (seguro_row["poliza_numero"] or "").strip()
             conn.execute(
                 """
                 INSERT INTO gestoria_contabilidad (
-                  id, empresa_id, cliente_id, fecha, concepto, gestion, tipo, importe, notas,
+                  id, empresa_id, cliente_id, seguro_id, poliza_numero, fecha, concepto, gestion, tipo, importe, notas,
                   created_at, updated_at
                 ) VALUES (
-                  ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
                 )
                 """,
                 (
                     os.urandom(16).hex(),
                     empresa["id"],
                     payload.get("cliente_id"),
+                    seguro_id or None,
+                    poliza_numero,
                     payload.get("fecha"),
                     payload.get("concepto"),
                     payload.get("gestion"),
@@ -7840,13 +7857,28 @@ class Handler(BaseHTTPRequestHandler):
             if not record_id:
                 json_response(self, {"error": "id requerido"}, status=400)
                 return
-            allowed = ("fecha", "concepto", "gestion", "tipo", "importe", "notas", "cliente_id")
+            allowed = ("fecha", "concepto", "gestion", "tipo", "importe", "notas", "cliente_id", "seguro_id")
             updates = []
             values = []
             for field in allowed:
                 if field in payload:
                     updates.append(f"{field} = ?")
-                    values.append(payload.get(field))
+                    if field == "seguro_id":
+                        values.append((payload.get(field) or "").strip() or None)
+                    else:
+                        values.append(payload.get(field))
+            if "seguro_id" in payload:
+                seguro_id = (payload.get("seguro_id") or "").strip()
+                poliza_numero = ""
+                if seguro_id:
+                    seguro_row = conn.execute(
+                        "SELECT poliza_numero FROM seguros WHERE id = ? LIMIT 1",
+                        (seguro_id,),
+                    ).fetchone()
+                    if seguro_row:
+                        poliza_numero = (seguro_row["poliza_numero"] or "").strip()
+                updates.append("poliza_numero = ?")
+                values.append(poliza_numero)
             if not updates:
                 json_response(self, {"error": "sin cambios"}, status=400)
                 return
@@ -12315,9 +12347,12 @@ class Handler(BaseHTTPRequestHandler):
             rows = conn.execute(
                 f"""
                 SELECT gc.id, gc.fecha, gc.concepto, gc.gestion, gc.tipo, gc.importe, gc.notas,
-                       gc.cliente_id, COALESCE(c.nombre, '') AS cliente
+                       gc.cliente_id, gc.seguro_id,
+                       COALESCE(NULLIF(gc.poliza_numero, ''), s.poliza_numero, '') AS poliza_numero,
+                       COALESCE(c.nombre, '') AS cliente
                 FROM gestoria_contabilidad gc
                 LEFT JOIN clientes c ON c.id = gc.cliente_id
+                LEFT JOIN seguros s ON s.id = gc.seguro_id
                 WHERE {where_clause}
                 ORDER BY gc.fecha DESC
                 LIMIT 300
@@ -13311,6 +13346,7 @@ class Handler(BaseHTTPRequestHandler):
             year_expr = "STRFTIME('%Y', created_at)"
             exclude_sin_seguro = f"({compania_expr} IS NULL OR {compania_expr} = '' OR {compania_expr} != 'sin seguro')"
             uploaded_clause = uploaded_policy_filter()
+            in_vigor_expr = in_vigor_policy_filter()
 
             current = conn.execute(
                 f"""
@@ -13396,6 +13432,44 @@ class Handler(BaseHTTPRequestHandler):
                 (empresa_id, 1 if uploaded_only else 0),
             ).fetchall()
 
+            facturacion_year = conn.execute(
+                f"""
+                SELECT COALESCE(SUM(COALESCE(comision, 0)), 0) AS total
+                FROM seguros
+                WHERE empresa_id = ?
+                  AND ({uploaded_clause} OR ? = 0)
+                  AND {year_expr} = ?
+                  AND {exclude_sin_seguro}
+                """,
+                (empresa_id, 1 if uploaded_only else 0, year),
+            ).fetchone()
+            facturacion_total = conn.execute(
+                f"""
+                SELECT COALESCE(SUM(COALESCE(comision, 0)), 0) AS total
+                FROM seguros
+                WHERE empresa_id = ?
+                  AND ({uploaded_clause} OR ? = 0)
+                  AND {exclude_sin_seguro}
+                """,
+                (empresa_id, 1 if uploaded_only else 0),
+            ).fetchone()
+            gastos_year = conn.execute(
+                """
+                SELECT COALESCE(SUM(CASE WHEN LOWER(COALESCE(tipo, '')) = 'gasto' THEN COALESCE(importe, 0) ELSE 0 END), 0) AS total
+                FROM gestoria_contabilidad
+                WHERE empresa_id = ? AND STRFTIME('%Y', fecha) = ?
+                """,
+                (empresa_id, year),
+            ).fetchone()
+            gastos_total = conn.execute(
+                """
+                SELECT COALESCE(SUM(CASE WHEN LOWER(COALESCE(tipo, '')) = 'gasto' THEN COALESCE(importe, 0) ELSE 0 END), 0) AS total
+                FROM gestoria_contabilidad
+                WHERE empresa_id = ?
+                """,
+                (empresa_id,),
+            ).fetchone()
+
             json_response(
                 self,
                 {
@@ -13409,6 +13483,10 @@ class Handler(BaseHTTPRequestHandler):
                         "en_vigor_total": total_en_vigor or 0,
                         "total_global": total_global or 0,
                         "conversion_total": conversion_global,
+                        "facturacion_comision": facturacion_year["total"] if facturacion_year else 0,
+                        "facturacion_comision_total": facturacion_total["total"] if facturacion_total else 0,
+                        "gastos": gastos_year["total"] if gastos_year else 0,
+                        "gastos_total": gastos_total["total"] if gastos_total else 0,
                     },
                     "series": series_payload,
                     "responsables": [dict(r) for r in responsables],

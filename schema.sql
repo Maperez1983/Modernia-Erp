@@ -188,6 +188,8 @@ CREATE TABLE IF NOT EXISTS gestoria_contabilidad (
   id TEXT PRIMARY KEY,
   empresa_id TEXT,
   cliente_id TEXT,
+  seguro_id TEXT,
+  poliza_numero TEXT,
   fecha TEXT,
   concepto TEXT,
   gestion TEXT,

@@ -1380,6 +1380,7 @@ const gestoriaAgendaInfo = document.getElementById("gestoriaAgendaInfo");
 const gestoriaContabilidadForm = document.getElementById("gestoriaContabilidadForm");
 const gestoriaContabilidadStatus = document.getElementById("gestoriaContabilidadStatus");
 const gestoriaContabilidadCliente = document.getElementById("gestoriaContabilidadCliente");
+const gestoriaContabilidadPoliza = document.getElementById("gestoriaContabilidadPoliza");
 const gestoriaContabilidadTable = document.getElementById("gestoriaContabilidadTable");
 const gestoriaContabilidadInfo = document.getElementById("gestoriaContabilidadInfo");
 const gestoriaContaConfigForm = document.getElementById("gestoriaContaConfigForm");
@@ -6066,6 +6067,47 @@ const resolveClienteFromInput = (inputEl, hiddenEl) => {
   return { cliente_id: clienteId || "", cliente_nombre: nombre || "" };
 };
 
+const gestoriaContabilidadSegurosCache = new Map();
+
+const loadSegurosForClienteContabilidad = async (clienteId) => {
+  const key = String(clienteId || "").trim();
+  if (!key) return [];
+  if (gestoriaContabilidadSegurosCache.has(key)) {
+    return gestoriaContabilidadSegurosCache.get(key) || [];
+  }
+  try {
+    const payload = await api(`/api/seguros_cliente?cliente_id=${encodeURIComponent(key)}&uploaded_only=0`);
+    const rows = Array.isArray(payload?.rows) ? payload.rows : [];
+    gestoriaContabilidadSegurosCache.set(key, rows);
+    return rows;
+  } catch {
+    return [];
+  }
+};
+
+const fillGestoriaContabilidadPolizaSelect = async (selectEl, clienteId, selectedSeguroId = "") => {
+  if (!selectEl) return;
+  selectEl.innerHTML = "";
+  selectEl.appendChild(createOption("", "Sin vincular"));
+  const seguros = await loadSegurosForClienteContabilidad(clienteId);
+  seguros.forEach((seguro) => {
+    const value = String(seguro.id || "").trim();
+    if (!value) return;
+    const label = [
+      seguro.poliza_numero || "Sin número",
+      seguro.compania || "Sin compañía",
+      seguro.ramo || "",
+    ]
+      .filter(Boolean)
+      .join(" · ");
+    selectEl.appendChild(createOption(value, label));
+  });
+  selectEl.value = String(selectedSeguroId || "").trim();
+  if (selectEl.value !== String(selectedSeguroId || "").trim()) {
+    selectEl.value = "";
+  }
+};
+
 const loadGestoriaContabilidad = () => {
   if (!gestoriaContabilidadTable || !gestoriaContabilidadInfo) return;
   const empresa = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
@@ -6073,17 +6115,25 @@ const loadGestoriaContabilidad = () => {
     gestoriaContabilidadTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
     return;
   }
-  api(`/api/gestoria_contabilidad?empresa_id=${empresa.id}`).then((data) => {
+  api(`/api/gestoria_contabilidad?empresa_id=${empresa.id}`).then(async (data) => {
     const rows = data.rows || [];
     if (!rows.length) {
       gestoriaContabilidadTable.innerHTML = "<p class='muted'>Sin anotaciones contables.</p>";
       gestoriaContabilidadInfo.textContent = "";
       return;
     }
+    const clienteIds = [
+      ...new Set(
+        rows
+          .map((row) => String(row.cliente_id || "").trim())
+          .filter(Boolean)
+      ),
+    ];
+    await Promise.all(clienteIds.map((clienteId) => loadSegurosForClienteContabilidad(clienteId)));
     const table = document.createElement("table");
     const thead = document.createElement("thead");
     const trHead = document.createElement("tr");
-    ["fecha", "concepto", "gestion", "tipo", "importe", "cliente", "notas", "accion"].forEach((col) => {
+    ["fecha", "concepto", "gestion", "tipo", "importe", "importe €", "póliza", "cliente", "notas", "accion"].forEach((col) => {
       const th = document.createElement("th");
       th.textContent = formatHeader(col);
       trHead.appendChild(th);
@@ -6091,7 +6141,7 @@ const loadGestoriaContabilidad = () => {
     thead.appendChild(trHead);
     table.appendChild(thead);
     const tbody = document.createElement("tbody");
-    rows.forEach((row) => {
+    for (const row of rows) {
       const tr = document.createElement("tr");
       const buildInput = (value, field, type = "text") => {
         const input = document.createElement("input");
@@ -6151,8 +6201,31 @@ const loadGestoriaContabilidad = () => {
       tipoTd.appendChild(buildSelect(row.tipo, "tipo", ["Ingreso", "Gasto"]));
       tr.appendChild(tipoTd);
       const importeTd = document.createElement("td");
-      importeTd.appendChild(buildInput(row.importe, "importe", "number"));
+      const importeInput = buildInput(row.importe, "importe", "number");
+      importeInput.step = "0.01";
+      importeInput.min = "0";
+      importeTd.appendChild(importeInput);
       tr.appendChild(importeTd);
+      const importeEurTd = document.createElement("td");
+      const importeBadge = document.createElement("span");
+      const refreshImporteBadge = () => {
+        const parsed = Number.parseFloat(String(importeInput.value || "").replace(",", "."));
+        importeBadge.textContent = Number.isFinite(parsed) ? euroFormatter.format(parsed) : "-";
+      };
+      refreshImporteBadge();
+      importeInput.addEventListener("input", refreshImporteBadge);
+      importeInput.addEventListener("change", refreshImporteBadge);
+      importeEurTd.appendChild(importeBadge);
+      tr.appendChild(importeEurTd);
+      const polizaTd = document.createElement("td");
+      const polizaSelect = document.createElement("select");
+      polizaSelect.classList.add("inline-input");
+      await fillGestoriaContabilidadPolizaSelect(polizaSelect, row.cliente_id, row.seguro_id);
+      polizaSelect.addEventListener("change", () => {
+        saveGestoriaContabilidadField(row.id, "seguro_id", polizaSelect.value || "");
+      });
+      polizaTd.appendChild(polizaSelect);
+      tr.appendChild(polizaTd);
       const clienteTd = document.createElement("td");
       const clienteSelect = document.createElement("select");
       clienteSelect.classList.add("inline-input");
@@ -6166,6 +6239,7 @@ const loadGestoriaContabilidad = () => {
       clienteSelect.value = row.cliente_id || "";
       clienteSelect.addEventListener("change", () => {
         saveGestoriaContabilidadField(row.id, "cliente_id", clienteSelect.value);
+        fillGestoriaContabilidadPolizaSelect(polizaSelect, clienteSelect.value, "");
       });
       clienteTd.appendChild(clienteSelect);
       tr.appendChild(clienteTd);
@@ -6182,7 +6256,7 @@ const loadGestoriaContabilidad = () => {
       actionTd.appendChild(delBtn);
       tr.appendChild(actionTd);
       tbody.appendChild(tr);
-    });
+    }
     table.appendChild(tbody);
     gestoriaContabilidadTable.innerHTML = "";
     gestoriaContabilidadTable.appendChild(table);
@@ -8017,6 +8091,16 @@ const renderFincasDashboard = (empresaId) => {
         value: numberFormatter.format(current.presupuesto_total || 0),
         note: "Histórico completo",
       },
+      {
+        title: `Facturación ${current.year || selectedYear}`,
+        value: euroFormatter.format(Number(current.facturacion_comision || 0)),
+        note: "Suma de comisiones",
+      },
+      {
+        title: `Gastos ${current.year || selectedYear}`,
+        value: euroFormatter.format(Number(current.gastos || 0)),
+        note: "Apuntes contables tipo gasto",
+      },
     ];
     kpis.forEach((kpi) => {
       const card = document.createElement("div");
@@ -8108,6 +8192,11 @@ const renderFincasDashboard = (empresaId) => {
         { legend: false, showValues: true, tooltip: true }
       );
     });
+  }).catch((error) => {
+    if (fincasDashboardKpis) {
+      const msg = error?.data?.error || error?.message || "No se pudo cargar el dashboard de seguros.";
+      fincasDashboardKpis.innerHTML = `<p class='muted'>${msg}</p>`;
+    }
   });
 };
 
@@ -19104,6 +19193,15 @@ if (gestoriaAgendaForm) {
 }
 
 if (gestoriaContabilidadForm) {
+  if (gestoriaContabilidadCliente && gestoriaContabilidadPoliza) {
+    gestoriaContabilidadCliente.addEventListener("change", () => {
+      fillGestoriaContabilidadPolizaSelect(
+        gestoriaContabilidadPoliza,
+        gestoriaContabilidadCliente.value,
+        ""
+      );
+    });
+  }
   gestoriaContabilidadForm.addEventListener("submit", (event) => {
     event.preventDefault();
     if (gestoriaContabilidadStatus) {
@@ -19124,6 +19222,10 @@ if (gestoriaContabilidadForm) {
         }
         if (!data.error) {
           gestoriaContabilidadForm.reset();
+          if (gestoriaContabilidadPoliza) {
+            gestoriaContabilidadPoliza.innerHTML = "";
+            gestoriaContabilidadPoliza.appendChild(createOption("", "Sin vincular"));
+          }
           loadGestoriaContabilidad();
         }
       })
