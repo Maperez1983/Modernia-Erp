@@ -85,6 +85,15 @@ CREATE TABLE IF NOT EXISTS seguros (
   estado_renovacion TEXT,
   renovacion_fecha TEXT,
   nueva_poliza_ref TEXT,
+  poliza_key TEXT,
+  poliza_url TEXT,
+  fecha_baja TEXT,
+  motivo_baja TEXT,
+  estado_poliza TEXT,
+  poliza_origen_id TEXT,
+  poliza_sustituta_id TEXT,
+  version_grupo TEXT,
+  tipo_vigencia TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   FOREIGN KEY (empresa_id) REFERENCES empresas(id)
@@ -396,6 +405,47 @@ CREATE TABLE IF NOT EXISTS seguros_checklist (
   FOREIGN KEY (poliza_id) REFERENCES seguros(id)
 );
 
+CREATE TABLE IF NOT EXISTS seguros_eventos (
+  id TEXT PRIMARY KEY,
+  seguro_id TEXT,
+  cliente_id TEXT,
+  empresa_id TEXT,
+  tipo TEXT,
+  fecha TEXT,
+  motivo TEXT,
+  payload_json TEXT,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS seguros_reclamaciones (
+  id TEXT PRIMARY KEY,
+  seguro_id TEXT,
+  cliente_id TEXT,
+  empresa_id TEXT,
+  estado TEXT,
+  canal TEXT,
+  fecha_apertura TEXT,
+  fecha_cierre TEXT,
+  asunto TEXT,
+  detalle TEXT,
+  resolucion TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS seguros_ipid_log (
+  id TEXT PRIMARY KEY,
+  seguro_id TEXT,
+  cliente_id TEXT,
+  empresa_id TEXT,
+  documento_key TEXT,
+  documento_url TEXT,
+  fecha_entrega TEXT,
+  metodo TEXT,
+  usuario TEXT,
+  created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS fin_checklist (
   id TEXT PRIMARY KEY,
   asesoramiento_id TEXT NOT NULL,
@@ -604,13 +654,16 @@ CREATE TABLE IF NOT EXISTS inversure_operaciones (
 CREATE TABLE IF NOT EXISTS usuarios (
   id TEXT PRIMARY KEY,
   nombre TEXT NOT NULL,
-  apellido TEXT NOT NULL,
-  usuario TEXT NOT NULL,
-  email TEXT NOT NULL,
+  apellido TEXT,
+  usuario TEXT UNIQUE,
+  email TEXT UNIQUE,
   servicio TEXT,
   rol TEXT,
   password_hash TEXT,
   activo INTEGER DEFAULT 1,
+  invite_token TEXT,
+  invite_expires_at TEXT,
+  invite_sent_at TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );

@@ -66,6 +66,13 @@ class ClienteFichaTests(unittest.TestCase):
               nueva_poliza_ref TEXT,
               poliza_key TEXT,
               poliza_url TEXT,
+              fecha_baja TEXT,
+              motivo_baja TEXT,
+              estado_poliza TEXT,
+              poliza_origen_id TEXT,
+              poliza_sustituta_id TEXT,
+              version_grupo TEXT,
+              tipo_vigencia TEXT,
               created_at TEXT,
               updated_at TEXT
             );

@@ -10509,8 +10509,23 @@ const loadSegurosKpis = () => {
 };
 
 const getSegurosRamoLabel = (value) => {
-  const ramo = String(value || "").trim();
-  return ramo || "Sin ramo";
+  const raw = String(value || "").trim();
+  if (!raw) return "Sin ramo";
+  const normalized = normalizeSimple(raw).replace(/\s+/g, " ").trim();
+  if (!normalized) return "Sin ramo";
+  const aliases = {
+    "proteccion de pago": "Protección de pago",
+    "responsabilidad civil": "Responsabilidad civil",
+    "impago alquiler": "Impago alquiler",
+    "hogar alquiler": "Hogar alquiler",
+    "multirriesgo hogar": "Hogar",
+    "multirriesgo comercio": "Comercio",
+  };
+  if (aliases[normalized]) return aliases[normalized];
+  return normalized
+    .split(" ")
+    .map((token) => token.charAt(0).toUpperCase() + token.slice(1))
+    .join(" ");
 };
 
 const renderSegurosRamoListado = (ramoLabel, items = []) => {

@@ -229,6 +229,7 @@ def normalize_phone(value):
         digits = digits[-9:]
     if len(digits) == 9:
         return digits
+    return ""
 
 def parse_services_param(raw):
     if not raw:
