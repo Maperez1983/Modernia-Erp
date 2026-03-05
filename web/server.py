@@ -7167,6 +7167,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/seguros_ipid_register",
             "/api/fin_checklist_generate",
             "/api/fin_checklist_update",
+            "/api/ai_seguros_copilot",
             "/api/ai_fin_copilot",
             "/api/s3_presign",
             "/api/s3_multipart_start",
@@ -7265,6 +7266,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/seguros_reclamacion_update",
             "/api/seguros_reclamacion_delete",
             "/api/seguros_ipid_register",
+            "/api/ai_seguros_copilot",
         ):
             empresa = conn.execute(
                 "SELECT id FROM empresas WHERE nombre = ?",
