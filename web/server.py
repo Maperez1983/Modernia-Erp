@@ -373,7 +373,12 @@ def canonicalize_ramo(value):
         "HOGAR ALQUILER",
     ):
         return "Protección de pagos"
-    if "IMPAGO" in key or "PROTECCION PAGO" in key or "PROTECCION DE PAGOS" in key:
+    if (
+        "IMPAGO" in key
+        or "PROTECCION PAGO" in key
+        or "PROTECCION DE PAGO" in key
+        or "PROTECCION DE PAGOS" in key
+    ):
         return "Protección de pagos"
     if "DEFENSA JURIDICA" in key or key.startswith("ARAG"):
         return "Defensa jurídica"
@@ -11997,19 +12002,25 @@ class Handler(BaseHTTPRequestHandler):
             compania_expr = "LOWER(TRIM(compania))"
             exclude_sin_seguro = f"({compania_expr} IS NULL OR {compania_expr} = '' OR {compania_expr} != 'sin seguro')"
             uploaded_clause = uploaded_policy_filter()
-            por_ramo = conn.execute(
+            por_ramo_raw = conn.execute(
                 f"""
-                SELECT ramo, COUNT(*) AS total
+                SELECT ramo
                 FROM seguros
                 WHERE empresa_id = ?
                   AND ({uploaded_clause} OR ? = 0)
                   AND {in_vigor_expr}
                   AND {exclude_sin_seguro}
-                GROUP BY ramo
-                ORDER BY total DESC
                 """,
                 (empresa_id, 1 if uploaded_only else 0),
             ).fetchall()
+            por_ramo_map = {}
+            for row in por_ramo_raw:
+                ramo_label = canonicalize_ramo(row["ramo"]) or "Sin ramo"
+                por_ramo_map[ramo_label] = por_ramo_map.get(ramo_label, 0) + 1
+            por_ramo = [
+                {"ramo": ramo, "total": total}
+                for ramo, total in sorted(por_ramo_map.items(), key=lambda item: item[1], reverse=True)
+            ]
             por_compania = conn.execute(
                 f"""
                 SELECT compania, COUNT(*) AS total
@@ -12044,7 +12055,7 @@ class Handler(BaseHTTPRequestHandler):
             json_response(
                 self,
                 {
-                    "por_ramo": [dict(r) for r in por_ramo],
+                    "por_ramo": por_ramo,
                     "por_compania": [dict(r) for r in por_compania],
                     "ofertas_estado": [dict(r) for r in ofertas_estado],
                     "preferencias": dict(preferencias) if preferencias else {},
