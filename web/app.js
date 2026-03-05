@@ -10598,7 +10598,10 @@ const getSegurosRamoLabel = (value) => {
   const normalized = normalizeSimple(raw).replace(/\s+/g, " ").trim();
   if (!normalized) return "Sin ramo";
   const aliases = {
-    "proteccion de pago": "Protección de pago",
+    "proteccion de pago": "Protección de pagos",
+    "proteccion de pagos": "Protección de pagos",
+    "proteccion pago": "Protección de pagos",
+    "proteccion pagos": "Protección de pagos",
     "responsabilidad civil": "Responsabilidad civil",
     "impago alquiler": "Impago alquiler",
     "hogar alquiler": "Hogar alquiler",
@@ -14088,8 +14091,7 @@ const renderClienteMiniChart = (container, items = []) => {
 };
 
 const getSeguroRamoLabel = (value) => {
-  const ramo = String(value || "").trim();
-  return ramo || "Sin ramo";
+  return getSegurosRamoLabel(value);
 };
 
 const summarizeSegurosByRamo = (rows = []) => {
