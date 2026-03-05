@@ -8091,16 +8091,6 @@ const renderFincasDashboard = (empresaId) => {
         value: numberFormatter.format(current.presupuesto_total || 0),
         note: "Histórico completo",
       },
-      {
-        title: `Facturación ${current.year || selectedYear}`,
-        value: euroFormatter.format(Number(current.facturacion_comision || 0)),
-        note: "Suma de comisiones",
-      },
-      {
-        title: `Gastos ${current.year || selectedYear}`,
-        value: euroFormatter.format(Number(current.gastos || 0)),
-        note: "Apuntes contables tipo gasto",
-      },
     ];
     kpis.forEach((kpi) => {
       const card = document.createElement("div");
@@ -10575,6 +10565,11 @@ const loadSegurosKpis = () => {
     addKpi("Pólizas en vigor", data.en_vigor || 0);
     addKpi("Vencen 30 días", data.vencen_30 || 0);
     addKpi("Con faltantes", data.faltantes || 0);
+    addKpi(
+      "Facturación comisiones",
+      euroFormatter.format(Number(data.facturacion_comision || 0))
+    );
+    addKpi("Gastos", euroFormatter.format(Number(data.gastos || 0)));
     if (data.prima_total !== undefined && data.prima_total !== null) {
       addKpi("Prima total", euroFormatter.format(data.prima_total || 0));
     }

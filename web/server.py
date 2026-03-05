@@ -13569,6 +13569,8 @@ class Handler(BaseHTTPRequestHandler):
             estado_expr = "LOWER(TRIM(estado))"
             in_vigor_expr = in_vigor_policy_filter()
             uploaded_clause = uploaded_policy_filter()
+            compania_expr = "LOWER(TRIM(compania))"
+            exclude_sin_seguro = f"({compania_expr} IS NULL OR {compania_expr} = '' OR {compania_expr} != 'sin seguro')"
             total = conn.execute(
                 f"""
                 SELECT COUNT(*) AS total
@@ -13637,6 +13639,24 @@ class Handler(BaseHTTPRequestHandler):
                 """,
                 (empresa_id, 1 if uploaded_only else 0),
             ).fetchone()
+            facturacion = conn.execute(
+                f"""
+                SELECT COALESCE(SUM(COALESCE(comision, 0)), 0) AS total
+                FROM seguros
+                WHERE empresa_id = ?
+                  AND ({uploaded_clause} OR ? = 0)
+                  AND {exclude_sin_seguro}
+                """,
+                (empresa_id, 1 if uploaded_only else 0),
+            ).fetchone()
+            gastos = conn.execute(
+                """
+                SELECT COALESCE(SUM(CASE WHEN LOWER(COALESCE(tipo, '')) = 'gasto' THEN COALESCE(importe, 0) ELSE 0 END), 0) AS total
+                FROM gestoria_contabilidad
+                WHERE empresa_id = ?
+                """,
+                (empresa_id,),
+            ).fetchone()
             quality = {"alta": 0, "media": 0, "baja": 0, "desconocida": 0}
             for row in quality_rows:
                 key = (row["calidad_ocr"] or "desconocida").lower()
@@ -13651,6 +13671,8 @@ class Handler(BaseHTTPRequestHandler):
                     "vencen_30": vencen_30["total"] if vencen_30 else 0,
                     "faltantes": faltantes["total"] if faltantes else 0,
                     "prima_total": primas["total"] if primas and primas["total"] is not None else 0,
+                    "facturacion_comision": facturacion["total"] if facturacion else 0,
+                    "gastos": gastos["total"] if gastos else 0,
                     "ocr_quality": quality,
                 },
             )
