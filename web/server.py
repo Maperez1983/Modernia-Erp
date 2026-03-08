@@ -10005,14 +10005,15 @@ class Handler(BaseHTTPRequestHandler):
             if not poliza:
                 json_response(self, {"error": "Póliza no encontrada"}, status=404)
                 return
+            poliza_data = dict(poliza)
             cliente = None
-            if poliza.get("cliente_id"):
+            if poliza_data.get("cliente_id"):
                 cliente = conn.execute(
                     "SELECT id, nombre, nif, telefono, email FROM clientes WHERE id = ?",
-                    (poliza["cliente_id"],),
+                    (poliza_data["cliente_id"],),
                 ).fetchone()
             context = {
-                "poliza": dict(poliza),
+                "poliza": poliza_data,
                 "cliente": dict(cliente) if cliente else {},
             }
             if task == "email_renovacion":
