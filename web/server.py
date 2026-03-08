@@ -5,6 +5,7 @@ import json
 import os
 import sqlite3
 import urllib.parse
+import urllib.error
 import hashlib
 import base64
 import re
@@ -2101,12 +2102,12 @@ def call_openai(prompt, model=None, temperature=0.2, max_tokens=600):
                 "role": "system",
                 "content": [
                     {
-                        "type": "text",
+                        "type": "input_text",
                         "text": "Eres un copiloto interno para un CRM de seguros. Responde en español.",
                     }
                 ],
             },
-            {"role": "user", "content": [{"type": "text", "text": prompt}]},
+            {"role": "user", "content": [{"type": "input_text", "text": prompt}]},
         ],
         "temperature": temperature,
         "max_output_tokens": max_tokens,
@@ -2124,6 +2125,14 @@ def call_openai(prompt, model=None, temperature=0.2, max_tokens=600):
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
             res = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as err:
+        body = ""
+        try:
+            body = err.read().decode("utf-8", errors="replace")
+        except Exception:
+            body = ""
+        details = body or str(err)
+        return "", f"OpenAI error ({err.code}): {details}"
     except Exception as err:
         return "", f"OpenAI error: {err}"
     return extract_openai_output(res), ""
@@ -2141,7 +2150,7 @@ def call_openai_content(user_content, model=None, temperature=0.0, max_tokens=70
                 "role": "system",
                 "content": [
                     {
-                        "type": "text",
+                        "type": "input_text",
                         "text": "Eres un extractor de datos para un CRM de seguros. Responde en JSON válido cuando se solicite.",
                     }
                 ],
@@ -2164,6 +2173,14 @@ def call_openai_content(user_content, model=None, temperature=0.0, max_tokens=70
     try:
         with urllib.request.urlopen(req, timeout=45) as resp:
             res = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as err:
+        body = ""
+        try:
+            body = err.read().decode("utf-8", errors="replace")
+        except Exception:
+            body = ""
+        details = body or str(err)
+        return "", f"OpenAI error ({err.code}): {details}"
     except Exception as err:
         return "", f"OpenAI error: {err}"
     return extract_openai_output(res), ""
@@ -2309,7 +2326,7 @@ def call_openai_extract_seguro_vision(image_data_urls, text="", source_hint="", 
         f"Compañía sugerida por metadata: {hinted_company or '-'}\n\n"
         f"Texto OCR auxiliar:\n{text[:12000] if text else '(vacío)'}"
     )
-    content = [{"type": "text", "text": prompt}]
+    content = [{"type": "input_text", "text": prompt}]
     for data_url in image_data_urls[: max(1, OCR_OPENAI_VISION_PAGES)]:
         content.append({"type": "input_image", "image_url": data_url})
     output, err = call_openai_content(content, temperature=0.0, max_tokens=900)
