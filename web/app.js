@@ -8996,7 +8996,10 @@ const renderTableInto = (data, container, infoEl, label) => {
   const showPdf = label === "Seguros" && (hasPolizaKey || hasPolizaUrl);
   const showOcr =
     label === "Seguros" && currentTab === "seguros-crm" && state.segurosTab === "bdt";
+  const showSeguroFichaAction =
+    label === "Seguros" && currentTab === "seguros-crm" && state.segurosTab === "bdt";
   const idIndex = columns.indexOf("id");
+  const clienteIdIndex = columns.indexOf("cliente_id");
   const table = document.createElement("table");
   const thead = document.createElement("thead");
   const trHead = document.createElement("tr");
@@ -9016,6 +9019,11 @@ const renderTableInto = (data, container, infoEl, label) => {
   if (showOcr) {
     const th = document.createElement("th");
     th.textContent = "OCR";
+    trHead.appendChild(th);
+  }
+  if (showSeguroFichaAction) {
+    const th = document.createElement("th");
+    th.textContent = "Ficha";
     trHead.appendChild(th);
   }
   thead.appendChild(trHead);
@@ -9088,6 +9096,28 @@ const renderTableInto = (data, container, infoEl, label) => {
       td.appendChild(btn);
       td.appendChild(status);
       td.appendChild(fileInput);
+      tr.appendChild(td);
+    }
+    if (showSeguroFichaAction) {
+      const td = document.createElement("td");
+      const rowMap = buildRowMap(row, columns);
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "secondary";
+      btn.textContent = "Abrir ficha";
+      btn.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        openClienteSeguroDetail(
+          rowMap,
+          {
+            id: clienteIdIndex >= 0 ? row[clienteIdIndex] : "",
+            nombre: rowMap.tomador || "",
+          },
+          { onSaved: () => loadSegurosCrm() }
+        );
+      });
+      td.appendChild(btn);
       tr.appendChild(td);
     }
     tbody.appendChild(tr);
@@ -15081,6 +15111,8 @@ const openClienteSeguroDetail = (row, cliente = {}, options = {}) => {
       ["Fecha vencimiento", vencimiento],
       ["Prima neta", row.prima_neta ? euroFormatter.format(Number(row.prima_neta) || 0) : "-"],
       ["Prima total", row.prima_total ? euroFormatter.format(Number(row.prima_total) || 0) : "-"],
+      ["Comisión", row.comision ? euroFormatter.format(Number(row.comision) || 0) : "-"],
+      ["Producción", row.produccion ? euroFormatter.format(Number(row.produccion) || 0) : "-"],
       ["Estado renovacion", row.estado_renovacion || "-"],
       ["Fecha renovacion", row.renovacion_fecha || "-"],
       ["Nueva poliza", row.nueva_poliza_ref || "-"],
@@ -15289,6 +15321,16 @@ const openClienteSeguroDetail = (row, cliente = {}, options = {}) => {
     editPrimaTotal.placeholder = "Prima total";
     editPrimaTotal.value = formatMoneyInputValue(row.prima_total || "");
     editForm.appendChild(editPrimaTotal);
+    const editComision = document.createElement("input");
+    editComision.type = "text";
+    editComision.placeholder = "Comisión";
+    editComision.value = formatMoneyInputValue(row.comision || "");
+    editForm.appendChild(editComision);
+    const editProduccion = document.createElement("input");
+    editProduccion.type = "text";
+    editProduccion.placeholder = "Producción";
+    editProduccion.value = formatMoneyInputValue(row.produccion || "");
+    editForm.appendChild(editProduccion);
     const editEstado = document.createElement("select");
     ["En vigor", "Presupuesto", "Anulada", "Vencida"].forEach((opt) => {
       const o = document.createElement("option");
@@ -15323,6 +15365,8 @@ const openClienteSeguroDetail = (row, cliente = {}, options = {}) => {
           fecha_vencimiento: editVenc.value || "",
           prima_neta: toNumber(editPrimaNeta.value || ""),
           prima_total: toNumber(editPrimaTotal.value || ""),
+          comision: toNumber(editComision.value || ""),
+          produccion: toNumber(editProduccion.value || ""),
           estado: editEstado.value || "",
         };
         const resp = await fetch("/api/seguros_update", {
