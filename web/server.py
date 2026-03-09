@@ -18,6 +18,7 @@ import time
 import secrets
 import smtplib
 from io import BytesIO
+from copy import copy as shallow_copy
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
 from pathlib import Path
@@ -25,10 +26,11 @@ import unicodedata
 from email.message import EmailMessage
 
 try:
-    from openpyxl import Workbook
+    from openpyxl import Workbook, load_workbook
     OPENPYXL_AVAILABLE = True
 except Exception:
     Workbook = None
+    load_workbook = None
     OPENPYXL_AVAILABLE = False
 
 
@@ -67,6 +69,7 @@ OCR_DB_CONFIGURED = Path(
     or os.environ.get("DATABASE_OCR_PATH")
     or str(OCR_DB_DEFAULT)
 )
+GESTORIA_EXCEL_TEMPLATE = ROOT.parent / "templates" / "Plantilla conversor asientos facturas.xlsx"
 S3_BUCKET = os.environ.get("AWS_S3_BUCKET") or os.environ.get("S3_BUCKET")
 S3_REGION = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION")
 OCR_SUBPROCESS_TIMEOUT_SECONDS = max(15, int(os.environ.get("OCR_SUBPROCESS_TIMEOUT_SECONDS", "90")))
@@ -13275,30 +13278,71 @@ class Handler(BaseHTTPRequestHandler):
                         round(total, 2) if total else "",
                     ]
                 )
-            wb = Workbook()
-            ws = wb.active
-            ws.title = "Hoja1"
-            headers = [
-                "FECHA ASIENTO",
-                "FECHA FACTURA",
-                "Nº FACTURA",
-                "CONCEPTO",
-                "SUBCUENTA",
-                "NIF",
-                "NOMBRE",
-                "DOMICILIO",
-                "LOCALIDAD",
-                "PROVINCIA",
-                "CODIGO POSTAL",
-                "BASE IMPONIBLE",
-                "% IVA",
-                "IMPORTE IVA",
-                "SUBCUENTA GASTOS/INGRESOS",
-                "IMPORTE (TOTAL)",
-            ]
-            ws.append(headers)
-            for row in output_rows:
-                ws.append(row)
+            if GESTORIA_EXCEL_TEMPLATE.exists():
+                wb = load_workbook(GESTORIA_EXCEL_TEMPLATE)
+                ws = wb["Hoja1"] if "Hoja1" in wb.sheetnames else wb.active
+            else:
+                wb = Workbook()
+                ws = wb.active
+                ws.title = "Hoja1"
+                headers = [
+                    "FECHA ASIENTO",
+                    "FECHA FACTURA",
+                    "Nº FACTURA",
+                    "CONCEPTO",
+                    "SUBCUENTA",
+                    "NIF",
+                    "NOMBRE",
+                    "DOMICILIO",
+                    "LOCALIDAD",
+                    "PROVINCIA",
+                    "CODIGO POSTAL",
+                    "BASE IMPONIBLE",
+                    "% IVA",
+                    "IMPORTE IVA",
+                    "SUBCUENTA GASTOS/INGRESOS",
+                    "IMPORTE (TOTAL)",
+                ]
+                ws.append(headers)
+                ws.append([None] * 16)
+
+            style_row_idx = 2
+            max_existing = max(ws.max_row, style_row_idx)
+            style_cells = [ws.cell(style_row_idx, col) for col in range(1, 17)]
+            # Limpia filas de datos previas (desde la fila 2).
+            for row_idx in range(2, max_existing + 1):
+                for col in range(1, 17):
+                    ws.cell(row_idx, col).value = None
+
+            for offset, row in enumerate(output_rows, start=0):
+                row_idx = 2 + offset
+                for col in range(1, 17):
+                    target = ws.cell(row_idx, col)
+                    source = style_cells[col - 1]
+                    target._style = shallow_copy(source._style)
+                    target.number_format = source.number_format
+                    target.protection = shallow_copy(source.protection)
+                    target.alignment = shallow_copy(source.alignment)
+                    target.font = shallow_copy(source.font)
+                    target.fill = shallow_copy(source.fill)
+                    target.border = shallow_copy(source.border)
+                ws.cell(row_idx, 1).value = row[0]
+                ws.cell(row_idx, 2).value = row[1]
+                ws.cell(row_idx, 3).value = row[2]
+                # Mantiene la lógica de tu plantilla original para el concepto.
+                ws.cell(row_idx, 4).value = f'=CONCATENATE(C{row_idx}," ",G{row_idx})'
+                ws.cell(row_idx, 5).value = row[4]
+                ws.cell(row_idx, 6).value = row[5]
+                ws.cell(row_idx, 7).value = row[6]
+                ws.cell(row_idx, 8).value = row[7]
+                ws.cell(row_idx, 9).value = row[8]
+                ws.cell(row_idx, 10).value = row[9]
+                ws.cell(row_idx, 11).value = row[10]
+                ws.cell(row_idx, 12).value = row[11]
+                ws.cell(row_idx, 13).value = row[12]
+                ws.cell(row_idx, 14).value = row[13]
+                ws.cell(row_idx, 15).value = row[14]
+                ws.cell(row_idx, 16).value = row[15]
             bio = BytesIO()
             wb.save(bio)
             payload = bio.getvalue()
