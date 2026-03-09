@@ -18161,7 +18161,7 @@ if (segurosOcrButton) {
         }
         try {
           return await runSegurosOcrDirectPayload(
-            { ...payload, empresa_nombre: FINCAS_COMPANY },
+            { ...payload, empresa_nombre: FINCAS_COMPANY, fast_mode: 1 },
             { timeoutMs: 180000 }
           );
         } catch (_directErr) {

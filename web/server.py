@@ -1300,6 +1300,7 @@ def build_invoice_asiento(parsed, counterpart_account):
 
 def process_seguros_ocr(payload, conn):
     pdf_bytes = decode_seguros_payload(payload)
+    fast_mode = str(payload.get("fast_mode") or "").strip().lower() in ("1", "true", "yes", "on")
     tmp_path = None
     text = ""
     err_detail = ""
@@ -1354,7 +1355,7 @@ def process_seguros_ocr(payload, conn):
                 err_detail = ocr_err
         doc_text = ""
         missing_required = any(not fields.get(key) for key in required_keys)
-        if (missing_required or candidate_score(best_quality) < 250) and docai_available():
+        if (missing_required or candidate_score(best_quality) < 250) and docai_available() and not fast_mode:
             doc_text, doc_fields, doc_err = ocr_image_docai(pdf_bytes, "application/pdf")
             if doc_err and not err_detail:
                 err_detail = doc_err
@@ -1376,7 +1377,8 @@ def process_seguros_ocr(payload, conn):
             if doc_text and doc_text.strip():
                 method = "docai"
         missing_required = any(not fields.get(key) for key in required_keys)
-        if missing_required or candidate_score(best_quality) < 320:
+        need_zones = missing_required or (not fast_mode and candidate_score(best_quality) < 320)
+        if need_zones:
             zones_text, zones_err = ocr_poliza_key_regions(tmp_path, use_external=external_ocr_available())
             if zones_text:
                 zones_fields = parse_poliza_text(
@@ -1399,7 +1401,7 @@ def process_seguros_ocr(payload, conn):
         if hinted_company and not fields.get("compania"):
             fields["compania"] = hinted_company
         missing_required = any(not fields.get(key) for key in required_keys)
-        if openai_available() and (missing_required or candidate_score(best_quality) < 320):
+        if (not fast_mode) and openai_available() and (missing_required or candidate_score(best_quality) < 320):
             ai_text = text or ""
             if doc_text and doc_text.strip():
                 ai_text = f"{ai_text}\n\n{doc_text}".strip()
@@ -1450,7 +1452,7 @@ def process_seguros_ocr(payload, conn):
                     if candidate_score(ai_quality) >= candidate_score(best_quality):
                         fields = merged
                         best_quality = ai_quality
-        if OCR_EXPERT_MODE and candidate_fields:
+        if (not fast_mode) and OCR_EXPERT_MODE and candidate_fields:
             expert_fields, expert_sources = blend_ocr_field_candidates(candidate_fields, required_keys)
             expert_quality = compute_ocr_quality(expert_fields, required_keys)
             if candidate_score(expert_quality) >= candidate_score(best_quality):
