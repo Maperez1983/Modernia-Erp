@@ -1967,11 +1967,49 @@ const getSegurosColaboradoresCatalog = () => {
   return catalog;
 };
 
+const getSegurosRamosCatalog = () => {
+  const seen = new Set();
+  const catalog = [];
+  const add = (value) => {
+    const raw = String(value || "").trim();
+    if (!raw) return;
+    const key = normalizeSimple(raw);
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    catalog.push(raw);
+  };
+  SEGUROS_RAMOS_CATALOGO.forEach(add);
+  const source = state.segurosCrmData;
+  if (source?.columns?.length && Array.isArray(source?.rows)) {
+    const ramoIndex = source.columns.indexOf("ramo");
+    if (ramoIndex >= 0) {
+      source.rows.forEach((row) => add(row?.[ramoIndex]));
+    }
+  }
+  return catalog;
+};
+
 const refreshSegurosColaboradoresList = (columns = [], rows = []) => {
   if (!segurosColaboradoresList) return;
   segurosColaboradoresList.innerHTML = "";
   getSegurosColaboradoresCatalog().forEach((item) => {
     segurosColaboradoresList.appendChild(createOption(item.value, item.label));
+  });
+  [seguroOcrColaborador].forEach((selectEl) => {
+    if (!selectEl || selectEl.tagName !== "SELECT") return;
+    const current = String(selectEl.value || "").trim();
+    selectEl.innerHTML = "";
+    selectEl.appendChild(createOption("", "Selecciona colaborador"));
+    getSegurosColaboradoresCatalog().forEach((item) => {
+      selectEl.appendChild(createOption(item.value, item.label));
+    });
+    if (current) {
+      selectEl.value = current;
+      if (String(selectEl.value || "").trim() !== current) {
+        selectEl.appendChild(createOption(current, current));
+        selectEl.value = current;
+      }
+    }
   });
 };
 
@@ -1997,6 +2035,22 @@ const refreshSegurosRamosList = (columns = [], rows = [], company = "") => {
   const ordered = [...priority, ...Array.from(rest).filter((item) => !priority.includes(item))];
   segurosRamosList.innerHTML = "";
   ordered.forEach((ramo) => segurosRamosList.appendChild(createOption(ramo, ramo)));
+  [seguroOcrRamo, segurosBdtOcrRamo].forEach((selectEl) => {
+    if (!selectEl || selectEl.tagName !== "SELECT") return;
+    const current = String(selectEl.value || "").trim();
+    selectEl.innerHTML = "";
+    selectEl.appendChild(createOption("", "Selecciona ramo"));
+    ordered.forEach((ramo) => {
+      selectEl.appendChild(createOption(ramo, ramo));
+    });
+    if (current) {
+      selectEl.value = current;
+      if (String(selectEl.value || "").trim() !== current) {
+        selectEl.appendChild(createOption(current, current));
+        selectEl.value = current;
+      }
+    }
+  });
 };
 
 const euroFormatter = new Intl.NumberFormat("es-ES", {
@@ -16037,10 +16091,19 @@ const openClienteSeguroDetail = (row, cliente = {}, options = {}) => {
     editCompania.placeholder = "Compañía";
     editCompania.value = row.compania || "";
     editForm.appendChild(editCompania);
-    const editRamo = document.createElement("input");
-    editRamo.type = "text";
-    editRamo.placeholder = "Ramo";
-    editRamo.value = row.ramo || "";
+    const editRamo = document.createElement("select");
+    editRamo.appendChild(createOption("", "Ramo"));
+    getSegurosRamosCatalog().forEach((ramo) => {
+      editRamo.appendChild(createOption(ramo, ramo));
+    });
+    const currentRamo = String(row.ramo || "").trim();
+    if (currentRamo) {
+      editRamo.value = currentRamo;
+      if (String(editRamo.value || "").trim() !== currentRamo) {
+        editRamo.appendChild(createOption(currentRamo, currentRamo));
+        editRamo.value = currentRamo;
+      }
+    }
     editForm.appendChild(editRamo);
     const editPoliza = document.createElement("input");
     editPoliza.type = "text";
