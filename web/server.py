@@ -13026,6 +13026,66 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, {"rows": [dict(r) for r in rows]})
             return
 
+        if path == "/api/gestoria_facturas":
+            cliente_id = params.get("cliente_id", [""])[0]
+            empresa_id = params.get("empresa_id", [""])[0]
+            if not cliente_id and not empresa_id:
+                json_response(self, {"error": "cliente_id o empresa_id requerido"}, status=400)
+                return
+            where = []
+            values = []
+            if cliente_id:
+                where.append("f.cliente_id = ?")
+                values.append(cliente_id)
+            if empresa_id:
+                where.append("f.empresa_id = ?")
+                values.append(empresa_id)
+            where_clause = " AND ".join(where) if where else "1=1"
+            rows = conn.execute(
+                f"""
+                SELECT f.id, f.fecha_emision, f.numero, f.tipo, f.total, f.estado_ocr, f.doc_key,
+                       COALESCE(t.nombre, '') AS tercero
+                FROM gestoria_facturas f
+                LEFT JOIN gestoria_terceros t ON t.id = f.tercero_id
+                WHERE {where_clause}
+                ORDER BY f.created_at DESC
+                LIMIT 300
+                """,
+                values,
+            ).fetchall()
+            json_response(self, {"rows": [dict(r) for r in rows]})
+            return
+
+        if path == "/api/gestoria_asientos":
+            cliente_id = params.get("cliente_id", [""])[0]
+            empresa_id = params.get("empresa_id", [""])[0]
+            if not cliente_id and not empresa_id:
+                json_response(self, {"error": "cliente_id o empresa_id requerido"}, status=400)
+                return
+            where = []
+            values = []
+            if cliente_id:
+                where.append("a.cliente_id = ?")
+                values.append(cliente_id)
+            if empresa_id:
+                where.append("a.empresa_id = ?")
+                values.append(empresa_id)
+            where_clause = " AND ".join(where) if where else "1=1"
+            rows = conn.execute(
+                f"""
+                SELECT a.id, a.fecha, a.concepto, a.referencia, a.total_debe, a.total_haber,
+                       COALESCE(f.numero, '') AS factura_numero, COALESCE(f.doc_key, '') AS factura_doc_key
+                FROM gestoria_asientos a
+                LEFT JOIN gestoria_facturas f ON f.id = a.factura_id
+                WHERE {where_clause}
+                ORDER BY a.created_at DESC
+                LIMIT 300
+                """,
+                values,
+            ).fetchall()
+            json_response(self, {"rows": [dict(r) for r in rows]})
+            return
+
         if path == "/api/gestoria_libros":
             empresa_id = params.get("empresa_id", [""])[0]
             desde = (params.get("desde", [""])[0] or "").strip()

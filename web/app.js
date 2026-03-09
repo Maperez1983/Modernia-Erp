@@ -1342,6 +1342,10 @@ const gestoriaClienteKpiVencen = document.getElementById("gestoriaClienteKpiVenc
 const gestoriaClienteKpiGestiones = document.getElementById("gestoriaClienteKpiGestiones");
 const gestoriaClienteKpiDocs = document.getElementById("gestoriaClienteKpiDocs");
 const gestoriaClienteAlerts = document.getElementById("gestoriaClienteAlerts");
+const gestoriaClienteFacturasTable = document.getElementById("gestoriaClienteFacturasTable");
+const gestoriaClienteFacturasInfo = document.getElementById("gestoriaClienteFacturasInfo");
+const gestoriaClienteAsientosTable = document.getElementById("gestoriaClienteAsientosTable");
+const gestoriaClienteAsientosInfo = document.getElementById("gestoriaClienteAsientosInfo");
 const gestoriaModuleTabs = document.getElementById("gestoriaModuleTabs");
 const gestoriaModuleContabilidad = document.getElementById("gestoriaModuleContabilidad");
 const gestoriaModuleFiscal = document.getElementById("gestoriaModuleFiscal");
@@ -13755,6 +13759,108 @@ const loadGestoriaClienteDashboard = (clienteId) => {
   );
 };
 
+const loadGestoriaClienteContaResultados = (clienteId) => {
+  if (!gestoriaClienteFacturasTable || !gestoriaClienteAsientosTable) return;
+  if (!clienteId) {
+    gestoriaClienteFacturasTable.innerHTML = "<p class='muted'>Sin cliente seleccionado.</p>";
+    gestoriaClienteAsientosTable.innerHTML = "<p class='muted'>Sin cliente seleccionado.</p>";
+    if (gestoriaClienteFacturasInfo) gestoriaClienteFacturasInfo.textContent = "";
+    if (gestoriaClienteAsientosInfo) gestoriaClienteAsientosInfo.textContent = "";
+    return;
+  }
+  const qs = new URLSearchParams({ cliente_id: clienteId });
+  Promise.all([
+    api(`/api/gestoria_facturas?${qs.toString()}`).catch(() => ({ rows: [] })),
+    api(`/api/gestoria_asientos?${qs.toString()}`).catch(() => ({ rows: [] })),
+  ]).then(([facturasData, asientosData]) => {
+    const facturas = facturasData.rows || [];
+    const asientos = asientosData.rows || [];
+
+    if (!facturas.length) {
+      gestoriaClienteFacturasTable.innerHTML = "<p class='muted'>Sin facturas OCR registradas.</p>";
+      if (gestoriaClienteFacturasInfo) gestoriaClienteFacturasInfo.textContent = "";
+    } else {
+      const table = document.createElement("table");
+      const thead = document.createElement("thead");
+      const trHead = document.createElement("tr");
+      ["Fecha", "Número", "Tipo", "Tercero", "Total", "PDF"].forEach((col) => {
+        const th = document.createElement("th");
+        th.textContent = col;
+        trHead.appendChild(th);
+      });
+      thead.appendChild(trHead);
+      table.appendChild(thead);
+      const tbody = document.createElement("tbody");
+      facturas.forEach((row) => {
+        const tr = document.createElement("tr");
+        [row.fecha_emision || "-", row.numero || "-", row.tipo || "-", row.tercero || "-", row.total ? euroFormatter.format(parseMoneyValue(row.total)) : "-"].forEach((value) => {
+          const td = document.createElement("td");
+          td.textContent = value;
+          tr.appendChild(td);
+        });
+        const pdfTd = document.createElement("td");
+        if (row.doc_key) {
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "secondary";
+          btn.textContent = "Ver";
+          btn.addEventListener("click", () => openS3File(row.doc_key, ""));
+          pdfTd.appendChild(btn);
+        } else {
+          pdfTd.textContent = "-";
+        }
+        tr.appendChild(pdfTd);
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+      gestoriaClienteFacturasTable.innerHTML = "";
+      gestoriaClienteFacturasTable.appendChild(table);
+      if (gestoriaClienteFacturasInfo) {
+        gestoriaClienteFacturasInfo.textContent = `Mostrando ${facturas.length} facturas.`;
+      }
+    }
+
+    if (!asientos.length) {
+      gestoriaClienteAsientosTable.innerHTML = "<p class='muted'>Sin asientos registrados.</p>";
+      if (gestoriaClienteAsientosInfo) gestoriaClienteAsientosInfo.textContent = "";
+    } else {
+      const table = document.createElement("table");
+      const thead = document.createElement("thead");
+      const trHead = document.createElement("tr");
+      ["Fecha", "Referencia", "Concepto", "Debe", "Haber", "Factura"].forEach((col) => {
+        const th = document.createElement("th");
+        th.textContent = col;
+        trHead.appendChild(th);
+      });
+      thead.appendChild(trHead);
+      table.appendChild(thead);
+      const tbody = document.createElement("tbody");
+      asientos.forEach((row) => {
+        const tr = document.createElement("tr");
+        [
+          row.fecha || "-",
+          row.referencia || "-",
+          row.concepto || "-",
+          row.total_debe ? euroFormatter.format(parseMoneyValue(row.total_debe)) : "-",
+          row.total_haber ? euroFormatter.format(parseMoneyValue(row.total_haber)) : "-",
+          row.factura_numero || "-",
+        ].forEach((value) => {
+          const td = document.createElement("td");
+          td.textContent = value;
+          tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+      gestoriaClienteAsientosTable.innerHTML = "";
+      gestoriaClienteAsientosTable.appendChild(table);
+      if (gestoriaClienteAsientosInfo) {
+        gestoriaClienteAsientosInfo.textContent = `Mostrando ${asientos.length} asientos.`;
+      }
+    }
+  });
+};
+
 const loadClienteGestoria = (clienteId) => {
   if (!clienteGestoriaForm) return;
   api(`/api/cliente_gestoria?cliente_id=${clienteId}`).then((data) => {
@@ -14030,6 +14136,9 @@ const runGestoriaFacturaOcr = async ({
   }
   fileInput.value = "";
   loadGestoriaContabilidad();
+  if (clienteId) {
+    loadGestoriaClienteContaResultados(clienteId);
+  }
 };
 
 const updateCatalogoList = (datalist, rows) => {
@@ -16205,6 +16314,7 @@ const openClienteDetail = (id) => {
     if (hasGestoria) {
       loadClienteGestoria(id);
       loadGestoriaClienteDashboard(id);
+      loadGestoriaClienteContaResultados(id);
       loadGestoriaModelos(id);
       loadGestoriaTrabajos(id);
       loadGestoriaDocs(id);
@@ -16225,6 +16335,18 @@ const openClienteDetail = (id) => {
       }
       if (gestoriaClienteAgendaInfo) {
         gestoriaClienteAgendaInfo.textContent = "";
+      }
+      if (gestoriaClienteFacturasTable) {
+        gestoriaClienteFacturasTable.innerHTML = "<p class='muted'>Sin facturas OCR registradas.</p>";
+      }
+      if (gestoriaClienteFacturasInfo) {
+        gestoriaClienteFacturasInfo.textContent = "";
+      }
+      if (gestoriaClienteAsientosTable) {
+        gestoriaClienteAsientosTable.innerHTML = "<p class='muted'>Sin asientos registrados.</p>";
+      }
+      if (gestoriaClienteAsientosInfo) {
+        gestoriaClienteAsientosInfo.textContent = "";
       }
     }
     if (hasSeguros) {
