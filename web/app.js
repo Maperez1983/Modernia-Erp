@@ -412,7 +412,7 @@ const runSegurosOcrDirectPayload = async (payload, options = {}) =>
   postJsonWithRetryBasic("/api/seguros_ocr", payload, {
     maxRetries: options.maxRetries || 4,
     baseDelayMs: options.baseDelayMs || 450,
-    timeoutMs: options.timeoutMs || 180000,
+    timeoutMs: options.timeoutMs || 120000,
   });
 
 const runSegurosOcrDirect = async (file, extraPayload = {}) => {
@@ -424,8 +424,9 @@ const runSegurosOcrDirect = async (file, extraPayload = {}) => {
   });
 };
 
-const pollOcrJob = async (jobId, onUpdate, timeoutMs = 10 * 60 * 1000) => {
+const pollOcrJob = async (jobId, onUpdate, timeoutMs = 3 * 60 * 1000) => {
   const started = Date.now();
+  let queuedSince = 0;
   let delay = 1200;
   let readErrors = 0;
   while (Date.now() - started < timeoutMs) {
@@ -443,6 +444,14 @@ const pollOcrJob = async (jobId, onUpdate, timeoutMs = 10 * 60 * 1000) => {
       continue;
     }
     if (onUpdate) onUpdate(data);
+    if (data.status === "queued") {
+      if (!queuedSince) queuedSince = Date.now();
+      if (Date.now() - queuedSince > 70 * 1000) {
+        throw new Error("Cola OCR saturada.");
+      }
+    } else if (data.status === "processing") {
+      queuedSince = 0;
+    }
     if (data.status === "done") {
       return data.result || null;
     }
