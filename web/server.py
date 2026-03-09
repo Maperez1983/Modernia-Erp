@@ -2073,6 +2073,14 @@ def compute_fin_quality(fields):
 def openai_available():
     return bool(os.environ.get("OPENAI_API_KEY"))
 
+def normalize_openai_model_name(value, default="gpt-4o-mini"):
+    raw = str(value or "").strip()
+    if not raw:
+        return default
+    if re.match(r"^gpt[-_]", raw, re.IGNORECASE):
+        return raw.replace("_", "-").lower()
+    return raw
+
 def extract_openai_output(resp):
     if not resp:
         return ""
@@ -2094,7 +2102,7 @@ def call_openai(prompt, model=None, temperature=0.2, max_tokens=600):
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
         return "", "OPENAI_API_KEY no configurada"
-    model = model or os.environ.get("OPENAI_MODEL") or "gpt-4o-mini"
+    model = normalize_openai_model_name(model or os.environ.get("OPENAI_MODEL"))
     payload = {
         "model": model,
         "input": [
@@ -2142,7 +2150,7 @@ def call_openai_content(user_content, model=None, temperature=0.0, max_tokens=70
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
         return "", "OPENAI_API_KEY no configurada"
-    model = model or os.environ.get("OPENAI_MODEL") or "gpt-4o-mini"
+    model = normalize_openai_model_name(model or os.environ.get("OPENAI_MODEL"))
     payload = {
         "model": model,
         "input": [
