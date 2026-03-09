@@ -13944,6 +13944,68 @@ const downloadCsvFile = (filename, content) => {
   URL.revokeObjectURL(url);
 };
 
+const buildPlantillaConversorRows = (diario = []) => {
+  const grouped = new Map();
+  diario.forEach((line) => {
+    const key = String(line.asiento_id || "").trim() || `${line.fecha || ""}-${line.referencia || ""}`;
+    if (!grouped.has(key)) grouped.set(key, []);
+    grouped.get(key).push(line);
+  });
+  const rows = [];
+  grouped.forEach((lines) => {
+    if (!lines.length) return;
+    const sample = lines[0];
+    let base = 0;
+    let ivaPct = 0;
+    let ivaImporte = 0;
+    let subcuentaTercero = "";
+    let subcuentaGyI = "";
+    lines.forEach((line) => {
+      const cuenta = String(line.cuenta || "").trim();
+      const debe = parseMoneyValue(line.debe);
+      const haber = parseMoneyValue(line.haber);
+      const impTipo = normalizeSimple(line.impuesto_tipo || "");
+      if (!subcuentaTercero && cuenta.startsWith("4")) {
+        subcuentaTercero = cuenta;
+      }
+      if (!subcuentaGyI && (cuenta.startsWith("6") || cuenta.startsWith("7"))) {
+        subcuentaGyI = cuenta;
+      }
+      if (impTipo === "iva") {
+        const tipoVenta = normalizeSimple(sample.tipo_factura || "") === "venta";
+        ivaImporte += Math.abs(tipoVenta ? haber : debe);
+        if (!ivaPct) {
+          const pct = Number(line.impuesto_pct || 0) || 0;
+          ivaPct = pct;
+        }
+      }
+      if (subcuentaGyI === cuenta) {
+        base += Math.abs(cuenta.startsWith("7") ? haber : debe);
+      }
+    });
+    const total = Number(sample.factura_total || 0) || (base + ivaImporte);
+    rows.push([
+      sample.fecha || "",
+      sample.factura_fecha || "",
+      sample.factura_numero || sample.referencia || "",
+      sample.concepto || "",
+      subcuentaTercero || "",
+      sample.tercero_nif || "",
+      sample.tercero || "",
+      "",
+      "",
+      "",
+      "",
+      base ? Number(base.toFixed(2)) : "",
+      ivaPct ? Number(ivaPct.toFixed(2)) : "",
+      ivaImporte ? Number(ivaImporte.toFixed(2)) : "",
+      subcuentaGyI || "",
+      total ? Number(total.toFixed(2)) : "",
+    ]);
+  });
+  return rows;
+};
+
 const loadGestoriaClienteLibros = (clienteId) => {
   if (!clienteId || !gestoriaClienteLibroDiarioTable) return;
   const empresa = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
@@ -14049,9 +14111,11 @@ const loadGestoriaClienteLibros = (clienteId) => {
       }
 
       state.gestoriaClienteLibrosCache = {
+        diarioRaw: diario,
         diarioRows,
         mayorRows,
         ivaRows,
+        plantillaRows: buildPlantillaConversorRows(diario),
       };
     })
     .catch(() => {
@@ -20191,33 +20255,39 @@ if (gestoriaClienteLibrosTabs) {
 if (gestoriaClienteLibroExcelBtn) {
   gestoriaClienteLibroExcelBtn.addEventListener("click", () => {
     const cache = state.gestoriaClienteLibrosCache || {};
-    const diarioRows = cache.diarioRows || [];
-    const mayorRows = cache.mayorRows || [];
-    const ivaRows = cache.ivaRows || [];
-    if (!diarioRows.length && !mayorRows.length && !ivaRows.length) {
+    const plantillaRows = cache.plantillaRows || [];
+    if (!plantillaRows.length) {
       if (gestoriaClienteLibroExcelStatus) {
         gestoriaClienteLibroExcelStatus.textContent = "No hay datos para exportar.";
       }
       return;
     }
     const rows = [
-      ["LIBRO DIARIO"],
-      ["Fecha", "Referencia", "Concepto", "Tercero", "Factura", "Cuenta", "Descripción", "Debe", "Haber"],
-      ...diarioRows,
-      [""],
-      ["LIBRO MAYOR"],
-      ["Cuenta", "Debe", "Haber", "Saldo"],
-      ...mayorRows,
-      [""],
-      ["DESGLOSE IVA (DESDE DIARIO)"],
-      ["Tipo", "% IVA", "Base imponible", "Cuota IVA", "Total"],
-      ...ivaRows,
+      [
+        "FECHA ASIENTO",
+        "FECHA FACTURA",
+        "Nº FACTURA",
+        "CONCEPTO",
+        "SUBCUENTA",
+        "NIF",
+        "NOMBRE",
+        "DOMICILIO",
+        "LOCALIDAD",
+        "PROVINCIA",
+        "CODIGO POSTAL",
+        "BASE IMPONIBLE",
+        "% IVA",
+        "IMPORTE IVA",
+        "SUBCUENTA GASTOS/INGRESOS",
+        "IMPORTE (TOTAL)",
+      ],
+      ...plantillaRows,
     ];
     const clienteNombre = normalizeSimple(state.currentClienteData?.nombre || "cliente").replace(/\s+/g, "_");
-    const filename = `libros_contables_${clienteNombre || "cliente"}_${new Date().toISOString().slice(0, 10)}.csv`;
+    const filename = `plantilla_conversor_asientos_${clienteNombre || "cliente"}_${new Date().toISOString().slice(0, 10)}.csv`;
     downloadCsvFile(filename, toCsv(rows));
     if (gestoriaClienteLibroExcelStatus) {
-      gestoriaClienteLibroExcelStatus.textContent = "Exportación generada.";
+      gestoriaClienteLibroExcelStatus.textContent = "Plantilla de conversor generada.";
     }
   });
 }

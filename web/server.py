@@ -13111,7 +13111,10 @@ class Handler(BaseHTTPRequestHandler):
                        l.cuenta, l.descripcion, l.debe, l.haber,
                        l.impuesto_tipo, l.impuesto_pct,
                        COALESCE(t.nombre, '') AS tercero,
+                       COALESCE(t.nif, '') AS tercero_nif,
                        COALESCE(f.numero, '') AS factura_numero,
+                       COALESCE(f.fecha_emision, '') AS factura_fecha,
+                       COALESCE(f.total, 0) AS factura_total,
                        COALESCE(f.tipo, '') AS tipo_factura
                 FROM gestoria_asientos a
                 JOIN gestoria_asiento_lineas l ON l.asiento_id = a.id
