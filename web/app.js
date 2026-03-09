@@ -18152,35 +18152,33 @@ if (segurosOcrButton) {
       segurosOcrStatus.textContent = "Procesando OCR...";
     }
     buildSegurosOcrPayload(file, segurosOcrStatus)
-      .then((payload) => {
+      .then(async (payload) => {
         if (!payload) {
           if (segurosOcrStatus) {
             segurosOcrStatus.textContent = "No se pudo preparar el PDF para OCR.";
           }
           return null;
         }
-        return startSegurosOcrJob({ ...payload, empresa_nombre: FINCAS_COMPANY });
-      })
-      .then(async (job) => {
-        if (!job || job.error || !job.job_id) {
-          if (segurosOcrStatus) {
-            segurosOcrStatus.textContent = "OCR en cola falló. Reintentando en modo directo...";
-          }
-          return runSegurosOcrDirect(file, { empresa_nombre: FINCAS_COMPANY });
-        }
-        if (segurosOcrStatus) segurosOcrStatus.textContent = "OCR en cola...";
         try {
+          return await runSegurosOcrDirectPayload(
+            { ...payload, empresa_nombre: FINCAS_COMPANY },
+            { timeoutMs: 180000 }
+          );
+        } catch (_directErr) {
+          if (segurosOcrStatus) {
+            segurosOcrStatus.textContent = "OCR directo lento. Reintentando en cola...";
+          }
+          const job = await startSegurosOcrJob({ ...payload, empresa_nombre: FINCAS_COMPANY });
+          if (!job || job.error || !job.job_id) {
+            throw new Error(job?.detail || job?.error || "No se pudo iniciar OCR.");
+          }
+          if (segurosOcrStatus) segurosOcrStatus.textContent = "OCR en cola...";
           const result = await pollOcrJob(job.job_id, (data) => {
             if (segurosOcrStatus && data.status === "processing") {
               segurosOcrStatus.textContent = "Procesando OCR...";
             }
           });
           return result;
-        } catch (_err) {
-          if (segurosOcrStatus) {
-            segurosOcrStatus.textContent = "OCR asíncrono falló. Reintentando en modo directo...";
-          }
-          return runSegurosOcrDirect(file, { empresa_nombre: FINCAS_COMPANY });
         }
       })
       .then((data) => {
