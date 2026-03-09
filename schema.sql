@@ -226,6 +226,76 @@ CREATE TABLE IF NOT EXISTS gestoria_conta_tasks (
   FOREIGN KEY (cliente_id) REFERENCES clientes(id)
 );
 
+CREATE TABLE IF NOT EXISTS gestoria_terceros (
+  id TEXT PRIMARY KEY,
+  empresa_id TEXT,
+  nif TEXT,
+  nombre TEXT,
+  tipo TEXT,
+  cuenta_contable TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (empresa_id) REFERENCES empresas(id)
+);
+
+CREATE TABLE IF NOT EXISTS gestoria_facturas (
+  id TEXT PRIMARY KEY,
+  empresa_id TEXT,
+  cliente_id TEXT,
+  tercero_id TEXT,
+  tipo TEXT,
+  numero TEXT,
+  fecha_emision TEXT,
+  descripcion TEXT,
+  base_imponible REAL,
+  cuota_iva REAL,
+  cuota_irpf REAL,
+  total REAL,
+  iva_pct REAL,
+  estado_ocr TEXT,
+  doc_key TEXT,
+  raw_text TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (empresa_id) REFERENCES empresas(id),
+  FOREIGN KEY (cliente_id) REFERENCES clientes(id),
+  FOREIGN KEY (tercero_id) REFERENCES gestoria_terceros(id)
+);
+
+CREATE TABLE IF NOT EXISTS gestoria_asientos (
+  id TEXT PRIMARY KEY,
+  empresa_id TEXT,
+  cliente_id TEXT,
+  factura_id TEXT,
+  fecha TEXT,
+  concepto TEXT,
+  diario TEXT,
+  referencia TEXT,
+  total_debe REAL,
+  total_haber REAL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (empresa_id) REFERENCES empresas(id),
+  FOREIGN KEY (cliente_id) REFERENCES clientes(id),
+  FOREIGN KEY (factura_id) REFERENCES gestoria_facturas(id)
+);
+
+CREATE TABLE IF NOT EXISTS gestoria_asiento_lineas (
+  id TEXT PRIMARY KEY,
+  asiento_id TEXT,
+  tercero_id TEXT,
+  cuenta TEXT,
+  descripcion TEXT,
+  debe REAL,
+  haber REAL,
+  impuesto_tipo TEXT,
+  impuesto_pct REAL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (asiento_id) REFERENCES gestoria_asientos(id),
+  FOREIGN KEY (tercero_id) REFERENCES gestoria_terceros(id)
+);
+
 CREATE TABLE IF NOT EXISTS cnae_catalogo (
   codigo TEXT PRIMARY KEY,
   descripcion TEXT NOT NULL

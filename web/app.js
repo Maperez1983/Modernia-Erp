@@ -1383,6 +1383,9 @@ const gestoriaContabilidadCliente = document.getElementById("gestoriaContabilida
 const gestoriaContabilidadPoliza = document.getElementById("gestoriaContabilidadPoliza");
 const gestoriaContabilidadTable = document.getElementById("gestoriaContabilidadTable");
 const gestoriaContabilidadInfo = document.getElementById("gestoriaContabilidadInfo");
+const gestoriaFacturaFile = document.getElementById("gestoriaFacturaFile");
+const gestoriaFacturaTipo = document.getElementById("gestoriaFacturaTipo");
+const gestoriaFacturaOcrBtn = document.getElementById("gestoriaFacturaOcrBtn");
 const gestoriaContaConfigForm = document.getElementById("gestoriaContaConfigForm");
 const gestoriaContaConfigStatus = document.getElementById("gestoriaContaConfigStatus");
 const gestoriaContaTasksBtn = document.getElementById("gestoriaContaTasksBtn");
@@ -13895,6 +13898,40 @@ const deleteGestoriaContabilidad = (id) => {
     });
 };
 
+const runGestoriaFacturaOcr = async () => {
+  if (!gestoriaFacturaFile || !gestoriaFacturaFile.files || !gestoriaFacturaFile.files.length) {
+    if (gestoriaContabilidadStatus) gestoriaContabilidadStatus.textContent = "Selecciona una factura (PDF/imagen).";
+    return;
+  }
+  const file = gestoriaFacturaFile.files[0];
+  const dataUrl = await readFileAsDataUrl(file);
+  const payload = {
+    empresa_nombre: FINCAS_COMPANY,
+    file_base64: dataUrl,
+    filename: file.name || "",
+    tipo_factura: gestoriaFacturaTipo ? gestoriaFacturaTipo.value : "compra",
+    cliente_id: gestoriaContabilidadCliente ? gestoriaContabilidadCliente.value : "",
+  };
+  if (gestoriaContabilidadStatus) gestoriaContabilidadStatus.textContent = "Procesando OCR y asiento...";
+  const res = await fetch("/api/gestoria_factura_ocr", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (data?.error) {
+    if (gestoriaContabilidadStatus) gestoriaContabilidadStatus.textContent = data.error;
+    return;
+  }
+  if (gestoriaContabilidadStatus) {
+    const factura = data?.parsed?.numero || data?.factura_id || "";
+    const asiento = data?.asiento_id || "";
+    gestoriaContabilidadStatus.textContent = `Factura ${factura} procesada. Asiento ${asiento}.`;
+  }
+  gestoriaFacturaFile.value = "";
+  loadGestoriaContabilidad();
+};
+
 const updateCatalogoList = (datalist, rows) => {
   if (!datalist) return;
   datalist.innerHTML = "";
@@ -19231,6 +19268,16 @@ if (gestoriaContabilidadForm) {
           gestoriaContabilidadStatus.textContent = "Error al guardar.";
         }
       });
+  });
+}
+
+if (gestoriaFacturaOcrBtn) {
+  gestoriaFacturaOcrBtn.addEventListener("click", () => {
+    runGestoriaFacturaOcr().catch((error) => {
+      if (gestoriaContabilidadStatus) {
+        gestoriaContabilidadStatus.textContent = error?.message || "Error al procesar OCR.";
+      }
+    });
   });
 }
 

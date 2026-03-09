@@ -1056,8 +1056,20 @@
                 Notas
                 <input name="notas" />
               </label>
+              <label class="span-2">
+                OCR factura (PDF/imagen)
+                <input id="gestoriaFacturaFile" type="file" accept=".pdf,image/*" />
+              </label>
+              <label>
+                Tipo factura OCR
+                <select id="gestoriaFacturaTipo">
+                  <option value="compra">Compra</option>
+                  <option value="venta">Venta</option>
+                </select>
+              </label>
               <div class="form-actions">
                 <button type="submit">Añadir anotación</button>
+                <button type="button" id="gestoriaFacturaOcrBtn" class="secondary">OCR + Asiento</button>
                 <span id="gestoriaContabilidadStatus" class="muted"></span>
               </div>
             </form>

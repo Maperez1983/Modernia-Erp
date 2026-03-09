@@ -1022,6 +1022,268 @@ def decode_seguros_payload(payload):
     return pdf_bytes
 
 
+def decode_document_payload(payload):
+    data_uri = payload.get("file_base64") or payload.get("data")
+    s3_key = (payload.get("s3_key") or "").strip()
+    raw_bytes = None
+    mime = ""
+    filename = str(payload.get("filename") or "").strip()
+    if s3_key:
+        raw_bytes, s3_err = s3_get_object_bytes(s3_key)
+        if not raw_bytes:
+            raise ValueError(f"S3: {s3_err}")
+        lower_key = s3_key.lower()
+        if lower_key.endswith(".pdf"):
+            mime = "application/pdf"
+        elif lower_key.endswith((".jpg", ".jpeg")):
+            mime = "image/jpeg"
+        elif lower_key.endswith(".png"):
+            mime = "image/png"
+    else:
+        if not data_uri:
+            raise ValueError("Archivo requerido")
+        if "," in data_uri:
+            header, data_uri = data_uri.split(",", 1)
+            if header.startswith("data:") and ";base64" in header:
+                mime = header.split(":", 1)[1].split(";", 1)[0]
+        try:
+            raw_bytes = base64.b64decode(data_uri)
+        except Exception:
+            raise ValueError("Base64 invalido")
+    if not raw_bytes:
+        raise ValueError("Archivo vacio")
+    source_hint = " ".join(
+        [
+            filename,
+            str(payload.get("source_hint") or ""),
+            s3_key,
+        ]
+    ).strip()
+    return raw_bytes, mime, source_hint
+
+
+def parse_decimal_eu(value):
+    raw = str(value or "").strip()
+    if not raw:
+        return 0.0
+    raw = raw.replace("€", "").replace("EUR", "").replace(" ", "")
+    if "," in raw and "." in raw:
+        if raw.rfind(",") > raw.rfind("."):
+            raw = raw.replace(".", "").replace(",", ".")
+        else:
+            raw = raw.replace(",", "")
+    elif "," in raw:
+        raw = raw.replace(".", "").replace(",", ".")
+    raw = re.sub(r"[^0-9.\-]", "", raw)
+    if raw in ("", ".", "-", "-."):
+        return 0.0
+    try:
+        return float(raw)
+    except Exception:
+        return 0.0
+
+
+def extract_invoice_amount(text, labels):
+    if not text:
+        return 0.0
+    for label in labels:
+        pattern = rf"{label}\s*[:\-]?\s*([0-9][0-9\.\,\s€]*)"
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            value = parse_decimal_eu(match.group(1))
+            if value > 0:
+                return value
+    return 0.0
+
+
+def parse_invoice_text(text):
+    raw = str(text or "")
+    upper = normalize_lookup_text(raw)
+    if not raw.strip():
+        return {}
+    numero = ""
+    numero_match = re.search(
+        r"(?:factura|fra\.?|n[úu]m(?:ero)?|n[º°])\s*[:#-]?\s*([A-Z0-9][A-Z0-9\-\/\.]{2,})",
+        raw,
+        re.IGNORECASE,
+    )
+    if numero_match:
+        numero = numero_match.group(1).strip()
+    fecha = ""
+    fecha_match = re.search(r"\b(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})\b", raw)
+    if fecha_match:
+        fecha = fecha_match.group(1).strip()
+    fecha_iso = ""
+    if fecha:
+        date_bits = re.split(r"[\/\-]", fecha)
+        if len(date_bits) == 3:
+            day, month, year = date_bits
+            if len(year) == 2:
+                year = f"20{year}"
+            try:
+                fecha_iso = f"{int(year):04d}-{int(month):02d}-{int(day):02d}"
+            except Exception:
+                fecha_iso = ""
+    nif_candidates = re.findall(
+        r"\b(?:[ABCDEFGHJNPQRSUVW]\d{7}[0-9A-J]|\d{8}[A-Z])\b",
+        upper,
+        re.IGNORECASE,
+    )
+    nif = nif_candidates[0].upper() if nif_candidates else ""
+    tercero = ""
+    for pattern in (
+        r"(?:proveedor|acreedor)\s*[:\-]\s*([^\n\r]{3,80})",
+        r"(?:raz[oó]n social)\s*[:\-]\s*([^\n\r]{3,80})",
+        r"(?:cliente)\s*[:\-]\s*([^\n\r]{3,80})",
+    ):
+        m = re.search(pattern, raw, re.IGNORECASE)
+        if m:
+            tercero = m.group(1).strip(" .;:")
+            break
+    tipo = "compra"
+    if any(token in upper for token in ("FACTURA EMITIDA", "TOTAL A COBRAR", "CLIENTE")):
+        tipo = "venta"
+    base = extract_invoice_amount(raw, ["base imponible", "subtotal", "base"])
+    cuota_iva = extract_invoice_amount(raw, ["cuota iva", "iva", "i\\.v\\.a\\."])
+    cuota_irpf = extract_invoice_amount(raw, ["retencion", "irpf"])
+    total = extract_invoice_amount(raw, ["total factura", "importe total", "total a pagar", "total"])
+    if base <= 0 and total > 0:
+        base = max(0.0, total - cuota_iva + cuota_irpf)
+    if total <= 0 and base > 0:
+        total = max(0.0, base + cuota_iva - cuota_irpf)
+    iva_pct = 0.0
+    pct_match = re.search(r"\b(4|10|21)(?:[.,]0+)?\s*%\b", raw)
+    if pct_match:
+        iva_pct = parse_decimal_eu(pct_match.group(1))
+    elif base > 0 and cuota_iva > 0:
+        iva_pct = round((cuota_iva / base) * 100.0, 2)
+    descripcion = numero or "Factura"
+    if tercero:
+        descripcion = f"{descripcion} · {tercero}"
+    return {
+        "numero": numero,
+        "fecha": fecha_iso,
+        "nif": nif,
+        "tercero": tercero,
+        "tipo": tipo,
+        "base_imponible": round(base, 2),
+        "cuota_iva": round(cuota_iva, 2),
+        "cuota_irpf": round(cuota_irpf, 2),
+        "total": round(total, 2),
+        "iva_pct": iva_pct,
+        "descripcion": descripcion,
+        "raw_text": raw.strip(),
+    }
+
+
+def infer_expense_account(concepto):
+    text = normalize_lookup_text(concepto or "")
+    mapping = [
+        ("ALQUILER", "621"),
+        ("ARRENDAMIENTO", "621"),
+        ("REPARACION", "622"),
+        ("CONSERVACION", "622"),
+        ("PROFESIONAL", "623"),
+        ("HONORARIO", "623"),
+        ("TRANSPORTE", "624"),
+        ("SEGURO", "625"),
+        ("BANC", "626"),
+        ("PUBLICIDAD", "627"),
+        ("SUMINISTRO", "628"),
+        ("LUZ", "628"),
+        ("AGUA", "628"),
+        ("TELEFON", "628"),
+        ("INTERNET", "628"),
+        ("TRIBUTO", "631"),
+        ("IMPUESTO", "631"),
+    ]
+    for token, account in mapping:
+        if token in text:
+            return account
+    return "629"
+
+
+def infer_revenue_account(concepto):
+    text = normalize_lookup_text(concepto or "")
+    if "ALQUILER" in text:
+        return "705"
+    return "700"
+
+
+def ensure_gestoria_tercero(conn, empresa_id, nif, nombre, tipo, now):
+    nif_clean = (nif or "").strip().upper()
+    name_clean = (nombre or "").strip()
+    kind = (tipo or "").strip().lower() or "proveedor"
+    account_map = {"proveedor": "400", "acreedor": "410", "cliente": "430"}
+    account = account_map.get(kind, "400")
+    row = None
+    if nif_clean:
+        row = conn.execute(
+            "SELECT id, cuenta_contable FROM gestoria_terceros WHERE empresa_id = ? AND UPPER(COALESCE(nif,'')) = ? LIMIT 1",
+            (empresa_id, nif_clean),
+        ).fetchone()
+    if not row and name_clean:
+        row = conn.execute(
+            "SELECT id, cuenta_contable FROM gestoria_terceros WHERE empresa_id = ? AND UPPER(COALESCE(nombre,'')) = UPPER(?) LIMIT 1",
+            (empresa_id, name_clean),
+        ).fetchone()
+    if row:
+        conn.execute(
+            """
+            UPDATE gestoria_terceros
+            SET nif = COALESCE(NULLIF(?, ''), nif),
+                nombre = COALESCE(NULLIF(?, ''), nombre),
+                tipo = ?,
+                cuenta_contable = COALESCE(NULLIF(cuenta_contable, ''), ?),
+                updated_at = datetime(?)
+            WHERE id = ?
+            """,
+            (nif_clean, name_clean, kind, account, now, row["id"]),
+        )
+        return row["id"], row["cuenta_contable"] or account
+    tercero_id = os.urandom(16).hex()
+    conn.execute(
+        """
+        INSERT INTO gestoria_terceros (
+          id, empresa_id, nif, nombre, tipo, cuenta_contable, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+        """,
+        (tercero_id, empresa_id, nif_clean, name_clean, kind, account, now, now),
+    )
+    return tercero_id, account
+
+
+def build_invoice_asiento(parsed, counterpart_account):
+    tipo = (parsed.get("tipo") or "compra").strip().lower()
+    base = float(parsed.get("base_imponible") or 0.0)
+    iva = float(parsed.get("cuota_iva") or 0.0)
+    irpf = float(parsed.get("cuota_irpf") or 0.0)
+    total = float(parsed.get("total") or 0.0)
+    concepto = parsed.get("descripcion") or parsed.get("numero") or "Factura"
+    lines = []
+    if tipo == "venta":
+        ingreso = infer_revenue_account(concepto)
+        if total > 0:
+            lines.append({"cuenta": counterpart_account or "430", "descripcion": "Cliente", "debe": round(total, 2), "haber": 0.0})
+        if base > 0:
+            lines.append({"cuenta": ingreso, "descripcion": "Ingreso", "debe": 0.0, "haber": round(base, 2)})
+        if iva > 0:
+            lines.append({"cuenta": "477", "descripcion": "IVA repercutido", "debe": 0.0, "haber": round(iva, 2), "impuesto": "IVA", "porcentaje": parsed.get("iva_pct") or 0.0})
+    else:
+        gasto = infer_expense_account(concepto)
+        if base > 0:
+            lines.append({"cuenta": gasto, "descripcion": "Gasto", "debe": round(base, 2), "haber": 0.0})
+        if iva > 0:
+            lines.append({"cuenta": "472", "descripcion": "IVA soportado", "debe": round(iva, 2), "haber": 0.0, "impuesto": "IVA", "porcentaje": parsed.get("iva_pct") or 0.0})
+        if irpf > 0:
+            lines.append({"cuenta": "4751", "descripcion": "H.P. acreedora retenciones", "debe": 0.0, "haber": round(irpf, 2), "impuesto": "IRPF", "porcentaje": 0.0})
+        payable = total if total > 0 else max(0.0, base + iva - irpf)
+        if payable > 0:
+            lines.append({"cuenta": counterpart_account or "400", "descripcion": "Proveedor/Acreedor", "debe": 0.0, "haber": round(payable, 2)})
+    debe = round(sum(float(item.get("debe") or 0.0) for item in lines), 2)
+    haber = round(sum(float(item.get("haber") or 0.0) for item in lines), 2)
+    return lines, debe, haber
+
 def process_seguros_ocr(payload, conn):
     pdf_bytes = decode_seguros_payload(payload)
     tmp_path = None
@@ -6238,6 +6500,79 @@ def ensure_tables(db_path):
     )
     conn.execute(
         """
+        CREATE TABLE IF NOT EXISTS gestoria_terceros (
+          id TEXT PRIMARY KEY,
+          empresa_id TEXT,
+          nif TEXT,
+          nombre TEXT,
+          tipo TEXT,
+          cuenta_contable TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS gestoria_facturas (
+          id TEXT PRIMARY KEY,
+          empresa_id TEXT,
+          cliente_id TEXT,
+          tercero_id TEXT,
+          tipo TEXT,
+          numero TEXT,
+          fecha_emision TEXT,
+          descripcion TEXT,
+          base_imponible REAL,
+          cuota_iva REAL,
+          cuota_irpf REAL,
+          total REAL,
+          iva_pct REAL,
+          estado_ocr TEXT,
+          doc_key TEXT,
+          raw_text TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS gestoria_asientos (
+          id TEXT PRIMARY KEY,
+          empresa_id TEXT,
+          cliente_id TEXT,
+          factura_id TEXT,
+          fecha TEXT,
+          concepto TEXT,
+          diario TEXT,
+          referencia TEXT,
+          total_debe REAL,
+          total_haber REAL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS gestoria_asiento_lineas (
+          id TEXT PRIMARY KEY,
+          asiento_id TEXT,
+          tercero_id TEXT,
+          cuenta TEXT,
+          descripcion TEXT,
+          debe REAL,
+          haber REAL,
+          impuesto_tipo TEXT,
+          impuesto_pct REAL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS inmueble_checklist (
           id TEXT PRIMARY KEY,
           inmueble_id TEXT NOT NULL,
@@ -6512,6 +6847,18 @@ def ensure_tables(db_path):
         conn.execute("ALTER TABLE gestoria_contabilidad ADD COLUMN seguro_id TEXT")
     if "poliza_numero" not in conta_cols:
         conn.execute("ALTER TABLE gestoria_contabilidad ADD COLUMN poliza_numero TEXT")
+    terceros_cols = [row[1] for row in conn.execute("PRAGMA table_info(gestoria_terceros)").fetchall()]
+    if "cuenta_contable" not in terceros_cols:
+        conn.execute("ALTER TABLE gestoria_terceros ADD COLUMN cuenta_contable TEXT")
+    facturas_cols = [row[1] for row in conn.execute("PRAGMA table_info(gestoria_facturas)").fetchall()]
+    if "iva_pct" not in facturas_cols:
+        conn.execute("ALTER TABLE gestoria_facturas ADD COLUMN iva_pct REAL")
+    if "estado_ocr" not in facturas_cols:
+        conn.execute("ALTER TABLE gestoria_facturas ADD COLUMN estado_ocr TEXT")
+    if "doc_key" not in facturas_cols:
+        conn.execute("ALTER TABLE gestoria_facturas ADD COLUMN doc_key TEXT")
+    if "raw_text" not in facturas_cols:
+        conn.execute("ALTER TABLE gestoria_facturas ADD COLUMN raw_text TEXT")
     load_postal_catalog(conn)
     conn.commit()
     conn.close()
@@ -6914,6 +7261,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/gestoria_contabilidad",
             "/api/gestoria_contabilidad_update",
             "/api/gestoria_contabilidad_delete",
+            "/api/gestoria_factura_ocr",
             "/api/gestoria_update",
             "/api/seguros_ocr",
             "/api/seguros_ocr_async",
@@ -7917,6 +8265,208 @@ class Handler(BaseHTTPRequestHandler):
                 """,
                 (*values, now, record_id),
             )
+        elif parsed.path == "/api/gestoria_factura_ocr":
+            cliente_id = (payload.get("cliente_id") or "").strip() or None
+            tipo_factura = (payload.get("tipo_factura") or payload.get("tipo") or "").strip().lower()
+            if tipo_factura not in ("compra", "venta"):
+                tipo_factura = "compra"
+            try:
+                doc_bytes, mime, source_hint = decode_document_payload(payload)
+            except ValueError as exc:
+                json_response(self, {"error": str(exc)}, status=400)
+                return
+            tmp_path = None
+            text = ""
+            err_detail = ""
+            method = "tesseract"
+            try:
+                suffix = ".pdf"
+                if mime.startswith("image/"):
+                    ext = mime.split("/", 1)[1] or "jpg"
+                    suffix = f".{ext}"
+                with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp_file:
+                    tmp_file.write(doc_bytes)
+                    tmp_path = tmp_file.name
+                if mime.startswith("image/"):
+                    if external_ocr_available():
+                        text, err_detail = ocr_image_external(doc_bytes)
+                        method = "vision" if text else "tesseract"
+                    if not text:
+                        text, err_detail = ocr_image_file(tmp_path)
+                        method = "tesseract"
+                    if docai_available():
+                        doc_text, _doc_fields, doc_err = ocr_image_docai(doc_bytes, mime)
+                        if doc_text and len(doc_text) > len(text or ""):
+                            text = doc_text
+                            method = "docai"
+                        elif doc_err and not err_detail:
+                            err_detail = doc_err
+                else:
+                    text, err_detail, method = extract_pdf_text(tmp_path)
+                    if not text:
+                        text, page_err = ocr_pdf_all_pages(tmp_path, use_external=external_ocr_available())
+                        if text:
+                            method = "ocr_all_pages"
+                        elif page_err and not err_detail:
+                            err_detail = page_err
+                if not text:
+                    json_response(self, {"error": err_detail or "No se pudo extraer texto de la factura"}, status=400)
+                    return
+                parsed_factura = parse_invoice_text(text)
+                if not parsed_factura:
+                    json_response(self, {"error": "No se pudieron extraer datos de factura"}, status=400)
+                    return
+                parsed_factura["tipo"] = tipo_factura
+                for key_src, key_dst in (
+                    ("numero", "numero"),
+                    ("fecha", "fecha"),
+                    ("nif", "nif"),
+                    ("tercero", "tercero"),
+                ):
+                    incoming = str(payload.get(key_src) or "").strip()
+                    if incoming:
+                        parsed_factura[key_dst] = incoming
+                for num_key in ("base_imponible", "cuota_iva", "cuota_irpf", "total", "iva_pct"):
+                    incoming = payload.get(num_key)
+                    if incoming not in (None, ""):
+                        parsed_factura[num_key] = round(parse_decimal_eu(incoming), 2)
+                if not parsed_factura.get("fecha"):
+                    parsed_factura["fecha"] = datetime.now().strftime("%Y-%m-%d")
+                third_type = "cliente" if tipo_factura == "venta" else ("proveedor" if parsed_factura.get("numero") else "acreedor")
+                tercero_id, counterpart_account = ensure_gestoria_tercero(
+                    conn,
+                    empresa["id"],
+                    parsed_factura.get("nif"),
+                    parsed_factura.get("tercero"),
+                    third_type,
+                    now,
+                )
+                factura_id = os.urandom(16).hex()
+                doc_key = (payload.get("s3_key") or "").strip()
+                conn.execute(
+                    """
+                    INSERT INTO gestoria_facturas (
+                      id, empresa_id, cliente_id, tercero_id, tipo, numero, fecha_emision, descripcion,
+                      base_imponible, cuota_iva, cuota_irpf, total, iva_pct, estado_ocr, doc_key, raw_text,
+                      created_at, updated_at
+                    ) VALUES (
+                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                    )
+                    """,
+                    (
+                        factura_id,
+                        empresa["id"],
+                        cliente_id,
+                        tercero_id,
+                        tipo_factura,
+                        parsed_factura.get("numero"),
+                        parsed_factura.get("fecha"),
+                        parsed_factura.get("descripcion"),
+                        parsed_factura.get("base_imponible") or 0.0,
+                        parsed_factura.get("cuota_iva") or 0.0,
+                        parsed_factura.get("cuota_irpf") or 0.0,
+                        parsed_factura.get("total") or 0.0,
+                        parsed_factura.get("iva_pct") or 0.0,
+                        "ok",
+                        doc_key,
+                        parsed_factura.get("raw_text") or text,
+                        now,
+                        now,
+                    ),
+                )
+                lines, total_debe, total_haber = build_invoice_asiento(parsed_factura, counterpart_account)
+                asiento_id = os.urandom(16).hex()
+                referencia = parsed_factura.get("numero") or factura_id
+                concepto = parsed_factura.get("descripcion") or "Factura OCR"
+                conn.execute(
+                    """
+                    INSERT INTO gestoria_asientos (
+                      id, empresa_id, cliente_id, factura_id, fecha, concepto, diario, referencia,
+                      total_debe, total_haber, created_at, updated_at
+                    ) VALUES (
+                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                    )
+                    """,
+                    (
+                        asiento_id,
+                        empresa["id"],
+                        cliente_id,
+                        factura_id,
+                        parsed_factura.get("fecha"),
+                        concepto,
+                        "FACT",
+                        referencia,
+                        total_debe,
+                        total_haber,
+                        now,
+                        now,
+                    ),
+                )
+                for item in lines:
+                    conn.execute(
+                        """
+                        INSERT INTO gestoria_asiento_lineas (
+                          id, asiento_id, tercero_id, cuenta, descripcion, debe, haber,
+                          impuesto_tipo, impuesto_pct, created_at, updated_at
+                        ) VALUES (
+                          ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                        )
+                        """,
+                        (
+                            os.urandom(16).hex(),
+                            asiento_id,
+                            tercero_id,
+                            item.get("cuenta"),
+                            item.get("descripcion"),
+                            item.get("debe") or 0.0,
+                            item.get("haber") or 0.0,
+                            item.get("impuesto"),
+                            item.get("porcentaje"),
+                            now,
+                            now,
+                        ),
+                    )
+                conn.execute(
+                    """
+                    INSERT INTO gestoria_contabilidad (
+                      id, empresa_id, cliente_id, fecha, concepto, gestion, tipo, importe, notas, created_at, updated_at
+                    ) VALUES (
+                      ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                    )
+                    """,
+                    (
+                        os.urandom(16).hex(),
+                        empresa["id"],
+                        cliente_id,
+                        parsed_factura.get("fecha"),
+                        concepto,
+                        "Contable",
+                        "Ingreso" if tipo_factura == "venta" else "Gasto",
+                        parsed_factura.get("total") or 0.0,
+                        f"Factura OCR {referencia} · asiento {asiento_id}",
+                        now,
+                        now,
+                    ),
+                )
+                json_response(
+                    self,
+                    {
+                        "ok": True,
+                        "factura_id": factura_id,
+                        "asiento_id": asiento_id,
+                        "ocr_method": method,
+                        "parsed": parsed_factura,
+                        "lineas": lines,
+                        "totales": {"debe": total_debe, "haber": total_haber},
+                    },
+                )
+                return
+            finally:
+                if tmp_path and os.path.exists(tmp_path):
+                    try:
+                        os.unlink(tmp_path)
+                    except Exception:
+                        pass
         elif parsed.path == "/api/gestoria_contabilidad_delete":
             record_id = payload.get("id")
             if not record_id:
@@ -12388,6 +12938,94 @@ class Handler(BaseHTTPRequestHandler):
                 values,
             ).fetchall()
             json_response(self, {"rows": [dict(r) for r in rows]})
+            return
+
+        if path == "/api/gestoria_libros":
+            empresa_id = params.get("empresa_id", [""])[0]
+            desde = (params.get("desde", [""])[0] or "").strip()
+            hasta = (params.get("hasta", [""])[0] or "").strip()
+            if not empresa_id:
+                json_response(self, {"error": "empresa_id requerido"}, status=400)
+                return
+            date_clause = ""
+            values = [empresa_id]
+            if desde:
+                date_clause += " AND a.fecha >= ?"
+                values.append(desde)
+            if hasta:
+                date_clause += " AND a.fecha <= ?"
+                values.append(hasta)
+            diario = conn.execute(
+                f"""
+                SELECT a.id AS asiento_id, a.fecha, a.concepto, a.referencia,
+                       l.cuenta, l.descripcion, l.debe, l.haber,
+                       COALESCE(t.nombre, '') AS tercero, COALESCE(f.numero, '') AS factura_numero
+                FROM gestoria_asientos a
+                JOIN gestoria_asiento_lineas l ON l.asiento_id = a.id
+                LEFT JOIN gestoria_terceros t ON t.id = l.tercero_id
+                LEFT JOIN gestoria_facturas f ON f.id = a.factura_id
+                WHERE a.empresa_id = ? {date_clause}
+                ORDER BY a.fecha ASC, a.created_at ASC, l.cuenta ASC
+                """,
+                values,
+            ).fetchall()
+            mayor = conn.execute(
+                f"""
+                SELECT l.cuenta,
+                       ROUND(SUM(COALESCE(l.debe, 0)), 2) AS debe,
+                       ROUND(SUM(COALESCE(l.haber, 0)), 2) AS haber,
+                       ROUND(SUM(COALESCE(l.debe, 0) - COALESCE(l.haber, 0)), 2) AS saldo
+                FROM gestoria_asientos a
+                JOIN gestoria_asiento_lineas l ON l.asiento_id = a.id
+                WHERE a.empresa_id = ? {date_clause}
+                GROUP BY l.cuenta
+                ORDER BY l.cuenta ASC
+                """,
+                values,
+            ).fetchall()
+            iva_values = [empresa_id]
+            iva_clause = ""
+            if desde:
+                iva_clause += " AND f.fecha_emision >= ?"
+                iva_values.append(desde)
+            if hasta:
+                iva_clause += " AND f.fecha_emision <= ?"
+                iva_values.append(hasta)
+            iva_compras = conn.execute(
+                f"""
+                SELECT f.id, f.fecha_emision, f.numero, COALESCE(t.nombre, '') AS tercero,
+                       f.base_imponible, f.cuota_iva, f.iva_pct, f.total
+                FROM gestoria_facturas f
+                LEFT JOIN gestoria_terceros t ON t.id = f.tercero_id
+                WHERE f.empresa_id = ?
+                  AND LOWER(COALESCE(f.tipo, '')) = 'compra'
+                  {iva_clause}
+                ORDER BY f.fecha_emision ASC, f.created_at ASC
+                """,
+                iva_values,
+            ).fetchall()
+            iva_ventas = conn.execute(
+                f"""
+                SELECT f.id, f.fecha_emision, f.numero, COALESCE(t.nombre, '') AS tercero,
+                       f.base_imponible, f.cuota_iva, f.iva_pct, f.total
+                FROM gestoria_facturas f
+                LEFT JOIN gestoria_terceros t ON t.id = f.tercero_id
+                WHERE f.empresa_id = ?
+                  AND LOWER(COALESCE(f.tipo, '')) = 'venta'
+                  {iva_clause}
+                ORDER BY f.fecha_emision ASC, f.created_at ASC
+                """,
+                iva_values,
+            ).fetchall()
+            json_response(
+                self,
+                {
+                    "diario": [dict(r) for r in diario],
+                    "mayor": [dict(r) for r in mayor],
+                    "iva_compras": [dict(r) for r in iva_compras],
+                    "iva_ventas": [dict(r) for r in iva_ventas],
+                },
+            )
             return
 
         if path == "/api/gestoria_conta_config":
