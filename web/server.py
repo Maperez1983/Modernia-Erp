@@ -6659,6 +6659,14 @@ def ensure_tables(db_path):
             conn.execute("ALTER TABLE seguros ADD COLUMN poliza_key TEXT")
         if "poliza_url" not in seguros_cols:
             conn.execute("ALTER TABLE seguros ADD COLUMN poliza_url TEXT")
+        if "comision" not in seguros_cols:
+            conn.execute("ALTER TABLE seguros ADD COLUMN comision REAL")
+        if "porcentaje" not in seguros_cols:
+            conn.execute("ALTER TABLE seguros ADD COLUMN porcentaje REAL")
+        if "produccion" not in seguros_cols:
+            conn.execute("ALTER TABLE seguros ADD COLUMN produccion REAL")
+        if "colaborador" not in seguros_cols:
+            conn.execute("ALTER TABLE seguros ADD COLUMN colaborador TEXT")
         if "cliente_id" not in seguros_cols:
             conn.execute("ALTER TABLE seguros ADD COLUMN cliente_id TEXT")
         if "fecha_baja" not in seguros_cols:

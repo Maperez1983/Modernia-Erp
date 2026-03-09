@@ -15631,7 +15631,6 @@ const openClienteSeguroDetail = (row, cliente = {}, options = {}) => {
         const payload = {
           id: row.id,
           empresa_nombre: FINCAS_COMPANY,
-          cliente_id: linkedClienteId || "",
           tomador: tomadorValue,
           compania: editCompania.value.trim(),
           ramo: editRamo.value.trim(),
@@ -15641,7 +15640,6 @@ const openClienteSeguroDetail = (row, cliente = {}, options = {}) => {
           prima_neta: toNumber(editPrimaNeta.value || ""),
           prima_total: primaTotalNum,
           comision: comisionNum,
-          porcentaje: pctNum,
           datos_ramo_json: JSON.stringify(
             Object.entries(smartInputs).reduce((acc, [key, input]) => {
               const value = String(input?.value || "").trim();
@@ -15652,6 +15650,12 @@ const openClienteSeguroDetail = (row, cliente = {}, options = {}) => {
           produccion: toNumber(editProduccion.value || ""),
           estado: editEstado.value || "",
         };
+        if (linkedClienteId) {
+          payload.cliente_id = linkedClienteId;
+        }
+        if (Number.isFinite(pctNum)) {
+          payload.porcentaje = pctNum;
+        }
         const updateRes = await fetch("/api/seguros_update", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
