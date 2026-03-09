@@ -465,6 +465,68 @@ const buildClienteNombreFromTomador = (tomador) => {
   return (tomador || "").trim();
 };
 
+const tokenSetFromText = (value) =>
+  normalizeName(value)
+    .split(/\s+/)
+    .filter(Boolean);
+
+const jaccardSimilarity = (a, b) => {
+  if (!Array.isArray(a) || !Array.isArray(b) || !a.length || !b.length) return 0;
+  const aSet = new Set(a);
+  const bSet = new Set(b);
+  let inter = 0;
+  aSet.forEach((token) => {
+    if (bSet.has(token)) inter += 1;
+  });
+  const union = new Set([...aSet, ...bSet]).size || 1;
+  return inter / union;
+};
+
+const scoreNameSimilarity = (left, right) => {
+  const a = normalizeName(left || "");
+  const b = normalizeName(right || "");
+  if (!a || !b) return 0;
+  if (a === b) return 1;
+  if (a.includes(b) || b.includes(a)) return 0.9;
+  return jaccardSimilarity(tokenSetFromText(a), tokenSetFromText(b));
+};
+
+const buildNameCandidates = (value) => {
+  const raw = normalizeName(value || "");
+  if (!raw) return [];
+  const stopWords = new Set([
+    "A",
+    "AL",
+    "ANTE",
+    "CON",
+    "DE",
+    "DEL",
+    "EL",
+    "EN",
+    "LA",
+    "LAS",
+    "LOS",
+    "PARA",
+    "POLIZA",
+    "RENOVACION",
+    "SEGURO",
+    "SU",
+    "Y",
+  ]);
+  const tokens = raw
+    .split(/\s+/)
+    .filter((token) => token && token.length > 2 && !stopWords.has(token));
+  const candidates = [raw];
+  if (tokens.length) {
+    candidates.push(tokens.join(" "));
+    if (tokens.length >= 2) {
+      candidates.push(tokens.slice(0, 2).join(" "));
+      candidates.push(tokens.slice(-2).join(" "));
+    }
+  }
+  return Array.from(new Set(candidates.filter((item) => item.length >= 3)));
+};
+
 const buildRowMap = (row, columns) =>
   columns.reduce((acc, col, idx) => {
     acc[col] = row[idx];
@@ -477,7 +539,7 @@ const compareOcrToRow = (rowMap, fields) => {
   const rowTomador = normalizeName(rowMap.tomador || "");
   const ocrTomador = normalizeName(fields.tomador || "");
   if (rowTomador && ocrTomador) {
-    const sim = jaccard(tokenSet(rowTomador), tokenSet(ocrTomador));
+    const sim = jaccardSimilarity(tokenSetFromText(rowTomador), tokenSetFromText(ocrTomador));
     if (sim < 0.35) {
       issues.push("Tomador no coincide");
       score -= 15;
@@ -12156,12 +12218,22 @@ const lookupClienteByNombre = async (nombre) => {
     if (exact) {
       return { id: exact[idIndex], nombre: exact[nombreIndex] || text };
     }
-    const soft = rows.find((row) => {
-      const n = normalizeName(row[nombreIndex] || "");
-      return n && (n.includes(wanted) || wanted.includes(n));
+    let best = null;
+    let bestScore = 0;
+    const candidates = buildNameCandidates(text);
+    rows.forEach((row) => {
+      const rowName = row[nombreIndex] || "";
+      let score = 0;
+      candidates.forEach((candidate) => {
+        score = Math.max(score, scoreNameSimilarity(rowName, candidate));
+      });
+      if (score > bestScore) {
+        bestScore = score;
+        best = row;
+      }
     });
-    if (soft) {
-      return { id: soft[idIndex], nombre: soft[nombreIndex] || text };
+    if (best && bestScore >= 0.4) {
+      return { id: best[idIndex], nombre: best[nombreIndex] || text };
     }
   } catch {}
   return null;
@@ -15474,7 +15546,7 @@ const computeSeguroDisplayState = (row) => {
 const buildSeguroHighlights = (row, cliente = {}) => {
   const ramo = normalizeSimple(row.ramo || "");
   const computed = computeSeguroDisplayState(row);
-  const smart = buildSeguroSmartData(row);
+  const smart = buildSeguroSmartData(row, cliente);
   const items = [];
   if (ramo.includes("hogar")) {
     items.push(`Direccion riesgo: ${String(cliente.direccion || "").trim() || "No informada"}`);
@@ -15585,11 +15657,47 @@ const getSeguroSmartFields = (profile) => {
   ];
 };
 
-const buildSeguroSmartData = (row) => {
+const buildSeguroSmartData = (row, cliente = {}) => {
   const base = parseJsonObjectSafe(row.datos_ramo_json);
-  if (!base.direccion_riesgo && row.direccion) base.direccion_riesgo = row.direccion;
-  if (!base.fecha_nacimiento_asegurado && row.fecha_nacimiento) {
-    base.fecha_nacimiento_asegurado = normalizeDateInput(row.fecha_nacimiento);
+  const aliases = {
+    direccion_riesgo: ["direccion", "direccionRiesgo"],
+    codigo_postal: ["cp", "postal", "postal_code"],
+    fecha_nacimiento_asegurado: ["fecha_nacimiento", "nacimiento", "fechaNacimientoAsegurado"],
+    fecha_nacimiento_conductor: ["fecha_nacimiento", "fecha_nacimiento_titular", "nacimiento_conductor"],
+    anio_matriculacion: ["ano_matriculacion"],
+    anio_construccion: ["ano_construccion"],
+    continente: ["capital_continente", "capitalContinente"],
+    contenido: ["capital_contenido", "capitalContenido"],
+    metros2: ["metros", "superficie"],
+  };
+  Object.entries(aliases).forEach(([target, sourceKeys]) => {
+    if (base[target]) return;
+    for (const source of sourceKeys) {
+      const value = base[source];
+      if (String(value || "").trim()) {
+        base[target] = value;
+        break;
+      }
+    }
+  });
+  const rowAddress = String(row.direccion || "").trim();
+  const clienteAddress = String(cliente.direccion || "").trim();
+  if (!base.direccion_riesgo && (rowAddress || clienteAddress)) {
+    base.direccion_riesgo = rowAddress || clienteAddress;
+  }
+  const rowPostal = String(row.codigo_postal || "").trim();
+  const clientePostal = String(cliente.codigo_postal || "").trim();
+  const addrPostal = (base.direccion_riesgo || "").match(/\b\d{5}\b/);
+  if (!base.codigo_postal && (rowPostal || clientePostal || addrPostal?.[0])) {
+    base.codigo_postal = rowPostal || clientePostal || addrPostal[0];
+  }
+  const rowBirth = normalizeDateInput(row.fecha_nacimiento || "");
+  const clienteBirth = normalizeDateInput(cliente.fecha_nacimiento || "");
+  if (!base.fecha_nacimiento_asegurado && (rowBirth || clienteBirth)) {
+    base.fecha_nacimiento_asegurado = rowBirth || clienteBirth;
+  }
+  if (!base.fecha_nacimiento_conductor && (rowBirth || clienteBirth)) {
+    base.fecha_nacimiento_conductor = rowBirth || clienteBirth;
   }
   return base;
 };
@@ -15658,6 +15766,20 @@ const openClienteSeguroDetail = (row, cliente = {}, options = {}) => {
   }
   if (meta) {
     meta.innerHTML = "";
+    const comisionNum = toNumber(row.comision || "");
+    const produccionNum = toNumber(row.produccion || "");
+    const primaTotalNum = toNumber(row.prima_total || "");
+    const effectiveCommission = Number.isFinite(comisionNum)
+      ? comisionNum
+      : Number.isFinite(produccionNum)
+      ? produccionNum
+      : NaN;
+    const pctFromStored = toNumber(row.porcentaje || "");
+    const pctComputed =
+      Number.isFinite(primaTotalNum) && Number.isFinite(effectiveCommission) && primaTotalNum > 0
+        ? (effectiveCommission / primaTotalNum) * 100
+        : NaN;
+    const pctToShow = Number.isFinite(pctFromStored) ? pctFromStored : pctComputed;
     const details = [
       ["Cliente vinculado", row.cliente_id || cliente.id || "-"],
       ["Tomador", row.tomador || cliente.nombre || "-"],
@@ -15673,8 +15795,8 @@ const openClienteSeguroDetail = (row, cliente = {}, options = {}) => {
       ["Fecha vencimiento", vencimiento],
       ["Prima neta", row.prima_neta ? euroFormatter.format(Number(row.prima_neta) || 0) : "-"],
       ["Prima total", row.prima_total ? euroFormatter.format(Number(row.prima_total) || 0) : "-"],
-      ["Comisión", row.comision ? euroFormatter.format(Number(row.comision) || 0) : "-"],
-      ["Porcentaje comisión", Number.isFinite(toNumber(row.porcentaje)) ? formatPercent(toNumber(row.porcentaje)) : "-"],
+      ["Comisión", Number.isFinite(effectiveCommission) ? euroFormatter.format(effectiveCommission) : "-"],
+      ["Porcentaje comisión", Number.isFinite(pctToShow) ? formatPercent(pctToShow) : "-"],
       ["Producción", row.produccion ? euroFormatter.format(Number(row.produccion) || 0) : "-"],
       ["Estado renovacion", row.estado_renovacion || "-"],
       ["Fecha renovacion", row.renovacion_fecha || "-"],
@@ -15886,12 +16008,12 @@ const openClienteSeguroDetail = (row, cliente = {}, options = {}) => {
     editForm.appendChild(editPrimaTotal);
     const editComision = document.createElement("input");
     editComision.type = "text";
-    editComision.placeholder = "Comisión";
+    editComision.placeholder = "Comisión cobrada (€)";
     editComision.value = formatMoneyInputValue(row.comision || "");
     editForm.appendChild(editComision);
     const editProduccion = document.createElement("input");
     editProduccion.type = "text";
-    editProduccion.placeholder = "Producción";
+    editProduccion.placeholder = "Producción (€) opcional";
     editProduccion.value = formatMoneyInputValue(row.produccion || "");
     editForm.appendChild(editProduccion);
     const editPorcentaje = document.createElement("input");
@@ -15937,7 +16059,7 @@ const openClienteSeguroDetail = (row, cliente = {}, options = {}) => {
     actions.appendChild(smartHint);
     const smartForm = document.createElement("div");
     smartForm.className = "cliente-seguro-actions-form";
-    const smartData = buildSeguroSmartData(row);
+    const smartData = buildSeguroSmartData(row, cliente);
     const smartInputs = {};
     getSeguroSmartFields(smartProfile).forEach((field) => {
       let input = null;
@@ -15969,9 +16091,16 @@ const openClienteSeguroDetail = (row, cliente = {}, options = {}) => {
     actions.appendChild(smartForm);
 
     let linkedClienteId = String(row.cliente_id || cliente.id || "").trim();
+    const resolveEffectiveCommission = () => {
+      const comision = toNumber(editComision.value || "");
+      if (Number.isFinite(comision)) return comision;
+      const produccion = toNumber(editProduccion.value || "");
+      if (Number.isFinite(produccion)) return produccion;
+      return NaN;
+    };
     const refreshComisionPct = () => {
       const primaTotal = toNumber(editPrimaTotal.value || "");
-      const comision = toNumber(editComision.value || "");
+      const comision = resolveEffectiveCommission();
       if (Number.isFinite(primaTotal) && Number.isFinite(comision) && primaTotal > 0) {
         editPorcentaje.value = formatPercent((comision / primaTotal) * 100);
       } else {
@@ -15980,6 +16109,7 @@ const openClienteSeguroDetail = (row, cliente = {}, options = {}) => {
     };
     editPrimaTotal.addEventListener("input", refreshComisionPct);
     editComision.addEventListener("input", refreshComisionPct);
+    editProduccion.addEventListener("input", refreshComisionPct);
     refreshComisionPct();
 
     editClienteLinkBtn.addEventListener("click", async () => {
@@ -15991,7 +16121,7 @@ const openClienteSeguroDetail = (row, cliente = {}, options = {}) => {
       editStatus.textContent = "Buscando cliente por tomador...";
       const byName = await lookupClienteByNombre(tomador);
       if (!byName?.id) {
-        editStatus.textContent = "No se encontró cliente exacto para este tomador.";
+        editStatus.textContent = "No se encontró cliente para este tomador.";
         return;
       }
       linkedClienteId = String(byName.id || "").trim();
@@ -16010,9 +16140,13 @@ const openClienteSeguroDetail = (row, cliente = {}, options = {}) => {
         }
         const primaTotalNum = toNumber(editPrimaTotal.value || "");
         const comisionNum = toNumber(editComision.value || "");
+        const produccionNum = toNumber(editProduccion.value || "");
+        const effectiveCommission = Number.isFinite(comisionNum)
+          ? comisionNum
+          : produccionNum;
         const pctNum =
-          Number.isFinite(primaTotalNum) && Number.isFinite(comisionNum) && primaTotalNum > 0
-            ? Number(((comisionNum / primaTotalNum) * 100).toFixed(4))
+          Number.isFinite(primaTotalNum) && Number.isFinite(effectiveCommission) && primaTotalNum > 0
+            ? Number(((effectiveCommission / primaTotalNum) * 100).toFixed(4))
             : toNumber(row.porcentaje || "");
         const payload = {
           id: row.id,
@@ -16025,7 +16159,7 @@ const openClienteSeguroDetail = (row, cliente = {}, options = {}) => {
           fecha_vencimiento: editVenc.value || "",
           prima_neta: toNumber(editPrimaNeta.value || ""),
           prima_total: primaTotalNum,
-          comision: comisionNum,
+          comision: Number.isFinite(comisionNum) ? comisionNum : effectiveCommission,
           datos_ramo_json: JSON.stringify(
             Object.entries(smartInputs).reduce((acc, [key, input]) => {
               const value = String(input?.value || "").trim();
@@ -16033,7 +16167,7 @@ const openClienteSeguroDetail = (row, cliente = {}, options = {}) => {
               return acc;
             }, {})
           ),
-          produccion: toNumber(editProduccion.value || ""),
+          produccion: produccionNum,
           estado: editEstado.value || "",
         };
         if (linkedClienteId) {
