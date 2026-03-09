@@ -1383,9 +1383,10 @@ const gestoriaContabilidadCliente = document.getElementById("gestoriaContabilida
 const gestoriaContabilidadPoliza = document.getElementById("gestoriaContabilidadPoliza");
 const gestoriaContabilidadTable = document.getElementById("gestoriaContabilidadTable");
 const gestoriaContabilidadInfo = document.getElementById("gestoriaContabilidadInfo");
-const gestoriaFacturaFile = document.getElementById("gestoriaFacturaFile");
-const gestoriaFacturaTipo = document.getElementById("gestoriaFacturaTipo");
-const gestoriaFacturaOcrBtn = document.getElementById("gestoriaFacturaOcrBtn");
+const gestoriaClienteFacturaFile = document.getElementById("gestoriaClienteFacturaFile");
+const gestoriaClienteFacturaTipo = document.getElementById("gestoriaClienteFacturaTipo");
+const gestoriaClienteFacturaOcrBtn = document.getElementById("gestoriaClienteFacturaOcrBtn");
+const gestoriaClienteFacturaStatus = document.getElementById("gestoriaClienteFacturaStatus");
 const gestoriaContaConfigForm = document.getElementById("gestoriaContaConfigForm");
 const gestoriaContaConfigStatus = document.getElementById("gestoriaContaConfigStatus");
 const gestoriaContaTasksBtn = document.getElementById("gestoriaContaTasksBtn");
@@ -13898,21 +13899,26 @@ const deleteGestoriaContabilidad = (id) => {
     });
 };
 
-const runGestoriaFacturaOcr = async () => {
-  if (!gestoriaFacturaFile || !gestoriaFacturaFile.files || !gestoriaFacturaFile.files.length) {
-    if (gestoriaContabilidadStatus) gestoriaContabilidadStatus.textContent = "Selecciona una factura (PDF/imagen).";
+const runGestoriaFacturaOcr = async ({
+  fileInput,
+  tipoInput,
+  statusEl,
+  clienteId,
+} = {}) => {
+  if (!fileInput || !fileInput.files || !fileInput.files.length) {
+    if (statusEl) statusEl.textContent = "Selecciona una factura (PDF/imagen).";
     return;
   }
-  const file = gestoriaFacturaFile.files[0];
+  const file = fileInput.files[0];
   const dataUrl = await readFileAsDataUrl(file);
   const payload = {
     empresa_nombre: FINCAS_COMPANY,
     file_base64: dataUrl,
     filename: file.name || "",
-    tipo_factura: gestoriaFacturaTipo ? gestoriaFacturaTipo.value : "compra",
-    cliente_id: gestoriaContabilidadCliente ? gestoriaContabilidadCliente.value : "",
+    tipo_factura: tipoInput ? tipoInput.value : "compra",
+    cliente_id: clienteId || "",
   };
-  if (gestoriaContabilidadStatus) gestoriaContabilidadStatus.textContent = "Procesando OCR y asiento...";
+  if (statusEl) statusEl.textContent = "Procesando OCR y asiento...";
   const res = await fetch("/api/gestoria_factura_ocr", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -13920,15 +13926,15 @@ const runGestoriaFacturaOcr = async () => {
   });
   const data = await res.json().catch(() => ({}));
   if (data?.error) {
-    if (gestoriaContabilidadStatus) gestoriaContabilidadStatus.textContent = data.error;
+    if (statusEl) statusEl.textContent = data.error;
     return;
   }
-  if (gestoriaContabilidadStatus) {
+  if (statusEl) {
     const factura = data?.parsed?.numero || data?.factura_id || "";
     const asiento = data?.asiento_id || "";
-    gestoriaContabilidadStatus.textContent = `Factura ${factura} procesada. Asiento ${asiento}.`;
+    statusEl.textContent = `Factura ${factura} procesada. Asiento ${asiento}.`;
   }
-  gestoriaFacturaFile.value = "";
+  fileInput.value = "";
   loadGestoriaContabilidad();
 };
 
@@ -19271,11 +19277,16 @@ if (gestoriaContabilidadForm) {
   });
 }
 
-if (gestoriaFacturaOcrBtn) {
-  gestoriaFacturaOcrBtn.addEventListener("click", () => {
-    runGestoriaFacturaOcr().catch((error) => {
-      if (gestoriaContabilidadStatus) {
-        gestoriaContabilidadStatus.textContent = error?.message || "Error al procesar OCR.";
+if (gestoriaClienteFacturaOcrBtn) {
+  gestoriaClienteFacturaOcrBtn.addEventListener("click", () => {
+    runGestoriaFacturaOcr({
+      fileInput: gestoriaClienteFacturaFile,
+      tipoInput: gestoriaClienteFacturaTipo,
+      statusEl: gestoriaClienteFacturaStatus,
+      clienteId: state.currentClienteId || "",
+    }).catch((error) => {
+      if (gestoriaClienteFacturaStatus) {
+        gestoriaClienteFacturaStatus.textContent = error?.message || "Error al procesar OCR.";
       }
     });
   });

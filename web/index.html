@@ -1056,20 +1056,8 @@
                 Notas
                 <input name="notas" />
               </label>
-              <label class="span-2">
-                OCR factura (PDF/imagen)
-                <input id="gestoriaFacturaFile" type="file" accept=".pdf,image/*" />
-              </label>
-              <label>
-                Tipo factura OCR
-                <select id="gestoriaFacturaTipo">
-                  <option value="compra">Compra</option>
-                  <option value="venta">Venta</option>
-                </select>
-              </label>
               <div class="form-actions">
                 <button type="submit">Añadir anotación</button>
-                <button type="button" id="gestoriaFacturaOcrBtn" class="secondary">OCR + Asiento</button>
                 <span id="gestoriaContabilidadStatus" class="muted"></span>
               </div>
             </form>
@@ -3359,6 +3347,27 @@
                 <button class="tab" type="button" data-gestoria-module="admin">Gestiones administrativas</button>
               </div>
               <div id="gestoriaModuleContabilidad">
+                <div class="form-card">
+                  <h3>OCR facturas · Contabilidad</h3>
+                  <p class="muted">Sube factura y genera asiento contable automático para este cliente.</p>
+                  <div class="form-grid">
+                    <label class="span-2">
+                      Factura (PDF/imagen)
+                      <input id="gestoriaClienteFacturaFile" type="file" accept=".pdf,image/*" />
+                    </label>
+                    <label>
+                      Tipo factura
+                      <select id="gestoriaClienteFacturaTipo">
+                        <option value="compra">Compra</option>
+                        <option value="venta">Venta</option>
+                      </select>
+                    </label>
+                    <div class="form-actions">
+                      <button type="button" id="gestoriaClienteFacturaOcrBtn">OCR + Asiento</button>
+                      <span id="gestoriaClienteFacturaStatus" class="muted"></span>
+                    </div>
+                  </div>
+                </div>
                 <div class="form-card">
                   <h3>Contabilidad · Configuración del periodo</h3>
                   <p class="muted">Define el ciclo contable activo para este cliente.</p>
