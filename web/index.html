@@ -3348,7 +3348,12 @@
                 <button class="tab" type="button" data-gestoria-module="admin">Gestiones administrativas</button>
               </div>
               <div id="gestoriaModuleContabilidad">
-                <div class="form-card">
+                <div class="tabs" id="gestoriaContaInnerTabs">
+                  <button class="tab active" type="button" data-gestoria-conta-tab="operativa">Operativa</button>
+                  <button class="tab" type="button" data-gestoria-conta-tab="libros">Libros</button>
+                  <button class="tab" type="button" data-gestoria-conta-tab="control">Control</button>
+                </div>
+                <div class="form-card" data-gestoria-conta-pane="operativa">
                   <h3>OCR facturas · Contabilidad</h3>
                   <p class="muted">Sube factura y genera asiento contable automático para este cliente.</p>
                   <div class="form-grid">
@@ -3369,7 +3374,7 @@
                     </div>
                   </div>
                 </div>
-                <div class="form-card">
+                <div class="form-card" data-gestoria-conta-pane="operativa">
                   <h3>Contabilidad · Configuración del periodo</h3>
                   <p class="muted">Define el ciclo contable activo para este cliente.</p>
                   <form id="gestoriaContaConfigForm" class="form-grid">
@@ -3397,7 +3402,7 @@
                     </div>
                   </form>
                 </div>
-                <div class="form-card">
+                <div class="form-card" data-gestoria-conta-pane="operativa">
                   <div class="section-head">
                     <div>
                       <h3>Checklist contable</h3>
@@ -3407,7 +3412,7 @@
                   <div id="gestoriaContaTasksTable"></div>
                   <div class="footer" id="gestoriaContaTasksInfo"></div>
                 </div>
-                <div class="form-card">
+                <div class="form-card" data-gestoria-conta-pane="operativa">
                   <h3>Resumen del periodo</h3>
                   <div class="grid crm-kpis">
                     <div class="card kpi-card">
@@ -3427,7 +3432,7 @@
                     </div>
                   </div>
                 </div>
-                <div class="form-card">
+                <div class="form-card hidden" data-gestoria-conta-pane="control">
                   <h3>Dashboard · Contabilidad</h3>
                   <p class="muted">Resumen operativo del cliente.</p>
                   <div class="grid crm-kpis" id="gestoriaClienteKpis">
@@ -3454,19 +3459,19 @@
                   </div>
                   <div class="inline-list" id="gestoriaClienteAlerts"></div>
                 </div>
-                <div class="form-card">
+                <div class="form-card hidden" data-gestoria-conta-pane="libros">
                   <h3>Facturas OCR recientes</h3>
                   <p class="muted">Facturas detectadas y registradas para este cliente.</p>
                   <div id="gestoriaClienteFacturasTable"></div>
                   <div class="footer" id="gestoriaClienteFacturasInfo"></div>
                 </div>
-                <div class="form-card">
+                <div class="form-card hidden" data-gestoria-conta-pane="libros">
                   <h3>Asientos contables recientes</h3>
                   <p class="muted">Asientos generados automáticamente desde OCR.</p>
                   <div id="gestoriaClienteAsientosTable"></div>
                   <div class="footer" id="gestoriaClienteAsientosInfo"></div>
                 </div>
-                <div class="form-card">
+                <div class="form-card hidden" data-gestoria-conta-pane="libros">
                   <div class="section-head">
                     <div>
                       <h3>Libros contables</h3>
@@ -3498,12 +3503,12 @@
                     </div>
                   </div>
                 </div>
-                <div class="form-card">
+                <div class="form-card hidden" data-gestoria-conta-pane="control">
                   <h3>Gestiones</h3>
                   <p class="muted">Encargos en curso y finalizados.</p>
                   <div id="gestoriaTrabajosTable"></div>
                 </div>
-                <div class="form-card">
+                <div class="form-card hidden" data-gestoria-conta-pane="control">
                   <h3>Documentos</h3>
                   <p class="muted">Documentación y estado.</p>
                   <form id="gestoriaClienteDocsForm" class="form-grid">
@@ -3542,7 +3547,7 @@
                   </form>
                   <div id="gestoriaDocsTable"></div>
                 </div>
-                <div class="form-card">
+                <div class="form-card hidden" data-gestoria-conta-pane="control">
                   <h3>Agenda del cliente</h3>
                   <p class="muted">Acciones y recordatorios asociados.</p>
                   <div id="gestoriaClienteAgendaTable"></div>

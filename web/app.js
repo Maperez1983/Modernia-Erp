@@ -1134,6 +1134,7 @@ const state = {
   currentClienteSegurosRows: [],
   currentClienteRamoSelected: "",
   currentSeguroId: "",
+  gestoriaClienteContaTab: "operativa",
   gestoriaClienteLibroTab: "diario",
   gestoriaClienteLibrosCache: null,
 };
@@ -1425,6 +1426,7 @@ const gestoriaClienteLibroExcelBtn = document.getElementById("gestoriaClienteLib
 const gestoriaClienteLibroExcelStatus = document.getElementById("gestoriaClienteLibroExcelStatus");
 const gestoriaModuleTabs = document.getElementById("gestoriaModuleTabs");
 const gestoriaModuleContabilidad = document.getElementById("gestoriaModuleContabilidad");
+const gestoriaContaInnerTabs = document.getElementById("gestoriaContaInnerTabs");
 const gestoriaModuleFiscal = document.getElementById("gestoriaModuleFiscal");
 const gestoriaModuleLaboral = document.getElementById("gestoriaModuleLaboral");
 const gestoriaModuleRenta = document.getElementById("gestoriaModuleRenta");
@@ -7518,6 +7520,9 @@ const setGestoriaClientModuleTab = (tabName = "") => {
     if (!section) return;
     section.classList.toggle("hidden", key !== target);
   });
+  if (target === "contabilidad") {
+    setGestoriaClienteContaTab(state.gestoriaClienteContaTab || "operativa");
+  }
   if (!state.currentClienteId) return;
   if (target === "fiscal") {
     loadGestoriaModelos(state.currentClienteId);
@@ -7572,6 +7577,23 @@ const setGestoriaClientModuleTab = (tabName = "") => {
       "gestiones administrativas"
     );
   }
+};
+
+const setGestoriaClienteContaTab = (tabName = "operativa") => {
+  if (!gestoriaModuleContabilidad) return;
+  const allowed = new Set(["operativa", "libros", "control"]);
+  const target = allowed.has(tabName) ? tabName : "operativa";
+  state.gestoriaClienteContaTab = target;
+  if (gestoriaContaInnerTabs) {
+    gestoriaContaInnerTabs.querySelectorAll(".tab").forEach((btn) => {
+      btn.classList.toggle("active", btn.dataset.gestoriaContaTab === target);
+    });
+  }
+  gestoriaModuleContabilidad
+    .querySelectorAll("[data-gestoria-conta-pane]")
+    .forEach((panel) => {
+      panel.classList.toggle("hidden", panel.dataset.gestoriaContaPane !== target);
+    });
 };
 
 const updateGestoriaModuleTabsFromForm = () => {
@@ -18789,6 +18811,14 @@ if (gestoriaModuleTabs) {
     const btn = event.target.closest("[data-gestoria-module]");
     if (!btn) return;
     setGestoriaClientModuleTab(btn.dataset.gestoriaModule);
+  });
+}
+
+if (gestoriaContaInnerTabs) {
+  gestoriaContaInnerTabs.addEventListener("click", (event) => {
+    const btn = event.target.closest("[data-gestoria-conta-tab]");
+    if (!btn) return;
+    setGestoriaClienteContaTab(btn.dataset.gestoriaContaTab);
   });
 }
 
