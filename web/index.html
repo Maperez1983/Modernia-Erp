@@ -3117,7 +3117,8 @@
           <div class="tabs" id="clienteTabs">
             <button class="tab active" type="button" data-tab="datos">Datos personales</button>
             <button class="tab" type="button" data-tab="dashboard">Dashboard</button>
-            <button class="tab" type="button" data-tab="profesional">Datos profesionales</button>
+            <button class="tab" type="button" data-tab="profesional">Configuración</button>
+            <button class="tab" type="button" data-tab="operativa">Operativa</button>
             <button class="tab" type="button" data-tab="servicios">Servicios</button>
             <button class="tab" type="button" data-tab="docs">Documentación</button>
             <button class="tab" type="button" data-tab="facturas">Facturas servicios</button>
@@ -3207,8 +3208,8 @@
           </div>
           <div id="clienteTabProfesional" class="hidden">
             <div class="form-card">
-              <h3>Datos profesionales por servicio</h3>
-              <p class="muted">El contenido visible se adapta a los servicios asignados al cliente.</p>
+              <h3>Resumen de configuración por servicio</h3>
+              <p class="muted">Solo datos maestros y configuración base del cliente.</p>
               <div id="clienteProfesionalScope"></div>
             </div>
             <div class="form-card">
@@ -3734,6 +3735,7 @@
               </div>
             </div>
           </div>
+          <div id="clienteTabOperativa" class="hidden"></div>
           <div id="clienteTabServicios" class="hidden">
             <div class="form-card" id="clienteServiciosSegurosCard">
               <h3>Seguros</h3>
