@@ -15143,14 +15143,22 @@ const openClienteSeguroDetail = (row, cliente = {}, options = {}) => {
   if (meta) {
     meta.innerHTML = "";
     const details = [
+      ["Cliente vinculado", row.cliente_id || cliente.id || "-"],
       ["Tomador", row.tomador || cliente.nombre || "-"],
+      ["DNI/NIF", row.nif || row.dni || "-"],
+      ["Teléfono", row.telefono || "-"],
+      ["Email", row.email || "-"],
+      ["Dirección riesgo", row.direccion || "-"],
       ["Ramo", row.ramo || "-"],
+      ["Tipo vigencia", row.tipo_vigencia || "-"],
+      ["Colaborador", row.colaborador || "-"],
       ["Estado", computed.estado || "-"],
       ["Fecha efecto", row.fecha_efecto || "-"],
       ["Fecha vencimiento", vencimiento],
       ["Prima neta", row.prima_neta ? euroFormatter.format(Number(row.prima_neta) || 0) : "-"],
       ["Prima total", row.prima_total ? euroFormatter.format(Number(row.prima_total) || 0) : "-"],
       ["Comisión", row.comision ? euroFormatter.format(Number(row.comision) || 0) : "-"],
+      ["Porcentaje comisión", Number.isFinite(toNumber(row.porcentaje)) ? formatPercent(toNumber(row.porcentaje)) : "-"],
       ["Producción", row.produccion ? euroFormatter.format(Number(row.produccion) || 0) : "-"],
       ["Estado renovacion", row.estado_renovacion || "-"],
       ["Fecha renovacion", row.renovacion_fecha || "-"],
@@ -15370,6 +15378,19 @@ const openClienteSeguroDetail = (row, cliente = {}, options = {}) => {
     editProduccion.placeholder = "Producción";
     editProduccion.value = formatMoneyInputValue(row.produccion || "");
     editForm.appendChild(editProduccion);
+    const editPorcentaje = document.createElement("input");
+    editPorcentaje.type = "text";
+    editPorcentaje.placeholder = "% comisión";
+    editPorcentaje.readOnly = true;
+    editPorcentaje.value = Number.isFinite(toNumber(row.porcentaje))
+      ? formatPercent(toNumber(row.porcentaje))
+      : "";
+    editForm.appendChild(editPorcentaje);
+    const editClienteLinkBtn = document.createElement("button");
+    editClienteLinkBtn.type = "button";
+    editClienteLinkBtn.className = "ghost";
+    editClienteLinkBtn.textContent = "Vincular cliente por tomador";
+    editForm.appendChild(editClienteLinkBtn);
     const editEstado = document.createElement("select");
     ["En vigor", "Presupuesto", "Anulada", "Vencida"].forEach((opt) => {
       const o = document.createElement("option");
@@ -15390,31 +15411,77 @@ const openClienteSeguroDetail = (row, cliente = {}, options = {}) => {
     editStatus.className = "muted";
     actions.appendChild(editStatus);
 
+    let linkedClienteId = String(row.cliente_id || cliente.id || "").trim();
+    const refreshComisionPct = () => {
+      const primaTotal = toNumber(editPrimaTotal.value || "");
+      const comision = toNumber(editComision.value || "");
+      if (Number.isFinite(primaTotal) && Number.isFinite(comision) && primaTotal > 0) {
+        editPorcentaje.value = formatPercent((comision / primaTotal) * 100);
+      } else {
+        editPorcentaje.value = "";
+      }
+    };
+    editPrimaTotal.addEventListener("input", refreshComisionPct);
+    editComision.addEventListener("input", refreshComisionPct);
+    refreshComisionPct();
+
+    editClienteLinkBtn.addEventListener("click", async () => {
+      const tomador = editTomador.value.trim();
+      if (!tomador) {
+        editStatus.textContent = "Introduce el tomador para vincular el cliente.";
+        return;
+      }
+      editStatus.textContent = "Buscando cliente por tomador...";
+      const byName = await lookupClienteByNombre(tomador);
+      if (!byName?.id) {
+        editStatus.textContent = "No se encontró cliente exacto para este tomador.";
+        return;
+      }
+      linkedClienteId = String(byName.id || "").trim();
+      editStatus.textContent = `Cliente vinculado: ${byName.nombre || linkedClienteId}`;
+    });
+
     editSaveBtn.addEventListener("click", async () => {
       editStatus.textContent = "Guardando edición...";
       try {
+        const tomadorValue = editTomador.value.trim();
+        if (tomadorValue) {
+          const byName = await lookupClienteByNombre(tomadorValue);
+          if (byName?.id) {
+            linkedClienteId = String(byName.id || "").trim();
+          }
+        }
+        const primaTotalNum = toNumber(editPrimaTotal.value || "");
+        const comisionNum = toNumber(editComision.value || "");
+        const pctNum =
+          Number.isFinite(primaTotalNum) && Number.isFinite(comisionNum) && primaTotalNum > 0
+            ? Number(((comisionNum / primaTotalNum) * 100).toFixed(4))
+            : toNumber(row.porcentaje || "");
         const payload = {
           id: row.id,
           empresa_nombre: FINCAS_COMPANY,
-          tomador: editTomador.value.trim(),
+          cliente_id: linkedClienteId || "",
+          tomador: tomadorValue,
           compania: editCompania.value.trim(),
           ramo: editRamo.value.trim(),
           poliza_numero: editPoliza.value.trim(),
           fecha_efecto: editEfecto.value || "",
           fecha_vencimiento: editVenc.value || "",
           prima_neta: toNumber(editPrimaNeta.value || ""),
-          prima_total: toNumber(editPrimaTotal.value || ""),
-          comision: toNumber(editComision.value || ""),
+          prima_total: primaTotalNum,
+          comision: comisionNum,
+          porcentaje: pctNum,
           produccion: toNumber(editProduccion.value || ""),
           estado: editEstado.value || "",
         };
-        const resp = await fetch("/api/seguros_update", {
+        const updateRes = await fetch("/api/seguros_update", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
-        }).then((r) => r.json());
-        if (resp?.error) {
-          editStatus.textContent = resp.error;
+        });
+        const resp = await updateRes.json().catch(() => ({}));
+        if (!updateRes.ok || resp?.error) {
+          editStatus.textContent = resp?.error || `Error ${updateRes.status} al guardar la póliza.`;
           return;
         }
         editStatus.textContent = "Datos actualizados.";

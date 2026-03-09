@@ -9708,6 +9708,7 @@ class Handler(BaseHTTPRequestHandler):
                 "prima_neta",
                 "prima_total",
                 "comision",
+                "porcentaje",
                 "produccion",
                 "colaborador",
                 "fecha_efecto",
