@@ -1072,6 +1072,8 @@ const state = {
   currentClienteSegurosRows: [],
   currentClienteRamoSelected: "",
   currentSeguroId: "",
+  gestoriaClienteLibroTab: "diario",
+  gestoriaClienteLibrosCache: null,
 };
 
 const empresaSelect = document.getElementById("empresaSelect");
@@ -1346,6 +1348,19 @@ const gestoriaClienteFacturasTable = document.getElementById("gestoriaClienteFac
 const gestoriaClienteFacturasInfo = document.getElementById("gestoriaClienteFacturasInfo");
 const gestoriaClienteAsientosTable = document.getElementById("gestoriaClienteAsientosTable");
 const gestoriaClienteAsientosInfo = document.getElementById("gestoriaClienteAsientosInfo");
+const gestoriaClienteLibrosTabs = document.getElementById("gestoriaClienteLibrosTabs");
+const gestoriaClienteLibroDiarioPanel = document.getElementById("gestoriaClienteLibroDiarioPanel");
+const gestoriaClienteLibroMayorPanel = document.getElementById("gestoriaClienteLibroMayorPanel");
+const gestoriaClienteLibroIvaPanel = document.getElementById("gestoriaClienteLibroIvaPanel");
+const gestoriaClienteLibroExcelPanel = document.getElementById("gestoriaClienteLibroExcelPanel");
+const gestoriaClienteLibroDiarioTable = document.getElementById("gestoriaClienteLibroDiarioTable");
+const gestoriaClienteLibroDiarioInfo = document.getElementById("gestoriaClienteLibroDiarioInfo");
+const gestoriaClienteLibroMayorTable = document.getElementById("gestoriaClienteLibroMayorTable");
+const gestoriaClienteLibroMayorInfo = document.getElementById("gestoriaClienteLibroMayorInfo");
+const gestoriaClienteLibroIvaTable = document.getElementById("gestoriaClienteLibroIvaTable");
+const gestoriaClienteLibroIvaInfo = document.getElementById("gestoriaClienteLibroIvaInfo");
+const gestoriaClienteLibroExcelBtn = document.getElementById("gestoriaClienteLibroExcelBtn");
+const gestoriaClienteLibroExcelStatus = document.getElementById("gestoriaClienteLibroExcelStatus");
 const gestoriaModuleTabs = document.getElementById("gestoriaModuleTabs");
 const gestoriaModuleContabilidad = document.getElementById("gestoriaModuleContabilidad");
 const gestoriaModuleFiscal = document.getElementById("gestoriaModuleFiscal");
@@ -13861,6 +13876,197 @@ const loadGestoriaClienteContaResultados = (clienteId) => {
   });
 };
 
+const setGestoriaClienteLibroTab = (tabName = "diario") => {
+  if (!gestoriaClienteLibrosTabs) return;
+  const target = tabName || "diario";
+  state.gestoriaClienteLibroTab = target;
+  gestoriaClienteLibrosTabs.querySelectorAll(".tab").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.libroTab === target);
+  });
+  if (gestoriaClienteLibroDiarioPanel) gestoriaClienteLibroDiarioPanel.classList.toggle("hidden", target !== "diario");
+  if (gestoriaClienteLibroMayorPanel) gestoriaClienteLibroMayorPanel.classList.toggle("hidden", target !== "mayor");
+  if (gestoriaClienteLibroIvaPanel) gestoriaClienteLibroIvaPanel.classList.toggle("hidden", target !== "iva");
+  if (gestoriaClienteLibroExcelPanel) gestoriaClienteLibroExcelPanel.classList.toggle("hidden", target !== "excel");
+};
+
+const renderSimpleTable = (container, columns, rows) => {
+  if (!container) return;
+  if (!rows.length) {
+    container.innerHTML = "<p class='muted'>Sin datos.</p>";
+    return;
+  }
+  const table = document.createElement("table");
+  const thead = document.createElement("thead");
+  const trHead = document.createElement("tr");
+  columns.forEach((col) => {
+    const th = document.createElement("th");
+    th.textContent = col;
+    trHead.appendChild(th);
+  });
+  thead.appendChild(trHead);
+  table.appendChild(thead);
+  const tbody = document.createElement("tbody");
+  rows.forEach((row) => {
+    const tr = document.createElement("tr");
+    row.forEach((value) => {
+      const td = document.createElement("td");
+      td.textContent = value;
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  container.innerHTML = "";
+  container.appendChild(table);
+};
+
+const toCsv = (rows) =>
+  rows
+    .map((row) =>
+      row
+        .map((cell) => {
+          const text = String(cell ?? "");
+          return /[",;\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+        })
+        .join(";")
+    )
+    .join("\n");
+
+const downloadCsvFile = (filename, content) => {
+  const blob = new Blob([content], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+};
+
+const loadGestoriaClienteLibros = (clienteId) => {
+  if (!clienteId || !gestoriaClienteLibroDiarioTable) return;
+  const empresa = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
+  if (!empresa) return;
+  const qs = new URLSearchParams({ empresa_id: empresa.id, cliente_id: clienteId });
+  api(`/api/gestoria_libros?${qs.toString()}`)
+    .then((data) => {
+      const diario = data.diario || [];
+      const mayor = data.mayor || [];
+
+      const diarioRows = diario.map((row) => [
+        row.fecha || "-",
+        row.referencia || "-",
+        row.concepto || "-",
+        row.tercero || "-",
+        row.factura_numero || "-",
+        row.cuenta || "-",
+        row.descripcion || "-",
+        row.debe ? euroFormatter.format(parseMoneyValue(row.debe)) : "-",
+        row.haber ? euroFormatter.format(parseMoneyValue(row.haber)) : "-",
+      ]);
+      renderSimpleTable(
+        gestoriaClienteLibroDiarioTable,
+        ["Fecha", "Referencia", "Concepto", "Tercero", "Factura", "Cuenta", "Descripción", "Debe", "Haber"],
+        diarioRows
+      );
+      if (gestoriaClienteLibroDiarioInfo) {
+        gestoriaClienteLibroDiarioInfo.textContent = `Mostrando ${diarioRows.length} apuntes.`;
+      }
+
+      const mayorRows = mayor.map((row) => [
+        row.cuenta || "-",
+        row.debe ? euroFormatter.format(parseMoneyValue(row.debe)) : "-",
+        row.haber ? euroFormatter.format(parseMoneyValue(row.haber)) : "-",
+        row.saldo ? euroFormatter.format(parseMoneyValue(row.saldo)) : "-",
+      ]);
+      renderSimpleTable(
+        gestoriaClienteLibroMayorTable,
+        ["Cuenta", "Debe", "Haber", "Saldo"],
+        mayorRows
+      );
+      if (gestoriaClienteLibroMayorInfo) {
+        gestoriaClienteLibroMayorInfo.textContent = `Mostrando ${mayorRows.length} cuentas.`;
+      }
+
+      // El desglose IVA se deriva del libro diario (asientos/líneas), no de un origen externo.
+      const byAsiento = new Map();
+      diario.forEach((row) => {
+        const key = row.asiento_id || `${row.fecha || ""}-${row.referencia || ""}`;
+        if (!byAsiento.has(key)) byAsiento.set(key, []);
+        byAsiento.get(key).push(row);
+      });
+      const ivaAgg = new Map();
+      byAsiento.forEach((lines) => {
+        const sample = lines[0] || {};
+        const tipo = normalizeSimple(sample.tipo_factura || "") === "venta" ? "Venta" : "Compra";
+        const ivaLines = lines.filter((l) => normalizeSimple(l.impuesto_tipo || "") === "iva");
+        if (!ivaLines.length) return;
+        const pct = Number(ivaLines[0].impuesto_pct || 0) || 0;
+        let cuota = 0;
+        ivaLines.forEach((line) => {
+          const debe = parseMoneyValue(line.debe);
+          const haber = parseMoneyValue(line.haber);
+          cuota += Math.abs(tipo === "Venta" ? haber : debe);
+        });
+        let base = 0;
+        lines.forEach((line) => {
+          const cuenta = String(line.cuenta || "");
+          if (tipo === "Compra" && cuenta.startsWith("6")) {
+            base += Math.abs(parseMoneyValue(line.debe));
+          }
+          if (tipo === "Venta" && cuenta.startsWith("7")) {
+            base += Math.abs(parseMoneyValue(line.haber));
+          }
+        });
+        if (!base && pct > 0) {
+          base = (cuota * 100) / pct;
+        }
+        const key = `${tipo}-${pct.toFixed(2)}`;
+        if (!ivaAgg.has(key)) ivaAgg.set(key, { tipo, pct, base: 0, cuota: 0 });
+        const acc = ivaAgg.get(key);
+        acc.base += base;
+        acc.cuota += cuota;
+      });
+      const ivaRowsData = Array.from(ivaAgg.values()).sort((a, b) => {
+        if (a.tipo !== b.tipo) return a.tipo.localeCompare(b.tipo);
+        return a.pct - b.pct;
+      });
+      const ivaRows = ivaRowsData.map((row) => [
+        row.tipo,
+        `${row.pct.toFixed(2)} %`,
+        euroFormatter.format(row.base || 0),
+        euroFormatter.format(row.cuota || 0),
+        euroFormatter.format((row.base || 0) + (row.cuota || 0)),
+      ]);
+      renderSimpleTable(
+        gestoriaClienteLibroIvaTable,
+        ["Tipo", "% IVA", "Base imponible", "Cuota IVA", "Total"],
+        ivaRows
+      );
+      if (gestoriaClienteLibroIvaInfo) {
+        gestoriaClienteLibroIvaInfo.textContent = `Mostrando ${ivaRows.length} líneas de desglose IVA.`;
+      }
+
+      state.gestoriaClienteLibrosCache = {
+        diarioRows,
+        mayorRows,
+        ivaRows,
+      };
+    })
+    .catch(() => {
+      if (gestoriaClienteLibroDiarioTable) {
+        gestoriaClienteLibroDiarioTable.innerHTML = "<p class='muted'>No se pudo cargar libro diario.</p>";
+      }
+      if (gestoriaClienteLibroMayorTable) {
+        gestoriaClienteLibroMayorTable.innerHTML = "<p class='muted'>No se pudo cargar libro mayor.</p>";
+      }
+      if (gestoriaClienteLibroIvaTable) {
+        gestoriaClienteLibroIvaTable.innerHTML = "<p class='muted'>No se pudo cargar desglose IVA.</p>";
+      }
+    });
+};
+
 const loadClienteGestoria = (clienteId) => {
   if (!clienteGestoriaForm) return;
   api(`/api/cliente_gestoria?cliente_id=${clienteId}`).then((data) => {
@@ -14138,6 +14344,7 @@ const runGestoriaFacturaOcr = async ({
   loadGestoriaContabilidad();
   if (clienteId) {
     loadGestoriaClienteContaResultados(clienteId);
+    loadGestoriaClienteLibros(clienteId);
   }
 };
 
@@ -16315,6 +16522,8 @@ const openClienteDetail = (id) => {
       loadClienteGestoria(id);
       loadGestoriaClienteDashboard(id);
       loadGestoriaClienteContaResultados(id);
+      loadGestoriaClienteLibros(id);
+      setGestoriaClienteLibroTab(state.gestoriaClienteLibroTab || "diario");
       loadGestoriaModelos(id);
       loadGestoriaTrabajos(id);
       loadGestoriaDocs(id);
@@ -16347,6 +16556,15 @@ const openClienteDetail = (id) => {
       }
       if (gestoriaClienteAsientosInfo) {
         gestoriaClienteAsientosInfo.textContent = "";
+      }
+      if (gestoriaClienteLibroDiarioTable) {
+        gestoriaClienteLibroDiarioTable.innerHTML = "<p class='muted'>Sin libro diario.</p>";
+      }
+      if (gestoriaClienteLibroMayorTable) {
+        gestoriaClienteLibroMayorTable.innerHTML = "<p class='muted'>Sin libro mayor.</p>";
+      }
+      if (gestoriaClienteLibroIvaTable) {
+        gestoriaClienteLibroIvaTable.innerHTML = "<p class='muted'>Sin desglose IVA.</p>";
       }
     }
     if (hasSeguros) {
@@ -19959,6 +20177,48 @@ if (gestoriaContaQueueBtn) {
 if (gestoriaContaQueueFilter) {
   gestoriaContaQueueFilter.addEventListener("change", () => {
     loadGestoriaContaQueue();
+  });
+}
+
+if (gestoriaClienteLibrosTabs) {
+  gestoriaClienteLibrosTabs.addEventListener("click", (event) => {
+    const btn = event.target.closest("[data-libro-tab]");
+    if (!btn) return;
+    setGestoriaClienteLibroTab(btn.dataset.libroTab || "diario");
+  });
+}
+
+if (gestoriaClienteLibroExcelBtn) {
+  gestoriaClienteLibroExcelBtn.addEventListener("click", () => {
+    const cache = state.gestoriaClienteLibrosCache || {};
+    const diarioRows = cache.diarioRows || [];
+    const mayorRows = cache.mayorRows || [];
+    const ivaRows = cache.ivaRows || [];
+    if (!diarioRows.length && !mayorRows.length && !ivaRows.length) {
+      if (gestoriaClienteLibroExcelStatus) {
+        gestoriaClienteLibroExcelStatus.textContent = "No hay datos para exportar.";
+      }
+      return;
+    }
+    const rows = [
+      ["LIBRO DIARIO"],
+      ["Fecha", "Referencia", "Concepto", "Tercero", "Factura", "Cuenta", "Descripción", "Debe", "Haber"],
+      ...diarioRows,
+      [""],
+      ["LIBRO MAYOR"],
+      ["Cuenta", "Debe", "Haber", "Saldo"],
+      ...mayorRows,
+      [""],
+      ["DESGLOSE IVA (DESDE DIARIO)"],
+      ["Tipo", "% IVA", "Base imponible", "Cuota IVA", "Total"],
+      ...ivaRows,
+    ];
+    const clienteNombre = normalizeSimple(state.currentClienteData?.nombre || "cliente").replace(/\s+/g, "_");
+    const filename = `libros_contables_${clienteNombre || "cliente"}_${new Date().toISOString().slice(0, 10)}.csv`;
+    downloadCsvFile(filename, toCsv(rows));
+    if (gestoriaClienteLibroExcelStatus) {
+      gestoriaClienteLibroExcelStatus.textContent = "Exportación generada.";
+    }
   });
 }
 

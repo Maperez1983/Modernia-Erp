@@ -3467,6 +3467,38 @@
                   <div class="footer" id="gestoriaClienteAsientosInfo"></div>
                 </div>
                 <div class="form-card">
+                  <div class="section-head">
+                    <div>
+                      <h3>Libros contables</h3>
+                      <p class="muted">Libro diario, mayor, desglose de IVA y exportación.</p>
+                    </div>
+                  </div>
+                  <div class="tabs" id="gestoriaClienteLibrosTabs">
+                    <button class="tab active" type="button" data-libro-tab="diario">Libro diario</button>
+                    <button class="tab" type="button" data-libro-tab="mayor">Libro mayor</button>
+                    <button class="tab" type="button" data-libro-tab="iva">Desglose IVA</button>
+                    <button class="tab" type="button" data-libro-tab="excel">Excel</button>
+                  </div>
+                  <div id="gestoriaClienteLibroDiarioPanel">
+                    <div id="gestoriaClienteLibroDiarioTable"></div>
+                    <div class="footer" id="gestoriaClienteLibroDiarioInfo"></div>
+                  </div>
+                  <div id="gestoriaClienteLibroMayorPanel" class="hidden">
+                    <div id="gestoriaClienteLibroMayorTable"></div>
+                    <div class="footer" id="gestoriaClienteLibroMayorInfo"></div>
+                  </div>
+                  <div id="gestoriaClienteLibroIvaPanel" class="hidden">
+                    <div id="gestoriaClienteLibroIvaTable"></div>
+                    <div class="footer" id="gestoriaClienteLibroIvaInfo"></div>
+                  </div>
+                  <div id="gestoriaClienteLibroExcelPanel" class="hidden">
+                    <div class="form-actions">
+                      <button type="button" id="gestoriaClienteLibroExcelBtn">Descargar Excel (CSV)</button>
+                      <span id="gestoriaClienteLibroExcelStatus" class="muted"></span>
+                    </div>
+                  </div>
+                </div>
+                <div class="form-card">
                   <h3>Gestiones</h3>
                   <p class="muted">Encargos en curso y finalizados.</p>
                   <div id="gestoriaTrabajosTable"></div>

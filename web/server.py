@@ -13088,6 +13088,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/gestoria_libros":
             empresa_id = params.get("empresa_id", [""])[0]
+            cliente_id = (params.get("cliente_id", [""])[0] or "").strip()
             desde = (params.get("desde", [""])[0] or "").strip()
             hasta = (params.get("hasta", [""])[0] or "").strip()
             if not empresa_id:
@@ -13095,6 +13096,9 @@ class Handler(BaseHTTPRequestHandler):
                 return
             date_clause = ""
             values = [empresa_id]
+            if cliente_id:
+                date_clause += " AND a.cliente_id = ?"
+                values.append(cliente_id)
             if desde:
                 date_clause += " AND a.fecha >= ?"
                 values.append(desde)
@@ -13105,7 +13109,10 @@ class Handler(BaseHTTPRequestHandler):
                 f"""
                 SELECT a.id AS asiento_id, a.fecha, a.concepto, a.referencia,
                        l.cuenta, l.descripcion, l.debe, l.haber,
-                       COALESCE(t.nombre, '') AS tercero, COALESCE(f.numero, '') AS factura_numero
+                       l.impuesto_tipo, l.impuesto_pct,
+                       COALESCE(t.nombre, '') AS tercero,
+                       COALESCE(f.numero, '') AS factura_numero,
+                       COALESCE(f.tipo, '') AS tipo_factura
                 FROM gestoria_asientos a
                 JOIN gestoria_asiento_lineas l ON l.asiento_id = a.id
                 LEFT JOIN gestoria_terceros t ON t.id = l.tercero_id
