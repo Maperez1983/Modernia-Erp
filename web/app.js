@@ -15264,6 +15264,12 @@ const openClienteSeguroDetail = (row, cliente = {}, options = {}) => {
     loadSegurosCrm();
     const fincas = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
     if (fincas) window.requestAnimationFrame(() => renderFincasDashboard(fincas.id));
+    if (pageMode && row?.id) {
+      const refreshed = await fetchSeguroRowById(row.id);
+      if (refreshed) {
+        openClienteSeguroDetail(refreshed, cliente, { ...options, pageMode: true });
+      }
+    }
   };
   const computed = computeSeguroDisplayState(row);
   const vencimiento = computed.vencimiento || "-";
@@ -15692,6 +15698,31 @@ const openClienteSeguroDetail = (row, cliente = {}, options = {}) => {
   }
 };
 
+const fetchSeguroRowById = async (seguroId) => {
+  const id = String(seguroId || "").trim();
+  if (!id) return null;
+  const fincas = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
+  if (!fincas) return null;
+  const params = new URLSearchParams({
+    tabla: "seguros",
+    empresa_id: fincas.id,
+    include_id: "1",
+    q: "",
+  });
+  try {
+    const data = await api(`/api/tabla?${params.toString()}`);
+    const columns = data?.columns || [];
+    const rows = data?.rows || [];
+    const idIndex = columns.indexOf("id");
+    if (idIndex < 0) return null;
+    const rowArr = rows.find((row) => String(row[idIndex] || "").trim() === id);
+    if (!rowArr) return null;
+    return buildRowMap(rowArr, columns);
+  } catch {
+    return null;
+  }
+};
+
 const openSeguroPage = (row, cliente = {}, options = {}) => {
   if (!row) return;
   if (state.currentPage !== "seguro") {
@@ -15738,30 +15769,12 @@ const closeSeguroPage = () => {
 };
 
 const openSeguroById = async (seguroId, clienteId = "") => {
-  const id = String(seguroId || "").trim();
-  if (!id) return;
-  const fincas = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
-  if (!fincas) return;
-  const params = new URLSearchParams({
-    tabla: "seguros",
-    empresa_id: fincas.id,
-    include_id: "1",
-    q: "",
-  });
-  try {
-    const data = await api(`/api/tabla?${params.toString()}`);
-    const columns = data?.columns || [];
-    const rows = data?.rows || [];
-    const idIndex = columns.indexOf("id");
-    if (idIndex < 0) return;
-    const rowArr = rows.find((row) => String(row[idIndex] || "").trim() === id);
-    if (!rowArr) return;
-    const rowMap = buildRowMap(rowArr, columns);
-    const cliente =
-      (clienteId && { id: clienteId, nombre: rowMap.tomador || "" }) ||
-      { id: rowMap.cliente_id || "", nombre: rowMap.tomador || "" };
-    openSeguroPage(rowMap, cliente, {});
-  } catch (_) {}
+  const rowMap = await fetchSeguroRowById(seguroId);
+  if (!rowMap) return;
+  const cliente =
+    (clienteId && { id: clienteId, nombre: rowMap.tomador || "" }) ||
+    { id: rowMap.cliente_id || "", nombre: rowMap.tomador || "" };
+  openSeguroPage(rowMap, cliente, {});
 };
 
 const loadClienteSeguros = (cliente, empresaId) => {

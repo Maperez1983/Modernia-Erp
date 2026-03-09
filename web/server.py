@@ -10237,6 +10237,77 @@ class Handler(BaseHTTPRequestHandler):
                     f"UPDATE seguros SET {set_clause}, updated_at = datetime(?) WHERE id = ?",
                     values,
                 )
+            # Captura inteligente por ramo desde OCR: persiste señales comerciales
+            # aunque no existan columnas dedicadas en la tabla.
+            smart_allowed = (
+                "direccion_riesgo",
+                "codigo_postal",
+                "fecha_nacimiento_asegurado",
+                "fecha_nacimiento_conductor",
+                "fecha_carnet",
+                "matricula",
+                "marca_modelo",
+                "anio_matriculacion",
+                "uso_vehiculo",
+                "garaje",
+                "tipo_vivienda",
+                "metros2",
+                "anio_construccion",
+                "continente",
+                "contenido",
+                "profesion",
+                "fumador",
+                "capital_asegurado",
+                "beneficiarios",
+                "deporte_riesgo",
+                "actividad",
+                "facturacion_anual",
+                "empleados",
+                "superficie",
+                "medidas_seguridad",
+                "notas_comerciales",
+            )
+            raw_existing = row["datos_ramo_json"] if "datos_ramo_json" in row.keys() else ""
+            try:
+                existing_smart = json.loads(raw_existing) if raw_existing else {}
+                if not isinstance(existing_smart, dict):
+                    existing_smart = {}
+            except Exception:
+                existing_smart = {}
+            incoming_smart = {}
+            raw_smart_payload = payload.get("datos_ramo_json")
+            if raw_smart_payload:
+                try:
+                    parsed_smart = (
+                        json.loads(raw_smart_payload)
+                        if isinstance(raw_smart_payload, str)
+                        else raw_smart_payload
+                    )
+                    if isinstance(parsed_smart, dict):
+                        incoming_smart.update(
+                            {
+                                str(k): v
+                                for k, v in parsed_smart.items()
+                                if str(v or "").strip() != ""
+                            }
+                        )
+                except Exception:
+                    pass
+            for key in smart_allowed:
+                val = payload.get(key)
+                if val is None:
+                    continue
+                text = str(val).strip()
+                if not text:
+                    continue
+                incoming_smart[key] = val
+            if incoming_smart:
+                merged = dict(existing_smart)
+                merged.update(incoming_smart)
+                conn.execute(
+                    "UPDATE seguros SET datos_ramo_json = ?, updated_at = datetime(?) WHERE id = ?",
+                    (json.dumps(merged, ensure_ascii=False), now, record_id),
+                )
             row = conn.execute("SELECT * FROM seguros WHERE id = ?", (record_id,)).fetchone()
             if row:
                 if row["cliente_id"]:
