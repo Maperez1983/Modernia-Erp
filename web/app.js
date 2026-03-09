@@ -1071,6 +1071,7 @@ const state = {
   currentClienteData: null,
   currentClienteSegurosRows: [],
   currentClienteRamoSelected: "",
+  currentSeguroId: "",
 };
 
 const empresaSelect = document.getElementById("empresaSelect");
@@ -1173,6 +1174,10 @@ const clientesServicioSelect = document.getElementById("clientesServicioSelect")
 const clientesLinkRows = document.getElementById("clientesLinkRows");
 const clientesLinkAdd = document.getElementById("clientesLinkAdd");
 const clientePage = document.getElementById("clientePage");
+const seguroPage = document.getElementById("seguroPage");
+const seguroDetailCard = document.getElementById("seguroDetailCard");
+const seguroDetailBack = document.getElementById("seguroDetailBack");
+const seguroDetailSubtitle = document.getElementById("seguroDetailSubtitle");
 const clientesDetail = document.getElementById("clientesDetail");
 const clienteDetailTitle = document.getElementById("clienteDetailTitle");
 const clienteDetailSubtitle = document.getElementById("clienteDetailSubtitle");
@@ -3147,6 +3152,9 @@ const setPage = (page) => {
   if (clientePage) {
     clientePage.classList.toggle("hidden", page !== "cliente");
   }
+  if (seguroPage) {
+    seguroPage.classList.toggle("hidden", page !== "seguro");
+  }
   if (clientesDetail) {
     clientesDetail.classList.toggle("hidden", page !== "cliente");
   }
@@ -3657,8 +3665,25 @@ const handleRoute = () => {
   }
   if (params.has("cliente")) {
     const id = params.get("cliente");
+    if (params.has("poliza")) {
+      const polizaId = params.get("poliza");
+      openClientesModule();
+      openClienteDetail(id);
+      setTimeout(() => {
+        openSeguroById(polizaId, id);
+      }, 250);
+      return;
+    }
     openClientesModule();
     openClienteDetail(id);
+    return;
+  }
+  if (params.has("poliza")) {
+    const polizaId = params.get("poliza");
+    openSegurosCrm();
+    setTimeout(() => {
+      openSeguroById(polizaId);
+    }, 250);
     return;
   }
   const slug = params.get("empresa");
@@ -9147,7 +9172,7 @@ const renderTableInto = (data, container, infoEl, label) => {
       btn.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
-        openClienteSeguroDetail(
+        openSeguroPage(
           rowMap,
           {
             id: clienteIdIndex >= 0 ? row[clienteIdIndex] : "",
@@ -10742,7 +10767,7 @@ const renderSegurosRamoListado = (ramoLabel, items = []) => {
     editBtn.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
-      openClienteSeguroDetail(
+      openSeguroPage(
         item,
         { id: item.cliente_id || "", nombre: item.tomador || "" },
         {
@@ -14263,7 +14288,7 @@ const renderClienteRamoListado = (ramoLabel, rows = [], cliente = null) => {
     openBtn.textContent = "Abrir póliza";
     openBtn.addEventListener("click", (event) => {
       event.stopPropagation();
-      openClienteSeguroDetail(
+      openSeguroPage(
         row,
         cliente || state.currentClienteData || { id: state.currentClienteId, nombre: row.tomador || "" },
         {
@@ -14277,7 +14302,7 @@ const renderClienteRamoListado = (ramoLabel, rows = [], cliente = null) => {
     actionTd.appendChild(openBtn);
     tr.appendChild(actionTd);
     tr.addEventListener("click", () =>
-      openClienteSeguroDetail(
+      openSeguroPage(
         row,
         cliente || state.currentClienteData || { id: state.currentClienteId, nombre: row.tomador || "" },
         {
@@ -15190,8 +15215,9 @@ const buildSeguroSmartData = (row) => {
 };
 
 const openClienteSeguroDetail = (row, cliente = {}, options = {}) => {
-  let modal = document.getElementById("clienteSeguroDetailModal");
-  if (!modal) {
+  const pageMode = options.pageMode === true;
+  let modal = pageMode ? seguroDetailCard : document.getElementById("clienteSeguroDetailModal");
+  if (!modal && !pageMode) {
     modal = document.createElement("div");
     modal.id = "clienteSeguroDetailModal";
     modal.className = "modal hidden";
@@ -15217,6 +15243,7 @@ const openClienteSeguroDetail = (row, cliente = {}, options = {}) => {
       if (event.target === modal) close();
     });
   }
+  if (!modal) return;
   const title = modal.querySelector(".cliente-seguro-modal-title");
   const meta = modal.querySelector(".cliente-seguro-meta");
   const actions = modal.querySelector(".cliente-seguro-actions");
@@ -15655,8 +15682,82 @@ const openClienteSeguroDetail = (row, cliente = {}, options = {}) => {
     });
     highlights.appendChild(list);
   }
-  modal.classList.remove("hidden");
-  modal.classList.add("open");
+  if (!pageMode) {
+    modal.classList.remove("hidden");
+    modal.classList.add("open");
+  }
+};
+
+const openSeguroPage = (row, cliente = {}, options = {}) => {
+  if (!row) return;
+  if (state.currentPage !== "seguro") {
+    state.prevPage = state.currentPage;
+    state.prevModule = state.currentModule;
+    state.prevTab = currentTab;
+  }
+  state.currentSeguroId = String(row.id || row.poliza_numero || "");
+  setPage("seguro");
+  updateTableVisibility();
+  if (seguroDetailSubtitle) {
+    seguroDetailSubtitle.textContent = `Tomador: ${row.tomador || cliente.nombre || "-"} · Ramo: ${row.ramo || "-"}`;
+  }
+  openClienteSeguroDetail(row, cliente, { ...options, pageMode: true });
+  const params = new URLSearchParams({ poliza: state.currentSeguroId });
+  if (cliente?.id) params.set("cliente", String(cliente.id));
+  setUrlParams(params);
+  window.scrollTo({ top: 0, behavior: "smooth" });
+};
+
+const closeSeguroPage = () => {
+  const returnPage = state.prevPage && state.prevPage !== "seguro" ? state.prevPage : "empresa";
+  if (returnPage === "cliente") {
+    setPage("cliente");
+    updateTableVisibility();
+    if (state.currentClienteId) {
+      setUrlParams(new URLSearchParams({ cliente: state.currentClienteId }));
+    }
+    return;
+  }
+  if (returnPage === "empresa") {
+    setModule(state.prevModule || "empresas");
+    setTab(state.prevTab || "bdt");
+    setPage("empresa");
+    updateTableVisibility();
+    if (state.currentEmpresaName) {
+      setUrlParams(new URLSearchParams({ empresa: slugify(state.currentEmpresaName) }));
+    } else {
+      setUrlParams(new URLSearchParams());
+    }
+    return;
+  }
+  goHome();
+};
+
+const openSeguroById = async (seguroId, clienteId = "") => {
+  const id = String(seguroId || "").trim();
+  if (!id) return;
+  const fincas = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
+  if (!fincas) return;
+  const params = new URLSearchParams({
+    tabla: "seguros",
+    empresa_id: fincas.id,
+    include_id: "1",
+    q: "",
+  });
+  try {
+    const data = await api(`/api/tabla?${params.toString()}`);
+    const columns = data?.columns || [];
+    const rows = data?.rows || [];
+    const idIndex = columns.indexOf("id");
+    if (idIndex < 0) return;
+    const rowArr = rows.find((row) => String(row[idIndex] || "").trim() === id);
+    if (!rowArr) return;
+    const rowMap = buildRowMap(rowArr, columns);
+    const cliente =
+      (clienteId && { id: clienteId, nombre: rowMap.tomador || "" }) ||
+      { id: rowMap.cliente_id || "", nombre: rowMap.tomador || "" };
+    openSeguroPage(rowMap, cliente, {});
+  } catch (_) {}
 };
 
 const loadClienteSeguros = (cliente, empresaId) => {
@@ -15738,7 +15839,7 @@ const loadClienteSeguros = (cliente, empresaId) => {
         openBtn.textContent = "Abrir";
         openBtn.addEventListener("click", (event) => {
           event.stopPropagation();
-          openClienteSeguroDetail(row, cliente, {
+          openSeguroPage(row, cliente, {
             onSaved: () => loadClienteSeguros(cliente, empresaId),
           });
         });
@@ -15764,7 +15865,7 @@ const loadClienteSeguros = (cliente, empresaId) => {
         actionTd.appendChild(deleteBtn);
         tr.appendChild(actionTd);
         tr.addEventListener("click", () =>
-          openClienteSeguroDetail(row, cliente, {
+          openSeguroPage(row, cliente, {
             onSaved: () => loadClienteSeguros(cliente, empresaId),
           })
         );
@@ -18095,6 +18196,12 @@ if (inmuebleBackBtn) {
 if (clienteDetailBack) {
   clienteDetailBack.addEventListener("click", () => {
     closeClienteDetail();
+  });
+}
+
+if (seguroDetailBack) {
+  seguroDetailBack.addEventListener("click", () => {
+    closeSeguroPage();
   });
 }
 
