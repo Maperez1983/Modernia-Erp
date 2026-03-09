@@ -1335,11 +1335,13 @@ def process_seguros_ocr(payload, conn):
         fields = parse_poliza_text(text, source_hint=source_hint, hinted_company=hinted_company)
         candidate_fields.append(("pdf_text", normalize_extracted_fields(fields), 1.0))
         best_quality = compute_ocr_quality(fields, required_keys)
-        if not any(str(value or "").strip() for value in fields.values()) or (
+        if (not fast_mode) and (
+            not any(str(value or "").strip() for value in fields.values()) or (
             not fields.get("poliza_numero")
             or not fields.get("tomador")
             or not fields.get("compania")
             or not fields.get("fecha_efecto")
+            )
         ):
             ocr_text, ocr_err = ocr_pdf_all_pages(tmp_path, use_external=external_ocr_available())
             if ocr_text:
@@ -1401,6 +1403,21 @@ def process_seguros_ocr(payload, conn):
         if hinted_company and not fields.get("compania"):
             fields["compania"] = hinted_company
         missing_required = any(not fields.get(key) for key in required_keys)
+        if fast_mode and missing_required:
+            # Último intento rápido sin OCR externo ni IA para evitar latencia alta.
+            quick_text, quick_err = ocr_pdf_all_pages(tmp_path, use_external=False)
+            if quick_text:
+                quick_fields = parse_poliza_text(quick_text, source_hint=source_hint, hinted_company=hinted_company)
+                quick_merged = merge_fields(fields, quick_fields)
+                quick_quality = compute_ocr_quality(quick_merged, required_keys)
+                if candidate_score(quick_quality) >= candidate_score(best_quality):
+                    fields = quick_merged
+                    best_quality = quick_quality
+                    text = quick_text
+                    method = "tesseract"
+            elif quick_err and not err_detail:
+                err_detail = quick_err
+            missing_required = any(not fields.get(key) for key in required_keys)
         if (not fast_mode) and openai_available() and (missing_required or candidate_score(best_quality) < 320):
             ai_text = text or ""
             if doc_text and doc_text.strip():
