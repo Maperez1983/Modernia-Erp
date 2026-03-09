@@ -15784,7 +15784,9 @@ const openClienteDetail = (id) => {
             : "seguros";
     setClienteDocsTab(docsDefault);
     clientesDetail.classList.remove("hidden");
-    const defaultTab = (hasSeguros || hasInmo || hasHipotecas) ? "servicios" : "dashboard";
+    const defaultTab = (hasSeguros || hasInmo || hasHipotecas)
+      ? "servicios"
+      : (hasGestoria ? "profesional" : "dashboard");
     setClienteTab(defaultTab);
     window.scrollTo({ top: clientesDetail.offsetTop - 120, behavior: "smooth" });
   });
