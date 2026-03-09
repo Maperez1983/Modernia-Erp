@@ -20253,7 +20253,43 @@ if (gestoriaClienteLibrosTabs) {
 }
 
 if (gestoriaClienteLibroExcelBtn) {
-  gestoriaClienteLibroExcelBtn.addEventListener("click", () => {
+  gestoriaClienteLibroExcelBtn.addEventListener("click", async () => {
+    const clienteId = String(state.currentClienteId || "").trim();
+    const empresa = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
+    if (!clienteId || !empresa?.id) {
+      if (gestoriaClienteLibroExcelStatus) {
+        gestoriaClienteLibroExcelStatus.textContent = "Cliente o empresa no disponible.";
+      }
+      return;
+    }
+    try {
+      const qs = new URLSearchParams({ empresa_id: empresa.id, cliente_id: clienteId });
+      const resp = await fetch(`/api/gestoria_excel_plantilla?${qs.toString()}`, {
+        credentials: "same-origin",
+      });
+      if (resp.ok) {
+        const blob = await resp.blob();
+        const cd = resp.headers.get("Content-Disposition") || "";
+        const match = cd.match(/filename=\"?([^\";]+)\"?/i);
+        const filename =
+          (match && match[1]) ||
+          `plantilla_conversor_asientos_${new Date().toISOString().slice(0, 10)}.xlsx`;
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        if (gestoriaClienteLibroExcelStatus) {
+          gestoriaClienteLibroExcelStatus.textContent = "Excel generado.";
+        }
+        return;
+      }
+    } catch (_) {}
+
+    // Fallback CSV si el backend no puede generar XLSX.
     const cache = state.gestoriaClienteLibrosCache || {};
     const plantillaRows = cache.plantillaRows || [];
     if (!plantillaRows.length) {
@@ -20287,7 +20323,7 @@ if (gestoriaClienteLibroExcelBtn) {
     const filename = `plantilla_conversor_asientos_${clienteNombre || "cliente"}_${new Date().toISOString().slice(0, 10)}.csv`;
     downloadCsvFile(filename, toCsv(rows));
     if (gestoriaClienteLibroExcelStatus) {
-      gestoriaClienteLibroExcelStatus.textContent = "Plantilla de conversor generada.";
+      gestoriaClienteLibroExcelStatus.textContent = "Plantilla generada en CSV (fallback).";
     }
   });
 }

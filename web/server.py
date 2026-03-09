@@ -17,11 +17,19 @@ import threading
 import time
 import secrets
 import smtplib
+from io import BytesIO
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
 from pathlib import Path
 import unicodedata
 from email.message import EmailMessage
+
+try:
+    from openpyxl import Workbook
+    OPENPYXL_AVAILABLE = True
+except Exception:
+    Workbook = None
+    OPENPYXL_AVAILABLE = False
 
 
 ROOT = Path(__file__).resolve().parent
@@ -13182,6 +13190,133 @@ class Handler(BaseHTTPRequestHandler):
                     "iva_ventas": [dict(r) for r in iva_ventas],
                 },
             )
+            return
+
+        if path == "/api/gestoria_excel_plantilla":
+            empresa_id = params.get("empresa_id", [""])[0]
+            cliente_id = (params.get("cliente_id", [""])[0] or "").strip()
+            if not empresa_id:
+                json_response(self, {"error": "empresa_id requerido"}, status=400)
+                return
+            if not cliente_id:
+                json_response(self, {"error": "cliente_id requerido"}, status=400)
+                return
+            if not OPENPYXL_AVAILABLE:
+                json_response(self, {"error": "openpyxl no disponible en servidor"}, status=500)
+                return
+            diario = conn.execute(
+                """
+                SELECT a.id AS asiento_id, a.fecha, a.concepto, a.referencia,
+                       l.cuenta, l.descripcion, l.debe, l.haber,
+                       l.impuesto_tipo, l.impuesto_pct,
+                       COALESCE(t.nombre, '') AS tercero,
+                       COALESCE(t.nif, '') AS tercero_nif,
+                       COALESCE(f.numero, '') AS factura_numero,
+                       COALESCE(f.fecha_emision, '') AS factura_fecha,
+                       COALESCE(f.total, 0) AS factura_total,
+                       COALESCE(f.tipo, '') AS tipo_factura
+                FROM gestoria_asientos a
+                JOIN gestoria_asiento_lineas l ON l.asiento_id = a.id
+                LEFT JOIN gestoria_terceros t ON t.id = l.tercero_id
+                LEFT JOIN gestoria_facturas f ON f.id = a.factura_id
+                WHERE a.empresa_id = ? AND a.cliente_id = ?
+                ORDER BY a.fecha ASC, a.created_at ASC, l.cuenta ASC
+                """,
+                (empresa_id, cliente_id),
+            ).fetchall()
+            grouped = {}
+            for row in diario:
+                key = str(row["asiento_id"] or "").strip() or f"{row['fecha'] or ''}-{row['referencia'] or ''}"
+                grouped.setdefault(key, []).append(row)
+            output_rows = []
+            for _key, lines in grouped.items():
+                if not lines:
+                    continue
+                sample = lines[0]
+                base = 0.0
+                iva_pct = 0.0
+                iva_importe = 0.0
+                subcuenta_tercero = ""
+                subcuenta_gyi = ""
+                tipo_venta = normalize_service_key(sample["tipo_factura"] or "") == "venta"
+                for line in lines:
+                    cuenta = str(line["cuenta"] or "").strip()
+                    debe = float(line["debe"] or 0)
+                    haber = float(line["haber"] or 0)
+                    imp_tipo = normalize_service_key(line["impuesto_tipo"] or "")
+                    if not subcuenta_tercero and cuenta.startswith("4"):
+                        subcuenta_tercero = cuenta
+                    if not subcuenta_gyi and (cuenta.startswith("6") or cuenta.startswith("7")):
+                        subcuenta_gyi = cuenta
+                    if imp_tipo == "iva":
+                        iva_importe += abs(haber if tipo_venta else debe)
+                        if not iva_pct:
+                            iva_pct = float(line["impuesto_pct"] or 0)
+                    if subcuenta_gyi == cuenta:
+                        base += abs(haber if cuenta.startswith("7") else debe)
+                total = float(sample["factura_total"] or 0) or (base + iva_importe)
+                output_rows.append(
+                    [
+                        sample["fecha"] or "",
+                        sample["factura_fecha"] or "",
+                        sample["factura_numero"] or sample["referencia"] or "",
+                        sample["concepto"] or "",
+                        subcuenta_tercero,
+                        sample["tercero_nif"] or "",
+                        sample["tercero"] or "",
+                        "",
+                        "",
+                        "",
+                        "",
+                        round(base, 2) if base else "",
+                        round(iva_pct, 2) if iva_pct else "",
+                        round(iva_importe, 2) if iva_importe else "",
+                        subcuenta_gyi,
+                        round(total, 2) if total else "",
+                    ]
+                )
+            wb = Workbook()
+            ws = wb.active
+            ws.title = "Hoja1"
+            headers = [
+                "FECHA ASIENTO",
+                "FECHA FACTURA",
+                "Nº FACTURA",
+                "CONCEPTO",
+                "SUBCUENTA",
+                "NIF",
+                "NOMBRE",
+                "DOMICILIO",
+                "LOCALIDAD",
+                "PROVINCIA",
+                "CODIGO POSTAL",
+                "BASE IMPONIBLE",
+                "% IVA",
+                "IMPORTE IVA",
+                "SUBCUENTA GASTOS/INGRESOS",
+                "IMPORTE (TOTAL)",
+            ]
+            ws.append(headers)
+            for row in output_rows:
+                ws.append(row)
+            bio = BytesIO()
+            wb.save(bio)
+            payload = bio.getvalue()
+            cliente = conn.execute("SELECT nombre FROM clientes WHERE id = ?", (cliente_id,)).fetchone()
+            cliente_slug = re.sub(r"[^a-z0-9]+", "_", normalize_lookup_text((cliente["nombre"] if cliente else "cliente"))).strip("_") or "cliente"
+            filename = f"plantilla_conversor_asientos_{cliente_slug}_{datetime.now().strftime('%Y%m%d')}.xlsx"
+            self.send_response(200)
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type")
+            self.send_header("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
+            self.send_header(
+                "Content-Type",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+            self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
             return
 
         if path == "/api/gestoria_conta_config":
