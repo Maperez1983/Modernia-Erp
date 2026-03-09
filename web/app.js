@@ -15543,7 +15543,19 @@ const openClienteDetail = (id) => {
       const isActiveService = (row) => {
         if (typeof row?.is_active === "boolean") return row.is_active;
         const estado = normalizeSimple(row?.estado || "activo");
-        return !["inactivo", "baja", "cancelado", "anulado", "finalizado"].includes(estado);
+        if (["inactivo", "baja", "cancelado", "anulado", "finalizado"].includes(estado)) {
+          return false;
+        }
+        const endRaw = String(row?.fecha_fin || "").trim();
+        if (endRaw) {
+          const endDate = new Date(`${endRaw}T00:00:00`);
+          const now = new Date();
+          const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+          if (!Number.isNaN(endDate.getTime()) && endDate < today) {
+            return false;
+          }
+        }
+        return true;
       };
       const activeEmpresas = empresas.filter((row) => isActiveService(row));
       const serviceSet = new Set(

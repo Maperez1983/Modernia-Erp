@@ -511,11 +511,14 @@ def normalize_service_key(value):
     return aliases.get(text, text.lower().strip())
 
 
-def is_active_service_state(value):
+def is_active_service_state(value, fecha_fin=None):
     state = normalize_lookup_text(value or "")
-    if not state:
-        return True
-    return state not in {"INACTIVO", "BAJA", "CANCELADO", "ANULADO", "FINALIZADO"}
+    if state and state in {"INACTIVO", "BAJA", "CANCELADO", "ANULADO", "FINALIZADO"}:
+        return False
+    end_date = parse_iso_date(fecha_fin)
+    if end_date and end_date < datetime.now(timezone.utc).date():
+        return False
+    return True
 
 
 def parse_iso_date(value):
@@ -5888,7 +5891,7 @@ def build_cliente_ficha_payload(conn, cliente_id, services_filter=None):
     allowed_keys = {"gestoria", "seguros", "inmobiliaria", "financiaciones"}
     for row in empresas:
         service_key = normalize_service_key(row.get("servicio"))
-        active = is_active_service_state(row.get("estado"))
+        active = is_active_service_state(row.get("estado"), row.get("fecha_fin"))
         row["servicio_key"] = service_key
         row["is_active"] = active
         if not active:
