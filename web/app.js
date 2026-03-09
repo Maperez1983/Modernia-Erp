@@ -1940,11 +1940,38 @@ const createOption = (value, label) => {
   return option;
 };
 
+const getSegurosColaboradoresCatalog = () => {
+  const seen = new Set();
+  const catalog = [];
+  const add = (value, label = "") => {
+    const raw = String(value || "").trim();
+    if (!raw) return;
+    const key = normalizeSimple(raw);
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    catalog.push({ value: raw, label: String(label || raw).trim() || raw });
+  };
+  SEGUROS_RESPONSABLES_FIJOS.forEach((name) => add(name, name));
+  (state.usersList || []).forEach((user) => {
+    const service = normalizeSimple(user?.servicio || "");
+    const canUse =
+      !service ||
+      service.includes("seguros") ||
+      service.includes("direccion") ||
+      service.includes("administracion");
+    if (!canUse) return;
+    const label = `${user?.nombre || ""} ${user?.apellido || ""}`.trim();
+    const value = (user?.usuario || "").trim() || label;
+    add(value, label || value);
+  });
+  return catalog;
+};
+
 const refreshSegurosColaboradoresList = (columns = [], rows = []) => {
   if (!segurosColaboradoresList) return;
   segurosColaboradoresList.innerHTML = "";
-  SEGUROS_RESPONSABLES_FIJOS.forEach((value) => {
-    segurosColaboradoresList.appendChild(createOption(value, value));
+  getSegurosColaboradoresCatalog().forEach((item) => {
+    segurosColaboradoresList.appendChild(createOption(item.value, item.label));
   });
 };
 
@@ -7077,6 +7104,7 @@ const loadUsuarios = () =>
   api("/api/usuarios").then((data) => {
     state.usersList = data.rows || [];
     populateResponsableSelects();
+    refreshSegurosColaboradoresList();
     return state.usersList;
   });
 
@@ -16055,6 +16083,20 @@ const openClienteSeguroDetail = (row, cliente = {}, options = {}) => {
       ? formatPercent(toNumber(row.porcentaje))
       : "";
     editForm.appendChild(editPorcentaje);
+    const editColaborador = document.createElement("select");
+    editColaborador.appendChild(createOption("", "Colaborador / responsable"));
+    getSegurosColaboradoresCatalog().forEach((item) => {
+      editColaborador.appendChild(createOption(item.value, item.label));
+    });
+    const currentColaborador = String(row.colaborador || "").trim();
+    if (currentColaborador) {
+      editColaborador.value = currentColaborador;
+      if (String(editColaborador.value || "").trim() !== currentColaborador) {
+        editColaborador.appendChild(createOption(currentColaborador, currentColaborador));
+        editColaborador.value = currentColaborador;
+      }
+    }
+    editForm.appendChild(editColaborador);
     const editClienteLinkBtn = document.createElement("button");
     editClienteLinkBtn.type = "button";
     editClienteLinkBtn.className = "ghost";
@@ -16199,6 +16241,7 @@ const openClienteSeguroDetail = (row, cliente = {}, options = {}) => {
             }, {})
           ),
           produccion: produccionNum,
+          colaborador: String(editColaborador.value || "").trim(),
           estado: editEstado.value || "",
         };
         if (linkedClienteId) {
