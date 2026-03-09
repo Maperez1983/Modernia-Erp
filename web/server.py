@@ -6675,6 +6675,8 @@ def ensure_tables(db_path):
             conn.execute("ALTER TABLE seguros ADD COLUMN version_grupo TEXT")
         if "tipo_vigencia" not in seguros_cols:
             conn.execute("ALTER TABLE seguros ADD COLUMN tipo_vigencia TEXT")
+        if "datos_ramo_json" not in seguros_cols:
+            conn.execute("ALTER TABLE seguros ADD COLUMN datos_ramo_json TEXT")
     except sqlite3.Error:
         pass
     conn.execute(
@@ -9726,6 +9728,7 @@ class Handler(BaseHTTPRequestHandler):
                 "poliza_key",
                 "poliza_url",
                 "tipo_vigencia",
+                "datos_ramo_json",
             ):
                 if key in payload:
                     updates[key] = payload.get(key)

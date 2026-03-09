@@ -15069,6 +15069,7 @@ const computeSeguroDisplayState = (row) => {
 const buildSeguroHighlights = (row, cliente = {}) => {
   const ramo = normalizeSimple(row.ramo || "");
   const computed = computeSeguroDisplayState(row);
+  const smart = buildSeguroSmartData(row);
   const items = [];
   if (ramo.includes("hogar")) {
     items.push(`Direccion riesgo: ${String(cliente.direccion || "").trim() || "No informada"}`);
@@ -15083,7 +15084,109 @@ const buildSeguroHighlights = (row, cliente = {}) => {
     items.push(`Tomador: ${row.tomador || cliente.nombre || "-"}`);
     items.push(`Ramo: ${row.ramo || "General"}`);
   }
+  if (ramo.includes("auto") && !smart.fecha_carnet) {
+    items.push("Upselling: falta fecha de carnet para tarificación avanzada.");
+  }
+  if (ramo.includes("hogar") && !smart.continente) {
+    items.push("Upselling: revisar capital de continente para ampliar cobertura.");
+  }
+  if ((ramo.includes("vida") || ramo.includes("salud")) && !smart.capital_asegurado) {
+    items.push("Upselling: definir capital asegurado para propuesta complementaria.");
+  }
   return items;
+};
+
+const parseJsonObjectSafe = (value) => {
+  if (!value) return {};
+  if (typeof value === "object") return value;
+  try {
+    const parsed = JSON.parse(String(value || ""));
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+};
+
+const resolveSeguroSmartProfile = (ramoValue) => {
+  const ramo = normalizeSimple(ramoValue || "");
+  if (ramo.includes("auto") || ramo.includes("vehiculo") || ramo.includes("coche")) {
+    return "auto";
+  }
+  if (ramo.includes("hogar") || ramo.includes("vivienda")) {
+    return "hogar";
+  }
+  if (ramo.includes("vida") || ramo.includes("salud") || ramo.includes("accidente")) {
+    return "persona";
+  }
+  if (
+    ramo.includes("comercio") ||
+    ramo.includes("pyme") ||
+    ramo.includes("negocio") ||
+    ramo.includes("responsabilidad civil")
+  ) {
+    return "negocio";
+  }
+  return "general";
+};
+
+const getSeguroSmartFields = (profile) => {
+  if (profile === "auto") {
+    return [
+      { key: "matricula", label: "Matrícula" },
+      { key: "marca_modelo", label: "Marca / modelo" },
+      { key: "anio_matriculacion", label: "Año matriculación", type: "number" },
+      { key: "fecha_carnet", label: "Fecha carnet", type: "date" },
+      { key: "fecha_nacimiento_conductor", label: "Nacimiento conductor", type: "date" },
+      { key: "uso_vehiculo", label: "Uso vehículo (particular/profesional)" },
+      { key: "garaje", label: "Plaza de garaje", type: "select", options: ["No", "Sí"] },
+    ];
+  }
+  if (profile === "hogar") {
+    return [
+      { key: "direccion_riesgo", label: "Dirección riesgo" },
+      { key: "codigo_postal", label: "Código postal" },
+      { key: "tipo_vivienda", label: "Tipo vivienda" },
+      { key: "metros2", label: "Metros cuadrados", type: "number" },
+      { key: "anio_construccion", label: "Año construcción", type: "number" },
+      { key: "continente", label: "Capital continente (€)", type: "number" },
+      { key: "contenido", label: "Capital contenido (€)", type: "number" },
+    ];
+  }
+  if (profile === "persona") {
+    return [
+      { key: "fecha_nacimiento_asegurado", label: "Nacimiento asegurado", type: "date" },
+      { key: "profesion", label: "Profesión" },
+      { key: "fumador", label: "Fumador", type: "select", options: ["No", "Sí"] },
+      { key: "capital_asegurado", label: "Capital asegurado (€)", type: "number" },
+      { key: "beneficiarios", label: "Beneficiarios" },
+      { key: "deporte_riesgo", label: "Deporte de riesgo", type: "select", options: ["No", "Sí"] },
+    ];
+  }
+  if (profile === "negocio") {
+    return [
+      { key: "actividad", label: "Actividad" },
+      { key: "facturacion_anual", label: "Facturación anual (€)", type: "number" },
+      { key: "empleados", label: "Nº empleados", type: "number" },
+      { key: "superficie", label: "Superficie (m2)", type: "number" },
+      { key: "direccion_riesgo", label: "Dirección riesgo" },
+      { key: "medidas_seguridad", label: "Medidas de seguridad" },
+    ];
+  }
+  return [
+    { key: "direccion_riesgo", label: "Dirección riesgo" },
+    { key: "fecha_nacimiento_asegurado", label: "Nacimiento asegurado", type: "date" },
+    { key: "profesion", label: "Profesión" },
+    { key: "notas_comerciales", label: "Notas comerciales" },
+  ];
+};
+
+const buildSeguroSmartData = (row) => {
+  const base = parseJsonObjectSafe(row.datos_ramo_json);
+  if (!base.direccion_riesgo && row.direccion) base.direccion_riesgo = row.direccion;
+  if (!base.fecha_nacimiento_asegurado && row.fecha_nacimiento) {
+    base.fecha_nacimiento_asegurado = normalizeDateInput(row.fecha_nacimiento);
+  }
+  return base;
 };
 
 const openClienteSeguroDetail = (row, cliente = {}, options = {}) => {
@@ -15411,6 +15514,47 @@ const openClienteSeguroDetail = (row, cliente = {}, options = {}) => {
     editStatus.className = "muted";
     actions.appendChild(editStatus);
 
+    const smartProfile = resolveSeguroSmartProfile(row.ramo || "");
+    const smartTitle = document.createElement("h4");
+    smartTitle.textContent = "Datos inteligentes por ramo";
+    actions.appendChild(smartTitle);
+    const smartHint = document.createElement("div");
+    smartHint.className = "muted";
+    smartHint.textContent = `Perfil activo: ${smartProfile}`;
+    actions.appendChild(smartHint);
+    const smartForm = document.createElement("div");
+    smartForm.className = "cliente-seguro-actions-form";
+    const smartData = buildSeguroSmartData(row);
+    const smartInputs = {};
+    getSeguroSmartFields(smartProfile).forEach((field) => {
+      let input = null;
+      if (field.type === "select") {
+        input = document.createElement("select");
+        const emptyOpt = document.createElement("option");
+        emptyOpt.value = "";
+        emptyOpt.textContent = field.label;
+        input.appendChild(emptyOpt);
+        (field.options || []).forEach((opt) => {
+          const optionEl = document.createElement("option");
+          optionEl.value = opt;
+          optionEl.textContent = opt;
+          input.appendChild(optionEl);
+        });
+      } else {
+        input = document.createElement("input");
+        input.type = field.type || "text";
+        input.placeholder = field.label;
+      }
+      if (field.type === "date") {
+        input.value = normalizeDateInput(smartData[field.key] || "");
+      } else {
+        input.value = smartData[field.key] || "";
+      }
+      smartInputs[field.key] = input;
+      smartForm.appendChild(input);
+    });
+    actions.appendChild(smartForm);
+
     let linkedClienteId = String(row.cliente_id || cliente.id || "").trim();
     const refreshComisionPct = () => {
       const primaTotal = toNumber(editPrimaTotal.value || "");
@@ -15471,6 +15615,13 @@ const openClienteSeguroDetail = (row, cliente = {}, options = {}) => {
           prima_total: primaTotalNum,
           comision: comisionNum,
           porcentaje: pctNum,
+          datos_ramo_json: JSON.stringify(
+            Object.entries(smartInputs).reduce((acc, [key, input]) => {
+              const value = String(input?.value || "").trim();
+              if (value) acc[key] = value;
+              return acc;
+            }, {})
+          ),
           produccion: toNumber(editProduccion.value || ""),
           estado: editEstado.value || "",
         };
