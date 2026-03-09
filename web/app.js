@@ -1184,6 +1184,15 @@ const clienteTabDatos = document.getElementById("clienteTabDatos");
 const clienteTabDashboard = document.getElementById("clienteTabDashboard");
 const clienteTabProfesional = document.getElementById("clienteTabProfesional");
 const clienteTabOperativa = document.getElementById("clienteTabOperativa");
+const clienteOperativaTabs = document.getElementById("clienteOperativaTabs");
+const clienteOperativaGestoriaPanel = document.getElementById("clienteOperativaGestoriaPanel");
+const clienteOperativaSegurosPanel = document.getElementById("clienteOperativaSegurosPanel");
+const clienteOperativaInmoPanel = document.getElementById("clienteOperativaInmoPanel");
+const clienteOperativaFinPanel = document.getElementById("clienteOperativaFinPanel");
+const clienteOperativaGestoriaMount = document.getElementById("clienteOperativaGestoriaMount");
+const clienteOperativaSegurosMount = document.getElementById("clienteOperativaSegurosMount");
+const clienteOperativaInmoMount = document.getElementById("clienteOperativaInmoMount");
+const clienteOperativaFinMount = document.getElementById("clienteOperativaFinMount");
 const clienteTabServicios = document.getElementById("clienteTabServicios");
 const clienteTabDocs = document.getElementById("clienteTabDocs");
 const clienteTabFacturas = document.getElementById("clienteTabFacturas");
@@ -3293,13 +3302,37 @@ const setClienteTab = (tab) => {
   if (clienteTabDocs) clienteTabDocs.classList.toggle("hidden", tab !== "docs");
   if (clienteTabFacturas) clienteTabFacturas.classList.toggle("hidden", tab !== "facturas");
   if (clienteTabTrabajos) clienteTabTrabajos.classList.toggle("hidden", tab !== "trabajos");
+  if (tab === "operativa") {
+    setClienteOperativaTab(state.clienteOperativaTab || "gestoria");
+  }
   if (tab === "docs") {
     setClienteDocsTab(state.clienteDocsTab || "seguros");
   }
 };
 
-if (clienteTabOperativa && clienteProfesionalOperativaBlock) {
-  clienteTabOperativa.appendChild(clienteProfesionalOperativaBlock);
+const setClienteOperativaTab = (tab) => {
+  if (!clienteOperativaTabs) return;
+  const target = tab || "gestoria";
+  state.clienteOperativaTab = target;
+  clienteOperativaTabs.querySelectorAll(".tab").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.operativaTab === target);
+  });
+  if (clienteOperativaGestoriaPanel) {
+    clienteOperativaGestoriaPanel.classList.toggle("hidden", target !== "gestoria");
+  }
+  if (clienteOperativaSegurosPanel) {
+    clienteOperativaSegurosPanel.classList.toggle("hidden", target !== "seguros");
+  }
+  if (clienteOperativaInmoPanel) {
+    clienteOperativaInmoPanel.classList.toggle("hidden", target !== "inmobiliaria");
+  }
+  if (clienteOperativaFinPanel) {
+    clienteOperativaFinPanel.classList.toggle("hidden", target !== "financiaciones");
+  }
+};
+
+if (clienteOperativaGestoriaMount && clienteProfesionalOperativaBlock) {
+  clienteOperativaGestoriaMount.appendChild(clienteProfesionalOperativaBlock);
 }
 
 const renderClienteDocsTable = (rows, container, options = {}) => {
@@ -15771,18 +15804,18 @@ const openClienteDetail = (id) => {
       const docsTab = clienteTabs.querySelector('[data-tab="docs"]');
       if (dashboardTab) dashboardTab.classList.toggle("hidden", false);
       if (gestoriaTab) gestoriaTab.classList.toggle("hidden", !(hasGestoria || hasSeguros || hasHipotecas || hasInmo));
-      if (operativaTab) operativaTab.classList.toggle("hidden", !hasGestoria);
-      if (serviciosTab) serviciosTab.classList.toggle("hidden", !(hasSeguros || hasInmo || hasHipotecas));
+      if (operativaTab) operativaTab.classList.toggle("hidden", !(hasGestoria || hasSeguros || hasHipotecas || hasInmo));
+      if (serviciosTab) serviciosTab.classList.toggle("hidden", true);
       if (docsTab) docsTab.classList.toggle("hidden", false);
     }
     if (clienteTabDashboard) {
       clienteTabDashboard.classList.toggle("hidden", false);
     }
     if (clienteTabServicios) {
-      clienteTabServicios.classList.toggle("hidden", !(hasSeguros || hasInmo || hasHipotecas));
+      clienteTabServicios.classList.add("hidden");
     }
     if (clienteTabOperativa) {
-      clienteTabOperativa.classList.toggle("hidden", !hasGestoria);
+      clienteTabOperativa.classList.toggle("hidden", !(hasGestoria || hasSeguros || hasHipotecas || hasInmo));
     }
     if (clienteServiciosSegurosCard) {
       clienteServiciosSegurosCard.classList.toggle("hidden", !hasSeguros);
@@ -15792,6 +15825,36 @@ const openClienteDetail = (id) => {
     }
     if (clienteServiciosHipotecasCard) {
       clienteServiciosHipotecasCard.classList.toggle("hidden", !hasHipotecas);
+    }
+    if (clienteOperativaTabs) {
+      const operativaVisibility = {
+        gestoria: hasGestoria,
+        seguros: hasSeguros,
+        inmobiliaria: hasInmo,
+        financiaciones: hasHipotecas,
+      };
+      let firstOperativaTab = "";
+      clienteOperativaTabs.querySelectorAll(".tab").forEach((btn) => {
+        const key = btn.dataset.operativaTab || "";
+        const visible = !!operativaVisibility[key];
+        btn.classList.toggle("hidden", !visible);
+        if (!firstOperativaTab && visible) firstOperativaTab = key;
+      });
+      if (clienteOperativaGestoriaMount && clienteProfesionalOperativaBlock && hasGestoria) {
+        clienteOperativaGestoriaMount.appendChild(clienteProfesionalOperativaBlock);
+      }
+      if (clienteOperativaSegurosMount && clienteServiciosSegurosCard && hasSeguros) {
+        clienteOperativaSegurosMount.appendChild(clienteServiciosSegurosCard);
+      }
+      if (clienteOperativaInmoMount && clienteServiciosInmoCard && hasInmo) {
+        clienteOperativaInmoMount.appendChild(clienteServiciosInmoCard);
+      }
+      if (clienteOperativaFinMount && clienteServiciosHipotecasCard && hasHipotecas) {
+        clienteOperativaFinMount.appendChild(clienteServiciosHipotecasCard);
+      }
+      if (firstOperativaTab) {
+        setClienteOperativaTab(firstOperativaTab);
+      }
     }
     if (clienteTabDocs) {
       clienteTabDocs.classList.toggle("hidden", false);
@@ -15851,9 +15914,9 @@ const openClienteDetail = (id) => {
             : "seguros";
     setClienteDocsTab(docsDefault);
     clientesDetail.classList.remove("hidden");
-    const defaultTab = (hasSeguros || hasInmo || hasHipotecas)
-      ? "servicios"
-      : (hasGestoria ? "operativa" : "dashboard");
+    const defaultTab = (hasGestoria || hasSeguros || hasInmo || hasHipotecas)
+      ? "operativa"
+      : "dashboard";
     setClienteTab(defaultTab);
     window.scrollTo({ top: clientesDetail.offsetTop - 120, behavior: "smooth" });
   });
@@ -17822,6 +17885,14 @@ if (clienteTabs) {
     const btn = event.target.closest("[data-tab]");
     if (!btn) return;
     setClienteTab(btn.dataset.tab);
+  });
+}
+
+if (clienteOperativaTabs) {
+  clienteOperativaTabs.addEventListener("click", (event) => {
+    const btn = event.target.closest("[data-operativa-tab]");
+    if (!btn) return;
+    setClienteOperativaTab(btn.dataset.operativaTab);
   });
 }
 

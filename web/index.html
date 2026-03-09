@@ -3735,7 +3735,30 @@
               </div>
             </div>
           </div>
-          <div id="clienteTabOperativa" class="hidden"></div>
+          <div id="clienteTabOperativa" class="hidden">
+            <div class="form-card">
+              <h3>Operativa por servicio</h3>
+              <p class="muted">Gestiona cada área en su pestaña específica.</p>
+              <div class="tabs" id="clienteOperativaTabs">
+                <button class="tab" type="button" data-operativa-tab="gestoria">Gestoría</button>
+                <button class="tab" type="button" data-operativa-tab="seguros">Seguros</button>
+                <button class="tab" type="button" data-operativa-tab="inmobiliaria">Inmobiliaria</button>
+                <button class="tab" type="button" data-operativa-tab="financiaciones">Financiaciones</button>
+              </div>
+            </div>
+            <div id="clienteOperativaGestoriaPanel" class="hidden">
+              <div id="clienteOperativaGestoriaMount"></div>
+            </div>
+            <div id="clienteOperativaSegurosPanel" class="hidden">
+              <div id="clienteOperativaSegurosMount"></div>
+            </div>
+            <div id="clienteOperativaInmoPanel" class="hidden">
+              <div id="clienteOperativaInmoMount"></div>
+            </div>
+            <div id="clienteOperativaFinPanel" class="hidden">
+              <div id="clienteOperativaFinMount"></div>
+            </div>
+          </div>
           <div id="clienteTabServicios" class="hidden">
             <div class="form-card" id="clienteServiciosSegurosCard">
               <h3>Seguros</h3>
