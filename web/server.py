@@ -646,6 +646,47 @@ def compute_seguros_contabilidad_totals(conn, empresa_id, year=None):
     return {"ingresos": round(ingresos, 2), "gastos": round(gastos, 2)}
 
 
+def normalize_auto_seguro_commission_assignments(conn, now=None):
+    now = now or datetime.now(timezone.utc).isoformat()
+    try:
+        rows = conn.execute(
+            """
+            SELECT gc.id, gc.cliente_id, gc.cliente_ids_json, gc.notas, gc.seguro_id, s.cliente_id AS seguro_cliente_id
+            FROM gestoria_contabilidad gc
+            LEFT JOIN seguros s ON s.id = gc.seguro_id
+            WHERE gc.seguro_id IS NOT NULL AND TRIM(gc.seguro_id) <> ''
+              AND UPPER(COALESCE(gc.notas, '')) LIKE 'AUTO CRM SEGUROS%'
+            """
+        ).fetchall()
+    except sqlite3.Error:
+        return 0
+    updated = 0
+    for row in rows:
+        seguro_cliente_id = str(row["seguro_cliente_id"] or "").strip()
+        if not seguro_cliente_id:
+            continue
+        assigned = parse_cliente_ids_payload(row["cliente_ids_json"])
+        if not assigned and row["cliente_id"]:
+            assigned = [str(row["cliente_id"]).strip()]
+        if len(assigned) == 1 and assigned[0] == seguro_cliente_id:
+            continue
+        conn.execute(
+            """
+            UPDATE gestoria_contabilidad
+            SET cliente_id = ?, cliente_ids_json = ?, updated_at = datetime(?)
+            WHERE id = ?
+            """,
+            (
+                seguro_cliente_id,
+                json.dumps([seguro_cliente_id], ensure_ascii=False),
+                now,
+                row["id"],
+            ),
+        )
+        updated += 1
+    return updated
+
+
 def find_existing_seguro_id(conn, empresa_id, poliza_numero, compania, exclude_id=None):
     poliza_norm = normalize_poliza_key(poliza_numero)
     if not poliza_norm:
@@ -7082,6 +7123,7 @@ def ensure_tables(db_path):
         conn.execute("ALTER TABLE gestoria_contabilidad ADD COLUMN poliza_numero TEXT")
     if "cliente_ids_json" not in conta_cols:
         conn.execute("ALTER TABLE gestoria_contabilidad ADD COLUMN cliente_ids_json TEXT")
+    normalize_auto_seguro_commission_assignments(conn)
     terceros_cols = [row[1] for row in conn.execute("PRAGMA table_info(gestoria_terceros)").fetchall()]
     if "cuenta_contable" not in terceros_cols:
         conn.execute("ALTER TABLE gestoria_terceros ADD COLUMN cuenta_contable TEXT")
@@ -13287,7 +13329,7 @@ class Handler(BaseHTTPRequestHandler):
             rows = conn.execute(
                 f"""
                 SELECT gc.id, gc.fecha, gc.concepto, gc.gestion, gc.tipo, gc.importe, gc.notas,
-                       gc.cliente_id, gc.cliente_ids_json, gc.seguro_id,
+                       gc.cliente_id, gc.cliente_ids_json, gc.seguro_id, s.cliente_id AS seguro_cliente_id,
                        COALESCE(NULLIF(gc.poliza_numero, ''), s.poliza_numero, '') AS poliza_numero,
                        COALESCE(c.nombre, '') AS cliente
                 FROM gestoria_contabilidad gc
@@ -13299,7 +13341,21 @@ class Handler(BaseHTTPRequestHandler):
                 """,
                 values,
             ).fetchall()
-            json_response(self, {"rows": [dict(r) for r in rows]})
+            out_rows = []
+            for raw in rows:
+                row = dict(raw)
+                seguro_cliente_id = str(row.get("seguro_cliente_id") or "").strip()
+                notas_up = str(row.get("notas") or "").upper()
+                if seguro_cliente_id and notas_up.startswith("AUTO CRM SEGUROS"):
+                    assigned = parse_cliente_ids_payload(row.get("cliente_ids_json"))
+                    if not assigned and row.get("cliente_id"):
+                        assigned = [str(row.get("cliente_id")).strip()]
+                    if len(assigned) != 1 or assigned[0] != seguro_cliente_id:
+                        row["cliente_id"] = seguro_cliente_id
+                        row["cliente_ids_json"] = json.dumps([seguro_cliente_id], ensure_ascii=False)
+                row.pop("seguro_cliente_id", None)
+                out_rows.append(row)
+            json_response(self, {"rows": out_rows})
             return
 
         if path == "/api/gestoria_facturas":

@@ -3,6 +3,7 @@ import unittest
 
 from web.server import (
     compute_seguros_contabilidad_totals,
+    normalize_auto_seguro_commission_assignments,
     resolve_seguro_contabilidad_link,
     upsert_seguro_comision_contabilidad,
 )
@@ -146,6 +147,33 @@ class SegurosContabilidadTests(unittest.TestCase):
         totals = compute_seguros_contabilidad_totals(self.conn, "e1", year="2026")
         self.assertAlmostEqual(totals["ingresos"], 17.59, places=2)
         self.assertAlmostEqual(totals["gastos"], 2.10, places=2)
+
+    def test_normalize_auto_seguro_commission_assignments_restores_single_policy_client(self):
+        self.conn.execute(
+            """
+            INSERT INTO seguros (id, cliente_id, poliza_numero)
+            VALUES ('s2', 'c2', 'POL-002')
+            """
+        )
+        self.conn.execute(
+            """
+            INSERT INTO gestoria_contabilidad (
+              id, empresa_id, cliente_id, cliente_ids_json, seguro_id, poliza_numero,
+              fecha, concepto, gestion, tipo, importe, notas, created_at, updated_at
+            ) VALUES (
+              'bad1', 'e1', 'c1', '["c1","c2","c3"]', 's2', 'POL-002',
+              '2026-02-01', 'Comisión', 'Comisión emisión', 'Ingreso', 10.0, 'Auto CRM Seguros · comisión emisión.',
+              '2026-02-01', '2026-02-01'
+            )
+            """
+        )
+        updated = normalize_auto_seguro_commission_assignments(self.conn, now=self.now)
+        self.assertEqual(updated, 1)
+        row = self.conn.execute(
+            "SELECT cliente_id, cliente_ids_json FROM gestoria_contabilidad WHERE id = 'bad1'"
+        ).fetchone()
+        self.assertEqual(row["cliente_id"], "c2")
+        self.assertEqual(row["cliente_ids_json"], '["c2"]')
 
 
 if __name__ == "__main__":
