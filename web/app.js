@@ -6356,6 +6356,15 @@ const fillGestoriaContabilidadPolizaSelect = async (selectEl, clienteId, selecte
   }
 };
 
+const ensureSelectedPolizaOption = (selectEl, seguroId, polizaNumero = "") => {
+  if (!selectEl) return;
+  const wanted = String(seguroId || "").trim();
+  if (!wanted || selectEl.value === wanted) return;
+  const label = (polizaNumero || "").trim() || "Póliza vinculada";
+  selectEl.appendChild(createOption(wanted, `${label} · vinculada`));
+  selectEl.value = wanted;
+};
+
 const loadGestoriaContabilidad = () => {
   if (!gestoriaContabilidadTable || !gestoriaContabilidadInfo) return;
   const empresa = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
@@ -6469,6 +6478,7 @@ const loadGestoriaContabilidad = () => {
       const polizaSelect = document.createElement("select");
       polizaSelect.classList.add("inline-input");
       await fillGestoriaContabilidadPolizaSelect(polizaSelect, row.cliente_id, row.seguro_id);
+      ensureSelectedPolizaOption(polizaSelect, row.seguro_id, row.poliza_numero);
       polizaSelect.addEventListener("change", () => {
         saveGestoriaContabilidadField(row.id, "seguro_id", polizaSelect.value || "");
       });
@@ -6619,6 +6629,7 @@ const loadSegurosContabilidad = () => {
       const polizaSelect = document.createElement("select");
       polizaSelect.classList.add("inline-input");
       await fillGestoriaContabilidadPolizaSelect(polizaSelect, row.cliente_id, row.seguro_id);
+      ensureSelectedPolizaOption(polizaSelect, row.seguro_id, row.poliza_numero);
       polizaSelect.addEventListener("change", () => {
         saveGestoriaContabilidadField(row.id, "seguro_id", polizaSelect.value || "");
       });
@@ -17481,6 +17492,22 @@ const init = async () => {
 };
 
 applyBtn.addEventListener("click", loadTable);
+if (searchInput) {
+  searchInput.addEventListener("input", () => {
+    scheduleSave("global-search", () => {
+      loadTable();
+    }, 250);
+  });
+  searchInput.addEventListener("change", () => {
+    loadTable();
+  });
+  searchInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      loadTable();
+    }
+  });
+}
 resetBtn.addEventListener("click", () => {
   empresaSelect.value = "";
   searchInput.value = "";
