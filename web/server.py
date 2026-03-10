@@ -13162,7 +13162,16 @@ class Handler(BaseHTTPRequestHandler):
             where = ["gc.empresa_id = ?"]
             values = [empresa_id]
             if seguros_only:
-                where.append("gc.seguro_id IS NOT NULL AND TRIM(gc.seguro_id) <> ''")
+                where.append(
+                    """
+                    (
+                      (gc.seguro_id IS NOT NULL AND TRIM(gc.seguro_id) <> '')
+                      OR UPPER(COALESCE(gc.notas, '')) LIKE 'AUTO CRM SEGUROS%'
+                      OR UPPER(COALESCE(gc.notas, '')) LIKE '[SEGUROS]%'
+                      OR UPPER(TRIM(COALESCE(gc.gestion, ''))) IN ('COMISION EMISION', 'COMISION RENOVACION', 'REGULARIZACION', 'EXTORNO')
+                    )
+                    """
+                )
             if q:
                 where.append("(gc.concepto LIKE ? OR c.nombre LIKE ?)")
                 values.extend([f"%{q}%", f"%{q}%"])

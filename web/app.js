@@ -18536,6 +18536,10 @@ if (segurosContabilidadForm) {
     const formData = new FormData(segurosContabilidadForm);
     const payload = Object.fromEntries(formData.entries());
     payload.empresa_nombre = FINCAS_COMPANY;
+    const rawNotas = String(payload.notas || "").trim();
+    if (!/^(\[SEGUROS\]|Auto CRM Seguros)/i.test(rawNotas)) {
+      payload.notas = rawNotas ? `[SEGUROS] ${rawNotas}` : "[SEGUROS]";
+    }
     fetch("/api/gestoria_contabilidad", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
