@@ -11824,7 +11824,7 @@ const loadSegurosAlertas = () => {
   api(`/api/seguros_alertas?${params.toString()}`).then((data) => {
     const items = data.items || [];
     if (!items.length) {
-      segurosAlertasList.innerHTML = "<p class='muted'>Sin vencimientos próximos.</p>";
+      segurosAlertasList.innerHTML = "<p class='muted'>Sin alertas próximas.</p>";
       return;
     }
     const list = document.createElement("div");
@@ -11835,33 +11835,52 @@ const loadSegurosAlertas = () => {
       const title = document.createElement("div");
       const tomador = row.tomador || "Cliente";
       const poliza = row.poliza_numero || "-";
-      const fecha = row.fecha_vencimiento || "-";
-      title.innerHTML = `<strong>${tomador}</strong><div class="muted">${poliza} · vence ${fecha}</div>`;
+      const isEntradaVigor = normalizeSimple(row.alert_type || "") === "entrada_vigor";
+      const fecha = isEntradaVigor ? (row.fecha_efecto || "-") : (row.fecha_vencimiento || "-");
+      const texto = isEntradaVigor ? `entra en vigor ${fecha}` : `vence ${fecha}`;
+      title.innerHTML = `<strong>${tomador}</strong><div class="muted">${poliza} · ${texto}</div>`;
       const actions = document.createElement("div");
       actions.className = "inline-actions";
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "secondary";
-      btn.textContent = "Crear acción";
-      btn.addEventListener("click", () => {
-        const payload = {
-          servicio: "Seguros",
-          cliente_id: row.cliente_id || "",
-          cliente_nombre: tomador,
-          fecha: row.fecha_vencimiento || "",
-          tipo: "Renovación",
-          estado: "Pendiente",
-          notas: `Renovación póliza ${poliza}`,
-        };
-        fetch("/api/acciones", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        })
-          .then((res) => res.json())
-          .then(() => loadSegurosCrm())
-          .catch(() => {});
-      });
+      if (isEntradaVigor) {
+        btn.textContent = "Pasar a en vigor";
+        btn.addEventListener("click", () => {
+          fetch("/api/seguros_poliza_accion", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: row.id, accion: "activar", fecha: row.fecha_efecto || "" }),
+          })
+            .then((res) => res.json())
+            .then(() => {
+              loadSegurosAlertas();
+              loadSegurosCrm();
+            })
+            .catch(() => {});
+        });
+      } else {
+        btn.textContent = "Crear acción";
+        btn.addEventListener("click", () => {
+          const payload = {
+            servicio: "Seguros",
+            cliente_id: row.cliente_id || "",
+            cliente_nombre: tomador,
+            fecha: row.fecha_vencimiento || "",
+            tipo: "Renovación",
+            estado: "Pendiente",
+            notas: `Renovación póliza ${poliza}`,
+          };
+          fetch("/api/acciones", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          })
+            .then((res) => res.json())
+            .then(() => loadSegurosCrm())
+            .catch(() => {});
+        });
+      }
       actions.appendChild(btn);
       item.appendChild(title);
       item.appendChild(actions);
@@ -16497,6 +16516,7 @@ const openClienteSeguroDetail = (row, cliente = {}, options = {}) => {
 
     const actionSelect = document.createElement("select");
     actionSelect.innerHTML = `
+      <option value="activar">Activar (entrada en vigor)</option>
       <option value="renovar">Renovar</option>
       <option value="cambiar_compania">Cambiar compañía</option>
       <option value="anular">Anular</option>
@@ -16555,7 +16575,9 @@ const openClienteSeguroDetail = (row, cliente = {}, options = {}) => {
         "hidden",
         !(mode === "anular" && anulaReasonSelect.value === "otros")
       );
-      if (mode === "renovar") {
+      if (mode === "activar") {
+        refInput.classList.add("hidden");
+      } else if (mode === "renovar") {
         refInput.placeholder = "Nueva póliza (opcional)";
       } else if (mode === "cambiar_compania") {
         refInput.placeholder = "Nº póliza nuevo (opcional)";
@@ -16571,7 +16593,11 @@ const openClienteSeguroDetail = (row, cliente = {}, options = {}) => {
       const payload = { id: row.id, empresa_nombre: FINCAS_COMPANY };
       const today = new Date().toISOString().slice(0, 10);
       let endpoint = "/api/seguros_update";
-      if (mode === "renovar") {
+      if (mode === "activar") {
+        endpoint = "/api/seguros_poliza_accion";
+        payload.accion = "activar";
+        payload.fecha = today;
+      } else if (mode === "renovar") {
         payload.estado = "En vigor";
         payload.estado_renovacion = "Renovada manual";
         payload.renovacion_fecha = today;
@@ -16720,7 +16746,7 @@ const openClienteSeguroDetail = (row, cliente = {}, options = {}) => {
     editClienteLinkBtn.textContent = "Vincular cliente por tomador";
     editForm.appendChild(editClienteLinkBtn);
     const editEstado = document.createElement("select");
-    ["En vigor", "Presupuesto", "Anulada", "Vencida"].forEach((opt) => {
+    ["En vigor", "Contratada", "Presupuesto", "Anulada", "Vencida"].forEach((opt) => {
       const o = document.createElement("option");
       o.value = opt;
       o.textContent = opt;

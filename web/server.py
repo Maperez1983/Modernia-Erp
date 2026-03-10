@@ -971,6 +971,91 @@ def fin_sync_missing_action(conn, empresa_id, asesoramiento_id, cliente_id, clie
             (now, f"%{asesoramiento_id}%"),
         )
 
+
+def seguros_sync_activation_action(conn, seguro_row, now):
+    if not seguro_row:
+        return
+    seguro_id = str(seguro_row["id"] or "").strip()
+    if not seguro_id:
+        return
+    empresa_id = str(seguro_row["empresa_id"] or "").strip()
+    cliente_id = str(seguro_row["cliente_id"] or "").strip() or None
+    fecha_efecto = str(seguro_row["fecha_efecto"] or "").strip()
+    efecto_dt = parse_iso_date(fecha_efecto)
+    estado_key = normalize_lookup_text(seguro_row["estado"] or "")
+    in_vigor = any(token in estado_key for token in ("EN VIGOR", "VIGENTE", "ACTIVA", "ACTIVO"))
+    existing = conn.execute(
+        """
+        SELECT id, estado
+        FROM acciones
+        WHERE servicio = 'Seguros'
+          AND tipo = 'Activar póliza'
+          AND notas LIKE ?
+        LIMIT 1
+        """,
+        (f"%{seguro_id}%",),
+    ).fetchone()
+    today = datetime.now(timezone.utc).date()
+    should_be_pending = (
+        bool(efecto_dt)
+        and efecto_dt > today
+        and not in_vigor
+    )
+    if should_be_pending:
+        notas = f"Activar póliza por entrada en vigor ({seguro_row['poliza_numero'] or 'sin número'}). Poliza ID: {seguro_id}"
+        if existing:
+            conn.execute(
+                """
+                UPDATE acciones
+                SET empresa_id = ?, cliente_id = ?, cliente_nombre = ?, fecha = ?, tipo = 'Activar póliza',
+                    estado = 'Pendiente', notas = ?, updated_at = datetime(?)
+                WHERE id = ?
+                """,
+                (
+                    empresa_id,
+                    cliente_id,
+                    seguro_row["tomador"] or "",
+                    fecha_efecto,
+                    notas,
+                    now,
+                    existing["id"],
+                ),
+            )
+            return
+        conn.execute(
+            """
+            INSERT INTO acciones (
+              id, empresa_id, servicio, cliente_id, inmueble_id, cliente_nombre,
+              fecha, hora, tipo, responsable, estado, notas, recordatorio_min, created_at, updated_at
+            ) VALUES (
+              ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+            )
+            """,
+            (
+                os.urandom(16).hex(),
+                empresa_id,
+                "Seguros",
+                cliente_id,
+                None,
+                seguro_row["tomador"] or "",
+                fecha_efecto,
+                None,
+                "Activar póliza",
+                None,
+                "Pendiente",
+                notas,
+                None,
+                now,
+                now,
+            ),
+        )
+        return
+    if existing:
+        conn.execute(
+            "UPDATE acciones SET estado = 'Hecho', updated_at = datetime(?) WHERE id = ?",
+            (now, existing["id"]),
+        )
+
 def normalize_header(value):
     return re.sub(r"[^a-z0-9]", "", str(value or "").lower())
 
@@ -9515,6 +9600,7 @@ class Handler(BaseHTTPRequestHandler):
                 doc_id = ensure_seguro_doc_link(conn, poliza_row, now, calidad_ocr=calidad_ocr, campos_ocr=campos_ocr)
                 log_seguro_event(conn, poliza_row, "alta", now, payload={"origen": "api/seguros"})
                 contabilidad_id = upsert_seguro_comision_contabilidad(conn, poliza_row, now, movimiento="emision")
+                seguros_sync_activation_action(conn, poliza_row, now)
             # Crear acción si faltan campos obligatorios
             missing = []
             for key in ("tomador", "poliza_numero", "compania", "fecha_efecto"):
@@ -10089,6 +10175,7 @@ class Handler(BaseHTTPRequestHandler):
                 ensure_seguro_doc_link(conn, row, now)
                 log_seguro_event(conn, row, "actualizacion", now, payload={"campos": sorted(list(updates.keys()))})
                 upsert_seguro_comision_contabilidad(conn, row, now, movimiento="emision")
+                seguros_sync_activation_action(conn, row, now)
             if row:
                 missing = []
                 for key in ("tomador", "poliza_numero", "compania", "fecha_efecto"):
@@ -10266,6 +10353,7 @@ class Handler(BaseHTTPRequestHandler):
                     payload={"old_id": record_id, "compania_origen": row["compania"], "poliza_origen": old_policy},
                 )
                 upsert_seguro_comision_contabilidad(conn, new_row, now, movimiento="emision")
+                seguros_sync_activation_action(conn, new_row, now)
             json_response(
                 self,
                 {
@@ -10326,6 +10414,27 @@ class Handler(BaseHTTPRequestHandler):
             if not row:
                 json_response(self, {"error": "Registro no encontrado"}, status=404)
                 return
+            if action in ("ACTIVAR", "ENTRADA VIGOR", "ENTRADA_EN_VIGOR", "PASAR EN VIGOR", "PASAR A EN VIGOR"):
+                fecha_activacion = (payload.get("fecha_activacion") or payload.get("fecha") or now[:10]).strip()
+                conn.execute(
+                    """
+                    UPDATE seguros
+                    SET estado = 'En vigor',
+                        estado_poliza = 'activa',
+                        estado_renovacion = COALESCE(NULLIF(estado_renovacion, ''), 'Activada por efecto'),
+                        renovacion_fecha = COALESCE(NULLIF(renovacion_fecha, ''), ?),
+                        updated_at = datetime(?)
+                    WHERE id = ?
+                    """,
+                    (fecha_activacion, now, record_id),
+                )
+                row = conn.execute("SELECT * FROM seguros WHERE id = ?", (record_id,)).fetchone()
+                seguros_sync_activation_action(conn, row, now)
+                log_seguro_event(conn, row, "activacion_efecto", now, payload={"fecha": fecha_activacion})
+                contabilidad_id = upsert_seguro_comision_contabilidad(conn, row, now, movimiento="emision", fecha=fecha_activacion)
+                json_response(self, {"ok": True, "id": record_id, "accion": "activar", "contabilidad_id": contabilidad_id})
+                conn.commit()
+                return
             if action in ("RENOVAR", "RENEW"):
                 fecha_renovacion = (payload.get("fecha_renovacion") or payload.get("fecha") or now[:10]).strip()
                 nueva_fecha_venc = (payload.get("nueva_fecha_vencimiento") or payload.get("fecha_vencimiento") or "").strip()
@@ -10348,6 +10457,7 @@ class Handler(BaseHTTPRequestHandler):
                     (*set_values, now, record_id),
                 )
                 row = conn.execute("SELECT * FROM seguros WHERE id = ?", (record_id,)).fetchone()
+                seguros_sync_activation_action(conn, row, now)
                 log_seguro_event(conn, row, "renovacion_manual", now, payload={"fecha": fecha_renovacion})
                 contabilidad_id = upsert_seguro_comision_contabilidad(
                     conn,
@@ -10375,6 +10485,7 @@ class Handler(BaseHTTPRequestHandler):
                     (fecha_baja, motivo_baja, now, record_id),
                 )
                 row = conn.execute("SELECT * FROM seguros WHERE id = ?", (record_id,)).fetchone()
+                seguros_sync_activation_action(conn, row, now)
                 log_seguro_event(conn, row, "anulacion", now, motivo=motivo_baja, payload={"fecha_baja": fecha_baja})
                 json_response(self, {"ok": True, "id": record_id, "accion": "anular"})
                 conn.commit()
@@ -10628,6 +10739,7 @@ class Handler(BaseHTTPRequestHandler):
                 if row["cliente_id"]:
                     ensure_cliente_servicio_link(conn, row["cliente_id"], row["empresa_id"], "seguros", now)
                 ensure_seguro_doc_link(conn, row, now)
+                seguros_sync_activation_action(conn, row, now)
                 missing = []
                 for key in ("tomador", "poliza_numero", "compania", "fecha_efecto"):
                     if not str(row[key] or "").strip():
@@ -14823,7 +14935,7 @@ class Handler(BaseHTTPRequestHandler):
                 days_int = int(days)
             except Exception:
                 days_int = 30
-            rows = conn.execute(
+            rows_venc = conn.execute(
                 f"""
                 SELECT
                   id,
@@ -14831,6 +14943,8 @@ class Handler(BaseHTTPRequestHandler):
                   tomador,
                   poliza_numero,
                   compania,
+                  'vencimiento' AS alert_type,
+                  '' AS estado,
                   fecha_efecto,
                   COALESCE(fecha_vencimiento, DATE(fecha_efecto, '+1 year')) AS fecha_vencimiento
                 FROM seguros
@@ -14844,7 +14958,33 @@ class Handler(BaseHTTPRequestHandler):
                 """,
                 (empresa_id, 1 if uploaded_only else 0),
             ).fetchall()
-            json_response(self, {"count": len(rows), "items": [dict(r) for r in rows]})
+            rows_efecto = conn.execute(
+                f"""
+                SELECT
+                  id,
+                  cliente_id,
+                  tomador,
+                  poliza_numero,
+                  compania,
+                  'entrada_vigor' AS alert_type,
+                  estado,
+                  fecha_efecto,
+                  COALESCE(fecha_vencimiento, DATE(fecha_efecto, '+1 year')) AS fecha_vencimiento
+                FROM seguros
+                WHERE empresa_id = ?
+                  AND ({uploaded_policy_filter()} OR ? = 0)
+                  AND fecha_efecto IS NOT NULL
+                  AND DATE(fecha_efecto) BETWEEN DATE('now','localtime')
+                      AND DATE('now','localtime', '+{days_int} days')
+                  AND UPPER(TRIM(COALESCE(estado, ''))) IN ('CONTRATADA', 'PRESUPUESTO', 'PROYECTO', 'PENDIENTE')
+                ORDER BY DATE(fecha_efecto) ASC
+                LIMIT 50
+                """,
+                (empresa_id, 1 if uploaded_only else 0),
+            ).fetchall()
+            items = [dict(r) for r in rows_efecto] + [dict(r) for r in rows_venc]
+            items.sort(key=lambda r: str(r.get("fecha_efecto") or r.get("fecha_vencimiento") or ""))
+            json_response(self, {"count": len(items), "items": items[:100]})
             return
 
         if path == "/api/seguros_kpis":
