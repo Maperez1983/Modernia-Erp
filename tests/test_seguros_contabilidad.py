@@ -1,7 +1,7 @@
 import sqlite3
 import unittest
 
-from web.server import upsert_seguro_comision_contabilidad
+from web.server import resolve_seguro_contabilidad_link, upsert_seguro_comision_contabilidad
 
 
 class SegurosContabilidadTests(unittest.TestCase):
@@ -10,6 +10,11 @@ class SegurosContabilidadTests(unittest.TestCase):
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(
             """
+            CREATE TABLE seguros (
+              id TEXT PRIMARY KEY,
+              cliente_id TEXT,
+              poliza_numero TEXT
+            );
             CREATE TABLE gestoria_contabilidad (
               id TEXT PRIMARY KEY,
               empresa_id TEXT,
@@ -25,6 +30,12 @@ class SegurosContabilidadTests(unittest.TestCase):
               created_at TEXT,
               updated_at TEXT
             );
+            """
+        )
+        self.conn.execute(
+            """
+            INSERT INTO seguros (id, cliente_id, poliza_numero)
+            VALUES ('s1', 'c1', 'POL-001')
             """
         )
         self.now = "2026-03-10T10:00:00+00:00"
@@ -92,6 +103,11 @@ class SegurosContabilidadTests(unittest.TestCase):
 
         count = self.conn.execute("SELECT COUNT(*) AS n FROM gestoria_contabilidad").fetchone()["n"]
         self.assertEqual(count, 2)
+
+    def test_resolve_seguro_contabilidad_link_returns_policy_and_client(self):
+        poliza_numero, cliente_id = resolve_seguro_contabilidad_link(self.conn, "s1")
+        self.assertEqual(poliza_numero, "POL-001")
+        self.assertEqual(cliente_id, "c1")
 
 
 if __name__ == "__main__":

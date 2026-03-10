@@ -562,6 +562,21 @@ def upsert_seguro_comision_contabilidad(conn, seguro_row, now, movimiento="emisi
     return record_id
 
 
+def resolve_seguro_contabilidad_link(conn, seguro_id):
+    seguro_id = str(seguro_id or "").strip()
+    if not seguro_id:
+        return "", None
+    row = conn.execute(
+        "SELECT poliza_numero, cliente_id FROM seguros WHERE id = ? LIMIT 1",
+        (seguro_id,),
+    ).fetchone()
+    if not row:
+        return "", None
+    poliza_numero = (row["poliza_numero"] or "").strip()
+    cliente_id = (row["cliente_id"] or "").strip() or None
+    return poliza_numero, cliente_id
+
+
 def find_existing_seguro_id(conn, empresa_id, poliza_numero, compania, exclude_id=None):
     poliza_norm = normalize_poliza_key(poliza_numero)
     if not poliza_norm:
@@ -8330,13 +8345,11 @@ class Handler(BaseHTTPRequestHandler):
         elif parsed.path == "/api/gestoria_contabilidad":
             seguro_id = (payload.get("seguro_id") or "").strip()
             poliza_numero = ""
+            cliente_id = (payload.get("cliente_id") or "").strip() or None
             if seguro_id:
-                seguro_row = conn.execute(
-                    "SELECT poliza_numero FROM seguros WHERE id = ? LIMIT 1",
-                    (seguro_id,),
-                ).fetchone()
-                if seguro_row:
-                    poliza_numero = (seguro_row["poliza_numero"] or "").strip()
+                poliza_numero, cliente_seguro_id = resolve_seguro_contabilidad_link(conn, seguro_id)
+                if cliente_seguro_id:
+                    cliente_id = cliente_seguro_id
             conn.execute(
                 """
                 INSERT INTO gestoria_contabilidad (
@@ -8349,7 +8362,7 @@ class Handler(BaseHTTPRequestHandler):
                 (
                     os.urandom(16).hex(),
                     empresa["id"],
-                    payload.get("cliente_id"),
+                    cliente_id,
                     seguro_id or None,
                     poliza_numero,
                     payload.get("fecha"),
@@ -8375,20 +8388,21 @@ class Handler(BaseHTTPRequestHandler):
                     updates.append(f"{field} = ?")
                     if field == "seguro_id":
                         values.append((payload.get(field) or "").strip() or None)
+                    elif field == "cliente_id":
+                        values.append((payload.get(field) or "").strip() or None)
                     else:
                         values.append(payload.get(field))
             if "seguro_id" in payload:
                 seguro_id = (payload.get("seguro_id") or "").strip()
                 poliza_numero = ""
+                cliente_seguro_id = None
                 if seguro_id:
-                    seguro_row = conn.execute(
-                        "SELECT poliza_numero FROM seguros WHERE id = ? LIMIT 1",
-                        (seguro_id,),
-                    ).fetchone()
-                    if seguro_row:
-                        poliza_numero = (seguro_row["poliza_numero"] or "").strip()
+                    poliza_numero, cliente_seguro_id = resolve_seguro_contabilidad_link(conn, seguro_id)
                 updates.append("poliza_numero = ?")
                 values.append(poliza_numero)
+                if cliente_seguro_id:
+                    updates.append("cliente_id = ?")
+                    values.append(cliente_seguro_id)
             if not updates:
                 json_response(self, {"error": "sin cambios"}, status=400)
                 return
