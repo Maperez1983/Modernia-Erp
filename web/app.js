@@ -1550,8 +1550,6 @@ const segurosContabilidadForm = document.getElementById("segurosContabilidadForm
 const segurosContabilidadStatus = document.getElementById("segurosContabilidadStatus");
 const segurosContabilidadCliente = document.getElementById("segurosContabilidadCliente");
 const segurosContabilidadClientesMulti = document.getElementById("segurosContabilidadClientesMulti");
-const segurosContaClientesAll = document.getElementById("segurosContaClientesAll");
-const segurosContaClientesClear = document.getElementById("segurosContaClientesClear");
 const segurosContabilidadPoliza = document.getElementById("segurosContabilidadPoliza");
 const segurosContabilidadSearch = document.getElementById("segurosContabilidadSearch");
 const segurosContabilidadTable = document.getElementById("segurosContabilidadTable");
@@ -6673,10 +6671,7 @@ const loadGestoriaContabilidad = () => {
         fillGestoriaContabilidadPolizaSelect(polizaSelect, clienteSelect.value, "");
       };
       clienteSelect.addEventListener("change", () => {
-        const current = parseGestoriaContaClienteIds(
-          Array.from(clientesMulti.selectedOptions || []).map((opt) => opt.value)
-        ).filter((value) => value !== clienteSelect.value);
-        setSelectMultipleValues(clientesMulti, clienteSelect.value ? [clienteSelect.value, ...current] : current);
+        setSelectMultipleValues(clientesMulti, clienteSelect.value ? [clienteSelect.value] : []);
         persistClientes();
       });
       clienteTd.appendChild(clienteSelect);
@@ -6845,10 +6840,7 @@ const loadSegurosContabilidad = () => {
         fillGestoriaContabilidadPolizaSelect(polizaSelect, clienteSelect.value, "");
       };
       clienteSelect.addEventListener("change", () => {
-        const current = parseGestoriaContaClienteIds(
-          Array.from(clientesMulti.selectedOptions || []).map((opt) => opt.value)
-        ).filter((value) => value !== clienteSelect.value);
-        setSelectMultipleValues(clientesMulti, clienteSelect.value ? [clienteSelect.value, ...current] : current);
+        setSelectMultipleValues(clientesMulti, clienteSelect.value ? [clienteSelect.value] : []);
         persistClientes();
       });
       clienteTd.appendChild(clienteSelect);
@@ -18697,12 +18689,9 @@ if (segurosContabilidadForm) {
   if (segurosContabilidadCliente && segurosContabilidadPoliza) {
     segurosContabilidadCliente.addEventListener("change", () => {
       if (segurosContabilidadClientesMulti) {
-        const current = parseGestoriaContaClienteIds(
-          Array.from(segurosContabilidadClientesMulti.selectedOptions || []).map((opt) => opt.value)
-        ).filter((id) => id !== segurosContabilidadCliente.value);
         setSelectMultipleValues(
           segurosContabilidadClientesMulti,
-          segurosContabilidadCliente.value ? [segurosContabilidadCliente.value, ...current] : current
+          segurosContabilidadCliente.value ? [segurosContabilidadCliente.value] : []
         );
       }
       segurosContabilidadAllCache = null;
@@ -18724,21 +18713,6 @@ if (segurosContabilidadForm) {
           segurosContabilidadCliente.value,
           ""
         );
-      });
-    }
-    if (segurosContaClientesAll) {
-      segurosContaClientesAll.addEventListener("click", () => {
-        const allValues = Array.from(segurosContabilidadClientesMulti?.options || [])
-          .map((opt) => String(opt.value || "").trim())
-          .filter(Boolean);
-        setSelectMultipleValues(segurosContabilidadClientesMulti, allValues);
-        segurosContabilidadCliente.value = allValues[0] || "";
-      });
-    }
-    if (segurosContaClientesClear) {
-      segurosContaClientesClear.addEventListener("click", () => {
-        setSelectMultipleValues(segurosContabilidadClientesMulti, []);
-        segurosContabilidadCliente.value = "";
       });
     }
   }
