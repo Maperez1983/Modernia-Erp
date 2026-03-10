@@ -1550,6 +1550,8 @@ const segurosContabilidadForm = document.getElementById("segurosContabilidadForm
 const segurosContabilidadStatus = document.getElementById("segurosContabilidadStatus");
 const segurosContabilidadCliente = document.getElementById("segurosContabilidadCliente");
 const segurosContabilidadClientesMulti = document.getElementById("segurosContabilidadClientesMulti");
+const segurosContaClientesAll = document.getElementById("segurosContaClientesAll");
+const segurosContaClientesClear = document.getElementById("segurosContaClientesClear");
 const segurosContabilidadPoliza = document.getElementById("segurosContabilidadPoliza");
 const segurosContabilidadSearch = document.getElementById("segurosContabilidadSearch");
 const segurosContabilidadTable = document.getElementById("segurosContabilidadTable");
@@ -9629,6 +9631,8 @@ const renderTableInto = (data, container, infoEl, label) => {
     label === "Seguros" && currentTab === "seguros-crm" && state.segurosTab === "bdt";
   const showSeguroFichaAction =
     label === "Seguros" && currentTab === "seguros-crm" && state.segurosTab === "bdt";
+  const enableColumnFilters =
+    label === "Seguros" && currentTab === "seguros-crm" && state.segurosTab === "bdt";
   const segurosCompactColumns = [
     "tomador",
     "compania",
@@ -9654,6 +9658,7 @@ const renderTableInto = (data, container, infoEl, label) => {
   const table = document.createElement("table");
   const thead = document.createElement("thead");
   const trHead = document.createElement("tr");
+  const columnFilterInputs = [];
   displayColumns.forEach((col) => {
     const th = document.createElement("th");
     th.textContent = formatHeader(col);
@@ -9675,9 +9680,28 @@ const renderTableInto = (data, container, infoEl, label) => {
     trHead.appendChild(th);
   }
   thead.appendChild(trHead);
+  if (enableColumnFilters) {
+    const trFilters = document.createElement("tr");
+    displayColumns.forEach((col) => {
+      const th = document.createElement("th");
+      const input = document.createElement("input");
+      input.type = "search";
+      input.placeholder = `Filtrar ${formatHeader(col).toLowerCase()}`;
+      input.className = "inline-input";
+      input.dataset.col = col;
+      th.appendChild(input);
+      trFilters.appendChild(th);
+      columnFilterInputs.push(input);
+    });
+    if (showPdf) trFilters.appendChild(document.createElement("th"));
+    if (showOcr) trFilters.appendChild(document.createElement("th"));
+    if (showSeguroFichaAction) trFilters.appendChild(document.createElement("th"));
+    thead.appendChild(trFilters);
+  }
   table.appendChild(thead);
 
   const tbody = document.createElement("tbody");
+  const filterRows = [];
   rows.forEach((row) => {
     const tr = document.createElement("tr");
     const rowMap = buildRowMap(row, columns);
@@ -9791,11 +9815,45 @@ const renderTableInto = (data, container, infoEl, label) => {
         openSeguroById(recordId, rowMap.cliente_id || "");
       });
     }
+    if (enableColumnFilters) {
+      const values = {};
+      displayColumns.forEach((colName) => {
+        const idx = colIndexMap.get(colName);
+        const raw = idx === undefined ? "" : row[idx];
+        values[colName] = normalizeSimple(formatCell(colName, raw) ?? raw ?? "");
+      });
+      filterRows.push({ tr, values });
+    }
     tbody.appendChild(tr);
   });
   table.appendChild(tbody);
   container.innerHTML = "";
   container.appendChild(table);
+  const applyColumnFilters = () => {
+    if (!enableColumnFilters) return;
+    const active = columnFilterInputs
+      .map((input) => ({
+        col: input.dataset.col || "",
+        value: normalizeSimple(input.value || ""),
+      }))
+      .filter((item) => item.value);
+    let visibleCount = 0;
+    filterRows.forEach((entry) => {
+      const visible = active.every((flt) => String(entry.values[flt.col] || "").includes(flt.value));
+      entry.tr.style.display = visible ? "" : "none";
+      if (visible) visibleCount += 1;
+    });
+    if (infoEl) {
+      infoEl.textContent = `Mostrando ${visibleCount} filas de ${label}.`;
+    }
+  };
+  if (enableColumnFilters) {
+    columnFilterInputs.forEach((input) => {
+      input.addEventListener("input", applyColumnFilters);
+    });
+    applyColumnFilters();
+    return;
+  }
   if (infoEl) {
     infoEl.textContent = `Mostrando ${rows.length} filas de ${label}.`;
   }
@@ -18639,9 +18697,12 @@ if (segurosContabilidadForm) {
   if (segurosContabilidadCliente && segurosContabilidadPoliza) {
     segurosContabilidadCliente.addEventListener("change", () => {
       if (segurosContabilidadClientesMulti) {
+        const current = parseGestoriaContaClienteIds(
+          Array.from(segurosContabilidadClientesMulti.selectedOptions || []).map((opt) => opt.value)
+        ).filter((id) => id !== segurosContabilidadCliente.value);
         setSelectMultipleValues(
           segurosContabilidadClientesMulti,
-          segurosContabilidadCliente.value ? [segurosContabilidadCliente.value] : []
+          segurosContabilidadCliente.value ? [segurosContabilidadCliente.value, ...current] : current
         );
       }
       segurosContabilidadAllCache = null;
@@ -18663,6 +18724,21 @@ if (segurosContabilidadForm) {
           segurosContabilidadCliente.value,
           ""
         );
+      });
+    }
+    if (segurosContaClientesAll) {
+      segurosContaClientesAll.addEventListener("click", () => {
+        const allValues = Array.from(segurosContabilidadClientesMulti?.options || [])
+          .map((opt) => String(opt.value || "").trim())
+          .filter(Boolean);
+        setSelectMultipleValues(segurosContabilidadClientesMulti, allValues);
+        segurosContabilidadCliente.value = allValues[0] || "";
+      });
+    }
+    if (segurosContaClientesClear) {
+      segurosContaClientesClear.addEventListener("click", () => {
+        setSelectMultipleValues(segurosContabilidadClientesMulti, []);
+        segurosContabilidadCliente.value = "";
       });
     }
   }

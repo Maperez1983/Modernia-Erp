@@ -531,6 +531,16 @@ body.crm-fin #companySummary {
   min-height: 110px;
 }
 
+#segurosContabilidadClientesMulti {
+  min-height: 120px;
+}
+
+.inline-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .form-grid label {
   display: grid;
   gap: 6px;
