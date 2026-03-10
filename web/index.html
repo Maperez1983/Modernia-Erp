@@ -1772,43 +1772,63 @@
           </div>
           <div class="seguros-tab" data-seguros-tab="contabilidad">
           <div class="form-card">
-            <h3>Comisiones por compañía</h3>
-            <p class="muted">Registro de comisionados por ramo.</p>
-            <form id="segurosComisionesForm" class="form-grid">
+            <h3>Asientos contables · Seguros</h3>
+            <p class="muted">Solo apuntes de pólizas. Se pueden editar los automáticos y añadir manuales.</p>
+            <form id="segurosContabilidadForm" class="form-grid">
               <label>
-                Compañía
-                <input name="compania" list="segurosCompaniasList" />
+                Fecha
+                <input name="fecha" type="date" required />
               </label>
               <label>
-                Ramo
-                <input name="ramo" />
+                Concepto
+                <input name="concepto" required />
               </label>
               <label>
-                % Comisión
-                <input name="porcentaje" type="number" step="0.01" />
+                Gestión
+                <select name="gestion">
+                  <option value="">Selecciona gestión</option>
+                  <option>Comisión emisión</option>
+                  <option>Comisión renovación</option>
+                  <option>Regularización</option>
+                  <option>Extorno</option>
+                  <option>Otros</option>
+                </select>
               </label>
               <label>
-                Vigencia desde
-                <input name="vigencia_desde" type="date" />
+                Tipo
+                <select name="tipo">
+                  <option>Ingreso</option>
+                  <option>Gasto</option>
+                </select>
               </label>
               <label>
-                Vigencia hasta
-                <input name="vigencia_hasta" type="date" />
+                Importe
+                <input name="importe" type="number" step="0.01" min="0" required />
+              </label>
+              <label class="span-2">
+                Cliente (opcional)
+                <select id="segurosContabilidadCliente" name="cliente_id"></select>
+              </label>
+              <label class="span-2">
+                Póliza vinculada
+                <select id="segurosContabilidadPoliza" name="seguro_id" required>
+                  <option value="">Sin vincular</option>
+                </select>
               </label>
               <label class="span-2">
                 Notas
                 <textarea name="notas" rows="2"></textarea>
               </label>
               <div class="form-actions">
-                <button type="submit">Guardar comisión</button>
-                <span id="segurosComisionesStatus" class="muted"></span>
+                <button type="submit">Añadir asiento</button>
+                <span id="segurosContabilidadStatus" class="muted"></span>
               </div>
             </form>
             <div class="table-tools">
-              <input id="segurosComisionesSearch" placeholder="Filtrar comisiones..." />
+              <input id="segurosContabilidadSearch" placeholder="Filtrar asientos..." />
             </div>
-            <div id="segurosComisionesTable"></div>
-            <div class="footer" id="segurosComisionesInfo"></div>
+            <div id="segurosContabilidadTable"></div>
+            <div class="footer" id="segurosContabilidadInfo"></div>
           </div>
           </div>
         </div>

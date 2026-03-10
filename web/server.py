@@ -13144,8 +13144,11 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "empresa_id requerido"}, status=400)
                 return
             q = params.get("q", [""])[0].strip()
+            seguros_only = (params.get("seguros_only", ["0"])[0] or "0").strip() in ("1", "true", "yes")
             where = ["gc.empresa_id = ?"]
             values = [empresa_id]
+            if seguros_only:
+                where.append("gc.seguro_id IS NOT NULL AND TRIM(gc.seguro_id) <> ''")
             if q:
                 where.append("(gc.concepto LIKE ? OR c.nombre LIKE ?)")
                 values.extend([f"%{q}%", f"%{q}%"])

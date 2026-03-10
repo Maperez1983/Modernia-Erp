@@ -1546,6 +1546,13 @@ const segurosComisionesStatus = document.getElementById("segurosComisionesStatus
 const segurosComisionesTable = document.getElementById("segurosComisionesTable");
 const segurosComisionesInfo = document.getElementById("segurosComisionesInfo");
 const segurosComisionesSearch = document.getElementById("segurosComisionesSearch");
+const segurosContabilidadForm = document.getElementById("segurosContabilidadForm");
+const segurosContabilidadStatus = document.getElementById("segurosContabilidadStatus");
+const segurosContabilidadCliente = document.getElementById("segurosContabilidadCliente");
+const segurosContabilidadPoliza = document.getElementById("segurosContabilidadPoliza");
+const segurosContabilidadSearch = document.getElementById("segurosContabilidadSearch");
+const segurosContabilidadTable = document.getElementById("segurosContabilidadTable");
+const segurosContabilidadInfo = document.getElementById("segurosContabilidadInfo");
 const segurosInsights = document.getElementById("segurosInsights");
 const segurosAlertasList = document.getElementById("segurosAlertasList");
 const segurosChecklistPoliza = document.getElementById("segurosChecklistPoliza");
@@ -6505,6 +6512,154 @@ const loadGestoriaContabilidad = () => {
   });
 };
 
+const loadSegurosContabilidad = () => {
+  if (!segurosContabilidadTable || !segurosContabilidadInfo) return;
+  const empresa = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
+  if (!empresa) {
+    segurosContabilidadTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
+    segurosContabilidadInfo.textContent = "";
+    return;
+  }
+  const q = segurosContabilidadSearch ? segurosContabilidadSearch.value.trim() : "";
+  const params = new URLSearchParams({
+    empresa_id: empresa.id,
+    seguros_only: "1",
+    q,
+  });
+  api(`/api/gestoria_contabilidad?${params.toString()}`).then(async (data) => {
+    const rows = data.rows || [];
+    if (!rows.length) {
+      segurosContabilidadTable.innerHTML = "<p class='muted'>Sin asientos contables de seguros.</p>";
+      segurosContabilidadInfo.textContent = "";
+      return;
+    }
+    const clienteIds = [
+      ...new Set(
+        rows
+          .map((row) => String(row.cliente_id || "").trim())
+          .filter(Boolean)
+      ),
+    ];
+    await Promise.all(clienteIds.map((clienteId) => loadSegurosForClienteContabilidad(clienteId)));
+    const table = document.createElement("table");
+    const thead = document.createElement("thead");
+    const trHead = document.createElement("tr");
+    ["fecha", "concepto", "gestion", "tipo", "importe", "importe €", "póliza", "cliente", "notas", "accion"].forEach((col) => {
+      const th = document.createElement("th");
+      th.textContent = formatHeader(col);
+      trHead.appendChild(th);
+    });
+    thead.appendChild(trHead);
+    table.appendChild(thead);
+    const tbody = document.createElement("tbody");
+    for (const row of rows) {
+      const tr = document.createElement("tr");
+      const buildInput = (value, field, type = "text") => {
+        const input = document.createElement("input");
+        input.type = type;
+        input.value = value || "";
+        input.classList.add("inline-input");
+        input.addEventListener("change", () => {
+          saveGestoriaContabilidadField(row.id, field, input.value);
+        });
+        return input;
+      };
+      const buildSelect = (value, field, options) => {
+        const select = document.createElement("select");
+        select.classList.add("inline-input");
+        options.forEach((opt) => select.appendChild(createOption(opt, opt)));
+        select.value = value || options[0];
+        select.addEventListener("change", () => {
+          saveGestoriaContabilidadField(row.id, field, select.value);
+        });
+        return select;
+      };
+      const fechaTd = document.createElement("td");
+      fechaTd.appendChild(buildInput(row.fecha, "fecha", "date"));
+      tr.appendChild(fechaTd);
+      const conceptoTd = document.createElement("td");
+      conceptoTd.appendChild(buildInput(row.concepto, "concepto"));
+      tr.appendChild(conceptoTd);
+      const gestionTd = document.createElement("td");
+      const gestiones = ["Comisión emisión", "Comisión renovación", "Regularización", "Extorno", "Otros"];
+      const gestionSelect = document.createElement("select");
+      gestionSelect.classList.add("inline-input");
+      gestionSelect.appendChild(createOption("", "-"));
+      gestiones.forEach((opt) => gestionSelect.appendChild(createOption(opt, opt)));
+      if (row.gestion && !gestiones.includes(row.gestion)) {
+        gestionSelect.appendChild(createOption(row.gestion, row.gestion));
+      }
+      gestionSelect.value = row.gestion || "";
+      gestionSelect.addEventListener("change", () => {
+        saveGestoriaContabilidadField(row.id, "gestion", gestionSelect.value);
+      });
+      gestionTd.appendChild(gestionSelect);
+      tr.appendChild(gestionTd);
+      const tipoTd = document.createElement("td");
+      tipoTd.appendChild(buildSelect(row.tipo, "tipo", ["Ingreso", "Gasto"]));
+      tr.appendChild(tipoTd);
+      const importeTd = document.createElement("td");
+      const importeInput = buildInput(row.importe, "importe", "number");
+      importeInput.step = "0.01";
+      importeInput.min = "0";
+      importeTd.appendChild(importeInput);
+      tr.appendChild(importeTd);
+      const importeEurTd = document.createElement("td");
+      const importeBadge = document.createElement("span");
+      const refreshImporteBadge = () => {
+        const parsed = Number.parseFloat(String(importeInput.value || "").replace(",", "."));
+        importeBadge.textContent = Number.isFinite(parsed) ? euroFormatter.format(parsed) : "-";
+      };
+      refreshImporteBadge();
+      importeInput.addEventListener("input", refreshImporteBadge);
+      importeInput.addEventListener("change", refreshImporteBadge);
+      importeEurTd.appendChild(importeBadge);
+      tr.appendChild(importeEurTd);
+      const polizaTd = document.createElement("td");
+      const polizaSelect = document.createElement("select");
+      polizaSelect.classList.add("inline-input");
+      await fillGestoriaContabilidadPolizaSelect(polizaSelect, row.cliente_id, row.seguro_id);
+      polizaSelect.addEventListener("change", () => {
+        saveGestoriaContabilidadField(row.id, "seguro_id", polizaSelect.value || "");
+      });
+      polizaTd.appendChild(polizaSelect);
+      tr.appendChild(polizaTd);
+      const clienteTd = document.createElement("td");
+      const clienteSelect = document.createElement("select");
+      clienteSelect.classList.add("inline-input");
+      clienteSelect.appendChild(createOption("", "-"));
+      const clientes = Array.isArray(state.clientesList) ? state.clientesList : [];
+      clientes.forEach((cliente) => {
+        clienteSelect.appendChild(createOption(cliente.id, formatNombreCliente(cliente.nombre)));
+      });
+      clienteSelect.value = row.cliente_id || "";
+      clienteSelect.addEventListener("change", () => {
+        saveGestoriaContabilidadField(row.id, "cliente_id", clienteSelect.value);
+        fillGestoriaContabilidadPolizaSelect(polizaSelect, clienteSelect.value, "");
+      });
+      clienteTd.appendChild(clienteSelect);
+      tr.appendChild(clienteTd);
+      const notasTd = document.createElement("td");
+      notasTd.appendChild(buildInput(row.notas, "notas"));
+      tr.appendChild(notasTd);
+      const actionTd = document.createElement("td");
+      const delBtn = document.createElement("button");
+      delBtn.type = "button";
+      delBtn.textContent = "Eliminar";
+      delBtn.addEventListener("click", () => {
+        deleteGestoriaContabilidad(row.id);
+      });
+      actionTd.appendChild(delBtn);
+      tr.appendChild(actionTd);
+      tbody.appendChild(tr);
+    }
+    table.appendChild(tbody);
+    segurosContabilidadTable.innerHTML = "";
+    segurosContabilidadTable.appendChild(table);
+    segurosContabilidadInfo.textContent = `Mostrando ${rows.length} asientos.`;
+  });
+};
+
 const formatInputDate = (date) => {
   if (!date) return "";
   const d = new Date(date);
@@ -7569,6 +7724,9 @@ const setSegurosTab = (name) => {
     window.requestAnimationFrame(() => {
       renderFincasDashboard(state.currentEmpresaId);
     });
+  }
+  if (name === "contabilidad") {
+    loadSegurosContabilidad();
   }
 };
 
@@ -10822,6 +10980,9 @@ const loadSegurosCrm = () => {
     loadSegurosComplianceKpis(empresa.id);
     loadSegurosEventos(segurosEventosPolizaId ? segurosEventosPolizaId.value : "");
     loadSegurosReclamaciones(empresa.id);
+    if (state.segurosTab === "contabilidad") {
+      loadSegurosContabilidad();
+    }
     if (segurosPreferenciasClientes) {
       populateAgendaClientes(
         segurosPreferenciasClientes,
@@ -14565,7 +14726,11 @@ const deleteGestoriaContabilidad = (id) => {
   })
     .then((res) => res.json())
     .then(() => {
-      loadGestoriaContabilidad();
+      if (currentTab === "seguros-crm" && state.segurosTab === "contabilidad") {
+        loadSegurosContabilidad();
+      } else {
+        loadGestoriaContabilidad();
+      }
     });
 };
 
@@ -17291,6 +17456,7 @@ const init = async () => {
     populateAgendaClientes(gestoriaCrmClientes, gestoriaCrmSearch, null);
     populateAgendaClientes(finCrmClientes, finCrmClienteInput, finCrmClienteId);
     populateClientesSelect(gestoriaContabilidadCliente);
+    populateClientesSelect(segurosContabilidadCliente);
     populateServiciosSelect(clientesServicioSelect);
     refreshClientesAltaSelects();
     initFinSimulator();
@@ -17800,6 +17966,13 @@ if (segurosComisionesSearch) {
     }, 200);
   });
 }
+if (segurosContabilidadSearch) {
+  segurosContabilidadSearch.addEventListener("input", () => {
+    scheduleSave("seguros-contabilidad-search", () => {
+      loadSegurosContabilidad();
+    }, 200);
+  });
+}
 
 if (segurosCrmClienteOpen) {
   segurosCrmClienteOpen.addEventListener("click", () => {
@@ -18190,6 +18363,51 @@ if (segurosComisionesForm) {
       .catch(() => {
         if (segurosComisionesStatus) {
           segurosComisionesStatus.textContent = "Error al guardar.";
+        }
+      });
+  });
+}
+
+if (segurosContabilidadForm) {
+  if (segurosContabilidadCliente && segurosContabilidadPoliza) {
+    segurosContabilidadCliente.addEventListener("change", () => {
+      fillGestoriaContabilidadPolizaSelect(
+        segurosContabilidadPoliza,
+        segurosContabilidadCliente.value,
+        ""
+      );
+    });
+  }
+  segurosContabilidadForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    if (segurosContabilidadStatus) {
+      segurosContabilidadStatus.textContent = "Guardando...";
+    }
+    const formData = new FormData(segurosContabilidadForm);
+    const payload = Object.fromEntries(formData.entries());
+    payload.empresa_nombre = FINCAS_COMPANY;
+    fetch("/api/gestoria_contabilidad", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (segurosContabilidadStatus) {
+          segurosContabilidadStatus.textContent = data.error || "Guardado.";
+        }
+        if (!data.error) {
+          segurosContabilidadForm.reset();
+          if (segurosContabilidadPoliza) {
+            segurosContabilidadPoliza.innerHTML = "";
+            segurosContabilidadPoliza.appendChild(createOption("", "Sin vincular"));
+          }
+          loadSegurosContabilidad();
+        }
+      })
+      .catch(() => {
+        if (segurosContabilidadStatus) {
+          segurosContabilidadStatus.textContent = "Error al guardar.";
         }
       });
   });
@@ -19940,6 +20158,7 @@ if (userSelect) {
       populateAgendaClientes(gestoriaCrmClientes, gestoriaCrmSearch, null);
       populateAgendaClientes(finCrmClientes, finCrmClienteInput, finCrmClienteId);
       populateClientesSelect(gestoriaContabilidadCliente);
+      populateClientesSelect(segurosContabilidadCliente);
       refreshClientesAltaSelects();
     });
     if (state.currentModule === "clientes") {
