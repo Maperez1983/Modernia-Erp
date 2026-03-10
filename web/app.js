@@ -6316,6 +6316,7 @@ const resolveClienteFromInput = (inputEl, hiddenEl) => {
 };
 
 const gestoriaContabilidadSegurosCache = new Map();
+let segurosContabilidadAllCache = null;
 
 const loadSegurosForClienteContabilidad = async (clienteId) => {
   const key = String(clienteId || "").trim();
@@ -6333,11 +6334,50 @@ const loadSegurosForClienteContabilidad = async (clienteId) => {
   }
 };
 
+const loadAllSegurosForContabilidad = async () => {
+  if (Array.isArray(segurosContabilidadAllCache)) {
+    return segurosContabilidadAllCache;
+  }
+  const empresa = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
+  if (!empresa) return [];
+  try {
+    const params = new URLSearchParams({
+      tabla: "seguros",
+      empresa_id: empresa.id,
+      include_id: "1",
+    });
+    const data = await api(`/api/tabla?${params.toString()}`);
+    const columns = Array.isArray(data?.columns) ? data.columns : [];
+    const rows = Array.isArray(data?.rows) ? data.rows : [];
+    const idx = (name) => columns.indexOf(name);
+    const idIndex = idx("id");
+    const polizaIndex = idx("poliza_numero");
+    const companiaIndex = idx("compania");
+    const ramoIndex = idx("ramo");
+    const clienteIndex = idx("cliente_id");
+    segurosContabilidadAllCache = rows
+      .map((row) => ({
+        id: idIndex >= 0 ? row[idIndex] : "",
+        poliza_numero: polizaIndex >= 0 ? row[polizaIndex] : "",
+        compania: companiaIndex >= 0 ? row[companiaIndex] : "",
+        ramo: ramoIndex >= 0 ? row[ramoIndex] : "",
+        cliente_id: clienteIndex >= 0 ? row[clienteIndex] : "",
+      }))
+      .filter((row) => String(row.id || "").trim());
+    return segurosContabilidadAllCache;
+  } catch {
+    return [];
+  }
+};
+
 const fillGestoriaContabilidadPolizaSelect = async (selectEl, clienteId, selectedSeguroId = "") => {
   if (!selectEl) return;
   selectEl.innerHTML = "";
   selectEl.appendChild(createOption("", "Sin vincular"));
-  const seguros = await loadSegurosForClienteContabilidad(clienteId);
+  let seguros = await loadSegurosForClienteContabilidad(clienteId);
+  if (!seguros.length) {
+    seguros = await loadAllSegurosForContabilidad();
+  }
   seguros.forEach((seguro) => {
     const value = String(seguro.id || "").trim();
     if (!value) return;
@@ -6354,6 +6394,19 @@ const fillGestoriaContabilidadPolizaSelect = async (selectEl, clienteId, selecte
   if (selectEl.value !== String(selectedSeguroId || "").trim()) {
     selectEl.value = "";
   }
+};
+
+const hydrateSegurosContabilidadFormSelects = async () => {
+  if (!segurosContabilidadCliente || !segurosContabilidadPoliza) return;
+  if (!Array.isArray(state.clientesList) || !state.clientesList.length) {
+    await loadClientesList().catch(() => []);
+  }
+  populateClientesSelect(segurosContabilidadCliente);
+  await fillGestoriaContabilidadPolizaSelect(
+    segurosContabilidadPoliza,
+    segurosContabilidadCliente.value || "",
+    segurosContabilidadPoliza.value || ""
+  );
 };
 
 const ensureSelectedPolizaOption = (selectEl, seguroId, polizaNumero = "") => {
@@ -7737,6 +7790,7 @@ const setSegurosTab = (name) => {
     });
   }
   if (name === "contabilidad") {
+    hydrateSegurosContabilidadFormSelects().catch(() => {});
     loadSegurosContabilidad();
   }
 };
@@ -18398,6 +18452,7 @@ if (segurosComisionesForm) {
 if (segurosContabilidadForm) {
   if (segurosContabilidadCliente && segurosContabilidadPoliza) {
     segurosContabilidadCliente.addEventListener("change", () => {
+      segurosContabilidadAllCache = null;
       fillGestoriaContabilidadPolizaSelect(
         segurosContabilidadPoliza,
         segurosContabilidadCliente.value,
@@ -18425,10 +18480,8 @@ if (segurosContabilidadForm) {
         }
         if (!data.error) {
           segurosContabilidadForm.reset();
-          if (segurosContabilidadPoliza) {
-            segurosContabilidadPoliza.innerHTML = "";
-            segurosContabilidadPoliza.appendChild(createOption("", "Sin vincular"));
-          }
+          segurosContabilidadAllCache = null;
+          hydrateSegurosContabilidadFormSelects().catch(() => {});
           loadSegurosContabilidad();
         }
       })
