@@ -6649,34 +6649,17 @@ const loadGestoriaContabilidad = () => {
       const clienteSelect = document.createElement("select");
       clienteSelect.classList.add("inline-input");
       clienteSelect.appendChild(createOption("", "-"));
-      const clientesMulti = document.createElement("select");
-      clientesMulti.classList.add("inline-input");
-      clientesMulti.multiple = true;
-      clientesMulti.size = 3;
       const clientes = await loadClientesForSegurosContabilidad();
       clientes.forEach((cliente) => {
         const label = formatNombreCliente(cliente.nombre);
         clienteSelect.appendChild(createOption(cliente.id, label));
-        clientesMulti.appendChild(createOption(cliente.id, label));
       });
       clienteSelect.value = primaryClienteId;
-      setSelectMultipleValues(clientesMulti, rowClienteIds);
-      const persistClientes = () => {
-        const selected = parseGestoriaContaClienteIds(
-          Array.from(clientesMulti.selectedOptions || []).map((opt) => opt.value),
-          clienteSelect.value
-        );
-        clienteSelect.value = selected[0] || "";
-        saveGestoriaContabilidadField(row.id, "cliente_ids_json", selected);
-        fillGestoriaContabilidadPolizaSelect(polizaSelect, clienteSelect.value, "");
-      };
       clienteSelect.addEventListener("change", () => {
-        setSelectMultipleValues(clientesMulti, clienteSelect.value ? [clienteSelect.value] : []);
-        persistClientes();
+        saveGestoriaContabilidadField(row.id, "cliente_id", clienteSelect.value);
+        fillGestoriaContabilidadPolizaSelect(polizaSelect, clienteSelect.value, "");
       });
       clienteTd.appendChild(clienteSelect);
-      clienteTd.appendChild(clientesMulti);
-      clientesMulti.addEventListener("change", persistClientes);
       tr.appendChild(clienteTd);
       const notasTd = document.createElement("td");
       notasTd.appendChild(buildInput(row.notas, "notas"));
@@ -6818,34 +6801,17 @@ const loadSegurosContabilidad = () => {
       const clienteSelect = document.createElement("select");
       clienteSelect.classList.add("inline-input");
       clienteSelect.appendChild(createOption("", "-"));
-      const clientesMulti = document.createElement("select");
-      clientesMulti.classList.add("inline-input");
-      clientesMulti.multiple = true;
-      clientesMulti.size = 3;
       const clientes = await loadClientesForSegurosContabilidad();
       clientes.forEach((cliente) => {
         const label = formatNombreCliente(cliente.nombre);
         clienteSelect.appendChild(createOption(cliente.id, label));
-        clientesMulti.appendChild(createOption(cliente.id, label));
       });
       clienteSelect.value = primaryClienteId;
-      setSelectMultipleValues(clientesMulti, rowClienteIds);
-      const persistClientes = () => {
-        const selected = parseGestoriaContaClienteIds(
-          Array.from(clientesMulti.selectedOptions || []).map((opt) => opt.value),
-          clienteSelect.value
-        );
-        clienteSelect.value = selected[0] || "";
-        saveGestoriaContabilidadField(row.id, "cliente_ids_json", selected);
-        fillGestoriaContabilidadPolizaSelect(polizaSelect, clienteSelect.value, "");
-      };
       clienteSelect.addEventListener("change", () => {
-        setSelectMultipleValues(clientesMulti, clienteSelect.value ? [clienteSelect.value] : []);
-        persistClientes();
+        saveGestoriaContabilidadField(row.id, "cliente_id", clienteSelect.value);
+        fillGestoriaContabilidadPolizaSelect(polizaSelect, clienteSelect.value, "");
       });
       clienteTd.appendChild(clienteSelect);
-      clienteTd.appendChild(clientesMulti);
-      clientesMulti.addEventListener("change", persistClientes);
       tr.appendChild(clienteTd);
       const notasTd = document.createElement("td");
       notasTd.appendChild(buildInput(row.notas, "notas"));
