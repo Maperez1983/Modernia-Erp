@@ -9573,11 +9573,31 @@ const renderTableInto = (data, container, infoEl, label) => {
   const tbody = document.createElement("tbody");
   rows.forEach((row) => {
     const tr = document.createElement("tr");
+    const rowMap = buildRowMap(row, columns);
+    const recordId = idIndex >= 0 ? row[idIndex] : "";
     displayColumns.forEach((colName) => {
       const idx = colIndexMap.get(colName);
       const cell = idx === undefined ? "" : row[idx];
       const td = document.createElement("td");
-      if (!applyCompanyCell(td, colName, cell) && !applyRamoCell(td, colName, cell)) {
+      const canOpenSeguro =
+        label === "Seguros" &&
+        currentTab === "seguros-crm" &&
+        state.segurosTab === "bdt" &&
+        colName === "poliza_numero" &&
+        String(recordId || "").trim();
+      if (canOpenSeguro) {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "ghost";
+        const formatted = formatCell(colName, cell);
+        btn.textContent = formatted === null || formatted === "" ? "Abrir póliza" : String(formatted);
+        btn.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          openSeguroById(recordId, rowMap.cliente_id || "");
+        });
+        td.appendChild(btn);
+      } else if (!applyCompanyCell(td, colName, cell) && !applyRamoCell(td, colName, cell)) {
         const formatted = formatCell(colName, cell);
         td.textContent = formatted === null ? "" : formatted;
       }
@@ -9603,8 +9623,6 @@ const renderTableInto = (data, container, infoEl, label) => {
     }
     if (showOcr) {
       const td = document.createElement("td");
-      const recordId = idIndex >= 0 ? row[idIndex] : "";
-      const rowMap = buildRowMap(row, columns);
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "secondary";
@@ -9639,7 +9657,6 @@ const renderTableInto = (data, container, infoEl, label) => {
     }
     if (showSeguroFichaAction) {
       const td = document.createElement("td");
-      const rowMap = buildRowMap(row, columns);
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "secondary";
@@ -9658,6 +9675,14 @@ const renderTableInto = (data, container, infoEl, label) => {
       });
       td.appendChild(btn);
       tr.appendChild(td);
+    }
+    if (label === "Seguros" && currentTab === "seguros-crm" && state.segurosTab === "bdt" && String(recordId || "").trim()) {
+      tr.addEventListener("click", (event) => {
+        if (event.target && event.target.closest("button, input, select, a")) {
+          return;
+        }
+        openSeguroById(recordId, rowMap.cliente_id || "");
+      });
     }
     tbody.appendChild(tr);
   });
