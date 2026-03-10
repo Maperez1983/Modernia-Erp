@@ -615,8 +615,35 @@ def seguros_contabilidad_where_clause(alias="gc"):
         f"(({p}.seguro_id IS NOT NULL AND TRIM({p}.seguro_id) <> '') "
         f"OR UPPER(COALESCE({p}.notas, '')) LIKE 'AUTO CRM SEGUROS%' "
         f"OR UPPER(COALESCE({p}.notas, '')) LIKE '[SEGUROS]%' "
-        f"OR UPPER(TRIM(COALESCE({p}.gestion, ''))) IN ('COMISION EMISION', 'COMISION RENOVACION', 'REGULARIZACION', 'EXTORNO'))"
+        f"OR UPPER(TRIM(COALESCE({p}.gestion, ''))) IN ('COMISION EMISION', 'COMISION RENOVACION', 'REGULARIZACION', 'REGULARIZACIÓN', 'EXTORNO') "
+        f"OR UPPER(TRIM(COALESCE({p}.gestion, ''))) LIKE 'COMISI% EMISI%' "
+        f"OR UPPER(TRIM(COALESCE({p}.gestion, ''))) LIKE 'COMISI% RENOVA%')"
     )
+
+
+def compute_seguros_contabilidad_totals(conn, empresa_id, year=None):
+    where = [ "gc.empresa_id = ?", seguros_contabilidad_where_clause("gc") ]
+    values = [empresa_id]
+    if year:
+        where.append("STRFTIME('%Y', gc.fecha) = ?")
+        values.append(str(year))
+    rows = conn.execute(
+        f"""
+        SELECT gc.tipo, gc.importe
+        FROM gestoria_contabilidad gc
+        WHERE {' AND '.join(where)}
+        """,
+        values,
+    ).fetchall()
+    ingresos = 0.0
+    gastos = 0.0
+    for row in rows:
+        amount = parse_money_value(row["importe"])
+        if normalize_lookup_text(row["tipo"]) == "GASTO":
+            gastos += amount
+        else:
+            ingresos += amount
+    return {"ingresos": round(ingresos, 2), "gastos": round(gastos, 2)}
 
 
 def find_existing_seguro_id(conn, empresa_id, poliza_numero, compania, exclude_id=None):
@@ -14671,57 +14698,8 @@ class Handler(BaseHTTPRequestHandler):
                 (empresa_id, 1 if uploaded_only else 0),
             ).fetchall()
 
-            facturacion_year = conn.execute(
-                f"""
-                SELECT COALESCE(
-                  SUM(
-                    CASE
-                      WHEN LOWER(TRIM(COALESCE(gc.tipo, ''))) = 'gasto' THEN 0
-                      ELSE COALESCE(gc.importe, 0)
-                    END
-                  ),
-                  0
-                ) AS total
-                FROM gestoria_contabilidad gc
-                WHERE gc.empresa_id = ?
-                  AND {seguros_contabilidad_where_clause("gc")}
-                  AND STRFTIME('%Y', gc.fecha) = ?
-                """,
-                (empresa_id, year),
-            ).fetchone()
-            facturacion_total = conn.execute(
-                f"""
-                SELECT COALESCE(
-                  SUM(
-                    CASE
-                      WHEN LOWER(TRIM(COALESCE(gc.tipo, ''))) = 'gasto' THEN 0
-                      ELSE COALESCE(gc.importe, 0)
-                    END
-                  ),
-                  0
-                ) AS total
-                FROM gestoria_contabilidad gc
-                WHERE gc.empresa_id = ?
-                  AND {seguros_contabilidad_where_clause("gc")}
-                """,
-                (empresa_id,),
-            ).fetchone()
-            gastos_year = conn.execute(
-                """
-                SELECT COALESCE(SUM(CASE WHEN LOWER(COALESCE(tipo, '')) = 'gasto' THEN COALESCE(importe, 0) ELSE 0 END), 0) AS total
-                FROM gestoria_contabilidad
-                WHERE empresa_id = ? AND STRFTIME('%Y', fecha) = ?
-                """,
-                (empresa_id, year),
-            ).fetchone()
-            gastos_total = conn.execute(
-                """
-                SELECT COALESCE(SUM(CASE WHEN LOWER(COALESCE(tipo, '')) = 'gasto' THEN COALESCE(importe, 0) ELSE 0 END), 0) AS total
-                FROM gestoria_contabilidad
-                WHERE empresa_id = ?
-                """,
-                (empresa_id,),
-            ).fetchone()
+            seguros_totals_year = compute_seguros_contabilidad_totals(conn, empresa_id, year=year)
+            seguros_totals_total = compute_seguros_contabilidad_totals(conn, empresa_id)
 
             json_response(
                 self,
@@ -14736,10 +14714,10 @@ class Handler(BaseHTTPRequestHandler):
                         "en_vigor_total": total_en_vigor or 0,
                         "total_global": total_global or 0,
                         "conversion_total": conversion_global,
-                        "facturacion_comision": facturacion_year["total"] if facturacion_year else 0,
-                        "facturacion_comision_total": facturacion_total["total"] if facturacion_total else 0,
-                        "gastos": gastos_year["total"] if gastos_year else 0,
-                        "gastos_total": gastos_total["total"] if gastos_total else 0,
+                        "facturacion_comision": seguros_totals_year["ingresos"],
+                        "facturacion_comision_total": seguros_totals_total["ingresos"],
+                        "gastos": seguros_totals_year["gastos"],
+                        "gastos_total": seguros_totals_total["gastos"],
                     },
                     "series": series_payload,
                     "responsables": [dict(r) for r in responsables],
@@ -14892,31 +14870,7 @@ class Handler(BaseHTTPRequestHandler):
                 """,
                 (empresa_id, 1 if uploaded_only else 0),
             ).fetchone()
-            facturacion = conn.execute(
-                f"""
-                SELECT COALESCE(
-                  SUM(
-                    CASE
-                      WHEN LOWER(TRIM(COALESCE(gc.tipo, ''))) = 'gasto' THEN 0
-                      ELSE COALESCE(gc.importe, 0)
-                    END
-                  ),
-                  0
-                ) AS total
-                FROM gestoria_contabilidad gc
-                WHERE gc.empresa_id = ?
-                  AND {seguros_contabilidad_where_clause("gc")}
-                """,
-                (empresa_id,),
-            ).fetchone()
-            gastos = conn.execute(
-                """
-                SELECT COALESCE(SUM(CASE WHEN LOWER(COALESCE(tipo, '')) = 'gasto' THEN COALESCE(importe, 0) ELSE 0 END), 0) AS total
-                FROM gestoria_contabilidad
-                WHERE empresa_id = ?
-                """,
-                (empresa_id,),
-            ).fetchone()
+            seguros_totals = compute_seguros_contabilidad_totals(conn, empresa_id)
             quality = {"alta": 0, "media": 0, "baja": 0, "desconocida": 0}
             for row in quality_rows:
                 key = (row["calidad_ocr"] or "desconocida").lower()
@@ -14931,8 +14885,8 @@ class Handler(BaseHTTPRequestHandler):
                     "vencen_30": vencen_30["total"] if vencen_30 else 0,
                     "faltantes": faltantes["total"] if faltantes else 0,
                     "prima_total": primas["total"] if primas and primas["total"] is not None else 0,
-                    "facturacion_comision": facturacion["total"] if facturacion else 0,
-                    "gastos": gastos["total"] if gastos else 0,
+                    "facturacion_comision": seguros_totals["ingresos"],
+                    "gastos": seguros_totals["gastos"],
                     "ocr_quality": quality,
                 },
             )

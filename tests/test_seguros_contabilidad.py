@@ -1,7 +1,11 @@
 import sqlite3
 import unittest
 
-from web.server import resolve_seguro_contabilidad_link, upsert_seguro_comision_contabilidad
+from web.server import (
+    compute_seguros_contabilidad_totals,
+    resolve_seguro_contabilidad_link,
+    upsert_seguro_comision_contabilidad,
+)
 
 
 class SegurosContabilidadTests(unittest.TestCase):
@@ -110,6 +114,38 @@ class SegurosContabilidadTests(unittest.TestCase):
         poliza_numero, cliente_id = resolve_seguro_contabilidad_link(self.conn, "s1")
         self.assertEqual(poliza_numero, "POL-001")
         self.assertEqual(cliente_id, "c1")
+
+    def test_compute_seguros_contabilidad_totals_parses_text_amounts_and_accents(self):
+        self.conn.execute(
+            """
+            INSERT INTO gestoria_contabilidad (
+              id, empresa_id, cliente_id, fecha, concepto, gestion, tipo, importe, notas
+            ) VALUES (
+              'm1', 'e1', 'c1', '2026-01-20', 'Liq ene', 'Comisión emisión', 'Ingreso', '17,59 €', ''
+            )
+            """
+        )
+        self.conn.execute(
+            """
+            INSERT INTO gestoria_contabilidad (
+              id, empresa_id, cliente_id, fecha, concepto, gestion, tipo, importe, notas
+            ) VALUES (
+              'm2', 'e1', 'c1', '2026-01-21', 'Extorno', 'Extorno', 'Gasto', '2,10', ''
+            )
+            """
+        )
+        self.conn.execute(
+            """
+            INSERT INTO gestoria_contabilidad (
+              id, empresa_id, cliente_id, fecha, concepto, gestion, tipo, importe, notas
+            ) VALUES (
+              'm3', 'e1', 'c1', '2026-02-02', 'No seguros', 'Fiscal', 'Ingreso', '999,00', 'otro módulo'
+            )
+            """
+        )
+        totals = compute_seguros_contabilidad_totals(self.conn, "e1", year="2026")
+        self.assertAlmostEqual(totals["ingresos"], 17.59, places=2)
+        self.assertAlmostEqual(totals["gastos"], 2.10, places=2)
 
 
 if __name__ == "__main__":
