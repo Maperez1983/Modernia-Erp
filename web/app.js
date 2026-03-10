@@ -6317,6 +6317,7 @@ const resolveClienteFromInput = (inputEl, hiddenEl) => {
 
 const gestoriaContabilidadSegurosCache = new Map();
 let segurosContabilidadAllCache = null;
+let segurosContabilidadClientesCache = null;
 
 const loadSegurosForClienteContabilidad = async (clienteId) => {
   const key = String(clienteId || "").trim();
@@ -6370,6 +6371,47 @@ const loadAllSegurosForContabilidad = async () => {
   }
 };
 
+const loadClientesForSegurosContabilidad = async () => {
+  if (Array.isArray(segurosContabilidadClientesCache)) {
+    return segurosContabilidadClientesCache;
+  }
+  const empresa = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
+  const params = new URLSearchParams({ servicio: "seguros" });
+  if (empresa?.id) {
+    params.set("empresa_id", empresa.id);
+  }
+  try {
+    const rows = await api(`/api/clientes_list?${params.toString()}`);
+    const list = Array.isArray(rows) ? rows : [];
+    list.sort((a, b) => {
+      const nameA = normalizeNombre(formatNombreCliente(a.nombre));
+      const nameB = normalizeNombre(formatNombreCliente(b.nombre));
+      return nameA.localeCompare(nameB, "es", { numeric: true, sensitivity: "base" });
+    });
+    segurosContabilidadClientesCache = list;
+    return list;
+  } catch {
+    if (Array.isArray(state.clientesList) && state.clientesList.length) {
+      segurosContabilidadClientesCache = state.clientesList;
+      return state.clientesList;
+    }
+    return [];
+  }
+};
+
+const populateSegurosContabilidadClientesSelect = async (selectEl, selectedId = "") => {
+  if (!selectEl) return;
+  const clientes = await loadClientesForSegurosContabilidad();
+  selectEl.innerHTML = "";
+  selectEl.appendChild(createOption("", "Selecciona cliente"));
+  clientes.forEach((cliente) => {
+    selectEl.appendChild(createOption(cliente.id, formatNombreCliente(cliente.nombre)));
+  });
+  if (selectedId) {
+    selectEl.value = selectedId;
+  }
+};
+
 const fillGestoriaContabilidadPolizaSelect = async (selectEl, clienteId, selectedSeguroId = "") => {
   if (!selectEl) return;
   selectEl.innerHTML = "";
@@ -6398,10 +6440,11 @@ const fillGestoriaContabilidadPolizaSelect = async (selectEl, clienteId, selecte
 
 const hydrateSegurosContabilidadFormSelects = async () => {
   if (!segurosContabilidadCliente || !segurosContabilidadPoliza) return;
-  if (!Array.isArray(state.clientesList) || !state.clientesList.length) {
-    await loadClientesList().catch(() => []);
-  }
-  populateClientesSelect(segurosContabilidadCliente);
+  segurosContabilidadClientesCache = null;
+  await populateSegurosContabilidadClientesSelect(
+    segurosContabilidadCliente,
+    segurosContabilidadCliente.value || ""
+  );
   await fillGestoriaContabilidadPolizaSelect(
     segurosContabilidadPoliza,
     segurosContabilidadCliente.value || "",
@@ -6541,7 +6584,7 @@ const loadGestoriaContabilidad = () => {
       const clienteSelect = document.createElement("select");
       clienteSelect.classList.add("inline-input");
       clienteSelect.appendChild(createOption("", "-"));
-      const clientes = Array.isArray(state.clientesList) ? state.clientesList : [];
+      const clientes = await loadClientesForSegurosContabilidad();
       clientes.forEach((cliente) => {
         clienteSelect.appendChild(
           createOption(cliente.id, formatNombreCliente(cliente.nombre))
@@ -6692,7 +6735,7 @@ const loadSegurosContabilidad = () => {
       const clienteSelect = document.createElement("select");
       clienteSelect.classList.add("inline-input");
       clienteSelect.appendChild(createOption("", "-"));
-      const clientes = Array.isArray(state.clientesList) ? state.clientesList : [];
+      const clientes = await loadClientesForSegurosContabilidad();
       clientes.forEach((cliente) => {
         clienteSelect.appendChild(createOption(cliente.id, formatNombreCliente(cliente.nombre)));
       });
@@ -18481,6 +18524,7 @@ if (segurosContabilidadForm) {
         if (!data.error) {
           segurosContabilidadForm.reset();
           segurosContabilidadAllCache = null;
+          segurosContabilidadClientesCache = null;
           hydrateSegurosContabilidadFormSelects().catch(() => {});
           loadSegurosContabilidad();
         }
