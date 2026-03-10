@@ -470,6 +470,98 @@ def log_seguro_event(conn, seguro_row, event_type, now, motivo="", payload=None)
     )
 
 
+def upsert_seguro_comision_contabilidad(conn, seguro_row, now, movimiento="emision", fecha=None, importe=None):
+    if not seguro_row:
+        return None
+    seguro_id = (seguro_row.get("id") if isinstance(seguro_row, dict) else seguro_row["id"]) or ""
+    empresa_id = (seguro_row.get("empresa_id") if isinstance(seguro_row, dict) else seguro_row["empresa_id"]) or ""
+    if not seguro_id or not empresa_id:
+        return None
+    cliente_id = (seguro_row.get("cliente_id") if isinstance(seguro_row, dict) else seguro_row["cliente_id"]) or None
+    poliza_numero = (seguro_row.get("poliza_numero") if isinstance(seguro_row, dict) else seguro_row["poliza_numero"]) or ""
+    comision_src = importe
+    if comision_src in (None, ""):
+        comision_src = seguro_row.get("comision") if isinstance(seguro_row, dict) else seguro_row["comision"]
+    comision = round(parse_money_value(comision_src), 2)
+    if abs(comision) < 0.005:
+        return None
+    fecha_base = fecha
+    if not fecha_base:
+        fecha_base = seguro_row.get("fecha_efecto") if isinstance(seguro_row, dict) else seguro_row["fecha_efecto"]
+    fecha_iso = ""
+    parsed_fecha = parse_iso_date(fecha_base)
+    if parsed_fecha:
+        fecha_iso = parsed_fecha.isoformat()
+    if not fecha_iso:
+        return None
+    is_renovacion = normalize_lookup_text(movimiento) in ("RENOVACION", "RENOVAR", "RENEW")
+    gestion = "Comisión renovación" if is_renovacion else "Comisión emisión"
+    concepto = "Comisión renovación póliza" if is_renovacion else "Comisión emisión póliza"
+    if poliza_numero:
+        concepto = f"{concepto} {poliza_numero}"
+    existing = conn.execute(
+        """
+        SELECT id
+        FROM gestoria_contabilidad
+        WHERE seguro_id = ?
+          AND fecha = ?
+          AND LOWER(COALESCE(gestion, '')) = LOWER(?)
+        ORDER BY created_at DESC
+        LIMIT 1
+        """,
+        (seguro_id, fecha_iso, gestion),
+    ).fetchone()
+    notas = f"Auto CRM Seguros · {gestion.lower()}."
+    if existing:
+        conn.execute(
+            """
+            UPDATE gestoria_contabilidad
+            SET empresa_id = ?, cliente_id = ?, poliza_numero = ?, concepto = ?, tipo = ?, importe = ?, notas = ?,
+                updated_at = datetime(?)
+            WHERE id = ?
+            """,
+            (
+                empresa_id,
+                cliente_id,
+                poliza_numero,
+                concepto,
+                "Ingreso",
+                comision,
+                notas,
+                now,
+                existing["id"],
+            ),
+        )
+        return existing["id"]
+    record_id = os.urandom(16).hex()
+    conn.execute(
+        """
+        INSERT INTO gestoria_contabilidad (
+          id, empresa_id, cliente_id, seguro_id, poliza_numero, fecha, concepto, gestion, tipo, importe, notas,
+          created_at, updated_at
+        ) VALUES (
+          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+        )
+        """,
+        (
+            record_id,
+            empresa_id,
+            cliente_id,
+            seguro_id,
+            poliza_numero,
+            fecha_iso,
+            concepto,
+            gestion,
+            "Ingreso",
+            comision,
+            notas,
+            now,
+            now,
+        ),
+    )
+    return record_id
+
+
 def find_existing_seguro_id(conn, empresa_id, poliza_numero, compania, exclude_id=None):
     poliza_norm = normalize_poliza_key(poliza_numero)
     if not poliza_norm:
@@ -9244,10 +9336,12 @@ class Handler(BaseHTTPRequestHandler):
                     ),
                 )
             doc_id = None
+            contabilidad_id = None
             poliza_row = conn.execute("SELECT * FROM seguros WHERE id = ?", (poliza_id,)).fetchone()
             if poliza_row:
                 doc_id = ensure_seguro_doc_link(conn, poliza_row, now, calidad_ocr=calidad_ocr, campos_ocr=campos_ocr)
                 log_seguro_event(conn, poliza_row, "alta", now, payload={"origen": "api/seguros"})
+                contabilidad_id = upsert_seguro_comision_contabilidad(conn, poliza_row, now, movimiento="emision")
             # Crear acción si faltan campos obligatorios
             missing = []
             for key in ("tomador", "poliza_numero", "compania", "fecha_efecto"):
@@ -9305,6 +9399,7 @@ class Handler(BaseHTTPRequestHandler):
                     "id": poliza_id,
                     "cliente_id": cliente_id,
                     "doc_id": doc_id,
+                    "contabilidad_id": contabilidad_id,
                     "ocr_quality": ocr_quality,
                     "duplicate_of": dup_id,
                 },
@@ -9820,6 +9915,7 @@ class Handler(BaseHTTPRequestHandler):
             if row:
                 ensure_seguro_doc_link(conn, row, now)
                 log_seguro_event(conn, row, "actualizacion", now, payload={"campos": sorted(list(updates.keys()))})
+                upsert_seguro_comision_contabilidad(conn, row, now, movimiento="emision")
             if row:
                 missing = []
                 for key in ("tomador", "poliza_numero", "compania", "fecha_efecto"):
@@ -9996,6 +10092,7 @@ class Handler(BaseHTTPRequestHandler):
                     now,
                     payload={"old_id": record_id, "compania_origen": row["compania"], "poliza_origen": old_policy},
                 )
+                upsert_seguro_comision_contabilidad(conn, new_row, now, movimiento="emision")
             json_response(
                 self,
                 {
@@ -10059,19 +10156,34 @@ class Handler(BaseHTTPRequestHandler):
             if action in ("RENOVAR", "RENEW"):
                 fecha_renovacion = (payload.get("fecha_renovacion") or payload.get("fecha") or now[:10]).strip()
                 nueva_fecha_venc = (payload.get("nueva_fecha_vencimiento") or payload.get("fecha_vencimiento") or "").strip()
+                set_parts = [
+                    "estado_renovacion = ?",
+                    "renovacion_fecha = ?",
+                    "estado_poliza = 'activa'",
+                    "fecha_vencimiento = COALESCE(NULLIF(?, ''), fecha_vencimiento)",
+                ]
+                set_values = ["Renovada manual", fecha_renovacion, nueva_fecha_venc]
+                if "comision" in payload:
+                    set_parts.append("comision = ?")
+                    set_values.append(parse_money_value(payload.get("comision")))
                 conn.execute(
-                    """
+                    f"""
                     UPDATE seguros
-                    SET estado_renovacion = ?, renovacion_fecha = ?, estado_poliza = 'activa',
-                        fecha_vencimiento = COALESCE(NULLIF(?, ''), fecha_vencimiento),
-                        updated_at = datetime(?)
+                    SET {", ".join(set_parts)}, updated_at = datetime(?)
                     WHERE id = ?
                     """,
-                    ("Renovada manual", fecha_renovacion, nueva_fecha_venc, now, record_id),
+                    (*set_values, now, record_id),
                 )
                 row = conn.execute("SELECT * FROM seguros WHERE id = ?", (record_id,)).fetchone()
                 log_seguro_event(conn, row, "renovacion_manual", now, payload={"fecha": fecha_renovacion})
-                json_response(self, {"ok": True, "id": record_id, "accion": "renovar"})
+                contabilidad_id = upsert_seguro_comision_contabilidad(
+                    conn,
+                    row,
+                    now,
+                    movimiento="renovacion",
+                    fecha=fecha_renovacion,
+                )
+                json_response(self, {"ok": True, "id": record_id, "accion": "renovar", "contabilidad_id": contabilidad_id})
                 conn.commit()
                 return
             if action in ("ANULAR", "CANCELAR", "CANCEL"):
