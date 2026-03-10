@@ -9256,15 +9256,32 @@ const renderTableInto = (data, container, infoEl, label) => {
     label === "Seguros" && currentTab === "seguros-crm" && state.segurosTab === "bdt";
   const showSeguroFichaAction =
     label === "Seguros" && currentTab === "seguros-crm" && state.segurosTab === "bdt";
+  const segurosCompactColumns = [
+    "tomador",
+    "compania",
+    "ramo",
+    "poliza_numero",
+    "fecha_efecto",
+    "fecha_vencimiento",
+    "comision",
+    "estado",
+    "estado_renovacion",
+    "cliente_id",
+  ];
+  const displayColumns =
+    label === "Seguros"
+      ? segurosCompactColumns.filter((col) => columns.includes(col))
+      : columns.filter((col) => col !== "id" && col !== "poliza_key" && col !== "poliza_url");
   const idIndex = columns.indexOf("id");
   const clienteIdIndex = columns.indexOf("cliente_id");
+  const colIndexMap = new Map();
+  columns.forEach((col, idx) => {
+    colIndexMap.set(col, idx);
+  });
   const table = document.createElement("table");
   const thead = document.createElement("thead");
   const trHead = document.createElement("tr");
-  columns.forEach((col) => {
-    if (col === "id" || col === "poliza_key" || col === "poliza_url") {
-      return;
-    }
+  displayColumns.forEach((col) => {
     const th = document.createElement("th");
     th.textContent = formatHeader(col);
     trHead.appendChild(th);
@@ -9290,11 +9307,9 @@ const renderTableInto = (data, container, infoEl, label) => {
   const tbody = document.createElement("tbody");
   rows.forEach((row) => {
     const tr = document.createElement("tr");
-    row.forEach((cell, idx) => {
-      const colName = columns[idx] || "";
-      if (colName === "id" || colName === "poliza_key" || colName === "poliza_url") {
-        return;
-      }
+    displayColumns.forEach((colName) => {
+      const idx = colIndexMap.get(colName);
+      const cell = idx === undefined ? "" : row[idx];
       const td = document.createElement("td");
       if (!applyCompanyCell(td, colName, cell) && !applyRamoCell(td, colName, cell)) {
         const formatted = formatCell(colName, cell);
