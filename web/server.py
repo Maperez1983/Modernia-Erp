@@ -577,6 +577,16 @@ def resolve_seguro_contabilidad_link(conn, seguro_id):
     return poliza_numero, cliente_id
 
 
+def seguros_contabilidad_where_clause(alias="gc"):
+    p = alias.strip() or "gc"
+    return (
+        f"(({p}.seguro_id IS NOT NULL AND TRIM({p}.seguro_id) <> '') "
+        f"OR UPPER(COALESCE({p}.notas, '')) LIKE 'AUTO CRM SEGUROS%' "
+        f"OR UPPER(COALESCE({p}.notas, '')) LIKE '[SEGUROS]%' "
+        f"OR UPPER(TRIM(COALESCE({p}.gestion, ''))) IN ('COMISION EMISION', 'COMISION RENOVACION', 'REGULARIZACION', 'EXTORNO'))"
+    )
+
+
 def find_existing_seguro_id(conn, empresa_id, poliza_numero, compania, exclude_id=None):
     poliza_norm = normalize_poliza_key(poliza_numero)
     if not poliza_norm:
@@ -13162,16 +13172,7 @@ class Handler(BaseHTTPRequestHandler):
             where = ["gc.empresa_id = ?"]
             values = [empresa_id]
             if seguros_only:
-                where.append(
-                    """
-                    (
-                      (gc.seguro_id IS NOT NULL AND TRIM(gc.seguro_id) <> '')
-                      OR UPPER(COALESCE(gc.notas, '')) LIKE 'AUTO CRM SEGUROS%'
-                      OR UPPER(COALESCE(gc.notas, '')) LIKE '[SEGUROS]%'
-                      OR UPPER(TRIM(COALESCE(gc.gestion, ''))) IN ('COMISION EMISION', 'COMISION RENOVACION', 'REGULARIZACION', 'EXTORNO')
-                    )
-                    """
-                )
+                where.append(seguros_contabilidad_where_clause("gc"))
             if q:
                 where.append("(gc.concepto LIKE ? OR c.nombre LIKE ?)")
                 values.extend([f"%{q}%", f"%{q}%"])
@@ -14592,24 +14593,38 @@ class Handler(BaseHTTPRequestHandler):
 
             facturacion_year = conn.execute(
                 f"""
-                SELECT COALESCE(SUM(COALESCE(comision, 0)), 0) AS total
-                FROM seguros
-                WHERE empresa_id = ?
-                  AND ({uploaded_clause} OR ? = 0)
-                  AND {year_expr} = ?
-                  AND {exclude_sin_seguro}
+                SELECT COALESCE(
+                  SUM(
+                    CASE
+                      WHEN LOWER(TRIM(COALESCE(gc.tipo, ''))) = 'gasto' THEN 0
+                      ELSE COALESCE(gc.importe, 0)
+                    END
+                  ),
+                  0
+                ) AS total
+                FROM gestoria_contabilidad gc
+                WHERE gc.empresa_id = ?
+                  AND {seguros_contabilidad_where_clause("gc")}
+                  AND STRFTIME('%Y', gc.fecha) = ?
                 """,
-                (empresa_id, 1 if uploaded_only else 0, year),
+                (empresa_id, year),
             ).fetchone()
             facturacion_total = conn.execute(
                 f"""
-                SELECT COALESCE(SUM(COALESCE(comision, 0)), 0) AS total
-                FROM seguros
-                WHERE empresa_id = ?
-                  AND ({uploaded_clause} OR ? = 0)
-                  AND {exclude_sin_seguro}
+                SELECT COALESCE(
+                  SUM(
+                    CASE
+                      WHEN LOWER(TRIM(COALESCE(gc.tipo, ''))) = 'gasto' THEN 0
+                      ELSE COALESCE(gc.importe, 0)
+                    END
+                  ),
+                  0
+                ) AS total
+                FROM gestoria_contabilidad gc
+                WHERE gc.empresa_id = ?
+                  AND {seguros_contabilidad_where_clause("gc")}
                 """,
-                (empresa_id, 1 if uploaded_only else 0),
+                (empresa_id,),
             ).fetchone()
             gastos_year = conn.execute(
                 """
@@ -14799,13 +14814,20 @@ class Handler(BaseHTTPRequestHandler):
             ).fetchone()
             facturacion = conn.execute(
                 f"""
-                SELECT COALESCE(SUM(COALESCE(comision, 0)), 0) AS total
-                FROM seguros
-                WHERE empresa_id = ?
-                  AND ({uploaded_clause} OR ? = 0)
-                  AND {exclude_sin_seguro}
+                SELECT COALESCE(
+                  SUM(
+                    CASE
+                      WHEN LOWER(TRIM(COALESCE(gc.tipo, ''))) = 'gasto' THEN 0
+                      ELSE COALESCE(gc.importe, 0)
+                    END
+                  ),
+                  0
+                ) AS total
+                FROM gestoria_contabilidad gc
+                WHERE gc.empresa_id = ?
+                  AND {seguros_contabilidad_where_clause("gc")}
                 """,
-                (empresa_id, 1 if uploaded_only else 0),
+                (empresa_id,),
             ).fetchone()
             gastos = conn.execute(
                 """
