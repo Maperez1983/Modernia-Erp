@@ -52,6 +52,7 @@ class SegurosContabilidadTests(unittest.TestCase):
             "poliza_numero": "POL-001",
             "fecha_efecto": "2026-01-15",
             "comision": 120.5,
+            "estado": "En vigor",
         }
 
     def tearDown(self):
@@ -115,6 +116,13 @@ class SegurosContabilidadTests(unittest.TestCase):
         poliza_numero, cliente_id = resolve_seguro_contabilidad_link(self.conn, "s1")
         self.assertEqual(poliza_numero, "POL-001")
         self.assertEqual(cliente_id, "c1")
+
+    def test_emision_commission_not_created_until_policy_in_force(self):
+        self.seguro["estado"] = "Presupuesto"
+        record_id = upsert_seguro_comision_contabilidad(self.conn, self.seguro, self.now, movimiento="emision")
+        self.assertIsNone(record_id)
+        count = self.conn.execute("SELECT COUNT(*) AS n FROM gestoria_contabilidad").fetchone()["n"]
+        self.assertEqual(count, 0)
 
     def test_compute_seguros_contabilidad_totals_parses_text_amounts_and_accents(self):
         self.conn.execute(

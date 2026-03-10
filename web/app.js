@@ -1004,7 +1004,7 @@ const runClienteSegurosDocOcr = async (row, statusEl, buttonEl) => {
           empresa_nombre: FINCAS_COMPANY,
           cliente_id: payloadBase.cliente_id,
           mes_creacion: mesCreacion,
-          estado: "En vigor",
+          estado: "Contratada",
           tomador: payloadBase.tomador,
           compania: payloadBase.compania,
           ramo: payloadBase.ramo,
@@ -12394,20 +12394,16 @@ const renderSegurosPresupuestos = (data) => {
     });
     const convertBtn = document.createElement("button");
     convertBtn.type = "button";
-    convertBtn.textContent = "Convertir a póliza";
+    convertBtn.textContent = "Pasar a contratada";
     convertBtn.addEventListener("click", () => {
-      const ok = window.confirm("¿Confirmas convertir este presupuesto en póliza?");
+      const ok = window.confirm("¿Confirmas convertir este presupuesto a contratada?");
       if (!ok) return;
-      const today = formatAgendaDate(new Date());
       const payload = {
-        empresa_nombre: FINCAS_COMPANY,
         id: row[idIndex],
-        estado: "En vigor",
-        fecha_efecto: row[columns.indexOf("fecha_efecto")] || today,
+        accion: "contratar",
+        fecha: row[columns.indexOf("fecha_efecto")] || formatAgendaDate(new Date()),
       };
-      const efecto = payload.fecha_efecto || today;
-      payload.fecha_vencimiento = addOneYear(efecto);
-      fetch("/api/seguros_update", {
+      fetch("/api/seguros_poliza_accion", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -12800,7 +12796,7 @@ const resetSegurosOcrAggregator = (options = {}) => {
   clearValue(seguroOcrPrimaNeta);
   clearValue(seguroOcrPrimaTotal);
   clearValue(seguroOcrColaborador);
-  if (seguroOcrEstado) seguroOcrEstado.value = "En vigor";
+  if (seguroOcrEstado) seguroOcrEstado.value = "Presupuesto";
   if (seguroOcrProduccion) seguroOcrProduccion.value = "Nueva producción";
   if (segurosOcrFile) segurosOcrFile.value = "";
   if (typeof segurosOcrPreviewUrl !== "undefined" && segurosOcrPreviewUrl) {
@@ -16516,6 +16512,7 @@ const openClienteSeguroDetail = (row, cliente = {}, options = {}) => {
 
     const actionSelect = document.createElement("select");
     actionSelect.innerHTML = `
+      <option value="contratar">Contratar</option>
       <option value="activar">Activar (entrada en vigor)</option>
       <option value="renovar">Renovar</option>
       <option value="cambiar_compania">Cambiar compañía</option>
@@ -16575,7 +16572,7 @@ const openClienteSeguroDetail = (row, cliente = {}, options = {}) => {
         "hidden",
         !(mode === "anular" && anulaReasonSelect.value === "otros")
       );
-      if (mode === "activar") {
+      if (mode === "contratar" || mode === "activar") {
         refInput.classList.add("hidden");
       } else if (mode === "renovar") {
         refInput.placeholder = "Nueva póliza (opcional)";
@@ -16593,7 +16590,11 @@ const openClienteSeguroDetail = (row, cliente = {}, options = {}) => {
       const payload = { id: row.id, empresa_nombre: FINCAS_COMPANY };
       const today = new Date().toISOString().slice(0, 10);
       let endpoint = "/api/seguros_update";
-      if (mode === "activar") {
+      if (mode === "contratar") {
+        endpoint = "/api/seguros_poliza_accion";
+        payload.accion = "contratar";
+        payload.fecha = row.fecha_efecto || today;
+      } else if (mode === "activar") {
         endpoint = "/api/seguros_poliza_accion";
         payload.accion = "activar";
         payload.fecha = today;
@@ -19017,7 +19018,7 @@ if (segurosOcrButton) {
             if (data.doc_type === "presupuesto") {
               seguroOcrEstado.value = "Presupuesto";
             } else if (data.doc_type === "poliza") {
-              seguroOcrEstado.value = "En vigor";
+              seguroOcrEstado.value = "Contratada";
             }
           }
       })
@@ -19133,7 +19134,7 @@ if (segurosOcrSave) {
         empresa_nombre: FINCAS_COMPANY,
         id: recordId,
         cliente_id: state.segurosOcrClienteId || "",
-        estado: "En vigor",
+        estado: "Contratada",
         tomador: seguroOcrTomador ? seguroOcrTomador.value.trim() : "",
         nif: seguroOcrDni ? seguroOcrDni.value.trim() : "",
         telefono: seguroOcrTelefono ? seguroOcrTelefono.value.trim() : "",

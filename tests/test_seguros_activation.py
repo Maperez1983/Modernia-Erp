@@ -1,7 +1,7 @@
 import sqlite3
 import unittest
 
-from web.server import seguros_sync_activation_action
+from web.server import can_transition_seguro_estado, seguros_sync_activation_action
 
 
 class SegurosActivationActionTests(unittest.TestCase):
@@ -77,6 +77,11 @@ class SegurosActivationActionTests(unittest.TestCase):
         seguros_sync_activation_action(self.conn, row, self.now)
         action = self.conn.execute("SELECT estado FROM acciones WHERE id = 'a1'").fetchone()
         self.assertEqual(action["estado"], "Hecho")
+
+    def test_estado_transition_flow(self):
+        self.assertTrue(can_transition_seguro_estado("Presupuesto", "Contratada"))
+        self.assertTrue(can_transition_seguro_estado("Contratada", "En vigor"))
+        self.assertFalse(can_transition_seguro_estado("Presupuesto", "En vigor"))
 
 
 if __name__ == "__main__":

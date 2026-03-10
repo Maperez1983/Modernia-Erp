@@ -470,6 +470,39 @@ def log_seguro_event(conn, seguro_row, event_type, now, motivo="", payload=None)
     )
 
 
+def normalize_seguro_estado_value(value):
+    key = normalize_lookup_text(value)
+    if not key:
+        return ""
+    if key in ("PRESUPUESTO",):
+        return "Presupuesto"
+    if key in ("PROYECTO", "PENDIENTE"):
+        return "Presupuesto"
+    if key in ("CONTRATADA", "CONTRATADO"):
+        return "Contratada"
+    if key in ("EN VIGOR", "ENVIGOR", "VIGENTE", "ACTIVA", "ACTIVO"):
+        return "En vigor"
+    if key in ("ANULADA", "ANULADO", "BAJA", "CANCELADA", "CANCELADO"):
+        return "Anulada"
+    return str(value or "").strip()
+
+
+def can_transition_seguro_estado(current_value, target_value):
+    current = normalize_seguro_estado_value(current_value)
+    target = normalize_seguro_estado_value(target_value)
+    if not target:
+        return True
+    if not current or current == target:
+        return True
+    allowed = {
+        "Presupuesto": {"Contratada", "Anulada"},
+        "Contratada": {"En vigor", "Anulada"},
+        "En vigor": {"Anulada"},
+        "Anulada": set(),
+    }
+    return target in allowed.get(current, set())
+
+
 def upsert_seguro_comision_contabilidad(conn, seguro_row, now, movimiento="emision", fecha=None, importe=None):
     if not seguro_row:
         return None
@@ -496,6 +529,12 @@ def upsert_seguro_comision_contabilidad(conn, seguro_row, now, movimiento="emisi
     if not fecha_iso:
         return None
     is_renovacion = normalize_lookup_text(movimiento) in ("RENOVACION", "RENOVAR", "RENEW")
+    if not is_renovacion:
+        estado = normalize_seguro_estado_value(
+            seguro_row.get("estado") if isinstance(seguro_row, dict) else seguro_row["estado"]
+        )
+        if estado != "En vigor":
+            return None
     gestion = "Comisión renovación" if is_renovacion else "Comisión emisión"
     concepto = "Comisión renovación póliza" if is_renovacion else "Comisión emisión póliza"
     if poliza_numero:
@@ -9451,6 +9490,10 @@ class Handler(BaseHTTPRequestHandler):
                     os.unlink(tmp_path)
         elif parsed.path == "/api/seguros":
             poliza_id = os.urandom(16).hex()
+            estado_incoming = normalize_seguro_estado_value(payload.get("estado") or "Presupuesto")
+            if estado_incoming == "En vigor":
+                # Flujo operativo: presupuesto -> contratada -> en vigor.
+                estado_incoming = "Contratada"
             cliente_id = payload.get("cliente_id")
             if cliente_id:
                 exists = conn.execute(
@@ -9540,6 +9583,15 @@ class Handler(BaseHTTPRequestHandler):
                     if current is None or str(current).strip() == "":
                         updates[key] = incoming
                 if updates:
+                    if "estado" in updates:
+                        updates["estado"] = normalize_seguro_estado_value(updates.get("estado"))
+                        if not can_transition_seguro_estado(row["estado"], updates["estado"]):
+                            json_response(
+                                self,
+                                {"error": f"Transición de estado no permitida: {row['estado'] or '-'} -> {updates['estado']}"},
+                                status=400,
+                            )
+                            return
                     set_clause = ", ".join([f"{key} = ?" for key in updates])
                     values = list(updates.values()) + [now, dup_id]
                     conn.execute(
@@ -9580,7 +9632,7 @@ class Handler(BaseHTTPRequestHandler):
                         payload.get("comision"),
                         payload.get("produccion"),
                         payload.get("colaborador"),
-                        payload.get("estado"),
+                        estado_incoming,
                         payload.get("estado_renovacion"),
                         payload.get("renovacion_fecha"),
                         payload.get("nueva_poliza_ref"),
@@ -10126,6 +10178,18 @@ class Handler(BaseHTTPRequestHandler):
                     updates[key] = payload.get(key)
             if "ramo" in updates:
                 updates["ramo"] = canonicalize_ramo(updates.get("ramo"))
+            if "estado" in updates:
+                updates["estado"] = normalize_seguro_estado_value(updates.get("estado"))
+                if not can_transition_seguro_estado(current_row["estado"], updates["estado"]):
+                    json_response(
+                        self,
+                        {
+                            "error": f"Transición de estado no permitida: {current_row['estado'] or '-'} -> {updates['estado']}",
+                            "allowed_flow": "Presupuesto -> Contratada -> En vigor",
+                        },
+                        status=400,
+                    )
+                    return
             if "tipo_vigencia" in updates or "ramo" in updates:
                 updates["tipo_vigencia"] = infer_tipo_vigencia(
                     updates.get("ramo", current_row["ramo"]),
@@ -10414,7 +10478,46 @@ class Handler(BaseHTTPRequestHandler):
             if not row:
                 json_response(self, {"error": "Registro no encontrado"}, status=404)
                 return
+            if action in ("CONTRATAR", "CONTRATADA", "CONVERTIR CONTRATADA", "CONVERTIR A CONTRATADA"):
+                if not can_transition_seguro_estado(row["estado"], "Contratada"):
+                    json_response(
+                        self,
+                        {
+                            "error": f"Transición de estado no permitida: {row['estado'] or '-'} -> Contratada",
+                            "allowed_flow": "Presupuesto -> Contratada -> En vigor",
+                        },
+                        status=400,
+                    )
+                    return
+                conn.execute(
+                    """
+                    UPDATE seguros
+                    SET estado = 'Contratada',
+                        estado_poliza = 'activa',
+                        estado_renovacion = COALESCE(NULLIF(estado_renovacion, ''), 'Pendiente entrada vigor'),
+                        updated_at = datetime(?)
+                    WHERE id = ?
+                    """,
+                    (now, record_id),
+                )
+                row = conn.execute("SELECT * FROM seguros WHERE id = ?", (record_id,)).fetchone()
+                seguros_sync_activation_action(conn, row, now)
+                log_seguro_event(conn, row, "contratada", now)
+                json_response(self, {"ok": True, "id": record_id, "accion": "contratar"})
+                conn.commit()
+                return
             if action in ("ACTIVAR", "ENTRADA VIGOR", "ENTRADA_EN_VIGOR", "PASAR EN VIGOR", "PASAR A EN VIGOR"):
+                current_state = normalize_seguro_estado_value(row["estado"])
+                if current_state not in ("Contratada", "En vigor"):
+                    json_response(
+                        self,
+                        {
+                            "error": f"Solo se puede activar una póliza en estado Contratada (actual: {row['estado'] or '-'})",
+                            "allowed_flow": "Presupuesto -> Contratada -> En vigor",
+                        },
+                        status=400,
+                    )
+                    return
                 fecha_activacion = (payload.get("fecha_activacion") or payload.get("fecha") or now[:10]).strip()
                 conn.execute(
                     """
