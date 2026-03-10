@@ -19,6 +19,7 @@ class SegurosContabilidadTests(unittest.TestCase):
               id TEXT PRIMARY KEY,
               empresa_id TEXT,
               cliente_id TEXT,
+              cliente_ids_json TEXT,
               seguro_id TEXT,
               poliza_numero TEXT,
               fecha TEXT,
@@ -64,6 +65,7 @@ class SegurosContabilidadTests(unittest.TestCase):
         self.assertEqual(row["gestion"], "Comisión emisión")
         self.assertEqual(row["tipo"], "Ingreso")
         self.assertAlmostEqual(float(row["importe"] or 0), 150.0, places=2)
+        self.assertEqual(row["cliente_ids_json"], '["c1"]')
 
         total = self.conn.execute("SELECT COUNT(*) AS n FROM gestoria_contabilidad").fetchone()["n"]
         self.assertEqual(total, 1)

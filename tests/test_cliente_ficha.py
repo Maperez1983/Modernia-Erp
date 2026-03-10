@@ -129,6 +129,7 @@ class ClienteFichaTests(unittest.TestCase):
               id TEXT PRIMARY KEY,
               empresa_id TEXT,
               cliente_id TEXT,
+              cliente_ids_json TEXT,
               fecha TEXT,
               concepto TEXT,
               gestion TEXT,
@@ -211,6 +212,30 @@ class ClienteFichaTests(unittest.TestCase):
         self.assertEqual(first_id, second_id)
         count = self.conn.execute("SELECT COUNT(*) AS n FROM gestoria_docs WHERE referencia_id='s1'").fetchone()["n"]
         self.assertEqual(count, 1)
+
+    def test_build_cliente_ficha_payload_splits_multi_client_accounting_entry(self):
+        now = datetime.now(timezone.utc).isoformat()
+        self.conn.execute(
+            """
+            INSERT INTO clientes (id, nombre, estado, created_at, updated_at)
+            VALUES ('c2', 'SEGUNDO CLIENTE', 'Activo', ?, ?)
+            """,
+            (now, now),
+        )
+        self.conn.execute(
+            """
+            INSERT INTO gestoria_contabilidad
+            (id, empresa_id, cliente_id, cliente_ids_json, fecha, concepto, tipo, importe, created_at, updated_at)
+            VALUES ('gc2', 'e1', 'c1', '["c1","c2"]', '2026-02-01', 'Liquidación mensual', 'Ingreso', 200.0, ?, ?)
+            """,
+            (now, now),
+        )
+        self.conn.commit()
+        payload = build_cliente_ficha_payload(self.conn, "c1")
+        facturas = payload.get("facturas") or []
+        liquidacion = next((row for row in facturas if row.get("id") == "gc2"), None)
+        self.assertIsNotNone(liquidacion)
+        self.assertAlmostEqual(float(liquidacion.get("importe_asignado") or 0), 100.0, places=2)
 
 
 if __name__ == "__main__":

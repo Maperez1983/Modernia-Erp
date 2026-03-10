@@ -1549,6 +1549,7 @@ const segurosComisionesSearch = document.getElementById("segurosComisionesSearch
 const segurosContabilidadForm = document.getElementById("segurosContabilidadForm");
 const segurosContabilidadStatus = document.getElementById("segurosContabilidadStatus");
 const segurosContabilidadCliente = document.getElementById("segurosContabilidadCliente");
+const segurosContabilidadClientesMulti = document.getElementById("segurosContabilidadClientesMulti");
 const segurosContabilidadPoliza = document.getElementById("segurosContabilidadPoliza");
 const segurosContabilidadSearch = document.getElementById("segurosContabilidadSearch");
 const segurosContabilidadTable = document.getElementById("segurosContabilidadTable");
@@ -6403,13 +6404,64 @@ const populateSegurosContabilidadClientesSelect = async (selectEl, selectedId = 
   if (!selectEl) return;
   const clientes = await loadClientesForSegurosContabilidad();
   selectEl.innerHTML = "";
-  selectEl.appendChild(createOption("", "Selecciona cliente"));
+  if (!selectEl.multiple) {
+    selectEl.appendChild(createOption("", "Selecciona cliente"));
+  }
   clientes.forEach((cliente) => {
     selectEl.appendChild(createOption(cliente.id, formatNombreCliente(cliente.nombre)));
   });
-  if (selectedId) {
+  if (selectedId && !selectEl.multiple) {
     selectEl.value = selectedId;
   }
+};
+
+const parseGestoriaContaClienteIds = (raw, fallback = "") => {
+  let items = [];
+  if (Array.isArray(raw)) {
+    items = raw;
+  } else if (typeof raw === "string") {
+    const text = raw.trim();
+    if (text) {
+      if (text.startsWith("[")) {
+        try {
+          const parsed = JSON.parse(text);
+          items = Array.isArray(parsed) ? parsed : [parsed];
+        } catch (_err) {
+          items = text.split(",");
+        }
+      } else {
+        items = text.split(",");
+      }
+    }
+  } else if (raw) {
+    items = [raw];
+  }
+  const out = [];
+  items.forEach((item) => {
+    const value = String(item || "").trim();
+    if (value && !out.includes(value)) out.push(value);
+  });
+  const fallbackValue = String(fallback || "").trim();
+  if (!out.length && fallbackValue) out.push(fallbackValue);
+  return out;
+};
+
+const setSelectMultipleValues = (selectEl, values = []) => {
+  if (!selectEl) return;
+  const wanted = new Set((values || []).map((v) => String(v || "").trim()).filter(Boolean));
+  Array.from(selectEl.options || []).forEach((option) => {
+    option.selected = wanted.has(String(option.value || "").trim());
+  });
+};
+
+const gestoriaContaRowForCliente = (row, clienteId) => {
+  const wanted = String(clienteId || "").trim();
+  if (!wanted || !row) return null;
+  const assigned = parseGestoriaContaClienteIds(row.cliente_ids_json, row.cliente_id);
+  if (!assigned.includes(wanted)) return null;
+  const importe = parseMoneyValue(row.importe);
+  const importeAsignado = assigned.length > 1 ? importe / assigned.length : importe;
+  return { ...row, importe_asignado: Math.round(importeAsignado * 100) / 100, cliente_ids: assigned };
 };
 
 const fillGestoriaContabilidadPolizaSelect = async (selectEl, clienteId, selectedSeguroId = "") => {
@@ -6450,6 +6502,17 @@ const hydrateSegurosContabilidadFormSelects = async () => {
     segurosContabilidadCliente.value || "",
     segurosContabilidadPoliza.value || ""
   );
+  if (segurosContabilidadClientesMulti) {
+    const selected = parseGestoriaContaClienteIds(
+      Array.from(segurosContabilidadClientesMulti.selectedOptions || []).map((opt) => opt.value),
+      segurosContabilidadCliente.value || ""
+    );
+    await populateSegurosContabilidadClientesSelect(
+      segurosContabilidadClientesMulti,
+      selected[0] || ""
+    );
+    setSelectMultipleValues(segurosContabilidadClientesMulti, selected);
+  }
 };
 
 const ensureSelectedPolizaOption = (selectEl, seguroId, polizaNumero = "") => {
@@ -6478,7 +6541,7 @@ const loadGestoriaContabilidad = () => {
     const clienteIds = [
       ...new Set(
         rows
-          .map((row) => String(row.cliente_id || "").trim())
+          .flatMap((row) => parseGestoriaContaClienteIds(row.cliente_ids_json, row.cliente_id))
           .filter(Boolean)
       ),
     ];
@@ -6573,7 +6636,9 @@ const loadGestoriaContabilidad = () => {
       const polizaTd = document.createElement("td");
       const polizaSelect = document.createElement("select");
       polizaSelect.classList.add("inline-input");
-      await fillGestoriaContabilidadPolizaSelect(polizaSelect, row.cliente_id, row.seguro_id);
+      const rowClienteIds = parseGestoriaContaClienteIds(row.cliente_ids_json, row.cliente_id);
+      const primaryClienteId = rowClienteIds[0] || "";
+      await fillGestoriaContabilidadPolizaSelect(polizaSelect, primaryClienteId, row.seguro_id);
       ensureSelectedPolizaOption(polizaSelect, row.seguro_id, row.poliza_numero);
       polizaSelect.addEventListener("change", () => {
         saveGestoriaContabilidadField(row.id, "seguro_id", polizaSelect.value || "");
@@ -6584,18 +6649,37 @@ const loadGestoriaContabilidad = () => {
       const clienteSelect = document.createElement("select");
       clienteSelect.classList.add("inline-input");
       clienteSelect.appendChild(createOption("", "-"));
+      const clientesMulti = document.createElement("select");
+      clientesMulti.classList.add("inline-input");
+      clientesMulti.multiple = true;
+      clientesMulti.size = 3;
       const clientes = await loadClientesForSegurosContabilidad();
       clientes.forEach((cliente) => {
-        clienteSelect.appendChild(
-          createOption(cliente.id, formatNombreCliente(cliente.nombre))
-        );
+        const label = formatNombreCliente(cliente.nombre);
+        clienteSelect.appendChild(createOption(cliente.id, label));
+        clientesMulti.appendChild(createOption(cliente.id, label));
       });
-      clienteSelect.value = row.cliente_id || "";
-      clienteSelect.addEventListener("change", () => {
-        saveGestoriaContabilidadField(row.id, "cliente_id", clienteSelect.value);
+      clienteSelect.value = primaryClienteId;
+      setSelectMultipleValues(clientesMulti, rowClienteIds);
+      const persistClientes = () => {
+        const selected = parseGestoriaContaClienteIds(
+          Array.from(clientesMulti.selectedOptions || []).map((opt) => opt.value),
+          clienteSelect.value
+        );
+        clienteSelect.value = selected[0] || "";
+        saveGestoriaContabilidadField(row.id, "cliente_ids_json", selected);
         fillGestoriaContabilidadPolizaSelect(polizaSelect, clienteSelect.value, "");
+      };
+      clienteSelect.addEventListener("change", () => {
+        const current = parseGestoriaContaClienteIds(
+          Array.from(clientesMulti.selectedOptions || []).map((opt) => opt.value)
+        ).filter((value) => value !== clienteSelect.value);
+        setSelectMultipleValues(clientesMulti, clienteSelect.value ? [clienteSelect.value, ...current] : current);
+        persistClientes();
       });
       clienteTd.appendChild(clienteSelect);
+      clienteTd.appendChild(clientesMulti);
+      clientesMulti.addEventListener("change", persistClientes);
       tr.appendChild(clienteTd);
       const notasTd = document.createElement("td");
       notasTd.appendChild(buildInput(row.notas, "notas"));
@@ -6642,7 +6726,7 @@ const loadSegurosContabilidad = () => {
     const clienteIds = [
       ...new Set(
         rows
-          .map((row) => String(row.cliente_id || "").trim())
+          .flatMap((row) => parseGestoriaContaClienteIds(row.cliente_ids_json, row.cliente_id))
           .filter(Boolean)
       ),
     ];
@@ -6724,7 +6808,9 @@ const loadSegurosContabilidad = () => {
       const polizaTd = document.createElement("td");
       const polizaSelect = document.createElement("select");
       polizaSelect.classList.add("inline-input");
-      await fillGestoriaContabilidadPolizaSelect(polizaSelect, row.cliente_id, row.seguro_id);
+      const rowClienteIds = parseGestoriaContaClienteIds(row.cliente_ids_json, row.cliente_id);
+      const primaryClienteId = rowClienteIds[0] || "";
+      await fillGestoriaContabilidadPolizaSelect(polizaSelect, primaryClienteId, row.seguro_id);
       ensureSelectedPolizaOption(polizaSelect, row.seguro_id, row.poliza_numero);
       polizaSelect.addEventListener("change", () => {
         saveGestoriaContabilidadField(row.id, "seguro_id", polizaSelect.value || "");
@@ -6735,16 +6821,37 @@ const loadSegurosContabilidad = () => {
       const clienteSelect = document.createElement("select");
       clienteSelect.classList.add("inline-input");
       clienteSelect.appendChild(createOption("", "-"));
+      const clientesMulti = document.createElement("select");
+      clientesMulti.classList.add("inline-input");
+      clientesMulti.multiple = true;
+      clientesMulti.size = 3;
       const clientes = await loadClientesForSegurosContabilidad();
       clientes.forEach((cliente) => {
-        clienteSelect.appendChild(createOption(cliente.id, formatNombreCliente(cliente.nombre)));
+        const label = formatNombreCliente(cliente.nombre);
+        clienteSelect.appendChild(createOption(cliente.id, label));
+        clientesMulti.appendChild(createOption(cliente.id, label));
       });
-      clienteSelect.value = row.cliente_id || "";
-      clienteSelect.addEventListener("change", () => {
-        saveGestoriaContabilidadField(row.id, "cliente_id", clienteSelect.value);
+      clienteSelect.value = primaryClienteId;
+      setSelectMultipleValues(clientesMulti, rowClienteIds);
+      const persistClientes = () => {
+        const selected = parseGestoriaContaClienteIds(
+          Array.from(clientesMulti.selectedOptions || []).map((opt) => opt.value),
+          clienteSelect.value
+        );
+        clienteSelect.value = selected[0] || "";
+        saveGestoriaContabilidadField(row.id, "cliente_ids_json", selected);
         fillGestoriaContabilidadPolizaSelect(polizaSelect, clienteSelect.value, "");
+      };
+      clienteSelect.addEventListener("change", () => {
+        const current = parseGestoriaContaClienteIds(
+          Array.from(clientesMulti.selectedOptions || []).map((opt) => opt.value)
+        ).filter((value) => value !== clienteSelect.value);
+        setSelectMultipleValues(clientesMulti, clienteSelect.value ? [clienteSelect.value, ...current] : current);
+        persistClientes();
       });
       clienteTd.appendChild(clienteSelect);
+      clienteTd.appendChild(clientesMulti);
+      clientesMulti.addEventListener("change", persistClientes);
       tr.appendChild(clienteTd);
       const notasTd = document.createElement("td");
       notasTd.appendChild(buildInput(row.notas, "notas"));
@@ -15385,7 +15492,8 @@ const loadClienteMiniDashboard = async (clienteId, empresas = [], prefetched = n
     const acciones = accionesGroups.flatMap((payload) => payload.rows || []);
     const movimientos = contaGroups
       .flatMap((payload) => payload.rows || [])
-      .filter((row) => String(row.cliente_id || "") === String(clienteId));
+      .map((row) => gestoriaContaRowForCliente(row, clienteId))
+      .filter(Boolean);
     const finComisiones = !clienteNameKey ? 0 : finGroups.reduce((sum, payload) => {
       const cols = payload.columns || [];
       const rows = payload.rows || [];
@@ -15421,7 +15529,7 @@ const loadClienteMiniDashboard = async (clienteId, empresas = [], prefetched = n
         const tipo = normalizeSimple(row.tipo || "");
         return tipo !== "gasto";
       })
-      .reduce((sum, row) => sum + parseMoneyValue(row.importe), 0);
+      .reduce((sum, row) => sum + parseMoneyValue(row.importe_asignado), 0);
     // Rentabilidad sin primas: primas se muestran aparte como KPI de cartera.
     const realizadoTotal = realizado + finComisiones + inmoComisiones;
     const cobradoTotal = cobrado + finComisiones + inmoComisiones;
@@ -15521,7 +15629,9 @@ const loadClienteFacturasServicios = async (clienteId, empresas = [], prefetched
     return;
   }
   if (Array.isArray(prefetchedRows)) {
-    const rows = [...prefetchedRows].sort((a, b) => String(b.fecha || "").localeCompare(String(a.fecha || "")));
+    const rows = [...prefetchedRows]
+      .map((row) => gestoriaContaRowForCliente(row, clienteId) || row)
+      .sort((a, b) => String(b.fecha || "").localeCompare(String(a.fecha || "")));
     if (!rows.length) {
       clienteFacturas.innerHTML = "<p class='muted'>Sin facturas registradas.</p>";
       return;
@@ -15543,7 +15653,9 @@ const loadClienteFacturasServicios = async (clienteId, empresas = [], prefetched
         row.fecha || "-",
         row.concepto || "-",
         row.tipo || "-",
-        row.importe ? euroFormatter.format(parseMoneyValue(row.importe)) : "-",
+        parseMoneyValue(row.importe_asignado ?? row.importe)
+          ? euroFormatter.format(parseMoneyValue(row.importe_asignado ?? row.importe))
+          : "-",
         row.notas || "-",
       ];
       values.forEach((value) => {
@@ -15574,7 +15686,8 @@ const loadClienteFacturasServicios = async (clienteId, empresas = [], prefetched
   );
   const rows = payloads
     .flatMap((item) => item.rows || [])
-    .filter((row) => String(row.cliente_id || "") === String(clienteId))
+    .map((row) => gestoriaContaRowForCliente(row, clienteId))
+    .filter(Boolean)
     .sort((a, b) => String(b.fecha || "").localeCompare(String(a.fecha || "")));
   if (!rows.length) {
     clienteFacturas.innerHTML = "<p class='muted'>Sin facturas registradas.</p>";
@@ -15597,7 +15710,9 @@ const loadClienteFacturasServicios = async (clienteId, empresas = [], prefetched
       row.fecha || "-",
       row.concepto || "-",
       row.tipo || "-",
-      row.importe ? euroFormatter.format(parseMoneyValue(row.importe)) : "-",
+      parseMoneyValue(row.importe_asignado ?? row.importe)
+        ? euroFormatter.format(parseMoneyValue(row.importe_asignado ?? row.importe))
+        : "-",
       row.notas || "-",
     ];
     values.forEach((value) => {
@@ -17590,6 +17705,9 @@ const init = async () => {
     populateAgendaClientes(finCrmClientes, finCrmClienteInput, finCrmClienteId);
     populateClientesSelect(gestoriaContabilidadCliente);
     populateClientesSelect(segurosContabilidadCliente);
+    if (segurosContabilidadClientesMulti) {
+      populateSegurosContabilidadClientesSelect(segurosContabilidadClientesMulti);
+    }
     populateServiciosSelect(clientesServicioSelect);
     refreshClientesAltaSelects();
     initFinSimulator();
@@ -18520,6 +18638,12 @@ if (segurosComisionesForm) {
 if (segurosContabilidadForm) {
   if (segurosContabilidadCliente && segurosContabilidadPoliza) {
     segurosContabilidadCliente.addEventListener("change", () => {
+      if (segurosContabilidadClientesMulti) {
+        setSelectMultipleValues(
+          segurosContabilidadClientesMulti,
+          segurosContabilidadCliente.value ? [segurosContabilidadCliente.value] : []
+        );
+      }
       segurosContabilidadAllCache = null;
       fillGestoriaContabilidadPolizaSelect(
         segurosContabilidadPoliza,
@@ -18527,6 +18651,20 @@ if (segurosContabilidadForm) {
         ""
       );
     });
+    if (segurosContabilidadClientesMulti) {
+      segurosContabilidadClientesMulti.addEventListener("change", () => {
+        const selected = parseGestoriaContaClienteIds(
+          Array.from(segurosContabilidadClientesMulti.selectedOptions || []).map((opt) => opt.value)
+        );
+        segurosContabilidadCliente.value = selected[0] || "";
+        segurosContabilidadAllCache = null;
+        fillGestoriaContabilidadPolizaSelect(
+          segurosContabilidadPoliza,
+          segurosContabilidadCliente.value,
+          ""
+        );
+      });
+    }
   }
   segurosContabilidadForm.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -18535,6 +18673,14 @@ if (segurosContabilidadForm) {
     }
     const formData = new FormData(segurosContabilidadForm);
     const payload = Object.fromEntries(formData.entries());
+    if (segurosContabilidadClientesMulti) {
+      const selected = parseGestoriaContaClienteIds(
+        Array.from(segurosContabilidadClientesMulti.selectedOptions || []).map((opt) => opt.value),
+        payload.cliente_id || ""
+      );
+      payload.cliente_ids_json = selected;
+      payload.cliente_id = selected[0] || payload.cliente_id || "";
+    }
     payload.empresa_nombre = FINCAS_COMPANY;
     const rawNotas = String(payload.notas || "").trim();
     if (!/^(\[SEGUROS\]|Auto CRM Seguros)/i.test(rawNotas)) {
@@ -20312,6 +20458,9 @@ if (userSelect) {
       populateAgendaClientes(finCrmClientes, finCrmClienteInput, finCrmClienteId);
       populateClientesSelect(gestoriaContabilidadCliente);
       populateClientesSelect(segurosContabilidadCliente);
+      if (segurosContabilidadClientesMulti) {
+        populateSegurosContabilidadClientesSelect(segurosContabilidadClientesMulti);
+      }
       refreshClientesAltaSelects();
     });
     if (state.currentModule === "clientes") {

@@ -196,6 +196,7 @@ CREATE TABLE IF NOT EXISTS gestoria_contabilidad (
   tipo TEXT,
   importe REAL,
   notas TEXT,
+  cliente_ids_json TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   FOREIGN KEY (cliente_id) REFERENCES clientes(id),

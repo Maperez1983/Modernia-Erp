@@ -478,6 +478,7 @@ def upsert_seguro_comision_contabilidad(conn, seguro_row, now, movimiento="emisi
     if not seguro_id or not empresa_id:
         return None
     cliente_id = (seguro_row.get("cliente_id") if isinstance(seguro_row, dict) else seguro_row["cliente_id"]) or None
+    cliente_ids_json = json.dumps([cliente_id], ensure_ascii=False) if cliente_id else None
     poliza_numero = (seguro_row.get("poliza_numero") if isinstance(seguro_row, dict) else seguro_row["poliza_numero"]) or ""
     comision_src = importe
     if comision_src in (None, ""):
@@ -516,13 +517,14 @@ def upsert_seguro_comision_contabilidad(conn, seguro_row, now, movimiento="emisi
         conn.execute(
             """
             UPDATE gestoria_contabilidad
-            SET empresa_id = ?, cliente_id = ?, poliza_numero = ?, concepto = ?, tipo = ?, importe = ?, notas = ?,
+            SET empresa_id = ?, cliente_id = ?, cliente_ids_json = ?, poliza_numero = ?, concepto = ?, tipo = ?, importe = ?, notas = ?,
                 updated_at = datetime(?)
             WHERE id = ?
             """,
             (
                 empresa_id,
                 cliente_id,
+                cliente_ids_json,
                 poliza_numero,
                 concepto,
                 "Ingreso",
@@ -537,16 +539,17 @@ def upsert_seguro_comision_contabilidad(conn, seguro_row, now, movimiento="emisi
     conn.execute(
         """
         INSERT INTO gestoria_contabilidad (
-          id, empresa_id, cliente_id, seguro_id, poliza_numero, fecha, concepto, gestion, tipo, importe, notas,
+          id, empresa_id, cliente_id, cliente_ids_json, seguro_id, poliza_numero, fecha, concepto, gestion, tipo, importe, notas,
           created_at, updated_at
         ) VALUES (
-          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
         )
         """,
         (
             record_id,
             empresa_id,
             cliente_id,
+            cliente_ids_json,
             seguro_id,
             poliza_numero,
             fecha_iso,
@@ -575,6 +578,35 @@ def resolve_seguro_contabilidad_link(conn, seguro_id):
     poliza_numero = (row["poliza_numero"] or "").strip()
     cliente_id = (row["cliente_id"] or "").strip() or None
     return poliza_numero, cliente_id
+
+
+def parse_cliente_ids_payload(raw_value):
+    if raw_value in (None, ""):
+        return []
+    items = raw_value
+    if isinstance(raw_value, str):
+        text = raw_value.strip()
+        if not text:
+            return []
+        if text.startswith("["):
+            try:
+                parsed = json.loads(text)
+                if isinstance(parsed, list):
+                    items = parsed
+                else:
+                    items = [parsed]
+            except Exception:
+                items = [part.strip() for part in text.split(",")]
+        else:
+            items = [part.strip() for part in text.split(",")]
+    elif not isinstance(raw_value, (list, tuple, set)):
+        items = [raw_value]
+    out = []
+    for item in items:
+        value = str(item or "").strip()
+        if value and value not in out:
+            out.append(value)
+    return out
 
 
 def seguros_contabilidad_where_clause(alias="gc"):
@@ -6090,21 +6122,34 @@ def build_cliente_ficha_payload(conn, cliente_id, services_filter=None):
     facturas = []
     if empresa_ids:
         placeholders = ",".join(["?"] * len(empresa_ids))
-        facturas = [
-            dict(r)
-            for r in conn.execute(
-                f"""
-                SELECT id, empresa_id, cliente_id, fecha, concepto, gestion, tipo, importe, notas
-                FROM gestoria_contabilidad
-                WHERE cliente_id = ?
-                  AND empresa_id IN ({placeholders})
-                ORDER BY fecha DESC, created_at DESC
-                LIMIT 500
-                """,
-                [cliente_id, *empresa_ids],
-            ).fetchall()
-        ]
-    fact_total = sum(parse_money_value(row.get("importe")) for row in facturas if normalize_lookup_text(row.get("tipo")) != "GASTO")
+        raw_facturas = conn.execute(
+            f"""
+            SELECT id, empresa_id, cliente_id, cliente_ids_json, fecha, concepto, gestion, tipo, importe, notas
+            FROM gestoria_contabilidad
+            WHERE empresa_id IN ({placeholders})
+            ORDER BY fecha DESC, created_at DESC
+            LIMIT 1000
+            """,
+            [*empresa_ids],
+        ).fetchall()
+        for raw_row in raw_facturas:
+            row = dict(raw_row)
+            asignados = parse_cliente_ids_payload(row.get("cliente_ids_json"))
+            if not asignados and row.get("cliente_id"):
+                asignados = [str(row.get("cliente_id")).strip()]
+            if cliente_id not in asignados:
+                continue
+            reparto = 1.0 / max(1, len(asignados))
+            importe_original = parse_money_value(row.get("importe"))
+            row["importe_asignado"] = round(importe_original * reparto, 2)
+            row["clientes_reparto"] = asignados
+            facturas.append(row)
+        facturas = facturas[:500]
+    fact_total = sum(
+        parse_money_value(row.get("importe_asignado") if row.get("importe_asignado") not in (None, "") else row.get("importe"))
+        for row in facturas
+        if normalize_lookup_text(row.get("tipo")) != "GASTO"
+    )
 
     trabajos = [
         dict(r)
@@ -6607,6 +6652,7 @@ def ensure_tables(db_path):
           id TEXT PRIMARY KEY,
           empresa_id TEXT,
           cliente_id TEXT,
+          cliente_ids_json TEXT,
           seguro_id TEXT,
           poliza_numero TEXT,
           fecha TEXT,
@@ -7007,6 +7053,8 @@ def ensure_tables(db_path):
         conn.execute("ALTER TABLE gestoria_contabilidad ADD COLUMN seguro_id TEXT")
     if "poliza_numero" not in conta_cols:
         conn.execute("ALTER TABLE gestoria_contabilidad ADD COLUMN poliza_numero TEXT")
+    if "cliente_ids_json" not in conta_cols:
+        conn.execute("ALTER TABLE gestoria_contabilidad ADD COLUMN cliente_ids_json TEXT")
     terceros_cols = [row[1] for row in conn.execute("PRAGMA table_info(gestoria_terceros)").fetchall()]
     if "cuenta_contable" not in terceros_cols:
         conn.execute("ALTER TABLE gestoria_terceros ADD COLUMN cuenta_contable TEXT")
@@ -8355,24 +8403,30 @@ class Handler(BaseHTTPRequestHandler):
         elif parsed.path == "/api/gestoria_contabilidad":
             seguro_id = (payload.get("seguro_id") or "").strip()
             poliza_numero = ""
-            cliente_id = (payload.get("cliente_id") or "").strip() or None
+            cliente_ids = parse_cliente_ids_payload(payload.get("cliente_ids_json"))
+            if not cliente_ids:
+                cliente_ids = parse_cliente_ids_payload(payload.get("cliente_id"))
+            cliente_id = cliente_ids[0] if cliente_ids else None
             if seguro_id:
                 poliza_numero, cliente_seguro_id = resolve_seguro_contabilidad_link(conn, seguro_id)
-                if cliente_seguro_id:
+                if cliente_seguro_id and not cliente_ids:
+                    cliente_ids = [cliente_seguro_id]
                     cliente_id = cliente_seguro_id
+            cliente_ids_json = json.dumps(cliente_ids, ensure_ascii=False) if cliente_ids else None
             conn.execute(
                 """
                 INSERT INTO gestoria_contabilidad (
-                  id, empresa_id, cliente_id, seguro_id, poliza_numero, fecha, concepto, gestion, tipo, importe, notas,
+                  id, empresa_id, cliente_id, cliente_ids_json, seguro_id, poliza_numero, fecha, concepto, gestion, tipo, importe, notas,
                   created_at, updated_at
                 ) VALUES (
-                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
                 )
                 """,
                 (
                     os.urandom(16).hex(),
                     empresa["id"],
                     cliente_id,
+                    cliente_ids_json,
                     seguro_id or None,
                     poliza_numero,
                     payload.get("fecha"),
@@ -8390,17 +8444,39 @@ class Handler(BaseHTTPRequestHandler):
             if not record_id:
                 json_response(self, {"error": "id requerido"}, status=400)
                 return
-            allowed = ("fecha", "concepto", "gestion", "tipo", "importe", "notas", "cliente_id", "seguro_id")
+            allowed = (
+                "fecha",
+                "concepto",
+                "gestion",
+                "tipo",
+                "importe",
+                "notas",
+                "cliente_id",
+                "cliente_ids_json",
+                "seguro_id",
+            )
             updates = []
             values = []
+            cliente_ids = None
             for field in allowed:
                 if field in payload:
-                    updates.append(f"{field} = ?")
                     if field == "seguro_id":
+                        updates.append(f"{field} = ?")
                         values.append((payload.get(field) or "").strip() or None)
                     elif field == "cliente_id":
-                        values.append((payload.get(field) or "").strip() or None)
+                        cliente_ids = parse_cliente_ids_payload(payload.get(field))
+                        updates.append("cliente_id = ?")
+                        values.append(cliente_ids[0] if cliente_ids else None)
+                        updates.append("cliente_ids_json = ?")
+                        values.append(json.dumps(cliente_ids, ensure_ascii=False) if cliente_ids else None)
+                    elif field == "cliente_ids_json":
+                        cliente_ids = parse_cliente_ids_payload(payload.get(field))
+                        updates.append("cliente_ids_json = ?")
+                        values.append(json.dumps(cliente_ids, ensure_ascii=False) if cliente_ids else None)
+                        updates.append("cliente_id = ?")
+                        values.append(cliente_ids[0] if cliente_ids else None)
                     else:
+                        updates.append(f"{field} = ?")
                         values.append(payload.get(field))
             if "seguro_id" in payload:
                 seguro_id = (payload.get("seguro_id") or "").strip()
@@ -8410,7 +8486,10 @@ class Handler(BaseHTTPRequestHandler):
                     poliza_numero, cliente_seguro_id = resolve_seguro_contabilidad_link(conn, seguro_id)
                 updates.append("poliza_numero = ?")
                 values.append(poliza_numero)
-                if cliente_seguro_id:
+                if cliente_seguro_id and not cliente_ids:
+                    cliente_ids = [cliente_seguro_id]
+                    updates.append("cliente_ids_json = ?")
+                    values.append(json.dumps(cliente_ids, ensure_ascii=False))
                     updates.append("cliente_id = ?")
                     values.append(cliente_seguro_id)
             if not updates:
@@ -8588,15 +8667,16 @@ class Handler(BaseHTTPRequestHandler):
                 conn.execute(
                     """
                     INSERT INTO gestoria_contabilidad (
-                      id, empresa_id, cliente_id, fecha, concepto, gestion, tipo, importe, notas, created_at, updated_at
+                      id, empresa_id, cliente_id, cliente_ids_json, fecha, concepto, gestion, tipo, importe, notas, created_at, updated_at
                     ) VALUES (
-                      ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
                     )
                     """,
                     (
                         os.urandom(16).hex(),
                         empresa["id"],
                         cliente_id,
+                        json.dumps([cliente_id], ensure_ascii=False) if cliente_id else None,
                         parsed_factura.get("fecha"),
                         concepto,
                         "Contable",
@@ -13180,7 +13260,7 @@ class Handler(BaseHTTPRequestHandler):
             rows = conn.execute(
                 f"""
                 SELECT gc.id, gc.fecha, gc.concepto, gc.gestion, gc.tipo, gc.importe, gc.notas,
-                       gc.cliente_id, gc.seguro_id,
+                       gc.cliente_id, gc.cliente_ids_json, gc.seguro_id,
                        COALESCE(NULLIF(gc.poliza_numero, ''), s.poliza_numero, '') AS poliza_numero,
                        COALESCE(c.nombre, '') AS cliente
                 FROM gestoria_contabilidad gc
