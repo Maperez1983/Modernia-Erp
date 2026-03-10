@@ -1135,6 +1135,9 @@ const state = {
   segurosComisionesRows: null,
   segurosCrmData: null,
   segurosRamoSelected: "",
+  segurosCrmFilterRamo: "",
+  segurosCrmFilterCompania: "",
+  segurosBdtSort: null,
   segurosKpisCache: null,
   segurosOcrClienteId: "",
   segurosBdtOcrClienteId: "",
@@ -9575,6 +9578,21 @@ const renderTable = (data, options = {}) => {
   tableContainer.appendChild(table);
 };
 
+const getSegurosBdtSortValue = (colName, raw) => {
+  const name = normalizeSimple(colName || "");
+  if (!name) return String(raw || "");
+  if (name.includes("fecha")) {
+    const value = String(raw || "").trim();
+    if (!value) return "";
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? value : parsed.getTime();
+  }
+  if (name.includes("prima") || name.includes("comision") || name.includes("importe")) {
+    return parseMoneyValue(raw);
+  }
+  return normalizeSimple(formatCell(colName, raw) ?? raw ?? "");
+};
+
 const renderTableInto = (data, container, infoEl, label) => {
   if (!container) {
     return;
@@ -9613,13 +9631,44 @@ const renderTableInto = (data, container, infoEl, label) => {
   columns.forEach((col, idx) => {
     colIndexMap.set(col, idx);
   });
+  const rowsView = Array.isArray(rows) ? [...rows] : [];
+  if (enableColumnFilters && state.segurosBdtSort && state.segurosBdtSort.col) {
+    const sortCol = state.segurosBdtSort.col;
+    const sortDir = state.segurosBdtSort.dir === "desc" ? -1 : 1;
+    const sortIdx = colIndexMap.get(sortCol);
+    if (sortIdx !== undefined) {
+      rowsView.sort((a, b) => {
+        const av = getSegurosBdtSortValue(sortCol, a[sortIdx]);
+        const bv = getSegurosBdtSortValue(sortCol, b[sortIdx]);
+        if (typeof av === "number" && typeof bv === "number") {
+          return (av - bv) * sortDir;
+        }
+        return String(av).localeCompare(String(bv), "es", { sensitivity: "base" }) * sortDir;
+      });
+    }
+  }
   const table = document.createElement("table");
   const thead = document.createElement("thead");
   const trHead = document.createElement("tr");
   const columnFilterInputs = [];
   displayColumns.forEach((col) => {
     const th = document.createElement("th");
-    th.textContent = formatHeader(col);
+    const sorted = enableColumnFilters && state.segurosBdtSort && state.segurosBdtSort.col === col;
+    const arrow = sorted ? (state.segurosBdtSort.dir === "desc" ? " ▼" : " ▲") : "";
+    th.textContent = `${formatHeader(col)}${arrow}`;
+    if (enableColumnFilters) {
+      th.style.cursor = "pointer";
+      th.title = "Ordenar";
+      th.addEventListener("click", () => {
+        const current = state.segurosBdtSort || {};
+        if (current.col === col) {
+          state.segurosBdtSort = { col, dir: current.dir === "asc" ? "desc" : "asc" };
+        } else {
+          state.segurosBdtSort = { col, dir: "asc" };
+        }
+        loadSegurosCrm();
+      });
+    }
     trHead.appendChild(th);
   });
   if (showPdf) {
@@ -9660,7 +9709,7 @@ const renderTableInto = (data, container, infoEl, label) => {
 
   const tbody = document.createElement("tbody");
   const filterRows = [];
-  rows.forEach((row) => {
+  rowsView.forEach((row) => {
     const tr = document.createElement("tr");
     const rowMap = buildRowMap(row, columns);
     const recordId = idIndex >= 0 ? row[idIndex] : "";
@@ -9813,7 +9862,7 @@ const renderTableInto = (data, container, infoEl, label) => {
     return;
   }
   if (infoEl) {
-    infoEl.textContent = `Mostrando ${rows.length} filas de ${label}.`;
+    infoEl.textContent = `Mostrando ${rowsView.length} filas de ${label}.`;
   }
 };
 
@@ -11212,10 +11261,35 @@ const loadSegurosCrm = () => {
         });
       }
     }
+    const ramoFilter = normalizeSimple(state.segurosCrmFilterRamo || "");
+    if (ramoFilter) {
+      const ramoIndex = columns.indexOf("ramo");
+      if (ramoIndex >= 0) {
+        rows = rows.filter((row) => normalizeSimple(getSegurosRamoLabel(row[ramoIndex] || "")) === ramoFilter);
+      }
+    }
+    const companiaFilter = normalizeSimple(state.segurosCrmFilterCompania || "");
+    if (companiaFilter) {
+      const companiaIndex = columns.indexOf("compania");
+      if (companiaIndex >= 0) {
+        rows = rows.filter((row) => normalizeSimple(row[companiaIndex] || "") === companiaFilter);
+      }
+    }
     state.segurosCrmData = { columns, rows };
     renderTableInto({ columns, rows }, segurosCrmTable, segurosCrmInfo, "Seguros");
-    if (segurosCrmInfo && (q || filtroCliente || (segurosEstadoFilter && segurosEstadoFilter.value !== "all"))) {
-      segurosCrmInfo.textContent = `${segurosCrmInfo.textContent} (filtro activo)`;
+    if (
+      segurosCrmInfo &&
+      (q ||
+        filtroCliente ||
+        (segurosEstadoFilter && segurosEstadoFilter.value !== "all") ||
+        ramoFilter ||
+        companiaFilter)
+    ) {
+      const tags = [];
+      if (ramoFilter) tags.push(`ramo: ${state.segurosCrmFilterRamo}`);
+      if (companiaFilter) tags.push(`compañía: ${state.segurosCrmFilterCompania}`);
+      const suffix = tags.length ? ` · ${tags.join(" · ")}` : "";
+      segurosCrmInfo.textContent = `${segurosCrmInfo.textContent} (filtro activo${suffix})`;
     }
     refreshSegurosColaboradoresList(columns, rows);
     refreshSegurosRamosList(columns, rows, seguroOcrCompania ? seguroOcrCompania.value : "");
@@ -11267,6 +11341,25 @@ const loadSegurosCrm = () => {
     state.segurosCrmData = { columns: [], rows: [] };
     renderSegurosRamosDashboard();
   });
+};
+
+const applySegurosBdtDashboardFilter = ({ ramo = "", compania = "" } = {}) => {
+  const nextRamo = String(ramo || "").trim();
+  const nextCompania = String(compania || "").trim();
+  const sameRamo = normalizeSimple(state.segurosCrmFilterRamo || "") === normalizeSimple(nextRamo);
+  const sameCompania = normalizeSimple(state.segurosCrmFilterCompania || "") === normalizeSimple(nextCompania);
+  if ((nextRamo || nextCompania) && sameRamo && sameCompania) {
+    state.segurosCrmFilterRamo = "";
+    state.segurosCrmFilterCompania = "";
+  } else {
+    state.segurosCrmFilterRamo = nextRamo;
+    state.segurosCrmFilterCompania = nextCompania;
+  }
+  if (segurosCrmSearch) segurosCrmSearch.value = "";
+  if (segurosCrmClienteInput) segurosCrmClienteInput.value = "";
+  if (segurosCrmClienteId) segurosCrmClienteId.value = "";
+  setSegurosTab("bdt");
+  loadSegurosCrm();
 };
 
 const loadSegurosKpis = () => {
@@ -11506,6 +11599,8 @@ const renderSegurosRamosDashboard = () => {
       value: item.total,
       display: `${item.total} póliza${item.total === 1 ? "" : "s"}`,
       color: ["#3C6E71", "#5F7A61", "#2B2B2B", "#8A9A8A", "#6B7C6B"][idx % 5],
+      onClick: () => applySegurosBdtDashboardFilter({ ramo: item.ramo }),
+      title: `Ver pólizas del ramo ${item.ramo}`,
     }))
   );
   const selected = summary.find((item) => item.ramo === state.segurosRamoSelected) || null;
@@ -12189,6 +12284,16 @@ const loadSegurosInsights = (empresaId) => {
         total.textContent = row.total;
         item.appendChild(label);
         item.appendChild(total);
+        if (key === "compania" || key === "ramo") {
+          item.style.cursor = "pointer";
+          item.title = "Ver pólizas";
+          item.addEventListener("click", () => {
+            applySegurosBdtDashboardFilter({
+              ramo: key === "ramo" ? row[key] || "" : "",
+              compania: key === "compania" ? row[key] || "" : "",
+            });
+          });
+        }
         list.appendChild(item);
       });
       card.appendChild(list);
@@ -15205,6 +15310,11 @@ const renderClienteMiniChart = (container, items = []) => {
   items.forEach((item) => {
     const row = document.createElement("div");
     row.className = "cliente-mini-chart-row";
+    if (typeof item.onClick === "function") {
+      row.style.cursor = "pointer";
+      row.title = item.title || "Ver detalle";
+      row.addEventListener("click", () => item.onClick(item));
+    }
     const label = document.createElement("div");
     label.className = "cliente-mini-chart-label";
     label.textContent = item.label || "-";
