@@ -1057,6 +1057,12 @@ body.crm-fin #companySummary {
   color: var(--ink);
 }
 
+#segurosKpis .kpi-value,
+#segurosRamoKpis .kpi-value {
+  font-family: var(--font-ui);
+  font-variant-numeric: tabular-nums;
+}
+
 .crm-split {
   display: grid;
   grid-template-columns: minmax(0, 2.35fr) minmax(340px, 1fr);
