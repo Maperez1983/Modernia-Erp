@@ -30,6 +30,10 @@ const setCrmMode = (mode = "") => {
   document.body.classList.toggle("crm-fin", mode === "fin");
 };
 
+const DENSITY_STORAGE_KEY = "crm_density_mode";
+const DENSITY_NORMAL = "normal";
+const DENSITY_COMPACT = "compact";
+
 const UPLOAD_IMAGE_COMPRESS_MIN_BYTES = 500 * 1024;
 const UPLOAD_IMAGE_MAX_SIDE = 2200;
 const UPLOAD_IMAGE_QUALITY = 0.82;
@@ -1188,6 +1192,7 @@ const agendaSection = document.getElementById("agendaSection");
 const agendaBackBtn = document.getElementById("agendaBackBtn");
 const agendaGeneral = document.getElementById("agendaGeneral");
 const yearSelect = document.getElementById("yearSelect");
+const densityToggle = document.getElementById("densityToggle");
 const dbStatus = document.getElementById("dbStatus");
 const authLoginOverlay = document.getElementById("authLoginOverlay");
 const authLoginForm = document.getElementById("authLoginForm");
@@ -1243,6 +1248,48 @@ const clienteTipoPersona = document.getElementById("clienteTipoPersona");
 const clienteAltaPersonaFields = clientesForm
   ? clientesForm.querySelectorAll('[data-cliente-persona="fisica"]')
   : [];
+
+const getStoredDensityMode = () => {
+  try {
+    const value = String(localStorage.getItem(DENSITY_STORAGE_KEY) || "").toLowerCase().trim();
+    return value === DENSITY_COMPACT ? DENSITY_COMPACT : DENSITY_NORMAL;
+  } catch {
+    return DENSITY_NORMAL;
+  }
+};
+
+const applyDensityMode = (mode = DENSITY_NORMAL) => {
+  const nextMode = mode === DENSITY_COMPACT ? DENSITY_COMPACT : DENSITY_NORMAL;
+  document.body.classList.toggle("density-compact", nextMode === DENSITY_COMPACT);
+  if (densityToggle) {
+    densityToggle.dataset.mode = nextMode;
+    densityToggle.querySelectorAll("[data-density]").forEach((btn) => {
+      const isActive = btn.dataset.density === nextMode;
+      btn.classList.toggle("active", isActive);
+      btn.setAttribute("aria-pressed", isActive ? "true" : "false");
+    });
+  }
+  return nextMode;
+};
+
+const setDensityMode = (mode = DENSITY_NORMAL, persist = true) => {
+  const nextMode = applyDensityMode(mode);
+  if (persist) {
+    try {
+      localStorage.setItem(DENSITY_STORAGE_KEY, nextMode);
+    } catch {}
+  }
+};
+
+const initDensityToggle = () => {
+  applyDensityMode(getStoredDensityMode());
+  if (!densityToggle) return;
+  densityToggle.addEventListener("click", (event) => {
+    const btn = event.target.closest("[data-density]");
+    if (!btn || !densityToggle.contains(btn)) return;
+    setDensityMode(btn.dataset.density, true);
+  });
+};
 const clientesLinkForm = document.getElementById("clientesLinkForm");
 const clientesLinkFormStatus = document.getElementById("clientesLinkFormStatus");
 const clientesSelect = document.getElementById("clientesSelect");
@@ -21423,6 +21470,7 @@ if (authActivateForm) {
   });
 }
 
+initDensityToggle();
 showAuthOverlay("");
 ensureAuthAndBoot();
 

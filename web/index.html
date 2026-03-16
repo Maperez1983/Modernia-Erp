@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>LIV</title>
-    <link rel="stylesheet" href="styles.css?v=119" />
+    <link rel="stylesheet" href="styles.css?v=120" />
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600;700&family=Source+Sans+3:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" />
   </head>
   <body>
@@ -15,18 +15,23 @@
           <p>Software verificado · Versión 1.0</p>
         </div>
       </div>
-      <div class="meta">
-        <div>Panel operativo</div>
-        <div class="muted">UI v4</div>
-        <div class="muted">
-          Usuario:
-          <select id="userSelect"></select>
+        <div class="meta">
+          <div>Panel operativo</div>
+          <div class="muted">UI v4</div>
+          <div class="muted">
+            Usuario:
+            <select id="userSelect"></select>
+          </div>
+          <div class="density-toggle" id="densityToggle" role="group" aria-label="Densidad visual">
+            <span class="density-label">Vista</span>
+            <button type="button" class="density-btn active" data-density="normal" aria-pressed="true">Normal</button>
+            <button type="button" class="density-btn" data-density="compact" aria-pressed="false">Compacto</button>
+          </div>
+          <div id="authSessionPill" class="pill hidden"></div>
+          <button id="authLogoutBtn" class="secondary ghost hidden" type="button">Salir</button>
+          <div id="dbStatus">Conectando a base de datos...</div>
         </div>
-        <div id="authSessionPill" class="pill hidden"></div>
-        <button id="authLogoutBtn" class="secondary ghost hidden" type="button">Salir</button>
-        <div id="dbStatus">Conectando a base de datos...</div>
-      </div>
-    </header>
+      </header>
     <div id="renewalAlert" class="alert hidden"></div>
 
     <main>
@@ -4057,6 +4062,6 @@
       </div>
     </div>
 
-    <script src="app.js?v=310"></script>
+    <script src="app.js?v=311"></script>
   </body>
 </html>
