@@ -8462,6 +8462,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/seguros_reclamacion_update",
             "/api/seguros_reclamacion_delete",
             "/api/seguros_ipid_register",
+            "/api/seguros_campanas_import_email",
             "/api/ai_seguros_copilot",
         ):
             empresa = conn.execute(
