@@ -457,6 +457,17 @@ CREATE TABLE IF NOT EXISTS seguros_campanas (
   updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS seguros_campanas_mail_seen (
+  id TEXT PRIMARY KEY,
+  message_id TEXT UNIQUE,
+  mailbox_uid TEXT,
+  remitente TEXT,
+  asunto TEXT,
+  fecha_mail TEXT,
+  campaign_id TEXT,
+  created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS seguros_comisiones (
   id TEXT PRIMARY KEY,
   compania TEXT,

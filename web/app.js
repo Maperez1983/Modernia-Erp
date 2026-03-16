@@ -1592,6 +1592,9 @@ const segurosCampanasStatus = document.getElementById("segurosCampanasStatus");
 const segurosCampanasTable = document.getElementById("segurosCampanasTable");
 const segurosCampanasInfo = document.getElementById("segurosCampanasInfo");
 const segurosCampanasSearch = document.getElementById("segurosCampanasSearch");
+const segurosCampanasImportForm = document.getElementById("segurosCampanasImportForm");
+const segurosCampanasImportStatus = document.getElementById("segurosCampanasImportStatus");
+const segurosCampanasImportInfo = document.getElementById("segurosCampanasImportInfo");
 const segurosRecClienteInput = document.getElementById("segurosRecClienteInput");
 const segurosRecClienteId = document.getElementById("segurosRecClienteId");
 const segurosRecClientes = document.getElementById("segurosRecClientes");
@@ -19020,6 +19023,57 @@ if (segurosCampanasForm) {
       .catch(() => {
         if (segurosCampanasStatus) {
           segurosCampanasStatus.textContent = "Error al guardar.";
+        }
+      });
+  });
+}
+
+if (segurosCampanasImportForm) {
+  segurosCampanasImportForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const formData = new FormData(segurosCampanasImportForm);
+    const payload = Object.fromEntries(formData.entries());
+    if (segurosCampanasImportStatus) {
+      segurosCampanasImportStatus.textContent = "Importando correos...";
+    }
+    if (segurosCampanasImportInfo) {
+      segurosCampanasImportInfo.textContent = "";
+    }
+    fetch("/api/seguros_campanas_import_email", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.error) {
+          if (segurosCampanasImportStatus) {
+            segurosCampanasImportStatus.textContent = data.error;
+          }
+          return;
+        }
+        const created = Number(data.created || 0);
+        const skipped = Number(data.skipped || 0);
+        if (segurosCampanasImportStatus) {
+          segurosCampanasImportStatus.textContent = `Importadas ${created} campañas · omitidas ${skipped}.`;
+        }
+        const previews = Array.isArray(data.preview) ? data.preview : [];
+        const errors = Array.isArray(data.errors) ? data.errors : [];
+        const lines = [];
+        if (previews.length) {
+          lines.push(`Detectadas: ${previews.map((row) => [row.compania, row.nombre].filter(Boolean).join(" · ")).join(" | ")}`);
+        }
+        if (errors.length) {
+          lines.push(`Incidencias: ${errors.join(" | ")}`);
+        }
+        if (segurosCampanasImportInfo) {
+          segurosCampanasImportInfo.textContent = lines.join(" ");
+        }
+        loadSegurosCampanas();
+      })
+      .catch(() => {
+        if (segurosCampanasImportStatus) {
+          segurosCampanasImportStatus.textContent = "Error al importar campañas.";
         }
       });
   });

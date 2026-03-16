@@ -17,6 +17,9 @@ import threading
 import time
 import secrets
 import smtplib
+import imaplib
+import email
+import html
 from io import BytesIO
 from copy import copy as shallow_copy
 from datetime import datetime, timedelta, timezone
@@ -24,6 +27,8 @@ from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
 from pathlib import Path
 import unicodedata
 from email.message import EmailMessage
+from email.header import decode_header
+from email.utils import parseaddr
 
 try:
     from openpyxl import Workbook, load_workbook
@@ -1273,6 +1278,398 @@ def send_mail_smtp(subject, to_email, text_body, html_body=None):
             server.quit()
         except Exception:
             pass
+
+
+def decode_mime_text(raw):
+    if not raw:
+        return ""
+    parts = []
+    try:
+        decoded = decode_header(raw)
+    except Exception:
+        return str(raw)
+    for chunk, encoding in decoded:
+        if isinstance(chunk, bytes):
+            codec = encoding or "utf-8"
+            try:
+                parts.append(chunk.decode(codec, errors="replace"))
+            except Exception:
+                parts.append(chunk.decode("utf-8", errors="replace"))
+        else:
+            parts.append(str(chunk))
+    return "".join(parts).strip()
+
+
+def html_to_text(value):
+    text = str(value or "")
+    text = re.sub(r"<\s*(script|style)\b[^>]*>.*?<\s*/\s*\1\s*>", " ", text, flags=re.IGNORECASE | re.DOTALL)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = html.unescape(text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def parse_decimal_amount(value):
+    raw = str(value or "").strip()
+    if not raw:
+        return 0.0
+    text = raw.replace("€", "").replace("EUR", "").replace(" ", "")
+    text = re.sub(r"[^0-9,.\-]", "", text)
+    if not text:
+        return 0.0
+    if "," in text and "." in text:
+        if text.rfind(",") > text.rfind("."):
+            text = text.replace(".", "").replace(",", ".")
+        else:
+            text = text.replace(",", "")
+    elif "," in text:
+        text = text.replace(".", "").replace(",", ".")
+    elif "." in text:
+        if text.count(".") == 1 and len(text.split(".")[-1]) <= 2:
+            pass
+        else:
+            text = text.replace(".", "")
+    try:
+        return float(text)
+    except Exception:
+        return 0.0
+
+
+def detect_campaign_ramo(text):
+    cleaned = normalize_lookup_text(text)
+    if not cleaned:
+        return ""
+    patterns = [
+        (r"\bHOGAR\b", "Hogar"),
+        (r"\bAUTO\b|\bAUTOMOVIL\b|\bCOCHE\b", "Auto"),
+        (r"\bSALUD\b|\bMEDIC(O|A)\b|\bASISTENCIA SANITARIA\b", "Salud"),
+        (r"\bDECESOS\b", "Decesos"),
+        (r"\bVIDA\b", "Vida"),
+        (r"\bCOMERCIO\b|\bPYME\b|\bNEGOCIO\b", "Comercio"),
+        (r"\bCOMUNIDAD\b", "Comunidad"),
+        (r"\bRESPONSABILIDAD CIVIL\b|\bRC\b", "Responsabilidad civil"),
+        (r"\bDEFENSA JURIDICA\b|\bARAG\b", "Defensa jurídica"),
+        (r"\bVIAJE\b|\bVIAJES\b", "Viaje"),
+        (r"\bAHORRO\b", "Ahorro"),
+    ]
+    for pattern, ramo in patterns:
+        if re.search(pattern, cleaned, re.IGNORECASE):
+            return ramo
+    return ""
+
+
+def parse_campaign_dates(text):
+    cleaned = str(text or "")
+    if not cleaned:
+        return "", ""
+
+    def _by_patterns(patterns):
+        for pattern in patterns:
+            match = re.search(pattern, cleaned, re.IGNORECASE)
+            if not match:
+                continue
+            parsed = parse_iso_date(match.group(1))
+            if parsed:
+                return parsed.isoformat()
+        return ""
+
+    inicio = _by_patterns(
+        [
+            r"(?:inicio|desde|vigencia\s+desde|validez\s+desde)\s*[:\-]?\s*([0-9]{1,2}[/-][0-9]{1,2}[/-][0-9]{2,4}|[0-9]{4}-[0-9]{2}-[0-9]{2})",
+        ]
+    )
+    fin = _by_patterns(
+        [
+            r"(?:fin|hasta|vigencia\s+hasta|validez\s+hasta|v[aá]lida\s+hasta|vence)\s*[:\-]?\s*([0-9]{1,2}[/-][0-9]{1,2}[/-][0-9]{2,4}|[0-9]{4}-[0-9]{2}-[0-9]{2})",
+        ]
+    )
+    if inicio and fin:
+        return inicio, fin
+    date_hits = re.findall(r"([0-9]{1,2}[/-][0-9]{1,2}[/-][0-9]{2,4}|[0-9]{4}-[0-9]{2}-[0-9]{2})", cleaned)
+    parsed_dates = []
+    for raw in date_hits:
+        parsed = parse_iso_date(raw)
+        if parsed and parsed.isoformat() not in parsed_dates:
+            parsed_dates.append(parsed.isoformat())
+    if not inicio and parsed_dates:
+        inicio = parsed_dates[0]
+    if not fin and len(parsed_dates) > 1:
+        fin = parsed_dates[-1]
+    if inicio and fin and fin < inicio:
+        inicio, fin = fin, inicio
+    return inicio, fin
+
+
+def extract_campaign_from_email(message_obj):
+    subject = decode_mime_text(message_obj.get("Subject", ""))
+    from_name, from_email = parseaddr(message_obj.get("From", ""))
+    from_name = decode_mime_text(from_name)
+    sender = " ".join(part for part in [from_name, from_email] if part).strip()
+
+    text_parts = []
+    html_parts = []
+    if message_obj.is_multipart():
+        for part in message_obj.walk():
+            if part.get_content_maintype() == "multipart":
+                continue
+            if "attachment" in str(part.get("Content-Disposition") or "").lower():
+                continue
+            content_type = str(part.get_content_type() or "").lower()
+            payload = part.get_payload(decode=True)
+            if payload is None:
+                continue
+            charset = part.get_content_charset() or "utf-8"
+            try:
+                decoded = payload.decode(charset, errors="replace")
+            except Exception:
+                decoded = payload.decode("utf-8", errors="replace")
+            if content_type == "text/plain":
+                text_parts.append(decoded)
+            elif content_type == "text/html":
+                html_parts.append(decoded)
+    else:
+        payload = message_obj.get_payload(decode=True)
+        if payload:
+            charset = message_obj.get_content_charset() or "utf-8"
+            try:
+                decoded = payload.decode(charset, errors="replace")
+            except Exception:
+                decoded = payload.decode("utf-8", errors="replace")
+            if str(message_obj.get_content_type() or "").lower() == "text/html":
+                html_parts.append(decoded)
+            else:
+                text_parts.append(decoded)
+
+    body = "\n".join(text_parts).strip() or html_to_text("\n".join(html_parts))
+    search_blob = " ".join(part for part in [subject, sender, body] if part).strip()
+
+    compania = detect_company_from_metadata(subject, sender, body)
+    if not compania:
+        compania = detect_company_from_text(search_blob)
+    ramo = detect_campaign_ramo(search_blob) or canonicalize_ramo(search_blob)
+    if not ramo:
+        ramo_match = re.search(r"\bramo\s*[:\-]?\s*([A-Za-zÁÉÍÓÚÜÑñçÇ\s]{3,40})", body or "", re.IGNORECASE)
+        if ramo_match:
+            ramo = canonicalize_ramo(ramo_match.group(1))
+    fecha_inicio, fecha_fin = parse_campaign_dates(search_blob)
+
+    precio_base = 0.0
+    comision_pct = 0.0
+    comision_fija = 0.0
+    price_match = re.search(
+        r"(?:precio|prima|tarifa|cuota|desde)\s*(?:base)?\s*[:\-]?\s*([0-9][0-9.,]{0,14})\s*€?",
+        search_blob,
+        re.IGNORECASE,
+    )
+    if price_match:
+        precio_base = parse_decimal_amount(price_match.group(1))
+    pct_match = re.search(
+        r"(?:comisi[oó]n|brokerage|mediaci[oó]n)[^%\n\r]{0,24}([0-9]{1,2}(?:[.,][0-9]{1,2})?)\s*%",
+        search_blob,
+        re.IGNORECASE,
+    )
+    if pct_match:
+        comision_pct = parse_decimal_amount(pct_match.group(1))
+    fijo_match = re.search(
+        r"(?:comisi[oó]n|fee|honorario)[^€\n\r]{0,24}([0-9][0-9.,]{0,14})\s*€",
+        search_blob,
+        re.IGNORECASE,
+    )
+    if fijo_match:
+        comision_fija = parse_decimal_amount(fijo_match.group(1))
+
+    url_match = re.search(r"(https?://[^\s<>\"]+)", search_blob, re.IGNORECASE)
+    url = (url_match.group(1).rstrip(").,;]") if url_match else "")
+    campaign_name = re.sub(r"^(RE|RV|FW|FWD)\s*:\s*", "", subject, flags=re.IGNORECASE).strip() or "Campaña correo"
+    description = re.sub(r"\s+", " ", body).strip()
+    if len(description) > 700:
+        description = f"{description[:697]}..."
+
+    return {
+        "compania": normalize_company_name(compania),
+        "nombre": campaign_name,
+        "ramo": ramo or "",
+        "origen": "Correo",
+        "fecha_inicio": fecha_inicio,
+        "fecha_fin": fecha_fin,
+        "descripcion": description,
+        "url": url,
+        "precio_base": round(precio_base, 2) if abs(precio_base) > 0.0001 else None,
+        "comision_pct": round(comision_pct, 2) if abs(comision_pct) > 0.0001 else None,
+        "comision_fija": round(comision_fija, 2) if abs(comision_fija) > 0.0001 else None,
+        "remitente": sender,
+    }
+
+
+def import_campaigns_from_mailbox(conn, payload, now):
+    host = (payload.get("host") or os.environ.get("CAMPAIGN_IMAP_HOST") or os.environ.get("IMAP_HOST") or "").strip()
+    user = (payload.get("user") or os.environ.get("CAMPAIGN_IMAP_USER") or os.environ.get("IMAP_USER") or "").strip()
+    password = str(payload.get("password") or os.environ.get("CAMPAIGN_IMAP_PASS") or os.environ.get("IMAP_PASS") or "").strip()
+    mailbox = str(payload.get("mailbox") or os.environ.get("CAMPAIGN_IMAP_MAILBOX") or "INBOX").strip() or "INBOX"
+    search = str(payload.get("search") or os.environ.get("CAMPAIGN_IMAP_SEARCH") or "UNSEEN").strip() or "UNSEEN"
+    ssl_enabled = str(payload.get("ssl") or os.environ.get("CAMPAIGN_IMAP_SSL") or "1").strip().lower() not in ("0", "false", "no", "off")
+    mark_seen = str(payload.get("mark_seen") or "1").strip().lower() not in ("0", "false", "no", "off")
+    try:
+        port = int(str(payload.get("port") or os.environ.get("CAMPAIGN_IMAP_PORT") or (993 if ssl_enabled else 143)).strip())
+    except Exception:
+        port = 993 if ssl_enabled else 143
+    try:
+        limit = max(1, min(50, int(str(payload.get("limit") or "20").strip() or "20")))
+    except Exception:
+        limit = 20
+    if not host or not user or not password:
+        raise RuntimeError("Configura host, usuario y contraseña IMAP.")
+
+    if ssl_enabled:
+        mail = imaplib.IMAP4_SSL(host, port)
+    else:
+        mail = imaplib.IMAP4(host, port)
+        mail.starttls()
+    created = 0
+    skipped = 0
+    errors = []
+    preview = []
+    try:
+        mail.login(user, password)
+        status, _ = mail.select(mailbox, readonly=False)
+        if status != "OK":
+            raise RuntimeError(f"No se pudo abrir el buzón '{mailbox}'.")
+        status, data = mail.search(None, search)
+        if status != "OK":
+            raise RuntimeError(f"No se pudo ejecutar búsqueda IMAP '{search}'.")
+        raw_ids = [token for token in (data[0] or b"").split() if token]
+        if not raw_ids:
+            return {"created": 0, "skipped": 0, "preview": []}
+        for seq_id in raw_ids[-limit:]:
+            try:
+                fetch_status, msg_data = mail.fetch(seq_id, "(UID BODY.PEEK[])")
+                if fetch_status != "OK" or not msg_data:
+                    skipped += 1
+                    continue
+                raw_message = None
+                imap_uid = ""
+                for item in msg_data:
+                    if not isinstance(item, tuple) or len(item) < 2:
+                        continue
+                    meta = item[0] if isinstance(item[0], (bytes, bytearray)) else b""
+                    body_bytes = item[1]
+                    if body_bytes and raw_message is None:
+                        raw_message = body_bytes
+                    uid_match = re.search(rb"UID\s+(\d+)", meta or b"")
+                    if uid_match:
+                        imap_uid = uid_match.group(1).decode("utf-8", errors="ignore")
+                if not raw_message:
+                    skipped += 1
+                    continue
+                msg = email.message_from_bytes(raw_message)
+                subject = decode_mime_text(msg.get("Subject", ""))
+                sender = decode_mime_text(msg.get("From", ""))
+                date_header = str(msg.get("Date") or "").strip()
+                message_id = str(msg.get("Message-ID") or "").strip()
+                seq_label = seq_id.decode("utf-8", errors="ignore") if isinstance(seq_id, (bytes, bytearray)) else str(seq_id)
+                fingerprint = f"{subject}|{sender}|{date_header}|{imap_uid or seq_label}"
+                dedupe_key = message_id or f"sha1:{hashlib.sha1(fingerprint.encode('utf-8')).hexdigest()}"
+                seen = conn.execute(
+                    "SELECT 1 FROM seguros_campanas_mail_seen WHERE message_id = ? LIMIT 1",
+                    (dedupe_key,),
+                ).fetchone()
+                if seen:
+                    skipped += 1
+                    if mark_seen:
+                        try:
+                            mail.store(seq_id, "+FLAGS", "(\\Seen)")
+                        except Exception:
+                            pass
+                    continue
+                parsed = extract_campaign_from_email(msg)
+                if not parsed.get("compania") and not parsed.get("ramo"):
+                    skipped += 1
+                    conn.execute(
+                        """
+                        INSERT INTO seguros_campanas_mail_seen (
+                          id, message_id, mailbox_uid, remitente, asunto, fecha_mail, campaign_id, created_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, datetime(?))
+                        """,
+                        (
+                            os.urandom(16).hex(),
+                            dedupe_key,
+                            imap_uid,
+                            parsed.get("remitente") or sender,
+                            subject,
+                            date_header,
+                            None,
+                            now,
+                        ),
+                    )
+                    continue
+                campaign_id = os.urandom(16).hex()
+                conn.execute(
+                    """
+                    INSERT INTO seguros_campanas (
+                      id, compania, nombre, ramo, origen, fecha_inicio, fecha_fin, descripcion, url, precio_base, comision_pct, comision_fija,
+                      created_at, updated_at
+                    ) VALUES (
+                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                    )
+                    """,
+                    (
+                        campaign_id,
+                        parsed.get("compania"),
+                        parsed.get("nombre"),
+                        canonicalize_ramo(parsed.get("ramo")) or parsed.get("ramo"),
+                        parsed.get("origen") or "Correo",
+                        parsed.get("fecha_inicio") or None,
+                        parsed.get("fecha_fin") or None,
+                        parsed.get("descripcion") or None,
+                        parsed.get("url") or None,
+                        parsed.get("precio_base"),
+                        parsed.get("comision_pct"),
+                        parsed.get("comision_fija"),
+                        now,
+                        now,
+                    ),
+                )
+                conn.execute(
+                    """
+                    INSERT INTO seguros_campanas_mail_seen (
+                      id, message_id, mailbox_uid, remitente, asunto, fecha_mail, campaign_id, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, datetime(?))
+                    """,
+                    (
+                        os.urandom(16).hex(),
+                        dedupe_key,
+                        imap_uid,
+                        parsed.get("remitente") or sender,
+                        subject,
+                        date_header,
+                        campaign_id,
+                        now,
+                    ),
+                )
+                created += 1
+                if mark_seen:
+                    try:
+                        mail.store(seq_id, "+FLAGS", "(\\Seen)")
+                    except Exception:
+                        pass
+                if len(preview) < 10:
+                    preview.append(
+                        {
+                            "compania": parsed.get("compania") or "",
+                            "nombre": parsed.get("nombre") or "",
+                            "ramo": parsed.get("ramo") or "",
+                        }
+                    )
+            except Exception as exc:
+                skipped += 1
+                if len(errors) < 5:
+                    errors.append(str(exc))
+    finally:
+        try:
+            mail.logout()
+        except Exception:
+            pass
+    return {"created": created, "skipped": skipped, "preview": preview, "errors": errors}
 
 def detect_ocr_lang():
     if os.path.isdir(TESSDATA_DIR):
@@ -7038,6 +7435,20 @@ def ensure_tables(db_path):
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS seguros_campanas_mail_seen (
+          id TEXT PRIMARY KEY,
+          message_id TEXT UNIQUE,
+          mailbox_uid TEXT,
+          remitente TEXT,
+          asunto TEXT,
+          fecha_mail TEXT,
+          campaign_id TEXT,
+          created_at TEXT NOT NULL
+        )
+        """
+    )
     campanas_cols = [row[1] for row in conn.execute("PRAGMA table_info(seguros_campanas)").fetchall()]
     if "origen" not in campanas_cols:
         conn.execute("ALTER TABLE seguros_campanas ADD COLUMN origen TEXT")
@@ -7697,6 +8108,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/seguros_preferencias",
             "/api/seguros_referidos",
             "/api/seguros_campanas",
+            "/api/seguros_campanas_import_email",
             "/api/seguros_campanas_update",
             "/api/seguros_campanas_delete",
             "/api/seguros_comisiones",
@@ -7939,6 +8351,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/seguros_preferencias",
             "/api/seguros_referidos",
             "/api/seguros_campanas",
+            "/api/seguros_campanas_import_email",
             "/api/seguros_campanas_update",
             "/api/seguros_campanas_delete",
             "/api/seguros_comisiones",
@@ -11011,6 +11424,24 @@ class Handler(BaseHTTPRequestHandler):
                     now,
                 ),
             )
+        elif parsed.path == "/api/seguros_campanas_import_email":
+            try:
+                result = import_campaigns_from_mailbox(conn, payload, now)
+            except Exception as exc:
+                json_response(self, {"error": str(exc)}, status=400)
+                return
+            json_response(
+                self,
+                {
+                    "ok": True,
+                    "created": int(result.get("created") or 0),
+                    "skipped": int(result.get("skipped") or 0),
+                    "preview": result.get("preview") or [],
+                    "errors": result.get("errors") or [],
+                },
+            )
+            conn.commit()
+            return
         elif parsed.path == "/api/seguros_campanas_update":
             record_id = payload.get("id")
             if not record_id:

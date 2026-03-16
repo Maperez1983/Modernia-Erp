@@ -1791,6 +1791,59 @@
               </div>
             </form>
             <div class="form-card">
+              <h4>Importar campañas desde buzón</h4>
+              <p class="muted">Reenvía campañas al buzón dedicado y pulsa importar para crear campañas automáticamente.</p>
+              <form id="segurosCampanasImportForm" class="form-grid">
+                <label>
+                  Host IMAP
+                  <input name="host" placeholder="imap.tudominio.com" />
+                </label>
+                <label>
+                  Puerto
+                  <input name="port" type="number" placeholder="993" />
+                </label>
+                <label>
+                  Usuario
+                  <input name="user" placeholder="campanas@dominio.com" />
+                </label>
+                <label>
+                  Password
+                  <input name="password" type="password" autocomplete="new-password" />
+                </label>
+                <label>
+                  Buzón
+                  <input name="mailbox" value="INBOX" />
+                </label>
+                <label>
+                  Búsqueda IMAP
+                  <input name="search" value="UNSEEN" />
+                </label>
+                <label>
+                  Límite correos
+                  <input name="limit" type="number" min="1" max="50" value="20" />
+                </label>
+                <label>
+                  SSL
+                  <select name="ssl">
+                    <option value="1">Sí</option>
+                    <option value="0">No</option>
+                  </select>
+                </label>
+                <label>
+                  Marcar leídos
+                  <select name="mark_seen">
+                    <option value="1">Sí</option>
+                    <option value="0">No</option>
+                  </select>
+                </label>
+                <div class="form-actions">
+                  <button type="submit">Importar desde email</button>
+                  <span id="segurosCampanasImportStatus" class="muted"></span>
+                </div>
+              </form>
+              <div id="segurosCampanasImportInfo" class="muted"></div>
+            </div>
+            <div class="form-card">
               <h4>Recomendador de cotización</h4>
               <p class="muted">Ranking por equilibrio precio/comisionado usando campañas vigentes.</p>
               <div class="form-grid">
@@ -4103,6 +4156,6 @@
       </div>
     </div>
 
-    <script src="app.js?v=314"></script>
+    <script src="app.js?v=315"></script>
   </body>
 </html>
