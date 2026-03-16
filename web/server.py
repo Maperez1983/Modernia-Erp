@@ -14880,7 +14880,17 @@ class Handler(BaseHTTPRequestHandler):
 
             estado_expr = "LOWER(TRIM(estado))"
             compania_expr = "LOWER(TRIM(compania))"
-            year_expr = "STRFTIME('%Y', created_at)"
+            # Use the real policy timeline first; fallback to import/create timestamps.
+            year_expr = (
+                "COALESCE("
+                "STRFTIME('%Y', fecha_efecto), "
+                "CASE "
+                "WHEN TRIM(COALESCE(mes_creacion, '')) GLOB '[0-9][0-9][0-9][0-9]*' "
+                "THEN SUBSTR(TRIM(mes_creacion), 1, 4) "
+                "ELSE NULL END, "
+                "STRFTIME('%Y', created_at)"
+                ")"
+            )
             exclude_sin_seguro = f"({compania_expr} IS NULL OR {compania_expr} = '' OR {compania_expr} != 'sin seguro')"
             uploaded_clause = uploaded_policy_filter()
             in_vigor_expr = in_vigor_policy_filter()
@@ -14969,6 +14979,52 @@ class Handler(BaseHTTPRequestHandler):
                 (empresa_id, 1 if uploaded_only else 0),
             ).fetchall()
 
+            comision_rows = conn.execute(
+                f"""
+                SELECT
+                  compania,
+                  ramo,
+                  comision,
+                  produccion
+                FROM seguros
+                WHERE empresa_id = ?
+                  AND ({uploaded_clause} OR ? = 0)
+                  AND {year_expr} = ?
+                  AND {exclude_sin_seguro}
+                """,
+                (empresa_id, 1 if uploaded_only else 0, year),
+            ).fetchall()
+
+            comision_by_compania = {}
+            comision_by_ramo = {}
+            for row in comision_rows:
+                amount = parse_money_value(row["comision"])
+                if abs(amount) < 0.005:
+                    amount = parse_money_value(row["produccion"])
+                if abs(amount) < 0.005:
+                    continue
+                compania_label = normalize_company_name(row["compania"] or "").strip() or "Sin compañía"
+                ramo_label = canonicalize_ramo(row["ramo"] or "") or normalize_person_name(row["ramo"] or "") or "Sin ramo"
+                comision_by_compania[compania_label] = comision_by_compania.get(compania_label, 0.0) + amount
+                comision_by_ramo[ramo_label] = comision_by_ramo.get(ramo_label, 0.0) + amount
+
+            comision_companias = sorted(
+                (
+                    {"label": label, "total": round(total, 2)}
+                    for label, total in comision_by_compania.items()
+                ),
+                key=lambda item: item["total"],
+                reverse=True,
+            )[:10]
+            comision_ramos = sorted(
+                (
+                    {"label": label, "total": round(total, 2)}
+                    for label, total in comision_by_ramo.items()
+                ),
+                key=lambda item: item["total"],
+                reverse=True,
+            )[:10]
+
             seguros_totals_year = compute_seguros_contabilidad_totals(conn, empresa_id, year=year)
             seguros_totals_total = compute_seguros_contabilidad_totals(conn, empresa_id)
 
@@ -14992,6 +15048,8 @@ class Handler(BaseHTTPRequestHandler):
                     },
                     "series": series_payload,
                     "responsables": [dict(r) for r in responsables],
+                    "comision_companias": comision_companias,
+                    "comision_ramos": comision_ramos,
                 },
             )
             return

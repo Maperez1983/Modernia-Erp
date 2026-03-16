@@ -1141,6 +1141,7 @@ const state = {
   segurosRamoSelected: "",
   segurosCrmFilterRamo: "",
   segurosCrmFilterCompania: "",
+  segurosCrmEstadoContains: "",
   segurosBdtSort: null,
   segurosKpisCache: null,
   segurosOcrClienteId: "",
@@ -1857,6 +1858,8 @@ const fincasDashboardKpis = document.getElementById("fincasDashboardKpis");
 const fincasPresupuestoChart = document.getElementById("fincasPresupuestoChart");
 const fincasResponsableChart = document.getElementById("fincasResponsableChart");
 const fincasConversionChart = document.getElementById("fincasConversionChart");
+const fincasComisionCompaniaChart = document.getElementById("fincasComisionCompaniaChart");
+const fincasComisionRamoChart = document.getElementById("fincasComisionRamoChart");
 const fincasBdtTabs = document.getElementById("fincasBdtTabs");
 const renewalAlert = document.getElementById("renewalAlert");
 const companySummary = document.getElementById("companySummary");
@@ -8682,6 +8685,10 @@ const renderFincasDashboard = (empresaId) => {
     fincasDashboardKpis.innerHTML = "";
     const series = data.series || [];
     const current = data.current || {};
+    const comisionCompanias = data.comision_companias || [];
+    const comisionRamos = data.comision_ramos || [];
+    const topCompania = comisionCompanias[0] || null;
+    const topRamo = comisionRamos[0] || null;
     const currentTotal =
       (current.presupuesto || 0) + (current.contratada || 0) + (current.en_vigor || 0);
     const targetYear = String(new Date().getFullYear());
@@ -8715,31 +8722,66 @@ const renderFincasDashboard = (empresaId) => {
         title: `Conversión ${current.year || selectedYear}`,
         value: `${(current.conversion || 0).toFixed(1)}%`,
         note: "En vigor / presupuestos",
+        action: () => openSegurosBdtFromDashboard({ estadoMode: "en_vigor" }),
       },
       {
         title: `Presupuestos ${current.year || selectedYear}`,
         value: numberFormatter.format(current.presupuesto || 0),
         note: "En estado Presupuesto",
+        action: () =>
+          openSegurosBdtFromDashboard({
+            estadoMode: "no_vigor",
+            estadoContains: "presupuesto",
+          }),
       },
       {
         title: `En vigor ${current.year || selectedYear}`,
         value: numberFormatter.format(current.en_vigor || 0),
         note: "Pólizas activas",
+        action: () => openSegurosBdtFromDashboard({ estadoMode: "en_vigor" }),
       },
       {
         title: "Conversión total",
         value: `${(current.conversion_total || 0).toFixed(1)}%`,
         note: "En vigor / presupuestos",
+        action: () => openSegurosBdtFromDashboard({ estadoMode: "en_vigor" }),
       },
       {
         title: "Presupuestos total",
         value: numberFormatter.format(current.presupuesto_total || 0),
         note: "Histórico completo",
+        action: () =>
+          openSegurosBdtFromDashboard({
+            estadoMode: "no_vigor",
+            estadoContains: "presupuesto",
+          }),
+      },
+      {
+        title: `Top compañía ${current.year || selectedYear}`,
+        value: topCompania ? euroFormatter.format(topCompania.total || 0) : euroFormatter.format(0),
+        note: topCompania ? topCompania.label : "Sin datos",
+      },
+      {
+        title: `Top ramo ${current.year || selectedYear}`,
+        value: topRamo ? euroFormatter.format(topRamo.total || 0) : euroFormatter.format(0),
+        note: topRamo ? topRamo.label : "Sin datos",
       },
     ];
     kpis.forEach((kpi) => {
       const card = document.createElement("div");
       card.className = "card";
+      if (typeof kpi.action === "function") {
+        card.classList.add("kpi-clickable");
+        card.setAttribute("role", "button");
+        card.setAttribute("tabindex", "0");
+        card.addEventListener("click", () => kpi.action());
+        card.addEventListener("keydown", (event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            kpi.action();
+          }
+        });
+      }
       card.innerHTML = `
         <h3>${kpi.title}</h3>
         <div class="muted">${kpi.value}</div>
@@ -8775,19 +8817,19 @@ const renderFincasDashboard = (empresaId) => {
           {
             label: "Presupuesto",
             values: presupuestos,
-            color: "#7e8878",
+            color: "#5F7A61",
             format: (value) => numberFormatter.format(value),
           },
           {
             label: "En vigor",
             values: enVigor,
-            color: "#824c45",
+            color: "#3C6E71",
             format: (value) => numberFormatter.format(value),
           },
           {
             label: "Conversión",
             values: conversion,
-            color: "#3f5d5a",
+            color: "#2B2B2B",
             format: (value) => `${Number(value || 0).toFixed(1)}%`,
             type: "line",
             scale: "percent",
@@ -8806,7 +8848,7 @@ const renderFincasDashboard = (empresaId) => {
           {
             label: "Pólizas",
             values: respValues,
-            color: "#d7b04c",
+            color: "#3C6E71",
             format: (value) => numberFormatter.format(value),
           },
         ],
@@ -8820,8 +8862,48 @@ const renderFincasDashboard = (empresaId) => {
           {
             label: "Conversión",
             values: conversion,
-            color: "#3f5d5a",
+            color: "#3C6E71",
             format: (value) => `${Number(value || 0).toFixed(1)}%`,
+          },
+        ],
+        { legend: false, showValues: true, tooltip: true }
+      );
+
+      const comisionCompaniaLabels = comisionCompanias.length
+        ? comisionCompanias.map((item) => item.label)
+        : ["Sin datos"];
+      const comisionCompaniaValues = comisionCompanias.length
+        ? comisionCompanias.map((item) => Number(item.total || 0))
+        : [0];
+      drawBarChart(
+        fincasComisionCompaniaChart,
+        comisionCompaniaLabels,
+        [
+          {
+            label: "Comisionado",
+            values: comisionCompaniaValues,
+            color: "#3C6E71",
+            format: (value) => euroFormatter.format(value),
+          },
+        ],
+        { legend: false, showValues: true, tooltip: true }
+      );
+
+      const comisionRamoLabels = comisionRamos.length
+        ? comisionRamos.map((item) => item.label)
+        : ["Sin datos"];
+      const comisionRamoValues = comisionRamos.length
+        ? comisionRamos.map((item) => Number(item.total || 0))
+        : [0];
+      drawBarChart(
+        fincasComisionRamoChart,
+        comisionRamoLabels,
+        [
+          {
+            label: "Comisionado",
+            values: comisionRamoValues,
+            color: "#5F7A61",
+            format: (value) => euroFormatter.format(value),
           },
         ],
         { legend: false, showValues: true, tooltip: true }
@@ -11308,6 +11390,15 @@ const loadSegurosCrm = () => {
         });
       }
     }
+    const estadoContains = normalizeSimple(state.segurosCrmEstadoContains || "");
+    if (estadoContains) {
+      const estadoIndex = columns.indexOf("estado");
+      if (estadoIndex >= 0) {
+        rows = rows.filter((row) =>
+          normalizeSimple(row[estadoIndex] || "").includes(estadoContains)
+        );
+      }
+    }
     const ramoFilter = normalizeSimple(state.segurosCrmFilterRamo || "");
     if (ramoFilter) {
       const ramoIndex = columns.indexOf("ramo");
@@ -11329,10 +11420,12 @@ const loadSegurosCrm = () => {
       (q ||
         filtroCliente ||
         (segurosEstadoFilter && segurosEstadoFilter.value !== "all") ||
+        estadoContains ||
         ramoFilter ||
         companiaFilter)
     ) {
       const tags = [];
+      if (estadoContains) tags.push(`estado: ${state.segurosCrmEstadoContains}`);
       if (ramoFilter) tags.push(`ramo: ${state.segurosCrmFilterRamo}`);
       if (companiaFilter) tags.push(`compañía: ${state.segurosCrmFilterCompania}`);
       const suffix = tags.length ? ` · ${tags.join(" · ")}` : "";
@@ -11402,6 +11495,21 @@ const applySegurosBdtDashboardFilter = ({ ramo = "", compania = "" } = {}) => {
     state.segurosCrmFilterRamo = nextRamo;
     state.segurosCrmFilterCompania = nextCompania;
   }
+  if (segurosCrmSearch) segurosCrmSearch.value = "";
+  if (segurosCrmClienteInput) segurosCrmClienteInput.value = "";
+  if (segurosCrmClienteId) segurosCrmClienteId.value = "";
+  state.segurosCrmEstadoContains = "";
+  setSegurosTab("bdt");
+  loadSegurosCrm();
+};
+
+const openSegurosBdtFromDashboard = ({ estadoMode = "all", estadoContains = "" } = {}) => {
+  if (segurosEstadoFilter) {
+    segurosEstadoFilter.value = estadoMode;
+  }
+  state.segurosCrmEstadoContains = String(estadoContains || "").trim();
+  state.segurosCrmFilterRamo = "";
+  state.segurosCrmFilterCompania = "";
   if (segurosCrmSearch) segurosCrmSearch.value = "";
   if (segurosCrmClienteInput) segurosCrmClienteInput.value = "";
   if (segurosCrmClienteId) segurosCrmClienteId.value = "";
@@ -18390,6 +18498,7 @@ if (clientesShowAllBtn) {
 
 if (segurosCrmSearch) {
   segurosCrmSearch.addEventListener("input", () => {
+    state.segurosCrmEstadoContains = "";
     scheduleSave("seguros-crm-search", () => {
       loadSegurosCrm();
     }, 300);
@@ -18398,6 +18507,7 @@ if (segurosCrmSearch) {
 
 if (segurosEstadoFilter) {
   segurosEstadoFilter.addEventListener("change", () => {
+    state.segurosCrmEstadoContains = "";
     loadSegurosCrm();
   });
 }

@@ -2073,6 +2073,22 @@ body.crm-fin #companySummary {
   font-size: 15px;
 }
 
+.dashboard-kpis .kpi-clickable {
+  cursor: pointer;
+  transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease;
+}
+
+.dashboard-kpis .kpi-clickable:hover {
+  transform: translateY(-1px);
+  border-color: rgba(60, 110, 113, 0.5);
+  box-shadow: 0 12px 24px rgba(18, 16, 12, 0.12);
+}
+
+.dashboard-kpis .kpi-clickable:focus-visible {
+  outline: 2px solid rgba(60, 110, 113, 0.65);
+  outline-offset: 2px;
+}
+
 .dashboard-charts {
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   gap: 14px;
