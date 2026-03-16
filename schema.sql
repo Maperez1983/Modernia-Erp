@@ -450,6 +450,9 @@ CREATE TABLE IF NOT EXISTS seguros_campanas (
   fecha_fin TEXT,
   descripcion TEXT,
   url TEXT,
+  precio_base REAL,
+  comision_pct REAL,
+  comision_fija REAL,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );

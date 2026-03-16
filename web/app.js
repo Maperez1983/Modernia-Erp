@@ -1592,6 +1592,13 @@ const segurosCampanasStatus = document.getElementById("segurosCampanasStatus");
 const segurosCampanasTable = document.getElementById("segurosCampanasTable");
 const segurosCampanasInfo = document.getElementById("segurosCampanasInfo");
 const segurosCampanasSearch = document.getElementById("segurosCampanasSearch");
+const segurosRecClienteInput = document.getElementById("segurosRecClienteInput");
+const segurosRecClienteId = document.getElementById("segurosRecClienteId");
+const segurosRecClientes = document.getElementById("segurosRecClientes");
+const segurosRecRamoInput = document.getElementById("segurosRecRamoInput");
+const segurosRecRun = document.getElementById("segurosRecRun");
+const segurosRecStatus = document.getElementById("segurosRecStatus");
+const segurosRecTable = document.getElementById("segurosRecTable");
 const segurosComisionesForm = document.getElementById("segurosComisionesForm");
 const segurosComisionesStatus = document.getElementById("segurosComisionesStatus");
 const segurosComisionesTable = document.getElementById("segurosComisionesTable");
@@ -11474,6 +11481,13 @@ const loadSegurosCrm = () => {
         segurosReferidosClienteId
       );
     }
+    if (segurosRecClientes) {
+      populateAgendaClientes(
+        segurosRecClientes,
+        segurosRecClienteInput,
+        segurosRecClienteId
+      );
+    }
   }).catch((error) => {
     const message = error?.data?.error || error?.message || "No se pudieron cargar las pólizas.";
     segurosCrmTable.innerHTML = `<p class='muted'>${message}</p>`;
@@ -12221,7 +12235,7 @@ const loadSegurosCampanas = () => {
     const rows = filterRowsByQuery(
       rawRows,
       segurosCampanasSearch ? segurosCampanasSearch.value : "",
-      ["compania", "nombre", "ramo", "origen", "descripcion", "url"]
+      ["compania", "nombre", "ramo", "origen", "descripcion", "url", "precio_base", "comision_pct", "comision_fija"]
     );
     if (!rows.length) {
       segurosCampanasTable.innerHTML = "<p class='muted'>Sin campañas.</p>";
@@ -12231,7 +12245,7 @@ const loadSegurosCampanas = () => {
     const table = document.createElement("table");
     const thead = document.createElement("thead");
     const trHead = document.createElement("tr");
-    ["compania", "nombre", "ramo", "origen", "fecha_inicio", "fecha_fin", "url"].forEach((col) => {
+    ["compania", "nombre", "ramo", "origen", "fecha_inicio", "fecha_fin", "precio_base", "comision_pct", "comision_fija", "url"].forEach((col) => {
       const th = document.createElement("th");
       th.textContent = formatHeader(col);
       trHead.appendChild(th);
@@ -12249,11 +12263,15 @@ const loadSegurosCampanas = () => {
         row.origen || "-",
         row.fecha_inicio || "-",
         row.fecha_fin || "-",
+        row.precio_base,
+        row.comision_pct,
+        row.comision_fija,
         link,
       ];
-      const cols = ["compania", "nombre", "ramo", "origen", "fecha_inicio", "fecha_fin", "url"];
+      const cols = ["compania", "nombre", "ramo", "origen", "fecha_inicio", "fecha_fin", "precio_base", "comision_pct", "comision_fija", "url"];
       values.forEach((value, idx) => {
         const td = document.createElement("td");
+        const col = cols[idx];
         if (cols[idx] === "url" && row.url) {
           const a = document.createElement("a");
           a.href = row.url;
@@ -12261,8 +12279,14 @@ const loadSegurosCampanas = () => {
           a.textContent = "Ver";
           td.appendChild(a);
         } else {
-          if (!applyCompanyCell(td, cols[idx], value, { compact: true }) && !applyRamoCell(td, cols[idx], value)) {
-            const formatted = formatCell(cols[idx], value);
+          if (!applyCompanyCell(td, col, value, { compact: true }) && !applyRamoCell(td, col, value)) {
+            let renderValue = value;
+            if ((col === "precio_base" || col === "comision_fija") && value !== null && value !== undefined && value !== "") {
+              renderValue = euroFormatter.format(Number(value) || 0);
+            } else if (col === "comision_pct" && value !== null && value !== undefined && value !== "") {
+              renderValue = `${Number(value || 0).toFixed(2)}%`;
+            }
+            const formatted = formatCell(col, renderValue);
             td.textContent = formatted === null ? "" : formatted;
           }
         }
@@ -12275,6 +12299,79 @@ const loadSegurosCampanas = () => {
     segurosCampanasTable.appendChild(table);
     segurosCampanasInfo.textContent = `Mostrando ${rows.length} campañas.`;
   });
+};
+
+const loadSegurosRecomendacion = () => {
+  if (!segurosRecTable || !segurosRecStatus) return;
+  const clienteData = resolveClienteFromInput(segurosRecClienteInput, segurosRecClienteId);
+  if (!clienteData.cliente_id) {
+    segurosRecStatus.textContent = "Selecciona un cliente.";
+    segurosRecTable.innerHTML = "";
+    return;
+  }
+  const params = new URLSearchParams({ cliente_id: clienteData.cliente_id, limit: "5" });
+  const ramo = String(segurosRecRamoInput?.value || "").trim();
+  if (ramo) params.set("ramo", ramo);
+  segurosRecStatus.textContent = "Analizando campañas...";
+  api(`/api/seguros_recomendacion?${params.toString()}`)
+    .then((data) => {
+      const rows = data.rows || [];
+      if (!rows.length) {
+        segurosRecTable.innerHTML = "<p class='muted'>Sin campañas vigentes para recomendar.</p>";
+        segurosRecStatus.textContent = "";
+        return;
+      }
+      const table = document.createElement("table");
+      const thead = document.createElement("thead");
+      const trHead = document.createElement("tr");
+      ["#", "compania", "campaña", "ramo", "precio estimado", "comisión estimada", "score", "motivo"].forEach((col) => {
+        const th = document.createElement("th");
+        th.textContent = col;
+        trHead.appendChild(th);
+      });
+      thead.appendChild(trHead);
+      table.appendChild(thead);
+      const tbody = document.createElement("tbody");
+      rows.forEach((row, idx) => {
+        const tr = document.createElement("tr");
+        const cells = [
+          String(idx + 1),
+          row.compania || "-",
+          row.nombre || "-",
+          row.ramo || "-",
+          row.precio_est !== null && row.precio_est !== undefined ? euroFormatter.format(Number(row.precio_est) || 0) : "-",
+          row.comision_est !== null && row.comision_est !== undefined ? euroFormatter.format(Number(row.comision_est) || 0) : "-",
+          `${Number(row.score || 0).toFixed(1)}`,
+          row.motivo || "-",
+        ];
+        cells.forEach((cell, i) => {
+          const td = document.createElement("td");
+          if (i === 1 && row.compania) {
+            applyCompanyCell(td, "compania", row.compania, { compact: true });
+          } else if (i === 2 && row.url) {
+            const a = document.createElement("a");
+            a.href = row.url;
+            a.target = "_blank";
+            a.textContent = row.nombre || "Campaña";
+            td.appendChild(a);
+          } else {
+            td.textContent = cell;
+          }
+          tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+      segurosRecTable.innerHTML = "";
+      segurosRecTable.appendChild(table);
+      const w = data.weights || {};
+      segurosRecStatus.textContent = `Peso precio ${(Number(w.precio || 0) * 100).toFixed(0)}% · comisión ${(Number(w.comision || 0) * 100).toFixed(0)}%`;
+    })
+    .catch((error) => {
+      const message = error?.data?.error || error?.message || "No se pudo calcular la recomendación.";
+      segurosRecTable.innerHTML = `<p class='muted'>${message}</p>`;
+      segurosRecStatus.textContent = "";
+    });
 };
 
 const segurosComisionTipoFromProduccion = (produccion = "") => {
@@ -18533,6 +18630,20 @@ if (segurosCampanasSearch) {
     scheduleSave("seguros-campanas-search", () => {
       loadSegurosCampanas();
     }, 200);
+  });
+}
+
+if (segurosRecRun) {
+  segurosRecRun.addEventListener("click", () => {
+    loadSegurosRecomendacion();
+  });
+}
+
+if (segurosRecClienteInput) {
+  segurosRecClienteInput.addEventListener("change", () => {
+    if (resolveClienteFromInput(segurosRecClienteInput, segurosRecClienteId).cliente_id) {
+      loadSegurosRecomendacion();
+    }
   });
 }
 

@@ -7030,6 +7030,9 @@ def ensure_tables(db_path):
           fecha_fin TEXT,
           descripcion TEXT,
           url TEXT,
+          precio_base REAL,
+          comision_pct REAL,
+          comision_fija REAL,
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL
         )
@@ -7038,6 +7041,12 @@ def ensure_tables(db_path):
     campanas_cols = [row[1] for row in conn.execute("PRAGMA table_info(seguros_campanas)").fetchall()]
     if "origen" not in campanas_cols:
         conn.execute("ALTER TABLE seguros_campanas ADD COLUMN origen TEXT")
+    if "precio_base" not in campanas_cols:
+        conn.execute("ALTER TABLE seguros_campanas ADD COLUMN precio_base REAL")
+    if "comision_pct" not in campanas_cols:
+        conn.execute("ALTER TABLE seguros_campanas ADD COLUMN comision_pct REAL")
+    if "comision_fija" not in campanas_cols:
+        conn.execute("ALTER TABLE seguros_campanas ADD COLUMN comision_fija REAL")
     try:
         seguros_cols = [row[1] for row in conn.execute("PRAGMA table_info(seguros)").fetchall()]
         if "poliza_key" not in seguros_cols:
@@ -10973,13 +10982,16 @@ class Handler(BaseHTTPRequestHandler):
                 ),
             )
         elif parsed.path == "/api/seguros_campanas":
+            precio_base = parse_money_value(payload.get("precio_base"))
+            comision_pct = parse_money_value(payload.get("comision_pct"))
+            comision_fija = parse_money_value(payload.get("comision_fija"))
             conn.execute(
                 """
                 INSERT INTO seguros_campanas (
-                  id, compania, nombre, ramo, origen, fecha_inicio, fecha_fin, descripcion, url,
+                  id, compania, nombre, ramo, origen, fecha_inicio, fecha_fin, descripcion, url, precio_base, comision_pct, comision_fija,
                   created_at, updated_at
                 ) VALUES (
-                  ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
                 )
                 """,
                 (
@@ -10992,6 +11004,9 @@ class Handler(BaseHTTPRequestHandler):
                     payload.get("fecha_fin"),
                     payload.get("descripcion"),
                     payload.get("url"),
+                    precio_base if abs(precio_base) > 0.0001 else None,
+                    comision_pct if abs(comision_pct) > 0.0001 else None,
+                    comision_fija if abs(comision_fija) > 0.0001 else None,
                     now,
                     now,
                 ),
@@ -11001,12 +11016,30 @@ class Handler(BaseHTTPRequestHandler):
             if not record_id:
                 json_response(self, {"error": "id requerido"}, status=400)
                 return
-            allowed = ("compania", "nombre", "ramo", "origen", "fecha_inicio", "fecha_fin", "descripcion", "url")
+            allowed = (
+                "compania",
+                "nombre",
+                "ramo",
+                "origen",
+                "fecha_inicio",
+                "fecha_fin",
+                "descripcion",
+                "url",
+                "precio_base",
+                "comision_pct",
+                "comision_fija",
+            )
             updates = {}
             for key in allowed:
                 if key not in payload:
                     continue
-                updates[key] = canonicalize_ramo(payload.get(key)) if key == "ramo" else payload.get(key)
+                if key == "ramo":
+                    updates[key] = canonicalize_ramo(payload.get(key))
+                elif key in {"precio_base", "comision_pct", "comision_fija"}:
+                    num = parse_money_value(payload.get(key))
+                    updates[key] = num if abs(num) > 0.0001 else None
+                else:
+                    updates[key] = payload.get(key)
             if not updates:
                 json_response(self, {"error": "Sin cambios"}, status=400)
                 return
@@ -13041,12 +13074,196 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/seguros_campanas":
             rows = conn.execute(
                 """
-                SELECT id, compania, nombre, ramo, origen, fecha_inicio, fecha_fin, descripcion, url
+                SELECT id, compania, nombre, ramo, origen, fecha_inicio, fecha_fin, descripcion, url,
+                       precio_base, comision_pct, comision_fija
                 FROM seguros_campanas
                 ORDER BY fecha_inicio DESC, created_at DESC
                 """
             ).fetchall()
             json_response(self, {"rows": [dict(r) for r in rows]})
+            return
+
+        if path == "/api/seguros_recomendacion":
+            cliente_id = (params.get("cliente_id", [""])[0] or "").strip()
+            ramo_raw = (params.get("ramo", [""])[0] or "").strip()
+            try:
+                limit = max(1, min(10, int((params.get("limit", ["5"])[0] or "5").strip() or "5")))
+            except Exception:
+                limit = 5
+            if not cliente_id:
+                json_response(self, {"error": "cliente_id requerido"}, status=400)
+                return
+            ramo = canonicalize_ramo(ramo_raw)
+
+            pref = conn.execute(
+                """
+                SELECT prioridad_precio, prioridad_compania, prioridad_coberturas
+                FROM seguros_preferencias
+                WHERE cliente_id = ?
+                LIMIT 1
+                """,
+                (cliente_id,),
+            ).fetchone()
+            prioriza_precio = int(pref["prioridad_precio"] or 0) if pref else 0
+            if prioriza_precio:
+                w_precio = 0.75
+                w_comision = 0.25
+            else:
+                w_precio = 0.6
+                w_comision = 0.4
+
+            cliente_comp_row = conn.execute(
+                """
+                SELECT compania, COUNT(*) AS total
+                FROM seguros
+                WHERE cliente_id = ?
+                  AND compania IS NOT NULL
+                  AND TRIM(compania) <> ''
+                GROUP BY compania
+                ORDER BY total DESC
+                LIMIT 1
+                """,
+                (cliente_id,),
+            ).fetchone()
+            cliente_comp_fav = normalize_company_key(cliente_comp_row["compania"]) if cliente_comp_row else ""
+
+            today = datetime.now().strftime("%Y-%m-%d")
+            where = [
+                "(fecha_inicio IS NULL OR TRIM(fecha_inicio) = '' OR DATE(fecha_inicio) <= DATE(?))",
+                "(fecha_fin IS NULL OR TRIM(fecha_fin) = '' OR DATE(fecha_fin) >= DATE(?))",
+            ]
+            values = [today, today]
+            if ramo:
+                where.append("(TRIM(COALESCE(ramo, '')) = '' OR LOWER(TRIM(ramo)) = LOWER(TRIM(?)))")
+                values.append(ramo)
+            campaigns = conn.execute(
+                f"""
+                SELECT id, compania, nombre, ramo, origen, fecha_inicio, fecha_fin, descripcion, url,
+                       precio_base, comision_pct, comision_fija
+                FROM seguros_campanas
+                WHERE {' AND '.join(where)}
+                ORDER BY COALESCE(fecha_inicio, '') DESC, created_at DESC
+                """,
+                values,
+            ).fetchall()
+
+            comp_hist = conn.execute(
+                """
+                SELECT compania, ramo,
+                       AVG(COALESCE(prima_total, 0)) AS avg_prima,
+                       AVG(COALESCE(comision, 0)) AS avg_comision
+                FROM seguros
+                WHERE compania IS NOT NULL
+                  AND TRIM(compania) <> ''
+                GROUP BY compania, ramo
+                """,
+            ).fetchall()
+            hist_by_key = {}
+            for row in comp_hist:
+                key = (
+                    normalize_company_key(row["compania"] or ""),
+                    normalize_lookup_text(row["ramo"] or ""),
+                )
+                hist_by_key[key] = {
+                    "avg_prima": parse_money_value(row["avg_prima"]),
+                    "avg_comision": parse_money_value(row["avg_comision"]),
+                }
+
+            items = []
+            for row in campaigns:
+                comp = normalize_company_name(row["compania"] or "").strip()
+                comp_key = normalize_company_key(comp)
+                ramo_label = canonicalize_ramo(row["ramo"] or "") or normalize_person_name(row["ramo"] or "")
+                ramo_key = normalize_lookup_text(ramo_label)
+                hist = hist_by_key.get((comp_key, ramo_key)) or hist_by_key.get((comp_key, ""))
+
+                precio_est = parse_money_value(row["precio_base"])
+                if abs(precio_est) < 0.0001 and hist:
+                    precio_est = parse_money_value(hist.get("avg_prima"))
+                precio_est = round(precio_est, 2) if abs(precio_est) > 0.0001 else None
+
+                comision_est = parse_money_value(row["comision_fija"])
+                if abs(comision_est) < 0.0001:
+                    pct = parse_money_value(row["comision_pct"])
+                    if abs(pct) > 0.0001 and precio_est is not None:
+                        comision_est = (precio_est * pct) / 100.0
+                if abs(comision_est) < 0.0001 and hist:
+                    comision_est = parse_money_value(hist.get("avg_comision"))
+                comision_est = round(comision_est, 2) if abs(comision_est) > 0.0001 else None
+
+                if precio_est is None and comision_est is None:
+                    continue
+
+                items.append(
+                    {
+                        "campana_id": row["id"],
+                        "compania": comp or "Sin compañía",
+                        "nombre": row["nombre"] or "Campaña",
+                        "ramo": ramo_label or "-",
+                        "origen": row["origen"] or "",
+                        "fecha_inicio": row["fecha_inicio"] or "",
+                        "fecha_fin": row["fecha_fin"] or "",
+                        "url": row["url"] or "",
+                        "precio_est": precio_est,
+                        "comision_est": comision_est,
+                    }
+                )
+
+            if not items:
+                json_response(
+                    self,
+                    {
+                        "rows": [],
+                        "weights": {"precio": w_precio, "comision": w_comision},
+                        "ramo": ramo,
+                    },
+                )
+                return
+
+            precios = [item["precio_est"] for item in items if item["precio_est"] is not None]
+            comisiones = [item["comision_est"] for item in items if item["comision_est"] is not None]
+            p_min = min(precios) if precios else None
+            p_max = max(precios) if precios else None
+            c_min = min(comisiones) if comisiones else None
+            c_max = max(comisiones) if comisiones else None
+
+            def score_precio(value):
+                if value is None or p_min is None or p_max is None:
+                    return 50.0
+                if abs(p_max - p_min) < 0.0001:
+                    return 50.0
+                return max(0.0, min(100.0, ((p_max - value) / (p_max - p_min)) * 100.0))
+
+            def score_comision(value):
+                if value is None or c_min is None or c_max is None:
+                    return 50.0
+                if abs(c_max - c_min) < 0.0001:
+                    return 50.0
+                return max(0.0, min(100.0, ((value - c_min) / (c_max - c_min)) * 100.0))
+
+            for item in items:
+                s_precio = score_precio(item["precio_est"])
+                s_comision = score_comision(item["comision_est"])
+                bonus = 4.0 if cliente_comp_fav and normalize_company_key(item["compania"]) == cliente_comp_fav else 0.0
+                final = (s_precio * w_precio) + (s_comision * w_comision) + bonus
+                item["score_precio"] = round(s_precio, 2)
+                item["score_comision"] = round(s_comision, 2)
+                item["score"] = round(max(0.0, min(100.0, final)), 2)
+                item["motivo"] = (
+                    "Mejor equilibrio precio/comisión"
+                    if item["score_precio"] > 55 and item["score_comision"] > 55
+                    else ("Mejor precio" if item["score_precio"] >= item["score_comision"] else "Mejor comisión")
+                )
+
+            items.sort(key=lambda r: (r.get("score") or 0), reverse=True)
+            json_response(
+                self,
+                {
+                    "rows": items[:limit],
+                    "weights": {"precio": w_precio, "comision": w_comision},
+                    "ramo": ramo,
+                },
+            )
             return
 
         if path == "/api/seguros_comisiones":
