@@ -2073,27 +2073,40 @@ body.crm-fin #companySummary {
   font-size: 15px;
 }
 
+.dashboard-charts {
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 14px;
+}
+
 .chart-card {
-  background: #ffffff;
-  border-radius: 14px;
-  border: 1px solid var(--line);
-  padding: 12px 14px 16px;
-  min-height: 360px;
+  background:
+    linear-gradient(155deg, rgba(255, 255, 255, 0.96) 0%, rgba(246, 250, 248, 0.92) 100%),
+    var(--cloud);
+  border-radius: 18px;
+  border: 1px solid rgba(190, 206, 198, 0.85);
+  border-top: 3px solid rgba(60, 110, 113, 0.32);
+  padding: 14px 16px 16px;
+  min-height: 330px;
   display: grid;
-  gap: 8px;
+  gap: 10px;
   overflow: hidden;
+  box-shadow: 0 12px 26px rgba(18, 16, 12, 0.08);
 }
 
 .chart-card h4 {
   margin: 0;
-  color: var(--ink-soft);
+  color: var(--ink);
   font-size: 14px;
+  font-family: var(--font-display);
+  letter-spacing: 0.2px;
+  font-weight: 600;
 }
 
 .chart-card canvas {
   display: block;
   width: 100%;
-  height: 300px;
+  height: 275px;
+  border-radius: 10px;
 }
 
 .chart-tooltip {
@@ -2417,6 +2430,18 @@ body.density-compact [id$="Table"] table {
   .tab {
     padding: 8px 12px;
     font-size: 11px;
+  }
+
+  .dashboard-charts {
+    grid-template-columns: 1fr;
+  }
+
+  .chart-card {
+    min-height: 280px;
+  }
+
+  .chart-card canvas {
+    height: 220px;
   }
 
   .density-toggle {
