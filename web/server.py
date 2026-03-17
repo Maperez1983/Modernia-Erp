@@ -1446,6 +1446,29 @@ def extract_campaign_from_email(message_obj):
     compania = detect_company_from_metadata(subject, sender, body)
     if not compania:
         compania = detect_company_from_text(search_blob)
+    if not compania and from_email and "@" in from_email:
+        domain = from_email.split("@", 1)[-1].lower().strip()
+        domain_hits = {
+            "mapfre.com": "Mapfre",
+            "allianz.es": "Allianz",
+            "axa.es": "AXA",
+            "zurich.com": "Zurich",
+            "lineadirecta.com": "Línea Directa",
+            "santalucia.es": "Santa Lucia",
+            "caser.es": "Caser",
+            "ocaso.es": "Ocaso",
+            "generali.com": "Generali",
+            "fiatc.es": "Fiatc",
+            "mutua.es": "Mutua Madrileña",
+            "dkv.es": "DKV",
+            "adeslas.es": "Adeslas",
+            "asisa.es": "Asisa",
+            "sanitas.es": "Sanitas",
+        }
+        for key, name in domain_hits.items():
+            if domain == key or domain.endswith(f".{key}"):
+                compania = name
+                break
     ramo = detect_campaign_ramo(search_blob) or canonicalize_ramo(search_blob)
     if not ramo:
         ramo_match = re.search(r"\bramo\s*[:\-]?\s*([A-Za-zÁÉÍÓÚÜÑñçÇ\s]{3,40})", body or "", re.IGNORECASE)
@@ -1480,10 +1503,29 @@ def extract_campaign_from_email(message_obj):
 
     url_match = re.search(r"(https?://[^\s<>\"]+)", search_blob, re.IGNORECASE)
     url = (url_match.group(1).rstrip(").,;]") if url_match else "")
-    campaign_name = re.sub(r"^(RE|RV|FW|FWD)\s*:\s*", "", subject, flags=re.IGNORECASE).strip() or "Campaña correo"
+    campaign_name = re.sub(r"^(RE|RV|FW|FWD)\s*:\s*", "", subject, flags=re.IGNORECASE).strip()
+    if not campaign_name:
+        campaign_name = f"Campaña correo {datetime.now().strftime('%Y-%m-%d')}"
+    if compania and campaign_name.lower() in {"campaña", "campana", "campaña correo"}:
+        campaign_name = f"Campaña {compania}"
     description = re.sub(r"\s+", " ", body).strip()
+    if len(description) < 20:
+        fallback_desc = " · ".join(part for part in [f"Asunto: {subject}" if subject else "", f"Remitente: {sender}" if sender else ""] if part)
+        description = fallback_desc or description
     if len(description) > 700:
         description = f"{description[:697]}..."
+
+    quality = 0
+    if compania:
+        quality += 1
+    if ramo:
+        quality += 1
+    if url:
+        quality += 1
+    if abs(precio_base) > 0.0001 or abs(comision_pct) > 0.0001 or abs(comision_fija) > 0.0001:
+        quality += 1
+    if description and len(description) >= 40:
+        quality += 1
 
     return {
         "compania": normalize_company_name(compania),
@@ -1498,6 +1540,7 @@ def extract_campaign_from_email(message_obj):
         "comision_pct": round(comision_pct, 2) if abs(comision_pct) > 0.0001 else None,
         "comision_fija": round(comision_fija, 2) if abs(comision_fija) > 0.0001 else None,
         "remitente": sender,
+        "quality": quality,
     }
 
 
@@ -1582,7 +1625,7 @@ def import_campaigns_from_mailbox(conn, payload, now):
                             pass
                     continue
                 parsed = extract_campaign_from_email(msg)
-                if not parsed.get("compania") and not parsed.get("ramo"):
+                if int(parsed.get("quality") or 0) < 2:
                     skipped += 1
                     conn.execute(
                         """
@@ -1595,7 +1638,7 @@ def import_campaigns_from_mailbox(conn, payload, now):
                             dedupe_key,
                             imap_uid,
                             parsed.get("remitente") or sender,
-                            subject,
+                            f"[IGNORADO BAJA_CALIDAD] {subject}",
                             date_header,
                             None,
                             now,
