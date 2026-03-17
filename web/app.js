@@ -12238,7 +12238,7 @@ const loadSegurosCampanas = () => {
     const rows = filterRowsByQuery(
       rawRows,
       segurosCampanasSearch ? segurosCampanasSearch.value : "",
-      ["compania", "nombre", "ramo", "origen", "descripcion", "url", "precio_base", "comision_pct", "comision_fija"]
+      ["compania", "nombre", "ramo", "origen", "descripcion", "url", "adjunto_url", "adjunto_nombre", "precio_base", "comision_pct", "comision_fija"]
     );
     if (!rows.length) {
       segurosCampanasTable.innerHTML = "<p class='muted'>Sin campañas.</p>";
@@ -12248,7 +12248,7 @@ const loadSegurosCampanas = () => {
     const table = document.createElement("table");
     const thead = document.createElement("thead");
     const trHead = document.createElement("tr");
-    ["compania", "nombre", "ramo", "origen", "fecha_inicio", "fecha_fin", "precio_base", "comision_pct", "comision_fija", "url"].forEach((col) => {
+    ["compania", "nombre", "ramo", "origen", "fecha_inicio", "fecha_fin", "precio_base", "comision_pct", "comision_fija", "adjunto", "url"].forEach((col) => {
       const th = document.createElement("th");
       th.textContent = formatHeader(col);
       trHead.appendChild(th);
@@ -12259,6 +12259,7 @@ const loadSegurosCampanas = () => {
     rows.forEach((row) => {
       const tr = document.createElement("tr");
       const link = row.url ? "Ver" : "";
+      const adjunto = row.adjunto_url ? (row.adjunto_nombre || "PDF") : "";
       const values = [
         row.compania || "-",
         row.nombre || "-",
@@ -12269,9 +12270,10 @@ const loadSegurosCampanas = () => {
         row.precio_base,
         row.comision_pct,
         row.comision_fija,
+        adjunto,
         link,
       ];
-      const cols = ["compania", "nombre", "ramo", "origen", "fecha_inicio", "fecha_fin", "precio_base", "comision_pct", "comision_fija", "url"];
+      const cols = ["compania", "nombre", "ramo", "origen", "fecha_inicio", "fecha_fin", "precio_base", "comision_pct", "comision_fija", "adjunto", "url"];
       values.forEach((value, idx) => {
         const td = document.createElement("td");
         const col = cols[idx];
@@ -12280,6 +12282,12 @@ const loadSegurosCampanas = () => {
           a.href = row.url;
           a.target = "_blank";
           a.textContent = "Ver";
+          td.appendChild(a);
+        } else if (cols[idx] === "adjunto" && row.adjunto_url) {
+          const a = document.createElement("a");
+          a.href = row.adjunto_url;
+          a.target = "_blank";
+          a.textContent = row.adjunto_nombre || "PDF";
           td.appendChild(a);
         } else {
           if (!applyCompanyCell(td, col, value, { compact: true }) && !applyRamoCell(td, col, value)) {

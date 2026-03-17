@@ -1334,6 +1334,21 @@ def extract_pdf_attachment_text(pdf_bytes, max_pages=2):
                 pass
 
 
+def save_campaign_attachment_file(file_bytes, original_name="campana.pdf"):
+    if not file_bytes:
+        return "", ""
+    safe_name = re.sub(r"[^A-Za-z0-9._-]", "_", os.path.basename(original_name or "campana.pdf"))
+    if not safe_name.lower().endswith(".pdf"):
+        safe_name = f"{safe_name}.pdf"
+    folder = UPLOADS / "seguros_campanas"
+    folder.mkdir(parents=True, exist_ok=True)
+    file_id = os.urandom(16).hex()
+    filename = f"{file_id}_{safe_name}"
+    file_path = folder / filename
+    file_path.write_bytes(file_bytes)
+    return f"/uploads/seguros_campanas/{filename}", safe_name
+
+
 def parse_decimal_amount(value):
     raw = str(value or "").strip()
     if not raw:
@@ -1434,6 +1449,8 @@ def extract_campaign_from_email(message_obj):
     text_parts = []
     html_parts = []
     attachment_parts = []
+    primary_pdf_bytes = b""
+    primary_pdf_name = ""
     if message_obj.is_multipart():
         for part in message_obj.walk():
             if part.get_content_maintype() == "multipart":
@@ -1450,6 +1467,9 @@ def extract_campaign_from_email(message_obj):
                 pdf_text = extract_pdf_attachment_text(payload, max_pages=2)
                 if pdf_text:
                     attachment_parts.append(pdf_text[:12000])
+                if (not primary_pdf_bytes) and payload:
+                    primary_pdf_bytes = payload
+                    primary_pdf_name = filename or "campana.pdf"
                 continue
             if is_attachment:
                 continue
@@ -1582,6 +1602,8 @@ def extract_campaign_from_email(message_obj):
         "comision_fija": round(comision_fija, 2) if abs(comision_fija) > 0.0001 else None,
         "remitente": sender,
         "quality": quality,
+        "adjunto_bytes": primary_pdf_bytes,
+        "adjunto_nombre": primary_pdf_name,
     }
 
 
@@ -1687,13 +1709,25 @@ def import_campaigns_from_mailbox(conn, payload, now):
                     )
                     continue
                 campaign_id = os.urandom(16).hex()
+                adjunto_url = ""
+                adjunto_nombre = ""
+                adjunto_bytes = parsed.get("adjunto_bytes") or b""
+                if adjunto_bytes:
+                    try:
+                        adjunto_url, adjunto_nombre = save_campaign_attachment_file(
+                            adjunto_bytes,
+                            parsed.get("adjunto_nombre") or f"{campaign_id}.pdf",
+                        )
+                    except Exception as exc:
+                        if len(errors) < 5:
+                            errors.append(f"Adjunto PDF no guardado ({subject}): {exc}")
                 conn.execute(
                     """
                     INSERT INTO seguros_campanas (
-                      id, compania, nombre, ramo, origen, fecha_inicio, fecha_fin, descripcion, url, precio_base, comision_pct, comision_fija,
+                      id, compania, nombre, ramo, origen, fecha_inicio, fecha_fin, descripcion, url, adjunto_url, adjunto_nombre, precio_base, comision_pct, comision_fija,
                       created_at, updated_at
                     ) VALUES (
-                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
                     )
                     """,
                     (
@@ -1706,6 +1740,8 @@ def import_campaigns_from_mailbox(conn, payload, now):
                         parsed.get("fecha_fin") or None,
                         parsed.get("descripcion") or None,
                         parsed.get("url") or None,
+                        adjunto_url or None,
+                        adjunto_nombre or None,
                         parsed.get("precio_base"),
                         parsed.get("comision_pct"),
                         parsed.get("comision_fija"),
@@ -7511,6 +7547,8 @@ def ensure_tables(db_path):
           fecha_fin TEXT,
           descripcion TEXT,
           url TEXT,
+          adjunto_url TEXT,
+          adjunto_nombre TEXT,
           precio_base REAL,
           comision_pct REAL,
           comision_fija REAL,
@@ -7536,6 +7574,10 @@ def ensure_tables(db_path):
     campanas_cols = [row[1] for row in conn.execute("PRAGMA table_info(seguros_campanas)").fetchall()]
     if "origen" not in campanas_cols:
         conn.execute("ALTER TABLE seguros_campanas ADD COLUMN origen TEXT")
+    if "adjunto_url" not in campanas_cols:
+        conn.execute("ALTER TABLE seguros_campanas ADD COLUMN adjunto_url TEXT")
+    if "adjunto_nombre" not in campanas_cols:
+        conn.execute("ALTER TABLE seguros_campanas ADD COLUMN adjunto_nombre TEXT")
     if "precio_base" not in campanas_cols:
         conn.execute("ALTER TABLE seguros_campanas ADD COLUMN precio_base REAL")
     if "comision_pct" not in campanas_cols:
@@ -11486,10 +11528,10 @@ class Handler(BaseHTTPRequestHandler):
             conn.execute(
                 """
                 INSERT INTO seguros_campanas (
-                  id, compania, nombre, ramo, origen, fecha_inicio, fecha_fin, descripcion, url, precio_base, comision_pct, comision_fija,
+                  id, compania, nombre, ramo, origen, fecha_inicio, fecha_fin, descripcion, url, adjunto_url, adjunto_nombre, precio_base, comision_pct, comision_fija,
                   created_at, updated_at
                 ) VALUES (
-                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
                 )
                 """,
                 (
@@ -11502,6 +11544,8 @@ class Handler(BaseHTTPRequestHandler):
                     payload.get("fecha_fin"),
                     payload.get("descripcion"),
                     payload.get("url"),
+                    payload.get("adjunto_url"),
+                    payload.get("adjunto_nombre"),
                     precio_base if abs(precio_base) > 0.0001 else None,
                     comision_pct if abs(comision_pct) > 0.0001 else None,
                     comision_fija if abs(comision_fija) > 0.0001 else None,
@@ -11541,6 +11585,8 @@ class Handler(BaseHTTPRequestHandler):
                 "fecha_fin",
                 "descripcion",
                 "url",
+                "adjunto_url",
+                "adjunto_nombre",
                 "precio_base",
                 "comision_pct",
                 "comision_fija",
@@ -13591,7 +13637,7 @@ class Handler(BaseHTTPRequestHandler):
             rows = conn.execute(
                 """
                 SELECT id, compania, nombre, ramo, origen, fecha_inicio, fecha_fin, descripcion, url,
-                       precio_base, comision_pct, comision_fija
+                       adjunto_url, adjunto_nombre, precio_base, comision_pct, comision_fija
                 FROM seguros_campanas
                 ORDER BY fecha_inicio DESC, created_at DESC
                 """
@@ -13655,7 +13701,7 @@ class Handler(BaseHTTPRequestHandler):
             campaigns = conn.execute(
                 f"""
                 SELECT id, compania, nombre, ramo, origen, fecha_inicio, fecha_fin, descripcion, url,
-                       precio_base, comision_pct, comision_fija
+                       adjunto_url, adjunto_nombre, precio_base, comision_pct, comision_fija
                 FROM seguros_campanas
                 WHERE {' AND '.join(where)}
                 ORDER BY COALESCE(fecha_inicio, '') DESC, created_at DESC
