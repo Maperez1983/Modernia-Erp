@@ -15673,6 +15673,19 @@ class Handler(BaseHTTPRequestHandler):
             exclude_sin_seguro = f"({compania_expr} IS NULL OR {compania_expr} = '' OR {compania_expr} != 'sin seguro')"
             uploaded_clause = uploaded_policy_filter()
             in_vigor_expr = in_vigor_policy_filter()
+            uploaded_param = 1 if uploaded_only else 0
+            if uploaded_only:
+                uploaded_count = conn.execute(
+                    f"""
+                    SELECT COUNT(*) AS total
+                    FROM seguros
+                    WHERE empresa_id = ?
+                      AND {uploaded_clause}
+                    """,
+                    (empresa_id,),
+                ).fetchone()
+                if not uploaded_count or int(uploaded_count["total"] or 0) <= 0:
+                    uploaded_param = 0
 
             current = conn.execute(
                 f"""
@@ -15686,7 +15699,7 @@ class Handler(BaseHTTPRequestHandler):
                   AND {year_expr} = ?
                   AND {exclude_sin_seguro}
                 """,
-                (empresa_id, 1 if uploaded_only else 0, year),
+                (empresa_id, uploaded_param, year),
             ).fetchone()
 
             totals = conn.execute(
@@ -15700,7 +15713,7 @@ class Handler(BaseHTTPRequestHandler):
                   AND ({uploaded_clause} OR ? = 0)
                   AND {exclude_sin_seguro}
                 """,
-                (empresa_id, 1 if uploaded_only else 0),
+                (empresa_id, uploaded_param),
             ).fetchone()
 
             series = conn.execute(
@@ -15718,7 +15731,7 @@ class Handler(BaseHTTPRequestHandler):
                 GROUP BY {year_expr}
                 ORDER BY {year_expr}
                 """,
-                (empresa_id, 1 if uploaded_only else 0),
+                (empresa_id, uploaded_param),
             ).fetchall()
 
             presupuesto = current["presupuesto"] if current else 0
@@ -15755,7 +15768,7 @@ class Handler(BaseHTTPRequestHandler):
                 ORDER BY total DESC
                 LIMIT 10
                 """,
-                (empresa_id, 1 if uploaded_only else 0),
+                (empresa_id, uploaded_param),
             ).fetchall()
 
             comision_rows = conn.execute(
@@ -15771,7 +15784,7 @@ class Handler(BaseHTTPRequestHandler):
                   AND {year_expr} = ?
                   AND {exclude_sin_seguro}
                 """,
-                (empresa_id, 1 if uploaded_only else 0, year),
+                (empresa_id, uploaded_param, year),
             ).fetchall()
 
             comision_by_compania = {}
@@ -15938,6 +15951,19 @@ class Handler(BaseHTTPRequestHandler):
             uploaded_clause = uploaded_policy_filter()
             compania_expr = "LOWER(TRIM(compania))"
             exclude_sin_seguro = f"({compania_expr} IS NULL OR {compania_expr} = '' OR {compania_expr} != 'sin seguro')"
+            uploaded_param = 1 if uploaded_only else 0
+            if uploaded_only:
+                uploaded_count = conn.execute(
+                    f"""
+                    SELECT COUNT(*) AS total
+                    FROM seguros
+                    WHERE empresa_id = ?
+                      AND {uploaded_clause}
+                    """,
+                    (empresa_id,),
+                ).fetchone()
+                if not uploaded_count or int(uploaded_count["total"] or 0) <= 0:
+                    uploaded_param = 0
             total = conn.execute(
                 f"""
                 SELECT COUNT(*) AS total
@@ -15945,7 +15971,7 @@ class Handler(BaseHTTPRequestHandler):
                 WHERE empresa_id = ?
                   AND ({uploaded_clause} OR ? = 0)
                 """,
-                (empresa_id, 1 if uploaded_only else 0),
+                (empresa_id, uploaded_param),
             ).fetchone()
             en_vigor = conn.execute(
                 f"""
@@ -15955,7 +15981,7 @@ class Handler(BaseHTTPRequestHandler):
                   AND ({uploaded_clause} OR ? = 0)
                   AND {in_vigor_expr}
                 """,
-                (empresa_id, 1 if uploaded_only else 0),
+                (empresa_id, uploaded_param),
             ).fetchone()
             vencen_30 = conn.execute(
                 f"""
@@ -15968,7 +15994,7 @@ class Handler(BaseHTTPRequestHandler):
                   AND DATE(COALESCE(fecha_vencimiento, DATE(fecha_efecto, '+1 year'))) BETWEEN DATE('now','localtime')
                       AND DATE('now','localtime','+30 days')
                 """,
-                (empresa_id, 1 if uploaded_only else 0),
+                (empresa_id, uploaded_param),
             ).fetchone()
             faltantes = conn.execute(
                 f"""
@@ -15984,7 +16010,7 @@ class Handler(BaseHTTPRequestHandler):
                   )
                   AND {in_vigor_expr}
                 """,
-                (empresa_id, 1 if uploaded_only else 0),
+                (empresa_id, uploaded_param),
             ).fetchone()
             quality_rows = conn.execute(
                 """
@@ -16004,7 +16030,7 @@ class Handler(BaseHTTPRequestHandler):
                   AND ({uploaded_clause} OR ? = 0)
                   AND {in_vigor_expr}
                 """,
-                (empresa_id, 1 if uploaded_only else 0),
+                (empresa_id, uploaded_param),
             ).fetchone()
             seguros_totals = compute_seguros_contabilidad_totals(conn, empresa_id)
             quality = {"alta": 0, "media": 0, "baja": 0, "desconocida": 0}
