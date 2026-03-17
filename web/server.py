@@ -1309,6 +1309,31 @@ def html_to_text(value):
     return text
 
 
+def extract_pdf_attachment_text(pdf_bytes, max_pages=2):
+    if not pdf_bytes:
+        return ""
+    tmp_path = ""
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp_file:
+            tmp_file.write(pdf_bytes)
+            tmp_path = tmp_file.name
+        text, err = pdftotext_extract(tmp_path, pages=max_pages)
+        if text and len(text.strip()) >= 40:
+            return text
+        text_full, _detail, _method = extract_pdf_text(tmp_path)
+        if text_full:
+            return text_full
+        return text or ""
+    except Exception:
+        return ""
+    finally:
+        if tmp_path:
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
+
+
 def parse_decimal_amount(value):
     raw = str(value or "").strip()
     if not raw:
@@ -1408,15 +1433,25 @@ def extract_campaign_from_email(message_obj):
 
     text_parts = []
     html_parts = []
+    attachment_parts = []
     if message_obj.is_multipart():
         for part in message_obj.walk():
             if part.get_content_maintype() == "multipart":
                 continue
-            if "attachment" in str(part.get("Content-Disposition") or "").lower():
-                continue
             content_type = str(part.get_content_type() or "").lower()
+            filename = decode_mime_text(part.get_filename() or "")
+            disposition = str(part.get("Content-Disposition") or "").lower()
             payload = part.get_payload(decode=True)
             if payload is None:
+                continue
+            is_attachment = ("attachment" in disposition) or bool(filename)
+            is_pdf_attachment = content_type == "application/pdf" or filename.lower().endswith(".pdf")
+            if is_attachment and is_pdf_attachment:
+                pdf_text = extract_pdf_attachment_text(payload, max_pages=2)
+                if pdf_text:
+                    attachment_parts.append(pdf_text[:12000])
+                continue
+            if is_attachment:
                 continue
             charset = part.get_content_charset() or "utf-8"
             try:
@@ -1441,7 +1476,8 @@ def extract_campaign_from_email(message_obj):
                 text_parts.append(decoded)
 
     body = "\n".join(text_parts).strip() or html_to_text("\n".join(html_parts))
-    search_blob = " ".join(part for part in [subject, sender, body] if part).strip()
+    attachment_text = "\n".join(attachment_parts).strip()
+    search_blob = " ".join(part for part in [subject, sender, body, attachment_text] if part).strip()
 
     compania = detect_company_from_metadata(subject, sender, body)
     if not compania:
@@ -1512,6 +1548,11 @@ def extract_campaign_from_email(message_obj):
     if len(description) < 20:
         fallback_desc = " · ".join(part for part in [f"Asunto: {subject}" if subject else "", f"Remitente: {sender}" if sender else ""] if part)
         description = fallback_desc or description
+    if len(description) < 40 and attachment_text:
+        attachment_summary = re.sub(r"\s+", " ", attachment_text).strip()
+        if len(attachment_summary) > 500:
+            attachment_summary = f"{attachment_summary[:497]}..."
+        description = f"{description} · PDF: {attachment_summary}".strip(" ·")
     if len(description) > 700:
         description = f"{description[:697]}..."
 
