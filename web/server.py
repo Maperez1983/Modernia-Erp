@@ -15863,7 +15863,8 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 year_int = datetime.now().year
             month_labels = [f"{year_int:04d}-{month:02d}" for month in range(1, 13)]
-            month_counts = {label: 0 for label in month_labels}
+            month_altas = {label: 0 for label in month_labels}
+            year_start = datetime(year_int, 1, 1).date()
             en_vigor_rows = conn.execute(
                 f"""
                 SELECT fecha_efecto, created_at
@@ -15882,13 +15883,32 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 if not base_date:
                     continue
+                if base_date < year_start:
+                    continue
                 month_key = f"{base_date.year:04d}-{base_date.month:02d}"
-                if month_key in month_counts:
-                    month_counts[month_key] += 1
-            series_en_vigor_mes = [
-                {"month": label, "total": int(month_counts[label])}
-                for label in month_labels
-            ]
+                if month_key in month_altas:
+                    month_altas[month_key] += 1
+            cartera_base = 0
+            for row in en_vigor_rows:
+                base_date = (
+                    parse_iso_date(row["fecha_efecto"])
+                    or parse_iso_date(row["created_at"])
+                )
+                if base_date and base_date < year_start:
+                    cartera_base += 1
+            acumulado = cartera_base
+            series_en_vigor_mes = []
+            for label in month_labels:
+                altas = int(month_altas[label] or 0)
+                acumulado += altas
+                series_en_vigor_mes.append(
+                    {
+                        "month": label,
+                        "total": altas,
+                        "altas": altas,
+                        "acumulado": int(acumulado),
+                    }
+                )
 
             json_response(
                 self,

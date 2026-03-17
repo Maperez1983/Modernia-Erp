@@ -8839,12 +8839,21 @@ const renderFincasDashboard = (empresaId) => {
         }),
         [
           {
-            label: "Pólizas en vigor",
+            label: "Altas en vigor (mes)",
             values: seriesEnVigorMes.length
-              ? seriesEnVigorMes.map((item) => Number(item.total || 0))
+              ? seriesEnVigorMes.map((item) => Number(item.altas ?? item.total ?? 0))
               : enVigor,
             color: "#5F7A61",
             format: (value) => numberFormatter.format(value),
+          },
+          {
+            label: "Cartera acumulada",
+            values: seriesEnVigorMes.length
+              ? seriesEnVigorMes.map((item) => Number(item.acumulado || 0))
+              : enVigor,
+            color: "#2B2B2B",
+            format: (value) => numberFormatter.format(value),
+            type: "line",
           },
         ],
         { legend: true, showValues: true, tooltip: true }
