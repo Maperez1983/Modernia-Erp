@@ -15754,7 +15754,7 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 series_payload.append(row_dict)
 
-            responsables = conn.execute(
+            responsables_rows = conn.execute(
                 f"""
                 SELECT
                   COALESCE(NULLIF(TRIM(colaborador), ''), 'Sin responsable') AS label,
@@ -15770,6 +15770,32 @@ class Handler(BaseHTTPRequestHandler):
                 """,
                 (empresa_id, uploaded_param),
             ).fetchall()
+
+            def normalize_person_key(value):
+                text = normalize_lookup_text(value or "")
+                text = re.sub(r"[^a-z0-9\\s]", " ", text)
+                text = re.sub(r"\\s+", " ", text).strip()
+                return text
+
+            responsables_map = {}
+            for row in responsables_rows:
+                label_raw = normalize_person_name(row["label"] or "").strip() or "Sin responsable"
+                if normalize_lookup_text(label_raw) in ("SIN RESPONSABLE",):
+                    base_key = "sin responsable"
+                else:
+                    norm = normalize_person_key(label_raw)
+                    tokens = [tok for tok in norm.split(" ") if tok]
+                    base_key = " ".join(tokens[:2]) if len(tokens) >= 2 else (tokens[0] if tokens else "sin responsable")
+                current = responsables_map.get(base_key)
+                total = int(row["total"] or 0)
+                if not current:
+                    responsables_map[base_key] = {"label": label_raw, "total": total}
+                else:
+                    current["total"] += total
+                    # Preferimos etiqueta más completa y con mejor capitalización.
+                    if len(label_raw) > len(current["label"]):
+                        current["label"] = label_raw
+            responsables = sorted(responsables_map.values(), key=lambda item: item["total"], reverse=True)[:10]
 
             comision_rows = conn.execute(
                 f"""
@@ -15819,6 +15845,50 @@ class Handler(BaseHTTPRequestHandler):
 
             seguros_totals_year = compute_seguros_contabilidad_totals(conn, empresa_id, year=year)
             seguros_totals_total = compute_seguros_contabilidad_totals(conn, empresa_id)
+            rentabilidad_year = round((seguros_totals_year["ingresos"] or 0) - (seguros_totals_year["gastos"] or 0), 2)
+            rentabilidad_total = round((seguros_totals_total["ingresos"] or 0) - (seguros_totals_total["gastos"] or 0), 2)
+            margen_year = (
+                (rentabilidad_year / seguros_totals_year["ingresos"]) * 100
+                if abs(seguros_totals_year["ingresos"] or 0) > 0.0001
+                else 0
+            )
+            margen_total = (
+                (rentabilidad_total / seguros_totals_total["ingresos"]) * 100
+                if abs(seguros_totals_total["ingresos"] or 0) > 0.0001
+                else 0
+            )
+
+            try:
+                year_int = int(str(year or "").strip())
+            except Exception:
+                year_int = datetime.now().year
+            month_labels = [f"{year_int:04d}-{month:02d}" for month in range(1, 13)]
+            month_counts = {label: 0 for label in month_labels}
+            en_vigor_rows = conn.execute(
+                f"""
+                SELECT fecha_efecto, created_at
+                FROM seguros
+                WHERE empresa_id = ?
+                  AND ({uploaded_clause} OR ? = 0)
+                  AND {in_vigor_expr}
+                  AND {exclude_sin_seguro}
+                """,
+                (empresa_id, uploaded_param),
+            ).fetchall()
+            for row in en_vigor_rows:
+                base_date = (
+                    parse_iso_date(row["fecha_efecto"])
+                    or parse_iso_date(row["created_at"])
+                )
+                if not base_date:
+                    continue
+                month_key = f"{base_date.year:04d}-{base_date.month:02d}"
+                if month_key in month_counts:
+                    month_counts[month_key] += 1
+            series_en_vigor_mes = [
+                {"month": label, "total": int(month_counts[label])}
+                for label in month_labels
+            ]
 
             json_response(
                 self,
@@ -15837,9 +15907,14 @@ class Handler(BaseHTTPRequestHandler):
                         "facturacion_comision_total": seguros_totals_total["ingresos"],
                         "gastos": seguros_totals_year["gastos"],
                         "gastos_total": seguros_totals_total["gastos"],
+                        "rentabilidad": rentabilidad_year,
+                        "rentabilidad_total": rentabilidad_total,
+                        "margen_rentabilidad": margen_year,
+                        "margen_rentabilidad_total": margen_total,
                     },
                     "series": series_payload,
-                    "responsables": [dict(r) for r in responsables],
+                    "series_en_vigor_mes": series_en_vigor_mes,
+                    "responsables": responsables,
                     "comision_companias": comision_companias,
                     "comision_ramos": comision_ramos,
                 },

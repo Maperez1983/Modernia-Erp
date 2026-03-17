@@ -8694,6 +8694,7 @@ const renderFincasDashboard = (empresaId) => {
     }
     fincasDashboardKpis.innerHTML = "";
     const series = data.series || [];
+    const seriesEnVigorMes = data.series_en_vigor_mes || [];
     const current = data.current || {};
     const comisionCompanias = data.comision_companias || [];
     const comisionRamos = data.comision_ramos || [];
@@ -8749,6 +8750,11 @@ const renderFincasDashboard = (empresaId) => {
         value: numberFormatter.format(current.en_vigor || 0),
         note: "Pólizas activas",
         action: () => openSegurosBdtFromDashboard({ estadoMode: "en_vigor" }),
+      },
+      {
+        title: `Rentabilidad ${current.year || selectedYear}`,
+        value: euroFormatter.format(Number(current.rentabilidad || 0)),
+        note: `Margen ${(Number(current.margen_rentabilidad || 0)).toFixed(1)}%`,
       },
       {
         title: "Conversión total",
@@ -8822,27 +8828,23 @@ const renderFincasDashboard = (empresaId) => {
 
       drawBarChart(
         fincasPresupuestoChart,
-        years,
+        (seriesEnVigorMes.length ? seriesEnVigorMes : years).map((item) => {
+          const raw = String(item.month || item || "");
+          if (!raw.includes("-")) return raw;
+          const [yearPart, monthPart] = raw.split("-", 2);
+          const monthNum = Number(monthPart || 0);
+          const monthNames = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
+          const monthLabel = monthNames[Math.max(0, Math.min(11, monthNum - 1))] || raw;
+          return `${monthLabel} ${String(yearPart || "").slice(-2)}`;
+        }),
         [
           {
-            label: "Presupuesto",
-            values: presupuestos,
+            label: "Pólizas en vigor",
+            values: seriesEnVigorMes.length
+              ? seriesEnVigorMes.map((item) => Number(item.total || 0))
+              : enVigor,
             color: "#5F7A61",
             format: (value) => numberFormatter.format(value),
-          },
-          {
-            label: "En vigor",
-            values: enVigor,
-            color: "#3C6E71",
-            format: (value) => numberFormatter.format(value),
-          },
-          {
-            label: "Conversión",
-            values: conversion,
-            color: "#2B2B2B",
-            format: (value) => `${Number(value || 0).toFixed(1)}%`,
-            type: "line",
-            scale: "percent",
           },
         ],
         { legend: true, showValues: true, tooltip: true }
