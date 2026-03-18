@@ -15682,11 +15682,11 @@ class Handler(BaseHTTPRequestHandler):
                 if col not in responsable_candidates:
                     responsable_candidates.append(col)
             if responsable_candidates:
-                responsable_expr = (
-                    "COALESCE("
-                    + ", ".join([f"NULLIF(TRIM({col}), '')" for col in responsable_candidates])
-                    + ")"
-                )
+                responsable_parts = [f"NULLIF(TRIM({col}), '')" for col in responsable_candidates]
+                if len(responsable_parts) == 1:
+                    responsable_expr = responsable_parts[0]
+                else:
+                    responsable_expr = "COALESCE(" + ", ".join(responsable_parts) + ")"
             else:
                 responsable_expr = "NULL"
             responsable_label_expr = f"COALESCE({responsable_expr}, 'Sin responsable')"
