@@ -8692,6 +8692,7 @@ const renderFincasDashboard = (empresaId) => {
     if (!fincasDashboardKpis) {
       return;
     }
+    fincasDashboardKpis.classList.remove("hidden");
     fincasDashboardKpis.innerHTML = "";
     const series = data.series || [];
     const seriesEnVigorMes = data.series_en_vigor_mes || [];
@@ -8932,6 +8933,7 @@ const renderFincasDashboard = (empresaId) => {
     });
   }).catch((error) => {
     if (fincasDashboardKpis) {
+      fincasDashboardKpis.classList.remove("hidden");
       const msg = error?.data?.error || error?.message || "No se pudo cargar el dashboard de seguros.";
       fincasDashboardKpis.innerHTML = `<p class='muted'>${msg}</p>`;
     }

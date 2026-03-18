@@ -15831,6 +15831,21 @@ class Handler(BaseHTTPRequestHandler):
                 """,
                 (empresa_id, uploaded_param, year),
             ).fetchall()
+            if not comision_rows:
+                comision_rows = conn.execute(
+                    f"""
+                    SELECT
+                      compania,
+                      ramo,
+                      comision,
+                      produccion
+                    FROM seguros
+                    WHERE empresa_id = ?
+                      AND ({uploaded_clause} OR ? = 0)
+                      AND {exclude_sin_seguro}
+                    """,
+                    (empresa_id, uploaded_param),
+                ).fetchall()
 
             comision_by_compania = {}
             comision_by_ramo = {}
