@@ -499,13 +499,12 @@ def can_transition_seguro_estado(current_value, target_value):
         return True
     if not current or current == target:
         return True
-    allowed = {
-        "Presupuesto": {"Contratada", "Anulada"},
-        "Contratada": {"En vigor", "Anulada"},
-        "En vigor": {"Anulada"},
-        "Anulada": set(),
-    }
-    return target in allowed.get(current, set())
+    # En CRM operativo permitimos cambio manual entre estados canónicos
+    # para corregir datos históricos/importados sin bloquear al usuario.
+    canonical = {"Presupuesto", "Contratada", "En vigor", "Anulada"}
+    if current in canonical and target in canonical:
+        return True
+    return True
 
 
 def upsert_seguro_comision_contabilidad(conn, seguro_row, now, movimiento="emision", fecha=None, importe=None):
