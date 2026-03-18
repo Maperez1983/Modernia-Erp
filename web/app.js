@@ -8747,6 +8747,10 @@ const renderFincasDashboard = (empresaId) => {
     };
     const topCompania = pickTopReal(comisionCompanias);
     const topRamo = pickTopReal(comisionRamos);
+    const comisionTotalYear = comisionCompanias.reduce(
+      (acc, item) => acc + Number(item?.total || 0),
+      0
+    );
     const kpis = [
       {
         title: `Conversión ${current.year || effectiveSelectedYear}`,
@@ -8761,6 +8765,12 @@ const renderFincasDashboard = (empresaId) => {
         action: () => openSegurosBdtFromDashboard({ estadoMode: "en_vigor" }),
       },
       {
+        title: `En vigor ${current.year || effectiveSelectedYear}`,
+        value: numberFormatter.format(current.en_vigor || 0),
+        note: "Pólizas activas",
+        action: () => openSegurosBdtFromDashboard({ estadoMode: "en_vigor" }),
+      },
+      {
         title: `Presupuestos ${current.year || effectiveSelectedYear}`,
         value: numberFormatter.format(current.presupuesto || 0),
         note: "En estado Presupuesto",
@@ -8771,37 +8781,14 @@ const renderFincasDashboard = (empresaId) => {
           }),
       },
       {
-        title: `En vigor ${current.year || effectiveSelectedYear}`,
-        value: numberFormatter.format(current.en_vigor || 0),
-        note: "Pólizas activas",
-        action: () => openSegurosBdtFromDashboard({ estadoMode: "en_vigor" }),
-      },
-      {
         title: `Rentabilidad ${current.year || effectiveSelectedYear}`,
         value: euroFormatter.format(Number(current.rentabilidad || 0)),
         note: `Margen ${(Number(current.margen_rentabilidad || 0)).toFixed(1)}%`,
       },
       {
-        title: "Conversión total",
-        value:
-          Number(current.presupuesto_total || 0) > 0
-            ? `${(current.conversion_total || 0).toFixed(1)}%`
-            : "-",
-        note:
-          Number(current.presupuesto_total || 0) > 0
-            ? "En vigor / presupuestos"
-            : "Sin presupuestos históricos",
-        action: () => openSegurosBdtFromDashboard({ estadoMode: "en_vigor" }),
-      },
-      {
-        title: "Presupuestos total",
-        value: numberFormatter.format(current.presupuesto_total || 0),
-        note: "Histórico completo",
-        action: () =>
-          openSegurosBdtFromDashboard({
-            estadoMode: "no_vigor",
-            estadoContains: "presupuesto",
-          }),
+        title: `Comisionado ${current.year || effectiveSelectedYear}`,
+        value: euroFormatter.format(comisionTotalYear),
+        note: comisionTotalYear > 0 ? "Total anual estimado" : "Sin comisiones en el año",
       },
       {
         title: `Top compañía ${current.year || effectiveSelectedYear}`,
@@ -8851,10 +8838,6 @@ const renderFincasDashboard = (empresaId) => {
       const enVigor = years.map((year) => {
         const found = series.find((item) => String(item.year) === String(year));
         return found ? found.en_vigor || 0 : 0;
-      });
-      const conversion = years.map((year) => {
-        const found = series.find((item) => String(item.year) === String(year));
-        return found ? Number(found.conversion || 0) : 0;
       });
 
       drawBarChart(
@@ -8909,13 +8892,17 @@ const renderFincasDashboard = (empresaId) => {
 
       drawBarChart(
         fincasConversionChart,
-        years,
+        ["Presupuestos", "Contratadas", "En vigor"],
         [
           {
-            label: "Conversión",
-            values: conversion,
+            label: `Embudo ${current.year || effectiveSelectedYear}`,
+            values: [
+              Number(current.presupuesto || 0),
+              Number(current.contratada || 0),
+              Number(current.en_vigor || 0),
+            ],
             color: "#3C6E71",
-            format: (value) => `${Number(value || 0).toFixed(1)}%`,
+            format: (value) => numberFormatter.format(value),
           },
         ],
         { legend: false, showValues: true, tooltip: true }
