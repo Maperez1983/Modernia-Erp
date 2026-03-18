@@ -15771,6 +15771,31 @@ class Handler(BaseHTTPRequestHandler):
                 """,
                 (empresa_id, uploaded_param),
             ).fetchall()
+            # Si el reparto por responsable queda todo en "Sin responsable",
+            # intentamos abrir el filtro para recuperar responsables reales de la cartera.
+            if responsables_rows:
+                all_sin = True
+                for row in responsables_rows:
+                    if normalize_lookup_text(row["label"] or "") not in ("SIN RESPONSABLE",):
+                        all_sin = False
+                        break
+                if all_sin:
+                    responsables_rows = conn.execute(
+                        f"""
+                        SELECT
+                          COALESCE(NULLIF(TRIM(colaborador), ''), 'Sin responsable') AS label,
+                          COUNT(*) AS total
+                        FROM seguros
+                        WHERE empresa_id = ?
+                          AND ({uploaded_clause} OR ? = 0)
+                          AND {exclude_sin_seguro}
+                          AND {year_expr} = ?
+                        GROUP BY COALESCE(NULLIF(TRIM(colaborador), ''), 'Sin responsable')
+                        ORDER BY total DESC
+                        LIMIT 10
+                        """,
+                        (empresa_id, uploaded_param, year),
+                    ).fetchall()
 
             def normalize_person_key(value):
                 text = normalize_lookup_text(value or "")
@@ -15822,7 +15847,8 @@ class Handler(BaseHTTPRequestHandler):
                   compania,
                   ramo,
                   comision,
-                  produccion
+                  produccion,
+                  prima_total
                 FROM seguros
                 WHERE empresa_id = ?
                   AND ({uploaded_clause} OR ? = 0)
@@ -15838,7 +15864,8 @@ class Handler(BaseHTTPRequestHandler):
                       compania,
                       ramo,
                       comision,
-                      produccion
+                      produccion,
+                      prima_total
                     FROM seguros
                     WHERE empresa_id = ?
                       AND ({uploaded_clause} OR ? = 0)
@@ -15847,12 +15874,61 @@ class Handler(BaseHTTPRequestHandler):
                     (empresa_id, uploaded_param),
                 ).fetchall()
 
+            comision_rules_rows = conn.execute(
+                """
+                SELECT compania, ramo, porcentaje
+                FROM seguros_comisiones
+                WHERE compania IS NOT NULL
+                  AND TRIM(compania) <> ''
+                """
+            ).fetchall()
+            comision_rules = []
+            for rule in comision_rules_rows:
+                pct = parse_money_value(rule["porcentaje"])
+                if abs(pct) < 0.0001:
+                    continue
+                comision_rules.append(
+                    (
+                        normalize_company_key(rule["compania"] or ""),
+                        normalize_lookup_text(canonicalize_ramo(rule["ramo"] or "") or rule["ramo"] or ""),
+                        pct,
+                    )
+                )
+
+            def estimate_commission_from_rules(compania, ramo, prima_total):
+                prima = parse_money_value(prima_total)
+                if abs(prima) < 0.0001:
+                    return 0.0
+                comp_key = normalize_company_key(compania or "")
+                ramo_key = normalize_lookup_text(canonicalize_ramo(ramo or "") or ramo or "")
+                best_pct = 0.0
+                best_score = -1
+                for rule_comp, rule_ramo, rule_pct in comision_rules:
+                    if not rule_comp or rule_comp != comp_key:
+                        continue
+                    score = 0
+                    if rule_ramo and ramo_key:
+                        if rule_ramo == ramo_key:
+                            score = 3
+                        elif rule_ramo in ramo_key or ramo_key in rule_ramo:
+                            score = 2
+                    elif not rule_ramo:
+                        score = 1
+                    if score > best_score:
+                        best_score = score
+                        best_pct = rule_pct
+                if best_score < 0 or abs(best_pct) < 0.0001:
+                    return 0.0
+                return (prima * best_pct) / 100.0
+
             comision_by_compania = {}
             comision_by_ramo = {}
             for row in comision_rows:
                 amount = parse_money_value(row["comision"])
                 if abs(amount) < 0.005:
                     amount = parse_money_value(row["produccion"])
+                if abs(amount) < 0.005:
+                    amount = estimate_commission_from_rules(row["compania"], row["ramo"], row["prima_total"])
                 if abs(amount) < 0.005:
                     continue
                 compania_label = normalize_company_name(row["compania"] or "").strip() or "Sin compañía"
