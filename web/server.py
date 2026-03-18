@@ -15796,6 +15796,28 @@ class Handler(BaseHTTPRequestHandler):
                         """,
                         (empresa_id, uploaded_param, year),
                     ).fetchall()
+            if responsables_rows:
+                all_sin = True
+                for row in responsables_rows:
+                    if normalize_lookup_text(row["label"] or "") not in ("SIN RESPONSABLE",):
+                        all_sin = False
+                        break
+                if all_sin:
+                    responsables_rows = conn.execute(
+                        f"""
+                        SELECT
+                          TRIM(colaborador) AS label,
+                          COUNT(*) AS total
+                        FROM seguros
+                        WHERE empresa_id = ?
+                          AND ({uploaded_clause} OR ? = 0)
+                          AND TRIM(COALESCE(colaborador, '')) <> ''
+                        GROUP BY TRIM(colaborador)
+                        ORDER BY total DESC
+                        LIMIT 10
+                        """,
+                        (empresa_id, uploaded_param),
+                    ).fetchall()
 
             def normalize_person_key(value):
                 text = normalize_lookup_text(value or "")
@@ -15935,6 +15957,53 @@ class Handler(BaseHTTPRequestHandler):
                 ramo_label = canonicalize_ramo(row["ramo"] or "") or normalize_person_name(row["ramo"] or "") or "Sin ramo"
                 comision_by_compania[compania_label] = comision_by_compania.get(compania_label, 0.0) + amount
                 comision_by_ramo[ramo_label] = comision_by_ramo.get(ramo_label, 0.0) + amount
+
+            if not comision_by_compania and not comision_by_ramo:
+                conta_rows = conn.execute(
+                    f"""
+                    SELECT
+                      gc.tipo,
+                      gc.importe,
+                      s.compania,
+                      s.ramo
+                    FROM gestoria_contabilidad gc
+                    LEFT JOIN seguros s ON s.id = gc.seguro_id
+                    WHERE gc.empresa_id = ?
+                      AND {seguros_contabilidad_where_clause('gc')}
+                      AND STRFTIME('%Y', gc.fecha) = ?
+                    """,
+                    (empresa_id, str(year)),
+                ).fetchall()
+                if not conta_rows:
+                    conta_rows = conn.execute(
+                        f"""
+                        SELECT
+                          gc.tipo,
+                          gc.importe,
+                          s.compania,
+                          s.ramo
+                        FROM gestoria_contabilidad gc
+                        LEFT JOIN seguros s ON s.id = gc.seguro_id
+                        WHERE gc.empresa_id = ?
+                          AND {seguros_contabilidad_where_clause('gc')}
+                        """,
+                        (empresa_id,),
+                    ).fetchall()
+                for row in conta_rows:
+                    amount = parse_money_value(row["importe"])
+                    if abs(amount) < 0.005:
+                        continue
+                    tipo_key = normalize_lookup_text(row["tipo"] or "")
+                    if tipo_key == "GASTO":
+                        amount = -abs(amount)
+                    else:
+                        amount = abs(amount)
+                    if amount <= 0:
+                        continue
+                    compania_label = normalize_company_name(row["compania"] or "").strip() or "Sin compañía"
+                    ramo_label = canonicalize_ramo(row["ramo"] or "") or normalize_person_name(row["ramo"] or "") or "Sin ramo"
+                    comision_by_compania[compania_label] = comision_by_compania.get(compania_label, 0.0) + amount
+                    comision_by_ramo[ramo_label] = comision_by_ramo.get(ramo_label, 0.0) + amount
 
             comision_companias = sorted(
                 (
