@@ -8843,7 +8843,7 @@ const renderFincasDashboard = (empresaId) => {
             values: seriesEnVigorMes.length
               ? seriesEnVigorMes.map((item) => Number(item.altas ?? item.total ?? 0))
               : enVigor,
-            color: "#5F7A61",
+            color: "#2f7a50",
             format: (value) => numberFormatter.format(value),
           },
           {
@@ -8851,7 +8851,7 @@ const renderFincasDashboard = (empresaId) => {
             values: seriesEnVigorMes.length
               ? seriesEnVigorMes.map((item) => Number(item.acumulado || 0))
               : enVigor,
-            color: "#2B2B2B",
+            color: "#c17817",
             format: (value) => numberFormatter.format(value),
             type: "line",
           },

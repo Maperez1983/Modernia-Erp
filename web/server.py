@@ -15662,10 +15662,10 @@ class Handler(BaseHTTPRequestHandler):
             # Use the real policy timeline first; fallback to import/create timestamps.
             year_expr = (
                 "COALESCE("
-                "STRFTIME('%Y', fecha_efecto), "
                 "CASE "
-                "WHEN TRIM(COALESCE(mes_creacion, '')) GLOB '[0-9][0-9][0-9][0-9]*' "
-                "THEN SUBSTR(TRIM(mes_creacion), 1, 4) "
+                "WHEN DATE(fecha_efecto) IS NOT NULL THEN STRFTIME('%Y', DATE(fecha_efecto)) "
+                "WHEN TRIM(COALESCE(fecha_efecto, '')) GLOB '[0-3][0-9]/[0-1][0-9]/[1-2][0-9][0-9][0-9]' THEN SUBSTR(TRIM(fecha_efecto), 7, 4) "
+                "WHEN TRIM(COALESCE(fecha_efecto, '')) GLOB '[0-3][0-9]-[0-1][0-9]-[1-2][0-9][0-9][0-9]' THEN SUBSTR(TRIM(fecha_efecto), 7, 4) "
                 "ELSE NULL END, "
                 "STRFTIME('%Y', created_at)"
                 ")"
@@ -15727,6 +15727,7 @@ class Handler(BaseHTTPRequestHandler):
                 WHERE empresa_id = ?
                   AND ({uploaded_clause} OR ? = 0)
                   AND {year_expr} IS NOT NULL
+                  AND CAST({year_expr} AS INTEGER) BETWEEN 2000 AND 2100
                   AND {exclude_sin_seguro}
                 GROUP BY {year_expr}
                 ORDER BY {year_expr}
@@ -15777,24 +15778,42 @@ class Handler(BaseHTTPRequestHandler):
                 text = re.sub(r"\\s+", " ", text).strip()
                 return text
 
+            def canonical_responsable_label(raw_value):
+                raw = normalize_person_name(raw_value or "").strip()
+                key = normalize_person_key(raw)
+                if not key:
+                    return "Sin responsable", "sin responsable"
+                alias_rules = [
+                    (("miguel angel perez", "miguel angel"), "Miguel Angel Perez"),
+                    (("ruben miera",), "Ruben Miera"),
+                ]
+                for aliases, label in alias_rules:
+                    for alias in aliases:
+                        if key == alias or key.startswith(f"{alias} "):
+                            return label, alias
+                corporate_tokens = {"modernia", "malaga", "centro", "oficina", "sucursal", "grupomodernia"}
+                key_tokens = [tok for tok in key.split(" ") if tok]
+                if any(tok in corporate_tokens for tok in key_tokens):
+                    return raw or "Sin responsable", key
+                if len(key_tokens) >= 2:
+                    base = " ".join(key_tokens[:2])
+                    label = " ".join(part.capitalize() for part in key_tokens[:3])
+                    return label, base
+                return (raw or "Sin responsable"), key
+
             responsables_map = {}
             for row in responsables_rows:
                 label_raw = normalize_person_name(row["label"] or "").strip() or "Sin responsable"
-                if normalize_lookup_text(label_raw) in ("SIN RESPONSABLE",):
-                    base_key = "sin responsable"
-                else:
-                    norm = normalize_person_key(label_raw)
-                    tokens = [tok for tok in norm.split(" ") if tok]
-                    base_key = " ".join(tokens[:2]) if len(tokens) >= 2 else (tokens[0] if tokens else "sin responsable")
+                canonical_label, base_key = canonical_responsable_label(label_raw)
                 current = responsables_map.get(base_key)
                 total = int(row["total"] or 0)
                 if not current:
-                    responsables_map[base_key] = {"label": label_raw, "total": total}
+                    responsables_map[base_key] = {"label": canonical_label, "total": total}
                 else:
                     current["total"] += total
                     # Preferimos etiqueta más completa y con mejor capitalización.
-                    if len(label_raw) > len(current["label"]):
-                        current["label"] = label_raw
+                    if len(canonical_label) > len(current["label"]):
+                        current["label"] = canonical_label
             responsables = sorted(responsables_map.values(), key=lambda item: item["total"], reverse=True)[:10]
 
             comision_rows = conn.execute(
