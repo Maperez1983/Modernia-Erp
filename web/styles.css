@@ -2125,6 +2125,21 @@ body.crm-fin #companySummary {
   border-radius: 10px;
 }
 
+/* Seguros dashboard: more room for labels and values */
+#fincasDashboardSection .dashboard-charts {
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: 16px;
+}
+
+#fincasDashboardSection .chart-card {
+  min-height: 410px;
+  padding: 16px 18px 18px;
+}
+
+#fincasDashboardSection .chart-card canvas {
+  height: 340px;
+}
+
 .chart-tooltip {
   position: absolute;
   z-index: 5;
@@ -2458,6 +2473,14 @@ body.density-compact [id$="Table"] table {
 
   .chart-card canvas {
     height: 220px;
+  }
+
+  #fincasDashboardSection .chart-card {
+    min-height: 320px;
+  }
+
+  #fincasDashboardSection .chart-card canvas {
+    height: 250px;
   }
 
   .density-toggle {

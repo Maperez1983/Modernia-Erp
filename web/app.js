@@ -8699,8 +8699,16 @@ const renderFincasDashboard = (empresaId) => {
     const current = data.current || {};
     const comisionCompanias = data.comision_companias || [];
     const comisionRamos = data.comision_ramos || [];
-    const topCompania = comisionCompanias[0] || null;
-    const topRamo = comisionRamos[0] || null;
+    const pickTopReal = (rows = []) => {
+      if (!rows.length) return null;
+      const clean = rows.find((item) => {
+        const label = normalizeSimple(item?.label || "");
+        return label && label !== "sin compania" && label !== "sin ramo";
+      });
+      return clean || rows[0] || null;
+    };
+    const topCompania = pickTopReal(comisionCompanias);
+    const topRamo = pickTopReal(comisionRamos);
     const currentTotal =
       (current.presupuesto || 0) + (current.contratada || 0) + (current.en_vigor || 0);
     const targetYear = String(new Date().getFullYear());
@@ -8732,8 +8740,14 @@ const renderFincasDashboard = (empresaId) => {
     const kpis = [
       {
         title: `Conversión ${current.year || selectedYear}`,
-        value: `${(current.conversion || 0).toFixed(1)}%`,
-        note: "En vigor / presupuestos",
+        value:
+          Number(current.presupuesto || 0) > 0
+            ? `${(current.conversion || 0).toFixed(1)}%`
+            : "-",
+        note:
+          Number(current.presupuesto || 0) > 0
+            ? "En vigor / presupuestos"
+            : "Sin presupuestos en el año",
         action: () => openSegurosBdtFromDashboard({ estadoMode: "en_vigor" }),
       },
       {
@@ -8759,8 +8773,14 @@ const renderFincasDashboard = (empresaId) => {
       },
       {
         title: "Conversión total",
-        value: `${(current.conversion_total || 0).toFixed(1)}%`,
-        note: "En vigor / presupuestos",
+        value:
+          Number(current.presupuesto_total || 0) > 0
+            ? `${(current.conversion_total || 0).toFixed(1)}%`
+            : "-",
+        note:
+          Number(current.presupuesto_total || 0) > 0
+            ? "En vigor / presupuestos"
+            : "Sin presupuestos históricos",
         action: () => openSegurosBdtFromDashboard({ estadoMode: "en_vigor" }),
       },
       {
