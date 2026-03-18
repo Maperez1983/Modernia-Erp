@@ -15659,6 +15659,38 @@ class Handler(BaseHTTPRequestHandler):
 
             estado_expr = "LOWER(TRIM(estado))"
             compania_expr = "LOWER(TRIM(compania))"
+            seguros_columns = {
+                str(col["name"]).strip().lower()
+                for col in conn.execute("PRAGMA table_info(seguros)").fetchall()
+                if col and col["name"]
+            }
+            responsable_candidates = [
+                col
+                for col in ("colaborador", "responsable", "asesor", "agente", "usuario", "comercial")
+                if col in seguros_columns
+            ]
+            dynamic_responsable_candidates = [
+                col
+                for col in sorted(seguros_columns)
+                if re.match(r"^[a-z_][a-z0-9_]*$", col or "")
+                if any(
+                    token in col
+                    for token in ("respons", "colab", "asesor", "agent", "comercial", "usuario")
+                )
+            ]
+            for col in dynamic_responsable_candidates:
+                if col not in responsable_candidates:
+                    responsable_candidates.append(col)
+            if responsable_candidates:
+                responsable_expr = (
+                    "COALESCE("
+                    + ", ".join([f"NULLIF(TRIM({col}), '')" for col in responsable_candidates])
+                    + ")"
+                )
+            else:
+                responsable_expr = "NULL"
+            responsable_label_expr = f"COALESCE({responsable_expr}, 'Sin responsable')"
+            responsable_non_empty_expr = f"TRIM(COALESCE({responsable_expr}, '')) <> ''"
             # Use the real policy timeline first; fallback to import/create timestamps.
             year_expr = (
                 "COALESCE("
@@ -15758,14 +15790,14 @@ class Handler(BaseHTTPRequestHandler):
             responsables_rows = conn.execute(
                 f"""
                 SELECT
-                  COALESCE(NULLIF(TRIM(colaborador), ''), 'Sin responsable') AS label,
+                  {responsable_label_expr} AS label,
                   COUNT(*) AS total
                 FROM seguros
                 WHERE empresa_id = ?
                   AND ({uploaded_clause} OR ? = 0)
                   AND {in_vigor_expr}
                   AND {exclude_sin_seguro}
-                GROUP BY COALESCE(NULLIF(TRIM(colaborador), ''), 'Sin responsable')
+                GROUP BY {responsable_label_expr}
                 ORDER BY total DESC
                 LIMIT 10
                 """,
@@ -15783,14 +15815,14 @@ class Handler(BaseHTTPRequestHandler):
                     responsables_rows = conn.execute(
                         f"""
                         SELECT
-                          COALESCE(NULLIF(TRIM(colaborador), ''), 'Sin responsable') AS label,
+                          {responsable_label_expr} AS label,
                           COUNT(*) AS total
                         FROM seguros
                         WHERE empresa_id = ?
                           AND ({uploaded_clause} OR ? = 0)
                           AND {exclude_sin_seguro}
                           AND {year_expr} = ?
-                        GROUP BY COALESCE(NULLIF(TRIM(colaborador), ''), 'Sin responsable')
+                        GROUP BY {responsable_label_expr}
                         ORDER BY total DESC
                         LIMIT 10
                         """,
@@ -15806,13 +15838,13 @@ class Handler(BaseHTTPRequestHandler):
                     responsables_rows = conn.execute(
                         f"""
                         SELECT
-                          TRIM(colaborador) AS label,
+                          {responsable_expr} AS label,
                           COUNT(*) AS total
                         FROM seguros
                         WHERE empresa_id = ?
                           AND ({uploaded_clause} OR ? = 0)
-                          AND TRIM(COALESCE(colaborador, '')) <> ''
-                        GROUP BY TRIM(colaborador)
+                          AND {responsable_non_empty_expr}
+                        GROUP BY {responsable_expr}
                         ORDER BY total DESC
                         LIMIT 10
                         """,

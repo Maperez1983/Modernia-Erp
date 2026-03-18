@@ -1865,6 +1865,7 @@ const finEntidadChart = document.getElementById("finEntidadChart");
 const finOficinaChart = document.getElementById("finOficinaChart");
 const fincasDashboardSection = document.getElementById("fincasDashboardSection");
 const fincasDashboardKpis = document.getElementById("fincasDashboardKpis");
+const fincasDashboardYearSelect = document.getElementById("fincasDashboardYear");
 const fincasPresupuestoChart = document.getElementById("fincasPresupuestoChart");
 const fincasResponsableChart = document.getElementById("fincasResponsableChart");
 const fincasConversionChart = document.getElementById("fincasConversionChart");
@@ -8666,6 +8667,34 @@ const renderDashboard = (empresaName, empresaId) => {
   });
 };
 
+const syncFincasDashboardYearSelector = (series, selectedYear) => {
+  if (!fincasDashboardYearSelect) {
+    return;
+  }
+  const years = Array.from(
+    new Set(
+      (series || [])
+        .map((item) => String(item?.year || "").trim())
+        .filter((value) => /^\d{4}$/.test(value))
+    )
+  ).sort();
+  if (!years.length) {
+    years.push(String(selectedYear || new Date().getFullYear()));
+  }
+  const previous = String(fincasDashboardYearSelect.value || "").trim();
+  fincasDashboardYearSelect.innerHTML = "";
+  years.forEach((year) => {
+    fincasDashboardYearSelect.appendChild(createOption(year, year));
+  });
+  const desired = years.includes(String(selectedYear || ""))
+    ? String(selectedYear)
+    : years.includes(previous)
+      ? previous
+      : years[years.length - 1];
+  fincasDashboardYearSelect.value = desired;
+  fincasDashboardYearSelect.disabled = years.length <= 1;
+};
+
 const renderFincasDashboard = (empresaId) => {
   if (!fincasDashboardSection) {
     return;
@@ -8682,7 +8711,10 @@ const renderFincasDashboard = (empresaId) => {
   }
   fincasDashboardSection.classList.remove("hidden");
   updateTableVisibility();
-  const selectedYear = yearSelect?.value || String(new Date().getFullYear());
+  const selectedYear =
+    String(fincasDashboardYearSelect?.value || "").trim() ||
+    String(yearSelect?.value || "").trim() ||
+    String(new Date().getFullYear());
   const params = new URLSearchParams({
     empresa_id: empresaId,
     year: selectedYear,
@@ -8696,6 +8728,12 @@ const renderFincasDashboard = (empresaId) => {
     fincasDashboardKpis.innerHTML = "";
     const series = data.series || [];
     const seriesEnVigorMes = data.series_en_vigor_mes || [];
+    syncFincasDashboardYearSelector(series, selectedYear);
+    const effectiveSelectedYear = String(fincasDashboardYearSelect?.value || selectedYear);
+    if (effectiveSelectedYear !== String(selectedYear)) {
+      renderFincasDashboard(empresaId);
+      return;
+    }
     const current = data.current || {};
     const comisionCompanias = data.comision_companias || [];
     const comisionRamos = data.comision_ramos || [];
@@ -8709,37 +8747,9 @@ const renderFincasDashboard = (empresaId) => {
     };
     const topCompania = pickTopReal(comisionCompanias);
     const topRamo = pickTopReal(comisionRamos);
-    const currentTotal =
-      (current.presupuesto || 0) + (current.contratada || 0) + (current.en_vigor || 0);
-    const targetYear = String(new Date().getFullYear());
-    const targetEntry = series.find(
-      (item) => String(item.year) === targetYear
-    );
-    const targetTotal = targetEntry
-      ? (targetEntry.presupuesto || 0) +
-        (targetEntry.contratada || 0) +
-        (targetEntry.en_vigor || 0)
-      : 0;
-    if (targetTotal && selectedYear !== targetYear) {
-      if (yearSelect) {
-        yearSelect.value = targetYear;
-      }
-      renderFincasDashboard(empresaId);
-      return;
-    }
-    if (!currentTotal && series.length) {
-      const lastYear = String(series[series.length - 1].year || "");
-      if (lastYear && lastYear !== selectedYear) {
-        if (yearSelect) {
-          yearSelect.value = lastYear;
-        }
-        renderFincasDashboard(empresaId);
-        return;
-      }
-    }
     const kpis = [
       {
-        title: `Conversión ${current.year || selectedYear}`,
+        title: `Conversión ${current.year || effectiveSelectedYear}`,
         value:
           Number(current.presupuesto || 0) > 0
             ? `${(current.conversion || 0).toFixed(1)}%`
@@ -8751,7 +8761,7 @@ const renderFincasDashboard = (empresaId) => {
         action: () => openSegurosBdtFromDashboard({ estadoMode: "en_vigor" }),
       },
       {
-        title: `Presupuestos ${current.year || selectedYear}`,
+        title: `Presupuestos ${current.year || effectiveSelectedYear}`,
         value: numberFormatter.format(current.presupuesto || 0),
         note: "En estado Presupuesto",
         action: () =>
@@ -8761,13 +8771,13 @@ const renderFincasDashboard = (empresaId) => {
           }),
       },
       {
-        title: `En vigor ${current.year || selectedYear}`,
+        title: `En vigor ${current.year || effectiveSelectedYear}`,
         value: numberFormatter.format(current.en_vigor || 0),
         note: "Pólizas activas",
         action: () => openSegurosBdtFromDashboard({ estadoMode: "en_vigor" }),
       },
       {
-        title: `Rentabilidad ${current.year || selectedYear}`,
+        title: `Rentabilidad ${current.year || effectiveSelectedYear}`,
         value: euroFormatter.format(Number(current.rentabilidad || 0)),
         note: `Margen ${(Number(current.margen_rentabilidad || 0)).toFixed(1)}%`,
       },
@@ -8794,12 +8804,12 @@ const renderFincasDashboard = (empresaId) => {
           }),
       },
       {
-        title: `Top compañía ${current.year || selectedYear}`,
+        title: `Top compañía ${current.year || effectiveSelectedYear}`,
         value: topCompania ? euroFormatter.format(topCompania.total || 0) : euroFormatter.format(0),
         note: topCompania ? topCompania.label : "Sin datos",
       },
       {
-        title: `Top ramo ${current.year || selectedYear}`,
+        title: `Top ramo ${current.year || effectiveSelectedYear}`,
         value: topRamo ? euroFormatter.format(topRamo.total || 0) : euroFormatter.format(0),
         note: topRamo ? topRamo.label : "Sin datos",
       },
@@ -21800,6 +21810,14 @@ if (yearSelect) {
       renderFincasDashboard(state.currentEmpresaId);
     }
     updateCompanySummary(state.currentEmpresaName || (state.currentModule === "clientes" ? "Clientes" : ""));
+  });
+}
+
+if (fincasDashboardYearSelect) {
+  fincasDashboardYearSelect.addEventListener("change", () => {
+    if (state.currentEmpresaName === FINCAS_COMPANY && currentTab === "seguros-crm") {
+      renderFincasDashboard(state.currentEmpresaId);
+    }
   });
 }
 
