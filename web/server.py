@@ -15796,15 +15796,16 @@ class Handler(BaseHTTPRequestHandler):
                 WHERE empresa_id = ?
                   AND ({uploaded_clause} OR ? = 0)
                   AND {in_vigor_expr}
+                  AND {year_expr} = ?
                   AND {exclude_sin_seguro}
                 GROUP BY {responsable_label_expr}
                 ORDER BY total DESC
                 LIMIT 10
                 """,
-                (empresa_id, uploaded_param),
+                (empresa_id, uploaded_param, year),
             ).fetchall()
             # Si el reparto por responsable queda todo en "Sin responsable",
-            # intentamos abrir el filtro para recuperar responsables reales de la cartera.
+            # intentamos recuperar responsables reales del mismo año (sin filtrar estado).
             if responsables_rows:
                 all_sin = True
                 for row in responsables_rows:
@@ -15828,28 +15829,42 @@ class Handler(BaseHTTPRequestHandler):
                         """,
                         (empresa_id, uploaded_param, year),
                     ).fetchall()
-            if responsables_rows:
-                all_sin = True
-                for row in responsables_rows:
-                    if normalize_lookup_text(row["label"] or "") not in ("SIN RESPONSABLE",):
-                        all_sin = False
-                        break
-                if all_sin:
-                    responsables_rows = conn.execute(
-                        f"""
-                        SELECT
-                          {responsable_expr} AS label,
-                          COUNT(*) AS total
-                        FROM seguros
-                        WHERE empresa_id = ?
-                          AND ({uploaded_clause} OR ? = 0)
-                          AND {responsable_non_empty_expr}
-                        GROUP BY {responsable_expr}
-                        ORDER BY total DESC
-                        LIMIT 10
-                        """,
-                        (empresa_id, uploaded_param),
-                    ).fetchall()
+            if (not responsables_rows) or all(
+                normalize_lookup_text(row["label"] or "") in ("SIN RESPONSABLE",)
+                for row in responsables_rows
+            ):
+                responsables_rows = conn.execute(
+                    f"""
+                    SELECT
+                      {responsable_expr} AS label,
+                      COUNT(*) AS total
+                    FROM seguros
+                    WHERE empresa_id = ?
+                      AND ({uploaded_clause} OR ? = 0)
+                      AND {year_expr} = ?
+                      AND {responsable_non_empty_expr}
+                    GROUP BY {responsable_expr}
+                    ORDER BY total DESC
+                    LIMIT 10
+                    """,
+                    (empresa_id, uploaded_param, year),
+                ).fetchall()
+            if not responsables_rows:
+                responsables_rows = conn.execute(
+                    f"""
+                    SELECT
+                      {responsable_expr} AS label,
+                      COUNT(*) AS total
+                    FROM seguros
+                    WHERE empresa_id = ?
+                      AND ({uploaded_clause} OR ? = 0)
+                      AND {responsable_non_empty_expr}
+                    GROUP BY {responsable_expr}
+                    ORDER BY total DESC
+                    LIMIT 10
+                    """,
+                    (empresa_id, uploaded_param),
+                ).fetchall()
 
             def normalize_person_key(value):
                 text = normalize_lookup_text(value or "")
@@ -15911,22 +15926,6 @@ class Handler(BaseHTTPRequestHandler):
                 """,
                 (empresa_id, uploaded_param, year),
             ).fetchall()
-            if not comision_rows:
-                comision_rows = conn.execute(
-                    f"""
-                    SELECT
-                      compania,
-                      ramo,
-                      comision,
-                      produccion,
-                      prima_total
-                    FROM seguros
-                    WHERE empresa_id = ?
-                      AND ({uploaded_clause} OR ? = 0)
-                      AND {exclude_sin_seguro}
-                    """,
-                    (empresa_id, uploaded_param),
-                ).fetchall()
 
             comision_rules_rows = conn.execute(
                 """
