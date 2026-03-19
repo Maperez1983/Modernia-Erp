@@ -5532,8 +5532,8 @@ const drawBarChart = (canvas, labels, datasets, options = {}) => {
   const padding = {
     top: 22,
     right: 18,
-    bottom: 92,
-    left: 32,
+    bottom: 78,
+    left: 40,
   };
   const chartWidth = width - padding.left - padding.right;
   const chartHeight = height - padding.top - padding.bottom;
@@ -5564,6 +5564,16 @@ const drawBarChart = (canvas, labels, datasets, options = {}) => {
 
   const groupWidth = chartWidth / Math.max(1, labels.length);
   const barWidth = Math.max(6, (groupWidth - 18) / Math.max(1, barSets.length));
+  const getTextColorForBar = (color) => {
+    const value = String(color || "").trim();
+    const hex = value.startsWith("#") ? value.slice(1) : "";
+    if (hex.length !== 6) return "#ffffff";
+    const r = parseInt(hex.slice(0, 2), 16);
+    const g = parseInt(hex.slice(2, 4), 16);
+    const b = parseInt(hex.slice(4, 6), 16);
+    const luminance = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+    return luminance > 0.56 ? "#1f1a16" : "#ffffff";
+  };
 
   labels.forEach((label, i) => {
     const xBase = padding.left + i * groupWidth;
@@ -5572,18 +5582,19 @@ const drawBarChart = (canvas, labels, datasets, options = {}) => {
       const barHeight = (Math.abs(value) / maxValue) * chartHeight;
       const x = xBase + 5 + j * barWidth;
       const y = height - padding.bottom - barHeight;
-      ctx.fillStyle = dataset.color;
+      const barColor = (dataset.colors && dataset.colors[i]) || dataset.color;
+      ctx.fillStyle = barColor;
       ctx.fillRect(x, y, barWidth, barHeight);
 
-      if (options.showValues) {
+      if (options.showValues && barHeight >= 18 && labels.length <= 18) {
         const labelText = dataset.format
           ? dataset.format(value)
           : numberFormatter.format(value);
-        ctx.font = "10px Baskerville, serif";
+        ctx.font = "600 10px 'Source Sans 3', sans-serif";
         const textWidth = ctx.measureText(labelText).width;
         const textX = x + (barWidth - textWidth) / 2;
         const textY = y + 14;
-        ctx.fillStyle = "#ffffff";
+        ctx.fillStyle = getTextColorForBar(barColor);
         ctx.strokeStyle = "rgba(0,0,0,0.15)";
         ctx.lineWidth = 2;
         ctx.strokeText(labelText, textX, textY);
@@ -5596,18 +5607,18 @@ const drawBarChart = (canvas, labels, datasets, options = {}) => {
     const shouldSkip = labels.length > 14 && i % 2 === 1;
     if (!shouldSkip) {
       ctx.fillStyle = "#6d665a";
-      ctx.font = "9px Baskerville, serif";
+      ctx.font = "500 11px 'Source Sans 3', sans-serif";
       if (shouldRotate) {
         ctx.save();
         const labelX = xBase + Math.max(0, (groupWidth - ctx.measureText(labelText).width) / 2);
-        const labelY = height - 1;
+        const labelY = height - 6;
         ctx.translate(labelX, labelY);
-        ctx.rotate(-Math.PI / 4);
+        ctx.rotate(-Math.PI / 5);
         ctx.fillText(labelText, 0, 0);
         ctx.restore();
       } else {
         const labelX = xBase + Math.max(0, (groupWidth - ctx.measureText(labelText).width) / 2);
-        const labelY = height - 1;
+        const labelY = height - 6;
         ctx.fillText(labelText, labelX, labelY);
       }
     }
@@ -5655,7 +5666,7 @@ const drawBarChart = (canvas, labels, datasets, options = {}) => {
       ctx.fillStyle = dataset.color;
       ctx.fillRect(offsetX, offsetY, 10, 10);
       ctx.fillStyle = "#4c4540";
-      ctx.font = "11px Baskerville, serif";
+      ctx.font = "600 11px 'Source Sans 3', sans-serif";
       ctx.fillText(dataset.label, offsetX + 14, offsetY + 9);
       offsetX += ctx.measureText(dataset.label).width + 30;
     });
@@ -8873,9 +8884,19 @@ const renderFincasDashboard = (empresaId) => {
         { legend: true, showValues: true, tooltip: true }
       );
 
-      const responsables = data.responsables || [];
+      const responsables = (data.responsables || []).slice(0, 8);
       const respLabels = responsables.map((item) => item.label);
       const respValues = responsables.map((item) => item.total);
+      const rankingPalette = [
+        "#2f7a50",
+        "#3C6E71",
+        "#c17817",
+        "#5F7A61",
+        "#4e8f96",
+        "#7b6d4f",
+        "#2f5d8a",
+        "#7a5448",
+      ];
       drawBarChart(
         fincasResponsableChart,
         respLabels,
@@ -8884,6 +8905,7 @@ const renderFincasDashboard = (empresaId) => {
             label: "Pólizas",
             values: respValues,
             color: "#3C6E71",
+            colors: respLabels.map((_, idx) => rankingPalette[idx % rankingPalette.length]),
             format: (value) => numberFormatter.format(value),
           },
         ],
@@ -8908,11 +8930,12 @@ const renderFincasDashboard = (empresaId) => {
         { legend: false, showValues: true, tooltip: true }
       );
 
-      const comisionCompaniaLabels = comisionCompanias.length
-        ? comisionCompanias.map((item) => item.label)
+      const topComisionCompanias = comisionCompanias.slice(0, 8);
+      const comisionCompaniaLabels = topComisionCompanias.length
+        ? topComisionCompanias.map((item) => item.label)
         : ["Sin datos"];
-      const comisionCompaniaValues = comisionCompanias.length
-        ? comisionCompanias.map((item) => Number(item.total || 0))
+      const comisionCompaniaValues = topComisionCompanias.length
+        ? topComisionCompanias.map((item) => Number(item.total || 0))
         : [0];
       drawBarChart(
         fincasComisionCompaniaChart,
@@ -8922,17 +8945,19 @@ const renderFincasDashboard = (empresaId) => {
             label: "Comisionado",
             values: comisionCompaniaValues,
             color: "#3C6E71",
+            colors: comisionCompaniaLabels.map((_, idx) => rankingPalette[idx % rankingPalette.length]),
             format: (value) => euroFormatter.format(value),
           },
         ],
         { legend: false, showValues: true, tooltip: true }
       );
 
-      const comisionRamoLabels = comisionRamos.length
-        ? comisionRamos.map((item) => item.label)
+      const topComisionRamos = comisionRamos.slice(0, 8);
+      const comisionRamoLabels = topComisionRamos.length
+        ? topComisionRamos.map((item) => item.label)
         : ["Sin datos"];
-      const comisionRamoValues = comisionRamos.length
-        ? comisionRamos.map((item) => Number(item.total || 0))
+      const comisionRamoValues = topComisionRamos.length
+        ? topComisionRamos.map((item) => Number(item.total || 0))
         : [0];
       drawBarChart(
         fincasComisionRamoChart,
@@ -8942,6 +8967,7 @@ const renderFincasDashboard = (empresaId) => {
             label: "Comisionado",
             values: comisionRamoValues,
             color: "#5F7A61",
+            colors: comisionRamoLabels.map((_, idx) => rankingPalette[idx % rankingPalette.length]),
             format: (value) => euroFormatter.format(value),
           },
         ],
