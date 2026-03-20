@@ -12028,8 +12028,8 @@ const getSegurosPolizaOptions = ({ action = "", includeAll = false } = {}) => {
     return "presupuesto";
   };
   const actionKey = normalizeSimple(action || "");
-  const isAllowedForAction = (bucket) => {
-    if (includeAll || !actionKey) return true;
+  const isCompatibleForAction = (bucket) => {
+    if (!actionKey) return true;
     if (actionKey === "contratar") return bucket === "presupuesto";
     if (actionKey === "activar") return bucket === "contratada";
     if (actionKey === "renovar" || actionKey === "anular" || actionKey === "cancelar" || actionKey === "cancel") {
@@ -12042,23 +12042,27 @@ const getSegurosPolizaOptions = ({ action = "", includeAll = false } = {}) => {
       const id = String(row[idIndex] || "").trim();
       if (!id) return null;
       const bucket = resolveBucket(row);
-      if (!isAllowedForAction(bucket)) return null;
+      const compatible = isCompatibleForAction(bucket);
+      if (!includeAll && actionKey && !compatible) return null;
       const poliza = row[polizaIndex] || "-";
       const tomador = row[tomadorIndex] || "Cliente";
       const compania = row[companiaIndex] || "-";
       return {
         id,
         bucket,
+        compatible,
         label: `${tomador} · ${compania} · ${poliza}`,
       };
     })
-    .filter(Boolean);
+    .filter(Boolean)
+    .sort((a, b) => Number(Boolean(b.compatible)) - Number(Boolean(a.compatible)));
 };
 
 const populateSegurosOperationalSelects = () => {
   const action = segurosPolizaAccionTipo ? segurosPolizaAccionTipo.value : "";
   const optionsAll = getSegurosPolizaOptions({ includeAll: true });
   const optionsByAction = getSegurosPolizaOptions({ action });
+  const optionsForAction = optionsByAction.length ? optionsByAction : optionsAll;
   const fill = (select, options = optionsAll) => {
     if (!select) return;
     const current = select.value;
@@ -12071,14 +12075,17 @@ const populateSegurosOperationalSelects = () => {
       select.value = options[0].id;
     }
   };
-  fill(segurosPolizaAccionId, optionsByAction);
+  fill(segurosPolizaAccionId, optionsForAction);
   fill(segurosEventosPolizaId, optionsAll);
   fill(segurosIpidPolizaId, optionsAll);
   fill(segurosReclamacionPolizaId, optionsAll);
   if (segurosPolizaAccionStatus) {
-    if (!optionsByAction.length) {
-      segurosPolizaAccionStatus.textContent = "No hay pólizas disponibles para esa acción.";
-    } else if (segurosPolizaAccionStatus.textContent === "No hay pólizas disponibles para esa acción.") {
+    if (!optionsByAction.length && optionsAll.length) {
+      segurosPolizaAccionStatus.textContent = "Mostrando todas las pólizas para que puedas seleccionar manualmente.";
+    } else if (
+      segurosPolizaAccionStatus.textContent === "No hay pólizas disponibles para esa acción." ||
+      segurosPolizaAccionStatus.textContent === "Mostrando todas las pólizas para que puedas seleccionar manualmente."
+    ) {
       segurosPolizaAccionStatus.textContent = "";
     }
   }
