@@ -3500,7 +3500,7 @@ const openSegurosCrm = () => {
   if (segurosCrmClienteInput) segurosCrmClienteInput.value = "";
   if (segurosCrmClienteId) segurosCrmClienteId.value = "";
   setCrmMode("seguros");
-  setSegurosTab("alta");
+  setSegurosTab("dashboard");
   if (viewTabs) viewTabs.classList.add("hidden");
   if (segurosCrmSection) segurosCrmSection.classList.remove("hidden");
   if (tableToolbar) tableToolbar.classList.add("hidden");
