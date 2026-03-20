@@ -5574,10 +5574,21 @@ const drawBarChart = (canvas, labels, datasets, options = {}) => {
     || (rotateLabels ? (heavyCrowding ? 16 : 20) : Math.max(8, Math.floor(estimatedGroupWidth / 6)));
   const axisBottomPadding = options.axisBottomPadding
     || (rotateLabels ? (heavyCrowding ? 112 : 96) : 78);
+  const legendPosition = options.legendPosition || "top";
+  let legendRightPadding = 0;
+  if (options.legend && legendPosition === "right") {
+    ctx.font = "600 11px 'Source Sans 3', sans-serif";
+    const maxLegendTextWidth = datasets.reduce((acc, dataset) => {
+      const widthText = ctx.measureText(String(dataset.label || "")).width;
+      return Math.max(acc, widthText);
+    }, 0);
+    const desired = Math.ceil(maxLegendTextWidth + 34);
+    legendRightPadding = Math.max(110, Math.min(220, desired));
+  }
 
   const padding = {
     top: 22,
-    right: 18,
+    right: 18 + legendRightPadding,
     bottom: axisBottomPadding,
     left: 40,
   };
@@ -5780,16 +5791,28 @@ const drawBarChart = (canvas, labels, datasets, options = {}) => {
   }
 
   if (options.legend) {
-    let offsetX = padding.left;
-    const offsetY = padding.top - 12;
-    datasets.forEach((dataset) => {
-      ctx.fillStyle = dataset.color;
-      ctx.fillRect(offsetX, offsetY, 10, 10);
-      ctx.fillStyle = "#4c4540";
-      ctx.font = "600 11px 'Source Sans 3', sans-serif";
-      ctx.fillText(dataset.label, offsetX + 14, offsetY + 9);
-      offsetX += ctx.measureText(dataset.label).width + 30;
-    });
+    ctx.font = "600 11px 'Source Sans 3', sans-serif";
+    if (legendPosition === "right") {
+      const legendStartX = width - legendRightPadding + 8;
+      let legendY = padding.top + 2;
+      datasets.forEach((dataset) => {
+        ctx.fillStyle = dataset.color || "#4c4540";
+        ctx.fillRect(legendStartX, legendY, 10, 10);
+        ctx.fillStyle = "#4c4540";
+        ctx.fillText(String(dataset.label || ""), legendStartX + 14, legendY + 9);
+        legendY += 18;
+      });
+    } else {
+      let offsetX = padding.left;
+      const offsetY = padding.top - 12;
+      datasets.forEach((dataset) => {
+        ctx.fillStyle = dataset.color || "#4c4540";
+        ctx.fillRect(offsetX, offsetY, 10, 10);
+        ctx.fillStyle = "#4c4540";
+        ctx.fillText(String(dataset.label || ""), offsetX + 14, offsetY + 9);
+        offsetX += ctx.measureText(String(dataset.label || "")).width + 30;
+      });
+    }
   }
 
   if (options.tooltip) {
@@ -9237,6 +9260,7 @@ const renderFincasDashboard = (empresaId) => {
         ],
         {
           legend: true,
+          legendPosition: "right",
           showValues: true,
           tooltip: true,
           secondaryAxisFormat: (value) => numberFormatter.format(Math.round(Number(value || 0))),
