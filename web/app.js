@@ -1133,6 +1133,7 @@ const state = {
   gestoriaCrmTab: "all",
   gestoriaCrmView: "crm",
   segurosTab: "dashboard",
+  hipotecaAltaView: "dashboard",
   clienteDocsTab: "seguros",
   segurosBdtCache: null,
   segurosRamosSource: null,
@@ -1859,6 +1860,22 @@ const aieFormStatus = document.getElementById("aieFormStatus");
 const hipotecaSection = document.getElementById("hipotecaSection");
 const hipotecaForm = document.getElementById("hipotecaForm");
 const hipotecaFormStatus = document.getElementById("hipotecaFormStatus");
+const hipotecaTabs = document.getElementById("hipotecaTabs");
+const hipotecaDashboardPanel = document.getElementById("hipotecaDashboardPanel");
+const hipotecaAltaPanel = document.getElementById("hipotecaAltaPanel");
+const hipotecaBdtPanel = document.getElementById("hipotecaBdtPanel");
+const hipotecaBdtSearch = document.getElementById("hipotecaBdtSearch");
+const hipotecaBdtRefresh = document.getElementById("hipotecaBdtRefresh");
+const hipotecaBdtTable = document.getElementById("hipotecaBdtTable");
+const hipotecaBdtInfo = document.getElementById("hipotecaBdtInfo");
+const hipotecaDashboardRefresh = document.getElementById("hipotecaDashboardRefresh");
+const hipotecaDashboardKpis = document.getElementById("hipotecaDashboardKpis");
+const hipotecaFirmadasChart = document.getElementById("hipotecaFirmadasChart");
+const hipotecaComisionChart = document.getElementById("hipotecaComisionChart");
+const hipotecaPorcentajeChart = document.getElementById("hipotecaPorcentajeChart");
+const hipotecaEntidadChart = document.getElementById("hipotecaEntidadChart");
+const hipotecaOficinaChart = document.getElementById("hipotecaOficinaChart");
+const hipotecaDashboardInfo = document.getElementById("hipotecaDashboardInfo");
 const finDashboardSection = document.getElementById("finDashboardSection");
 const finDashboardKpis = document.getElementById("finDashboardKpis");
 const finHipotecasChart = document.getElementById("finHipotecasChart");
@@ -8464,6 +8481,7 @@ const updateTableVisibility = () => {
   }
   updateFincasBdtTabs();
   updateEstudioAltaTabs();
+  updateHipotecaAltaTabs();
   if (state.currentModule === "clientes") {
     if (dashboardSection) dashboardSection.classList.add("hidden");
     if (finDashboardSection) finDashboardSection.classList.add("hidden");
@@ -8544,6 +8562,224 @@ const updateEstudioAltaTabs = () => {
   estudioAltaTabs.querySelectorAll(".tab").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.section === active);
   });
+};
+
+const loadHipotecaBdt = () => {
+  if (!hipotecaBdtTable || !hipotecaBdtInfo) {
+    return;
+  }
+  const empresa = state.empresas.find((e) => e.nombre === FIN_COMPANY);
+  if (!empresa?.id) {
+    hipotecaBdtTable.innerHTML = "<p class='muted'>Sin empresa de hipotecas configurada.</p>";
+    hipotecaBdtInfo.textContent = "";
+    return;
+  }
+  const q = hipotecaBdtSearch ? hipotecaBdtSearch.value.trim() : "";
+  const params = new URLSearchParams({
+    tabla: "hipotecas",
+    empresa_id: empresa.id,
+    q,
+  });
+  api(`/api/tabla?${params.toString()}`)
+    .then((data) => {
+      renderTableInto(
+        {
+          columns: data.columns || [],
+          rows: data.rows || [],
+        },
+        hipotecaBdtTable,
+        hipotecaBdtInfo,
+        "Hipotecas"
+      );
+    })
+    .catch((error) => {
+      const message = error?.data?.error || error?.message || "No se pudo cargar la BDT.";
+      hipotecaBdtTable.innerHTML = `<p class='muted'>${message}</p>`;
+      hipotecaBdtInfo.textContent = "";
+    });
+};
+
+const loadHipotecaDashboard = () => {
+  if (
+    !hipotecaDashboardKpis ||
+    !hipotecaFirmadasChart ||
+    !hipotecaComisionChart ||
+    !hipotecaPorcentajeChart ||
+    !hipotecaEntidadChart ||
+    !hipotecaOficinaChart
+  ) {
+    return;
+  }
+  const empresa = state.empresas.find((e) => e.nombre === FIN_COMPANY);
+  if (!empresa?.id) {
+    hipotecaDashboardKpis.innerHTML = "<p class='muted'>Sin empresa de hipotecas configurada.</p>";
+    if (hipotecaDashboardInfo) hipotecaDashboardInfo.textContent = "";
+    return;
+  }
+  if (hipotecaDashboardInfo) {
+    hipotecaDashboardInfo.textContent = "Cargando dashboard...";
+  }
+  api(`/api/hipoteca_dashboard?empresa_id=${empresa.id}`)
+    .then((data) => {
+      const currentYear = String(new Date().getFullYear());
+      const kpis = [
+        {
+          title: `Hipotecas ${currentYear}`,
+          value: numberFormatter.format(data?.current?.total || 0),
+          note: "Firmadas + Indemnización",
+        },
+        {
+          title: "Firmadas mes",
+          value: numberFormatter.format(data?.current?.firmadas_mes || 0),
+          note: "Mes actual",
+        },
+        {
+          title: "Porcentaje medio",
+          value: formatPercent(data?.current?.porcentaje_medio),
+          note: "Financiación media",
+        },
+        {
+          title: "Comisión media",
+          value: euroFormatter.format(data?.current?.comision_media || 0),
+          note: "Firmadas + Indemnización",
+        },
+      ];
+      hipotecaDashboardKpis.innerHTML = "";
+      kpis.forEach((kpi) => {
+        const card = document.createElement("div");
+        card.className = "card";
+        card.innerHTML = `
+          <h3>${kpi.title}</h3>
+          <div class="muted">${kpi.value}</div>
+          <div class="muted">${kpi.note}</div>
+        `;
+        hipotecaDashboardKpis.appendChild(card);
+      });
+
+      const years = buildYearIndex([data?.series_totales || []]);
+      drawBarChart(
+        hipotecaFirmadasChart,
+        years,
+        [
+          {
+            label: "Hipotecas",
+            values: alignSeries(years, data?.series_totales || []),
+            color: "#824c45",
+            format: (value) => numberFormatter.format(value),
+          },
+        ],
+        { legend: false, showValues: true, tooltip: true }
+      );
+
+      const comisionYears = buildYearIndex([data?.series_comision || []]);
+      drawBarChart(
+        hipotecaComisionChart,
+        comisionYears,
+        [
+          {
+            label: "Comisión",
+            values: alignSeries(comisionYears, data?.series_comision || []),
+            color: "#d7b04c",
+            format: (value) => euroFormatter.format(value),
+          },
+        ],
+        { legend: false, showValues: true, tooltip: true }
+      );
+
+      const pctYears = buildYearIndex([data?.series_porcentaje || []]);
+      drawBarChart(
+        hipotecaPorcentajeChart,
+        pctYears,
+        [
+          {
+            label: "% financiación",
+            values: alignSeries(pctYears, data?.series_porcentaje || []),
+            color: "#3C6E71",
+            format: (value) => `${Number(value || 0).toFixed(1)}%`,
+          },
+        ],
+        { legend: false, showValues: true, tooltip: true }
+      );
+
+      const entidadLabels = (data?.series_entidades || []).map((item) => item.label);
+      const entidadValues = (data?.series_entidades || []).map((item) => Number(item.total || 0));
+      drawBarChart(
+        hipotecaEntidadChart,
+        entidadLabels.length ? entidadLabels : ["Sin datos"],
+        [
+          {
+            label: "Entidad",
+            values: entidadValues.length ? entidadValues : [0],
+            color: "#7e8878",
+            format: (value) => numberFormatter.format(value),
+          },
+        ],
+        { legend: false, showValues: true, tooltip: true }
+      );
+
+      const oficinaLabels = (data?.series_oficinas || []).map((item) => item.label);
+      const oficinaValues = (data?.series_oficinas || []).map((item) => Number(item.total || 0));
+      drawBarChart(
+        hipotecaOficinaChart,
+        oficinaLabels.length ? oficinaLabels : ["Sin datos"],
+        [
+          {
+            label: "Oficina",
+            values: oficinaValues.length ? oficinaValues : [0],
+            color: "#5f6f5b",
+            format: (value) => numberFormatter.format(value),
+          },
+        ],
+        { legend: false, showValues: true, tooltip: true }
+      );
+      if (hipotecaDashboardInfo) {
+        hipotecaDashboardInfo.textContent = "Actualizado.";
+      }
+    })
+    .catch((error) => {
+      const message = error?.data?.error || error?.message || "No se pudo cargar el dashboard.";
+      hipotecaDashboardKpis.innerHTML = `<p class='muted'>${message}</p>`;
+      if (hipotecaDashboardInfo) {
+        hipotecaDashboardInfo.textContent = message;
+      }
+    });
+};
+
+const setHipotecaAltaView = (view) => {
+  if (!hipotecaSection || !hipotecaTabs) {
+    return;
+  }
+  const next =
+    view === "alta" || view === "bdt" || view === "dashboard" ? view : "dashboard";
+  state.hipotecaAltaView = next;
+  if (hipotecaDashboardPanel) {
+    hipotecaDashboardPanel.classList.toggle("hidden", next !== "dashboard");
+  }
+  if (hipotecaAltaPanel) {
+    hipotecaAltaPanel.classList.toggle("hidden", next !== "alta");
+  }
+  if (hipotecaBdtPanel) {
+    hipotecaBdtPanel.classList.toggle("hidden", next !== "bdt");
+  }
+  hipotecaTabs.querySelectorAll(".tab").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.hipotecaSection === next);
+  });
+  if (next === "dashboard") {
+    loadHipotecaDashboard();
+  }
+  if (next === "bdt") {
+    loadHipotecaBdt();
+  }
+};
+
+const updateHipotecaAltaTabs = () => {
+  if (!hipotecaSection || !hipotecaTabs) {
+    return;
+  }
+  if (hipotecaSection.classList.contains("hidden")) {
+    return;
+  }
+  setHipotecaAltaView(state.hipotecaAltaView || "dashboard");
 };
 
 const drawSignedBarChart = (canvas, labels, values, color) => {
@@ -22820,6 +23056,38 @@ if (aieForm) {
   });
 }
 
+if (hipotecaTabs) {
+  hipotecaTabs.querySelectorAll(".tab").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      setHipotecaAltaView(btn.dataset.hipotecaSection || "dashboard");
+    });
+  });
+}
+
+if (hipotecaBdtRefresh) {
+  hipotecaBdtRefresh.addEventListener("click", () => {
+    loadHipotecaBdt();
+  });
+}
+
+if (hipotecaDashboardRefresh) {
+  hipotecaDashboardRefresh.addEventListener("click", () => {
+    loadHipotecaDashboard();
+  });
+}
+
+if (hipotecaBdtSearch) {
+  let hipotecaBdtSearchTimer = null;
+  hipotecaBdtSearch.addEventListener("input", () => {
+    clearTimeout(hipotecaBdtSearchTimer);
+    hipotecaBdtSearchTimer = setTimeout(() => {
+      if ((state.hipotecaAltaView || "dashboard") === "bdt") {
+        loadHipotecaBdt();
+      }
+    }, 220);
+  });
+}
+
 if (hipotecaForm) {
   const comisionInput = hipotecaForm.querySelector("input[name='comision']");
   const comisionJuanInput = hipotecaForm.querySelector("input[name='comision_juan']");
@@ -22923,6 +23191,12 @@ if (hipotecaForm) {
           hipotecaFormStatus.textContent = "Guardado.";
         }
         hipotecaForm.reset();
+        if ((state.hipotecaAltaView || "") === "bdt") {
+          loadHipotecaBdt();
+        }
+        if ((state.hipotecaAltaView || "") === "dashboard") {
+          loadHipotecaDashboard();
+        }
         loadHomeHipotecaStats().then(() => renderCompanyCards());
       })
       .catch(() => {

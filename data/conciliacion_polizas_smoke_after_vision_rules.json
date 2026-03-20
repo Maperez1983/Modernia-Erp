@@ -1,0 +1,533 @@
+{
+  "generated_at": "2026-02-18T14:51:05.076425+00:00",
+  "empresa_id": "a261e552-8b9c-4da4-a279-a21c33277789",
+  "stats": {
+    "files_total": 16,
+    "matched_policy+company": 6,
+    "rows_unchanged": 9,
+    "matched_soft": 3,
+    "missing_cliente_before": 2,
+    "rows_updated": 2,
+    "fields_updated": 2,
+    "unmatched": 4,
+    "skipped_non_policy": 9,
+    "ocr_error": 1,
+    "matched_tomador+company": 2,
+    "created_seguros": 0,
+    "empty_fields": 0
+  },
+  "by_company": {
+    "(sin_compania)": {
+      "total": 1,
+      "ocr_error": 1
+    },
+    "Fiatc": {
+      "total": 2,
+      "unmatched": 1,
+      "matched_unchanged": 1
+    },
+    "MAPFRE": {
+      "total": 2,
+      "matched_unchanged": 2
+    },
+    "MUTUA PROPIETARIOS": {
+      "total": 2,
+      "updated": 2
+    },
+    "Mapfre": {
+      "total": 1,
+      "unmatched": 1
+    },
+    "OCASO": {
+      "total": 3,
+      "matched_unchanged": 3
+    },
+    "REALE": {
+      "total": 1,
+      "matched_unchanged": 1
+    },
+    "Reale": {
+      "total": 2,
+      "matched_unchanged": 2
+    },
+    "iptiQ EMEA P": {
+      "total": 2,
+      "unmatched": 2
+    }
+  },
+  "learned_hints": {
+    "MAPFRE": {
+      "company": "MAPFRE",
+      "count": 2,
+      "total": 2,
+      "ratio": 1.0
+    },
+    "CALLE": {
+      "company": "MUTUA PROPIETARIOS",
+      "count": 2,
+      "total": 2,
+      "ratio": 1.0
+    },
+    "MUTUA": {
+      "company": "MUTUA PROPIETARIOS",
+      "count": 2,
+      "total": 2,
+      "ratio": 1.0
+    },
+    "OCASO": {
+      "company": "OCASO",
+      "count": 3,
+      "total": 3,
+      "ratio": 1.0
+    },
+    "OCTUBRE BARBARA KONECNY": {
+      "company": "Reale",
+      "count": 2,
+      "total": 2,
+      "ratio": 1.0
+    },
+    "OCTUBRE": {
+      "company": "Reale",
+      "count": 2,
+      "total": 2,
+      "ratio": 1.0
+    },
+    "BARBARA KONECKY": {
+      "company": "Reale",
+      "count": 2,
+      "total": 2,
+      "ratio": 1.0
+    },
+    "EMITIDAS OCTUBRE": {
+      "company": "Reale",
+      "count": 2,
+      "total": 2,
+      "ratio": 1.0
+    },
+    "KONECKY": {
+      "company": "Reale",
+      "count": 2,
+      "total": 2,
+      "ratio": 1.0
+    },
+    "KONECNY REALE": {
+      "company": "Reale",
+      "count": 2,
+      "total": 2,
+      "ratio": 1.0
+    },
+    "KONECNY REALE BARBARA": {
+      "company": "Reale",
+      "count": 2,
+      "total": 2,
+      "ratio": 1.0
+    },
+    "BARBARA KONECNY REALE": {
+      "company": "Reale",
+      "count": 2,
+      "total": 2,
+      "ratio": 1.0
+    },
+    "EMITIDAS OCTUBRE BARBARA": {
+      "company": "Reale",
+      "count": 2,
+      "total": 2,
+      "ratio": 1.0
+    },
+    "REALE BARBARA": {
+      "company": "Reale",
+      "count": 2,
+      "total": 2,
+      "ratio": 1.0
+    },
+    "KONECNY": {
+      "company": "Reale",
+      "count": 2,
+      "total": 2,
+      "ratio": 1.0
+    },
+    "OCTUBRE BARBARA": {
+      "company": "Reale",
+      "count": 2,
+      "total": 2,
+      "ratio": 1.0
+    },
+    "POLIZAS EMITIDAS OCTUBRE": {
+      "company": "Reale",
+      "count": 2,
+      "total": 2,
+      "ratio": 1.0
+    },
+    "BARBARA KONECNY": {
+      "company": "Reale",
+      "count": 2,
+      "total": 2,
+      "ratio": 1.0
+    },
+    "BARBARA": {
+      "company": "Reale",
+      "count": 2,
+      "total": 2,
+      "ratio": 1.0
+    },
+    "REALE BARBARA KONECKY": {
+      "company": "Reale",
+      "count": 2,
+      "total": 2,
+      "ratio": 1.0
+    },
+    "POLIZAS EMITIDAS NOVIEMBRE": {
+      "company": "OCASO",
+      "count": 2,
+      "total": 2,
+      "ratio": 1.0
+    },
+    "NOVIEMBRE OCASO": {
+      "company": "OCASO",
+      "count": 2,
+      "total": 2,
+      "ratio": 1.0
+    },
+    "EMITIDAS NOVIEMBRE OCASO": {
+      "company": "OCASO",
+      "count": 2,
+      "total": 2,
+      "ratio": 1.0
+    },
+    "EMITIDAS NOVIEMBRE": {
+      "company": "OCASO",
+      "count": 2,
+      "total": 2,
+      "ratio": 1.0
+    },
+    "NOVIEMBRE": {
+      "company": "OCASO",
+      "count": 2,
+      "total": 2,
+      "ratio": 1.0
+    }
+  },
+  "rows": [
+    {
+      "file": "/Users/miguelperezrodriguez/Library/CloudStorage/OneDrive-Personal/FINCAS VELAZQUEZ/SEGUROS/POLIZAS EMITIDAS/2024/08 AGOSTO/MAPFRE - HOGAR ADIL.pdf",
+      "status": "matched_unchanged",
+      "match_reason": "policy+company",
+      "seguro_id": "b6899e55-9798-460b-a976-23508cb9c86e",
+      "seguro_company": "MAPFRE",
+      "ocr_company": "Mapfre",
+      "seguro_policy": "0732400157624",
+      "ocr_policy": "0732400157624",
+      "seguro_tomador": "ADIL BENABDALLAH",
+      "ocr_tomador": "a la fecha de renovación de la póliza y",
+      "missing_required": "",
+      "ocr_error": "",
+      "ai_used": "0",
+      "ai_error": "",
+      "soft_score": 0.0,
+      "review_action": "",
+      "review_match_id": ""
+    },
+    {
+      "file": "/Users/miguelperezrodriguez/Library/CloudStorage/OneDrive-Personal/FINCAS VELAZQUEZ/SEGUROS/POLIZAS EMITIDAS/2024/09 SEPTIEMBRE/MUTUA PROPIETARIOS -POLIZA CALLE APOLO.pdf",
+      "status": "updated",
+      "match_reason": "soft",
+      "seguro_id": "ce92a8b1-474a-4cba-9096-49d789f92ce4",
+      "seguro_company": "MUTUA PROPIETARIOS",
+      "ocr_company": "Mutua Propietarios",
+      "seguro_policy": "92095255",
+      "ocr_policy": "920095255",
+      "seguro_tomador": "CARLOS REIM",
+      "ocr_tomador": "CARLOS REIN LORENZALE",
+      "missing_required": "",
+      "ocr_error": "",
+      "ai_used": "0",
+      "ai_error": "",
+      "soft_score": 43.5,
+      "candidate_top_id": "ce92a8b1-474a-4cba-9096-49d789f92ce4",
+      "candidate_top_score": 43.5,
+      "candidate_top_poliza": "92095255",
+      "candidate_top_tomador": "CARLOS REIM",
+      "review_action": "",
+      "review_match_id": ""
+    },
+    {
+      "file": "/Users/miguelperezrodriguez/Library/CloudStorage/OneDrive-Personal/FINCAS VELAZQUEZ/SEGUROS/POLIZAS EMITIDAS/2024/09 SEPTIEMBRE/OCASO - POLIZA HOGAR IKRAM.pdf",
+      "status": "matched_unchanged",
+      "match_reason": "policy+company",
+      "seguro_id": "fb0fcec7-efd4-4d4f-85ee-1b3d1b886747",
+      "seguro_company": "OCASO",
+      "ocr_company": "Ocaso",
+      "seguro_policy": "3401159",
+      "ocr_policy": "3401159",
+      "seguro_tomador": "OCASO POLIZA HOGAR IKRAM",
+      "ocr_tomador": "IKRAM NAJAE AHBAYTI",
+      "missing_required": "",
+      "ocr_error": "",
+      "ai_used": "0",
+      "ai_error": "",
+      "soft_score": 0.0,
+      "review_action": "",
+      "review_match_id": ""
+    },
+    {
+      "file": "/Users/miguelperezrodriguez/Library/CloudStorage/OneDrive-Personal/FINCAS VELAZQUEZ/SEGUROS/POLIZAS EMITIDAS/2024/09 SEPTIEMBRE/POLIZA DECOCHE ROCIO/2002400516767 - MAPFRE AUTO - ROCIO PASCUAL.pdf",
+      "status": "unmatched",
+      "match_reason": "",
+      "seguro_id": "",
+      "seguro_company": "",
+      "ocr_company": "Mapfre",
+      "seguro_policy": "",
+      "ocr_policy": "2002400516767",
+      "seguro_tomador": "",
+      "ocr_tomador": "ROCIO PASCUAL CABRERA",
+      "missing_required": "",
+      "ocr_error": "",
+      "ai_used": "0",
+      "ai_error": "top=e02bacaa-3b87-4594-9601-ebf0de31806e:4851500465:RAMON BUSTAMANTE RAMIREZ:24.0 | a428f4e9-3447-464c-9fcf-74f25ebcdb58:2002300396857 / 001:Lucas Narvaez Vazquez:24.0 | 6e798bff-771c-4a0b-b61a-62fcc86df5be:-:HIJO CRISTINA CANALES:24.0",
+      "soft_score": 24.0,
+      "candidate_top_id": "e02bacaa-3b87-4594-9601-ebf0de31806e",
+      "candidate_top_score": 24.0,
+      "candidate_top_poliza": "4851500465",
+      "candidate_top_tomador": "RAMON BUSTAMANTE RAMIREZ",
+      "review_action": "",
+      "review_match_id": ""
+    },
+    {
+      "file": "/Users/miguelperezrodriguez/Library/CloudStorage/OneDrive-Personal/FINCAS VELAZQUEZ/SEGUROS/POLIZAS EMITIDAS/2024/09 SEPTIEMBRE/POLIZA DECOCHE ROCIO/IMG-20240910-WA0009.jpg",
+      "status": "ocr_error",
+      "ocr_error": "pdftotext: Syntax Warning: May not be a PDF file (continuing anyway)\nSyntax Error: Couldn't find trailer dictionary\nSyntax Error: Couldn't find trailer dictionary\nSyntax Error: Couldn't read xref table",
+      "missing_required": "tomador,poliza_numero,compania,fecha_efecto",
+      "ai_used": "",
+      "ai_error": ""
+    },
+    {
+      "file": "/Users/miguelperezrodriguez/Library/CloudStorage/OneDrive-Personal/FINCAS VELAZQUEZ/SEGUROS/POLIZAS EMITIDAS/2024/09 SEPTIEMBRE/RC GLADYS RAQUEL - MAPFRE.pdf",
+      "status": "matched_unchanged",
+      "match_reason": "soft",
+      "seguro_id": "ae41690f-e768-4466-899e-192152aeb617",
+      "seguro_company": "MAPFRE",
+      "ocr_company": "Mapfre",
+      "seguro_policy": "742480180489",
+      "ocr_policy": "00022593",
+      "seguro_tomador": "GLADYS RAQUEL",
+      "ocr_tomador": "VILLALBA BAEZ, GLADYS RAQUEL",
+      "missing_required": "",
+      "ocr_error": "",
+      "ai_used": "0",
+      "ai_error": "",
+      "soft_score": 41.0,
+      "candidate_top_id": "ae41690f-e768-4466-899e-192152aeb617",
+      "candidate_top_score": 41.0,
+      "candidate_top_poliza": "742480180489",
+      "candidate_top_tomador": "GLADYS RAQUEL",
+      "review_action": "",
+      "review_match_id": ""
+    },
+    {
+      "file": "/Users/miguelperezrodriguez/Library/CloudStorage/OneDrive-Personal/FINCAS VELAZQUEZ/SEGUROS/POLIZAS EMITIDAS/2024/09 SEPTIEMBRE/REALE - POLIZA HOGAR CRISTINA CANALES.pdf",
+      "status": "matched_unchanged",
+      "match_reason": "tomador+company",
+      "seguro_id": "687ff65c-9319-4f38-be46-710f0d0987a9",
+      "seguro_company": "REALE",
+      "ocr_company": "Reale",
+      "seguro_policy": "3022500320279",
+      "ocr_policy": "8172400044392",
+      "seguro_tomador": "CANALES RIVAS CRISTINA",
+      "ocr_tomador": "CANALES RIVAS, CRISTINA",
+      "missing_required": "",
+      "ocr_error": "",
+      "ai_used": "0",
+      "ai_error": "",
+      "soft_score": 0.0,
+      "review_action": "",
+      "review_match_id": ""
+    },
+    {
+      "file": "/Users/miguelperezrodriguez/Library/CloudStorage/OneDrive-Personal/FINCAS VELAZQUEZ/SEGUROS/POLIZAS EMITIDAS/2024/10 OCTUBRE/BARBARA KONECNY/REALE BARBARA KONECKY.pdf",
+      "status": "matched_unchanged",
+      "match_reason": "policy+company",
+      "seguro_id": "25589705-f063-4987-8583-4d998f08f489",
+      "seguro_company": "Reale",
+      "ocr_company": "Reale",
+      "seguro_policy": "8172400047362",
+      "ocr_policy": "8172400047362",
+      "seguro_tomador": "idad vivienda",
+      "ocr_tomador": "o a satisfacer la prestación convenida, hasta la suma",
+      "missing_required": "",
+      "ocr_error": "",
+      "ai_used": "0",
+      "ai_error": "",
+      "soft_score": 0.0,
+      "review_action": "",
+      "review_match_id": ""
+    },
+    {
+      "file": "/Users/miguelperezrodriguez/Library/CloudStorage/OneDrive-Personal/FINCAS VELAZQUEZ/SEGUROS/POLIZAS EMITIDAS/2024/10 OCTUBRE/BARBARA KONECNY/REALE POLIZA HOGAR BARBARA KONECKY.pdf",
+      "status": "matched_unchanged",
+      "match_reason": "policy+company",
+      "seguro_id": "25589705-f063-4987-8583-4d998f08f489",
+      "seguro_company": "Reale",
+      "ocr_company": "Reale",
+      "seguro_policy": "8172400047362",
+      "ocr_policy": "8172400047362",
+      "seguro_tomador": "idad vivienda",
+      "ocr_tomador": "KONECNY FIORE, BARBARA",
+      "missing_required": "",
+      "ocr_error": "",
+      "ai_used": "0",
+      "ai_error": "",
+      "soft_score": 0.0,
+      "review_action": "",
+      "review_match_id": ""
+    },
+    {
+      "file": "/Users/miguelperezrodriguez/Library/CloudStorage/OneDrive-Personal/FINCAS VELAZQUEZ/SEGUROS/POLIZAS EMITIDAS/2024/11 NOVIEMBRE/POLIZA SEG.IMPAGOS GAG09126.pdf",
+      "status": "unmatched",
+      "match_reason": "",
+      "seguro_id": "",
+      "seguro_company": "",
+      "ocr_company": "iptiQ EMEA P",
+      "seguro_policy": "",
+      "ocr_policy": "GAG09126Fechadeemisión:31",
+      "seguro_tomador": "",
+      "ocr_tomador": "una persona física (mayor de edad) o una persona",
+      "missing_required": "",
+      "ocr_error": "",
+      "ai_used": "0",
+      "ai_error": "top=b3b24d81-0e23-48e0-85f1-99b9560f5da6:GAG11164:y Apellidos:18.0 | fb0fcec7-efd4-4d4f-85ee-1b3d1b886747:3401159:OCASO POLIZA HOGAR IKRAM:5.0 | 98160b87-f90b-4615-b05b-693554b949eb:0482013720628:de la cuenta:3.75",
+      "soft_score": 18.0,
+      "candidate_top_id": "b3b24d81-0e23-48e0-85f1-99b9560f5da6",
+      "candidate_top_score": 18.0,
+      "candidate_top_poliza": "GAG11164",
+      "candidate_top_tomador": "y Apellidos",
+      "review_action": "",
+      "review_match_id": ""
+    },
+    {
+      "file": "/Users/miguelperezrodriguez/Library/CloudStorage/OneDrive-Personal/FINCAS VELAZQUEZ/SEGUROS/POLIZAS EMITIDAS/2024/11 NOVIEMBRE/Poliza Ocaso Francisco - Bonaire.pdf",
+      "status": "matched_unchanged",
+      "match_reason": "policy+company",
+      "seguro_id": "2ab56924-26c6-462e-a40a-67878671ef95",
+      "seguro_company": "OCASO",
+      "ocr_company": "Ocaso",
+      "seguro_policy": "3419938",
+      "ocr_policy": "3419938",
+      "seguro_tomador": "FRANCISCO BONAIRE",
+      "ocr_tomador": "FRANCISCO TORRALVO BENITEZ",
+      "missing_required": "",
+      "ocr_error": "",
+      "ai_used": "0",
+      "ai_error": "",
+      "soft_score": 0.0,
+      "review_action": "",
+      "review_match_id": ""
+    },
+    {
+      "file": "/Users/miguelperezrodriguez/Library/CloudStorage/OneDrive-Personal/FINCAS VELAZQUEZ/SEGUROS/POLIZAS EMITIDAS/2024/11 NOVIEMBRE/Poliza Ocaso Rafael Lopez - Estudio Carlota Alexandri.pdf",
+      "status": "matched_unchanged",
+      "match_reason": "policy+company",
+      "seguro_id": "fa33711e-ffec-4e05-b2a4-1bd560336e56",
+      "seguro_company": "OCASO",
+      "ocr_company": "Ocaso",
+      "seguro_policy": "3425369",
+      "ocr_policy": "3425369",
+      "seguro_tomador": "LOPEZ ESTUDIO CARLOTA ALEXANDRI",
+      "ocr_tomador": "RAFAEL LOPEZ BARRANCO",
+      "missing_required": "",
+      "ocr_error": "",
+      "ai_used": "0",
+      "ai_error": "",
+      "soft_score": 0.0,
+      "review_action": "",
+      "review_match_id": ""
+    },
+    {
+      "file": "/Users/miguelperezrodriguez/Library/CloudStorage/OneDrive-Personal/FINCAS VELAZQUEZ/SEGUROS/POLIZAS EMITIDAS/2024/11 NOVIEMBRE/SEGURO IMPAGO FIACT SEBASTIAN GUERRERO.pdf",
+      "status": "unmatched",
+      "match_reason": "",
+      "seguro_id": "",
+      "seguro_company": "",
+      "ocr_company": "Fiatc",
+      "seguro_policy": "",
+      "ocr_policy": "0061-5014501-5",
+      "seguro_tomador": "",
+      "ocr_tomador": "SEBASTIAN GUERRERO RODRIGUEZ",
+      "missing_required": "",
+      "ocr_error": "",
+      "ai_used": "0",
+      "ai_error": "top=5853388a-1e16-4453-b98f-37607b91f997:30749063-13:JORGE LOPEZ ROMERO:20.0 | 0e8351b9-0d76-4c01-ba70-1ca700a03862:30749063-25:del acreedor:18.0 | ca5883ac-5f05-47ca-8f55-5f2dece289b8:y24mesesdecarencia:MARIA TORRES MARTIN:18.0",
+      "soft_score": 20.0,
+      "candidate_top_id": "5853388a-1e16-4453-b98f-37607b91f997",
+      "candidate_top_score": 20.0,
+      "candidate_top_poliza": "30749063-13",
+      "candidate_top_tomador": "JORGE LOPEZ ROMERO",
+      "review_action": "",
+      "review_match_id": ""
+    },
+    {
+      "file": "/Users/miguelperezrodriguez/Library/CloudStorage/OneDrive-Personal/FINCAS VELAZQUEZ/SEGUROS/POLIZAS EMITIDAS/2024/12. DICIEMBRE/BARCENILLAS 6.pdf",
+      "status": "unmatched",
+      "match_reason": "",
+      "seguro_id": "",
+      "seguro_company": "",
+      "ocr_company": "iptiQ EMEA P",
+      "seguro_policy": "",
+      "ocr_policy": "GAG09374Fechadeemisión:01",
+      "seguro_tomador": "",
+      "ocr_tomador": "una persona física (mayor de edad) o una persona",
+      "missing_required": "",
+      "ocr_error": "",
+      "ai_used": "0",
+      "ai_error": "top=b3b24d81-0e23-48e0-85f1-99b9560f5da6:GAG11164:y Apellidos:20.0 | ca5883ac-5f05-47ca-8f55-5f2dece289b8:y24mesesdecarencia:MARIA TORRES MARTIN:8.0 | 98160b87-f90b-4615-b05b-693554b949eb:0482013720628:de la cuenta:5.75",
+      "soft_score": 20.0,
+      "candidate_top_id": "b3b24d81-0e23-48e0-85f1-99b9560f5da6",
+      "candidate_top_score": 20.0,
+      "candidate_top_poliza": "GAG11164",
+      "candidate_top_tomador": "y Apellidos",
+      "review_action": "",
+      "review_match_id": ""
+    },
+    {
+      "file": "/Users/miguelperezrodriguez/Library/CloudStorage/OneDrive-Personal/FINCAS VELAZQUEZ/SEGUROS/POLIZAS EMITIDAS/2024/12. DICIEMBRE/FIACT.pdf",
+      "status": "matched_unchanged",
+      "match_reason": "tomador+company",
+      "seguro_id": "ca5883ac-5f05-47ca-8f55-5f2dece289b8",
+      "seguro_company": "Fiatc",
+      "ocr_company": "Fiatc",
+      "seguro_policy": "y24mesesdecarencia",
+      "ocr_policy": "estapolizaESPECIALIDADES2",
+      "seguro_tomador": "MARIA TORRES MARTIN",
+      "ocr_tomador": "MARIA TORRES MARTIN (",
+      "missing_required": "",
+      "ocr_error": "",
+      "ai_used": "0",
+      "ai_error": "",
+      "soft_score": 0.0,
+      "review_action": "",
+      "review_match_id": ""
+    },
+    {
+      "file": "/Users/miguelperezrodriguez/Library/CloudStorage/OneDrive-Personal/FINCAS VELAZQUEZ/SEGUROS/POLIZAS EMITIDAS/2024/12. DICIEMBRE/HOGAR MUTUA - CALLE SAN JUAN BOSCO - CLUAIDO.pdf",
+      "status": "updated",
+      "match_reason": "soft",
+      "seguro_id": "b31e2036-9228-472e-983d-3ac1be971056",
+      "seguro_company": "MUTUA PROPIETARIOS",
+      "ocr_company": "Mutua Propietarios",
+      "seguro_policy": "660059539",
+      "ocr_policy": "5PT0.660059539",
+      "seguro_tomador": "San juan bosco 23",
+      "ocr_tomador": "SAN JUAN BOSCO CLUAIDO",
+      "missing_required": "",
+      "ocr_error": "",
+      "ai_used": "0",
+      "ai_error": "",
+      "soft_score": 72.0,
+      "candidate_top_id": "b31e2036-9228-472e-983d-3ac1be971056",
+      "candidate_top_score": 72.0,
+      "candidate_top_poliza": "660059539",
+      "candidate_top_tomador": "San juan bosco 23",
+      "review_action": "",
+      "review_match_id": ""
+    }
+  ]
+}

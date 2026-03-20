@@ -1,0 +1,102 @@
+{
+  "generated_at": "2026-02-16T07:43:20.454784+00:00",
+  "empresa_id": "a261e552-8b9c-4da4-a279-a21c33277789",
+  "stats": {
+    "files_total": 4,
+    "unmatched": 3,
+    "matched_policy+company": 1,
+    "missing_cliente_before": 1,
+    "rows_updated": 1,
+    "fields_updated": 1,
+    "skipped_non_policy": 6,
+    "rows_unchanged": 0,
+    "created_seguros": 0,
+    "ocr_error": 0,
+    "empty_fields": 0
+  },
+  "by_company": {
+    "(sin_compania)": {
+      "total": 1,
+      "unmatched": 1
+    },
+    "MAPFRE": {
+      "total": 1,
+      "updated": 1
+    },
+    "Mapfre": {
+      "total": 1,
+      "unmatched": 1
+    },
+    "Ocaso": {
+      "total": 1,
+      "unmatched": 1
+    }
+  },
+  "learned_hints": {},
+  "rows": [
+    {
+      "file": "/Users/miguelperezrodriguez/Library/CloudStorage/OneDrive-Personal/FINCAS VELAZQUEZ/SEGUROS/POLIZAS EMITIDAS/2024/08 AGOSTO/MAPFRE - HOGAR ADIL.pdf",
+      "status": "unmatched",
+      "match_reason": "",
+      "seguro_id": "",
+      "seguro_company": "",
+      "ocr_company": "Mapfre",
+      "seguro_policy": "",
+      "ocr_policy": "",
+      "seguro_tomador": "",
+      "ocr_tomador": "ADIL BENABDALLAH",
+      "missing_required": "poliza_numero",
+      "ocr_error": "",
+      "ai_used": "0",
+      "ai_error": "OpenAI error: HTTP Error 400: Bad Request"
+    },
+    {
+      "file": "/Users/miguelperezrodriguez/Library/CloudStorage/OneDrive-Personal/FINCAS VELAZQUEZ/SEGUROS/POLIZAS EMITIDAS/2024/09 SEPTIEMBRE/MUTUA PROPIETARIOS -POLIZA CALLE APOLO.pdf",
+      "status": "unmatched",
+      "match_reason": "",
+      "seguro_id": "",
+      "seguro_company": "",
+      "ocr_company": "",
+      "seguro_policy": "",
+      "ocr_policy": "",
+      "seguro_tomador": "",
+      "ocr_tomador": "CARLOS REIN LORENZALE CIF",
+      "missing_required": "poliza_numero,compania",
+      "ocr_error": "",
+      "ai_used": "0",
+      "ai_error": "OpenAI error: HTTP Error 400: Bad Request"
+    },
+    {
+      "file": "/Users/miguelperezrodriguez/Library/CloudStorage/OneDrive-Personal/FINCAS VELAZQUEZ/SEGUROS/POLIZAS EMITIDAS/2024/09 SEPTIEMBRE/OCASO - POLIZA HOGAR IKRAM.pdf",
+      "status": "unmatched",
+      "match_reason": "",
+      "seguro_id": "",
+      "seguro_company": "",
+      "ocr_company": "Ocaso",
+      "seguro_policy": "",
+      "ocr_policy": "",
+      "seguro_tomador": "",
+      "ocr_tomador": "Tipo:",
+      "missing_required": "poliza_numero",
+      "ocr_error": "",
+      "ai_used": "0",
+      "ai_error": "OpenAI error: HTTP Error 400: Bad Request"
+    },
+    {
+      "file": "/Users/miguelperezrodriguez/Library/CloudStorage/OneDrive-Personal/FINCAS VELAZQUEZ/SEGUROS/POLIZAS EMITIDAS/2024/09 SEPTIEMBRE/POLIZA DECOCHE ROCIO/2002400516767 - MAPFRE AUTO - ROCIO PASCUAL.pdf",
+      "status": "updated",
+      "match_reason": "policy+company",
+      "seguro_id": "6a3773d9-7c24-465e-bdd3-7e6ef304ae28",
+      "seguro_company": "MAPFRE",
+      "ocr_company": "Mapfre",
+      "seguro_policy": "2002400516767",
+      "ocr_policy": "2002400516767",
+      "seguro_tomador": "ROCIO PASCUAL",
+      "ocr_tomador": "Dirección ROCIO PASCUAL CABRERA Documento ID CL JOAQUIN Código postal GAZTAMBIDE N",
+      "missing_required": "",
+      "ocr_error": "",
+      "ai_used": "0",
+      "ai_error": "OpenAI error: HTTP Error 400: Bad Request"
+    }
+  ]
+}

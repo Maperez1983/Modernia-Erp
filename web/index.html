@@ -2493,351 +2493,49 @@
           </div>
         </div>
         <div id="hipotecaSection" class="hidden">
-          <div class="form-card">
-            <div class="section-head">
+          <div id="hipotecaTabs" class="tabs">
+            <button class="tab active" type="button" data-hipoteca-section="dashboard">Dashboard</button>
+            <button class="tab" type="button" data-hipoteca-section="alta">Alta</button>
+            <button class="tab" type="button" data-hipoteca-section="bdt">BDT</button>
+          </div>
+          <div id="hipotecaDashboardPanel" class="form-card">
+            <div class="dashboard-head">
               <div>
-                <h3>Asesoramientos previos</h3>
-                <p class="muted">Alta de clientes desde la ficha de asesoramiento.</p>
+                <h3>Dashboard · CRM Hipoteca</h3>
+                <p class="muted">Resumen anual de hipotecas firmadas e indemnización.</p>
               </div>
-              <div class="crm-actions">
-                <input id="finAsesoramientosSearch" placeholder="Buscar asesoramiento..." />
-              </div>
-            </div>
-            <div class="form-grid">
-              <div class="span-2">
-                <div class="inline-actions">
-                  <button type="button" id="finAsesorOcrButton">Extraer datos</button>
-                  <button type="button" id="finAsesorOcrAutoButton" class="secondary">Auto-recortar</button>
-                  <button type="button" id="finAsesorOcrPreview" class="secondary" disabled>Vista previa</button>
-                  <span id="finAsesorOcrStatus" class="muted"></span>
-                </div>
-                <input id="finAsesorOcrFile" type="file" accept="application/pdf,image/*" />
+              <div class="section-head-actions">
+                <button type="button" id="hipotecaDashboardRefresh" class="secondary">Recargar</button>
               </div>
             </div>
-            <div class="form-grid">
-              <div class="span-2">
-                <label class="muted" style="display:flex;gap:8px;align-items:center;">
-                  <input type="checkbox" id="finAsesorOcrExternal" />
-                  Usar OCR externo (Google Vision) para manuscritos.
-                </label>
+            <div class="grid dashboard-kpis" id="hipotecaDashboardKpis"></div>
+            <div class="grid dashboard-charts">
+              <div class="chart-card">
+                <h4>Hipotecas firmadas por año</h4>
+                <canvas id="hipotecaFirmadasChart"></canvas>
               </div>
-              <label>
-                Motor OCR
-                <select id="finAsesorOcrMode">
-                  <option value="handwritten">Manuscrito (recomendado)</option>
-                  <option value="vision">Vision</option>
-                  <option value="docai">Document AI (Form Parser)</option>
-                  <option value="hybrid">Híbrido (Vision + DocAI)</option>
-                  <option value="tesseract">Tesseract local</option>
-                </select>
-              </label>
-              <details class="span-2">
-                <summary>Modo avanzado: recortes manuales</summary>
-                <div class="form-grid" style="margin-top:12px;">
-                  <label>
-                    Recorte · Cabecera
-                    <input id="finAsesorOcrGuidedHeader" type="file" accept="image/*" />
-                  </label>
-                  <label>
-                    Recorte · Cliente 1
-                    <input id="finAsesorOcrGuidedCliente1" type="file" accept="image/*" />
-                  </label>
-                  <label>
-                    Recorte · Cliente 2
-                    <input id="finAsesorOcrGuidedCliente2" type="file" accept="image/*" />
-                  </label>
-                  <label>
-                    Recorte · Resumen
-                    <input id="finAsesorOcrGuidedResumen" type="file" accept="image/*" />
-                  </label>
-                  <div class="span-2 inline-actions">
-                    <button type="button" id="finAsesorOcrGuidedButton" class="secondary">Extraer con recortes</button>
-                    <span id="finAsesorOcrGuidedStatus" class="muted"></span>
-                  </div>
-                </div>
-              </details>
+              <div class="chart-card">
+                <h4>Comisión total por año</h4>
+                <canvas id="hipotecaComisionChart"></canvas>
+              </div>
+              <div class="chart-card">
+                <h4>% financiación media por año</h4>
+                <canvas id="hipotecaPorcentajeChart"></canvas>
+              </div>
+              <div class="chart-card">
+                <h4>Firmadas por entidad</h4>
+                <canvas id="hipotecaEntidadChart"></canvas>
+              </div>
+              <div class="chart-card">
+                <h4>Firmadas por oficina</h4>
+                <canvas id="hipotecaOficinaChart"></canvas>
+              </div>
             </div>
-            <form id="finAsesoramientoForm" class="form-grid">
-              <input id="finAsesoramientoId" type="hidden" name="id" />
-              <input type="hidden" name="calidad_ocr" />
-              <input type="hidden" name="campos_ocr" />
-              <label>
-                Inmobiliaria/Asesor
-                <select name="inmobiliaria_asesor" id="finAsesorInmobiliaria"></select>
-              </label>
-              <label>
-                Asesor
-                <input name="asesor" />
-              </label>
-              <label>
-                Fecha
-                <input name="fecha" type="date" />
-              </label>
-              <label>
-                Origen
-                <select name="origen">
-                  <option>Presencial</option>
-                  <option>Teléfono</option>
-                  <option>Email</option>
-                  <option>Portal</option>
-                </select>
-              </label>
-              <label>
-                Estado
-                <select name="estado">
-                  <option>En estudio</option>
-                  <option>Aprobado</option>
-                  <option>Descartado</option>
-                  <option>Convertido</option>
-                </select>
-              </label>
-              <div class="form-section">Cliente 1</div>
-              <label>
-                Nombre y apellidos
-                <input name="cliente1_nombre" />
-              </label>
-              <label>
-                DNI
-                <input name="cliente1_dni" />
-              </label>
-              <label>
-                Teléfono
-                <input name="cliente1_telefono" />
-              </label>
-              <label>
-                Email
-                <input name="cliente1_email" />
-              </label>
-              <label>
-                Fecha nacimiento
-                <input name="cliente1_fecha_nacimiento" type="date" />
-              </label>
-              <label>
-                Estado civil
-                <select name="cliente1_estado_civil">
-                  <option value=""></option>
-                  <option>Soltero</option>
-                  <option>Casado</option>
-                </select>
-              </label>
-              <label>
-                Régimen (si casado)
-                <select name="cliente1_regimen">
-                  <option value=""></option>
-                  <option>Separación de bienes</option>
-                  <option>Gananciales</option>
-                </select>
-              </label>
-              <label>
-                Hijos
-                <input name="cliente1_hijos" />
-              </label>
-              <label>
-                Profesión
-                <input name="cliente1_profesion" />
-              </label>
-              <label>
-                Tipo contrato
-                <select name="cliente1_tipo_contrato">
-                  <option value=""></option>
-                  <option>Eventual</option>
-                  <option>Indefinido</option>
-                </select>
-              </label>
-              <label>
-                Tiempo contrato
-                <input name="cliente1_tiempo_contrato" placeholder="Ej: 6 meses / 2 años" />
-              </label>
-              <label>
-                Ingresos/Nómina
-                <input name="cliente1_ingresos" type="text" inputmode="decimal" data-money="1" />
-              </label>
-              <label class="span-2">
-                Patrimonio/Alquiler
-                <input name="cliente1_patrimonio" />
-              </label>
-              <label class="span-2">
-                Préstamos
-                <input name="cliente1_prestamos" />
-              </label>
-              <label>
-                Préstamo activo
-                <select name="cliente1_prestamo_activo" data-loan-toggle="cliente1">
-                  <option value=""></option>
-                  <option>Si</option>
-                  <option>No</option>
-                </select>
-              </label>
-              <label data-loan-field="cliente1">
-                Entidad préstamo
-                <input name="cliente1_prestamo_entidad" list="bankList" />
-              </label>
-              <label data-loan-field="cliente1">
-                Cantidad restante
-                <input name="cliente1_prestamo_resto" type="text" inputmode="decimal" data-money="1" />
-              </label>
-              <div class="form-section">Cliente 2</div>
-              <label>
-                Nombre y apellidos
-                <input name="cliente2_nombre" />
-              </label>
-              <label>
-                DNI
-                <input name="cliente2_dni" />
-              </label>
-              <label>
-                Teléfono
-                <input name="cliente2_telefono" />
-              </label>
-              <label>
-                Email
-                <input name="cliente2_email" />
-              </label>
-              <label>
-                Fecha nacimiento
-                <input name="cliente2_fecha_nacimiento" type="date" />
-              </label>
-              <label>
-                Estado civil
-                <select name="cliente2_estado_civil">
-                  <option value=""></option>
-                  <option>Soltero</option>
-                  <option>Casado</option>
-                </select>
-              </label>
-              <label>
-                Régimen (si casado)
-                <select name="cliente2_regimen">
-                  <option value=""></option>
-                  <option>Separación de bienes</option>
-                  <option>Gananciales</option>
-                </select>
-              </label>
-              <label>
-                Hijos
-                <input name="cliente2_hijos" />
-              </label>
-              <label>
-                Profesión
-                <input name="cliente2_profesion" />
-              </label>
-              <label>
-                Tipo contrato
-                <select name="cliente2_tipo_contrato">
-                  <option value=""></option>
-                  <option>Eventual</option>
-                  <option>Indefinido</option>
-                </select>
-              </label>
-              <label>
-                Tiempo contrato
-                <input name="cliente2_tiempo_contrato" placeholder="Ej: 6 meses / 2 años" />
-              </label>
-              <label>
-                Ingresos/Nómina
-                <input name="cliente2_ingresos" type="text" inputmode="decimal" data-money="1" />
-              </label>
-              <label class="span-2">
-                Patrimonio/Alquiler
-                <input name="cliente2_patrimonio" />
-              </label>
-              <label class="span-2">
-                Préstamos
-                <input name="cliente2_prestamos" />
-              </label>
-              <label>
-                Préstamo activo
-                <select name="cliente2_prestamo_activo" data-loan-toggle="cliente2">
-                  <option value=""></option>
-                  <option>Si</option>
-                  <option>No</option>
-                </select>
-              </label>
-              <label data-loan-field="cliente2">
-                Entidad préstamo
-                <input name="cliente2_prestamo_entidad" list="bankList" />
-              </label>
-              <label data-loan-field="cliente2">
-                Cantidad restante
-                <input name="cliente2_prestamo_resto" type="text" inputmode="decimal" data-money="1" />
-              </label>
-              <div class="form-section">Resumen financiero</div>
-              <label>
-                Ingresos conjuntos
-                <input name="ingresos_conjuntos" type="text" inputmode="decimal" data-money="1" />
-              </label>
-              <label>
-                Aportación CV
-                <input name="aportacion_cv" type="text" inputmode="decimal" data-money="1" />
-              </label>
-              <label class="span-2">
-                Entidades financieras
-                <input name="entidades_financieras" />
-              </label>
-              <label class="span-2">
-                Avalistas/Cotitulares
-                <input name="avalistas" />
-              </label>
-              <label class="span-2">
-                Notas
-                <textarea name="notas" rows="2"></textarea>
-              </label>
-              <label class="span-2">
-                Texto OCR
-                <textarea id="finAsesorOcrRaw" name="notas_ocr" rows="3"></textarea>
-              </label>
-              <div class="form-actions span-2">
-                <button type="submit">Guardar asesoramiento</button>
-                <button type="button" id="finAsesoramientoConvert" class="secondary">Convertir a hipoteca</button>
-                <span id="finAsesoramientoStatus" class="muted"></span>
-              </div>
-            </form>
-            <div id="finAsesoramientosTable"></div>
-            <div class="footer" id="finAsesoramientosInfo"></div>
+            <div class="footer" id="hipotecaDashboardInfo"></div>
           </div>
-          <div class="form-card">
-            <h3>Alertas y checklist · Asesoramientos</h3>
-            <p class="muted">Seguimiento de documentación y faltantes.</p>
-            <div class="grid" id="finAsesorKpis"></div>
-            <div class="inline-actions" style="margin-top:12px;">
-              <button type="button" id="finChecklistGenerate">Generar checklist</button>
-              <span id="finChecklistStatus" class="muted"></span>
-            </div>
-            <div id="finChecklistTable"></div>
-            <div class="footer" id="finChecklistInfo"></div>
-            <h3 style="margin-top:16px;">Alertas</h3>
-            <div id="finAlertsTable"></div>
-            <div class="footer" id="finAlertsInfo"></div>
-          </div>
-          <div class="form-card">
-            <h3>Copiloto · Financiaciones</h3>
-            <p class="muted">Resumen, faltantes y documentación sugerida.</p>
-            <form id="finCopilotForm" class="form-grid">
-              <label>
-                Acción
-                <select name="task">
-                  <option value="resumen">Resumen asesoramiento</option>
-                  <option value="faltantes">Campos faltantes</option>
-                  <option value="documentacion">Checklist documentación</option>
-                </select>
-              </label>
-              <label class="span-2">
-                Instrucciones extra
-                <textarea name="extra" rows="2"></textarea>
-              </label>
-              <div class="form-actions span-2">
-                <button type="submit">Generar</button>
-                <span id="finCopilotStatus" class="muted"></span>
-              </div>
-            </form>
-            <label>
-              Resultado
-              <textarea id="finCopilotOutput" rows="5" readonly></textarea>
-            </label>
-          </div>
-          <div class="form-card">
-            <h3>Alta Hipoteca · Financiaciones Modernia</h3>
-            <p class="muted">Registro directo de hipotecas firmadas.</p>
+          <div id="hipotecaAltaPanel" class="form-card hidden">
+            <h3>Alta · BDT Hipotecas</h3>
+            <p class="muted">Formulario de carga de clientes de hipoteca.</p>
             <form id="hipotecaForm">
               <div class="form-grid">
                 <label>
@@ -2905,20 +2603,20 @@
                   <input name="inmobiliaria_compra" />
                 </label>
                 <label>
-                  Año
-                  <input name="anio" type="number" min="2000" max="2100" />
-                </label>
-                <label>
                   Asesor
                   <input name="asesor" />
                 </label>
                 <label>
                   Estado
                   <select name="estado">
+                    <option>Pendiente</option>
                     <option>Firmado</option>
                     <option>Indemnización</option>
-                    <option>Pendiente</option>
                   </select>
+                </label>
+                <label>
+                  Año
+                  <input name="anio" type="number" min="2000" max="2100" />
                 </label>
               </div>
               <div class="form-actions">
@@ -2969,13 +2667,26 @@
               <option value="TECNOCASA ALHAURIN"></option>
               <option value="TECNOCASA CIUDAD JARDIN"></option>
               <option value="TECNOCASA TORCAL"></option>
-              <option value="TECNOCASA ALHAURIN"></option>
               <option value="CASA AXARQUIA"></option>
               <option value="BONILLA"></option>
               <option value="MAMBO"></option>
               <option value="ALEX SERRATO"></option>
               <option value="MARCELO VARGAS"></option>
             </datalist>
+          </div>
+          <div id="hipotecaBdtPanel" class="form-card hidden">
+            <div class="section-head">
+              <div>
+                <h3>BDT Hipotecas</h3>
+                <p class="muted">Listado de clientes y operaciones cargadas.</p>
+              </div>
+              <div class="crm-actions">
+                <input id="hipotecaBdtSearch" placeholder="Buscar en BDT..." />
+                <button type="button" id="hipotecaBdtRefresh" class="secondary">Actualizar</button>
+              </div>
+            </div>
+            <div id="hipotecaBdtTable"></div>
+            <div class="footer" id="hipotecaBdtInfo"></div>
           </div>
         </div>
         <div id="finSimSection" class="hidden">
