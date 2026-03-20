@@ -11971,7 +11971,7 @@ const renderSegurosRamosDashboard = () => {
   renderSegurosRamoListado(selected.ramo, selected.items);
 };
 
-const getSegurosPolizaOptions = ({ onlyActive = false } = {}) => {
+const getSegurosPolizaOptions = ({ action = "", includeAll = false } = {}) => {
   const source = state.segurosCrmData;
   if (!source || !Array.isArray(source.rows)) return [];
   const columns = source.columns || [];
@@ -11980,35 +11980,75 @@ const getSegurosPolizaOptions = ({ onlyActive = false } = {}) => {
   const tomadorIndex = columns.indexOf("tomador");
   const companiaIndex = columns.indexOf("compania");
   const estadoIndex = columns.indexOf("estado");
-  const vencIndex = columns.indexOf("fecha_vencimiento");
+  const efectoIndex = columns.indexOf("fecha_efecto");
   if (idIndex < 0) return [];
-  const vigorStates = new Set(["en vigor", "en_vigor", "vigente", "poliza", "póliza", "poliza en vigor"]);
+
+  const presupuestoStates = new Set(["presupuesto", "presupuestos", "proyecto", "pendiente"]);
+  const contratadaStates = new Set(["contratada", "contratado", "contrato"]);
+  const vigorStates = new Set(["en vigor", "en_vigor", "vigente", "poliza", "póliza", "poliza en vigor", "activo", "activa", "alta", "emitida", "recibido"]);
+  const anuladaStates = new Set(["anulada", "anulado", "cancelada", "cancelado", "baja"]);
+  const rechazadaStates = new Set(["rechazada", "rechazado", "no aceptada", "no aceptado", "denegada", "denegado"]);
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  const limit = new Date(today);
-  limit.setDate(limit.getDate() + 45);
-  const isPendingVencimiento = (raw) => {
+  const parseDateLoose = (raw) => {
     const value = String(raw || "").trim();
-    if (!value) return false;
-    const parsed = new Date(value);
-    if (Number.isNaN(parsed.getTime())) return false;
-    parsed.setHours(0, 0, 0, 0);
-    return parsed >= today && parsed <= limit;
+    if (!value) return null;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      const d = new Date(`${value}T00:00:00`);
+      return Number.isNaN(d.getTime()) ? null : d;
+    }
+    const m = value.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})$/);
+    if (m) {
+      const day = Number(m[1]);
+      const month = Number(m[2]);
+      let year = Number(m[3]);
+      if (year < 100) year += 2000;
+      const d = new Date(year, month - 1, day);
+      return Number.isNaN(d.getTime()) ? null : d;
+    }
+    const d = new Date(value);
+    return Number.isNaN(d.getTime()) ? null : d;
+  };
+  const resolveBucket = (row) => {
+    const estado = normalizeSimple(estadoIndex >= 0 ? row[estadoIndex] : "");
+    if (presupuestoStates.has(estado)) return "presupuesto";
+    if (anuladaStates.has(estado)) return "anulada";
+    if (rechazadaStates.has(estado) || estado.startsWith("rechazada") || estado.startsWith("rechazado")) return "rechazada";
+    const efecto = parseDateLoose(efectoIndex >= 0 ? row[efectoIndex] : "");
+    if (contratadaStates.has(estado)) {
+      if (efecto && efecto > today) return "contratada";
+      if (efecto && efecto <= today) return "en_vigor";
+      return "contratada";
+    }
+    if (vigorStates.has(estado)) return "en_vigor";
+    if (!estado) {
+      if (efecto && efecto > today) return "contratada";
+      if (efecto && efecto <= today) return "en_vigor";
+    }
+    return "presupuesto";
+  };
+  const actionKey = normalizeSimple(action || "");
+  const isAllowedForAction = (bucket) => {
+    if (includeAll || !actionKey) return true;
+    if (actionKey === "contratar") return bucket === "presupuesto";
+    if (actionKey === "activar") return bucket === "contratada";
+    if (actionKey === "renovar" || actionKey === "anular" || actionKey === "cancelar" || actionKey === "cancel") {
+      return bucket === "en_vigor";
+    }
+    return true;
   };
   return source.rows
     .map((row) => {
       const id = String(row[idIndex] || "").trim();
       if (!id) return null;
-      if (onlyActive && estadoIndex >= 0) {
-        const estado = normalizeSimple(row[estadoIndex] || "");
-        if (!vigorStates.has(estado)) return null;
-        if (vencIndex >= 0 && !isPendingVencimiento(row[vencIndex])) return null;
-      }
+      const bucket = resolveBucket(row);
+      if (!isAllowedForAction(bucket)) return null;
       const poliza = row[polizaIndex] || "-";
       const tomador = row[tomadorIndex] || "Cliente";
       const compania = row[companiaIndex] || "-";
       return {
         id,
+        bucket,
         label: `${tomador} · ${compania} · ${poliza}`,
       };
     })
@@ -12016,8 +12056,9 @@ const getSegurosPolizaOptions = ({ onlyActive = false } = {}) => {
 };
 
 const populateSegurosOperationalSelects = () => {
-  const optionsAll = getSegurosPolizaOptions();
-  const optionsActive = getSegurosPolizaOptions({ onlyActive: true });
+  const action = segurosPolizaAccionTipo ? segurosPolizaAccionTipo.value : "";
+  const optionsAll = getSegurosPolizaOptions({ includeAll: true });
+  const optionsByAction = getSegurosPolizaOptions({ action });
   const fill = (select, options = optionsAll) => {
     if (!select) return;
     const current = select.value;
@@ -12030,10 +12071,17 @@ const populateSegurosOperationalSelects = () => {
       select.value = options[0].id;
     }
   };
-  fill(segurosPolizaAccionId, optionsActive);
+  fill(segurosPolizaAccionId, optionsByAction);
   fill(segurosEventosPolizaId, optionsAll);
   fill(segurosIpidPolizaId, optionsAll);
   fill(segurosReclamacionPolizaId, optionsAll);
+  if (segurosPolizaAccionStatus) {
+    if (!optionsByAction.length) {
+      segurosPolizaAccionStatus.textContent = "No hay pólizas disponibles para esa acción.";
+    } else if (segurosPolizaAccionStatus.textContent === "No hay pólizas disponibles para esa acción.") {
+      segurosPolizaAccionStatus.textContent = "";
+    }
+  }
 };
 
 const loadSegurosComplianceKpis = (empresaId) => {
@@ -19003,6 +19051,12 @@ if (segurosPolizaAccionForm) {
     loadSegurosCrm();
     loadSegurosEventos(id);
     loadSegurosComplianceKpis(empresa.id);
+  });
+}
+
+if (segurosPolizaAccionTipo) {
+  segurosPolizaAccionTipo.addEventListener("change", () => {
+    populateSegurosOperationalSelects();
   });
 }
 
