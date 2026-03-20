@@ -1147,6 +1147,7 @@ const state = {
   segurosOcrClienteId: "",
   segurosBdtOcrClienteId: "",
   segurosOcrQuality: null,
+  segurosOcrParsedFields: {},
   currentClienteData: null,
   currentClienteSegurosRows: [],
   currentClienteRamoSelected: "",
@@ -13135,6 +13136,7 @@ const resetSegurosOcrAggregator = (options = {}) => {
   if (segurosOcrRaw) segurosOcrRaw.value = "";
   state.segurosOcrClienteId = keepCliente ? previousClienteId : "";
   state.segurosOcrQuality = null;
+  state.segurosOcrParsedFields = {};
   if (keepCliente && state.segurosOcrClienteId) {
     setOcrClienteUi(getOcrClienteContext(), {
       status: keepStatus || "Póliza guardada. Puedes abrir la ficha del cliente.",
@@ -13511,6 +13513,7 @@ const matchSegurosBdtFromFields = async () => {
 };
 
 const fillSegurosOcrFields = (fields = {}) => {
+  state.segurosOcrParsedFields = fields && typeof fields === "object" ? { ...fields } : {};
   if (seguroOcrTomador) seguroOcrTomador.value = fields.tomador || "";
   if (seguroOcrDni) seguroOcrDni.value = fields.dni || fields.nif || "";
   if (seguroOcrTelefono) seguroOcrTelefono.value = fields.telefono || "";
@@ -13542,6 +13545,48 @@ const fillSegurosOcrFields = (fields = {}) => {
     }
   }
   refreshSegurosOcrComisionSuggestion();
+};
+
+const SEGURO_SMART_KEYS = [
+  "direccion_riesgo",
+  "codigo_postal",
+  "fecha_nacimiento_asegurado",
+  "fecha_nacimiento_conductor",
+  "fecha_carnet",
+  "matricula",
+  "marca_modelo",
+  "anio_matriculacion",
+  "uso_vehiculo",
+  "garaje",
+  "tipo_vivienda",
+  "metros2",
+  "anio_construccion",
+  "continente",
+  "contenido",
+  "profesion",
+  "fumador",
+  "capital_asegurado",
+  "beneficiarios",
+  "deporte_riesgo",
+  "actividad",
+  "facturacion_anual",
+  "empleados",
+  "superficie",
+  "medidas_seguridad",
+  "notas_comerciales",
+];
+
+const buildSegurosSmartPayloadFromOcr = () => {
+  const source = state.segurosOcrParsedFields && typeof state.segurosOcrParsedFields === "object"
+    ? state.segurosOcrParsedFields
+    : {};
+  return SEGURO_SMART_KEYS.reduce((acc, key) => {
+    const val = source[key];
+    if (val === null || val === undefined) return acc;
+    if (!String(val).trim()) return acc;
+    acc[key] = val;
+    return acc;
+  }, {});
 };
 
 const loadGestoriaBdt = async () => {
@@ -13683,6 +13728,10 @@ const saveSegurosOcrRecord = async () => {
     colaborador: seguroOcrColaborador ? seguroOcrColaborador.value.trim() : "",
     estado: seguroOcrEstado ? seguroOcrEstado.value : "",
   };
+  const smartPayload = buildSegurosSmartPayloadFromOcr();
+  if (Object.keys(smartPayload).length) {
+    payload.datos_ramo_json = JSON.stringify(smartPayload);
+  }
   const comisionEstimada = getSegurosOcrComisionAmount();
   if (Number.isFinite(comisionEstimada)) {
     payload.comision = comisionEstimada;
@@ -19323,6 +19372,7 @@ if (segurosOcrButton) {
       segurosOcrSaveStatus.textContent = "";
     }
     state.segurosOcrClienteId = "";
+    state.segurosOcrParsedFields = {};
     setOcrClienteUi(getOcrClienteContext("alta"), { status: "" });
     if (!segurosOcrFile || !segurosOcrFile.files || !segurosOcrFile.files.length) {
       if (segurosOcrStatus) {
@@ -19379,6 +19429,7 @@ if (segurosOcrButton) {
                 : data.error;
             }
             state.segurosOcrClienteId = "";
+            state.segurosOcrParsedFields = {};
             return;
           }
           state.segurosOcrQuality = data.ocr_quality || null;
@@ -19426,6 +19477,7 @@ if (segurosOcrButton) {
         }
         state.segurosOcrClienteId = "";
         state.segurosOcrQuality = null;
+        state.segurosOcrParsedFields = {};
       });
   });
 }
@@ -19549,6 +19601,10 @@ if (segurosOcrSave) {
         produccion: seguroOcrProduccion ? seguroOcrProduccion.value.trim() : "",
         colaborador: seguroOcrColaborador ? seguroOcrColaborador.value.trim() : "",
       };
+      const smartPayload = buildSegurosSmartPayloadFromOcr();
+      if (Object.keys(smartPayload).length) {
+        payload.datos_ramo_json = JSON.stringify(smartPayload);
+      }
       const comisionEstimada = getSegurosOcrComisionAmount();
       if (Number.isFinite(comisionEstimada)) {
         payload.comision = comisionEstimada;

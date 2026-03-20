@@ -353,6 +353,35 @@ LEGAL_RAMOS_CANONICAL = (
     "Caza",
 )
 
+SEGURO_SMART_FIELDS = (
+    "direccion_riesgo",
+    "codigo_postal",
+    "fecha_nacimiento_asegurado",
+    "fecha_nacimiento_conductor",
+    "fecha_carnet",
+    "matricula",
+    "marca_modelo",
+    "anio_matriculacion",
+    "uso_vehiculo",
+    "garaje",
+    "tipo_vivienda",
+    "metros2",
+    "anio_construccion",
+    "continente",
+    "contenido",
+    "profesion",
+    "fumador",
+    "capital_asegurado",
+    "beneficiarios",
+    "deporte_riesgo",
+    "actividad",
+    "facturacion_anual",
+    "empleados",
+    "superficie",
+    "medidas_seguridad",
+    "notas_comerciales",
+)
+
 
 def canonicalize_ramo(value):
     raw = str(value or "").strip()
@@ -442,6 +471,63 @@ def infer_tipo_vigencia(ramo, explicit=None):
     if any(token in ramo_key for token in ("VIAJE", "VIAJES", "CAZA EVENTUAL")):
         return "temporal_no_renovable"
     return "anual_renovable"
+
+
+def extract_seguro_smart_payload(payload):
+    if not isinstance(payload, dict):
+        return {}
+    incoming_smart = {}
+    raw_smart_payload = payload.get("datos_ramo_json")
+    if raw_smart_payload:
+        try:
+            parsed_smart = (
+                json.loads(raw_smart_payload)
+                if isinstance(raw_smart_payload, str)
+                else raw_smart_payload
+            )
+            if isinstance(parsed_smart, dict):
+                incoming_smart.update(
+                    {
+                        str(k): v
+                        for k, v in parsed_smart.items()
+                        if str(v or "").strip() != ""
+                    }
+                )
+        except Exception:
+            pass
+    for key in SEGURO_SMART_FIELDS:
+        val = payload.get(key)
+        if val is None:
+            continue
+        text = str(val).strip()
+        if not text:
+            continue
+        incoming_smart[key] = val
+    return incoming_smart
+
+
+def merge_seguro_smart_data(conn, seguro_id, incoming_smart, now):
+    if not seguro_id or not incoming_smart:
+        return
+    row = conn.execute("SELECT datos_ramo_json FROM seguros WHERE id = ?", (seguro_id,)).fetchone()
+    raw_existing = ""
+    if row:
+        if hasattr(row, "keys"):
+            raw_existing = row["datos_ramo_json"]
+        else:
+            raw_existing = row[0]
+    try:
+        existing_smart = json.loads(raw_existing) if raw_existing else {}
+        if not isinstance(existing_smart, dict):
+            existing_smart = {}
+    except Exception:
+        existing_smart = {}
+    merged = dict(existing_smart)
+    merged.update(incoming_smart)
+    conn.execute(
+        "UPDATE seguros SET datos_ramo_json = ?, updated_at = datetime(?) WHERE id = ?",
+        (json.dumps(merged, ensure_ascii=False), now, seguro_id),
+    )
 
 
 def log_seguro_event(conn, seguro_row, event_type, now, motivo="", payload=None):
@@ -6088,6 +6174,153 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
         mail_match = re.search(r"\b([A-Z0-9._%+\-]+@(?:LLOYDS|EXSEL)[A-Z0-9.\-]*\.[A-Z]{2,})\b", text, re.IGNORECASE)
         if mail_match:
             fields["email"] = normalize_email(mail_match.group(1))
+    def normalize_date_capture(value):
+        date = normalize_ocr_date(value)
+        return date if re.search(r"\d{1,2}/\d{1,2}/\d{2,4}", date) else ""
+    def normalize_plate(value):
+        raw = re.sub(r"[^A-Z0-9]", "", str(value or "").upper())
+        if not raw:
+            return ""
+        if re.match(r"^\d{4}[A-Z]{3}$", raw):
+            return f"{raw[:4]} {raw[4:]}"
+        if 5 <= len(raw) <= 10 and re.search(r"[A-Z]", raw) and re.search(r"\d", raw):
+            return raw
+        return ""
+    smart_fields = {}
+    ramo_key = normalize_lookup_text(fields.get("ramo") or "")
+    auto_hint = any(token in ramo_key for token in ("AUTO", "MOTO", "VEHICULO", "AUTOMOVIL"))
+    hogar_hint = any(token in ramo_key for token in ("HOGAR", "COMUNIDAD", "COMERCIO"))
+    vida_salud_hint = any(token in ramo_key for token in ("VIDA", "SALUD", "ACCIDENT"))
+    empresa_hint = any(token in ramo_key for token in ("RESPONSABILIDAD CIVIL", "COMERCIO", "PYME"))
+
+    matricula_val = (
+        pick([r"MATR[IÍ]CULA\s*(?:DEL\s+VEH[IÍ]CULO)?\s*[:\-]?\s*([0-9]{4}\s*[A-Z]{3}|[A-Z]{1,2}\s*[0-9]{4}\s*[A-Z]{1,2})"])
+        or pick([r"\b([0-9]{4}\s*[A-Z]{3})\b"])
+    )
+    matricula = normalize_plate(matricula_val)
+    if matricula:
+        smart_fields["matricula"] = matricula
+    marca_modelo = pick(
+        [
+            r"(?:MARCA\s*/?\s*MODELO|MODELO\s+VEH[IÍ]CULO|VEH[IÍ]CULO)\s*[:\-]?\s*([A-Z0-9][^\n\r]{3,70})",
+        ]
+    )
+    if marca_modelo:
+        smart_fields["marca_modelo"] = re.sub(r"\s{2,}", " ", marca_modelo).strip(" ,;:-")
+    fecha_carnet = normalize_date_capture(
+        pick([r"(?:FECHA\s+DE\s+)?(?:CARNET|PERMISO)\s*(?:DE\s+CONDUCIR)?\s*[:\-]?\s*(\d{1,2}[./-]\d{1,2}[./-]\d{2,4})"])
+    )
+    if fecha_carnet:
+        smart_fields["fecha_carnet"] = fecha_carnet
+    fecha_nac_conductor = normalize_date_capture(
+        pick([r"FECHA\s+NAC(?:IMIENTO)?\s*(?:DEL\s+)?CONDUCTOR(?:\s+PRINCIPAL)?\s*[:\-]?\s*(\d{1,2}[./-]\d{1,2}[./-]\d{2,4})"])
+    )
+    if fecha_nac_conductor:
+        smart_fields["fecha_nacimiento_conductor"] = fecha_nac_conductor
+    anio_matriculacion = pick([r"(?:A[NÑ]O|ANIO)\s+MATRICULACI[ÓO]N\s*[:\-]?\s*([12][0-9]{3})"])
+    if anio_matriculacion:
+        smart_fields["anio_matriculacion"] = anio_matriculacion
+    uso_vehiculo = pick([r"USO\s*(?:DEL\s+VEH[IÍ]CULO)?\s*[:\-]?\s*([A-Z][^\n\r]{2,40})"])
+    if uso_vehiculo:
+        smart_fields["uso_vehiculo"] = uso_vehiculo.strip(" ,;:-")
+    garaje = pick([r"GARAJE\s*[:\-]?\s*(SI|S[IÍ]|NO|COLECTIVO|INDIVIDUAL)"])
+    if garaje:
+        smart_fields["garaje"] = garaje.strip(" ,;:-").capitalize()
+
+    direccion_riesgo = pick(
+        [
+            r"(?:DIRECCI[ÓO]N|SITUACI[ÓO]N|UBICACI[ÓO]N)\s+DEL?\s+RIESGO\s*[:\-]?\s*([^\n\r]{8,120})",
+            r"SITUACI[ÓO]N\s+DE\s+LA\s+VIVIENDA\s*[:\-]?\s*([^\n\r]{8,120})",
+        ]
+    )
+    if direccion_riesgo:
+        smart_fields["direccion_riesgo"] = re.sub(r"\s{2,}", " ", direccion_riesgo).strip(" ,;:-")
+    codigo_postal = pick([r"\bC(?:[ÓO]D(?:IGO)?)?\s*P(?:OSTAL)?\.?\s*[:\-]?\s*([0-9]{5})\b"])
+    if codigo_postal:
+        smart_fields["codigo_postal"] = codigo_postal
+    tipo_vivienda = pick([r"TIPO\s+DE\s+VIVIENDA\s*[:\-]?\s*([A-Z][^\n\r]{2,40})"])
+    if tipo_vivienda:
+        smart_fields["tipo_vivienda"] = tipo_vivienda.strip(" ,;:-")
+    metros2 = pick([r"(?:SUPERFICIE|M2|M²|METROS(?:\s+CUADRADOS)?)\s*[:\-]?\s*([0-9]{2,4}(?:[.,][0-9]{1,2})?)"])
+    if metros2:
+        smart_fields["metros2"] = metros2.replace(",", ".")
+    anio_construccion = pick([r"A[NÑ]O\s+CONSTRUCCI[ÓO]N\s*[:\-]?\s*([12][0-9]{3})"])
+    if anio_construccion:
+        smart_fields["anio_construccion"] = anio_construccion
+    continente = pick([r"CONTINENTE\s*[:\-]?\s*([0-9]{1,3}(?:\.[0-9]{3})*(?:,[0-9]{2})?)"])
+    if continente:
+        smart_fields["continente"] = continente
+    contenido = pick([r"CONTENIDO\s*[:\-]?\s*([0-9]{1,3}(?:\.[0-9]{3})*(?:,[0-9]{2})?)"])
+    if contenido:
+        smart_fields["contenido"] = contenido
+
+    fecha_nac_asegurado = normalize_date_capture(
+        pick([r"FECHA\s+NAC(?:IMIENTO)?\s*(?:DEL?\s+)?(?:ASEGURADO|TOMADOR|TITULAR)\s*[:\-]?\s*(\d{1,2}[./-]\d{1,2}[./-]\d{2,4})"])
+    )
+    if fecha_nac_asegurado:
+        smart_fields["fecha_nacimiento_asegurado"] = fecha_nac_asegurado
+    profesion = pick([r"PROFESI[ÓO]N\s*[:\-]?\s*([A-Z][^\n\r]{2,60})"])
+    if profesion:
+        smart_fields["profesion"] = profesion.strip(" ,;:-")
+    fumador = pick([r"FUMADOR(?:\/A)?\s*[:\-]?\s*(SI|S[IÍ]|NO)"])
+    if fumador:
+        smart_fields["fumador"] = "Sí" if normalize_lookup_text(fumador) in ("SI", "SÍ") else "No"
+    capital_asegurado = pick([r"CAPITAL\s+ASEGURADO\s*[:\-]?\s*([0-9]{1,3}(?:\.[0-9]{3})*(?:,[0-9]{2})?)"])
+    if capital_asegurado:
+        smart_fields["capital_asegurado"] = capital_asegurado
+    beneficiarios = pick([r"BENEFICIARIOS?\s*[:\-]?\s*([A-Z][^\n\r]{3,120})"])
+    if beneficiarios:
+        smart_fields["beneficiarios"] = beneficiarios.strip(" ,;:-")
+    deporte_riesgo = pick([r"DEPORTE\s+DE\s+RIESGO\s*[:\-]?\s*(SI|S[IÍ]|NO)"])
+    if deporte_riesgo:
+        smart_fields["deporte_riesgo"] = "Sí" if normalize_lookup_text(deporte_riesgo) in ("SI", "SÍ") else "No"
+
+    actividad = pick([r"ACTIVIDAD(?:\s+PRINCIPAL)?\s*[:\-]?\s*([A-Z0-9][^\n\r]{3,90})"])
+    if actividad:
+        smart_fields["actividad"] = actividad.strip(" ,;:-")
+    facturacion_anual = pick([r"FACTURACI[ÓO]N\s+ANUAL\s*[:\-]?\s*([0-9]{1,3}(?:\.[0-9]{3})*(?:,[0-9]{2})?)"])
+    if facturacion_anual:
+        smart_fields["facturacion_anual"] = facturacion_anual
+    empleados = pick([r"(?:N[ºO]\s*|N[ÚU]MERO\s+DE\s+)?EMPLEADOS?\s*[:\-]?\s*([0-9]{1,4})"])
+    if empleados:
+        smart_fields["empleados"] = empleados
+    superficie = pick([r"SUPERFICIE\s*(?:LOCAL|NEGOCIO)?\s*[:\-]?\s*([0-9]{2,5}(?:[.,][0-9]{1,2})?)"])
+    if superficie:
+        smart_fields["superficie"] = superficie.replace(",", ".")
+    medidas_seguridad = pick([r"MEDIDAS?\s+DE\s+SEGURIDAD\s*[:\-]?\s*([^\n\r]{3,120})"])
+    if medidas_seguridad:
+        smart_fields["medidas_seguridad"] = medidas_seguridad.strip(" ,;:-")
+    notas_comerciales = pick([r"(?:OBSERVACIONES|NOTAS)\s*[:\-]?\s*([^\n\r]{5,180})"])
+    if notas_comerciales:
+        smart_fields["notas_comerciales"] = notas_comerciales.strip(" ,;:-")
+
+    # Si el ramo es claro, priorizamos solo campos coherentes para evitar ruido OCR.
+    if auto_hint:
+        smart_fields = {
+            k: v
+            for k, v in smart_fields.items()
+            if k in ("matricula", "marca_modelo", "fecha_carnet", "fecha_nacimiento_conductor", "anio_matriculacion", "uso_vehiculo", "garaje")
+        }
+    elif hogar_hint:
+        smart_fields = {
+            k: v
+            for k, v in smart_fields.items()
+            if k in ("direccion_riesgo", "codigo_postal", "tipo_vivienda", "metros2", "anio_construccion", "continente", "contenido")
+        }
+    elif vida_salud_hint:
+        smart_fields = {
+            k: v
+            for k, v in smart_fields.items()
+            if k in ("fecha_nacimiento_asegurado", "profesion", "fumador", "capital_asegurado", "beneficiarios", "deporte_riesgo")
+        }
+    elif empresa_hint:
+        smart_fields = {
+            k: v
+            for k, v in smart_fields.items()
+            if k in ("actividad", "facturacion_anual", "empleados", "superficie", "medidas_seguridad")
+        }
+    if smart_fields:
+        fields.update(smart_fields)
     if "ramo" in fields:
         fields["ramo"] = canonicalize_ramo(fields.get("ramo"))
     return fields
@@ -10086,6 +10319,7 @@ class Handler(BaseHTTPRequestHandler):
                 payload.get("poliza_numero"),
                 payload.get("compania"),
             )
+            incoming_smart = extract_seguro_smart_payload(payload)
 
             if dup_id:
                 # Enriquecer la póliza existente con campos vacíos
@@ -10147,6 +10381,8 @@ class Handler(BaseHTTPRequestHandler):
                         values,
                     )
                 poliza_id = dup_id
+                if incoming_smart:
+                    merge_seguro_smart_data(conn, poliza_id, incoming_smart, now)
                 row = conn.execute("SELECT * FROM seguros WHERE id = ?", (poliza_id,)).fetchone()
                 if row and row["cliente_id"]:
                     ensure_cliente_servicio_link(conn, row["cliente_id"], row["empresa_id"], "seguros", now)
@@ -10193,6 +10429,8 @@ class Handler(BaseHTTPRequestHandler):
                         now,
                     ),
                 )
+                if incoming_smart:
+                    merge_seguro_smart_data(conn, poliza_id, incoming_smart, now)
             doc_id = None
             contabilidad_id = None
             poliza_row = conn.execute("SELECT * FROM seguros WHERE id = ?", (poliza_id,)).fetchone()
@@ -11314,77 +11552,9 @@ class Handler(BaseHTTPRequestHandler):
                     f"UPDATE seguros SET {set_clause}, updated_at = datetime(?) WHERE id = ?",
                     values,
                 )
-            # Captura inteligente por ramo desde OCR: persiste señales comerciales
-            # aunque no existan columnas dedicadas en la tabla.
-            smart_allowed = (
-                "direccion_riesgo",
-                "codigo_postal",
-                "fecha_nacimiento_asegurado",
-                "fecha_nacimiento_conductor",
-                "fecha_carnet",
-                "matricula",
-                "marca_modelo",
-                "anio_matriculacion",
-                "uso_vehiculo",
-                "garaje",
-                "tipo_vivienda",
-                "metros2",
-                "anio_construccion",
-                "continente",
-                "contenido",
-                "profesion",
-                "fumador",
-                "capital_asegurado",
-                "beneficiarios",
-                "deporte_riesgo",
-                "actividad",
-                "facturacion_anual",
-                "empleados",
-                "superficie",
-                "medidas_seguridad",
-                "notas_comerciales",
-            )
-            raw_existing = row["datos_ramo_json"] if "datos_ramo_json" in row.keys() else ""
-            try:
-                existing_smart = json.loads(raw_existing) if raw_existing else {}
-                if not isinstance(existing_smart, dict):
-                    existing_smart = {}
-            except Exception:
-                existing_smart = {}
-            incoming_smart = {}
-            raw_smart_payload = payload.get("datos_ramo_json")
-            if raw_smart_payload:
-                try:
-                    parsed_smart = (
-                        json.loads(raw_smart_payload)
-                        if isinstance(raw_smart_payload, str)
-                        else raw_smart_payload
-                    )
-                    if isinstance(parsed_smart, dict):
-                        incoming_smart.update(
-                            {
-                                str(k): v
-                                for k, v in parsed_smart.items()
-                                if str(v or "").strip() != ""
-                            }
-                        )
-                except Exception:
-                    pass
-            for key in smart_allowed:
-                val = payload.get(key)
-                if val is None:
-                    continue
-                text = str(val).strip()
-                if not text:
-                    continue
-                incoming_smart[key] = val
+            incoming_smart = extract_seguro_smart_payload(payload)
             if incoming_smart:
-                merged = dict(existing_smart)
-                merged.update(incoming_smart)
-                conn.execute(
-                    "UPDATE seguros SET datos_ramo_json = ?, updated_at = datetime(?) WHERE id = ?",
-                    (json.dumps(merged, ensure_ascii=False), now, record_id),
-                )
+                merge_seguro_smart_data(conn, record_id, incoming_smart, now)
             row = conn.execute("SELECT * FROM seguros WHERE id = ?", (record_id,)).fetchone()
             if row:
                 if row["cliente_id"]:
