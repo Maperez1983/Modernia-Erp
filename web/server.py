@@ -313,12 +313,23 @@ def in_vigor_policy_filter(alias=""):
     prefix = f"{alias}." if alias else ""
     estado_expr = f"LOWER(TRIM(COALESCE({prefix}estado, '')))"
     estado_poliza_expr = f"LOWER(TRIM(COALESCE({prefix}estado_poliza, '')))"
-    # Considera variaciones operativas reales en producción (activo/activa/alta/emitida).
-    return (
-        f"({estado_expr} IN ("
+    # En vigor debe depender del estado operativo principal.
+    # Solo usamos estado_poliza=activa como fallback cuando estado está vacío/no informado.
+    non_vigor_states = (
+        "'presupuesto', 'presupuestos', 'proyecto', 'pendiente', "
+        "'contratada', 'contratado', 'contrato', "
+        "'anulada', 'anulado', 'cancelada', 'cancelado', 'baja'"
+    )
+    vigor_states = (
         "'en vigor', 'en_vigor', 'vigente', 'poliza', 'póliza', 'poliza en vigor', "
         "'activo', 'activa', 'alta', 'emitida', 'recibido'"
-        f") OR {estado_poliza_expr} IN ('activa', 'activo', 'en vigor', 'vigente'))"
+    )
+    return (
+        "("
+        f"{estado_expr} IN ({vigor_states}) "
+        f"OR ({estado_expr} = '' AND {estado_poliza_expr} IN ('activa', 'activo', 'en vigor', 'vigente'))"
+        ") "
+        f"AND {estado_expr} NOT IN ({non_vigor_states})"
     )
 
 def normalize_poliza_key(value):
