@@ -16119,7 +16119,7 @@ class Handler(BaseHTTPRequestHandler):
 
             def normalize_person_key(value):
                 text = normalize_lookup_text(value or "")
-                text = re.sub(r"[^a-z0-9\\s]", " ", text)
+                text = re.sub(r"[^A-Z0-9\\s]", " ", text)
                 text = re.sub(r"\\s+", " ", text).strip()
                 return text
 
@@ -16314,7 +16314,8 @@ class Handler(BaseHTTPRequestHandler):
                   ramo,
                   comision,
                   produccion,
-                  prima_total
+                  prima_total,
+                  prima_neta
                 FROM seguros
                 WHERE empresa_id = ?
                   AND ({uploaded_clause} OR ? = 0)
@@ -16373,18 +16374,25 @@ class Handler(BaseHTTPRequestHandler):
 
             comision_by_compania = {}
             comision_by_ramo = {}
+            prima_by_compania = {}
+            prima_by_ramo = {}
             for row in comision_rows:
+                prima_amount = parse_money_value(row["prima_total"])
+                if abs(prima_amount) < 0.005:
+                    prima_amount = parse_money_value(row["prima_neta"])
                 amount = parse_money_value(row["comision"])
                 if abs(amount) < 0.005:
                     amount = parse_money_value(row["produccion"])
                 if abs(amount) < 0.005:
                     amount = estimate_commission_from_rules(row["compania"], row["ramo"], row["prima_total"])
-                if abs(amount) < 0.005:
-                    continue
                 compania_label = normalize_company_name(row["compania"] or "").strip() or "Sin compañía"
                 ramo_label = canonicalize_ramo(row["ramo"] or "") or normalize_person_name(row["ramo"] or "") or "Sin ramo"
-                comision_by_compania[compania_label] = comision_by_compania.get(compania_label, 0.0) + amount
-                comision_by_ramo[ramo_label] = comision_by_ramo.get(ramo_label, 0.0) + amount
+                if abs(amount) >= 0.005:
+                    comision_by_compania[compania_label] = comision_by_compania.get(compania_label, 0.0) + amount
+                    comision_by_ramo[ramo_label] = comision_by_ramo.get(ramo_label, 0.0) + amount
+                if abs(prima_amount) >= 0.005:
+                    prima_by_compania[compania_label] = prima_by_compania.get(compania_label, 0.0) + prima_amount
+                    prima_by_ramo[ramo_label] = prima_by_ramo.get(ramo_label, 0.0) + prima_amount
 
             if not comision_by_compania and not comision_by_ramo:
                 conta_rows = conn.execute(
@@ -16430,6 +16438,22 @@ class Handler(BaseHTTPRequestHandler):
                 (
                     {"label": label, "total": round(total, 2)}
                     for label, total in comision_by_ramo.items()
+                ),
+                key=lambda item: item["total"],
+                reverse=True,
+            )[:10]
+            prima_companias = sorted(
+                (
+                    {"label": label, "total": round(total, 2)}
+                    for label, total in prima_by_compania.items()
+                ),
+                key=lambda item: item["total"],
+                reverse=True,
+            )[:10]
+            prima_ramos = sorted(
+                (
+                    {"label": label, "total": round(total, 2)}
+                    for label, total in prima_by_ramo.items()
                 ),
                 key=lambda item: item["total"],
                 reverse=True,
@@ -16533,6 +16557,8 @@ class Handler(BaseHTTPRequestHandler):
                     "responsables": responsables,
                     "comision_companias": comision_companias,
                     "comision_ramos": comision_ramos,
+                    "prima_companias": prima_companias,
+                    "prima_ramos": prima_ramos,
                     "rechazo_motivos": rechazo_motivos,
                     "conversion_responsables": conversion_responsables,
                     "renovaciones_anulaciones_mes": renovaciones_anulaciones_mes,

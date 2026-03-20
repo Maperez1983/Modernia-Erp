@@ -8999,46 +8999,45 @@ const renderFincasDashboard = (empresaId) => {
         { legend: false, showValues: true, tooltip: true }
       );
 
-      const rechazoMotivos = (data.rechazo_motivos || []).slice(0, 8);
-      const rechazoLabels = rechazoMotivos.length
-        ? rechazoMotivos.map((item) => item.label || "Otros")
+      const primaCompanias = (data.prima_companias || []).slice(0, 8);
+      const primaCompaniaLabels = primaCompanias.length
+        ? primaCompanias.map((item) => item.label || "Sin compañía")
         : ["Sin datos"];
-      const rechazoValues = rechazoMotivos.length
-        ? rechazoMotivos.map((item) => Number(item.total || 0))
+      const primaCompaniaValues = primaCompanias.length
+        ? primaCompanias.map((item) => Number(item.total || 0))
         : [0];
       drawBarChart(
         fincasRechazoMotivoChart,
-        rechazoLabels,
+        primaCompaniaLabels,
         [
           {
-            label: "Rechazos",
-            values: rechazoValues,
+            label: "Prima total",
+            values: primaCompaniaValues,
             color: "#7a5448",
-            colors: rechazoLabels.map((_, idx) => rankingPalette[idx % rankingPalette.length]),
-            format: (value) => numberFormatter.format(value),
+            colors: primaCompaniaLabels.map((_, idx) => rankingPalette[idx % rankingPalette.length]),
+            format: (value) => euroFormatter.format(value),
           },
         ],
         { legend: false, showValues: true, tooltip: true }
       );
 
-      const conversionResp = (data.conversion_responsables || []).slice(0, 8);
-      const convRespLabels = conversionResp.length
-        ? conversionResp.map((item) => item.label || "Sin responsable")
+      const primaRamos = (data.prima_ramos || []).slice(0, 8);
+      const primaRamoLabels = primaRamos.length
+        ? primaRamos.map((item) => item.label || "Sin ramo")
         : ["Sin datos"];
-      const convRespValues = conversionResp.length
-        ? conversionResp.map((item) => Number(item.conversion || 0))
+      const primaRamoValues = primaRamos.length
+        ? primaRamos.map((item) => Number(item.total || 0))
         : [0];
       drawBarChart(
         fincasConversionResponsableChart,
-        convRespLabels,
+        primaRamoLabels,
         [
           {
-            label: "Conversión",
-            values: convRespValues,
+            label: "Prima total",
+            values: primaRamoValues,
             color: "#2f7a50",
-            colors: convRespLabels.map((_, idx) => rankingPalette[idx % rankingPalette.length]),
-            scale: "percent",
-            format: (value) => `${Number(value || 0).toFixed(1)}%`,
+            colors: primaRamoLabels.map((_, idx) => rankingPalette[idx % rankingPalette.length]),
+            format: (value) => euroFormatter.format(value),
           },
         ],
         { legend: false, showValues: true, tooltip: true }
