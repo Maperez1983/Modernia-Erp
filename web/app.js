@@ -19426,50 +19426,50 @@ if (segurosOcrButton) {
           if (segurosOcrStatus) {
             segurosOcrStatus.textContent = data.detail
               ? `${data.error} ${data.detail}`
-                : data.error;
-            }
-            state.segurosOcrClienteId = "";
-            state.segurosOcrParsedFields = {};
-            return;
+              : data.error;
           }
-          state.segurosOcrQuality = data.ocr_quality || null;
-          fillSegurosOcrFields(data.fields || {});
-          if (segurosOcrRaw) {
-            segurosOcrRaw.value = (data.text || "").trim();
-          }
-          resolveOcrClienteMatch("alta", data.fields || {}).then(() => {
-            if (state.segurosOcrClienteId) {
-              if (segurosOcrSaveStatus) {
-                segurosOcrSaveStatus.textContent =
-                  "Cliente detectado. Revisa datos y pulsa Guardar póliza.";
-              }
-            } else if (segurosOcrSaveStatus) {
+          state.segurosOcrClienteId = "";
+          state.segurosOcrParsedFields = {};
+          return;
+        }
+        state.segurosOcrQuality = data.ocr_quality || null;
+        fillSegurosOcrFields(data.fields || {});
+        if (segurosOcrRaw) {
+          segurosOcrRaw.value = (data.text || "").trim();
+        }
+        resolveOcrClienteMatch("alta", data.fields || {}).then(() => {
+          if (state.segurosOcrClienteId) {
+            if (segurosOcrSaveStatus) {
               segurosOcrSaveStatus.textContent =
-                "Revisa el cliente (DNI) antes de guardar la póliza.";
+                "Cliente detectado. Revisa datos y pulsa Guardar póliza.";
             }
-          });
-          if (segurosOcrStatus) {
-            const lang = data.language ? ` (${data.language})` : "";
-            const method = data.method ? ` · ${data.method}` : "";
-            const docType = data.doc_type ? ` · ${data.doc_type}` : "";
-            const calidad = data.ocr_quality?.calidad ? ` · ${data.ocr_quality.calidad}` : "";
-            const fields = data.fields || {};
-            const filled = Object.entries(fields)
-              .filter(([, value]) => String(value || "").trim().length)
-              .map(([key]) => key);
-            if (filled.length) {
-              segurosOcrStatus.textContent = `Datos extraídos${lang}${method}${docType}${calidad}: ${filled.join(", ")}.`;
-            } else {
-              segurosOcrStatus.textContent = `No se detectaron campos${lang}${method}${docType}${calidad}.`;
-            }
+          } else if (segurosOcrSaveStatus) {
+            segurosOcrSaveStatus.textContent =
+              "Revisa el cliente (DNI) antes de guardar la póliza.";
           }
-          if (seguroOcrEstado && data.doc_type) {
-            if (data.doc_type === "presupuesto") {
-              seguroOcrEstado.value = "Presupuesto";
-            } else if (data.doc_type === "poliza") {
-              seguroOcrEstado.value = "Contratada";
-            }
+        });
+        if (segurosOcrStatus) {
+          const lang = data.language ? ` (${data.language})` : "";
+          const method = data.method ? ` · ${data.method}` : "";
+          const docType = data.doc_type ? ` · ${data.doc_type}` : "";
+          const calidad = data.ocr_quality?.calidad ? ` · ${data.ocr_quality.calidad}` : "";
+          const fields = data.fields || {};
+          const filled = Object.entries(fields)
+            .filter(([, value]) => String(value || "").trim().length)
+            .map(([key]) => key);
+          if (filled.length) {
+            segurosOcrStatus.textContent = `Datos extraídos${lang}${method}${docType}${calidad}: ${filled.join(", ")}.`;
+          } else {
+            segurosOcrStatus.textContent = `No se detectaron campos${lang}${method}${docType}${calidad}.`;
           }
+        }
+        if (seguroOcrEstado && data.doc_type) {
+          if (data.doc_type === "presupuesto") {
+            seguroOcrEstado.value = "Presupuesto";
+          } else if (data.doc_type === "poliza") {
+            seguroOcrEstado.value = "Contratada";
+          }
+        }
       })
       .catch((err) => {
         if (segurosOcrStatus) {
@@ -19535,19 +19535,19 @@ if (segurosBdtOcrButton) {
           if (segurosBdtOcrStatus) {
             segurosBdtOcrStatus.textContent = data.detail
               ? `${data.error} ${data.detail}`
-                : data.error;
-            }
-            state.segurosBdtOcrClienteId = "";
-            return;
+              : data.error;
           }
-          fillSegurosBdtOcrFields(data.fields || {});
-          resolveOcrClienteMatch("bdt", data.fields || {});
-          if (segurosBdtOcrStatus && (data.doc_type || data.ocr_quality?.calidad)) {
-            const docType = data.doc_type ? ` · ${data.doc_type}` : "";
-            const calidad = data.ocr_quality?.calidad ? ` · ${data.ocr_quality.calidad}` : "";
-            segurosBdtOcrStatus.textContent = `OCR listo${docType}${calidad}.`;
-          }
-          matchSegurosBdtFromFields().catch(() => {});
+          state.segurosBdtOcrClienteId = "";
+          return;
+        }
+        fillSegurosBdtOcrFields(data.fields || {});
+        resolveOcrClienteMatch("bdt", data.fields || {});
+        if (segurosBdtOcrStatus && (data.doc_type || data.ocr_quality?.calidad)) {
+          const docType = data.doc_type ? ` · ${data.doc_type}` : "";
+          const calidad = data.ocr_quality?.calidad ? ` · ${data.ocr_quality.calidad}` : "";
+          segurosBdtOcrStatus.textContent = `OCR listo${docType}${calidad}.`;
+        }
+        matchSegurosBdtFromFields().catch(() => {});
       })
       .catch((err) => {
         if (segurosBdtOcrStatus) {
