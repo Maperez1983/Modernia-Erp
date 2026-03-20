@@ -309,28 +309,54 @@ def uploaded_policy_filter(alias=""):
     return f"(COALESCE({prefix}poliza_key, '') <> '' OR COALESCE({prefix}poliza_url, '') <> '')"
 
 
-def in_vigor_policy_filter(alias=""):
+def seguro_date_sql(field, alias=""):
+    prefix = f"{alias}." if alias else ""
+    raw_expr = f"TRIM(COALESCE({prefix}{field}, ''))"
+    return (
+        "("
+        "CASE "
+        f"WHEN DATE({prefix}{field}) IS NOT NULL THEN DATE({prefix}{field}) "
+        f"WHEN {raw_expr} GLOB '[0-3][0-9]/[0-1][0-9]/[1-2][0-9][0-9][0-9]' "
+        f"THEN SUBSTR({raw_expr}, 7, 4) || '-' || SUBSTR({raw_expr}, 4, 2) || '-' || SUBSTR({raw_expr}, 1, 2) "
+        f"WHEN {raw_expr} GLOB '[0-3][0-9]-[0-1][0-9]-[1-2][0-9][0-9][0-9]' "
+        f"THEN SUBSTR({raw_expr}, 7, 4) || '-' || SUBSTR({raw_expr}, 4, 2) || '-' || SUBSTR({raw_expr}, 1, 2) "
+        "ELSE NULL END"
+        ")"
+    )
+
+
+def seguro_estado_bucket_expr(alias=""):
     prefix = f"{alias}." if alias else ""
     estado_expr = f"LOWER(TRIM(COALESCE({prefix}estado, '')))"
     estado_poliza_expr = f"LOWER(TRIM(COALESCE({prefix}estado_poliza, '')))"
-    # En vigor debe depender del estado operativo principal.
-    # Solo usamos estado_poliza=activa como fallback cuando estado está vacío/no informado.
-    non_vigor_states = (
-        "'presupuesto', 'presupuestos', 'proyecto', 'pendiente', "
-        "'contratada', 'contratado', 'contrato', "
-        "'anulada', 'anulado', 'cancelada', 'cancelado', 'baja'"
+    fecha_efecto_expr = seguro_date_sql("fecha_efecto", alias)
+    fecha_venc_raw_expr = seguro_date_sql("fecha_vencimiento", alias)
+    fecha_venc_expr = (
+        f"COALESCE({fecha_venc_raw_expr}, "
+        f"CASE WHEN {fecha_efecto_expr} IS NOT NULL THEN DATE({fecha_efecto_expr}, '+1 year') ELSE NULL END)"
     )
-    vigor_states = (
-        "'en vigor', 'en_vigor', 'vigente', 'poliza', 'póliza', 'poliza en vigor', "
-        "'activo', 'activa', 'alta', 'emitida', 'recibido'"
-    )
+    today_expr = "DATE('now','localtime')"
     return (
         "("
-        f"{estado_expr} IN ({vigor_states}) "
-        f"OR ({estado_expr} = '' AND {estado_poliza_expr} IN ('activa', 'activo', 'en vigor', 'vigente'))"
-        ") "
-        f"AND {estado_expr} NOT IN ({non_vigor_states})"
+        "CASE "
+        f"WHEN {estado_expr} IN ('presupuesto', 'presupuestos', 'proyecto', 'pendiente') THEN 'presupuesto' "
+        f"WHEN {estado_expr} IN ('anulada', 'anulado', 'cancelada', 'cancelado', 'baja') "
+        f"  OR {estado_poliza_expr} IN ('anulada', 'cancelada', 'baja', 'sustituida') THEN 'anulada' "
+        f"WHEN {fecha_efecto_expr} IS NOT NULL AND DATE({fecha_efecto_expr}) > {today_expr} THEN 'contratada' "
+        f"WHEN {fecha_efecto_expr} IS NOT NULL "
+        f"  AND DATE({fecha_efecto_expr}) <= {today_expr} "
+        f"  AND ({fecha_venc_expr} IS NULL OR DATE({fecha_venc_expr}) >= {today_expr}) THEN 'en_vigor' "
+        f"WHEN {estado_expr} IN ('contratada', 'contratado', 'contrato') THEN 'contratada' "
+        f"WHEN {estado_expr} IN ('en vigor', 'en_vigor', 'vigente', 'poliza', 'póliza', 'poliza en vigor', 'activo', 'activa', 'alta', 'emitida', 'recibido') THEN 'en_vigor' "
+        f"WHEN {estado_expr} = '' AND {estado_poliza_expr} IN ('activa', 'activo', 'en vigor', 'vigente') THEN 'en_vigor' "
+        "ELSE 'presupuesto' "
+        "END"
+        ")"
     )
+
+
+def in_vigor_policy_filter(alias=""):
+    return f"({seguro_estado_bucket_expr(alias)} = 'en_vigor')"
 
 def normalize_poliza_key(value):
     if not value:
@@ -15905,6 +15931,7 @@ class Handler(BaseHTTPRequestHandler):
             exclude_sin_seguro = f"({compania_expr} IS NULL OR {compania_expr} = '' OR {compania_expr} != 'sin seguro')"
             uploaded_clause = uploaded_policy_filter()
             in_vigor_expr = in_vigor_policy_filter()
+            estado_bucket_expr = seguro_estado_bucket_expr()
             uploaded_param = 1 if uploaded_only else 0
             if uploaded_only:
                 uploaded_count = conn.execute(
@@ -15922,9 +15949,9 @@ class Handler(BaseHTTPRequestHandler):
             current = conn.execute(
                 f"""
                 SELECT
-                  SUM(CASE WHEN {estado_expr} IN ('presupuesto', 'presupuestos') THEN 1 ELSE 0 END) AS presupuesto,
-                  SUM(CASE WHEN {estado_expr} IN ('contratada', 'contratado', 'contrato', 'proyecto') THEN 1 ELSE 0 END) AS contratada,
-                  SUM(CASE WHEN {in_vigor_expr} THEN 1 ELSE 0 END) AS en_vigor
+                  SUM(CASE WHEN {estado_bucket_expr} = 'presupuesto' THEN 1 ELSE 0 END) AS presupuesto,
+                  SUM(CASE WHEN {estado_bucket_expr} = 'contratada' THEN 1 ELSE 0 END) AS contratada,
+                  SUM(CASE WHEN {estado_bucket_expr} = 'en_vigor' THEN 1 ELSE 0 END) AS en_vigor
                 FROM seguros
                 WHERE empresa_id = ?
                   AND ({uploaded_clause} OR ? = 0)
@@ -15937,9 +15964,9 @@ class Handler(BaseHTTPRequestHandler):
             totals = conn.execute(
                 f"""
                 SELECT
-                  SUM(CASE WHEN {estado_expr} IN ('presupuesto', 'presupuestos') THEN 1 ELSE 0 END) AS presupuesto,
-                  SUM(CASE WHEN {estado_expr} IN ('contratada', 'contratado', 'contrato', 'proyecto') THEN 1 ELSE 0 END) AS contratada,
-                  SUM(CASE WHEN {in_vigor_expr} THEN 1 ELSE 0 END) AS en_vigor
+                  SUM(CASE WHEN {estado_bucket_expr} = 'presupuesto' THEN 1 ELSE 0 END) AS presupuesto,
+                  SUM(CASE WHEN {estado_bucket_expr} = 'contratada' THEN 1 ELSE 0 END) AS contratada,
+                  SUM(CASE WHEN {estado_bucket_expr} = 'en_vigor' THEN 1 ELSE 0 END) AS en_vigor
                 FROM seguros
                 WHERE empresa_id = ?
                   AND ({uploaded_clause} OR ? = 0)
@@ -15952,9 +15979,9 @@ class Handler(BaseHTTPRequestHandler):
                 f"""
                 SELECT
                   {year_expr} AS year,
-                  SUM(CASE WHEN {estado_expr} IN ('presupuesto', 'presupuestos') THEN 1 ELSE 0 END) AS presupuesto,
-                  SUM(CASE WHEN {estado_expr} IN ('contratada', 'contratado', 'contrato', 'proyecto') THEN 1 ELSE 0 END) AS contratada,
-                  SUM(CASE WHEN {in_vigor_expr} THEN 1 ELSE 0 END) AS en_vigor
+                  SUM(CASE WHEN {estado_bucket_expr} = 'presupuesto' THEN 1 ELSE 0 END) AS presupuesto,
+                  SUM(CASE WHEN {estado_bucket_expr} = 'contratada' THEN 1 ELSE 0 END) AS contratada,
+                  SUM(CASE WHEN {estado_bucket_expr} = 'en_vigor' THEN 1 ELSE 0 END) AS en_vigor
                 FROM seguros
                 WHERE empresa_id = ?
                   AND ({uploaded_clause} OR ? = 0)
@@ -16384,6 +16411,7 @@ class Handler(BaseHTTPRequestHandler):
                 days_int = int(days)
             except Exception:
                 days_int = 30
+            estado_bucket_expr = seguro_estado_bucket_expr()
             rows_venc = conn.execute(
                 f"""
                 SELECT
@@ -16425,7 +16453,7 @@ class Handler(BaseHTTPRequestHandler):
                   AND fecha_efecto IS NOT NULL
                   AND DATE(fecha_efecto) BETWEEN DATE('now','localtime')
                       AND DATE('now','localtime', '+{days_int} days')
-                  AND UPPER(TRIM(COALESCE(estado, ''))) IN ('CONTRATADA', 'PRESUPUESTO', 'PROYECTO', 'PENDIENTE')
+                  AND {estado_bucket_expr} = 'contratada'
                 ORDER BY DATE(fecha_efecto) ASC
                 LIMIT 50
                 """,
