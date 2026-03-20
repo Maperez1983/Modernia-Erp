@@ -16434,14 +16434,21 @@ class Handler(BaseHTTPRequestHandler):
                 key=lambda item: item["total"],
                 reverse=True,
             )[:10]
-            comision_ramos = sorted(
+            comision_ramos_raw = sorted(
                 (
                     {"label": label, "total": round(total, 2)}
                     for label, total in comision_by_ramo.items()
                 ),
                 key=lambda item: item["total"],
                 reverse=True,
-            )[:10]
+            )
+            comision_ramos = [
+                item
+                for item in comision_ramos_raw
+                if normalize_lookup_text(item.get("label") or "") != "SIN RAMO"
+            ][:10]
+            if not comision_ramos:
+                comision_ramos = comision_ramos_raw[:10]
             prima_companias = sorted(
                 (
                     {"label": label, "total": round(total, 2)}
@@ -16450,14 +16457,21 @@ class Handler(BaseHTTPRequestHandler):
                 key=lambda item: item["total"],
                 reverse=True,
             )[:10]
-            prima_ramos = sorted(
+            prima_ramos_raw = sorted(
                 (
                     {"label": label, "total": round(total, 2)}
                     for label, total in prima_by_ramo.items()
                 ),
                 key=lambda item: item["total"],
                 reverse=True,
-            )[:10]
+            )
+            prima_ramos = [
+                item
+                for item in prima_ramos_raw
+                if normalize_lookup_text(item.get("label") or "") != "SIN RAMO"
+            ][:10]
+            if not prima_ramos:
+                prima_ramos = prima_ramos_raw[:10]
 
             seguros_totals_year = compute_seguros_contabilidad_totals(conn, empresa_id, year=year)
             seguros_totals_total = compute_seguros_contabilidad_totals(conn, empresa_id)
