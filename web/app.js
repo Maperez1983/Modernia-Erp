@@ -5572,6 +5572,7 @@ const drawBarChart = (canvas, labels, datasets, options = {}) => {
   ctx.stroke();
 
   const groupWidth = chartWidth / Math.max(1, labels.length);
+  const barSets = datasets.filter((set) => set.type !== "line");
   const barWidth = Math.max(6, (groupWidth - 18) / Math.max(1, barSets.length));
   const getTextColorForBar = (color) => {
     const value = String(color || "").trim();
