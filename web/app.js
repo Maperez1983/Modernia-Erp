@@ -5535,10 +5535,33 @@ const drawBarChart = (canvas, labels, datasets, options = {}) => {
   }
   ctx.clearRect(0, 0, width, height);
 
+  const labelCount = Math.max(1, labels.length);
+  const maxLabelLen = labels.reduce(
+    (acc, label) => Math.max(acc, String(label || "").length),
+    0
+  );
+  const estimatedGroupWidth = (width - 58) / labelCount;
+  const crowdedAxis =
+    labelCount >= 10 || estimatedGroupWidth < 42 || maxLabelLen > 16;
+  const heavyCrowding =
+    labelCount >= 16 || estimatedGroupWidth < 32 || maxLabelLen > 22;
+  const rotateLabels =
+    options.rotateLabels ?? (crowdedAxis || estimatedGroupWidth < 36);
+  const labelFontSize =
+    heavyCrowding ? 9 : crowdedAxis ? 10 : 11;
+  const labelSkipStep = options.labelSkipStep
+    || (labelCount >= 26 ? 4 : labelCount >= 18 ? 3 : labelCount >= 13 ? 2 : 1);
+  const rotationAngle = options.labelRotationAngle
+    || (heavyCrowding ? Math.PI / 3.2 : Math.PI / 5.2);
+  const axisMaxChars = options.axisLabelMaxChars
+    || (rotateLabels ? (heavyCrowding ? 16 : 20) : Math.max(8, Math.floor(estimatedGroupWidth / 6)));
+  const axisBottomPadding = options.axisBottomPadding
+    || (rotateLabels ? (heavyCrowding ? 112 : 96) : 78);
+
   const padding = {
     top: 22,
     right: 18,
-    bottom: 78,
+    bottom: axisBottomPadding,
     left: 40,
   };
   const chartWidth = width - padding.left - padding.right;
@@ -5601,7 +5624,7 @@ const drawBarChart = (canvas, labels, datasets, options = {}) => {
       ctx.fillStyle = barColor;
       ctx.fillRect(x, y, barWidth, barHeight);
 
-      if (options.showValues && barHeight >= 18 && labels.length <= 18) {
+      if (options.showValues && barHeight >= 18 && labels.length <= 18 && groupWidth >= 24) {
         const labelText = dataset.format
           ? dataset.format(value)
           : numberFormatter.format(value);
@@ -5618,23 +5641,27 @@ const drawBarChart = (canvas, labels, datasets, options = {}) => {
     });
 
     const labelText = String(label);
-    const shouldRotate = labels.length > 8 || groupWidth < 40;
-    const shouldSkip = labels.length > 14 && i % 2 === 1;
+    const axisLabel =
+      labelText.length > axisMaxChars
+        ? `${labelText.slice(0, Math.max(1, axisMaxChars - 1))}…`
+        : labelText;
+    const shouldRotate = rotateLabels || groupWidth < 40;
+    const shouldSkip = labelSkipStep > 1 && i % labelSkipStep !== 0;
     if (!shouldSkip) {
       ctx.fillStyle = "#6d665a";
-      ctx.font = "500 11px 'Source Sans 3', sans-serif";
+      ctx.font = `500 ${labelFontSize}px 'Source Sans 3', sans-serif`;
       if (shouldRotate) {
         ctx.save();
-        const labelX = xBase + Math.max(0, (groupWidth - ctx.measureText(labelText).width) / 2);
+        const labelX = xBase + Math.max(0, (groupWidth - ctx.measureText(axisLabel).width) / 2);
         const labelY = height - 6;
         ctx.translate(labelX, labelY);
-        ctx.rotate(-Math.PI / 5);
-        ctx.fillText(labelText, 0, 0);
+        ctx.rotate(-rotationAngle);
+        ctx.fillText(axisLabel, 0, 0);
         ctx.restore();
       } else {
-        const labelX = xBase + Math.max(0, (groupWidth - ctx.measureText(labelText).width) / 2);
+        const labelX = xBase + Math.max(0, (groupWidth - ctx.measureText(axisLabel).width) / 2);
         const labelY = height - 6;
-        ctx.fillText(labelText, labelX, labelY);
+        ctx.fillText(axisLabel, labelX, labelY);
       }
     }
   });
