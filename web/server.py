@@ -15701,8 +15701,6 @@ class Handler(BaseHTTPRequestHandler):
                     responsable_expr = "COALESCE(" + ", ".join(responsable_parts) + ")"
             else:
                 responsable_expr = "NULL"
-            responsable_label_expr = f"COALESCE({responsable_expr}, 'Sin responsable')"
-            responsable_non_empty_expr = f"TRIM(COALESCE({responsable_expr}, '')) <> ''"
             # Use the real policy timeline first; fallback to import/create timestamps.
             year_expr = (
                 "COALESCE("
@@ -15808,107 +15806,90 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 series_payload.append(row_dict)
 
-            responsables_rows = conn.execute(
+            def build_cliente_responsable_map():
+                rows = conn.execute(
+                    """
+                    SELECT cliente_id, responsable, fecha, created_at
+                    FROM acciones
+                    WHERE empresa_id = ?
+                      AND LOWER(TRIM(COALESCE(servicio, ''))) = 'seguros'
+                      AND TRIM(COALESCE(responsable, '')) <> ''
+                    ORDER BY DATE(COALESCE(fecha, created_at)) DESC, created_at DESC
+                    """,
+                    (empresa_id,),
+                ).fetchall()
+                mapping = {}
+                for row in rows:
+                    key = str(row["cliente_id"] or "").strip()
+                    if not key or key in mapping:
+                        continue
+                    mapping[key] = normalize_person_name(row["responsable"] or "").strip()
+                return mapping
+
+            cliente_responsable_map = build_cliente_responsable_map()
+
+            def aggregate_responsables(policy_rows):
+                grouped = {}
+                for row in policy_rows:
+                    cliente_id_row = str(row["cliente_id"] or "").strip()
+                    raw = normalize_person_name(row["label"] or "").strip()
+                    if not raw and cliente_id_row:
+                        raw = normalize_person_name(cliente_responsable_map.get(cliente_id_row) or "").strip()
+                    label = raw or "Sin responsable"
+                    grouped[label] = grouped.get(label, 0) + 1
+                return [{"label": k, "total": v} for k, v in grouped.items()]
+
+            responsable_policy_rows = conn.execute(
                 f"""
                 SELECT
-                  {responsable_label_expr} AS label,
-                  COUNT(*) AS total
+                  cliente_id,
+                  {responsable_expr} AS label
                 FROM seguros
                 WHERE empresa_id = ?
                   AND ({uploaded_clause} OR ? = 0)
                   AND {in_vigor_expr}
                   AND {year_expr} = ?
                   AND {exclude_sin_seguro}
-                GROUP BY {responsable_label_expr}
-                ORDER BY total DESC
-                LIMIT 10
                 """,
                 (empresa_id, uploaded_param, year),
             ).fetchall()
-            # Si el reparto por responsable queda todo en "Sin responsable",
-            # intentamos recuperar responsables reales del mismo año (sin filtrar estado).
-            if responsables_rows:
-                all_sin = True
-                for row in responsables_rows:
-                    if normalize_lookup_text(row["label"] or "") not in ("SIN RESPONSABLE",):
-                        all_sin = False
-                        break
-                if all_sin:
-                    responsables_rows = conn.execute(
-                        f"""
-                        SELECT
-                          {responsable_label_expr} AS label,
-                          COUNT(*) AS total
-                        FROM seguros
-                        WHERE empresa_id = ?
-                          AND ({uploaded_clause} OR ? = 0)
-                          AND {exclude_sin_seguro}
-                          AND {year_expr} = ?
-                        GROUP BY {responsable_label_expr}
-                        ORDER BY total DESC
-                        LIMIT 10
-                        """,
-                        (empresa_id, uploaded_param, year),
-                    ).fetchall()
+            responsables_rows = aggregate_responsables(responsable_policy_rows)
             if (not responsables_rows) or all(
                 normalize_lookup_text(row["label"] or "") in ("SIN RESPONSABLE",)
                 for row in responsables_rows
             ):
-                responsables_rows = conn.execute(
+                responsable_policy_rows = conn.execute(
                     f"""
                     SELECT
-                      {responsable_expr} AS label,
-                      COUNT(*) AS total
+                      cliente_id,
+                      {responsable_expr} AS label
                     FROM seguros
                     WHERE empresa_id = ?
                       AND ({uploaded_clause} OR ? = 0)
                       AND {year_expr} = ?
-                      AND {responsable_non_empty_expr}
-                    GROUP BY {responsable_expr}
-                    ORDER BY total DESC
-                    LIMIT 10
+                      AND {exclude_sin_seguro}
                     """,
                     (empresa_id, uploaded_param, year),
                 ).fetchall()
-            # Si seguimos sin responsables útiles, abrimos el filtro uploaded_only
-            # para no perder asignaciones existentes en cartera histórica.
+                responsables_rows = aggregate_responsables(responsable_policy_rows)
             if (not responsables_rows) or all(
                 normalize_lookup_text(row["label"] or "") in ("SIN RESPONSABLE",)
                 for row in responsables_rows
             ):
-                responsables_rows = conn.execute(
+                responsable_policy_rows = conn.execute(
                     f"""
                     SELECT
-                      {responsable_expr} AS label,
-                      COUNT(*) AS total
+                      cliente_id,
+                      {responsable_expr} AS label
                     FROM seguros
                     WHERE empresa_id = ?
                       AND {year_expr} = ?
                       AND {in_vigor_expr}
-                      AND {responsable_non_empty_expr}
                       AND {exclude_sin_seguro}
-                    GROUP BY {responsable_expr}
-                    ORDER BY total DESC
-                    LIMIT 10
                     """,
                     (empresa_id, year),
                 ).fetchall()
-            if not responsables_rows:
-                responsables_rows = conn.execute(
-                    f"""
-                    SELECT
-                      {responsable_expr} AS label,
-                      COUNT(*) AS total
-                    FROM seguros
-                    WHERE empresa_id = ?
-                      AND ({uploaded_clause} OR ? = 0)
-                      AND {responsable_non_empty_expr}
-                    GROUP BY {responsable_expr}
-                    ORDER BY total DESC
-                    LIMIT 10
-                    """,
-                    (empresa_id, uploaded_param),
-                ).fetchall()
+                responsables_rows = aggregate_responsables(responsable_policy_rows)
 
             def normalize_person_key(value):
                 text = normalize_lookup_text(value or "")
