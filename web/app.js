@@ -11417,6 +11417,7 @@ const loadSegurosCrm = () => {
     q,
   });
   params.set("include_id", "1");
+  params.set("uploaded_only", SEGUROS_ONLY_UPLOADED_MODE ? "1" : "0");
   api(`/api/tabla?${params.toString()}`).then((data) => {
     const columns = data.columns || [];
     const allRows = data.rows || [];

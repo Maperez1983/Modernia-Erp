@@ -14006,6 +14006,19 @@ class Handler(BaseHTTPRequestHandler):
             compania_expr = "LOWER(TRIM(compania))"
             exclude_sin_seguro = f"({compania_expr} IS NULL OR {compania_expr} = '' OR {compania_expr} != 'sin seguro')"
             uploaded_clause = uploaded_policy_filter()
+            uploaded_param = 1 if uploaded_only else 0
+            if uploaded_only:
+                uploaded_count = conn.execute(
+                    f"""
+                    SELECT COUNT(*) AS total
+                    FROM seguros
+                    WHERE empresa_id = ?
+                      AND {uploaded_clause}
+                    """,
+                    (empresa_id,),
+                ).fetchone()
+                if not uploaded_count or int(uploaded_count["total"] or 0) <= 0:
+                    uploaded_param = 0
             por_ramo_raw = conn.execute(
                 f"""
                 SELECT ramo
@@ -14015,7 +14028,7 @@ class Handler(BaseHTTPRequestHandler):
                   AND {in_vigor_expr}
                   AND {exclude_sin_seguro}
                 """,
-                (empresa_id, 1 if uploaded_only else 0),
+                (empresa_id, uploaded_param),
             ).fetchall()
             por_ramo_map = {}
             for row in por_ramo_raw:
@@ -14036,7 +14049,7 @@ class Handler(BaseHTTPRequestHandler):
                 GROUP BY compania
                 ORDER BY total DESC
                 """,
-                (empresa_id, 1 if uploaded_only else 0),
+                (empresa_id, uploaded_param),
             ).fetchall()
             ofertas_estado = conn.execute(
                 """
@@ -15620,12 +15633,12 @@ class Handler(BaseHTTPRequestHandler):
             ).fetchone()
 
             polizas = conn.execute(
-                """
+                f"""
                 SELECT COUNT(*) AS total
                 FROM seguros
                 WHERE empresa_id = ?
                   AND (COALESCE(poliza_key, '') <> '' OR COALESCE(poliza_url, '') <> '' OR ? = 0)
-                  AND LOWER(TRIM(estado)) IN ('en vigor', 'en_vigor', 'vigente', 'poliza', 'póliza', 'poliza en vigor')
+                  AND {in_vigor_policy_filter()}
                 """,
                 (empresa_id, 1 if uploaded_only else 0),
             ).fetchone()
@@ -16013,21 +16026,6 @@ class Handler(BaseHTTPRequestHandler):
                     """,
                     (empresa_id, str(year)),
                 ).fetchall()
-                if not conta_rows:
-                    conta_rows = conn.execute(
-                        f"""
-                        SELECT
-                          gc.tipo,
-                          gc.importe,
-                          s.compania,
-                          s.ramo
-                        FROM gestoria_contabilidad gc
-                        LEFT JOIN seguros s ON s.id = gc.seguro_id
-                        WHERE gc.empresa_id = ?
-                          AND {seguros_contabilidad_where_clause('gc')}
-                        """,
-                        (empresa_id,),
-                    ).fetchall()
                 for row in conta_rows:
                     amount = parse_money_value(row["importe"])
                     if abs(amount) < 0.005:
@@ -16565,6 +16563,7 @@ class Handler(BaseHTTPRequestHandler):
 
             empresa_id = params.get("empresa_id", [""])[0]
             q = params.get("q", [""])[0].strip()
+            uploaded_only = (params.get("uploaded_only", ["1"])[0] or "1").strip() in ("1", "true", "yes")
             year_filter = params.get("year", [""])[0].strip()
             field_filter = params.get("field", [""])[0].strip()
             estado_filter = params.get("estado", [""])[0].strip()
@@ -16588,6 +16587,22 @@ class Handler(BaseHTTPRequestHandler):
             if empresa_id:
                 where.append("t.empresa_id = ?")
                 values.append(empresa_id)
+            if tabla == "seguros":
+                uploaded_param = 1 if uploaded_only else 0
+                if uploaded_only:
+                    uploaded_count = conn.execute(
+                        f"""
+                        SELECT COUNT(*) AS total
+                        FROM {tabla}
+                        WHERE empresa_id = ?
+                          AND ({uploaded_policy_filter()})
+                        """,
+                        (empresa_id,),
+                    ).fetchone()
+                    if not uploaded_count or int(uploaded_count["total"] or 0) <= 0:
+                        uploaded_param = 0
+                where.append(f"({uploaded_policy_filter('t')} OR ? = 0)")
+                values.append(uploaded_param)
 
             if year_filter and tabla == "movimientos":
                 where.append("t.anio = ?")
