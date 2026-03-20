@@ -15870,6 +15870,29 @@ class Handler(BaseHTTPRequestHandler):
                     """,
                     (empresa_id, uploaded_param, year),
                 ).fetchall()
+            # Si seguimos sin responsables útiles, abrimos el filtro uploaded_only
+            # para no perder asignaciones existentes en cartera histórica.
+            if (not responsables_rows) or all(
+                normalize_lookup_text(row["label"] or "") in ("SIN RESPONSABLE",)
+                for row in responsables_rows
+            ):
+                responsables_rows = conn.execute(
+                    f"""
+                    SELECT
+                      {responsable_expr} AS label,
+                      COUNT(*) AS total
+                    FROM seguros
+                    WHERE empresa_id = ?
+                      AND {year_expr} = ?
+                      AND {in_vigor_expr}
+                      AND {responsable_non_empty_expr}
+                      AND {exclude_sin_seguro}
+                    GROUP BY {responsable_expr}
+                    ORDER BY total DESC
+                    LIMIT 10
+                    """,
+                    (empresa_id, year),
+                ).fetchall()
             if not responsables_rows:
                 responsables_rows = conn.execute(
                     f"""

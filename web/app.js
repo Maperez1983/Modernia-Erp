@@ -5537,10 +5537,18 @@ const drawBarChart = (canvas, labels, datasets, options = {}) => {
   };
   const chartWidth = width - padding.left - padding.right;
   const chartHeight = height - padding.top - padding.bottom;
-  const barSets = datasets.filter((set) => set.type !== "line");
+  const normalizedChartValues = datasets.flatMap((set) =>
+    (set.values || []).map((val) => {
+      const n = Number(val || 0);
+      if (set.type === "line" && set.scale === "percent") {
+        return (n / 100);
+      }
+      return n;
+    })
+  );
   const maxValue = Math.max(
     1,
-    ...barSets.flatMap((set) => set.values.map((val) => Math.abs(val)))
+    ...normalizedChartValues.map((val) => Math.abs(val))
   );
 
   const gridLines = 4;
