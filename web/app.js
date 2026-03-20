@@ -12033,7 +12033,7 @@ const getSegurosPolizaOptions = ({ action = "", includeAll = false } = {}) => {
     if (actionKey === "contratar") return bucket === "presupuesto";
     if (actionKey === "activar") return bucket === "contratada";
     if (actionKey === "renovar" || actionKey === "anular" || actionKey === "cancelar" || actionKey === "cancel") {
-      return bucket === "en_vigor";
+      return bucket === "en_vigor" || bucket === "contratada";
     }
     return true;
   };
@@ -17145,9 +17145,9 @@ const openClienteSeguroDetail = (row, cliente = {}, options = {}) => {
         payload.accion = "activar";
         payload.fecha = today;
       } else if (mode === "renovar") {
-        payload.estado = "En vigor";
-        payload.estado_renovacion = "Renovada manual";
-        payload.renovacion_fecha = today;
+        endpoint = "/api/seguros_poliza_accion";
+        payload.accion = "renovar";
+        payload.fecha = today;
         if (refInput.value.trim()) payload.nueva_poliza_ref = refInput.value.trim();
       } else if (mode === "cambiar_compania") {
         const newCompany = companiaInput.value.trim();

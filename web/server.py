@@ -11371,6 +11371,7 @@ class Handler(BaseHTTPRequestHandler):
             if action in ("RENOVAR", "RENEW"):
                 fecha_renovacion = (payload.get("fecha_renovacion") or payload.get("fecha") or now[:10]).strip()
                 nueva_fecha_venc = (payload.get("nueva_fecha_vencimiento") or payload.get("fecha_vencimiento") or "").strip()
+                nueva_ref = (payload.get("nueva_poliza_ref") or payload.get("poliza_numero") or "").strip()
                 set_parts = [
                     "estado_renovacion = ?",
                     "renovacion_fecha = ?",
@@ -11378,6 +11379,9 @@ class Handler(BaseHTTPRequestHandler):
                     "fecha_vencimiento = COALESCE(NULLIF(?, ''), fecha_vencimiento)",
                 ]
                 set_values = ["Renovada manual", fecha_renovacion, nueva_fecha_venc]
+                if nueva_ref:
+                    set_parts.append("nueva_poliza_ref = ?")
+                    set_values.append(nueva_ref)
                 if "comision" in payload:
                     set_parts.append("comision = ?")
                     set_values.append(parse_money_value(payload.get("comision")))
@@ -17035,7 +17039,8 @@ def main():
     parser.add_argument("--db", default=str(DB_CONFIGURED), help="SQLite path.")
     parser.add_argument("--ocr-db", default=str(OCR_DB_CONFIGURED), help="SQLite OCR jobs path.")
     parser.add_argument("--ocr-workers", type=int, default=OCR_WORKERS, help="Numero de workers OCR en paralelo.")
-    parser.add_argument("--host", default="127.0.0.1", help="Host.")
+    # En entornos cloud (Render, etc.) debe escuchar en 0.0.0.0 para pasar health checks.
+    parser.add_argument("--host", default="0.0.0.0", help="Host.")
     env_port = os.environ.get("PORT")
     try:
         env_port = int(env_port) if env_port else None
