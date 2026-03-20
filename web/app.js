@@ -1872,6 +1872,10 @@ const fincasResponsableChart = document.getElementById("fincasResponsableChart")
 const fincasConversionChart = document.getElementById("fincasConversionChart");
 const fincasComisionCompaniaChart = document.getElementById("fincasComisionCompaniaChart");
 const fincasComisionRamoChart = document.getElementById("fincasComisionRamoChart");
+const fincasRechazoMotivoChart = document.getElementById("fincasRechazoMotivoChart");
+const fincasConversionResponsableChart = document.getElementById("fincasConversionResponsableChart");
+const fincasRenovacionChart = document.getElementById("fincasRenovacionChart");
+const fincasOportunidadesChart = document.getElementById("fincasOportunidadesChart");
 const fincasBdtTabs = document.getElementById("fincasBdtTabs");
 const renewalAlert = document.getElementById("renewalAlert");
 const companySummary = document.getElementById("companySummary");
@@ -8990,6 +8994,111 @@ const renderFincasDashboard = (empresaId) => {
             color: "#5F7A61",
             colors: comisionRamoLabels.map((_, idx) => rankingPalette[idx % rankingPalette.length]),
             format: (value) => euroFormatter.format(value),
+          },
+        ],
+        { legend: false, showValues: true, tooltip: true }
+      );
+
+      const rechazoMotivos = (data.rechazo_motivos || []).slice(0, 8);
+      const rechazoLabels = rechazoMotivos.length
+        ? rechazoMotivos.map((item) => item.label || "Otros")
+        : ["Sin datos"];
+      const rechazoValues = rechazoMotivos.length
+        ? rechazoMotivos.map((item) => Number(item.total || 0))
+        : [0];
+      drawBarChart(
+        fincasRechazoMotivoChart,
+        rechazoLabels,
+        [
+          {
+            label: "Rechazos",
+            values: rechazoValues,
+            color: "#7a5448",
+            colors: rechazoLabels.map((_, idx) => rankingPalette[idx % rankingPalette.length]),
+            format: (value) => numberFormatter.format(value),
+          },
+        ],
+        { legend: false, showValues: true, tooltip: true }
+      );
+
+      const conversionResp = (data.conversion_responsables || []).slice(0, 8);
+      const convRespLabels = conversionResp.length
+        ? conversionResp.map((item) => item.label || "Sin responsable")
+        : ["Sin datos"];
+      const convRespValues = conversionResp.length
+        ? conversionResp.map((item) => Number(item.conversion || 0))
+        : [0];
+      drawBarChart(
+        fincasConversionResponsableChart,
+        convRespLabels,
+        [
+          {
+            label: "Conversión",
+            values: convRespValues,
+            color: "#2f7a50",
+            colors: convRespLabels.map((_, idx) => rankingPalette[idx % rankingPalette.length]),
+            scale: "percent",
+            format: (value) => `${Number(value || 0).toFixed(1)}%`,
+          },
+        ],
+        { legend: false, showValues: true, tooltip: true }
+      );
+
+      const renovSeries = data.renovaciones_anulaciones_mes || [];
+      const renovLabels = renovSeries.length
+        ? renovSeries.map((item) => {
+            const raw = String(item.month || "");
+            if (!raw.includes("-")) return raw;
+            const [yearPart, monthPart] = raw.split("-", 2);
+            const monthNum = Number(monthPart || 0);
+            const monthNames = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
+            const monthLabel = monthNames[Math.max(0, Math.min(11, monthNum - 1))] || raw;
+            return `${monthLabel} ${String(yearPart || "").slice(-2)}`;
+          })
+        : ["Sin datos"];
+      const renovValues = renovSeries.length
+        ? renovSeries.map((item) => Number(item.renovaciones || 0))
+        : [0];
+      const anulValues = renovSeries.length
+        ? renovSeries.map((item) => Number(item.anulaciones || 0))
+        : [0];
+      drawBarChart(
+        fincasRenovacionChart,
+        renovLabels,
+        [
+          {
+            label: "Renovaciones",
+            values: renovValues,
+            color: "#2f7a50",
+            format: (value) => numberFormatter.format(value),
+          },
+          {
+            label: "Anulaciones",
+            values: anulValues,
+            color: "#7a5448",
+            format: (value) => numberFormatter.format(value),
+          },
+        ],
+        { legend: true, showValues: true, tooltip: true }
+      );
+
+      const oportunidades = (data.oportunidades_abiertas || []).slice(0, 8);
+      const oportunidadLabels = oportunidades.length
+        ? oportunidades.map((item) => item.label || "Sin datos")
+        : ["Sin datos"];
+      const oportunidadValues = oportunidades.length
+        ? oportunidades.map((item) => Number(item.total || 0))
+        : [0];
+      drawBarChart(
+        fincasOportunidadesChart,
+        oportunidadLabels,
+        [
+          {
+            label: "Oportunidades",
+            values: oportunidadValues,
+            color: "#3C6E71",
+            colors: oportunidadLabels.map((_, idx) => rankingPalette[idx % rankingPalette.length]),
+            format: (value) => numberFormatter.format(value),
           },
         ],
         { legend: false, showValues: true, tooltip: true }

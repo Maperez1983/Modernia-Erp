@@ -16157,6 +16157,152 @@ class Handler(BaseHTTPRequestHandler):
                         current["label"] = canonical_label
             responsables = sorted(responsables_map.values(), key=lambda item: item["total"], reverse=True)[:10]
 
+            closed_policy_rows = conn.execute(
+                f"""
+                SELECT
+                  cliente_id,
+                  {responsable_expr} AS label,
+                  {estado_bucket_expr} AS bucket
+                FROM seguros
+                WHERE empresa_id = ?
+                  AND ({uploaded_clause} OR ? = 0)
+                  AND {year_expr} = ?
+                  AND {exclude_sin_seguro}
+                """,
+                (empresa_id, uploaded_param, year),
+            ).fetchall()
+            conv_responsable_map = {}
+            for row in closed_policy_rows:
+                bucket = normalize_lookup_text(row["bucket"] or "")
+                if bucket not in ("CONTRATADA", "ENVIGOR", "EN VIGOR", "RECHAZADA"):
+                    continue
+                cliente_id_row = str(row["cliente_id"] or "").strip()
+                raw = normalize_person_name(row["label"] or "").strip()
+                if not raw and cliente_id_row:
+                    raw = normalize_person_name(cliente_responsable_map.get(cliente_id_row) or "").strip()
+                label_raw = raw or "Sin responsable"
+                canonical_label, base_key = canonical_responsable_label(label_raw)
+                current = conv_responsable_map.get(base_key)
+                if not current:
+                    current = {"label": canonical_label, "aceptadas": 0, "rechazadas": 0}
+                    conv_responsable_map[base_key] = current
+                if bucket == "RECHAZADA":
+                    current["rechazadas"] += 1
+                else:
+                    current["aceptadas"] += 1
+            conversion_responsables = []
+            for item in conv_responsable_map.values():
+                closed = (item["aceptadas"] or 0) + (item["rechazadas"] or 0)
+                if closed <= 0:
+                    continue
+                conversion_responsables.append(
+                    {
+                        "label": item["label"],
+                        "aceptadas": item["aceptadas"],
+                        "rechazadas": item["rechazadas"],
+                        "conversion": (item["aceptadas"] / closed) * 100,
+                    }
+                )
+            conversion_responsables.sort(key=lambda x: (x["conversion"], x["aceptadas"]), reverse=True)
+            conversion_responsables = conversion_responsables[:10]
+
+            rechazo_rows = conn.execute(
+                f"""
+                SELECT estado, motivo_baja
+                FROM seguros
+                WHERE empresa_id = ?
+                  AND ({uploaded_clause} OR ? = 0)
+                  AND {year_expr} = ?
+                  AND {estado_bucket_expr} = 'rechazada'
+                  AND {exclude_sin_seguro}
+                """,
+                (empresa_id, uploaded_param, year),
+            ).fetchall()
+            rechazo_map = {}
+            for row in rechazo_rows:
+                motivo = normalize_person_name(row["motivo_baja"] or "").strip()
+                if not motivo:
+                    estado_txt = normalize_person_name(row["estado"] or "").strip()
+                    m = re.search(r"rechazad[ao]\s*\(([^)]+)\)", estado_txt, re.IGNORECASE)
+                    if m:
+                        motivo = m.group(1).strip()
+                motivo_key = normalize_lookup_text(motivo or "")
+                if motivo_key in ("", "OTROS", "OTRO"):
+                    motivo_label = "Otros"
+                else:
+                    motivo_label = (motivo or "Otros").capitalize()
+                rechazo_map[motivo_label] = rechazo_map.get(motivo_label, 0) + 1
+            rechazo_motivos = sorted(
+                ({"label": k, "total": v} for k, v in rechazo_map.items()),
+                key=lambda x: x["total"],
+                reverse=True,
+            )[:10]
+
+            oportunidades_rows = conn.execute(
+                f"""
+                SELECT compania, ramo, {estado_bucket_expr} AS bucket
+                FROM seguros
+                WHERE empresa_id = ?
+                  AND ({uploaded_clause} OR ? = 0)
+                  AND {year_expr} = ?
+                  AND {exclude_sin_seguro}
+                """,
+                (empresa_id, uploaded_param, year),
+            ).fetchall()
+            oportunidades_map = {}
+            for row in oportunidades_rows:
+                bucket = normalize_lookup_text(row["bucket"] or "")
+                if bucket not in ("PRESUPUESTO", "CONTRATADA"):
+                    continue
+                compania_label = normalize_company_name(row["compania"] or "").strip() or "Sin compañía"
+                ramo_label = canonicalize_ramo(row["ramo"] or "") or normalize_person_name(row["ramo"] or "") or "Sin ramo"
+                label = f"{compania_label} · {ramo_label}"
+                current = oportunidades_map.get(label, {"label": label, "presupuesto": 0, "contratada": 0, "total": 0})
+                if bucket == "PRESUPUESTO":
+                    current["presupuesto"] += 1
+                else:
+                    current["contratada"] += 1
+                current["total"] += 1
+                oportunidades_map[label] = current
+            oportunidades_abiertas = sorted(
+                oportunidades_map.values(),
+                key=lambda x: x["total"],
+                reverse=True,
+            )[:10]
+
+            try:
+                year_int = int(str(year or "").strip())
+            except Exception:
+                year_int = datetime.now().year
+            month_labels = [f"{year_int:04d}-{month:02d}" for month in range(1, 13)]
+            month_idx = {label: idx for idx, label in enumerate(month_labels)}
+            renovaciones_anulaciones_mes = [
+                {"month": label, "renovaciones": 0, "anulaciones": 0}
+                for label in month_labels
+            ]
+            eventos_rows = conn.execute(
+                """
+                SELECT tipo, fecha, created_at
+                FROM seguros_eventos
+                WHERE empresa_id = ?
+                  AND LOWER(TRIM(COALESCE(tipo, ''))) IN ('renovacion_manual', 'anulacion')
+                """,
+                (empresa_id,),
+            ).fetchall()
+            for row in eventos_rows:
+                dt = parse_iso_date(row["fecha"]) or parse_iso_date(row["created_at"])
+                if not dt or dt.year != year_int:
+                    continue
+                month_key = f"{dt.year:04d}-{dt.month:02d}"
+                idx = month_idx.get(month_key)
+                if idx is None:
+                    continue
+                tipo = normalize_lookup_text(row["tipo"] or "")
+                if tipo == "RENOVACION MANUAL":
+                    renovaciones_anulaciones_mes[idx]["renovaciones"] += 1
+                elif tipo == "ANULACION":
+                    renovaciones_anulaciones_mes[idx]["anulaciones"] += 1
+
             comision_rows = conn.execute(
                 f"""
                 SELECT
@@ -16383,6 +16529,10 @@ class Handler(BaseHTTPRequestHandler):
                     "responsables": responsables,
                     "comision_companias": comision_companias,
                     "comision_ramos": comision_ramos,
+                    "rechazo_motivos": rechazo_motivos,
+                    "conversion_responsables": conversion_responsables,
+                    "renovaciones_anulaciones_mes": renovaciones_anulaciones_mes,
+                    "oportunidades_abiertas": oportunidades_abiertas,
                 },
             )
             return
