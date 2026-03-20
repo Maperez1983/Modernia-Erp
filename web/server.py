@@ -340,6 +340,9 @@ def seguro_estado_bucket_expr(alias=""):
         "("
         "CASE "
         f"WHEN {estado_expr} IN ('presupuesto', 'presupuestos', 'proyecto', 'pendiente') THEN 'presupuesto' "
+        f"WHEN {estado_expr} IN ('rechazada', 'rechazado', 'no aceptada', 'no aceptado', 'denegada', 'denegado') "
+        f"  OR {estado_expr} LIKE 'rechazada %' OR {estado_expr} LIKE 'rechazado %' "
+        f"THEN 'rechazada' "
         f"WHEN {estado_expr} IN ('anulada', 'anulado', 'cancelada', 'cancelado', 'baja') "
         f"  OR {estado_poliza_expr} IN ('anulada', 'cancelada', 'baja', 'sustituida') THEN 'anulada' "
         f"WHEN {fecha_efecto_expr} IS NOT NULL AND DATE({fecha_efecto_expr}) > {today_expr} THEN 'contratada' "
@@ -606,6 +609,10 @@ def normalize_seguro_estado_value(value):
         return "Presupuesto"
     if key in ("PROYECTO", "PENDIENTE"):
         return "Presupuesto"
+    if key in ("RECHAZADA", "RECHAZADO", "NO ACEPTADA", "NO ACEPTADO", "DENEGADA", "DENEGADO"):
+        return "Rechazada"
+    if key.startswith("RECHAZADA ") or key.startswith("RECHAZADO "):
+        return "Rechazada"
     if key in ("CONTRATADA", "CONTRATADO"):
         return "Contratada"
     if key in ("EN VIGOR", "ENVIGOR", "VIGENTE", "ACTIVA", "ACTIVO"):
@@ -624,7 +631,7 @@ def can_transition_seguro_estado(current_value, target_value):
         return True
     # En CRM operativo permitimos cambio manual entre estados canónicos
     # para corregir datos históricos/importados sin bloquear al usuario.
-    canonical = {"Presupuesto", "Contratada", "En vigor", "Anulada"}
+    canonical = {"Presupuesto", "Contratada", "En vigor", "Anulada", "Rechazada"}
     if current in canonical and target in canonical:
         return True
     return True
@@ -15951,7 +15958,8 @@ class Handler(BaseHTTPRequestHandler):
                 SELECT
                   SUM(CASE WHEN {estado_bucket_expr} = 'presupuesto' THEN 1 ELSE 0 END) AS presupuesto,
                   SUM(CASE WHEN {estado_bucket_expr} = 'contratada' THEN 1 ELSE 0 END) AS contratada,
-                  SUM(CASE WHEN {estado_bucket_expr} = 'en_vigor' THEN 1 ELSE 0 END) AS en_vigor
+                  SUM(CASE WHEN {estado_bucket_expr} = 'en_vigor' THEN 1 ELSE 0 END) AS en_vigor,
+                  SUM(CASE WHEN {estado_bucket_expr} = 'rechazada' THEN 1 ELSE 0 END) AS rechazada
                 FROM seguros
                 WHERE empresa_id = ?
                   AND ({uploaded_clause} OR ? = 0)
@@ -15966,7 +15974,8 @@ class Handler(BaseHTTPRequestHandler):
                 SELECT
                   SUM(CASE WHEN {estado_bucket_expr} = 'presupuesto' THEN 1 ELSE 0 END) AS presupuesto,
                   SUM(CASE WHEN {estado_bucket_expr} = 'contratada' THEN 1 ELSE 0 END) AS contratada,
-                  SUM(CASE WHEN {estado_bucket_expr} = 'en_vigor' THEN 1 ELSE 0 END) AS en_vigor
+                  SUM(CASE WHEN {estado_bucket_expr} = 'en_vigor' THEN 1 ELSE 0 END) AS en_vigor,
+                  SUM(CASE WHEN {estado_bucket_expr} = 'rechazada' THEN 1 ELSE 0 END) AS rechazada
                 FROM seguros
                 WHERE empresa_id = ?
                   AND ({uploaded_clause} OR ? = 0)
@@ -15981,7 +15990,8 @@ class Handler(BaseHTTPRequestHandler):
                   {year_expr} AS year,
                   SUM(CASE WHEN {estado_bucket_expr} = 'presupuesto' THEN 1 ELSE 0 END) AS presupuesto,
                   SUM(CASE WHEN {estado_bucket_expr} = 'contratada' THEN 1 ELSE 0 END) AS contratada,
-                  SUM(CASE WHEN {estado_bucket_expr} = 'en_vigor' THEN 1 ELSE 0 END) AS en_vigor
+                  SUM(CASE WHEN {estado_bucket_expr} = 'en_vigor' THEN 1 ELSE 0 END) AS en_vigor,
+                  SUM(CASE WHEN {estado_bucket_expr} = 'rechazada' THEN 1 ELSE 0 END) AS rechazada
                 FROM seguros
                 WHERE empresa_id = ?
                   AND ({uploaded_clause} OR ? = 0)
@@ -15997,21 +16007,25 @@ class Handler(BaseHTTPRequestHandler):
             presupuesto = current["presupuesto"] if current else 0
             contratada = current["contratada"] if current else 0
             en_vigor = current["en_vigor"] if current else 0
-            conversion = (en_vigor / presupuesto * 100) if presupuesto else 0
+            rechazada = current["rechazada"] if current else 0
+            aceptadas = (contratada or 0) + (en_vigor or 0)
+            total_cerradas = aceptadas + (rechazada or 0)
+            conversion = (aceptadas / total_cerradas * 100) if total_cerradas else 0
             total_presupuesto = totals["presupuesto"] if totals else 0
             total_contratada = totals["contratada"] if totals else 0
             total_en_vigor = totals["en_vigor"] if totals else 0
-            total_global = (total_presupuesto or 0) + (total_contratada or 0) + (total_en_vigor or 0)
-            conversion_global = (total_en_vigor / total_presupuesto * 100) if total_presupuesto else 0
+            total_rechazada = totals["rechazada"] if totals else 0
+            total_aceptadas = (total_contratada or 0) + (total_en_vigor or 0)
+            total_cerradas_global = total_aceptadas + (total_rechazada or 0)
+            total_global = (total_presupuesto or 0) + total_aceptadas + (total_rechazada or 0)
+            conversion_global = (total_aceptadas / total_cerradas_global * 100) if total_cerradas_global else 0
 
             series_payload = []
             for row in series:
                 row_dict = dict(row)
-                row_dict["conversion"] = (
-                    (row_dict.get("en_vigor") or 0) / (row_dict.get("presupuesto") or 0) * 100
-                    if (row_dict.get("presupuesto") or 0)
-                    else 0
-                )
+                accepted_row = (row_dict.get("contratada") or 0) + (row_dict.get("en_vigor") or 0)
+                closed_row = accepted_row + (row_dict.get("rechazada") or 0)
+                row_dict["conversion"] = (accepted_row / closed_row * 100) if closed_row else 0
                 series_payload.append(row_dict)
 
             def build_cliente_responsable_map():
@@ -16346,9 +16360,13 @@ class Handler(BaseHTTPRequestHandler):
                         "presupuesto": presupuesto or 0,
                         "contratada": contratada or 0,
                         "en_vigor": en_vigor or 0,
+                        "rechazada": rechazada or 0,
+                        "aceptadas": aceptadas or 0,
                         "conversion": conversion,
                         "presupuesto_total": total_presupuesto or 0,
                         "en_vigor_total": total_en_vigor or 0,
+                        "rechazada_total": total_rechazada or 0,
+                        "aceptadas_total": total_aceptadas or 0,
                         "total_global": total_global or 0,
                         "conversion_total": conversion_global,
                         "facturacion_comision": seguros_totals_year["ingresos"],

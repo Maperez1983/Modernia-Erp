@@ -8776,13 +8776,13 @@ const renderFincasDashboard = (empresaId) => {
       {
         title: `Conversión ${current.year || effectiveSelectedYear}`,
         value:
-          Number(current.presupuesto || 0) > 0
+          Number((current.aceptadas || 0) + (current.rechazada || 0)) > 0
             ? `${(current.conversion || 0).toFixed(1)}%`
             : "-",
         note:
-          Number(current.presupuesto || 0) > 0
-            ? "En vigor / presupuestos"
-            : "Sin presupuestos en el año",
+          Number((current.aceptadas || 0) + (current.rechazada || 0)) > 0
+            ? "Aceptadas / (Aceptadas + Rechazadas)"
+            : "Sin cierres en el año",
         action: () => openSegurosBdtFromDashboard({ estadoMode: "en_vigor" }),
       },
       {
@@ -8799,6 +8799,16 @@ const renderFincasDashboard = (empresaId) => {
           openSegurosBdtFromDashboard({
             estadoMode: "no_vigor",
             estadoContains: "presupuesto",
+          }),
+      },
+      {
+        title: `Rechazadas ${current.year || effectiveSelectedYear}`,
+        value: numberFormatter.format(current.rechazada || 0),
+        note: "No aceptadas",
+        action: () =>
+          openSegurosBdtFromDashboard({
+            estadoMode: "no_vigor",
+            estadoContains: "rechaz",
           }),
       },
       {
@@ -8924,7 +8934,7 @@ const renderFincasDashboard = (empresaId) => {
 
       drawBarChart(
         fincasConversionChart,
-        ["Presupuestos", "Contratadas", "En vigor"],
+        ["Presupuestos", "Contratadas", "En vigor", "Rechazadas"],
         [
           {
             label: `Embudo ${current.year || effectiveSelectedYear}`,
@@ -8932,6 +8942,7 @@ const renderFincasDashboard = (empresaId) => {
               Number(current.presupuesto || 0),
               Number(current.contratada || 0),
               Number(current.en_vigor || 0),
+              Number(current.rechazada || 0),
             ],
             color: "#3C6E71",
             format: (value) => numberFormatter.format(value),
@@ -17128,7 +17139,7 @@ const openClienteSeguroDetail = (row, cliente = {}, options = {}) => {
     editClienteLinkBtn.textContent = "Vincular cliente por tomador";
     editForm.appendChild(editClienteLinkBtn);
     const editEstado = document.createElement("select");
-    ["En vigor", "Contratada", "Presupuesto", "Anulada", "Vencida"].forEach((opt) => {
+    ["En vigor", "Contratada", "Presupuesto", "Rechazada", "Anulada", "Vencida"].forEach((opt) => {
       const o = document.createElement("option");
       o.value = opt;
       o.textContent = opt;
