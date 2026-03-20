@@ -1138,6 +1138,7 @@ const state = {
   segurosRamosSource: null,
   segurosComisionesRows: null,
   segurosCrmData: null,
+  segurosRenovarPendientesIds: [],
   segurosRamoSelected: "",
   segurosCrmFilterRamo: "",
   segurosCrmFilterCompania: "",
@@ -11533,6 +11534,8 @@ const loadSegurosCrm = () => {
   if (!empresa) {
     segurosCrmTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
     state.segurosCrmData = null;
+    state.segurosRenovarPendientesIds = [];
+    populateSegurosOperationalSelects();
     renderSegurosRamosDashboard();
     if (segurosComplianceKpis) segurosComplianceKpis.innerHTML = "<p class='muted'>Sin empresa.</p>";
     if (segurosEventosTable) segurosEventosTable.innerHTML = "<p class='muted'>Sin pólizas.</p>";
@@ -12027,11 +12030,17 @@ const getSegurosPolizaOptions = ({ action = "", includeAll = false } = {}) => {
     return "presupuesto";
   };
   const actionKey = normalizeSimple(action || "");
-  const isCompatibleForAction = (bucket) => {
+  const pendingRenewalIds = new Set(
+    Array.isArray(state.segurosRenovarPendientesIds) ? state.segurosRenovarPendientesIds.map((v) => String(v || "").trim()).filter(Boolean) : []
+  );
+  const isCompatibleForAction = (bucket, rowId) => {
     if (!actionKey) return true;
     if (actionKey === "contratar") return bucket === "presupuesto";
     if (actionKey === "activar") return bucket === "contratada";
-    if (actionKey === "renovar" || actionKey === "anular" || actionKey === "cancelar" || actionKey === "cancel") {
+    if (actionKey === "renovar") {
+      return pendingRenewalIds.has(String(rowId || "").trim());
+    }
+    if (actionKey === "anular" || actionKey === "cancelar" || actionKey === "cancel") {
       return bucket === "en_vigor" || bucket === "contratada";
     }
     return true;
@@ -12041,7 +12050,7 @@ const getSegurosPolizaOptions = ({ action = "", includeAll = false } = {}) => {
       const id = String(row[idIndex] || "").trim();
       if (!id) return null;
       const bucket = resolveBucket(row);
-      const compatible = isCompatibleForAction(bucket);
+      const compatible = isCompatibleForAction(bucket, id);
       if (!includeAll && actionKey && !compatible) return null;
       const poliza = row[polizaIndex] || "-";
       const tomador = row[tomadorIndex] || "Cliente";
@@ -12059,9 +12068,9 @@ const getSegurosPolizaOptions = ({ action = "", includeAll = false } = {}) => {
 
 const populateSegurosOperationalSelects = () => {
   const action = segurosPolizaAccionTipo ? segurosPolizaAccionTipo.value : "";
+  const actionKey = normalizeSimple(action || "");
   const optionsAll = getSegurosPolizaOptions({ includeAll: true });
   const optionsByAction = getSegurosPolizaOptions({ action });
-  const optionsForAction = optionsByAction.length ? optionsByAction : optionsAll;
   const fill = (select, options = optionsAll) => {
     if (!select) return;
     const current = select.value;
@@ -12074,16 +12083,20 @@ const populateSegurosOperationalSelects = () => {
       select.value = options[0].id;
     }
   };
-  fill(segurosPolizaAccionId, optionsForAction);
+  fill(segurosPolizaAccionId, optionsByAction);
   fill(segurosEventosPolizaId, optionsAll);
   fill(segurosIpidPolizaId, optionsAll);
   fill(segurosReclamacionPolizaId, optionsAll);
   if (segurosPolizaAccionStatus) {
-    if (!optionsByAction.length && optionsAll.length) {
-      segurosPolizaAccionStatus.textContent = "Mostrando todas las pólizas para que puedas seleccionar manualmente.";
+    if (!optionsByAction.length) {
+      segurosPolizaAccionStatus.textContent =
+        actionKey === "renovar"
+          ? "No hay pólizas pendientes de renovar."
+          : "No hay pólizas disponibles para esa acción.";
     } else if (
       segurosPolizaAccionStatus.textContent === "No hay pólizas disponibles para esa acción." ||
-      segurosPolizaAccionStatus.textContent === "Mostrando todas las pólizas para que puedas seleccionar manualmente."
+      segurosPolizaAccionStatus.textContent === "Mostrando todas las pólizas para que puedas seleccionar manualmente." ||
+      segurosPolizaAccionStatus.textContent === "No hay pólizas pendientes de renovar."
     ) {
       segurosPolizaAccionStatus.textContent = "";
     }
@@ -12231,13 +12244,20 @@ const loadSegurosAlertas = () => {
   const empresa = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
   if (!empresa) {
     segurosAlertasList.innerHTML = "<p class='muted'>Sin empresa.</p>";
+    state.segurosRenovarPendientesIds = [];
+    populateSegurosOperationalSelects();
     return;
   }
   const params = new URLSearchParams({ empresa_id: empresa.id });
   api(`/api/seguros_alertas?${params.toString()}`).then((data) => {
     const items = data.items || [];
+    state.segurosRenovarPendientesIds = items
+      .filter((row) => normalizeSimple(row.alert_type || "") !== "entrada_vigor")
+      .map((row) => String(row.id || "").trim())
+      .filter(Boolean);
     if (!items.length) {
       segurosAlertasList.innerHTML = "<p class='muted'>Sin alertas próximas.</p>";
+      populateSegurosOperationalSelects();
       return;
     }
     const list = document.createElement("div");
@@ -12301,6 +12321,10 @@ const loadSegurosAlertas = () => {
     });
     segurosAlertasList.innerHTML = "";
     segurosAlertasList.appendChild(list);
+    populateSegurosOperationalSelects();
+  }).catch(() => {
+    state.segurosRenovarPendientesIds = [];
+    populateSegurosOperationalSelects();
   });
 };
 
