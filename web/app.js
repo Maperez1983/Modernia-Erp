@@ -16976,6 +16976,9 @@ const openClienteSeguroDetail = (row, cliente = {}, options = {}) => {
         }
         status.textContent = "Acción aplicada.";
         await runAfterSave();
+        if (mode === "cambiar_compania" && resp?.new_id) {
+          await openSeguroById(resp.new_id, row.cliente_id || cliente.id || "");
+        }
       } catch {
         status.textContent = "Error al aplicar la acción.";
       }
