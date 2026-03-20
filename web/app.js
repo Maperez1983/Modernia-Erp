@@ -5566,11 +5566,17 @@ const drawBarChart = (canvas, labels, datasets, options = {}) => {
   };
   const chartWidth = width - padding.left - padding.right;
   const chartHeight = height - padding.top - padding.bottom;
-  const normalizedChartValues = datasets.flatMap((set) =>
+  const secondaryLineSets = datasets.filter(
+    (set) => set.type === "line" && set.yAxis === "right"
+  );
+  const primarySets = datasets.filter(
+    (set) => !(set.type === "line" && set.yAxis === "right")
+  );
+  const normalizedChartValues = primarySets.flatMap((set) =>
     (set.values || []).map((val) => {
       const n = Number(val || 0);
       if (set.type === "line" && set.scale === "percent") {
-        return (n / 100);
+        return n / 100;
       }
       return n;
     })
@@ -5579,6 +5585,20 @@ const drawBarChart = (canvas, labels, datasets, options = {}) => {
     1,
     ...normalizedChartValues.map((val) => Math.abs(val))
   );
+  const secondaryValues = secondaryLineSets.flatMap((set) =>
+    (set.values || []).map((val) => Number(val || 0))
+  );
+  const hasSecondaryAxis = secondaryValues.length > 0;
+  const secondaryMinRaw = hasSecondaryAxis ? Math.min(...secondaryValues) : 0;
+  const secondaryMaxRaw = hasSecondaryAxis ? Math.max(...secondaryValues) : 0;
+  const secondaryMin = hasSecondaryAxis ? Math.min(secondaryMinRaw, 0) : 0;
+  const secondaryMax =
+    hasSecondaryAxis
+      ? secondaryMaxRaw === secondaryMin
+        ? secondaryMin + 1
+        : secondaryMaxRaw
+      : 1;
+  const secondaryRange = Math.max(1, secondaryMax - secondaryMin);
 
   const gridLines = 4;
   ctx.strokeStyle = "#efe9df";
@@ -5598,6 +5618,27 @@ const drawBarChart = (canvas, labels, datasets, options = {}) => {
   ctx.lineTo(padding.left, height - padding.bottom);
   ctx.lineTo(width - padding.right, height - padding.bottom);
   ctx.stroke();
+
+  if (hasSecondaryAxis) {
+    ctx.strokeStyle = "#e6e0d6";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(width - padding.right, padding.top);
+    ctx.lineTo(width - padding.right, height - padding.bottom);
+    ctx.stroke();
+    const rightFormat =
+      options.secondaryAxisFormat || ((value) => numberFormatter.format(value));
+    ctx.fillStyle = "#8c857a";
+    ctx.font = "500 10px 'Source Sans 3', sans-serif";
+    for (let i = 0; i <= gridLines; i += 1) {
+      const ratio = i / gridLines;
+      const value = secondaryMax - ratio * secondaryRange;
+      const y = padding.top + (chartHeight / gridLines) * i;
+      const text = rightFormat(value);
+      const textWidth = ctx.measureText(text).width;
+      ctx.fillText(text, width - padding.right - textWidth - 4, y - 2);
+    }
+  }
 
   const groupWidth = chartWidth / Math.max(1, labels.length);
   const barSets = datasets.filter((set) => set.type !== "line");
@@ -5670,14 +5711,20 @@ const drawBarChart = (canvas, labels, datasets, options = {}) => {
   if (lineSets.length) {
     lineSets.forEach((dataset) => {
       ctx.strokeStyle = dataset.color || "#3f5d5a";
-      ctx.lineWidth = 2;
+      ctx.lineWidth = Number(dataset.lineWidth || 2);
       ctx.beginPath();
       dataset.values.forEach((value, i) => {
-        const normalized = dataset.scale === "percent" ? (value / 100) * maxValue : value;
-        const y =
-          height -
-          padding.bottom -
-          (Math.abs(normalized) / maxValue) * chartHeight;
+        let y;
+        if (dataset.yAxis === "right" && hasSecondaryAxis) {
+          const normalized = (Number(value || 0) - secondaryMin) / secondaryRange;
+          y = height - padding.bottom - normalized * chartHeight;
+        } else {
+          const normalized = dataset.scale === "percent" ? (value / 100) * maxValue : value;
+          y =
+            height -
+            padding.bottom -
+            (Math.abs(normalized) / maxValue) * chartHeight;
+        }
         const x = padding.left + i * groupWidth + groupWidth / 2;
         if (i === 0) {
           ctx.moveTo(x, y);
@@ -5687,16 +5734,30 @@ const drawBarChart = (canvas, labels, datasets, options = {}) => {
       });
       ctx.stroke();
       dataset.values.forEach((value, i) => {
-        const normalized = dataset.scale === "percent" ? (value / 100) * maxValue : value;
-        const y =
-          height -
-          padding.bottom -
-          (Math.abs(normalized) / maxValue) * chartHeight;
+        let y;
+        if (dataset.yAxis === "right" && hasSecondaryAxis) {
+          const normalized = (Number(value || 0) - secondaryMin) / secondaryRange;
+          y = height - padding.bottom - normalized * chartHeight;
+        } else {
+          const normalized = dataset.scale === "percent" ? (value / 100) * maxValue : value;
+          y =
+            height -
+            padding.bottom -
+            (Math.abs(normalized) / maxValue) * chartHeight;
+        }
         const x = padding.left + i * groupWidth + groupWidth / 2;
         ctx.fillStyle = dataset.color || "#3f5d5a";
         ctx.beginPath();
-        ctx.arc(x, y, 3, 0, Math.PI * 2);
+        ctx.arc(x, y, Number(dataset.pointRadius || 3), 0, Math.PI * 2);
         ctx.fill();
+        if (dataset.showPointValues && i % Math.max(1, Number(dataset.pointLabelStep || 2)) === 0) {
+          const valueText = dataset.format
+            ? dataset.format(value)
+            : numberFormatter.format(Number(value || 0));
+          ctx.fillStyle = dataset.color || "#3f5d5a";
+          ctx.font = "600 10px 'Source Sans 3', sans-serif";
+          ctx.fillText(valueText, x + 4, y - 6);
+        }
       });
     });
   }
@@ -8931,9 +8992,19 @@ const renderFincasDashboard = (empresaId) => {
             color: "#c17817",
             format: (value) => numberFormatter.format(value),
             type: "line",
+            yAxis: "right",
+            lineWidth: 3,
+            pointRadius: 3,
+            showPointValues: true,
+            pointLabelStep: 2,
           },
         ],
-        { legend: true, showValues: true, tooltip: true }
+        {
+          legend: true,
+          showValues: true,
+          tooltip: true,
+          secondaryAxisFormat: (value) => numberFormatter.format(Math.round(Number(value || 0))),
+        }
       );
 
       const responsables = (data.responsables || []).slice(0, 8);
