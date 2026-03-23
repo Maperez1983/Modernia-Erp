@@ -1958,7 +1958,10 @@ const EDITABLE_FIELDS = {
     comision_modernia: { type: "money" },
     inmobiliaria_compra: { type: "text" },
     asesor: { type: "text" },
-    estado: { type: "select", options: ["Pendiente", "Estudio", "Encargo", "Firmada", "Rechazada", "Cancelada"] },
+    estado: {
+      type: "select",
+      options: ["Pendiente", "Estudio", "Encargo", "Firmada", "Rechazada", "Cancelada", "Indemnización"],
+    },
     anio: { type: "number" },
   },
 };
@@ -8959,6 +8962,10 @@ const openHipotecaFicha = (recordId) => {
     const control = panel.querySelector(`[name="${field}"]`);
     if (!control) return;
     const raw = rowData[field];
+    if (cfg.type === "select") {
+      setSelectValueCaseInsensitive(control, raw);
+      return;
+    }
     if (cfg.type === "money") {
       control.value = formatMoneyInputValue(raw ?? "");
     } else if (cfg.type === "percent") {
@@ -9036,6 +9043,25 @@ const saveHipotecaFicha = (event) => {
     .catch(() => {
       if (status) status.textContent = "Error al guardar cambios.";
     });
+};
+
+const setSelectValueCaseInsensitive = (selectEl, rawValue) => {
+  if (!selectEl) return;
+  const value = String(rawValue ?? "").trim();
+  if (!value) {
+    selectEl.value = "";
+    return;
+  }
+  const exact = Array.from(selectEl.options).find((opt) => String(opt.value) === value);
+  if (exact) {
+    selectEl.value = exact.value;
+    return;
+  }
+  const normalized = normalizeSimple(value);
+  const byNormalized = Array.from(selectEl.options).find(
+    (opt) => normalizeSimple(String(opt.value || "")) === normalized
+  );
+  selectEl.value = byNormalized ? byNormalized.value : "";
 };
 
 const renderHipotecaBdtTable = (data) => {
