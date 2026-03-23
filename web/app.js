@@ -23925,6 +23925,7 @@ if (hipotecaForm) {
   const comisionInput = hipotecaForm.querySelector("input[name='comision']");
   const comisionJuanInput = hipotecaForm.querySelector("input[name='comision_juan']");
   const comisionModerniaInput = hipotecaForm.querySelector("input[name='comision_modernia']");
+  const comisionNetaModerniaInput = document.getElementById("hipotecaComisionNeta");
   const cesionHint = document.getElementById("hipotecaCesionHint");
   const cesionInput = hipotecaForm.querySelector("input[name='cesion']");
   const inmobiliariaCompraInput = hipotecaForm.querySelector("input[name='inmobiliaria_compra']");
@@ -23969,13 +23970,18 @@ if (hipotecaForm) {
     if (comisionJuanInput) {
       comisionJuanInput.value = (total * 0.2).toFixed(2);
     }
+    const juan = total * 0.2;
     if (cesionInput) {
       cesionInput.value = (total * cesionRate).toFixed(2);
     }
+    const cesion = total * cesionRate;
     if (comisionModerniaInput) {
       // En el formulario visible mostramos la parte cedida a inmobiliaria.
-      const cesion = total * cesionRate;
       comisionModerniaInput.value = cesion.toFixed(2);
+    }
+    if (comisionNetaModerniaInput) {
+      const modernia = Math.max(total - juan - cesion, 0);
+      comisionNetaModerniaInput.value = modernia.toFixed(2);
     }
   };
 
