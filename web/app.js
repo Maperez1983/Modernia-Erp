@@ -8747,11 +8747,14 @@ const loadHipotecaBdt = (forceRefresh = false) => {
     return;
   }
   const q = hipotecaBdtSearch ? hipotecaBdtSearch.value.trim() : "";
+  const cacheAgeMs = Date.now() - Number(state.hipotecaBdtCache?.ts || 0);
+  const isFreshCache = cacheAgeMs >= 0 && cacheAgeMs < 30000;
   if (
     !forceRefresh &&
     state.hipotecaBdtCache &&
     state.hipotecaBdtCache.empresaId === empresa.id &&
-    state.hipotecaBdtCache.q === q
+    state.hipotecaBdtCache.q === q &&
+    isFreshCache
   ) {
     const cached = state.hipotecaBdtCache.data || {};
     const columns = cached.columns || [];
@@ -9365,7 +9368,7 @@ const setHipotecaAltaView = (view) => {
     loadHipotecaDashboard();
   }
   if (next === "bdt") {
-    loadHipotecaBdt();
+    loadHipotecaBdt(true);
   }
 };
 
