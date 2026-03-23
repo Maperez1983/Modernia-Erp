@@ -23973,10 +23973,9 @@ if (hipotecaForm) {
       cesionInput.value = (total * cesionRate).toFixed(2);
     }
     if (comisionModerniaInput) {
-      const juan = total * 0.2;
+      // En el formulario visible mostramos la parte cedida a inmobiliaria.
       const cesion = total * cesionRate;
-      const modernia = Math.max(total - juan - cesion, 0);
-      comisionModerniaInput.value = modernia.toFixed(2);
+      comisionModerniaInput.value = cesion.toFixed(2);
     }
   };
 
