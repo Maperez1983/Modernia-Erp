@@ -15772,6 +15772,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/hipoteca_dashboard":
             empresa_id = params.get("empresa_id", [""])[0]
+            requested_year = (params.get("year", [""])[0] or "").strip()
             if not empresa_id:
                 json_response(self, {"error": "empresa_id requerido"}, status=400)
                 return
@@ -15781,6 +15782,31 @@ class Handler(BaseHTTPRequestHandler):
                 "COALESCE(NULLIF(TRIM(anio), ''), "
                 "strftime('%Y', COALESCE(NULLIF(fecha_firma, ''), NULLIF(fecha_encargo, ''), created_at)))"
             )
+
+            available_years = conn.execute(
+                """
+                SELECT """
+                + year_expr
+                + """ AS year, COUNT(*) AS total
+                FROM hipotecas
+                WHERE empresa_id = ?
+                  AND """
+                + year_expr
+                + """ IS NOT NULL
+                  AND LOWER(TRIM(estado)) IN ('firmado', 'firmada', 'indemnización', 'indemnizacion')
+                GROUP BY """
+                + year_expr
+                + """
+                ORDER BY """
+                + year_expr
+                + """
+                """,
+                (empresa_id,),
+            ).fetchall()
+            available_set = {str(r["year"]) for r in available_years if r["year"] is not None}
+            selected_year = requested_year or current_year
+            if selected_year not in available_set and available_years:
+                selected_year = str(available_years[-1]["year"])
 
             current = conn.execute(
                 """
@@ -15804,7 +15830,20 @@ class Handler(BaseHTTPRequestHandler):
                 + """ = ?
                   AND LOWER(TRIM(estado)) IN ('firmado', 'firmada', 'indemnización', 'indemnizacion')
                 """,
-                (empresa_id, current_year),
+                (empresa_id, selected_year),
+            ).fetchone()
+
+            firmadas_anio = conn.execute(
+                """
+                SELECT COUNT(*) AS total
+                FROM hipotecas
+                WHERE empresa_id = ?
+                  AND """
+                + year_expr
+                + """ = ?
+                  AND LOWER(TRIM(estado)) IN ('firmado', 'firmada')
+                """,
+                (empresa_id, selected_year),
             ).fetchone()
 
             firmadas_mes = conn.execute(
@@ -15819,26 +15858,7 @@ class Handler(BaseHTTPRequestHandler):
                 (empresa_id,),
             ).fetchone()
 
-            series_totales = conn.execute(
-                """
-                SELECT """
-                + year_expr
-                + """ AS year, COUNT(*) AS total
-                FROM hipotecas
-                WHERE empresa_id = ?
-                  AND """
-                + year_expr
-                + """ IS NOT NULL
-                  AND LOWER(TRIM(estado)) IN ('firmado', 'firmada', 'indemnización', 'indemnizacion')
-                GROUP BY """
-                + year_expr
-                + """
-                ORDER BY """
-                + year_expr
-                + """
-                """,
-                (empresa_id,),
-            ).fetchall()
+            series_totales = available_years
 
             series_comision = conn.execute(
                 """
@@ -15928,8 +15948,10 @@ class Handler(BaseHTTPRequestHandler):
                         "porcentaje_medio": current["porcentaje_medio"] if current else 0,
                         "comision_media": current["comision_media"] if current else 0,
                         "comision_total": current["comision_total"] if current else 0,
+                        "firmadas_anio": firmadas_anio["total"] if firmadas_anio else 0,
                         "firmadas_mes": firmadas_mes["total"] if firmadas_mes else 0,
                     },
+                    "current_year": selected_year,
                     "series_totales": [dict(r) for r in series_totales],
                     "series_comision": [dict(r) for r in series_comision],
                     "series_porcentaje": [dict(r) for r in series_porcentaje],

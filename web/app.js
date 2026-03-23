@@ -9221,7 +9221,7 @@ const loadHipotecaDashboard = () => {
   }
   api(`/api/hipoteca_dashboard?empresa_id=${empresa.id}`)
     .then((data) => {
-      const currentYear = String(new Date().getFullYear());
+      const currentYear = String(data?.current_year || new Date().getFullYear());
       const kpis = [
         {
           title: `Hipotecas ${currentYear}`,
@@ -9229,9 +9229,9 @@ const loadHipotecaDashboard = () => {
           note: "Firmadas + Indemnización",
         },
         {
-          title: "Firmadas mes",
-          value: numberFormatter.format(data?.current?.firmadas_mes || 0),
-          note: "Mes actual",
+          title: `Firmadas ${currentYear}`,
+          value: numberFormatter.format(data?.current?.firmadas_anio || 0),
+          note: "Solo firmadas",
         },
         {
           title: "Porcentaje medio",
