@@ -4170,6 +4170,7 @@ const setDefaultTableForCompany = (resumenItem) => {
 
 const HEADER_OVERRIDES = {
   anio: "AÑO",
+  "comision modernia": "CESIÓN A INMOBILIARIAS",
 };
 
 const formatHeader = (value) => {
@@ -23937,19 +23938,18 @@ if (hipotecaForm) {
       .replace(/[\u0300-\u036f]/g, "")
       .trim();
 
-  const MODERNIA_AGENCIES = new Set([
-    "modernia norte",
-    "modernia oeste",
-    "modernia centro",
+  const MALAGA_BONUS_OFFICES = new Set([
+    "malaga norte",
+    "malaga oeste",
+    "malaga centro",
   ]);
 
-  const canonicalAgency = (value) =>
+  const canonicalOffice = (value) =>
     normalizeText(value)
-      .replace(/\bmalaga\b/g, " ")
       .replace(/\s+/g, " ")
       .trim();
 
-  const isModerniaGroup = (value) => MODERNIA_AGENCIES.has(canonicalAgency(value));
+  const hasMalagaBonusOffice = (value) => MALAGA_BONUS_OFFICES.has(canonicalOffice(value));
 
   const updateCommissions = () => {
     if (!comisionInput) return;
@@ -23960,8 +23960,8 @@ if (hipotecaForm) {
     if (comisionJuanInput) {
       comisionJuanInput.value = (total * 0.2).toFixed(2);
     }
-    const inmobiliariaCompra = inmobiliariaCompraInput?.value || oficinaInput?.value || "";
-    const cesionRate = isModerniaGroup(inmobiliariaCompra) ? 0.25 : 0.2;
+    const oficina = oficinaInput?.value || inmobiliariaCompraInput?.value || "";
+    const cesionRate = hasMalagaBonusOffice(oficina) ? 0.25 : 0.2;
     if (cesionInput) {
       cesionInput.value = (total * cesionRate).toFixed(2);
     }

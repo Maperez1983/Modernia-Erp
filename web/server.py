@@ -964,26 +964,24 @@ def parse_money_value(value):
         return 0.0
 
 
-MODERNIA_FIN_AGENCIES = {
-    "MODERNIA NORTE",
-    "MODERNIA OESTE",
-    "MODERNIA CENTRO",
+MALAGA_BONUS_OFFICES = {
+    "MALAGA NORTE",
+    "MALAGA OESTE",
+    "MALAGA CENTRO",
 }
 
 
-def is_modernia_fin_agency(value):
+def has_malaga_bonus_office(value):
     key = normalize_lookup_text(value)
     if not key:
         return False
-    # Permite variantes con "MALAGA" pero compara contra la base oficial.
-    compact = " ".join(token for token in key.split() if token != "MALAGA")
-    return compact in MODERNIA_FIN_AGENCIES
+    return key in MALAGA_BONUS_OFFICES
 
 
-def derive_hipoteca_commissions(comision_total, agencia):
+def derive_hipoteca_commissions(comision_total, oficina_o_agencia):
     total = max(parse_money_value(comision_total), 0.0)
     juan = round(total * 0.20, 2)
-    cesion_rate = 0.25 if is_modernia_fin_agency(agencia) else 0.20
+    cesion_rate = 0.25 if has_malaga_bonus_office(oficina_o_agencia) else 0.20
     cesion = round(total * cesion_rate, 2)
     modernia = round(max(total - juan - cesion, 0.0), 2)
     return {
@@ -11042,10 +11040,10 @@ class Handler(BaseHTTPRequestHandler):
                 else current_row["comision"]
             )
             effective_agencia = (
-                updates.get("inmobiliaria_compra")
-                or updates.get("oficina")
-                or current_row["inmobiliaria_compra"]
+                updates.get("oficina")
+                or updates.get("inmobiliaria_compra")
                 or current_row["oficina"]
+                or current_row["inmobiliaria_compra"]
             )
             commission_split = derive_hipoteca_commissions(effective_comision, effective_agencia)
             updates["cesion"] = commission_split["cesion"]
@@ -13233,10 +13231,10 @@ class Handler(BaseHTTPRequestHandler):
                 else (existing_row["comision"] if existing_row else 0)
             )
             effective_agencia = (
-                payload.get("inmobiliaria_compra")
-                or payload.get("oficina")
-                or (existing_row["inmobiliaria_compra"] if existing_row else "")
+                payload.get("oficina")
+                or payload.get("inmobiliaria_compra")
                 or (existing_row["oficina"] if existing_row else "")
+                or (existing_row["inmobiliaria_compra"] if existing_row else "")
             )
             commission_split = derive_hipoteca_commissions(effective_comision, effective_agencia)
             financing_split = derive_hipoteca_financing(
