@@ -3537,11 +3537,11 @@ const openFinCrm = () => {
   updateTableVisibility();
   setCrmMode("fin");
   if (viewTabs) viewTabs.classList.add("hidden");
-  if (finCrmSection) finCrmSection.classList.remove("hidden");
+  if (finCrmSection) finCrmSection.classList.add("hidden");
   if (tableToolbar) tableToolbar.classList.add("hidden");
   if (tableContainer) tableContainer.classList.add("hidden");
   if (tableInfo) tableInfo.classList.add("hidden");
-  loadFinCrm();
+  setHipotecaAltaView("dashboard");
 };
 
 const openServiceCrm = (service) => {
@@ -8476,7 +8476,7 @@ const updateTableVisibility = () => {
     );
   }
   if (finCrmSection) {
-    finCrmSection.classList.toggle("hidden", currentTab !== "fin-crm" || isClientePage);
+    finCrmSection.classList.add("hidden");
   }
   if (finSimSection) {
     finSimSection.classList.toggle(
@@ -8499,7 +8499,7 @@ const updateTableVisibility = () => {
     const company = state.empresas.find((e) => e.id === empresaSelect.value)?.nombre;
     hipotecaSection.classList.toggle(
       "hidden",
-      isClientePage || currentTab !== "alta" || company !== FIN_COMPANY
+      isClientePage || currentTab !== "fin-crm" || company !== FIN_COMPANY
     );
   }
   updateFincasBdtTabs();
