@@ -23925,6 +23925,7 @@ if (hipotecaForm) {
   const comisionInput = hipotecaForm.querySelector("input[name='comision']");
   const comisionJuanInput = hipotecaForm.querySelector("input[name='comision_juan']");
   const comisionModerniaInput = hipotecaForm.querySelector("input[name='comision_modernia']");
+  const cesionHint = document.getElementById("hipotecaCesionHint");
   const cesionInput = hipotecaForm.querySelector("input[name='cesion']");
   const inmobiliariaCompraInput = hipotecaForm.querySelector("input[name='inmobiliaria_compra']");
   const oficinaInput = hipotecaForm.querySelector("input[name='oficina']");
@@ -23954,14 +23955,20 @@ if (hipotecaForm) {
   const updateCommissions = () => {
     if (!comisionInput) return;
     const total = Number(comisionInput.value);
+    const oficina = oficinaInput?.value || inmobiliariaCompraInput?.value || "";
+    const hasBonus = hasMalagaBonusOffice(oficina);
+    const cesionRate = hasBonus ? 0.25 : 0.2;
+    if (cesionHint) {
+      cesionHint.textContent = hasBonus
+        ? "Aplicando 25% (oficina Málaga Centro/Norte/Oeste)."
+        : "Aplicando 20% general.";
+    }
     if (Number.isNaN(total)) {
       return;
     }
     if (comisionJuanInput) {
       comisionJuanInput.value = (total * 0.2).toFixed(2);
     }
-    const oficina = oficinaInput?.value || inmobiliariaCompraInput?.value || "";
-    const cesionRate = hasMalagaBonusOffice(oficina) ? 0.25 : 0.2;
     if (cesionInput) {
       cesionInput.value = (total * cesionRate).toFixed(2);
     }
@@ -23999,6 +24006,8 @@ if (hipotecaForm) {
   if (hipotecaInput) {
     hipotecaInput.addEventListener("input", updateFinanciacion);
   }
+  updateCommissions();
+  updateFinanciacion();
   hipotecaForm.addEventListener("submit", (event) => {
     event.preventDefault();
     if (hipotecaFormStatus) {
