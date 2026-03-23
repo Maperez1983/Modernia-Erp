@@ -964,6 +964,35 @@ def parse_money_value(value):
         return 0.0
 
 
+MODERNIA_FIN_AGENCIES = {
+    "MODERNIA NORTE",
+    "MODERNIA OESTE",
+    "MODERNIA CENTRO",
+}
+
+
+def is_modernia_fin_agency(value):
+    key = normalize_lookup_text(value)
+    if not key:
+        return False
+    # Permite variantes con "MALAGA" pero compara contra la base oficial.
+    compact = " ".join(token for token in key.split() if token != "MALAGA")
+    return compact in MODERNIA_FIN_AGENCIES
+
+
+def derive_hipoteca_commissions(comision_total, agencia):
+    total = max(parse_money_value(comision_total), 0.0)
+    juan = round(total * 0.20, 2)
+    cesion_rate = 0.25 if is_modernia_fin_agency(agencia) else 0.20
+    cesion = round(total * cesion_rate, 2)
+    modernia = round(max(total - juan - cesion, 0.0), 2)
+    return {
+        "comision_juan": juan,
+        "cesion": cesion,
+        "comision_modernia": modernia,
+    }
+
+
 def has_explicit_renewal_action(seguro_row):
     estado = normalize_lookup_text(seguro_row.get("estado"))
     estado_ren = normalize_lookup_text(seguro_row.get("estado_renovacion"))
@@ -10994,6 +11023,21 @@ class Handler(BaseHTTPRequestHandler):
             if not updates:
                 json_response(self, {"error": "Sin cambios"}, status=400)
                 return
+            effective_comision = (
+                updates.get("comision")
+                if updates.get("comision") not in (None, "")
+                else current_row["comision"]
+            )
+            effective_agencia = (
+                updates.get("inmobiliaria_compra")
+                or updates.get("oficina")
+                or current_row["inmobiliaria_compra"]
+                or current_row["oficina"]
+            )
+            commission_split = derive_hipoteca_commissions(effective_comision, effective_agencia)
+            updates["cesion"] = commission_split["cesion"]
+            updates["comision_juan"] = commission_split["comision_juan"]
+            updates["comision_modernia"] = commission_split["comision_modernia"]
             if "anio" not in updates:
                 fecha_ref = str(updates.get("fecha_firma") or updates.get("fecha_encargo") or "").strip()
                 if fecha_ref:
@@ -13155,6 +13199,25 @@ class Handler(BaseHTTPRequestHandler):
                 f"SELECT id FROM hipotecas WHERE {where} LIMIT 1",
                 values,
             ).fetchone()
+            existing_row = None
+            if existing:
+                existing_row = conn.execute(
+                    "SELECT * FROM hipotecas WHERE id = ?",
+                    (existing["id"],),
+                ).fetchone()
+
+            effective_comision = (
+                payload.get("comision")
+                if payload.get("comision") not in (None, "")
+                else (existing_row["comision"] if existing_row else 0)
+            )
+            effective_agencia = (
+                payload.get("inmobiliaria_compra")
+                or payload.get("oficina")
+                or (existing_row["inmobiliaria_compra"] if existing_row else "")
+                or (existing_row["oficina"] if existing_row else "")
+            )
+            commission_split = derive_hipoteca_commissions(effective_comision, effective_agencia)
 
             if existing:
                 conn.execute(
@@ -13171,9 +13234,9 @@ class Handler(BaseHTTPRequestHandler):
                       encargo = COALESCE(?, encargo),
                       tipo_hipoteca = COALESCE(?, tipo_hipoteca),
                       fecha_firma = COALESCE(?, fecha_firma),
-                      cesion = COALESCE(?, cesion),
-                      comision_juan = COALESCE(?, comision_juan),
-                      comision_modernia = COALESCE(?, comision_modernia),
+                      cesion = ?,
+                      comision_juan = ?,
+                      comision_modernia = ?,
                       inmobiliaria_compra = COALESCE(?, inmobiliaria_compra),
                       asesor = COALESCE(?, asesor),
                       estado = COALESCE(?, estado),
@@ -13193,9 +13256,9 @@ class Handler(BaseHTTPRequestHandler):
                         payload.get("encargo"),
                         payload.get("tipo_hipoteca"),
                         payload.get("fecha_firma"),
-                        payload.get("cesion"),
-                        payload.get("comision_juan"),
-                        payload.get("comision_modernia"),
+                        commission_split["cesion"],
+                        commission_split["comision_juan"],
+                        commission_split["comision_modernia"],
                         payload.get("inmobiliaria_compra"),
                         payload.get("asesor"),
                         payload.get("estado"),
@@ -13232,9 +13295,9 @@ class Handler(BaseHTTPRequestHandler):
                         payload.get("encargo"),
                         payload.get("tipo_hipoteca"),
                         payload.get("fecha_firma"),
-                        payload.get("cesion"),
-                        payload.get("comision_juan"),
-                        payload.get("comision_modernia"),
+                        commission_split["cesion"],
+                        commission_split["comision_juan"],
+                        commission_split["comision_modernia"],
                         payload.get("inmobiliaria_compra"),
                         payload.get("asesor"),
                         payload.get("estado"),

@@ -4926,10 +4926,7 @@ const resolveCompanyKey = (value) => {
   return COMPANY_ALIASES[normalized] || normalized;
 };
 
-let companyLogosDisabled = false;
-
 const getCompanyLogo = (value) => {
-  if (companyLogosDisabled) return "";
   const key = resolveCompanyKey(value);
   return COMPANY_LOGOS[key] || "";
 };
@@ -5024,7 +5021,6 @@ const createCompanyBadge = (value, options = {}) => {
     img.referrerPolicy = "no-referrer";
     img.className = "company-logo";
     img.addEventListener("error", () => {
-      companyLogosDisabled = true;
       img.remove();
       if (!wrapper.querySelector(".company-initials")) {
         const initials = document.createElement("span");
@@ -23620,24 +23616,26 @@ if (hipotecaForm) {
   const hipotecaInput = hipotecaForm.querySelector("input[name='importe_hipoteca']");
   const porcentajeInput = hipotecaForm.querySelector("input[name='porcentaje']");
   const entradaInput = hipotecaForm.querySelector("input[name='entrada']");
-  const isModerniaGroup = (value) => {
-    const v = normalizeText(value);
-    return (
-      v.includes("modernia oeste") ||
-      v.includes("modernia centro") ||
-      v.includes("modernia norte") ||
-      v.includes("modernia malaga oeste") ||
-      v.includes("modernia malaga centro") ||
-      v.includes("modernia malaga norte")
-    );
-  };
-
   const normalizeText = (value) =>
     String(value || "")
       .toLowerCase()
       .normalize("NFD")
       .replace(/[\u0300-\u036f]/g, "")
       .trim();
+
+  const MODERNIA_AGENCIES = new Set([
+    "modernia norte",
+    "modernia oeste",
+    "modernia centro",
+  ]);
+
+  const canonicalAgency = (value) =>
+    normalizeText(value)
+      .replace(/\bmalaga\b/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+
+  const isModerniaGroup = (value) => MODERNIA_AGENCIES.has(canonicalAgency(value));
 
   const updateCommissions = () => {
     if (!comisionInput) return;
