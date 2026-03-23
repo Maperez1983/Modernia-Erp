@@ -310,7 +310,7 @@ textarea:focus {
 }
 
 .hidden {
-  display: none;
+  display: none !important;
 }
 
 body.page-empresa #homeSection {
