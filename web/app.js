@@ -4822,6 +4822,23 @@ const COMPANY_LOGOS = {
   SANITAS: "/assets/logos/sanitas.svg",
   "SANTA LUCIA": "/assets/logos/santalucia.svg",
   ZURICH: "/assets/logos/zurich.svg",
+  SANTANDER: "https://logo.clearbit.com/santander.com",
+  BBVA: "https://logo.clearbit.com/bbva.com",
+  CAIXABANK: "https://logo.clearbit.com/caixabank.com",
+  SABADELL: "https://logo.clearbit.com/bancsabadell.com",
+  BANKINTER: "https://logo.clearbit.com/bankinter.com",
+  UNICAJA: "https://logo.clearbit.com/unicajabanco.es",
+  ABANCA: "https://logo.clearbit.com/abanca.com",
+  IBERCAJA: "https://logo.clearbit.com/ibercaja.es",
+  KUTXABANK: "https://logo.clearbit.com/kutxabank.es",
+  CAJAMAR: "https://logo.clearbit.com/grupocooperativocajamar.es",
+  OPENBANK: "https://logo.clearbit.com/openbank.es",
+  "ING": "https://logo.clearbit.com/ing.com",
+  "DEUTSCHE BANK": "https://logo.clearbit.com/db.com",
+  "BANCA MARCH": "https://logo.clearbit.com/bancamarch.es",
+  EVO: "https://logo.clearbit.com/evobanco.com",
+  MYINVESTOR: "https://logo.clearbit.com/myinvestor.es",
+  CETELEM: "https://logo.clearbit.com/cetelem.es",
 };
 
 const COMPANY_ALIASES = {
@@ -4842,6 +4859,31 @@ const COMPANY_ALIASES = {
   "CATALANA OCCIDENTE": "CATALANA OCCIDENTE",
   "CATALANA OCCIDENT": "CATALANA OCCIDENTE",
   "CATALANA": "CATALANA OCCIDENTE",
+  "BANCO SANTANDER": "SANTANDER",
+  SANTANDER: "SANTANDER",
+  "BANCO BBVA": "BBVA",
+  BBVA: "BBVA",
+  CAIXABANK: "CAIXABANK",
+  "CAIXA BANK": "CAIXABANK",
+  "BANCO SABADELL": "SABADELL",
+  SABADELL: "SABADELL",
+  BANKINTER: "BANKINTER",
+  "UNICAJA BANCO": "UNICAJA",
+  UNICAJA: "UNICAJA",
+  ABANCA: "ABANCA",
+  "IBERCAJA BANCO": "IBERCAJA",
+  IBERCAJA: "IBERCAJA",
+  KUTXABANK: "KUTXABANK",
+  "CAJAMAR CAJA RURAL": "CAJAMAR",
+  CAJAMAR: "CAJAMAR",
+  OPENBANK: "OPENBANK",
+  "DEUTSCHE BANK ESPANA": "DEUTSCHE BANK",
+  "DEUTSCHE BANK": "DEUTSCHE BANK",
+  "BANCA MARCH": "BANCA MARCH",
+  "EVO BANCO": "EVO",
+  EVO: "EVO",
+  MYINVESTOR: "MYINVESTOR",
+  CETELEM: "CETELEM",
 };
 
 const normalizeCompanyName = (value) => {
@@ -4881,6 +4923,8 @@ const isCompanyColumn = (colName = "") => {
   return (
     lower.includes("compania") ||
     lower.includes("compañia") ||
+    lower.includes("entidad") ||
+    lower.includes("banco") ||
     lower.includes("aseguradora") ||
     lower.includes("asegurador")
   );
