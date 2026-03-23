@@ -999,12 +999,10 @@ def derive_hipoteca_financing(precio, importe_hipoteca):
     if precio_num is None or precio_num <= 0 or hipoteca_num is None:
         return None
     porcentaje = round((hipoteca_num * 100.0) / precio_num, 2)
-    entrada = round(precio_num - hipoteca_num, 2)
     return {
         "precio": round(precio_num, 2),
         "importe_hipoteca": round(hipoteca_num, 2),
         "porcentaje": porcentaje,
-        "entrada": entrada,
     }
 
 
@@ -11061,7 +11059,6 @@ class Handler(BaseHTTPRequestHandler):
                 updates["precio"] = financing_split["precio"]
                 updates["importe_hipoteca"] = financing_split["importe_hipoteca"]
                 updates["porcentaje"] = financing_split["porcentaje"]
-                updates["entrada"] = financing_split["entrada"]
             if "anio" not in updates:
                 fecha_ref = str(updates.get("fecha_firma") or updates.get("fecha_encargo") or "").strip()
                 if fecha_ref:
@@ -13277,7 +13274,7 @@ class Handler(BaseHTTPRequestHandler):
                         financing_split["precio"] if financing_split else precio,
                         financing_split["importe_hipoteca"] if financing_split else importe_hipoteca,
                         financing_split["porcentaje"] if financing_split else payload.get("porcentaje"),
-                        financing_split["entrada"] if financing_split else payload.get("entrada"),
+                        payload.get("entrada"),
                         payload.get("comision"),
                         payload.get("oficina"),
                         payload.get("fecha_encargo"),
@@ -13316,7 +13313,7 @@ class Handler(BaseHTTPRequestHandler):
                         financing_split["precio"] if financing_split else payload.get("precio"),
                         financing_split["importe_hipoteca"] if financing_split else payload.get("importe_hipoteca"),
                         financing_split["porcentaje"] if financing_split else payload.get("porcentaje"),
-                        financing_split["entrada"] if financing_split else payload.get("entrada"),
+                        payload.get("entrada"),
                         payload.get("comision"),
                         payload.get("oficina"),
                         payload.get("fecha_encargo"),

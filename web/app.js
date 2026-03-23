@@ -23930,7 +23930,6 @@ if (hipotecaForm) {
   const precioInput = hipotecaForm.querySelector("input[name='precio']");
   const hipotecaInput = hipotecaForm.querySelector("input[name='importe_hipoteca']");
   const porcentajeInput = hipotecaForm.querySelector("input[name='porcentaje']");
-  const entradaInput = hipotecaForm.querySelector("input[name='entrada']");
   const normalizeText = (value) =>
     String(value || "")
       .toLowerCase()
@@ -23980,9 +23979,6 @@ if (hipotecaForm) {
     if (precio !== null && precio > 0 && hipoteca !== null) {
       if (porcentajeInput) {
         porcentajeInput.value = ((hipoteca / precio) * 100).toFixed(2);
-      }
-      if (entradaInput) {
-        entradaInput.value = (precio - hipoteca).toFixed(2);
       }
     }
   };
