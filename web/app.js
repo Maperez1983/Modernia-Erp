@@ -8767,13 +8767,11 @@ const loadHipotecaBdt = (forceRefresh = false) => {
     return;
   }
   const params = new URLSearchParams({
-    tabla: "hipotecas",
     empresa_id: empresa.id,
     q,
-    include_id: "1",
     limit: "1000",
   });
-  api(`/api/tabla?${params.toString()}`)
+  api(`/api/hipoteca_bdt?${params.toString()}`)
     .then((data) => {
       const columns = data.columns || [];
       const rows = data.rows || [];

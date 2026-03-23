@@ -15961,6 +15961,53 @@ class Handler(BaseHTTPRequestHandler):
             )
             return
 
+        if path == "/api/hipoteca_bdt":
+            empresa_id = (params.get("empresa_id", [""])[0] or "").strip()
+            q = (params.get("q", [""])[0] or "").strip()
+            limit_raw = (params.get("limit", ["1000"])[0] or "1000").strip()
+            if not empresa_id:
+                json_response(self, {"error": "empresa_id requerido"}, status=400)
+                return
+            try:
+                limit = int(limit_raw)
+            except ValueError:
+                limit = 1000
+            limit = max(1, min(limit, 5000))
+
+            all_columns = [
+                r["name"] for r in conn.execute("PRAGMA table_info(hipotecas)").fetchall()
+            ]
+            hidden = {"empresa_id", "created_at", "updated_at"}
+            columns = [col for col in all_columns if col not in hidden]
+            if "id" in columns:
+                columns = ["id"] + [c for c in columns if c != "id"]
+            text_columns = [col for col in columns if col != "id"]
+
+            where = ["empresa_id = ?"]
+            values: List[object] = [empresa_id]
+            if q and text_columns:
+                likes = " OR ".join([f"{col} LIKE ?" for col in text_columns])
+                where.append(f"({likes})")
+                values.extend([f"%{q}%"] * len(text_columns))
+            elif q and not text_columns:
+                json_response(self, {"columns": columns, "rows": []})
+                return
+
+            select_cols = ", ".join(columns)
+            where_clause = " AND ".join(where)
+            rows = conn.execute(
+                f"""
+                SELECT {select_cols}
+                FROM hipotecas
+                WHERE {where_clause}
+                ORDER BY COALESCE(NULLIF(fecha_firma, ''), NULLIF(fecha_encargo, ''), updated_at, created_at) DESC
+                LIMIT {limit}
+                """,
+                values,
+            ).fetchall()
+            json_response(self, {"columns": columns, "rows": [list(r) for r in rows]})
+            return
+
         if path == "/api/fincas_stats":
             empresa_id = params.get("empresa_id", [""])[0]
             year = params.get("year", [""])[0]
