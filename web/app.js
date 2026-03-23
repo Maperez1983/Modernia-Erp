@@ -1858,6 +1858,12 @@ const aieSection = document.getElementById("aieSection");
 const aieForm = document.getElementById("aieForm");
 const aieFormStatus = document.getElementById("aieFormStatus");
 const hipotecaSection = document.getElementById("hipotecaSection");
+const hipotecaClienteForm = document.getElementById("hipotecaClienteForm");
+const hipotecaClienteFormStatus = document.getElementById("hipotecaClienteFormStatus");
+const hipotecaClienteTipoPersona = document.getElementById("hipotecaClienteTipoPersona");
+const hipotecaClientePersonaFields = hipotecaClienteForm
+  ? hipotecaClienteForm.querySelectorAll('[data-hipoteca-persona="fisica"]')
+  : [];
 const hipotecaForm = document.getElementById("hipotecaForm");
 const hipotecaFormStatus = document.getElementById("hipotecaFormStatus");
 const hipotecaTabs = document.getElementById("hipotecaTabs");
@@ -8534,6 +8540,17 @@ const updateClienteAltaPersona = () => {
   }
   const isJuridica = String(clienteTipoPersona.value || "").toLowerCase() === "jurídica";
   clienteAltaPersonaFields.forEach((field) => {
+    field.classList.toggle("hidden", isJuridica);
+  });
+};
+
+const updateHipotecaClientePersona = () => {
+  if (!hipotecaClienteTipoPersona || !hipotecaClientePersonaFields.length) {
+    return;
+  }
+  const isJuridica =
+    String(hipotecaClienteTipoPersona.value || "").toLowerCase() === "jurídica";
+  hipotecaClientePersonaFields.forEach((field) => {
     field.classList.toggle("hidden", isJuridica);
   });
 };
@@ -22931,6 +22948,11 @@ if (clienteTipoPersona) {
   updateClienteAltaPersona();
 }
 
+if (hipotecaClienteTipoPersona) {
+  hipotecaClienteTipoPersona.addEventListener("change", updateHipotecaClientePersona);
+  updateHipotecaClientePersona();
+}
+
 if (clientesLinkAdd) {
   clientesLinkAdd.addEventListener("click", () => {
     buildClientesLinkRow();
@@ -23109,6 +23131,103 @@ if (hipotecaBdtSearch) {
         loadHipotecaBdt();
       }
     }, 220);
+  });
+}
+
+if (hipotecaClienteForm) {
+  hipotecaClienteForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (hipotecaClienteFormStatus) {
+      hipotecaClienteFormStatus.textContent = "Guardando cliente...";
+    }
+    const formData = new FormData(hipotecaClienteForm);
+    const payload = Object.fromEntries(formData.entries());
+    const tipoPersona = payload.tipo_persona || "Física";
+    const nombreBase = String(payload.nombre || "").trim();
+    const apellido1 = String(payload.apellido1 || "").trim();
+    const apellido2 = String(payload.apellido2 || "").trim();
+
+    if (String(tipoPersona).toLowerCase() === "jurídica") {
+      if (!nombreBase) {
+        if (hipotecaClienteFormStatus) {
+          hipotecaClienteFormStatus.textContent = "Indica la razón social.";
+        }
+        return;
+      }
+    } else if (!apellido1 || !nombreBase) {
+      if (hipotecaClienteFormStatus) {
+        hipotecaClienteFormStatus.textContent = "Indica apellido 1 y nombre.";
+      }
+      return;
+    }
+
+    if (payload.nif) {
+      const nif = normalizeDocumento(payload.nif);
+      if (!isValidDocumento(nif)) {
+        if (hipotecaClienteFormStatus) {
+          hipotecaClienteFormStatus.textContent = "DNI/NIF/CIF no válido.";
+        }
+        return;
+      }
+      payload.nif = nif;
+    }
+
+    if (String(tipoPersona).toLowerCase() === "jurídica") {
+      payload.nombre = nombreBase;
+    } else {
+      const apellidos = [apellido1, apellido2].filter(Boolean).join(" ").trim();
+      payload.nombre =
+        apellidos || nombreBase
+          ? `${apellidos}${apellidos && nombreBase ? ", " : ""}${nombreBase}`.trim()
+          : "";
+    }
+    delete payload.apellido1;
+    delete payload.apellido2;
+
+    const newClienteId = randomId();
+    payload.id = newClienteId;
+
+    try {
+      const res = await fetch("/api/clientes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (data.error) {
+        if (hipotecaClienteFormStatus) {
+          hipotecaClienteFormStatus.textContent = data.error;
+        }
+        return;
+      }
+
+      const clienteId = data.id || newClienteId;
+      const empresaFin = state.empresas.find((e) => e.nombre === FIN_COMPANY);
+      if (empresaFin?.id) {
+        await postJsonWithDbRetry(
+          "/api/clientes_link",
+          {
+            cliente_id: clienteId,
+            empresa_id: empresaFin.id,
+            servicio: "Financiaciones",
+            estado: "Activo",
+            fecha_inicio: new Date().toISOString().slice(0, 10),
+          },
+          { retries: 1, delayMs: 120 }
+        );
+      }
+
+      if (hipotecaClienteFormStatus) {
+        hipotecaClienteFormStatus.textContent = "Cliente creado y vinculado a Financiaciones.";
+      }
+      hipotecaClienteForm.reset();
+      updateHipotecaClientePersona();
+      loadClientesCardStats().then(() => renderCompanyCards());
+    } catch (_) {
+      if (hipotecaClienteFormStatus) {
+        hipotecaClienteFormStatus.textContent = "Error al guardar cliente.";
+      }
+    }
   });
 }
 

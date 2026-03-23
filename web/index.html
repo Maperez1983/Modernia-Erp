@@ -2534,8 +2534,61 @@
             <div class="footer" id="hipotecaDashboardInfo"></div>
           </div>
           <div id="hipotecaAltaPanel" class="form-card hidden">
-            <h3>Alta · BDT Hipotecas</h3>
-            <p class="muted">Formulario de carga de clientes de hipoteca.</p>
+            <h3>Alta · Financiaciones</h3>
+            <p class="muted">Crea cliente y registra operación en BDT.</p>
+            <div class="form-card" style="margin: 14px 0 18px 0; padding: 14px;">
+              <h4 style="margin-bottom: 6px;">Crear cliente</h4>
+              <p class="muted" style="margin-bottom: 10px;">Alta rápida en Clientes y vínculo automático con Financiaciones.</p>
+              <form id="hipotecaClienteForm">
+                <div class="form-grid">
+                  <label>
+                    Tipo persona
+                    <select id="hipotecaClienteTipoPersona" name="tipo_persona">
+                      <option value="Física">Física</option>
+                      <option value="Jurídica">Jurídica</option>
+                    </select>
+                  </label>
+                  <label data-hipoteca-persona="fisica">
+                    Apellido 1
+                    <input name="apellido1" />
+                  </label>
+                  <label data-hipoteca-persona="fisica">
+                    Apellido 2
+                    <input name="apellido2" />
+                  </label>
+                  <label>
+                    Nombre / Razón social
+                    <input name="nombre" required />
+                  </label>
+                  <label>
+                    DNI/NIF/CIF
+                    <input name="nif" />
+                  </label>
+                  <label>
+                    Teléfono
+                    <input name="telefono" />
+                  </label>
+                  <label>
+                    Email
+                    <input name="email" type="email" />
+                  </label>
+                  <label>
+                    Población
+                    <input name="poblacion" />
+                  </label>
+                  <label>
+                    Provincia
+                    <input name="provincia" />
+                  </label>
+                </div>
+                <div class="form-actions">
+                  <button type="submit">Crear cliente</button>
+                  <span id="hipotecaClienteFormStatus" class="muted"></span>
+                </div>
+              </form>
+            </div>
+            <h4 style="margin-bottom: 6px;">Alta BDT Hipotecas</h4>
+            <p class="muted" style="margin-bottom: 10px;">Registro de operación hipotecaria.</p>
             <form id="hipotecaForm">
               <div class="form-grid">
                 <label>
