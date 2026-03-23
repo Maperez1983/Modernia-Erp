@@ -23975,9 +23975,9 @@ if (hipotecaForm) {
   };
 
   const updateFinanciacion = () => {
-    const precio = Number(precioInput?.value);
-    const hipoteca = Number(hipotecaInput?.value);
-    if (!Number.isNaN(precio) && precio > 0 && !Number.isNaN(hipoteca)) {
+    const precio = toNumber(precioInput?.value);
+    const hipoteca = toNumber(hipotecaInput?.value);
+    if (precio !== null && precio > 0 && hipoteca !== null) {
       if (porcentajeInput) {
         porcentajeInput.value = ((hipoteca / precio) * 100).toFixed(2);
       }
