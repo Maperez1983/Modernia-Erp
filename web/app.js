@@ -23236,21 +23236,23 @@ if (hipotecaForm) {
   const comisionJuanInput = hipotecaForm.querySelector("input[name='comision_juan']");
   const comisionModerniaInput = hipotecaForm.querySelector("input[name='comision_modernia']");
   const cesionInput = hipotecaForm.querySelector("input[name='cesion']");
+  const inmobiliariaCompraInput = hipotecaForm.querySelector("input[name='inmobiliaria_compra']");
   const oficinaInput = hipotecaForm.querySelector("input[name='oficina']");
   const precioInput = hipotecaForm.querySelector("input[name='precio']");
   const hipotecaInput = hipotecaForm.querySelector("input[name='importe_hipoteca']");
   const porcentajeInput = hipotecaForm.querySelector("input[name='porcentaje']");
   const entradaInput = hipotecaForm.querySelector("input[name='entrada']");
-  const groupOffices = new Set([
-    "malaga norte",
-    "málaga norte",
-    "malaga centro",
-    "málaga centro",
-    "malaga oeste",
-    "málaga oeste",
-    "malaga valle del guadalhorce",
-    "málaga valle del guadalhorce",
-  ]);
+  const isModerniaGroup = (value) => {
+    const v = normalizeText(value);
+    return (
+      v.includes("modernia oeste") ||
+      v.includes("modernia centro") ||
+      v.includes("modernia norte") ||
+      v.includes("modernia malaga oeste") ||
+      v.includes("modernia malaga centro") ||
+      v.includes("modernia malaga norte")
+    );
+  };
 
   const normalizeText = (value) =>
     String(value || "")
@@ -23268,8 +23270,8 @@ if (hipotecaForm) {
     if (comisionJuanInput) {
       comisionJuanInput.value = (total * 0.2).toFixed(2);
     }
-    const oficina = normalizeText(oficinaInput?.value || "");
-    const cesionRate = groupOffices.has(oficina) ? 0.25 : 0.2;
+    const inmobiliariaCompra = inmobiliariaCompraInput?.value || oficinaInput?.value || "";
+    const cesionRate = isModerniaGroup(inmobiliariaCompra) ? 0.25 : 0.2;
     if (cesionInput) {
       cesionInput.value = (total * cesionRate).toFixed(2);
     }
@@ -23299,6 +23301,10 @@ if (hipotecaForm) {
   }
   if (oficinaInput) {
     oficinaInput.addEventListener("input", updateCommissions);
+  }
+  if (inmobiliariaCompraInput) {
+    inmobiliariaCompraInput.addEventListener("input", updateCommissions);
+    inmobiliariaCompraInput.addEventListener("change", updateCommissions);
   }
   if (precioInput) {
     precioInput.addEventListener("input", updateFinanciacion);
