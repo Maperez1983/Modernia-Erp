@@ -17237,11 +17237,26 @@ class Handler(BaseHTTPRequestHandler):
             limit_clause = "LIMIT 200"
             if limit_param.isdigit():
                 limit_clause = f"LIMIT {int(limit_param)}"
+            order_clause = ""
+            if tabla == "hipotecas":
+                order_clause = (
+                    "ORDER BY COALESCE("
+                    "NULLIF(t.fecha_firma, ''), "
+                    "NULLIF(t.fecha_encargo, ''), "
+                    "t.updated_at, "
+                    "t.created_at"
+                    ") DESC"
+                )
+            elif "updated_at" in columns:
+                order_clause = "ORDER BY t.updated_at DESC"
+            elif "created_at" in columns:
+                order_clause = "ORDER BY t.created_at DESC"
             query = (
                 f"SELECT e.nombre AS empresa, {select_cols} "
                 f"FROM {tabla} t "
                 "LEFT JOIN empresas e ON e.id = t.empresa_id "
                 f"{where_clause} "
+                f"{order_clause} "
                 f"{limit_clause}"
             )
             rows = conn.execute(query, values).fetchall()
