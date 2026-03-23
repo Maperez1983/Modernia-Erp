@@ -8474,6 +8474,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/movimientos",
             "/api/hipotecas",
             "/api/hipotecas/firmar",
+            "/api/hipotecas_update",
             "/api/gestoria",
             "/api/gestoria_trabajos",
             "/api/gestoria_trabajos_update",
@@ -8700,6 +8701,7 @@ class Handler(BaseHTTPRequestHandler):
         empresa_nombre = payload.get("empresa_nombre")
         if parsed.path not in (
             "/api/hipotecas/firmar",
+            "/api/hipotecas_update",
             "/api/clientes",
             "/api/clientes_link",
             "/api/clientes_link_delete",
@@ -8818,6 +8820,7 @@ class Handler(BaseHTTPRequestHandler):
         empresa = None
         if parsed.path not in (
             "/api/hipotecas/firmar",
+            "/api/hipotecas_update",
             "/api/clientes",
             "/api/clientes_link",
             "/api/clientes_link_delete",
@@ -10947,6 +10950,63 @@ class Handler(BaseHTTPRequestHandler):
                 ("Convertido", now, record_id),
             )
             json_response(self, {"hipoteca_id": hipoteca_id})
+        elif parsed.path == "/api/hipotecas_update":
+            record_id = payload.get("id")
+            if not record_id:
+                json_response(self, {"error": "id requerido"}, status=400)
+                return
+            current_row = conn.execute("SELECT * FROM hipotecas WHERE id = ?", (record_id,)).fetchone()
+            if not current_row:
+                json_response(self, {"error": "Registro no encontrado"}, status=404)
+                return
+            aliases = {
+                "entidad": "banco",
+                "inmobiliaria": "inmobiliaria_compra",
+            }
+            allowed = (
+                "cliente",
+                "banco",
+                "precio",
+                "importe_hipoteca",
+                "porcentaje",
+                "entrada",
+                "comision",
+                "oficina",
+                "fecha_encargo",
+                "encargo",
+                "tipo_hipoteca",
+                "fecha_firma",
+                "cesion",
+                "comision_juan",
+                "comision_modernia",
+                "inmobiliaria_compra",
+                "asesor",
+                "estado",
+                "anio",
+            )
+            updates = {}
+            for key in allowed:
+                if key in payload:
+                    updates[key] = payload.get(key)
+            for alias, target in aliases.items():
+                if alias in payload:
+                    updates[target] = payload.get(alias)
+            if not updates:
+                json_response(self, {"error": "Sin cambios"}, status=400)
+                return
+            if "anio" not in updates:
+                fecha_ref = str(updates.get("fecha_firma") or updates.get("fecha_encargo") or "").strip()
+                if fecha_ref:
+                    try:
+                        updates["anio"] = int(fecha_ref.split("-")[0])
+                    except Exception:
+                        pass
+            set_clause = ", ".join([f"{key} = ?" for key in updates])
+            values = list(updates.values()) + [now, record_id]
+            conn.execute(
+                f"UPDATE hipotecas SET {set_clause}, updated_at = datetime(?) WHERE id = ?",
+                values,
+            )
         elif parsed.path == "/api/gestoria_update":
             record_id = payload.get("id")
             if not record_id:
@@ -15654,6 +15714,10 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
             current_year = conn.execute("SELECT strftime('%Y','now','localtime') AS y").fetchone()["y"]
+            year_expr = (
+                "COALESCE(NULLIF(TRIM(anio), ''), "
+                "strftime('%Y', COALESCE(NULLIF(fecha_firma, ''), NULLIF(fecha_encargo, ''), created_at)))"
+            )
 
             current = conn.execute(
                 """
@@ -15668,10 +15732,13 @@ class Handler(BaseHTTPRequestHandler):
                       ELSE NULL
                     END
                   ) AS porcentaje_medio,
-                  AVG(COALESCE(comision, 0)) AS comision_media
+                  AVG(COALESCE(comision, 0)) AS comision_media,
+                  SUM(COALESCE(comision, 0)) AS comision_total
                 FROM hipotecas
                 WHERE empresa_id = ?
-                  AND anio = ?
+                  AND """
+                + year_expr
+                + """ = ?
                   AND LOWER(TRIM(estado)) IN ('firmado', 'firmada', 'indemnización', 'indemnizacion')
                 """,
                 (empresa_id, current_year),
@@ -15691,31 +15758,51 @@ class Handler(BaseHTTPRequestHandler):
 
             series_totales = conn.execute(
                 """
-                SELECT anio AS year, COUNT(*) AS total
+                SELECT """
+                + year_expr
+                + """ AS year, COUNT(*) AS total
                 FROM hipotecas
                 WHERE empresa_id = ?
+                  AND """
+                + year_expr
+                + """ IS NOT NULL
                   AND LOWER(TRIM(estado)) IN ('firmado', 'firmada', 'indemnización', 'indemnizacion')
-                GROUP BY anio
-                ORDER BY anio
+                GROUP BY """
+                + year_expr
+                + """
+                ORDER BY """
+                + year_expr
+                + """
                 """,
                 (empresa_id,),
             ).fetchall()
 
             series_comision = conn.execute(
                 """
-                SELECT anio AS year, SUM(COALESCE(comision, 0)) AS total
+                SELECT """
+                + year_expr
+                + """ AS year, SUM(COALESCE(comision, 0)) AS total
                 FROM hipotecas
                 WHERE empresa_id = ?
+                  AND """
+                + year_expr
+                + """ IS NOT NULL
                   AND LOWER(TRIM(estado)) IN ('firmado', 'firmada', 'indemnización', 'indemnizacion')
-                GROUP BY anio
-                ORDER BY anio
+                GROUP BY """
+                + year_expr
+                + """
+                ORDER BY """
+                + year_expr
+                + """
                 """,
                 (empresa_id,),
             ).fetchall()
 
             series_porcentaje = conn.execute(
                 """
-                SELECT anio AS year,
+                SELECT """
+                + year_expr
+                + """ AS year,
                        AVG(
                          CASE
                            WHEN precio IS NOT NULL AND precio > 0 AND importe_hipoteca IS NOT NULL
@@ -15727,9 +15814,16 @@ class Handler(BaseHTTPRequestHandler):
                        ) AS total
                 FROM hipotecas
                 WHERE empresa_id = ?
+                  AND """
+                + year_expr
+                + """ IS NOT NULL
                   AND LOWER(TRIM(estado)) IN ('firmado', 'firmada', 'indemnización', 'indemnizacion')
-                GROUP BY anio
-                ORDER BY anio
+                GROUP BY """
+                + year_expr
+                + """
+                ORDER BY """
+                + year_expr
+                + """
                 """,
                 (empresa_id,),
             ).fetchall()
@@ -15770,6 +15864,7 @@ class Handler(BaseHTTPRequestHandler):
                         "total": current["total"] if current else 0,
                         "porcentaje_medio": current["porcentaje_medio"] if current else 0,
                         "comision_media": current["comision_media"] if current else 0,
+                        "comision_total": current["comision_total"] if current else 0,
                         "firmadas_mes": firmadas_mes["total"] if firmadas_mes else 0,
                     },
                     "series_totales": [dict(r) for r in series_totales],

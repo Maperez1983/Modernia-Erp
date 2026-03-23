@@ -1136,6 +1136,7 @@ const state = {
   hipotecaAltaView: "dashboard",
   clienteDocsTab: "seguros",
   segurosBdtCache: null,
+  hipotecaBdtCache: null,
   segurosRamosSource: null,
   segurosComisionesRows: null,
   segurosCrmData: null,
@@ -1872,6 +1873,9 @@ const hipotecaAltaPanel = document.getElementById("hipotecaAltaPanel");
 const hipotecaBdtPanel = document.getElementById("hipotecaBdtPanel");
 const hipotecaBdtSearch = document.getElementById("hipotecaBdtSearch");
 const hipotecaBdtRefresh = document.getElementById("hipotecaBdtRefresh");
+const hipotecaBdtVincularSelect = document.getElementById("hipotecaBdtVincularSelect");
+const hipotecaBdtVincularBtn = document.getElementById("hipotecaBdtVincularBtn");
+const hipotecaBdtVincularStatus = document.getElementById("hipotecaBdtVincularStatus");
 const hipotecaBdtTable = document.getElementById("hipotecaBdtTable");
 const hipotecaBdtInfo = document.getElementById("hipotecaBdtInfo");
 const hipotecaDashboardRefresh = document.getElementById("hipotecaDashboardRefresh");
@@ -1935,6 +1939,27 @@ const EDITABLE_FIELDS = {
   gestoria: {
     estado: { type: "select", options: ["Alta", "Baja"] },
     fecha_baja: { type: "date" },
+  },
+  hipotecas: {
+    cliente: { type: "text" },
+    banco: { type: "text" },
+    precio: { type: "money" },
+    importe_hipoteca: { type: "money" },
+    porcentaje: { type: "percent" },
+    entrada: { type: "money" },
+    comision: { type: "money" },
+    oficina: { type: "text" },
+    fecha_encargo: { type: "date" },
+    encargo: { type: "select", options: ["Sí", "No"] },
+    tipo_hipoteca: { type: "select", options: ["Compra", "Subrogación", "Novación", "Cambio", "Otro"] },
+    fecha_firma: { type: "date" },
+    cesion: { type: "money" },
+    comision_juan: { type: "money" },
+    comision_modernia: { type: "money" },
+    inmobiliaria_compra: { type: "text" },
+    asesor: { type: "text" },
+    estado: { type: "select", options: ["Pendiente", "Estudio", "Encargo", "Firmada", "Rechazada", "Cancelada"] },
+    anio: { type: "number" },
   },
 };
 
@@ -8648,7 +8673,72 @@ const updateEstudioAltaTabs = () => {
   });
 };
 
-const loadHipotecaBdt = () => {
+const getHipotecaFieldValue = (row, columns, candidates = []) => {
+  if (!Array.isArray(row) || !Array.isArray(columns)) return "";
+  const keys = Array.isArray(candidates) ? candidates : [candidates];
+  for (const key of keys) {
+    const idx = columns.indexOf(key);
+    if (idx >= 0) {
+      const value = row[idx];
+      if (value !== null && value !== undefined && String(value).trim() !== "") {
+        return String(value).trim();
+      }
+    }
+  }
+  return "";
+};
+
+const getHipotecaDisplayName = (row, columns) => {
+  const cliente = getHipotecaFieldValue(row, columns, [
+    "cliente",
+    "tomador",
+    "nombre_cliente",
+    "nombre",
+    "titular",
+  ]);
+  if (cliente) return cliente;
+  const id = getHipotecaFieldValue(row, columns, ["id"]);
+  return id ? `Hipoteca ${id.slice(0, 8)}` : "Hipoteca sin nombre";
+};
+
+const buildHipotecaOptionLabel = (row, columns) => {
+  const cliente = getHipotecaDisplayName(row, columns);
+  const entidad = getHipotecaFieldValue(row, columns, ["entidad", "banco", "entidad_financiera"]);
+  const fecha = getHipotecaFieldValue(row, columns, ["fecha_firma", "fecha", "fecha_entrada"]);
+  const pieces = [cliente];
+  if (entidad) pieces.push(entidad);
+  if (fecha) pieces.push(fecha);
+  return pieces.join(" · ");
+};
+
+const populateHipotecaVincularSelect = (rows = [], columns = []) => {
+  if (!hipotecaBdtVincularSelect) return;
+  const current = String(hipotecaBdtVincularSelect.value || "").trim();
+  hipotecaBdtVincularSelect.innerHTML = "";
+  const baseOption = document.createElement("option");
+  baseOption.value = "";
+  baseOption.textContent = "Seleccionar hipoteca…";
+  hipotecaBdtVincularSelect.appendChild(baseOption);
+  const idIndex = columns.indexOf("id");
+  if (idIndex < 0) {
+    hipotecaBdtVincularSelect.disabled = true;
+    return;
+  }
+  rows.forEach((row) => {
+    const id = String(row[idIndex] || "").trim();
+    if (!id) return;
+    const option = document.createElement("option");
+    option.value = id;
+    option.textContent = buildHipotecaOptionLabel(row, columns);
+    hipotecaBdtVincularSelect.appendChild(option);
+  });
+  hipotecaBdtVincularSelect.disabled = rows.length === 0;
+  if (current) {
+    hipotecaBdtVincularSelect.value = current;
+  }
+};
+
+const loadHipotecaBdt = (forceRefresh = false) => {
   if (!hipotecaBdtTable || !hipotecaBdtInfo) {
     return;
   }
@@ -8656,31 +8746,170 @@ const loadHipotecaBdt = () => {
   if (!empresa?.id) {
     hipotecaBdtTable.innerHTML = "<p class='muted'>Sin empresa de hipotecas configurada.</p>";
     hipotecaBdtInfo.textContent = "";
+    if (hipotecaBdtVincularStatus) hipotecaBdtVincularStatus.textContent = "";
+    populateHipotecaVincularSelect([], []);
     return;
   }
   const q = hipotecaBdtSearch ? hipotecaBdtSearch.value.trim() : "";
+  if (
+    !forceRefresh &&
+    state.hipotecaBdtCache &&
+    state.hipotecaBdtCache.empresaId === empresa.id &&
+    state.hipotecaBdtCache.q === q
+  ) {
+    const cached = state.hipotecaBdtCache.data || {};
+    const columns = cached.columns || [];
+    const rows = cached.rows || [];
+    renderTable(
+      { columns, rows },
+      { showActions: false, editableTable: "hipotecas", container: hipotecaBdtTable, infoEl: hipotecaBdtInfo }
+    );
+    const baseText = `Mostrando ${rows.length} filas de Hipotecas.`;
+    hipotecaBdtInfo.textContent = baseText;
+    hipotecaBdtInfo.dataset.baseText = baseText;
+    populateHipotecaVincularSelect(rows, columns);
+    return;
+  }
   const params = new URLSearchParams({
     tabla: "hipotecas",
     empresa_id: empresa.id,
     q,
+    include_id: "1",
+    limit: "1000",
   });
   api(`/api/tabla?${params.toString()}`)
     .then((data) => {
-      renderTableInto(
-        {
-          columns: data.columns || [],
-          rows: data.rows || [],
-        },
-        hipotecaBdtTable,
-        hipotecaBdtInfo,
-        "Hipotecas"
+      const columns = data.columns || [];
+      const rows = data.rows || [];
+      state.hipotecaBdtCache = {
+        empresaId: empresa.id,
+        q,
+        data: { columns, rows },
+        ts: Date.now(),
+      };
+      renderTable(
+        { columns, rows },
+        { showActions: false, editableTable: "hipotecas", container: hipotecaBdtTable, infoEl: hipotecaBdtInfo }
       );
+      const baseText = `Mostrando ${rows.length} filas de Hipotecas.`;
+      hipotecaBdtInfo.textContent = baseText;
+      hipotecaBdtInfo.dataset.baseText = baseText;
+      populateHipotecaVincularSelect(rows, columns);
     })
     .catch((error) => {
       const message = error?.data?.error || error?.message || "No se pudo cargar la BDT.";
       hipotecaBdtTable.innerHTML = `<p class='muted'>${message}</p>`;
       hipotecaBdtInfo.textContent = "";
+      if (hipotecaBdtVincularStatus) hipotecaBdtVincularStatus.textContent = message;
+      populateHipotecaVincularSelect([], []);
     });
+};
+
+const findHipotecaBdtRowById = (id) => {
+  const target = String(id || "").trim();
+  const cached = state.hipotecaBdtCache?.data || {};
+  const columns = cached.columns || [];
+  const rows = cached.rows || [];
+  if (!target || !Array.isArray(columns) || !Array.isArray(rows)) return null;
+  const idIndex = columns.indexOf("id");
+  if (idIndex < 0) return null;
+  const row = rows.find((item) => String(item[idIndex] || "").trim() === target);
+  if (!row) return null;
+  return { row, columns };
+};
+
+const linkFinanciacionServiceToCliente = async (clienteId, empresaId) => {
+  const payload = {
+    cliente_id: clienteId,
+    empresa_id: empresaId,
+    servicio: "Financiaciones",
+    estado: "Activo",
+    fecha_inicio: new Date().toISOString().slice(0, 10),
+  };
+  const data = await postJsonWithDbRetry("/api/clientes_link", payload, {
+    retries: 1,
+    delayMs: 120,
+  });
+  const errorText = String(data?.error || "").toLowerCase();
+  if (data?.error && !errorText.includes("existe") && !errorText.includes("ya")) {
+    throw new Error(data.error);
+  }
+  return data;
+};
+
+const createClienteForHipoteca = async (nombre, sourceRow, columns) => {
+  const payload = {
+    id: randomId(),
+    tipo_persona: "Física",
+    nombre: String(nombre || "").trim(),
+  };
+  const nif = getHipotecaFieldValue(sourceRow, columns, ["nif", "dni", "documento"]);
+  const telefono = getHipotecaFieldValue(sourceRow, columns, ["telefono", "movil", "teléfono"]);
+  const email = getHipotecaFieldValue(sourceRow, columns, ["email", "correo"]);
+  const direccion = getHipotecaFieldValue(sourceRow, columns, ["direccion", "dirección"]);
+  if (nif) payload.nif = normalizeDocumento(nif);
+  if (telefono) payload.telefono = telefono;
+  if (email) payload.email = email;
+  if (direccion) payload.direccion = direccion;
+  const response = await fetch("/api/clientes", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const data = await response.json();
+  if (data?.error) {
+    if (response.status === 409 && data.id) {
+      return data.id;
+    }
+    throw new Error(data.error);
+  }
+  return data?.id || payload.id;
+};
+
+const vincularHipotecaSeleccionada = async () => {
+  if (!hipotecaBdtVincularSelect || !hipotecaBdtVincularStatus) return;
+  const selectedId = String(hipotecaBdtVincularSelect.value || "").trim();
+  if (!selectedId) {
+    hipotecaBdtVincularStatus.textContent = "Selecciona una hipoteca para vincular.";
+    return;
+  }
+  const empresa = state.empresas.find((e) => e.nombre === FIN_COMPANY);
+  if (!empresa?.id) {
+    hipotecaBdtVincularStatus.textContent = "Empresa de Financiaciones no disponible.";
+    return;
+  }
+  const selected = findHipotecaBdtRowById(selectedId);
+  if (!selected) {
+    hipotecaBdtVincularStatus.textContent = "No se encuentra la hipoteca seleccionada.";
+    return;
+  }
+  const { row, columns } = selected;
+  const nombreCliente = getHipotecaDisplayName(row, columns);
+  if (!nombreCliente) {
+    hipotecaBdtVincularStatus.textContent = "No hay nombre de cliente para vincular.";
+    return;
+  }
+  hipotecaBdtVincularBtn?.setAttribute("disabled", "disabled");
+  hipotecaBdtVincularStatus.textContent = "Vinculando hipoteca con cliente...";
+  try {
+    const existing = await lookupClienteByNombre(nombreCliente);
+    let clienteId = existing?.id || "";
+    let wasNew = false;
+    if (!clienteId) {
+      clienteId = await createClienteForHipoteca(nombreCliente, row, columns);
+      wasNew = true;
+    }
+    await linkFinanciacionServiceToCliente(clienteId, empresa.id);
+    await refreshClientesSummary();
+    hipotecaBdtVincularStatus.textContent = wasNew
+      ? `Cliente creado y vinculado a Financiaciones: ${nombreCliente}`
+      : `Servicio Financiaciones vinculado al cliente: ${existing?.nombre || nombreCliente}`;
+  } catch (error) {
+    hipotecaBdtVincularStatus.textContent =
+      error?.message || "No se pudo completar la vinculación.";
+  } finally {
+    hipotecaBdtVincularBtn?.removeAttribute("disabled");
+  }
 };
 
 const loadHipotecaDashboard = () => {
@@ -8723,8 +8952,8 @@ const loadHipotecaDashboard = () => {
           note: "Financiación media",
         },
         {
-          title: "Comisión media",
-          value: euroFormatter.format(data?.current?.comision_media || 0),
+          title: "Comisión total",
+          value: euroFormatter.format(data?.current?.comision_total || 0),
           note: "Firmadas + Indemnización",
         },
       ];
@@ -9557,8 +9786,8 @@ const renderFinDashboard = (empresaId) => {
         note: "Financiación",
       },
       {
-        title: "Comisión media",
-        value: euroFormatter.format(data.current.comision_media || 0),
+        title: "Comisión total",
+        value: euroFormatter.format(data.current.comision_total || 0),
         note: "Firmadas + Indemnización",
       },
     ];
@@ -10172,17 +10401,23 @@ const loadFincasRenewalAlert = () => {
   });
 };
 
-const sendTableUpdate = (table, recordId, column, value) => {
+const sendTableUpdate = (table, recordId, column, value, statusEl = null) => {
   if (!recordId) {
     return Promise.resolve();
   }
-  const endpoint = table === "seguros" ? "/api/seguros_update" : "/api/gestoria_update";
-  if (tableInfo) {
-    tableInfo.textContent = "Actualizando...";
+  const endpointMap = {
+    seguros: "/api/seguros_update",
+    gestoria: "/api/gestoria_update",
+    hipotecas: "/api/hipotecas_update",
+  };
+  const endpoint = endpointMap[table] || "/api/gestoria_update";
+  const infoTarget = statusEl || tableInfo;
+  if (infoTarget) {
+    infoTarget.textContent = "Actualizando...";
   }
   const payload = {
     id: recordId,
-    empresa_nombre: FINCAS_COMPANY,
+    empresa_nombre: table === "hipotecas" ? FIN_COMPANY : FINCAS_COMPANY,
     [column]: value,
   };
   return fetch(endpoint, {
@@ -10193,24 +10428,24 @@ const sendTableUpdate = (table, recordId, column, value) => {
     .then((res) => res.json())
     .then((data) => {
       if (data.error) {
-        if (tableInfo) {
-          tableInfo.textContent = data.error;
+        if (infoTarget) {
+          infoTarget.textContent = data.error;
         }
         return;
       }
-      if (tableInfo) {
-        tableInfo.textContent = "Actualizado.";
-        const baseText = tableInfo.dataset.baseText;
+      if (infoTarget) {
+        infoTarget.textContent = "Actualizado.";
+        const baseText = infoTarget.dataset.baseText;
         if (baseText) {
           setTimeout(() => {
-            tableInfo.textContent = baseText;
+            infoTarget.textContent = baseText;
           }, 1200);
         }
       }
     })
     .catch(() => {
-      if (tableInfo) {
-        tableInfo.textContent = "Error al actualizar.";
+      if (infoTarget) {
+        infoTarget.textContent = "Error al actualizar.";
       }
     });
 };
@@ -10219,6 +10454,9 @@ const renderTable = (data, options = {}) => {
   const { columns, rows } = data;
   const showActions = options.showActions;
   const editableTable = options.editableTable;
+  const statusEl = options.infoEl || tableInfo;
+  const tableMount = options.container || tableContainer;
+  if (!tableMount) return;
   const editableFields = editableTable ? EDITABLE_FIELDS[editableTable] : null;
   const table = document.createElement("table");
   const thead = document.createElement("thead");
@@ -10266,15 +10504,38 @@ const renderTable = (data, options = {}) => {
           });
           select.value = cell ?? "";
           select.addEventListener("change", () => {
-            sendTableUpdate(editableTable, rowId, colName, select.value);
+            sendTableUpdate(editableTable, rowId, colName, select.value, statusEl);
           });
           td.appendChild(select);
         } else {
           const input = document.createElement("input");
-          input.type = config.type;
-          input.value = cell ?? "";
+          const isMoneyType = config.type === "money";
+          const isPercentType = config.type === "percent";
+          input.type = isMoneyType || isPercentType ? "text" : config.type;
+          if (isMoneyType) {
+            input.value = formatMoneyInputValue(cell ?? "");
+          } else if (isPercentType) {
+            const parsed = toNumber(cell);
+            input.value = parsed === null ? (cell ?? "") : String(parsed);
+          } else {
+            input.value = cell ?? "";
+          }
           input.addEventListener("change", () => {
-            sendTableUpdate(editableTable, rowId, colName, input.value);
+            if (isMoneyType) {
+              const parsed = toNumber(input.value);
+              const valueToSave = parsed === null ? "" : parsed;
+              sendTableUpdate(editableTable, rowId, colName, valueToSave, statusEl);
+              input.value = parsed === null ? "" : euroFormatter.format(parsed);
+              return;
+            }
+            if (isPercentType) {
+              const parsed = toNumber(input.value);
+              const valueToSave = parsed === null ? "" : parsed;
+              sendTableUpdate(editableTable, rowId, colName, valueToSave, statusEl);
+              input.value = parsed === null ? "" : String(parsed);
+              return;
+            }
+            sendTableUpdate(editableTable, rowId, colName, input.value, statusEl);
           });
           td.appendChild(input);
         }
@@ -10318,8 +10579,8 @@ const renderTable = (data, options = {}) => {
     tbody.appendChild(tr);
   });
   table.appendChild(tbody);
-  tableContainer.innerHTML = "";
-  tableContainer.appendChild(table);
+  tableMount.innerHTML = "";
+  tableMount.appendChild(table);
 };
 
 const getSegurosBdtSortValue = (colName, raw) => {
@@ -16305,6 +16566,63 @@ const getTableRowsByEmpresa = async (tabla, empresaId, q = "") => {
   };
 };
 
+const loadClienteHipotecasFicha = async (cliente = null, empresasActivas = []) => {
+  if (!clienteHipotecaFicha) return;
+  const clienteNombre = String(cliente?.nombre || "").trim();
+  if (!clienteNombre) {
+    clienteHipotecaFicha.innerHTML = "<p class='muted'>Sin nombre de cliente para buscar financiaciones.</p>";
+    return;
+  }
+  const empresaByName = new Map((state.empresas || []).map((item) => [item.nombre, item.id]));
+  let finEmpresaIds = (empresasActivas || [])
+    .filter((row) => normalizeSimple(row.servicio || "") === "financiaciones")
+    .map((row) => empresaByName.get(row.empresa))
+    .filter(Boolean);
+  if (!finEmpresaIds.length) {
+    const fin = (state.empresas || []).find((item) => item.nombre === FIN_COMPANY);
+    if (fin?.id) finEmpresaIds = [fin.id];
+  }
+  if (!finEmpresaIds.length) {
+    clienteHipotecaFicha.innerHTML = "<p class='muted'>Sin empresa de financiaciones configurada.</p>";
+    return;
+  }
+  try {
+    const groups = await Promise.all(
+      finEmpresaIds.map((empresaId) =>
+        getTableRowsByEmpresa("hipotecas", empresaId, clienteNombre).catch(() => ({ columns: [], rows: [] }))
+      )
+    );
+    const base = groups.find((item) => Array.isArray(item.columns) && item.columns.length) || { columns: [], rows: [] };
+    const columns = base.columns || [];
+    if (!columns.length) {
+      clienteHipotecaFicha.innerHTML = "<p class='muted'>Sin financiaciones vinculadas.</p>";
+      return;
+    }
+    const idIndex = columns.indexOf("id");
+    const clienteIdx = columns.indexOf("cliente");
+    const seen = new Set();
+    const clienteKey = normalizeSimple(clienteNombre);
+    const rows = groups
+      .flatMap((item) => item.rows || [])
+      .filter((row) => Array.isArray(row))
+      .filter((row) => {
+        const uniqueKey =
+          idIndex >= 0 ? String(row[idIndex] || "").trim() : JSON.stringify(row);
+        if (uniqueKey && seen.has(uniqueKey)) return false;
+        if (uniqueKey) seen.add(uniqueKey);
+        if (clienteIdx < 0) return true;
+        return normalizeSimple(String(row[clienteIdx] || "")).includes(clienteKey);
+      });
+    if (!rows.length) {
+      clienteHipotecaFicha.innerHTML = "<p class='muted'>Sin financiaciones vinculadas.</p>";
+      return;
+    }
+    renderTableInto({ columns, rows }, clienteHipotecaFicha, null, "Hipotecas");
+  } catch {
+    clienteHipotecaFicha.innerHTML = "<p class='muted'>No se pudo cargar la ficha de financiaciones.</p>";
+  }
+};
+
 const renderClienteMiniChart = (container, items = []) => {
   if (!container) return;
   if (!items.length) {
@@ -18491,7 +18809,9 @@ const openClienteDetail = (id) => {
       clienteInmoFicha.innerHTML = "<p class='muted'>Vista inmobiliaria en preparación para esta fase.</p>";
     }
     if (hasHipotecas && clienteHipotecaFicha) {
-      clienteHipotecaFicha.innerHTML = "<p class='muted'>Vista de financiaciones en preparación para esta fase.</p>";
+      loadClienteHipotecasFicha(cliente, empresasActivas);
+    } else if (clienteHipotecaFicha) {
+      clienteHipotecaFicha.innerHTML = "<p class='muted'>Sin financiaciones vinculadas.</p>";
     }
     const docsDefault = hasSeguros
       ? "seguros"
@@ -18564,10 +18884,12 @@ const loadTable = () => {
     currentTab === "bdt" &&
     selectedCompany === FIN_COMPANY &&
     tabla === "hipotecas";
-  const isFincasEditable =
+  const isEditableTable =
     currentTab === "bdt" &&
-    selectedCompany === FINCAS_COMPANY &&
-    (tabla === "seguros" || tabla === "gestoria");
+    (
+      (selectedCompany === FINCAS_COMPANY && (tabla === "seguros" || tabla === "gestoria")) ||
+      (selectedCompany === FIN_COMPANY && tabla === "hipotecas")
+    );
   const params = new URLSearchParams({
     tabla,
     empresa_id: empresaId,
@@ -18588,14 +18910,14 @@ const loadTable = () => {
   if (showActions) {
     params.set("include_id", "1");
   }
-  if (isFincasEditable) {
+  if (isEditableTable) {
     params.set("include_id", "1");
   }
   api(`/api/tabla?${params.toString()}`).then((data) => {
     if (state.currentModule !== requestModule || currentTab !== requestTab) {
       return;
     }
-    renderTable(data, { showActions, editableTable: isFincasEditable ? tabla : null });
+    renderTable(data, { showActions, editableTable: isEditableTable ? tabla : null });
     const baseText = `Mostrando ${data.rows.length} filas de ${TABLE_LABELS[tabla] || tabla}.`;
     tableInfo.textContent = baseText;
     tableInfo.dataset.baseText = baseText;
@@ -23156,7 +23478,7 @@ if (hipotecaTabs) {
 
 if (hipotecaBdtRefresh) {
   hipotecaBdtRefresh.addEventListener("click", () => {
-    loadHipotecaBdt();
+    loadHipotecaBdt(true);
   });
 }
 
@@ -23175,6 +23497,18 @@ if (hipotecaBdtSearch) {
         loadHipotecaBdt();
       }
     }, 220);
+  });
+}
+
+if (hipotecaBdtVincularBtn) {
+  hipotecaBdtVincularBtn.addEventListener("click", () => {
+    vincularHipotecaSeleccionada();
+  });
+}
+
+if (hipotecaBdtVincularSelect) {
+  hipotecaBdtVincularSelect.addEventListener("change", () => {
+    if (hipotecaBdtVincularStatus) hipotecaBdtVincularStatus.textContent = "";
   });
 }
 
@@ -23385,7 +23719,7 @@ if (hipotecaForm) {
         }
         hipotecaForm.reset();
         if ((state.hipotecaAltaView || "") === "bdt") {
-          loadHipotecaBdt();
+          loadHipotecaBdt(true);
         }
         if ((state.hipotecaAltaView || "") === "dashboard") {
           loadHipotecaDashboard();
