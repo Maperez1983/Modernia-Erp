@@ -1752,6 +1752,26 @@ body.crm-fin #companySummary {
   overflow: auto;
 }
 
+.hipoteca-bank-cell {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.hipoteca-bank-badge {
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #824c45;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
 .cliente-seguro-meta {
   display: grid;
   gap: 6px;

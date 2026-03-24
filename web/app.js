@@ -1873,6 +1873,7 @@ const hipotecaTabs = document.getElementById("hipotecaTabs");
 const hipotecaDashboardPanel = document.getElementById("hipotecaDashboardPanel");
 const hipotecaAltaPanel = document.getElementById("hipotecaAltaPanel");
 const hipotecaBdtPanel = document.getElementById("hipotecaBdtPanel");
+const hipotecaContabilidadPanel = document.getElementById("hipotecaContabilidadPanel");
 const hipotecaBdtSearch = document.getElementById("hipotecaBdtSearch");
 const hipotecaBdtRefresh = document.getElementById("hipotecaBdtRefresh");
 const hipotecaBdtVincularSelect = document.getElementById("hipotecaBdtVincularSelect");
@@ -1882,12 +1883,22 @@ const hipotecaBdtTable = document.getElementById("hipotecaBdtTable");
 const hipotecaBdtInfo = document.getElementById("hipotecaBdtInfo");
 const hipotecaDashboardRefresh = document.getElementById("hipotecaDashboardRefresh");
 const hipotecaDashboardKpis = document.getElementById("hipotecaDashboardKpis");
+const hipotecaDashboardYearSelect = document.getElementById("hipotecaDashboardYear");
+const hipotecaEntidadKpis = document.getElementById("hipotecaEntidadKpis");
 const hipotecaFirmadasChart = document.getElementById("hipotecaFirmadasChart");
 const hipotecaComisionChart = document.getElementById("hipotecaComisionChart");
 const hipotecaPorcentajeChart = document.getElementById("hipotecaPorcentajeChart");
 const hipotecaEntidadChart = document.getElementById("hipotecaEntidadChart");
 const hipotecaOficinaChart = document.getElementById("hipotecaOficinaChart");
 const hipotecaDashboardInfo = document.getElementById("hipotecaDashboardInfo");
+const hipotecaContabilidadForm = document.getElementById("hipotecaContabilidadForm");
+const hipotecaContabilidadHipoteca = document.getElementById("hipotecaContabilidadHipoteca");
+const hipotecaContabilidadSearch = document.getElementById("hipotecaContabilidadSearch");
+const hipotecaContabilidadRefresh = document.getElementById("hipotecaContabilidadRefresh");
+const hipotecaContabilidadStatus = document.getElementById("hipotecaContabilidadStatus");
+const hipotecaContabilidadSummary = document.getElementById("hipotecaContabilidadSummary");
+const hipotecaContabilidadTable = document.getElementById("hipotecaContabilidadTable");
+const hipotecaContabilidadInfo = document.getElementById("hipotecaContabilidadInfo");
 const finDashboardSection = document.getElementById("finDashboardSection");
 const finDashboardKpis = document.getElementById("finDashboardKpis");
 const finHipotecasChart = document.getElementById("finHipotecasChart");
@@ -9293,6 +9304,68 @@ const vincularHipotecaSeleccionada = async () => {
   }
 };
 
+const formatDaysMetric = (value) => {
+  const num = Number(value);
+  if (!Number.isFinite(num) || num <= 0) return "-";
+  return `${num.toFixed(1)} días`;
+};
+
+const hipotecaBankBadge = (label) => {
+  const raw = String(label || "").trim();
+  if (!raw) return "??";
+  return raw
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((token) => token.charAt(0))
+    .join("")
+    .toUpperCase();
+};
+
+const renderHipotecaEntityKpis = (rows = [], selectedYear = "") => {
+  if (!hipotecaEntidadKpis) return;
+  if (!rows.length) {
+    hipotecaEntidadKpis.innerHTML = "<p class='muted'>Sin entidades para este año.</p>";
+    return;
+  }
+  const table = document.createElement("table");
+  const thead = document.createElement("thead");
+  const trHead = document.createElement("tr");
+  ["Entidad", `Hipotecas ${selectedYear || ""}`.trim(), "Total", "Volumen", "Plazo medio", "Comisión"].forEach((label) => {
+    const th = document.createElement("th");
+    th.textContent = label;
+    trHead.appendChild(th);
+  });
+  thead.appendChild(trHead);
+  table.appendChild(thead);
+  const tbody = document.createElement("tbody");
+  rows.forEach((row) => {
+    const tr = document.createElement("tr");
+    const entityTd = document.createElement("td");
+    entityTd.innerHTML = `
+      <div class="hipoteca-bank-cell">
+        <span class="hipoteca-bank-badge">${hipotecaBankBadge(row.label)}</span>
+        <span>${row.label || "-"}</span>
+      </div>
+    `;
+    tr.appendChild(entityTd);
+    [
+      numberFormatter.format(Number(row.year_total || 0)),
+      numberFormatter.format(Number(row.total || 0)),
+      euroFormatter.format(Number(row.volumen_total || 0)),
+      formatDaysMetric(row.plazo_medio_dias),
+      euroFormatter.format(Number(row.comision_total || 0)),
+    ].forEach((value) => {
+      const td = document.createElement("td");
+      td.textContent = value;
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  hipotecaEntidadKpis.innerHTML = "";
+  hipotecaEntidadKpis.appendChild(table);
+};
+
 const loadHipotecaDashboard = () => {
   if (
     !hipotecaDashboardKpis ||
@@ -9313,29 +9386,66 @@ const loadHipotecaDashboard = () => {
   if (hipotecaDashboardInfo) {
     hipotecaDashboardInfo.textContent = "Cargando dashboard...";
   }
-  api(`/api/hipoteca_dashboard?empresa_id=${empresa.id}`)
+  const params = new URLSearchParams({ empresa_id: empresa.id });
+  if (hipotecaDashboardYearSelect?.value) {
+    params.set("year", hipotecaDashboardYearSelect.value);
+  }
+  api(`/api/hipoteca_dashboard?${params.toString()}`)
     .then((data) => {
       const currentYear = String(data?.current_year || new Date().getFullYear());
+      const years = Array.isArray(data?.available_years) ? data.available_years.map((item) => String(item)) : [];
+      if (hipotecaDashboardYearSelect) {
+        const nextValue = currentYear;
+        hipotecaDashboardYearSelect.innerHTML = "";
+        years.forEach((year) => {
+          hipotecaDashboardYearSelect.appendChild(createOption(year, year));
+        });
+        if (!years.length) {
+          hipotecaDashboardYearSelect.appendChild(createOption(currentYear, currentYear));
+        }
+        hipotecaDashboardYearSelect.value = nextValue;
+      }
+      const totals = data?.totals || {};
       const kpis = [
         {
           title: `Hipotecas ${currentYear}`,
           value: numberFormatter.format(data?.current?.total || 0),
-          note: "Firmadas + Indemnización",
+          note: `Totales: ${numberFormatter.format(totals?.total || 0)}`,
         },
         {
-          title: `Firmadas ${currentYear}`,
-          value: numberFormatter.format(data?.current?.firmadas_anio || 0),
-          note: "Solo firmadas",
+          title: `Volumen ${currentYear}`,
+          value: euroFormatter.format(data?.current?.volumen_total || 0),
+          note: `Total: ${euroFormatter.format(totals?.volumen_total || 0)}`,
+        },
+        {
+          title: `Plazo medio ${currentYear}`,
+          value: formatDaysMetric(data?.current?.plazo_medio_dias),
+          note: `Total: ${formatDaysMetric(totals?.plazo_medio_dias)}`,
+        },
+        {
+          title: `Comisión ${currentYear}`,
+          value: euroFormatter.format(data?.current?.comision_total || 0),
+          note: `Total: ${euroFormatter.format(totals?.comision_total || 0)}`,
+        },
+        {
+          title: `Ingresos ${currentYear}`,
+          value: euroFormatter.format(data?.current?.ingresos || 0),
+          note: `Total: ${euroFormatter.format(totals?.ingresos || 0)}`,
+        },
+        {
+          title: `Gastos ${currentYear}`,
+          value: euroFormatter.format(data?.current?.gastos || 0),
+          note: `Total: ${euroFormatter.format(totals?.gastos || 0)}`,
+        },
+        {
+          title: `Resultado ${currentYear}`,
+          value: euroFormatter.format(data?.current?.resultado || 0),
+          note: `Total: ${euroFormatter.format(totals?.resultado || 0)}`,
         },
         {
           title: "Porcentaje medio",
           value: formatPercent(data?.current?.porcentaje_medio),
-          note: "Financiación media",
-        },
-        {
-          title: "Comisión total",
-          value: euroFormatter.format(data?.current?.comision_total || 0),
-          note: "Firmadas + Indemnización",
+          note: `Total: ${formatPercent(totals?.porcentaje_medio)}`,
         },
       ];
       hipotecaDashboardKpis.innerHTML = "";
@@ -9349,15 +9459,16 @@ const loadHipotecaDashboard = () => {
         `;
         hipotecaDashboardKpis.appendChild(card);
       });
+      renderHipotecaEntityKpis(data?.entity_kpis || [], currentYear);
 
-      const years = buildYearIndex([data?.series_totales || []]);
+      const seriesYears = buildYearIndex([data?.series_totales || []]);
       drawBarChart(
         hipotecaFirmadasChart,
-        years,
+        seriesYears,
         [
           {
             label: "Hipotecas",
-            values: alignSeries(years, data?.series_totales || []),
+            values: alignSeries(seriesYears, data?.series_totales || []),
             color: "#824c45",
             format: (value) => numberFormatter.format(value),
           },
@@ -9365,14 +9476,14 @@ const loadHipotecaDashboard = () => {
         { legend: false, showValues: true, tooltip: true }
       );
 
-      const comisionYears = buildYearIndex([data?.series_comision || []]);
+      const volumenYears = buildYearIndex([data?.series_volumen || []]);
       drawBarChart(
         hipotecaComisionChart,
-        comisionYears,
+        volumenYears,
         [
           {
-            label: "Comisión",
-            values: alignSeries(comisionYears, data?.series_comision || []),
+            label: "Volumen",
+            values: alignSeries(volumenYears, data?.series_volumen || []),
             color: "#d7b04c",
             format: (value) => euroFormatter.format(value),
           },
@@ -9380,32 +9491,31 @@ const loadHipotecaDashboard = () => {
         { legend: false, showValues: true, tooltip: true }
       );
 
-      const pctYears = buildYearIndex([data?.series_porcentaje || []]);
+      const plazoYears = buildYearIndex([data?.series_plazo || []]);
       drawBarChart(
         hipotecaPorcentajeChart,
-        pctYears,
+        plazoYears,
         [
           {
-            label: "% financiación",
-            values: alignSeries(pctYears, data?.series_porcentaje || []),
+            label: "Días",
+            values: alignSeries(plazoYears, data?.series_plazo || []),
             color: "#3C6E71",
-            format: (value) => `${Number(value || 0).toFixed(1)}%`,
+            format: (value) => formatDaysMetric(value),
           },
         ],
         { legend: false, showValues: true, tooltip: true }
       );
 
-      const entidadLabels = (data?.series_entidades || []).map((item) => item.label);
-      const entidadValues = (data?.series_entidades || []).map((item) => Number(item.total || 0));
+      const comisionYears = buildYearIndex([data?.series_comision || []]);
       drawBarChart(
         hipotecaEntidadChart,
-        entidadLabels.length ? entidadLabels : ["Sin datos"],
+        comisionYears,
         [
           {
-            label: "Entidad",
-            values: entidadValues.length ? entidadValues : [0],
+            label: "Comisión",
+            values: alignSeries(comisionYears, data?.series_comision || []),
             color: "#7e8878",
-            format: (value) => numberFormatter.format(value),
+            format: (value) => euroFormatter.format(value),
           },
         ],
         { legend: false, showValues: true, tooltip: true }
@@ -9439,12 +9549,159 @@ const loadHipotecaDashboard = () => {
     });
 };
 
+const loadHipotecaContabilidadHipotecas = async () => {
+  if (!hipotecaContabilidadHipoteca) return [];
+  const empresa = state.empresas.find((e) => e.nombre === FIN_COMPANY);
+  if (!empresa?.id) return [];
+  const data = await api(`/api/hipoteca_bdt?empresa_id=${empresa.id}&limit=1000`);
+  const rows = data?.rows || [];
+  hipotecaContabilidadHipoteca.innerHTML = "";
+  hipotecaContabilidadHipoteca.appendChild(createOption("", "Selecciona hipoteca"));
+  rows.forEach((row) => {
+    const label = [row.cliente || "Sin cliente", row.banco || "-", row.fecha_firma || row.fecha_encargo || ""]
+      .filter(Boolean)
+      .join(" · ");
+    hipotecaContabilidadHipoteca.appendChild(createOption(row.id, label));
+  });
+  return rows;
+};
+
+const loadHipotecaContabilidad = () => {
+  if (!hipotecaContabilidadTable || !hipotecaContabilidadInfo) return;
+  const empresa = state.empresas.find((e) => e.nombre === FIN_COMPANY);
+  if (!empresa?.id) {
+    hipotecaContabilidadTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
+    hipotecaContabilidadInfo.textContent = "";
+    return;
+  }
+  const q = hipotecaContabilidadSearch ? hipotecaContabilidadSearch.value.trim() : "";
+  const params = new URLSearchParams({
+    empresa_id: empresa.id,
+    hipotecas_only: "1",
+    q,
+  });
+  api(`/api/gestoria_contabilidad?${params.toString()}`).then((data) => {
+    const rows = data?.rows || [];
+    let ingresos = 0;
+    let gastos = 0;
+    rows.forEach((row) => {
+      const amount = Number(row.importe || 0);
+      if (normalizeSimple(row.tipo) === "gasto") gastos += amount;
+      else ingresos += amount;
+    });
+    if (hipotecaContabilidadSummary) {
+      const items = [
+        { title: "Ingresos", value: euroFormatter.format(ingresos) },
+        { title: "Gastos", value: euroFormatter.format(gastos) },
+        { title: "Resultado", value: euroFormatter.format(ingresos - gastos) },
+      ];
+      hipotecaContabilidadSummary.innerHTML = "";
+      items.forEach((item) => {
+        const card = document.createElement("div");
+        card.className = "card";
+        card.innerHTML = `<h3>${item.title}</h3><div class="muted">${item.value}</div>`;
+        hipotecaContabilidadSummary.appendChild(card);
+      });
+    }
+    if (!rows.length) {
+      hipotecaContabilidadTable.innerHTML = "<p class='muted'>Sin apuntes contables de hipotecas.</p>";
+      hipotecaContabilidadInfo.textContent = "";
+      return;
+    }
+    const table = document.createElement("table");
+    const thead = document.createElement("thead");
+    const trHead = document.createElement("tr");
+    ["fecha", "cliente", "banco", "gestión", "tipo", "importe", "concepto", "notas", "acción"].forEach((label) => {
+      const th = document.createElement("th");
+      th.textContent = formatHeader(label);
+      trHead.appendChild(th);
+    });
+    thead.appendChild(trHead);
+    table.appendChild(thead);
+    const tbody = document.createElement("tbody");
+    rows.forEach((row) => {
+      const tr = document.createElement("tr");
+      const buildInput = (value, field, type = "text") => {
+        const input = document.createElement("input");
+        input.type = type;
+        input.value = value || "";
+        input.classList.add("inline-input");
+        input.addEventListener("change", () => {
+          saveGestoriaContabilidadField(row.id, field, input.value);
+        });
+        return input;
+      };
+      const buildSelect = (value, field, options) => {
+        const select = document.createElement("select");
+        select.classList.add("inline-input");
+        options.forEach((opt) => select.appendChild(createOption(opt, opt)));
+        select.value = value || options[0];
+        select.addEventListener("change", () => {
+          saveGestoriaContabilidadField(row.id, field, select.value);
+        });
+        return select;
+      };
+      const fechaTd = document.createElement("td");
+      fechaTd.appendChild(buildInput(row.fecha, "fecha", "date"));
+      tr.appendChild(fechaTd);
+      const clienteTd = document.createElement("td");
+      clienteTd.textContent = row.hipoteca_cliente || row.cliente || "-";
+      tr.appendChild(clienteTd);
+      const bancoTd = document.createElement("td");
+      bancoTd.textContent = row.hipoteca_banco || "-";
+      tr.appendChild(bancoTd);
+      const gestionTd = document.createElement("td");
+      gestionTd.appendChild(buildSelect(row.gestion, "gestion", [
+        "Comisión cliente",
+        "Cesión banco",
+        "Gestoría",
+        "Seguros y comisión Juan",
+        "Cesión a inmobiliarias",
+        "Nómina Juan",
+      ]));
+      tr.appendChild(gestionTd);
+      const tipoTd = document.createElement("td");
+      tipoTd.appendChild(buildSelect(row.tipo, "tipo", ["Ingreso", "Gasto"]));
+      tr.appendChild(tipoTd);
+      const importeTd = document.createElement("td");
+      const importeInput = buildInput(row.importe, "importe", "number");
+      importeInput.step = "0.01";
+      importeInput.min = "0";
+      importeTd.appendChild(importeInput);
+      tr.appendChild(importeTd);
+      const conceptoTd = document.createElement("td");
+      conceptoTd.appendChild(buildInput(row.concepto, "concepto"));
+      tr.appendChild(conceptoTd);
+      const notasTd = document.createElement("td");
+      notasTd.appendChild(buildInput(row.notas, "notas"));
+      tr.appendChild(notasTd);
+      const actionTd = document.createElement("td");
+      const delBtn = document.createElement("button");
+      delBtn.type = "button";
+      delBtn.textContent = "Eliminar";
+      delBtn.addEventListener("click", () => {
+        deleteGestoriaContabilidad(row.id);
+        setTimeout(() => loadHipotecaContabilidad(), 120);
+      });
+      actionTd.appendChild(delBtn);
+      tr.appendChild(actionTd);
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    hipotecaContabilidadTable.innerHTML = "";
+    hipotecaContabilidadTable.appendChild(table);
+    hipotecaContabilidadInfo.textContent = `Mostrando ${rows.length} asientos.`;
+  });
+};
+
 const setHipotecaAltaView = (view) => {
   if (!hipotecaSection || !hipotecaTabs) {
     return;
   }
   const next =
-    view === "alta" || view === "bdt" || view === "dashboard" ? view : "dashboard";
+    view === "alta" || view === "bdt" || view === "dashboard" || view === "contabilidad"
+      ? view
+      : "dashboard";
   state.hipotecaAltaView = next;
   if (hipotecaDashboardPanel) {
     hipotecaDashboardPanel.classList.toggle("hidden", next !== "dashboard");
@@ -9455,6 +9712,9 @@ const setHipotecaAltaView = (view) => {
   if (hipotecaBdtPanel) {
     hipotecaBdtPanel.classList.toggle("hidden", next !== "bdt");
   }
+  if (hipotecaContabilidadPanel) {
+    hipotecaContabilidadPanel.classList.toggle("hidden", next !== "contabilidad");
+  }
   hipotecaTabs.querySelectorAll(".tab").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.hipotecaSection === next);
   });
@@ -9463,6 +9723,10 @@ const setHipotecaAltaView = (view) => {
   }
   if (next === "bdt") {
     loadHipotecaBdt(true);
+  }
+  if (next === "contabilidad") {
+    loadHipotecaContabilidadHipotecas().catch(() => {});
+    loadHipotecaContabilidad();
   }
 };
 
@@ -24132,6 +24396,12 @@ if (hipotecaDashboardRefresh) {
   });
 }
 
+if (hipotecaDashboardYearSelect) {
+  hipotecaDashboardYearSelect.addEventListener("change", () => {
+    loadHipotecaDashboard();
+  });
+}
+
 if (hipotecaBdtSearch) {
   let hipotecaBdtSearchTimer = null;
   hipotecaBdtSearch.addEventListener("input", () => {
@@ -24153,6 +24423,84 @@ if (hipotecaBdtVincularBtn) {
 if (hipotecaBdtVincularSelect) {
   hipotecaBdtVincularSelect.addEventListener("change", () => {
     if (hipotecaBdtVincularStatus) hipotecaBdtVincularStatus.textContent = "";
+  });
+}
+
+if (hipotecaContabilidadRefresh) {
+  hipotecaContabilidadRefresh.addEventListener("click", () => {
+    loadHipotecaContabilidadHipotecas().catch(() => {});
+    loadHipotecaContabilidad();
+  });
+}
+
+if (hipotecaContabilidadSearch) {
+  let hipotecaContabilidadSearchTimer = null;
+  hipotecaContabilidadSearch.addEventListener("input", () => {
+    clearTimeout(hipotecaContabilidadSearchTimer);
+    hipotecaContabilidadSearchTimer = setTimeout(() => {
+      if ((state.hipotecaAltaView || "dashboard") === "contabilidad") {
+        loadHipotecaContabilidad();
+      }
+    }, 220);
+  });
+}
+
+if (hipotecaContabilidadHipoteca && hipotecaContabilidadForm) {
+  hipotecaContabilidadHipoteca.addEventListener("change", async () => {
+    const selected = hipotecaContabilidadHipoteca.selectedOptions?.[0];
+    const form = hipotecaContabilidadForm;
+    if (!form) return;
+    const conceptInput = form.querySelector('[name="concepto"]');
+    const dateInput = form.querySelector('[name="fecha"]');
+    if (!selected?.value) return;
+    if (conceptInput && !conceptInput.value) {
+      conceptInput.value = selected.textContent || "";
+    }
+    if (dateInput && !dateInput.value) {
+      const label = String(selected.textContent || "");
+      const match = label.match(/\b(\d{4}-\d{2}-\d{2})\b/);
+      if (match) {
+        dateInput.value = match[1];
+      }
+    }
+  });
+}
+
+if (hipotecaContabilidadForm) {
+  hipotecaContabilidadForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    if (hipotecaContabilidadStatus) {
+      hipotecaContabilidadStatus.textContent = "Guardando...";
+    }
+    const formData = new FormData(hipotecaContabilidadForm);
+    const payload = Object.fromEntries(formData.entries());
+    payload.empresa_nombre = FIN_COMPANY;
+    const rawNotas = String(payload.notas || "").trim();
+    if (!/^(\[HIPOTECAS\]|Auto CRM Hipotecas)/i.test(rawNotas)) {
+      payload.notas = rawNotas ? `[HIPOTECAS] ${rawNotas}` : "[HIPOTECAS]";
+    }
+    fetch("/api/gestoria_contabilidad", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (hipotecaContabilidadStatus) {
+          hipotecaContabilidadStatus.textContent = data.error || "Guardado.";
+        }
+        if (!data.error) {
+          hipotecaContabilidadForm.reset();
+          loadHipotecaContabilidadHipotecas().catch(() => {});
+          loadHipotecaContabilidad();
+          loadHipotecaDashboard();
+        }
+      })
+      .catch(() => {
+        if (hipotecaContabilidadStatus) {
+          hipotecaContabilidadStatus.textContent = "Error al guardar.";
+        }
+      });
   });
 }
 

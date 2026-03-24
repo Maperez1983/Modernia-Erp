@@ -2497,6 +2497,7 @@
             <button class="tab active" type="button" data-hipoteca-section="dashboard">Dashboard</button>
             <button class="tab" type="button" data-hipoteca-section="alta">Alta</button>
             <button class="tab" type="button" data-hipoteca-section="bdt">BDT</button>
+            <button class="tab" type="button" data-hipoteca-section="contabilidad">Contabilidad</button>
           </div>
           <div id="hipotecaDashboardPanel" class="form-card">
             <div class="dashboard-head">
@@ -2505,25 +2506,35 @@
                 <p class="muted">Resumen anual de hipotecas firmadas e indemnización.</p>
               </div>
               <div class="section-head-actions">
+                <select id="hipotecaDashboardYear" class="inline-input"></select>
                 <button type="button" id="hipotecaDashboardRefresh" class="secondary">Recargar</button>
               </div>
             </div>
             <div class="grid dashboard-kpis" id="hipotecaDashboardKpis"></div>
+            <div id="hipotecaDashboardEntities" class="form-card" style="margin-top: 14px;">
+              <div class="section-head">
+                <div>
+                  <h4>Entidades</h4>
+                  <p class="muted">Hipotecas y volumen por entidad.</p>
+                </div>
+              </div>
+              <div id="hipotecaEntidadKpis"></div>
+            </div>
             <div class="grid dashboard-charts">
               <div class="chart-card">
-                <h4>Hipotecas firmadas por año</h4>
+                <h4>Hipotecas cerradas por año</h4>
                 <canvas id="hipotecaFirmadasChart"></canvas>
               </div>
               <div class="chart-card">
-                <h4>Comisión total por año</h4>
+                <h4>Volumen tramitado por año</h4>
                 <canvas id="hipotecaComisionChart"></canvas>
               </div>
               <div class="chart-card">
-                <h4>% financiación media por año</h4>
+                <h4>Días medios hasta firma</h4>
                 <canvas id="hipotecaPorcentajeChart"></canvas>
               </div>
               <div class="chart-card">
-                <h4>Firmadas por entidad</h4>
+                <h4>Comisión total por año</h4>
                 <canvas id="hipotecaEntidadChart"></canvas>
               </div>
               <div class="chart-card">
@@ -2759,6 +2770,67 @@
             </div>
             <div id="hipotecaBdtTable"></div>
             <div class="footer" id="hipotecaBdtInfo"></div>
+          </div>
+          <div id="hipotecaContabilidadPanel" class="form-card hidden">
+            <div class="section-head">
+              <div>
+                <h3>Contabilidad · Hipotecas</h3>
+                <p class="muted">Ingresos y gastos vinculados a hipotecas firmadas e indemnización.</p>
+              </div>
+              <div class="crm-actions">
+                <input id="hipotecaContabilidadSearch" placeholder="Buscar apuntes..." />
+                <button type="button" id="hipotecaContabilidadRefresh" class="secondary">Actualizar</button>
+              </div>
+            </div>
+            <form id="hipotecaContabilidadForm" class="form-grid">
+              <label class="span-2">
+                Hipoteca
+                <select id="hipotecaContabilidadHipoteca" name="hipoteca_id">
+                  <option value="">Selecciona hipoteca</option>
+                </select>
+              </label>
+              <label>
+                Fecha
+                <input name="fecha" type="date" />
+              </label>
+              <label>
+                Gestión
+                <select name="gestion">
+                  <option>Comisión cliente</option>
+                  <option>Cesión banco</option>
+                  <option>Gestoría</option>
+                  <option>Seguros y comisión Juan</option>
+                  <option>Cesión a inmobiliarias</option>
+                  <option>Nómina Juan</option>
+                </select>
+              </label>
+              <label>
+                Tipo
+                <select name="tipo">
+                  <option>Ingreso</option>
+                  <option>Gasto</option>
+                </select>
+              </label>
+              <label>
+                Importe
+                <input name="importe" type="number" step="0.01" min="0" required />
+              </label>
+              <label class="span-2">
+                Concepto
+                <input name="concepto" placeholder="Concepto del apunte" />
+              </label>
+              <label class="span-2">
+                Notas
+                <textarea name="notas" rows="2"></textarea>
+              </label>
+              <div class="form-actions">
+                <button type="submit">Añadir apunte</button>
+                <span id="hipotecaContabilidadStatus" class="muted"></span>
+              </div>
+            </form>
+            <div id="hipotecaContabilidadSummary" class="grid dashboard-kpis" style="margin-top: 14px;"></div>
+            <div id="hipotecaContabilidadTable" style="margin-top: 12px;"></div>
+            <div class="footer" id="hipotecaContabilidadInfo"></div>
           </div>
         </div>
         <div id="finSimSection" class="hidden">

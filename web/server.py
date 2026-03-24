@@ -1004,6 +1004,243 @@ def derive_hipoteca_financing(precio, importe_hipoteca):
     }
 
 
+HIPOTECA_SIGNED_STATES = {"FIRMADA", "FIRMADO", "INDEMNIZACION", "INDEMNIZACIÓN"}
+HIPOTECA_ACCOUNTING_AUTO_NOTES_PREFIX = "Auto CRM Hipotecas"
+HIPOTECA_ACCOUNTING_GESTIONES = (
+    "Comisión cliente",
+    "Cesión banco",
+    "Gestoría",
+    "Seguros y comisión Juan",
+    "Cesión a inmobiliarias",
+    "Nómina Juan",
+)
+
+
+def hipoteca_estado_is_closed(value):
+    return normalize_lookup_text(value) in HIPOTECA_SIGNED_STATES
+
+
+def hipotecas_contabilidad_where_clause(alias="gc"):
+    p = alias.strip() or "gc"
+    return (
+        f"(({p}.hipoteca_id IS NOT NULL AND TRIM({p}.hipoteca_id) <> '') "
+        f"OR UPPER(COALESCE({p}.notas, '')) LIKE 'AUTO CRM HIPOTECAS%' "
+        f"OR UPPER(COALESCE({p}.notas, '')) LIKE '[HIPOTECAS]%' "
+        f"OR UPPER(TRIM(COALESCE({p}.gestion, ''))) IN ("
+        f"'COMISION CLIENTE', 'COMISIÓN CLIENTE', 'CESION BANCO', 'CESIÓN BANCO', "
+        f"'GESTORIA', 'GESTORÍA', 'SEGUROS Y COMISION JUAN', 'SEGUROS Y COMISIÓN JUAN', "
+        f"'CESION A INMOBILIARIAS', 'CESIÓN A INMOBILIARIAS', 'NOMINA JUAN', 'NÓMINA JUAN'))"
+    )
+
+
+def compute_hipotecas_contabilidad_totals(conn, empresa_id, year=None):
+    where = ["gc.empresa_id = ?", hipotecas_contabilidad_where_clause("gc")]
+    values = [empresa_id]
+    if year:
+        where.append("STRFTIME('%Y', gc.fecha) = ?")
+        values.append(str(year))
+    rows = conn.execute(
+        f"""
+        SELECT gc.tipo, gc.importe
+        FROM gestoria_contabilidad gc
+        WHERE {' AND '.join(where)}
+        """,
+        values,
+    ).fetchall()
+    ingresos = 0.0
+    gastos = 0.0
+    for row in rows:
+        amount = parse_money_value(row["importe"])
+        if normalize_lookup_text(row["tipo"]) == "GASTO":
+            gastos += amount
+        else:
+            ingresos += amount
+    return {
+        "ingresos": round(ingresos, 2),
+        "gastos": round(gastos, 2),
+        "resultado": round(ingresos - gastos, 2),
+    }
+
+
+def resolve_hipoteca_contabilidad_link(conn, hipoteca_id):
+    hipoteca_id = str(hipoteca_id or "").strip()
+    if not hipoteca_id:
+        return {"cliente": "", "banco": "", "fecha_firma": "", "cliente_id": None}
+    row = conn.execute(
+        "SELECT cliente, banco, fecha_firma FROM hipotecas WHERE id = ? LIMIT 1",
+        (hipoteca_id,),
+    ).fetchone()
+    if not row:
+        return {"cliente": "", "banco": "", "fecha_firma": "", "cliente_id": None}
+    cliente_nombre = str(row["cliente"] or "").strip()
+    cliente_id = None
+    if cliente_nombre:
+        cliente_row = conn.execute(
+            "SELECT id FROM clientes WHERE UPPER(COALESCE(nombre, '')) = UPPER(?) ORDER BY created_at DESC LIMIT 1",
+            (cliente_nombre,),
+        ).fetchone()
+        if cliente_row:
+            cliente_id = cliente_row["id"]
+    return {
+        "cliente": cliente_nombre,
+        "banco": str(row["banco"] or "").strip(),
+        "fecha_firma": str(row["fecha_firma"] or "").strip(),
+        "cliente_id": cliente_id,
+    }
+
+
+def derive_hipoteca_inmobiliaria_cost(row):
+    total = parse_money_value((row.get("comision") if isinstance(row, dict) else row["comision"]) or 0)
+    juan = parse_money_value((row.get("comision_juan") if isinstance(row, dict) else row["comision_juan"]) or 0)
+    modernia = parse_money_value((row.get("comision_modernia") if isinstance(row, dict) else row["comision_modernia"]) or 0)
+    explicit = parse_money_value((row.get("cesion") if isinstance(row, dict) else row["cesion"]) or 0)
+    derived = round(total - juan - modernia, 2)
+    if derived > 0.005:
+        return derived
+    if explicit > 0.005:
+        return round(explicit, 2)
+    return 0.0
+
+
+def build_hipoteca_accounting_entries(row):
+    fecha_raw = (row.get("fecha_firma") if isinstance(row, dict) else row["fecha_firma"]) or ""
+    fecha = parse_iso_date(fecha_raw)
+    if not fecha or not hipoteca_estado_is_closed((row.get("estado") if isinstance(row, dict) else row["estado"]) or ""):
+        return []
+    cliente = str((row.get("cliente") if isinstance(row, dict) else row["cliente"]) or "").strip() or "Hipoteca"
+    banco = str((row.get("banco") if isinstance(row, dict) else row["banco"]) or "").strip()
+    suffix = f"{cliente}"
+    if banco:
+        suffix = f"{cliente} · {banco}"
+    entries = []
+
+    def add_entry(gestion, tipo, importe, concepto):
+        amount = round(parse_money_value(importe), 2)
+        if abs(amount) < 0.005:
+            return
+        entries.append(
+            {
+                "gestion": gestion,
+                "tipo": tipo,
+                "importe": amount,
+                "concepto": f"{concepto} · {suffix}",
+                "fecha": fecha.isoformat(),
+            }
+        )
+
+    total_comision = (row.get("comision") if isinstance(row, dict) else row["comision"]) or 0
+    cesion_banco = (row.get("cesion") if isinstance(row, dict) else row["cesion"]) or 0
+    gasto_juan = (row.get("comision_juan") if isinstance(row, dict) else row["comision_juan"]) or 0
+    gasto_inmobiliaria = derive_hipoteca_inmobiliaria_cost(row)
+
+    add_entry("Comisión cliente", "Ingreso", total_comision, "Comisión cliente")
+    add_entry("Cesión banco", "Ingreso", cesion_banco, "Cesión banco")
+    add_entry("Seguros y comisión Juan", "Gasto", gasto_juan, "Seguros y comisión Juan")
+    add_entry("Cesión a inmobiliarias", "Gasto", gasto_inmobiliaria, "Cesión a inmobiliarias")
+    return entries
+
+
+def sync_hipotecas_contabilidad_entries(conn, empresa_id, now=None):
+    now = now or datetime.now(timezone.utc).isoformat()
+    rows = conn.execute(
+        """
+        SELECT *
+        FROM hipotecas
+        WHERE empresa_id = ?
+        """,
+        (empresa_id,),
+    ).fetchall()
+    expected = {}
+    for raw in rows:
+        row = dict(raw)
+        hipoteca_id = str(row.get("id") or "").strip()
+        if not hipoteca_id:
+            continue
+        entries = build_hipoteca_accounting_entries(row)
+        expected[hipoteca_id] = {item["gestion"] for item in entries}
+        link = resolve_hipoteca_contabilidad_link(conn, hipoteca_id)
+        cliente_id = link.get("cliente_id")
+        cliente_ids_json = json.dumps([cliente_id], ensure_ascii=False) if cliente_id else None
+        for item in entries:
+            existing = conn.execute(
+                """
+                SELECT id
+                FROM gestoria_contabilidad
+                WHERE hipoteca_id = ?
+                  AND fecha = ?
+                  AND LOWER(COALESCE(gestion, '')) = LOWER(?)
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                (hipoteca_id, item["fecha"], item["gestion"]),
+            ).fetchone()
+            notes = f"{HIPOTECA_ACCOUNTING_AUTO_NOTES_PREFIX} · {item['gestion'].lower()}."
+            if existing:
+                conn.execute(
+                    """
+                    UPDATE gestoria_contabilidad
+                    SET empresa_id = ?, cliente_id = ?, cliente_ids_json = ?, hipoteca_id = ?, concepto = ?, gestion = ?, tipo = ?,
+                        importe = ?, notas = ?, updated_at = datetime(?)
+                    WHERE id = ?
+                    """,
+                    (
+                        empresa_id,
+                        cliente_id,
+                        cliente_ids_json,
+                        hipoteca_id,
+                        item["concepto"],
+                        item["gestion"],
+                        item["tipo"],
+                        item["importe"],
+                        notes,
+                        now,
+                        existing["id"],
+                    ),
+                )
+            else:
+                conn.execute(
+                    """
+                    INSERT INTO gestoria_contabilidad (
+                      id, empresa_id, cliente_id, cliente_ids_json, hipoteca_id, fecha, concepto, gestion, tipo, importe, notas,
+                      created_at, updated_at
+                    ) VALUES (
+                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                    )
+                    """,
+                    (
+                        os.urandom(16).hex(),
+                        empresa_id,
+                        cliente_id,
+                        cliente_ids_json,
+                        hipoteca_id,
+                        item["fecha"],
+                        item["concepto"],
+                        item["gestion"],
+                        item["tipo"],
+                        item["importe"],
+                        notes,
+                        now,
+                        now,
+                    ),
+                )
+    existing_rows = conn.execute(
+        """
+        SELECT id, hipoteca_id, gestion
+        FROM gestoria_contabilidad
+        WHERE empresa_id = ?
+          AND hipoteca_id IS NOT NULL
+          AND TRIM(hipoteca_id) <> ''
+          AND UPPER(COALESCE(notas, '')) LIKE 'AUTO CRM HIPOTECAS%'
+        """,
+        (empresa_id,),
+    ).fetchall()
+    for row in existing_rows:
+        hipoteca_id = str(row["hipoteca_id"] or "").strip()
+        gestion = str(row["gestion"] or "").strip()
+        if hipoteca_id not in expected or gestion not in expected.get(hipoteca_id, set()):
+            conn.execute("DELETE FROM gestoria_contabilidad WHERE id = ?", (row["id"],))
+
+
 def delete_hipoteca_record(conn, record_id):
     if not record_id:
         return False
@@ -7739,6 +7976,7 @@ def ensure_tables(db_path):
           cliente_id TEXT,
           cliente_ids_json TEXT,
           seguro_id TEXT,
+          hipoteca_id TEXT,
           poliza_numero TEXT,
           fecha TEXT,
           concepto TEXT,
@@ -8165,6 +8403,8 @@ def ensure_tables(db_path):
         conn.execute("ALTER TABLE gestoria_contabilidad ADD COLUMN gestion TEXT")
     if "seguro_id" not in conta_cols:
         conn.execute("ALTER TABLE gestoria_contabilidad ADD COLUMN seguro_id TEXT")
+    if "hipoteca_id" not in conta_cols:
+        conn.execute("ALTER TABLE gestoria_contabilidad ADD COLUMN hipoteca_id TEXT")
     if "poliza_numero" not in conta_cols:
         conn.execute("ALTER TABLE gestoria_contabilidad ADD COLUMN poliza_numero TEXT")
     if "cliente_ids_json" not in conta_cols:
@@ -9526,6 +9766,7 @@ class Handler(BaseHTTPRequestHandler):
             conn.execute("DELETE FROM usuarios WHERE id = ?", (user_id,))
         elif parsed.path == "/api/gestoria_contabilidad":
             seguro_id = (payload.get("seguro_id") or "").strip()
+            hipoteca_id = (payload.get("hipoteca_id") or "").strip()
             poliza_numero = ""
             cliente_ids = parse_cliente_ids_payload(payload.get("cliente_ids_json"))
             if not cliente_ids:
@@ -9536,14 +9777,19 @@ class Handler(BaseHTTPRequestHandler):
                 if cliente_seguro_id and not cliente_ids:
                     cliente_ids = [cliente_seguro_id]
                     cliente_id = cliente_seguro_id
+            if hipoteca_id:
+                hipoteca_link = resolve_hipoteca_contabilidad_link(conn, hipoteca_id)
+                if hipoteca_link.get("cliente_id") and not cliente_ids:
+                    cliente_ids = [hipoteca_link["cliente_id"]]
+                    cliente_id = hipoteca_link["cliente_id"]
             cliente_ids_json = json.dumps(cliente_ids, ensure_ascii=False) if cliente_ids else None
             conn.execute(
                 """
                 INSERT INTO gestoria_contabilidad (
-                  id, empresa_id, cliente_id, cliente_ids_json, seguro_id, poliza_numero, fecha, concepto, gestion, tipo, importe, notas,
+                  id, empresa_id, cliente_id, cliente_ids_json, seguro_id, hipoteca_id, poliza_numero, fecha, concepto, gestion, tipo, importe, notas,
                   created_at, updated_at
                 ) VALUES (
-                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
                 )
                 """,
                 (
@@ -9552,6 +9798,7 @@ class Handler(BaseHTTPRequestHandler):
                     cliente_id,
                     cliente_ids_json,
                     seguro_id or None,
+                    hipoteca_id or None,
                     poliza_numero,
                     payload.get("fecha"),
                     payload.get("concepto"),
@@ -9578,13 +9825,14 @@ class Handler(BaseHTTPRequestHandler):
                 "cliente_id",
                 "cliente_ids_json",
                 "seguro_id",
+                "hipoteca_id",
             )
             updates = []
             values = []
             cliente_ids = None
             for field in allowed:
                 if field in payload:
-                    if field == "seguro_id":
+                    if field in {"seguro_id", "hipoteca_id"}:
                         updates.append(f"{field} = ?")
                         values.append((payload.get(field) or "").strip() or None)
                     elif field == "cliente_id":
@@ -9616,6 +9864,16 @@ class Handler(BaseHTTPRequestHandler):
                     values.append(json.dumps(cliente_ids, ensure_ascii=False))
                     updates.append("cliente_id = ?")
                     values.append(cliente_seguro_id)
+            if "hipoteca_id" in payload:
+                hipoteca_id = (payload.get("hipoteca_id") or "").strip()
+                if hipoteca_id:
+                    hipoteca_link = resolve_hipoteca_contabilidad_link(conn, hipoteca_id)
+                    if hipoteca_link.get("cliente_id") and not cliente_ids:
+                        cliente_ids = [hipoteca_link["cliente_id"]]
+                        updates.append("cliente_ids_json = ?")
+                        values.append(json.dumps(cliente_ids, ensure_ascii=False))
+                        updates.append("cliente_id = ?")
+                        values.append(hipoteca_link["cliente_id"])
             if not updates:
                 json_response(self, {"error": "sin cambios"}, status=400)
                 return
@@ -14777,23 +15035,34 @@ class Handler(BaseHTTPRequestHandler):
                 return
             q = params.get("q", [""])[0].strip()
             seguros_only = (params.get("seguros_only", ["0"])[0] or "0").strip() in ("1", "true", "yes")
+            hipotecas_only = (params.get("hipotecas_only", ["0"])[0] or "0").strip() in ("1", "true", "yes")
+            if hipotecas_only:
+                sync_hipotecas_contabilidad_entries(conn, empresa_id)
+                conn.commit()
             where = ["gc.empresa_id = ?"]
             values = [empresa_id]
             if seguros_only:
                 where.append(seguros_contabilidad_where_clause("gc"))
+            if hipotecas_only:
+                where.append(hipotecas_contabilidad_where_clause("gc"))
             if q:
-                where.append("(gc.concepto LIKE ? OR c.nombre LIKE ?)")
-                values.extend([f"%{q}%", f"%{q}%"])
+                where.append("(gc.concepto LIKE ? OR c.nombre LIKE ? OR h.cliente LIKE ? OR h.banco LIKE ?)")
+                values.extend([f"%{q}%", f"%{q}%", f"%{q}%", f"%{q}%"])
             where_clause = " AND ".join(where)
             rows = conn.execute(
                 f"""
                 SELECT gc.id, gc.fecha, gc.concepto, gc.gestion, gc.tipo, gc.importe, gc.notas,
-                       gc.cliente_id, gc.cliente_ids_json, gc.seguro_id, s.cliente_id AS seguro_cliente_id,
+                       gc.cliente_id, gc.cliente_ids_json, gc.seguro_id, gc.hipoteca_id, s.cliente_id AS seguro_cliente_id,
                        COALESCE(NULLIF(gc.poliza_numero, ''), s.poliza_numero, '') AS poliza_numero,
-                       COALESCE(c.nombre, '') AS cliente
+                       COALESCE(c.nombre, h.cliente, '') AS cliente,
+                       COALESCE(h.cliente, '') AS hipoteca_cliente,
+                       COALESCE(h.banco, '') AS hipoteca_banco,
+                       COALESCE(h.estado, '') AS hipoteca_estado,
+                       COALESCE(h.fecha_firma, '') AS hipoteca_fecha_firma
                 FROM gestoria_contabilidad gc
                 LEFT JOIN clientes c ON c.id = gc.cliente_id
                 LEFT JOIN seguros s ON s.id = gc.seguro_id
+                LEFT JOIN hipotecas h ON h.id = gc.hipoteca_id
                 WHERE {where_clause}
                 ORDER BY gc.fecha DESC
                 LIMIT 300
@@ -15888,11 +16157,21 @@ class Handler(BaseHTTPRequestHandler):
             if not empresa_id:
                 json_response(self, {"error": "empresa_id requerido"}, status=400)
                 return
+            sync_hipotecas_contabilidad_entries(conn, empresa_id)
+            conn.commit()
 
             current_year = conn.execute("SELECT strftime('%Y','now','localtime') AS y").fetchone()["y"]
             year_expr = (
                 "COALESCE(NULLIF(TRIM(anio), ''), "
                 "strftime('%Y', COALESCE(NULLIF(fecha_firma, ''), NULLIF(fecha_encargo, ''), created_at)))"
+            )
+            duration_expr = (
+                "CASE "
+                "WHEN fecha_encargo IS NOT NULL AND TRIM(fecha_encargo) <> '' "
+                " AND fecha_firma IS NOT NULL AND TRIM(fecha_firma) <> '' "
+                " AND julianday(fecha_firma) IS NOT NULL AND julianday(fecha_encargo) IS NOT NULL "
+                "THEN julianday(fecha_firma) - julianday(fecha_encargo) "
+                "ELSE NULL END"
             )
 
             available_years = conn.execute(
@@ -15934,7 +16213,11 @@ class Handler(BaseHTTPRequestHandler):
                     END
                   ) AS porcentaje_medio,
                   AVG(COALESCE(comision, 0)) AS comision_media,
-                  SUM(COALESCE(comision, 0)) AS comision_total
+                  SUM(COALESCE(comision, 0)) AS comision_total,
+                  SUM(COALESCE(importe_hipoteca, 0)) AS volumen_total,
+                  AVG("""
+                + duration_expr
+                + """) AS plazo_medio_dias
                 FROM hipotecas
                 WHERE empresa_id = ?
                   AND """
@@ -15943,6 +16226,32 @@ class Handler(BaseHTTPRequestHandler):
                   AND LOWER(TRIM(estado)) IN ('firmado', 'firmada', 'indemnización', 'indemnizacion')
                 """,
                 (empresa_id, selected_year),
+            ).fetchone()
+
+            totals = conn.execute(
+                """
+                SELECT
+                  COUNT(*) AS total,
+                  AVG(
+                    CASE
+                      WHEN precio IS NOT NULL AND precio > 0 AND importe_hipoteca IS NOT NULL
+                        THEN (importe_hipoteca * 100.0 / precio)
+                      WHEN porcentaje IS NOT NULL AND porcentaje > 0 AND porcentaje <= 1 THEN porcentaje * 100.0
+                      WHEN porcentaje IS NOT NULL AND porcentaje > 1 THEN porcentaje
+                      ELSE NULL
+                    END
+                  ) AS porcentaje_medio,
+                  AVG(COALESCE(comision, 0)) AS comision_media,
+                  SUM(COALESCE(comision, 0)) AS comision_total,
+                  SUM(COALESCE(importe_hipoteca, 0)) AS volumen_total,
+                  AVG("""
+                + duration_expr
+                + """) AS plazo_medio_dias
+                FROM hipotecas
+                WHERE empresa_id = ?
+                  AND LOWER(TRIM(estado)) IN ('firmado', 'firmada', 'indemnización', 'indemnizacion')
+                """,
+                (empresa_id,),
             ).fetchone()
 
             firmadas_anio = conn.execute(
@@ -15971,6 +16280,50 @@ class Handler(BaseHTTPRequestHandler):
             ).fetchone()
 
             series_totales = available_years
+
+            series_volumen = conn.execute(
+                """
+                SELECT """
+                + year_expr
+                + """ AS year, SUM(COALESCE(importe_hipoteca, 0)) AS total
+                FROM hipotecas
+                WHERE empresa_id = ?
+                  AND """
+                + year_expr
+                + """ IS NOT NULL
+                  AND LOWER(TRIM(estado)) IN ('firmado', 'firmada', 'indemnización', 'indemnizacion')
+                GROUP BY """
+                + year_expr
+                + """
+                ORDER BY """
+                + year_expr
+                + """
+                """,
+                (empresa_id,),
+            ).fetchall()
+
+            series_plazo = conn.execute(
+                """
+                SELECT """
+                + year_expr
+                + """ AS year, AVG("""
+                + duration_expr
+                + """) AS total
+                FROM hipotecas
+                WHERE empresa_id = ?
+                  AND """
+                + year_expr
+                + """ IS NOT NULL
+                  AND LOWER(TRIM(estado)) IN ('firmado', 'firmada', 'indemnización', 'indemnizacion')
+                GROUP BY """
+                + year_expr
+                + """
+                ORDER BY """
+                + year_expr
+                + """
+                """,
+                (empresa_id,),
+            ).fetchall()
 
             series_comision = conn.execute(
                 """
@@ -16023,7 +16376,7 @@ class Handler(BaseHTTPRequestHandler):
                 (empresa_id,),
             ).fetchall()
 
-            series_entidades = conn.execute(
+            entity_total_rows = conn.execute(
                 """
                 SELECT banco AS label, COUNT(*) AS total
                 FROM hipotecas
@@ -16037,6 +16390,58 @@ class Handler(BaseHTTPRequestHandler):
                 """,
                 (empresa_id,),
             ).fetchall()
+
+            entity_year_rows = conn.execute(
+                """
+                SELECT banco AS label, COUNT(*) AS total
+                FROM hipotecas
+                WHERE empresa_id = ?
+                  AND banco IS NOT NULL
+                  AND TRIM(banco) != ''
+                  AND """
+                + year_expr
+                + """ = ?
+                  AND LOWER(TRIM(estado)) IN ('firmado', 'firmada', 'indemnización', 'indemnizacion')
+                GROUP BY banco
+                ORDER BY COUNT(*) DESC
+                LIMIT 12
+                """,
+                (empresa_id, selected_year),
+            ).fetchall()
+
+            entity_total_map = {str(row["label"]): dict(row) for row in entity_total_rows}
+            entities = []
+            for row in entity_year_rows:
+                label = str(row["label"] or "").strip()
+                base = entity_total_map.get(label, {"total": 0})
+                metrics = conn.execute(
+                    """
+                    SELECT
+                      SUM(COALESCE(importe_hipoteca, 0)) AS volumen_total,
+                      AVG("""
+                    + duration_expr
+                    + """) AS plazo_medio_dias,
+                      SUM(COALESCE(comision, 0)) AS comision_total
+                    FROM hipotecas
+                    WHERE empresa_id = ?
+                      AND banco = ?
+                      AND """
+                    + year_expr
+                    + """ = ?
+                      AND LOWER(TRIM(estado)) IN ('firmado', 'firmada', 'indemnización', 'indemnizacion')
+                    """,
+                    (empresa_id, label, selected_year),
+                ).fetchone()
+                entities.append(
+                    {
+                        "label": label,
+                        "year_total": row["total"] or 0,
+                        "total": base.get("total") or 0,
+                        "volumen_total": metrics["volumen_total"] if metrics and metrics["volumen_total"] is not None else 0,
+                        "plazo_medio_dias": metrics["plazo_medio_dias"] if metrics and metrics["plazo_medio_dias"] is not None else 0,
+                        "comision_total": metrics["comision_total"] if metrics and metrics["comision_total"] is not None else 0,
+                    }
+                )
 
             series_oficinas = conn.execute(
                 """
@@ -16052,6 +16457,9 @@ class Handler(BaseHTTPRequestHandler):
                 (empresa_id,),
             ).fetchall()
 
+            conta_year = compute_hipotecas_contabilidad_totals(conn, empresa_id, selected_year)
+            conta_total = compute_hipotecas_contabilidad_totals(conn, empresa_id)
+
             json_response(
                 self,
                 {
@@ -16060,14 +16468,34 @@ class Handler(BaseHTTPRequestHandler):
                         "porcentaje_medio": current["porcentaje_medio"] if current else 0,
                         "comision_media": current["comision_media"] if current else 0,
                         "comision_total": current["comision_total"] if current else 0,
+                        "volumen_total": current["volumen_total"] if current else 0,
+                        "plazo_medio_dias": current["plazo_medio_dias"] if current else 0,
                         "firmadas_anio": firmadas_anio["total"] if firmadas_anio else 0,
                         "firmadas_mes": firmadas_mes["total"] if firmadas_mes else 0,
+                        "ingresos": conta_year["ingresos"],
+                        "gastos": conta_year["gastos"],
+                        "resultado": conta_year["resultado"],
+                    },
+                    "totals": {
+                        "total": totals["total"] if totals else 0,
+                        "porcentaje_medio": totals["porcentaje_medio"] if totals else 0,
+                        "comision_media": totals["comision_media"] if totals else 0,
+                        "comision_total": totals["comision_total"] if totals else 0,
+                        "volumen_total": totals["volumen_total"] if totals else 0,
+                        "plazo_medio_dias": totals["plazo_medio_dias"] if totals else 0,
+                        "ingresos": conta_total["ingresos"],
+                        "gastos": conta_total["gastos"],
+                        "resultado": conta_total["resultado"],
                     },
                     "current_year": selected_year,
+                    "available_years": [str(r["year"]) for r in available_years if r["year"] is not None],
                     "series_totales": [dict(r) for r in series_totales],
                     "series_comision": [dict(r) for r in series_comision],
                     "series_porcentaje": [dict(r) for r in series_porcentaje],
-                    "series_entidades": [dict(r) for r in series_entidades],
+                    "series_volumen": [dict(r) for r in series_volumen],
+                    "series_plazo": [dict(r) for r in series_plazo],
+                    "series_entidades": [dict(r) for r in entity_total_rows],
+                    "entity_kpis": entities,
                     "series_oficinas": [dict(r) for r in series_oficinas],
                 },
             )
