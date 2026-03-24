@@ -1876,6 +1876,7 @@ const hipotecaBdtPanel = document.getElementById("hipotecaBdtPanel");
 const hipotecaContabilidadPanel = document.getElementById("hipotecaContabilidadPanel");
 const hipotecaBdtSearch = document.getElementById("hipotecaBdtSearch");
 const hipotecaBdtRefresh = document.getElementById("hipotecaBdtRefresh");
+const hipotecaBdtExcelFirmadas = document.getElementById("hipotecaBdtExcelFirmadas");
 const hipotecaBdtVincularSelect = document.getElementById("hipotecaBdtVincularSelect");
 const hipotecaBdtVincularBtn = document.getElementById("hipotecaBdtVincularBtn");
 const hipotecaBdtVincularStatus = document.getElementById("hipotecaBdtVincularStatus");
@@ -8850,7 +8851,7 @@ const getHipotecaFichaFields = (columns = []) => {
   if (!Array.isArray(columns) || columns.length === 0) {
     return [...HIPOTECA_FICHA_PRIORITY_FIELDS];
   }
-  const ignored = new Set(["id"]);
+  const ignored = new Set(["id", "cliente_id"]);
   const available = columns.filter((col) => col && !ignored.has(col));
   const ordered = [];
   HIPOTECA_FICHA_PRIORITY_FIELDS.forEach((field) => {
@@ -8897,6 +8898,7 @@ const ensureHipotecaFichaPanel = () => {
       <form id="hipotecaFichaForm">
         <div id="hipotecaFichaGrid" class="form-grid"></div>
         <div class="form-actions">
+          <button type="button" id="hipotecaFichaPdf" class="secondary">Generar PDF</button>
           <button type="submit">Guardar cambios</button>
           <button type="button" id="hipotecaFichaCancel" class="secondary">Cancelar</button>
           <span id="hipotecaFichaStatus" class="muted"></span>
@@ -8912,6 +8914,12 @@ const ensureHipotecaFichaPanel = () => {
   };
   panel.querySelector("#hipotecaFichaClose")?.addEventListener("click", closeHipotecaFichaPanel);
   panel.querySelector("#hipotecaFichaCancel")?.addEventListener("click", closeHipotecaFichaPanel);
+  panel.querySelector("#hipotecaFichaPdf")?.addEventListener("click", () => {
+    const recordId = String(panel.dataset.recordId || "").trim();
+    if (recordId) {
+      openHipotecaFichaPrint(recordId);
+    }
+  });
   panel.querySelector("#hipotecaFichaForm")?.addEventListener("submit", saveHipotecaFicha);
   panel.addEventListener("click", (event) => {
     if (event.target === panel) {
@@ -8987,6 +8995,20 @@ const fetchHipotecaRowById = async (recordId) => {
   } catch {
     return null;
   }
+};
+
+const openHipotecaFichaPrint = (recordId) => {
+  const id = String(recordId || "").trim();
+  if (!id) return;
+  const url = `/api/hipoteca_ficha_print?id=${encodeURIComponent(id)}&autoprint=1`;
+  window.open(url, "_blank", "noopener");
+};
+
+const downloadHipotecasFirmadasExcel = () => {
+  const empresa = state.empresas.find((item) => item.nombre === FIN_COMPANY);
+  if (!empresa?.id) return;
+  const url = `/api/hipotecas_firmadas_excel?empresa_id=${encodeURIComponent(empresa.id)}`;
+  window.location.href = url;
 };
 
 const openHipotecaFicha = async (recordId, prefetched = null) => {
@@ -9166,6 +9188,13 @@ const renderHipotecaBdtTable = (data) => {
     openBtn.addEventListener("click", () => {
       openHipotecaFicha(recordId, { row, columns });
     });
+    const pdfBtn = document.createElement("button");
+    pdfBtn.type = "button";
+    pdfBtn.className = "secondary";
+    pdfBtn.textContent = "PDF";
+    pdfBtn.addEventListener("click", () => {
+      openHipotecaFichaPrint(recordId);
+    });
     const deleteBtn = document.createElement("button");
     deleteBtn.type = "button";
     deleteBtn.className = "danger";
@@ -9187,6 +9216,7 @@ const renderHipotecaBdtTable = (data) => {
       loadHomeHipotecaStats().then(() => renderCompanyCards());
     });
     actions.appendChild(openBtn);
+    actions.appendChild(pdfBtn);
     actions.appendChild(deleteBtn);
     tdAction.appendChild(actions);
     tr.appendChild(tdAction);
@@ -9292,7 +9322,19 @@ const vincularHipotecaSeleccionada = async () => {
       wasNew = true;
     }
     await linkFinanciacionServiceToCliente(clienteId, empresa.id);
+    const clienteNombrePersistido = String(existing?.nombre || nombreCliente || "").trim();
+    await postJsonWithDbRetry(
+      "/api/hipotecas_update",
+      {
+        id: selectedId,
+        empresa_nombre: FIN_COMPANY,
+        cliente_id: clienteId,
+        cliente: clienteNombrePersistido,
+      },
+      { retries: 1, delayMs: 120 }
+    );
     await refreshClientesSummary();
+    loadHipotecaBdt(true);
     hipotecaBdtVincularStatus.textContent = wasNew
       ? `Cliente creado y vinculado a Financiaciones: ${nombreCliente}`
       : `Servicio Financiaciones vinculado al cliente: ${existing?.nombre || nombreCliente}`;
@@ -24512,6 +24554,12 @@ if (hipotecaTabs) {
 if (hipotecaBdtRefresh) {
   hipotecaBdtRefresh.addEventListener("click", () => {
     loadHipotecaBdt(true);
+  });
+}
+
+if (hipotecaBdtExcelFirmadas) {
+  hipotecaBdtExcelFirmadas.addEventListener("click", () => {
+    downloadHipotecasFirmadasExcel();
   });
 }
 

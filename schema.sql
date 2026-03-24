@@ -620,6 +620,7 @@ CREATE TABLE IF NOT EXISTS hipotecas (
   id TEXT PRIMARY KEY,
   empresa_id TEXT,
   cliente TEXT,
+  cliente_id TEXT,
   banco TEXT,
   precio REAL,
   importe_hipoteca REAL,
@@ -640,7 +641,8 @@ CREATE TABLE IF NOT EXISTS hipotecas (
   anio INTEGER,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
-  FOREIGN KEY (empresa_id) REFERENCES empresas(id)
+  FOREIGN KEY (empresa_id) REFERENCES empresas(id),
+  FOREIGN KEY (cliente_id) REFERENCES clientes(id)
 );
 
 CREATE TABLE IF NOT EXISTS asesoramientos_financiacion (

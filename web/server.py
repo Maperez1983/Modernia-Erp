@@ -1014,6 +1014,23 @@ HIPOTECA_ACCOUNTING_GESTIONES = (
     "Cesión a inmobiliarias",
     "Nómina Juan",
 )
+HIPOTECA_EXPORT_BRANDS = {
+    "SANTANDER": "Banco Santander",
+    "BANCO SANTANDER": "Banco Santander",
+    "BBVA": "BBVA",
+    "CAIXABANK": "CaixaBank",
+    "LA CAIXA": "CaixaBank",
+    "SABADELL": "Banco Sabadell",
+    "BANCO SABADELL": "Banco Sabadell",
+    "BANKINTER": "Bankinter",
+    "UNICAJA": "Unicaja Banco",
+    "UNICAJA BANCO": "Unicaja Banco",
+    "ABANCA": "ABANCA",
+    "CAJAMAR": "Cajamar",
+    "UCI": "UCI",
+    "CAJA RURAL DE GRANADA": "Caja Rural de Granada",
+    "CAJA RURAL DEL SUR": "Caja Rural del Sur",
+}
 
 
 def hipoteca_estado_is_closed(value):
@@ -1071,14 +1088,14 @@ def resolve_hipoteca_contabilidad_link(conn, hipoteca_id):
     if not hipoteca_id:
         return {"cliente": "", "banco": "", "fecha_firma": "", "cliente_id": None}
     row = conn.execute(
-        "SELECT cliente, banco, fecha_firma FROM hipotecas WHERE id = ? LIMIT 1",
+        "SELECT cliente, cliente_id, banco, fecha_firma FROM hipotecas WHERE id = ? LIMIT 1",
         (hipoteca_id,),
     ).fetchone()
     if not row:
         return {"cliente": "", "banco": "", "fecha_firma": "", "cliente_id": None}
     cliente_nombre = str(row["cliente"] or "").strip()
-    cliente_id = None
-    if cliente_nombre:
+    cliente_id = str(row["cliente_id"] or "").strip() or None
+    if not cliente_id and cliente_nombre:
         cliente_row = conn.execute(
             "SELECT id FROM clientes WHERE UPPER(COALESCE(nombre, '')) = UPPER(?) ORDER BY created_at DESC LIMIT 1",
             (cliente_nombre,),
@@ -1091,6 +1108,289 @@ def resolve_hipoteca_contabilidad_link(conn, hipoteca_id):
         "fecha_firma": str(row["fecha_firma"] or "").strip(),
         "cliente_id": cliente_id,
     }
+
+
+def canonicalize_hipoteca_bank_name(value):
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    return HIPOTECA_EXPORT_BRANDS.get(normalize_lookup_text(raw), raw)
+
+
+def format_export_money(value):
+    amount = parse_money_value(value)
+    return f"{amount:,.2f} €".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def format_export_date(value):
+    parsed = parse_iso_date(value)
+    if not parsed:
+        return str(value or "").strip()
+    return parsed.strftime("%d/%m/%Y")
+
+
+def hipoteca_export_filename_part(value):
+    raw = normalize_person_name(value or "") or "hipoteca"
+    normalized = unicodedata.normalize("NFD", raw)
+    normalized = "".join(ch for ch in normalized if unicodedata.category(ch) != "Mn")
+    normalized = re.sub(r"[^A-Za-z0-9]+", "_", normalized).strip("_").lower()
+    return normalized or "hipoteca"
+
+
+def build_hipoteca_export_row(conn, row):
+    cliente_id = str(row["cliente_id"] or "").strip()
+    cliente = str(row["cliente"] or "").strip()
+    cliente_nif = ""
+    cliente_direccion = ""
+    cliente_telefono = ""
+    cliente_email = ""
+    if cliente_id:
+        cliente_row = conn.execute(
+            """
+            SELECT nombre, nif, direccion, telefono, email
+            FROM clientes
+            WHERE id = ?
+            LIMIT 1
+            """,
+            (cliente_id,),
+        ).fetchone()
+        if cliente_row:
+            cliente = str(cliente_row["nombre"] or "").strip() or cliente
+            cliente_nif = str(cliente_row["nif"] or "").strip()
+            cliente_direccion = str(cliente_row["direccion"] or "").strip()
+            cliente_telefono = str(cliente_row["telefono"] or "").strip()
+            cliente_email = str(cliente_row["email"] or "").strip()
+    return {
+        "id": str(row["id"] or "").strip(),
+        "cliente": cliente,
+        "cliente_id": cliente_id,
+        "cliente_nif": cliente_nif,
+        "cliente_direccion": cliente_direccion,
+        "cliente_telefono": cliente_telefono,
+        "cliente_email": cliente_email,
+        "fecha_encargo": str(row["fecha_encargo"] or "").strip(),
+        "fecha_firma": str(row["fecha_firma"] or "").strip(),
+        "tipo_hipoteca": str(row["tipo_hipoteca"] or "").strip(),
+        "importe_hipoteca": parse_money_value(row["importe_hipoteca"]),
+        "precio": parse_money_value(row["precio"]),
+        "entrada": parse_money_value(row["entrada"]),
+        "banco": canonicalize_hipoteca_bank_name(row["banco"]),
+        "honorarios": parse_money_value(row["comision"]),
+        "inmobiliaria": str(row["inmobiliaria_compra"] or row["oficina"] or "").strip(),
+        "estado": str(row["estado"] or "").strip(),
+        "oficina": str(row["oficina"] or "").strip(),
+        "asesor": str(row["asesor"] or "").strip(),
+    }
+
+
+def render_hipoteca_print_html(payload, auto_print=False):
+    cliente = html.escape(payload["cliente"] or "Cliente")
+    banco = html.escape(payload["banco"] or "-")
+    tipo = html.escape(payload["tipo_hipoteca"] or "-")
+    asesor = html.escape(payload["asesor"] or "-")
+    inmobiliaria = html.escape(payload["inmobiliaria"] or "-")
+    direccion = html.escape(payload["cliente_direccion"] or "-")
+    nif = html.escape(payload["cliente_nif"] or "-")
+    telefono = html.escape(payload["cliente_telefono"] or "-")
+    email_val = html.escape(payload["cliente_email"] or "-")
+    fecha_encargo = html.escape(format_export_date(payload["fecha_encargo"]) or "-")
+    fecha_firma = html.escape(format_export_date(payload["fecha_firma"]) or "-")
+    importe = html.escape(format_export_money(payload["importe_hipoteca"]))
+    precio = html.escape(format_export_money(payload["precio"]))
+    entrada = html.escape(format_export_money(payload["entrada"]))
+    honorarios = html.escape(format_export_money(payload["honorarios"]))
+    print_script = (
+        "<script>window.addEventListener('load',()=>setTimeout(()=>window.print(),250));</script>"
+        if auto_print
+        else ""
+    )
+    return f"""<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <title>Ficha hipoteca · {cliente}</title>
+  <style>
+    :root {{
+      --ink: #122033;
+      --muted: #5c6b80;
+      --brand: #103f91;
+      --brand-2: #1aa0c9;
+      --paper: #f4f7fb;
+      --line: #d7e2ee;
+    }}
+    * {{ box-sizing: border-box; }}
+    body {{
+      margin: 0;
+      font-family: "Avenir Next", "Segoe UI", sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at top right, rgba(26,160,201,.18), transparent 28%),
+        linear-gradient(160deg, #eef3f9 0%, #ffffff 44%, #eef4fb 100%);
+      padding: 28px;
+    }}
+    .sheet {{
+      max-width: 980px;
+      margin: 0 auto;
+      background: rgba(255,255,255,.96);
+      border: 1px solid rgba(16,63,145,.08);
+      border-radius: 28px;
+      overflow: hidden;
+      box-shadow: 0 20px 55px rgba(13,35,66,.12);
+    }}
+    .hero {{
+      display: grid;
+      grid-template-columns: 170px 1fr auto;
+      gap: 22px;
+      align-items: center;
+      padding: 28px 30px;
+      background: linear-gradient(135deg, rgba(16,63,145,.97), rgba(26,160,201,.92));
+      color: #fff;
+    }}
+    .hero img {{
+      width: 150px;
+      max-height: 90px;
+      object-fit: contain;
+    }}
+    .hero h1 {{
+      margin: 0;
+      font-size: 30px;
+      line-height: 1.05;
+      letter-spacing: -.03em;
+    }}
+    .hero p {{
+      margin: 8px 0 0;
+      color: rgba(255,255,255,.85);
+      font-size: 14px;
+    }}
+    .hero-tag {{
+      padding: 10px 14px;
+      border-radius: 999px;
+      background: rgba(255,255,255,.16);
+      font-weight: 700;
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+    }}
+    .content {{
+      padding: 28px 30px 34px;
+      display: grid;
+      gap: 24px;
+    }}
+    .metrics {{
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
+    }}
+    .metric {{
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 16px 18px;
+    }}
+    .metric span {{
+      display: block;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      color: var(--muted);
+      margin-bottom: 10px;
+    }}
+    .metric strong {{
+      font-size: 22px;
+      line-height: 1.05;
+    }}
+    .sections {{
+      display: grid;
+      grid-template-columns: 1.15fr .85fr;
+      gap: 20px;
+    }}
+    .panel {{
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      padding: 20px 22px;
+    }}
+    .panel h2 {{
+      margin: 0 0 16px;
+      font-size: 16px;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      color: var(--brand);
+    }}
+    dl {{
+      margin: 0;
+      display: grid;
+      grid-template-columns: 180px 1fr;
+      gap: 10px 16px;
+      align-items: start;
+    }}
+    dt {{
+      color: var(--muted);
+      font-weight: 600;
+    }}
+    dd {{
+      margin: 0;
+      font-weight: 700;
+    }}
+    .footer-note {{
+      color: var(--muted);
+      font-size: 12px;
+      text-align: right;
+    }}
+    @media print {{
+      body {{ background: #fff; padding: 0; }}
+      .sheet {{ box-shadow: none; border-radius: 0; border: none; max-width: none; }}
+    }}
+  </style>
+  {print_script}
+</head>
+<body>
+  <div class="sheet">
+    <div class="hero">
+      <img src="/assets/logo.jpg" alt="Grupo Modernia" />
+      <div>
+        <h1>Ficha de Operación Hipotecaria</h1>
+        <p>{cliente} · {banco}</p>
+      </div>
+      <div class="hero-tag">Financiaciones</div>
+    </div>
+    <div class="content">
+      <div class="metrics">
+        <div class="metric"><span>Importe hipoteca</span><strong>{importe}</strong></div>
+        <div class="metric"><span>Precio compra</span><strong>{precio}</strong></div>
+        <div class="metric"><span>Entrada</span><strong>{entrada}</strong></div>
+        <div class="metric"><span>Honorarios</span><strong>{honorarios}</strong></div>
+      </div>
+      <div class="sections">
+        <div class="panel">
+          <h2>Datos de la operación</h2>
+          <dl>
+            <dt>Cliente</dt><dd>{cliente}</dd>
+            <dt>DNI</dt><dd>{nif}</dd>
+            <dt>Fecha encargo</dt><dd>{fecha_encargo}</dd>
+            <dt>Fecha firma</dt><dd>{fecha_firma}</dd>
+            <dt>Tipo hipoteca</dt><dd>{tipo}</dd>
+            <dt>Banco</dt><dd>{banco}</dd>
+            <dt>Inmobiliaria</dt><dd>{inmobiliaria}</dd>
+            <dt>Asesor</dt><dd>{asesor}</dd>
+          </dl>
+        </div>
+        <div class="panel">
+          <h2>Datos del cliente</h2>
+          <dl>
+            <dt>Dirección</dt><dd>{direccion}</dd>
+            <dt>Teléfono</dt><dd>{telefono}</dd>
+            <dt>Email</dt><dd>{email_val}</dd>
+            <dt>Oficina</dt><dd>{html.escape(payload["oficina"] or "-")}</dd>
+            <dt>Estado</dt><dd>{html.escape(payload["estado"] or "-")}</dd>
+          </dl>
+        </div>
+      </div>
+      <div class="footer-note">Documento generado desde CRM Financiaciones · {html.escape(datetime.now().strftime("%d/%m/%Y %H:%M"))}</div>
+    </div>
+  </div>
+</body>
+</html>"""
 
 
 def derive_hipoteca_inmobiliaria_cost(row):
@@ -8236,6 +8536,12 @@ def ensure_tables(db_path):
             conn.execute("ALTER TABLE seguros ADD COLUMN datos_ramo_json TEXT")
     except sqlite3.Error:
         pass
+    try:
+        hipotecas_cols = [row[1] for row in conn.execute("PRAGMA table_info(hipotecas)").fetchall()]
+        if "cliente_id" not in hipotecas_cols:
+            conn.execute("ALTER TABLE hipotecas ADD COLUMN cliente_id TEXT")
+    except sqlite3.Error:
+        pass
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS seguros_comisiones (
@@ -11276,18 +11582,19 @@ class Handler(BaseHTTPRequestHandler):
             conn.execute(
                 """
                 INSERT INTO hipotecas (
-                  id, empresa_id, cliente, banco, precio, importe_hipoteca, porcentaje,
+                  id, empresa_id, cliente, cliente_id, banco, precio, importe_hipoteca, porcentaje,
                   entrada, comision, oficina, fecha_encargo, encargo, tipo_hipoteca,
                   fecha_firma, cesion, comision_juan, comision_modernia, inmobiliaria_compra,
                   asesor, estado, anio, created_at, updated_at
                 ) VALUES (
-                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
                 )
                 """,
                 (
                     hipoteca_id,
                     empresa["id"],
                     cliente_nombre,
+                    row["cliente1_id"],
                     None,
                     None,
                     None,
@@ -11330,6 +11637,7 @@ class Handler(BaseHTTPRequestHandler):
             }
             allowed = (
                 "cliente",
+                "cliente_id",
                 "banco",
                 "precio",
                 "importe_hipoteca",
@@ -11359,6 +11667,16 @@ class Handler(BaseHTTPRequestHandler):
             if not updates:
                 json_response(self, {"error": "Sin cambios"}, status=400)
                 return
+            incoming_cliente_id = str(updates.get("cliente_id") or "").strip()
+            if "cliente_id" in updates:
+                if incoming_cliente_id:
+                    exists = conn.execute("SELECT id FROM clientes WHERE id = ? LIMIT 1", (incoming_cliente_id,)).fetchone()
+                    if not exists:
+                        json_response(self, {"error": "cliente_id no válido"}, status=400)
+                        return
+                    updates["cliente_id"] = incoming_cliente_id
+                else:
+                    updates["cliente_id"] = None
             effective_comision = (
                 updates.get("comision")
                 if updates.get("comision") not in (None, "")
@@ -13590,6 +13908,7 @@ class Handler(BaseHTTPRequestHandler):
                 conn.execute(
                     """
                     UPDATE hipotecas SET
+                      cliente_id = COALESCE(?, cliente_id),
                       banco = COALESCE(?, banco),
                       precio = COALESCE(?, precio),
                       importe_hipoteca = COALESCE(?, importe_hipoteca),
@@ -13612,6 +13931,7 @@ class Handler(BaseHTTPRequestHandler):
                     WHERE id = ?
                     """,
                     (
+                        payload.get("cliente_id"),
                         payload.get("banco"),
                         financing_split["precio"] if financing_split else precio,
                         financing_split["importe_hipoteca"] if financing_split else importe_hipoteca,
@@ -13638,19 +13958,20 @@ class Handler(BaseHTTPRequestHandler):
                 conn.execute(
                     """
                     INSERT INTO hipotecas (
-                      id, empresa_id, cliente, banco, precio, importe_hipoteca,
+                      id, empresa_id, cliente, cliente_id, banco, precio, importe_hipoteca,
                       porcentaje, entrada, comision, oficina, fecha_encargo,
                       encargo, tipo_hipoteca, fecha_firma, cesion, comision_juan,
                       comision_modernia, inmobiliaria_compra, asesor, estado, anio,
                       created_at, updated_at
                     ) VALUES (
-                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
                     )
                     """,
                     (
                         os.urandom(16).hex(),
                         empresa["id"],
                         payload.get("cliente"),
+                        payload.get("cliente_id"),
                         payload.get("banco"),
                         financing_split["precio"] if financing_split else payload.get("precio"),
                         financing_split["importe_hipoteca"] if financing_split else payload.get("importe_hipoteca"),
@@ -16609,6 +16930,138 @@ class Handler(BaseHTTPRequestHandler):
                 values,
             ).fetchall()
             json_response(self, {"columns": columns, "rows": [list(r) for r in rows]})
+            return
+
+        if path == "/api/hipoteca_ficha_print":
+            record_id = (params.get("id", [""])[0] or "").strip()
+            auto_print = (params.get("autoprint", ["1"])[0] or "1").strip().lower() in ("1", "true", "yes")
+            if not record_id:
+                json_response(self, {"error": "id requerido"}, status=400)
+                return
+            row = conn.execute(
+                """
+                SELECT *
+                FROM hipotecas
+                WHERE id = ?
+                LIMIT 1
+                """,
+                (record_id,),
+            ).fetchone()
+            if not row:
+                json_response(self, {"error": "Hipoteca no encontrada"}, status=404)
+                return
+            content = render_hipoteca_print_html(
+                build_hipoteca_export_row(conn, row),
+                auto_print=auto_print,
+            ).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(content)))
+            self.end_headers()
+            self.wfile.write(content)
+            return
+
+        if path == "/api/hipotecas_firmadas_excel":
+            empresa_id = (params.get("empresa_id", [""])[0] or "").strip()
+            if not empresa_id:
+                json_response(self, {"error": "empresa_id requerido"}, status=400)
+                return
+            if not OPENPYXL_AVAILABLE:
+                json_response(self, {"error": "openpyxl no disponible en servidor"}, status=500)
+                return
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM hipotecas
+                WHERE empresa_id = ?
+                  AND TRIM(COALESCE(fecha_firma, '')) <> ''
+                ORDER BY DATE(COALESCE(NULLIF(fecha_firma, ''), '1900-01-01')) DESC, created_at DESC
+                """,
+                (empresa_id,),
+            ).fetchall()
+            wb = Workbook()
+            ws = wb.active
+            ws.title = "Hipotecas firmadas"
+            headers = [
+                "Cliente",
+                "DNI",
+                "Fecha encargo",
+                "Fecha firma",
+                "Tipo hipoteca",
+                "Importe hipoteca",
+                "Precio compra",
+                "Entrada",
+                "Banco",
+                "Honorarios",
+                "Inmobiliaria",
+                "Asesor",
+                "Estado",
+            ]
+            ws.append(headers)
+            for cell in ws[1]:
+                cell.font = cell.font.copy(bold=True, color="FFFFFF")
+                cell.fill = cell.fill.copy(fill_type="solid", fgColor="103F91")
+                cell.alignment = cell.alignment.copy(horizontal="center")
+            for raw in rows:
+                item = build_hipoteca_export_row(conn, raw)
+                ws.append(
+                    [
+                        item["cliente"],
+                        item["cliente_nif"],
+                        item["fecha_encargo"],
+                        item["fecha_firma"],
+                        item["tipo_hipoteca"],
+                        item["importe_hipoteca"],
+                        item["precio"],
+                        item["entrada"],
+                        item["banco"],
+                        item["honorarios"],
+                        item["inmobiliaria"],
+                        item["asesor"],
+                        item["estado"],
+                    ]
+                )
+            for column_letter in ("F", "G", "H", "J"):
+                for cell in ws[column_letter][1:]:
+                    cell.number_format = '#,##0.00 "€"'
+            for column_letter in ("C", "D"):
+                for cell in ws[column_letter][1:]:
+                    parsed = parse_iso_date(cell.value)
+                    if parsed:
+                        cell.value = parsed
+                        cell.number_format = "DD/MM/YYYY"
+            widths = {
+                "A": 28,
+                "B": 16,
+                "C": 14,
+                "D": 14,
+                "E": 18,
+                "F": 18,
+                "G": 18,
+                "H": 16,
+                "I": 24,
+                "J": 16,
+                "K": 24,
+                "L": 18,
+                "M": 16,
+            }
+            for col, width in widths.items():
+                ws.column_dimensions[col].width = width
+            ws.freeze_panes = "A2"
+            ws.auto_filter.ref = f"A1:M{max(ws.max_row, 1)}"
+            output = BytesIO()
+            wb.save(output)
+            content = output.getvalue()
+            filename = f'hipotecas_firmadas_{datetime.now().strftime("%Y%m%d_%H%M")}.xlsx'
+            self.send_response(200)
+            self.send_header(
+                "Content-Type",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+            self.send_header("Content-Length", str(len(content)))
+            self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+            self.end_headers()
+            self.wfile.write(content)
             return
 
         if path == "/api/fincas_stats":
