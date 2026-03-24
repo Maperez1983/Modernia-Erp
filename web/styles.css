@@ -1746,6 +1746,12 @@ body.crm-fin #companySummary {
   overflow: auto;
 }
 
+.hipoteca-ficha-modal-content {
+  width: min(1100px, 96vw);
+  max-height: 86vh;
+  overflow: auto;
+}
+
 .cliente-seguro-meta {
   display: grid;
   gap: 6px;

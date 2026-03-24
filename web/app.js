@@ -8859,47 +8859,55 @@ const hipotecaRowToObject = (row, columns) => {
   return result;
 };
 
+const closeHipotecaFichaPanel = () => {
+  const panel = document.getElementById("hipotecaBdtFichaPanel");
+  if (!panel) return;
+  panel.classList.add("hidden");
+  panel.classList.remove("open");
+  const status = panel.querySelector("#hipotecaFichaStatus");
+  if (status) status.textContent = "";
+};
+
 const ensureHipotecaFichaPanel = () => {
-  if (!hipotecaBdtPanel) return null;
   let panel = document.getElementById("hipotecaBdtFichaPanel");
   if (panel) return panel;
   panel = document.createElement("div");
   panel.id = "hipotecaBdtFichaPanel";
-  panel.className = "form-card hidden";
+  panel.className = "modal hidden";
   panel.innerHTML = `
-    <div class="section-head">
-      <div>
-        <h3>Ficha hipoteca</h3>
-        <p id="hipotecaFichaMeta" class="muted">Selecciona una hipoteca desde el listado.</p>
-      </div>
-      <div class="section-head-actions">
+    <div class="modal-content hipoteca-ficha-modal-content">
+      <div class="modal-header">
+        <div>
+          <h3>Ficha hipoteca</h3>
+          <p id="hipotecaFichaMeta" class="muted">Selecciona una hipoteca desde el listado.</p>
+        </div>
         <button type="button" id="hipotecaFichaClose" class="secondary">Cerrar</button>
       </div>
+      <form id="hipotecaFichaForm">
+        <div id="hipotecaFichaGrid" class="form-grid"></div>
+        <div class="form-actions">
+          <button type="submit">Guardar cambios</button>
+          <button type="button" id="hipotecaFichaCancel" class="secondary">Cancelar</button>
+          <span id="hipotecaFichaStatus" class="muted"></span>
+        </div>
+      </form>
     </div>
-    <form id="hipotecaFichaForm">
-      <div id="hipotecaFichaGrid" class="form-grid"></div>
-      <div class="form-actions">
-        <button type="submit">Guardar cambios</button>
-        <button type="button" id="hipotecaFichaCancel" class="secondary">Cancelar</button>
-        <span id="hipotecaFichaStatus" class="muted"></span>
-      </div>
-    </form>
   `;
-  hipotecaBdtPanel.appendChild(panel);
+  document.body.appendChild(panel);
 
   const clearStatus = () => {
     const status = panel.querySelector("#hipotecaFichaStatus");
     if (status) status.textContent = "";
   };
-  panel.querySelector("#hipotecaFichaClose")?.addEventListener("click", () => {
-    panel.classList.add("hidden");
-    clearStatus();
-  });
-  panel.querySelector("#hipotecaFichaCancel")?.addEventListener("click", () => {
-    panel.classList.add("hidden");
-    clearStatus();
-  });
+  panel.querySelector("#hipotecaFichaClose")?.addEventListener("click", closeHipotecaFichaPanel);
+  panel.querySelector("#hipotecaFichaCancel")?.addEventListener("click", closeHipotecaFichaPanel);
   panel.querySelector("#hipotecaFichaForm")?.addEventListener("submit", saveHipotecaFicha);
+  panel.addEventListener("click", (event) => {
+    if (event.target === panel) {
+      closeHipotecaFichaPanel();
+      clearStatus();
+    }
+  });
   return panel;
 };
 
@@ -8945,17 +8953,51 @@ const buildHipotecaFichaFormFields = (panel, columns = []) => {
   return fields;
 };
 
-const openHipotecaFicha = (recordId) => {
+const fetchHipotecaRowById = async (recordId) => {
+  const id = String(recordId || "").trim();
+  if (!id) return null;
+  const empresa = state.empresas.find((item) => item.nombre === FIN_COMPANY);
+  if (!empresa) return null;
+  const params = new URLSearchParams({
+    tabla: "hipotecas",
+    empresa_id: empresa.id,
+    include_id: "1",
+    q: "",
+  });
+  try {
+    const data = await api(`/api/tabla?${params.toString()}`);
+    const columns = data?.columns || [];
+    const rows = data?.rows || [];
+    const idIndex = columns.indexOf("id");
+    if (idIndex < 0) return null;
+    const row = rows.find((item) => String(item[idIndex] || "").trim() === id);
+    if (!row) return null;
+    return { row, columns };
+  } catch {
+    return null;
+  }
+};
+
+const openHipotecaFicha = async (recordId, prefetched = null) => {
   const target = String(recordId || "").trim();
   if (!target) return;
   const panel = ensureHipotecaFichaPanel();
   if (!panel) return;
-  const found = findHipotecaBdtRowById(target);
+  panel.dataset.recordId = target;
+  const meta = panel.querySelector("#hipotecaFichaMeta");
+  if (meta) meta.textContent = "Cargando ficha...";
+  panel.classList.remove("hidden");
+  panel.classList.add("open");
+  let found = prefetched;
+  if (!found) {
+    found = findHipotecaBdtRowById(target);
+  }
+  if (!found) {
+    found = await fetchHipotecaRowById(target);
+  }
   if (!found) return;
   const rowData = hipotecaRowToObject(found.row, found.columns);
   const fields = buildHipotecaFichaFormFields(panel, found.columns);
-  panel.dataset.recordId = target;
-  const meta = panel.querySelector("#hipotecaFichaMeta");
   if (meta) {
     const cliente = String(rowData.cliente || "").trim() || `Hipoteca ${target.slice(0, 8)}`;
     meta.textContent = `${cliente} · ID ${target.slice(0, 8)}`;
@@ -8987,7 +9029,7 @@ const openHipotecaFicha = (recordId) => {
   const status = panel.querySelector("#hipotecaFichaStatus");
   if (status) status.textContent = "";
   panel.classList.remove("hidden");
-  panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  panel.classList.add("open");
 };
 
 const saveHipotecaFicha = (event) => {
@@ -9037,6 +9079,7 @@ const saveHipotecaFicha = (event) => {
       }
       if (status) status.textContent = "Cambios guardados.";
       loadHipotecaBdt(true);
+      loadFinCrm();
       loadHipotecaDashboard();
       loadHomeHipotecaStats().then(() => renderCompanyCards());
       setTimeout(() => {
@@ -9086,7 +9129,7 @@ const renderHipotecaBdtTable = (data) => {
     trHead.appendChild(th);
   });
   const thAction = document.createElement("th");
-  thAction.textContent = "FICHA";
+  thAction.textContent = "ACCIONES";
   trHead.appendChild(thAction);
   thead.appendChild(trHead);
   table.appendChild(thead);
@@ -9102,15 +9145,39 @@ const renderHipotecaBdtTable = (data) => {
       tr.appendChild(td);
     });
     const tdAction = document.createElement("td");
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "secondary";
-    btn.textContent = "Abrir ficha";
-    btn.addEventListener("click", () => {
-      const recordId = row[idIndex];
-      openHipotecaFicha(recordId);
+    const actions = document.createElement("div");
+    actions.className = "inline-actions";
+    const recordId = row[idIndex];
+    const openBtn = document.createElement("button");
+    openBtn.type = "button";
+    openBtn.className = "secondary";
+    openBtn.textContent = "Abrir ficha";
+    openBtn.addEventListener("click", () => {
+      openHipotecaFicha(recordId, { row, columns });
     });
-    tdAction.appendChild(btn);
+    const deleteBtn = document.createElement("button");
+    deleteBtn.type = "button";
+    deleteBtn.className = "danger";
+    deleteBtn.textContent = "Eliminar";
+    deleteBtn.addEventListener("click", async () => {
+      if (!recordId) return;
+      if (!window.confirm("¿Eliminar esta hipoteca? Esta acción no se puede deshacer.")) return;
+      const data = await deleteHipoteca(recordId);
+      if (data?.error) {
+        alert(data.error);
+        return;
+      }
+      if (String(document.getElementById("hipotecaBdtFichaPanel")?.dataset.recordId || "") === String(recordId)) {
+        closeHipotecaFichaPanel();
+      }
+      loadHipotecaBdt(true);
+      loadFinCrm();
+      loadHipotecaDashboard();
+      loadHomeHipotecaStats().then(() => renderCompanyCards());
+    });
+    actions.appendChild(openBtn);
+    actions.appendChild(deleteBtn);
+    tdAction.appendChild(actions);
     tr.appendChild(tdAction);
     tbody.appendChild(tr);
   });
@@ -10946,6 +11013,7 @@ const renderTableInto = (data, container, infoEl, label) => {
     label === "Seguros" && currentTab === "seguros-crm" && state.segurosTab === "bdt";
   const showSeguroFichaAction =
     label === "Seguros" && currentTab === "seguros-crm" && state.segurosTab === "bdt";
+  const showHipotecaActions = label === "Hipotecas";
   const enableColumnFilters =
     label === "Seguros" && currentTab === "seguros-crm" && state.segurosTab === "bdt";
   const segurosCompactColumns = [
@@ -11020,9 +11088,9 @@ const renderTableInto = (data, container, infoEl, label) => {
     th.textContent = "OCR";
     trHead.appendChild(th);
   }
-  if (showSeguroFichaAction) {
+  if (showSeguroFichaAction || showHipotecaActions) {
     const th = document.createElement("th");
-    th.textContent = "Ficha";
+    th.textContent = "Acciones";
     trHead.appendChild(th);
   }
   thead.appendChild(trHead);
@@ -11041,7 +11109,7 @@ const renderTableInto = (data, container, infoEl, label) => {
     });
     if (showPdf) trFilters.appendChild(document.createElement("th"));
     if (showOcr) trFilters.appendChild(document.createElement("th"));
-    if (showSeguroFichaAction) trFilters.appendChild(document.createElement("th"));
+    if (showSeguroFichaAction || showHipotecaActions) trFilters.appendChild(document.createElement("th"));
     thead.appendChild(trFilters);
   }
   table.appendChild(thead);
@@ -11151,6 +11219,46 @@ const renderTableInto = (data, container, infoEl, label) => {
         );
       });
       td.appendChild(btn);
+      tr.appendChild(td);
+    }
+    if (showHipotecaActions) {
+      const td = document.createElement("td");
+      const actions = document.createElement("div");
+      actions.className = "inline-actions";
+      const openBtn = document.createElement("button");
+      openBtn.type = "button";
+      openBtn.className = "secondary";
+      openBtn.textContent = "Abrir ficha";
+      openBtn.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        openHipotecaFicha(recordId, { row, columns });
+      });
+      actions.appendChild(openBtn);
+      const deleteBtn = document.createElement("button");
+      deleteBtn.type = "button";
+      deleteBtn.className = "danger";
+      deleteBtn.textContent = "Eliminar";
+      deleteBtn.addEventListener("click", async (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!recordId) return;
+        if (!window.confirm("¿Eliminar esta hipoteca? Esta acción no se puede deshacer.")) return;
+        const data = await deleteHipoteca(recordId);
+        if (data?.error) {
+          alert(data.error);
+          return;
+        }
+        if (String(document.getElementById("hipotecaBdtFichaPanel")?.dataset.recordId || "") === String(recordId)) {
+          closeHipotecaFichaPanel();
+        }
+        loadFinCrm();
+        loadHipotecaBdt(true);
+        loadHipotecaDashboard();
+        loadHomeHipotecaStats().then(() => renderCompanyCards());
+      });
+      actions.appendChild(deleteBtn);
+      td.appendChild(actions);
       tr.appendChild(td);
     }
     if (label === "Seguros" && currentTab === "seguros-crm" && state.segurosTab === "bdt" && String(recordId || "").trim()) {
