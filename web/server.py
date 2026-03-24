@@ -1020,6 +1020,10 @@ def hipoteca_estado_is_closed(value):
     return normalize_lookup_text(value) in HIPOTECA_SIGNED_STATES
 
 
+def hipoteca_has_signature_date(value):
+    return bool(parse_iso_date(value))
+
+
 def hipotecas_contabilidad_where_clause(alias="gc"):
     p = alias.strip() or "gc"
     return (
@@ -1105,7 +1109,7 @@ def derive_hipoteca_inmobiliaria_cost(row):
 def build_hipoteca_accounting_entries(row):
     fecha_raw = (row.get("fecha_firma") if isinstance(row, dict) else row["fecha_firma"]) or ""
     fecha = parse_iso_date(fecha_raw)
-    if not fecha or not hipoteca_estado_is_closed((row.get("estado") if isinstance(row, dict) else row["estado"]) or ""):
+    if not fecha:
         return []
     cliente = str((row.get("cliente") if isinstance(row, dict) else row["cliente"]) or "").strip() or "Hipoteca"
     banco = str((row.get("banco") if isinstance(row, dict) else row["banco"]) or "").strip()
@@ -16102,6 +16106,7 @@ class Handler(BaseHTTPRequestHandler):
             if not empresa_id:
                 json_response(self, {"error": "empresa_id requerido"}, status=400)
                 return
+            signed_expr = "fecha_firma IS NOT NULL AND TRIM(fecha_firma) <> ''"
 
             total = conn.execute(
                 "SELECT COUNT(*) AS total FROM hipotecas WHERE empresa_id = ?",
@@ -16113,7 +16118,9 @@ class Handler(BaseHTTPRequestHandler):
                 SELECT COUNT(*) AS total
                 FROM hipotecas
                 WHERE empresa_id = ?
-                  AND LOWER(TRIM(estado)) IN ('firmado', 'firmada', 'indemnización', 'indemnizacion')
+                  AND """
+                + signed_expr
+                + """
                   AND fecha_firma IS NOT NULL
                   AND strftime('%Y-%m', fecha_firma) = strftime('%Y-%m', 'now', 'localtime')
                 """,
@@ -16135,7 +16142,9 @@ class Handler(BaseHTTPRequestHandler):
                   AVG(COALESCE(comision, 0)) AS comision_media
                 FROM hipotecas
                 WHERE empresa_id = ?
-                  AND LOWER(TRIM(estado)) IN ('firmado', 'firmada', 'indemnización', 'indemnizacion')
+                  AND """
+                + signed_expr
+                + """
                 """,
                 (empresa_id,),
             ).fetchone()
@@ -16165,6 +16174,8 @@ class Handler(BaseHTTPRequestHandler):
                 "COALESCE(NULLIF(TRIM(anio), ''), "
                 "strftime('%Y', COALESCE(NULLIF(fecha_firma, ''), NULLIF(fecha_encargo, ''), created_at)))"
             )
+            signed_expr = "fecha_firma IS NOT NULL AND TRIM(fecha_firma) <> ''"
+            estudio_expr = "LOWER(TRIM(COALESCE(estado, ''))) IN ('estudio', 'en estudio')"
             duration_expr = (
                 "CASE "
                 "WHEN fecha_encargo IS NOT NULL AND TRIM(fecha_encargo) <> '' "
@@ -16184,7 +16195,9 @@ class Handler(BaseHTTPRequestHandler):
                   AND """
                 + year_expr
                 + """ IS NOT NULL
-                  AND LOWER(TRIM(estado)) IN ('firmado', 'firmada', 'indemnización', 'indemnizacion')
+                  AND """
+                + signed_expr
+                + """
                 GROUP BY """
                 + year_expr
                 + """
@@ -16223,7 +16236,9 @@ class Handler(BaseHTTPRequestHandler):
                   AND """
                 + year_expr
                 + """ = ?
-                  AND LOWER(TRIM(estado)) IN ('firmado', 'firmada', 'indemnización', 'indemnizacion')
+                  AND """
+                + signed_expr
+                + """
                 """,
                 (empresa_id, selected_year),
             ).fetchone()
@@ -16249,7 +16264,9 @@ class Handler(BaseHTTPRequestHandler):
                 + """) AS plazo_medio_dias
                 FROM hipotecas
                 WHERE empresa_id = ?
-                  AND LOWER(TRIM(estado)) IN ('firmado', 'firmada', 'indemnización', 'indemnizacion')
+                  AND """
+                + signed_expr
+                + """
                 """,
                 (empresa_id,),
             ).fetchone()
@@ -16262,9 +16279,38 @@ class Handler(BaseHTTPRequestHandler):
                   AND """
                 + year_expr
                 + """ = ?
-                  AND LOWER(TRIM(estado)) IN ('firmado', 'firmada')
+                  AND """
+                + signed_expr
+                + """
                 """,
                 (empresa_id, selected_year),
+            ).fetchone()
+
+            estudio_anio = conn.execute(
+                """
+                SELECT COUNT(*) AS total
+                FROM hipotecas
+                WHERE empresa_id = ?
+                  AND """
+                + year_expr
+                + """ = ?
+                  AND """
+                + estudio_expr
+                + """
+                """,
+                (empresa_id, selected_year),
+            ).fetchone()
+
+            estudio_total = conn.execute(
+                """
+                SELECT COUNT(*) AS total
+                FROM hipotecas
+                WHERE empresa_id = ?
+                  AND """
+                + estudio_expr
+                + """
+                """,
+                (empresa_id,),
             ).fetchone()
 
             firmadas_mes = conn.execute(
@@ -16272,8 +16318,9 @@ class Handler(BaseHTTPRequestHandler):
                 SELECT COUNT(*) AS total
                 FROM hipotecas
                 WHERE empresa_id = ?
-                  AND LOWER(TRIM(estado)) IN ('firmado', 'firmada', 'indemnización', 'indemnizacion')
-                  AND fecha_firma IS NOT NULL
+                  AND """
+                + signed_expr
+                + """
                   AND strftime('%Y-%m', fecha_firma) = strftime('%Y-%m', 'now', 'localtime')
                 """,
                 (empresa_id,),
@@ -16291,7 +16338,9 @@ class Handler(BaseHTTPRequestHandler):
                   AND """
                 + year_expr
                 + """ IS NOT NULL
-                  AND LOWER(TRIM(estado)) IN ('firmado', 'firmada', 'indemnización', 'indemnizacion')
+                  AND """
+                + signed_expr
+                + """
                 GROUP BY """
                 + year_expr
                 + """
@@ -16314,7 +16363,9 @@ class Handler(BaseHTTPRequestHandler):
                   AND """
                 + year_expr
                 + """ IS NOT NULL
-                  AND LOWER(TRIM(estado)) IN ('firmado', 'firmada', 'indemnización', 'indemnizacion')
+                  AND """
+                + signed_expr
+                + """
                 GROUP BY """
                 + year_expr
                 + """
@@ -16335,7 +16386,9 @@ class Handler(BaseHTTPRequestHandler):
                   AND """
                 + year_expr
                 + """ IS NOT NULL
-                  AND LOWER(TRIM(estado)) IN ('firmado', 'firmada', 'indemnización', 'indemnizacion')
+                  AND """
+                + signed_expr
+                + """
                 GROUP BY """
                 + year_expr
                 + """
@@ -16383,7 +16436,9 @@ class Handler(BaseHTTPRequestHandler):
                 WHERE empresa_id = ?
                   AND banco IS NOT NULL
                   AND TRIM(banco) != ''
-                  AND LOWER(TRIM(estado)) IN ('firmado', 'firmada', 'indemnización', 'indemnizacion')
+                  AND """
+                + signed_expr
+                + """
                 GROUP BY banco
                 ORDER BY COUNT(*) DESC
                 LIMIT 8
@@ -16401,7 +16456,9 @@ class Handler(BaseHTTPRequestHandler):
                   AND """
                 + year_expr
                 + """ = ?
-                  AND LOWER(TRIM(estado)) IN ('firmado', 'firmada', 'indemnización', 'indemnizacion')
+                  AND """
+                + signed_expr
+                + """
                 GROUP BY banco
                 ORDER BY COUNT(*) DESC
                 LIMIT 12
@@ -16428,7 +16485,9 @@ class Handler(BaseHTTPRequestHandler):
                       AND """
                     + year_expr
                     + """ = ?
-                      AND LOWER(TRIM(estado)) IN ('firmado', 'firmada', 'indemnización', 'indemnizacion')
+                      AND """
+                    + signed_expr
+                    + """
                     """,
                     (empresa_id, label, selected_year),
                 ).fetchone()
@@ -16450,7 +16509,9 @@ class Handler(BaseHTTPRequestHandler):
                 WHERE empresa_id = ?
                   AND oficina IS NOT NULL
                   AND TRIM(oficina) != ''
-                  AND LOWER(TRIM(estado)) IN ('firmado', 'firmada', 'indemnización', 'indemnizacion')
+                  AND """
+                + signed_expr
+                + """
                 GROUP BY oficina
                 ORDER BY COUNT(*) DESC
                 """,
@@ -16472,6 +16533,7 @@ class Handler(BaseHTTPRequestHandler):
                         "plazo_medio_dias": current["plazo_medio_dias"] if current else 0,
                         "firmadas_anio": firmadas_anio["total"] if firmadas_anio else 0,
                         "firmadas_mes": firmadas_mes["total"] if firmadas_mes else 0,
+                        "operaciones_estudio": estudio_anio["total"] if estudio_anio else 0,
                         "ingresos": conta_year["ingresos"],
                         "gastos": conta_year["gastos"],
                         "resultado": conta_year["resultado"],
@@ -16483,6 +16545,7 @@ class Handler(BaseHTTPRequestHandler):
                         "comision_total": totals["comision_total"] if totals else 0,
                         "volumen_total": totals["volumen_total"] if totals else 0,
                         "plazo_medio_dias": totals["plazo_medio_dias"] if totals else 0,
+                        "operaciones_estudio": estudio_total["total"] if estudio_total else 0,
                         "ingresos": conta_total["ingresos"],
                         "gastos": conta_total["gastos"],
                         "resultado": conta_total["resultado"],

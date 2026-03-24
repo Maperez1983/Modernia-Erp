@@ -9423,6 +9423,11 @@ const loadHipotecaDashboard = () => {
           note: `Total: ${formatDaysMetric(totals?.plazo_medio_dias)}`,
         },
         {
+          title: `Operaciones en estudio ${currentYear}`,
+          value: numberFormatter.format(data?.current?.operaciones_estudio || 0),
+          note: `Total: ${numberFormatter.format(totals?.operaciones_estudio || 0)}`,
+        },
+        {
           title: `Comisión ${currentYear}`,
           value: euroFormatter.format(data?.current?.comision_total || 0),
           note: `Total: ${euroFormatter.format(totals?.comision_total || 0)}`,
