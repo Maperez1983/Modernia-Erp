@@ -1758,6 +1758,16 @@ body.crm-fin #companySummary {
   gap: 10px;
 }
 
+.hipoteca-bank-logo {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  object-fit: contain;
+  background: #fff;
+  border: 1px solid var(--line);
+  padding: 4px;
+}
+
 .hipoteca-bank-badge {
   width: 34px;
   height: 34px;

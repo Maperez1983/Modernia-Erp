@@ -9310,15 +9310,114 @@ const formatDaysMetric = (value) => {
   return `${num.toFixed(1)} días`;
 };
 
-const hipotecaBankBadge = (label) => {
+const HIPOTECA_BANK_BRANDS = [
+  {
+    name: "Banco Santander",
+    short: "Santander",
+    logo: "https://logo.clearbit.com/santander.com",
+    color: "#e30613",
+    aliases: ["santander", "banco santander"],
+  },
+  {
+    name: "BBVA",
+    short: "BBVA",
+    logo: "https://logo.clearbit.com/bbva.com",
+    color: "#072146",
+    aliases: ["bbva"],
+  },
+  {
+    name: "CaixaBank",
+    short: "CaixaBank",
+    logo: "https://logo.clearbit.com/caixabank.com",
+    color: "#0079c1",
+    aliases: ["caixabank", "la caixa"],
+  },
+  {
+    name: "Banco Sabadell",
+    short: "Sabadell",
+    logo: "https://logo.clearbit.com/bancsabadell.com",
+    color: "#003b7a",
+    aliases: ["sabadell", "banco sabadell"],
+  },
+  {
+    name: "Bankinter",
+    short: "Bankinter",
+    logo: "https://logo.clearbit.com/bankinter.com",
+    color: "#f58220",
+    aliases: ["bankinter"],
+  },
+  {
+    name: "Unicaja Banco",
+    short: "Unicaja",
+    logo: "https://logo.clearbit.com/unicajabanco.es",
+    color: "#007a53",
+    aliases: ["unicaja", "unicaja banco"],
+  },
+  {
+    name: "ABANCA",
+    short: "ABANCA",
+    logo: "https://logo.clearbit.com/abanca.com",
+    color: "#001f5b",
+    aliases: ["abanca"],
+  },
+  {
+    name: "Cajamar",
+    short: "Cajamar",
+    logo: "https://logo.clearbit.com/grupocooperativocajamar.es",
+    color: "#00843d",
+    aliases: ["cajamar", "cajamar caja rural"],
+  },
+  {
+    name: "UCI",
+    short: "UCI",
+    logo: "https://logo.clearbit.com/uci.com",
+    color: "#5a2d82",
+    aliases: ["uci"],
+  },
+  {
+    name: "Caja Rural de Granada",
+    short: "CR Granada",
+    logo: "https://logo.clearbit.com/ruralvia.com",
+    color: "#2e7d32",
+    aliases: ["caja rural de granada"],
+  },
+  {
+    name: "Caja Rural del Sur",
+    short: "CR del Sur",
+    logo: "https://logo.clearbit.com/cajaruraldelsur.es",
+    color: "#0b8f3d",
+    aliases: ["caja rural del sur"],
+  },
+];
+
+const resolveHipotecaBankBrand = (label) => {
   const raw = String(label || "").trim();
-  if (!raw) return "??";
-  return raw
+  const normalized = normalizeSimple(raw);
+  const brand = HIPOTECA_BANK_BRANDS.find((item) =>
+    item.aliases.some((alias) => normalizeSimple(alias) === normalized)
+  );
+  if (brand) {
+    return {
+      ...brand,
+      original: raw,
+      displayName: brand.name,
+    };
+  }
+  const fallback = raw || "Entidad sin identificar";
+  const badge = fallback
     .split(/\s+/)
     .slice(0, 2)
     .map((token) => token.charAt(0))
     .join("")
-    .toUpperCase();
+    .toUpperCase() || "??";
+  return {
+    name: fallback,
+    short: badge,
+    logo: "",
+    color: "#824c45",
+    original: raw,
+    displayName: fallback,
+  };
 };
 
 const renderHipotecaEntityKpis = (rows = [], selectedYear = "") => {
@@ -9339,14 +9438,35 @@ const renderHipotecaEntityKpis = (rows = [], selectedYear = "") => {
   table.appendChild(thead);
   const tbody = document.createElement("tbody");
   rows.forEach((row) => {
+    const brand = resolveHipotecaBankBrand(row.label);
     const tr = document.createElement("tr");
     const entityTd = document.createElement("td");
-    entityTd.innerHTML = `
-      <div class="hipoteca-bank-cell">
-        <span class="hipoteca-bank-badge">${hipotecaBankBadge(row.label)}</span>
-        <span>${row.label || "-"}</span>
-      </div>
-    `;
+    const wrapper = document.createElement("div");
+    wrapper.className = "hipoteca-bank-cell";
+    if (brand.logo) {
+      const logo = document.createElement("img");
+      logo.className = "hipoteca-bank-logo";
+      logo.src = brand.logo;
+      logo.alt = brand.displayName;
+      logo.loading = "lazy";
+      logo.addEventListener("error", () => {
+        logo.replaceWith(Object.assign(document.createElement("span"), {
+          className: "hipoteca-bank-badge",
+          textContent: brand.short,
+        }));
+      }, { once: true });
+      wrapper.appendChild(logo);
+    } else {
+      const badge = document.createElement("span");
+      badge.className = "hipoteca-bank-badge";
+      badge.style.background = brand.color;
+      badge.textContent = brand.short;
+      wrapper.appendChild(badge);
+    }
+    const name = document.createElement("span");
+    name.textContent = brand.displayName;
+    wrapper.appendChild(name);
+    entityTd.appendChild(wrapper);
     tr.appendChild(entityTd);
     [
       numberFormatter.format(Number(row.year_total || 0)),
@@ -10484,7 +10604,7 @@ const renderFinDashboard = (empresaId) => {
       { legend: false, showValues: true }
     );
 
-    const entidadLabels = data.series_entidades.map((item) => item.label);
+    const entidadLabels = data.series_entidades.map((item) => resolveHipotecaBankBrand(item.label).displayName);
     const entidadValues = data.series_entidades.map((item) => item.total);
     drawBarChart(
       finEntidadChart,
