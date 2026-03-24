@@ -1004,6 +1004,16 @@ def derive_hipoteca_financing(precio, importe_hipoteca):
     }
 
 
+def delete_hipoteca_record(conn, record_id):
+    if not record_id:
+        return False
+    row = conn.execute("SELECT id FROM hipotecas WHERE id = ?", (record_id,)).fetchone()
+    if not row:
+        return False
+    conn.execute("DELETE FROM hipotecas WHERE id = ?", (record_id,))
+    return True
+
+
 def has_explicit_renewal_action(seguro_row):
     estado = normalize_lookup_text(seguro_row.get("estado"))
     estado_ren = normalize_lookup_text(seguro_row.get("estado_renovacion"))
@@ -8515,6 +8525,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/hipotecas",
             "/api/hipotecas/firmar",
             "/api/hipotecas_update",
+            "/api/hipotecas_delete",
             "/api/gestoria",
             "/api/gestoria_trabajos",
             "/api/gestoria_trabajos_update",
@@ -8742,6 +8753,7 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path not in (
             "/api/hipotecas/firmar",
             "/api/hipotecas_update",
+            "/api/hipotecas_delete",
             "/api/clientes",
             "/api/clientes_link",
             "/api/clientes_link_delete",
@@ -8861,6 +8873,7 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path not in (
             "/api/hipotecas/firmar",
             "/api/hipotecas_update",
+            "/api/hipotecas_delete",
             "/api/clientes",
             "/api/clientes_link",
             "/api/clientes_link_delete",
@@ -11070,6 +11083,20 @@ class Handler(BaseHTTPRequestHandler):
                 f"UPDATE hipotecas SET {set_clause}, updated_at = datetime(?) WHERE id = ?",
                 values,
             )
+            audit("hipoteca", record_id, "actualizar", json.dumps(payload), payload.get("usuario"))
+        elif parsed.path == "/api/hipotecas_delete":
+            record_id = payload.get("id")
+            if not record_id:
+                json_response(self, {"error": "id requerido"}, status=400)
+                return
+            deleted = delete_hipoteca_record(conn, record_id)
+            if not deleted:
+                json_response(self, {"error": "Registro no encontrado"}, status=404)
+                return
+            audit("hipoteca", record_id, "eliminar", None, payload.get("usuario"))
+            conn.commit()
+            json_response(self, self._ok({"deleted": True}))
+            return
         elif parsed.path == "/api/gestoria_update":
             record_id = payload.get("id")
             if not record_id:

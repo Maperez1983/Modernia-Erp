@@ -10859,9 +10859,11 @@ const renderTable = (data, options = {}) => {
     });
     if (showActions) {
       const td = document.createElement("td");
-      const btn = document.createElement("button");
-      btn.textContent = "Firmar";
-      btn.addEventListener("click", () => {
+      const actions = document.createElement("div");
+      actions.className = "inline-actions";
+      const signBtn = document.createElement("button");
+      signBtn.textContent = "Firmar";
+      signBtn.addEventListener("click", () => {
         const fecha = prompt("Fecha firma (YYYY-MM-DD):");
         if (!fecha) return;
         const payload = { id: rowId, fecha_firma: fecha, estado: "FIRMADA" };
@@ -10885,7 +10887,25 @@ const renderTable = (data, options = {}) => {
             }
           });
       });
-      td.appendChild(btn);
+      actions.appendChild(signBtn);
+      const deleteBtn = document.createElement("button");
+      deleteBtn.textContent = "Eliminar";
+      deleteBtn.className = "danger";
+      deleteBtn.addEventListener("click", async () => {
+        if (!rowId) return;
+        if (!window.confirm("¿Eliminar esta hipoteca? Esta acción no se puede deshacer.")) return;
+        const data = await deleteHipoteca(rowId);
+        if (data?.error) {
+          alert(data.error);
+          return;
+        }
+        loadHipotecaBdt(true);
+        loadTable();
+        loadHipotecaDashboard();
+        loadHomeHipotecaStats().then(() => renderCompanyCards());
+      });
+      actions.appendChild(deleteBtn);
+      td.appendChild(actions);
       tr.appendChild(td);
     }
     tbody.appendChild(tr);
@@ -16651,6 +16671,14 @@ const deleteSeguro = (id) => {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ id }),
+  }).then((res) => res.json());
+};
+
+const deleteHipoteca = (id) => {
+  return fetch("/api/hipotecas_delete", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id, empresa_nombre: FIN_COMPANY }),
   }).then((res) => res.json());
 };
 
