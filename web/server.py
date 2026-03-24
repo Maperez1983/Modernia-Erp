@@ -7078,6 +7078,52 @@ def ensure_seguro_doc_link(conn, seguro_row, now, calidad_ocr=None, campos_ocr="
     return doc_id
 
 
+def parse_renta_detalles_payload(raw):
+    text = str(raw or "").strip()
+    if not text:
+        return {"notes": "", "entries": []}
+    try:
+        payload = json.loads(text)
+    except Exception:
+        return {"notes": text, "entries": []}
+    if isinstance(payload, list):
+        return {"notes": "", "entries": payload}
+    if not isinstance(payload, dict):
+        return {"notes": "", "entries": []}
+    notes = str(payload.get("notes") or "").strip()
+    entries = payload.get("entries")
+    if not isinstance(entries, list):
+        entries = []
+    return {"notes": notes, "entries": entries}
+
+
+def serialize_renta_detalles_payload(raw_value, existing_value=""):
+    current = parse_renta_detalles_payload(existing_value)
+    if isinstance(raw_value, dict):
+        payload = raw_value
+    else:
+        text = str(raw_value or "").strip()
+        if not text:
+            payload = {"notes": "", "entries": current.get("entries", [])}
+        else:
+            try:
+                payload = json.loads(text)
+            except Exception:
+                payload = {
+                    "notes": text,
+                    "entries": current.get("entries", []),
+                }
+    if isinstance(payload, list):
+        payload = {"notes": current.get("notes", ""), "entries": payload}
+    if not isinstance(payload, dict):
+        payload = {"notes": current.get("notes", ""), "entries": current.get("entries", [])}
+    notes = str(payload.get("notes") or "").strip()
+    entries = payload.get("entries")
+    if not isinstance(entries, list):
+        entries = current.get("entries", [])
+    return json.dumps({"notes": notes, "entries": entries}, ensure_ascii=False)
+
+
 def build_cliente_ficha_payload(conn, cliente_id, services_filter=None):
     cliente = conn.execute("SELECT * FROM clientes WHERE id = ?", (cliente_id,)).fetchone()
     if not cliente:
@@ -7284,7 +7330,11 @@ def build_cliente_ficha_payload(conn, cliente_id, services_filter=None):
         (cliente_id,),
     ).fetchone()
     if gestoria_row:
-        profesionales["gestoria"] = dict(gestoria_row)
+        gestoria_payload = dict(gestoria_row)
+        renta_payload = parse_renta_detalles_payload(gestoria_payload.get("renta_detalles"))
+        gestoria_payload["renta_notes"] = renta_payload.get("notes", "")
+        gestoria_payload["renta_entries"] = renta_payload.get("entries", [])
+        profesionales["gestoria"] = gestoria_payload
 
     return {
         "cliente": dict(cliente),
@@ -12999,9 +13049,14 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "Sin cambios"}, status=400)
                 return
             existing = conn.execute(
-                "SELECT id FROM cliente_gestoria WHERE cliente_id = ?",
+                "SELECT id, renta_detalles FROM cliente_gestoria WHERE cliente_id = ?",
                 (cliente_id,),
             ).fetchone()
+            if "renta_detalles" in updates:
+                updates["renta_detalles"] = serialize_renta_detalles_payload(
+                    updates.get("renta_detalles"),
+                    existing["renta_detalles"] if existing else "",
+                )
             if existing:
                 set_clause = ", ".join([f"{key} = ?" for key in updates])
                 values = list(updates.values()) + [now, cliente_id]
@@ -13899,7 +13954,14 @@ class Handler(BaseHTTPRequestHandler):
                 """,
                 (cliente_id,),
             ).fetchone()
-            json_response(self, {"row": dict(row) if row else {}})
+            if not row:
+                json_response(self, {"row": {}})
+                return
+            row_dict = dict(row)
+            renta_payload = parse_renta_detalles_payload(row_dict.get("renta_detalles"))
+            row_dict["renta_notes"] = renta_payload.get("notes", "")
+            row_dict["renta_entries"] = renta_payload.get("entries", [])
+            json_response(self, {"row": row_dict})
             return
 
         if path == "/api/acciones":

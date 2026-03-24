@@ -1198,6 +1198,90 @@ body.crm-fin #companySummary {
   gap: 8px;
 }
 
+.renta-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 14px;
+  margin-top: 12px;
+}
+
+.renta-card {
+  width: 100%;
+  text-align: left;
+  background: linear-gradient(180deg, #fffdfa 0%, #f6f1e7 100%);
+  color: var(--ink);
+  border: 1px solid rgba(60, 110, 113, 0.18);
+  box-shadow: none;
+  padding: 16px;
+}
+
+.renta-card:hover {
+  box-shadow: 0 12px 26px rgba(12, 10, 8, 0.12);
+}
+
+.renta-card.is-selected {
+  border-color: rgba(60, 110, 113, 0.5);
+  box-shadow: 0 16px 28px rgba(60, 110, 113, 0.14);
+}
+
+.renta-card-top,
+.renta-card-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+}
+
+.renta-card h4 {
+  margin: 10px 0 2px;
+}
+
+.renta-card-meta {
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.renta-result {
+  margin-top: 12px;
+  font-weight: 700;
+}
+
+.renta-result.negative {
+  color: #1f7a4c;
+}
+
+.renta-result.positive {
+  color: #b33a2f;
+}
+
+.renta-result.neutral {
+  color: var(--ink);
+}
+
+.renta-detail-card {
+  margin-top: 14px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: #fffdfa;
+}
+
+.renta-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+  margin-bottom: 14px;
+}
+
+.renta-detail-item {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #ffffff;
+  padding: 10px 12px;
+}
+
 .inline-row {
   display: flex;
   gap: 12px;

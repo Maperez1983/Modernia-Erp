@@ -1507,6 +1507,8 @@ const gestoriaRentaTable = document.getElementById("gestoriaRentaTable");
 const gestoriaRentaInfo = document.getElementById("gestoriaRentaInfo");
 const gestoriaRentaDetallesForm = document.getElementById("gestoriaRentaDetallesForm");
 const gestoriaRentaDetallesStatus = document.getElementById("gestoriaRentaDetallesStatus");
+const gestoriaRentaCards = document.getElementById("gestoriaRentaCards");
+const gestoriaRentaDetail = document.getElementById("gestoriaRentaDetail");
 const gestoriaAdminForm = document.getElementById("gestoriaAdminForm");
 const gestoriaAdminStatus = document.getElementById("gestoriaAdminStatus");
 const gestoriaAdminTable = document.getElementById("gestoriaAdminTable");
@@ -16456,6 +16458,196 @@ const loadGestoriaClienteLibros = (clienteId) => {
     });
 };
 
+const parseGestoriaRentaPayload = (row = {}) => {
+  if (!row || typeof row !== "object") {
+    return { notes: "", entries: [] };
+  }
+  if (Array.isArray(row.renta_entries)) {
+    return {
+      notes: String(row.renta_notes || "").trim(),
+      entries: row.renta_entries.filter((item) => item && typeof item === "object"),
+    };
+  }
+  const raw = String(row.renta_detalles || "").trim();
+  if (!raw) {
+    return { notes: "", entries: [] };
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return { notes: "", entries: parsed };
+    }
+    if (parsed && typeof parsed === "object") {
+      return {
+        notes: String(parsed.notes || "").trim(),
+        entries: Array.isArray(parsed.entries) ? parsed.entries : [],
+      };
+    }
+  } catch {}
+  return { notes: raw, entries: [] };
+};
+
+const formatRentaResult = (value) => {
+  const num = Number(value);
+  if (!Number.isFinite(num)) {
+    return { text: "-", className: "neutral" };
+  }
+  return {
+    text: euroFormatter.format(num),
+    className: num < 0 ? "negative" : num > 0 ? "positive" : "neutral",
+  };
+};
+
+const renderGestoriaRentaDetail = (entry = {}) => {
+  if (!gestoriaRentaDetail) return;
+  if (!entry || typeof entry !== "object") {
+    gestoriaRentaDetail.classList.add("hidden");
+    gestoriaRentaDetail.innerHTML = "";
+    return;
+  }
+  const detail = document.createElement("div");
+  detail.className = "renta-detail-card";
+  const title = document.createElement("h4");
+  title.textContent = `Ficha renta ${entry.ejercicio || "2024"}`;
+  detail.appendChild(title);
+  const subtitle = document.createElement("p");
+  subtitle.className = "muted";
+  subtitle.textContent = formatNombreCliente(entry.cliente_nombre || "");
+  detail.appendChild(subtitle);
+
+  const result = formatRentaResult(entry.resultado_declaracion);
+  const summary = document.createElement("div");
+  summary.className = "renta-detail-grid";
+  const rows = [
+    ["DNI", entry.cliente_nif || "-"],
+    ["Caducidad DNI", formatCell("fecha", entry.dni_caducidad || "") || entry.dni_caducidad || "-"],
+    ["Fecha nacimiento", formatCell("fecha", entry.cliente_fecha_nacimiento || "") || entry.cliente_fecha_nacimiento || "-"],
+    ["Estado civil", entry.estado_civil || "-"],
+    ["Hijos", String(entry.hijos_count ?? "-")],
+    ["Presentación", formatCell("fecha", entry.presentacion_fecha || "") || entry.presentacion_fecha || "-"],
+    ["Casilla 505", entry.casilla_505 != null ? euroFormatter.format(parseMoneyValue(entry.casilla_505)) : "-"],
+    ["Resultado declaración", result.text],
+    ["Ingresos", entry.ingresos_principales_total != null ? euroFormatter.format(parseMoneyValue(entry.ingresos_principales_total)) : "-"],
+    ["Dirección", entry.direccion || "-"],
+    ["Población", [entry.codigo_postal, entry.poblacion, entry.provincia].filter(Boolean).join(" ") || "-"],
+  ];
+  rows.forEach(([label, value]) => {
+    const item = document.createElement("div");
+    item.className = "renta-detail-item";
+    const k = document.createElement("div");
+    k.className = "muted";
+    k.textContent = label;
+    const v = document.createElement("div");
+    v.textContent = value;
+    if (label === "Resultado declaración") {
+      v.classList.add("renta-result", result.className);
+    }
+    item.appendChild(k);
+    item.appendChild(v);
+    summary.appendChild(item);
+  });
+  detail.appendChild(summary);
+
+  const extra = document.createElement("div");
+  extra.className = "inline-list";
+  const pushRow = (label, value) => {
+    if (!value || (Array.isArray(value) && !value.length)) return;
+    const row = document.createElement("div");
+    row.className = "inline-row";
+    const left = document.createElement("div");
+    left.className = "muted";
+    left.textContent = label;
+    const right = document.createElement("div");
+    right.textContent = Array.isArray(value) ? value.join(" · ") : value;
+    row.appendChild(left);
+    row.appendChild(right);
+    extra.appendChild(row);
+  };
+  pushRow("Cuentas", entry.cuentas_detectadas || []);
+  pushRow("Pagadores", entry.pagadores_detectados || []);
+  pushRow(
+    "Propiedades",
+    [
+      entry?.patrimonio?.direccion_inmueble_principal || "",
+      entry?.patrimonio?.referencia_catastral_principal || "",
+    ].filter(Boolean)
+  );
+  pushRow("Préstamo", entry?.patrimonio?.prestamo_hipotecario_id || "");
+  pushRow(
+    "Hijos",
+    (entry.hijos || []).map((child) =>
+      [child.nombre || "", formatCell("fecha", child.fecha_nacimiento || "") || child.fecha_nacimiento || ""]
+        .filter(Boolean)
+        .join(" · ")
+    )
+  );
+  pushRow("Archivos", entry.source_files || []);
+  if (extra.childNodes.length) {
+    detail.appendChild(extra);
+  }
+  gestoriaRentaDetail.innerHTML = "";
+  gestoriaRentaDetail.appendChild(detail);
+  gestoriaRentaDetail.classList.remove("hidden");
+};
+
+const renderGestoriaRentaCards = (row = {}) => {
+  if (!gestoriaRentaCards) return;
+  const payload = parseGestoriaRentaPayload(row);
+  const entries = (payload.entries || [])
+    .slice()
+    .sort((a, b) => String(b.ejercicio || "").localeCompare(String(a.ejercicio || "")));
+  if (!entries.length) {
+    gestoriaRentaCards.innerHTML = "<p class='muted'>Sin campañas de renta importadas.</p>";
+    if (gestoriaRentaDetail) {
+      gestoriaRentaDetail.classList.add("hidden");
+      gestoriaRentaDetail.innerHTML = "";
+    }
+    return;
+  }
+  const grid = document.createElement("div");
+  grid.className = "renta-cards-grid";
+  const selectedId =
+    String(state.currentRentaEntryId || "").trim() && entries.some((entry) => entry.id === state.currentRentaEntryId)
+      ? state.currentRentaEntryId
+      : entries[0].id;
+  state.currentRentaEntryId = selectedId;
+  entries.forEach((entry) => {
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = "renta-card";
+    card.classList.toggle("is-selected", entry.id === selectedId);
+    const split = splitNombreApellidos(formatNombreCliente(entry.cliente_nombre || ""), "Física");
+    const result = formatRentaResult(entry.resultado_declaracion);
+    card.innerHTML = `
+      <div class="renta-card-top">
+        <strong>${entry.ejercicio || "2024"}</strong>
+        <span class="pill">${entry.estado_civil || "Sin estado civil"}</span>
+      </div>
+      <h4>${split.apellidos || "-"}</h4>
+      <div>${split.nombre || formatNombreCliente(entry.cliente_nombre || "") || "-"}</div>
+      <div class="muted">${entry.cliente_nif || "-"}</div>
+      <div class="renta-card-meta">
+        <span>Cad. DNI: ${formatCell("fecha", entry.dni_caducidad || "") || entry.dni_caducidad || "-"}</span>
+        <span>Hijos: ${entry.hijos_count ?? 0}</span>
+      </div>
+      <div class="renta-card-meta">
+        <span>Casilla 505</span>
+        <strong>${entry.casilla_505 != null ? euroFormatter.format(parseMoneyValue(entry.casilla_505)) : "-"}</strong>
+      </div>
+      <div class="renta-result ${result.className}">${result.text}</div>
+    `;
+    card.addEventListener("click", () => {
+      state.currentRentaEntryId = entry.id;
+      renderGestoriaRentaCards(row);
+    });
+    grid.appendChild(card);
+  });
+  gestoriaRentaCards.innerHTML = "";
+  gestoriaRentaCards.appendChild(grid);
+  const selected = entries.find((entry) => entry.id === selectedId) || entries[0];
+  renderGestoriaRentaDetail(selected);
+};
+
 const loadClienteGestoria = (clienteId) => {
   if (!clienteGestoriaForm) return;
   api(`/api/cliente_gestoria?cliente_id=${clienteId}`).then((data) => {
@@ -16481,8 +16673,12 @@ const loadClienteGestoria = (clienteId) => {
     if (gestoriaRentaDetallesForm) {
       const rentaInput = gestoriaRentaDetallesForm.querySelector('[name="renta_detalles"]');
       if (rentaInput) {
-        rentaInput.value = row.renta_detalles || "";
+        rentaInput.value = row.renta_notes || "";
       }
+    }
+    renderGestoriaRentaCards(row);
+    if (gestoriaRentaInfo && Array.isArray(row.renta_entries) && row.renta_entries.length) {
+      gestoriaRentaInfo.textContent = `Mostrando ${row.renta_entries.length} campañas de renta.`;
     }
     updateGestoriaModuleTabsFromForm();
   });
