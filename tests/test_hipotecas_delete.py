@@ -202,6 +202,28 @@ class HipotecasDeleteTests(unittest.TestCase):
         self.assertIn("Cesión Juan", gestiones)
         self.assertIn("Cesión a inmobiliarias", gestiones)
 
+    def test_build_hipoteca_accounting_entries_skips_cesion_costs_for_particulares(self):
+        row = dict(self.conn.execute("SELECT * FROM hipotecas WHERE id = 'h1'").fetchone())
+        row["oficina"] = "PARTICULARES"
+        entries = build_hipoteca_accounting_entries(row)
+
+        self.assertEqual([item["gestion"] for item in entries], ["Comisión cliente"])
+
+    def test_build_hipoteca_accounting_entries_derives_missing_split_from_total(self):
+        row = dict(self.conn.execute("SELECT * FROM hipotecas WHERE id = 'h1'").fetchone())
+        row["oficina"] = "CASA AXARQUIA"
+        row["comision"] = 2500.0
+        row["comision_juan"] = None
+        row["comision_modernia"] = None
+        row["cesion"] = None
+
+        entries = build_hipoteca_accounting_entries(row)
+        totals = {item["gestion"]: item["importe"] for item in entries}
+
+        self.assertEqual(totals["Comisión cliente"], 2500.0)
+        self.assertEqual(totals["Cesión Juan"], 500.0)
+        self.assertEqual(totals["Cesión a inmobiliarias"], 500.0)
+
     def test_resolve_hipoteca_contabilidad_link_supports_legacy_schema_without_cliente_id(self):
         legacy = sqlite3.connect(":memory:")
         legacy.row_factory = sqlite3.Row

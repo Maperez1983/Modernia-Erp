@@ -1407,6 +1407,11 @@ def derive_hipoteca_inmobiliaria_cost(row):
     return 0.0
 
 
+def hipoteca_office_has_no_cesion_costs(value):
+    key = normalize_lookup_text(value)
+    return key in {"PARTICULAR", "PARTICULARES"}
+
+
 def build_hipoteca_accounting_entries(row):
     estado = (row.get("estado") if isinstance(row, dict) else row["estado"]) or ""
     fecha_raw = (row.get("fecha_firma") if isinstance(row, dict) else row["fecha_firma"]) or ""
@@ -1435,8 +1440,21 @@ def build_hipoteca_accounting_entries(row):
         )
 
     total_comision = (row.get("comision") if isinstance(row, dict) else row["comision"]) or 0
-    gasto_juan = (row.get("comision_juan") if isinstance(row, dict) else row["comision_juan"]) or 0
-    gasto_inmobiliaria = derive_hipoteca_inmobiliaria_cost(row)
+    oficina = (row.get("oficina") if isinstance(row, dict) else row["oficina"]) or ""
+    split = derive_hipoteca_commissions(total_comision, oficina)
+    raw_gasto_juan = (row.get("comision_juan") if isinstance(row, dict) else row["comision_juan"])
+    raw_gasto_inmobiliaria = (row.get("cesion") if isinstance(row, dict) else row["cesion"])
+    if raw_gasto_juan in (None, ""):
+        gasto_juan = split["comision_juan"]
+    else:
+        gasto_juan = raw_gasto_juan
+    if raw_gasto_inmobiliaria in (None, ""):
+        gasto_inmobiliaria = split["cesion"]
+    else:
+        gasto_inmobiliaria = raw_gasto_inmobiliaria
+    if hipoteca_office_has_no_cesion_costs(oficina):
+        gasto_juan = 0
+        gasto_inmobiliaria = 0
 
     add_entry("Comisión cliente", "Ingreso", total_comision, "Comisión cliente")
     add_entry("Cesión Juan", "Gasto", gasto_juan, "Cesión Juan")
