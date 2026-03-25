@@ -31,6 +31,21 @@ from email.header import decode_header
 from email.utils import parseaddr
 
 try:
+    from .auth_security import hash_password as runtime_hash_password
+    from .auth_security import needs_password_rehash
+    from .auth_security import verify_password as runtime_verify_password
+    from .schema_support import apply_schema_file, ensure_column, table_columns
+    from .seguros_state import can_transition_seguro_estado as runtime_can_transition_seguro_estado
+    from .seguros_state import normalize_seguro_estado_value as runtime_normalize_seguro_estado_value
+except ImportError:
+    from auth_security import hash_password as runtime_hash_password
+    from auth_security import needs_password_rehash
+    from auth_security import verify_password as runtime_verify_password
+    from schema_support import apply_schema_file, ensure_column, table_columns
+    from seguros_state import can_transition_seguro_estado as runtime_can_transition_seguro_estado
+    from seguros_state import normalize_seguro_estado_value as runtime_normalize_seguro_estado_value
+
+try:
     from openpyxl import Workbook, load_workbook
     OPENPYXL_AVAILABLE = True
 except Exception:
@@ -602,39 +617,11 @@ def log_seguro_event(conn, seguro_row, event_type, now, motivo="", payload=None)
 
 
 def normalize_seguro_estado_value(value):
-    key = normalize_lookup_text(value)
-    if not key:
-        return ""
-    if key in ("PRESUPUESTO",):
-        return "Presupuesto"
-    if key in ("PROYECTO", "PENDIENTE"):
-        return "Presupuesto"
-    if key in ("RECHAZADA", "RECHAZADO", "NO ACEPTADA", "NO ACEPTADO", "DENEGADA", "DENEGADO"):
-        return "Rechazada"
-    if key.startswith("RECHAZADA ") or key.startswith("RECHAZADO "):
-        return "Rechazada"
-    if key in ("CONTRATADA", "CONTRATADO"):
-        return "Contratada"
-    if key in ("EN VIGOR", "ENVIGOR", "VIGENTE", "ACTIVA", "ACTIVO"):
-        return "En vigor"
-    if key in ("ANULADA", "ANULADO", "BAJA", "CANCELADA", "CANCELADO"):
-        return "Anulada"
-    return str(value or "").strip()
+    return runtime_normalize_seguro_estado_value(value)
 
 
 def can_transition_seguro_estado(current_value, target_value):
-    current = normalize_seguro_estado_value(current_value)
-    target = normalize_seguro_estado_value(target_value)
-    if not target:
-        return True
-    if not current or current == target:
-        return True
-    # En CRM operativo permitimos cambio manual entre estados canónicos
-    # para corregir datos históricos/importados sin bloquear al usuario.
-    canonical = {"Presupuesto", "Contratada", "En vigor", "Anulada", "Rechazada"}
-    if current in canonical and target in canonical:
-        return True
-    return True
+    return runtime_can_transition_seguro_estado(current_value, target_value)
 
 
 def upsert_seguro_comision_contabilidad(conn, seguro_row, now, movimiento="emision", fecha=None, importe=None):
@@ -1960,24 +1947,11 @@ def load_postal_catalog(conn):
             continue
 
 def hash_password(password):
-    if not password:
-        return None
-    salt = os.urandom(16).hex()
-    digest = hashlib.sha256((salt + password).encode("utf-8")).hexdigest()
-    return f"{salt}${digest}"
+    return runtime_hash_password(password)
 
 
 def verify_password(password, password_hash):
-    if not password_hash or not password:
-        return False
-    raw = str(password_hash)
-    if "$" not in raw:
-        return False
-    salt, stored = raw.split("$", 1)
-    if not salt or not stored:
-        return False
-    digest = hashlib.sha256((salt + password).encode("utf-8")).hexdigest()
-    return secrets.compare_digest(digest, stored)
+    return runtime_verify_password(password, password_hash)
 
 
 def _cleanup_expired_sessions():
@@ -8126,6 +8100,7 @@ def open_sqlite_conn(db_path, with_row_factory=False):
 
 def ensure_tables(db_path):
     conn = open_sqlite_conn(db_path, with_row_factory=False)
+    apply_schema_file(conn, ROOT.parent / "schema.sql")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS ocr_jobs (
@@ -8160,11 +8135,8 @@ def ensure_tables(db_path):
         )
         """
     )
-    cliente_gestoria_cols = [row[1] for row in conn.execute("PRAGMA table_info(cliente_gestoria)").fetchall()]
-    if "mod_renta" not in cliente_gestoria_cols:
-        conn.execute("ALTER TABLE cliente_gestoria ADD COLUMN mod_renta INTEGER")
-    if "renta_detalles" not in cliente_gestoria_cols:
-        conn.execute("ALTER TABLE cliente_gestoria ADD COLUMN renta_detalles TEXT")
+    ensure_column(conn, "cliente_gestoria", "mod_renta", "mod_renta INTEGER")
+    ensure_column(conn, "cliente_gestoria", "renta_detalles", "renta_detalles TEXT")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS gestoria_modelos (
@@ -8242,19 +8214,12 @@ def ensure_tables(db_path):
         """
     )
     try:
-        docs_cols = [row[1] for row in conn.execute("PRAGMA table_info(gestoria_docs)").fetchall()]
-        if "doc_key" not in docs_cols:
-            conn.execute("ALTER TABLE gestoria_docs ADD COLUMN doc_key TEXT")
-        if "doc_url" not in docs_cols:
-            conn.execute("ALTER TABLE gestoria_docs ADD COLUMN doc_url TEXT")
-        if "referencia_tipo" not in docs_cols:
-            conn.execute("ALTER TABLE gestoria_docs ADD COLUMN referencia_tipo TEXT")
-        if "referencia_id" not in docs_cols:
-            conn.execute("ALTER TABLE gestoria_docs ADD COLUMN referencia_id TEXT")
-        if "calidad_ocr" not in docs_cols:
-            conn.execute("ALTER TABLE gestoria_docs ADD COLUMN calidad_ocr TEXT")
-        if "campos_ocr" not in docs_cols:
-            conn.execute("ALTER TABLE gestoria_docs ADD COLUMN campos_ocr TEXT")
+        ensure_column(conn, "gestoria_docs", "doc_key", "doc_key TEXT")
+        ensure_column(conn, "gestoria_docs", "doc_url", "doc_url TEXT")
+        ensure_column(conn, "gestoria_docs", "referencia_tipo", "referencia_tipo TEXT")
+        ensure_column(conn, "gestoria_docs", "referencia_id", "referencia_id TEXT")
+        ensure_column(conn, "gestoria_docs", "calidad_ocr", "calidad_ocr TEXT")
+        ensure_column(conn, "gestoria_docs", "campos_ocr", "campos_ocr TEXT")
     except sqlite3.Error:
         pass
     conn.execute(
@@ -8316,31 +8281,18 @@ def ensure_tables(db_path):
         )
         """
     )
-    ases_cols = [row[1] for row in conn.execute("PRAGMA table_info(asesoramientos_financiacion)").fetchall()]
-    if "cliente1_tiempo_contrato" not in ases_cols:
-        conn.execute("ALTER TABLE asesoramientos_financiacion ADD COLUMN cliente1_tiempo_contrato TEXT")
-    if "cliente2_tiempo_contrato" not in ases_cols:
-        conn.execute("ALTER TABLE asesoramientos_financiacion ADD COLUMN cliente2_tiempo_contrato TEXT")
-    if "cliente1_regimen" not in ases_cols:
-        conn.execute("ALTER TABLE asesoramientos_financiacion ADD COLUMN cliente1_regimen TEXT")
-    if "cliente2_regimen" not in ases_cols:
-        conn.execute("ALTER TABLE asesoramientos_financiacion ADD COLUMN cliente2_regimen TEXT")
-    if "cliente1_prestamo_activo" not in ases_cols:
-        conn.execute("ALTER TABLE asesoramientos_financiacion ADD COLUMN cliente1_prestamo_activo TEXT")
-    if "cliente1_prestamo_entidad" not in ases_cols:
-        conn.execute("ALTER TABLE asesoramientos_financiacion ADD COLUMN cliente1_prestamo_entidad TEXT")
-    if "cliente1_prestamo_resto" not in ases_cols:
-        conn.execute("ALTER TABLE asesoramientos_financiacion ADD COLUMN cliente1_prestamo_resto REAL")
-    if "cliente2_prestamo_activo" not in ases_cols:
-        conn.execute("ALTER TABLE asesoramientos_financiacion ADD COLUMN cliente2_prestamo_activo TEXT")
-    if "cliente2_prestamo_entidad" not in ases_cols:
-        conn.execute("ALTER TABLE asesoramientos_financiacion ADD COLUMN cliente2_prestamo_entidad TEXT")
-    if "cliente2_prestamo_resto" not in ases_cols:
-        conn.execute("ALTER TABLE asesoramientos_financiacion ADD COLUMN cliente2_prestamo_resto REAL")
-    if "calidad_ocr" not in ases_cols:
-        conn.execute("ALTER TABLE asesoramientos_financiacion ADD COLUMN calidad_ocr TEXT")
-    if "campos_ocr" not in ases_cols:
-        conn.execute("ALTER TABLE asesoramientos_financiacion ADD COLUMN campos_ocr TEXT")
+    ensure_column(conn, "asesoramientos_financiacion", "cliente1_tiempo_contrato", "cliente1_tiempo_contrato TEXT")
+    ensure_column(conn, "asesoramientos_financiacion", "cliente2_tiempo_contrato", "cliente2_tiempo_contrato TEXT")
+    ensure_column(conn, "asesoramientos_financiacion", "cliente1_regimen", "cliente1_regimen TEXT")
+    ensure_column(conn, "asesoramientos_financiacion", "cliente2_regimen", "cliente2_regimen TEXT")
+    ensure_column(conn, "asesoramientos_financiacion", "cliente1_prestamo_activo", "cliente1_prestamo_activo TEXT")
+    ensure_column(conn, "asesoramientos_financiacion", "cliente1_prestamo_entidad", "cliente1_prestamo_entidad TEXT")
+    ensure_column(conn, "asesoramientos_financiacion", "cliente1_prestamo_resto", "cliente1_prestamo_resto REAL")
+    ensure_column(conn, "asesoramientos_financiacion", "cliente2_prestamo_activo", "cliente2_prestamo_activo TEXT")
+    ensure_column(conn, "asesoramientos_financiacion", "cliente2_prestamo_entidad", "cliente2_prestamo_entidad TEXT")
+    ensure_column(conn, "asesoramientos_financiacion", "cliente2_prestamo_resto", "cliente2_prestamo_resto REAL")
+    ensure_column(conn, "asesoramientos_financiacion", "calidad_ocr", "calidad_ocr TEXT")
+    ensure_column(conn, "asesoramientos_financiacion", "campos_ocr", "campos_ocr TEXT")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS gestoria_contabilidad (
@@ -8571,51 +8523,28 @@ def ensure_tables(db_path):
         )
         """
     )
-    campanas_cols = [row[1] for row in conn.execute("PRAGMA table_info(seguros_campanas)").fetchall()]
-    if "origen" not in campanas_cols:
-        conn.execute("ALTER TABLE seguros_campanas ADD COLUMN origen TEXT")
-    if "adjunto_url" not in campanas_cols:
-        conn.execute("ALTER TABLE seguros_campanas ADD COLUMN adjunto_url TEXT")
-    if "adjunto_nombre" not in campanas_cols:
-        conn.execute("ALTER TABLE seguros_campanas ADD COLUMN adjunto_nombre TEXT")
-    if "precio_base" not in campanas_cols:
-        conn.execute("ALTER TABLE seguros_campanas ADD COLUMN precio_base REAL")
-    if "comision_pct" not in campanas_cols:
-        conn.execute("ALTER TABLE seguros_campanas ADD COLUMN comision_pct REAL")
-    if "comision_fija" not in campanas_cols:
-        conn.execute("ALTER TABLE seguros_campanas ADD COLUMN comision_fija REAL")
+    ensure_column(conn, "seguros_campanas", "origen", "origen TEXT")
+    ensure_column(conn, "seguros_campanas", "adjunto_url", "adjunto_url TEXT")
+    ensure_column(conn, "seguros_campanas", "adjunto_nombre", "adjunto_nombre TEXT")
+    ensure_column(conn, "seguros_campanas", "precio_base", "precio_base REAL")
+    ensure_column(conn, "seguros_campanas", "comision_pct", "comision_pct REAL")
+    ensure_column(conn, "seguros_campanas", "comision_fija", "comision_fija REAL")
     try:
-        seguros_cols = [row[1] for row in conn.execute("PRAGMA table_info(seguros)").fetchall()]
-        if "poliza_key" not in seguros_cols:
-            conn.execute("ALTER TABLE seguros ADD COLUMN poliza_key TEXT")
-        if "poliza_url" not in seguros_cols:
-            conn.execute("ALTER TABLE seguros ADD COLUMN poliza_url TEXT")
-        if "comision" not in seguros_cols:
-            conn.execute("ALTER TABLE seguros ADD COLUMN comision REAL")
-        if "porcentaje" not in seguros_cols:
-            conn.execute("ALTER TABLE seguros ADD COLUMN porcentaje REAL")
-        if "produccion" not in seguros_cols:
-            conn.execute("ALTER TABLE seguros ADD COLUMN produccion REAL")
-        if "colaborador" not in seguros_cols:
-            conn.execute("ALTER TABLE seguros ADD COLUMN colaborador TEXT")
-        if "cliente_id" not in seguros_cols:
-            conn.execute("ALTER TABLE seguros ADD COLUMN cliente_id TEXT")
-        if "fecha_baja" not in seguros_cols:
-            conn.execute("ALTER TABLE seguros ADD COLUMN fecha_baja TEXT")
-        if "motivo_baja" not in seguros_cols:
-            conn.execute("ALTER TABLE seguros ADD COLUMN motivo_baja TEXT")
-        if "estado_poliza" not in seguros_cols:
-            conn.execute("ALTER TABLE seguros ADD COLUMN estado_poliza TEXT")
-        if "poliza_origen_id" not in seguros_cols:
-            conn.execute("ALTER TABLE seguros ADD COLUMN poliza_origen_id TEXT")
-        if "poliza_sustituta_id" not in seguros_cols:
-            conn.execute("ALTER TABLE seguros ADD COLUMN poliza_sustituta_id TEXT")
-        if "version_grupo" not in seguros_cols:
-            conn.execute("ALTER TABLE seguros ADD COLUMN version_grupo TEXT")
-        if "tipo_vigencia" not in seguros_cols:
-            conn.execute("ALTER TABLE seguros ADD COLUMN tipo_vigencia TEXT")
-        if "datos_ramo_json" not in seguros_cols:
-            conn.execute("ALTER TABLE seguros ADD COLUMN datos_ramo_json TEXT")
+        ensure_column(conn, "seguros", "poliza_key", "poliza_key TEXT")
+        ensure_column(conn, "seguros", "poliza_url", "poliza_url TEXT")
+        ensure_column(conn, "seguros", "comision", "comision REAL")
+        ensure_column(conn, "seguros", "porcentaje", "porcentaje REAL")
+        ensure_column(conn, "seguros", "produccion", "produccion REAL")
+        ensure_column(conn, "seguros", "colaborador", "colaborador TEXT")
+        ensure_column(conn, "seguros", "cliente_id", "cliente_id TEXT")
+        ensure_column(conn, "seguros", "fecha_baja", "fecha_baja TEXT")
+        ensure_column(conn, "seguros", "motivo_baja", "motivo_baja TEXT")
+        ensure_column(conn, "seguros", "estado_poliza", "estado_poliza TEXT")
+        ensure_column(conn, "seguros", "poliza_origen_id", "poliza_origen_id TEXT")
+        ensure_column(conn, "seguros", "poliza_sustituta_id", "poliza_sustituta_id TEXT")
+        ensure_column(conn, "seguros", "version_grupo", "version_grupo TEXT")
+        ensure_column(conn, "seguros", "tipo_vigencia", "tipo_vigencia TEXT")
+        ensure_column(conn, "seguros", "datos_ramo_json", "datos_ramo_json TEXT")
     except sqlite3.Error:
         pass
     try:
@@ -8763,57 +8692,28 @@ def ensure_tables(db_path):
         )
         """
     )
-    cols = [row[1] for row in conn.execute("PRAGMA table_info(clientes)").fetchall()]
-    if "tipo_persona" not in cols:
-        conn.execute("ALTER TABLE clientes ADD COLUMN tipo_persona TEXT")
-    if "codigo_postal" not in cols:
-        conn.execute("ALTER TABLE clientes ADD COLUMN codigo_postal TEXT")
-    if "poblacion" not in cols:
-        conn.execute("ALTER TABLE clientes ADD COLUMN poblacion TEXT")
-    if "provincia" not in cols:
-        conn.execute("ALTER TABLE clientes ADD COLUMN provincia TEXT")
-    modelo_cols = [row[1] for row in conn.execute("PRAGMA table_info(gestoria_modelos)").fetchall()]
-    if "responsable" not in modelo_cols:
-        conn.execute("ALTER TABLE gestoria_modelos ADD COLUMN responsable TEXT")
-    trabajo_cols = [row[1] for row in conn.execute("PRAGMA table_info(gestoria_trabajos)").fetchall()]
-    if "responsable" not in trabajo_cols:
-        conn.execute("ALTER TABLE gestoria_trabajos ADD COLUMN responsable TEXT")
-    if "sla_dias" not in trabajo_cols:
-        conn.execute("ALTER TABLE gestoria_trabajos ADD COLUMN sla_dias INTEGER")
-    acciones_cols = [row[1] for row in conn.execute("PRAGMA table_info(acciones)").fetchall()]
-    if "responsable" not in acciones_cols:
-        conn.execute("ALTER TABLE acciones ADD COLUMN responsable TEXT")
-    if "recordatorio_min" not in acciones_cols:
-        conn.execute("ALTER TABLE acciones ADD COLUMN recordatorio_min INTEGER")
-    if "inmueble_id" not in acciones_cols:
-        conn.execute("ALTER TABLE acciones ADD COLUMN inmueble_id TEXT")
-    inm_cols = [row[1] for row in conn.execute("PRAGMA table_info(inmuebles)").fetchall()]
-    if "valor_referencia" not in inm_cols:
-        conn.execute("ALTER TABLE inmuebles ADD COLUMN valor_referencia REAL")
-    conta_cols = [row[1] for row in conn.execute("PRAGMA table_info(gestoria_contabilidad)").fetchall()]
-    if "gestion" not in conta_cols:
-        conn.execute("ALTER TABLE gestoria_contabilidad ADD COLUMN gestion TEXT")
-    if "seguro_id" not in conta_cols:
-        conn.execute("ALTER TABLE gestoria_contabilidad ADD COLUMN seguro_id TEXT")
-    if "hipoteca_id" not in conta_cols:
-        conn.execute("ALTER TABLE gestoria_contabilidad ADD COLUMN hipoteca_id TEXT")
-    if "poliza_numero" not in conta_cols:
-        conn.execute("ALTER TABLE gestoria_contabilidad ADD COLUMN poliza_numero TEXT")
-    if "cliente_ids_json" not in conta_cols:
-        conn.execute("ALTER TABLE gestoria_contabilidad ADD COLUMN cliente_ids_json TEXT")
+    ensure_column(conn, "clientes", "tipo_persona", "tipo_persona TEXT")
+    ensure_column(conn, "clientes", "codigo_postal", "codigo_postal TEXT")
+    ensure_column(conn, "clientes", "poblacion", "poblacion TEXT")
+    ensure_column(conn, "clientes", "provincia", "provincia TEXT")
+    ensure_column(conn, "gestoria_modelos", "responsable", "responsable TEXT")
+    ensure_column(conn, "gestoria_trabajos", "responsable", "responsable TEXT")
+    ensure_column(conn, "gestoria_trabajos", "sla_dias", "sla_dias INTEGER")
+    ensure_column(conn, "acciones", "responsable", "responsable TEXT")
+    ensure_column(conn, "acciones", "recordatorio_min", "recordatorio_min INTEGER")
+    ensure_column(conn, "acciones", "inmueble_id", "inmueble_id TEXT")
+    ensure_column(conn, "inmuebles", "valor_referencia", "valor_referencia REAL")
+    ensure_column(conn, "gestoria_contabilidad", "gestion", "gestion TEXT")
+    ensure_column(conn, "gestoria_contabilidad", "seguro_id", "seguro_id TEXT")
+    ensure_column(conn, "gestoria_contabilidad", "hipoteca_id", "hipoteca_id TEXT")
+    ensure_column(conn, "gestoria_contabilidad", "poliza_numero", "poliza_numero TEXT")
+    ensure_column(conn, "gestoria_contabilidad", "cliente_ids_json", "cliente_ids_json TEXT")
     normalize_auto_seguro_commission_assignments(conn)
-    terceros_cols = [row[1] for row in conn.execute("PRAGMA table_info(gestoria_terceros)").fetchall()]
-    if "cuenta_contable" not in terceros_cols:
-        conn.execute("ALTER TABLE gestoria_terceros ADD COLUMN cuenta_contable TEXT")
-    facturas_cols = [row[1] for row in conn.execute("PRAGMA table_info(gestoria_facturas)").fetchall()]
-    if "iva_pct" not in facturas_cols:
-        conn.execute("ALTER TABLE gestoria_facturas ADD COLUMN iva_pct REAL")
-    if "estado_ocr" not in facturas_cols:
-        conn.execute("ALTER TABLE gestoria_facturas ADD COLUMN estado_ocr TEXT")
-    if "doc_key" not in facturas_cols:
-        conn.execute("ALTER TABLE gestoria_facturas ADD COLUMN doc_key TEXT")
-    if "raw_text" not in facturas_cols:
-        conn.execute("ALTER TABLE gestoria_facturas ADD COLUMN raw_text TEXT")
+    ensure_column(conn, "gestoria_terceros", "cuenta_contable", "cuenta_contable TEXT")
+    ensure_column(conn, "gestoria_facturas", "iva_pct", "iva_pct REAL")
+    ensure_column(conn, "gestoria_facturas", "estado_ocr", "estado_ocr TEXT")
+    ensure_column(conn, "gestoria_facturas", "doc_key", "doc_key TEXT")
+    ensure_column(conn, "gestoria_facturas", "raw_text", "raw_text TEXT")
     load_postal_catalog(conn)
     conn.commit()
     conn.close()
@@ -8840,23 +8740,14 @@ def ensure_usuarios_schema(conn):
         )
         """
     )
-    user_cols = [row[1] for row in conn.execute("PRAGMA table_info(usuarios)").fetchall()]
-    if "apellido" not in user_cols:
-        conn.execute("ALTER TABLE usuarios ADD COLUMN apellido TEXT")
-    if "usuario" not in user_cols:
-        conn.execute("ALTER TABLE usuarios ADD COLUMN usuario TEXT")
-    if "email" not in user_cols:
-        conn.execute("ALTER TABLE usuarios ADD COLUMN email TEXT")
-    if "servicio" not in user_cols:
-        conn.execute("ALTER TABLE usuarios ADD COLUMN servicio TEXT")
-    if "password_hash" not in user_cols:
-        conn.execute("ALTER TABLE usuarios ADD COLUMN password_hash TEXT")
-    if "invite_token" not in user_cols:
-        conn.execute("ALTER TABLE usuarios ADD COLUMN invite_token TEXT")
-    if "invite_expires_at" not in user_cols:
-        conn.execute("ALTER TABLE usuarios ADD COLUMN invite_expires_at TEXT")
-    if "invite_sent_at" not in user_cols:
-        conn.execute("ALTER TABLE usuarios ADD COLUMN invite_sent_at TEXT")
+    ensure_column(conn, "usuarios", "apellido", "apellido TEXT")
+    ensure_column(conn, "usuarios", "usuario", "usuario TEXT")
+    ensure_column(conn, "usuarios", "email", "email TEXT")
+    ensure_column(conn, "usuarios", "servicio", "servicio TEXT")
+    ensure_column(conn, "usuarios", "password_hash", "password_hash TEXT")
+    ensure_column(conn, "usuarios", "invite_token", "invite_token TEXT")
+    ensure_column(conn, "usuarios", "invite_expires_at", "invite_expires_at TEXT")
+    ensure_column(conn, "usuarios", "invite_sent_at", "invite_sent_at TEXT")
     users_count = conn.execute("SELECT COUNT(*) AS total FROM usuarios").fetchone()
     total_users = 0
     if users_count:
@@ -9351,9 +9242,25 @@ class Handler(BaseHTTPRequestHandler):
                 if not verify_password(password, stored_hash):
                     json_response(self, {"error": "Usuario o contraseña incorrectos"}, status=401)
                     return
+                if needs_password_rehash(stored_hash):
+                    conn.execute(
+                        "UPDATE usuarios SET password_hash = ?, updated_at = datetime('now') WHERE id = ?",
+                        (hash_password(password), row["id"]),
+                    )
+                    conn.commit()
+                    row = conn.execute(
+                        """
+                        SELECT id, nombre, apellido, usuario, email, servicio, rol, activo, password_hash
+                        FROM usuarios WHERE id = ?
+                        """,
+                        (row["id"],),
+                    ).fetchone()
             else:
                 if not AUTH_ALLOW_FIRST_PASSWORD_SET:
                     json_response(self, {"error": "Usuario sin contraseña inicializada"}, status=403)
+                    return
+                if len(password) < 8:
+                    json_response(self, {"error": "La contraseña debe tener al menos 8 caracteres"}, status=400)
                     return
                 conn.execute(
                     "UPDATE usuarios SET password_hash = ?, updated_at = datetime('now') WHERE id = ?",
