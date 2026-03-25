@@ -4793,6 +4793,58 @@ const formatCell = (col, value, tipoPersona = "") => {
   return value;
 };
 
+const createWordmarkLogoDataUri = (label, options = {}) => {
+  const {
+    width = 240,
+    height = 72,
+    bg = "#f7f4eb",
+    bg2 = "#eef3ea",
+    text = "#213129",
+    accent = "#c7a24a",
+  } = options;
+  const safeLabel = String(label || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
+      <defs>
+        <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stop-color="${bg}" />
+          <stop offset="100%" stop-color="${bg2}" />
+        </linearGradient>
+      </defs>
+      <rect width="${width}" height="${height}" rx="18" fill="url(#bg)" />
+      <rect x="10" y="10" width="6" height="${height - 20}" rx="3" fill="${accent}" />
+      <text x="${width / 2 + 8}" y="${height / 2 + 6}" text-anchor="middle" font-family="Space Grotesk, Arial, sans-serif" font-size="26" font-weight="700" fill="${text}" letter-spacing="0.5">${safeLabel}</text>
+    </svg>
+  `.trim();
+  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+};
+
+const BANK_WORDMARK_LOGOS = {
+  SANTANDER: createWordmarkLogoDataUri("Santander", { bg: "#fff1f1", bg2: "#ffe6e6", text: "#b30f1f", accent: "#e30613" }),
+  BBVA: createWordmarkLogoDataUri("BBVA", { bg: "#eef4ff", bg2: "#dfeaff", text: "#072146", accent: "#1464a5" }),
+  CAIXABANK: createWordmarkLogoDataUri("CaixaBank", { bg: "#eef8ff", bg2: "#e6f4ff", text: "#005b96", accent: "#00a1df" }),
+  SABADELL: createWordmarkLogoDataUri("Sabadell", { bg: "#eef4ff", bg2: "#e3edff", text: "#003b7a", accent: "#0d5cab" }),
+  BANKINTER: createWordmarkLogoDataUri("Bankinter", { bg: "#fff6ee", bg2: "#ffeddc", text: "#9b4b00", accent: "#f58220" }),
+  UNICAJA: createWordmarkLogoDataUri("Unicaja", { bg: "#eef8f2", bg2: "#e1f3e8", text: "#0d5a3f", accent: "#007a53" }),
+  ABANCA: createWordmarkLogoDataUri("ABANCA", { bg: "#eef3ff", bg2: "#e3ebff", text: "#001f5b", accent: "#4b6fff" }),
+  CAJAMAR: createWordmarkLogoDataUri("Cajamar", { bg: "#f2f8ec", bg2: "#e9f4df", text: "#1f5b28", accent: "#7bb32e" }),
+  OPENBANK: createWordmarkLogoDataUri("Openbank", { bg: "#fff4f6", bg2: "#ffe9ef", text: "#ab0b4d", accent: "#e40046" }),
+  ING: createWordmarkLogoDataUri("ING", { bg: "#fff5ea", bg2: "#ffebd3", text: "#a54c00", accent: "#ff6200" }),
+  "DEUTSCHE BANK": createWordmarkLogoDataUri("Deutsche", { bg: "#eef3ff", bg2: "#e0e9ff", text: "#0018a8", accent: "#0018a8" }),
+  "BANCA MARCH": createWordmarkLogoDataUri("Banca March", { bg: "#f5f3e9", bg2: "#ece7d6", text: "#5b4a20", accent: "#b49b4e" }),
+  EVO: createWordmarkLogoDataUri("EVO", { bg: "#f1f7ff", bg2: "#e7f0ff", text: "#2b4f7a", accent: "#6e44ff" }),
+  MYINVESTOR: createWordmarkLogoDataUri("MyInvestor", { bg: "#f5efff", bg2: "#ece3ff", text: "#4e2f8e", accent: "#7c4dff" }),
+  CETELEM: createWordmarkLogoDataUri("Cetelem", { bg: "#eef9ef", bg2: "#e3f6e4", text: "#2c6a35", accent: "#5cbf2a" }),
+  UCI: createWordmarkLogoDataUri("UCI", { bg: "#f3f2ff", bg2: "#e9e8ff", text: "#483b8b", accent: "#5a2d82" }),
+  "CAJA RURAL DE GRANADA": createWordmarkLogoDataUri("CR Granada", { bg: "#f0f8ef", bg2: "#e3f3e0", text: "#2e5d31", accent: "#2e7d32" }),
+  "CAJA RURAL DEL SUR": createWordmarkLogoDataUri("CR del Sur", { bg: "#f0f8ef", bg2: "#e3f4e5", text: "#1f6b30", accent: "#0b8f3d" }),
+};
+
 const COMPANY_LOGOS = {
   ALLIANZ: "/assets/logos/allianz.svg",
   ADESLAS: "/assets/logos/adeslas.png",
@@ -4819,23 +4871,23 @@ const COMPANY_LOGOS = {
   SANITAS: "/assets/logos/sanitas.svg",
   "SANTA LUCIA": "/assets/logos/santalucia.svg",
   ZURICH: "/assets/logos/zurich.svg",
-  SANTANDER: "https://logo.clearbit.com/santander.com",
-  BBVA: "https://logo.clearbit.com/bbva.com",
-  CAIXABANK: "https://logo.clearbit.com/caixabank.com",
-  SABADELL: "https://logo.clearbit.com/bancsabadell.com",
-  BANKINTER: "https://logo.clearbit.com/bankinter.com",
-  UNICAJA: "https://logo.clearbit.com/unicajabanco.es",
-  ABANCA: "https://logo.clearbit.com/abanca.com",
-  IBERCAJA: "https://logo.clearbit.com/ibercaja.es",
-  KUTXABANK: "https://logo.clearbit.com/kutxabank.es",
-  CAJAMAR: "https://logo.clearbit.com/grupocooperativocajamar.es",
-  OPENBANK: "https://logo.clearbit.com/openbank.es",
-  "ING": "https://logo.clearbit.com/ing.com",
-  "DEUTSCHE BANK": "https://logo.clearbit.com/db.com",
-  "BANCA MARCH": "https://logo.clearbit.com/bancamarch.es",
-  EVO: "https://logo.clearbit.com/evobanco.com",
-  MYINVESTOR: "https://logo.clearbit.com/myinvestor.es",
-  CETELEM: "https://logo.clearbit.com/cetelem.es",
+  SANTANDER: BANK_WORDMARK_LOGOS.SANTANDER,
+  BBVA: BANK_WORDMARK_LOGOS.BBVA,
+  CAIXABANK: BANK_WORDMARK_LOGOS.CAIXABANK,
+  SABADELL: BANK_WORDMARK_LOGOS.SABADELL,
+  BANKINTER: BANK_WORDMARK_LOGOS.BANKINTER,
+  UNICAJA: BANK_WORDMARK_LOGOS.UNICAJA,
+  ABANCA: BANK_WORDMARK_LOGOS.ABANCA,
+  IBERCAJA: createWordmarkLogoDataUri("Ibercaja", { bg: "#fff3ed", bg2: "#ffebe2", text: "#8f2600", accent: "#ff5b21" }),
+  KUTXABANK: createWordmarkLogoDataUri("Kutxabank", { bg: "#eef9f5", bg2: "#e1f4ee", text: "#006b57", accent: "#009879" }),
+  CAJAMAR: BANK_WORDMARK_LOGOS.CAJAMAR,
+  OPENBANK: BANK_WORDMARK_LOGOS.OPENBANK,
+  "ING": BANK_WORDMARK_LOGOS.ING,
+  "DEUTSCHE BANK": BANK_WORDMARK_LOGOS["DEUTSCHE BANK"],
+  "BANCA MARCH": BANK_WORDMARK_LOGOS["BANCA MARCH"],
+  EVO: BANK_WORDMARK_LOGOS.EVO,
+  MYINVESTOR: BANK_WORDMARK_LOGOS.MYINVESTOR,
+  CETELEM: BANK_WORDMARK_LOGOS.CETELEM,
 };
 
 const COMPANY_ALIASES = {
@@ -4862,6 +4914,7 @@ const COMPANY_ALIASES = {
   BBVA: "BBVA",
   CAIXABANK: "CAIXABANK",
   "CAIXA BANK": "CAIXABANK",
+  CAIXA: "CAIXABANK",
   "BANCO SABADELL": "SABADELL",
   SABADELL: "SABADELL",
   BANKINTER: "BANKINTER",
@@ -9310,77 +9363,77 @@ const HIPOTECA_BANK_BRANDS = [
   {
     name: "Banco Santander",
     short: "Santander",
-    logo: "https://logo.clearbit.com/santander.com",
+    logo: BANK_WORDMARK_LOGOS.SANTANDER,
     color: "#e30613",
     aliases: ["santander", "banco santander"],
   },
   {
     name: "BBVA",
     short: "BBVA",
-    logo: "https://logo.clearbit.com/bbva.com",
+    logo: BANK_WORDMARK_LOGOS.BBVA,
     color: "#072146",
     aliases: ["bbva"],
   },
   {
     name: "CaixaBank",
     short: "CaixaBank",
-    logo: "https://logo.clearbit.com/caixabank.com",
+    logo: BANK_WORDMARK_LOGOS.CAIXABANK,
     color: "#0079c1",
-    aliases: ["caixabank", "la caixa"],
+    aliases: ["caixabank", "la caixa", "caixa"],
   },
   {
     name: "Banco Sabadell",
     short: "Sabadell",
-    logo: "https://logo.clearbit.com/bancsabadell.com",
+    logo: BANK_WORDMARK_LOGOS.SABADELL,
     color: "#003b7a",
     aliases: ["sabadell", "banco sabadell"],
   },
   {
     name: "Bankinter",
     short: "Bankinter",
-    logo: "https://logo.clearbit.com/bankinter.com",
+    logo: BANK_WORDMARK_LOGOS.BANKINTER,
     color: "#f58220",
     aliases: ["bankinter"],
   },
   {
     name: "Unicaja Banco",
     short: "Unicaja",
-    logo: "https://logo.clearbit.com/unicajabanco.es",
+    logo: BANK_WORDMARK_LOGOS.UNICAJA,
     color: "#007a53",
     aliases: ["unicaja", "unicaja banco"],
   },
   {
     name: "ABANCA",
     short: "ABANCA",
-    logo: "https://logo.clearbit.com/abanca.com",
+    logo: BANK_WORDMARK_LOGOS.ABANCA,
     color: "#001f5b",
     aliases: ["abanca"],
   },
   {
     name: "Cajamar",
     short: "Cajamar",
-    logo: "https://logo.clearbit.com/grupocooperativocajamar.es",
+    logo: BANK_WORDMARK_LOGOS.CAJAMAR,
     color: "#00843d",
     aliases: ["cajamar", "cajamar caja rural"],
   },
   {
     name: "UCI",
     short: "UCI",
-    logo: "https://logo.clearbit.com/uci.com",
+    logo: BANK_WORDMARK_LOGOS.UCI,
     color: "#5a2d82",
     aliases: ["uci"],
   },
   {
     name: "Caja Rural de Granada",
     short: "CR Granada",
-    logo: "https://logo.clearbit.com/ruralvia.com",
+    logo: BANK_WORDMARK_LOGOS["CAJA RURAL DE GRANADA"],
     color: "#2e7d32",
     aliases: ["caja rural de granada"],
   },
   {
     name: "Caja Rural del Sur",
     short: "CR del Sur",
-    logo: "https://logo.clearbit.com/cajaruraldelsur.es",
+    logo: BANK_WORDMARK_LOGOS["CAJA RURAL DEL SUR"],
     color: "#0b8f3d",
     aliases: ["caja rural del sur"],
   },
@@ -9776,6 +9829,7 @@ const loadHipotecaContabilidad = () => {
         "Comisión cliente",
         "Cesión banco",
         "Gestoría",
+        "Cesión Juan",
         "Seguros y comisión Juan",
         "Cesión a inmobiliarias",
         "Nómina Juan",
@@ -24652,7 +24706,6 @@ if (hipotecaClienteForm) {
 if (hipotecaForm) {
   const comisionInput = hipotecaForm.querySelector("input[name='comision']");
   const comisionJuanInput = hipotecaForm.querySelector("input[name='comision_juan']");
-  const comisionModerniaInput = hipotecaForm.querySelector("input[name='comision_modernia']");
   const comisionNetaModerniaInput = document.getElementById("hipotecaComisionNeta");
   const cesionHint = document.getElementById("hipotecaCesionHint");
   const cesionInput = hipotecaForm.querySelector("input[name='cesion']");
@@ -24669,6 +24722,9 @@ if (hipotecaForm) {
       .trim();
 
   const MALAGA_BONUS_OFFICES = new Set([
+    "modernia norte",
+    "modernia oeste",
+    "modernia centro",
     "malaga norte",
     "malaga oeste",
     "malaga centro",
@@ -24689,7 +24745,7 @@ if (hipotecaForm) {
     const cesionRate = hasBonus ? 0.25 : 0.2;
     if (cesionHint) {
       cesionHint.textContent = hasBonus
-        ? "Aplicando 25% (oficina Málaga Centro/Norte/Oeste)."
+        ? "Aplicando 25% (Modernia Centro/Norte/Oeste)."
         : "Aplicando 20% general.";
     }
     if (Number.isNaN(total)) {
@@ -24703,10 +24759,6 @@ if (hipotecaForm) {
       cesionInput.value = (total * cesionRate).toFixed(2);
     }
     const cesion = total * cesionRate;
-    if (comisionModerniaInput) {
-      // En el formulario visible mostramos la parte cedida a inmobiliaria.
-      comisionModerniaInput.value = cesion.toFixed(2);
-    }
     if (comisionNetaModerniaInput) {
       const modernia = Math.max(total - juan - cesion, 0);
       comisionNetaModerniaInput.value = modernia.toFixed(2);

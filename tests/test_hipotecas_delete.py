@@ -2,8 +2,10 @@ import sqlite3
 import unittest
 
 from web.server import (
+    build_hipoteca_accounting_entries,
     delete_gestoria_contabilidad_record,
     delete_hipoteca_record,
+    derive_hipoteca_commissions,
     sync_hipotecas_contabilidad_entries,
 )
 
@@ -135,6 +137,30 @@ class HipotecasDeleteTests(unittest.TestCase):
         ).fetchone()["total"]
         self.assertEqual(exclusion, 1)
 
+    def test_sync_creates_only_expected_auto_entries(self):
+        sync_hipotecas_contabilidad_entries(self.conn, "e1", now="2026-03-24T10:00:00+00:00")
+
+        rows = self.conn.execute(
+            """
+            SELECT gestion, tipo, importe
+            FROM gestoria_contabilidad
+            WHERE hipoteca_id = 'h1'
+            ORDER BY gestion
+            """
+        ).fetchall()
+        gestiones = [row["gestion"] for row in rows]
+
+        self.assertEqual(
+            gestiones,
+            ["Cesión Juan", "Cesión a inmobiliarias", "Comisión cliente"],
+        )
+        self.assertNotIn("Cesión banco", gestiones)
+
+        totals = {row["gestion"]: row["importe"] for row in rows}
+        self.assertEqual(totals["Comisión cliente"], 100.0)
+        self.assertEqual(totals["Cesión Juan"], 20.0)
+        self.assertEqual(totals["Cesión a inmobiliarias"], 20.0)
+
     def test_sync_does_not_create_entries_for_non_closed_status_even_with_signature_date(self):
         self.conn.execute(
             """
@@ -159,6 +185,21 @@ class HipotecasDeleteTests(unittest.TestCase):
             """
         ).fetchone()["total"]
         self.assertEqual(count, 0)
+
+    def test_derive_hipoteca_commissions_applies_bonus_office(self):
+        split = derive_hipoteca_commissions(100.0, "Modernia Norte")
+        self.assertEqual(split["comision_juan"], 20.0)
+        self.assertEqual(split["cesion"], 25.0)
+        self.assertEqual(split["comision_modernia"], 55.0)
+
+    def test_build_hipoteca_accounting_entries_does_not_autogenerate_cesion_banco(self):
+        row = self.conn.execute("SELECT * FROM hipotecas WHERE id = 'h1'").fetchone()
+        entries = build_hipoteca_accounting_entries(dict(row))
+        gestiones = {item["gestion"] for item in entries}
+        self.assertNotIn("Cesión banco", gestiones)
+        self.assertIn("Comisión cliente", gestiones)
+        self.assertIn("Cesión Juan", gestiones)
+        self.assertIn("Cesión a inmobiliarias", gestiones)
 
 
 if __name__ == "__main__":

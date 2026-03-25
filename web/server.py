@@ -952,6 +952,9 @@ def parse_money_value(value):
 
 
 MALAGA_BONUS_OFFICES = {
+    "MODERNIA NORTE",
+    "MODERNIA OESTE",
+    "MODERNIA CENTRO",
     "MALAGA NORTE",
     "MALAGA OESTE",
     "MALAGA CENTRO",
@@ -997,6 +1000,7 @@ HIPOTECA_ACCOUNTING_GESTIONES = (
     "Comisión cliente",
     "Cesión banco",
     "Gestoría",
+    "Cesión Juan",
     "Seguros y comisión Juan",
     "Cesión a inmobiliarias",
     "Nómina Juan",
@@ -1007,6 +1011,7 @@ HIPOTECA_EXPORT_BRANDS = {
     "BBVA": "BBVA",
     "CAIXABANK": "CaixaBank",
     "LA CAIXA": "CaixaBank",
+    "CAIXA": "CaixaBank",
     "SABADELL": "Banco Sabadell",
     "BANCO SABADELL": "Banco Sabadell",
     "BANKINTER": "Bankinter",
@@ -1036,7 +1041,8 @@ def hipotecas_contabilidad_where_clause(alias="gc"):
         f"OR UPPER(COALESCE({p}.notas, '')) LIKE '[HIPOTECAS]%' "
         f"OR UPPER(TRIM(COALESCE({p}.gestion, ''))) IN ("
         f"'COMISION CLIENTE', 'COMISIÓN CLIENTE', 'CESION BANCO', 'CESIÓN BANCO', "
-        f"'GESTORIA', 'GESTORÍA', 'SEGUROS Y COMISION JUAN', 'SEGUROS Y COMISIÓN JUAN', "
+        f"'GESTORIA', 'GESTORÍA', 'CESION JUAN', 'CESIÓN JUAN', "
+        f"'SEGUROS Y COMISION JUAN', 'SEGUROS Y COMISIÓN JUAN', "
         f"'CESION A INMOBILIARIAS', 'CESIÓN A INMOBILIARIAS', 'NOMINA JUAN', 'NÓMINA JUAN'))"
     )
 
@@ -1385,11 +1391,11 @@ def derive_hipoteca_inmobiliaria_cost(row):
     juan = parse_money_value((row.get("comision_juan") if isinstance(row, dict) else row["comision_juan"]) or 0)
     modernia = parse_money_value((row.get("comision_modernia") if isinstance(row, dict) else row["comision_modernia"]) or 0)
     explicit = parse_money_value((row.get("cesion") if isinstance(row, dict) else row["cesion"]) or 0)
+    if explicit > 0.005:
+        return round(explicit, 2)
     derived = round(total - juan - modernia, 2)
     if derived > 0.005:
         return derived
-    if explicit > 0.005:
-        return round(explicit, 2)
     return 0.0
 
 
@@ -1421,13 +1427,11 @@ def build_hipoteca_accounting_entries(row):
         )
 
     total_comision = (row.get("comision") if isinstance(row, dict) else row["comision"]) or 0
-    cesion_banco = (row.get("cesion") if isinstance(row, dict) else row["cesion"]) or 0
     gasto_juan = (row.get("comision_juan") if isinstance(row, dict) else row["comision_juan"]) or 0
     gasto_inmobiliaria = derive_hipoteca_inmobiliaria_cost(row)
 
     add_entry("Comisión cliente", "Ingreso", total_comision, "Comisión cliente")
-    add_entry("Cesión banco", "Ingreso", cesion_banco, "Cesión banco")
-    add_entry("Seguros y comisión Juan", "Gasto", gasto_juan, "Seguros y comisión Juan")
+    add_entry("Cesión Juan", "Gasto", gasto_juan, "Cesión Juan")
     add_entry("Cesión a inmobiliarias", "Gasto", gasto_inmobiliaria, "Cesión a inmobiliarias")
     return entries
 

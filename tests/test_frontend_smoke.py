@@ -22,6 +22,10 @@ class FrontendSmokeTests(unittest.TestCase):
         self.assertIn("window.CRMAppRouting", routing_js)
         self.assertIn("window.CRMUI", foundation_js)
 
+    def test_bank_branding_does_not_depend_on_remote_clearbit_logos(self):
+        app_js = (WEB_DIR / "app.js").read_text(encoding="utf-8")
+        self.assertNotIn("logo.clearbit.com", app_js)
+
     def test_gitignore_covers_local_runtime_artifacts(self):
         gitignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
         self.assertIn("data/*.bak_*", gitignore)
