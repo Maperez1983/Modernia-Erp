@@ -17075,8 +17075,13 @@ class Handler(BaseHTTPRequestHandler):
                 "COALESCE(NULLIF(TRIM(anio), ''), "
                 "strftime('%Y', COALESCE(NULLIF(fecha_firma, ''), NULLIF(fecha_encargo, ''), created_at)))"
             )
+            signed_year_expr = "strftime('%Y', NULLIF(fecha_firma, ''))"
             closed_expr = "LOWER(TRIM(COALESCE(estado, ''))) IN ('firmado', 'firmada', 'indemnización', 'indemnizacion')"
             signed_expr = "fecha_firma IS NOT NULL AND TRIM(fecha_firma) <> ''"
+            signed_closed_expr = (
+                "LOWER(TRIM(COALESCE(estado, ''))) IN ('firmado', 'firmada')"
+                " AND fecha_firma IS NOT NULL AND TRIM(fecha_firma) <> ''"
+            )
             estudio_expr = "LOWER(TRIM(COALESCE(estado, ''))) IN ('estudio', 'en estudio')"
             duration_expr = (
                 "CASE "
@@ -17090,21 +17095,21 @@ class Handler(BaseHTTPRequestHandler):
             available_years = conn.execute(
                 """
                 SELECT """
-                + year_expr
+                + signed_year_expr
                 + """ AS year, COUNT(*) AS total
                 FROM hipotecas
                 WHERE empresa_id = ?
                   AND """
-                + year_expr
-                + """ IS NOT NULL
-                  AND """
-                + closed_expr
+                + signed_closed_expr
                 + """
+                  AND """
+                + signed_year_expr
+                + """ IS NOT NULL
                 GROUP BY """
-                + year_expr
+                + signed_year_expr
                 + """
                 ORDER BY """
-                + year_expr
+                + signed_year_expr
                 + """
                 """,
                 (empresa_id,),
@@ -17136,10 +17141,10 @@ class Handler(BaseHTTPRequestHandler):
                 FROM hipotecas
                 WHERE empresa_id = ?
                   AND """
-                + year_expr
+                + signed_year_expr
                 + """ = ?
                   AND """
-                + closed_expr
+                + signed_closed_expr
                 + """
                 """,
                 (empresa_id, selected_year),
@@ -17167,7 +17172,7 @@ class Handler(BaseHTTPRequestHandler):
                 FROM hipotecas
                 WHERE empresa_id = ?
                   AND """
-                + closed_expr
+                + signed_closed_expr
                 + """
                 """,
                 (empresa_id,),
@@ -17179,10 +17184,10 @@ class Handler(BaseHTTPRequestHandler):
                 FROM hipotecas
                 WHERE empresa_id = ?
                   AND """
-                + year_expr
+                + signed_year_expr
                 + """ = ?
                   AND """
-                + closed_expr
+                + signed_closed_expr
                 + """
                 """,
                 (empresa_id, selected_year),
@@ -17233,21 +17238,21 @@ class Handler(BaseHTTPRequestHandler):
             series_volumen = conn.execute(
                 """
                 SELECT """
-                + year_expr
+                + signed_year_expr
                 + """ AS year, SUM(COALESCE(importe_hipoteca, 0)) AS total
                 FROM hipotecas
                 WHERE empresa_id = ?
                   AND """
-                + year_expr
-                + """ IS NOT NULL
-                  AND """
-                + closed_expr
+                + signed_closed_expr
                 + """
+                  AND """
+                + signed_year_expr
+                + """ IS NOT NULL
                 GROUP BY """
-                + year_expr
+                + signed_year_expr
                 + """
                 ORDER BY """
-                + year_expr
+                + signed_year_expr
                 + """
                 """,
                 (empresa_id,),
@@ -17256,23 +17261,23 @@ class Handler(BaseHTTPRequestHandler):
             series_plazo = conn.execute(
                 """
                 SELECT """
-                + year_expr
+                + signed_year_expr
                 + """ AS year, AVG("""
                 + duration_expr
                 + """) AS total
                 FROM hipotecas
                 WHERE empresa_id = ?
                   AND """
-                + year_expr
-                + """ IS NOT NULL
-                  AND """
-                + closed_expr
+                + signed_closed_expr
                 + """
+                  AND """
+                + signed_year_expr
+                + """ IS NOT NULL
                 GROUP BY """
-                + year_expr
+                + signed_year_expr
                 + """
                 ORDER BY """
-                + year_expr
+                + signed_year_expr
                 + """
                 """,
                 (empresa_id,),
@@ -17283,7 +17288,7 @@ class Handler(BaseHTTPRequestHandler):
             series_porcentaje = conn.execute(
                 """
                 SELECT """
-                + year_expr
+                + signed_year_expr
                 + """ AS year,
                        AVG(
                          CASE
@@ -17297,16 +17302,16 @@ class Handler(BaseHTTPRequestHandler):
                 FROM hipotecas
                 WHERE empresa_id = ?
                   AND """
-                + year_expr
-                + """ IS NOT NULL
-                  AND """
-                + closed_expr
+                + signed_closed_expr
                 + """
+                  AND """
+                + signed_year_expr
+                + """ IS NOT NULL
                 GROUP BY """
-                + year_expr
+                + signed_year_expr
                 + """
                 ORDER BY """
-                + year_expr
+                + signed_year_expr
                 + """
                 """,
                 (empresa_id,),
@@ -17320,7 +17325,7 @@ class Handler(BaseHTTPRequestHandler):
                   AND banco IS NOT NULL
                   AND TRIM(banco) != ''
                   AND """
-                + closed_expr
+                + signed_closed_expr
                 + """
                 GROUP BY banco
                 ORDER BY COUNT(*) DESC
@@ -17337,10 +17342,10 @@ class Handler(BaseHTTPRequestHandler):
                   AND banco IS NOT NULL
                   AND TRIM(banco) != ''
                   AND """
-                + year_expr
+                + signed_year_expr
                 + """ = ?
                   AND """
-                + closed_expr
+                + signed_closed_expr
                 + """
                 GROUP BY banco
                 ORDER BY COUNT(*) DESC
@@ -17366,10 +17371,10 @@ class Handler(BaseHTTPRequestHandler):
                     WHERE empresa_id = ?
                       AND banco = ?
                       AND """
-                    + year_expr
+                    + signed_year_expr
                     + """ = ?
                       AND """
-                    + closed_expr
+                    + signed_closed_expr
                     + """
                     """,
                     (empresa_id, label, selected_year),
@@ -17393,7 +17398,7 @@ class Handler(BaseHTTPRequestHandler):
                   AND oficina IS NOT NULL
                   AND TRIM(oficina) != ''
                   AND """
-                + closed_expr
+                + signed_closed_expr
                 + """
                 GROUP BY oficina
                 ORDER BY COUNT(*) DESC

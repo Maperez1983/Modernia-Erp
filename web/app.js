@@ -2371,6 +2371,20 @@ const canAccessAdminPanel = (user) => {
 
 const canAccessSharedHomeModules = (user) => isPrivilegedUser(user);
 
+const getPrimaryRestrictedHomeService = (user) => {
+  if (!user || isPrivilegedUser(user)) return "";
+  const services = expandServiceAliases(parseServiceList(user.servicio || ""));
+  for (const service of services) {
+    if (service === "inmobiliaria") return "inmobiliaria";
+    if (service === "gestoria" || service === "administracion fincas" || service === "administracion de fincas") {
+      return "gestoria";
+    }
+    if (service === "seguros") return "seguros";
+    if (service === "financiaciones" || service === "hipotecas") return "financiaciones";
+  }
+  return "";
+};
+
 const resolveRestrictedCompanyAccess = (empresaName) => {
   if (empresaName === DASHBOARD_COMPANY && userCanAccessService("inmobiliaria")) {
     return "inmobiliaria";
@@ -3186,6 +3200,55 @@ const renderCompanyCards = () => {
     const canGestoria = userCanAccessService("gestoria");
     const canSeguros = userCanAccessService("seguros");
     const canFin = userCanAccessService("financiaciones");
+    const primaryRestrictedService = getPrimaryRestrictedHomeService(user);
+
+    const appendServiceCard = (serviceKey) => {
+      const service = normalizeSimple(serviceKey);
+      const card = document.createElement("div");
+      card.className = "company-card";
+      if (service === "inmobiliaria") {
+        card.dataset.action = "crm-inmo";
+        card.innerHTML = `
+          <h3>CRM Inmobiliario</h3>
+          <div class="company-meta">Captación, inmuebles y operaciones.</div>
+          <div class="company-meta">Servicio inmobiliario.</div>
+          <a class="card-link" href="?crm=inmo" data-action="crm-inmo">Entrar</a>
+        `;
+      } else if (service === "gestoria") {
+        card.dataset.action = "crm-gestoria";
+        card.innerHTML = `
+          <h3>CRM Gestoría</h3>
+          <div class="company-meta">Clientes en gestión y seguimiento.</div>
+          <div class="company-meta">Servicio de gestoría.</div>
+          <a class="card-link" href="?crm=gestoria" data-action="crm-gestoria">Entrar</a>
+        `;
+      } else if (service === "seguros") {
+        card.dataset.action = "crm-seguros";
+        card.innerHTML = `
+          <h3>CRM Seguros</h3>
+          <div class="company-meta">Pólizas, renovaciones y oportunidades.</div>
+          <div class="company-meta">Servicio de seguros.</div>
+          <a class="card-link" href="?crm=seguros" data-action="crm-seguros">Entrar</a>
+        `;
+      } else if (service === "financiaciones") {
+        card.dataset.action = "crm-fin";
+        card.innerHTML = `
+          <h3>CRM Financiaciones</h3>
+          <div class="company-meta">Hipotecas y seguimiento.</div>
+          <div class="company-meta">Servicio financiero.</div>
+          <a class="card-link" href="?crm=fin" data-action="crm-fin">Entrar</a>
+        `;
+      } else {
+        return;
+      }
+      coreCards.appendChild(card);
+    };
+
+    if (!isPriv) {
+      appendServiceCard(primaryRestrictedService);
+      return;
+    }
+
     const holdingCard = document.createElement("div");
     holdingCard.className = "company-card";
     holdingCard.dataset.action = "holding";
@@ -3199,57 +3262,10 @@ const renderCompanyCards = () => {
       coreCards.appendChild(holdingCard);
     }
 
-    const crmCard = document.createElement("div");
-    crmCard.className = "company-card";
-    crmCard.dataset.action = "crm-inmo";
-    crmCard.innerHTML = `
-      <h3>CRM Inmobiliario</h3>
-      <div class="company-meta">Captación, inmuebles y operaciones.</div>
-      <div class="company-meta">Servicio inmobiliario.</div>
-      <a class="card-link" href="?crm=inmo" data-action="crm-inmo">Entrar</a>
-    `;
-    if (canInmo) {
-      coreCards.appendChild(crmCard);
-    }
-
-    const gestoriaCard = document.createElement("div");
-    gestoriaCard.className = "company-card";
-    gestoriaCard.dataset.action = "crm-gestoria";
-    gestoriaCard.innerHTML = `
-      <h3>CRM Gestoría</h3>
-      <div class="company-meta">Clientes en gestión y seguimiento.</div>
-      <div class="company-meta">Servicio de gestoría.</div>
-      <a class="card-link" href="?crm=gestoria" data-action="crm-gestoria">Entrar</a>
-    `;
-    if (canGestoria) {
-      coreCards.appendChild(gestoriaCard);
-    }
-
-    const segurosCard = document.createElement("div");
-    segurosCard.className = "company-card";
-    segurosCard.dataset.action = "crm-seguros";
-    segurosCard.innerHTML = `
-      <h3>CRM Seguros</h3>
-      <div class="company-meta">Pólizas, renovaciones y oportunidades.</div>
-      <div class="company-meta">Servicio de seguros.</div>
-      <a class="card-link" href="?crm=seguros" data-action="crm-seguros">Entrar</a>
-    `;
-    if (canSeguros) {
-      coreCards.appendChild(segurosCard);
-    }
-
-    const finCard = document.createElement("div");
-    finCard.className = "company-card";
-    finCard.dataset.action = "crm-fin";
-    finCard.innerHTML = `
-      <h3>CRM Financiaciones</h3>
-      <div class="company-meta">Hipotecas y seguimiento.</div>
-      <div class="company-meta">Servicio financiero.</div>
-      <a class="card-link" href="?crm=fin" data-action="crm-fin">Entrar</a>
-    `;
-    if (canFin) {
-      coreCards.appendChild(finCard);
-    }
+    if (canInmo) appendServiceCard("inmobiliaria");
+    if (canGestoria) appendServiceCard("gestoria");
+    if (canSeguros) appendServiceCard("seguros");
+    if (canFin) appendServiceCard("financiaciones");
 
     const clientesCard = document.createElement("div");
     clientesCard.className = "company-card";
