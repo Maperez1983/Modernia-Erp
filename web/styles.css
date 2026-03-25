@@ -4036,3 +4036,55 @@ body.theme-operativa #homeSection .company-card {
     rgba(255, 255, 255, 0.9);
   border-color: rgba(115, 152, 111, 0.14);
 }
+
+body.theme-operativa .meta {
+  justify-items: start;
+  text-align: left;
+  gap: 10px;
+  min-width: 220px;
+  padding: 14px 16px;
+  border-radius: 20px;
+}
+
+body.theme-operativa .meta-user {
+  display: grid;
+  gap: 6px;
+  width: 100%;
+  color: rgba(255, 248, 236, 0.92);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+body.theme-operativa .meta-user select {
+  width: 100%;
+  min-width: 0;
+  background: rgba(255, 252, 245, 0.94);
+  color: #213129;
+  border-color: rgba(199, 162, 74, 0.18);
+}
+
+body.theme-operativa #authLogoutBtn {
+  justify-self: start;
+}
+
+body.theme-operativa .meta-status {
+  min-height: 18px;
+  font-size: 12px;
+  line-height: 1.35;
+  color: rgba(255, 248, 236, 0.86);
+}
+
+body.theme-operativa .meta-status .status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+body.theme-operativa .meta-status .status span {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #d8b15b;
+  box-shadow: 0 0 0 4px rgba(216, 177, 91, 0.16);
+}
