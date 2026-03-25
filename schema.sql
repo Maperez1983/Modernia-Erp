@@ -188,6 +188,7 @@ CREATE TABLE IF NOT EXISTS gestoria_contabilidad (
   id TEXT PRIMARY KEY,
   empresa_id TEXT,
   cliente_id TEXT,
+  hipoteca_id TEXT,
   seguro_id TEXT,
   poliza_numero TEXT,
   fecha TEXT,
@@ -201,6 +202,16 @@ CREATE TABLE IF NOT EXISTS gestoria_contabilidad (
   updated_at TEXT NOT NULL,
   FOREIGN KEY (cliente_id) REFERENCES clientes(id),
   FOREIGN KEY (empresa_id) REFERENCES empresas(id)
+);
+
+CREATE TABLE IF NOT EXISTS hipotecas_contabilidad_excluidas (
+  id TEXT PRIMARY KEY,
+  empresa_id TEXT NOT NULL,
+  hipoteca_id TEXT NOT NULL,
+  fecha TEXT NOT NULL,
+  gestion TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE (empresa_id, hipoteca_id, fecha, gestion)
 );
 
 CREATE TABLE IF NOT EXISTS gestoria_conta_config (

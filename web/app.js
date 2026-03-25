@@ -9848,7 +9848,6 @@ const loadHipotecaContabilidad = () => {
       delBtn.textContent = "Eliminar";
       delBtn.addEventListener("click", () => {
         deleteGestoriaContabilidad(row.id);
-        setTimeout(() => loadHipotecaContabilidad(), 120);
       });
       actionTd.appendChild(delBtn);
       tr.appendChild(actionTd);
@@ -17426,14 +17425,17 @@ const saveGestoriaContabilidadField = (id, field, value) => {
 };
 
 const deleteGestoriaContabilidad = (id) => {
-  fetch("/api/gestoria_contabilidad_delete", {
+  return fetch("/api/gestoria_contabilidad_delete", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ id }),
   })
     .then((res) => res.json())
     .then(() => {
-      if (currentTab === "seguros-crm" && state.segurosTab === "contabilidad") {
+      if (hipotecaContabilidadPanel && !hipotecaContabilidadPanel.classList.contains("hidden")) {
+        loadHipotecaContabilidad();
+        loadHipotecaDashboard();
+      } else if (currentTab === "seguros-crm" && state.segurosTab === "contabilidad") {
         loadSegurosContabilidad();
       } else {
         loadGestoriaContabilidad();

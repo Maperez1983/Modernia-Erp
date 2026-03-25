@@ -1444,8 +1444,36 @@ def build_hipoteca_accounting_entries(row):
     return entries
 
 
+def hipoteca_accounting_exclusion_key(hipoteca_id, fecha, gestion):
+    return (
+        str(hipoteca_id or "").strip(),
+        str(fecha or "").strip(),
+        normalize_lookup_text(gestion),
+    )
+
+
+def load_hipoteca_accounting_exclusions(conn, empresa_id):
+    try:
+        rows = conn.execute(
+            """
+            SELECT hipoteca_id, fecha, gestion
+            FROM hipotecas_contabilidad_excluidas
+            WHERE empresa_id = ?
+            """,
+            (empresa_id,),
+        ).fetchall()
+    except sqlite3.Error:
+        return set()
+    return {
+        hipoteca_accounting_exclusion_key(row["hipoteca_id"], row["fecha"], row["gestion"])
+        for row in rows
+        if str(row["hipoteca_id"] or "").strip()
+    }
+
+
 def sync_hipotecas_contabilidad_entries(conn, empresa_id, now=None):
     now = now or datetime.now(timezone.utc).isoformat()
+    excluded_keys = load_hipoteca_accounting_exclusions(conn, empresa_id)
     rows = conn.execute(
         """
         SELECT *
@@ -1454,18 +1482,21 @@ def sync_hipotecas_contabilidad_entries(conn, empresa_id, now=None):
         """,
         (empresa_id,),
     ).fetchall()
-    expected = {}
+    expected_keys = set()
     for raw in rows:
         row = dict(raw)
         hipoteca_id = str(row.get("id") or "").strip()
         if not hipoteca_id:
             continue
         entries = build_hipoteca_accounting_entries(row)
-        expected[hipoteca_id] = {item["gestion"] for item in entries}
         link = resolve_hipoteca_contabilidad_link(conn, hipoteca_id)
         cliente_id = link.get("cliente_id")
         cliente_ids_json = json.dumps([cliente_id], ensure_ascii=False) if cliente_id else None
         for item in entries:
+            key = hipoteca_accounting_exclusion_key(hipoteca_id, item["fecha"], item["gestion"])
+            if key in excluded_keys:
+                continue
+            expected_keys.add(key)
             existing = conn.execute(
                 """
                 SELECT id
@@ -1529,7 +1560,7 @@ def sync_hipotecas_contabilidad_entries(conn, empresa_id, now=None):
                 )
     existing_rows = conn.execute(
         """
-        SELECT id, hipoteca_id, gestion
+        SELECT id, hipoteca_id, fecha, gestion
         FROM gestoria_contabilidad
         WHERE empresa_id = ?
           AND hipoteca_id IS NOT NULL
@@ -1539,9 +1570,8 @@ def sync_hipotecas_contabilidad_entries(conn, empresa_id, now=None):
         (empresa_id,),
     ).fetchall()
     for row in existing_rows:
-        hipoteca_id = str(row["hipoteca_id"] or "").strip()
-        gestion = str(row["gestion"] or "").strip()
-        if hipoteca_id not in expected or gestion not in expected.get(hipoteca_id, set()):
+        key = hipoteca_accounting_exclusion_key(row["hipoteca_id"], row["fecha"], row["gestion"])
+        if key not in expected_keys:
             conn.execute("DELETE FROM gestoria_contabilidad WHERE id = ?", (row["id"],))
 
 
@@ -1552,6 +1582,44 @@ def delete_hipoteca_record(conn, record_id):
     if not row:
         return False
     conn.execute("DELETE FROM hipotecas WHERE id = ?", (record_id,))
+    return True
+
+
+def delete_gestoria_contabilidad_record(conn, record_id, now=None):
+    if not record_id:
+        return False
+    now = now or datetime.now(timezone.utc).isoformat()
+    row = conn.execute(
+        """
+        SELECT id, empresa_id, hipoteca_id, fecha, gestion, notas
+        FROM gestoria_contabilidad
+        WHERE id = ?
+        LIMIT 1
+        """,
+        (record_id,),
+    ).fetchone()
+    if not row:
+        return False
+    hipoteca_id = str(row["hipoteca_id"] or "").strip()
+    notes = str(row["notas"] or "").strip().upper()
+    if hipoteca_id and notes.startswith("AUTO CRM HIPOTECAS"):
+        conn.execute(
+            """
+            INSERT INTO hipotecas_contabilidad_excluidas (
+              id, empresa_id, hipoteca_id, fecha, gestion, created_at
+            ) VALUES (?, ?, ?, ?, ?, datetime(?))
+            ON CONFLICT(empresa_id, hipoteca_id, fecha, gestion) DO NOTHING
+            """,
+            (
+                os.urandom(16).hex(),
+                row["empresa_id"],
+                hipoteca_id,
+                row["fecha"],
+                row["gestion"],
+                now,
+            ),
+        )
+    conn.execute("DELETE FROM gestoria_contabilidad WHERE id = ?", (record_id,))
     return True
 
 
@@ -8295,6 +8363,19 @@ def ensure_tables(db_path):
     )
     conn.execute(
         """
+        CREATE TABLE IF NOT EXISTS hipotecas_contabilidad_excluidas (
+          id TEXT PRIMARY KEY,
+          empresa_id TEXT NOT NULL,
+          hipoteca_id TEXT NOT NULL,
+          fecha TEXT NOT NULL,
+          gestion TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          UNIQUE (empresa_id, hipoteca_id, fecha, gestion)
+        )
+        """
+    )
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS gestoria_conta_config (
           id TEXT PRIMARY KEY,
           cliente_id TEXT UNIQUE,
@@ -10403,7 +10484,9 @@ class Handler(BaseHTTPRequestHandler):
             if not record_id:
                 json_response(self, {"error": "id requerido"}, status=400)
                 return
-            conn.execute("DELETE FROM gestoria_contabilidad WHERE id = ?", (record_id,))
+            if not delete_gestoria_contabilidad_record(conn, record_id, now=now):
+                json_response(self, {"error": "registro no encontrado"}, status=404)
+                return
         elif parsed.path == "/api/gestoria_conta_config":
             cliente_id = payload.get("cliente_id")
             if not cliente_id:
