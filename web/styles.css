@@ -38,6 +38,10 @@ body {
   min-height: 100vh;
 }
 
+body.modal-open {
+  overflow: hidden;
+}
+
 header {
   display: flex;
   flex-wrap: wrap;
@@ -147,6 +151,42 @@ main {
   max-width: var(--layout-max);
   width: 100%;
   margin: 0 auto;
+}
+
+.ui-context-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px clamp(16px, 2.4vw, 40px);
+  background: rgba(255, 255, 255, 0.82);
+  border-bottom: 1px solid rgba(60, 110, 113, 0.14);
+  backdrop-filter: blur(10px);
+  position: sticky;
+  top: 0;
+  z-index: 18;
+}
+
+.ui-context-copy {
+  display: grid;
+  gap: 2px;
+}
+
+.ui-context-copy strong {
+  font-family: var(--font-ui);
+  letter-spacing: 0.2px;
+}
+
+.ui-context-copy span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.ui-context-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 section {
@@ -468,6 +508,218 @@ h2 {
   margin: 0;
   font-size: 14px;
   color: var(--ink);
+}
+
+input:focus,
+select:focus,
+textarea:focus,
+button:focus,
+.tab:focus,
+[role="tab"]:focus {
+  outline: 3px solid rgba(60, 110, 113, 0.22);
+  outline-offset: 2px;
+}
+
+.ui-form-managed.is-dirty {
+  position: relative;
+}
+
+.ui-form-managed.is-dirty::after {
+  content: "Borrador";
+  position: absolute;
+  top: -10px;
+  right: 10px;
+  font-family: var(--font-ui);
+  font-size: 11px;
+  letter-spacing: 0.25px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(95, 122, 97, 0.14);
+  color: var(--sage);
+  border: 1px solid rgba(95, 122, 97, 0.24);
+}
+
+[aria-invalid="true"] {
+  border-color: #b64a42 !important;
+  box-shadow: 0 0 0 3px rgba(182, 74, 66, 0.12);
+}
+
+.ui-field-error {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #b64a42;
+  font-family: var(--font-ui);
+}
+
+.ui-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 22px;
+  padding: 4px 0;
+}
+
+.ui-status.is-pending {
+  color: #6c6f1b;
+}
+
+.ui-status.is-success {
+  color: #2f6a43;
+}
+
+.ui-status.is-error {
+  color: #a33c32;
+}
+
+.ui-status.is-empty {
+  color: var(--muted);
+}
+
+.ui-empty-state {
+  padding: 16px 18px;
+  border: 1px dashed rgba(100, 112, 107, 0.28);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.6);
+}
+
+.ui-table-shell {
+  display: grid;
+  gap: 10px;
+}
+
+.ui-table-meta {
+  color: var(--muted);
+  font-size: 13px;
+  letter-spacing: 0.2px;
+}
+
+.ui-table-scroll {
+  overflow-x: auto;
+  border-radius: 16px;
+}
+
+.ui-table th.ui-sortable {
+  cursor: pointer;
+  user-select: none;
+  position: relative;
+  padding-right: 22px;
+}
+
+.ui-table th.ui-sortable::after {
+  content: "↕";
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.ui-table th.ui-sortable.sort-asc::after {
+  content: "↑";
+}
+
+.ui-table th.ui-sortable.sort-desc::after {
+  content: "↓";
+}
+
+.form-actions,
+.modal-actions,
+.crm-actions,
+.section-head {
+  row-gap: 10px;
+}
+
+.tabs {
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.tabs .tab {
+  white-space: nowrap;
+}
+
+@media (max-width: 980px) {
+  .ui-context-bar {
+    position: static;
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  header,
+  .section-head,
+  .crm-actions,
+  .form-actions {
+    align-items: stretch;
+  }
+
+  .ui-context-actions {
+    width: 100%;
+  }
+
+  .ui-context-actions button {
+    flex: 1 1 180px;
+  }
+}
+
+@media (max-width: 760px) {
+  main {
+    padding-top: 18px;
+  }
+
+  .ui-table-scroll {
+    overflow: visible;
+  }
+
+  .ui-table table,
+  .ui-table thead,
+  .ui-table tbody,
+  .ui-table tr,
+  .ui-table th,
+  .ui-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .ui-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    border: 0;
+  }
+
+  .ui-table tbody {
+    display: grid;
+    gap: 12px;
+  }
+
+  .ui-table tr {
+    border: 1px solid rgba(214, 222, 218, 0.9);
+    border-radius: 16px;
+    padding: 10px 12px;
+    background: rgba(255, 255, 255, 0.95);
+    box-shadow: 0 8px 18px rgba(12, 10, 8, 0.06);
+  }
+
+  .ui-table td {
+    border: none;
+    padding: 7px 0;
+  }
+
+  .ui-table td::before {
+    content: attr(data-label);
+    display: block;
+    font-family: var(--font-ui);
+    font-size: 11px;
+    letter-spacing: 0.35px;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 2px;
+  }
 }
 
 .org-node .muted {

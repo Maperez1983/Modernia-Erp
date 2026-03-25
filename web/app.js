@@ -1098,6 +1098,8 @@ const setCurrentUser = (name) => {
   }
 };
 
+const UI = window.CRMUI || null;
+
 const state = {
   appInitialized: false,
   authUser: null,
@@ -4011,6 +4013,7 @@ const handleRoute = () => {
     }
   }
   goHome();
+  UI?.refreshContext(state);
 };
 
 const updateCompanySummary = (empresaName) => {
@@ -11412,6 +11415,7 @@ const renderTable = (data, options = {}) => {
   table.appendChild(tbody);
   tableMount.innerHTML = "";
   tableMount.appendChild(table);
+  UI?.enhanceFragment(tableMount);
 };
 
 const getSegurosBdtSortValue = (colName, raw) => {
@@ -11713,6 +11717,7 @@ const renderTableInto = (data, container, infoEl, label) => {
   table.appendChild(tbody);
   container.innerHTML = "";
   container.appendChild(table);
+  UI?.enhanceFragment(container);
   const applyColumnFilters = () => {
     if (!enableColumnFilters) return;
     const active = columnFilterInputs
@@ -20269,6 +20274,7 @@ const init = async () => {
     loadTable();
     updateTableVisibility();
     handleRoute();
+    UI?.boot(state);
     const okCount = results.filter((r) => r.status === "fulfilled").length;
     dbStatus.innerHTML = okCount === 3
       ? `<span class="status"><span></span>Conectado</span>`
@@ -20278,6 +20284,7 @@ const init = async () => {
     tableContainer.innerHTML =
       "<p class='muted'>Error al cargar los datos.</p>";
     renderCompanyCards();
+    UI?.boot(state);
   }
 };
 
@@ -23901,6 +23908,7 @@ if (authActivateForm) {
 }
 
 initDensityToggle();
+UI?.boot(state);
 showAuthOverlay("");
 ensureAuthAndBoot();
 
