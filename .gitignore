@@ -2,3 +2,9 @@ vision-sa.json
 .env
 .DS_Store
 data/.DS_Store
+data/*.bak_*
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite-journal
+__pycache__/
+.pytest_cache/

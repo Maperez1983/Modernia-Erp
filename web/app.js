@@ -1099,6 +1099,8 @@ const setCurrentUser = (name) => {
 };
 
 const UI = window.CRMUI || null;
+const AuthModule = window.CRMAppAuth || null;
+const RoutingModule = window.CRMAppRouting || null;
 
 const state = {
   appInitialized: false,
@@ -3945,75 +3947,24 @@ const goHome = () => {
 };
 
 const handleRoute = () => {
-  const params = new URLSearchParams(window.location.search);
-  if (params.has("agenda")) {
-    openAgenda();
-    return;
-  }
-  if (params.has("admin")) {
-    openAdmin();
-    return;
-  }
-  if (params.has("holding")) {
-    openHolding();
-    return;
-  }
-  if (params.has("clientes")) {
-    openClientesModule();
-    return;
-  }
-  if (params.has("crm")) {
-    const crm = params.get("crm");
-    if (crm === "inmo") {
-      openCrmInmobiliario();
-      return;
-    }
-    if (crm === "gestoria") {
-      openGestoriaCrm();
-      return;
-    }
-    if (crm === "seguros") {
-      openSegurosCrm();
-      return;
-    }
-    if (crm === "fin") {
-      openFinCrm();
-      return;
-    }
-  }
-  if (params.has("cliente")) {
-    const id = params.get("cliente");
-    if (params.has("poliza")) {
-      const polizaId = params.get("poliza");
-      openClientesModule();
-      openClienteDetail(id);
-      setTimeout(() => {
-        openSeguroById(polizaId, id);
-      }, 250);
-      return;
-    }
-    openClientesModule();
-    openClienteDetail(id);
-    return;
-  }
-  if (params.has("poliza")) {
-    const polizaId = params.get("poliza");
-    openSegurosCrm();
-    setTimeout(() => {
-      openSeguroById(polizaId);
-    }, 250);
-    return;
-  }
-  const slug = params.get("empresa");
-  if (slug) {
-    const empresa = state.empresas.find((item) => slugify(item.nombre) === slug);
-    if (empresa) {
-      openCompany(empresa.nombre);
-      return;
-    }
-  }
-  goHome();
-  UI?.refreshContext(state);
+  if (!RoutingModule) return;
+  RoutingModule.handleRoute({
+    state,
+    slugify,
+    openAgenda,
+    openAdmin,
+    openHolding,
+    openClientesModule,
+    openCrmInmobiliario,
+    openGestoriaCrm,
+    openSegurosCrm,
+    openFinCrm,
+    openClienteDetail,
+    openSeguroById,
+    openCompany,
+    goHome,
+    ui: UI,
+  });
 };
 
 const updateCompanySummary = (empresaName) => {
@@ -20063,157 +20014,71 @@ const showActivationOverlay = (introText = "") => {
 };
 
 async function fetchCurrentSessionUser() {
-  const res = await fetch("/api/me", { cache: "no-store", credentials: "same-origin" });
-  let data = null;
-  try {
-    data = await res.json();
-  } catch {
-    data = null;
-  }
-  if (!res.ok) {
-    return null;
-  }
-  return data?.user || null;
+  return AuthModule ? AuthModule.fetchCurrentSessionUser() : null;
 }
 
 async function ensureAuthAndBoot() {
-  const params = new URLSearchParams(window.location.search);
-  const activateToken = (params.get("activar_token") || "").trim();
-  if (activateToken) {
-    await prepareActivationFlow(activateToken);
-    return;
-  }
-  const user = await fetchCurrentSessionUser();
-  if (!user) {
-    showAuthOverlay("");
-    return;
-  }
-  setAuthUi(user);
-  hideAuthOverlay();
-  if (!state.appInitialized) {
-    await init();
-    state.appInitialized = true;
-  }
+  if (!AuthModule) return;
+  return AuthModule.ensureAuthAndBoot({
+    state,
+    init,
+    setAuthUi,
+    hideAuthOverlay,
+    showAuthOverlay,
+    prepareActivationFlow,
+  });
 }
 
 function handleAuthExpired() {
-  if (!state.appInitialized && authLoginOverlay && !authLoginOverlay.classList.contains("hidden")) {
-    return;
-  }
-  showAuthOverlay("La sesión ha caducado. Inicia sesión de nuevo.");
+  if (!AuthModule) return;
+  return AuthModule.handleAuthExpired({
+    state,
+    authLoginOverlay,
+    showAuthOverlay,
+  });
 }
 
 async function prepareActivationFlow(token) {
-  showActivationOverlay("Validando invitación...");
-  try {
-    const data = await api(`/api/auth_invite_status?token=${encodeURIComponent(token)}`);
-    if (!data?.valid) {
-      if (authActivateStatus) authActivateStatus.textContent = data?.expired ? "La invitación ha caducado." : "Invitación no válida.";
-      return;
-    }
-    const user = data.user || {};
-    const label = [user.nombre, user.apellido].filter(Boolean).join(" ").trim() || user.usuario || user.email || "usuario";
-    if (authActivateIntro) {
-      authActivateIntro.textContent = `Activa el acceso de ${label} y define tu contraseña.`;
-    }
-  } catch (error) {
-    if (authActivateStatus) authActivateStatus.textContent = error?.message || "No se pudo validar la invitación.";
-  }
+  if (!AuthModule) return;
+  return AuthModule.prepareActivationFlow(
+    {
+      api,
+      showActivationOverlay,
+      authActivateStatus,
+      authActivateIntro,
+    },
+    token
+  );
 }
 
 const submitActivationPassword = async () => {
-  const params = new URLSearchParams(window.location.search);
-  const token = (params.get("activar_token") || "").trim();
-  const p1 = authActivatePass1?.value || "";
-  const p2 = authActivatePass2?.value || "";
-  if (!token) {
-    if (authActivateStatus) authActivateStatus.textContent = "Token de activación no disponible.";
-    return;
-  }
-  if (!p1 || p1.length < 8) {
-    if (authActivateStatus) authActivateStatus.textContent = "La contraseña debe tener al menos 8 caracteres.";
-    return;
-  }
-  if (p1 !== p2) {
-    if (authActivateStatus) authActivateStatus.textContent = "Las contraseñas no coinciden.";
-    return;
-  }
-  if (authActivateStatus) authActivateStatus.textContent = "Activando cuenta...";
-  try {
-    const res = await fetch("/api/auth_set_password", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "same-origin",
-      body: JSON.stringify({ token, password: p1 }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok || data?.error) {
-      if (authActivateStatus) authActivateStatus.textContent = data?.error || "No se pudo activar la cuenta.";
-      return;
-    }
-    if (authActivateStatus) {
-      authActivateStatus.textContent = "Cuenta activada. Ya puedes iniciar sesión.";
-      authActivateStatus.classList.add("success");
-    }
-    if (authActivatePass1) authActivatePass1.value = "";
-    if (authActivatePass2) authActivatePass2.value = "";
-    history.replaceState({}, "", window.location.pathname);
-    setTimeout(() => {
-      if (authActivateStatus) authActivateStatus.classList.remove("success");
-      showAuthOverlay("Cuenta activada. Inicia sesión.");
-    }, 700);
-  } catch {
-    if (authActivateStatus) authActivateStatus.textContent = "Error de conexión al activar la cuenta.";
-  }
+  if (!AuthModule) return;
+  return AuthModule.submitActivationPassword({
+    authActivatePass1,
+    authActivatePass2,
+    authActivateStatus,
+    showAuthOverlay,
+  });
 };
 
 const submitAuthLogin = async () => {
-  const usuario = authLoginUser?.value?.trim() || "";
-  const password = authLoginPass?.value || "";
-  if (!usuario || !password) {
-    if (authLoginStatus) authLoginStatus.textContent = "Introduce usuario/email y contraseña.";
-    return;
-  }
-  if (authLoginStatus) authLoginStatus.textContent = "Accediendo...";
-  try {
-    const res = await fetch("/api/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "same-origin",
-      body: JSON.stringify({ usuario, password }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok || data?.error) {
-      if (authLoginStatus) authLoginStatus.textContent = data?.error || "No se pudo iniciar sesión.";
-      return;
-    }
-    if (authLoginPass) authLoginPass.value = "";
-    if (authLoginStatus) {
-      authLoginStatus.textContent = data?.first_password_set
-        ? "Contraseña inicial guardada. Acceso correcto."
-        : "Acceso correcto.";
-    }
-    setAuthUi(data?.user || null);
-    hideAuthOverlay();
-    if (!state.appInitialized) {
-      await init();
-      state.appInitialized = true;
-    }
-  } catch {
-    if (authLoginStatus) authLoginStatus.textContent = "Error de conexión al iniciar sesión.";
-  }
+  if (!AuthModule) return;
+  return AuthModule.submitAuthLogin({
+    state,
+    init,
+    authLoginUser,
+    authLoginPass,
+    authLoginStatus,
+    setAuthUi,
+    hideAuthOverlay,
+  });
 };
 
 const logoutAuthSession = async () => {
-  try {
-    await fetch("/api/logout", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "same-origin",
-      body: "{}",
-    });
-  } catch {}
-  showAuthOverlay("Sesión cerrada.");
+  if (!AuthModule) return;
+  return AuthModule.logoutAuthSession({
+    showAuthOverlay,
+  });
 };
 
 const init = async () => {
@@ -24920,7 +24785,7 @@ if (hipotecaForm) {
   });
 }
 
-window.addEventListener("resize", () => {
+const redrawDashboardOnResize = () => {
   if (lastDashboardData && dashboardSection && !dashboardSection.classList.contains("hidden")) {
     const ventasYears = buildYearIndex([lastDashboardData.ventas]);
     const facturadoYears = buildYearIndex([lastDashboardData.ingresos, lastDashboardData.gastos]);
@@ -24992,4 +24857,10 @@ window.addEventListener("resize", () => {
       "#d7b04c"
     );
   }
+};
+
+let dashboardResizeTimer = null;
+window.addEventListener("resize", () => {
+  clearTimeout(dashboardResizeTimer);
+  dashboardResizeTimer = setTimeout(redrawDashboardOnResize, 120);
 });
