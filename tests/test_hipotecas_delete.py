@@ -6,6 +6,7 @@ from web.server import (
     delete_gestoria_contabilidad_record,
     delete_hipoteca_record,
     derive_hipoteca_commissions,
+    resolve_hipoteca_contabilidad_link,
     sync_hipotecas_contabilidad_entries,
 )
 
@@ -200,6 +201,39 @@ class HipotecasDeleteTests(unittest.TestCase):
         self.assertIn("Comisión cliente", gestiones)
         self.assertIn("Cesión Juan", gestiones)
         self.assertIn("Cesión a inmobiliarias", gestiones)
+
+    def test_resolve_hipoteca_contabilidad_link_supports_legacy_schema_without_cliente_id(self):
+        legacy = sqlite3.connect(":memory:")
+        legacy.row_factory = sqlite3.Row
+        legacy.executescript(
+            """
+            CREATE TABLE hipotecas (
+              id TEXT PRIMARY KEY,
+              empresa_id TEXT,
+              cliente TEXT,
+              banco TEXT,
+              fecha_firma TEXT
+            );
+            CREATE TABLE clientes (
+              id TEXT PRIMARY KEY,
+              nombre TEXT,
+              created_at TEXT
+            );
+            INSERT INTO hipotecas (id, empresa_id, cliente, banco, fecha_firma)
+            VALUES ('h1', 'e1', 'Cliente Uno', 'Banco Test', '2025-02-10');
+            INSERT INTO clientes (id, nombre, created_at)
+            VALUES ('c1', 'Cliente Uno', '2026-03-24');
+            """
+        )
+        try:
+            link = resolve_hipoteca_contabilidad_link(legacy, "h1")
+        finally:
+            legacy.close()
+
+        self.assertEqual(link["cliente"], "Cliente Uno")
+        self.assertEqual(link["banco"], "Banco Test")
+        self.assertEqual(link["fecha_firma"], "2025-02-10")
+        self.assertEqual(link["cliente_id"], "c1")
 
 
 if __name__ == "__main__":

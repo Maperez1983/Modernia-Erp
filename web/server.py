@@ -1080,14 +1080,22 @@ def resolve_hipoteca_contabilidad_link(conn, hipoteca_id):
     hipoteca_id = str(hipoteca_id or "").strip()
     if not hipoteca_id:
         return {"cliente": "", "banco": "", "fecha_firma": "", "cliente_id": None}
-    row = conn.execute(
-        "SELECT cliente, cliente_id, banco, fecha_firma FROM hipotecas WHERE id = ? LIMIT 1",
-        (hipoteca_id,),
-    ).fetchone()
+    try:
+        row = conn.execute(
+            "SELECT cliente, cliente_id, banco, fecha_firma FROM hipotecas WHERE id = ? LIMIT 1",
+            (hipoteca_id,),
+        ).fetchone()
+    except sqlite3.OperationalError as exc:
+        if "no such column: cliente_id" not in str(exc).lower():
+            raise
+        row = conn.execute(
+            "SELECT cliente, banco, fecha_firma FROM hipotecas WHERE id = ? LIMIT 1",
+            (hipoteca_id,),
+        ).fetchone()
     if not row:
         return {"cliente": "", "banco": "", "fecha_firma": "", "cliente_id": None}
     cliente_nombre = str(row["cliente"] or "").strip()
-    cliente_id = str(row["cliente_id"] or "").strip() or None
+    cliente_id = str(row["cliente_id"] or "").strip() or None if "cliente_id" in row.keys() else None
     if not cliente_id and cliente_nombre:
         cliente_row = conn.execute(
             "SELECT id FROM clientes WHERE UPPER(COALESCE(nombre, '')) = UPPER(?) ORDER BY created_at DESC LIMIT 1",
