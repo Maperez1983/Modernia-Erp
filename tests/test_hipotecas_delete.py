@@ -135,6 +135,31 @@ class HipotecasDeleteTests(unittest.TestCase):
         ).fetchone()["total"]
         self.assertEqual(exclusion, 1)
 
+    def test_sync_does_not_create_entries_for_non_closed_status_even_with_signature_date(self):
+        self.conn.execute(
+            """
+            INSERT INTO hipotecas (
+              id, empresa_id, cliente, banco, fecha_firma, comision, cesion, comision_juan, comision_modernia,
+              estado, anio, created_at, updated_at
+            ) VALUES (
+              'h2', 'e1', 'Cliente Dos', 'Banco Test', '2025-03-12', 90.0, 10.0, 18.0, 62.0,
+              'ESTUDIO', 2025, '2026-03-24', '2026-03-24'
+            )
+            """
+        )
+        self.conn.commit()
+
+        sync_hipotecas_contabilidad_entries(self.conn, "e1", now="2026-03-24T10:00:00+00:00")
+
+        count = self.conn.execute(
+            """
+            SELECT COUNT(*) AS total
+            FROM gestoria_contabilidad
+            WHERE hipoteca_id = 'h2'
+            """
+        ).fetchone()["total"]
+        self.assertEqual(count, 0)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1407,9 +1407,10 @@ def derive_hipoteca_inmobiliaria_cost(row):
 
 
 def build_hipoteca_accounting_entries(row):
+    estado = (row.get("estado") if isinstance(row, dict) else row["estado"]) or ""
     fecha_raw = (row.get("fecha_firma") if isinstance(row, dict) else row["fecha_firma"]) or ""
     fecha = parse_iso_date(fecha_raw)
-    if not fecha:
+    if not fecha or not hipoteca_estado_is_closed(estado):
         return []
     cliente = str((row.get("cliente") if isinstance(row, dict) else row["cliente"]) or "").strip() or "Hipoteca"
     banco = str((row.get("banco") if isinstance(row, dict) else row["banco"]) or "").strip()
