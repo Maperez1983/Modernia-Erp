@@ -789,7 +789,7 @@ def compute_seguros_contabilidad_totals(conn, empresa_id, year=None):
         values.append(str(year))
     rows = conn.execute(
         f"""
-        SELECT gc.tipo, gc.importe
+        SELECT gc.tipo, gc.importe, gc.gestion
         FROM gestoria_contabilidad gc
         WHERE {' AND '.join(where)}
         """,
@@ -1162,7 +1162,7 @@ def compute_hipotecas_contabilidad_totals(conn, empresa_id, year=None):
         values.append(str(year))
     rows = conn.execute(
         f"""
-        SELECT gc.tipo, gc.importe
+        SELECT gc.tipo, gc.importe, gc.gestion
         FROM gestoria_contabilidad gc
         WHERE {' AND '.join(where)}
         """,
@@ -1170,20 +1170,70 @@ def compute_hipotecas_contabilidad_totals(conn, empresa_id, year=None):
     ).fetchall()
     ingresos = 0.0
     gastos = 0.0
+    comision_cliente = 0.0
     for row in rows:
         amount = parse_money_value(row["importe"])
         if normalize_lookup_text(row["tipo"]) == "GASTO":
             gastos += amount
         else:
             ingresos += amount
+            gestion = normalize_lookup_text(row["gestion"])
+            if gestion in ("COMISION CLIENTE", "COMISIÓN CLIENTE"):
+                comision_cliente += amount
     resultado = round(ingresos - gastos, 2)
     rentabilidad_ratio = round(resultado / gastos, 4) if abs(gastos) >= 0.005 else None
     return {
         "ingresos": round(ingresos, 2),
         "gastos": round(gastos, 2),
+        "comision_cliente": round(comision_cliente, 2),
         "resultado": resultado,
         "rentabilidad_ratio": rentabilidad_ratio,
     }
+
+
+def compute_hipotecas_commission_series(conn, empresa_id):
+    rows = conn.execute(
+        f"""
+        SELECT STRFTIME('%Y', gc.fecha) AS year, SUM(COALESCE(gc.importe, 0)) AS total
+        FROM gestoria_contabilidad gc
+        WHERE gc.empresa_id = ?
+          AND {hipotecas_contabilidad_where_clause("gc")}
+          AND LOWER(TRIM(COALESCE(gc.gestion, ''))) IN ('comision cliente', 'comisión cliente')
+          AND LOWER(TRIM(COALESCE(gc.tipo, ''))) <> 'gasto'
+          AND STRFTIME('%Y', gc.fecha) IS NOT NULL
+        GROUP BY STRFTIME('%Y', gc.fecha)
+        ORDER BY STRFTIME('%Y', gc.fecha)
+        """,
+        (empresa_id,),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def compute_hipotecas_commission_by_bank(conn, empresa_id, year=None):
+    where = [
+        "gc.empresa_id = ?",
+        hipotecas_contabilidad_where_clause("gc"),
+        "h.id = gc.hipoteca_id",
+        "h.banco IS NOT NULL",
+        "TRIM(h.banco) <> ''",
+        "LOWER(TRIM(COALESCE(gc.gestion, ''))) IN ('comision cliente', 'comisión cliente')",
+        "LOWER(TRIM(COALESCE(gc.tipo, ''))) <> 'gasto'",
+    ]
+    values = [empresa_id]
+    if year:
+        where.append("STRFTIME('%Y', gc.fecha) = ?")
+        values.append(str(year))
+    rows = conn.execute(
+        f"""
+        SELECT h.banco AS label, SUM(COALESCE(gc.importe, 0)) AS total
+        FROM gestoria_contabilidad gc
+        JOIN hipotecas h ON h.id = gc.hipoteca_id
+        WHERE {' AND '.join(where)}
+        GROUP BY h.banco
+        """,
+        values,
+    ).fetchall()
+    return {str(row["label"] or "").strip(): round(parse_money_value(row["total"]), 2) for row in rows}
 
 
 def resolve_hipoteca_contabilidad_link(conn, hipoteca_id):
@@ -17228,28 +17278,7 @@ class Handler(BaseHTTPRequestHandler):
                 (empresa_id,),
             ).fetchall()
 
-            series_comision = conn.execute(
-                """
-                SELECT """
-                + year_expr
-                + """ AS year, SUM(COALESCE(comision, 0)) AS total
-                FROM hipotecas
-                WHERE empresa_id = ?
-                  AND """
-                + year_expr
-                + """ IS NOT NULL
-                  AND """
-                + closed_expr
-                + """
-                GROUP BY """
-                + year_expr
-                + """
-                ORDER BY """
-                + year_expr
-                + """
-                """,
-                (empresa_id,),
-            ).fetchall()
+            series_comision = compute_hipotecas_commission_series(conn, empresa_id)
 
             series_porcentaje = conn.execute(
                 """
@@ -17321,6 +17350,7 @@ class Handler(BaseHTTPRequestHandler):
             ).fetchall()
 
             entity_total_map = {str(row["label"]): dict(row) for row in entity_total_rows}
+            commission_by_bank_year = compute_hipotecas_commission_by_bank(conn, empresa_id, selected_year)
             entities = []
             for row in entity_year_rows:
                 label = str(row["label"] or "").strip()
@@ -17331,8 +17361,7 @@ class Handler(BaseHTTPRequestHandler):
                       SUM(COALESCE(importe_hipoteca, 0)) AS volumen_total,
                       AVG("""
                     + duration_expr
-                    + """) AS plazo_medio_dias,
-                      SUM(COALESCE(comision, 0)) AS comision_total
+                    + """) AS plazo_medio_dias
                     FROM hipotecas
                     WHERE empresa_id = ?
                       AND banco = ?
@@ -17352,7 +17381,7 @@ class Handler(BaseHTTPRequestHandler):
                         "total": base.get("total") or 0,
                         "volumen_total": metrics["volumen_total"] if metrics and metrics["volumen_total"] is not None else 0,
                         "plazo_medio_dias": metrics["plazo_medio_dias"] if metrics and metrics["plazo_medio_dias"] is not None else 0,
-                        "comision_total": metrics["comision_total"] if metrics and metrics["comision_total"] is not None else 0,
+                        "comision_total": commission_by_bank_year.get(label, 0),
                     }
                 )
 
@@ -17382,7 +17411,7 @@ class Handler(BaseHTTPRequestHandler):
                         "total": current["total"] if current else 0,
                         "porcentaje_medio": current["porcentaje_medio"] if current else 0,
                         "comision_media": current["comision_media"] if current else 0,
-                        "comision_total": current["comision_total"] if current else 0,
+                        "comision_total": conta_year["comision_cliente"],
                         "volumen_total": current["volumen_total"] if current else 0,
                         "plazo_medio_dias": current["plazo_medio_dias"] if current else 0,
                         "firmadas_anio": firmadas_anio["total"] if firmadas_anio else 0,
@@ -17397,7 +17426,7 @@ class Handler(BaseHTTPRequestHandler):
                         "total": totals["total"] if totals else 0,
                         "porcentaje_medio": totals["porcentaje_medio"] if totals else 0,
                         "comision_media": totals["comision_media"] if totals else 0,
-                        "comision_total": totals["comision_total"] if totals else 0,
+                        "comision_total": conta_total["comision_cliente"],
                         "volumen_total": totals["volumen_total"] if totals else 0,
                         "plazo_medio_dias": totals["plazo_medio_dias"] if totals else 0,
                         "operaciones_estudio": estudio_total["total"] if estudio_total else 0,

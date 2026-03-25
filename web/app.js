@@ -9465,7 +9465,7 @@ const HIPOTECA_BANK_BRANDS = [
     short: "Santander",
     logo: "/assets/logos/santander.svg",
     color: "#e30613",
-    aliases: ["santander", "banco santander"],
+    aliases: ["santander", "banco santander", "banco santander s.a.", "grupo santander"],
   },
   {
     name: "BBVA",
@@ -9493,7 +9493,7 @@ const HIPOTECA_BANK_BRANDS = [
     short: "Bankinter",
     logo: "",
     color: "#f58220",
-    aliases: ["bankinter"],
+    aliases: ["bankinter", "bankinter consumer finance", "bankinter consumer"],
   },
   {
     name: "Unicaja Banco",
@@ -9528,14 +9528,21 @@ const HIPOTECA_BANK_BRANDS = [
     short: "CR Granada",
     logo: "/assets/logos/caja-rural-granada.png",
     color: "#2e7d32",
-    aliases: ["caja rural de granada"],
+    aliases: ["caja rural de granada", "cajarural de granada", "rural granada"],
   },
   {
     name: "Caja Rural del Sur",
     short: "CR del Sur",
     logo: "/assets/logos/caja-rural-del-sur.png",
     color: "#0b8f3d",
-    aliases: ["caja rural del sur"],
+    aliases: ["caja rural del sur", "cajarural del sur", "rural del sur"],
+  },
+  {
+    name: "ING",
+    short: "ING",
+    logo: "",
+    color: "#ff6200",
+    aliases: ["ing", "ing direct", "ing bank"],
   },
 ];
 
@@ -9578,7 +9585,7 @@ const renderHipotecaEntityKpis = (rows = [], selectedYear = "") => {
   const table = document.createElement("table");
   const thead = document.createElement("thead");
   const trHead = document.createElement("tr");
-  ["Entidad", `Hipotecas ${selectedYear || ""}`.trim(), "Total", "Volumen", "Plazo medio", "Comisión"].forEach((label) => {
+  ["Entidad", `Hipotecas ${selectedYear || ""}`.trim(), "Total", "Volumen", "Plazo medio", "Comisión cliente"].forEach((label) => {
     const th = document.createElement("th");
     th.textContent = label;
     trHead.appendChild(th);
@@ -9697,7 +9704,7 @@ const loadHipotecaDashboard = () => {
           note: `Total: ${numberFormatter.format(totals?.operaciones_estudio || 0)}`,
         },
         {
-          title: `Comisión ${currentYear}`,
+          title: `Comisión cliente ${currentYear}`,
           value: euroFormatter.format(data?.current?.comision_total || 0),
           note: `Total: ${euroFormatter.format(totals?.comision_total || 0)}`,
         },
@@ -9791,7 +9798,7 @@ const loadHipotecaDashboard = () => {
         comisionYears,
         [
           {
-            label: "Comisión",
+            label: "Comisión cliente",
             values: alignSeries(comisionYears, data?.series_comision || []),
             color: "#7e8878",
             format: (value) => euroFormatter.format(value),
