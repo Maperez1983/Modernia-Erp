@@ -4847,7 +4847,6 @@ const BANK_WORDMARK_LOGOS = {
 
 const COMPANY_LOGOS = {
   ALLIANZ: "/assets/logos/allianz.svg",
-  ADESLAS: "/assets/logos/adeslas.png",
   ARAG: "/assets/logos/arag.svg",
   AXA: "/assets/logos/axa.svg",
   CASER: "/assets/logos/caser.svg",

@@ -1566,14 +1566,19 @@ body.crm-fin #companySummary {
 }
 
 .company-logo {
-  width: 20px;
-  height: 20px;
+  display: block;
+  width: auto;
+  height: 24px;
+  max-width: 48px;
   object-fit: contain;
+  object-position: left center;
+  flex-shrink: 0;
+  image-rendering: -webkit-optimize-contrast;
 }
 
 .company-badge.compact .company-logo {
-  width: 16px;
-  height: 16px;
+  height: 18px;
+  max-width: 34px;
 }
 
 .company-initials {
@@ -2011,13 +2016,18 @@ body.crm-fin #companySummary {
 }
 
 .hipoteca-bank-logo {
-  width: 34px;
-  height: 34px;
+  display: block;
+  width: auto;
+  height: 28px;
+  min-width: 52px;
+  max-width: 72px;
   border-radius: 10px;
   object-fit: contain;
+  object-position: center;
   background: #fff;
   border: 1px solid var(--line);
-  padding: 4px;
+  padding: 4px 6px;
+  image-rendering: -webkit-optimize-contrast;
 }
 
 .hipoteca-bank-badge {
