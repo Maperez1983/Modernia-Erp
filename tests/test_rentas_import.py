@@ -92,6 +92,71 @@ Cuenta
 """
 
 
+MODELO_ACTIVITY_SAMPLE = """
+INFORMACIÓN DE LA PRESENTACIÓN DE LA DECLARACIÓN
+Modelo 100
+Impuesto sobre la Renta de las Personas Físicas
+74887470E 0001
+BARBERO GARCIA JUAN 0002
+Hombre 0005
+(1) Soltero/a 0006
+13/07/1985 0010
+Suma del rendimiento neto reducido total de las actividades económicas en estimación directa
+
+611,60 0198
+5.581,88 0199
+210,00 0217
+17.825,19 0218
+20.050,31 0221
+1.002,52 0222
+150,00 0670
+"""
+
+
+MODELO_IBAN_SAMPLE = """
+INFORMACIÓN DE LA PRESENTACIÓN DE LA DECLARACIÓN
+Modelo 100
+74871528L 0001
+BUENO SANTANA PAULA MACARENA 0002
+Mujer 0005
+(1) Soltero/a 0006
+29/08/1982 0010
+8.447,50 0171
+5.595,50 0235
+376,94 0670
+DOMICILIACIÓN DEL IMPORTE A INGRESAR
+Código IBAN
+ES1601825332100203546780
+"""
+
+
+MODELO_OCR_RELAXED_SAMPLE = """
+INFORMACION DE LA PRESENTACION DE LA DECLARACION
+Modelo 100 Ejercicio 2024
+NIF Presentador: 74841 155Y
+Apellidos y Nombre / Razon social: MARTIN ILLANEZ JOSE MANUEL
+Fecha de nacimiento 18/02/1977 [ooto]
+Total ingresos integros computables [(03)+(07)+(08)+(24)+(09)+(10)-(11)] 21.880,73 [oo12]
+Resultado de la declaracién -125,04 [oe70]
+"""
+
+
+FISCALES_AYUDAS_SAMPLE = """
+Consulta de Datos Fiscales 2024
+NIF:
+Y9736585D
+NOMBRE:
+AMBROSELLI MARTORELL ANTONELLA
+OTRAS SUBVENCIONES, AUXILIOS Y AYUDAS SATISFECHOS POR LAS ADMINISTRACIONES PÚBLICAS
+Código
+IP00001
+Importe
+JUNTA DE ANDALUCIA
+6.035,17
+PAGOS FRACCIONADOS DE EMPRESAS Y PROFESIONALES
+"""
+
+
 def create_test_schema(db_path: Path) -> None:
     conn = sqlite3.connect(str(db_path))
     try:
@@ -320,11 +385,29 @@ class RentasImportTests(unittest.TestCase):
         self.assertAlmostEqual(parsed["rendimientos_capital_mobiliario_total"], 920.00, places=2)
         self.assertAlmostEqual(parsed["ingresos_principales_total"], 920.00, places=2)
 
+    def test_parse_modelo_100_uses_activity_fallback_when_income_code_is_missing(self):
+        parsed = parse_modelo_100_text(MODELO_ACTIVITY_SAMPLE)
+        self.assertEqual(parsed["cliente_nif"], "74887470E")
+        self.assertAlmostEqual(parsed["rendimientos_actividades_economicas_total"], 20050.31, places=2)
+        self.assertAlmostEqual(parsed["ingresos_principales_total"], 20050.31, places=2)
+
+    def test_parse_modelo_100_extracts_iban_accounts(self):
+        parsed = parse_modelo_100_text(MODELO_IBAN_SAMPLE)
+        self.assertIn("ES1601825332100203546780", parsed["cuentas_detectadas"])
+
+    def test_parse_modelo_100_handles_relaxed_ocr_nif_and_birthdate(self):
+        parsed = parse_modelo_100_text(MODELO_OCR_RELAXED_SAMPLE)
+        self.assertEqual(parsed["cliente_nif"], "74841155Y")
+        self.assertEqual(parsed["cliente_fecha_nacimiento"], "1977-02-18")
+        self.assertAlmostEqual(parsed["ingresos_principales_total"], 21880.73, places=2)
+        self.assertAlmostEqual(parsed["resultado_declaracion"], -125.04, places=2)
+
     def test_classify_pdf_support_documents(self):
         aplazamiento = "DETALLE DE LA SOLICITUD Tipo Solicitud: Aplaz/Fracc"
         dt2 = "Modelo DT2 Solicitud devolución por aportaciones a Mutualidades"
         self.assertEqual(classify_pdf(aplazamiento, Path("/tmp/aplazamiento.pdf")), "soporte_cliente")
         self.assertEqual(classify_pdf(dt2, Path("/tmp/dt2.pdf")), "soporte_cliente")
+        self.assertEqual(classify_pdf("", Path("/tmp/cliente FRACCIONAMIENTO 2 PLAZO.pdf")), "soporte_cliente")
 
     def test_parse_datos_fiscales_extracts_address_and_accounts(self):
         parsed = parse_datos_fiscales_text(FISCALES_SAMPLE)
@@ -336,6 +419,27 @@ class RentasImportTests(unittest.TestCase):
         self.assertEqual(parsed["poblacion"], "ALHAURÍN DE LA TORRE")
         self.assertEqual(parsed["provincia"], "MALAGA")
         self.assertIn("3650938313", parsed["cuentas_detectadas"])
+
+    def test_parse_datos_fiscales_uses_public_aids_as_income_fallback(self):
+        parsed = parse_datos_fiscales_text(FISCALES_AYUDAS_SAMPLE)
+        self.assertAlmostEqual(parsed["rendimientos_actividades_economicas_total"], 6035.17, places=2)
+        self.assertAlmostEqual(parsed["ingresos_principales_total"], 6035.17, places=2)
+
+    def test_parse_modelo_100_discards_spouse_name_when_it_looks_like_an_address(self):
+        text = """
+        Modelo 100
+        11111111H 0001
+        CLIENTE PRUEBA 0002
+        Hombre 0005
+        (2) Casado/a 0007
+        01/01/1980 0010
+        22222222J 0013
+        CL ANTONIO MACHADO 0014
+        100,00 0670
+        """
+        parsed = parse_modelo_100_text(text)
+        self.assertEqual(parsed["conyuge_nif"], "22222222J")
+        self.assertFalse(parsed.get("conyuge_nombre"))
 
     def test_finalize_record_marks_filename_only_records_for_review(self):
         record = finalize_record(

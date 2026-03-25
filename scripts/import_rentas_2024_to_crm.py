@@ -58,8 +58,13 @@ def clean_ocr_text_value(value: object) -> str:
     return compact_spaces(text)
 
 
+def normalize_nif_candidate(value: object) -> str:
+    text = compact_spaces(value).upper().replace(" ", "").replace(".", "").replace("-", "")
+    return text
+
+
 def looks_like_nif(value: object) -> bool:
-    text = compact_spaces(value).upper().replace(" ", "").replace("-", "").replace(".", "")
+    text = normalize_nif_candidate(value)
     if not re.fullmatch(r"[A-Z0-9]{8,10}", text):
         return False
     if not any(ch.isdigit() for ch in text):
@@ -164,6 +169,25 @@ def extract_money_near_line(text: str, line_pattern: str, window: int = 3) -> fl
     return None
 
 
+def extract_money_candidates_near_line(text: str, line_pattern: str, window: int = 6) -> list[float]:
+    lines = [compact_spaces(line) for line in str(text or "").splitlines()]
+    number_pattern = re.compile(r"[\-0-9][0-9\.,]*")
+    candidates: list[float] = []
+    for idx, line in enumerate(lines):
+        if not re.search(line_pattern, line, re.IGNORECASE):
+            continue
+        for offset in range(window + 1):
+            pos = idx + offset
+            if pos >= len(lines):
+                break
+            for candidate in number_pattern.findall(lines[pos]):
+                value = parse_money(candidate)
+                if value is None or abs(value) < 0.005:
+                    continue
+                candidates.append(value)
+    return candidates
+
+
 def looks_like_person_name(value: object) -> bool:
     text = compact_spaces(value)
     if not text:
@@ -174,6 +198,30 @@ def looks_like_person_name(value: object) -> bool:
     if re.search(r"\d", text):
         return False
     return True
+
+
+def sanitize_person_name_candidate(value: object) -> str:
+    text = clean_ocr_text_value(value)
+    if not text:
+        return ""
+    lowered = norm_text(text)
+    if any(token in lowered for token in ("inmueble", "direccion", "referencia catastral", "vivienda habitual")):
+        return ""
+    if re.match(r"^(CL|AV|AVDA|AVENIDA|LG|CM|CR|PS|PZ|UR|CTRA|CALLE|CAMINO|LUGAR)\b", text, re.IGNORECASE):
+        return ""
+    if not looks_like_person_name(text):
+        return ""
+    return text
+
+
+def extract_iban_accounts(text: str) -> list[str]:
+    raw_matches = re.findall(r"\bES(?:\s*[0-9A-Z]){22}\b", str(text or ""), re.IGNORECASE)
+    accounts = []
+    for raw in raw_matches:
+        normalized = re.sub(r"\s+", "", raw).upper()
+        if re.fullmatch(r"ES[0-9A-Z]{22}", normalized) and normalized not in accounts:
+            accounts.append(normalized)
+    return accounts
 
 
 def run_pdftotext(pdf_path: Path) -> str:
@@ -228,6 +276,8 @@ def get_pdf_text(pdf_path: Path) -> tuple[str, str]:
 def classify_pdf(text: str, pdf_path: Path) -> str:
     upper = norm_text(text)
     name = norm_text(pdf_path.name)
+    if any(token in name for token in ("fraccionamiento", "aplazamiento", "aplaz", "pago")):
+        return "soporte_cliente"
     if "recibo de presentacion" in upper and "aportar documentacion complementaria" in upper:
         return "soporte_cliente"
     if "detalle de la solicitud" in upper and ("aplazamiento" in upper or "aplaz/fracc" in upper or "fracc" in upper):
@@ -274,7 +324,7 @@ def parse_modelo_100_text(text: str) -> dict:
         re.IGNORECASE | re.DOTALL,
     )
     if titular:
-        data["cliente_nif"] = compact_spaces(titular.group(1)).upper()
+        data["cliente_nif"] = normalize_nif_candidate(titular.group(1))
         data["cliente_nombre"] = compact_spaces(titular.group(2))
         data["cliente_nif_source"] = "modelo_100"
         data["cliente_nombre_source"] = "modelo_100"
@@ -283,7 +333,7 @@ def parse_modelo_100_text(text: str) -> dict:
     else:
         match = re.search(r"Primer declarante.*?\b([0-9A-Z]{8,10})\s+0001\b", text, re.IGNORECASE | re.DOTALL)
         if match:
-            data["cliente_nif"] = compact_spaces(match.group(1)).upper()
+            data["cliente_nif"] = normalize_nif_candidate(match.group(1))
             data["cliente_nif_source"] = "modelo_100"
         match = re.search(r"\b0001\s+([A-ZÁÉÍÓÚÜÑ ,'./-]+?)\s+0002\b", text, re.IGNORECASE | re.DOTALL)
         if match:
@@ -310,13 +360,27 @@ def parse_modelo_100_text(text: str) -> dict:
     if not data.get("cliente_nif"):
         presentador_nif = re.search(r"NIF Presentador:\s*([A-Z0-9]{8,10})", text)
         if presentador_nif:
-            data["cliente_nif"] = presentador_nif.group(1).upper()
+            data["cliente_nif"] = normalize_nif_candidate(presentador_nif.group(1))
             data["cliente_nif_source"] = "presentador"
+    if not data.get("cliente_nif"):
+        presentador_nif_relaxed = re.search(r"NIF Presentador:\s*([A-Z0-9 ]{8,12})", text, re.IGNORECASE)
+        if presentador_nif_relaxed:
+            maybe = normalize_nif_candidate(presentador_nif_relaxed.group(1))
+            if looks_like_nif(maybe):
+                data["cliente_nif"] = maybe
+                data["cliente_nif_source"] = "presentador"
     if not data.get("cliente_nif"):
         nif_0001 = extract_single_code_value(text, "0001", r"([A-Z0-9]{8,10})")
         if nif_0001:
-            data["cliente_nif"] = nif_0001.upper()
+            data["cliente_nif"] = normalize_nif_candidate(nif_0001)
             data["cliente_nif_source"] = "modelo_100"
+    if not data.get("cliente_nif"):
+        relaxed_nif = re.search(r"NIF\s+([A-Z0-9 ]{8,12})\s+\[?o*0*0*1\]?", normalized, re.IGNORECASE)
+        if relaxed_nif:
+            maybe = normalize_nif_candidate(relaxed_nif.group(1))
+            if looks_like_nif(maybe):
+                data["cliente_nif"] = maybe
+                data["cliente_nif_source"] = "modelo_100"
     if not data.get("cliente_nombre") or data.get("cliente_nombre_source") == "presentador":
         nombre_0002 = extract_single_code_value(text, "0002", r"([A-ZÁÉÍÓÚÜÑ ,'./-]+?)")
         if nombre_0002:
@@ -364,6 +428,10 @@ def parse_modelo_100_text(text: str) -> dict:
         nacimiento = extract_date_near_line(normalized, r"Fecha de nacimiento", window=2)
         if nacimiento:
             data["cliente_fecha_nacimiento"] = nacimiento
+    if not data.get("cliente_fecha_nacimiento"):
+        match = re.search(r"Fecha de nacimiento\s+([0-9]{2}/[0-9]{2}/[0-9]{4})", normalized, re.IGNORECASE)
+        if match:
+            data["cliente_fecha_nacimiento"] = parse_date_ddmmyyyy(match.group(1))
     if not looks_like_person_name(data.get("cliente_nombre")):
         presentador = compact_spaces(data.get("cliente_nombre")) if data.get("cliente_nombre_source") == "presentador" else ""
         if not presentador:
@@ -373,12 +441,15 @@ def parse_modelo_100_text(text: str) -> dict:
         if looks_like_person_name(presentador):
             data["cliente_nombre"] = presentador
             data["cliente_nombre_source"] = "presentador"
+    cliente_name_clean = sanitize_person_name_candidate(data.get("cliente_nombre"))
+    if cliente_name_clean:
+        data["cliente_nombre"] = cliente_name_clean
     conyuge_nif = re.search(r"(?:Cónyuge.*?NIF\s+)?([A-Z0-9]{8,10})\s+0013\b", text, re.IGNORECASE | re.DOTALL)
     if conyuge_nif:
-        data["conyuge_nif"] = compact_spaces(conyuge_nif.group(1)).upper()
+        data["conyuge_nif"] = normalize_nif_candidate(conyuge_nif.group(1))
     conyuge_nombre = re.search(r"(?:Apellidos y nombre\s+)?([A-ZÁÉÍÓÚÜÑ ,'./-]+?)\s+0014\b", text, re.IGNORECASE | re.DOTALL)
     if conyuge_nombre:
-        nombre = compact_spaces(conyuge_nombre.group(1))
+        nombre = sanitize_person_name_candidate(conyuge_nombre.group(1))
         if nombre and "primer declarante" not in norm_text(nombre):
             data["conyuge_nombre"] = nombre
     conyuge_fecha = re.search(r"Fecha de nacimiento del cónyuge\s+([0-9]{2}/[0-9]{2}/[0-9]{4})\s+0060\b", text)
@@ -387,18 +458,26 @@ def parse_modelo_100_text(text: str) -> dict:
     if not data.get("conyuge_nif"):
         match = re.search(r"C[oó]nyuge .*?NIF\s+([A-Z0-9]{8,10})", normalized, re.IGNORECASE | re.DOTALL)
         if match:
-            data["conyuge_nif"] = compact_spaces(match.group(1)).upper()
+            data["conyuge_nif"] = normalize_nif_candidate(match.group(1))
     if not data.get("conyuge_nombre"):
         match = re.search(r"C[oó]nyuge .*?Apellidos y nombre\s+([A-ZÁÉÍÓÚÜÑ ,'./-]+?)\s+Sexo del c[oó]nyuge", normalized, re.IGNORECASE | re.DOTALL)
         if match:
-            data["conyuge_nombre"] = compact_spaces(match.group(1))
+            data["conyuge_nombre"] = sanitize_person_name_candidate(match.group(1))
     if not data.get("conyuge_fecha_nacimiento"):
         match = re.search(r"Fecha de nacimiento del c[oó]nyuge\s+([0-9]{2}/[0-9]{2}/[0-9]{4})", normalized, re.IGNORECASE)
         if match:
             data["conyuge_fecha_nacimiento"] = parse_date_ddmmyyyy(match.group(1))
+    conyuge_name_clean = sanitize_person_name_candidate(data.get("conyuge_nombre"))
+    if conyuge_name_clean:
+        data["conyuge_nombre"] = conyuge_name_clean
+    elif data.get("conyuge_nombre"):
+        data.pop("conyuge_nombre", None)
     comunidad = re.search(r"\n([A-ZÁÉÍÓÚÜÑ ]+)\s+0070\b", text)
     if comunidad:
         data["comunidad_autonoma"] = compact_spaces(comunidad.group(1))
+    cuentas = extract_iban_accounts(text)
+    if cuentas:
+        data["cuentas_detectadas"] = cuentas
 
     hijos_section = ""
     section_match = re.search(r"Situación familiar(.*?)Rendimientos del trabajo", text, re.IGNORECASE | re.DOTALL)
@@ -464,6 +543,20 @@ def parse_modelo_100_text(text: str) -> dict:
     )
     if actividad_label is not None:
         actividades.append(actividad_label)
+    actividad_window = extract_money_candidates_near_line(
+        normalized,
+        r"Suma del rendimiento neto reducido total de las actividades econ[oó]micas en estimaci[oó]n directa",
+        window=8,
+    )
+    if actividad_window:
+        actividades.append(max(actividad_window))
+    actividad_window = extract_money_candidates_near_line(
+        normalized,
+        r"Rendimiento neto reducido|Suma de rendimientos netos reducidos",
+        window=8,
+    )
+    if actividad_window:
+        actividades.append(max(actividad_window))
     if actividades:
         data["rendimientos_actividades_economicas_total"] = max(actividades)
     rend_cap_mob = []
@@ -512,6 +605,14 @@ def parse_modelo_100_text(text: str) -> dict:
             window=4,
         )
     if data.get("resultado_declaracion") is None:
+        match = re.search(r"Resultado de la declara[^\n\r]*?([\-]?[0-9][0-9\.,]*)", normalized, re.IGNORECASE)
+        if match:
+            data["resultado_declaracion"] = parse_money(match.group(1))
+    if data.get("resultado_declaracion") is None:
+        match = re.search(r"Importe total de la declaraci[oó]n:\s*([\-0-9\.,]+)\s*euros", normalized, re.IGNORECASE)
+        if match:
+            data["resultado_declaracion"] = parse_money(match.group(1))
+    if data.get("resultado_declaracion") is None:
         primer_plazo = extract_money_near_line(
             normalized,
             r"Importe del primer plazo",
@@ -540,6 +641,20 @@ def parse_modelo_100_text(text: str) -> dict:
         or data.get("rendimientos_capital_mobiliario_total")
         or None
     )
+    if data.get("ingresos_principales_total") is None:
+        ganancias = []
+        for code in ("1833", "1836", "1840", "1841", "0301", "0306", "0418", "0420"):
+            match = re.search(rf"([\-]?[0-9][0-9\.,]*)\s+(?:\[?{code.lower()}|\[?{code}|\b{code}\b)", normalized, re.IGNORECASE)
+            if match:
+                value = parse_money(match.group(1))
+                if value is not None:
+                    ganancias.append(abs(value))
+        if ganancias:
+            data["ingresos_principales_total"] = max(ganancias)
+    if data.get("ingresos_principales_total") is None:
+        match = re.search(r"Importe total de la declaraci[oó]n:\s*([\-0-9\.,]+)\s*euros", normalized, re.IGNORECASE)
+        if match:
+            data["ingresos_principales_total"] = parse_money(match.group(1))
     if data.get("ingresos_principales_total") is None and "negativa/sin actividad/resultado cero" in norm_text(text):
         data["ingresos_principales_total"] = 0.0
 
@@ -563,6 +678,7 @@ def parse_datos_fiscales_text(text: str) -> dict:
     data: dict[str, object] = {"source_type": "datos_fiscales"}
     if not text:
         return data
+    flat = compact_spaces(text.replace("\n", " "))
     match = re.search(r"NIF:\s*([A-Z0-9]+)", text)
     if match:
         data["cliente_nif"] = match.group(1)
@@ -583,17 +699,52 @@ def parse_datos_fiscales_text(text: str) -> dict:
             compact_spaces(numero.group(1)) if numero else "",
         ]
         data["direccion"] = compact_spaces(" ".join([p for p in parts if p]))
+    if not data.get("direccion"):
+        via_flat = re.search(r"Tipo V[ií]a\s+([A-ZÁÉÍÓÚÜÑ ]+?)\s+Nombre largo V[ií]a", flat, re.IGNORECASE)
+        nombre_flat = re.search(
+            r"Nombre largo V[ií]a\s+(.+?)\s+(?:Tipo Numer|NUM\b|N[uú]me|Datos Complementarios|Localidad / Poblaci[oó]n|C[oó]digo Post Municipio)",
+            flat,
+            re.IGNORECASE,
+        )
+        numero_flat = re.search(r"N[uú]mero\s+([0-9A-Z]+)\b", flat, re.IGNORECASE)
+        if via_flat or nombre_flat or numero_flat:
+            parts = [
+                compact_spaces(via_flat.group(1)) if via_flat else "",
+                compact_spaces(nombre_flat.group(1)) if nombre_flat else "",
+                compact_spaces(numero_flat.group(1)) if numero_flat else "",
+            ]
+            data["direccion"] = compact_spaces(" ".join([p for p in parts if p]))
     if poblacion:
         data["codigo_postal"] = poblacion.group(1)
         data["poblacion"] = compact_spaces(poblacion.group(2))
+    if not data.get("codigo_postal") or not data.get("poblacion"):
+        poblacion_flat = re.search(
+            r"C[oó]digo Post Municipio\s+(?:al\s+)?([A-ZÁÉÍÓÚÜÑ' ]+?)\s+([0-9]{5})\s+Provincia",
+            flat,
+            re.IGNORECASE,
+        )
+        if poblacion_flat:
+            data["poblacion"] = compact_spaces(poblacion_flat.group(1))
+            data["codigo_postal"] = poblacion_flat.group(2)
     if provincia:
         data["provincia"] = compact_spaces(provincia.group(1))
+    if not data.get("provincia"):
+        provincia_flat = re.search(r"Provincia\s+([A-ZÁÉÍÓÚÜÑ ]+)", flat, re.IGNORECASE)
+        if provincia_flat:
+            data["provincia"] = compact_spaces(provincia_flat.group(1))
     ref = re.search(r"Referencia Catastral\s+([A-Z0-9]+)", text)
     if ref:
         data["referencia_catastral"] = ref.group(1)
     cuentas = sorted(set(re.findall(r"\b[0-9]{10,20}\b", text)))
     if cuentas:
         data["cuentas_detectadas"] = cuentas
+    ibans = extract_iban_accounts(text)
+    if ibans:
+        current = list(data.get("cuentas_detectadas") or [])
+        for account in ibans:
+            if account not in current:
+                current.append(account)
+        data["cuentas_detectadas"] = current
     pagadores = sorted(set(re.findall(r"\b[A-Z][0-9A-Z]{7,}\s+([A-ZÁÉÍÓÚÜÑ ,\.]+?)\s+(?:\d{6,}|AU|SA|SL|S)\b", text)))
     pagadores = [compact_spaces(item) for item in pagadores if compact_spaces(item)]
     if pagadores:
@@ -607,6 +758,23 @@ def parse_datos_fiscales_text(text: str) -> dict:
         data["rendimientos_seguros_total"] = parse_money(seguros.group(1))
         data["base_retenciones_seguros_total"] = parse_money(seguros.group(2))
         data["retenciones_seguros_total"] = parse_money(seguros.group(3))
+    ayudas_block = re.search(
+        r"OTRAS SUBVENCIONES, AUXILIOS Y AYUDAS SATISFECHOS POR LAS ADMINISTRACIONES P[ÚU]BLICAS(.*?)(?:PAGOS FRACCIONADOS|CASILLAS DECLARACI[ÓO]N RENTA|$)",
+        text,
+        re.IGNORECASE | re.DOTALL,
+    )
+    if ayudas_block:
+        ayudas_vals = [
+            parse_money(item)
+            for item in re.findall(
+                r"\b([0-9]{1,3}(?:\.[0-9]{3})*,[0-9]{2}|[0-9]+\.[0-9]{2}|[0-9]+,[0-9]{2})\b",
+                ayudas_block.group(1),
+            )
+        ]
+        ayudas_vals = [item for item in ayudas_vals if item is not None]
+        if ayudas_vals:
+            data["rendimientos_actividades_economicas_total"] = round(max(ayudas_vals), 2)
+            data["ingresos_principales_total"] = data["rendimientos_actividades_economicas_total"]
     return data
 
 
@@ -676,6 +844,12 @@ def infer_name_from_sources(paths: list[str]) -> str:
     if first.parent.name and first.parent.name != "RENTAS 2024":
         return compact_spaces(first.parent.name)
     stem = first.stem
+    stem = re.sub(
+        r"\b(firma|fraccionamiento|aplazamiento|solicitud|pago|plazo|renta|modelo|presentacion)\b.*$",
+        " ",
+        stem,
+        flags=re.IGNORECASE,
+    )
     stem = re.sub(r"\b[0-9]{2,}[_/-]?[0-9A-Z]{2,}\b", " ", stem)
     stem = re.sub(r"\b[0-9A-Z]{5,}\b", " ", stem)
     stem = re.sub(r"\b\d{2}[_/-]?\d{2}[_/-]?\d{4}\b", " ", stem)
