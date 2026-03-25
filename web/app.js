@@ -17387,11 +17387,21 @@ const deleteHipoteca = (id) => {
   }).then((res) => res.json());
 };
 
+const getGestoriaContabilidadServiceContext = () => {
+  if (hipotecaContabilidadPanel && !hipotecaContabilidadPanel.classList.contains("hidden")) {
+    return "financiaciones";
+  }
+  if (currentTab === "seguros-crm" && state.segurosTab === "contabilidad") {
+    return "seguros";
+  }
+  return "gestoria";
+};
+
 const saveGestoriaContabilidadField = (id, field, value) => {
   fetch("/api/gestoria_contabilidad_update", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ id, [field]: value }),
+    body: JSON.stringify({ id, [field]: value, servicio: getGestoriaContabilidadServiceContext() }),
   });
 };
 
@@ -17399,7 +17409,7 @@ const deleteGestoriaContabilidad = (id) => {
   return fetch("/api/gestoria_contabilidad_delete", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ id }),
+    body: JSON.stringify({ id, servicio: getGestoriaContabilidadServiceContext() }),
   })
     .then((res) => res.json())
     .then(() => {
@@ -24538,6 +24548,7 @@ if (hipotecaContabilidadForm) {
     const formData = new FormData(hipotecaContabilidadForm);
     const payload = Object.fromEntries(formData.entries());
     payload.empresa_nombre = FIN_COMPANY;
+    payload.servicio = "financiaciones";
     const rawNotas = String(payload.notas || "").trim();
     if (!/^(\[HIPOTECAS\]|Auto CRM Hipotecas)/i.test(rawNotas)) {
       payload.notas = rawNotas ? `[HIPOTECAS] ${rawNotas}` : "[HIPOTECAS]";

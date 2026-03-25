@@ -9019,6 +9019,29 @@ class Handler(BaseHTTPRequestHandler):
     def _resolve_required_service(self, path, params=None, payload=None):
         params = params or {}
         payload = payload or {}
+        if path in {"/api/gestoria_contabilidad", "/api/gestoria_contabilidad_update", "/api/gestoria_contabilidad_delete"}:
+            hinted = normalize_service_key(
+                payload.get("servicio")
+                or (params.get("servicio", [""])[0] if params else "")
+                or ""
+            )
+            if hinted:
+                return hinted
+            hipotecas_only = (params.get("hipotecas_only", ["0"])[0] if params else "")
+            seguros_only = (params.get("seguros_only", ["0"])[0] if params else "")
+            if str(hipotecas_only).strip().lower() in {"1", "true", "yes"}:
+                return "financiaciones"
+            if str(seguros_only).strip().lower() in {"1", "true", "yes"}:
+                return "seguros"
+            if str(payload.get("hipoteca_id") or "").strip():
+                return "financiaciones"
+            if str(payload.get("seguro_id") or "").strip():
+                return "seguros"
+            empresa_nombre = normalize_lookup_text(payload.get("empresa_nombre") or "")
+            if empresa_nombre == normalize_lookup_text("Financiaciones Modernia"):
+                return "financiaciones"
+            if empresa_nombre == normalize_lookup_text("Fincas Velazquez"):
+                return "gestoria"
         if path.startswith("/api/seguros"):
             return "seguros"
         if path.startswith("/api/gestoria") or path.startswith("/api/cliente_gestoria"):
