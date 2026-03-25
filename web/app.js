@@ -2219,6 +2219,16 @@ const formatPercent = (value) => {
   return `${normalized.toFixed(2)}%`;
 };
 
+const formatPercentOrDash = (value) => {
+  const num = Number(value);
+  return Number.isFinite(num) ? formatPercent(num) : "-";
+};
+
+const rowsToObjectsByColumns = (columns = [], rows = []) =>
+  rows.map((row) =>
+    Object.fromEntries(columns.map((column, index) => [column, Array.isArray(row) ? row[index] : row?.[column]]))
+  );
+
 const normalizeName = (value) => {
   return String(value || "")
     .normalize("NFD")
@@ -9553,7 +9563,7 @@ const loadHipotecaDashboard = () => {
           note: `Total: ${formatDaysMetric(totals?.plazo_medio_dias)}`,
         },
         {
-          title: `Operaciones en estudio ${currentYear}`,
+          title: `Hipotecas en estudio ${currentYear}`,
           value: numberFormatter.format(data?.current?.operaciones_estudio || 0),
           note: `Total: ${numberFormatter.format(totals?.operaciones_estudio || 0)}`,
         },
@@ -9576,6 +9586,11 @@ const loadHipotecaDashboard = () => {
           title: `Resultado ${currentYear}`,
           value: euroFormatter.format(data?.current?.resultado || 0),
           note: `Total: ${euroFormatter.format(totals?.resultado || 0)}`,
+        },
+        {
+          title: "Rentabilidad negocio",
+          value: formatPercentOrDash(data?.current?.rentabilidad_ratio),
+          note: `Total: ${formatPercentOrDash(totals?.rentabilidad_ratio)}`,
         },
         {
           title: "Porcentaje medio",
@@ -9689,15 +9704,37 @@ const loadHipotecaContabilidadHipotecas = async () => {
   const empresa = state.empresas.find((e) => e.nombre === FIN_COMPANY);
   if (!empresa?.id) return [];
   const data = await api(`/api/hipoteca_bdt?empresa_id=${empresa.id}&limit=1000`);
-  const rows = data?.rows || [];
+  const columns = data?.columns || [];
+  const rows = rowsToObjectsByColumns(columns, data?.rows || []);
   hipotecaContabilidadHipoteca.innerHTML = "";
   hipotecaContabilidadHipoteca.appendChild(createOption("", "Selecciona hipoteca"));
+  const pendingStudyRows = [];
+  const otherRows = [];
   rows.forEach((row) => {
-    const label = [row.cliente || "Sin cliente", row.banco || "-", row.fecha_firma || row.fecha_encargo || ""]
-      .filter(Boolean)
-      .join(" · ");
-    hipotecaContabilidadHipoteca.appendChild(createOption(row.id, label));
+    if (normalizeSimple(row.estado) === "estudio" || normalizeSimple(row.estado) === "en estudio") {
+      pendingStudyRows.push(row);
+      return;
+    }
+    otherRows.push(row);
   });
+  const appendOptions = (items, label) => {
+    if (!items.length) return;
+    const group = document.createElement("optgroup");
+    group.label = label;
+    items.forEach((row) => {
+      const option = createOption(
+        row.id,
+        [row.cliente || "Sin cliente", row.banco || "-", row.fecha_firma || row.fecha_encargo || ""]
+          .filter(Boolean)
+          .join(" · ")
+      );
+      option.dataset.hipotecaEstado = row.estado || "";
+      group.appendChild(option);
+    });
+    hipotecaContabilidadHipoteca.appendChild(group);
+  };
+  appendOptions(pendingStudyRows, "Pendientes de cobro · Estudio");
+  appendOptions(otherRows, "Resto de hipotecas");
   return rows;
 };
 
@@ -9714,21 +9751,18 @@ const loadHipotecaContabilidad = () => {
     empresa_id: empresa.id,
     hipotecas_only: "1",
     q,
+    limit: q ? "100" : "10",
   });
   api(`/api/gestoria_contabilidad?${params.toString()}`).then((data) => {
     const rows = data?.rows || [];
-    let ingresos = 0;
-    let gastos = 0;
-    rows.forEach((row) => {
-      const amount = Number(row.importe || 0);
-      if (normalizeSimple(row.tipo) === "gasto") gastos += amount;
-      else ingresos += amount;
-    });
+    const summary = data?.summary || {};
+    const totalRows = Number(data?.total_rows || 0);
     if (hipotecaContabilidadSummary) {
       const items = [
-        { title: "Ingresos", value: euroFormatter.format(ingresos) },
-        { title: "Gastos", value: euroFormatter.format(gastos) },
-        { title: "Resultado", value: euroFormatter.format(ingresos - gastos) },
+        { title: "Ingresos", value: euroFormatter.format(summary.ingresos || 0) },
+        { title: "Gastos", value: euroFormatter.format(summary.gastos || 0) },
+        { title: "Resultado", value: euroFormatter.format(summary.resultado || 0) },
+        { title: "Rentabilidad", value: formatPercentOrDash(summary.rentabilidad_ratio) },
       ];
       hipotecaContabilidadSummary.innerHTML = "";
       items.forEach((item) => {
@@ -9794,6 +9828,7 @@ const loadHipotecaContabilidad = () => {
         "Seguros y comisión Juan",
         "Cesión a inmobiliarias",
         "Nómina Juan",
+        "Seguro anual",
       ]));
       tr.appendChild(gestionTd);
       const tipoTd = document.createElement("td");
@@ -9825,7 +9860,9 @@ const loadHipotecaContabilidad = () => {
     table.appendChild(tbody);
     hipotecaContabilidadTable.innerHTML = "";
     hipotecaContabilidadTable.appendChild(table);
-    hipotecaContabilidadInfo.textContent = `Mostrando ${rows.length} asientos.`;
+    hipotecaContabilidadInfo.textContent = q
+      ? `Mostrando ${rows.length} asientos encontrados.`
+      : `Mostrando ${rows.length} últimos asientos de ${numberFormatter.format(totalRows)}. Usa el buscador para localizar el resto.`;
   });
 };
 
@@ -10548,27 +10585,38 @@ const renderFinDashboard = (empresaId) => {
   finDashboardSection.classList.remove("hidden");
   updateTableVisibility();
   api(`/api/hipoteca_dashboard?empresa_id=${empresaId}`).then((data) => {
-    const currentYear = String(new Date().getFullYear());
+    const currentYear = String(data?.current_year || new Date().getFullYear());
+    const totals = data?.totals || {};
     const kpis = [
       {
         title: `Hipotecas ${currentYear}`,
-        value: numberFormatter.format(data.current.total || 0),
-        note: "Firmadas + Indemnización",
+        value: numberFormatter.format(data?.current?.total || 0),
+        note: `Totales: ${numberFormatter.format(totals?.total || 0)}`,
       },
       {
         title: "Firmadas mes",
-        value: numberFormatter.format(data.current.firmadas_mes || 0),
+        value: numberFormatter.format(data?.current?.firmadas_mes || 0),
         note: "Mes actual",
       },
       {
+        title: "Hipotecas en estudio",
+        value: numberFormatter.format(data?.current?.operaciones_estudio || 0),
+        note: `Total: ${numberFormatter.format(totals?.operaciones_estudio || 0)}`,
+      },
+      {
+        title: "Rentabilidad negocio",
+        value: formatPercentOrDash(data?.current?.rentabilidad_ratio),
+        note: `Total: ${formatPercentOrDash(totals?.rentabilidad_ratio)}`,
+      },
+      {
         title: "Porcentaje medio",
-        value: formatPercent(data.current.porcentaje_medio),
+        value: formatPercent(data?.current?.porcentaje_medio),
         note: "Financiación",
       },
       {
         title: "Comisión total",
-        value: euroFormatter.format(data.current.comision_total || 0),
-        note: "Firmadas + Indemnización",
+        value: euroFormatter.format(data?.current?.comision_total || 0),
+        note: `Total: ${euroFormatter.format(totals?.comision_total || 0)}`,
       },
     ];
 
@@ -24525,6 +24573,8 @@ if (hipotecaContabilidadHipoteca && hipotecaContabilidadForm) {
     if (!form) return;
     const conceptInput = form.querySelector('[name="concepto"]');
     const dateInput = form.querySelector('[name="fecha"]');
+    const gestionInput = form.querySelector('[name="gestion"]');
+    const tipoInput = form.querySelector('[name="tipo"]');
     if (!selected?.value) return;
     if (conceptInput && !conceptInput.value) {
       conceptInput.value = selected.textContent || "";
@@ -24535,6 +24585,10 @@ if (hipotecaContabilidadHipoteca && hipotecaContabilidadForm) {
       if (match) {
         dateInput.value = match[1];
       }
+    }
+    if (normalizeSimple(selected.dataset.hipotecaEstado) === "estudio" || normalizeSimple(selected.dataset.hipotecaEstado) === "en estudio") {
+      if (gestionInput) gestionInput.value = "Comisión cliente";
+      if (tipoInput) tipoInput.value = "Ingreso";
     }
   });
 }
@@ -24561,7 +24615,7 @@ if (hipotecaContabilidadForm) {
       .then((res) => res.json())
       .then((data) => {
         if (hipotecaContabilidadStatus) {
-          hipotecaContabilidadStatus.textContent = data.error || "Guardado.";
+          hipotecaContabilidadStatus.textContent = data.error || (data.auto_promoted ? "Cobro vinculado e indemnización actualizada." : "Guardado.");
         }
         if (!data.error) {
           hipotecaContabilidadForm.reset();

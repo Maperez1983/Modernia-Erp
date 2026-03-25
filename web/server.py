@@ -922,6 +922,20 @@ def parse_iso_date(value):
     return None
 
 
+def parse_datetime_value(value):
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except Exception:
+        pass
+    parsed_date = parse_iso_date(raw)
+    if parsed_date:
+        return datetime.combine(parsed_date, datetime.min.time(), tzinfo=timezone.utc)
+    return None
+
+
 def add_year_to_date(value):
     base = parse_iso_date(value)
     if not base:
@@ -995,7 +1009,16 @@ def derive_hipoteca_financing(precio, importe_hipoteca):
 
 
 HIPOTECA_SIGNED_STATES = {"FIRMADA", "FIRMADO", "INDEMNIZACION", "INDEMNIZACIÓN"}
+HIPOTECA_STUDY_STATES = {"ESTUDIO", "EN ESTUDIO"}
 HIPOTECA_ACCOUNTING_AUTO_NOTES_PREFIX = "Auto CRM Hipotecas"
+HIPOTECA_ACCOUNTING_FIXED_COSTS_PREFIX = f"{HIPOTECA_ACCOUNTING_AUTO_NOTES_PREFIX} · coste fijo"
+HIPOTECA_JUAN_MONTHLY_COST = 1800.0
+HIPOTECA_GESTORIA_MONTHLY_COST = 150.0
+HIPOTECA_FIXED_COSTS_START = "2024-05-01"
+HIPOTECA_ANNUAL_INSURANCE_PAYMENTS = (
+    ("2024-10-01", 502.26),
+    ("2025-10-01", 502.26),
+)
 HIPOTECA_ACCOUNTING_GESTIONES = (
     "Comisión cliente",
     "Cesión banco",
@@ -1004,6 +1027,7 @@ HIPOTECA_ACCOUNTING_GESTIONES = (
     "Seguros y comisión Juan",
     "Cesión a inmobiliarias",
     "Nómina Juan",
+    "Seguro anual",
 )
 HIPOTECA_EXPORT_BRANDS = {
     "SANTANDER": "Banco Santander",
@@ -1029,8 +1053,91 @@ def hipoteca_estado_is_closed(value):
     return normalize_lookup_text(value) in HIPOTECA_SIGNED_STATES
 
 
+def hipoteca_estado_is_study(value):
+    return normalize_lookup_text(value) in HIPOTECA_STUDY_STATES
+
+
 def hipoteca_has_signature_date(value):
     return bool(parse_iso_date(value))
+
+
+def resolve_hipoteca_accounting_date(row):
+    estado = normalize_lookup_text((row.get("estado") if isinstance(row, dict) else row["estado"]) or "")
+    fecha_firma_raw = (row.get("fecha_firma") if isinstance(row, dict) else row["fecha_firma"]) or ""
+    fecha_firma = parse_iso_date(fecha_firma_raw)
+    if fecha_firma:
+        return fecha_firma
+    if estado not in {"INDEMNIZACION", "INDEMNIZACIÓN"}:
+        return None
+    fecha_encargo_raw = (row.get("fecha_encargo") if isinstance(row, dict) else row["fecha_encargo"]) or ""
+    fecha_encargo = parse_iso_date(fecha_encargo_raw)
+    if fecha_encargo:
+        return fecha_encargo
+    created_raw = (row.get("created_at") if isinstance(row, dict) else row["created_at"]) or ""
+    created_dt = parse_datetime_value(created_raw)
+    if created_dt:
+        return created_dt.date()
+    updated_raw = (row.get("updated_at") if isinstance(row, dict) else row["updated_at"]) or ""
+    updated_dt = parse_datetime_value(updated_raw)
+    if updated_dt:
+        return updated_dt.date()
+    return None
+
+
+def iterate_month_starts(start_date, end_date):
+    current = start_date.replace(day=1)
+    end = end_date.replace(day=1)
+    while current <= end:
+        yield current
+        year = current.year + (1 if current.month == 12 else 0)
+        month = 1 if current.month == 12 else current.month + 1
+        current = current.replace(year=year, month=month, day=1)
+
+
+def build_hipoteca_fixed_cost_entries(now=None):
+    ref = parse_datetime_value(now) if now else None
+    ref_date = (ref.date() if ref else datetime.now(timezone.utc).date()).replace(day=1)
+    start_date = parse_iso_date(HIPOTECA_FIXED_COSTS_START)
+    if not start_date or start_date > ref_date:
+        return []
+    entries = []
+    for month_start in iterate_month_starts(start_date, ref_date):
+        fecha = month_start.isoformat()
+        entries.append(
+            {
+                "fecha": fecha,
+                "gestion": "Nómina Juan",
+                "tipo": "Gasto",
+                "importe": HIPOTECA_JUAN_MONTHLY_COST,
+                "concepto": "Coste laboral Juan",
+                "notas": f"{HIPOTECA_ACCOUNTING_FIXED_COSTS_PREFIX} · nómina juan.",
+            }
+        )
+        entries.append(
+            {
+                "fecha": fecha,
+                "gestion": "Gestoría",
+                "tipo": "Gasto",
+                "importe": HIPOTECA_GESTORIA_MONTHLY_COST,
+                "concepto": "Gasto gestoría",
+                "notas": f"{HIPOTECA_ACCOUNTING_FIXED_COSTS_PREFIX} · gestoría.",
+            }
+        )
+    for fecha, importe in HIPOTECA_ANNUAL_INSURANCE_PAYMENTS:
+        fecha_iso = parse_iso_date(fecha)
+        if not fecha_iso or fecha_iso > ref_date:
+            continue
+        entries.append(
+            {
+                "fecha": fecha_iso.isoformat(),
+                "gestion": "Seguro anual",
+                "tipo": "Gasto",
+                "importe": round(parse_money_value(importe), 2),
+                "concepto": "Seguro anual",
+                "notas": f"{HIPOTECA_ACCOUNTING_FIXED_COSTS_PREFIX} · seguro anual.",
+            }
+        )
+    return entries
 
 
 def hipotecas_contabilidad_where_clause(alias="gc"):
@@ -1069,10 +1176,13 @@ def compute_hipotecas_contabilidad_totals(conn, empresa_id, year=None):
             gastos += amount
         else:
             ingresos += amount
+    resultado = round(ingresos - gastos, 2)
+    rentabilidad_ratio = round(resultado / gastos, 4) if abs(gastos) >= 0.005 else None
     return {
         "ingresos": round(ingresos, 2),
         "gastos": round(gastos, 2),
-        "resultado": round(ingresos - gastos, 2),
+        "resultado": resultado,
+        "rentabilidad_ratio": rentabilidad_ratio,
     }
 
 
@@ -1414,8 +1524,7 @@ def hipoteca_office_has_no_cesion_costs(value):
 
 def build_hipoteca_accounting_entries(row):
     estado = (row.get("estado") if isinstance(row, dict) else row["estado"]) or ""
-    fecha_raw = (row.get("fecha_firma") if isinstance(row, dict) else row["fecha_firma"]) or ""
-    fecha = parse_iso_date(fecha_raw)
+    fecha = resolve_hipoteca_accounting_date(row)
     if not fecha or not hipoteca_estado_is_closed(estado):
         return []
     cliente = str((row.get("cliente") if isinstance(row, dict) else row["cliente"]) or "").strip() or "Hipoteca"
@@ -1487,6 +1596,38 @@ def load_hipoteca_accounting_exclusions(conn, empresa_id):
         for row in rows
         if str(row["hipoteca_id"] or "").strip()
     }
+
+
+def maybe_promote_study_hipoteca_accounting(conn, empresa_id, hipoteca_id, payload, now=None):
+    hipoteca_id = str(hipoteca_id or "").strip()
+    if not hipoteca_id:
+        return False
+    tipo = normalize_lookup_text(payload.get("tipo"))
+    if tipo == "GASTO":
+        return False
+    row = conn.execute(
+        """
+        SELECT id, estado, fecha_firma, anio
+        FROM hipotecas
+        WHERE id = ?
+        LIMIT 1
+        """,
+        (hipoteca_id,),
+    ).fetchone()
+    if not row or not hipoteca_estado_is_study(row["estado"]):
+        return False
+    fecha = parse_iso_date(payload.get("fecha")) or datetime.now(timezone.utc).date()
+    stamp = now or datetime.now(timezone.utc).isoformat()
+    conn.execute(
+        """
+        UPDATE hipotecas
+        SET estado = ?, fecha_firma = COALESCE(NULLIF(TRIM(fecha_firma), ''), ?), anio = ?, updated_at = datetime(?)
+        WHERE id = ?
+        """,
+        ("INDEMNIZACIÓN", fecha.isoformat(), int(fecha.year), stamp, hipoteca_id),
+    )
+    sync_hipotecas_contabilidad_entries(conn, empresa_id, now=stamp)
+    return True
 
 
 def sync_hipotecas_contabilidad_entries(conn, empresa_id, now=None):
@@ -1576,6 +1717,70 @@ def sync_hipotecas_contabilidad_entries(conn, empresa_id, now=None):
                         now,
                     ),
                 )
+    fixed_expected_keys = set()
+    for item in build_hipoteca_fixed_cost_entries(now):
+        key = (
+            str(item["fecha"]).strip(),
+            normalize_lookup_text(item["gestion"]),
+            normalize_lookup_text(item["concepto"]),
+        )
+        fixed_expected_keys.add(key)
+        existing = conn.execute(
+            """
+            SELECT id
+            FROM gestoria_contabilidad
+            WHERE empresa_id = ?
+              AND (hipoteca_id IS NULL OR TRIM(hipoteca_id) = '')
+              AND fecha = ?
+              AND LOWER(COALESCE(gestion, '')) = LOWER(?)
+              AND LOWER(COALESCE(concepto, '')) = LOWER(?)
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            (empresa_id, item["fecha"], item["gestion"], item["concepto"]),
+        ).fetchone()
+        if existing:
+            conn.execute(
+                """
+                UPDATE gestoria_contabilidad
+                SET empresa_id = ?, cliente_id = NULL, cliente_ids_json = NULL, hipoteca_id = NULL, concepto = ?, gestion = ?, tipo = ?,
+                    importe = ?, notas = ?, updated_at = datetime(?)
+                WHERE id = ?
+                """,
+                (
+                    empresa_id,
+                    item["concepto"],
+                    item["gestion"],
+                    item["tipo"],
+                    item["importe"],
+                    item["notas"],
+                    now,
+                    existing["id"],
+                ),
+            )
+        else:
+            conn.execute(
+                """
+                INSERT INTO gestoria_contabilidad (
+                  id, empresa_id, cliente_id, cliente_ids_json, hipoteca_id, fecha, concepto, gestion, tipo, importe, notas,
+                  created_at, updated_at
+                ) VALUES (
+                  ?, ?, NULL, NULL, NULL, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                )
+                """,
+                (
+                    os.urandom(16).hex(),
+                    empresa_id,
+                    item["fecha"],
+                    item["concepto"],
+                    item["gestion"],
+                    item["tipo"],
+                    item["importe"],
+                    item["notas"],
+                    now,
+                    now,
+                ),
+            )
     existing_rows = conn.execute(
         """
         SELECT id, hipoteca_id, fecha, gestion
@@ -1590,6 +1795,24 @@ def sync_hipotecas_contabilidad_entries(conn, empresa_id, now=None):
     for row in existing_rows:
         key = hipoteca_accounting_exclusion_key(row["hipoteca_id"], row["fecha"], row["gestion"])
         if key not in expected_keys:
+            conn.execute("DELETE FROM gestoria_contabilidad WHERE id = ?", (row["id"],))
+    fixed_rows = conn.execute(
+        """
+        SELECT id, fecha, gestion, concepto
+        FROM gestoria_contabilidad
+        WHERE empresa_id = ?
+          AND (hipoteca_id IS NULL OR TRIM(hipoteca_id) = '')
+          AND UPPER(COALESCE(notas, '')) LIKE UPPER(?)
+        """,
+        (empresa_id, f"{HIPOTECA_ACCOUNTING_FIXED_COSTS_PREFIX}%"),
+    ).fetchall()
+    for row in fixed_rows:
+        key = (
+            str(row["fecha"] or "").strip(),
+            normalize_lookup_text(row["gestion"]),
+            normalize_lookup_text(row["concepto"]),
+        )
+        if key not in fixed_expected_keys:
             conn.execute("DELETE FROM gestoria_contabilidad WHERE id = ?", (row["id"],))
 
 
@@ -10130,6 +10353,10 @@ class Handler(BaseHTTPRequestHandler):
                     cliente_ids = [cliente_seguro_id]
                     cliente_id = cliente_seguro_id
             if hipoteca_id:
+                if maybe_promote_study_hipoteca_accounting(conn, empresa["id"], hipoteca_id, payload, now=now):
+                    conn.commit()
+                    json_response(self, {"ok": True, "auto_promoted": True})
+                    return
                 hipoteca_link = resolve_hipoteca_contabilidad_link(conn, hipoteca_id)
                 if hipoteca_link.get("cliente_id") and not cliente_ids:
                     cliente_ids = [hipoteca_link["cliente_id"]]
@@ -15403,6 +15630,12 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "empresa_id requerido"}, status=400)
                 return
             q = params.get("q", [""])[0].strip()
+            limit_raw = (params.get("limit", ["300"])[0] or "300").strip()
+            try:
+                limit = int(limit_raw)
+            except ValueError:
+                limit = 300
+            limit = max(1, min(limit, 1000))
             seguros_only = (params.get("seguros_only", ["0"])[0] or "0").strip() in ("1", "true", "yes")
             hipotecas_only = (params.get("hipotecas_only", ["0"])[0] or "0").strip() in ("1", "true", "yes")
             if hipotecas_only:
@@ -15418,6 +15651,20 @@ class Handler(BaseHTTPRequestHandler):
                 where.append("(gc.concepto LIKE ? OR c.nombre LIKE ? OR h.cliente LIKE ? OR h.banco LIKE ?)")
                 values.extend([f"%{q}%", f"%{q}%", f"%{q}%", f"%{q}%"])
             where_clause = " AND ".join(where)
+            summary = conn.execute(
+                f"""
+                SELECT
+                  COUNT(*) AS total_rows,
+                  SUM(CASE WHEN LOWER(TRIM(COALESCE(gc.tipo, ''))) = 'gasto' THEN COALESCE(gc.importe, 0) ELSE 0 END) AS gastos,
+                  SUM(CASE WHEN LOWER(TRIM(COALESCE(gc.tipo, ''))) = 'gasto' THEN 0 ELSE COALESCE(gc.importe, 0) END) AS ingresos
+                FROM gestoria_contabilidad gc
+                LEFT JOIN clientes c ON c.id = gc.cliente_id
+                LEFT JOIN seguros s ON s.id = gc.seguro_id
+                LEFT JOIN hipotecas h ON h.id = gc.hipoteca_id
+                WHERE {where_clause}
+                """,
+                values,
+            ).fetchone()
             rows = conn.execute(
                 f"""
                 SELECT gc.id, gc.fecha, gc.concepto, gc.gestion, gc.tipo, gc.importe, gc.notas,
@@ -15434,9 +15681,9 @@ class Handler(BaseHTTPRequestHandler):
                 LEFT JOIN hipotecas h ON h.id = gc.hipoteca_id
                 WHERE {where_clause}
                 ORDER BY gc.fecha DESC
-                LIMIT 300
+                LIMIT ?
                 """,
-                values,
+                [*values, limit],
             ).fetchall()
             out_rows = []
             for raw in rows:
@@ -15452,7 +15699,23 @@ class Handler(BaseHTTPRequestHandler):
                         row["cliente_ids_json"] = json.dumps([seguro_cliente_id], ensure_ascii=False)
                 row.pop("seguro_cliente_id", None)
                 out_rows.append(row)
-            json_response(self, {"rows": out_rows})
+            ingresos = round(parse_money_value(summary["ingresos"] if summary else 0), 2)
+            gastos = round(parse_money_value(summary["gastos"] if summary else 0), 2)
+            resultado = round(ingresos - gastos, 2)
+            rentabilidad_ratio = round(resultado / gastos, 4) if abs(gastos) >= 0.005 else None
+            json_response(
+                self,
+                {
+                    "rows": out_rows,
+                    "total_rows": int(summary["total_rows"] or 0) if summary else 0,
+                    "summary": {
+                        "ingresos": ingresos,
+                        "gastos": gastos,
+                        "resultado": resultado,
+                        "rentabilidad_ratio": rentabilidad_ratio,
+                    },
+                },
+            )
             return
 
         if path == "/api/gestoria_facturas":
@@ -16539,6 +16802,7 @@ class Handler(BaseHTTPRequestHandler):
                 "COALESCE(NULLIF(TRIM(anio), ''), "
                 "strftime('%Y', COALESCE(NULLIF(fecha_firma, ''), NULLIF(fecha_encargo, ''), created_at)))"
             )
+            closed_expr = "LOWER(TRIM(COALESCE(estado, ''))) IN ('firmado', 'firmada', 'indemnización', 'indemnizacion')"
             signed_expr = "fecha_firma IS NOT NULL AND TRIM(fecha_firma) <> ''"
             estudio_expr = "LOWER(TRIM(COALESCE(estado, ''))) IN ('estudio', 'en estudio')"
             duration_expr = (
@@ -16561,7 +16825,7 @@ class Handler(BaseHTTPRequestHandler):
                 + year_expr
                 + """ IS NOT NULL
                   AND """
-                + signed_expr
+                + closed_expr
                 + """
                 GROUP BY """
                 + year_expr
@@ -16602,7 +16866,7 @@ class Handler(BaseHTTPRequestHandler):
                 + year_expr
                 + """ = ?
                   AND """
-                + signed_expr
+                + closed_expr
                 + """
                 """,
                 (empresa_id, selected_year),
@@ -16630,7 +16894,7 @@ class Handler(BaseHTTPRequestHandler):
                 FROM hipotecas
                 WHERE empresa_id = ?
                   AND """
-                + signed_expr
+                + closed_expr
                 + """
                 """,
                 (empresa_id,),
@@ -16645,7 +16909,7 @@ class Handler(BaseHTTPRequestHandler):
                 + year_expr
                 + """ = ?
                   AND """
-                + signed_expr
+                + closed_expr
                 + """
                 """,
                 (empresa_id, selected_year),
@@ -16704,7 +16968,7 @@ class Handler(BaseHTTPRequestHandler):
                 + year_expr
                 + """ IS NOT NULL
                   AND """
-                + signed_expr
+                + closed_expr
                 + """
                 GROUP BY """
                 + year_expr
@@ -16729,7 +16993,7 @@ class Handler(BaseHTTPRequestHandler):
                 + year_expr
                 + """ IS NOT NULL
                   AND """
-                + signed_expr
+                + closed_expr
                 + """
                 GROUP BY """
                 + year_expr
@@ -16752,7 +17016,7 @@ class Handler(BaseHTTPRequestHandler):
                 + year_expr
                 + """ IS NOT NULL
                   AND """
-                + signed_expr
+                + closed_expr
                 + """
                 GROUP BY """
                 + year_expr
@@ -16783,7 +17047,9 @@ class Handler(BaseHTTPRequestHandler):
                   AND """
                 + year_expr
                 + """ IS NOT NULL
-                  AND LOWER(TRIM(estado)) IN ('firmado', 'firmada', 'indemnización', 'indemnizacion')
+                  AND """
+                + closed_expr
+                + """
                 GROUP BY """
                 + year_expr
                 + """
@@ -16802,7 +17068,7 @@ class Handler(BaseHTTPRequestHandler):
                   AND banco IS NOT NULL
                   AND TRIM(banco) != ''
                   AND """
-                + signed_expr
+                + closed_expr
                 + """
                 GROUP BY banco
                 ORDER BY COUNT(*) DESC
@@ -16822,7 +17088,7 @@ class Handler(BaseHTTPRequestHandler):
                 + year_expr
                 + """ = ?
                   AND """
-                + signed_expr
+                + closed_expr
                 + """
                 GROUP BY banco
                 ORDER BY COUNT(*) DESC
@@ -16851,7 +17117,7 @@ class Handler(BaseHTTPRequestHandler):
                     + year_expr
                     + """ = ?
                       AND """
-                    + signed_expr
+                    + closed_expr
                     + """
                     """,
                     (empresa_id, label, selected_year),
@@ -16875,7 +17141,7 @@ class Handler(BaseHTTPRequestHandler):
                   AND oficina IS NOT NULL
                   AND TRIM(oficina) != ''
                   AND """
-                + signed_expr
+                + closed_expr
                 + """
                 GROUP BY oficina
                 ORDER BY COUNT(*) DESC
@@ -16902,6 +17168,7 @@ class Handler(BaseHTTPRequestHandler):
                         "ingresos": conta_year["ingresos"],
                         "gastos": conta_year["gastos"],
                         "resultado": conta_year["resultado"],
+                        "rentabilidad_ratio": conta_year["rentabilidad_ratio"],
                     },
                     "totals": {
                         "total": totals["total"] if totals else 0,
@@ -16914,6 +17181,7 @@ class Handler(BaseHTTPRequestHandler):
                         "ingresos": conta_total["ingresos"],
                         "gastos": conta_total["gastos"],
                         "resultado": conta_total["resultado"],
+                        "rentabilidad_ratio": conta_total["rentabilidad_ratio"],
                     },
                     "current_year": selected_year,
                     "available_years": [str(r["year"]) for r in available_years if r["year"] is not None],

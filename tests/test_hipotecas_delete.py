@@ -2,10 +2,12 @@ import sqlite3
 import unittest
 
 from web.server import (
+    build_hipoteca_fixed_cost_entries,
     build_hipoteca_accounting_entries,
     delete_gestoria_contabilidad_record,
     delete_hipoteca_record,
     derive_hipoteca_commissions,
+    maybe_promote_study_hipoteca_accounting,
     resolve_hipoteca_contabilidad_link,
     sync_hipotecas_contabilidad_entries,
 )
@@ -223,6 +225,70 @@ class HipotecasDeleteTests(unittest.TestCase):
         self.assertEqual(totals["Comisión cliente"], 2500.0)
         self.assertEqual(totals["Cesión Juan"], 500.0)
         self.assertEqual(totals["Cesión a inmobiliarias"], 500.0)
+
+    def test_build_hipoteca_accounting_entries_uses_fecha_encargo_for_indemnizacion_without_signature(self):
+        row = dict(self.conn.execute("SELECT * FROM hipotecas WHERE id = 'h1'").fetchone())
+        row["estado"] = "INDEMNIZACIÓN"
+        row["fecha_firma"] = ""
+        row["fecha_encargo"] = "2025-01-15"
+
+        entries = build_hipoteca_accounting_entries(row)
+
+        self.assertTrue(entries)
+        self.assertTrue(all(item["fecha"] == "2025-01-15" for item in entries))
+
+    def test_build_hipoteca_fixed_cost_entries_generates_monthly_and_annual_costs(self):
+        entries = build_hipoteca_fixed_cost_entries(now="2025-10-15T10:00:00+00:00")
+
+        self.assertEqual(len(entries), 38)
+        self.assertEqual(entries[0]["gestion"], "Nómina Juan")
+        self.assertEqual(entries[0]["fecha"], "2024-05-01")
+        self.assertEqual(entries[1]["gestion"], "Gestoría")
+        self.assertIn(
+            ("2024-10-01", "Seguro anual", 502.26),
+            {(item["fecha"], item["gestion"], item["importe"]) for item in entries},
+        )
+        self.assertIn(
+            ("2025-10-01", "Seguro anual", 502.26),
+            {(item["fecha"], item["gestion"], item["importe"]) for item in entries},
+        )
+
+    def test_promoting_study_hipoteca_creates_auto_indemnizacion_entries(self):
+        self.conn.execute(
+            """
+            INSERT INTO hipotecas (
+              id, empresa_id, cliente, banco, fecha_encargo, comision, cesion, comision_juan, comision_modernia,
+              estado, anio, created_at, updated_at
+            ) VALUES (
+              'h2', 'e1', 'Cliente Dos', 'Banco Dos', '2025-03-12', 90.0, 18.0, 18.0, 54.0,
+              'ESTUDIO', 2025, '2026-03-24', '2026-03-24'
+            )
+            """
+        )
+        self.conn.commit()
+
+        changed = maybe_promote_study_hipoteca_accounting(
+            self.conn,
+            "e1",
+            "h2",
+            {"fecha": "2025-03-18", "tipo": "Ingreso", "gestion": "Comisión cliente"},
+            now="2026-03-24T10:00:00+00:00",
+        )
+
+        self.assertTrue(changed)
+        row = self.conn.execute("SELECT estado, fecha_firma FROM hipotecas WHERE id = 'h2'").fetchone()
+        self.assertEqual(row["estado"], "INDEMNIZACIÓN")
+        self.assertEqual(row["fecha_firma"], "2025-03-18")
+
+        entries = self.conn.execute(
+            """
+            SELECT gestion, tipo, importe
+            FROM gestoria_contabilidad
+            WHERE hipoteca_id = 'h2'
+            ORDER BY gestion
+            """
+        ).fetchall()
+        self.assertEqual([item["gestion"] for item in entries], ["Cesión Juan", "Cesión a inmobiliarias", "Comisión cliente"])
 
     def test_resolve_hipoteca_contabilidad_link_supports_legacy_schema_without_cliente_id(self):
         legacy = sqlite3.connect(":memory:")
