@@ -1284,14 +1284,237 @@ def build_hipoteca_export_row(conn, row):
         "tipo_hipoteca": str(row["tipo_hipoteca"] or "").strip(),
         "importe_hipoteca": parse_money_value(row["importe_hipoteca"]),
         "precio": parse_money_value(row["precio"]),
+        "porcentaje": parse_money_value(row["porcentaje"]),
         "entrada": parse_money_value(row["entrada"]),
         "banco": canonicalize_hipoteca_bank_name(row["banco"]),
         "honorarios": parse_money_value(row["comision"]),
+        "cesion": parse_money_value(row["cesion"]),
+        "comision_juan": parse_money_value(row["comision_juan"]),
+        "comision_modernia": parse_money_value(row["comision_modernia"]),
         "inmobiliaria": str(row["inmobiliaria_compra"] or row["oficina"] or "").strip(),
         "estado": str(row["estado"] or "").strip(),
         "oficina": str(row["oficina"] or "").strip(),
         "asesor": str(row["asesor"] or "").strip(),
+        "encargo": str(row["encargo"] or "").strip(),
+        "anio": str(row["anio"] or "").strip(),
     }
+
+
+def normalize_hipoteca_estado(value):
+    return re.sub(r"\s+", " ", str(value or "").strip().lower())
+
+
+def hipoteca_signed_export_year(row):
+    parsed = parse_iso_date(row["fecha_firma"])
+    if parsed:
+        return str(parsed.year)
+    raw_year = str(row["anio"] or "").strip()
+    return raw_year if re.fullmatch(r"\d{4}", raw_year) else ""
+
+
+def is_hipoteca_signed_for_export(row):
+    if not parse_iso_date(row["fecha_firma"]):
+        return False
+    return normalize_hipoteca_estado(row["estado"]) in ("firmada", "firmado")
+
+
+def collect_hipotecas_firmadas_export_rows(conn, empresa_id, selected_year=None):
+    year_filter = str(selected_year or "").strip()
+    raw_rows = conn.execute(
+        """
+        SELECT *
+        FROM hipotecas
+        WHERE empresa_id = ?
+        ORDER BY COALESCE(NULLIF(fecha_firma, ''), NULLIF(fecha_encargo, ''), created_at) DESC, created_at DESC
+        """,
+        (empresa_id,),
+    ).fetchall()
+    items = []
+    for raw in raw_rows:
+        if not is_hipoteca_signed_for_export(raw):
+            continue
+        declarativo_year = hipoteca_signed_export_year(raw)
+        if year_filter and declarativo_year != year_filter:
+            continue
+        item = build_hipoteca_export_row(conn, raw)
+        item["anio_declarativo"] = declarativo_year
+        items.append(item)
+    items.sort(
+        key=lambda item: (
+            parse_iso_date(item.get("fecha_firma")) or datetime.min.date(),
+            item.get("cliente") or "",
+        ),
+        reverse=True,
+    )
+    return items
+
+
+def build_hipotecas_firmadas_excel_workbook(items, selected_year=None):
+    wb = Workbook()
+    summary = wb.active
+    summary.title = "Resumen declarativo"
+
+    year_label = str(selected_year or "").strip() or "Histórico"
+    summary["A1"] = "Declarativo anual · Hipotecas firmadas"
+    summary["A2"] = "Ejercicio"
+    summary["B2"] = year_label
+    summary["A3"] = "Operaciones"
+    summary["B3"] = len(items)
+    summary["A4"] = "Volumen hipotecario"
+    summary["B4"] = sum(float(item.get("importe_hipoteca") or 0) for item in items)
+    summary["A5"] = "Honorarios"
+    summary["B5"] = sum(float(item.get("honorarios") or 0) for item in items)
+    summary["A6"] = "Cesión inmobiliaria"
+    summary["B6"] = sum(float(item.get("cesion") or 0) for item in items)
+    summary["A7"] = "Cesión Juan"
+    summary["B7"] = sum(float(item.get("comision_juan") or 0) for item in items)
+    summary["A8"] = "Margen Modernia"
+    summary["B8"] = sum(float(item.get("comision_modernia") or 0) for item in items)
+
+    month_headers = ("Mes firma", "Operaciones", "Volumen", "Honorarios")
+    for col_idx, value in enumerate(month_headers, start=1):
+        summary.cell(row=10, column=col_idx, value=value)
+    month_totals = {}
+    for item in items:
+        fecha = parse_iso_date(item.get("fecha_firma"))
+        month_key = fecha.strftime("%Y-%m") if fecha else "Sin fecha"
+        entry = month_totals.setdefault(
+            month_key,
+            {"total": 0, "volumen": 0.0, "honorarios": 0.0},
+        )
+        entry["total"] += 1
+        entry["volumen"] += float(item.get("importe_hipoteca") or 0)
+        entry["honorarios"] += float(item.get("honorarios") or 0)
+    month_row = 11
+    for month_key in sorted(month_totals.keys()):
+        bucket = month_totals[month_key]
+        summary.cell(row=month_row, column=1, value=month_key)
+        summary.cell(row=month_row, column=2, value=bucket["total"])
+        summary.cell(row=month_row, column=3, value=bucket["volumen"])
+        summary.cell(row=month_row, column=4, value=bucket["honorarios"])
+        month_row += 1
+
+    bank_headers = ("Entidad", "Operaciones", "Volumen", "Honorarios")
+    for col_idx, value in enumerate(bank_headers, start=6):
+        summary.cell(row=10, column=col_idx, value=value)
+    bank_totals = {}
+    for item in items:
+        bank_key = str(item.get("banco") or "Sin entidad").strip() or "Sin entidad"
+        entry = bank_totals.setdefault(
+            bank_key,
+            {"total": 0, "volumen": 0.0, "honorarios": 0.0},
+        )
+        entry["total"] += 1
+        entry["volumen"] += float(item.get("importe_hipoteca") or 0)
+        entry["honorarios"] += float(item.get("honorarios") or 0)
+    bank_row = 11
+    for bank_key, bucket in sorted(bank_totals.items(), key=lambda pair: (-pair[1]["total"], pair[0])):
+        summary.cell(row=bank_row, column=6, value=bank_key)
+        summary.cell(row=bank_row, column=7, value=bucket["total"])
+        summary.cell(row=bank_row, column=8, value=bucket["volumen"])
+        summary.cell(row=bank_row, column=9, value=bucket["honorarios"])
+        bank_row += 1
+
+    detail = wb.create_sheet("Operaciones firmadas")
+    detail_headers = [
+        ("Año declarativo", "anio_declarativo"),
+        ("Fecha firma", "fecha_firma"),
+        ("Cliente", "cliente"),
+        ("DNI", "cliente_nif"),
+        ("Teléfono", "cliente_telefono"),
+        ("Email", "cliente_email"),
+        ("Dirección", "cliente_direccion"),
+        ("Banco", "banco"),
+        ("Tipo hipoteca", "tipo_hipoteca"),
+        ("Importe hipoteca", "importe_hipoteca"),
+        ("Precio compra", "precio"),
+        ("% financiación", "porcentaje"),
+        ("Entrada", "entrada"),
+        ("Honorarios", "honorarios"),
+        ("Cesión inmobiliaria", "cesion"),
+        ("Cesión Juan", "comision_juan"),
+        ("Margen Modernia", "comision_modernia"),
+        ("Inmobiliaria", "inmobiliaria"),
+        ("Oficina", "oficina"),
+        ("Asesor", "asesor"),
+        ("Fecha encargo", "fecha_encargo"),
+        ("Encargo", "encargo"),
+        ("Estado", "estado"),
+        ("ID operación", "id"),
+    ]
+    detail.append([header for header, _ in detail_headers])
+    for item in items:
+        detail.append([item.get(key, "") for _, key in detail_headers])
+
+    def style_header_row(sheet, row_idx):
+        for cell in sheet[row_idx]:
+            font = shallow_copy(cell.font)
+            font.bold = True
+            font.color = "FFFFFF"
+            fill = shallow_copy(cell.fill)
+            fill.fill_type = "solid"
+            fill.fgColor = "103F91"
+            alignment = shallow_copy(cell.alignment)
+            alignment.horizontal = "center"
+            cell.font = font
+            cell.fill = fill
+            cell.alignment = alignment
+
+    style_header_row(summary, 1)
+    style_header_row(summary, 10)
+    style_header_row(detail, 1)
+
+    for cell in ("B4", "B5", "B6", "B7", "B8"):
+        summary[cell].number_format = '#,##0.00 "€"'
+    for row_idx in range(11, max(month_row, 12)):
+        summary.cell(row=row_idx, column=3).number_format = '#,##0.00 "€"'
+        summary.cell(row=row_idx, column=4).number_format = '#,##0.00 "€"'
+    for row_idx in range(11, max(bank_row, 12)):
+        summary.cell(row=row_idx, column=8).number_format = '#,##0.00 "€"'
+        summary.cell(row=row_idx, column=9).number_format = '#,##0.00 "€"'
+
+    for row_idx in range(2, detail.max_row + 1):
+        for col_idx in (10, 11, 12, 13, 14, 15, 16, 17):
+            detail.cell(row=row_idx, column=col_idx).number_format = '#,##0.00'
+        for col_idx in (2, 21):
+            parsed = parse_iso_date(detail.cell(row=row_idx, column=col_idx).value)
+            if parsed:
+                detail.cell(row=row_idx, column=col_idx, value=parsed)
+                detail.cell(row=row_idx, column=col_idx).number_format = "DD/MM/YYYY"
+    widths = {
+        "A": 16,
+        "B": 14,
+        "C": 30,
+        "D": 16,
+        "E": 16,
+        "F": 28,
+        "G": 36,
+        "H": 22,
+        "I": 18,
+        "J": 18,
+        "K": 18,
+        "L": 14,
+        "M": 14,
+        "N": 14,
+        "O": 16,
+        "P": 14,
+        "Q": 16,
+        "R": 24,
+        "S": 20,
+        "T": 18,
+        "U": 14,
+        "V": 18,
+        "W": 16,
+        "X": 18,
+    }
+    for col, width in widths.items():
+        detail.column_dimensions[col].width = width
+    for col, width in {"A": 22, "B": 14, "C": 12, "D": 18, "F": 24, "G": 12, "H": 18, "I": 12}.items():
+        summary.column_dimensions[col].width = width
+    summary.freeze_panes = "A10"
+    detail.freeze_panes = "A2"
+    detail.auto_filter.ref = f"A1:X{max(detail.max_row, 1)}"
+    return wb
 
 
 def render_hipoteca_print_html(payload, auto_print=False):
@@ -17275,96 +17498,20 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/hipotecas_firmadas_excel":
             empresa_id = (params.get("empresa_id", [""])[0] or "").strip()
+            selected_year = (params.get("year", [""])[0] or "").strip()
             if not empresa_id:
                 json_response(self, {"error": "empresa_id requerido"}, status=400)
                 return
             if not OPENPYXL_AVAILABLE:
                 json_response(self, {"error": "openpyxl no disponible en servidor"}, status=500)
                 return
-            rows = conn.execute(
-                """
-                SELECT *
-                FROM hipotecas
-                WHERE empresa_id = ?
-                  AND TRIM(COALESCE(fecha_firma, '')) <> ''
-                ORDER BY DATE(COALESCE(NULLIF(fecha_firma, ''), '1900-01-01')) DESC, created_at DESC
-                """,
-                (empresa_id,),
-            ).fetchall()
-            wb = Workbook()
-            ws = wb.active
-            ws.title = "Hipotecas firmadas"
-            headers = [
-                "Cliente",
-                "DNI",
-                "Fecha encargo",
-                "Fecha firma",
-                "Tipo hipoteca",
-                "Importe hipoteca",
-                "Precio compra",
-                "Entrada",
-                "Banco",
-                "Honorarios",
-                "Inmobiliaria",
-                "Asesor",
-                "Estado",
-            ]
-            ws.append(headers)
-            for cell in ws[1]:
-                cell.font = cell.font.copy(bold=True, color="FFFFFF")
-                cell.fill = cell.fill.copy(fill_type="solid", fgColor="103F91")
-                cell.alignment = cell.alignment.copy(horizontal="center")
-            for raw in rows:
-                item = build_hipoteca_export_row(conn, raw)
-                ws.append(
-                    [
-                        item["cliente"],
-                        item["cliente_nif"],
-                        item["fecha_encargo"],
-                        item["fecha_firma"],
-                        item["tipo_hipoteca"],
-                        item["importe_hipoteca"],
-                        item["precio"],
-                        item["entrada"],
-                        item["banco"],
-                        item["honorarios"],
-                        item["inmobiliaria"],
-                        item["asesor"],
-                        item["estado"],
-                    ]
-                )
-            for column_letter in ("F", "G", "H", "J"):
-                for cell in ws[column_letter][1:]:
-                    cell.number_format = '#,##0.00 "€"'
-            for column_letter in ("C", "D"):
-                for cell in ws[column_letter][1:]:
-                    parsed = parse_iso_date(cell.value)
-                    if parsed:
-                        cell.value = parsed
-                        cell.number_format = "DD/MM/YYYY"
-            widths = {
-                "A": 28,
-                "B": 16,
-                "C": 14,
-                "D": 14,
-                "E": 18,
-                "F": 18,
-                "G": 18,
-                "H": 16,
-                "I": 24,
-                "J": 16,
-                "K": 24,
-                "L": 18,
-                "M": 16,
-            }
-            for col, width in widths.items():
-                ws.column_dimensions[col].width = width
-            ws.freeze_panes = "A2"
-            ws.auto_filter.ref = f"A1:M{max(ws.max_row, 1)}"
+            items = collect_hipotecas_firmadas_export_rows(conn, empresa_id, selected_year)
+            wb = build_hipotecas_firmadas_excel_workbook(items, selected_year)
             output = BytesIO()
             wb.save(output)
             content = output.getvalue()
-            filename = f'hipotecas_firmadas_{datetime.now().strftime("%Y%m%d_%H%M")}.xlsx'
+            year_suffix = selected_year if re.fullmatch(r"\d{4}", selected_year) else "historico"
+            filename = f'hipotecas_firmadas_declarativo_{year_suffix}_{datetime.now().strftime("%Y%m%d_%H%M")}.xlsx'
             self.send_response(200)
             self.send_header(
                 "Content-Type",

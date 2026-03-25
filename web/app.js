@@ -1881,6 +1881,7 @@ const hipotecaContabilidadPanel = document.getElementById("hipotecaContabilidadP
 const hipotecaBdtSearch = document.getElementById("hipotecaBdtSearch");
 const hipotecaBdtRefresh = document.getElementById("hipotecaBdtRefresh");
 const hipotecaBdtExcelFirmadas = document.getElementById("hipotecaBdtExcelFirmadas");
+const hipotecaBdtExportYear = document.getElementById("hipotecaBdtExportYear");
 const hipotecaBdtVincularSelect = document.getElementById("hipotecaBdtVincularSelect");
 const hipotecaBdtVincularBtn = document.getElementById("hipotecaBdtVincularBtn");
 const hipotecaBdtVincularStatus = document.getElementById("hipotecaBdtVincularStatus");
@@ -2366,6 +2367,26 @@ const canAccessAdminPanel = (user) => {
     || isPrivilegedService(user.servicio)
     || services.some((service) => isPrivilegedService(service))
   );
+};
+
+const canAccessSharedHomeModules = (user) => isPrivilegedUser(user);
+
+const resolveRestrictedCompanyAccess = (empresaName) => {
+  if (empresaName === DASHBOARD_COMPANY && userCanAccessService("inmobiliaria")) {
+    return "inmobiliaria";
+  }
+  if (empresaName === FIN_COMPANY && userCanAccessService("financiaciones")) {
+    return "financiaciones";
+  }
+  const fincasServices = [
+    userCanAccessService("seguros") ? "seguros" : "",
+    userCanAccessService("gestoria") ? "gestoria" : "",
+    userCanAccessService("administracion fincas") ? "gestoria" : "",
+  ].filter(Boolean);
+  if (empresaName === FINCAS_COMPANY && fincasServices.length === 1) {
+    return fincasServices[0];
+  }
+  return "";
 };
 
 const getAuthScopeUser = () => {
@@ -3240,7 +3261,9 @@ const renderCompanyCards = () => {
       <div class="company-meta">Módulo compartido entre CRMs.</div>
       <a class="card-link" href="?clientes=1" data-action="clientes">Entrar</a>
     `;
-    coreCards.appendChild(clientesCard);
+    if (canAccessSharedHomeModules(user)) {
+      coreCards.appendChild(clientesCard);
+    }
 
     const agendaCard = document.createElement("div");
     agendaCard.className = "company-card";
@@ -3251,7 +3274,9 @@ const renderCompanyCards = () => {
       <div class="company-meta">Centraliza las agendas por servicio.</div>
       <a class="card-link" href="?agenda=1" data-action="agenda">Entrar</a>
     `;
-    coreCards.appendChild(agendaCard);
+    if (canAccessSharedHomeModules(user)) {
+      coreCards.appendChild(agendaCard);
+    }
 
     const adminCard = document.createElement("div");
     adminCard.className = "company-card";
@@ -3490,7 +3515,32 @@ const setPage = (page) => {
   }
 };
 
-const openCompany = (empresaName) => {
+const openCompany = (empresaName, options = {}) => {
+  const { allowRestricted = false } = options;
+  if (!allowRestricted) {
+    const user = getAuthScopeUser();
+    if (!canAccessSharedHomeModules(user)) {
+      const restrictedAccess = resolveRestrictedCompanyAccess(empresaName);
+      if (restrictedAccess === "inmobiliaria") {
+        openCrmInmobiliario();
+        return;
+      }
+      if (restrictedAccess === "seguros") {
+        openSegurosCrm();
+        return;
+      }
+      if (restrictedAccess === "gestoria") {
+        openGestoriaCrm();
+        return;
+      }
+      if (restrictedAccess === "financiaciones") {
+        openFinCrm();
+        return;
+      }
+      goHome();
+      return;
+    }
+  }
   setCrmMode("");
   const empresa = state.empresas.find((e) => e.nombre === empresaName);
   if (!empresa) {
@@ -3538,6 +3588,11 @@ const openCompany = (empresaName) => {
 };
 
 const openClientesModule = () => {
+  const user = getAuthScopeUser();
+  if (!canAccessSharedHomeModules(user)) {
+    goHome();
+    return;
+  }
   if (homeSection) {
     homeSection.classList.add("hidden");
   }
@@ -3548,7 +3603,7 @@ const openClientesModule = () => {
 
 const openCrmInmobiliario = () => {
   if (!userCanAccessService("inmobiliaria")) return;
-  openCompany(DASHBOARD_COMPANY);
+  openCompany(DASHBOARD_COMPANY, { allowRestricted: true });
   setTab("crm");
   updateTableVisibility();
   loadCrmCaptaciones();
@@ -3565,7 +3620,7 @@ const openInmuebleFromAgenda = (inmuebleId) => {
 
 const openGestoriaCrm = () => {
   if (!userCanAccessService("gestoria")) return;
-  openCompany(FINCAS_COMPANY);
+  openCompany(FINCAS_COMPANY, { allowRestricted: true });
   setTab("gestoria-dash");
   updateTableVisibility();
   loadGestoriaDashboard();
@@ -3573,7 +3628,7 @@ const openGestoriaCrm = () => {
 
 const openSegurosCrm = () => {
   if (!userCanAccessService("seguros")) return;
-  openCompany(FINCAS_COMPANY);
+  openCompany(FINCAS_COMPANY, { allowRestricted: true });
   setTab("seguros-crm");
   updateTableVisibility();
   if (segurosCrmSearch) segurosCrmSearch.value = "";
@@ -3594,7 +3649,7 @@ const openSegurosCrm = () => {
 
 const openFinCrm = () => {
   if (!userCanAccessService("financiaciones")) return;
-  openCompany(FIN_COMPANY);
+  openCompany(FIN_COMPANY, { allowRestricted: true });
   setTab("fin-crm");
   updateTableVisibility();
   setCrmMode("fin");
@@ -3878,6 +3933,11 @@ const setClienteDocsTab = (tab) => {
 };
 
 const openHolding = () => {
+  const user = getAuthScopeUser();
+  if (!canAccessSharedHomeModules(user)) {
+    goHome();
+    return;
+  }
   setModule("empresas");
   explorerSection.classList.add("hidden");
   setPage("holding");
@@ -3886,6 +3946,11 @@ const openHolding = () => {
 };
 
 const openAgenda = () => {
+  const user = getAuthScopeUser();
+  if (!canAccessSharedHomeModules(user)) {
+    goHome();
+    return;
+  }
   setModule("empresas");
   explorerSection.classList.add("hidden");
   setPage("agenda");
@@ -8703,6 +8768,46 @@ const buildHipotecaOptionLabel = (row, columns) => {
   return pieces.join(" · ");
 };
 
+const getHipotecaSignedYear = (row, columns) => {
+  const raw = getHipotecaFieldValue(row, columns, ["fecha_firma", "fecha"]);
+  if (raw) {
+    const match = String(raw).trim().match(/^(\d{4})[-/]/);
+    if (match) return match[1];
+    const reverse = String(raw).trim().match(/[-/](\d{4})$/);
+    if (reverse) return reverse[1];
+  }
+  const anio = getHipotecaFieldValue(row, columns, ["anio"]);
+  return /^\d{4}$/.test(String(anio || "").trim()) ? String(anio).trim() : "";
+};
+
+const isHipotecaSignedForExport = (row, columns) => {
+  const fechaFirma = getHipotecaFieldValue(row, columns, ["fecha_firma"]);
+  const estado = normalizeSimple(getHipotecaFieldValue(row, columns, ["estado"]));
+  if (!fechaFirma) return false;
+  return estado === "firmada" || estado === "firmado";
+};
+
+const syncHipotecaExportYears = (rows = [], columns = []) => {
+  if (!hipotecaBdtExportYear) return;
+  const current = String(hipotecaBdtExportYear.value || "").trim();
+  const years = Array.from(
+    new Set(
+      rows
+        .filter((row) => isHipotecaSignedForExport(row, columns))
+        .map((row) => getHipotecaSignedYear(row, columns))
+        .filter(Boolean)
+    )
+  ).sort((a, b) => Number(b) - Number(a));
+  hipotecaBdtExportYear.innerHTML = "";
+  hipotecaBdtExportYear.appendChild(createOption("", "Declarativo · Todos"));
+  years.forEach((year) => {
+    hipotecaBdtExportYear.appendChild(createOption(year, `Declarativo ${year}`));
+  });
+  if (current && years.includes(current)) {
+    hipotecaBdtExportYear.value = current;
+  }
+};
+
 const populateHipotecaVincularSelect = (rows = [], columns = []) => {
   if (!hipotecaBdtVincularSelect) return;
   const current = String(hipotecaBdtVincularSelect.value || "").trim();
@@ -8739,6 +8844,7 @@ const loadHipotecaBdt = (forceRefresh = false) => {
     hipotecaBdtTable.innerHTML = "<p class='muted'>Sin empresa de hipotecas configurada.</p>";
     hipotecaBdtInfo.textContent = "";
     if (hipotecaBdtVincularStatus) hipotecaBdtVincularStatus.textContent = "";
+    syncHipotecaExportYears([], []);
     populateHipotecaVincularSelect([], []);
     return;
   }
@@ -8759,6 +8865,7 @@ const loadHipotecaBdt = (forceRefresh = false) => {
     const baseText = `Mostrando ${rows.length} filas de Hipotecas.`;
     hipotecaBdtInfo.textContent = baseText;
     hipotecaBdtInfo.dataset.baseText = baseText;
+    syncHipotecaExportYears(rows, columns);
     populateHipotecaVincularSelect(rows, columns);
     return;
   }
@@ -8781,6 +8888,7 @@ const loadHipotecaBdt = (forceRefresh = false) => {
       const baseText = `Mostrando ${rows.length} filas de Hipotecas.`;
       hipotecaBdtInfo.textContent = baseText;
       hipotecaBdtInfo.dataset.baseText = baseText;
+      syncHipotecaExportYears(rows, columns);
       populateHipotecaVincularSelect(rows, columns);
     })
     .catch((error) => {
@@ -8788,6 +8896,7 @@ const loadHipotecaBdt = (forceRefresh = false) => {
       hipotecaBdtTable.innerHTML = `<p class='muted'>${message}</p>`;
       hipotecaBdtInfo.textContent = "";
       if (hipotecaBdtVincularStatus) hipotecaBdtVincularStatus.textContent = message;
+      syncHipotecaExportYears([], []);
       populateHipotecaVincularSelect([], []);
     });
 };
@@ -8985,8 +9094,24 @@ const openHipotecaFichaPrint = (recordId) => {
 const downloadHipotecasFirmadasExcel = () => {
   const empresa = state.empresas.find((item) => item.nombre === FIN_COMPANY);
   if (!empresa?.id) return;
-  const url = `/api/hipotecas_firmadas_excel?empresa_id=${encodeURIComponent(empresa.id)}`;
+  const params = new URLSearchParams({ empresa_id: empresa.id });
+  const year = String(hipotecaBdtExportYear?.value || "").trim();
+  if (year) params.set("year", year);
+  const url = `/api/hipotecas_firmadas_excel?${params.toString()}`;
   window.location.href = url;
+};
+
+const syncHipotecaFichaPdfState = (panel, rowData = {}) => {
+  if (!panel) return;
+  const button = panel.querySelector("#hipotecaFichaPdf");
+  if (!button) return;
+  const enabled =
+    !!String(rowData.fecha_firma || "").trim() &&
+    ["firmada", "firmado"].includes(normalizeSimple(rowData.estado || ""));
+  button.disabled = !enabled;
+  button.title = enabled
+    ? ""
+    : "Disponible solo para hipotecas firmadas con fecha de firma.";
 };
 
 const openHipotecaFicha = async (recordId, prefetched = null) => {
@@ -9013,6 +9138,7 @@ const openHipotecaFicha = async (recordId, prefetched = null) => {
     const cliente = String(rowData.cliente || "").trim() || `Hipoteca ${target.slice(0, 8)}`;
     meta.textContent = `${cliente} · ID ${target.slice(0, 8)}`;
   }
+  syncHipotecaFichaPdfState(panel, rowData);
   fields.forEach((field) => {
     const cfg = EDITABLE_FIELDS.hipotecas?.[field] || { type: "text" };
     const control = panel.querySelector(`[name="${field}"]`);
@@ -9159,6 +9285,7 @@ const renderHipotecaBdtTable = (data) => {
     const actions = document.createElement("div");
     actions.className = "inline-actions";
     const recordId = row[idIndex];
+    const canGeneratePdf = isHipotecaSignedForExport(row, columns);
     const openBtn = document.createElement("button");
     openBtn.type = "button";
     openBtn.className = "secondary";
@@ -9170,6 +9297,8 @@ const renderHipotecaBdtTable = (data) => {
     pdfBtn.type = "button";
     pdfBtn.className = "secondary";
     pdfBtn.textContent = "PDF";
+    pdfBtn.disabled = !canGeneratePdf;
+    pdfBtn.title = canGeneratePdf ? "" : "Disponible solo para firmadas con fecha de firma.";
     pdfBtn.addEventListener("click", () => {
       openHipotecaFichaPrint(recordId);
     });

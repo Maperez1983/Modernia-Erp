@@ -2,8 +2,11 @@ import sqlite3
 import unittest
 
 from web.server import (
+    OPENPYXL_AVAILABLE,
+    build_hipotecas_firmadas_excel_workbook,
     build_hipoteca_fixed_cost_entries,
     build_hipoteca_accounting_entries,
+    collect_hipotecas_firmadas_export_rows,
     delete_gestoria_contabilidad_record,
     delete_hipoteca_record,
     derive_hipoteca_commissions,
@@ -317,11 +320,105 @@ class HipotecasDeleteTests(unittest.TestCase):
             link = resolve_hipoteca_contabilidad_link(legacy, "h1")
         finally:
             legacy.close()
-
         self.assertEqual(link["cliente"], "Cliente Uno")
         self.assertEqual(link["banco"], "Banco Test")
         self.assertEqual(link["fecha_firma"], "2025-02-10")
         self.assertEqual(link["cliente_id"], "c1")
+
+    def test_collect_signed_export_rows_filters_year_and_non_signed_statuses(self):
+        if not OPENPYXL_AVAILABLE:
+            self.skipTest("openpyxl no disponible")
+
+        export_conn = sqlite3.connect(":memory:")
+        export_conn.row_factory = sqlite3.Row
+        export_conn.executescript(
+            """
+            CREATE TABLE hipotecas (
+              id TEXT PRIMARY KEY,
+              empresa_id TEXT,
+              cliente TEXT,
+              cliente_id TEXT,
+              banco TEXT,
+              precio REAL,
+              importe_hipoteca REAL,
+              porcentaje REAL,
+              entrada REAL,
+              comision REAL,
+              oficina TEXT,
+              fecha_encargo TEXT,
+              encargo TEXT,
+              tipo_hipoteca TEXT,
+              fecha_firma TEXT,
+              cesion REAL,
+              comision_juan REAL,
+              comision_modernia REAL,
+              inmobiliaria_compra TEXT,
+              asesor TEXT,
+              estado TEXT,
+              anio INTEGER,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            );
+            CREATE TABLE clientes (
+              id TEXT PRIMARY KEY,
+              nombre TEXT,
+              nif TEXT,
+              direccion TEXT,
+              telefono TEXT,
+              email TEXT,
+              created_at TEXT
+            );
+            INSERT INTO clientes (id, nombre, nif, direccion, telefono, email, created_at)
+            VALUES ('c1', 'Cliente Uno', '11111111H', 'Calle Uno', '600000001', 'uno@test.local', '2026-03-25');
+            INSERT INTO clientes (id, nombre, nif, direccion, telefono, email, created_at)
+            VALUES ('c2', 'Cliente Dos', '22222222J', 'Calle Dos', '600000002', 'dos@test.local', '2026-03-25');
+            INSERT INTO clientes (id, nombre, nif, direccion, telefono, email, created_at)
+            VALUES ('c3', 'Cliente Tres', '33333333P', 'Calle Tres', '600000003', 'tres@test.local', '2026-03-25');
+            INSERT INTO hipotecas (
+              id, empresa_id, cliente, cliente_id, banco, precio, importe_hipoteca, porcentaje, entrada, comision,
+              oficina, fecha_encargo, encargo, tipo_hipoteca, fecha_firma, cesion, comision_juan, comision_modernia,
+              inmobiliaria_compra, asesor, estado, anio, created_at, updated_at
+            ) VALUES (
+              'h1', 'e1', 'Cliente Uno', 'c1', 'BBVA', 200000, 160000, 80, 40000, 3000,
+              'Modernia Norte', '2025-01-10', 'Sí', 'Compra', '2025-02-15', 750, 600, 1650,
+              'Inmo Uno', 'Asesor Uno', 'Firmada', 2025, '2026-03-25', '2026-03-25'
+            );
+            INSERT INTO hipotecas (
+              id, empresa_id, cliente, cliente_id, banco, precio, importe_hipoteca, porcentaje, entrada, comision,
+              oficina, fecha_encargo, encargo, tipo_hipoteca, fecha_firma, cesion, comision_juan, comision_modernia,
+              inmobiliaria_compra, asesor, estado, anio, created_at, updated_at
+            ) VALUES (
+              'h2', 'e1', 'Cliente Dos', 'c2', 'Santander', 180000, 140000, 77.78, 40000, 2500,
+              'Modernia Centro', '2025-03-01', 'Sí', 'Compra', '2025-04-10', 625, 500, 1375,
+              'Inmo Dos', 'Asesor Dos', 'Indemnización', 2025, '2026-03-25', '2026-03-25'
+            );
+            INSERT INTO hipotecas (
+              id, empresa_id, cliente, cliente_id, banco, precio, importe_hipoteca, porcentaje, entrada, comision,
+              oficina, fecha_encargo, encargo, tipo_hipoteca, fecha_firma, cesion, comision_juan, comision_modernia,
+              inmobiliaria_compra, asesor, estado, anio, created_at, updated_at
+            ) VALUES (
+              'h3', 'e1', 'Cliente Tres', 'c3', 'CaixaBank', 210000, 170000, 80.95, 40000, 3200,
+              'Modernia Sur', '2024-05-01', 'Sí', 'Subrogación', '2024-06-20', 800, 640, 1760,
+              'Inmo Tres', 'Asesor Tres', 'Firmado', 2024, '2026-03-25', '2026-03-25'
+            );
+            """
+        )
+        try:
+            rows_2025 = collect_hipotecas_firmadas_export_rows(export_conn, "e1", "2025")
+            self.assertEqual([row["id"] for row in rows_2025], ["h1"])
+            self.assertEqual(rows_2025[0]["anio_declarativo"], "2025")
+            self.assertEqual(rows_2025[0]["cliente_nif"], "11111111H")
+
+            wb = build_hipotecas_firmadas_excel_workbook(rows_2025, "2025")
+            detail = wb["Operaciones firmadas"]
+            summary = wb["Resumen declarativo"]
+
+            self.assertEqual(detail["A2"].value, "2025")
+            self.assertEqual(detail["C2"].value, "Cliente Uno")
+            self.assertEqual(summary["B2"].value, "2025")
+            self.assertEqual(summary["B3"].value, 1)
+        finally:
+            export_conn.close()
 
 
 if __name__ == "__main__":
