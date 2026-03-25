@@ -3,19 +3,27 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>LIV</title>
-    <link rel="stylesheet" href="styles.css?v=126" />
+    <title>LIV · Grupo Modernia</title>
+    <link rel="stylesheet" href="styles.css?v=127" />
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600;700&family=Source+Sans+3:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" />
   </head>
-  <body>
+  <body class="theme-operativa">
     <header>
       <div class="brand" id="brandHome">
         <img src="/assets/liv_logo.svg" alt="LIV" />
-        <div>
-          <p>Software verificado · Versión 1.0</p>
+        <div class="brand-copy">
+          <span class="brand-kicker">Modernia group platform</span>
+          <h1>LIV Control Center</h1>
+          <div class="brand-system">by Grupo Modernia</div>
+          <p>CRM operativo, seguimiento comercial y coordinación multiempresa desde una sola interfaz.</p>
         </div>
       </div>
         <div class="meta">
+          <div class="meta-badges">
+            <span class="pill">Centro de control</span>
+            <span class="pill">Grupo Modernia</span>
+            <span class="pill">Tiempo real</span>
+          </div>
           <div>Panel operativo</div>
           <div class="muted">UI v4</div>
           <div class="muted">
@@ -36,11 +44,29 @@
 
     <main>
       <section class="hero" id="homeSection">
-        <h2>Visión general <span class="pill">Fase 1</span></h2>
-        <p>Accede a los servicios, al módulo de clientes y al histórico de empresas.</p>
-        <div class="toolbar" id="tableToolbar">
-          <span class="pill">Año</span>
-          <select id="yearSelect"></select>
+        <div class="hero-shell">
+          <div class="hero-copy">
+            <h2>Visión general <span class="pill">Fase 1</span></h2>
+            <p>Accede a los servicios, al módulo de clientes y al histórico de empresas.</p>
+            <div class="toolbar" id="tableToolbar">
+              <span class="pill">Año</span>
+              <select id="yearSelect"></select>
+            </div>
+          </div>
+          <aside class="hero-aside" aria-label="Resumen de plataforma">
+            <div class="hero-chip">Identidad LIV + ecosistema Modernia</div>
+            <div class="hero-badge">Pipeline comercial, gestoría, seguros y finanzas en un mismo tablero.</div>
+            <div class="hero-metrics">
+              <div class="hero-metric">
+                <strong>360º</strong>
+                <span>Vista transversal del grupo</span>
+              </div>
+              <div class="hero-metric">
+                <strong>1</strong>
+                <span>Centro operativo compartido</span>
+              </div>
+            </div>
+          </aside>
         </div>
         <div class="home-block">
           <h3>Módulos clave</h3>

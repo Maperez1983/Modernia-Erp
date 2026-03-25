@@ -3040,3 +3040,920 @@ body.auth-locked {
   color: #3c6e71;
   font-weight: 600;
 }
+
+body.theme-operativa {
+  --gold: #0f766e;
+  --gold-deep: #155e75;
+  --gold-soft: #dff5ef;
+  --black: #10212b;
+  --charcoal: #10212b;
+  --ink: #10212b;
+  --ink-soft: #355060;
+  --paper: #f4f3ee;
+  --cream: #ece8de;
+  --cloud: rgba(255, 255, 255, 0.9);
+  --line: rgba(28, 70, 78, 0.14);
+  --muted: #5f716f;
+  --sage: #237a6a;
+  --shadow: rgba(16, 33, 43, 0.14);
+  background:
+    radial-gradient(circle at top left, rgba(16, 185, 129, 0.16), transparent 28%),
+    radial-gradient(circle at 100% 0%, rgba(14, 116, 144, 0.18), transparent 32%),
+    radial-gradient(circle at 50% 100%, rgba(202, 138, 4, 0.08), transparent 34%),
+    linear-gradient(180deg, #f3efe4 0%, #edf1ee 45%, #f7f7f3 100%);
+}
+
+body.theme-operativa::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.18) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.18) 1px, transparent 1px);
+  background-size: 24px 24px;
+  mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.18), transparent 70%);
+  opacity: 0.3;
+}
+
+body.theme-operativa header {
+  width: min(calc(100% - (var(--layout-gutter) * 2)), var(--layout-max));
+  margin: 18px auto 0;
+  padding: 28px clamp(18px, 2.6vw, 38px);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 30px;
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0 24px 70px rgba(16, 33, 43, 0.18);
+  background:
+    radial-gradient(circle at top left, rgba(255, 255, 255, 0.22), transparent 30%),
+    linear-gradient(135deg, #0f172a 0%, #123247 34%, #155e75 62%, #15803d 100%);
+}
+
+body.theme-operativa header::before,
+body.theme-operativa header::after {
+  content: "";
+  position: absolute;
+  border-radius: 999px;
+  pointer-events: none;
+}
+
+body.theme-operativa header::before {
+  width: 320px;
+  height: 320px;
+  right: -120px;
+  top: -140px;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.22) 0%, transparent 68%);
+}
+
+body.theme-operativa header::after {
+  width: 220px;
+  height: 220px;
+  left: 35%;
+  bottom: -120px;
+  background: radial-gradient(circle, rgba(16, 185, 129, 0.18) 0%, transparent 72%);
+}
+
+body.theme-operativa .brand,
+body.theme-operativa .meta {
+  position: relative;
+  z-index: 1;
+}
+
+body.theme-operativa .brand {
+  gap: 20px;
+}
+
+body.theme-operativa .brand img {
+  width: 92px;
+  height: 92px;
+  padding: 14px;
+  border-radius: 26px;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14);
+}
+
+body.theme-operativa .brand-copy {
+  display: grid;
+  gap: 6px;
+  max-width: 700px;
+}
+
+body.theme-operativa .brand-kicker {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: rgba(247, 244, 238, 0.82);
+}
+
+body.theme-operativa .brand h1 {
+  font-size: clamp(30px, 4vw, 52px);
+  line-height: 0.96;
+  letter-spacing: -0.03em;
+}
+
+body.theme-operativa .brand p {
+  max-width: 58ch;
+  margin-top: 0;
+  font-size: 15px;
+  line-height: 1.45;
+  color: rgba(247, 244, 238, 0.84);
+}
+
+body.theme-operativa .meta {
+  gap: 8px;
+  padding: 16px 18px;
+  min-width: min(100%, 320px);
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(14px);
+}
+
+body.theme-operativa .meta-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+body.theme-operativa .meta .pill,
+body.theme-operativa #authSessionPill {
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.9);
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+body.theme-operativa .density-toggle {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+body.theme-operativa .density-btn.active {
+  background: rgba(255, 255, 255, 0.96);
+  color: #0f172a;
+}
+
+body.theme-operativa .ui-context-bar {
+  width: min(calc(100% - (var(--layout-gutter) * 2)), var(--layout-max));
+  margin: 14px auto 0;
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.62);
+  box-shadow: 0 18px 48px rgba(16, 33, 43, 0.08);
+  backdrop-filter: blur(16px);
+  top: 12px;
+}
+
+body.theme-operativa main {
+  gap: 26px;
+  padding-top: 18px;
+}
+
+body.theme-operativa section {
+  border-radius: 28px;
+  border: 1px solid rgba(255, 255, 255, 0.76);
+  border-top: 1px solid rgba(255, 255, 255, 0.76);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(255, 255, 255, 0.72)),
+    linear-gradient(135deg, rgba(16, 185, 129, 0.04), rgba(14, 116, 144, 0.05));
+  box-shadow:
+    0 22px 60px rgba(16, 33, 43, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  position: relative;
+  overflow: hidden;
+}
+
+body.theme-operativa section::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto auto 0;
+  width: 180px;
+  height: 180px;
+  background: radial-gradient(circle, rgba(16, 185, 129, 0.08), transparent 70%);
+  pointer-events: none;
+}
+
+body.theme-operativa h2 {
+  font-size: clamp(28px, 3.4vw, 44px);
+  letter-spacing: -0.03em;
+  margin-bottom: 10px;
+}
+
+body.theme-operativa h3 {
+  letter-spacing: -0.02em;
+}
+
+body.theme-operativa .hero {
+  padding: clamp(22px, 3vw, 34px);
+  background:
+    radial-gradient(circle at top right, rgba(14, 116, 144, 0.12), transparent 34%),
+    linear-gradient(135deg, rgba(15, 23, 42, 0.96) 0%, rgba(17, 66, 72, 0.95) 48%, rgba(21, 128, 61, 0.84) 100%);
+  color: #f5f7f6;
+}
+
+body.theme-operativa #homeSection.hero::before {
+  width: 260px;
+  height: 260px;
+  top: -120px;
+  right: -40px;
+  left: auto;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.18), transparent 68%);
+}
+
+body.theme-operativa .hero-shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(300px, 0.9fr);
+  gap: 22px;
+  align-items: stretch;
+}
+
+body.theme-operativa .hero-copy {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+  position: relative;
+  z-index: 1;
+}
+
+body.theme-operativa .hero h2,
+body.theme-operativa .hero h3,
+body.theme-operativa .hero p,
+body.theme-operativa .hero .muted {
+  color: inherit;
+}
+
+body.theme-operativa .hero p {
+  max-width: 58ch;
+  font-size: 16px;
+  line-height: 1.55;
+  color: rgba(245, 247, 246, 0.86);
+}
+
+body.theme-operativa .hero .toolbar {
+  width: fit-content;
+  margin-bottom: 0;
+  padding: 10px 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+body.theme-operativa .hero .toolbar select {
+  min-width: 120px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.9);
+}
+
+body.theme-operativa .hero-aside {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+  padding: 18px;
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  position: relative;
+  z-index: 1;
+}
+
+body.theme-operativa .hero-badge {
+  font-family: var(--font-display);
+  font-size: 22px;
+  line-height: 1.18;
+}
+
+body.theme-operativa .hero-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+body.theme-operativa .hero-metric {
+  display: grid;
+  gap: 4px;
+  padding: 14px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+body.theme-operativa .hero-metric strong {
+  font-family: var(--font-display);
+  font-size: 34px;
+  line-height: 1;
+}
+
+body.theme-operativa .hero-metric span {
+  font-size: 12px;
+  line-height: 1.4;
+  color: rgba(245, 247, 246, 0.8);
+}
+
+body.theme-operativa .home-block {
+  position: relative;
+  z-index: 1;
+  margin-top: 24px;
+}
+
+body.theme-operativa .pill {
+  background: rgba(16, 185, 129, 0.1);
+  color: #d8fff6;
+  border-color: rgba(216, 255, 246, 0.18);
+}
+
+body.theme-operativa section:not(.hero) .pill {
+  background: rgba(16, 185, 129, 0.08);
+  color: var(--ink-soft);
+  border-color: rgba(16, 185, 129, 0.16);
+}
+
+body.theme-operativa .section-head {
+  margin-bottom: 16px;
+}
+
+body.theme-operativa .card,
+body.theme-operativa .form-card,
+body.theme-operativa .data-card,
+body.theme-operativa .dashboard-card,
+body.theme-operativa .company-summary,
+body.theme-operativa .crm-header,
+body.theme-operativa .company-card,
+body.theme-operativa .inline-row,
+body.theme-operativa .renta-detail-card,
+body.theme-operativa .agenda-side {
+  border: 1px solid rgba(18, 50, 71, 0.08);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(247, 249, 248, 0.9)),
+    linear-gradient(135deg, rgba(16, 185, 129, 0.03), rgba(14, 116, 144, 0.03));
+  box-shadow:
+    0 16px 42px rgba(16, 33, 43, 0.07),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+body.theme-operativa .card:hover,
+body.theme-operativa .form-card:hover,
+body.theme-operativa .data-card:hover,
+body.theme-operativa .dashboard-card:hover,
+body.theme-operativa .company-card:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    0 24px 54px rgba(16, 33, 43, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.92);
+}
+
+body.theme-operativa .grid {
+  gap: 18px;
+}
+
+body.theme-operativa .company-card {
+  border-top: 1px solid rgba(18, 50, 71, 0.08);
+  padding: 20px;
+}
+
+body.theme-operativa .company-card button,
+body.theme-operativa .company-card .card-link,
+body.theme-operativa .toolbar button,
+body.theme-operativa .form-actions button,
+body.theme-operativa .inline-row button {
+  background: linear-gradient(135deg, #0f766e 0%, #155e75 100%);
+  color: #f4fbf9;
+  box-shadow: 0 12px 24px rgba(15, 118, 110, 0.18);
+}
+
+body.theme-operativa button.secondary,
+body.theme-operativa .btn.secondary,
+body.theme-operativa .toolbar button.secondary,
+body.theme-operativa .crm-actions .secondary,
+body.theme-operativa .inline-row button.secondary {
+  background: rgba(16, 33, 43, 0.04);
+  color: var(--ink);
+  border: 1px solid rgba(18, 50, 71, 0.14);
+  box-shadow: none;
+}
+
+body.theme-operativa .toolbar button.ghost,
+body.theme-operativa .section-head .ghost,
+body.theme-operativa #authLogoutBtn {
+  background: rgba(255, 255, 255, 0.04);
+  color: inherit;
+  border: 1px solid rgba(18, 50, 71, 0.16);
+}
+
+body.theme-operativa .tabs,
+body.theme-operativa .tab-group {
+  gap: 10px;
+  padding: 10px;
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.66);
+  border: 1px solid rgba(255, 255, 255, 0.82);
+  box-shadow: 0 16px 38px rgba(16, 33, 43, 0.06);
+}
+
+body.theme-operativa .tab {
+  min-height: 42px;
+  border-radius: 14px;
+  border-color: transparent;
+  background: rgba(255, 255, 255, 0.62);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+body.theme-operativa .tab.active {
+  background: linear-gradient(135deg, #0f172a 0%, #14532d 100%);
+  color: #f5f7f6;
+  box-shadow: 0 12px 24px rgba(16, 33, 43, 0.18);
+}
+
+body.theme-operativa input,
+body.theme-operativa select,
+body.theme-operativa textarea {
+  border-radius: 14px;
+  border: 1px solid rgba(18, 50, 71, 0.12);
+  background: rgba(255, 255, 255, 0.88);
+}
+
+body.theme-operativa .toolbar {
+  gap: 10px;
+}
+
+body.theme-operativa .toolbar select,
+body.theme-operativa .toolbar input {
+  border-radius: 999px;
+  min-height: 42px;
+}
+
+body.theme-operativa .dashboard,
+body.theme-operativa #fincasDashboardSection,
+body.theme-operativa #dashboardSection,
+body.theme-operativa #finDashboardSection {
+  display: grid;
+  gap: 16px;
+}
+
+body.theme-operativa .dashboard-head {
+  padding: 8px 2px;
+}
+
+body.theme-operativa .dashboard-kpis .card,
+body.theme-operativa .crm-kpis .card,
+body.theme-operativa .crm-kpis .kpi-card {
+  position: relative;
+  overflow: hidden;
+}
+
+body.theme-operativa .dashboard-kpis .card::before,
+body.theme-operativa .crm-kpis .card::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 4px;
+  background: linear-gradient(90deg, #0f766e 0%, #16a34a 50%, #eab308 100%);
+}
+
+body.theme-operativa .kpi-value {
+  font-size: clamp(28px, 3vw, 38px);
+  color: #0f172a;
+}
+
+body.theme-operativa .company-summary,
+body.theme-operativa .crm-header {
+  padding: 20px 22px;
+  border-radius: 22px;
+}
+
+body.theme-operativa .crm-pipeline {
+  gap: 10px;
+}
+
+body.theme-operativa .crm-pipeline button {
+  border-radius: 999px;
+  border: 1px solid rgba(18, 50, 71, 0.08);
+  background: rgba(255, 255, 255, 0.88);
+  color: var(--ink);
+  box-shadow: none;
+}
+
+body.theme-operativa .crm-pipeline button.active {
+  background: linear-gradient(135deg, #0f766e 0%, #155e75 100%);
+  color: #f4fbf9;
+  box-shadow: 0 14px 24px rgba(15, 118, 110, 0.2);
+}
+
+body.theme-operativa .crm-kanban-column {
+  border-radius: 22px;
+  border: 1px solid rgba(18, 50, 71, 0.08);
+  background: rgba(255, 255, 255, 0.68);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.82);
+}
+
+body.theme-operativa .crm-kanban-card,
+body.theme-operativa .admin-user-item,
+body.theme-operativa .crm-recent-item,
+body.theme-operativa .crm-mini-card,
+body.theme-operativa .renta-card,
+body.theme-operativa .agenda-day {
+  border: 1px solid rgba(18, 50, 71, 0.08);
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 12px 28px rgba(16, 33, 43, 0.06);
+}
+
+body.theme-operativa .data-table,
+body.theme-operativa .ui-table tr,
+body.theme-operativa .ui-table-scroll {
+  border-radius: 18px;
+}
+
+body.theme-operativa .data-table th {
+  background: linear-gradient(180deg, rgba(16, 185, 129, 0.12), rgba(14, 116, 144, 0.08));
+  color: #123247;
+}
+
+body.theme-operativa .footer,
+body.theme-operativa .ui-table-meta,
+body.theme-operativa .company-summary-meta,
+body.theme-operativa .muted {
+  color: #617472;
+}
+
+body.theme-operativa .alert {
+  width: min(calc(100% - (var(--layout-gutter) * 2)), var(--layout-max));
+  margin-top: 12px;
+  border-radius: 22px;
+  border: 1px solid rgba(18, 50, 71, 0.14);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.8), rgba(224, 247, 240, 0.76));
+  box-shadow: 0 18px 40px rgba(16, 33, 43, 0.08);
+}
+
+body.theme-operativa .auth-login-overlay {
+  background:
+    radial-gradient(circle at 15% 10%, rgba(16, 185, 129, 0.18), transparent 45%),
+    radial-gradient(circle at 85% 20%, rgba(14, 116, 144, 0.18), transparent 42%),
+    rgba(244, 243, 238, 0.92);
+}
+
+body.theme-operativa .auth-login-card {
+  border-radius: 28px;
+  padding: 24px 24px 20px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(247, 249, 248, 0.92)),
+    linear-gradient(135deg, rgba(16, 185, 129, 0.04), rgba(14, 116, 144, 0.04));
+  border: 1px solid rgba(255, 255, 255, 0.84);
+  box-shadow: 0 26px 64px rgba(16, 33, 43, 0.14);
+}
+
+@media (max-width: 980px) {
+  body.theme-operativa header {
+    width: calc(100% - 28px);
+    border-radius: 24px;
+  }
+
+  body.theme-operativa .hero-shell {
+    grid-template-columns: 1fr;
+  }
+
+  body.theme-operativa .meta-badges {
+    justify-content: flex-start;
+  }
+
+  body.theme-operativa .ui-context-bar {
+    width: calc(100% - 28px);
+  }
+}
+
+@media (max-width: 760px) {
+  body.theme-operativa .brand {
+    align-items: flex-start;
+  }
+
+  body.theme-operativa .brand img {
+    width: 74px;
+    height: 74px;
+  }
+
+  body.theme-operativa .meta {
+    width: 100%;
+    min-width: 0;
+    border-radius: 20px;
+  }
+
+  body.theme-operativa main {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+
+  body.theme-operativa section {
+    border-radius: 22px;
+  }
+
+  body.theme-operativa .hero {
+    padding: 20px 18px;
+  }
+
+  body.theme-operativa .hero-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  body.theme-operativa .hero .toolbar {
+    width: 100%;
+    border-radius: 18px;
+  }
+
+  body.theme-operativa .hero .toolbar select {
+    width: 100%;
+  }
+}
+
+body.theme-operativa {
+  --gold: #c7a24a;
+  --gold-deep: #a88327;
+  --gold-soft: #f4ecd5;
+  --black: #1d241f;
+  --charcoal: #1d241f;
+  --ink: #213129;
+  --ink-soft: #4f6a5f;
+  --paper: #f5f1e7;
+  --cream: #ece6d8;
+  --cloud: rgba(255, 251, 243, 0.9);
+  --line: rgba(112, 131, 102, 0.18);
+  --muted: #68776e;
+  --sage: #73986f;
+  --shadow: rgba(33, 49, 41, 0.16);
+  background:
+    radial-gradient(circle at top left, rgba(199, 162, 74, 0.2), transparent 26%),
+    radial-gradient(circle at 100% 0%, rgba(115, 152, 111, 0.16), transparent 30%),
+    radial-gradient(circle at 50% 100%, rgba(147, 168, 103, 0.12), transparent 34%),
+    linear-gradient(180deg, #f7f3e8 0%, #eef2ea 46%, #f7f7f2 100%);
+}
+
+body.theme-operativa header {
+  background:
+    radial-gradient(circle at top left, rgba(247, 240, 214, 0.15), transparent 32%),
+    radial-gradient(circle at 80% 12%, rgba(199, 162, 74, 0.22), transparent 20%),
+    linear-gradient(135deg, #1b211d 0%, #34483d 28%, #6f8f68 66%, #c7a24a 100%);
+}
+
+body.theme-operativa .brand img {
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.04)),
+    radial-gradient(circle at top left, rgba(199, 162, 74, 0.24), transparent 62%);
+}
+
+body.theme-operativa .brand-kicker {
+  background: rgba(247, 240, 214, 0.1);
+  border-color: rgba(247, 240, 214, 0.16);
+  color: rgba(255, 248, 236, 0.82);
+}
+
+body.theme-operativa .brand h1 {
+  text-shadow: 0 10px 30px rgba(18, 24, 21, 0.24);
+}
+
+body.theme-operativa .brand-system {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  padding: 4px 0 0;
+  font-family: var(--font-display);
+  font-size: 18px;
+  letter-spacing: 0.04em;
+  color: rgba(231, 240, 227, 0.84);
+}
+
+body.theme-operativa .brand-system::before {
+  content: "";
+  width: 40px;
+  height: 1px;
+  margin-right: 12px;
+  background: linear-gradient(90deg, rgba(199, 162, 74, 0.95), rgba(115, 152, 111, 0.7));
+}
+
+body.theme-operativa .meta {
+  background:
+    linear-gradient(180deg, rgba(255, 252, 245, 0.12), rgba(255, 255, 255, 0.05)),
+    rgba(26, 34, 29, 0.18);
+}
+
+body.theme-operativa .meta .pill,
+body.theme-operativa #authSessionPill {
+  background: rgba(255, 247, 228, 0.12);
+  color: rgba(255, 248, 236, 0.92);
+  border-color: rgba(255, 232, 179, 0.22);
+}
+
+body.theme-operativa .density-toggle {
+  background: rgba(255, 248, 236, 0.08);
+  border-color: rgba(255, 232, 179, 0.18);
+}
+
+body.theme-operativa .ui-context-bar {
+  background:
+    linear-gradient(135deg, rgba(255, 251, 242, 0.72), rgba(241, 246, 238, 0.62)),
+    rgba(255, 255, 255, 0.58);
+}
+
+body.theme-operativa section {
+  background:
+    linear-gradient(180deg, rgba(255, 252, 246, 0.9), rgba(255, 255, 255, 0.72)),
+    linear-gradient(135deg, rgba(199, 162, 74, 0.05), rgba(115, 152, 111, 0.06));
+}
+
+body.theme-operativa section::before {
+  background: radial-gradient(circle, rgba(199, 162, 74, 0.08), transparent 70%);
+}
+
+body.theme-operativa .hero {
+  background:
+    radial-gradient(circle at 82% 18%, rgba(199, 162, 74, 0.34), transparent 20%),
+    radial-gradient(circle at top left, rgba(255, 244, 217, 0.14), transparent 28%),
+    linear-gradient(135deg, #1b211d 0%, #385044 34%, #76946d 68%, #c7a24a 100%);
+}
+
+body.theme-operativa .hero::after {
+  content: "";
+  position: absolute;
+  inset: auto 28px 26px auto;
+  width: 160px;
+  height: 160px;
+  border-radius: 28px;
+  opacity: 0.18;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0.02)),
+    repeating-linear-gradient(
+      135deg,
+      rgba(255, 255, 255, 0.22),
+      rgba(255, 255, 255, 0.22) 2px,
+      transparent 2px,
+      transparent 12px
+    );
+  pointer-events: none;
+}
+
+body.theme-operativa .hero .pill {
+  background: rgba(255, 244, 217, 0.14);
+  color: #fff6df;
+  border-color: rgba(255, 244, 217, 0.16);
+}
+
+body.theme-operativa .hero-aside {
+  background:
+    linear-gradient(180deg, rgba(255, 249, 236, 0.12), rgba(255, 255, 255, 0.04)),
+    rgba(26, 34, 29, 0.16);
+  border-color: rgba(255, 244, 217, 0.18);
+}
+
+body.theme-operativa .hero-chip {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-family: var(--font-ui);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  background: rgba(255, 244, 217, 0.12);
+  border: 1px solid rgba(255, 244, 217, 0.16);
+  color: rgba(255, 248, 236, 0.88);
+}
+
+body.theme-operativa .hero-badge {
+  color: #fff8ea;
+  text-wrap: balance;
+}
+
+body.theme-operativa .hero-metric {
+  background:
+    linear-gradient(180deg, rgba(255, 249, 236, 0.12), rgba(255, 255, 255, 0.05)),
+    rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 244, 217, 0.14);
+}
+
+body.theme-operativa .hero-metric strong {
+  color: #fff4d6;
+}
+
+body.theme-operativa section:not(.hero) .pill {
+  background: rgba(199, 162, 74, 0.08);
+  color: #4f6a5f;
+  border-color: rgba(199, 162, 74, 0.18);
+}
+
+body.theme-operativa .card,
+body.theme-operativa .form-card,
+body.theme-operativa .data-card,
+body.theme-operativa .dashboard-card,
+body.theme-operativa .company-summary,
+body.theme-operativa .crm-header,
+body.theme-operativa .company-card,
+body.theme-operativa .inline-row,
+body.theme-operativa .renta-detail-card,
+body.theme-operativa .agenda-side {
+  background:
+    linear-gradient(180deg, rgba(255, 252, 246, 0.94), rgba(247, 249, 245, 0.9)),
+    linear-gradient(135deg, rgba(199, 162, 74, 0.04), rgba(115, 152, 111, 0.04));
+}
+
+body.theme-operativa .company-card,
+body.theme-operativa .crm-header,
+body.theme-operativa .company-summary {
+  position: relative;
+  overflow: hidden;
+}
+
+body.theme-operativa .company-card::before,
+body.theme-operativa .crm-header::before,
+body.theme-operativa .company-summary::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 5px;
+  background: linear-gradient(180deg, #c7a24a 0%, #73986f 100%);
+  opacity: 0.9;
+}
+
+body.theme-operativa .company-card button,
+body.theme-operativa .company-card .card-link,
+body.theme-operativa .toolbar button,
+body.theme-operativa .form-actions button,
+body.theme-operativa .inline-row button,
+body.theme-operativa .crm-pipeline button.active {
+  background: linear-gradient(135deg, #c7a24a 0%, #73986f 100%);
+  color: #fffdf7;
+  box-shadow: 0 14px 26px rgba(138, 135, 67, 0.2);
+}
+
+body.theme-operativa .toolbar button.secondary,
+body.theme-operativa .crm-actions .secondary,
+body.theme-operativa .inline-row button.secondary,
+body.theme-operativa button.secondary,
+body.theme-operativa .btn.secondary {
+  background: rgba(104, 119, 110, 0.06);
+  color: #284237;
+  border-color: rgba(115, 152, 111, 0.18);
+}
+
+body.theme-operativa .tabs,
+body.theme-operativa .tab-group {
+  background:
+    linear-gradient(135deg, rgba(255, 251, 242, 0.8), rgba(242, 247, 238, 0.72)),
+    rgba(255, 255, 255, 0.66);
+}
+
+body.theme-operativa .tab {
+  background: rgba(255, 254, 249, 0.72);
+  color: #375044;
+}
+
+body.theme-operativa .tab.active {
+  background: linear-gradient(135deg, #263a30 0%, #73986f 55%, #c7a24a 100%);
+  color: #fffdf5;
+}
+
+body.theme-operativa .dashboard-kpis .card::before,
+body.theme-operativa .crm-kpis .card::before {
+  background: linear-gradient(90deg, #c7a24a 0%, #93a867 40%, #73986f 100%);
+}
+
+body.theme-operativa .kpi-value {
+  color: #24352d;
+}
+
+body.theme-operativa .crm-pipeline button {
+  background: rgba(255, 253, 247, 0.92);
+  color: #375044;
+}
+
+body.theme-operativa .data-table th {
+  background: linear-gradient(180deg, rgba(199, 162, 74, 0.12), rgba(115, 152, 111, 0.08));
+  color: #355046;
+}
+
+body.theme-operativa .alert {
+  background: linear-gradient(135deg, rgba(255, 250, 239, 0.84), rgba(236, 245, 234, 0.78));
+}
+
+body.theme-operativa .auth-login-overlay {
+  background:
+    radial-gradient(circle at 15% 10%, rgba(199, 162, 74, 0.18), transparent 45%),
+    radial-gradient(circle at 85% 20%, rgba(115, 152, 111, 0.18), transparent 42%),
+    rgba(245, 241, 231, 0.92);
+}
+
+body.theme-operativa .auth-login-card {
+  background:
+    linear-gradient(180deg, rgba(255, 252, 246, 0.96), rgba(247, 249, 245, 0.92)),
+    linear-gradient(135deg, rgba(199, 162, 74, 0.04), rgba(115, 152, 111, 0.04));
+}
