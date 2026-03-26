@@ -196,6 +196,84 @@ Mujer |ooos
 """
 
 
+MODELO_OCR_PRESENTACION_SAMPLE = """
+INFORMACION DE LA PRESENTACION DE LA DECLARACION
+Modelo 100 Ejercicio 2024
+Registro
+Presentacion realizada el: 10-06-2025 a las 12:48:21
+Expediente/Referencia (n° registro asignado): 202410028581770L
+Codigo Seguro de Verificacion: ZYDH7SW7Q8ZYDB3T
+Numero de justificante: 1005234323371
+NIF Presentador: X6828588A
+Apellidos y Nombre / Razon social: MACHADO ROCHA RODRIGO WALDEMAR
+En calidad de: Titular
+Fecha de nacimiento 09/04/1974 [oor0]
+"""
+
+
+MODELO_OCR_DECLARANTE_NIF_SAMPLE = """
+INFORMACION DE LA PRESENTACION DE LA DECLARACION
+Modelo 100 Ejercicio 2024
+Registro Presentacion realizada el: 13-06-2025 a las 18:17:14
+Expediente/Referencia (n° registro asignado): 202410066761892X
+NIF Presentador: 74866767L
+Apellidos y Nombre / Razon social: ACEBES ACEBES PATRICIA
+En calidad de: Titular
+Primer declarante 0001
+NIF 74866767L
+Apellidos y nombre ACEBES ACEBES PATRICIA 0002
+Sexo del primer declarante Mujer 0005
+Estado civil (el 31-12-2024) (1) Soltero/a 0006
+Fecha de nacimiento 30/06/1982 0010
+Contribuyente que obtiene los rendimientos DECLARANTE 0001
+"""
+
+
+MODELO_OCR_DECLARANTE_NIF_CASADO_SAMPLE = """
+INFORMACION DE LA PRESENTACION DE LA DECLARACION
+Modelo 100 Ejercicio 2024
+Registro Presentacion realizada el: 11-05-2025 a las 10:48:06
+Expediente/Referencia (n° registro asignado): 202410012900884F
+NIF Presentador: 70312903V
+Apellidos y Nombre / Razon social: MEGIAS HERENCIAS SANTOS
+En calidad de: Titular
+Primer declarante NIF 70312903V 0001
+Apellidos y nombre MEGIAS HERENCIAS SANTOS 0002
+Sexo del primer declarante Hombre 0005
+Estado civil (el 31-12-2024) (2) Casado/a 0007
+Fecha de nacimiento 03/06/1944 0010
+Conyuge NIF 74785936H 0013
+Apellidos y nombre MEDINA BOZA MARIA 0014
+"""
+
+
+MODELO_OCR_WORK_AND_ACTIVITY_SAMPLE = """
+INFORMACION DE LA PRESENTACION DE LA DECLARACION
+Modelo 100 Ejercicio 2024
+Primer declarante NIF 74865829R 0001
+Apellidos y nombre CALLE SERON ALEJANDRO 0002
+Retribuciones dinerarias 57.597,81 0003
+Valoracion retribucion en especie 393,36 0004
+Total ingresos integros computables 57.991,17 0012
+Cotizac. Seguridad Social 1.574,16 0013
+Rendimiento neto reducido total de actividades economicas 56.284,73
+50.527,03 0505
+7.198,25 0670
+"""
+
+
+MODELO_OCR_MAIN_INCOME_SAMPLE = """
+INFORMACION DE LA PRESENTACION DE LA DECLARACION
+Modelo 100 Ejercicio 2024
+Primer declarante NIF X4499144E 0001
+Apellidos y nombre BENABDALLAH ADIL 0002
+2.386,71 1484
+65.701,92 0149
+26.941,68 0505
+3.913,35 0670
+"""
+
+
 def create_test_schema(db_path: Path) -> None:
     conn = sqlite3.connect(str(db_path))
     try:
@@ -399,6 +477,31 @@ class RentasImportTests(unittest.TestCase):
     def test_parse_modelo_100_recovers_birthdate_from_ocr_layout(self):
         parsed = parse_modelo_100_text(MODELO_OCR_BIRTHDATE_SAMPLE)
         self.assertEqual(parsed["cliente_fecha_nacimiento"], "2000-05-28")
+
+    def test_parse_modelo_100_recovers_presentacion_fecha_from_ocr_header(self):
+        parsed = parse_modelo_100_text(MODELO_OCR_PRESENTACION_SAMPLE)
+        self.assertEqual(parsed["presentacion_fecha"], "2025-06-10")
+
+    def test_parse_modelo_100_prefers_real_primer_declarante_nif_over_placeholder(self):
+        parsed = parse_modelo_100_text(MODELO_OCR_DECLARANTE_NIF_SAMPLE)
+        self.assertEqual(parsed["cliente_nif"], "74866767L")
+        self.assertEqual(parsed["cliente_nombre"], "ACEBES ACEBES PATRICIA")
+
+    def test_parse_modelo_100_recovers_declarante_nif_with_marriage_block(self):
+        parsed = parse_modelo_100_text(MODELO_OCR_DECLARANTE_NIF_CASADO_SAMPLE)
+        self.assertEqual(parsed["cliente_nif"], "70312903V")
+        self.assertEqual(parsed["cliente_nombre"], "MEGIAS HERENCIAS SANTOS")
+
+    def test_parse_modelo_100_uses_highest_work_income_candidate(self):
+        parsed = parse_modelo_100_text(MODELO_OCR_WORK_AND_ACTIVITY_SAMPLE)
+        self.assertAlmostEqual(parsed["rendimientos_trabajo_total"], 57991.17, places=2)
+        self.assertAlmostEqual(parsed["ingresos_principales_total"], 57991.17, places=2)
+
+    def test_parse_modelo_100_uses_main_income_amount_over_smaller_activity(self):
+        parsed = parse_modelo_100_text(MODELO_OCR_MAIN_INCOME_SAMPLE)
+        self.assertAlmostEqual(parsed["rendimientos_actividades_economicas_total"], 2386.71, places=2)
+        self.assertAlmostEqual(parsed["rendimientos_capital_inmobiliario_total"], 65701.92, places=2)
+        self.assertAlmostEqual(parsed["ingresos_principales_total"], 65701.92, places=2)
 
     def test_parse_modelo_100_rebuilds_result_from_installments(self):
         text = """

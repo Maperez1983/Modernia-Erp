@@ -128,6 +128,22 @@ def first_reasonable_renta_amount(values: list[object], reference: object = None
     return None
 
 
+def max_reasonable_renta_amount(values: list[object], reference: object = None, allow_zero: bool = True) -> float | None:
+    candidates: list[float] = []
+    for raw in values:
+        number = parse_money(raw) if not isinstance(raw, (int, float)) else round(float(raw), 2)
+        if number is None:
+            continue
+        if not is_reasonable_renta_amount(number, allow_zero=allow_zero):
+            continue
+        if reference is not None and is_renta_amount_outlier(number, reference):
+            continue
+        candidates.append(number)
+    if not candidates:
+        return None
+    return max(candidates)
+
+
 def normalize_renta_amounts(data: dict) -> dict:
     result = dict(data or {})
     raw_work = result.get("rendimientos_trabajo_total")
@@ -174,7 +190,7 @@ def normalize_renta_amounts(data: dict) -> dict:
         reference=income_reference,
     )
     result["resultado_declaracion"] = first_reasonable_renta_amount([result.get("resultado_declaracion")])
-    result["ingresos_principales_total"] = first_reasonable_renta_amount(
+    result["ingresos_principales_total"] = max_reasonable_renta_amount(
         [
             result.get("ingresos_principales_total"),
             result.get("rendimientos_trabajo_total"),
@@ -292,6 +308,44 @@ def extract_date_near_line(text: str, line_pattern: str, window: int = 3) -> str
     return ""
 
 
+def extract_presentacion_fecha(text: str) -> str:
+    raw = str(text or "")
+    normalized = unicodedata.normalize("NFKD", raw)
+    patterns = (
+        r"Presentaci[oó]n realizada el\s*:?\s*([0-9]{2}[/-][0-9]{2}[/-][0-9]{4})",
+        r"Presentacion realizada el\s*:?\s*([0-9]{2}[/-][0-9]{2}[/-][0-9]{4})",
+        r"Presentaci[oó]n\s+realizada\s+el[\s\S]{0,20}?([0-9]{2}[/-][0-9]{2}[/-][0-9]{4})",
+        r"Presentacion\s+realizada\s+el[\s\S]{0,20}?([0-9]{2}[/-][0-9]{2}[/-][0-9]{4})",
+    )
+    for text_variant in (raw, normalized):
+        for pattern in patterns:
+            match = re.search(pattern, text_variant, re.IGNORECASE)
+            if match:
+                value = parse_date_ddmmyyyy(match.group(1).replace("-", "/"))
+                if value:
+                    return value
+    return ""
+
+
+def extract_primer_declarante_nif(text: str) -> str:
+    raw = str(text or "")
+    normalized = unicodedata.normalize("NFKD", raw)
+    patterns = (
+        r"Primer declarante[\s\S]{0,80}?NIF\s+([A-Z0-9 ]{8,12})",
+        r"Primer declarante[\s\S]{0,120}?([A-Z0-9 ]{8,12})\s+\[?0*0*0*1\]?",
+        r"Primer declarante[\s\S]{0,120}?([A-Z0-9 ]{8,12})\s+0001\b",
+    )
+    for text_variant in (raw, normalized):
+        for pattern in patterns:
+            match = re.search(pattern, text_variant, re.IGNORECASE)
+            if not match:
+                continue
+            maybe = normalize_nif_candidate(match.group(1))
+            if looks_like_nif(maybe):
+                return maybe
+    return ""
+
+
 def extract_label_money(text: str, label: str) -> float | None:
     match = re.search(rf"{label}\s*([\-0-9\.,]+)", text, re.IGNORECASE)
     if not match:
@@ -356,6 +410,7 @@ def sanitize_person_name_candidate(value: object) -> str:
     text = clean_ocr_text_value(value)
     if not text:
         return ""
+    text = re.sub(r"^(?:Apellidos y nombre|Apellidos y Nombre)\s+", "", text, flags=re.IGNORECASE)
     lowered = norm_text(text)
     if any(token in lowered for token in ("inmueble", "direccion", "referencia catastral", "vivienda habitual")):
         return ""
@@ -487,10 +542,7 @@ def parse_modelo_100_text(text: str) -> dict:
     if not text:
         return data
     normalized = unicodedata.normalize("NFKD", text)
-    data["presentacion_fecha"] = parse_date_ddmmyyyy(
-        re.search(r"Presentación realizada el:\s*([0-9]{2}-[0-9]{2}-[0-9]{4})", text)
-        and re.search(r"Presentación realizada el:\s*([0-9]{2}-[0-9]{2}-[0-9]{4})", text).group(1)
-    )
+    data["presentacion_fecha"] = extract_presentacion_fecha(text)
     match = re.search(r"Expediente/Referencia .*?:\s*([A-Z0-9]+)", text)
     if match:
         data["expediente"] = match.group(1)
@@ -518,6 +570,14 @@ def parse_modelo_100_text(text: str) -> dict:
         if match:
             data["cliente_nombre"] = compact_spaces(match.group(1))
             data["cliente_nombre_source"] = "modelo_100"
+    if not looks_like_nif(data.get("cliente_nif")):
+        data.pop("cliente_nif", None)
+        data.pop("cliente_nif_source", None)
+    if not data.get("cliente_nif"):
+        primer_declarante_nif = extract_primer_declarante_nif(text)
+        if primer_declarante_nif:
+            data["cliente_nif"] = primer_declarante_nif
+            data["cliente_nif_source"] = "modelo_100"
     estado_match = re.search(
         r"(Hombre|Mujer)\s+0005\s+(.+?)\s+000[6-9]\s+([0-9]{2}/[0-9]{2}/[0-9]{4})\s+0010\b",
         text,
@@ -707,16 +767,30 @@ def parse_modelo_100_text(text: str) -> dict:
         match = re.search(rf"([\-0-9\.,]+)\s+{code}\b", text)
         if match:
             data[field] = parse_money(match.group(1))
-    if data.get("rendimientos_trabajo_total") is None:
-        data["rendimientos_trabajo_total"] = extract_label_money(
-            normalized,
-            r"Total ingresos integros computables.*?\]\s*",
-        )
-    if data.get("rendimientos_trabajo_total") is None:
-        data["rendimientos_trabajo_total"] = extract_money_near_line(
-            normalized,
-            r"Total ingresos integros computables|Retribuciones dinerarias",
-        )
+    trabajo_candidates = []
+    if data.get("rendimientos_trabajo_total") is not None:
+        trabajo_candidates.append(data.get("rendimientos_trabajo_total"))
+    label_value = extract_label_money(
+        normalized,
+        r"Total ingresos integros computables.*?\]\s*",
+    )
+    if label_value is not None:
+        trabajo_candidates.append(label_value)
+    label_value = extract_label_money(
+        normalized,
+        r"Retribuciones dinerarias\s*",
+    )
+    if label_value is not None:
+        trabajo_candidates.append(label_value)
+    trabajo_window = extract_money_candidates_near_line(
+        normalized,
+        r"Total ingresos integros computables|Retribuciones dinerarias",
+        window=4,
+    )
+    if trabajo_window:
+        trabajo_candidates.append(max(trabajo_window))
+    if trabajo_candidates:
+        data["rendimientos_trabajo_total"] = max(trabajo_candidates)
     actividades = []
     for code in ("1484", "1482"):
         match = re.search(rf"([\-0-9\.,]+)\s+{code}\b", text)
