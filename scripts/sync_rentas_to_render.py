@@ -17,10 +17,12 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import tarfile
 from pathlib import Path
 
 
 GESTORIA_COMPANY = "Fincas Velazquez"
+ROOT = Path(__file__).resolve().parents[1]
 SSH_OPTIONS = [
     "-o",
     "StrictHostKeyChecking=no",
@@ -31,6 +33,7 @@ SSH_OPTIONS = [
     "-o",
     "ServerAliveCountMax=4",
 ]
+DEFAULT_LOCAL_UPLOADS = ROOT / "web" / "uploads"
 CLIENT_FIELDS = [
     "nombre",
     "nif",
@@ -103,6 +106,46 @@ def fetch_payload(local_db: Path) -> dict:
             ORDER BY c.updated_at DESC
             """,
         ).fetchall()
+        doc_rows = conn.execute(
+            """
+            SELECT
+              d.cliente_id,
+              d.nombre,
+              d.tipo,
+              d.fecha,
+              d.estado,
+              d.notas,
+              d.doc_key,
+              d.doc_url,
+              d.referencia_tipo,
+              d.referencia_id
+            FROM gestoria_docs d
+            JOIN cliente_gestoria cg ON cg.cliente_id = d.cliente_id
+            WHERE COALESCE(cg.mod_renta, 0) = 1
+              AND (
+                LOWER(COALESCE(d.referencia_tipo, '')) = 'renta'
+                OR LOWER(COALESCE(d.tipo, '')) = 'renta'
+                OR LOWER(COALESCE(d.tipo, '')) = 'declaracion de renta'
+                OR LOWER(COALESCE(d.nombre, '')) LIKE 'renta %'
+              )
+            ORDER BY d.updated_at DESC
+            """
+        ).fetchall()
+        docs_by_client: dict[str, list[dict]] = {}
+        for doc in doc_rows:
+            docs_by_client.setdefault(str(doc["cliente_id"]), []).append(
+                {
+                    "nombre": doc["nombre"],
+                    "tipo": doc["tipo"],
+                    "fecha": doc["fecha"],
+                    "estado": doc["estado"],
+                    "notas": doc["notas"],
+                    "doc_key": doc["doc_key"],
+                    "doc_url": doc["doc_url"],
+                    "referencia_tipo": doc["referencia_tipo"],
+                    "referencia_id": doc["referencia_id"],
+                }
+            )
         items = []
         for row in rows:
             client = {field: row[field] for field in CLIENT_FIELDS}
@@ -133,6 +176,7 @@ def fetch_payload(local_db: Path) -> dict:
                     "client": client,
                     "gestoria": gestoria,
                     "trabajo": trabajo,
+                    "docs": docs_by_client.get(str(row["cliente_id"]), []),
                 }
             )
         return {
@@ -143,19 +187,48 @@ def fetch_payload(local_db: Path) -> dict:
         conn.close()
 
 
+def build_docs_archive(payload: dict, local_uploads: Path, archive_path: Path) -> tuple[int, int]:
+    local_uploads = local_uploads.expanduser().resolve()
+    if not local_uploads.exists():
+        return 0, 0
+    seen = set()
+    added = 0
+    missing = 0
+    with tarfile.open(archive_path, "w") as tar:
+        for item in payload.get("items") or []:
+            for doc in item.get("docs") or []:
+                doc_url = str(doc.get("doc_url") or "").strip()
+                if not doc_url.startswith("/uploads/"):
+                    continue
+                rel = doc_url.replace("/uploads/", "", 1)
+                if rel in seen:
+                    continue
+                source_path = local_uploads / rel
+                if not source_path.exists():
+                    missing += 1
+                    continue
+                tar.add(source_path, arcname=rel)
+                seen.add(rel)
+                added += 1
+    return added, missing
+
+
 REMOTE_SCRIPT = r'''
 import json
 import sqlite3
 import sys
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 
 db_path = sys.argv[1]
 payload_path = sys.argv[2]
+uploads_root = Path(sys.argv[3])
 
 conn = sqlite3.connect(db_path)
 conn.row_factory = sqlite3.Row
 now = datetime.now(timezone.utc).isoformat()
+uploads_root.mkdir(parents=True, exist_ok=True)
 
 with open(payload_path, 'r', encoding='utf-8') as fh:
     payload = json.load(fh)
@@ -386,6 +459,72 @@ for item in payload["items"]:
                 ),
             )
 
+    for doc in item.get("docs") or []:
+        doc_url = str(doc.get("doc_url") or "").strip()
+        if doc_url.startswith("/uploads/"):
+            rel = doc_url.replace("/uploads/", "", 1)
+            target = uploads_root / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+        existing_doc = conn.execute(
+            """
+            SELECT id
+            FROM gestoria_docs
+            WHERE cliente_id = ? AND COALESCE(doc_url, '') = ?
+            LIMIT 1
+            """,
+            (cliente_id, doc_url),
+        ).fetchone()
+        if existing_doc:
+            conn.execute(
+                """
+                UPDATE gestoria_docs
+                SET empresa_id = ?, referencia_tipo = ?, referencia_id = ?, nombre = ?, tipo = ?,
+                    fecha = ?, estado = ?, notas = ?, doc_key = ?, doc_url = ?, updated_at = datetime(?)
+                WHERE id = ?
+                """,
+                (
+                    empresa_id,
+                    doc.get("referencia_tipo"),
+                    doc.get("referencia_id"),
+                    doc.get("nombre"),
+                    doc.get("tipo"),
+                    doc.get("fecha"),
+                    doc.get("estado"),
+                    doc.get("notas"),
+                    doc.get("doc_key"),
+                    doc.get("doc_url"),
+                    now,
+                    existing_doc["id"],
+                ),
+            )
+        else:
+            conn.execute(
+                """
+                INSERT INTO gestoria_docs (
+                  id, empresa_id, cliente_id, referencia_tipo, referencia_id,
+                  nombre, tipo, fecha, estado, notas, doc_key, doc_url, created_at, updated_at
+                ) VALUES (
+                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                )
+                """,
+                (
+                    uuid.uuid4().hex,
+                    empresa_id,
+                    cliente_id,
+                    doc.get("referencia_tipo"),
+                    doc.get("referencia_id"),
+                    doc.get("nombre"),
+                    doc.get("tipo"),
+                    doc.get("fecha"),
+                    doc.get("estado"),
+                    doc.get("notas"),
+                    doc.get("doc_key"),
+                    doc.get("doc_url"),
+                    now,
+                    now,
+                ),
+            )
+
 conn.commit()
 print(json.dumps({"ok": True, "items": len(payload["items"])}, ensure_ascii=False))
 '''
@@ -400,12 +539,15 @@ def run(cmd: list[str]) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Sincroniza rentas a Render por SSH.")
     parser.add_argument("--local-db", default="data/erp_import2.sqlite", help="Ruta a la SQLite local.")
+    parser.add_argument("--local-uploads", default=str(DEFAULT_LOCAL_UPLOADS), help="Carpeta local de uploads servidos por la app.")
     parser.add_argument("--render-host", required=True, help="Host SSH de Render, ej. srv-xxx@ssh.frankfurt.render.com")
     parser.add_argument("--render-db", default="/var/data/erp_import2.sqlite", help="Ruta SQLite en Render.")
+    parser.add_argument("--render-uploads", default="/var/data/uploads", help="Carpeta persistente de uploads en Render.")
     parser.add_argument("--dry-run", action="store_true", help="Genera el payload pero no lo sube.")
     args = parser.parse_args()
 
     local_db = Path(args.local_db).expanduser().resolve()
+    local_uploads = Path(args.local_uploads).expanduser().resolve()
     if not local_db.exists():
         raise SystemExit(f"No existe la base local: {local_db}")
 
@@ -416,20 +558,28 @@ def main() -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
         payload_path = Path(tmpdir) / "rentas_sync.json"
         script_path = Path(tmpdir) / "rentas_sync_remote.py"
+        docs_archive_path = Path(tmpdir) / "rentas_uploads.tar"
         payload_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         script_path.write_text(REMOTE_SCRIPT, encoding="utf-8")
+        docs_added, docs_missing = build_docs_archive(payload, local_uploads, docs_archive_path)
+        docs_total = sum(len(item.get("docs") or []) for item in payload.get("items") or [])
         print(f"Preparados {len(payload['items'])} clientes de renta para sincronizar.")
+        print(f"Documentos de renta detectados: {docs_total}. Ficheros empaquetados: {docs_added}. Faltantes: {docs_missing}.")
         print(f"Payload temporal: {payload_path}")
         if args.dry_run:
             return
 
         remote_payload = "/tmp/rentas_sync.json"
         remote_script = "/tmp/rentas_sync_remote.py"
+        remote_archive = "/tmp/rentas_uploads.tar"
         run(["scp", *SSH_OPTIONS, str(payload_path), f"{args.render_host}:{remote_payload}"])
         run(["scp", *SSH_OPTIONS, str(script_path), f"{args.render_host}:{remote_script}"])
+        run(["scp", *SSH_OPTIONS, str(docs_archive_path), f"{args.render_host}:{remote_archive}"])
         remote_cmd = (
-            f"python3 {remote_script} {args.render_db} {remote_payload} "
-            f"&& rm -f {remote_script} {remote_payload} "
+            f"mkdir -p {args.render_uploads} "
+            f"&& tar -xf {remote_archive} -C {args.render_uploads} "
+            f"&& python3 {remote_script} {args.render_db} {remote_payload} {args.render_uploads} "
+            f"&& rm -f {remote_script} {remote_payload} {remote_archive} "
             f"&& echo '__SYNC_OK__'"
         )
         run(
