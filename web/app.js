@@ -3457,7 +3457,8 @@ const updateExplorerHeader = (empresaName) => {
       setTab("gestoria-dash");
     }
   }
-  if (empresaName === FINCAS_COMPANY && currentTab === "alta") {
+  if (empresaName === FINCAS_COMPANY && (currentTab === "alta" || currentTab === "bdt")) {
+    state.gestoriaCrmView = currentTab === "alta" ? "alta" : "bdt";
     setTab("gestoria-crm");
   }
   if (crmTab) {
@@ -4122,10 +4123,33 @@ const updateCompanySummary = (empresaName) => {
     }
     return;
   }
-  companySummarySubtitle.textContent = "Gestion operativa y control diario.";
+  const gestoriaCopyByTab = {
+    "gestoria-dash": {
+      subtitle: "Resumen del despacho, alertas y vencimientos.",
+      meta: "Área · Resumen",
+    },
+    "gestoria-crm": {
+      subtitle: "Cartera de clientes, base importada y altas.",
+      meta: "Área · Clientes",
+    },
+    "gestoria-agenda": {
+      subtitle: "Trabajo del equipo, seguimiento y recordatorios.",
+      meta: "Área · Trabajo",
+    },
+    "gestoria-conta": {
+      subtitle: "Cola contable, revisión y control operativo.",
+      meta: "Área · Contabilidad",
+    },
+    "gestoria-fact": {
+      subtitle: "Facturas del servicio y salida al software externo.",
+      meta: "Área · Facturas",
+    },
+  };
+  const gestoriaCopy = empresaName === FINCAS_COMPANY ? gestoriaCopyByTab[currentTab] : null;
+  companySummarySubtitle.textContent = gestoriaCopy?.subtitle || "Gestion operativa y control diario.";
   if (companySummaryMeta) {
     const year = yearSelect?.value ? `Año ${yearSelect.value}` : "";
-    companySummaryMeta.textContent = year;
+    companySummaryMeta.textContent = [gestoriaCopy?.meta, year].filter(Boolean).join(" · ");
   }
 };
 
@@ -4195,6 +4219,7 @@ const setTab = (tabName) => {
   viewTabs.querySelectorAll(".tab").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.tab === tabName);
   });
+  updateCompanySummary(state.currentEmpresaName || (state.currentModule === "clientes" ? "Clientes" : ""));
   if (tabName === "fin-sim") {
     initFinSimulator();
   }
@@ -8579,6 +8604,7 @@ const updateTableVisibility = () => {
   const isClientePage = state.currentPage === "cliente";
   const isClientesModule = state.currentModule === "clientes";
   const isServiceCrm = ["crm", "gestoria-crm", "seguros-crm", "fin-crm", "gestoria-fact", "gestoria-conta", "gestoria-agenda", "gestoria-dash"].includes(currentTab);
+  const hideCompanySummary = isClientePage || ["crm", "seguros-crm", "fin-crm"].includes(currentTab);
   const isFinSim = currentTab === "fin-sim";
   const selectedCompany =
     state.currentEmpresaName ||
@@ -8596,13 +8622,18 @@ const updateTableVisibility = () => {
         isFinCrmVisible
     );
   }
-  if (altaTab) {
+  if (altaTab || bdtTab) {
     const company = state.empresas.find((e) => e.id === empresaSelect.value)?.nombre;
-    const hideAlta = !isClientesModule && company === FINCAS_COMPANY;
-    altaTab.classList.toggle("hidden", hideAlta);
+    const hideCrmUtilityTabs = !isClientesModule && company === FINCAS_COMPANY;
+    if (altaTab) {
+      altaTab.classList.toggle("hidden", hideCrmUtilityTabs);
+    }
+    if (bdtTab) {
+      bdtTab.classList.toggle("hidden", hideCrmUtilityTabs);
+    }
   }
   if (companySummary) {
-    companySummary.classList.toggle("hidden", isClientePage || isServiceCrm);
+    companySummary.classList.toggle("hidden", hideCompanySummary);
   }
   if (tableToolbar) {
     tableToolbar.classList.toggle("hidden", isClientePage || isFinSim);

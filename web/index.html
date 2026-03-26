@@ -186,13 +186,13 @@
         <div class="tabs" id="viewTabs">
           <button class="tab active" data-tab="operativa">Dashboard</button>
           <button class="tab hidden" data-tab="crm" id="crmTab">CRM</button>
-          <button class="tab hidden" data-tab="gestoria-dash" id="gestoriaDashTab">Dashboard Gestoría</button>
-          <button class="tab hidden" data-tab="gestoria-crm" id="fincasCrmTab">CRM Gestoría</button>
-          <button class="tab hidden" data-tab="gestoria-agenda" id="gestoriaAgendaTab">Agenda Gestoría</button>
+          <button class="tab hidden" data-tab="gestoria-dash" id="gestoriaDashTab">Resumen</button>
+          <button class="tab hidden" data-tab="gestoria-crm" id="fincasCrmTab">Clientes</button>
+          <button class="tab hidden" data-tab="gestoria-agenda" id="gestoriaAgendaTab">Trabajo</button>
           <button class="tab hidden" data-tab="seguros-crm" id="segurosCrmTab">CRM Seguros</button>
           <button class="tab hidden" data-tab="fin-crm" id="finCrmTab">CRM Financiaciones</button>
-          <button class="tab hidden" data-tab="gestoria-fact" id="gestoriaFactTab">Facturación Gestoría</button>
-          <button class="tab hidden" data-tab="gestoria-conta" id="gestoriaContaTab">Contabilidad Gestoría</button>
+          <button class="tab hidden" data-tab="gestoria-fact" id="gestoriaFactTab">Facturas</button>
+          <button class="tab hidden" data-tab="gestoria-conta" id="gestoriaContaTab">Contabilidad</button>
           <button class="tab" data-tab="bdt">BDT</button>
           <button class="tab" data-tab="alta">Alta</button>
           <button class="tab hidden" data-tab="fin-sim" id="finSimTab">Simulador</button>
@@ -677,14 +677,14 @@
         <div id="gestoriaCrmSection" class="hidden">
           <div class="crm-header">
             <div>
-              <h3>CRM Gestoría</h3>
-              <p class="muted">Clientes asignados y estado de gestión.</p>
+              <h3>Gestoría · Clientes</h3>
+              <p class="muted">Cartera, segmentación y altas del despacho.</p>
             </div>
           </div>
           <div class="tabs" id="gestoriaCrmViews">
-            <button type="button" class="tab active" data-gestoria-view="crm">CRM</button>
-            <button type="button" class="tab" data-gestoria-view="bdt">BDT</button>
-            <button type="button" class="tab" data-gestoria-view="alta">Alta</button>
+            <button type="button" class="tab active" data-gestoria-view="crm">Clientes</button>
+            <button type="button" class="tab" data-gestoria-view="bdt">Base importada</button>
+            <button type="button" class="tab" data-gestoria-view="alta">Alta cliente</button>
           </div>
           <div id="gestoriaCrmViewCrm">
           <div class="form-card">
@@ -1029,8 +1029,8 @@
         <div id="gestoriaDashboardSection" class="hidden">
           <div class="crm-header">
             <div>
-              <h3>Dashboard · Gestoría</h3>
-              <p class="muted">KPIs, alertas y vencimientos.</p>
+              <h3>Gestoría · Resumen</h3>
+              <p class="muted">Carga de trabajo, alertas y vencimientos del despacho.</p>
             </div>
           </div>
           <button type="button" class="gestoria-renta-banner" id="gestoriaRentaCampaignBanner">
@@ -1158,8 +1158,8 @@
         <div id="gestoriaContaSection" class="hidden">
           <div class="crm-header">
             <div>
-              <h3>Contabilidad · Gestoría</h3>
-              <p class="muted">Anotaciones contables (histórico).</p>
+              <h3>Gestoría · Contabilidad</h3>
+              <p class="muted">Cola de trabajo contable y seguimiento global del despacho.</p>
             </div>
           </div>
           <div class="form-card">
@@ -1245,8 +1245,8 @@
         <div id="gestoriaAgendaSection" class="hidden">
           <div class="crm-header">
             <div>
-              <h3>Agenda · Gestoría</h3>
-              <p class="muted">Acciones y recordatorios.</p>
+              <h3>Gestoría · Trabajo</h3>
+              <p class="muted">Acciones, seguimiento y recordatorios del equipo.</p>
             </div>
           </div>
           <div class="form-card">
@@ -1302,8 +1302,8 @@
         <div id="gestoriaFactSection" class="hidden">
           <div class="crm-header">
             <div>
-              <h3>Facturación · Gestoría</h3>
-              <p class="muted">Preparado para fase 2 de facturación.</p>
+              <h3>Gestoría · Facturas</h3>
+              <p class="muted">Facturación del servicio y preparación de salida al software externo.</p>
             </div>
           </div>
           <div class="form-card">
@@ -3465,12 +3465,12 @@
           </div>
           <div class="tabs" id="clienteTabs">
             <button class="tab active" type="button" data-tab="datos">Datos personales</button>
-            <button class="tab" type="button" data-tab="dashboard">Dashboard</button>
+            <button class="tab" type="button" data-tab="dashboard">Resumen</button>
             <button class="tab" type="button" data-tab="profesional">Configuración</button>
-            <button class="tab" type="button" data-tab="operativa">Operativa</button>
+            <button class="tab" type="button" data-tab="operativa">Áreas de trabajo</button>
             <button class="tab" type="button" data-tab="servicios">Servicios</button>
-            <button class="tab" type="button" data-tab="docs">Documentación</button>
-            <button class="tab" type="button" data-tab="facturas">Facturas servicios</button>
+            <button class="tab" type="button" data-tab="docs">Documentos</button>
+            <button class="tab" type="button" data-tab="facturas">Facturas servicio</button>
             <button class="tab" type="button" data-tab="trabajos">Trabajos</button>
           </div>
           <div id="clienteTabDatos">
@@ -3516,8 +3516,8 @@
           </div>
           <div id="clienteTabDashboard" class="hidden">
             <div class="form-card" id="clienteMiniDashboard">
-              <h3>Dashboard cliente</h3>
-              <p class="muted" id="clienteMiniDashboardHint">Resumen operativo y económico del cliente.</p>
+              <h3>Resumen del cliente</h3>
+              <p class="muted" id="clienteMiniDashboardHint">Vista rápida de actividad, carga y rendimiento del cliente.</p>
               <div class="cliente-mini-kpis">
                 <div class="card">
                   <div class="kpi-label">Rentabilidad (realizado/cobrado)</div>
@@ -3558,12 +3558,12 @@
           <div id="clienteTabProfesional" class="hidden">
             <div class="form-card">
               <h3>Resumen de configuración por servicio</h3>
-              <p class="muted">Solo datos maestros y configuración base del cliente.</p>
+              <p class="muted">Datos maestros y alcance operativo del cliente.</p>
               <div id="clienteProfesionalScope"></div>
             </div>
             <div class="form-card">
-              <h3>Gestoría · Configuración del servicio</h3>
-              <p class="muted">Selecciona el tipo de cliente y activa los módulos que se gestionan.</p>
+              <h3>Gestoría · Configuración base</h3>
+              <p class="muted">Define el perfil del cliente y qué áreas de gestoría se trabajan.</p>
               <form id="clienteGestoriaForm">
                 <div class="service-config">
                   <div class="service-config-card">
@@ -3683,12 +3683,12 @@
             <datalist id="cnaeCatalogo"></datalist>
             <datalist id="iaeCatalogo"></datalist>
             <div class="form-card">
-              <h3>Operativa de trabajos</h3>
-              <p class="muted">La ejecución diaria se gestiona en la pestaña Trabajos, según la configuración de servicios.</p>
+              <h3>Cómo se trabaja este cliente</h3>
+              <p class="muted">La ejecución diaria se organiza por áreas y por la pestaña Trabajos.</p>
             </div>
             <div class="form-card hidden" id="clienteProfesionalOperativaBlock">
-              <h3>Módulos activos</h3>
-              <p class="muted">Accede a la operativa específica del cliente.</p>
+              <h3>Áreas de gestoría</h3>
+              <p class="muted">Cada pestaña corresponde a una línea de trabajo activa para este cliente.</p>
               <div class="tabs" id="gestoriaModuleTabs">
                 <button class="tab" type="button" data-gestoria-module="contabilidad">Contabilidad</button>
                 <button class="tab" type="button" data-gestoria-module="fiscal">Fiscal</button>
@@ -3704,8 +3704,8 @@
                   <button class="tab" type="button" data-gestoria-conta-tab="control">Control</button>
                 </div>
                 <div class="form-card" data-gestoria-conta-pane="operativa">
-                  <h3>Entrada documental · OCR directo</h3>
-                  <p class="muted">Alta rápida de una factura individual: OCR, factura y asiento para este cliente.</p>
+                  <h3>Entrada documental</h3>
+                  <p class="muted">Alta rápida de una factura individual con OCR y propuesta contable directa.</p>
                   <div class="form-grid">
                     <label class="span-2">
                       Factura (PDF/imagen)
@@ -3725,8 +3725,8 @@
                   </div>
                 </div>
                 <div class="form-card hidden" data-gestoria-conta-pane="importador">
-                  <h3>Mapa del sistema contable</h3>
-                  <p class="muted">Cada capa tiene una función distinta. Esto evita mezclar documentos, revisión e impacto contable.</p>
+                  <h3>Cómo fluye la documentación</h3>
+                  <p class="muted">Separa entrada documental, revisión y efecto contable para evitar mezclar estados.</p>
                   <div class="inline-list">
                     <div class="inline-row">
                       <div class="muted">Documentos manuales</div>
@@ -3753,8 +3753,8 @@
                 <div class="form-card hidden" data-gestoria-conta-pane="importador">
                   <div class="section-head">
                     <div>
-                      <h3>Lotes del importador</h3>
-                      <p class="muted">Entrada por lotes, revisión y aplicación a contabilidad. Aquí debe vivir el flujo masivo.</p>
+                      <h3>Bandeja de lotes</h3>
+                      <p class="muted">Entrada masiva, revisión y aplicación a contabilidad desde un único sitio.</p>
                     </div>
                     <div class="form-actions">
                       <button type="button" class="ghost" id="gestoriaImportRefreshBtn">Recargar</button>
@@ -3768,8 +3768,8 @@
                 <div class="form-card hidden" data-gestoria-conta-pane="importador">
                   <div class="section-head">
                     <div>
-                      <h3>Documentos del lote</h3>
-                      <p class="muted">Detalle de documentos detectados, estado de revisión y si ya impactaron en factura/asiento.</p>
+                      <h3>Bandeja documental</h3>
+                      <p class="muted">Documentos detectados, estado de revisión e impacto en factura y asiento.</p>
                     </div>
                     <div class="form-actions">
                       <label>
@@ -3789,8 +3789,8 @@
                   <div class="footer" id="gestoriaImportDocsInfo"></div>
                 </div>
                 <div class="form-card hidden" data-gestoria-conta-pane="importador">
-                  <h3>Revisión manual</h3>
-                  <p class="muted">Corrige el documento seleccionado antes de aplicarlo a factura y asiento.</p>
+                  <h3>Editor de revisión</h3>
+                  <p class="muted">Corrige el documento seleccionado antes de llevarlo a factura y asiento.</p>
                   <form id="gestoriaImportReviewForm" class="form-grid">
                     <label>
                       Estado
@@ -3855,8 +3855,8 @@
                   </form>
                 </div>
                 <div class="form-card" data-gestoria-conta-pane="operativa">
-                  <h3>Contabilidad · Configuración del periodo</h3>
-                  <p class="muted">Define el ciclo contable activo para este cliente.</p>
+                  <h3>Configuración del ciclo</h3>
+                  <p class="muted">Define el periodo activo y el responsable del trabajo contable.</p>
                   <form id="gestoriaContaConfigForm" class="form-grid">
                     <label>
                       Periodo
@@ -3885,15 +3885,15 @@
                 <div class="form-card" data-gestoria-conta-pane="operativa">
                   <div class="section-head">
                     <div>
-                      <h3>Checklist contable</h3>
-                      <p class="muted">Tareas recurrentes del periodo en curso.</p>
+                      <h3>Control del ciclo</h3>
+                      <p class="muted">Tareas recurrentes y seguimiento del periodo en curso.</p>
                     </div>
                   </div>
                   <div id="gestoriaContaTasksTable"></div>
                   <div class="footer" id="gestoriaContaTasksInfo"></div>
                 </div>
                 <div class="form-card" data-gestoria-conta-pane="operativa">
-                  <h3>Resumen del periodo</h3>
+                  <h3>Resumen del ciclo</h3>
                   <div class="grid crm-kpis">
                     <div class="card kpi-card">
                       <h3>Tareas completadas</h3>
@@ -3913,8 +3913,8 @@
                   </div>
                 </div>
                 <div class="form-card hidden" data-gestoria-conta-pane="control">
-                  <h3>Dashboard · Contabilidad</h3>
-                  <p class="muted">Resumen operativo del cliente.</p>
+                  <h3>Panel de control</h3>
+                  <p class="muted">Vista operativa del cliente con vencimientos, documentos y gestiones.</p>
                   <div class="grid crm-kpis" id="gestoriaClienteKpis">
                     <div class="card kpi-card">
                       <h3>Modelos activos</h3>
@@ -3984,13 +3984,13 @@
                   </div>
                 </div>
                 <div class="form-card hidden" data-gestoria-conta-pane="control">
-                  <h3>Gestiones</h3>
-                  <p class="muted">Encargos en curso y finalizados.</p>
+                  <h3>Gestiones vinculadas</h3>
+                  <p class="muted">Encargos abiertos y finalizados relacionados con este cliente.</p>
                   <div id="gestoriaTrabajosTable"></div>
                 </div>
                 <div class="form-card hidden" data-gestoria-conta-pane="control">
-                  <h3>Documentos</h3>
-                  <p class="muted">Documentación y estado.</p>
+                  <h3>Documentos manuales</h3>
+                  <p class="muted">Documentación subida fuera del importador y su estado de validación.</p>
                   <form id="gestoriaClienteDocsForm" class="form-grid">
                     <label>
                       Nombre documento
@@ -4272,8 +4272,8 @@
           </div>
           <div id="clienteTabOperativa" class="hidden">
             <div class="form-card">
-              <h3>Operativa por servicio</h3>
-              <p class="muted">Gestiona cada área en su pestaña específica.</p>
+              <h3>Áreas de trabajo</h3>
+              <p class="muted">Entra en la línea operativa correspondiente sin mezclar configuración, documentos y contabilidad.</p>
               <div class="tabs" id="clienteOperativaTabs">
                 <button class="tab" type="button" data-operativa-tab="gestoria">Gestoría</button>
                 <button class="tab" type="button" data-operativa-tab="seguros">Seguros</button>
@@ -4313,8 +4313,8 @@
           </div>
           <div id="clienteTabDocs" class="hidden">
             <div class="form-card">
-              <h3>Documentación del cliente</h3>
-              <p class="muted">Archivos por servicio (seguros, gestoría, financiaciones e inmobiliaria).</p>
+              <h3>Documentos del cliente</h3>
+              <p class="muted">Archivo documental por servicio con un lenguaje más claro para el trabajo diario.</p>
               <form id="clienteDocsUploadForm" class="form-grid">
                 <label>
                   Servicio destino
