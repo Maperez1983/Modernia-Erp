@@ -20650,6 +20650,151 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "empresa_id requerido"}, status=400)
                 return
 
+            empresa_row = conn.execute(
+                "SELECT id, nombre FROM empresas WHERE id = ? LIMIT 1",
+                (empresa_id,),
+            ).fetchone()
+            empresa_nombre = str(empresa_row["nombre"] or "").strip() if empresa_row else ""
+            if empresa_nombre == "Estudio Velazquez 2012 SL":
+                ventas = conn.execute(
+                    """
+                    SELECT anio AS year, COUNT(*) AS total
+                    FROM operaciones_inmobiliarias
+                    WHERE empresa_id = ?
+                      AND LOWER(COALESCE(tipo_operacion, 'venta')) = 'venta'
+                      AND anio IS NOT NULL
+                    GROUP BY anio
+                    ORDER BY anio
+                    """,
+                    (empresa_id,),
+                ).fetchall()
+
+                volumen_cierre = conn.execute(
+                    """
+                    SELECT anio AS year,
+                           ROUND(SUM(COALESCE(precio_escritura, precio_propuesta, precio_contrato, 0)), 2) AS total
+                    FROM operaciones_inmobiliarias
+                    WHERE empresa_id = ?
+                      AND LOWER(COALESCE(tipo_operacion, 'venta')) = 'venta'
+                      AND anio IS NOT NULL
+                    GROUP BY anio
+                    ORDER BY anio
+                    """,
+                    (empresa_id,),
+                ).fetchall()
+
+                volumen_salida = conn.execute(
+                    """
+                    SELECT anio AS year,
+                           ROUND(SUM(COALESCE(precio_encargo, 0)), 2) AS total
+                    FROM operaciones_inmobiliarias
+                    WHERE empresa_id = ?
+                      AND LOWER(COALESCE(tipo_operacion, 'venta')) = 'venta'
+                      AND anio IS NOT NULL
+                    GROUP BY anio
+                    ORDER BY anio
+                    """,
+                    (empresa_id,),
+                ).fetchall()
+
+                captaciones_series = conn.execute(
+                    """
+                    SELECT CAST(STRFTIME('%Y', COALESCE(NULLIF(updated_at, ''), created_at)) AS INTEGER) AS year,
+                           COUNT(*) AS total
+                    FROM captaciones
+                    WHERE empresa_id = ?
+                    GROUP BY CAST(STRFTIME('%Y', COALESCE(NULLIF(updated_at, ''), created_at)) AS INTEGER)
+                    ORDER BY year
+                    """,
+                    (empresa_id,),
+                ).fetchall()
+
+                inmuebles_series = conn.execute(
+                    """
+                    SELECT CAST(STRFTIME('%Y', COALESCE(NULLIF(updated_at, ''), created_at)) AS INTEGER) AS year,
+                           COUNT(*) AS total
+                    FROM inmuebles
+                    WHERE empresa_id = ?
+                    GROUP BY CAST(STRFTIME('%Y', COALESCE(NULLIF(updated_at, ''), created_at)) AS INTEGER)
+                    ORDER BY year
+                    """,
+                    (empresa_id,),
+                ).fetchall()
+
+                summary = conn.execute(
+                    """
+                    SELECT
+                      COUNT(*) AS compraventas_total,
+                      ROUND(AVG(CASE WHEN COALESCE(precio_escritura, precio_propuesta, precio_contrato, 0) > 0
+                        THEN COALESCE(precio_escritura, precio_propuesta, precio_contrato) END), 2) AS ticket_medio,
+                      ROUND(AVG(CASE WHEN COALESCE(dias_hasta_venta, 0) > 0 THEN dias_hasta_venta END), 1) AS plazo_medio_dias,
+                      ROUND(AVG(CASE WHEN desviacion_pct IS NOT NULL THEN desviacion_pct END), 2) AS desviacion_media_pct,
+                      SUM(COALESCE(num_visitas, 0)) AS visitas_total
+                    FROM operaciones_inmobiliarias
+                    WHERE empresa_id = ?
+                      AND LOWER(COALESCE(tipo_operacion, 'venta')) = 'venta'
+                    """,
+                    (empresa_id,),
+                ).fetchone()
+
+                captacion_summary = conn.execute(
+                    """
+                    SELECT
+                      COUNT(*) AS captaciones_total,
+                      SUM(CASE WHEN LOWER(COALESCE(etapa, '')) <> 'perdido' THEN 1 ELSE 0 END) AS captaciones_activas
+                    FROM captaciones
+                    WHERE empresa_id = ?
+                    """,
+                    (empresa_id,),
+                ).fetchone()
+
+                inmuebles_total = conn.execute(
+                    """
+                    SELECT COUNT(*) AS total
+                    FROM inmuebles
+                    WHERE empresa_id = ?
+                    """,
+                    (empresa_id,),
+                ).fetchone()
+
+                alquileres = conn.execute(
+                    """
+                    SELECT STRFTIME('%Y', fecha) AS year,
+                           COUNT(*) AS total,
+                           SUM(COALESCE(precio, 0)) AS facturado
+                    FROM alquileres
+                    WHERE empresa_id = ?
+                      AND fecha IS NOT NULL
+                    GROUP BY STRFTIME('%Y', fecha)
+                    ORDER BY STRFTIME('%Y', fecha)
+                    """,
+                    (empresa_id,),
+                ).fetchall()
+
+                json_response(
+                    self,
+                    {
+                        "mode": "inmobiliaria",
+                        "ventas": [dict(r) for r in ventas],
+                        "ingresos": [dict(r) for r in volumen_cierre],
+                        "gastos": [dict(r) for r in volumen_salida],
+                        "captaciones": [dict(r) for r in captaciones_series],
+                        "inmuebles": [dict(r) for r in inmuebles_series],
+                        "alquileres": [dict(r) for r in alquileres],
+                        "summary": {
+                            "compraventas_total": int(summary["compraventas_total"] or 0) if summary else 0,
+                            "ticket_medio": float(summary["ticket_medio"] or 0) if summary else 0,
+                            "plazo_medio_dias": float(summary["plazo_medio_dias"] or 0) if summary else 0,
+                            "desviacion_media_pct": float(summary["desviacion_media_pct"] or 0) if summary else 0,
+                            "visitas_total": int(summary["visitas_total"] or 0) if summary else 0,
+                            "captaciones_total": int(captacion_summary["captaciones_total"] or 0) if captacion_summary else 0,
+                            "captaciones_activas": int(captacion_summary["captaciones_activas"] or 0) if captacion_summary else 0,
+                            "inmuebles_total": int(inmuebles_total["total"] or 0) if inmuebles_total else 0,
+                        },
+                    },
+                )
+                return
+
             ventas = conn.execute(
                 """
                 SELECT anio AS year, COUNT(*) AS total
