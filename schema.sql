@@ -134,6 +134,22 @@ CREATE TABLE IF NOT EXISTS cliente_gestoria (
   FOREIGN KEY (cliente_id) REFERENCES clientes(id)
 );
 
+CREATE TABLE IF NOT EXISTS cliente_relaciones (
+  id TEXT PRIMARY KEY,
+  cliente_id TEXT NOT NULL,
+  related_cliente_id TEXT NOT NULL,
+  vinculo TEXT,
+  notas TEXT,
+  usar_en_renta INTEGER DEFAULT 0,
+  usar_en_seguros INTEGER DEFAULT 0,
+  usar_en_inmobiliaria INTEGER DEFAULT 0,
+  declaracion_conjunta INTEGER DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (cliente_id) REFERENCES clientes(id),
+  FOREIGN KEY (related_cliente_id) REFERENCES clientes(id)
+);
+
 CREATE TABLE IF NOT EXISTS gestoria_modelos (
   id TEXT PRIMARY KEY,
   cliente_id TEXT,

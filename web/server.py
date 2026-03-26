@@ -9298,20 +9298,50 @@ def ensure_seguro_doc_link(conn, seguro_row, now, calidad_ocr=None, campos_ocr="
 def parse_renta_detalles_payload(raw):
     text = str(raw or "").strip()
     if not text:
-        return {"notes": "", "entries": []}
+        return {
+            "notes": "",
+            "entries": [],
+            "related_cliente_id": "",
+            "related_relation_id": "",
+            "declaracion_conjunta": 0,
+        }
     try:
         payload = json.loads(text)
     except Exception:
-        return {"notes": text, "entries": []}
+        return {
+            "notes": text,
+            "entries": [],
+            "related_cliente_id": "",
+            "related_relation_id": "",
+            "declaracion_conjunta": 0,
+        }
     if isinstance(payload, list):
-        return {"notes": "", "entries": payload}
+        return {
+            "notes": "",
+            "entries": payload,
+            "related_cliente_id": "",
+            "related_relation_id": "",
+            "declaracion_conjunta": 0,
+        }
     if not isinstance(payload, dict):
-        return {"notes": "", "entries": []}
+        return {
+            "notes": "",
+            "entries": [],
+            "related_cliente_id": "",
+            "related_relation_id": "",
+            "declaracion_conjunta": 0,
+        }
     notes = str(payload.get("notes") or "").strip()
     entries = payload.get("entries")
     if not isinstance(entries, list):
         entries = []
-    return {"notes": notes, "entries": entries}
+    return {
+        "notes": notes,
+        "entries": entries,
+        "related_cliente_id": str(payload.get("related_cliente_id") or "").strip(),
+        "related_relation_id": str(payload.get("related_relation_id") or "").strip(),
+        "declaracion_conjunta": 1 if str(payload.get("declaracion_conjunta") or "").strip().lower() in {"1", "true", "yes", "si", "sí"} else 0,
+    }
 
 
 def sort_renta_entries(entries):
@@ -9589,12 +9619,81 @@ def serialize_renta_detalles_payload(raw_value, existing_value=""):
     if isinstance(payload, list):
         payload = {"notes": current.get("notes", ""), "entries": payload}
     if not isinstance(payload, dict):
-        payload = {"notes": current.get("notes", ""), "entries": current.get("entries", [])}
+        payload = {
+            "notes": current.get("notes", ""),
+            "entries": current.get("entries", []),
+            "related_cliente_id": current.get("related_cliente_id", ""),
+            "related_relation_id": current.get("related_relation_id", ""),
+            "declaracion_conjunta": current.get("declaracion_conjunta", 0),
+        }
     notes = str(payload.get("notes") or "").strip()
     entries = payload.get("entries")
     if not isinstance(entries, list):
         entries = current.get("entries", [])
-    return json.dumps({"notes": notes, "entries": entries}, ensure_ascii=False)
+    related_cliente_id = str(
+        payload["related_cliente_id"] if "related_cliente_id" in payload else current.get("related_cliente_id") or ""
+    ).strip()
+    related_relation_id = str(
+        payload["related_relation_id"] if "related_relation_id" in payload else current.get("related_relation_id") or ""
+    ).strip()
+    declaracion_raw = (
+        payload["declaracion_conjunta"]
+        if "declaracion_conjunta" in payload
+        else current.get("declaracion_conjunta", 0)
+    )
+    declaracion_conjunta = 1 if str(declaracion_raw or "").strip().lower() in {"1", "true", "yes", "si", "sí"} else 0
+    return json.dumps(
+        {
+            "notes": notes,
+            "entries": entries,
+            "related_cliente_id": related_cliente_id,
+            "related_relation_id": related_relation_id,
+            "declaracion_conjunta": declaracion_conjunta,
+        },
+        ensure_ascii=False,
+    )
+
+
+def fetch_cliente_relaciones(conn, cliente_id):
+    rows = conn.execute(
+        """
+        SELECT
+          r.id,
+          r.cliente_id,
+          r.related_cliente_id,
+          r.vinculo,
+          r.notas,
+          r.usar_en_renta,
+          r.usar_en_seguros,
+          r.usar_en_inmobiliaria,
+          r.declaracion_conjunta,
+          r.created_at,
+          r.updated_at,
+          c1.nombre AS cliente_nombre,
+          c1.nif AS cliente_nif,
+          c2.nombre AS related_cliente_nombre,
+          c2.nif AS related_cliente_nif
+        FROM cliente_relaciones r
+        LEFT JOIN clientes c1 ON c1.id = r.cliente_id
+        LEFT JOIN clientes c2 ON c2.id = r.related_cliente_id
+        WHERE r.cliente_id = ? OR r.related_cliente_id = ?
+        ORDER BY LOWER(COALESCE(r.vinculo, '')), LOWER(COALESCE(c1.nombre, '')), LOWER(COALESCE(c2.nombre, ''))
+        """,
+        (cliente_id, cliente_id),
+    ).fetchall()
+    items = []
+    for row in rows:
+        row_dict = dict(row)
+        is_reverse = str(row_dict.get("related_cliente_id") or "") == str(cliente_id)
+        counterpart_id = row_dict.get("cliente_id") if is_reverse else row_dict.get("related_cliente_id")
+        counterpart_nombre = row_dict.get("cliente_nombre") if is_reverse else row_dict.get("related_cliente_nombre")
+        counterpart_nif = row_dict.get("cliente_nif") if is_reverse else row_dict.get("related_cliente_nif")
+        row_dict["counterpart_id"] = counterpart_id
+        row_dict["counterpart_nombre"] = counterpart_nombre
+        row_dict["counterpart_nif"] = counterpart_nif
+        row_dict["is_reverse"] = is_reverse
+        items.append(row_dict)
+    return items
 
 
 def build_cliente_ficha_payload(conn, cliente_id, services_filter=None):
@@ -9807,12 +9906,17 @@ def build_cliente_ficha_payload(conn, cliente_id, services_filter=None):
         renta_payload = parse_renta_detalles_payload(gestoria_payload.get("renta_detalles"))
         gestoria_payload["renta_notes"] = renta_payload.get("notes", "")
         gestoria_payload["renta_entries"] = sanitize_renta_entries(renta_payload.get("entries", []))
+        gestoria_payload["renta_related_cliente_id"] = renta_payload.get("related_cliente_id", "")
+        gestoria_payload["renta_related_relation_id"] = renta_payload.get("related_relation_id", "")
+        gestoria_payload["renta_declaracion_conjunta"] = renta_payload.get("declaracion_conjunta", 0)
         profesionales["gestoria"] = gestoria_payload
+    relaciones = fetch_cliente_relaciones(conn, cliente_id)
 
     return {
         "cliente": dict(cliente),
         "datos_personales": dict(cliente),
         "empresas": empresas,
+        "relaciones": relaciones,
         "servicios_activos": service_keys,
         "datos_profesionales_por_servicio": profesionales,
         "servicios": {
@@ -10027,6 +10131,27 @@ def ensure_tables(db_path):
     )
     ensure_column(conn, "cliente_gestoria", "mod_renta", "mod_renta INTEGER")
     ensure_column(conn, "cliente_gestoria", "renta_detalles", "renta_detalles TEXT")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS cliente_relaciones (
+          id TEXT PRIMARY KEY,
+          cliente_id TEXT NOT NULL,
+          related_cliente_id TEXT NOT NULL,
+          vinculo TEXT,
+          notas TEXT,
+          usar_en_renta INTEGER DEFAULT 0,
+          usar_en_seguros INTEGER DEFAULT 0,
+          usar_en_inmobiliaria INTEGER DEFAULT 0,
+          declaracion_conjunta INTEGER DEFAULT 0,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    ensure_column(conn, "cliente_relaciones", "usar_en_renta", "usar_en_renta INTEGER DEFAULT 0")
+    ensure_column(conn, "cliente_relaciones", "usar_en_seguros", "usar_en_seguros INTEGER DEFAULT 0")
+    ensure_column(conn, "cliente_relaciones", "usar_en_inmobiliaria", "usar_en_inmobiliaria INTEGER DEFAULT 0")
+    ensure_column(conn, "cliente_relaciones", "declaracion_conjunta", "declaracion_conjunta INTEGER DEFAULT 0")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS gestoria_modelos (
@@ -11166,6 +11291,8 @@ class Handler(BaseHTTPRequestHandler):
             "/api/s3_multipart_complete",
             "/api/s3_multipart_abort",
             "/api/clientes",
+            "/api/cliente_relaciones",
+            "/api/cliente_relaciones_delete",
             "/api/clientes_link",
             "/api/clientes_link_delete",
             "/api/cliente_update",
@@ -11358,6 +11485,8 @@ class Handler(BaseHTTPRequestHandler):
             "/api/hipotecas_update",
             "/api/hipotecas_delete",
             "/api/clientes",
+            "/api/cliente_relaciones",
+            "/api/cliente_relaciones_delete",
             "/api/clientes_link",
             "/api/clientes_link_delete",
             "/api/inmueble_update",
@@ -11479,6 +11608,8 @@ class Handler(BaseHTTPRequestHandler):
             "/api/hipotecas_update",
             "/api/hipotecas_delete",
             "/api/clientes",
+            "/api/cliente_relaciones",
+            "/api/cliente_relaciones_delete",
             "/api/clientes_link",
             "/api/clientes_link_delete",
             "/api/cliente_update",
@@ -16143,6 +16274,108 @@ class Handler(BaseHTTPRequestHandler):
                         now,
                     ),
                 )
+        elif parsed.path == "/api/cliente_relaciones":
+            cliente_id = str(payload.get("cliente_id") or "").strip()
+            related_cliente_id = str(payload.get("related_cliente_id") or "").strip()
+            relation_id = str(payload.get("id") or "").strip()
+            if not cliente_id or not related_cliente_id:
+                json_response(self, {"error": "cliente_id y related_cliente_id requeridos"}, status=400)
+                return
+            if cliente_id == related_cliente_id:
+                json_response(self, {"error": "Un cliente no puede relacionarse consigo mismo"}, status=400)
+                return
+            vinculo = str(payload.get("vinculo") or "").strip()
+            notas = str(payload.get("notas") or "").strip()
+            usar_en_renta = 1 if str(payload.get("usar_en_renta") or "").strip().lower() in {"1", "true", "yes", "si", "sí"} else 0
+            usar_en_seguros = 1 if str(payload.get("usar_en_seguros") or "").strip().lower() in {"1", "true", "yes", "si", "sí"} else 0
+            usar_en_inmobiliaria = 1 if str(payload.get("usar_en_inmobiliaria") or "").strip().lower() in {"1", "true", "yes", "si", "sí"} else 0
+            declaracion_conjunta = 1 if str(payload.get("declaracion_conjunta") or "").strip().lower() in {"1", "true", "yes", "si", "sí"} else 0
+            exists = conn.execute(
+                "SELECT id FROM clientes WHERE id = ?",
+                (cliente_id,),
+            ).fetchone()
+            exists_related = conn.execute(
+                "SELECT id FROM clientes WHERE id = ?",
+                (related_cliente_id,),
+            ).fetchone()
+            if not exists or not exists_related:
+                json_response(self, {"error": "Cliente relacionado no válido"}, status=404)
+                return
+            if not relation_id:
+                existing = conn.execute(
+                    """
+                    SELECT id
+                    FROM cliente_relaciones
+                    WHERE (cliente_id = ? AND related_cliente_id = ?)
+                       OR (cliente_id = ? AND related_cliente_id = ?)
+                    LIMIT 1
+                    """,
+                    (cliente_id, related_cliente_id, related_cliente_id, cliente_id),
+                ).fetchone()
+                relation_id = existing["id"] if existing else os.urandom(16).hex()
+            current = conn.execute(
+                "SELECT id FROM cliente_relaciones WHERE id = ?",
+                (relation_id,),
+            ).fetchone()
+            if current:
+                conn.execute(
+                    """
+                    UPDATE cliente_relaciones
+                    SET cliente_id = ?, related_cliente_id = ?, vinculo = ?, notas = ?,
+                        usar_en_renta = ?, usar_en_seguros = ?, usar_en_inmobiliaria = ?,
+                        declaracion_conjunta = ?, updated_at = datetime(?)
+                    WHERE id = ?
+                    """,
+                    (
+                        cliente_id,
+                        related_cliente_id,
+                        vinculo,
+                        notas,
+                        usar_en_renta,
+                        usar_en_seguros,
+                        usar_en_inmobiliaria,
+                        declaracion_conjunta,
+                        now,
+                        relation_id,
+                    ),
+                )
+            else:
+                conn.execute(
+                    """
+                    INSERT INTO cliente_relaciones (
+                      id, cliente_id, related_cliente_id, vinculo, notas,
+                      usar_en_renta, usar_en_seguros, usar_en_inmobiliaria, declaracion_conjunta,
+                      created_at, updated_at
+                    ) VALUES (
+                      ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                    )
+                    """,
+                    (
+                        relation_id,
+                        cliente_id,
+                        related_cliente_id,
+                        vinculo,
+                        notas,
+                        usar_en_renta,
+                        usar_en_seguros,
+                        usar_en_inmobiliaria,
+                        declaracion_conjunta,
+                        now,
+                        now,
+                    ),
+                )
+            conn.commit()
+            json_response(self, {"ok": True, "id": relation_id})
+            return
+        elif parsed.path == "/api/cliente_relaciones_delete":
+            relation_id = str(payload.get("id") or "").strip()
+            if not relation_id:
+                json_response(self, {"error": "id requerido"}, status=400)
+                return
+            conn.execute("DELETE FROM cliente_relaciones WHERE id = ?", (relation_id,))
+            conn.commit()
+            json_response(self, {"ok": True})
+            return
         elif parsed.path == "/api/acciones":
             servicio = payload.get("servicio")
             if not servicio:
@@ -17016,7 +17249,18 @@ class Handler(BaseHTTPRequestHandler):
             renta_payload = parse_renta_detalles_payload(row_dict.get("renta_detalles"))
             row_dict["renta_notes"] = renta_payload.get("notes", "")
             row_dict["renta_entries"] = sanitize_renta_entries(renta_payload.get("entries", []))
+            row_dict["renta_related_cliente_id"] = renta_payload.get("related_cliente_id", "")
+            row_dict["renta_related_relation_id"] = renta_payload.get("related_relation_id", "")
+            row_dict["renta_declaracion_conjunta"] = renta_payload.get("declaracion_conjunta", 0)
             json_response(self, {"row": row_dict})
+            return
+
+        if path == "/api/cliente_relaciones":
+            cliente_id = params.get("cliente_id", [""])[0]
+            if not cliente_id:
+                json_response(self, {"error": "cliente_id requerido"}, status=400)
+                return
+            json_response(self, {"rows": fetch_cliente_relaciones(conn, cliente_id)})
             return
 
         if path == "/api/gestoria_renta_cards":

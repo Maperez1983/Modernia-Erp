@@ -3491,6 +3491,7 @@
           </div>
           <div class="tabs" id="clienteTabs">
             <button class="tab active" type="button" data-tab="datos">Datos personales</button>
+            <button class="tab" type="button" data-tab="relaciones">Personas relacionadas</button>
             <button class="tab" type="button" data-tab="dashboard">Resumen</button>
             <button class="tab" type="button" data-tab="profesional">Configuración</button>
             <button class="tab" type="button" data-tab="operativa">Áreas de trabajo</button>
@@ -3579,6 +3580,62 @@
                 <div id="clienteChartRamos"></div>
                 <div id="clienteRamoListado" class="cliente-ramo-listado"></div>
               </div>
+            </div>
+          </div>
+          <div id="clienteTabRelaciones" class="hidden">
+            <div class="form-card">
+              <h3>Personas relacionadas</h3>
+              <p class="muted">Vincula clientes entre sí para reflejar pareja, cónyuge, copropiedad, socios o familiares.</p>
+              <form id="clienteRelacionForm" class="form-grid">
+                <input type="hidden" name="id" />
+                <label class="span-2">
+                  Cliente relacionado
+                  <select name="related_cliente_id" id="clienteRelacionCliente" required></select>
+                </label>
+                <label>
+                  Tipo de vínculo
+                  <select name="vinculo">
+                    <option>Pareja</option>
+                    <option>Cónyuge</option>
+                    <option>Familiar</option>
+                    <option>Copropietario</option>
+                    <option>Socio</option>
+                    <option>Administrador</option>
+                    <option>Otro</option>
+                  </select>
+                </label>
+                <label class="span-2">
+                  Observaciones
+                  <input name="notas" placeholder="Ej. vivienda habitual compartida, pólizas comunes..." />
+                </label>
+                <label class="pill-option">
+                  <input type="checkbox" name="usar_en_renta" />
+                  Utilizar en renta
+                </label>
+                <label class="pill-option">
+                  <input type="checkbox" name="declaracion_conjunta" />
+                  Declaración conjunta
+                </label>
+                <label class="pill-option">
+                  <input type="checkbox" name="usar_en_seguros" />
+                  Utilizar en seguros
+                </label>
+                <label class="pill-option">
+                  <input type="checkbox" name="usar_en_inmobiliaria" />
+                  Utilizar en inmobiliaria
+                </label>
+                <div class="form-actions span-2">
+                  <button type="submit">Guardar relación</button>
+                  <button type="button" class="ghost" id="clienteRelacionReset">Limpiar</button>
+                  <span id="clienteRelacionStatus" class="muted"></span>
+                </div>
+              </form>
+            </div>
+            <div class="form-card">
+              <h3>Relaciones guardadas</h3>
+              <p class="muted">Estas relaciones podrán aprovecharse en renta, seguros e inmobiliaria.</p>
+              <div id="clienteRelacionesTable"></div>
+              <div class="footer" id="clienteRelacionesInfo"></div>
             </div>
           </div>
           <div id="clienteTabProfesional" class="hidden">
@@ -4219,6 +4276,16 @@
                     </div>
                   </form>
                   <form id="gestoriaRentaDetallesForm" class="form-grid">
+                    <label>
+                      Relación aplicable
+                      <select name="related_relation_id" id="gestoriaRentaRelacionSelect">
+                        <option value="">Sin relación vinculada</option>
+                      </select>
+                    </label>
+                    <label class="pill-option">
+                      <input type="checkbox" name="declaracion_conjunta" id="gestoriaRentaDeclaracionConjunta" />
+                      Declaración conjunta
+                    </label>
                     <label class="span-2">
                       Detalles de renta (venta vivienda, deducciones, etc.)
                       <textarea name="renta_detalles" rows="3"></textarea>

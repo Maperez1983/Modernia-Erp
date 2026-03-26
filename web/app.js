@@ -1333,6 +1333,7 @@ const clienteSaveBtn = document.getElementById("clienteSaveBtn");
 const clienteSaveStatus = document.getElementById("clienteSaveStatus");
 const clienteTabs = document.getElementById("clienteTabs");
 const clienteTabDatos = document.getElementById("clienteTabDatos");
+const clienteTabRelaciones = document.getElementById("clienteTabRelaciones");
 const clienteTabDashboard = document.getElementById("clienteTabDashboard");
 const clienteTabProfesional = document.getElementById("clienteTabProfesional");
 const clienteTabOperativa = document.getElementById("clienteTabOperativa");
@@ -1349,6 +1350,12 @@ const clienteTabServicios = document.getElementById("clienteTabServicios");
 const clienteTabDocs = document.getElementById("clienteTabDocs");
 const clienteTabFacturas = document.getElementById("clienteTabFacturas");
 const clienteTabTrabajos = document.getElementById("clienteTabTrabajos");
+const clienteRelacionForm = document.getElementById("clienteRelacionForm");
+const clienteRelacionCliente = document.getElementById("clienteRelacionCliente");
+const clienteRelacionReset = document.getElementById("clienteRelacionReset");
+const clienteRelacionStatus = document.getElementById("clienteRelacionStatus");
+const clienteRelacionesTable = document.getElementById("clienteRelacionesTable");
+const clienteRelacionesInfo = document.getElementById("clienteRelacionesInfo");
 const clienteTrabajosPlanificados = document.getElementById("clienteTrabajosPlanificados");
 const clienteProfesionalOperativaBlock = document.getElementById("clienteProfesionalOperativaBlock");
 const clienteDocsUploadForm = document.getElementById("clienteDocsUploadForm");
@@ -1536,6 +1543,8 @@ const gestoriaRentaTable = document.getElementById("gestoriaRentaTable");
 const gestoriaRentaInfo = document.getElementById("gestoriaRentaInfo");
 const gestoriaRentaDetallesForm = document.getElementById("gestoriaRentaDetallesForm");
 const gestoriaRentaDetallesStatus = document.getElementById("gestoriaRentaDetallesStatus");
+const gestoriaRentaRelacionSelect = document.getElementById("gestoriaRentaRelacionSelect");
+const gestoriaRentaDeclaracionConjunta = document.getElementById("gestoriaRentaDeclaracionConjunta");
 const gestoriaRentaCards = document.getElementById("gestoriaRentaCards");
 const gestoriaRentaDetail = document.getElementById("gestoriaRentaDetail");
 const gestoriaAdminForm = document.getElementById("gestoriaAdminForm");
@@ -3757,6 +3766,7 @@ const setClienteTab = (tab) => {
     btn.classList.toggle("active", btn.dataset.tab === tab);
   });
   if (clienteTabDatos) clienteTabDatos.classList.toggle("hidden", tab !== "datos");
+  if (clienteTabRelaciones) clienteTabRelaciones.classList.toggle("hidden", tab !== "relaciones");
   if (clienteTabDashboard) clienteTabDashboard.classList.toggle("hidden", tab !== "dashboard");
   if (clienteTabProfesional) clienteTabProfesional.classList.toggle("hidden", tab !== "profesional");
   if (clienteTabOperativa) clienteTabOperativa.classList.toggle("hidden", tab !== "operativa");
@@ -11489,6 +11499,175 @@ const renderClientesSelects = (clientes) => {
       clientesEmpresaSelect.appendChild(createOption(empresa.id, empresa.nombre));
     });
   }
+  populateClienteRelacionSelect();
+};
+
+const resetClienteRelacionForm = () => {
+  if (!clienteRelacionForm) return;
+  clienteRelacionForm.reset();
+  const idInput = clienteRelacionForm.querySelector('[name="id"]');
+  if (idInput) idInput.value = "";
+};
+
+const populateClienteRelacionSelect = () => {
+  if (!clienteRelacionCliente) return;
+  const currentId = String(state.currentClienteId || "").trim();
+  const currentValue = String(clienteRelacionCliente.value || "").trim();
+  clienteRelacionCliente.innerHTML = "";
+  clienteRelacionCliente.appendChild(createOption("", "Selecciona cliente"));
+  (state.clientesList || []).forEach((cliente) => {
+    const id = String(cliente.id || "").trim();
+    if (!id || id === currentId) return;
+    clienteRelacionCliente.appendChild(
+      createOption(id, formatNombreCliente(cliente.nombre || "") || id)
+    );
+  });
+  if (currentValue) {
+    clienteRelacionCliente.value = currentValue;
+  }
+};
+
+const populateGestoriaRentaRelationOptions = (relations = [], selectedId = "") => {
+  if (!gestoriaRentaRelacionSelect) return;
+  const current = String(selectedId || gestoriaRentaRelacionSelect.value || "").trim();
+  gestoriaRentaRelacionSelect.innerHTML = "";
+  gestoriaRentaRelacionSelect.appendChild(createOption("", "Sin relación vinculada"));
+  relations
+    .filter((row) => Number(row.usar_en_renta || 0) === 1)
+    .forEach((row) => {
+      const relationId = String(row.id || "").trim();
+      if (!relationId) return;
+      const labelParts = [
+        formatNombreCliente(row.counterpart_nombre || "") || "Cliente relacionado",
+        row.vinculo || "",
+        Number(row.declaracion_conjunta || 0) === 1 ? "Conjunta" : "",
+      ].filter(Boolean);
+      gestoriaRentaRelacionSelect.appendChild(createOption(relationId, labelParts.join(" · ")));
+    });
+  if (current) {
+    gestoriaRentaRelacionSelect.value = current;
+  }
+};
+
+const renderClienteRelaciones = (relations = []) => {
+  state.currentClienteRelaciones = Array.isArray(relations) ? relations : [];
+  populateClienteRelacionSelect();
+  populateGestoriaRentaRelationOptions(state.currentClienteRelaciones);
+  if (!clienteRelacionesTable) return;
+  if (!state.currentClienteRelaciones.length) {
+    clienteRelacionesTable.innerHTML = "<p class='muted'>Sin relaciones registradas.</p>";
+    if (clienteRelacionesInfo) clienteRelacionesInfo.textContent = "";
+    return;
+  }
+  const table = document.createElement("table");
+  const thead = document.createElement("thead");
+  const trHead = document.createElement("tr");
+  ["persona", "vinculo", "renta", "seguros", "inmobiliaria", "notas", "accion"].forEach((col) => {
+    const th = document.createElement("th");
+    th.textContent = formatHeader(col);
+    trHead.appendChild(th);
+  });
+  thead.appendChild(trHead);
+  table.appendChild(thead);
+  const tbody = document.createElement("tbody");
+  state.currentClienteRelaciones.forEach((row) => {
+    const tr = document.createElement("tr");
+    const personTd = document.createElement("td");
+    personTd.innerHTML = `<strong>${formatNombreCliente(row.counterpart_nombre || "") || "-"}</strong><div class="muted">${row.counterpart_nif || "-"}</div>`;
+    tr.appendChild(personTd);
+    const vinculoTd = document.createElement("td");
+    vinculoTd.textContent = row.vinculo || "-";
+    tr.appendChild(vinculoTd);
+    const rentaTd = document.createElement("td");
+    rentaTd.textContent = Number(row.usar_en_renta || 0) === 1
+      ? (Number(row.declaracion_conjunta || 0) === 1 ? "Conjunta" : "Sí")
+      : "No";
+    tr.appendChild(rentaTd);
+    const segurosTd = document.createElement("td");
+    segurosTd.textContent = Number(row.usar_en_seguros || 0) === 1 ? "Sí" : "No";
+    tr.appendChild(segurosTd);
+    const inmoTd = document.createElement("td");
+    inmoTd.textContent = Number(row.usar_en_inmobiliaria || 0) === 1 ? "Sí" : "No";
+    tr.appendChild(inmoTd);
+    const notasTd = document.createElement("td");
+    notasTd.textContent = row.notas || "";
+    tr.appendChild(notasTd);
+    const actionTd = document.createElement("td");
+    const editBtn = document.createElement("button");
+    editBtn.type = "button";
+    editBtn.className = "secondary";
+    editBtn.textContent = "Editar";
+    editBtn.addEventListener("click", () => {
+      if (!clienteRelacionForm) return;
+      const setValue = (name, value) => {
+        const el = clienteRelacionForm.querySelector(`[name="${name}"]`);
+        if (!el) return;
+        if (el.type === "checkbox") {
+          el.checked = Number(value || 0) === 1;
+        } else {
+          el.value = value || "";
+        }
+      };
+      setValue("id", row.id);
+      setValue("related_cliente_id", row.counterpart_id);
+      setValue("vinculo", row.vinculo);
+      setValue("notas", row.notas);
+      setValue("usar_en_renta", row.usar_en_renta);
+      setValue("usar_en_seguros", row.usar_en_seguros);
+      setValue("usar_en_inmobiliaria", row.usar_en_inmobiliaria);
+      setValue("declaracion_conjunta", row.declaracion_conjunta);
+      if (clienteRelacionStatus) {
+        clienteRelacionStatus.textContent = "Editando relación.";
+      }
+      focusElementInView(clienteRelacionForm);
+    });
+    actionTd.appendChild(editBtn);
+    const deleteBtn = document.createElement("button");
+    deleteBtn.type = "button";
+    deleteBtn.className = "ghost";
+    deleteBtn.textContent = "Eliminar";
+    deleteBtn.addEventListener("click", async () => {
+      if (!row.id) return;
+      if (!window.confirm("¿Eliminar esta relación?")) return;
+      const resp = await postJsonWithDbRetry("/api/cliente_relaciones_delete", { id: row.id }, {
+        maxRetries: 4,
+        baseDelayMs: 250,
+        timeoutMs: 15000,
+      });
+      if (clienteRelacionStatus) {
+        clienteRelacionStatus.textContent = resp?.error || "Relación eliminada.";
+      }
+      if (!resp?.error && state.currentClienteId) {
+        loadClienteRelaciones(state.currentClienteId);
+      }
+    });
+    actionTd.appendChild(deleteBtn);
+    tr.appendChild(actionTd);
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  clienteRelacionesTable.innerHTML = "";
+  clienteRelacionesTable.appendChild(table);
+  if (clienteRelacionesInfo) {
+    clienteRelacionesInfo.textContent = `Mostrando ${state.currentClienteRelaciones.length} relaciones.`;
+  }
+};
+
+const loadClienteRelaciones = (clienteId) => {
+  if (!clienteId) return Promise.resolve();
+  return api(`/api/cliente_relaciones?cliente_id=${encodeURIComponent(clienteId)}`)
+    .then((data) => {
+      renderClienteRelaciones(data.rows || []);
+      return data.rows || [];
+    })
+    .catch(() => {
+      state.currentClienteRelaciones = [];
+      renderClienteRelaciones([]);
+      if (clienteRelacionStatus) {
+        clienteRelacionStatus.textContent = "No se pudieron cargar las relaciones.";
+      }
+      return [];
+    });
 };
 
 const refreshClientesAltaSelects = () => {
@@ -18828,6 +19007,15 @@ const loadClienteGestoria = (clienteId) => {
       if (rentaInput) {
         rentaInput.value = row.renta_notes || "";
       }
+      if (gestoriaRentaRelacionSelect) {
+        populateGestoriaRentaRelationOptions(
+          state.currentClienteRelaciones || [],
+          row.renta_related_relation_id || ""
+        );
+      }
+      if (gestoriaRentaDeclaracionConjunta) {
+        gestoriaRentaDeclaracionConjunta.checked = Number(row.renta_declaracion_conjunta || 0) === 1;
+      }
     }
     renderGestoriaRentaCards(row);
     if (gestoriaRentaInfo && Array.isArray(row.renta_entries) && row.renta_entries.length) {
@@ -21188,6 +21376,11 @@ const openClienteDetail = (id) => {
     if (clienteDetailSubtitle) {
       clienteDetailSubtitle.textContent = "Información general y asignaciones.";
     }
+    resetClienteRelacionForm();
+    if (clienteRelacionStatus) {
+      clienteRelacionStatus.textContent = "";
+    }
+    renderClienteRelaciones(data.relaciones || []);
     if (clienteDetailGrid) {
       const nombreCompleto = cliente.nombre || "";
       const split = splitNombreApellidos(nombreCompleto, cliente.tipo_persona);
@@ -21383,11 +21576,13 @@ const openClienteDetail = (id) => {
       gestoriaClienteAgendaForm.classList.toggle("hidden", !hasGestoria);
     }
     if (clienteTabs) {
+      const relacionesTab = clienteTabs.querySelector('[data-tab="relaciones"]');
       const dashboardTab = clienteTabs.querySelector('[data-tab="dashboard"]');
       const gestoriaTab = clienteTabs.querySelector('[data-tab="profesional"]');
       const operativaTab = clienteTabs.querySelector('[data-tab="operativa"]');
       const serviciosTab = clienteTabs.querySelector('[data-tab="servicios"]');
       const docsTab = clienteTabs.querySelector('[data-tab="docs"]');
+      if (relacionesTab) relacionesTab.classList.toggle("hidden", false);
       if (dashboardTab) dashboardTab.classList.toggle("hidden", false);
       if (gestoriaTab) gestoriaTab.classList.toggle("hidden", !(hasGestoria || hasSeguros || hasHipotecas || hasInmo));
       if (operativaTab) operativaTab.classList.toggle("hidden", !(hasGestoria || hasSeguros || hasHipotecas || hasInmo));
@@ -21453,6 +21648,7 @@ const openClienteDetail = (id) => {
       }
     }
     if (hasGestoria) {
+      loadClienteRelaciones(id);
       loadClienteGestoria(id);
       loadGestoriaClienteDashboard(id);
       loadGestoriaClienteContaResultados(id);
@@ -21465,6 +21661,7 @@ const openClienteDetail = (id) => {
       loadGestoriaClienteAgenda(id);
       loadGestoriaContaConfig(id);
     } else {
+      loadClienteRelaciones(id);
       if (gestoriaModelosTable) {
         gestoriaModelosTable.innerHTML = "<p class='muted'>Sin modelos asignados.</p>";
       }
@@ -21553,6 +21750,7 @@ const closeClienteDetail = () => {
   state.currentClienteData = null;
   state.currentClienteSegurosRows = [];
   state.currentClienteRamoSelected = "";
+  state.currentClienteRelaciones = [];
   const returnPage = state.prevPage && state.prevPage !== "cliente" ? state.prevPage : "empresa";
   const returnModule = state.prevModule || "clientes";
   const returnTab = state.prevTab || "bdt";
@@ -23764,6 +23962,46 @@ if (clienteAssignForm) {
   });
 }
 
+if (clienteRelacionReset) {
+  clienteRelacionReset.addEventListener("click", () => {
+    resetClienteRelacionForm();
+    if (clienteRelacionStatus) {
+      clienteRelacionStatus.textContent = "";
+    }
+  });
+}
+
+if (clienteRelacionForm) {
+  clienteRelacionForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (!state.currentClienteId) {
+      if (clienteRelacionStatus) clienteRelacionStatus.textContent = "Selecciona un cliente.";
+      return;
+    }
+    if (clienteRelacionStatus) {
+      clienteRelacionStatus.textContent = "Guardando...";
+    }
+    const formData = new FormData(clienteRelacionForm);
+    const payload = Object.fromEntries(formData.entries());
+    ["usar_en_renta", "usar_en_seguros", "usar_en_inmobiliaria", "declaracion_conjunta"].forEach((field) => {
+      payload[field] = clienteRelacionForm.querySelector(`[name="${field}"]`)?.checked ? 1 : 0;
+    });
+    payload.cliente_id = state.currentClienteId;
+    const resp = await postJsonWithDbRetry("/api/cliente_relaciones", payload, {
+      maxRetries: 4,
+      baseDelayMs: 250,
+      timeoutMs: 15000,
+    });
+    if (clienteRelacionStatus) {
+      clienteRelacionStatus.textContent = resp?.error || "Relación guardada.";
+    }
+    if (!resp?.error && state.currentClienteId) {
+      resetClienteRelacionForm();
+      loadClienteRelaciones(state.currentClienteId);
+    }
+  });
+}
+
 let finAsesorPreviewUrl = "";
 if (finAsesorOcrFile) {
   finAsesorOcrFile.addEventListener("change", () => {
@@ -25487,7 +25725,6 @@ if (gestoriaClienteLibroExcelBtn) {
     }
   });
 }
-
 
 const formatInmobiliariaDuplicateSummary = (duplicates = []) =>
   duplicates
