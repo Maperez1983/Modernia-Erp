@@ -6,10 +6,12 @@ from web.server import (
     build_hipotecas_firmadas_excel_workbook,
     build_hipoteca_fixed_cost_entries,
     build_hipoteca_accounting_entries,
+    collect_gestoria_renta_card_items,
     collect_hipotecas_firmadas_export_rows,
     delete_gestoria_contabilidad_record,
     delete_hipoteca_record,
     derive_hipoteca_commissions,
+    is_gestoria_dashboard_active_state,
     maybe_promote_study_hipoteca_accounting,
     resolve_hipoteca_contabilidad_link,
     sync_hipotecas_contabilidad_entries,
@@ -51,7 +53,42 @@ class HipotecasDeleteTests(unittest.TestCase):
             CREATE TABLE clientes (
               id TEXT PRIMARY KEY,
               nombre TEXT,
-              created_at TEXT
+              empresa_id TEXT,
+              nif TEXT,
+              telefono TEXT,
+              email TEXT,
+              estado TEXT,
+              fecha_nacimiento TEXT,
+              poblacion TEXT,
+              provincia TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            );
+            CREATE TABLE clientes_empresas (
+              id TEXT PRIMARY KEY,
+              cliente_id TEXT,
+              empresa_id TEXT,
+              servicio TEXT,
+              estado TEXT,
+              fecha_inicio TEXT,
+              fecha_fin TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            );
+            CREATE TABLE cliente_gestoria (
+              id TEXT PRIMARY KEY,
+              cliente_id TEXT,
+              tipo_cliente TEXT,
+              mod_fiscal INTEGER,
+              mod_laboral INTEGER,
+              mod_contable INTEGER,
+              mod_renta INTEGER,
+              mod_registro INTEGER,
+              mod_trafico INTEGER,
+              mod_puntuales INTEGER,
+              renta_detalles TEXT,
+              created_at TEXT,
+              updated_at TEXT
             );
             CREATE TABLE gestoria_contabilidad (
               id TEXT PRIMARY KEY,
@@ -78,6 +115,24 @@ class HipotecasDeleteTests(unittest.TestCase):
               gestion TEXT NOT NULL,
               created_at TEXT NOT NULL,
               UNIQUE (empresa_id, hipoteca_id, fecha, gestion)
+            );
+            CREATE TABLE gestoria_docs (
+              id TEXT PRIMARY KEY,
+              empresa_id TEXT,
+              cliente_id TEXT,
+              referencia_tipo TEXT,
+              referencia_id TEXT,
+              nombre TEXT,
+              tipo TEXT,
+              fecha TEXT,
+              estado TEXT,
+              notas TEXT,
+              doc_key TEXT,
+              doc_url TEXT,
+              calidad_ocr TEXT,
+              campos_ocr TEXT,
+              created_at TEXT,
+              updated_at TEXT
             );
             """
         )
@@ -419,6 +474,72 @@ class HipotecasDeleteTests(unittest.TestCase):
             self.assertEqual(summary["B3"].value, 1)
         finally:
             export_conn.close()
+
+    def test_collect_gestoria_renta_card_items_returns_latest_entry_and_preview_doc(self):
+        self.conn.execute(
+            """
+            INSERT INTO clientes (
+              id, nombre, empresa_id, nif, telefono, email, estado, fecha_nacimiento, poblacion, provincia, created_at, updated_at
+            ) VALUES (
+              'c1', 'Ana Renta', 'e1', '12345678A', '600000000', 'ana@example.com', 'Alta', '1985-01-10', 'Malaga',
+              'Malaga', '2026-03-25', '2026-03-25'
+            )
+            """
+        )
+        self.conn.execute(
+            """
+            INSERT INTO clientes_empresas (
+              id, cliente_id, empresa_id, servicio, estado, fecha_inicio, created_at, updated_at
+            ) VALUES (
+              'ce1', 'c1', 'e1', 'gestoria', 'Alta', '2024-01-01', '2026-03-25', '2026-03-25'
+            )
+            """
+        )
+        self.conn.execute(
+            """
+            INSERT INTO cliente_gestoria (
+              id, cliente_id, tipo_cliente, mod_fiscal, mod_laboral, mod_contable,
+              mod_renta, mod_registro, mod_trafico, mod_puntuales, renta_detalles, created_at, updated_at
+            ) VALUES (
+              'cg1', 'c1', 'Particular', 0, 0, 0, 1, 0, 0, 0, ?, '2026-03-25', '2026-03-25'
+            )
+            """,
+            (
+                """
+                {"notes":"","entries":[
+                  {"id":"r1","ejercicio":"2024","cliente_nombre":"Ana Renta","cliente_nif":"12345678A","presentacion_fecha":"2025-04-01","resultado_declaracion":100.0,"source_files":["uno.pdf"]},
+                  {"id":"r2","ejercicio":"2025","cliente_nombre":"Ana Renta","cliente_nif":"12345678A","presentacion_fecha":"2026-04-02","resultado_declaracion":250.0,"source_files":["dos.pdf"]}
+                ]}
+                """,
+            ),
+        )
+        self.conn.execute(
+            """
+            INSERT INTO gestoria_docs (
+              id, empresa_id, cliente_id, referencia_tipo, referencia_id, nombre, tipo, fecha, estado, notas, doc_url, created_at, updated_at
+            ) VALUES (
+              'd1', 'e1', 'c1', 'renta', 'r2', 'Renta 2025 · Ana.pdf', 'Renta', '2026-04-02', 'Recibido', 'ok',
+              '/uploads/rentas/2025/ana.pdf', '2026-03-25', '2026-03-25'
+            )
+            """
+        )
+        self.conn.commit()
+
+        rows = collect_gestoria_renta_card_items(self.conn, "e1", q="ana", estado="Alta", limit=10)
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["cliente_id"], "c1")
+        self.assertEqual(rows[0]["renta_latest"]["id"], "r2")
+        self.assertEqual(rows[0]["renta_latest"]["ejercicio"], "2025")
+        self.assertEqual(rows[0]["doc_count"], 1)
+        self.assertEqual(rows[0]["preview_doc"]["doc_url"], "/uploads/rentas/2025/ana.pdf")
+
+    def test_is_gestoria_dashboard_active_state_supports_activo_and_alta(self):
+        self.assertTrue(is_gestoria_dashboard_active_state("Activo"))
+        self.assertTrue(is_gestoria_dashboard_active_state("Activa"))
+        self.assertTrue(is_gestoria_dashboard_active_state("Alta"))
+        self.assertFalse(is_gestoria_dashboard_active_state("Pendiente"))
+        self.assertFalse(is_gestoria_dashboard_active_state("Baja"))
 
 
 if __name__ == "__main__":

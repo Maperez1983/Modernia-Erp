@@ -12856,6 +12856,35 @@ const loadGestoriaCrm = async () => {
   } else if (limit) {
     params.set("limit", limit);
   }
+  if (state.gestoriaCrmTab === "renta") {
+    const rentaParams = new URLSearchParams({
+      empresa_id: empresa.id,
+      q,
+      estado,
+      limit: limit || "50",
+    });
+    const rentaData = await api(`/api/gestoria_renta_cards?${rentaParams.toString()}`);
+    if (!rentaData) return;
+    renderGestoriaRentaCrmCards(rentaData.rows || []);
+    if (gestoriaCrmTable) {
+      gestoriaCrmTable.innerHTML = "";
+      gestoriaCrmTable.classList.add("hidden");
+    }
+    if (gestoriaCrmSummary) {
+      gestoriaCrmSummary.classList.remove("hidden");
+    }
+    if (gestoriaCrmInfo) {
+      const total = Array.isArray(rentaData.rows) ? rentaData.rows.length : 0;
+      gestoriaCrmInfo.textContent = total
+        ? `Mostrando ${total} clientes de renta con ficha resumida.`
+        : "Sin clientes de renta con esos filtros.";
+    }
+    if (gestoriaCrmToggleView) {
+      gestoriaCrmToggleView.classList.add("hidden");
+    }
+    loadAcciones("gestoria", empresa.id, gestoriaAgendaTable, gestoriaAgendaInfo);
+    return;
+  }
   let data = await api(`/api/tabla?${params.toString()}`);
   if (data && (!data.rows || data.rows.length === 0) && empresa?.id && state.gestoriaCrmFull) {
     const fallbackParams = new URLSearchParams(params);
@@ -13054,6 +13083,7 @@ const loadGestoriaCrm = async () => {
     if (gestoriaCrmTable) gestoriaCrmTable.classList.toggle("hidden", !showFull);
     if (gestoriaCrmSummary) gestoriaCrmSummary.classList.toggle("hidden", showFull);
     if (gestoriaCrmToggleView) {
+      gestoriaCrmToggleView.classList.remove("hidden");
       gestoriaCrmToggleView.textContent = showFull ? "Ver resumen" : "Ver tabla completa";
     }
   return;
@@ -13062,6 +13092,7 @@ const loadGestoriaCrm = async () => {
 const loadGestoriaDashboard = () => {
   const empresa = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
   if (!empresa) return;
+  bindGestoriaDashboardKpis();
   Promise.all([
     api(`/api/gestoria_dashboard?empresa_id=${empresa.id}`),
     api(`/api/gestoria_trabajos?empresa_id=${empresa.id}`),
@@ -13246,6 +13277,152 @@ const loadGestoriaDashboard = () => {
       gestoriaResponsablesTable.innerHTML = "";
       gestoriaResponsablesTable.appendChild(table);
     }
+  });
+};
+
+const focusElementInView = (element) => {
+  if (!element) return;
+  element.scrollIntoView({ behavior: "smooth", block: "start" });
+};
+
+const openGestoriaCrmWithFilters = ({
+  tab = "all",
+  tipo = "",
+  subtipo = "",
+  estado = "",
+  search = "",
+} = {}) => {
+  openGestoriaCrm();
+  setGestoriaCrmView("crm");
+  if (gestoriaCrmSearch) {
+    gestoriaCrmSearch.value = search || "";
+  }
+  if (gestoriaCrmEstado) {
+    gestoriaCrmEstado.value = "";
+    if (estado) {
+      const hasOption = Array.from(gestoriaCrmEstado.options || []).some(
+        (option) => option.value === estado || option.text === estado
+      );
+      if (!hasOption) {
+        gestoriaCrmEstado.appendChild(createOption(estado, estado));
+      }
+      gestoriaCrmEstado.value = estado;
+    }
+  }
+  if (tab && tab !== "custom") {
+    setGestoriaCrmTab(tab);
+  } else {
+    if (gestoriaCrmTipo) {
+      gestoriaCrmTipo.value = tipo || "";
+      populateGestoriaSubtipos(tipo || "");
+    }
+    if (gestoriaCrmSubtipo) {
+      gestoriaCrmSubtipo.value = subtipo || "";
+    }
+  }
+  if (tipo) {
+    if (gestoriaCrmTipo) {
+      gestoriaCrmTipo.value = tipo;
+      populateGestoriaSubtipos(tipo);
+    }
+    if (gestoriaCrmSubtipo) {
+      gestoriaCrmSubtipo.value = subtipo || "";
+    }
+  }
+  state.gestoriaCrmFull = false;
+  loadGestoriaCrm();
+  focusElementInView(gestoriaCrmSection);
+};
+
+const openGestoriaTrabajosWithFilters = ({ tipo = "", estado = "", target = gestoriaCrmSection } = {}) => {
+  openGestoriaCrm();
+  setGestoriaCrmView("crm");
+  if (gestoriaTrabajosTipoFilter) {
+    gestoriaTrabajosTipoFilter.value = tipo || "";
+  }
+  if (gestoriaTrabajosEstadoFilter) {
+    gestoriaTrabajosEstadoFilter.value = estado || "";
+  }
+  loadGestoriaCrm();
+  loadGestoriaTrabajosOverview();
+  focusElementInView(target || gestoriaCrmSection);
+};
+
+const bindGestoriaDashboardKpis = () => {
+  const configs = [
+    {
+      valueEl: gestoriaKpiTotal,
+      action: () => openGestoriaCrmWithFilters({ tab: "all" }),
+      title: "Clientes gestoría",
+    },
+    {
+      valueEl: gestoriaKpiActivos,
+      action: () => openGestoriaCrmWithFilters({ tab: "all", estado: "Activo" }),
+      title: "Clientes activos",
+    },
+    {
+      valueEl: gestoriaKpiAutonomos,
+      action: () => openGestoriaCrmWithFilters({ tab: "autonomo" }),
+      title: "Autónomos",
+    },
+    {
+      valueEl: gestoriaKpiEmpresas,
+      action: () => openGestoriaCrmWithFilters({ tab: "empresa" }),
+      title: "Empresas",
+    },
+    {
+      valueEl: gestoriaKpiPuntuales,
+      action: () =>
+        openGestoriaCrmWithFilters({
+          tab: "custom",
+          tipo: "Gestión administrativa",
+          subtipo: "Puntual",
+        }),
+      title: "Clientes puntuales",
+    },
+    {
+      valueEl: gestoriaKpiModelosMes,
+      action: () => {
+        openGestoriaCrm();
+        focusElementInView(gestoriaAlertModelos);
+      },
+      title: "Modelos este mes",
+    },
+    {
+      valueEl: gestoriaKpiGestionesCurso,
+      action: () => openGestoriaTrabajosWithFilters({ estado: "En curso" }),
+      title: "Gestiones en curso",
+    },
+    {
+      valueEl: gestoriaKpiGestionesEspera,
+      action: () => openGestoriaTrabajosWithFilters({ estado: "En espera" }),
+      title: "Gestiones en espera",
+    },
+    {
+      valueEl: gestoriaKpiGestionesVencidas,
+      action: () => {
+        openGestoriaCrm();
+        loadGestoriaCrm();
+        focusElementInView(gestoriaAlertGestiones);
+      },
+      title: "Gestiones vencidas",
+    },
+  ];
+  configs.forEach(({ valueEl, action, title }) => {
+    const card = valueEl?.closest(".kpi-card");
+    if (!card || card.dataset.kpiBound === "1") return;
+    card.dataset.kpiBound = "1";
+    card.classList.add("kpi-clickable");
+    card.tabIndex = 0;
+    card.setAttribute("role", "button");
+    card.setAttribute("aria-label", title || "Abrir detalle");
+    card.addEventListener("click", action);
+    card.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        action();
+      }
+    });
   });
 };
 
@@ -17355,6 +17532,109 @@ const renderGestoriaRentaCards = (row = {}) => {
   gestoriaRentaCards.appendChild(grid);
   const selected = entries.find((entry) => entry.id === selectedId) || entries[0];
   renderGestoriaRentaDetail(selected);
+};
+
+const renderGestoriaRentaCrmCards = (rows = []) => {
+  if (!gestoriaCrmSummary) return;
+  if (!Array.isArray(rows) || !rows.length) {
+    gestoriaCrmSummary.innerHTML = "<p class='muted'>Sin clientes de renta con esos filtros.</p>";
+    return;
+  }
+  const board = document.createElement("div");
+  board.className = "gestoria-renta-board";
+  rows.forEach((row) => {
+    const entry = row?.renta_latest || {};
+    const result = formatRentaResult(entry.resultado_declaracion);
+    const casilla505 =
+      entry.casilla_505 != null ? euroFormatter.format(parseMoneyValue(entry.casilla_505)) : "-";
+    const ingresos =
+      entry.ingresos_principales_total != null
+        ? euroFormatter.format(parseMoneyValue(entry.ingresos_principales_total))
+        : "-";
+    const metaLocation = [row.poblacion, row.provincia].filter(Boolean).join(" · ") || "-";
+    const card = document.createElement("article");
+    card.className = "gestoria-renta-overview-card";
+    card.tabIndex = 0;
+    card.setAttribute("role", "button");
+    card.innerHTML = `
+      <div class="gestoria-renta-overview-top">
+        <div>
+          <strong>${entry.ejercicio || "2024"}</strong>
+          <span class="crm-badge">${row.estado || "Alta"}</span>
+        </div>
+        <div class="muted">${row.doc_count || 0} PDF</div>
+      </div>
+      <h4>${formatNombreCliente(row.nombre || "") || "-"}</h4>
+      <div class="muted">${row.nif || "-"}</div>
+      <div class="gestoria-renta-overview-grid">
+        <div>
+          <span class="muted">Presentación</span>
+          <strong>${formatCell("fecha", entry.presentacion_fecha || "") || entry.presentacion_fecha || "-"}</strong>
+        </div>
+        <div>
+          <span class="muted">Casilla 505</span>
+          <strong>${casilla505}</strong>
+        </div>
+        <div>
+          <span class="muted">Resultado</span>
+          <strong class="renta-result ${result.className}">${result.text}</strong>
+        </div>
+        <div>
+          <span class="muted">Ingresos</span>
+          <strong>${ingresos}</strong>
+        </div>
+      </div>
+      <div class="gestoria-renta-overview-meta">
+        <span>${entry.estado_civil || "Sin estado civil"}</span>
+        <span>Hijos: ${entry.hijos_count ?? 0}</span>
+        <span>${metaLocation}</span>
+      </div>
+    `;
+    const openCliente = () => {
+      const clienteId = String(row.cliente_id || "").trim();
+      if (clienteId) {
+        openClienteDetail(clienteId);
+      }
+    };
+    card.addEventListener("click", openCliente);
+    card.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        openCliente();
+      }
+    });
+
+    const footer = document.createElement("div");
+    footer.className = "gestoria-renta-overview-actions";
+
+    const clienteBtn = document.createElement("button");
+    clienteBtn.type = "button";
+    clienteBtn.className = "secondary";
+    clienteBtn.textContent = "Ver cliente";
+    clienteBtn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      openCliente();
+    });
+    footer.appendChild(clienteBtn);
+
+    const previewDoc = row?.preview_doc || {};
+    if (previewDoc.doc_key || previewDoc.doc_url) {
+      const pdfBtn = document.createElement("button");
+      pdfBtn.type = "button";
+      pdfBtn.className = "secondary ghost";
+      pdfBtn.textContent = "Ver PDF";
+      pdfBtn.addEventListener("click", (event) => {
+        event.stopPropagation();
+        openS3File(previewDoc.doc_key || "", previewDoc.doc_url || "");
+      });
+      footer.appendChild(pdfBtn);
+    }
+
+    card.appendChild(footer);
+    board.appendChild(card);
+  });
+  gestoriaCrmSummary.innerHTML = "";
+  gestoriaCrmSummary.appendChild(board);
 };
 
 const loadClienteGestoria = (clienteId) => {

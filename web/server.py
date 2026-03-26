@@ -56,7 +56,6 @@ except Exception:
 
 ROOT = Path(__file__).resolve().parent
 ASSETS = ROOT.parent / "assets"
-UPLOADS = ROOT / "uploads"
 DB_DEFAULT = ROOT.parent / "data" / "erp_import2.sqlite"
 OCR_DB_DEFAULT = ROOT.parent / "data" / "ocr_jobs.sqlite"
 TESSDATA_DIR = "/opt/homebrew/share/tessdata"
@@ -83,6 +82,11 @@ def load_env_file():
         return
 
 load_env_file()
+UPLOADS = Path(
+    os.environ.get("UPLOADS_DIR")
+    or ("/var/data/uploads" if Path("/var/data").exists() else str(ROOT / "uploads"))
+)
+UPLOADS.mkdir(parents=True, exist_ok=True)
 DB_CONFIGURED = Path(os.environ.get("DB_PATH") or os.environ.get("DATABASE_PATH") or str(DB_DEFAULT))
 OCR_DB_CONFIGURED = Path(
     os.environ.get("OCR_DB_PATH")
@@ -897,6 +901,11 @@ def normalize_service_key(value):
         "ADMINISTRACION DE FINCAS": "administracion fincas",
     }
     return aliases.get(text, text.lower().strip())
+
+
+def is_gestoria_dashboard_active_state(value):
+    state = normalize_lookup_text(value or "")
+    return state in {"ALTA", "ACTIVO", "ACTIVA"}
 
 
 def is_active_service_state(value, fecha_fin=None):
@@ -8207,6 +8216,121 @@ def parse_renta_detalles_payload(raw):
     return {"notes": notes, "entries": entries}
 
 
+def sort_renta_entries(entries):
+    def entry_key(entry):
+        if not isinstance(entry, dict):
+            return ("", "", "")
+        ejercicio = str(entry.get("ejercicio") or "")
+        fecha = str(entry.get("presentacion_fecha") or "")
+        entry_id = str(entry.get("id") or "")
+        return (ejercicio, fecha, entry_id)
+
+    return sorted(
+        [entry for entry in entries if isinstance(entry, dict)],
+        key=entry_key,
+        reverse=True,
+    )
+
+
+def collect_gestoria_renta_card_items(conn, empresa_id, q="", estado="", limit=50):
+    q_norm = str(q or "").strip().lower()
+    estado_norm = normalize_lookup_text(estado or "")
+    try:
+        limit_val = int(limit)
+    except Exception:
+        limit_val = 50
+    limit_val = max(1, min(limit_val, 200))
+    service_filter = (
+        "LOWER(ce.servicio) IN ('gestoria', 'gestoría', "
+        "'administracion fincas', 'administración fincas')"
+    )
+    rows = conn.execute(
+        f"""
+        SELECT
+          c.id AS cliente_id,
+          c.nombre,
+          c.nif,
+          c.telefono,
+          c.email,
+          c.estado AS cliente_estado,
+          c.fecha_nacimiento,
+          c.poblacion,
+          c.provincia,
+          cg.tipo_cliente,
+          cg.renta_detalles,
+          ce.estado AS servicio_estado
+        FROM cliente_gestoria cg
+        JOIN clientes c ON c.id = cg.cliente_id
+        JOIN clientes_empresas ce ON ce.cliente_id = c.id
+        WHERE ce.empresa_id = ?
+          AND {service_filter}
+          AND COALESCE(cg.mod_renta, 0) = 1
+        ORDER BY c.updated_at DESC, c.nombre COLLATE NOCASE ASC
+        """,
+        (empresa_id,),
+    ).fetchall()
+    items = []
+    for row in rows:
+        servicio_estado = str(row["servicio_estado"] or row["cliente_estado"] or "").strip()
+        if estado_norm and normalize_lookup_text(servicio_estado) != estado_norm:
+            continue
+        search_blob = " ".join(
+            [
+                str(row["nombre"] or ""),
+                str(row["nif"] or ""),
+                str(row["email"] or ""),
+                str(row["telefono"] or ""),
+                str(row["poblacion"] or ""),
+                str(row["provincia"] or ""),
+            ]
+        ).lower()
+        if q_norm and q_norm not in search_blob:
+            continue
+        renta_payload = parse_renta_detalles_payload(row["renta_detalles"])
+        entries = sort_renta_entries(renta_payload.get("entries") or [])
+        latest = entries[0] if entries else {}
+        docs = conn.execute(
+            """
+            SELECT id, nombre, tipo, fecha, estado, notas, doc_key, doc_url, referencia_tipo, referencia_id
+            FROM gestoria_docs
+            WHERE cliente_id = ?
+              AND (
+                LOWER(COALESCE(referencia_tipo, '')) = 'renta'
+                OR LOWER(COALESCE(tipo, '')) = 'renta'
+                OR LOWER(COALESCE(tipo, '')) = 'declaracion de renta'
+                OR LOWER(COALESCE(nombre, '')) LIKE 'renta %'
+              )
+            ORDER BY date(COALESCE(fecha, '0001-01-01')) DESC, updated_at DESC
+            """,
+            (row["cliente_id"],),
+        ).fetchall()
+        docs_list = [dict(doc) for doc in docs]
+        items.append(
+            {
+                "cliente_id": row["cliente_id"],
+                "nombre": row["nombre"],
+                "nif": row["nif"],
+                "telefono": row["telefono"],
+                "email": row["email"],
+                "fecha_nacimiento": row["fecha_nacimiento"],
+                "poblacion": row["poblacion"],
+                "provincia": row["provincia"],
+                "tipo_cliente": row["tipo_cliente"],
+                "estado": servicio_estado or "Alta",
+                "renta_notes": renta_payload.get("notes") or "",
+                "renta_entries": entries,
+                "renta_latest": latest,
+                "renta_entry_count": len(entries),
+                "docs": docs_list,
+                "doc_count": len(docs_list),
+                "preview_doc": docs_list[0] if docs_list else {},
+            }
+        )
+        if len(items) >= limit_val:
+            break
+    return items
+
+
 def serialize_renta_detalles_payload(raw_value, existing_value=""):
     current = parse_renta_detalles_payload(existing_value)
     if isinstance(raw_value, dict):
@@ -15091,6 +15215,18 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, {"row": row_dict})
             return
 
+        if path == "/api/gestoria_renta_cards":
+            empresa_id = params.get("empresa_id", [""])[0]
+            if not empresa_id:
+                json_response(self, {"error": "empresa_id requerido"}, status=400)
+                return
+            q = params.get("q", [""])[0]
+            estado = params.get("estado", [""])[0]
+            limit = params.get("limit", ["50"])[0]
+            items = collect_gestoria_renta_card_items(conn, empresa_id, q=q, estado=estado, limit=limit)
+            json_response(self, {"rows": items})
+            return
+
         if path == "/api/acciones":
             empresa_id = params.get("empresa_id", [""])[0]
             servicio = params.get("servicio", [""])[0]
@@ -16483,17 +16619,17 @@ class Handler(BaseHTTPRequestHandler):
                 """,
                 (empresa_id,),
             ).fetchone()
-            activos = conn.execute(
+            active_rows = conn.execute(
                 f"""
-                SELECT COUNT(DISTINCT c.id) AS total
+                SELECT DISTINCT c.id AS cliente_id, ce.estado
                 FROM clientes c
                 JOIN clientes_empresas ce ON ce.cliente_id = c.id
                 WHERE ce.empresa_id = ?
                   AND {service_filter}
-                  AND LOWER(COALESCE(ce.estado, '')) = 'alta'
                 """,
                 (empresa_id,),
-            ).fetchone()
+            ).fetchall()
+            active_ids = {row["cliente_id"] for row in active_rows if is_gestoria_dashboard_active_state(row["estado"])}
             tipos = conn.execute(
                 f"""
                 SELECT cg.tipo_cliente AS tipo, COUNT(*) AS total
@@ -16598,7 +16734,7 @@ class Handler(BaseHTTPRequestHandler):
                 {
                     "counts": {
                         "total": total["total"] if total else 0,
-                        "activos": activos["total"] if activos else 0,
+                        "activos": len(active_ids),
                         "autonomos": tipo_count("Autónomo", "Autonomo"),
                         "empresas": tipo_count("Empresa", "Empresas"),
                         "puntuales": tipo_count("Puntual", "Puntuales"),
