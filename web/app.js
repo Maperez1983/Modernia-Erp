@@ -1132,6 +1132,7 @@ const state = {
   prevPage: "home",
   prevModule: "empresas",
   prevTab: "operativa",
+  crmWorkspaceView: "resumen",
   clientesShowAll: false,
   gestoriaCrmFull: false,
   gestoriaCrmTab: "all",
@@ -1814,12 +1815,24 @@ const finAgendaInfo = document.getElementById("finAgendaInfo");
 const gestoriaFacturasTable = document.getElementById("gestoriaFacturasTable");
 const crmNuevaCaptacionBtn = document.getElementById("crmNuevaCaptacionBtn");
 const crmNuevaCompraventaBtn = document.getElementById("crmNuevaCompraventaBtn");
+const crmWorkspaceShell = document.getElementById("crmWorkspaceShell");
+const crmWorkspaceTabs = document.getElementById("crmWorkspaceTabs");
+const crmViewResumen = document.getElementById("crmViewResumen");
+const crmViewCaptaciones = document.getElementById("crmViewCaptaciones");
+const crmViewInmuebles = document.getElementById("crmViewInmuebles");
+const crmViewCompraventas = document.getElementById("crmViewCompraventas");
+const crmViewDemandas = document.getElementById("crmViewDemandas");
+const crmViewVisitas = document.getElementById("crmViewVisitas");
 const crmCaptacionesTable = document.getElementById("crmCaptacionesTable");
 const crmCaptacionesInfo = document.getElementById("crmCaptacionesInfo");
 const crmInmueblesTable = document.getElementById("crmInmueblesTable");
 const crmInmueblesInfo = document.getElementById("crmInmueblesInfo");
 const crmInmueblesRecent = document.getElementById("crmInmueblesRecent");
 const crmInmuebleSearch = document.getElementById("crmInmuebleSearch");
+const crmInmuebleSearchMirror = document.getElementById("crmInmuebleSearchMirror");
+const crmInmueblesTableMirror = document.getElementById("crmInmueblesTableMirror");
+const crmInmueblesInfoMirror = document.getElementById("crmInmueblesInfoMirror");
+const crmInmueblesRecentMirror = document.getElementById("crmInmueblesRecentMirror");
 const crmCompraventasTable = document.getElementById("crmCompraventasTable");
 const crmCompraventasInfo = document.getElementById("crmCompraventasInfo");
 const crmCompraventaSearch = document.getElementById("crmCompraventaSearch");
@@ -1838,8 +1851,11 @@ const visitaDemanda = document.getElementById("visitaDemanda");
 const crmVisitasTable = document.getElementById("crmVisitasTable");
 const crmVisitasInfo = document.getElementById("crmVisitasInfo");
 const crmKanban = document.getElementById("crmKanban");
+const crmCaptacionesKanban = document.getElementById("crmCaptacionesKanban");
 const crmPipeline = document.getElementById("crmPipeline");
 const crmEtapaFilter = document.getElementById("crmEtapaFilter");
+const crmEtapaFilterMirror = document.getElementById("crmEtapaFilterMirror");
+const crmCaptacionesStageSummary = document.getElementById("crmCaptacionesStageSummary");
 const crmKpiCaptaciones = document.getElementById("crmKpiCaptaciones");
 const crmKpiInmuebles = document.getElementById("crmKpiInmuebles");
 const crmKpiEtapa = document.getElementById("crmKpiEtapa");
@@ -3650,6 +3666,7 @@ const openCrmInmobiliario = () => {
   openCompany(DASHBOARD_COMPANY, { allowRestricted: true });
   setTab("crm");
   updateTableVisibility();
+  setCrmWorkspaceView(state.crmWorkspaceView || "resumen");
   loadCrmCaptaciones();
   loadCrmInmuebles();
   loadCrmCompraventas();
@@ -3659,6 +3676,7 @@ const openInmuebleFromAgenda = (inmuebleId) => {
   if (!inmuebleId) return;
   openCrmInmobiliario();
   setTimeout(() => {
+    setCrmWorkspaceView("inmuebles");
     openInmuebleDetail(inmuebleId);
   }, 300);
 };
@@ -8785,6 +8803,61 @@ const updateEstudioAltaTabs = () => {
   });
 };
 
+const setCrmWorkspaceView = (view = "resumen") => {
+  const allowed = new Set(["resumen", "captaciones", "inmuebles", "compraventas", "demandas", "visitas"]);
+  const nextView = allowed.has(view) ? view : "resumen";
+  state.crmWorkspaceView = nextView;
+
+  if (crmWorkspaceTabs) {
+    crmWorkspaceTabs.querySelectorAll("[data-crm-view]").forEach((btn) => {
+      btn.classList.toggle("active", btn.dataset.crmView === nextView);
+    });
+  }
+
+  const viewMap = {
+    resumen: crmViewResumen,
+    captaciones: crmViewCaptaciones,
+    inmuebles: crmViewInmuebles,
+    compraventas: crmViewCompraventas,
+    demandas: crmViewDemandas,
+    visitas: crmViewVisitas,
+  };
+  Object.entries(viewMap).forEach(([key, node]) => {
+    if (node) {
+      node.classList.toggle("hidden", key !== nextView);
+    }
+  });
+
+  if (crmWorkspaceShell && inmuebleDetail && !inmuebleDetail.classList.contains("hidden")) {
+    inmuebleDetail.classList.add("hidden");
+    crmWorkspaceShell.classList.remove("hidden");
+  }
+
+  if (nextView === "captaciones") {
+    loadCrmCaptaciones();
+  } else if (nextView === "inmuebles") {
+    loadCrmInmuebles();
+  } else if (nextView === "compraventas") {
+    loadCrmCompraventas();
+  } else if (nextView === "demandas") {
+    loadCrmDemandas();
+  } else if (nextView === "visitas") {
+    loadCrmVisitas();
+  } else {
+    loadCrmCaptaciones();
+    loadCrmInmuebles();
+    loadCrmCompraventas();
+  }
+};
+
+const goToEstudioAlta = (section = "compraventa") => {
+  if (altaSection) {
+    altaSection.dataset.estudioActive = section;
+  }
+  setTab("alta");
+  updateEstudioAltaTabs();
+};
+
 const getHipotecaFieldValue = (row, columns, candidates = []) => {
   if (!Array.isArray(row) || !Array.isArray(columns)) return "";
   const keys = Array.isArray(candidates) ? candidates : [candidates];
@@ -12050,43 +12123,21 @@ const loadCrmCaptaciones = () => {
   api(`/api/tabla?${params.toString()}`).then((data) => {
     const etapaIndex = data.columns.indexOf("etapa");
     const idIndex = data.columns.indexOf("id");
+    const activeEtapa = crmEtapaFilter?.value || crmEtapaFilterMirror?.value || "";
+    if (crmEtapaFilter) crmEtapaFilter.value = activeEtapa;
+    if (crmEtapaFilterMirror) crmEtapaFilterMirror.value = activeEtapa;
     const filteredRows = data.rows.filter((row) => {
-      if (!crmEtapaFilter || !crmEtapaFilter.value) {
+      if (!activeEtapa) {
         return true;
       }
-      return row[etapaIndex] === crmEtapaFilter.value;
+      return row[etapaIndex] === activeEtapa;
     });
     const counts = {};
     data.rows.forEach((row) => {
       const etapa = row[etapaIndex] || "Sin etapa";
       counts[etapa] = (counts[etapa] || 0) + 1;
     });
-    if (crmPipeline) {
-      const etapas = [
-        "Prospecto",
-        "Contactado",
-        "Visita/Valoración",
-        "Negociación",
-        "Encargo firmado",
-        "Publicado",
-        "Perdido",
-      ];
-      crmPipeline.innerHTML = "";
-      etapas.forEach((etapa) => {
-        const btn = document.createElement("button");
-        btn.type = "button";
-        btn.classList.add(`stage-${slugify(etapa)}`);
-        btn.textContent = `${etapa} (${counts[etapa] || 0})`;
-        btn.classList.toggle("active", crmEtapaFilter?.value === etapa);
-        btn.addEventListener("click", () => {
-          if (crmEtapaFilter) {
-            crmEtapaFilter.value = crmEtapaFilter.value === etapa ? "" : etapa;
-          }
-          loadCrmCaptaciones();
-        });
-        crmPipeline.appendChild(btn);
-      });
-    }
+    renderCrmPipeline(counts, activeEtapa);
     if (crmKpiCaptaciones) {
       crmKpiCaptaciones.textContent = String(data.rows.length);
     }
@@ -12104,8 +12155,38 @@ const loadCrmCaptaciones = () => {
   });
 };
 
+const renderCrmPipeline = (counts = {}, activeEtapa = "") => {
+  const etapas = [
+    "Prospecto",
+    "Contactado",
+    "Visita/Valoración",
+    "Negociación",
+    "Encargo firmado",
+    "Publicado",
+    "Perdido",
+  ];
+  [crmPipeline, crmCaptacionesStageSummary].forEach((container) => {
+    if (!container) return;
+    container.innerHTML = "";
+    etapas.forEach((etapa) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.classList.add(`stage-${slugify(etapa)}`);
+      btn.textContent = `${etapa} (${counts[etapa] || 0})`;
+      btn.classList.toggle("active", activeEtapa === etapa);
+      btn.addEventListener("click", () => {
+        const nextEtapa = activeEtapa === etapa ? "" : etapa;
+        if (crmEtapaFilter) crmEtapaFilter.value = nextEtapa;
+        if (crmEtapaFilterMirror) crmEtapaFilterMirror.value = nextEtapa;
+        loadCrmCaptaciones();
+      });
+      container.appendChild(btn);
+    });
+  });
+};
+
 const renderCrmKanban = (data) => {
-  if (!crmKanban) {
+  if (!crmKanban && !crmCaptacionesKanban) {
     return;
   }
   const etapaIndex = data.columns.indexOf("etapa");
@@ -12131,45 +12212,48 @@ const renderCrmKanban = (data) => {
     }
     grouped.get(etapa).push(row);
   });
-  crmKanban.innerHTML = "";
-  etapas.forEach((etapa) => {
-    const column = document.createElement("div");
-    column.className = "crm-kanban-column";
-    column.innerHTML = `<h4>${etapa}</h4>`;
-    column.dataset.etapa = etapa;
-    column.addEventListener("dragover", (event) => {
-      event.preventDefault();
-      column.classList.add("drag-over");
-    });
-    column.addEventListener("dragleave", () => {
-      column.classList.remove("drag-over");
-    });
-    column.addEventListener("drop", (event) => {
-      event.preventDefault();
-      column.classList.remove("drag-over");
-      const id = event.dataTransfer.getData("text/plain");
-      if (id) {
-        updateCaptacionEtapa(id, etapa);
-      }
-    });
-    const rows = grouped.get(etapa) || [];
-    rows.slice(0, 5).forEach((row) => {
-      const rowId = row[idIndex];
-      const card = document.createElement("div");
-      card.className = "crm-kanban-card";
-      card.setAttribute("draggable", "true");
-      card.addEventListener("dragstart", (event) => {
-        event.dataTransfer.setData("text/plain", rowId);
-        event.dataTransfer.effectAllowed = "move";
+  [crmKanban, crmCaptacionesKanban].forEach((container) => {
+    if (!container) return;
+    container.innerHTML = "";
+    etapas.forEach((etapa) => {
+      const column = document.createElement("div");
+      column.className = "crm-kanban-column";
+      column.innerHTML = `<h4>${etapa}</h4>`;
+      column.dataset.etapa = etapa;
+      column.addEventListener("dragover", (event) => {
+        event.preventDefault();
+        column.classList.add("drag-over");
       });
-      card.innerHTML = `
-        <div><strong>${row[propietarioIndex] || "Propietario"}</strong></div>
-        <div>${row[direccionIndex] || "-"} · ${row[zonaIndex] || "-"}</div>
-        <div class="muted">${row[proximaIndex] || "Sin próxima acción"}</div>
-      `;
-      column.appendChild(card);
+      column.addEventListener("dragleave", () => {
+        column.classList.remove("drag-over");
+      });
+      column.addEventListener("drop", (event) => {
+        event.preventDefault();
+        column.classList.remove("drag-over");
+        const id = event.dataTransfer.getData("text/plain");
+        if (id) {
+          updateCaptacionEtapa(id, etapa);
+        }
+      });
+      const rows = grouped.get(etapa) || [];
+      rows.slice(0, 5).forEach((row) => {
+        const rowId = row[idIndex];
+        const card = document.createElement("div");
+        card.className = "crm-kanban-card";
+        card.setAttribute("draggable", "true");
+        card.addEventListener("dragstart", (event) => {
+          event.dataTransfer.setData("text/plain", rowId);
+          event.dataTransfer.effectAllowed = "move";
+        });
+        card.innerHTML = `
+          <div><strong>${row[propietarioIndex] || "Propietario"}</strong></div>
+          <div>${row[direccionIndex] || "-"} · ${row[zonaIndex] || "-"}</div>
+          <div class="muted">${row[proximaIndex] || "Sin próxima acción"}</div>
+        `;
+        column.appendChild(card);
+      });
+      container.appendChild(column);
     });
-    crmKanban.appendChild(column);
   });
 };
 
@@ -12308,13 +12392,9 @@ const refreshCurrentInmuebleProfile = () => {
   }
 };
 
-const renderCrmInmueblesRecent = (rows) => {
-  if (!crmInmueblesRecent) {
-    return;
-  }
+const buildCrmInmueblesRecentNode = (rows = []) => {
   if (!rows.length) {
-    crmInmueblesRecent.innerHTML = "<p class='muted'>Sin inmuebles recientes.</p>";
-    return;
+    return null;
   }
   const list = document.createElement("div");
   list.className = "crm-recent-list";
@@ -12332,17 +12412,28 @@ const renderCrmInmueblesRecent = (rows) => {
     item.addEventListener("click", () => openInmuebleDetail(row.id));
     list.appendChild(item);
   });
-  crmInmueblesRecent.innerHTML = "";
-  crmInmueblesRecent.appendChild(list);
+  return list;
 };
 
-const renderCrmInmueblesCatalog = (rows = []) => {
-  if (!crmInmueblesTable) {
+const renderCrmInmueblesRecent = (rows = []) => {
+  const targets = [crmInmueblesRecent, crmInmueblesRecentMirror].filter(Boolean);
+  if (!targets.length) {
     return;
   }
+  targets.forEach((target) => {
+    target.innerHTML = "";
+    const node = buildCrmInmueblesRecentNode(rows);
+    if (!node) {
+      target.innerHTML = "<p class='muted'>Sin inmuebles recientes.</p>";
+      return;
+    }
+    target.appendChild(node);
+  });
+};
+
+const buildCrmInmueblesCatalogNode = (rows = []) => {
   if (!rows.length) {
-    crmInmueblesTable.innerHTML = "<p class='muted'>Sin inmuebles.</p>";
-    return;
+    return null;
   }
   const list = document.createElement("div");
   list.className = "inmueble-catalog";
@@ -12370,20 +12461,43 @@ const renderCrmInmueblesCatalog = (rows = []) => {
     item.addEventListener("click", () => openInmuebleDetail(row.id));
     list.appendChild(item);
   });
-  crmInmueblesTable.innerHTML = "";
-  crmInmueblesTable.appendChild(list);
+  return list;
+};
+
+const renderCrmInmueblesCatalog = (rows = []) => {
+  const targets = [crmInmueblesTable, crmInmueblesTableMirror].filter(Boolean);
+  if (!targets.length) {
+    return;
+  }
+  targets.forEach((target) => {
+    target.innerHTML = "";
+    const node = buildCrmInmueblesCatalogNode(rows);
+    if (!node) {
+      target.innerHTML = "<p class='muted'>Sin inmuebles.</p>";
+      return;
+    }
+    target.appendChild(node);
+  });
 };
 
 const loadCrmInmuebles = () => {
-  if (!crmInmueblesTable) {
+  if (!crmInmueblesTable && !crmInmueblesTableMirror) {
     return;
   }
   const empresa = state.empresas.find((e) => e.nombre === DASHBOARD_COMPANY);
   if (!empresa) {
-    crmInmueblesTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
+    [crmInmueblesTable, crmInmueblesTableMirror].filter(Boolean).forEach((target) => {
+      target.innerHTML = "<p class='muted'>Sin empresa.</p>";
+    });
     return;
   }
-  const q = crmInmuebleSearch ? crmInmuebleSearch.value.trim() : "";
+  const q = crmInmuebleSearchMirror?.value?.trim() || crmInmuebleSearch?.value?.trim() || "";
+  if (crmInmuebleSearch && crmInmuebleSearch.value !== q) {
+    crmInmuebleSearch.value = q;
+  }
+  if (crmInmuebleSearchMirror && crmInmuebleSearchMirror.value !== q) {
+    crmInmuebleSearchMirror.value = q;
+  }
   const params = new URLSearchParams({ empresa_id: empresa.id });
   if (q) {
     params.set("q", q);
@@ -12393,9 +12507,9 @@ const loadCrmInmuebles = () => {
     cachedCrmInmuebles = rows;
     renderCrmInmueblesRecent(rows);
     renderCrmInmueblesCatalog(rows);
-    if (crmInmueblesInfo) {
-      crmInmueblesInfo.textContent = `Mostrando ${rows.length} inmuebles.`;
-    }
+    [crmInmueblesInfo, crmInmueblesInfoMirror].filter(Boolean).forEach((target) => {
+      target.textContent = `Mostrando ${rows.length} inmuebles.`;
+    });
     if (crmKpiInmuebles) {
       crmKpiInmuebles.textContent = String(rows.length);
     }
@@ -12797,6 +12911,9 @@ const openInmuebleDetail = (id) => {
       loadInmuebleVisitas(id, empresaId);
       loadInmuebleActividad(id, empresaId);
       loadInmuebleDocs(id);
+      if (crmWorkspaceShell) {
+        crmWorkspaceShell.classList.add("hidden");
+      }
       inmuebleDetail.classList.remove("hidden");
       setInmuebleTab("datos");
     })
@@ -21407,6 +21524,7 @@ viewTabs.addEventListener("click", (event) => {
     return;
   }
   if (currentTab === "crm") {
+    setCrmWorkspaceView(state.crmWorkspaceView || "resumen");
     loadCrmCaptaciones();
     loadCrmInmuebles();
     loadCrmCompraventas();
@@ -21486,45 +21604,81 @@ if (estudioAltaTabs) {
   });
 }
 
+if (crmWorkspaceTabs) {
+  crmWorkspaceTabs.addEventListener("click", (event) => {
+    const btn = event.target.closest("[data-crm-view]");
+    if (!btn) return;
+    setCrmWorkspaceView(btn.dataset.crmView);
+  });
+}
+
+if (crmSection) {
+  crmSection.addEventListener("click", (event) => {
+    const kpiLink = event.target.closest(".kpi-clickable[data-crm-view], .crm-focus-link[data-crm-view]");
+    if (kpiLink) {
+      setCrmWorkspaceView(kpiLink.dataset.crmView);
+      return;
+    }
+    const actionLink = event.target.closest(".crm-quick-action[data-crm-action]");
+    if (actionLink) {
+      goToEstudioAlta(actionLink.dataset.crmAction || "compraventa");
+    }
+  });
+}
+
 if (crmNuevaCaptacionBtn) {
   crmNuevaCaptacionBtn.addEventListener("click", () => {
-    if (altaSection) {
-      altaSection.dataset.estudioActive = "captacion";
-    }
-    setTab("alta");
-    updateEstudioAltaTabs();
+    goToEstudioAlta("captacion");
   });
 }
 
 if (crmNuevaCompraventaBtn) {
   crmNuevaCompraventaBtn.addEventListener("click", () => {
-    if (altaSection) {
-      altaSection.dataset.estudioActive = "compraventa";
-    }
-    setTab("alta");
-    updateEstudioAltaTabs();
+    goToEstudioAlta("compraventa");
   });
 }
 
 if (crmNuevaDemandaBtn) {
   crmNuevaDemandaBtn.addEventListener("click", () => {
-    if (altaSection) {
-      altaSection.dataset.estudioActive = "demanda";
-    }
-    setTab("alta");
-    updateEstudioAltaTabs();
+    goToEstudioAlta("demanda");
   });
 }
 
 if (crmEtapaFilter) {
   crmEtapaFilter.addEventListener("change", () => {
+    if (crmEtapaFilterMirror) {
+      crmEtapaFilterMirror.value = crmEtapaFilter.value;
+    }
+    loadCrmCaptaciones();
+  });
+}
+
+if (crmEtapaFilterMirror) {
+  crmEtapaFilterMirror.addEventListener("change", () => {
+    if (crmEtapaFilter) {
+      crmEtapaFilter.value = crmEtapaFilterMirror.value;
+    }
     loadCrmCaptaciones();
   });
 }
 
 if (crmInmuebleSearch) {
   crmInmuebleSearch.addEventListener("input", () => {
+    if (crmInmuebleSearchMirror) {
+      crmInmuebleSearchMirror.value = crmInmuebleSearch.value;
+    }
     scheduleSave("crm-inmuebles-search", () => {
+      loadCrmInmuebles();
+    }, 300);
+  });
+}
+
+if (crmInmuebleSearchMirror) {
+  crmInmuebleSearchMirror.addEventListener("input", () => {
+    if (crmInmuebleSearch) {
+      crmInmuebleSearch.value = crmInmuebleSearchMirror.value;
+    }
+    scheduleSave("crm-inmuebles-search-mirror", () => {
       loadCrmInmuebles();
     }, 300);
   });
@@ -23084,6 +23238,10 @@ if (inmuebleBackBtn) {
     if (inmuebleDetail) {
       inmuebleDetail.classList.add("hidden");
     }
+    if (crmWorkspaceShell) {
+      crmWorkspaceShell.classList.remove("hidden");
+    }
+    setCrmWorkspaceView("inmuebles");
     state.currentInmuebleId = "";
   });
 }

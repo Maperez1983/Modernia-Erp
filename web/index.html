@@ -202,7 +202,7 @@
           <div class="crm-header crm-header-stack">
             <div>
               <h3>CRM Inmobiliario</h3>
-              <p class="muted">Control de captaciones, inmuebles, demandas y visitas.</p>
+              <p class="muted">Control de captaciones, inmuebles, compraventas, demandas y visitas.</p>
             </div>
             <div class="crm-actions">
               <button type="button" id="crmNuevaCaptacionBtn">Nueva captación</button>
@@ -211,79 +211,214 @@
             </div>
           </div>
           <div class="grid crm-kpis">
-            <div class="card kpi-card">
+            <div class="card kpi-card kpi-clickable" data-crm-view="captaciones">
               <h3>Captaciones activas</h3>
               <div class="kpi-value" id="crmKpiCaptaciones">0</div>
               <div class="muted">Pipeline</div>
             </div>
-            <div class="card kpi-card">
+            <div class="card kpi-card kpi-clickable" data-crm-view="inmuebles">
               <h3>Inmuebles activos</h3>
               <div class="kpi-value" id="crmKpiInmuebles">0</div>
               <div class="muted">Inventario</div>
             </div>
-            <div class="card kpi-card">
+            <div class="card kpi-card kpi-clickable" data-crm-view="captaciones">
               <h3>Etapa más activa</h3>
               <div class="kpi-value" id="crmKpiEtapa">-</div>
               <div class="muted">Captaciones</div>
             </div>
-            <div class="card kpi-card">
+            <div class="card kpi-card kpi-clickable" data-crm-view="compraventas">
               <h3>Compraventas</h3>
               <div class="kpi-value" id="crmKpiCompraventas">0</div>
               <div class="muted">Histórico visible</div>
             </div>
           </div>
-          <div class="form-card">
-            <div class="section-head">
-              <div>
-                <h3>Pipeline de captación</h3>
-                <p class="muted">Arrastra para avanzar el estado de cada captación.</p>
-              </div>
-              <select id="crmEtapaFilter">
-                <option value="">Todas las etapas</option>
-                <option>Prospecto</option>
-                <option>Contactado</option>
-                <option>Visita/Valoración</option>
-                <option>Negociación</option>
-                <option>Encargo firmado</option>
-                <option>Publicado</option>
-                <option>Perdido</option>
-              </select>
+          <div id="crmWorkspaceShell" class="crm-workspace-shell">
+            <div id="crmWorkspaceTabs" class="crm-workspace-tabs">
+              <button type="button" class="tab active" data-crm-view="resumen">Resumen</button>
+              <button type="button" class="tab" data-crm-view="captaciones">Captaciones</button>
+              <button type="button" class="tab" data-crm-view="inmuebles">Inmuebles</button>
+              <button type="button" class="tab" data-crm-view="compraventas">Compraventas</button>
+              <button type="button" class="tab" data-crm-view="demandas">Demandas</button>
+              <button type="button" class="tab" data-crm-view="visitas">Visitas</button>
             </div>
-            <div id="crmPipeline" class="crm-pipeline"></div>
-            <div id="crmKanban" class="crm-kanban"></div>
-          </div>
-          <div class="crm-split">
-            <div class="form-card">
-              <div class="section-head">
-                <div>
-                  <h3>Inmuebles</h3>
-                  <p class="muted">Busca por referencia, dirección, zona o estado.</p>
+            <div id="crmWorkspace">
+              <div id="crmViewResumen" class="crm-workspace-view">
+                <div class="crm-summary-grid">
+                  <div class="form-card crm-focus-card">
+                    <div class="section-head">
+                      <div>
+                        <h3>Acciones rápidas</h3>
+                        <p class="muted">Arranca trabajo nuevo sin perder tiempo buscando el módulo correcto.</p>
+                      </div>
+                    </div>
+                    <div class="crm-quick-actions">
+                      <button type="button" class="crm-quick-action" data-crm-action="captacion">
+                        <strong>Nueva captación</strong>
+                        <span>Alta de propietario, valoración y origen</span>
+                      </button>
+                      <button type="button" class="crm-quick-action" data-crm-action="compraventa">
+                        <strong>Nueva compraventa</strong>
+                        <span>Venta nueva con precios, honorarios y documentación</span>
+                      </button>
+                      <button type="button" class="crm-quick-action" data-crm-action="demanda">
+                        <strong>Nueva demanda</strong>
+                        <span>Comprador potencial con matching posterior</span>
+                      </button>
+                    </div>
+                  </div>
+                  <div class="form-card crm-focus-card">
+                    <div class="section-head">
+                      <div>
+                        <h3>Panorama operativo</h3>
+                        <p class="muted">Usa las vistas para entrar rápido en la parte del proceso que toque.</p>
+                      </div>
+                    </div>
+                    <div class="crm-focus-list">
+                      <button type="button" class="crm-focus-link" data-crm-view="captaciones">Revisar pipeline y próximas acciones</button>
+                      <button type="button" class="crm-focus-link" data-crm-view="inmuebles">Abrir fichas y documentación de inmuebles</button>
+                      <button type="button" class="crm-focus-link" data-crm-view="compraventas">Controlar precio salida, venta y desviación</button>
+                      <button type="button" class="crm-focus-link" data-crm-view="demandas">Ver compradores activos y matching</button>
+                      <button type="button" class="crm-focus-link" data-crm-view="visitas">Consultar visitas realizadas</button>
+                    </div>
+                  </div>
                 </div>
-                <input id="crmInmuebleSearch" placeholder="Buscar inmueble..." />
-              </div>
-              <div id="crmInmueblesTable"></div>
-              <div class="footer" id="crmInmueblesInfo"></div>
-            </div>
-            <div class="form-card">
-              <div class="section-head">
-                <div>
-                  <h3>Últimos inmuebles</h3>
-                  <p class="muted">Accesos rápidos a fichas recientes.</p>
+                <div class="form-card">
+                  <div class="section-head">
+                    <div>
+                      <h3>Pipeline de captación</h3>
+                      <p class="muted">Vista rápida del embudo comercial y evolución de los inmuebles en entrada.</p>
+                    </div>
+                    <select id="crmEtapaFilter">
+                      <option value="">Todas las etapas</option>
+                      <option>Prospecto</option>
+                      <option>Contactado</option>
+                      <option>Visita/Valoración</option>
+                      <option>Negociación</option>
+                      <option>Encargo firmado</option>
+                      <option>Publicado</option>
+                      <option>Perdido</option>
+                    </select>
+                  </div>
+                  <div id="crmPipeline" class="crm-pipeline"></div>
+                  <div id="crmKanban" class="crm-kanban"></div>
+                </div>
+                <div class="crm-split">
+                  <div class="form-card">
+                    <div class="section-head">
+                      <div>
+                        <h3>Inventario activo</h3>
+                        <p class="muted">Acceso directo a las fichas de inmueble que requieren seguimiento.</p>
+                      </div>
+                      <input id="crmInmuebleSearch" placeholder="Buscar inmueble..." />
+                    </div>
+                    <div id="crmInmueblesTable"></div>
+                    <div class="footer" id="crmInmueblesInfo"></div>
+                  </div>
+                  <div class="form-card">
+                    <div class="section-head">
+                      <div>
+                        <h3>Últimos inmuebles</h3>
+                        <p class="muted">Atajos a fichas recientes.</p>
+                      </div>
+                    </div>
+                    <div id="crmInmueblesRecent" class="crm-recent"></div>
+                  </div>
                 </div>
               </div>
-              <div id="crmInmueblesRecent" class="crm-recent"></div>
-            </div>
-          </div>
-          <div class="form-card">
-            <div class="section-head">
-              <div>
-                <h3>Compraventas</h3>
-                <p class="muted">Ventas históricas importadas y operaciones nuevas dadas de alta por formulario.</p>
+              <div id="crmViewCaptaciones" class="crm-workspace-view hidden">
+                <div class="form-card">
+                  <div class="section-head">
+                    <div>
+                      <h3>Pipeline de captación</h3>
+                      <p class="muted">Arrastra para avanzar el estado de cada captación.</p>
+                    </div>
+                    <select id="crmEtapaFilterMirror">
+                      <option value="">Todas las etapas</option>
+                      <option>Prospecto</option>
+                      <option>Contactado</option>
+                      <option>Visita/Valoración</option>
+                      <option>Negociación</option>
+                      <option>Encargo firmado</option>
+                      <option>Publicado</option>
+                      <option>Perdido</option>
+                    </select>
+                  </div>
+                  <div id="crmCaptacionesStageSummary" class="crm-pipeline"></div>
+                  <div id="crmCaptacionesKanban" class="crm-kanban"></div>
+                </div>
+                <div class="form-card">
+                  <div class="section-head">
+                    <div>
+                      <h3>Listado de captaciones</h3>
+                      <p class="muted">Base operativa para seguimiento, llamadas y negociación.</p>
+                    </div>
+                  </div>
+                  <div id="crmCaptacionesTable"></div>
+                  <div class="footer" id="crmCaptacionesInfo"></div>
+                </div>
               </div>
-              <input id="crmCompraventaSearch" placeholder="Buscar por dirección, vendedor o comprador..." />
+              <div id="crmViewInmuebles" class="crm-workspace-view hidden">
+                <div class="crm-split">
+                  <div class="form-card">
+                    <div class="section-head">
+                      <div>
+                        <h3>Inmuebles</h3>
+                        <p class="muted">Busca por referencia, dirección, zona o estado.</p>
+                      </div>
+                      <input id="crmInmuebleSearchMirror" placeholder="Buscar inmueble..." />
+                    </div>
+                    <div id="crmInmueblesTableMirror"></div>
+                    <div class="footer" id="crmInmueblesInfoMirror"></div>
+                  </div>
+                  <div class="form-card">
+                    <div class="section-head">
+                      <div>
+                        <h3>Últimos inmuebles</h3>
+                        <p class="muted">Accesos rápidos a fichas recientes.</p>
+                      </div>
+                    </div>
+                    <div id="crmInmueblesRecentMirror" class="crm-recent"></div>
+                  </div>
+                </div>
+              </div>
+              <div id="crmViewCompraventas" class="crm-workspace-view hidden">
+                <div class="form-card">
+                  <div class="section-head">
+                    <div>
+                      <h3>Compraventas</h3>
+                      <p class="muted">Ventas históricas importadas y operaciones nuevas dadas de alta por formulario.</p>
+                    </div>
+                    <input id="crmCompraventaSearch" placeholder="Buscar por dirección, vendedor o comprador..." />
+                  </div>
+                  <div id="crmCompraventasTable"></div>
+                  <div class="footer" id="crmCompraventasInfo"></div>
+                </div>
+              </div>
+              <div id="crmViewDemandas" class="crm-workspace-view hidden">
+                <div class="form-card">
+                  <div class="section-head">
+                    <div>
+                      <h3>Demandas</h3>
+                      <p class="muted">Compradores activos, filtros de búsqueda y acceso a matching.</p>
+                    </div>
+                  </div>
+                  <div id="crmDemandasTable"></div>
+                  <div class="footer" id="crmDemandasInfo"></div>
+                </div>
+              </div>
+              <div id="crmViewVisitas" class="crm-workspace-view hidden">
+                <div class="form-card">
+                  <div class="section-head">
+                    <div>
+                      <h3>Visitas</h3>
+                      <p class="muted">Histórico de visitas y seguimiento comercial realizado.</p>
+                    </div>
+                  </div>
+                  <div id="crmVisitasTable"></div>
+                  <div class="footer" id="crmVisitasInfo"></div>
+                </div>
+              </div>
             </div>
-            <div id="crmCompraventasTable"></div>
-            <div class="footer" id="crmCompraventasInfo"></div>
           </div>
           <div id="inmuebleDetail" class="form-card hidden">
             <div class="section-head">

@@ -1296,6 +1296,87 @@ body.crm-fin #companySummary {
   color: #f7f4ee;
 }
 
+.crm-workspace-shell {
+  display: grid;
+  gap: 16px;
+}
+
+.crm-workspace-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 10px;
+  border-radius: 18px;
+  border: 1px solid rgba(130, 76, 69, 0.12);
+  background:
+    linear-gradient(180deg, rgba(255, 251, 244, 0.98), rgba(244, 238, 227, 0.96)),
+    #fff;
+}
+
+.crm-workspace-tabs .tab {
+  min-width: 120px;
+}
+
+.crm-workspace-view {
+  display: grid;
+  gap: 14px;
+}
+
+.crm-summary-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(280px, 0.85fr);
+  gap: 14px;
+}
+
+.crm-focus-card {
+  display: grid;
+  gap: 14px;
+}
+
+.crm-quick-actions,
+.crm-focus-list {
+  display: grid;
+  gap: 10px;
+}
+
+.crm-quick-action,
+.crm-focus-link {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  padding: 14px 16px;
+  border-radius: 16px;
+  border: 1px solid rgba(130, 76, 69, 0.12);
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.98), rgba(247, 243, 236, 0.98)),
+    #fff;
+  text-align: left;
+  color: var(--ink);
+  cursor: pointer;
+  transition: transform 0.14s ease, box-shadow 0.14s ease, border-color 0.14s ease;
+}
+
+.crm-quick-action strong,
+.crm-focus-link {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.crm-quick-action span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.crm-quick-action:hover,
+.crm-focus-link:hover,
+.crm-quick-action:focus-visible,
+.crm-focus-link:focus-visible {
+  transform: translateY(-1px);
+  border-color: rgba(60, 110, 113, 0.4);
+  box-shadow: 0 12px 26px rgba(16, 12, 8, 0.1);
+  outline: none;
+}
+
 .crm-kpis .kpi-card {
   display: grid;
   gap: 8px;
@@ -1402,6 +1483,10 @@ body.crm-fin #companySummary {
 
   .gestoria-renta-banner-mark {
     flex-wrap: wrap;
+  }
+
+  .crm-summary-grid {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -1705,7 +1790,8 @@ body.crm-fin #companySummary {
   background: rgba(60, 110, 113, 0.12);
 }
 
-#crmInmuebleSearch {
+#crmInmuebleSearch,
+#crmInmuebleSearchMirror {
   min-width: 300px;
   padding: 8px 12px;
   border-radius: 10px;
@@ -3346,7 +3432,8 @@ body.density-compact [id$="Table"] table {
     grid-template-columns: 1fr;
   }
 
-  #crmInmuebleSearch {
+  #crmInmuebleSearch,
+  #crmInmuebleSearchMirror {
     min-width: 0;
     width: 100%;
   }
