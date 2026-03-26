@@ -12548,6 +12548,45 @@ const refreshCurrentInmuebleProfile = () => {
       inmueble.precio_valoracion ? `Valoración ${formatDisplayCell("precio_valoracion", inmueble.precio_valoracion)}` : "",
     ].filter(Boolean).join(" · ");
     const ownerNames = propietarios.map((item) => item.nombre).filter(Boolean);
+    const metrics = [
+      {
+        label: "Estado",
+        value: inmueble.estado || "Sin estado",
+      },
+      {
+        label: "Catastro",
+        value: inmueble.referencia_catastral || "Pendiente",
+      },
+      {
+        label: "Documentos",
+        value: String(docs.length || 0),
+      },
+      {
+        label: "Visitas",
+        value: String(visitas.length || 0),
+      },
+    ];
+    const ownerMarkup = ownerNames.length
+      ? ownerNames
+          .map((name) => {
+            const initials = name
+              .split(/\s+/)
+              .filter(Boolean)
+              .slice(0, 2)
+              .map((part) => part.charAt(0).toUpperCase())
+              .join("");
+            return `
+              <div class="inmueble-owner-card">
+                <span class="inmueble-owner-avatar">${initials || "?"}</span>
+                <div class="inmueble-owner-copy">
+                  <strong>${name}</strong>
+                  <span>${captacion.propietario && ownerNames.length === 1 ? "Propietario principal" : "Propiedad vinculada"}</span>
+                </div>
+              </div>
+            `;
+          })
+          .join("")
+      : "<div class='muted'>Sin propietarios enlazados</div>";
     inmuebleSummaryCard.innerHTML = `
       <div class="inmueble-summary-top">
         <div>
@@ -12557,8 +12596,28 @@ const refreshCurrentInmuebleProfile = () => {
         </div>
         <div class="inmueble-summary-badges">${topBadges}</div>
       </div>
-      <div class="inmueble-summary-pricing">${priceLine || "Sin pricing definido"}</div>
-      <div class="inmueble-summary-owners">${ownerNames.length ? ownerNames.map((name) => `<span class="inmueble-chip">${name}</span>`).join("") : "<span class='muted'>Sin propietarios enlazados</span>"}</div>
+      <div class="inmueble-summary-body">
+        <div class="inmueble-summary-main">
+          <div class="inmueble-summary-pricing">${priceLine || "Sin pricing definido"}</div>
+          <div class="inmueble-summary-note">${captacion.proxima_accion || inmueble.referencia || "Completa la ficha para mejorar la calidad del inventario."}</div>
+          <div class="inmueble-summary-metrics">
+            ${metrics
+              .map(
+                (item) => `
+                  <div class="inmueble-summary-metric">
+                    <span>${item.label}</span>
+                    <strong>${item.value}</strong>
+                  </div>
+                `
+              )
+              .join("")}
+          </div>
+        </div>
+        <div class="inmueble-summary-side">
+          <div class="inmueble-summary-side-title">Propiedad</div>
+          <div class="inmueble-summary-owners">${ownerMarkup}</div>
+        </div>
+      </div>
     `;
   }
 
