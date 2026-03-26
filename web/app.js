@@ -13295,7 +13295,10 @@ const openGestoriaCrmWithFilters = ({
   estado = "",
   search = "",
 } = {}) => {
-  openGestoriaCrm();
+  if (!userCanAccessService("gestoria")) return;
+  openCompany(FINCAS_COMPANY, { allowRestricted: true });
+  setTab("gestoria-crm");
+  updateTableVisibility();
   setGestoriaCrmView("crm");
   if (gestoriaCrmSearch) {
     gestoriaCrmSearch.value = search || "";
@@ -13338,7 +13341,10 @@ const openGestoriaCrmWithFilters = ({
 };
 
 const openGestoriaTrabajosWithFilters = ({ tipo = "", estado = "", target = gestoriaCrmSection } = {}) => {
-  openGestoriaCrm();
+  if (!userCanAccessService("gestoria")) return;
+  openCompany(FINCAS_COMPANY, { allowRestricted: true });
+  setTab("gestoria-crm");
+  updateTableVisibility();
   setGestoriaCrmView("crm");
   if (gestoriaTrabajosTipoFilter) {
     gestoriaTrabajosTipoFilter.value = tipo || "";
@@ -13349,6 +13355,21 @@ const openGestoriaTrabajosWithFilters = ({ tipo = "", estado = "", target = gest
   loadGestoriaCrm();
   loadGestoriaTrabajosOverview();
   focusElementInView(target || gestoriaCrmSection);
+};
+
+const openGestoriaRentaCampaign = () => {
+  if (!userCanAccessService("gestoria")) return;
+  openCompany(FINCAS_COMPANY, { allowRestricted: true });
+  setTab("gestoria-crm");
+  updateTableVisibility();
+  setGestoriaCrmView("crm");
+  if (gestoriaCrmSearch) gestoriaCrmSearch.value = "";
+  if (gestoriaCrmEstado) gestoriaCrmEstado.value = "";
+  if (gestoriaCrmLimit) gestoriaCrmLimit.value = "50";
+  setGestoriaCrmTab("renta");
+  state.gestoriaCrmFull = false;
+  loadGestoriaCrm();
+  focusElementInView(gestoriaCrmSection);
 };
 
 const bindGestoriaDashboardKpis = () => {
@@ -13432,7 +13453,7 @@ const bindGestoriaDashboardKpis = () => {
 const bindGestoriaRentaCampaignBanner = () => {
   if (!gestoriaRentaCampaignBanner || gestoriaRentaCampaignBanner.dataset.bound === "1") return;
   gestoriaRentaCampaignBanner.dataset.bound = "1";
-  const action = () => openGestoriaCrmWithFilters({ tab: "renta" });
+  const action = () => openGestoriaRentaCampaign();
   gestoriaRentaCampaignBanner.addEventListener("click", action);
   gestoriaRentaCampaignBanner.addEventListener("keydown", (event) => {
     if (event.key === "Enter" || event.key === " ") {
@@ -20662,11 +20683,15 @@ const init = async () => {
     handleRoute();
     UI?.boot(state);
     const okCount = results.filter((r) => r.status === "fulfilled").length;
-    dbStatus.innerHTML = okCount === 3
-      ? `<span class="status"><span></span>Conectado</span>`
-      : `<span class="status"><span></span>Con datos parciales</span>`;
+    if (dbStatus) {
+      dbStatus.innerHTML = okCount === 3
+        ? `<span class="status"><span></span>Conectado</span>`
+        : `<span class="status"><span></span>Con datos parciales</span>`;
+    }
   } catch (error) {
-    dbStatus.textContent = "No se pudo conectar a la base de datos.";
+    if (dbStatus) {
+      dbStatus.textContent = "";
+    }
     tableContainer.innerHTML =
       "<p class='muted'>Error al cargar los datos.</p>";
     renderCompanyCards();

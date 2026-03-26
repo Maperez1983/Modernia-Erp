@@ -20,10 +20,10 @@
       <div class="meta">
         <label class="meta-user" for="userSelect">
           <span>Usuario</span>
-          <select id="userSelect"></select>
+          <span id="authSessionPill" class="pill hidden" aria-live="polite"></span>
+          <select id="userSelect" class="hidden" aria-hidden="true" tabindex="-1"></select>
         </label>
         <button id="authLogoutBtn" class="secondary ghost hidden" type="button">Salir</button>
-        <div id="dbStatus" class="meta-status"></div>
       </div>
       </header>
     <div id="renewalAlert" class="alert hidden"></div>
@@ -4065,6 +4065,6 @@
     <script src="ui-foundation.js?v=1"></script>
     <script src="app-auth.js?v=1"></script>
     <script src="app-routing.js?v=1"></script>
-    <script src="app.js?v=335"></script>
+    <script src="app.js?v=337"></script>
   </body>
 </html>
