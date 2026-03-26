@@ -1234,6 +1234,11 @@ const explorerSection = document.getElementById("explorerSection");
 const dashboardSection = document.getElementById("dashboardSection");
 const dashboardTitle = document.getElementById("dashboardTitle");
 const dashboardKpis = document.getElementById("dashboardKpis");
+const clientesDashboardPanel = document.getElementById("clientesDashboardPanel");
+const clientesDashboardKpis = document.getElementById("clientesDashboardKpis");
+const clientesDashboardEmpresas = document.getElementById("clientesDashboardEmpresas");
+const clientesDashboardServicios = document.getElementById("clientesDashboardServicios");
+const clientesDashboardCalidad = document.getElementById("clientesDashboardCalidad");
 const ventasChart = document.getElementById("ventasChart");
 const facturadoChart = document.getElementById("facturadoChart");
 const alquileresChart = document.getElementById("alquileresChart");
@@ -8638,6 +8643,9 @@ const updateTableVisibility = () => {
   if (tableToolbar) {
     tableToolbar.classList.toggle("hidden", isClientePage || isFinSim);
   }
+  if (clientesDashboardPanel) {
+    clientesDashboardPanel.classList.toggle("hidden", state.currentModule !== "clientes" || isClientePage);
+  }
   if (clientesEstadoFilter) {
     clientesEstadoFilter.classList.toggle("hidden", state.currentModule !== "clientes");
   }
@@ -11211,6 +11219,170 @@ const refreshClientesSummary = async () => {
   } catch (_) {}
 };
 
+const splitMultiValueField = (value) =>
+  String(value || "")
+    .split(/[,;|/]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+const renderClientesDashboardList = (container, items, emptyText, labelFormatter = (item) => item.label) => {
+  if (!container) return;
+  if (!items.length) {
+    container.innerHTML = `<p class="muted">${emptyText}</p>`;
+    return;
+  }
+  const table = document.createElement("table");
+  const thead = document.createElement("thead");
+  const trHead = document.createElement("tr");
+  ["concepto", "clientes"].forEach((label) => {
+    const th = document.createElement("th");
+    th.textContent = formatHeader(label);
+    trHead.appendChild(th);
+  });
+  thead.appendChild(trHead);
+  table.appendChild(thead);
+  const tbody = document.createElement("tbody");
+  items.forEach((item) => {
+    const tr = document.createElement("tr");
+    const tdLabel = document.createElement("td");
+    tdLabel.textContent = labelFormatter(item);
+    const tdValue = document.createElement("td");
+    tdValue.textContent = String(item.count);
+    tr.appendChild(tdLabel);
+    tr.appendChild(tdValue);
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  container.innerHTML = "";
+  container.appendChild(table);
+};
+
+const renderClientesDashboard = (rows = [], dataColumns = []) => {
+  if (!clientesDashboardPanel) return;
+  const isClientesModule = state.currentModule === "clientes" && state.currentPage !== "cliente";
+  clientesDashboardPanel.classList.toggle("hidden", !isClientesModule);
+  if (!isClientesModule) return;
+  const getValue = (row, col) => {
+    const idx = dataColumns.indexOf(col);
+    return idx >= 0 ? row[idx] : "";
+  };
+  const empresaCounts = new Map();
+  const servicioCounts = new Map();
+  let multiEmpresa = 0;
+  let multiServicio = 0;
+  let conEmail = 0;
+  let conTelefono = 0;
+  let juridicos = 0;
+  rows.forEach((row) => {
+    const empresas = Array.from(new Set(splitMultiValueField(getValue(row, "empresas"))));
+    const servicios = Array.from(new Set(splitMultiValueField(getValue(row, "servicios"))));
+    const email = String(getValue(row, "email") || "").trim();
+    const telefono = String(getValue(row, "telefono") || "").trim();
+    const tipoPersona = normalizeSimple(getValue(row, "tipo_persona"));
+    if (empresas.length > 1) multiEmpresa += 1;
+    if (servicios.length > 1) multiServicio += 1;
+    if (email) conEmail += 1;
+    if (telefono) conTelefono += 1;
+    if (tipoPersona === "juridica" || tipoPersona === "jurídica") juridicos += 1;
+    empresas.forEach((empresa) => {
+      empresaCounts.set(empresa, (empresaCounts.get(empresa) || 0) + 1);
+    });
+    servicios.forEach((servicio) => {
+      servicioCounts.set(servicio, (servicioCounts.get(servicio) || 0) + 1);
+    });
+  });
+  const total = rows.length;
+  const fisicos = Math.max(0, total - juridicos);
+  const topEmpresas = Array.from(empresaCounts.entries())
+    .map(([label, count]) => ({ label, count }))
+    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, "es"))
+    .slice(0, 8);
+  const topServicios = Array.from(servicioCounts.entries())
+    .map(([label, count]) => ({ label, count }))
+    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, "es"))
+    .slice(0, 8);
+  if (clientesDashboardKpis) {
+    const metrics = [
+      { label: "Clientes", value: total, note: "Total visible en cartera" },
+      { label: "Empresas activas", value: empresaCounts.size, note: "Con al menos un cliente vinculado" },
+      { label: "Servicios activos", value: servicioCounts.size, note: "Tipos de servicio presentes" },
+      { label: "Multiempresa", value: multiEmpresa, note: "Clientes vinculados a varias empresas" },
+      { label: "Multiservicio", value: multiServicio, note: "Clientes con más de un servicio" },
+      { label: "Personas jurídicas", value: juridicos, note: `Físicas: ${fisicos}` },
+    ];
+    clientesDashboardKpis.innerHTML = "";
+    metrics.forEach((item) => {
+      const card = document.createElement("div");
+      card.className = "card kpi-card";
+      card.innerHTML = `<h3>${item.label}</h3><div class="kpi-value">${item.value}</div><div class="muted">${item.note}</div>`;
+      clientesDashboardKpis.appendChild(card);
+    });
+  }
+  renderClientesDashboardList(
+    clientesDashboardEmpresas,
+    topEmpresas,
+    "Sin empresas asociadas en este conjunto."
+  );
+  renderClientesDashboardList(
+    clientesDashboardServicios,
+    topServicios,
+    "Sin servicios asociados en este conjunto."
+  );
+  renderClientesDashboardList(
+    clientesDashboardCalidad,
+    [
+      { label: "Con email", count: conEmail },
+      { label: "Con teléfono", count: conTelefono },
+      { label: "Sin email", count: Math.max(0, total - conEmail) },
+      { label: "Sin teléfono", count: Math.max(0, total - conTelefono) },
+    ],
+    "Sin datos de calidad disponibles."
+  );
+};
+
+const loadClientesDashboard = () => {
+  if (!clientesDashboardPanel) return Promise.resolve();
+  if (state.currentModule !== "clientes" || state.currentPage === "cliente") {
+    clientesDashboardPanel.classList.add("hidden");
+    return Promise.resolve();
+  }
+  const empresaId = empresaSelect.value || "";
+  const estado = clientesEstadoFilter ? clientesEstadoFilter.value.trim() : "";
+  const params = new URLSearchParams({ include_id: "1", limit: "500" });
+  if (empresaId) {
+    params.set("empresa_id", empresaId);
+  }
+  if (estado) {
+    params.set("estado", estado);
+  }
+  const rawServiceParam = getServiceFilterParam();
+  const serviceParam = rawServiceParam || (SEGUROS_ONLY_UPLOADED_MODE ? "seguros" : "");
+  if (serviceParam) {
+    params.set("servicio", serviceParam);
+  }
+  if (SEGUROS_ONLY_UPLOADED_MODE && normalizeSimple(serviceParam || "") === "seguros") {
+    const fincas = (state.empresas || []).find((e) => e.nombre === FINCAS_COMPANY);
+    if (fincas?.id && !empresaId) {
+      params.set("empresa_id", fincas.id);
+    }
+    params.set("source", "seguros");
+    params.set("uploaded_only", "1");
+  }
+  return api(`/api/clientes?${params.toString()}`)
+    .then((data) => {
+      renderClientesDashboard(data.rows || [], data.columns || []);
+    })
+    .catch(() => {
+      if (clientesDashboardKpis) {
+        clientesDashboardKpis.innerHTML = "<p class='muted'>No se pudo cargar el resumen de clientes.</p>";
+      }
+      renderClientesDashboardList(clientesDashboardEmpresas, [], "No se pudo cargar.");
+      renderClientesDashboardList(clientesDashboardServicios, [], "No se pudo cargar.");
+      renderClientesDashboardList(clientesDashboardCalidad, [], "No se pudo cargar.");
+      clientesDashboardPanel.classList.remove("hidden");
+    });
+};
+
 const renderClientesSelects = (clientes) => {
   if (clientesSelect) {
     clientesSelect.innerHTML = "";
@@ -11397,6 +11569,7 @@ const loadClientesTable = () => {
   const empresaId = empresaSelect.value || "";
   const q = searchInput.value.trim();
   const estado = clientesEstadoFilter ? clientesEstadoFilter.value.trim() : "";
+  loadClientesDashboard();
   if (!q && !empresaId && !state.clientesShowAll) {
     tableContainer.innerHTML = "<p class='muted'>Usa búsqueda o filtros para cargar clientes.</p>";
     if (tableInfo) {
@@ -12571,9 +12744,12 @@ const loadCrmCompraventas = () => {
       "vendedores",
       "compradores",
       "fecha_encargo",
+      "fecha_propuesta",
       "fecha_escritura",
       "precio_salida",
       "precio_venta",
+      "precio_escritura",
+      "honorarios",
       "desviacion_porcentaje",
       "dias_hasta_venta",
       "num_visitas",
@@ -12593,9 +12769,12 @@ const loadCrmCompraventas = () => {
         row.vendedores || "-",
         row.compradores || "-",
         row.fecha_encargo || "",
+        row.fecha_propuesta || row.fecha_contrato || "",
         row.fecha_escritura || "",
         row.precio_encargo,
         row.precio_venta,
+        row.precio_escritura,
+        row.honorarios,
         row.desviacion_pct,
         row.dias_hasta_venta,
         row.num_visitas,
@@ -12606,9 +12785,12 @@ const loadCrmCompraventas = () => {
         "vendedores",
         "compradores",
         "fecha_encargo",
+        "fecha_propuesta",
         "fecha_escritura",
         "precio_encargo",
         "precio_venta",
+        "precio_escritura",
+        "honorarios",
         "desviacion_porcentaje",
         "dias_hasta_venta",
         "num_visitas",
@@ -16238,7 +16420,77 @@ const loadGestoriaBdt = async () => {
       gestoriaBdtInfo.textContent = "";
       return;
     }
-    renderTableInto(data, gestoriaBdtTable, gestoriaBdtInfo, "Gestoria");
+    const columns = data.columns || [];
+    const rows = data.rows || [];
+    const displayCols = ["cliente", "tipo", "perfil", "estado", "cuota", "precio"].filter((col) =>
+      columns.includes(col)
+    );
+    const table = document.createElement("table");
+    const thead = document.createElement("thead");
+    const trHead = document.createElement("tr");
+    displayCols.forEach((col) => {
+      const th = document.createElement("th");
+      th.textContent = formatHeader(col);
+      trHead.appendChild(th);
+    });
+    const actionTh = document.createElement("th");
+    actionTh.textContent = "Acciones";
+    trHead.appendChild(actionTh);
+    thead.appendChild(trHead);
+    table.appendChild(thead);
+    const tbody = document.createElement("tbody");
+    rows.forEach((row) => {
+      const tr = document.createElement("tr");
+      const nombre = columns.includes("cliente") ? row[columns.indexOf("cliente")] : "";
+      displayCols.forEach((col) => {
+        const idx = columns.indexOf(col);
+        const td = document.createElement("td");
+        const formatted = formatCell(col, idx >= 0 ? row[idx] : "");
+        td.textContent = formatted === null ? "" : formatted;
+        tr.appendChild(td);
+      });
+      const actionTd = document.createElement("td");
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = "Ver cliente";
+      const openCliente = () => {
+        let id = resolveClienteIdFromName(nombre);
+        if (id) {
+          openClienteDetail(id);
+          return;
+        }
+        loadClientesList()
+          .then(() => {
+            id = resolveClienteIdFromName(nombre);
+            if (id) {
+              openClienteDetail(id);
+            } else {
+              gestoriaBdtInfo.textContent = `No se encontró ficha para ${nombre || "este cliente"}.`;
+            }
+          })
+          .catch(() => {
+            gestoriaBdtInfo.textContent = `No se encontró ficha para ${nombre || "este cliente"}.`;
+          });
+      };
+      btn.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        openCliente();
+      });
+      actionTd.appendChild(btn);
+      tr.appendChild(actionTd);
+      tr.addEventListener("click", (event) => {
+        if (event.target && event.target.closest("button, input, select, a")) {
+          return;
+        }
+        openCliente();
+      });
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    gestoriaBdtTable.innerHTML = "";
+    gestoriaBdtTable.appendChild(table);
+    gestoriaBdtInfo.textContent = `Mostrando ${rows.length} clientes importados.`;
   } catch (error) {
     gestoriaBdtTable.innerHTML = "<p class='muted'>Error al cargar.</p>";
     gestoriaBdtInfo.textContent = "";

@@ -927,7 +927,7 @@ def money_candidates(text: str) -> list[float]:
         value = parse_money(match.group(1))
         if value is None:
             continue
-        if value < 100:
+        if value < 100 or value > 2_000_000:
             continue
         values.append(value)
     return values
@@ -937,7 +937,7 @@ def numeric_amount_candidates(text: str) -> list[float]:
     values: list[float] = []
     for match in PLAIN_AMOUNT_RE.finditer(text or ""):
         value = parse_money(match.group(1))
-        if value is None or value < 1000:
+        if value is None or value < 1000 or value > 2_000_000:
             continue
         values.append(value)
     return values
@@ -947,15 +947,49 @@ def find_money_near_keywords(text: str, keywords: Iterable[str]) -> float | None
     if not text:
         return None
     lowered = norm_text(text)
+    matches: list[float] = []
     for keyword in keywords:
-        pos = lowered.find(norm_text(keyword))
-        if pos < 0:
-            continue
-        start = max(0, pos - 60)
-        end = min(len(text), pos + 240)
-        values = money_candidates(text[start:end])
-        if values:
-            return max(values)
+        keyword_norm = norm_text(keyword)
+        start_pos = 0
+        while True:
+            pos = lowered.find(keyword_norm, start_pos)
+            if pos < 0:
+                break
+            start = max(0, pos - 120)
+            end = min(len(text), pos + 420)
+            values = money_candidates(text[start:end]) + numeric_amount_candidates(text[start:end])
+            matches.extend(value for value in values if value >= 1000)
+            start_pos = pos + len(keyword_norm)
+    return max(matches) if matches else None
+
+
+def extract_encargo_price(text: str) -> float | None:
+    if not text:
+        return None
+    value = find_money_near_keywords(
+        text,
+        (
+            "fija el precio",
+            "precio del inmueble",
+            "precio de venta",
+            "precio total",
+            "se fija en la cantidad",
+            "se fija en",
+            "cantidad de",
+            "precio",
+        ),
+    )
+    if value is not None:
+        return value
+    opening = text[:2500]
+    candidates = [amount for amount in money_candidates(opening) + numeric_amount_candidates(opening) if amount >= 1000]
+    if not candidates:
+        return None
+    unique = sorted(set(round(amount, 2) for amount in candidates))
+    if len(unique) == 1:
+        return unique[0]
+    if len(unique) <= 4:
+        return max(unique)
     return None
 
 
@@ -1207,10 +1241,7 @@ def extract_case_data(case: CaseEntry, root: Path) -> dict[str, object]:
         or extract_reference_catastral(texts.get("encargo", ""))
     )
 
-    price_encargo = find_money_near_keywords(
-        texts.get("encargo", ""),
-        ("fija el precio", "precio del inmueble", "precio de venta", "precio"),
-    )
+    price_encargo = extract_encargo_price(texts.get("encargo", ""))
     price_propuesta = find_money_near_keywords(
         texts.get("propuesta", ""),
         ("precio propuesto", "precio propuesto para la compra", "precio queda fijado"),

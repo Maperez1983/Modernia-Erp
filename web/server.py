@@ -18689,14 +18689,22 @@ class Handler(BaseHTTPRequestHandler):
                   contraparte_nombre AS compradores,
                   fecha_encargo,
                   fecha_propuesta,
+                  fecha_contrato,
                   fecha_escritura,
                   precio_encargo,
-                  COALESCE(precio_propuesta, precio_contrato, precio_escritura) AS precio_venta,
+                  CASE
+                    WHEN COALESCE(precio_contrato, 0) >= 10000 THEN precio_contrato
+                    WHEN COALESCE(precio_propuesta, 0) >= 10000 THEN precio_propuesta
+                    ELSE NULL
+                  END AS precio_venta,
+                  precio_propuesta,
+                  precio_contrato,
                   precio_escritura,
                   desviacion_euros,
                   desviacion_pct,
                   dias_hasta_venta,
                   num_visitas,
+                  honorarios,
                   responsable_gestion,
                   origen_inmueble,
                   estado_documental
