@@ -98,6 +98,35 @@ INMUEBLE_PROPIETARIO_COLUMNS = [
     "updated_at",
 ]
 
+CAPTACION_COLUMNS = [
+    "id",
+    "empresa_id",
+    "inmueble_id",
+    "propietario",
+    "tipo_inmueble",
+    "direccion",
+    "zona",
+    "m2",
+    "habitaciones",
+    "banos",
+    "precio_objetivo",
+    "precio_valoracion",
+    "urgencia",
+    "motivo",
+    "canal",
+    "etapa",
+    "probabilidad",
+    "proxima_accion",
+    "fecha_contacto",
+    "asesor",
+    "codigo_postal",
+    "poblacion",
+    "provincia",
+    "notas",
+    "created_at",
+    "updated_at",
+]
+
 OPERACION_COLUMNS = [
     "id",
     "empresa_id",
@@ -264,6 +293,15 @@ def fetch_payload(local_db: Path, company_name: str, year_from: int | None) -> d
 
         clientes = []
         clientes_empresas = []
+        captaciones = conn.execute(
+            f"""
+            SELECT {", ".join(CAPTACION_COLUMNS)}
+            FROM captaciones
+            WHERE empresa_id = ?
+            ORDER BY updated_at DESC, created_at DESC
+            """,
+            (empresa_id,),
+        ).fetchall()
         if cliente_ids:
             placeholders = ", ".join(["?"] * len(cliente_ids))
             clientes = conn.execute(
@@ -295,12 +333,14 @@ def fetch_payload(local_db: Path, company_name: str, year_from: int | None) -> d
                 "clientes": len(clientes),
                 "clientes_empresas": len(clientes_empresas),
                 "inmueble_propietarios": len(relaciones),
+                "captaciones": len(captaciones),
             },
             "operaciones": rows_to_dicts(operaciones),
             "inmuebles": rows_to_dicts(inmuebles),
             "clientes": rows_to_dicts(clientes),
             "clientes_empresas": rows_to_dicts(clientes_empresas),
             "inmueble_propietarios": rows_to_dicts(relaciones),
+            "captaciones": rows_to_dicts(captaciones),
         }
     finally:
         conn.close()
@@ -324,8 +364,8 @@ def build_upsert_sql(table_name: str, columns: list[str], rows: list[dict]) -> l
 def build_sql(payload: dict) -> str:
     lines = [
         "PRAGMA foreign_keys = OFF;",
-        "PRAGMA busy_timeout = 5000;",
-        "BEGIN IMMEDIATE;",
+        "PRAGMA busy_timeout = 60000;",
+        "BEGIN;",
     ]
     lines.extend(build_upsert_sql("clientes", CLIENT_COLUMNS, payload.get("clientes") or []))
     lines.extend(build_upsert_sql("clientes_empresas", CLIENT_EMPRESA_COLUMNS, payload.get("clientes_empresas") or []))
@@ -337,6 +377,7 @@ def build_sql(payload: dict) -> str:
             payload.get("inmueble_propietarios") or [],
         )
     )
+    lines.extend(build_upsert_sql("captaciones", CAPTACION_COLUMNS, payload.get("captaciones") or []))
     lines.extend(build_upsert_sql("operaciones_inmobiliarias", OPERACION_COLUMNS, payload.get("operaciones") or []))
     lines.extend(["COMMIT;", "PRAGMA foreign_keys = ON;"])
     return "\n".join(lines) + "\n"
@@ -368,6 +409,7 @@ def main() -> None:
         "Preparadas "
         f"{counts['operaciones']} compraventas, "
         f"{counts['inmuebles']} inmuebles, "
+        f"{counts['captaciones']} captaciones, "
         f"{counts['clientes']} clientes y "
         f"{counts['clientes_empresas']} relaciones cliente-servicio."
     )
