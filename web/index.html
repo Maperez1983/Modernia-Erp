@@ -307,6 +307,10 @@
               <button class="tab" type="button" data-tab="estado">Estado</button>
             </div>
             <div id="inmuebleTabDatos">
+              <div class="inmueble-profile">
+                <div id="inmuebleSummaryCard" class="inmueble-summary-card"></div>
+                <div id="inmuebleFactsPanel" class="inmueble-facts-panel"></div>
+              </div>
               <div class="grid" id="inmuebleDatosGrid"></div>
             </div>
             <div id="inmuebleTabCaptacion" class="hidden">
@@ -3559,13 +3563,14 @@
               </div>
               <div id="gestoriaModuleContabilidad">
                 <div class="tabs" id="gestoriaContaInnerTabs">
-                  <button class="tab active" type="button" data-gestoria-conta-tab="operativa">Operativa</button>
+                  <button class="tab active" type="button" data-gestoria-conta-tab="operativa">Entrada</button>
+                  <button class="tab" type="button" data-gestoria-conta-tab="importador">Importador</button>
                   <button class="tab" type="button" data-gestoria-conta-tab="libros">Libros</button>
                   <button class="tab" type="button" data-gestoria-conta-tab="control">Control</button>
                 </div>
                 <div class="form-card" data-gestoria-conta-pane="operativa">
-                  <h3>OCR facturas · Contabilidad</h3>
-                  <p class="muted">Sube factura y genera asiento contable automático para este cliente.</p>
+                  <h3>Entrada documental · OCR directo</h3>
+                  <p class="muted">Alta rápida de una factura individual: OCR, factura y asiento para este cliente.</p>
                   <div class="form-grid">
                     <label class="span-2">
                       Factura (PDF/imagen)
@@ -3583,6 +3588,52 @@
                       <span id="gestoriaClienteFacturaStatus" class="muted"></span>
                     </div>
                   </div>
+                </div>
+                <div class="form-card hidden" data-gestoria-conta-pane="importador">
+                  <h3>Mapa del sistema contable</h3>
+                  <p class="muted">Cada capa tiene una función distinta. Esto evita mezclar documentos, revisión e impacto contable.</p>
+                  <div class="inline-list">
+                    <div class="inline-row">
+                      <div class="muted">Documentos manuales</div>
+                      <div><strong><code>gestoria_docs</code></strong> · archivo y metadatos generales</div>
+                    </div>
+                    <div class="inline-row">
+                      <div class="muted">OCR / importación</div>
+                      <div><strong><code>gestoria_import_documentos</code></strong> · lectura, revisión e incidencias</div>
+                    </div>
+                    <div class="inline-row">
+                      <div class="muted">Factura validada</div>
+                      <div><strong><code>gestoria_facturas</code></strong> · resultado contable aceptado</div>
+                    </div>
+                    <div class="inline-row">
+                      <div class="muted">Asiento</div>
+                      <div><strong><code>gestoria_asientos</code></strong> y <strong><code>gestoria_asiento_lineas</code></strong> · libro real</div>
+                    </div>
+                    <div class="inline-row">
+                      <div class="muted">Salida</div>
+                      <div><strong><code>/api/gestoria_excel_plantilla</code></strong> · exportación al conversor</div>
+                    </div>
+                  </div>
+                </div>
+                <div class="form-card hidden" data-gestoria-conta-pane="importador">
+                  <div class="section-head">
+                    <div>
+                      <h3>Lotes del importador</h3>
+                      <p class="muted">Entrada por lotes, revisión y aplicación a contabilidad. Aquí debe vivir el flujo masivo.</p>
+                    </div>
+                    <div class="form-actions">
+                      <button type="button" class="ghost" id="gestoriaImportRefreshBtn">Recargar</button>
+                      <button type="button" class="ghost" id="gestoriaImportQueueBtn">Abrir cola contable</button>
+                    </div>
+                  </div>
+                  <div id="gestoriaImportLotesTable"></div>
+                  <div class="footer" id="gestoriaImportLotesInfo"></div>
+                </div>
+                <div class="form-card hidden" data-gestoria-conta-pane="importador">
+                  <h3>Documentos del lote</h3>
+                  <p class="muted">Detalle de documentos detectados, estado de revisión y si ya impactaron en factura/asiento.</p>
+                  <div id="gestoriaImportDocsTable"></div>
+                  <div class="footer" id="gestoriaImportDocsInfo"></div>
                 </div>
                 <div class="form-card" data-gestoria-conta-pane="operativa">
                   <h3>Contabilidad · Configuración del periodo</h3>

@@ -18626,9 +18626,9 @@ class Handler(BaseHTTPRequestHandler):
             values = [empresa_id]
             if q:
                 where.append(
-                    "(i.referencia LIKE ? OR i.direccion LIKE ? OR i.zona LIKE ? OR i.estado LIKE ? OR c.nombre LIKE ?)"
+                    "(i.referencia LIKE ? OR i.referencia_catastral LIKE ? OR i.direccion LIKE ? OR i.zona LIKE ? OR i.estado LIKE ? OR c.nombre LIKE ?)"
                 )
-                values.extend([f"%{q}%"] * 5)
+                values.extend([f"%{q}%"] * 6)
             where_clause = " AND ".join(where)
             rows = conn.execute(
                 f"""
@@ -18636,7 +18636,16 @@ class Handler(BaseHTTPRequestHandler):
                   i.id,
                   i.referencia,
                   i.direccion,
+                  i.referencia_catastral,
+                  i.codigo_postal,
+                  i.poblacion,
+                  i.provincia,
                   i.zona,
+                  i.tipo_inmueble,
+                  i.m2,
+                  i.habitaciones,
+                  i.banos,
+                  i.precio_objetivo,
                   i.estado,
                   GROUP_CONCAT(c.nombre, ' | ') AS propietarios
                 FROM inmuebles i

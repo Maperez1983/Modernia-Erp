@@ -1498,6 +1498,12 @@ const gestoriaClienteLibroExcelStatus = document.getElementById("gestoriaCliente
 const gestoriaModuleTabs = document.getElementById("gestoriaModuleTabs");
 const gestoriaModuleContabilidad = document.getElementById("gestoriaModuleContabilidad");
 const gestoriaContaInnerTabs = document.getElementById("gestoriaContaInnerTabs");
+const gestoriaImportRefreshBtn = document.getElementById("gestoriaImportRefreshBtn");
+const gestoriaImportQueueBtn = document.getElementById("gestoriaImportQueueBtn");
+const gestoriaImportLotesTable = document.getElementById("gestoriaImportLotesTable");
+const gestoriaImportLotesInfo = document.getElementById("gestoriaImportLotesInfo");
+const gestoriaImportDocsTable = document.getElementById("gestoriaImportDocsTable");
+const gestoriaImportDocsInfo = document.getElementById("gestoriaImportDocsInfo");
 const gestoriaModuleFiscal = document.getElementById("gestoriaModuleFiscal");
 const gestoriaModuleLaboral = document.getElementById("gestoriaModuleLaboral");
 const gestoriaModuleRenta = document.getElementById("gestoriaModuleRenta");
@@ -1855,6 +1861,8 @@ const inmuebleActividadClienteInput = document.getElementById("inmuebleActividad
 const inmuebleActividadClienteId = document.getElementById("inmuebleActividadClienteId");
 const inmuebleActividadClientes = document.getElementById("inmuebleActividadClientes");
 const inmuebleDatosGrid = document.getElementById("inmuebleDatosGrid");
+const inmuebleSummaryCard = document.getElementById("inmuebleSummaryCard");
+const inmuebleFactsPanel = document.getElementById("inmuebleFactsPanel");
 const inmuebleCaptacionGrid = document.getElementById("inmuebleCaptacionGrid");
 const inmuebleDemandasTable = document.getElementById("inmuebleDemandasTable");
 const inmuebleDemandaForm = document.getElementById("inmuebleDemandaForm");
@@ -5382,13 +5390,17 @@ const INMUEBLE_FIELDS = [
   { key: "tipo_inmueble", label: "Tipo", type: "text" },
   { key: "zona", label: "Zona", type: "text" },
   { key: "direccion", label: "Dirección", type: "text" },
+  { key: "codigo_postal", label: "Código postal", type: "text" },
+  { key: "poblacion", label: "Población", type: "text" },
+  { key: "provincia", label: "Provincia", type: "text" },
   { key: "m2", label: "m²", type: "number" },
   { key: "habitaciones", label: "Habitaciones", type: "number" },
   { key: "banos", label: "Baños", type: "number" },
   { key: "precio_objetivo", label: "Precio objetivo", type: "number" },
   { key: "precio_valoracion", label: "Precio valoración", type: "number" },
   { key: "valor_referencia", label: "Valor de referencia", type: "number" },
-  { key: "referencia", label: "Referencia catastral", type: "text" },
+  { key: "referencia", label: "Referencia interna", type: "text" },
+  { key: "referencia_catastral", label: "Referencia catastral", type: "text" },
   { key: "lat", label: "Latitud", type: "number" },
   { key: "lon", label: "Longitud", type: "number" },
 ];
@@ -8382,7 +8394,7 @@ const setGestoriaClientModuleTab = (tabName = "") => {
 
 const setGestoriaClienteContaTab = (tabName = "operativa") => {
   if (!gestoriaModuleContabilidad) return;
-  const allowed = new Set(["operativa", "libros", "control"]);
+  const allowed = new Set(["operativa", "importador", "libros", "control"]);
   const target = allowed.has(tabName) ? tabName : "operativa";
   state.gestoriaClienteContaTab = target;
   if (gestoriaContaInnerTabs) {
@@ -8395,6 +8407,9 @@ const setGestoriaClienteContaTab = (tabName = "operativa") => {
     .forEach((panel) => {
       panel.classList.toggle("hidden", panel.dataset.gestoriaContaPane !== target);
     });
+  if (target === "importador" && state.currentClienteId) {
+    loadGestoriaClienteImportador(state.currentClienteId);
+  }
 };
 
 const updateGestoriaModuleTabsFromForm = () => {
@@ -12087,6 +12102,122 @@ const updateCaptacionEtapa = (id, etapa) => {
 let cachedCrmInmuebles = [];
 let cachedCrmDemandas = [];
 
+const formatDisplayCell = (col, value, fallback = "-") => {
+  if (value === null || value === undefined || value === "") return fallback;
+  const formatted = formatCell(col, value);
+  return formatted === null || formatted === undefined || formatted === "" ? fallback : formatted;
+};
+
+const buildInmuebleBadge = (value, tone = "neutral") => {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  return `<span class="inmueble-badge tone-${tone}">${text}</span>`;
+};
+
+const refreshCurrentInmuebleProfile = () => {
+  const context = state.currentInmuebleContext || {};
+  const inmueble = context.inmueble || {};
+  const captacion = context.captacion || {};
+  const propietarios = Array.isArray(context.propietarios) ? context.propietarios : [];
+  const docs = Array.isArray(context.docs) ? context.docs : [];
+  const demandas = Array.isArray(context.demandas) ? context.demandas : [];
+  const visitas = Array.isArray(context.visitas) ? context.visitas : [];
+
+  if (inmuebleSummaryCard) {
+    const address = inmueble.direccion || "Sin dirección";
+    const locality = [inmueble.zona, inmueble.poblacion].filter(Boolean).join(" · ");
+    const topBadges = [
+      buildInmuebleBadge(inmueble.estado || "Sin estado", "accent"),
+      buildInmuebleBadge(inmueble.tipo_inmueble || "Sin tipo"),
+      captacion.etapa ? buildInmuebleBadge(captacion.etapa, "soft") : "",
+    ].filter(Boolean).join("");
+    const secondary = [
+      formatDisplayCell("m2", inmueble.m2, ""),
+      inmueble.habitaciones ? `${inmueble.habitaciones} hab.` : "",
+      inmueble.banos ? `${inmueble.banos} baños` : "",
+    ].filter(Boolean).join(" · ");
+    const priceLine = [
+      inmueble.precio_objetivo ? `Objetivo ${formatDisplayCell("precio_objetivo", inmueble.precio_objetivo)}` : "",
+      inmueble.precio_valoracion ? `Valoración ${formatDisplayCell("precio_valoracion", inmueble.precio_valoracion)}` : "",
+    ].filter(Boolean).join(" · ");
+    const ownerNames = propietarios.map((item) => item.nombre).filter(Boolean);
+    inmuebleSummaryCard.innerHTML = `
+      <div class="inmueble-summary-top">
+        <div>
+          <div class="inmueble-summary-kicker">${locality || "Ficha operativa"}</div>
+          <h3>${address}</h3>
+          <div class="inmueble-summary-subline">${secondary || "Pendiente de completar dimensiones"}</div>
+        </div>
+        <div class="inmueble-summary-badges">${topBadges}</div>
+      </div>
+      <div class="inmueble-summary-pricing">${priceLine || "Sin pricing definido"}</div>
+      <div class="inmueble-summary-owners">${ownerNames.length ? ownerNames.map((name) => `<span class="inmueble-chip">${name}</span>`).join("") : "<span class='muted'>Sin propietarios enlazados</span>"}</div>
+    `;
+  }
+
+  if (inmuebleFactsPanel) {
+    const cards = [
+      {
+        title: "Localización",
+        items: [
+          ["Zona", inmueble.zona],
+          ["Población", inmueble.poblacion],
+          ["Provincia", inmueble.provincia],
+          ["CP", inmueble.codigo_postal],
+        ],
+      },
+      {
+        title: "Identificación",
+        items: [
+          ["Referencia interna", inmueble.referencia],
+          ["Catastro", inmueble.referencia_catastral],
+          ["Estado", inmueble.estado],
+          ["Tipo", inmueble.tipo_inmueble],
+        ],
+      },
+      {
+        title: "Captación",
+        items: [
+          ["Propietario", captacion.propietario],
+          ["Canal", captacion.canal],
+          ["Urgencia", captacion.urgencia],
+          ["Asesor", captacion.asesor],
+        ],
+      },
+      {
+        title: "Actividad",
+        items: [
+          ["Demandas", demandas.length],
+          ["Visitas", visitas.length],
+          ["Documentos", docs.length],
+          ["Próxima acción", captacion.proxima_accion],
+        ],
+      },
+    ];
+    inmuebleFactsPanel.innerHTML = cards
+      .map(
+        (card) => `
+          <section class="inmueble-fact-card">
+            <h4>${card.title}</h4>
+            <div class="inmueble-fact-list">
+              ${card.items
+                .map(
+                  ([label, value]) => `
+                    <div class="inmueble-fact-row">
+                      <span>${label}</span>
+                      <strong>${value === 0 ? "0" : formatDisplayCell(label.toLowerCase(), value)}</strong>
+                    </div>
+                  `
+                )
+                .join("")}
+            </div>
+          </section>
+        `
+      )
+      .join("");
+  }
+};
+
 const renderCrmInmueblesRecent = (rows) => {
   if (!crmInmueblesRecent) {
     return;
@@ -12115,6 +12246,44 @@ const renderCrmInmueblesRecent = (rows) => {
   crmInmueblesRecent.appendChild(list);
 };
 
+const renderCrmInmueblesCatalog = (rows = []) => {
+  if (!crmInmueblesTable) {
+    return;
+  }
+  if (!rows.length) {
+    crmInmueblesTable.innerHTML = "<p class='muted'>Sin inmuebles.</p>";
+    return;
+  }
+  const list = document.createElement("div");
+  list.className = "inmueble-catalog";
+  rows.forEach((row) => {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "inmueble-catalog-card";
+    item.innerHTML = `
+      <div class="inmueble-catalog-head">
+        <div>
+          <div class="inmueble-catalog-title">${row.direccion || "Sin dirección"}</div>
+          <div class="inmueble-catalog-meta">${[row.zona, row.poblacion].filter(Boolean).join(" · ") || "Sin zona definida"}</div>
+        </div>
+        ${buildInmuebleBadge(row.estado || "Sin estado", "accent")}
+      </div>
+      <div class="inmueble-catalog-line">
+        <span>${row.tipo_inmueble || "Tipo pendiente"}</span>
+        <span>${formatDisplayCell("m2", row.m2, "m² n/d")}</span>
+        <span>${row.habitaciones ? `${row.habitaciones} hab.` : "hab. n/d"}</span>
+        <span>${row.banos ? `${row.banos} baños` : "baños n/d"}</span>
+      </div>
+      <div class="inmueble-catalog-price">${row.precio_objetivo ? formatDisplayCell("precio_objetivo", row.precio_objetivo) : "Precio pendiente"}</div>
+      <div class="inmueble-catalog-owners">${row.propietarios || "Sin propietarios enlazados"}</div>
+    `;
+    item.addEventListener("click", () => openInmuebleDetail(row.id));
+    list.appendChild(item);
+  });
+  crmInmueblesTable.innerHTML = "";
+  crmInmueblesTable.appendChild(list);
+};
+
 const loadCrmInmuebles = () => {
   if (!crmInmueblesTable) {
     return;
@@ -12133,45 +12302,7 @@ const loadCrmInmuebles = () => {
     const rows = data.rows || [];
     cachedCrmInmuebles = rows;
     renderCrmInmueblesRecent(rows);
-    const table = document.createElement("table");
-    const thead = document.createElement("thead");
-    const trHead = document.createElement("tr");
-    ["referencia", "direccion", "zona", "estado", "propietarios", "accion"].forEach((col) => {
-      const th = document.createElement("th");
-      th.textContent = formatHeader(col);
-      trHead.appendChild(th);
-    });
-    thead.appendChild(trHead);
-    table.appendChild(thead);
-    const tbody = document.createElement("tbody");
-    rows.forEach((row) => {
-      const tr = document.createElement("tr");
-      const cells = [
-        row.referencia || "-",
-        row.direccion || "-",
-        row.zona || "-",
-        row.estado || "-",
-        row.propietarios || "-",
-      ];
-      cells.forEach((value, idx) => {
-        const td = document.createElement("td");
-        td.textContent = formatCell(["referencia", "direccion", "zona", "estado", "propietarios"][idx], value);
-        tr.appendChild(td);
-      });
-      const actionTd = document.createElement("td");
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.textContent = "Ver ficha";
-      btn.addEventListener("click", () => {
-        openInmuebleDetail(row.id);
-      });
-      actionTd.appendChild(btn);
-      tr.appendChild(actionTd);
-      tbody.appendChild(tr);
-    });
-    table.appendChild(tbody);
-    crmInmueblesTable.innerHTML = "";
-    crmInmueblesTable.appendChild(table);
+    renderCrmInmueblesCatalog(rows);
     if (crmInmueblesInfo) {
       crmInmueblesInfo.textContent = `Mostrando ${rows.length} inmuebles.`;
     }
@@ -12509,6 +12640,7 @@ const openInmuebleDetail = (id) => {
   if (!inmuebleDetail) return;
   state.currentInmuebleId = id;
   state.currentInmueble = null;
+  state.currentInmuebleContext = null;
   setInmuebleSaveStatus("");
   const empresa = state.empresas.find((e) => e.nombre === DASHBOARD_COMPANY);
   const empresaId = empresa ? empresa.id : "";
@@ -12517,11 +12649,22 @@ const openInmuebleDetail = (id) => {
       const inmueble = data.inmueble || {};
       state.currentInmueble = inmueble;
       const captacion = data.captacion || {};
+      state.currentInmuebleContext = {
+        inmueble,
+        captacion,
+        propietarios: data.propietarios || [],
+        docs: data.docs || [],
+        demandas: [],
+        visitas: [],
+      };
       if (inmuebleTitle) {
         inmuebleTitle.textContent = inmueble.direccion || "Ficha de inmueble";
       }
       if (inmuebleSubtitle) {
-        inmuebleSubtitle.textContent = inmueble.referencia || "Referencia sin asignar";
+        inmuebleSubtitle.textContent =
+          [inmueble.referencia || "", inmueble.referencia_catastral || "", inmueble.poblacion || ""]
+            .filter(Boolean)
+            .join(" · ") || "Referencia sin asignar";
       }
       if (inmuebleDatosGrid) {
         renderEditableGrid(inmuebleDatosGrid, INMUEBLE_FIELDS, inmueble, "inmueble");
@@ -12559,6 +12702,7 @@ const openInmuebleDetail = (id) => {
       if (inmuebleEstadoInfo) {
         inmuebleEstadoInfo.textContent = `Estado actual: ${inmueble.estado || "-"}`;
       }
+      refreshCurrentInmuebleProfile();
       loadInmuebleDemandas(id);
       loadInmuebleVisitas(id, empresaId);
       loadInmuebleActividad(id, empresaId);
@@ -12579,6 +12723,10 @@ const loadInmuebleDemandas = (inmuebleId) => {
   }
   api(`/api/inmueble_matching?inmueble_id=${inmuebleId}`).then((data) => {
     const rows = data.rows || [];
+    if (state.currentInmuebleId === inmuebleId && state.currentInmuebleContext) {
+      state.currentInmuebleContext.demandas = rows;
+      refreshCurrentInmuebleProfile();
+    }
     if (!rows.length) {
       inmuebleDemandasTable.innerHTML = "<p class='muted'>Sin demandas compatibles.</p>";
       return;
@@ -12640,6 +12788,10 @@ const loadInmuebleVisitas = (inmuebleId, empresaId) => {
   }
   api(`/api/visitas?empresa_id=${empresaId}&inmueble_id=${inmuebleId}`).then((data) => {
     const rows = data.rows || [];
+    if (state.currentInmuebleId === inmuebleId && state.currentInmuebleContext) {
+      state.currentInmuebleContext.visitas = rows;
+      refreshCurrentInmuebleProfile();
+    }
     const table = document.createElement("table");
     const thead = document.createElement("thead");
     const trHead = document.createElement("tr");
@@ -12702,7 +12854,12 @@ const renderInmuebleDocs = (rows = []) => {
 const loadInmuebleDocs = (inmuebleId) => {
   if (!inmuebleId) return;
   api(`/api/inmueble_docs?inmueble_id=${inmuebleId}`).then((data) => {
-    renderInmuebleDocs(data.rows || []);
+    const rows = data.rows || [];
+    if (state.currentInmuebleId === inmuebleId && state.currentInmuebleContext) {
+      state.currentInmuebleContext.docs = rows;
+      refreshCurrentInmuebleProfile();
+    }
+    renderInmuebleDocs(rows);
   });
 };
 
@@ -17225,6 +17382,164 @@ const loadGestoriaClienteContaResultados = (clienteId) => {
   });
 };
 
+const renderGestoriaImportDocsTable = (rows = []) => {
+  if (!gestoriaImportDocsTable) return;
+  if (!rows.length) {
+    gestoriaImportDocsTable.innerHTML = "<p class='muted'>Sin documentos en el lote seleccionado.</p>";
+    if (gestoriaImportDocsInfo) gestoriaImportDocsInfo.textContent = "";
+    return;
+  }
+  const table = document.createElement("table");
+  const thead = document.createElement("thead");
+  const trHead = document.createElement("tr");
+  ["Fecha", "Archivo", "Estado", "Categoría", "Tercero", "Número", "Total", "Factura"].forEach((col) => {
+    const th = document.createElement("th");
+    th.textContent = col;
+    trHead.appendChild(th);
+  });
+  thead.appendChild(trHead);
+  table.appendChild(thead);
+  const tbody = document.createElement("tbody");
+  rows.forEach((row) => {
+    const tr = document.createElement("tr");
+    const values = [
+      row.fecha_detectada || "-",
+      row.archivo_nombre || "-",
+      row.estado_revision || "-",
+      row.categoria_detectada || "-",
+      row.tercero_detectado || row.tercero_nombre || "-",
+      row.numero_detectado || row.factura_numero || "-",
+      row.total_detectado ? euroFormatter.format(parseMoneyValue(row.total_detectado)) : "-",
+      row.factura_numero || row.factura_id || "-",
+    ];
+    values.forEach((value) => {
+      const td = document.createElement("td");
+      td.textContent = value;
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  gestoriaImportDocsTable.innerHTML = "";
+  gestoriaImportDocsTable.appendChild(table);
+  if (gestoriaImportDocsInfo) {
+    const summary = rows.reduce(
+      (acc, row) => {
+        const key = String(row.estado_revision || "").toUpperCase();
+        acc[key] = (acc[key] || 0) + 1;
+        return acc;
+      },
+      {}
+    );
+    gestoriaImportDocsInfo.textContent = `Documentos: ${rows.length} · OK ${summary.OK || 0} · REVISAR ${summary.REVISAR || 0} · DUPLICADO ${summary.DUPLICADO || 0} · ERROR ${summary.ERROR || 0}`;
+  }
+};
+
+const loadGestoriaImportLoteDocuments = (loteId) => {
+  if (!loteId) {
+    renderGestoriaImportDocsTable([]);
+    return Promise.resolve();
+  }
+  state.gestoriaImportSelectedLoteId = loteId;
+  return api(`/api/gestoria_import_documentos?lote_id=${encodeURIComponent(loteId)}`)
+    .then((data) => {
+      renderGestoriaImportDocsTable(data.rows || []);
+    })
+    .catch(() => {
+      if (gestoriaImportDocsTable) {
+        gestoriaImportDocsTable.innerHTML = "<p class='muted'>No se pudieron cargar los documentos del lote.</p>";
+      }
+      if (gestoriaImportDocsInfo) gestoriaImportDocsInfo.textContent = "";
+    });
+};
+
+const renderGestoriaImportLotesTable = (clienteId, rows = []) => {
+  if (!gestoriaImportLotesTable) return;
+  if (!rows.length) {
+    gestoriaImportLotesTable.innerHTML = "<p class='muted'>Sin lotes de importación registrados.</p>";
+    if (gestoriaImportLotesInfo) gestoriaImportLotesInfo.textContent = "";
+    renderGestoriaImportDocsTable([]);
+    return;
+  }
+  const exactRows = rows.filter((row) => String(row.cliente_id || "") === String(clienteId || ""));
+  const unassignedRows = rows.filter((row) => !String(row.cliente_id || "").trim());
+  const visibleRows = (exactRows.length ? exactRows : []).concat(
+    unassignedRows.filter((row) => !exactRows.some((item) => item.id === row.id))
+  ).slice(0, 12);
+  const selectedId =
+    visibleRows.some((row) => row.id === state.gestoriaImportSelectedLoteId)
+      ? state.gestoriaImportSelectedLoteId
+      : (visibleRows[0] && visibleRows[0].id) || "";
+  const table = document.createElement("table");
+  const thead = document.createElement("thead");
+  const trHead = document.createElement("tr");
+  ["Fecha", "Origen", "Estado", "Cliente", "Docs", "OK", "Revisar", "Error", ""].forEach((col) => {
+    const th = document.createElement("th");
+    th.textContent = col;
+    trHead.appendChild(th);
+  });
+  thead.appendChild(trHead);
+  table.appendChild(thead);
+  const tbody = document.createElement("tbody");
+  visibleRows.forEach((row) => {
+    const tr = document.createElement("tr");
+    if (row.id === selectedId) tr.classList.add("active");
+    [
+      row.created_at || "-",
+      row.origen || "-",
+      row.estado || "-",
+      row.cliente || (row.cliente_id ? row.cliente_id : "Sin asignar"),
+      row.total_documentos || 0,
+      row.total_ok || 0,
+      row.total_revisar || 0,
+      row.total_error || 0,
+    ].forEach((value) => {
+      const td = document.createElement("td");
+      td.textContent = String(value);
+      tr.appendChild(td);
+    });
+    const actionTd = document.createElement("td");
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = row.id === selectedId ? "secondary" : "ghost";
+    btn.textContent = "Ver";
+    btn.addEventListener("click", () => {
+      loadGestoriaImportLoteDocuments(row.id);
+      renderGestoriaImportLotesTable(clienteId, rows);
+    });
+    actionTd.appendChild(btn);
+    tr.appendChild(actionTd);
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  gestoriaImportLotesTable.innerHTML = "";
+  gestoriaImportLotesTable.appendChild(table);
+  if (gestoriaImportLotesInfo) {
+    gestoriaImportLotesInfo.textContent = `Mostrando ${visibleRows.length} lotes${exactRows.length ? " del cliente" : " recientes de la empresa"}${unassignedRows.length ? " · incluye lotes sin cliente asignado" : ""}.`;
+  }
+  loadGestoriaImportLoteDocuments(selectedId);
+};
+
+const loadGestoriaClienteImportador = (clienteId) => {
+  if (!gestoriaImportLotesTable) return;
+  const empresa = state.empresas.find((item) => item.nombre === FINCAS_COMPANY);
+  if (!clienteId || !empresa?.id) {
+    gestoriaImportLotesTable.innerHTML = "<p class='muted'>Sin cliente o empresa seleccionada.</p>";
+    if (gestoriaImportLotesInfo) gestoriaImportLotesInfo.textContent = "";
+    renderGestoriaImportDocsTable([]);
+    return;
+  }
+  api(`/api/gestoria_import_lotes?empresa_id=${encodeURIComponent(empresa.id)}`)
+    .then((data) => {
+      renderGestoriaImportLotesTable(clienteId, data.rows || []);
+    })
+    .catch(() => {
+      gestoriaImportLotesTable.innerHTML = "<p class='muted'>No se pudo cargar la cola del importador.</p>";
+      if (gestoriaImportLotesInfo) gestoriaImportLotesInfo.textContent = "";
+      renderGestoriaImportDocsTable([]);
+    });
+};
+
 const setGestoriaClienteLibroTab = (tabName = "diario") => {
   if (!gestoriaClienteLibrosTabs) return;
   const target = tabName || "diario";
@@ -20428,6 +20743,7 @@ const openClienteDetail = (id) => {
       loadClienteGestoria(id);
       loadGestoriaClienteDashboard(id);
       loadGestoriaClienteContaResultados(id);
+      loadGestoriaClienteImportador(id);
       loadGestoriaClienteLibros(id);
       setGestoriaClienteLibroTab(state.gestoriaClienteLibroTab || "diario");
       loadGestoriaModelos(id);
@@ -20471,6 +20787,18 @@ const openClienteDetail = (id) => {
       }
       if (gestoriaClienteLibroIvaTable) {
         gestoriaClienteLibroIvaTable.innerHTML = "<p class='muted'>Sin desglose IVA.</p>";
+      }
+      if (gestoriaImportLotesTable) {
+        gestoriaImportLotesTable.innerHTML = "<p class='muted'>Sin lotes de importación.</p>";
+      }
+      if (gestoriaImportLotesInfo) {
+        gestoriaImportLotesInfo.textContent = "";
+      }
+      if (gestoriaImportDocsTable) {
+        gestoriaImportDocsTable.innerHTML = "<p class='muted'>Sin documentos del importador.</p>";
+      }
+      if (gestoriaImportDocsInfo) {
+        gestoriaImportDocsInfo.textContent = "";
       }
     }
     if (hasSeguros) {
@@ -24217,6 +24545,23 @@ if (gestoriaContaQueueBtn) {
     setTab("gestoria-conta");
     loadGestoriaContabilidad();
     loadGestoriaContaQueue();
+  });
+}
+
+if (gestoriaImportQueueBtn) {
+  gestoriaImportQueueBtn.addEventListener("click", () => {
+    openCompany(FINCAS_COMPANY);
+    setTab("gestoria-conta");
+    loadGestoriaContabilidad();
+    loadGestoriaContaQueue();
+  });
+}
+
+if (gestoriaImportRefreshBtn) {
+  gestoriaImportRefreshBtn.addEventListener("click", () => {
+    if (state.currentClienteId) {
+      loadGestoriaClienteImportador(state.currentClienteId);
+    }
   });
 }
 
