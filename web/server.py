@@ -20669,6 +20669,19 @@ class Handler(BaseHTTPRequestHandler):
                     (empresa_id,),
                 ).fetchall()
 
+                comision_series = conn.execute(
+                    """
+                    SELECT anio AS year, ROUND(SUM(COALESCE(comision, 0)), 2) AS total
+                    FROM movimientos
+                    WHERE empresa_id = ?
+                      AND UPPER(TRIM(concepto)) = 'COMPRAVENTA'
+                      AND anio IS NOT NULL
+                    GROUP BY anio
+                    ORDER BY anio
+                    """,
+                    (empresa_id,),
+                ).fetchall()
+
                 volumen_cierre = conn.execute(
                     """
                     SELECT anio AS year,
@@ -20721,6 +20734,33 @@ class Handler(BaseHTTPRequestHandler):
                     (empresa_id,),
                 ).fetchall()
 
+                visitas_series = conn.execute(
+                    """
+                    SELECT anio AS year, SUM(COALESCE(num_visitas, 0)) AS total
+                    FROM operaciones_inmobiliarias
+                    WHERE empresa_id = ?
+                      AND LOWER(COALESCE(tipo_operacion, 'venta')) = 'venta'
+                      AND anio IS NOT NULL
+                    GROUP BY anio
+                    ORDER BY anio
+                    """,
+                    (empresa_id,),
+                ).fetchall()
+
+                plazos_series = conn.execute(
+                    """
+                    SELECT anio AS year,
+                           ROUND(AVG(CASE WHEN COALESCE(dias_hasta_venta, 0) > 0 THEN dias_hasta_venta END), 1) AS total
+                    FROM operaciones_inmobiliarias
+                    WHERE empresa_id = ?
+                      AND LOWER(COALESCE(tipo_operacion, 'venta')) = 'venta'
+                      AND anio IS NOT NULL
+                    GROUP BY anio
+                    ORDER BY anio
+                    """,
+                    (empresa_id,),
+                ).fetchall()
+
                 summary = conn.execute(
                     """
                     SELECT
@@ -20729,7 +20769,8 @@ class Handler(BaseHTTPRequestHandler):
                         THEN COALESCE(precio_escritura, precio_propuesta, precio_contrato) END), 2) AS ticket_medio,
                       ROUND(AVG(CASE WHEN COALESCE(dias_hasta_venta, 0) > 0 THEN dias_hasta_venta END), 1) AS plazo_medio_dias,
                       ROUND(AVG(CASE WHEN desviacion_pct IS NOT NULL THEN desviacion_pct END), 2) AS desviacion_media_pct,
-                      SUM(COALESCE(num_visitas, 0)) AS visitas_total
+                      SUM(COALESCE(num_visitas, 0)) AS visitas_total,
+                      ROUND(AVG(CASE WHEN COALESCE(num_visitas, 0) > 0 THEN num_visitas END), 1) AS visitas_media
                     FROM operaciones_inmobiliarias
                     WHERE empresa_id = ?
                       AND LOWER(COALESCE(tipo_operacion, 'venta')) = 'venta'
@@ -20776,10 +20817,14 @@ class Handler(BaseHTTPRequestHandler):
                     {
                         "mode": "inmobiliaria",
                         "ventas": [dict(r) for r in ventas],
-                        "ingresos": [dict(r) for r in volumen_cierre],
+                        "ingresos": [dict(r) for r in comision_series],
+                        "cierres": [dict(r) for r in volumen_cierre],
+                        "salidas": [dict(r) for r in volumen_salida],
                         "gastos": [dict(r) for r in volumen_salida],
                         "captaciones": [dict(r) for r in captaciones_series],
                         "inmuebles": [dict(r) for r in inmuebles_series],
+                        "visitas": [dict(r) for r in visitas_series],
+                        "plazos": [dict(r) for r in plazos_series],
                         "alquileres": [dict(r) for r in alquileres],
                         "summary": {
                             "compraventas_total": int(summary["compraventas_total"] or 0) if summary else 0,
@@ -20787,6 +20832,7 @@ class Handler(BaseHTTPRequestHandler):
                             "plazo_medio_dias": float(summary["plazo_medio_dias"] or 0) if summary else 0,
                             "desviacion_media_pct": float(summary["desviacion_media_pct"] or 0) if summary else 0,
                             "visitas_total": int(summary["visitas_total"] or 0) if summary else 0,
+                            "visitas_media": float(summary["visitas_media"] or 0) if summary else 0,
                             "captaciones_total": int(captacion_summary["captaciones_total"] or 0) if captacion_summary else 0,
                             "captaciones_activas": int(captacion_summary["captaciones_activas"] or 0) if captacion_summary else 0,
                             "inmuebles_total": int(inmuebles_total["total"] or 0) if inmuebles_total else 0,

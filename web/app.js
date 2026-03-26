@@ -8765,7 +8765,7 @@ const updateEstudioAltaTabs = () => {
     return;
   }
   if (!altaSection.dataset.estudioActive) {
-    altaSection.dataset.estudioActive = "bdt";
+    altaSection.dataset.estudioActive = "compraventa";
   }
   const active = altaSection.dataset.estudioActive;
   if (estudioAltaBdt) {
@@ -10199,9 +10199,13 @@ const renderDashboard = (empresaName, empresaId) => {
       data.ventas || [],
       data.ingresos || [],
       data.gastos || [],
+      data.cierres || [],
+      data.salidas || [],
       data.alquileres || [],
       data.captaciones || [],
       data.inmuebles || [],
+      data.visitas || [],
+      data.plazos || [],
     ]);
     const requestedYear =
       String(yearSelect?.value || "").trim() || String(new Date().getFullYear());
@@ -10214,6 +10218,10 @@ const renderDashboard = (empresaName, empresaId) => {
     const alquileresYear = getYearValueFromSeries(data.alquileres, currentYear);
     const captacionesYear = getYearValueFromSeries(data.captaciones || [], currentYear);
     const inmueblesYear = getYearValueFromSeries(data.inmuebles || [], currentYear);
+    const cierresYear = getYearValueFromSeries(data.cierres || [], currentYear);
+    const salidasYear = getYearValueFromSeries(data.salidas || [], currentYear);
+    const visitasYear = getYearValueFromSeries(data.visitas || [], currentYear);
+    const plazoYear = getYearValueFromSeries(data.plazos || [], currentYear);
     const facturadoAlquileresYear = (data.alquileres || []).reduce(
       (acc, item) => acc + (item.facturado || 0),
       0
@@ -10230,9 +10238,21 @@ const renderDashboard = (empresaName, empresaId) => {
             note: `${numberFormatter.format(summary.compraventas_total || 0)} operaciones en CRM`,
           },
           {
-            title: `Volumen cierre ${currentYear}`,
+            title: `Comisión ganada ${currentYear}`,
             value: euroFormatter.format(ingresosYear),
-            note: `Ticket medio ${euroFormatter.format(summary.ticket_medio || 0)}`,
+            note: `Cierre anual ${euroFormatter.format(cierresYear)}`,
+          },
+          {
+            title: `Visitas de venta ${currentYear}`,
+            value: numberFormatter.format(visitasYear),
+            note: `Media histórica ${Number(summary.visitas_media || 0).toFixed(1)} por operación`,
+          },
+          {
+            title: `Tiempo medio de venta ${currentYear}`,
+            value: plazoYear ? `${Number(plazoYear).toFixed(1)} días` : "-",
+            note: summary.plazo_medio_dias
+              ? `Media histórica ${Number(summary.plazo_medio_dias).toFixed(1)} días`
+              : "Sin fecha de encargo suficiente",
           },
           {
             title: "Captaciones activas",
@@ -10245,14 +10265,9 @@ const renderDashboard = (empresaName, empresaId) => {
             note: `${numberFormatter.format(inmueblesYear)} incorporados en ${currentYear}`,
           },
           {
-            title: "Visitas históricas",
-            value: numberFormatter.format(summary.visitas_total || 0),
-            note: `Plazo medio ${summary.plazo_medio_dias ? `${summary.plazo_medio_dias} días` : "-"}`,
-          },
-          {
             title: "Desviación media",
             value: `${Number(summary.desviacion_media_pct || 0).toFixed(2)}%`,
-            note: `Salida ${euroFormatter.format(gastosYear)} vs cierre ${euroFormatter.format(ingresosYear)}`,
+            note: `Salida ${euroFormatter.format(salidasYear)} vs cierre ${euroFormatter.format(cierresYear)}`,
           },
         ]
       : [
@@ -10291,7 +10306,10 @@ const renderDashboard = (empresaName, empresaId) => {
 
     requestAnimationFrame(() => {
       const ventasYears = buildYearIndex([data.ventas]);
-      const facturadoYears = buildYearIndex([data.ingresos, data.gastos]);
+      const facturadoYears = buildYearIndex([
+        data.ingresos,
+        isRealEstateDashboard ? (data.cierres || []) : data.gastos,
+      ]);
       const alquilerYears = buildYearIndex([
         isRealEstateDashboard ? (data.captaciones || []) : (data.alquileres || []),
       ]);
@@ -10315,17 +10333,28 @@ const renderDashboard = (empresaName, empresaId) => {
         facturadoYears,
         [
           {
-            label: isRealEstateDashboard ? "Volumen cierre" : "Facturado",
+            label: isRealEstateDashboard ? "Comisión ganada" : "Facturado",
             values: alignSeries(facturadoYears, data.ingresos),
             color: "#d7b04c",
             format: (value) => euroFormatter.format(value),
           },
-          {
-            label: isRealEstateDashboard ? "Volumen salida" : "Gastos",
-            values: alignSeries(facturadoYears, data.gastos),
-            color: "#7e8878",
-            format: (value) => euroFormatter.format(value),
-          },
+          ...(isRealEstateDashboard
+            ? [
+                {
+                  label: "Precio cierre",
+                  values: alignSeries(facturadoYears, data.cierres || []),
+                  color: "#7e8878",
+                  format: (value) => euroFormatter.format(value),
+                },
+              ]
+            : [
+                {
+                  label: "Gastos",
+                  values: alignSeries(facturadoYears, data.gastos),
+                  color: "#7e8878",
+                  format: (value) => euroFormatter.format(value),
+                },
+              ]),
         ],
         { legend: true, showValues: true }
       );
@@ -10351,12 +10380,12 @@ const renderDashboard = (empresaName, empresaId) => {
         facturadoProgress.innerHTML = `
           <div class="progress-meta">
             <span>${currentYear}: ${euroFormatter.format(ingresosYear)}</span>
-            <span>${isRealEstateDashboard ? "Cierre previo" : "Meta"} ${prevYear}: ${euroFormatter.format(prevFacturado)}</span>
+            <span>${isRealEstateDashboard ? "Comisión previa" : "Meta"} ${prevYear}: ${euroFormatter.format(prevFacturado)}</span>
           </div>
           <div class="progress-bar"><span style="width:${progress}%"></span></div>
           <div class="progress-meta">
             <span>Avance: ${progress.toFixed(1)}%</span>
-            <span>${isRealEstateDashboard ? "Comparativa anual" : `Objetivo ${prevYear}`}</span>
+            <span>${isRealEstateDashboard ? "Comparativa de comisión" : `Objetivo ${prevYear}`}</span>
           </div>
         `;
       }
