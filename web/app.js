@@ -1939,7 +1939,7 @@ const TABLE_LABELS = {
   seguros: "Seguros",
   gestoria: "Gestoría",
   captaciones: "Captación",
-  operaciones_inmobiliarias: "Operaciones Inmobiliarias",
+  operaciones_inmobiliarias: "Compraventas",
   hipotecas: "Hipotecas",
   alquileres: "Alquileres",
   inversores: "Inversores",

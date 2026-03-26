@@ -9622,6 +9622,7 @@ def ensure_tables(db_path):
           tipo_operacion TEXT NOT NULL,
           estado TEXT,
           origen TEXT,
+          origen_inmueble TEXT,
           expediente_path TEXT,
           expediente_hash TEXT UNIQUE,
           anio INTEGER,
@@ -9641,6 +9642,8 @@ def ensure_tables(db_path):
           propietario2_telefono TEXT,
           propietario2_email TEXT,
           propietario2_fecha_nacimiento TEXT,
+          contraparte1_id TEXT,
+          contraparte2_id TEXT,
           contraparte_nombre TEXT,
           contraparte_nif TEXT,
           contraparte_telefono TEXT,
@@ -9656,8 +9659,20 @@ def ensure_tables(db_path):
           precio_contrato REAL,
           precio_escritura REAL,
           precio_renta REAL,
+          desviacion_euros REAL,
+          desviacion_pct REAL,
+          dias_hasta_venta INTEGER,
+          num_visitas INTEGER,
+          honorarios REAL,
           agente TEXT,
+          responsable_gestion TEXT,
           oficina TEXT,
+          doc_nota_encargo_path TEXT,
+          doc_propuesta_path TEXT,
+          doc_escritura_path TEXT,
+          doc_nota_simple_path TEXT,
+          doc_partes_visita_paths TEXT,
+          estado_documental TEXT,
           calidad_ocr TEXT,
           notas TEXT,
           datos_extraidos_json TEXT,
@@ -9666,6 +9681,29 @@ def ensure_tables(db_path):
         )
         """
     )
+    try:
+        op_cols = [row[1] for row in conn.execute("PRAGMA table_info(operaciones_inmobiliarias)").fetchall()]
+        for col_name, col_type in {
+            "origen_inmueble": "TEXT",
+            "contraparte1_id": "TEXT",
+            "contraparte2_id": "TEXT",
+            "desviacion_euros": "REAL",
+            "desviacion_pct": "REAL",
+            "dias_hasta_venta": "INTEGER",
+            "num_visitas": "INTEGER",
+            "honorarios": "REAL",
+            "responsable_gestion": "TEXT",
+            "doc_nota_encargo_path": "TEXT",
+            "doc_propuesta_path": "TEXT",
+            "doc_escritura_path": "TEXT",
+            "doc_nota_simple_path": "TEXT",
+            "doc_partes_visita_paths": "TEXT",
+            "estado_documental": "TEXT",
+        }.items():
+            if col_name not in op_cols:
+                conn.execute(f"ALTER TABLE operaciones_inmobiliarias ADD COLUMN {col_name} {col_type}")
+    except sqlite3.Error:
+        pass
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS gestoria_docs (
@@ -10459,6 +10497,7 @@ class Handler(BaseHTTPRequestHandler):
             "inmuebles": "inmobiliaria",
             "demandas": "inmobiliaria",
             "visitas": "inmobiliaria",
+            "operaciones_inmobiliarias": "inmobiliaria",
             "movimientos": "inmobiliaria",
             "alquileres": "inmobiliaria",
         }

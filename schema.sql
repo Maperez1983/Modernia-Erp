@@ -531,6 +531,7 @@ CREATE TABLE IF NOT EXISTS operaciones_inmobiliarias (
   tipo_operacion TEXT NOT NULL,
   estado TEXT,
   origen TEXT,
+  origen_inmueble TEXT,
   expediente_path TEXT,
   expediente_hash TEXT UNIQUE,
   anio INTEGER,
@@ -550,6 +551,8 @@ CREATE TABLE IF NOT EXISTS operaciones_inmobiliarias (
   propietario2_telefono TEXT,
   propietario2_email TEXT,
   propietario2_fecha_nacimiento TEXT,
+  contraparte1_id TEXT,
+  contraparte2_id TEXT,
   contraparte_nombre TEXT,
   contraparte_nif TEXT,
   contraparte_telefono TEXT,
@@ -565,8 +568,20 @@ CREATE TABLE IF NOT EXISTS operaciones_inmobiliarias (
   precio_contrato REAL,
   precio_escritura REAL,
   precio_renta REAL,
+  desviacion_euros REAL,
+  desviacion_pct REAL,
+  dias_hasta_venta INTEGER,
+  num_visitas INTEGER,
+  honorarios REAL,
   agente TEXT,
+  responsable_gestion TEXT,
   oficina TEXT,
+  doc_nota_encargo_path TEXT,
+  doc_propuesta_path TEXT,
+  doc_escritura_path TEXT,
+  doc_nota_simple_path TEXT,
+  doc_partes_visita_paths TEXT,
+  estado_documental TEXT,
   calidad_ocr TEXT,
   notas TEXT,
   datos_extraidos_json TEXT,
@@ -575,7 +590,9 @@ CREATE TABLE IF NOT EXISTS operaciones_inmobiliarias (
   FOREIGN KEY (empresa_id) REFERENCES empresas(id),
   FOREIGN KEY (inmueble_id) REFERENCES inmuebles(id),
   FOREIGN KEY (propietario1_id) REFERENCES clientes(id),
-  FOREIGN KEY (propietario2_id) REFERENCES clientes(id)
+  FOREIGN KEY (propietario2_id) REFERENCES clientes(id),
+  FOREIGN KEY (contraparte1_id) REFERENCES clientes(id),
+  FOREIGN KEY (contraparte2_id) REFERENCES clientes(id)
 );
 
 CREATE TABLE IF NOT EXISTS inmueble_checklist (
