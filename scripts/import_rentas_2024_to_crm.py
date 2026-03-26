@@ -24,6 +24,9 @@ DEFAULT_SOURCE_DIR = (
 )
 RENTA_SERVICE = "gestoria"
 RENTA_ACTIVITY_TYPE = "Declaración en periodo"
+PDFTOTEXT_TIMEOUT_SECONDS = 20
+TESSERACT_TIMEOUT_SECONDS = 45
+PDFTOPPM_TIMEOUT_SECONDS = 45
 CRITICAL_FIELDS = (
     "cliente_nombre",
     "cliente_nif",
@@ -31,6 +34,9 @@ CRITICAL_FIELDS = (
     "ingresos_principales_total",
     "resultado_declaracion",
 )
+RENTA_MAX_REASONABLE_AMOUNT = 1_000_000.0
+RENTA_OUTLIER_RATIO = 50.0
+RENTA_MAJOR_AMOUNT_FLOOR = 1000.0
 
 
 def norm_text(value: object) -> str:
@@ -87,6 +93,152 @@ def parse_money(raw: object) -> float | None:
         return round(float(text), 2)
     except ValueError:
         return None
+
+
+def is_reasonable_renta_amount(value: object, allow_zero: bool = True) -> bool:
+    number = parse_money(value) if not isinstance(value, (int, float)) else round(float(value), 2)
+    if number is None:
+        return False
+    if allow_zero and abs(number) < 0.0001:
+        return True
+    return abs(number) <= RENTA_MAX_REASONABLE_AMOUNT
+
+
+def is_renta_amount_outlier(value: object, reference: object) -> bool:
+    candidate = parse_money(value) if not isinstance(value, (int, float)) else round(float(value), 2)
+    ref = parse_money(reference) if not isinstance(reference, (int, float)) else round(float(reference), 2)
+    if candidate is None or ref is None:
+        return False
+    if abs(candidate) < 0.0001 or abs(ref) < RENTA_MAJOR_AMOUNT_FLOOR:
+        return False
+    ratio = max(abs(candidate), abs(ref)) / max(min(abs(candidate), abs(ref)), 0.01)
+    return ratio > RENTA_OUTLIER_RATIO and min(abs(candidate), abs(ref)) < RENTA_MAJOR_AMOUNT_FLOOR
+
+
+def first_reasonable_renta_amount(values: list[object], reference: object = None, allow_zero: bool = True) -> float | None:
+    for raw in values:
+        number = parse_money(raw) if not isinstance(raw, (int, float)) else round(float(raw), 2)
+        if number is None:
+            continue
+        if not is_reasonable_renta_amount(number, allow_zero=allow_zero):
+            continue
+        if reference is not None and is_renta_amount_outlier(number, reference):
+            continue
+        return number
+    return None
+
+
+def normalize_renta_amounts(data: dict) -> dict:
+    result = dict(data or {})
+    raw_work = result.get("rendimientos_trabajo_total")
+    raw_activities = result.get("rendimientos_actividades_economicas_total")
+    raw_cap_inm = result.get("rendimientos_capital_inmobiliario_total")
+    raw_cap_mob = result.get("rendimientos_capital_mobiliario_total")
+    raw_base_general = result.get("base_imponible_general")
+    raw_base_liquidable = result.get("base_liquidable_general")
+    raw_casilla_505 = result.get("casilla_505")
+
+    major_reference = first_reasonable_renta_amount(
+        [
+            raw_casilla_505,
+            raw_base_liquidable,
+            raw_base_general,
+            raw_work,
+            raw_activities,
+            raw_cap_inm,
+            raw_cap_mob,
+        ],
+        allow_zero=False,
+    )
+
+    result["rendimientos_trabajo_total"] = first_reasonable_renta_amount([raw_work], reference=major_reference)
+    result["rendimientos_actividades_economicas_total"] = first_reasonable_renta_amount([raw_activities], reference=major_reference)
+    result["rendimientos_capital_inmobiliario_total"] = first_reasonable_renta_amount([raw_cap_inm], reference=major_reference)
+    result["rendimientos_capital_mobiliario_total"] = first_reasonable_renta_amount([raw_cap_mob], reference=major_reference)
+    result["base_imponible_general"] = first_reasonable_renta_amount([raw_base_general])
+    result["base_liquidable_general"] = first_reasonable_renta_amount([raw_base_liquidable])
+    income_reference = first_reasonable_renta_amount(
+        [
+            result.get("rendimientos_trabajo_total"),
+            result.get("rendimientos_actividades_economicas_total"),
+            result.get("rendimientos_capital_inmobiliario_total"),
+            result.get("rendimientos_capital_mobiliario_total"),
+            result.get("base_liquidable_general"),
+            result.get("base_imponible_general"),
+            raw_casilla_505,
+        ],
+        allow_zero=False,
+    )
+    result["casilla_505"] = first_reasonable_renta_amount(
+        [raw_casilla_505, raw_base_liquidable, raw_base_general],
+        reference=income_reference,
+    )
+    result["resultado_declaracion"] = first_reasonable_renta_amount([result.get("resultado_declaracion")])
+    result["ingresos_principales_total"] = first_reasonable_renta_amount(
+        [
+            result.get("ingresos_principales_total"),
+            result.get("rendimientos_trabajo_total"),
+            result.get("rendimientos_actividades_economicas_total"),
+            result.get("rendimientos_capital_inmobiliario_total"),
+            result.get("rendimientos_capital_mobiliario_total"),
+            result.get("casilla_505"),
+            result.get("base_liquidable_general"),
+            result.get("base_imponible_general"),
+        ],
+        reference=result.get("casilla_505") or major_reference,
+    )
+    return result
+
+
+def renta_validation_flags(record: dict) -> list[str]:
+    flags: list[str] = []
+    incomes = [
+        record.get("rendimientos_trabajo_total"),
+        record.get("rendimientos_actividades_economicas_total"),
+        record.get("rendimientos_capital_inmobiliario_total"),
+        record.get("rendimientos_capital_mobiliario_total"),
+    ]
+    present_incomes = [value for value in incomes if value not in (None, "")]
+    if any(not is_reasonable_renta_amount(value) for value in present_incomes):
+        flags.append("importe_fuera_rango")
+    casilla_505 = record.get("casilla_505")
+    if casilla_505 not in (None, "") and not is_reasonable_renta_amount(casilla_505):
+        flags.append("casilla_505_fuera_rango")
+    resultado = record.get("resultado_declaracion")
+    if resultado not in (None, "") and not is_reasonable_renta_amount(resultado):
+        flags.append("resultado_fuera_rango")
+    if casilla_505 not in (None, ""):
+        for value in present_incomes:
+            if is_renta_amount_outlier(value, casilla_505):
+                flags.append("renta_incoherente")
+                break
+    return flags
+
+
+def renta_normalization_changed(original: dict, normalized: dict) -> bool:
+    fields = (
+        "ingresos_principales_total",
+        "rendimientos_trabajo_total",
+        "rendimientos_actividades_economicas_total",
+        "rendimientos_capital_inmobiliario_total",
+        "rendimientos_capital_mobiliario_total",
+        "casilla_505",
+        "base_imponible_general",
+        "base_liquidable_general",
+        "resultado_declaracion",
+    )
+    for field in fields:
+        before = original.get(field)
+        if before in (None, "", [], {}):
+            continue
+        after = normalized.get(field)
+        before_num = parse_money(before) if not isinstance(before, (int, float)) else round(float(before), 2)
+        after_num = parse_money(after) if not isinstance(after, (int, float)) else round(float(after), 2)
+        if before_num is None and after_num is None:
+            continue
+        if before_num != after_num:
+            return True
+    return False
 
 
 def parse_date_ddmmyyyy(raw: object) -> str:
@@ -225,12 +377,16 @@ def extract_iban_accounts(text: str) -> list[str]:
 
 
 def run_pdftotext(pdf_path: Path) -> str:
-    proc = subprocess.run(
-        ["pdftotext", str(pdf_path), "-"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        proc = subprocess.run(
+            ["pdftotext", str(pdf_path), "-"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=PDFTOTEXT_TIMEOUT_SECONDS,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return ""
     if proc.returncode != 0:
         return ""
     return proc.stdout or ""
@@ -240,22 +396,30 @@ def run_tesseract_ocr(pdf_path: Path) -> str:
     try:
         with tempfile.TemporaryDirectory() as tmpdir:
             prefix = Path(tmpdir) / "page"
-            proc = subprocess.run(
-                ["pdftoppm", "-r", "300", "-png", str(pdf_path), str(prefix)],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
+            try:
+                proc = subprocess.run(
+                    ["pdftoppm", "-r", "300", "-png", str(pdf_path), str(prefix)],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=PDFTOPPM_TIMEOUT_SECONDS,
+                )
+            except subprocess.TimeoutExpired:
+                return ""
             if proc.returncode != 0:
                 return ""
             chunks = []
             for image_path in sorted(Path(tmpdir).glob("*.png")):
-                ocr = subprocess.run(
-                    ["tesseract", str(image_path), "stdout", "-l", "spa+eng"],
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                )
+                try:
+                    ocr = subprocess.run(
+                        ["tesseract", str(image_path), "stdout", "-l", "spa+eng"],
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                        timeout=TESSERACT_TIMEOUT_SECONDS,
+                    )
+                except subprocess.TimeoutExpired:
+                    continue
                 if ocr.returncode == 0 and compact_spaces(ocr.stdout):
                     chunks.append(ocr.stdout)
             return "\n".join(chunks)
@@ -671,7 +835,7 @@ def parse_modelo_100_text(text: str) -> dict:
     prestamo = re.search(r"Nº de identificación del préstamo hipotecario\s+([A-Z0-9]+)\s+0709\b", text)
     if prestamo:
         data["prestamo_hipotecario_id"] = prestamo.group(1)
-    return data
+    return normalize_renta_amounts(data)
 
 
 def parse_datos_fiscales_text(text: str) -> dict:
@@ -880,7 +1044,8 @@ def should_skip_auxiliary_record(record: dict) -> bool:
 
 
 def finalize_record(record: dict) -> dict:
-    result = dict(record)
+    raw_record = dict(record)
+    result = normalize_renta_amounts(record)
     result["source_files"] = sorted(result.get("source_files") or [])
     result["source_file_count"] = len(result["source_files"])
     result["source_types"] = sorted(result.get("source_types") or [])
@@ -896,6 +1061,11 @@ def finalize_record(record: dict) -> dict:
         flags.append("nombre_desde_filename")
     if critical_missing:
         flags.append("faltan_campos_criticos")
+    if renta_normalization_changed(raw_record, result):
+        flags.append("renta_corregida")
+    for flag in renta_validation_flags(result):
+        if flag not in flags:
+            flags.append(flag)
     score = 0
     if "modelo_100" in result["source_types"]:
         score += 30
@@ -914,9 +1084,12 @@ def finalize_record(record: dict) -> dict:
         score -= 20
     if result["source_types"] == ["pdf_desconocido"]:
         score -= 30
+    if any(flag in flags for flag in ("importe_fuera_rango", "casilla_505_fuera_rango", "resultado_fuera_rango", "renta_incoherente", "renta_corregida")):
+        score -= 35
     score = max(0, min(100, score))
     safe_to_apply = (
         not critical_missing
+        and not any(flag in flags for flag in ("importe_fuera_rango", "casilla_505_fuera_rango", "resultado_fuera_rango", "renta_incoherente", "renta_corregida"))
         and result.get("cliente_nombre_source") != "filename"
         and any(kind in result["source_types"] for kind in ("modelo_100", "datos_fiscales"))
     )
@@ -1450,7 +1623,10 @@ def scan_folder(source_dir: Path, limit: int = 0) -> list[dict]:
     pdfs = sorted(source_dir.rglob("*.pdf"))
     if limit > 0:
         pdfs = pdfs[:limit]
-    for pdf_path in pdfs:
+    total = len(pdfs)
+    for idx, pdf_path in enumerate(pdfs, start=1):
+        if idx == 1 or idx % 25 == 0 or idx == total:
+            print(f"[rentas] Procesando PDF {idx}/{total}: {pdf_path.name}", file=sys.stderr)
         fields = parse_pdf(pdf_path)
         key = build_record_key(fields, pdf_path)
         if not key:

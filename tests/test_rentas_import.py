@@ -157,6 +157,21 @@ PAGOS FRACCIONADOS DE EMPRESAS Y PROFESIONALES
 """
 
 
+MODELO_INCOHERENT_AMOUNTS_SAMPLE = """
+INFORMACIÓN DE LA PRESENTACIÓN DE LA DECLARACIÓN
+Modelo 100
+Impuesto sobre la Renta de las Personas Físicas
+52588440K 0001
+AGUAYO COBO SAUL 0002
+Hombre 0005
+(1) Soltero/a 0006
+01/01/1980 0010
+13.809,24 0505
+868,32 0670
+2.643.216,00 1484
+"""
+
+
 def create_test_schema(db_path: Path) -> None:
     conn = sqlite3.connect(str(db_path))
     try:
@@ -350,6 +365,13 @@ class RentasImportTests(unittest.TestCase):
         self.assertAlmostEqual(parsed["rendimientos_capital_inmobiliario_total"], 12729.24, places=2)
         self.assertAlmostEqual(parsed["ingresos_principales_total"], 12729.24, places=2)
 
+    def test_parse_modelo_100_normalizes_incoherent_activity_amounts(self):
+        parsed = parse_modelo_100_text(MODELO_INCOHERENT_AMOUNTS_SAMPLE)
+        self.assertEqual(parsed["casilla_505"], 13809.24)
+        self.assertEqual(parsed["resultado_declaracion"], 868.32)
+        self.assertIsNone(parsed.get("rendimientos_actividades_economicas_total"))
+        self.assertAlmostEqual(parsed["ingresos_principales_total"], 13809.24, places=2)
+
     def test_parse_modelo_100_rebuilds_result_from_installments(self):
         text = """
         Modelo 100
@@ -512,6 +534,27 @@ class RentasImportTests(unittest.TestCase):
         queue = build_review_queue([safe, review])
         self.assertEqual(len(queue), 1)
         self.assertEqual(queue[0]["cliente_nombre"], "CLIENTE DUDOSO")
+
+    def test_finalize_record_marks_incoherent_renta_amounts_for_review(self):
+        record = finalize_record(
+            {
+                "cliente_nombre": "CLIENTE DUDOSO",
+                "cliente_nombre_source": "modelo_100",
+                "cliente_nif": "11111111H",
+                "cliente_fecha_nacimiento": "1980-01-01",
+                "ingresos_principales_total": 9000000.0,
+                "rendimientos_trabajo_total": 7876.22,
+                "rendimientos_actividades_economicas_total": 9000000.0,
+                "casilla_505": 14.64,
+                "resultado_declaracion": 1577.18,
+                "source_types": ["modelo_100"],
+                "source_files": ["/tmp/incoherente.pdf"],
+            }
+        )
+        self.assertFalse(record["safe_to_apply"])
+        self.assertIn("renta_corregida", record["review_flags"])
+        self.assertEqual(record["ingresos_principales_total"], 7876.22)
+        self.assertIsNone(record["casilla_505"])
 
     def test_apply_to_db_only_imports_safe_records_and_avoids_duplicates(self):
         with tempfile.TemporaryDirectory() as tmpdir:
