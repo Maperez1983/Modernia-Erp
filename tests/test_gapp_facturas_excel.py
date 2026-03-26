@@ -82,6 +82,11 @@ class GappFacturasExcelTests(unittest.TestCase):
         kind = detect_document_type(path, "Cliente GAPP\nTOTAL FACTURA 45,79", {"tipo": "venta"})
         self.assertEqual(kind, "compra")
 
+    def test_detect_document_type_marks_materials_image_as_compra(self):
+        path = Path("/tmp/Materiales 26.02.2026.jpeg")
+        kind = detect_document_type(path, "Cliente GAPP\nimporte 12,49", {"tipo": "venta"})
+        self.assertEqual(kind, "compra")
+
     def test_prefilter_marks_materiales_as_suministros(self):
         path = Path("/tmp/Materiales 26.02.2026.jpeg")
         category, confidence, _reason = preclassify_from_filename(path)
@@ -142,6 +147,72 @@ class GappFacturasExcelTests(unittest.TestCase):
         )
         self.assertEqual(state, "OK")
         self.assertEqual(reasons, "")
+
+    def test_review_record_marks_implausible_vat(self):
+        state, reasons = review_record(
+            {
+                "categoria_excel": "SUMINISTROS",
+                "importe_agregado": 9.0,
+                "confianza_categoria": 0.96,
+                "ocr_metodo": "ocr_image_file",
+                "tercero": "OBRAMAT",
+                "fecha": "2026-01-09",
+                "motivo_categoria": "proveedor:OBRAMAT",
+                "archivo": "Factura Obramat 09.01.2026.jpg.jpeg",
+                "numero": "09",
+                "tipo": "compra",
+                "base_imponible": 9.0,
+                "cuota_iva": 21.0,
+                "total": 9.0,
+            },
+            target_year=2026,
+        )
+        self.assertEqual(state, "REVISAR")
+        self.assertIn("iva_inverosimil", reasons)
+
+    def test_review_record_marks_expense_detected_as_sale(self):
+        state, reasons = review_record(
+            {
+                "categoria_excel": "SUMINISTROS",
+                "importe_agregado": 40.39,
+                "confianza_categoria": 0.96,
+                "ocr_metodo": "ocr_image_file",
+                "tercero": "COMASUR",
+                "fecha": "2026-02-09",
+                "motivo_categoria": "proveedor:COMASUR",
+                "archivo": "Material limpieza 9.02.2026.jpeg",
+                "numero": "GAPP",
+                "tipo": "venta",
+                "base_imponible": 40.39,
+                "cuota_iva": 0.0,
+                "total": 40.39,
+            },
+            target_year=2026,
+        )
+        self.assertEqual(state, "REVISAR")
+        self.assertIn("tipo_venta_en_gasto", reasons)
+
+    def test_review_record_marks_suspicious_invoice_number(self):
+        state, reasons = review_record(
+            {
+                "categoria_excel": "SUMINISTROS",
+                "importe_agregado": 99.55,
+                "confianza_categoria": 0.96,
+                "ocr_metodo": "ocr_image_file",
+                "tercero": "OBRAMAT",
+                "fecha": "2026-03-02",
+                "motivo_categoria": "proveedor:OBRAMAT",
+                "archivo": "Obramat 2.03.2026.jpeg",
+                "numero": "emitida",
+                "tipo": "compra",
+                "base_imponible": 99.55,
+                "cuota_iva": 0.0,
+                "total": 99.55,
+            },
+            target_year=2026,
+        )
+        self.assertEqual(state, "REVISAR")
+        self.assertIn("numero_dudoso", reasons)
 
     def test_review_record_ignores_non_template_categories(self):
         state, reasons = review_record(

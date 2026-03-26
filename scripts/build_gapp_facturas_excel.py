@@ -93,6 +93,25 @@ TRUSTED_OCR_SUPPLIERS = (
     "ACTIVOS INMOBILIARIOS GILDUSA",
     "AUTOMATISMO MARBELLA",
 )
+EXPENSE_TEMPLATE_CATEGORIES = set(TEMPLATE_CATEGORY_ROWS)
+INVALID_NUMBER_TOKENS = {
+    "PAGADO",
+    "EMITIDA",
+    "CALLE",
+    "SIMPLIFICADA",
+    "FACTURA",
+    "GAPP",
+    "ORIGINAL",
+}
+INVALID_VENDOR_TOKENS = {
+    "Q",
+    "QO",
+    "Q°",
+    "ORIGINAL",
+    "PAGADO",
+    "EMITIDA",
+    "MES FEBRERO",
+}
 
 
 def norm(value: Any) -> str:
@@ -167,7 +186,9 @@ def detect_document_type(path: Path, text: str, parsed: dict[str, Any]) -> str:
     haystack = norm(text)
     if "FACTURA_GAPP" in filename or "GESTIONES COMERCIALES" in haystack:
         return "venta"
-    if any(token in filename for token in ("COMBUSTIBLE", "PARKING", "PEAJE", "REPOSTAJE", "HOTEL", "OPTIMUS", "OBRAMAT", "HTM", "LEROY", "MANDOS", "ARRENDAMIENTO", "ALQUILER")):
+    if any(token in filename for token in ("COMBUSTIBLE", "PARKING", "PEAJE", "REPOSTAJE", "HOTEL", "OPTIMUS", "OBRAMAT", "HTM", "LEROY", "MANDOS", "ARRENDAMIENTO", "ALQUILER", "MATERIAL", "MATERIALES", "LIMPIEZA", "CERRAJER", "ROPA TRABAJO")):
+        return "compra"
+    if any(token in haystack for token in ("OPTIMUS", "OBRAMAT", "HTM", "LEROY", "GILDUSA", "COMASUR", "ADAIRA", "AUTOMATISMO MARBELLA", "INTHER")):
         return "compra"
     if "TOTAL A COBRAR" in haystack or "FACTURA EMITIDA" in haystack:
         return "venta"
@@ -208,6 +229,52 @@ def infer_vendor(text: str, source_path: Path) -> str:
 
 def looks_like_own_company(name: str) -> bool:
     return "GAPP" in norm(name)
+
+
+def looks_like_suspicious_invoice_number(value: str) -> bool:
+    token = norm(value)
+    if not token:
+        return False
+    if token in INVALID_NUMBER_TOKENS:
+        return True
+    if re.fullmatch(r"\d{1,2}", token):
+        return True
+    if re.fullmatch(r"\d{4}", token):
+        return True
+    return False
+
+
+def looks_like_suspicious_vendor(value: str) -> bool:
+    token = norm(value)
+    if not token:
+        return True
+    if token in INVALID_VENDOR_TOKENS:
+        return True
+    if len(token) <= 3:
+        return True
+    letters = re.sub(r"[^A-Z]", "", token)
+    if len(letters) <= 2:
+        return True
+    return False
+
+
+def is_implausible_vat(base: float, cuota_iva: float, total: float) -> bool:
+    base = float(base or 0.0)
+    cuota_iva = float(cuota_iva or 0.0)
+    total = float(total or 0.0)
+    if cuota_iva < 0:
+        return True
+    if cuota_iva <= 0:
+        return False
+    if total > 0 and cuota_iva > total + 0.01:
+        return True
+    if base > 0:
+        iva_pct = cuota_iva / max(base, 0.01)
+        if iva_pct > 0.30:
+            return True
+        if total > 0 and abs((base + cuota_iva) - total) > max(1.0, total * 0.15):
+            return True
+    return False
 
 
 def extract_text(path: Path, pdf_pages: int = 2) -> tuple[str, str, str]:
@@ -378,6 +445,13 @@ def enrich_parsed(path: Path, text: str, parsed: dict[str, Any]) -> dict[str, An
     if not result.get("numero"):
         number = re.search(r"\b([A-Z]{0,4}\d{2,}[A-Z0-9/\-]*)\b", norm(path.stem))
         result["numero"] = number.group(1) if number else path.stem[:60]
+    if looks_like_suspicious_invoice_number(result.get("numero") or ""):
+        alt_number_match = re.search(
+            r"(?:FACTURA|FRA|N[OU]?M(?:ERO)?)[^A-Z0-9]{0,8}([A-Z]{1,4}[\d/\-]{2,}[A-Z0-9/\-]*)",
+            norm(text),
+        )
+        alt_number = alt_number_match.group(1) if alt_number_match else ""
+        result["numero"] = alt_number if alt_number and not looks_like_suspicious_invoice_number(alt_number) else ""
     total = float(result.get("total") or 0.0)
     if total <= 0:
         total = extract_amount_by_labels(
@@ -474,6 +548,11 @@ def review_record(record: dict[str, Any], target_year: int | None = None) -> tup
     vendor = norm(record.get("tercero") or "")
     fecha = str(record.get("fecha") or "")
     motivo = str(record.get("motivo_categoria") or "")
+    tipo = str(record.get("tipo") or "").strip().lower()
+    numero = str(record.get("numero") or "").strip()
+    base = float(record.get("base_imponible") or 0.0)
+    cuota_iva = float(record.get("cuota_iva") or 0.0)
+    total = float(record.get("total") or 0.0)
 
     if category in {"ALQUILER LOCAL", "SUMINISTROS"} and amount <= 0:
         flags.append("importe_cero")
@@ -493,9 +572,21 @@ def review_record(record: dict[str, Any], target_year: int | None = None) -> tup
         flags.append("proveedor_dudoso")
     if category == "SUMINISTROS" and any(token in motivo for token in ("regla:AGUA", "regla:TELEFONO")):
         flags.append("regla_generica")
+    if category in EXPENSE_TEMPLATE_CATEGORIES and tipo == "venta":
+        flags.append("tipo_venta_en_gasto")
+    if looks_like_suspicious_invoice_number(numero):
+        flags.append("numero_dudoso")
+    if looks_like_suspicious_vendor(record.get("tercero") or "") and not trusted_ocr:
+        flags.append("proveedor_dudoso")
+    if is_implausible_vat(base, cuota_iva, total):
+        flags.append("iva_inverosimil")
 
     state = "OK" if not flags else "REVISAR"
-    return state, ",".join(flags)
+    deduped = []
+    for flag in flags:
+        if flag not in deduped:
+            deduped.append(flag)
+    return state, ",".join(deduped)
 
 
 def canonical_filename_stem(filename: str) -> str:
@@ -586,6 +677,10 @@ def scan_documents(input_dir: Path, pdf_pages: int = 2, limit: int = 0) -> list[
             category, confidence, reason = classify_record(path, parsed)
             if pre_category and category == "SIN_CATEGORIA":
                 category, confidence, reason = pre_category, pre_confidence, pre_reason
+        if category in EXPENSE_TEMPLATE_CATEGORIES and parsed.get("tipo") == "venta":
+            parsed["tipo"] = "compra"
+        if category == "INGRESO":
+            parsed["tipo"] = "venta"
         amount = round(float(parsed.get("total") or parsed.get("base_imponible") or 0.0), 2)
         records.append(
             {

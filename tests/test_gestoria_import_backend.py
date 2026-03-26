@@ -218,6 +218,41 @@ class GestoriaImportBackendTests(unittest.TestCase):
         self.assertTrue(doc["tercero_id"])
         self.assertEqual(doc["estado_revision"], "OK")
 
+    def test_apply_lote_rejects_invalid_vat_or_type(self):
+        upsert_gestoria_import_document(
+            self.conn,
+            "l1",
+            "e1",
+            "c1",
+            {
+                "archivo": "factura_obramat_bad.jpg",
+                "fecha": "2026-01-09",
+                "numero": "09",
+                "tercero": "Q° ~",
+                "tipo": "venta",
+                "base_imponible": 9.0,
+                "cuota_iva": 21.0,
+                "total": 9.0,
+                "categoria_excel": "SUMINISTROS",
+                "estado_revision": "OK",
+            },
+            self.now,
+        )
+        result = apply_gestoria_import_lote(self.conn, "l1", "e1", self.now)
+        self.assertEqual(len(result["applied"]), 0)
+        self.assertEqual(len(result["errors"]), 1)
+
+        doc = self.conn.execute(
+            "SELECT estado_revision, motivos_revision FROM gestoria_import_documentos LIMIT 1"
+        ).fetchone()
+        self.assertEqual(doc["estado_revision"], "ERROR")
+        self.assertIn("error_aplicacion", doc["motivos_revision"])
+
+        factura_count = self.conn.execute(
+            "SELECT COUNT(*) AS n FROM gestoria_facturas"
+        ).fetchone()["n"]
+        self.assertEqual(factura_count, 0)
+
 
 if __name__ == "__main__":
     unittest.main()
