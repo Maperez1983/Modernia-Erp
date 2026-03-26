@@ -1162,6 +1162,11 @@ const state = {
   gestoriaClienteContaTab: "operativa",
   gestoriaClienteLibroTab: "diario",
   gestoriaClienteLibrosCache: null,
+  gestoriaImportSelectedLoteId: "",
+  gestoriaImportSelectedDocumentoId: "",
+  gestoriaImportEstadoFilter: "",
+  gestoriaImportCurrentLotes: [],
+  gestoriaImportCurrentDocs: [],
 };
 
 const empresaSelect = document.getElementById("empresaSelect");
@@ -1500,10 +1505,15 @@ const gestoriaModuleContabilidad = document.getElementById("gestoriaModuleContab
 const gestoriaContaInnerTabs = document.getElementById("gestoriaContaInnerTabs");
 const gestoriaImportRefreshBtn = document.getElementById("gestoriaImportRefreshBtn");
 const gestoriaImportQueueBtn = document.getElementById("gestoriaImportQueueBtn");
+const gestoriaImportApplyBtn = document.getElementById("gestoriaImportApplyBtn");
+const gestoriaImportEstadoFilter = document.getElementById("gestoriaImportEstadoFilter");
+const gestoriaImportSelectedLoteMeta = document.getElementById("gestoriaImportSelectedLoteMeta");
 const gestoriaImportLotesTable = document.getElementById("gestoriaImportLotesTable");
 const gestoriaImportLotesInfo = document.getElementById("gestoriaImportLotesInfo");
 const gestoriaImportDocsTable = document.getElementById("gestoriaImportDocsTable");
 const gestoriaImportDocsInfo = document.getElementById("gestoriaImportDocsInfo");
+const gestoriaImportReviewForm = document.getElementById("gestoriaImportReviewForm");
+const gestoriaImportReviewStatus = document.getElementById("gestoriaImportReviewStatus");
 const gestoriaModuleFiscal = document.getElementById("gestoriaModuleFiscal");
 const gestoriaModuleLaboral = document.getElementById("gestoriaModuleLaboral");
 const gestoriaModuleRenta = document.getElementById("gestoriaModuleRenta");
@@ -10185,39 +10195,88 @@ const renderDashboard = (empresaName, empresaId) => {
 
   api(`/api/dashboard?empresa_id=${empresaId}`).then((data) => {
     lastDashboardData = data;
-    const currentYear = String(new Date().getFullYear());
+    const availableYears = buildYearIndex([
+      data.ventas || [],
+      data.ingresos || [],
+      data.gastos || [],
+      data.alquileres || [],
+      data.captaciones || [],
+      data.inmuebles || [],
+    ]);
+    const requestedYear =
+      String(yearSelect?.value || "").trim() || String(new Date().getFullYear());
+    const currentYear = availableYears.includes(requestedYear)
+      ? requestedYear
+      : (availableYears[availableYears.length - 1] || requestedYear);
     const ventasYear = getYearValueFromSeries(data.ventas, currentYear);
     const ingresosYear = getYearValueFromSeries(data.ingresos, currentYear);
     const gastosYear = getYearValueFromSeries(data.gastos, currentYear);
     const alquileresYear = getYearValueFromSeries(data.alquileres, currentYear);
-    const facturadoAlquileresYear = data.alquileres.reduce(
+    const captacionesYear = getYearValueFromSeries(data.captaciones || [], currentYear);
+    const inmueblesYear = getYearValueFromSeries(data.inmuebles || [], currentYear);
+    const facturadoAlquileresYear = (data.alquileres || []).reduce(
       (acc, item) => acc + (item.facturado || 0),
       0
     );
+    const isRealEstateDashboard = data?.mode === "inmobiliaria";
+    const summary = data?.summary || {};
 
     dashboardKpis.innerHTML = "";
-    const kpis = [
-      {
-        title: `Ventas ${currentYear}`,
-        value: numberFormatter.format(ventasYear),
-        note: "Operaciones COMPRAVENTA",
-      },
-      {
-        title: `Facturado ${currentYear}`,
-        value: euroFormatter.format(ingresosYear),
-        note: "Ingresos BDT",
-      },
-      {
-        title: `Gastos ${currentYear}`,
-        value: euroFormatter.format(gastosYear),
-        note: "Gastos BDT",
-      },
-      {
-        title: `Alquileres ${currentYear}`,
-        value: numberFormatter.format(alquileresYear),
-        note: `${euroFormatter.format(facturadoAlquileresYear)} facturados`,
-      },
-    ];
+    const kpis = isRealEstateDashboard
+      ? [
+          {
+            title: `Compraventas ${currentYear}`,
+            value: numberFormatter.format(ventasYear),
+            note: `${numberFormatter.format(summary.compraventas_total || 0)} operaciones en CRM`,
+          },
+          {
+            title: `Volumen cierre ${currentYear}`,
+            value: euroFormatter.format(ingresosYear),
+            note: `Ticket medio ${euroFormatter.format(summary.ticket_medio || 0)}`,
+          },
+          {
+            title: "Captaciones activas",
+            value: numberFormatter.format(summary.captaciones_activas || 0),
+            note: `${numberFormatter.format(captacionesYear)} registradas en ${currentYear}`,
+          },
+          {
+            title: "Inmuebles CRM",
+            value: numberFormatter.format(summary.inmuebles_total || 0),
+            note: `${numberFormatter.format(inmueblesYear)} incorporados en ${currentYear}`,
+          },
+          {
+            title: "Visitas históricas",
+            value: numberFormatter.format(summary.visitas_total || 0),
+            note: `Plazo medio ${summary.plazo_medio_dias ? `${summary.plazo_medio_dias} días` : "-"}`,
+          },
+          {
+            title: "Desviación media",
+            value: `${Number(summary.desviacion_media_pct || 0).toFixed(2)}%`,
+            note: `Salida ${euroFormatter.format(gastosYear)} vs cierre ${euroFormatter.format(ingresosYear)}`,
+          },
+        ]
+      : [
+          {
+            title: `Ventas ${currentYear}`,
+            value: numberFormatter.format(ventasYear),
+            note: "Operaciones COMPRAVENTA",
+          },
+          {
+            title: `Facturado ${currentYear}`,
+            value: euroFormatter.format(ingresosYear),
+            note: "Ingresos BDT",
+          },
+          {
+            title: `Gastos ${currentYear}`,
+            value: euroFormatter.format(gastosYear),
+            note: "Gastos BDT",
+          },
+          {
+            title: `Alquileres ${currentYear}`,
+            value: numberFormatter.format(alquileresYear),
+            note: `${euroFormatter.format(facturadoAlquileresYear)} facturados`,
+          },
+        ];
 
     kpis.forEach((kpi) => {
       const card = document.createElement("div");
@@ -10233,14 +10292,16 @@ const renderDashboard = (empresaName, empresaId) => {
     requestAnimationFrame(() => {
       const ventasYears = buildYearIndex([data.ventas]);
       const facturadoYears = buildYearIndex([data.ingresos, data.gastos]);
-      const alquilerYears = buildYearIndex([data.alquileres]);
+      const alquilerYears = buildYearIndex([
+        isRealEstateDashboard ? (data.captaciones || []) : (data.alquileres || []),
+      ]);
 
       drawBarChart(
         ventasChart,
         ventasYears,
         [
           {
-            label: "Ventas",
+            label: isRealEstateDashboard ? "Compraventas" : "Ventas",
             values: alignSeries(ventasYears, data.ventas),
             color: "#824c45",
             format: (value) => numberFormatter.format(value),
@@ -10254,13 +10315,13 @@ const renderDashboard = (empresaName, empresaId) => {
         facturadoYears,
         [
           {
-            label: "Facturado",
+            label: isRealEstateDashboard ? "Volumen cierre" : "Facturado",
             values: alignSeries(facturadoYears, data.ingresos),
             color: "#d7b04c",
             format: (value) => euroFormatter.format(value),
           },
           {
-            label: "Gastos",
+            label: isRealEstateDashboard ? "Volumen salida" : "Gastos",
             values: alignSeries(facturadoYears, data.gastos),
             color: "#7e8878",
             format: (value) => euroFormatter.format(value),
@@ -10274,8 +10335,8 @@ const renderDashboard = (empresaName, empresaId) => {
         alquilerYears,
         [
           {
-            label: "Alquileres",
-            values: alignSeries(alquilerYears, data.alquileres),
+            label: isRealEstateDashboard ? "Captaciones" : "Alquileres",
+            values: alignSeries(alquilerYears, isRealEstateDashboard ? (data.captaciones || []) : data.alquileres),
             color: "#cca33c",
             format: (value) => numberFormatter.format(value),
           },
@@ -10290,18 +10351,18 @@ const renderDashboard = (empresaName, empresaId) => {
         facturadoProgress.innerHTML = `
           <div class="progress-meta">
             <span>${currentYear}: ${euroFormatter.format(ingresosYear)}</span>
-            <span>Meta ${prevYear}: ${euroFormatter.format(prevFacturado)}</span>
+            <span>${isRealEstateDashboard ? "Cierre previo" : "Meta"} ${prevYear}: ${euroFormatter.format(prevFacturado)}</span>
           </div>
           <div class="progress-bar"><span style="width:${progress}%"></span></div>
           <div class="progress-meta">
             <span>Avance: ${progress.toFixed(1)}%</span>
-            <span>Objetivo ${prevYear}</span>
+            <span>${isRealEstateDashboard ? "Comparativa anual" : `Objetivo ${prevYear}`}</span>
           </div>
         `;
       }
 
       const ventasVar = computeVariations(data.ventas);
-      const alquilerVar = computeVariations(data.alquileres);
+      const alquilerVar = computeVariations(isRealEstateDashboard ? (data.captaciones || []) : data.alquileres);
       const facturadoVar = computeVariations(data.ingresos);
 
       drawSignedBarChart(
@@ -17382,17 +17443,83 @@ const loadGestoriaClienteContaResultados = (clienteId) => {
   });
 };
 
+const getGestoriaImportSelectedDoc = () =>
+  (state.gestoriaImportCurrentDocs || []).find((row) => row.id === state.gestoriaImportSelectedDocumentoId) || null;
+
+const fillGestoriaImportSelectedLoteMeta = (row) => {
+  if (!gestoriaImportSelectedLoteMeta) return;
+  if (!row) {
+    gestoriaImportSelectedLoteMeta.innerHTML = "<p class='muted'>Sin lote seleccionado.</p>";
+    return;
+  }
+  const items = [
+    ["Lote", row.id],
+    ["Estado", row.estado || "-"],
+    ["Periodo", row.periodo || "-"],
+    ["Docs", row.total_documentos || 0],
+    ["OK", row.total_ok || 0],
+    ["Revisar", row.total_revisar || 0],
+    ["Error", row.total_error || 0],
+  ];
+  gestoriaImportSelectedLoteMeta.innerHTML = items
+    .map(
+      ([label, value]) => `
+        <div class="inline-row">
+          <div class="muted">${label}</div>
+          <div>${value}</div>
+        </div>
+      `
+    )
+    .join("");
+};
+
+const fillGestoriaImportReviewForm = (row) => {
+  if (!gestoriaImportReviewForm) return;
+  const doc = row || null;
+  const setValue = (name, value) => {
+    const input = gestoriaImportReviewForm.querySelector(`[name="${name}"]`);
+    if (input) input.value = value ?? "";
+  };
+  if (!doc) {
+    gestoriaImportReviewForm.reset();
+    if (gestoriaImportReviewStatus) gestoriaImportReviewStatus.textContent = "Selecciona un documento.";
+    return;
+  }
+  setValue("estado_revision", doc.estado_revision || "REVISAR");
+  setValue("tipo_detectado", doc.tipo_detectado || "compra");
+  setValue("categoria_detectada", doc.categoria_detectada || "");
+  setValue("cuenta_sugerida", doc.cuenta_sugerida || "");
+  setValue("tercero_detectado", doc.tercero_detectado || doc.tercero_nombre || "");
+  setValue("nif_detectado", doc.nif_detectado || "");
+  setValue("numero_detectado", doc.numero_detectado || "");
+  setValue("fecha_detectada", doc.fecha_detectada || "");
+  setValue("base_detectada", doc.base_detectada ?? "");
+  setValue("cuota_iva_detectada", doc.cuota_iva_detectada ?? "");
+  setValue("total_detectado", doc.total_detectado ?? "");
+  setValue("motivos_revision", doc.motivos_revision || "");
+  if (gestoriaImportReviewStatus) {
+    gestoriaImportReviewStatus.textContent = `Documento seleccionado: ${doc.archivo_nombre || doc.id}`;
+  }
+};
+
 const renderGestoriaImportDocsTable = (rows = []) => {
   if (!gestoriaImportDocsTable) return;
   if (!rows.length) {
     gestoriaImportDocsTable.innerHTML = "<p class='muted'>Sin documentos en el lote seleccionado.</p>";
     if (gestoriaImportDocsInfo) gestoriaImportDocsInfo.textContent = "";
+    state.gestoriaImportCurrentDocs = [];
+    state.gestoriaImportSelectedDocumentoId = "";
+    fillGestoriaImportReviewForm(null);
     return;
+  }
+  state.gestoriaImportCurrentDocs = rows;
+  if (!rows.some((row) => row.id === state.gestoriaImportSelectedDocumentoId)) {
+    state.gestoriaImportSelectedDocumentoId = rows[0]?.id || "";
   }
   const table = document.createElement("table");
   const thead = document.createElement("thead");
   const trHead = document.createElement("tr");
-  ["Fecha", "Archivo", "Estado", "Categoría", "Tercero", "Número", "Total", "Factura"].forEach((col) => {
+  ["Fecha", "Archivo", "Estado", "Categoría", "Tercero", "Número", "Total", "Factura", ""].forEach((col) => {
     const th = document.createElement("th");
     th.textContent = col;
     trHead.appendChild(th);
@@ -17402,6 +17529,7 @@ const renderGestoriaImportDocsTable = (rows = []) => {
   const tbody = document.createElement("tbody");
   rows.forEach((row) => {
     const tr = document.createElement("tr");
+    if (row.id === state.gestoriaImportSelectedDocumentoId) tr.classList.add("active");
     const values = [
       row.fecha_detectada || "-",
       row.archivo_nombre || "-",
@@ -17417,11 +17545,24 @@ const renderGestoriaImportDocsTable = (rows = []) => {
       td.textContent = value;
       tr.appendChild(td);
     });
+    const actionTd = document.createElement("td");
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = row.id === state.gestoriaImportSelectedDocumentoId ? "secondary" : "ghost";
+    btn.textContent = "Revisar";
+    btn.addEventListener("click", () => {
+      state.gestoriaImportSelectedDocumentoId = row.id;
+      fillGestoriaImportReviewForm(row);
+      renderGestoriaImportDocsTable(state.gestoriaImportCurrentDocs || []);
+    });
+    actionTd.appendChild(btn);
+    tr.appendChild(actionTd);
     tbody.appendChild(tr);
   });
   table.appendChild(tbody);
   gestoriaImportDocsTable.innerHTML = "";
   gestoriaImportDocsTable.appendChild(table);
+  fillGestoriaImportReviewForm(getGestoriaImportSelectedDoc());
   if (gestoriaImportDocsInfo) {
     const summary = rows.reduce(
       (acc, row) => {
@@ -17441,7 +17582,9 @@ const loadGestoriaImportLoteDocuments = (loteId) => {
     return Promise.resolve();
   }
   state.gestoriaImportSelectedLoteId = loteId;
-  return api(`/api/gestoria_import_documentos?lote_id=${encodeURIComponent(loteId)}`)
+  const qs = new URLSearchParams({ lote_id: loteId });
+  if (state.gestoriaImportEstadoFilter) qs.set("estado", state.gestoriaImportEstadoFilter);
+  return api(`/api/gestoria_import_documentos?${qs.toString()}`)
     .then((data) => {
       renderGestoriaImportDocsTable(data.rows || []);
     })
@@ -17455,9 +17598,11 @@ const loadGestoriaImportLoteDocuments = (loteId) => {
 
 const renderGestoriaImportLotesTable = (clienteId, rows = []) => {
   if (!gestoriaImportLotesTable) return;
+  state.gestoriaImportCurrentLotes = rows;
   if (!rows.length) {
     gestoriaImportLotesTable.innerHTML = "<p class='muted'>Sin lotes de importación registrados.</p>";
     if (gestoriaImportLotesInfo) gestoriaImportLotesInfo.textContent = "";
+    fillGestoriaImportSelectedLoteMeta(null);
     renderGestoriaImportDocsTable([]);
     return;
   }
@@ -17514,6 +17659,7 @@ const renderGestoriaImportLotesTable = (clienteId, rows = []) => {
   table.appendChild(tbody);
   gestoriaImportLotesTable.innerHTML = "";
   gestoriaImportLotesTable.appendChild(table);
+  fillGestoriaImportSelectedLoteMeta(visibleRows.find((row) => row.id === selectedId) || null);
   if (gestoriaImportLotesInfo) {
     gestoriaImportLotesInfo.textContent = `Mostrando ${visibleRows.length} lotes${exactRows.length ? " del cliente" : " recientes de la empresa"}${unassignedRows.length ? " · incluye lotes sin cliente asignado" : ""}.`;
   }
@@ -17526,6 +17672,7 @@ const loadGestoriaClienteImportador = (clienteId) => {
   if (!clienteId || !empresa?.id) {
     gestoriaImportLotesTable.innerHTML = "<p class='muted'>Sin cliente o empresa seleccionada.</p>";
     if (gestoriaImportLotesInfo) gestoriaImportLotesInfo.textContent = "";
+    fillGestoriaImportSelectedLoteMeta(null);
     renderGestoriaImportDocsTable([]);
     return;
   }
@@ -24561,6 +24708,78 @@ if (gestoriaImportRefreshBtn) {
   gestoriaImportRefreshBtn.addEventListener("click", () => {
     if (state.currentClienteId) {
       loadGestoriaClienteImportador(state.currentClienteId);
+    }
+  });
+}
+
+if (gestoriaImportEstadoFilter) {
+  gestoriaImportEstadoFilter.addEventListener("change", () => {
+    state.gestoriaImportEstadoFilter = gestoriaImportEstadoFilter.value || "";
+    if (state.gestoriaImportSelectedLoteId) {
+      loadGestoriaImportLoteDocuments(state.gestoriaImportSelectedLoteId);
+    }
+  });
+}
+
+if (gestoriaImportApplyBtn) {
+  gestoriaImportApplyBtn.addEventListener("click", async () => {
+    const loteId = String(state.gestoriaImportSelectedLoteId || "").trim();
+    if (!loteId) {
+      if (gestoriaImportDocsInfo) gestoriaImportDocsInfo.textContent = "Selecciona un lote.";
+      return;
+    }
+    if (gestoriaImportDocsInfo) gestoriaImportDocsInfo.textContent = "Aplicando lote...";
+    try {
+      const data = await postJsonWithDbRetry("/api/gestoria_import_aplicar", {
+        empresa_nombre: FINCAS_COMPANY,
+        lote_id: loteId,
+      });
+      if (gestoriaImportDocsInfo) {
+        gestoriaImportDocsInfo.textContent = data.error
+          ? data.error
+          : `Lote aplicado. Documentos aplicados: ${(data.applied || []).length}. Errores: ${(data.errors || []).length}.`;
+      }
+      if (!data.error && state.currentClienteId) {
+        loadGestoriaClienteImportador(state.currentClienteId);
+        loadGestoriaClienteContaResultados(state.currentClienteId);
+        loadGestoriaClienteLibros(state.currentClienteId);
+      }
+    } catch (_) {
+      if (gestoriaImportDocsInfo) gestoriaImportDocsInfo.textContent = "Error al aplicar el lote.";
+    }
+  });
+}
+
+if (gestoriaImportReviewForm) {
+  gestoriaImportReviewForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const doc = getGestoriaImportSelectedDoc();
+    if (!doc) {
+      if (gestoriaImportReviewStatus) gestoriaImportReviewStatus.textContent = "Selecciona un documento.";
+      return;
+    }
+    if (gestoriaImportReviewStatus) gestoriaImportReviewStatus.textContent = "Guardando revisión...";
+    const formData = new FormData(gestoriaImportReviewForm);
+    const payload = Object.fromEntries(formData.entries());
+    payload.id = doc.id;
+    payload.empresa_nombre = FINCAS_COMPANY;
+    ["base_detectada", "cuota_iva_detectada", "total_detectado"].forEach((field) => {
+      payload[field] = payload[field] === "" ? "" : parseMoneyValue(payload[field]);
+    });
+    try {
+      const data = await postJsonWithDbRetry("/api/gestoria_import_documento_resolver", payload);
+      if (gestoriaImportReviewStatus) {
+        gestoriaImportReviewStatus.textContent = data.error ? data.error : "Revisión guardada.";
+      }
+      if (!data.error) {
+        if (state.currentClienteId) {
+          loadGestoriaClienteImportador(state.currentClienteId);
+        } else if (state.gestoriaImportSelectedLoteId) {
+          loadGestoriaImportLoteDocuments(state.gestoriaImportSelectedLoteId);
+        }
+      }
+    } catch (_) {
+      if (gestoriaImportReviewStatus) gestoriaImportReviewStatus.textContent = "Error al guardar la revisión.";
     }
   });
 }

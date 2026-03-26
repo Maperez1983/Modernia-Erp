@@ -3626,14 +3626,98 @@
                       <button type="button" class="ghost" id="gestoriaImportQueueBtn">Abrir cola contable</button>
                     </div>
                   </div>
+                  <div class="inline-list" id="gestoriaImportSelectedLoteMeta"></div>
                   <div id="gestoriaImportLotesTable"></div>
                   <div class="footer" id="gestoriaImportLotesInfo"></div>
                 </div>
                 <div class="form-card hidden" data-gestoria-conta-pane="importador">
-                  <h3>Documentos del lote</h3>
-                  <p class="muted">Detalle de documentos detectados, estado de revisión y si ya impactaron en factura/asiento.</p>
+                  <div class="section-head">
+                    <div>
+                      <h3>Documentos del lote</h3>
+                      <p class="muted">Detalle de documentos detectados, estado de revisión y si ya impactaron en factura/asiento.</p>
+                    </div>
+                    <div class="form-actions">
+                      <label>
+                        Estado
+                        <select id="gestoriaImportEstadoFilter">
+                          <option value="">Todos</option>
+                          <option value="OK">OK</option>
+                          <option value="REVISAR">Revisar</option>
+                          <option value="DUPLICADO">Duplicado</option>
+                          <option value="ERROR">Error</option>
+                        </select>
+                      </label>
+                      <button type="button" id="gestoriaImportApplyBtn">Aplicar lote</button>
+                    </div>
+                  </div>
                   <div id="gestoriaImportDocsTable"></div>
                   <div class="footer" id="gestoriaImportDocsInfo"></div>
+                </div>
+                <div class="form-card hidden" data-gestoria-conta-pane="importador">
+                  <h3>Revisión manual</h3>
+                  <p class="muted">Corrige el documento seleccionado antes de aplicarlo a factura y asiento.</p>
+                  <form id="gestoriaImportReviewForm" class="form-grid">
+                    <label>
+                      Estado
+                      <select name="estado_revision">
+                        <option value="OK">OK</option>
+                        <option value="REVISAR">Revisar</option>
+                        <option value="DUPLICADO">Duplicado</option>
+                        <option value="ERROR">Error</option>
+                      </select>
+                    </label>
+                    <label>
+                      Tipo
+                      <select name="tipo_detectado">
+                        <option value="compra">Compra</option>
+                        <option value="venta">Venta</option>
+                      </select>
+                    </label>
+                    <label>
+                      Categoría
+                      <input name="categoria_detectada" type="text" />
+                    </label>
+                    <label>
+                      Cuenta sugerida
+                      <input name="cuenta_sugerida" type="text" />
+                    </label>
+                    <label class="span-2">
+                      Tercero
+                      <input name="tercero_detectado" type="text" />
+                    </label>
+                    <label>
+                      NIF
+                      <input name="nif_detectado" type="text" />
+                    </label>
+                    <label>
+                      Número
+                      <input name="numero_detectado" type="text" />
+                    </label>
+                    <label>
+                      Fecha
+                      <input name="fecha_detectada" type="date" />
+                    </label>
+                    <label>
+                      Base
+                      <input name="base_detectada" type="number" step="0.01" />
+                    </label>
+                    <label>
+                      IVA
+                      <input name="cuota_iva_detectada" type="number" step="0.01" />
+                    </label>
+                    <label>
+                      Total
+                      <input name="total_detectado" type="number" step="0.01" />
+                    </label>
+                    <label class="span-2">
+                      Motivos revisión
+                      <input name="motivos_revision" type="text" />
+                    </label>
+                    <div class="form-actions span-2">
+                      <button type="submit">Guardar revisión</button>
+                      <span id="gestoriaImportReviewStatus" class="muted"></span>
+                    </div>
+                  </form>
                 </div>
                 <div class="form-card" data-gestoria-conta-pane="operativa">
                   <h3>Contabilidad · Configuración del periodo</h3>
