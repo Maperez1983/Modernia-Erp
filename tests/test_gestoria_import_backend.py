@@ -217,6 +217,50 @@ class GestoriaImportBackendTests(unittest.TestCase):
         self.assertTrue(doc["factura_id"])
         self.assertTrue(doc["tercero_id"])
         self.assertEqual(doc["estado_revision"], "OK")
+        self.assertEqual(result["lote"]["estado"], "aplicado")
+
+    def test_apply_lote_does_not_reuse_conflicting_nif_if_name_differs(self):
+        self.conn.execute(
+            """
+            INSERT INTO gestoria_terceros (
+              id, empresa_id, nif, nombre, tipo, cuenta_contable, created_at, updated_at
+            ) VALUES (
+              't-obramat', 'e1', 'B23902240', 'OBRAMAT', 'proveedor', '400', '2026-03-01', '2026-03-01'
+            )
+            """
+        )
+        upsert_gestoria_import_document(
+            self.conn,
+            "l1",
+            "e1",
+            "c1",
+            {
+                "archivo": "factura_optimus.jpeg",
+                "fecha": "2026-03-08",
+                "tercero": "OPTIMUS TINEO S. PEDRO S.L",
+                "nif": "B23902240",
+                "tipo": "compra",
+                "base_imponible": 24.0,
+                "cuota_iva": 0.0,
+                "total": 24.0,
+                "categoria_excel": "SUMINISTROS",
+                "estado_revision": "OK",
+            },
+            self.now,
+        )
+        result = apply_gestoria_import_lote(self.conn, "l1", "e1", self.now)
+        self.assertEqual(len(result["errors"]), 0)
+        factura = self.conn.execute(
+            """
+            SELECT f.tercero_id, t.nombre, COALESCE(t.nif, '') AS nif
+            FROM gestoria_facturas f
+            JOIN gestoria_terceros t ON t.id = f.tercero_id
+            LIMIT 1
+            """
+        ).fetchone()
+        self.assertEqual(factura["nombre"], "OPTIMUS TINEO S. PEDRO S.L")
+        self.assertEqual(factura["nif"], "")
+        self.assertNotEqual(factura["tercero_id"], "t-obramat")
 
     def test_apply_lote_rejects_invalid_vat_or_type(self):
         upsert_gestoria_import_document(

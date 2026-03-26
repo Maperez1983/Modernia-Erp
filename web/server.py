@@ -3396,16 +3396,23 @@ def ensure_gestoria_tercero(conn, empresa_id, nif, nombre, tipo, now):
     account_map = {"proveedor": "400", "acreedor": "410", "cliente": "430"}
     account = account_map.get(kind, "400")
     row = None
-    if nif_clean:
+    if name_clean:
         row = conn.execute(
-            "SELECT id, cuenta_contable FROM gestoria_terceros WHERE empresa_id = ? AND UPPER(COALESCE(nif,'')) = ? LIMIT 1",
-            (empresa_id, nif_clean),
-        ).fetchone()
-    if not row and name_clean:
-        row = conn.execute(
-            "SELECT id, cuenta_contable FROM gestoria_terceros WHERE empresa_id = ? AND UPPER(COALESCE(nombre,'')) = UPPER(?) LIMIT 1",
+            "SELECT id, cuenta_contable, nombre, nif FROM gestoria_terceros WHERE empresa_id = ? AND UPPER(COALESCE(nombre,'')) = UPPER(?) LIMIT 1",
             (empresa_id, name_clean),
         ).fetchone()
+    if not row and nif_clean:
+        nif_row = conn.execute(
+            "SELECT id, cuenta_contable, nombre, nif FROM gestoria_terceros WHERE empresa_id = ? AND UPPER(COALESCE(nif,'')) = ? LIMIT 1",
+            (empresa_id, nif_clean),
+        ).fetchone()
+        if nif_row:
+            existing_name = normalize_lookup_text(nif_row["nombre"] or "")
+            current_name = normalize_lookup_text(name_clean or "")
+            if existing_name and current_name and existing_name != current_name:
+                nif_clean = ""
+            else:
+                row = nif_row
     if row:
         conn.execute(
             """
@@ -3542,6 +3549,8 @@ def import_number_is_suspicious(value):
     if not token:
         return False
     if token in {"PAGADO", "EMITIDA", "CALLE", "SIMPLIFICADA", "FACTURA", "GAPP", "ORIGINAL"}:
+        return True
+    if not any(ch.isdigit() for ch in token):
         return True
     if re.fullmatch(r"\d{1,2}", token):
         return True
@@ -4177,6 +4186,30 @@ def apply_gestoria_import_lote(conn, lote_id, empresa_id, now, limit=None):
                 payload={"archivo_nombre": row["archivo_nombre"]},
             )
     lote = refresh_gestoria_import_lote_totals(conn, lote_id, now)
+    pending_ok = conn.execute(
+        """
+        SELECT COUNT(*) AS n
+        FROM gestoria_import_documentos
+        WHERE lote_id = ?
+          AND empresa_id = ?
+          AND estado_revision = 'OK'
+          AND factura_id IS NULL
+        """,
+        (lote_id, empresa_id),
+    ).fetchone()
+    pending_ok_count = int((pending_ok["n"] if pending_ok else 0) or 0)
+    if lote and pending_ok_count == 0 and int(lote.get("total_ok") or 0) > 0 and not errors:
+        conn.execute(
+            """
+            UPDATE gestoria_import_lotes
+            SET estado = 'aplicado',
+                updated_at = datetime(?)
+            WHERE id = ?
+            """,
+            (now, lote_id),
+        )
+        lote = conn.execute("SELECT * FROM gestoria_import_lotes WHERE id = ?", (lote_id,)).fetchone()
+        lote = dict(lote) if lote else None
     return {"applied": applied, "errors": errors, "lote": lote}
 
 def process_seguros_ocr(payload, conn):

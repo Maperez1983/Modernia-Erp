@@ -16,6 +16,7 @@ from scripts.build_gapp_facturas_excel import (
     extract_fallback_total,
     import_records_to_local_db,
     looks_like_own_company,
+    looks_like_suspicious_invoice_number,
     mark_filename_duplicates,
     preclassify_from_filename,
     review_record,
@@ -119,6 +120,11 @@ class GappFacturasExcelTests(unittest.TestCase):
 
     def test_canonical_supplier_from_reason_uses_supplier_rule(self):
         self.assertEqual(canonical_supplier_from_reason("proveedor:LEROY"), "LEROY MERLIN MARBELLA")
+
+    def test_suspicious_invoice_number_requires_digits(self):
+        self.assertTrue(looks_like_suspicious_invoice_number("Sinplificada"))
+        self.assertTrue(looks_like_suspicious_invoice_number("Productos limpieza"))
+        self.assertFalse(looks_like_suspicious_invoice_number("FM26"))
 
     def test_extract_fallback_total_picks_largest_positive_amount(self):
         text = "Subtotal 53,33 IVA 11,20 Total 64,53"
@@ -262,6 +268,14 @@ class GappFacturasExcelTests(unittest.TestCase):
             {"tipo": "compra"},
         )
         self.assertIn("Jim", parsed["tercero"])
+
+    def test_enrich_keeps_invoice_number_empty_when_only_filename_words_exist(self):
+        parsed = enrich_parsed(
+            Path("/tmp/Productos limpieza.jpeg"),
+            "Factura simplificada\nTotal 5,80",
+            {"tipo": "compra", "numero": "", "tercero": "7 Mintmarket Bazar"},
+        )
+        self.assertEqual(parsed["numero"], "")
 
     def test_review_record_does_not_flag_bad_vendor_if_supplier_rule_is_trusted(self):
         state, reasons = review_record(

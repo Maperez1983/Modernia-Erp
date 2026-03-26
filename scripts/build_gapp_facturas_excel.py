@@ -112,6 +112,7 @@ INVALID_NUMBER_TOKENS = {
     "EMITIDA",
     "CALLE",
     "SIMPLIFICADA",
+    "SINPLIFICADA",
     "FACTURA",
     "GAPP",
     "ORIGINAL",
@@ -296,6 +297,8 @@ def looks_like_suspicious_invoice_number(value: str) -> bool:
     if not token:
         return False
     if token in INVALID_NUMBER_TOKENS:
+        return True
+    if not any(ch.isdigit() for ch in token):
         return True
     if re.fullmatch(r"\d{1,2}", token):
         return True
@@ -525,7 +528,7 @@ def enrich_parsed(path: Path, text: str, parsed: dict[str, Any]) -> dict[str, An
     result["tercero"] = canonical_supplier_name(result.get("tercero") or "")
     if not result.get("numero"):
         number = re.search(r"\b([A-Z]{0,4}\d{2,}[A-Z0-9/\-]*)\b", norm(path.stem))
-        result["numero"] = number.group(1) if number else path.stem[:60]
+        result["numero"] = number.group(1) if number else ""
     if looks_like_suspicious_invoice_number(result.get("numero") or ""):
         alt_number_match = re.search(
             r"(?:FACTURA|FRA|N[OU]?M(?:ERO)?)[^A-Z0-9]{0,8}([A-Z]{1,4}[\d/\-]{2,}[A-Z0-9/\-]*)",
