@@ -311,6 +311,121 @@ CREATE TABLE IF NOT EXISTS gestoria_asiento_lineas (
   FOREIGN KEY (tercero_id) REFERENCES gestoria_terceros(id)
 );
 
+CREATE TABLE IF NOT EXISTS gestoria_import_lotes (
+  id TEXT PRIMARY KEY,
+  empresa_id TEXT NOT NULL,
+  cliente_id TEXT,
+  origen TEXT,
+  estado TEXT NOT NULL,
+  periodo TEXT,
+  carpeta_origen TEXT,
+  template_path TEXT,
+  total_documentos INTEGER NOT NULL DEFAULT 0,
+  total_ok INTEGER NOT NULL DEFAULT 0,
+  total_revisar INTEGER NOT NULL DEFAULT 0,
+  total_duplicado INTEGER NOT NULL DEFAULT 0,
+  total_error INTEGER NOT NULL DEFAULT 0,
+  notas TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (empresa_id) REFERENCES empresas(id),
+  FOREIGN KEY (cliente_id) REFERENCES clientes(id)
+);
+
+CREATE TABLE IF NOT EXISTS gestoria_import_documentos (
+  id TEXT PRIMARY KEY,
+  lote_id TEXT NOT NULL,
+  empresa_id TEXT NOT NULL,
+  cliente_id TEXT,
+  factura_id TEXT,
+  tercero_id TEXT,
+  gestoria_doc_id TEXT,
+  archivo_nombre TEXT NOT NULL,
+  archivo_hash TEXT,
+  doc_key TEXT,
+  numero_detectado TEXT,
+  fecha_detectada TEXT,
+  tercero_detectado TEXT,
+  nif_detectado TEXT,
+  base_detectada REAL,
+  cuota_iva_detectada REAL,
+  total_detectado REAL,
+  tipo_detectado TEXT,
+  categoria_detectada TEXT,
+  subcategoria_detectada TEXT,
+  cuenta_sugerida TEXT,
+  cuenta_tercero_sugerida TEXT,
+  confianza_categoria REAL,
+  confianza_extraccion REAL,
+  estado_revision TEXT NOT NULL,
+  motivos_revision TEXT,
+  regla_aplicada TEXT,
+  ocr_metodo TEXT,
+  ocr_error TEXT,
+  raw_text TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (lote_id) REFERENCES gestoria_import_lotes(id),
+  FOREIGN KEY (empresa_id) REFERENCES empresas(id),
+  FOREIGN KEY (cliente_id) REFERENCES clientes(id),
+  FOREIGN KEY (factura_id) REFERENCES gestoria_facturas(id),
+  FOREIGN KEY (tercero_id) REFERENCES gestoria_terceros(id),
+  FOREIGN KEY (gestoria_doc_id) REFERENCES gestoria_docs(id)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_gestoria_import_documentos_lote_archivo
+ON gestoria_import_documentos (lote_id, archivo_nombre);
+
+CREATE INDEX IF NOT EXISTS idx_gestoria_import_documentos_estado
+ON gestoria_import_documentos (estado_revision);
+
+CREATE INDEX IF NOT EXISTS idx_gestoria_import_documentos_hash
+ON gestoria_import_documentos (archivo_hash);
+
+CREATE TABLE IF NOT EXISTS gestoria_import_reglas (
+  id TEXT PRIMARY KEY,
+  empresa_id TEXT NOT NULL,
+  cliente_id TEXT,
+  ambito TEXT NOT NULL,
+  prioridad INTEGER NOT NULL DEFAULT 100,
+  activo INTEGER NOT NULL DEFAULT 1,
+  proveedor_match TEXT,
+  proveedor_nif_match TEXT,
+  texto_match TEXT,
+  categoria_forzada TEXT,
+  tercero_nombre_forzado TEXT,
+  tercero_nif_forzado TEXT,
+  cuenta_gasto_forzada TEXT,
+  cuenta_tercero_forzada TEXT,
+  iva_pct_forzado REAL,
+  auto_ok INTEGER NOT NULL DEFAULT 0,
+  notas TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (empresa_id) REFERENCES empresas(id),
+  FOREIGN KEY (cliente_id) REFERENCES clientes(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_gestoria_import_reglas_scope
+ON gestoria_import_reglas (empresa_id, cliente_id, activo, prioridad);
+
+CREATE TABLE IF NOT EXISTS gestoria_import_eventos (
+  id TEXT PRIMARY KEY,
+  lote_id TEXT NOT NULL,
+  documento_id TEXT,
+  factura_id TEXT,
+  tipo TEXT NOT NULL,
+  detalle TEXT,
+  payload_json TEXT,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY (lote_id) REFERENCES gestoria_import_lotes(id),
+  FOREIGN KEY (documento_id) REFERENCES gestoria_import_documentos(id),
+  FOREIGN KEY (factura_id) REFERENCES gestoria_facturas(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_gestoria_import_eventos_lote
+ON gestoria_import_eventos (lote_id, created_at);
+
 CREATE TABLE IF NOT EXISTS cnae_catalogo (
   codigo TEXT PRIMARY KEY,
   descripcion TEXT NOT NULL
@@ -369,6 +484,7 @@ CREATE TABLE IF NOT EXISTS inmuebles (
   empresa_id TEXT,
   referencia TEXT,
   direccion TEXT,
+  referencia_catastral TEXT,
   codigo_postal TEXT,
   poblacion TEXT,
   provincia TEXT,
@@ -407,6 +523,59 @@ CREATE TABLE IF NOT EXISTS inmueble_docs (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   FOREIGN KEY (inmueble_id) REFERENCES inmuebles(id)
+);
+
+CREATE TABLE IF NOT EXISTS operaciones_inmobiliarias (
+  id TEXT PRIMARY KEY,
+  empresa_id TEXT NOT NULL,
+  tipo_operacion TEXT NOT NULL,
+  estado TEXT,
+  origen TEXT,
+  expediente_path TEXT,
+  expediente_hash TEXT UNIQUE,
+  anio INTEGER,
+  mes TEXT,
+  inmueble_id TEXT,
+  direccion TEXT,
+  referencia_catastral TEXT,
+  propietario1_id TEXT,
+  propietario1_nombre TEXT,
+  propietario1_nif TEXT,
+  propietario1_telefono TEXT,
+  propietario1_email TEXT,
+  propietario1_fecha_nacimiento TEXT,
+  propietario2_id TEXT,
+  propietario2_nombre TEXT,
+  propietario2_nif TEXT,
+  propietario2_telefono TEXT,
+  propietario2_email TEXT,
+  propietario2_fecha_nacimiento TEXT,
+  contraparte_nombre TEXT,
+  contraparte_nif TEXT,
+  contraparte_telefono TEXT,
+  contraparte_email TEXT,
+  contraparte_fecha_nacimiento TEXT,
+  fecha_encargo TEXT,
+  fecha_propuesta TEXT,
+  fecha_contrato TEXT,
+  fecha_escritura TEXT,
+  fecha_operacion TEXT,
+  precio_encargo REAL,
+  precio_propuesta REAL,
+  precio_contrato REAL,
+  precio_escritura REAL,
+  precio_renta REAL,
+  agente TEXT,
+  oficina TEXT,
+  calidad_ocr TEXT,
+  notas TEXT,
+  datos_extraidos_json TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (empresa_id) REFERENCES empresas(id),
+  FOREIGN KEY (inmueble_id) REFERENCES inmuebles(id),
+  FOREIGN KEY (propietario1_id) REFERENCES clientes(id),
+  FOREIGN KEY (propietario2_id) REFERENCES clientes(id)
 );
 
 CREATE TABLE IF NOT EXISTS inmueble_checklist (

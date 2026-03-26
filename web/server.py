@@ -3454,6 +3454,635 @@ def build_invoice_asiento(parsed, counterpart_account):
     haber = round(sum(float(item.get("haber") or 0.0) for item in lines), 2)
     return lines, debe, haber
 
+
+def normalize_import_review_state(value):
+    state = normalize_lookup_text(value or "")
+    if state in {"OK", "VALIDADO", "APROBADO"}:
+        return "OK"
+    if state in {"DUPLICADO", "DUPLICATE"}:
+        return "DUPLICADO"
+    if state in {"ERROR", "ERR"}:
+        return "ERROR"
+    if state in {"REVISAR", "REVISION", "PENDIENTE", "PENDIENTE REVISION"}:
+        return "REVISAR"
+    return "REVISAR"
+
+
+def normalize_import_reasons(value):
+    if isinstance(value, (list, tuple, set)):
+        items = [str(item or "").strip() for item in value]
+        return ",".join(item for item in items if item)
+    return str(value or "").strip()
+
+
+def parse_confidence_value(value):
+    if value in (None, ""):
+        return 0.0
+    try:
+        parsed = float(value)
+    except Exception:
+        parsed = parse_money_value(value)
+    if parsed < 0:
+        return 0.0
+    if parsed > 1:
+        return 1.0 if parsed <= 100 else parsed
+    return round(parsed, 4)
+
+
+def map_import_category_to_account(category):
+    key = normalize_lookup_text(category or "")
+    mapping = {
+        "ALQUILER LOCAL": "621",
+        "SUMINISTROS": "628",
+        "SEGURO LOCAL": "625",
+        "SEGURO RC": "625",
+        "SEGURO CONVENIO": "625",
+        "GESTORIA": "623",
+        "LOPD": "623",
+        "PRL": "623",
+        "CANAL DE DENUNCIAS": "623",
+        "SALUD": "642",
+        "ILT": "642",
+        "SALARIOS": "640",
+        "COMIDAS": "629",
+        "VIAJE": "624",
+        "INGRESO": "700",
+    }
+    return mapping.get(key, "")
+
+
+def describe_import_record(record):
+    numero = str(record.get("numero_detectado") or record.get("numero") or "").strip()
+    tercero = str(record.get("tercero_detectado") or record.get("tercero") or "").strip()
+    categoria = str(record.get("categoria_detectada") or record.get("categoria_excel") or "").strip()
+    archivo = str(record.get("archivo_nombre") or record.get("archivo") or "").strip()
+    concept_parts = [part for part in (numero, tercero or categoria or archivo) if part]
+    return " · ".join(concept_parts) or "Factura importada"
+
+
+def ensure_gestoria_import_schema(conn):
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS gestoria_import_lotes (
+          id TEXT PRIMARY KEY,
+          empresa_id TEXT NOT NULL,
+          cliente_id TEXT,
+          origen TEXT,
+          estado TEXT NOT NULL,
+          periodo TEXT,
+          carpeta_origen TEXT,
+          template_path TEXT,
+          total_documentos INTEGER NOT NULL DEFAULT 0,
+          total_ok INTEGER NOT NULL DEFAULT 0,
+          total_revisar INTEGER NOT NULL DEFAULT 0,
+          total_duplicado INTEGER NOT NULL DEFAULT 0,
+          total_error INTEGER NOT NULL DEFAULT 0,
+          notas TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          FOREIGN KEY (empresa_id) REFERENCES empresas(id),
+          FOREIGN KEY (cliente_id) REFERENCES clientes(id)
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS gestoria_import_documentos (
+          id TEXT PRIMARY KEY,
+          lote_id TEXT NOT NULL,
+          empresa_id TEXT NOT NULL,
+          cliente_id TEXT,
+          factura_id TEXT,
+          tercero_id TEXT,
+          gestoria_doc_id TEXT,
+          archivo_nombre TEXT NOT NULL,
+          archivo_hash TEXT,
+          doc_key TEXT,
+          numero_detectado TEXT,
+          fecha_detectada TEXT,
+          tercero_detectado TEXT,
+          nif_detectado TEXT,
+          base_detectada REAL,
+          cuota_iva_detectada REAL,
+          total_detectado REAL,
+          tipo_detectado TEXT,
+          categoria_detectada TEXT,
+          subcategoria_detectada TEXT,
+          cuenta_sugerida TEXT,
+          cuenta_tercero_sugerida TEXT,
+          confianza_categoria REAL,
+          confianza_extraccion REAL,
+          estado_revision TEXT NOT NULL,
+          motivos_revision TEXT,
+          regla_aplicada TEXT,
+          ocr_metodo TEXT,
+          ocr_error TEXT,
+          raw_text TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          FOREIGN KEY (lote_id) REFERENCES gestoria_import_lotes(id),
+          FOREIGN KEY (empresa_id) REFERENCES empresas(id),
+          FOREIGN KEY (cliente_id) REFERENCES clientes(id),
+          FOREIGN KEY (factura_id) REFERENCES gestoria_facturas(id),
+          FOREIGN KEY (tercero_id) REFERENCES gestoria_terceros(id),
+          FOREIGN KEY (gestoria_doc_id) REFERENCES gestoria_docs(id)
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_gestoria_import_documentos_lote_archivo
+        ON gestoria_import_documentos (lote_id, archivo_nombre)
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_gestoria_import_documentos_estado
+        ON gestoria_import_documentos (estado_revision)
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_gestoria_import_documentos_hash
+        ON gestoria_import_documentos (archivo_hash)
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS gestoria_import_reglas (
+          id TEXT PRIMARY KEY,
+          empresa_id TEXT NOT NULL,
+          cliente_id TEXT,
+          ambito TEXT NOT NULL,
+          prioridad INTEGER NOT NULL DEFAULT 100,
+          activo INTEGER NOT NULL DEFAULT 1,
+          proveedor_match TEXT,
+          proveedor_nif_match TEXT,
+          texto_match TEXT,
+          categoria_forzada TEXT,
+          tercero_nombre_forzado TEXT,
+          tercero_nif_forzado TEXT,
+          cuenta_gasto_forzada TEXT,
+          cuenta_tercero_forzada TEXT,
+          iva_pct_forzado REAL,
+          auto_ok INTEGER NOT NULL DEFAULT 0,
+          notas TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          FOREIGN KEY (empresa_id) REFERENCES empresas(id),
+          FOREIGN KEY (cliente_id) REFERENCES clientes(id)
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_gestoria_import_reglas_scope
+        ON gestoria_import_reglas (empresa_id, cliente_id, activo, prioridad)
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS gestoria_import_eventos (
+          id TEXT PRIMARY KEY,
+          lote_id TEXT NOT NULL,
+          documento_id TEXT,
+          factura_id TEXT,
+          tipo TEXT NOT NULL,
+          detalle TEXT,
+          payload_json TEXT,
+          created_at TEXT NOT NULL,
+          FOREIGN KEY (lote_id) REFERENCES gestoria_import_lotes(id),
+          FOREIGN KEY (documento_id) REFERENCES gestoria_import_documentos(id),
+          FOREIGN KEY (factura_id) REFERENCES gestoria_facturas(id)
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_gestoria_import_eventos_lote
+        ON gestoria_import_eventos (lote_id, created_at)
+        """
+    )
+
+
+def log_gestoria_import_event(conn, lote_id, tipo, now, documento_id=None, factura_id=None, detalle=None, payload=None):
+    conn.execute(
+        """
+        INSERT INTO gestoria_import_eventos (
+          id, lote_id, documento_id, factura_id, tipo, detalle, payload_json, created_at
+        ) VALUES (
+          ?, ?, ?, ?, ?, ?, ?, datetime(?)
+        )
+        """,
+        (
+            os.urandom(16).hex(),
+            lote_id,
+            documento_id,
+            factura_id,
+            tipo,
+            detalle,
+            json.dumps(payload, ensure_ascii=False) if payload is not None else None,
+            now,
+        ),
+    )
+
+
+def refresh_gestoria_import_lote_totals(conn, lote_id, now):
+    summary = conn.execute(
+        """
+        SELECT
+          COUNT(*) AS total_documentos,
+          SUM(CASE WHEN estado_revision = 'OK' THEN 1 ELSE 0 END) AS total_ok,
+          SUM(CASE WHEN estado_revision = 'REVISAR' THEN 1 ELSE 0 END) AS total_revisar,
+          SUM(CASE WHEN estado_revision = 'DUPLICADO' THEN 1 ELSE 0 END) AS total_duplicado,
+          SUM(CASE WHEN estado_revision = 'ERROR' THEN 1 ELSE 0 END) AS total_error
+        FROM gestoria_import_documentos
+        WHERE lote_id = ?
+        """,
+        (lote_id,),
+    ).fetchone()
+    if not summary:
+        summary = {
+            "total_documentos": 0,
+            "total_ok": 0,
+            "total_revisar": 0,
+            "total_duplicado": 0,
+            "total_error": 0,
+        }
+    total_ok = int(summary["total_ok"] or 0)
+    total_revisar = int(summary["total_revisar"] or 0)
+    total_duplicado = int(summary["total_duplicado"] or 0)
+    total_error = int(summary["total_error"] or 0)
+    if total_error > 0:
+        estado = "con_errores"
+    elif total_revisar > 0:
+        estado = "pendiente_revision"
+    elif total_ok > 0:
+        estado = "preparado"
+    else:
+        estado = "vacio"
+    conn.execute(
+        """
+        UPDATE gestoria_import_lotes
+        SET total_documentos = ?,
+            total_ok = ?,
+            total_revisar = ?,
+            total_duplicado = ?,
+            total_error = ?,
+            estado = ?,
+            updated_at = datetime(?)
+        WHERE id = ?
+        """,
+        (
+            int(summary["total_documentos"] or 0),
+            total_ok,
+            total_revisar,
+            total_duplicado,
+            total_error,
+            estado,
+            now,
+            lote_id,
+        ),
+    )
+    row = conn.execute("SELECT * FROM gestoria_import_lotes WHERE id = ?", (lote_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def upsert_gestoria_import_document(conn, lote_id, empresa_id, default_cliente_id, record, now):
+    archivo_nombre = str(record.get("archivo_nombre") or record.get("archivo") or "").strip()
+    if not archivo_nombre:
+        raise ValueError("archivo_nombre requerido")
+    existing = conn.execute(
+        """
+        SELECT id, factura_id, tercero_id, gestoria_doc_id, created_at
+        FROM gestoria_import_documentos
+        WHERE lote_id = ? AND archivo_nombre = ?
+        LIMIT 1
+        """,
+        (lote_id, archivo_nombre),
+    ).fetchone()
+    document_id = existing["id"] if existing else os.urandom(16).hex()
+    cliente_id = str(record.get("cliente_id") or default_cliente_id or "").strip() or None
+    categoria = str(record.get("categoria_detectada") or record.get("categoria_excel") or "").strip()
+    tipo = str(record.get("tipo_detectado") or record.get("tipo") or "compra").strip().lower() or "compra"
+    estado = normalize_import_review_state(record.get("estado_revision"))
+    motivos = normalize_import_reasons(record.get("motivos_revision"))
+    cuenta_sugerida = str(record.get("cuenta_sugerida") or "").strip() or map_import_category_to_account(categoria)
+    cuenta_tercero = str(record.get("cuenta_tercero_sugerida") or "").strip()
+    numero = str(record.get("numero_detectado") or record.get("numero") or "").strip()
+    fecha = str(record.get("fecha_detectada") or record.get("fecha") or "").strip()
+    tercero = str(record.get("tercero_detectado") or record.get("tercero") or "").strip()
+    nif = str(record.get("nif_detectado") or record.get("nif") or "").strip().upper()
+    base = round(parse_money_value(record.get("base_detectada") if "base_detectada" in record else record.get("base_imponible")), 2)
+    cuota_iva = round(parse_money_value(record.get("cuota_iva_detectada") if "cuota_iva_detectada" in record else record.get("cuota_iva")), 2)
+    total = round(parse_money_value(record.get("total_detectado") if "total_detectado" in record else record.get("total")), 2)
+    if total <= 0:
+        total = round(parse_money_value(record.get("importe_agregado")), 2)
+    confianza_categoria = parse_confidence_value(record.get("confianza_categoria"))
+    confianza_extraccion = parse_confidence_value(record.get("confianza_extraccion"))
+    if confianza_extraccion <= 0:
+        confianza_extraccion = 1.0 if total > 0 else 0.0
+    raw_text = str(record.get("raw_text") or record.get("descripcion") or "").strip()
+    values = (
+        document_id,
+        lote_id,
+        empresa_id,
+        cliente_id,
+        existing["factura_id"] if existing else None,
+        existing["tercero_id"] if existing else None,
+        existing["gestoria_doc_id"] if existing else None,
+        archivo_nombre,
+        str(record.get("archivo_hash") or "").strip() or None,
+        str(record.get("doc_key") or "").strip() or None,
+        numero or None,
+        fecha or None,
+        tercero or None,
+        nif or None,
+        base,
+        cuota_iva,
+        total,
+        tipo,
+        categoria or None,
+        str(record.get("subcategoria_detectada") or record.get("subcategoria") or "").strip() or None,
+        cuenta_sugerida or None,
+        cuenta_tercero or None,
+        confianza_categoria,
+        confianza_extraccion,
+        estado,
+        motivos or None,
+        str(record.get("regla_aplicada") or record.get("motivo_categoria") or "").strip() or None,
+        str(record.get("ocr_metodo") or "").strip() or None,
+        str(record.get("ocr_error") or "").strip() or None,
+        raw_text or None,
+        existing["created_at"] if existing else now,
+        now,
+    )
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO gestoria_import_documentos (
+          id, lote_id, empresa_id, cliente_id, factura_id, tercero_id, gestoria_doc_id,
+          archivo_nombre, archivo_hash, doc_key, numero_detectado, fecha_detectada,
+          tercero_detectado, nif_detectado, base_detectada, cuota_iva_detectada,
+          total_detectado, tipo_detectado, categoria_detectada, subcategoria_detectada,
+          cuenta_sugerida, cuenta_tercero_sugerida, confianza_categoria, confianza_extraccion,
+          estado_revision, motivos_revision, regla_aplicada, ocr_metodo, ocr_error, raw_text,
+          created_at, updated_at
+        ) VALUES (
+          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+        )
+        """,
+        values,
+    )
+    return document_id
+
+
+def apply_gestoria_import_document(conn, document_row, now):
+    if not isinstance(document_row, dict):
+        document_row = dict(document_row)
+    tipo = str(document_row["tipo_detectado"] or "compra").strip().lower() or "compra"
+    numero = str(document_row["numero_detectado"] or "").strip()
+    fecha = str(document_row["fecha_detectada"] or "").strip() or datetime.now().strftime("%Y-%m-%d")
+    tercero_nombre = str(document_row["tercero_detectado"] or "").strip() or str(document_row["archivo_nombre"] or "").strip()
+    tercero_nif = str(document_row["nif_detectado"] or "").strip().upper()
+    categoria = str(document_row["categoria_detectada"] or "").strip()
+    descripcion = describe_import_record(document_row)
+    base = round(parse_money_value(document_row["base_detectada"]), 2)
+    cuota_iva = round(parse_money_value(document_row["cuota_iva_detectada"]), 2)
+    total = round(parse_money_value(document_row["total_detectado"]), 2)
+    if total <= 0 and base > 0 and cuota_iva > 0:
+        total = round(base + cuota_iva, 2)
+    if base <= 0 and total > 0 and cuota_iva > 0:
+        base = round(max(0.0, total - cuota_iva), 2)
+    iva_pct = 0.0
+    if base > 0 and cuota_iva > 0:
+        iva_pct = round((cuota_iva / base) * 100.0, 2)
+    third_type = "cliente" if tipo == "venta" else ("proveedor" if numero else "acreedor")
+    tercero_id, counterpart_account = ensure_gestoria_tercero(
+        conn,
+        document_row["empresa_id"],
+        tercero_nif,
+        tercero_nombre,
+        third_type,
+        now,
+    )
+    if document_row["cuenta_tercero_sugerida"]:
+        counterpart_account = str(document_row["cuenta_tercero_sugerida"]).strip() or counterpart_account
+        conn.execute(
+            """
+            UPDATE gestoria_terceros
+            SET cuenta_contable = COALESCE(NULLIF(?, ''), cuenta_contable),
+                updated_at = datetime(?)
+            WHERE id = ?
+            """,
+            (counterpart_account, now, tercero_id),
+        )
+    concepto = descripcion
+    if categoria and categoria not in normalize_lookup_text(concepto):
+        concepto = f"{concepto} · {categoria}" if concepto else categoria
+    parsed_factura = {
+        "tipo": tipo,
+        "numero": numero,
+        "fecha": fecha,
+        "nif": tercero_nif,
+        "tercero": tercero_nombre,
+        "base_imponible": base,
+        "cuota_iva": cuota_iva,
+        "cuota_irpf": 0.0,
+        "total": total,
+        "iva_pct": iva_pct,
+        "descripcion": concepto,
+        "raw_text": document_row["raw_text"] or "",
+    }
+    lines, total_debe, total_haber = build_invoice_asiento(parsed_factura, counterpart_account)
+    forced_account = str(document_row["cuenta_sugerida"] or "").strip() or map_import_category_to_account(categoria)
+    if forced_account:
+        for item in lines:
+            cuenta = str(item.get("cuenta") or "").strip()
+            if tipo == "venta":
+                if cuenta.startswith("7"):
+                    item["cuenta"] = forced_account
+            else:
+                if cuenta.startswith("6"):
+                    item["cuenta"] = forced_account
+    factura_id = os.urandom(16).hex()
+    conn.execute(
+        """
+        INSERT INTO gestoria_facturas (
+          id, empresa_id, cliente_id, tercero_id, tipo, numero, fecha_emision, descripcion,
+          base_imponible, cuota_iva, cuota_irpf, total, iva_pct, estado_ocr, doc_key, raw_text,
+          import_documento_id, origen_importacion, created_at, updated_at
+        ) VALUES (
+          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+        )
+        """,
+        (
+            factura_id,
+            document_row["empresa_id"],
+            document_row["cliente_id"],
+            tercero_id,
+            tipo,
+            numero or None,
+            fecha,
+            concepto,
+            base,
+            cuota_iva,
+            0.0,
+            total,
+            iva_pct,
+            "importado",
+            document_row["doc_key"],
+            document_row["raw_text"],
+            document_row["id"],
+            "gestoria_import",
+            now,
+            now,
+        ),
+    )
+    asiento_id = os.urandom(16).hex()
+    referencia = numero or factura_id
+    conn.execute(
+        """
+        INSERT INTO gestoria_asientos (
+          id, empresa_id, cliente_id, factura_id, fecha, concepto, diario, referencia,
+          total_debe, total_haber, created_at, updated_at
+        ) VALUES (
+          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+        )
+        """,
+        (
+            asiento_id,
+            document_row["empresa_id"],
+            document_row["cliente_id"],
+            factura_id,
+            fecha,
+            concepto,
+            "FACT",
+            referencia,
+            total_debe,
+            total_haber,
+            now,
+            now,
+        ),
+    )
+    for item in lines:
+        conn.execute(
+            """
+            INSERT INTO gestoria_asiento_lineas (
+              id, asiento_id, tercero_id, cuenta, descripcion, debe, haber,
+              impuesto_tipo, impuesto_pct, created_at, updated_at
+            ) VALUES (
+              ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+            )
+            """,
+            (
+                os.urandom(16).hex(),
+                asiento_id,
+                tercero_id,
+                item.get("cuenta"),
+                item.get("descripcion"),
+                item.get("debe") or 0.0,
+                item.get("haber") or 0.0,
+                item.get("impuesto"),
+                item.get("porcentaje"),
+                now,
+                now,
+            ),
+        )
+    conn.execute(
+        """
+        INSERT INTO gestoria_contabilidad (
+          id, empresa_id, cliente_id, cliente_ids_json, fecha, concepto, gestion, tipo, importe, notas, created_at, updated_at
+        ) VALUES (
+          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+        )
+        """,
+        (
+            os.urandom(16).hex(),
+            document_row["empresa_id"],
+            document_row["cliente_id"],
+            json.dumps([document_row["cliente_id"]], ensure_ascii=False) if document_row["cliente_id"] else None,
+            fecha,
+            concepto,
+            "Contable",
+            "Ingreso" if tipo == "venta" else "Gasto",
+            total,
+            f"Importador facturas · lote {document_row['lote_id']} · documento {document_row['id']} · asiento {asiento_id}",
+            now,
+            now,
+        ),
+    )
+    conn.execute(
+        """
+        UPDATE gestoria_import_documentos
+        SET factura_id = ?, tercero_id = ?, updated_at = datetime(?)
+        WHERE id = ?
+        """,
+        (factura_id, tercero_id, now, document_row["id"]),
+    )
+    return {
+        "factura_id": factura_id,
+        "asiento_id": asiento_id,
+        "tercero_id": tercero_id,
+        "lineas": lines,
+        "totales": {"debe": total_debe, "haber": total_haber},
+    }
+
+
+def apply_gestoria_import_lote(conn, lote_id, empresa_id, now, limit=None):
+    sql = """
+        SELECT *
+        FROM gestoria_import_documentos
+        WHERE lote_id = ?
+          AND empresa_id = ?
+          AND estado_revision = 'OK'
+          AND factura_id IS NULL
+        ORDER BY fecha_detectada ASC, created_at ASC
+    """
+    values = [lote_id, empresa_id]
+    if limit:
+        sql += " LIMIT ?"
+        values.append(int(limit))
+    rows = conn.execute(sql, values).fetchall()
+    applied = []
+    errors = []
+    for row in rows:
+        try:
+            result = apply_gestoria_import_document(conn, row, now)
+            applied.append({"documento_id": row["id"], **result})
+            log_gestoria_import_event(
+                conn,
+                lote_id,
+                "aplicado",
+                now,
+                documento_id=row["id"],
+                factura_id=result["factura_id"],
+                detalle="Documento aplicado a factura/asiento",
+                payload={"archivo_nombre": row["archivo_nombre"], "factura_id": result["factura_id"], "asiento_id": result["asiento_id"]},
+            )
+        except Exception as exc:
+            conn.execute(
+                """
+                UPDATE gestoria_import_documentos
+                SET estado_revision = 'ERROR',
+                    motivos_revision = COALESCE(NULLIF(TRIM(COALESCE(motivos_revision, '') || ',error_aplicacion'), ''), 'error_aplicacion'),
+                    updated_at = datetime(?)
+                WHERE id = ?
+                """,
+                (now, row["id"]),
+            )
+            errors.append({"documento_id": row["id"], "archivo_nombre": row["archivo_nombre"], "error": str(exc)})
+            log_gestoria_import_event(
+                conn,
+                lote_id,
+                "error_aplicacion",
+                now,
+                documento_id=row["id"],
+                detalle=str(exc),
+                payload={"archivo_nombre": row["archivo_nombre"]},
+            )
+    lote = refresh_gestoria_import_lote_totals(conn, lote_id, now)
+    return {"applied": applied, "errors": errors, "lote": lote}
+
 def process_seguros_ocr(payload, conn):
     pdf_bytes = decode_seguros_payload(payload)
     fast_mode = str(payload.get("fast_mode") or "").strip().lower() in ("1", "true", "yes", "on")
@@ -9274,6 +9903,7 @@ def ensure_tables(db_path):
         )
         """
     )
+    ensure_gestoria_import_schema(conn)
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS inmueble_checklist (
@@ -9560,6 +10190,8 @@ def ensure_tables(db_path):
     ensure_column(conn, "gestoria_facturas", "estado_ocr", "estado_ocr TEXT")
     ensure_column(conn, "gestoria_facturas", "doc_key", "doc_key TEXT")
     ensure_column(conn, "gestoria_facturas", "raw_text", "raw_text TEXT")
+    ensure_column(conn, "gestoria_facturas", "import_documento_id", "import_documento_id TEXT")
+    ensure_column(conn, "gestoria_facturas", "origen_importacion", "origen_importacion TEXT")
     load_postal_catalog(conn)
     conn.commit()
     conn.close()
@@ -9978,6 +10610,10 @@ class Handler(BaseHTTPRequestHandler):
             "/api/gestoria_contabilidad",
             "/api/gestoria_contabilidad_update",
             "/api/gestoria_contabilidad_delete",
+            "/api/gestoria_import_lotes",
+            "/api/gestoria_import_documentos_bulk",
+            "/api/gestoria_import_documento_resolver",
+            "/api/gestoria_import_aplicar",
             "/api/gestoria_factura_ocr",
             "/api/gestoria_update",
             "/api/seguros_ocr",
@@ -10783,6 +11419,195 @@ class Handler(BaseHTTPRequestHandler):
                 return
             conn.execute("DELETE FROM gestoria_docs WHERE id = ?", (doc_id,))
             audit("gestoria_doc", doc_id, "eliminar", None, payload.get("usuario"))
+        elif parsed.path == "/api/gestoria_import_lotes":
+            cliente_id = str(payload.get("cliente_id") or "").strip() or None
+            lote_id = os.urandom(16).hex()
+            conn.execute(
+                """
+                INSERT INTO gestoria_import_lotes (
+                  id, empresa_id, cliente_id, origen, estado, periodo, carpeta_origen,
+                  template_path, notas, created_at, updated_at
+                ) VALUES (
+                  ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                )
+                """,
+                (
+                    lote_id,
+                    empresa["id"],
+                    cliente_id,
+                    payload.get("origen"),
+                    "nuevo",
+                    payload.get("periodo"),
+                    payload.get("carpeta_origen"),
+                    payload.get("template_path"),
+                    payload.get("notas"),
+                    now,
+                    now,
+                ),
+            )
+            log_gestoria_import_event(
+                conn,
+                lote_id,
+                "lote_creado",
+                now,
+                detalle="Alta de lote de importacion",
+                payload={"cliente_id": cliente_id, "periodo": payload.get("periodo")},
+            )
+            conn.commit()
+            json_response(self, {"ok": True, "lote_id": lote_id})
+            return
+        elif parsed.path == "/api/gestoria_import_documentos_bulk":
+            lote_id = str(payload.get("lote_id") or "").strip()
+            if not lote_id:
+                json_response(self, {"error": "lote_id requerido"}, status=400)
+                return
+            lote = conn.execute(
+                """
+                SELECT id, empresa_id, cliente_id
+                FROM gestoria_import_lotes
+                WHERE id = ? AND empresa_id = ?
+                LIMIT 1
+                """,
+                (lote_id, empresa["id"]),
+            ).fetchone()
+            if not lote:
+                json_response(self, {"error": "lote no encontrado"}, status=404)
+                return
+            records = payload.get("records")
+            if not isinstance(records, list):
+                records = payload.get("documentos")
+            if not isinstance(records, list):
+                json_response(self, {"error": "records requerido"}, status=400)
+                return
+            inserted = 0
+            for record in records:
+                if not isinstance(record, dict):
+                    continue
+                upsert_gestoria_import_document(conn, lote_id, empresa["id"], lote["cliente_id"], record, now)
+                inserted += 1
+            lote_row = refresh_gestoria_import_lote_totals(conn, lote_id, now)
+            log_gestoria_import_event(
+                conn,
+                lote_id,
+                "documentos_cargados",
+                now,
+                detalle=f"{inserted} documentos recibidos",
+                payload={"count": inserted},
+            )
+            conn.commit()
+            json_response(self, {"ok": True, "inserted": inserted, "lote": lote_row})
+            return
+        elif parsed.path == "/api/gestoria_import_documento_resolver":
+            document_id = str(payload.get("id") or "").strip()
+            if not document_id:
+                json_response(self, {"error": "id requerido"}, status=400)
+                return
+            row = conn.execute(
+                """
+                SELECT id, lote_id, empresa_id
+                FROM gestoria_import_documentos
+                WHERE id = ? AND empresa_id = ?
+                LIMIT 1
+                """,
+                (document_id, empresa["id"]),
+            ).fetchone()
+            if not row:
+                json_response(self, {"error": "documento no encontrado"}, status=404)
+                return
+            allowed = (
+                "estado_revision",
+                "motivos_revision",
+                "categoria_detectada",
+                "subcategoria_detectada",
+                "cuenta_sugerida",
+                "cuenta_tercero_sugerida",
+                "numero_detectado",
+                "fecha_detectada",
+                "tercero_detectado",
+                "nif_detectado",
+                "base_detectada",
+                "cuota_iva_detectada",
+                "total_detectado",
+                "tipo_detectado",
+                "doc_key",
+                "raw_text",
+            )
+            updates = []
+            values = []
+            for field in allowed:
+                if field not in payload:
+                    continue
+                if field == "estado_revision":
+                    updates.append("estado_revision = ?")
+                    values.append(normalize_import_review_state(payload.get(field)))
+                elif field == "motivos_revision":
+                    updates.append("motivos_revision = ?")
+                    values.append(normalize_import_reasons(payload.get(field)) or None)
+                elif field in {"base_detectada", "cuota_iva_detectada", "total_detectado"}:
+                    updates.append(f"{field} = ?")
+                    values.append(round(parse_money_value(payload.get(field)), 2))
+                else:
+                    updates.append(f"{field} = ?")
+                    raw_value = payload.get(field)
+                    values.append(str(raw_value).strip() if raw_value is not None else None)
+            if not updates:
+                json_response(self, {"error": "sin cambios"}, status=400)
+                return
+            conn.execute(
+                f"""
+                UPDATE gestoria_import_documentos
+                SET {", ".join(updates)}, updated_at = datetime(?)
+                WHERE id = ?
+                """,
+                (*values, now, document_id),
+            )
+            lote_row = refresh_gestoria_import_lote_totals(conn, row["lote_id"], now)
+            log_gestoria_import_event(
+                conn,
+                row["lote_id"],
+                "documento_resuelto",
+                now,
+                documento_id=document_id,
+                detalle="Revision manual actualizada",
+                payload={k: payload.get(k) for k in allowed if k in payload},
+            )
+            conn.commit()
+            json_response(self, {"ok": True, "lote": lote_row})
+            return
+        elif parsed.path == "/api/gestoria_import_aplicar":
+            lote_id = str(payload.get("lote_id") or "").strip()
+            if not lote_id:
+                json_response(self, {"error": "lote_id requerido"}, status=400)
+                return
+            lote = conn.execute(
+                """
+                SELECT id
+                FROM gestoria_import_lotes
+                WHERE id = ? AND empresa_id = ?
+                LIMIT 1
+                """,
+                (lote_id, empresa["id"]),
+            ).fetchone()
+            if not lote:
+                json_response(self, {"error": "lote no encontrado"}, status=404)
+                return
+            limit = payload.get("limit")
+            try:
+                limit = int(limit) if limit not in (None, "") else None
+            except Exception:
+                limit = None
+            result = apply_gestoria_import_lote(conn, lote_id, empresa["id"], now, limit=limit)
+            conn.commit()
+            json_response(
+                self,
+                {
+                    "ok": True,
+                    "applied": result["applied"],
+                    "errors": result["errors"],
+                    "lote": result["lote"],
+                },
+            )
+            return
         elif parsed.path == "/api/ocr_job":
             json_response(self, {"error": "Usa GET"}, status=405)
             return
@@ -16351,6 +17176,86 @@ class Handler(BaseHTTPRequestHandler):
                 values,
             ).fetchall()
             json_response(self, {"rows": [dict(r) for r in rows]})
+            return
+
+        if path == "/api/gestoria_import_lotes":
+            empresa_id = params.get("empresa_id", [""])[0]
+            cliente_id = params.get("cliente_id", [""])[0]
+            if not empresa_id:
+                json_response(self, {"error": "empresa_id requerido"}, status=400)
+                return
+            rows = conn.execute(
+                """
+                SELECT l.id, l.empresa_id, l.cliente_id, l.origen, l.estado, l.periodo,
+                       l.carpeta_origen, l.template_path, l.total_documentos, l.total_ok,
+                       l.total_revisar, l.total_duplicado, l.total_error, l.notas,
+                       l.created_at, l.updated_at, COALESCE(c.nombre, '') AS cliente
+                FROM gestoria_import_lotes l
+                LEFT JOIN clientes c ON c.id = l.cliente_id
+                WHERE l.empresa_id = ?
+                  AND (? = '' OR COALESCE(l.cliente_id, '') = ?)
+                ORDER BY l.created_at DESC
+                LIMIT 200
+                """,
+                (empresa_id, cliente_id, cliente_id),
+            ).fetchall()
+            json_response(self, {"rows": [dict(r) for r in rows]})
+            return
+
+        if path == "/api/gestoria_import_documentos":
+            lote_id = params.get("lote_id", [""])[0]
+            estado_raw = (params.get("estado", [""])[0] or "").strip()
+            estado = normalize_import_review_state(estado_raw) if estado_raw else ""
+            if not lote_id:
+                json_response(self, {"error": "lote_id requerido"}, status=400)
+                return
+            values = [lote_id]
+            where_estado = ""
+            if estado:
+                where_estado = " AND d.estado_revision = ?"
+                values.append(estado)
+            rows = conn.execute(
+                f"""
+                SELECT d.*, COALESCE(f.numero, '') AS factura_numero,
+                       COALESCE(f.fecha_emision, '') AS factura_fecha,
+                       COALESCE(f.total, 0) AS factura_total,
+                       COALESCE(t.nombre, '') AS tercero_nombre
+                FROM gestoria_import_documentos d
+                LEFT JOIN gestoria_facturas f ON f.id = d.factura_id
+                LEFT JOIN gestoria_terceros t ON t.id = COALESCE(d.tercero_id, f.tercero_id)
+                WHERE d.lote_id = ?
+                {where_estado}
+                ORDER BY d.fecha_detectada DESC, d.created_at DESC
+                LIMIT 500
+                """,
+                values,
+            ).fetchall()
+            summary = conn.execute(
+                """
+                SELECT
+                  COUNT(*) AS total_documentos,
+                  SUM(CASE WHEN estado_revision = 'OK' THEN 1 ELSE 0 END) AS total_ok,
+                  SUM(CASE WHEN estado_revision = 'REVISAR' THEN 1 ELSE 0 END) AS total_revisar,
+                  SUM(CASE WHEN estado_revision = 'DUPLICADO' THEN 1 ELSE 0 END) AS total_duplicado,
+                  SUM(CASE WHEN estado_revision = 'ERROR' THEN 1 ELSE 0 END) AS total_error
+                FROM gestoria_import_documentos
+                WHERE lote_id = ?
+                """,
+                (lote_id,),
+            ).fetchone()
+            json_response(
+                self,
+                {
+                    "rows": [dict(r) for r in rows],
+                    "summary": {
+                        "total_documentos": int(summary["total_documentos"] or 0) if summary else 0,
+                        "total_ok": int(summary["total_ok"] or 0) if summary else 0,
+                        "total_revisar": int(summary["total_revisar"] or 0) if summary else 0,
+                        "total_duplicado": int(summary["total_duplicado"] or 0) if summary else 0,
+                        "total_error": int(summary["total_error"] or 0) if summary else 0,
+                    },
+                },
+            )
             return
 
         if path == "/api/gestoria_asientos":
