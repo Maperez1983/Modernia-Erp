@@ -8123,6 +8123,33 @@ const renderAdminUserDetail = () => {
     label.appendChild(select);
     return { label, select };
   };
+  const buildPasswordInput = (labelText, value = "", opts = {}) => {
+    const label = document.createElement("label");
+    label.className = "admin-detail-field";
+    label.textContent = labelText;
+    const shell = document.createElement("div");
+    shell.className = "input-with-icon";
+    const input = document.createElement("input");
+    input.className = "inline-input";
+    input.type = "password";
+    input.value = value || "";
+    if (opts.placeholder) input.placeholder = opts.placeholder;
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "icon-btn";
+    toggle.setAttribute("aria-label", "Mostrar contraseña");
+    toggle.textContent = "👁";
+    toggle.addEventListener("click", () => {
+      const isHidden = input.type === "password";
+      input.type = isHidden ? "text" : "password";
+      toggle.textContent = isHidden ? "🙈" : "👁";
+      toggle.setAttribute("aria-label", isHidden ? "Ocultar contraseña" : "Mostrar contraseña");
+    });
+    shell.appendChild(input);
+    shell.appendChild(toggle);
+    label.appendChild(shell);
+    return { label, input, toggle };
+  };
 
   const nombre = buildInput("Nombre", user.nombre || "");
   const apellido = buildInput("Apellido", user.apellido || "");
@@ -8141,7 +8168,7 @@ const renderAdminUserDetail = () => {
     ],
     user.activo ? "1" : "0"
   );
-  const password = buildInput("Nueva contraseña", "", { type: "password", placeholder: "Opcional" });
+  const password = buildPasswordInput("Nueva contraseña", "", { placeholder: "Opcional" });
 
   const serviciosLabel = document.createElement("label");
   serviciosLabel.className = "admin-detail-field admin-detail-services";
