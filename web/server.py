@@ -8930,6 +8930,147 @@ def ensure_inmueble_propietario_link(conn, inmueble_id, cliente_id, now):
     )
 
 
+def normalize_inmobiliaria_address(value):
+    return re.sub(r"\s+", " ", normalize_lookup_text(value or "")).strip()
+
+
+def resolve_owner_nifs_from_cliente_ids(conn, cliente_ids):
+    normalized = []
+    seen = set()
+    for cliente_id in cliente_ids or []:
+        row = conn.execute(
+            "SELECT nif FROM clientes WHERE id = ? LIMIT 1",
+            (cliente_id,),
+        ).fetchone()
+        nif = normalize_nif(row["nif"] if row else "")
+        if nif and nif not in seen:
+            seen.add(nif)
+            normalized.append(nif)
+    return normalized
+
+
+def detect_inmobiliaria_duplicates(conn, empresa_id, *, direccion="", owner_nifs=None, scope="captacion"):
+    direccion_norm = normalize_inmobiliaria_address(direccion)
+    owner_nifs = [normalize_nif(item) for item in (owner_nifs or []) if normalize_nif(item)]
+    owner_nif_set = set(owner_nifs)
+    duplicates = []
+
+    inmueble_rows = conn.execute(
+        """
+        SELECT
+          i.id AS inmueble_id,
+          i.direccion,
+          i.referencia,
+          i.referencia_catastral,
+          cpt.id AS captacion_id,
+          cpt.propietario,
+          cpt.etapa,
+          GROUP_CONCAT(DISTINCT c.nif) AS propietario_nifs
+        FROM inmuebles i
+        LEFT JOIN captaciones cpt ON cpt.inmueble_id = i.id
+        LEFT JOIN inmueble_propietarios ip ON ip.inmueble_id = i.id
+        LEFT JOIN clientes c ON c.id = ip.cliente_id
+        WHERE i.empresa_id = ?
+        GROUP BY i.id, cpt.id
+        ORDER BY COALESCE(i.updated_at, i.created_at) DESC
+        """,
+        (empresa_id,),
+    ).fetchall()
+    for row in inmueble_rows:
+        reasons = []
+        if direccion_norm and normalize_inmobiliaria_address(row["direccion"]) == direccion_norm:
+            reasons.append("misma dirección")
+        row_nifs = {
+            normalize_nif(part)
+            for part in re.split(r"[|,]", str(row["propietario_nifs"] or ""))
+            if normalize_nif(part)
+        }
+        shared_nifs = sorted(row_nifs.intersection(owner_nif_set))
+        if shared_nifs:
+            reasons.append(f"mismo DNI/NIF de propietario ({', '.join(shared_nifs)})")
+        if not reasons:
+            continue
+        duplicates.append(
+            {
+                "type": "inmueble",
+                "id": row["inmueble_id"],
+                "direccion": row["direccion"] or "",
+                "label": row["direccion"] or row["referencia"] or "Inmueble existente",
+                "subtype": "captacion" if row["captacion_id"] else "inmueble",
+                "propietario": row["propietario"] or "",
+                "referencia_catastral": row["referencia_catastral"] or "",
+                "reasons": reasons,
+            }
+        )
+
+    if scope == "compraventa":
+        operacion_rows = conn.execute(
+            """
+            SELECT
+              id,
+              direccion,
+              fecha_escritura,
+              propietario1_nombre,
+              propietario1_nif,
+              propietario2_nombre,
+              propietario2_nif
+            FROM operaciones_inmobiliarias
+            WHERE empresa_id = ?
+              AND LOWER(COALESCE(tipo_operacion, 'venta')) = 'venta'
+            ORDER BY COALESCE(updated_at, created_at) DESC
+            """,
+            (empresa_id,),
+        ).fetchall()
+        for row in operacion_rows:
+            reasons = []
+            if direccion_norm and normalize_inmobiliaria_address(row["direccion"]) == direccion_norm:
+                reasons.append("misma dirección en compraventa existente")
+            row_nifs = {
+                normalize_nif(row["propietario1_nif"]),
+                normalize_nif(row["propietario2_nif"]),
+            }
+            row_nifs = {item for item in row_nifs if item}
+            shared_nifs = sorted(row_nifs.intersection(owner_nif_set))
+            if shared_nifs:
+                reasons.append(f"mismo DNI/NIF de vendedor ({', '.join(shared_nifs)})")
+            if not reasons:
+                continue
+            duplicates.append(
+                {
+                    "type": "compraventa",
+                    "id": row["id"],
+                    "direccion": row["direccion"] or "",
+                    "label": row["direccion"] or "Compraventa existente",
+                    "fecha_escritura": row["fecha_escritura"] or "",
+                    "propietario": " | ".join(
+                        [
+                            item
+                            for item in [
+                                row["propietario1_nombre"] or "",
+                                row["propietario2_nombre"] or "",
+                            ]
+                            if item
+                        ]
+                    ),
+                    "reasons": reasons,
+                }
+            )
+
+    deduped = []
+    seen = set()
+    for item in duplicates:
+        signature = (
+            item.get("type"),
+            item.get("id"),
+            tuple(item.get("reasons") or []),
+        )
+        if signature in seen:
+            continue
+        seen.add(signature)
+        deduped.append(item)
+    return deduped
+
+
 def infer_operacion_estado_documental(payload):
     checks = [
         ("nota de encargo", payload.get("doc_nota_encargo_path")),

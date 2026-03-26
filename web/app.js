@@ -25433,6 +25433,74 @@ if (gestoriaClienteLibroExcelBtn) {
 }
 
 
+const formatInmobiliariaDuplicateSummary = (duplicates = []) =>
+  duplicates
+    .slice(0, 5)
+    .map((item) => {
+      const label = item?.label || item?.direccion || "Registro existente";
+      const reasons = Array.isArray(item?.reasons) ? item.reasons.join(", ") : "";
+      return `- ${label}${reasons ? ` · ${reasons}` : ""}`;
+    })
+    .join("\n");
+
+const submitInmobiliariaWithDuplicateCheck = async ({
+  endpoint,
+  payload,
+  statusEl,
+  successMessage,
+  onSuccess,
+}) => {
+  const postPayload = async (allowDuplicate = false) => {
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ...payload,
+        ...(allowDuplicate ? { allow_duplicate: "1" } : {}),
+      }),
+    });
+    let data = null;
+    try {
+      data = await res.json();
+    } catch (_) {
+      data = null;
+    }
+    return { res, data };
+  };
+
+  let { res, data } = await postPayload(false);
+  if (res.status === 409 && data?.code === "duplicate_detected") {
+    const duplicateText = formatInmobiliariaDuplicateSummary(data?.duplicates || []);
+    if (statusEl) {
+      statusEl.textContent = duplicateText
+        ? `Posible duplicado detectado. ${duplicateText.replace(/\n/g, " | ")}`
+        : "Posible duplicado detectado.";
+    }
+    const confirmed = window.confirm(
+      `Se han detectado posibles duplicados:
+
+${duplicateText || "- Registro similar existente"}
+
+¿Quieres guardar de todos modos?`
+    );
+    if (!confirmed) {
+      return { duplicateCancelled: true, data };
+    }
+    ({ res, data } = await postPayload(true));
+  }
+
+  if (!res.ok || data?.error) {
+    throw new Error(data?.error || `HTTP ${res.status}`);
+  }
+  if (statusEl) {
+    statusEl.textContent = successMessage;
+  }
+  if (typeof onSuccess === "function") {
+    onSuccess(data);
+  }
+  return { ok: true, data };
+};
+
 if (segurosAgendaForm) {
   segurosAgendaForm.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -25645,7 +25713,7 @@ if (bdtForm) {
 
 if (captacionForm) {
   bindPostalLookup(captacionForm);
-  captacionForm.addEventListener("submit", (event) => {
+  captacionForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (captacionFormStatus) {
       captacionFormStatus.textContent = "Guardando...";
@@ -25658,36 +25726,31 @@ if (captacionForm) {
       );
     }
     payload.empresa_nombre = DASHBOARD_COMPANY;
-    fetch("/api/captaciones", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    })
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.error) {
-          if (captacionFormStatus) {
-            captacionFormStatus.textContent = data.error;
-          }
-          return;
-        }
-        if (captacionFormStatus) {
-          captacionFormStatus.textContent = "Guardado.";
-        }
-        captacionForm.reset();
-        loadCrmCaptaciones();
-        loadCrmInmuebles();
-      })
-      .catch(() => {
-        if (captacionFormStatus) {
-          captacionFormStatus.textContent = "Error al guardar.";
-        }
+    try {
+      const result = await submitInmobiliariaWithDuplicateCheck({
+        endpoint: "/api/captaciones",
+        payload,
+        statusEl: captacionFormStatus,
+        successMessage: "Guardado.",
+        onSuccess: () => {
+          captacionForm.reset();
+          loadCrmCaptaciones();
+          loadCrmInmuebles();
+        },
       });
+      if (result?.duplicateCancelled && captacionFormStatus) {
+        captacionFormStatus.textContent = "Guardado cancelado por posible duplicado.";
+      }
+    } catch (error) {
+      if (captacionFormStatus) {
+        captacionFormStatus.textContent = error?.message || "Error al guardar.";
+      }
+    }
   });
 }
 
 if (compraventaForm) {
-  compraventaForm.addEventListener("submit", (event) => {
+  compraventaForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (compraventaFormStatus) {
       compraventaFormStatus.textContent = "Guardando...";
@@ -25695,35 +25758,30 @@ if (compraventaForm) {
     const formData = new FormData(compraventaForm);
     const payload = Object.fromEntries(formData.entries());
     payload.empresa_nombre = DASHBOARD_COMPANY;
-    fetch("/api/compraventas", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    })
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.error) {
-          if (compraventaFormStatus) {
-            compraventaFormStatus.textContent = data.error;
+    try {
+      const result = await submitInmobiliariaWithDuplicateCheck({
+        endpoint: "/api/compraventas",
+        payload,
+        statusEl: compraventaFormStatus,
+        successMessage: "Compraventa guardada.",
+        onSuccess: () => {
+          compraventaForm.reset();
+          const oficinaField = compraventaForm.querySelector('[name="oficina"]');
+          if (oficinaField) {
+            oficinaField.value = "Estudio Velazquez";
           }
-          return;
-        }
-        if (compraventaFormStatus) {
-          compraventaFormStatus.textContent = "Compraventa guardada.";
-        }
-        compraventaForm.reset();
-        const oficinaField = compraventaForm.querySelector('[name="oficina"]');
-        if (oficinaField) {
-          oficinaField.value = "Estudio Velazquez";
-        }
-        loadCrmInmuebles();
-        loadCrmCompraventas();
-      })
-      .catch(() => {
-        if (compraventaFormStatus) {
-          compraventaFormStatus.textContent = "Error al guardar.";
-        }
+          loadCrmInmuebles();
+          loadCrmCompraventas();
+        },
       });
+      if (result?.duplicateCancelled && compraventaFormStatus) {
+        compraventaFormStatus.textContent = "Guardado cancelado por posible duplicado.";
+      }
+    } catch (error) {
+      if (compraventaFormStatus) {
+        compraventaFormStatus.textContent = error?.message || "Error al guardar.";
+      }
+    }
   });
 }
 
