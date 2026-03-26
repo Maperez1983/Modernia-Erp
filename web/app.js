@@ -6137,6 +6137,19 @@ const updateInmuebleMapFromInputs = () => {
   updateInmuebleMap(lat, lon);
 };
 
+const refreshCurrentInmuebleHeader = () => {
+  const inmueble = state.currentInmueble || state.currentInmuebleContext?.inmueble || {};
+  if (inmuebleTitle) {
+    inmuebleTitle.textContent = inmueble.direccion || "Ficha de inmueble";
+  }
+  if (inmuebleSubtitle) {
+    inmuebleSubtitle.textContent =
+      [inmueble.referencia || "", inmueble.referencia_catastral || "", inmueble.poblacion || ""]
+        .filter(Boolean)
+        .join(" · ") || "Referencia sin asignar";
+  }
+};
+
 const saveInmuebleField = (field, value) => {
   if (!state.currentInmuebleId) {
     return;
@@ -6156,12 +6169,13 @@ const saveInmuebleField = (field, value) => {
         setInmuebleSaveStatus(data.error);
         return;
       }
-      if (field === "direccion" && inmuebleTitle) {
-        inmuebleTitle.textContent = value || "Ficha de inmueble";
+      if (state.currentInmueble) {
+        state.currentInmueble[field] = value;
       }
-      if (field === "referencia" && inmuebleSubtitle) {
-        inmuebleSubtitle.textContent = value || "Referencia sin asignar";
+      if (state.currentInmuebleContext?.inmueble) {
+        state.currentInmuebleContext.inmueble[field] = value;
       }
+      refreshCurrentInmuebleHeader();
       if (field === "estado" && inmuebleEstadoInfo) {
         if (state.currentInmueble) {
           state.currentInmueble.estado = value;
@@ -6173,7 +6187,8 @@ const saveInmuebleField = (field, value) => {
       if (field === "lat" || field === "lon") {
         updateInmuebleMapFromInputs();
       }
-      setInmuebleSaveStatus("Guardado");
+      refreshCurrentInmuebleProfile();
+      setInmuebleSaveStatus("Guardado · cambios aplicados");
       loadCrmInmuebles();
     })
     .catch(() => {
@@ -6200,14 +6215,21 @@ const saveCaptacionField = (field, value) => {
         setInmuebleSaveStatus(data.error);
         return;
       }
+      if (state.currentInmuebleContext?.captacion) {
+        state.currentInmuebleContext.captacion[field] = value;
+      }
       if (field === "etapa") {
         if (state.currentInmueble) {
           state.currentInmueble.estado = value;
         }
+        if (state.currentInmuebleContext?.inmueble) {
+          state.currentInmuebleContext.inmueble.estado = value;
+        }
         generateInmuebleChecklist(value);
         loadInmuebleChecklist(state.currentInmuebleId, value);
       }
-      setInmuebleSaveStatus("Guardado");
+      refreshCurrentInmuebleProfile();
+      setInmuebleSaveStatus("Guardado · cambios aplicados");
     })
     .catch(() => {
       setInmuebleSaveStatus("Error al guardar.");
@@ -24373,6 +24395,13 @@ if (gestoriaRentaDetallesForm) {
     }
     const formData = new FormData(gestoriaRentaDetallesForm);
     const payload = Object.fromEntries(formData.entries());
+    const selectedRelationId = String(payload.related_relation_id || "").trim();
+    const selectedRelation = (state.currentClienteRelaciones || []).find(
+      (item) => String(item.id || "").trim() === selectedRelationId
+    );
+    payload.related_relation_id = selectedRelationId;
+    payload.related_cliente_id = selectedRelation ? selectedRelation.counterpart_id || "" : "";
+    payload.declaracion_conjunta = gestoriaRentaDeclaracionConjunta?.checked ? 1 : 0;
     payload.cliente_id = state.currentClienteId;
     fetch("/api/cliente_gestoria_update", {
       method: "POST",
