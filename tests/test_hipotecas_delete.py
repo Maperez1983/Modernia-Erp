@@ -14,6 +14,7 @@ from web.server import (
     is_gestoria_dashboard_active_state,
     maybe_promote_study_hipoteca_accounting,
     resolve_hipoteca_contabilidad_link,
+    sanitize_renta_entry,
     sync_hipotecas_contabilidad_entries,
 )
 
@@ -533,6 +534,26 @@ class HipotecasDeleteTests(unittest.TestCase):
         self.assertEqual(rows[0]["renta_latest"]["ejercicio"], "2025")
         self.assertEqual(rows[0]["doc_count"], 1)
         self.assertEqual(rows[0]["preview_doc"]["doc_url"], "/uploads/rentas/2025/ana.pdf")
+
+    def test_sanitize_renta_entry_discards_outlier_income_and_corrupt_casilla(self):
+        sane = sanitize_renta_entry(
+            {
+                "ingresos_principales_total": 9000000,
+                "rendimientos_trabajo_total": 7876.22,
+                "rendimientos_actividades_economicas_total": 9000000,
+                "rendimientos_capital_inmobiliario_total": None,
+                "rendimientos_capital_mobiliario_total": None,
+                "casilla_505": 14.64,
+                "base_imponible_general": None,
+                "base_liquidable_general": None,
+                "resultado_declaracion": 1577.18,
+            }
+        )
+        self.assertEqual(sane["ingresos_principales_total"], 7876.22)
+        self.assertEqual(sane["rendimientos_trabajo_total"], 7876.22)
+        self.assertIsNone(sane["rendimientos_actividades_economicas_total"])
+        self.assertIsNone(sane["casilla_505"])
+        self.assertEqual(sane["resultado_declaracion"], 1577.18)
 
     def test_is_gestoria_dashboard_active_state_supports_activo_and_alta(self):
         self.assertTrue(is_gestoria_dashboard_active_state("Activo"))

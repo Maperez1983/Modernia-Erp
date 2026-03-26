@@ -8232,6 +8232,147 @@ def sort_renta_entries(entries):
     )
 
 
+RENTA_MAX_REASONABLE_AMOUNT = 1_000_000.0
+RENTA_OUTLIER_RATIO = 50.0
+RENTA_MAJOR_AMOUNT_FLOOR = 1000.0
+
+
+def coerce_renta_money(value):
+    if value is None:
+        return None
+    if isinstance(value, str) and not value.strip():
+        return None
+    number = parse_money_value(value)
+    if number is None:
+        return None
+    return round(number, 2)
+
+
+def is_reasonable_renta_amount(value, allow_zero=True):
+    number = coerce_renta_money(value)
+    if number is None:
+        return False
+    if allow_zero and abs(number) < 0.0001:
+        return True
+    return abs(number) <= RENTA_MAX_REASONABLE_AMOUNT
+
+
+def is_renta_amount_outlier(value, reference):
+    candidate = coerce_renta_money(value)
+    ref = coerce_renta_money(reference)
+    if candidate is None or ref is None:
+        return False
+    if abs(candidate) < 0.0001 or abs(ref) < RENTA_MAJOR_AMOUNT_FLOOR:
+        return False
+    ratio = max(abs(candidate), abs(ref)) / max(min(abs(candidate), abs(ref)), 0.01)
+    return ratio > RENTA_OUTLIER_RATIO and min(abs(candidate), abs(ref)) < RENTA_MAJOR_AMOUNT_FLOOR
+
+
+def first_reasonable_renta_amount(values, reference=None, allow_zero=True):
+    for raw in values:
+        number = coerce_renta_money(raw)
+        if number is None:
+            continue
+        if not is_reasonable_renta_amount(number, allow_zero=allow_zero):
+            continue
+        if reference is not None and is_renta_amount_outlier(number, reference):
+            continue
+        return number
+    return None
+
+
+def sanitize_renta_entry(entry):
+    if not isinstance(entry, dict):
+        return {}
+    sanitized = dict(entry)
+
+    raw_work = coerce_renta_money(entry.get("rendimientos_trabajo_total"))
+    raw_activities = coerce_renta_money(entry.get("rendimientos_actividades_economicas_total"))
+    raw_cap_inm = coerce_renta_money(entry.get("rendimientos_capital_inmobiliario_total"))
+    raw_cap_mob = coerce_renta_money(entry.get("rendimientos_capital_mobiliario_total"))
+    raw_base_general = coerce_renta_money(entry.get("base_imponible_general"))
+    raw_base_liquidable = coerce_renta_money(entry.get("base_liquidable_general"))
+    raw_casilla_505 = coerce_renta_money(entry.get("casilla_505"))
+
+    major_reference = first_reasonable_renta_amount(
+        [
+            raw_casilla_505,
+            raw_base_liquidable,
+            raw_base_general,
+            raw_work,
+            raw_activities,
+            raw_cap_inm,
+            raw_cap_mob,
+        ],
+        allow_zero=False,
+    )
+
+    sanitized["rendimientos_trabajo_total"] = first_reasonable_renta_amount(
+        [raw_work],
+        reference=major_reference,
+        allow_zero=True,
+    )
+    sanitized["rendimientos_actividades_economicas_total"] = first_reasonable_renta_amount(
+        [raw_activities],
+        reference=major_reference,
+        allow_zero=True,
+    )
+    sanitized["rendimientos_capital_inmobiliario_total"] = first_reasonable_renta_amount(
+        [raw_cap_inm],
+        reference=major_reference,
+        allow_zero=True,
+    )
+    sanitized["rendimientos_capital_mobiliario_total"] = first_reasonable_renta_amount(
+        [raw_cap_mob],
+        reference=major_reference,
+        allow_zero=True,
+    )
+    sanitized["base_imponible_general"] = first_reasonable_renta_amount([raw_base_general], allow_zero=True)
+    sanitized["base_liquidable_general"] = first_reasonable_renta_amount([raw_base_liquidable], allow_zero=True)
+
+    income_reference = first_reasonable_renta_amount(
+        [
+            sanitized.get("rendimientos_trabajo_total"),
+            sanitized.get("rendimientos_actividades_economicas_total"),
+            sanitized.get("rendimientos_capital_inmobiliario_total"),
+            sanitized.get("rendimientos_capital_mobiliario_total"),
+            sanitized.get("base_liquidable_general"),
+            sanitized.get("base_imponible_general"),
+            raw_casilla_505,
+        ],
+        allow_zero=False,
+    )
+
+    sanitized["casilla_505"] = first_reasonable_renta_amount(
+        [raw_casilla_505, raw_base_liquidable, raw_base_general],
+        reference=income_reference,
+        allow_zero=True,
+    )
+    sanitized["resultado_declaracion"] = first_reasonable_renta_amount(
+        [entry.get("resultado_declaracion")],
+        allow_zero=True,
+    )
+    sanitized["ingresos_principales_total"] = first_reasonable_renta_amount(
+        [
+            entry.get("ingresos_principales_total"),
+            sanitized.get("rendimientos_trabajo_total"),
+            sanitized.get("rendimientos_actividades_economicas_total"),
+            sanitized.get("rendimientos_capital_inmobiliario_total"),
+            sanitized.get("rendimientos_capital_mobiliario_total"),
+            sanitized.get("casilla_505"),
+            sanitized.get("base_liquidable_general"),
+            sanitized.get("base_imponible_general"),
+        ],
+        reference=sanitized.get("casilla_505") or major_reference,
+        allow_zero=True,
+    )
+    return sanitized
+
+
+def sanitize_renta_entries(entries):
+    return [sanitize_renta_entry(entry) for entry in entries if isinstance(entry, dict)]
+
+
 def collect_gestoria_renta_card_items(conn, empresa_id, q="", estado="", limit=50):
     q_norm = str(q or "").strip().lower()
     estado_norm = normalize_lookup_text(estado or "")
@@ -8287,7 +8428,7 @@ def collect_gestoria_renta_card_items(conn, empresa_id, q="", estado="", limit=5
         if q_norm and q_norm not in search_blob:
             continue
         renta_payload = parse_renta_detalles_payload(row["renta_detalles"])
-        entries = sort_renta_entries(renta_payload.get("entries") or [])
+        entries = sanitize_renta_entries(sort_renta_entries(renta_payload.get("entries") or []))
         latest = entries[0] if entries else {}
         docs = conn.execute(
             """
@@ -8567,7 +8708,7 @@ def build_cliente_ficha_payload(conn, cliente_id, services_filter=None):
         gestoria_payload = dict(gestoria_row)
         renta_payload = parse_renta_detalles_payload(gestoria_payload.get("renta_detalles"))
         gestoria_payload["renta_notes"] = renta_payload.get("notes", "")
-        gestoria_payload["renta_entries"] = renta_payload.get("entries", [])
+        gestoria_payload["renta_entries"] = sanitize_renta_entries(renta_payload.get("entries", []))
         profesionales["gestoria"] = gestoria_payload
 
     return {
@@ -8715,6 +8856,7 @@ TABLES = [
     "gestoria",
     "captaciones",
     "inmuebles",
+    "operaciones_inmobiliarias",
     "demandas",
     "visitas",
     "hipotecas",
@@ -8833,6 +8975,8 @@ def ensure_tables(db_path):
         pass
     try:
         inm_cols = [row[1] for row in conn.execute("PRAGMA table_info(inmuebles)").fetchall()]
+        if "referencia_catastral" not in inm_cols:
+            conn.execute("ALTER TABLE inmuebles ADD COLUMN referencia_catastral TEXT")
         if "codigo_postal" not in inm_cols:
             conn.execute("ALTER TABLE inmuebles ADD COLUMN codigo_postal TEXT")
         if "poblacion" not in inm_cols:
@@ -8841,6 +8985,58 @@ def ensure_tables(db_path):
             conn.execute("ALTER TABLE inmuebles ADD COLUMN provincia TEXT")
     except sqlite3.Error:
         pass
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS operaciones_inmobiliarias (
+          id TEXT PRIMARY KEY,
+          empresa_id TEXT NOT NULL,
+          tipo_operacion TEXT NOT NULL,
+          estado TEXT,
+          origen TEXT,
+          expediente_path TEXT,
+          expediente_hash TEXT UNIQUE,
+          anio INTEGER,
+          mes TEXT,
+          inmueble_id TEXT,
+          direccion TEXT,
+          referencia_catastral TEXT,
+          propietario1_id TEXT,
+          propietario1_nombre TEXT,
+          propietario1_nif TEXT,
+          propietario1_telefono TEXT,
+          propietario1_email TEXT,
+          propietario1_fecha_nacimiento TEXT,
+          propietario2_id TEXT,
+          propietario2_nombre TEXT,
+          propietario2_nif TEXT,
+          propietario2_telefono TEXT,
+          propietario2_email TEXT,
+          propietario2_fecha_nacimiento TEXT,
+          contraparte_nombre TEXT,
+          contraparte_nif TEXT,
+          contraparte_telefono TEXT,
+          contraparte_email TEXT,
+          contraparte_fecha_nacimiento TEXT,
+          fecha_encargo TEXT,
+          fecha_propuesta TEXT,
+          fecha_contrato TEXT,
+          fecha_escritura TEXT,
+          fecha_operacion TEXT,
+          precio_encargo REAL,
+          precio_propuesta REAL,
+          precio_contrato REAL,
+          precio_escritura REAL,
+          precio_renta REAL,
+          agente TEXT,
+          oficina TEXT,
+          calidad_ocr TEXT,
+          notas TEXT,
+          datos_extraidos_json TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS gestoria_docs (
@@ -15211,7 +15407,7 @@ class Handler(BaseHTTPRequestHandler):
             row_dict = dict(row)
             renta_payload = parse_renta_detalles_payload(row_dict.get("renta_detalles"))
             row_dict["renta_notes"] = renta_payload.get("notes", "")
-            row_dict["renta_entries"] = renta_payload.get("entries", [])
+            row_dict["renta_entries"] = sanitize_renta_entries(renta_payload.get("entries", []))
             json_response(self, {"row": row_dict})
             return
 
