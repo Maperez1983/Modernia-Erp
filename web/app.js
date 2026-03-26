@@ -1537,6 +1537,7 @@ const gestoriaAlertAccionesOverdue = document.getElementById("gestoriaAlertAccio
 const gestoriaAlertGestiones = document.getElementById("gestoriaAlertGestiones");
 const gestoriaAlertGestionesProximas = document.getElementById("gestoriaAlertGestionesProximas");
 const gestoriaAlertDays = document.getElementById("gestoriaAlertDays");
+const gestoriaRentaCampaignBanner = document.getElementById("gestoriaRentaCampaignBanner");
 const gestoriaResponsablesTable = document.getElementById("gestoriaResponsablesTable");
 const gestoriaAgendaForm = document.getElementById("gestoriaAgendaForm");
 const gestoriaAgendaStatus = document.getElementById("gestoriaAgendaStatus");
@@ -1938,6 +1939,7 @@ const TABLE_LABELS = {
   seguros: "Seguros",
   gestoria: "Gestoría",
   captaciones: "Captación",
+  operaciones_inmobiliarias: "Operaciones Inmobiliarias",
   hipotecas: "Hipotecas",
   alquileres: "Alquileres",
   inversores: "Inversores",
@@ -13093,6 +13095,7 @@ const loadGestoriaDashboard = () => {
   const empresa = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
   if (!empresa) return;
   bindGestoriaDashboardKpis();
+  bindGestoriaRentaCampaignBanner();
   Promise.all([
     api(`/api/gestoria_dashboard?empresa_id=${empresa.id}`),
     api(`/api/gestoria_trabajos?empresa_id=${empresa.id}`),
@@ -13423,6 +13426,19 @@ const bindGestoriaDashboardKpis = () => {
         action();
       }
     });
+  });
+};
+
+const bindGestoriaRentaCampaignBanner = () => {
+  if (!gestoriaRentaCampaignBanner || gestoriaRentaCampaignBanner.dataset.bound === "1") return;
+  gestoriaRentaCampaignBanner.dataset.bound = "1";
+  const action = () => openGestoriaCrmWithFilters({ tab: "renta" });
+  gestoriaRentaCampaignBanner.addEventListener("click", action);
+  gestoriaRentaCampaignBanner.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      action();
+    }
   });
 };
 

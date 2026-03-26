@@ -1302,6 +1302,109 @@ body.crm-fin #companySummary {
   border-left: 3px solid rgba(60, 110, 113, 0.6);
 }
 
+.gestoria-renta-banner {
+  width: 100%;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 18px;
+  align-items: center;
+  margin-bottom: 18px;
+  padding: 18px 20px;
+  border: 1px solid rgba(60, 110, 113, 0.18);
+  border-radius: 20px;
+  background:
+    radial-gradient(circle at top right, rgba(247, 232, 0, 0.18), transparent 28%),
+    linear-gradient(135deg, #fffef7 0%, #f5efe4 52%, #eef4f8 100%);
+  text-align: left;
+  cursor: pointer;
+  box-shadow: 0 14px 30px rgba(18, 16, 12, 0.08);
+}
+
+.gestoria-renta-banner:hover,
+.gestoria-renta-banner:focus-visible {
+  border-color: rgba(60, 110, 113, 0.45);
+  box-shadow: 0 18px 34px rgba(18, 16, 12, 0.14);
+  transform: translateY(-1px);
+  outline: none;
+}
+
+.gestoria-renta-banner-mark {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+.gestoria-renta-banner-gov {
+  width: 108px;
+  height: 30px;
+  border-radius: 6px;
+  background-image: url("../assets/logos/hacienda-sprite-07.png");
+  background-repeat: no-repeat;
+  background-position: 0 0;
+  background-size: 430px auto;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.04);
+}
+
+.gestoria-renta-banner-aeat {
+  display: grid;
+  gap: 2px;
+  font-family: var(--font-ui);
+  color: #34459b;
+  line-height: 1;
+}
+
+.gestoria-renta-banner-aeat span {
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.gestoria-renta-banner-aeat strong {
+  font-size: 22px;
+  color: #34459b;
+}
+
+.gestoria-renta-banner-copy {
+  display: grid;
+  gap: 6px;
+}
+
+.gestoria-renta-banner-copy h3 {
+  margin: 0;
+  font-size: 28px;
+}
+
+.gestoria-renta-banner-copy p {
+  margin: 0;
+  color: var(--muted);
+  max-width: 56ch;
+}
+
+.gestoria-renta-banner-cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  padding: 0 16px;
+  border-radius: 999px;
+  background: var(--charcoal);
+  color: #f7f4ee;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+@media (max-width: 820px) {
+  .gestoria-renta-banner {
+    grid-template-columns: 1fr;
+    justify-items: start;
+  }
+
+  .gestoria-renta-banner-mark {
+    flex-wrap: wrap;
+  }
+}
+
 .crm-kpis .kpi-clickable {
   cursor: pointer;
   transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease;
