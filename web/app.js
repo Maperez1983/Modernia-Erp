@@ -4201,9 +4201,16 @@ const setModule = (moduleName) => {
     updateExplorerHeader("Clientes");
     explorerSection.classList.remove("hidden");
     setTab("bdt");
+    if (searchInput) {
+      searchInput.placeholder = "Buscar cliente...";
+    }
     loadClientesTable();
+    loadClientesDashboard();
     renderClientesColumnsPicker();
   } else {
+    if (searchInput) {
+      searchInput.placeholder = "Buscar por texto o número...";
+    }
     updateExplorerHeader(state.currentEmpresaName || "");
   }
   updateTableVisibility();
@@ -8646,8 +8653,30 @@ const updateTableVisibility = () => {
   if (clientesDashboardPanel) {
     clientesDashboardPanel.classList.toggle("hidden", state.currentModule !== "clientes" || isClientePage);
   }
+  if (state.currentModule === "clientes") {
+    if (empresaSelect) empresaSelect.classList.add("hidden");
+    if (tablaSelect) tablaSelect.classList.add("hidden");
+    if (clientesEstadoFilter) clientesEstadoFilter.classList.add("hidden");
+    if (applyBtn) applyBtn.classList.add("hidden");
+    if (resetBtn) resetBtn.classList.add("hidden");
+    if (clientesColumnsBtn) clientesColumnsBtn.classList.add("hidden");
+    if (clientesShowAllBtn) clientesShowAllBtn.classList.add("hidden");
+    if (searchInput) {
+      searchInput.classList.remove("hidden");
+      searchInput.placeholder = "Buscar cliente...";
+    }
+  } else {
+    if (empresaSelect) empresaSelect.classList.remove("hidden");
+    if (applyBtn) applyBtn.classList.remove("hidden");
+    if (resetBtn) resetBtn.classList.remove("hidden");
+    if (clientesColumnsBtn) clientesColumnsBtn.classList.remove("hidden");
+    if (clientesShowAllBtn) clientesShowAllBtn.classList.remove("hidden");
+    if (searchInput) {
+      searchInput.placeholder = "Buscar por texto o número...";
+    }
+  }
   if (clientesEstadoFilter) {
-    clientesEstadoFilter.classList.toggle("hidden", state.currentModule !== "clientes");
+    clientesEstadoFilter.classList.toggle("hidden", true);
   }
   const isClientesAlta = state.currentModule === "clientes" && currentTab === "alta";
   if (tableContainer) {
