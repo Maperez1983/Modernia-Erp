@@ -206,6 +206,7 @@
             </div>
             <div class="crm-actions">
               <button type="button" id="crmNuevaCaptacionBtn">Nueva captación</button>
+              <button type="button" id="crmNuevaCompraventaBtn" class="secondary">Nueva compraventa</button>
               <button type="button" id="crmNuevaDemandaBtn" class="secondary">Nueva demanda</button>
             </div>
           </div>
@@ -224,6 +225,11 @@
               <h3>Etapa más activa</h3>
               <div class="kpi-value" id="crmKpiEtapa">-</div>
               <div class="muted">Captaciones</div>
+            </div>
+            <div class="card kpi-card">
+              <h3>Compraventas</h3>
+              <div class="kpi-value" id="crmKpiCompraventas">0</div>
+              <div class="muted">Histórico visible</div>
             </div>
           </div>
           <div class="form-card">
@@ -267,6 +273,17 @@
               </div>
               <div id="crmInmueblesRecent" class="crm-recent"></div>
             </div>
+          </div>
+          <div class="form-card">
+            <div class="section-head">
+              <div>
+                <h3>Compraventas</h3>
+                <p class="muted">Ventas históricas importadas y operaciones nuevas dadas de alta por formulario.</p>
+              </div>
+              <input id="crmCompraventaSearch" placeholder="Buscar por dirección, vendedor o comprador..." />
+            </div>
+            <div id="crmCompraventasTable"></div>
+            <div class="footer" id="crmCompraventasInfo"></div>
           </div>
           <div id="inmuebleDetail" class="form-card hidden">
             <div class="section-head">
@@ -2159,6 +2176,7 @@
           <div id="estudioAltaTabs" class="tabs">
             <button class="tab active" type="button" data-section="bdt">BDT</button>
             <button class="tab" type="button" data-section="captacion">Captación</button>
+            <button class="tab" type="button" data-section="compraventa">Compraventa</button>
             <button class="tab" type="button" data-section="demanda">Demanda</button>
           </div>
           <div id="estudioAltaBdt">
@@ -2359,6 +2377,172 @@
                 <div class="form-actions">
                   <button type="submit">Guardar</button>
                   <span id="captacionFormStatus" class="muted"></span>
+                </div>
+              </form>
+            </div>
+          </div>
+          <div id="estudioAltaCompraventa" class="hidden">
+            <div class="form-card">
+              <h3>Alta Compraventa · Estudio Velazquez 2012 SL</h3>
+              <p class="muted">Registro operativo para ventas nuevas y carga manual de expedientes recientes.</p>
+              <form id="compraventaForm">
+                <div class="form-grid inmo-grid">
+                  <label class="span-2">
+                    Dirección
+                    <input name="direccion" required />
+                  </label>
+                  <label>
+                    Referencia catastral
+                    <input name="referencia_catastral" />
+                  </label>
+                  <label>
+                    Oficina
+                    <input name="oficina" value="Estudio Velazquez" />
+                  </label>
+                  <label>
+                    Responsable gestión
+                    <input name="responsable_gestion" />
+                  </label>
+                  <label>
+                    Agente
+                    <input name="agente" />
+                  </label>
+                  <label>
+                    Origen inmueble
+                    <select name="origen_inmueble">
+                      <option value="">Sin definir</option>
+                      <option>oficina</option>
+                      <option>llamada</option>
+                      <option>referido</option>
+                      <option>captacion directa</option>
+                      <option>web</option>
+                      <option>otro</option>
+                    </select>
+                  </label>
+                  <label>
+                    Fecha encargo
+                    <input name="fecha_encargo" type="date" />
+                  </label>
+                  <label>
+                    Fecha propuesta
+                    <input name="fecha_propuesta" type="date" />
+                  </label>
+                  <label>
+                    Fecha escritura
+                    <input name="fecha_escritura" type="date" />
+                  </label>
+                  <label>
+                    Precio salida
+                    <input name="precio_encargo" type="number" step="0.01" />
+                  </label>
+                  <label>
+                    Precio venta
+                    <input name="precio_propuesta" type="number" step="0.01" />
+                  </label>
+                  <label>
+                    Precio escritura
+                    <input name="precio_escritura" type="number" step="0.01" />
+                  </label>
+                  <label>
+                    Honorarios
+                    <input name="honorarios" type="number" step="0.01" />
+                  </label>
+                  <label>
+                    Nº visitas
+                    <input name="num_visitas" type="number" min="0" step="1" />
+                  </label>
+                  <label>
+                    Vendedor 1
+                    <input name="propietario1_nombre" />
+                  </label>
+                  <label>
+                    NIF vendedor 1
+                    <input name="propietario1_nif" />
+                  </label>
+                  <label>
+                    Teléfono vendedor 1
+                    <input name="propietario1_telefono" />
+                  </label>
+                  <label>
+                    Email vendedor 1
+                    <input name="propietario1_email" type="email" />
+                  </label>
+                  <label>
+                    Vendedor 2
+                    <input name="propietario2_nombre" />
+                  </label>
+                  <label>
+                    NIF vendedor 2
+                    <input name="propietario2_nif" />
+                  </label>
+                  <label>
+                    Teléfono vendedor 2
+                    <input name="propietario2_telefono" />
+                  </label>
+                  <label>
+                    Email vendedor 2
+                    <input name="propietario2_email" type="email" />
+                  </label>
+                  <label>
+                    Comprador 1
+                    <input name="contraparte1_nombre" />
+                  </label>
+                  <label>
+                    NIF comprador 1
+                    <input name="contraparte1_nif" />
+                  </label>
+                  <label>
+                    Teléfono comprador 1
+                    <input name="contraparte1_telefono" />
+                  </label>
+                  <label>
+                    Email comprador 1
+                    <input name="contraparte1_email" type="email" />
+                  </label>
+                  <label>
+                    Comprador 2
+                    <input name="contraparte2_nombre" />
+                  </label>
+                  <label>
+                    NIF comprador 2
+                    <input name="contraparte2_nif" />
+                  </label>
+                  <label>
+                    Teléfono comprador 2
+                    <input name="contraparte2_telefono" />
+                  </label>
+                  <label>
+                    Email comprador 2
+                    <input name="contraparte2_email" type="email" />
+                  </label>
+                  <label class="span-2">
+                    Documento nota de encargo
+                    <input name="doc_nota_encargo_path" placeholder="Ruta, nombre o referencia interna" />
+                  </label>
+                  <label class="span-2">
+                    Documento propuesta
+                    <input name="doc_propuesta_path" placeholder="Ruta, nombre o referencia interna" />
+                  </label>
+                  <label class="span-2">
+                    Documento escritura
+                    <input name="doc_escritura_path" placeholder="Ruta, nombre o referencia interna" />
+                  </label>
+                  <label class="span-2">
+                    Documento nota simple
+                    <input name="doc_nota_simple_path" placeholder="Ruta, nombre o referencia interna" />
+                  </label>
+                  <label class="span-2">
+                    Partes de visita
+                    <input name="doc_partes_visita_paths" placeholder="Ruta o listado interno de partes de visita" />
+                  </label>
+                  <label class="span-2">
+                    Notas
+                    <textarea name="notas" rows="3"></textarea>
+                  </label>
+                </div>
+                <div class="form-actions">
+                  <button type="submit">Guardar compraventa</button>
+                  <span id="compraventaFormStatus" class="muted"></span>
                 </div>
               </form>
             </div>

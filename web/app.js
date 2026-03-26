@@ -1244,9 +1244,12 @@ const fincasBdtFormStatus = document.getElementById("fincasBdtFormStatus");
 const estudioAltaTabs = document.getElementById("estudioAltaTabs");
 const estudioAltaBdt = document.getElementById("estudioAltaBdt");
 const estudioAltaCaptacion = document.getElementById("estudioAltaCaptacion");
+const estudioAltaCompraventa = document.getElementById("estudioAltaCompraventa");
 const estudioAltaDemanda = document.getElementById("estudioAltaDemanda");
 const captacionForm = document.getElementById("captacionForm");
 const captacionFormStatus = document.getElementById("captacionFormStatus");
+const compraventaForm = document.getElementById("compraventaForm");
+const compraventaFormStatus = document.getElementById("compraventaFormStatus");
 const demandaForm = document.getElementById("demandaForm");
 const demandaFormStatus = document.getElementById("demandaFormStatus");
 const demandaCliente = document.getElementById("demandaCliente");
@@ -1794,12 +1797,16 @@ const finAgendaTable = document.getElementById("finAgendaTable");
 const finAgendaInfo = document.getElementById("finAgendaInfo");
 const gestoriaFacturasTable = document.getElementById("gestoriaFacturasTable");
 const crmNuevaCaptacionBtn = document.getElementById("crmNuevaCaptacionBtn");
+const crmNuevaCompraventaBtn = document.getElementById("crmNuevaCompraventaBtn");
 const crmCaptacionesTable = document.getElementById("crmCaptacionesTable");
 const crmCaptacionesInfo = document.getElementById("crmCaptacionesInfo");
 const crmInmueblesTable = document.getElementById("crmInmueblesTable");
 const crmInmueblesInfo = document.getElementById("crmInmueblesInfo");
 const crmInmueblesRecent = document.getElementById("crmInmueblesRecent");
 const crmInmuebleSearch = document.getElementById("crmInmuebleSearch");
+const crmCompraventasTable = document.getElementById("crmCompraventasTable");
+const crmCompraventasInfo = document.getElementById("crmCompraventasInfo");
+const crmCompraventaSearch = document.getElementById("crmCompraventaSearch");
 const crmDemandasTable = document.getElementById("crmDemandasTable");
 const crmDemandasInfo = document.getElementById("crmDemandasInfo");
 const crmNuevaDemandaBtn = document.getElementById("crmNuevaDemandaBtn");
@@ -1820,6 +1827,7 @@ const crmEtapaFilter = document.getElementById("crmEtapaFilter");
 const crmKpiCaptaciones = document.getElementById("crmKpiCaptaciones");
 const crmKpiInmuebles = document.getElementById("crmKpiInmuebles");
 const crmKpiEtapa = document.getElementById("crmKpiEtapa");
+const crmKpiCompraventas = document.getElementById("crmKpiCompraventas");
 const inmuebleDetail = document.getElementById("inmuebleDetail");
 const inmuebleBackBtn = document.getElementById("inmuebleBackBtn");
 const inmuebleTabs = document.getElementById("inmuebleTabs");
@@ -3626,6 +3634,7 @@ const openCrmInmobiliario = () => {
   updateTableVisibility();
   loadCrmCaptaciones();
   loadCrmInmuebles();
+  loadCrmCompraventas();
 };
 
 const openInmuebleFromAgenda = (inmuebleId) => {
@@ -8740,6 +8749,9 @@ const updateEstudioAltaTabs = () => {
   if (estudioAltaCaptacion) {
     estudioAltaCaptacion.classList.toggle("hidden", active !== "captacion");
   }
+  if (estudioAltaCompraventa) {
+    estudioAltaCompraventa.classList.toggle("hidden", active !== "compraventa");
+  }
   if (estudioAltaDemanda) {
     estudioAltaDemanda.classList.toggle("hidden", active !== "demanda");
   }
@@ -12165,6 +12177,93 @@ const loadCrmInmuebles = () => {
     }
     if (crmKpiInmuebles) {
       crmKpiInmuebles.textContent = String(rows.length);
+    }
+  });
+};
+
+const loadCrmCompraventas = () => {
+  if (!crmCompraventasTable) {
+    return;
+  }
+  const empresa = state.empresas.find((e) => e.nombre === DASHBOARD_COMPANY);
+  if (!empresa) {
+    crmCompraventasTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
+    return;
+  }
+  const params = new URLSearchParams({ empresa_id: empresa.id });
+  const q = crmCompraventaSearch ? crmCompraventaSearch.value.trim() : "";
+  if (q) {
+    params.set("q", q);
+  }
+  api(`/api/compraventas?${params.toString()}`).then((data) => {
+    const rows = Array.isArray(data?.rows) ? data.rows : [];
+    const table = document.createElement("table");
+    const thead = document.createElement("thead");
+    const trHead = document.createElement("tr");
+    [
+      "direccion",
+      "vendedores",
+      "compradores",
+      "fecha_encargo",
+      "fecha_escritura",
+      "precio_salida",
+      "precio_venta",
+      "desviacion_porcentaje",
+      "dias_hasta_venta",
+      "num_visitas",
+      "estado_documental",
+    ].forEach((col) => {
+      const th = document.createElement("th");
+      th.textContent = formatHeader(col);
+      trHead.appendChild(th);
+    });
+    thead.appendChild(trHead);
+    table.appendChild(thead);
+    const tbody = document.createElement("tbody");
+    rows.forEach((row) => {
+      const tr = document.createElement("tr");
+      const rowValues = [
+        row.direccion || "-",
+        row.vendedores || "-",
+        row.compradores || "-",
+        row.fecha_encargo || "",
+        row.fecha_escritura || "",
+        row.precio_encargo,
+        row.precio_venta,
+        row.desviacion_pct,
+        row.dias_hasta_venta,
+        row.num_visitas,
+        row.estado_documental || "-",
+      ];
+      const rowColumns = [
+        "direccion",
+        "vendedores",
+        "compradores",
+        "fecha_encargo",
+        "fecha_escritura",
+        "precio_encargo",
+        "precio_venta",
+        "desviacion_porcentaje",
+        "dias_hasta_venta",
+        "num_visitas",
+        "estado_documental",
+      ];
+      rowValues.forEach((value, idx) => {
+        const td = document.createElement("td");
+        const formatted = formatCell(rowColumns[idx], value);
+        td.textContent = formatted === null ? "" : formatted;
+        tr.appendChild(td);
+      });
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    crmCompraventasTable.innerHTML = "";
+    crmCompraventasTable.appendChild(table);
+    if (crmCompraventasInfo) {
+      crmCompraventasInfo.textContent = `Mostrando ${rows.length} compraventas.`;
+    }
+    if (crmKpiCompraventas) {
+      crmKpiCompraventas.textContent = String(data?.kpis?.total || rows.length || 0);
     }
   });
 };
@@ -20436,7 +20535,9 @@ const loadTable = () => {
     return;
   }
   if (currentTab === "crm") {
+    loadCrmCaptaciones();
     loadCrmInmuebles();
+    loadCrmCompraventas();
     return;
   }
   const empresaId = empresaSelect.value || "";
@@ -20802,7 +20903,9 @@ viewTabs.addEventListener("click", (event) => {
     return;
   }
   if (currentTab === "crm") {
+    loadCrmCaptaciones();
     loadCrmInmuebles();
+    loadCrmCompraventas();
     updateTableVisibility();
     return;
   }
@@ -20889,6 +20992,16 @@ if (crmNuevaCaptacionBtn) {
   });
 }
 
+if (crmNuevaCompraventaBtn) {
+  crmNuevaCompraventaBtn.addEventListener("click", () => {
+    if (altaSection) {
+      altaSection.dataset.estudioActive = "compraventa";
+    }
+    setTab("alta");
+    updateEstudioAltaTabs();
+  });
+}
+
 if (crmNuevaDemandaBtn) {
   crmNuevaDemandaBtn.addEventListener("click", () => {
     if (altaSection) {
@@ -20909,6 +21022,14 @@ if (crmInmuebleSearch) {
   crmInmuebleSearch.addEventListener("input", () => {
     scheduleSave("crm-inmuebles-search", () => {
       loadCrmInmuebles();
+    }, 300);
+  });
+}
+
+if (crmCompraventaSearch) {
+  crmCompraventaSearch.addEventListener("input", () => {
+    scheduleSave("crm-compraventas-search", () => {
+      loadCrmCompraventas();
     }, 300);
   });
 }
@@ -24438,6 +24559,47 @@ if (captacionForm) {
       .catch(() => {
         if (captacionFormStatus) {
           captacionFormStatus.textContent = "Error al guardar.";
+        }
+      });
+  });
+}
+
+if (compraventaForm) {
+  compraventaForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    if (compraventaFormStatus) {
+      compraventaFormStatus.textContent = "Guardando...";
+    }
+    const formData = new FormData(compraventaForm);
+    const payload = Object.fromEntries(formData.entries());
+    payload.empresa_nombre = DASHBOARD_COMPANY;
+    fetch("/api/compraventas", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.error) {
+          if (compraventaFormStatus) {
+            compraventaFormStatus.textContent = data.error;
+          }
+          return;
+        }
+        if (compraventaFormStatus) {
+          compraventaFormStatus.textContent = "Compraventa guardada.";
+        }
+        compraventaForm.reset();
+        const oficinaField = compraventaForm.querySelector('[name="oficina"]');
+        if (oficinaField) {
+          oficinaField.value = "Estudio Velazquez";
+        }
+        loadCrmInmuebles();
+        loadCrmCompraventas();
+      })
+      .catch(() => {
+        if (compraventaFormStatus) {
+          compraventaFormStatus.textContent = "Error al guardar.";
         }
       });
   });
