@@ -440,7 +440,22 @@ def get_pdf_text(pdf_path: Path) -> tuple[str, str]:
 def classify_pdf(text: str, pdf_path: Path) -> str:
     upper = norm_text(text)
     name = norm_text(pdf_path.name)
-    if any(token in name for token in ("fraccionamiento", "aplazamiento", "aplaz", "pago")):
+    if any(
+        token in name
+        for token in (
+            "fraccionamiento",
+            "aplazamiento",
+            "aplaz",
+            "pago",
+            "modificacion cuenta",
+            "mod cuenta",
+            "mod cta",
+            "compensacion",
+            "no obligado",
+            "presentacion documentos",
+            "presentacion documentacion",
+        )
+    ):
         return "soporte_cliente"
     if "recibo de presentacion" in upper and "aportar documentacion complementaria" in upper:
         return "soporte_cliente"
@@ -594,6 +609,14 @@ def parse_modelo_100_text(text: str) -> dict:
             data["cliente_fecha_nacimiento"] = nacimiento
     if not data.get("cliente_fecha_nacimiento"):
         match = re.search(r"Fecha de nacimiento\s+([0-9]{2}/[0-9]{2}/[0-9]{4})", normalized, re.IGNORECASE)
+        if match:
+            data["cliente_fecha_nacimiento"] = parse_date_ddmmyyyy(match.group(1))
+    if not data.get("cliente_fecha_nacimiento"):
+        match = re.search(
+            r"Fecha de nacimiento[\s\S]{0,160}?([0-9]{2}/[0-9]{2}/[0-9]{4})",
+            normalized,
+            re.IGNORECASE,
+        )
         if match:
             data["cliente_fecha_nacimiento"] = parse_date_ddmmyyyy(match.group(1))
     if not looks_like_person_name(data.get("cliente_nombre")):
@@ -1040,6 +1063,13 @@ def should_skip_auxiliary_record(record: dict) -> bool:
         return False
     if source_types.issubset({"soporte_cliente", "notas"}):
         return True
+    if "modelo_100" not in source_types:
+        has_core_renta_data = any(
+            record.get(field) not in (None, "", [], {})
+            for field in ("ingresos_principales_total", "resultado_declaracion", "casilla_505")
+        )
+        if not has_core_renta_data:
+            return True
     return False
 
 

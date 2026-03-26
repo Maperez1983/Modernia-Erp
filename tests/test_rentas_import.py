@@ -9,6 +9,7 @@ from scripts.import_rentas_2024_to_crm import (
     build_validation_summary,
     classify_pdf,
     finalize_record,
+    should_skip_auxiliary_record,
     parse_datos_fiscales_text,
     parse_modelo_100_text,
 )
@@ -169,6 +170,29 @@ Hombre 0005
 13.809,24 0505
 868,32 0670
 2.643.216,00 1484
+"""
+
+
+MODELO_OCR_BIRTHDATE_SAMPLE = """
+INFORMACION DE LA PRESENTACION DE LA DECLARACION
+Modelo 100 Ejercicio 2024
+NIF Presentador: 76882248X
+Apellidos y Nombre / Razon social: LEIVA GARCIA MARIA SOLEDAD
+En calidad de: Titular
+NEGATIVA/SIN ACTIVIDAD/RESULTADO CERO
+Primer declarante
+NIF
+76882248X |o001]
+Apellidos y nombre
+LEIVA GARCIA MARIA SOLEDAD |[oo02]
+Sexo del primer declarante
+Estado civil (el 31-12-2024)
+Fecha de nacimiento
+Mujer |ooos
+(1) Soltero/a [ooos]
+28/05/2000 [oor0]
+14.903,52 |o218
+-6.215,91 |o432
 """
 
 
@@ -372,6 +396,10 @@ class RentasImportTests(unittest.TestCase):
         self.assertIsNone(parsed.get("rendimientos_actividades_economicas_total"))
         self.assertAlmostEqual(parsed["ingresos_principales_total"], 13809.24, places=2)
 
+    def test_parse_modelo_100_recovers_birthdate_from_ocr_layout(self):
+        parsed = parse_modelo_100_text(MODELO_OCR_BIRTHDATE_SAMPLE)
+        self.assertEqual(parsed["cliente_fecha_nacimiento"], "2000-05-28")
+
     def test_parse_modelo_100_rebuilds_result_from_installments(self):
         text = """
         Modelo 100
@@ -555,6 +583,35 @@ class RentasImportTests(unittest.TestCase):
         self.assertIn("renta_corregida", record["review_flags"])
         self.assertEqual(record["ingresos_principales_total"], 7876.22)
         self.assertIsNone(record["casilla_505"])
+
+    def test_should_skip_auxiliary_record_without_modelo_100(self):
+        self.assertTrue(
+            should_skip_auxiliary_record(
+                {
+                    "source_types": ["soporte_cliente"],
+                    "source_files": ["/tmp/modificacion cuenta.pdf"],
+                }
+            )
+        )
+        self.assertTrue(
+            should_skip_auxiliary_record(
+                {
+                    "source_types": ["datos_fiscales"],
+                    "cliente_nombre": "Cliente Fiscal",
+                    "cliente_nif": "12345678A",
+                }
+            )
+        )
+        self.assertFalse(
+            should_skip_auxiliary_record(
+                {
+                    "source_types": ["modelo_100"],
+                    "cliente_nombre": "Cliente Modelo",
+                    "cliente_nif": "12345678A",
+                    "resultado_declaracion": 0.0,
+                }
+            )
+        )
 
     def test_apply_to_db_only_imports_safe_records_and_avoids_duplicates(self):
         with tempfile.TemporaryDirectory() as tmpdir:
