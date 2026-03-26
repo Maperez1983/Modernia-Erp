@@ -6,10 +6,13 @@ from openpyxl import Workbook, load_workbook
 
 from scripts.build_gapp_facturas_excel import (
     build_category_totals,
+    canonical_supplier_from_reason,
+    canonical_supplier_name,
     canonical_filename_stem,
     classify_record,
     detect_document_type,
     enrich_parsed,
+    extract_totals_triplet,
     extract_fallback_total,
     import_records_to_local_db,
     looks_like_own_company,
@@ -110,9 +113,24 @@ class GappFacturasExcelTests(unittest.TestCase):
         self.assertTrue(looks_like_own_company("GAPP ELEVADORES S.L"))
         self.assertFalse(looks_like_own_company("OPTIMUS TINEO S. PEDRO S.L."))
 
+    def test_canonical_supplier_name_normalizes_known_alias(self):
+        self.assertEqual(canonical_supplier_name("OPTIMUS TINEO s. pEpp,"), "OPTIMUS TINEO S. PEDRO S.L")
+        self.assertEqual(canonical_supplier_name("ACTIVOS INMOBILIARIOS GILDUSA"), "ACTIVOS INMOVILIARIOS GILDUSA S.L")
+
+    def test_canonical_supplier_from_reason_uses_supplier_rule(self):
+        self.assertEqual(canonical_supplier_from_reason("proveedor:LEROY"), "LEROY MERLIN MARBELLA")
+
     def test_extract_fallback_total_picks_largest_positive_amount(self):
         text = "Subtotal 53,33 IVA 11,20 Total 64,53"
         self.assertAlmostEqual(extract_fallback_total(text), 64.53)
+
+    def test_extract_totals_triplet_reads_summary_line(self):
+        text = """
+        DESGLOSE TOTALES
+        FECHA METODO DE PAGO CANT. TASA TOTALBI TOTALIVA TOTAL
+        26/01/2026 Tarjeta Bancaria SA 62.07 1 IVA 21% 51.30 10.77 62.07
+        """
+        self.assertEqual(extract_totals_triplet(text), (51.3, 10.77, 62.07))
 
     def test_review_record_marks_suspicious_ocr_amount(self):
         state, reasons = review_record(
@@ -213,6 +231,59 @@ class GappFacturasExcelTests(unittest.TestCase):
         )
         self.assertEqual(state, "REVISAR")
         self.assertIn("numero_dudoso", reasons)
+
+    def test_enrich_uses_triplet_to_fix_implausible_vat(self):
+        path = Path("/tmp/Factura Obramat 26.01.2026.jpg")
+        parsed = enrich_parsed(
+            path,
+            """
+            OBRAMAT
+            DESGLOSE TOTALES
+            FECHA METODO DE PAGO CANT. TASA TOTALBI TOTALIVA TOTAL
+            26/01/2026 Tarjeta Bancaria SA 62.07 1 IVA 21% 51.30 10.77 62.07
+            """,
+            {"tipo": "compra", "base_imponible": 62.07, "cuota_iva": 21.0, "total": 62.07, "tercero": "Original ,"},
+        )
+        self.assertEqual(parsed["tercero"], "OBRAMAT")
+        self.assertAlmostEqual(parsed["base_imponible"], 51.3, places=2)
+        self.assertAlmostEqual(parsed["cuota_iva"], 10.77, places=2)
+        self.assertAlmostEqual(parsed["total"], 62.07, places=2)
+
+    def test_enrich_detects_supplier_company_suffix(self):
+        path = Path("/tmp/Materiales 2 - 02.03.2026.jpeg")
+        parsed = enrich_parsed(
+            path,
+            """
+            Factura Simplificada
+            Jiménez Maña Recambios, S.L.U. Store
+            TOTAL DOCUMENTO
+            4,22 21,0 0,89 0,00 5,11€
+            """,
+            {"tipo": "compra"},
+        )
+        self.assertIn("Jim", parsed["tercero"])
+
+    def test_review_record_does_not_flag_bad_vendor_if_supplier_rule_is_trusted(self):
+        state, reasons = review_record(
+            {
+                "categoria_excel": "SUMINISTROS",
+                "importe_agregado": 25.69,
+                "confianza_categoria": 0.96,
+                "ocr_metodo": "ocr_image_file",
+                "tercero": "a7? @ &",
+                "fecha": "2026-02-05",
+                "motivo_categoria": "proveedor:LEROY",
+                "archivo": "Factura Leroy 5-02-2026.jpeg",
+                "numero": "036-000s",
+                "tipo": "compra",
+                "base_imponible": 25.69,
+                "cuota_iva": 0.0,
+                "total": 25.69,
+            },
+            target_year=2026,
+        )
+        self.assertEqual(state, "OK")
+        self.assertNotIn("proveedor_dudoso", reasons)
 
     def test_review_record_ignores_non_template_categories(self):
         state, reasons = review_record(

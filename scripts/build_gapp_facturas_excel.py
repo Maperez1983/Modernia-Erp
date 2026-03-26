@@ -93,6 +93,19 @@ TRUSTED_OCR_SUPPLIERS = (
     "ACTIVOS INMOBILIARIOS GILDUSA",
     "AUTOMATISMO MARBELLA",
 )
+CANONICAL_SUPPLIER_NAMES = {
+    "ACTIVOS INMOVILIARIOS GILDUSA": "ACTIVOS INMOVILIARIOS GILDUSA S.L",
+    "ACTIVOS INMOBILIARIOS GILDUSA": "ACTIVOS INMOVILIARIOS GILDUSA S.L",
+    "HTM": "HTM",
+    "OPTIMUS": "OPTIMUS TINEO S. PEDRO S.L",
+    "OBRAMAT": "OBRAMAT",
+    "LEROY": "LEROY MERLIN MARBELLA",
+    "COMASUR": "COMASUR",
+    "ADAIRA": "ADAIRA",
+    "AUTOMATISMO MARBELLA": "AUTOMATISMO MARBELLA",
+    "INTHER": "INTHER",
+    "HONGSHUK": "XIAMEN CHEERING INDUSTRIAL CO.,LTD",
+}
 EXPENSE_TEMPLATE_CATEGORIES = set(TEMPLATE_CATEGORY_ROWS)
 INVALID_NUMBER_TOKENS = {
     "PAGADO",
@@ -164,6 +177,43 @@ def extract_amount_by_labels(text: str, labels: tuple[str, ...]) -> float:
     return 0.0
 
 
+def extract_totals_triplet(text: str) -> tuple[float, float, float]:
+    lines = [line.strip() for line in str(text or "").splitlines() if line.strip()]
+    header_seen = False
+    best = (0.0, 0.0, 0.0)
+    for line in lines:
+        upper = norm(line)
+        if "TOTALBI" in upper or "TOTAL IVA" in upper or "DESGLOSE TOTALES" in upper:
+            header_seen = True
+            continue
+        if not header_seen and "IVA 21" not in upper and "TOTAL DOCUMENTO" not in upper:
+            continue
+        matches = re.findall(r"(?<![\d.,-])(\d{1,6}[.,]\d{2})(?![\d%]|[.,]\d)", line)
+        values = [parse_decimal(item) for item in matches if parse_decimal(item) > 0]
+        if len(values) >= 3:
+            candidates = []
+            for i in range(len(values)):
+                for j in range(len(values)):
+                    for k in range(len(values)):
+                        if len({i, j, k}) < 3:
+                            continue
+                        base, iva, total = values[i], values[j], values[k]
+                        if total < max(base, iva):
+                            continue
+                        diff = abs((base + iva) - total)
+                        if diff <= max(1.0, total * 0.12):
+                            candidates.append((diff, total, base, iva))
+            if candidates:
+                candidates.sort(key=lambda item: (item[0], -item[1]))
+                _diff, total, base, iva = candidates[0]
+                return round(base, 2), round(iva, 2), round(total, 2)
+            tail = values[-3:]
+            base, iva, total = tail[0], tail[1], tail[2]
+            if total > 0 and total >= max(base, iva):
+                best = (round(base, 2), round(iva, 2), round(total, 2))
+    return best
+
+
 def extract_fallback_total(text: str) -> float:
     values: list[float] = []
     for match in re.finditer(r"(?<![\d.,-])(-?\d{1,4}[.,]\d{2})(?![\d%]|[.,]\d)", text):
@@ -198,6 +248,16 @@ def detect_document_type(path: Path, text: str, parsed: dict[str, Any]) -> str:
 
 
 def infer_vendor(text: str, source_path: Path) -> str:
+    known = canonical_supplier_name(text)
+    if known != str(text or "").strip():
+        return known
+    company_match = re.search(
+        r"([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ0-9 ,.'/-]{3,}(?:S\\.?L\\.?U?|S\\.?A\\.?U?|S\\.?A\\.?|STORE))",
+        str(text or ""),
+        re.IGNORECASE,
+    )
+    if company_match:
+        return re.sub(r"\s+", " ", company_match.group(1)).strip(" .:-")[:120]
     sold_by = re.search(r"Vendido por\s+([^\n\r]{3,120})", text, re.IGNORECASE)
     if sold_by:
         return re.sub(r"\s+", " ", sold_by.group(1)).strip(" .:-")[:120]
@@ -275,6 +335,22 @@ def is_implausible_vat(base: float, cuota_iva: float, total: float) -> bool:
         if total > 0 and abs((base + cuota_iva) - total) > max(1.0, total * 0.15):
             return True
     return False
+
+
+def canonical_supplier_name(value: str) -> str:
+    token = norm(value)
+    for key, canonical in CANONICAL_SUPPLIER_NAMES.items():
+        if key in token:
+            return canonical
+    return str(value or "").strip()
+
+
+def canonical_supplier_from_reason(reason: str) -> str:
+    raw = str(reason or "")
+    if not raw.startswith("proveedor:"):
+        return ""
+    supplier = raw.split(":", 1)[1].strip()
+    return canonical_supplier_name(supplier)
 
 
 def extract_text(path: Path, pdf_pages: int = 2) -> tuple[str, str, str]:
@@ -440,8 +516,13 @@ def enrich_parsed(path: Path, text: str, parsed: dict[str, Any]) -> dict[str, An
     if not result.get("fecha"):
         result["fecha"] = extract_filename_date(path)
     guessed_vendor = infer_vendor(text, path)
-    if not result.get("tercero") or looks_like_own_company(result.get("tercero") or ""):
+    if (
+        not result.get("tercero")
+        or looks_like_own_company(result.get("tercero") or "")
+        or looks_like_suspicious_vendor(result.get("tercero") or "")
+    ):
         result["tercero"] = guessed_vendor
+    result["tercero"] = canonical_supplier_name(result.get("tercero") or "")
     if not result.get("numero"):
         number = re.search(r"\b([A-Z]{0,4}\d{2,}[A-Z0-9/\-]*)\b", norm(path.stem))
         result["numero"] = number.group(1) if number else path.stem[:60]
@@ -452,6 +533,7 @@ def enrich_parsed(path: Path, text: str, parsed: dict[str, Any]) -> dict[str, An
         )
         alt_number = alt_number_match.group(1) if alt_number_match else ""
         result["numero"] = alt_number if alt_number and not looks_like_suspicious_invoice_number(alt_number) else ""
+    triplet_base, triplet_iva, triplet_total = extract_totals_triplet(text)
     total = float(result.get("total") or 0.0)
     if total <= 0:
         total = extract_amount_by_labels(
@@ -473,6 +555,12 @@ def enrich_parsed(path: Path, text: str, parsed: dict[str, Any]) -> dict[str, An
         if total <= 0:
             total = extract_fallback_total(text)
         result["total"] = total
+    if triplet_total > 0 and (float(result.get("total") or 0.0) <= 0 or is_implausible_vat(float(result.get("base_imponible") or 0.0), float(result.get("cuota_iva") or 0.0), float(result.get("total") or 0.0))):
+        result["total"] = triplet_total
+    if triplet_base > 0 and (float(result.get("base_imponible") or 0.0) <= 0 or is_implausible_vat(float(result.get("base_imponible") or 0.0), float(result.get("cuota_iva") or 0.0), float(result.get("total") or 0.0))):
+        result["base_imponible"] = triplet_base
+    if triplet_iva > 0 and (float(result.get("cuota_iva") or 0.0) <= 0 or is_implausible_vat(float(result.get("base_imponible") or 0.0), float(result.get("cuota_iva") or 0.0), float(result.get("total") or 0.0))):
+        result["cuota_iva"] = triplet_iva
     if float(result.get("base_imponible") or 0.0) <= 0 and total > 0:
         base = extract_amount_by_labels(text, ("base imponible", "subtotal", "base"))
         if base <= 0:
@@ -548,6 +636,7 @@ def review_record(record: dict[str, Any], target_year: int | None = None) -> tup
     vendor = norm(record.get("tercero") or "")
     fecha = str(record.get("fecha") or "")
     motivo = str(record.get("motivo_categoria") or "")
+    trusted_by_reason = bool(canonical_supplier_from_reason(motivo))
     tipo = str(record.get("tipo") or "").strip().lower()
     numero = str(record.get("numero") or "").strip()
     base = float(record.get("base_imponible") or 0.0)
@@ -556,7 +645,7 @@ def review_record(record: dict[str, Any], target_year: int | None = None) -> tup
 
     if category in {"ALQUILER LOCAL", "SUMINISTROS"} and amount <= 0:
         flags.append("importe_cero")
-    trusted_ocr = any(token in vendor for token in TRUSTED_OCR_SUPPLIERS)
+    trusted_ocr = any(token in vendor for token in TRUSTED_OCR_SUPPLIERS) or trusted_by_reason
 
     if confidence < 0.95 and not (
         category == "ALQUILER LOCAL" and "GILDUSA" in vendor
@@ -677,6 +766,9 @@ def scan_documents(input_dir: Path, pdf_pages: int = 2, limit: int = 0) -> list[
             category, confidence, reason = classify_record(path, parsed)
             if pre_category and category == "SIN_CATEGORIA":
                 category, confidence, reason = pre_category, pre_confidence, pre_reason
+        canonical_reason_supplier = canonical_supplier_from_reason(reason)
+        if canonical_reason_supplier:
+            parsed["tercero"] = canonical_reason_supplier
         if category in EXPENSE_TEMPLATE_CATEGORIES and parsed.get("tipo") == "venta":
             parsed["tipo"] = "compra"
         if category == "INGRESO":
