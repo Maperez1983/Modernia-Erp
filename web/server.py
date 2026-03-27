@@ -18459,6 +18459,20 @@ class Handler(BaseHTTPRequestHandler):
                 propietarios = payload.get("propietarios") or []
                 if isinstance(propietarios, str):
                     propietarios = [p for p in propietarios.split(",") if p]
+                propietario_principal_id = ensure_cliente_for_inmobiliaria(
+                    conn,
+                    empresa["id"],
+                    payload.get("propietario"),
+                    payload.get("propietario_nif"),
+                    now,
+                    {
+                        "telefono": payload.get("propietario_telefono"),
+                        "email": payload.get("propietario_email"),
+                        "direccion": payload.get("direccion"),
+                    },
+                )
+                if propietario_principal_id and propietario_principal_id not in propietarios:
+                    propietarios.append(propietario_principal_id)
                 allow_duplicate = str(payload.get("allow_duplicate") or "").strip().lower() in {"1", "true", "yes", "si"}
                 duplicate_matches = detect_inmobiliaria_duplicates(
                     conn,
@@ -18557,16 +18571,7 @@ class Handler(BaseHTTPRequestHandler):
                     ),
                 )
                 for cliente_id in propietarios:
-                    conn.execute(
-                        """
-                        INSERT INTO inmueble_propietarios (
-                          id, inmueble_id, cliente_id, created_at, updated_at
-                        ) VALUES (
-                          ?, ?, ?, datetime(?), datetime(?)
-                        )
-                        """,
-                        (os.urandom(16).hex(), inmueble_id, cliente_id, now, now),
-                    )
+                    ensure_inmueble_propietario_link(conn, inmueble_id, cliente_id, now)
                 conn.commit()
                 json_response(self, {"ok": True, "id": captacion_id, "inmueble_id": inmueble_id})
                 return
@@ -18756,6 +18761,17 @@ class Handler(BaseHTTPRequestHandler):
                         precio_encargo = parse_money_value(captacion["precio_objetivo"]) or parse_money_value(inmueble["precio_objetivo"])
                     precio_escritura = parse_money_value(payload.get("precio_escritura") or payload.get("precio_venta"))
                     honorarios = parse_money_value(payload.get("honorarios"))
+                    comprador_id = ensure_cliente_for_inmobiliaria(
+                        conn,
+                        empresa["id"],
+                        payload.get("comprador_nombre"),
+                        payload.get("comprador_nif"),
+                        now,
+                        {
+                            "telefono": payload.get("comprador_telefono"),
+                            "email": payload.get("comprador_email"),
+                        },
+                    )
                     record = conn.execute(
                         """
                         SELECT id
@@ -18798,7 +18814,7 @@ class Handler(BaseHTTPRequestHandler):
                         owner_value(owner2, "telefono") or None,
                         normalize_email(owner2.get("email")) or None,
                         None,
-                        None,
+                        comprador_id,
                         None,
                         normalize_person_name(payload.get("comprador_nombre")) or None,
                         normalize_nif(payload.get("comprador_nif")) or None,
@@ -18931,6 +18947,17 @@ class Handler(BaseHTTPRequestHandler):
                 precio_alquiler = parse_money_value(payload.get("precio") or payload.get("precio_alquiler"))
                 if precio_alquiler is None:
                     precio_alquiler = parse_money_value(captacion["precio_objetivo"]) or parse_money_value(inmueble["precio_objetivo"])
+                inquilino_id = ensure_cliente_for_inmobiliaria(
+                    conn,
+                    empresa["id"],
+                    payload.get("inquilino"),
+                    payload.get("inquilino_nif"),
+                    now,
+                    {
+                        "telefono": payload.get("inquilino_telefono"),
+                        "email": payload.get("inquilino_email"),
+                    },
+                )
                 alquiler = conn.execute(
                     """
                     SELECT id
@@ -19011,7 +19038,7 @@ class Handler(BaseHTTPRequestHandler):
                     (destino_label, now, captacion["inmueble_id"]),
                 )
                 conn.commit()
-                json_response(self, {"ok": True, "destino": destino_label, "id": alquiler_id, "inmueble_id": captacion["inmueble_id"]})
+                json_response(self, {"ok": True, "destino": destino_label, "id": alquiler_id, "inmueble_id": captacion["inmueble_id"], "inquilino_id": inquilino_id})
                 return
             except Exception as exc:
                 try:
