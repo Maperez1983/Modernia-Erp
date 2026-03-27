@@ -9169,7 +9169,8 @@ def ensure_captacion_for_inmueble(conn, empresa_id, inmueble_id, now):
 def sync_inmueble_stage_for_action(conn, inmueble_id, destino, now):
     destino_label = {
         "noticia": "Noticia",
-        "valoracion": "Valoración",
+        "valoracion": "Adquisición",
+        "adquisicion": "Adquisición",
         "encargo": "Encargo",
         "reservado": "Reservado",
         "vendido": "Vendido",
@@ -20096,7 +20097,8 @@ class Handler(BaseHTTPRequestHandler):
                 destino_map = {
                     "noticia": "Noticia",
                     "inmueble": "Noticia",
-                    "valoracion": "Valoración",
+                    "valoracion": "Adquisición",
+                    "adquisicion": "Adquisición",
                     "encargo": "Encargo",
                     "reservado": "Reservado",
                     "compraventa": "Vendido",
@@ -20150,7 +20152,33 @@ class Handler(BaseHTTPRequestHandler):
                         return fallback
                     return ""
 
-                if destino_label in {"Noticia", "Valoración", "Reservado", "Cerrado negativamente"}:
+                if destino_label == "Adquisición":
+                    json_response(self, {"error": "El paso a Adquisición se genera al fijar una cita de adquisición en la agenda del inmueble"}, status=400)
+                    return
+
+                if destino_label == "Encargo":
+                    cita_adquisicion = conn.execute(
+                        """
+                        SELECT id, estado, resultado_cierre
+                        FROM acciones
+                        WHERE inmueble_id = ?
+                          AND LOWER(COALESCE(tipo, '')) = 'cita de adquisición'
+                        ORDER BY fecha DESC, hora DESC, updated_at DESC
+                        LIMIT 1
+                        """,
+                        (captacion["inmueble_id"],),
+                    ).fetchone()
+                    if not cita_adquisicion:
+                        json_response(self, {"error": "No puedes pasar a Encargo sin una cita de adquisición registrada"}, status=400)
+                        return
+                    if str(cita_adquisicion["estado"] or "").strip().lower() == "pendiente":
+                        json_response(self, {"error": "La cita de adquisición debe estar cerrada antes de pasar a Encargo"}, status=400)
+                        return
+                    if normalize_lookup_text(cita_adquisicion["resultado_cierre"] or "") != "positivo":
+                        json_response(self, {"error": "Solo una cita de adquisición cerrada en positivo puede generar Encargo"}, status=400)
+                        return
+
+                if destino_label in {"Noticia", "Reservado", "Cerrado negativamente"}:
                     conn.execute(
                         """
                         UPDATE captaciones
@@ -21451,7 +21479,7 @@ class Handler(BaseHTTPRequestHandler):
                     ).fetchone()
                     estado_actual = normalize_lookup_text((inmueble["estado"] if inmueble else "") or "")
                     if estado_actual in {"", "noticia"}:
-                        sync_inmueble_stage_for_action(conn, inmueble_id, "valoracion", now)
+                        sync_inmueble_stage_for_action(conn, inmueble_id, "adquisicion", now)
         elif parsed.path == "/api/acciones_update":
             record_id = payload.get("id")
             if not record_id:

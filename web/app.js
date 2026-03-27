@@ -7739,7 +7739,7 @@ const isValidDocumento = (value) => {
 
 const CRM_ETAPAS = [
   "Noticia",
-  "Valoración",
+  "Adquisición",
   "Encargo",
   "Reservado",
   "Vendido",
@@ -7754,8 +7754,8 @@ const INMUEBLE_CHECKLISTS = {
     "Primera llamada de contacto",
     "Calificar interés",
   ],
-  "Valoración": [
-    "Agendar visita/valoración",
+  "Adquisición": [
+    "Agendar cita de adquisición",
     "Enviar dossier inicial",
     "Confirmar documentación básica",
     "Recoger datos registrales",
@@ -7802,7 +7802,7 @@ const INMUEBLE_FIELDS = [
   { key: "habitaciones", label: "Habitaciones", type: "number" },
   { key: "banos", label: "Baños", type: "number" },
   { key: "precio_objetivo", label: "Precio objetivo", type: "number" },
-  { key: "precio_valoracion", label: "Precio valoración", type: "number" },
+  { key: "precio_valoracion", label: "Precio adquisición", type: "number" },
   { key: "valor_referencia", label: "Valor de referencia", type: "number" },
   { key: "honorarios", label: "Honorarios agencia", type: "number" },
   {
@@ -15020,7 +15020,7 @@ const renderTableInto = (data, container, infoEl, label) => {
       actions.appendChild(openBtn);
       [
         ["Noticia", "noticia", "ghost"],
-        ["Valoración", "valoracion", "ghost"],
+        ["Adquisición", "adquisicion", "ghost"],
         ["Encargo", "encargo", "secondary"],
         ["Reservado", "reservado", "secondary"],
         ["Vendido", "compraventa", "secondary"],
@@ -15160,11 +15160,40 @@ const buildCaptacionConversionPayload = (rowMap, destino) => {
   return payload;
 };
 
+const prepareInmuebleAcquisitionAppointment = () => {
+  setInmuebleTab("actividad");
+  if (!inmuebleActividadForm) return;
+  const tipoSelect = inmuebleActividadForm.querySelector('select[name="tipo"]');
+  const estadoSelect = inmuebleActividadForm.querySelector('select[name="estado"]');
+  const resultadoSelect = inmuebleActividadForm.querySelector('select[name="resultado_cierre"]');
+  const siguienteSelect = inmuebleActividadForm.querySelector('select[name="estado_siguiente"]');
+  if (tipoSelect) tipoSelect.value = "Cita de adquisición";
+  if (estadoSelect) estadoSelect.value = "Pendiente";
+  if (resultadoSelect) resultadoSelect.value = "";
+  if (siguienteSelect) siguienteSelect.value = "Encargo";
+  if (inmuebleActividadStatus) {
+    inmuebleActividadStatus.textContent = "Programa aquí la cita de adquisición para pasar el inmueble a Adquisición.";
+  }
+};
+
 const runCaptacionConversion = async (captacionId, rowMap = {}, destino = "") => {
   if (!captacionId || !destino) return;
+  if (destino === "adquisicion" || destino === "valoracion") {
+    const inmuebleId = String(rowMap.inmueble_id || "").trim();
+    if (!inmuebleId) {
+      alert("La captación no tiene inmueble vinculado para programar la cita de adquisición.");
+      return;
+    }
+    openInmuebleDetail(inmuebleId, "captaciones");
+    setTimeout(() => {
+      prepareInmuebleAcquisitionAppointment();
+    }, 250);
+    return;
+  }
   const destinationLabel = {
     noticia: "Noticia",
-    valoracion: "Valoración",
+    valoracion: "Adquisición",
+    adquisicion: "Adquisición",
     encargo: "Encargo",
     reservado: "Reservado",
     compraventa: "Vendido",
@@ -15224,6 +15253,10 @@ const runCaptacionConversion = async (captacionId, rowMap = {}, destino = "") =>
 };
 
 const runCurrentInmuebleConversion = (destino) => {
+  if (destino === "adquisicion" || destino === "valoracion") {
+    prepareInmuebleAcquisitionAppointment();
+    return;
+  }
   const captacion = state.currentInmuebleContext?.captacion || {};
   const inmueble = state.currentInmuebleContext?.inmueble || state.currentInmueble || {};
   const captacionId = String(captacion.id || "").trim();
@@ -15242,7 +15275,8 @@ const runCurrentInmuebleConversion = (destino) => {
   }
   const destinationLabel = {
     noticia: "Noticia",
-    valoracion: "Valoración",
+    valoracion: "Adquisición",
+    adquisicion: "Adquisición",
     encargo: "Encargo",
     reservado: "Reservado",
     compraventa: "Vendido",
@@ -15520,7 +15554,7 @@ const refreshCurrentInmuebleProfile = () => {
     ].filter(Boolean).join(" · ");
     const priceLine = [
       inmueble.precio_objetivo ? `Objetivo ${formatDisplayCell("precio_objetivo", inmueble.precio_objetivo)}` : "",
-      inmueble.precio_valoracion ? `Valoración ${formatDisplayCell("precio_valoracion", inmueble.precio_valoracion)}` : "",
+      inmueble.precio_valoracion ? `Adquisición ${formatDisplayCell("precio_valoracion", inmueble.precio_valoracion)}` : "",
     ].filter(Boolean).join(" · ");
     const ownerNames = propietarios.map((item) => item.nombre).filter(Boolean);
     const metrics = [
@@ -27619,7 +27653,7 @@ if (inmuebleConvertInmuebleBtn) {
 
 if (inmuebleConvertValoracionBtn) {
   inmuebleConvertValoracionBtn.addEventListener("click", () => {
-    runCurrentInmuebleConversion("valoracion");
+    runCurrentInmuebleConversion("adquisicion");
   });
 }
 
