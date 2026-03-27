@@ -14768,11 +14768,65 @@ const runCurrentInmuebleConversion = (destino) => {
   const captacion = state.currentInmuebleContext?.captacion || {};
   const inmueble = state.currentInmuebleContext?.inmueble || state.currentInmueble || {};
   const captacionId = String(captacion.id || "").trim();
-  if (!captacionId) {
-    alert("La ficha no tiene una captación vinculada para convertir.");
+  const inmuebleId = String(inmueble.id || state.currentInmuebleId || "").trim();
+  if (!captacionId && !inmuebleId) {
+    alert("La ficha no tiene un inmueble válido para convertir.");
     return;
   }
-  runCaptacionConversion(captacionId, { ...captacion, ...inmueble, id: captacionId }, destino);
+  const rowPayload = { ...captacion, ...inmueble, id: captacionId || inmuebleId, inmueble_id: inmuebleId };
+  const payload = buildCaptacionConversionPayload(rowPayload, destino);
+  if (!payload) return;
+  if (captacionId) {
+    payload.captacion_id = captacionId;
+  } else {
+    payload.inmueble_id = inmuebleId;
+  }
+  const destinationLabel = {
+    inmueble: "Inmueble",
+    encargo: "Encargo",
+    compraventa: "Compraventa",
+    alquiler: "Alquiler",
+  }[destino] || destino;
+  const ok = window.confirm(
+    `¿Convertir el inmueble "${inmueble.direccion || inmueble.referencia || inmuebleId}" a ${destinationLabel}?`
+  );
+  if (!ok) return;
+  if (crmCaptacionesInfo) {
+    crmCaptacionesInfo.textContent = `Convirtiendo a ${destinationLabel}...`;
+  }
+  fetch("/api/captacion_convert", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "same-origin",
+    body: JSON.stringify(payload),
+  })
+    .then((res) => res.json().then((data) => ({ ok: res.ok, status: res.status, data })))
+    .then(({ ok, data, status }) => {
+      if (!ok || data?.error) {
+        const message = data?.error || `HTTP ${status}`;
+        if (crmCaptacionesInfo) crmCaptacionesInfo.textContent = message;
+        alert(message);
+        return;
+      }
+      if (crmCaptacionesInfo) {
+        crmCaptacionesInfo.textContent = `Convertido a ${destinationLabel}.`;
+      }
+      loadCrmCaptaciones();
+      loadCrmInmuebles();
+      if (state.currentInmuebleId) {
+        openInmuebleDetail(state.currentInmuebleId, state.currentInmuebleOriginView || "inmuebles");
+      }
+      if (destino === "compraventa") {
+        loadCrmCompraventas();
+      } else if (destino === "alquiler") {
+        loadCrmAlquileres();
+      }
+    })
+    .catch((error) => {
+      const message = error?.message || "Error al convertir el inmueble.";
+      if (crmCaptacionesInfo) crmCaptacionesInfo.textContent = message;
+      alert(message);
+    });
 };
 
 const loadCrmCaptaciones = () => {
@@ -21087,6 +21141,7 @@ const fillGestoriaRentaDetailsForm = (row = {}) => {
   setValue("related_relation_id", payload.related_relation_id || "");
   setValue("precio_servicio", entry?.precio_servicio ?? "");
   setValue("responsable", entry?.responsable || "");
+  setValue("referencia_hacienda", entry?.referencia_hacienda || "");
   setValue("forma_cobro", entry?.forma_cobro || "");
   setValue("renta_detalles", entry?.gestion_notas || payload.notes || "");
   setValue("doc_id", entry?.doc_presentada_id || entry?.doc_borrador_id || "");
@@ -21135,6 +21190,7 @@ const buildGestoriaRentaDetailsPayload = (formPayload = {}) => {
     ),
     precio_servicio: Number.isFinite(precioServicio) ? Number(precioServicio.toFixed(2)) : null,
     responsable: String(formPayload.responsable || "").trim(),
+    referencia_hacienda: String(formPayload.referencia_hacienda || "").trim(),
     cobrada: gestoriaRentaCobrada?.checked ? 1 : 0,
     forma_cobro: String(formPayload.forma_cobro || "").trim(),
     doc_presentada_id: selectedEntry?.doc_presentada_id || "",
@@ -21257,6 +21313,7 @@ const renderGestoriaRentaDetail = (entry = {}) => {
     ["Hijos", String(entry.hijos_count ?? "-")],
     ["Presentación", formatCell("fecha", entry.presentacion_fecha || "") || entry.presentacion_fecha || "-"],
     ["Estado campaña", normalizeRentaPresentacionStatus(entry.estado_presentacion || entry.doc_status || "Presentada")],
+    ["Referencia AEAT", entry.referencia_hacienda || "-"],
     ["Casilla 505", entry.casilla_505 != null ? euroFormatter.format(parseMoneyValue(entry.casilla_505)) : "-"],
     ["Resultado declaración", result.text],
     ["Ingresos", entry.ingresos_principales_total != null ? euroFormatter.format(parseMoneyValue(entry.ingresos_principales_total)) : "-"],
@@ -21366,6 +21423,10 @@ const renderGestoriaRentaCards = (row = {}) => {
         <strong>${entry.casilla_505 != null ? euroFormatter.format(parseMoneyValue(entry.casilla_505)) : "-"}</strong>
       </div>
       <div class="renta-card-meta">
+        <span>Referencia AEAT</span>
+        <strong>${entry.referencia_hacienda || "-"}</strong>
+      </div>
+      <div class="renta-card-meta">
         <span>Precio</span>
         <strong>${entry.precio_servicio != null ? euroFormatter.format(parseMoneyValue(entry.precio_servicio)) : "-"}</strong>
       </div>
@@ -21433,6 +21494,10 @@ const renderGestoriaRentaCrmCards = (rows = []) => {
         <div>
           <span class="muted">Casilla 505</span>
           <strong>${casilla505}</strong>
+        </div>
+        <div>
+          <span class="muted">Referencia AEAT</span>
+          <strong>${entry.referencia_hacienda || "-"}</strong>
         </div>
         <div>
           <span class="muted">Resultado</span>

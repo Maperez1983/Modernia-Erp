@@ -262,7 +262,7 @@ def parse_date_ddmmyyyy(raw: object) -> str:
     text = compact_spaces(raw)
     if not text:
         return ""
-    for fmt in ("%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d"):
+    for fmt in ("%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d", "%d%m%Y"):
         try:
             return datetime.strptime(text, fmt).date().isoformat()
         except ValueError:
