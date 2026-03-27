@@ -1757,6 +1757,15 @@ body.crm-fin #companySummary {
   max-width: 56ch;
 }
 
+.portal-public-shell {
+  display: grid;
+  gap: 18px;
+}
+
+.workspace-automation-logs {
+  margin-top: 18px;
+}
+
 .gestoria-renta-banner-cta {
   display: inline-flex;
   align-items: center;

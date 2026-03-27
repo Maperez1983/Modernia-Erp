@@ -108,8 +108,8 @@ APP_SESSION_TTL_SECONDS = max(900, int(os.environ.get("APP_SESSION_TTL_SECONDS",
 SESSION_COOKIE_NAME = os.environ.get("APP_SESSION_COOKIE", "crm_session")
 AUTH_ALLOW_FIRST_PASSWORD_SET = os.environ.get("AUTH_ALLOW_FIRST_PASSWORD_SET", "1").strip().lower() not in ("0", "false", "no", "off")
 AUTH_INVITE_TTL_SECONDS = max(1800, int(os.environ.get("AUTH_INVITE_TTL_SECONDS", "172800")))
-AUTH_PUBLIC_GET_ENDPOINTS = {"/api/health", "/api/me", "/api/auth_invite_status"}
-AUTH_PUBLIC_POST_ENDPOINTS = {"/api/login", "/api/logout", "/api/auth_set_password"}
+AUTH_PUBLIC_GET_ENDPOINTS = {"/api/health", "/api/me", "/api/auth_invite_status", "/api/workspace_portal_public"}
+AUTH_PUBLIC_POST_ENDPOINTS = {"/api/login", "/api/logout", "/api/auth_set_password", "/api/workspace_portal_upload"}
 AUTH_SESSIONS = {}
 AUTH_SESSIONS_LOCK = threading.Lock()
 DEFAULT_WORKSPACE_NAME = "Modernia"
@@ -11180,6 +11180,21 @@ def ensure_workspace_product_tables(conn):
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workspace_automatizacion_logs (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          automatizacion_id TEXT,
+          trigger_key TEXT NOT NULL,
+          estado TEXT NOT NULL,
+          detalle TEXT,
+          payload_json TEXT,
+          created_at TEXT NOT NULL,
+          FOREIGN KEY (workspace_id) REFERENCES workspaces(id)
+        )
+        """
+    )
 
 
 def fetch_workspace_company_ids(conn, workspace_id):
@@ -11321,6 +11336,30 @@ def fetch_workspace_automations(conn, workspace_id, limit=50):
     return {"rows": [dict(row) for row in rows]}
 
 
+def fetch_workspace_automation_logs(conn, workspace_id, limit=50):
+    rows = conn.execute(
+        """
+        SELECT
+          l.id,
+          l.workspace_id,
+          l.automatizacion_id,
+          COALESCE(a.nombre, '') AS automatizacion_nombre,
+          l.trigger_key,
+          l.estado,
+          l.detalle,
+          l.payload_json,
+          l.created_at
+        FROM workspace_automatizacion_logs l
+        LEFT JOIN workspace_automatizaciones a ON a.id = l.automatizacion_id
+        WHERE l.workspace_id = ?
+        ORDER BY l.created_at DESC
+        LIMIT ?
+        """,
+        (workspace_id, max(1, min(int(limit or 50), 100))),
+    ).fetchall()
+    return {"rows": [dict(row) for row in rows]}
+
+
 def run_workspace_automations(conn, workspace_id, trigger_key, context, now):
     rows = conn.execute(
         """
@@ -11338,13 +11377,14 @@ def run_workspace_automations(conn, workspace_id, trigger_key, context, now):
         if not empresa_id:
             continue
         servicio = (row["modulo_key"] or context.get("servicio") or "gestoria").strip()
+        detalle = (row["action_summary"] or "").strip() or f"Automatización {row['nombre']}"
         conn.execute(
             """
             INSERT INTO acciones (
               id, empresa_id, servicio, cliente_id, inmueble_id, cliente_nombre,
-              fecha, hora, tipo, responsable, estado, notas, recordatorio_min, created_at, updated_at
+                fecha, hora, tipo, responsable, estado, notas, recordatorio_min, created_at, updated_at
             ) VALUES (
-              ?, ?, ?, ?, ?, ?, date(?), time(?), ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                ?, ?, ?, ?, ?, ?, date(?), time(?), ?, ?, ?, ?, ?, datetime(?), datetime(?)
             )
             """,
             (
@@ -11359,9 +11399,26 @@ def run_workspace_automations(conn, workspace_id, trigger_key, context, now):
                 row["nombre"],
                 context.get("responsable"),
                 "Pendiente",
-                (row["action_summary"] or "").strip() or f"Automatización {row['nombre']}",
+                detalle,
                 60,
                 now,
+                now,
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO workspace_automatizacion_logs (
+              id, workspace_id, automatizacion_id, trigger_key, estado, detalle, payload_json, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, datetime(?))
+            """,
+            (
+                os.urandom(16).hex(),
+                workspace_id,
+                row["id"],
+                trigger_key,
+                "ejecutada",
+                detalle,
+                json.dumps(context, ensure_ascii=False),
                 now,
             ),
         )
@@ -12182,6 +12239,8 @@ class Handler(BaseHTTPRequestHandler):
             "/api/auth_set_password",
             "/api/me",
             "/api/auth_invite_status",
+            "/api/workspace_portal_public",
+            "/api/workspace_portal_upload",
             "/api/usuarios",
             "/api/usuarios_update",
             "/api/usuarios_delete",
@@ -12357,6 +12416,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/login",
             "/api/logout",
             "/api/auth_set_password",
+            "/api/workspace_portal_upload",
         ):
             json_response(self, {"error": "Endpoint no valido"}, status=404)
             return
@@ -13580,6 +13640,20 @@ class Handler(BaseHTTPRequestHandler):
                         "UPDATE workspace_facturacion_series SET siguiente_numero = ?, updated_at = datetime(?) WHERE id = ?",
                         (int(series_row[2] or 1) + 1, now, series_row[0]),
                     )
+            if serie and numero:
+                duplicate = conn.execute(
+                    """
+                    SELECT id
+                    FROM workspace_facturacion
+                    WHERE workspace_id = ? AND empresa_id = ? AND COALESCE(serie, '') = COALESCE(?, '') AND COALESCE(numero, '') = COALESCE(?, '')
+                      AND id != ?
+                    LIMIT 1
+                    """,
+                    (workspace_id, empresa_id, serie, numero, record_id or ""),
+                ).fetchone()
+                if duplicate:
+                    json_response(self, {"error": "número de factura duplicado para esa serie"}, status=409)
+                    return
             cobrarda_raw = str(payload.get("cobrada") or "").strip().lower()
             cobrada = 1 if cobrarda_raw in {"1", "true", "yes", "si", "sí", "on"} else 0
             subtotal = round(parse_money_value(payload.get("subtotal")), 2)
@@ -13853,6 +13927,70 @@ class Handler(BaseHTTPRequestHandler):
             )
             conn.commit()
             json_response(self, {"ok": True, "id": record_id, "token": token, "automation_actions": auto_created})
+            return
+        elif parsed.path == "/api/workspace_portal_upload":
+            token = str(payload.get("token") or "").strip()
+            nombre = str(payload.get("nombre") or "").strip()
+            if not token or not nombre:
+                json_response(self, {"error": "token y nombre requeridos"}, status=400)
+                return
+            portal = conn.execute(
+                """
+                SELECT workspace_id, cliente_id
+                FROM workspace_portal_clientes
+                WHERE token = ?
+                LIMIT 1
+                """,
+                (token,),
+            ).fetchone()
+            if not portal:
+                json_response(self, {"error": "portal no encontrado"}, status=404)
+                return
+            empresa_ids = fetch_workspace_company_ids(conn, portal["workspace_id"])
+            empresa_id = empresa_ids[0] if empresa_ids else None
+            if not empresa_id:
+                json_response(self, {"error": "workspace sin empresa operativa"}, status=400)
+                return
+            record_id = os.urandom(16).hex()
+            conn.execute(
+                """
+                INSERT INTO workspace_documentos_inbox (
+                  id, workspace_id, empresa_id, cliente_id, servicio, nombre, tipo, clasificacion,
+                  canal_entrada, prioridad, estado, doc_key, doc_url, notas, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Portal', ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                """,
+                (
+                    record_id,
+                    portal["workspace_id"],
+                    empresa_id,
+                    portal["cliente_id"],
+                    (payload.get("servicio") or "").strip() or "portal_cliente",
+                    nombre,
+                    (payload.get("tipo") or "").strip() or None,
+                    (payload.get("clasificacion") or "").strip() or None,
+                    (payload.get("prioridad") or "").strip() or "Normal",
+                    (payload.get("estado") or "").strip() or "Pendiente",
+                    (payload.get("doc_key") or "").strip() or None,
+                    (payload.get("doc_url") or "").strip() or None,
+                    (payload.get("notas") or "").strip() or None,
+                    now,
+                    now,
+                ),
+            )
+            auto_created = run_workspace_automations(
+                conn,
+                portal["workspace_id"],
+                "document_uploaded",
+                {
+                    "empresa_id": empresa_id,
+                    "cliente_id": portal["cliente_id"],
+                    "servicio": (payload.get("servicio") or "").strip() or "portal_cliente",
+                    "cliente_nombre": None,
+                },
+                now,
+            )
+            conn.commit()
+            json_response(self, {"ok": True, "id": record_id, "automation_actions": auto_created})
             return
         elif parsed.path == "/api/workspace_automatizaciones":
             workspace_id = str(payload.get("workspace_id") or "").strip()
@@ -18592,6 +18730,15 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "workspace_id requerido"}, status=400)
                 return
             json_response(self, fetch_workspace_automations(conn, workspace_id))
+            return
+
+        if path == "/api/workspace_automatizacion_logs":
+            workspace_id = params.get("workspace_id", [""])[0]
+            limit = params.get("limit", ["50"])[0]
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            json_response(self, fetch_workspace_automation_logs(conn, workspace_id, limit=limit))
             return
 
         if path == "/api/workspace_portal_public":

@@ -1249,6 +1249,7 @@ const workspaceAutomationForm = document.getElementById("workspaceAutomationForm
 const workspaceAutomationResetBtn = document.getElementById("workspaceAutomationResetBtn");
 const workspaceAutomationStatus = document.getElementById("workspaceAutomationStatus");
 const workspaceAutomationList = document.getElementById("workspaceAutomationList");
+const workspaceAutomationLogs = document.getElementById("workspaceAutomationLogs");
 const agendaSection = document.getElementById("agendaSection");
 const agendaBackBtn = document.getElementById("agendaBackBtn");
 const agendaGeneral = document.getElementById("agendaGeneral");
@@ -4104,6 +4105,40 @@ const renderWorkspaceAutomationList = (rows = []) => {
   });
 };
 
+const renderWorkspaceAutomationLogs = (rows = []) => {
+  if (!workspaceAutomationLogs) return;
+  if (!rows.length) {
+    workspaceAutomationLogs.innerHTML = "<p class='muted'>Sin ejecuciones recientes.</p>";
+    return;
+  }
+  workspaceAutomationLogs.innerHTML = `
+    <div class="section-head compact">
+      <div>
+        <h3>Últimas ejecuciones</h3>
+        <p class="muted">Trazabilidad reciente del motor automático del workspace.</p>
+      </div>
+    </div>
+    <div class="workspace-billing-list">
+      ${rows
+        .map(
+          (row) => `
+            <div class="workspace-billing-row">
+              <div>
+                <strong>${row.automation_nombre || row.trigger_key || "Automatización"}</strong>
+                <div class="muted">${row.trigger_key || "-"}${row.modulo_key ? ` · ${row.modulo_key}` : ""}</div>
+              </div>
+              <div class="workspace-billing-meta">
+                <span>${row.entity_label || row.cliente_nombre || row.servicio || "-"}</span>
+                <span>${row.created_at || ""}</span>
+              </div>
+            </div>
+          `
+        )
+        .join("")}
+    </div>
+  `;
+};
+
 const renderWorkspaceDocumentHub = (data = {}) => {
   if (!workspaceDocumentHub) return;
   const rows = Array.isArray(data.rows) ? data.rows : [];
@@ -4194,7 +4229,7 @@ const renderWorkspaceDocumentHub = (data = {}) => {
 const loadWorkspaceDetail = async (workspaceId) => {
   if (!workspaceId) return;
   state.currentWorkspaceId = workspaceId;
-  const [detail, billing, docs, billingRows, workspaceClients, health, series, inbox, portal, automations] = await Promise.all([
+  const [detail, billing, docs, billingRows, workspaceClients, health, series, inbox, portal, automations, automationLogs] = await Promise.all([
     api(`/api/workspace_detail?id=${encodeURIComponent(workspaceId)}`),
     api(`/api/workspace_billing_summary?workspace_id=${encodeURIComponent(workspaceId)}`),
     api(`/api/workspace_document_hub?workspace_id=${encodeURIComponent(workspaceId)}`),
@@ -4205,6 +4240,7 @@ const loadWorkspaceDetail = async (workspaceId) => {
     api(`/api/workspace_inbox?workspace_id=${encodeURIComponent(workspaceId)}`),
     api(`/api/workspace_portal?workspace_id=${encodeURIComponent(workspaceId)}`),
     api(`/api/workspace_automatizaciones?workspace_id=${encodeURIComponent(workspaceId)}`),
+    api(`/api/workspace_automatizacion_logs?workspace_id=${encodeURIComponent(workspaceId)}&limit=12`),
   ]);
   state.currentWorkspaceDetail = detail;
   state.currentWorkspaceEnabledModules = getWorkspaceEnabledModules(detail.modules || []);
@@ -4224,6 +4260,7 @@ const loadWorkspaceDetail = async (workspaceId) => {
   fillWorkspaceInboxForm();
   renderWorkspacePortalList(portal.rows || []);
   renderWorkspaceAutomationList(automations.rows || []);
+  renderWorkspaceAutomationLogs(automationLogs.rows || []);
   fillWorkspaceAutomationForm();
   renderWorkspaceDocumentHub(docs || {});
   renderWorkspaceList(state.workspaces || []);
@@ -4972,6 +5009,36 @@ const openWorkspacePortalPublic = async (token) => {
             </div>
           </div>
         </div>
+        <div class="form-card">
+          <h3>Subir documentación</h3>
+          <p class="muted">Puedes aportar documentos directamente al expediente. Quedarán en revisión interna.</p>
+          <form id="workspacePortalPublicUploadForm" class="form-grid">
+            <label class="span-2">
+              Nombre documento
+              <input name="nombre" required placeholder="IRPF, factura, contrato, justificante..." />
+            </label>
+            <label>
+              Servicio
+              <input name="servicio" value="portal_cliente" />
+            </label>
+            <label>
+              Clasificación
+              <input name="clasificacion" placeholder="Fiscal, identidad, factura..." />
+            </label>
+            <label class="span-2">
+              Notas
+              <textarea name="notas" rows="3" placeholder="Información útil para el equipo"></textarea>
+            </label>
+            <label class="span-2">
+              Archivo
+              <input type="file" name="archivo" required />
+            </label>
+            <div class="form-actions span-2">
+              <button type="submit">Subir al portal</button>
+              <span id="workspacePortalPublicUploadStatus" class="muted"></span>
+            </div>
+          </form>
+        </div>
         <div class="workspace-central-layout">
           <div class="form-card">
             <h3>Documentación</h3>
@@ -5029,6 +5096,42 @@ const openWorkspacePortalPublic = async (token) => {
           </div>
         </div>
       `;
+      const uploadForm = document.getElementById("workspacePortalPublicUploadForm");
+      const uploadStatus = document.getElementById("workspacePortalPublicUploadStatus");
+      uploadForm?.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const formData = new FormData(uploadForm);
+        const file = formData.get("archivo");
+        if (!(file instanceof File) || !file.size) {
+          if (uploadStatus) uploadStatus.textContent = "Selecciona un archivo.";
+          return;
+        }
+        try {
+          if (uploadStatus) uploadStatus.textContent = "Subiendo archivo...";
+          const upload = await uploadFileToS3(file, "workspace", uploadStatus);
+          const payload = {
+            token,
+            nombre: String(formData.get("nombre") || "").trim(),
+            servicio: String(formData.get("servicio") || "").trim(),
+            clasificacion: String(formData.get("clasificacion") || "").trim(),
+            notas: String(formData.get("notas") || "").trim(),
+            doc_key: upload?.key || "",
+            doc_url: upload?.public_url || "",
+          };
+          const response = await fetch("/api/workspace_portal_upload", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          }).then((res) => res.json());
+          if (response?.error) throw new Error(response.error);
+          if (uploadStatus) {
+            uploadStatus.textContent = `Documento enviado.${response.automation_actions ? ` Automatizaciones: ${response.automation_actions}` : ""}`;
+          }
+          await openWorkspacePortalPublic(token);
+        } catch (error) {
+          if (uploadStatus) uploadStatus.textContent = error.message || "No se pudo subir el documento.";
+        }
+      });
     }
     window.scrollTo({ top: 0, behavior: "smooth" });
   } catch (error) {
