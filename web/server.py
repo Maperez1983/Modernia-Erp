@@ -30,6 +30,7 @@ import unicodedata
 from email.message import EmailMessage
 from email.header import decode_header
 from email.utils import parseaddr
+from PIL import Image, ImageDraw, ImageFont
 try:
     from .auth_security import hash_password as runtime_hash_password
     from .auth_security import needs_password_rehash
