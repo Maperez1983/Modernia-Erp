@@ -9098,6 +9098,89 @@ def get_inmueble_propietarios(conn, inmueble_id):
     return [dict(row) for row in rows]
 
 
+def resolve_inmobiliaria_contact_candidate(conn, empresa_id, payload, *, role_prefix="", demanda_id="", inmueble_id=""):
+    nombre = normalize_person_name(payload.get(f"{role_prefix}_nombre")) if role_prefix else ""
+    nif = normalize_nif(payload.get(f"{role_prefix}_nif")) if role_prefix else ""
+    telefono = str(payload.get(f"{role_prefix}_telefono") or "").strip() if role_prefix else ""
+    email = normalize_email(payload.get(f"{role_prefix}_email")) if role_prefix else ""
+    cliente_id = None
+    if role_prefix and (nombre or nif or telefono or email):
+        cliente_id = ensure_cliente_for_inmobiliaria(
+            conn,
+            empresa_id,
+            nombre,
+            nif,
+            datetime.now(timezone.utc).isoformat(),
+            {"telefono": telefono, "email": email},
+        )
+        return {
+            "cliente_id": cliente_id,
+            "nombre": nombre,
+            "nif": nif,
+            "telefono": telefono,
+            "email": email,
+        }
+
+    if demanda_id:
+        demanda = conn.execute(
+            """
+            SELECT d.cliente_id, c.nombre, c.nif, c.telefono, c.email
+            FROM demandas d
+            LEFT JOIN clientes c ON c.id = d.cliente_id
+            WHERE d.id = ? AND d.empresa_id = ?
+            LIMIT 1
+            """,
+            (demanda_id, empresa_id),
+        ).fetchone()
+        if demanda and (demanda["cliente_id"] or demanda["nombre"]):
+            return {
+                "cliente_id": demanda["cliente_id"],
+                "nombre": str(demanda["nombre"] or "").strip(),
+                "nif": normalize_nif(demanda["nif"]),
+                "telefono": str(demanda["telefono"] or "").strip(),
+                "email": normalize_email(demanda["email"]),
+            }
+
+    if inmueble_id:
+        rows = conn.execute(
+            """
+            SELECT DISTINCT d.cliente_id, c.nombre, c.nif, c.telefono, c.email
+            FROM visitas v
+            JOIN demandas d ON d.id = v.demanda_id
+            LEFT JOIN clientes c ON c.id = d.cliente_id
+            WHERE v.empresa_id = ?
+              AND v.inmueble_id = ?
+              AND d.cliente_id IS NOT NULL
+            ORDER BY v.created_at DESC
+            """,
+            (empresa_id, inmueble_id),
+        ).fetchall()
+        unique = []
+        seen = set()
+        for row in rows:
+            key = str(row["cliente_id"] or "").strip()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            unique.append(row)
+        if len(unique) == 1:
+            row = unique[0]
+            return {
+                "cliente_id": row["cliente_id"],
+                "nombre": str(row["nombre"] or "").strip(),
+                "nif": normalize_nif(row["nif"]),
+                "telefono": str(row["telefono"] or "").strip(),
+                "email": normalize_email(row["email"]),
+            }
+    return {
+        "cliente_id": None,
+        "nombre": "",
+        "nif": "",
+        "telefono": "",
+        "email": "",
+    }
+
+
 def normalize_inmobiliaria_address(value):
     return re.sub(r"\s+", " ", normalize_lookup_text(value or "")).strip()
 
@@ -11172,6 +11255,10 @@ def ensure_workspace_product_tables(conn):
         )
         """
     )
+    ensure_column(conn, "workspace_documentos_inbox", "origen_tipo", "origen_tipo TEXT")
+    ensure_column(conn, "workspace_documentos_inbox", "origen_id", "origen_id TEXT")
+    ensure_column(conn, "workspace_documentos_inbox", "reviewed_at", "reviewed_at TEXT")
+    ensure_column(conn, "workspace_documentos_inbox", "reviewed_by", "reviewed_by TEXT")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS workspace_portal_clientes (
@@ -11275,6 +11362,9 @@ def ensure_workspace_product_tables(conn):
         )
         """
     )
+    ensure_column(conn, "workspace_portal_requerimientos", "clasificacion", "clasificacion TEXT")
+    ensure_column(conn, "workspace_portal_requerimientos", "completed_at", "completed_at TEXT")
+    ensure_column(conn, "workspace_portal_requerimientos", "resolved_doc_id", "resolved_doc_id TEXT")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS workspace_registro_horario (
@@ -11331,6 +11421,8 @@ def ensure_workspace_product_tables(conn):
         )
         """
     )
+    ensure_column(conn, "workspace_fincas_incidencias", "proveedor_id", "proveedor_id TEXT")
+    ensure_column(conn, "workspace_fincas_incidencias", "coste_estimado", "coste_estimado REAL")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS workspace_fincas_proveedores (
@@ -11471,13 +11563,19 @@ def fetch_workspace_inbox_queue(conn, workspace_id, limit=40):
           q.estado,
           q.doc_key,
           q.doc_url,
+          q.origen_tipo,
+          q.origen_id,
+          q.reviewed_at,
+          q.reviewed_by,
           q.notas,
           q.created_at,
-          q.updated_at
+          q.updated_at,
+          COALESCE(req.titulo, '') AS requerimiento_titulo
         FROM workspace_documentos_inbox q
         LEFT JOIN empresas e ON e.id = q.empresa_id
         LEFT JOIN clientes c ON c.id = q.cliente_id
         LEFT JOIN clientes sc ON sc.id = q.suggested_cliente_id
+        LEFT JOIN workspace_portal_requerimientos req ON req.id = q.origen_id AND q.origen_tipo = 'portal_requerimiento'
         WHERE q.workspace_id = ?
         ORDER BY q.updated_at DESC, q.created_at DESC
         LIMIT ?
@@ -11586,9 +11684,12 @@ def fetch_workspace_portal_requests(conn, workspace_id, limit=40):
           r.servicio,
           r.titulo,
           r.descripcion,
+          r.clasificacion,
           r.prioridad,
           r.estado,
           r.fecha_limite,
+          r.completed_at,
+          r.resolved_doc_id,
           r.created_at,
           r.updated_at,
           COALESCE(c.nombre, '') AS cliente_nombre,
@@ -11688,13 +11789,17 @@ def fetch_workspace_fincas_incidencias(conn, workspace_id, limit=40):
           i.prioridad,
           i.estado,
           i.proveedor,
+          i.proveedor_id,
+          COALESCE(p.nombre, '') AS proveedor_nombre,
           i.responsable,
           i.fecha_apertura,
           i.fecha_cierre,
+          i.coste_estimado,
           i.created_at,
           i.updated_at
         FROM workspace_fincas_incidencias i
         LEFT JOIN workspace_fincas_comunidades c ON c.id = i.comunidad_id
+        LEFT JOIN workspace_fincas_proveedores p ON p.id = i.proveedor_id
         WHERE i.workspace_id = ?
         ORDER BY COALESCE(i.fecha_apertura, i.created_at) DESC, i.updated_at DESC
         LIMIT ?
@@ -18232,6 +18337,24 @@ class Handler(BaseHTTPRequestHandler):
                     },
                 )
                 inmueble_id = ensure_inmueble_for_compraventa(conn, empresa["id"], payload, now)
+                if not contraparte1_id and not contraparte2_id:
+                    buyer = resolve_inmobiliaria_contact_candidate(
+                        conn,
+                        empresa["id"],
+                        payload,
+                        role_prefix="contraparte1",
+                        demanda_id=str(payload.get("demanda_id") or "").strip(),
+                        inmueble_id=inmueble_id,
+                    )
+                    contraparte1_id = buyer.get("cliente_id")
+                    if buyer.get("nombre") and not payload.get("contraparte1_nombre"):
+                        payload["contraparte1_nombre"] = buyer.get("nombre")
+                    if buyer.get("nif") and not payload.get("contraparte1_nif"):
+                        payload["contraparte1_nif"] = buyer.get("nif")
+                    if buyer.get("telefono") and not payload.get("contraparte1_telefono"):
+                        payload["contraparte1_telefono"] = buyer.get("telefono")
+                    if buyer.get("email") and not payload.get("contraparte1_email"):
+                        payload["contraparte1_email"] = buyer.get("email")
                 ensure_inmueble_propietario_link(conn, inmueble_id, propietario1_id, now)
                 ensure_inmueble_propietario_link(conn, inmueble_id, propietario2_id, now)
 
@@ -18761,17 +18884,15 @@ class Handler(BaseHTTPRequestHandler):
                         precio_encargo = parse_money_value(captacion["precio_objetivo"]) or parse_money_value(inmueble["precio_objetivo"])
                     precio_escritura = parse_money_value(payload.get("precio_escritura") or payload.get("precio_venta"))
                     honorarios = parse_money_value(payload.get("honorarios"))
-                    comprador_id = ensure_cliente_for_inmobiliaria(
+                    buyer = resolve_inmobiliaria_contact_candidate(
                         conn,
                         empresa["id"],
-                        payload.get("comprador_nombre"),
-                        payload.get("comprador_nif"),
-                        now,
-                        {
-                            "telefono": payload.get("comprador_telefono"),
-                            "email": payload.get("comprador_email"),
-                        },
+                        payload,
+                        role_prefix="comprador",
+                        demanda_id=str(payload.get("demanda_id") or "").strip(),
+                        inmueble_id=captacion["inmueble_id"],
                     )
+                    comprador_id = buyer.get("cliente_id")
                     record = conn.execute(
                         """
                         SELECT id
@@ -18816,10 +18937,10 @@ class Handler(BaseHTTPRequestHandler):
                         None,
                         comprador_id,
                         None,
-                        normalize_person_name(payload.get("comprador_nombre")) or None,
-                        normalize_nif(payload.get("comprador_nif")) or None,
-                        str(payload.get("comprador_telefono") or "").strip() or None,
-                        normalize_email(payload.get("comprador_email")) or None,
+                        buyer.get("nombre") or normalize_person_name(payload.get("comprador_nombre")) or None,
+                        buyer.get("nif") or normalize_nif(payload.get("comprador_nif")) or None,
+                        buyer.get("telefono") or str(payload.get("comprador_telefono") or "").strip() or None,
+                        buyer.get("email") or normalize_email(payload.get("comprador_email")) or None,
                         None,
                         fecha_encargo or None,
                         None,
@@ -18947,17 +19068,15 @@ class Handler(BaseHTTPRequestHandler):
                 precio_alquiler = parse_money_value(payload.get("precio") or payload.get("precio_alquiler"))
                 if precio_alquiler is None:
                     precio_alquiler = parse_money_value(captacion["precio_objetivo"]) or parse_money_value(inmueble["precio_objetivo"])
-                inquilino_id = ensure_cliente_for_inmobiliaria(
+                tenant = resolve_inmobiliaria_contact_candidate(
                     conn,
                     empresa["id"],
-                    payload.get("inquilino"),
-                    payload.get("inquilino_nif"),
-                    now,
-                    {
-                        "telefono": payload.get("inquilino_telefono"),
-                        "email": payload.get("inquilino_email"),
-                    },
+                    payload,
+                    role_prefix="inquilino",
+                    demanda_id=str(payload.get("demanda_id") or "").strip(),
+                    inmueble_id=captacion["inmueble_id"],
                 )
+                inquilino_id = tenant.get("cliente_id")
                 alquiler = conn.execute(
                     """
                     SELECT id
@@ -18983,8 +19102,8 @@ class Handler(BaseHTTPRequestHandler):
                     None,
                     parse_money_value(payload.get("importe_comision")),
                     parse_money_value(payload.get("total")) or precio_alquiler,
-                    normalize_person_name(payload.get("inquilino")) or None,
-                    str(payload.get("inquilino_telefono") or "").strip() or None,
+                    tenant.get("nombre") or normalize_person_name(payload.get("inquilino")) or None,
+                    tenant.get("telefono") or str(payload.get("inquilino_telefono") or "").strip() or None,
                     str(payload.get("agente") or captacion["asesor"] or "").strip() or None,
                     1,
                     "Manual",
@@ -19222,6 +19341,19 @@ class Handler(BaseHTTPRequestHandler):
             )
             audit("inmueble_docs", doc_id, "Subir documento", usuario=payload.get("usuario"))
         elif parsed.path == "/api/demandas":
+            cliente_id = payload.get("cliente_id")
+            if not cliente_id:
+                cliente_id = ensure_cliente_for_inmobiliaria(
+                    conn,
+                    empresa["id"],
+                    payload.get("cliente_nombre"),
+                    payload.get("cliente_nif"),
+                    now,
+                    {
+                        "telefono": payload.get("cliente_telefono"),
+                        "email": payload.get("cliente_email"),
+                    },
+                )
             conn.execute(
                 """
                 INSERT INTO demandas (
@@ -19235,7 +19367,7 @@ class Handler(BaseHTTPRequestHandler):
                 (
                     os.urandom(16).hex(),
                     empresa["id"],
-                    payload.get("cliente_id"),
+                    cliente_id,
                     payload.get("tipo"),
                     payload.get("zona"),
                     payload.get("precio_max"),
@@ -22831,8 +22963,9 @@ class Handler(BaseHTTPRequestHandler):
                 return
             rows = conn.execute(
                 """
-                SELECT d.id, d.tipo, d.zona, d.precio_max, d.m2_min,
+               SELECT d.id, d.tipo, d.zona, d.precio_max, d.m2_min,
                        d.habitaciones_min, d.banos_min, d.estado, d.prioridad,
+                       d.cliente_id,
                        c.nombre AS cliente
                 FROM demandas d
                 LEFT JOIN clientes c ON c.id = d.cliente_id
@@ -22859,7 +22992,9 @@ class Handler(BaseHTTPRequestHandler):
             rows = conn.execute(
                 f"""
                 SELECT v.id, v.fecha, v.hora, v.estado, v.asesor, v.notas,
+                       v.demanda_id,
                        i.direccion AS inmueble,
+                       d.cliente_id,
                        c.nombre AS cliente
                 FROM visitas v
                 LEFT JOIN inmuebles i ON i.id = v.inmueble_id
