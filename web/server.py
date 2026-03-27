@@ -9126,8 +9126,8 @@ def ensure_captacion_for_inmueble(conn, empresa_id, inmueble_id, now):
     if not inmueble:
         return None
     captacion_id = os.urandom(16).hex()
-    situacion = str(inmueble["estado"] or "Captación").strip() or "Captación"
-    etapa = "Encargo firmado" if normalize_lookup_text(situacion) == "encargo" else "Prospecto"
+    situacion = str(inmueble["estado"] or "Noticia").strip() or "Noticia"
+    etapa = "Encargo" if normalize_lookup_text(situacion) == "encargo" else situacion
     conn.execute(
         """
         INSERT INTO captaciones (
@@ -11561,6 +11561,49 @@ def ensure_workspace_product_tables(conn):
     )
     conn.execute(
         """
+        CREATE TABLE IF NOT EXISTS workspace_presupuestos (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          empresa_id TEXT,
+          cliente_id TEXT,
+          servicio TEXT,
+          referencia_tipo TEXT,
+          referencia_id TEXT,
+          titulo TEXT NOT NULL,
+          estado TEXT NOT NULL DEFAULT 'Borrador',
+          fecha TEXT,
+          responsable TEXT,
+          forma_pago TEXT,
+          observaciones TEXT,
+          subtotal REAL,
+          impuestos REAL,
+          total REAL,
+          calculo_json TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workspace_presupuesto_lineas (
+          id TEXT PRIMARY KEY,
+          presupuesto_id TEXT NOT NULL,
+          orden INTEGER NOT NULL DEFAULT 1,
+          categoria TEXT,
+          concepto TEXT NOT NULL,
+          cantidad REAL NOT NULL DEFAULT 1,
+          unidad TEXT,
+          precio_unitario REAL NOT NULL DEFAULT 0,
+          descuento_pct REAL NOT NULL DEFAULT 0,
+          total_linea REAL NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS workspace_fincas_comunidades (
           id TEXT PRIMARY KEY,
           workspace_id TEXT NOT NULL,
@@ -11571,12 +11614,22 @@ def ensure_workspace_product_tables(conn):
           presidente TEXT,
           secretario TEXT,
           estado TEXT NOT NULL DEFAULT 'Activa',
+          num_vecinos INTEGER,
+          num_locales INTEGER,
+          num_trasteros INTEGER,
+          num_aparcamientos INTEGER,
+          cuota_sugerida REAL,
           cuota_mensual REAL,
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL
         )
         """
     )
+    ensure_column(conn, "workspace_fincas_comunidades", "num_vecinos", "num_vecinos INTEGER")
+    ensure_column(conn, "workspace_fincas_comunidades", "num_locales", "num_locales INTEGER")
+    ensure_column(conn, "workspace_fincas_comunidades", "num_trasteros", "num_trasteros INTEGER")
+    ensure_column(conn, "workspace_fincas_comunidades", "num_aparcamientos", "num_aparcamientos INTEGER")
+    ensure_column(conn, "workspace_fincas_comunidades", "cuota_sugerida", "cuota_sugerida REAL")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS workspace_fincas_incidencias (
@@ -11918,6 +11971,106 @@ def fetch_workspace_time_entries(conn, workspace_id, limit=40):
     return {"rows": [dict(row) for row in rows]}
 
 
+def parse_non_negative_int(value):
+    text = str(value or "").strip()
+    if not text:
+        return 0
+    try:
+        return max(0, int(float(text)))
+    except Exception:
+        return 0
+
+
+def compute_fincas_cuota_sugerida(num_vecinos=0, num_locales=0, num_trasteros=0, num_aparcamientos=0):
+    total = (
+        parse_non_negative_int(num_vecinos) * 5
+        + parse_non_negative_int(num_locales)
+        + parse_non_negative_int(num_trasteros)
+        + parse_non_negative_int(num_aparcamientos)
+    )
+    return round(max(60, total), 2)
+
+
+def parse_workspace_presupuesto_lineas(raw):
+    if raw in (None, ""):
+        return []
+    parsed = raw
+    if isinstance(raw, str):
+        try:
+            parsed = json.loads(raw)
+        except Exception:
+            parsed = []
+    if not isinstance(parsed, list):
+        return []
+    lineas = []
+    for index, item in enumerate(parsed, start=1):
+        if not isinstance(item, dict):
+            continue
+        concepto = str(item.get("concepto") or "").strip()
+        if not concepto:
+            continue
+        cantidad = float(item.get("cantidad") or 0) or 0.0
+        precio_unitario = float(item.get("precio_unitario") or 0) or 0.0
+        descuento_pct = float(item.get("descuento_pct") or 0) or 0.0
+        bruto = max(cantidad, 0.0) * max(precio_unitario, 0.0)
+        total_linea = round(bruto * (1 - max(min(descuento_pct, 100.0), 0.0) / 100.0), 2)
+        lineas.append(
+            {
+                "orden": index,
+                "categoria": str(item.get("categoria") or "").strip() or None,
+                "concepto": concepto,
+                "cantidad": round(max(cantidad, 0.0), 2),
+                "unidad": str(item.get("unidad") or "").strip() or None,
+                "precio_unitario": round(max(precio_unitario, 0.0), 2),
+                "descuento_pct": round(max(min(descuento_pct, 100.0), 0.0), 2),
+                "total_linea": total_linea,
+            }
+        )
+    return lineas
+
+
+def fetch_workspace_presupuestos(conn, workspace_id, limit=40):
+    rows = conn.execute(
+        """
+        SELECT
+          p.id,
+          p.workspace_id,
+          p.empresa_id,
+          p.cliente_id,
+          COALESCE(e.nombre, '') AS empresa_nombre,
+          COALESCE(c.nombre, '') AS cliente_nombre,
+          p.servicio,
+          p.referencia_tipo,
+          p.referencia_id,
+          p.titulo,
+          p.estado,
+          p.fecha,
+          p.responsable,
+          p.forma_pago,
+          p.observaciones,
+          p.subtotal,
+          p.impuestos,
+          p.total,
+          p.calculo_json,
+          p.created_at,
+          p.updated_at,
+          (
+            SELECT COUNT(*)
+            FROM workspace_presupuesto_lineas l
+            WHERE l.presupuesto_id = p.id
+          ) AS lineas_total
+        FROM workspace_presupuestos p
+        LEFT JOIN empresas e ON e.id = p.empresa_id
+        LEFT JOIN clientes c ON c.id = p.cliente_id
+        WHERE p.workspace_id = ?
+        ORDER BY COALESCE(p.fecha, p.updated_at, p.created_at) DESC, p.updated_at DESC
+        LIMIT ?
+        """,
+        (workspace_id, max(1, min(int(limit or 40), 100))),
+    ).fetchall()
+    return {"rows": [dict(row) for row in rows]}
+
+
 def fetch_workspace_fincas_comunidades(conn, workspace_id, limit=30):
     rows = conn.execute(
         """
@@ -11932,6 +12085,11 @@ def fetch_workspace_fincas_comunidades(conn, workspace_id, limit=30):
           c.presidente,
           c.secretario,
           c.estado,
+          c.num_vecinos,
+          c.num_locales,
+          c.num_trasteros,
+          c.num_aparcamientos,
+          c.cuota_sugerida,
           c.cuota_mensual,
           c.created_at,
           c.updated_at,
@@ -12633,6 +12791,7 @@ def fetch_workspace_health(conn, workspace_id):
     ).fetchone()[0]
     docs_summary = fetch_workspace_document_hub(conn, workspace_id, limit=5)["summary"]
     billing_rows = fetch_workspace_billing_rows(conn, workspace_id, limit=5)["rows"]
+    presupuesto_rows = fetch_workspace_presupuestos(conn, workspace_id, limit=5)["rows"]
     inbox_rows = fetch_workspace_inbox_queue(conn, workspace_id, limit=5)["rows"]
     portal_rows = fetch_workspace_portal_clients(conn, workspace_id, limit=5)["rows"]
     portal_requests = fetch_workspace_portal_requests(conn, workspace_id, limit=5)["rows"]
@@ -12711,6 +12870,11 @@ def fetch_workspace_health(conn, workspace_id):
             "hint": f"{int(facturas_total or 0)} movimientos transversales registrados.",
         },
         {
+            "label": "Presupuestos",
+            "done": 1 if len(presupuesto_rows) > 0 else 0,
+            "hint": f"{len(presupuesto_rows)} propuestas comerciales cargadas.",
+        },
+        {
             "label": "Series",
             "done": 1 if len(series_rows) > 0 else 0,
             "hint": f"{len(series_rows)} series de facturación configuradas.",
@@ -12751,7 +12915,7 @@ def fetch_workspace_health(conn, workspace_id):
     metrics_by_module = {
         "crm360": (clientes_total, "clientes activos en el tenant", "Importar o crear clientes base."),
         "documental": (docs_summary.get("documentos_total") or 0, "documentos unificados", "Subir documentos y revisar asignaciones."),
-        "dashboard": (len(billing_rows) + int(clientes_total or 0), "fuentes listas para cuadros de mando", "Conectar más datos operativos y facturación."),
+        "dashboard": (len(billing_rows) + len(presupuesto_rows) + int(clientes_total or 0), "fuentes listas para cuadros de mando", "Conectar más datos operativos y facturación."),
         "gestoria": (gestoria_total, "trabajos de gestoría", "Cargar trabajos/campañas y responsables."),
         "seguros": (seguros_total, "pólizas o expedientes de seguros", "Importar cartera o cargar pólizas activas."),
         "inmobiliaria": (inmuebles_total + operaciones_total, "inmuebles y operaciones", "Cargar captaciones, inmuebles u operaciones."),
@@ -12794,6 +12958,7 @@ def fetch_workspace_health(conn, workspace_id):
             "clientes": int(clientes_total or 0),
             "documentos": int(docs_summary.get("documentos_total") or 0),
             "facturas": int(facturas_total or 0),
+            "presupuestos": len(presupuesto_rows),
             "cobros": len(billing_collections),
             "portal_requerimientos": len(portal_requests),
             "fichajes": len(time_rows),
@@ -13615,6 +13780,9 @@ class Handler(BaseHTTPRequestHandler):
         if path in {"/api/acciones", "/api/acciones_update"}:
             raw = payload.get("servicio") or (params.get("servicio", [""])[0] if params else "")
             return normalize_service_key(raw)
+        if path == "/api/workspace_presupuestos":
+            raw = payload.get("servicio") or (params.get("servicio", [""])[0] if params else "") or "gestoria"
+            return normalize_service_key(raw)
         if path in {"/api/clientes_link", "/api/cliente_empresa_update"}:
             raw = payload.get("servicio") or ""
             return normalize_service_key(raw)
@@ -13814,6 +13982,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/workspace_remesas",
             "/api/workspace_portal_requerimientos",
             "/api/workspace_registro_horario",
+            "/api/workspace_presupuestos",
             "/api/workspace_fincas_comunidades",
             "/api/workspace_fincas_incidencias",
             "/api/workspace_fincas_proveedores",
@@ -15827,6 +15996,133 @@ class Handler(BaseHTTPRequestHandler):
             conn.commit()
             json_response(self, {"ok": True, "id": record_id, "automation_actions": auto_created})
             return
+        elif parsed.path == "/api/workspace_presupuestos":
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            empresa_id = str(payload.get("empresa_id") or "").strip()
+            record_id = str(payload.get("id") or "").strip()
+            servicio = normalize_service_key(payload.get("servicio") or "").strip() or "gestoria"
+            titulo = str(payload.get("titulo") or "").strip()
+            if not workspace_id or not empresa_id or not titulo:
+                json_response(self, {"error": "workspace_id, empresa_id y titulo requeridos"}, status=400)
+                return
+            cliente_id = str(payload.get("cliente_id") or "").strip() or None
+            referencia_tipo = str(payload.get("referencia_tipo") or "").strip() or None
+            referencia_id = str(payload.get("referencia_id") or "").strip() or None
+            lineas = parse_workspace_presupuesto_lineas(payload.get("lineas"))
+            calculo = {}
+            if servicio in {"administracion fincas", "fincas"}:
+                calculo = {
+                    "num_vecinos": parse_non_negative_int(payload.get("num_vecinos")),
+                    "num_locales": parse_non_negative_int(payload.get("num_locales")),
+                    "num_trasteros": parse_non_negative_int(payload.get("num_trasteros")),
+                    "num_aparcamientos": parse_non_negative_int(payload.get("num_aparcamientos")),
+                }
+                calculo["cuota_sugerida"] = compute_fincas_cuota_sugerida(
+                    calculo["num_vecinos"],
+                    calculo["num_locales"],
+                    calculo["num_trasteros"],
+                    calculo["num_aparcamientos"],
+                )
+                if not lineas:
+                    lineas = [
+                        {
+                            "orden": 1,
+                            "categoria": "Administración",
+                            "concepto": f"Administración mensual · {titulo}",
+                            "cantidad": 1.0,
+                            "unidad": "mes",
+                            "precio_unitario": calculo["cuota_sugerida"],
+                            "descuento_pct": 0.0,
+                            "total_linea": round(calculo["cuota_sugerida"], 2),
+                        }
+                    ]
+            subtotal_calculado = round(sum(float(item.get("total_linea") or 0.0) for item in lineas), 2)
+            subtotal_manual = round(parse_money_value(payload.get("subtotal")), 2) or 0.0
+            subtotal = subtotal_manual if subtotal_manual > 0 else subtotal_calculado
+            impuestos = round(parse_money_value(payload.get("impuestos")), 2) or 0.0
+            total_manual = round(parse_money_value(payload.get("total")), 2) or 0.0
+            total = total_manual if total_manual > 0 else round(subtotal + impuestos, 2)
+            values = (
+                workspace_id,
+                empresa_id,
+                cliente_id,
+                servicio,
+                referencia_tipo,
+                referencia_id,
+                titulo,
+                (payload.get("estado") or "").strip() or "Borrador",
+                (payload.get("fecha") or "").strip() or None,
+                (payload.get("responsable") or "").strip() or None,
+                (payload.get("forma_pago") or "").strip() or None,
+                (payload.get("observaciones") or "").strip() or None,
+                subtotal,
+                impuestos,
+                total,
+                json.dumps(calculo, ensure_ascii=False) if calculo else None,
+            )
+            if record_id:
+                conn.execute(
+                    """
+                    UPDATE workspace_presupuestos
+                    SET workspace_id = ?, empresa_id = ?, cliente_id = ?, servicio = ?, referencia_tipo = ?, referencia_id = ?,
+                        titulo = ?, estado = ?, fecha = ?, responsable = ?, forma_pago = ?, observaciones = ?,
+                        subtotal = ?, impuestos = ?, total = ?, calculo_json = ?, updated_at = datetime(?)
+                    WHERE id = ? AND workspace_id = ?
+                    """,
+                    (*values, now, record_id, workspace_id),
+                )
+                conn.execute("DELETE FROM workspace_presupuesto_lineas WHERE presupuesto_id = ?", (record_id,))
+            else:
+                record_id = os.urandom(16).hex()
+                conn.execute(
+                    """
+                    INSERT INTO workspace_presupuestos (
+                      id, workspace_id, empresa_id, cliente_id, servicio, referencia_tipo, referencia_id,
+                      titulo, estado, fecha, responsable, forma_pago, observaciones, subtotal, impuestos, total, calculo_json, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                    """,
+                    (record_id, *values, now, now),
+                )
+            for index, line in enumerate(lineas, start=1):
+                conn.execute(
+                    """
+                    INSERT INTO workspace_presupuesto_lineas (
+                      id, presupuesto_id, orden, categoria, concepto, cantidad, unidad, precio_unitario, descuento_pct, total_linea, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                    """,
+                    (
+                        os.urandom(16).hex(),
+                        record_id,
+                        index,
+                        line.get("categoria"),
+                        line.get("concepto"),
+                        line.get("cantidad"),
+                        line.get("unidad"),
+                        line.get("precio_unitario"),
+                        line.get("descuento_pct"),
+                        line.get("total_linea"),
+                        now,
+                        now,
+                    ),
+                )
+            auto_created = run_workspace_automations(
+                conn,
+                workspace_id,
+                "presupuesto_created",
+                {
+                    "presupuesto_id": record_id,
+                    "empresa_id": empresa_id,
+                    "cliente_id": cliente_id,
+                    "servicio": servicio,
+                    "cliente_nombre": None,
+                    "estado": (payload.get("estado") or "").strip() or "Borrador",
+                    "importe": total,
+                },
+                now,
+            )
+            conn.commit()
+            json_response(self, {"ok": True, "id": record_id, "automation_actions": auto_created})
+            return
         elif parsed.path == "/api/workspace_fincas_comunidades":
             workspace_id = str(payload.get("workspace_id") or "").strip()
             empresa_id = str(payload.get("empresa_id") or "").strip()
@@ -15835,6 +16131,11 @@ class Handler(BaseHTTPRequestHandler):
             if not workspace_id or not empresa_id or not nombre:
                 json_response(self, {"error": "workspace_id, empresa_id y nombre requeridos"}, status=400)
                 return
+            num_vecinos = parse_non_negative_int(payload.get("num_vecinos"))
+            num_locales = parse_non_negative_int(payload.get("num_locales"))
+            num_trasteros = parse_non_negative_int(payload.get("num_trasteros"))
+            num_aparcamientos = parse_non_negative_int(payload.get("num_aparcamientos"))
+            cuota_sugerida = compute_fincas_cuota_sugerida(num_vecinos, num_locales, num_trasteros, num_aparcamientos)
             values = (
                 workspace_id,
                 empresa_id,
@@ -15844,14 +16145,20 @@ class Handler(BaseHTTPRequestHandler):
                 (payload.get("presidente") or "").strip() or None,
                 (payload.get("secretario") or "").strip() or None,
                 (payload.get("estado") or "").strip() or "Activa",
-                round(parse_money_value(payload.get("cuota_mensual")), 2) or None,
+                num_vecinos,
+                num_locales,
+                num_trasteros,
+                num_aparcamientos,
+                cuota_sugerida,
+                round(parse_money_value(payload.get("cuota_mensual")), 2) or cuota_sugerida,
             )
             if record_id:
                 conn.execute(
                     """
                     UPDATE workspace_fincas_comunidades
                     SET workspace_id = ?, empresa_id = ?, nombre = ?, cif = ?, direccion = ?, presidente = ?,
-                        secretario = ?, estado = ?, cuota_mensual = ?, updated_at = datetime(?)
+                        secretario = ?, estado = ?, num_vecinos = ?, num_locales = ?, num_trasteros = ?,
+                        num_aparcamientos = ?, cuota_sugerida = ?, cuota_mensual = ?, updated_at = datetime(?)
                     WHERE id = ? AND workspace_id = ?
                     """,
                     (*values, now, record_id, workspace_id),
@@ -15862,8 +16169,8 @@ class Handler(BaseHTTPRequestHandler):
                     """
                     INSERT INTO workspace_fincas_comunidades (
                       id, workspace_id, empresa_id, nombre, cif, direccion, presidente, secretario,
-                      estado, cuota_mensual, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                      estado, num_vecinos, num_locales, num_trasteros, num_aparcamientos, cuota_sugerida, cuota_mensual, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
                     """,
                     (record_id, *values, now, now),
                 )
@@ -19307,7 +19614,7 @@ class Handler(BaseHTTPRequestHandler):
                         payload.get("precio_objetivo"),
                         payload.get("precio_valoracion"),
                         payload.get("valor_referencia"),
-                        payload.get("situacion_comercial") or "Captación",
+                        payload.get("situacion_comercial") or payload.get("etapa") or "Noticia",
                         payload.get("lat"),
                         payload.get("lon"),
                         now,
@@ -19343,7 +19650,7 @@ class Handler(BaseHTTPRequestHandler):
                         payload.get("precio_objetivo"),
                         payload.get("precio_valoracion"),
                         payload.get("urgencia"),
-                        payload.get("situacion_comercial") or "Captación",
+                        payload.get("situacion_comercial") or payload.get("etapa") or "Noticia",
                         None,
                         payload.get("motivo"),
                         payload.get("canal"),
@@ -19378,8 +19685,18 @@ class Handler(BaseHTTPRequestHandler):
             conn.execute(
                 """
                 UPDATE captaciones
-                SET etapa = ?, updated_at = datetime(?)
+                SET etapa = ?, situacion_comercial = ?, updated_at = datetime(?)
                 WHERE id = ?
+                """,
+                (etapa, etapa, now, record_id),
+            )
+            conn.execute(
+                """
+                UPDATE inmuebles
+                SET estado = ?, updated_at = datetime(?)
+                WHERE id = (
+                  SELECT inmueble_id FROM captaciones WHERE id = ? LIMIT 1
+                )
                 """,
                 (etapa, now, record_id),
             )
@@ -19416,6 +19733,8 @@ class Handler(BaseHTTPRequestHandler):
             if not updates:
                 json_response(self, {"error": "Sin cambios"}, status=400)
                 return
+            if "etapa" in updates and "situacion_comercial" not in updates:
+                updates["situacion_comercial"] = updates["etapa"]
             set_clause = ", ".join([f"{key} = ?" for key in updates])
             values = list(updates.values()) + [now, inmueble_id]
             conn.execute(
@@ -19436,6 +19755,8 @@ class Handler(BaseHTTPRequestHandler):
                 "precio_valoracion",
             )
             inm_updates = {key: updates[key] for key in shared if key in updates}
+            if "etapa" in updates:
+                inm_updates["estado"] = updates["etapa"]
             if "situacion_comercial" in updates:
                 inm_updates["estado"] = updates["situacion_comercial"]
             if inm_updates:
@@ -19451,10 +19772,17 @@ class Handler(BaseHTTPRequestHandler):
                 inmueble_id = str(payload.get("inmueble_id") or "").strip()
                 destino = normalize_lookup_text(payload.get("destino") or "")
                 destino_map = {
-                    "inmueble": "Inmueble",
+                    "noticia": "Noticia",
+                    "inmueble": "Noticia",
+                    "valoracion": "Valoración",
                     "encargo": "Encargo",
-                    "compraventa": "Compraventa",
-                    "venta": "Compraventa",
+                    "reservado": "Reservado",
+                    "compraventa": "Vendido",
+                    "vendido": "Vendido",
+                    "venta": "Vendido",
+                    "cerradonegativamente": "Cerrado negativamente",
+                    "cerrado_negativamente": "Cerrado negativamente",
+                    "cerrado negativamente": "Cerrado negativamente",
                     "alquiler": "Alquiler",
                 }
                 destino_label = destino_map.get(destino)
@@ -19500,14 +19828,14 @@ class Handler(BaseHTTPRequestHandler):
                         return fallback
                     return ""
 
-                if destino_label == "Inmueble":
+                if destino_label in {"Noticia", "Valoración", "Reservado", "Cerrado negativamente"}:
                     conn.execute(
                         """
                         UPDATE captaciones
-                        SET situacion_comercial = ?, fecha_conversion = ?, updated_at = datetime(?)
+                        SET situacion_comercial = ?, etapa = ?, fecha_conversion = ?, updated_at = datetime(?)
                         WHERE id = ?
                         """,
-                        (destino_label, now, now, captacion_id),
+                        (destino_label, destino_label, now, now, captacion_id),
                     )
                     conn.execute(
                         "UPDATE inmuebles SET estado = ?, updated_at = datetime(?) WHERE id = ?",
@@ -19522,7 +19850,7 @@ class Handler(BaseHTTPRequestHandler):
                     cap_updates = {
                         "situacion_comercial": destino_label,
                         "fecha_conversion": now,
-                        "etapa": "Encargo firmado",
+                        "etapa": "Encargo",
                     }
                     if precio_encargo is not None:
                         cap_updates["precio_objetivo"] = precio_encargo
@@ -19545,7 +19873,7 @@ class Handler(BaseHTTPRequestHandler):
                     json_response(self, {"ok": True, "destino": destino_label, "inmueble_id": captacion["inmueble_id"]})
                     return
 
-                if destino_label == "Compraventa":
+                if destino_label == "Vendido":
                     fecha_encargo = str(payload.get("fecha_encargo") or "").strip()
                     fecha_escritura = str(payload.get("fecha_escritura") or "").strip()
                     fecha_operacion = fecha_escritura or fecha_encargo
@@ -19719,10 +20047,10 @@ class Handler(BaseHTTPRequestHandler):
                     conn.execute(
                         """
                         UPDATE captaciones
-                        SET situacion_comercial = ?, fecha_conversion = ?, updated_at = datetime(?)
+                        SET situacion_comercial = ?, etapa = ?, fecha_conversion = ?, updated_at = datetime(?)
                         WHERE id = ?
                         """,
-                        (destino_label, now, now, captacion_id),
+                        (destino_label, destino_label, now, now, captacion_id),
                     )
                     conn.execute(
                         "UPDATE inmuebles SET estado = ?, updated_at = datetime(?) WHERE id = ?",
@@ -19817,10 +20145,10 @@ class Handler(BaseHTTPRequestHandler):
                 conn.execute(
                     """
                     UPDATE captaciones
-                    SET situacion_comercial = ?, fecha_conversion = ?, updated_at = datetime(?)
+                    SET situacion_comercial = ?, etapa = ?, fecha_conversion = ?, updated_at = datetime(?)
                     WHERE id = ?
                     """,
-                    (destino_label, now, now, captacion_id),
+                    (destino_label, destino_label, now, now, captacion_id),
                 )
                 conn.execute(
                     "UPDATE inmuebles SET estado = ?, updated_at = datetime(?) WHERE id = ?",
@@ -21349,6 +21677,15 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "workspace_id requerido"}, status=400)
                 return
             json_response(self, fetch_workspace_time_entries(conn, workspace_id, limit=limit))
+            return
+
+        if path == "/api/workspace_presupuestos":
+            workspace_id = params.get("workspace_id", [""])[0]
+            limit = params.get("limit", ["40"])[0]
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            json_response(self, fetch_workspace_presupuestos(conn, workspace_id, limit=limit))
             return
 
         if path == "/api/workspace_fincas_comunidades":
@@ -25934,7 +26271,7 @@ class Handler(BaseHTTPRequestHandler):
                     """
                     SELECT
                       COUNT(*) AS captaciones_total,
-                      SUM(CASE WHEN LOWER(COALESCE(etapa, '')) <> 'perdido' THEN 1 ELSE 0 END) AS captaciones_activas
+                      SUM(CASE WHEN LOWER(COALESCE(etapa, '')) NOT IN ('cerrado negativamente', 'vendido', 'alquiler') THEN 1 ELSE 0 END) AS captaciones_activas
                     FROM captaciones
                     WHERE empresa_id = ?
                     """,

@@ -80,6 +80,126 @@
           <div class="form-card">
             <div class="section-head">
               <div>
+                <h3>Presupuestos</h3>
+                <p class="muted">Propuestas comerciales para reformas, gestoría y fincas desde una sola base operativa.</p>
+              </div>
+            </div>
+            <div id="workspaceBudgetSummary"></div>
+            <div class="workspace-billing-layout">
+              <form id="workspaceBudgetForm" class="form-grid">
+                <input type="hidden" name="id" />
+                <input type="hidden" name="workspace_id" />
+                <input type="hidden" name="cliente_id" />
+                <input type="hidden" name="lineas" />
+                <label>
+                  Empresa
+                  <select name="empresa_id" required></select>
+                </label>
+                <label>
+                  Servicio
+                  <select name="servicio">
+                    <option value="reformas">Reformas</option>
+                    <option value="gestoria">Gestoría</option>
+                    <option value="fincas">Fincas</option>
+                  </select>
+                </label>
+                <label>
+                  Estado
+                  <select name="estado">
+                    <option>Borrador</option>
+                    <option>Enviado</option>
+                    <option>Aceptado</option>
+                    <option>Rechazado</option>
+                  </select>
+                </label>
+                <label>
+                  Fecha
+                  <input name="fecha" type="date" />
+                </label>
+                <label class="span-2">
+                  Cliente
+                  <input name="cliente_lookup" id="workspaceBudgetClienteLookup" list="workspaceClientOptions" placeholder="Busca por nombre o DNI" />
+                </label>
+                <label class="span-2">
+                  Título
+                  <input name="titulo" required placeholder="Ej. Reforma integral, asesoría fiscal anual, administración C.P." />
+                </label>
+                <label>
+                  Responsable
+                  <input name="responsable" />
+                </label>
+                <label>
+                  Forma de pago
+                  <select name="forma_pago">
+                    <option value="">Sin definir</option>
+                    <option>Efectivo</option>
+                    <option>Tarjeta</option>
+                    <option>Transferencia</option>
+                    <option>Remesa</option>
+                  </select>
+                </label>
+                <label>
+                  Ref. tipo
+                  <input name="referencia_tipo" placeholder="obra, comunidad, expediente..." />
+                </label>
+                <label>
+                  Ref. id
+                  <input name="referencia_id" placeholder="Opcional" />
+                </label>
+                <label>
+                  Vecinos
+                  <input name="num_vecinos" type="number" min="0" step="1" />
+                </label>
+                <label>
+                  Locales
+                  <input name="num_locales" type="number" min="0" step="1" />
+                </label>
+                <label>
+                  Trasteros
+                  <input name="num_trasteros" type="number" min="0" step="1" />
+                </label>
+                <label>
+                  Aparcamientos
+                  <input name="num_aparcamientos" type="number" min="0" step="1" />
+                </label>
+                <label>
+                  Base sugerida
+                  <input name="subtotal_sugerido" type="number" step="0.01" readonly />
+                </label>
+                <label>
+                  Subtotal editable
+                  <input name="subtotal" type="number" step="0.01" />
+                </label>
+                <label>
+                  IVA / impuestos
+                  <input name="impuestos" type="number" step="0.01" value="0" />
+                </label>
+                <label>
+                  Total editable
+                  <input name="total" type="number" step="0.01" />
+                </label>
+                <label class="span-2">
+                  Partidas
+                  <textarea name="lineas_texto" rows="5" placeholder="Una línea por partida. Formato: categoría | concepto | cantidad | unidad | precio | dto%"></textarea>
+                </label>
+                <label class="span-2">
+                  Observaciones
+                  <textarea name="observaciones" rows="3"></textarea>
+                </label>
+                <div class="form-actions span-2">
+                  <button type="submit">Guardar presupuesto</button>
+                  <button type="button" id="workspaceBudgetResetBtn" class="secondary ghost">Nuevo</button>
+                  <span id="workspaceBudgetStatus" class="muted"></span>
+                </div>
+              </form>
+              <div id="workspaceBudgetList"></div>
+            </div>
+          </div>
+        </div>
+        <div class="workspace-central-layout">
+          <div class="form-card">
+            <div class="section-head">
+              <div>
                 <h3>Paquete Comercial</h3>
                 <p class="muted">Cómo se empaqueta y se presenta este workspace dentro del producto.</p>
               </div>
@@ -1212,8 +1332,8 @@
                     </div>
                     <div class="crm-quick-actions">
                       <button type="button" class="crm-quick-action" data-crm-action="captacion">
-                        <strong>Nueva captación</strong>
-                        <span>Alta de propietario, valoración y origen</span>
+                        <strong>Nueva noticia</strong>
+                        <span>Alta inicial del inmueble, propietario y origen</span>
                       </button>
                       <button type="button" class="crm-quick-action" data-crm-action="compraventa">
                         <strong>Nueva compraventa</strong>
@@ -1233,7 +1353,7 @@
                       </div>
                     </div>
                     <div class="crm-focus-list">
-                      <button type="button" class="crm-focus-link" data-crm-view="captaciones">Revisar pipeline y próximas acciones</button>
+                      <button type="button" class="crm-focus-link" data-crm-view="captaciones">Revisar noticias y próximas acciones</button>
                       <button type="button" class="crm-focus-link" data-crm-view="inmuebles">Abrir fichas y documentación de inmuebles</button>
                       <button type="button" class="crm-focus-link" data-crm-view="alquileres">Controlar cierres y rentas alquiladas</button>
                       <button type="button" class="crm-focus-link" data-crm-view="compraventas">Controlar precio salida, venta y desviación</button>
@@ -1245,18 +1365,18 @@
                 <div class="form-card">
                   <div class="section-head">
                     <div>
-                      <h3>Pipeline de captación</h3>
-                      <p class="muted">Vista rápida del embudo comercial y evolución de los inmuebles en entrada.</p>
+                      <h3>Pipeline inmobiliario</h3>
+                      <p class="muted">Vista rápida de noticia, valoración, encargo, reserva y cierre.</p>
                     </div>
                     <select id="crmEtapaFilter">
                       <option value="">Todas las etapas</option>
-                      <option>Prospecto</option>
-                      <option>Contactado</option>
-                      <option>Visita/Valoración</option>
-                      <option>Negociación</option>
-                      <option>Encargo firmado</option>
-                      <option>Publicado</option>
-                      <option>Perdido</option>
+                      <option>Noticia</option>
+                      <option>Valoración</option>
+                      <option>Encargo</option>
+                      <option>Reservado</option>
+                      <option>Vendido</option>
+                      <option>Cerrado negativamente</option>
+                      <option>Alquiler</option>
                     </select>
                   </div>
                   <div id="crmPipeline" class="crm-pipeline"></div>
@@ -1289,18 +1409,18 @@
                 <div class="form-card">
                   <div class="section-head">
                     <div>
-                      <h3>Pipeline de captación</h3>
-                      <p class="muted">Arrastra para avanzar el estado de cada captación.</p>
+                      <h3>Pipeline inmobiliario</h3>
+                      <p class="muted">Arrastra para avanzar el estado de cada inmueble dentro del pipeline.</p>
                     </div>
                     <select id="crmEtapaFilterMirror">
                       <option value="">Todas las etapas</option>
-                      <option>Prospecto</option>
-                      <option>Contactado</option>
-                      <option>Visita/Valoración</option>
-                      <option>Negociación</option>
-                      <option>Encargo firmado</option>
-                      <option>Publicado</option>
-                      <option>Perdido</option>
+                      <option>Noticia</option>
+                      <option>Valoración</option>
+                      <option>Encargo</option>
+                      <option>Reservado</option>
+                      <option>Vendido</option>
+                      <option>Cerrado negativamente</option>
+                      <option>Alquiler</option>
                     </select>
                   </div>
                   <div id="crmCaptacionesStageSummary" class="crm-pipeline"></div>
@@ -1309,8 +1429,8 @@
                 <div class="form-card">
                   <div class="section-head">
                     <div>
-                      <h3>Listado de captaciones</h3>
-                      <p class="muted">Base operativa para seguimiento, llamadas y negociación.</p>
+                      <h3>Listado de noticias y encargos</h3>
+                      <p class="muted">Base operativa para seguimiento, valoración, reserva y cierre.</p>
                     </div>
                   </div>
                   <div id="crmCaptacionesTable"></div>
@@ -1408,10 +1528,10 @@
                 <button class="ghost" type="button" id="inmuebleBackBtn">Volver</button>
               </div>
             </div>
-            <p class="muted">Los campos de Datos y Captación son editables y se guardan automáticamente.</p>
+            <p class="muted">Los campos de Datos y Seguimiento son editables y se guardan automáticamente.</p>
             <div class="tabs" id="inmuebleTabs">
               <button class="tab active" type="button" data-tab="datos">Datos</button>
-              <button class="tab" type="button" data-tab="captacion">Captación</button>
+              <button class="tab" type="button" data-tab="captacion">Seguimiento</button>
               <button class="tab" type="button" data-tab="demandas">Demandas</button>
               <button class="tab" type="button" data-tab="visitas">Visitas</button>
               <button class="tab" type="button" data-tab="actividad">Actividad</button>
@@ -1641,13 +1761,16 @@
                 <div class="section-head">
                   <div>
                     <h3>Conversión comercial</h3>
-                    <p class="muted">Mueve la captación a inmueble, encargo, compraventa o alquiler desde su expediente.</p>
+                    <p class="muted">Mueve el inmueble por noticia, valoración, encargo, reserva, cierre o alquiler desde su expediente.</p>
                   </div>
                 </div>
                 <div class="inline-actions">
-                  <button type="button" class="ghost" id="inmuebleConvertInmuebleBtn">Inmueble</button>
+                  <button type="button" class="ghost" id="inmuebleConvertInmuebleBtn">Noticia</button>
+                  <button type="button" class="ghost" id="inmuebleConvertValoracionBtn">Valoración</button>
                   <button type="button" class="secondary" id="inmuebleConvertEncargoBtn">Encargo</button>
-                  <button type="button" class="secondary" id="inmuebleConvertVentaBtn">Compraventa</button>
+                  <button type="button" class="secondary" id="inmuebleConvertReservadoBtn">Reservado</button>
+                  <button type="button" class="secondary" id="inmuebleConvertVentaBtn">Vendido</button>
+                  <button type="button" class="ghost" id="inmuebleConvertCerradoBtn">Cerrado negativamente</button>
                   <button type="button" class="secondary" id="inmuebleConvertAlquilerBtn">Alquiler</button>
                 </div>
               </div>
@@ -3417,8 +3540,8 @@
           </div>
           <div id="estudioAltaCaptacion" class="hidden">
             <div class="form-card">
-              <h3>Alta Captación · Estudio Velazquez 2012 SL</h3>
-              <p class="muted">Registro de captaciones en fase inicial.</p>
+              <h3>Alta Noticia · Estudio Velazquez 2012 SL</h3>
+              <p class="muted">Registro inicial de inmuebles antes de valoración o encargo.</p>
               <form id="captacionForm">
                 <div class="form-grid inmo-grid">
                   <label>
@@ -3518,13 +3641,13 @@
                   <label>
                     Etapa
                     <select name="etapa">
-                      <option>Prospecto</option>
-                      <option>Contactado</option>
-                      <option>Visita/Valoración</option>
-                      <option>Negociación</option>
-                      <option>Encargo firmado</option>
-                      <option>Publicado</option>
-                      <option>Perdido</option>
+                      <option>Noticia</option>
+                      <option>Valoración</option>
+                      <option>Encargo</option>
+                      <option>Reservado</option>
+                      <option>Vendido</option>
+                      <option>Cerrado negativamente</option>
+                      <option>Alquiler</option>
                     </select>
                   </label>
                   <label>

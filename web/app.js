@@ -1275,6 +1275,12 @@ const workspaceTimeForm = document.getElementById("workspaceTimeForm");
 const workspaceTimeResetBtn = document.getElementById("workspaceTimeResetBtn");
 const workspaceTimeStatus = document.getElementById("workspaceTimeStatus");
 const workspaceTimeList = document.getElementById("workspaceTimeList");
+const workspaceBudgetSummary = document.getElementById("workspaceBudgetSummary");
+const workspaceBudgetForm = document.getElementById("workspaceBudgetForm");
+const workspaceBudgetResetBtn = document.getElementById("workspaceBudgetResetBtn");
+const workspaceBudgetStatus = document.getElementById("workspaceBudgetStatus");
+const workspaceBudgetList = document.getElementById("workspaceBudgetList");
+const workspaceBudgetClienteLookup = document.getElementById("workspaceBudgetClienteLookup");
 const workspaceFincasCommunityForm = document.getElementById("workspaceFincasCommunityForm");
 const workspaceFincasCommunityResetBtn = document.getElementById("workspaceFincasCommunityResetBtn");
 const workspaceFincasCommunityStatus = document.getElementById("workspaceFincasCommunityStatus");
@@ -1998,8 +2004,11 @@ const inmuebleChecklistTable = document.getElementById("inmuebleChecklistTable")
 const inmuebleChecklistInfo = document.getElementById("inmuebleChecklistInfo");
 const inmuebleChecklistBtn = document.getElementById("inmuebleChecklistBtn");
 const inmuebleConvertInmuebleBtn = document.getElementById("inmuebleConvertInmuebleBtn");
+const inmuebleConvertValoracionBtn = document.getElementById("inmuebleConvertValoracionBtn");
 const inmuebleConvertEncargoBtn = document.getElementById("inmuebleConvertEncargoBtn");
+const inmuebleConvertReservadoBtn = document.getElementById("inmuebleConvertReservadoBtn");
 const inmuebleConvertVentaBtn = document.getElementById("inmuebleConvertVentaBtn");
+const inmuebleConvertCerradoBtn = document.getElementById("inmuebleConvertCerradoBtn");
 const inmuebleConvertAlquilerBtn = document.getElementById("inmuebleConvertAlquilerBtn");
 const inmuebleActividadTable = document.getElementById("inmuebleActividadTable");
 const inmuebleActividadInfo = document.getElementById("inmuebleActividadInfo");
@@ -2103,7 +2112,7 @@ const TABLE_LABELS = {
   movimientos: "BDT (Ingresos/Gastos)",
   seguros: "Seguros",
   gestoria: "Gestoría",
-  captaciones: "Captación",
+  captaciones: "Pipeline",
   operaciones_inmobiliarias: "Compraventas",
   hipotecas: "Hipotecas",
   alquileres: "Alquileres",
@@ -3388,7 +3397,7 @@ const renderCompanyCards = () => {
         card.dataset.action = "crm-inmo";
         card.innerHTML = `
           <h3>CRM Inmobiliario</h3>
-          <div class="company-meta">Captación, inmuebles y operaciones.</div>
+          <div class="company-meta">Noticias, inmuebles y operaciones.</div>
           <div class="company-meta">Servicio inmobiliario.</div>
           <a class="card-link" href="?crm=inmo" data-action="crm-inmo">Entrar</a>
         `;
@@ -6961,6 +6970,9 @@ const createWordmarkLogoDataUri = (label, options = {}) => {
 const COMPANY_LOGOS = {
   "FINCAS VELAZQUEZ": "/assets/logos/fincas-velazquez.png",
   "FINANCIACIONES MODERNIA": "/assets/grupo_modernia_logo.png",
+  "INVERSURE HOMES": "/assets/logos/inversure-homes.svg",
+  "INMOVERE PROYECT": "/assets/logos/xp-renova.svg",
+  "XP RENOVA": "/assets/logos/xp-renova.svg",
   "MODERNIA ASESORES": "/assets/grupo_modernia_logo.png",
   "GRUPO MODERNIA": "/assets/grupo_modernia_logo.png",
   ALLIANZ: "/assets/logos/allianz.svg",
@@ -6994,6 +7006,15 @@ const COMPANY_ALIASES = {
   "FINCAS VELAZQUEZ S L": "FINCAS VELAZQUEZ",
   "FINCAS VELAZQUEZ S L U": "FINCAS VELAZQUEZ",
   "FINANCIACIONES MODERNIA MALAGA": "FINANCIACIONES MODERNIA",
+  INVERSURE: "INVERSURE HOMES",
+  "INVERSURE HOMES SL": "INVERSURE HOMES",
+  "INVERSURE HOMES S L": "INVERSURE HOMES",
+  "INVESURE HOMES": "INVERSURE HOMES",
+  "INVESURE HOMES SL": "INVERSURE HOMES",
+  "INVESURE HOMES S L": "INVERSURE HOMES",
+  "INMOVERE PROYECT SL": "INMOVERE PROYECT",
+  "INMOVERE PROYECT S L": "INMOVERE PROYECT",
+  "XP RENOVA SL": "XP RENOVA",
   "MODERNIA FINANCIACIONES": "FINANCIACIONES MODERNIA",
   "MODERNIA ASESORES SL": "MODERNIA ASESORES",
   "MODERNIA ASESORES S L": "MODERNIA ASESORES",
@@ -7374,57 +7395,55 @@ const isValidDocumento = (value) => {
 };
 
 const CRM_ETAPAS = [
-  "Prospecto",
-  "Contactado",
-  "Visita/Valoración",
-  "Negociación",
-  "Encargo firmado",
-  "Publicado",
-  "Perdido",
+  "Noticia",
+  "Valoración",
+  "Encargo",
+  "Reservado",
+  "Vendido",
+  "Cerrado negativamente",
+  "Alquiler",
 ];
 
 const INMUEBLE_CHECKLISTS = {
-  Prospecto: [
+  Noticia: [
     "Registrar lead y origen",
     "Verificar datos del propietario",
     "Primera llamada de contacto",
     "Calificar interés",
   ],
-  Contactado: [
+  "Valoración": [
     "Agendar visita/valoración",
     "Enviar dossier inicial",
     "Confirmar documentación básica",
     "Recoger datos registrales",
   ],
-  "Visita/Valoración": [
-    "Realizar visita",
-    "Tomar fotos y medidas",
-    "Preparar valoración",
-    "Revisión de cargas",
-  ],
-  Negociación: [
-    "Revisión de oferta",
-    "Negociar honorarios",
-    "Confirmar condiciones",
-    "Validar documentación del propietario",
-  ],
-  "Encargo firmado": [
+  Encargo: [
     "Firmar encargo",
     "Subir documentación",
     "Preparar anuncio",
     "Solicitar nota simple",
     "Verificar referencia catastral",
   ],
-  Publicado: [
-    "Publicar en portales",
-    "Activar campaña de leads",
-    "Planificar visitas",
-    "Enviar reporte al propietario",
+  Reservado: [
+    "Subir reserva firmada",
+    "Confirmar señal entregada",
+    "Bloquear comercialización",
+    "Coordinar siguiente hito con las partes",
   ],
-  Perdido: [
+  Vendido: [
+    "Subir escritura pública",
+    "Cerrar expediente documental",
+    "Comunicar cierre al propietario",
+  ],
+  "Cerrado negativamente": [
     "Registrar motivo pérdida",
     "Cerrar expediente",
     "Programar seguimiento futuro",
+  ],
+  Alquiler: [
+    "Formalizar contrato de alquiler",
+    "Subir documentación del arrendamiento",
+    "Cerrar seguimiento comercial",
   ],
 };
 
@@ -14650,9 +14669,12 @@ const renderTableInto = (data, container, infoEl, label) => {
       });
       actions.appendChild(openBtn);
       [
-        ["Inmueble", "inmueble", "ghost"],
+        ["Noticia", "noticia", "ghost"],
+        ["Valoración", "valoracion", "ghost"],
         ["Encargo", "encargo", "secondary"],
-        ["Venta", "compraventa", "secondary"],
+        ["Reservado", "reservado", "secondary"],
+        ["Vendido", "compraventa", "secondary"],
+        ["Cerrado negativamente", "cerrado_negativamente", "ghost"],
         ["Alquiler", "alquiler", "secondary"],
       ].forEach(([text, destino, cssClass]) => {
         const btn = document.createElement("button");
@@ -14791,9 +14813,13 @@ const buildCaptacionConversionPayload = (rowMap, destino) => {
 const runCaptacionConversion = async (captacionId, rowMap = {}, destino = "") => {
   if (!captacionId || !destino) return;
   const destinationLabel = {
-    inmueble: "Inmueble",
+    noticia: "Noticia",
+    valoracion: "Valoración",
     encargo: "Encargo",
-    compraventa: "Compraventa",
+    reservado: "Reservado",
+    compraventa: "Vendido",
+    vendido: "Vendido",
+    cerrado_negativamente: "Cerrado negativamente",
     alquiler: "Alquiler",
   }[destino] || destino;
   const ok = window.confirm(
@@ -14825,7 +14851,7 @@ const runCaptacionConversion = async (captacionId, rowMap = {}, destino = "") =>
     }
     loadCrmCaptaciones();
     loadCrmInmuebles();
-    if (destino === "compraventa") {
+    if (destino === "compraventa" || destino === "vendido") {
       loadCrmCompraventas();
       setCrmWorkspaceView("compraventas");
       return;
@@ -14839,7 +14865,7 @@ const runCaptacionConversion = async (captacionId, rowMap = {}, destino = "") =>
       setCrmWorkspaceView("inmuebles");
     }
   } catch (error) {
-    const message = error?.message || "Error al convertir la captación.";
+    const message = error?.message || "Error al convertir el inmueble.";
     if (crmCaptacionesInfo) {
       crmCaptacionesInfo.textContent = message;
     }
@@ -14865,9 +14891,13 @@ const runCurrentInmuebleConversion = (destino) => {
     payload.inmueble_id = inmuebleId;
   }
   const destinationLabel = {
-    inmueble: "Inmueble",
+    noticia: "Noticia",
+    valoracion: "Valoración",
     encargo: "Encargo",
-    compraventa: "Compraventa",
+    reservado: "Reservado",
+    compraventa: "Vendido",
+    vendido: "Vendido",
+    cerrado_negativamente: "Cerrado negativamente",
     alquiler: "Alquiler",
   }[destino] || destino;
   const ok = window.confirm(
@@ -14985,15 +15015,7 @@ const loadCrmAlquileres = () => {
 };
 
 const renderCrmPipeline = (counts = {}, activeEtapa = "") => {
-  const etapas = [
-    "Prospecto",
-    "Contactado",
-    "Visita/Valoración",
-    "Negociación",
-    "Encargo firmado",
-    "Publicado",
-    "Perdido",
-  ];
+  const etapas = [...CRM_ETAPAS];
   [crmPipeline, crmCaptacionesStageSummary].forEach((container) => {
     if (!container) return;
     container.innerHTML = "";
@@ -15024,18 +15046,10 @@ const renderCrmKanban = (data) => {
   const direccionIndex = data.columns.indexOf("direccion");
   const zonaIndex = data.columns.indexOf("zona");
   const proximaIndex = data.columns.indexOf("proxima_accion");
-  const etapas = [
-    "Prospecto",
-    "Contactado",
-    "Visita/Valoración",
-    "Negociación",
-    "Encargo firmado",
-    "Publicado",
-    "Perdido",
-  ];
+  const etapas = [...CRM_ETAPAS];
   const grouped = new Map(etapas.map((e) => [e, []]));
   data.rows.forEach((row) => {
-    const etapa = row[etapaIndex] || "Prospecto";
+    const etapa = row[etapaIndex] || "Noticia";
     if (!grouped.has(etapa)) {
       grouped.set(etapa, []);
     }
@@ -15253,7 +15267,7 @@ const refreshCurrentInmuebleProfile = () => {
         ],
       },
       {
-        title: "Captación",
+        title: "Seguimiento",
         items: [
           ["Propietario", captacion.propietario],
           ["Situación", captacion.situacion_comercial],
@@ -27098,7 +27112,13 @@ if (inmuebleAlquilerDiaPdfBtn) {
 
 if (inmuebleConvertInmuebleBtn) {
   inmuebleConvertInmuebleBtn.addEventListener("click", () => {
-    runCurrentInmuebleConversion("inmueble");
+    runCurrentInmuebleConversion("noticia");
+  });
+}
+
+if (inmuebleConvertValoracionBtn) {
+  inmuebleConvertValoracionBtn.addEventListener("click", () => {
+    runCurrentInmuebleConversion("valoracion");
   });
 }
 
@@ -27108,9 +27128,21 @@ if (inmuebleConvertEncargoBtn) {
   });
 }
 
+if (inmuebleConvertReservadoBtn) {
+  inmuebleConvertReservadoBtn.addEventListener("click", () => {
+    runCurrentInmuebleConversion("reservado");
+  });
+}
+
 if (inmuebleConvertVentaBtn) {
   inmuebleConvertVentaBtn.addEventListener("click", () => {
     runCurrentInmuebleConversion("compraventa");
+  });
+}
+
+if (inmuebleConvertCerradoBtn) {
+  inmuebleConvertCerradoBtn.addEventListener("click", () => {
+    runCurrentInmuebleConversion("cerrado_negativamente");
   });
 }
 
