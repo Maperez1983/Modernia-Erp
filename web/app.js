@@ -10701,11 +10701,75 @@ const renderPropietariosEditor = (propietarios) => {
   if (!propietarios || !propietarios.length) {
     addOwnerRow("");
   }
+  const actions = document.createElement("div");
+  actions.className = "inline-actions";
   const addBtn = document.createElement("button");
   addBtn.type = "button";
   addBtn.textContent = "Añadir propietario";
   addBtn.addEventListener("click", () => addOwnerRow(""));
-  wrapper.appendChild(addBtn);
+  const quickAddBtn = document.createElement("button");
+  quickAddBtn.type = "button";
+  quickAddBtn.className = "secondary";
+  quickAddBtn.textContent = "Dar de alta propietario";
+  quickAddBtn.addEventListener("click", async () => {
+    if (!state.currentInmuebleId) {
+      alert("No hay inmueble seleccionado.");
+      return;
+    }
+    const nombre = window.prompt("Nombre y apellidos o titular del propietario:");
+    if (nombre === null) return;
+    if (!String(nombre).trim()) {
+      alert("El nombre es obligatorio.");
+      return;
+    }
+    const nif = window.prompt("DNI/NIF del propietario (opcional):", "");
+    if (nif === null) return;
+    const telefono = window.prompt("Teléfono del propietario (opcional):", "");
+    if (telefono === null) return;
+    const email = window.prompt("Email del propietario (opcional):", "");
+    if (email === null) return;
+    setInmuebleSaveStatus("Creando propietario...");
+    try {
+      const response = await fetch("/api/inmueble_propietario_create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          inmueble_id: state.currentInmuebleId,
+          nombre: String(nombre).trim(),
+          nif: String(nif || "").trim(),
+          telefono: String(telefono || "").trim(),
+          email: String(email || "").trim(),
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok || data?.error) {
+        setInmuebleSaveStatus(data?.error || `HTTP ${response.status}`);
+        alert(data?.error || `HTTP ${response.status}`);
+        return;
+      }
+      const cliente = data?.cliente || {};
+      addOwnerRow(cliente.id || "");
+      const selects = Array.from(list.querySelectorAll("select"));
+      const lastSelect = selects[selects.length - 1];
+      if (lastSelect && cliente.id) {
+        lastSelect.value = cliente.id;
+      }
+      if (state.currentInmuebleContext) {
+        const existing = Array.isArray(state.currentInmuebleContext.propietarios)
+          ? state.currentInmuebleContext.propietarios
+          : [];
+        state.currentInmuebleContext.propietarios = [...existing, cliente];
+      }
+      refreshCurrentInmuebleProfile();
+      loadCrmInmuebles();
+      setInmuebleSaveStatus("Guardado");
+    } catch (error) {
+      setInmuebleSaveStatus("Error al guardar.");
+    }
+  });
+  actions.appendChild(addBtn);
+  actions.appendChild(quickAddBtn);
+  wrapper.appendChild(actions);
   inmuebleDatosGrid.appendChild(wrapper);
 };
 

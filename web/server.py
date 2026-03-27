@@ -19972,6 +19972,41 @@ class Handler(BaseHTTPRequestHandler):
                     """,
                     (os.urandom(16).hex(), inmueble_id, cliente_id, now, now),
                 )
+        elif parsed.path == "/api/inmueble_propietario_create":
+            inmueble_id = str(payload.get("inmueble_id") or "").strip()
+            nombre = str(payload.get("nombre") or "").strip()
+            nif = str(payload.get("nif") or "").strip()
+            telefono = str(payload.get("telefono") or "").strip()
+            email_value = str(payload.get("email") or "").strip()
+            if not inmueble_id or not nombre:
+                json_response(self, {"error": "inmueble_id y nombre requeridos"}, status=400)
+                return
+            inmueble = conn.execute(
+                "SELECT * FROM inmuebles WHERE id = ? LIMIT 1",
+                (inmueble_id,),
+            ).fetchone()
+            if not inmueble:
+                json_response(self, {"error": "Inmueble no encontrado"}, status=404)
+                return
+            cliente_id = ensure_cliente_for_inmobiliaria(
+                conn,
+                inmueble["empresa_id"],
+                nombre,
+                nif,
+                now,
+                {
+                    "telefono": telefono,
+                    "email": email_value,
+                    "direccion": inmueble["direccion"] or "",
+                },
+            )
+            ensure_inmueble_propietario_link(conn, inmueble_id, cliente_id, now)
+            cliente = conn.execute(
+                "SELECT id, nombre, nif, telefono, email FROM clientes WHERE id = ? LIMIT 1",
+                (cliente_id,),
+            ).fetchone()
+            json_response(self, {"ok": True, "cliente": dict(cliente) if cliente else {"id": cliente_id, "nombre": nombre}})
+            return
         elif parsed.path == "/api/inmueble_docs":
             inmueble_id = payload.get("inmueble_id")
             nombre = payload.get("nombre") or ""
