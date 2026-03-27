@@ -24,6 +24,7 @@ DEFAULT_SOURCE_DIR = (
 )
 RENTA_SERVICE = "gestoria"
 RENTA_ACTIVITY_TYPE = "Declaración en periodo"
+DEFAULT_EJERCICIO = str(datetime.now(timezone.utc).year - 1)
 PDFTOTEXT_TIMEOUT_SECONDS = 20
 TESSERACT_TIMEOUT_SECONDS = 45
 PDFTOPPM_TIMEOUT_SECONDS = 45
@@ -1120,15 +1121,43 @@ def infer_name_from_sources(paths: list[str]) -> str:
 
 
 def extract_dni_expiry_from_sources(paths: list[str]) -> str:
+    return extract_dni_metadata_from_sources(paths).get("dni_caducidad") or ""
+
+
+def detect_renta_doc_status(value: object) -> str:
+    text = norm_text(value)
+    if not text:
+        return "Presentada"
+    if any(token in text for token in ("borrador", "draft")):
+        return "Borrador"
+    return "Presentada"
+
+
+def extract_dni_metadata_from_sources(paths: list[str]) -> dict:
     for raw_path in paths or []:
         stem = Path(raw_path).stem
-        matches = re.findall(r"(\d{8})(?!.*\d{8})", stem)
-        if not matches:
-            continue
-        value = parse_date_ddmmyyyy(matches[-1])
-        if value:
-            return value
-    return ""
+        upper = stem.upper()
+        dates = [parse_date_ddmmyyyy(value) for value in re.findall(r"(\d{8})", stem)]
+        dates = [value for value in dates if value]
+        if "PERMAN" in upper:
+            return {
+                "dni_expedicion": dates[0] if dates else "",
+                "dni_caducidad": "Permanente",
+                "dni_permanente": 1,
+            }
+        if len(dates) >= 2:
+            return {
+                "dni_expedicion": dates[0],
+                "dni_caducidad": dates[-1],
+                "dni_permanente": 0,
+            }
+        if len(dates) == 1:
+            return {
+                "dni_expedicion": "",
+                "dni_caducidad": dates[0],
+                "dni_permanente": 0,
+            }
+    return {"dni_expedicion": "", "dni_caducidad": "", "dni_permanente": 0}
 
 
 def should_skip_auxiliary_record(record: dict) -> bool:
@@ -1153,8 +1182,17 @@ def finalize_record(record: dict) -> dict:
     result["source_files"] = sorted(result.get("source_files") or [])
     result["source_file_count"] = len(result["source_files"])
     result["source_types"] = sorted(result.get("source_types") or [])
+    result["estado_presentacion"] = detect_renta_doc_status(
+        result.get("estado_presentacion") or result.get("doc_status") or "Presentada"
+    )
+    result["doc_status"] = result["estado_presentacion"]
+    dni_meta = extract_dni_metadata_from_sources(result["source_files"])
+    if not result.get("dni_expedicion"):
+        result["dni_expedicion"] = dni_meta.get("dni_expedicion") or ""
     if not result.get("dni_caducidad"):
-        result["dni_caducidad"] = extract_dni_expiry_from_sources(result["source_files"])
+        result["dni_caducidad"] = dni_meta.get("dni_caducidad") or ""
+    if result.get("dni_permanente") in (None, "", 0, "0", False):
+        result["dni_permanente"] = 1 if dni_meta.get("dni_permanente") else 0
     critical_missing = [field for field in CRITICAL_FIELDS if result.get(field) in (None, "", [], {})]
     flags = []
     if "pdf_desconocido" in result["source_types"]:
@@ -1433,8 +1471,11 @@ def ensure_spouse(conn: sqlite3.Connection, empresa_id: str, service: str, recor
     return ensure_cliente(conn, empresa_id, service, spouse_record, now)
 
 
-def build_renta_entry(record: dict) -> dict:
-    ejercicio = "2024"
+def build_renta_entry(record: dict, ejercicio: str | None = None, estado_presentacion: str | None = None) -> dict:
+    ejercicio = str(ejercicio or record.get("ejercicio") or DEFAULT_EJERCICIO).strip() or DEFAULT_EJERCICIO
+    estado_presentacion = detect_renta_doc_status(
+        estado_presentacion or record.get("estado_presentacion") or record.get("doc_status")
+    )
     patrimonio = {
         "base_imponible_general": record.get("base_imponible_general"),
         "base_imponible_ahorro": record.get("base_imponible_ahorro"),
@@ -1450,7 +1491,9 @@ def build_renta_entry(record: dict) -> dict:
         "ejercicio": ejercicio,
         "cliente_nombre": record.get("cliente_nombre"),
         "cliente_nif": record.get("cliente_nif"),
+        "dni_expedicion": record.get("dni_expedicion") or "",
         "dni_caducidad": record.get("dni_caducidad") or "",
+        "dni_permanente": 1 if str(record.get("dni_permanente") or "").strip().lower() in {"1", "true", "yes", "si", "sí"} else 0,
         "cliente_fecha_nacimiento": record.get("cliente_fecha_nacimiento") or "",
         "estado_civil": record.get("cliente_estado_civil") or "",
         "hijos_count": int(record.get("hijos_count") or 0),
@@ -1476,6 +1519,8 @@ def build_renta_entry(record: dict) -> dict:
         "responsable": record.get("responsable") or "",
         "cobrada": 1 if str(record.get("cobrada") or "").strip().lower() in {"1", "true", "yes", "si", "sí"} else 0,
         "forma_cobro": record.get("forma_cobro") or "",
+        "estado_presentacion": estado_presentacion,
+        "doc_status": estado_presentacion,
         "gestion_notas": record.get("gestion_notas") or "",
         "confidence_score": record.get("confidence_score"),
         "notas_ocr": record,
@@ -1509,8 +1554,10 @@ def ensure_cliente_gestoria_renta(
     cliente_id: str,
     record: dict,
     now: str,
+    ejercicio: str | None = None,
+    estado_presentacion: str | None = None,
 ) -> None:
-    entry = build_renta_entry(record)
+    entry = build_renta_entry(record, ejercicio=ejercicio, estado_presentacion=estado_presentacion)
     existing = conn.execute(
         "SELECT id, tipo_cliente, renta_detalles FROM cliente_gestoria WHERE cliente_id = ?",
         (cliente_id,),
@@ -1566,8 +1613,13 @@ def ensure_gestoria_renta_trabajo(
     cliente_id: str,
     record: dict,
     now: str,
+    ejercicio: str | None = None,
+    estado_presentacion: str | None = None,
 ) -> None:
-    ejercicio = "2024"
+    ejercicio = str(ejercicio or record.get("ejercicio") or DEFAULT_EJERCICIO).strip() or DEFAULT_EJERCICIO
+    estado_presentacion = detect_renta_doc_status(
+        estado_presentacion or record.get("estado_presentacion") or record.get("doc_status")
+    )
     row = conn.execute(
         """
         SELECT id
@@ -1578,8 +1630,10 @@ def ensure_gestoria_renta_trabajo(
         """,
         (empresa_id, cliente_id, RENTA_ACTIVITY_TYPE, f"%Renta {ejercicio}%"),
     ).fetchone()
+    trabajo_estado = "Finalizado" if estado_presentacion == "Presentada" else "En espera"
+    responsable = record.get("responsable") or "Importación renta"
     notas = (
-        f"Renta {ejercicio} importada · DNI {record.get('cliente_nif') or ''} · "
+        f"Renta {ejercicio} {estado_presentacion.lower()} · DNI {record.get('cliente_nif') or ''} · "
         f"Resultado {record.get('resultado_declaracion') if record.get('resultado_declaracion') is not None else '-'}"
     ).strip()
     if row:
@@ -1590,10 +1644,10 @@ def ensure_gestoria_renta_trabajo(
             WHERE id = ?
             """,
             (
-                "Finalizado",
+                trabajo_estado,
                 record.get("presentacion_fecha") or "",
                 record.get("presentacion_fecha") or "",
-                "Importación renta",
+                responsable,
                 notas,
                 now,
                 row["id"],
@@ -1605,7 +1659,7 @@ def ensure_gestoria_renta_trabajo(
         INSERT INTO gestoria_trabajos (
           id, empresa_id, cliente_id, tipo_trabajo, estado, fecha_inicio, fecha_fin, responsable, importe, notas, created_at, updated_at
         ) VALUES (
-          ?, ?, ?, ?, 'Finalizado', ?, ?, ?, ?, ?, datetime(?), datetime(?)
+          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
         )
         """,
         (
@@ -1613,9 +1667,10 @@ def ensure_gestoria_renta_trabajo(
             empresa_id,
             cliente_id,
             RENTA_ACTIVITY_TYPE,
+            trabajo_estado,
             record.get("presentacion_fecha") or "",
             record.get("presentacion_fecha") or "",
-            "Importación renta",
+            responsable,
             record.get("resultado_declaracion"),
             notas,
             now,
@@ -1630,14 +1685,19 @@ def ensure_gestoria_renta_docs(
     cliente_id: str,
     record: dict,
     now: str,
+    ejercicio: str | None = None,
+    estado_presentacion: str | None = None,
 ) -> None:
-    ejercicio = str(record.get("ejercicio") or "2024").strip() or "2024"
+    ejercicio = str(ejercicio or record.get("ejercicio") or DEFAULT_EJERCICIO).strip() or DEFAULT_EJERCICIO
+    estado_presentacion = detect_renta_doc_status(
+        estado_presentacion or record.get("estado_presentacion") or record.get("doc_status")
+    )
     presentacion_fecha = record.get("presentacion_fecha") or ""
     for source in record.get("source_files") or []:
         source_text = compact_spaces(source)
         if not source_text:
             continue
-        doc_name = f"Renta {ejercicio} · {Path(source_text).name}"
+        doc_name = f"Renta {ejercicio} · {estado_presentacion} · {Path(source_text).name}"
         source_url = source_text if source_text.startswith("/uploads/") or source_text.startswith("http") else ""
         if source_url:
             existing = conn.execute(
@@ -1671,15 +1731,24 @@ def ensure_gestoria_renta_docs(
                 """
                 UPDATE gestoria_docs
                 SET empresa_id = ?,
-                    tipo = 'Renta',
+                    tipo = ?,
                     fecha = COALESCE(NULLIF(?, ''), fecha),
-                    estado = 'Recibido',
+                    estado = ?,
                     notas = COALESCE(NULLIF(?, ''), notas),
                     doc_url = COALESCE(NULLIF(?, ''), doc_url),
                     updated_at = datetime(?)
                 WHERE id = ?
                 """,
-                (empresa_id, presentacion_fecha, source_text, source_url, now, existing["id"]),
+                (
+                    empresa_id,
+                    f"Renta {estado_presentacion}",
+                    presentacion_fecha,
+                    estado_presentacion,
+                    source_text,
+                    source_url,
+                    now,
+                    existing["id"],
+                ),
             )
             continue
         conn.execute(
@@ -1689,7 +1758,7 @@ def ensure_gestoria_renta_docs(
               nombre, tipo, fecha, estado, notas, doc_key, doc_url,
               calidad_ocr, campos_ocr, created_at, updated_at
             ) VALUES (
-              ?, ?, ?, 'renta', ?, ?, 'Renta', ?, 'Recibido', ?, NULL, ?, ?, ?, datetime(?), datetime(?)
+              ?, ?, ?, 'renta', ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, datetime(?), datetime(?)
             )
             """,
             (
@@ -1698,8 +1767,10 @@ def ensure_gestoria_renta_docs(
                 cliente_id,
                 f"renta-{ejercicio}-{slug(record.get('cliente_nif') or record.get('cliente_nombre'))}",
                 doc_name,
+                f"Renta {estado_presentacion}",
                 presentacion_fecha,
-                source_text,
+                estado_presentacion,
+                source_text or estado_presentacion,
                 source_url or None,
                 record.get("text_source") or "",
                 ",".join(sorted(k for k, v in record.items() if v not in (None, "", [], {}))),
@@ -1716,15 +1787,17 @@ def upsert_asesoramiento_renta(
     cliente2_id: str | None,
     record: dict,
     now: str,
+    ejercicio: str | None = None,
 ) -> str:
+    ejercicio = str(ejercicio or record.get("ejercicio") or DEFAULT_EJERCICIO).strip() or DEFAULT_EJERCICIO
     existing = conn.execute(
         """
         SELECT id FROM asesoramientos_financiacion
-        WHERE empresa_id = ? AND origen = 'Renta 2024' AND cliente1_id = ?
+        WHERE empresa_id = ? AND origen = ? AND cliente1_id = ?
         ORDER BY updated_at DESC
         LIMIT 1
         """,
-        (empresa_id, cliente1_id),
+        (empresa_id, f"Renta {ejercicio}", cliente1_id),
     ).fetchone()
     payload = {
         "fecha": record.get("presentacion_fecha") or datetime.now(timezone.utc).date().isoformat(),
@@ -1779,12 +1852,13 @@ def upsert_asesoramiento_renta(
           cliente2_fecha_nacimiento, ingresos_conjuntos, notas, notas_ocr, calidad_ocr, campos_ocr,
           created_at, updated_at
         ) VALUES (
-          ?, ?, 'Renta 2024', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
         )
         """,
         (
             record_id,
             empresa_id,
+            f"Renta {ejercicio}",
             payload["fecha"],
             payload["estado"],
             payload["cliente1_id"],
@@ -1837,7 +1911,13 @@ def write_json(out_path: Path, records: list[dict]) -> None:
     out_path.write_text(json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def apply_to_db(db_path: Path, records: list[dict], company_name: str) -> dict:
+def apply_to_db(
+    db_path: Path,
+    records: list[dict],
+    company_name: str,
+    ejercicio: str | None = None,
+    estado_presentacion: str = "Presentada",
+) -> dict:
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
     try:
@@ -1850,6 +1930,11 @@ def apply_to_db(db_path: Path, records: list[dict], company_name: str) -> dict:
             if not record.get("safe_to_apply"):
                 skipped_for_review += 1
                 continue
+            record = dict(record)
+            record["ejercicio"] = str(ejercicio or record.get("ejercicio") or DEFAULT_EJERCICIO)
+            record["estado_presentacion"] = detect_renta_doc_status(
+                record.get("estado_presentacion") or estado_presentacion
+            )
             cliente_id = ensure_cliente(conn, company_id, RENTA_SERVICE, record, now)
             if not cliente_id:
                 skipped_for_review += 1
@@ -1857,9 +1942,32 @@ def apply_to_db(db_path: Path, records: list[dict], company_name: str) -> dict:
             spouse_id = ensure_spouse(conn, company_id, RENTA_SERVICE, record, now)
             if spouse_id:
                 linked_spouses += 1
-            ensure_cliente_gestoria_renta(conn, cliente_id, record, now)
-            ensure_gestoria_renta_docs(conn, company_id, cliente_id, record, now)
-            ensure_gestoria_renta_trabajo(conn, company_id, cliente_id, record, now)
+            ensure_cliente_gestoria_renta(
+                conn,
+                cliente_id,
+                record,
+                now,
+                ejercicio=record["ejercicio"],
+                estado_presentacion=record["estado_presentacion"],
+            )
+            ensure_gestoria_renta_docs(
+                conn,
+                company_id,
+                cliente_id,
+                record,
+                now,
+                ejercicio=record["ejercicio"],
+                estado_presentacion=record["estado_presentacion"],
+            )
+            ensure_gestoria_renta_trabajo(
+                conn,
+                company_id,
+                cliente_id,
+                record,
+                now,
+                ejercicio=record["ejercicio"],
+                estado_presentacion=record["estado_presentacion"],
+            )
             created_or_updated += 1
         conn.commit()
         return {
@@ -1873,13 +1981,15 @@ def apply_to_db(db_path: Path, records: list[dict], company_name: str) -> dict:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Importa rentas 2024 al CRM.")
+    parser = argparse.ArgumentParser(description="Importa campañas de renta al CRM.")
     parser.add_argument("--source-dir", default=DEFAULT_SOURCE_DIR, help="Carpeta raíz con PDFs de renta.")
     parser.add_argument("--db", default="data/erp_import2.sqlite", help="Ruta a la SQLite del CRM.")
     parser.add_argument("--company", default=GESTORIA_COMPANY, help="Empresa destino para vincular clientes.")
     parser.add_argument("--out-json", default="data/rentas_2024_preview.json", help="Salida JSON consolidada.")
     parser.add_argument("--out-csv", default="data/rentas_2024_preview.csv", help="Salida CSV resumida.")
     parser.add_argument("--review-json", default="data/rentas_2024_review_queue.json", help="Cola de revisión para casos dudosos.")
+    parser.add_argument("--ejercicio", default=DEFAULT_EJERCICIO, help="Ejercicio fiscal a cargar. En 2026, normalmente será 2025.")
+    parser.add_argument("--estado-presentacion", default="Presentada", choices=("Borrador", "Presentada"), help="Estado documental de la renta importada.")
     parser.add_argument("--limit", type=int, default=0, help="Limita el número de PDFs procesados.")
     parser.add_argument("--apply", action="store_true", help="Aplica los cambios en SQLite.")
     args = parser.parse_args()
@@ -1902,7 +2012,13 @@ def main() -> None:
     print(f"Review queue: {review_path}")
     print(json.dumps(validation, ensure_ascii=False, indent=2))
     if args.apply:
-        result = apply_to_db(Path(args.db).expanduser(), records, args.company)
+        result = apply_to_db(
+            Path(args.db).expanduser(),
+            records,
+            args.company,
+            ejercicio=str(args.ejercicio or DEFAULT_EJERCICIO),
+            estado_presentacion=str(args.estado_presentacion or "Presentada"),
+        )
         print(json.dumps(result, ensure_ascii=False, indent=2))
 
 

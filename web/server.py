@@ -30,7 +30,6 @@ import unicodedata
 from email.message import EmailMessage
 from email.header import decode_header
 from email.utils import parseaddr
-
 try:
     from .auth_security import hash_password as runtime_hash_password
     from .auth_security import needs_password_rehash
@@ -9617,6 +9616,23 @@ def parse_renta_detalles_payload(raw):
     }
 
 
+def normalize_renta_presentacion_status(value):
+    text = normalize_lookup_text(value or "")
+    if "BORR" in text:
+        return "Borrador"
+    if "PRESEN" in text:
+        return "Presentada"
+    return "Presentada"
+
+
+def renta_dni_label(entry):
+    if not isinstance(entry, dict):
+        return "Caducidad DNI"
+    if str(entry.get("dni_permanente") or "").strip().lower() in {"1", "true", "yes", "si", "sí"}:
+        return "DNI permanente"
+    return "Caducidad DNI"
+
+
 def sort_renta_entries(entries):
     def entry_key(entry):
         if not isinstance(entry, dict):
@@ -9767,6 +9783,15 @@ def sanitize_renta_entry(entry):
         reference=sanitized.get("casilla_505") or major_reference,
         allow_zero=True,
     )
+    sanitized["estado_presentacion"] = normalize_renta_presentacion_status(
+        entry.get("estado_presentacion") or entry.get("doc_status")
+    )
+    sanitized["doc_status"] = sanitized["estado_presentacion"]
+    sanitized["dni_expedicion"] = str(entry.get("dni_expedicion") or "").strip()
+    sanitized["dni_caducidad"] = str(entry.get("dni_caducidad") or "").strip()
+    sanitized["dni_permanente"] = 1 if str(entry.get("dni_permanente") or "").strip().lower() in {"1", "true", "yes", "si", "sí"} else 0
+    sanitized["dni_label"] = renta_dni_label(sanitized)
+    sanitized["pendiente_presentacion"] = 1 if sanitized["estado_presentacion"] == "Borrador" else 0
     return sanitized
 
 
@@ -9847,6 +9872,7 @@ def collect_gestoria_renta_card_items(conn, empresa_id, q="", estado="", limit=5
             (row["cliente_id"],),
         ).fetchall()
         docs_list = [dict(doc) for doc in docs]
+        pending_presentacion = 1 if latest and normalize_renta_presentacion_status(latest.get("estado_presentacion")) == "Borrador" else 0
         items.append(
             {
                 "cliente_id": row["cliente_id"],
@@ -9863,6 +9889,7 @@ def collect_gestoria_renta_card_items(conn, empresa_id, q="", estado="", limit=5
                 "renta_entries": entries,
                 "renta_latest": latest,
                 "renta_entry_count": len(entries),
+                "renta_pendiente_presentacion": pending_presentacion,
                 "docs": docs_list,
                 "doc_count": len(docs_list),
                 "preview_doc": docs_list[0] if docs_list else {},
@@ -9925,6 +9952,68 @@ def serialize_renta_detalles_payload(raw_value, existing_value=""):
         },
         ensure_ascii=False,
     )
+
+
+def upsert_cliente_renta_entry(conn, cliente_id, entry_payload, now):
+    row = conn.execute(
+        "SELECT renta_detalles FROM cliente_gestoria WHERE cliente_id = ?",
+        (cliente_id,),
+    ).fetchone()
+    current = parse_renta_detalles_payload(row["renta_detalles"] if row else "")
+    entries = sanitize_renta_entries(current.get("entries") or [])
+    entry_id = str(entry_payload.get("id") or "").strip()
+    next_entries = []
+    replaced = False
+    for item in entries:
+        same_entry = entry_id and str(item.get("id") or "").strip() == entry_id
+        if same_entry:
+            merged = dict(item)
+            merged.update(entry_payload)
+            merged["estado_presentacion"] = normalize_renta_presentacion_status(
+                merged.get("estado_presentacion") or merged.get("doc_status")
+            )
+            merged["doc_status"] = merged["estado_presentacion"]
+            next_entries.append(merged)
+            replaced = True
+        else:
+            next_entries.append(item)
+    if not replaced:
+        fresh = dict(entry_payload)
+        fresh["estado_presentacion"] = normalize_renta_presentacion_status(
+            fresh.get("estado_presentacion") or fresh.get("doc_status")
+        )
+        fresh["doc_status"] = fresh["estado_presentacion"]
+        next_entries.append(fresh)
+    payload = {
+        "notes": current.get("notes") or "",
+        "entries": sort_renta_entries(next_entries),
+        "related_cliente_id": current.get("related_cliente_id") or "",
+        "related_relation_id": current.get("related_relation_id") or "",
+        "declaracion_conjunta": current.get("declaracion_conjunta", 0),
+    }
+    serialized = json.dumps(payload, ensure_ascii=False)
+    if row:
+        conn.execute(
+            """
+            UPDATE cliente_gestoria
+            SET mod_renta = 1, renta_detalles = ?, updated_at = datetime(?)
+            WHERE cliente_id = ?
+            """,
+            (serialized, now, cliente_id),
+        )
+    else:
+        conn.execute(
+            """
+            INSERT INTO cliente_gestoria (
+              id, cliente_id, tipo_cliente, mod_fiscal, mod_laboral, mod_contable,
+              mod_renta, mod_registro, mod_trafico, mod_puntuales, renta_detalles, created_at, updated_at
+            ) VALUES (
+              ?, ?, 'Particular', 0, 0, 0, 1, 0, 0, 0, ?, datetime(?), datetime(?)
+            )
+            """,
+            (uuid.uuid4().hex, cliente_id, serialized, now, now),
+        )
+    return payload
 
 
 def fetch_cliente_relaciones(conn, cliente_id):
@@ -12899,64 +12988,49 @@ def build_inmueble_visit_sheet_pdf(company, inmueble, captacion, owners, buyer, 
     buyer_nif = str((buyer or {}).get("nif") or "").strip() or "-"
     buyer_phone = str((buyer or {}).get("telefono") or "").strip() or "-"
     buyer_email = str((buyer or {}).get("email") or "").strip() or "-"
-    lines = [
-        company.get("nombre") or "Modernia",
-        "HOJA DE VISITA",
-        "",
-        f"Fecha emisión: {format_export_date(datetime.now(timezone.utc).date().isoformat())}",
-        "",
-        "DATOS DEL INMUEBLE",
-        f"Dirección: {inmueble.get('direccion') or '-'}",
-        f"Zona/Población: {' · '.join([part for part in [inmueble.get('zona'), inmueble.get('poblacion'), inmueble.get('provincia')] if part]) or '-'}",
-        f"Tipo: {inmueble.get('tipo_inmueble') or '-'}",
-        f"Estado comercial: {captacion.get('situacion_comercial') or inmueble.get('estado') or '-'}",
-        f"Precio objetivo: {format_eur(inmueble.get('precio_objetivo') or captacion.get('precio_objetivo') or 0)}",
-        "",
-        "DATOS DEL CLIENTE VISITANTE",
-        f"Nombre: {buyer_name}",
-        f"DNI/NIF: {buyer_nif}",
-        f"Teléfono: {buyer_phone}",
-        f"Email: {buyer_email}",
-        f"Demanda vinculada: {(demanda or {}).get('tipo') or '-'} · {(demanda or {}).get('zona') or '-'}",
-        "",
-        "CONDICIONES DE LA VISITA",
-        "El cliente visitante reconoce haber visitado el inmueble con intermediación de ESTUDIO VELAZQUEZ / MODERNIA.",
-        "Cualquier negociación, reserva o compraventa/alquiler posterior sobre este inmueble deberá canalizarse a través de la agencia.",
-        "",
-        "OBSERVACIONES",
-        captacion.get("notas") or "-",
-        "",
-        "Firma cliente visitante: ____________________________",
-        "",
-        "Firma asesor comercial: ____________________________",
+    sections = [
+        (
+            "Datos del inmueble",
+            [
+                ("Fecha emisión", format_export_date(datetime.now(timezone.utc).date().isoformat())),
+                ("Dirección", inmueble.get("direccion") or "-"),
+                ("Zona / población", " · ".join([part for part in [inmueble.get("zona"), inmueble.get("poblacion"), inmueble.get("provincia")] if part]) or "-"),
+                ("Tipo", inmueble.get("tipo_inmueble") or "-"),
+                ("Estado comercial", captacion.get("situacion_comercial") or inmueble.get("estado") or "-"),
+                ("Precio objetivo", format_eur(inmueble.get("precio_objetivo") or captacion.get("precio_objetivo") or 0)),
+            ],
+        ),
+        (
+            "Datos del cliente visitante",
+            [
+                ("Nombre", buyer_name),
+                ("DNI / NIF", buyer_nif),
+                ("Teléfono", buyer_phone),
+                ("Email", buyer_email),
+                ("Demanda vinculada", f"{(demanda or {}).get('tipo') or '-'} · {(demanda or {}).get('zona') or '-'}"),
+            ],
+        ),
+        (
+            "Condiciones de la visita",
+            [
+                "El cliente visitante reconoce haber visitado el inmueble con intermediación de ESTUDIO VELAZQUEZ / MODERNIA.",
+                "Cualquier negociación, reserva o compraventa/alquiler posterior sobre este inmueble deberá canalizarse a través de la agencia.",
+            ],
+        ),
+        (
+            "Observaciones y firmas",
+            [
+                ("Observaciones", captacion.get("notas") or "-"),
+                "Firma cliente visitante: ____________________________",
+                "Firma asesor comercial: ____________________________",
+            ],
+        ),
     ]
-    font_obj = "1 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj\n"
-    page_lines = []
-    y = 800
-    for raw in lines[:42]:
-        page_lines.append(f"BT /F1 11 Tf 42 {y} Td ({_pdf_escape(raw)}) Tj ET")
-        y -= 18
-    content_stream = "\n".join(page_lines).encode("latin-1", "replace")
-    objects = []
-    objects.append("1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n")
-    objects.append("2 0 obj << /Type /Pages /Count 1 /Kids [3 0 R] >> endobj\n")
-    objects.append(
-        "3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >> endobj\n"
+    return build_branded_document_pdf(
+        "HOJA DE VISITA",
+        "Documento comercial de visita vinculado al expediente del inmueble",
+        sections,
     )
-    objects.append(font_obj)
-    objects.append(f"5 0 obj << /Length {len(content_stream)} >> stream\n".encode("latin-1") + content_stream + b"\nendstream\nendobj\n")
-    pdf = bytearray(b"%PDF-1.4\n")
-    offsets = [0]
-    for obj in objects:
-        offsets.append(len(pdf))
-        pdf.extend(obj if isinstance(obj, bytes) else obj.encode("latin-1"))
-    xref_pos = len(pdf)
-    pdf.extend(f"xref\n0 {len(offsets)}\n".encode("latin-1"))
-    pdf.extend(b"0000000000 65535 f \n")
-    for offset in offsets[1:]:
-        pdf.extend(f"{offset:010d} 00000 n \n".encode("latin-1"))
-    pdf.extend(f"trailer << /Size {len(offsets)} /Root 1 0 R >>\nstartxref\n{xref_pos}\n%%EOF\n".encode("latin-1"))
-    return bytes(pdf)
 
 
 def _pdf_wrap_lines(text, width=86):
@@ -12981,104 +13055,120 @@ def _pdf_format_number(value, decimals=2):
     return f"{amount:,.{decimals}f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
+def _document_font(size=18, bold=False):
+    candidates = []
+    if bold:
+        candidates.extend(
+            [
+                "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+                "/System/Library/Fonts/Supplemental/Helvetica.ttc",
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+            ]
+        )
+    else:
+        candidates.extend(
+            [
+                "/System/Library/Fonts/Supplemental/Arial.ttf",
+                "/System/Library/Fonts/Supplemental/Helvetica.ttc",
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            ]
+        )
+    for path in candidates:
+        try:
+            return ImageFont.truetype(path, size=size)
+        except Exception:
+            continue
+    return ImageFont.load_default()
+
+
+def _load_modernia_logo(max_width=520):
+    logo_path = ASSETS / "grupo_modernia_logo.png"
+    if not logo_path.exists():
+        return None
+    try:
+        logo = Image.open(logo_path).convert("RGBA")
+    except Exception:
+        return None
+    if logo.width > max_width:
+        ratio = max_width / float(logo.width)
+        logo = logo.resize((int(logo.width * ratio), int(logo.height * ratio)), Image.LANCZOS)
+    return logo
+
+
+def _pil_multiline(draw, text, font, width, line_gap=8):
+    lines = _pdf_wrap_lines(text, width=width)
+    sample = "Ag"
+    bbox = draw.textbbox((0, 0), sample, font=font)
+    line_height = (bbox[3] - bbox[1]) + line_gap
+    total_height = max(line_height * len(lines), line_height)
+    return lines, line_height, total_height
+
+
 def build_branded_document_pdf(title, subtitle, sections, footer_lines=None):
     footer_lines = footer_lines or []
-    style_map = {
-        "brand": {"font": "F2", "size": 24, "leading": 28, "color": "0.79 0.64 0.30 rg"},
-        "brand_sub": {"font": "F1", "size": 10, "leading": 16, "color": "0.22 0.24 0.27 rg"},
-        "title": {"font": "F2", "size": 15, "leading": 22, "color": "0 0 0 rg"},
-        "subtitle": {"font": "F1", "size": 10, "leading": 16, "color": "0.30 0.33 0.36 rg"},
-        "section": {"font": "F2", "size": 11, "leading": 18, "color": "0.16 0.19 0.22 rg"},
-        "body": {"font": "F1", "size": 10, "leading": 14, "color": "0 0 0 rg"},
-        "footer": {"font": "F1", "size": 9, "leading": 13, "color": "0.32 0.35 0.39 rg"},
-    }
-
-    entries = [("brand", "LIV"), ("brand_sub", "GRUPO MODERNIA"), ("title", title)]
-    if subtitle:
-        entries.append(("subtitle", subtitle))
-    entries.append(("body", ""))
-    for heading, lines in sections:
-        entries.append(("section", heading))
-        for line in lines:
-            if isinstance(line, (list, tuple)) and len(line) == 2:
-                label, value = line
-                wrapped = _pdf_wrap_lines(f"{label}: {value}", width=84)
-            else:
-                wrapped = _pdf_wrap_lines(line, width=84)
-            for wrapped_line in wrapped:
-                entries.append(("body", wrapped_line))
-        entries.append(("body", ""))
-    for line in footer_lines:
-        for wrapped_line in _pdf_wrap_lines(line, width=84):
-            entries.append(("footer", wrapped_line))
-
+    page_width, page_height = 1240, 1754
+    margin_x, top_margin, bottom_margin = 90, 70, 90
+    content_width = page_width - (margin_x * 2)
+    logo = _load_modernia_logo(max_width=560)
+    font_title = _document_font(34, bold=True)
+    font_subtitle = _document_font(18, bold=False)
+    font_section = _document_font(22, bold=True)
+    font_body = _document_font(17, bold=False)
+    font_footer = _document_font(15, bold=False)
     pages = []
-    current = []
-    y = 800
-    min_y = 54
-    for style_name, text in entries:
-        style = style_map[style_name]
-        leading = style["leading"]
-        if y - leading < min_y:
-            pages.append(current)
-            current = []
-            y = 800
-        text_value = _pdf_escape(text)
-        current.append(f"{style['color']} BT /{style['font']} {style['size']} Tf 42 {y} Td ({text_value}) Tj ET")
-        y -= leading
-    if current:
-        pages.append(current)
 
-    objects = []
-    pdf = bytearray(b"%PDF-1.4\n")
-    page_obj_ids = []
-    content_obj_ids = []
-    next_obj_id = 1
-    catalog_id = next_obj_id
-    next_obj_id += 1
-    pages_id = next_obj_id
-    next_obj_id += 1
-    for _ in pages:
-        page_obj_ids.append(next_obj_id)
-        next_obj_id += 1
-        content_obj_ids.append(next_obj_id)
-        next_obj_id += 1
-    font_regular_id = next_obj_id
-    next_obj_id += 1
-    font_bold_id = next_obj_id
-    next_obj_id += 1
+    def new_page():
+        image = Image.new("RGB", (page_width, page_height), "white")
+        draw = ImageDraw.Draw(image)
+        y = top_margin
+        if logo:
+            image.paste(logo, (margin_x, y), logo)
+            y += logo.height + 30
+        draw.text((margin_x, y), title, fill=(48, 54, 58), font=font_title)
+        title_box = draw.textbbox((margin_x, y), title, font=font_title)
+        y = title_box[3] + 12
+        if subtitle:
+            subtitle_lines, sub_line_height, sub_height = _pil_multiline(draw, subtitle, font_subtitle, width=94, line_gap=6)
+            draw.multiline_text((margin_x, y), "\n".join(subtitle_lines), fill=(110, 116, 120), font=font_subtitle, spacing=6)
+            y += sub_height + 18
+        return image, draw, y
 
-    objects.append(f"{catalog_id} 0 obj << /Type /Catalog /Pages {pages_id} 0 R >> endobj\n")
-    kids = " ".join(f"{obj_id} 0 R" for obj_id in page_obj_ids)
-    objects.append(f"{pages_id} 0 obj << /Type /Pages /Count {len(page_obj_ids)} /Kids [{kids}] >> endobj\n")
-    for page_obj_id, content_obj_id, page_lines in zip(page_obj_ids, content_obj_ids, pages):
-        stream = "\n".join(page_lines).encode("latin-1", "replace")
-        objects.append(
-            f"{page_obj_id} 0 obj << /Type /Page /Parent {pages_id} 0 R /MediaBox [0 0 595 842] "
-            f"/Resources << /Font << /F1 {font_regular_id} 0 R /F2 {font_bold_id} 0 R >> >> "
-            f"/Contents {content_obj_id} 0 R >> endobj\n"
-        )
-        objects.append(
-            f"{content_obj_id} 0 obj << /Length {len(stream)} >> stream\n".encode("latin-1")
-            + stream
-            + b"\nendstream\nendobj\n"
-        )
-    objects.append(f"{font_regular_id} 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj\n")
-    objects.append(f"{font_bold_id} 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >> endobj\n")
+    image, draw, y = new_page()
+    usable_bottom = page_height - bottom_margin
 
-    offsets = [0]
-    for obj in objects:
-        offsets.append(len(pdf))
-        pdf.extend(obj if isinstance(obj, bytes) else obj.encode("latin-1"))
-    xref_pos = len(pdf)
-    pdf.extend(f"xref\n0 {len(offsets)}\n".encode("latin-1"))
-    pdf.extend(b"0000000000 65535 f \n")
-    for offset in offsets[1:]:
-        pdf.extend(f"{offset:010d} 00000 n \n".encode("latin-1"))
-    pdf.extend(
-        f"trailer << /Size {len(offsets)} /Root {catalog_id} 0 R >>\nstartxref\n{xref_pos}\n%%EOF\n".encode("latin-1")
-    )
-    return bytes(pdf)
+    def ensure_space(required_height):
+        nonlocal image, draw, y
+        if y + required_height <= usable_bottom:
+            return
+        pages.append(image)
+        image, draw, y = new_page()
+
+    for heading, lines in sections:
+        heading_box = draw.textbbox((margin_x, y), heading, font=font_section)
+        ensure_space((heading_box[3] - heading_box[1]) + 20)
+        draw.text((margin_x, y), heading, fill=(60, 67, 72), font=font_section)
+        y = heading_box[3] + 12
+        for line in lines:
+            raw = f"{line[0]}: {line[1]}" if isinstance(line, (list, tuple)) and len(line) == 2 else str(line or "")
+            wrapped, line_height, total_height = _pil_multiline(draw, raw, font_body, width=96, line_gap=6)
+            ensure_space(total_height + 6)
+            draw.multiline_text((margin_x, y), "\n".join(wrapped), fill=(25, 28, 31), font=font_body, spacing=6)
+            y += total_height + 6
+        y += 14
+
+    for line in footer_lines:
+        wrapped, line_height, total_height = _pil_multiline(draw, line, font_footer, width=100, line_gap=5)
+        ensure_space(total_height + 4)
+        draw.multiline_text((margin_x, y), "\n".join(wrapped), fill=(106, 111, 116), font=font_footer, spacing=5)
+        y += total_height + 4
+
+    pages.append(image)
+    buffer = BytesIO()
+    if len(pages) == 1:
+        pages[0].save(buffer, format="PDF", resolution=150.0)
+    else:
+        pages[0].save(buffer, format="PDF", resolution=150.0, save_all=True, append_images=pages[1:])
+    return buffer.getvalue()
 
 
 def build_inmueble_consumo_sale_sheet_pdf(company, inmueble, captacion, docs):
@@ -20308,6 +20398,145 @@ class Handler(BaseHTTPRequestHandler):
                         now,
                     ),
                 )
+        elif parsed.path == "/api/renta_campaign_document":
+            cliente_id = str(payload.get("cliente_id") or "").strip()
+            entry_id = str(payload.get("entry_id") or "").strip()
+            ejercicio = str(payload.get("ejercicio") or "").strip()
+            estado_presentacion = normalize_renta_presentacion_status(payload.get("estado_presentacion"))
+            if not cliente_id or not entry_id or not ejercicio:
+                json_response(self, {"error": "cliente_id, entry_id y ejercicio requeridos"}, status=400)
+                return
+            cg_row = conn.execute(
+                "SELECT renta_detalles FROM cliente_gestoria WHERE cliente_id = ?",
+                (cliente_id,),
+            ).fetchone()
+            renta_payload = parse_renta_detalles_payload(cg_row["renta_detalles"] if cg_row else "")
+            existing_entries = sanitize_renta_entries(renta_payload.get("entries") or [])
+            current_entry = next((item for item in existing_entries if str(item.get("id") or "").strip() == entry_id), None)
+            if not current_entry:
+                json_response(self, {"error": "Campaña de renta no encontrada"}, status=404)
+                return
+            doc_id = str(
+                payload.get("doc_id")
+                or current_entry.get("doc_presentada_id")
+                or current_entry.get("doc_borrador_id")
+                or ""
+            ).strip()
+            presentacion_fecha = str(payload.get("presentacion_fecha") or current_entry.get("presentacion_fecha") or "").strip()
+            doc_nombre = str(payload.get("nombre") or f"Renta {ejercicio} · {estado_presentacion}.pdf").strip()
+            doc_tipo = str(payload.get("tipo") or f"Renta {estado_presentacion}").strip()
+            doc_notas = str(payload.get("notas") or current_entry.get("gestion_notas") or "").strip()
+            doc_key = str(payload.get("doc_key") or "").strip()
+            doc_url = str(payload.get("doc_url") or "").strip()
+            if not doc_key and not doc_url:
+                json_response(self, {"error": "Debes subir un archivo antes de guardar el documento"}, status=400)
+                return
+            if doc_id:
+                conn.execute(
+                    """
+                    UPDATE gestoria_docs
+                    SET empresa_id = ?, cliente_id = ?, referencia_tipo = 'renta', referencia_id = ?,
+                        nombre = ?, tipo = ?, fecha = ?, estado = ?, notas = ?, doc_key = ?, doc_url = ?, updated_at = datetime(?)
+                    WHERE id = ?
+                    """,
+                    (
+                        empresa["id"],
+                        cliente_id,
+                        f"renta-{ejercicio}-{entry_id}",
+                        doc_nombre,
+                        doc_tipo,
+                        presentacion_fecha,
+                        estado_presentacion,
+                        doc_notas,
+                        doc_key or None,
+                        doc_url or None,
+                        now,
+                        doc_id,
+                    ),
+                )
+            else:
+                doc_id = uuid.uuid4().hex
+                conn.execute(
+                    """
+                    INSERT INTO gestoria_docs (
+                      id, empresa_id, cliente_id, referencia_tipo, referencia_id,
+                      nombre, tipo, fecha, estado, notas, doc_key, doc_url,
+                      created_at, updated_at
+                    ) VALUES (
+                      ?, ?, ?, 'renta', ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                    )
+                    """,
+                    (
+                        doc_id,
+                        empresa["id"],
+                        cliente_id,
+                        f"renta-{ejercicio}-{entry_id}",
+                        doc_nombre,
+                        doc_tipo,
+                        presentacion_fecha,
+                        estado_presentacion,
+                        doc_notas,
+                        doc_key or None,
+                        doc_url or None,
+                        now,
+                        now,
+                    ),
+                )
+            updated_entry = dict(current_entry)
+            updated_entry.update(
+                {
+                    "id": entry_id,
+                    "ejercicio": ejercicio,
+                    "estado_presentacion": estado_presentacion,
+                    "doc_status": estado_presentacion,
+                    "presentacion_fecha": presentacion_fecha,
+                    "precio_servicio": payload.get("precio_servicio", current_entry.get("precio_servicio")),
+                    "responsable": payload.get("responsable", current_entry.get("responsable")),
+                    "cobrada": payload.get("cobrada", current_entry.get("cobrada")),
+                    "forma_cobro": payload.get("forma_cobro", current_entry.get("forma_cobro")),
+                    "gestion_notas": doc_notas or current_entry.get("gestion_notas") or "",
+                    "doc_borrador_id": doc_id if estado_presentacion == "Borrador" else current_entry.get("doc_borrador_id") or doc_id,
+                    "doc_presentada_id": doc_id if estado_presentacion == "Presentada" else current_entry.get("doc_presentada_id") or "",
+                }
+            )
+            upsert_cliente_renta_entry(conn, cliente_id, updated_entry, now)
+            trabajo = conn.execute(
+                """
+                SELECT id
+                FROM gestoria_trabajos
+                WHERE empresa_id = ? AND cliente_id = ? AND tipo_trabajo = ? AND COALESCE(notas, '') LIKE ?
+                ORDER BY updated_at DESC
+                LIMIT 1
+                """,
+                (empresa["id"], cliente_id, "Declaración en periodo", f"%Renta {ejercicio}%"),
+            ).fetchone()
+            trabajo_estado = "Finalizado" if estado_presentacion == "Presentada" else "En espera"
+            responsable = str(payload.get("responsable") or current_entry.get("responsable") or "Renta").strip()
+            trabajo_notas = f"Renta {ejercicio} {estado_presentacion.lower()} · documento enlazado"
+            if trabajo:
+                conn.execute(
+                    """
+                    UPDATE gestoria_trabajos
+                    SET estado = ?, fecha_inicio = COALESCE(NULLIF(?, ''), fecha_inicio),
+                        fecha_fin = CASE WHEN ? = 'Presentada' THEN COALESCE(NULLIF(?, ''), fecha_fin) ELSE fecha_fin END,
+                        responsable = COALESCE(NULLIF(?, ''), responsable),
+                        notas = ?, updated_at = datetime(?)
+                    WHERE id = ?
+                    """,
+                    (
+                        trabajo_estado,
+                        presentacion_fecha,
+                        estado_presentacion,
+                        presentacion_fecha,
+                        responsable,
+                        trabajo_notas,
+                        now,
+                        trabajo["id"],
+                    ),
+                )
+            audit("renta_campaign_document", entry_id, "actualizar", json.dumps(payload), payload.get("usuario"))
+            json_response(self, {"ok": True, "entry_id": entry_id, "doc_id": doc_id, "estado_presentacion": estado_presentacion})
+            return
         elif parsed.path == "/api/cliente_relaciones":
             cliente_id = str(payload.get("cliente_id") or "").strip()
             related_cliente_id = str(payload.get("related_cliente_id") or "").strip()
@@ -23085,6 +23314,12 @@ class Handler(BaseHTTPRequestHandler):
                 """,
                 (empresa_id, today.isoformat()),
             ).fetchall()
+            renta_rows = collect_gestoria_renta_card_items(conn, empresa_id, q="", estado="", limit=500)
+            rentas_borrador = [
+                row
+                for row in renta_rows
+                if normalize_renta_presentacion_status((row.get("renta_latest") or {}).get("estado_presentacion")) == "Borrador"
+            ]
             acciones_pendientes = conn.execute(
                 """
                 SELECT COUNT(*) AS total
@@ -23139,15 +23374,26 @@ class Handler(BaseHTTPRequestHandler):
                         "activos": len(active_ids),
                         "autonomos": tipo_count("Autónomo", "Autonomo"),
                         "empresas": tipo_count("Empresa", "Empresas"),
-                        "puntuales": tipo_count("Puntual", "Puntuales"),
-                        "modelos_mes": modelos_mes["total"] if modelos_mes else 0,
-                        "acciones_pendientes": acciones_pendientes["total"] if acciones_pendientes else 0,
-                    },
-                    "modelos": [dict(r) for r in modelos],
-                    "modelos_vencidos": [dict(r) for r in modelos_vencidos],
-                    "acciones": [dict(r) for r in acciones],
-                    "acciones_vencidas": [dict(r) for r in acciones_vencidas],
+                    "puntuales": tipo_count("Puntual", "Puntuales"),
+                    "modelos_mes": modelos_mes["total"] if modelos_mes else 0,
+                    "rentas_pendientes_presentar": len(rentas_borrador),
+                    "acciones_pendientes": acciones_pendientes["total"] if acciones_pendientes else 0,
                 },
+                "modelos": [dict(r) for r in modelos],
+                "modelos_vencidos": [dict(r) for r in modelos_vencidos],
+                "rentas_pendientes": [
+                    {
+                        "cliente": row.get("nombre"),
+                        "ejercicio": (row.get("renta_latest") or {}).get("ejercicio") or "",
+                        "nif": row.get("nif") or "",
+                        "doc_count": row.get("doc_count") or 0,
+                        "estado_presentacion": (row.get("renta_latest") or {}).get("estado_presentacion") or "Borrador",
+                    }
+                    for row in rentas_borrador[:12]
+                ],
+                "acciones": [dict(r) for r in acciones],
+                "acciones_vencidas": [dict(r) for r in acciones_vencidas],
+            },
             )
             return
 

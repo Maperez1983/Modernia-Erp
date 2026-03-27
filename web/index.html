@@ -2087,6 +2087,11 @@
                 <div class="muted">Próximas presentaciones</div>
               </div>
               <div class="card kpi-card">
+                <h3>Rentas pendientes</h3>
+                <div class="kpi-value" id="gestoriaKpiRentasPendientes">0</div>
+                <div class="muted">Borradores por presentar</div>
+              </div>
+              <div class="card kpi-card">
                 <h3>Gestiones en curso</h3>
                 <div class="kpi-value" id="gestoriaKpiGestionesCurso">0</div>
                 <div class="muted">Trabajo activo</div>
@@ -2125,6 +2130,11 @@
                 <p class="muted">Tareas con fecha pasada.</p>
                 <div id="gestoriaAlertAccionesOverdue"></div>
               </div>
+            </div>
+            <div class="form-card">
+              <h3>Rentas pendientes de presentar</h3>
+              <p class="muted">Borradores cargados que todavía no tienen declaración presentada.</p>
+              <div id="gestoriaAlertRentasPendientes"></div>
             </div>
             <div class="form-card">
               <h3>Gestiones vencidas</h3>
@@ -5296,6 +5306,13 @@
                       <input name="entry_ejercicio" id="gestoriaRentaEntryEjercicio" readonly />
                     </label>
                     <label>
+                      Estado documental
+                      <select name="estado_presentacion" id="gestoriaRentaEstadoPresentacion">
+                        <option>Presentada</option>
+                        <option>Borrador</option>
+                      </select>
+                    </label>
+                    <label>
                       Relación aplicable
                       <select name="related_relation_id" id="gestoriaRentaRelacionSelect">
                         <option value="">Sin relación vinculada</option>
@@ -5331,11 +5348,39 @@
                       Detalles de la campaña (venta vivienda, deducciones, incidencias, etc.)
                       <textarea name="renta_detalles" rows="3"></textarea>
                     </label>
+                    <input type="hidden" name="doc_id" id="gestoriaRentaDocId" />
                     <div class="form-actions">
                       <button type="submit">Guardar detalles</button>
                       <span id="gestoriaRentaDetallesStatus" class="muted"></span>
                     </div>
                   </form>
+                  <div class="form-card">
+                    <h4>Documento de campaña</h4>
+                    <p class="muted">Sube borrador o presentación final. Si presentas una campaña en borrador, el sistema sustituye el archivo y actualiza la ficha.</p>
+                    <form id="gestoriaRentaDocumentoForm" class="form-grid">
+                      <label>
+                        Nombre documento
+                        <input name="nombre" placeholder="Ej: Renta 2025 presentada" />
+                      </label>
+                      <label>
+                        Fecha documento
+                        <input name="presentacion_fecha" type="date" />
+                      </label>
+                      <label class="span-2">
+                        Archivo
+                        <input name="archivo" id="gestoriaRentaDocumentoFile" type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" />
+                      </label>
+                      <label class="span-2">
+                        Notas del documento
+                        <textarea name="notas" rows="2"></textarea>
+                      </label>
+                      <div class="form-actions">
+                        <button type="submit">Subir documento</button>
+                        <button type="button" class="secondary hidden" id="gestoriaRentaPresentarBtn">Presentar</button>
+                        <span id="gestoriaRentaDocumentoStatus" class="muted"></span>
+                      </div>
+                    </form>
+                  </div>
                   <div class="form-card">
                     <h4>Cards de renta</h4>
                     <p class="muted">Resumen por campaña y acceso directo a la ficha fiscal del cliente.</p>

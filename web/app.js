@@ -1633,7 +1633,13 @@ const gestoriaRentaDetallesStatus = document.getElementById("gestoriaRentaDetall
 const gestoriaRentaRelacionSelect = document.getElementById("gestoriaRentaRelacionSelect");
 const gestoriaRentaDeclaracionConjunta = document.getElementById("gestoriaRentaDeclaracionConjunta");
 const gestoriaRentaEntryEjercicio = document.getElementById("gestoriaRentaEntryEjercicio");
+const gestoriaRentaEstadoPresentacion = document.getElementById("gestoriaRentaEstadoPresentacion");
 const gestoriaRentaCobrada = document.getElementById("gestoriaRentaCobrada");
+const gestoriaRentaDocId = document.getElementById("gestoriaRentaDocId");
+const gestoriaRentaDocumentoForm = document.getElementById("gestoriaRentaDocumentoForm");
+const gestoriaRentaDocumentoFile = document.getElementById("gestoriaRentaDocumentoFile");
+const gestoriaRentaDocumentoStatus = document.getElementById("gestoriaRentaDocumentoStatus");
+const gestoriaRentaPresentarBtn = document.getElementById("gestoriaRentaPresentarBtn");
 const gestoriaRentaCards = document.getElementById("gestoriaRentaCards");
 const gestoriaRentaDetail = document.getElementById("gestoriaRentaDetail");
 const gestoriaAdminForm = document.getElementById("gestoriaAdminForm");
@@ -1650,6 +1656,7 @@ const gestoriaKpiAutonomos = document.getElementById("gestoriaKpiAutonomos");
 const gestoriaKpiEmpresas = document.getElementById("gestoriaKpiEmpresas");
 const gestoriaKpiPuntuales = document.getElementById("gestoriaKpiPuntuales");
 const gestoriaKpiModelosMes = document.getElementById("gestoriaKpiModelosMes");
+const gestoriaKpiRentasPendientes = document.getElementById("gestoriaKpiRentasPendientes");
 const gestoriaKpiGestionesCurso = document.getElementById("gestoriaKpiGestionesCurso");
 const gestoriaKpiGestionesEspera = document.getElementById("gestoriaKpiGestionesEspera");
 const gestoriaKpiGestionesVencidas = document.getElementById("gestoriaKpiGestionesVencidas");
@@ -1657,6 +1664,7 @@ const gestoriaAlertModelos = document.getElementById("gestoriaAlertModelos");
 const gestoriaAlertAcciones = document.getElementById("gestoriaAlertAcciones");
 const gestoriaAlertModelosOverdue = document.getElementById("gestoriaAlertModelosOverdue");
 const gestoriaAlertAccionesOverdue = document.getElementById("gestoriaAlertAccionesOverdue");
+const gestoriaAlertRentasPendientes = document.getElementById("gestoriaAlertRentasPendientes");
 const gestoriaAlertGestiones = document.getElementById("gestoriaAlertGestiones");
 const gestoriaAlertGestionesProximas = document.getElementById("gestoriaAlertGestionesProximas");
 const gestoriaAlertDays = document.getElementById("gestoriaAlertDays");
@@ -16367,6 +16375,7 @@ const loadGestoriaDashboard = () => {
     if (gestoriaKpiEmpresas) gestoriaKpiEmpresas.textContent = counts.empresas ?? 0;
     if (gestoriaKpiPuntuales) gestoriaKpiPuntuales.textContent = counts.puntuales ?? 0;
     if (gestoriaKpiModelosMes) gestoriaKpiModelosMes.textContent = counts.modelos_mes ?? 0;
+    if (gestoriaKpiRentasPendientes) gestoriaKpiRentasPendientes.textContent = counts.rentas_pendientes_presentar ?? 0;
 
     const renderAlertList = (target, items, emptyText, lineBuilder) => {
       if (!target) return;
@@ -16464,6 +16473,18 @@ const loadGestoriaDashboard = () => {
     if (gestoriaKpiGestionesCurso) gestoriaKpiGestionesCurso.textContent = enCurso.length;
     if (gestoriaKpiGestionesEspera) gestoriaKpiGestionesEspera.textContent = enEspera.length;
     if (gestoriaKpiGestionesVencidas) gestoriaKpiGestionesVencidas.textContent = vencidas.length;
+    renderAlertList(
+      gestoriaAlertRentasPendientes,
+      data.rentas_pendientes,
+      "Sin borradores pendientes de presentar.",
+      (row) => {
+        const cliente = row.cliente || "Cliente";
+        const ejercicio = row.ejercicio || "-";
+        const estado = row.estado_presentacion || "Borrador";
+        return `<div class="muted">${ejercicio}</div><div>${cliente}</div><div class="muted">${estado} · ${row.doc_count || 0} docs</div>`;
+      }
+    );
+
     renderAlertList(
       gestoriaAlertGestiones,
       vencidas,
@@ -16671,6 +16692,11 @@ const bindGestoriaDashboardKpis = () => {
         focusElementInView(gestoriaAlertModelos);
       },
       title: "Modelos este mes",
+    },
+    {
+      valueEl: gestoriaKpiRentasPendientes,
+      action: () => openGestoriaCrmWithFilters({ tab: "renta" }),
+      title: "Rentas pendientes",
     },
     {
       valueEl: gestoriaKpiGestionesCurso,
@@ -21023,6 +21049,30 @@ const formatRentaCobro = (entry = {}) => {
   return forma ? `Cobrada · ${forma}` : "Cobrada";
 };
 
+const normalizeRentaPresentacionStatus = (value) => {
+  const text = normalizeSimple(value || "");
+  if (text.includes("borr")) return "Borrador";
+  if (text.includes("presen")) return "Presentada";
+  return "Presentada";
+};
+
+const getRentaDniMeta = (entry = {}) => {
+  const permanente = Number(entry?.dni_permanente || 0) === 1 || normalizeSimple(entry?.dni_caducidad || "") === "permanente";
+  return {
+    expedicion: formatCell("fecha", entry?.dni_expedicion || "") || entry?.dni_expedicion || "-",
+    label: permanente ? "DNI permanente" : "Caducidad DNI",
+    value: permanente
+      ? "Permanente"
+      : formatCell("fecha", entry?.dni_caducidad || "") || entry?.dni_caducidad || "-",
+  };
+};
+
+const toggleGestoriaRentaPresentarButton = (entry = {}) => {
+  if (!gestoriaRentaPresentarBtn) return;
+  const visible = normalizeRentaPresentacionStatus(entry?.estado_presentacion || entry?.doc_status) === "Borrador";
+  gestoriaRentaPresentarBtn.classList.toggle("hidden", !visible);
+};
+
 const fillGestoriaRentaDetailsForm = (row = {}) => {
   if (!gestoriaRentaDetallesForm) return;
   const payload = parseGestoriaRentaPayload(row);
@@ -21033,17 +21083,33 @@ const fillGestoriaRentaDetailsForm = (row = {}) => {
     el.value = value ?? "";
   };
   setValue("entry_ejercicio", entry?.ejercicio || "");
+  setValue("estado_presentacion", normalizeRentaPresentacionStatus(entry?.estado_presentacion || entry?.doc_status || "Presentada"));
   setValue("related_relation_id", payload.related_relation_id || "");
   setValue("precio_servicio", entry?.precio_servicio ?? "");
   setValue("responsable", entry?.responsable || "");
   setValue("forma_cobro", entry?.forma_cobro || "");
   setValue("renta_detalles", entry?.gestion_notas || payload.notes || "");
+  setValue("doc_id", entry?.doc_presentada_id || entry?.doc_borrador_id || "");
   if (gestoriaRentaDeclaracionConjunta) {
     gestoriaRentaDeclaracionConjunta.checked = Number(payload.declaracion_conjunta || 0) === 1;
   }
   if (gestoriaRentaCobrada) {
     gestoriaRentaCobrada.checked = Number(entry?.cobrada || 0) === 1;
   }
+  if (gestoriaRentaDocumentoForm) {
+    const docSetValue = (name, value) => {
+      const el = gestoriaRentaDocumentoForm.querySelector(`[name="${name}"]`);
+      if (!el) return;
+      el.value = value ?? "";
+    };
+    docSetValue(
+      "nombre",
+      `Renta ${entry?.ejercicio || new Date().getFullYear()} · ${normalizeRentaPresentacionStatus(entry?.estado_presentacion || entry?.doc_status)}`
+    );
+    docSetValue("presentacion_fecha", entry?.presentacion_fecha || "");
+    docSetValue("notas", entry?.gestion_notas || payload.notes || "");
+  }
+  toggleGestoriaRentaPresentarButton(entry || {});
 };
 
 const buildGestoriaRentaDetailsPayload = (formPayload = {}) => {
@@ -21061,10 +21127,18 @@ const buildGestoriaRentaDetailsPayload = (formPayload = {}) => {
     ejercicio: String(formPayload.entry_ejercicio || selectedEntry?.ejercicio || new Date().getFullYear()),
     cliente_nombre: selectedEntry?.cliente_nombre || state.currentClienteData?.nombre || "",
     cliente_nif: selectedEntry?.cliente_nif || state.currentClienteData?.nif || "",
+    estado_presentacion: normalizeRentaPresentacionStatus(
+      formPayload.estado_presentacion || selectedEntry?.estado_presentacion || selectedEntry?.doc_status || "Presentada"
+    ),
+    doc_status: normalizeRentaPresentacionStatus(
+      formPayload.estado_presentacion || selectedEntry?.estado_presentacion || selectedEntry?.doc_status || "Presentada"
+    ),
     precio_servicio: Number.isFinite(precioServicio) ? Number(precioServicio.toFixed(2)) : null,
     responsable: String(formPayload.responsable || "").trim(),
     cobrada: gestoriaRentaCobrada?.checked ? 1 : 0,
     forma_cobro: String(formPayload.forma_cobro || "").trim(),
+    doc_presentada_id: selectedEntry?.doc_presentada_id || "",
+    doc_borrador_id: selectedEntry?.doc_borrador_id || "",
     gestion_notas: String(formPayload.renta_detalles || "").trim(),
   };
   const nextEntries = entries.length
@@ -21082,6 +21156,75 @@ const buildGestoriaRentaDetailsPayload = (formPayload = {}) => {
     related_cliente_id: selectedRelation ? selectedRelation.counterpart_id || "" : "",
     declaracion_conjunta: gestoriaRentaDeclaracionConjunta?.checked ? 1 : 0,
   };
+};
+
+const submitGestoriaRentaDocument = async (forcedStatus = "") => {
+  if (!state.currentClienteId) {
+    if (gestoriaRentaDocumentoStatus) gestoriaRentaDocumentoStatus.textContent = "Selecciona un cliente.";
+    return;
+  }
+  const row = state.currentClienteGestoriaData || {};
+  const entry = getSelectedRentaEntry(row);
+  if (!entry?.id) {
+    if (gestoriaRentaDocumentoStatus) gestoriaRentaDocumentoStatus.textContent = "Selecciona una campaña de renta.";
+    return;
+  }
+  if (!gestoriaRentaDocumentoForm) return;
+  if (gestoriaRentaDocumentoStatus) gestoriaRentaDocumentoStatus.textContent = "Subiendo...";
+  const formData = new FormData(gestoriaRentaDocumentoForm);
+  const payload = Object.fromEntries(formData.entries());
+  payload.usuario = getCurrentUser();
+  payload.empresa_nombre = FINCAS_COMPANY;
+  payload.cliente_id = state.currentClienteId;
+  payload.entry_id = entry.id;
+  payload.ejercicio = entry.ejercicio || payload.entry_ejercicio || new Date().getFullYear();
+  payload.estado_presentacion =
+    forcedStatus || normalizeRentaPresentacionStatus(gestoriaRentaEstadoPresentacion?.value || entry.estado_presentacion || entry.doc_status || "Presentada");
+  payload.precio_servicio = entry.precio_servicio ?? "";
+  payload.responsable = entry.responsable || "";
+  payload.cobrada = Number(entry.cobrada || 0) === 1 ? 1 : 0;
+  payload.forma_cobro = entry.forma_cobro || "";
+  payload.doc_id = String(gestoriaRentaDocId?.value || entry.doc_presentada_id || entry.doc_borrador_id || "").trim();
+  const file =
+    gestoriaRentaDocumentoFile &&
+    gestoriaRentaDocumentoFile.files &&
+    gestoriaRentaDocumentoFile.files.length
+      ? gestoriaRentaDocumentoFile.files[0]
+      : null;
+  if (!file) {
+    if (gestoriaRentaDocumentoStatus) gestoriaRentaDocumentoStatus.textContent = "Selecciona un archivo.";
+    return;
+  }
+  try {
+    const upload = await uploadFileToS3(file, "gestoria", gestoriaRentaDocumentoStatus);
+    if (upload) {
+      payload.doc_key = upload.key || "";
+      payload.doc_url = upload.public_url || "";
+    }
+    const response = await fetch("/api/renta_campaign_document", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }).then((res) => res.json());
+    if (response.error) {
+      throw new Error(response.error);
+    }
+    if (gestoriaRentaDocumentoStatus) {
+      gestoriaRentaDocumentoStatus.textContent =
+        payload.estado_presentacion === "Presentada" ? "Renta presentada y ficha actualizada." : "Borrador cargado.";
+    }
+    if (gestoriaRentaEstadoPresentacion) {
+      gestoriaRentaEstadoPresentacion.value = payload.estado_presentacion;
+    }
+    if (gestoriaRentaDocumentoFile) {
+      gestoriaRentaDocumentoFile.value = "";
+    }
+    loadClienteGestoria(state.currentClienteId);
+  } catch (error) {
+    if (gestoriaRentaDocumentoStatus) {
+      gestoriaRentaDocumentoStatus.textContent = error?.message || "Error al guardar el documento.";
+    }
+  }
 };
 
 const renderGestoriaRentaDetail = (entry = {}) => {
@@ -21102,15 +21245,18 @@ const renderGestoriaRentaDetail = (entry = {}) => {
   detail.appendChild(subtitle);
 
   const result = formatRentaResult(entry.resultado_declaracion);
+  const dniMeta = getRentaDniMeta(entry);
   const summary = document.createElement("div");
   summary.className = "renta-detail-grid";
   const rows = [
     ["DNI", entry.cliente_nif || "-"],
-    ["Caducidad DNI", formatCell("fecha", entry.dni_caducidad || "") || entry.dni_caducidad || "-"],
+    ["Fecha expedición DNI", dniMeta.expedicion],
+    [dniMeta.label, dniMeta.value],
     ["Fecha nacimiento", formatCell("fecha", entry.cliente_fecha_nacimiento || "") || entry.cliente_fecha_nacimiento || "-"],
     ["Estado civil", entry.estado_civil || "-"],
     ["Hijos", String(entry.hijos_count ?? "-")],
     ["Presentación", formatCell("fecha", entry.presentacion_fecha || "") || entry.presentacion_fecha || "-"],
+    ["Estado campaña", normalizeRentaPresentacionStatus(entry.estado_presentacion || entry.doc_status || "Presentada")],
     ["Casilla 505", entry.casilla_505 != null ? euroFormatter.format(parseMoneyValue(entry.casilla_505)) : "-"],
     ["Resultado declaración", result.text],
     ["Ingresos", entry.ingresos_principales_total != null ? euroFormatter.format(parseMoneyValue(entry.ingresos_principales_total)) : "-"],
@@ -21195,6 +21341,7 @@ const renderGestoriaRentaCards = (row = {}) => {
   grid.className = "renta-cards-grid";
   const selectedId = getSelectedRentaEntry(row)?.id || entries[0].id;
   entries.forEach((entry) => {
+    const dniMeta = getRentaDniMeta(entry);
     const card = document.createElement("button");
     card.type = "button";
     card.className = "renta-card";
@@ -21204,13 +21351,14 @@ const renderGestoriaRentaCards = (row = {}) => {
     card.innerHTML = `
       <div class="renta-card-top">
         <strong>${entry.ejercicio || "2024"}</strong>
-        <span class="pill">${entry.estado_civil || "Sin estado civil"}</span>
+        <span class="pill">${normalizeRentaPresentacionStatus(entry.estado_presentacion || entry.doc_status || "Presentada")}</span>
       </div>
       <h4>${split.apellidos || "-"}</h4>
       <div>${split.nombre || formatNombreCliente(entry.cliente_nombre || "") || "-"}</div>
       <div class="muted">${entry.cliente_nif || "-"}</div>
       <div class="renta-card-meta">
-        <span>Cad. DNI: ${formatCell("fecha", entry.dni_caducidad || "") || entry.dni_caducidad || "-"}</span>
+        <span>Exp. DNI: ${dniMeta.expedicion}</span>
+        <span>${dniMeta.label}: ${dniMeta.value}</span>
         <span>Hijos: ${entry.hijos_count ?? 0}</span>
       </div>
       <div class="renta-card-meta">
@@ -21250,6 +21398,7 @@ const renderGestoriaRentaCrmCards = (rows = []) => {
   board.className = "gestoria-renta-board";
   rows.forEach((row) => {
     const entry = row?.renta_latest || {};
+    const dniMeta = getRentaDniMeta(entry);
     const result = formatRentaResult(entry.resultado_declaracion);
     const casilla505 =
       entry.casilla_505 != null ? euroFormatter.format(parseMoneyValue(entry.casilla_505)) : "-";
@@ -21278,6 +21427,10 @@ const renderGestoriaRentaCrmCards = (rows = []) => {
           <strong>${formatCell("fecha", entry.presentacion_fecha || "") || entry.presentacion_fecha || "-"}</strong>
         </div>
         <div>
+          <span class="muted">Estado</span>
+          <strong>${normalizeRentaPresentacionStatus(entry.estado_presentacion || entry.doc_status || "Presentada")}</strong>
+        </div>
+        <div>
           <span class="muted">Casilla 505</span>
           <strong>${casilla505}</strong>
         </div>
@@ -21301,6 +21454,8 @@ const renderGestoriaRentaCrmCards = (rows = []) => {
       <div class="gestoria-renta-overview-meta">
         <span>${entry.estado_civil || "Sin estado civil"}</span>
         <span>Hijos: ${entry.hijos_count ?? 0}</span>
+        <span>Exp. DNI: ${dniMeta.expedicion}</span>
+        <span>${dniMeta.label}: ${dniMeta.value}</span>
         <span>${entry.responsable || "Sin responsable"}</span>
         <span>${metaLocation}</span>
       </div>
@@ -27609,6 +27764,30 @@ if (gestoriaRentaDetallesForm) {
           gestoriaRentaDetallesStatus.textContent = "Error al guardar.";
         }
       });
+  });
+}
+
+if (gestoriaRentaDocumentoForm) {
+  gestoriaRentaDocumentoForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    await submitGestoriaRentaDocument("");
+  });
+}
+
+if (gestoriaRentaPresentarBtn) {
+  gestoriaRentaPresentarBtn.addEventListener("click", async () => {
+    if (gestoriaRentaEstadoPresentacion) {
+      gestoriaRentaEstadoPresentacion.value = "Presentada";
+    }
+    await submitGestoriaRentaDocument("Presentada");
+  });
+}
+
+if (gestoriaRentaEstadoPresentacion) {
+  gestoriaRentaEstadoPresentacion.addEventListener("change", () => {
+    toggleGestoriaRentaPresentarButton({
+      estado_presentacion: gestoriaRentaEstadoPresentacion.value,
+    });
   });
 }
 
