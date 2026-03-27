@@ -18046,10 +18046,21 @@ class Handler(BaseHTTPRequestHandler):
                 where = ["cliente_id = ?"]
                 values = [cliente_id]
                 if service:
-                    where.append(
-                        "(LOWER(COALESCE(referencia_tipo, '')) = ? OR LOWER(COALESCE(tipo, '')) = ?)"
-                    )
-                    values.extend([service, service])
+                    if normalize_lookup_text(service) == "gestoria":
+                        where.append(
+                            """
+                            (
+                              LOWER(COALESCE(referencia_tipo, '')) IN ('gestoria', 'gestoría', 'renta')
+                              OR LOWER(COALESCE(tipo, '')) IN ('gestoria', 'gestoría', 'renta', 'declaracion de renta')
+                              OR LOWER(COALESCE(nombre, '')) LIKE 'renta %'
+                            )
+                            """
+                        )
+                    else:
+                        where.append(
+                            "(LOWER(COALESCE(referencia_tipo, '')) = ? OR LOWER(COALESCE(tipo, '')) = ?)"
+                        )
+                        values.extend([service, service])
                 where_clause = " AND ".join(where)
                 rows = conn.execute(
                     f"""

@@ -4277,6 +4277,10 @@
                   </form>
                   <form id="gestoriaRentaDetallesForm" class="form-grid">
                     <label>
+                      Campaña seleccionada
+                      <input name="entry_ejercicio" id="gestoriaRentaEntryEjercicio" readonly />
+                    </label>
+                    <label>
                       Relación aplicable
                       <select name="related_relation_id" id="gestoriaRentaRelacionSelect">
                         <option value="">Sin relación vinculada</option>
@@ -4286,8 +4290,30 @@
                       <input type="checkbox" name="declaracion_conjunta" id="gestoriaRentaDeclaracionConjunta" />
                       Declaración conjunta
                     </label>
+                    <label>
+                      Precio
+                      <input name="precio_servicio" type="number" step="0.01" min="0" />
+                    </label>
+                    <label>
+                      Responsable
+                      <select name="responsable" class="responsable-select" data-service="Gestoría"></select>
+                    </label>
+                    <label class="pill-option">
+                      <input type="checkbox" name="cobrada" id="gestoriaRentaCobrada" />
+                      Cobrada
+                    </label>
+                    <label>
+                      Forma de cobro
+                      <select name="forma_cobro">
+                        <option value="">Sin definir</option>
+                        <option>Efectivo</option>
+                        <option>Tarjeta</option>
+                        <option>Remesa</option>
+                        <option>Transferencia</option>
+                      </select>
+                    </label>
                     <label class="span-2">
-                      Detalles de renta (venta vivienda, deducciones, etc.)
+                      Detalles de la campaña (venta vivienda, deducciones, incidencias, etc.)
                       <textarea name="renta_detalles" rows="3"></textarea>
                     </label>
                     <div class="form-actions">

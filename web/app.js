@@ -1157,6 +1157,7 @@ const state = {
   segurosOcrQuality: null,
   segurosOcrParsedFields: {},
   currentClienteData: null,
+  currentClienteGestoriaData: null,
   currentClienteSegurosRows: [],
   currentClienteRamoSelected: "",
   currentSeguroId: "",
@@ -1545,6 +1546,8 @@ const gestoriaRentaDetallesForm = document.getElementById("gestoriaRentaDetalles
 const gestoriaRentaDetallesStatus = document.getElementById("gestoriaRentaDetallesStatus");
 const gestoriaRentaRelacionSelect = document.getElementById("gestoriaRentaRelacionSelect");
 const gestoriaRentaDeclaracionConjunta = document.getElementById("gestoriaRentaDeclaracionConjunta");
+const gestoriaRentaEntryEjercicio = document.getElementById("gestoriaRentaEntryEjercicio");
+const gestoriaRentaCobrada = document.getElementById("gestoriaRentaCobrada");
 const gestoriaRentaCards = document.getElementById("gestoriaRentaCards");
 const gestoriaRentaDetail = document.getElementById("gestoriaRentaDetail");
 const gestoriaAdminForm = document.getElementById("gestoriaAdminForm");
@@ -18727,6 +18730,95 @@ const formatRentaResult = (value) => {
   };
 };
 
+const getSortedRentaEntries = (row = {}) =>
+  (parseGestoriaRentaPayload(row).entries || [])
+    .slice()
+    .filter((item) => item && typeof item === "object")
+    .sort((a, b) => String(b.ejercicio || "").localeCompare(String(a.ejercicio || "")));
+
+const getSelectedRentaEntry = (row = {}) => {
+  const entries = getSortedRentaEntries(row);
+  if (!entries.length) {
+    state.currentRentaEntryId = "";
+    return null;
+  }
+  const selectedId =
+    String(state.currentRentaEntryId || "").trim() && entries.some((entry) => entry.id === state.currentRentaEntryId)
+      ? state.currentRentaEntryId
+      : entries[0].id;
+  state.currentRentaEntryId = selectedId;
+  return entries.find((entry) => entry.id === selectedId) || entries[0];
+};
+
+const formatRentaCobro = (entry = {}) => {
+  if (!entry || typeof entry !== "object") return "-";
+  const cobrada = Number(entry.cobrada || 0) === 1;
+  const forma = String(entry.forma_cobro || "").trim();
+  if (!cobrada) return "Pendiente";
+  return forma ? `Cobrada · ${forma}` : "Cobrada";
+};
+
+const fillGestoriaRentaDetailsForm = (row = {}) => {
+  if (!gestoriaRentaDetallesForm) return;
+  const payload = parseGestoriaRentaPayload(row);
+  const entry = getSelectedRentaEntry(row);
+  const setValue = (name, value) => {
+    const el = gestoriaRentaDetallesForm.querySelector(`[name="${name}"]`);
+    if (!el) return;
+    el.value = value ?? "";
+  };
+  setValue("entry_ejercicio", entry?.ejercicio || "");
+  setValue("related_relation_id", payload.related_relation_id || "");
+  setValue("precio_servicio", entry?.precio_servicio ?? "");
+  setValue("responsable", entry?.responsable || "");
+  setValue("forma_cobro", entry?.forma_cobro || "");
+  setValue("renta_detalles", entry?.gestion_notas || payload.notes || "");
+  if (gestoriaRentaDeclaracionConjunta) {
+    gestoriaRentaDeclaracionConjunta.checked = Number(payload.declaracion_conjunta || 0) === 1;
+  }
+  if (gestoriaRentaCobrada) {
+    gestoriaRentaCobrada.checked = Number(entry?.cobrada || 0) === 1;
+  }
+};
+
+const buildGestoriaRentaDetailsPayload = (formPayload = {}) => {
+  const row = state.currentClienteGestoriaData || {};
+  const current = parseGestoriaRentaPayload(row);
+  const entries = getSortedRentaEntries(row);
+  const selectedEntry = getSelectedRentaEntry(row);
+  const selectedId = String(selectedEntry?.id || "").trim();
+  const precioServicioRaw = String(formPayload.precio_servicio || "").trim();
+  const precioServicio =
+    precioServicioRaw === "" ? null : parseMoneyValue(precioServicioRaw);
+  const updatedEntry = {
+    ...(selectedEntry || {}),
+    id: selectedId || randomId(),
+    ejercicio: String(formPayload.entry_ejercicio || selectedEntry?.ejercicio || new Date().getFullYear()),
+    cliente_nombre: selectedEntry?.cliente_nombre || state.currentClienteData?.nombre || "",
+    cliente_nif: selectedEntry?.cliente_nif || state.currentClienteData?.nif || "",
+    precio_servicio: Number.isFinite(precioServicio) ? Number(precioServicio.toFixed(2)) : null,
+    responsable: String(formPayload.responsable || "").trim(),
+    cobrada: gestoriaRentaCobrada?.checked ? 1 : 0,
+    forma_cobro: String(formPayload.forma_cobro || "").trim(),
+    gestion_notas: String(formPayload.renta_detalles || "").trim(),
+  };
+  const nextEntries = entries.length
+    ? entries.map((entry) => (String(entry.id || "").trim() === selectedId ? updatedEntry : entry))
+    : [updatedEntry];
+  state.currentRentaEntryId = updatedEntry.id;
+  const selectedRelationId = String(formPayload.related_relation_id || "").trim();
+  const selectedRelation = (state.currentClienteRelaciones || []).find(
+    (item) => String(item.id || "").trim() === selectedRelationId
+  );
+  return {
+    notes: current.notes || "",
+    entries: nextEntries,
+    related_relation_id: selectedRelationId,
+    related_cliente_id: selectedRelation ? selectedRelation.counterpart_id || "" : "",
+    declaracion_conjunta: gestoriaRentaDeclaracionConjunta?.checked ? 1 : 0,
+  };
+};
+
 const renderGestoriaRentaDetail = (entry = {}) => {
   if (!gestoriaRentaDetail) return;
   if (!entry || typeof entry !== "object") {
@@ -18757,6 +18849,9 @@ const renderGestoriaRentaDetail = (entry = {}) => {
     ["Casilla 505", entry.casilla_505 != null ? euroFormatter.format(parseMoneyValue(entry.casilla_505)) : "-"],
     ["Resultado declaración", result.text],
     ["Ingresos", entry.ingresos_principales_total != null ? euroFormatter.format(parseMoneyValue(entry.ingresos_principales_total)) : "-"],
+    ["Precio servicio", entry.precio_servicio != null ? euroFormatter.format(parseMoneyValue(entry.precio_servicio)) : "-"],
+    ["Responsable", entry.responsable || "-"],
+    ["Cobro", formatRentaCobro(entry)],
     ["Dirección", entry.direccion || "-"],
     ["Población", [entry.codigo_postal, entry.poblacion, entry.provincia].filter(Boolean).join(" ") || "-"],
   ];
@@ -18821,25 +18916,19 @@ const renderGestoriaRentaDetail = (entry = {}) => {
 
 const renderGestoriaRentaCards = (row = {}) => {
   if (!gestoriaRentaCards) return;
-  const payload = parseGestoriaRentaPayload(row);
-  const entries = (payload.entries || [])
-    .slice()
-    .sort((a, b) => String(b.ejercicio || "").localeCompare(String(a.ejercicio || "")));
+  const entries = getSortedRentaEntries(row);
   if (!entries.length) {
     gestoriaRentaCards.innerHTML = "<p class='muted'>Sin campañas de renta importadas.</p>";
     if (gestoriaRentaDetail) {
       gestoriaRentaDetail.classList.add("hidden");
       gestoriaRentaDetail.innerHTML = "";
     }
+    fillGestoriaRentaDetailsForm(row);
     return;
   }
   const grid = document.createElement("div");
   grid.className = "renta-cards-grid";
-  const selectedId =
-    String(state.currentRentaEntryId || "").trim() && entries.some((entry) => entry.id === state.currentRentaEntryId)
-      ? state.currentRentaEntryId
-      : entries[0].id;
-  state.currentRentaEntryId = selectedId;
+  const selectedId = getSelectedRentaEntry(row)?.id || entries[0].id;
   entries.forEach((entry) => {
     const card = document.createElement("button");
     card.type = "button";
@@ -18863,6 +18952,14 @@ const renderGestoriaRentaCards = (row = {}) => {
         <span>Casilla 505</span>
         <strong>${entry.casilla_505 != null ? euroFormatter.format(parseMoneyValue(entry.casilla_505)) : "-"}</strong>
       </div>
+      <div class="renta-card-meta">
+        <span>Precio</span>
+        <strong>${entry.precio_servicio != null ? euroFormatter.format(parseMoneyValue(entry.precio_servicio)) : "-"}</strong>
+      </div>
+      <div class="renta-card-meta">
+        <span>${formatRentaCobro(entry)}</span>
+        <strong>${entry.responsable || "Sin responsable"}</strong>
+      </div>
       <div class="renta-result ${result.className}">${result.text}</div>
     `;
     card.addEventListener("click", () => {
@@ -18875,6 +18972,7 @@ const renderGestoriaRentaCards = (row = {}) => {
   gestoriaRentaCards.appendChild(grid);
   const selected = entries.find((entry) => entry.id === selectedId) || entries[0];
   renderGestoriaRentaDetail(selected);
+  fillGestoriaRentaDetailsForm(row);
 };
 
 const renderGestoriaRentaCrmCards = (rows = []) => {
@@ -18926,10 +19024,19 @@ const renderGestoriaRentaCrmCards = (rows = []) => {
           <span class="muted">Ingresos</span>
           <strong>${ingresos}</strong>
         </div>
+        <div>
+          <span class="muted">Precio</span>
+          <strong>${entry.precio_servicio != null ? euroFormatter.format(parseMoneyValue(entry.precio_servicio)) : "-"}</strong>
+        </div>
+        <div>
+          <span class="muted">Cobro</span>
+          <strong>${formatRentaCobro(entry)}</strong>
+        </div>
       </div>
       <div class="gestoria-renta-overview-meta">
         <span>${entry.estado_civil || "Sin estado civil"}</span>
         <span>Hijos: ${entry.hijos_count ?? 0}</span>
+        <span>${entry.responsable || "Sin responsable"}</span>
         <span>${metaLocation}</span>
       </div>
     `;
@@ -18984,6 +19091,7 @@ const loadClienteGestoria = (clienteId) => {
   if (!clienteGestoriaForm) return;
   api(`/api/cliente_gestoria?cliente_id=${clienteId}`).then((data) => {
     const row = data.row || {};
+    state.currentClienteGestoriaData = row;
     const setValue = (name, value) => {
       const el = clienteGestoriaForm.querySelector(`[name="${name}"]`);
       if (!el) return;
@@ -19003,19 +19111,13 @@ const loadClienteGestoria = (clienteId) => {
     setCheck("mod_trafico", row.mod_trafico);
     setCheck("mod_puntuales", row.mod_puntuales);
     if (gestoriaRentaDetallesForm) {
-      const rentaInput = gestoriaRentaDetallesForm.querySelector('[name="renta_detalles"]');
-      if (rentaInput) {
-        rentaInput.value = row.renta_notes || "";
-      }
       if (gestoriaRentaRelacionSelect) {
         populateGestoriaRentaRelationOptions(
           state.currentClienteRelaciones || [],
           row.renta_related_relation_id || ""
         );
       }
-      if (gestoriaRentaDeclaracionConjunta) {
-        gestoriaRentaDeclaracionConjunta.checked = Number(row.renta_declaracion_conjunta || 0) === 1;
-      }
+      fillGestoriaRentaDetailsForm(row);
     }
     renderGestoriaRentaCards(row);
     if (gestoriaRentaInfo && Array.isArray(row.renta_entries) && row.renta_entries.length) {
@@ -24632,15 +24734,11 @@ if (gestoriaRentaDetallesForm) {
       gestoriaRentaDetallesStatus.textContent = "Guardando...";
     }
     const formData = new FormData(gestoriaRentaDetallesForm);
-    const payload = Object.fromEntries(formData.entries());
-    const selectedRelationId = String(payload.related_relation_id || "").trim();
-    const selectedRelation = (state.currentClienteRelaciones || []).find(
-      (item) => String(item.id || "").trim() === selectedRelationId
-    );
-    payload.related_relation_id = selectedRelationId;
-    payload.related_cliente_id = selectedRelation ? selectedRelation.counterpart_id || "" : "";
-    payload.declaracion_conjunta = gestoriaRentaDeclaracionConjunta?.checked ? 1 : 0;
-    payload.cliente_id = state.currentClienteId;
+    const payload = {
+      cliente_id: state.currentClienteId,
+      mod_renta: 1,
+      renta_detalles: buildGestoriaRentaDetailsPayload(Object.fromEntries(formData.entries())),
+    };
     fetch("/api/cliente_gestoria_update", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -24650,6 +24748,9 @@ if (gestoriaRentaDetallesForm) {
       .then((data) => {
         if (gestoriaRentaDetallesStatus) {
           gestoriaRentaDetallesStatus.textContent = data.error || "Guardado.";
+        }
+        if (!data.error) {
+          loadClienteGestoria(state.currentClienteId);
         }
       })
       .catch(() => {

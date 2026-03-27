@@ -1472,6 +1472,11 @@ def build_renta_entry(record: dict) -> dict:
         "patrimonio": patrimonio,
         "source_files": record.get("source_files") or [],
         "source_file_count": record.get("source_file_count") or 0,
+        "precio_servicio": record.get("precio_servicio"),
+        "responsable": record.get("responsable") or "",
+        "cobrada": 1 if str(record.get("cobrada") or "").strip().lower() in {"1", "true", "yes", "si", "sí"} else 0,
+        "forma_cobro": record.get("forma_cobro") or "",
+        "gestion_notas": record.get("gestion_notas") or "",
         "confidence_score": record.get("confidence_score"),
         "notas_ocr": record,
     }
@@ -1617,6 +1622,91 @@ def ensure_gestoria_renta_trabajo(
             now,
         ),
     )
+
+
+def ensure_gestoria_renta_docs(
+    conn: sqlite3.Connection,
+    empresa_id: str,
+    cliente_id: str,
+    record: dict,
+    now: str,
+) -> None:
+    ejercicio = str(record.get("ejercicio") or "2024").strip() or "2024"
+    presentacion_fecha = record.get("presentacion_fecha") or ""
+    for source in record.get("source_files") or []:
+        source_text = compact_spaces(source)
+        if not source_text:
+            continue
+        doc_name = f"Renta {ejercicio} · {Path(source_text).name}"
+        source_url = source_text if source_text.startswith("/uploads/") or source_text.startswith("http") else ""
+        if source_url:
+            existing = conn.execute(
+                """
+                SELECT id
+                FROM gestoria_docs
+                WHERE cliente_id = ?
+                  AND LOWER(COALESCE(referencia_tipo, '')) = 'renta'
+                  AND (
+                    LOWER(COALESCE(doc_url, '')) = LOWER(?)
+                    OR LOWER(COALESCE(nombre, '')) = LOWER(?)
+                  )
+                LIMIT 1
+                """,
+                (cliente_id, source_url, doc_name),
+            ).fetchone()
+        else:
+            existing = conn.execute(
+                """
+                SELECT id
+                FROM gestoria_docs
+                WHERE cliente_id = ?
+                  AND LOWER(COALESCE(referencia_tipo, '')) = 'renta'
+                  AND LOWER(COALESCE(nombre, '')) = LOWER(?)
+                LIMIT 1
+                """,
+                (cliente_id, doc_name),
+            ).fetchone()
+        if existing:
+            conn.execute(
+                """
+                UPDATE gestoria_docs
+                SET empresa_id = ?,
+                    tipo = 'Renta',
+                    fecha = COALESCE(NULLIF(?, ''), fecha),
+                    estado = 'Recibido',
+                    notas = COALESCE(NULLIF(?, ''), notas),
+                    doc_url = COALESCE(NULLIF(?, ''), doc_url),
+                    updated_at = datetime(?)
+                WHERE id = ?
+                """,
+                (empresa_id, presentacion_fecha, source_text, source_url, now, existing["id"]),
+            )
+            continue
+        conn.execute(
+            """
+            INSERT INTO gestoria_docs (
+              id, empresa_id, cliente_id, referencia_tipo, referencia_id,
+              nombre, tipo, fecha, estado, notas, doc_key, doc_url,
+              calidad_ocr, campos_ocr, created_at, updated_at
+            ) VALUES (
+              ?, ?, ?, 'renta', ?, ?, 'Renta', ?, 'Recibido', ?, NULL, ?, ?, ?, datetime(?), datetime(?)
+            )
+            """,
+            (
+                uuid.uuid4().hex,
+                empresa_id,
+                cliente_id,
+                f"renta-{ejercicio}-{slug(record.get('cliente_nif') or record.get('cliente_nombre'))}",
+                doc_name,
+                presentacion_fecha,
+                source_text,
+                source_url or None,
+                record.get("text_source") or "",
+                ",".join(sorted(k for k, v in record.items() if v not in (None, "", [], {}))),
+                now,
+                now,
+            ),
+        )
 
 
 def upsert_asesoramiento_renta(
@@ -1768,6 +1858,7 @@ def apply_to_db(db_path: Path, records: list[dict], company_name: str) -> dict:
             if spouse_id:
                 linked_spouses += 1
             ensure_cliente_gestoria_renta(conn, cliente_id, record, now)
+            ensure_gestoria_renta_docs(conn, company_id, cliente_id, record, now)
             ensure_gestoria_renta_trabajo(conn, company_id, cliente_id, record, now)
             created_or_updated += 1
         conn.commit()
