@@ -76,6 +76,35 @@
             <div id="workspaceModuleHealth"></div>
           </div>
         </div>
+        <div class="workspace-central-layout">
+          <div class="form-card">
+            <div class="section-head">
+              <div>
+                <h3>Paquete Comercial</h3>
+                <p class="muted">Cómo se empaqueta y se presenta este workspace dentro del producto.</p>
+              </div>
+            </div>
+            <div id="workspaceCommercialPack"></div>
+          </div>
+          <div class="form-card">
+            <div class="section-head">
+              <div>
+                <h3>Go Live</h3>
+                <p class="muted">Acciones prioritarias para dejar el tenant listo para implantación o venta.</p>
+              </div>
+            </div>
+            <div id="workspaceOnboardingActions"></div>
+          </div>
+        </div>
+        <div class="form-card">
+          <div class="section-head">
+            <div>
+              <h3>Matriz de Accesos</h3>
+              <p class="muted">Plantillas de permisos recomendadas por perfil para mantener el producto gobernable.</p>
+            </div>
+          </div>
+          <div id="workspacePermissionMatrix"></div>
+        </div>
         <div class="form-card">
           <div class="section-head">
             <div>
@@ -347,10 +376,6 @@
                   <option>Alta</option>
                   <option>Urgente</option>
                 </select>
-              </label>
-              <label>
-                Clasificación esperada
-                <input name="clasificacion" placeholder="Factura, Fiscal, Identidad..." />
               </label>
               <label>
                 Estado
@@ -1377,6 +1402,9 @@
               <div class="form-actions">
                 <span id="inmuebleSaveStatus" class="muted"></span>
                 <button class="secondary hidden" type="button" id="inmuebleVisitaPdfBtn">Hoja de visita PDF</button>
+                <button class="secondary hidden" type="button" id="inmuebleVentaFichaPdfBtn">Ficha venta PDF</button>
+                <button class="secondary hidden" type="button" id="inmuebleVentaPrecioPdfBtn">Nota precio PDF</button>
+                <button class="secondary hidden" type="button" id="inmuebleAlquilerDiaPdfBtn">DIA alquiler PDF</button>
                 <button class="ghost" type="button" id="inmuebleBackBtn">Volver</button>
               </div>
             </div>
@@ -1609,6 +1637,20 @@
               </div>
             </div>
             <div id="inmuebleTabEstado" class="hidden">
+              <div class="form-card">
+                <div class="section-head">
+                  <div>
+                    <h3>Conversión comercial</h3>
+                    <p class="muted">Mueve la captación a inmueble, encargo, compraventa o alquiler desde su expediente.</p>
+                  </div>
+                </div>
+                <div class="inline-actions">
+                  <button type="button" class="ghost" id="inmuebleConvertInmuebleBtn">Inmueble</button>
+                  <button type="button" class="secondary" id="inmuebleConvertEncargoBtn">Encargo</button>
+                  <button type="button" class="secondary" id="inmuebleConvertVentaBtn">Compraventa</button>
+                  <button type="button" class="secondary" id="inmuebleConvertAlquilerBtn">Alquiler</button>
+                </div>
+              </div>
               <div class="form-card">
                 <div class="section-head">
                   <div>

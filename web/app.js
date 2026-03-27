@@ -1117,6 +1117,7 @@ const state = {
   currentEmpresaName: "",
   currentModule: "empresas",
   currentInmuebleId: "",
+  currentInmuebleOriginView: "inmuebles",
   currentInmueble: null,
   clientesList: [],
   demandasList: [],
@@ -1216,6 +1217,9 @@ const workspaceKpis = document.getElementById("workspaceKpis");
 const workspaceHealthScore = document.getElementById("workspaceHealthScore");
 const workspaceChecklist = document.getElementById("workspaceChecklist");
 const workspaceModuleHealth = document.getElementById("workspaceModuleHealth");
+const workspaceCommercialPack = document.getElementById("workspaceCommercialPack");
+const workspaceOnboardingActions = document.getElementById("workspaceOnboardingActions");
+const workspacePermissionMatrix = document.getElementById("workspacePermissionMatrix");
 const workspaceLauncher = document.getElementById("workspaceLauncher");
 const workspaceList = document.getElementById("workspaceList");
 const workspaceForm = document.getElementById("workspaceForm");
@@ -1966,6 +1970,9 @@ const crmKpiCompraventas = document.getElementById("crmKpiCompraventas");
 const inmuebleDetail = document.getElementById("inmuebleDetail");
 const inmuebleBackBtn = document.getElementById("inmuebleBackBtn");
 const inmuebleVisitaPdfBtn = document.getElementById("inmuebleVisitaPdfBtn");
+const inmuebleVentaFichaPdfBtn = document.getElementById("inmuebleVentaFichaPdfBtn");
+const inmuebleVentaPrecioPdfBtn = document.getElementById("inmuebleVentaPrecioPdfBtn");
+const inmuebleAlquilerDiaPdfBtn = document.getElementById("inmuebleAlquilerDiaPdfBtn");
 const inmuebleTabs = document.getElementById("inmuebleTabs");
 const inmuebleSaveStatus = document.getElementById("inmuebleSaveStatus");
 const inmuebleTabDatos = document.getElementById("inmuebleTabDatos");
@@ -1982,6 +1989,10 @@ const inmuebleDocsStatus = document.getElementById("inmuebleDocsStatus");
 const inmuebleChecklistTable = document.getElementById("inmuebleChecklistTable");
 const inmuebleChecklistInfo = document.getElementById("inmuebleChecklistInfo");
 const inmuebleChecklistBtn = document.getElementById("inmuebleChecklistBtn");
+const inmuebleConvertInmuebleBtn = document.getElementById("inmuebleConvertInmuebleBtn");
+const inmuebleConvertEncargoBtn = document.getElementById("inmuebleConvertEncargoBtn");
+const inmuebleConvertVentaBtn = document.getElementById("inmuebleConvertVentaBtn");
+const inmuebleConvertAlquilerBtn = document.getElementById("inmuebleConvertAlquilerBtn");
 const inmuebleActividadTable = document.getElementById("inmuebleActividadTable");
 const inmuebleActividadInfo = document.getElementById("inmuebleActividadInfo");
 const inmuebleActividadTimeline = document.getElementById("inmuebleActividadTimeline");
@@ -3634,6 +3645,101 @@ const renderWorkspaceHealth = (data = {}) => {
         `
       : "<p class='muted'>Sin módulos evaluados.</p>";
   }
+  if (workspaceOnboardingActions) {
+    const status = String(data.go_live_status || "bloqueado");
+    const actions = Array.isArray(data.onboarding_actions) ? data.onboarding_actions : [];
+    const badge = status === "listo" ? "Listo para go-live" : status === "implantacion" ? "En implantación" : "Bloqueado";
+    workspaceOnboardingActions.innerHTML = `
+      <div class="workspace-document-head">
+        <span class="workspace-document-total">${badge}</span>
+        <span class="muted">${actions.length ? `${actions.length} acciones recomendadas` : "Sin bloqueos prioritarios"}</span>
+      </div>
+      ${
+        actions.length
+          ? `
+              <div class="workspace-billing-list">
+                ${actions
+                  .map(
+                    (item) => `
+                      <div class="workspace-billing-row">
+                        <div>
+                          <strong>${item.label || "-"}</strong>
+                          <div class="muted">Prioridad ${item.priority || "media"}</div>
+                        </div>
+                        <div class="workspace-billing-meta">
+                          <button type="button" class="secondary ghost" data-workspace-jump="${item.target || ""}">Ir</button>
+                        </div>
+                      </div>
+                    `
+                  )
+                  .join("")}
+              </div>
+            `
+          : "<p class='muted'>El tenant ya tiene una base suficiente para implantación comercial.</p>"
+      }
+    `;
+    workspaceOnboardingActions.querySelectorAll("[data-workspace-jump]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const target = document.getElementById(button.dataset.workspaceJump || "");
+        target?.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    });
+  }
+};
+
+const renderWorkspaceCommercialPack = (workspace = {}, packageData = {}) => {
+  if (!workspaceCommercialPack) return;
+  const included = Array.isArray(packageData.included) ? packageData.included : [];
+  workspaceCommercialPack.innerHTML = `
+    <div class="workspace-summary-list">
+      <div class="workspace-summary-row">
+        <div>
+          <strong>${packageData.label || workspace.plan || "Enterprise"}</strong>
+          <div class="muted">${packageData.pitch || "Sin narrativa comercial definida."}</div>
+        </div>
+        <div class="workspace-summary-metrics">
+          <span>${Number(packageData.enabled_focus_total || 0)} focos activos</span>
+          <span>${Number(packageData.enabled_modules_total || 0)} módulos activos</span>
+        </div>
+      </div>
+    </div>
+    ${
+      included.length
+        ? `
+            <div class="workspace-chip-list">
+              ${included.map((item) => `<div class="workspace-chip"><strong>${item}</strong><span>Incluido</span></div>`).join("")}
+            </div>
+          `
+        : "<p class='muted'>Sin paquete comercial definido todavía.</p>"
+    }
+  `;
+};
+
+const renderWorkspacePermissionMatrix = (rows = []) => {
+  if (!workspacePermissionMatrix) return;
+  if (!rows.length) {
+    workspacePermissionMatrix.innerHTML = "<p class='muted'>Sin matriz de acceso disponible.</p>";
+    return;
+  }
+  workspacePermissionMatrix.innerHTML = `
+    <div class="workspace-billing-list">
+      ${rows
+        .map(
+          (row) => `
+            <div class="workspace-billing-row">
+              <div>
+                <strong>${row.perfil || "-"}</strong>
+                <div class="muted">${(row.modules || []).join(" · ") || "Sin módulos"}</div>
+              </div>
+              <div class="workspace-billing-meta">
+                <span>${numberFormatter.format(Number(row.modules_total || 0))} módulos</span>
+              </div>
+            </div>
+          `
+        )
+        .join("")}
+    </div>
+  `;
 };
 
 const fillWorkspaceForm = (workspace = {}) => {
@@ -4878,6 +4984,8 @@ const loadWorkspaceDetail = async (workspaceId) => {
   syncWorkspaceClientOptions(workspaceClients.rows || []);
   fillWorkspaceForm(detail.workspace || {});
   renderWorkspaceHealth(health || {});
+  renderWorkspaceCommercialPack(detail.workspace || {}, detail.commercial_package || {});
+  renderWorkspacePermissionMatrix(detail.permission_matrix || []);
   renderWorkspaceLauncher(detail.workspace || {}, detail.modules || []);
   renderWorkspaceCompanies(detail.companies || []);
   renderWorkspaceModules(detail.modules || []);
@@ -4934,6 +5042,8 @@ const loadWorkspaceCentral = async () => {
     state.currentWorkspaceName = "";
     fillWorkspaceForm({});
     renderWorkspaceHealth({});
+    renderWorkspaceCommercialPack({}, {});
+    renderWorkspacePermissionMatrix([]);
     renderWorkspaceLauncher({}, []);
     renderWorkspaceCompanies([]);
     renderWorkspaceModules([]);
@@ -7998,6 +8108,9 @@ const refreshInmuebleVisitSheetButton = () => {
   const status = String(captacion.situacion_comercial || inmueble.estado || "").trim().toLowerCase();
   const visible = status === "encargo";
   inmuebleVisitaPdfBtn.classList.toggle("hidden", !visible);
+  inmuebleVentaFichaPdfBtn?.classList.toggle("hidden", !visible);
+  inmuebleVentaPrecioPdfBtn?.classList.toggle("hidden", !visible);
+  inmuebleAlquilerDiaPdfBtn?.classList.toggle("hidden", !visible);
 };
 
 const resolveVisitSheetDemandaId = () => {
@@ -8056,6 +8169,12 @@ const openInmuebleVisitSheetPdf = () => {
     params.set("demanda_id", demandaId);
   }
   window.open(`/api/inmueble_visita_pdf?${params.toString()}`, "_blank", "noopener");
+};
+
+const openInmuebleConsumoPdf = (kind) => {
+  if (!state.currentInmuebleId || !kind) return;
+  const params = new URLSearchParams({ id: state.currentInmuebleId, kind });
+  window.open(`/api/inmueble_consumo_pdf?${params.toString()}`, "_blank", "noopener");
 };
 
 const saveInmuebleField = (field, value) => {
@@ -14424,6 +14543,21 @@ const renderTableInto = (data, container, infoEl, label) => {
       const td = document.createElement("td");
       const actions = document.createElement("div");
       actions.className = "inline-actions";
+      const openBtn = document.createElement("button");
+      openBtn.type = "button";
+      openBtn.className = "ghost";
+      openBtn.textContent = "Ficha";
+      openBtn.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const inmuebleId = String(rowMap.inmueble_id || "").trim();
+        if (!inmuebleId) {
+          alert("La captación no tiene inmueble vinculado.");
+          return;
+        }
+        openInmuebleDetail(inmuebleId, "captaciones");
+      });
+      actions.appendChild(openBtn);
       [
         ["Inmueble", "inmueble", "ghost"],
         ["Encargo", "encargo", "secondary"],
@@ -14443,6 +14577,18 @@ const renderTableInto = (data, container, infoEl, label) => {
       });
       td.appendChild(actions);
       tr.appendChild(td);
+    }
+    if (showCaptacionActions && String(recordId || "").trim()) {
+      tr.addEventListener("click", (event) => {
+        if (event.target && event.target.closest("button, input, select, a")) {
+          return;
+        }
+        const inmuebleId = String(rowMap.inmueble_id || "").trim();
+        if (!inmuebleId) {
+          return;
+        }
+        openInmuebleDetail(inmuebleId, "captaciones");
+      });
     }
     if (label === "Seguros" && currentTab === "seguros-crm" && state.segurosTab === "bdt" && String(recordId || "").trim()) {
       tr.addEventListener("click", (event) => {
@@ -14610,6 +14756,17 @@ const runCaptacionConversion = async (captacionId, rowMap = {}, destino = "") =>
   }
 };
 
+const runCurrentInmuebleConversion = (destino) => {
+  const captacion = state.currentInmuebleContext?.captacion || {};
+  const inmueble = state.currentInmuebleContext?.inmueble || state.currentInmueble || {};
+  const captacionId = String(captacion.id || "").trim();
+  if (!captacionId) {
+    alert("La ficha no tiene una captación vinculada para convertir.");
+    return;
+  }
+  runCaptacionConversion(captacionId, { ...captacion, ...inmueble, id: captacionId }, destino);
+};
+
 const loadCrmCaptaciones = () => {
   if (!crmCaptacionesTable) {
     return;
@@ -14765,6 +14922,7 @@ const renderCrmKanban = (data) => {
       const rows = grouped.get(etapa) || [];
       rows.slice(0, 5).forEach((row) => {
         const rowId = row[idIndex];
+        const rowMap = buildRowMap(row, data.columns);
         const card = document.createElement("div");
         card.className = "crm-kanban-card";
         card.setAttribute("draggable", "true");
@@ -14776,7 +14934,21 @@ const renderCrmKanban = (data) => {
           <div><strong>${row[propietarioIndex] || "Propietario"}</strong></div>
           <div>${row[direccionIndex] || "-"} · ${row[zonaIndex] || "-"}</div>
           <div class="muted">${row[proximaIndex] || "Sin próxima acción"}</div>
+          <div class="inline-actions"><button type="button" class="ghost">Abrir ficha</button></div>
         `;
+        const openBtn = card.querySelector("button");
+        if (openBtn) {
+          openBtn.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            const inmuebleId = String(rowMap.inmueble_id || "").trim();
+            if (!inmuebleId) {
+              alert("La captación no tiene inmueble vinculado.");
+              return;
+            }
+            openInmuebleDetail(inmuebleId, "captaciones");
+          });
+        }
         column.appendChild(card);
       });
       container.appendChild(column);
@@ -15457,9 +15629,10 @@ const setInmuebleTab = (tab) => {
   if (inmuebleTabEstado) inmuebleTabEstado.classList.toggle("hidden", tab !== "estado");
 };
 
-const openInmuebleDetail = (id) => {
+const openInmuebleDetail = (id, originView = "") => {
   if (!inmuebleDetail) return;
   state.currentInmuebleId = id;
+  state.currentInmuebleOriginView = originView || state.crmWorkspaceView || "inmuebles";
   state.currentInmueble = null;
   state.currentInmuebleContext = null;
   setInmuebleSaveStatus("");
@@ -26590,14 +26763,57 @@ if (inmuebleBackBtn) {
     if (crmWorkspaceShell) {
       crmWorkspaceShell.classList.remove("hidden");
     }
-    setCrmWorkspaceView("inmuebles");
+    setCrmWorkspaceView(state.currentInmuebleOriginView || "inmuebles");
     state.currentInmuebleId = "";
+    state.currentInmuebleOriginView = "inmuebles";
   });
 }
 
 if (inmuebleVisitaPdfBtn) {
   inmuebleVisitaPdfBtn.addEventListener("click", () => {
     openInmuebleVisitSheetPdf();
+  });
+}
+
+if (inmuebleVentaFichaPdfBtn) {
+  inmuebleVentaFichaPdfBtn.addEventListener("click", () => {
+    openInmuebleConsumoPdf("venta_ficha");
+  });
+}
+
+if (inmuebleVentaPrecioPdfBtn) {
+  inmuebleVentaPrecioPdfBtn.addEventListener("click", () => {
+    openInmuebleConsumoPdf("venta_precio");
+  });
+}
+
+if (inmuebleAlquilerDiaPdfBtn) {
+  inmuebleAlquilerDiaPdfBtn.addEventListener("click", () => {
+    openInmuebleConsumoPdf("alquiler_dia");
+  });
+}
+
+if (inmuebleConvertInmuebleBtn) {
+  inmuebleConvertInmuebleBtn.addEventListener("click", () => {
+    runCurrentInmuebleConversion("inmueble");
+  });
+}
+
+if (inmuebleConvertEncargoBtn) {
+  inmuebleConvertEncargoBtn.addEventListener("click", () => {
+    runCurrentInmuebleConversion("encargo");
+  });
+}
+
+if (inmuebleConvertVentaBtn) {
+  inmuebleConvertVentaBtn.addEventListener("click", () => {
+    runCurrentInmuebleConversion("compraventa");
+  });
+}
+
+if (inmuebleConvertAlquilerBtn) {
+  inmuebleConvertAlquilerBtn.addEventListener("click", () => {
+    runCurrentInmuebleConversion("alquiler");
   });
 }
 

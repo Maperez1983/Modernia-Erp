@@ -20,6 +20,7 @@ import smtplib
 import imaplib
 import email
 import html
+import textwrap
 from io import BytesIO
 from copy import copy as shallow_copy
 from datetime import datetime, timedelta, timezone
@@ -128,6 +129,27 @@ WORKSPACE_MODULE_CATALOG = [
     {"key": "registro_horario", "nombre": "Registro Horario", "categoria": "motor", "sort_order": 120},
     {"key": "automatizaciones", "nombre": "Automatizaciones", "categoria": "motor", "sort_order": 130},
 ]
+
+WORKSPACE_PLAN_PACKAGES = {
+    "Base": {
+        "label": "Base",
+        "pitch": "CRM unificado y operativa documental para despachos que empiezan a centralizar servicios.",
+        "focus": ["crm360", "documental", "dashboard"],
+        "included": ["CRM 360", "Documental", "Dashboard Ejecutivo", "Agenda y acciones"],
+    },
+    "Pro": {
+        "label": "Pro",
+        "pitch": "Activa verticales de negocio y facturación para operar el despacho desde un único workspace.",
+        "focus": ["gestoria", "seguros", "inmobiliaria", "financiacion", "facturacion"],
+        "included": ["Gestoría", "Seguros", "Inmobiliaria", "Financiación", "Facturación", "Portal Cliente"],
+    },
+    "Enterprise": {
+        "label": "Enterprise",
+        "pitch": "Producto multiservicio completo con automatización, portal y motores transversales listos para escalar.",
+        "focus": ["automatizaciones", "portal_cliente", "registro_horario", "facturas_recibidas", "fincas"],
+        "included": ["Automatizaciones", "Portal Cliente", "Registro Horario", "Facturas Recibidas", "Administración de Fincas"],
+    },
+}
 
 
 def parse_ocr_psms(raw):
@@ -12226,10 +12248,34 @@ def fetch_workspace_detail(conn, workspace_id):
         """,
         (workspace_id,),
     ).fetchall()
+    module_rows = [dict(row) for row in modules]
+    enabled_keys = [row["modulo_key"] for row in module_rows if int(row.get("enabled") or 0) == 1]
+    plan_name = str(workspace["plan"] or "Enterprise")
+    package = dict(WORKSPACE_PLAN_PACKAGES.get(plan_name, WORKSPACE_PLAN_PACKAGES["Enterprise"]))
+    package["enabled_focus_total"] = sum(1 for key in package.get("focus", []) if key in enabled_keys)
+    package["enabled_modules_total"] = len(enabled_keys)
+    permission_matrix = []
+    profiles = [
+        ("Dirección", {"crm360", "dashboard", "documental", "gestoria", "seguros", "inmobiliaria", "financiacion", "fincas", "facturacion", "facturas_recibidas", "portal_cliente", "registro_horario", "automatizaciones"}),
+        ("Operaciones", {"crm360", "dashboard", "documental", "gestoria", "facturacion", "facturas_recibidas", "portal_cliente", "registro_horario"}),
+        ("Comercial", {"crm360", "dashboard", "documental", "seguros", "inmobiliaria", "financiacion", "portal_cliente"}),
+        ("Backoffice", {"crm360", "documental", "gestoria", "facturacion", "facturas_recibidas", "fincas", "registro_horario"}),
+    ]
+    for role_name, allowed_modules in profiles:
+        granted = [row["modulo_nombre"] for row in module_rows if row["modulo_key"] in enabled_keys and row["modulo_key"] in allowed_modules]
+        permission_matrix.append(
+            {
+                "perfil": role_name,
+                "modules_total": len(granted),
+                "modules": granted,
+            }
+        )
     return {
         "workspace": dict(workspace),
         "companies": [dict(row) for row in companies],
-        "modules": [dict(row) for row in modules],
+        "modules": module_rows,
+        "commercial_package": package,
+        "permission_matrix": permission_matrix,
     }
 
 
@@ -12533,6 +12579,22 @@ def fetch_workspace_health(conn, workspace_id):
         },
     ]
     readiness_score = round((sum(item["done"] for item in checklist) / max(len(checklist), 1)) * 100)
+    onboarding_actions = []
+    if not branding_ready:
+        onboarding_actions.append({"label": "Completar branding del tenant", "target": "workspaceForm", "priority": "alta"})
+    if len(enabled_modules) < 3:
+        onboarding_actions.append({"label": "Activar módulos núcleo y verticales mínimas", "target": "workspaceModules", "priority": "alta"})
+    if int(clientes_total or 0) == 0:
+        onboarding_actions.append({"label": "Cargar primeros clientes del tenant", "target": "workspaceLauncher", "priority": "alta"})
+    if int(docs_summary.get("documentos_total") or 0) == 0:
+        onboarding_actions.append({"label": "Subir documentación inicial al inbox", "target": "workspaceInboxForm", "priority": "media"})
+    if int(facturas_total or 0) == 0:
+        onboarding_actions.append({"label": "Emitir la primera factura transversal", "target": "workspaceBillingForm", "priority": "media"})
+    if len(portal_rows) == 0:
+        onboarding_actions.append({"label": "Invitar al menos un cliente al portal", "target": "workspacePortalForm", "priority": "media"})
+    if len(automation_rows) == 0:
+        onboarding_actions.append({"label": "Configurar la primera automatización del tenant", "target": "workspaceAutomationForm", "priority": "media"})
+    go_live_status = "listo" if readiness_score >= 85 else ("implantacion" if readiness_score >= 60 else "bloqueado")
     metrics_by_module = {
         "crm360": (clientes_total, "clientes activos en el tenant", "Importar o crear clientes base."),
         "documental": (docs_summary.get("documentos_total") or 0, "documentos unificados", "Subir documentos y revisar asignaciones."),
@@ -12572,6 +12634,8 @@ def fetch_workspace_health(conn, workspace_id):
     return {
         "readiness_score": readiness_score,
         "checklist": checklist,
+        "go_live_status": go_live_status,
+        "onboarding_actions": onboarding_actions[:6],
         "module_health": module_health,
         "summary": {
             "clientes": int(clientes_total or 0),
@@ -12831,7 +12895,6 @@ def build_workspace_invoice_pdf(invoice, workspace, company, client, collections
 
 
 def build_inmueble_visit_sheet_pdf(company, inmueble, captacion, owners, buyer, demanda=None):
-    owners_text = " | ".join([str(item.get("nombre") or "").strip() for item in (owners or []) if str(item.get("nombre") or "").strip()]) or (captacion.get("propietario") or "-")
     buyer_name = str((buyer or {}).get("nombre") or "").strip() or "-"
     buyer_nif = str((buyer or {}).get("nif") or "").strip() or "-"
     buyer_phone = str((buyer or {}).get("telefono") or "").strip() or "-"
@@ -12848,7 +12911,6 @@ def build_inmueble_visit_sheet_pdf(company, inmueble, captacion, owners, buyer, 
         f"Tipo: {inmueble.get('tipo_inmueble') or '-'}",
         f"Estado comercial: {captacion.get('situacion_comercial') or inmueble.get('estado') or '-'}",
         f"Precio objetivo: {format_eur(inmueble.get('precio_objetivo') or captacion.get('precio_objetivo') or 0)}",
-        f"Propietarios: {owners_text}",
         "",
         "DATOS DEL CLIENTE VISITANTE",
         f"Nombre: {buyer_name}",
@@ -12895,6 +12957,284 @@ def build_inmueble_visit_sheet_pdf(company, inmueble, captacion, owners, buyer, 
         pdf.extend(f"{offset:010d} 00000 n \n".encode("latin-1"))
     pdf.extend(f"trailer << /Size {len(offsets)} /Root 1 0 R >>\nstartxref\n{xref_pos}\n%%EOF\n".encode("latin-1"))
     return bytes(pdf)
+
+
+def _pdf_wrap_lines(text, width=86):
+    raw = str(text or "").strip()
+    if not raw:
+        return [""]
+    lines = []
+    for block in raw.splitlines():
+        block = block.strip()
+        if not block:
+            lines.append("")
+            continue
+        wrapped = textwrap.wrap(block, width=width, break_long_words=False, break_on_hyphens=False)
+        lines.extend(wrapped or [""])
+    return lines or [""]
+
+
+def _pdf_format_number(value, decimals=2):
+    amount = parse_money_value(value)
+    if amount is None:
+        return ""
+    return f"{amount:,.{decimals}f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def build_branded_document_pdf(title, subtitle, sections, footer_lines=None):
+    footer_lines = footer_lines or []
+    style_map = {
+        "brand": {"font": "F2", "size": 24, "leading": 28, "color": "0.79 0.64 0.30 rg"},
+        "brand_sub": {"font": "F1", "size": 10, "leading": 16, "color": "0.22 0.24 0.27 rg"},
+        "title": {"font": "F2", "size": 15, "leading": 22, "color": "0 0 0 rg"},
+        "subtitle": {"font": "F1", "size": 10, "leading": 16, "color": "0.30 0.33 0.36 rg"},
+        "section": {"font": "F2", "size": 11, "leading": 18, "color": "0.16 0.19 0.22 rg"},
+        "body": {"font": "F1", "size": 10, "leading": 14, "color": "0 0 0 rg"},
+        "footer": {"font": "F1", "size": 9, "leading": 13, "color": "0.32 0.35 0.39 rg"},
+    }
+
+    entries = [("brand", "LIV"), ("brand_sub", "GRUPO MODERNIA"), ("title", title)]
+    if subtitle:
+        entries.append(("subtitle", subtitle))
+    entries.append(("body", ""))
+    for heading, lines in sections:
+        entries.append(("section", heading))
+        for line in lines:
+            if isinstance(line, (list, tuple)) and len(line) == 2:
+                label, value = line
+                wrapped = _pdf_wrap_lines(f"{label}: {value}", width=84)
+            else:
+                wrapped = _pdf_wrap_lines(line, width=84)
+            for wrapped_line in wrapped:
+                entries.append(("body", wrapped_line))
+        entries.append(("body", ""))
+    for line in footer_lines:
+        for wrapped_line in _pdf_wrap_lines(line, width=84):
+            entries.append(("footer", wrapped_line))
+
+    pages = []
+    current = []
+    y = 800
+    min_y = 54
+    for style_name, text in entries:
+        style = style_map[style_name]
+        leading = style["leading"]
+        if y - leading < min_y:
+            pages.append(current)
+            current = []
+            y = 800
+        text_value = _pdf_escape(text)
+        current.append(f"{style['color']} BT /{style['font']} {style['size']} Tf 42 {y} Td ({text_value}) Tj ET")
+        y -= leading
+    if current:
+        pages.append(current)
+
+    objects = []
+    pdf = bytearray(b"%PDF-1.4\n")
+    page_obj_ids = []
+    content_obj_ids = []
+    next_obj_id = 1
+    catalog_id = next_obj_id
+    next_obj_id += 1
+    pages_id = next_obj_id
+    next_obj_id += 1
+    for _ in pages:
+        page_obj_ids.append(next_obj_id)
+        next_obj_id += 1
+        content_obj_ids.append(next_obj_id)
+        next_obj_id += 1
+    font_regular_id = next_obj_id
+    next_obj_id += 1
+    font_bold_id = next_obj_id
+    next_obj_id += 1
+
+    objects.append(f"{catalog_id} 0 obj << /Type /Catalog /Pages {pages_id} 0 R >> endobj\n")
+    kids = " ".join(f"{obj_id} 0 R" for obj_id in page_obj_ids)
+    objects.append(f"{pages_id} 0 obj << /Type /Pages /Count {len(page_obj_ids)} /Kids [{kids}] >> endobj\n")
+    for page_obj_id, content_obj_id, page_lines in zip(page_obj_ids, content_obj_ids, pages):
+        stream = "\n".join(page_lines).encode("latin-1", "replace")
+        objects.append(
+            f"{page_obj_id} 0 obj << /Type /Page /Parent {pages_id} 0 R /MediaBox [0 0 595 842] "
+            f"/Resources << /Font << /F1 {font_regular_id} 0 R /F2 {font_bold_id} 0 R >> >> "
+            f"/Contents {content_obj_id} 0 R >> endobj\n"
+        )
+        objects.append(
+            f"{content_obj_id} 0 obj << /Length {len(stream)} >> stream\n".encode("latin-1")
+            + stream
+            + b"\nendstream\nendobj\n"
+        )
+    objects.append(f"{font_regular_id} 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj\n")
+    objects.append(f"{font_bold_id} 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >> endobj\n")
+
+    offsets = [0]
+    for obj in objects:
+        offsets.append(len(pdf))
+        pdf.extend(obj if isinstance(obj, bytes) else obj.encode("latin-1"))
+    xref_pos = len(pdf)
+    pdf.extend(f"xref\n0 {len(offsets)}\n".encode("latin-1"))
+    pdf.extend(b"0000000000 65535 f \n")
+    for offset in offsets[1:]:
+        pdf.extend(f"{offset:010d} 00000 n \n".encode("latin-1"))
+    pdf.extend(
+        f"trailer << /Size {len(offsets)} /Root {catalog_id} 0 R >>\nstartxref\n{xref_pos}\n%%EOF\n".encode("latin-1")
+    )
+    return bytes(pdf)
+
+
+def build_inmueble_consumo_sale_sheet_pdf(company, inmueble, captacion, docs):
+    price = format_eur(inmueble.get("precio_objetivo") or captacion.get("precio_objetivo") or 0)
+    locality = " · ".join([part for part in [inmueble.get("zona"), inmueble.get("poblacion"), inmueble.get("provincia")] if part]) or "Pendiente"
+    docs_text = ", ".join(
+        str(item.get("tipo") or item.get("nombre") or "").strip()
+        for item in (docs or [])
+        if str(item.get("tipo") or item.get("nombre") or "").strip()
+    ) or "Documentación en expediente Modernia"
+    sections = [
+        (
+            "Identificación de la vivienda",
+            [
+                ("Dirección", inmueble.get("direccion") or "Pendiente"),
+                ("Tipo de inmueble", inmueble.get("tipo_inmueble") or "Pendiente"),
+                ("Zona / población", locality),
+                ("Referencia catastral", inmueble.get("referencia_catastral") or "Pendiente"),
+                ("Superficie / distribución", f"{_pdf_format_number(inmueble.get('m2'), 2) if inmueble.get('m2') not in (None, '') else 'Pendiente'} m² · {inmueble.get('habitaciones') or '-'} hab. · {inmueble.get('banos') or '-'} baños"),
+            ],
+        ),
+        (
+            "Precio y forma de pago",
+            [
+                ("Precio de venta", price),
+                ("Tributos y gastos", "Se informarán conforme a ley y según corresponda al adquirente"),
+                ("Forma de pago", "Pendiente de concretar en expediente"),
+                ("Validez del precio", "Hasta nueva actualización comercial"),
+            ],
+        ),
+        (
+            "Situación registral y documental",
+            [
+                ("Titularidad / cargas", "Comprobar con nota simple registral actualizada"),
+                ("Documentos localizados", docs_text),
+                ("Año de construcción", "Pendiente de completar en expediente"),
+                ("Cuota de comunidad", "Pendiente de completar en expediente"),
+            ],
+        ),
+        (
+            "Suministros e información adicional",
+            [
+                ("Suministros", "Electricidad, agua, teléfono y gas: pendiente de validar"),
+                ("Intermediación", company.get("nombre") or "Grupo Modernia"),
+                ("Observaciones", captacion.get("notas") or "Sin observaciones adicionales"),
+            ],
+        ),
+    ]
+    footer = [
+        "Documento orientado al modelo de ficha informativa para segundas o ulteriores transmisiones del Decreto 218/2005 de la Junta de Andalucía.",
+        "La documentación acreditativa del contenido de esta ficha queda disponible para consulta en el expediente del inmueble.",
+    ]
+    return build_branded_document_pdf(
+        "FICHA INFORMATIVA DE VENTA",
+        "Modelo adaptado para segundas o ulteriores transmisiones de vivienda · Junta de Andalucía",
+        sections,
+        footer,
+    )
+
+
+def build_inmueble_consumo_sale_price_note_pdf(company, inmueble, captacion):
+    price = format_eur(inmueble.get("precio_objetivo") or captacion.get("precio_objetivo") or 0)
+    sections = [
+        (
+            "Datos económicos",
+            [
+                ("Vivienda", inmueble.get("direccion") or "Pendiente"),
+                ("Precio de venta", price),
+                ("Anejos y servicios accesorios", "No constan diferenciados en el expediente actual"),
+                ("Tributos y otros gastos", "Se repercutirán conforme a ley y se detallarán en contrato o reserva"),
+            ],
+        ),
+        (
+            "Forma de pago",
+            [
+                ("Pago inicial / señal", "Pendiente de concretar"),
+                ("Resto del precio", "Pendiente de concretar"),
+                ("Subrogación / financiación", "Pendiente de concretar, en su caso"),
+                ("Período de validez", "Hasta nueva actualización comercial"),
+            ],
+        ),
+        (
+            "Mención obligatoria",
+            [
+                "Del precio total de la venta se deducirá cualquier cantidad que entregue el adquirente antes de la formalización del contrato, salvo que conste de manera inequívoca que dicha entrega se realiza en otro concepto.",
+                f"Intermediación comercial gestionada por {company.get('nombre') or 'Grupo Modernia'}.",
+            ],
+        ),
+    ]
+    footer = [
+        "Documento orientado a la nota explicativa sobre el precio y las formas de pago prevista en el artículo 8 del Decreto 218/2005.",
+    ]
+    return build_branded_document_pdf(
+        "NOTA EXPLICATIVA SOBRE EL PRECIO Y LAS FORMAS DE PAGO",
+        "Oferta económica del inmueble conforme al expediente comercial disponible",
+        sections,
+        footer,
+    )
+
+
+def build_inmueble_consumo_rental_dia_pdf(company, inmueble, captacion, docs):
+    rent_amount = format_eur(inmueble.get("precio_objetivo") or captacion.get("precio_objetivo") or 0)
+    locality = " · ".join([part for part in [inmueble.get("zona"), inmueble.get("poblacion"), inmueble.get("provincia")] if part]) or "Pendiente"
+    docs_text = ", ".join(
+        str(item.get("tipo") or item.get("nombre") or "").strip()
+        for item in (docs or [])
+        if str(item.get("tipo") or item.get("nombre") or "").strip()
+    ) or "Documentación en expediente Modernia"
+    sections = [
+        (
+            "Identificación de la vivienda",
+            [
+                ("Dirección", inmueble.get("direccion") or "Pendiente"),
+                ("Tipo de inmueble", inmueble.get("tipo_inmueble") or "Pendiente"),
+                ("Zona / población", locality),
+                ("Superficie / distribución", f"{_pdf_format_number(inmueble.get('m2'), 2) if inmueble.get('m2') not in (None, '') else 'Pendiente'} m² · {inmueble.get('habitaciones') or '-'} hab. · {inmueble.get('banos') or '-'} baños"),
+                ("Inventario / mobiliario", "Pendiente de concretar en expediente"),
+            ],
+        ),
+        (
+            "Condiciones económicas",
+            [
+                ("Renta", rent_amount),
+                ("Gastos repercutibles", "Pendiente de concretar en expediente"),
+                ("Fianza legal", "Equivalente a una mensualidad de renta, salvo actualización normativa"),
+                ("Garantías adicionales", "Pendiente de concretar en expediente"),
+                ("Coste de intermediación", "Pendiente de concretar en expediente"),
+            ],
+        ),
+        (
+            "Condiciones del arrendamiento",
+            [
+                ("Duración prevista", "Pendiente de concretar en contrato"),
+                ("Modelo contractual", "Disponible a solicitud del consumidor"),
+                ("Licencias / ocupación", "Pendiente de validar en expediente"),
+                ("Cargas o gravámenes", "Pendiente de validar en expediente"),
+                ("Documentos localizados", docs_text),
+            ],
+        ),
+        (
+            "Intermediación",
+            [
+                ("Entidad intermediaria", company.get("nombre") or "Grupo Modernia"),
+                ("Observaciones", captacion.get("notas") or "Sin observaciones adicionales"),
+            ],
+        ),
+    ]
+    footer = [
+        "Documento orientado al Documento Informativo Abreviado para arrendamiento de vivienda previsto en el Decreto 218/2005 de la Junta de Andalucía.",
+    ]
+    return build_branded_document_pdf(
+        "DOCUMENTO INFORMATIVO ABREVIADO · ARRENDAMIENTO",
+        "Modelo adaptado para alquiler de vivienda",
+        sections,
+        footer,
+    )
 
 
 def send_file(handler, path):
@@ -23170,6 +23510,69 @@ class Handler(BaseHTTPRequestHandler):
             )
             safe_ref = slugify_text(inmueble["direccion"] or inmueble["referencia"] or inmueble_id)[:50] or inmueble_id
             filename = f"hoja_visita_{safe_ref}.pdf"
+            binary_response(self, pdf_bytes, content_type="application/pdf", filename=filename)
+            return
+
+        if path == "/api/inmueble_consumo_pdf":
+            inmueble_id = params.get("id", [""])[0]
+            doc_kind = str(params.get("kind", [""])[0] or "").strip().lower()
+            if not inmueble_id or not doc_kind:
+                json_response(self, {"error": "id y kind requeridos"}, status=400)
+                return
+            inmueble = conn.execute(
+                "SELECT * FROM inmuebles WHERE id = ? LIMIT 1",
+                (inmueble_id,),
+            ).fetchone()
+            if not inmueble:
+                json_response(self, {"error": "Inmueble no encontrado"}, status=404)
+                return
+            empresa = conn.execute(
+                "SELECT * FROM empresas WHERE id = ? LIMIT 1",
+                (inmueble["empresa_id"],),
+            ).fetchone()
+            captacion = conn.execute(
+                """
+                SELECT *
+                FROM captaciones
+                WHERE inmueble_id = ?
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                (inmueble_id,),
+            ).fetchone()
+            if not captacion:
+                json_response(self, {"error": "Captación no encontrada"}, status=404)
+                return
+            status = str(captacion["situacion_comercial"] or inmueble["estado"] or "").strip().lower()
+            if status != "encargo":
+                json_response(self, {"error": "Los documentos de consumo solo están disponibles para inmuebles en Encargo"}, status=400)
+                return
+            docs = conn.execute(
+                """
+                SELECT nombre, url, tipo
+                FROM inmueble_docs
+                WHERE inmueble_id = ?
+                ORDER BY created_at DESC
+                """,
+                (inmueble_id,),
+            ).fetchall()
+            company_payload = dict(empresa) if empresa else {}
+            inmueble_payload = dict(inmueble)
+            captacion_payload = dict(captacion)
+            docs_payload = [dict(r) for r in docs]
+            safe_ref = slugify_text(inmueble["direccion"] or inmueble["referencia"] or inmueble_id)[:50] or inmueble_id
+            if doc_kind == "venta_ficha":
+                pdf_bytes = build_inmueble_consumo_sale_sheet_pdf(company_payload, inmueble_payload, captacion_payload, docs_payload)
+                filename = f"ficha_venta_{safe_ref}.pdf"
+            elif doc_kind == "venta_precio":
+                pdf_bytes = build_inmueble_consumo_sale_price_note_pdf(company_payload, inmueble_payload, captacion_payload)
+                filename = f"nota_precio_{safe_ref}.pdf"
+            elif doc_kind == "alquiler_dia":
+                pdf_bytes = build_inmueble_consumo_rental_dia_pdf(company_payload, inmueble_payload, captacion_payload, docs_payload)
+                filename = f"dia_alquiler_{safe_ref}.pdf"
+            else:
+                json_response(self, {"error": "kind no soportado"}, status=400)
+                return
             binary_response(self, pdf_bytes, content_type="application/pdf", filename=filename)
             return
 
