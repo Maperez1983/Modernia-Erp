@@ -349,6 +349,10 @@
                 </select>
               </label>
               <label>
+                Clasificación esperada
+                <input name="clasificacion" placeholder="Factura, Fiscal, Identidad..." />
+              </label>
+              <label>
                 Estado
                 <select name="estado">
                   <option>Pendiente</option>
@@ -837,11 +841,15 @@
             </label>
             <label>
               Proveedor
-              <input name="proveedor" />
+              <select name="proveedor_id"></select>
             </label>
             <label>
               Responsable
               <input name="responsable" />
+            </label>
+            <label>
+              Coste estimado
+              <input name="coste_estimado" type="number" min="0" step="0.01" />
             </label>
             <label class="span-2">
               Descripción

@@ -12089,6 +12089,11 @@ def fetch_workspace_portal_public(conn, token):
     ).fetchone()
     if not row:
         return None
+    conn.execute(
+        "UPDATE workspace_portal_clientes SET ultimo_acceso_at = datetime(?) WHERE token = ?",
+        (datetime.now(timezone.utc).isoformat(), token),
+    )
+    conn.commit()
     docs = conn.execute(
         """
         SELECT nombre, clasificacion, estado, created_at
@@ -12111,7 +12116,7 @@ def fetch_workspace_portal_public(conn, token):
     ).fetchall()
     requests = conn.execute(
         """
-        SELECT titulo, descripcion, prioridad, estado, fecha_limite
+        SELECT id, titulo, descripcion, clasificacion, prioridad, estado, fecha_limite, completed_at
         FROM workspace_portal_requerimientos
         WHERE workspace_id = ? AND cliente_id = ?
         ORDER BY
@@ -14815,7 +14820,8 @@ class Handler(BaseHTTPRequestHandler):
                     """
                     UPDATE workspace_documentos_inbox
                     SET empresa_id = ?, cliente_id = ?, suggested_cliente_id = ?, servicio = ?, nombre = ?, tipo = ?, clasificacion = ?,
-                        canal_entrada = ?, prioridad = ?, estado = ?, doc_key = ?, doc_url = ?, notas = ?, updated_at = datetime(?)
+                        canal_entrada = ?, prioridad = ?, estado = ?, doc_key = ?, doc_url = ?, origen_tipo = ?, origen_id = ?,
+                        reviewed_at = ?, reviewed_by = ?, notas = ?, updated_at = datetime(?)
                     WHERE id = ? AND workspace_id = ?
                     """,
                     (
@@ -14831,6 +14837,10 @@ class Handler(BaseHTTPRequestHandler):
                         (payload.get("estado") or "").strip() or "Pendiente",
                         (payload.get("doc_key") or "").strip() or None,
                         (payload.get("doc_url") or "").strip() or None,
+                        (payload.get("origen_tipo") or "").strip() or None,
+                        (payload.get("origen_id") or "").strip() or None,
+                        (payload.get("reviewed_at") or "").strip() or None,
+                        (payload.get("reviewed_by") or "").strip() or None,
                         (payload.get("notas") or "").strip() or None,
                         now,
                         record_id,
@@ -14843,8 +14853,9 @@ class Handler(BaseHTTPRequestHandler):
                     """
                     INSERT INTO workspace_documentos_inbox (
                       id, workspace_id, empresa_id, cliente_id, suggested_cliente_id, servicio, nombre, tipo, clasificacion,
-                      canal_entrada, prioridad, estado, doc_key, doc_url, notas, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                      canal_entrada, prioridad, estado, doc_key, doc_url, origen_tipo, origen_id, reviewed_at, reviewed_by,
+                      notas, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
                     """,
                     (
                         record_id,
@@ -14861,6 +14872,10 @@ class Handler(BaseHTTPRequestHandler):
                         (payload.get("estado") or "").strip() or "Pendiente",
                         (payload.get("doc_key") or "").strip() or None,
                         (payload.get("doc_url") or "").strip() or None,
+                        (payload.get("origen_tipo") or "").strip() or None,
+                        (payload.get("origen_id") or "").strip() or None,
+                        (payload.get("reviewed_at") or "").strip() or None,
+                        (payload.get("reviewed_by") or "").strip() or None,
                         (payload.get("notas") or "").strip() or None,
                         now,
                         now,
@@ -14885,6 +14900,56 @@ class Handler(BaseHTTPRequestHandler):
                 )
             conn.commit()
             json_response(self, {"ok": True, "id": record_id, "automation_actions": auto_created})
+            return
+        elif parsed.path == "/api/workspace_inbox_review":
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            record_id = str(payload.get("id") or "").strip()
+            action = normalize_lookup_text(payload.get("action") or "")
+            reviewer = str(payload.get("reviewed_by") or payload.get("usuario") or "").strip() or "Sistema"
+            if not workspace_id or not record_id or not action:
+                json_response(self, {"error": "workspace_id, id y action requeridos"}, status=400)
+                return
+            row = conn.execute(
+                "SELECT * FROM workspace_documentos_inbox WHERE id = ? AND workspace_id = ? LIMIT 1",
+                (record_id, workspace_id),
+            ).fetchone()
+            if not row:
+                json_response(self, {"error": "Documento no encontrado"}, status=404)
+                return
+            cliente_id = str(payload.get("cliente_id") or "").strip() or row["cliente_id"] or row["suggested_cliente_id"]
+            new_state = str(payload.get("estado") or "").strip() or row["estado"] or "Pendiente"
+            if action == "accept_suggestion" and row["suggested_cliente_id"]:
+                cliente_id = row["suggested_cliente_id"]
+                new_state = "Asignado"
+            elif action == "mark_processed":
+                new_state = "Procesado"
+            elif action == "archive":
+                new_state = "Archivado"
+            elif action == "link_request":
+                new_state = "Recibido"
+            conn.execute(
+                """
+                UPDATE workspace_documentos_inbox
+                SET cliente_id = ?, estado = ?, reviewed_at = datetime(?), reviewed_by = ?, updated_at = datetime(?)
+                WHERE id = ? AND workspace_id = ?
+                """,
+                (cliente_id, new_state, now, reviewer, now, record_id, workspace_id),
+            )
+            origen_tipo = str(payload.get("origen_tipo") or row["origen_tipo"] or "").strip()
+            origen_id = str(payload.get("origen_id") or row["origen_id"] or "").strip()
+            if origen_tipo == "portal_requerimiento" and origen_id:
+                request_state = "Completado" if action == "mark_processed" else "Recibido"
+                completed_at = now if request_state == "Completado" else None
+                conn.execute(
+                    """
+                    UPDATE workspace_portal_requerimientos
+                    SET estado = ?, resolved_doc_id = ?, completed_at = COALESCE(?, completed_at), updated_at = datetime(?)
+                    WHERE id = ? AND workspace_id = ?
+                    """,
+                    (request_state, record_id, completed_at, now, origen_id, workspace_id),
+                )
+            conn.commit()
+            json_response(self, {"ok": True, "id": record_id, "estado": new_state, "cliente_id": cliente_id})
             return
         elif parsed.path == "/api/workspace_portal":
             workspace_id = str(payload.get("workspace_id") or "").strip()
@@ -14970,16 +15035,18 @@ class Handler(BaseHTTPRequestHandler):
                 (payload.get("servicio") or "").strip() or None,
                 titulo,
                 (payload.get("descripcion") or "").strip() or None,
+                (payload.get("clasificacion") or "").strip() or None,
                 (payload.get("prioridad") or "").strip() or "Normal",
                 (payload.get("estado") or "").strip() or "Pendiente",
                 (payload.get("fecha_limite") or "").strip() or None,
+                now if (payload.get("estado") or "").strip() == "Completado" else None,
             )
             if record_id:
                 conn.execute(
                     """
                     UPDATE workspace_portal_requerimientos
                     SET workspace_id = ?, portal_cliente_id = ?, cliente_id = ?, servicio = ?, titulo = ?, descripcion = ?,
-                        prioridad = ?, estado = ?, fecha_limite = ?, updated_at = datetime(?)
+                        clasificacion = ?, prioridad = ?, estado = ?, fecha_limite = ?, completed_at = COALESCE(?, completed_at), updated_at = datetime(?)
                     WHERE id = ? AND workspace_id = ?
                     """,
                     (*values, now, record_id, workspace_id),
@@ -14990,8 +15057,8 @@ class Handler(BaseHTTPRequestHandler):
                     """
                     INSERT INTO workspace_portal_requerimientos (
                       id, workspace_id, portal_cliente_id, cliente_id, servicio, titulo, descripcion,
-                      prioridad, estado, fecha_limite, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                      clasificacion, prioridad, estado, fecha_limite, completed_at, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
                     """,
                     (record_id, *values, now, now),
                 )
@@ -15021,32 +15088,58 @@ class Handler(BaseHTTPRequestHandler):
             if not empresa_id:
                 json_response(self, {"error": "workspace sin empresa operativa"}, status=400)
                 return
+            requerimiento_id = str(payload.get("requerimiento_id") or "").strip() or None
+            request_row = None
+            if requerimiento_id:
+                request_row = conn.execute(
+                    """
+                    SELECT id, servicio, clasificacion
+                    FROM workspace_portal_requerimientos
+                    WHERE id = ? AND portal_cliente_id = ? AND workspace_id = ?
+                    LIMIT 1
+                    """,
+                    (requerimiento_id, portal["id"], portal["workspace_id"]),
+                ).fetchone()
+                if not request_row:
+                    json_response(self, {"error": "requerimiento no encontrado"}, status=404)
+                    return
             record_id = os.urandom(16).hex()
             conn.execute(
                 """
                 INSERT INTO workspace_documentos_inbox (
                   id, workspace_id, empresa_id, cliente_id, servicio, nombre, tipo, clasificacion,
-                  canal_entrada, prioridad, estado, doc_key, doc_url, notas, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Portal', ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                  canal_entrada, prioridad, estado, doc_key, doc_url, origen_tipo, origen_id, notas, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Portal', ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
                 """,
                 (
                     record_id,
                     portal["workspace_id"],
                     empresa_id,
                     portal["cliente_id"],
-                    (payload.get("servicio") or "").strip() or "portal_cliente",
+                    (payload.get("servicio") or (request_row["servicio"] if request_row else "")).strip() or "portal_cliente",
                     nombre,
                     (payload.get("tipo") or "").strip() or None,
-                    (payload.get("clasificacion") or "").strip() or None,
+                    (payload.get("clasificacion") or (request_row["clasificacion"] if request_row else "")).strip() or None,
                     (payload.get("prioridad") or "").strip() or "Normal",
                     (payload.get("estado") or "").strip() or "Pendiente",
                     (payload.get("doc_key") or "").strip() or None,
                     (payload.get("doc_url") or "").strip() or None,
+                    "portal_requerimiento" if request_row else None,
+                    request_row["id"] if request_row else None,
                     (payload.get("notas") or "").strip() or None,
                     now,
                     now,
                 ),
             )
+            if request_row:
+                conn.execute(
+                    """
+                    UPDATE workspace_portal_requerimientos
+                    SET estado = 'Recibido', resolved_doc_id = ?, updated_at = datetime(?)
+                    WHERE id = ? AND workspace_id = ?
+                    """,
+                    (record_id, now, request_row["id"], portal["workspace_id"]),
+                )
             auto_created = run_workspace_automations(
                 conn,
                 portal["workspace_id"],
@@ -15224,6 +15317,14 @@ class Handler(BaseHTTPRequestHandler):
             if not workspace_id or not comunidad_id or not titulo:
                 json_response(self, {"error": "workspace_id, comunidad_id y titulo requeridos"}, status=400)
                 return
+            proveedor_id = str(payload.get("proveedor_id") or "").strip() or None
+            proveedor_nombre = str(payload.get("proveedor") or "").strip() or None
+            if proveedor_id and not proveedor_nombre:
+                proveedor_row = conn.execute(
+                    "SELECT nombre FROM workspace_fincas_proveedores WHERE id = ? AND workspace_id = ? LIMIT 1",
+                    (proveedor_id, workspace_id),
+                ).fetchone()
+                proveedor_nombre = proveedor_row["nombre"] if proveedor_row else None
             values = (
                 workspace_id,
                 comunidad_id,
@@ -15231,17 +15332,19 @@ class Handler(BaseHTTPRequestHandler):
                 (payload.get("descripcion") or "").strip() or None,
                 (payload.get("prioridad") or "").strip() or "Normal",
                 (payload.get("estado") or "").strip() or "Abierta",
-                (payload.get("proveedor") or "").strip() or None,
+                proveedor_nombre,
+                proveedor_id,
                 (payload.get("responsable") or "").strip() or None,
                 (payload.get("fecha_apertura") or "").strip() or None,
                 (payload.get("fecha_cierre") or "").strip() or None,
+                round(parse_money_value(payload.get("coste_estimado")), 2) if parse_money_value(payload.get("coste_estimado")) is not None else None,
             )
             if record_id:
                 conn.execute(
                     """
                     UPDATE workspace_fincas_incidencias
                     SET workspace_id = ?, comunidad_id = ?, titulo = ?, descripcion = ?, prioridad = ?, estado = ?,
-                        proveedor = ?, responsable = ?, fecha_apertura = ?, fecha_cierre = ?, updated_at = datetime(?)
+                        proveedor = ?, proveedor_id = ?, responsable = ?, fecha_apertura = ?, fecha_cierre = ?, coste_estimado = ?, updated_at = datetime(?)
                     WHERE id = ? AND workspace_id = ?
                     """,
                     (*values, now, record_id, workspace_id),
@@ -15252,8 +15355,8 @@ class Handler(BaseHTTPRequestHandler):
                     """
                     INSERT INTO workspace_fincas_incidencias (
                       id, workspace_id, comunidad_id, titulo, descripcion, prioridad, estado, proveedor,
-                      responsable, fecha_apertura, fecha_cierre, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                      proveedor_id, responsable, fecha_apertura, fecha_cierre, coste_estimado, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
                     """,
                     (record_id, *values, now, now),
                 )

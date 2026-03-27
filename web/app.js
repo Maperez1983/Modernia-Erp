@@ -3903,6 +3903,7 @@ const renderWorkspaceBillingList = (rows = []) => {
                 <span>${euroFormatter.format(Number(row.total || 0))}</span>
                 <span>${row.estado || "Borrador"}</span>
                 <a class="secondary ghost button-inline" href="/api/workspace_factura_pdf?id=${encodeURIComponent(row.id || "")}&workspace_id=${encodeURIComponent(state.currentWorkspaceId || "")}" target="_blank" rel="noreferrer">PDF</a>
+                ${Number(row.saldo_pendiente || 0) > 0 ? `<button type="button" class="secondary ghost" data-billing-collect="${row.id}">Cobrar</button>` : ""}
                 <button type="button" class="secondary ghost" data-billing-edit="${row.id}">Editar</button>
               </div>
             </div>
@@ -3922,6 +3923,23 @@ const renderWorkspaceBillingList = (rows = []) => {
       fillWorkspaceBillingForm({ ...record, cliente_lookup: clientLabel });
       if (workspaceBillingStatus) workspaceBillingStatus.textContent = "Editando movimiento existente.";
       workspaceBillingForm?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  });
+  workspaceBillingList.querySelectorAll("[data-billing-collect]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const billingId = button.dataset.billingCollect || "";
+      const record = state.workspaceBillingRows.find((row) => String(row.id || "") === String(billingId));
+      if (!record) return;
+      fillWorkspaceCollectionsForm({
+        factura_id: record.id,
+        fecha_cobro: new Date().toISOString().slice(0, 10),
+        importe: Number(record.saldo_pendiente || 0).toFixed(2),
+        metodo: record.forma_cobro || "Transferencia",
+        estado: "Aplicado",
+        referencia: [record.serie, record.numero].filter(Boolean).join("-"),
+      });
+      if (workspaceCollectionsStatus) workspaceCollectionsStatus.textContent = "Cobro preparado desde la factura.";
+      workspaceCollectionsForm?.scrollIntoView({ behavior: "smooth", block: "start" });
     });
   });
 };
@@ -4090,10 +4108,12 @@ const fillWorkspaceInboxForm = (record = null) => {
     canal_entrada: "Email",
     prioridad: "Normal",
     estado: "Pendiente",
+    origen_tipo: "",
+    origen_id: "",
     notas: "",
     ...(record || {}),
   };
-  ["id", "workspace_id", "empresa_id", "cliente_id", "suggested_cliente_id", "servicio", "nombre", "tipo", "clasificacion", "canal_entrada", "prioridad", "estado", "notas"].forEach((field) => {
+  ["id", "workspace_id", "empresa_id", "cliente_id", "suggested_cliente_id", "servicio", "nombre", "tipo", "clasificacion", "canal_entrada", "prioridad", "estado", "origen_tipo", "origen_id", "notas"].forEach((field) => {
     const input = workspaceInboxForm.querySelector(`[name="${field}"]`);
     if (input) input.value = payload[field] ?? "";
   });
@@ -4118,10 +4138,14 @@ const renderWorkspaceInboxList = (rows = []) => {
                 <strong>${row.nombre || "Documento"}</strong>
                 <div class="muted">${row.empresa_nombre || "-"} · ${row.servicio || "sin servicio"} · ${row.estado || "Pendiente"}</div>
                 ${row.suggested_cliente_nombre ? `<div class="workspace-document-suggestion">Cliente sugerido: ${row.suggested_cliente_nombre}</div>` : ""}
+                ${row.requerimiento_titulo ? `<div class="muted">Requerimiento: ${row.requerimiento_titulo}</div>` : ""}
               </div>
               <div class="workspace-billing-meta">
                 <span>${row.canal_entrada || "Manual"}</span>
                 <span>${row.prioridad || "Normal"}</span>
+                ${row.doc_url ? `<a class="secondary ghost button-inline" href="${row.doc_url}" target="_blank" rel="noreferrer">Abrir</a>` : ""}
+                ${row.suggested_cliente_id && !row.cliente_id ? `<button type="button" class="secondary ghost" data-inbox-accept="${row.id}">Aceptar sugerido</button>` : ""}
+                ${row.estado !== "Procesado" ? `<button type="button" class="secondary ghost" data-inbox-process="${row.id}">Procesar</button>` : ""}
                 <button type="button" class="secondary ghost" data-inbox-edit="${row.id}">Editar</button>
               </div>
             </div>
@@ -4137,6 +4161,26 @@ const renderWorkspaceInboxList = (rows = []) => {
       const lookup = record.suggested_cliente_nombre || record.cliente_nombre || "";
       fillWorkspaceInboxForm({ ...record, suggested_cliente_lookup: lookup });
     });
+  });
+  const runInboxAction = async (id, action) => {
+    try {
+      const data = await fetch("/api/workspace_inbox_review", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workspace_id: state.currentWorkspaceId, id, action, usuario: getCurrentUser() }),
+      }).then((res) => res.json());
+      if (data?.error) throw new Error(data.error);
+      await loadWorkspaceDetail(state.currentWorkspaceId);
+      if (workspaceInboxStatus) workspaceInboxStatus.textContent = `Documento ${data.estado || "actualizado"}.`;
+    } catch (error) {
+      if (workspaceInboxStatus) workspaceInboxStatus.textContent = error.message || "No se pudo revisar el documento.";
+    }
+  };
+  workspaceInboxList.querySelectorAll("[data-inbox-accept]").forEach((button) => {
+    button.addEventListener("click", () => runInboxAction(button.dataset.inboxAccept || "", "accept_suggestion"));
+  });
+  workspaceInboxList.querySelectorAll("[data-inbox-process]").forEach((button) => {
+    button.addEventListener("click", () => runInboxAction(button.dataset.inboxProcess || "", "mark_processed"));
   });
 };
 
@@ -4246,12 +4290,13 @@ const fillWorkspacePortalRequestForm = (record = null) => {
     servicio: "",
     titulo: "",
     descripcion: "",
+    clasificacion: "",
     prioridad: "Normal",
     estado: "Pendiente",
     fecha_limite: "",
     ...(record || {}),
   };
-  ["id", "workspace_id", "portal_cliente_id", "servicio", "titulo", "descripcion", "prioridad", "estado", "fecha_limite"].forEach((field) => {
+  ["id", "workspace_id", "portal_cliente_id", "servicio", "titulo", "descripcion", "clasificacion", "prioridad", "estado", "fecha_limite"].forEach((field) => {
     const input = workspacePortalRequestForm.querySelector(`[name="${field}"]`);
     if (input) input.value = payload[field] ?? "";
   });
@@ -4271,7 +4316,7 @@ const renderWorkspacePortalRequestList = (rows = []) => {
             <div class="workspace-billing-row">
               <div>
                 <strong>${row.titulo || "-"}</strong>
-                <div class="muted">${row.cliente_nombre || "-"}${row.servicio ? ` · ${row.servicio}` : ""}</div>
+                <div class="muted">${row.cliente_nombre || "-"}${row.servicio ? ` · ${row.servicio}` : ""}${row.clasificacion ? ` · ${row.clasificacion}` : ""}</div>
               </div>
               <div class="workspace-billing-meta">
                 <span>${row.fecha_limite || "Sin fecha"}</span>
@@ -4426,6 +4471,7 @@ const renderWorkspaceTimeList = (rows = []) => {
                 <span>${row.hora_inicio || "-"}${row.hora_fin ? ` - ${row.hora_fin}` : ""}</span>
                 <span>Pausa ${numberFormatter.format(Number(row.pausa_min || 0))} min</span>
                 <span>${row.estado || "Borrador"}</span>
+                ${!row.hora_fin ? `<button type="button" class="secondary ghost" data-time-close="${row.id}">Cerrar</button>` : ""}
                 <button type="button" class="secondary ghost" data-time-edit="${row.id}">Editar</button>
               </div>
             </div>
@@ -4440,6 +4486,26 @@ const renderWorkspaceTimeList = (rows = []) => {
       if (record) fillWorkspaceTimeForm(record);
     });
   });
+  workspaceTimeList.querySelectorAll("[data-time-close]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const record = rows.find((row) => String(row.id || "") === String(button.dataset.timeClose || ""));
+      if (!record) return;
+      const now = new Date();
+      const currentTime = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+      try {
+        const data = await fetch("/api/workspace_registro_horario", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...record, workspace_id: state.currentWorkspaceId, hora_fin: currentTime, estado: record.estado || "Validado" }),
+        }).then((res) => res.json());
+        if (data?.error) throw new Error(data.error);
+        await loadWorkspaceDetail(state.currentWorkspaceId);
+        if (workspaceTimeStatus) workspaceTimeStatus.textContent = `Fichaje cerrado a las ${currentTime}.`;
+      } catch (error) {
+        if (workspaceTimeStatus) workspaceTimeStatus.textContent = error.message || "No se pudo cerrar el fichaje.";
+      }
+    });
+  });
 };
 
 const hydrateWorkspaceCommunitySelect = (rows = []) => {
@@ -4450,6 +4516,14 @@ const hydrateWorkspaceCommunitySelect = (rows = []) => {
       ? rows.map((row) => `<option value="${row.id}">${row.nombre || "-"}</option>`).join("")
       : "<option value=''>Sin comunidades</option>";
   });
+};
+
+const hydrateWorkspaceProviderSelect = (rows = []) => {
+  const select = workspaceFincasIncidentForm?.querySelector('[name="proveedor_id"]');
+  if (!select) return;
+  select.innerHTML = ["<option value=''>Sin asignar</option>"]
+    .concat((rows || []).map((row) => `<option value="${row.id}">${row.nombre || "-"}${row.comunidad_nombre ? ` · ${row.comunidad_nombre}` : ""}</option>`))
+    .join("");
 };
 
 const fillWorkspaceFincasCommunityForm = (record = null) => {
@@ -4521,13 +4595,14 @@ const fillWorkspaceFincasIncidentForm = (record = null) => {
     descripcion: "",
     prioridad: "Normal",
     estado: "Abierta",
-    proveedor: "",
+    proveedor_id: "",
     responsable: "",
     fecha_apertura: "",
     fecha_cierre: "",
+    coste_estimado: "",
     ...(record || {}),
   };
-  ["id", "workspace_id", "comunidad_id", "titulo", "descripcion", "prioridad", "estado", "proveedor", "responsable", "fecha_apertura", "fecha_cierre"].forEach((field) => {
+  ["id", "workspace_id", "comunidad_id", "titulo", "descripcion", "prioridad", "estado", "proveedor_id", "responsable", "fecha_apertura", "fecha_cierre", "coste_estimado"].forEach((field) => {
     const input = workspaceFincasIncidentForm.querySelector(`[name="${field}"]`);
     if (input) input.value = payload[field] ?? "";
   });
@@ -4547,11 +4622,12 @@ const renderWorkspaceFincasIncidentList = (rows = []) => {
             <div class="workspace-billing-row">
               <div>
                 <strong>${row.titulo || "-"}</strong>
-                <div class="muted">${row.comunidad_nombre || "-"}${row.proveedor ? ` · ${row.proveedor}` : ""}</div>
+                <div class="muted">${row.comunidad_nombre || "-"}${row.proveedor_nombre || row.proveedor ? ` · ${row.proveedor_nombre || row.proveedor}` : ""}</div>
               </div>
               <div class="workspace-billing-meta">
                 <span>${row.fecha_apertura || "Sin fecha"}</span>
                 <span>${row.prioridad || "Normal"}</span>
+                <span>${row.coste_estimado ? euroFormatter.format(Number(row.coste_estimado || 0)) : "-"}</span>
                 <span>${row.estado || "Abierta"}</span>
                 <button type="button" class="secondary ghost" data-incident-edit="${row.id}">Editar</button>
               </div>
@@ -4827,6 +4903,7 @@ const loadWorkspaceDetail = async (workspaceId) => {
   renderWorkspaceFincasCommunityList(fincasCommunities.rows || []);
   fillWorkspaceFincasCommunityForm();
   hydrateWorkspaceCommunitySelect(fincasCommunities.rows || []);
+  hydrateWorkspaceProviderSelect(fincasProviders.rows || []);
   renderWorkspaceFincasIncidentList(fincasIncidents.rows || []);
   fillWorkspaceFincasIncidentForm();
   renderWorkspaceFincasProviderList(fincasProviders.rows || []);
@@ -4882,6 +4959,7 @@ const loadWorkspaceCentral = async () => {
     renderWorkspaceFincasCommunityList([]);
     fillWorkspaceFincasCommunityForm();
     hydrateWorkspaceCommunitySelect([]);
+    hydrateWorkspaceProviderSelect([]);
     renderWorkspaceFincasIncidentList([]);
     fillWorkspaceFincasIncidentForm();
     renderWorkspaceFincasProviderList([]);
@@ -5611,6 +5689,16 @@ const openWorkspacePortalPublic = async (token) => {
               Nombre documento
               <input name="nombre" required placeholder="IRPF, factura, contrato, justificante..." />
             </label>
+            <label class="span-2">
+              Requerimiento relacionado
+              <select name="requerimiento_id">
+                <option value="">Sin vincular</option>
+                ${(data.requerimientos || [])
+                  .filter((row) => row.estado !== "Completado")
+                  .map((row) => `<option value="${row.id}">${row.titulo || "Requerimiento"}${row.clasificacion ? ` · ${row.clasificacion}` : ""}</option>`)
+                  .join("")}
+              </select>
+            </label>
             <label>
               Servicio
               <input name="servicio" value="portal_cliente" />
@@ -5673,11 +5761,12 @@ const openWorkspacePortalPublic = async (token) => {
                             <div class="workspace-billing-row">
                               <div>
                                 <strong>${row.titulo || "Requerimiento"}</strong>
-                                <div class="muted">${row.descripcion || row.prioridad || ""}</div>
+                                <div class="muted">${row.descripcion || row.prioridad || ""}${row.clasificacion ? ` · ${row.clasificacion}` : ""}</div>
                               </div>
                               <div class="workspace-billing-meta">
                                 <span>${row.fecha_limite || "Sin fecha"}</span>
                                 <span>${row.estado || "Pendiente"}</span>
+                                ${row.estado !== "Completado" ? `<button type="button" class="secondary ghost" data-portal-request-upload="${row.id}" data-portal-request-title="${(row.titulo || "").replace(/"/g, "&quot;")}" data-portal-request-classification="${(row.clasificacion || "").replace(/"/g, "&quot;")}">Responder</button>` : ""}
                               </div>
                             </div>
                           `
@@ -5736,6 +5825,7 @@ const openWorkspacePortalPublic = async (token) => {
             nombre: String(formData.get("nombre") || "").trim(),
             servicio: String(formData.get("servicio") || "").trim(),
             clasificacion: String(formData.get("clasificacion") || "").trim(),
+            requerimiento_id: String(formData.get("requerimiento_id") || "").trim(),
             notas: String(formData.get("notas") || "").trim(),
             doc_key: upload?.key || "",
             doc_url: upload?.public_url || "",
@@ -5753,6 +5843,20 @@ const openWorkspacePortalPublic = async (token) => {
         } catch (error) {
           if (uploadStatus) uploadStatus.textContent = error.message || "No se pudo subir el documento.";
         }
+      });
+      document.querySelectorAll("[data-portal-request-upload]").forEach((button) => {
+        button.addEventListener("click", () => {
+          const requestId = button.dataset.portalRequestUpload || "";
+          const title = button.dataset.portalRequestTitle || "";
+          const classification = button.dataset.portalRequestClassification || "";
+          const requestSelect = uploadForm?.querySelector('[name="requerimiento_id"]');
+          const nameInput = uploadForm?.querySelector('[name="nombre"]');
+          const classificationInput = uploadForm?.querySelector('[name="clasificacion"]');
+          if (requestSelect) requestSelect.value = requestId;
+          if (nameInput && !nameInput.value.trim()) nameInput.value = title;
+          if (classificationInput && !classificationInput.value.trim()) classificationInput.value = classification;
+          uploadForm?.scrollIntoView({ behavior: "smooth", block: "start" });
+        });
       });
     }
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -25952,6 +26056,7 @@ if (workspaceNewBtn) {
     renderWorkspaceFincasCommunityList([]);
     fillWorkspaceFincasCommunityForm();
     hydrateWorkspaceCommunitySelect([]);
+    hydrateWorkspaceProviderSelect([]);
     renderWorkspaceFincasIncidentList([]);
     fillWorkspaceFincasIncidentForm();
     renderWorkspaceFincasProviderList([]);
