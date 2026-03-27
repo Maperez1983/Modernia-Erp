@@ -16951,300 +16951,308 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, {"output": output})
             return
         elif parsed.path == "/api/compraventas":
-            direccion = normalize_person_name(payload.get("direccion"))
-            if not direccion:
-                json_response(self, {"error": "direccion requerida"}, status=400)
-                return
-            allow_duplicate = str(payload.get("allow_duplicate") or "").strip().lower() in {"1", "true", "yes", "si"}
-            duplicate_matches = detect_inmobiliaria_duplicates(
-                conn,
-                empresa["id"],
-                direccion=direccion,
-                owner_nifs=[
+            try:
+                direccion = normalize_person_name(payload.get("direccion"))
+                if not direccion:
+                    json_response(self, {"error": "direccion requerida"}, status=400)
+                    return
+                allow_duplicate = str(payload.get("allow_duplicate") or "").strip().lower() in {"1", "true", "yes", "si"}
+                duplicate_matches = detect_inmobiliaria_duplicates(
+                    conn,
+                    empresa["id"],
+                    direccion=direccion,
+                    owner_nifs=[
+                        payload.get("propietario1_nif"),
+                        payload.get("propietario2_nif"),
+                    ],
+                    scope="compraventa",
+                )
+                if duplicate_matches and not allow_duplicate:
+                    json_response(
+                        self,
+                        {
+                            "error": "Posible duplicado detectado",
+                            "code": "duplicate_detected",
+                            "duplicates": duplicate_matches[:10],
+                        },
+                        status=409,
+                    )
+                    return
+                propietario1_id = ensure_cliente_for_inmobiliaria(
+                    conn,
+                    empresa["id"],
+                    payload.get("propietario1_nombre"),
                     payload.get("propietario1_nif"),
-                    payload.get("propietario2_nif"),
-                ],
-                scope="compraventa",
-            )
-            if duplicate_matches and not allow_duplicate:
-                json_response(
-                    self,
+                    now,
                     {
-                        "error": "Posible duplicado detectado",
-                        "code": "duplicate_detected",
-                        "duplicates": duplicate_matches[:10],
+                        "telefono": payload.get("propietario1_telefono"),
+                        "email": payload.get("propietario1_email"),
+                        "fecha_nacimiento": payload.get("propietario1_fecha_nacimiento"),
+                        "direccion": direccion,
                     },
-                    status=409,
                 )
-                return
-            propietario1_id = ensure_cliente_for_inmobiliaria(
-                conn,
-                empresa["id"],
-                payload.get("propietario1_nombre"),
-                payload.get("propietario1_nif"),
-                now,
-                {
-                    "telefono": payload.get("propietario1_telefono"),
-                    "email": payload.get("propietario1_email"),
-                    "fecha_nacimiento": payload.get("propietario1_fecha_nacimiento"),
-                    "direccion": direccion,
-                },
-            )
-            propietario2_id = ensure_cliente_for_inmobiliaria(
-                conn,
-                empresa["id"],
-                payload.get("propietario2_nombre"),
-                payload.get("propietario2_nif"),
-                now,
-                {
-                    "telefono": payload.get("propietario2_telefono"),
-                    "email": payload.get("propietario2_email"),
-                    "fecha_nacimiento": payload.get("propietario2_fecha_nacimiento"),
-                    "direccion": direccion,
-                },
-            )
-            contraparte1_id = ensure_cliente_for_inmobiliaria(
-                conn,
-                empresa["id"],
-                payload.get("contraparte1_nombre"),
-                payload.get("contraparte1_nif"),
-                now,
-                {
-                    "telefono": payload.get("contraparte1_telefono"),
-                    "email": payload.get("contraparte1_email"),
-                    "fecha_nacimiento": payload.get("contraparte1_fecha_nacimiento"),
-                    "direccion": "",
-                },
-            )
-            contraparte2_id = ensure_cliente_for_inmobiliaria(
-                conn,
-                empresa["id"],
-                payload.get("contraparte2_nombre"),
-                payload.get("contraparte2_nif"),
-                now,
-                {
-                    "telefono": payload.get("contraparte2_telefono"),
-                    "email": payload.get("contraparte2_email"),
-                    "fecha_nacimiento": payload.get("contraparte2_fecha_nacimiento"),
-                    "direccion": "",
-                },
-            )
-            inmueble_id = ensure_inmueble_for_compraventa(conn, empresa["id"], payload, now)
-            ensure_inmueble_propietario_link(conn, inmueble_id, propietario1_id, now)
-            ensure_inmueble_propietario_link(conn, inmueble_id, propietario2_id, now)
+                propietario2_id = ensure_cliente_for_inmobiliaria(
+                    conn,
+                    empresa["id"],
+                    payload.get("propietario2_nombre"),
+                    payload.get("propietario2_nif"),
+                    now,
+                    {
+                        "telefono": payload.get("propietario2_telefono"),
+                        "email": payload.get("propietario2_email"),
+                        "fecha_nacimiento": payload.get("propietario2_fecha_nacimiento"),
+                        "direccion": direccion,
+                    },
+                )
+                contraparte1_id = ensure_cliente_for_inmobiliaria(
+                    conn,
+                    empresa["id"],
+                    payload.get("contraparte1_nombre"),
+                    payload.get("contraparte1_nif"),
+                    now,
+                    {
+                        "telefono": payload.get("contraparte1_telefono"),
+                        "email": payload.get("contraparte1_email"),
+                        "fecha_nacimiento": payload.get("contraparte1_fecha_nacimiento"),
+                        "direccion": "",
+                    },
+                )
+                contraparte2_id = ensure_cliente_for_inmobiliaria(
+                    conn,
+                    empresa["id"],
+                    payload.get("contraparte2_nombre"),
+                    payload.get("contraparte2_nif"),
+                    now,
+                    {
+                        "telefono": payload.get("contraparte2_telefono"),
+                        "email": payload.get("contraparte2_email"),
+                        "fecha_nacimiento": payload.get("contraparte2_fecha_nacimiento"),
+                        "direccion": "",
+                    },
+                )
+                inmueble_id = ensure_inmueble_for_compraventa(conn, empresa["id"], payload, now)
+                ensure_inmueble_propietario_link(conn, inmueble_id, propietario1_id, now)
+                ensure_inmueble_propietario_link(conn, inmueble_id, propietario2_id, now)
 
-            fecha_encargo = (payload.get("fecha_encargo") or "").strip()
-            fecha_propuesta = (payload.get("fecha_propuesta") or "").strip()
-            fecha_escritura = (payload.get("fecha_escritura") or "").strip()
-            fecha_operacion = fecha_escritura or fecha_propuesta or fecha_encargo
-            precio_encargo = parse_money_value(payload.get("precio_encargo")) or None
-            precio_propuesta = parse_money_value(payload.get("precio_propuesta")) or None
-            precio_escritura = parse_money_value(payload.get("precio_escritura")) or None
-            precio_venta = precio_propuesta if precio_propuesta is not None else precio_escritura
-            desviacion_euros = round(precio_encargo - precio_venta, 2) if precio_encargo is not None and precio_venta is not None else None
-            desviacion_pct = round(((precio_encargo - precio_venta) / precio_encargo) * 100.0, 2) if precio_encargo not in (None, 0) and precio_venta is not None else None
-            dias_hasta_venta = None
-            if fecha_encargo and fecha_operacion:
-                start_dt = parse_iso_date(fecha_encargo)
-                end_dt = parse_iso_date(fecha_operacion)
-                if start_dt and end_dt:
-                    dias_hasta_venta = (end_dt - start_dt).days
-            doc_nota_encargo_path = (payload.get("doc_nota_encargo_path") or "").strip()
-            doc_propuesta_path = (payload.get("doc_propuesta_path") or "").strip()
-            doc_escritura_path = (payload.get("doc_escritura_path") or "").strip()
-            doc_nota_simple_path = (payload.get("doc_nota_simple_path") or "").strip()
-            doc_partes_visita_paths = (payload.get("doc_partes_visita_paths") or "").strip()
-            estado_documental = infer_operacion_estado_documental(
-                {
-                    "doc_nota_encargo_path": doc_nota_encargo_path,
-                    "doc_propuesta_path": doc_propuesta_path,
-                    "doc_escritura_path": doc_escritura_path,
-                    "doc_nota_simple_path": doc_nota_simple_path,
-                }
-            )
-            contraparte_nombre = " | ".join(
-                [
-                    item
-                    for item in [
-                        normalize_person_name(payload.get("contraparte1_nombre")),
-                        normalize_person_name(payload.get("contraparte2_nombre")),
+                fecha_encargo = (payload.get("fecha_encargo") or "").strip()
+                fecha_propuesta = (payload.get("fecha_propuesta") or "").strip()
+                fecha_escritura = (payload.get("fecha_escritura") or "").strip()
+                fecha_operacion = fecha_escritura or fecha_propuesta or fecha_encargo
+                precio_encargo = parse_money_value(payload.get("precio_encargo")) or None
+                precio_propuesta = parse_money_value(payload.get("precio_propuesta")) or None
+                precio_escritura = parse_money_value(payload.get("precio_escritura")) or None
+                precio_venta = precio_propuesta if precio_propuesta is not None else precio_escritura
+                desviacion_euros = round(precio_encargo - precio_venta, 2) if precio_encargo is not None and precio_venta is not None else None
+                desviacion_pct = round(((precio_encargo - precio_venta) / precio_encargo) * 100.0, 2) if precio_encargo not in (None, 0) and precio_venta is not None else None
+                dias_hasta_venta = None
+                if fecha_encargo and fecha_operacion:
+                    start_dt = parse_iso_date(fecha_encargo)
+                    end_dt = parse_iso_date(fecha_operacion)
+                    if start_dt and end_dt:
+                        dias_hasta_venta = (end_dt - start_dt).days
+                doc_nota_encargo_path = (payload.get("doc_nota_encargo_path") or "").strip()
+                doc_propuesta_path = (payload.get("doc_propuesta_path") or "").strip()
+                doc_escritura_path = (payload.get("doc_escritura_path") or "").strip()
+                doc_nota_simple_path = (payload.get("doc_nota_simple_path") or "").strip()
+                doc_partes_visita_paths = (payload.get("doc_partes_visita_paths") or "").strip()
+                estado_documental = infer_operacion_estado_documental(
+                    {
+                        "doc_nota_encargo_path": doc_nota_encargo_path,
+                        "doc_propuesta_path": doc_propuesta_path,
+                        "doc_escritura_path": doc_escritura_path,
+                        "doc_nota_simple_path": doc_nota_simple_path,
+                    }
+                )
+                contraparte_nombre = " | ".join(
+                    [
+                        item
+                        for item in [
+                            normalize_person_name(payload.get("contraparte1_nombre")),
+                            normalize_person_name(payload.get("contraparte2_nombre")),
+                        ]
+                        if item
                     ]
-                    if item
-                ]
-            )
-            contraparte_nif = " | ".join(
-                [item for item in [normalize_nif(payload.get("contraparte1_nif")), normalize_nif(payload.get("contraparte2_nif"))] if item]
-            )
-            contraparte_telefono = " | ".join(
-                [item for item in [str(payload.get("contraparte1_telefono") or "").strip(), str(payload.get("contraparte2_telefono") or "").strip()] if item]
-            )
-            contraparte_email = " | ".join(
-                [item for item in [normalize_email(payload.get("contraparte1_email")), normalize_email(payload.get("contraparte2_email"))] if item]
-            )
-            existing = conn.execute(
-                """
-                SELECT id
-                FROM operaciones_inmobiliarias
-                WHERE empresa_id = ?
-                  AND LOWER(COALESCE(tipo_operacion, 'venta')) = 'venta'
-                  AND UPPER(COALESCE(direccion, '')) = UPPER(?)
-                  AND COALESCE(fecha_escritura, '') = COALESCE(?, '')
-                ORDER BY updated_at DESC, created_at DESC
-                LIMIT 1
-                """,
-                (empresa["id"], direccion, fecha_escritura),
-            ).fetchone()
-            record_id = existing["id"] if existing else os.urandom(16).hex()
-            payload_json = json.dumps(
-                {
-                    "origen": "formulario",
-                    "doc_nota_encargo_path": doc_nota_encargo_path,
-                    "doc_propuesta_path": doc_propuesta_path,
-                    "doc_escritura_path": doc_escritura_path,
-                    "doc_nota_simple_path": doc_nota_simple_path,
-                    "doc_partes_visita_paths": doc_partes_visita_paths,
-                },
-                ensure_ascii=False,
-            )
-            record_values = (
-                empresa["id"],
-                "venta",
-                "Manual",
-                "formulario",
-                (payload.get("origen_inmueble") or "").strip(),
-                payload.get("expediente_path"),
-                payload.get("expediente_hash"),
-                parse_iso_date(fecha_operacion).year if parse_iso_date(fecha_operacion) else None,
-                iso_month_label(fecha_operacion),
-                inmueble_id,
-                direccion,
-                re.sub(r"[^A-Z0-9]", "", str(payload.get("referencia_catastral") or "").upper()) or None,
-                propietario1_id,
-                normalize_person_name(payload.get("propietario1_nombre")) or None,
-                normalize_nif(payload.get("propietario1_nif")) or None,
-                (payload.get("propietario1_telefono") or "").strip() or None,
-                normalize_email(payload.get("propietario1_email")) or None,
-                (payload.get("propietario1_fecha_nacimiento") or "").strip() or None,
-                propietario2_id,
-                normalize_person_name(payload.get("propietario2_nombre")) or None,
-                normalize_nif(payload.get("propietario2_nif")) or None,
-                (payload.get("propietario2_telefono") or "").strip() or None,
-                normalize_email(payload.get("propietario2_email")) or None,
-                (payload.get("propietario2_fecha_nacimiento") or "").strip() or None,
-                contraparte1_id,
-                contraparte2_id,
-                contraparte_nombre or None,
-                contraparte_nif or None,
-                contraparte_telefono or None,
-                contraparte_email or None,
-                None,
-                fecha_encargo or None,
-                fecha_propuesta or None,
-                None,
-                fecha_escritura or None,
-                fecha_operacion or None,
-                precio_encargo,
-                precio_propuesta,
-                None,
-                precio_escritura,
-                None,
-                desviacion_euros,
-                desviacion_pct,
-                dias_hasta_venta,
-                int(parse_money_value(payload.get("num_visitas")) or 0),
-                parse_money_value(payload.get("honorarios")) or None,
-                (payload.get("agente") or "").strip() or None,
-                (payload.get("responsable_gestion") or "").strip() or None,
-                (payload.get("oficina") or "").strip() or None,
-                doc_nota_encargo_path or None,
-                doc_propuesta_path or None,
-                doc_escritura_path or None,
-                doc_nota_simple_path or None,
-                doc_partes_visita_paths or None,
-                estado_documental,
-                "manual",
-                (payload.get("notas") or "").strip() or None,
-                payload_json,
-            )
-            columns = [
-                "empresa_id",
-                "tipo_operacion",
-                "estado",
-                "origen",
-                "origen_inmueble",
-                "expediente_path",
-                "expediente_hash",
-                "anio",
-                "mes",
-                "inmueble_id",
-                "direccion",
-                "referencia_catastral",
-                "propietario1_id",
-                "propietario1_nombre",
-                "propietario1_nif",
-                "propietario1_telefono",
-                "propietario1_email",
-                "propietario1_fecha_nacimiento",
-                "propietario2_id",
-                "propietario2_nombre",
-                "propietario2_nif",
-                "propietario2_telefono",
-                "propietario2_email",
-                "propietario2_fecha_nacimiento",
-                "contraparte1_id",
-                "contraparte2_id",
-                "contraparte_nombre",
-                "contraparte_nif",
-                "contraparte_telefono",
-                "contraparte_email",
-                "contraparte_fecha_nacimiento",
-                "fecha_encargo",
-                "fecha_propuesta",
-                "fecha_contrato",
-                "fecha_escritura",
-                "fecha_operacion",
-                "precio_encargo",
-                "precio_propuesta",
-                "precio_contrato",
-                "precio_escritura",
-                "precio_renta",
-                "desviacion_euros",
-                "desviacion_pct",
-                "dias_hasta_venta",
-                "num_visitas",
-                "honorarios",
-                "agente",
-                "responsable_gestion",
-                "oficina",
-                "doc_nota_encargo_path",
-                "doc_propuesta_path",
-                "doc_escritura_path",
-                "doc_nota_simple_path",
-                "doc_partes_visita_paths",
-                "estado_documental",
-                "calidad_ocr",
-                "notas",
-                "datos_extraidos_json",
-            ]
-            if existing:
-                set_clause = ", ".join([f"{column} = ?" for column in columns])
-                conn.execute(
-                    f"UPDATE operaciones_inmobiliarias SET {set_clause}, updated_at = datetime(?) WHERE id = ?",
-                    (*record_values, now, record_id),
                 )
-            else:
-                placeholders = ", ".join(["?"] * (len(columns) + 3))
-                conn.execute(
-                    f"""
-                    INSERT INTO operaciones_inmobiliarias (
-                      id, {", ".join(columns)}, created_at, updated_at
-                    ) VALUES ({placeholders})
+                contraparte_nif = " | ".join(
+                    [item for item in [normalize_nif(payload.get("contraparte1_nif")), normalize_nif(payload.get("contraparte2_nif"))] if item]
+                )
+                contraparte_telefono = " | ".join(
+                    [item for item in [str(payload.get("contraparte1_telefono") or "").strip(), str(payload.get("contraparte2_telefono") or "").strip()] if item]
+                )
+                contraparte_email = " | ".join(
+                    [item for item in [normalize_email(payload.get("contraparte1_email")), normalize_email(payload.get("contraparte2_email"))] if item]
+                )
+                existing = conn.execute(
+                    """
+                    SELECT id
+                    FROM operaciones_inmobiliarias
+                    WHERE empresa_id = ?
+                      AND LOWER(COALESCE(tipo_operacion, 'venta')) = 'venta'
+                      AND UPPER(COALESCE(direccion, '')) = UPPER(?)
+                      AND COALESCE(fecha_escritura, '') = COALESCE(?, '')
+                    ORDER BY updated_at DESC, created_at DESC
+                    LIMIT 1
                     """,
-                    (record_id, *record_values, now, now),
+                    (empresa["id"], direccion, fecha_escritura),
+                ).fetchone()
+                record_id = existing["id"] if existing else os.urandom(16).hex()
+                payload_json = json.dumps(
+                    {
+                        "origen": "formulario",
+                        "doc_nota_encargo_path": doc_nota_encargo_path,
+                        "doc_propuesta_path": doc_propuesta_path,
+                        "doc_escritura_path": doc_escritura_path,
+                        "doc_nota_simple_path": doc_nota_simple_path,
+                        "doc_partes_visita_paths": doc_partes_visita_paths,
+                    },
+                    ensure_ascii=False,
                 )
-            conn.commit()
-            json_response(self, {"ok": True, "id": record_id, "inmueble_id": inmueble_id})
-            return
+                record_values = (
+                    empresa["id"],
+                    "venta",
+                    "Manual",
+                    "formulario",
+                    (payload.get("origen_inmueble") or "").strip(),
+                    payload.get("expediente_path"),
+                    payload.get("expediente_hash"),
+                    parse_iso_date(fecha_operacion).year if parse_iso_date(fecha_operacion) else None,
+                    iso_month_label(fecha_operacion),
+                    inmueble_id,
+                    direccion,
+                    re.sub(r"[^A-Z0-9]", "", str(payload.get("referencia_catastral") or "").upper()) or None,
+                    propietario1_id,
+                    normalize_person_name(payload.get("propietario1_nombre")) or None,
+                    normalize_nif(payload.get("propietario1_nif")) or None,
+                    (payload.get("propietario1_telefono") or "").strip() or None,
+                    normalize_email(payload.get("propietario1_email")) or None,
+                    (payload.get("propietario1_fecha_nacimiento") or "").strip() or None,
+                    propietario2_id,
+                    normalize_person_name(payload.get("propietario2_nombre")) or None,
+                    normalize_nif(payload.get("propietario2_nif")) or None,
+                    (payload.get("propietario2_telefono") or "").strip() or None,
+                    normalize_email(payload.get("propietario2_email")) or None,
+                    (payload.get("propietario2_fecha_nacimiento") or "").strip() or None,
+                    contraparte1_id,
+                    contraparte2_id,
+                    contraparte_nombre or None,
+                    contraparte_nif or None,
+                    contraparte_telefono or None,
+                    contraparte_email or None,
+                    None,
+                    fecha_encargo or None,
+                    fecha_propuesta or None,
+                    None,
+                    fecha_escritura or None,
+                    fecha_operacion or None,
+                    precio_encargo,
+                    precio_propuesta,
+                    None,
+                    precio_escritura,
+                    None,
+                    desviacion_euros,
+                    desviacion_pct,
+                    dias_hasta_venta,
+                    int(parse_money_value(payload.get("num_visitas")) or 0),
+                    parse_money_value(payload.get("honorarios")) or None,
+                    (payload.get("agente") or "").strip() or None,
+                    (payload.get("responsable_gestion") or "").strip() or None,
+                    (payload.get("oficina") or "").strip() or None,
+                    doc_nota_encargo_path or None,
+                    doc_propuesta_path or None,
+                    doc_escritura_path or None,
+                    doc_nota_simple_path or None,
+                    doc_partes_visita_paths or None,
+                    estado_documental,
+                    "manual",
+                    (payload.get("notas") or "").strip() or None,
+                    payload_json,
+                )
+                columns = [
+                    "empresa_id",
+                    "tipo_operacion",
+                    "estado",
+                    "origen",
+                    "origen_inmueble",
+                    "expediente_path",
+                    "expediente_hash",
+                    "anio",
+                    "mes",
+                    "inmueble_id",
+                    "direccion",
+                    "referencia_catastral",
+                    "propietario1_id",
+                    "propietario1_nombre",
+                    "propietario1_nif",
+                    "propietario1_telefono",
+                    "propietario1_email",
+                    "propietario1_fecha_nacimiento",
+                    "propietario2_id",
+                    "propietario2_nombre",
+                    "propietario2_nif",
+                    "propietario2_telefono",
+                    "propietario2_email",
+                    "propietario2_fecha_nacimiento",
+                    "contraparte1_id",
+                    "contraparte2_id",
+                    "contraparte_nombre",
+                    "contraparte_nif",
+                    "contraparte_telefono",
+                    "contraparte_email",
+                    "contraparte_fecha_nacimiento",
+                    "fecha_encargo",
+                    "fecha_propuesta",
+                    "fecha_contrato",
+                    "fecha_escritura",
+                    "fecha_operacion",
+                    "precio_encargo",
+                    "precio_propuesta",
+                    "precio_contrato",
+                    "precio_escritura",
+                    "precio_renta",
+                    "desviacion_euros",
+                    "desviacion_pct",
+                    "dias_hasta_venta",
+                    "num_visitas",
+                    "honorarios",
+                    "agente",
+                    "responsable_gestion",
+                    "oficina",
+                    "doc_nota_encargo_path",
+                    "doc_propuesta_path",
+                    "doc_escritura_path",
+                    "doc_nota_simple_path",
+                    "doc_partes_visita_paths",
+                    "estado_documental",
+                    "calidad_ocr",
+                    "notas",
+                    "datos_extraidos_json",
+                ]
+                if existing:
+                    set_clause = ", ".join([f"{column} = ?" for column in columns])
+                    conn.execute(
+                        f"UPDATE operaciones_inmobiliarias SET {set_clause}, updated_at = datetime(?) WHERE id = ?",
+                        (*record_values, now, record_id),
+                    )
+                else:
+                    placeholders = ", ".join(["?"] * (len(columns) + 3))
+                    conn.execute(
+                        f"""
+                        INSERT INTO operaciones_inmobiliarias (
+                          id, {", ".join(columns)}, created_at, updated_at
+                        ) VALUES ({placeholders})
+                        """,
+                        (record_id, *record_values, now, now),
+                    )
+                conn.commit()
+                json_response(self, {"ok": True, "id": record_id, "inmueble_id": inmueble_id})
+                return
+            except Exception as exc:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                json_response(self, {"error": f"compraventas_error: {type(exc).__name__}: {exc}"}, status=500)
+                return
         elif parsed.path == "/api/captaciones":
             try:
                 propietarios = payload.get("propietarios") or []
