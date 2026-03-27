@@ -1520,6 +1520,11 @@ body.crm-fin #companySummary {
   font-weight: 600;
 }
 
+.portal-public-shell {
+  display: grid;
+  gap: 18px;
+}
+
 .inline-check {
   display: flex;
   align-items: center;

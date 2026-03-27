@@ -16,8 +16,20 @@
   async function ensureAuthAndBoot(deps) {
     const params = new URLSearchParams(window.location.search);
     const activateToken = (params.get("activar_token") || "").trim();
+    const portalToken = (params.get("portal_token") || "").trim();
     if (activateToken) {
       await deps.prepareActivationFlow(activateToken);
+      return;
+    }
+    if (portalToken) {
+      deps.setAuthUi(null);
+      deps.hideAuthOverlay();
+      if (!deps.state.appInitialized) {
+        await deps.init();
+        deps.state.appInitialized = true;
+      } else if (typeof deps.openPublicPortal === "function") {
+        await deps.openPublicPortal(portalToken);
+      }
       return;
     }
     const user = await fetchCurrentSessionUser();

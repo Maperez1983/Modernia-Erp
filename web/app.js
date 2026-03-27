@@ -1252,6 +1252,8 @@ const workspaceAutomationList = document.getElementById("workspaceAutomationList
 const agendaSection = document.getElementById("agendaSection");
 const agendaBackBtn = document.getElementById("agendaBackBtn");
 const agendaGeneral = document.getElementById("agendaGeneral");
+const workspacePortalPublicSection = document.getElementById("workspacePortalPublicSection");
+const workspacePortalPublicContent = document.getElementById("workspacePortalPublicContent");
 const yearSelect = document.getElementById("yearSelect");
 const densityToggle = document.getElementById("densityToggle");
 const dbStatus = document.getElementById("dbStatus");
@@ -4472,6 +4474,9 @@ const setPage = (page) => {
   if (adminSection) {
     adminSection.classList.toggle("hidden", page !== "admin");
   }
+  if (workspacePortalPublicSection) {
+    workspacePortalPublicSection.classList.toggle("hidden", page !== "portal-public");
+  }
   if (clientePage) {
     clientePage.classList.toggle("hidden", page !== "cliente");
   }
@@ -4937,6 +4942,102 @@ const openAgenda = () => {
   window.scrollTo({ top: 0, behavior: "smooth" });
 };
 
+const openWorkspacePortalPublic = async (token) => {
+  setCrmMode("");
+  setModule("empresas");
+  explorerSection.classList.add("hidden");
+  setPage("portal-public");
+  if (workspacePortalPublicContent) {
+    workspacePortalPublicContent.innerHTML = "<p class='muted'>Cargando portal...</p>";
+  }
+  try {
+    const data = await api(`/api/workspace_portal_public?token=${encodeURIComponent(token)}`);
+    if (workspacePortalPublicContent) {
+      workspacePortalPublicContent.innerHTML = `
+        <div class="form-card">
+          <h3>${data.workspace || "Workspace"}</h3>
+          <p class="muted">${data.cliente || "Cliente"}</p>
+          <div class="workspace-mini-kpis">
+            <div class="workspace-mini-kpi">
+              <span>Estado acceso</span>
+              <strong>${data.estado || "-"}</strong>
+            </div>
+            <div class="workspace-mini-kpi">
+              <span>Documentos</span>
+              <strong>${numberFormatter.format((data.docs || []).length)}</strong>
+            </div>
+            <div class="workspace-mini-kpi">
+              <span>Facturas</span>
+              <strong>${numberFormatter.format((data.facturas || []).length)}</strong>
+            </div>
+          </div>
+        </div>
+        <div class="workspace-central-layout">
+          <div class="form-card">
+            <h3>Documentación</h3>
+            ${
+              (data.docs || []).length
+                ? `
+                    <div class="workspace-document-list">
+                      ${(data.docs || [])
+                        .map(
+                          (row) => `
+                            <div class="workspace-document-row">
+                              <div>
+                                <strong>${row.nombre || "Documento"}</strong>
+                                <div class="muted">${row.clasificacion || "Sin clasificar"}</div>
+                              </div>
+                              <div class="workspace-document-meta">
+                                <span>${row.estado || "-"}</span>
+                                <span>${row.created_at || ""}</span>
+                              </div>
+                            </div>
+                          `
+                        )
+                        .join("")}
+                    </div>
+                  `
+                : "<p class='muted'>No hay documentación compartida todavía.</p>"
+            }
+          </div>
+          <div class="form-card">
+            <h3>Facturación</h3>
+            ${
+              (data.facturas || []).length
+                ? `
+                    <div class="workspace-billing-list">
+                      ${(data.facturas || [])
+                        .map(
+                          (row) => `
+                            <div class="workspace-billing-row">
+                              <div>
+                                <strong>${row.concepto || "Factura"}</strong>
+                                <div class="muted">${row.fecha_emision || ""}</div>
+                              </div>
+                              <div class="workspace-billing-meta">
+                                <span>${euroFormatter.format(Number(row.total || 0))}</span>
+                                <span>${row.cobrada ? "Cobrada" : row.estado || "Emitida"}</span>
+                              </div>
+                            </div>
+                          `
+                        )
+                        .join("")}
+                    </div>
+                  `
+                : "<p class='muted'>No hay facturas disponibles.</p>"
+            }
+          </div>
+        </div>
+      `;
+    }
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  } catch (error) {
+    if (workspacePortalPublicContent) {
+      workspacePortalPublicContent.innerHTML = `<p class='muted'>${error.message || "No se pudo abrir el portal."}</p>`;
+    }
+  }
+};
+
 const openAdmin = () => {
   const user = getAuthScopeUser();
   if (!canAccessAdminPanel(user)) return;
@@ -4982,6 +5083,9 @@ const goHome = () => {
   if (agendaSection) {
     agendaSection.classList.add("hidden");
   }
+  if (workspacePortalPublicSection) {
+    workspacePortalPublicSection.classList.add("hidden");
+  }
   if (holdingSection) {
     holdingSection.classList.add("hidden");
   }
@@ -5009,6 +5113,7 @@ const handleRoute = () => {
     openGestoriaCrm,
     openSegurosCrm,
     openFinCrm,
+    openWorkspacePortalPublic,
     openClienteDetail,
     openSeguroById,
     openCompany,
@@ -22931,6 +23036,7 @@ async function ensureAuthAndBoot() {
     hideAuthOverlay,
     showAuthOverlay,
     prepareActivationFlow,
+    openPublicPortal: openWorkspacePortalPublic,
   });
 }
 

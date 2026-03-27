@@ -1,6 +1,11 @@
 (function () {
   function handleRoute(deps) {
     const params = new URLSearchParams(window.location.search);
+    if (params.has("portal_token")) {
+      deps.openWorkspacePortalPublic(params.get("portal_token") || "");
+      deps.ui?.refreshContext(deps.state);
+      return;
+    }
     if (params.has("agenda")) {
       deps.openAgenda();
       deps.ui?.refreshContext(deps.state);
