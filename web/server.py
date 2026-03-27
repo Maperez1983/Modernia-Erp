@@ -11321,6 +11321,106 @@ def fetch_workspace_automations(conn, workspace_id, limit=50):
     return {"rows": [dict(row) for row in rows]}
 
 
+def run_workspace_automations(conn, workspace_id, trigger_key, context, now):
+    rows = conn.execute(
+        """
+        SELECT id, nombre, trigger_key, modulo_key, enabled, action_summary
+        FROM workspace_automatizaciones
+        WHERE workspace_id = ? AND trigger_key = ? AND COALESCE(enabled, 1) = 1
+        ORDER BY updated_at DESC, created_at DESC
+        """,
+        (workspace_id, trigger_key),
+    ).fetchall()
+    created = 0
+    for row in rows:
+        empresa_id = context.get("empresa_id") or fetch_workspace_company_ids(conn, workspace_id)[:1]
+        empresa_id = empresa_id[0] if isinstance(empresa_id, list) else empresa_id
+        if not empresa_id:
+            continue
+        servicio = (row["modulo_key"] or context.get("servicio") or "gestoria").strip()
+        conn.execute(
+            """
+            INSERT INTO acciones (
+              id, empresa_id, servicio, cliente_id, inmueble_id, cliente_nombre,
+              fecha, hora, tipo, responsable, estado, notas, recordatorio_min, created_at, updated_at
+            ) VALUES (
+              ?, ?, ?, ?, ?, ?, date(?), time(?), ?, ?, ?, ?, ?, datetime(?), datetime(?)
+            )
+            """,
+            (
+                os.urandom(16).hex(),
+                empresa_id,
+                servicio,
+                context.get("cliente_id"),
+                context.get("inmueble_id"),
+                context.get("cliente_nombre"),
+                now,
+                now,
+                row["nombre"],
+                context.get("responsable"),
+                "Pendiente",
+                (row["action_summary"] or "").strip() or f"Automatización {row['nombre']}",
+                60,
+                now,
+                now,
+            ),
+        )
+        created += 1
+    return created
+
+
+def fetch_workspace_portal_public(conn, token):
+    row = conn.execute(
+        """
+        SELECT
+          p.workspace_id,
+          p.cliente_id,
+          p.estado,
+          p.token,
+          p.ultimo_acceso_at,
+          c.nombre AS cliente_nombre,
+          COALESCE(c.email, '') AS email,
+          w.nombre AS workspace_nombre
+        FROM workspace_portal_clientes p
+        JOIN clientes c ON c.id = p.cliente_id
+        JOIN workspaces w ON w.id = p.workspace_id
+        WHERE p.token = ?
+        LIMIT 1
+        """,
+        (token,),
+    ).fetchone()
+    if not row:
+        return None
+    docs = conn.execute(
+        """
+        SELECT nombre, clasificacion, estado, created_at
+        FROM workspace_documentos_inbox
+        WHERE workspace_id = ? AND COALESCE(cliente_id, suggested_cliente_id) = ?
+        ORDER BY updated_at DESC, created_at DESC
+        LIMIT 10
+        """,
+        (row["workspace_id"], row["cliente_id"]),
+    ).fetchall()
+    bills = conn.execute(
+        """
+        SELECT concepto, fecha_emision, total, estado, cobrada
+        FROM workspace_facturacion
+        WHERE workspace_id = ? AND cliente_id = ?
+        ORDER BY COALESCE(fecha_emision, created_at) DESC
+        LIMIT 10
+        """,
+        (row["workspace_id"], row["cliente_id"]),
+    ).fetchall()
+    return {
+        "workspace": row["workspace_nombre"],
+        "cliente": row["cliente_nombre"],
+        "estado": row["estado"],
+        "email": row["email"],
+        "docs": [dict(item) for item in docs],
+        "facturas": [dict(item) for item in bills],
+    }
+
+
 def fetch_workspace_detail(conn, workspace_id):
     workspace = conn.execute(
         """
@@ -13543,8 +13643,21 @@ class Handler(BaseHTTPRequestHandler):
                     """,
                     (record_id, *fields, now, now),
                 )
+            auto_created = run_workspace_automations(
+                conn,
+                workspace_id,
+                "invoice_created",
+                {
+                    "empresa_id": empresa_id,
+                    "cliente_id": cliente_id or None,
+                    "servicio": (payload.get("servicio") or "").strip() or "facturacion",
+                    "cliente_nombre": None,
+                    "responsable": (payload.get("responsable") or "").strip() or None,
+                },
+                now,
+            )
             conn.commit()
-            json_response(self, {"ok": True, "id": record_id})
+            json_response(self, {"ok": True, "id": record_id, "automation_actions": auto_created})
             return
         elif parsed.path == "/api/workspace_series":
             workspace_id = str(payload.get("workspace_id") or "").strip()
@@ -13596,8 +13709,20 @@ class Handler(BaseHTTPRequestHandler):
                         now,
                     ),
                 )
+            auto_created = run_workspace_automations(
+                conn,
+                workspace_id,
+                "document_uploaded",
+                {
+                    "empresa_id": empresa_id,
+                    "cliente_id": cliente_id or suggested_cliente_id,
+                    "servicio": (payload.get("servicio") or "").strip() or "documental",
+                    "cliente_nombre": None,
+                },
+                now,
+            )
             conn.commit()
-            json_response(self, {"ok": True, "id": record_id})
+            json_response(self, {"ok": True, "id": record_id, "automation_actions": auto_created})
             return
         elif parsed.path == "/api/workspace_inbox":
             workspace_id = str(payload.get("workspace_id") or "").strip()
@@ -13714,8 +13839,20 @@ class Handler(BaseHTTPRequestHandler):
                         now,
                     ),
                 )
+            auto_created = run_workspace_automations(
+                conn,
+                workspace_id,
+                "portal_client_invited",
+                {
+                    "empresa_id": fetch_workspace_company_ids(conn, workspace_id)[:1],
+                    "cliente_id": cliente_id,
+                    "servicio": "portal_cliente",
+                    "cliente_nombre": None,
+                },
+                now,
+            )
             conn.commit()
-            json_response(self, {"ok": True, "id": record_id, "token": token})
+            json_response(self, {"ok": True, "id": record_id, "token": token, "automation_actions": auto_created})
             return
         elif parsed.path == "/api/workspace_automatizaciones":
             workspace_id = str(payload.get("workspace_id") or "").strip()
@@ -16995,46 +17132,7 @@ class Handler(BaseHTTPRequestHandler):
                     )
                     return
                 inmueble_id = os.urandom(16).hex()
-                conn.execute(
-                    """
-                    INSERT INTO captaciones (
-                      id, empresa_id, inmueble_id, propietario, tipo_inmueble, direccion, codigo_postal, poblacion, provincia, zona, m2,
-                      habitaciones, banos, precio_objetivo, precio_valoracion, urgencia,
-                      motivo, canal, etapa, probabilidad, proxima_accion, fecha_contacto,
-                      asesor, notas, created_at, updated_at
-                    ) VALUES (
-                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
-                    )
-                    """,
-                    (
-                        os.urandom(16).hex(),
-                        empresa["id"],
-                        inmueble_id,
-                        payload.get("propietario"),
-                        payload.get("tipo_inmueble"),
-                        payload.get("direccion"),
-                        payload.get("codigo_postal"),
-                        payload.get("poblacion"),
-                        payload.get("provincia"),
-                        payload.get("zona"),
-                        payload.get("m2"),
-                        payload.get("habitaciones"),
-                        payload.get("banos"),
-                        payload.get("precio_objetivo"),
-                        payload.get("precio_valoracion"),
-                        payload.get("urgencia"),
-                        payload.get("motivo"),
-                        payload.get("canal"),
-                        payload.get("etapa"),
-                        payload.get("probabilidad"),
-                        payload.get("proxima_accion"),
-                        payload.get("fecha_contacto"),
-                        payload.get("asesor"),
-                        payload.get("notas"),
-                        now,
-                        now,
-                    ),
-                )
+                captacion_id = os.urandom(16).hex()
                 conn.execute(
                     """
                     INSERT INTO inmuebles (
@@ -17068,6 +17166,46 @@ class Handler(BaseHTTPRequestHandler):
                         now,
                     ),
                 )
+                conn.execute(
+                    """
+                    INSERT INTO captaciones (
+                      id, empresa_id, inmueble_id, propietario, tipo_inmueble, direccion, codigo_postal, poblacion, provincia, zona, m2,
+                      habitaciones, banos, precio_objetivo, precio_valoracion, urgencia,
+                      motivo, canal, etapa, probabilidad, proxima_accion, fecha_contacto,
+                      asesor, notas, created_at, updated_at
+                    ) VALUES (
+                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                    )
+                    """,
+                    (
+                        captacion_id,
+                        empresa["id"],
+                        inmueble_id,
+                        payload.get("propietario"),
+                        payload.get("tipo_inmueble"),
+                        payload.get("direccion"),
+                        payload.get("codigo_postal"),
+                        payload.get("poblacion"),
+                        payload.get("provincia"),
+                        payload.get("zona"),
+                        payload.get("m2"),
+                        payload.get("habitaciones"),
+                        payload.get("banos"),
+                        payload.get("precio_objetivo"),
+                        payload.get("precio_valoracion"),
+                        payload.get("urgencia"),
+                        payload.get("motivo"),
+                        payload.get("canal"),
+                        payload.get("etapa"),
+                        payload.get("probabilidad"),
+                        payload.get("proxima_accion"),
+                        payload.get("fecha_contacto"),
+                        payload.get("asesor"),
+                        payload.get("notas"),
+                        now,
+                        now,
+                    ),
+                )
                 for cliente_id in propietarios:
                     conn.execute(
                         """
@@ -17079,6 +17217,9 @@ class Handler(BaseHTTPRequestHandler):
                         """,
                         (os.urandom(16).hex(), inmueble_id, cliente_id, now, now),
                     )
+                conn.commit()
+                json_response(self, {"ok": True, "id": captacion_id, "inmueble_id": inmueble_id})
+                return
             except Exception as exc:
                 try:
                     conn.rollback()
@@ -18451,6 +18592,18 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "workspace_id requerido"}, status=400)
                 return
             json_response(self, fetch_workspace_automations(conn, workspace_id))
+            return
+
+        if path == "/api/workspace_portal_public":
+            token = params.get("token", [""])[0]
+            if not token:
+                json_response(self, {"error": "token requerido"}, status=400)
+                return
+            payload = fetch_workspace_portal_public(conn, token)
+            if not payload:
+                json_response(self, {"error": "portal no encontrado"}, status=404)
+                return
+            json_response(self, payload)
             return
 
         if path == "/api/years":

@@ -1232,6 +1232,7 @@ const workspaceBillingResetBtn = document.getElementById("workspaceBillingResetB
 const workspaceBillingClienteLookup = document.getElementById("workspaceBillingClienteLookup");
 const workspaceClientOptions = document.getElementById("workspaceClientOptions");
 const workspaceInboxForm = document.getElementById("workspaceInboxForm");
+const workspaceInboxFile = document.getElementById("workspaceInboxFile");
 const workspaceInboxClienteLookup = document.getElementById("workspaceInboxClienteLookup");
 const workspaceInboxResetBtn = document.getElementById("workspaceInboxResetBtn");
 const workspaceInboxStatus = document.getElementById("workspaceInboxStatus");
@@ -4031,6 +4032,7 @@ const renderWorkspacePortalList = (rows = []) => {
               <div>
                 <strong>${row.cliente_nombre || "-"}</strong>
                 <div class="muted">${row.email_acceso || "Sin email"} · ${row.estado || "Invitado"}</div>
+                <div class="muted">API pública: /api/workspace_portal_public?token=${row.token || ""}</div>
               </div>
               <div class="workspace-billing-meta">
                 <span>Token ${String(row.token || "").slice(0, 8) || "-"}</span>
@@ -24990,7 +24992,7 @@ if (workspaceBillingForm) {
       if (data?.error) {
         throw new Error(data.error);
       }
-      if (workspaceBillingStatus) workspaceBillingStatus.textContent = "Movimiento guardado.";
+      if (workspaceBillingStatus) workspaceBillingStatus.textContent = `Movimiento guardado.${data.automation_actions ? ` Automatizaciones: ${data.automation_actions}` : ""}`;
       await loadWorkspaceDetail(state.currentWorkspaceId);
       fillWorkspaceBillingForm();
     } catch (error) {
@@ -25052,13 +25054,19 @@ if (workspaceInboxForm) {
     const payload = Object.fromEntries(formData.entries());
     payload.workspace_id = state.currentWorkspaceId;
     try {
+      if (workspaceInboxFile?.files?.[0]) {
+        const upload = await uploadFileToS3(workspaceInboxFile.files[0], "workspace", workspaceInboxStatus);
+        payload.doc_key = upload?.key || "";
+        payload.doc_url = upload?.public_url || "";
+      }
       const data = await fetch("/api/workspace_inbox", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       }).then((res) => res.json());
       if (data?.error) throw new Error(data.error);
-      if (workspaceInboxStatus) workspaceInboxStatus.textContent = "Documento añadido al inbox.";
+      if (workspaceInboxStatus) workspaceInboxStatus.textContent = `Documento añadido al inbox.${data.automation_actions ? ` Automatizaciones: ${data.automation_actions}` : ""}`;
+      if (workspaceInboxFile) workspaceInboxFile.value = "";
       await loadWorkspaceDetail(state.currentWorkspaceId);
     } catch (error) {
       if (workspaceInboxStatus) workspaceInboxStatus.textContent = error.message || "No se pudo guardar.";
@@ -25103,7 +25111,7 @@ if (workspacePortalForm) {
         body: JSON.stringify(payload),
       }).then((res) => res.json());
       if (data?.error) throw new Error(data.error);
-      if (workspacePortalStatus) workspacePortalStatus.textContent = `Portal activado. Token ${String(data.token || "").slice(0, 8)}`;
+      if (workspacePortalStatus) workspacePortalStatus.textContent = `Portal activado. Token ${String(data.token || "").slice(0, 8)}${data.automation_actions ? ` · Automatizaciones ${data.automation_actions}` : ""}`;
       await loadWorkspaceDetail(state.currentWorkspaceId);
     } catch (error) {
       if (workspacePortalStatus) workspacePortalStatus.textContent = error.message || "No se pudo activar.";
