@@ -55,6 +55,15 @@
           <button id="holdingBackBtn" class="secondary ghost">Volver a home</button>
         </div>
         <div class="grid workspace-kpis" id="workspaceKpis"></div>
+        <div class="form-card">
+          <div class="section-head">
+            <div>
+              <h3>Lanzadores del tenant</h3>
+              <p class="muted">Acceso directo a los módulos activos del workspace seleccionado.</p>
+            </div>
+          </div>
+          <div id="workspaceLauncher"></div>
+        </div>
         <div class="workspace-central-layout">
           <div class="form-card">
             <div class="section-head">
@@ -148,6 +157,95 @@
               </div>
             </div>
             <div id="workspaceBillingSummary"></div>
+            <div class="workspace-billing-layout">
+              <form id="workspaceBillingForm" class="form-grid">
+                <input type="hidden" name="id" />
+                <input type="hidden" name="workspace_id" />
+                <input type="hidden" name="cliente_id" />
+                <label>
+                  Empresa
+                  <select name="empresa_id" required></select>
+                </label>
+                <label>
+                  Servicio
+                  <select name="servicio">
+                    <option value="">Sin servicio</option>
+                    <option value="gestoria">Gestoría</option>
+                    <option value="seguros">Seguros</option>
+                    <option value="inmobiliaria">Inmobiliaria</option>
+                    <option value="financiacion">Financiación</option>
+                    <option value="fincas">Fincas</option>
+                  </select>
+                </label>
+                <label class="span-2">
+                  Cliente
+                  <input name="cliente_lookup" id="workspaceBillingClienteLookup" list="workspaceClientOptions" placeholder="Busca por nombre o DNI" />
+                </label>
+                <label>
+                  Fecha emisión
+                  <input type="date" name="fecha_emision" />
+                </label>
+                <label>
+                  Fecha vencimiento
+                  <input type="date" name="fecha_vencimiento" />
+                </label>
+                <label>
+                  Subtotal
+                  <input type="number" step="0.01" name="subtotal" />
+                </label>
+                <label>
+                  Impuestos
+                  <input type="number" step="0.01" name="impuestos" />
+                </label>
+                <label>
+                  Total
+                  <input type="number" step="0.01" name="total" required />
+                </label>
+                <label>
+                  Estado
+                  <select name="estado">
+                    <option>Borrador</option>
+                    <option>Emitida</option>
+                    <option>Cobrada</option>
+                    <option>Vencida</option>
+                    <option>Anulada</option>
+                  </select>
+                </label>
+                <label>
+                  Forma de cobro
+                  <select name="forma_cobro">
+                    <option value="">Sin definir</option>
+                    <option>Efectivo</option>
+                    <option>Tarjeta</option>
+                    <option>Transferencia</option>
+                    <option>Remesa</option>
+                  </select>
+                </label>
+                <label>
+                  Responsable
+                  <input name="responsable" />
+                </label>
+                <label class="inline-check">
+                  <input type="checkbox" name="cobrada" />
+                  Cobrada
+                </label>
+                <label class="span-2">
+                  Concepto
+                  <input name="concepto" required />
+                </label>
+                <label class="span-2">
+                  Notas
+                  <textarea name="notas" rows="2"></textarea>
+                </label>
+                <div class="form-actions span-2">
+                  <button type="submit">Guardar movimiento</button>
+                  <button type="button" id="workspaceBillingResetBtn" class="secondary ghost">Nuevo</button>
+                  <span id="workspaceBillingStatus" class="muted"></span>
+                </div>
+              </form>
+              <datalist id="workspaceClientOptions"></datalist>
+              <div id="workspaceBillingList"></div>
+            </div>
           </div>
           <div class="form-card">
             <div class="section-head">

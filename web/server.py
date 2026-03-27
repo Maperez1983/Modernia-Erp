@@ -11106,6 +11106,45 @@ def ensure_workspace_facturacion_table(conn):
     )
 
 
+def fetch_workspace_company_ids(conn, workspace_id):
+    rows = conn.execute(
+        "SELECT empresa_id FROM workspace_empresas WHERE workspace_id = ?",
+        (workspace_id,),
+    ).fetchall()
+    return [row["empresa_id"] if isinstance(row, sqlite3.Row) else row[0] for row in rows]
+
+
+def fetch_workspace_clientes(conn, workspace_id, q="", limit=60):
+    empresa_ids = fetch_workspace_company_ids(conn, workspace_id)
+    if not empresa_ids:
+        return {"rows": []}
+    placeholders = ",".join(["?"] * len(empresa_ids))
+    where = [f"ce.empresa_id IN ({placeholders})"]
+    values = list(empresa_ids)
+    if q:
+        where.append("(c.nombre LIKE ? OR c.nif LIKE ? OR c.telefono LIKE ? OR c.email LIKE ?)")
+        values.extend([f"%{q}%"] * 4)
+    rows = conn.execute(
+        f"""
+        SELECT
+          c.id,
+          c.nombre,
+          COALESCE(c.nif, '') AS nif,
+          GROUP_CONCAT(DISTINCT e.nombre) AS empresas,
+          GROUP_CONCAT(DISTINCT ce.servicio) AS servicios
+        FROM clientes c
+        JOIN clientes_empresas ce ON ce.cliente_id = c.id
+        LEFT JOIN empresas e ON e.id = ce.empresa_id
+        WHERE {' AND '.join(where)}
+        GROUP BY c.id
+        ORDER BY c.nombre COLLATE NOCASE ASC
+        LIMIT ?
+        """,
+        [*values, max(1, min(int(limit or 60), 150))],
+    ).fetchall()
+    return {"rows": [dict(row) for row in rows]}
+
+
 def fetch_workspace_detail(conn, workspace_id):
     workspace = conn.execute(
         """
@@ -11145,11 +11184,7 @@ def fetch_workspace_detail(conn, workspace_id):
 
 
 def fetch_workspace_billing_summary(conn, workspace_id):
-    companies = conn.execute(
-        "SELECT empresa_id FROM workspace_empresas WHERE workspace_id = ?",
-        (workspace_id,),
-    ).fetchall()
-    empresa_ids = [row["empresa_id"] if isinstance(row, sqlite3.Row) else row[0] for row in companies]
+    empresa_ids = fetch_workspace_company_ids(conn, workspace_id)
     if not empresa_ids:
         return {
             "facturas_emitidas": 0,
@@ -11257,12 +11292,89 @@ def fetch_workspace_billing_summary(conn, workspace_id):
     }
 
 
-def fetch_workspace_document_hub(conn, workspace_id, limit=20):
-    companies = conn.execute(
-        "SELECT empresa_id FROM workspace_empresas WHERE workspace_id = ?",
-        (workspace_id,),
+def fetch_workspace_billing_rows(conn, workspace_id, limit=25):
+    empresa_ids = fetch_workspace_company_ids(conn, workspace_id)
+    if not empresa_ids:
+        return {"rows": []}
+    placeholders = ",".join(["?"] * len(empresa_ids))
+    rows = conn.execute(
+        f"""
+        SELECT
+          wf.id,
+          wf.workspace_id,
+          wf.empresa_id,
+          wf.cliente_id,
+          wf.servicio,
+          wf.origen_tipo,
+          wf.origen_id,
+          wf.serie,
+          wf.numero,
+          wf.fecha_emision,
+          wf.fecha_vencimiento,
+          wf.concepto,
+          wf.subtotal,
+          wf.impuestos,
+          wf.total,
+          wf.estado,
+          wf.cobrada,
+          wf.fecha_cobro,
+          wf.forma_cobro,
+          wf.responsable,
+          wf.notas,
+          wf.created_at,
+          wf.updated_at,
+          COALESCE(e.nombre, '') AS empresa_nombre,
+          COALESCE(c.nombre, '') AS cliente_nombre,
+          COALESCE(c.nif, '') AS cliente_nif
+        FROM workspace_facturacion wf
+        LEFT JOIN empresas e ON e.id = wf.empresa_id
+        LEFT JOIN clientes c ON c.id = wf.cliente_id
+        WHERE wf.workspace_id = ?
+          AND wf.empresa_id IN ({placeholders})
+        ORDER BY COALESCE(wf.fecha_emision, wf.created_at) DESC, wf.updated_at DESC
+        LIMIT ?
+        """,
+        [workspace_id, *empresa_ids, max(1, min(int(limit or 25), 100))],
     ).fetchall()
-    empresa_ids = [row["empresa_id"] if isinstance(row, sqlite3.Row) else row[0] for row in companies]
+    return {"rows": [dict(row) for row in rows]}
+
+
+def suggest_workspace_document_cliente(candidates, text):
+    normalized_text = normalize_lookup_text(text)
+    if len(normalized_text) < 6:
+        return None
+    best = None
+    best_score = 0
+    stopwords = {"DE", "DEL", "LA", "LAS", "LOS", "Y", "EL"}
+    for candidate in candidates:
+        name = candidate.get("nombre") or ""
+        nif = normalize_lookup_text(candidate.get("nif") or "")
+        name_norm = normalize_lookup_text(name)
+        score = 0
+        if nif and len(nif) >= 6 and nif in normalized_text:
+            score = 1000 + len(nif)
+        elif name_norm and len(name_norm) >= 8 and name_norm in normalized_text:
+            score = 100 + len(name_norm)
+        else:
+            tokens = [token for token in name_norm.split() if len(token) >= 4 and token not in stopwords]
+            matched = [token for token in tokens if token in normalized_text]
+            if len(matched) >= 2:
+                score = sum(len(token) for token in matched)
+        if score > best_score:
+            best_score = score
+            best = candidate
+    if best_score < 8:
+        return None
+    return {
+        "id": best["id"],
+        "nombre": best.get("nombre") or "",
+        "nif": best.get("nif") or "",
+        "score": best_score,
+    }
+
+
+def fetch_workspace_document_hub(conn, workspace_id, limit=20):
+    empresa_ids = fetch_workspace_company_ids(conn, workspace_id)
     if not empresa_ids:
         return {"rows": [], "summary": {"documentos_total": 0}}
     placeholders = ",".join(["?"] * len(empresa_ids))
@@ -11272,9 +11384,12 @@ def fetch_workspace_document_hub(conn, workspace_id, limit=20):
         FROM (
           SELECT
             d.id,
+            'gestoria_docs' AS source_table,
             d.empresa_id,
             COALESCE(e.nombre, '') AS empresa,
             COALESCE(c.nombre, '') AS cliente,
+            d.cliente_id,
+            COALESCE(NULLIF(d.referencia_tipo, ''), 'gestoria') AS referencia_tipo,
             COALESCE(NULLIF(d.referencia_tipo, ''), d.tipo, 'gestoria') AS servicio,
             d.nombre,
             d.tipo,
@@ -11291,9 +11406,12 @@ def fetch_workspace_document_hub(conn, workspace_id, limit=20):
           UNION ALL
           SELECT
             idoc.id,
+            'inmueble_docs' AS source_table,
             i.empresa_id,
             COALESCE(e.nombre, '') AS empresa,
             COALESCE(i.direccion, '') AS cliente,
+            NULL AS cliente_id,
+            'inmobiliaria' AS referencia_tipo,
             'inmobiliaria' AS servicio,
             COALESCE(idoc.nombre, 'Documento inmueble') AS nombre,
             COALESCE(idoc.tipo, 'Inmueble') AS tipo,
@@ -11313,6 +11431,39 @@ def fetch_workspace_document_hub(conn, workspace_id, limit=20):
         """,
         [*empresa_ids, *empresa_ids, max(1, min(int(limit or 20), 100))],
     ).fetchall()
+    candidates = conn.execute(
+        f"""
+        SELECT DISTINCT c.id, c.nombre, COALESCE(c.nif, '') AS nif
+        FROM clientes c
+        JOIN clientes_empresas ce ON ce.cliente_id = c.id
+        WHERE ce.empresa_id IN ({placeholders})
+        ORDER BY LENGTH(COALESCE(c.nombre, '')) DESC, c.nombre COLLATE NOCASE ASC
+        LIMIT 500
+        """,
+        empresa_ids,
+    ).fetchall()
+    candidate_rows = [dict(row) for row in candidates]
+    processed_rows = []
+    pending_assignments = 0
+    for row in rows:
+        item = dict(row)
+        item["assignable"] = 1 if item.get("source_table") == "gestoria_docs" else 0
+        item["suggested_cliente_id"] = ""
+        item["suggested_cliente"] = ""
+        if item["assignable"] and not item.get("cliente_id"):
+            suggestion = suggest_workspace_document_cliente(
+                candidate_rows,
+                " ".join(
+                    part
+                    for part in [item.get("nombre"), item.get("notas"), item.get("tipo"), item.get("servicio")]
+                    if part
+                ),
+            )
+            if suggestion:
+                item["suggested_cliente_id"] = suggestion["id"]
+                item["suggested_cliente"] = suggestion["nombre"]
+                pending_assignments += 1
+        processed_rows.append(item)
     total_docs = conn.execute(
         f"""
         SELECT
@@ -11324,8 +11475,11 @@ def fetch_workspace_document_hub(conn, workspace_id, limit=20):
         [*empresa_ids, *empresa_ids],
     ).fetchone()
     return {
-        "rows": [dict(row) for row in rows],
-        "summary": {"documentos_total": int(total_docs["total"] or 0) if total_docs else 0},
+        "rows": processed_rows,
+        "summary": {
+            "documentos_total": int(total_docs["total"] or 0) if total_docs else 0,
+            "pendientes_asignacion": pending_assignments,
+        },
     }
 
 
@@ -12923,6 +13077,194 @@ class Handler(BaseHTTPRequestHandler):
             )
             conn.commit()
             json_response(self, {"ok": True, "id": record_id, "enabled": enabled})
+            return
+        elif parsed.path == "/api/workspace_facturacion":
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            empresa_id = str(payload.get("empresa_id") or "").strip()
+            record_id = str(payload.get("id") or "").strip()
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            if not empresa_id:
+                json_response(self, {"error": "empresa_id requerido"}, status=400)
+                return
+            workspace_exists = conn.execute(
+                "SELECT id FROM workspaces WHERE id = ? LIMIT 1",
+                (workspace_id,),
+            ).fetchone()
+            if not workspace_exists:
+                json_response(self, {"error": "workspace no encontrado"}, status=404)
+                return
+            company_link = conn.execute(
+                """
+                SELECT empresa_id
+                FROM workspace_empresas
+                WHERE workspace_id = ? AND empresa_id = ?
+                LIMIT 1
+                """,
+                (workspace_id, empresa_id),
+            ).fetchone()
+            if not company_link:
+                json_response(self, {"error": "empresa fuera del workspace"}, status=400)
+                return
+            cliente_id = str(payload.get("cliente_id") or "").strip()
+            if cliente_id:
+                cliente_exists = conn.execute(
+                    "SELECT id FROM clientes WHERE id = ? LIMIT 1",
+                    (cliente_id,),
+                ).fetchone()
+                if not cliente_exists:
+                    json_response(self, {"error": "cliente no encontrado"}, status=404)
+                    return
+            cobrarda_raw = str(payload.get("cobrada") or "").strip().lower()
+            cobrada = 1 if cobrarda_raw in {"1", "true", "yes", "si", "sí", "on"} else 0
+            subtotal = round(parse_money_value(payload.get("subtotal")), 2)
+            impuestos = round(parse_money_value(payload.get("impuestos")), 2)
+            total_raw = payload.get("total")
+            total = round(parse_money_value(total_raw), 2)
+            if not total:
+                total = round(subtotal + impuestos, 2)
+            fields = (
+                workspace_id,
+                empresa_id,
+                cliente_id or None,
+                (payload.get("servicio") or "").strip() or None,
+                (payload.get("origen_tipo") or "").strip() or None,
+                (payload.get("origen_id") or "").strip() or None,
+                (payload.get("serie") or "").strip() or None,
+                (payload.get("numero") or "").strip() or None,
+                (payload.get("fecha_emision") or "").strip() or None,
+                (payload.get("fecha_vencimiento") or "").strip() or None,
+                (payload.get("concepto") or "").strip() or None,
+                subtotal,
+                impuestos,
+                total,
+                (payload.get("estado") or "").strip() or "Borrador",
+                cobrada,
+                (payload.get("fecha_cobro") or "").strip() or None,
+                (payload.get("forma_cobro") or "").strip() or None,
+                (payload.get("responsable") or "").strip() or None,
+                (payload.get("notas") or "").strip() or None,
+            )
+            if record_id:
+                existing = conn.execute(
+                    "SELECT id FROM workspace_facturacion WHERE id = ? AND workspace_id = ? LIMIT 1",
+                    (record_id, workspace_id),
+                ).fetchone()
+                if not existing:
+                    json_response(self, {"error": "registro no encontrado"}, status=404)
+                    return
+                conn.execute(
+                    """
+                    UPDATE workspace_facturacion
+                    SET workspace_id = ?, empresa_id = ?, cliente_id = ?, servicio = ?, origen_tipo = ?, origen_id = ?,
+                        serie = ?, numero = ?, fecha_emision = ?, fecha_vencimiento = ?, concepto = ?, subtotal = ?,
+                        impuestos = ?, total = ?, estado = ?, cobrada = ?, fecha_cobro = ?, forma_cobro = ?,
+                        responsable = ?, notas = ?, updated_at = datetime(?)
+                    WHERE id = ?
+                    """,
+                    (*fields, now, record_id),
+                )
+            else:
+                record_id = os.urandom(16).hex()
+                conn.execute(
+                    """
+                    INSERT INTO workspace_facturacion (
+                      id, workspace_id, empresa_id, cliente_id, servicio, origen_tipo, origen_id, serie, numero,
+                      fecha_emision, fecha_vencimiento, concepto, subtotal, impuestos, total, estado, cobrada,
+                      fecha_cobro, forma_cobro, responsable, notas, created_at, updated_at
+                    ) VALUES (
+                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                    )
+                    """,
+                    (record_id, *fields, now, now),
+                )
+            conn.commit()
+            json_response(self, {"ok": True, "id": record_id})
+            return
+        elif parsed.path == "/api/workspace_document_assign":
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            source_table = str(payload.get("source_table") or "").strip()
+            source_id = str(payload.get("source_id") or "").strip()
+            if not workspace_id or not source_table or not source_id:
+                json_response(self, {"error": "workspace_id, source_table y source_id requeridos"}, status=400)
+                return
+            empresa_ids = fetch_workspace_company_ids(conn, workspace_id)
+            if not empresa_ids:
+                json_response(self, {"error": "workspace sin empresas"}, status=400)
+                return
+            placeholders = ",".join(["?"] * len(empresa_ids))
+            if source_table == "gestoria_docs":
+                row = conn.execute(
+                    f"""
+                    SELECT id
+                    FROM gestoria_docs
+                    WHERE id = ? AND empresa_id IN ({placeholders})
+                    LIMIT 1
+                    """,
+                    [source_id, *empresa_ids],
+                ).fetchone()
+                if not row:
+                    json_response(self, {"error": "documento no encontrado"}, status=404)
+                    return
+                cliente_id = str(payload.get("cliente_id") or "").strip() or None
+                if cliente_id:
+                    cliente_exists = conn.execute(
+                        "SELECT id FROM clientes WHERE id = ? LIMIT 1",
+                        (cliente_id,),
+                    ).fetchone()
+                    if not cliente_exists:
+                        json_response(self, {"error": "cliente no encontrado"}, status=404)
+                        return
+                conn.execute(
+                    """
+                    UPDATE gestoria_docs
+                    SET cliente_id = ?, referencia_tipo = ?, tipo = ?, estado = ?, notas = ?, updated_at = datetime(?)
+                    WHERE id = ?
+                    """,
+                    (
+                        cliente_id,
+                        (payload.get("referencia_tipo") or "").strip() or None,
+                        (payload.get("tipo") or "").strip() or None,
+                        (payload.get("estado") or "").strip() or None,
+                        (payload.get("notas") or "").strip() or None,
+                        now,
+                        source_id,
+                    ),
+                )
+                conn.commit()
+                json_response(self, {"ok": True, "id": source_id, "source_table": source_table})
+                return
+            if source_table == "inmueble_docs":
+                row = conn.execute(
+                    f"""
+                    SELECT idoc.id
+                    FROM inmueble_docs idoc
+                    JOIN inmuebles i ON i.id = idoc.inmueble_id
+                    WHERE idoc.id = ? AND i.empresa_id IN ({placeholders})
+                    LIMIT 1
+                    """,
+                    [source_id, *empresa_ids],
+                ).fetchone()
+                if not row:
+                    json_response(self, {"error": "documento no encontrado"}, status=404)
+                    return
+                conn.execute(
+                    """
+                    UPDATE inmueble_docs
+                    SET tipo = ?, updated_at = datetime(?)
+                    WHERE id = ?
+                    """,
+                    (
+                        (payload.get("tipo") or "").strip() or None,
+                        now,
+                        source_id,
+                    ),
+                )
+                conn.commit()
+                json_response(self, {"ok": True, "id": source_id, "source_table": source_table})
+                return
+            json_response(self, {"error": "source_table no soportada"}, status=400)
             return
         elif parsed.path == "/api/gestoria_contabilidad":
             seguro_id = (payload.get("seguro_id") or "").strip()
@@ -17448,6 +17790,25 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "workspace_id requerido"}, status=400)
                 return
             json_response(self, fetch_workspace_document_hub(conn, workspace_id, limit=limit))
+            return
+
+        if path == "/api/workspace_facturacion":
+            workspace_id = params.get("workspace_id", [""])[0]
+            limit = params.get("limit", ["25"])[0]
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            json_response(self, fetch_workspace_billing_rows(conn, workspace_id, limit=limit))
+            return
+
+        if path == "/api/workspace_clientes":
+            workspace_id = params.get("workspace_id", [""])[0]
+            q = params.get("q", [""])[0].strip()
+            limit = params.get("limit", ["60"])[0]
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            json_response(self, fetch_workspace_clientes(conn, workspace_id, q=q, limit=limit))
             return
 
         if path == "/api/years":
