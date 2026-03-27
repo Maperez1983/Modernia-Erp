@@ -19681,10 +19681,11 @@ class Handler(BaseHTTPRequestHandler):
                 where.append(
                     "("
                     "direccion LIKE ? OR referencia_catastral LIKE ? OR "
-                    "propietario1_nombre LIKE ? OR propietario2_nombre LIKE ? OR contraparte_nombre LIKE ?"
+                    "propietario1_nombre LIKE ? OR propietario2_nombre LIKE ? OR contraparte_nombre LIKE ? OR "
+                    "responsable_gestion LIKE ? OR agente LIKE ? OR oficina LIKE ? OR estado LIKE ? OR origen LIKE ?"
                     ")"
                 )
-                values.extend([f"%{q}%"] * 5)
+                values.extend([f"%{q}%"] * 10)
             rows = conn.execute(
                 f"""
                 SELECT
@@ -19714,7 +19715,10 @@ class Handler(BaseHTTPRequestHandler):
                   dias_hasta_venta,
                   num_visitas,
                   honorarios,
+                  agente,
                   responsable_gestion,
+                  estado,
+                  origen,
                   origen_inmueble,
                   estado_documental
                 FROM operaciones_inmobiliarias

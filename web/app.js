@@ -13352,11 +13352,24 @@ const loadCrmCompraventas = () => {
   }
   api(`/api/compraventas?${params.toString()}`).then((data) => {
     const rows = Array.isArray(data?.rows) ? data.rows : [];
+    const manualCount = rows.filter((row) => {
+      const estado = String(row.estado || "").trim().toLowerCase();
+      const origen = String(row.origen || "").trim().toLowerCase();
+      return estado === "manual" || origen === "formulario";
+    }).length;
+    const historicoCount = rows.filter((row) => {
+      const estado = String(row.estado || "").trim().toLowerCase();
+      return estado === "importado historico";
+    }).length;
     const table = document.createElement("table");
     const thead = document.createElement("thead");
     const trHead = document.createElement("tr");
     [
       "direccion",
+      "responsable_gestion",
+      "agente",
+      "estado",
+      "origen",
       "vendedores",
       "compradores",
       "fecha_encargo",
@@ -13382,6 +13395,10 @@ const loadCrmCompraventas = () => {
       const tr = document.createElement("tr");
       const rowValues = [
         row.direccion || "-",
+        row.responsable_gestion || "-",
+        row.agente || "-",
+        row.estado || "-",
+        row.origen || "-",
         row.vendedores || "-",
         row.compradores || "-",
         row.fecha_encargo || "",
@@ -13398,6 +13415,10 @@ const loadCrmCompraventas = () => {
       ];
       const rowColumns = [
         "direccion",
+        "responsable_gestion",
+        "agente",
+        "estado",
+        "origen",
         "vendedores",
         "compradores",
         "fecha_encargo",
@@ -13424,7 +13445,7 @@ const loadCrmCompraventas = () => {
     crmCompraventasTable.innerHTML = "";
     crmCompraventasTable.appendChild(table);
     if (crmCompraventasInfo) {
-      crmCompraventasInfo.textContent = `Mostrando ${rows.length} compraventas.`;
+      crmCompraventasInfo.textContent = `Mostrando ${rows.length} compraventas. Manuales: ${manualCount}. Históricas: ${historicoCount}. Busca también por responsable, agente u oficina.`;
     }
     if (crmKpiCompraventas) {
       crmKpiCompraventas.textContent = String(data?.kpis?.total || rows.length || 0);
