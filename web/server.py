@@ -9104,6 +9104,68 @@ def ensure_inmueble_propietario_link(conn, inmueble_id, cliente_id, now):
     )
 
 
+def ensure_captacion_for_inmueble(conn, empresa_id, inmueble_id, now):
+    if not inmueble_id:
+        return None
+    captacion = conn.execute(
+        """
+        SELECT *
+        FROM captaciones
+        WHERE empresa_id = ? AND inmueble_id = ?
+        ORDER BY updated_at DESC, created_at DESC
+        LIMIT 1
+        """,
+        (empresa_id, inmueble_id),
+    ).fetchone()
+    if captacion:
+        return captacion
+    inmueble = conn.execute(
+        "SELECT * FROM inmuebles WHERE id = ? AND empresa_id = ? LIMIT 1",
+        (inmueble_id, empresa_id),
+    ).fetchone()
+    if not inmueble:
+        return None
+    captacion_id = os.urandom(16).hex()
+    situacion = str(inmueble["estado"] or "Captación").strip() or "Captación"
+    etapa = "Encargo firmado" if normalize_lookup_text(situacion) == "encargo" else "Prospecto"
+    conn.execute(
+        """
+        INSERT INTO captaciones (
+          id, empresa_id, inmueble_id, propietario, tipo_inmueble, direccion, codigo_postal, poblacion, provincia,
+          zona, m2, habitaciones, banos, precio_objetivo, precio_valoracion, etapa, situacion_comercial,
+          created_at, updated_at
+        ) VALUES (
+          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+        )
+        """,
+        (
+            captacion_id,
+            empresa_id,
+            inmueble_id,
+            None,
+            inmueble["tipo_inmueble"],
+            inmueble["direccion"],
+            inmueble["codigo_postal"],
+            inmueble["poblacion"],
+            inmueble["provincia"],
+            inmueble["zona"],
+            inmueble["m2"],
+            inmueble["habitaciones"],
+            inmueble["banos"],
+            inmueble["precio_objetivo"],
+            inmueble["precio_valoracion"],
+            etapa,
+            situacion,
+            now,
+            now,
+        ),
+    )
+    return conn.execute(
+        "SELECT * FROM captaciones WHERE id = ? LIMIT 1",
+        (captacion_id,),
+    ).fetchone()
+
+
 def get_inmueble_propietarios(conn, inmueble_id):
     if not inmueble_id:
         return []
@@ -19385,6 +19447,7 @@ class Handler(BaseHTTPRequestHandler):
         elif parsed.path == "/api/captacion_convert":
             try:
                 captacion_id = str(payload.get("captacion_id") or "").strip()
+                inmueble_id = str(payload.get("inmueble_id") or "").strip()
                 destino = normalize_lookup_text(payload.get("destino") or "")
                 destino_map = {
                     "inmueble": "Inmueble",
@@ -19394,21 +19457,26 @@ class Handler(BaseHTTPRequestHandler):
                     "alquiler": "Alquiler",
                 }
                 destino_label = destino_map.get(destino)
-                if not captacion_id or not destino_label:
-                    json_response(self, {"error": "captacion_id y destino válidos requeridos"}, status=400)
+                if not destino_label or (not captacion_id and not inmueble_id):
+                    json_response(self, {"error": "captacion_id o inmueble_id y destino válidos requeridos"}, status=400)
                     return
-                captacion = conn.execute(
-                    """
-                    SELECT *
-                    FROM captaciones
-                    WHERE id = ? AND empresa_id = ?
-                    LIMIT 1
-                    """,
-                    (captacion_id, empresa["id"]),
-                ).fetchone()
+                captacion = None
+                if captacion_id:
+                    captacion = conn.execute(
+                        """
+                        SELECT *
+                        FROM captaciones
+                        WHERE id = ? AND empresa_id = ?
+                        LIMIT 1
+                        """,
+                        (captacion_id, empresa["id"]),
+                    ).fetchone()
+                if not captacion and inmueble_id:
+                    captacion = ensure_captacion_for_inmueble(conn, empresa["id"], inmueble_id, now)
                 if not captacion:
                     json_response(self, {"error": "Captación no encontrada"}, status=404)
                     return
+                captacion_id = str(captacion["id"] or "").strip()
                 inmueble = conn.execute(
                     "SELECT * FROM inmuebles WHERE id = ? LIMIT 1",
                     (captacion["inmueble_id"],),
