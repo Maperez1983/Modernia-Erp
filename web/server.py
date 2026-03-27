@@ -12830,6 +12830,73 @@ def build_workspace_invoice_pdf(invoice, workspace, company, client, collections
     return bytes(pdf)
 
 
+def build_inmueble_visit_sheet_pdf(company, inmueble, captacion, owners, buyer, demanda=None):
+    owners_text = " | ".join([str(item.get("nombre") or "").strip() for item in (owners or []) if str(item.get("nombre") or "").strip()]) or (captacion.get("propietario") or "-")
+    buyer_name = str((buyer or {}).get("nombre") or "").strip() or "-"
+    buyer_nif = str((buyer or {}).get("nif") or "").strip() or "-"
+    buyer_phone = str((buyer or {}).get("telefono") or "").strip() or "-"
+    buyer_email = str((buyer or {}).get("email") or "").strip() or "-"
+    lines = [
+        company.get("nombre") or "Modernia",
+        "HOJA DE VISITA",
+        "",
+        f"Fecha emisión: {format_export_date(datetime.now(timezone.utc).date().isoformat())}",
+        "",
+        "DATOS DEL INMUEBLE",
+        f"Dirección: {inmueble.get('direccion') or '-'}",
+        f"Zona/Población: {' · '.join([part for part in [inmueble.get('zona'), inmueble.get('poblacion'), inmueble.get('provincia')] if part]) or '-'}",
+        f"Tipo: {inmueble.get('tipo_inmueble') or '-'}",
+        f"Estado comercial: {captacion.get('situacion_comercial') or inmueble.get('estado') or '-'}",
+        f"Precio objetivo: {format_eur(inmueble.get('precio_objetivo') or captacion.get('precio_objetivo') or 0)}",
+        f"Propietarios: {owners_text}",
+        "",
+        "DATOS DEL CLIENTE VISITANTE",
+        f"Nombre: {buyer_name}",
+        f"DNI/NIF: {buyer_nif}",
+        f"Teléfono: {buyer_phone}",
+        f"Email: {buyer_email}",
+        f"Demanda vinculada: {(demanda or {}).get('tipo') or '-'} · {(demanda or {}).get('zona') or '-'}",
+        "",
+        "CONDICIONES DE LA VISITA",
+        "El cliente visitante reconoce haber visitado el inmueble con intermediación de ESTUDIO VELAZQUEZ / MODERNIA.",
+        "Cualquier negociación, reserva o compraventa/alquiler posterior sobre este inmueble deberá canalizarse a través de la agencia.",
+        "",
+        "OBSERVACIONES",
+        captacion.get("notas") or "-",
+        "",
+        "Firma cliente visitante: ____________________________",
+        "",
+        "Firma asesor comercial: ____________________________",
+    ]
+    font_obj = "1 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj\n"
+    page_lines = []
+    y = 800
+    for raw in lines[:42]:
+        page_lines.append(f"BT /F1 11 Tf 42 {y} Td ({_pdf_escape(raw)}) Tj ET")
+        y -= 18
+    content_stream = "\n".join(page_lines).encode("latin-1", "replace")
+    objects = []
+    objects.append("1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n")
+    objects.append("2 0 obj << /Type /Pages /Count 1 /Kids [3 0 R] >> endobj\n")
+    objects.append(
+        "3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >> endobj\n"
+    )
+    objects.append(font_obj)
+    objects.append(f"5 0 obj << /Length {len(content_stream)} >> stream\n".encode("latin-1") + content_stream + b"\nendstream\nendobj\n")
+    pdf = bytearray(b"%PDF-1.4\n")
+    offsets = [0]
+    for obj in objects:
+        offsets.append(len(pdf))
+        pdf.extend(obj if isinstance(obj, bytes) else obj.encode("latin-1"))
+    xref_pos = len(pdf)
+    pdf.extend(f"xref\n0 {len(offsets)}\n".encode("latin-1"))
+    pdf.extend(b"0000000000 65535 f \n")
+    for offset in offsets[1:]:
+        pdf.extend(f"{offset:010d} 00000 n \n".encode("latin-1"))
+    pdf.extend(f"trailer << /Size {len(offsets)} /Root 1 0 R >>\nstartxref\n{xref_pos}\n%%EOF\n".encode("latin-1"))
+    return bytes(pdf)
+
+
 def send_file(handler, path):
     if not path.exists() or not path.is_file():
         handler.send_error(404, "Not found")
@@ -23040,6 +23107,70 @@ class Handler(BaseHTTPRequestHandler):
                     "captacion": dict(captacion) if captacion else {},
                 },
             )
+            return
+
+        if path == "/api/inmueble_visita_pdf":
+            inmueble_id = params.get("id", [""])[0]
+            demanda_id = params.get("demanda_id", [""])[0].strip()
+            if not inmueble_id:
+                json_response(self, {"error": "id requerido"}, status=400)
+                return
+            inmueble = conn.execute(
+                "SELECT * FROM inmuebles WHERE id = ? LIMIT 1",
+                (inmueble_id,),
+            ).fetchone()
+            if not inmueble:
+                json_response(self, {"error": "Inmueble no encontrado"}, status=404)
+                return
+            empresa = conn.execute(
+                "SELECT * FROM empresas WHERE id = ? LIMIT 1",
+                (inmueble["empresa_id"],),
+            ).fetchone()
+            captacion = conn.execute(
+                """
+                SELECT *
+                FROM captaciones
+                WHERE inmueble_id = ?
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                (inmueble_id,),
+            ).fetchone()
+            if not captacion:
+                json_response(self, {"error": "Captación no encontrada"}, status=404)
+                return
+            status = str(captacion["situacion_comercial"] or inmueble["estado"] or "").strip().lower()
+            if status != "encargo":
+                json_response(self, {"error": "La hoja de visita solo está disponible para inmuebles en Encargo"}, status=400)
+                return
+            buyer = resolve_inmobiliaria_contact_candidate(
+                conn,
+                inmueble["empresa_id"],
+                {},
+                demanda_id=demanda_id,
+                inmueble_id=inmueble_id,
+            )
+            if not buyer.get("cliente_id") and not buyer.get("nombre"):
+                json_response(self, {"error": "No hay comprador vinculado por demanda o visita para generar la hoja"}, status=400)
+                return
+            demanda = None
+            if demanda_id:
+                demanda = conn.execute(
+                    "SELECT * FROM demandas WHERE id = ? AND empresa_id = ? LIMIT 1",
+                    (demanda_id, inmueble["empresa_id"]),
+                ).fetchone()
+            owners = get_inmueble_propietarios(conn, inmueble_id)
+            pdf_bytes = build_inmueble_visit_sheet_pdf(
+                dict(empresa) if empresa else {},
+                dict(inmueble),
+                dict(captacion),
+                owners,
+                buyer,
+                dict(demanda) if demanda else None,
+            )
+            safe_ref = slugify_text(inmueble["direccion"] or inmueble["referencia"] or inmueble_id)[:50] or inmueble_id
+            filename = f"hoja_visita_{safe_ref}.pdf"
+            binary_response(self, pdf_bytes, content_type="application/pdf", filename=filename)
             return
 
         if path == "/api/inmueble_docs":

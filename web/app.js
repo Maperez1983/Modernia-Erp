@@ -1965,6 +1965,7 @@ const crmKpiEtapa = document.getElementById("crmKpiEtapa");
 const crmKpiCompraventas = document.getElementById("crmKpiCompraventas");
 const inmuebleDetail = document.getElementById("inmuebleDetail");
 const inmuebleBackBtn = document.getElementById("inmuebleBackBtn");
+const inmuebleVisitaPdfBtn = document.getElementById("inmuebleVisitaPdfBtn");
 const inmuebleTabs = document.getElementById("inmuebleTabs");
 const inmuebleSaveStatus = document.getElementById("inmuebleSaveStatus");
 const inmuebleTabDatos = document.getElementById("inmuebleTabDatos");
@@ -7990,6 +7991,73 @@ const refreshCurrentInmuebleHeader = () => {
   }
 };
 
+const refreshInmuebleVisitSheetButton = () => {
+  if (!inmuebleVisitaPdfBtn) return;
+  const inmueble = state.currentInmueble || state.currentInmuebleContext?.inmueble || {};
+  const captacion = state.currentInmuebleContext?.captacion || {};
+  const status = String(captacion.situacion_comercial || inmueble.estado || "").trim().toLowerCase();
+  const visible = status === "encargo";
+  inmuebleVisitaPdfBtn.classList.toggle("hidden", !visible);
+};
+
+const resolveVisitSheetDemandaId = () => {
+  const demandas = Array.isArray(state.currentInmuebleContext?.demandas) ? state.currentInmuebleContext.demandas : [];
+  const visitas = Array.isArray(state.currentInmuebleContext?.visitas) ? state.currentInmuebleContext.visitas : [];
+  const candidates = new Map();
+  demandas.forEach((row) => {
+    const demandaId = String(row.id || "").trim();
+    const clienteId = String(row.cliente_id || "").trim();
+    const cliente = String(row.cliente || "").trim();
+    if (!demandaId || !clienteId) return;
+    candidates.set(demandaId, {
+      demanda_id: demandaId,
+      cliente_id: clienteId,
+      label: `${cliente || "Cliente"} · ${row.zona || "-"} · ${row.tipo || "-"}`,
+    });
+  });
+  visitas.forEach((row) => {
+    const demandaId = String(row.demanda_id || "").trim();
+    const clienteId = String(row.cliente_id || "").trim();
+    const cliente = String(row.cliente || "").trim();
+    if (!demandaId || !clienteId || candidates.has(demandaId)) return;
+    candidates.set(demandaId, {
+      demanda_id: demandaId,
+      cliente_id: clienteId,
+      label: `${cliente || "Cliente"} · visita ${row.fecha || "-"}`,
+    });
+  });
+  const items = Array.from(candidates.values());
+  if (!items.length) {
+    return "";
+  }
+  if (items.length === 1) {
+    return items[0].demanda_id;
+  }
+  const message = items.map((item, index) => `${index + 1}. ${item.label}`).join("\n");
+  const raw = window.prompt(
+    `Hay varios compradores vinculados. Indica el número de la demanda para generar la hoja:\n\n${message}`,
+    "1"
+  );
+  if (raw === null) return null;
+  const idx = Number(raw);
+  if (!Number.isInteger(idx) || idx < 1 || idx > items.length) {
+    alert("Selección no válida.");
+    return null;
+  }
+  return items[idx - 1].demanda_id;
+};
+
+const openInmuebleVisitSheetPdf = () => {
+  if (!state.currentInmuebleId) return;
+  const demandaId = resolveVisitSheetDemandaId();
+  if (demandaId === null) return;
+  const params = new URLSearchParams({ id: state.currentInmuebleId });
+  if (demandaId) {
+    params.set("demanda_id", demandaId);
+  }
+  window.open(`/api/inmueble_visita_pdf?${params.toString()}`, "_blank", "noopener");
+};
+
 const saveInmuebleField = (field, value) => {
   if (!state.currentInmuebleId) {
     return;
@@ -8028,6 +8096,7 @@ const saveInmuebleField = (field, value) => {
         updateInmuebleMapFromInputs();
       }
       refreshCurrentInmuebleProfile();
+      refreshInmuebleVisitSheetButton();
       setInmuebleSaveStatus("Guardado · cambios aplicados");
       loadCrmInmuebles();
     })
@@ -8069,6 +8138,7 @@ const saveCaptacionField = (field, value) => {
         loadInmuebleChecklist(state.currentInmuebleId, value);
       }
       refreshCurrentInmuebleProfile();
+      refreshInmuebleVisitSheetButton();
       setInmuebleSaveStatus("Guardado · cambios aplicados");
     })
     .catch(() => {
@@ -15454,6 +15524,7 @@ const openInmuebleDetail = (id) => {
         inmuebleEstadoInfo.textContent = `Estado actual: ${inmueble.estado || "-"}`;
       }
       refreshCurrentInmuebleProfile();
+      refreshInmuebleVisitSheetButton();
       loadInmuebleDemandas(id);
       loadInmuebleVisitas(id, empresaId);
       loadInmuebleActividad(id, empresaId);
@@ -26521,6 +26592,12 @@ if (inmuebleBackBtn) {
     }
     setCrmWorkspaceView("inmuebles");
     state.currentInmuebleId = "";
+  });
+}
+
+if (inmuebleVisitaPdfBtn) {
+  inmuebleVisitaPdfBtn.addEventListener("click", () => {
+    openInmuebleVisitSheetPdf();
   });
 }
 
