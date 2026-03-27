@@ -1424,6 +1424,7 @@ const finSimTab = document.getElementById("finSimTab");
 const gestoriaFactTab = document.getElementById("gestoriaFactTab");
 const gestoriaContaTab = document.getElementById("gestoriaContaTab");
 const gestoriaDashTab = document.getElementById("gestoriaDashTab");
+const gestoriaDocsTab = document.getElementById("gestoriaDocsTab");
 const gestoriaAgendaTab = document.getElementById("gestoriaAgendaTab");
 const crmSection = document.getElementById("crmSection");
 const gestoriaCrmSection = document.getElementById("gestoriaCrmSection");
@@ -1440,6 +1441,7 @@ const gestoriaAltaPersonaFields = gestoriaAltaForm
   ? gestoriaAltaForm.querySelectorAll('[data-gestoria-persona="fisica"]')
   : [];
 const gestoriaDashboardSection = document.getElementById("gestoriaDashboardSection");
+const gestoriaDocsSection = document.getElementById("gestoriaDocsSection");
 const gestoriaContaSection = document.getElementById("gestoriaContaSection");
 const gestoriaAgendaSection = document.getElementById("gestoriaAgendaSection");
 const segurosCrmSection = document.getElementById("segurosCrmSection");
@@ -3475,8 +3477,8 @@ const updateExplorerHeader = (empresaName) => {
     }
   }
   if (empresaName === FINCAS_COMPANY && (currentTab === "alta" || currentTab === "bdt")) {
-    state.gestoriaCrmView = currentTab === "alta" ? "alta" : "bdt";
-    setTab("gestoria-crm");
+    state.gestoriaCrmView = currentTab === "alta" ? "alta" : "crm";
+    setTab(currentTab === "alta" ? "gestoria-crm" : "gestoria-docs");
   }
   if (crmTab) {
     const showCrm = empresaName === DASHBOARD_COMPANY;
@@ -3499,6 +3501,13 @@ const updateExplorerHeader = (empresaName) => {
       setTab("operativa");
     }
   }
+  if (gestoriaDocsTab) {
+    const showDocs = empresaName === FINCAS_COMPANY;
+    gestoriaDocsTab.classList.toggle("hidden", !showDocs);
+    if (!showDocs && currentTab === "gestoria-docs") {
+      setTab("operativa");
+    }
+  }
   if (gestoriaAgendaTab) {
     const showAgenda = empresaName === FINCAS_COMPANY;
     gestoriaAgendaTab.classList.toggle("hidden", !showAgenda);
@@ -3507,10 +3516,10 @@ const updateExplorerHeader = (empresaName) => {
     }
   }
   if (gestoriaFactTab) {
-    const showFact = empresaName === FINCAS_COMPANY;
+    const showFact = false;
     gestoriaFactTab.classList.toggle("hidden", !showFact);
     if (!showFact && currentTab === "gestoria-fact") {
-      setTab("operativa");
+      setTab("gestoria-conta");
     }
   }
   if (gestoriaContaTab) {
@@ -3524,6 +3533,13 @@ const updateExplorerHeader = (empresaName) => {
     const showDash = empresaName === FINCAS_COMPANY;
     gestoriaDashTab.classList.toggle("hidden", !showDash);
     if (!showDash && currentTab === "gestoria-dash") {
+      setTab("operativa");
+    }
+  }
+  if (gestoriaDocsTab) {
+    const showDocs = empresaName === FINCAS_COMPANY;
+    gestoriaDocsTab.classList.toggle("hidden", !showDocs);
+    if (!showDocs && currentTab === "gestoria-docs") {
       setTab("operativa");
     }
   }
@@ -3768,16 +3784,18 @@ const setClienteTab = (tab) => {
   clienteTabs.querySelectorAll(".tab").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.tab === tab);
   });
-  if (clienteTabDatos) clienteTabDatos.classList.toggle("hidden", tab !== "datos");
+  const showExpediente = tab === "datos";
+  const showServicios = tab === "profesional";
+  if (clienteTabDatos) clienteTabDatos.classList.toggle("hidden", !showExpediente);
   if (clienteTabRelaciones) clienteTabRelaciones.classList.toggle("hidden", tab !== "relaciones");
-  if (clienteTabDashboard) clienteTabDashboard.classList.toggle("hidden", tab !== "dashboard");
-  if (clienteTabProfesional) clienteTabProfesional.classList.toggle("hidden", tab !== "profesional");
-  if (clienteTabOperativa) clienteTabOperativa.classList.toggle("hidden", tab !== "operativa");
-  if (clienteTabServicios) clienteTabServicios.classList.toggle("hidden", tab !== "servicios");
+  if (clienteTabDashboard) clienteTabDashboard.classList.toggle("hidden", !showExpediente);
+  if (clienteTabProfesional) clienteTabProfesional.classList.toggle("hidden", !showServicios);
+  if (clienteTabOperativa) clienteTabOperativa.classList.toggle("hidden", !showServicios);
+  if (clienteTabServicios) clienteTabServicios.classList.toggle("hidden", !showServicios);
   if (clienteTabDocs) clienteTabDocs.classList.toggle("hidden", tab !== "docs");
   if (clienteTabFacturas) clienteTabFacturas.classList.toggle("hidden", tab !== "facturas");
   if (clienteTabTrabajos) clienteTabTrabajos.classList.toggle("hidden", tab !== "trabajos");
-  if (tab === "operativa") {
+  if (showServicios) {
     setClienteOperativaTab(state.clienteOperativaTab || "gestoria");
   }
   if (tab === "docs") {
@@ -4143,24 +4161,24 @@ const updateCompanySummary = (empresaName) => {
   }
   const gestoriaCopyByTab = {
     "gestoria-dash": {
-      subtitle: "Resumen del despacho, alertas y vencimientos.",
-      meta: "Área · Resumen",
+      subtitle: "Panel del despacho, alertas y foco operativo.",
+      meta: "Área · Panel",
     },
     "gestoria-crm": {
-      subtitle: "Cartera de clientes, base importada y altas.",
+      subtitle: "Expedientes activos, cartera de clientes y altas.",
       meta: "Área · Clientes",
     },
+    "gestoria-docs": {
+      subtitle: "Entrada documental, base importada y trazabilidad de documentos.",
+      meta: "Área · Inbox documental",
+    },
     "gestoria-agenda": {
-      subtitle: "Trabajo del equipo, seguimiento y recordatorios.",
-      meta: "Área · Trabajo",
+      subtitle: "Campañas, seguimientos y agenda operativa del equipo.",
+      meta: "Área · Campañas",
     },
     "gestoria-conta": {
       subtitle: "Cola contable, revisión y control operativo.",
       meta: "Área · Contabilidad",
-    },
-    "gestoria-fact": {
-      subtitle: "Facturas del servicio y salida al software externo.",
-      meta: "Área · Facturas",
     },
   };
   const gestoriaCopy = empresaName === FINCAS_COMPANY ? gestoriaCopyByTab[currentTab] : null;
@@ -8373,25 +8391,20 @@ const setGestoriaCrmTab = (tabName = "autonomo") => {
 };
 
 const setGestoriaCrmView = (viewName = "crm") => {
-  state.gestoriaCrmView = viewName;
+  const normalizedView = viewName === "bdt" ? "crm" : viewName;
+  state.gestoriaCrmView = normalizedView;
   if (gestoriaCrmViews) {
     gestoriaCrmViews.querySelectorAll(".tab").forEach((btn) => {
-      btn.classList.toggle("active", btn.dataset.gestoriaView === viewName);
+      btn.classList.toggle("active", btn.dataset.gestoriaView === normalizedView);
     });
   }
   if (gestoriaCrmViewCrm) {
-    gestoriaCrmViewCrm.classList.toggle("hidden", viewName !== "crm");
-  }
-  if (gestoriaCrmViewBdt) {
-    gestoriaCrmViewBdt.classList.toggle("hidden", viewName !== "bdt");
+    gestoriaCrmViewCrm.classList.toggle("hidden", normalizedView !== "crm");
   }
   if (gestoriaCrmViewAlta) {
-    gestoriaCrmViewAlta.classList.toggle("hidden", viewName !== "alta");
+    gestoriaCrmViewAlta.classList.toggle("hidden", normalizedView !== "alta");
   }
-  if (viewName === "bdt") {
-    loadGestoriaBdt();
-  }
-  if (viewName === "crm") {
+  if (normalizedView === "crm") {
     loadGestoriaCrm();
   }
 };
@@ -8753,13 +8766,13 @@ const updateTableVisibility = () => {
     clientesAltaSection.classList.toggle("hidden", !isClientesAlta);
   }
   if (clientesColumnsBtn) {
-    clientesColumnsBtn.classList.toggle("hidden", state.currentModule !== "clientes" || isClientePage);
+    clientesColumnsBtn.classList.toggle("hidden", true);
   }
   if (clientesColumnsPanel) {
-    clientesColumnsPanel.classList.toggle("hidden", state.currentModule !== "clientes" || isClientePage);
+    clientesColumnsPanel.classList.toggle("hidden", true);
   }
   if (clientesShowAllBtn) {
-    clientesShowAllBtn.classList.toggle("hidden", state.currentModule !== "clientes" || isClientePage);
+    clientesShowAllBtn.classList.toggle("hidden", true);
   }
   const showTable = currentTab === "bdt";
   if (bdtSection) {
@@ -8776,6 +8789,12 @@ const updateTableVisibility = () => {
   }
   if (currentTab === "gestoria-crm" && !isClientePage) {
     setGestoriaCrmView(state.gestoriaCrmView || "crm");
+  }
+  if (gestoriaDocsSection) {
+    gestoriaDocsSection.classList.toggle(
+      "hidden",
+      currentTab !== "gestoria-docs" || isClientePage
+    );
   }
   if (gestoriaDashboardSection) {
     gestoriaDashboardSection.classList.toggle(
@@ -8844,7 +8863,7 @@ const updateTableVisibility = () => {
     if (fincasBdtTabs) fincasBdtTabs.classList.add("hidden");
     tablaSelect.classList.add("hidden");
   } else {
-    tablaSelect.classList.toggle("hidden", currentTab === "gestoria-crm");
+    tablaSelect.classList.toggle("hidden", currentTab === "gestoria-crm" || currentTab === "gestoria-docs");
     if (currentTab !== "operativa") {
       if (dashboardSection) dashboardSection.classList.add("hidden");
       if (finDashboardSection) finDashboardSection.classList.add("hidden");
@@ -14084,6 +14103,12 @@ const loadGestoriaCrm = async () => {
       gestoriaCrmToggleView.textContent = showFull ? "Ver resumen" : "Ver tabla completa";
     }
   return;
+};
+
+const loadGestoriaDocsWorkspace = () => {
+  loadGestoriaBdt();
+  loadGestoriaDocsRecent();
+  loadGestoriaAuditoria();
 };
 
 const loadGestoriaDashboard = () => {
@@ -21679,26 +21704,28 @@ const openClienteDetail = (id) => {
     }
     if (clienteTabs) {
       const relacionesTab = clienteTabs.querySelector('[data-tab="relaciones"]');
+      const expedienteTab = clienteTabs.querySelector('[data-tab="datos"]');
       const dashboardTab = clienteTabs.querySelector('[data-tab="dashboard"]');
       const gestoriaTab = clienteTabs.querySelector('[data-tab="profesional"]');
       const operativaTab = clienteTabs.querySelector('[data-tab="operativa"]');
       const serviciosTab = clienteTabs.querySelector('[data-tab="servicios"]');
       const docsTab = clienteTabs.querySelector('[data-tab="docs"]');
       if (relacionesTab) relacionesTab.classList.toggle("hidden", false);
-      if (dashboardTab) dashboardTab.classList.toggle("hidden", false);
+      if (expedienteTab) expedienteTab.classList.toggle("hidden", false);
+      if (dashboardTab) dashboardTab.classList.toggle("hidden", true);
       if (gestoriaTab) gestoriaTab.classList.toggle("hidden", !(hasGestoria || hasSeguros || hasHipotecas || hasInmo));
-      if (operativaTab) operativaTab.classList.toggle("hidden", !(hasGestoria || hasSeguros || hasHipotecas || hasInmo));
+      if (operativaTab) operativaTab.classList.toggle("hidden", true);
       if (serviciosTab) serviciosTab.classList.toggle("hidden", true);
       if (docsTab) docsTab.classList.toggle("hidden", false);
     }
     if (clienteTabDashboard) {
-      clienteTabDashboard.classList.toggle("hidden", false);
+      clienteTabDashboard.classList.toggle("hidden", true);
     }
     if (clienteTabServicios) {
       clienteTabServicios.classList.add("hidden");
     }
     if (clienteTabOperativa) {
-      clienteTabOperativa.classList.toggle("hidden", !(hasGestoria || hasSeguros || hasHipotecas || hasInmo));
+      clienteTabOperativa.classList.toggle("hidden", true);
     }
     if (clienteServiciosSegurosCard) {
       clienteServiciosSegurosCard.classList.toggle("hidden", !hasSeguros);
@@ -21838,9 +21865,7 @@ const openClienteDetail = (id) => {
             : "seguros";
     setClienteDocsTab(docsDefault);
     clientesDetail.classList.remove("hidden");
-    const defaultTab = (hasGestoria || hasSeguros || hasInmo || hasHipotecas)
-      ? "operativa"
-      : "dashboard";
+    const defaultTab = "datos";
     setClienteTab(defaultTab);
     window.scrollTo({ top: clientesDetail.offsetTop - 120, behavior: "smooth" });
   });
@@ -25895,6 +25920,7 @@ ${duplicateText || "- Registro similar existente"}
   return { ok: true, data };
 };
 
+
 if (segurosAgendaForm) {
   segurosAgendaForm.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -25999,6 +26025,9 @@ if (empresaSelect) {
     loadTable();
     if (empresaName === FINCAS_COMPANY && currentTab === "gestoria-crm") {
       loadGestoriaCrm();
+    }
+    if (empresaName === FINCAS_COMPANY && currentTab === "gestoria-docs") {
+      loadGestoriaDocsWorkspace();
     }
   });
 }
