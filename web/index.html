@@ -49,14 +49,99 @@
       <section id="holdingSection" class="hidden">
         <div class="section-head">
           <div>
-            <h2>Histórico de empresas</h2>
-            <p class="muted">Consulta por sociedades y evolución histórica.</p>
+            <h2>Workspace Central</h2>
+            <p class="muted">Control de tenants, empresas, módulos y base de producto desde una sola vista.</p>
           </div>
           <button id="holdingBackBtn" class="secondary ghost">Volver a home</button>
         </div>
+        <div class="grid workspace-kpis" id="workspaceKpis"></div>
+        <div class="workspace-central-layout">
+          <div class="form-card">
+            <div class="section-head">
+              <div>
+                <h3>Workspaces</h3>
+                <p class="muted">Cada workspace representa un tenant operando sobre el producto.</p>
+              </div>
+            </div>
+            <div id="workspaceList"></div>
+          </div>
+          <div class="form-card">
+            <div class="section-head">
+              <div>
+                <h3>Configuración del workspace</h3>
+                <p class="muted">Define branding, estado y plan del tenant.</p>
+              </div>
+              <button type="button" id="workspaceNewBtn" class="secondary ghost">Nuevo workspace</button>
+            </div>
+            <form id="workspaceForm" class="form-grid">
+              <input type="hidden" name="id" />
+              <label>
+                Nombre
+                <input name="nombre" required />
+              </label>
+              <label>
+                Slug
+                <input name="slug" />
+              </label>
+              <label>
+                Estado
+                <select name="estado">
+                  <option>Activo</option>
+                  <option>Implantación</option>
+                  <option>Pausa</option>
+                  <option>Archivo</option>
+                </select>
+              </label>
+              <label>
+                Plan
+                <select name="plan">
+                  <option>Base</option>
+                  <option>Pro</option>
+                  <option>Enterprise</option>
+                </select>
+              </label>
+              <label>
+                Color principal
+                <input name="primary_color" placeholder="#3C6E71" />
+              </label>
+              <label>
+                Color acento
+                <input name="accent_color" placeholder="#5F7A61" />
+              </label>
+              <label class="span-2">
+                Descripción
+                <textarea name="descripcion" rows="3"></textarea>
+              </label>
+              <div class="form-actions">
+                <button type="submit">Guardar workspace</button>
+                <span id="workspaceFormStatus" class="muted"></span>
+              </div>
+            </form>
+          </div>
+        </div>
+        <div class="workspace-central-layout">
+          <div class="form-card">
+            <div class="section-head">
+              <div>
+                <h3>Empresas vinculadas</h3>
+                <p class="muted">Sociedades operativas que cuelgan del workspace.</p>
+              </div>
+            </div>
+            <div id="workspaceCompanies"></div>
+          </div>
+          <div class="form-card">
+            <div class="section-head">
+              <div>
+                <h3>Módulos del producto</h3>
+                <p class="muted">Activa o pausa verticales y motores transversales por workspace.</p>
+              </div>
+            </div>
+            <div id="workspaceModules"></div>
+          </div>
+        </div>
         <div class="form-card">
-          <h3>Organigrama</h3>
-          <p class="muted">Estructura societaria.</p>
+          <h3>Mapa societario</h3>
+          <p class="muted">Relación operativa entre empresas actuales mientras se completa la transición a tenants.</p>
           <div id="holdingOrgChart" class="org-chart"></div>
         </div>
       </section>

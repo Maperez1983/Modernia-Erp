@@ -1158,6 +1158,8 @@ const state = {
   segurosOcrParsedFields: {},
   currentClienteData: null,
   currentClienteGestoriaData: null,
+  workspaces: [],
+  currentWorkspaceId: "",
   currentClienteSegurosRows: [],
   currentClienteRamoSelected: "",
   currentSeguroId: "",
@@ -1204,6 +1206,13 @@ const adminUserDetailBack = document.getElementById("adminUserDetailBack");
 const holdingSection = document.getElementById("holdingSection");
 const holdingBackBtn = document.getElementById("holdingBackBtn");
 const holdingOrgChart = document.getElementById("holdingOrgChart");
+const workspaceKpis = document.getElementById("workspaceKpis");
+const workspaceList = document.getElementById("workspaceList");
+const workspaceForm = document.getElementById("workspaceForm");
+const workspaceFormStatus = document.getElementById("workspaceFormStatus");
+const workspaceNewBtn = document.getElementById("workspaceNewBtn");
+const workspaceCompanies = document.getElementById("workspaceCompanies");
+const workspaceModules = document.getElementById("workspaceModules");
 const agendaSection = document.getElementById("agendaSection");
 const agendaBackBtn = document.getElementById("agendaBackBtn");
 const agendaGeneral = document.getElementById("agendaGeneral");
@@ -3316,9 +3325,9 @@ const renderCompanyCards = () => {
     holdingCard.className = "company-card";
     holdingCard.dataset.action = "holding";
     holdingCard.innerHTML = `
-      <h3>Histórico empresas</h3>
-      <div class="company-meta">Acceso al histórico por sociedades.</div>
-      <div class="company-meta">Dashboards por empresa (fase final).</div>
+      <h3>Workspace Central</h3>
+      <div class="company-meta">Control del producto, tenants y módulos.</div>
+      <div class="company-meta">Modernia como primer workspace operativo.</div>
       <a class="card-link" href="?holding=1" data-action="holding">Entrar</a>
     `;
     if (isPriv) {
@@ -3388,6 +3397,174 @@ const refreshClientesCardCount = () => {
   if (!el) return;
   const clientesCount = getClientesCardCount();
   el.textContent = numberFormatter.format(clientesCount);
+};
+
+const WORKSPACE_CATEGORY_LABELS = {
+  core: "Core",
+  vertical: "Vertical",
+  motor: "Motor",
+};
+
+const renderWorkspaceKpis = (summary = {}) => {
+  if (!workspaceKpis) return;
+  const items = [
+    ["Workspaces", summary.workspaces_total || 0, "Tenants operativos"],
+    ["Empresas", summary.empresas_total || 0, "Sociedades enlazadas"],
+    ["Módulos activos", summary.modulos_activos_total || 0, "Capacidades habilitadas"],
+  ];
+  workspaceKpis.innerHTML = items
+    .map(
+      ([title, value, subtitle]) => `
+        <div class="card kpi-card">
+          <h3>${title}</h3>
+          <div class="kpi-value">${numberFormatter.format(Number(value) || 0)}</div>
+          <div class="muted">${subtitle}</div>
+        </div>
+      `
+    )
+    .join("");
+};
+
+const fillWorkspaceForm = (workspace = {}) => {
+  if (!workspaceForm) return;
+  ["id", "nombre", "slug", "estado", "plan", "descripcion", "logo_url", "primary_color", "accent_color"].forEach((field) => {
+    const el = workspaceForm.querySelector(`[name="${field}"]`);
+    if (!el) return;
+    el.value = workspace[field] || "";
+  });
+};
+
+const renderWorkspaceList = (rows = []) => {
+  if (!workspaceList) return;
+  if (!rows.length) {
+    workspaceList.innerHTML = "<p class='muted'>Sin workspaces configurados.</p>";
+    return;
+  }
+  const selectedId =
+    rows.some((row) => String(row.id || "") === String(state.currentWorkspaceId || ""))
+      ? state.currentWorkspaceId
+      : rows[0].id;
+  state.currentWorkspaceId = selectedId;
+  workspaceList.innerHTML = rows
+    .map((row) => {
+      const isActive = String(row.id || "") === String(selectedId || "");
+      return `
+        <button type="button" class="workspace-list-item${isActive ? " is-active" : ""}" data-workspace-id="${row.id}">
+          <div>
+            <strong>${row.nombre || "-"}</strong>
+            <div class="muted">${row.plan || "Enterprise"} · ${row.estado || "Activo"}</div>
+          </div>
+          <div class="workspace-list-meta">
+            <span>${Number(row.empresas_total || 0)} empresas</span>
+            <span>${Number(row.modulos_activos || 0)} módulos</span>
+          </div>
+        </button>
+      `;
+    })
+    .join("");
+  workspaceList.querySelectorAll("[data-workspace-id]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const workspaceId = btn.dataset.workspaceId || "";
+      if (!workspaceId) return;
+      loadWorkspaceDetail(workspaceId);
+    });
+  });
+};
+
+const renderWorkspaceCompanies = (rows = []) => {
+  if (!workspaceCompanies) return;
+  if (!rows.length) {
+    workspaceCompanies.innerHTML = "<p class='muted'>Sin empresas asociadas.</p>";
+    return;
+  }
+  workspaceCompanies.innerHTML = `
+    <div class="workspace-chip-list">
+      ${rows
+        .map(
+          (row) => `
+            <div class="workspace-chip">
+              <strong>${row.nombre || "-"}</strong>
+              <span>${row.rol || "operativa"} · ${Number(row.activo || 0) === 1 ? "activa" : "inactiva"}</span>
+            </div>
+          `
+        )
+        .join("")}
+    </div>
+  `;
+};
+
+const renderWorkspaceModules = (rows = []) => {
+  if (!workspaceModules) return;
+  if (!rows.length) {
+    workspaceModules.innerHTML = "<p class='muted'>Sin módulos configurados.</p>";
+    return;
+  }
+  workspaceModules.innerHTML = `
+    <div class="workspace-module-grid">
+      ${rows
+        .map(
+          (row) => `
+            <label class="workspace-module-card">
+              <div>
+                <strong>${row.modulo_nombre || row.modulo_key || "-"}</strong>
+                <div class="muted">${WORKSPACE_CATEGORY_LABELS[row.categoria] || row.categoria || "Módulo"}</div>
+              </div>
+              <input type="checkbox" data-module-id="${row.id}" ${Number(row.enabled || 0) === 1 ? "checked" : ""} />
+            </label>
+          `
+        )
+        .join("")}
+    </div>
+  `;
+  workspaceModules.querySelectorAll("[data-module-id]").forEach((input) => {
+    input.addEventListener("change", async () => {
+      const moduleId = input.dataset.moduleId || "";
+      const enabled = input.checked ? 1 : 0;
+      try {
+        const data = await fetch("/api/workspace_module_update", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: moduleId, enabled }),
+        }).then((res) => res.json());
+        if (data?.error) {
+          throw new Error(data.error);
+        }
+        loadWorkspaceCentral();
+      } catch (error) {
+        input.checked = !enabled;
+        alert(error.message || "No se pudo actualizar el módulo.");
+      }
+    });
+  });
+};
+
+const loadWorkspaceDetail = async (workspaceId) => {
+  if (!workspaceId) return;
+  state.currentWorkspaceId = workspaceId;
+  const data = await api(`/api/workspace_detail?id=${encodeURIComponent(workspaceId)}`);
+  fillWorkspaceForm(data.workspace || {});
+  renderWorkspaceCompanies(data.companies || []);
+  renderWorkspaceModules(data.modules || []);
+  renderWorkspaceList(state.workspaces || []);
+};
+
+const loadWorkspaceCentral = async () => {
+  const data = await api("/api/workspaces");
+  state.workspaces = data.rows || [];
+  renderWorkspaceKpis(data.summary || {});
+  renderWorkspaceList(state.workspaces);
+  renderHoldingOrgChart();
+  const selectedId =
+    state.workspaces.some((row) => String(row.id || "") === String(state.currentWorkspaceId || ""))
+      ? state.currentWorkspaceId
+      : (state.workspaces[0] && state.workspaces[0].id) || "";
+  if (selectedId) {
+    await loadWorkspaceDetail(selectedId);
+  } else {
+    fillWorkspaceForm({});
+    renderWorkspaceCompanies([]);
+    renderWorkspaceModules([]);
+  }
 };
 
 const renderHoldingOrgChart = () => {
@@ -4041,6 +4218,7 @@ const openHolding = () => {
   setModule("empresas");
   explorerSection.classList.add("hidden");
   setPage("holding");
+  loadWorkspaceCentral().catch(() => {});
   setUrlParams(new URLSearchParams({ holding: "1" }));
   window.scrollTo({ top: 0, behavior: "smooth" });
 };
@@ -8690,7 +8868,7 @@ const updateTableVisibility = () => {
   }
   const isClientePage = state.currentPage === "cliente";
   const isClientesModule = state.currentModule === "clientes";
-  const isServiceCrm = ["crm", "gestoria-crm", "seguros-crm", "fin-crm", "gestoria-fact", "gestoria-conta", "gestoria-agenda", "gestoria-dash"].includes(currentTab);
+  const isServiceCrm = ["crm", "gestoria-crm", "gestoria-docs", "seguros-crm", "fin-crm", "gestoria-fact", "gestoria-conta", "gestoria-agenda", "gestoria-dash"].includes(currentTab);
   const hideCompanySummary = isClientePage || ["crm", "seguros-crm", "fin-crm"].includes(currentTab);
   const isFinSim = currentTab === "fin-sim";
   const selectedCompany =
@@ -22117,6 +22295,7 @@ const init = async () => {
     await safe(loadHomeDashboard());
     await safe(loadHomeHipotecaStats());
     await safe(loadHomeFincasStats(yearSelect?.value));
+    await safe(loadWorkspaceCentral());
     await safe(loadUsuarios());
     renderUsuariosSelect();
     renderUsuariosTable();
@@ -22278,6 +22457,11 @@ viewTabs.addEventListener("click", (event) => {
   }
   if (currentTab === "gestoria-crm") {
     loadGestoriaCrm();
+    updateTableVisibility();
+    return;
+  }
+  if (currentTab === "gestoria-docs") {
+    loadGestoriaDocsWorkspace();
     updateTableVisibility();
     return;
   }
@@ -23972,6 +24156,57 @@ if (holdingBackBtn) {
     goHome();
   });
 }
+
+if (workspaceForm) {
+  workspaceForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (workspaceFormStatus) {
+      workspaceFormStatus.textContent = "Guardando...";
+    }
+    const formData = new FormData(workspaceForm);
+    const payload = Object.fromEntries(formData.entries());
+    try {
+      const data = await fetch("/api/workspace_update", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }).then((res) => res.json());
+      if (data?.error) {
+        throw new Error(data.error);
+      }
+      state.currentWorkspaceId = data.id || "";
+      if (workspaceFormStatus) {
+        workspaceFormStatus.textContent = "Guardado.";
+      }
+      await loadWorkspaceCentral();
+    } catch (error) {
+      if (workspaceFormStatus) {
+        workspaceFormStatus.textContent = error.message || "Error al guardar.";
+      }
+    }
+  });
+}
+
+if (workspaceNewBtn) {
+  workspaceNewBtn.addEventListener("click", () => {
+    state.currentWorkspaceId = "";
+    fillWorkspaceForm({
+      nombre: "",
+      slug: "",
+      estado: "Activo",
+      plan: "Enterprise",
+      descripcion: "",
+      primary_color: "#3C6E71",
+      accent_color: "#5F7A61",
+    });
+    renderWorkspaceCompanies([]);
+    renderWorkspaceModules([]);
+    if (workspaceFormStatus) {
+      workspaceFormStatus.textContent = "Preparado para crear un workspace nuevo.";
+    }
+  });
+}
+
 if (agendaBackBtn) {
   agendaBackBtn.addEventListener("click", () => {
     goHome();
@@ -25896,11 +26131,7 @@ const submitInmobiliariaWithDuplicateCheck = async ({
         : "Posible duplicado detectado.";
     }
     const confirmed = window.confirm(
-      `Se han detectado posibles duplicados:
-
-${duplicateText || "- Registro similar existente"}
-
-¿Quieres guardar de todos modos?`
+      `Se han detectado posibles duplicados:\n\n${duplicateText || "- Registro similar existente"}\n\n¿Quieres guardar de todos modos?`
     );
     if (!confirmed) {
       return { duplicateCancelled: true, data };

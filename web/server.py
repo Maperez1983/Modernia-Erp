@@ -112,6 +112,22 @@ AUTH_PUBLIC_GET_ENDPOINTS = {"/api/health", "/api/me", "/api/auth_invite_status"
 AUTH_PUBLIC_POST_ENDPOINTS = {"/api/login", "/api/logout", "/api/auth_set_password"}
 AUTH_SESSIONS = {}
 AUTH_SESSIONS_LOCK = threading.Lock()
+DEFAULT_WORKSPACE_NAME = "Modernia"
+WORKSPACE_MODULE_CATALOG = [
+    {"key": "crm360", "nombre": "CRM 360", "categoria": "core", "sort_order": 10},
+    {"key": "documental", "nombre": "Inbox Documental", "categoria": "core", "sort_order": 20},
+    {"key": "dashboard", "nombre": "Dashboard Ejecutivo", "categoria": "core", "sort_order": 30},
+    {"key": "gestoria", "nombre": "Gestoría", "categoria": "vertical", "sort_order": 40},
+    {"key": "seguros", "nombre": "Seguros", "categoria": "vertical", "sort_order": 50},
+    {"key": "inmobiliaria", "nombre": "Inmobiliaria", "categoria": "vertical", "sort_order": 60},
+    {"key": "financiacion", "nombre": "Financiación", "categoria": "vertical", "sort_order": 70},
+    {"key": "fincas", "nombre": "Administración de Fincas", "categoria": "vertical", "sort_order": 80},
+    {"key": "facturacion", "nombre": "Facturación", "categoria": "motor", "sort_order": 90},
+    {"key": "facturas_recibidas", "nombre": "Facturas Recibidas", "categoria": "motor", "sort_order": 100},
+    {"key": "portal_cliente", "nombre": "Portal Cliente", "categoria": "motor", "sort_order": 110},
+    {"key": "registro_horario", "nombre": "Registro Horario", "categoria": "motor", "sort_order": 120},
+    {"key": "automatizaciones", "nombre": "Automatizaciones", "categoria": "motor", "sort_order": 130},
+]
 
 
 def parse_ocr_psms(raw):
@@ -898,6 +914,13 @@ def normalize_lookup_text(value):
     return text
 
 
+def normalize_workspace_slug(value):
+    text = normalize_lookup_text(value or "").lower().replace(" ", "-")
+    text = re.sub(r"[^a-z0-9\-]+", "", text)
+    text = re.sub(r"\-+", "-", text).strip("-")
+    return text or "workspace"
+
+
 def normalize_service_key(value):
     text = normalize_lookup_text(value)
     aliases = {
@@ -910,6 +933,135 @@ def normalize_service_key(value):
         "ADMINISTRACION DE FINCAS": "administracion fincas",
     }
     return aliases.get(text, text.lower().strip())
+
+
+def ensure_workspace_core_tables(conn):
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workspaces (
+          id TEXT PRIMARY KEY,
+          nombre TEXT NOT NULL UNIQUE,
+          slug TEXT NOT NULL UNIQUE,
+          estado TEXT NOT NULL DEFAULT 'Activo',
+          plan TEXT NOT NULL DEFAULT 'Enterprise',
+          descripcion TEXT,
+          logo_url TEXT,
+          primary_color TEXT,
+          accent_color TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workspace_empresas (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          empresa_id TEXT NOT NULL,
+          rol TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          UNIQUE (workspace_id, empresa_id)
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workspace_modulos (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          modulo_key TEXT NOT NULL,
+          modulo_nombre TEXT NOT NULL,
+          categoria TEXT,
+          enabled INTEGER NOT NULL DEFAULT 1,
+          sort_order INTEGER NOT NULL DEFAULT 0,
+          config_json TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          UNIQUE (workspace_id, modulo_key)
+        )
+        """
+    )
+    ensure_column(conn, "workspaces", "descripcion", "descripcion TEXT")
+    ensure_column(conn, "workspaces", "logo_url", "logo_url TEXT")
+    ensure_column(conn, "workspaces", "primary_color", "primary_color TEXT")
+    ensure_column(conn, "workspaces", "accent_color", "accent_color TEXT")
+    ensure_column(conn, "workspace_modulos", "config_json", "config_json TEXT")
+
+
+def bootstrap_default_workspace(conn):
+    now = datetime.now(timezone.utc).isoformat()
+    workspace = conn.execute(
+        "SELECT id FROM workspaces WHERE nombre = ? OR slug = ? LIMIT 1",
+        (DEFAULT_WORKSPACE_NAME, normalize_workspace_slug(DEFAULT_WORKSPACE_NAME)),
+    ).fetchone()
+    if workspace:
+        workspace_id = workspace["id"] if isinstance(workspace, sqlite3.Row) else workspace[0]
+        conn.execute(
+            """
+            UPDATE workspaces
+            SET descripcion = COALESCE(NULLIF(descripcion, ''), ?),
+                estado = COALESCE(NULLIF(estado, ''), 'Activo'),
+                plan = COALESCE(NULLIF(plan, ''), 'Enterprise'),
+                updated_at = datetime(?)
+            WHERE id = ?
+            """,
+            (
+                "Workspace principal del producto y tenant inicial del grupo.",
+                now,
+                workspace_id,
+            ),
+        )
+    else:
+        workspace_id = os.urandom(16).hex()
+        conn.execute(
+            """
+            INSERT INTO workspaces (
+              id, nombre, slug, estado, plan, descripcion, primary_color, accent_color, created_at, updated_at
+            ) VALUES (?, ?, ?, 'Activo', 'Enterprise', ?, ?, ?, datetime(?), datetime(?))
+            """,
+            (
+                workspace_id,
+                DEFAULT_WORKSPACE_NAME,
+                normalize_workspace_slug(DEFAULT_WORKSPACE_NAME),
+                "Workspace principal del producto y tenant inicial del grupo.",
+                "#3C6E71",
+                "#5F7A61",
+                now,
+                now,
+            ),
+        )
+
+    empresas = conn.execute("SELECT id FROM empresas ORDER BY nombre").fetchall()
+    for row in empresas:
+        empresa_id = row["id"] if isinstance(row, sqlite3.Row) else row[0]
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO workspace_empresas (
+              id, workspace_id, empresa_id, rol, created_at, updated_at
+            ) VALUES (?, ?, ?, 'operativa', datetime(?), datetime(?))
+            """,
+            (os.urandom(16).hex(), workspace_id, empresa_id, now, now),
+        )
+    for module in WORKSPACE_MODULE_CATALOG:
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO workspace_modulos (
+              id, workspace_id, modulo_key, modulo_nombre, categoria, enabled, sort_order, config_json, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, 1, ?, '{}', datetime(?), datetime(?))
+            """,
+            (
+                os.urandom(16).hex(),
+                workspace_id,
+                module["key"],
+                module["nombre"],
+                module["categoria"],
+                module["sort_order"],
+                now,
+                now,
+            ),
+        )
 
 
 def is_gestoria_dashboard_active_state(value):
@@ -10095,6 +10247,7 @@ def open_sqlite_conn(db_path, with_row_factory=False):
 def ensure_tables(db_path):
     conn = open_sqlite_conn(db_path, with_row_factory=False)
     apply_schema_file(conn, ROOT.parent / "schema.sql")
+    ensure_workspace_core_tables(conn)
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS ocr_jobs (
@@ -10824,6 +10977,7 @@ def ensure_tables(db_path):
     ensure_column(conn, "gestoria_facturas", "raw_text", "raw_text TEXT")
     ensure_column(conn, "gestoria_facturas", "import_documento_id", "import_documento_id TEXT")
     ensure_column(conn, "gestoria_facturas", "origen_importacion", "origen_importacion TEXT")
+    bootstrap_default_workspace(conn)
     load_postal_catalog(conn)
     conn.commit()
     conn.close()
@@ -10892,6 +11046,69 @@ def ensure_ocr_tables(db_path):
     )
     conn.commit()
     conn.close()
+
+
+def fetch_workspace_rows(conn):
+    rows = conn.execute(
+        """
+        SELECT
+          w.id,
+          w.nombre,
+          w.slug,
+          w.estado,
+          w.plan,
+          w.descripcion,
+          w.logo_url,
+          w.primary_color,
+          w.accent_color,
+          COUNT(DISTINCT we.empresa_id) AS empresas_total,
+          COUNT(DISTINCT CASE WHEN COALESCE(wm.enabled, 0) = 1 THEN wm.modulo_key END) AS modulos_activos
+        FROM workspaces w
+        LEFT JOIN workspace_empresas we ON we.workspace_id = w.id
+        LEFT JOIN workspace_modulos wm ON wm.workspace_id = w.id
+        GROUP BY w.id, w.nombre, w.slug, w.estado, w.plan, w.descripcion, w.logo_url, w.primary_color, w.accent_color
+        ORDER BY w.nombre COLLATE NOCASE ASC
+        """
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def fetch_workspace_detail(conn, workspace_id):
+    workspace = conn.execute(
+        """
+        SELECT id, nombre, slug, estado, plan, descripcion, logo_url, primary_color, accent_color
+        FROM workspaces
+        WHERE id = ?
+        LIMIT 1
+        """,
+        (workspace_id,),
+    ).fetchone()
+    if not workspace:
+        return None
+    companies = conn.execute(
+        """
+        SELECT e.id, e.nombre, COALESCE(we.rol, '') AS rol, COALESCE(e.activo, 1) AS activo
+        FROM workspace_empresas we
+        JOIN empresas e ON e.id = we.empresa_id
+        WHERE we.workspace_id = ?
+        ORDER BY e.nombre COLLATE NOCASE ASC
+        """,
+        (workspace_id,),
+    ).fetchall()
+    modules = conn.execute(
+        """
+        SELECT id, modulo_key, modulo_nombre, categoria, enabled, sort_order, config_json
+        FROM workspace_modulos
+        WHERE workspace_id = ?
+        ORDER BY sort_order ASC, modulo_nombre COLLATE NOCASE ASC
+        """,
+        (workspace_id,),
+    ).fetchall()
+    return {
+        "workspace": dict(workspace),
+        "companies": [dict(row) for row in companies],
+        "modules": [dict(row) for row in modules],
+    }
 
 
 def json_response(handler, data, status=200, cookies=None, extra_headers=None):
@@ -12398,6 +12615,97 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "id requerido"}, status=400)
                 return
             conn.execute("DELETE FROM usuarios WHERE id = ?", (user_id,))
+        elif parsed.path == "/api/workspace_update":
+            workspace_id = str(payload.get("id") or "").strip()
+            nombre = str(payload.get("nombre") or "").strip()
+            slug_value = normalize_workspace_slug(payload.get("slug") or nombre)
+            if not nombre:
+                json_response(self, {"error": "nombre requerido"}, status=400)
+                return
+            existing_slug = conn.execute(
+                "SELECT id FROM workspaces WHERE slug = ? AND id != ? LIMIT 1",
+                (slug_value, workspace_id),
+            ).fetchone()
+            if existing_slug:
+                json_response(self, {"error": "slug ya en uso"}, status=409)
+                return
+            if workspace_id:
+                conn.execute(
+                    """
+                    UPDATE workspaces
+                    SET nombre = ?, slug = ?, estado = ?, plan = ?, descripcion = ?,
+                        logo_url = ?, primary_color = ?, accent_color = ?, updated_at = datetime(?)
+                    WHERE id = ?
+                    """,
+                    (
+                        nombre,
+                        slug_value,
+                        payload.get("estado") or "Activo",
+                        payload.get("plan") or "Enterprise",
+                        payload.get("descripcion") or "",
+                        payload.get("logo_url") or "",
+                        payload.get("primary_color") or "",
+                        payload.get("accent_color") or "",
+                        now,
+                        workspace_id,
+                    ),
+                )
+            else:
+                workspace_id = os.urandom(16).hex()
+                conn.execute(
+                    """
+                    INSERT INTO workspaces (
+                      id, nombre, slug, estado, plan, descripcion, logo_url, primary_color, accent_color, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                    """,
+                    (
+                        workspace_id,
+                        nombre,
+                        slug_value,
+                        payload.get("estado") or "Activo",
+                        payload.get("plan") or "Enterprise",
+                        payload.get("descripcion") or "",
+                        payload.get("logo_url") or "",
+                        payload.get("primary_color") or "",
+                        payload.get("accent_color") or "",
+                        now,
+                        now,
+                    ),
+                )
+                for module in WORKSPACE_MODULE_CATALOG:
+                    conn.execute(
+                        """
+                        INSERT INTO workspace_modulos (
+                          id, workspace_id, modulo_key, modulo_nombre, categoria, enabled, sort_order, config_json, created_at, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, 1, ?, '{}', datetime(?), datetime(?))
+                        """,
+                        (
+                            os.urandom(16).hex(),
+                            workspace_id,
+                            module["key"],
+                            module["nombre"],
+                            module["categoria"],
+                            module["sort_order"],
+                            now,
+                            now,
+                        ),
+                    )
+            conn.commit()
+            json_response(self, {"ok": True, "id": workspace_id})
+            return
+        elif parsed.path == "/api/workspace_module_update":
+            record_id = str(payload.get("id") or "").strip()
+            if not record_id:
+                json_response(self, {"error": "id requerido"}, status=400)
+                return
+            enabled = 1 if str(payload.get("enabled") or "").strip().lower() in {"1", "true", "yes", "si", "sí"} else 0
+            conn.execute(
+                "UPDATE workspace_modulos SET enabled = ?, updated_at = datetime(?) WHERE id = ?",
+                (enabled, now, record_id),
+            )
+            conn.commit()
+            json_response(self, {"ok": True, "id": record_id, "enabled": enabled})
+            return
         elif parsed.path == "/api/gestoria_contabilidad":
             seguro_id = (payload.get("seguro_id") or "").strip()
             hipoteca_id = (payload.get("hipoteca_id") or "").strip()
@@ -15223,6 +15531,28 @@ class Handler(BaseHTTPRequestHandler):
             if not direccion:
                 json_response(self, {"error": "direccion requerida"}, status=400)
                 return
+            allow_duplicate = str(payload.get("allow_duplicate") or "").strip().lower() in {"1", "true", "yes", "si"}
+            duplicate_matches = detect_inmobiliaria_duplicates(
+                conn,
+                empresa["id"],
+                direccion=direccion,
+                owner_nifs=[
+                    payload.get("propietario1_nif"),
+                    payload.get("propietario2_nif"),
+                ],
+                scope="compraventa",
+            )
+            if duplicate_matches and not allow_duplicate:
+                json_response(
+                    self,
+                    {
+                        "error": "Posible duplicado detectado",
+                        "code": "duplicate_detected",
+                        "duplicates": duplicate_matches[:10],
+                    },
+                    status=409,
+                )
+                return
             propietario1_id = ensure_cliente_for_inmobiliaria(
                 conn,
                 empresa["id"],
@@ -15492,10 +15822,29 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, {"ok": True, "id": record_id, "inmueble_id": inmueble_id})
             return
         elif parsed.path == "/api/captaciones":
-            inmueble_id = os.urandom(16).hex()
             propietarios = payload.get("propietarios") or []
             if isinstance(propietarios, str):
                 propietarios = [p for p in propietarios.split(",") if p]
+            allow_duplicate = str(payload.get("allow_duplicate") or "").strip().lower() in {"1", "true", "yes", "si"}
+            duplicate_matches = detect_inmobiliaria_duplicates(
+                conn,
+                empresa["id"],
+                direccion=payload.get("direccion"),
+                owner_nifs=resolve_owner_nifs_from_cliente_ids(conn, propietarios),
+                scope="captacion",
+            )
+            if duplicate_matches and not allow_duplicate:
+                json_response(
+                    self,
+                    {
+                        "error": "Posible duplicado detectado",
+                        "code": "duplicate_detected",
+                        "duplicates": duplicate_matches[:10],
+                    },
+                    status=409,
+                )
+                return
+            inmueble_id = os.urandom(16).hex()
             conn.execute(
                 """
                 INSERT INTO captaciones (
@@ -16835,6 +17184,35 @@ class Handler(BaseHTTPRequestHandler):
                 "SELECT id, nombre FROM empresas ORDER BY nombre"
             ).fetchall()
             json_response(self, [dict(r) for r in rows])
+            return
+
+        if path == "/api/workspaces":
+            rows = fetch_workspace_rows(conn)
+            total_empresas = sum(int(item.get("empresas_total") or 0) for item in rows)
+            total_modulos_activos = sum(int(item.get("modulos_activos") or 0) for item in rows)
+            json_response(
+                self,
+                {
+                    "rows": rows,
+                    "summary": {
+                        "workspaces_total": len(rows),
+                        "empresas_total": total_empresas,
+                        "modulos_activos_total": total_modulos_activos,
+                    },
+                },
+            )
+            return
+
+        if path == "/api/workspace_detail":
+            workspace_id = params.get("id", [""])[0]
+            if not workspace_id:
+                json_response(self, {"error": "id requerido"}, status=400)
+                return
+            payload = fetch_workspace_detail(conn, workspace_id)
+            if not payload:
+                json_response(self, {"error": "workspace no encontrado"}, status=404)
+                return
+            json_response(self, payload)
             return
 
         if path == "/api/years":

@@ -8,6 +8,47 @@ CREATE TABLE IF NOT EXISTS empresas (
   updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS workspaces (
+  id TEXT PRIMARY KEY,
+  nombre TEXT NOT NULL UNIQUE,
+  slug TEXT NOT NULL UNIQUE,
+  estado TEXT NOT NULL DEFAULT 'Activo',
+  plan TEXT NOT NULL DEFAULT 'Enterprise',
+  descripcion TEXT,
+  logo_url TEXT,
+  primary_color TEXT,
+  accent_color TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS workspace_empresas (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL,
+  empresa_id TEXT NOT NULL,
+  rol TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (workspace_id, empresa_id),
+  FOREIGN KEY (workspace_id) REFERENCES workspaces(id),
+  FOREIGN KEY (empresa_id) REFERENCES empresas(id)
+);
+
+CREATE TABLE IF NOT EXISTS workspace_modulos (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL,
+  modulo_key TEXT NOT NULL,
+  modulo_nombre TEXT NOT NULL,
+  categoria TEXT,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  config_json TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (workspace_id, modulo_key),
+  FOREIGN KEY (workspace_id) REFERENCES workspaces(id)
+);
+
 CREATE TABLE IF NOT EXISTS clientes (
   id TEXT PRIMARY KEY,
   empresa_id TEXT,
