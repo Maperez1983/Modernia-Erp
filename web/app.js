@@ -1213,6 +1213,8 @@ const workspaceFormStatus = document.getElementById("workspaceFormStatus");
 const workspaceNewBtn = document.getElementById("workspaceNewBtn");
 const workspaceCompanies = document.getElementById("workspaceCompanies");
 const workspaceModules = document.getElementById("workspaceModules");
+const workspaceBillingSummary = document.getElementById("workspaceBillingSummary");
+const workspaceDocumentHub = document.getElementById("workspaceDocumentHub");
 const agendaSection = document.getElementById("agendaSection");
 const agendaBackBtn = document.getElementById("agendaBackBtn");
 const agendaGeneral = document.getElementById("agendaGeneral");
@@ -3538,13 +3540,109 @@ const renderWorkspaceModules = (rows = []) => {
   });
 };
 
+const renderWorkspaceBillingSummary = (data = {}) => {
+  if (!workspaceBillingSummary) return;
+  const metricItems = [
+    ["Facturas emitidas", numberFormatter.format(Number(data.facturas_emitidas || 0))],
+    ["Facturación", euroFormatter.format(Number(data.facturacion_total || 0))],
+    ["Cobrado", euroFormatter.format(Number(data.cobrado_total || 0))],
+    ["Pendiente", euroFormatter.format(Number(data.pendiente_total || 0))],
+    ["Potencial operativo", euroFormatter.format(Number(data.potencial_operativo || 0))],
+  ];
+  const services = Array.isArray(data.servicios) ? data.servicios : [];
+  workspaceBillingSummary.innerHTML = `
+    <div class="workspace-mini-kpis">
+      ${metricItems
+        .map(
+          ([label, value]) => `
+            <div class="workspace-mini-kpi">
+              <span>${label}</span>
+              <strong>${value}</strong>
+            </div>
+          `
+        )
+        .join("")}
+    </div>
+    ${
+      services.length
+        ? `
+          <div class="workspace-summary-list">
+            ${services
+              .map(
+                (item) => `
+                  <div class="workspace-summary-row">
+                    <div>
+                      <strong>${item.servicio || "Sin servicio"}</strong>
+                      <div class="muted">${numberFormatter.format(Number(item.facturas || 0))} facturas</div>
+                    </div>
+                    <div class="workspace-summary-metrics">
+                      <span>Facturado ${euroFormatter.format(Number(item.facturado || 0))}</span>
+                      <span>Cobrado ${euroFormatter.format(Number(item.cobrado || 0))}</span>
+                      <span>Potencial ${euroFormatter.format(Number(item.potencial || 0))}</span>
+                    </div>
+                  </div>
+                `
+              )
+              .join("")}
+          </div>
+        `
+        : "<p class='muted'>Todavía no hay facturación transversal consolidada para este workspace.</p>"
+    }
+  `;
+};
+
+const renderWorkspaceDocumentHub = (data = {}) => {
+  if (!workspaceDocumentHub) return;
+  const rows = Array.isArray(data.rows) ? data.rows : [];
+  const totalDocs = Number(data.summary?.documentos_total || 0);
+  workspaceDocumentHub.innerHTML = `
+    <div class="workspace-document-head">
+      <span class="workspace-document-total">${numberFormatter.format(totalDocs)} documentos agregados</span>
+      <span class="muted">Gestoría e inmobiliaria unificados</span>
+    </div>
+    ${
+      rows.length
+        ? `
+          <div class="workspace-document-list">
+            ${rows
+              .map((row) => {
+                const subject = row.cliente || row.empresa || "-";
+                const meta = [row.servicio || "", row.tipo || "", row.empresa || ""].filter(Boolean).join(" · ");
+                const dateText = row.fecha || "";
+                return `
+                  <div class="workspace-document-row">
+                    <div>
+                      <strong>${row.nombre || "Documento"}</strong>
+                      <div class="muted">${subject}</div>
+                    </div>
+                    <div class="workspace-document-meta">
+                      <span>${meta || "Sin clasificar"}</span>
+                      <span>${dateText || "Sin fecha"}</span>
+                    </div>
+                  </div>
+                `;
+              })
+              .join("")}
+          </div>
+        `
+        : "<p class='muted'>Sin documentos agregados todavía en este workspace.</p>"
+    }
+  `;
+};
+
 const loadWorkspaceDetail = async (workspaceId) => {
   if (!workspaceId) return;
   state.currentWorkspaceId = workspaceId;
-  const data = await api(`/api/workspace_detail?id=${encodeURIComponent(workspaceId)}`);
-  fillWorkspaceForm(data.workspace || {});
-  renderWorkspaceCompanies(data.companies || []);
-  renderWorkspaceModules(data.modules || []);
+  const [detail, billing, docs] = await Promise.all([
+    api(`/api/workspace_detail?id=${encodeURIComponent(workspaceId)}`),
+    api(`/api/workspace_billing_summary?workspace_id=${encodeURIComponent(workspaceId)}`),
+    api(`/api/workspace_document_hub?workspace_id=${encodeURIComponent(workspaceId)}`),
+  ]);
+  fillWorkspaceForm(detail.workspace || {});
+  renderWorkspaceCompanies(detail.companies || []);
+  renderWorkspaceModules(detail.modules || []);
+  renderWorkspaceBillingSummary(billing || {});
+  renderWorkspaceDocumentHub(docs || {});
   renderWorkspaceList(state.workspaces || []);
 };
 
@@ -3564,6 +3662,8 @@ const loadWorkspaceCentral = async () => {
     fillWorkspaceForm({});
     renderWorkspaceCompanies([]);
     renderWorkspaceModules([]);
+    renderWorkspaceBillingSummary({});
+    renderWorkspaceDocumentHub({});
   }
 };
 

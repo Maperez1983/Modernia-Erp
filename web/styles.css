@@ -1339,9 +1339,82 @@ body.crm-fin #companySummary {
   height: 18px;
 }
 
+.workspace-mini-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.workspace-mini-kpi {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(60, 110, 113, 0.14);
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.workspace-mini-kpi span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.workspace-summary-list,
+.workspace-document-list {
+  display: grid;
+  gap: 10px;
+}
+
+.workspace-summary-row,
+.workspace-document-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(60, 110, 113, 0.14);
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.workspace-summary-metrics,
+.workspace-document-meta {
+  display: grid;
+  gap: 4px;
+  justify-items: end;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: right;
+}
+
+.workspace-document-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.workspace-document-total {
+  font-weight: 700;
+}
+
 @media (max-width: 980px) {
   .workspace-central-layout {
     grid-template-columns: 1fr;
+  }
+
+  .workspace-summary-row,
+  .workspace-document-row,
+  .workspace-document-head {
+    flex-direction: column;
+  }
+
+  .workspace-summary-metrics,
+  .workspace-document-meta {
+    justify-items: start;
+    text-align: left;
   }
 }
 

@@ -49,6 +49,35 @@ CREATE TABLE IF NOT EXISTS workspace_modulos (
   FOREIGN KEY (workspace_id) REFERENCES workspaces(id)
 );
 
+CREATE TABLE IF NOT EXISTS workspace_facturacion (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL,
+  empresa_id TEXT,
+  cliente_id TEXT,
+  servicio TEXT,
+  origen_tipo TEXT,
+  origen_id TEXT,
+  serie TEXT,
+  numero TEXT,
+  fecha_emision TEXT,
+  fecha_vencimiento TEXT,
+  concepto TEXT,
+  subtotal REAL,
+  impuestos REAL,
+  total REAL,
+  estado TEXT,
+  cobrada INTEGER NOT NULL DEFAULT 0,
+  fecha_cobro TEXT,
+  forma_cobro TEXT,
+  responsable TEXT,
+  notas TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (workspace_id) REFERENCES workspaces(id),
+  FOREIGN KEY (empresa_id) REFERENCES empresas(id),
+  FOREIGN KEY (cliente_id) REFERENCES clientes(id)
+);
+
 CREATE TABLE IF NOT EXISTS clientes (
   id TEXT PRIMARY KEY,
   empresa_id TEXT,

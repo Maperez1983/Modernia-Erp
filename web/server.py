@@ -10248,6 +10248,7 @@ def ensure_tables(db_path):
     conn = open_sqlite_conn(db_path, with_row_factory=False)
     apply_schema_file(conn, ROOT.parent / "schema.sql")
     ensure_workspace_core_tables(conn)
+    ensure_workspace_facturacion_table(conn)
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS ocr_jobs (
@@ -11073,6 +11074,38 @@ def fetch_workspace_rows(conn):
     return [dict(row) for row in rows]
 
 
+def ensure_workspace_facturacion_table(conn):
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workspace_facturacion (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          empresa_id TEXT,
+          cliente_id TEXT,
+          servicio TEXT,
+          origen_tipo TEXT,
+          origen_id TEXT,
+          serie TEXT,
+          numero TEXT,
+          fecha_emision TEXT,
+          fecha_vencimiento TEXT,
+          concepto TEXT,
+          subtotal REAL,
+          impuestos REAL,
+          total REAL,
+          estado TEXT,
+          cobrada INTEGER NOT NULL DEFAULT 0,
+          fecha_cobro TEXT,
+          forma_cobro TEXT,
+          responsable TEXT,
+          notas TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+
+
 def fetch_workspace_detail(conn, workspace_id):
     workspace = conn.execute(
         """
@@ -11108,6 +11141,191 @@ def fetch_workspace_detail(conn, workspace_id):
         "workspace": dict(workspace),
         "companies": [dict(row) for row in companies],
         "modules": [dict(row) for row in modules],
+    }
+
+
+def fetch_workspace_billing_summary(conn, workspace_id):
+    companies = conn.execute(
+        "SELECT empresa_id FROM workspace_empresas WHERE workspace_id = ?",
+        (workspace_id,),
+    ).fetchall()
+    empresa_ids = [row["empresa_id"] if isinstance(row, sqlite3.Row) else row[0] for row in companies]
+    if not empresa_ids:
+        return {
+            "facturas_emitidas": 0,
+            "facturacion_total": 0.0,
+            "cobrado_total": 0.0,
+            "pendiente_total": 0.0,
+            "potencial_operativo": 0.0,
+            "servicios": [],
+        }
+    placeholders = ",".join(["?"] * len(empresa_ids))
+    fact_rows = conn.execute(
+        f"""
+        SELECT
+          COALESCE(servicio, 'sin_servicio') AS servicio,
+          COUNT(*) AS total_facturas,
+          SUM(COALESCE(total, 0)) AS total_facturado,
+          SUM(CASE WHEN COALESCE(cobrada, 0) = 1 THEN COALESCE(total, 0) ELSE 0 END) AS total_cobrado
+        FROM workspace_facturacion
+        WHERE workspace_id = ?
+          AND empresa_id IN ({placeholders})
+        GROUP BY COALESCE(servicio, 'sin_servicio')
+        ORDER BY total_facturado DESC
+        """,
+        [workspace_id, *empresa_ids],
+    ).fetchall()
+    facturas_emitidas = sum(int(row["total_facturas"] or 0) for row in fact_rows)
+    facturacion_total = round(sum(float(row["total_facturado"] or 0.0) for row in fact_rows), 2)
+    cobrado_total = round(sum(float(row["total_cobrado"] or 0.0) for row in fact_rows), 2)
+    pendiente_total = round(max(facturacion_total - cobrado_total, 0.0), 2)
+
+    potential_rows = []
+    seguros = conn.execute(
+        f"""
+        SELECT 'seguros' AS servicio, SUM(COALESCE(comision, 0)) AS total
+        FROM seguros
+        WHERE empresa_id IN ({placeholders})
+        """,
+        empresa_ids,
+    ).fetchone()
+    if seguros and seguros["total"] is not None:
+        potential_rows.append({"servicio": "seguros", "total": float(seguros["total"] or 0.0)})
+    inmo = conn.execute(
+        f"""
+        SELECT 'inmobiliaria' AS servicio, SUM(COALESCE(honorarios, 0)) AS total
+        FROM operaciones_inmobiliarias
+        WHERE empresa_id IN ({placeholders})
+        """,
+        empresa_ids,
+    ).fetchone()
+    if inmo and inmo["total"] is not None:
+        potential_rows.append({"servicio": "inmobiliaria", "total": float(inmo["total"] or 0.0)})
+    fin = conn.execute(
+        f"""
+        SELECT 'financiacion' AS servicio, SUM(COALESCE(comision, 0)) AS total
+        FROM hipotecas
+        WHERE empresa_id IN ({placeholders})
+        """,
+        empresa_ids,
+    ).fetchone()
+    if fin and fin["total"] is not None:
+        potential_rows.append({"servicio": "financiacion", "total": float(fin["total"] or 0.0)})
+    gest = conn.execute(
+        f"""
+        SELECT 'gestoria' AS servicio, SUM(COALESCE(importe, 0)) AS total
+        FROM gestoria_trabajos
+        WHERE empresa_id IN ({placeholders})
+        """,
+        empresa_ids,
+    ).fetchone()
+    if gest and gest["total"] is not None:
+        potential_rows.append({"servicio": "gestoria", "total": float(gest["total"] or 0.0)})
+    potencial_operativo = round(sum(float(item["total"] or 0.0) for item in potential_rows), 2)
+    services = [
+        {
+            "servicio": row["servicio"],
+            "facturas": int(row["total_facturas"] or 0),
+            "facturado": round(float(row["total_facturado"] or 0.0), 2),
+            "cobrado": round(float(row["total_cobrado"] or 0.0), 2),
+        }
+        for row in fact_rows
+    ]
+    potential_map = {item["servicio"]: round(float(item["total"] or 0.0), 2) for item in potential_rows}
+    for service_name, total in potential_map.items():
+        existing = next((item for item in services if item["servicio"] == service_name), None)
+        if existing:
+            existing["potencial"] = total
+        else:
+            services.append(
+                {
+                    "servicio": service_name,
+                    "facturas": 0,
+                    "facturado": 0.0,
+                    "cobrado": 0.0,
+                    "potencial": total,
+                }
+            )
+    services.sort(key=lambda item: float(item.get("facturado") or item.get("potencial") or 0.0), reverse=True)
+    return {
+        "facturas_emitidas": facturas_emitidas,
+        "facturacion_total": facturacion_total,
+        "cobrado_total": cobrado_total,
+        "pendiente_total": pendiente_total,
+        "potencial_operativo": potencial_operativo,
+        "servicios": services,
+    }
+
+
+def fetch_workspace_document_hub(conn, workspace_id, limit=20):
+    companies = conn.execute(
+        "SELECT empresa_id FROM workspace_empresas WHERE workspace_id = ?",
+        (workspace_id,),
+    ).fetchall()
+    empresa_ids = [row["empresa_id"] if isinstance(row, sqlite3.Row) else row[0] for row in companies]
+    if not empresa_ids:
+        return {"rows": [], "summary": {"documentos_total": 0}}
+    placeholders = ",".join(["?"] * len(empresa_ids))
+    rows = conn.execute(
+        f"""
+        SELECT *
+        FROM (
+          SELECT
+            d.id,
+            d.empresa_id,
+            COALESCE(e.nombre, '') AS empresa,
+            COALESCE(c.nombre, '') AS cliente,
+            COALESCE(NULLIF(d.referencia_tipo, ''), d.tipo, 'gestoria') AS servicio,
+            d.nombre,
+            d.tipo,
+            d.fecha,
+            d.estado,
+            d.notas,
+            d.doc_key,
+            d.doc_url,
+            d.created_at AS sort_date
+          FROM gestoria_docs d
+          LEFT JOIN clientes c ON c.id = d.cliente_id
+          LEFT JOIN empresas e ON e.id = d.empresa_id
+          WHERE d.empresa_id IN ({placeholders})
+          UNION ALL
+          SELECT
+            idoc.id,
+            i.empresa_id,
+            COALESCE(e.nombre, '') AS empresa,
+            COALESCE(i.direccion, '') AS cliente,
+            'inmobiliaria' AS servicio,
+            COALESCE(idoc.nombre, 'Documento inmueble') AS nombre,
+            COALESCE(idoc.tipo, 'Inmueble') AS tipo,
+            COALESCE(idoc.created_at, '') AS fecha,
+            '' AS estado,
+            '' AS notas,
+            NULL AS doc_key,
+            COALESCE(idoc.url, '') AS doc_url,
+            idoc.created_at AS sort_date
+          FROM inmueble_docs idoc
+          JOIN inmuebles i ON i.id = idoc.inmueble_id
+          LEFT JOIN empresas e ON e.id = i.empresa_id
+          WHERE i.empresa_id IN ({placeholders})
+        )
+        ORDER BY COALESCE(fecha, sort_date) DESC, sort_date DESC
+        LIMIT ?
+        """,
+        [*empresa_ids, *empresa_ids, max(1, min(int(limit or 20), 100))],
+    ).fetchall()
+    total_docs = conn.execute(
+        f"""
+        SELECT
+          (SELECT COUNT(*) FROM gestoria_docs WHERE empresa_id IN ({placeholders}))
+          +
+          (SELECT COUNT(*) FROM inmueble_docs idoc JOIN inmuebles i ON i.id = idoc.inmueble_id WHERE i.empresa_id IN ({placeholders}))
+          AS total
+        """,
+        [*empresa_ids, *empresa_ids],
+    ).fetchone()
+    return {
+        "rows": [dict(row) for row in rows],
+        "summary": {"documentos_total": int(total_docs["total"] or 0) if total_docs else 0},
     }
 
 
@@ -17213,6 +17431,23 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "workspace no encontrado"}, status=404)
                 return
             json_response(self, payload)
+            return
+
+        if path == "/api/workspace_billing_summary":
+            workspace_id = params.get("workspace_id", [""])[0]
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            json_response(self, fetch_workspace_billing_summary(conn, workspace_id))
+            return
+
+        if path == "/api/workspace_document_hub":
+            workspace_id = params.get("workspace_id", [""])[0]
+            limit = params.get("limit", ["20"])[0]
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            json_response(self, fetch_workspace_document_hub(conn, workspace_id, limit=limit))
             return
 
         if path == "/api/years":
