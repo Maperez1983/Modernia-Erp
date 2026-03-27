@@ -9166,6 +9166,45 @@ def ensure_captacion_for_inmueble(conn, empresa_id, inmueble_id, now):
     ).fetchone()
 
 
+def sync_inmueble_stage_for_action(conn, inmueble_id, destino, now):
+    destino_label = {
+        "noticia": "Noticia",
+        "valoracion": "Valoración",
+        "encargo": "Encargo",
+        "reservado": "Reservado",
+        "vendido": "Vendido",
+        "compraventa": "Vendido",
+        "cerrado_negativamente": "Cerrado negativamente",
+        "alquiler": "Alquiler",
+    }.get(str(destino or "").strip().lower())
+    if not inmueble_id or not destino_label:
+        return
+    inmueble = conn.execute(
+        "SELECT id, empresa_id FROM inmuebles WHERE id = ? LIMIT 1",
+        (inmueble_id,),
+    ).fetchone()
+    if not inmueble:
+        return
+    captacion = ensure_captacion_for_inmueble(conn, inmueble["empresa_id"], inmueble_id, now)
+    if captacion:
+        conn.execute(
+            """
+            UPDATE captaciones
+            SET etapa = ?, situacion_comercial = ?, updated_at = datetime(?)
+            WHERE id = ?
+            """,
+            (destino_label, destino_label, now, captacion["id"]),
+        )
+    conn.execute(
+        """
+        UPDATE inmuebles
+        SET estado = ?, updated_at = datetime(?)
+        WHERE id = ?
+        """,
+        (destino_label, now, inmueble_id),
+    )
+
+
 def get_inmueble_propietarios(conn, inmueble_id):
     if not inmueble_id:
         return []
@@ -11243,6 +11282,8 @@ def ensure_tables(db_path):
     ensure_column(conn, "acciones", "responsable", "responsable TEXT")
     ensure_column(conn, "acciones", "recordatorio_min", "recordatorio_min INTEGER")
     ensure_column(conn, "acciones", "inmueble_id", "inmueble_id TEXT")
+    ensure_column(conn, "acciones", "resultado_cierre", "resultado_cierre TEXT")
+    ensure_column(conn, "acciones", "estado_siguiente", "estado_siguiente TEXT")
     ensure_column(conn, "inmuebles", "valor_referencia", "valor_referencia REAL")
     ensure_column(conn, "inmuebles", "honorarios", "honorarios REAL")
     ensure_column(conn, "inmuebles", "situacion_ocupacion", "situacion_ocupacion TEXT")
@@ -12557,6 +12598,8 @@ def fetch_workspace_budget_pdf_payload(conn, budget_id, workspace_id=None):
         SELECT
           p.*,
           COALESCE(w.nombre, '') AS workspace_nombre,
+          COALESCE(w.primary_color, '') AS workspace_primary_color,
+          COALESCE(w.accent_color, '') AS workspace_accent_color,
           COALESCE(e.nombre, '') AS empresa_nombre,
           COALESCE(e.logo_url, '') AS empresa_logo_url,
           COALESCE(c.nombre, '') AS cliente_nombre,
@@ -12585,7 +12628,11 @@ def fetch_workspace_budget_pdf_payload(conn, budget_id, workspace_id=None):
     ).fetchall()
     return {
         "budget": dict(budget),
-        "workspace": {"nombre": budget["workspace_nombre"]},
+        "workspace": {
+            "nombre": budget["workspace_nombre"],
+            "primary_color": budget["workspace_primary_color"],
+            "accent_color": budget["workspace_accent_color"],
+        },
         "company": {"nombre": budget["empresa_nombre"], "logo_url": budget["empresa_logo_url"]},
         "client": {
             "nombre": budget["cliente_nombre"],
@@ -13282,6 +13329,27 @@ def build_workspace_invoice_pdf(invoice, workspace, company, client, collections
 
 
 def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
+    def hex_to_rgb(value, fallback):
+        raw = str(value or "").strip().lstrip("#")
+        if len(raw) == 3:
+            raw = "".join(ch * 2 for ch in raw)
+        if len(raw) != 6:
+            return fallback
+        try:
+            return tuple(int(raw[i:i + 2], 16) for i in (0, 2, 4))
+        except Exception:
+            return fallback
+
+    def draw_label_value(draw, x, y, width, label, value, label_font, value_font, label_fill, value_fill):
+        draw.text((x, y), str(label or "").upper(), fill=label_fill, font=label_font)
+        label_box = draw.textbbox((x, y), str(label or "").upper(), font=label_font)
+        current_y = label_box[3] + 8
+        wrapped = _pdf_wrap_lines(value, width=max(20, int(width / 11)))
+        draw.multiline_text((x, current_y), "\n".join(wrapped), fill=value_fill, font=value_font, spacing=6)
+        sample_box = draw.textbbox((x, current_y), "Ag", font=value_font)
+        line_height = sample_box[3] - sample_box[1] + 6
+        return current_y + max(line_height * len(wrapped), line_height)
+
     calc = {}
     try:
         calc = json.loads(budget.get("calculo_json") or "{}") if budget.get("calculo_json") else {}
@@ -13289,78 +13357,167 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
             calc = {}
     except Exception:
         calc = {}
-    sections = [
-        (
-            "Cabecera",
-            [
-                ("Presupuesto", budget.get("titulo") or "-"),
-                ("Referencia", budget.get("id") or "-"),
-                ("Fecha", budget.get("fecha") or "-"),
-                ("Estado", budget.get("estado") or "Borrador"),
-                ("Servicio", budget.get("servicio") or "-"),
-            ],
-        ),
-        (
-            "Cliente",
-            [
-                ("Nombre", client.get("nombre") or "-"),
-                ("NIF", client.get("nif") or "-"),
-                ("Teléfono", client.get("telefono") or "-"),
-                ("Email", client.get("email") or "-"),
-            ],
-        ),
-    ]
+    primary = hex_to_rgb(workspace.get("primary_color"), (60, 110, 113))
+    accent = hex_to_rgb(workspace.get("accent_color"), (143, 155, 116))
+    ink = (35, 40, 44)
+    muted = (104, 111, 117)
+    soft = (244, 246, 247)
+    border = (223, 228, 231)
+    page_width, page_height = 1240, 1754
+    margin_x, top_margin, bottom_margin = 84, 72, 84
+    logo = _load_brand_logo(company.get("logo_url"), max_width=360)
+    font_title = _document_font(44, bold=True)
+    font_subtitle = _document_font(20, bold=False)
+    font_chip = _document_font(16, bold=True)
+    font_section = _document_font(22, bold=True)
+    font_label = _document_font(14, bold=True)
+    font_value = _document_font(20, bold=False)
+    font_table_head = _document_font(15, bold=True)
+    font_table = _document_font(16, bold=False)
+    font_total = _document_font(28, bold=True)
+    font_footer = _document_font(14, bold=False)
+    pages = []
+    servicio_label = normalize_service_key(budget.get("servicio") or "") or "-"
+    ref_label = budget.get("id") or "-"
+
+    def new_page(include_cards=False):
+        image = Image.new("RGB", (page_width, page_height), "white")
+        draw = ImageDraw.Draw(image)
+        draw.rounded_rectangle((0, 0, page_width, 250), radius=0, fill=primary)
+        draw.polygon([(page_width - 220, 0), (page_width, 0), (page_width, 180)], fill=accent)
+        draw.text((margin_x, top_margin), "PRESUPUESTO", fill="white", font=font_title)
+        draw.text((margin_x, top_margin + 62), company.get("nombre") or workspace.get("nombre") or "Workspace", fill=(240, 246, 248), font=font_subtitle)
+        chip_y = top_margin + 116
+        chips = [
+            f"REF {ref_label[:12]}",
+            f"FECHA {budget.get('fecha') or '-'}",
+            f"ESTADO {budget.get('estado') or 'Borrador'}",
+            f"SERVICIO {servicio_label.upper()}",
+        ]
+        chip_x = margin_x
+        for chip in chips:
+            box = draw.textbbox((chip_x, chip_y), chip, font=font_chip)
+            chip_w = (box[2] - box[0]) + 30
+            draw.rounded_rectangle((chip_x, chip_y - 8, chip_x + chip_w, chip_y + 26), radius=18, fill=(94, 137, 139), outline=(255, 255, 255))
+            draw.text((chip_x + 15, chip_y), chip, fill="white", font=font_chip)
+            chip_x += chip_w + 12
+        if logo:
+            image.paste(logo, (page_width - margin_x - logo.width, top_margin + 8), logo)
+        current_y = 296
+        if include_cards:
+            left = (margin_x, current_y, margin_x + 560, current_y + 250)
+            right = (page_width - margin_x - 420, current_y, page_width - margin_x, current_y + 250)
+            draw.rounded_rectangle(left, radius=28, fill=soft, outline=border)
+            draw.rounded_rectangle(right, radius=28, fill=(250, 247, 240), outline=border)
+            draw.text((left[0] + 24, left[1] + 22), "CLIENTE", fill=primary, font=font_section)
+            y_client = left[1] + 64
+            y_client = draw_label_value(draw, left[0] + 24, y_client, 500, "Nombre", client.get("nombre") or "-", font_label, font_value, muted, ink)
+            y_client = draw_label_value(draw, left[0] + 24, y_client + 10, 220, "NIF", client.get("nif") or "-", font_label, font_value, muted, ink)
+            y_client = draw_label_value(draw, left[0] + 250, left[1] + 64, 250, "Teléfono", client.get("telefono") or "-", font_label, font_value, muted, ink)
+            draw_label_value(draw, left[0] + 250, left[1] + 150, 250, "Email", client.get("email") or "-", font_label, _document_font(16, False), muted, ink)
+            draw.text((right[0] + 24, right[1] + 22), "RESUMEN ECONÓMICO", fill=primary, font=font_section)
+            draw.text((right[0] + 24, right[1] + 82), "TOTAL", fill=muted, font=font_label)
+            draw.text((right[0] + 24, right[1] + 108), format_eur(budget.get("total") or 0), fill=ink, font=font_total)
+            draw.text((right[0] + 24, right[1] + 170), f"Subtotal {format_eur(budget.get('subtotal') or 0)}", fill=ink, font=font_table)
+            draw.text((right[0] + 24, right[1] + 198), f"Impuestos {format_eur(budget.get('impuestos') or 0)}", fill=ink, font=font_table)
+            draw.text((right[0] + 24, right[1] + 226), f"Pago {budget.get('forma_pago') or 'Pendiente'}", fill=ink, font=font_table)
+            current_y = left[3] + 34
+        return image, draw, current_y
+
+    image, draw, y = new_page(include_cards=True)
+    usable_bottom = page_height - bottom_margin
+
+    def ensure_space(required_height):
+        nonlocal image, draw, y
+        if y + required_height <= usable_bottom:
+            return
+        pages.append(image)
+        image, draw, y = new_page(include_cards=False)
+
     if normalize_service_key(budget.get("servicio") or "") == "administracion fincas":
-        sections.append(
-            (
-                "Base de cálculo comunidad",
-                [
-                    ("Vecinos", calc.get("num_vecinos") or 0),
-                    ("Locales", calc.get("num_locales") or 0),
-                    ("Trasteros", calc.get("num_trasteros") or 0),
-                    ("Aparcamientos", calc.get("num_aparcamientos") or 0),
-                    ("Base sugerida", format_eur(calc.get("cuota_sugerida") or 0)),
-                ],
-            )
+        ensure_space(120)
+        box = (margin_x, y, page_width - margin_x, y + 100)
+        draw.rounded_rectangle(box, radius=24, fill=(247, 250, 242), outline=border)
+        draw.text((box[0] + 24, box[1] + 18), "BASE DE CÁLCULO COMUNIDAD", fill=primary, font=font_section)
+        base_text = (
+            f"{calc.get('num_vecinos') or 0} vecinos · "
+            f"{calc.get('num_locales') or 0} locales · "
+            f"{calc.get('num_trasteros') or 0} trasteros · "
+            f"{calc.get('num_aparcamientos') or 0} aparcamientos · "
+            f"Base sugerida {format_eur(calc.get('cuota_sugerida') or 0)}"
         )
-    sections.append(
-        (
-            "Partidas presupuestadas",
-            [
-                (
-                    f"{line.get('categoria') or 'Partida'} · {line.get('concepto') or '-'}",
-                    f"{_pdf_format_number(line.get('cantidad'), 2) or '0'} {line.get('unidad') or ''} · {format_eur(line.get('precio_unitario') or 0)} · dto {_pdf_format_number(line.get('descuento_pct'), 2) or '0'}% · total {format_eur(line.get('total_linea') or 0)}",
-                )
-                for line in (lineas or [])
-            ]
-            or [("Partida principal", format_eur(budget.get("subtotal") or budget.get("total") or 0))]
-        )
-    )
-    sections.append(
-        (
-            "Resumen económico",
-            [
-                ("Subtotal", format_eur(budget.get("subtotal") or 0)),
-                ("Impuestos", format_eur(budget.get("impuestos") or 0)),
-                ("Total", format_eur(budget.get("total") or 0)),
-                ("Forma de pago", budget.get("forma_pago") or "Pendiente de definir"),
-                ("Responsable", budget.get("responsable") or "-"),
-            ],
-        )
-    )
+        draw.text((box[0] + 24, box[1] + 58), base_text, fill=ink, font=font_table)
+        y = box[3] + 24
+
+    ensure_space(70)
+    draw.text((margin_x, y), "PARTIDAS PRESUPUESTADAS", fill=primary, font=font_section)
+    y += 42
+    columns = {
+        "concepto": (margin_x, 650),
+        "cantidad": (770, 90),
+        "precio": (880, 130),
+        "dto": (1028, 72),
+        "total": (1114, 110),
+    }
+    header_h = 40
+    draw.rounded_rectangle((margin_x, y, page_width - margin_x, y + header_h), radius=16, fill=primary)
+    draw.text((columns["concepto"][0] + 18, y + 10), "PARTIDA", fill="white", font=font_table_head)
+    draw.text((columns["cantidad"][0], y + 10), "CANT.", fill="white", font=font_table_head)
+    draw.text((columns["precio"][0], y + 10), "PRECIO", fill="white", font=font_table_head)
+    draw.text((columns["dto"][0], y + 10), "DTO", fill="white", font=font_table_head)
+    draw.text((columns["total"][0], y + 10), "TOTAL", fill="white", font=font_table_head)
+    y += header_h + 10
+    row_fill = (249, 250, 251)
+    for index, line in enumerate(lineas or [{"categoria": "Partida", "concepto": budget.get("titulo") or "-", "cantidad": 1, "unidad": "", "precio_unitario": budget.get("subtotal") or budget.get("total") or 0, "descuento_pct": 0, "total_linea": budget.get("subtotal") or budget.get("total") or 0}], start=1):
+        concept = f"{line.get('categoria') or 'Partida'} · {line.get('concepto') or '-'}"
+        concept_lines = _pdf_wrap_lines(concept, width=54)
+        row_h = 54 + max(0, len(concept_lines) - 1) * 20
+        ensure_space(row_h + 12)
+        fill = row_fill if index % 2 else (255, 255, 255)
+        draw.rounded_rectangle((margin_x, y, page_width - margin_x, y + row_h), radius=14, fill=fill, outline=border)
+        draw.multiline_text((columns["concepto"][0] + 18, y + 12), "\n".join(concept_lines), fill=ink, font=font_table, spacing=4)
+        qty_text = f"{_pdf_format_number(line.get('cantidad'), 2) or '0'} {line.get('unidad') or ''}".strip()
+        draw.text((columns["cantidad"][0], y + 16), qty_text, fill=ink, font=font_table)
+        draw.text((columns["precio"][0], y + 16), format_eur(line.get("precio_unitario") or 0), fill=ink, font=font_table)
+        draw.text((columns["dto"][0], y + 16), f"{_pdf_format_number(line.get('descuento_pct'), 2) or '0'}%", fill=ink, font=font_table)
+        draw.text((columns["total"][0], y + 16), format_eur(line.get("total_linea") or 0), fill=ink, font=font_table)
+        y += row_h + 10
+
+    ensure_space(180)
+    totals_box = (page_width - margin_x - 360, y + 10, page_width - margin_x, y + 170)
+    draw.rounded_rectangle(totals_box, radius=26, fill=soft, outline=border)
+    draw.text((totals_box[0] + 24, totals_box[1] + 22), "CIERRE ECONÓMICO", fill=primary, font=font_section)
+    draw.text((totals_box[0] + 24, totals_box[1] + 72), f"Subtotal  {format_eur(budget.get('subtotal') or 0)}", fill=ink, font=font_table)
+    draw.text((totals_box[0] + 24, totals_box[1] + 102), f"Impuestos {format_eur(budget.get('impuestos') or 0)}", fill=ink, font=font_table)
+    draw.text((totals_box[0] + 24, totals_box[1] + 132), f"Total     {format_eur(budget.get('total') or 0)}", fill=ink, font=_document_font(20, True))
+    left_text_top = y + 18
+    draw.text((margin_x, left_text_top), "RESPONSABLE", fill=muted, font=font_label)
+    draw.text((margin_x, left_text_top + 24), budget.get("responsable") or "-", fill=ink, font=font_table)
+    draw.text((margin_x, left_text_top + 68), "FORMA DE PAGO", fill=muted, font=font_label)
+    draw.text((margin_x, left_text_top + 92), budget.get("forma_pago") or "Pendiente de definir", fill=ink, font=font_table)
+    y = totals_box[3] + 24
+
     if budget.get("observaciones"):
-        sections.append(("Observaciones", [budget.get("observaciones")]))
-    footer = [
-        f"Documento emitido por {company.get('nombre') or workspace.get('nombre') or 'Workspace'}.",
-        "Presupuesto editable y sujeto a aceptación expresa del cliente.",
-    ]
-    return build_branded_document_pdf(
-        "PRESUPUESTO",
-        f"{company.get('nombre') or workspace.get('nombre') or 'Workspace'} · Propuesta económica",
-        sections,
-        footer,
-        brand_logo_url=company.get("logo_url"),
-    )
+        ensure_space(160)
+        draw.text((margin_x, y), "OBSERVACIONES", fill=primary, font=font_section)
+        y += 36
+        obs_lines = _pdf_wrap_lines(budget.get("observaciones"), width=98)
+        draw.rounded_rectangle((margin_x, y, page_width - margin_x, y + 38 + len(obs_lines) * 22), radius=20, fill=(252, 252, 252), outline=border)
+        draw.multiline_text((margin_x + 20, y + 18), "\n".join(obs_lines), fill=ink, font=font_table, spacing=6)
+        y += 50 + len(obs_lines) * 22
+
+    footer_text = f"Documento emitido por {company.get('nombre') or workspace.get('nombre') or 'Workspace'}. Presupuesto editable y sujeto a aceptación expresa del cliente."
+    footer_lines = _pdf_wrap_lines(footer_text, width=108)
+    draw.line((margin_x, page_height - bottom_margin - 28, page_width - margin_x, page_height - bottom_margin - 28), fill=border, width=2)
+    draw.multiline_text((margin_x, page_height - bottom_margin), "\n".join(footer_lines), fill=muted, font=font_footer, spacing=4)
+
+    pages.append(image)
+    buffer = BytesIO()
+    if len(pages) == 1:
+        pages[0].save(buffer, format="PDF", resolution=150.0)
+    else:
+        pages[0].save(buffer, format="PDF", resolution=150.0, save_all=True, append_images=pages[1:])
+    return buffer.getvalue()
 
 
 def build_inmueble_visit_sheet_pdf(company, inmueble, captacion, owners, buyer, demanda=None):
@@ -21249,13 +21406,20 @@ class Handler(BaseHTTPRequestHandler):
             if not servicio:
                 json_response(self, {"error": "servicio requerido"}, status=400)
                 return
+            tipo = str(payload.get("tipo") or "").strip()
+            estado = str(payload.get("estado") or "").strip() or "Pendiente"
+            resultado_cierre = str(payload.get("resultado_cierre") or "").strip()
+            estado_siguiente = str(payload.get("estado_siguiente") or "").strip()
+            if normalize_lookup_text(tipo) == "cita de adquisicion" and estado.lower() != "pendiente" and not resultado_cierre:
+                json_response(self, {"error": "La cita de adquisición debe cerrarse con resultado"}, status=400)
+                return
             conn.execute(
                 """
                 INSERT INTO acciones (
                   id, empresa_id, servicio, cliente_id, inmueble_id, cliente_nombre,
-                  fecha, hora, tipo, responsable, estado, notas, recordatorio_min, created_at, updated_at
+                  fecha, hora, tipo, responsable, estado, resultado_cierre, estado_siguiente, notas, recordatorio_min, created_at, updated_at
                 ) VALUES (
-                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
                 )
                 """,
                 (
@@ -21267,19 +21431,38 @@ class Handler(BaseHTTPRequestHandler):
                     payload.get("cliente_nombre"),
                     payload.get("fecha"),
                     payload.get("hora"),
-                    payload.get("tipo"),
+                    tipo,
                     payload.get("responsable"),
-                    payload.get("estado"),
+                    estado,
+                    resultado_cierre or None,
+                    estado_siguiente or None,
                     payload.get("notas"),
                     payload.get("recordatorio_min"),
                     now,
                     now,
                 ),
             )
+            if normalize_lookup_text(tipo) == "cita de adquisicion":
+                inmueble_id = str(payload.get("inmueble_id") or "").strip()
+                if inmueble_id:
+                    inmueble = conn.execute(
+                        "SELECT estado FROM inmuebles WHERE id = ? LIMIT 1",
+                        (inmueble_id,),
+                    ).fetchone()
+                    estado_actual = normalize_lookup_text((inmueble["estado"] if inmueble else "") or "")
+                    if estado_actual in {"", "noticia"}:
+                        sync_inmueble_stage_for_action(conn, inmueble_id, "valoracion", now)
         elif parsed.path == "/api/acciones_update":
             record_id = payload.get("id")
             if not record_id:
                 json_response(self, {"error": "id requerido"}, status=400)
+                return
+            current = conn.execute(
+                "SELECT * FROM acciones WHERE id = ? LIMIT 1",
+                (record_id,),
+            ).fetchone()
+            if not current:
+                json_response(self, {"error": "Acción no encontrada"}, status=404)
                 return
             updates = {}
             for key in (
@@ -21288,6 +21471,8 @@ class Handler(BaseHTTPRequestHandler):
                 "tipo",
                 "responsable",
                 "estado",
+                "resultado_cierre",
+                "estado_siguiente",
                 "notas",
                 "cliente_id",
                 "cliente_nombre",
@@ -21299,12 +21484,33 @@ class Handler(BaseHTTPRequestHandler):
             if not updates:
                 json_response(self, {"error": "Sin cambios"}, status=400)
                 return
+            tipo_final = str(updates.get("tipo") if "tipo" in updates else current["tipo"] or "").strip()
+            estado_final = str(updates.get("estado") if "estado" in updates else current["estado"] or "").strip()
+            resultado_final = str(
+                updates.get("resultado_cierre") if "resultado_cierre" in updates else current["resultado_cierre"] or ""
+            ).strip()
+            estado_siguiente_final = str(
+                updates.get("estado_siguiente") if "estado_siguiente" in updates else current["estado_siguiente"] or ""
+            ).strip()
+            if normalize_lookup_text(tipo_final) == "cita de adquisicion" and estado_final.lower() != "pendiente" and not resultado_final:
+                json_response(self, {"error": "La cita de adquisición debe cerrarse con resultado"}, status=400)
+                return
             set_clause = ", ".join([f"{key} = ?" for key in updates])
             values = list(updates.values()) + [now, record_id]
             conn.execute(
                 f"UPDATE acciones SET {set_clause}, updated_at = datetime(?) WHERE id = ?",
                 values,
             )
+            inmueble_id = str(updates.get("inmueble_id") if "inmueble_id" in updates else current["inmueble_id"] or "").strip()
+            if normalize_lookup_text(tipo_final) == "cita de adquisicion" and inmueble_id and estado_final.lower() != "pendiente":
+                resultado_norm = normalize_lookup_text(resultado_final)
+                destino = ""
+                if resultado_norm == "positivo":
+                    destino = estado_siguiente_final or "Encargo"
+                elif resultado_norm == "negativo":
+                    destino = estado_siguiente_final or "Cerrado negativamente"
+                if destino:
+                    sync_inmueble_stage_for_action(conn, inmueble_id, destino, now)
         elif parsed.path == "/api/cliente_profesional":
             cliente_id = payload.get("cliente_id")
             if not cliente_id:
@@ -22406,7 +22612,8 @@ class Handler(BaseHTTPRequestHandler):
                 SELECT
                   a.id, a.cliente_id, a.fecha, a.hora,
                   COALESCE(c.nombre, a.cliente_nombre) AS cliente,
-                  a.tipo, a.responsable, a.estado, a.notas, a.servicio, a.recordatorio_min, a.inmueble_id
+                  a.tipo, a.responsable, a.estado, a.resultado_cierre, a.estado_siguiente,
+                  a.notas, a.servicio, a.recordatorio_min, a.inmueble_id
                 FROM acciones a
                 LEFT JOIN clientes c ON c.id = a.cliente_id
                 WHERE a.servicio = ?
