@@ -231,6 +231,47 @@ CREATE TABLE IF NOT EXISTS workspace_registro_horario (
   FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
 );
 
+CREATE TABLE IF NOT EXISTS workspace_presupuestos (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL,
+  empresa_id TEXT,
+  cliente_id TEXT,
+  servicio TEXT,
+  referencia_tipo TEXT,
+  referencia_id TEXT,
+  titulo TEXT NOT NULL,
+  estado TEXT NOT NULL DEFAULT 'Borrador',
+  fecha TEXT,
+  responsable TEXT,
+  forma_pago TEXT,
+  observaciones TEXT,
+  subtotal REAL,
+  impuestos REAL,
+  total REAL,
+  calculo_json TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (workspace_id) REFERENCES workspaces(id),
+  FOREIGN KEY (empresa_id) REFERENCES empresas(id),
+  FOREIGN KEY (cliente_id) REFERENCES clientes(id)
+);
+
+CREATE TABLE IF NOT EXISTS workspace_presupuesto_lineas (
+  id TEXT PRIMARY KEY,
+  presupuesto_id TEXT NOT NULL,
+  orden INTEGER NOT NULL DEFAULT 1,
+  categoria TEXT,
+  concepto TEXT NOT NULL,
+  cantidad REAL NOT NULL DEFAULT 1,
+  unidad TEXT,
+  precio_unitario REAL NOT NULL DEFAULT 0,
+  descuento_pct REAL NOT NULL DEFAULT 0,
+  total_linea REAL NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (presupuesto_id) REFERENCES workspace_presupuestos(id)
+);
+
 CREATE TABLE IF NOT EXISTS workspace_fincas_comunidades (
   id TEXT PRIMARY KEY,
   workspace_id TEXT NOT NULL,
@@ -241,6 +282,11 @@ CREATE TABLE IF NOT EXISTS workspace_fincas_comunidades (
   presidente TEXT,
   secretario TEXT,
   estado TEXT NOT NULL DEFAULT 'Activa',
+  num_vecinos INTEGER,
+  num_locales INTEGER,
+  num_trasteros INTEGER,
+  num_aparcamientos INTEGER,
+  cuota_sugerida REAL,
   cuota_mensual REAL,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,

@@ -12068,7 +12068,26 @@ def fetch_workspace_presupuestos(conn, workspace_id, limit=40):
         """,
         (workspace_id, max(1, min(int(limit or 40), 100))),
     ).fetchall()
-    return {"rows": [dict(row) for row in rows]}
+    items = [dict(row) for row in rows]
+    if not items:
+        return {"rows": []}
+    ids = [item["id"] for item in items if item.get("id")]
+    placeholders = ",".join(["?"] * len(ids))
+    line_rows = conn.execute(
+        f"""
+        SELECT presupuesto_id, orden, categoria, concepto, cantidad, unidad, precio_unitario, descuento_pct, total_linea
+        FROM workspace_presupuesto_lineas
+        WHERE presupuesto_id IN ({placeholders})
+        ORDER BY presupuesto_id, orden ASC, created_at ASC
+        """,
+        ids,
+    ).fetchall()
+    grouped = {}
+    for row in line_rows:
+        grouped.setdefault(row["presupuesto_id"], []).append(dict(row))
+    for item in items:
+        item["lineas"] = grouped.get(item["id"], [])
+    return {"rows": items}
 
 
 def fetch_workspace_fincas_comunidades(conn, workspace_id, limit=30):
@@ -13781,8 +13800,8 @@ class Handler(BaseHTTPRequestHandler):
             raw = payload.get("servicio") or (params.get("servicio", [""])[0] if params else "")
             return normalize_service_key(raw)
         if path == "/api/workspace_presupuestos":
-            raw = payload.get("servicio") or (params.get("servicio", [""])[0] if params else "") or "gestoria"
-            return normalize_service_key(raw)
+            raw = normalize_service_key(payload.get("servicio") or (params.get("servicio", [""])[0] if params else "") or "")
+            return raw if raw in {"gestoria", "administracion fincas"} else ""
         if path in {"/api/clientes_link", "/api/cliente_empresa_update"}:
             raw = payload.get("servicio") or ""
             return normalize_service_key(raw)

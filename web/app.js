@@ -4068,6 +4068,186 @@ const renderWorkspaceBillingList = (rows = []) => {
   });
 };
 
+const parseWorkspaceBudgetLinesText = (raw = "") => {
+  return String(raw || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [categoria = "", concepto = "", cantidad = "1", unidad = "", precio = "0", descuento = "0"] = line.split("|").map((part) => part.trim());
+      return {
+        categoria,
+        concepto: concepto || categoria,
+        cantidad: Number(cantidad || 0) || 0,
+        unidad,
+        precio_unitario: Number(precio || 0) || 0,
+        descuento_pct: Number(descuento || 0) || 0,
+      };
+    })
+    .filter((line) => line.concepto);
+};
+
+const stringifyWorkspaceBudgetLines = (lines = []) =>
+  (Array.isArray(lines) ? lines : [])
+    .map((line) => [
+      line.categoria || "",
+      line.concepto || "",
+      Number(line.cantidad || 0) || 0,
+      line.unidad || "",
+      Number(line.precio_unitario || 0) || 0,
+      Number(line.descuento_pct || 0) || 0,
+    ].join(" | "))
+    .join("\n");
+
+const computeWorkspaceBudgetTotals = ({ servicio = "", subtotal = "", impuestos = "", lineas = [], num_vecinos = "", num_locales = "", num_trasteros = "", num_aparcamientos = "" } = {}) => {
+  const normalizedService = String(servicio || "").trim().toLowerCase();
+  const lineSubtotal = (Array.isArray(lineas) ? lineas : []).reduce((sum, line) => {
+    const cantidad = Number(line.cantidad || 0) || 0;
+    const precio = Number(line.precio_unitario || 0) || 0;
+    const dto = Math.max(0, Math.min(100, Number(line.descuento_pct || 0) || 0));
+    return sum + cantidad * precio * (1 - dto / 100);
+  }, 0);
+  const fincasSuggested = Math.max(
+    60,
+    (Number(num_vecinos || 0) || 0) * 5
+      + (Number(num_locales || 0) || 0)
+      + (Number(num_trasteros || 0) || 0)
+      + (Number(num_aparcamientos || 0) || 0)
+  );
+  const suggested = normalizedService === "fincas" ? (lineSubtotal > 0 ? lineSubtotal : fincasSuggested) : lineSubtotal;
+  const manualSubtotal = Number(subtotal || 0) || 0;
+  const effectiveSubtotal = manualSubtotal > 0 ? manualSubtotal : suggested;
+  const tax = Number(impuestos || 0) || 0;
+  return {
+    suggested: Number(suggested.toFixed(2)),
+    subtotal: Number(effectiveSubtotal.toFixed(2)),
+    total: Number((effectiveSubtotal + tax).toFixed(2)),
+  };
+};
+
+const syncWorkspaceBudgetComputedFields = ({ forceSubtotal = false, forceTotal = false } = {}) => {
+  if (!workspaceBudgetForm) return;
+  const linesText = workspaceBudgetForm.querySelector('[name="lineas_texto"]')?.value || "";
+  const subtotalInput = workspaceBudgetForm.querySelector('[name="subtotal"]');
+  const totalInput = workspaceBudgetForm.querySelector('[name="total"]');
+  const suggestedInput = workspaceBudgetForm.querySelector('[name="subtotal_sugerido"]');
+  const lineas = parseWorkspaceBudgetLinesText(linesText);
+  const computed = computeWorkspaceBudgetTotals({
+    servicio: workspaceBudgetForm.querySelector('[name="servicio"]')?.value,
+    subtotal: subtotalInput?.value,
+    impuestos: workspaceBudgetForm.querySelector('[name="impuestos"]')?.value,
+    lineas,
+    num_vecinos: workspaceBudgetForm.querySelector('[name="num_vecinos"]')?.value,
+    num_locales: workspaceBudgetForm.querySelector('[name="num_locales"]')?.value,
+    num_trasteros: workspaceBudgetForm.querySelector('[name="num_trasteros"]')?.value,
+    num_aparcamientos: workspaceBudgetForm.querySelector('[name="num_aparcamientos"]')?.value,
+  });
+  if (suggestedInput) suggestedInput.value = computed.suggested.toFixed(2);
+  if (subtotalInput && (forceSubtotal || !subtotalInput.value)) subtotalInput.value = computed.subtotal.toFixed(2);
+  if (totalInput && (forceTotal || !totalInput.value)) totalInput.value = computed.total.toFixed(2);
+  const hiddenLines = workspaceBudgetForm.querySelector('[name="lineas"]');
+  if (hiddenLines) hiddenLines.value = JSON.stringify(lineas);
+};
+
+const renderWorkspaceBudgetSummary = (rows = []) => {
+  if (!workspaceBudgetSummary) return;
+  const items = Array.isArray(rows) ? rows : [];
+  const total = items.reduce((sum, row) => sum + (Number(row.total || 0) || 0), 0);
+  const accepted = items.filter((row) => String(row.estado || "").toLowerCase() === "aceptado").length;
+  workspaceBudgetSummary.innerHTML = `
+    <div class="workspace-mini-kpis">
+      <div class="workspace-mini-kpi"><span>Presupuestos</span><strong>${numberFormatter.format(items.length)}</strong></div>
+      <div class="workspace-mini-kpi"><span>Total propuesto</span><strong>${euroFormatter.format(total)}</strong></div>
+      <div class="workspace-mini-kpi"><span>Aceptados</span><strong>${numberFormatter.format(accepted)}</strong></div>
+    </div>
+  `;
+};
+
+const fillWorkspaceBudgetForm = (record = null) => {
+  if (!workspaceBudgetForm) return;
+  hydrateWorkspaceCompanySelects();
+  const companies = state.currentWorkspaceDetail?.companies || [];
+  const payload = {
+    id: "",
+    workspace_id: state.currentWorkspaceId || "",
+    empresa_id: companies[0]?.id || "",
+    cliente_id: "",
+    cliente_lookup: "",
+    servicio: "reformas",
+    referencia_tipo: "",
+    referencia_id: "",
+    titulo: "",
+    estado: "Borrador",
+    fecha: "",
+    responsable: "",
+    forma_pago: "",
+    observaciones: "",
+    subtotal_sugerido: "",
+    subtotal: "",
+    impuestos: "0",
+    total: "",
+    num_vecinos: "",
+    num_locales: "",
+    num_trasteros: "",
+    num_aparcamientos: "",
+    lineas_texto: "",
+    ...(record || {}),
+  };
+  ["id", "workspace_id", "empresa_id", "cliente_id", "servicio", "referencia_tipo", "referencia_id", "titulo", "estado", "fecha", "responsable", "forma_pago", "observaciones", "subtotal_sugerido", "subtotal", "impuestos", "total", "num_vecinos", "num_locales", "num_trasteros", "num_aparcamientos", "lineas_texto"].forEach((field) => {
+    const input = workspaceBudgetForm.querySelector(`[name="${field}"]`);
+    if (input) input.value = payload[field] ?? "";
+  });
+  if (workspaceBudgetClienteLookup) workspaceBudgetClienteLookup.value = payload.cliente_lookup || "";
+  syncWorkspaceBudgetComputedFields({ forceSubtotal: !record, forceTotal: !record });
+};
+
+const renderWorkspaceBudgetList = (rows = []) => {
+  if (!workspaceBudgetList) return;
+  state.workspaceBudgetRows = Array.isArray(rows) ? rows : [];
+  renderWorkspaceBudgetSummary(state.workspaceBudgetRows);
+  if (!state.workspaceBudgetRows.length) {
+    workspaceBudgetList.innerHTML = "<p class='muted'>Sin presupuestos registrados todavía.</p>";
+    return;
+  }
+  workspaceBudgetList.innerHTML = `
+    <div class="workspace-billing-list">
+      ${state.workspaceBudgetRows.map((row) => `
+        <div class="workspace-billing-row">
+          <div>
+            <strong>${row.titulo || "Presupuesto"}</strong>
+            <div class="muted">${row.empresa_nombre || "-"}${row.cliente_nombre ? ` · ${row.cliente_nombre}` : ""}</div>
+            <div class="muted">${row.servicio || "-"}${row.lineas_total ? ` · ${numberFormatter.format(Number(row.lineas_total || 0))} partidas` : ""}</div>
+          </div>
+          <div class="workspace-billing-meta">
+            <span>${row.fecha || "Sin fecha"}</span>
+            <span>${euroFormatter.format(Number(row.total || 0))}</span>
+            <span>${row.estado || "Borrador"}</span>
+            <button type="button" class="secondary ghost" data-budget-edit="${row.id}">Editar</button>
+          </div>
+        </div>
+      `).join("")}
+    </div>
+  `;
+  workspaceBudgetList.querySelectorAll("[data-budget-edit]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const row = state.workspaceBudgetRows.find((item) => String(item.id || "") === String(button.dataset.budgetEdit || ""));
+      if (!row) return;
+      const calc = (() => {
+        try { return JSON.parse(row.calculo_json || "{}") || {}; } catch { return {}; }
+      })();
+      fillWorkspaceBudgetForm({
+        ...row,
+        ...calc,
+        cliente_lookup: row.cliente_nombre || "",
+        lineas_texto: stringifyWorkspaceBudgetLines(row.lineas || []),
+        subtotal_sugerido: calc.cuota_sugerida || row.subtotal || "",
+      });
+      if (workspaceBudgetStatus) workspaceBudgetStatus.textContent = "Editando presupuesto existente.";
+      workspaceBudgetForm?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  });
+};
+
 const hydrateWorkspaceBillingTargetSelect = () => {
   if (!workspaceCollectionsForm) return;
   const select = workspaceCollectionsForm.querySelector('[name="factura_id"]');
@@ -4209,7 +4389,7 @@ const renderWorkspaceRemittancesList = (rows = []) => {
 const hydrateWorkspaceCompanySelects = () => {
   const companies = state.currentWorkspaceDetail?.companies || [];
   const html = companies.map((row) => `<option value="${row.id}">${row.nombre || "-"}</option>`).join("");
-  [workspaceBillingForm, workspaceInboxForm, workspaceSeriesForm, workspaceTimeForm, workspaceFincasCommunityForm, workspaceRemittancesForm, workspaceFincasProviderForm].forEach((form) => {
+  [workspaceBillingForm, workspaceBudgetForm, workspaceInboxForm, workspaceSeriesForm, workspaceTimeForm, workspaceFincasCommunityForm, workspaceRemittancesForm, workspaceFincasProviderForm].forEach((form) => {
     const select = form?.querySelector('[name="empresa_id"]');
     if (select) select.innerHTML = html;
   });
@@ -4664,13 +4844,29 @@ const fillWorkspaceFincasCommunityForm = (record = null) => {
     presidente: "",
     secretario: "",
     estado: "Activa",
+    num_vecinos: "",
+    num_locales: "",
+    num_trasteros: "",
+    num_aparcamientos: "",
+    cuota_sugerida: "",
     cuota_mensual: "",
     ...(record || {}),
   };
-  ["id", "workspace_id", "empresa_id", "nombre", "cif", "direccion", "presidente", "secretario", "estado", "cuota_mensual"].forEach((field) => {
+  ["id", "workspace_id", "empresa_id", "nombre", "cif", "direccion", "presidente", "secretario", "estado", "num_vecinos", "num_locales", "num_trasteros", "num_aparcamientos", "cuota_sugerida", "cuota_mensual"].forEach((field) => {
     const input = workspaceFincasCommunityForm.querySelector(`[name="${field}"]`);
     if (input) input.value = payload[field] ?? "";
   });
+  const suggestedInput = workspaceFincasCommunityForm.querySelector('[name="cuota_sugerida"]');
+  if (suggestedInput && !suggestedInput.value) {
+    const suggested = Math.max(
+      60,
+      (Number(payload.num_vecinos || 0) || 0) * 5
+        + (Number(payload.num_locales || 0) || 0)
+        + (Number(payload.num_trasteros || 0) || 0)
+        + (Number(payload.num_aparcamientos || 0) || 0)
+    );
+    suggestedInput.value = suggested.toFixed(2);
+  }
 };
 
 const renderWorkspaceFincasCommunityList = (rows = []) => {
@@ -4688,9 +4884,11 @@ const renderWorkspaceFincasCommunityList = (rows = []) => {
               <div>
                 <strong>${row.nombre || "-"}</strong>
                 <div class="muted">${row.direccion || row.empresa_nombre || "-"}</div>
+                <div class="muted">${numberFormatter.format(Number(row.num_vecinos || 0))} vecinos · ${numberFormatter.format(Number(row.num_locales || 0))} locales · ${numberFormatter.format(Number(row.num_trasteros || 0))} trasteros · ${numberFormatter.format(Number(row.num_aparcamientos || 0))} aparcamientos</div>
               </div>
               <div class="workspace-billing-meta">
                 <span>${row.estado || "Activa"}</span>
+                <span>Sug. ${euroFormatter.format(Number(row.cuota_sugerida || 0))}</span>
                 <span>${euroFormatter.format(Number(row.cuota_mensual || 0))}</span>
                 <span>${numberFormatter.format(Number(row.incidencias_abiertas || 0))} abiertas</span>
                 <button type="button" class="secondary ghost" data-community-edit="${row.id}">Editar</button>
@@ -4974,11 +5172,12 @@ const renderWorkspaceDocumentHub = (data = {}) => {
 const loadWorkspaceDetail = async (workspaceId) => {
   if (!workspaceId) return;
   state.currentWorkspaceId = workspaceId;
-  const [detail, billing, docs, billingRows, collections, remittances, workspaceClients, health, series, inbox, portal, portalRequests, automations, automationLogs, timeRows, fincasCommunities, fincasIncidents, fincasProviders, fincasMeetings] = await Promise.all([
+  const [detail, billing, docs, billingRows, budgetRows, collections, remittances, workspaceClients, health, series, inbox, portal, portalRequests, automations, automationLogs, timeRows, fincasCommunities, fincasIncidents, fincasProviders, fincasMeetings] = await Promise.all([
     api(`/api/workspace_detail?id=${encodeURIComponent(workspaceId)}`),
     api(`/api/workspace_billing_summary?workspace_id=${encodeURIComponent(workspaceId)}`),
     api(`/api/workspace_document_hub?workspace_id=${encodeURIComponent(workspaceId)}`),
     api(`/api/workspace_facturacion?workspace_id=${encodeURIComponent(workspaceId)}`),
+    api(`/api/workspace_presupuestos?workspace_id=${encodeURIComponent(workspaceId)}`),
     api(`/api/workspace_cobros?workspace_id=${encodeURIComponent(workspaceId)}`),
     api(`/api/workspace_remesas?workspace_id=${encodeURIComponent(workspaceId)}`),
     api(`/api/workspace_clientes?workspace_id=${encodeURIComponent(workspaceId)}&limit=60`),
@@ -5009,6 +5208,8 @@ const loadWorkspaceDetail = async (workspaceId) => {
   renderWorkspaceBillingSummary(billing || {});
   renderWorkspaceBillingList(billingRows.rows || []);
   fillWorkspaceBillingForm();
+  renderWorkspaceBudgetList(budgetRows.rows || []);
+  fillWorkspaceBudgetForm();
   renderWorkspaceCollectionsList(collections.rows || []);
   fillWorkspaceCollectionsForm();
   renderWorkspaceRemittancesList(remittances.rows || []);
@@ -26595,8 +26796,10 @@ if (workspaceNewBtn) {
     renderWorkspaceModules([]);
     renderWorkspaceBillingSummary({});
     renderWorkspaceBillingList([]);
+    renderWorkspaceBudgetList([]);
     syncWorkspaceClientOptions([]);
     fillWorkspaceBillingForm();
+    fillWorkspaceBudgetForm();
     renderWorkspaceCollectionsList([]);
     fillWorkspaceCollectionsForm();
     renderWorkspaceRemittancesList([]);
@@ -26659,6 +26862,18 @@ if (workspaceBillingResetBtn) {
   });
 }
 
+if (workspaceBudgetClienteLookup) {
+  workspaceBudgetClienteLookup.addEventListener("input", () => syncWorkspaceLookupField(workspaceBudgetClienteLookup, workspaceBudgetForm, "cliente_id"));
+  workspaceBudgetClienteLookup.addEventListener("change", () => syncWorkspaceLookupField(workspaceBudgetClienteLookup, workspaceBudgetForm, "cliente_id"));
+}
+
+if (workspaceBudgetResetBtn) {
+  workspaceBudgetResetBtn.addEventListener("click", () => {
+    fillWorkspaceBudgetForm();
+    if (workspaceBudgetStatus) workspaceBudgetStatus.textContent = "";
+  });
+}
+
 if (workspaceCollectionsResetBtn) {
   workspaceCollectionsResetBtn.addEventListener("click", () => {
     fillWorkspaceCollectionsForm();
@@ -26701,6 +26916,47 @@ if (workspaceBillingForm) {
       fillWorkspaceBillingForm();
     } catch (error) {
       if (workspaceBillingStatus) workspaceBillingStatus.textContent = error.message || "No se pudo guardar.";
+    }
+  });
+}
+
+if (workspaceBudgetForm) {
+  ["input", "change"].forEach((eventName) => {
+    workspaceBudgetForm.addEventListener(eventName, (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) return;
+      const watched = new Set(["servicio", "subtotal", "impuestos", "total", "num_vecinos", "num_locales", "num_trasteros", "num_aparcamientos", "lineas_texto"]);
+      const fieldName = target.getAttribute("name") || "";
+      if (watched.has(fieldName)) {
+        syncWorkspaceBudgetComputedFields({ forceSubtotal: fieldName === "servicio", forceTotal: fieldName !== "total" });
+      }
+    });
+  });
+  workspaceBudgetForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (!state.currentWorkspaceId) {
+      if (workspaceBudgetStatus) workspaceBudgetStatus.textContent = "Selecciona un workspace.";
+      return;
+    }
+    if (workspaceBudgetStatus) workspaceBudgetStatus.textContent = "Guardando...";
+    syncWorkspaceBudgetComputedFields();
+    const formData = new FormData(workspaceBudgetForm);
+    const payload = Object.fromEntries(formData.entries());
+    payload.workspace_id = state.currentWorkspaceId;
+    const clientMatch = state.workspaceClientOptionMap.get((workspaceBudgetClienteLookup?.value || "").trim());
+    payload.cliente_id = clientMatch?.id || payload.cliente_id || "";
+    try {
+      const data = await fetch("/api/workspace_presupuestos", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }).then((res) => res.json());
+      if (data?.error) throw new Error(data.error);
+      if (workspaceBudgetStatus) workspaceBudgetStatus.textContent = `Presupuesto guardado.${data.automation_actions ? ` Automatizaciones: ${data.automation_actions}` : ""}`;
+      await loadWorkspaceDetail(state.currentWorkspaceId);
+      fillWorkspaceBudgetForm();
+    } catch (error) {
+      if (workspaceBudgetStatus) workspaceBudgetStatus.textContent = error.message || "No se pudo guardar.";
     }
   });
 }
@@ -26768,6 +27024,28 @@ if (workspaceFincasCommunityResetBtn) {
   workspaceFincasCommunityResetBtn.addEventListener("click", () => {
     fillWorkspaceFincasCommunityForm();
     if (workspaceFincasCommunityStatus) workspaceFincasCommunityStatus.textContent = "";
+  });
+}
+
+if (workspaceFincasCommunityForm) {
+  ["input", "change"].forEach((eventName) => {
+    workspaceFincasCommunityForm.addEventListener(eventName, (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) return;
+      const fieldName = target.getAttribute("name") || "";
+      if (!["num_vecinos", "num_locales", "num_trasteros", "num_aparcamientos"].includes(fieldName)) return;
+      const suggested = Math.max(
+        60,
+        (Number(workspaceFincasCommunityForm.querySelector('[name="num_vecinos"]')?.value || 0) || 0) * 5
+          + (Number(workspaceFincasCommunityForm.querySelector('[name="num_locales"]')?.value || 0) || 0)
+          + (Number(workspaceFincasCommunityForm.querySelector('[name="num_trasteros"]')?.value || 0) || 0)
+          + (Number(workspaceFincasCommunityForm.querySelector('[name="num_aparcamientos"]')?.value || 0) || 0)
+      );
+      const suggestedInput = workspaceFincasCommunityForm.querySelector('[name="cuota_sugerida"]');
+      const cuotaInput = workspaceFincasCommunityForm.querySelector('[name="cuota_mensual"]');
+      if (suggestedInput) suggestedInput.value = suggested.toFixed(2);
+      if (cuotaInput && !cuotaInput.value) cuotaInput.value = suggested.toFixed(2);
+    });
   });
 }
 
