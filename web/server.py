@@ -11339,6 +11339,150 @@ def fetch_workspace_billing_rows(conn, workspace_id, limit=25):
     return {"rows": [dict(row) for row in rows]}
 
 
+def fetch_workspace_health(conn, workspace_id):
+    workspace_detail = fetch_workspace_detail(conn, workspace_id)
+    if not workspace_detail:
+        return None
+    workspace = workspace_detail["workspace"]
+    modules = workspace_detail["modules"]
+    empresa_ids = fetch_workspace_company_ids(conn, workspace_id)
+    if not empresa_ids:
+        return {
+            "readiness_score": 0,
+            "checklist": [],
+            "module_health": [],
+            "summary": {
+                "clientes": 0,
+                "documentos": 0,
+                "facturas": 0,
+            },
+        }
+    placeholders = ",".join(["?"] * len(empresa_ids))
+    clientes_total = conn.execute(
+        f"""
+        SELECT COUNT(DISTINCT ce.cliente_id)
+        FROM clientes_empresas ce
+        WHERE ce.empresa_id IN ({placeholders})
+        """,
+        empresa_ids,
+    ).fetchone()[0]
+    docs_summary = fetch_workspace_document_hub(conn, workspace_id, limit=5)["summary"]
+    billing_rows = fetch_workspace_billing_rows(conn, workspace_id, limit=5)["rows"]
+    facturas_total = conn.execute(
+        f"""
+        SELECT COUNT(*)
+        FROM workspace_facturacion
+        WHERE workspace_id = ? AND empresa_id IN ({placeholders})
+        """,
+        [workspace_id, *empresa_ids],
+    ).fetchone()[0]
+    seguros_total = conn.execute(
+        f"SELECT COUNT(*) FROM seguros WHERE empresa_id IN ({placeholders})",
+        empresa_ids,
+    ).fetchone()[0]
+    gestoria_total = conn.execute(
+        f"SELECT COUNT(*) FROM gestoria_trabajos WHERE empresa_id IN ({placeholders})",
+        empresa_ids,
+    ).fetchone()[0]
+    inmuebles_total = conn.execute(
+        f"SELECT COUNT(*) FROM inmuebles WHERE empresa_id IN ({placeholders})",
+        empresa_ids,
+    ).fetchone()[0]
+    operaciones_total = conn.execute(
+        f"SELECT COUNT(*) FROM operaciones_inmobiliarias WHERE empresa_id IN ({placeholders})",
+        empresa_ids,
+    ).fetchone()[0]
+    hipotecas_total = conn.execute(
+        f"SELECT COUNT(*) FROM hipotecas WHERE empresa_id IN ({placeholders})",
+        empresa_ids,
+    ).fetchone()[0]
+    facturas_recibidas_total = conn.execute(
+        f"SELECT COUNT(*) FROM gestoria_facturas WHERE empresa_id IN ({placeholders})",
+        empresa_ids,
+    ).fetchone()[0]
+    enabled_modules = [row for row in modules if int(row.get("enabled") or 0) == 1]
+    branding_ready = bool((workspace.get("descripcion") or "").strip() and (workspace.get("primary_color") or "").strip())
+    checklist = [
+        {
+            "label": "Branding",
+            "done": 1 if branding_ready else 0,
+            "hint": "Nombre, descripción y colores definidos.",
+        },
+        {
+            "label": "Empresas",
+            "done": 1 if len(empresa_ids) > 0 else 0,
+            "hint": f"{len(empresa_ids)} sociedades vinculadas al tenant.",
+        },
+        {
+            "label": "Módulos activos",
+            "done": 1 if len(enabled_modules) >= 3 else 0,
+            "hint": f"{len(enabled_modules)} módulos habilitados.",
+        },
+        {
+            "label": "Base CRM",
+            "done": 1 if int(clientes_total or 0) > 0 else 0,
+            "hint": f"{int(clientes_total or 0)} clientes dentro del workspace.",
+        },
+        {
+            "label": "Documental",
+            "done": 1 if int(docs_summary.get('documentos_total') or 0) > 0 else 0,
+            "hint": f"{int(docs_summary.get('documentos_total') or 0)} documentos agregados.",
+        },
+        {
+            "label": "Facturación",
+            "done": 1 if int(facturas_total or 0) > 0 else 0,
+            "hint": f"{int(facturas_total or 0)} movimientos transversales registrados.",
+        },
+    ]
+    readiness_score = round((sum(item["done"] for item in checklist) / max(len(checklist), 1)) * 100)
+    metrics_by_module = {
+        "crm360": (clientes_total, "clientes activos en el tenant", "Importar o crear clientes base."),
+        "documental": (docs_summary.get("documentos_total") or 0, "documentos unificados", "Subir documentos y revisar asignaciones."),
+        "dashboard": (len(billing_rows) + int(clientes_total or 0), "fuentes listas para cuadros de mando", "Conectar más datos operativos y facturación."),
+        "gestoria": (gestoria_total, "trabajos de gestoría", "Cargar trabajos/campañas y responsables."),
+        "seguros": (seguros_total, "pólizas o expedientes de seguros", "Importar cartera o cargar pólizas activas."),
+        "inmobiliaria": (inmuebles_total + operaciones_total, "inmuebles y operaciones", "Cargar captaciones, inmuebles u operaciones."),
+        "financiacion": (hipotecas_total, "hipotecas registradas", "Activar expedientes y pipeline financiero."),
+        "fincas": (0, "módulo pendiente de vertical propia", "Definir modelo de comunidades y operativa."),
+        "facturacion": (facturas_total, "movimientos de facturación", "Emitir primeras facturas del tenant."),
+        "facturas_recibidas": (facturas_recibidas_total, "facturas recibidas clasificadas", "Activar inbox de proveedores."),
+        "portal_cliente": (0, "portal aún no desplegado", "Diseñar acceso y flujo cliente."),
+        "registro_horario": (0, "registro horario no implantado", "Activar fichajes y política laboral."),
+        "automatizaciones": (0, "automatizaciones pendientes", "Definir reglas por evento."),
+    }
+    module_health = []
+    for module in modules:
+        key = module.get("modulo_key") or ""
+        metric_value, metric_label, next_step = metrics_by_module.get(key, (0, "sin métrica", "Completar configuración."))
+        enabled = int(module.get("enabled") or 0) == 1
+        status = "disabled"
+        if enabled and metric_value:
+            status = "operativo"
+        elif enabled:
+            status = "configuracion"
+        module_health.append(
+            {
+                "key": key,
+                "nombre": module.get("modulo_nombre") or key,
+                "enabled": 1 if enabled else 0,
+                "status": status,
+                "metric_value": int(metric_value or 0),
+                "metric_label": metric_label,
+                "next_step": next_step,
+            }
+        )
+    return {
+        "readiness_score": readiness_score,
+        "checklist": checklist,
+        "module_health": module_health,
+        "summary": {
+            "clientes": int(clientes_total or 0),
+            "documentos": int(docs_summary.get("documentos_total") or 0),
+            "facturas": int(facturas_total or 0),
+        },
+    }
+
+
 def suggest_workspace_document_cliente(candidates, text):
     normalized_text = normalize_lookup_text(text)
     if len(normalized_text) < 6:
@@ -17809,6 +17953,18 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "workspace_id requerido"}, status=400)
                 return
             json_response(self, fetch_workspace_clientes(conn, workspace_id, q=q, limit=limit))
+            return
+
+        if path == "/api/workspace_health":
+            workspace_id = params.get("workspace_id", [""])[0]
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            payload = fetch_workspace_health(conn, workspace_id)
+            if not payload:
+                json_response(self, {"error": "workspace no encontrado"}, status=404)
+                return
+            json_response(self, payload)
             return
 
         if path == "/api/years":

@@ -1345,6 +1345,73 @@ body.crm-fin #companySummary {
   gap: 12px;
 }
 
+.workspace-health-score-card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 16px;
+  margin-bottom: 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(60, 110, 113, 0.16);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.97), rgba(245, 245, 245, 0.96));
+}
+
+.workspace-health-ring {
+  width: 72px;
+  height: 72px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: radial-gradient(circle at 30% 30%, rgba(255, 255, 255, 0.95), rgba(214, 226, 216, 0.9));
+  border: 1px solid rgba(60, 110, 113, 0.2);
+  font-weight: 700;
+  color: var(--text);
+}
+
+.workspace-checklist,
+.workspace-module-health-list {
+  display: grid;
+  gap: 10px;
+}
+
+.workspace-check-item,
+.workspace-module-health-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(60, 110, 113, 0.14);
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.workspace-check-item.is-done {
+  border-color: rgba(95, 122, 97, 0.35);
+  background: linear-gradient(135deg, rgba(247, 251, 248, 0.98), rgba(233, 244, 236, 0.92));
+}
+
+.workspace-module-health-meta {
+  display: grid;
+  gap: 4px;
+  justify-items: end;
+  font-size: 12px;
+  color: var(--muted);
+  text-align: right;
+}
+
+.workspace-module-health-row.status-operativo {
+  border-color: rgba(95, 122, 97, 0.35);
+}
+
+.workspace-module-health-row.status-configuracion {
+  border-color: rgba(190, 153, 64, 0.35);
+}
+
+.workspace-module-health-row.status-disabled {
+  opacity: 0.78;
+}
+
 .workspace-launcher-card {
   display: grid;
   gap: 10px;
@@ -1466,6 +1533,8 @@ body.crm-fin #companySummary {
   }
 
   .workspace-billing-row,
+  .workspace-check-item,
+  .workspace-module-health-row,
   .workspace-summary-row,
   .workspace-document-row,
   .workspace-document-head {
@@ -1473,6 +1542,7 @@ body.crm-fin #companySummary {
   }
 
   .workspace-billing-meta,
+  .workspace-module-health-meta,
   .workspace-summary-metrics,
   .workspace-document-meta {
     justify-items: start;

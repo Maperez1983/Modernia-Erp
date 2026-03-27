@@ -1213,6 +1213,9 @@ const holdingSection = document.getElementById("holdingSection");
 const holdingBackBtn = document.getElementById("holdingBackBtn");
 const holdingOrgChart = document.getElementById("holdingOrgChart");
 const workspaceKpis = document.getElementById("workspaceKpis");
+const workspaceHealthScore = document.getElementById("workspaceHealthScore");
+const workspaceChecklist = document.getElementById("workspaceChecklist");
+const workspaceModuleHealth = document.getElementById("workspaceModuleHealth");
 const workspaceLauncher = document.getElementById("workspaceLauncher");
 const workspaceList = document.getElementById("workspaceList");
 const workspaceForm = document.getElementById("workspaceForm");
@@ -3503,6 +3506,70 @@ const renderWorkspaceKpis = (summary = {}) => {
     .join("");
 };
 
+const renderWorkspaceHealth = (data = {}) => {
+  if (workspaceHealthScore) {
+    const score = Number(data.readiness_score || 0);
+    const summary = data.summary || {};
+    workspaceHealthScore.innerHTML = `
+      <div class="workspace-health-score-card">
+        <div class="workspace-health-ring">${score}%</div>
+        <div>
+          <strong>Readiness del tenant</strong>
+          <div class="muted">
+            ${numberFormatter.format(Number(summary.clientes || 0))} clientes ·
+            ${numberFormatter.format(Number(summary.documentos || 0))} documentos ·
+            ${numberFormatter.format(Number(summary.facturas || 0))} movimientos
+          </div>
+        </div>
+      </div>
+    `;
+  }
+  if (workspaceChecklist) {
+    const items = Array.isArray(data.checklist) ? data.checklist : [];
+    workspaceChecklist.innerHTML = items.length
+      ? `
+          <div class="workspace-checklist">
+            ${items
+              .map(
+                (item) => `
+                  <div class="workspace-check-item${Number(item.done || 0) === 1 ? " is-done" : ""}">
+                    <strong>${item.label || "-"}</strong>
+                    <div class="muted">${item.hint || ""}</div>
+                  </div>
+                `
+              )
+              .join("")}
+          </div>
+        `
+      : "<p class='muted'>Sin checklist disponible.</p>";
+  }
+  if (workspaceModuleHealth) {
+    const rows = Array.isArray(data.module_health) ? data.module_health : [];
+    workspaceModuleHealth.innerHTML = rows.length
+      ? `
+          <div class="workspace-module-health-list">
+            ${rows
+              .map(
+                (row) => `
+                  <div class="workspace-module-health-row status-${row.status || "disabled"}">
+                    <div>
+                      <strong>${row.nombre || row.key || "-"}</strong>
+                      <div class="muted">${row.metric_value || 0} ${row.metric_label || ""}</div>
+                    </div>
+                    <div class="workspace-module-health-meta">
+                      <span>${row.enabled ? (row.status || "activo") : "desactivado"}</span>
+                      <span>${row.next_step || ""}</span>
+                    </div>
+                  </div>
+                `
+              )
+              .join("")}
+          </div>
+        `
+      : "<p class='muted'>Sin módulos evaluados.</p>";
+  }
+};
+
 const fillWorkspaceForm = (workspace = {}) => {
   if (!workspaceForm) return;
   ["id", "nombre", "slug", "estado", "plan", "descripcion", "logo_url", "primary_color", "accent_color"].forEach((field) => {
@@ -3883,18 +3950,20 @@ const renderWorkspaceDocumentHub = (data = {}) => {
 const loadWorkspaceDetail = async (workspaceId) => {
   if (!workspaceId) return;
   state.currentWorkspaceId = workspaceId;
-  const [detail, billing, docs, billingRows, workspaceClients] = await Promise.all([
+  const [detail, billing, docs, billingRows, workspaceClients, health] = await Promise.all([
     api(`/api/workspace_detail?id=${encodeURIComponent(workspaceId)}`),
     api(`/api/workspace_billing_summary?workspace_id=${encodeURIComponent(workspaceId)}`),
     api(`/api/workspace_document_hub?workspace_id=${encodeURIComponent(workspaceId)}`),
     api(`/api/workspace_facturacion?workspace_id=${encodeURIComponent(workspaceId)}`),
     api(`/api/workspace_clientes?workspace_id=${encodeURIComponent(workspaceId)}&limit=60`),
+    api(`/api/workspace_health?workspace_id=${encodeURIComponent(workspaceId)}`),
   ]);
   state.currentWorkspaceDetail = detail;
   state.currentWorkspaceEnabledModules = getWorkspaceEnabledModules(detail.modules || []);
   state.currentWorkspaceName = detail.workspace?.nombre || "";
   syncWorkspaceClientOptions(workspaceClients.rows || []);
   fillWorkspaceForm(detail.workspace || {});
+  renderWorkspaceHealth(health || {});
   renderWorkspaceLauncher(detail.workspace || {}, detail.modules || []);
   renderWorkspaceCompanies(detail.companies || []);
   renderWorkspaceModules(detail.modules || []);
@@ -3923,6 +3992,7 @@ const loadWorkspaceCentral = async () => {
     state.currentWorkspaceEnabledModules = [];
     state.currentWorkspaceName = "";
     fillWorkspaceForm({});
+    renderWorkspaceHealth({});
     renderWorkspaceLauncher({}, []);
     renderWorkspaceCompanies([]);
     renderWorkspaceModules([]);
