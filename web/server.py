@@ -18654,259 +18654,349 @@ class Handler(BaseHTTPRequestHandler):
                     inm_values,
                 )
         elif parsed.path == "/api/captacion_convert":
-            captacion_id = str(payload.get("captacion_id") or "").strip()
-            destino = normalize_lookup_text(payload.get("destino") or "")
-            destino_map = {
-                "inmueble": "Inmueble",
-                "encargo": "Encargo",
-                "compraventa": "Compraventa",
-                "venta": "Compraventa",
-                "alquiler": "Alquiler",
-            }
-            destino_label = destino_map.get(destino)
-            if not captacion_id or not destino_label:
-                json_response(self, {"error": "captacion_id y destino válidos requeridos"}, status=400)
-                return
-            captacion = conn.execute(
-                """
-                SELECT *
-                FROM captaciones
-                WHERE id = ? AND empresa_id = ?
-                LIMIT 1
-                """,
-                (captacion_id, empresa["id"]),
-            ).fetchone()
-            if not captacion:
-                json_response(self, {"error": "Captación no encontrada"}, status=404)
-                return
-            inmueble = conn.execute(
-                "SELECT * FROM inmuebles WHERE id = ? LIMIT 1",
-                (captacion["inmueble_id"],),
-            ).fetchone()
-            if not inmueble:
-                json_response(self, {"error": "Inmueble no encontrado"}, status=404)
-                return
-
-            propietarios = get_inmueble_propietarios(conn, captacion["inmueble_id"])
-            owner1 = propietarios[0] if len(propietarios) > 0 else {}
-            owner2 = propietarios[1] if len(propietarios) > 1 else {}
-            propietario_fallback = normalize_person_name(captacion["propietario"]) or normalize_person_name(inmueble["direccion"])
-            direccion = normalize_person_name(inmueble["direccion"] or captacion["direccion"])
-
-            def owner_value(owner, key, fallback=""):
-                value = str((owner or {}).get(key) or "").strip()
-                if value:
-                    return value
-                if key == "nombre":
-                    return fallback
-                return ""
-
-            if destino_label == "Inmueble":
-                conn.execute(
-                    """
-                    UPDATE captaciones
-                    SET situacion_comercial = ?, fecha_conversion = ?, updated_at = datetime(?)
-                    WHERE id = ?
-                    """,
-                    (destino_label, now, now, captacion_id),
-                )
-                conn.execute(
-                    "UPDATE inmuebles SET estado = ?, updated_at = datetime(?) WHERE id = ?",
-                    (destino_label, now, captacion["inmueble_id"]),
-                )
-                conn.commit()
-                json_response(self, {"ok": True, "destino": destino_label, "inmueble_id": captacion["inmueble_id"]})
-                return
-
-            if destino_label == "Encargo":
-                precio_encargo = parse_money_value(payload.get("precio_encargo"))
-                cap_updates = {
-                    "situacion_comercial": destino_label,
-                    "fecha_conversion": now,
-                    "etapa": "Encargo firmado",
+            try:
+                captacion_id = str(payload.get("captacion_id") or "").strip()
+                destino = normalize_lookup_text(payload.get("destino") or "")
+                destino_map = {
+                    "inmueble": "Inmueble",
+                    "encargo": "Encargo",
+                    "compraventa": "Compraventa",
+                    "venta": "Compraventa",
+                    "alquiler": "Alquiler",
                 }
-                if precio_encargo is not None:
-                    cap_updates["precio_objetivo"] = precio_encargo
-                    cap_updates["precio_valoracion"] = precio_encargo
-                set_clause = ", ".join([f"{key} = ?" for key in cap_updates])
-                conn.execute(
-                    f"UPDATE captaciones SET {set_clause}, updated_at = datetime(?) WHERE id = ?",
-                    [*cap_updates.values(), now, captacion_id],
-                )
-                inm_updates = {"estado": destino_label}
-                if precio_encargo is not None:
-                    inm_updates["precio_objetivo"] = precio_encargo
-                    inm_updates["precio_valoracion"] = precio_encargo
-                inm_set_clause = ", ".join([f"{key} = ?" for key in inm_updates])
-                conn.execute(
-                    f"UPDATE inmuebles SET {inm_set_clause}, updated_at = datetime(?) WHERE id = ?",
-                    [*inm_updates.values(), now, captacion["inmueble_id"]],
-                )
-                conn.commit()
-                json_response(self, {"ok": True, "destino": destino_label, "inmueble_id": captacion["inmueble_id"]})
-                return
+                destino_label = destino_map.get(destino)
+                if not captacion_id or not destino_label:
+                    json_response(self, {"error": "captacion_id y destino válidos requeridos"}, status=400)
+                    return
+                captacion = conn.execute(
+                    """
+                    SELECT *
+                    FROM captaciones
+                    WHERE id = ? AND empresa_id = ?
+                    LIMIT 1
+                    """,
+                    (captacion_id, empresa["id"]),
+                ).fetchone()
+                if not captacion:
+                    json_response(self, {"error": "Captación no encontrada"}, status=404)
+                    return
+                inmueble = conn.execute(
+                    "SELECT * FROM inmuebles WHERE id = ? LIMIT 1",
+                    (captacion["inmueble_id"],),
+                ).fetchone()
+                if not inmueble:
+                    json_response(self, {"error": "Inmueble no encontrado"}, status=404)
+                    return
 
-            if destino_label == "Compraventa":
-                fecha_encargo = str(payload.get("fecha_encargo") or "").strip()
-                fecha_escritura = str(payload.get("fecha_escritura") or "").strip()
-                fecha_operacion = fecha_escritura or fecha_encargo
-                precio_encargo = parse_money_value(payload.get("precio_encargo"))
-                if precio_encargo is None:
-                    precio_encargo = parse_money_value(captacion["precio_objetivo"]) or parse_money_value(inmueble["precio_objetivo"])
-                precio_escritura = parse_money_value(payload.get("precio_escritura") or payload.get("precio_venta"))
-                honorarios = parse_money_value(payload.get("honorarios"))
-                record = conn.execute(
+                propietarios = get_inmueble_propietarios(conn, captacion["inmueble_id"])
+                owner1 = propietarios[0] if len(propietarios) > 0 else {}
+                owner2 = propietarios[1] if len(propietarios) > 1 else {}
+                propietario_fallback = normalize_person_name(captacion["propietario"]) or normalize_person_name(inmueble["direccion"])
+                direccion = normalize_person_name(inmueble["direccion"] or captacion["direccion"])
+
+                def owner_value(owner, key, fallback=""):
+                    value = str((owner or {}).get(key) or "").strip()
+                    if value:
+                        return value
+                    if key == "nombre":
+                        return fallback
+                    return ""
+
+                if destino_label == "Inmueble":
+                    conn.execute(
+                        """
+                        UPDATE captaciones
+                        SET situacion_comercial = ?, fecha_conversion = ?, updated_at = datetime(?)
+                        WHERE id = ?
+                        """,
+                        (destino_label, now, now, captacion_id),
+                    )
+                    conn.execute(
+                        "UPDATE inmuebles SET estado = ?, updated_at = datetime(?) WHERE id = ?",
+                        (destino_label, now, captacion["inmueble_id"]),
+                    )
+                    conn.commit()
+                    json_response(self, {"ok": True, "destino": destino_label, "inmueble_id": captacion["inmueble_id"]})
+                    return
+
+                if destino_label == "Encargo":
+                    precio_encargo = parse_money_value(payload.get("precio_encargo"))
+                    cap_updates = {
+                        "situacion_comercial": destino_label,
+                        "fecha_conversion": now,
+                        "etapa": "Encargo firmado",
+                    }
+                    if precio_encargo is not None:
+                        cap_updates["precio_objetivo"] = precio_encargo
+                        cap_updates["precio_valoracion"] = precio_encargo
+                    set_clause = ", ".join([f"{key} = ?" for key in cap_updates])
+                    conn.execute(
+                        f"UPDATE captaciones SET {set_clause}, updated_at = datetime(?) WHERE id = ?",
+                        [*cap_updates.values(), now, captacion_id],
+                    )
+                    inm_updates = {"estado": destino_label}
+                    if precio_encargo is not None:
+                        inm_updates["precio_objetivo"] = precio_encargo
+                        inm_updates["precio_valoracion"] = precio_encargo
+                    inm_set_clause = ", ".join([f"{key} = ?" for key in inm_updates])
+                    conn.execute(
+                        f"UPDATE inmuebles SET {inm_set_clause}, updated_at = datetime(?) WHERE id = ?",
+                        [*inm_updates.values(), now, captacion["inmueble_id"]],
+                    )
+                    conn.commit()
+                    json_response(self, {"ok": True, "destino": destino_label, "inmueble_id": captacion["inmueble_id"]})
+                    return
+
+                if destino_label == "Compraventa":
+                    fecha_encargo = str(payload.get("fecha_encargo") or "").strip()
+                    fecha_escritura = str(payload.get("fecha_escritura") or "").strip()
+                    fecha_operacion = fecha_escritura or fecha_encargo
+                    precio_encargo = parse_money_value(payload.get("precio_encargo"))
+                    if precio_encargo is None:
+                        precio_encargo = parse_money_value(captacion["precio_objetivo"]) or parse_money_value(inmueble["precio_objetivo"])
+                    precio_escritura = parse_money_value(payload.get("precio_escritura") or payload.get("precio_venta"))
+                    honorarios = parse_money_value(payload.get("honorarios"))
+                    record = conn.execute(
+                        """
+                        SELECT id
+                        FROM operaciones_inmobiliarias
+                        WHERE empresa_id = ?
+                          AND inmueble_id = ?
+                          AND LOWER(COALESCE(tipo_operacion, 'venta')) = 'venta'
+                        ORDER BY updated_at DESC, created_at DESC
+                        LIMIT 1
+                        """,
+                        (empresa["id"], captacion["inmueble_id"]),
+                    ).fetchone()
+                    record_id = record["id"] if record else os.urandom(16).hex()
+                    payload_json = json.dumps(
+                        {"origen": "captacion_convertida", "captacion_id": captacion_id},
+                        ensure_ascii=False,
+                    )
+                    record_values = (
+                        empresa["id"],
+                        "venta",
+                        "Manual",
+                        "captacion_convertida",
+                        "captacion",
+                        None,
+                        None,
+                        parse_iso_date(fecha_operacion).year if parse_iso_date(fecha_operacion) else None,
+                        iso_month_label(fecha_operacion),
+                        captacion["inmueble_id"],
+                        direccion or None,
+                        re.sub(r"[^A-Z0-9]", "", str(inmueble["referencia_catastral"] or "").upper()) or None,
+                        owner1.get("id") or None,
+                        owner_value(owner1, "nombre", propietario_fallback) or None,
+                        normalize_nif(owner1.get("nif")) or None,
+                        owner_value(owner1, "telefono") or None,
+                        normalize_email(owner1.get("email")) or None,
+                        None,
+                        owner2.get("id") or None,
+                        owner_value(owner2, "nombre") or None,
+                        normalize_nif(owner2.get("nif")) or None,
+                        owner_value(owner2, "telefono") or None,
+                        normalize_email(owner2.get("email")) or None,
+                        None,
+                        None,
+                        None,
+                        normalize_person_name(payload.get("comprador_nombre")) or None,
+                        normalize_nif(payload.get("comprador_nif")) or None,
+                        str(payload.get("comprador_telefono") or "").strip() or None,
+                        normalize_email(payload.get("comprador_email")) or None,
+                        None,
+                        fecha_encargo or None,
+                        None,
+                        None,
+                        fecha_escritura or None,
+                        fecha_operacion or None,
+                        precio_encargo,
+                        None,
+                        None,
+                        precio_escritura,
+                        None,
+                        round(precio_encargo - precio_escritura, 2) if precio_encargo is not None and precio_escritura is not None else None,
+                        round(((precio_encargo - precio_escritura) / precio_encargo) * 100.0, 2) if precio_encargo not in (None, 0) and precio_escritura is not None else None,
+                        None,
+                        0,
+                        honorarios,
+                        str(payload.get("agente") or captacion["asesor"] or "").strip() or None,
+                        str(payload.get("responsable_gestion") or captacion["asesor"] or "").strip() or None,
+                        str(payload.get("oficina") or "Estudio Velazquez").strip() or None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        "Pendiente",
+                        "manual",
+                        str(payload.get("notas") or captacion["notas"] or "").strip() or None,
+                        payload_json,
+                    )
+                    columns = [
+                        "empresa_id",
+                        "tipo_operacion",
+                        "estado",
+                        "origen",
+                        "origen_inmueble",
+                        "expediente_path",
+                        "expediente_hash",
+                        "anio",
+                        "mes",
+                        "inmueble_id",
+                        "direccion",
+                        "referencia_catastral",
+                        "propietario1_id",
+                        "propietario1_nombre",
+                        "propietario1_nif",
+                        "propietario1_telefono",
+                        "propietario1_email",
+                        "propietario1_fecha_nacimiento",
+                        "propietario2_id",
+                        "propietario2_nombre",
+                        "propietario2_nif",
+                        "propietario2_telefono",
+                        "propietario2_email",
+                        "propietario2_fecha_nacimiento",
+                        "contraparte1_id",
+                        "contraparte2_id",
+                        "contraparte_nombre",
+                        "contraparte_nif",
+                        "contraparte_telefono",
+                        "contraparte_email",
+                        "contraparte_fecha_nacimiento",
+                        "fecha_encargo",
+                        "fecha_propuesta",
+                        "fecha_contrato",
+                        "fecha_escritura",
+                        "fecha_operacion",
+                        "precio_encargo",
+                        "precio_propuesta",
+                        "precio_contrato",
+                        "precio_escritura",
+                        "precio_renta",
+                        "desviacion_euros",
+                        "desviacion_pct",
+                        "dias_hasta_venta",
+                        "num_visitas",
+                        "honorarios",
+                        "agente",
+                        "responsable_gestion",
+                        "oficina",
+                        "doc_nota_encargo_path",
+                        "doc_propuesta_path",
+                        "doc_escritura_path",
+                        "doc_nota_simple_path",
+                        "doc_partes_visita_paths",
+                        "estado_documental",
+                        "calidad_ocr",
+                        "notas",
+                        "datos_extraidos_json",
+                    ]
+                    if record:
+                        set_clause = ", ".join([f"{column} = ?" for column in columns])
+                        conn.execute(
+                            f"UPDATE operaciones_inmobiliarias SET {set_clause}, updated_at = datetime(?) WHERE id = ?",
+                            (*record_values, now, record_id),
+                        )
+                    else:
+                        placeholders = ", ".join(["?"] * (len(columns) + 3))
+                        conn.execute(
+                            f"""
+                            INSERT INTO operaciones_inmobiliarias (
+                              id, {", ".join(columns)}, created_at, updated_at
+                            ) VALUES ({placeholders})
+                            """,
+                            (record_id, *record_values, now, now),
+                        )
+                    conn.execute(
+                        """
+                        UPDATE captaciones
+                        SET situacion_comercial = ?, fecha_conversion = ?, updated_at = datetime(?)
+                        WHERE id = ?
+                        """,
+                        (destino_label, now, now, captacion_id),
+                    )
+                    conn.execute(
+                        "UPDATE inmuebles SET estado = ?, updated_at = datetime(?) WHERE id = ?",
+                        (destino_label, now, captacion["inmueble_id"]),
+                    )
+                    conn.commit()
+                    json_response(self, {"ok": True, "destino": destino_label, "id": record_id, "inmueble_id": captacion["inmueble_id"]})
+                    return
+
+                fecha_alquiler = str(payload.get("fecha") or "").strip()
+                if not fecha_alquiler:
+                    fecha_alquiler = datetime.now(timezone.utc).date().isoformat()
+                precio_alquiler = parse_money_value(payload.get("precio") or payload.get("precio_alquiler"))
+                if precio_alquiler is None:
+                    precio_alquiler = parse_money_value(captacion["precio_objetivo"]) or parse_money_value(inmueble["precio_objetivo"])
+                alquiler = conn.execute(
                     """
                     SELECT id
-                    FROM operaciones_inmobiliarias
+                    FROM alquileres
                     WHERE empresa_id = ?
-                      AND inmueble_id = ?
-                      AND LOWER(COALESCE(tipo_operacion, 'venta')) = 'venta'
+                      AND UPPER(COALESCE(direccion, '')) = UPPER(?)
+                      AND COALESCE(fecha, '') = COALESCE(?, '')
                     ORDER BY updated_at DESC, created_at DESC
                     LIMIT 1
                     """,
-                    (empresa["id"], captacion["inmueble_id"]),
+                    (empresa["id"], direccion, fecha_alquiler),
                 ).fetchone()
-                record_id = record["id"] if record else os.urandom(16).hex()
-                payload_json = json.dumps(
-                    {"origen": "captacion_convertida", "captacion_id": captacion_id},
-                    ensure_ascii=False,
-                )
-                record_values = (
+                alquiler_id = alquiler["id"] if alquiler else os.urandom(16).hex()
+                alquiler_values = (
                     empresa["id"],
-                    "venta",
-                    "Manual",
-                    "captacion_convertida",
-                    "captacion",
-                    None,
-                    None,
-                    parse_iso_date(fecha_operacion).year if parse_iso_date(fecha_operacion) else None,
-                    iso_month_label(fecha_operacion),
-                    captacion["inmueble_id"],
+                    fecha_alquiler,
                     direccion or None,
-                    re.sub(r"[^A-Z0-9]", "", str(inmueble["referencia_catastral"] or "").upper()) or None,
-                    owner1.get("id") or None,
                     owner_value(owner1, "nombre", propietario_fallback) or None,
-                    normalize_nif(owner1.get("nif")) or None,
                     owner_value(owner1, "telefono") or None,
-                    normalize_email(owner1.get("email")) or None,
-                    None,
-                    owner2.get("id") or None,
-                    owner_value(owner2, "nombre") or None,
-                    normalize_nif(owner2.get("nif")) or None,
-                    owner_value(owner2, "telefono") or None,
-                    normalize_email(owner2.get("email")) or None,
+                    precio_alquiler,
                     None,
                     None,
                     None,
-                    normalize_person_name(payload.get("comprador_nombre")) or None,
-                    normalize_nif(payload.get("comprador_nif")) or None,
-                    str(payload.get("comprador_telefono") or "").strip() or None,
-                    normalize_email(payload.get("comprador_email")) or None,
-                    None,
-                    fecha_encargo or None,
-                    None,
-                    None,
-                    fecha_escritura or None,
-                    fecha_operacion or None,
-                    precio_encargo,
-                    None,
-                    None,
-                    precio_escritura,
-                    None,
-                    round(precio_encargo - precio_escritura, 2) if precio_encargo is not None and precio_escritura is not None else None,
-                    round(((precio_encargo - precio_escritura) / precio_encargo) * 100.0, 2) if precio_encargo not in (None, 0) and precio_escritura is not None else None,
-                    None,
-                    0,
-                    honorarios,
+                    parse_money_value(payload.get("importe_comision")),
+                    parse_money_value(payload.get("total")) or precio_alquiler,
+                    normalize_person_name(payload.get("inquilino")) or None,
+                    str(payload.get("inquilino_telefono") or "").strip() or None,
                     str(payload.get("agente") or captacion["asesor"] or "").strip() or None,
-                    str(payload.get("responsable_gestion") or captacion["asesor"] or "").strip() or None,
+                    1,
+                    "Manual",
                     str(payload.get("oficina") or "Estudio Velazquez").strip() or None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    "Pendiente",
-                    "manual",
-                    str(payload.get("notas") or captacion["notas"] or "").strip() or None,
-                    payload_json,
                 )
-                columns = [
+                alquiler_columns = [
                     "empresa_id",
-                    "tipo_operacion",
-                    "estado",
-                    "origen",
-                    "origen_inmueble",
-                    "expediente_path",
-                    "expediente_hash",
-                    "anio",
-                    "mes",
-                    "inmueble_id",
+                    "fecha",
                     "direccion",
-                    "referencia_catastral",
-                    "propietario1_id",
-                    "propietario1_nombre",
-                    "propietario1_nif",
-                    "propietario1_telefono",
-                    "propietario1_email",
-                    "propietario1_fecha_nacimiento",
-                    "propietario2_id",
-                    "propietario2_nombre",
-                    "propietario2_nif",
-                    "propietario2_telefono",
-                    "propietario2_email",
-                    "propietario2_fecha_nacimiento",
-                    "contraparte1_id",
-                    "contraparte2_id",
-                    "contraparte_nombre",
-                    "contraparte_nif",
-                    "contraparte_telefono",
-                    "contraparte_email",
-                    "contraparte_fecha_nacimiento",
-                    "fecha_encargo",
-                    "fecha_propuesta",
-                    "fecha_contrato",
-                    "fecha_escritura",
-                    "fecha_operacion",
-                    "precio_encargo",
-                    "precio_propuesta",
-                    "precio_contrato",
-                    "precio_escritura",
-                    "precio_renta",
-                    "desviacion_euros",
-                    "desviacion_pct",
-                    "dias_hasta_venta",
-                    "num_visitas",
-                    "honorarios",
+                    "propietario",
+                    "telefono",
+                    "precio",
+                    "seguro",
+                    "hacienda",
+                    "comision",
+                    "importe_comision",
+                    "total",
+                    "inquilino",
+                    "telefono2",
                     "agente",
-                    "responsable_gestion",
+                    "numero_alquileres",
+                    "tipo",
                     "oficina",
-                    "doc_nota_encargo_path",
-                    "doc_propuesta_path",
-                    "doc_escritura_path",
-                    "doc_nota_simple_path",
-                    "doc_partes_visita_paths",
-                    "estado_documental",
-                    "calidad_ocr",
-                    "notas",
-                    "datos_extraidos_json",
                 ]
-                if record:
-                    set_clause = ", ".join([f"{column} = ?" for column in columns])
+                if alquiler:
+                    set_clause = ", ".join([f"{column} = ?" for column in alquiler_columns])
                     conn.execute(
-                        f"UPDATE operaciones_inmobiliarias SET {set_clause}, updated_at = datetime(?) WHERE id = ?",
-                        (*record_values, now, record_id),
+                        f"UPDATE alquileres SET {set_clause}, updated_at = datetime(?) WHERE id = ?",
+                        (*alquiler_values, now, alquiler_id),
                     )
                 else:
-                    placeholders = ", ".join(["?"] * (len(columns) + 3))
+                    placeholders = ", ".join(["?"] * (len(alquiler_columns) + 3))
                     conn.execute(
                         f"""
-                        INSERT INTO operaciones_inmobiliarias (
-                          id, {", ".join(columns)}, created_at, updated_at
+                        INSERT INTO alquileres (
+                          id, {", ".join(alquiler_columns)}, created_at, updated_at
                         ) VALUES ({placeholders})
                         """,
-                        (record_id, *record_values, now, now),
+                        (alquiler_id, *alquiler_values, now, now),
                     )
                 conn.execute(
                     """
@@ -18921,97 +19011,15 @@ class Handler(BaseHTTPRequestHandler):
                     (destino_label, now, captacion["inmueble_id"]),
                 )
                 conn.commit()
-                json_response(self, {"ok": True, "destino": destino_label, "id": record_id, "inmueble_id": captacion["inmueble_id"]})
+                json_response(self, {"ok": True, "destino": destino_label, "id": alquiler_id, "inmueble_id": captacion["inmueble_id"]})
                 return
-
-            fecha_alquiler = str(payload.get("fecha") or "").strip()
-            if not fecha_alquiler:
-                fecha_alquiler = datetime.now(timezone.utc).date().isoformat()
-            precio_alquiler = parse_money_value(payload.get("precio") or payload.get("precio_alquiler"))
-            if precio_alquiler is None:
-                precio_alquiler = parse_money_value(captacion["precio_objetivo"]) or parse_money_value(inmueble["precio_objetivo"])
-            alquiler = conn.execute(
-                """
-                SELECT id
-                FROM alquileres
-                WHERE empresa_id = ?
-                  AND UPPER(COALESCE(direccion, '')) = UPPER(?)
-                  AND COALESCE(fecha, '') = COALESCE(?, '')
-                ORDER BY updated_at DESC, created_at DESC
-                LIMIT 1
-                """,
-                (empresa["id"], direccion, fecha_alquiler),
-            ).fetchone()
-            alquiler_id = alquiler["id"] if alquiler else os.urandom(16).hex()
-            alquiler_values = (
-                empresa["id"],
-                fecha_alquiler,
-                direccion or None,
-                owner_value(owner1, "nombre", propietario_fallback) or None,
-                owner_value(owner1, "telefono") or None,
-                precio_alquiler,
-                None,
-                None,
-                None,
-                parse_money_value(payload.get("importe_comision")),
-                parse_money_value(payload.get("total")) or precio_alquiler,
-                normalize_person_name(payload.get("inquilino")) or None,
-                str(payload.get("inquilino_telefono") or "").strip() or None,
-                str(payload.get("agente") or captacion["asesor"] or "").strip() or None,
-                1,
-                "Manual",
-                str(payload.get("oficina") or "Estudio Velazquez").strip() or None,
-            )
-            alquiler_columns = [
-                "empresa_id",
-                "fecha",
-                "direccion",
-                "propietario",
-                "telefono",
-                "precio",
-                "seguro",
-                "hacienda",
-                "comision",
-                "importe_comision",
-                "total",
-                "inquilino",
-                "telefono2",
-                "agente",
-                "numero_alquileres",
-                "tipo",
-                "oficina",
-            ]
-            if alquiler:
-                set_clause = ", ".join([f"{column} = ?" for column in alquiler_columns])
-                conn.execute(
-                    f"UPDATE alquileres SET {set_clause}, updated_at = datetime(?) WHERE id = ?",
-                    (*alquiler_values, now, alquiler_id),
-                )
-            else:
-                placeholders = ", ".join(["?"] * (len(alquiler_columns) + 3))
-                conn.execute(
-                    f"""
-                    INSERT INTO alquileres (
-                      id, {", ".join(alquiler_columns)}, created_at, updated_at
-                    ) VALUES ({placeholders})
-                    """,
-                    (alquiler_id, *alquiler_values, now, now),
-                )
-            conn.execute(
-                """
-                UPDATE captaciones
-                SET situacion_comercial = ?, fecha_conversion = ?, updated_at = datetime(?)
-                WHERE id = ?
-                """,
-                (destino_label, now, now, captacion_id),
-            )
-            conn.execute(
-                "UPDATE inmuebles SET estado = ?, updated_at = datetime(?) WHERE id = ?",
-                (destino_label, now, captacion["inmueble_id"]),
-            )
-            conn.commit()
-            json_response(self, {"ok": True, "destino": destino_label, "id": alquiler_id, "inmueble_id": captacion["inmueble_id"]})
-            return
+            except Exception as exc:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                json_response(self, {"error": f"captacion_convert_error: {type(exc).__name__}: {exc}"}, status=500)
+                return
         elif parsed.path == "/api/inmueble_update":
             inmueble_id = payload.get("inmueble_id")
             if not inmueble_id:

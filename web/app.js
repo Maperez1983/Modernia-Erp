@@ -14395,15 +14395,18 @@ const runCaptacionConversion = async (captacionId, rowMap = {}, destino = "") =>
     crmCaptacionesInfo.textContent = `Convirtiendo a ${destinationLabel}...`;
   }
   try {
-    const data = await api("/api/captacion_convert", {
+    const response = await fetch("/api/captacion_convert", {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
       body: JSON.stringify(payload),
     });
-    if (data?.error) {
+    const data = await response.json();
+    if (!response.ok || data?.error) {
       if (crmCaptacionesInfo) {
-        crmCaptacionesInfo.textContent = data.error;
+        crmCaptacionesInfo.textContent = data?.error || `HTTP ${response.status}`;
       }
-      alert(data.error);
+      alert(data?.error || `HTTP ${response.status}`);
       return;
     }
     if (crmCaptacionesInfo) {
