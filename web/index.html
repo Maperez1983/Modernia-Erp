@@ -476,8 +476,11 @@
                 <select name="trigger_key">
                   <option value="document_uploaded">Documento entrante</option>
                   <option value="invoice_created">Factura emitida</option>
+                  <option value="payment_registered">Cobro registrado</option>
                   <option value="portal_client_invited">Cliente invitado al portal</option>
+                  <option value="time_logged">Fichaje registrado</option>
                   <option value="sale_closed">Compraventa cerrada</option>
+                  <option value="finca_incidencia_created">Incidencia de fincas</option>
                 </select>
               </label>
               <label>
@@ -511,6 +514,298 @@
             <div id="workspaceAutomationList"></div>
             <div id="workspaceAutomationLogs" class="workspace-automation-logs"></div>
           </div>
+        </div>
+        <div class="workspace-central-layout">
+          <div class="form-card">
+            <div class="section-head">
+              <div>
+                <h3>Cobros y remesas</h3>
+                <p class="muted">Aplicación de cobros a facturas emitidas para cerrar el circuito económico.</p>
+              </div>
+            </div>
+            <form id="workspaceCollectionsForm" class="form-grid">
+              <input type="hidden" name="id" />
+              <input type="hidden" name="workspace_id" />
+              <label class="span-2">
+                Factura
+                <select name="factura_id" required></select>
+              </label>
+              <label>
+                Fecha cobro
+                <input name="fecha_cobro" type="date" />
+              </label>
+              <label>
+                Importe
+                <input name="importe" type="number" step="0.01" min="0" required />
+              </label>
+              <label>
+                Método
+                <select name="metodo">
+                  <option>Transferencia</option>
+                  <option>Tarjeta</option>
+                  <option>Efectivo</option>
+                  <option>Remesa</option>
+                </select>
+              </label>
+              <label>
+                Estado
+                <select name="estado">
+                  <option>Aplicado</option>
+                  <option>Pendiente</option>
+                  <option>Devuelto</option>
+                </select>
+              </label>
+              <label class="span-2">
+                Referencia
+                <input name="referencia" placeholder="SEPA, banco, operación..." />
+              </label>
+              <label class="span-2">
+                Notas
+                <textarea name="notas" rows="2"></textarea>
+              </label>
+              <div class="form-actions span-2">
+                <button type="submit">Registrar cobro</button>
+                <button type="button" id="workspaceCollectionsResetBtn" class="secondary ghost">Nuevo</button>
+                <span id="workspaceCollectionsStatus" class="muted"></span>
+              </div>
+            </form>
+            <div id="workspaceCollectionsList"></div>
+          </div>
+          <div class="form-card">
+            <div class="section-head">
+              <div>
+                <h3>Requerimientos portal</h3>
+                <p class="muted">Solicitudes de documentación o acciones visibles para el cliente en su portal.</p>
+              </div>
+            </div>
+            <form id="workspacePortalRequestForm" class="form-grid">
+              <input type="hidden" name="id" />
+              <input type="hidden" name="workspace_id" />
+              <label class="span-2">
+                Cliente portal
+                <select name="portal_cliente_id" required></select>
+              </label>
+              <label>
+                Servicio
+                <select name="servicio">
+                  <option value="">Transversal</option>
+                  <option value="gestoria">Gestoría</option>
+                  <option value="seguros">Seguros</option>
+                  <option value="inmobiliaria">Inmobiliaria</option>
+                  <option value="financiacion">Financiación</option>
+                  <option value="fincas">Fincas</option>
+                </select>
+              </label>
+              <label>
+                Fecha límite
+                <input name="fecha_limite" type="date" />
+              </label>
+              <label>
+                Prioridad
+                <select name="prioridad">
+                  <option>Normal</option>
+                  <option>Alta</option>
+                  <option>Urgente</option>
+                </select>
+              </label>
+              <label>
+                Estado
+                <select name="estado">
+                  <option>Pendiente</option>
+                  <option>Enviado</option>
+                  <option>Recibido</option>
+                  <option>Completado</option>
+                </select>
+              </label>
+              <label class="span-2">
+                Título
+                <input name="titulo" required />
+              </label>
+              <label class="span-2">
+                Descripción
+                <textarea name="descripcion" rows="3"></textarea>
+              </label>
+              <div class="form-actions span-2">
+                <button type="submit">Guardar requerimiento</button>
+                <button type="button" id="workspacePortalRequestResetBtn" class="secondary ghost">Nuevo</button>
+                <span id="workspacePortalRequestStatus" class="muted"></span>
+              </div>
+            </form>
+            <div id="workspacePortalRequestList"></div>
+          </div>
+        </div>
+        <div class="workspace-central-layout">
+          <div class="form-card">
+            <div class="section-head">
+              <div>
+                <h3>Registro horario</h3>
+                <p class="muted">Base de fichajes del tenant para evolucionar hacia control horario productivo.</p>
+              </div>
+            </div>
+            <form id="workspaceTimeForm" class="form-grid">
+              <input type="hidden" name="id" />
+              <input type="hidden" name="workspace_id" />
+              <label>
+                Empresa
+                <select name="empresa_id" required></select>
+              </label>
+              <label>
+                Persona
+                <input name="persona_nombre" required />
+              </label>
+              <label>
+                Fecha
+                <input name="fecha" type="date" required />
+              </label>
+              <label>
+                Inicio
+                <input name="hora_inicio" type="time" required />
+              </label>
+              <label>
+                Fin
+                <input name="hora_fin" type="time" />
+              </label>
+              <label>
+                Pausa min
+                <input name="pausa_min" type="number" min="0" step="1" value="0" />
+              </label>
+              <label>
+                Estado
+                <select name="estado">
+                  <option>Borrador</option>
+                  <option>Validado</option>
+                  <option>Incidencia</option>
+                </select>
+              </label>
+              <label class="span-2">
+                Notas
+                <textarea name="notas" rows="2"></textarea>
+              </label>
+              <div class="form-actions span-2">
+                <button type="submit">Registrar fichaje</button>
+                <button type="button" id="workspaceTimeResetBtn" class="secondary ghost">Nuevo</button>
+                <span id="workspaceTimeStatus" class="muted"></span>
+              </div>
+            </form>
+            <div id="workspaceTimeList"></div>
+          </div>
+          <div class="form-card">
+            <div class="section-head">
+              <div>
+                <h3>Comunidades de fincas</h3>
+                <p class="muted">Núcleo de administración de fincas para comunidades, cuotas e incidencias.</p>
+              </div>
+            </div>
+            <form id="workspaceFincasCommunityForm" class="form-grid">
+              <input type="hidden" name="id" />
+              <input type="hidden" name="workspace_id" />
+              <label>
+                Empresa
+                <select name="empresa_id" required></select>
+              </label>
+              <label>
+                Comunidad
+                <input name="nombre" required />
+              </label>
+              <label>
+                CIF
+                <input name="cif" />
+              </label>
+              <label>
+                Estado
+                <select name="estado">
+                  <option>Activa</option>
+                  <option>En implantación</option>
+                  <option>Pausada</option>
+                </select>
+              </label>
+              <label class="span-2">
+                Dirección
+                <input name="direccion" />
+              </label>
+              <label>
+                Presidente
+                <input name="presidente" />
+              </label>
+              <label>
+                Secretario
+                <input name="secretario" />
+              </label>
+              <label>
+                Cuota mensual
+                <input name="cuota_mensual" type="number" min="0" step="0.01" />
+              </label>
+              <div class="form-actions span-2">
+                <button type="submit">Guardar comunidad</button>
+                <button type="button" id="workspaceFincasCommunityResetBtn" class="secondary ghost">Nueva</button>
+                <span id="workspaceFincasCommunityStatus" class="muted"></span>
+              </div>
+            </form>
+            <div id="workspaceFincasCommunityList"></div>
+          </div>
+        </div>
+        <div class="form-card">
+          <div class="section-head">
+            <div>
+              <h3>Incidencias de fincas</h3>
+              <p class="muted">Seguimiento operativo de averías, proveedores y resoluciones de comunidades.</p>
+            </div>
+          </div>
+          <form id="workspaceFincasIncidentForm" class="form-grid">
+            <input type="hidden" name="id" />
+            <input type="hidden" name="workspace_id" />
+            <label class="span-2">
+              Comunidad
+              <select name="comunidad_id" required></select>
+            </label>
+            <label>
+              Prioridad
+              <select name="prioridad">
+                <option>Normal</option>
+                <option>Alta</option>
+                <option>Urgente</option>
+              </select>
+            </label>
+            <label>
+              Estado
+              <select name="estado">
+                <option>Abierta</option>
+                <option>En curso</option>
+                <option>Resuelta</option>
+                <option>Cerrada</option>
+              </select>
+            </label>
+            <label>
+              Fecha apertura
+              <input name="fecha_apertura" type="date" />
+            </label>
+            <label>
+              Fecha cierre
+              <input name="fecha_cierre" type="date" />
+            </label>
+            <label class="span-2">
+              Título
+              <input name="titulo" required />
+            </label>
+            <label>
+              Proveedor
+              <input name="proveedor" />
+            </label>
+            <label>
+              Responsable
+              <input name="responsable" />
+            </label>
+            <label class="span-2">
+              Descripción
+              <textarea name="descripcion" rows="3"></textarea>
+            </label>
+            <div class="form-actions span-2">
+              <button type="submit">Guardar incidencia</button>
+              <button type="button" id="workspaceFincasIncidentResetBtn" class="secondary ghost">Nueva</button>
+              <span id="workspaceFincasIncidentStatus" class="muted"></span>
+            </div>
+          </form>
+          <div id="workspaceFincasIncidentList"></div>
         </div>
         <div class="form-card">
           <h3>Mapa societario</h3>

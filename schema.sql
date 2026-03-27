@@ -147,6 +147,98 @@ CREATE TABLE IF NOT EXISTS workspace_automatizaciones (
   FOREIGN KEY (workspace_id) REFERENCES workspaces(id)
 );
 
+CREATE TABLE IF NOT EXISTS workspace_facturacion_cobros (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL,
+  factura_id TEXT NOT NULL,
+  empresa_id TEXT,
+  cliente_id TEXT,
+  fecha_cobro TEXT,
+  importe REAL NOT NULL DEFAULT 0,
+  metodo TEXT,
+  referencia TEXT,
+  estado TEXT NOT NULL DEFAULT 'Aplicado',
+  notas TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (workspace_id) REFERENCES workspaces(id),
+  FOREIGN KEY (factura_id) REFERENCES workspace_facturacion(id),
+  FOREIGN KEY (empresa_id) REFERENCES empresas(id),
+  FOREIGN KEY (cliente_id) REFERENCES clientes(id)
+);
+
+CREATE TABLE IF NOT EXISTS workspace_portal_requerimientos (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL,
+  portal_cliente_id TEXT NOT NULL,
+  cliente_id TEXT,
+  servicio TEXT,
+  titulo TEXT NOT NULL,
+  descripcion TEXT,
+  prioridad TEXT,
+  estado TEXT NOT NULL DEFAULT 'Pendiente',
+  fecha_limite TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (workspace_id) REFERENCES workspaces(id),
+  FOREIGN KEY (portal_cliente_id) REFERENCES workspace_portal_clientes(id),
+  FOREIGN KEY (cliente_id) REFERENCES clientes(id)
+);
+
+CREATE TABLE IF NOT EXISTS workspace_registro_horario (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL,
+  empresa_id TEXT,
+  usuario_id TEXT,
+  persona_nombre TEXT NOT NULL,
+  fecha TEXT NOT NULL,
+  hora_inicio TEXT NOT NULL,
+  hora_fin TEXT,
+  pausa_min INTEGER NOT NULL DEFAULT 0,
+  estado TEXT NOT NULL DEFAULT 'Borrador',
+  notas TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (workspace_id) REFERENCES workspaces(id),
+  FOREIGN KEY (empresa_id) REFERENCES empresas(id),
+  FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
+);
+
+CREATE TABLE IF NOT EXISTS workspace_fincas_comunidades (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL,
+  empresa_id TEXT,
+  nombre TEXT NOT NULL,
+  cif TEXT,
+  direccion TEXT,
+  presidente TEXT,
+  secretario TEXT,
+  estado TEXT NOT NULL DEFAULT 'Activa',
+  cuota_mensual REAL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (workspace_id) REFERENCES workspaces(id),
+  FOREIGN KEY (empresa_id) REFERENCES empresas(id)
+);
+
+CREATE TABLE IF NOT EXISTS workspace_fincas_incidencias (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL,
+  comunidad_id TEXT NOT NULL,
+  titulo TEXT NOT NULL,
+  descripcion TEXT,
+  prioridad TEXT,
+  estado TEXT NOT NULL DEFAULT 'Abierta',
+  proveedor TEXT,
+  responsable TEXT,
+  fecha_apertura TEXT,
+  fecha_cierre TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (workspace_id) REFERENCES workspaces(id),
+  FOREIGN KEY (comunidad_id) REFERENCES workspace_fincas_comunidades(id)
+);
+
 CREATE TABLE IF NOT EXISTS clientes (
   id TEXT PRIMARY KEY,
   empresa_id TEXT,

@@ -11195,6 +11195,118 @@ def ensure_workspace_product_tables(conn):
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workspace_facturacion_cobros (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          factura_id TEXT NOT NULL,
+          empresa_id TEXT,
+          cliente_id TEXT,
+          fecha_cobro TEXT,
+          importe REAL NOT NULL DEFAULT 0,
+          metodo TEXT,
+          referencia TEXT,
+          estado TEXT NOT NULL DEFAULT 'Aplicado',
+          notas TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workspace_portal_requerimientos (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          portal_cliente_id TEXT NOT NULL,
+          cliente_id TEXT,
+          servicio TEXT,
+          titulo TEXT NOT NULL,
+          descripcion TEXT,
+          prioridad TEXT,
+          estado TEXT NOT NULL DEFAULT 'Pendiente',
+          fecha_limite TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workspace_registro_horario (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          empresa_id TEXT,
+          usuario_id TEXT,
+          persona_nombre TEXT NOT NULL,
+          fecha TEXT NOT NULL,
+          hora_inicio TEXT NOT NULL,
+          hora_fin TEXT,
+          pausa_min INTEGER NOT NULL DEFAULT 0,
+          estado TEXT NOT NULL DEFAULT 'Borrador',
+          notas TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workspace_fincas_comunidades (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          empresa_id TEXT,
+          nombre TEXT NOT NULL,
+          cif TEXT,
+          direccion TEXT,
+          presidente TEXT,
+          secretario TEXT,
+          estado TEXT NOT NULL DEFAULT 'Activa',
+          cuota_mensual REAL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workspace_fincas_incidencias (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          comunidad_id TEXT NOT NULL,
+          titulo TEXT NOT NULL,
+          descripcion TEXT,
+          prioridad TEXT,
+          estado TEXT NOT NULL DEFAULT 'Abierta',
+          proveedor TEXT,
+          responsable TEXT,
+          fecha_apertura TEXT,
+          fecha_cierre TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+
+
+def infer_workspace_doc_classification(nombre, tipo, servicio):
+    text = normalize_lookup_text(" ".join(str(value or "") for value in (nombre, tipo, servicio)))
+    if not text:
+        return None
+    if "FACTURA" in text:
+        return "Factura"
+    if "POLIZA" in text or "RECIBO" in text:
+        return "Póliza"
+    if "ESCRITURA" in text or "NOTA SIMPLE" in text:
+        return "Escritura"
+    if "DNI" in text or "NIF" in text or "PASAPORTE" in text:
+        return "Identidad"
+    if "MODELO" in text or "RENTA" in text or "IRPF" in text:
+        return "Fiscal"
+    if "NOMINA" in text or "CONTRATO" in text:
+        return "Laboral"
+    return None
 
 
 def fetch_workspace_company_ids(conn, workspace_id):
@@ -11315,6 +11427,168 @@ def fetch_workspace_portal_clients(conn, workspace_id, limit=40):
         JOIN clientes c ON c.id = p.cliente_id
         WHERE p.workspace_id = ?
         ORDER BY p.updated_at DESC, p.created_at DESC
+        LIMIT ?
+        """,
+        (workspace_id, max(1, min(int(limit or 40), 100))),
+    ).fetchall()
+    return {"rows": [dict(row) for row in rows]}
+
+
+def fetch_workspace_billing_collections(conn, workspace_id, limit=40):
+    rows = conn.execute(
+        """
+        SELECT
+          c.id,
+          c.workspace_id,
+          c.factura_id,
+          c.empresa_id,
+          c.cliente_id,
+          c.fecha_cobro,
+          c.importe,
+          c.metodo,
+          c.referencia,
+          c.estado,
+          c.notas,
+          c.created_at,
+          c.updated_at,
+          COALESCE(wf.concepto, '') AS factura_concepto,
+          COALESCE(wf.serie, '') AS factura_serie,
+          COALESCE(wf.numero, '') AS factura_numero,
+          COALESCE(cl.nombre, '') AS cliente_nombre
+        FROM workspace_facturacion_cobros c
+        LEFT JOIN workspace_facturacion wf ON wf.id = c.factura_id
+        LEFT JOIN clientes cl ON cl.id = c.cliente_id
+        WHERE c.workspace_id = ?
+        ORDER BY COALESCE(c.fecha_cobro, c.created_at) DESC, c.updated_at DESC
+        LIMIT ?
+        """,
+        (workspace_id, max(1, min(int(limit or 40), 100))),
+    ).fetchall()
+    return {"rows": [dict(row) for row in rows]}
+
+
+def fetch_workspace_portal_requests(conn, workspace_id, limit=40):
+    rows = conn.execute(
+        """
+        SELECT
+          r.id,
+          r.workspace_id,
+          r.portal_cliente_id,
+          r.cliente_id,
+          r.servicio,
+          r.titulo,
+          r.descripcion,
+          r.prioridad,
+          r.estado,
+          r.fecha_limite,
+          r.created_at,
+          r.updated_at,
+          COALESCE(c.nombre, '') AS cliente_nombre,
+          COALESCE(p.email_acceso, '') AS email_acceso
+        FROM workspace_portal_requerimientos r
+        LEFT JOIN workspace_portal_clientes p ON p.id = r.portal_cliente_id
+        LEFT JOIN clientes c ON c.id = r.cliente_id
+        WHERE r.workspace_id = ?
+        ORDER BY
+          CASE COALESCE(r.estado, 'Pendiente')
+            WHEN 'Pendiente' THEN 0
+            WHEN 'Enviado' THEN 1
+            WHEN 'Recibido' THEN 2
+            WHEN 'Completado' THEN 3
+            ELSE 9
+          END,
+          COALESCE(r.fecha_limite, r.created_at) ASC
+        LIMIT ?
+        """,
+        (workspace_id, max(1, min(int(limit or 40), 100))),
+    ).fetchall()
+    return {"rows": [dict(row) for row in rows]}
+
+
+def fetch_workspace_time_entries(conn, workspace_id, limit=40):
+    rows = conn.execute(
+        """
+        SELECT
+          t.id,
+          t.workspace_id,
+          t.empresa_id,
+          COALESCE(e.nombre, '') AS empresa_nombre,
+          t.usuario_id,
+          t.persona_nombre,
+          t.fecha,
+          t.hora_inicio,
+          t.hora_fin,
+          t.pausa_min,
+          t.estado,
+          t.notas,
+          t.created_at,
+          t.updated_at
+        FROM workspace_registro_horario t
+        LEFT JOIN empresas e ON e.id = t.empresa_id
+        WHERE t.workspace_id = ?
+        ORDER BY COALESCE(t.fecha, t.created_at) DESC, t.hora_inicio DESC
+        LIMIT ?
+        """,
+        (workspace_id, max(1, min(int(limit or 40), 100))),
+    ).fetchall()
+    return {"rows": [dict(row) for row in rows]}
+
+
+def fetch_workspace_fincas_comunidades(conn, workspace_id, limit=30):
+    rows = conn.execute(
+        """
+        SELECT
+          c.id,
+          c.workspace_id,
+          c.empresa_id,
+          COALESCE(e.nombre, '') AS empresa_nombre,
+          c.nombre,
+          c.cif,
+          c.direccion,
+          c.presidente,
+          c.secretario,
+          c.estado,
+          c.cuota_mensual,
+          c.created_at,
+          c.updated_at,
+          (
+            SELECT COUNT(*)
+            FROM workspace_fincas_incidencias i
+            WHERE i.comunidad_id = c.id AND COALESCE(i.estado, 'Abierta') NOT IN ('Cerrada', 'Resuelta')
+          ) AS incidencias_abiertas
+        FROM workspace_fincas_comunidades c
+        LEFT JOIN empresas e ON e.id = c.empresa_id
+        WHERE c.workspace_id = ?
+        ORDER BY c.updated_at DESC, c.nombre COLLATE NOCASE ASC
+        LIMIT ?
+        """,
+        (workspace_id, max(1, min(int(limit or 30), 100))),
+    ).fetchall()
+    return {"rows": [dict(row) for row in rows]}
+
+
+def fetch_workspace_fincas_incidencias(conn, workspace_id, limit=40):
+    rows = conn.execute(
+        """
+        SELECT
+          i.id,
+          i.workspace_id,
+          i.comunidad_id,
+          COALESCE(c.nombre, '') AS comunidad_nombre,
+          i.titulo,
+          i.descripcion,
+          i.prioridad,
+          i.estado,
+          i.proveedor,
+          i.responsable,
+          i.fecha_apertura,
+          i.fecha_cierre,
+          i.created_at,
+          i.updated_at
+        FROM workspace_fincas_incidencias i
+        LEFT JOIN workspace_fincas_comunidades c ON c.id = i.comunidad_id
+        WHERE i.workspace_id = ?
+        ORDER BY COALESCE(i.fecha_apertura, i.created_at) DESC, i.updated_at DESC
         LIMIT ?
         """,
         (workspace_id, max(1, min(int(limit or 40), 100))),
@@ -11468,6 +11742,24 @@ def fetch_workspace_portal_public(conn, token):
         """,
         (row["workspace_id"], row["cliente_id"]),
     ).fetchall()
+    requests = conn.execute(
+        """
+        SELECT titulo, descripcion, prioridad, estado, fecha_limite
+        FROM workspace_portal_requerimientos
+        WHERE workspace_id = ? AND cliente_id = ?
+        ORDER BY
+          CASE COALESCE(estado, 'Pendiente')
+            WHEN 'Pendiente' THEN 0
+            WHEN 'Enviado' THEN 1
+            WHEN 'Recibido' THEN 2
+            WHEN 'Completado' THEN 3
+            ELSE 9
+          END,
+          COALESCE(fecha_limite, created_at) ASC
+        LIMIT 12
+        """,
+        (row["workspace_id"], row["cliente_id"]),
+    ).fetchall()
     return {
         "workspace": row["workspace_nombre"],
         "cliente": row["cliente_nombre"],
@@ -11475,6 +11767,7 @@ def fetch_workspace_portal_public(conn, token):
         "email": row["email"],
         "docs": [dict(item) for item in docs],
         "facturas": [dict(item) for item in bills],
+        "requerimientos": [dict(item) for item in requests],
     }
 
 
@@ -11525,6 +11818,8 @@ def fetch_workspace_billing_summary(conn, workspace_id):
             "cobrado_total": 0.0,
             "pendiente_total": 0.0,
             "potencial_operativo": 0.0,
+            "cobros_registrados": 0,
+            "remesas_total": 0.0,
             "servicios": [],
         }
     placeholders = ",".join(["?"] * len(empresa_ids))
@@ -11590,6 +11885,14 @@ def fetch_workspace_billing_summary(conn, workspace_id):
     if gest and gest["total"] is not None:
         potential_rows.append({"servicio": "gestoria", "total": float(gest["total"] or 0.0)})
     potencial_operativo = round(sum(float(item["total"] or 0.0) for item in potential_rows), 2)
+    cobros = conn.execute(
+        """
+        SELECT COUNT(*) AS total_cobros, SUM(CASE WHEN COALESCE(metodo, '') = 'Remesa' THEN COALESCE(importe, 0) ELSE 0 END) AS total_remesas
+        FROM workspace_facturacion_cobros
+        WHERE workspace_id = ?
+        """,
+        (workspace_id,),
+    ).fetchone()
     services = [
         {
             "servicio": row["servicio"],
@@ -11621,6 +11924,8 @@ def fetch_workspace_billing_summary(conn, workspace_id):
         "cobrado_total": cobrado_total,
         "pendiente_total": pendiente_total,
         "potencial_operativo": potencial_operativo,
+        "cobros_registrados": int((cobros["total_cobros"] if cobros else 0) or 0),
+        "remesas_total": round(float((cobros["total_remesas"] if cobros else 0) or 0.0), 2),
         "servicios": services,
     }
 
@@ -11703,7 +12008,12 @@ def fetch_workspace_health(conn, workspace_id):
     billing_rows = fetch_workspace_billing_rows(conn, workspace_id, limit=5)["rows"]
     inbox_rows = fetch_workspace_inbox_queue(conn, workspace_id, limit=5)["rows"]
     portal_rows = fetch_workspace_portal_clients(conn, workspace_id, limit=5)["rows"]
+    portal_requests = fetch_workspace_portal_requests(conn, workspace_id, limit=5)["rows"]
     automation_rows = fetch_workspace_automations(conn, workspace_id, limit=5)["rows"]
+    billing_collections = fetch_workspace_billing_collections(conn, workspace_id, limit=5)["rows"]
+    time_rows = fetch_workspace_time_entries(conn, workspace_id, limit=5)["rows"]
+    fincas_communities = fetch_workspace_fincas_comunidades(conn, workspace_id, limit=5)["rows"]
+    fincas_incidents = fetch_workspace_fincas_incidencias(conn, workspace_id, limit=5)["rows"]
     series_rows = fetch_workspace_series(conn, workspace_id)["rows"]
     facturas_total = conn.execute(
         f"""
@@ -11800,11 +12110,11 @@ def fetch_workspace_health(conn, workspace_id):
         "seguros": (seguros_total, "pólizas o expedientes de seguros", "Importar cartera o cargar pólizas activas."),
         "inmobiliaria": (inmuebles_total + operaciones_total, "inmuebles y operaciones", "Cargar captaciones, inmuebles u operaciones."),
         "financiacion": (hipotecas_total, "hipotecas registradas", "Activar expedientes y pipeline financiero."),
-        "fincas": (0, "módulo pendiente de vertical propia", "Definir modelo de comunidades y operativa."),
+        "fincas": (len(fincas_communities) + len(fincas_incidents), "comunidades e incidencias de fincas", "Cargar comunidades, cuotas e incidencias."),
         "facturacion": (facturas_total, "movimientos de facturación", "Emitir primeras facturas del tenant."),
         "facturas_recibidas": (facturas_recibidas_total + len(inbox_rows), "facturas recibidas o inbox", "Activar inbox de proveedores."),
-        "portal_cliente": (len(portal_rows), "clientes con portal activado", "Invitar clientes clave al portal."),
-        "registro_horario": (0, "registro horario no implantado", "Activar fichajes y política laboral."),
+        "portal_cliente": (len(portal_rows) + len(portal_requests), "clientes y requerimientos de portal", "Invitar clientes clave y crear requerimientos."),
+        "registro_horario": (len(time_rows), "fichajes registrados", "Activar fichajes y política laboral."),
         "automatizaciones": (len(automation_rows), "automatizaciones configuradas", "Definir reglas por evento."),
     }
     module_health = []
@@ -11836,6 +12146,10 @@ def fetch_workspace_health(conn, workspace_id):
             "clientes": int(clientes_total or 0),
             "documentos": int(docs_summary.get("documentos_total") or 0),
             "facturas": int(facturas_total or 0),
+            "cobros": len(billing_collections),
+            "portal_requerimientos": len(portal_requests),
+            "fichajes": len(time_rows),
+            "comunidades": len(fincas_communities),
         },
     }
 
@@ -12417,6 +12731,11 @@ class Handler(BaseHTTPRequestHandler):
             "/api/logout",
             "/api/auth_set_password",
             "/api/workspace_portal_upload",
+            "/api/workspace_cobros",
+            "/api/workspace_portal_requerimientos",
+            "/api/workspace_registro_horario",
+            "/api/workspace_fincas_comunidades",
+            "/api/workspace_fincas_incidencias",
         ):
             json_response(self, {"error": "Endpoint no valido"}, status=404)
             return
@@ -13733,6 +14052,99 @@ class Handler(BaseHTTPRequestHandler):
             conn.commit()
             json_response(self, {"ok": True, "id": record_id, "automation_actions": auto_created})
             return
+        elif parsed.path == "/api/workspace_cobros":
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            factura_id = str(payload.get("factura_id") or "").strip()
+            record_id = str(payload.get("id") or "").strip()
+            if not workspace_id or not factura_id:
+                json_response(self, {"error": "workspace_id y factura_id requeridos"}, status=400)
+                return
+            factura = conn.execute(
+                """
+                SELECT id, empresa_id, cliente_id, total
+                FROM workspace_facturacion
+                WHERE id = ? AND workspace_id = ?
+                LIMIT 1
+                """,
+                (factura_id, workspace_id),
+            ).fetchone()
+            if not factura:
+                json_response(self, {"error": "factura no encontrada"}, status=404)
+                return
+            importe = round(parse_money_value(payload.get("importe")), 2)
+            if importe <= 0:
+                json_response(self, {"error": "importe inválido"}, status=400)
+                return
+            values = (
+                workspace_id,
+                factura_id,
+                factura["empresa_id"],
+                factura["cliente_id"],
+                (payload.get("fecha_cobro") or "").strip() or None,
+                importe,
+                (payload.get("metodo") or "").strip() or None,
+                (payload.get("referencia") or "").strip() or None,
+                (payload.get("estado") or "").strip() or "Aplicado",
+                (payload.get("notas") or "").strip() or None,
+            )
+            if record_id:
+                conn.execute(
+                    """
+                    UPDATE workspace_facturacion_cobros
+                    SET workspace_id = ?, factura_id = ?, empresa_id = ?, cliente_id = ?, fecha_cobro = ?, importe = ?,
+                        metodo = ?, referencia = ?, estado = ?, notas = ?, updated_at = datetime(?)
+                    WHERE id = ? AND workspace_id = ?
+                    """,
+                    (*values, now, record_id, workspace_id),
+                )
+            else:
+                record_id = os.urandom(16).hex()
+                conn.execute(
+                    """
+                    INSERT INTO workspace_facturacion_cobros (
+                      id, workspace_id, factura_id, empresa_id, cliente_id, fecha_cobro, importe, metodo, referencia,
+                      estado, notas, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                    """,
+                    (record_id, *values, now, now),
+                )
+            total_cobrado = conn.execute(
+                "SELECT COALESCE(SUM(importe), 0) FROM workspace_facturacion_cobros WHERE factura_id = ?",
+                (factura_id,),
+            ).fetchone()[0]
+            cobrada = 1 if float(total_cobrado or 0.0) >= float(factura["total"] or 0.0) > 0 else 0
+            conn.execute(
+                """
+                UPDATE workspace_facturacion
+                SET cobrada = ?, fecha_cobro = COALESCE(?, fecha_cobro), forma_cobro = COALESCE(?, forma_cobro),
+                    estado = CASE WHEN ? = 1 THEN 'Cobrada' ELSE estado END,
+                    updated_at = datetime(?)
+                WHERE id = ?
+                """,
+                (
+                    cobrada,
+                    (payload.get("fecha_cobro") or "").strip() or None,
+                    (payload.get("metodo") or "").strip() or None,
+                    cobrada,
+                    now,
+                    factura_id,
+                ),
+            )
+            auto_created = run_workspace_automations(
+                conn,
+                workspace_id,
+                "payment_registered",
+                {
+                    "empresa_id": factura["empresa_id"],
+                    "cliente_id": factura["cliente_id"],
+                    "servicio": "facturacion",
+                    "cliente_nombre": None,
+                },
+                now,
+            )
+            conn.commit()
+            json_response(self, {"ok": True, "id": record_id, "automation_actions": auto_created})
+            return
         elif parsed.path == "/api/workspace_series":
             workspace_id = str(payload.get("workspace_id") or "").strip()
             empresa_id = str(payload.get("empresa_id") or "").strip()
@@ -13783,20 +14195,8 @@ class Handler(BaseHTTPRequestHandler):
                         now,
                     ),
                 )
-            auto_created = run_workspace_automations(
-                conn,
-                workspace_id,
-                "document_uploaded",
-                {
-                    "empresa_id": empresa_id,
-                    "cliente_id": cliente_id or suggested_cliente_id,
-                    "servicio": (payload.get("servicio") or "").strip() or "documental",
-                    "cliente_nombre": None,
-                },
-                now,
-            )
             conn.commit()
-            json_response(self, {"ok": True, "id": record_id, "automation_actions": auto_created})
+            json_response(self, {"ok": True, "id": record_id})
             return
         elif parsed.path == "/api/workspace_inbox":
             workspace_id = str(payload.get("workspace_id") or "").strip()
@@ -13808,6 +14208,9 @@ class Handler(BaseHTTPRequestHandler):
                 return
             cliente_id = str(payload.get("cliente_id") or "").strip() or None
             suggested_cliente_id = str(payload.get("suggested_cliente_id") or "").strip() or None
+            if not (payload.get("clasificacion") or "").strip():
+                payload["clasificacion"] = infer_workspace_doc_classification(nombre, payload.get("tipo"), payload.get("servicio")) or None
+            is_new = not record_id
             if record_id:
                 conn.execute(
                     """
@@ -13864,8 +14267,22 @@ class Handler(BaseHTTPRequestHandler):
                         now,
                     ),
                 )
+            auto_created = 0
+            if is_new:
+                auto_created = run_workspace_automations(
+                    conn,
+                    workspace_id,
+                    "document_uploaded",
+                    {
+                        "empresa_id": empresa_id,
+                        "cliente_id": cliente_id or suggested_cliente_id,
+                        "servicio": (payload.get("servicio") or "").strip() or "documental",
+                        "cliente_nombre": None,
+                    },
+                    now,
+                )
             conn.commit()
-            json_response(self, {"ok": True, "id": record_id})
+            json_response(self, {"ok": True, "id": record_id, "automation_actions": auto_created})
             return
         elif parsed.path == "/api/workspace_portal":
             workspace_id = str(payload.get("workspace_id") or "").strip()
@@ -13927,6 +14344,56 @@ class Handler(BaseHTTPRequestHandler):
             )
             conn.commit()
             json_response(self, {"ok": True, "id": record_id, "token": token, "automation_actions": auto_created})
+            return
+        elif parsed.path == "/api/workspace_portal_requerimientos":
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            portal_cliente_id = str(payload.get("portal_cliente_id") or "").strip()
+            record_id = str(payload.get("id") or "").strip()
+            titulo = str(payload.get("titulo") or "").strip()
+            if not workspace_id or not portal_cliente_id or not titulo:
+                json_response(self, {"error": "workspace_id, portal_cliente_id y titulo requeridos"}, status=400)
+                return
+            portal = conn.execute(
+                "SELECT id, cliente_id FROM workspace_portal_clientes WHERE id = ? AND workspace_id = ? LIMIT 1",
+                (portal_cliente_id, workspace_id),
+            ).fetchone()
+            if not portal:
+                json_response(self, {"error": "portal cliente no encontrado"}, status=404)
+                return
+            values = (
+                workspace_id,
+                portal_cliente_id,
+                portal["cliente_id"],
+                (payload.get("servicio") or "").strip() or None,
+                titulo,
+                (payload.get("descripcion") or "").strip() or None,
+                (payload.get("prioridad") or "").strip() or "Normal",
+                (payload.get("estado") or "").strip() or "Pendiente",
+                (payload.get("fecha_limite") or "").strip() or None,
+            )
+            if record_id:
+                conn.execute(
+                    """
+                    UPDATE workspace_portal_requerimientos
+                    SET workspace_id = ?, portal_cliente_id = ?, cliente_id = ?, servicio = ?, titulo = ?, descripcion = ?,
+                        prioridad = ?, estado = ?, fecha_limite = ?, updated_at = datetime(?)
+                    WHERE id = ? AND workspace_id = ?
+                    """,
+                    (*values, now, record_id, workspace_id),
+                )
+            else:
+                record_id = os.urandom(16).hex()
+                conn.execute(
+                    """
+                    INSERT INTO workspace_portal_requerimientos (
+                      id, workspace_id, portal_cliente_id, cliente_id, servicio, titulo, descripcion,
+                      prioridad, estado, fecha_limite, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                    """,
+                    (record_id, *values, now, now),
+                )
+            conn.commit()
+            json_response(self, {"ok": True, "id": record_id})
             return
         elif parsed.path == "/api/workspace_portal_upload":
             token = str(payload.get("token") or "").strip()
@@ -14045,6 +14512,153 @@ class Handler(BaseHTTPRequestHandler):
                 )
             conn.commit()
             json_response(self, {"ok": True, "id": record_id})
+            return
+        elif parsed.path == "/api/workspace_registro_horario":
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            empresa_id = str(payload.get("empresa_id") or "").strip()
+            record_id = str(payload.get("id") or "").strip()
+            persona_nombre = str(payload.get("persona_nombre") or "").strip()
+            fecha = str(payload.get("fecha") or "").strip()
+            hora_inicio = str(payload.get("hora_inicio") or "").strip()
+            if not workspace_id or not empresa_id or not persona_nombre or not fecha or not hora_inicio:
+                json_response(self, {"error": "workspace_id, empresa_id, persona_nombre, fecha y hora_inicio requeridos"}, status=400)
+                return
+            values = (
+                workspace_id,
+                empresa_id,
+                (payload.get("usuario_id") or "").strip() or None,
+                persona_nombre,
+                fecha,
+                hora_inicio,
+                (payload.get("hora_fin") or "").strip() or None,
+                max(0, int(parse_money_value(payload.get("pausa_min")) or 0)),
+                (payload.get("estado") or "").strip() or "Borrador",
+                (payload.get("notas") or "").strip() or None,
+            )
+            if record_id:
+                conn.execute(
+                    """
+                    UPDATE workspace_registro_horario
+                    SET workspace_id = ?, empresa_id = ?, usuario_id = ?, persona_nombre = ?, fecha = ?, hora_inicio = ?,
+                        hora_fin = ?, pausa_min = ?, estado = ?, notas = ?, updated_at = datetime(?)
+                    WHERE id = ? AND workspace_id = ?
+                    """,
+                    (*values, now, record_id, workspace_id),
+                )
+            else:
+                record_id = os.urandom(16).hex()
+                conn.execute(
+                    """
+                    INSERT INTO workspace_registro_horario (
+                      id, workspace_id, empresa_id, usuario_id, persona_nombre, fecha, hora_inicio, hora_fin,
+                      pausa_min, estado, notas, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                    """,
+                    (record_id, *values, now, now),
+                )
+            auto_created = run_workspace_automations(
+                conn,
+                workspace_id,
+                "time_logged",
+                {"empresa_id": empresa_id, "servicio": "registro_horario", "cliente_nombre": persona_nombre},
+                now,
+            )
+            conn.commit()
+            json_response(self, {"ok": True, "id": record_id, "automation_actions": auto_created})
+            return
+        elif parsed.path == "/api/workspace_fincas_comunidades":
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            empresa_id = str(payload.get("empresa_id") or "").strip()
+            record_id = str(payload.get("id") or "").strip()
+            nombre = str(payload.get("nombre") or "").strip()
+            if not workspace_id or not empresa_id or not nombre:
+                json_response(self, {"error": "workspace_id, empresa_id y nombre requeridos"}, status=400)
+                return
+            values = (
+                workspace_id,
+                empresa_id,
+                nombre,
+                (payload.get("cif") or "").strip() or None,
+                (payload.get("direccion") or "").strip() or None,
+                (payload.get("presidente") or "").strip() or None,
+                (payload.get("secretario") or "").strip() or None,
+                (payload.get("estado") or "").strip() or "Activa",
+                round(parse_money_value(payload.get("cuota_mensual")), 2) or None,
+            )
+            if record_id:
+                conn.execute(
+                    """
+                    UPDATE workspace_fincas_comunidades
+                    SET workspace_id = ?, empresa_id = ?, nombre = ?, cif = ?, direccion = ?, presidente = ?,
+                        secretario = ?, estado = ?, cuota_mensual = ?, updated_at = datetime(?)
+                    WHERE id = ? AND workspace_id = ?
+                    """,
+                    (*values, now, record_id, workspace_id),
+                )
+            else:
+                record_id = os.urandom(16).hex()
+                conn.execute(
+                    """
+                    INSERT INTO workspace_fincas_comunidades (
+                      id, workspace_id, empresa_id, nombre, cif, direccion, presidente, secretario,
+                      estado, cuota_mensual, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                    """,
+                    (record_id, *values, now, now),
+                )
+            conn.commit()
+            json_response(self, {"ok": True, "id": record_id})
+            return
+        elif parsed.path == "/api/workspace_fincas_incidencias":
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            comunidad_id = str(payload.get("comunidad_id") or "").strip()
+            record_id = str(payload.get("id") or "").strip()
+            titulo = str(payload.get("titulo") or "").strip()
+            if not workspace_id or not comunidad_id or not titulo:
+                json_response(self, {"error": "workspace_id, comunidad_id y titulo requeridos"}, status=400)
+                return
+            values = (
+                workspace_id,
+                comunidad_id,
+                titulo,
+                (payload.get("descripcion") or "").strip() or None,
+                (payload.get("prioridad") or "").strip() or "Normal",
+                (payload.get("estado") or "").strip() or "Abierta",
+                (payload.get("proveedor") or "").strip() or None,
+                (payload.get("responsable") or "").strip() or None,
+                (payload.get("fecha_apertura") or "").strip() or None,
+                (payload.get("fecha_cierre") or "").strip() or None,
+            )
+            if record_id:
+                conn.execute(
+                    """
+                    UPDATE workspace_fincas_incidencias
+                    SET workspace_id = ?, comunidad_id = ?, titulo = ?, descripcion = ?, prioridad = ?, estado = ?,
+                        proveedor = ?, responsable = ?, fecha_apertura = ?, fecha_cierre = ?, updated_at = datetime(?)
+                    WHERE id = ? AND workspace_id = ?
+                    """,
+                    (*values, now, record_id, workspace_id),
+                )
+            else:
+                record_id = os.urandom(16).hex()
+                conn.execute(
+                    """
+                    INSERT INTO workspace_fincas_incidencias (
+                      id, workspace_id, comunidad_id, titulo, descripcion, prioridad, estado, proveedor,
+                      responsable, fecha_apertura, fecha_cierre, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                    """,
+                    (record_id, *values, now, now),
+                )
+            auto_created = run_workspace_automations(
+                conn,
+                workspace_id,
+                "finca_incidencia_created",
+                {"servicio": "fincas", "cliente_nombre": None},
+                now,
+            )
+            conn.commit()
+            json_response(self, {"ok": True, "id": record_id, "automation_actions": auto_created})
             return
         elif parsed.path == "/api/workspace_document_assign":
             workspace_id = str(payload.get("workspace_id") or "").strip()
@@ -18685,6 +19299,15 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, fetch_workspace_billing_rows(conn, workspace_id, limit=limit))
             return
 
+        if path == "/api/workspace_cobros":
+            workspace_id = params.get("workspace_id", [""])[0]
+            limit = params.get("limit", ["40"])[0]
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            json_response(self, fetch_workspace_billing_collections(conn, workspace_id, limit=limit))
+            return
+
         if path == "/api/workspace_clientes":
             workspace_id = params.get("workspace_id", [""])[0]
             q = params.get("q", [""])[0].strip()
@@ -18732,12 +19355,48 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, fetch_workspace_portal_clients(conn, workspace_id))
             return
 
+        if path == "/api/workspace_portal_requerimientos":
+            workspace_id = params.get("workspace_id", [""])[0]
+            limit = params.get("limit", ["40"])[0]
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            json_response(self, fetch_workspace_portal_requests(conn, workspace_id, limit=limit))
+            return
+
         if path == "/api/workspace_automatizaciones":
             workspace_id = params.get("workspace_id", [""])[0]
             if not workspace_id:
                 json_response(self, {"error": "workspace_id requerido"}, status=400)
                 return
             json_response(self, fetch_workspace_automations(conn, workspace_id))
+            return
+
+        if path == "/api/workspace_registro_horario":
+            workspace_id = params.get("workspace_id", [""])[0]
+            limit = params.get("limit", ["40"])[0]
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            json_response(self, fetch_workspace_time_entries(conn, workspace_id, limit=limit))
+            return
+
+        if path == "/api/workspace_fincas_comunidades":
+            workspace_id = params.get("workspace_id", [""])[0]
+            limit = params.get("limit", ["30"])[0]
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            json_response(self, fetch_workspace_fincas_comunidades(conn, workspace_id, limit=limit))
+            return
+
+        if path == "/api/workspace_fincas_incidencias":
+            workspace_id = params.get("workspace_id", [""])[0]
+            limit = params.get("limit", ["40"])[0]
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            json_response(self, fetch_workspace_fincas_incidencias(conn, workspace_id, limit=limit))
             return
 
         if path == "/api/workspace_automatizacion_logs":
