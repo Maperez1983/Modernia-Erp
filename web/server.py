@@ -10520,6 +10520,7 @@ def open_sqlite_conn(db_path, with_row_factory=False):
 def ensure_tables(db_path):
     conn = open_sqlite_conn(db_path, with_row_factory=False)
     apply_schema_file(conn, ROOT.parent / "schema.sql")
+    ensure_column(conn, "empresas", "logo_url", "logo_url TEXT")
     ensure_workspace_core_tables(conn)
     ensure_workspace_facturacion_table(conn)
     ensure_workspace_product_tables(conn)
@@ -21164,7 +21165,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/empresas":
             rows = conn.execute(
-                "SELECT id, nombre FROM empresas ORDER BY nombre"
+                "SELECT id, nombre, COALESCE(logo_url, '') AS logo_url FROM empresas ORDER BY nombre"
             ).fetchall()
             json_response(self, [dict(r) for r in rows])
             return

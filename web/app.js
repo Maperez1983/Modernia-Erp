@@ -6959,6 +6959,10 @@ const createWordmarkLogoDataUri = (label, options = {}) => {
 };
 
 const COMPANY_LOGOS = {
+  "FINCAS VELAZQUEZ": "/assets/logos/fincas-velazquez.png",
+  "FINANCIACIONES MODERNIA": "/assets/grupo_modernia_logo.png",
+  "MODERNIA ASESORES": "/assets/grupo_modernia_logo.png",
+  "GRUPO MODERNIA": "/assets/grupo_modernia_logo.png",
   ALLIANZ: "/assets/logos/allianz.svg",
   ARAG: "/assets/logos/arag.svg",
   AXA: "/assets/logos/axa.svg",
@@ -6986,6 +6990,13 @@ const COMPANY_LOGOS = {
 };
 
 const COMPANY_ALIASES = {
+  "FINCAS VELAZQUEZ SL": "FINCAS VELAZQUEZ",
+  "FINCAS VELAZQUEZ S L": "FINCAS VELAZQUEZ",
+  "FINCAS VELAZQUEZ S L U": "FINCAS VELAZQUEZ",
+  "FINANCIACIONES MODERNIA MALAGA": "FINANCIACIONES MODERNIA",
+  "MODERNIA FINANCIACIONES": "FINANCIACIONES MODERNIA",
+  "MODERNIA ASESORES SL": "MODERNIA ASESORES",
+  "MODERNIA ASESORES S L": "MODERNIA ASESORES",
   "ALLIANZ SEGUROS": "ALLIANZ",
   "MAPFRE SEGUROS": "MAPFRE",
   "ZURICH SEGUROS": "ZURICH",
@@ -7046,7 +7057,15 @@ const resolveCompanyKey = (value) => {
   return COMPANY_ALIASES[normalized] || normalized;
 };
 
+const getPersistedCompanyLogo = (value) => {
+  const key = resolveCompanyKey(value);
+  const match = (state.empresas || []).find((item) => resolveCompanyKey(item?.nombre) === key);
+  return String(match?.logo_url || "").trim();
+};
+
 const getCompanyLogo = (value) => {
+  const persisted = getPersistedCompanyLogo(value);
+  if (persisted) return persisted;
   const key = resolveCompanyKey(value);
   return COMPANY_LOGOS[key] || "";
 };
