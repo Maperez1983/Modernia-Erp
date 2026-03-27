@@ -108,7 +108,7 @@ APP_SESSION_TTL_SECONDS = max(900, int(os.environ.get("APP_SESSION_TTL_SECONDS",
 SESSION_COOKIE_NAME = os.environ.get("APP_SESSION_COOKIE", "crm_session")
 AUTH_ALLOW_FIRST_PASSWORD_SET = os.environ.get("AUTH_ALLOW_FIRST_PASSWORD_SET", "1").strip().lower() not in ("0", "false", "no", "off")
 AUTH_INVITE_TTL_SECONDS = max(1800, int(os.environ.get("AUTH_INVITE_TTL_SECONDS", "172800")))
-AUTH_PUBLIC_GET_ENDPOINTS = {"/api/health", "/api/me", "/api/auth_invite_status", "/api/workspace_portal_public"}
+AUTH_PUBLIC_GET_ENDPOINTS = {"/api/health", "/api/me", "/api/auth_invite_status", "/api/workspace_portal_public", "/api/workspace_factura_pdf_public"}
 AUTH_PUBLIC_POST_ENDPOINTS = {"/api/login", "/api/logout", "/api/auth_set_password", "/api/workspace_portal_upload"}
 AUTH_SESSIONS = {}
 AUTH_SESSIONS_LOCK = threading.Lock()
@@ -9082,6 +9082,22 @@ def ensure_inmueble_propietario_link(conn, inmueble_id, cliente_id, now):
     )
 
 
+def get_inmueble_propietarios(conn, inmueble_id):
+    if not inmueble_id:
+        return []
+    rows = conn.execute(
+        """
+        SELECT c.id, c.nombre, c.nif, c.telefono, c.email
+        FROM inmueble_propietarios ip
+        JOIN clientes c ON c.id = ip.cliente_id
+        WHERE ip.inmueble_id = ?
+        ORDER BY c.nombre
+        """,
+        (inmueble_id,),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
 def normalize_inmobiliaria_address(value):
     return re.sub(r"\s+", " ", normalize_lookup_text(value or "")).strip()
 
@@ -10349,6 +10365,10 @@ def ensure_tables(db_path):
             conn.execute("ALTER TABLE captaciones ADD COLUMN poblacion TEXT")
         if "provincia" not in cap_cols:
             conn.execute("ALTER TABLE captaciones ADD COLUMN provincia TEXT")
+        if "situacion_comercial" not in cap_cols:
+            conn.execute("ALTER TABLE captaciones ADD COLUMN situacion_comercial TEXT")
+        if "fecha_conversion" not in cap_cols:
+            conn.execute("ALTER TABLE captaciones ADD COLUMN fecha_conversion TEXT")
     except sqlite3.Error:
         pass
     try:
@@ -11095,6 +11115,8 @@ def ensure_workspace_facturacion_table(conn):
           impuestos REAL,
           total REAL,
           estado TEXT,
+          remesa_id TEXT,
+          conciliacion_estado TEXT,
           cobrada INTEGER NOT NULL DEFAULT 0,
           fecha_cobro TEXT,
           forma_cobro TEXT,
@@ -11105,6 +11127,8 @@ def ensure_workspace_facturacion_table(conn):
         )
         """
     )
+    ensure_column(conn, "workspace_facturacion", "remesa_id", "remesa_id TEXT")
+    ensure_column(conn, "workspace_facturacion", "conciliacion_estado", "conciliacion_estado TEXT")
 
 
 def ensure_workspace_product_tables(conn):
@@ -11216,6 +11240,25 @@ def ensure_workspace_product_tables(conn):
     )
     conn.execute(
         """
+        CREATE TABLE IF NOT EXISTS workspace_facturacion_remesas (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          empresa_id TEXT,
+          servicio TEXT,
+          referencia TEXT NOT NULL,
+          fecha_emision TEXT,
+          fecha_cargo TEXT,
+          estado TEXT NOT NULL DEFAULT 'Preparada',
+          total REAL NOT NULL DEFAULT 0,
+          facturas_total INTEGER NOT NULL DEFAULT 0,
+          notas TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS workspace_portal_requerimientos (
           id TEXT PRIMARY KEY,
           workspace_id TEXT NOT NULL,
@@ -11283,6 +11326,42 @@ def ensure_workspace_product_tables(conn):
           responsable TEXT,
           fecha_apertura TEXT,
           fecha_cierre TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workspace_fincas_proveedores (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          comunidad_id TEXT,
+          empresa_id TEXT,
+          nombre TEXT NOT NULL,
+          tipo_servicio TEXT,
+          telefono TEXT,
+          email TEXT,
+          estado TEXT NOT NULL DEFAULT 'Activo',
+          tarifa_mensual REAL,
+          notas TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workspace_fincas_juntas (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          comunidad_id TEXT NOT NULL,
+          fecha TEXT NOT NULL,
+          tipo TEXT,
+          estado TEXT NOT NULL DEFAULT 'Planificada',
+          orden_dia TEXT,
+          acuerdos TEXT,
+          proxima_fecha TEXT,
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL
         )
@@ -11467,6 +11546,35 @@ def fetch_workspace_billing_collections(conn, workspace_id, limit=40):
     return {"rows": [dict(row) for row in rows]}
 
 
+def fetch_workspace_remesas(conn, workspace_id, limit=30):
+    rows = conn.execute(
+        """
+        SELECT
+          r.id,
+          r.workspace_id,
+          r.empresa_id,
+          COALESCE(e.nombre, '') AS empresa_nombre,
+          r.servicio,
+          r.referencia,
+          r.fecha_emision,
+          r.fecha_cargo,
+          r.estado,
+          r.total,
+          r.facturas_total,
+          r.notas,
+          r.created_at,
+          r.updated_at
+        FROM workspace_facturacion_remesas r
+        LEFT JOIN empresas e ON e.id = r.empresa_id
+        WHERE r.workspace_id = ?
+        ORDER BY COALESCE(r.fecha_cargo, r.fecha_emision, r.created_at) DESC, r.updated_at DESC
+        LIMIT ?
+        """,
+        (workspace_id, max(1, min(int(limit or 30), 100))),
+    ).fetchall()
+    return {"rows": [dict(row) for row in rows]}
+
+
 def fetch_workspace_portal_requests(conn, workspace_id, limit=40):
     rows = conn.execute(
         """
@@ -11596,6 +11704,64 @@ def fetch_workspace_fincas_incidencias(conn, workspace_id, limit=40):
     return {"rows": [dict(row) for row in rows]}
 
 
+def fetch_workspace_fincas_proveedores(conn, workspace_id, limit=40):
+    rows = conn.execute(
+        """
+        SELECT
+          p.id,
+          p.workspace_id,
+          p.comunidad_id,
+          COALESCE(c.nombre, '') AS comunidad_nombre,
+          p.empresa_id,
+          COALESCE(e.nombre, '') AS empresa_nombre,
+          p.nombre,
+          p.tipo_servicio,
+          p.telefono,
+          p.email,
+          p.estado,
+          p.tarifa_mensual,
+          p.notas,
+          p.created_at,
+          p.updated_at
+        FROM workspace_fincas_proveedores p
+        LEFT JOIN workspace_fincas_comunidades c ON c.id = p.comunidad_id
+        LEFT JOIN empresas e ON e.id = p.empresa_id
+        WHERE p.workspace_id = ?
+        ORDER BY p.updated_at DESC, p.nombre COLLATE NOCASE ASC
+        LIMIT ?
+        """,
+        (workspace_id, max(1, min(int(limit or 40), 100))),
+    ).fetchall()
+    return {"rows": [dict(row) for row in rows]}
+
+
+def fetch_workspace_fincas_juntas(conn, workspace_id, limit=40):
+    rows = conn.execute(
+        """
+        SELECT
+          j.id,
+          j.workspace_id,
+          j.comunidad_id,
+          COALESCE(c.nombre, '') AS comunidad_nombre,
+          j.fecha,
+          j.tipo,
+          j.estado,
+          j.orden_dia,
+          j.acuerdos,
+          j.proxima_fecha,
+          j.created_at,
+          j.updated_at
+        FROM workspace_fincas_juntas j
+        LEFT JOIN workspace_fincas_comunidades c ON c.id = j.comunidad_id
+        WHERE j.workspace_id = ?
+        ORDER BY COALESCE(j.fecha, j.created_at) DESC, j.updated_at DESC
+        LIMIT ?
+        """,
+        (workspace_id, max(1, min(int(limit or 40), 100))),
+    ).fetchall()
+    return {"rows": [dict(row) for row in rows]}
+
+
 def fetch_workspace_automations(conn, workspace_id, limit=50):
     rows = conn.execute(
         """
@@ -11634,10 +11800,135 @@ def fetch_workspace_automation_logs(conn, workspace_id, limit=50):
     return {"rows": [dict(row) for row in rows]}
 
 
+def parse_workspace_automation_config(raw):
+    if raw in (None, ""):
+        return {}
+    if isinstance(raw, dict):
+        return raw
+    try:
+        value = json.loads(str(raw))
+        return value if isinstance(value, dict) else {}
+    except Exception:
+        return {}
+
+
+def _normalize_to_list(value):
+    if value in (None, "", []):
+        return []
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    return [item.strip() for item in str(value).split(",") if item.strip()]
+
+
+def workspace_automation_matches(config, context):
+    conditions = config.get("conditions") if isinstance(config.get("conditions"), dict) else {}
+    servicios = {normalize_service_key(item) for item in _normalize_to_list(conditions.get("servicios"))}
+    servicio = normalize_service_key(context.get("servicio") or "")
+    if servicios and servicio not in servicios:
+        return False, "servicio fuera de condición"
+    metodos = {item.lower() for item in _normalize_to_list(conditions.get("metodos"))}
+    metodo = str(context.get("metodo") or "").strip().lower()
+    if metodos and metodo not in metodos:
+        return False, "método fuera de condición"
+    estados = {item.lower() for item in _normalize_to_list(conditions.get("estados"))}
+    estado = str(context.get("estado") or "").strip().lower()
+    if estados and estado not in estados:
+        return False, "estado fuera de condición"
+    required_keys = _normalize_to_list(conditions.get("required_keys"))
+    for key in required_keys:
+        if not context.get(key):
+            return False, f"falta {key}"
+    min_importe = conditions.get("min_importe")
+    if min_importe not in (None, ""):
+        if float(context.get("importe") or context.get("total") or 0.0) < float(min_importe):
+            return False, "importe por debajo del mínimo"
+    return True, ""
+
+
+def apply_workspace_automation_effects(conn, workspace_id, automation_row, config, context, now):
+    actions = config.get("actions") if isinstance(config.get("actions"), dict) else {}
+    if not actions and any(key in config for key in ("inbox_estado", "portal_request", "create_action")):
+        actions = dict(config)
+    effect_count = 0
+    if actions.get("create_action", True):
+        empresa_id = context.get("empresa_id") or fetch_workspace_company_ids(conn, workspace_id)[:1]
+        empresa_id = empresa_id[0] if isinstance(empresa_id, list) else empresa_id
+        if empresa_id:
+            detalle = (automation_row["action_summary"] or "").strip() or f"Automatización {automation_row['nombre']}"
+            conn.execute(
+                """
+                INSERT INTO acciones (
+                  id, empresa_id, servicio, cliente_id, inmueble_id, cliente_nombre,
+                  fecha, hora, tipo, responsable, estado, notas, recordatorio_min, created_at, updated_at
+                ) VALUES (
+                  ?, ?, ?, ?, ?, ?, date(?), time(?), ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                )
+                """,
+                (
+                    os.urandom(16).hex(),
+                    empresa_id,
+                    (automation_row["modulo_key"] or context.get("servicio") or "gestoria").strip(),
+                    context.get("cliente_id"),
+                    context.get("inmueble_id"),
+                    context.get("cliente_nombre"),
+                    now,
+                    now,
+                    automation_row["nombre"],
+                    actions.get("responsable") or context.get("responsable"),
+                    actions.get("action_estado") or "Pendiente",
+                    detalle,
+                    int(actions.get("recordatorio_min") or 60),
+                    now,
+                    now,
+                ),
+            )
+            effect_count += 1
+    inbox_estado = (actions.get("inbox_estado") or "").strip()
+    if inbox_estado and context.get("document_id"):
+        conn.execute(
+            "UPDATE workspace_documentos_inbox SET estado = ?, updated_at = datetime(?) WHERE id = ? AND workspace_id = ?",
+            (inbox_estado, now, context.get("document_id"), workspace_id),
+        )
+        effect_count += 1
+    portal_request = actions.get("portal_request")
+    if isinstance(portal_request, dict) and context.get("portal_cliente_id"):
+        due_days = int(portal_request.get("days_due") or 0)
+        due_date = None
+        if due_days > 0:
+            try:
+                due_date = (datetime.fromisoformat(str(now).replace("Z", "")) + timedelta(days=due_days)).date().isoformat()
+            except Exception:
+                due_date = None
+        conn.execute(
+            """
+            INSERT INTO workspace_portal_requerimientos (
+              id, workspace_id, portal_cliente_id, cliente_id, servicio, titulo, descripcion,
+              prioridad, estado, fecha_limite, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+            """,
+            (
+                os.urandom(16).hex(),
+                workspace_id,
+                context.get("portal_cliente_id"),
+                context.get("cliente_id"),
+                (portal_request.get("servicio") or context.get("servicio") or "").strip() or None,
+                (portal_request.get("titulo") or automation_row["nombre"]).strip(),
+                (portal_request.get("descripcion") or automation_row["action_summary"] or "").strip() or None,
+                (portal_request.get("prioridad") or "Normal").strip(),
+                (portal_request.get("estado") or "Pendiente").strip(),
+                due_date or (portal_request.get("fecha_limite") or None),
+                now,
+                now,
+            ),
+        )
+        effect_count += 1
+    return effect_count
+
+
 def run_workspace_automations(conn, workspace_id, trigger_key, context, now):
     rows = conn.execute(
         """
-        SELECT id, nombre, trigger_key, modulo_key, enabled, action_summary
+        SELECT id, nombre, trigger_key, modulo_key, enabled, action_summary, config_json
         FROM workspace_automatizaciones
         WHERE workspace_id = ? AND trigger_key = ? AND COALESCE(enabled, 1) = 1
         ORDER BY updated_at DESC, created_at DESC
@@ -11646,39 +11937,11 @@ def run_workspace_automations(conn, workspace_id, trigger_key, context, now):
     ).fetchall()
     created = 0
     for row in rows:
-        empresa_id = context.get("empresa_id") or fetch_workspace_company_ids(conn, workspace_id)[:1]
-        empresa_id = empresa_id[0] if isinstance(empresa_id, list) else empresa_id
-        if not empresa_id:
-            continue
-        servicio = (row["modulo_key"] or context.get("servicio") or "gestoria").strip()
+        config = parse_workspace_automation_config(row["config_json"])
+        matches, reason = workspace_automation_matches(config, context)
         detalle = (row["action_summary"] or "").strip() or f"Automatización {row['nombre']}"
-        conn.execute(
-            """
-            INSERT INTO acciones (
-              id, empresa_id, servicio, cliente_id, inmueble_id, cliente_nombre,
-                fecha, hora, tipo, responsable, estado, notas, recordatorio_min, created_at, updated_at
-            ) VALUES (
-                ?, ?, ?, ?, ?, ?, date(?), time(?), ?, ?, ?, ?, ?, datetime(?), datetime(?)
-            )
-            """,
-            (
-                os.urandom(16).hex(),
-                empresa_id,
-                servicio,
-                context.get("cliente_id"),
-                context.get("inmueble_id"),
-                context.get("cliente_nombre"),
-                now,
-                now,
-                row["nombre"],
-                context.get("responsable"),
-                "Pendiente",
-                detalle,
-                60,
-                now,
-                now,
-            ),
-        )
+        if matches:
+            created += apply_workspace_automation_effects(conn, workspace_id, row, config, context, now)
         conn.execute(
             """
             INSERT INTO workspace_automatizacion_logs (
@@ -11690,13 +11953,12 @@ def run_workspace_automations(conn, workspace_id, trigger_key, context, now):
                 workspace_id,
                 row["id"],
                 trigger_key,
-                "ejecutada",
-                detalle,
+                "ejecutada" if matches else "omitida",
+                detalle if matches else f"{detalle} · {reason}",
                 json.dumps(context, ensure_ascii=False),
                 now,
             ),
         )
-        created += 1
     return created
 
 
@@ -11734,7 +11996,7 @@ def fetch_workspace_portal_public(conn, token):
     ).fetchall()
     bills = conn.execute(
         """
-        SELECT concepto, fecha_emision, total, estado, cobrada
+        SELECT id, concepto, fecha_emision, total, estado, cobrada
         FROM workspace_facturacion
         WHERE workspace_id = ? AND cliente_id = ?
         ORDER BY COALESCE(fecha_emision, created_at) DESC
@@ -11768,6 +12030,58 @@ def fetch_workspace_portal_public(conn, token):
         "docs": [dict(item) for item in docs],
         "facturas": [dict(item) for item in bills],
         "requerimientos": [dict(item) for item in requests],
+    }
+
+
+def fetch_workspace_invoice_pdf_payload(conn, invoice_id, workspace_id=None, token=None):
+    portal_scope = None
+    if token:
+        portal_scope = conn.execute(
+            """
+            SELECT workspace_id, cliente_id
+            FROM workspace_portal_clientes
+            WHERE token = ?
+            LIMIT 1
+            """,
+            (token,),
+        ).fetchone()
+        if not portal_scope:
+            return None
+        workspace_id = portal_scope["workspace_id"]
+    if not invoice_id or not workspace_id:
+        return None
+    invoice = conn.execute(
+        """
+        SELECT wf.*, COALESCE(w.nombre, '') AS workspace_nombre, COALESCE(e.nombre, '') AS empresa_nombre,
+               COALESCE(c.nombre, '') AS cliente_nombre, COALESCE(c.nif, '') AS cliente_nif, COALESCE(c.email, '') AS cliente_email
+        FROM workspace_facturacion wf
+        LEFT JOIN workspaces w ON w.id = wf.workspace_id
+        LEFT JOIN empresas e ON e.id = wf.empresa_id
+        LEFT JOIN clientes c ON c.id = wf.cliente_id
+        WHERE wf.id = ? AND wf.workspace_id = ?
+        LIMIT 1
+        """,
+        (invoice_id, workspace_id),
+    ).fetchone()
+    if not invoice:
+        return None
+    if portal_scope and str(invoice["cliente_id"] or "") != str(portal_scope["cliente_id"] or ""):
+        return None
+    collections = conn.execute(
+        """
+        SELECT fecha_cobro, metodo, importe, referencia
+        FROM workspace_facturacion_cobros
+        WHERE factura_id = ?
+        ORDER BY COALESCE(fecha_cobro, created_at) ASC
+        """,
+        (invoice_id,),
+    ).fetchall()
+    return {
+        "invoice": dict(invoice),
+        "workspace": {"nombre": invoice["workspace_nombre"]},
+        "company": {"nombre": invoice["empresa_nombre"]},
+        "client": {"nombre": invoice["cliente_nombre"], "nif": invoice["cliente_nif"], "email": invoice["cliente_email"]},
+        "collections": [dict(row) for row in collections],
     }
 
 
@@ -11954,6 +12268,8 @@ def fetch_workspace_billing_rows(conn, workspace_id, limit=25):
           wf.impuestos,
           wf.total,
           wf.estado,
+          wf.remesa_id,
+          wf.conciliacion_estado,
           wf.cobrada,
           wf.fecha_cobro,
           wf.forma_cobro,
@@ -11963,7 +12279,9 @@ def fetch_workspace_billing_rows(conn, workspace_id, limit=25):
           wf.updated_at,
           COALESCE(e.nombre, '') AS empresa_nombre,
           COALESCE(c.nombre, '') AS cliente_nombre,
-          COALESCE(c.nif, '') AS cliente_nif
+          COALESCE(c.nif, '') AS cliente_nif,
+          COALESCE((SELECT SUM(COALESCE(col.importe, 0)) FROM workspace_facturacion_cobros col WHERE col.factura_id = wf.id AND COALESCE(col.estado, 'Aplicado') != 'Devuelto'), 0) AS cobrado_total,
+          MAX(COALESCE(wf.total, 0) - COALESCE((SELECT SUM(COALESCE(col.importe, 0)) FROM workspace_facturacion_cobros col WHERE col.factura_id = wf.id AND COALESCE(col.estado, 'Aplicado') != 'Devuelto'), 0), 0) AS saldo_pendiente
         FROM workspace_facturacion wf
         LEFT JOIN empresas e ON e.id = wf.empresa_id
         LEFT JOIN clientes c ON c.id = wf.cliente_id
@@ -12011,9 +12329,12 @@ def fetch_workspace_health(conn, workspace_id):
     portal_requests = fetch_workspace_portal_requests(conn, workspace_id, limit=5)["rows"]
     automation_rows = fetch_workspace_automations(conn, workspace_id, limit=5)["rows"]
     billing_collections = fetch_workspace_billing_collections(conn, workspace_id, limit=5)["rows"]
+    remittance_rows = fetch_workspace_remesas(conn, workspace_id, limit=5)["rows"]
     time_rows = fetch_workspace_time_entries(conn, workspace_id, limit=5)["rows"]
     fincas_communities = fetch_workspace_fincas_comunidades(conn, workspace_id, limit=5)["rows"]
     fincas_incidents = fetch_workspace_fincas_incidencias(conn, workspace_id, limit=5)["rows"]
+    fincas_providers = fetch_workspace_fincas_proveedores(conn, workspace_id, limit=5)["rows"]
+    fincas_meetings = fetch_workspace_fincas_juntas(conn, workspace_id, limit=5)["rows"]
     series_rows = fetch_workspace_series(conn, workspace_id)["rows"]
     facturas_total = conn.execute(
         f"""
@@ -12110,8 +12431,8 @@ def fetch_workspace_health(conn, workspace_id):
         "seguros": (seguros_total, "pólizas o expedientes de seguros", "Importar cartera o cargar pólizas activas."),
         "inmobiliaria": (inmuebles_total + operaciones_total, "inmuebles y operaciones", "Cargar captaciones, inmuebles u operaciones."),
         "financiacion": (hipotecas_total, "hipotecas registradas", "Activar expedientes y pipeline financiero."),
-        "fincas": (len(fincas_communities) + len(fincas_incidents), "comunidades e incidencias de fincas", "Cargar comunidades, cuotas e incidencias."),
-        "facturacion": (facturas_total, "movimientos de facturación", "Emitir primeras facturas del tenant."),
+        "fincas": (len(fincas_communities) + len(fincas_incidents) + len(fincas_providers) + len(fincas_meetings), "comunidades, incidencias y operativa de fincas", "Cargar comunidades, proveedores e incidencias."),
+        "facturacion": (facturas_total + len(remittance_rows) + len(billing_collections), "facturas, cobros y remesas", "Emitir primeras facturas del tenant."),
         "facturas_recibidas": (facturas_recibidas_total + len(inbox_rows), "facturas recibidas o inbox", "Activar inbox de proveedores."),
         "portal_cliente": (len(portal_rows) + len(portal_requests), "clientes y requerimientos de portal", "Invitar clientes clave y crear requerimientos."),
         "registro_horario": (len(time_rows), "fichajes registrados", "Activar fichajes y política laboral."),
@@ -12150,6 +12471,7 @@ def fetch_workspace_health(conn, workspace_id):
             "portal_requerimientos": len(portal_requests),
             "fichajes": len(time_rows),
             "comunidades": len(fincas_communities),
+            "remesas": len(remittance_rows),
         },
     }
 
@@ -12312,6 +12634,90 @@ def json_response(handler, data, status=200, cookies=None, extra_headers=None):
     handler.send_header("Content-Length", str(len(payload)))
     handler.end_headers()
     handler.wfile.write(payload)
+
+
+def binary_response(handler, data, content_type="application/octet-stream", filename=None, status=200):
+    payload = data or b""
+    handler.send_response(status)
+    handler.send_header("Access-Control-Allow-Origin", "*")
+    handler.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+    handler.send_header("Access-Control-Allow-Headers", "Content-Type")
+    handler.send_header("Content-Type", content_type)
+    if filename:
+        handler.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+    handler.send_header("Content-Length", str(len(payload)))
+    handler.end_headers()
+    handler.wfile.write(payload)
+
+
+def _pdf_escape(value):
+    return str(value or "").replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+
+
+def format_eur(value):
+    amount = float(value or 0.0)
+    raw = f"{amount:,.2f}"
+    return raw.replace(",", "X").replace(".", ",").replace("X", ".") + " EUR"
+
+
+def build_workspace_invoice_pdf(invoice, workspace, company, client, collections):
+    lines = [
+        workspace.get("nombre") or "Workspace",
+        company.get("nombre") or "Empresa",
+        "",
+        f"Factura: {'-'.join(part for part in [invoice.get('serie'), invoice.get('numero')] if part) or invoice.get('id') or '-'}",
+        f"Fecha emisión: {invoice.get('fecha_emision') or '-'}",
+        f"Fecha vencimiento: {invoice.get('fecha_vencimiento') or '-'}",
+        f"Estado: {invoice.get('estado') or '-'}",
+        f"Cliente: {client.get('nombre') or '-'}",
+        f"NIF: {client.get('nif') or '-'}",
+        "",
+        f"Concepto: {invoice.get('concepto') or '-'}",
+        f"Servicio: {invoice.get('servicio') or '-'}",
+        "",
+        f"Subtotal: {format_eur(invoice.get('subtotal'))}",
+        f"Impuestos: {format_eur(invoice.get('impuestos'))}",
+        f"Total: {format_eur(invoice.get('total'))}",
+        f"Cobrado: {format_eur(sum(float(item.get('importe') or 0.0) for item in collections))}",
+        f"Pendiente: {format_eur(max(float(invoice.get('total') or 0.0) - sum(float(item.get('importe') or 0.0) for item in collections), 0.0))}",
+        "",
+    ]
+    if collections:
+        lines.append("Cobros aplicados:")
+        for item in collections[:8]:
+            lines.append(
+                f"- {item.get('fecha_cobro') or '-'} · {item.get('metodo') or '-'} · {format_eur(item.get('importe'))}"
+            )
+        lines.append("")
+    if invoice.get("notas"):
+        lines.append(f"Notas: {invoice.get('notas')}")
+    font_obj = "1 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj\n"
+    page_lines = []
+    y = 800
+    for raw in lines[:38]:
+        page_lines.append(f"BT /F1 11 Tf 48 {y} Td ({_pdf_escape(raw)}) Tj ET")
+        y -= 18
+    content_stream = "\n".join(page_lines).encode("latin-1", "replace")
+    objects = []
+    objects.append("1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n")
+    objects.append("2 0 obj << /Type /Pages /Count 1 /Kids [3 0 R] >> endobj\n")
+    objects.append(
+        "3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >> endobj\n"
+    )
+    objects.append(font_obj)
+    objects.append(f"5 0 obj << /Length {len(content_stream)} >> stream\n".encode("latin-1") + content_stream + b"\nendstream\nendobj\n")
+    pdf = bytearray(b"%PDF-1.4\n")
+    offsets = [0]
+    for obj in objects:
+        offsets.append(len(pdf))
+        pdf.extend(obj if isinstance(obj, bytes) else obj.encode("latin-1"))
+    xref_pos = len(pdf)
+    pdf.extend(f"xref\n0 {len(offsets)}\n".encode("latin-1"))
+    pdf.extend(b"0000000000 65535 f \n")
+    for offset in offsets[1:]:
+        pdf.extend(f"{offset:010d} 00000 n \n".encode("latin-1"))
+    pdf.extend(f"trailer << /Size {len(offsets)} /Root 1 0 R >>\nstartxref\n{xref_pos}\n%%EOF\n".encode("latin-1"))
+    return bytes(pdf)
 
 
 def send_file(handler, path):
@@ -12554,6 +12960,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/me",
             "/api/auth_invite_status",
             "/api/workspace_portal_public",
+            "/api/workspace_factura_pdf_public",
             "/api/workspace_portal_upload",
             "/api/usuarios",
             "/api/usuarios_update",
@@ -12715,6 +13122,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/captaciones",
             "/api/captaciones_update",
             "/api/captacion_update",
+            "/api/captacion_convert",
             "/api/compraventas",
             "/api/inmueble_update",
             "/api/inmueble_propietarios_update",
@@ -12732,10 +13140,13 @@ class Handler(BaseHTTPRequestHandler):
             "/api/auth_set_password",
             "/api/workspace_portal_upload",
             "/api/workspace_cobros",
+            "/api/workspace_remesas",
             "/api/workspace_portal_requerimientos",
             "/api/workspace_registro_horario",
             "/api/workspace_fincas_comunidades",
             "/api/workspace_fincas_incidencias",
+            "/api/workspace_fincas_proveedores",
+            "/api/workspace_fincas_juntas",
         ):
             json_response(self, {"error": "Endpoint no valido"}, status=404)
             return
@@ -14041,11 +14452,14 @@ class Handler(BaseHTTPRequestHandler):
                 workspace_id,
                 "invoice_created",
                 {
+                    "invoice_id": record_id,
                     "empresa_id": empresa_id,
                     "cliente_id": cliente_id or None,
                     "servicio": (payload.get("servicio") or "").strip() or "facturacion",
                     "cliente_nombre": None,
                     "responsable": (payload.get("responsable") or "").strip() or None,
+                    "total": total,
+                    "estado": (payload.get("estado") or "").strip() or "Borrador",
                 },
                 now,
             )
@@ -14118,6 +14532,11 @@ class Handler(BaseHTTPRequestHandler):
                 UPDATE workspace_facturacion
                 SET cobrada = ?, fecha_cobro = COALESCE(?, fecha_cobro), forma_cobro = COALESCE(?, forma_cobro),
                     estado = CASE WHEN ? = 1 THEN 'Cobrada' ELSE estado END,
+                    conciliacion_estado = CASE
+                        WHEN ? = 1 THEN 'Conciliada'
+                        WHEN ? > 0 THEN 'Parcial'
+                        ELSE conciliacion_estado
+                    END,
                     updated_at = datetime(?)
                 WHERE id = ?
                 """,
@@ -14126,6 +14545,8 @@ class Handler(BaseHTTPRequestHandler):
                     (payload.get("fecha_cobro") or "").strip() or None,
                     (payload.get("metodo") or "").strip() or None,
                     cobrada,
+                    cobrada,
+                    float(total_cobrado or 0.0),
                     now,
                     factura_id,
                 ),
@@ -14135,15 +14556,88 @@ class Handler(BaseHTTPRequestHandler):
                 workspace_id,
                 "payment_registered",
                 {
+                    "invoice_id": factura_id,
                     "empresa_id": factura["empresa_id"],
                     "cliente_id": factura["cliente_id"],
                     "servicio": "facturacion",
                     "cliente_nombre": None,
+                    "metodo": (payload.get("metodo") or "").strip() or None,
+                    "importe": importe,
+                    "estado": (payload.get("estado") or "").strip() or "Aplicado",
                 },
                 now,
             )
             conn.commit()
             json_response(self, {"ok": True, "id": record_id, "automation_actions": auto_created})
+            return
+        elif parsed.path == "/api/workspace_remesas":
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            empresa_id = str(payload.get("empresa_id") or "").strip()
+            if not workspace_id or not empresa_id:
+                json_response(self, {"error": "workspace_id y empresa_id requeridos"}, status=400)
+                return
+            raw_ids = payload.get("factura_ids") or payload.get("factura_ids_json") or []
+            if isinstance(raw_ids, str):
+                try:
+                    factura_ids = json.loads(raw_ids)
+                    if not isinstance(factura_ids, list):
+                        factura_ids = [item.strip() for item in raw_ids.split(",") if item.strip()]
+                except Exception:
+                    factura_ids = [item.strip() for item in raw_ids.split(",") if item.strip()]
+            else:
+                factura_ids = list(raw_ids or [])
+            factura_ids = [str(item).strip() for item in factura_ids if str(item).strip()]
+            if not factura_ids:
+                json_response(self, {"error": "selecciona al menos una factura"}, status=400)
+                return
+            placeholders = ",".join(["?"] * len(factura_ids))
+            invoices = conn.execute(
+                f"""
+                SELECT id, servicio, total, COALESCE((
+                    SELECT SUM(COALESCE(col.importe, 0)) FROM workspace_facturacion_cobros col
+                    WHERE col.factura_id = workspace_facturacion.id AND COALESCE(col.estado, 'Aplicado') != 'Devuelto'
+                ), 0) AS cobrado_total
+                FROM workspace_facturacion
+                WHERE workspace_id = ? AND empresa_id = ? AND id IN ({placeholders})
+                """,
+                [workspace_id, empresa_id, *factura_ids],
+            ).fetchall()
+            if not invoices:
+                json_response(self, {"error": "facturas no encontradas"}, status=404)
+                return
+            total = 0.0
+            for row in invoices:
+                total += max(float(row["total"] or 0.0) - float(row["cobrado_total"] or 0.0), 0.0)
+            referencia = str(payload.get("referencia") or "").strip() or f"REM-{datetime.now().strftime('%Y%m%d-%H%M')}"
+            record_id = str(payload.get("id") or "").strip() or os.urandom(16).hex()
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO workspace_facturacion_remesas (
+                  id, workspace_id, empresa_id, servicio, referencia, fecha_emision, fecha_cargo, estado, total, facturas_total, notas, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                """,
+                (
+                    record_id,
+                    workspace_id,
+                    empresa_id,
+                    (payload.get("servicio") or "").strip() or None,
+                    referencia,
+                    (payload.get("fecha_emision") or "").strip() or datetime.now().date().isoformat(),
+                    (payload.get("fecha_cargo") or "").strip() or None,
+                    (payload.get("estado") or "").strip() or "Preparada",
+                    round(total, 2),
+                    len(invoices),
+                    (payload.get("notas") or "").strip() or None,
+                    now,
+                    now,
+                ),
+            )
+            conn.execute(
+                f"UPDATE workspace_facturacion SET remesa_id = ?, estado = CASE WHEN COALESCE(cobrada,0)=1 THEN estado ELSE 'En remesa' END, updated_at = datetime(?) WHERE workspace_id = ? AND empresa_id = ? AND id IN ({placeholders})",
+                [record_id, now, workspace_id, empresa_id, *factura_ids],
+            )
+            conn.commit()
+            json_response(self, {"ok": True, "id": record_id, "total": round(total, 2)})
             return
         elif parsed.path == "/api/workspace_series":
             workspace_id = str(payload.get("workspace_id") or "").strip()
@@ -14274,10 +14768,13 @@ class Handler(BaseHTTPRequestHandler):
                     workspace_id,
                     "document_uploaded",
                     {
+                        "document_id": record_id,
                         "empresa_id": empresa_id,
                         "cliente_id": cliente_id or suggested_cliente_id,
                         "servicio": (payload.get("servicio") or "").strip() or "documental",
                         "cliente_nombre": None,
+                        "estado": (payload.get("estado") or "").strip() or "Pendiente",
+                        "canal": (payload.get("canal_entrada") or "").strip() or None,
                     },
                     now,
                 )
@@ -14336,6 +14833,7 @@ class Handler(BaseHTTPRequestHandler):
                 "portal_client_invited",
                 {
                     "empresa_id": fetch_workspace_company_ids(conn, workspace_id)[:1],
+                    "portal_cliente_id": record_id,
                     "cliente_id": cliente_id,
                     "servicio": "portal_cliente",
                     "cliente_nombre": None,
@@ -14403,7 +14901,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             portal = conn.execute(
                 """
-                SELECT workspace_id, cliente_id
+                SELECT id, workspace_id, cliente_id
                 FROM workspace_portal_clientes
                 WHERE token = ?
                 LIMIT 1
@@ -14449,10 +14947,14 @@ class Handler(BaseHTTPRequestHandler):
                 portal["workspace_id"],
                 "document_uploaded",
                 {
+                    "document_id": record_id,
+                    "portal_cliente_id": portal["id"],
                     "empresa_id": empresa_id,
                     "cliente_id": portal["cliente_id"],
                     "servicio": (payload.get("servicio") or "").strip() or "portal_cliente",
                     "cliente_nombre": None,
+                    "estado": (payload.get("estado") or "").strip() or "Pendiente",
+                    "canal": "Portal",
                 },
                 now,
             )
@@ -14560,7 +15062,7 @@ class Handler(BaseHTTPRequestHandler):
                 conn,
                 workspace_id,
                 "time_logged",
-                {"empresa_id": empresa_id, "servicio": "registro_horario", "cliente_nombre": persona_nombre},
+                {"time_entry_id": record_id, "empresa_id": empresa_id, "servicio": "registro_horario", "cliente_nombre": persona_nombre, "estado": (payload.get("estado") or "").strip() or "Borrador"},
                 now,
             )
             conn.commit()
@@ -14654,11 +15156,96 @@ class Handler(BaseHTTPRequestHandler):
                 conn,
                 workspace_id,
                 "finca_incidencia_created",
-                {"servicio": "fincas", "cliente_nombre": None},
+                {"incident_id": record_id, "comunidad_id": comunidad_id, "servicio": "fincas", "cliente_nombre": None, "estado": (payload.get("estado") or "").strip() or "Abierta"},
                 now,
             )
             conn.commit()
             json_response(self, {"ok": True, "id": record_id, "automation_actions": auto_created})
+            return
+        elif parsed.path == "/api/workspace_fincas_proveedores":
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            empresa_id = str(payload.get("empresa_id") or "").strip()
+            record_id = str(payload.get("id") or "").strip()
+            nombre = str(payload.get("nombre") or "").strip()
+            if not workspace_id or not empresa_id or not nombre:
+                json_response(self, {"error": "workspace_id, empresa_id y nombre requeridos"}, status=400)
+                return
+            values = (
+                workspace_id,
+                (payload.get("comunidad_id") or "").strip() or None,
+                empresa_id,
+                nombre,
+                (payload.get("tipo_servicio") or "").strip() or None,
+                (payload.get("telefono") or "").strip() or None,
+                (payload.get("email") or "").strip() or None,
+                (payload.get("estado") or "").strip() or "Activo",
+                round(parse_money_value(payload.get("tarifa_mensual")), 2) or None,
+                (payload.get("notas") or "").strip() or None,
+            )
+            if record_id:
+                conn.execute(
+                    """
+                    UPDATE workspace_fincas_proveedores
+                    SET workspace_id = ?, comunidad_id = ?, empresa_id = ?, nombre = ?, tipo_servicio = ?, telefono = ?,
+                        email = ?, estado = ?, tarifa_mensual = ?, notas = ?, updated_at = datetime(?)
+                    WHERE id = ? AND workspace_id = ?
+                    """,
+                    (*values, now, record_id, workspace_id),
+                )
+            else:
+                record_id = os.urandom(16).hex()
+                conn.execute(
+                    """
+                    INSERT INTO workspace_fincas_proveedores (
+                      id, workspace_id, comunidad_id, empresa_id, nombre, tipo_servicio, telefono, email,
+                      estado, tarifa_mensual, notas, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                    """,
+                    (record_id, *values, now, now),
+                )
+            conn.commit()
+            json_response(self, {"ok": True, "id": record_id})
+            return
+        elif parsed.path == "/api/workspace_fincas_juntas":
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            comunidad_id = str(payload.get("comunidad_id") or "").strip()
+            record_id = str(payload.get("id") or "").strip()
+            fecha = str(payload.get("fecha") or "").strip()
+            if not workspace_id or not comunidad_id or not fecha:
+                json_response(self, {"error": "workspace_id, comunidad_id y fecha requeridos"}, status=400)
+                return
+            values = (
+                workspace_id,
+                comunidad_id,
+                fecha,
+                (payload.get("tipo") or "").strip() or None,
+                (payload.get("estado") or "").strip() or "Planificada",
+                (payload.get("orden_dia") or "").strip() or None,
+                (payload.get("acuerdos") or "").strip() or None,
+                (payload.get("proxima_fecha") or "").strip() or None,
+            )
+            if record_id:
+                conn.execute(
+                    """
+                    UPDATE workspace_fincas_juntas
+                    SET workspace_id = ?, comunidad_id = ?, fecha = ?, tipo = ?, estado = ?, orden_dia = ?,
+                        acuerdos = ?, proxima_fecha = ?, updated_at = datetime(?)
+                    WHERE id = ? AND workspace_id = ?
+                    """,
+                    (*values, now, record_id, workspace_id),
+                )
+            else:
+                record_id = os.urandom(16).hex()
+                conn.execute(
+                    """
+                    INSERT INTO workspace_fincas_juntas (
+                      id, workspace_id, comunidad_id, fecha, tipo, estado, orden_dia, acuerdos, proxima_fecha, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                    """,
+                    (record_id, *values, now, now),
+                )
+            conn.commit()
+            json_response(self, {"ok": True, "id": record_id})
             return
         elif parsed.path == "/api/workspace_document_assign":
             workspace_id = str(payload.get("workspace_id") or "").strip()
@@ -17919,7 +18506,7 @@ class Handler(BaseHTTPRequestHandler):
                         payload.get("precio_objetivo"),
                         payload.get("precio_valoracion"),
                         payload.get("valor_referencia"),
-                        payload.get("etapa"),
+                        payload.get("situacion_comercial") or "Captación",
                         payload.get("lat"),
                         payload.get("lon"),
                         now,
@@ -17931,10 +18518,11 @@ class Handler(BaseHTTPRequestHandler):
                     INSERT INTO captaciones (
                       id, empresa_id, inmueble_id, propietario, tipo_inmueble, direccion, codigo_postal, poblacion, provincia, zona, m2,
                       habitaciones, banos, precio_objetivo, precio_valoracion, urgencia,
+                      situacion_comercial, fecha_conversion,
                       motivo, canal, etapa, probabilidad, proxima_accion, fecha_contacto,
                       asesor, notas, created_at, updated_at
                     ) VALUES (
-                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
                     )
                     """,
                     (
@@ -17954,6 +18542,8 @@ class Handler(BaseHTTPRequestHandler):
                         payload.get("precio_objetivo"),
                         payload.get("precio_valoracion"),
                         payload.get("urgencia"),
+                        payload.get("situacion_comercial") or "Captación",
+                        None,
                         payload.get("motivo"),
                         payload.get("canal"),
                         payload.get("etapa"),
@@ -18023,6 +18613,7 @@ class Handler(BaseHTTPRequestHandler):
                 "motivo",
                 "canal",
                 "etapa",
+                "situacion_comercial",
                 "probabilidad",
                 "proxima_accion",
                 "fecha_contacto",
@@ -18053,8 +18644,8 @@ class Handler(BaseHTTPRequestHandler):
                 "precio_valoracion",
             )
             inm_updates = {key: updates[key] for key in shared if key in updates}
-            if "etapa" in updates:
-                inm_updates["estado"] = updates["etapa"]
+            if "situacion_comercial" in updates:
+                inm_updates["estado"] = updates["situacion_comercial"]
             if inm_updates:
                 inm_set = ", ".join([f"{key} = ?" for key in inm_updates])
                 inm_values = list(inm_updates.values()) + [now, inmueble_id]
@@ -18062,6 +18653,365 @@ class Handler(BaseHTTPRequestHandler):
                     f"UPDATE inmuebles SET {inm_set}, updated_at = datetime(?) WHERE id = ?",
                     inm_values,
                 )
+        elif parsed.path == "/api/captacion_convert":
+            captacion_id = str(payload.get("captacion_id") or "").strip()
+            destino = normalize_lookup_text(payload.get("destino") or "")
+            destino_map = {
+                "inmueble": "Inmueble",
+                "encargo": "Encargo",
+                "compraventa": "Compraventa",
+                "venta": "Compraventa",
+                "alquiler": "Alquiler",
+            }
+            destino_label = destino_map.get(destino)
+            if not captacion_id or not destino_label:
+                json_response(self, {"error": "captacion_id y destino válidos requeridos"}, status=400)
+                return
+            captacion = conn.execute(
+                """
+                SELECT *
+                FROM captaciones
+                WHERE id = ? AND empresa_id = ?
+                LIMIT 1
+                """,
+                (captacion_id, empresa["id"]),
+            ).fetchone()
+            if not captacion:
+                json_response(self, {"error": "Captación no encontrada"}, status=404)
+                return
+            inmueble = conn.execute(
+                "SELECT * FROM inmuebles WHERE id = ? LIMIT 1",
+                (captacion["inmueble_id"],),
+            ).fetchone()
+            if not inmueble:
+                json_response(self, {"error": "Inmueble no encontrado"}, status=404)
+                return
+
+            propietarios = get_inmueble_propietarios(conn, captacion["inmueble_id"])
+            owner1 = propietarios[0] if len(propietarios) > 0 else {}
+            owner2 = propietarios[1] if len(propietarios) > 1 else {}
+            propietario_fallback = normalize_person_name(captacion["propietario"]) or normalize_person_name(inmueble["direccion"])
+            direccion = normalize_person_name(inmueble["direccion"] or captacion["direccion"])
+
+            def owner_value(owner, key, fallback=""):
+                value = str((owner or {}).get(key) or "").strip()
+                if value:
+                    return value
+                if key == "nombre":
+                    return fallback
+                return ""
+
+            if destino_label == "Inmueble":
+                conn.execute(
+                    """
+                    UPDATE captaciones
+                    SET situacion_comercial = ?, fecha_conversion = ?, updated_at = datetime(?)
+                    WHERE id = ?
+                    """,
+                    (destino_label, now, now, captacion_id),
+                )
+                conn.execute(
+                    "UPDATE inmuebles SET estado = ?, updated_at = datetime(?) WHERE id = ?",
+                    (destino_label, now, captacion["inmueble_id"]),
+                )
+                conn.commit()
+                json_response(self, {"ok": True, "destino": destino_label, "inmueble_id": captacion["inmueble_id"]})
+                return
+
+            if destino_label == "Encargo":
+                precio_encargo = parse_money_value(payload.get("precio_encargo"))
+                cap_updates = {
+                    "situacion_comercial": destino_label,
+                    "fecha_conversion": now,
+                    "etapa": "Encargo firmado",
+                }
+                if precio_encargo is not None:
+                    cap_updates["precio_objetivo"] = precio_encargo
+                    cap_updates["precio_valoracion"] = precio_encargo
+                set_clause = ", ".join([f"{key} = ?" for key in cap_updates])
+                conn.execute(
+                    f"UPDATE captaciones SET {set_clause}, updated_at = datetime(?) WHERE id = ?",
+                    [*cap_updates.values(), now, captacion_id],
+                )
+                inm_updates = {"estado": destino_label}
+                if precio_encargo is not None:
+                    inm_updates["precio_objetivo"] = precio_encargo
+                    inm_updates["precio_valoracion"] = precio_encargo
+                inm_set_clause = ", ".join([f"{key} = ?" for key in inm_updates])
+                conn.execute(
+                    f"UPDATE inmuebles SET {inm_set_clause}, updated_at = datetime(?) WHERE id = ?",
+                    [*inm_updates.values(), now, captacion["inmueble_id"]],
+                )
+                conn.commit()
+                json_response(self, {"ok": True, "destino": destino_label, "inmueble_id": captacion["inmueble_id"]})
+                return
+
+            if destino_label == "Compraventa":
+                fecha_encargo = str(payload.get("fecha_encargo") or "").strip()
+                fecha_escritura = str(payload.get("fecha_escritura") or "").strip()
+                fecha_operacion = fecha_escritura or fecha_encargo
+                precio_encargo = parse_money_value(payload.get("precio_encargo"))
+                if precio_encargo is None:
+                    precio_encargo = parse_money_value(captacion["precio_objetivo"]) or parse_money_value(inmueble["precio_objetivo"])
+                precio_escritura = parse_money_value(payload.get("precio_escritura") or payload.get("precio_venta"))
+                honorarios = parse_money_value(payload.get("honorarios"))
+                record = conn.execute(
+                    """
+                    SELECT id
+                    FROM operaciones_inmobiliarias
+                    WHERE empresa_id = ?
+                      AND inmueble_id = ?
+                      AND LOWER(COALESCE(tipo_operacion, 'venta')) = 'venta'
+                    ORDER BY updated_at DESC, created_at DESC
+                    LIMIT 1
+                    """,
+                    (empresa["id"], captacion["inmueble_id"]),
+                ).fetchone()
+                record_id = record["id"] if record else os.urandom(16).hex()
+                payload_json = json.dumps(
+                    {"origen": "captacion_convertida", "captacion_id": captacion_id},
+                    ensure_ascii=False,
+                )
+                record_values = (
+                    empresa["id"],
+                    "venta",
+                    "Manual",
+                    "captacion_convertida",
+                    "captacion",
+                    None,
+                    None,
+                    parse_iso_date(fecha_operacion).year if parse_iso_date(fecha_operacion) else None,
+                    iso_month_label(fecha_operacion),
+                    captacion["inmueble_id"],
+                    direccion or None,
+                    re.sub(r"[^A-Z0-9]", "", str(inmueble["referencia_catastral"] or "").upper()) or None,
+                    owner1.get("id") or None,
+                    owner_value(owner1, "nombre", propietario_fallback) or None,
+                    normalize_nif(owner1.get("nif")) or None,
+                    owner_value(owner1, "telefono") or None,
+                    normalize_email(owner1.get("email")) or None,
+                    None,
+                    owner2.get("id") or None,
+                    owner_value(owner2, "nombre") or None,
+                    normalize_nif(owner2.get("nif")) or None,
+                    owner_value(owner2, "telefono") or None,
+                    normalize_email(owner2.get("email")) or None,
+                    None,
+                    None,
+                    None,
+                    normalize_person_name(payload.get("comprador_nombre")) or None,
+                    normalize_nif(payload.get("comprador_nif")) or None,
+                    str(payload.get("comprador_telefono") or "").strip() or None,
+                    normalize_email(payload.get("comprador_email")) or None,
+                    None,
+                    fecha_encargo or None,
+                    None,
+                    None,
+                    fecha_escritura or None,
+                    fecha_operacion or None,
+                    precio_encargo,
+                    None,
+                    None,
+                    precio_escritura,
+                    None,
+                    round(precio_encargo - precio_escritura, 2) if precio_encargo is not None and precio_escritura is not None else None,
+                    round(((precio_encargo - precio_escritura) / precio_encargo) * 100.0, 2) if precio_encargo not in (None, 0) and precio_escritura is not None else None,
+                    None,
+                    0,
+                    honorarios,
+                    str(payload.get("agente") or captacion["asesor"] or "").strip() or None,
+                    str(payload.get("responsable_gestion") or captacion["asesor"] or "").strip() or None,
+                    str(payload.get("oficina") or "Estudio Velazquez").strip() or None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    "Pendiente",
+                    "manual",
+                    str(payload.get("notas") or captacion["notas"] or "").strip() or None,
+                    payload_json,
+                )
+                columns = [
+                    "empresa_id",
+                    "tipo_operacion",
+                    "estado",
+                    "origen",
+                    "origen_inmueble",
+                    "expediente_path",
+                    "expediente_hash",
+                    "anio",
+                    "mes",
+                    "inmueble_id",
+                    "direccion",
+                    "referencia_catastral",
+                    "propietario1_id",
+                    "propietario1_nombre",
+                    "propietario1_nif",
+                    "propietario1_telefono",
+                    "propietario1_email",
+                    "propietario1_fecha_nacimiento",
+                    "propietario2_id",
+                    "propietario2_nombre",
+                    "propietario2_nif",
+                    "propietario2_telefono",
+                    "propietario2_email",
+                    "propietario2_fecha_nacimiento",
+                    "contraparte1_id",
+                    "contraparte2_id",
+                    "contraparte_nombre",
+                    "contraparte_nif",
+                    "contraparte_telefono",
+                    "contraparte_email",
+                    "contraparte_fecha_nacimiento",
+                    "fecha_encargo",
+                    "fecha_propuesta",
+                    "fecha_contrato",
+                    "fecha_escritura",
+                    "fecha_operacion",
+                    "precio_encargo",
+                    "precio_propuesta",
+                    "precio_contrato",
+                    "precio_escritura",
+                    "precio_renta",
+                    "desviacion_euros",
+                    "desviacion_pct",
+                    "dias_hasta_venta",
+                    "num_visitas",
+                    "honorarios",
+                    "agente",
+                    "responsable_gestion",
+                    "oficina",
+                    "doc_nota_encargo_path",
+                    "doc_propuesta_path",
+                    "doc_escritura_path",
+                    "doc_nota_simple_path",
+                    "doc_partes_visita_paths",
+                    "estado_documental",
+                    "calidad_ocr",
+                    "notas",
+                    "datos_extraidos_json",
+                ]
+                if record:
+                    set_clause = ", ".join([f"{column} = ?" for column in columns])
+                    conn.execute(
+                        f"UPDATE operaciones_inmobiliarias SET {set_clause}, updated_at = datetime(?) WHERE id = ?",
+                        (*record_values, now, record_id),
+                    )
+                else:
+                    placeholders = ", ".join(["?"] * (len(columns) + 3))
+                    conn.execute(
+                        f"""
+                        INSERT INTO operaciones_inmobiliarias (
+                          id, {", ".join(columns)}, created_at, updated_at
+                        ) VALUES ({placeholders})
+                        """,
+                        (record_id, *record_values, now, now),
+                    )
+                conn.execute(
+                    """
+                    UPDATE captaciones
+                    SET situacion_comercial = ?, fecha_conversion = ?, updated_at = datetime(?)
+                    WHERE id = ?
+                    """,
+                    (destino_label, now, now, captacion_id),
+                )
+                conn.execute(
+                    "UPDATE inmuebles SET estado = ?, updated_at = datetime(?) WHERE id = ?",
+                    (destino_label, now, captacion["inmueble_id"]),
+                )
+                conn.commit()
+                json_response(self, {"ok": True, "destino": destino_label, "id": record_id, "inmueble_id": captacion["inmueble_id"]})
+                return
+
+            fecha_alquiler = str(payload.get("fecha") or "").strip()
+            if not fecha_alquiler:
+                fecha_alquiler = datetime.now(timezone.utc).date().isoformat()
+            precio_alquiler = parse_money_value(payload.get("precio") or payload.get("precio_alquiler"))
+            if precio_alquiler is None:
+                precio_alquiler = parse_money_value(captacion["precio_objetivo"]) or parse_money_value(inmueble["precio_objetivo"])
+            alquiler = conn.execute(
+                """
+                SELECT id
+                FROM alquileres
+                WHERE empresa_id = ?
+                  AND UPPER(COALESCE(direccion, '')) = UPPER(?)
+                  AND COALESCE(fecha, '') = COALESCE(?, '')
+                ORDER BY updated_at DESC, created_at DESC
+                LIMIT 1
+                """,
+                (empresa["id"], direccion, fecha_alquiler),
+            ).fetchone()
+            alquiler_id = alquiler["id"] if alquiler else os.urandom(16).hex()
+            alquiler_values = (
+                empresa["id"],
+                fecha_alquiler,
+                direccion or None,
+                owner_value(owner1, "nombre", propietario_fallback) or None,
+                owner_value(owner1, "telefono") or None,
+                precio_alquiler,
+                None,
+                None,
+                None,
+                parse_money_value(payload.get("importe_comision")),
+                parse_money_value(payload.get("total")) or precio_alquiler,
+                normalize_person_name(payload.get("inquilino")) or None,
+                str(payload.get("inquilino_telefono") or "").strip() or None,
+                str(payload.get("agente") or captacion["asesor"] or "").strip() or None,
+                1,
+                "Manual",
+                str(payload.get("oficina") or "Estudio Velazquez").strip() or None,
+            )
+            alquiler_columns = [
+                "empresa_id",
+                "fecha",
+                "direccion",
+                "propietario",
+                "telefono",
+                "precio",
+                "seguro",
+                "hacienda",
+                "comision",
+                "importe_comision",
+                "total",
+                "inquilino",
+                "telefono2",
+                "agente",
+                "numero_alquileres",
+                "tipo",
+                "oficina",
+            ]
+            if alquiler:
+                set_clause = ", ".join([f"{column} = ?" for column in alquiler_columns])
+                conn.execute(
+                    f"UPDATE alquileres SET {set_clause}, updated_at = datetime(?) WHERE id = ?",
+                    (*alquiler_values, now, alquiler_id),
+                )
+            else:
+                placeholders = ", ".join(["?"] * (len(alquiler_columns) + 3))
+                conn.execute(
+                    f"""
+                    INSERT INTO alquileres (
+                      id, {", ".join(alquiler_columns)}, created_at, updated_at
+                    ) VALUES ({placeholders})
+                    """,
+                    (alquiler_id, *alquiler_values, now, now),
+                )
+            conn.execute(
+                """
+                UPDATE captaciones
+                SET situacion_comercial = ?, fecha_conversion = ?, updated_at = datetime(?)
+                WHERE id = ?
+                """,
+                (destino_label, now, now, captacion_id),
+            )
+            conn.execute(
+                "UPDATE inmuebles SET estado = ?, updated_at = datetime(?) WHERE id = ?",
+                (destino_label, now, captacion["inmueble_id"]),
+            )
+            conn.commit()
+            json_response(self, {"ok": True, "destino": destino_label, "id": alquiler_id, "inmueble_id": captacion["inmueble_id"]})
+            return
         elif parsed.path == "/api/inmueble_update":
             inmueble_id = payload.get("inmueble_id")
             if not inmueble_id:
@@ -18110,7 +19060,7 @@ class Handler(BaseHTTPRequestHandler):
             )
             cap_updates = {key: updates[key] for key in shared if key in updates}
             if "estado" in updates:
-                cap_updates["etapa"] = updates["estado"]
+                cap_updates["situacion_comercial"] = updates["estado"]
             if cap_updates:
                 cap_set = ", ".join([f"{key} = ?" for key in cap_updates])
                 cap_values = list(cap_updates.values()) + [now, inmueble_id]
@@ -19308,6 +20258,15 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, fetch_workspace_billing_collections(conn, workspace_id, limit=limit))
             return
 
+        if path == "/api/workspace_remesas":
+            workspace_id = params.get("workspace_id", [""])[0]
+            limit = params.get("limit", ["30"])[0]
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            json_response(self, fetch_workspace_remesas(conn, workspace_id, limit=limit))
+            return
+
         if path == "/api/workspace_clientes":
             workspace_id = params.get("workspace_id", [""])[0]
             q = params.get("q", [""])[0].strip()
@@ -19399,6 +20358,24 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, fetch_workspace_fincas_incidencias(conn, workspace_id, limit=limit))
             return
 
+        if path == "/api/workspace_fincas_proveedores":
+            workspace_id = params.get("workspace_id", [""])[0]
+            limit = params.get("limit", ["40"])[0]
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            json_response(self, fetch_workspace_fincas_proveedores(conn, workspace_id, limit=limit))
+            return
+
+        if path == "/api/workspace_fincas_juntas":
+            workspace_id = params.get("workspace_id", [""])[0]
+            limit = params.get("limit", ["40"])[0]
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            json_response(self, fetch_workspace_fincas_juntas(conn, workspace_id, limit=limit))
+            return
+
         if path == "/api/workspace_automatizacion_logs":
             workspace_id = params.get("workspace_id", [""])[0]
             limit = params.get("limit", ["50"])[0]
@@ -19418,6 +20395,32 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "portal no encontrado"}, status=404)
                 return
             json_response(self, payload)
+            return
+
+        if path == "/api/workspace_factura_pdf":
+            invoice_id = params.get("id", [""])[0]
+            workspace_id = params.get("workspace_id", [""])[0]
+            payload = fetch_workspace_invoice_pdf_payload(conn, invoice_id, workspace_id=workspace_id)
+            if not payload:
+                json_response(self, {"error": "factura no encontrada"}, status=404)
+                return
+            invoice = payload["invoice"]
+            pdf_bytes = build_workspace_invoice_pdf(payload["invoice"], payload["workspace"], payload["company"], payload["client"], payload["collections"])
+            filename = f"factura_{invoice.get('serie') or 'WS'}_{invoice.get('numero') or invoice_id}.pdf"
+            binary_response(self, pdf_bytes, content_type="application/pdf", filename=filename)
+            return
+
+        if path == "/api/workspace_factura_pdf_public":
+            invoice_id = params.get("id", [""])[0]
+            token = params.get("token", [""])[0]
+            payload = fetch_workspace_invoice_pdf_payload(conn, invoice_id, token=token)
+            if not payload:
+                json_response(self, {"error": "factura no encontrada"}, status=404)
+                return
+            invoice = payload["invoice"]
+            pdf_bytes = build_workspace_invoice_pdf(payload["invoice"], payload["workspace"], payload["company"], payload["client"], payload["collections"])
+            filename = f"factura_{invoice.get('serie') or 'WS'}_{invoice.get('numero') or invoice_id}.pdf"
+            binary_response(self, pdf_bytes, content_type="application/pdf", filename=filename)
             return
 
         if path == "/api/years":

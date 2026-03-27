@@ -1235,6 +1235,10 @@ const workspaceCollectionsForm = document.getElementById("workspaceCollectionsFo
 const workspaceCollectionsResetBtn = document.getElementById("workspaceCollectionsResetBtn");
 const workspaceCollectionsStatus = document.getElementById("workspaceCollectionsStatus");
 const workspaceCollectionsList = document.getElementById("workspaceCollectionsList");
+const workspaceRemittancesForm = document.getElementById("workspaceRemittancesForm");
+const workspaceRemittancesResetBtn = document.getElementById("workspaceRemittancesResetBtn");
+const workspaceRemittancesStatus = document.getElementById("workspaceRemittancesStatus");
+const workspaceRemittancesList = document.getElementById("workspaceRemittancesList");
 const workspaceInboxForm = document.getElementById("workspaceInboxForm");
 const workspaceInboxFile = document.getElementById("workspaceInboxFile");
 const workspaceInboxClienteLookup = document.getElementById("workspaceInboxClienteLookup");
@@ -1275,6 +1279,14 @@ const workspaceFincasIncidentForm = document.getElementById("workspaceFincasInci
 const workspaceFincasIncidentResetBtn = document.getElementById("workspaceFincasIncidentResetBtn");
 const workspaceFincasIncidentStatus = document.getElementById("workspaceFincasIncidentStatus");
 const workspaceFincasIncidentList = document.getElementById("workspaceFincasIncidentList");
+const workspaceFincasProviderForm = document.getElementById("workspaceFincasProviderForm");
+const workspaceFincasProviderResetBtn = document.getElementById("workspaceFincasProviderResetBtn");
+const workspaceFincasProviderStatus = document.getElementById("workspaceFincasProviderStatus");
+const workspaceFincasProviderList = document.getElementById("workspaceFincasProviderList");
+const workspaceFincasMeetingForm = document.getElementById("workspaceFincasMeetingForm");
+const workspaceFincasMeetingResetBtn = document.getElementById("workspaceFincasMeetingResetBtn");
+const workspaceFincasMeetingStatus = document.getElementById("workspaceFincasMeetingStatus");
+const workspaceFincasMeetingList = document.getElementById("workspaceFincasMeetingList");
 const yearSelect = document.getElementById("yearSelect");
 const densityToggle = document.getElementById("densityToggle");
 const dbStatus = document.getElementById("dbStatus");
@@ -1907,6 +1919,7 @@ const crmWorkspaceTabs = document.getElementById("crmWorkspaceTabs");
 const crmViewResumen = document.getElementById("crmViewResumen");
 const crmViewCaptaciones = document.getElementById("crmViewCaptaciones");
 const crmViewInmuebles = document.getElementById("crmViewInmuebles");
+const crmViewAlquileres = document.getElementById("crmViewAlquileres");
 const crmViewCompraventas = document.getElementById("crmViewCompraventas");
 const crmViewDemandas = document.getElementById("crmViewDemandas");
 const crmViewVisitas = document.getElementById("crmViewVisitas");
@@ -1920,6 +1933,9 @@ const crmInmuebleSearchMirror = document.getElementById("crmInmuebleSearchMirror
 const crmInmueblesTableMirror = document.getElementById("crmInmueblesTableMirror");
 const crmInmueblesInfoMirror = document.getElementById("crmInmueblesInfoMirror");
 const crmInmueblesRecentMirror = document.getElementById("crmInmueblesRecentMirror");
+const crmAlquileresTable = document.getElementById("crmAlquileresTable");
+const crmAlquileresInfo = document.getElementById("crmAlquileresInfo");
+const crmAlquilerSearch = document.getElementById("crmAlquilerSearch");
 const crmCompraventasTable = document.getElementById("crmCompraventasTable");
 const crmCompraventasInfo = document.getElementById("crmCompraventasInfo");
 const crmCompraventaSearch = document.getElementById("crmCompraventaSearch");
@@ -3880,11 +3896,13 @@ const renderWorkspaceBillingList = (rows = []) => {
               <div>
                 <strong>${row.concepto || "Movimiento sin concepto"}</strong>
                 <div class="muted">${row.empresa_nombre || "-"}${row.cliente_nombre ? ` · ${row.cliente_nombre}` : ""}</div>
+                <div class="muted">Saldo ${euroFormatter.format(Number(row.saldo_pendiente || 0))}${row.remesa_id ? " · en remesa" : ""}${row.conciliacion_estado ? ` · ${row.conciliacion_estado}` : ""}</div>
               </div>
               <div class="workspace-billing-meta">
                 <span>${row.fecha_emision || "Sin fecha"}</span>
                 <span>${euroFormatter.format(Number(row.total || 0))}</span>
                 <span>${row.estado || "Borrador"}</span>
+                <a class="secondary ghost button-inline" href="/api/workspace_factura_pdf?id=${encodeURIComponent(row.id || "")}&workspace_id=${encodeURIComponent(state.currentWorkspaceId || "")}" target="_blank" rel="noreferrer">PDF</a>
                 <button type="button" class="secondary ghost" data-billing-edit="${row.id}">Editar</button>
               </div>
             </div>
@@ -3922,6 +3940,21 @@ const hydrateWorkspaceBillingTargetSelect = () => {
         })
         .join("")
     : "<option value=''>Sin facturas</option>";
+};
+
+const hydrateWorkspaceRemittanceTargets = () => {
+  if (!workspaceRemittancesForm) return;
+  const select = workspaceRemittancesForm.querySelector('[name="factura_ids"]');
+  if (!select) return;
+  const rows = (state.workspaceBillingRows || []).filter((row) => Number(row.saldo_pendiente || 0) > 0 && !row.remesa_id);
+  select.innerHTML = rows.length
+    ? rows
+        .map((row) => {
+          const ref = [row.serie, row.numero].filter(Boolean).join("-");
+          return `<option value="${row.id}">${ref || row.id} · ${row.concepto || "Factura"} · ${euroFormatter.format(Number(row.saldo_pendiente || 0))}</option>`;
+        })
+        .join("")
+    : "<option value=''>Sin pendientes remesables</option>";
 };
 
 const fillWorkspaceCollectionsForm = (record = null) => {
@@ -3982,10 +4015,59 @@ const renderWorkspaceCollectionsList = (rows = []) => {
   });
 };
 
+const fillWorkspaceRemittancesForm = () => {
+  if (!workspaceRemittancesForm) return;
+  hydrateWorkspaceCompanySelects();
+  hydrateWorkspaceRemittanceTargets();
+  const companies = state.currentWorkspaceDetail?.companies || [];
+  const defaults = {
+    workspace_id: state.currentWorkspaceId || "",
+    empresa_id: companies[0]?.id || "",
+    servicio: "",
+    referencia: "",
+    fecha_cargo: "",
+    notas: "",
+  };
+  ["workspace_id", "empresa_id", "servicio", "referencia", "fecha_cargo", "notas"].forEach((field) => {
+    const input = workspaceRemittancesForm.querySelector(`[name="${field}"]`);
+    if (input) input.value = defaults[field] ?? "";
+  });
+};
+
+const renderWorkspaceRemittancesList = (rows = []) => {
+  if (!workspaceRemittancesList) return;
+  if (!rows.length) {
+    workspaceRemittancesList.innerHTML = "<p class='muted'>Sin remesas preparadas.</p>";
+    return;
+  }
+  workspaceRemittancesList.innerHTML = `
+    <div class="workspace-billing-list">
+      ${rows
+        .map(
+          (row) => `
+            <div class="workspace-billing-row">
+              <div>
+                <strong>${row.referencia || "-"}</strong>
+                <div class="muted">${row.empresa_nombre || "-"}${row.servicio ? ` · ${row.servicio}` : ""}</div>
+              </div>
+              <div class="workspace-billing-meta">
+                <span>${row.fecha_cargo || row.fecha_emision || "-"}</span>
+                <span>${numberFormatter.format(Number(row.facturas_total || 0))} facturas</span>
+                <span>${euroFormatter.format(Number(row.total || 0))}</span>
+                <span>${row.estado || "Preparada"}</span>
+              </div>
+            </div>
+          `
+        )
+        .join("")}
+    </div>
+  `;
+};
+
 const hydrateWorkspaceCompanySelects = () => {
   const companies = state.currentWorkspaceDetail?.companies || [];
   const html = companies.map((row) => `<option value="${row.id}">${row.nombre || "-"}</option>`).join("");
-  [workspaceBillingForm, workspaceInboxForm, workspaceSeriesForm, workspaceTimeForm, workspaceFincasCommunityForm].forEach((form) => {
+  [workspaceBillingForm, workspaceInboxForm, workspaceSeriesForm, workspaceTimeForm, workspaceFincasCommunityForm, workspaceRemittancesForm, workspaceFincasProviderForm].forEach((form) => {
     const select = form?.querySelector('[name="empresa_id"]');
     if (select) select.innerHTML = html;
   });
@@ -4131,7 +4213,7 @@ const renderWorkspacePortalList = (rows = []) => {
               <div>
                 <strong>${row.cliente_nombre || "-"}</strong>
                 <div class="muted">${row.email_acceso || "Sin email"} · ${row.estado || "Invitado"}</div>
-                <div class="muted">API pública: /api/workspace_portal_public?token=${row.token || ""}</div>
+                <div class="muted">Portal: /?portal_token=${row.token || ""}</div>
               </div>
               <div class="workspace-billing-meta">
                 <span>Token ${String(row.token || "").slice(0, 8) || "-"}</span>
@@ -4361,11 +4443,13 @@ const renderWorkspaceTimeList = (rows = []) => {
 };
 
 const hydrateWorkspaceCommunitySelect = (rows = []) => {
-  const select = workspaceFincasIncidentForm?.querySelector('[name="comunidad_id"]');
-  if (!select) return;
-  select.innerHTML = rows.length
-    ? rows.map((row) => `<option value="${row.id}">${row.nombre || "-"}</option>`).join("")
-    : "<option value=''>Sin comunidades</option>";
+  [workspaceFincasIncidentForm, workspaceFincasProviderForm, workspaceFincasMeetingForm].forEach((form) => {
+    const select = form?.querySelector('[name="comunidad_id"]');
+    if (!select) return;
+    select.innerHTML = rows.length
+      ? rows.map((row) => `<option value="${row.id}">${row.nombre || "-"}</option>`).join("")
+      : "<option value=''>Sin comunidades</option>";
+  });
 };
 
 const fillWorkspaceFincasCommunityForm = (record = null) => {
@@ -4485,6 +4569,121 @@ const renderWorkspaceFincasIncidentList = (rows = []) => {
   });
 };
 
+const fillWorkspaceFincasProviderForm = (record = null) => {
+  if (!workspaceFincasProviderForm) return;
+  hydrateWorkspaceCompanySelects();
+  const companies = state.currentWorkspaceDetail?.companies || [];
+  const payload = {
+    id: "",
+    workspace_id: state.currentWorkspaceId || "",
+    empresa_id: companies[0]?.id || "",
+    comunidad_id: "",
+    nombre: "",
+    tipo_servicio: "",
+    telefono: "",
+    email: "",
+    estado: "Activo",
+    tarifa_mensual: "",
+    notas: "",
+    ...(record || {}),
+  };
+  ["id", "workspace_id", "empresa_id", "comunidad_id", "nombre", "tipo_servicio", "telefono", "email", "estado", "tarifa_mensual", "notas"].forEach((field) => {
+    const input = workspaceFincasProviderForm.querySelector(`[name="${field}"]`);
+    if (input) input.value = payload[field] ?? "";
+  });
+};
+
+const renderWorkspaceFincasProviderList = (rows = []) => {
+  if (!workspaceFincasProviderList) return;
+  if (!rows.length) {
+    workspaceFincasProviderList.innerHTML = "<p class='muted'>Sin proveedores registrados.</p>";
+    return;
+  }
+  workspaceFincasProviderList.innerHTML = `
+    <div class="workspace-billing-list">
+      ${rows
+        .map(
+          (row) => `
+            <div class="workspace-billing-row">
+              <div>
+                <strong>${row.nombre || "-"}</strong>
+                <div class="muted">${row.tipo_servicio || "-"}${row.comunidad_nombre ? ` · ${row.comunidad_nombre}` : ""}</div>
+              </div>
+              <div class="workspace-billing-meta">
+                <span>${row.telefono || row.email || "-"}</span>
+                <span>${euroFormatter.format(Number(row.tarifa_mensual || 0))}</span>
+                <span>${row.estado || "Activo"}</span>
+                <button type="button" class="secondary ghost" data-provider-edit="${row.id}">Editar</button>
+              </div>
+            </div>
+          `
+        )
+        .join("")}
+    </div>
+  `;
+  workspaceFincasProviderList.querySelectorAll("[data-provider-edit]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const record = rows.find((row) => String(row.id || "") === String(button.dataset.providerEdit || ""));
+      if (record) fillWorkspaceFincasProviderForm(record);
+    });
+  });
+};
+
+const fillWorkspaceFincasMeetingForm = (record = null) => {
+  if (!workspaceFincasMeetingForm) return;
+  const payload = {
+    id: "",
+    workspace_id: state.currentWorkspaceId || "",
+    comunidad_id: "",
+    fecha: "",
+    tipo: "Ordinaria",
+    estado: "Planificada",
+    orden_dia: "",
+    acuerdos: "",
+    proxima_fecha: "",
+    ...(record || {}),
+  };
+  ["id", "workspace_id", "comunidad_id", "fecha", "tipo", "estado", "orden_dia", "acuerdos", "proxima_fecha"].forEach((field) => {
+    const input = workspaceFincasMeetingForm.querySelector(`[name="${field}"]`);
+    if (input) input.value = payload[field] ?? "";
+  });
+};
+
+const renderWorkspaceFincasMeetingList = (rows = []) => {
+  if (!workspaceFincasMeetingList) return;
+  if (!rows.length) {
+    workspaceFincasMeetingList.innerHTML = "<p class='muted'>Sin juntas planificadas.</p>";
+    return;
+  }
+  workspaceFincasMeetingList.innerHTML = `
+    <div class="workspace-billing-list">
+      ${rows
+        .map(
+          (row) => `
+            <div class="workspace-billing-row">
+              <div>
+                <strong>${row.comunidad_nombre || "-"}</strong>
+                <div class="muted">${row.tipo || "Junta"} · ${row.fecha || "-"}</div>
+              </div>
+              <div class="workspace-billing-meta">
+                <span>${row.estado || "Planificada"}</span>
+                <span>${row.proxima_fecha || ""}</span>
+                <button type="button" class="secondary ghost" data-meeting-edit="${row.id}">Editar</button>
+              </div>
+            </div>
+          `
+        )
+        .join("")}
+    </div>
+  `;
+  workspaceFincasMeetingList.querySelectorAll("[data-meeting-edit]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const record = rows.find((row) => String(row.id || "") === String(button.dataset.meetingEdit || ""));
+      if (record) fillWorkspaceFincasMeetingForm(record);
+    });
+  });
+};
+
 const renderWorkspaceDocumentHub = (data = {}) => {
   if (!workspaceDocumentHub) return;
   const rows = Array.isArray(data.rows) ? data.rows : [];
@@ -4575,12 +4774,13 @@ const renderWorkspaceDocumentHub = (data = {}) => {
 const loadWorkspaceDetail = async (workspaceId) => {
   if (!workspaceId) return;
   state.currentWorkspaceId = workspaceId;
-  const [detail, billing, docs, billingRows, collections, workspaceClients, health, series, inbox, portal, portalRequests, automations, automationLogs, timeRows, fincasCommunities, fincasIncidents] = await Promise.all([
+  const [detail, billing, docs, billingRows, collections, remittances, workspaceClients, health, series, inbox, portal, portalRequests, automations, automationLogs, timeRows, fincasCommunities, fincasIncidents, fincasProviders, fincasMeetings] = await Promise.all([
     api(`/api/workspace_detail?id=${encodeURIComponent(workspaceId)}`),
     api(`/api/workspace_billing_summary?workspace_id=${encodeURIComponent(workspaceId)}`),
     api(`/api/workspace_document_hub?workspace_id=${encodeURIComponent(workspaceId)}`),
     api(`/api/workspace_facturacion?workspace_id=${encodeURIComponent(workspaceId)}`),
     api(`/api/workspace_cobros?workspace_id=${encodeURIComponent(workspaceId)}`),
+    api(`/api/workspace_remesas?workspace_id=${encodeURIComponent(workspaceId)}`),
     api(`/api/workspace_clientes?workspace_id=${encodeURIComponent(workspaceId)}&limit=60`),
     api(`/api/workspace_health?workspace_id=${encodeURIComponent(workspaceId)}`),
     api(`/api/workspace_series?workspace_id=${encodeURIComponent(workspaceId)}`),
@@ -4592,6 +4792,8 @@ const loadWorkspaceDetail = async (workspaceId) => {
     api(`/api/workspace_registro_horario?workspace_id=${encodeURIComponent(workspaceId)}`),
     api(`/api/workspace_fincas_comunidades?workspace_id=${encodeURIComponent(workspaceId)}`),
     api(`/api/workspace_fincas_incidencias?workspace_id=${encodeURIComponent(workspaceId)}`),
+    api(`/api/workspace_fincas_proveedores?workspace_id=${encodeURIComponent(workspaceId)}`),
+    api(`/api/workspace_fincas_juntas?workspace_id=${encodeURIComponent(workspaceId)}`),
   ]);
   state.currentWorkspaceDetail = detail;
   state.currentWorkspaceEnabledModules = getWorkspaceEnabledModules(detail.modules || []);
@@ -4607,6 +4809,8 @@ const loadWorkspaceDetail = async (workspaceId) => {
   fillWorkspaceBillingForm();
   renderWorkspaceCollectionsList(collections.rows || []);
   fillWorkspaceCollectionsForm();
+  renderWorkspaceRemittancesList(remittances.rows || []);
+  fillWorkspaceRemittancesForm();
   renderWorkspaceSeriesList(series.rows || []);
   fillWorkspaceSeriesForm();
   renderWorkspaceInboxList(inbox.rows || []);
@@ -4625,6 +4829,10 @@ const loadWorkspaceDetail = async (workspaceId) => {
   hydrateWorkspaceCommunitySelect(fincasCommunities.rows || []);
   renderWorkspaceFincasIncidentList(fincasIncidents.rows || []);
   fillWorkspaceFincasIncidentForm();
+  renderWorkspaceFincasProviderList(fincasProviders.rows || []);
+  fillWorkspaceFincasProviderForm();
+  renderWorkspaceFincasMeetingList(fincasMeetings.rows || []);
+  fillWorkspaceFincasMeetingForm();
   renderWorkspaceDocumentHub(docs || {});
   renderWorkspaceList(state.workspaces || []);
   renderCompanyCards();
@@ -4656,6 +4864,8 @@ const loadWorkspaceCentral = async () => {
     renderWorkspaceCollectionsList([]);
     fillWorkspaceBillingForm();
     fillWorkspaceCollectionsForm();
+    renderWorkspaceRemittancesList([]);
+    fillWorkspaceRemittancesForm();
     renderWorkspaceSeriesList([]);
     fillWorkspaceSeriesForm();
     renderWorkspaceInboxList([]);
@@ -4674,6 +4884,10 @@ const loadWorkspaceCentral = async () => {
     hydrateWorkspaceCommunitySelect([]);
     renderWorkspaceFincasIncidentList([]);
     fillWorkspaceFincasIncidentForm();
+    renderWorkspaceFincasProviderList([]);
+    fillWorkspaceFincasProviderForm();
+    renderWorkspaceFincasMeetingList([]);
+    fillWorkspaceFincasMeetingForm();
     renderWorkspaceDocumentHub({});
     renderCompanyCards();
   }
@@ -5491,6 +5705,7 @@ const openWorkspacePortalPublic = async (token) => {
                               <div class="workspace-billing-meta">
                                 <span>${euroFormatter.format(Number(row.total || 0))}</span>
                                 <span>${row.cobrada ? "Cobrada" : row.estado || "Emitida"}</span>
+                                <a class="secondary ghost button-inline" href="/api/workspace_factura_pdf_public?token=${encodeURIComponent(token)}&id=${encodeURIComponent(row.id || "")}" target="_blank" rel="noreferrer">PDF</a>
                               </div>
                             </div>
                           `
@@ -10443,7 +10658,7 @@ const updateEstudioAltaTabs = () => {
 };
 
 const setCrmWorkspaceView = (view = "resumen") => {
-  const allowed = new Set(["resumen", "captaciones", "inmuebles", "compraventas", "demandas", "visitas"]);
+  const allowed = new Set(["resumen", "captaciones", "inmuebles", "alquileres", "compraventas", "demandas", "visitas"]);
   const nextView = allowed.has(view) ? view : "resumen";
   state.crmWorkspaceView = nextView;
 
@@ -10457,6 +10672,7 @@ const setCrmWorkspaceView = (view = "resumen") => {
     resumen: crmViewResumen,
     captaciones: crmViewCaptaciones,
     inmuebles: crmViewInmuebles,
+    alquileres: crmViewAlquileres,
     compraventas: crmViewCompraventas,
     demandas: crmViewDemandas,
     visitas: crmViewVisitas,
@@ -10476,6 +10692,8 @@ const setCrmWorkspaceView = (view = "resumen") => {
     loadCrmCaptaciones();
   } else if (nextView === "inmuebles") {
     loadCrmInmuebles();
+  } else if (nextView === "alquileres") {
+    loadCrmAlquileres();
   } else if (nextView === "compraventas") {
     loadCrmCompraventas();
   } else if (nextView === "demandas") {
@@ -10485,6 +10703,7 @@ const setCrmWorkspaceView = (view = "resumen") => {
   } else {
     loadCrmCaptaciones();
     loadCrmInmuebles();
+    loadCrmAlquileres();
     loadCrmCompraventas();
   }
 };
@@ -13779,6 +13998,7 @@ const renderTableInto = (data, container, infoEl, label) => {
   const showSeguroFichaAction =
     label === "Seguros" && currentTab === "seguros-crm" && state.segurosTab === "bdt";
   const showHipotecaActions = label === "Hipotecas";
+  const showCaptacionActions = label === "Captaciones" && currentTab === "crm";
   const enableColumnFilters =
     label === "Seguros" && currentTab === "seguros-crm" && state.segurosTab === "bdt";
   const segurosCompactColumns = [
@@ -13853,7 +14073,7 @@ const renderTableInto = (data, container, infoEl, label) => {
     th.textContent = "OCR";
     trHead.appendChild(th);
   }
-  if (showSeguroFichaAction || showHipotecaActions) {
+  if (showSeguroFichaAction || showHipotecaActions || showCaptacionActions) {
     const th = document.createElement("th");
     th.textContent = "Acciones";
     trHead.appendChild(th);
@@ -13874,7 +14094,7 @@ const renderTableInto = (data, container, infoEl, label) => {
     });
     if (showPdf) trFilters.appendChild(document.createElement("th"));
     if (showOcr) trFilters.appendChild(document.createElement("th"));
-    if (showSeguroFichaAction || showHipotecaActions) trFilters.appendChild(document.createElement("th"));
+    if (showSeguroFichaAction || showHipotecaActions || showCaptacionActions) trFilters.appendChild(document.createElement("th"));
     thead.appendChild(trFilters);
   }
   table.appendChild(thead);
@@ -14026,6 +14246,30 @@ const renderTableInto = (data, container, infoEl, label) => {
       td.appendChild(actions);
       tr.appendChild(td);
     }
+    if (showCaptacionActions && String(recordId || "").trim()) {
+      const td = document.createElement("td");
+      const actions = document.createElement("div");
+      actions.className = "inline-actions";
+      [
+        ["Inmueble", "inmueble", "ghost"],
+        ["Encargo", "encargo", "secondary"],
+        ["Venta", "compraventa", "secondary"],
+        ["Alquiler", "alquiler", "secondary"],
+      ].forEach(([text, destino, cssClass]) => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = cssClass;
+        btn.textContent = text;
+        btn.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          runCaptacionConversion(recordId, rowMap, destino);
+        });
+        actions.appendChild(btn);
+      });
+      td.appendChild(actions);
+      tr.appendChild(td);
+    }
     if (label === "Seguros" && currentTab === "seguros-crm" && state.segurosTab === "bdt" && String(recordId || "").trim()) {
       tr.addEventListener("click", (event) => {
         if (event.target && event.target.closest("button, input, select, a")) {
@@ -14079,6 +14323,116 @@ const renderTableInto = (data, container, infoEl, label) => {
   }
 };
 
+const buildCaptacionConversionPayload = (rowMap, destino) => {
+  const payload = {
+    captacion_id: rowMap.id,
+    destino,
+    empresa_nombre: DASHBOARD_COMPANY,
+  };
+  if (destino === "encargo") {
+    const precio = window.prompt(
+      "Precio de encargo (opcional). Déjalo vacío para mantener el actual.",
+      rowMap.precio_objetivo || ""
+    );
+    if (precio !== null && String(precio).trim()) {
+      payload.precio_encargo = String(precio).trim();
+    }
+  }
+  if (destino === "compraventa") {
+    const fecha = window.prompt(
+      "Fecha de escritura (YYYY-MM-DD, opcional).",
+      new Date().toISOString().slice(0, 10)
+    );
+    if (fecha === null) return null;
+    if (String(fecha).trim()) {
+      payload.fecha_escritura = String(fecha).trim();
+    }
+    const precio = window.prompt(
+      "Precio de venta (opcional).",
+      rowMap.precio_objetivo || ""
+    );
+    if (precio === null) return null;
+    if (String(precio).trim()) {
+      payload.precio_escritura = String(precio).trim();
+    }
+  }
+  if (destino === "alquiler") {
+    const fecha = window.prompt(
+      "Fecha de alquiler (YYYY-MM-DD, opcional).",
+      new Date().toISOString().slice(0, 10)
+    );
+    if (fecha === null) return null;
+    if (String(fecha).trim()) {
+      payload.fecha = String(fecha).trim();
+    }
+    const precio = window.prompt(
+      "Renta mensual o importe del alquiler (opcional).",
+      rowMap.precio_objetivo || ""
+    );
+    if (precio === null) return null;
+    if (String(precio).trim()) {
+      payload.precio = String(precio).trim();
+    }
+  }
+  return payload;
+};
+
+const runCaptacionConversion = async (captacionId, rowMap = {}, destino = "") => {
+  if (!captacionId || !destino) return;
+  const destinationLabel = {
+    inmueble: "Inmueble",
+    encargo: "Encargo",
+    compraventa: "Compraventa",
+    alquiler: "Alquiler",
+  }[destino] || destino;
+  const ok = window.confirm(
+    `¿Convertir la captación "${rowMap.direccion || rowMap.propietario || captacionId}" a ${destinationLabel}?`
+  );
+  if (!ok) return;
+  const payload = buildCaptacionConversionPayload({ ...rowMap, id: captacionId }, destino);
+  if (!payload) return;
+  if (crmCaptacionesInfo) {
+    crmCaptacionesInfo.textContent = `Convirtiendo a ${destinationLabel}...`;
+  }
+  try {
+    const data = await api("/api/captacion_convert", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    if (data?.error) {
+      if (crmCaptacionesInfo) {
+        crmCaptacionesInfo.textContent = data.error;
+      }
+      alert(data.error);
+      return;
+    }
+    if (crmCaptacionesInfo) {
+      crmCaptacionesInfo.textContent = `Convertida a ${destinationLabel}.`;
+    }
+    loadCrmCaptaciones();
+    loadCrmInmuebles();
+    if (destino === "compraventa") {
+      loadCrmCompraventas();
+      setCrmWorkspaceView("compraventas");
+      return;
+    }
+    if (destino === "alquiler") {
+      loadCrmAlquileres();
+      setCrmWorkspaceView("alquileres");
+      return;
+    }
+    if (destino === "inmueble" || destino === "encargo") {
+      setCrmWorkspaceView("inmuebles");
+    }
+  } catch (error) {
+    const message = error?.message || "Error al convertir la captación.";
+    if (crmCaptacionesInfo) {
+      crmCaptacionesInfo.textContent = message;
+    }
+    alert(message);
+  }
+};
+
 const loadCrmCaptaciones = () => {
   if (!crmCaptacionesTable) {
     return;
@@ -14125,6 +14479,29 @@ const loadCrmCaptaciones = () => {
       crmCaptacionesInfo,
       "Captaciones"
     );
+  });
+};
+
+const loadCrmAlquileres = () => {
+  if (!crmAlquileresTable) {
+    return;
+  }
+  const empresa = state.empresas.find((e) => e.nombre === DASHBOARD_COMPANY);
+  if (!empresa) {
+    crmAlquileresTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
+    return;
+  }
+  const params = new URLSearchParams({
+    tabla: "alquileres",
+    empresa_id: empresa.id,
+    include_id: "1",
+  });
+  const q = crmAlquilerSearch?.value?.trim() || "";
+  if (q) {
+    params.set("q", q);
+  }
+  api(`/api/tabla?${params.toString()}`).then((data) => {
+    renderTableInto(data, crmAlquileresTable, crmAlquileresInfo, "Alquileres");
   });
 };
 
@@ -14385,6 +14762,7 @@ const refreshCurrentInmuebleProfile = () => {
         title: "Captación",
         items: [
           ["Propietario", captacion.propietario],
+          ["Situación", captacion.situacion_comercial],
           ["Canal", captacion.canal],
           ["Urgencia", captacion.urgencia],
           ["Asesor", captacion.asesor],
@@ -23955,6 +24333,14 @@ if (crmCompraventaSearch) {
   });
 }
 
+if (crmAlquilerSearch) {
+  crmAlquilerSearch.addEventListener("input", () => {
+    scheduleSave("crm-alquileres-search", () => {
+      loadCrmAlquileres();
+    }, 300);
+  });
+}
+
 if (gestoriaCrmSearch) {
   const triggerGestoriaSearch = () => {
     scheduleSave("gestoria-crm-search", () => {
@@ -25545,6 +25931,8 @@ if (workspaceNewBtn) {
     fillWorkspaceBillingForm();
     renderWorkspaceCollectionsList([]);
     fillWorkspaceCollectionsForm();
+    renderWorkspaceRemittancesList([]);
+    fillWorkspaceRemittancesForm();
     renderWorkspaceSeriesList([]);
     fillWorkspaceSeriesForm();
     renderWorkspaceInboxList([]);
@@ -25563,6 +25951,10 @@ if (workspaceNewBtn) {
     hydrateWorkspaceCommunitySelect([]);
     renderWorkspaceFincasIncidentList([]);
     fillWorkspaceFincasIncidentForm();
+    renderWorkspaceFincasProviderList([]);
+    fillWorkspaceFincasProviderForm();
+    renderWorkspaceFincasMeetingList([]);
+    fillWorkspaceFincasMeetingForm();
     renderCompanyCards();
     if (workspaceFormStatus) {
       workspaceFormStatus.textContent = "Preparado para crear un workspace nuevo.";
@@ -25602,6 +25994,13 @@ if (workspaceCollectionsResetBtn) {
   workspaceCollectionsResetBtn.addEventListener("click", () => {
     fillWorkspaceCollectionsForm();
     if (workspaceCollectionsStatus) workspaceCollectionsStatus.textContent = "";
+  });
+}
+
+if (workspaceRemittancesResetBtn) {
+  workspaceRemittancesResetBtn.addEventListener("click", () => {
+    fillWorkspaceRemittancesForm();
+    if (workspaceRemittancesStatus) workspaceRemittancesStatus.textContent = "";
   });
 }
 
@@ -25710,6 +26109,20 @@ if (workspaceFincasIncidentResetBtn) {
   });
 }
 
+if (workspaceFincasProviderResetBtn) {
+  workspaceFincasProviderResetBtn.addEventListener("click", () => {
+    fillWorkspaceFincasProviderForm();
+    if (workspaceFincasProviderStatus) workspaceFincasProviderStatus.textContent = "";
+  });
+}
+
+if (workspaceFincasMeetingResetBtn) {
+  workspaceFincasMeetingResetBtn.addEventListener("click", () => {
+    fillWorkspaceFincasMeetingForm();
+    if (workspaceFincasMeetingStatus) workspaceFincasMeetingStatus.textContent = "";
+  });
+}
+
 if (workspaceInboxForm) {
   workspaceInboxForm.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -25756,6 +26169,30 @@ if (workspaceCollectionsForm) {
       await loadWorkspaceDetail(state.currentWorkspaceId);
     } catch (error) {
       if (workspaceCollectionsStatus) workspaceCollectionsStatus.textContent = error.message || "No se pudo guardar.";
+    }
+  });
+}
+
+if (workspaceRemittancesForm) {
+  workspaceRemittancesForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (workspaceRemittancesStatus) workspaceRemittancesStatus.textContent = "Preparando...";
+    const formData = new FormData(workspaceRemittancesForm);
+    const payload = Object.fromEntries(formData.entries());
+    payload.workspace_id = state.currentWorkspaceId;
+    const selected = Array.from(workspaceRemittancesForm.querySelector('[name="factura_ids"]')?.selectedOptions || []).map((option) => option.value).filter(Boolean);
+    payload.factura_ids = selected;
+    try {
+      const data = await fetch("/api/workspace_remesas", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }).then((res) => res.json());
+      if (data?.error) throw new Error(data.error);
+      if (workspaceRemittancesStatus) workspaceRemittancesStatus.textContent = `Remesa preparada por ${euroFormatter.format(Number(data.total || 0))}.`;
+      await loadWorkspaceDetail(state.currentWorkspaceId);
+    } catch (error) {
+      if (workspaceRemittancesStatus) workspaceRemittancesStatus.textContent = error.message || "No se pudo preparar la remesa.";
     }
   });
 }
@@ -25912,6 +26349,50 @@ if (workspaceFincasIncidentForm) {
       await loadWorkspaceDetail(state.currentWorkspaceId);
     } catch (error) {
       if (workspaceFincasIncidentStatus) workspaceFincasIncidentStatus.textContent = error.message || "No se pudo guardar.";
+    }
+  });
+}
+
+if (workspaceFincasProviderForm) {
+  workspaceFincasProviderForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (workspaceFincasProviderStatus) workspaceFincasProviderStatus.textContent = "Guardando...";
+    const formData = new FormData(workspaceFincasProviderForm);
+    const payload = Object.fromEntries(formData.entries());
+    payload.workspace_id = state.currentWorkspaceId;
+    try {
+      const data = await fetch("/api/workspace_fincas_proveedores", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }).then((res) => res.json());
+      if (data?.error) throw new Error(data.error);
+      if (workspaceFincasProviderStatus) workspaceFincasProviderStatus.textContent = "Proveedor guardado.";
+      await loadWorkspaceDetail(state.currentWorkspaceId);
+    } catch (error) {
+      if (workspaceFincasProviderStatus) workspaceFincasProviderStatus.textContent = error.message || "No se pudo guardar.";
+    }
+  });
+}
+
+if (workspaceFincasMeetingForm) {
+  workspaceFincasMeetingForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (workspaceFincasMeetingStatus) workspaceFincasMeetingStatus.textContent = "Guardando...";
+    const formData = new FormData(workspaceFincasMeetingForm);
+    const payload = Object.fromEntries(formData.entries());
+    payload.workspace_id = state.currentWorkspaceId;
+    try {
+      const data = await fetch("/api/workspace_fincas_juntas", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }).then((res) => res.json());
+      if (data?.error) throw new Error(data.error);
+      if (workspaceFincasMeetingStatus) workspaceFincasMeetingStatus.textContent = "Junta guardada.";
+      await loadWorkspaceDetail(state.currentWorkspaceId);
+    } catch (error) {
+      if (workspaceFincasMeetingStatus) workspaceFincasMeetingStatus.textContent = error.message || "No se pudo guardar.";
     }
   });
 }

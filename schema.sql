@@ -66,6 +66,8 @@ CREATE TABLE IF NOT EXISTS workspace_facturacion (
   impuestos REAL,
   total REAL,
   estado TEXT,
+  remesa_id TEXT,
+  conciliacion_estado TEXT,
   cobrada INTEGER NOT NULL DEFAULT 0,
   fecha_cobro TEXT,
   forma_cobro TEXT,
@@ -167,6 +169,24 @@ CREATE TABLE IF NOT EXISTS workspace_facturacion_cobros (
   FOREIGN KEY (cliente_id) REFERENCES clientes(id)
 );
 
+CREATE TABLE IF NOT EXISTS workspace_facturacion_remesas (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL,
+  empresa_id TEXT,
+  servicio TEXT,
+  referencia TEXT NOT NULL,
+  fecha_emision TEXT,
+  fecha_cargo TEXT,
+  estado TEXT NOT NULL DEFAULT 'Preparada',
+  total REAL NOT NULL DEFAULT 0,
+  facturas_total INTEGER NOT NULL DEFAULT 0,
+  notas TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (workspace_id) REFERENCES workspaces(id),
+  FOREIGN KEY (empresa_id) REFERENCES empresas(id)
+);
+
 CREATE TABLE IF NOT EXISTS workspace_portal_requerimientos (
   id TEXT PRIMARY KEY,
   workspace_id TEXT NOT NULL,
@@ -233,6 +253,41 @@ CREATE TABLE IF NOT EXISTS workspace_fincas_incidencias (
   responsable TEXT,
   fecha_apertura TEXT,
   fecha_cierre TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (workspace_id) REFERENCES workspaces(id),
+  FOREIGN KEY (comunidad_id) REFERENCES workspace_fincas_comunidades(id)
+);
+
+CREATE TABLE IF NOT EXISTS workspace_fincas_proveedores (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL,
+  comunidad_id TEXT,
+  empresa_id TEXT,
+  nombre TEXT NOT NULL,
+  tipo_servicio TEXT,
+  telefono TEXT,
+  email TEXT,
+  estado TEXT NOT NULL DEFAULT 'Activo',
+  tarifa_mensual REAL,
+  notas TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (workspace_id) REFERENCES workspaces(id),
+  FOREIGN KEY (comunidad_id) REFERENCES workspace_fincas_comunidades(id),
+  FOREIGN KEY (empresa_id) REFERENCES empresas(id)
+);
+
+CREATE TABLE IF NOT EXISTS workspace_fincas_juntas (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL,
+  comunidad_id TEXT NOT NULL,
+  fecha TEXT NOT NULL,
+  tipo TEXT,
+  estado TEXT NOT NULL DEFAULT 'Planificada',
+  orden_dia TEXT,
+  acuerdos TEXT,
+  proxima_fecha TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   FOREIGN KEY (workspace_id) REFERENCES workspaces(id),
@@ -712,6 +767,8 @@ CREATE TABLE IF NOT EXISTS captaciones (
   motivo TEXT,
   canal TEXT,
   etapa TEXT,
+  situacion_comercial TEXT,
+  fecha_conversion TEXT,
   probabilidad REAL,
   proxima_accion TEXT,
   fecha_contacto TEXT,

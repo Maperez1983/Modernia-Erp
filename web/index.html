@@ -574,6 +574,54 @@
           <div class="form-card">
             <div class="section-head">
               <div>
+                <h3>Remesas</h3>
+                <p class="muted">Agrupación de facturas pendientes para cobro por remesa y seguimiento contable.</p>
+              </div>
+            </div>
+            <form id="workspaceRemittancesForm" class="form-grid">
+              <input type="hidden" name="workspace_id" />
+              <label>
+                Empresa
+                <select name="empresa_id" required></select>
+              </label>
+              <label>
+                Servicio
+                <select name="servicio">
+                  <option value="">General</option>
+                  <option value="gestoria">Gestoría</option>
+                  <option value="seguros">Seguros</option>
+                  <option value="inmobiliaria">Inmobiliaria</option>
+                  <option value="financiacion">Financiación</option>
+                  <option value="fincas">Fincas</option>
+                </select>
+              </label>
+              <label>
+                Referencia
+                <input name="referencia" placeholder="REM-202603-01" />
+              </label>
+              <label>
+                Fecha cargo
+                <input name="fecha_cargo" type="date" />
+              </label>
+              <label class="span-2">
+                Facturas incluidas
+                <select name="factura_ids" multiple size="6" required></select>
+              </label>
+              <label class="span-2">
+                Notas
+                <textarea name="notas" rows="2"></textarea>
+              </label>
+              <div class="form-actions span-2">
+                <button type="submit">Preparar remesa</button>
+                <button type="button" id="workspaceRemittancesResetBtn" class="secondary ghost">Nueva</button>
+                <span id="workspaceRemittancesStatus" class="muted"></span>
+              </div>
+            </form>
+            <div id="workspaceRemittancesList"></div>
+          </div>
+          <div class="form-card">
+            <div class="section-head">
+              <div>
                 <h3>Requerimientos portal</h3>
                 <p class="muted">Solicitudes de documentación o acciones visibles para el cliente en su portal.</p>
               </div>
@@ -807,6 +855,120 @@
           </form>
           <div id="workspaceFincasIncidentList"></div>
         </div>
+        <div class="workspace-central-layout">
+          <div class="form-card">
+            <div class="section-head">
+              <div>
+                <h3>Proveedores de fincas</h3>
+                <p class="muted">Carpintería, limpieza, ascensores y otros terceros vinculados a comunidades.</p>
+              </div>
+            </div>
+            <form id="workspaceFincasProviderForm" class="form-grid">
+              <input type="hidden" name="id" />
+              <input type="hidden" name="workspace_id" />
+              <label>
+                Empresa
+                <select name="empresa_id" required></select>
+              </label>
+              <label>
+                Comunidad
+                <select name="comunidad_id"></select>
+              </label>
+              <label>
+                Nombre
+                <input name="nombre" required />
+              </label>
+              <label>
+                Tipo servicio
+                <input name="tipo_servicio" placeholder="Limpieza, fontanería..." />
+              </label>
+              <label>
+                Teléfono
+                <input name="telefono" />
+              </label>
+              <label>
+                Email
+                <input name="email" type="email" />
+              </label>
+              <label>
+                Estado
+                <select name="estado">
+                  <option>Activo</option>
+                  <option>Pendiente</option>
+                  <option>Bloqueado</option>
+                </select>
+              </label>
+              <label>
+                Tarifa mensual
+                <input name="tarifa_mensual" type="number" min="0" step="0.01" />
+              </label>
+              <label class="span-2">
+                Notas
+                <textarea name="notas" rows="2"></textarea>
+              </label>
+              <div class="form-actions span-2">
+                <button type="submit">Guardar proveedor</button>
+                <button type="button" id="workspaceFincasProviderResetBtn" class="secondary ghost">Nuevo</button>
+                <span id="workspaceFincasProviderStatus" class="muted"></span>
+              </div>
+            </form>
+            <div id="workspaceFincasProviderList"></div>
+          </div>
+          <div class="form-card">
+            <div class="section-head">
+              <div>
+                <h3>Juntas</h3>
+                <p class="muted">Planificación y actas resumidas de juntas de comunidades dentro del tenant.</p>
+              </div>
+            </div>
+            <form id="workspaceFincasMeetingForm" class="form-grid">
+              <input type="hidden" name="id" />
+              <input type="hidden" name="workspace_id" />
+              <label>
+                Comunidad
+                <select name="comunidad_id" required></select>
+              </label>
+              <label>
+                Fecha
+                <input name="fecha" type="date" required />
+              </label>
+              <label>
+                Tipo
+                <select name="tipo">
+                  <option>Ordinaria</option>
+                  <option>Extraordinaria</option>
+                  <option>Informativa</option>
+                </select>
+              </label>
+              <label>
+                Estado
+                <select name="estado">
+                  <option>Planificada</option>
+                  <option>Celebrada</option>
+                  <option>Cerrada</option>
+                </select>
+              </label>
+              <label class="span-2">
+                Orden del día
+                <textarea name="orden_dia" rows="3"></textarea>
+              </label>
+              <label class="span-2">
+                Acuerdos
+                <textarea name="acuerdos" rows="3"></textarea>
+              </label>
+              <label>
+                Próxima fecha
+                <input name="proxima_fecha" type="date" />
+              </label>
+              <div class="form-actions span-2">
+                <button type="submit">Guardar junta</button>
+                <button type="button" id="workspaceFincasMeetingResetBtn" class="secondary ghost">Nueva</button>
+                <span id="workspaceFincasMeetingStatus" class="muted"></span>
+              </div>
+            </form>
+            <div id="workspaceFincasMeetingList"></div>
+          </div>
+        </div>
         <div class="form-card">
           <h3>Mapa societario</h3>
           <p class="muted">Relación operativa entre empresas actuales mientras se completa la transición a tenants.</p>
@@ -1000,6 +1162,7 @@
               <button type="button" class="tab active" data-crm-view="resumen">Resumen</button>
               <button type="button" class="tab" data-crm-view="captaciones">Captaciones</button>
               <button type="button" class="tab" data-crm-view="inmuebles">Inmuebles</button>
+              <button type="button" class="tab" data-crm-view="alquileres">Alquileres</button>
               <button type="button" class="tab" data-crm-view="compraventas">Compraventas</button>
               <button type="button" class="tab" data-crm-view="demandas">Demandas</button>
               <button type="button" class="tab" data-crm-view="visitas">Visitas</button>
@@ -1039,6 +1202,7 @@
                     <div class="crm-focus-list">
                       <button type="button" class="crm-focus-link" data-crm-view="captaciones">Revisar pipeline y próximas acciones</button>
                       <button type="button" class="crm-focus-link" data-crm-view="inmuebles">Abrir fichas y documentación de inmuebles</button>
+                      <button type="button" class="crm-focus-link" data-crm-view="alquileres">Controlar cierres y rentas alquiladas</button>
                       <button type="button" class="crm-focus-link" data-crm-view="compraventas">Controlar precio salida, venta y desviación</button>
                       <button type="button" class="crm-focus-link" data-crm-view="demandas">Ver compradores activos y matching</button>
                       <button type="button" class="crm-focus-link" data-crm-view="visitas">Consultar visitas realizadas</button>
@@ -1142,6 +1306,19 @@
                     </div>
                     <div id="crmInmueblesRecentMirror" class="crm-recent"></div>
                   </div>
+                </div>
+              </div>
+              <div id="crmViewAlquileres" class="crm-workspace-view hidden">
+                <div class="form-card">
+                  <div class="section-head">
+                    <div>
+                      <h3>Alquileres</h3>
+                      <p class="muted">Operaciones alquiladas convertidas desde captación o dadas de alta manualmente.</p>
+                    </div>
+                    <input id="crmAlquilerSearch" placeholder="Buscar por dirección, propietario o inquilino..." />
+                  </div>
+                  <div id="crmAlquileresTable"></div>
+                  <div class="footer" id="crmAlquileresInfo"></div>
                 </div>
               </div>
               <div id="crmViewCompraventas" class="crm-workspace-view hidden">

@@ -1459,6 +1459,17 @@ body.crm-fin #companySummary {
   text-align: right;
 }
 
+.workspace-billing-meta .button-inline {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+}
+
+.form-grid select[multiple] {
+  min-height: 144px;
+}
+
 .workspace-mini-kpi {
   display: grid;
   gap: 4px;
