@@ -1997,6 +1997,7 @@ const inmuebleTabActividad = document.getElementById("inmuebleTabActividad");
 const inmuebleTabMapa = document.getElementById("inmuebleTabMapa");
 const inmuebleTabDocs = document.getElementById("inmuebleTabDocs");
 const inmuebleTabEstado = document.getElementById("inmuebleTabEstado");
+const inmuebleGoEstadoBtn = document.getElementById("inmuebleGoEstadoBtn");
 const inmuebleDocsForm = document.getElementById("inmuebleDocsForm");
 const inmuebleDocsFile = document.getElementById("inmuebleDocsFile");
 const inmuebleDocsStatus = document.getElementById("inmuebleDocsStatus");
@@ -4222,6 +4223,7 @@ const renderWorkspaceBudgetList = (rows = []) => {
             <span>${row.fecha || "Sin fecha"}</span>
             <span>${euroFormatter.format(Number(row.total || 0))}</span>
             <span>${row.estado || "Borrador"}</span>
+            <a class="secondary ghost button-inline" href="/api/workspace_presupuesto_pdf?id=${encodeURIComponent(row.id || "")}&workspace_id=${encodeURIComponent(state.currentWorkspaceId || "")}" target="_blank" rel="noreferrer">PDF</a>
             <button type="button" class="secondary ghost" data-budget-edit="${row.id}">Editar</button>
           </div>
         </div>
@@ -7662,6 +7664,13 @@ const INMUEBLE_FIELDS = [
   { key: "precio_objetivo", label: "Precio objetivo", type: "number" },
   { key: "precio_valoracion", label: "Precio valoración", type: "number" },
   { key: "valor_referencia", label: "Valor de referencia", type: "number" },
+  { key: "honorarios", label: "Honorarios agencia", type: "number" },
+  {
+    key: "situacion_ocupacion",
+    label: "Situación de ocupación",
+    type: "select",
+    options: ["Libre", "Ocupado", "Alquilado"],
+  },
   { key: "referencia", label: "Referencia interna", type: "text" },
   { key: "referencia_catastral", label: "Referencia catastral", type: "text" },
   { key: "lat", label: "Latitud", type: "number" },
@@ -15980,11 +15989,8 @@ const setInmuebleTab = (tab) => {
     btn.classList.toggle("active", btn.dataset.tab === tab);
   });
   if (inmuebleTabDatos) inmuebleTabDatos.classList.toggle("hidden", tab !== "datos");
-  if (inmuebleTabCaptacion) inmuebleTabCaptacion.classList.toggle("hidden", tab !== "captacion");
   if (inmuebleTabDemandas) inmuebleTabDemandas.classList.toggle("hidden", tab !== "demandas");
-  if (inmuebleTabVisitas) inmuebleTabVisitas.classList.toggle("hidden", tab !== "visitas");
   if (inmuebleTabActividad) inmuebleTabActividad.classList.toggle("hidden", tab !== "actividad");
-  if (inmuebleTabMapa) inmuebleTabMapa.classList.toggle("hidden", tab !== "mapa");
   if (inmuebleTabDocs) inmuebleTabDocs.classList.toggle("hidden", tab !== "docs");
   if (inmuebleTabEstado) inmuebleTabEstado.classList.toggle("hidden", tab !== "estado");
 };
@@ -27385,6 +27391,12 @@ if (inmuebleVentaPrecioPdfBtn) {
 if (inmuebleAlquilerDiaPdfBtn) {
   inmuebleAlquilerDiaPdfBtn.addEventListener("click", () => {
     openInmuebleConsumoPdf("alquiler_dia");
+  });
+}
+
+if (inmuebleGoEstadoBtn) {
+  inmuebleGoEstadoBtn.addEventListener("click", () => {
+    setInmuebleTab("estado");
   });
 }
 

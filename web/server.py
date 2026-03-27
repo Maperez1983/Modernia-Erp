@@ -11244,6 +11244,8 @@ def ensure_tables(db_path):
     ensure_column(conn, "acciones", "recordatorio_min", "recordatorio_min INTEGER")
     ensure_column(conn, "acciones", "inmueble_id", "inmueble_id TEXT")
     ensure_column(conn, "inmuebles", "valor_referencia", "valor_referencia REAL")
+    ensure_column(conn, "inmuebles", "honorarios", "honorarios REAL")
+    ensure_column(conn, "inmuebles", "situacion_ocupacion", "situacion_ocupacion TEXT")
     ensure_column(conn, "gestoria_contabilidad", "gestion", "gestion TEXT")
     ensure_column(conn, "gestoria_contabilidad", "seguro_id", "seguro_id TEXT")
     ensure_column(conn, "gestoria_contabilidad", "hipoteca_id", "hipoteca_id TEXT")
@@ -12547,6 +12549,54 @@ def fetch_workspace_invoice_pdf_payload(conn, invoice_id, workspace_id=None, tok
     }
 
 
+def fetch_workspace_budget_pdf_payload(conn, budget_id, workspace_id=None):
+    if not budget_id or not workspace_id:
+        return None
+    budget = conn.execute(
+        """
+        SELECT
+          p.*,
+          COALESCE(w.nombre, '') AS workspace_nombre,
+          COALESCE(e.nombre, '') AS empresa_nombre,
+          COALESCE(e.logo_url, '') AS empresa_logo_url,
+          COALESCE(c.nombre, '') AS cliente_nombre,
+          COALESCE(c.nif, '') AS cliente_nif,
+          COALESCE(c.email, '') AS cliente_email,
+          COALESCE(c.telefono, '') AS cliente_telefono
+        FROM workspace_presupuestos p
+        LEFT JOIN workspaces w ON w.id = p.workspace_id
+        LEFT JOIN empresas e ON e.id = p.empresa_id
+        LEFT JOIN clientes c ON c.id = p.cliente_id
+        WHERE p.id = ? AND p.workspace_id = ?
+        LIMIT 1
+        """,
+        (budget_id, workspace_id),
+    ).fetchone()
+    if not budget:
+        return None
+    lineas = conn.execute(
+        """
+        SELECT orden, categoria, concepto, cantidad, unidad, precio_unitario, descuento_pct, total_linea
+        FROM workspace_presupuesto_lineas
+        WHERE presupuesto_id = ?
+        ORDER BY orden ASC, created_at ASC
+        """,
+        (budget_id,),
+    ).fetchall()
+    return {
+        "budget": dict(budget),
+        "workspace": {"nombre": budget["workspace_nombre"]},
+        "company": {"nombre": budget["empresa_nombre"], "logo_url": budget["empresa_logo_url"]},
+        "client": {
+            "nombre": budget["cliente_nombre"],
+            "nif": budget["cliente_nif"],
+            "email": budget["cliente_email"],
+            "telefono": budget["cliente_telefono"],
+        },
+        "lineas": [dict(row) for row in lineas],
+    }
+
+
 def fetch_workspace_detail(conn, workspace_id):
     workspace = conn.execute(
         """
@@ -13231,6 +13281,88 @@ def build_workspace_invoice_pdf(invoice, workspace, company, client, collections
     return bytes(pdf)
 
 
+def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
+    calc = {}
+    try:
+        calc = json.loads(budget.get("calculo_json") or "{}") if budget.get("calculo_json") else {}
+        if not isinstance(calc, dict):
+            calc = {}
+    except Exception:
+        calc = {}
+    sections = [
+        (
+            "Cabecera",
+            [
+                ("Presupuesto", budget.get("titulo") or "-"),
+                ("Referencia", budget.get("id") or "-"),
+                ("Fecha", budget.get("fecha") or "-"),
+                ("Estado", budget.get("estado") or "Borrador"),
+                ("Servicio", budget.get("servicio") or "-"),
+            ],
+        ),
+        (
+            "Cliente",
+            [
+                ("Nombre", client.get("nombre") or "-"),
+                ("NIF", client.get("nif") or "-"),
+                ("Teléfono", client.get("telefono") or "-"),
+                ("Email", client.get("email") or "-"),
+            ],
+        ),
+    ]
+    if normalize_service_key(budget.get("servicio") or "") == "administracion fincas":
+        sections.append(
+            (
+                "Base de cálculo comunidad",
+                [
+                    ("Vecinos", calc.get("num_vecinos") or 0),
+                    ("Locales", calc.get("num_locales") or 0),
+                    ("Trasteros", calc.get("num_trasteros") or 0),
+                    ("Aparcamientos", calc.get("num_aparcamientos") or 0),
+                    ("Base sugerida", format_eur(calc.get("cuota_sugerida") or 0)),
+                ],
+            )
+        )
+    sections.append(
+        (
+            "Partidas presupuestadas",
+            [
+                (
+                    f"{line.get('categoria') or 'Partida'} · {line.get('concepto') or '-'}",
+                    f"{_pdf_format_number(line.get('cantidad'), 2) or '0'} {line.get('unidad') or ''} · {format_eur(line.get('precio_unitario') or 0)} · dto {_pdf_format_number(line.get('descuento_pct'), 2) or '0'}% · total {format_eur(line.get('total_linea') or 0)}",
+                )
+                for line in (lineas or [])
+            ]
+            or [("Partida principal", format_eur(budget.get("subtotal") or budget.get("total") or 0))]
+        )
+    )
+    sections.append(
+        (
+            "Resumen económico",
+            [
+                ("Subtotal", format_eur(budget.get("subtotal") or 0)),
+                ("Impuestos", format_eur(budget.get("impuestos") or 0)),
+                ("Total", format_eur(budget.get("total") or 0)),
+                ("Forma de pago", budget.get("forma_pago") or "Pendiente de definir"),
+                ("Responsable", budget.get("responsable") or "-"),
+            ],
+        )
+    )
+    if budget.get("observaciones"):
+        sections.append(("Observaciones", [budget.get("observaciones")]))
+    footer = [
+        f"Documento emitido por {company.get('nombre') or workspace.get('nombre') or 'Workspace'}.",
+        "Presupuesto editable y sujeto a aceptación expresa del cliente.",
+    ]
+    return build_branded_document_pdf(
+        "PRESUPUESTO",
+        f"{company.get('nombre') or workspace.get('nombre') or 'Workspace'} · Propuesta económica",
+        sections,
+        footer,
+        brand_logo_url=company.get("logo_url"),
+    )
+
+
 def build_inmueble_visit_sheet_pdf(company, inmueble, captacion, owners, buyer, demanda=None):
     buyer_name = str((buyer or {}).get("nombre") or "").strip() or "-"
     buyer_nif = str((buyer or {}).get("nif") or "").strip() or "-"
@@ -13329,8 +13461,20 @@ def _document_font(size=18, bold=False):
     return ImageFont.load_default()
 
 
-def _load_modernia_logo(max_width=520):
-    logo_path = ASSETS / "grupo_modernia_logo.png"
+def _load_brand_logo(logo_url=None, max_width=520):
+    logo_path = None
+    if logo_url:
+        raw = str(logo_url).strip()
+        if raw.startswith("/assets/"):
+            candidate = ASSETS / raw.replace("/assets/", "", 1)
+            if candidate.exists():
+                logo_path = candidate
+        elif raw.startswith("assets/"):
+            candidate = ROOT / raw
+            if candidate.exists():
+                logo_path = candidate
+    if logo_path is None:
+        logo_path = ASSETS / "grupo_modernia_logo.png"
     if not logo_path.exists():
         return None
     try:
@@ -13352,12 +13496,12 @@ def _pil_multiline(draw, text, font, width, line_gap=8):
     return lines, line_height, total_height
 
 
-def build_branded_document_pdf(title, subtitle, sections, footer_lines=None):
+def build_branded_document_pdf(title, subtitle, sections, footer_lines=None, brand_logo_url=None):
     footer_lines = footer_lines or []
     page_width, page_height = 1240, 1754
     margin_x, top_margin, bottom_margin = 90, 70, 90
     content_width = page_width - (margin_x * 2)
-    logo = _load_modernia_logo(max_width=560)
+    logo = _load_brand_logo(brand_logo_url, max_width=560)
     font_title = _document_font(34, bold=True)
     font_subtitle = _document_font(18, bold=False)
     font_section = _document_font(22, bold=True)
@@ -19612,9 +19756,9 @@ class Handler(BaseHTTPRequestHandler):
                     INSERT INTO inmuebles (
                       id, empresa_id, referencia, direccion, codigo_postal, poblacion, provincia, zona, tipo_inmueble,
                       m2, habitaciones, banos, precio_objetivo, precio_valoracion,
-                      valor_referencia, estado, lat, lon, created_at, updated_at
+                      valor_referencia, honorarios, situacion_ocupacion, estado, lat, lon, created_at, updated_at
                     ) VALUES (
-                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
                     )
                     """,
                     (
@@ -19633,6 +19777,8 @@ class Handler(BaseHTTPRequestHandler):
                         payload.get("precio_objetivo"),
                         payload.get("precio_valoracion"),
                         payload.get("valor_referencia"),
+                        parse_money_value(payload.get("honorarios")) or None,
+                        payload.get("situacion_ocupacion"),
                         payload.get("situacion_comercial") or payload.get("etapa") or "Noticia",
                         payload.get("lat"),
                         payload.get("lon"),
@@ -19901,6 +20047,8 @@ class Handler(BaseHTTPRequestHandler):
                         precio_encargo = parse_money_value(captacion["precio_objetivo"]) or parse_money_value(inmueble["precio_objetivo"])
                     precio_escritura = parse_money_value(payload.get("precio_escritura") or payload.get("precio_venta"))
                     honorarios = parse_money_value(payload.get("honorarios"))
+                    if honorarios is None:
+                        honorarios = parse_money_value(inmueble.get("honorarios"))
                     buyer = resolve_inmobiliaria_contact_candidate(
                         conn,
                         empresa["id"],
@@ -20202,6 +20350,8 @@ class Handler(BaseHTTPRequestHandler):
                 "precio_objetivo",
                 "precio_valoracion",
                 "valor_referencia",
+                "honorarios",
+                "situacion_ocupacion",
                 "estado",
                 "lat",
                 "lon",
@@ -20210,6 +20360,9 @@ class Handler(BaseHTTPRequestHandler):
             if not updates:
                 json_response(self, {"error": "Sin cambios"}, status=400)
                 return
+            for money_key in ("precio_objetivo", "precio_valoracion", "valor_referencia", "honorarios"):
+                if money_key in updates:
+                    updates[money_key] = parse_money_value(updates[money_key]) if updates[money_key] not in (None, "") else None
             set_clause = ", ".join([f"{key} = ?" for key in updates])
             values = list(updates.values()) + [now, inmueble_id]
             conn.execute(
@@ -21705,6 +21858,18 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "workspace_id requerido"}, status=400)
                 return
             json_response(self, fetch_workspace_presupuestos(conn, workspace_id, limit=limit))
+            return
+
+        if path == "/api/workspace_presupuesto_pdf":
+            budget_id = params.get("id", [""])[0]
+            workspace_id = params.get("workspace_id", [""])[0]
+            payload = fetch_workspace_budget_pdf_payload(conn, budget_id, workspace_id=workspace_id)
+            if not payload:
+                json_response(self, {"error": "presupuesto no encontrado"}, status=404)
+                return
+            pdf_bytes = build_workspace_budget_pdf(payload["budget"], payload["workspace"], payload["company"], payload["client"], payload["lineas"])
+            filename = f"presupuesto_{budget_id}.pdf"
+            binary_response(self, pdf_bytes, content_type="application/pdf", filename=filename)
             return
 
         if path == "/api/workspace_fincas_comunidades":
