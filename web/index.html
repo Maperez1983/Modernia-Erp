@@ -104,6 +104,10 @@
                   </select>
                 </label>
                 <label>
+                  Configuración
+                  <select name="plantilla_key" id="workspaceBudgetTemplateSelect"></select>
+                </label>
+                <label>
                   Estado
                   <select name="estado">
                     <option>Borrador</option>
@@ -146,19 +150,19 @@
                   Ref. id
                   <input name="referencia_id" placeholder="Opcional" />
                 </label>
-                <label>
+                <label data-budget-fincas="1">
                   Vecinos
                   <input name="num_vecinos" type="number" min="0" step="1" />
                 </label>
-                <label>
+                <label data-budget-fincas="1">
                   Locales
                   <input name="num_locales" type="number" min="0" step="1" />
                 </label>
-                <label>
+                <label data-budget-fincas="1">
                   Trasteros
                   <input name="num_trasteros" type="number" min="0" step="1" />
                 </label>
-                <label>
+                <label data-budget-fincas="1">
                   Aparcamientos
                   <input name="num_aparcamientos" type="number" min="0" step="1" />
                 </label>
@@ -182,6 +186,7 @@
                   Partidas
                   <textarea name="lineas_texto" rows="5" placeholder="Una línea por partida. Formato: categoría | concepto | cantidad | unidad | precio | dto%"></textarea>
                 </label>
+                <p class="muted span-2" id="workspaceBudgetConfigHelp"></p>
                 <label class="span-2">
                   Observaciones
                   <textarea name="observaciones" rows="3"></textarea>
@@ -1549,14 +1554,11 @@
                 <button class="ghost" type="button" id="inmuebleBackBtn">Volver</button>
               </div>
             </div>
-            <p class="muted">Los campos de Datos y Seguimiento son editables y se guardan automáticamente.</p>
+            <p class="muted">La ficha del inmueble es editable y se guarda automáticamente. En Datos se concentra el formulario operativo, el seguimiento comercial y la geolocalización.</p>
             <div class="tabs" id="inmuebleTabs">
               <button class="tab active" type="button" data-tab="datos">Datos</button>
-              <button class="tab" type="button" data-tab="captacion">Seguimiento</button>
               <button class="tab" type="button" data-tab="demandas">Demandas</button>
-              <button class="tab" type="button" data-tab="visitas">Visitas</button>
               <button class="tab" type="button" data-tab="actividad">Actividad</button>
-              <button class="tab" type="button" data-tab="mapa">Mapa</button>
               <button class="tab" type="button" data-tab="docs">Documentos</button>
               <button class="tab" type="button" data-tab="estado">Estado</button>
             </div>
@@ -1565,10 +1567,36 @@
                 <div id="inmuebleSummaryCard" class="inmueble-summary-card"></div>
                 <div id="inmuebleFactsPanel" class="inmueble-facts-panel"></div>
               </div>
-              <div class="grid" id="inmuebleDatosGrid"></div>
-            </div>
-            <div id="inmuebleTabCaptacion" class="hidden">
-              <div class="grid" id="inmuebleCaptacionGrid"></div>
+              <div class="form-card">
+                <div class="section-head">
+                  <div>
+                    <h3>Datos del inmueble</h3>
+                    <p class="muted">Dirección, características, precios, honorarios, situación de ocupación y coordenadas.</p>
+                  </div>
+                </div>
+                <div class="grid" id="inmuebleDatosGrid"></div>
+              </div>
+              <div class="form-card">
+                <div class="section-head">
+                  <div>
+                    <h3>Gestión comercial</h3>
+                    <p class="muted">Seguimiento del expediente, asesor responsable y próxima acción sobre la vivienda.</p>
+                  </div>
+                  <div class="form-actions">
+                    <button class="secondary" type="button" id="inmuebleGoEstadoBtn">Cambiar estado</button>
+                  </div>
+                </div>
+                <div class="grid" id="inmuebleCaptacionGrid"></div>
+              </div>
+              <div class="form-card">
+                <div class="section-head">
+                  <div>
+                    <h3>Mapa y geolocalización</h3>
+                    <p class="muted">Al informar la dirección, el sistema intenta geolocalizar el inmueble y actualiza el mapa.</p>
+                  </div>
+                </div>
+                <div id="inmuebleMap" class="map-box"></div>
+              </div>
             </div>
             <div id="inmuebleTabDemandas" class="hidden">
               <div class="form-card">
@@ -1637,10 +1665,9 @@
                   </div>
                 </form>
               </div>
-            </div>
-            <div id="inmuebleTabVisitas" class="hidden">
               <div class="form-card">
-                <h3>Agenda de visitas</h3>
+                <h3>Visitas y asignaciones</h3>
+                <p class="muted">Asigna compradores, agenda visitas y deja rastro comercial vinculado al inmueble.</p>
                 <form id="inmuebleVisitaForm" class="form-grid">
                   <label>
                     Demanda
@@ -1711,6 +1738,7 @@
                     Tipo
                     <select name="tipo">
                       <option>Llamada</option>
+                      <option>Cita de adquisición</option>
                       <option>Visita</option>
                       <option>Email</option>
                       <option>Nota interna</option>
@@ -1729,6 +1757,25 @@
                       <option>Cancelada</option>
                     </select>
                   </label>
+                  <label>
+                    Resultado
+                    <select name="resultado_cierre">
+                      <option value="">Pendiente de cierre</option>
+                      <option>Positivo</option>
+                      <option>Negativo</option>
+                      <option>Reprogramar</option>
+                      <option>No realizada</option>
+                    </select>
+                  </label>
+                  <label>
+                    Estado siguiente
+                    <select name="estado_siguiente">
+                      <option value="">Sin cambio automático</option>
+                      <option>Valoración</option>
+                      <option>Encargo</option>
+                      <option>Cerrado negativamente</option>
+                    </select>
+                  </label>
                   <label class="span-2">
                     Notas
                     <textarea name="notas" rows="2"></textarea>
@@ -1739,9 +1786,6 @@
                   </div>
                 </form>
               </div>
-            </div>
-            <div id="inmuebleTabMapa" class="hidden">
-              <div id="inmuebleMap" class="map-box"></div>
             </div>
             <div id="inmuebleTabDocs" class="hidden">
               <div class="form-card">

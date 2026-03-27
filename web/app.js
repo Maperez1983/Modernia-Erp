@@ -1281,6 +1281,8 @@ const workspaceBudgetResetBtn = document.getElementById("workspaceBudgetResetBtn
 const workspaceBudgetStatus = document.getElementById("workspaceBudgetStatus");
 const workspaceBudgetList = document.getElementById("workspaceBudgetList");
 const workspaceBudgetClienteLookup = document.getElementById("workspaceBudgetClienteLookup");
+const workspaceBudgetTemplateSelect = document.getElementById("workspaceBudgetTemplateSelect");
+const workspaceBudgetConfigHelp = document.getElementById("workspaceBudgetConfigHelp");
 const workspaceFincasCommunityForm = document.getElementById("workspaceFincasCommunityForm");
 const workspaceFincasCommunityResetBtn = document.getElementById("workspaceFincasCommunityResetBtn");
 const workspaceFincasCommunityStatus = document.getElementById("workspaceFincasCommunityStatus");
@@ -4088,6 +4090,86 @@ const parseWorkspaceBudgetLinesText = (raw = "") => {
     .filter((line) => line.concepto);
 };
 
+const WORKSPACE_BUDGET_TEMPLATES = {
+  gestoria: [
+    {
+      key: "gestoria_libre",
+      label: "Libre",
+      help: "Presupuesto totalmente editable. Úsalo para gestoría a medida o encargos no estandarizados.",
+      title: "",
+      lineas: [],
+    },
+    {
+      key: "gestoria_renta",
+      label: "Renta anual",
+      help: "Base simple para campañas de renta. Puedes tocar importe, conceptos y observaciones libremente.",
+      title: "Servicio de renta anual",
+      lineas: [
+        { categoria: "Fiscal", concepto: "Confección y presentación de declaración de renta", cantidad: 1, unidad: "servicio", precio_unitario: 0, descuento_pct: 0 },
+      ],
+    },
+    {
+      key: "gestoria_fiscal",
+      label: "Asesoría fiscal",
+      help: "Plantilla para servicios recurrentes de asesoría o gestión tributaria.",
+      title: "Servicio de asesoría fiscal",
+      lineas: [
+        { categoria: "Asesoría", concepto: "Asesoramiento fiscal y soporte operativo", cantidad: 1, unidad: "servicio", precio_unitario: 0, descuento_pct: 0 },
+      ],
+    },
+  ],
+  reformas: [
+    {
+      key: "reformas_libre",
+      label: "Libre por partidas",
+      help: "Presupuesto por partidas completamente editable. Añade una línea por concepto de obra.",
+      title: "",
+      lineas: [],
+    },
+    {
+      key: "reformas_integral",
+      label: "Reforma integral",
+      help: "Plantilla base para una reforma integral de vivienda.",
+      title: "Presupuesto de reforma integral",
+      lineas: [
+        { categoria: "Demolición", concepto: "Demoliciones y retirada de escombros", cantidad: 1, unidad: "partida", precio_unitario: 0, descuento_pct: 0 },
+        { categoria: "Albañilería", concepto: "Trabajos de albañilería y replanteo", cantidad: 1, unidad: "partida", precio_unitario: 0, descuento_pct: 0 },
+        { categoria: "Instalaciones", concepto: "Electricidad y fontanería", cantidad: 1, unidad: "partida", precio_unitario: 0, descuento_pct: 0 },
+        { categoria: "Acabados", concepto: "Pintura, carpintería y remates", cantidad: 1, unidad: "partida", precio_unitario: 0, descuento_pct: 0 },
+      ],
+    },
+    {
+      key: "reformas_bano",
+      label: "Reforma de baño",
+      help: "Plantilla rápida para cambios de baño con partidas estándar.",
+      title: "Presupuesto de reforma de baño",
+      lineas: [
+        { categoria: "Demolición", concepto: "Demolición y retirada de sanitarios/revestimientos", cantidad: 1, unidad: "partida", precio_unitario: 0, descuento_pct: 0 },
+        { categoria: "Fontanería", concepto: "Adaptación de instalaciones y desagües", cantidad: 1, unidad: "partida", precio_unitario: 0, descuento_pct: 0 },
+        { categoria: "Acabados", concepto: "Alicatado, sanitarios y remates", cantidad: 1, unidad: "partida", precio_unitario: 0, descuento_pct: 0 },
+      ],
+    },
+  ],
+  fincas: [
+    {
+      key: "fincas_calculado",
+      label: "Calculado automático",
+      help: "Calcula base mensual con 5 € por vecino y 1 € por local, trastero o aparcamiento, mínimo 60 €. Luego puedes editar el resultado.",
+      title: "Administración de comunidad",
+      lineas: [],
+    },
+    {
+      key: "fincas_completo",
+      label: "Administración + extras",
+      help: "Parte de la cuota automática y te deja añadir partidas extra para juntas, incidencias o gestiones especiales.",
+      title: "Administración de comunidad + servicios complementarios",
+      lineas: [
+        { categoria: "Gestión", concepto: "Gestión de incidencias y coordinación de proveedores", cantidad: 1, unidad: "servicio", precio_unitario: 0, descuento_pct: 0 },
+      ],
+    },
+  ],
+};
+
 const stringifyWorkspaceBudgetLines = (lines = []) =>
   (Array.isArray(lines) ? lines : [])
     .map((line) => [
@@ -4164,6 +4246,58 @@ const renderWorkspaceBudgetSummary = (rows = []) => {
   `;
 };
 
+const getWorkspaceBudgetTemplatesForService = (service) => {
+  const key = String(service || "").trim().toLowerCase();
+  return WORKSPACE_BUDGET_TEMPLATES[key] || WORKSPACE_BUDGET_TEMPLATES.gestoria;
+};
+
+const applyWorkspaceBudgetServiceMode = () => {
+  if (!workspaceBudgetForm) return;
+  const service = String(workspaceBudgetForm.querySelector('[name="servicio"]')?.value || "gestoria").trim().toLowerCase();
+  const templates = getWorkspaceBudgetTemplatesForService(service);
+  if (workspaceBudgetTemplateSelect) {
+    const current = String(workspaceBudgetTemplateSelect.value || "").trim();
+    workspaceBudgetTemplateSelect.innerHTML = templates.map((template) => `<option value="${template.key}">${template.label}</option>`).join("");
+    const nextValue = templates.some((template) => template.key === current) ? current : templates[0]?.key || "";
+    workspaceBudgetTemplateSelect.value = nextValue;
+  }
+  if (workspaceBudgetConfigHelp) {
+    const activeTemplate = templates.find((template) => template.key === String(workspaceBudgetTemplateSelect?.value || "").trim()) || templates[0];
+    workspaceBudgetConfigHelp.textContent = activeTemplate?.help || "";
+  }
+  workspaceBudgetForm.querySelectorAll("[data-budget-fincas='1']").forEach((field) => {
+    field.classList.toggle("hidden", service !== "fincas");
+  });
+  const lineasField = workspaceBudgetForm.querySelector('[name="lineas_texto"]');
+  if (lineasField) {
+    if (service === "gestoria") {
+      lineasField.placeholder = "Conceptos libres de gestoría. Una línea por servicio si quieres detalle, o déjalo vacío y trabaja con subtotal/total manual.";
+    } else if (service === "reformas") {
+      lineasField.placeholder = "Una línea por partida. Formato: categoría | concepto | cantidad | unidad | precio | dto%";
+    } else {
+      lineasField.placeholder = "Opcional. Puedes añadir extras sobre la cuota calculada: categoría | concepto | cantidad | unidad | precio | dto%";
+    }
+  }
+};
+
+const applyWorkspaceBudgetTemplate = ({ force = false } = {}) => {
+  if (!workspaceBudgetForm || !workspaceBudgetTemplateSelect) return;
+  const service = String(workspaceBudgetForm.querySelector('[name="servicio"]')?.value || "gestoria").trim().toLowerCase();
+  const templates = getWorkspaceBudgetTemplatesForService(service);
+  const template = templates.find((item) => item.key === String(workspaceBudgetTemplateSelect.value || "").trim()) || templates[0];
+  if (!template) return;
+  if (workspaceBudgetConfigHelp) workspaceBudgetConfigHelp.textContent = template.help || "";
+  const titleInput = workspaceBudgetForm.querySelector('[name="titulo"]');
+  const linesInput = workspaceBudgetForm.querySelector('[name="lineas_texto"]');
+  if (titleInput && template.title && (force || !String(titleInput.value || "").trim())) {
+    titleInput.value = template.title;
+  }
+  if (linesInput && Array.isArray(template.lineas) && (force || !String(linesInput.value || "").trim())) {
+    linesInput.value = stringifyWorkspaceBudgetLines(template.lineas);
+  }
+  syncWorkspaceBudgetComputedFields({ forceSubtotal: service !== "gestoria", forceTotal: true });
+};
+
 const fillWorkspaceBudgetForm = (record = null) => {
   if (!workspaceBudgetForm) return;
   hydrateWorkspaceCompanySelects();
@@ -4192,6 +4326,7 @@ const fillWorkspaceBudgetForm = (record = null) => {
     num_trasteros: "",
     num_aparcamientos: "",
     lineas_texto: "",
+    plantilla_key: "",
     ...(record || {}),
   };
   ["id", "workspace_id", "empresa_id", "cliente_id", "servicio", "referencia_tipo", "referencia_id", "titulo", "estado", "fecha", "responsable", "forma_pago", "observaciones", "subtotal_sugerido", "subtotal", "impuestos", "total", "num_vecinos", "num_locales", "num_trasteros", "num_aparcamientos", "lineas_texto"].forEach((field) => {
@@ -4199,6 +4334,11 @@ const fillWorkspaceBudgetForm = (record = null) => {
     if (input) input.value = payload[field] ?? "";
   });
   if (workspaceBudgetClienteLookup) workspaceBudgetClienteLookup.value = payload.cliente_lookup || "";
+  applyWorkspaceBudgetServiceMode();
+  if (workspaceBudgetTemplateSelect) {
+    const templates = getWorkspaceBudgetTemplatesForService(payload.servicio);
+    workspaceBudgetTemplateSelect.value = payload.plantilla_key && templates.some((item) => item.key === payload.plantilla_key) ? payload.plantilla_key : (templates[0]?.key || "");
+  }
   syncWorkspaceBudgetComputedFields({ forceSubtotal: !record, forceTotal: !record });
 };
 
@@ -16398,7 +16538,7 @@ const loadInmuebleActividad = (inmuebleId, empresaId) => {
     const table = document.createElement("table");
     const thead = document.createElement("thead");
     const trHead = document.createElement("tr");
-    ["fecha", "hora", "tipo", "cliente", "responsable", "estado", "notas"].forEach((col) => {
+    ["fecha", "hora", "tipo", "cliente", "responsable", "estado", "resultado", "notas", "acciones"].forEach((col) => {
       const th = document.createElement("th");
       th.textContent = formatHeader(col);
       trHead.appendChild(th);
@@ -16408,22 +16548,28 @@ const loadInmuebleActividad = (inmuebleId, empresaId) => {
     const tbody = document.createElement("tbody");
     rows.forEach((row) => {
       const tr = document.createElement("tr");
-      const values = [
-        row.fecha || "-",
-        row.hora || "-",
-        row.tipo || "-",
-        row.cliente || "-",
-        row.responsable || "-",
-        row.estado || "-",
-        row.notas || "-",
-      ];
-      const cols = ["fecha", "hora", "tipo", "cliente", "responsable", "estado", "notas"];
+      const values = [row.fecha || "-", row.hora || "-", row.tipo || "-", row.cliente || "-", row.responsable || "-", row.estado || "-", row.resultado_cierre || "-", row.notas || "-"];
+      const cols = ["fecha", "hora", "tipo", "cliente", "responsable", "estado", "resultado", "notas"];
       values.forEach((value, idx) => {
         const td = document.createElement("td");
         const formatted = formatCell(cols[idx], value);
         td.textContent = formatted === null ? "" : formatted;
         tr.appendChild(td);
       });
+      const actionsTd = document.createElement("td");
+      const isAcquisition = String(row.tipo || "").trim().toLowerCase() === "cita de adquisición";
+      const isPending = String(row.estado || "").trim().toLowerCase() === "pendiente";
+      if (isAcquisition && isPending) {
+        const closeBtn = document.createElement("button");
+        closeBtn.type = "button";
+        closeBtn.className = "secondary";
+        closeBtn.textContent = "Cerrar cita";
+        closeBtn.addEventListener("click", () => closeInmuebleAcquisitionAction(row, empresaId));
+        actionsTd.appendChild(closeBtn);
+      } else {
+        actionsTd.textContent = "-";
+      }
+      tr.appendChild(actionsTd);
       tbody.appendChild(tr);
     });
     table.appendChild(tbody);
@@ -16433,6 +16579,61 @@ const loadInmuebleActividad = (inmuebleId, empresaId) => {
       inmuebleActividadInfo.textContent = `Mostrando ${rows.length} acciones.`;
     }
   });
+};
+
+const closeInmuebleAcquisitionAction = (row, empresaId) => {
+  const raw = window.prompt(
+    "Resultado de la cita de adquisición:\n1. Positivo\n2. Negativo\n3. Reprogramar\n4. No realizada",
+    "1"
+  );
+  if (raw === null) return;
+  const resultMap = {
+    "1": "Positivo",
+    "2": "Negativo",
+    "3": "Reprogramar",
+    "4": "No realizada",
+  };
+  const resultado = resultMap[String(raw).trim()];
+  if (!resultado) {
+    alert("Resultado no válido.");
+    return;
+  }
+  let estado = "Completada";
+  let estadoSiguiente = "";
+  if (resultado === "Positivo") {
+    estadoSiguiente = window.confirm("¿Pasar el inmueble a Encargo?") ? "Encargo" : "";
+  } else if (resultado === "Negativo") {
+    estadoSiguiente = window.confirm("¿Cerrar el inmueble negativamente?") ? "Cerrado negativamente" : "";
+  } else {
+    estado = "Cancelada";
+  }
+  fetch("/api/acciones_update", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      id: row.id,
+      estado,
+      resultado_cierre: resultado,
+      estado_siguiente: estadoSiguiente,
+    }),
+  })
+    .then((res) => res.json())
+    .then((data) => {
+      if (data?.error) {
+        alert(data.error);
+        return;
+      }
+      if (inmuebleActividadStatus) {
+        inmuebleActividadStatus.textContent = `Cita cerrada con resultado ${resultado}.`;
+      }
+      if (state.currentInmuebleId && empresaId) {
+        loadInmuebleActividad(state.currentInmuebleId, empresaId);
+        openInmuebleDetail(state.currentInmuebleId, state.currentInmuebleOriginView || "inmuebles");
+      }
+    })
+    .catch(() => {
+      alert("No se pudo cerrar la cita.");
+    });
 };
 
 const loadGestoriaCrm = async () => {
@@ -26880,6 +27081,12 @@ if (workspaceBudgetResetBtn) {
   });
 }
 
+if (workspaceBudgetTemplateSelect) {
+  workspaceBudgetTemplateSelect.addEventListener("change", () => {
+    applyWorkspaceBudgetTemplate({ force: true });
+  });
+}
+
 if (workspaceCollectionsResetBtn) {
   workspaceCollectionsResetBtn.addEventListener("click", () => {
     fillWorkspaceCollectionsForm();
@@ -26933,6 +27140,10 @@ if (workspaceBudgetForm) {
       if (!(target instanceof HTMLElement)) return;
       const watched = new Set(["servicio", "subtotal", "impuestos", "total", "num_vecinos", "num_locales", "num_trasteros", "num_aparcamientos", "lineas_texto"]);
       const fieldName = target.getAttribute("name") || "";
+      if (fieldName === "servicio") {
+        applyWorkspaceBudgetServiceMode();
+        applyWorkspaceBudgetTemplate({ force: true });
+      }
       if (watched.has(fieldName)) {
         syncWorkspaceBudgetComputedFields({ forceSubtotal: fieldName === "servicio", forceTotal: fieldName !== "total" });
       }
@@ -28793,6 +29004,20 @@ if (inmuebleActividadForm) {
     }
     const formData = new FormData(inmuebleActividadForm);
     const payload = Object.fromEntries(formData.entries());
+    const tipo = String(payload.tipo || "").trim();
+    const estado = String(payload.estado || "").trim() || "Pendiente";
+    if (tipo.toLowerCase() !== "cita de adquisición") {
+      payload.resultado_cierre = "";
+      payload.estado_siguiente = "";
+    } else if (estado.toLowerCase() === "pendiente") {
+      payload.resultado_cierre = "";
+      payload.estado_siguiente = "";
+    } else if (!String(payload.resultado_cierre || "").trim()) {
+      if (inmuebleActividadStatus) {
+        inmuebleActividadStatus.textContent = "La cita de adquisición debe cerrarse con resultado.";
+      }
+      return;
+    }
     Object.assign(
       payload,
       resolveClienteFromInput(inmuebleActividadClienteInput, inmuebleActividadClienteId)
