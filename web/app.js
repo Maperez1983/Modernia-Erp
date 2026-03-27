@@ -1231,6 +1231,23 @@ const workspaceBillingStatus = document.getElementById("workspaceBillingStatus")
 const workspaceBillingResetBtn = document.getElementById("workspaceBillingResetBtn");
 const workspaceBillingClienteLookup = document.getElementById("workspaceBillingClienteLookup");
 const workspaceClientOptions = document.getElementById("workspaceClientOptions");
+const workspaceInboxForm = document.getElementById("workspaceInboxForm");
+const workspaceInboxClienteLookup = document.getElementById("workspaceInboxClienteLookup");
+const workspaceInboxResetBtn = document.getElementById("workspaceInboxResetBtn");
+const workspaceInboxStatus = document.getElementById("workspaceInboxStatus");
+const workspaceInboxList = document.getElementById("workspaceInboxList");
+const workspaceSeriesForm = document.getElementById("workspaceSeriesForm");
+const workspaceSeriesResetBtn = document.getElementById("workspaceSeriesResetBtn");
+const workspaceSeriesStatus = document.getElementById("workspaceSeriesStatus");
+const workspaceSeriesList = document.getElementById("workspaceSeriesList");
+const workspacePortalForm = document.getElementById("workspacePortalForm");
+const workspacePortalClienteLookup = document.getElementById("workspacePortalClienteLookup");
+const workspacePortalStatus = document.getElementById("workspacePortalStatus");
+const workspacePortalList = document.getElementById("workspacePortalList");
+const workspaceAutomationForm = document.getElementById("workspaceAutomationForm");
+const workspaceAutomationResetBtn = document.getElementById("workspaceAutomationResetBtn");
+const workspaceAutomationStatus = document.getElementById("workspaceAutomationStatus");
+const workspaceAutomationList = document.getElementById("workspaceAutomationList");
 const agendaSection = document.getElementById("agendaSection");
 const agendaBackBtn = document.getElementById("agendaBackBtn");
 const agendaGeneral = document.getElementById("agendaGeneral");
@@ -3455,11 +3472,19 @@ const WORKSPACE_LAUNCHERS = {
   facturas_recibidas: {
     label: "Facturas Recibidas",
     actionLabel: "Ver inbox",
-    action: () => workspaceDocumentHub?.scrollIntoView({ behavior: "smooth", block: "start" }),
+    action: () => workspaceInboxForm?.scrollIntoView({ behavior: "smooth", block: "start" }),
   },
-  portal_cliente: { label: "Portal Cliente", actionLabel: "Próximo", action: null },
+  portal_cliente: {
+    label: "Portal Cliente",
+    actionLabel: "Gestionar",
+    action: () => workspacePortalForm?.scrollIntoView({ behavior: "smooth", block: "start" }),
+  },
   registro_horario: { label: "Registro Horario", actionLabel: "Próximo", action: null },
-  automatizaciones: { label: "Automatizaciones", actionLabel: "Próximo", action: null },
+  automatizaciones: {
+    label: "Automatizaciones",
+    actionLabel: "Gestionar",
+    action: () => workspaceAutomationForm?.scrollIntoView({ behavior: "smooth", block: "start" }),
+  },
 };
 
 const syncWorkspaceClientOptions = (rows = []) => {
@@ -3777,13 +3802,8 @@ const renderWorkspaceBillingSummary = (data = {}) => {
 
 const fillWorkspaceBillingForm = (record = null) => {
   if (!workspaceBillingForm) return;
+  hydrateWorkspaceCompanySelects();
   const companies = state.currentWorkspaceDetail?.companies || [];
-  const companySelect = workspaceBillingForm.querySelector('[name="empresa_id"]');
-  if (companySelect) {
-    companySelect.innerHTML = companies
-      .map((row) => `<option value="${row.id}">${row.nombre || "-"}</option>`)
-      .join("");
-  }
   const emptyRecord = {
     id: "",
     workspace_id: state.currentWorkspaceId || "",
@@ -3791,6 +3811,8 @@ const fillWorkspaceBillingForm = (record = null) => {
     cliente_id: "",
     cliente_lookup: "",
     servicio: "",
+    serie: "",
+    numero: "",
     fecha_emision: "",
     fecha_vencimiento: "",
     subtotal: "",
@@ -3804,7 +3826,7 @@ const fillWorkspaceBillingForm = (record = null) => {
     notas: "",
   };
   const payload = { ...emptyRecord, ...(record || {}) };
-  ["id", "workspace_id", "empresa_id", "cliente_id", "servicio", "fecha_emision", "fecha_vencimiento", "subtotal", "impuestos", "total", "estado", "forma_cobro", "responsable", "concepto", "notas"].forEach((field) => {
+  ["id", "workspace_id", "empresa_id", "cliente_id", "servicio", "serie", "numero", "fecha_emision", "fecha_vencimiento", "subtotal", "impuestos", "total", "estado", "forma_cobro", "responsable", "concepto", "notas"].forEach((field) => {
     const input = workspaceBillingForm.querySelector(`[name="${field}"]`);
     if (!input) return;
     input.value = payload[field] ?? "";
@@ -3856,6 +3878,224 @@ const renderWorkspaceBillingList = (rows = []) => {
       fillWorkspaceBillingForm({ ...record, cliente_lookup: clientLabel });
       if (workspaceBillingStatus) workspaceBillingStatus.textContent = "Editando movimiento existente.";
       workspaceBillingForm?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  });
+};
+
+const hydrateWorkspaceCompanySelects = () => {
+  const companies = state.currentWorkspaceDetail?.companies || [];
+  const html = companies.map((row) => `<option value="${row.id}">${row.nombre || "-"}</option>`).join("");
+  [workspaceBillingForm, workspaceInboxForm, workspaceSeriesForm].forEach((form) => {
+    const select = form?.querySelector('[name="empresa_id"]');
+    if (select) select.innerHTML = html;
+  });
+};
+
+const fillWorkspaceInboxForm = (record = null) => {
+  if (!workspaceInboxForm) return;
+  hydrateWorkspaceCompanySelects();
+  const companies = state.currentWorkspaceDetail?.companies || [];
+  const payload = {
+    id: "",
+    workspace_id: state.currentWorkspaceId || "",
+    empresa_id: companies[0]?.id || "",
+    cliente_id: "",
+    suggested_cliente_id: "",
+    servicio: "",
+    nombre: "",
+    tipo: "",
+    clasificacion: "",
+    canal_entrada: "Email",
+    prioridad: "Normal",
+    estado: "Pendiente",
+    notas: "",
+    ...(record || {}),
+  };
+  ["id", "workspace_id", "empresa_id", "cliente_id", "suggested_cliente_id", "servicio", "nombre", "tipo", "clasificacion", "canal_entrada", "prioridad", "estado", "notas"].forEach((field) => {
+    const input = workspaceInboxForm.querySelector(`[name="${field}"]`);
+    if (input) input.value = payload[field] ?? "";
+  });
+  if (workspaceInboxClienteLookup) {
+    workspaceInboxClienteLookup.value = payload.cliente_lookup || payload.suggested_cliente_lookup || "";
+  }
+};
+
+const renderWorkspaceInboxList = (rows = []) => {
+  if (!workspaceInboxList) return;
+  if (!rows.length) {
+    workspaceInboxList.innerHTML = "<p class='muted'>Sin documentos en inbox.</p>";
+    return;
+  }
+  workspaceInboxList.innerHTML = `
+    <div class="workspace-billing-list">
+      ${rows
+        .map(
+          (row) => `
+            <div class="workspace-billing-row">
+              <div>
+                <strong>${row.nombre || "Documento"}</strong>
+                <div class="muted">${row.empresa_nombre || "-"} · ${row.servicio || "sin servicio"} · ${row.estado || "Pendiente"}</div>
+                ${row.suggested_cliente_nombre ? `<div class="workspace-document-suggestion">Cliente sugerido: ${row.suggested_cliente_nombre}</div>` : ""}
+              </div>
+              <div class="workspace-billing-meta">
+                <span>${row.canal_entrada || "Manual"}</span>
+                <span>${row.prioridad || "Normal"}</span>
+                <button type="button" class="secondary ghost" data-inbox-edit="${row.id}">Editar</button>
+              </div>
+            </div>
+          `
+        )
+        .join("")}
+    </div>
+  `;
+  workspaceInboxList.querySelectorAll("[data-inbox-edit]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const record = rows.find((row) => String(row.id || "") === String(button.dataset.inboxEdit || ""));
+      if (!record) return;
+      const lookup = record.suggested_cliente_nombre || record.cliente_nombre || "";
+      fillWorkspaceInboxForm({ ...record, suggested_cliente_lookup: lookup });
+    });
+  });
+};
+
+const fillWorkspaceSeriesForm = (record = null) => {
+  if (!workspaceSeriesForm) return;
+  hydrateWorkspaceCompanySelects();
+  const companies = state.currentWorkspaceDetail?.companies || [];
+  const payload = {
+    id: "",
+    workspace_id: state.currentWorkspaceId || "",
+    empresa_id: companies[0]?.id || "",
+    servicio: "",
+    serie: "",
+    prefijo: "",
+    siguiente_numero: 1,
+    activa: 1,
+    ...(record || {}),
+  };
+  ["id", "workspace_id", "empresa_id", "servicio", "serie", "prefijo", "siguiente_numero"].forEach((field) => {
+    const input = workspaceSeriesForm.querySelector(`[name="${field}"]`);
+    if (input) input.value = payload[field] ?? "";
+  });
+  const activeInput = workspaceSeriesForm.querySelector('[name="activa"]');
+  if (activeInput) activeInput.checked = Number(payload.activa || 0) === 1;
+};
+
+const renderWorkspaceSeriesList = (rows = []) => {
+  if (!workspaceSeriesList) return;
+  if (!rows.length) {
+    workspaceSeriesList.innerHTML = "<p class='muted'>Sin series configuradas.</p>";
+    return;
+  }
+  workspaceSeriesList.innerHTML = `
+    <div class="workspace-billing-list">
+      ${rows
+        .map(
+          (row) => `
+            <div class="workspace-billing-row">
+              <div>
+                <strong>${row.serie || "-"}</strong>
+                <div class="muted">${row.empresa_nombre || "-"}${row.servicio ? ` · ${row.servicio}` : ""}</div>
+              </div>
+              <div class="workspace-billing-meta">
+                <span>Prefijo ${row.prefijo || "-"}</span>
+                <span>Siguiente ${numberFormatter.format(Number(row.siguiente_numero || 1))}</span>
+                <button type="button" class="secondary ghost" data-series-edit="${row.id}">Editar</button>
+              </div>
+            </div>
+          `
+        )
+        .join("")}
+    </div>
+  `;
+  workspaceSeriesList.querySelectorAll("[data-series-edit]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const record = rows.find((row) => String(row.id || "") === String(button.dataset.seriesEdit || ""));
+      if (record) fillWorkspaceSeriesForm(record);
+    });
+  });
+};
+
+const renderWorkspacePortalList = (rows = []) => {
+  if (!workspacePortalList) return;
+  if (!rows.length) {
+    workspacePortalList.innerHTML = "<p class='muted'>Sin clientes con portal activado.</p>";
+    return;
+  }
+  workspacePortalList.innerHTML = `
+    <div class="workspace-billing-list">
+      ${rows
+        .map(
+          (row) => `
+            <div class="workspace-billing-row">
+              <div>
+                <strong>${row.cliente_nombre || "-"}</strong>
+                <div class="muted">${row.email_acceso || "Sin email"} · ${row.estado || "Invitado"}</div>
+              </div>
+              <div class="workspace-billing-meta">
+                <span>Token ${String(row.token || "").slice(0, 8) || "-"}</span>
+                <span>${row.ultimo_acceso_at || "Sin acceso"}</span>
+              </div>
+            </div>
+          `
+        )
+        .join("")}
+    </div>
+  `;
+};
+
+const fillWorkspaceAutomationForm = (record = null) => {
+  if (!workspaceAutomationForm) return;
+  const payload = {
+    id: "",
+    workspace_id: state.currentWorkspaceId || "",
+    nombre: "",
+    trigger_key: "document_uploaded",
+    modulo_key: "",
+    enabled: 1,
+    action_summary: "",
+    config_json: "{}",
+    ...(record || {}),
+  };
+  ["id", "workspace_id", "nombre", "trigger_key", "modulo_key", "action_summary", "config_json"].forEach((field) => {
+    const input = workspaceAutomationForm.querySelector(`[name="${field}"]`);
+    if (input) input.value = payload[field] ?? "";
+  });
+  const enabledInput = workspaceAutomationForm.querySelector('[name="enabled"]');
+  if (enabledInput) enabledInput.checked = Number(payload.enabled || 0) === 1;
+};
+
+const renderWorkspaceAutomationList = (rows = []) => {
+  if (!workspaceAutomationList) return;
+  if (!rows.length) {
+    workspaceAutomationList.innerHTML = "<p class='muted'>Sin automatizaciones configuradas.</p>";
+    return;
+  }
+  workspaceAutomationList.innerHTML = `
+    <div class="workspace-billing-list">
+      ${rows
+        .map(
+          (row) => `
+            <div class="workspace-billing-row">
+              <div>
+                <strong>${row.nombre || "-"}</strong>
+                <div class="muted">${row.trigger_key || "-"}${row.modulo_key ? ` · ${row.modulo_key}` : ""}</div>
+              </div>
+              <div class="workspace-billing-meta">
+                <span>${row.enabled ? "Activa" : "Pausada"}</span>
+                <span>${row.action_summary || "-"}</span>
+                <button type="button" class="secondary ghost" data-automation-edit="${row.id}">Editar</button>
+              </div>
+            </div>
+          `
+        )
+        .join("")}
+    </div>
+  `;
+  workspaceAutomationList.querySelectorAll("[data-automation-edit]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const record = rows.find((row) => String(row.id || "") === String(button.dataset.automationEdit || ""));
+      if (record) fillWorkspaceAutomationForm(record);
     });
   });
 };
@@ -3950,13 +4190,17 @@ const renderWorkspaceDocumentHub = (data = {}) => {
 const loadWorkspaceDetail = async (workspaceId) => {
   if (!workspaceId) return;
   state.currentWorkspaceId = workspaceId;
-  const [detail, billing, docs, billingRows, workspaceClients, health] = await Promise.all([
+  const [detail, billing, docs, billingRows, workspaceClients, health, series, inbox, portal, automations] = await Promise.all([
     api(`/api/workspace_detail?id=${encodeURIComponent(workspaceId)}`),
     api(`/api/workspace_billing_summary?workspace_id=${encodeURIComponent(workspaceId)}`),
     api(`/api/workspace_document_hub?workspace_id=${encodeURIComponent(workspaceId)}`),
     api(`/api/workspace_facturacion?workspace_id=${encodeURIComponent(workspaceId)}`),
     api(`/api/workspace_clientes?workspace_id=${encodeURIComponent(workspaceId)}&limit=60`),
     api(`/api/workspace_health?workspace_id=${encodeURIComponent(workspaceId)}`),
+    api(`/api/workspace_series?workspace_id=${encodeURIComponent(workspaceId)}`),
+    api(`/api/workspace_inbox?workspace_id=${encodeURIComponent(workspaceId)}`),
+    api(`/api/workspace_portal?workspace_id=${encodeURIComponent(workspaceId)}`),
+    api(`/api/workspace_automatizaciones?workspace_id=${encodeURIComponent(workspaceId)}`),
   ]);
   state.currentWorkspaceDetail = detail;
   state.currentWorkspaceEnabledModules = getWorkspaceEnabledModules(detail.modules || []);
@@ -3970,6 +4214,13 @@ const loadWorkspaceDetail = async (workspaceId) => {
   renderWorkspaceBillingSummary(billing || {});
   renderWorkspaceBillingList(billingRows.rows || []);
   fillWorkspaceBillingForm();
+  renderWorkspaceSeriesList(series.rows || []);
+  fillWorkspaceSeriesForm();
+  renderWorkspaceInboxList(inbox.rows || []);
+  fillWorkspaceInboxForm();
+  renderWorkspacePortalList(portal.rows || []);
+  renderWorkspaceAutomationList(automations.rows || []);
+  fillWorkspaceAutomationForm();
   renderWorkspaceDocumentHub(docs || {});
   renderWorkspaceList(state.workspaces || []);
   renderCompanyCards();
@@ -3999,6 +4250,13 @@ const loadWorkspaceCentral = async () => {
     renderWorkspaceBillingSummary({});
     renderWorkspaceBillingList([]);
     fillWorkspaceBillingForm();
+    renderWorkspaceSeriesList([]);
+    fillWorkspaceSeriesForm();
+    renderWorkspaceInboxList([]);
+    fillWorkspaceInboxForm();
+    renderWorkspacePortalList([]);
+    renderWorkspaceAutomationList([]);
+    fillWorkspaceAutomationForm();
     renderWorkspaceDocumentHub({});
     renderCompanyCards();
   }
@@ -24667,6 +24925,13 @@ if (workspaceNewBtn) {
     renderWorkspaceBillingList([]);
     syncWorkspaceClientOptions([]);
     fillWorkspaceBillingForm();
+    renderWorkspaceSeriesList([]);
+    fillWorkspaceSeriesForm();
+    renderWorkspaceInboxList([]);
+    fillWorkspaceInboxForm();
+    renderWorkspacePortalList([]);
+    renderWorkspaceAutomationList([]);
+    fillWorkspaceAutomationForm();
     renderCompanyCards();
     if (workspaceFormStatus) {
       workspaceFormStatus.textContent = "Preparado para crear un workspace nuevo.";
@@ -24730,6 +24995,141 @@ if (workspaceBillingForm) {
       fillWorkspaceBillingForm();
     } catch (error) {
       if (workspaceBillingStatus) workspaceBillingStatus.textContent = error.message || "No se pudo guardar.";
+    }
+  });
+}
+
+const syncWorkspaceLookupField = async (inputEl, targetForm, targetFieldName) => {
+  const value = inputEl?.value?.trim() || "";
+  const hidden = targetForm?.querySelector(`[name="${targetFieldName}"]`);
+  const matched = state.workspaceClientOptionMap.get(value);
+  if (hidden) hidden.value = matched?.id || "";
+  if (value.length >= 2) {
+    try {
+      await fetchWorkspaceClientOptions(value);
+    } catch (_) {
+      // best effort
+    }
+  }
+};
+
+if (workspaceInboxClienteLookup) {
+  workspaceInboxClienteLookup.addEventListener("input", () => syncWorkspaceLookupField(workspaceInboxClienteLookup, workspaceInboxForm, "suggested_cliente_id"));
+  workspaceInboxClienteLookup.addEventListener("change", () => syncWorkspaceLookupField(workspaceInboxClienteLookup, workspaceInboxForm, "suggested_cliente_id"));
+}
+
+if (workspacePortalClienteLookup) {
+  workspacePortalClienteLookup.addEventListener("input", () => syncWorkspaceLookupField(workspacePortalClienteLookup, workspacePortalForm, "cliente_id"));
+  workspacePortalClienteLookup.addEventListener("change", () => syncWorkspaceLookupField(workspacePortalClienteLookup, workspacePortalForm, "cliente_id"));
+}
+
+if (workspaceInboxResetBtn) {
+  workspaceInboxResetBtn.addEventListener("click", () => {
+    fillWorkspaceInboxForm();
+    if (workspaceInboxStatus) workspaceInboxStatus.textContent = "";
+  });
+}
+
+if (workspaceSeriesResetBtn) {
+  workspaceSeriesResetBtn.addEventListener("click", () => {
+    fillWorkspaceSeriesForm();
+    if (workspaceSeriesStatus) workspaceSeriesStatus.textContent = "";
+  });
+}
+
+if (workspaceAutomationResetBtn) {
+  workspaceAutomationResetBtn.addEventListener("click", () => {
+    fillWorkspaceAutomationForm();
+    if (workspaceAutomationStatus) workspaceAutomationStatus.textContent = "";
+  });
+}
+
+if (workspaceInboxForm) {
+  workspaceInboxForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (workspaceInboxStatus) workspaceInboxStatus.textContent = "Guardando...";
+    const formData = new FormData(workspaceInboxForm);
+    const payload = Object.fromEntries(formData.entries());
+    payload.workspace_id = state.currentWorkspaceId;
+    try {
+      const data = await fetch("/api/workspace_inbox", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }).then((res) => res.json());
+      if (data?.error) throw new Error(data.error);
+      if (workspaceInboxStatus) workspaceInboxStatus.textContent = "Documento añadido al inbox.";
+      await loadWorkspaceDetail(state.currentWorkspaceId);
+    } catch (error) {
+      if (workspaceInboxStatus) workspaceInboxStatus.textContent = error.message || "No se pudo guardar.";
+    }
+  });
+}
+
+if (workspaceSeriesForm) {
+  workspaceSeriesForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (workspaceSeriesStatus) workspaceSeriesStatus.textContent = "Guardando...";
+    const formData = new FormData(workspaceSeriesForm);
+    const payload = Object.fromEntries(formData.entries());
+    payload.workspace_id = state.currentWorkspaceId;
+    payload.activa = workspaceSeriesForm.querySelector('[name="activa"]')?.checked ? 1 : 0;
+    try {
+      const data = await fetch("/api/workspace_series", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }).then((res) => res.json());
+      if (data?.error) throw new Error(data.error);
+      if (workspaceSeriesStatus) workspaceSeriesStatus.textContent = "Serie guardada.";
+      await loadWorkspaceDetail(state.currentWorkspaceId);
+    } catch (error) {
+      if (workspaceSeriesStatus) workspaceSeriesStatus.textContent = error.message || "No se pudo guardar.";
+    }
+  });
+}
+
+if (workspacePortalForm) {
+  workspacePortalForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (workspacePortalStatus) workspacePortalStatus.textContent = "Activando...";
+    const formData = new FormData(workspacePortalForm);
+    const payload = Object.fromEntries(formData.entries());
+    payload.workspace_id = state.currentWorkspaceId;
+    try {
+      const data = await fetch("/api/workspace_portal", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }).then((res) => res.json());
+      if (data?.error) throw new Error(data.error);
+      if (workspacePortalStatus) workspacePortalStatus.textContent = `Portal activado. Token ${String(data.token || "").slice(0, 8)}`;
+      await loadWorkspaceDetail(state.currentWorkspaceId);
+    } catch (error) {
+      if (workspacePortalStatus) workspacePortalStatus.textContent = error.message || "No se pudo activar.";
+    }
+  });
+}
+
+if (workspaceAutomationForm) {
+  workspaceAutomationForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (workspaceAutomationStatus) workspaceAutomationStatus.textContent = "Guardando...";
+    const formData = new FormData(workspaceAutomationForm);
+    const payload = Object.fromEntries(formData.entries());
+    payload.workspace_id = state.currentWorkspaceId;
+    payload.enabled = workspaceAutomationForm.querySelector('[name="enabled"]')?.checked ? 1 : 0;
+    try {
+      const data = await fetch("/api/workspace_automatizaciones", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }).then((res) => res.json());
+      if (data?.error) throw new Error(data.error);
+      if (workspaceAutomationStatus) workspaceAutomationStatus.textContent = "Automatización guardada.";
+      await loadWorkspaceDetail(state.currentWorkspaceId);
+    } catch (error) {
+      if (workspaceAutomationStatus) workspaceAutomationStatus.textContent = error.message || "No se pudo guardar.";
     }
   });
 }

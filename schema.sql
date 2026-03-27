@@ -78,6 +78,75 @@ CREATE TABLE IF NOT EXISTS workspace_facturacion (
   FOREIGN KEY (cliente_id) REFERENCES clientes(id)
 );
 
+CREATE TABLE IF NOT EXISTS workspace_facturacion_series (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL,
+  empresa_id TEXT,
+  servicio TEXT,
+  serie TEXT NOT NULL,
+  prefijo TEXT,
+  siguiente_numero INTEGER NOT NULL DEFAULT 1,
+  activa INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (workspace_id, empresa_id, serie),
+  FOREIGN KEY (workspace_id) REFERENCES workspaces(id),
+  FOREIGN KEY (empresa_id) REFERENCES empresas(id)
+);
+
+CREATE TABLE IF NOT EXISTS workspace_documentos_inbox (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL,
+  empresa_id TEXT,
+  cliente_id TEXT,
+  suggested_cliente_id TEXT,
+  servicio TEXT,
+  nombre TEXT NOT NULL,
+  tipo TEXT,
+  clasificacion TEXT,
+  canal_entrada TEXT,
+  prioridad TEXT,
+  estado TEXT NOT NULL DEFAULT 'Pendiente',
+  doc_key TEXT,
+  doc_url TEXT,
+  notas TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (workspace_id) REFERENCES workspaces(id),
+  FOREIGN KEY (empresa_id) REFERENCES empresas(id),
+  FOREIGN KEY (cliente_id) REFERENCES clientes(id),
+  FOREIGN KEY (suggested_cliente_id) REFERENCES clientes(id)
+);
+
+CREATE TABLE IF NOT EXISTS workspace_portal_clientes (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL,
+  cliente_id TEXT NOT NULL,
+  email_acceso TEXT,
+  estado TEXT NOT NULL DEFAULT 'Invitado',
+  token TEXT,
+  ultimo_acceso_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (workspace_id, cliente_id),
+  FOREIGN KEY (workspace_id) REFERENCES workspaces(id),
+  FOREIGN KEY (cliente_id) REFERENCES clientes(id)
+);
+
+CREATE TABLE IF NOT EXISTS workspace_automatizaciones (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL,
+  nombre TEXT NOT NULL,
+  trigger_key TEXT NOT NULL,
+  modulo_key TEXT,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  action_summary TEXT,
+  config_json TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (workspace_id) REFERENCES workspaces(id)
+);
+
 CREATE TABLE IF NOT EXISTS clientes (
   id TEXT PRIMARY KEY,
   empresa_id TEXT,
