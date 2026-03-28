@@ -10456,6 +10456,16 @@ def build_cliente_ficha_payload(conn, cliente_id, services_filter=None):
         gestoria_payload["renta_declaracion_conjunta"] = renta_payload.get("declaracion_conjunta", 0)
         profesionales["gestoria"] = gestoria_payload
     relaciones = fetch_cliente_relaciones(conn, cliente_id)
+    datos_economicos = conn.execute(
+        """
+        SELECT *
+        FROM asesoramientos_financiacion
+        WHERE cliente1_id = ? OR cliente2_id = ?
+        ORDER BY datetime(COALESCE(updated_at, created_at)) DESC
+        LIMIT 1
+        """,
+        (cliente_id, cliente_id),
+    ).fetchone()
 
     return {
         "cliente": dict(cliente),
@@ -10464,6 +10474,7 @@ def build_cliente_ficha_payload(conn, cliente_id, services_filter=None):
         "relaciones": relaciones,
         "servicios_activos": service_keys,
         "datos_profesionales_por_servicio": profesionales,
+        "datos_economicos": dict(datos_economicos) if datos_economicos else {},
         "servicios": {
             "seguros": seguros_rows,
             "gestoria_trabajos": trabajos,
@@ -10596,6 +10607,275 @@ def ensure_cliente_for_financiacion(conn, empresa_id, nombre, nif, now, extra=No
             ),
         )
     return cliente_id
+
+
+def get_empresa_by_nombre(conn, nombre):
+    nombre = str(nombre or "").strip()
+    if not nombre:
+        return None
+    return conn.execute(
+        "SELECT * FROM empresas WHERE nombre = ? LIMIT 1",
+        (nombre,),
+    ).fetchone()
+
+
+def build_financiacion_context_note(inmueble_row, action_row):
+    parts = []
+    direccion = str((inmueble_row or {}).get("direccion") or "").strip()
+    if direccion:
+        parts.append(f"Inmueble: {direccion}")
+    if inmueble_row:
+        precio = parse_money_value(inmueble_row.get("precio_objetivo"))
+        if precio > 0:
+            parts.append(f"Precio objetivo: {precio:.2f} EUR")
+    if action_row:
+        fecha = str(action_row.get("fecha") or "").strip()
+        if fecha:
+            parts.append(f"Cita origen: {fecha}")
+    return " | ".join(parts)
+
+
+def ensure_financiacion_opportunity_from_inmo(
+    conn,
+    fin_empresa_id,
+    inmueble_row,
+    cliente_row,
+    action_row,
+    now,
+):
+    cliente_id = str((cliente_row or {}).get("id") or "").strip()
+    inmueble_id = str((inmueble_row or {}).get("id") or "").strip()
+    action_id = str((action_row or {}).get("id") or "").strip()
+    if not fin_empresa_id or not cliente_id:
+        return None
+    existing = conn.execute(
+        """
+        SELECT id
+        FROM acciones
+        WHERE servicio = 'financiaciones'
+          AND empresa_id = ?
+          AND cliente_id = ?
+          AND inmueble_id = ?
+          AND tipo = 'Oportunidad hipotecaria'
+          AND notas LIKE ?
+        LIMIT 1
+        """,
+        (fin_empresa_id, cliente_id, inmueble_id or None, f"%Acción origen: {action_id}%"),
+    ).fetchone()
+    if existing:
+        return existing["id"]
+    context_note = build_financiacion_context_note(inmueble_row, action_row)
+    notas = f"Lead generado desde visita inmobiliaria. Acción origen: {action_id}."
+    if context_note:
+        notas = f"{notas} {context_note}"
+    opportunity_id = os.urandom(16).hex()
+    conn.execute(
+        """
+        INSERT INTO acciones (
+          id, empresa_id, servicio, cliente_id, inmueble_id, cliente_nombre,
+          fecha, hora, tipo, responsable, estado, notas, created_at, updated_at
+        ) VALUES (
+          ?, ?, 'financiaciones', ?, ?, ?, date('now'), '10:00', ?, ?, 'Pendiente', ?, datetime(?), datetime(?)
+        )
+        """,
+        (
+            opportunity_id,
+            fin_empresa_id,
+            cliente_id,
+            inmueble_id or None,
+            str((cliente_row or {}).get("nombre") or "").strip(),
+            "Oportunidad hipotecaria",
+            str((action_row or {}).get("responsable") or "").strip() or None,
+            notas,
+            now,
+            now,
+        ),
+    )
+    return opportunity_id
+
+
+def ensure_financiacion_asesoramiento_from_inmo(
+    conn,
+    fin_empresa_id,
+    inmueble_row,
+    cliente_row,
+    action_row,
+    now,
+    *,
+    fin_data=None,
+):
+    cliente_id = str((cliente_row or {}).get("id") or "").strip()
+    inmueble_id = str((inmueble_row or {}).get("id") or "").strip()
+    action_id = str((action_row or {}).get("id") or "").strip()
+    if not fin_empresa_id or not cliente_id:
+        return None, []
+    existing = conn.execute(
+        """
+        SELECT *
+        FROM asesoramientos_financiacion
+        WHERE empresa_id = ?
+          AND cliente1_id = ?
+          AND COALESCE(inmueble_id, '') = ?
+          AND COALESCE(accion_origen_id, '') = ?
+        LIMIT 1
+        """,
+        (fin_empresa_id, cliente_id, inmueble_id, action_id),
+    ).fetchone()
+    profesion = conn.execute(
+        """
+        SELECT actividad
+        FROM cliente_profesional
+        WHERE cliente_id = ?
+        ORDER BY principal DESC, created_at ASC
+        LIMIT 1
+        """,
+        (cliente_id,),
+    ).fetchone()
+    fin_data = fin_data or {}
+    context_note = build_financiacion_context_note(inmueble_row, action_row)
+    notas = "Asesoramiento generado desde Inmobiliaria."
+    if context_note:
+        notas = f"{notas} {context_note}"
+    notas_extra = str(fin_data.get("notas") or "").strip()
+    if notas_extra:
+        notas = f"{notas} {notas_extra}"
+    ingreso1_val = parse_money_value(fin_data.get("cliente1_ingresos"))
+    ingreso2_val = parse_money_value(fin_data.get("cliente2_ingresos"))
+    ingresos_conjuntos_val = parse_money_value(fin_data.get("ingresos_conjuntos"))
+    if ingresos_conjuntos_val <= 0:
+        ingresos_conjuntos_val = round((ingreso1_val or 0.0) + (ingreso2_val or 0.0), 2)
+    aportacion_val = parse_money_value(fin_data.get("aportacion_cv"))
+    if existing:
+        updates = {}
+        for field in (
+            "cliente1_nombre",
+            "cliente1_dni",
+            "cliente1_telefono",
+            "cliente1_email",
+            "cliente1_fecha_nacimiento",
+            "cliente1_estado_civil",
+            "cliente1_hijos",
+            "cliente1_profesion",
+            "cliente1_tipo_contrato",
+            "cliente1_tiempo_contrato",
+            "cliente1_patrimonio",
+            "cliente1_prestamos",
+            "cliente2_nombre",
+            "cliente2_dni",
+            "cliente2_telefono",
+            "cliente2_email",
+            "cliente2_fecha_nacimiento",
+            "cliente2_estado_civil",
+            "cliente2_hijos",
+            "cliente2_profesion",
+            "cliente2_tipo_contrato",
+            "cliente2_tiempo_contrato",
+            "cliente2_patrimonio",
+            "cliente2_prestamos",
+            "entidades_financieras",
+            "avalistas",
+        ):
+            incoming = str(fin_data.get(field) or "").strip()
+            if incoming and not str(existing[field] or "").strip():
+                updates[field] = incoming
+        if ingreso1_val > 0 and not parse_money_value(existing["cliente1_ingresos"]):
+            updates["cliente1_ingresos"] = ingreso1_val
+        if ingreso2_val > 0 and not parse_money_value(existing["cliente2_ingresos"]):
+            updates["cliente2_ingresos"] = ingreso2_val
+        if ingresos_conjuntos_val > 0 and not parse_money_value(existing["ingresos_conjuntos"]):
+            updates["ingresos_conjuntos"] = ingresos_conjuntos_val
+        if aportacion_val > 0 and not parse_money_value(existing["aportacion_cv"]):
+            updates["aportacion_cv"] = aportacion_val
+        if not str(existing["cliente1_profesion"] or "").strip() and profesion and str(profesion["actividad"] or "").strip():
+            updates["cliente1_profesion"] = str(profesion["actividad"] or "").strip()
+        if notas and not str(existing["notas"] or "").strip():
+            updates["notas"] = notas
+        if updates:
+            set_clause = ", ".join([f"{key} = ?" for key in updates])
+            values = list(updates.values()) + [now, existing["id"]]
+            conn.execute(
+                f"UPDATE asesoramientos_financiacion SET {set_clause}, updated_at = datetime(?) WHERE id = ?",
+                values,
+            )
+        asesoramiento_id = existing["id"]
+    else:
+        asesoramiento_id = os.urandom(16).hex()
+        conn.execute(
+            """
+            INSERT INTO asesoramientos_financiacion (
+              id, empresa_id, origen, inmueble_id, accion_origen_id, inmobiliaria_asesor, asesor, fecha, estado,
+              cliente1_id, cliente1_nombre, cliente1_dni, cliente1_telefono, cliente1_email,
+              cliente1_fecha_nacimiento, cliente1_estado_civil, cliente1_hijos, cliente1_profesion, cliente1_tipo_contrato,
+              cliente1_tiempo_contrato, cliente1_ingresos, cliente1_patrimonio, cliente1_prestamos,
+              cliente2_nombre, cliente2_dni, cliente2_telefono, cliente2_email, cliente2_fecha_nacimiento,
+              cliente2_estado_civil, cliente2_hijos, cliente2_profesion, cliente2_tipo_contrato, cliente2_tiempo_contrato,
+              cliente2_ingresos, cliente2_patrimonio, cliente2_prestamos,
+              ingresos_conjuntos, entidades_financieras, avalistas, aportacion_cv, notas, created_at, updated_at
+            ) VALUES (
+              ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+            )
+            """,
+            (
+                asesoramiento_id,
+                fin_empresa_id,
+                "Inmobiliaria",
+                inmueble_id or None,
+                action_id or None,
+                str((action_row or {}).get("responsable") or "").strip() or None,
+                None,
+                str((action_row or {}).get("fecha") or "").strip() or datetime.now().strftime("%Y-%m-%d"),
+                "En estudio",
+                cliente_id,
+                str(fin_data.get("cliente1_nombre") or (cliente_row or {}).get("nombre") or "").strip() or None,
+                normalize_nif(fin_data.get("cliente1_dni") or (cliente_row or {}).get("nif")),
+                str(fin_data.get("cliente1_telefono") or (cliente_row or {}).get("telefono") or "").strip() or None,
+                normalize_email(fin_data.get("cliente1_email") or (cliente_row or {}).get("email")),
+                str(fin_data.get("cliente1_fecha_nacimiento") or (cliente_row or {}).get("fecha_nacimiento") or "").strip() or None,
+                str(fin_data.get("cliente1_estado_civil") or "").strip() or None,
+                str(fin_data.get("cliente1_hijos") or "").strip() or None,
+                str(fin_data.get("cliente1_profesion") or (profesion["actividad"] if profesion else "") or "").strip() or None,
+                str(fin_data.get("cliente1_tipo_contrato") or "").strip() or None,
+                str(fin_data.get("cliente1_tiempo_contrato") or "").strip() or None,
+                ingreso1_val or None,
+                str(fin_data.get("cliente1_patrimonio") or "").strip() or None,
+                str(fin_data.get("cliente1_prestamos") or "").strip() or None,
+                str(fin_data.get("cliente2_nombre") or "").strip() or None,
+                normalize_nif(fin_data.get("cliente2_dni")),
+                str(fin_data.get("cliente2_telefono") or "").strip() or None,
+                normalize_email(fin_data.get("cliente2_email")),
+                str(fin_data.get("cliente2_fecha_nacimiento") or "").strip() or None,
+                str(fin_data.get("cliente2_estado_civil") or "").strip() or None,
+                str(fin_data.get("cliente2_hijos") or "").strip() or None,
+                str(fin_data.get("cliente2_profesion") or "").strip() or None,
+                str(fin_data.get("cliente2_tipo_contrato") or "").strip() or None,
+                str(fin_data.get("cliente2_tiempo_contrato") or "").strip() or None,
+                ingreso2_val or None,
+                str(fin_data.get("cliente2_patrimonio") or "").strip() or None,
+                str(fin_data.get("cliente2_prestamos") or "").strip() or None,
+                ingresos_conjuntos_val or None,
+                str(fin_data.get("entidades_financieras") or "").strip() or None,
+                str(fin_data.get("avalistas") or "").strip() or None,
+                aportacion_val or None,
+                notas,
+                now,
+                now,
+            ),
+        )
+    row = conn.execute(
+        "SELECT * FROM asesoramientos_financiacion WHERE id = ? LIMIT 1",
+        (asesoramiento_id,),
+    ).fetchone()
+    missing = fin_missing_fields(row) if row else []
+    fin_sync_missing_action(
+        conn,
+        fin_empresa_id,
+        asesoramiento_id,
+        cliente_id,
+        str((cliente_row or {}).get("nombre") or "").strip(),
+        missing,
+        now,
+    )
+    return asesoramiento_id, missing
 
 TABLES = [
     "movimientos",
@@ -10888,6 +11168,8 @@ def ensure_tables(db_path):
           id TEXT PRIMARY KEY,
           empresa_id TEXT,
           origen TEXT,
+          inmueble_id TEXT,
+          accion_origen_id TEXT,
           inmobiliaria_asesor TEXT,
           asesor TEXT,
           fecha TEXT,
@@ -10941,6 +11223,8 @@ def ensure_tables(db_path):
         )
         """
     )
+    ensure_column(conn, "asesoramientos_financiacion", "inmueble_id", "inmueble_id TEXT")
+    ensure_column(conn, "asesoramientos_financiacion", "accion_origen_id", "accion_origen_id TEXT")
     ensure_column(conn, "asesoramientos_financiacion", "cliente1_tiempo_contrato", "cliente1_tiempo_contrato TEXT")
     ensure_column(conn, "asesoramientos_financiacion", "cliente2_tiempo_contrato", "cliente2_tiempo_contrato TEXT")
     ensure_column(conn, "asesoramientos_financiacion", "cliente1_regimen", "cliente1_regimen TEXT")
@@ -11893,6 +12177,295 @@ def fetch_workspace_clientes(conn, workspace_id, q="", limit=60):
         [*values, max(1, min(int(limit or 60), 150))],
     ).fetchall()
     return {"rows": [dict(row) for row in rows]}
+
+
+def fetch_workspace_cliente_360(conn, workspace_id, cliente_id):
+    empresa_ids = fetch_workspace_company_ids(conn, workspace_id)
+    if not empresa_ids:
+        return {"error": "Tenant sin empresas activas"}
+    placeholders = ",".join(["?"] * len(empresa_ids))
+    allowed = conn.execute(
+        f"""
+        SELECT 1
+        FROM clientes_empresas
+        WHERE cliente_id = ?
+          AND empresa_id IN ({placeholders})
+        LIMIT 1
+        """,
+        [cliente_id, *empresa_ids],
+    ).fetchone()
+    if not allowed:
+        return {"error": "Cliente no disponible en este tenant"}
+
+    payload = build_cliente_ficha_payload(conn, cliente_id)
+    if not payload:
+        return {"error": "Cliente no encontrado"}
+
+    empresa_set = {str(item) for item in empresa_ids if item}
+    empresas = [
+        row for row in (payload.get("empresas") or [])
+        if str(row.get("empresa_id") or "") in empresa_set
+    ]
+
+    servicios_activos = []
+    for row in empresas:
+        service_key = normalize_service_key(row.get("servicio"))
+        if service_key == "hipotecas":
+            service_key = "financiaciones"
+        if service_key and row.get("is_active") and service_key not in servicios_activos:
+            servicios_activos.append(service_key)
+    allowed_service_keys = set(servicios_activos)
+
+    docs_all = []
+    docs_by_service = {"seguros": [], "gestoria": [], "financiaciones": [], "inmobiliaria": [], "otros": []}
+    for row in payload.get("documentacion", {}).get("all", []):
+        row_empresa_id = str(row.get("empresa_id") or "")
+        service_key = normalize_service_key(row.get("referencia_tipo") or row.get("tipo"))
+        if row_empresa_id and row_empresa_id not in empresa_set:
+            continue
+        if row_empresa_id or service_key in allowed_service_keys:
+            docs_all.append(row)
+            docs_by_service[service_key if service_key in docs_by_service else "otros"].append(row)
+
+    facturas = [
+        row for row in (payload.get("facturas") or [])
+        if str(row.get("empresa_id") or "") in empresa_set
+    ]
+    gestoria_trabajos = [
+        row for row in (payload.get("servicios", {}).get("gestoria_trabajos") or [])
+        if str(row.get("empresa_id") or "") in empresa_set
+    ]
+    acciones = [
+        row for row in (payload.get("servicios", {}).get("acciones") or [])
+        if str(row.get("empresa_id") or "") in empresa_set
+    ]
+    seguros_rows = [
+        row for row in (payload.get("servicios", {}).get("seguros") or [])
+        if not row.get("empresa_id") or str(row.get("empresa_id") or "") in empresa_set
+    ]
+
+    historico = []
+    for row in payload.get("historico") or []:
+        service_key = normalize_service_key(row.get("servicio"))
+        if service_key == "hipotecas":
+            service_key = "financiaciones"
+        if service_key in allowed_service_keys:
+            historico.append(row)
+
+    pendientes_trabajos = sum(
+        1 for row in gestoria_trabajos
+        if "FINAL" not in normalize_lookup_text(row.get("estado"))
+        and "CANCEL" not in normalize_lookup_text(row.get("estado"))
+    )
+    pendientes_acciones = sum(
+        1 for row in acciones
+        if all(token not in normalize_lookup_text(row.get("estado")) for token in ("HECHO", "FINAL", "CANCEL"))
+    )
+    today = datetime.now(timezone.utc).date()
+    citas_programadas = [
+        row for row in acciones
+        if parse_iso_date(row.get("fecha")) and parse_iso_date(row.get("fecha")) >= today
+    ]
+    primas_total = sum(parse_money_value(row.get("prima_total")) for row in seguros_rows)
+    realizado = sum(
+        parse_money_value(row.get("importe"))
+        for row in gestoria_trabajos
+        if "FINAL" in normalize_lookup_text(row.get("estado"))
+    )
+    cobrado = sum(
+        parse_money_value(row.get("importe_asignado") if row.get("importe_asignado") not in (None, "") else row.get("importe"))
+        for row in facturas
+        if normalize_lookup_text(row.get("tipo")) != "GASTO"
+    )
+    rentabilidad = cobrado - realizado
+
+    return {
+        "cliente": payload.get("cliente") or {},
+        "empresas": empresas,
+        "relaciones": payload.get("relaciones") or [],
+        "servicios_activos": servicios_activos,
+        "documentacion": {
+            "all": docs_all,
+            "by_service": docs_by_service,
+        },
+        "docs_summary": {
+            "total": len(docs_all),
+            "gestoria": len(docs_by_service["gestoria"]),
+            "seguros": len(docs_by_service["seguros"]),
+            "financiaciones": len(docs_by_service["financiaciones"]),
+            "inmobiliaria": len(docs_by_service["inmobiliaria"]),
+        },
+        "servicios": {
+            "seguros": seguros_rows,
+            "gestoria_trabajos": gestoria_trabajos,
+            "acciones": acciones,
+        },
+        "facturas": facturas,
+        "historico": historico[:100],
+        "dashboard": {
+            "rentabilidad": {
+                "realizado": realizado,
+                "cobrado": cobrado,
+                "margen": rentabilidad,
+            },
+            "primas_total": primas_total,
+            "tareas_pendientes": pendientes_trabajos + pendientes_acciones,
+            "citas_programadas": len(citas_programadas),
+            "proxima_cita": min([row["fecha"] for row in citas_programadas if row.get("fecha")], default=""),
+        },
+    }
+
+
+def fetch_workspace_gestoria_overview(conn, workspace_id):
+    empresa_ids = fetch_workspace_company_ids(conn, workspace_id)
+    if not empresa_ids:
+        return {
+            "counts": {
+                "total": 0,
+                "activos": 0,
+                "modelos_mes": 0,
+                "rentas_pendientes_presentar": 0,
+                "acciones_pendientes": 0,
+                "presupuestos_estudio": 0,
+            },
+            "modelos_vencidos": [],
+            "rentas_pendientes": [],
+            "acciones_vencidas": [],
+            "presupuestos_estudio": [],
+        }
+    placeholders = ",".join(["?"] * len(empresa_ids))
+    service_filter = (
+        "LOWER(ce.servicio) IN ('gestoria', 'gestoría', "
+        "'administracion fincas', 'administración fincas')"
+    )
+    today = datetime.now().date()
+    current_month = today.strftime("%Y-%m")
+
+    total = conn.execute(
+        f"""
+        SELECT COUNT(DISTINCT c.id) AS total
+        FROM clientes c
+        JOIN clientes_empresas ce ON ce.cliente_id = c.id
+        WHERE ce.empresa_id IN ({placeholders})
+          AND {service_filter}
+        """,
+        empresa_ids,
+    ).fetchone()
+    active_rows = conn.execute(
+        f"""
+        SELECT DISTINCT c.id AS cliente_id, ce.estado
+        FROM clientes c
+        JOIN clientes_empresas ce ON ce.cliente_id = c.id
+        WHERE ce.empresa_id IN ({placeholders})
+          AND {service_filter}
+        """,
+        empresa_ids,
+    ).fetchall()
+    active_ids = {row["cliente_id"] for row in active_rows if is_gestoria_dashboard_active_state(row["estado"])}
+    modelos_mes = conn.execute(
+        f"""
+        SELECT COUNT(*) AS total
+        FROM gestoria_modelos m
+        WHERE m.empresa_id IN ({placeholders})
+          AND m.proxima_fecha IS NOT NULL
+          AND strftime('%Y-%m', m.proxima_fecha) = ?
+        """,
+        [*empresa_ids, current_month],
+    ).fetchone()
+    modelos_vencidos = conn.execute(
+        f"""
+        SELECT c.nombre AS cliente, m.modelo, m.proxima_fecha, m.estado
+        FROM gestoria_modelos m
+        JOIN clientes c ON c.id = m.cliente_id
+        WHERE m.empresa_id IN ({placeholders})
+          AND m.proxima_fecha IS NOT NULL
+          AND date(m.proxima_fecha) < date(?)
+          AND (m.estado IS NULL OR LOWER(m.estado) != 'presentado')
+        ORDER BY m.proxima_fecha ASC
+        LIMIT 12
+        """,
+        [*empresa_ids, today.isoformat()],
+    ).fetchall()
+    acciones_pendientes = conn.execute(
+        f"""
+        SELECT COUNT(*) AS total
+        FROM acciones a
+        WHERE a.empresa_id IN ({placeholders})
+          AND LOWER(a.servicio) = 'gestoria'
+          AND (a.estado IS NULL OR LOWER(a.estado) != 'hecho')
+          AND a.fecha IS NOT NULL
+          AND date(a.fecha) >= date(?)
+        """,
+        [*empresa_ids, today.isoformat()],
+    ).fetchone()
+    acciones_vencidas = conn.execute(
+        f"""
+        SELECT a.fecha, a.hora, COALESCE(c.nombre, a.cliente_nombre) AS cliente, a.tipo, a.estado
+        FROM acciones a
+        LEFT JOIN clientes c ON c.id = a.cliente_id
+        WHERE a.empresa_id IN ({placeholders})
+          AND LOWER(a.servicio) = 'gestoria'
+          AND a.fecha IS NOT NULL
+          AND date(a.fecha) < date(?)
+          AND (a.estado IS NULL OR LOWER(a.estado) != 'hecho')
+        ORDER BY a.fecha ASC, a.hora ASC
+        LIMIT 12
+        """,
+        [*empresa_ids, today.isoformat()],
+    ).fetchall()
+    presupuestos_estudio = conn.execute(
+        f"""
+        SELECT p.fecha, p.fecha_seguimiento, p.titulo, p.motivo_estado, COALESCE(c.nombre, '') AS cliente
+        FROM workspace_presupuestos p
+        LEFT JOIN clientes c ON c.id = p.cliente_id
+        WHERE p.workspace_id = ?
+          AND p.empresa_id IN ({placeholders})
+          AND LOWER(COALESCE(p.servicio, '')) IN ('gestoria', 'administracion fincas', 'fincas')
+          AND LOWER(COALESCE(p.estado, '')) = 'estudio'
+        ORDER BY COALESCE(p.fecha_seguimiento, p.fecha, p.updated_at) ASC
+        LIMIT 12
+        """,
+        [workspace_id, *empresa_ids],
+    ).fetchall()
+
+    renta_index = {}
+    for empresa_id in empresa_ids:
+        for row in collect_gestoria_renta_card_items(conn, empresa_id, q="", estado="", limit=500):
+            cliente_id = str(row.get("cliente_id") or "")
+            latest = row.get("renta_latest") or {}
+            current = renta_index.get(cliente_id)
+            current_entry = current.get("renta_latest") if current else {}
+            current_ex = int(current_entry.get("ejercicio") or 0) if current_entry else 0
+            next_ex = int(latest.get("ejercicio") or 0) if latest else 0
+            if not current or next_ex >= current_ex:
+                renta_index[cliente_id] = row
+    rentas_borrador = [
+        row for row in renta_index.values()
+        if normalize_renta_presentacion_status((row.get("renta_latest") or {}).get("estado_presentacion")) == "Borrador"
+    ]
+
+    return {
+        "counts": {
+            "total": total["total"] if total else 0,
+            "activos": len(active_ids),
+            "modelos_mes": modelos_mes["total"] if modelos_mes else 0,
+            "rentas_pendientes_presentar": len(rentas_borrador),
+            "acciones_pendientes": acciones_pendientes["total"] if acciones_pendientes else 0,
+            "presupuestos_estudio": len(presupuestos_estudio),
+        },
+        "modelos_vencidos": [dict(r) for r in modelos_vencidos],
+        "rentas_pendientes": [
+            {
+                "cliente": row.get("nombre"),
+                "ejercicio": (row.get("renta_latest") or {}).get("ejercicio") or "",
+                "nif": row.get("nif") or "",
+                "estado_presentacion": (row.get("renta_latest") or {}).get("estado_presentacion") or "Borrador",
+            }
+            for row in rentas_borrador[:12]
+        ],
+        "acciones_vencidas": [dict(r) for r in acciones_vencidas],
+        "presupuestos_estudio": [dict(r) for r in presupuestos_estudio],
+    }
 
 
 def fetch_workspace_series(conn, workspace_id):
@@ -18499,6 +19072,8 @@ class Handler(BaseHTTPRequestHandler):
 
             allowed_fields = (
                 "origen",
+                "inmueble_id",
+                "accion_origen_id",
                 "inmobiliaria_asesor",
                 "asesor",
                 "fecha",
@@ -18578,7 +19153,7 @@ class Handler(BaseHTTPRequestHandler):
                 conn.execute(
                     """
                     INSERT INTO asesoramientos_financiacion (
-                      id, empresa_id, origen, inmobiliaria_asesor, asesor, fecha, estado,
+                      id, empresa_id, origen, inmueble_id, accion_origen_id, inmobiliaria_asesor, asesor, fecha, estado,
                       cliente1_id, cliente1_nombre, cliente1_dni, cliente1_telefono, cliente1_email,
                       cliente1_fecha_nacimiento, cliente1_estado_civil, cliente1_regimen, cliente1_hijos, cliente1_profesion,
                       cliente1_tipo_contrato, cliente1_tiempo_contrato, cliente1_ingresos, cliente1_patrimonio, cliente1_prestamos,
@@ -18590,13 +19165,15 @@ class Handler(BaseHTTPRequestHandler):
                       ingresos_conjuntos, entidades_financieras, avalistas, aportacion_cv,
                       notas, notas_ocr, calidad_ocr, campos_ocr, created_at, updated_at
                     ) VALUES (
-                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
                     )
                     """,
                     (
                         asesoramiento_id,
                         empresa["id"],
                         payload.get("origen"),
+                        payload.get("inmueble_id"),
+                        payload.get("accion_origen_id"),
                         payload.get("inmobiliaria_asesor"),
                         payload.get("asesor"),
                         payload.get("fecha"),
@@ -18704,6 +19281,8 @@ class Handler(BaseHTTPRequestHandler):
             )
             allowed = (
                 "origen",
+                "inmueble_id",
+                "accion_origen_id",
                 "inmobiliaria_asesor",
                 "asesor",
                 "fecha",
@@ -22102,6 +22681,10 @@ class Handler(BaseHTTPRequestHandler):
             )
             inmueble_id = str(updates.get("inmueble_id") if "inmueble_id" in updates else current["inmueble_id"] or "").strip()
             tipo_norm = normalize_inmo_action_type(tipo_final)
+            action_row = conn.execute(
+                "SELECT * FROM acciones WHERE id = ? LIMIT 1",
+                (record_id,),
+            ).fetchone()
             if tipo_norm == "cita_adquisicion" and inmueble_id and estado_final.lower() != "pendiente":
                 resultado_norm = normalize_lookup_text(resultado_final)
                 destino = ""
@@ -22113,6 +22696,108 @@ class Handler(BaseHTTPRequestHandler):
                     sync_inmueble_stage_for_action(conn, inmueble_id, destino, now)
             elif tipo_norm == "cita_comprador" and inmueble_id and estado_final.lower() != "pendiente":
                 if normalize_lookup_text(resultado_final) == "interesado":
+                    generar_fin = str(payload.get("generar_oportunidad_financiacion") or "").strip().lower() in {"1", "true", "si", "sí", "yes"}
+                    generar_asesoramiento = str(payload.get("generar_asesoramiento_financiero") or "").strip().lower() in {"1", "true", "si", "sí", "yes"}
+                    if generar_fin or generar_asesoramiento:
+                        fin_empresa = get_empresa_by_nombre(conn, "Financiaciones Modernia")
+                        cliente_id_fin = str((action_row["cliente_id"] if action_row else current["cliente_id"]) or "").strip()
+                        cliente_row = None
+                        if fin_empresa:
+                            if not cliente_id_fin:
+                                cliente_id_fin = ensure_cliente_for_financiacion(
+                                    conn,
+                                    fin_empresa["id"],
+                                    str((action_row["cliente_nombre"] if action_row else current["cliente_nombre"]) or "").strip(),
+                                    "",
+                                    now,
+                                    {},
+                                ) or ""
+                            if cliente_id_fin:
+                                cliente = conn.execute(
+                                    "SELECT * FROM clientes WHERE id = ? LIMIT 1",
+                                    (cliente_id_fin,),
+                                ).fetchone()
+                                if cliente:
+                                    cliente_row = dict(cliente)
+                        if fin_empresa and cliente_row:
+                                ensure_cliente_for_financiacion(
+                                    conn,
+                                    fin_empresa["id"],
+                                    cliente_row.get("nombre"),
+                                    cliente_row.get("nif"),
+                                    now,
+                                    {
+                                        "telefono": cliente_row.get("telefono"),
+                                        "email": cliente_row.get("email"),
+                                        "fecha_nacimiento": cliente_row.get("fecha_nacimiento"),
+                                        "direccion": cliente_row.get("direccion"),
+                                    },
+                                )
+                        inmueble_row = None
+                        if fin_empresa and inmueble_id:
+                            inmueble = conn.execute(
+                                "SELECT * FROM inmuebles WHERE id = ? LIMIT 1",
+                                (inmueble_id,),
+                            ).fetchone()
+                            if inmueble:
+                                inmueble_row = dict(inmueble)
+                        if fin_empresa and cliente_row:
+                            if generar_fin:
+                                opportunity_id = ensure_financiacion_opportunity_from_inmo(
+                                    conn,
+                                    fin_empresa["id"],
+                                    inmueble_row,
+                                    cliente_row,
+                                    dict(action_row) if action_row else dict(current),
+                                    now,
+                                )
+                                if opportunity_id:
+                                    updates["financiacion_oportunidad_id"] = opportunity_id
+                            if generar_asesoramiento:
+                                asesoramiento_id, missing = ensure_financiacion_asesoramiento_from_inmo(
+                                    conn,
+                                    fin_empresa["id"],
+                                    inmueble_row,
+                                    cliente_row,
+                                    dict(action_row) if action_row else dict(current),
+                                    now,
+                                    fin_data={
+                                        "cliente1_nombre": payload.get("fin_cliente1_nombre"),
+                                        "cliente1_dni": payload.get("fin_cliente1_dni"),
+                                        "cliente1_telefono": payload.get("fin_cliente1_telefono"),
+                                        "cliente1_email": payload.get("fin_cliente1_email"),
+                                        "cliente1_fecha_nacimiento": payload.get("fin_cliente1_fecha_nacimiento"),
+                                        "cliente1_estado_civil": payload.get("fin_cliente1_estado_civil"),
+                                        "cliente1_hijos": payload.get("fin_cliente1_hijos"),
+                                        "cliente1_profesion": payload.get("fin_cliente1_profesion"),
+                                        "cliente1_tipo_contrato": payload.get("fin_cliente1_tipo_contrato"),
+                                        "cliente1_tiempo_contrato": payload.get("fin_cliente1_tiempo_contrato"),
+                                        "cliente1_ingresos": payload.get("fin_cliente1_ingresos"),
+                                        "cliente1_patrimonio": payload.get("fin_cliente1_patrimonio"),
+                                        "cliente1_prestamos": payload.get("fin_cliente1_prestamos"),
+                                        "cliente2_nombre": payload.get("fin_cliente2_nombre"),
+                                        "cliente2_dni": payload.get("fin_cliente2_dni"),
+                                        "cliente2_telefono": payload.get("fin_cliente2_telefono"),
+                                        "cliente2_email": payload.get("fin_cliente2_email"),
+                                        "cliente2_fecha_nacimiento": payload.get("fin_cliente2_fecha_nacimiento"),
+                                        "cliente2_estado_civil": payload.get("fin_cliente2_estado_civil"),
+                                        "cliente2_hijos": payload.get("fin_cliente2_hijos"),
+                                        "cliente2_profesion": payload.get("fin_cliente2_profesion"),
+                                        "cliente2_tipo_contrato": payload.get("fin_cliente2_tipo_contrato"),
+                                        "cliente2_tiempo_contrato": payload.get("fin_cliente2_tiempo_contrato"),
+                                        "cliente2_ingresos": payload.get("fin_cliente2_ingresos"),
+                                        "cliente2_patrimonio": payload.get("fin_cliente2_patrimonio"),
+                                        "cliente2_prestamos": payload.get("fin_cliente2_prestamos"),
+                                        "ingresos_conjuntos": payload.get("fin_ingresos_conjuntos"),
+                                        "entidades_financieras": payload.get("fin_entidades_financieras"),
+                                        "avalistas": payload.get("fin_avalistas"),
+                                        "aportacion_cv": payload.get("fin_aportacion_cv"),
+                                        "notas": payload.get("fin_notas"),
+                                    },
+                                )
+                                if asesoramiento_id:
+                                    updates["financiacion_asesoramiento_id"] = asesoramiento_id
+                                    updates["financiacion_missing_fields"] = missing
                     next_id = os.urandom(16).hex()
                     conn.execute(
                         """
@@ -22126,11 +22811,11 @@ class Handler(BaseHTTPRequestHandler):
                         (
                             next_id,
                             empresa["id"],
-                            current["cliente_id"],
+                            action_row["cliente_id"] if action_row else current["cliente_id"],
                             inmueble_id,
-                            current["cliente_nombre"],
+                            action_row["cliente_nombre"] if action_row else current["cliente_nombre"],
                             "Cita propuesta",
-                            current["responsable"],
+                            action_row["responsable"] if action_row else current["responsable"],
                             now,
                             now,
                         ),
@@ -22170,7 +22855,6 @@ class Handler(BaseHTTPRequestHandler):
                     documento_tipo = str(
                         updates.get("documento_tipo") if "documento_tipo" in updates else current["documento_tipo"] or "Propuesta de compra"
                     ).strip() or "Propuesta de compra"
-                    action_row = conn.execute("SELECT * FROM acciones WHERE id = ? LIMIT 1", (record_id,)).fetchone()
                     buyer = conn.execute(
                         "SELECT nombre, nif, telefono, email FROM clientes WHERE id = ? LIMIT 1",
                         (action_row["cliente_id"],),
@@ -22205,6 +22889,15 @@ class Handler(BaseHTTPRequestHandler):
                             now,
                         ),
                     )
+            response_payload = {"ok": True}
+            if "financiacion_oportunidad_id" in updates:
+                response_payload["financiacion_oportunidad_id"] = updates["financiacion_oportunidad_id"]
+            if "financiacion_asesoramiento_id" in updates:
+                response_payload["financiacion_asesoramiento_id"] = updates["financiacion_asesoramiento_id"]
+                response_payload["financiacion_missing_fields"] = updates.get("financiacion_missing_fields") or []
+            conn.commit()
+            json_response(self, response_payload)
+            return
         elif parsed.path == "/api/cliente_profesional":
             cliente_id = payload.get("cliente_id")
             if not cliente_id:
@@ -22688,6 +23381,19 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, fetch_workspace_clientes(conn, workspace_id, q=q, limit=limit))
             return
 
+        if path == "/api/workspace_cliente_360":
+            workspace_id = params.get("workspace_id", [""])[0]
+            cliente_id = params.get("cliente_id", [""])[0]
+            if not workspace_id or not cliente_id:
+                json_response(self, {"error": "workspace_id y cliente_id requeridos"}, status=400)
+                return
+            payload = fetch_workspace_cliente_360(conn, workspace_id, cliente_id)
+            if payload.get("error"):
+                json_response(self, payload, status=404)
+                return
+            json_response(self, payload)
+            return
+
         if path == "/api/workspace_health":
             workspace_id = params.get("workspace_id", [""])[0]
             if not workspace_id:
@@ -22698,6 +23404,14 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "workspace no encontrado"}, status=404)
                 return
             json_response(self, payload)
+            return
+
+        if path == "/api/workspace_gestoria_overview":
+            workspace_id = params.get("workspace_id", [""])[0]
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            json_response(self, fetch_workspace_gestoria_overview(conn, workspace_id))
             return
 
         if path == "/api/workspace_series":

@@ -1227,6 +1227,8 @@ CREATE TABLE IF NOT EXISTS asesoramientos_financiacion (
   id TEXT PRIMARY KEY,
   empresa_id TEXT,
   origen TEXT,
+  inmueble_id TEXT,
+  accion_origen_id TEXT,
   inmobiliaria_asesor TEXT,
   asesor TEXT,
   fecha TEXT,

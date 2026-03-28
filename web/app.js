@@ -1164,6 +1164,9 @@ const state = {
   currentWorkspaceDetail: null,
   currentWorkspaceEnabledModules: [],
   currentWorkspaceName: "",
+  currentWorkspaceClientId: "",
+  currentWorkspaceClientData: null,
+  currentWorkspaceClients: [],
   workspaceBillingRows: [],
   workspaceClientOptions: [],
   workspaceClientOptionMap: new Map(),
@@ -1228,6 +1231,11 @@ const workspaceNewBtn = document.getElementById("workspaceNewBtn");
 const workspaceCompanies = document.getElementById("workspaceCompanies");
 const workspaceModules = document.getElementById("workspaceModules");
 const workspaceClientBase = document.getElementById("workspaceClientBase");
+const workspaceClientLookup = document.getElementById("workspaceClientLookup");
+const workspaceClientRefreshBtn = document.getElementById("workspaceClientRefreshBtn");
+const workspaceClientStatus = document.getElementById("workspaceClientStatus");
+const workspaceClientDetail = document.getElementById("workspaceClientDetail");
+const workspaceGestoriaOverview = document.getElementById("workspaceGestoriaOverview");
 const workspaceBillingSummary = document.getElementById("workspaceBillingSummary");
 const workspaceDocumentHub = document.getElementById("workspaceDocumentHub");
 const workspaceBillingForm = document.getElementById("workspaceBillingForm");
@@ -1428,6 +1436,7 @@ const clienteSaveStatus = document.getElementById("clienteSaveStatus");
 const clienteTabs = document.getElementById("clienteTabs");
 const clienteTabDatos = document.getElementById("clienteTabDatos");
 const clienteTabRelaciones = document.getElementById("clienteTabRelaciones");
+const clienteTabEconomicos = document.getElementById("clienteTabEconomicos");
 const clienteTabDashboard = document.getElementById("clienteTabDashboard");
 const clienteTabProfesional = document.getElementById("clienteTabProfesional");
 const clienteTabOperativa = document.getElementById("clienteTabOperativa");
@@ -1466,6 +1475,7 @@ const clienteGestoriaStatus = document.getElementById("clienteGestoriaStatus");
 const gestoriaModeloForm = document.getElementById("gestoriaModeloForm");
 const gestoriaModeloStatus = document.getElementById("gestoriaModeloStatus");
 const clienteDetailGrid = document.getElementById("clienteDetailGrid");
+const clienteEconomicosPanel = document.getElementById("clienteEconomicosPanel");
 const clienteEmpresasList = document.getElementById("clienteEmpresasList");
 const clienteAssignForm = document.getElementById("clienteAssignForm");
 const clienteAssignServicio = document.getElementById("clienteAssignServicio");
@@ -3530,14 +3540,22 @@ const WORKSPACE_CATEGORY_LABELS = {
 };
 
 const WORKSPACE_LAUNCHERS = {
-  crm360: { label: "CRM 360", actionLabel: "Abrir clientes", action: () => openClientesModule() },
+  crm360: {
+    label: "CRM 360",
+    actionLabel: "Ver clientes",
+    action: () => workspaceClientLookup?.scrollIntoView({ behavior: "smooth", block: "start" }),
+  },
   documental: {
     label: "Inbox Documental",
     actionLabel: "Ver inbox",
     action: () => workspaceDocumentHub?.scrollIntoView({ behavior: "smooth", block: "start" }),
   },
   dashboard: { label: "Dashboard Ejecutivo", actionLabel: "Ir a home", action: () => goHome() },
-  gestoria: { label: "Gestoría", actionLabel: "Abrir CRM", action: () => openGestoriaCrm() },
+  gestoria: {
+    label: "Gestoría",
+    actionLabel: "Ver gestión",
+    action: () => workspaceGestoriaOverview?.scrollIntoView({ behavior: "smooth", block: "start" }),
+  },
   seguros: { label: "Seguros", actionLabel: "Abrir CRM", action: () => openSegurosCrm() },
   inmobiliaria: { label: "Inmobiliaria", actionLabel: "Abrir CRM", action: () => openCrmInmobiliario() },
   financiacion: { label: "Financiación", actionLabel: "Abrir CRM", action: () => openFinCrm() },
@@ -3603,6 +3621,29 @@ const fetchWorkspaceClientOptions = async (query = "") => {
   if (query) params.set("q", query);
   const data = await api(`/api/workspace_clientes?${params.toString()}`);
   syncWorkspaceClientOptions(data.rows || []);
+};
+
+const loadWorkspaceClients = async (query = "") => {
+  if (!state.currentWorkspaceId) return [];
+  const params = new URLSearchParams({ workspace_id: state.currentWorkspaceId, limit: "120" });
+  if (query) params.set("q", query);
+  const data = await api(`/api/workspace_clientes?${params.toString()}`);
+  const rows = Array.isArray(data.rows) ? data.rows : [];
+  state.currentWorkspaceClients = rows;
+  syncWorkspaceClientOptions(rows);
+  renderWorkspaceClientBase(rows);
+  const currentId = String(state.currentWorkspaceClientId || "");
+  const stillExists = rows.some((row) => String(row.id || "") === currentId);
+  if (stillExists && currentId) {
+    openWorkspaceClient360(currentId, { silent: true }).catch(() => {});
+  } else if (rows.length) {
+    openWorkspaceClient360(rows[0].id, { prefetchedRow: rows[0], silent: true }).catch(() => {});
+  } else {
+    state.currentWorkspaceClientId = "";
+    state.currentWorkspaceClientData = null;
+    renderWorkspaceClientDetail(null);
+  }
+  return rows;
 };
 
 const getWorkspaceEnabledModules = (modules = []) =>
@@ -3799,7 +3840,7 @@ const renderWorkspaceClientBase = (rows = []) => {
       ${items
         .map(
           (row) => `
-            <div class="workspace-billing-row">
+            <button type="button" class="workspace-billing-row workspace-client-row${String(row.id || "") === String(state.currentWorkspaceClientId || "") ? " is-active" : ""}" data-workspace-client-id="${row.id || ""}">
               <div>
                 <strong>${row.nombre || "-"}</strong>
                 <div class="muted">${row.nif || "Sin DNI/NIF"}${row.telefono ? ` · ${row.telefono}` : ""}${row.email ? ` · ${row.email}` : ""}</div>
@@ -3808,10 +3849,230 @@ const renderWorkspaceClientBase = (rows = []) => {
               <div class="workspace-billing-meta">
                 <span>Cliente final</span>
               </div>
-            </div>
+            </button>
           `
         )
         .join("")}
+    </div>
+  `;
+  workspaceClientBase.querySelectorAll("[data-workspace-client-id]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const clientId = button.dataset.workspaceClientId || "";
+      if (!clientId) return;
+      openWorkspaceClient360(clientId, {
+        prefetchedRow: items.find((row) => String(row.id || "") === String(clientId || "")) || null,
+      }).catch(() => {});
+    });
+  });
+};
+
+const renderWorkspaceClientDetail = (payload = null) => {
+  if (!workspaceClientDetail) return;
+  if (!payload || !payload.cliente) {
+    workspaceClientDetail.innerHTML = "<p class='muted'>Selecciona un cliente final del tenant para ver su CRM 360.</p>";
+    return;
+  }
+  const cliente = payload.cliente || {};
+  const dashboard = payload.dashboard || {};
+  const docsSummary = payload.docs_summary || {};
+  const empresas = Array.isArray(payload.empresas) ? payload.empresas : [];
+  const relaciones = Array.isArray(payload.relaciones) ? payload.relaciones : [];
+  const servicios = Array.isArray(payload.servicios_activos) ? payload.servicios_activos : [];
+  const historico = Array.isArray(payload.historico) ? payload.historico : [];
+  const facturas = Array.isArray(payload.facturas) ? payload.facturas : [];
+  const renderList = (items = [], empty = "Sin registros.") =>
+    items.length
+      ? `<ul>${items.map((item) => `<li>${item}</li>`).join("")}</ul>`
+      : `<p class="muted">${empty}</p>`;
+  workspaceClientDetail.innerHTML = `
+    <div class="workspace-client-detail">
+      <div class="workspace-client-hero">
+        <div class="workspace-client-hero-head">
+          <div>
+            <h3>${cliente.nombre || "Cliente final"}</h3>
+            <div class="muted">${cliente.nif || "Sin DNI/NIF"}${cliente.telefono ? ` · ${cliente.telefono}` : ""}${cliente.email ? ` · ${cliente.email}` : ""}</div>
+          </div>
+          <div class="workspace-client-actions">
+            <button type="button" class="secondary ghost" id="workspaceClientOpenFull">Ficha completa</button>
+          </div>
+        </div>
+        <div class="workspace-client-meta">
+          ${empresas.slice(0, 6).map((row) => `<span>${row.empresa || "-"} · ${row.servicio || "-"}</span>`).join("") || "<span>Sin servicios activos</span>"}
+        </div>
+        <div class="workspace-mini-kpis">
+          <div class="workspace-mini-kpi"><span>Servicios activos</span><strong>${numberFormatter.format(servicios.length)}</strong></div>
+          <div class="workspace-mini-kpi"><span>Documentos</span><strong>${numberFormatter.format(Number(docsSummary.total || 0))}</strong></div>
+          <div class="workspace-mini-kpi"><span>Facturación</span><strong>${currency(Number(dashboard?.rentabilidad?.cobrado || 0))}</strong></div>
+          <div class="workspace-mini-kpi"><span>Tareas pendientes</span><strong>${numberFormatter.format(Number(dashboard.tareas_pendientes || 0))}</strong></div>
+        </div>
+      </div>
+      <div class="workspace-client-columns">
+        <div class="workspace-client-card">
+          <h4>Actividad del tenant</h4>
+          ${renderList(
+            [
+              `Próxima cita: ${dashboard.proxima_cita || "Sin fecha"}`,
+              `Citas programadas: ${numberFormatter.format(Number(dashboard.citas_programadas || 0))}`,
+              `Histórico visible: ${numberFormatter.format(historico.length)}`,
+              `Facturas visibles: ${numberFormatter.format(facturas.length)}`,
+            ],
+            "Sin actividad trazada."
+          )}
+        </div>
+        <div class="workspace-client-card">
+          <h4>Documentación por servicio</h4>
+          ${renderList(
+            [
+              `Gestoría: ${numberFormatter.format(Number(docsSummary.gestoria || 0))}`,
+              `Seguros: ${numberFormatter.format(Number(docsSummary.seguros || 0))}`,
+              `Financiación: ${numberFormatter.format(Number(docsSummary.financiaciones || 0))}`,
+              `Inmobiliaria: ${numberFormatter.format(Number(docsSummary.inmobiliaria || 0))}`,
+            ],
+            "Sin documentación visible."
+          )}
+        </div>
+        <div class="workspace-client-card">
+          <h4>Relaciones</h4>
+          ${renderList(
+            relaciones.slice(0, 5).map((row) => `${row.related_nombre || "Relacionado"} · ${row.vinculo || "Vínculo"}`),
+            "Sin relaciones guardadas."
+          )}
+        </div>
+        <div class="workspace-client-card">
+          <h4>Resumen económico</h4>
+          ${renderList(
+            [
+              `Cobrado: ${currency(Number(dashboard?.rentabilidad?.cobrado || 0))}`,
+              `Realizado: ${currency(Number(dashboard?.rentabilidad?.realizado || 0))}`,
+              `Margen: ${currency(Number(dashboard?.rentabilidad?.margen || 0))}`,
+              `Primas: ${currency(Number(dashboard.primas_total || 0))}`,
+            ],
+            "Sin datos económicos."
+          )}
+        </div>
+      </div>
+    </div>
+  `;
+  const openBtn = document.getElementById("workspaceClientOpenFull");
+  if (openBtn) {
+    openBtn.addEventListener("click", () => {
+      if (cliente.id) openClienteDetail(cliente.id);
+    });
+  }
+};
+
+const openWorkspaceClient360 = async (clientId, options = {}) => {
+  if (!clientId || !state.currentWorkspaceId) return;
+  state.currentWorkspaceClientId = String(clientId);
+  const prefetchedRow = options.prefetchedRow || null;
+  if (!options.silent && workspaceClientStatus) {
+    workspaceClientStatus.textContent = "Cargando cliente...";
+  }
+  renderWorkspaceClientBase(state.currentWorkspaceClients || []);
+  const params = new URLSearchParams({
+    workspace_id: state.currentWorkspaceId,
+    cliente_id: clientId,
+  });
+  const data = await api(`/api/workspace_cliente_360?${params.toString()}`);
+  state.currentWorkspaceClientData = data;
+  renderWorkspaceClientDetail({
+    ...data,
+    cliente: {
+      ...(prefetchedRow || {}),
+      ...(data.cliente || {}),
+    },
+  });
+  renderWorkspaceClientBase(state.currentWorkspaceClients || []);
+  if (workspaceClientStatus) {
+    workspaceClientStatus.textContent = prefetchedRow?.nombre ? `Cliente activo: ${prefetchedRow.nombre}` : "CRM 360 cargado.";
+  }
+};
+
+const renderWorkspaceGestoriaOverview = (payload = {}) => {
+  if (!workspaceGestoriaOverview) return;
+  const counts = payload.counts || {};
+  const modelos = Array.isArray(payload.modelos_vencidos) ? payload.modelos_vencidos : [];
+  const acciones = Array.isArray(payload.acciones_vencidas) ? payload.acciones_vencidas : [];
+  const rentas = Array.isArray(payload.rentas_pendientes) ? payload.rentas_pendientes : [];
+  const estudios = Array.isArray(payload.presupuestos_estudio) ? payload.presupuestos_estudio : [];
+  const listHtml = (rows = [], formatter, emptyText) =>
+    rows.length
+      ? `<div class="workspace-billing-list">${rows.map((row) => formatter(row)).join("")}</div>`
+      : `<p class="muted">${emptyText}</p>`;
+  workspaceGestoriaOverview.innerHTML = `
+    <div class="workspace-gestoria-grid workspace-mini-kpis">
+      <div class="workspace-mini-kpi"><span>Clientes gestoría</span><strong>${numberFormatter.format(Number(counts.total || 0))}</strong></div>
+      <div class="workspace-mini-kpi"><span>Activos</span><strong>${numberFormatter.format(Number(counts.activos || 0))}</strong></div>
+      <div class="workspace-mini-kpi"><span>Modelos este mes</span><strong>${numberFormatter.format(Number(counts.modelos_mes || 0))}</strong></div>
+      <div class="workspace-mini-kpi"><span>Rentas pendientes</span><strong>${numberFormatter.format(Number(counts.rentas_pendientes_presentar || 0))}</strong></div>
+      <div class="workspace-mini-kpi"><span>Acciones pendientes</span><strong>${numberFormatter.format(Number(counts.acciones_pendientes || 0))}</strong></div>
+      <div class="workspace-mini-kpi"><span>Presupuestos en estudio</span><strong>${numberFormatter.format(Number(counts.presupuestos_estudio || 0))}</strong></div>
+    </div>
+    <div class="workspace-gestoria-columns">
+      <div class="workspace-gestoria-card">
+        <h4>Modelos vencidos</h4>
+        ${listHtml(
+          modelos,
+          (row) => `
+            <div class="workspace-billing-row">
+              <div>
+                <strong>${row.cliente || "-"}</strong>
+                <div class="muted">${row.modelo || "Modelo"}${row.proxima_fecha ? ` · ${row.proxima_fecha}` : ""}</div>
+              </div>
+              <div class="workspace-billing-meta"><span>${row.estado || "Pendiente"}</span></div>
+            </div>
+          `,
+          "Sin modelos vencidos."
+        )}
+      </div>
+      <div class="workspace-gestoria-card">
+        <h4>Renta pendiente de presentar</h4>
+        ${listHtml(
+          rentas,
+          (row) => `
+            <div class="workspace-billing-row">
+              <div>
+                <strong>${row.cliente || "-"}</strong>
+                <div class="muted">${row.nif || "Sin DNI/NIF"}${row.ejercicio ? ` · ${row.ejercicio}` : ""}</div>
+              </div>
+              <div class="workspace-billing-meta"><span>${row.estado_presentacion || "Borrador"}</span></div>
+            </div>
+          `,
+          "Sin campañas de renta pendientes."
+        )}
+      </div>
+      <div class="workspace-gestoria-card">
+        <h4>Acciones vencidas</h4>
+        ${listHtml(
+          acciones,
+          (row) => `
+            <div class="workspace-billing-row">
+              <div>
+                <strong>${row.cliente || "-"}</strong>
+                <div class="muted">${row.tipo || "Acción"}${row.fecha ? ` · ${row.fecha}` : ""}</div>
+              </div>
+              <div class="workspace-billing-meta"><span>${row.estado || "Pendiente"}</span></div>
+            </div>
+          `,
+          "Sin acciones vencidas."
+        )}
+      </div>
+      <div class="workspace-gestoria-card">
+        <h4>Presupuestos en estudio</h4>
+        ${listHtml(
+          estudios,
+          (row) => `
+            <div class="workspace-billing-row">
+              <div>
+                <strong>${row.cliente || "-"}</strong>
+                <div class="muted">${row.titulo || "Presupuesto"}${row.fecha_seguimiento ? ` · Seguimiento ${row.fecha_seguimiento}` : ""}</div>
+              </div>
+              <div class="workspace-billing-meta"><span>${row.motivo_estado || "En estudio"}</span></div>
+            </div>
+          `,
+          "Sin presupuestos en estudio."
+        )}
+      </div>
     </div>
   `;
 };
@@ -5428,7 +5689,7 @@ const renderWorkspaceDocumentHub = (data = {}) => {
 const loadWorkspaceDetail = async (workspaceId) => {
   if (!workspaceId) return;
   state.currentWorkspaceId = workspaceId;
-  const [detail, billing, docs, billingRows, budgetRows, collections, remittances, workspaceClients, health, series, inbox, portal, portalRequests, automations, automationLogs, timeRows, fincasCommunities, fincasIncidents, fincasProviders, fincasMeetings] = await Promise.all([
+  const [detail, billing, docs, billingRows, budgetRows, collections, remittances, workspaceClients, health, gestoriaOverview, series, inbox, portal, portalRequests, automations, automationLogs, timeRows, fincasCommunities, fincasIncidents, fincasProviders, fincasMeetings] = await Promise.all([
     api(`/api/workspace_detail?id=${encodeURIComponent(workspaceId)}`),
     api(`/api/workspace_billing_summary?workspace_id=${encodeURIComponent(workspaceId)}`),
     api(`/api/workspace_document_hub?workspace_id=${encodeURIComponent(workspaceId)}`),
@@ -5438,6 +5699,7 @@ const loadWorkspaceDetail = async (workspaceId) => {
     api(`/api/workspace_remesas?workspace_id=${encodeURIComponent(workspaceId)}`),
     api(`/api/workspace_clientes?workspace_id=${encodeURIComponent(workspaceId)}&limit=60`),
     api(`/api/workspace_health?workspace_id=${encodeURIComponent(workspaceId)}`),
+    api(`/api/workspace_gestoria_overview?workspace_id=${encodeURIComponent(workspaceId)}`),
     api(`/api/workspace_series?workspace_id=${encodeURIComponent(workspaceId)}`),
     api(`/api/workspace_inbox?workspace_id=${encodeURIComponent(workspaceId)}`),
     api(`/api/workspace_portal?workspace_id=${encodeURIComponent(workspaceId)}`),
@@ -5453,6 +5715,7 @@ const loadWorkspaceDetail = async (workspaceId) => {
   state.currentWorkspaceDetail = detail;
   state.currentWorkspaceEnabledModules = getWorkspaceEnabledModules(detail.modules || []);
   state.currentWorkspaceName = detail.workspace?.nombre || "";
+  state.currentWorkspaceClients = workspaceClients.rows || [];
   syncWorkspaceClientOptions(workspaceClients.rows || []);
   fillWorkspaceForm(detail.workspace || {});
   renderWorkspaceHealth(health || {});
@@ -5461,9 +5724,11 @@ const loadWorkspaceDetail = async (workspaceId) => {
   renderWorkspaceLauncher(detail.workspace || {}, detail.modules || []);
   renderWorkspaceCompanies(detail.companies || []);
   renderWorkspaceClientBase(workspaceClients.rows || []);
+  renderWorkspaceClientDetail(null);
   renderWorkspaceModules(detail.modules || []);
   renderWorkspaceBillingSummary(billing || {});
   renderWorkspaceBillingList(billingRows.rows || []);
+  renderWorkspaceGestoriaOverview(gestoriaOverview || {});
   fillWorkspaceBillingForm();
   renderWorkspaceBudgetList(budgetRows.rows || []);
   fillWorkspaceBudgetForm();
@@ -5495,6 +5760,16 @@ const loadWorkspaceDetail = async (workspaceId) => {
   renderWorkspaceFincasMeetingList(fincasMeetings.rows || []);
   fillWorkspaceFincasMeetingForm();
   renderWorkspaceDocumentHub(docs || {});
+  if ((workspaceClients.rows || []).length) {
+    await openWorkspaceClient360((workspaceClients.rows || [])[0].id, {
+      prefetchedRow: (workspaceClients.rows || [])[0],
+      silent: true,
+    });
+  } else {
+    state.currentWorkspaceClientId = "";
+    state.currentWorkspaceClientData = null;
+    renderWorkspaceClientDetail(null);
+  }
   renderWorkspaceList(state.workspaces || []);
   renderCompanyCards();
 };
@@ -5515,6 +5790,9 @@ const loadWorkspaceCentral = async () => {
     state.currentWorkspaceDetail = null;
     state.currentWorkspaceEnabledModules = [];
     state.currentWorkspaceName = "";
+    state.currentWorkspaceClientId = "";
+    state.currentWorkspaceClientData = null;
+    state.currentWorkspaceClients = [];
     fillWorkspaceForm({});
     renderWorkspaceHealth({});
     renderWorkspaceCommercialPack({}, {});
@@ -5522,9 +5800,11 @@ const loadWorkspaceCentral = async () => {
     renderWorkspaceLauncher({}, []);
     renderWorkspaceCompanies([]);
     renderWorkspaceClientBase([]);
+    renderWorkspaceClientDetail(null);
     renderWorkspaceModules([]);
     renderWorkspaceBillingSummary({});
     renderWorkspaceBillingList([]);
+    renderWorkspaceGestoriaOverview({});
     renderWorkspaceCollectionsList([]);
     fillWorkspaceBillingForm();
     fillWorkspaceCollectionsForm();
@@ -5959,6 +6239,7 @@ const setClienteTab = (tab) => {
   const showServicios = tab === "profesional";
   if (clienteTabDatos) clienteTabDatos.classList.toggle("hidden", !showExpediente);
   if (clienteTabRelaciones) clienteTabRelaciones.classList.toggle("hidden", tab !== "relaciones");
+  if (clienteTabEconomicos) clienteTabEconomicos.classList.toggle("hidden", tab !== "economicos");
   if (clienteTabDashboard) clienteTabDashboard.classList.toggle("hidden", !showExpediente);
   if (clienteTabProfesional) clienteTabProfesional.classList.toggle("hidden", !showServicios);
   if (clienteTabOperativa) clienteTabOperativa.classList.toggle("hidden", !showServicios);
@@ -16781,6 +17062,226 @@ const loadInmuebleActividad = (inmuebleId, empresaId) => {
 };
 
 const closeInmuebleWorkflowAction = (row, empresaId) => {
+  const findInmoClientContext = (clienteId, fallbackName = "") => {
+    const id = String(clienteId || "").trim();
+    const fallback = String(fallbackName || "").trim();
+    const list = Array.isArray(state.clientesList) ? state.clientesList : [];
+    const byId = id ? list.find((item) => String(item.id || "") === id) : null;
+    if (byId) return byId;
+    const demandas = Array.isArray(state.currentInmuebleContext?.demandas) ? state.currentInmuebleContext.demandas : [];
+    const demandaMatch = id
+      ? demandas.find((item) => String(item.cliente_id || "") === id)
+      : demandas.find((item) => normalizeSimple(item.cliente || item.nombre || "") === normalizeSimple(fallback));
+    if (demandaMatch) {
+      return {
+        id: demandaMatch.cliente_id || "",
+        nombre: demandaMatch.cliente || demandaMatch.nombre || fallback,
+        nif: demandaMatch.nif || "",
+        telefono: demandaMatch.telefono || "",
+        email: demandaMatch.email || "",
+        fecha_nacimiento: demandaMatch.fecha_nacimiento || "",
+      };
+    }
+    return {
+      id,
+      nombre: fallback,
+      nif: "",
+      telefono: "",
+      email: "",
+      fecha_nacimiento: "",
+    };
+  };
+
+  const openFinanciacionFichaModal = (clienteBase = {}) =>
+    new Promise((resolve) => {
+      let modal = document.getElementById("inmoFinanciacionModal");
+      if (!modal) {
+        modal = document.createElement("div");
+        modal.id = "inmoFinanciacionModal";
+        modal.className = "modal hidden";
+        modal.innerHTML = `
+          <div class="modal-content" style="max-width: 980px;">
+            <div class="modal-header">
+              <h3>Asesoramiento financiero</h3>
+              <button type="button" class="ghost" data-inmo-fin-close>✕</button>
+            </div>
+            <form class="modal-body form-grid" data-inmo-fin-form>
+              <label>
+                Cliente 1
+                <input name="cliente1_nombre" required />
+              </label>
+              <label>
+                DNI cliente 1
+                <input name="cliente1_dni" />
+              </label>
+              <label>
+                Teléfono cliente 1
+                <input name="cliente1_telefono" />
+              </label>
+              <label>
+                Email cliente 1
+                <input name="cliente1_email" />
+              </label>
+              <label>
+                Fecha nacimiento cliente 1
+                <input name="cliente1_fecha_nacimiento" type="date" />
+              </label>
+              <label>
+                Estado civil cliente 1
+                <input name="cliente1_estado_civil" />
+              </label>
+              <label>
+                Hijos cliente 1
+                <input name="cliente1_hijos" />
+              </label>
+              <label>
+                Profesión cliente 1
+                <input name="cliente1_profesion" />
+              </label>
+              <label>
+                Tipo contrato cliente 1
+                <input name="cliente1_tipo_contrato" />
+              </label>
+              <label>
+                Antigüedad / tiempo contrato cliente 1
+                <input name="cliente1_tiempo_contrato" />
+              </label>
+              <label>
+                Ingresos cliente 1
+                <input name="cliente1_ingresos" />
+              </label>
+              <label>
+                Patrimonio / alquiler cliente 1
+                <input name="cliente1_patrimonio" />
+              </label>
+              <label style="grid-column: 1 / -1;">
+                Préstamos cliente 1
+                <textarea name="cliente1_prestamos" rows="2"></textarea>
+              </label>
+              <label>
+                Cliente 2
+                <input name="cliente2_nombre" />
+              </label>
+              <label>
+                DNI cliente 2
+                <input name="cliente2_dni" />
+              </label>
+              <label>
+                Teléfono cliente 2
+                <input name="cliente2_telefono" />
+              </label>
+              <label>
+                Email cliente 2
+                <input name="cliente2_email" />
+              </label>
+              <label>
+                Fecha nacimiento cliente 2
+                <input name="cliente2_fecha_nacimiento" type="date" />
+              </label>
+              <label>
+                Estado civil cliente 2
+                <input name="cliente2_estado_civil" />
+              </label>
+              <label>
+                Hijos cliente 2
+                <input name="cliente2_hijos" />
+              </label>
+              <label>
+                Profesión cliente 2
+                <input name="cliente2_profesion" />
+              </label>
+              <label>
+                Tipo contrato cliente 2
+                <input name="cliente2_tipo_contrato" />
+              </label>
+              <label>
+                Antigüedad / tiempo contrato cliente 2
+                <input name="cliente2_tiempo_contrato" />
+              </label>
+              <label>
+                Ingresos cliente 2
+                <input name="cliente2_ingresos" />
+              </label>
+              <label>
+                Patrimonio / alquiler cliente 2
+                <input name="cliente2_patrimonio" />
+              </label>
+              <label style="grid-column: 1 / -1;">
+                Préstamos cliente 2
+                <textarea name="cliente2_prestamos" rows="2"></textarea>
+              </label>
+              <label>
+                Ingresos conjuntos
+                <input name="ingresos_conjuntos" />
+              </label>
+              <label>
+                Entidades financieras
+                <input name="entidades_financieras" />
+              </label>
+              <label>
+                Posibles avalistas / cotitulares
+                <input name="avalistas" />
+              </label>
+              <label>
+                Aportación para compraventa
+                <input name="aportacion_cv" />
+              </label>
+              <label style="grid-column: 1 / -1;">
+                Notas de asesoramiento
+                <textarea name="fin_notas" rows="3"></textarea>
+              </label>
+            </form>
+            <div class="modal-actions">
+              <button type="button" class="secondary" data-inmo-fin-cancel>Cancelar</button>
+              <button type="button" data-inmo-fin-save>Generar asesoramiento</button>
+            </div>
+          </div>
+        `;
+        document.body.appendChild(modal);
+      }
+      const form = modal.querySelector("[data-inmo-fin-form]");
+      const closeBtn = modal.querySelector("[data-inmo-fin-close]");
+      const cancelBtn = modal.querySelector("[data-inmo-fin-cancel]");
+      const saveBtn = modal.querySelector("[data-inmo-fin-save]");
+      const setValue = (name, value, isDate = false) => {
+        const el = form?.querySelector(`[name="${name}"]`);
+        if (!el) return;
+        el.value = isDate ? normalizeDateInput(value || "") : (value || "");
+      };
+      form?.reset();
+      setValue("cliente1_nombre", clienteBase.nombre || "");
+      setValue("cliente1_dni", clienteBase.nif || "");
+      setValue("cliente1_telefono", clienteBase.telefono || "");
+      setValue("cliente1_email", clienteBase.email || "");
+      setValue("cliente1_fecha_nacimiento", clienteBase.fecha_nacimiento || "", true);
+      bindMoneyInputs(form);
+      bindIngresosConjuntos(form);
+      let resolved = false;
+      const cleanup = (result) => {
+        if (resolved) return;
+        resolved = true;
+        modal.classList.add("hidden");
+        modal.classList.remove("open");
+        resolve(result);
+      };
+      closeBtn.onclick = () => cleanup(null);
+      cancelBtn.onclick = () => cleanup(null);
+      saveBtn.onclick = () => {
+        const formData = new FormData(form);
+        const values = Object.fromEntries(formData.entries());
+        if (!String(values.cliente1_nombre || "").trim()) {
+          alert("El nombre del cliente 1 es obligatorio.");
+          return;
+        }
+        cleanup(values);
+      };
+      modal.onclick = (event) => {
+        if (event.target === modal) cleanup(null);
+      };
+      modal.classList.remove("hidden");
+      modal.classList.add("open");
+    });
+
   const type = String(row.tipo || "").trim();
   const workflows = {
     "Cita de adquisición": {
@@ -16797,6 +17298,36 @@ const closeInmuebleWorkflowAction = (row, empresaId) => {
     },
     "Cita comprador": {
       options: INMO_WORKFLOW_RESULT_OPTIONS["Cita comprador"],
+      followup: async (payload) => {
+        if (payload.resultado_cierre !== "Interesado") return;
+        const necesitaFinanciacion = window.confirm(
+          "¿El comprador necesita financiación? Si aceptas, se generará una oportunidad en CRM Financiaciones."
+        );
+        if (!necesitaFinanciacion) return;
+        payload.generar_oportunidad_financiacion = "1";
+        const crearAsesoramiento = window.confirm(
+          "¿Quieres abrir ahora la ficha de asesoramiento financiero para dejar el expediente completo?"
+        );
+        if (!crearAsesoramiento) return;
+        payload.generar_asesoramiento_financiero = "1";
+        const clienteBase = findInmoClientContext(row.cliente_id, row.cliente || row.cliente_nombre || "");
+        const ficha = await openFinanciacionFichaModal(clienteBase);
+        if (!ficha) {
+          payload.generar_asesoramiento_financiero = "";
+          return;
+        }
+        Object.entries(ficha).forEach(([key, value]) => {
+          if (String(value || "").trim()) {
+            payload[`fin_${key}`] = value;
+          }
+        });
+        if (!payload.fin_cliente1_nombre && clienteBase.nombre) {
+          payload.fin_cliente1_nombre = clienteBase.nombre;
+        }
+        if (!payload.fin_cliente1_dni && clienteBase.nif) {
+          payload.fin_cliente1_dni = clienteBase.nif;
+        }
+      },
     },
     "Cita propuesta": {
       options: INMO_WORKFLOW_RESULT_OPTIONS["Cita propuesta"],
@@ -16840,7 +17371,48 @@ const closeInmuebleWorkflowAction = (row, empresaId) => {
     importe_propuesta: "",
   };
   if (workflow.followup) {
-    workflow.followup(payload);
+    const result = workflow.followup(payload);
+    if (result && typeof result.then === "function") {
+      result
+        .then(() => {
+          fetch("/api/acciones_update", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          })
+            .then((res) => res.json())
+            .then((data) => {
+              if (data?.error) {
+                alert(data.error);
+                return;
+              }
+              const financeMessages = [];
+              if (data?.financiacion_oportunidad_id) {
+                financeMessages.push("Se creó una oportunidad en CRM Financiaciones.");
+              }
+              if (data?.financiacion_asesoramiento_id) {
+                const missing = Array.isArray(data.financiacion_missing_fields) && data.financiacion_missing_fields.length
+                  ? ` Faltan: ${data.financiacion_missing_fields.join(", ")}.`
+                  : "";
+                financeMessages.push(`Se generó un asesoramiento financiero.${missing}`);
+              }
+              if (inmuebleActividadStatus) {
+                inmuebleActividadStatus.textContent = `${type} cerrada con resultado ${resultado}.${financeMessages.length ? ` ${financeMessages.join(" ")}` : ""}`;
+              }
+              if (state.currentInmuebleId && empresaId) {
+                loadInmuebleActividad(state.currentInmuebleId, empresaId);
+                openInmuebleDetail(state.currentInmuebleId, state.currentInmuebleOriginView || "inmuebles");
+              }
+            })
+            .catch(() => {
+              alert("No se pudo cerrar la cita.");
+            });
+        })
+        .catch(() => {
+          alert("No se pudo preparar el asesoramiento financiero.");
+        });
+      return;
+    }
   }
   fetch("/api/acciones_update", {
     method: "POST",
@@ -16853,8 +17425,18 @@ const closeInmuebleWorkflowAction = (row, empresaId) => {
         alert(data.error);
         return;
       }
+      const financeMessages = [];
+      if (data?.financiacion_oportunidad_id) {
+        financeMessages.push("Se creó una oportunidad en CRM Financiaciones.");
+      }
+      if (data?.financiacion_asesoramiento_id) {
+        const missing = Array.isArray(data.financiacion_missing_fields) && data.financiacion_missing_fields.length
+          ? ` Faltan: ${data.financiacion_missing_fields.join(", ")}.`
+          : "";
+        financeMessages.push(`Se generó un asesoramiento financiero.${missing}`);
+      }
       if (inmuebleActividadStatus) {
-        inmuebleActividadStatus.textContent = `${type} cerrada con resultado ${resultado}.`;
+        inmuebleActividadStatus.textContent = `${type} cerrada con resultado ${resultado}.${financeMessages.length ? ` ${financeMessages.join(" ")}` : ""}`;
       }
       if (state.currentInmuebleId && empresaId) {
         loadInmuebleActividad(state.currentInmuebleId, empresaId);
@@ -22888,6 +23470,134 @@ const loadClienteHipotecasFicha = async (cliente = null, empresasActivas = []) =
   }
 };
 
+const CLIENTE_ECONOMIC_FORM_FIELDS = [
+  { name: "cliente1_nombre", label: "Cliente 1", type: "text", required: true },
+  { name: "cliente1_dni", label: "DNI cliente 1", type: "text" },
+  { name: "cliente1_telefono", label: "Teléfono cliente 1", type: "text" },
+  { name: "cliente1_email", label: "Email cliente 1", type: "text" },
+  { name: "cliente1_fecha_nacimiento", label: "Fecha nacimiento cliente 1", type: "date" },
+  { name: "cliente1_estado_civil", label: "Estado civil cliente 1", type: "text" },
+  { name: "cliente1_hijos", label: "Hijos cliente 1", type: "text" },
+  { name: "cliente1_profesion", label: "Profesión cliente 1", type: "text" },
+  { name: "cliente1_tipo_contrato", label: "Tipo contrato cliente 1", type: "text" },
+  { name: "cliente1_tiempo_contrato", label: "Antigüedad / tiempo contrato cliente 1", type: "text" },
+  { name: "cliente1_ingresos", label: "Ingresos cliente 1", type: "money" },
+  { name: "cliente1_patrimonio", label: "Patrimonio - alquiler cliente 1", type: "text" },
+  { name: "cliente1_prestamos", label: "Préstamos cliente 1", type: "textarea", span: 2 },
+  { name: "cliente2_nombre", label: "Cliente 2", type: "text" },
+  { name: "cliente2_dni", label: "DNI cliente 2", type: "text" },
+  { name: "cliente2_telefono", label: "Teléfono cliente 2", type: "text" },
+  { name: "cliente2_email", label: "Email cliente 2", type: "text" },
+  { name: "cliente2_fecha_nacimiento", label: "Fecha nacimiento cliente 2", type: "date" },
+  { name: "cliente2_estado_civil", label: "Estado civil cliente 2", type: "text" },
+  { name: "cliente2_hijos", label: "Hijos cliente 2", type: "text" },
+  { name: "cliente2_profesion", label: "Profesión cliente 2", type: "text" },
+  { name: "cliente2_tipo_contrato", label: "Tipo contrato cliente 2", type: "text" },
+  { name: "cliente2_tiempo_contrato", label: "Antigüedad / tiempo contrato cliente 2", type: "text" },
+  { name: "cliente2_ingresos", label: "Ingresos cliente 2", type: "money" },
+  { name: "cliente2_patrimonio", label: "Patrimonio - alquiler cliente 2", type: "text" },
+  { name: "cliente2_prestamos", label: "Préstamos cliente 2", type: "textarea", span: 2 },
+  { name: "ingresos_conjuntos", label: "Ingresos conjuntos", type: "money" },
+  { name: "entidades_financieras", label: "Entidades financieras", type: "text" },
+  { name: "avalistas", label: "Posibles avalistas / cotitulares", type: "text" },
+  { name: "aportacion_cv", label: "Aportación para CV", type: "money" },
+  { name: "notas", label: "Notas", type: "textarea", span: 2 },
+];
+
+const renderClienteDatosEconomicos = (cliente = {}, economicData = {}) => {
+  if (!clienteEconomicosPanel) return;
+  const current = economicData && typeof economicData === "object" ? economicData : {};
+  const defaults = {
+    cliente1_nombre: current.cliente1_nombre || cliente.nombre || "",
+    cliente1_dni: current.cliente1_dni || cliente.nif || "",
+    cliente1_telefono: current.cliente1_telefono || cliente.telefono || "",
+    cliente1_email: current.cliente1_email || cliente.email || "",
+    cliente1_fecha_nacimiento: current.cliente1_fecha_nacimiento || cliente.fecha_nacimiento || "",
+  };
+  const form = document.createElement("form");
+  form.className = "form-grid";
+  form.id = "clienteEconomicosForm";
+  const hiddenId = document.createElement("input");
+  hiddenId.type = "hidden";
+  hiddenId.name = "id";
+  hiddenId.value = current.id || "";
+  form.appendChild(hiddenId);
+  const hiddenOrigen = document.createElement("input");
+  hiddenOrigen.type = "hidden";
+  hiddenOrigen.name = "origen";
+  hiddenOrigen.value = current.origen || "Cliente";
+  form.appendChild(hiddenOrigen);
+  CLIENTE_ECONOMIC_FORM_FIELDS.forEach((field) => {
+    const label = document.createElement("label");
+    if (field.span === 2) label.classList.add("span-2");
+    label.textContent = field.label;
+    let input;
+    if (field.type === "textarea") {
+      input = document.createElement("textarea");
+      input.rows = 2;
+    } else {
+      input = document.createElement("input");
+      input.type = field.type === "money" ? "text" : field.type;
+    }
+    input.name = field.name;
+    if (field.required) input.required = true;
+    const value = current[field.name] ?? defaults[field.name] ?? "";
+    if (field.type === "date") {
+      input.value = normalizeDateInput(value || "");
+    } else if (field.type === "money") {
+      const num = toNumber(value);
+      input.value = num === null ? (value || "") : euroFormatter.format(num);
+    } else {
+      input.value = value || "";
+    }
+    label.appendChild(input);
+    form.appendChild(label);
+  });
+  const actions = document.createElement("div");
+  actions.className = "form-actions span-2";
+  actions.innerHTML = `
+    <button type="submit">Guardar datos económicos</button>
+    <span id="clienteEconomicosStatus" class="muted"></span>
+  `;
+  form.appendChild(actions);
+  clienteEconomicosPanel.innerHTML = "";
+  clienteEconomicosPanel.appendChild(form);
+  bindMoneyInputs(form);
+  bindIngresosConjuntos(form);
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const statusEl = form.querySelector("#clienteEconomicosStatus");
+    if (statusEl) statusEl.textContent = "Guardando...";
+    const payload = Object.fromEntries(new FormData(form).entries());
+    payload.empresa_nombre = FIN_COMPANY;
+    payload.cliente1_id = payload.cliente1_id || cliente.id || "";
+    payload.cliente1_ingresos = toNumber(payload.cliente1_ingresos);
+    payload.cliente2_ingresos = toNumber(payload.cliente2_ingresos);
+    payload.ingresos_conjuntos = toNumber(payload.ingresos_conjuntos);
+    payload.aportacion_cv = toNumber(payload.aportacion_cv);
+    if (!payload.fecha) payload.fecha = new Date().toISOString().slice(0, 10);
+    if (!payload.estado) payload.estado = current.estado || "En estudio";
+    const endpoint = payload.id ? "/api/fin_asesoramientos_update" : "/api/fin_asesoramientos";
+    fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (statusEl) {
+          statusEl.textContent = data.error || "Guardado.";
+        }
+        if (!data.error && state.currentClienteId) {
+          openClienteDetail(state.currentClienteId);
+        }
+      })
+      .catch(() => {
+        if (statusEl) statusEl.textContent = "Error al guardar.";
+      });
+  });
+};
+
 const renderClienteMiniChart = (container, items = []) => {
   if (!container) return;
   if (!items.length) {
@@ -24952,6 +25662,7 @@ const openClienteDetail = (id) => {
     }
     if (clienteTabs) {
       const relacionesTab = clienteTabs.querySelector('[data-tab="relaciones"]');
+      const economicosTab = clienteTabs.querySelector('[data-tab="economicos"]');
       const expedienteTab = clienteTabs.querySelector('[data-tab="datos"]');
       const dashboardTab = clienteTabs.querySelector('[data-tab="dashboard"]');
       const gestoriaTab = clienteTabs.querySelector('[data-tab="profesional"]');
@@ -24959,6 +25670,7 @@ const openClienteDetail = (id) => {
       const serviciosTab = clienteTabs.querySelector('[data-tab="servicios"]');
       const docsTab = clienteTabs.querySelector('[data-tab="docs"]');
       if (relacionesTab) relacionesTab.classList.toggle("hidden", false);
+      if (economicosTab) economicosTab.classList.toggle("hidden", !hasHipotecas);
       if (expedienteTab) expedienteTab.classList.toggle("hidden", false);
       if (dashboardTab) dashboardTab.classList.toggle("hidden", true);
       if (gestoriaTab) gestoriaTab.classList.toggle("hidden", !(hasGestoria || hasSeguros || hasHipotecas || hasInmo));
@@ -25099,8 +25811,12 @@ const openClienteDetail = (id) => {
     }
     if (hasHipotecas && clienteHipotecaFicha) {
       loadClienteHipotecasFicha(cliente, empresasActivas);
+      renderClienteDatosEconomicos(cliente, data.datos_economicos || {});
     } else if (clienteHipotecaFicha) {
       clienteHipotecaFicha.innerHTML = "<p class='muted'>Sin financiaciones vinculadas.</p>";
+      if (clienteEconomicosPanel) {
+        clienteEconomicosPanel.innerHTML = "<p class='muted'>Sin servicio de financiaciones activo.</p>";
+      }
     }
     const docsDefault = hasSeguros
       ? "seguros"
@@ -27272,6 +27988,9 @@ if (workspaceNewBtn) {
     state.currentWorkspaceDetail = null;
     state.currentWorkspaceEnabledModules = [];
     state.currentWorkspaceName = "";
+    state.currentWorkspaceClientId = "";
+    state.currentWorkspaceClientData = null;
+    state.currentWorkspaceClients = [];
     fillWorkspaceForm({
       nombre: "",
       slug: "",
@@ -27287,9 +28006,11 @@ if (workspaceNewBtn) {
     renderWorkspaceLauncher({}, []);
     renderWorkspaceCompanies([]);
     renderWorkspaceClientBase([]);
+    renderWorkspaceClientDetail(null);
     renderWorkspaceModules([]);
     renderWorkspaceBillingSummary({});
     renderWorkspaceBillingList([]);
+    renderWorkspaceGestoriaOverview({});
     renderWorkspaceBudgetList([]);
     syncWorkspaceClientOptions([]);
     fillWorkspaceBillingForm();
@@ -27325,6 +28046,33 @@ if (workspaceNewBtn) {
     renderCompanyCards();
     if (workspaceFormStatus) {
       workspaceFormStatus.textContent = "Preparado para crear un tenant nuevo.";
+    }
+  });
+}
+
+if (workspaceClientLookup) {
+  workspaceClientLookup.addEventListener("input", async () => {
+    const value = workspaceClientLookup.value.trim();
+    try {
+      if (workspaceClientStatus) {
+        workspaceClientStatus.textContent = value.length >= 2 ? "Buscando clientes..." : "";
+      }
+      await loadWorkspaceClients(value);
+    } catch (error) {
+      if (workspaceClientStatus) {
+        workspaceClientStatus.textContent = error?.message || "No se pudieron cargar los clientes.";
+      }
+    }
+  });
+}
+
+if (workspaceClientRefreshBtn) {
+  workspaceClientRefreshBtn.addEventListener("click", async () => {
+    try {
+      if (workspaceClientStatus) workspaceClientStatus.textContent = "Actualizando clientes...";
+      await loadWorkspaceClients(workspaceClientLookup?.value?.trim() || "");
+    } catch (error) {
+      if (workspaceClientStatus) workspaceClientStatus.textContent = error?.message || "No se pudieron actualizar los clientes.";
     }
   });
 }

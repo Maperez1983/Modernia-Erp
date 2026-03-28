@@ -361,11 +361,23 @@
         <div class="form-card">
           <div class="section-head">
             <div>
-              <h3>Clientes Finales del Tenant</h3>
+              <h3>CRM 360 del Tenant</h3>
               <p class="muted">Base comercial y operativa de clientes reales del tenant, distinta del propio tenant cliente de LIV.</p>
             </div>
           </div>
-          <div id="workspaceClientBase"></div>
+          <div class="workspace-client-toolbar">
+            <input id="workspaceClientLookup" placeholder="Buscar cliente final por nombre, DNI, teléfono o email" />
+            <button type="button" id="workspaceClientRefreshBtn" class="secondary ghost">Actualizar</button>
+            <span id="workspaceClientStatus" class="muted"></span>
+          </div>
+          <div class="workspace-central-layout">
+            <div>
+              <div id="workspaceClientBase"></div>
+            </div>
+            <div>
+              <div id="workspaceClientDetail"></div>
+            </div>
+          </div>
         </div>
         <div class="workspace-central-layout">
           <div class="form-card">
@@ -483,6 +495,15 @@
             </div>
             <div id="workspaceDocumentHub"></div>
           </div>
+        </div>
+        <div class="form-card">
+          <div class="section-head">
+            <div>
+              <h3>Gestoría del Tenant</h3>
+              <p class="muted">Seguimiento operativo de gestoría, administración de fincas y campaña de renta dentro del tenant.</p>
+            </div>
+          </div>
+          <div id="workspaceGestoriaOverview"></div>
         </div>
         <div class="workspace-central-layout">
           <div class="form-card">
@@ -4780,6 +4801,7 @@
           <div class="tabs" id="clienteTabs">
             <button class="tab active" type="button" data-tab="datos">Expediente</button>
             <button class="tab" type="button" data-tab="relaciones">Relaciones</button>
+            <button class="tab hidden" type="button" data-tab="economicos">Datos económicos</button>
             <button class="tab hidden" type="button" data-tab="dashboard">Resumen</button>
             <button class="tab" type="button" data-tab="profesional">Servicios</button>
             <button class="tab hidden" type="button" data-tab="operativa">Áreas de trabajo</button>
@@ -4827,6 +4849,17 @@
                   <span id="clienteAssignStatus" class="muted"></span>
                 </div>
               </form>
+            </div>
+          </div>
+          <div id="clienteTabEconomicos" class="hidden">
+            <div class="form-card">
+              <div class="section-head">
+                <div>
+                  <h3>Datos económicos</h3>
+                  <p class="muted">Ficha económica reutilizable para financiaciones y seguimiento hipotecario.</p>
+                </div>
+              </div>
+              <div id="clienteEconomicosPanel"></div>
             </div>
           </div>
           <div id="clienteTabDashboard" class="hidden">
