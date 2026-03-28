@@ -11101,7 +11101,7 @@ const renderEditableGrid = (grid, fields, data, target) => {
     const brand = document.createElement("div");
     brand.className = "catastro-brand";
     brand.innerHTML = `
-      <span class="catastro-icon" aria-hidden="true">C</span>
+      <span class="catastro-icon" aria-hidden="true"><span>CAT</span></span>
       <div>
         <strong>Catastro</strong>
         <p class="muted">Referencia catastral y ficha pública del inmueble.</p>
@@ -18538,12 +18538,12 @@ const refreshCurrentInmuebleProfile = () => {
         value: inmueble.referencia_catastral || "Pendiente",
       },
       {
-        label: "Documentos",
-        value: String(docs.length || 0),
+        label: "Ocupación",
+        value: inmueble.situacion_ocupacion || "Pendiente",
       },
       {
-        label: "Visitas",
-        value: String(visitas.length || 0),
+        label: "Documentos",
+        value: String(docs.length || 0),
       },
     ];
     const ownerMarkup = ownerNames.length
@@ -18619,14 +18619,17 @@ const refreshCurrentInmuebleProfile = () => {
           ["Catastro", inmueble.referencia_catastral],
           ["Estado", inmueble.estado],
           ["Tipo", inmueble.tipo_inmueble],
+          ["Antigüedad", inmueble.anio_construccion],
         ],
       },
       {
-        title: "Seguimiento",
+        title: "Comercial",
         items: [
           ["Propietario", captacion.propietario],
           ["Situación", captacion.situacion_comercial],
           ["Canal", captacion.canal],
+          ["Honorarios", inmueble.honorarios],
+          ["Ocupación", inmueble.situacion_ocupacion],
           ["Urgencia", captacion.urgencia],
           ["Asesor", captacion.asesor],
         ],

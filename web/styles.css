@@ -291,15 +291,20 @@ button.secondary,
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 36px;
-  height: 30px;
-  padding: 0 8px;
-  border-radius: 10px;
-  background: linear-gradient(135deg, #1b4f72, #3f7fb1);
+  min-width: 54px;
+  height: 34px;
+  padding: 0 10px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #1b4f72 0%, #2d6c98 56%, #5a9cc7 100%);
   color: #fff;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.16em;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+}
+
+.catastro-icon span {
+  transform: translateY(1px);
 }
 
 .tabs,
@@ -2564,6 +2569,27 @@ tr.is-selected td {
   align-items: start;
 }
 
+.inmueble-profile-top {
+  grid-template-columns: minmax(0, 1.25fr) minmax(320px, 0.95fr);
+}
+
+.inmueble-profile-side {
+  display: grid;
+  gap: 12px;
+}
+
+.inmueble-map-card {
+  display: grid;
+  gap: 12px;
+}
+
+.inmueble-data-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.9fr);
+  gap: 14px;
+  align-items: start;
+}
+
 .inmueble-summary-card,
 .inmueble-fact-card {
   border: 1px solid var(--line);
@@ -2801,6 +2827,13 @@ tr.is-selected td {
 .inmueble-fact-row strong {
   text-align: right;
   color: var(--ink);
+}
+
+@media (max-width: 1024px) {
+  .inmueble-profile-top,
+  .inmueble-data-workspace {
+    grid-template-columns: 1fr;
+  }
 }
 
 .crm-badge {

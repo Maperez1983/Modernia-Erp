@@ -2000,39 +2000,45 @@
               <button class="tab" type="button" data-tab="estado">Estado</button>
             </div>
             <div id="inmuebleTabDatos">
-              <div class="inmueble-profile">
+              <div class="inmueble-profile inmueble-profile-top">
                 <div id="inmuebleSummaryCard" class="inmueble-summary-card"></div>
-                <div id="inmuebleFactsPanel" class="inmueble-facts-panel"></div>
+                <div class="inmueble-profile-side">
+                  <div class="form-card inmueble-map-card">
+                    <div class="section-head">
+                      <div>
+                        <h3>Mapa y geolocalización</h3>
+                        <p class="muted">Vista rápida de localización y apoyo para Catastro.</p>
+                      </div>
+                    </div>
+                    <div id="inmuebleMap" class="map-box"></div>
+                  </div>
+                  <div id="inmuebleFactsPanel" class="inmueble-facts-panel"></div>
+                </div>
               </div>
-              <div class="form-card">
-                <div class="section-head">
-                  <div>
-                    <h3>Datos del inmueble</h3>
-                    <p class="muted">Dirección, características, precios, honorarios, situación de ocupación y coordenadas.</p>
+              <div class="inmueble-data-workspace">
+                <div class="form-card">
+                  <div class="section-head">
+                    <div>
+                      <h3>Datos del inmueble</h3>
+                      <p class="muted">Dirección, características, pricing, honorarios, ocupación y Catastro.</p>
+                    </div>
+                  </div>
+                  <div class="grid" id="inmuebleDatosGrid"></div>
+                </div>
+                <div class="stack">
+                  <div class="form-card">
+                    <div class="section-head">
+                      <div>
+                        <h3>Gestión comercial</h3>
+                        <p class="muted">Seguimiento del expediente, asesor responsable y próxima acción sobre la vivienda.</p>
+                      </div>
+                      <div class="form-actions">
+                        <button class="secondary" type="button" id="inmuebleGoEstadoBtn">Cambiar estado</button>
+                      </div>
+                    </div>
+                    <div class="grid" id="inmuebleCaptacionGrid"></div>
                   </div>
                 </div>
-                <div class="grid" id="inmuebleDatosGrid"></div>
-              </div>
-              <div class="form-card">
-                <div class="section-head">
-                  <div>
-                    <h3>Gestión comercial</h3>
-                    <p class="muted">Seguimiento del expediente, asesor responsable y próxima acción sobre la vivienda.</p>
-                  </div>
-                  <div class="form-actions">
-                    <button class="secondary" type="button" id="inmuebleGoEstadoBtn">Cambiar estado</button>
-                  </div>
-                </div>
-                <div class="grid" id="inmuebleCaptacionGrid"></div>
-              </div>
-              <div class="form-card">
-                <div class="section-head">
-                  <div>
-                    <h3>Mapa y geolocalización</h3>
-                    <p class="muted">Al informar la dirección, el sistema intenta geolocalizar el inmueble y actualiza el mapa.</p>
-                  </div>
-                </div>
-                <div id="inmuebleMap" class="map-box"></div>
               </div>
             </div>
             <div id="inmuebleTabDemandas" class="hidden">
