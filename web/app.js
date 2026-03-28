@@ -1176,6 +1176,7 @@ const state = {
   currentWorkspaceClientData: null,
   currentWorkspaceClients: [],
   currentWorkspaceView: "overview",
+  currentWorkspaceData: {},
   workspaceBillingRows: [],
   workspaceClientOptions: [],
   workspaceClientOptionMap: new Map(),
@@ -3725,7 +3726,7 @@ const updateWorkspaceEntryChrome = () => {
 };
 
 const setWorkspaceCompanyContext = (companyId = "", options = {}) => {
-  const { rerenderForms = true } = options;
+  const { rerenderForms = true, reloadScopedPanels = true } = options;
   const companies = state.currentWorkspaceDetail?.companies || [];
   const selected =
     companies.find((row) => String(row.id || "") === String(companyId || ""))
@@ -3735,6 +3736,7 @@ const setWorkspaceCompanyContext = (companyId = "", options = {}) => {
   state.currentWorkspaceCompanyName = selected?.nombre || "";
   renderWorkspaceCompanySwitcher(companies);
   renderWorkspaceCompanies(companies);
+  renderWorkspaceCompanyScopedData();
   if (rerenderForms) {
     fillWorkspaceBillingForm();
     fillWorkspaceBudgetForm();
@@ -3745,6 +3747,93 @@ const setWorkspaceCompanyContext = (companyId = "", options = {}) => {
     fillWorkspaceFincasCommunityForm();
     fillWorkspaceFincasProviderForm();
   }
+  if (reloadScopedPanels) {
+    loadWorkspaceCompanyScopedPanels();
+  }
+};
+
+const getWorkspaceCompanyFilter = () => String(state.currentWorkspaceCompanyId || "").trim();
+
+const filterWorkspaceRowsByCompany = (rows = [], field = "empresa_id") => {
+  const companyId = getWorkspaceCompanyFilter();
+  const items = Array.isArray(rows) ? rows : [];
+  if (!companyId) return items;
+  return items.filter((row) => String(row?.[field] || "").trim() === companyId);
+};
+
+const filterWorkspaceDocumentHubData = (payload = {}) => {
+  const rows = Array.isArray(payload.rows) ? payload.rows : [];
+  const companyName = normalizeSimple(state.currentWorkspaceCompanyName || "");
+  if (!companyName) return payload;
+  const filteredRows = rows.filter((row) => normalizeSimple(row?.empresa || "") === companyName);
+  return {
+    ...payload,
+    rows: filteredRows,
+    summary: {
+      ...(payload.summary || {}),
+      documentos_total: filteredRows.length,
+      pendientes_asignacion: filteredRows.filter((row) => Number(row?.assignable || 0) === 1 && row?.suggested_cliente_id).length,
+    },
+  };
+};
+
+const renderWorkspaceCompanyScopedData = () => {
+  const raw = state.currentWorkspaceData || {};
+  const billingRows = filterWorkspaceRowsByCompany(raw.billingRows || []);
+  const budgetRows = filterWorkspaceRowsByCompany(raw.budgetRows || []);
+  const collectionRows = filterWorkspaceRowsByCompany(raw.collectionRows || []);
+  const remittanceRows = filterWorkspaceRowsByCompany(raw.remittanceRows || []);
+  const seriesRows = filterWorkspaceRowsByCompany(raw.seriesRows || []);
+  const inboxRows = filterWorkspaceRowsByCompany(raw.inboxRows || []);
+  const timeRows = filterWorkspaceRowsByCompany(raw.timeRows || []);
+  const communityRows = filterWorkspaceRowsByCompany(raw.fincasCommunities || []);
+  const communityIds = new Set(communityRows.map((row) => String(row.id || "")).filter(Boolean));
+  const providerRows = (raw.fincasProviders || []).filter((row) => {
+    const rowCompanyId = String(row?.empresa_id || "").trim();
+    const rowCommunityId = String(row?.comunidad_id || "").trim();
+    return (rowCompanyId && rowCompanyId === getWorkspaceCompanyFilter()) || (rowCommunityId && communityIds.has(rowCommunityId));
+  });
+  const incidentRows = (raw.fincasIncidents || []).filter((row) => communityIds.has(String(row?.comunidad_id || "").trim()));
+  const meetingRows = (raw.fincasMeetings || []).filter((row) => communityIds.has(String(row?.comunidad_id || "").trim()));
+  state.workspaceBillingRows = billingRows;
+  renderWorkspaceBillingList(billingRows);
+  renderWorkspaceBudgetList(budgetRows);
+  renderWorkspaceCollectionsList(collectionRows);
+  renderWorkspaceRemittancesList(remittanceRows);
+  renderWorkspaceSeriesList(seriesRows);
+  renderWorkspaceInboxList(inboxRows);
+  renderWorkspaceTimeList(timeRows);
+  renderWorkspaceFincasCommunityList(communityRows);
+  renderWorkspaceFincasProviderList(providerRows);
+  renderWorkspaceFincasIncidentList(incidentRows);
+  renderWorkspaceFincasMeetingList(meetingRows);
+  hydrateWorkspaceCommunitySelect(communityRows);
+  hydrateWorkspaceProviderSelect(providerRows);
+  renderWorkspacePortalList(raw.portalRows || []);
+  hydrateWorkspacePortalRequestTargets(raw.portalRows || []);
+  renderWorkspacePortalRequestList(raw.portalRequestRows || []);
+  renderWorkspaceAutomationList(raw.automationRows || []);
+  renderWorkspaceAutomationLogs(raw.automationLogRows || []);
+  renderWorkspaceDocumentHub(filterWorkspaceDocumentHubData(raw.docs || {}));
+};
+
+const loadWorkspaceCompanyScopedPanels = async () => {
+  if (!state.currentWorkspaceId) return;
+  const companyQuery = state.currentWorkspaceCompanyId
+    ? `&empresa_id=${encodeURIComponent(state.currentWorkspaceCompanyId)}`
+    : "";
+  const [gestoriaOverview, segurosOverview, finOverview, inmoOverview, serviceDesks] = await Promise.all([
+    api(`/api/workspace_gestoria_overview?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}${companyQuery}`),
+    api(`/api/workspace_seguros_overview?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}${companyQuery}`),
+    api(`/api/workspace_fin_overview?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}${companyQuery}`),
+    api(`/api/workspace_inmo_overview?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}${companyQuery}`),
+    api(`/api/workspace_service_desks?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}${companyQuery}`),
+  ]);
+  renderWorkspaceGestoriaOverview(gestoriaOverview || {});
+  renderWorkspaceSegurosOverview(segurosOverview || {});
+  renderWorkspaceFinOverview(finOverview || {});
+  renderWorkspaceInmoOverview(inmoOverview || {});
+  renderWorkspaceServiceDesks(serviceDesks || {});
 };
 
 const renderWorkspaceCompanySwitcher = (rows = []) => {
@@ -6439,8 +6528,21 @@ const renderWorkspaceDocumentHub = (data = {}) => {
 const loadWorkspaceDetail = async (workspaceId) => {
   if (!workspaceId) return;
   state.currentWorkspaceId = workspaceId;
-  const [detail, billing, docs, billingRows, budgetRows, collections, remittances, workspaceClients, health, gestoriaOverview, segurosOverview, finOverview, inmoOverview, serviceDesks, series, inbox, portal, portalRequests, automations, automationLogs, timeRows, fincasCommunities, fincasIncidents, fincasProviders, fincasMeetings] = await Promise.all([
-    api(`/api/workspace_detail?id=${encodeURIComponent(workspaceId)}`),
+  const detail = await api(`/api/workspace_detail?id=${encodeURIComponent(workspaceId)}`);
+  state.currentWorkspaceDetail = detail;
+  state.currentWorkspaceEnabledModules = getWorkspaceEnabledModules(detail.modules || []);
+  state.currentWorkspaceName = detail.workspace?.nombre || "";
+  if (!state.currentWorkspaceTarget) {
+    state.currentWorkspaceTarget = detail.workspace?.slug || detail.workspace?.nombre || "";
+  }
+  const companies = detail.companies || [];
+  const companyMatch = companies.find((row) => String(row.id || "") === String(state.currentWorkspaceCompanyId || ""));
+  state.currentWorkspaceCompanyId = companyMatch?.id || companies[0]?.id || "";
+  state.currentWorkspaceCompanyName = companyMatch?.nombre || companies[0]?.nombre || "";
+  const companyQuery = state.currentWorkspaceCompanyId
+    ? `&empresa_id=${encodeURIComponent(state.currentWorkspaceCompanyId)}`
+    : "";
+  const [billing, docs, billingRows, budgetRows, collections, remittances, workspaceClients, health, gestoriaOverview, segurosOverview, finOverview, inmoOverview, serviceDesks, series, inbox, portal, portalRequests, automations, automationLogs, timeRows, fincasCommunities, fincasIncidents, fincasProviders, fincasMeetings] = await Promise.all([
     api(`/api/workspace_billing_summary?workspace_id=${encodeURIComponent(workspaceId)}`),
     api(`/api/workspace_document_hub?workspace_id=${encodeURIComponent(workspaceId)}`),
     api(`/api/workspace_facturacion?workspace_id=${encodeURIComponent(workspaceId)}`),
@@ -6449,11 +6551,11 @@ const loadWorkspaceDetail = async (workspaceId) => {
     api(`/api/workspace_remesas?workspace_id=${encodeURIComponent(workspaceId)}`),
     api(`/api/workspace_clientes?workspace_id=${encodeURIComponent(workspaceId)}&limit=60`),
     api(`/api/workspace_health?workspace_id=${encodeURIComponent(workspaceId)}`),
-    api(`/api/workspace_gestoria_overview?workspace_id=${encodeURIComponent(workspaceId)}`),
-    api(`/api/workspace_seguros_overview?workspace_id=${encodeURIComponent(workspaceId)}`),
-    api(`/api/workspace_fin_overview?workspace_id=${encodeURIComponent(workspaceId)}`),
-    api(`/api/workspace_inmo_overview?workspace_id=${encodeURIComponent(workspaceId)}`),
-    api(`/api/workspace_service_desks?workspace_id=${encodeURIComponent(workspaceId)}`),
+    api(`/api/workspace_gestoria_overview?workspace_id=${encodeURIComponent(workspaceId)}${companyQuery}`),
+    api(`/api/workspace_seguros_overview?workspace_id=${encodeURIComponent(workspaceId)}${companyQuery}`),
+    api(`/api/workspace_fin_overview?workspace_id=${encodeURIComponent(workspaceId)}${companyQuery}`),
+    api(`/api/workspace_inmo_overview?workspace_id=${encodeURIComponent(workspaceId)}${companyQuery}`),
+    api(`/api/workspace_service_desks?workspace_id=${encodeURIComponent(workspaceId)}${companyQuery}`),
     api(`/api/workspace_series?workspace_id=${encodeURIComponent(workspaceId)}`),
     api(`/api/workspace_inbox?workspace_id=${encodeURIComponent(workspaceId)}`),
     api(`/api/workspace_portal?workspace_id=${encodeURIComponent(workspaceId)}`),
@@ -6466,17 +6568,25 @@ const loadWorkspaceDetail = async (workspaceId) => {
     api(`/api/workspace_fincas_proveedores?workspace_id=${encodeURIComponent(workspaceId)}`),
     api(`/api/workspace_fincas_juntas?workspace_id=${encodeURIComponent(workspaceId)}`),
   ]);
-  state.currentWorkspaceDetail = detail;
-  state.currentWorkspaceEnabledModules = getWorkspaceEnabledModules(detail.modules || []);
-  state.currentWorkspaceName = detail.workspace?.nombre || "";
-  if (!state.currentWorkspaceTarget) {
-    state.currentWorkspaceTarget = detail.workspace?.slug || detail.workspace?.nombre || "";
-  }
-  const companies = detail.companies || [];
-  const companyMatch = companies.find((row) => String(row.id || "") === String(state.currentWorkspaceCompanyId || ""));
-  state.currentWorkspaceCompanyId = companyMatch?.id || companies[0]?.id || "";
-  state.currentWorkspaceCompanyName = companyMatch?.nombre || companies[0]?.nombre || "";
   state.currentWorkspaceClients = workspaceClients.rows || [];
+  state.currentWorkspaceData = {
+    docs,
+    billingRows: billingRows.rows || [],
+    budgetRows: budgetRows.rows || [],
+    collectionRows: collections.rows || [],
+    remittanceRows: remittances.rows || [],
+    seriesRows: series.rows || [],
+    inboxRows: inbox.rows || [],
+    portalRows: portal.rows || [],
+    portalRequestRows: portalRequests.rows || [],
+    automationRows: automations.rows || [],
+    automationLogRows: automationLogs.rows || [],
+    timeRows: timeRows.rows || [],
+    fincasCommunities: fincasCommunities.rows || [],
+    fincasIncidents: fincasIncidents.rows || [],
+    fincasProviders: fincasProviders.rows || [],
+    fincasMeetings: fincasMeetings.rows || [],
+  };
   syncWorkspaceClientOptions(workspaceClients.rows || []);
   fillWorkspaceForm(detail.workspace || {});
   renderWorkspaceHealth(health || {});
@@ -6489,43 +6599,25 @@ const loadWorkspaceDetail = async (workspaceId) => {
   renderWorkspaceClientDetail(null);
   renderWorkspaceModules(detail.modules || []);
   renderWorkspaceBillingSummary(billing || {});
-  renderWorkspaceBillingList(billingRows.rows || []);
   renderWorkspaceGestoriaOverview(gestoriaOverview || {});
   renderWorkspaceSegurosOverview(segurosOverview || {});
   renderWorkspaceFinOverview(finOverview || {});
   renderWorkspaceInmoOverview(inmoOverview || {});
   renderWorkspaceServiceDesks(serviceDesks || {});
   fillWorkspaceBillingForm();
-  renderWorkspaceBudgetList(budgetRows.rows || []);
   fillWorkspaceBudgetForm();
-  renderWorkspaceCollectionsList(collections.rows || []);
   fillWorkspaceCollectionsForm();
-  renderWorkspaceRemittancesList(remittances.rows || []);
   fillWorkspaceRemittancesForm();
-  renderWorkspaceSeriesList(series.rows || []);
   fillWorkspaceSeriesForm();
-  renderWorkspaceInboxList(inbox.rows || []);
   fillWorkspaceInboxForm();
-  renderWorkspacePortalList(portal.rows || []);
-  hydrateWorkspacePortalRequestTargets(portal.rows || []);
-  renderWorkspacePortalRequestList(portalRequests.rows || []);
   fillWorkspacePortalRequestForm();
-  renderWorkspaceAutomationList(automations.rows || []);
-  renderWorkspaceAutomationLogs(automationLogs.rows || []);
   fillWorkspaceAutomationForm();
-  renderWorkspaceTimeList(timeRows.rows || []);
   fillWorkspaceTimeForm();
-  renderWorkspaceFincasCommunityList(fincasCommunities.rows || []);
   fillWorkspaceFincasCommunityForm();
-  hydrateWorkspaceCommunitySelect(fincasCommunities.rows || []);
-  hydrateWorkspaceProviderSelect(fincasProviders.rows || []);
-  renderWorkspaceFincasIncidentList(fincasIncidents.rows || []);
   fillWorkspaceFincasIncidentForm();
-  renderWorkspaceFincasProviderList(fincasProviders.rows || []);
   fillWorkspaceFincasProviderForm();
-  renderWorkspaceFincasMeetingList(fincasMeetings.rows || []);
   fillWorkspaceFincasMeetingForm();
-  renderWorkspaceDocumentHub(docs || {});
+  renderWorkspaceCompanyScopedData();
   updateWorkspaceEntryChrome();
   setWorkspaceView(state.currentWorkspaceView || "overview");
   if ((workspaceClients.rows || []).length) {

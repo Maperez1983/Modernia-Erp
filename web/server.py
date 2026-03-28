@@ -12478,6 +12478,17 @@ def fetch_workspace_company_ids(conn, workspace_id):
     return [row["empresa_id"] if isinstance(row, sqlite3.Row) else row[0] for row in rows]
 
 
+def resolve_workspace_company_ids(conn, workspace_id, empresa_id=None):
+    empresa_ids = fetch_workspace_company_ids(conn, workspace_id)
+    if not empresa_ids:
+        return []
+    scoped_id = str(empresa_id or "").strip()
+    if not scoped_id:
+        return empresa_ids
+    allowed_ids = {str(value) for value in empresa_ids if value}
+    return [scoped_id] if scoped_id in allowed_ids else []
+
+
 def fetch_workspace_clientes(conn, workspace_id, q="", limit=60):
     empresa_ids = fetch_workspace_company_ids(conn, workspace_id)
     if not empresa_ids:
@@ -12648,8 +12659,8 @@ def fetch_workspace_cliente_360(conn, workspace_id, cliente_id):
     }
 
 
-def fetch_workspace_gestoria_overview(conn, workspace_id):
-    empresa_ids = fetch_workspace_company_ids(conn, workspace_id)
+def fetch_workspace_gestoria_overview(conn, workspace_id, empresa_id=None):
+    empresa_ids = resolve_workspace_company_ids(conn, workspace_id, empresa_id=empresa_id)
     if not empresa_ids:
         return {
             "counts": {
@@ -12800,8 +12811,8 @@ def fetch_workspace_gestoria_overview(conn, workspace_id):
     }
 
 
-def fetch_workspace_seguros_overview(conn, workspace_id):
-    empresa_ids = fetch_workspace_company_ids(conn, workspace_id)
+def fetch_workspace_seguros_overview(conn, workspace_id, empresa_id=None):
+    empresa_ids = resolve_workspace_company_ids(conn, workspace_id, empresa_id=empresa_id)
     if not empresa_ids:
         return {
             "counts": {
@@ -12953,8 +12964,8 @@ def fetch_workspace_seguros_overview(conn, workspace_id):
     }
 
 
-def fetch_workspace_fin_overview(conn, workspace_id):
-    empresa_ids = fetch_workspace_company_ids(conn, workspace_id)
+def fetch_workspace_fin_overview(conn, workspace_id, empresa_id=None):
+    empresa_ids = resolve_workspace_company_ids(conn, workspace_id, empresa_id=empresa_id)
     if not empresa_ids:
         return {
             "counts": {
@@ -13087,8 +13098,8 @@ def fetch_workspace_fin_overview(conn, workspace_id):
     }
 
 
-def fetch_workspace_inmo_overview(conn, workspace_id):
-    empresa_ids = fetch_workspace_company_ids(conn, workspace_id)
+def fetch_workspace_inmo_overview(conn, workspace_id, empresa_id=None):
+    empresa_ids = resolve_workspace_company_ids(conn, workspace_id, empresa_id=empresa_id)
     if not empresa_ids:
         return {
             "counts": {
@@ -13231,8 +13242,8 @@ def fetch_workspace_inmo_overview(conn, workspace_id):
     }
 
 
-def fetch_workspace_service_desks(conn, workspace_id):
-    empresa_ids = fetch_workspace_company_ids(conn, workspace_id)
+def fetch_workspace_service_desks(conn, workspace_id, empresa_id=None):
+    empresa_ids = resolve_workspace_company_ids(conn, workspace_id, empresa_id=empresa_id)
     if not empresa_ids:
         return {"gestoria": [], "seguros": [], "financiacion": [], "inmobiliaria": []}
     placeholders = ",".join(["?"] * len(empresa_ids))
@@ -24327,42 +24338,47 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/workspace_gestoria_overview":
             workspace_id = params.get("workspace_id", [""])[0]
+            empresa_id = params.get("empresa_id", [""])[0].strip()
             if not workspace_id:
                 json_response(self, {"error": "workspace_id requerido"}, status=400)
                 return
-            json_response(self, fetch_workspace_gestoria_overview(conn, workspace_id))
+            json_response(self, fetch_workspace_gestoria_overview(conn, workspace_id, empresa_id=empresa_id))
             return
 
         if path == "/api/workspace_seguros_overview":
             workspace_id = params.get("workspace_id", [""])[0]
+            empresa_id = params.get("empresa_id", [""])[0].strip()
             if not workspace_id:
                 json_response(self, {"error": "workspace_id requerido"}, status=400)
                 return
-            json_response(self, fetch_workspace_seguros_overview(conn, workspace_id))
+            json_response(self, fetch_workspace_seguros_overview(conn, workspace_id, empresa_id=empresa_id))
             return
 
         if path == "/api/workspace_fin_overview":
             workspace_id = params.get("workspace_id", [""])[0]
+            empresa_id = params.get("empresa_id", [""])[0].strip()
             if not workspace_id:
                 json_response(self, {"error": "workspace_id requerido"}, status=400)
                 return
-            json_response(self, fetch_workspace_fin_overview(conn, workspace_id))
+            json_response(self, fetch_workspace_fin_overview(conn, workspace_id, empresa_id=empresa_id))
             return
 
         if path == "/api/workspace_inmo_overview":
             workspace_id = params.get("workspace_id", [""])[0]
+            empresa_id = params.get("empresa_id", [""])[0].strip()
             if not workspace_id:
                 json_response(self, {"error": "workspace_id requerido"}, status=400)
                 return
-            json_response(self, fetch_workspace_inmo_overview(conn, workspace_id))
+            json_response(self, fetch_workspace_inmo_overview(conn, workspace_id, empresa_id=empresa_id))
             return
 
         if path == "/api/workspace_service_desks":
             workspace_id = params.get("workspace_id", [""])[0]
+            empresa_id = params.get("empresa_id", [""])[0].strip()
             if not workspace_id:
                 json_response(self, {"error": "workspace_id requerido"}, status=400)
                 return
-            json_response(self, fetch_workspace_service_desks(conn, workspace_id))
+            json_response(self, fetch_workspace_service_desks(conn, workspace_id, empresa_id=empresa_id))
             return
 
         if path == "/api/workspace_series":
