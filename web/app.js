@@ -3898,7 +3898,9 @@ const setWorkspaceView = (view = "overview", options = {}) => {
     button.classList.toggle("active", (button.dataset.workspaceViewTab || "") === normalized);
   });
   workspaceViewPanels.forEach((panel) => {
-    panel.classList.toggle("hidden", (panel.dataset.workspaceView || "") !== normalized);
+    const isHidden = (panel.dataset.workspaceView || "") !== normalized;
+    panel.classList.toggle("hidden", isHidden);
+    panel.hidden = isHidden;
   });
   if (scroll && workspaceViewTabs) {
     workspaceViewTabs.scrollIntoView({ behavior: "smooth", block: "start" });

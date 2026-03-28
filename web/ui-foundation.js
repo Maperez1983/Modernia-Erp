@@ -1,5 +1,6 @@
 (function () {
   const dirtyForms = new Set();
+  const touchedForms = new Set();
   const focusedModalState = new WeakMap();
   let contextBar = null;
   let contextTitle = null;
@@ -176,6 +177,7 @@
       localStorage.removeItem(storageKey("draft", form.id));
     } catch {}
     dirtyForms.delete(form.id);
+    touchedForms.delete(form.id);
     form.classList.remove("is-dirty");
     syncContextBar();
   };
@@ -224,6 +226,7 @@
       const handleFieldChange = () => {
         validateField(field);
         dirtyForms.add(form.id);
+        touchedForms.add(form.id);
         form.classList.add("is-dirty");
         saveFormDraft(form);
         syncContextBar();
@@ -587,7 +590,7 @@
   };
 
   window.addEventListener("beforeunload", (event) => {
-    if (!dirtyForms.size) return;
+    if (!touchedForms.size) return;
     event.preventDefault();
     event.returnValue = "";
   });
