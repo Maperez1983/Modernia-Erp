@@ -2035,14 +2035,17 @@ const crmCaptacionesInfo = document.getElementById("crmCaptacionesInfo");
 const crmInmueblesTable = document.getElementById("crmInmueblesTable");
 const crmInmueblesInfo = document.getElementById("crmInmueblesInfo");
 const crmInmueblesRecent = document.getElementById("crmInmueblesRecent");
+const crmInmueblesQuality = document.getElementById("crmInmueblesQuality");
 const crmInmuebleSearch = document.getElementById("crmInmuebleSearch");
 const crmInmuebleSearchMirror = document.getElementById("crmInmuebleSearchMirror");
 const crmInmueblesTableMirror = document.getElementById("crmInmueblesTableMirror");
 const crmInmueblesInfoMirror = document.getElementById("crmInmueblesInfoMirror");
 const crmInmueblesRecentMirror = document.getElementById("crmInmueblesRecentMirror");
+const crmAlquileresMini = document.getElementById("crmAlquileresMini");
 const crmAlquileresTable = document.getElementById("crmAlquileresTable");
 const crmAlquileresInfo = document.getElementById("crmAlquileresInfo");
 const crmAlquilerSearch = document.getElementById("crmAlquilerSearch");
+const crmCompraventasMini = document.getElementById("crmCompraventasMini");
 const crmCompraventasTable = document.getElementById("crmCompraventasTable");
 const crmCompraventasInfo = document.getElementById("crmCompraventasInfo");
 const crmCompraventaSearch = document.getElementById("crmCompraventaSearch");
@@ -18099,6 +18102,43 @@ const loadCrmAlquileres = () => {
     params.set("q", q);
   }
   api(`/api/tabla?${params.toString()}`).then((data) => {
+    const rows = Array.isArray(data?.rows) ? data.rows : [];
+    cachedCrmAlquileres = rows;
+    const activos = rows.filter((row) => {
+      const status = normalizeSimple(row.estado || row.situacion || row.estado_operacion || "");
+      return status && !status.includes("cerr") && !status.includes("baja") && !status.includes("cancel");
+    }).length;
+    const conRenta = rows.filter((row) => {
+      const rent = Number(row.renta || row.renta_mensual || row.precio || 0);
+      return Number.isFinite(rent) && rent > 0;
+    }).length;
+    const conInquilino = rows.filter((row) => String(row.inquilino || row.arrendatario || "").trim()).length;
+    renderCrmMiniCards(crmAlquileresMini, [
+      {
+        title: "Alquileres totales",
+        value: rows.length,
+        meta: "Operaciones",
+        summary: "Expedientes activos e históricos de alquiler.",
+      },
+      {
+        title: "Con renta informada",
+        value: conRenta,
+        meta: "Pricing",
+        summary: "Importes listos para seguimiento y documentación.",
+      },
+      {
+        title: "Con inquilino vinculado",
+        value: conInquilino,
+        meta: "Relación",
+        summary: "Alquileres con parte arrendataria identificada.",
+      },
+      {
+        title: "Activos",
+        value: activos,
+        meta: "Cartera",
+        summary: "Expedientes todavía abiertos o en gestión.",
+      },
+    ]);
     renderTableInto(data, crmAlquileresTable, crmAlquileresInfo, "Alquileres");
   });
 };
@@ -18443,6 +18483,7 @@ const updateCaptacionEtapa = (id, etapa) => {
 };
 
 let cachedCrmInmuebles = [];
+let cachedCrmAlquileres = [];
 let cachedCrmDemandas = [];
 let cachedCrmCaptaciones = [];
 let cachedCrmCompraventas = [];
@@ -18739,6 +18780,40 @@ const loadCrmInmuebles = () => {
     cachedCrmInmuebles = rows;
     renderCrmInmueblesRecent(rows);
     renderCrmInmueblesCatalog(rows);
+    const sinCatastro = rows.filter((row) => !String(row.referencia_catastral || "").trim()).length;
+    const sinPropietarios = rows.filter((row) => !String(row.propietarios || row.propietario || "").trim()).length;
+    const sinPricing = rows.filter((row) => {
+      const objetivo = Number(row.precio_objetivo || 0);
+      const valoracion = Number(row.precio_valoracion || 0);
+      return (!Number.isFinite(objetivo) || objetivo <= 0) && (!Number.isFinite(valoracion) || valoracion <= 0);
+    }).length;
+    const enNoticia = rows.filter((row) => normalizeSimple(row.estado || "") === "noticia").length;
+    renderCrmMiniCards(crmInmueblesQuality, [
+      {
+        title: "Sin Catastro",
+        value: sinCatastro,
+        meta: "Calidad",
+        summary: "Inmuebles que todavía necesitan referencia catastral.",
+      },
+      {
+        title: "Sin propietarios",
+        value: sinPropietarios,
+        meta: "Vinculación",
+        summary: "Expedientes sin cliente propietario enlazado.",
+      },
+      {
+        title: "Sin pricing",
+        value: sinPricing,
+        meta: "Valoración",
+        summary: "Faltan precio objetivo o valoración de adquisición.",
+      },
+      {
+        title: "En noticia",
+        value: enNoticia,
+        meta: "Pipeline",
+        summary: "Stock aún sin avanzar a adquisición o encargo.",
+      },
+    ]);
     [crmInmueblesInfo, crmInmueblesInfoMirror].filter(Boolean).forEach((target) => {
       target.textContent = `Mostrando ${rows.length} inmuebles.`;
     });
@@ -18775,6 +18850,37 @@ const loadCrmCompraventas = () => {
       const estado = String(row.estado || "").trim().toLowerCase();
       return estado === "importado historico";
     }).length;
+    const escrituradas = rows.filter((row) => String(row.fecha_escritura || "").trim()).length;
+    const conDocumentacion = rows.filter((row) => {
+      const documental = normalizeSimple(row.estado_documental || "");
+      return documental && !documental.includes("pendiente");
+    }).length;
+    renderCrmMiniCards(crmCompraventasMini, [
+      {
+        title: "Compraventas totales",
+        value: rows.length,
+        meta: "Volumen",
+        summary: "Operaciones cargadas en el CRM inmobiliario.",
+      },
+      {
+        title: "Manuales",
+        value: manualCount,
+        meta: "Captura",
+        summary: "Dadas de alta desde formulario u operativa nueva.",
+      },
+      {
+        title: "Históricas",
+        value: historicoCount,
+        meta: "Migración",
+        summary: "Operaciones importadas desde histórico previo.",
+      },
+      {
+        title: "Escrituradas",
+        value: escrituradas,
+        meta: "Cierre",
+        summary: `${conDocumentacion} con documentación avanzada o cerrada.`,
+      },
+    ]);
     const table = document.createElement("table");
     const thead = document.createElement("thead");
     const trHead = document.createElement("tr");
