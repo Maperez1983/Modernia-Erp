@@ -9206,6 +9206,85 @@ def sync_inmueble_stage_for_action(conn, inmueble_id, destino, now):
     )
 
 
+def normalize_inmo_action_type(value):
+    normalized = normalize_lookup_text(value or "")
+    aliases = {
+        "cita de adquisicion": "cita_adquisicion",
+        "cita adquisicion": "cita_adquisicion",
+        "cita comprador": "cita_comprador",
+        "cita de comprador": "cita_comprador",
+        "cita propuesta": "cita_propuesta",
+        "cita de propuesta": "cita_propuesta",
+        "cita propietarios": "cita_propietarios",
+        "cita de propietarios": "cita_propietarios",
+        "cita aceptacion propietarios": "cita_propietarios",
+        "cita de aceptacion propietarios": "cita_propietarios",
+        "cita contraoferta": "cita_contraoferta",
+        "cita aceptacion contraoferta": "cita_contraoferta",
+        "cita de aceptacion contraoferta": "cita_contraoferta",
+    }
+    return aliases.get(normalized, normalized)
+
+
+def upsert_inmueble_generated_doc(conn, inmueble_id, tipo, nombre, url, now):
+    if not inmueble_id or not tipo or not url:
+        return None
+    existing = conn.execute(
+        """
+        SELECT id
+        FROM inmueble_docs
+        WHERE inmueble_id = ? AND tipo = ? AND url = ?
+        LIMIT 1
+        """,
+        (inmueble_id, tipo, url),
+    ).fetchone()
+    if existing:
+        conn.execute(
+            """
+            UPDATE inmueble_docs
+            SET nombre = ?, updated_at = datetime(?)
+            WHERE id = ?
+            """,
+            (nombre or tipo, now, existing["id"]),
+        )
+        return existing["id"]
+    doc_id = os.urandom(16).hex()
+    conn.execute(
+        """
+        INSERT INTO inmueble_docs (
+          id, inmueble_id, nombre, url, tipo, created_at, updated_at
+        ) VALUES (
+          ?, ?, ?, ?, ?, datetime(?), datetime(?)
+        )
+        """,
+        (doc_id, inmueble_id, nombre or tipo, url, tipo, now, now),
+    )
+    return doc_id
+
+
+INMO_ACTION_RESULT_OPTIONS = {
+    "cita_adquisicion": {"Positivo", "Negativo", "Reprogramar", "No realizada"},
+    "cita_comprador": {"Estudio", "No interesa", "Interesado"},
+    "cita_propuesta": {"Se realiza propuesta", "No se realiza"},
+    "cita_propietarios": {"Aceptada", "Rechazada", "Contraoferta"},
+    "cita_contraoferta": {"Aceptada", "Rechazada"},
+}
+
+
+def validate_inmo_action_result(action_type, estado, resultado):
+    normalized_type = normalize_inmo_action_type(action_type)
+    if normalized_type not in INMO_ACTION_RESULT_OPTIONS:
+        return None
+    estado_norm = str(estado or "").strip().lower()
+    if estado_norm == "pendiente":
+        return None
+    if not resultado:
+        return "La cita debe cerrarse con un resultado"
+    if resultado not in INMO_ACTION_RESULT_OPTIONS[normalized_type]:
+        return "Resultado no válido para este tipo de cita"
+    return None
+
+
 def get_inmueble_propietarios(conn, inmueble_id):
     if not inmueble_id:
         return []
@@ -11285,6 +11364,8 @@ def ensure_tables(db_path):
     ensure_column(conn, "acciones", "inmueble_id", "inmueble_id TEXT")
     ensure_column(conn, "acciones", "resultado_cierre", "resultado_cierre TEXT")
     ensure_column(conn, "acciones", "estado_siguiente", "estado_siguiente TEXT")
+    ensure_column(conn, "acciones", "documento_tipo", "documento_tipo TEXT")
+    ensure_column(conn, "acciones", "importe_propuesta", "importe_propuesta REAL")
     ensure_column(conn, "inmuebles", "valor_referencia", "valor_referencia REAL")
     ensure_column(conn, "inmuebles", "honorarios", "honorarios REAL")
     ensure_column(conn, "inmuebles", "situacion_ocupacion", "situacion_ocupacion TEXT")
@@ -14210,6 +14291,50 @@ def build_inmueble_consumo_rental_dia_pdf(company, inmueble, captacion, docs):
     return build_branded_document_pdf(
         "DOCUMENTO INFORMATIVO ABREVIADO · ARRENDAMIENTO",
         "Modelo adaptado para alquiler de vivienda",
+        sections,
+        footer,
+    )
+
+
+def build_inmueble_negotiation_offer_pdf(company, inmueble, buyer, action):
+    amount = format_eur(action.get("importe_propuesta") or inmueble.get("precio_objetivo") or 0)
+    doc_kind = str(action.get("documento_tipo") or "Propuesta de compra").strip() or "Propuesta de compra"
+    sections = [
+        (
+            "Inmueble",
+            [
+                ("Dirección", inmueble.get("direccion") or "Pendiente"),
+                ("Tipo", inmueble.get("tipo_inmueble") or "Pendiente"),
+                ("Zona", " · ".join([part for part in [inmueble.get("zona"), inmueble.get("poblacion")] if part]) or "Pendiente"),
+                ("Referencia", inmueble.get("referencia") or inmueble.get("referencia_catastral") or "Pendiente"),
+            ],
+        ),
+        (
+            "Comprador",
+            [
+                ("Nombre", buyer.get("nombre") or "Pendiente"),
+                ("NIF", buyer.get("nif") or "Pendiente"),
+                ("Teléfono", buyer.get("telefono") or "Pendiente"),
+                ("Email", buyer.get("email") or "Pendiente"),
+            ],
+        ),
+        (
+            "Propuesta económica",
+            [
+                ("Documento", doc_kind),
+                ("Importe", amount),
+                ("Fecha de cita", action.get("fecha") or "Pendiente"),
+                ("Observaciones", action.get("notas") or "Pendiente de concretar en expediente"),
+            ],
+        ),
+    ]
+    footer = [
+        "Documento generado desde el expediente comercial para formalizar una propuesta o promesa de compra.",
+        "Su contenido definitivo debe revisarse antes de firma por las partes.",
+    ]
+    return build_branded_document_pdf(
+        doc_kind.upper(),
+        f"{company.get('nombre') or 'Grupo Modernia'} · expediente de negociación",
         sections,
         footer,
     )
@@ -21876,16 +22001,18 @@ class Handler(BaseHTTPRequestHandler):
             estado = str(payload.get("estado") or "").strip() or "Pendiente"
             resultado_cierre = str(payload.get("resultado_cierre") or "").strip()
             estado_siguiente = str(payload.get("estado_siguiente") or "").strip()
-            if normalize_lookup_text(tipo) == "cita de adquisicion" and estado.lower() != "pendiente" and not resultado_cierre:
-                json_response(self, {"error": "La cita de adquisición debe cerrarse con resultado"}, status=400)
+            validation_error = validate_inmo_action_result(tipo, estado, resultado_cierre)
+            if validation_error:
+                json_response(self, {"error": validation_error}, status=400)
                 return
             conn.execute(
                 """
                 INSERT INTO acciones (
                   id, empresa_id, servicio, cliente_id, inmueble_id, cliente_nombre,
-                  fecha, hora, tipo, responsable, estado, resultado_cierre, estado_siguiente, notas, recordatorio_min, created_at, updated_at
+                  fecha, hora, tipo, responsable, estado, resultado_cierre, estado_siguiente,
+                  documento_tipo, importe_propuesta, notas, recordatorio_min, created_at, updated_at
                 ) VALUES (
-                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
                 )
                 """,
                 (
@@ -21902,13 +22029,15 @@ class Handler(BaseHTTPRequestHandler):
                     estado,
                     resultado_cierre or None,
                     estado_siguiente or None,
+                    str(payload.get("documento_tipo") or "").strip() or None,
+                    parse_money_value(payload.get("importe_propuesta")) or None,
                     payload.get("notas"),
                     payload.get("recordatorio_min"),
                     now,
                     now,
                 ),
             )
-            if normalize_lookup_text(tipo) == "cita de adquisicion":
+            if normalize_inmo_action_type(tipo) == "cita_adquisicion":
                 inmueble_id = str(payload.get("inmueble_id") or "").strip()
                 if inmueble_id:
                     inmueble = conn.execute(
@@ -21939,6 +22068,8 @@ class Handler(BaseHTTPRequestHandler):
                 "estado",
                 "resultado_cierre",
                 "estado_siguiente",
+                "documento_tipo",
+                "importe_propuesta",
                 "notas",
                 "cliente_id",
                 "cliente_nombre",
@@ -21958,8 +22089,9 @@ class Handler(BaseHTTPRequestHandler):
             estado_siguiente_final = str(
                 updates.get("estado_siguiente") if "estado_siguiente" in updates else current["estado_siguiente"] or ""
             ).strip()
-            if normalize_lookup_text(tipo_final) == "cita de adquisicion" and estado_final.lower() != "pendiente" and not resultado_final:
-                json_response(self, {"error": "La cita de adquisición debe cerrarse con resultado"}, status=400)
+            validation_error = validate_inmo_action_result(tipo_final, estado_final, resultado_final)
+            if validation_error:
+                json_response(self, {"error": validation_error}, status=400)
                 return
             set_clause = ", ".join([f"{key} = ?" for key in updates])
             values = list(updates.values()) + [now, record_id]
@@ -21968,7 +22100,8 @@ class Handler(BaseHTTPRequestHandler):
                 values,
             )
             inmueble_id = str(updates.get("inmueble_id") if "inmueble_id" in updates else current["inmueble_id"] or "").strip()
-            if normalize_lookup_text(tipo_final) == "cita de adquisicion" and inmueble_id and estado_final.lower() != "pendiente":
+            tipo_norm = normalize_inmo_action_type(tipo_final)
+            if tipo_norm == "cita_adquisicion" and inmueble_id and estado_final.lower() != "pendiente":
                 resultado_norm = normalize_lookup_text(resultado_final)
                 destino = ""
                 if resultado_norm == "positivo":
@@ -21977,6 +22110,100 @@ class Handler(BaseHTTPRequestHandler):
                     destino = estado_siguiente_final or "Cerrado negativamente"
                 if destino:
                     sync_inmueble_stage_for_action(conn, inmueble_id, destino, now)
+            elif tipo_norm == "cita_comprador" and inmueble_id and estado_final.lower() != "pendiente":
+                if normalize_lookup_text(resultado_final) == "interesado":
+                    next_id = os.urandom(16).hex()
+                    conn.execute(
+                        """
+                        INSERT INTO acciones (
+                          id, empresa_id, servicio, cliente_id, inmueble_id, cliente_nombre,
+                          fecha, hora, tipo, responsable, estado, created_at, updated_at
+                        ) VALUES (
+                          ?, ?, 'inmobiliaria', ?, ?, ?, date('now', '+1 day'), '11:00', ?, ?, 'Pendiente', datetime(?), datetime(?)
+                        )
+                        """,
+                        (
+                            next_id,
+                            empresa["id"],
+                            current["cliente_id"],
+                            inmueble_id,
+                            current["cliente_nombre"],
+                            "Cita propuesta",
+                            current["responsable"],
+                            now,
+                            now,
+                        ),
+                    )
+            elif tipo_norm == "cita_propietarios" and inmueble_id and estado_final.lower() != "pendiente":
+                resultado_norm = normalize_lookup_text(resultado_final)
+                if resultado_norm == "aceptada":
+                    sync_inmueble_stage_for_action(conn, inmueble_id, "reservado", now)
+                elif resultado_norm == "contraoferta":
+                    next_id = os.urandom(16).hex()
+                    conn.execute(
+                        """
+                        INSERT INTO acciones (
+                          id, empresa_id, servicio, cliente_id, inmueble_id, cliente_nombre,
+                          fecha, hora, tipo, responsable, estado, created_at, updated_at
+                        ) VALUES (
+                          ?, ?, 'inmobiliaria', ?, ?, ?, date('now', '+1 day'), '10:00', ?, ?, 'Pendiente', datetime(?), datetime(?)
+                        )
+                        """,
+                        (
+                            next_id,
+                            empresa["id"],
+                            current["cliente_id"],
+                            inmueble_id,
+                            current["cliente_nombre"],
+                            "Cita aceptación contraoferta",
+                            current["responsable"],
+                            now,
+                            now,
+                        ),
+                    )
+            elif tipo_norm == "cita_contraoferta" and inmueble_id and estado_final.lower() != "pendiente":
+                if normalize_lookup_text(resultado_final) == "aceptada":
+                    sync_inmueble_stage_for_action(conn, inmueble_id, "reservado", now)
+            elif tipo_norm == "cita_propuesta" and inmueble_id and estado_final.lower() != "pendiente":
+                if normalize_lookup_text(resultado_final) == "serealizapropuesta":
+                    documento_tipo = str(
+                        updates.get("documento_tipo") if "documento_tipo" in updates else current["documento_tipo"] or "Propuesta de compra"
+                    ).strip() or "Propuesta de compra"
+                    action_row = conn.execute("SELECT * FROM acciones WHERE id = ? LIMIT 1", (record_id,)).fetchone()
+                    buyer = conn.execute(
+                        "SELECT nombre, nif, telefono, email FROM clientes WHERE id = ? LIMIT 1",
+                        (action_row["cliente_id"],),
+                    ).fetchone()
+                    inmueble = conn.execute(
+                        "SELECT * FROM inmuebles WHERE id = ? LIMIT 1",
+                        (inmueble_id,),
+                    ).fetchone()
+                    if inmueble:
+                        url = f"/api/inmueble_negociacion_pdf?action_id={record_id}"
+                        nombre = f"{documento_tipo} · {buyer['nombre'] if buyer and buyer['nombre'] else inmueble['direccion'] or 'Inmueble'}"
+                        upsert_inmueble_generated_doc(conn, inmueble_id, documento_tipo, nombre, url, now)
+                    next_id = os.urandom(16).hex()
+                    conn.execute(
+                        """
+                        INSERT INTO acciones (
+                          id, empresa_id, servicio, cliente_id, inmueble_id, cliente_nombre,
+                          fecha, hora, tipo, responsable, estado, created_at, updated_at
+                        ) VALUES (
+                          ?, ?, 'inmobiliaria', ?, ?, ?, date('now', '+1 day'), '12:00', ?, ?, 'Pendiente', datetime(?), datetime(?)
+                        )
+                        """,
+                        (
+                            next_id,
+                            empresa["id"],
+                            action_row["cliente_id"],
+                            inmueble_id,
+                            action_row["cliente_nombre"],
+                            "Cita aceptación propietarios",
+                            action_row["responsable"],
+                            now,
+                            now,
+                        ),
+                    )
         elif parsed.path == "/api/cliente_profesional":
             cliente_id = payload.get("cliente_id")
             if not cliente_id:
@@ -23097,6 +23324,7 @@ class Handler(BaseHTTPRequestHandler):
                   a.id, a.cliente_id, a.fecha, a.hora,
                   COALESCE(c.nombre, a.cliente_nombre) AS cliente,
                   a.tipo, a.responsable, a.estado, a.resultado_cierre, a.estado_siguiente,
+                  a.documento_tipo, a.importe_propuesta,
                   a.notas, a.servicio, a.recordatorio_min, a.inmueble_id
                 FROM acciones a
                 LEFT JOIN clientes c ON c.id = a.cliente_id
@@ -25118,6 +25346,44 @@ class Handler(BaseHTTPRequestHandler):
             )
             safe_ref = slugify_text(inmueble["direccion"] or inmueble["referencia"] or inmueble_id)[:50] or inmueble_id
             filename = f"hoja_visita_{safe_ref}.pdf"
+            binary_response(self, pdf_bytes, content_type="application/pdf", filename=filename)
+            return
+
+        if path == "/api/inmueble_negociacion_pdf":
+            action_id = params.get("action_id", [""])[0].strip()
+            if not action_id:
+                json_response(self, {"error": "action_id requerido"}, status=400)
+                return
+            action = conn.execute(
+                "SELECT * FROM acciones WHERE id = ? LIMIT 1",
+                (action_id,),
+            ).fetchone()
+            if not action:
+                json_response(self, {"error": "Acción no encontrada"}, status=404)
+                return
+            inmueble = conn.execute(
+                "SELECT * FROM inmuebles WHERE id = ? LIMIT 1",
+                (action["inmueble_id"],),
+            ).fetchone()
+            if not inmueble:
+                json_response(self, {"error": "Inmueble no encontrado"}, status=404)
+                return
+            empresa = conn.execute(
+                "SELECT * FROM empresas WHERE id = ? LIMIT 1",
+                (inmueble["empresa_id"],),
+            ).fetchone()
+            buyer = conn.execute(
+                "SELECT nombre, nif, telefono, email FROM clientes WHERE id = ? LIMIT 1",
+                (action["cliente_id"],),
+            ).fetchone()
+            pdf_bytes = build_inmueble_negotiation_offer_pdf(
+                dict(empresa) if empresa else {},
+                dict(inmueble),
+                dict(buyer) if buyer else {},
+                dict(action),
+            )
+            safe_ref = slugify_text(inmueble["direccion"] or inmueble["referencia"] or action_id)[:50] or action_id
+            filename = f"negociacion_{safe_ref}.pdf"
             binary_response(self, pdf_bytes, content_type="application/pdf", filename=filename)
             return
 

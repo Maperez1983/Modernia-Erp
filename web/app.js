@@ -15248,14 +15248,47 @@ const prepareInmuebleAcquisitionAppointment = () => {
   if (!inmuebleActividadForm) return;
   const tipoSelect = inmuebleActividadForm.querySelector('select[name="tipo"]');
   const estadoSelect = inmuebleActividadForm.querySelector('select[name="estado"]');
-  const resultadoSelect = inmuebleActividadForm.querySelector('select[name="resultado_cierre"]');
-  const siguienteSelect = inmuebleActividadForm.querySelector('select[name="estado_siguiente"]');
   if (tipoSelect) tipoSelect.value = "Cita de adquisición";
   if (estadoSelect) estadoSelect.value = "Pendiente";
-  if (resultadoSelect) resultadoSelect.value = "";
+  syncInmuebleWorkflowForm();
+  const siguienteSelect = inmuebleActividadForm.querySelector('select[name="estado_siguiente"]');
   if (siguienteSelect) siguienteSelect.value = "Encargo";
   if (inmuebleActividadStatus) {
     inmuebleActividadStatus.textContent = "Programa aquí la cita de adquisición para pasar el inmueble a Adquisición.";
+  }
+};
+
+const INMO_WORKFLOW_RESULT_OPTIONS = {
+  "Cita de adquisición": ["Positivo", "Negativo", "Reprogramar", "No realizada"],
+  "Cita comprador": ["Estudio", "No interesa", "Interesado"],
+  "Cita propuesta": ["Se realiza propuesta", "No se realiza"],
+  "Cita aceptación propietarios": ["Aceptada", "Rechazada", "Contraoferta"],
+  "Cita aceptación contraoferta": ["Aceptada", "Rechazada"],
+};
+
+const syncInmuebleWorkflowForm = () => {
+  if (!inmuebleActividadForm) return;
+  const tipoSelect = inmuebleActividadForm.querySelector('select[name="tipo"]');
+  const resultSelect = inmuebleActividadForm.querySelector('select[name="resultado_cierre"]');
+  const nextSelect = inmuebleActividadForm.querySelector('select[name="estado_siguiente"]');
+  const type = String(tipoSelect?.value || "").trim();
+  if (resultSelect) {
+    const current = resultSelect.value;
+    const options = INMO_WORKFLOW_RESULT_OPTIONS[type] || [];
+    resultSelect.innerHTML = "";
+    resultSelect.appendChild(createOption("", options.length ? "Selecciona resultado" : "Sin resultado para esta cita"));
+    options.forEach((opt) => resultSelect.appendChild(createOption(opt, opt)));
+    resultSelect.value = options.includes(current) ? current : "";
+  }
+  if (nextSelect) {
+    const current = nextSelect.value;
+    const nextOptions = type === "Cita de adquisición"
+      ? ["Encargo", "Cerrado negativamente"]
+      : [];
+    nextSelect.innerHTML = "";
+    nextSelect.appendChild(createOption("", nextOptions.length ? "Sin cambio automático" : "No aplica"));
+    nextOptions.forEach((opt) => nextSelect.appendChild(createOption(opt, opt)));
+    nextSelect.value = nextOptions.includes(current) ? current : "";
   }
 };
 
@@ -16674,15 +16707,31 @@ const loadInmuebleActividad = (inmuebleId, empresaId) => {
         tr.appendChild(td);
       });
       const actionsTd = document.createElement("td");
-      const isAcquisition = String(row.tipo || "").trim().toLowerCase() === "cita de adquisición";
+      const normalizedType = String(row.tipo || "").trim().toLowerCase();
+      const closableTypes = new Set([
+        "cita de adquisición",
+        "cita comprador",
+        "cita propuesta",
+        "cita aceptación propietarios",
+        "cita aceptación contraoferta",
+      ]);
       const isPending = String(row.estado || "").trim().toLowerCase() === "pendiente";
-      if (isAcquisition && isPending) {
+      if (closableTypes.has(normalizedType) && isPending) {
         const closeBtn = document.createElement("button");
         closeBtn.type = "button";
         closeBtn.className = "secondary";
         closeBtn.textContent = "Cerrar cita";
-        closeBtn.addEventListener("click", () => closeInmuebleAcquisitionAction(row, empresaId));
+        closeBtn.addEventListener("click", () => closeInmuebleWorkflowAction(row, empresaId));
         actionsTd.appendChild(closeBtn);
+      } else if (String(row.documento_tipo || "").trim()) {
+        const docBtn = document.createElement("button");
+        docBtn.type = "button";
+        docBtn.className = "ghost";
+        docBtn.textContent = "Documento";
+        docBtn.addEventListener("click", () => {
+          window.open(`/api/inmueble_negociacion_pdf?action_id=${encodeURIComponent(row.id)}`, "_blank", "noopener");
+        });
+        actionsTd.appendChild(docBtn);
       } else {
         actionsTd.textContent = "-";
       }
@@ -16698,41 +16747,72 @@ const loadInmuebleActividad = (inmuebleId, empresaId) => {
   });
 };
 
-const closeInmuebleAcquisitionAction = (row, empresaId) => {
-  const raw = window.prompt(
-    "Resultado de la cita de adquisición:\n1. Positivo\n2. Negativo\n3. Reprogramar\n4. No realizada",
-    "1"
-  );
-  if (raw === null) return;
-  const resultMap = {
-    "1": "Positivo",
-    "2": "Negativo",
-    "3": "Reprogramar",
-    "4": "No realizada",
+const closeInmuebleWorkflowAction = (row, empresaId) => {
+  const type = String(row.tipo || "").trim();
+  const workflows = {
+    "Cita de adquisición": {
+      options: INMO_WORKFLOW_RESULT_OPTIONS["Cita de adquisición"],
+      followup: (payload) => {
+        if (payload.resultado_cierre === "Positivo") {
+          payload.estado_siguiente = window.confirm("¿Pasar el inmueble a Encargo?") ? "Encargo" : "";
+        } else if (payload.resultado_cierre === "Negativo") {
+          payload.estado_siguiente = window.confirm("¿Cerrar el inmueble negativamente?") ? "Cerrado negativamente" : "";
+        } else {
+          payload.estado = "Cancelada";
+        }
+      },
+    },
+    "Cita comprador": {
+      options: INMO_WORKFLOW_RESULT_OPTIONS["Cita comprador"],
+    },
+    "Cita propuesta": {
+      options: INMO_WORKFLOW_RESULT_OPTIONS["Cita propuesta"],
+      followup: (payload) => {
+        if (payload.resultado_cierre !== "Se realiza propuesta") return;
+        const docRaw = window.prompt(
+          "Documento a generar:\n1. Propuesta de compra\n2. Promesa de compra",
+          "1"
+        );
+        const docMap = { "1": "Propuesta de compra", "2": "Promesa de compra" };
+        payload.documento_tipo = docMap[String(docRaw || "").trim()] || "Propuesta de compra";
+        const amount = window.prompt("Importe de la propuesta/promesa", "");
+        if (amount !== null && String(amount).trim()) {
+          payload.importe_propuesta = String(amount).trim();
+        }
+      },
+    },
+    "Cita aceptación propietarios": {
+      options: INMO_WORKFLOW_RESULT_OPTIONS["Cita aceptación propietarios"],
+    },
+    "Cita aceptación contraoferta": {
+      options: INMO_WORKFLOW_RESULT_OPTIONS["Cita aceptación contraoferta"],
+    },
   };
-  const resultado = resultMap[String(raw).trim()];
+  const workflow = workflows[type];
+  if (!workflow) return;
+  const message = workflow.options.map((opt, index) => `${index + 1}. ${opt}`).join("\n");
+  const raw = window.prompt(`Resultado de ${type}:\n${message}`, "1");
+  if (raw === null) return;
+  const resultado = workflow.options[Number(String(raw).trim()) - 1];
   if (!resultado) {
     alert("Resultado no válido.");
     return;
   }
-  let estado = "Completada";
-  let estadoSiguiente = "";
-  if (resultado === "Positivo") {
-    estadoSiguiente = window.confirm("¿Pasar el inmueble a Encargo?") ? "Encargo" : "";
-  } else if (resultado === "Negativo") {
-    estadoSiguiente = window.confirm("¿Cerrar el inmueble negativamente?") ? "Cerrado negativamente" : "";
-  } else {
-    estado = "Cancelada";
+  const payload = {
+    id: row.id,
+    estado: "Completada",
+    resultado_cierre: resultado,
+    estado_siguiente: "",
+    documento_tipo: "",
+    importe_propuesta: "",
+  };
+  if (workflow.followup) {
+    workflow.followup(payload);
   }
   fetch("/api/acciones_update", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      id: row.id,
-      estado,
-      resultado_cierre: resultado,
-      estado_siguiente: estadoSiguiente,
-    }),
+    body: JSON.stringify(payload),
   })
     .then((res) => res.json())
     .then((data) => {
@@ -16741,7 +16821,7 @@ const closeInmuebleAcquisitionAction = (row, empresaId) => {
         return;
       }
       if (inmuebleActividadStatus) {
-        inmuebleActividadStatus.textContent = `Cita cerrada con resultado ${resultado}.`;
+        inmuebleActividadStatus.textContent = `${type} cerrada con resultado ${resultado}.`;
       }
       if (state.currentInmuebleId && empresaId) {
         loadInmuebleActividad(state.currentInmuebleId, empresaId);
@@ -29204,6 +29284,13 @@ if (inmuebleChecklistBtn) {
 }
 
 if (inmuebleActividadForm) {
+  const tipoSelect = inmuebleActividadForm.querySelector('select[name="tipo"]');
+  if (tipoSelect) {
+    tipoSelect.addEventListener("change", () => {
+      syncInmuebleWorkflowForm();
+    });
+  }
+  syncInmuebleWorkflowForm();
   inmuebleActividadForm.addEventListener("submit", (event) => {
     event.preventDefault();
     if (!state.currentInmuebleId) {
@@ -29219,7 +29306,8 @@ if (inmuebleActividadForm) {
     const payload = Object.fromEntries(formData.entries());
     const tipo = String(payload.tipo || "").trim();
     const estado = String(payload.estado || "").trim() || "Pendiente";
-    if (tipo.toLowerCase() !== "cita de adquisición") {
+    const requiredResults = INMO_WORKFLOW_RESULT_OPTIONS[tipo];
+    if (!requiredResults) {
       payload.resultado_cierre = "";
       payload.estado_siguiente = "";
     } else if (estado.toLowerCase() === "pendiente") {
@@ -29227,7 +29315,12 @@ if (inmuebleActividadForm) {
       payload.estado_siguiente = "";
     } else if (!String(payload.resultado_cierre || "").trim()) {
       if (inmuebleActividadStatus) {
-        inmuebleActividadStatus.textContent = "La cita de adquisición debe cerrarse con resultado.";
+        inmuebleActividadStatus.textContent = "Esta cita debe cerrarse con resultado.";
+      }
+      return;
+    } else if (!requiredResults.includes(String(payload.resultado_cierre || "").trim())) {
+      if (inmuebleActividadStatus) {
+        inmuebleActividadStatus.textContent = "El resultado no es válido para este tipo de cita.";
       }
       return;
     }
@@ -29250,6 +29343,7 @@ if (inmuebleActividadForm) {
         }
         if (!data.error) {
           inmuebleActividadForm.reset();
+          syncInmuebleWorkflowForm();
           const empresa = state.empresas.find((e) => e.nombre === DASHBOARD_COMPANY);
           if (empresa) {
             loadInmuebleActividad(state.currentInmuebleId, empresa.id);

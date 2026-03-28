@@ -1170,6 +1170,8 @@ CREATE TABLE IF NOT EXISTS acciones (
   estado TEXT,
   resultado_cierre TEXT,
   estado_siguiente TEXT,
+  documento_tipo TEXT,
+  importe_propuesta REAL,
   notas TEXT,
   recordatorio_min INTEGER,
   created_at TEXT NOT NULL,
