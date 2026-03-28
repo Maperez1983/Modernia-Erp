@@ -10814,6 +10814,20 @@ const renderEditableGrid = (grid, fields, data, target) => {
     const label = document.createElement("h3");
     label.textContent = "Catastro";
     catastroCard.appendChild(label);
+    const hint = document.createElement("p");
+    hint.className = "muted";
+    hint.textContent = "Busca la referencia catastral desde la dirección y después, si quieres, abre la ficha pública.";
+    catastroCard.appendChild(hint);
+    const actions = document.createElement("div");
+    actions.className = "inline-row";
+    const lookupBtn = document.createElement("button");
+    lookupBtn.type = "button";
+    lookupBtn.className = "secondary catastro-button";
+    lookupBtn.innerHTML = '<span class="catastro-icon" aria-hidden="true">CAT</span><span>Buscar referencia</span>';
+    lookupBtn.addEventListener("click", async () => {
+      await lookupInmuebleCatastro(inputMap);
+    });
+    actions.appendChild(lookupBtn);
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "secondary catastro-button";
@@ -10824,7 +10838,8 @@ const renderEditableGrid = (grid, fields, data, target) => {
       const url = buildCatastroUrl(ref, address);
       window.open(url, "_blank");
     });
-    catastroCard.appendChild(btn);
+    actions.appendChild(btn);
+    catastroCard.appendChild(actions);
     grid.appendChild(catastroCard);
   }
 };
@@ -11056,6 +11071,54 @@ const lookupCaptacionCatastro = async () => {
     if (captacionCatastroStatus) {
       captacionCatastroStatus.textContent = "No se pudo consultar Catastro ahora mismo.";
     }
+  }
+};
+
+const lookupInmuebleCatastro = async (inputMap = {}) => {
+  const direccionInput = inputMap.direccion;
+  const provinciaInput = inputMap.provincia;
+  const poblacionInput = inputMap.poblacion;
+  const codigoPostalInput = inputMap.codigo_postal;
+  const refInput = inputMap.referencia_catastral || inputMap.referencia;
+  const direccion = String(direccionInput ? direccionInput.value : "").trim();
+  if (!direccion) {
+    setInmuebleSaveStatus("Indica la dirección para consultar Catastro.");
+    return null;
+  }
+  setInmuebleSaveStatus("Consultando Catastro...");
+  try {
+    const payload = {
+      direccion,
+      provincia: provinciaInput ? provinciaInput.value.trim() : "",
+      poblacion: poblacionInput ? poblacionInput.value.trim() : "",
+      codigo_postal: codigoPostalInput ? codigoPostalInput.value.trim() : "",
+    };
+    const data = await fetch("/api/inmueble_catastro_lookup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }).then((res) => res.json());
+    if (data?.error) {
+      setInmuebleSaveStatus(data.error);
+      return null;
+    }
+    if (data?.match_unique && data?.referencia_catastral) {
+      if (refInput) {
+        refInput.value = data.referencia_catastral;
+      }
+      saveInmuebleField("referencia_catastral", data.referencia_catastral);
+      return data.referencia_catastral;
+    }
+    const count = Array.isArray(data?.candidates) ? data.candidates.length : 0;
+    setInmuebleSaveStatus(
+      count > 1
+        ? `Catastro devolvió ${count} coincidencias. Completa más la dirección.`
+        : "Catastro no devolvió una coincidencia única."
+    );
+    return null;
+  } catch {
+    setInmuebleSaveStatus("No se pudo consultar Catastro.");
+    return null;
   }
 };
 
