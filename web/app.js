@@ -1296,6 +1296,7 @@ const workspacePortalRequestForm = document.getElementById("workspacePortalReque
 const workspacePortalRequestResetBtn = document.getElementById("workspacePortalRequestResetBtn");
 const workspacePortalRequestStatus = document.getElementById("workspacePortalRequestStatus");
 const workspacePortalRequestList = document.getElementById("workspacePortalRequestList");
+const workspaceCopilotHub = document.getElementById("workspaceCopilotHub");
 const workspaceAutomationForm = document.getElementById("workspaceAutomationForm");
 const workspaceAutomationResetBtn = document.getElementById("workspaceAutomationResetBtn");
 const workspaceAutomationStatus = document.getElementById("workspaceAutomationStatus");
@@ -4028,6 +4029,37 @@ const focusWorkspaceView = (view, element = null, options = {}) => {
   }
 };
 
+const openWorkspaceLegalCopilot = () => {
+  openCrmInmobiliario();
+  window.setTimeout(() => {
+    setCrmWorkspaceView("legal");
+    if (inmoLegalCopilotForm && typeof inmoLegalCopilotForm.scrollIntoView === "function") {
+      inmoLegalCopilotForm.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }, 220);
+};
+
+const openWorkspaceSegurosCopilot = () => {
+  openSegurosCrm();
+  window.setTimeout(() => {
+    setSegurosTab("gestion");
+    const target = document.querySelector('.seguros-tab[data-seguros-tab="gestion"]');
+    if (target && typeof target.scrollIntoView === "function") {
+      target.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }, 220);
+};
+
+const openWorkspaceFinCopilot = () => {
+  openFinCrm();
+  window.setTimeout(() => {
+    setHipotecaAltaView("alta");
+    if (finCopilotForm && typeof finCopilotForm.scrollIntoView === "function") {
+      finCopilotForm.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }, 220);
+};
+
 const WORKSPACE_LAUNCHERS = {
   crm360: {
     label: "CRM 360",
@@ -4175,13 +4207,13 @@ const WORKSPACE_LAUNCHERS = {
   },
   copilot: {
     label: "Copilot",
-    actionLabel: "Abrir",
+    actionLabel: "Abrir hub",
     action: () => {
       if (isTenantWorkspaceMode()) {
-        openCrmInmobiliario();
+        focusWorkspaceView("backoffice", workspaceCopilotHub, { forceTenantView: true });
         return;
       }
-      goHome();
+      focusWorkspaceView("backoffice", workspaceCopilotHub);
     },
   },
 };
@@ -4261,7 +4293,7 @@ const WORKSPACE_HOME_CONTAINERS = [
     title: "Motores comunes",
     kicker: "Transversal",
     description: "Capas compartidas del grupo para documental, facturación, portal, horario y automatización.",
-    modules: ["documental", "facturacion", "portal_cliente", "registro_horario", "automatizaciones", "copilot"],
+    modules: ["documental", "facturacion", "facturas_recibidas", "portal_cliente", "registro_horario", "automatizaciones", "copilot"],
     planned: [],
     action: WORKSPACE_LAUNCHERS.documental?.action || null,
     actionLabel: "Abrir backoffice",
@@ -5237,6 +5269,7 @@ const renderWorkspaceLauncher = (workspace = {}, modules = []) => {
     enabledKeys.add("fincas");
     enabledKeys.add("documental");
     enabledKeys.add("facturacion");
+    enabledKeys.add("facturas_recibidas");
     enabledKeys.add("portal_cliente");
     enabledKeys.add("registro_horario");
     enabledKeys.add("automatizaciones");
@@ -5377,6 +5410,50 @@ const renderWorkspaceHomeDetail = (container, enabledKeys = new Set()) => {
       const moduleKey = button.dataset.workspaceModuleOpen || "";
       const action = resolveWorkspaceContainerModuleAction(container.key, moduleKey);
       if (typeof action === "function") action();
+    });
+  });
+};
+
+const renderWorkspaceCopilotHub = () => {
+  if (!workspaceCopilotHub) return;
+  workspaceCopilotHub.innerHTML = `
+    <div class="workspace-home-detail-card">
+      <div class="section-head">
+        <div>
+          <h4>Copilot del grupo</h4>
+          <p class="muted">Accesos directos a los copilotos operativos disponibles en cada servicio.</p>
+        </div>
+      </div>
+      <div class="workspace-home-detail-grid">
+        <button type="button" class="workspace-home-detail-item" data-workspace-copilot-open="inmobiliaria">
+          <strong>Copilot Inmobiliaria</strong>
+          <span>Abrir copiloto legal</span>
+        </button>
+        <button type="button" class="workspace-home-detail-item" data-workspace-copilot-open="seguros">
+          <strong>Copilot Seguros</strong>
+          <span>Abrir copiloto de pólizas</span>
+        </button>
+        <button type="button" class="workspace-home-detail-item" data-workspace-copilot-open="financiacion">
+          <strong>Copilot Financiación</strong>
+          <span>Abrir copiloto hipotecario</span>
+        </button>
+      </div>
+    </div>
+  `;
+  workspaceCopilotHub.querySelectorAll("[data-workspace-copilot-open]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const service = button.dataset.workspaceCopilotOpen || "";
+      if (service === "inmobiliaria") {
+        openWorkspaceLegalCopilot();
+        return;
+      }
+      if (service === "seguros") {
+        openWorkspaceSegurosCopilot();
+        return;
+      }
+      if (service === "financiacion") {
+        openWorkspaceFinCopilot();
+      }
     });
   });
 };
@@ -7151,6 +7228,7 @@ const loadWorkspaceDetail = async (workspaceId) => {
   renderWorkspaceFinOverview(finOverview || {});
   renderWorkspaceInmoOverview(inmoOverview || {});
   renderWorkspaceServiceDesks(serviceDesks || {});
+  renderWorkspaceCopilotHub();
   fillWorkspaceBillingForm();
   fillWorkspaceBudgetForm();
   fillWorkspaceCollectionsForm();
