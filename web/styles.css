@@ -3761,26 +3761,39 @@ tr.is-selected td {
 }
 
 .crm-kanban {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 12px;
-  align-items: start;
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 4px 2px 12px;
+  scroll-snap-type: x proximity;
 }
 
 .crm-kanban-column {
+  flex: 0 0 280px;
+  min-width: 280px;
+  max-width: 280px;
+  min-height: 220px;
   background: #fffdf8;
   border: 1px solid #e4ded4;
-  border-radius: 14px;
-  padding: 10px;
+  border-radius: 16px;
+  padding: 12px;
   display: grid;
-  gap: 8px;
-  align-self: start;
+  align-content: start;
+  gap: 10px;
+  align-self: flex-start;
+  scroll-snap-align: start;
 }
 
 .crm-kanban-column h4 {
   margin: 0;
   font-size: 13px;
   color: var(--ink);
+}
+
+.crm-kanban-column > .crm-kanban-card:last-child {
+  margin-bottom: 0;
 }
 
 .pipeline-board {
@@ -3856,12 +3869,13 @@ tr.is-selected td {
 .crm-kanban-card {
   border: 1px solid #eee6db;
   border-radius: 12px;
-  padding: 8px;
+  padding: 10px;
   background: #ffffff;
   font-size: 12px;
   display: grid;
-  gap: 4px;
+  gap: 6px;
   cursor: grab;
+  box-shadow: 0 8px 18px rgba(34, 28, 20, 0.04);
 }
 
 .crm-timeline {
