@@ -1995,6 +1995,7 @@ const legalRadarStatus = document.getElementById("legalRadarStatus");
 const legalRadarTable = document.getElementById("legalRadarTable");
 const legalRadarInfo = document.getElementById("legalRadarInfo");
 const legalRadarRefreshBtn = document.getElementById("legalRadarRefreshBtn");
+const legalRadarScanBtn = document.getElementById("legalRadarScanBtn");
 const crmCaptacionesTable = document.getElementById("crmCaptacionesTable");
 const crmCaptacionesInfo = document.getElementById("crmCaptacionesInfo");
 const crmInmueblesTable = document.getElementById("crmInmueblesTable");
@@ -3489,7 +3490,16 @@ const renderCompanyCards = () => {
     };
 
     if (!isPriv) {
-      appendServiceCard(primaryRestrictedService);
+      const workspaceCard = document.createElement("div");
+      workspaceCard.className = "company-card";
+      workspaceCard.dataset.action = "holding-tenant";
+      workspaceCard.innerHTML = `
+        <h3>Workspace ${getWorkspaceDisplayName(state.currentWorkspaceName || "modernia")}</h3>
+        <div class="company-meta">Entrada operativa al grupo y a sus empresas activas.</div>
+        <div class="company-meta">Desde aquí eliges empresa y luego trabajas en clientes y módulos.</div>
+        <a class="card-link" href="?holding=1&mode=tenant&workspace=modernia" data-action="holding-tenant">Entrar</a>
+      `;
+      coreCards.appendChild(workspaceCard);
       return;
     }
 
@@ -3508,56 +3518,12 @@ const renderCompanyCards = () => {
     tenantCard.className = "company-card";
     tenantCard.dataset.action = "holding-tenant";
     tenantCard.innerHTML = `
-      <h3>${state.currentWorkspaceName || "Modernia"}</h3>
-      <div class="company-meta">Entrada operativa al CRM, subservicios y motores transversales del cliente.</div>
-      <div class="company-meta">Vista diaria del cliente dentro de LIV.</div>
+      <h3>Workspace ${getWorkspaceDisplayName(state.currentWorkspaceName || "modernia")}</h3>
+      <div class="company-meta">Espacio del grupo donde viven sus empresas, clientes, módulos y operativa diaria.</div>
+      <div class="company-meta">Primero entras al workspace y desde ahí eliges la empresa con la que quieres trabajar.</div>
       <a class="card-link" href="?holding=1&mode=tenant&workspace=modernia" data-action="holding-tenant">Entrar</a>
     `;
     coreCards.appendChild(tenantCard);
-
-    if (canInmo) appendServiceCard("inmobiliaria");
-    if (canGestoria) appendServiceCard("gestoria");
-    if (canSeguros) appendServiceCard("seguros");
-    if (canFin) appendServiceCard("financiaciones");
-
-    const clientesCard = document.createElement("div");
-    clientesCard.className = "company-card";
-    clientesCard.dataset.action = "clientes";
-    const clientesCount = getClientesCardCount();
-    clientesCard.innerHTML = `
-      <h3>Clientes</h3>
-      <div class="company-meta">Total registrados: <strong id="clientesCardTotal">${numberFormatter.format(clientesCount)}</strong></div>
-      <div class="company-meta">Módulo compartido entre CRMs.</div>
-      <a class="card-link" href="?clientes=1" data-action="clientes">Entrar</a>
-    `;
-    if (canAccessSharedHomeModules(user) && (!workspaceScoped || enabledModules.has("crm360"))) {
-      coreCards.appendChild(clientesCard);
-    }
-
-    const agendaCard = document.createElement("div");
-    agendaCard.className = "company-card";
-    agendaCard.dataset.action = "agenda";
-    agendaCard.innerHTML = `
-      <h3>Agenda</h3>
-      <div class="company-meta">Tareas y seguimientos del grupo.</div>
-      <div class="company-meta">Centraliza las agendas por servicio.</div>
-      <a class="card-link" href="?agenda=1" data-action="agenda">Entrar</a>
-    `;
-    if (canAccessSharedHomeModules(user)) {
-      coreCards.appendChild(agendaCard);
-    }
-
-    const adminCard = document.createElement("div");
-    adminCard.className = "company-card";
-    adminCard.dataset.action = "admin";
-    adminCard.innerHTML = `
-      <h3>Panel admin</h3>
-      <div class="company-meta">Usuarios y permisos.</div>
-      <a class="card-link" href="?admin=1" data-action="admin">Entrar</a>
-    `;
-    if (canAdmin) {
-      coreCards.appendChild(adminCard);
-    }
   }
 };
 
@@ -3590,14 +3556,14 @@ const WORKSPACE_MODULE_STRUCTURE = {
   crm360: {
     section: "crm_core",
     family: "CRM principal",
-    badge: "Base del tenant",
-    description: "Ficha 360, clientes finales y punto de entrada común para todos los servicios.",
+    badge: "Base del workspace",
+    description: "Ficha 360, clientes finales y punto de entrada común para todas las empresas y servicios del grupo.",
   },
   gestoria: {
     section: "crm_services",
     family: "Subservicio CRM",
     badge: "Servicio activo",
-    description: "Operativa fiscal, renta y gestiones periódicas del tenant.",
+    description: "Operativa fiscal, renta y gestiones periódicas dentro del workspace.",
   },
   seguros: {
     section: "crm_services",
@@ -3627,13 +3593,13 @@ const WORKSPACE_MODULE_STRUCTURE = {
     section: "workspace_engines",
     family: "Motor transversal",
     badge: "Core operativo",
-    description: "Entrada documental, unificación de archivos y revisión del tenant.",
+    description: "Entrada documental, unificación de archivos y revisión operativa del workspace.",
   },
   dashboard: {
     section: "workspace_engines",
     family: "Motor transversal",
     badge: "Core analítico",
-    description: "KPIs ejecutivos y lectura consolidada del tenant dentro de LIV.",
+    description: "KPIs ejecutivos y lectura consolidada del workspace dentro de LIV.",
   },
   facturacion: {
     section: "workspace_engines",
@@ -3657,7 +3623,7 @@ const WORKSPACE_MODULE_STRUCTURE = {
     section: "workspace_engines",
     family: "Motor transversal",
     badge: "People ops",
-    description: "Fichajes y control laboral ligados al tenant.",
+    description: "Fichajes y control laboral ligados al workspace.",
   },
   automatizaciones: {
     section: "workspace_engines",
@@ -3671,7 +3637,7 @@ const WORKSPACE_SECTION_DEFINITIONS = [
   {
     key: "crm_core",
     title: "CRM principal",
-    subtitle: "El módulo base del tenant dentro de LIV. Desde aquí nacen clientes, actividad y relación 360.",
+    subtitle: "El módulo base del workspace. Desde aquí nacen clientes, actividad y relación 360 para el grupo.",
   },
   {
     key: "crm_services",
@@ -3691,7 +3657,7 @@ const getWorkspaceModuleMeta = (row = {}) => {
     section: base.section || "workspace_engines",
     family: base.family || (WORKSPACE_CATEGORY_LABELS[row.categoria] || "Módulo"),
     badge: base.badge || "Módulo",
-    description: base.description || "Capacidad configurable del tenant dentro de LIV.",
+    description: base.description || "Capacidad configurable del workspace dentro de LIV.",
   };
 };
 
@@ -3702,6 +3668,19 @@ const groupWorkspaceModulesBySection = (rows = []) =>
   })).filter((section) => section.rows.length);
 
 const normalizeWorkspaceIdentifier = (value = "") => normalizeSimple(String(value || "").trim());
+
+const getWorkspaceDisplayName = (workspace = null) => {
+  const rawName =
+    typeof workspace === "string"
+      ? workspace
+      : workspace?.nombre || workspace?.name || workspace?.slug || workspace?.id || "";
+  const normalized = normalizeWorkspaceIdentifier(rawName);
+  if (!normalized) return "Workspace";
+  if (["modernia", "grupomodernia", "grupo-modernia"].includes(normalized)) {
+    return "Grupo Modernia";
+  }
+  return rawName;
+};
 
 const findWorkspaceRecord = (rows = [], identifier = "") => {
   const normalized = normalizeWorkspaceIdentifier(identifier);
@@ -3716,16 +3695,18 @@ const findWorkspaceRecord = (rows = [], identifier = "") => {
 
 const updateWorkspaceEntryChrome = () => {
   const mode = state.currentWorkspaceEntryMode || "platform";
-  const workspaceName = state.currentWorkspaceName || state.currentWorkspaceDetail?.workspace?.nombre || "Cliente";
+  const workspaceName = getWorkspaceDisplayName(
+    state.currentWorkspaceDetail?.workspace?.nombre || state.currentWorkspaceName || "Workspace"
+  );
   const companyLabel = getWorkspaceCompanyContextLabel();
   if (holdingTitle) {
-    holdingTitle.textContent = mode === "tenant" ? workspaceName : "Centro de operaciones";
+    holdingTitle.textContent = mode === "tenant" ? `Workspace ${workspaceName}` : "Gestión de workspaces";
   }
   if (holdingSubtitle) {
     holdingSubtitle.textContent =
       mode === "tenant"
-        ? `CRM, subservicios y motores activos de ${companyLabel} dentro del cliente LIV.`
-        : "Clientes LIV, módulos, operativa y motores transversales desde la capa plataforma.";
+        ? `${companyLabel} trabaja dentro del workspace ${workspaceName}. Todo lo operativo del grupo se organiza desde aquí.`
+        : "Administra workspaces de LIV, módulos activos, branding y estructura de clientes.";
   }
   if (holdingBackBtn) {
     holdingBackBtn.textContent = mode === "tenant" ? "Volver al panel" : "Volver al panel";
@@ -3864,7 +3845,7 @@ const renderWorkspaceCompanySwitcher = (rows = []) => {
     <div class="workspace-company-switcher-card">
       <div>
         <strong>Empresa activa</strong>
-        <div class="muted">El trabajo diario del cliente LIV se aterriza sobre una empresa operativa.</div>
+        <div class="muted">El trabajo diario del workspace se aterriza sobre una empresa operativa del grupo.</div>
       </div>
       <div class="workspace-company-switcher-actions">
         ${companies.map((row) => `
@@ -4042,8 +4023,8 @@ const getWorkspaceEnabledModules = (modules = []) =>
 const renderWorkspaceKpis = (summary = {}) => {
   if (!workspaceKpis) return;
   const items = [
-    ["Tenants", summary.workspaces_total || 0, "Clientes de LIV operativos"],
-    ["Empresas operativas", summary.empresas_total || 0, "Sociedades enlazadas a tenants"],
+    ["Workspaces", summary.workspaces_total || 0, "Clientes de LIV operativos"],
+    ["Empresas operativas", summary.empresas_total || 0, "Sociedades enlazadas a workspaces"],
     ["Módulos activos", summary.modulos_activos_total || 0, "Capacidades habilitadas"],
   ];
   workspaceKpis.innerHTML = items
@@ -4152,7 +4133,7 @@ const renderWorkspaceHealth = (data = {}) => {
                   .join("")}
               </div>
             `
-          : "<p class='muted'>El tenant ya tiene una base suficiente para implantación comercial.</p>"
+          : "<p class='muted'>El workspace ya tiene una base suficiente para implantación comercial.</p>"
       }
     `;
     workspaceOnboardingActions.querySelectorAll("[data-workspace-jump]").forEach((button) => {
@@ -4187,7 +4168,7 @@ const renderWorkspaceCommercialPack = (workspace = {}, packageData = {}) => {
               ${included.map((item) => `<div class="workspace-chip"><strong>${item}</strong><span>Incluido</span></div>`).join("")}
             </div>
           `
-        : "<p class='muted'>Sin paquete comercial definido todavía para este tenant.</p>"
+        : "<p class='muted'>Sin paquete comercial definido todavía para este workspace.</p>"
     }
   `;
 };
@@ -4223,7 +4204,7 @@ const renderWorkspaceClientBase = (rows = []) => {
   if (!workspaceClientBase) return;
   const items = Array.isArray(rows) ? rows : [];
   if (!items.length) {
-    workspaceClientBase.innerHTML = "<p class='muted'>Sin clientes finales vinculados todavía a este tenant.</p>";
+    workspaceClientBase.innerHTML = "<p class='muted'>Sin clientes finales vinculados todavía a este workspace.</p>";
     return;
   }
   workspaceClientBase.innerHTML = `
@@ -4260,7 +4241,7 @@ const renderWorkspaceClientBase = (rows = []) => {
 const renderWorkspaceClientDetail = (payload = null) => {
   if (!workspaceClientDetail) return;
   if (!payload || !payload.cliente) {
-    workspaceClientDetail.innerHTML = "<p class='muted'>Selecciona un cliente final del tenant para ver su CRM 360.</p>";
+    workspaceClientDetail.innerHTML = "<p class='muted'>Selecciona un cliente final del workspace para ver su CRM 360.</p>";
     return;
   }
   const cliente = payload.cliente || {};
@@ -4299,7 +4280,7 @@ const renderWorkspaceClientDetail = (payload = null) => {
       </div>
       <div class="workspace-client-columns">
         <div class="workspace-client-card">
-          <h4>Actividad del tenant</h4>
+          <h4>Actividad del workspace</h4>
           ${renderList(
             [
               `Próxima cita: ${dashboard.proxima_cita || "Sin fecha"}`,
@@ -4839,7 +4820,7 @@ const fillWorkspaceForm = (workspace = {}) => {
 const renderWorkspaceList = (rows = []) => {
   if (!workspaceList) return;
   if (!rows.length) {
-    workspaceList.innerHTML = "<p class='muted'>Sin tenants configurados todavía en LIV.</p>";
+    workspaceList.innerHTML = "<p class='muted'>Sin workspaces configurados todavía en LIV.</p>";
     return;
   }
   const selectedId =
@@ -4853,8 +4834,8 @@ const renderWorkspaceList = (rows = []) => {
       return `
         <button type="button" class="workspace-list-item${isActive ? " is-active" : ""}" data-workspace-id="${row.id}">
           <div>
-            <strong>${row.nombre || "-"}</strong>
-            <div class="muted">Tenant · ${row.plan || "Enterprise"} · ${row.estado || "Activo"}</div>
+            <strong>${getWorkspaceDisplayName(row)}</strong>
+            <div class="muted">Workspace · ${row.plan || "Enterprise"} · ${row.estado || "Activo"}</div>
             ${row.descripcion ? `<div class="muted">${row.descripcion}</div>` : ""}
           </div>
           <div class="workspace-list-meta">
@@ -4929,7 +4910,7 @@ const renderWorkspaceLauncher = (workspace = {}, modules = []) => {
   if (!workspaceLauncher) return;
   const enabled = modules.filter((row) => Number(row.enabled || 0) === 1);
   if (!enabled.length) {
-    workspaceLauncher.innerHTML = "<p class='muted'>No hay módulos activos en este tenant.</p>";
+    workspaceLauncher.innerHTML = "<p class='muted'>No hay módulos activos en este workspace.</p>";
     return;
   }
   const grouped = groupWorkspaceModulesBySection(enabled);
@@ -5012,9 +4993,9 @@ const renderWorkspaceModules = (rows = []) => {
   const activeTotal = rows.filter((row) => Number(row.enabled || 0) === 1).length;
   workspaceModules.innerHTML = `
     <div class="workspace-module-explainer">
-      <strong>Arquitectura del tenant</strong>
+      <strong>Arquitectura del workspace</strong>
       <p class="muted">
-        En LIV, el tenant activa un <strong>CRM principal</strong> y encima cuelgan sus <strong>subservicios</strong>.
+        En LIV, el workspace activa un <strong>CRM principal</strong> y encima cuelgan sus <strong>subservicios</strong>.
         Los módulos restantes funcionan como <strong>motores transversales</strong> del workspace.
       </p>
       <div class="workspace-module-explainer-meta">
@@ -7436,7 +7417,7 @@ const openWorkspacePortalPublic = async (token) => {
     if (workspacePortalPublicContent) {
       workspacePortalPublicContent.innerHTML = `
         <div class="form-card">
-          <h3>${data.workspace || "Tenant"}</h3>
+          <h3>${getWorkspaceDisplayName(data.workspace || "Workspace")}</h3>
           <p class="muted">${data.cliente || "Cliente"}</p>
           <div class="workspace-mini-kpis">
             <div class="workspace-mini-kpi">
@@ -12792,6 +12773,7 @@ const renderInmoLegalCopilotResponse = (payload = {}) => {
   const draftingHelp = Array.isArray(payload.drafting_help) ? payload.drafting_help : [];
   const variableBlocks = Array.isArray(payload.variable_blocks) ? payload.variable_blocks : [];
   const warnings = Array.isArray(payload.warnings) ? payload.warnings : [];
+  const recentUpdates = Array.isArray(payload.recent_updates) ? payload.recent_updates : [];
   const sections = [];
   if (summary) {
     sections.push(`<div class="crm-focus-link"><strong>${title}</strong><span>${summary}</span></div>`);
@@ -12836,6 +12818,21 @@ const renderInmoLegalCopilotResponse = (payload = {}) => {
       `<div class="crm-focus-link"><strong>Alertas</strong><span>${warnings.map((item) => escapeHtml(item)).join("<br>")}</span></div>`
     );
   }
+  if (recentUpdates.length) {
+    sections.push(
+      `<div class="crm-focus-link"><strong>Novedades detectadas</strong><span>${recentUpdates
+        .map((item) => {
+          const parts = [
+            item.fecha_publicacion ? escapeHtml(item.fecha_publicacion) : "",
+            item.fuente ? escapeHtml(item.fuente) : "",
+            item.title ? escapeHtml(item.title) : "",
+            item.accion_recomendada ? `Acción: ${escapeHtml(item.accion_recomendada)}` : "",
+          ].filter(Boolean);
+          return parts.join(" · ");
+        })
+        .join("<br><br>")}</span></div>`
+    );
+  }
   if (Array.isArray(payload.sources) && payload.sources.length) {
     sections.push(
       `<div class="crm-focus-link"><strong>Base interna</strong><span>${payload.sources.map((item) => escapeHtml(item)).join("<br>")}</span></div>`
@@ -12878,12 +12875,15 @@ const loadLegalRadarItems = async () => {
         if (row.url) {
           buttons.push(`<a class="secondary ghost button-inline" href="${escapeHtml(row.url)}" target="_blank" rel="noreferrer">Abrir</a>`);
         }
+        if (row.auto_detected) {
+          buttons.push(`<span class="status-pill status-open">Auto</span>`);
+        }
         return buttons.join(" ");
       }
     );
     if (legalRadarInfo) {
       const summary = data?.summary || {};
-      legalRadarInfo.textContent = `${rows.length} alertas · pendientes ${summary.pendiente || 0} · revisadas ${summary.revisado || 0} · aplicadas ${summary.aplicado || 0}`;
+      legalRadarInfo.textContent = `${rows.length} alertas · pendientes ${summary.pendiente || 0} · revisadas ${summary.revisado || 0} · aplicadas ${summary.aplicado || 0} · auto ${summary.auto_detected || 0} · sincronizadas ${summary.knowledge_synced || 0}`;
     }
   } catch (error) {
     legalRadarTable.innerHTML = "<div class='muted'>No se pudo cargar el radar legal.</div>";
@@ -27780,6 +27780,38 @@ if (legalRadarRefreshBtn) {
   });
 }
 
+if (legalRadarScanBtn) {
+  legalRadarScanBtn.addEventListener("click", async () => {
+    if (legalRadarStatus) legalRadarStatus.textContent = "Escaneando fuentes y sincronizando base legal...";
+    legalRadarScanBtn.disabled = true;
+    try {
+      const response = await fetch("/api/legal_radar_scan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ area: "inmobiliaria" }),
+      });
+      const data = await response.json();
+      if (!response.ok || data?.error) {
+        throw new Error(data?.error || `HTTP ${response.status}`);
+      }
+      const sync = data?.knowledge_sync || {};
+      const errors = Array.isArray(data?.errors) ? data.errors.length : 0;
+      if (legalRadarStatus) {
+        legalRadarStatus.textContent = `Escaneo completado · nuevas ${data?.created || 0} · actualizadas ${data?.updated || 0} · sincronizadas ${sync?.synced || 0}${errors ? ` · errores ${errors}` : ""}`;
+      }
+      loadLegalRadarItems();
+      if (inmoLegalTopic && inmoLegalTopic.value) {
+        inmoLegalCopilotForm?.dispatchEvent(new Event("submit", { cancelable: true, bubbles: true }));
+      }
+    } catch (error) {
+      if (legalRadarStatus) legalRadarStatus.textContent = error?.message || "No se pudo escanear el radar legal.";
+    } finally {
+      legalRadarScanBtn.disabled = false;
+    }
+  });
+}
+
 if (legalRadarTable) {
   legalRadarTable.addEventListener("click", async (event) => {
     const btn = event.target.closest("[data-legal-radar-action][data-id]");
@@ -29443,7 +29475,7 @@ if (workspaceForm) {
   workspaceForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (workspaceFormStatus) {
-      workspaceFormStatus.textContent = "Guardando tenant...";
+      workspaceFormStatus.textContent = "Guardando workspace...";
     }
     const formData = new FormData(workspaceForm);
     const payload = Object.fromEntries(formData.entries());
@@ -29458,12 +29490,12 @@ if (workspaceForm) {
       }
       state.currentWorkspaceId = data.id || "";
       if (workspaceFormStatus) {
-        workspaceFormStatus.textContent = "Tenant guardado.";
+        workspaceFormStatus.textContent = "Workspace guardado.";
       }
       await loadWorkspaceCentral();
     } catch (error) {
       if (workspaceFormStatus) {
-        workspaceFormStatus.textContent = error.message || "Error al guardar el tenant.";
+        workspaceFormStatus.textContent = error.message || "Error al guardar el workspace.";
       }
     }
   });
@@ -29536,7 +29568,7 @@ if (workspaceNewBtn) {
     renderWorkspaceDocumentHub({});
     renderCompanyCards();
     if (workspaceFormStatus) {
-      workspaceFormStatus.textContent = "Preparado para crear un tenant nuevo.";
+      workspaceFormStatus.textContent = "Preparado para crear un workspace nuevo.";
     }
   });
 }
