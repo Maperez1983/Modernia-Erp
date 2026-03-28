@@ -5223,12 +5223,23 @@ const renderWorkspaceCompanies = (rows = []) => {
 const renderWorkspaceLauncher = (workspace = {}, modules = []) => {
   if (!workspaceLauncher) return;
   const enabled = modules.filter((row) => Number(row.enabled || 0) === 1);
-  if (!enabled.length) {
+  if (!enabled.length && !isTenantWorkspaceMode()) {
     workspaceLauncher.innerHTML = "<p class='muted'>No hay módulos activos en este workspace.</p>";
     return;
   }
   const enabledKeys = new Set(enabled.map((row) => row.modulo_key));
   if (isTenantWorkspaceMode()) {
+    enabledKeys.add("crm360");
+    enabledKeys.add("gestoria");
+    enabledKeys.add("seguros");
+    enabledKeys.add("inmobiliaria");
+    enabledKeys.add("financiacion");
+    enabledKeys.add("fincas");
+    enabledKeys.add("documental");
+    enabledKeys.add("facturacion");
+    enabledKeys.add("portal_cliente");
+    enabledKeys.add("registro_horario");
+    enabledKeys.add("automatizaciones");
     enabledKeys.add("reformas");
     if (isGrupoModerniaWorkspace() || enabledKeys.has("copilot")) {
       enabledKeys.add("copilot");
@@ -10790,7 +10801,7 @@ const renderEditableGrid = (grid, fields, data, target) => {
     const direccionInput = inputMap.direccion;
     const latInput = inputMap.lat;
     const lonInput = inputMap.lon;
-    const refInput = inputMap.referencia;
+    const refInput = inputMap.referencia_catastral || inputMap.referencia;
     if (direccionInput && latInput && lonInput) {
       direccionInput.addEventListener("blur", () => {
         const address = direccionInput.value.trim();
@@ -10805,7 +10816,8 @@ const renderEditableGrid = (grid, fields, data, target) => {
     catastroCard.appendChild(label);
     const btn = document.createElement("button");
     btn.type = "button";
-    btn.textContent = "Abrir Catastro";
+    btn.className = "secondary catastro-button";
+    btn.innerHTML = '<span class="catastro-icon" aria-hidden="true">CAT</span><span>Abrir Catastro</span>';
     btn.addEventListener("click", () => {
       const ref = refInput ? refInput.value.trim() : "";
       const address = direccionInput ? direccionInput.value.trim() : "";
