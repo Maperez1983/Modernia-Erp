@@ -3478,8 +3478,8 @@ const renderCompanyCards = () => {
     holdingCard.dataset.action = "holding";
     holdingCard.innerHTML = `
       <h3>Centro de operaciones</h3>
-      <div class="company-meta">Control del cliente LIV, CRM, subservicios y motores transversales.</div>
-      <div class="company-meta">${state.currentWorkspaceName ? `Cliente activo: ${state.currentWorkspaceName}` : "Modernia como primer cliente operativo dentro de LIV."}</div>
+      <div class="company-meta">Control del tenant, CRM, subservicios y motores transversales.</div>
+      <div class="company-meta">${state.currentWorkspaceName ? `Tenant activo: ${state.currentWorkspaceName}` : "Modernia como primer tenant operativo dentro de LIV."}</div>
       <a class="card-link" href="?holding=1" data-action="holding">Entrar</a>
     `;
     if (isPriv) {
@@ -3552,8 +3552,8 @@ const refreshClientesCardCount = () => {
 };
 
 const WORKSPACE_CATEGORY_LABELS = {
-  core: "CRM",
-  vertical: "Subservicio",
+  core: "Core",
+  vertical: "Vertical",
   motor: "Motor",
 };
 
@@ -3561,14 +3561,14 @@ const WORKSPACE_MODULE_STRUCTURE = {
   crm360: {
     section: "crm_core",
     family: "CRM principal",
-    badge: "Base del cliente",
+    badge: "Base del tenant",
     description: "Ficha 360, clientes finales y punto de entrada común para todos los servicios.",
   },
   gestoria: {
     section: "crm_services",
     family: "Subservicio CRM",
     badge: "Servicio activo",
-    description: "Operativa fiscal, renta y gestiones periódicas del cliente.",
+    description: "Operativa fiscal, renta y gestiones periódicas del tenant.",
   },
   seguros: {
     section: "crm_services",
@@ -3598,13 +3598,13 @@ const WORKSPACE_MODULE_STRUCTURE = {
     section: "workspace_engines",
     family: "Motor transversal",
     badge: "Core operativo",
-    description: "Entrada documental, unificación de archivos y revisión del cliente.",
+    description: "Entrada documental, unificación de archivos y revisión del tenant.",
   },
   dashboard: {
     section: "workspace_engines",
     family: "Motor transversal",
     badge: "Core analítico",
-    description: "KPIs ejecutivos y lectura consolidada del cliente dentro de LIV.",
+    description: "KPIs ejecutivos y lectura consolidada del tenant dentro de LIV.",
   },
   facturacion: {
     section: "workspace_engines",
@@ -3628,7 +3628,7 @@ const WORKSPACE_MODULE_STRUCTURE = {
     section: "workspace_engines",
     family: "Motor transversal",
     badge: "People ops",
-    description: "Fichajes y control laboral ligados al cliente.",
+    description: "Fichajes y control laboral ligados al tenant.",
   },
   automatizaciones: {
     section: "workspace_engines",
@@ -3642,7 +3642,7 @@ const WORKSPACE_SECTION_DEFINITIONS = [
   {
     key: "crm_core",
     title: "CRM principal",
-    subtitle: "El módulo base del cliente dentro de LIV. Desde aquí nacen clientes, actividad y relación 360.",
+    subtitle: "El módulo base del tenant dentro de LIV. Desde aquí nacen clientes, actividad y relación 360.",
   },
   {
     key: "crm_services",
@@ -3652,7 +3652,7 @@ const WORKSPACE_SECTION_DEFINITIONS = [
   {
     key: "workspace_engines",
     title: "Motores transversales",
-    subtitle: "Capas compartidas del sistema: documental, facturación, portal, horario y automatización.",
+    subtitle: "Capas compartidas del workspace: documental, facturación, portal, horario y automatización.",
   },
 ];
 
@@ -3662,7 +3662,7 @@ const getWorkspaceModuleMeta = (row = {}) => {
     section: base.section || "workspace_engines",
     family: base.family || (WORKSPACE_CATEGORY_LABELS[row.categoria] || "Módulo"),
     badge: base.badge || "Módulo",
-    description: base.description || "Capacidad configurable del cliente dentro de LIV.",
+    description: base.description || "Capacidad configurable del tenant dentro de LIV.",
   };
 };
 
@@ -3852,7 +3852,7 @@ const renderWorkspaceHealth = (data = {}) => {
       <div class="workspace-health-score-card">
           <div class="workspace-health-ring">${score}%</div>
           <div>
-          <strong>Readiness del cliente</strong>
+          <strong>Readiness del tenant</strong>
           <div class="muted">
             ${numberFormatter.format(Number(summary.clientes || 0))} clientes finales ·
             ${numberFormatter.format(Number(summary.documentos || 0))} documentos ·
@@ -6210,7 +6210,7 @@ const renderWorkspaceDocumentHub = (data = {}) => {
   workspaceDocumentHub.innerHTML = `
     <div class="workspace-document-head">
       <span class="workspace-document-total">${numberFormatter.format(totalDocs)} documentos agregados</span>
-      <span class="muted">${pending ? `${numberFormatter.format(pending)} pendientes de asignación` : "Documentación unificada por servicios"}</span>
+      <span class="muted">${pending ? `${numberFormatter.format(pending)} pendientes de asignación` : "Gestoría e inmobiliaria unificados"}</span>
     </div>
     ${
       rows.length
