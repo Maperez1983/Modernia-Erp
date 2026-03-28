@@ -3680,6 +3680,7 @@ const groupWorkspaceModulesBySection = (rows = []) =>
   })).filter((section) => section.rows.length);
 
 const normalizeWorkspaceIdentifier = (value = "") => normalizeSimple(String(value || "").trim());
+const isTenantWorkspaceMode = () => (state.currentWorkspaceEntryMode || "platform") === "tenant";
 
 const getWorkspaceDisplayName = (workspace = null) => {
   const rawName =
@@ -3728,6 +3729,10 @@ const updateWorkspaceEntryChrome = () => {
     holdingBackBtn.textContent = mode === "tenant" ? "Volver al panel" : "Volver al panel";
   }
   const tenantOperationalMode = mode === "tenant";
+  if (tenantOperationalMode && state.currentWorkspaceView !== "overview") {
+    state.currentWorkspaceView = "overview";
+  }
+  if (workspaceViewTabs) workspaceViewTabs.classList.toggle("hidden", tenantOperationalMode);
   if (workspaceCompanySwitcher) workspaceCompanySwitcher.classList.toggle("hidden", tenantOperationalMode);
   if (workspaceKpis) workspaceKpis.classList.toggle("hidden", tenantOperationalMode);
   if (workspaceOverviewHealth) workspaceOverviewHealth.classList.toggle("hidden", tenantOperationalMode);
@@ -3930,6 +3935,9 @@ const normalizeWorkspaceViewKey = (value = "") => {
 const setWorkspaceView = (view = "overview", options = {}) => {
   const { scroll = false } = options;
   let normalized = normalizeWorkspaceViewKey(view);
+  if (isTenantWorkspaceMode()) {
+    normalized = "overview";
+  }
   if ((state.currentWorkspaceEntryMode || "platform") === "tenant" && normalized === "tenant") {
     normalized = "operations";
   }
@@ -3958,55 +3966,135 @@ const WORKSPACE_LAUNCHERS = {
   crm360: {
     label: "CRM 360",
     actionLabel: "Ver clientes",
-    action: () => focusWorkspaceView("clients", workspaceClientLookup),
+    action: () => {
+      if (isTenantWorkspaceMode()) {
+        openClientesModule();
+        return;
+      }
+      focusWorkspaceView("clients", workspaceClientLookup);
+    },
   },
   documental: {
     label: "Inbox Documental",
     actionLabel: "Ver inbox",
-    action: () => focusWorkspaceView("backoffice", workspaceDocumentHub),
+    action: () => {
+      if (isTenantWorkspaceMode()) {
+        openGestoriaCrm();
+        return;
+      }
+      focusWorkspaceView("backoffice", workspaceDocumentHub);
+    },
   },
   dashboard: { label: "Dashboard Ejecutivo", actionLabel: "Ir a home", action: () => goHome() },
   gestoria: {
     label: "Gestoría",
     actionLabel: "Ver gestión",
-    action: () => focusWorkspaceView("operations", workspaceGestoriaOverview),
+    action: () => {
+      if (isTenantWorkspaceMode()) {
+        openGestoriaCrm();
+        return;
+      }
+      focusWorkspaceView("operations", workspaceGestoriaOverview);
+    },
   },
   seguros: {
     label: "Seguros",
     actionLabel: "Ver cartera",
-    action: () => focusWorkspaceView("operations", workspaceSegurosOverview),
+    action: () => {
+      if (isTenantWorkspaceMode()) {
+        openSegurosCrm();
+        return;
+      }
+      focusWorkspaceView("operations", workspaceSegurosOverview);
+    },
   },
   inmobiliaria: {
     label: "Inmobiliaria",
     actionLabel: "Ver pipeline",
-    action: () => focusWorkspaceView("operations", workspaceInmoOverview),
+    action: () => {
+      if (isTenantWorkspaceMode()) {
+        openCrmInmobiliario();
+        return;
+      }
+      focusWorkspaceView("operations", workspaceInmoOverview);
+    },
   },
   financiacion: {
     label: "Financiación",
     actionLabel: "Ver pipeline",
-    action: () => focusWorkspaceView("operations", workspaceFinOverview),
+    action: () => {
+      if (isTenantWorkspaceMode()) {
+        openFinCrm();
+        return;
+      }
+      focusWorkspaceView("operations", workspaceFinOverview);
+    },
   },
-  fincas: { label: "Fincas", actionLabel: "Ver módulo", action: () => focusWorkspaceView("fincas", workspaceFincasCommunityForm) },
+  fincas: {
+    label: "Fincas",
+    actionLabel: "Ver módulo",
+    action: () => {
+      if (isTenantWorkspaceMode()) {
+        openCompany(FINCAS_COMPANY, { allowRestricted: true });
+        return;
+      }
+      focusWorkspaceView("fincas", workspaceFincasCommunityForm);
+    },
+  },
   facturacion: {
     label: "Facturación",
     actionLabel: "Gestionar",
-    action: () => focusWorkspaceView("finance", workspaceBillingForm),
+    action: () => {
+      if (isTenantWorkspaceMode()) {
+        openGestoriaCrm();
+        return;
+      }
+      focusWorkspaceView("finance", workspaceBillingForm);
+    },
   },
   facturas_recibidas: {
     label: "Facturas Recibidas",
     actionLabel: "Ver inbox",
-    action: () => focusWorkspaceView("backoffice", workspaceInboxForm),
+    action: () => {
+      if (isTenantWorkspaceMode()) {
+        openGestoriaCrm();
+        return;
+      }
+      focusWorkspaceView("backoffice", workspaceInboxForm);
+    },
   },
   portal_cliente: {
     label: "Portal Cliente",
     actionLabel: "Gestionar",
-    action: () => focusWorkspaceView("backoffice", workspacePortalForm),
+    action: () => {
+      if (isTenantWorkspaceMode()) {
+        openClientesModule();
+        return;
+      }
+      focusWorkspaceView("backoffice", workspacePortalForm);
+    },
   },
-  registro_horario: { label: "Registro Horario", actionLabel: "Gestionar", action: () => focusWorkspaceView("backoffice", workspaceTimeForm) },
+  registro_horario: {
+    label: "Registro Horario",
+    actionLabel: "Gestionar",
+    action: () => {
+      if (isTenantWorkspaceMode()) {
+        openGestoriaCrm();
+        return;
+      }
+      focusWorkspaceView("backoffice", workspaceTimeForm);
+    },
+  },
   automatizaciones: {
     label: "Automatizaciones",
     actionLabel: "Gestionar",
-    action: () => focusWorkspaceView("backoffice", workspaceAutomationForm),
+    action: () => {
+      if (isTenantWorkspaceMode()) {
+        openGestoriaCrm();
+        return;
+      }
+      focusWorkspaceView("backoffice", workspaceAutomationForm);
+    },
   },
 };
 
