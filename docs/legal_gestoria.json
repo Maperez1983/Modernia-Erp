@@ -2,6 +2,39 @@
   "version": 1,
   "area": "gestoria",
   "topics": {
+    "lgt_procedimiento": {
+      "title": "Ley General Tributaria y procedimiento",
+      "summary": "Marco general de obligaciones, procedimientos, comprobación, recaudación, sanciones y revisión tributaria.",
+      "keywords": ["ley general tributaria", "procedimiento tributario", "requerimiento", "comprobacion", "sancion", "recaudacion"],
+      "legal_basis": [
+        "Ley General Tributaria.",
+        "Reglamentos y normativa procedimental tributaria aplicable."
+      ],
+      "mandatory_docs": [
+        "Notificaciones, requerimientos, respuestas, justificantes y resoluciones."
+      ],
+      "checklist": [
+        "Identificar procedimiento, plazo y órgano actuante.",
+        "Vincular la documentación remitida y su soporte.",
+        "Dejar trazado el criterio usado y el estado del expediente."
+      ],
+      "editable_fields": [
+        "Procedimiento, plazo, organismo, cliente, soporte y observaciones."
+      ],
+      "clause_alerts": [
+        "Contestar sin fijar plazo ni soporte documental.",
+        "No distinguir gestión, inspección, recaudación o revisión."
+      ],
+      "warnings": [
+        "Toda actuación tributaria debe quedar unida a plazo, soporte y criterio."
+      ],
+      "drafting_help": [
+        "Las notas del expediente deben indicar procedimiento, fecha límite, documentación enviada y siguiente actuación."
+      ],
+      "variable_blocks": [
+        "Procedimiento, plazo, organismo, documentación y actuación pendiente."
+      ]
+    },
     "consultas_hacienda": {
       "title": "Consultas vinculantes Hacienda",
       "summary": "Doctrina oficial útil para fiscalidad operativa, interpretación de tributos y criterios aplicables al expediente.",
@@ -69,6 +102,135 @@
         "Periodo, impuesto, documentación soporte, criterio y plazos."
       ]
     },
+    "irpf": {
+      "title": "IRPF",
+      "summary": "Rendimientos, ganancias, deducciones, imputaciones y obligaciones del contribuyente persona física.",
+      "keywords": ["irpf", "renta", "ganancia patrimonial", "deduccion", "rendimientos", "declaracion renta"],
+      "legal_basis": [
+        "Normativa reguladora del Impuesto sobre la Renta de las Personas Físicas.",
+        "Reglamento del IRPF y doctrina administrativa aplicable."
+      ],
+      "mandatory_docs": [
+        "Certificados, ingresos, gastos, operaciones patrimoniales y justificantes de deducciones."
+      ],
+      "checklist": [
+        "Separar rendimientos, ganancias y deducciones.",
+        "Vincular operaciones patrimoniales y soporte bancario o notarial.",
+        "Registrar consultas DGT relevantes si se usan criterios específicos."
+      ],
+      "editable_fields": [
+        "Ejercicio, contribuyente, rendimientos, deducciones, inmuebles y observaciones."
+      ],
+      "clause_alerts": [
+        "Aplicar deducciones o ganancias sin soporte suficiente."
+      ],
+      "warnings": [
+        "IRPF requiere lectura por tipo de renta y situación personal del contribuyente."
+      ],
+      "drafting_help": [
+        "La ficha debe distinguir origen de rentas, operaciones patrimoniales, deducciones y documentación pendiente."
+      ],
+      "variable_blocks": [
+        "Ejercicio, rentas, inmuebles, ganancias, deducciones y soporte."
+      ]
+    },
+    "iva": {
+      "title": "IVA",
+      "summary": "Devengo, deducibilidad, facturación, prorrata, regímenes y obligaciones formales del impuesto.",
+      "keywords": ["iva", "factura", "base imponible", "deducibilidad", "prorrata", "modelo 303"],
+      "legal_basis": [
+        "Normativa reguladora del Impuesto sobre el Valor Añadido.",
+        "Reglamento de facturación y doctrina administrativa aplicable."
+      ],
+      "mandatory_docs": [
+        "Facturas emitidas, recibidas, libros, justificantes y criterio de deducción."
+      ],
+      "checklist": [
+        "Vincular cada criterio de deducibilidad a su soporte.",
+        "Controlar fechas, devengo y periodo.",
+        "Separar operaciones sujetas, exentas y no sujetas si aplica."
+      ],
+      "editable_fields": [
+        "Periodo, facturas, bases, cuotas, regímenes y observaciones."
+      ],
+      "clause_alerts": [
+        "Deducir IVA sin soporte formal suficiente.",
+        "Confundir criterio contable con criterio de IVA."
+      ],
+      "warnings": [
+        "El soporte documental y la calificación de la operación son clave."
+      ],
+      "drafting_help": [
+        "La ficha debe reflejar operaciones dudosas, criterio aplicado y revisión pendiente."
+      ],
+      "variable_blocks": [
+        "Periodo, operación, base, cuota, soporte y criterio."
+      ]
+    },
+    "sociedades_impuesto": {
+      "title": "Impuesto sobre Sociedades",
+      "summary": "Base imponible, ajustes, deducciones, gastos fiscalmente relevantes y cierre del ejercicio societario.",
+      "keywords": ["impuesto sociedades", "sociedades", "base imponible", "ajustes extracontables", "modelo 200"],
+      "legal_basis": [
+        "Normativa reguladora del Impuesto sobre Sociedades.",
+        "Doctrina y criterios administrativos aplicables."
+      ],
+      "mandatory_docs": [
+        "Cierre contable, ajustes, cuentas anuales, libros y soportes fiscales."
+      ],
+      "checklist": [
+        "Separar criterio contable y fiscal.",
+        "Vincular ajustes y deducciones a soporte documental.",
+        "Controlar relación con cuentas anuales y cierre."
+      ],
+      "editable_fields": [
+        "Ejercicio, sociedad, ajustes, deducciones, compensaciones y observaciones."
+      ],
+      "clause_alerts": [
+        "Ajustes extracontables sin soporte o sin explicación interna."
+      ],
+      "warnings": [
+        "Sociedades exige conciliación real entre contabilidad y fiscalidad."
+      ],
+      "drafting_help": [
+        "Las notas deben dejar claro origen del ajuste, base jurídica y soporte documental."
+      ],
+      "variable_blocks": [
+        "Ejercicio, ajuste, soporte, criterio y revisión."
+      ]
+    },
+    "mercantil_societario": {
+      "title": "Mercantil y societario",
+      "summary": "Constitución, órganos sociales, acuerdos, poderes, libros societarios y estructura de la sociedad.",
+      "keywords": ["mercantil", "societario", "sociedad de capital", "administrador", "junta general", "poderes"],
+      "legal_basis": [
+        "Ley de Sociedades de Capital.",
+        "Código de Comercio y Reglamento del Registro Mercantil."
+      ],
+      "mandatory_docs": [
+        "Escrituras, poderes, libros societarios, actas y certificaciones."
+      ],
+      "checklist": [
+        "Verificar representación y cargo vigente.",
+        "Relacionar acuerdo con órgano competente.",
+        "Vincular documentación registral o societaria soporte."
+      ],
+      "editable_fields": [
+        "Sociedad, cargo, acuerdo, libro, poder y observaciones."
+      ],
+      "clause_alerts": [
+        "Firmas o actuaciones sin verificar cargo o poder."
+      ],
+      "warnings": [
+        "El expediente debe acreditar quién decide y con qué capacidad."
+      ],
+      "drafting_help": [
+        "Las notas internas deben identificar sociedad, órgano, representación y soporte registral/documental."
+      ],
+      "variable_blocks": [
+        "Sociedad, órgano, acuerdo, representación y fecha."
+      ]
+    },
     "laboral_general": {
       "title": "Gestión laboral",
       "summary": "Expedientes laborales, altas, bajas, contratos, nóminas e incidencias con impacto laboral y de Seguridad Social.",
@@ -99,6 +261,101 @@
       ],
       "variable_blocks": [
         "Empresa, trabajador, actuación, fecha y soporte documental."
+      ]
+    },
+    "contratacion_laboral": {
+      "title": "Contratación laboral",
+      "summary": "Altas, tipos de contrato, condiciones laborales, modificaciones y soporte del vínculo laboral.",
+      "keywords": ["contratacion laboral", "contrato trabajo", "alta trabajador", "jornada", "convenio"],
+      "legal_basis": [
+        "Estatuto de los Trabajadores.",
+        "Normativa laboral específica y convenio aplicable."
+      ],
+      "mandatory_docs": [
+        "Contrato, alta, anexos, convenio y comunicaciones."
+      ],
+      "checklist": [
+        "Verificar tipo de contrato y jornada.",
+        "Vincular alta y soporte documental.",
+        "Relacionar convenio y condiciones esenciales."
+      ],
+      "editable_fields": [
+        "Empresa, trabajador, contrato, jornada, convenio, fecha y observaciones."
+      ],
+      "clause_alerts": [
+        "Contratación sin revisar convenio, jornada o soporte de alta."
+      ],
+      "warnings": [
+        "La contratación debe quedar soportada laboral y documentalmente."
+      ],
+      "drafting_help": [
+        "La ficha debe recoger empresa, trabajador, tipo de contrato, jornada, convenio y fechas clave."
+      ],
+      "variable_blocks": [
+        "Empresa, trabajador, contrato, jornada, convenio y fechas."
+      ]
+    },
+    "nominas_cotizacion": {
+      "title": "Nóminas y cotización",
+      "summary": "Gestión de nómina, bases, seguros sociales, incidencias retributivas y trazabilidad de variaciones.",
+      "keywords": ["nomina", "cotizacion", "seguros sociales", "bases cotizacion", "ss"],
+      "legal_basis": [
+        "Normativa laboral y de Seguridad Social aplicable.",
+        "Convenio colectivo y reglas retributivas de la empresa."
+      ],
+      "mandatory_docs": [
+        "Nómina, bases, seguros sociales, incidencias y comunicaciones."
+      ],
+      "checklist": [
+        "Vincular incidencia retributiva a soporte.",
+        "Controlar bases y periodos.",
+        "Trazar regularizaciones y correcciones."
+      ],
+      "editable_fields": [
+        "Trabajador, periodo, conceptos, bases, incidencias y revisión."
+      ],
+      "clause_alerts": [
+        "Regularizaciones sin nota explicativa interna."
+      ],
+      "warnings": [
+        "Nómina, cotización y convenio deben leerse de forma conjunta."
+      ],
+      "drafting_help": [
+        "Las incidencias deben indicar periodo, concepto, base, motivo y documento soporte."
+      ],
+      "variable_blocks": [
+        "Periodo, trabajador, bases, conceptos, incidencia y soporte."
+      ]
+    },
+    "seguridad_social_procedimientos": {
+      "title": "Seguridad Social y procedimientos",
+      "summary": "Altas, bajas, afiliación, cotización, aplazamientos e incidencias con Tesorería y organismos relacionados.",
+      "keywords": ["seguridad social", "tgss", "alta baja", "afiliacion", "cotizacion", "aplazamiento"],
+      "legal_basis": [
+        "Normativa de Seguridad Social y reglamentos de afiliación y cotización."
+      ],
+      "mandatory_docs": [
+        "Comunicaciones, resoluciones, altas, bajas y justificantes."
+      ],
+      "checklist": [
+        "Identificar organismo, trámite y plazo.",
+        "Vincular respuesta y justificante.",
+        "Separar incidencia de Seguridad Social del frente laboral si procede."
+      ],
+      "editable_fields": [
+        "Empresa, trabajador, trámite, organismo, plazo y observaciones."
+      ],
+      "clause_alerts": [
+        "No distinguir el trámite concreto ni su fecha límite."
+      ],
+      "warnings": [
+        "La trazabilidad por organismo y plazo es esencial."
+      ],
+      "drafting_help": [
+        "Las notas deben reflejar organismo, trámite, plazo, documentación remitida y estado."
+      ],
+      "variable_blocks": [
+        "Organismo, trámite, sujeto afectado, plazo y soporte."
       ]
     },
     "contabilidad_mercantil": {
@@ -164,38 +421,6 @@
       ],
       "variable_blocks": [
         "Responsable, finalidad, legitimación, cesiones, conservación y derechos."
-      ]
-    },
-    "sociedades_mercantil": {
-      "title": "Societario y mercantil",
-      "summary": "Actas, acuerdos, poderes, administradores y documentación societaria vinculada al cliente empresa.",
-      "keywords": ["sociedad", "administrador", "junta general", "poderes", "mercantil"],
-      "legal_basis": [
-        "Ley de Sociedades de Capital.",
-        "Reglamento del Registro Mercantil y normativa mercantil complementaria."
-      ],
-      "mandatory_docs": [
-        "Escrituras, poderes, acuerdos y certificaciones societarias."
-      ],
-      "checklist": [
-        "Verificar quién puede firmar o acordar.",
-        "Relacionar acuerdo, órgano competente y documentación acreditativa.",
-        "Controlar vigencia de cargos y poderes."
-      ],
-      "editable_fields": [
-        "Sociedad, cargo, poder, acuerdo, fecha y documentación soporte."
-      ],
-      "clause_alerts": [
-        "Actuar sin verificar representación o vigencia del cargo."
-      ],
-      "warnings": [
-        "El expediente societario debe dejar claro quién actúa y con qué poder."
-      ],
-      "drafting_help": [
-        "Las notas societarias deben identificar sociedad, órgano, acuerdo, certificación y soporte registral o documental."
-      ],
-      "variable_blocks": [
-        "Sociedad, representantes, acuerdo, poder y fecha."
       ]
     }
   }
