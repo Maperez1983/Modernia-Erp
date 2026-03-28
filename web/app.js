@@ -3708,6 +3708,36 @@ const getWorkspaceDisplayName = (workspace = null) => {
   return rawName;
 };
 
+const isGrupoModerniaWorkspace = () => {
+  const candidates = [
+    state.currentWorkspaceDetail?.workspace?.nombre,
+    state.currentWorkspaceDetail?.workspace?.slug,
+    state.currentWorkspaceName,
+    state.currentWorkspaceTarget,
+  ];
+  return candidates.some((value) => {
+    const normalized = normalizeWorkspaceIdentifier(value || "");
+    return ["modernia", "grupomodernia", "grupo-modernia"].includes(normalized);
+  });
+};
+
+const workspaceHasEnabledModule = (moduleKey = "") =>
+  new Set(state.currentWorkspaceEnabledModules || []).has(String(moduleKey || "").trim());
+
+const canUseLegalCopilot = () => isGrupoModerniaWorkspace() || workspaceHasEnabledModule("copilot");
+
+const syncCrmLegalAvailability = () => {
+  const enabled = canUseLegalCopilot();
+  const legalTabBtn = crmWorkspaceTabs?.querySelector('[data-crm-view="legal"]');
+  if (legalTabBtn) {
+    legalTabBtn.classList.toggle("hidden", !enabled);
+    legalTabBtn.disabled = !enabled;
+  }
+  if (!enabled && state.crmWorkspaceView === "legal") {
+    state.crmWorkspaceView = "resumen";
+  }
+};
+
 const findWorkspaceRecord = (rows = [], identifier = "") => {
   const normalized = normalizeWorkspaceIdentifier(identifier);
   if (!normalized) return null;
@@ -5177,7 +5207,9 @@ const renderWorkspaceLauncher = (workspace = {}, modules = []) => {
   const enabledKeys = new Set(enabled.map((row) => row.modulo_key));
   if (isTenantWorkspaceMode()) {
     enabledKeys.add("reformas");
-    enabledKeys.add("copilot");
+    if (isGrupoModerniaWorkspace() || enabledKeys.has("copilot")) {
+      enabledKeys.add("copilot");
+    }
   }
   workspaceLauncher.innerHTML = `
     <div class="workspace-home-grid">
@@ -6899,6 +6931,7 @@ const loadWorkspaceDetail = async (workspaceId) => {
   fillWorkspaceFincasMeetingForm();
   renderWorkspaceCompanyScopedData();
   updateWorkspaceEntryChrome();
+  syncCrmLegalAvailability();
   setWorkspaceView(state.currentWorkspaceView || "overview");
   if ((workspaceClients.rows || []).length) {
     await openWorkspaceClient360((workspaceClients.rows || [])[0].id, {
@@ -6963,6 +6996,7 @@ const loadWorkspaceCentral = async () => {
     renderWorkspacePortalList([]);
     hydrateWorkspacePortalRequestTargets([]);
     renderWorkspacePortalRequestList([]);
+    syncCrmLegalAvailability();
     fillWorkspacePortalRequestForm();
     renderWorkspaceAutomationList([]);
     renderWorkspaceAutomationLogs([]);
@@ -7299,6 +7333,7 @@ const openCrmInmobiliario = () => {
   openCompany(DASHBOARD_COMPANY, { allowRestricted: true });
   setTab("crm");
   updateTableVisibility();
+  syncCrmLegalAvailability();
   setCrmWorkspaceView(state.crmWorkspaceView || "resumen");
   loadCrmCaptaciones();
   loadCrmInmuebles();
@@ -12967,8 +13002,12 @@ const updateEstudioAltaTabs = () => {
 
 const setCrmWorkspaceView = (view = "resumen") => {
   const allowed = new Set(["resumen", "captaciones", "inmuebles", "alquileres", "compraventas", "demandas", "visitas", "legal"]);
-  const nextView = allowed.has(view) ? view : "resumen";
+  let nextView = allowed.has(view) ? view : "resumen";
+  if (nextView === "legal" && !canUseLegalCopilot()) {
+    nextView = "resumen";
+  }
   state.crmWorkspaceView = nextView;
+  syncCrmLegalAvailability();
 
   if (crmWorkspaceTabs) {
     crmWorkspaceTabs.querySelectorAll("[data-crm-view]").forEach((btn) => {
