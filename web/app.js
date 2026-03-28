@@ -1233,6 +1233,9 @@ const holdingOrgChart = document.getElementById("holdingOrgChart");
 const workspaceKpis = document.getElementById("workspaceKpis");
 const workspaceViewTabs = document.getElementById("workspaceViewTabs");
 const workspaceCompanySwitcher = document.getElementById("workspaceCompanySwitcher");
+const workspaceOverviewHealth = document.getElementById("workspaceOverviewHealth");
+const workspaceOverviewCommercial = document.getElementById("workspaceOverviewCommercial");
+const workspaceOverviewLauncherCard = document.getElementById("workspaceOverviewLauncherCard");
 const workspaceHealthScore = document.getElementById("workspaceHealthScore");
 const workspaceChecklist = document.getElementById("workspaceChecklist");
 const workspaceModuleHealth = document.getElementById("workspaceModuleHealth");
@@ -3725,6 +3728,12 @@ const updateWorkspaceEntryChrome = () => {
   if (holdingBackBtn) {
     holdingBackBtn.textContent = mode === "tenant" ? "Volver al panel" : "Volver al panel";
   }
+  const tenantOperationalMode = mode === "tenant";
+  if (workspaceCompanySwitcher) workspaceCompanySwitcher.classList.toggle("hidden", tenantOperationalMode);
+  if (workspaceKpis) workspaceKpis.classList.toggle("hidden", tenantOperationalMode);
+  if (workspaceOverviewHealth) workspaceOverviewHealth.classList.toggle("hidden", tenantOperationalMode);
+  if (workspaceOverviewCommercial) workspaceOverviewCommercial.classList.toggle("hidden", tenantOperationalMode);
+  if (workspaceOverviewLauncherCard) workspaceOverviewLauncherCard.classList.toggle("tenant-home-card", tenantOperationalMode);
   workspaceViewButtons.forEach((button) => {
     const viewKey = button.dataset.workspaceViewTab || "";
     if (viewKey === "tenant") {

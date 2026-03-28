@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>LIV · Plataforma Operativa</title>
-    <link rel="stylesheet" href="styles.css?v=137" />
+    <link rel="stylesheet" href="styles.css?v=138" />
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600;700&family=Source+Sans+3:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" />
   </head>
   <body class="theme-operativa">
@@ -64,9 +64,9 @@
             <button class="tab" type="button" data-workspace-view-tab="backoffice">Backoffice</button>
             <button class="tab" type="button" data-workspace-view-tab="fincas">Fincas</button>
           </div>
-          <div id="workspaceCompanySwitcher" class="workspace-company-switcher"></div>
+        <div id="workspaceCompanySwitcher" class="workspace-company-switcher"></div>
         <div class="grid workspace-kpis crm-workspace-view" id="workspaceKpis" data-workspace-view="overview"></div>
-        <div class="workspace-central-layout crm-workspace-view" data-workspace-view="overview">
+        <div id="workspaceOverviewHealth" class="workspace-central-layout crm-workspace-view" data-workspace-view="overview">
           <div class="form-card">
             <div class="section-head">
               <div>
@@ -247,7 +247,7 @@
             </div>
           </div>
         </div>
-        <div class="workspace-central-layout crm-workspace-view" data-workspace-view="overview">
+        <div id="workspaceOverviewCommercial" class="workspace-central-layout crm-workspace-view" data-workspace-view="overview">
           <div class="form-card">
             <div class="section-head">
               <div>
@@ -276,7 +276,7 @@
           </div>
           <div id="workspacePermissionMatrix"></div>
         </div>
-        <div class="form-card crm-workspace-view" data-workspace-view="overview">
+        <div id="workspaceOverviewLauncherCard" class="form-card crm-workspace-view" data-workspace-view="overview">
           <div class="section-head">
             <div>
                 <h3>Áreas del grupo</h3>
@@ -6428,6 +6428,6 @@
     <script src="ui-foundation.js?v=2"></script>
     <script src="app-auth.js?v=2"></script>
     <script src="app-routing.js?v=1"></script>
-    <script src="app.js?v=342"></script>
+    <script src="app.js?v=343"></script>
   </body>
 </html>
