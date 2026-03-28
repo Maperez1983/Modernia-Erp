@@ -215,6 +215,108 @@
         "Consecuencias del incumplimiento."
       ]
     },
+    "exclusiva_mediacion": {
+      "title": "Exclusiva y mediación inmobiliaria",
+      "summary": "Cláusulas de exclusiva, duración, prórroga, devengo y trazabilidad comercial del intermediario.",
+      "keywords": ["exclusiva inmobiliaria", "mediacion inmobiliaria", "prorroga", "devengo honorarios", "captacion exclusiva"],
+      "legal_basis": [
+        "Código Civil: autonomía de la voluntad y límites generales.",
+        "LGDCU: transparencia y control de cláusulas no negociadas con consumidores."
+      ],
+      "mandatory_docs": [
+        "Encargo firmado, duración, honorarios, alcance de la exclusiva y trazabilidad de visitas o compradores aportados."
+      ],
+      "checklist": [
+        "Definir duración y alcance real de la exclusiva.",
+        "Vincular compradores aportados, visitas y propuestas.",
+        "Revisar devengo de honorarios y prórrogas."
+      ],
+      "editable_fields": [
+        "Duración, exclusiva, honorarios, prórrogas, supuestos de devengo y resolución."
+      ],
+      "clause_alerts": [
+        "Prórrogas tácitas poco claras.",
+        "Penalizaciones automáticas desproporcionadas.",
+        "Devengo de honorarios sin trazabilidad del trabajo realizado."
+      ],
+      "warnings": [
+        "La exclusiva exige más trazabilidad comercial que otros encargos."
+      ],
+      "drafting_help": [
+        "La cláusula de exclusiva debe delimitar plazo, alcance, canalización de contactos y supuestos de devengo con lenguaje claro."
+      ],
+      "variable_blocks": [
+        "Duración, alcance, honorarios, prórrogas y causas de resolución."
+      ]
+    },
+    "varios_titulares_representacion": {
+      "title": "Varios titulares y representación",
+      "summary": "Encargos, propuestas y contratos cuando intervienen varios propietarios, herederos o apoderados.",
+      "keywords": ["varios titulares", "herederos", "apoderado", "representacion", "copropietarios"],
+      "legal_basis": [
+        "Código Civil sobre consentimiento y representación.",
+        "Normativa mercantil o de poderes si interviene una sociedad o representante."
+      ],
+      "mandatory_docs": [
+        "Identificación de todos los titulares o representación suficiente.",
+        "Poder, escritura o soporte de legitimación cuando proceda."
+      ],
+      "checklist": [
+        "Verificar quién firma y con qué capacidad.",
+        "Separar titularidad y representación.",
+        "Evitar automatizar firmas o consentimientos sin base documental."
+      ],
+      "editable_fields": [
+        "Titulares, representante, poderes, porcentajes y observaciones."
+      ],
+      "clause_alerts": [
+        "Firmas incompletas.",
+        "Representación no acreditada.",
+        "Confundir propietario material con firmante legitimado."
+      ],
+      "warnings": [
+        "Este es uno de los puntos más delicados en documentos inmobiliarios."
+      ],
+      "drafting_help": [
+        "La cabecera del documento debe identificar a todos los titulares o al representante, y dejar constancia del título con el que actúa."
+      ],
+      "variable_blocks": [
+        "Titulares, representación, porcentajes, poder y firma."
+      ]
+    },
+    "alquiler_vivienda_habitual": {
+      "title": "Alquiler de vivienda habitual",
+      "summary": "Régimen de arrendamiento de vivienda habitual, distribución de gastos, información previa y contrato final.",
+      "keywords": ["alquiler vivienda habitual", "lau vivienda", "gastos gestion inmobiliaria alquiler", "arrendador", "arrendatario"],
+      "legal_basis": [
+        "Ley de Arrendamientos Urbanos.",
+        "Normativa de consumidores y reglas sobre gastos de gestión inmobiliaria en vivienda habitual."
+      ],
+      "mandatory_docs": [
+        "DIA alquiler, identificación de partes, renta, gastos, fianza y condiciones esenciales."
+      ],
+      "checklist": [
+        "Separar encargo comercial y contrato de arrendamiento.",
+        "Controlar quién asume gastos y comisión.",
+        "Vincular documentación informativa y contrato final."
+      ],
+      "editable_fields": [
+        "Renta, fianza, duración, gastos, suministros y observaciones."
+      ],
+      "clause_alerts": [
+        "Cobrar gastos al inquilino cuando no corresponda.",
+        "Cláusulas oscuras sobre duración o actualizaciones."
+      ],
+      "warnings": [
+        "El alquiler de vivienda habitual tiene reglas imperativas sensibles."
+      ],
+      "drafting_help": [
+        "La documentación debe distinguir encargo, propuesta, DIA y contrato final de arrendamiento."
+      ],
+      "variable_blocks": [
+        "Renta, fianza, duración, gastos, suministros y firma."
+      ]
+    },
     "contrato_privado_compraventa": {
       "title": "Contrato privado de compraventa",
       "summary": "Contrato civil principal previo a escritura para regular transmisión, precio, cargas, posesión y responsabilidades.",

@@ -21,10 +21,28 @@
           "accion_recomendada": "Revisar contrato privado de arrendamiento, reparto de gastos y anexos de alquiler."
         },
         {
+          "topic_key": "alquiler_vivienda_habitual",
+          "impacto": "Alto",
+          "keywords": ["vivienda habitual", "arrendador", "arrendatario", "renta alquiler", "fianza alquiler"],
+          "accion_recomendada": "Revisar documentación y cláusulas de alquiler de vivienda habitual."
+        },
+        {
           "topic_key": "contrato_privado_compraventa",
           "impacto": "Alto",
           "keywords": ["compraventa vivienda", "arras", "reserva", "compraventa de inmueble", "vivienda y urbanismo"],
           "accion_recomendada": "Revisar contrato privado de compraventa, reserva/arras y condiciones suspensivas."
+        },
+        {
+          "topic_key": "exclusiva_mediacion",
+          "impacto": "Medio",
+          "keywords": ["mediacion inmobiliaria", "exclusiva", "honorarios intermediacion", "agente inmobiliario"],
+          "accion_recomendada": "Revisar cláusulas de exclusiva, devengo y trazabilidad comercial."
+        },
+        {
+          "topic_key": "varios_titulares_representacion",
+          "impacto": "Alto",
+          "keywords": ["copropietario", "herederos", "representacion", "poder", "titulares"],
+          "accion_recomendada": "Revisar representación, poderes y firma de varios titulares."
         },
         {
           "topic_key": "consumo_andalucia",
@@ -83,10 +101,88 @@
           "accion_recomendada": "Revisar criterio fiscal y contrastarlo con doctrina DGT aplicable."
         },
         {
+          "topic_key": "lgt_procedimiento",
+          "impacto": "Alto",
+          "keywords": ["ley general tributaria", "procedimiento tributario", "comprobacion", "recaudacion", "sancion"],
+          "accion_recomendada": "Revisar plazos, procedimientos y notas de expediente tributario."
+        },
+        {
           "topic_key": "fiscal_general",
           "impacto": "Alto",
           "keywords": ["obligacion tributaria", "declaracion", "tributo", "modelo", "recaudacion"],
           "accion_recomendada": "Revisar modelos, checklists y notas fiscales del servicio."
+        },
+        {
+          "topic_key": "irpf",
+          "impacto": "Alto",
+          "keywords": ["impuesto sobre la renta", "irpf", "renta personas fisicas", "deduccion renta"],
+          "accion_recomendada": "Revisar criterios de IRPF y expedientes de renta afectados."
+        },
+        {
+          "topic_key": "manual_renta",
+          "impacto": "Alto",
+          "keywords": ["campaña renta", "declaracion renta", "borrador renta", "manual renta"],
+          "accion_recomendada": "Actualizar checklist y manual operativo de renta del despacho."
+        },
+        {
+          "topic_key": "renta_inmuebles_alquileres",
+          "impacto": "Alto",
+          "keywords": ["rendimiento inmobiliario", "imputacion inmobiliaria", "alquiler irpf", "inmuebles renta"],
+          "accion_recomendada": "Revisar tratamiento de inmuebles y alquileres en renta."
+        },
+        {
+          "topic_key": "renta_ganancias_patrimoniales",
+          "impacto": "Alto",
+          "keywords": ["ganancia patrimonial", "transmision inmueble", "perdida patrimonial", "venta inmueble renta"],
+          "accion_recomendada": "Revisar criterio de ganancias patrimoniales y soporte documental."
+        },
+        {
+          "topic_key": "iva",
+          "impacto": "Alto",
+          "keywords": ["iva", "impuesto valor anadido", "facturacion", "deducibilidad iva"],
+          "accion_recomendada": "Revisar criterios de IVA, libros y documentos soporte."
+        },
+        {
+          "topic_key": "sociedades_impuesto",
+          "impacto": "Alto",
+          "keywords": ["impuesto sobre sociedades", "sociedades", "modelo 200", "ajustes extracontables"],
+          "accion_recomendada": "Revisar ajustes, cierres y notas fiscales de Sociedades."
+        },
+        {
+          "topic_key": "itp_ajd",
+          "impacto": "Alto",
+          "keywords": ["itp", "ajd", "transmisiones patrimoniales", "actos juridicos documentados"],
+          "accion_recomendada": "Revisar expedientes de ITP/AJD y criterios territoriales aplicables."
+        },
+        {
+          "topic_key": "isd",
+          "impacto": "Alto",
+          "keywords": ["sucesiones", "donaciones", "isd", "herencia", "donacion"],
+          "accion_recomendada": "Revisar expedientes de sucesiones/donaciones y beneficios aplicables."
+        },
+        {
+          "topic_key": "no_residentes",
+          "impacto": "Alto",
+          "keywords": ["no residentes", "irnr", "residencia fiscal", "convenio doble imposicion"],
+          "accion_recomendada": "Revisar expedientes de no residentes y convenios aplicables."
+        },
+        {
+          "topic_key": "modelos_tributarios",
+          "impacto": "Medio",
+          "keywords": ["modelo 303", "modelo 111", "modelo 130", "modelo 200", "declaracion informativa"],
+          "accion_recomendada": "Actualizar calendarios, checklists y soporte de modelos tributarios."
+        },
+        {
+          "topic_key": "fiscal_inmobiliaria",
+          "impacto": "Alto",
+          "keywords": ["fiscalidad inmobiliaria", "alquiler inmueble", "venta inmueble", "inmueble"],
+          "accion_recomendada": "Revisar fiscalidad inmobiliaria del despacho y criterios cruzados por impuesto."
+        },
+        {
+          "topic_key": "inspeccion_sanciones",
+          "impacto": "Alto",
+          "keywords": ["inspeccion", "expediente sancionador", "sancion", "alegaciones"],
+          "accion_recomendada": "Revisar protocolos de inspección, sancionador y trazabilidad probatoria."
         }
       ]
     },
