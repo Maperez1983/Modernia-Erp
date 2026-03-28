@@ -3999,9 +3999,9 @@ const normalizeWorkspaceViewKey = (value = "") => {
 };
 
 const setWorkspaceView = (view = "overview", options = {}) => {
-  const { scroll = false } = options;
+  const { scroll = false, forceTenantView = false } = options;
   let normalized = normalizeWorkspaceViewKey(view);
-  if (isTenantWorkspaceMode()) {
+  if (isTenantWorkspaceMode() && !forceTenantView) {
     normalized = "overview";
   }
   if ((state.currentWorkspaceEntryMode || "platform") === "tenant" && normalized === "tenant") {
@@ -4021,8 +4021,8 @@ const setWorkspaceView = (view = "overview", options = {}) => {
   }
 };
 
-const focusWorkspaceView = (view, element = null) => {
-  setWorkspaceView(view);
+const focusWorkspaceView = (view, element = null, options = {}) => {
+  setWorkspaceView(view, options);
   if (element && typeof element.scrollIntoView === "function") {
     element.scrollIntoView({ behavior: "smooth", block: "start" });
   }
@@ -4045,7 +4045,7 @@ const WORKSPACE_LAUNCHERS = {
     actionLabel: "Ver inbox",
     action: () => {
       if (isTenantWorkspaceMode()) {
-        openGestoriaCrm();
+        focusWorkspaceView("backoffice", workspaceDocumentHub, { forceTenantView: true });
         return;
       }
       focusWorkspaceView("backoffice", workspaceDocumentHub);
@@ -4123,7 +4123,7 @@ const WORKSPACE_LAUNCHERS = {
     actionLabel: "Gestionar",
     action: () => {
       if (isTenantWorkspaceMode()) {
-        openGestoriaCrm();
+        focusWorkspaceView("finance", workspaceBillingForm, { forceTenantView: true });
         return;
       }
       focusWorkspaceView("finance", workspaceBillingForm);
@@ -4134,7 +4134,7 @@ const WORKSPACE_LAUNCHERS = {
     actionLabel: "Ver inbox",
     action: () => {
       if (isTenantWorkspaceMode()) {
-        openGestoriaCrm();
+        focusWorkspaceView("backoffice", workspaceInboxForm, { forceTenantView: true });
         return;
       }
       focusWorkspaceView("backoffice", workspaceInboxForm);
@@ -4145,7 +4145,7 @@ const WORKSPACE_LAUNCHERS = {
     actionLabel: "Gestionar",
     action: () => {
       if (isTenantWorkspaceMode()) {
-        openClientesModule();
+        focusWorkspaceView("backoffice", workspacePortalForm, { forceTenantView: true });
         return;
       }
       focusWorkspaceView("backoffice", workspacePortalForm);
@@ -4156,7 +4156,7 @@ const WORKSPACE_LAUNCHERS = {
     actionLabel: "Gestionar",
     action: () => {
       if (isTenantWorkspaceMode()) {
-        openGestoriaCrm();
+        focusWorkspaceView("backoffice", workspaceTimeForm, { forceTenantView: true });
         return;
       }
       focusWorkspaceView("backoffice", workspaceTimeForm);
@@ -4167,7 +4167,7 @@ const WORKSPACE_LAUNCHERS = {
     actionLabel: "Gestionar",
     action: () => {
       if (isTenantWorkspaceMode()) {
-        openGestoriaCrm();
+        focusWorkspaceView("backoffice", workspaceAutomationForm, { forceTenantView: true });
         return;
       }
       focusWorkspaceView("backoffice", workspaceAutomationForm);
