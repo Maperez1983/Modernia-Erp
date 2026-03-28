@@ -5320,6 +5320,27 @@ const renderWorkspaceHomeDetail = (container, enabledKeys = new Set()) => {
   const target = document.getElementById("workspaceHomeDetail");
   if (!target || !container) return;
   const availableModules = (container.modules || []).filter((moduleKey) => enabledKeys.has(moduleKey));
+  const resolveWorkspaceContainerModuleAction = (containerKey, moduleKey) => {
+    const genericAction = WORKSPACE_LAUNCHERS[moduleKey]?.action;
+    if (containerKey === "shared") {
+      return genericAction;
+    }
+    const serviceActions = {
+      gestoria: () => openGestoriaCrm(),
+      seguros: () => openSegurosCrm(),
+      inmobiliaria: () => openCrmInmobiliario(),
+      financiacion: () => openFinCrm(),
+      reformas: () => openCompany(REFORMAS_COMPANY, { allowRestricted: true }),
+      fincas: () => openCompany(FINCAS_COMPANY, { allowRestricted: true }),
+      crm360: () => openClientesModule(),
+    };
+    const serviceAction = serviceActions[containerKey];
+    if (!serviceAction) return genericAction;
+    if (moduleKey === containerKey || ["documental", "facturacion", "facturas_recibidas", "portal_cliente", "automatizaciones", "copilot"].includes(moduleKey)) {
+      return serviceAction;
+    }
+    return genericAction || serviceAction;
+  };
   target.innerHTML = `
     <div class="workspace-home-detail-card">
       <div class="section-head">
@@ -5331,6 +5352,12 @@ const renderWorkspaceHomeDetail = (container, enabledKeys = new Set()) => {
       <div class="workspace-home-detail-grid">
         ${availableModules.map((moduleKey) => {
           const moduleMeta = WORKSPACE_LAUNCHERS[moduleKey] || {};
+          const contextualAction =
+            container.key === "shared"
+              ? (moduleMeta.actionLabel || "Abrir")
+              : (moduleKey === container.key
+                  ? `Abrir ${container.title.toLowerCase()}`
+                  : `Ir a ${container.title.toLowerCase()}`);
           return `
             <button
               type="button"
@@ -5338,7 +5365,7 @@ const renderWorkspaceHomeDetail = (container, enabledKeys = new Set()) => {
               data-workspace-module-open="${moduleKey}"
             >
               <strong>${getWorkspaceModuleLabel(moduleKey)}</strong>
-              <span>${moduleMeta.actionLabel || "Abrir"}</span>
+              <span>${contextualAction}</span>
             </button>
           `;
         }).join("")}
@@ -5348,7 +5375,7 @@ const renderWorkspaceHomeDetail = (container, enabledKeys = new Set()) => {
   target.querySelectorAll("[data-workspace-module-open]").forEach((button) => {
     button.addEventListener("click", () => {
       const moduleKey = button.dataset.workspaceModuleOpen || "";
-      const action = WORKSPACE_LAUNCHERS[moduleKey]?.action;
+      const action = resolveWorkspaceContainerModuleAction(container.key, moduleKey);
       if (typeof action === "function") action();
     });
   });
