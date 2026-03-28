@@ -1713,6 +1713,95 @@
                     <div class="muted">Selecciona un tema o escribe una pregunta para obtener una guía operativa.</div>
                   </div>
                 </div>
+                <div class="crm-summary-grid">
+                  <div class="form-card">
+                    <div class="section-head">
+                      <div>
+                        <h3>Radar legal</h3>
+                        <p class="muted">Registra novedades BOE/BOJA, evalúa impacto y deja trazada la revisión.</p>
+                      </div>
+                    </div>
+                    <div class="crm-focus-list" style="margin-bottom:12px;">
+                      <div class="crm-focus-link"><strong>Fuentes sugeridas</strong><span>BOE · Mi BOE · BOJA · Alertas internas del despacho.</span></div>
+                      <div class="crm-focus-link"><strong>Palabras clave</strong><span>Arrendamientos urbanos, vivienda, consumidores, intermediación inmobiliaria, honorarios, reserva, arras, compraventa.</span></div>
+                    </div>
+                    <form id="legalRadarForm" class="form-grid">
+                      <label>
+                        Fuente
+                        <select name="fuente">
+                          <option value="">Selecciona fuente</option>
+                          <option>BOE</option>
+                          <option>BOJA</option>
+                          <option>Mi BOE</option>
+                          <option>Revisión interna</option>
+                        </select>
+                      </label>
+                      <label>
+                        Referencia
+                        <input name="referencia" placeholder="Ej. Ley 29/1994 o Decreto 218/2005" />
+                      </label>
+                      <label class="span-2">
+                        Título
+                        <input name="titulo" required />
+                      </label>
+                      <label>
+                        Fecha publicación
+                        <input name="fecha_publicacion" type="date" />
+                      </label>
+                      <label>
+                        Impacto
+                        <select name="impacto">
+                          <option value="">Sin clasificar</option>
+                          <option>Alto</option>
+                          <option>Medio</option>
+                          <option>Bajo</option>
+                        </select>
+                      </label>
+                      <label>
+                        Tema relacionado
+                        <select name="topic_key">
+                          <option value="">Sin vincular</option>
+                          <option value="encargo_venta">Encargo de venta</option>
+                          <option value="encargo_alquiler">Encargo de alquiler</option>
+                          <option value="propuesta_compra">Propuesta / promesa de compra</option>
+                          <option value="propuesta_alquiler">Propuesta de alquiler</option>
+                          <option value="reserva_arras">Reserva / arras</option>
+                          <option value="contrato_privado_compraventa">Contrato privado de compraventa</option>
+                          <option value="contrato_privado_arrendamiento">Contrato privado de arrendamiento</option>
+                          <option value="consumo_andalucia">Consumo Andalucía</option>
+                          <option value="visitas">Hoja de visita</option>
+                        </select>
+                      </label>
+                      <label>
+                        URL oficial
+                        <input name="url" placeholder="https://..." />
+                      </label>
+                      <label class="span-2">
+                        Resumen
+                        <textarea name="resumen" rows="3" placeholder="Qué cambia y por qué afecta al despacho o a las plantillas"></textarea>
+                      </label>
+                      <label class="span-2">
+                        Acción recomendada
+                        <textarea name="accion_recomendada" rows="2" placeholder="Ej. revisar cláusula de gastos, actualizar contrato de arrendamiento, ajustar encargo..."></textarea>
+                      </label>
+                      <div class="form-actions span-2">
+                        <button type="submit">Guardar alerta legal</button>
+                        <span id="legalRadarStatus" class="muted"></span>
+                      </div>
+                    </form>
+                  </div>
+                  <div class="form-card">
+                    <div class="section-head">
+                      <div>
+                        <h3>Cola de revisión</h3>
+                        <p class="muted">Pendiente, revisado o aplicado.</p>
+                      </div>
+                      <button type="button" id="legalRadarRefreshBtn" class="secondary ghost">Recargar</button>
+                    </div>
+                    <div id="legalRadarTable"></div>
+                    <div class="footer" id="legalRadarInfo"></div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>

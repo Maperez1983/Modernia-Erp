@@ -1990,6 +1990,11 @@ const inmoLegalQuestion = document.getElementById("inmoLegalQuestion");
 const inmoLegalAskBtn = document.getElementById("inmoLegalAskBtn");
 const inmoLegalStatus = document.getElementById("inmoLegalStatus");
 const inmoLegalResponse = document.getElementById("inmoLegalResponse");
+const legalRadarForm = document.getElementById("legalRadarForm");
+const legalRadarStatus = document.getElementById("legalRadarStatus");
+const legalRadarTable = document.getElementById("legalRadarTable");
+const legalRadarInfo = document.getElementById("legalRadarInfo");
+const legalRadarRefreshBtn = document.getElementById("legalRadarRefreshBtn");
 const crmCaptacionesTable = document.getElementById("crmCaptacionesTable");
 const crmCaptacionesInfo = document.getElementById("crmCaptacionesInfo");
 const crmInmueblesTable = document.getElementById("crmInmueblesTable");
@@ -12758,6 +12763,7 @@ const setCrmWorkspaceView = (view = "resumen") => {
     if (inmoLegalResponse && !String(inmoLegalResponse.textContent || "").trim()) {
       inmoLegalResponse.innerHTML = "<div class='muted'>Selecciona un tema o escribe una pregunta para obtener una guía operativa.</div>";
     }
+    loadLegalRadarItems();
   } else {
     loadCrmCaptaciones();
     loadCrmInmuebles();
@@ -12836,6 +12842,53 @@ const renderInmoLegalCopilotResponse = (payload = {}) => {
     );
   }
   inmoLegalResponse.innerHTML = sections.join("") || "<div class='muted'>Sin respuesta disponible.</div>";
+};
+
+const loadLegalRadarItems = async () => {
+  if (!legalRadarTable) return;
+  if (legalRadarInfo) legalRadarInfo.textContent = "Cargando...";
+  try {
+    const data = await api("/api/legal_radar_items?area=inmobiliaria&limit=100");
+    const rows = Array.isArray(data?.rows) ? data.rows : [];
+    if (!rows.length) {
+      legalRadarTable.innerHTML = "<div class='muted'>Sin alertas legales registradas.</div>";
+      if (legalRadarInfo) legalRadarInfo.textContent = "0 alertas.";
+      return;
+    }
+    const cols = ["fecha_publicacion", "fuente", "titulo", "impacto", "estado", "accion_recomendada"];
+    legalRadarTable.innerHTML = renderTable(
+      cols,
+      rows.map((row) => [
+        row.fecha_publicacion || "",
+        row.fuente || "",
+        row.titulo || "",
+        row.impacto || "",
+        row.estado || "",
+        row.accion_recomendada || "",
+      ]),
+      cols,
+      (row) => {
+        const buttons = [];
+        if (normalizeSimple(row.estado || "") !== "revisado") {
+          buttons.push(`<button class="secondary ghost button-inline" data-legal-radar-action="revisado" data-id="${row.id}">Revisado</button>`);
+        }
+        if (normalizeSimple(row.estado || "") !== "aplicado") {
+          buttons.push(`<button class="secondary ghost button-inline" data-legal-radar-action="aplicado" data-id="${row.id}">Aplicado</button>`);
+        }
+        if (row.url) {
+          buttons.push(`<a class="secondary ghost button-inline" href="${escapeHtml(row.url)}" target="_blank" rel="noreferrer">Abrir</a>`);
+        }
+        return buttons.join(" ");
+      }
+    );
+    if (legalRadarInfo) {
+      const summary = data?.summary || {};
+      legalRadarInfo.textContent = `${rows.length} alertas · pendientes ${summary.pendiente || 0} · revisadas ${summary.revisado || 0} · aplicadas ${summary.aplicado || 0}`;
+    }
+  } catch (error) {
+    legalRadarTable.innerHTML = "<div class='muted'>No se pudo cargar el radar legal.</div>";
+    if (legalRadarInfo) legalRadarInfo.textContent = error?.message || "Error";
+  }
 };
 
 const goToEstudioAlta = (section = "compraventa") => {
@@ -27691,6 +27744,67 @@ if (inmoLegalCopilotForm) {
       }
     } finally {
       if (inmoLegalAskBtn) inmoLegalAskBtn.disabled = false;
+    }
+  });
+}
+
+if (legalRadarForm) {
+  legalRadarForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (legalRadarStatus) legalRadarStatus.textContent = "Guardando...";
+    try {
+      const payload = Object.fromEntries(new FormData(legalRadarForm).entries());
+      payload.area = "inmobiliaria";
+      const response = await fetch("/api/legal_radar_items", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify(payload),
+      });
+      const data = await response.json();
+      if (!response.ok || data?.error) {
+        throw new Error(data?.error || `HTTP ${response.status}`);
+      }
+      legalRadarForm.reset();
+      if (legalRadarStatus) legalRadarStatus.textContent = "Alerta legal guardada.";
+      loadLegalRadarItems();
+    } catch (error) {
+      if (legalRadarStatus) legalRadarStatus.textContent = error?.message || "No se pudo guardar la alerta legal.";
+    }
+  });
+}
+
+if (legalRadarRefreshBtn) {
+  legalRadarRefreshBtn.addEventListener("click", () => {
+    loadLegalRadarItems();
+  });
+}
+
+if (legalRadarTable) {
+  legalRadarTable.addEventListener("click", async (event) => {
+    const btn = event.target.closest("[data-legal-radar-action][data-id]");
+    if (!btn) return;
+    const id = btn.dataset.id || "";
+    const nextState = btn.dataset.legalRadarAction || "";
+    if (!id || !nextState) return;
+    if (legalRadarInfo) legalRadarInfo.textContent = "Actualizando...";
+    try {
+      const response = await fetch("/api/legal_radar_items_update", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({
+          id,
+          estado: nextState === "revisado" ? "Revisado" : "Aplicado",
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok || data?.error) {
+        throw new Error(data?.error || `HTTP ${response.status}`);
+      }
+      loadLegalRadarItems();
+    } catch (error) {
+      if (legalRadarInfo) legalRadarInfo.textContent = error?.message || "No se pudo actualizar la alerta legal.";
     }
   });
 }

@@ -1182,6 +1182,26 @@ CREATE TABLE IF NOT EXISTS acciones (
   FOREIGN KEY (inmueble_id) REFERENCES inmuebles(id)
 );
 
+CREATE TABLE IF NOT EXISTS legal_radar_items (
+  id TEXT PRIMARY KEY,
+  area TEXT NOT NULL DEFAULT 'inmobiliaria',
+  fuente TEXT,
+  referencia TEXT,
+  titulo TEXT NOT NULL,
+  fecha_publicacion TEXT,
+  estado TEXT NOT NULL DEFAULT 'Pendiente',
+  impacto TEXT,
+  topic_key TEXT,
+  url TEXT,
+  resumen TEXT,
+  accion_recomendada TEXT,
+  reviewed_at TEXT,
+  reviewed_by TEXT,
+  applied_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS cliente_profesional (
   id TEXT PRIMARY KEY,
   cliente_id TEXT NOT NULL,

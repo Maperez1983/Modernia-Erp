@@ -9761,6 +9761,43 @@ def resolve_legal_copilot_topic(area, topic, question):
     return fallback_key, topics.get(fallback_key)
 
 
+def fetch_legal_radar_items(conn, area="inmobiliaria", limit=100):
+    try:
+        limit_value = max(1, min(500, int(limit)))
+    except Exception:
+        limit_value = 100
+    rows = conn.execute(
+        """
+        SELECT id, area, fuente, referencia, titulo, fecha_publicacion, estado, impacto,
+               topic_key, url, resumen, accion_recomendada, reviewed_at, reviewed_by,
+               applied_at, created_at, updated_at
+        FROM legal_radar_items
+        WHERE area = ?
+        ORDER BY
+          CASE LOWER(COALESCE(estado, ''))
+            WHEN 'pendiente' THEN 0
+            WHEN 'revisado' THEN 1
+            WHEN 'aplicado' THEN 2
+            ELSE 3
+          END,
+          COALESCE(NULLIF(fecha_publicacion, ''), created_at) DESC,
+          updated_at DESC
+        LIMIT ?
+        """,
+        (area, limit_value),
+    ).fetchall()
+    summary = {"pendiente": 0, "revisado": 0, "aplicado": 0}
+    for row in rows:
+        key = normalize_lookup_text(row["estado"] or "").lower()
+        if key == "pendiente":
+            summary["pendiente"] += 1
+        elif key == "revisado":
+            summary["revisado"] += 1
+        elif key == "aplicado":
+            summary["aplicado"] += 1
+    return {"rows": [dict(r) for r in rows], "summary": summary}
+
+
 def validate_inmo_action_result(action_type, estado, resultado):
     normalized_type = normalize_inmo_action_type(action_type)
     if normalized_type not in INMO_ACTION_RESULT_OPTIONS:
@@ -12471,6 +12508,43 @@ def ensure_tables(db_path):
     ensure_column(conn, "acciones", "estado_siguiente", "estado_siguiente TEXT")
     ensure_column(conn, "acciones", "documento_tipo", "documento_tipo TEXT")
     ensure_column(conn, "acciones", "importe_propuesta", "importe_propuesta REAL")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS legal_radar_items (
+          id TEXT PRIMARY KEY,
+          area TEXT NOT NULL DEFAULT 'inmobiliaria',
+          fuente TEXT,
+          referencia TEXT,
+          titulo TEXT NOT NULL,
+          fecha_publicacion TEXT,
+          estado TEXT NOT NULL DEFAULT 'Pendiente',
+          impacto TEXT,
+          topic_key TEXT,
+          url TEXT,
+          resumen TEXT,
+          accion_recomendada TEXT,
+          reviewed_at TEXT,
+          reviewed_by TEXT,
+          applied_at TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    ensure_column(conn, "legal_radar_items", "area", "area TEXT NOT NULL DEFAULT 'inmobiliaria'")
+    ensure_column(conn, "legal_radar_items", "fuente", "fuente TEXT")
+    ensure_column(conn, "legal_radar_items", "referencia", "referencia TEXT")
+    ensure_column(conn, "legal_radar_items", "titulo", "titulo TEXT")
+    ensure_column(conn, "legal_radar_items", "fecha_publicacion", "fecha_publicacion TEXT")
+    ensure_column(conn, "legal_radar_items", "estado", "estado TEXT NOT NULL DEFAULT 'Pendiente'")
+    ensure_column(conn, "legal_radar_items", "impacto", "impacto TEXT")
+    ensure_column(conn, "legal_radar_items", "topic_key", "topic_key TEXT")
+    ensure_column(conn, "legal_radar_items", "url", "url TEXT")
+    ensure_column(conn, "legal_radar_items", "resumen", "resumen TEXT")
+    ensure_column(conn, "legal_radar_items", "accion_recomendada", "accion_recomendada TEXT")
+    ensure_column(conn, "legal_radar_items", "reviewed_at", "reviewed_at TEXT")
+    ensure_column(conn, "legal_radar_items", "reviewed_by", "reviewed_by TEXT")
+    ensure_column(conn, "legal_radar_items", "applied_at", "applied_at TEXT")
     ensure_column(conn, "inmuebles", "valor_referencia", "valor_referencia REAL")
     ensure_column(conn, "inmuebles", "honorarios", "honorarios REAL")
     ensure_column(conn, "inmuebles", "situacion_ocupacion", "situacion_ocupacion TEXT")
@@ -16550,7 +16624,7 @@ class Handler(BaseHTTPRequestHandler):
             return "gestoria"
         if path.startswith("/api/fin_") or path.startswith("/api/hipotecas"):
             return "financiaciones"
-        if path == "/api/legal_copilot":
+        if path in {"/api/legal_copilot", "/api/legal_radar_items", "/api/legal_radar_items_update"}:
             return "inmobiliaria"
         if path.startswith("/api/capt") or path.startswith("/api/inmueble") or path.startswith("/api/demandas") or path.startswith("/api/visitas") or path.startswith("/api/compraventas"):
             return "inmobiliaria"
@@ -16715,6 +16789,8 @@ class Handler(BaseHTTPRequestHandler):
             "/api/ai_seguros_copilot",
             "/api/ai_fin_copilot",
             "/api/legal_copilot",
+            "/api/legal_radar_items",
+            "/api/legal_radar_items_update",
             "/api/s3_presign",
             "/api/s3_multipart_start",
             "/api/s3_multipart_presign",
@@ -22128,6 +22204,83 @@ class Handler(BaseHTTPRequestHandler):
                     ]
             json_response(self, response)
             return
+        elif parsed.path == "/api/legal_radar_items":
+            area = str(payload.get("area") or "inmobiliaria").strip().lower() or "inmobiliaria"
+            titulo = str(payload.get("titulo") or "").strip()
+            if not titulo:
+                json_response(self, {"error": "titulo requerido"}, status=400)
+                return
+            item_id = os.urandom(16).hex()
+            conn.execute(
+                """
+                INSERT INTO legal_radar_items (
+                  id, area, fuente, referencia, titulo, fecha_publicacion, estado, impacto,
+                  topic_key, url, resumen, accion_recomendada, created_at, updated_at
+                ) VALUES (
+                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                )
+                """,
+                (
+                    item_id,
+                    area,
+                    str(payload.get("fuente") or "").strip() or None,
+                    str(payload.get("referencia") or "").strip() or None,
+                    titulo,
+                    str(payload.get("fecha_publicacion") or "").strip() or None,
+                    str(payload.get("estado") or "Pendiente").strip() or "Pendiente",
+                    str(payload.get("impacto") or "").strip() or None,
+                    str(payload.get("topic_key") or "").strip() or None,
+                    str(payload.get("url") or "").strip() or None,
+                    str(payload.get("resumen") or "").strip() or None,
+                    str(payload.get("accion_recomendada") or "").strip() or None,
+                    now,
+                    now,
+                ),
+            )
+            json_response(self, {"ok": True, "id": item_id})
+            conn.commit()
+            return
+        elif parsed.path == "/api/legal_radar_items_update":
+            record_id = str(payload.get("id") or "").strip()
+            if not record_id:
+                json_response(self, {"error": "id requerido"}, status=400)
+                return
+            allowed = (
+                "fuente",
+                "referencia",
+                "titulo",
+                "fecha_publicacion",
+                "estado",
+                "impacto",
+                "topic_key",
+                "url",
+                "resumen",
+                "accion_recomendada",
+                "reviewed_by",
+            )
+            updates = {}
+            for key in allowed:
+                if key in payload:
+                    value = str(payload.get(key) or "").strip()
+                    updates[key] = value or None
+            estado_value = normalize_lookup_text(updates.get("estado") or payload.get("estado") or "").lower()
+            if estado_value == "revisado":
+                updates["reviewed_at"] = now
+            elif estado_value == "aplicado":
+                updates["reviewed_at"] = now
+                updates["applied_at"] = now
+            if not updates:
+                json_response(self, {"error": "Sin cambios"}, status=400)
+                return
+            set_clause = ", ".join([f"{key} = ?" for key in updates])
+            values = list(updates.values()) + [now, record_id]
+            conn.execute(
+                f"UPDATE legal_radar_items SET {set_clause}, updated_at = datetime(?) WHERE id = ?",
+                values,
+            )
+            json_response(self, {"ok": True, "id": record_id})
+            conn.commit()
+            return
         elif parsed.path == "/api/compraventas":
             try:
                 direccion = normalize_person_name(payload.get("direccion"))
@@ -25063,6 +25216,12 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "workspace_id requerido"}, status=400)
                 return
             json_response(self, fetch_workspace_automation_logs(conn, workspace_id, limit=limit))
+            return
+
+        if path == "/api/legal_radar_items":
+            area = str(params.get("area", ["inmobiliaria"])[0] or "inmobiliaria").strip().lower()
+            limit = params.get("limit", ["100"])[0]
+            json_response(self, fetch_legal_radar_items(conn, area=area, limit=limit))
             return
 
         if path == "/api/workspace_portal_public":

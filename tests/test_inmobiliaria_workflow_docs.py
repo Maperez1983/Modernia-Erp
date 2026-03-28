@@ -7,6 +7,7 @@ from unittest.mock import patch
 from web import server
 from web.server import (
     LEGAL_COPILOT_TOPICS,
+    fetch_legal_radar_items,
     get_legal_copilot_topics,
     persist_generated_inmueble_pdf,
     resolve_legal_copilot_topic,
@@ -65,6 +66,25 @@ class InmobiliariaWorkflowDocsTests(unittest.TestCase):
               precio_valoracion REAL,
               etapa TEXT,
               situacion_comercial TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            );
+            CREATE TABLE legal_radar_items (
+              id TEXT PRIMARY KEY,
+              area TEXT,
+              fuente TEXT,
+              referencia TEXT,
+              titulo TEXT,
+              fecha_publicacion TEXT,
+              estado TEXT,
+              impacto TEXT,
+              topic_key TEXT,
+              url TEXT,
+              resumen TEXT,
+              accion_recomendada TEXT,
+              reviewed_at TEXT,
+              reviewed_by TEXT,
+              applied_at TEXT,
               created_at TEXT,
               updated_at TEXT
             );
@@ -185,6 +205,23 @@ class InmobiliariaWorkflowDocsTests(unittest.TestCase):
                 server.LEGAL_COPILOT_CACHE["topics"] = None
                 topics = get_legal_copilot_topics()
         self.assertEqual(topics["encargo_venta"]["title"], "Encargo editable")
+
+    def test_fetch_legal_radar_items_sorts_pending_first_and_builds_summary(self):
+        self.conn.execute(
+            """
+            INSERT INTO legal_radar_items (
+              id, area, fuente, titulo, fecha_publicacion, estado, created_at, updated_at
+            ) VALUES
+              ('l1', 'inmobiliaria', 'BOE', 'Cambio 1', '2026-03-20', 'Aplicado', '2026-03-20', '2026-03-20'),
+              ('l2', 'inmobiliaria', 'BOJA', 'Cambio 2', '2026-03-21', 'Pendiente', '2026-03-21', '2026-03-21'),
+              ('l3', 'inmobiliaria', 'BOE', 'Cambio 3', '2026-03-22', 'Revisado', '2026-03-22', '2026-03-22')
+            """
+        )
+        payload = fetch_legal_radar_items(self.conn, area="inmobiliaria", limit=10)
+        self.assertEqual(payload["rows"][0]["id"], "l2")
+        self.assertEqual(payload["summary"]["pendiente"], 1)
+        self.assertEqual(payload["summary"]["revisado"], 1)
+        self.assertEqual(payload["summary"]["aplicado"], 1)
 
 
 if __name__ == "__main__":
