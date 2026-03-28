@@ -23506,6 +23506,9 @@ class Handler(BaseHTTPRequestHandler):
                     now,
                 ),
             )
+            action_row = conn.execute(
+                "SELECT * FROM acciones WHERE rowid = last_insert_rowid()"
+            ).fetchone()
             if normalize_inmo_action_type(tipo) == "cita_adquisicion":
                 inmueble_id = str(payload.get("inmueble_id") or "").strip()
                 if inmueble_id:
@@ -23517,11 +23520,17 @@ class Handler(BaseHTTPRequestHandler):
                     if estado_actual in {"", "noticia"}:
                         sync_inmueble_stage_for_action(conn, inmueble_id, "adquisicion", now)
             elif servicio_norm == "financiaciones":
-                action_row = conn.execute(
-                    "SELECT * FROM acciones WHERE rowid = last_insert_rowid()"
-                ).fetchone()
                 if action_row and str(action_row["estado"] or "").strip().lower() != "pendiente":
                     apply_fin_action_workflow(conn, empresa["id"], action_row, now)
+            conn.commit()
+            json_response(
+                self,
+                {
+                    "ok": True,
+                    "id": action_row["id"] if action_row else None,
+                },
+            )
+            return
         elif parsed.path == "/api/acciones_update":
             record_id = payload.get("id")
             if not record_id:
