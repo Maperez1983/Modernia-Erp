@@ -3993,7 +3993,7 @@ const renderWorkspaceCompanySwitcher = (rows = []) => {
 
 const normalizeWorkspaceViewKey = (value = "") => {
   const key = String(value || "").trim().toLowerCase();
-  if (["overview", "tenant", "clients", "operations", "documental", "facturacion", "facturas_recibidas", "portal_cliente", "registro_horario", "automatizaciones", "copilot", "fincas"].includes(key)) {
+  if (["overview", "tenant", "clients", "operations", "motores", "fincas"].includes(key)) {
     return key;
   }
   return "overview";
@@ -4077,10 +4077,10 @@ const WORKSPACE_LAUNCHERS = {
     actionLabel: "Ver inbox",
     action: () => {
       if (isTenantWorkspaceMode()) {
-        focusWorkspaceView("documental", workspaceDocumentHub, { forceTenantView: true });
+        focusWorkspaceView("motores", workspaceDocumentHub, { forceTenantView: true });
         return;
       }
-      focusWorkspaceView("documental", workspaceDocumentHub);
+      focusWorkspaceView("motores", workspaceDocumentHub);
     },
   },
   dashboard: { label: "Dashboard Ejecutivo", actionLabel: "Ir a home", action: () => goHome() },
@@ -4155,10 +4155,10 @@ const WORKSPACE_LAUNCHERS = {
     actionLabel: "Gestionar",
     action: () => {
       if (isTenantWorkspaceMode()) {
-        focusWorkspaceView("facturacion", workspaceBillingForm, { forceTenantView: true });
+        focusWorkspaceView("motores", workspaceBillingForm, { forceTenantView: true });
         return;
       }
-      focusWorkspaceView("facturacion", workspaceBillingForm);
+      focusWorkspaceView("motores", workspaceBillingForm);
     },
   },
   facturas_recibidas: {
@@ -4166,10 +4166,10 @@ const WORKSPACE_LAUNCHERS = {
     actionLabel: "Ver inbox",
     action: () => {
       if (isTenantWorkspaceMode()) {
-        focusWorkspaceView("facturas_recibidas", workspaceInboxForm, { forceTenantView: true });
+        focusWorkspaceView("motores", workspaceInboxForm, { forceTenantView: true });
         return;
       }
-      focusWorkspaceView("facturas_recibidas", workspaceInboxForm);
+      focusWorkspaceView("motores", workspaceInboxForm);
     },
   },
   portal_cliente: {
@@ -4177,10 +4177,10 @@ const WORKSPACE_LAUNCHERS = {
     actionLabel: "Gestionar",
     action: () => {
       if (isTenantWorkspaceMode()) {
-        focusWorkspaceView("portal_cliente", workspacePortalForm, { forceTenantView: true });
+        focusWorkspaceView("motores", workspacePortalForm, { forceTenantView: true });
         return;
       }
-      focusWorkspaceView("portal_cliente", workspacePortalForm);
+      focusWorkspaceView("motores", workspacePortalForm);
     },
   },
   registro_horario: {
@@ -4188,10 +4188,10 @@ const WORKSPACE_LAUNCHERS = {
     actionLabel: "Gestionar",
     action: () => {
       if (isTenantWorkspaceMode()) {
-        focusWorkspaceView("registro_horario", workspaceTimeForm, { forceTenantView: true });
+        focusWorkspaceView("motores", workspaceTimeForm, { forceTenantView: true });
         return;
       }
-      focusWorkspaceView("registro_horario", workspaceTimeForm);
+      focusWorkspaceView("motores", workspaceTimeForm);
     },
   },
   automatizaciones: {
@@ -4199,10 +4199,10 @@ const WORKSPACE_LAUNCHERS = {
     actionLabel: "Gestionar",
     action: () => {
       if (isTenantWorkspaceMode()) {
-        focusWorkspaceView("automatizaciones", workspaceAutomationForm, { forceTenantView: true });
+        focusWorkspaceView("motores", workspaceAutomationForm, { forceTenantView: true });
         return;
       }
-      focusWorkspaceView("automatizaciones", workspaceAutomationForm);
+      focusWorkspaceView("motores", workspaceAutomationForm);
     },
   },
   copilot: {
@@ -4210,10 +4210,10 @@ const WORKSPACE_LAUNCHERS = {
     actionLabel: "Abrir hub",
     action: () => {
       if (isTenantWorkspaceMode()) {
-        focusWorkspaceView("copilot", workspaceCopilotHub, { forceTenantView: true });
+        focusWorkspaceView("motores", workspaceCopilotHub, { forceTenantView: true });
         return;
       }
-      focusWorkspaceView("copilot", workspaceCopilotHub);
+      focusWorkspaceView("motores", workspaceCopilotHub);
     },
   },
 };
@@ -4295,8 +4295,8 @@ const WORKSPACE_HOME_CONTAINERS = [
     description: "Capas compartidas del grupo para documental, facturación, portal, horario y automatización.",
     modules: ["documental", "facturacion", "facturas_recibidas", "portal_cliente", "registro_horario", "automatizaciones", "copilot"],
     planned: [],
-    action: WORKSPACE_LAUNCHERS.documental?.action || null,
-    actionLabel: "Abrir motores",
+    action: () => focusWorkspaceView("motores", workspaceDocumentHub, { forceTenantView: true }),
+    actionLabel: "Configurar motores",
   },
 ];
 
@@ -5281,6 +5281,7 @@ const renderWorkspaceLauncher = (workspace = {}, modules = []) => {
   workspaceLauncher.innerHTML = `
     <div class="workspace-home-grid">
       ${WORKSPACE_HOME_CONTAINERS
+        .filter((container) => !(isTenantWorkspaceMode() && container.key === "shared"))
         .map((container) => {
           const availableModules = container.modules.filter((moduleKey) => enabledKeys.has(moduleKey));
           if (!availableModules.length && container.key !== "shared") return "";
