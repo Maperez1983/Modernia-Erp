@@ -134,6 +134,102 @@
         "Ejercicio, rentas, inmuebles, ganancias, deducciones y soporte."
       ]
     },
+    "manual_renta": {
+      "title": "Manual práctico de Renta",
+      "summary": "Guía operativa del expediente de campaña de renta: fuentes de datos, validaciones, deducciones, inmuebles y cierre de declaración.",
+      "keywords": ["manual renta", "campaña renta", "declaracion renta", "expediente renta", "borrador renta"],
+      "legal_basis": [
+        "Normativa de IRPF y doctrina administrativa aplicable al ejercicio.",
+        "Criterios y documentación operativa de campaña de renta."
+      ],
+      "mandatory_docs": [
+        "Datos fiscales, rendimientos, inmuebles, deducciones, operaciones patrimoniales y justificantes."
+      ],
+      "checklist": [
+        "Separar información fiscal importada y documentación aportada por el cliente.",
+        "Controlar inmuebles, alquileres, ganancias y deducciones.",
+        "Vincular cada ajuste o criterio a soporte documental."
+      ],
+      "editable_fields": [
+        "Ejercicio, contribuyente, datos fiscales, inmuebles, deducciones, observaciones y revisión."
+      ],
+      "clause_alerts": [
+        "Dar por bueno el borrador sin revisar inmuebles, deducciones o cambios personales."
+      ],
+      "warnings": [
+        "Renta exige una revisión final manual incluso si parte de datos fiscales pre-cargados."
+      ],
+      "drafting_help": [
+        "La ficha de renta debe indicar documentación pendiente, incidencias detectadas y criterio usado en cada ajuste relevante."
+      ],
+      "variable_blocks": [
+        "Ejercicio, contribuyente, datos fiscales, ajustes, deducciones y soporte."
+      ]
+    },
+    "renta_inmuebles_alquileres": {
+      "title": "Renta de inmuebles y alquileres",
+      "summary": "Tratamiento en IRPF de inmuebles, alquileres, imputaciones, gastos deducibles y regularización del rendimiento inmobiliario.",
+      "keywords": ["renta inmuebles", "alquiler irpf", "rendimiento inmobiliario", "imputacion inmobiliaria", "gastos deducibles alquiler"],
+      "legal_basis": [
+        "Normativa de IRPF aplicable a inmuebles y rendimientos del capital inmobiliario.",
+        "Doctrina y criterios administrativos sobre gastos, reducción y uso del inmueble."
+      ],
+      "mandatory_docs": [
+        "Recibos, rentas cobradas, gastos, referencias catastrales y situación del inmueble."
+      ],
+      "checklist": [
+        "Identificar uso del inmueble y periodo.",
+        "Separar alquiler, vivienda habitual, inmueble vacío o a disposición.",
+        "Vincular gastos deducibles y soporte."
+      ],
+      "editable_fields": [
+        "Inmueble, referencia, uso, rentas, gastos, periodos y observaciones."
+      ],
+      "clause_alerts": [
+        "Aplicar gastos o reducciones sin soporte o sin revisar el uso real del inmueble."
+      ],
+      "warnings": [
+        "Los inmuebles suelen ser una fuente frecuente de errores en campaña de renta."
+      ],
+      "drafting_help": [
+        "La ficha debe dejar claro por inmueble el uso, rentas, gastos y criterio aplicado."
+      ],
+      "variable_blocks": [
+        "Inmueble, uso, rentas, gastos, periodos y soporte."
+      ]
+    },
+    "renta_ganancias_patrimoniales": {
+      "title": "Renta y ganancias patrimoniales",
+      "summary": "Ventas, transmisiones, premios, activos y otras alteraciones patrimoniales con impacto en IRPF.",
+      "keywords": ["ganancia patrimonial", "venta inmueble renta", "transmision", "alteracion patrimonial", "plusvalia renta"],
+      "legal_basis": [
+        "Normativa de IRPF sobre ganancias y pérdidas patrimoniales.",
+        "Criterios administrativos aplicables a transmisiones y valores de adquisición/transmisión."
+      ],
+      "mandatory_docs": [
+        "Escrituras, contratos, justificantes de gastos, valores de adquisición y transmisión."
+      ],
+      "checklist": [
+        "Identificar hecho transmisivo y fecha.",
+        "Vincular gastos e importes a soporte.",
+        "Separar transmisión de inmueble, valores u otro activo."
+      ],
+      "editable_fields": [
+        "Activo, fechas, valores, gastos, resultado y observaciones."
+      ],
+      "clause_alerts": [
+        "Calcular ganancia patrimonial sin soporte completo de adquisición o transmisión."
+      ],
+      "warnings": [
+        "Las ganancias patrimoniales requieren soporte documental muy fino."
+      ],
+      "drafting_help": [
+        "La ficha debe reflejar activo, fechas, valores, gastos y criterio usado."
+      ],
+      "variable_blocks": [
+        "Activo, adquisición, transmisión, gastos, resultado y soporte."
+      ]
+    },
     "iva": {
       "title": "IVA",
       "summary": "Devengo, deducibilidad, facturación, prorrata, regímenes y obligaciones formales del impuesto.",
