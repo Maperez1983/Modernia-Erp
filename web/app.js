@@ -4716,15 +4716,29 @@ const renderWorkspaceCompanies = (rows = []) => {
       ${rows
         .map(
           (row) => `
-            <div class="workspace-chip">
-              <strong>${row.nombre || "-"}</strong>
-              <span>${row.rol || "operativa"} · ${Number(row.activo || 0) === 1 ? "activa" : "inactiva"}</span>
+            <div class="workspace-chip workspace-company-chip">
+              <div>
+                <strong>${row.nombre || "-"}</strong>
+                <span>${row.rol || "operativa"} · ${Number(row.activo || 0) === 1 ? "activa" : "inactiva"}</span>
+              </div>
+              <button
+                type="button"
+                class="secondary ghost"
+                data-workspace-company-enter="${row.nombre || ""}"
+              >Entrar en empresa</button>
             </div>
           `
         )
         .join("")}
     </div>
   `;
+  workspaceCompanies.querySelectorAll("[data-workspace-company-enter]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const companyName = button.dataset.workspaceCompanyEnter || "";
+      if (!companyName) return;
+      openCompany(companyName, { allowRestricted: true });
+    });
+  });
 };
 
 const renderWorkspaceLauncher = (workspace = {}, modules = []) => {

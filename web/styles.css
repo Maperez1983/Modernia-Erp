@@ -1312,6 +1312,12 @@ body.crm-fin #companySummary {
   background: rgba(255, 255, 255, 0.9);
 }
 
+.workspace-company-chip {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+}
+
 .workspace-chip span {
   color: var(--muted);
   font-size: 12px;
@@ -2078,6 +2084,10 @@ tr.is-selected td {
   .workspace-module-grid,
   .workspace-launcher-grid,
   .workspace-suite-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .workspace-company-chip {
     grid-template-columns: 1fr;
   }
 
