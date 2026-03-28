@@ -11279,7 +11279,7 @@ const renderEditableGrid = (grid, fields, data, target) => {
     const lookupBtn = document.createElement("button");
     lookupBtn.type = "button";
     lookupBtn.className = "secondary catastro-button";
-    lookupBtn.textContent = "Buscar referencia";
+    lookupBtn.innerHTML = `<span class="catastro-icon" aria-hidden="true"><span>CAT</span></span><span>Buscar referencia</span>`;
     lookupBtn.addEventListener("click", async () => {
       await lookupInmuebleCatastro(inputMap);
     });
@@ -11287,7 +11287,7 @@ const renderEditableGrid = (grid, fields, data, target) => {
     const syncBtn = document.createElement("button");
     syncBtn.type = "button";
     syncBtn.className = "secondary catastro-button";
-    syncBtn.textContent = "Ficha PDF";
+    syncBtn.innerHTML = `<span class="catastro-icon" aria-hidden="true"><span>CAT</span></span><span>Ficha PDF</span>`;
     syncBtn.addEventListener("click", async () => {
       await syncInmuebleCatastroFicha(inputMap);
     });
@@ -11295,7 +11295,7 @@ const renderEditableGrid = (grid, fields, data, target) => {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "secondary catastro-button";
-    btn.textContent = "Abrir ficha pública";
+    btn.innerHTML = `<span class="catastro-icon" aria-hidden="true"><span>CAT</span></span><span>Abrir ficha pública</span>`;
     btn.addEventListener("click", () => {
       const ref = refInput ? refInput.value.trim() : "";
       const address = direccionInput ? direccionInput.value.trim() : "";
@@ -11350,8 +11350,10 @@ const buildCatastroUrl = (ref, address) => {
   const cleanRef = String(ref || "")
     .toUpperCase()
     .replace(/[^A-Z0-9]/g, "");
-  if (cleanRef) {
-    return `https://www1.sedecatastro.gob.es/CYCBienInmueble/OVCConCiud.aspx?RefC=${encodeURIComponent(cleanRef)}`;
+  if (cleanRef.length >= 14) {
+    const rc1 = cleanRef.slice(0, 7);
+    const rc2 = cleanRef.slice(7, 14);
+    return `https://www1.sedecatastro.gob.es/CYCBienInmueble/OVCListaBienes.aspx?RC1=${encodeURIComponent(rc1)}&RC2=${encodeURIComponent(rc2)}`;
   }
   if (String(address || "").trim()) {
     return "https://www.sedecatastro.gob.es/";
