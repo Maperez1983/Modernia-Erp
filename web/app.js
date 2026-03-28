@@ -13049,9 +13049,20 @@ const renderInmoLegalCopilotResponse = (payload = {}) => {
   const variableBlocks = Array.isArray(payload.variable_blocks) ? payload.variable_blocks : [];
   const warnings = Array.isArray(payload.warnings) ? payload.warnings : [];
   const recentUpdates = Array.isArray(payload.recent_updates) ? payload.recent_updates : [];
+  const documentTemplates = Array.isArray(payload.document_templates) ? payload.document_templates : [];
+  const workflowCheckpoints = Array.isArray(payload.workflow_checkpoints) ? payload.workflow_checkpoints : [];
+  const reviewRecommendations = Array.isArray(payload.review_recommendations) ? payload.review_recommendations : [];
+  const impactScore = Number(payload.impact_score || 0);
   const sections = [];
   if (summary) {
     sections.push(`<div class="crm-focus-link"><strong>${title}</strong><span>${summary}</span></div>`);
+  }
+  if (impactScore > 0) {
+    sections.push(
+      `<div class="crm-focus-link"><strong>Impacto operativo</strong><span>${escapeHtml(
+        `${Math.round(impactScore * 100)}% de impacto estimado en plantillas y workflow`
+      )}</span></div>`
+    );
   }
   if (legalBasis.length) {
     sections.push(
@@ -13066,6 +13077,18 @@ const renderInmoLegalCopilotResponse = (payload = {}) => {
   if (checklist.length) {
     sections.push(
       `<div class="crm-focus-link"><strong>Checklist</strong><span>${checklist.map((item) => escapeHtml(item)).join("<br>")}</span></div>`
+    );
+  }
+  if (documentTemplates.length) {
+    sections.push(
+      `<div class="crm-focus-link"><strong>Plantillas afectadas</strong><span>${documentTemplates.map((item) => escapeHtml(item)).join("<br>")}</span></div>`
+    );
+  }
+  if (workflowCheckpoints.length) {
+    sections.push(
+      `<div class="crm-focus-link"><strong>Checkpoints del workflow</strong><span>${workflowCheckpoints
+        .map((item) => escapeHtml(item))
+        .join("<br>")}</span></div>`
     );
   }
   if (draftingHelp.length) {
@@ -13086,6 +13109,13 @@ const renderInmoLegalCopilotResponse = (payload = {}) => {
   if (clauseAlerts.length) {
     sections.push(
       `<div class="crm-focus-link"><strong>Cláusulas sensibles</strong><span>${clauseAlerts.map((item) => escapeHtml(item)).join("<br>")}</span></div>`
+    );
+  }
+  if (reviewRecommendations.length) {
+    sections.push(
+      `<div class="crm-focus-link"><strong>Puntos a revisar</strong><span>${reviewRecommendations
+        .map((item) => escapeHtml(item))
+        .join("<br>")}</span></div>`
     );
   }
   if (warnings.length) {
@@ -13116,6 +13146,13 @@ const renderInmoLegalCopilotResponse = (payload = {}) => {
   inmoLegalResponse.innerHTML = sections.join("") || "<div class='muted'>Sin respuesta disponible.</div>";
 };
 
+const renderLegalRadarImpacts = (items = []) =>
+  items.length
+    ? `<div class="inmueble-summary-badges">${items
+        .map((item) => `<span class="inmueble-chip">${escapeHtml(item)}</span>`)
+        .join("")}</div>`
+    : "<span class='muted'>Sin impacto detectado</span>";
+
 const loadLegalRadarItems = async () => {
   if (!legalRadarTable) return;
   if (legalRadarInfo) legalRadarInfo.textContent = "Cargando...";
@@ -13128,35 +13165,65 @@ const loadLegalRadarItems = async () => {
       if (legalRadarInfo) legalRadarInfo.textContent = "0 alertas.";
       return;
     }
-    const cols = ["fecha_publicacion", "fuente", "titulo", "impacto", "estado", "accion_recomendada"];
-    legalRadarTable.innerHTML = renderTable(
-      cols,
-      rows.map((row) => [
-        row.fecha_publicacion || "",
-        row.fuente || "",
-        row.titulo || "",
-        row.impacto || "",
-        row.estado || "",
-        row.accion_recomendada || "",
-      ]),
-      cols,
-      (row) => {
-        const buttons = [];
-        if (normalizeSimple(row.estado || "") !== "revisado") {
-          buttons.push(`<button class="secondary ghost button-inline" data-legal-radar-action="revisado" data-id="${row.id}">Revisado</button>`);
-        }
-        if (normalizeSimple(row.estado || "") !== "aplicado") {
-          buttons.push(`<button class="secondary ghost button-inline" data-legal-radar-action="aplicado" data-id="${row.id}">Aplicado</button>`);
-        }
-        if (row.url) {
-          buttons.push(`<a class="secondary ghost button-inline" href="${escapeHtml(row.url)}" target="_blank" rel="noreferrer">Abrir</a>`);
-        }
-        if (row.auto_detected) {
-          buttons.push(`<span class="status-pill status-open">Auto</span>`);
-        }
-        return buttons.join(" ");
+    const table = document.createElement("table");
+    const thead = document.createElement("thead");
+    thead.innerHTML = `
+      <tr>
+        <th>Fecha</th>
+        <th>Fuente</th>
+        <th>Título</th>
+        <th>Impacto</th>
+        <th>Estado</th>
+        <th>Recomendación</th>
+        <th>Acción</th>
+      </tr>
+    `;
+    table.appendChild(thead);
+    const tbody = document.createElement("tbody");
+    rows.forEach((row) => {
+      const tr = document.createElement("tr");
+      const impactLabel = row.impact_score ? `${Math.round(Number(row.impact_score || 0) * 100)}%` : "Sin score";
+      const impacts = [
+        { label: "Documentos", values: Array.isArray(row.affected_documents) ? row.affected_documents : [] },
+        { label: "Workflow", values: Array.isArray(row.affected_workflows) ? row.affected_workflows : [] },
+        { label: "Cláusulas", values: Array.isArray(row.affected_clauses) ? row.affected_clauses : [] },
+      ];
+      const impactoHtml = `
+        <div><strong>${escapeHtml(row.impacto || "Sin clasificar")}</strong> · ${escapeHtml(impactLabel)}</div>
+        ${impacts
+          .map((block) => `<div class="muted" style="margin-top:6px;"><strong>${escapeHtml(block.label)}:</strong></div>${renderLegalRadarImpacts(block.values)}`)
+          .join("")}
+      `;
+      const buttons = [];
+      if (normalizeSimple(row.estado || "") !== "revisado") {
+        buttons.push(`<button class="secondary ghost button-inline" data-legal-radar-action="revisado" data-id="${row.id}">Revisado</button>`);
       }
-    );
+      if (normalizeSimple(row.estado || "") !== "aplicado") {
+        buttons.push(`<button class="secondary ghost button-inline" data-legal-radar-action="aplicado" data-id="${row.id}">Aplicado</button>`);
+      }
+      if (row.url) {
+        buttons.push(`<a class="secondary ghost button-inline" href="${escapeHtml(row.url)}" target="_blank" rel="noreferrer">Abrir</a>`);
+      }
+      if (row.auto_detected) {
+        buttons.push(`<span class="status-pill status-open">Auto</span>`);
+      }
+      tr.innerHTML = `
+        <td>${escapeHtml(formatCell("fecha", row.fecha_publicacion || "") || row.fecha_publicacion || "-")}</td>
+        <td>${escapeHtml(row.fuente || "-")}</td>
+        <td>
+          <div><strong>${escapeHtml(row.titulo || "-")}</strong></div>
+          ${row.topic_key ? `<div class="muted">${escapeHtml(row.topic_key)}</div>` : ""}
+        </td>
+        <td>${impactoHtml}</td>
+        <td><span class="crm-badge">${escapeHtml(row.estado || "Pendiente")}</span></td>
+        <td>${escapeHtml(row.accion_recomendada || "Sin acción recomendada")}</td>
+        <td>${buttons.join(" ")}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    legalRadarTable.innerHTML = "";
+    legalRadarTable.appendChild(table);
     if (legalRadarInfo) {
       const summary = data?.summary || {};
       legalRadarInfo.textContent = `${rows.length} alertas · pendientes ${summary.pendiente || 0} · revisadas ${summary.revisado || 0} · aplicadas ${summary.aplicado || 0} · auto ${summary.auto_detected || 0} · sincronizadas ${summary.knowledge_synced || 0}`;
@@ -18120,8 +18187,25 @@ const renderInmuebleDocs = (rows = []) => {
     item.className = "inline-row";
     const name = row.nombre || row.url || "Documento";
     const tipo = row.tipo || "Documento";
-    const link = row.url ? `<a href="${row.url}" target="_blank">Ver</a>` : "";
-    item.innerHTML = `<div>${name}</div><div class="muted">${tipo}</div><div>${link}</div>`;
+    const version = row.version ? `v${row.version}` : "";
+    const estado = row.estado || "Sin estado";
+    const plantilla = row.plantilla_clave || "";
+    const origen = [row.origen_tipo, row.origen_id].filter(Boolean).join(" · ");
+    const reviewers = [row.reviewed_by, row.reviewed_at ? formatCell("fecha", String(row.reviewed_at).slice(0, 10)) : ""].filter(Boolean).join(" · ");
+    const link = row.url ? `<a href="${escapeHtml(row.url)}" target="_blank" rel="noreferrer">Ver</a>` : "";
+    item.innerHTML = `
+      <div>
+        <strong>${escapeHtml(name)}</strong>
+        <div class="muted">${escapeHtml(tipo)}${plantilla ? ` · plantilla ${escapeHtml(plantilla)}` : ""}</div>
+        ${origen ? `<div class="muted">Origen: ${escapeHtml(origen)}</div>` : ""}
+        ${reviewers ? `<div class="muted">Revisión: ${escapeHtml(reviewers)}</div>` : ""}
+      </div>
+      <div class="inmueble-summary-badges">
+        ${version ? `<span class="inmueble-chip">${escapeHtml(version)}</span>` : ""}
+        <span class="inmueble-badge tone-${normalizeSimple(estado).includes("vigente") ? "accent" : "soft"}">${escapeHtml(estado)}</span>
+      </div>
+      <div>${link}</div>
+    `;
     list.appendChild(item);
   });
   inmuebleDocsList.innerHTML = "";
@@ -18265,38 +18349,67 @@ const loadInmuebleActividad = (inmuebleId, empresaId) => {
     `/api/acciones?servicio=inmobiliaria&empresa_id=${empresaId}&inmueble_id=${inmuebleId}`
   );
   const visitasReq = api(`/api/visitas?empresa_id=${empresaId}&inmueble_id=${inmuebleId}`);
-  Promise.all([accionesReq, visitasReq]).then(([accionesData, visitasData]) => {
+  const timelineReq = api(`/api/inmueble_timeline?inmueble_id=${inmuebleId}`).catch(() => ({ rows: [] }));
+  Promise.all([accionesReq, visitasReq, timelineReq]).then(([accionesData, visitasData, timelineData]) => {
     const acciones = accionesData.rows || [];
     const visitas = visitasData.rows || [];
-    const timeline = [
-      ...acciones.map((row) => ({
-        fecha: row.fecha,
-        hora: row.hora,
-        titulo: row.tipo || "Acción",
-        meta: `${row.responsable || "Sin responsable"} · ${row.estado || "Pendiente"}`,
-        notas: row.notas || "",
-      })),
-      ...visitas.map((row) => ({
-        fecha: row.fecha,
-        hora: row.hora,
-        titulo: "Visita",
-        meta: `${row.asesor || "Sin asesor"} · ${row.estado || "-"}`,
-        notas: row.notas || "",
-      })),
-    ].filter((item) => item.fecha);
-    timeline.sort((a, b) => String(b.fecha).localeCompare(String(a.fecha)));
+    const unifiedTimeline = Array.isArray(timelineData?.rows) ? timelineData.rows : [];
+    const timeline = unifiedTimeline.length
+      ? unifiedTimeline
+      : [
+          ...acciones.map((row) => ({
+            kind: "accion",
+            title: row.tipo || "Acción",
+            status: row.estado || "Pendiente",
+            date: row.fecha,
+            meta: { responsable: row.responsable, resultado: row.resultado_cierre, hora: row.hora },
+          })),
+          ...visitas.map((row) => ({
+            kind: "accion",
+            title: "Visita",
+            status: row.estado || "-",
+            date: row.fecha,
+            meta: { responsable: row.asesor, resultado: row.estado, hora: row.hora },
+          })),
+        ].filter((item) => item.date);
     if (inmuebleActividadTimeline) {
       inmuebleActividadTimeline.innerHTML = "";
       if (!timeline.length) {
         inmuebleActividadTimeline.innerHTML = "<p class='muted'>Sin actividad.</p>";
       } else {
         timeline.slice(0, 10).forEach((item) => {
+          const kind = normalizeSimple(item.kind || "accion");
+          const tone = kind === "documento" ? "accent" : kind === "auditoria" ? "soft" : "accent";
+          const rawDate = String(item.date || "").trim();
+          const day = rawDate ? formatCell("fecha", rawDate.slice(0, 10)) : "-";
+          const time = rawDate.length > 10 ? rawDate.slice(11, 16) : item?.meta?.hora || "";
+          const metaParts = [];
+          if (kind === "documento") {
+            if (item?.meta?.tipo) metaParts.push(item.meta.tipo);
+            if (item?.meta?.version) metaParts.push(`v${item.meta.version}`);
+          } else if (kind === "auditoria") {
+            if (item?.meta?.usuario) metaParts.push(item.meta.usuario);
+            if (item?.status) metaParts.push(item.status);
+          } else {
+            if (item?.meta?.responsable) metaParts.push(item.meta.responsable);
+            if (item?.status) metaParts.push(item.status);
+            if (item?.meta?.resultado) metaParts.push(`Resultado: ${item.meta.resultado}`);
+          }
+          const notes =
+            kind === "auditoria"
+              ? item?.meta?.detalles || ""
+              : kind === "documento"
+                ? item?.meta?.url || ""
+                : "";
           const card = document.createElement("div");
           card.className = "crm-timeline-item";
           card.innerHTML = `
-            <div class="title">${item.titulo}</div>
-            <div class="meta">${formatCell("fecha", item.fecha)} ${item.hora || ""} · ${item.meta}</div>
-            ${item.notas ? `<div class="notes">${item.notas}</div>` : ""}
+            <div class="title">
+              ${escapeHtml(item.title || item.titulo || "Actividad")}
+              <span class="inmueble-badge tone-${tone}">${escapeHtml(kind || "evento")}</span>
+            </div>
+            <div class="meta">${escapeHtml([day, time, ...metaParts].filter(Boolean).join(" · "))}</div>
+            ${notes ? `<div class="notes">${escapeHtml(notes)}</div>` : ""}
           `;
           inmuebleActividadTimeline.appendChild(card);
         });
