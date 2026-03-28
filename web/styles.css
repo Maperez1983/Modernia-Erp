@@ -2569,8 +2569,8 @@ tr.is-selected td {
 .inmueble-profile {
   display: grid;
   grid-template-columns: minmax(0, 1.3fr) minmax(300px, 0.9fr);
-  gap: 14px;
-  margin-bottom: 14px;
+  gap: 12px;
+  margin-bottom: 12px;
   align-items: start;
 }
 
@@ -2580,18 +2580,18 @@ tr.is-selected td {
 
 .inmueble-profile-side {
   display: grid;
-  gap: 12px;
+  gap: 10px;
 }
 
 .inmueble-map-card {
   display: grid;
-  gap: 12px;
+  gap: 8px;
 }
 
 .inmueble-data-workspace {
   display: grid;
   grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.9fr);
-  gap: 14px;
+  gap: 12px;
   align-items: start;
 }
 
@@ -2605,21 +2605,22 @@ tr.is-selected td {
 }
 
 .inmueble-summary-card {
-  padding: 18px;
+  padding: 14px 16px;
   display: grid;
-  gap: 14px;
+  gap: 10px;
   overflow: hidden;
 }
 
 .inmueble-summary-top {
   display: flex;
   justify-content: space-between;
-  gap: 12px;
+  gap: 10px;
 }
 
 .inmueble-summary-top h3 {
-  margin: 4px 0 6px;
-  font-size: 22px;
+  margin: 2px 0 4px;
+  font-size: 18px;
+  line-height: 1.2;
 }
 
 .inmueble-summary-kicker {
@@ -2635,29 +2636,33 @@ tr.is-selected td {
   color: var(--ink);
 }
 
+.inmueble-summary-subline {
+  font-size: 13px;
+}
+
 .inmueble-summary-badges,
 .inmueble-summary-owners {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
 }
 
 .inmueble-summary-badges {
   justify-content: flex-end;
   align-items: flex-start;
-  max-width: 38%;
+  max-width: 34%;
 }
 
 .inmueble-summary-body {
   display: grid;
   grid-template-columns: minmax(0, 1.3fr) minmax(220px, 0.8fr);
-  gap: 14px;
+  gap: 10px;
   align-items: start;
 }
 
 .inmueble-summary-main {
   display: grid;
-  gap: 14px;
+  gap: 8px;
 }
 
 .inmueble-badge,
@@ -2665,8 +2670,8 @@ tr.is-selected td {
   display: inline-flex;
   align-items: center;
   border-radius: 999px;
-  padding: 6px 10px;
-  font-size: 11px;
+  padding: 4px 8px;
+  font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.02em;
   white-space: nowrap;
@@ -2696,49 +2701,49 @@ tr.is-selected td {
 }
 
 .inmueble-summary-pricing {
-  font-size: 20px;
+  font-size: 16px;
   font-weight: 700;
   line-height: 1.25;
 }
 
 .inmueble-summary-note {
   color: var(--muted);
-  font-size: 13px;
-  line-height: 1.45;
+  font-size: 12px;
+  line-height: 1.35;
 }
 
 .inmueble-summary-metrics {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
 }
 
 .inmueble-summary-metric {
   display: grid;
-  gap: 4px;
-  padding: 12px 14px;
-  border-radius: 14px;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: 12px;
   border: 1px solid rgba(130, 76, 69, 0.12);
   background: rgba(255, 255, 255, 0.72);
 }
 
 .inmueble-summary-metric span {
   color: var(--muted);
-  font-size: 11px;
+  font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
 
 .inmueble-summary-metric strong {
-  font-size: 14px;
+  font-size: 12px;
   color: var(--ink);
 }
 
 .inmueble-summary-side {
   display: grid;
-  gap: 10px;
-  padding: 14px;
-  border-radius: 16px;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 14px;
   border: 1px solid rgba(130, 76, 69, 0.12);
   background: rgba(255, 255, 255, 0.7);
 }
@@ -2754,24 +2759,24 @@ tr.is-selected td {
 .inmueble-owner-card {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
-  gap: 10px;
+  gap: 8px;
   align-items: center;
-  padding: 10px 12px;
-  border-radius: 14px;
+  padding: 8px 10px;
+  border-radius: 12px;
   background: #f7f0e4;
   border: 1px solid rgba(130, 76, 69, 0.08);
 }
 
 .inmueble-owner-avatar {
-  width: 40px;
-  height: 40px;
+  width: 34px;
+  height: 34px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   border-radius: 999px;
   background: #824c45;
   color: #fff;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
 }
 
@@ -2782,41 +2787,41 @@ tr.is-selected td {
 }
 
 .inmueble-owner-copy strong {
-  font-size: 13px;
+  font-size: 12px;
   color: var(--ink);
 }
 
 .inmueble-owner-copy span {
-  font-size: 11px;
+  font-size: 10px;
   color: var(--muted);
 }
 
 .inmueble-facts-panel {
   display: grid;
-  gap: 12px;
+  gap: 8px;
 }
 
 .inmueble-fact-card {
-  padding: 14px 16px;
+  padding: 10px 12px;
 }
 
 .inmueble-fact-card h4 {
-  margin: 0 0 10px;
-  font-size: 13px;
+  margin: 0 0 6px;
+  font-size: 12px;
   color: #5a3a34;
 }
 
 .inmueble-fact-list {
   display: grid;
-  gap: 8px;
+  gap: 4px;
 }
 
 .inmueble-fact-row {
   display: flex;
   justify-content: space-between;
   gap: 12px;
-  font-size: 12px;
-  padding: 6px 0;
+  font-size: 11px;
+  padding: 4px 0;
   border-bottom: 1px solid rgba(130, 76, 69, 0.08);
 }
 
