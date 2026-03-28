@@ -23524,7 +23524,7 @@ class Handler(BaseHTTPRequestHandler):
                         "SELECT estado FROM inmuebles WHERE id = ? LIMIT 1",
                         (inmueble_id,),
                     ).fetchone()
-                    estado_actual = normalize_lookup_text((inmueble["estado"] if inmueble else "") or "")
+                    estado_actual = normalize_lookup_text((inmueble["estado"] if inmueble else "") or "").lower()
                     if estado_actual in {"", "noticia"}:
                         sync_inmueble_stage_for_action(conn, inmueble_id, "adquisicion", now)
             elif servicio_norm == "financiaciones":
@@ -23605,7 +23605,7 @@ class Handler(BaseHTTPRequestHandler):
             if normalize_lookup_text(servicio_final) == "financiaciones" and estado_final.lower() != "pendiente":
                 apply_fin_action_workflow(conn, empresa["id"], action_row, now)
             if tipo_norm == "cita_adquisicion" and inmueble_id and estado_final.lower() != "pendiente":
-                resultado_norm = normalize_lookup_text(resultado_final)
+                resultado_norm = normalize_lookup_text(resultado_final).lower()
                 destino = ""
                 if resultado_norm == "positivo":
                     destino = estado_siguiente_final or "Encargo"
@@ -23614,7 +23614,7 @@ class Handler(BaseHTTPRequestHandler):
                 if destino:
                     sync_inmueble_stage_for_action(conn, inmueble_id, destino, now)
             elif tipo_norm == "cita_comprador" and inmueble_id and estado_final.lower() != "pendiente":
-                if normalize_lookup_text(resultado_final) == "interesado":
+                if normalize_lookup_text(resultado_final).lower() == "interesado":
                     generar_fin = str(payload.get("generar_oportunidad_financiacion") or "").strip().lower() in {"1", "true", "si", "sí", "yes"}
                     generar_asesoramiento = str(payload.get("generar_asesoramiento_financiero") or "").strip().lower() in {"1", "true", "si", "sí", "yes"}
                     if generar_fin or generar_asesoramiento:
@@ -23740,7 +23740,7 @@ class Handler(BaseHTTPRequestHandler):
                         ),
                     )
             elif tipo_norm == "cita_propietarios" and inmueble_id and estado_final.lower() != "pendiente":
-                resultado_norm = normalize_lookup_text(resultado_final)
+                resultado_norm = normalize_lookup_text(resultado_final).lower()
                 if resultado_norm == "aceptada":
                     sync_inmueble_stage_for_action(conn, inmueble_id, "reservado", now)
                 elif resultado_norm == "contraoferta":
@@ -23767,10 +23767,10 @@ class Handler(BaseHTTPRequestHandler):
                         ),
                     )
             elif tipo_norm == "cita_contraoferta" and inmueble_id and estado_final.lower() != "pendiente":
-                if normalize_lookup_text(resultado_final) == "aceptada":
+                if normalize_lookup_text(resultado_final).lower() == "aceptada":
                     sync_inmueble_stage_for_action(conn, inmueble_id, "reservado", now)
             elif tipo_norm == "cita_propuesta" and inmueble_id and estado_final.lower() != "pendiente":
-                if normalize_lookup_text(resultado_final) == "serealizapropuesta":
+                if normalize_lookup_text(resultado_final).lower() == "se realiza propuesta":
                     documento_tipo = str(
                         updates.get("documento_tipo") if "documento_tipo" in updates else current["documento_tipo"] or "Propuesta de compra"
                     ).strip() or "Propuesta de compra"
