@@ -57,6 +57,7 @@ except Exception:
 
 ROOT = Path(__file__).resolve().parent
 ASSETS = ROOT.parent / "assets"
+LEGAL_COPILOT_PATH = ROOT.parent / "docs" / "legal_inmobiliaria.json"
 DB_DEFAULT = ROOT.parent / "data" / "erp_import2.sqlite"
 OCR_DB_DEFAULT = ROOT.parent / "data" / "ocr_jobs.sqlite"
 TESSDATA_DIR = "/opt/homebrew/share/tessdata"
@@ -115,6 +116,7 @@ AUTH_SESSIONS = {}
 AUTH_SESSIONS_LOCK = threading.Lock()
 DEFAULT_WORKSPACE_NAME = "Modernia"
 PLATFORM_NAME = "LIV"
+LEGAL_COPILOT_CACHE = {"mtime": None, "topics": None}
 WORKSPACE_MODULE_CATALOG = [
     {"key": "crm360", "nombre": "CRM 360", "categoria": "core", "sort_order": 10},
     {"key": "documental", "nombre": "Inbox Documental", "categoria": "core", "sort_order": 20},
@@ -9702,12 +9704,37 @@ LEGAL_COPILOT_TOPICS = {
 }
 
 
+def get_legal_copilot_topics():
+    try:
+        mtime = LEGAL_COPILOT_PATH.stat().st_mtime
+    except FileNotFoundError:
+        return LEGAL_COPILOT_TOPICS
+    except Exception:
+        return LEGAL_COPILOT_TOPICS
+    cached_mtime = LEGAL_COPILOT_CACHE.get("mtime")
+    cached_topics = LEGAL_COPILOT_CACHE.get("topics")
+    if cached_topics and cached_mtime == mtime:
+        return cached_topics
+    try:
+        with LEGAL_COPILOT_PATH.open("r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+        topics = payload.get("topics") if isinstance(payload, dict) else None
+        if isinstance(topics, dict) and topics:
+            LEGAL_COPILOT_CACHE["mtime"] = mtime
+            LEGAL_COPILOT_CACHE["topics"] = topics
+            return topics
+    except Exception:
+        return LEGAL_COPILOT_TOPICS
+    return LEGAL_COPILOT_TOPICS
+
+
 def resolve_legal_copilot_topic(area, topic, question):
     if str(area or "").strip().lower() != "inmobiliaria":
         return None, None
+    topics = get_legal_copilot_topics()
     topic_key = str(topic or "").strip()
-    if topic_key in LEGAL_COPILOT_TOPICS:
-        return topic_key, LEGAL_COPILOT_TOPICS[topic_key]
+    if topic_key in topics:
+        return topic_key, topics[topic_key]
     haystack = normalize_lookup_text(question or "").lower()
     keyword_map = [
         ("encargo alquiler", "encargo_alquiler"),
@@ -9726,9 +9753,12 @@ def resolve_legal_copilot_topic(area, topic, question):
         ("visita", "visitas"),
     ]
     for needle, candidate in keyword_map:
-        if needle in haystack:
-            return candidate, LEGAL_COPILOT_TOPICS[candidate]
-    return "encargo_venta", LEGAL_COPILOT_TOPICS["encargo_venta"]
+        if needle in haystack and candidate in topics:
+            return candidate, topics[candidate]
+    fallback_key = "encargo_venta" if "encargo_venta" in topics else next(iter(topics.keys()), None)
+    if not fallback_key:
+        return None, None
+    return fallback_key, topics.get(fallback_key)
 
 
 def validate_inmo_action_result(action_type, estado, resultado):

@@ -7,6 +7,7 @@ from unittest.mock import patch
 from web import server
 from web.server import (
     LEGAL_COPILOT_TOPICS,
+    get_legal_copilot_topics,
     persist_generated_inmueble_pdf,
     resolve_legal_copilot_topic,
     sync_inmueble_stage_for_action,
@@ -162,6 +163,28 @@ class InmobiliariaWorkflowDocsTests(unittest.TestCase):
         )
         self.assertEqual(topic_key, "contrato_privado_arrendamiento")
         self.assertEqual(payload["title"], LEGAL_COPILOT_TOPICS["contrato_privado_arrendamiento"]["title"])
+
+    def test_get_legal_copilot_topics_loads_editable_json(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            legal_path = Path(tmp) / "legal.json"
+            legal_path.write_text(
+                """
+                {
+                  "topics": {
+                    "encargo_venta": {
+                      "title": "Encargo editable",
+                      "summary": "Texto desde JSON"
+                    }
+                  }
+                }
+                """,
+                encoding="utf-8",
+            )
+            with patch.object(server, "LEGAL_COPILOT_PATH", legal_path):
+                server.LEGAL_COPILOT_CACHE["mtime"] = None
+                server.LEGAL_COPILOT_CACHE["topics"] = None
+                topics = get_legal_copilot_topics()
+        self.assertEqual(topics["encargo_venta"]["title"], "Encargo editable")
 
 
 if __name__ == "__main__":
