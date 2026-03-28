@@ -16542,6 +16542,14 @@ class Handler(BaseHTTPRequestHandler):
             ensure_usuarios_schema(conn)
             conn.commit()
         empresa = None
+        if parsed.path in ("/api/acciones", "/api/acciones_update") and empresa_nombre:
+            empresa = conn.execute(
+                "SELECT id FROM empresas WHERE nombre = ?",
+                (empresa_nombre,),
+            ).fetchone()
+            if not empresa:
+                json_response(self, {"error": "Empresa no encontrada"}, status=400)
+                return
         if parsed.path not in (
             "/api/hipotecas/firmar",
             "/api/hipotecas_update",

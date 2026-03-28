@@ -14,7 +14,7 @@
         <div class="brand-copy">
           <span class="brand-kicker">LIV platform</span>
           <h1>LIV Plataforma Operativa</h1>
-          <p>Plataforma de producto para gestionar tenants, módulos, operación y clientes finales desde una sola interfaz.</p>
+          <p>Plataforma operativa para gestionar clientes, servicios, módulos y operación diaria desde una sola interfaz.</p>
         </div>
       </div>
       <div class="meta">
@@ -41,8 +41,8 @@
           </div>
         </div>
         <div class="home-block">
-          <h3>Módulos clave</h3>
-          <p class="muted">Herramientas transversales del grupo.</p>
+          <h3>Accesos clave</h3>
+          <p class="muted">Entrada a CRM, servicios y motores operativos.</p>
           <div id="coreCards" class="grid"></div>
         </div>
       </section>
@@ -69,8 +69,8 @@
           <div class="form-card">
             <div class="section-head">
               <div>
-                <h3>Salud del tenant</h3>
-                <p class="muted">Nivel de implantación y readiness del tenant dentro de LIV.</p>
+                <h3>Estado de implantación</h3>
+                <p class="muted">Nivel de preparación operativa del cliente dentro de LIV.</p>
               </div>
             </div>
             <div id="workspaceHealthScore"></div>
@@ -80,7 +80,7 @@
             <div class="section-head">
               <div>
                 <h3>Estado por módulo</h3>
-                <p class="muted">Qué módulos del tenant están operativos, configurándose o pendientes.</p>
+                <p class="muted">Qué áreas del sistema están operativas, configurándose o pendientes.</p>
               </div>
             </div>
             <div id="workspaceModuleHealth"></div>
@@ -251,7 +251,7 @@
             <div class="section-head">
               <div>
                 <h3>Paquete Comercial</h3>
-                <p class="muted">Cómo se empaqueta y se presenta este tenant dentro del producto LIV.</p>
+                <p class="muted">Cómo se presenta este cliente dentro del producto LIV.</p>
               </div>
             </div>
             <div id="workspaceCommercialPack"></div>
@@ -260,7 +260,7 @@
             <div class="section-head">
               <div>
                 <h3>Go Live</h3>
-                <p class="muted">Acciones prioritarias para dejar el tenant listo para implantación o venta en LIV.</p>
+                <p class="muted">Acciones prioritarias para dejar el cliente listo para implantación o comercialización.</p>
               </div>
             </div>
             <div id="workspaceOnboardingActions"></div>
@@ -278,8 +278,8 @@
         <div class="form-card crm-workspace-view" data-workspace-view="overview">
           <div class="section-head">
             <div>
-              <h3>Módulos del tenant</h3>
-              <p class="muted">Acceso directo a los módulos activos del tenant seleccionado.</p>
+              <h3>Áreas activas</h3>
+              <p class="muted">Acceso directo a las áreas activas del cliente seleccionado.</p>
             </div>
           </div>
           <div id="workspaceLauncher"></div>
@@ -289,7 +289,7 @@
             <div class="section-head">
               <div>
                 <h3>Tenants</h3>
-                <p class="muted">Cada workspace representa un tenant cliente de LIV.</p>
+                <p class="muted">Cada registro representa un cliente de LIV con su propia operación.</p>
               </div>
             </div>
             <div id="workspaceList"></div>
@@ -297,15 +297,15 @@
           <div class="form-card">
             <div class="section-head">
               <div>
-                <h3>Configuración del tenant</h3>
-                <p class="muted">Define branding, estado y plan comercial del tenant dentro de LIV.</p>
+                <h3>Configuración del cliente</h3>
+                <p class="muted">Define branding, estado y plan comercial del cliente dentro de LIV.</p>
               </div>
-              <button type="button" id="workspaceNewBtn" class="secondary ghost">Nuevo tenant</button>
+              <button type="button" id="workspaceNewBtn" class="secondary ghost">Nuevo cliente LIV</button>
             </div>
             <form id="workspaceForm" class="form-grid">
               <input type="hidden" name="id" />
               <label>
-                Nombre del tenant
+                Nombre del cliente LIV
                 <input name="nombre" required />
               </label>
               <label>
@@ -342,7 +342,7 @@
                 <textarea name="descripcion" rows="3"></textarea>
               </label>
               <div class="form-actions">
-                <button type="submit">Guardar tenant</button>
+                <button type="submit">Guardar cliente LIV</button>
                 <span id="workspaceFormStatus" class="muted"></span>
               </div>
             </form>
@@ -353,7 +353,7 @@
             <div class="section-head">
               <div>
                 <h3>Empresas vinculadas</h3>
-                <p class="muted">Sociedades operativas que cuelgan del tenant.</p>
+                <p class="muted">Sociedades operativas que cuelgan del cliente dentro de LIV.</p>
               </div>
             </div>
             <div id="workspaceCompanies"></div>
@@ -362,7 +362,7 @@
             <div class="section-head">
               <div>
                 <h3>Módulos del producto</h3>
-                <p class="muted">Activa o pausa verticales y motores transversales por tenant.</p>
+                <p class="muted">Activa o pausa CRM, subservicios y motores transversales por cliente.</p>
               </div>
             </div>
             <div id="workspaceModules"></div>
@@ -371,8 +371,8 @@
         <div class="form-card crm-workspace-view" data-workspace-view="clients">
           <div class="section-head">
             <div>
-              <h3>CRM 360 del Tenant</h3>
-              <p class="muted">Base comercial y operativa de clientes reales del tenant, distinta del propio tenant cliente de LIV.</p>
+              <h3>CRM 360</h3>
+              <p class="muted">Base comercial y operativa de clientes reales, distinta del propio cliente de LIV.</p>
             </div>
           </div>
           <div class="workspace-client-toolbar">
@@ -394,7 +394,7 @@
             <div class="section-head">
               <div>
                 <h3>Facturación transversal</h3>
-                <p class="muted">Base única para medir facturado, cobrado y potencial operativo por tenant.</p>
+                <p class="muted">Base única para medir facturado, cobrado y potencial operativo del cliente.</p>
               </div>
             </div>
             <div id="workspaceBillingSummary"></div>
@@ -509,8 +509,8 @@
         <div class="form-card crm-workspace-view" data-workspace-view="operations">
           <div class="section-head">
             <div>
-              <h3>Gestoría del Tenant</h3>
-              <p class="muted">Seguimiento operativo de gestoría, administración de fincas y campaña de renta dentro del tenant.</p>
+              <h3>Gestoría</h3>
+                <p class="muted">Seguimiento operativo de gestoría, administración de fincas y campaña de renta.</p>
             </div>
           </div>
           <div id="workspaceGestoriaOverview"></div>
@@ -518,8 +518,8 @@
         <div class="form-card crm-workspace-view" data-workspace-view="operations">
           <div class="section-head">
             <div>
-              <h3>Seguros del Tenant</h3>
-              <p class="muted">Visión operativa de cartera, primas, renovaciones y alertas comerciales dentro del tenant.</p>
+              <h3>Seguros</h3>
+                <p class="muted">Visión operativa de cartera, primas, renovaciones y alertas comerciales.</p>
             </div>
           </div>
           <div id="workspaceSegurosOverview"></div>
@@ -527,8 +527,8 @@
         <div class="form-card crm-workspace-view" data-workspace-view="operations">
           <div class="section-head">
             <div>
-              <h3>Financiación del Tenant</h3>
-              <p class="muted">Pipeline hipotecario, firmas, bancos y seguimiento comercial dentro del tenant.</p>
+              <h3>Financiación</h3>
+                <p class="muted">Pipeline hipotecario, firmas, bancos y seguimiento comercial.</p>
             </div>
           </div>
           <div id="workspaceFinOverview"></div>
@@ -536,8 +536,8 @@
         <div class="form-card crm-workspace-view" data-workspace-view="operations">
           <div class="section-head">
             <div>
-              <h3>Inmobiliaria del Tenant</h3>
-              <p class="muted">Captaciones, inmuebles, compraventas y seguimiento comercial dentro del tenant.</p>
+              <h3>Inmobiliaria</h3>
+                <p class="muted">Captaciones, inmuebles, compraventas y seguimiento comercial.</p>
             </div>
           </div>
           <div id="workspaceInmoOverview"></div>
@@ -545,7 +545,7 @@
         <div class="form-card crm-workspace-view" data-workspace-view="operations">
           <div class="section-head">
             <div>
-              <h3>Operativa del Tenant</h3>
+              <h3>Operativa por servicio</h3>
               <p class="muted">Colas de trabajo reales por módulo para operar sin salir del Hub.</p>
             </div>
           </div>
@@ -726,7 +726,7 @@
             <div class="section-head">
               <div>
                 <h3>Automatizaciones</h3>
-                <p class="muted">Reglas simples por evento para aumentar el valor operativo del tenant.</p>
+                <p class="muted">Reglas simples por evento para aumentar el valor operativo del cliente.</p>
               </div>
             </div>
             <form id="workspaceAutomationForm" class="form-grid">
@@ -952,7 +952,7 @@
             <div class="section-head">
               <div>
                 <h3>Registro horario</h3>
-                <p class="muted">Base de fichajes del tenant para evolucionar hacia control horario productivo.</p>
+                <p class="muted">Base de fichajes para evolucionar hacia control horario productivo.</p>
               </div>
             </div>
             <form id="workspaceTimeForm" class="form-grid">
@@ -1210,7 +1210,7 @@
             <div class="section-head">
               <div>
                 <h3>Juntas</h3>
-                <p class="muted">Planificación y actas resumidas de juntas de comunidades dentro del tenant.</p>
+                <p class="muted">Planificación y actas resumidas de juntas de comunidades.</p>
               </div>
             </div>
             <form id="workspaceFincasMeetingForm" class="form-grid">
