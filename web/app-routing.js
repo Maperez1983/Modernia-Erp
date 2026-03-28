@@ -17,7 +17,11 @@
       return;
     }
     if (params.has("holding")) {
-      deps.openHolding();
+      deps.openHolding({
+        mode: params.get("mode") || "platform",
+        workspace: params.get("workspace") || "",
+        view: (params.get("mode") || "").toLowerCase() === "tenant" ? "operations" : "overview",
+      });
       deps.ui?.refreshContext(deps.state);
       return;
     }

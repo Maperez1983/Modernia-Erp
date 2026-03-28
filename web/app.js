@@ -1168,6 +1168,8 @@ const state = {
   currentWorkspaceDetail: null,
   currentWorkspaceEnabledModules: [],
   currentWorkspaceName: "",
+  currentWorkspaceTarget: "",
+  currentWorkspaceEntryMode: "platform",
   currentWorkspaceClientId: "",
   currentWorkspaceClientData: null,
   currentWorkspaceClients: [],
@@ -1220,6 +1222,8 @@ const adminUserDetailTitle = document.getElementById("adminUserDetailTitle");
 const adminUserDetailBack = document.getElementById("adminUserDetailBack");
 const holdingSection = document.getElementById("holdingSection");
 const holdingBackBtn = document.getElementById("holdingBackBtn");
+const holdingTitle = document.getElementById("holdingTitle");
+const holdingSubtitle = document.getElementById("holdingSubtitle");
 const holdingOrgChart = document.getElementById("holdingOrgChart");
 const workspaceKpis = document.getElementById("workspaceKpis");
 const workspaceViewTabs = document.getElementById("workspaceViewTabs");
@@ -3473,18 +3477,27 @@ const renderCompanyCards = () => {
       return;
     }
 
-    const holdingCard = document.createElement("div");
-    holdingCard.className = "company-card";
-    holdingCard.dataset.action = "holding";
-    holdingCard.innerHTML = `
-      <h3>Centro de operaciones</h3>
-      <div class="company-meta">Control del tenant, CRM, subservicios y motores transversales.</div>
-      <div class="company-meta">${state.currentWorkspaceName ? `Tenant activo: ${state.currentWorkspaceName}` : "Modernia como primer tenant operativo dentro de LIV."}</div>
-      <a class="card-link" href="?holding=1" data-action="holding">Entrar</a>
+    const platformCard = document.createElement("div");
+    platformCard.className = "company-card";
+    platformCard.dataset.action = "holding-admin";
+    platformCard.innerHTML = `
+      <h3>LIV Admin</h3>
+      <div class="company-meta">Configuración de clientes LIV, módulos, branding y control de plataforma.</div>
+      <div class="company-meta">Vista de administración global.</div>
+      <a class="card-link" href="?holding=1&mode=platform" data-action="holding-admin">Entrar</a>
     `;
-    if (isPriv) {
-      coreCards.appendChild(holdingCard);
-    }
+    coreCards.appendChild(platformCard);
+
+    const tenantCard = document.createElement("div");
+    tenantCard.className = "company-card";
+    tenantCard.dataset.action = "holding-tenant";
+    tenantCard.innerHTML = `
+      <h3>${state.currentWorkspaceName || "Modernia"}</h3>
+      <div class="company-meta">Entrada operativa al CRM, subservicios y motores transversales del cliente.</div>
+      <div class="company-meta">Vista diaria del cliente dentro de LIV.</div>
+      <a class="card-link" href="?holding=1&mode=tenant&workspace=modernia" data-action="holding-tenant">Entrar</a>
+    `;
+    coreCards.appendChild(tenantCard);
 
     if (canInmo) appendServiceCard("inmobiliaria");
     if (canGestoria) appendServiceCard("gestoria");
@@ -3672,6 +3685,42 @@ const groupWorkspaceModulesBySection = (rows = []) =>
     rows: rows.filter((row) => getWorkspaceModuleMeta(row).section === section.key),
   })).filter((section) => section.rows.length);
 
+const normalizeWorkspaceIdentifier = (value = "") => normalizeSimple(String(value || "").trim());
+
+const findWorkspaceRecord = (rows = [], identifier = "") => {
+  const normalized = normalizeWorkspaceIdentifier(identifier);
+  if (!normalized) return null;
+  return rows.find((row) => {
+    const id = normalizeWorkspaceIdentifier(row.id || "");
+    const slug = normalizeWorkspaceIdentifier(row.slug || "");
+    const nombre = normalizeWorkspaceIdentifier(row.nombre || "");
+    return normalized === id || normalized === slug || normalized === nombre;
+  }) || null;
+};
+
+const updateWorkspaceEntryChrome = () => {
+  const mode = state.currentWorkspaceEntryMode || "platform";
+  const workspaceName = state.currentWorkspaceName || state.currentWorkspaceDetail?.workspace?.nombre || "Cliente";
+  if (holdingTitle) {
+    holdingTitle.textContent = mode === "tenant" ? workspaceName : "Centro de operaciones";
+  }
+  if (holdingSubtitle) {
+    holdingSubtitle.textContent =
+      mode === "tenant"
+        ? "CRM, subservicios y motores activos del cliente dentro de LIV."
+        : "Clientes LIV, módulos, operativa y motores transversales desde la capa plataforma.";
+  }
+  if (holdingBackBtn) {
+    holdingBackBtn.textContent = mode === "tenant" ? "Volver al panel" : "Volver al panel";
+  }
+  workspaceViewButtons.forEach((button) => {
+    const viewKey = button.dataset.workspaceViewTab || "";
+    if (viewKey === "tenant") {
+      button.classList.toggle("hidden", mode === "tenant");
+    }
+  });
+};
+
 const normalizeWorkspaceViewKey = (value = "") => {
   const key = String(value || "").trim().toLowerCase();
   if (["overview", "tenant", "clients", "operations", "finance", "backoffice", "fincas"].includes(key)) {
@@ -3682,7 +3731,10 @@ const normalizeWorkspaceViewKey = (value = "") => {
 
 const setWorkspaceView = (view = "overview", options = {}) => {
   const { scroll = false } = options;
-  const normalized = normalizeWorkspaceViewKey(view);
+  let normalized = normalizeWorkspaceViewKey(view);
+  if ((state.currentWorkspaceEntryMode || "platform") === "tenant" && normalized === "tenant") {
+    normalized = "operations";
+  }
   state.currentWorkspaceView = normalized;
   workspaceViewButtons.forEach((button) => {
     button.classList.toggle("active", (button.dataset.workspaceViewTab || "") === normalized);
@@ -6322,6 +6374,9 @@ const loadWorkspaceDetail = async (workspaceId) => {
   state.currentWorkspaceDetail = detail;
   state.currentWorkspaceEnabledModules = getWorkspaceEnabledModules(detail.modules || []);
   state.currentWorkspaceName = detail.workspace?.nombre || "";
+  if (!state.currentWorkspaceTarget) {
+    state.currentWorkspaceTarget = detail.workspace?.slug || detail.workspace?.nombre || "";
+  }
   state.currentWorkspaceClients = workspaceClients.rows || [];
   syncWorkspaceClientOptions(workspaceClients.rows || []);
   fillWorkspaceForm(detail.workspace || {});
@@ -6371,6 +6426,7 @@ const loadWorkspaceDetail = async (workspaceId) => {
   renderWorkspaceFincasMeetingList(fincasMeetings.rows || []);
   fillWorkspaceFincasMeetingForm();
   renderWorkspaceDocumentHub(docs || {});
+  updateWorkspaceEntryChrome();
   setWorkspaceView(state.currentWorkspaceView || "overview");
   if ((workspaceClients.rows || []).length) {
     await openWorkspaceClient360((workspaceClients.rows || [])[0].id, {
@@ -6392,10 +6448,12 @@ const loadWorkspaceCentral = async () => {
   renderWorkspaceKpis(data.summary || {});
   renderWorkspaceList(state.workspaces);
   renderHoldingOrgChart();
+  const targetedWorkspace = findWorkspaceRecord(state.workspaces, state.currentWorkspaceTarget || "");
   const selectedId =
-    state.workspaces.some((row) => String(row.id || "") === String(state.currentWorkspaceId || ""))
+    targetedWorkspace?.id
+      || (state.workspaces.some((row) => String(row.id || "") === String(state.currentWorkspaceId || ""))
       ? state.currentWorkspaceId
-      : (state.workspaces[0] && state.workspaces[0].id) || "";
+      : (state.workspaces[0] && state.workspaces[0].id) || "");
   if (selectedId) {
     await loadWorkspaceDetail(selectedId);
   } else {
@@ -6453,6 +6511,7 @@ const loadWorkspaceCentral = async () => {
     setWorkspaceView(state.currentWorkspaceView || "overview");
     renderCompanyCards();
   }
+  updateWorkspaceEntryChrome();
 };
 
 const renderHoldingOrgChart = () => {
@@ -7101,18 +7160,27 @@ const setClienteDocsTab = (tab) => {
   }
 };
 
-const openHolding = () => {
+const openHolding = (options = {}) => {
   const user = getAuthScopeUser();
   if (!canAccessSharedHomeModules(user)) {
     goHome();
     return;
   }
+  const mode = options.mode === "tenant" ? "tenant" : "platform";
+  const requestedWorkspace = String(options.workspace || "").trim();
+  state.currentWorkspaceEntryMode = mode;
+  state.currentWorkspaceTarget = requestedWorkspace || (mode === "tenant" ? "modernia" : "");
   setModule("empresas");
   explorerSection.classList.add("hidden");
   setPage("holding");
-  setWorkspaceView(state.currentWorkspaceView || "overview");
+  setWorkspaceView(options.view || (mode === "tenant" ? "operations" : state.currentWorkspaceView || "overview"));
+  updateWorkspaceEntryChrome();
   loadWorkspaceCentral().catch(() => {});
-  setUrlParams(new URLSearchParams({ holding: "1" }));
+  const params = new URLSearchParams({ holding: "1", mode });
+  if (state.currentWorkspaceTarget) {
+    params.set("workspace", state.currentWorkspaceTarget);
+  }
+  setUrlParams(params);
   window.scrollTo({ top: 0, behavior: "smooth" });
 };
 
@@ -27176,6 +27244,10 @@ if (coreCards) {
     const action = target.dataset.action;
     if (action === "holding") {
       openHolding();
+    } else if (action === "holding-admin") {
+      openHolding({ mode: "platform", view: "overview" });
+    } else if (action === "holding-tenant") {
+      openHolding({ mode: "tenant", workspace: "modernia", view: "operations" });
     } else if (action === "crm-inmo") {
       openCrmInmobiliario();
     } else if (action === "crm-gestoria") {
