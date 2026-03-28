@@ -9301,7 +9301,7 @@ FIN_ACTION_RESULT_OPTIONS = {
 
 
 def normalize_fin_action_type(value):
-    normalized = normalize_lookup_text(value or "")
+    normalized = normalize_lookup_text(value or "").lower()
     aliases = {
         "primera llamada": "primera_llamada",
         "reunion de asesoramiento": "reunion_asesoramiento",
@@ -9334,7 +9334,7 @@ def validate_fin_action_result(action_type, estado, resultado):
 
 
 def normalize_fin_stage(value):
-    normalized = normalize_lookup_text(value or "")
+    normalized = normalize_lookup_text(value or "").lower()
     aliases = {
         "lead": "Lead",
         "asesoramiento": "Asesoramiento",
@@ -10521,6 +10521,11 @@ def upsert_cliente_renta_entry(conn, cliente_id, entry_payload, now):
 
 
 def fetch_cliente_relaciones(conn, cliente_id):
+    table_row = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'cliente_relaciones'"
+    ).fetchone()
+    if not table_row:
+        return []
     rows = conn.execute(
         """
         SELECT
@@ -10777,16 +10782,21 @@ def build_cliente_ficha_payload(conn, cliente_id, services_filter=None):
         gestoria_payload["renta_declaracion_conjunta"] = renta_payload.get("declaracion_conjunta", 0)
         profesionales["gestoria"] = gestoria_payload
     relaciones = fetch_cliente_relaciones(conn, cliente_id)
-    datos_economicos = conn.execute(
-        """
-        SELECT *
-        FROM asesoramientos_financiacion
-        WHERE cliente1_id = ? OR cliente2_id = ?
-        ORDER BY datetime(COALESCE(updated_at, created_at)) DESC
-        LIMIT 1
-        """,
-        (cliente_id, cliente_id),
+    asesoramientos_table = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'asesoramientos_financiacion'"
     ).fetchone()
+    datos_economicos = None
+    if asesoramientos_table:
+        datos_economicos = conn.execute(
+            """
+            SELECT *
+            FROM asesoramientos_financiacion
+            WHERE cliente1_id = ? OR cliente2_id = ?
+            ORDER BY datetime(COALESCE(updated_at, created_at)) DESC
+            LIMIT 1
+            """,
+            (cliente_id, cliente_id),
+        ).fetchone()
 
     return {
         "cliente": dict(cliente),
@@ -13218,6 +13228,161 @@ def fetch_workspace_inmo_overview(conn, workspace_id):
             }
             for row in zonas_rows
         ],
+    }
+
+
+def fetch_workspace_service_desks(conn, workspace_id):
+    empresa_ids = fetch_workspace_company_ids(conn, workspace_id)
+    if not empresa_ids:
+        return {"gestoria": [], "seguros": [], "financiacion": [], "inmobiliaria": []}
+    placeholders = ",".join(["?"] * len(empresa_ids))
+    today = datetime.now().date().isoformat()
+
+    gestoria_rows = conn.execute(
+        f"""
+        SELECT *
+        FROM (
+          SELECT
+            c.id AS cliente_id,
+            COALESCE(c.nombre, '') AS titulo,
+            'Modelo ' || COALESCE(m.modelo, '') AS subtitulo,
+            COALESCE(m.estado, 'Pendiente') AS estado,
+            m.proxima_fecha AS fecha,
+            '' AS valor,
+            1 AS sort_group
+          FROM gestoria_modelos m
+          JOIN clientes c ON c.id = m.cliente_id
+          JOIN clientes_empresas ce ON ce.cliente_id = c.id
+          WHERE ce.empresa_id IN ({placeholders})
+            AND m.proxima_fecha IS NOT NULL
+            AND DATE(m.proxima_fecha) <= DATE(?, '+30 day')
+          UNION ALL
+          SELECT
+            gt.cliente_id,
+            COALESCE(c.nombre, '') AS titulo,
+            COALESCE(gt.tipo_trabajo, 'Trabajo') AS subtitulo,
+            COALESCE(gt.estado, 'Pendiente') AS estado,
+            COALESCE(gt.fecha_fin, gt.fecha_inicio, '') AS fecha,
+            CASE WHEN COALESCE(gt.importe, 0) > 0 THEN printf('%.2f €', gt.importe) ELSE '' END AS valor,
+            2 AS sort_group
+          FROM gestoria_trabajos gt
+          LEFT JOIN clientes c ON c.id = gt.cliente_id
+          WHERE gt.empresa_id IN ({placeholders})
+            AND LOWER(COALESCE(gt.estado, '')) NOT IN ('finalizado', 'finalizada', 'cancelado', 'cancelada')
+        )
+        ORDER BY sort_group ASC, DATE(COALESCE(fecha, '9999-12-31')) ASC, titulo COLLATE NOCASE ASC
+        LIMIT 16
+        """,
+        [*empresa_ids, today, *empresa_ids],
+    ).fetchall()
+
+    seguros_rows = conn.execute(
+        f"""
+        SELECT
+          s.cliente_id,
+          COALESCE(NULLIF(TRIM(s.tomador), ''), c.nombre, '') AS titulo,
+          COALESCE(NULLIF(TRIM(s.compania), ''), 'Sin compañía') || ' · ' || COALESCE(NULLIF(TRIM(s.ramo), ''), 'Sin ramo') AS subtitulo,
+          COALESCE(NULLIF(TRIM(s.estado), ''), 'Pendiente') AS estado,
+          COALESCE({seguro_date_sql('fecha_vencimiento', 's')}, {seguro_date_sql('fecha_efecto', 's')}) AS fecha,
+          CASE WHEN COALESCE(s.prima_total, s.prima_neta, 0) > 0 THEN printf('%.2f €', COALESCE(s.prima_total, s.prima_neta, 0)) ELSE '' END AS valor
+        FROM seguros s
+        LEFT JOIN clientes c ON c.id = s.cliente_id
+        WHERE s.empresa_id IN ({placeholders})
+          AND LOWER(COALESCE(TRIM(s.compania), '')) != 'sin seguro'
+        ORDER BY COALESCE(DATE({seguro_date_sql('fecha_vencimiento', 's')}), DATE({seguro_date_sql('fecha_efecto', 's')}), DATE(s.updated_at), DATE(s.created_at)) ASC
+        LIMIT 16
+        """,
+        empresa_ids,
+    ).fetchall()
+
+    financiacion_rows = conn.execute(
+        f"""
+        SELECT *
+        FROM (
+          SELECT
+            af.cliente1_id AS cliente_id,
+            COALESCE(NULLIF(TRIM(af.cliente1_nombre), ''), NULLIF(TRIM(af.cliente2_nombre), ''), '') AS titulo,
+            'Asesoramiento financiero' AS subtitulo,
+            COALESCE(af.estado, 'Pendiente') AS estado,
+            af.fecha AS fecha,
+            CASE WHEN COALESCE(af.ingresos_conjuntos, 0) > 0 THEN printf('%.2f €', af.ingresos_conjuntos) ELSE '' END AS valor,
+            1 AS sort_group
+          FROM asesoramientos_financiacion af
+          WHERE af.empresa_id IN ({placeholders})
+            AND LOWER(COALESCE(af.estado, '')) NOT IN ('firmada', 'cerrado', 'cerrada', 'cancelado', 'cancelada', 'rechazado', 'rechazada')
+          UNION ALL
+          SELECT
+            h.cliente_id,
+            COALESCE(NULLIF(TRIM(h.cliente), ''), c.nombre, '') AS titulo,
+            COALESCE(NULLIF(TRIM(h.banco), ''), 'Hipoteca') AS subtitulo,
+            COALESCE(h.estado, 'Firmada') AS estado,
+            h.fecha_firma AS fecha,
+            CASE WHEN COALESCE(h.comision, h.comision_modernia, 0) > 0 THEN printf('%.2f €', COALESCE(h.comision, h.comision_modernia, 0)) ELSE '' END AS valor,
+            2 AS sort_group
+          FROM hipotecas h
+          LEFT JOIN clientes c ON c.id = h.cliente_id
+          WHERE h.empresa_id IN ({placeholders})
+        )
+        ORDER BY sort_group ASC, DATE(COALESCE(fecha, '9999-12-31')) DESC, titulo COLLATE NOCASE ASC
+        LIMIT 16
+        """,
+        [*empresa_ids, *empresa_ids],
+    ).fetchall()
+
+    inmobiliaria_rows = conn.execute(
+        f"""
+        SELECT *
+        FROM (
+          SELECT
+            '' AS cliente_id,
+            COALESCE(NULLIF(TRIM(c.direccion), ''), 'Captación') AS titulo,
+            COALESCE(NULLIF(TRIM(c.zona), ''), 'Sin zona') AS subtitulo,
+            COALESCE(c.etapa, 'Captación') AS estado,
+            COALESCE(c.fecha_contacto, c.updated_at, c.created_at) AS fecha,
+            CASE WHEN COALESCE(c.precio_objetivo, 0) > 0 THEN printf('%.2f €', c.precio_objetivo) ELSE '' END AS valor,
+            1 AS sort_group
+          FROM captaciones c
+          WHERE c.empresa_id IN ({placeholders})
+            AND LOWER(COALESCE(c.etapa, '')) NOT IN ('cerrado negativamente', 'vendido', 'alquiler')
+          UNION ALL
+          SELECT
+            COALESCE(o.contraparte1_id, o.propietario1_id, '') AS cliente_id,
+            COALESCE(NULLIF(TRIM(o.direccion), ''), 'Compraventa') AS titulo,
+            COALESCE(NULLIF(TRIM(o.tipo_operacion), ''), 'Operación') AS subtitulo,
+            COALESCE(o.estado, 'Cerrada') AS estado,
+            COALESCE(o.fecha_escritura, o.fecha_operacion, o.fecha_contrato, o.fecha_propuesta, '') AS fecha,
+            CASE WHEN COALESCE(o.precio_escritura, o.precio_contrato, o.precio_propuesta, 0) > 0 THEN printf('%.2f €', COALESCE(o.precio_escritura, o.precio_contrato, o.precio_propuesta, 0)) ELSE '' END AS valor,
+            2 AS sort_group
+          FROM operaciones_inmobiliarias o
+          WHERE o.empresa_id IN ({placeholders})
+          UNION ALL
+          SELECT
+            d.cliente_id,
+            COALESCE(NULLIF(TRIM(i.direccion), ''), 'Visita') AS titulo,
+            COALESCE(c.nombre, 'Sin demanda') AS subtitulo,
+            COALESCE(v.estado, 'Pendiente') AS estado,
+            v.fecha || CASE WHEN COALESCE(v.hora, '') <> '' THEN ' ' || v.hora ELSE '' END AS fecha,
+            '' AS valor,
+            3 AS sort_group
+          FROM visitas v
+          LEFT JOIN inmuebles i ON i.id = v.inmueble_id
+          LEFT JOIN demandas d ON d.id = v.demanda_id
+          LEFT JOIN clientes c ON c.id = d.cliente_id
+          WHERE v.empresa_id IN ({placeholders})
+            AND v.fecha IS NOT NULL
+            AND DATE(v.fecha) >= DATE(?)
+        )
+        ORDER BY sort_group ASC, DATE(SUBSTR(COALESCE(fecha, '9999-12-31'), 1, 10)) DESC, titulo COLLATE NOCASE ASC
+        LIMIT 16
+        """,
+        [*empresa_ids, *empresa_ids, *empresa_ids, today],
+    ).fetchall()
+
+    return {
+        "gestoria": [dict(r) for r in gestoria_rows],
+        "seguros": [dict(r) for r in seguros_rows],
+        "financiacion": [dict(r) for r in financiacion_rows],
+        "inmobiliaria": [dict(r) for r in inmobiliaria_rows],
     }
 
 
@@ -24173,6 +24338,14 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "workspace_id requerido"}, status=400)
                 return
             json_response(self, fetch_workspace_inmo_overview(conn, workspace_id))
+            return
+
+        if path == "/api/workspace_service_desks":
+            workspace_id = params.get("workspace_id", [""])[0]
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            json_response(self, fetch_workspace_service_desks(conn, workspace_id))
             return
 
         if path == "/api/workspace_series":

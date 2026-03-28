@@ -1243,6 +1243,7 @@ const workspaceGestoriaOverview = document.getElementById("workspaceGestoriaOver
 const workspaceSegurosOverview = document.getElementById("workspaceSegurosOverview");
 const workspaceFinOverview = document.getElementById("workspaceFinOverview");
 const workspaceInmoOverview = document.getElementById("workspaceInmoOverview");
+const workspaceServiceDesks = document.getElementById("workspaceServiceDesks");
 const workspaceBillingSummary = document.getElementById("workspaceBillingSummary");
 const workspaceDocumentHub = document.getElementById("workspaceDocumentHub");
 const workspaceBillingForm = document.getElementById("workspaceBillingForm");
@@ -4369,6 +4370,93 @@ const renderWorkspaceInmoOverview = (payload = {}) => {
   `;
 };
 
+const renderWorkspaceServiceDesks = (payload = {}) => {
+  if (!workspaceServiceDesks) return;
+  const sections = [
+    {
+      key: "gestoria",
+      title: "Gestoría",
+      actionLabel: "Abrir CRM",
+      action: () => openGestoriaCrm(),
+      rows: Array.isArray(payload.gestoria) ? payload.gestoria : [],
+      empty: "Sin cola operativa en gestoría.",
+    },
+    {
+      key: "seguros",
+      title: "Seguros",
+      actionLabel: "Abrir CRM",
+      action: () => openSegurosCrm(),
+      rows: Array.isArray(payload.seguros) ? payload.seguros : [],
+      empty: "Sin cola operativa en seguros.",
+    },
+    {
+      key: "financiacion",
+      title: "Financiación",
+      actionLabel: "Abrir CRM",
+      action: () => openFinCrm(),
+      rows: Array.isArray(payload.financiacion) ? payload.financiacion : [],
+      empty: "Sin cola operativa en financiación.",
+    },
+    {
+      key: "inmobiliaria",
+      title: "Inmobiliaria",
+      actionLabel: "Abrir CRM",
+      action: () => openCrmInmobiliario(),
+      rows: Array.isArray(payload.inmobiliaria) ? payload.inmobiliaria : [],
+      empty: "Sin cola operativa en inmobiliaria.",
+    },
+  ];
+  const renderRow = (row = {}) => `
+    <div class="workspace-billing-row">
+      <div>
+        <strong>${row.titulo || row.cliente || row.direccion || row.nombre || "-"}</strong>
+        <div class="muted">${[row.subtitulo, row.estado, row.fecha].filter(Boolean).join(" · ") || row.tipo || "-"}</div>
+      </div>
+      <div class="workspace-billing-meta">
+        ${row.valor ? `<span>${row.valor}</span>` : ""}
+        ${row.cliente_id ? `<button type="button" class="secondary ghost" data-workspace-row-client="${row.cliente_id}">Cliente</button>` : ""}
+      </div>
+    </div>
+  `;
+  workspaceServiceDesks.innerHTML = `
+    <div class="workspace-gestoria-columns">
+      ${sections
+        .map(
+          (section) => `
+            <div class="workspace-gestoria-card">
+              <div class="section-head">
+                <div>
+                  <h4>${section.title}</h4>
+                  <p class="muted">${numberFormatter.format(section.rows.length)} elementos en cola</p>
+                </div>
+                <button type="button" class="secondary ghost" data-workspace-desk-open="${section.key}">${section.actionLabel}</button>
+              </div>
+              ${
+                section.rows.length
+                  ? `<div class="workspace-billing-list">${section.rows.map((row) => renderRow(row)).join("")}</div>`
+                  : `<p class="muted">${section.empty}</p>`
+              }
+            </div>
+          `
+        )
+        .join("")}
+    </div>
+  `;
+  workspaceServiceDesks.querySelectorAll("[data-workspace-row-client]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const clientId = button.dataset.workspaceRowClient || "";
+      if (clientId) openClienteDetail(clientId);
+    });
+  });
+  workspaceServiceDesks.querySelectorAll("[data-workspace-desk-open]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const key = button.dataset.workspaceDeskOpen || "";
+      const section = sections.find((item) => item.key === key);
+      if (section?.action) section.action();
+    });
+  });
+};
+
 const fillWorkspaceForm = (workspace = {}) => {
   if (!workspaceForm) return;
   ["id", "nombre", "slug", "estado", "plan", "descripcion", "logo_url", "primary_color", "accent_color"].forEach((field) => {
@@ -5981,7 +6069,7 @@ const renderWorkspaceDocumentHub = (data = {}) => {
 const loadWorkspaceDetail = async (workspaceId) => {
   if (!workspaceId) return;
   state.currentWorkspaceId = workspaceId;
-  const [detail, billing, docs, billingRows, budgetRows, collections, remittances, workspaceClients, health, gestoriaOverview, segurosOverview, finOverview, inmoOverview, series, inbox, portal, portalRequests, automations, automationLogs, timeRows, fincasCommunities, fincasIncidents, fincasProviders, fincasMeetings] = await Promise.all([
+  const [detail, billing, docs, billingRows, budgetRows, collections, remittances, workspaceClients, health, gestoriaOverview, segurosOverview, finOverview, inmoOverview, serviceDesks, series, inbox, portal, portalRequests, automations, automationLogs, timeRows, fincasCommunities, fincasIncidents, fincasProviders, fincasMeetings] = await Promise.all([
     api(`/api/workspace_detail?id=${encodeURIComponent(workspaceId)}`),
     api(`/api/workspace_billing_summary?workspace_id=${encodeURIComponent(workspaceId)}`),
     api(`/api/workspace_document_hub?workspace_id=${encodeURIComponent(workspaceId)}`),
@@ -5995,6 +6083,7 @@ const loadWorkspaceDetail = async (workspaceId) => {
     api(`/api/workspace_seguros_overview?workspace_id=${encodeURIComponent(workspaceId)}`),
     api(`/api/workspace_fin_overview?workspace_id=${encodeURIComponent(workspaceId)}`),
     api(`/api/workspace_inmo_overview?workspace_id=${encodeURIComponent(workspaceId)}`),
+    api(`/api/workspace_service_desks?workspace_id=${encodeURIComponent(workspaceId)}`),
     api(`/api/workspace_series?workspace_id=${encodeURIComponent(workspaceId)}`),
     api(`/api/workspace_inbox?workspace_id=${encodeURIComponent(workspaceId)}`),
     api(`/api/workspace_portal?workspace_id=${encodeURIComponent(workspaceId)}`),
@@ -6027,6 +6116,7 @@ const loadWorkspaceDetail = async (workspaceId) => {
   renderWorkspaceSegurosOverview(segurosOverview || {});
   renderWorkspaceFinOverview(finOverview || {});
   renderWorkspaceInmoOverview(inmoOverview || {});
+  renderWorkspaceServiceDesks(serviceDesks || {});
   fillWorkspaceBillingForm();
   renderWorkspaceBudgetList(budgetRows.rows || []);
   fillWorkspaceBudgetForm();
@@ -6106,6 +6196,7 @@ const loadWorkspaceCentral = async () => {
     renderWorkspaceSegurosOverview({});
     renderWorkspaceFinOverview({});
     renderWorkspaceInmoOverview({});
+    renderWorkspaceServiceDesks({});
     renderWorkspaceCollectionsList([]);
     fillWorkspaceBillingForm();
     fillWorkspaceCollectionsForm();
@@ -28666,6 +28757,7 @@ if (workspaceNewBtn) {
     renderWorkspaceSegurosOverview({});
     renderWorkspaceFinOverview({});
     renderWorkspaceInmoOverview({});
+    renderWorkspaceServiceDesks({});
     renderWorkspaceBudgetList([]);
     syncWorkspaceClientOptions([]);
     fillWorkspaceBillingForm();
