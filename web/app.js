@@ -3715,14 +3715,13 @@ const updateWorkspaceEntryChrome = () => {
   const workspaceName = getWorkspaceDisplayName(
     workspaceSource || "Workspace"
   );
-  const companyLabel = getWorkspaceCompanyContextLabel();
   if (holdingTitle) {
     holdingTitle.textContent = mode === "tenant" ? `Workspace ${workspaceName}` : "Gestión de workspaces";
   }
   if (holdingSubtitle) {
     holdingSubtitle.textContent =
       mode === "tenant"
-        ? `${companyLabel} trabaja dentro del workspace ${workspaceName}. Todo lo operativo del grupo se organiza desde aquí.`
+        ? `Todo lo operativo de ${workspaceName} se organiza desde este workspace por contenedores de servicio.`
         : "Administra workspaces de LIV, módulos activos, branding y estructura de clientes.";
   }
   if (holdingBackBtn) {
@@ -3745,6 +3744,27 @@ const updateWorkspaceEntryChrome = () => {
 const setWorkspaceCompanyContext = (companyId = "", options = {}) => {
   const { rerenderForms = true, reloadScopedPanels = true } = options;
   const companies = state.currentWorkspaceDetail?.companies || [];
+  if ((state.currentWorkspaceEntryMode || "platform") === "tenant") {
+    state.currentWorkspaceCompanyId = "";
+    state.currentWorkspaceCompanyName = "";
+    renderWorkspaceCompanySwitcher([]);
+    renderWorkspaceCompanies(companies);
+    renderWorkspaceCompanyScopedData();
+    if (rerenderForms) {
+      fillWorkspaceBillingForm();
+      fillWorkspaceBudgetForm();
+      fillWorkspaceRemittancesForm();
+      fillWorkspaceInboxForm();
+      fillWorkspaceSeriesForm();
+      fillWorkspaceTimeForm();
+      fillWorkspaceFincasCommunityForm();
+      fillWorkspaceFincasProviderForm();
+    }
+    if (reloadScopedPanels) {
+      loadWorkspaceCompanyScopedPanels();
+    }
+    return;
+  }
   const selected =
     companies.find((row) => String(row.id || "") === String(companyId || ""))
     || companies[0]
@@ -3769,8 +3789,14 @@ const setWorkspaceCompanyContext = (companyId = "", options = {}) => {
   }
 };
 
-const getWorkspaceCompanyFilter = () => String(state.currentWorkspaceCompanyId || "").trim();
-const getWorkspaceCompanyContextLabel = () => state.currentWorkspaceCompanyName || "Empresa activa";
+const getWorkspaceCompanyFilter = () =>
+  (state.currentWorkspaceEntryMode || "platform") === "tenant"
+    ? ""
+    : String(state.currentWorkspaceCompanyId || "").trim();
+const getWorkspaceCompanyContextLabel = () =>
+  (state.currentWorkspaceEntryMode || "platform") === "tenant"
+    ? getWorkspaceDisplayName(state.currentWorkspaceName || state.currentWorkspaceTarget || "modernia")
+    : (state.currentWorkspaceCompanyName || "Empresa activa");
 
 const filterWorkspaceRowsByCompany = (rows = [], field = "empresa_id") => {
   const companyId = getWorkspaceCompanyFilter();
@@ -3856,6 +3882,11 @@ const loadWorkspaceCompanyScopedPanels = async () => {
 
 const renderWorkspaceCompanySwitcher = (rows = []) => {
   if (!workspaceCompanySwitcher) return;
+  if ((state.currentWorkspaceEntryMode || "platform") === "tenant") {
+    workspaceCompanySwitcher.innerHTML = "";
+    workspaceCompanySwitcher.classList.add("hidden");
+    return;
+  }
   const companies = Array.isArray(rows) ? rows : [];
   if (!companies.length) {
     workspaceCompanySwitcher.innerHTML = "";
@@ -5017,12 +5048,7 @@ const renderWorkspaceLauncher = (workspace = {}, modules = []) => {
     return;
   }
   const enabledKeys = new Set(enabled.map((row) => row.modulo_key));
-  const companyLabel = getWorkspaceCompanyContextLabel();
   workspaceLauncher.innerHTML = `
-    <div class="workspace-context-strip">
-      <strong>Empresa en foco: ${companyLabel}</strong>
-      <span class="muted">El workspace se organiza por áreas de servicio. Entra en cada contenedor para trabajar con esa línea del grupo.</span>
-    </div>
     <div class="workspace-home-grid">
       ${WORKSPACE_HOME_CONTAINERS
         .map((container) => {
@@ -6658,9 +6684,10 @@ const loadWorkspaceDetail = async (workspaceId) => {
     state.currentWorkspaceTarget = detail.workspace?.slug || detail.workspace?.nombre || "";
   }
   const companies = detail.companies || [];
+  const tenantOperationalMode = (state.currentWorkspaceEntryMode || "platform") === "tenant";
   const companyMatch = companies.find((row) => String(row.id || "") === String(state.currentWorkspaceCompanyId || ""));
-  state.currentWorkspaceCompanyId = companyMatch?.id || companies[0]?.id || "";
-  state.currentWorkspaceCompanyName = companyMatch?.nombre || companies[0]?.nombre || "";
+  state.currentWorkspaceCompanyId = tenantOperationalMode ? "" : (companyMatch?.id || companies[0]?.id || "");
+  state.currentWorkspaceCompanyName = tenantOperationalMode ? "" : (companyMatch?.nombre || companies[0]?.nombre || "");
   const companyQuery = state.currentWorkspaceCompanyId
     ? `&empresa_id=${encodeURIComponent(state.currentWorkspaceCompanyId)}`
     : "";
