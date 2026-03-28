@@ -199,6 +199,104 @@
         "Ejercicio, ajuste, soporte, criterio y revisión."
       ]
     },
+    "itp_ajd": {
+      "title": "ITP y AJD",
+      "summary": "Operaciones sujetas a transmisiones patrimoniales onerosas, actos jurídicos documentados y modalidades conexas.",
+      "keywords": ["itp", "ajd", "transmisiones patrimoniales", "actos juridicos documentados", "modelo 600"],
+      "legal_basis": [
+        "Normativa reguladora del Impuesto sobre Transmisiones Patrimoniales y Actos Jurídicos Documentados.",
+        "Normativa autonómica y criterios aplicables según territorio."
+      ],
+      "mandatory_docs": [
+        "Escritura o contrato, autoliquidación, justificantes y documentación del hecho imponible."
+      ],
+      "checklist": [
+        "Identificar modalidad, hecho imponible y territorio.",
+        "Vincular escritura o contrato al expediente.",
+        "Controlar plazo de liquidación y justificantes."
+      ],
+      "editable_fields": [
+        "Hecho imponible, fecha, territorio, base, cuota y observaciones."
+      ],
+      "clause_alerts": [
+        "Confundir TPO, AJD y exenciones aplicables.",
+        "No revisar criterio autonómico concreto."
+      ],
+      "warnings": [
+        "Este impuesto tiene fuerte componente territorial y documental."
+      ],
+      "drafting_help": [
+        "La ficha debe separar modalidad, territorio, soporte y plazo de presentación."
+      ],
+      "variable_blocks": [
+        "Modalidad, hecho imponible, territorio, base, cuota y soporte."
+      ]
+    },
+    "isd": {
+      "title": "Sucesiones y Donaciones",
+      "summary": "Gestión de herencias, donaciones, reducciones, plazos y documentación sucesoria o transmisiva.",
+      "keywords": ["sucesiones", "donaciones", "isd", "herencia", "donacion", "modelo 650", "modelo 651"],
+      "legal_basis": [
+        "Normativa del Impuesto sobre Sucesiones y Donaciones.",
+        "Normativa autonómica y beneficios fiscales aplicables."
+      ],
+      "mandatory_docs": [
+        "Certificados, testamento, escritura, inventario y autoliquidación."
+      ],
+      "checklist": [
+        "Identificar hecho imponible y territorio.",
+        "Vincular documentación sucesoria o donacional completa.",
+        "Controlar plazos y beneficios fiscales."
+      ],
+      "editable_fields": [
+        "Causante/donante, adquirente, bienes, fecha, territorio y observaciones."
+      ],
+      "clause_alerts": [
+        "No revisar reducciones o beneficios autonómicos aplicables."
+      ],
+      "warnings": [
+        "El soporte documental y el territorio son determinantes en este impuesto."
+      ],
+      "drafting_help": [
+        "La ficha debe reunir documentación del hecho imponible, bienes, beneficiarios y criterio territorial."
+      ],
+      "variable_blocks": [
+        "Hecho imponible, sujetos, bienes, territorio y soporte."
+      ]
+    },
+    "no_residentes": {
+      "title": "No residentes",
+      "summary": "Obligaciones fiscales y documentales de personas o entidades no residentes en operaciones y rentas con nexo en España.",
+      "keywords": ["no residentes", "irnr", "no residente", "modelo 210", "modelo 211"],
+      "legal_basis": [
+        "Normativa del Impuesto sobre la Renta de no Residentes.",
+        "Convenios para evitar la doble imposición cuando proceda."
+      ],
+      "mandatory_docs": [
+        "Documentación identificativa, residencia fiscal, operación y autoliquidación."
+      ],
+      "checklist": [
+        "Identificar residencia fiscal real.",
+        "Vincular operación, retención o autoliquidación al expediente.",
+        "Comprobar si hay convenio aplicable."
+      ],
+      "editable_fields": [
+        "Contribuyente, residencia, operación, modelo, retención y observaciones."
+      ],
+      "clause_alerts": [
+        "Aplicar criterio de residente sin soporte.",
+        "No revisar si existe convenio internacional aplicable."
+      ],
+      "warnings": [
+        "No residentes exige lectura fiscal internacional básica y soporte de residencia."
+      ],
+      "drafting_help": [
+        "La ficha debe identificar residencia fiscal, operación, modelo y posible convenio aplicable."
+      ],
+      "variable_blocks": [
+        "Residencia, operación, modelo, convenio y soporte."
+      ]
+    },
     "mercantil_societario": {
       "title": "Mercantil y societario",
       "summary": "Constitución, órganos sociales, acuerdos, poderes, libros societarios y estructura de la sociedad.",
@@ -261,6 +359,38 @@
       ],
       "variable_blocks": [
         "Empresa, trabajador, actuación, fecha y soporte documental."
+      ]
+    },
+    "despidos_extinciones": {
+      "title": "Despidos y extinciones",
+      "summary": "Extinción de la relación laboral, cartas, indemnización, finiquito y trazabilidad del expediente.",
+      "keywords": ["despido", "extincion", "finiquito", "indemnizacion", "carta despido"],
+      "legal_basis": [
+        "Estatuto de los Trabajadores.",
+        "Normativa procesal y laboral aplicable al tipo de extinción."
+      ],
+      "mandatory_docs": [
+        "Carta, cálculo, finiquito, comunicaciones y soporte del motivo."
+      ],
+      "checklist": [
+        "Identificar causa y fecha.",
+        "Vincular cálculo e indemnización a soporte.",
+        "Trazar entrega de documentación y siguientes pasos."
+      ],
+      "editable_fields": [
+        "Empresa, trabajador, causa, fecha, indemnización y observaciones."
+      ],
+      "clause_alerts": [
+        "Extinciones sin soporte documental suficiente o sin cálculo trazado."
+      ],
+      "warnings": [
+        "Los despidos son especialmente sensibles y requieren expediente muy ordenado."
+      ],
+      "drafting_help": [
+        "La ficha debe distinguir causa, documentación soporte, cálculo y estado del expediente."
+      ],
+      "variable_blocks": [
+        "Trabajador, causa, fecha, cálculo, soporte y actuaciones."
       ]
     },
     "contratacion_laboral": {
@@ -356,6 +486,102 @@
       ],
       "variable_blocks": [
         "Organismo, trámite, sujeto afectado, plazo y soporte."
+      ]
+    },
+    "autonomos": {
+      "title": "Autónomos",
+      "summary": "Altas, bajas, obligaciones censales y de cotización, cobertura y seguimiento integral del trabajador autónomo.",
+      "keywords": ["autonomo", "reta", "alta autonomo", "baja autonomo", "modelo 036", "modelo 037"],
+      "legal_basis": [
+        "Normativa tributaria y de Seguridad Social aplicable al trabajador autónomo."
+      ],
+      "mandatory_docs": [
+        "Alta censal, alta RETA, variaciones, justificantes y obligaciones periódicas."
+      ],
+      "checklist": [
+        "Vincular frente fiscal y frente de Seguridad Social.",
+        "Controlar fechas de alta/baja y regímenes aplicables.",
+        "Separar obligaciones recurrentes y trámites puntuales."
+      ],
+      "editable_fields": [
+        "Titular, fecha, régimen, modelos, cotización y observaciones."
+      ],
+      "clause_alerts": [
+        "Tratar el alta autónomo solo como trámite fiscal o solo como trámite RETA."
+      ],
+      "warnings": [
+        "Autónomos exige lectura conjunta fiscal, laboral y de Seguridad Social."
+      ],
+      "drafting_help": [
+        "La ficha debe ligar censal, RETA, cotización y obligaciones periódicas."
+      ],
+      "variable_blocks": [
+        "Titular, alta/baja, censal, RETA, cotización y seguimiento."
+      ]
+    },
+    "inspeccion_sanciones": {
+      "title": "Inspección y sancionador",
+      "summary": "Actuaciones inspectoras, expedientes sancionadores y defensa documental en ámbitos fiscal, laboral o de Seguridad Social.",
+      "keywords": ["inspeccion", "sancion", "acta inspeccion", "expediente sancionador", "requerimiento"],
+      "legal_basis": [
+        "Ley General Tributaria y normativa procedimental tributaria.",
+        "Normativa laboral y de Seguridad Social sobre actuaciones inspectoras, según el caso."
+      ],
+      "mandatory_docs": [
+        "Actas, requerimientos, alegaciones, resoluciones y soporte documental."
+      ],
+      "checklist": [
+        "Identificar procedimiento, organismo y plazo.",
+        "Vincular alegaciones y prueba documental.",
+        "Trazar estado del expediente y estrategia seguida."
+      ],
+      "editable_fields": [
+        "Organismo, procedimiento, plazo, alegaciones, prueba y observaciones."
+      ],
+      "clause_alerts": [
+        "No distinguir expediente inspector de sancionador.",
+        "Responder sin soporte documental o sin estrategia clara."
+      ],
+      "warnings": [
+        "La defensa del expediente exige trazabilidad cronológica y documental muy estricta."
+      ],
+      "drafting_help": [
+        "Las notas deben recoger organismo, fase, plazo, documentación, alegaciones y próximo hito."
+      ],
+      "variable_blocks": [
+        "Organismo, expediente, plazo, prueba, alegaciones y estado."
+      ]
+    },
+    "prl": {
+      "title": "Prevención de riesgos laborales",
+      "summary": "Obligaciones preventivas, documentación, vigilancia y coordinación ligada a la empresa y sus trabajadores.",
+      "keywords": ["prl", "prevencion riesgos laborales", "vigilancia salud", "evaluacion riesgos", "coordinacion actividades"],
+      "legal_basis": [
+        "Ley de Prevención de Riesgos Laborales.",
+        "Normativa reglamentaria preventiva aplicable."
+      ],
+      "mandatory_docs": [
+        "Evaluación, planificación, formación, vigilancia y coordinación cuando proceda."
+      ],
+      "checklist": [
+        "Vincular empresa, actividad y documentación preventiva.",
+        "Controlar revisiones y soportes de formación/información.",
+        "Separar PRL de otras obligaciones laborales cuando proceda."
+      ],
+      "editable_fields": [
+        "Empresa, actividad, documentos preventivos, revisiones y observaciones."
+      ],
+      "clause_alerts": [
+        "Tratar la PRL como mero check sin soporte documental real."
+      ],
+      "warnings": [
+        "La prevención requiere trazabilidad propia dentro del expediente del cliente."
+      ],
+      "drafting_help": [
+        "La ficha debe identificar documentos preventivos, fechas de revisión y obligaciones pendientes."
+      ],
+      "variable_blocks": [
+        "Empresa, actividad, PRL, revisiones y soporte."
       ]
     },
     "contabilidad_mercantil": {
