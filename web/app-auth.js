@@ -152,6 +152,11 @@
         await deps.init();
         deps.state.appInitialized = true;
       }
+      const targetUser = String(data?.user?.usuario || "").trim().toLowerCase();
+      if (targetUser === "workspace") {
+        window.location.assign("?holding=1&mode=tenant&workspace=modernia");
+        return;
+      }
     } catch {
       if (deps.authLoginStatus) deps.authLoginStatus.textContent = "Error de conexión al iniciar sesión.";
     }
