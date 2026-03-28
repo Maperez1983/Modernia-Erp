@@ -9333,6 +9333,208 @@ INMO_ACTION_RESULT_OPTIONS = {
 }
 
 
+LEGAL_COPILOT_TOPICS = {
+    "encargo_venta": {
+        "title": "Encargo de venta",
+        "summary": "Documento base para formalizar la gestión comercial del inmueble antes de pasar a reserva o venta.",
+        "checklist": [
+            "Identificación completa de los propietarios o representantes.",
+            "Identificación del inmueble y título sobre el que actúan.",
+            "Precio de salida, honorarios y duración del encargo.",
+            "Tipo de encargo: exclusiva o no exclusiva.",
+            "Régimen de prórrogas, revocación y firma de titulares.",
+        ],
+        "editable_fields": [
+            "Partes intervinientes.",
+            "Dirección, referencia y datos del inmueble.",
+            "Precio, honorarios, duración y exclusiva.",
+            "Cláusulas variables negociadas con el cliente.",
+        ],
+        "warnings": [
+            "Revisar representación cuando firman herederos, cotitulares o apoderados.",
+            "Evitar penalizaciones automáticas mal equilibradas.",
+            "La revisión jurídica final sigue siendo necesaria antes de uso masivo.",
+        ],
+        "next_documents": ["Hoja de visita", "Ficha venta", "Nota precio", "Reserva / arras"],
+    },
+    "encargo_alquiler": {
+        "title": "Encargo de alquiler",
+        "summary": "Formaliza la comercialización del inmueble para alquiler y prepara la salida documental del arrendamiento.",
+        "checklist": [
+            "Titularidad del arrendador y datos del inmueble.",
+            "Renta objetivo, honorarios y duración del encargo.",
+            "Distribución de gastos y alcance del servicio comercial.",
+            "Inventario y situación de ocupación del inmueble.",
+        ],
+        "editable_fields": [
+            "Renta, fianza, duración del encargo y honorarios.",
+            "Condiciones comerciales pactadas.",
+        ],
+        "warnings": [
+            "Separar claramente encargo comercial y contrato de arrendamiento.",
+            "Controlar quién asume gastos de gestión en alquiler de vivienda habitual.",
+        ],
+        "next_documents": ["DIA alquiler", "Propuesta de alquiler", "Contrato privado de arrendamiento"],
+    },
+    "propuesta_compra": {
+        "title": "Propuesta / promesa de compra",
+        "summary": "Documento de negociación previo a la reserva o a la aceptación por la propiedad.",
+        "checklist": [
+            "Identificación del comprador y del inmueble.",
+            "Importe ofertado y forma de pago.",
+            "Plazo de aceptación.",
+            "Condiciones suspensivas, financiación y señal si aplica.",
+        ],
+        "editable_fields": [
+            "Precio ofertado, plazos y condiciones.",
+            "Necesidad de financiación.",
+            "Fecha límite de respuesta.",
+        ],
+        "warnings": [
+            "Diferenciar propuesta, promesa, reserva y arras para no mezclar efectos.",
+            "No avanzar a reservado sin aceptación clara de la propiedad.",
+        ],
+        "next_documents": ["Aceptación de propuesta", "Reserva / arras", "Contrato privado de compraventa"],
+    },
+    "propuesta_alquiler": {
+        "title": "Propuesta de alquiler",
+        "summary": "Documento previo al cierre del alquiler cuando todavía no existe contrato privado firmado.",
+        "checklist": [
+            "Datos del inquilino y del inmueble.",
+            "Renta, duración y fecha prevista.",
+            "Fianza, garantías adicionales y solvencia.",
+        ],
+        "editable_fields": [
+            "Renta, garantías, duración y observaciones.",
+        ],
+        "warnings": [
+            "No usar esta propuesta como sustituto del contrato privado de arrendamiento.",
+        ],
+        "next_documents": ["Aceptación de propuesta de alquiler", "Contrato privado de arrendamiento"],
+    },
+    "reserva_arras": {
+        "title": "Reserva / arras",
+        "summary": "Documento puente entre la aceptación de la propuesta y el contrato privado o la escritura.",
+        "checklist": [
+            "Partes, inmueble y precio final pactado.",
+            "Importe entregado y destino de la cantidad.",
+            "Plazo para contrato privado o escritura.",
+            "Consecuencias del incumplimiento.",
+        ],
+        "editable_fields": [
+            "Importe de la señal o arras.",
+            "Plazos y forma de pago restante.",
+            "Condiciones suspensivas y penalización pactada.",
+        ],
+        "warnings": [
+            "Distinguir si son arras confirmatorias, penitenciales o penales.",
+            "No mezclarla con una simple propuesta si ya produce obligaciones más fuertes.",
+        ],
+        "next_documents": ["Contrato privado de compraventa", "Escritura"],
+    },
+    "contrato_privado_compraventa": {
+        "title": "Contrato privado de compraventa",
+        "summary": "Documento contractual principal antes de escritura, con efectos más intensos que propuesta o reserva.",
+        "checklist": [
+            "Identificación completa de todas las partes.",
+            "Título, cargas, precio y calendario de pagos.",
+            "Entrega de posesión, gastos, saneamiento y documentación.",
+            "Condiciones suspensivas, financiación y arras si siguen vigentes.",
+        ],
+        "editable_fields": [
+            "Precio, pagos, fechas, cargas, posesión y pactos especiales.",
+        ],
+        "warnings": [
+            "Documento de riesgo jurídico superior: requiere plantilla muy revisada.",
+            "Revisar cargas, representación y coherencia con reserva/arras previas.",
+        ],
+        "next_documents": ["Escritura", "Recibos o anexos de entrega"],
+    },
+    "contrato_privado_arrendamiento": {
+        "title": "Contrato privado de arrendamiento",
+        "summary": "Contrato principal del alquiler con renta, duración, fianza y obligaciones de las partes.",
+        "checklist": [
+            "Identificación de arrendador e inquilino.",
+            "Objeto arrendado, renta, duración, prórrogas y gastos.",
+            "Fianza, garantías adicionales e inventario si procede.",
+            "Estado del inmueble y llaves.",
+        ],
+        "editable_fields": [
+            "Renta, duración, gastos, inventario y garantías.",
+        ],
+        "warnings": [
+            "Separar cláusulas imperativas de las libremente negociables.",
+            "Controlar gastos de gestión y formalización según el tipo de arrendamiento.",
+        ],
+        "next_documents": ["Inventario", "Entrega de llaves", "Recibos de renta"],
+    },
+    "consumo_andalucia": {
+        "title": "Consumo Andalucía",
+        "summary": "Bloque informativo para controlar qué documentación de consumo debe acompañar la comercialización profesional.",
+        "checklist": [
+            "Ficha informativa de venta si procede.",
+            "Nota explicativa del precio y formas de pago.",
+            "DIA de alquiler en arrendamientos.",
+            "Justificante de entrega o trazabilidad documental.",
+        ],
+        "editable_fields": [
+            "Datos del inmueble, precio, gastos y condiciones concretas.",
+        ],
+        "warnings": [
+            "No confundir documentación comercial con documentación de consumo.",
+            "La entrega de información debe quedar trazada en el expediente.",
+        ],
+        "next_documents": ["Ficha venta", "Nota precio", "DIA alquiler"],
+    },
+    "visitas": {
+        "title": "Hoja de visita",
+        "summary": "Documento comercial de control de visitas, útil para trazabilidad del comprador y protección del expediente.",
+        "checklist": [
+            "Datos del visitante y del inmueble.",
+            "Fecha, asesor y observaciones de la visita.",
+            "Firma del visitante si se quiere reforzar trazabilidad.",
+        ],
+        "editable_fields": [
+            "Visitante, fecha, observaciones y condiciones puntuales.",
+        ],
+        "warnings": [
+            "No sustituye reserva, propuesta ni contrato.",
+            "Debe quedar vinculada al inmueble y al cliente para sostener la negociación posterior.",
+        ],
+        "next_documents": ["Propuesta / promesa", "Reserva / arras"],
+    },
+}
+
+
+def resolve_legal_copilot_topic(area, topic, question):
+    if str(area or "").strip().lower() != "inmobiliaria":
+        return None, None
+    topic_key = str(topic or "").strip()
+    if topic_key in LEGAL_COPILOT_TOPICS:
+        return topic_key, LEGAL_COPILOT_TOPICS[topic_key]
+    haystack = normalize_lookup_text(question or "").lower()
+    keyword_map = [
+        ("encargo alquiler", "encargo_alquiler"),
+        ("encargo venta", "encargo_venta"),
+        ("propuesta alquiler", "propuesta_alquiler"),
+        ("propuesta compra", "propuesta_compra"),
+        ("promesa compra", "propuesta_compra"),
+        ("arras", "reserva_arras"),
+        ("reserva", "reserva_arras"),
+        ("contrato privado compraventa", "contrato_privado_compraventa"),
+        ("compraventa", "contrato_privado_compraventa"),
+        ("contrato privado arrendamiento", "contrato_privado_arrendamiento"),
+        ("arrendamiento", "contrato_privado_arrendamiento"),
+        ("consumo", "consumo_andalucia"),
+        ("andalucia", "consumo_andalucia"),
+        ("visita", "visitas"),
+    ]
+    for needle, candidate in keyword_map:
+        if needle in haystack:
+            return candidate, LEGAL_COPILOT_TOPICS[candidate]
+    return "encargo_venta", LEGAL_COPILOT_TOPICS["encargo_venta"]
+
+
 def validate_inmo_action_result(action_type, estado, resultado):
     normalized_type = normalize_inmo_action_type(action_type)
     if normalized_type not in INMO_ACTION_RESULT_OPTIONS:
@@ -16122,6 +16324,8 @@ class Handler(BaseHTTPRequestHandler):
             return "gestoria"
         if path.startswith("/api/fin_") or path.startswith("/api/hipotecas"):
             return "financiaciones"
+        if path == "/api/legal_copilot":
+            return "inmobiliaria"
         if path.startswith("/api/capt") or path.startswith("/api/inmueble") or path.startswith("/api/demandas") or path.startswith("/api/visitas") or path.startswith("/api/compraventas"):
             return "inmobiliaria"
         if path in {"/api/acciones", "/api/acciones_update"}:
@@ -16284,6 +16488,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/fin_checklist_update",
             "/api/ai_seguros_copilot",
             "/api/ai_fin_copilot",
+            "/api/legal_copilot",
             "/api/s3_presign",
             "/api/s3_multipart_start",
             "/api/s3_multipart_presign",
@@ -21653,6 +21858,43 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": err}, status=400)
                 return
             json_response(self, {"output": output})
+            return
+        elif parsed.path == "/api/legal_copilot":
+            area = str(payload.get("area") or "inmobiliaria").strip().lower()
+            topic = str(payload.get("topic") or "").strip()
+            question = str(payload.get("question") or "").strip()
+            topic_key, topic_payload = resolve_legal_copilot_topic(area, topic, question)
+            if not topic_payload:
+                json_response(self, {"error": "Área legal no soportada"}, status=400)
+                return
+            response = {
+                "area": area,
+                "topic_key": topic_key,
+                "title": topic_payload["title"],
+                "summary": topic_payload["summary"],
+                "checklist": list(topic_payload.get("checklist") or []),
+                "editable_fields": list(topic_payload.get("editable_fields") or []),
+                "warnings": list(topic_payload.get("warnings") or []),
+                "next_documents": list(topic_payload.get("next_documents") or []),
+                "sources": [
+                    "Playbook legal inmobiliario interno de Modernia.",
+                    "Uso operativo orientado a plantillas, estados y documentación del CRM.",
+                    "No sustituye revisión jurídica final del despacho.",
+                ],
+            }
+            if question:
+                normalized = normalize_lookup_text(question).lower()
+                if "editable" in normalized or "rellenable" in normalized or "pdf" in normalized:
+                    response["editable_fields"] = list(response["editable_fields"]) + [
+                        "Las cláusulas genéricas deben quedar bloqueadas y los datos variables como campos editables.",
+                    ]
+                if "siguiente" in normalized or "despues" in normalized or "después" in normalized:
+                    response["summary"] += " La respuesta prioriza el siguiente documento lógico dentro del workflow."
+                if "riesgo" in normalized or "problem" in normalized or "clausula" in normalized or "cláusula" in normalized:
+                    response["warnings"] = list(response["warnings"]) + [
+                        "Revisar penalizaciones, prórrogas, representación y efectos económicos antes de activar la plantilla.",
+                    ]
+            json_response(self, response)
             return
         elif parsed.path == "/api/compraventas":
             try:

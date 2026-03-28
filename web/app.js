@@ -1983,6 +1983,13 @@ const crmViewAlquileres = document.getElementById("crmViewAlquileres");
 const crmViewCompraventas = document.getElementById("crmViewCompraventas");
 const crmViewDemandas = document.getElementById("crmViewDemandas");
 const crmViewVisitas = document.getElementById("crmViewVisitas");
+const crmViewLegal = document.getElementById("crmViewLegal");
+const inmoLegalCopilotForm = document.getElementById("inmoLegalCopilotForm");
+const inmoLegalTopic = document.getElementById("inmoLegalTopic");
+const inmoLegalQuestion = document.getElementById("inmoLegalQuestion");
+const inmoLegalAskBtn = document.getElementById("inmoLegalAskBtn");
+const inmoLegalStatus = document.getElementById("inmoLegalStatus");
+const inmoLegalResponse = document.getElementById("inmoLegalResponse");
 const crmCaptacionesTable = document.getElementById("crmCaptacionesTable");
 const crmCaptacionesInfo = document.getElementById("crmCaptacionesInfo");
 const crmInmueblesTable = document.getElementById("crmInmueblesTable");
@@ -12704,7 +12711,7 @@ const updateEstudioAltaTabs = () => {
 };
 
 const setCrmWorkspaceView = (view = "resumen") => {
-  const allowed = new Set(["resumen", "captaciones", "inmuebles", "alquileres", "compraventas", "demandas", "visitas"]);
+  const allowed = new Set(["resumen", "captaciones", "inmuebles", "alquileres", "compraventas", "demandas", "visitas", "legal"]);
   const nextView = allowed.has(view) ? view : "resumen";
   state.crmWorkspaceView = nextView;
 
@@ -12722,6 +12729,7 @@ const setCrmWorkspaceView = (view = "resumen") => {
     compraventas: crmViewCompraventas,
     demandas: crmViewDemandas,
     visitas: crmViewVisitas,
+    legal: crmViewLegal,
   };
   Object.entries(viewMap).forEach(([key, node]) => {
     if (node) {
@@ -12746,12 +12754,64 @@ const setCrmWorkspaceView = (view = "resumen") => {
     loadCrmDemandas();
   } else if (nextView === "visitas") {
     loadCrmVisitas();
+  } else if (nextView === "legal") {
+    if (inmoLegalResponse && !String(inmoLegalResponse.textContent || "").trim()) {
+      inmoLegalResponse.innerHTML = "<div class='muted'>Selecciona un tema o escribe una pregunta para obtener una guía operativa.</div>";
+    }
   } else {
     loadCrmCaptaciones();
     loadCrmInmuebles();
     loadCrmAlquileres();
     loadCrmCompraventas();
   }
+};
+
+const escapeHtml = (value) =>
+  String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+
+const renderInmoLegalCopilotResponse = (payload = {}) => {
+  if (!inmoLegalResponse) return;
+  const title = payload.title || "Respuesta legal";
+  const summary = payload.summary || "";
+  const checklist = Array.isArray(payload.checklist) ? payload.checklist : [];
+  const editableFields = Array.isArray(payload.editable_fields) ? payload.editable_fields : [];
+  const warnings = Array.isArray(payload.warnings) ? payload.warnings : [];
+  const nextDocs = Array.isArray(payload.next_documents) ? payload.next_documents : [];
+  const sections = [];
+  if (summary) {
+    sections.push(`<div class="crm-focus-link"><strong>${title}</strong><span>${summary}</span></div>`);
+  }
+  if (checklist.length) {
+    sections.push(
+      `<div class="crm-focus-link"><strong>Checklist</strong><span>${checklist.map((item) => escapeHtml(item)).join("<br>")}</span></div>`
+    );
+  }
+  if (editableFields.length) {
+    sections.push(
+      `<div class="crm-focus-link"><strong>Campos editables</strong><span>${editableFields.map((item) => escapeHtml(item)).join("<br>")}</span></div>`
+    );
+  }
+  if (warnings.length) {
+    sections.push(
+      `<div class="crm-focus-link"><strong>Alertas</strong><span>${warnings.map((item) => escapeHtml(item)).join("<br>")}</span></div>`
+    );
+  }
+  if (nextDocs.length) {
+    sections.push(
+      `<div class="crm-focus-link"><strong>Siguiente documentación</strong><span>${nextDocs.map((item) => escapeHtml(item)).join("<br>")}</span></div>`
+    );
+  }
+  if (Array.isArray(payload.sources) && payload.sources.length) {
+    sections.push(
+      `<div class="crm-focus-link"><strong>Base interna</strong><span>${payload.sources.map((item) => escapeHtml(item)).join("<br>")}</span></div>`
+    );
+  }
+  inmoLegalResponse.innerHTML = sections.join("") || "<div class='muted'>Sin respuesta disponible.</div>";
 };
 
 const goToEstudioAlta = (section = "compraventa") => {
@@ -27576,6 +27636,38 @@ if (crmWorkspaceTabs) {
     const btn = event.target.closest("[data-crm-view]");
     if (!btn) return;
     setCrmWorkspaceView(btn.dataset.crmView);
+  });
+}
+
+if (inmoLegalCopilotForm) {
+  inmoLegalCopilotForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (inmoLegalStatus) inmoLegalStatus.textContent = "Consultando...";
+    if (inmoLegalAskBtn) inmoLegalAskBtn.disabled = true;
+    try {
+      const response = await fetch("/api/legal_copilot", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({
+          area: "inmobiliaria",
+          topic: inmoLegalTopic ? inmoLegalTopic.value : "",
+          question: inmoLegalQuestion ? inmoLegalQuestion.value : "",
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok || data?.error) {
+        throw new Error(data?.error || `HTTP ${response.status}`);
+      }
+      renderInmoLegalCopilotResponse(data);
+      if (inmoLegalStatus) inmoLegalStatus.textContent = "Respuesta generada.";
+    } catch (error) {
+      if (inmoLegalStatus) {
+        inmoLegalStatus.textContent = error?.message || "No se pudo consultar el copiloto legal.";
+      }
+    } finally {
+      if (inmoLegalAskBtn) inmoLegalAskBtn.disabled = false;
+    }
   });
 }
 

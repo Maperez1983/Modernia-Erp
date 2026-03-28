@@ -5,7 +5,12 @@ from pathlib import Path
 from unittest.mock import patch
 
 from web import server
-from web.server import persist_generated_inmueble_pdf, sync_inmueble_stage_for_action
+from web.server import (
+    LEGAL_COPILOT_TOPICS,
+    persist_generated_inmueble_pdf,
+    resolve_legal_copilot_topic,
+    sync_inmueble_stage_for_action,
+)
 
 
 class InmobiliariaWorkflowDocsTests(unittest.TestCase):
@@ -148,6 +153,15 @@ class InmobiliariaWorkflowDocsTests(unittest.TestCase):
         self.assertEqual(inmueble["estado"], "Adquisición")
         self.assertEqual(captacion["etapa"], "Adquisición")
         self.assertEqual(captacion["situacion_comercial"], "Adquisición")
+
+    def test_resolve_legal_copilot_topic_supports_keywords(self):
+        topic_key, payload = resolve_legal_copilot_topic(
+            "inmobiliaria",
+            "",
+            "Que riesgos tiene el contrato privado de arrendamiento y qué documento va después",
+        )
+        self.assertEqual(topic_key, "contrato_privado_arrendamiento")
+        self.assertEqual(payload["title"], LEGAL_COPILOT_TOPICS["contrato_privado_arrendamiento"]["title"])
 
 
 if __name__ == "__main__":
