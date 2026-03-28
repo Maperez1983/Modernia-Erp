@@ -1171,6 +1171,7 @@ const state = {
   currentWorkspaceClientId: "",
   currentWorkspaceClientData: null,
   currentWorkspaceClients: [],
+  currentWorkspaceView: "overview",
   workspaceBillingRows: [],
   workspaceClientOptions: [],
   workspaceClientOptionMap: new Map(),
@@ -1221,6 +1222,7 @@ const holdingSection = document.getElementById("holdingSection");
 const holdingBackBtn = document.getElementById("holdingBackBtn");
 const holdingOrgChart = document.getElementById("holdingOrgChart");
 const workspaceKpis = document.getElementById("workspaceKpis");
+const workspaceViewTabs = document.getElementById("workspaceViewTabs");
 const workspaceHealthScore = document.getElementById("workspaceHealthScore");
 const workspaceChecklist = document.getElementById("workspaceChecklist");
 const workspaceModuleHealth = document.getElementById("workspaceModuleHealth");
@@ -1316,6 +1318,8 @@ const workspaceFincasMeetingForm = document.getElementById("workspaceFincasMeeti
 const workspaceFincasMeetingResetBtn = document.getElementById("workspaceFincasMeetingResetBtn");
 const workspaceFincasMeetingStatus = document.getElementById("workspaceFincasMeetingStatus");
 const workspaceFincasMeetingList = document.getElementById("workspaceFincasMeetingList");
+const workspaceViewPanels = Array.from(document.querySelectorAll("[data-workspace-view]"));
+const workspaceViewButtons = Array.from(document.querySelectorAll("[data-workspace-view-tab]"));
 const yearSelect = document.getElementById("yearSelect");
 const densityToggle = document.getElementById("densityToggle");
 const dbStatus = document.getElementById("dbStatus");
@@ -3553,59 +3557,89 @@ const WORKSPACE_CATEGORY_LABELS = {
   motor: "Motor",
 };
 
+const normalizeWorkspaceViewKey = (value = "") => {
+  const key = String(value || "").trim().toLowerCase();
+  if (["overview", "tenant", "clients", "operations", "finance", "backoffice", "fincas"].includes(key)) {
+    return key;
+  }
+  return "overview";
+};
+
+const setWorkspaceView = (view = "overview", options = {}) => {
+  const { scroll = false } = options;
+  const normalized = normalizeWorkspaceViewKey(view);
+  state.currentWorkspaceView = normalized;
+  workspaceViewButtons.forEach((button) => {
+    button.classList.toggle("active", (button.dataset.workspaceViewTab || "") === normalized);
+  });
+  workspaceViewPanels.forEach((panel) => {
+    panel.classList.toggle("hidden", (panel.dataset.workspaceView || "") !== normalized);
+  });
+  if (scroll && workspaceViewTabs) {
+    workspaceViewTabs.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+};
+
+const focusWorkspaceView = (view, element = null) => {
+  setWorkspaceView(view);
+  if (element && typeof element.scrollIntoView === "function") {
+    element.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+};
+
 const WORKSPACE_LAUNCHERS = {
   crm360: {
     label: "CRM 360",
     actionLabel: "Ver clientes",
-    action: () => workspaceClientLookup?.scrollIntoView({ behavior: "smooth", block: "start" }),
+    action: () => focusWorkspaceView("clients", workspaceClientLookup),
   },
   documental: {
     label: "Inbox Documental",
     actionLabel: "Ver inbox",
-    action: () => workspaceDocumentHub?.scrollIntoView({ behavior: "smooth", block: "start" }),
+    action: () => focusWorkspaceView("backoffice", workspaceDocumentHub),
   },
   dashboard: { label: "Dashboard Ejecutivo", actionLabel: "Ir a home", action: () => goHome() },
   gestoria: {
     label: "Gestoría",
     actionLabel: "Ver gestión",
-    action: () => workspaceGestoriaOverview?.scrollIntoView({ behavior: "smooth", block: "start" }),
+    action: () => focusWorkspaceView("operations", workspaceGestoriaOverview),
   },
   seguros: {
     label: "Seguros",
     actionLabel: "Ver cartera",
-    action: () => workspaceSegurosOverview?.scrollIntoView({ behavior: "smooth", block: "start" }),
+    action: () => focusWorkspaceView("operations", workspaceSegurosOverview),
   },
   inmobiliaria: {
     label: "Inmobiliaria",
     actionLabel: "Ver pipeline",
-    action: () => workspaceInmoOverview?.scrollIntoView({ behavior: "smooth", block: "start" }),
+    action: () => focusWorkspaceView("operations", workspaceInmoOverview),
   },
   financiacion: {
     label: "Financiación",
     actionLabel: "Ver pipeline",
-    action: () => workspaceFinOverview?.scrollIntoView({ behavior: "smooth", block: "start" }),
+    action: () => focusWorkspaceView("operations", workspaceFinOverview),
   },
-  fincas: { label: "Fincas", actionLabel: "Próximo", action: null },
+  fincas: { label: "Fincas", actionLabel: "Ver módulo", action: () => focusWorkspaceView("fincas", workspaceFincasCommunityForm) },
   facturacion: {
     label: "Facturación",
     actionLabel: "Gestionar",
-    action: () => workspaceBillingForm?.scrollIntoView({ behavior: "smooth", block: "start" }),
+    action: () => focusWorkspaceView("finance", workspaceBillingForm),
   },
   facturas_recibidas: {
     label: "Facturas Recibidas",
     actionLabel: "Ver inbox",
-    action: () => workspaceInboxForm?.scrollIntoView({ behavior: "smooth", block: "start" }),
+    action: () => focusWorkspaceView("backoffice", workspaceInboxForm),
   },
   portal_cliente: {
     label: "Portal Cliente",
     actionLabel: "Gestionar",
-    action: () => workspacePortalForm?.scrollIntoView({ behavior: "smooth", block: "start" }),
+    action: () => focusWorkspaceView("backoffice", workspacePortalForm),
   },
-  registro_horario: { label: "Registro Horario", actionLabel: "Próximo", action: null },
+  registro_horario: { label: "Registro Horario", actionLabel: "Gestionar", action: () => focusWorkspaceView("backoffice", workspaceTimeForm) },
   automatizaciones: {
     label: "Automatizaciones",
     actionLabel: "Gestionar",
-    action: () => workspaceAutomationForm?.scrollIntoView({ behavior: "smooth", block: "start" }),
+    action: () => focusWorkspaceView("backoffice", workspaceAutomationForm),
   },
 };
 
@@ -6148,6 +6182,7 @@ const loadWorkspaceDetail = async (workspaceId) => {
   renderWorkspaceFincasMeetingList(fincasMeetings.rows || []);
   fillWorkspaceFincasMeetingForm();
   renderWorkspaceDocumentHub(docs || {});
+  setWorkspaceView(state.currentWorkspaceView || "overview");
   if ((workspaceClients.rows || []).length) {
     await openWorkspaceClient360((workspaceClients.rows || [])[0].id, {
       prefetchedRow: (workspaceClients.rows || [])[0],
@@ -6226,6 +6261,7 @@ const loadWorkspaceCentral = async () => {
     renderWorkspaceFincasMeetingList([]);
     fillWorkspaceFincasMeetingForm();
     renderWorkspaceDocumentHub({});
+    setWorkspaceView(state.currentWorkspaceView || "overview");
     renderCompanyCards();
   }
 };
@@ -6885,6 +6921,7 @@ const openHolding = () => {
   setModule("empresas");
   explorerSection.classList.add("hidden");
   setPage("holding");
+  setWorkspaceView(state.currentWorkspaceView || "overview");
   loadWorkspaceCentral().catch(() => {});
   setUrlParams(new URLSearchParams({ holding: "1" }));
   window.scrollTo({ top: 0, behavior: "smooth" });
@@ -28694,6 +28731,12 @@ if (holdingBackBtn) {
     goHome();
   });
 }
+
+workspaceViewButtons.forEach((button) => {
+  button.addEventListener("click", () => {
+    setWorkspaceView(button.dataset.workspaceViewTab || "overview", { scroll: true });
+  });
+});
 
 if (workspaceForm) {
   workspaceForm.addEventListener("submit", async (event) => {

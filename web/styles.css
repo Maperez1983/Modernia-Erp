@@ -1753,6 +1753,9 @@ body.crm-fin #companySummary {
 }
 
 .crm-workspace-tabs {
+  position: sticky;
+  top: 14px;
+  z-index: 6;
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
@@ -1771,6 +1774,11 @@ body.crm-fin #companySummary {
 .crm-workspace-view {
   display: grid;
   gap: 14px;
+  align-content: start;
+}
+
+.crm-workspace-view + .crm-workspace-view {
+  margin-top: -2px;
 }
 
 .crm-summary-grid {

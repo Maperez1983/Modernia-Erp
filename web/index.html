@@ -54,8 +54,18 @@
           </div>
           <button id="holdingBackBtn" class="secondary ghost">Volver a home</button>
         </div>
-        <div class="grid workspace-kpis" id="workspaceKpis"></div>
-        <div class="workspace-central-layout">
+        <div class="crm-workspace-shell">
+          <div class="crm-workspace-tabs" id="workspaceViewTabs">
+            <button class="tab active" type="button" data-workspace-view-tab="overview">Resumen</button>
+            <button class="tab" type="button" data-workspace-view-tab="tenant">Tenant</button>
+            <button class="tab" type="button" data-workspace-view-tab="clients">Clientes</button>
+            <button class="tab" type="button" data-workspace-view-tab="operations">Operativa</button>
+            <button class="tab" type="button" data-workspace-view-tab="finance">Finanzas</button>
+            <button class="tab" type="button" data-workspace-view-tab="backoffice">Backoffice</button>
+            <button class="tab" type="button" data-workspace-view-tab="fincas">Fincas</button>
+          </div>
+        <div class="grid workspace-kpis crm-workspace-view" id="workspaceKpis" data-workspace-view="overview"></div>
+        <div class="workspace-central-layout crm-workspace-view" data-workspace-view="overview">
           <div class="form-card">
             <div class="section-head">
               <div>
@@ -236,7 +246,7 @@
             </div>
           </div>
         </div>
-        <div class="workspace-central-layout">
+        <div class="workspace-central-layout crm-workspace-view" data-workspace-view="overview">
           <div class="form-card">
             <div class="section-head">
               <div>
@@ -256,7 +266,7 @@
             <div id="workspaceOnboardingActions"></div>
           </div>
         </div>
-        <div class="form-card">
+        <div class="form-card crm-workspace-view" data-workspace-view="tenant">
           <div class="section-head">
             <div>
               <h3>Matriz de Accesos</h3>
@@ -265,7 +275,7 @@
           </div>
           <div id="workspacePermissionMatrix"></div>
         </div>
-        <div class="form-card">
+        <div class="form-card crm-workspace-view" data-workspace-view="overview">
           <div class="section-head">
             <div>
               <h3>Módulos del tenant</h3>
@@ -274,7 +284,7 @@
           </div>
           <div id="workspaceLauncher"></div>
         </div>
-        <div class="workspace-central-layout">
+        <div class="workspace-central-layout crm-workspace-view" data-workspace-view="tenant">
           <div class="form-card">
             <div class="section-head">
               <div>
@@ -338,7 +348,7 @@
             </form>
           </div>
         </div>
-        <div class="workspace-central-layout">
+        <div class="workspace-central-layout crm-workspace-view" data-workspace-view="tenant">
           <div class="form-card">
             <div class="section-head">
               <div>
@@ -358,7 +368,7 @@
             <div id="workspaceModules"></div>
           </div>
         </div>
-        <div class="form-card">
+        <div class="form-card crm-workspace-view" data-workspace-view="clients">
           <div class="section-head">
             <div>
               <h3>CRM 360 del Tenant</h3>
@@ -379,7 +389,7 @@
             </div>
           </div>
         </div>
-        <div class="workspace-central-layout">
+        <div class="workspace-central-layout crm-workspace-view" data-workspace-view="finance">
           <div class="form-card">
             <div class="section-head">
               <div>
@@ -486,17 +496,17 @@
               <div id="workspaceBillingList"></div>
             </div>
           </div>
-          <div class="form-card">
-            <div class="section-head">
-              <div>
-                <h3>Inbox documental unificado</h3>
-                <p class="muted">Últimos documentos agregados desde gestoría, seguros e inmobiliaria.</p>
-              </div>
-            </div>
-            <div id="workspaceDocumentHub"></div>
-          </div>
         </div>
-        <div class="form-card">
+        <div class="form-card crm-workspace-view" data-workspace-view="backoffice">
+          <div class="section-head">
+            <div>
+              <h3>Inbox documental unificado</h3>
+              <p class="muted">Últimos documentos agregados desde gestoría, seguros e inmobiliaria.</p>
+            </div>
+          </div>
+          <div id="workspaceDocumentHub"></div>
+        </div>
+        <div class="form-card crm-workspace-view" data-workspace-view="operations">
           <div class="section-head">
             <div>
               <h3>Gestoría del Tenant</h3>
@@ -505,7 +515,7 @@
           </div>
           <div id="workspaceGestoriaOverview"></div>
         </div>
-        <div class="form-card">
+        <div class="form-card crm-workspace-view" data-workspace-view="operations">
           <div class="section-head">
             <div>
               <h3>Seguros del Tenant</h3>
@@ -514,7 +524,7 @@
           </div>
           <div id="workspaceSegurosOverview"></div>
         </div>
-        <div class="form-card">
+        <div class="form-card crm-workspace-view" data-workspace-view="operations">
           <div class="section-head">
             <div>
               <h3>Financiación del Tenant</h3>
@@ -523,7 +533,7 @@
           </div>
           <div id="workspaceFinOverview"></div>
         </div>
-        <div class="form-card">
+        <div class="form-card crm-workspace-view" data-workspace-view="operations">
           <div class="section-head">
             <div>
               <h3>Inmobiliaria del Tenant</h3>
@@ -532,7 +542,7 @@
           </div>
           <div id="workspaceInmoOverview"></div>
         </div>
-        <div class="form-card">
+        <div class="form-card crm-workspace-view" data-workspace-view="operations">
           <div class="section-head">
             <div>
               <h3>Operativa del Tenant</h3>
@@ -541,7 +551,7 @@
           </div>
           <div id="workspaceServiceDesks"></div>
         </div>
-        <div class="workspace-central-layout">
+        <div class="workspace-central-layout crm-workspace-view" data-workspace-view="backoffice">
           <div class="form-card">
             <div class="section-head">
               <div>
@@ -678,7 +688,7 @@
             <div id="workspaceSeriesList"></div>
           </div>
         </div>
-        <div class="workspace-central-layout">
+        <div class="workspace-central-layout crm-workspace-view" data-workspace-view="backoffice">
           <div class="form-card">
             <div class="section-head">
               <div>
@@ -770,7 +780,7 @@
             <div id="workspaceAutomationLogs" class="workspace-automation-logs"></div>
           </div>
         </div>
-        <div class="workspace-central-layout">
+        <div class="workspace-central-layout crm-workspace-view" data-workspace-view="finance">
           <div class="form-card">
             <div class="section-head">
               <div>
@@ -874,70 +884,70 @@
             </form>
             <div id="workspaceRemittancesList"></div>
           </div>
-          <div class="form-card">
-            <div class="section-head">
-              <div>
-                <h3>Requerimientos portal</h3>
-                <p class="muted">Solicitudes de documentación o acciones visibles para el cliente en su portal.</p>
-              </div>
-            </div>
-            <form id="workspacePortalRequestForm" class="form-grid">
-              <input type="hidden" name="id" />
-              <input type="hidden" name="workspace_id" />
-              <label class="span-2">
-                Cliente portal
-                <select name="portal_cliente_id" required></select>
-              </label>
-              <label>
-                Servicio
-                <select name="servicio">
-                  <option value="">Transversal</option>
-                  <option value="gestoria">Gestoría</option>
-                  <option value="seguros">Seguros</option>
-                  <option value="inmobiliaria">Inmobiliaria</option>
-                  <option value="financiacion">Financiación</option>
-                  <option value="fincas">Fincas</option>
-                </select>
-              </label>
-              <label>
-                Fecha límite
-                <input name="fecha_limite" type="date" />
-              </label>
-              <label>
-                Prioridad
-                <select name="prioridad">
-                  <option>Normal</option>
-                  <option>Alta</option>
-                  <option>Urgente</option>
-                </select>
-              </label>
-              <label>
-                Estado
-                <select name="estado">
-                  <option>Pendiente</option>
-                  <option>Enviado</option>
-                  <option>Recibido</option>
-                  <option>Completado</option>
-                </select>
-              </label>
-              <label class="span-2">
-                Título
-                <input name="titulo" required />
-              </label>
-              <label class="span-2">
-                Descripción
-                <textarea name="descripcion" rows="3"></textarea>
-              </label>
-              <div class="form-actions span-2">
-                <button type="submit">Guardar requerimiento</button>
-                <button type="button" id="workspacePortalRequestResetBtn" class="secondary ghost">Nuevo</button>
-                <span id="workspacePortalRequestStatus" class="muted"></span>
-              </div>
-            </form>
-            <div id="workspacePortalRequestList"></div>
-          </div>
         </div>
-        <div class="workspace-central-layout">
+        <div class="form-card crm-workspace-view" data-workspace-view="backoffice">
+          <div class="section-head">
+            <div>
+              <h3>Requerimientos portal</h3>
+              <p class="muted">Solicitudes de documentación o acciones visibles para el cliente en su portal.</p>
+            </div>
+          </div>
+          <form id="workspacePortalRequestForm" class="form-grid">
+            <input type="hidden" name="id" />
+            <input type="hidden" name="workspace_id" />
+            <label class="span-2">
+              Cliente portal
+              <select name="portal_cliente_id" required></select>
+            </label>
+            <label>
+              Servicio
+              <select name="servicio">
+                <option value="">Transversal</option>
+                <option value="gestoria">Gestoría</option>
+                <option value="seguros">Seguros</option>
+                <option value="inmobiliaria">Inmobiliaria</option>
+                <option value="financiacion">Financiación</option>
+                <option value="fincas">Fincas</option>
+              </select>
+            </label>
+            <label>
+              Fecha límite
+              <input name="fecha_limite" type="date" />
+            </label>
+            <label>
+              Prioridad
+              <select name="prioridad">
+                <option>Normal</option>
+                <option>Alta</option>
+                <option>Urgente</option>
+              </select>
+            </label>
+            <label>
+              Estado
+              <select name="estado">
+                <option>Pendiente</option>
+                <option>Enviado</option>
+                <option>Recibido</option>
+                <option>Completado</option>
+              </select>
+            </label>
+            <label class="span-2">
+              Título
+              <input name="titulo" required />
+            </label>
+            <label class="span-2">
+              Descripción
+              <textarea name="descripcion" rows="3"></textarea>
+            </label>
+            <div class="form-actions span-2">
+              <button type="submit">Guardar requerimiento</button>
+              <button type="button" id="workspacePortalRequestResetBtn" class="secondary ghost">Nuevo</button>
+              <span id="workspacePortalRequestStatus" class="muted"></span>
+            </div>
+          </form>
+          <div id="workspacePortalRequestList"></div>
+        </div>
+        <div class="workspace-central-layout crm-workspace-view" data-workspace-view="backoffice">
           <div class="form-card">
             <div class="section-head">
               <div>
@@ -992,6 +1002,8 @@
             </form>
             <div id="workspaceTimeList"></div>
           </div>
+        </div>
+        <div class="workspace-central-layout crm-workspace-view" data-workspace-view="fincas">
           <div class="form-card">
             <div class="section-head">
               <div>
@@ -1068,7 +1080,7 @@
             <div id="workspaceFincasCommunityList"></div>
           </div>
         </div>
-        <div class="form-card">
+        <div class="form-card crm-workspace-view" data-workspace-view="fincas">
           <div class="section-head">
             <div>
               <h3>Incidencias de fincas</h3>
@@ -1135,7 +1147,7 @@
           </form>
           <div id="workspaceFincasIncidentList"></div>
         </div>
-        <div class="workspace-central-layout">
+        <div class="workspace-central-layout crm-workspace-view" data-workspace-view="fincas">
           <div class="form-card">
             <div class="section-head">
               <div>
@@ -1249,10 +1261,11 @@
             <div id="workspaceFincasMeetingList"></div>
           </div>
         </div>
-        <div class="form-card">
+        <div class="form-card crm-workspace-view" data-workspace-view="tenant">
           <h3>Mapa societario</h3>
           <p class="muted">Relación operativa entre empresas actuales mientras se completa la transición a tenants.</p>
           <div id="holdingOrgChart" class="org-chart"></div>
+        </div>
         </div>
       </section>
       <section id="agendaSection" class="hidden">
