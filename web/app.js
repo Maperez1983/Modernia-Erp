@@ -6629,6 +6629,15 @@ const renderWorkspaceDocumentHub = (data = {}) => {
   });
 };
 
+const safeWorkspaceApi = async (path, fallback) => {
+  try {
+    return await api(path);
+  } catch (error) {
+    console.error("Workspace API failed:", path, error);
+    return fallback;
+  }
+};
+
 const loadWorkspaceDetail = async (workspaceId) => {
   if (!workspaceId) return;
   state.currentWorkspaceId = workspaceId;
@@ -6647,30 +6656,30 @@ const loadWorkspaceDetail = async (workspaceId) => {
     ? `&empresa_id=${encodeURIComponent(state.currentWorkspaceCompanyId)}`
     : "";
   const [billing, docs, billingRows, budgetRows, collections, remittances, workspaceClients, health, gestoriaOverview, segurosOverview, finOverview, inmoOverview, serviceDesks, series, inbox, portal, portalRequests, automations, automationLogs, timeRows, fincasCommunities, fincasIncidents, fincasProviders, fincasMeetings] = await Promise.all([
-    api(`/api/workspace_billing_summary?workspace_id=${encodeURIComponent(workspaceId)}`),
-    api(`/api/workspace_document_hub?workspace_id=${encodeURIComponent(workspaceId)}`),
-    api(`/api/workspace_facturacion?workspace_id=${encodeURIComponent(workspaceId)}`),
-    api(`/api/workspace_presupuestos?workspace_id=${encodeURIComponent(workspaceId)}`),
-    api(`/api/workspace_cobros?workspace_id=${encodeURIComponent(workspaceId)}`),
-    api(`/api/workspace_remesas?workspace_id=${encodeURIComponent(workspaceId)}`),
-    api(`/api/workspace_clientes?workspace_id=${encodeURIComponent(workspaceId)}&limit=60`),
-    api(`/api/workspace_health?workspace_id=${encodeURIComponent(workspaceId)}`),
-    api(`/api/workspace_gestoria_overview?workspace_id=${encodeURIComponent(workspaceId)}${companyQuery}`),
-    api(`/api/workspace_seguros_overview?workspace_id=${encodeURIComponent(workspaceId)}${companyQuery}`),
-    api(`/api/workspace_fin_overview?workspace_id=${encodeURIComponent(workspaceId)}${companyQuery}`),
-    api(`/api/workspace_inmo_overview?workspace_id=${encodeURIComponent(workspaceId)}${companyQuery}`),
-    api(`/api/workspace_service_desks?workspace_id=${encodeURIComponent(workspaceId)}${companyQuery}`),
-    api(`/api/workspace_series?workspace_id=${encodeURIComponent(workspaceId)}`),
-    api(`/api/workspace_inbox?workspace_id=${encodeURIComponent(workspaceId)}`),
-    api(`/api/workspace_portal?workspace_id=${encodeURIComponent(workspaceId)}`),
-    api(`/api/workspace_portal_requerimientos?workspace_id=${encodeURIComponent(workspaceId)}`),
-    api(`/api/workspace_automatizaciones?workspace_id=${encodeURIComponent(workspaceId)}`),
-    api(`/api/workspace_automatizacion_logs?workspace_id=${encodeURIComponent(workspaceId)}&limit=12`),
-    api(`/api/workspace_registro_horario?workspace_id=${encodeURIComponent(workspaceId)}`),
-    api(`/api/workspace_fincas_comunidades?workspace_id=${encodeURIComponent(workspaceId)}`),
-    api(`/api/workspace_fincas_incidencias?workspace_id=${encodeURIComponent(workspaceId)}`),
-    api(`/api/workspace_fincas_proveedores?workspace_id=${encodeURIComponent(workspaceId)}`),
-    api(`/api/workspace_fincas_juntas?workspace_id=${encodeURIComponent(workspaceId)}`),
+    safeWorkspaceApi(`/api/workspace_billing_summary?workspace_id=${encodeURIComponent(workspaceId)}`, {}),
+    safeWorkspaceApi(`/api/workspace_document_hub?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [], summary: {} }),
+    safeWorkspaceApi(`/api/workspace_facturacion?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [] }),
+    safeWorkspaceApi(`/api/workspace_presupuestos?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [] }),
+    safeWorkspaceApi(`/api/workspace_cobros?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [] }),
+    safeWorkspaceApi(`/api/workspace_remesas?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [] }),
+    safeWorkspaceApi(`/api/workspace_clientes?workspace_id=${encodeURIComponent(workspaceId)}&limit=60`, { rows: [] }),
+    safeWorkspaceApi(`/api/workspace_health?workspace_id=${encodeURIComponent(workspaceId)}`, {}),
+    safeWorkspaceApi(`/api/workspace_gestoria_overview?workspace_id=${encodeURIComponent(workspaceId)}${companyQuery}`, {}),
+    safeWorkspaceApi(`/api/workspace_seguros_overview?workspace_id=${encodeURIComponent(workspaceId)}${companyQuery}`, {}),
+    safeWorkspaceApi(`/api/workspace_fin_overview?workspace_id=${encodeURIComponent(workspaceId)}${companyQuery}`, {}),
+    safeWorkspaceApi(`/api/workspace_inmo_overview?workspace_id=${encodeURIComponent(workspaceId)}${companyQuery}`, {}),
+    safeWorkspaceApi(`/api/workspace_service_desks?workspace_id=${encodeURIComponent(workspaceId)}${companyQuery}`, {}),
+    safeWorkspaceApi(`/api/workspace_series?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [] }),
+    safeWorkspaceApi(`/api/workspace_inbox?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [] }),
+    safeWorkspaceApi(`/api/workspace_portal?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [] }),
+    safeWorkspaceApi(`/api/workspace_portal_requerimientos?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [] }),
+    safeWorkspaceApi(`/api/workspace_automatizaciones?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [] }),
+    safeWorkspaceApi(`/api/workspace_automatizacion_logs?workspace_id=${encodeURIComponent(workspaceId)}&limit=12`, { rows: [] }),
+    safeWorkspaceApi(`/api/workspace_registro_horario?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [] }),
+    safeWorkspaceApi(`/api/workspace_fincas_comunidades?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [] }),
+    safeWorkspaceApi(`/api/workspace_fincas_incidencias?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [] }),
+    safeWorkspaceApi(`/api/workspace_fincas_proveedores?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [] }),
+    safeWorkspaceApi(`/api/workspace_fincas_juntas?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [] }),
   ]);
   state.currentWorkspaceClients = workspaceClients.rows || [];
   state.currentWorkspaceData = {
