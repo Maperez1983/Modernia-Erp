@@ -505,6 +505,33 @@
           </div>
           <div id="workspaceGestoriaOverview"></div>
         </div>
+        <div class="form-card">
+          <div class="section-head">
+            <div>
+              <h3>Seguros del Tenant</h3>
+              <p class="muted">Visión operativa de cartera, primas, renovaciones y alertas comerciales dentro del tenant.</p>
+            </div>
+          </div>
+          <div id="workspaceSegurosOverview"></div>
+        </div>
+        <div class="form-card">
+          <div class="section-head">
+            <div>
+              <h3>Financiación del Tenant</h3>
+              <p class="muted">Pipeline hipotecario, firmas, bancos y seguimiento comercial dentro del tenant.</p>
+            </div>
+          </div>
+          <div id="workspaceFinOverview"></div>
+        </div>
+        <div class="form-card">
+          <div class="section-head">
+            <div>
+              <h3>Inmobiliaria del Tenant</h3>
+              <p class="muted">Captaciones, inmuebles, compraventas y seguimiento comercial dentro del tenant.</p>
+            </div>
+          </div>
+          <div id="workspaceInmoOverview"></div>
+        </div>
         <div class="workspace-central-layout">
           <div class="form-card">
             <div class="section-head">
@@ -3428,80 +3455,9 @@
           </div>
         </div>
         <div id="finCrmSection" class="hidden">
-          <div class="crm-header">
-            <div>
-              <h3>CRM Financiaciones</h3>
-              <p class="muted">Hipotecas y seguimiento comercial.</p>
-            </div>
-          </div>
           <div class="form-card">
-            <div class="section-head">
-              <div>
-                <h3>Operaciones</h3>
-                <p class="muted">Listado de hipotecas firmadas y en curso.</p>
-              </div>
-              <div class="crm-actions">
-                <div class="quick-search">
-                  <input id="finCrmClienteInput" list="finCrmClientes" placeholder="Buscar cliente..." autocomplete="off" />
-                  <input id="finCrmClienteId" type="hidden" />
-                  <datalist id="finCrmClientes"></datalist>
-                </div>
-                <button type="button" id="finCrmClienteOpen" class="secondary">Abrir ficha</button>
-                <input id="finCrmSearch" placeholder="Buscar hipoteca..." />
-              </div>
-            </div>
-            <div id="finCrmTable"></div>
-            <div class="footer" id="finCrmInfo"></div>
-          </div>
-          <div class="form-card">
-            <h3>Agenda · Financiaciones</h3>
-            <form id="finAgendaForm" class="form-grid">
-              <label>
-                Cliente
-                <input id="finAgendaClienteInput" name="cliente_nombre" list="finAgendaClientes" autocomplete="off" />
-                <input id="finAgendaClienteId" type="hidden" name="cliente_id" />
-                <datalist id="finAgendaClientes"></datalist>
-              </label>
-              <label>
-                Fecha
-                <input name="fecha" type="date" required />
-              </label>
-              <label>
-                Hora
-                <input name="hora" type="time" />
-              </label>
-              <label>
-                Tipo
-                <select name="tipo">
-                  <option>Llamada</option>
-                  <option>Reunión</option>
-                  <option>Documentación</option>
-                  <option>Firma</option>
-                </select>
-              </label>
-              <label>
-                Responsable
-                <select name="responsable" class="responsable-select" data-service="Financiaciones"></select>
-              </label>
-              <label>
-                Estado
-                <select name="estado">
-                  <option>Pendiente</option>
-                  <option>Hecho</option>
-                  <option>Cancelado</option>
-                </select>
-              </label>
-              <label>
-                Notas
-                <textarea name="notas" rows="2"></textarea>
-              </label>
-              <div class="form-actions">
-                <button type="submit">Guardar</button>
-                <span id="finAgendaStatus" class="muted"></span>
-              </div>
-            </form>
-            <div id="finAgendaTable"></div>
-            <div class="footer" id="finAgendaInfo"></div>
+            <h3>CRM Financiaciones</h3>
+            <p class="muted">Esta vista legacy ya no se usa. El workflow real vive en el panel principal de Financiaciones.</p>
           </div>
         </div>
         <div id="dashboardSection" class="dashboard hidden">
@@ -4169,7 +4125,7 @@
         <div id="hipotecaSection" class="hidden">
           <div id="hipotecaTabs" class="tabs">
             <button class="tab active" type="button" data-hipoteca-section="dashboard">Dashboard</button>
-            <button class="tab" type="button" data-hipoteca-section="alta">Alta</button>
+            <button class="tab" type="button" data-hipoteca-section="alta">Workflow</button>
             <button class="tab" type="button" data-hipoteca-section="bdt">BDT</button>
             <button class="tab" type="button" data-hipoteca-section="contabilidad">Contabilidad</button>
           </div>
@@ -4219,8 +4175,263 @@
             <div class="footer" id="hipotecaDashboardInfo"></div>
           </div>
           <div id="hipotecaAltaPanel" class="form-card hidden">
-            <h3>Alta · Financiaciones</h3>
-            <p class="muted">Crea cliente y registra operación en BDT.</p>
+            <div class="section-head">
+              <div>
+                <h3>Workflow · Financiaciones</h3>
+                <p class="muted">Gestiona el expediente hipotecario desde el lead hasta la firma con citas, tareas, checklist y seguimiento bancario.</p>
+              </div>
+            </div>
+            <div class="grid crm-kpis" id="finAsesorKpis"></div>
+            <div id="hipotecaWorkflowStageBoard" class="fin-workflow-stage-grid"></div>
+            <div class="crm-summary-grid" style="margin-top: 16px;">
+              <div class="form-card">
+                <div class="section-head">
+                  <div>
+                    <h4>Expedientes financieros</h4>
+                    <p class="muted">Lead, asesoramiento, estudio, documentación, banco, tasación y firma.</p>
+                  </div>
+                  <div class="crm-actions">
+                    <input id="finAsesoramientosSearch" placeholder="Buscar expediente..." />
+                  </div>
+                </div>
+                <div id="finAsesoramientosTable"></div>
+                <div class="footer" id="finAsesoramientosInfo"></div>
+              </div>
+              <div class="crm-focus-card">
+                <div class="form-card">
+                  <div class="section-head">
+                    <div>
+                      <h4>Expediente seleccionado</h4>
+                      <p class="muted" id="finSelectedAsesoramientoLabel">Selecciona un asesoramiento para trabajar su seguimiento.</p>
+                    </div>
+                    <div class="crm-actions">
+                      <button type="button" id="finCreateRecommendedAction" class="secondary">Crear siguiente paso</button>
+                    </div>
+                  </div>
+                  <div id="hipotecaWorkflowStatus" class="crm-focus-list"></div>
+                </div>
+                <div class="form-card">
+                  <div class="section-head">
+                    <div>
+                      <h4>Alertas del pipeline</h4>
+                      <p class="muted">Faltantes, expedientes detenidos y seguimientos vencidos.</p>
+                    </div>
+                  </div>
+                  <div id="finAlertsTable"></div>
+                  <div class="footer" id="finAlertsInfo"></div>
+                </div>
+              </div>
+            </div>
+            <div class="crm-summary-grid" style="margin-top: 16px;">
+              <div class="form-card">
+                <div class="section-head">
+                  <div>
+                    <h4>Ficha de asesoramiento</h4>
+                    <p class="muted">Base económica del expediente hipotecario.</p>
+                  </div>
+                  <div class="crm-actions">
+                    <button type="button" id="finAsesoramientoConvert" class="secondary">Convertir a hipoteca</button>
+                  </div>
+                </div>
+                <form id="finAsesoramientoForm" class="form-grid">
+                  <input id="finAsesoramientoId" name="id" type="hidden" />
+                  <label>
+                    Fecha
+                    <input name="fecha" type="date" />
+                  </label>
+                  <label>
+                    Estado
+                    <select name="estado">
+                      <option>Lead</option>
+                      <option>Asesoramiento</option>
+                      <option>Estudio</option>
+                      <option>Documentación</option>
+                      <option>Bancos</option>
+                      <option>Tasación</option>
+                      <option>FEIN / Acta</option>
+                      <option>Firma</option>
+                      <option>Convertido</option>
+                      <option>Descartada</option>
+                    </select>
+                  </label>
+                  <label>
+                    Inmobiliaria / asesor
+                    <input name="inmobiliaria_asesor" />
+                  </label>
+                  <label>
+                    Asesor financiero
+                    <input name="asesor" />
+                  </label>
+                  <label>
+                    Cliente 1
+                    <input name="cliente1_nombre" />
+                  </label>
+                  <label>
+                    DNI cliente 1
+                    <input name="cliente1_dni" />
+                  </label>
+                  <label>
+                    Teléfono cliente 1
+                    <input name="cliente1_telefono" />
+                  </label>
+                  <label>
+                    Email cliente 1
+                    <input name="cliente1_email" type="email" />
+                  </label>
+                  <label>
+                    Cliente 2
+                    <input name="cliente2_nombre" />
+                  </label>
+                  <label>
+                    DNI cliente 2
+                    <input name="cliente2_dni" />
+                  </label>
+                  <label>
+                    Teléfono cliente 2
+                    <input name="cliente2_telefono" />
+                  </label>
+                  <label>
+                    Email cliente 2
+                    <input name="cliente2_email" type="email" />
+                  </label>
+                  <label>
+                    Ingresos cliente 1
+                    <input name="cliente1_ingresos" data-money="1" />
+                  </label>
+                  <label>
+                    Ingresos cliente 2
+                    <input name="cliente2_ingresos" data-money="1" />
+                  </label>
+                  <label>
+                    Ingresos conjuntos
+                    <input name="ingresos_conjuntos" data-money="1" />
+                  </label>
+                  <label>
+                    Aportación compraventa
+                    <input name="aportacion_cv" data-money="1" />
+                  </label>
+                  <label class="span-2">
+                    Entidades financieras
+                    <input name="entidades_financieras" placeholder="Banco 1, Banco 2..." />
+                  </label>
+                  <label class="span-2">
+                    Avalistas / cotitulares
+                    <input name="avalistas" />
+                  </label>
+                  <label class="span-2">
+                    Notas
+                    <textarea name="notas" rows="3"></textarea>
+                  </label>
+                  <input name="calidad_ocr" type="hidden" />
+                  <input name="campos_ocr" type="hidden" />
+                  <div class="form-actions span-2">
+                    <button type="submit">Guardar asesoramiento</button>
+                    <span id="finAsesoramientoStatus" class="muted"></span>
+                  </div>
+                </form>
+              </div>
+              <div class="crm-focus-card">
+                <div class="form-card">
+                  <div class="section-head">
+                    <div>
+                      <h4>Checklist documental</h4>
+                      <p class="muted">Documentación a completar según la fase del expediente.</p>
+                    </div>
+                    <div class="crm-actions">
+                      <button type="button" id="finChecklistGenerate" class="secondary">Generar checklist</button>
+                    </div>
+                  </div>
+                  <div id="finChecklistTable"></div>
+                  <div class="footer">
+                    <span id="finChecklistStatus" class="muted"></span>
+                    <span id="finChecklistInfo" class="muted"></span>
+                  </div>
+                </div>
+                <div class="form-card">
+                  <div class="section-head">
+                    <div>
+                      <h4>Agenda y tareas</h4>
+                      <p class="muted">Cada fase del expediente avanza cerrando una cita o tarea con resultado.</p>
+                    </div>
+                  </div>
+                  <form id="finAgendaForm" class="form-grid">
+                    <input id="finAgendaAsesoramientoId" name="asesoramiento_id" type="hidden" />
+                    <label>
+                      Cliente
+                      <input id="finAgendaClienteInput" name="cliente_nombre" list="finAgendaClientes" autocomplete="off" />
+                      <input id="finAgendaClienteId" type="hidden" name="cliente_id" />
+                      <datalist id="finAgendaClientes"></datalist>
+                    </label>
+                    <label>
+                      Fecha
+                      <input name="fecha" type="date" required />
+                    </label>
+                    <label>
+                      Hora
+                      <input name="hora" type="time" />
+                    </label>
+                    <label>
+                      Tipo
+                      <select id="finAgendaTipo" name="tipo">
+                        <option>Primera llamada</option>
+                        <option>Reunión de asesoramiento</option>
+                        <option>Solicitud documentación</option>
+                        <option>Estudio financiero</option>
+                        <option>Presentación bancaria</option>
+                        <option>Seguimiento bancario</option>
+                        <option>Tasación</option>
+                        <option>FEIN / Acta</option>
+                        <option>Firma hipoteca</option>
+                        <option>Completar datos asesoramiento</option>
+                      </select>
+                    </label>
+                    <label>
+                      Responsable
+                      <select name="responsable" class="responsable-select" data-service="Financiaciones"></select>
+                    </label>
+                    <label>
+                      Estado
+                      <select name="estado">
+                        <option>Pendiente</option>
+                        <option>Hecho</option>
+                        <option>Cancelado</option>
+                      </select>
+                    </label>
+                    <label class="span-2">
+                      Notas
+                      <textarea name="notas" rows="2"></textarea>
+                    </label>
+                    <div class="form-actions span-2">
+                      <button type="submit">Guardar tarea</button>
+                      <span id="finAgendaStatus" class="muted"></span>
+                    </div>
+                  </form>
+                  <div id="finAgendaTable"></div>
+                  <div class="footer" id="finAgendaInfo"></div>
+                </div>
+              </div>
+            </div>
+            <div class="form-card" style="margin-top: 16px;">
+              <div class="section-head">
+                <div>
+                  <h4>Hipotecas registradas</h4>
+                  <p class="muted">Listado de hipotecas firmadas y operaciones ya activadas.</p>
+                </div>
+                <div class="crm-actions">
+                  <div class="quick-search">
+                    <input id="finCrmClienteInput" list="finCrmClientes" placeholder="Buscar cliente..." autocomplete="off" />
+                    <input id="finCrmClienteId" type="hidden" />
+                    <datalist id="finCrmClientes"></datalist>
+                  </div>
+                  <button type="button" id="finCrmClienteOpen" class="secondary">Abrir ficha</button>
+                  <input id="finCrmSearch" placeholder="Buscar hipoteca..." />
+                </div>
+              </div>
+              <div id="finCrmTable"></div>
+              <div class="footer" id="finCrmInfo"></div>
+            </div>
+            <h4 style="margin: 20px 0 6px;">Alta manual complementaria</h4>
+            <p class="muted" style="margin-bottom: 10px;">Crea cliente y registra operación en BDT cuando el expediente no venga del workflow.</p>
             <div class="form-card" style="margin: 14px 0 18px 0; padding: 14px;">
               <h4 style="margin-bottom: 6px;">Crear cliente</h4>
               <p class="muted" style="margin-bottom: 10px;">Alta rápida en Clientes y vínculo automático con Financiaciones.</p>

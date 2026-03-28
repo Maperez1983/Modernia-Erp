@@ -1162,6 +1162,7 @@ CREATE TABLE IF NOT EXISTS acciones (
   servicio TEXT NOT NULL,
   cliente_id TEXT,
   inmueble_id TEXT,
+  asesoramiento_id TEXT,
   cliente_nombre TEXT,
   fecha TEXT,
   hora TEXT,

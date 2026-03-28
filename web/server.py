@@ -2456,12 +2456,12 @@ def fin_sync_missing_action(conn, empresa_id, asesoramiento_id, cliente_id, clie
         exists = conn.execute(
             """
             SELECT id, estado FROM acciones
-            WHERE servicio = 'Financiaciones'
+            WHERE LOWER(servicio) = 'financiaciones'
+              AND asesoramiento_id = ?
               AND tipo = 'Completar datos asesoramiento'
-              AND notas LIKE ?
             LIMIT 1
             """,
-            (f"%{asesoramiento_id}%",),
+            (asesoramiento_id,),
         ).fetchone()
         if exists:
             if (exists["estado"] or "").lower() != "pendiente":
@@ -2474,18 +2474,19 @@ def fin_sync_missing_action(conn, empresa_id, asesoramiento_id, cliente_id, clie
         conn.execute(
             """
             INSERT INTO acciones (
-              id, empresa_id, servicio, cliente_id, inmueble_id, cliente_nombre,
+              id, empresa_id, servicio, cliente_id, inmueble_id, asesoramiento_id, cliente_nombre,
               fecha, hora, tipo, responsable, estado, notas, recordatorio_min, created_at, updated_at
             ) VALUES (
-              ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+              ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
             )
             """,
             (
                 os.urandom(16).hex(),
                 empresa_id,
-                "Financiaciones",
+                "financiaciones",
                 cliente_id,
                 None,
+                asesoramiento_id,
                 cliente_nombre or "",
                 today,
                 None,
@@ -2503,11 +2504,11 @@ def fin_sync_missing_action(conn, empresa_id, asesoramiento_id, cliente_id, clie
             """
             UPDATE acciones
             SET estado = 'Hecho', updated_at = datetime(?)
-            WHERE servicio = 'Financiaciones'
+            WHERE LOWER(servicio) = 'financiaciones'
+              AND asesoramiento_id = ?
               AND tipo = 'Completar datos asesoramiento'
-              AND notas LIKE ?
             """,
-            (now, f"%{asesoramiento_id}%"),
+            (now, asesoramiento_id),
         )
 
 
@@ -9286,6 +9287,326 @@ def validate_inmo_action_result(action_type, estado, resultado):
     return None
 
 
+FIN_ACTION_RESULT_OPTIONS = {
+    "primera_llamada": {"Cita concertada", "No interesado", "Sin respuesta"},
+    "reunion_asesoramiento": {"Realizada", "Pendiente documentación", "No viable"},
+    "solicitud_documentacion": {"Completa", "Parcial", "No entregada"},
+    "estudio_financiero": {"Viable", "Pendiente documentación", "No viable"},
+    "presentacion_bancaria": {"Presentada", "Pendiente completar", "No presentada"},
+    "seguimiento_bancario": {"Tasación solicitada", "Aprobada", "Denegada", "Pendiente"},
+    "tasacion_fin": {"Tasación OK", "Incidencia", "Cancelada"},
+    "fein_acta": {"Firmable", "Pendiente", "Caducada"},
+    "firma_hipoteca": {"Firmada", "Cancelada", "Pospuesta"},
+}
+
+
+def normalize_fin_action_type(value):
+    normalized = normalize_lookup_text(value or "")
+    aliases = {
+        "primera llamada": "primera_llamada",
+        "reunion de asesoramiento": "reunion_asesoramiento",
+        "reunion asesoramiento": "reunion_asesoramiento",
+        "solicitud documentacion": "solicitud_documentacion",
+        "estudio financiero": "estudio_financiero",
+        "estudio financiero hipotecario": "estudio_financiero",
+        "presentacion bancaria": "presentacion_bancaria",
+        "seguimiento bancario": "seguimiento_bancario",
+        "tasacion": "tasacion_fin",
+        "fein / acta": "fein_acta",
+        "fein acta": "fein_acta",
+        "firma hipoteca": "firma_hipoteca",
+    }
+    return aliases.get(normalized, normalized)
+
+
+def validate_fin_action_result(action_type, estado, resultado):
+    normalized_type = normalize_fin_action_type(action_type)
+    if normalized_type not in FIN_ACTION_RESULT_OPTIONS:
+        return None
+    estado_norm = str(estado or "").strip().lower()
+    if estado_norm == "pendiente":
+        return None
+    if not resultado:
+        return "La tarea financiera debe cerrarse con un resultado"
+    if resultado not in FIN_ACTION_RESULT_OPTIONS[normalized_type]:
+        return "Resultado no válido para esta tarea financiera"
+    return None
+
+
+def normalize_fin_stage(value):
+    normalized = normalize_lookup_text(value or "")
+    aliases = {
+        "lead": "Lead",
+        "asesoramiento": "Asesoramiento",
+        "en estudio": "Estudio",
+        "estudio": "Estudio",
+        "documentacion": "Documentación",
+        "pendiente documentacion": "Documentación",
+        "bancos": "Bancos",
+        "presentada a banco": "Bancos",
+        "tasacion": "Tasación",
+        "aprobado": "FEIN / Acta",
+        "fein": "FEIN / Acta",
+        "fein / acta": "FEIN / Acta",
+        "firma": "Firma",
+        "firmada": "Convertido",
+        "convertido": "Convertido",
+        "descartado": "Descartada",
+        "rechazado": "Descartada",
+    }
+    return aliases.get(normalized, value or "Lead")
+
+
+def fin_sync_stage(conn, asesoramiento_id, stage, now):
+    if not asesoramiento_id or not stage:
+        return
+    conn.execute(
+        "UPDATE asesoramientos_financiacion SET estado = ?, updated_at = datetime(?) WHERE id = ?",
+        (stage, now, asesoramiento_id),
+    )
+
+
+def ensure_fin_followup_action(
+    conn,
+    empresa_id,
+    asesoramiento_id,
+    cliente_id,
+    cliente_nombre,
+    responsable,
+    action_type,
+    notas,
+    now,
+):
+    if not empresa_id or not asesoramiento_id or not action_type:
+        return None
+    exists = conn.execute(
+        """
+        SELECT id
+        FROM acciones
+        WHERE servicio = 'financiaciones'
+          AND asesoramiento_id = ?
+          AND tipo = ?
+          AND LOWER(COALESCE(estado, '')) = 'pendiente'
+        LIMIT 1
+        """,
+        (asesoramiento_id, action_type),
+    ).fetchone()
+    if exists:
+        return exists["id"]
+    next_id = os.urandom(16).hex()
+    next_date = datetime.now().strftime("%Y-%m-%d")
+    conn.execute(
+        """
+        INSERT INTO acciones (
+          id, empresa_id, servicio, cliente_id, inmueble_id, asesoramiento_id, cliente_nombre,
+          fecha, hora, tipo, responsable, estado, notas, created_at, updated_at
+        ) VALUES (
+          ?, ?, 'financiaciones', ?, NULL, ?, ?, ?, '10:00', ?, ?, 'Pendiente', ?, datetime(?), datetime(?)
+        )
+        """,
+        (
+            next_id,
+            empresa_id,
+            cliente_id,
+            asesoramiento_id,
+            cliente_nombre or "",
+            next_date,
+            action_type,
+            responsable or "",
+            notas or "",
+            now,
+            now,
+        ),
+    )
+    return next_id
+
+
+def convert_fin_asesoramiento_to_hipoteca(conn, empresa_id, row, now):
+    if not row:
+        return None
+    existing = conn.execute(
+        """
+        SELECT id
+        FROM hipotecas
+        WHERE empresa_id = ?
+          AND cliente_id = ?
+          AND fecha_encargo = ?
+        LIMIT 1
+        """,
+        (empresa_id, row["cliente1_id"], row["fecha"]),
+    ).fetchone()
+    if existing:
+        conn.execute(
+            "UPDATE asesoramientos_financiacion SET estado = ?, updated_at = datetime(?) WHERE id = ?",
+            ("Convertido", now, row["id"]),
+        )
+        return existing["id"]
+    cliente_nombre = row["cliente1_nombre"] or ""
+    if row["cliente2_nombre"]:
+        cliente_nombre = f"{cliente_nombre} / {row['cliente2_nombre']}".strip(" /")
+    fecha = row["fecha"] or ""
+    try:
+        anio = int(fecha.split("/")[-1]) if "/" in fecha else int(fecha.split("-")[0])
+    except Exception:
+        anio = None
+    hipoteca_id = os.urandom(16).hex()
+    conn.execute(
+        """
+        INSERT INTO hipotecas (
+          id, empresa_id, cliente, cliente_id, banco, precio, importe_hipoteca, porcentaje,
+          entrada, comision, oficina, fecha_encargo, encargo, tipo_hipoteca,
+          fecha_firma, cesion, comision_juan, comision_modernia, inmobiliaria_compra,
+          asesor, estado, anio, created_at, updated_at
+        ) VALUES (
+          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+        )
+        """,
+        (
+            hipoteca_id,
+            empresa_id,
+            cliente_nombre,
+            row["cliente1_id"],
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            fecha,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            row["inmobiliaria_asesor"],
+            row["asesor"],
+            "Pendiente",
+            anio,
+            now,
+            now,
+        ),
+    )
+    conn.execute(
+        "UPDATE asesoramientos_financiacion SET estado = ?, updated_at = datetime(?) WHERE id = ?",
+        ("Convertido", now, row["id"]),
+    )
+    return hipoteca_id
+
+
+def apply_fin_action_workflow(conn, empresa_id, action_row, now):
+    if not action_row:
+        return None
+    asesoramiento_id = str(action_row["asesoramiento_id"] or "").strip()
+    if not asesoramiento_id:
+        return None
+    current = conn.execute(
+        "SELECT * FROM asesoramientos_financiacion WHERE id = ? LIMIT 1",
+        (asesoramiento_id,),
+    ).fetchone()
+    if not current:
+        return None
+    tipo = normalize_fin_action_type(action_row["tipo"])
+    resultado = str(action_row["resultado_cierre"] or "").strip()
+    next_stage = ""
+    next_action = ""
+    next_note = ""
+    if tipo == "primera_llamada":
+        if resultado == "Cita concertada":
+            next_stage = "Asesoramiento"
+            next_action = "Reunión de asesoramiento"
+            next_note = "Cita concertada desde la primera llamada."
+        elif resultado == "No interesado":
+            next_stage = "Descartada"
+    elif tipo == "reunion_asesoramiento":
+        if resultado == "Realizada":
+            next_stage = "Estudio"
+            next_action = "Estudio financiero"
+            next_note = "Analizar viabilidad y ratios."
+        elif resultado == "Pendiente documentación":
+            next_stage = "Documentación"
+            next_action = "Solicitud documentación"
+            next_note = "Completar documentación antes del estudio."
+        elif resultado == "No viable":
+            next_stage = "Descartada"
+    elif tipo == "solicitud_documentacion":
+        if resultado == "Completa":
+            next_stage = "Estudio"
+            next_action = "Estudio financiero"
+            next_note = "Documentación completa para analizar."
+        else:
+            next_stage = "Documentación"
+    elif tipo == "estudio_financiero":
+        if resultado == "Viable":
+            next_stage = "Bancos"
+            next_action = "Presentación bancaria"
+            next_note = "Enviar expediente a entidades."
+        elif resultado == "Pendiente documentación":
+            next_stage = "Documentación"
+            next_action = "Solicitud documentación"
+            next_note = "Falta documentación para terminar el estudio."
+        elif resultado == "No viable":
+            next_stage = "Descartada"
+    elif tipo == "presentacion_bancaria":
+        if resultado == "Presentada":
+            next_stage = "Bancos"
+            next_action = "Seguimiento bancario"
+            next_note = "Hacer seguimiento de entidades."
+        elif resultado == "Pendiente completar":
+            next_stage = "Documentación"
+            next_action = "Solicitud documentación"
+            next_note = "Completar expediente antes de enviar."
+    elif tipo == "seguimiento_bancario":
+        if resultado == "Tasación solicitada":
+            next_stage = "Tasación"
+            next_action = "Tasación"
+            next_note = "Controlar cita, encargo y resultado de tasación."
+        elif resultado == "Aprobada":
+            next_stage = "FEIN / Acta"
+            next_action = "FEIN / Acta"
+            next_note = "Revisar FEIN, acta notarial y pre-firma."
+        elif resultado == "Denegada":
+            next_stage = "Descartada"
+    elif tipo == "tasacion_fin":
+        if resultado == "Tasación OK":
+            next_stage = "FEIN / Acta"
+            next_action = "FEIN / Acta"
+            next_note = "Avanzar a FEIN y acta."
+        elif resultado == "Incidencia":
+            next_stage = "Tasación"
+    elif tipo == "fein_acta":
+        if resultado == "Firmable":
+            next_stage = "Firma"
+            next_action = "Firma hipoteca"
+            next_note = "Preparar firma hipotecaria."
+        elif resultado == "Pendiente":
+            next_stage = "FEIN / Acta"
+    elif tipo == "firma_hipoteca":
+        if resultado == "Firmada":
+            convert_fin_asesoramiento_to_hipoteca(conn, empresa_id, current, now)
+            return "Convertido"
+        elif resultado == "Cancelada":
+            next_stage = "Descartada"
+        elif resultado == "Pospuesta":
+            next_stage = "Firma"
+    if next_stage:
+        fin_sync_stage(conn, asesoramiento_id, next_stage, now)
+    if next_action:
+        ensure_fin_followup_action(
+            conn,
+            empresa_id,
+            asesoramiento_id,
+            current["cliente1_id"],
+            current["cliente1_nombre"],
+            action_row["responsable"],
+            next_action,
+            next_note,
+            now,
+        )
+    return next_stage or normalize_fin_stage(current["estado"])
+
+
 def get_inmueble_propietarios(conn, inmueble_id):
     if not inmueble_id:
         return []
@@ -11647,6 +11968,7 @@ def ensure_tables(db_path):
     ensure_column(conn, "acciones", "responsable", "responsable TEXT")
     ensure_column(conn, "acciones", "recordatorio_min", "recordatorio_min INTEGER")
     ensure_column(conn, "acciones", "inmueble_id", "inmueble_id TEXT")
+    ensure_column(conn, "acciones", "asesoramiento_id", "asesoramiento_id TEXT")
     ensure_column(conn, "acciones", "resultado_cierre", "resultado_cierre TEXT")
     ensure_column(conn, "acciones", "estado_siguiente", "estado_siguiente TEXT")
     ensure_column(conn, "acciones", "documento_tipo", "documento_tipo TEXT")
@@ -12465,6 +12787,437 @@ def fetch_workspace_gestoria_overview(conn, workspace_id):
         ],
         "acciones_vencidas": [dict(r) for r in acciones_vencidas],
         "presupuestos_estudio": [dict(r) for r in presupuestos_estudio],
+    }
+
+
+def fetch_workspace_seguros_overview(conn, workspace_id):
+    empresa_ids = fetch_workspace_company_ids(conn, workspace_id)
+    if not empresa_ids:
+        return {
+            "counts": {
+                "total": 0,
+                "en_vigor": 0,
+                "presupuesto": 0,
+                "renovaciones_30d": 0,
+                "prima_total": 0,
+                "alertas_abiertas": 0,
+            },
+            "renovaciones_proximas": [],
+            "alertas_comerciales": [],
+            "top_companias": [],
+            "top_ramos": [],
+        }
+    placeholders = ",".join(["?"] * len(empresa_ids))
+    bucket_expr = seguro_estado_bucket_expr("s")
+    fecha_efecto_expr = seguro_date_sql("fecha_efecto", "s")
+    fecha_venc_expr = (
+        f"COALESCE({seguro_date_sql('fecha_vencimiento', 's')}, "
+        f"CASE WHEN {fecha_efecto_expr} IS NOT NULL THEN DATE({fecha_efecto_expr}, '+1 year') ELSE NULL END)"
+    )
+    compania_expr = "LOWER(TRIM(COALESCE(s.compania, '')))"
+    today = datetime.now().date().isoformat()
+
+    totals = conn.execute(
+        f"""
+        SELECT
+          COUNT(*) AS total,
+          SUM(CASE WHEN {bucket_expr} = 'en_vigor' THEN 1 ELSE 0 END) AS en_vigor,
+          SUM(CASE WHEN {bucket_expr} = 'presupuesto' THEN 1 ELSE 0 END) AS presupuesto,
+          SUM(CASE WHEN {fecha_venc_expr} IS NOT NULL
+                    AND DATE({fecha_venc_expr}) BETWEEN DATE(?) AND DATE(?, '+30 day')
+                    AND {bucket_expr} IN ('en_vigor', 'contratada')
+              THEN 1 ELSE 0 END) AS renovaciones_30d,
+          SUM(COALESCE(s.prima_total, s.prima_neta, 0)) AS prima_total
+        FROM seguros s
+        WHERE s.empresa_id IN ({placeholders})
+          AND ({compania_expr} = '' OR {compania_expr} != 'sin seguro')
+        """,
+        [today, today, *empresa_ids],
+    ).fetchone()
+
+    renovaciones = conn.execute(
+        f"""
+        SELECT
+          COALESCE(NULLIF(TRIM(s.tomador), ''), c.nombre, '') AS tomador,
+          COALESCE(NULLIF(TRIM(s.compania), ''), 'Sin compañía') AS compania,
+          COALESCE(NULLIF(TRIM(s.ramo), ''), 'Sin ramo') AS ramo,
+          {fecha_venc_expr} AS fecha_vencimiento
+        FROM seguros s
+        LEFT JOIN clientes c ON c.id = s.cliente_id
+        WHERE s.empresa_id IN ({placeholders})
+          AND {fecha_venc_expr} IS NOT NULL
+          AND DATE({fecha_venc_expr}) BETWEEN DATE(?) AND DATE(?, '+30 day')
+          AND {bucket_expr} IN ('en_vigor', 'contratada')
+          AND ({compania_expr} = '' OR {compania_expr} != 'sin seguro')
+        ORDER BY DATE({fecha_venc_expr}) ASC, COALESCE(NULLIF(TRIM(s.tomador), ''), c.nombre, '') COLLATE NOCASE ASC
+        LIMIT 12
+        """,
+        [*empresa_ids, today, today],
+    ).fetchall()
+
+    alertas = conn.execute(
+        f"""
+        SELECT
+          a.fecha,
+          a.hora,
+          COALESCE(c.nombre, a.cliente_nombre, '') AS cliente,
+          a.tipo,
+          a.estado
+        FROM acciones a
+        LEFT JOIN clientes c ON c.id = a.cliente_id
+        WHERE a.empresa_id IN ({placeholders})
+          AND LOWER(TRIM(COALESCE(a.servicio, ''))) = 'seguros'
+          AND (a.estado IS NULL OR LOWER(TRIM(a.estado)) NOT IN ('hecho', 'finalizado', 'cancelado'))
+        ORDER BY
+          CASE
+            WHEN a.fecha IS NULL OR TRIM(a.fecha) = '' THEN 1
+            WHEN DATE(a.fecha) < DATE(?) THEN 0
+            ELSE 1
+          END,
+          DATE(COALESCE(a.fecha, '9999-12-31')) ASC,
+          TIME(COALESCE(a.hora, '23:59')) ASC
+        LIMIT 12
+        """,
+        [*empresa_ids, today],
+    ).fetchall()
+
+    companias_rows = conn.execute(
+        f"""
+        SELECT
+          COALESCE(NULLIF(TRIM(s.compania), ''), 'Sin compañía') AS label,
+          COUNT(*) AS total,
+          SUM(COALESCE(s.prima_total, s.prima_neta, 0)) AS prima_total
+        FROM seguros s
+        WHERE s.empresa_id IN ({placeholders})
+          AND ({compania_expr} = '' OR {compania_expr} != 'sin seguro')
+        GROUP BY COALESCE(NULLIF(TRIM(s.compania), ''), 'Sin compañía')
+        ORDER BY COUNT(*) DESC, label COLLATE NOCASE ASC
+        LIMIT 8
+        """,
+        empresa_ids,
+    ).fetchall()
+
+    ramos_rows = conn.execute(
+        f"""
+        SELECT
+          COALESCE(NULLIF(TRIM(s.ramo), ''), 'Sin ramo') AS label,
+          COUNT(*) AS total,
+          SUM(COALESCE(s.prima_total, s.prima_neta, 0)) AS prima_total
+        FROM seguros s
+        WHERE s.empresa_id IN ({placeholders})
+          AND ({compania_expr} = '' OR {compania_expr} != 'sin seguro')
+        GROUP BY COALESCE(NULLIF(TRIM(s.ramo), ''), 'Sin ramo')
+        ORDER BY COUNT(*) DESC, label COLLATE NOCASE ASC
+        LIMIT 8
+        """,
+        empresa_ids,
+    ).fetchall()
+
+    return {
+        "counts": {
+            "total": int((totals["total"] if totals else 0) or 0),
+            "en_vigor": int((totals["en_vigor"] if totals else 0) or 0),
+            "presupuesto": int((totals["presupuesto"] if totals else 0) or 0),
+            "renovaciones_30d": int((totals["renovaciones_30d"] if totals else 0) or 0),
+            "prima_total": round(parse_money_value(totals["prima_total"] if totals else 0), 2),
+            "alertas_abiertas": len(alertas),
+        },
+        "renovaciones_proximas": [dict(r) for r in renovaciones],
+        "alertas_comerciales": [dict(r) for r in alertas],
+        "top_companias": [
+            {
+                "label": row["label"],
+                "total": int(row["total"] or 0),
+                "prima_total": round(parse_money_value(row["prima_total"]), 2),
+            }
+            for row in companias_rows
+        ],
+        "top_ramos": [
+            {
+                "label": row["label"],
+                "total": int(row["total"] or 0),
+                "prima_total": round(parse_money_value(row["prima_total"]), 2),
+            }
+            for row in ramos_rows
+        ],
+    }
+
+
+def fetch_workspace_fin_overview(conn, workspace_id):
+    empresa_ids = fetch_workspace_company_ids(conn, workspace_id)
+    if not empresa_ids:
+        return {
+            "counts": {
+                "total": 0,
+                "firmadas": 0,
+                "asesoramientos_abiertos": 0,
+                "encargos_abiertos": 0,
+                "comision_total": 0,
+                "alertas_abiertas": 0,
+            },
+            "asesoramientos_abiertos": [],
+            "firmas_recientes": [],
+            "alertas_comerciales": [],
+            "top_bancos": [],
+        }
+    placeholders = ",".join(["?"] * len(empresa_ids))
+    total_row = conn.execute(
+        f"""
+        SELECT
+          COUNT(*) AS total,
+          SUM(CASE WHEN fecha_firma IS NOT NULL AND TRIM(fecha_firma) <> '' THEN 1 ELSE 0 END) AS firmadas,
+          SUM(COALESCE(comision, comision_modernia, 0)) AS comision_total,
+          SUM(CASE WHEN encargo IS NOT NULL AND TRIM(encargo) <> '' AND LOWER(TRIM(encargo)) NOT IN ('no', 'rechazado', 'cancelado') THEN 1 ELSE 0 END) AS encargos_abiertos
+        FROM hipotecas
+        WHERE empresa_id IN ({placeholders})
+        """,
+        empresa_ids,
+    ).fetchone()
+    asesoramientos_abiertos = conn.execute(
+        f"""
+        SELECT
+          COUNT(*) AS total
+        FROM asesoramientos_financiacion af
+        WHERE af.empresa_id IN ({placeholders})
+          AND LOWER(COALESCE(af.estado, '')) NOT IN ('firmada', 'cerrado', 'cerrada', 'cancelado', 'cancelada', 'rechazado', 'rechazada')
+        """,
+        empresa_ids,
+    ).fetchone()
+    alertas = conn.execute(
+        f"""
+        SELECT
+          a.fecha,
+          a.hora,
+          COALESCE(c.nombre, a.cliente_nombre, '') AS cliente,
+          a.tipo,
+          a.estado
+        FROM acciones a
+        LEFT JOIN clientes c ON c.id = a.cliente_id
+        WHERE a.empresa_id IN ({placeholders})
+          AND LOWER(TRIM(COALESCE(a.servicio, ''))) = 'financiaciones'
+          AND (a.estado IS NULL OR LOWER(TRIM(a.estado)) NOT IN ('hecho', 'finalizado', 'cancelado'))
+        ORDER BY DATE(COALESCE(a.fecha, '9999-12-31')) ASC, TIME(COALESCE(a.hora, '23:59')) ASC
+        LIMIT 12
+        """,
+        empresa_ids,
+    ).fetchall()
+    asesoramientos_rows = conn.execute(
+        f"""
+        SELECT
+          af.fecha,
+          af.estado,
+          COALESCE(NULLIF(TRIM(af.cliente1_nombre), ''), NULLIF(TRIM(af.cliente2_nombre), ''), c.nombre, '') AS cliente,
+          COALESCE(af.ingresos_conjuntos, 0) AS ingresos_conjuntos
+        FROM asesoramientos_financiacion af
+        LEFT JOIN clientes c ON c.id = af.cliente1_id
+        WHERE af.empresa_id IN ({placeholders})
+          AND LOWER(COALESCE(af.estado, '')) NOT IN ('firmada', 'cerrado', 'cerrada', 'cancelado', 'cancelada', 'rechazado', 'rechazada')
+        ORDER BY DATE(COALESCE(af.fecha, af.created_at)) DESC
+        LIMIT 12
+        """,
+        empresa_ids,
+    ).fetchall()
+    firmas_rows = conn.execute(
+        f"""
+        SELECT
+          COALESCE(NULLIF(TRIM(h.cliente), ''), c.nombre, '') AS cliente,
+          COALESCE(NULLIF(TRIM(h.banco), ''), 'Sin banco') AS banco,
+          h.fecha_firma,
+          COALESCE(h.comision, h.comision_modernia, 0) AS comision
+        FROM hipotecas h
+        LEFT JOIN clientes c ON c.id = h.cliente_id
+        WHERE h.empresa_id IN ({placeholders})
+          AND h.fecha_firma IS NOT NULL
+          AND TRIM(h.fecha_firma) <> ''
+        ORDER BY DATE(h.fecha_firma) DESC
+        LIMIT 12
+        """,
+        empresa_ids,
+    ).fetchall()
+    bancos_rows = conn.execute(
+        f"""
+        SELECT
+          COALESCE(NULLIF(TRIM(h.banco), ''), 'Sin banco') AS label,
+          COUNT(*) AS total,
+          SUM(COALESCE(h.comision, h.comision_modernia, 0)) AS comision_total
+        FROM hipotecas h
+        WHERE h.empresa_id IN ({placeholders})
+        GROUP BY COALESCE(NULLIF(TRIM(h.banco), ''), 'Sin banco')
+        ORDER BY COUNT(*) DESC, label COLLATE NOCASE ASC
+        LIMIT 8
+        """,
+        empresa_ids,
+    ).fetchall()
+    return {
+        "counts": {
+            "total": int((total_row["total"] if total_row else 0) or 0),
+            "firmadas": int((total_row["firmadas"] if total_row else 0) or 0),
+            "asesoramientos_abiertos": int((asesoramientos_abiertos["total"] if asesoramientos_abiertos else 0) or 0),
+            "encargos_abiertos": int((total_row["encargos_abiertos"] if total_row else 0) or 0),
+            "comision_total": round(parse_money_value(total_row["comision_total"] if total_row else 0), 2),
+            "alertas_abiertas": len(alertas),
+        },
+        "asesoramientos_abiertos": [dict(r) for r in asesoramientos_rows],
+        "firmas_recientes": [
+            {
+                **dict(r),
+                "comision": round(parse_money_value(r["comision"]), 2),
+            }
+            for r in firmas_rows
+        ],
+        "alertas_comerciales": [dict(r) for r in alertas],
+        "top_bancos": [
+            {
+                "label": row["label"],
+                "total": int(row["total"] or 0),
+                "comision_total": round(parse_money_value(row["comision_total"]), 2),
+            }
+            for row in bancos_rows
+        ],
+    }
+
+
+def fetch_workspace_inmo_overview(conn, workspace_id):
+    empresa_ids = fetch_workspace_company_ids(conn, workspace_id)
+    if not empresa_ids:
+        return {
+            "counts": {
+                "inmuebles": 0,
+                "captaciones_activas": 0,
+                "compraventas": 0,
+                "volumen_cierre": 0,
+                "visitas_programadas": 0,
+                "demandas_activas": 0,
+            },
+            "captaciones_activas": [],
+            "operaciones_recientes": [],
+            "proximas_visitas": [],
+            "top_zonas": [],
+        }
+    placeholders = ",".join(["?"] * len(empresa_ids))
+    today = datetime.now().date().isoformat()
+    inmuebles_total = conn.execute(
+        f"SELECT COUNT(*) AS total FROM inmuebles WHERE empresa_id IN ({placeholders})",
+        empresa_ids,
+    ).fetchone()
+    captaciones_summary = conn.execute(
+        f"""
+        SELECT
+          COUNT(*) AS total,
+          SUM(CASE WHEN LOWER(COALESCE(etapa, '')) NOT IN ('cerrado negativamente', 'vendido', 'alquiler') THEN 1 ELSE 0 END) AS activas
+        FROM captaciones
+        WHERE empresa_id IN ({placeholders})
+        """,
+        empresa_ids,
+    ).fetchone()
+    operaciones_summary = conn.execute(
+        f"""
+        SELECT
+          COUNT(*) AS total,
+          SUM(COALESCE(precio_escritura, precio_contrato, precio_propuesta, 0)) AS volumen
+        FROM operaciones_inmobiliarias
+        WHERE empresa_id IN ({placeholders})
+          AND LOWER(COALESCE(tipo_operacion, '')) = 'venta'
+        """,
+        empresa_ids,
+    ).fetchone()
+    visitas_programadas = conn.execute(
+        f"""
+        SELECT COUNT(*) AS total
+        FROM visitas
+        WHERE empresa_id IN ({placeholders})
+          AND fecha IS NOT NULL
+          AND DATE(fecha) >= DATE(?)
+          AND LOWER(COALESCE(estado, '')) NOT IN ('cancelada', 'cancelado', 'hecha', 'realizada')
+        """,
+        [*empresa_ids, today],
+    ).fetchone()
+    demandas_activas = conn.execute(
+        f"""
+        SELECT COUNT(*) AS total
+        FROM demandas
+        WHERE empresa_id IN ({placeholders})
+          AND LOWER(COALESCE(estado, '')) NOT IN ('cerrada', 'cerrado', 'cancelada', 'cancelado')
+        """,
+        empresa_ids,
+    ).fetchone()
+    captaciones_rows = conn.execute(
+        f"""
+        SELECT direccion, zona, propietario, precio_objetivo
+        FROM captaciones
+        WHERE empresa_id IN ({placeholders})
+          AND LOWER(COALESCE(etapa, '')) NOT IN ('cerrado negativamente', 'vendido', 'alquiler')
+        ORDER BY COALESCE(updated_at, created_at) DESC
+        LIMIT 12
+        """,
+        empresa_ids,
+    ).fetchall()
+    operaciones_rows = conn.execute(
+        f"""
+        SELECT direccion, tipo_operacion, COALESCE(fecha_operacion, fecha_escritura, fecha_contrato, fecha_propuesta) AS fecha_operacion,
+               precio_propuesta, precio_contrato, precio_escritura
+        FROM operaciones_inmobiliarias
+        WHERE empresa_id IN ({placeholders})
+        ORDER BY DATE(COALESCE(fecha_operacion, fecha_escritura, fecha_contrato, fecha_propuesta, created_at)) DESC
+        LIMIT 12
+        """,
+        empresa_ids,
+    ).fetchall()
+    visitas_rows = conn.execute(
+        f"""
+        SELECT
+          v.fecha,
+          v.hora,
+          v.estado,
+          COALESCE(i.direccion, '') AS inmueble,
+          COALESCE(c.nombre, '') AS cliente
+        FROM visitas v
+        LEFT JOIN inmuebles i ON i.id = v.inmueble_id
+        LEFT JOIN demandas d ON d.id = v.demanda_id
+        LEFT JOIN clientes c ON c.id = d.cliente_id
+        WHERE v.empresa_id IN ({placeholders})
+          AND v.fecha IS NOT NULL
+          AND DATE(v.fecha) >= DATE(?)
+          AND LOWER(COALESCE(v.estado, '')) NOT IN ('cancelada', 'cancelado', 'hecha', 'realizada')
+        ORDER BY DATE(v.fecha) ASC, TIME(COALESCE(v.hora, '23:59')) ASC
+        LIMIT 12
+        """,
+        [*empresa_ids, today],
+    ).fetchall()
+    zonas_rows = conn.execute(
+        f"""
+        SELECT
+          COALESCE(NULLIF(TRIM(zona), ''), 'Sin zona') AS label,
+          COUNT(*) AS total,
+          SUM(COALESCE(precio_objetivo, 0)) AS precio_total
+        FROM captaciones
+        WHERE empresa_id IN ({placeholders})
+        GROUP BY COALESCE(NULLIF(TRIM(zona), ''), 'Sin zona')
+        ORDER BY COUNT(*) DESC, label COLLATE NOCASE ASC
+        LIMIT 8
+        """,
+        empresa_ids,
+    ).fetchall()
+    return {
+        "counts": {
+            "inmuebles": int((inmuebles_total["total"] if inmuebles_total else 0) or 0),
+            "captaciones_activas": int((captaciones_summary["activas"] if captaciones_summary else 0) or 0),
+            "compraventas": int((operaciones_summary["total"] if operaciones_summary else 0) or 0),
+            "volumen_cierre": round(parse_money_value(operaciones_summary["volumen"] if operaciones_summary else 0), 2),
+            "visitas_programadas": int((visitas_programadas["total"] if visitas_programadas else 0) or 0),
+            "demandas_activas": int((demandas_activas["total"] if demandas_activas else 0) or 0),
+        },
+        "captaciones_activas": [dict(r) for r in captaciones_rows],
+        "operaciones_recientes": [dict(r) for r in operaciones_rows],
+        "proximas_visitas": [dict(r) for r in visitas_rows],
+        "top_zonas": [
+            {
+                "label": row["label"],
+                "total": int(row["total"] or 0),
+                "precio_total": round(parse_money_value(row["precio_total"]), 2),
+            }
+            for row in zonas_rows
+        ],
     }
 
 
@@ -19373,57 +20126,7 @@ class Handler(BaseHTTPRequestHandler):
             if not row:
                 json_response(self, {"error": "Registro no encontrado"}, status=404)
                 return
-            cliente_nombre = row["cliente1_nombre"] or ""
-            if row["cliente2_nombre"]:
-                cliente_nombre = f"{cliente_nombre} / {row['cliente2_nombre']}".strip(" /")
-            fecha = row["fecha"] or ""
-            try:
-                anio = int(fecha.split("/")[-1]) if "/" in fecha else int(fecha.split("-")[0])
-            except Exception:
-                anio = None
-            hipoteca_id = os.urandom(16).hex()
-            conn.execute(
-                """
-                INSERT INTO hipotecas (
-                  id, empresa_id, cliente, cliente_id, banco, precio, importe_hipoteca, porcentaje,
-                  entrada, comision, oficina, fecha_encargo, encargo, tipo_hipoteca,
-                  fecha_firma, cesion, comision_juan, comision_modernia, inmobiliaria_compra,
-                  asesor, estado, anio, created_at, updated_at
-                ) VALUES (
-                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
-                )
-                """,
-                (
-                    hipoteca_id,
-                    empresa["id"],
-                    cliente_nombre,
-                    row["cliente1_id"],
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    fecha,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    row["inmobiliaria_asesor"],
-                    row["asesor"],
-                    "Pendiente",
-                    anio,
-                    now,
-                    now,
-                ),
-            )
-            conn.execute(
-                "UPDATE asesoramientos_financiacion SET estado = ?, updated_at = datetime(?) WHERE id = ?",
-                ("Convertido", now, record_id),
-            )
+            hipoteca_id = convert_fin_asesoramiento_to_hipoteca(conn, empresa["id"], row, now)
             json_response(self, {"hipoteca_id": hipoteca_id})
         elif parsed.path == "/api/hipotecas_update":
             record_id = payload.get("id")
@@ -20524,18 +21227,34 @@ class Handler(BaseHTTPRequestHandler):
             if not asesoramiento_id:
                 json_response(self, {"error": "asesoramiento_id requerido"}, status=400)
                 return
+            ases_row = conn.execute(
+                "SELECT estado FROM asesoramientos_financiacion WHERE id = ? LIMIT 1",
+                (asesoramiento_id,),
+            ).fetchone()
+            stage = normalize_fin_stage(ases_row["estado"] if ases_row else "")
             conn.execute(
                 "DELETE FROM fin_checklist WHERE asesoramiento_id = ?",
                 (asesoramiento_id,),
             )
-            tasks = [
-                "DNI clientes",
+            base_tasks = [
+                "DNI/NIE de titulares",
                 "Vida laboral",
-                "Nóminas últimos meses",
+                "Nóminas o ingresos recientes",
                 "Declaración de la renta",
-                "Preaprobación bancaria",
-                "Tasación",
             ]
+            stage_tasks = {
+                "Lead": ["Primera llamada y encaje del cliente"],
+                "Asesoramiento": ["Reunión de asesoramiento", "Definir inmueble objetivo y aportación disponible"],
+                "Documentación": ["Completar documentación pendiente", "Revisar endeudamiento y préstamos activos"],
+                "Estudio": ["Calcular ratio de endeudamiento", "Validar viabilidad financiera"],
+                "Bancos": ["Presentar expediente a entidades", "Hacer seguimiento bancario"],
+                "Tasación": ["Encargar tasación", "Revisar resultado de tasación"],
+                "FEIN / Acta": ["Recibir FEIN", "Controlar acta notarial previa"],
+                "Firma": ["Coordinar firma y documentación final"],
+                "Convertido": ["Hipoteca convertida y seguimiento post-firma"],
+                "Descartada": ["Cerrar expediente y documentar motivo"],
+            }
+            tasks = base_tasks + stage_tasks.get(stage, [])
             for tarea in tasks:
                 conn.execute(
                     """
@@ -22581,18 +23300,22 @@ class Handler(BaseHTTPRequestHandler):
             estado = str(payload.get("estado") or "").strip() or "Pendiente"
             resultado_cierre = str(payload.get("resultado_cierre") or "").strip()
             estado_siguiente = str(payload.get("estado_siguiente") or "").strip()
-            validation_error = validate_inmo_action_result(tipo, estado, resultado_cierre)
+            servicio_norm = normalize_lookup_text(servicio)
+            if servicio_norm == "financiaciones":
+                validation_error = validate_fin_action_result(tipo, estado, resultado_cierre)
+            else:
+                validation_error = validate_inmo_action_result(tipo, estado, resultado_cierre)
             if validation_error:
                 json_response(self, {"error": validation_error}, status=400)
                 return
             conn.execute(
                 """
                 INSERT INTO acciones (
-                  id, empresa_id, servicio, cliente_id, inmueble_id, cliente_nombre,
+                  id, empresa_id, servicio, cliente_id, inmueble_id, asesoramiento_id, cliente_nombre,
                   fecha, hora, tipo, responsable, estado, resultado_cierre, estado_siguiente,
                   documento_tipo, importe_propuesta, notas, recordatorio_min, created_at, updated_at
                 ) VALUES (
-                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
                 )
                 """,
                 (
@@ -22601,6 +23324,7 @@ class Handler(BaseHTTPRequestHandler):
                     servicio,
                     payload.get("cliente_id"),
                     payload.get("inmueble_id"),
+                    payload.get("asesoramiento_id"),
                     payload.get("cliente_nombre"),
                     payload.get("fecha"),
                     payload.get("hora"),
@@ -22627,6 +23351,12 @@ class Handler(BaseHTTPRequestHandler):
                     estado_actual = normalize_lookup_text((inmueble["estado"] if inmueble else "") or "")
                     if estado_actual in {"", "noticia"}:
                         sync_inmueble_stage_for_action(conn, inmueble_id, "adquisicion", now)
+            elif servicio_norm == "financiaciones":
+                action_row = conn.execute(
+                    "SELECT * FROM acciones WHERE rowid = last_insert_rowid()"
+                ).fetchone()
+                if action_row and str(action_row["estado"] or "").strip().lower() != "pendiente":
+                    apply_fin_action_workflow(conn, empresa["id"], action_row, now)
         elif parsed.path == "/api/acciones_update":
             record_id = payload.get("id")
             if not record_id:
@@ -22654,6 +23384,7 @@ class Handler(BaseHTTPRequestHandler):
                 "cliente_id",
                 "cliente_nombre",
                 "inmueble_id",
+                "asesoramiento_id",
                 "recordatorio_min",
             ):
                 if key in payload:
@@ -22669,7 +23400,11 @@ class Handler(BaseHTTPRequestHandler):
             estado_siguiente_final = str(
                 updates.get("estado_siguiente") if "estado_siguiente" in updates else current["estado_siguiente"] or ""
             ).strip()
-            validation_error = validate_inmo_action_result(tipo_final, estado_final, resultado_final)
+            servicio_final = str(current["servicio"] or "").strip()
+            if normalize_lookup_text(servicio_final) == "financiaciones":
+                validation_error = validate_fin_action_result(tipo_final, estado_final, resultado_final)
+            else:
+                validation_error = validate_inmo_action_result(tipo_final, estado_final, resultado_final)
             if validation_error:
                 json_response(self, {"error": validation_error}, status=400)
                 return
@@ -22685,6 +23420,8 @@ class Handler(BaseHTTPRequestHandler):
                 "SELECT * FROM acciones WHERE id = ? LIMIT 1",
                 (record_id,),
             ).fetchone()
+            if normalize_lookup_text(servicio_final) == "financiaciones" and estado_final.lower() != "pendiente":
+                apply_fin_action_workflow(conn, empresa["id"], action_row, now)
             if tipo_norm == "cita_adquisicion" and inmueble_id and estado_final.lower() != "pendiente":
                 resultado_norm = normalize_lookup_text(resultado_final)
                 destino = ""
@@ -23414,6 +24151,30 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, fetch_workspace_gestoria_overview(conn, workspace_id))
             return
 
+        if path == "/api/workspace_seguros_overview":
+            workspace_id = params.get("workspace_id", [""])[0]
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            json_response(self, fetch_workspace_seguros_overview(conn, workspace_id))
+            return
+
+        if path == "/api/workspace_fin_overview":
+            workspace_id = params.get("workspace_id", [""])[0]
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            json_response(self, fetch_workspace_fin_overview(conn, workspace_id))
+            return
+
+        if path == "/api/workspace_inmo_overview":
+            workspace_id = params.get("workspace_id", [""])[0]
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            json_response(self, fetch_workspace_inmo_overview(conn, workspace_id))
+            return
+
         if path == "/api/workspace_series":
             workspace_id = params.get("workspace_id", [""])[0]
             if not workspace_id:
@@ -24030,27 +24791,39 @@ class Handler(BaseHTTPRequestHandler):
             servicio = params.get("servicio", [""])[0]
             cliente_id = params.get("cliente_id", [""])[0]
             inmueble_id = params.get("inmueble_id", [""])[0]
+            asesoramiento_id = params.get("asesoramiento_id", [""])[0]
             if not servicio:
                 json_response(self, {"error": "servicio requerido"}, status=400)
                 return
             rows = conn.execute(
                 """
                 SELECT
-                  a.id, a.cliente_id, a.fecha, a.hora,
+                  a.id, a.cliente_id, a.asesoramiento_id, a.fecha, a.hora,
                   COALESCE(c.nombre, a.cliente_nombre) AS cliente,
                   a.tipo, a.responsable, a.estado, a.resultado_cierre, a.estado_siguiente,
                   a.documento_tipo, a.importe_propuesta,
                   a.notas, a.servicio, a.recordatorio_min, a.inmueble_id
                 FROM acciones a
                 LEFT JOIN clientes c ON c.id = a.cliente_id
-                WHERE a.servicio = ?
+                WHERE LOWER(a.servicio) = LOWER(?)
                   AND (? = '' OR a.empresa_id = ?)
                   AND (? = '' OR a.cliente_id = ?)
                   AND (? = '' OR a.inmueble_id = ?)
+                  AND (? = '' OR a.asesoramiento_id = ?)
                 ORDER BY a.fecha DESC, a.hora DESC
                 LIMIT 300
                 """,
-                (servicio, empresa_id, empresa_id, cliente_id, cliente_id, inmueble_id, inmueble_id),
+                (
+                    servicio,
+                    empresa_id,
+                    empresa_id,
+                    cliente_id,
+                    cliente_id,
+                    inmueble_id,
+                    inmueble_id,
+                    asesoramiento_id,
+                    asesoramiento_id,
+                ),
             ).fetchall()
             json_response(self, {"rows": [dict(r) for r in rows]})
             return

@@ -1140,6 +1140,10 @@ const state = {
   gestoriaCrmView: "crm",
   segurosTab: "dashboard",
   hipotecaAltaView: "dashboard",
+  finSelectedAsesoramientoId: "",
+  finSelectedAsesoramiento: null,
+  finAsesoramientosRows: [],
+  finAgendaRows: [],
   clienteDocsTab: "seguros",
   segurosBdtCache: null,
   hipotecaBdtCache: null,
@@ -1236,6 +1240,9 @@ const workspaceClientRefreshBtn = document.getElementById("workspaceClientRefres
 const workspaceClientStatus = document.getElementById("workspaceClientStatus");
 const workspaceClientDetail = document.getElementById("workspaceClientDetail");
 const workspaceGestoriaOverview = document.getElementById("workspaceGestoriaOverview");
+const workspaceSegurosOverview = document.getElementById("workspaceSegurosOverview");
+const workspaceFinOverview = document.getElementById("workspaceFinOverview");
+const workspaceInmoOverview = document.getElementById("workspaceInmoOverview");
 const workspaceBillingSummary = document.getElementById("workspaceBillingSummary");
 const workspaceDocumentHub = document.getElementById("workspaceDocumentHub");
 const workspaceBillingForm = document.getElementById("workspaceBillingForm");
@@ -1926,9 +1933,13 @@ const finCrmTable = document.getElementById("finCrmTable");
 const finCrmInfo = document.getElementById("finCrmInfo");
 const finAgendaForm = document.getElementById("finAgendaForm");
 const finAgendaStatus = document.getElementById("finAgendaStatus");
+const finAgendaAsesoramientoId = document.getElementById("finAgendaAsesoramientoId");
+const finAgendaTipo = document.getElementById("finAgendaTipo");
 const finAgendaClienteInput = document.getElementById("finAgendaClienteInput");
 const finAgendaClienteId = document.getElementById("finAgendaClienteId");
 const finAgendaClientes = document.getElementById("finAgendaClientes");
+const finSelectedAsesoramientoLabel = document.getElementById("finSelectedAsesoramientoLabel");
+const finCreateRecommendedAction = document.getElementById("finCreateRecommendedAction");
 const actionModal = document.getElementById("actionModal");
 const actionModalClose = document.getElementById("actionModalClose");
 const actionModalClienteInput = document.getElementById("actionModalClienteInput");
@@ -2072,6 +2083,8 @@ const hipotecaDashboardPanel = document.getElementById("hipotecaDashboardPanel")
 const hipotecaAltaPanel = document.getElementById("hipotecaAltaPanel");
 const hipotecaBdtPanel = document.getElementById("hipotecaBdtPanel");
 const hipotecaContabilidadPanel = document.getElementById("hipotecaContabilidadPanel");
+const hipotecaWorkflowStageBoard = document.getElementById("hipotecaWorkflowStageBoard");
+const hipotecaWorkflowStatus = document.getElementById("hipotecaWorkflowStatus");
 const hipotecaBdtSearch = document.getElementById("hipotecaBdtSearch");
 const hipotecaBdtRefresh = document.getElementById("hipotecaBdtRefresh");
 const hipotecaBdtExcelFirmadas = document.getElementById("hipotecaBdtExcelFirmadas");
@@ -3556,9 +3569,21 @@ const WORKSPACE_LAUNCHERS = {
     actionLabel: "Ver gestión",
     action: () => workspaceGestoriaOverview?.scrollIntoView({ behavior: "smooth", block: "start" }),
   },
-  seguros: { label: "Seguros", actionLabel: "Abrir CRM", action: () => openSegurosCrm() },
-  inmobiliaria: { label: "Inmobiliaria", actionLabel: "Abrir CRM", action: () => openCrmInmobiliario() },
-  financiacion: { label: "Financiación", actionLabel: "Abrir CRM", action: () => openFinCrm() },
+  seguros: {
+    label: "Seguros",
+    actionLabel: "Ver cartera",
+    action: () => workspaceSegurosOverview?.scrollIntoView({ behavior: "smooth", block: "start" }),
+  },
+  inmobiliaria: {
+    label: "Inmobiliaria",
+    actionLabel: "Ver pipeline",
+    action: () => workspaceInmoOverview?.scrollIntoView({ behavior: "smooth", block: "start" }),
+  },
+  financiacion: {
+    label: "Financiación",
+    actionLabel: "Ver pipeline",
+    action: () => workspaceFinOverview?.scrollIntoView({ behavior: "smooth", block: "start" }),
+  },
   fincas: { label: "Fincas", actionLabel: "Próximo", action: null },
   facturacion: {
     label: "Facturación",
@@ -4071,6 +4096,273 @@ const renderWorkspaceGestoriaOverview = (payload = {}) => {
             </div>
           `,
           "Sin presupuestos en estudio."
+        )}
+      </div>
+    </div>
+  `;
+};
+
+const renderWorkspaceSegurosOverview = (payload = {}) => {
+  if (!workspaceSegurosOverview) return;
+  const counts = payload.counts || {};
+  const renovaciones = Array.isArray(payload.renovaciones_proximas) ? payload.renovaciones_proximas : [];
+  const alertas = Array.isArray(payload.alertas_comerciales) ? payload.alertas_comerciales : [];
+  const companias = Array.isArray(payload.top_companias) ? payload.top_companias : [];
+  const ramos = Array.isArray(payload.top_ramos) ? payload.top_ramos : [];
+  const listHtml = (rows = [], formatter, emptyText) =>
+    rows.length
+      ? `<div class="workspace-billing-list">${rows.map((row) => formatter(row)).join("")}</div>`
+      : `<p class="muted">${emptyText}</p>`;
+  workspaceSegurosOverview.innerHTML = `
+    <div class="workspace-gestoria-grid workspace-mini-kpis">
+      <div class="workspace-mini-kpi"><span>Pólizas</span><strong>${numberFormatter.format(Number(counts.total || 0))}</strong></div>
+      <div class="workspace-mini-kpi"><span>En vigor</span><strong>${numberFormatter.format(Number(counts.en_vigor || 0))}</strong></div>
+      <div class="workspace-mini-kpi"><span>Presupuestos</span><strong>${numberFormatter.format(Number(counts.presupuesto || 0))}</strong></div>
+      <div class="workspace-mini-kpi"><span>Renovaciones 30d</span><strong>${numberFormatter.format(Number(counts.renovaciones_30d || 0))}</strong></div>
+      <div class="workspace-mini-kpi"><span>Prima anual</span><strong>${formatEuros(Number(counts.prima_total || 0))}</strong></div>
+      <div class="workspace-mini-kpi"><span>Alertas abiertas</span><strong>${numberFormatter.format(Number(counts.alertas_abiertas || 0))}</strong></div>
+    </div>
+    <div class="workspace-gestoria-columns">
+      <div class="workspace-gestoria-card">
+        <h4>Renovaciones próximas</h4>
+        ${listHtml(
+          renovaciones,
+          (row) => `
+            <div class="workspace-billing-row">
+              <div>
+                <strong>${row.tomador || row.cliente || "-"}</strong>
+                <div class="muted">${row.compania || "Sin compañía"}${row.ramo ? ` · ${row.ramo}` : ""}</div>
+              </div>
+              <div class="workspace-billing-meta"><span>${row.fecha_vencimiento || "Sin fecha"}</span></div>
+            </div>
+          `,
+          "Sin renovaciones cercanas."
+        )}
+      </div>
+      <div class="workspace-gestoria-card">
+        <h4>Alertas comerciales</h4>
+        ${listHtml(
+          alertas,
+          (row) => `
+            <div class="workspace-billing-row">
+              <div>
+                <strong>${row.cliente || "-"}</strong>
+                <div class="muted">${row.tipo || "Acción"}${row.fecha ? ` · ${row.fecha}` : ""}</div>
+              </div>
+              <div class="workspace-billing-meta"><span>${row.estado || "Pendiente"}</span></div>
+            </div>
+          `,
+          "Sin alertas abiertas."
+        )}
+      </div>
+      <div class="workspace-gestoria-card">
+        <h4>Compañías principales</h4>
+        ${listHtml(
+          companias,
+          (row) => `
+            <div class="workspace-billing-row">
+              <div>
+                <strong>${row.label || "Sin compañía"}</strong>
+                <div class="muted">${numberFormatter.format(Number(row.total || 0))} pólizas</div>
+              </div>
+              <div class="workspace-billing-meta"><span>${formatEuros(Number(row.prima_total || 0))}</span></div>
+            </div>
+          `,
+          "Sin distribución por compañía."
+        )}
+      </div>
+      <div class="workspace-gestoria-card">
+        <h4>Ramos principales</h4>
+        ${listHtml(
+          ramos,
+          (row) => `
+            <div class="workspace-billing-row">
+              <div>
+                <strong>${row.label || "Sin ramo"}</strong>
+                <div class="muted">${numberFormatter.format(Number(row.total || 0))} pólizas</div>
+              </div>
+              <div class="workspace-billing-meta"><span>${formatEuros(Number(row.prima_total || 0))}</span></div>
+            </div>
+          `,
+          "Sin distribución por ramo."
+        )}
+      </div>
+    </div>
+  `;
+};
+
+const renderWorkspaceFinOverview = (payload = {}) => {
+  if (!workspaceFinOverview) return;
+  const counts = payload.counts || {};
+  const asesoramientos = Array.isArray(payload.asesoramientos_abiertos) ? payload.asesoramientos_abiertos : [];
+  const firmas = Array.isArray(payload.firmas_recientes) ? payload.firmas_recientes : [];
+  const alertas = Array.isArray(payload.alertas_comerciales) ? payload.alertas_comerciales : [];
+  const bancos = Array.isArray(payload.top_bancos) ? payload.top_bancos : [];
+  const listHtml = (rows = [], formatter, emptyText) =>
+    rows.length
+      ? `<div class="workspace-billing-list">${rows.map((row) => formatter(row)).join("")}</div>`
+      : `<p class="muted">${emptyText}</p>`;
+  workspaceFinOverview.innerHTML = `
+    <div class="workspace-gestoria-grid workspace-mini-kpis">
+      <div class="workspace-mini-kpi"><span>Hipotecas</span><strong>${numberFormatter.format(Number(counts.total || 0))}</strong></div>
+      <div class="workspace-mini-kpi"><span>Firmadas</span><strong>${numberFormatter.format(Number(counts.firmadas || 0))}</strong></div>
+      <div class="workspace-mini-kpi"><span>Asesoramientos abiertos</span><strong>${numberFormatter.format(Number(counts.asesoramientos_abiertos || 0))}</strong></div>
+      <div class="workspace-mini-kpi"><span>Encargos</span><strong>${numberFormatter.format(Number(counts.encargos_abiertos || 0))}</strong></div>
+      <div class="workspace-mini-kpi"><span>Comisión estimada</span><strong>${formatEuros(Number(counts.comision_total || 0))}</strong></div>
+      <div class="workspace-mini-kpi"><span>Alertas abiertas</span><strong>${numberFormatter.format(Number(counts.alertas_abiertas || 0))}</strong></div>
+    </div>
+    <div class="workspace-gestoria-columns">
+      <div class="workspace-gestoria-card">
+        <h4>Asesoramientos abiertos</h4>
+        ${listHtml(
+          asesoramientos,
+          (row) => `
+            <div class="workspace-billing-row">
+              <div>
+                <strong>${row.cliente || "-"}</strong>
+                <div class="muted">${row.estado || "Pendiente"}${row.fecha ? ` · ${row.fecha}` : ""}</div>
+              </div>
+              <div class="workspace-billing-meta"><span>${formatEuros(Number(row.ingresos_conjuntos || 0))}</span></div>
+            </div>
+          `,
+          "Sin asesoramientos abiertos."
+        )}
+      </div>
+      <div class="workspace-gestoria-card">
+        <h4>Firmas recientes</h4>
+        ${listHtml(
+          firmas,
+          (row) => `
+            <div class="workspace-billing-row">
+              <div>
+                <strong>${row.cliente || "-"}</strong>
+                <div class="muted">${row.banco || "Sin banco"}${row.fecha_firma ? ` · ${row.fecha_firma}` : ""}</div>
+              </div>
+              <div class="workspace-billing-meta"><span>${formatEuros(Number(row.comision || 0))}</span></div>
+            </div>
+          `,
+          "Sin firmas recientes."
+        )}
+      </div>
+      <div class="workspace-gestoria-card">
+        <h4>Alertas comerciales</h4>
+        ${listHtml(
+          alertas,
+          (row) => `
+            <div class="workspace-billing-row">
+              <div>
+                <strong>${row.cliente || "-"}</strong>
+                <div class="muted">${row.tipo || "Acción"}${row.fecha ? ` · ${row.fecha}` : ""}</div>
+              </div>
+              <div class="workspace-billing-meta"><span>${row.estado || "Pendiente"}</span></div>
+            </div>
+          `,
+          "Sin alertas comerciales."
+        )}
+      </div>
+      <div class="workspace-gestoria-card">
+        <h4>Bancos principales</h4>
+        ${listHtml(
+          bancos,
+          (row) => `
+            <div class="workspace-billing-row">
+              <div>
+                <strong>${row.label || "Sin banco"}</strong>
+                <div class="muted">${numberFormatter.format(Number(row.total || 0))} expedientes</div>
+              </div>
+              <div class="workspace-billing-meta"><span>${formatEuros(Number(row.comision_total || 0))}</span></div>
+            </div>
+          `,
+          "Sin distribución por banco."
+        )}
+      </div>
+    </div>
+  `;
+};
+
+const renderWorkspaceInmoOverview = (payload = {}) => {
+  if (!workspaceInmoOverview) return;
+  const counts = payload.counts || {};
+  const captaciones = Array.isArray(payload.captaciones_activas) ? payload.captaciones_activas : [];
+  const operaciones = Array.isArray(payload.operaciones_recientes) ? payload.operaciones_recientes : [];
+  const visitas = Array.isArray(payload.proximas_visitas) ? payload.proximas_visitas : [];
+  const zonas = Array.isArray(payload.top_zonas) ? payload.top_zonas : [];
+  const listHtml = (rows = [], formatter, emptyText) =>
+    rows.length
+      ? `<div class="workspace-billing-list">${rows.map((row) => formatter(row)).join("")}</div>`
+      : `<p class="muted">${emptyText}</p>`;
+  workspaceInmoOverview.innerHTML = `
+    <div class="workspace-gestoria-grid workspace-mini-kpis">
+      <div class="workspace-mini-kpi"><span>Inmuebles</span><strong>${numberFormatter.format(Number(counts.inmuebles || 0))}</strong></div>
+      <div class="workspace-mini-kpi"><span>Captaciones activas</span><strong>${numberFormatter.format(Number(counts.captaciones_activas || 0))}</strong></div>
+      <div class="workspace-mini-kpi"><span>Compraventas</span><strong>${numberFormatter.format(Number(counts.compraventas || 0))}</strong></div>
+      <div class="workspace-mini-kpi"><span>Volumen cierre</span><strong>${formatEuros(Number(counts.volumen_cierre || 0))}</strong></div>
+      <div class="workspace-mini-kpi"><span>Visitas programadas</span><strong>${numberFormatter.format(Number(counts.visitas_programadas || 0))}</strong></div>
+      <div class="workspace-mini-kpi"><span>Demandas activas</span><strong>${numberFormatter.format(Number(counts.demandas_activas || 0))}</strong></div>
+    </div>
+    <div class="workspace-gestoria-columns">
+      <div class="workspace-gestoria-card">
+        <h4>Captaciones activas</h4>
+        ${listHtml(
+          captaciones,
+          (row) => `
+            <div class="workspace-billing-row">
+              <div>
+                <strong>${row.direccion || "-"}</strong>
+                <div class="muted">${row.zona || "Sin zona"}${row.propietario ? ` · ${row.propietario}` : ""}</div>
+              </div>
+              <div class="workspace-billing-meta"><span>${formatEuros(Number(row.precio_objetivo || 0))}</span></div>
+            </div>
+          `,
+          "Sin captaciones activas."
+        )}
+      </div>
+      <div class="workspace-gestoria-card">
+        <h4>Operaciones recientes</h4>
+        ${listHtml(
+          operaciones,
+          (row) => `
+            <div class="workspace-billing-row">
+              <div>
+                <strong>${row.direccion || "-"}</strong>
+                <div class="muted">${row.tipo_operacion || "Operación"}${row.fecha_operacion ? ` · ${row.fecha_operacion}` : ""}</div>
+              </div>
+              <div class="workspace-billing-meta"><span>${formatEuros(Number(row.precio_escritura || row.precio_contrato || row.precio_propuesta || 0))}</span></div>
+            </div>
+          `,
+          "Sin operaciones recientes."
+        )}
+      </div>
+      <div class="workspace-gestoria-card">
+        <h4>Próximas visitas</h4>
+        ${listHtml(
+          visitas,
+          (row) => `
+            <div class="workspace-billing-row">
+              <div>
+                <strong>${row.inmueble || "-"}</strong>
+                <div class="muted">${row.cliente || "Sin demanda"}${row.fecha ? ` · ${row.fecha}` : ""}${row.hora ? ` ${row.hora}` : ""}</div>
+              </div>
+              <div class="workspace-billing-meta"><span>${row.estado || "Pendiente"}</span></div>
+            </div>
+          `,
+          "Sin visitas programadas."
+        )}
+      </div>
+      <div class="workspace-gestoria-card">
+        <h4>Zonas principales</h4>
+        ${listHtml(
+          zonas,
+          (row) => `
+            <div class="workspace-billing-row">
+              <div>
+                <strong>${row.label || "Sin zona"}</strong>
+                <div class="muted">${numberFormatter.format(Number(row.total || 0))} captaciones</div>
+              </div>
+              <div class="workspace-billing-meta"><span>${formatEuros(Number(row.precio_total || 0))}</span></div>
+            </div>
+          `,
+          "Sin distribución por zonas."
         )}
       </div>
     </div>
@@ -5689,7 +5981,7 @@ const renderWorkspaceDocumentHub = (data = {}) => {
 const loadWorkspaceDetail = async (workspaceId) => {
   if (!workspaceId) return;
   state.currentWorkspaceId = workspaceId;
-  const [detail, billing, docs, billingRows, budgetRows, collections, remittances, workspaceClients, health, gestoriaOverview, series, inbox, portal, portalRequests, automations, automationLogs, timeRows, fincasCommunities, fincasIncidents, fincasProviders, fincasMeetings] = await Promise.all([
+  const [detail, billing, docs, billingRows, budgetRows, collections, remittances, workspaceClients, health, gestoriaOverview, segurosOverview, finOverview, inmoOverview, series, inbox, portal, portalRequests, automations, automationLogs, timeRows, fincasCommunities, fincasIncidents, fincasProviders, fincasMeetings] = await Promise.all([
     api(`/api/workspace_detail?id=${encodeURIComponent(workspaceId)}`),
     api(`/api/workspace_billing_summary?workspace_id=${encodeURIComponent(workspaceId)}`),
     api(`/api/workspace_document_hub?workspace_id=${encodeURIComponent(workspaceId)}`),
@@ -5700,6 +5992,9 @@ const loadWorkspaceDetail = async (workspaceId) => {
     api(`/api/workspace_clientes?workspace_id=${encodeURIComponent(workspaceId)}&limit=60`),
     api(`/api/workspace_health?workspace_id=${encodeURIComponent(workspaceId)}`),
     api(`/api/workspace_gestoria_overview?workspace_id=${encodeURIComponent(workspaceId)}`),
+    api(`/api/workspace_seguros_overview?workspace_id=${encodeURIComponent(workspaceId)}`),
+    api(`/api/workspace_fin_overview?workspace_id=${encodeURIComponent(workspaceId)}`),
+    api(`/api/workspace_inmo_overview?workspace_id=${encodeURIComponent(workspaceId)}`),
     api(`/api/workspace_series?workspace_id=${encodeURIComponent(workspaceId)}`),
     api(`/api/workspace_inbox?workspace_id=${encodeURIComponent(workspaceId)}`),
     api(`/api/workspace_portal?workspace_id=${encodeURIComponent(workspaceId)}`),
@@ -5729,6 +6024,9 @@ const loadWorkspaceDetail = async (workspaceId) => {
   renderWorkspaceBillingSummary(billing || {});
   renderWorkspaceBillingList(billingRows.rows || []);
   renderWorkspaceGestoriaOverview(gestoriaOverview || {});
+  renderWorkspaceSegurosOverview(segurosOverview || {});
+  renderWorkspaceFinOverview(finOverview || {});
+  renderWorkspaceInmoOverview(inmoOverview || {});
   fillWorkspaceBillingForm();
   renderWorkspaceBudgetList(budgetRows.rows || []);
   fillWorkspaceBudgetForm();
@@ -5805,6 +6103,9 @@ const loadWorkspaceCentral = async () => {
     renderWorkspaceBillingSummary({});
     renderWorkspaceBillingList([]);
     renderWorkspaceGestoriaOverview({});
+    renderWorkspaceSegurosOverview({});
+    renderWorkspaceFinOverview({});
+    renderWorkspaceInmoOverview({});
     renderWorkspaceCollectionsList([]);
     fillWorkspaceBillingForm();
     fillWorkspaceCollectionsForm();
@@ -6206,7 +6507,7 @@ const openFinCrm = () => {
   if (tableToolbar) tableToolbar.classList.add("hidden");
   if (tableContainer) tableContainer.classList.add("hidden");
   if (tableInfo) tableInfo.classList.add("hidden");
-  setHipotecaAltaView("dashboard");
+  setHipotecaAltaView("alta");
 };
 
 const openServiceCrm = (service) => {
@@ -20790,40 +21091,43 @@ const openSegurosPresupuestoEdit = (columns, row) => {
 };
 
 const loadFinCrm = () => {
-  if (!finCrmTable || !finCrmInfo) {
-    return;
-  }
   const empresa = state.empresas.find((e) => e.nombre === FIN_COMPANY);
   if (!empresa) {
-    finCrmTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
+    if (finCrmTable) {
+      finCrmTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
+    }
     return;
   }
   loadFinInmobiliarias();
+  populateAgendaClientes(finAgendaClientes, finAgendaClienteInput, finAgendaClienteId);
+  populateAgendaClientes(finCrmClientes, finCrmClienteInput, finCrmClienteId);
   const q = finCrmSearch ? finCrmSearch.value.trim() : "";
-  const params = new URLSearchParams({
-    tabla: "hipotecas",
-    empresa_id: empresa.id,
-    q,
-  });
-  api(`/api/tabla?${params.toString()}`).then((data) => {
-    const columns = data.columns || [];
-    let rows = data.rows || [];
-    const filtroCliente = finCrmClienteInput ? finCrmClienteInput.value.trim().toLowerCase() : "";
-    if (filtroCliente) {
-      const clienteIndex = columns.indexOf("cliente");
-      if (clienteIndex >= 0) {
-        rows = rows.filter((row) =>
-          String(row[clienteIndex] || "").toLowerCase().includes(filtroCliente)
-        );
+  if (finCrmTable && finCrmInfo) {
+    const params = new URLSearchParams({
+      tabla: "hipotecas",
+      empresa_id: empresa.id,
+      q,
+    });
+    api(`/api/tabla?${params.toString()}`).then((data) => {
+      const columns = data.columns || [];
+      let rows = data.rows || [];
+      const filtroCliente = finCrmClienteInput ? finCrmClienteInput.value.trim().toLowerCase() : "";
+      if (filtroCliente) {
+        const clienteIndex = columns.indexOf("cliente");
+        if (clienteIndex >= 0) {
+          rows = rows.filter((row) =>
+            String(row[clienteIndex] || "").toLowerCase().includes(filtroCliente)
+          );
+        }
       }
-    }
-    renderTableInto({ columns, rows }, finCrmTable, finCrmInfo, "Hipotecas");
-    loadAcciones("financiaciones", empresa.id, finAgendaTable, finAgendaInfo);
-    loadFinAsesoramientos(empresa.id);
-    bindMoneyInputs(finAsesoramientoForm);
-    bindIngresosConjuntos(finAsesoramientoForm);
-    bindLoanToggles(finAsesoramientoForm);
-  });
+      renderTableInto({ columns, rows }, finCrmTable, finCrmInfo, "Hipotecas");
+    });
+  }
+  loadFinAsesoramientos(empresa.id);
+  loadFinWorkflowActions(empresa.id);
+  bindMoneyInputs(finAsesoramientoForm);
+  bindIngresosConjuntos(finAsesoramientoForm);
+  bindLoanToggles(finAsesoramientoForm);
 };
 
 const loadFinInmobiliarias = () => {
@@ -21067,12 +21371,19 @@ const loadFinAsesoramientos = (empresaId) => {
   const params = new URLSearchParams({ empresa_id: empresaId, q });
   api(`/api/fin_asesoramientos?${params.toString()}`).then((data) => {
     const rows = data.rows || [];
+    state.finAsesoramientosRows = rows;
+    renderFinAsesorKpisFromRows(rows);
+    renderFinStageBoard(rows);
     if (!rows.length) {
       finAsesoramientosTable.innerHTML = "<p class='muted'>Sin asesoramientos aún.</p>";
       finAsesoramientosInfo.textContent = "";
-      renderFinAsesorKpis(empresaId);
       loadFinAlerts(empresaId);
+      selectFinAsesoramiento(null);
       return;
+    }
+    let selectedId = state.finSelectedAsesoramientoId;
+    if (!selectedId || !rows.some((row) => row.id === selectedId)) {
+      selectedId = rows[0]?.id || "";
     }
     const table = document.createElement("table");
     const thead = document.createElement("thead");
@@ -21097,6 +21408,9 @@ const loadFinAsesoramientos = (empresaId) => {
     const tbody = document.createElement("tbody");
     rows.forEach((row) => {
       const tr = document.createElement("tr");
+      if (row.id === selectedId) {
+        tr.classList.add("is-selected");
+      }
       const telefono = row.cliente1_telefono || row.cliente2_telefono || "-";
       const ingresos = row.ingresos_conjuntos || row.cliente1_ingresos || "-";
       const values = [
@@ -21105,7 +21419,7 @@ const loadFinAsesoramientos = (empresaId) => {
         row.cliente2_nombre || "-",
         telefono,
         ingresos,
-        row.estado || "-",
+        normalizeFinStage(row.estado),
         row.missing_count ? String(row.missing_count) : "-",
         row.asesor || row.inmobiliaria_asesor || "-",
       ];
@@ -21124,11 +21438,23 @@ const loadFinAsesoramientos = (empresaId) => {
       const editBtn = document.createElement("button");
       editBtn.type = "button";
       editBtn.className = "secondary";
-      editBtn.textContent = "Editar";
+      editBtn.textContent = "Abrir";
       editBtn.addEventListener("click", () => {
-        fillFinAsesoramientoForm(row);
+        selectFinAsesoramiento(row);
         if (finAsesoramientoForm) {
           finAsesoramientoForm.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+      });
+      const nextBtn = document.createElement("button");
+      nextBtn.type = "button";
+      nextBtn.textContent = "Siguiente";
+      nextBtn.addEventListener("click", async () => {
+        selectFinAsesoramiento(row);
+        try {
+          await createRecommendedFinAction();
+          loadFinCrm();
+        } catch (error) {
+          window.alert(error.message || "No se pudo crear la siguiente tarea.");
         }
       });
       const convertBtn = document.createElement("button");
@@ -21152,6 +21478,7 @@ const loadFinAsesoramientos = (empresaId) => {
           });
       });
       tdActions.appendChild(editBtn);
+      tdActions.appendChild(nextBtn);
       tdActions.appendChild(convertBtn);
       tr.appendChild(tdActions);
       tbody.appendChild(tr);
@@ -21160,8 +21487,9 @@ const loadFinAsesoramientos = (empresaId) => {
     finAsesoramientosTable.innerHTML = "";
     finAsesoramientosTable.appendChild(table);
     finAsesoramientosInfo.textContent = `Mostrando ${rows.length} asesoramientos.`;
-    renderFinAsesorKpis(empresaId);
     loadFinAlerts(empresaId);
+    const selectedRow = rows.find((row) => row.id === selectedId) || rows[0];
+    selectFinAsesoramiento(selectedRow);
   });
 };
 
@@ -21295,6 +21623,330 @@ const loadSegurosOportunidades = (empresaId) => {
     segurosCrmOportunidades.innerHTML = "";
     segurosCrmOportunidades.appendChild(list);
   });
+};
+
+const FIN_STAGE_ORDER = [
+  "Lead",
+  "Asesoramiento",
+  "Documentación",
+  "Estudio",
+  "Bancos",
+  "Tasación",
+  "FEIN / Acta",
+  "Firma",
+  "Convertido",
+  "Descartada",
+];
+
+const FIN_ACTION_RESULT_OPTIONS = {
+  "Primera llamada": ["Cita concertada", "No interesado", "Sin respuesta"],
+  "Reunión de asesoramiento": ["Realizada", "Pendiente documentación", "No viable"],
+  "Solicitud documentación": ["Completa", "Parcial", "No entregada"],
+  "Estudio financiero": ["Viable", "Pendiente documentación", "No viable"],
+  "Presentación bancaria": ["Presentada", "Pendiente completar", "No presentada"],
+  "Seguimiento bancario": ["Tasación solicitada", "Aprobada", "Denegada", "Pendiente"],
+  "Tasación": ["Tasación OK", "Incidencia", "Cancelada"],
+  "FEIN / Acta": ["Firmable", "Pendiente", "Caducada"],
+  "Firma hipoteca": ["Firmada", "Cancelada", "Pospuesta"],
+};
+
+const FIN_STAGE_ALIASES = new Map([
+  ["en estudio", "Estudio"],
+  ["estudio", "Estudio"],
+  ["aprobado", "FEIN / Acta"],
+  ["pendiente documentacion", "Documentación"],
+  ["documentacion", "Documentación"],
+  ["presentada a banco", "Bancos"],
+  ["bancos", "Bancos"],
+  ["tasacion", "Tasación"],
+  ["fein", "FEIN / Acta"],
+  ["fein / acta", "FEIN / Acta"],
+  ["firma", "Firma"],
+  ["convertido", "Convertido"],
+  ["firmada", "Convertido"],
+  ["descartado", "Descartada"],
+  ["rechazado", "Descartada"],
+  ["asesoramiento", "Asesoramiento"],
+  ["lead", "Lead"],
+]);
+
+const normalizeFinStage = (value) => {
+  const raw = String(value || "").trim();
+  if (!raw) return "Lead";
+  const normalized = normalizeSimple(raw);
+  return FIN_STAGE_ALIASES.get(normalized) || raw;
+};
+
+const getFinActionResults = (actionType) => FIN_ACTION_RESULT_OPTIONS[String(actionType || "").trim()] || [];
+
+const getFinRecommendedAction = (row) => {
+  const stage = normalizeFinStage(row?.estado);
+  const missing = Number(row?.missing_count || 0);
+  if (missing > 0 && stage !== "Convertido" && stage !== "Descartada") {
+    return {
+      type: "Completar datos asesoramiento",
+      hint: `Completar ${missing} campos obligatorios antes de seguir`,
+    };
+  }
+  switch (stage) {
+    case "Lead":
+      return { type: "Primera llamada", hint: "Confirmar interés y concertar la primera cita" };
+    case "Asesoramiento":
+      return { type: "Reunión de asesoramiento", hint: "Recoger perfil económico y enfocar la operación" };
+    case "Documentación":
+      return { type: "Solicitud documentación", hint: "Pedir o rematar la documentación pendiente" };
+    case "Estudio":
+      return { type: "Estudio financiero", hint: "Validar viabilidad antes de enviar a banco" };
+    case "Bancos":
+      return { type: "Seguimiento bancario", hint: "Revisar respuesta de entidades y siguientes hitos" };
+    case "Tasación":
+      return { type: "Tasación", hint: "Controlar tasación, incidencias y resultado" };
+    case "FEIN / Acta":
+      return { type: "FEIN / Acta", hint: "Controlar FEIN, acta y estado pre-firma" };
+    case "Firma":
+      return { type: "Firma hipoteca", hint: "Preparar y cerrar la firma de escritura" };
+    default:
+      return null;
+  }
+};
+
+const renderFinStageBoard = (rows = []) => {
+  if (!hipotecaWorkflowStageBoard) return;
+  const counts = new Map(FIN_STAGE_ORDER.map((stage) => [stage, 0]));
+  rows.forEach((row) => {
+    const stage = normalizeFinStage(row?.estado);
+    counts.set(stage, (counts.get(stage) || 0) + 1);
+  });
+  hipotecaWorkflowStageBoard.innerHTML = "";
+  FIN_STAGE_ORDER.forEach((stage) => {
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = "fin-stage-card";
+    if (state.finSelectedAsesoramiento && normalizeFinStage(state.finSelectedAsesoramiento.estado) === stage) {
+      card.classList.add("active");
+    }
+    card.innerHTML = `
+      <strong>${stage}</strong>
+      <span>${numberFormatter.format(counts.get(stage) || 0)} expedientes</span>
+    `;
+    card.addEventListener("click", () => {
+      if (finAsesoramientosSearch) {
+        finAsesoramientosSearch.value = stage === "Lead" ? "" : stage;
+        loadFinCrm();
+      }
+    });
+    hipotecaWorkflowStageBoard.appendChild(card);
+  });
+};
+
+const renderFinAsesorKpisFromRows = (rows = []) => {
+  if (!finAsesorKpis) return;
+  const total = rows.length;
+  const docs = rows.filter((row) => normalizeFinStage(row?.estado) === "Documentación").length;
+  const bancos = rows.filter((row) => ["Bancos", "Tasación", "FEIN / Acta", "Firma"].includes(normalizeFinStage(row?.estado))).length;
+  const convertidos = rows.filter((row) => normalizeFinStage(row?.estado) === "Convertido").length;
+  const faltantes = rows.filter((row) => Number(row?.missing_count || 0) > 0).length;
+  const kpis = [
+    { title: "Expedientes", value: numberFormatter.format(total), note: "Cartera total" },
+    { title: "Documentación", value: numberFormatter.format(docs), note: "Pendiente de completar" },
+    { title: "Bancos y firma", value: numberFormatter.format(bancos), note: "Tramitación avanzada" },
+    { title: "Firmadas", value: numberFormatter.format(convertidos), note: "Convertidas en hipoteca" },
+    { title: "Bloqueos", value: numberFormatter.format(faltantes), note: "Con campos obligatorios faltantes" },
+  ];
+  finAsesorKpis.innerHTML = "";
+  kpis.forEach((item) => {
+    const card = document.createElement("div");
+    card.className = "card";
+    card.innerHTML = `
+      <h3>${item.title}</h3>
+      <div class="muted">${item.value}</div>
+      <div class="muted">${item.note}</div>
+    `;
+    finAsesorKpis.appendChild(card);
+  });
+};
+
+const updateFinSelectedSummary = () => {
+  if (!hipotecaWorkflowStatus || !finSelectedAsesoramientoLabel) return;
+  const row = state.finSelectedAsesoramiento;
+  if (!row) {
+    finSelectedAsesoramientoLabel.textContent = "Selecciona un asesoramiento para trabajar su seguimiento.";
+    hipotecaWorkflowStatus.innerHTML = "<p class='muted'>Sin expediente seleccionado.</p>";
+    return;
+  }
+  const cliente2 = row.cliente2_nombre ? ` / ${row.cliente2_nombre}` : "";
+  finSelectedAsesoramientoLabel.textContent = `${row.cliente1_nombre || "Cliente"}${cliente2} · ${normalizeFinStage(row.estado)}`;
+  const missing = Array.isArray(row.missing_fields) ? row.missing_fields : [];
+  const next = getFinRecommendedAction(row);
+  hipotecaWorkflowStatus.innerHTML = `
+    <div class="workspace-mini-kpi"><span>Estado</span><strong>${normalizeFinStage(row.estado)}</strong></div>
+    <div class="workspace-mini-kpi"><span>Ingresos conjuntos</span><strong>${formatCell("ingresos_conjuntos", row.ingresos_conjuntos || row.cliente1_ingresos || 0) || "-"}</strong></div>
+    <div class="workspace-mini-kpi"><span>Aportación</span><strong>${formatCell("aportacion_cv", row.aportacion_cv || 0) || "-"}</strong></div>
+    <div class="workspace-mini-kpi"><span>Próximo paso</span><strong>${next?.type || "Sin sugerencia"}</strong></div>
+    <div class="workspace-mini-kpi"><span>Bloqueos</span><strong>${missing.length ? missing.join(", ") : "Sin bloqueos"}</strong></div>
+  `;
+};
+
+const syncFinAgendaContext = () => {
+  const row = state.finSelectedAsesoramiento;
+  if (finAgendaAsesoramientoId) {
+    finAgendaAsesoramientoId.value = row?.id || "";
+  }
+  if (finAgendaClienteInput && row) {
+    finAgendaClienteInput.value = row.cliente1_nombre || "";
+  }
+  if (finAgendaClienteId && row) {
+    finAgendaClienteId.value = row.cliente1_id || "";
+  }
+};
+
+const selectFinAsesoramiento = (row) => {
+  state.finSelectedAsesoramiento = row || null;
+  state.finSelectedAsesoramientoId = row?.id || "";
+  if (row) {
+    fillFinAsesoramientoForm(row);
+  } else {
+    if (finAsesoramientoForm) finAsesoramientoForm.reset();
+    if (finAsesoramientoId) finAsesoramientoId.value = "";
+    loadFinChecklist("");
+  }
+  updateFinSelectedSummary();
+  syncFinAgendaContext();
+  const empresa = state.empresas.find((item) => item.nombre === FIN_COMPANY);
+  if (empresa?.id) {
+    loadFinWorkflowActions(empresa.id);
+  }
+  renderFinStageBoard(state.finAsesoramientosRows || []);
+};
+
+const saveFinActionResolution = async (row, result, estado = "Hecho") => {
+  if (!row?.id) return;
+  const payload = {
+    id: row.id,
+    empresa_nombre: FIN_COMPANY,
+    estado,
+    resultado_cierre: result || "",
+  };
+  const res = await fetch("/api/acciones_update", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json();
+  if (data.error) throw new Error(data.error);
+};
+
+const loadFinWorkflowActions = (empresaId) => {
+  if (!finAgendaTable || !finAgendaInfo || !empresaId) return;
+  const params = new URLSearchParams({ servicio: "financiaciones", empresa_id: empresaId });
+  if (state.finSelectedAsesoramientoId) {
+    params.set("asesoramiento_id", state.finSelectedAsesoramientoId);
+  }
+  api(`/api/acciones?${params.toString()}`).then((data) => {
+    const rows = data.rows || [];
+    state.finAgendaRows = rows;
+    if (!rows.length) {
+      finAgendaTable.innerHTML = "<p class='muted'>Sin tareas ni citas para este expediente.</p>";
+      finAgendaInfo.textContent = state.finSelectedAsesoramientoId ? "Crea el siguiente paso desde el expediente." : "";
+      return;
+    }
+    const table = document.createElement("table");
+    const thead = document.createElement("thead");
+    const headRow = document.createElement("tr");
+    ["fecha", "hora", "tipo", "cliente", "estado", "resultado", "acciones"].forEach((label) => {
+      const th = document.createElement("th");
+      th.textContent = formatHeader(label);
+      headRow.appendChild(th);
+    });
+    thead.appendChild(headRow);
+    table.appendChild(thead);
+    const tbody = document.createElement("tbody");
+    rows.forEach((row) => {
+      const tr = document.createElement("tr");
+      [row.fecha || "-", row.hora || "-", row.tipo || "-", row.cliente || "-", row.estado || "-", row.resultado_cierre || "-"].forEach((value) => {
+        const td = document.createElement("td");
+        td.textContent = value;
+        tr.appendChild(td);
+      });
+      const actionTd = document.createElement("td");
+      actionTd.className = "inline-actions";
+      if (String(row.estado || "").toLowerCase() === "pendiente") {
+        const options = getFinActionResults(row.tipo);
+        if (options.length) {
+          const select = document.createElement("select");
+          select.className = "inline-input";
+          select.appendChild(createOption("", "Resultado"));
+          options.forEach((option) => {
+            select.appendChild(createOption(option, option));
+          });
+          const closeBtn = document.createElement("button");
+          closeBtn.type = "button";
+          closeBtn.textContent = "Cerrar";
+          closeBtn.addEventListener("click", async () => {
+            if (!select.value) {
+              window.alert("Selecciona un resultado para cerrar la cita o tarea.");
+              return;
+            }
+            try {
+              await saveFinActionResolution(row, select.value, "Hecho");
+              loadFinCrm();
+            } catch (error) {
+              window.alert(error.message || "No se pudo cerrar la acción.");
+            }
+          });
+          actionTd.appendChild(select);
+          actionTd.appendChild(closeBtn);
+        } else {
+          const doneBtn = document.createElement("button");
+          doneBtn.type = "button";
+          doneBtn.textContent = "Hecho";
+          doneBtn.addEventListener("click", async () => {
+            try {
+              await saveFinActionResolution(row, "", "Hecho");
+              loadFinCrm();
+            } catch (error) {
+              window.alert(error.message || "No se pudo cerrar la tarea.");
+            }
+          });
+          actionTd.appendChild(doneBtn);
+        }
+      } else {
+        actionTd.textContent = row.resultado_cierre || row.estado || "-";
+      }
+      tr.appendChild(actionTd);
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    finAgendaTable.innerHTML = "";
+    finAgendaTable.appendChild(table);
+    finAgendaInfo.textContent = `Mostrando ${rows.length} tareas/citas${state.finSelectedAsesoramientoId ? " del expediente seleccionado" : ""}.`;
+  });
+};
+
+const createRecommendedFinAction = async () => {
+  const empresa = state.empresas.find((item) => item.nombre === FIN_COMPANY);
+  const row = state.finSelectedAsesoramiento;
+  const next = getFinRecommendedAction(row);
+  if (!empresa?.id || !row || !next) return;
+  const payload = {
+    empresa_nombre: FIN_COMPANY,
+    servicio: "financiaciones",
+    asesoramiento_id: row.id,
+    cliente_id: row.cliente1_id || "",
+    cliente_nombre: row.cliente1_nombre || "",
+    fecha: new Date().toISOString().slice(0, 10),
+    tipo: next.type,
+    estado: "Pendiente",
+    responsable: row.asesor || "",
+    notas: next.hint,
+  };
+  const res = await fetch("/api/acciones", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json();
+  if (data.error) throw new Error(data.error);
 };
 
 const loadAcciones = (servicio, empresaId, container, infoEl) => {
@@ -28011,6 +28663,9 @@ if (workspaceNewBtn) {
     renderWorkspaceBillingSummary({});
     renderWorkspaceBillingList([]);
     renderWorkspaceGestoriaOverview({});
+    renderWorkspaceSegurosOverview({});
+    renderWorkspaceFinOverview({});
+    renderWorkspaceInmoOverview({});
     renderWorkspaceBudgetList([]);
     syncWorkspaceClientOptions([]);
     fillWorkspaceBillingForm();
@@ -30785,9 +31440,10 @@ if (finAgendaForm) {
           finAgendaStatus.textContent = "Guardado.";
         }
         finAgendaForm.reset();
+        syncFinAgendaContext();
         const empresa = state.empresas.find((e) => e.nombre === FIN_COMPANY);
         if (empresa) {
-          loadAcciones("financiaciones", empresa.id, finAgendaTable, finAgendaInfo);
+          loadFinWorkflowActions(empresa.id);
         }
       })
       .catch(() => {
@@ -30795,6 +31451,21 @@ if (finAgendaForm) {
           finAgendaStatus.textContent = "Error al guardar.";
         }
       });
+  });
+}
+
+if (finCreateRecommendedAction) {
+  finCreateRecommendedAction.addEventListener("click", async () => {
+    if (!state.finSelectedAsesoramiento) {
+      window.alert("Selecciona primero un expediente.");
+      return;
+    }
+    try {
+      await createRecommendedFinAction();
+      loadFinCrm();
+    } catch (error) {
+      window.alert(error.message || "No se pudo crear la tarea recomendada.");
+    }
   });
 }
 
