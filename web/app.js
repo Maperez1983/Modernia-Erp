@@ -5546,7 +5546,7 @@ const renderWorkspaceModules = (rows = []) => {
     button.addEventListener("click", () => {
       const sectionKey = button.dataset.workspaceSectionJump || "";
       if (sectionKey === "workspace_engines") {
-        focusWorkspaceView("motores", workspaceDocumentHub);
+        focusWorkspaceView("motores", workspaceDocumentHub, { forceTenantView: true });
         return;
       }
       const target = workspaceModules.querySelector(`[data-workspace-section="${sectionKey}"]`);
@@ -10444,6 +10444,16 @@ const updateInmuebleMapFromInputs = () => {
   const lon = lonInput ? Number(lonInput.value) : null;
   updateInmuebleMap(lat, lon);
 };
+
+const buildInmuebleGeocodeAddress = (source = {}) =>
+  [
+    String(source.direccion || "").trim(),
+    String(source.poblacion || "").trim(),
+    String(source.provincia || "").trim(),
+    "España",
+  ]
+    .filter(Boolean)
+    .join(", ");
 
 const refreshCurrentInmuebleHeader = () => {
   const inmueble = state.currentInmueble || state.currentInmuebleContext?.inmueble || {};
