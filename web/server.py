@@ -9209,7 +9209,7 @@ def sync_inmueble_stage_for_action(conn, inmueble_id, destino, now):
 
 
 def normalize_inmo_action_type(value):
-    normalized = normalize_lookup_text(value or "")
+    normalized = normalize_lookup_text(value or "").lower()
     aliases = {
         "cita de adquisicion": "cita_adquisicion",
         "cita adquisicion": "cita_adquisicion",
