@@ -9319,10 +9319,10 @@ def ensure_captacion_for_inmueble(conn, empresa_id, inmueble_id, now):
         """
         INSERT INTO captaciones (
           id, empresa_id, inmueble_id, propietario, tipo_inmueble, direccion, codigo_postal, poblacion, provincia,
-          zona, m2, habitaciones, banos, precio_objetivo, precio_valoracion, etapa, situacion_comercial,
+          zona, m2, anio_construccion, habitaciones, banos, precio_objetivo, precio_valoracion, etapa, situacion_comercial,
           created_at, updated_at
         ) VALUES (
-          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
         )
         """,
         (
@@ -9337,6 +9337,7 @@ def ensure_captacion_for_inmueble(conn, empresa_id, inmueble_id, now):
             inmueble["provincia"],
             inmueble["zona"],
             inmueble["m2"],
+            inmueble["anio_construccion"] if "anio_construccion" in inmueble.keys() else None,
             inmueble["habitaciones"],
             inmueble["banos"],
             inmueble["precio_objetivo"],
@@ -11077,6 +11078,7 @@ CATRASTRO_LOOKUP_URLS = (
 
 CATRASTRO_STREET_SEARCH_URL = "https://ovc.catastro.meh.es/ovcservweb/OVCSWLocalizacionRC/OVCCallejero.asmx/ConsultaVia"
 CATRASTRO_NUMBER_SEARCH_URL = "https://ovc.catastro.meh.es/ovcservweb/OVCSWLocalizacionRC/OVCCallejero.asmx/ConsultaNumero"
+CATRASTRO_PUBLIC_LIST_URL = "https://www1.sedecatastro.gob.es/CYCBienInmueble/OVCListaBienes.aspx"
 
 
 def parse_inmobiliaria_address_for_catastro(value):
@@ -11268,6 +11270,211 @@ def _fetch_catastro_xml(url, params):
     with urllib.request.urlopen(full_url, timeout=8) as response:
         xml_text = response.read().decode("utf-8", errors="ignore")
     return full_url, xml_text
+
+
+def clean_catastro_reference(value):
+    return re.sub(r"[^A-Z0-9]", "", str(value or "").upper())
+
+
+def split_catastro_reference(value):
+    clean = clean_catastro_reference(value)
+    if len(clean) < 14:
+        return "", "", clean
+    return clean[:7], clean[7:14], clean
+
+
+def _strip_html_fragment(value):
+    raw = re.sub(r"<br\s*/?>", " ", str(value or ""), flags=re.I)
+    raw = re.sub(r"<[^>]+>", "", raw)
+    return html.unescape(raw).replace("\xa0", " ").strip()
+
+
+def _parse_catastro_number(value):
+    raw = _strip_html_fragment(value)
+    if not raw:
+        return None
+    match = re.search(r"([0-9]+(?:[.,][0-9]+)?)", raw)
+    if not match:
+        return None
+    try:
+        return float(match.group(1).replace(".", "").replace(",", "."))
+    except Exception:
+        return None
+
+
+def infer_inmueble_type_from_catastro_use(use_label, current_value=""):
+    current = str(current_value or "").strip()
+    if current:
+        return current
+    key = normalize_lookup_text(use_label or "")
+    mapping = {
+        "residencial": "Vivienda",
+        "comercial": "Local",
+        "industrial": "Nave",
+        "aparcamiento": "Garaje",
+        "garaje": "Garaje",
+        "almacen": "Trastero",
+        "trastero": "Trastero",
+        "oficinas": "Oficina",
+        "oficina": "Oficina",
+        "suelo": "Suelo",
+    }
+    return mapping.get(key) or normalize_person_name(use_label or "")
+
+
+def extract_catastro_public_summary_from_html(html_text, reference=""):
+    if not html_text:
+        return {}
+    clean_ref = clean_catastro_reference(reference)
+    parcel_match = re.search(
+        r"PARCELA CATASTRAL\s+([A-Z0-9]+).*?title='Tipo de parcela'>(.*?)</span>.*?title='Localizacion'>(.*?)</span>.*?title='Superficie gráfica'>(.*?)</span>",
+        html_text,
+        re.I | re.S,
+    )
+    parcel = {}
+    if parcel_match:
+        parcel = {
+            "referencia_parcela": clean_catastro_reference(parcel_match.group(1)),
+            "tipo_parcela": _strip_html_fragment(parcel_match.group(2)),
+            "localizacion_parcela": _strip_html_fragment(parcel_match.group(3)),
+            "superficie_grafica_m2": _parse_catastro_number(parcel_match.group(4)),
+        }
+    pattern = re.compile(
+        r"CargarBien\('[^']*','[^']*','[^']*','(?P<ref>[A-Z0-9]+)'.*?"
+        r"title='Localización'>(?P<location>.*?)</span>.*?"
+        r"title='Uso'>(?P<use>.*?)</span>.*?"
+        r"title='Superficie construida'>(?P<surface>.*?)</span>.*?"
+        r"title='Coeficiente de participación'>(?P<coef>.*?)</span>.*?"
+        r"title='Año construcción'>(?P<year>\d{4})</span>",
+        re.I | re.S,
+    )
+    items = []
+    for match in pattern.finditer(html_text):
+        ref = clean_catastro_reference(match.group("ref"))
+        location = _strip_html_fragment(match.group("location"))
+        use_label = _strip_html_fragment(match.group("use"))
+        items.append(
+            {
+                "referencia_catastral": ref,
+                "localizacion": location,
+                "uso": use_label,
+                "superficie_construida_m2": _parse_catastro_number(match.group("surface")),
+                "coef_participacion": _strip_html_fragment(match.group("coef")),
+                "anio_construccion": int(match.group("year")) if match.group("year") else None,
+            }
+        )
+    if clean_ref:
+        exact = next((item for item in items if item["referencia_catastral"] == clean_ref), None)
+        if exact:
+            return {**parcel, **exact}
+    if len(items) == 1:
+        return {**parcel, **items[0]}
+    return {**parcel, "items": items}
+
+
+def fetch_catastro_public_summary(reference):
+    rc1, rc2, clean_ref = split_catastro_reference(reference)
+    if not rc1 or not rc2:
+        raise ValueError("referencia catastral incompleta")
+    query = {"RC1": rc1, "RC2": rc2}
+    source_url = f"{CATRASTRO_PUBLIC_LIST_URL}?{urllib.parse.urlencode(query)}"
+    with urllib.request.urlopen(source_url, timeout=10) as response:
+        html_text = response.read().decode("utf-8", errors="ignore")
+    summary = extract_catastro_public_summary_from_html(html_text, clean_ref)
+    if not summary or (clean_ref and clean_catastro_reference(summary.get("referencia_catastral")) != clean_ref):
+        raise RuntimeError("no se pudo localizar la finca exacta en la ficha pública del Catastro")
+    summary["source_url"] = source_url
+    return summary, html_text
+
+
+def build_catastro_sync_updates(inmueble, summary):
+    inmueble = dict(inmueble or {})
+    summary = summary or {}
+    updates = {}
+    ref = clean_catastro_reference(summary.get("referencia_catastral"))
+    if ref:
+        updates["referencia_catastral"] = ref
+    surface = summary.get("superficie_construida_m2")
+    if surface not in (None, ""):
+        updates["m2"] = surface
+    year = summary.get("anio_construccion")
+    if year:
+        updates["anio_construccion"] = int(year)
+    inferred_type = infer_inmueble_type_from_catastro_use(summary.get("uso"), inmueble.get("tipo_inmueble"))
+    if inferred_type:
+        updates["tipo_inmueble"] = inferred_type
+    if not str(inmueble.get("codigo_postal") or "").strip():
+        code_match = re.search(r"\b(\d{5})\b", str(summary.get("localizacion") or ""))
+        if code_match:
+            updates["codigo_postal"] = code_match.group(1)
+    return updates
+
+
+def apply_catastro_summary_to_inmueble(conn, inmueble_id, inmueble, summary, now):
+    updates = build_catastro_sync_updates(inmueble, summary)
+    if not updates:
+        return {}
+    set_clause = ", ".join([f"{key} = ?" for key in updates])
+    conn.execute(
+        f"UPDATE inmuebles SET {set_clause}, updated_at = datetime(?) WHERE id = ?",
+        [*updates.values(), now, inmueble_id],
+    )
+    cap_shared = {key: updates[key] for key in ("tipo_inmueble", "m2", "anio_construccion") if key in updates}
+    if cap_shared:
+        cap_set = ", ".join([f"{key} = ?" for key in cap_shared])
+        conn.execute(
+            f"UPDATE captaciones SET {cap_set}, updated_at = datetime(?) WHERE inmueble_id = ?",
+            [*cap_shared.values(), now, inmueble_id],
+        )
+    return updates
+
+
+def sync_catastro_for_inmueble(conn, inmueble_id, now, usuario=None):
+    inmueble = conn.execute("SELECT * FROM inmuebles WHERE id = ? LIMIT 1", (inmueble_id,)).fetchone()
+    if not inmueble:
+        raise ValueError("Inmueble no encontrado")
+    reference = clean_catastro_reference(inmueble["referencia_catastral"])
+    if not reference:
+        lookup = lookup_catastro_reference_by_address(
+            provincia=str(inmueble["provincia"] or "").strip(),
+            municipio=str(inmueble["poblacion"] or "").strip(),
+            direccion=str(inmueble["direccion"] or "").strip(),
+            codigo_postal=str(inmueble["codigo_postal"] or "").strip(),
+        )
+        if not lookup.get("match_unique") or not lookup.get("referencia_catastral"):
+            raise RuntimeError("No se pudo obtener una referencia catastral única para este inmueble")
+        reference = clean_catastro_reference(lookup.get("referencia_catastral"))
+    summary, raw_html = fetch_catastro_public_summary(reference)
+    updates = apply_catastro_summary_to_inmueble(conn, inmueble_id, dict(inmueble), summary, now)
+    inmueble = conn.execute("SELECT * FROM inmuebles WHERE id = ? LIMIT 1", (inmueble_id,)).fetchone()
+    empresa = conn.execute("SELECT * FROM empresas WHERE id = ? LIMIT 1", (inmueble["empresa_id"],)).fetchone()
+    pdf_bytes = build_inmueble_catastro_sheet_pdf(dict(empresa) if empresa else {}, dict(inmueble), summary)
+    safe_ref = slugify_text(inmueble["direccion"] or summary.get("referencia_catastral") or inmueble_id)[:50] or inmueble_id
+    filename = f"ficha_catastro_{safe_ref}.pdf"
+    doc = persist_generated_inmueble_pdf(
+        conn,
+        inmueble_id,
+        "Ficha Catastro",
+        f"Ficha Catastro · {inmueble['direccion'] or safe_ref}",
+        pdf_bytes,
+        filename.replace(".pdf", ""),
+        now,
+        replace_existing=True,
+        empresa_id=inmueble["empresa_id"],
+        usuario=usuario,
+        plantilla_clave="catastro_ficha",
+        origen_tipo="catastro",
+        origen_id=summary.get("referencia_catastral") or reference,
+        payload_json={"summary": summary},
+    )
+    return {
+        "summary": summary,
+        "updates": updates,
+        "document": doc,
+        "pdf_bytes": pdf_bytes,
+        "filename": filename,
+        "html_size": len(raw_html or ""),
+    }
 
 
 def lookup_catastro_reference_by_address(*, provincia="", municipio="", direccion="", codigo_postal=""):
@@ -13744,6 +13951,8 @@ def ensure_tables(db_path):
     ensure_column(conn, "inmuebles", "valor_referencia", "valor_referencia REAL")
     ensure_column(conn, "inmuebles", "honorarios", "honorarios REAL")
     ensure_column(conn, "inmuebles", "situacion_ocupacion", "situacion_ocupacion TEXT")
+    ensure_column(conn, "inmuebles", "anio_construccion", "anio_construccion INTEGER")
+    ensure_column(conn, "captaciones", "anio_construccion", "anio_construccion INTEGER")
     ensure_column(conn, "gestoria_contabilidad", "gestion", "gestion TEXT")
     ensure_column(conn, "gestoria_contabilidad", "seguro_id", "seguro_id TEXT")
     ensure_column(conn, "gestoria_contabilidad", "hipoteca_id", "hipoteca_id TEXT")
@@ -17841,6 +18050,60 @@ def build_inmueble_negotiation_offer_pdf(company, inmueble, buyer, action):
     )
 
 
+def build_inmueble_catastro_sheet_pdf(company, inmueble, catastro_summary):
+    locality = " · ".join(
+        [part for part in [inmueble.get("poblacion"), inmueble.get("provincia")] if str(part or "").strip()]
+    ) or "Pendiente"
+    sections = [
+        (
+            "Identificación del inmueble",
+            [
+                ("Dirección CRM", inmueble.get("direccion") or "Pendiente"),
+                ("Referencia catastral", catastro_summary.get("referencia_catastral") or inmueble.get("referencia_catastral") or "Pendiente"),
+                ("Localización Catastro", catastro_summary.get("localizacion") or "Pendiente"),
+                ("Municipio / provincia", locality),
+            ],
+        ),
+        (
+            "Datos catastrales extraídos",
+            [
+                ("Uso Catastro", catastro_summary.get("uso") or "Pendiente"),
+                ("Tipo sugerido", infer_inmueble_type_from_catastro_use(catastro_summary.get("uso"), inmueble.get("tipo_inmueble")) or "Pendiente"),
+                ("Superficie construida", f"{_pdf_format_number(catastro_summary.get('superficie_construida_m2'), 2) or 'Pendiente'} m²"),
+                ("Año de construcción", catastro_summary.get("anio_construccion") or "Pendiente"),
+                ("Coeficiente de participación", catastro_summary.get("coef_participacion") or "Pendiente"),
+            ],
+        ),
+        (
+            "Parcela catastral",
+            [
+                ("Referencia de parcela", catastro_summary.get("referencia_parcela") or "Pendiente"),
+                ("Tipo de parcela", catastro_summary.get("tipo_parcela") or "Pendiente"),
+                ("Superficie gráfica parcela", f"{_pdf_format_number(catastro_summary.get('superficie_grafica_m2'), 2) or 'Pendiente'} m²"),
+                ("Localización parcela", catastro_summary.get("localizacion_parcela") or "Pendiente"),
+            ],
+        ),
+        (
+            "Trazabilidad",
+            [
+                ("Fuente", "Sede Electrónica del Catastro"),
+                ("URL fuente", catastro_summary.get("source_url") or "Pendiente"),
+                ("Fecha de sincronización", datetime.now().strftime("%d/%m/%Y %H:%M")),
+            ],
+        ),
+    ]
+    footer = [
+        f"Documento generado automáticamente por {company.get('nombre') or 'Grupo Modernia'} a partir de la ficha pública del Catastro.",
+        "Los datos catastrales deben revisarse dentro del expediente antes de usarlos contractualmente.",
+    ]
+    return build_branded_document_pdf(
+        "FICHA CATASTRAL",
+        "Resumen operativo del inmueble obtenido desde la Sede Electrónica del Catastro",
+        sections,
+        footer,
+    )
+
+
 def send_file(handler, path):
     if not path.exists() or not path.is_file():
         handler.send_error(404, "Not found")
@@ -17855,6 +18118,8 @@ def send_file(handler, path):
         content_type = "application/javascript; charset=utf-8"
     elif path.suffix in (".png", ".jpg", ".jpeg", ".gif"):
         content_type = f"image/{path.suffix.lstrip('.')}"
+    elif path.suffix == ".pdf":
+        content_type = "application/pdf"
     elif path.suffix == ".svg":
         content_type = "image/svg+xml"
 
@@ -24270,10 +24535,10 @@ class Handler(BaseHTTPRequestHandler):
                     """
                     INSERT INTO inmuebles (
                       id, empresa_id, referencia, referencia_catastral, direccion, codigo_postal, poblacion, provincia, zona, tipo_inmueble,
-                      m2, habitaciones, banos, precio_objetivo, precio_valoracion,
+                      m2, anio_construccion, habitaciones, banos, precio_objetivo, precio_valoracion,
                       valor_referencia, honorarios, situacion_ocupacion, estado, lat, lon, created_at, updated_at
                     ) VALUES (
-                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
                     )
                     """,
                     (
@@ -24288,6 +24553,7 @@ class Handler(BaseHTTPRequestHandler):
                         payload.get("zona"),
                         payload.get("tipo_inmueble"),
                         payload.get("m2"),
+                        payload.get("anio_construccion"),
                         payload.get("habitaciones"),
                         payload.get("banos"),
                         payload.get("precio_objetivo"),
@@ -24306,12 +24572,12 @@ class Handler(BaseHTTPRequestHandler):
                     """
                     INSERT INTO captaciones (
                       id, empresa_id, inmueble_id, propietario, tipo_inmueble, direccion, codigo_postal, poblacion, provincia, zona, m2,
-                      habitaciones, banos, precio_objetivo, precio_valoracion, urgencia,
+                      anio_construccion, habitaciones, banos, precio_objetivo, precio_valoracion, urgencia,
                       situacion_comercial, fecha_conversion,
                       motivo, canal, etapa, probabilidad, proxima_accion, fecha_contacto,
                       asesor, notas, created_at, updated_at
                     ) VALUES (
-                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
                     )
                     """,
                     (
@@ -24326,6 +24592,7 @@ class Handler(BaseHTTPRequestHandler):
                         payload.get("provincia"),
                         payload.get("zona"),
                         payload.get("m2"),
+                        payload.get("anio_construccion"),
                         payload.get("habitaciones"),
                         payload.get("banos"),
                         payload.get("precio_objetivo"),
@@ -24377,6 +24644,39 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as exc:
                 json_response(self, {"error": f"catastro_lookup_error: {type(exc).__name__}: {exc}"}, status=502)
                 return
+        elif parsed.path == "/api/inmueble_catastro_sync":
+            try:
+                inmueble_id = str(payload.get("inmueble_id") or "").strip()
+                if not inmueble_id:
+                    json_response(self, {"error": "inmueble_id requerido"}, status=400)
+                    return
+                result = sync_catastro_for_inmueble(conn, inmueble_id, now, usuario=payload.get("usuario"))
+                conn.commit()
+                json_response(
+                    self,
+                    {
+                        "ok": True,
+                        "summary": result["summary"],
+                        "updates": result["updates"],
+                        "document": result["document"],
+                        "filename": result["filename"],
+                    },
+                )
+                return
+            except ValueError as exc:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                json_response(self, {"error": str(exc)}, status=400)
+                return
+            except Exception as exc:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                json_response(self, {"error": f"catastro_sync_error: {type(exc).__name__}: {exc}"}, status=502)
+                return
         elif parsed.path == "/api/captaciones_update":
             record_id = payload.get("id")
             etapa = payload.get("etapa")
@@ -24415,6 +24715,7 @@ class Handler(BaseHTTPRequestHandler):
                 "provincia",
                 "zona",
                 "m2",
+                "anio_construccion",
                 "habitaciones",
                 "banos",
                 "precio_objetivo",
@@ -24450,6 +24751,7 @@ class Handler(BaseHTTPRequestHandler):
                 "provincia",
                 "zona",
                 "m2",
+                "anio_construccion",
                 "habitaciones",
                 "banos",
                 "precio_objetivo",
@@ -24939,6 +25241,7 @@ class Handler(BaseHTTPRequestHandler):
                 "zona",
                 "tipo_inmueble",
                 "m2",
+                "anio_construccion",
                 "habitaciones",
                 "banos",
                 "precio_objetivo",
@@ -24971,6 +25274,7 @@ class Handler(BaseHTTPRequestHandler):
                 "provincia",
                 "zona",
                 "m2",
+                "anio_construccion",
                 "habitaciones",
                 "banos",
                 "precio_objetivo",

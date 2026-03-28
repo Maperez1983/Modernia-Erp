@@ -8,8 +8,10 @@ from unittest.mock import patch
 from web import server
 from web.server import (
     LEGAL_COPILOT_TOPICS,
+    apply_catastro_summary_to_inmueble,
     build_dgt_consulta_url,
     classify_legal_feed_entry,
+    extract_catastro_public_summary_from_html,
     extract_catastro_candidates_from_xml,
     fetch_legal_radar_items,
     get_legal_copilot_catalog,
@@ -54,11 +56,13 @@ class InmobiliariaWorkflowDocsTests(unittest.TestCase):
               empresa_id TEXT NOT NULL,
               tipo_inmueble TEXT,
               direccion TEXT,
+              referencia_catastral TEXT,
               codigo_postal TEXT,
               poblacion TEXT,
               provincia TEXT,
               zona TEXT,
               m2 REAL,
+              anio_construccion INTEGER,
               habitaciones INTEGER,
               banos INTEGER,
               precio_objetivo REAL,
@@ -79,6 +83,7 @@ class InmobiliariaWorkflowDocsTests(unittest.TestCase):
               provincia TEXT,
               zona TEXT,
               m2 REAL,
+              anio_construccion INTEGER,
               habitaciones INTEGER,
               banos INTEGER,
               precio_objetivo REAL,
@@ -260,6 +265,66 @@ class InmobiliariaWorkflowDocsTests(unittest.TestCase):
         self.assertEqual(len(parsed["candidates"]), 1)
         self.assertEqual(parsed["candidates"][0]["referencia_catastral"], "1234567UF7613S0001AB")
         self.assertEqual(parsed["candidates"][0]["label"], "AV EUROPA 110")
+
+    def test_extract_catastro_public_summary_from_html_reads_exact_unit(self):
+        html_text = """
+        <div class='panel panel-sec'>
+          <div class='panel-heading amarillo'>PARCELA CATASTRAL 0119101UF7601N</div>
+          <p class='panel-title texto_regular '>
+            <span data-bs-toggle='tooltip' data-bs-placement='top' title='Tipo de parcela'>Parcela con varios inmuebles (division horizontal)</span>
+          </p>
+          <p class='panel-title texto_regular '>
+            <span data-bs-toggle='tooltip' data-bs-placement='top' title='Localizacion'>PJ AUGUSTO GONZALEZ BESADA 2<br/>MALAGA (MÁLAGA)</span>
+          </p>
+          <p class='panel-title texto_regular '>
+            <span data-bs-toggle='tooltip' data-bs-placement='top' title='Superficie gráfica'>2.156 m<sup>2</sup></span>
+          </p>
+        </div>
+        <div class='panel panel-default'>
+          <div class='panel-heading' role='tab' id='heading5'>
+            <b><a onclick="javascript:CargarBien('29','900','U','0119101UF7601N0006XK','N','','','','','','','','N','N','_top','nuevoVisor','NO','');" target="_top">0119101UF7601N0006XK</a></b>
+            <span class='panel-title texto_regular gray9 float-right '><span data-bs-toggle='tooltip' data-bs-placement='top' title='Localización'>PJ AUGUSTO GONZALEZ BESADA 2 Es:1  Pl:02  Pt:D</span></span>
+            <div class='panel-title texto_regular gray9 float-right'>
+              <span data-bs-toggle='tooltip' data-bs-placement='top' title='Uso'>Residencial</span>
+              <span class='gray_light'> | </span>
+              <span data-bs-toggle='tooltip' data-bs-placement='top' title='Superficie construida'>83 m<sup>2</sup></span>
+              <span class='gray_light'> | </span>
+              <span data-bs-toggle='tooltip' data-bs-placement='top' title='Coeficiente de participación'>0,80%</span>
+              <span class='gray_light'> | </span>
+              <span data-bs-toggle='tooltip' data-bs-placement='top' title='Año construcción'>1972</span>
+            </div>
+          </div>
+        </div>
+        """
+        parsed = extract_catastro_public_summary_from_html(html_text, "0119101UF7601N0006XK")
+        self.assertEqual(parsed["referencia_catastral"], "0119101UF7601N0006XK")
+        self.assertEqual(parsed["uso"], "Residencial")
+        self.assertEqual(parsed["superficie_construida_m2"], 83.0)
+        self.assertEqual(parsed["anio_construccion"], 1972)
+        self.assertEqual(parsed["referencia_parcela"], "0119101UF7601N")
+        self.assertEqual(parsed["superficie_grafica_m2"], 2156.0)
+
+    def test_apply_catastro_summary_to_inmueble_updates_fields(self):
+        updates = apply_catastro_summary_to_inmueble(
+            self.conn,
+            "i1",
+            self.conn.execute("SELECT * FROM inmuebles WHERE id = 'i1'").fetchone(),
+            {
+                "referencia_catastral": "0119101UF7601N0006XK",
+                "uso": "Residencial",
+                "superficie_construida_m2": 83.0,
+                "anio_construccion": 1972,
+            },
+            self.now,
+        )
+        inmueble = self.conn.execute(
+            "SELECT referencia_catastral, tipo_inmueble, m2, anio_construccion FROM inmuebles WHERE id = 'i1'"
+        ).fetchone()
+        self.assertEqual(updates["referencia_catastral"], "0119101UF7601N0006XK")
+        self.assertEqual(inmueble["referencia_catastral"], "0119101UF7601N0006XK")
+        self.assertEqual(inmueble["tipo_inmueble"], "Piso")
+        self.assertEqual(inmueble["m2"], 83.0)
+        self.assertEqual(inmueble["anio_construccion"], 1972)
 
     def test_sync_inmueble_stage_for_action_creates_captacion_and_updates_both_entities(self):
         sync_inmueble_stage_for_action(self.conn, "i1", "adquisicion", self.now)
