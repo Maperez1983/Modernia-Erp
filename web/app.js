@@ -7335,6 +7335,11 @@ const safeWorkspaceApi = async (path, fallback) => {
 const loadWorkspaceDetail = async (workspaceId) => {
   if (!workspaceId) return;
   state.currentWorkspaceId = workspaceId;
+  await safeWorkspaceApi("/api/usuarios", { rows: [] }).then((data) => {
+    state.usersList = data.rows || [];
+    populateResponsableSelects();
+    refreshSegurosColaboradoresList();
+  });
   const detail = await api(`/api/workspace_detail?id=${encodeURIComponent(workspaceId)}`);
   state.currentWorkspaceDetail = detail;
   state.currentWorkspaceEnabledModules = getWorkspaceEnabledModules(detail.modules || []);
