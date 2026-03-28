@@ -1668,11 +1668,16 @@ const gestoriaKpiRentasPendientes = document.getElementById("gestoriaKpiRentasPe
 const gestoriaKpiGestionesCurso = document.getElementById("gestoriaKpiGestionesCurso");
 const gestoriaKpiGestionesEspera = document.getElementById("gestoriaKpiGestionesEspera");
 const gestoriaKpiGestionesVencidas = document.getElementById("gestoriaKpiGestionesVencidas");
+const gestoriaKpiPresupuestosEstudio = document.getElementById("gestoriaKpiPresupuestosEstudio");
+const gestoriaKpiEncargosPendientes = document.getElementById("gestoriaKpiEncargosPendientes");
 const gestoriaAlertModelos = document.getElementById("gestoriaAlertModelos");
 const gestoriaAlertAcciones = document.getElementById("gestoriaAlertAcciones");
 const gestoriaAlertModelosOverdue = document.getElementById("gestoriaAlertModelosOverdue");
 const gestoriaAlertAccionesOverdue = document.getElementById("gestoriaAlertAccionesOverdue");
 const gestoriaAlertRentasPendientes = document.getElementById("gestoriaAlertRentasPendientes");
+const gestoriaAlertPresupuestosEstudio = document.getElementById("gestoriaAlertPresupuestosEstudio");
+const gestoriaAlertPresupuestosRechazados = document.getElementById("gestoriaAlertPresupuestosRechazados");
+const gestoriaAlertEncargosPendientes = document.getElementById("gestoriaAlertEncargosPendientes");
 const gestoriaAlertGestiones = document.getElementById("gestoriaAlertGestiones");
 const gestoriaAlertGestionesProximas = document.getElementById("gestoriaAlertGestionesProximas");
 const gestoriaAlertDays = document.getElementById("gestoriaAlertDays");
@@ -3562,14 +3567,33 @@ const WORKSPACE_LAUNCHERS = {
 const syncWorkspaceClientOptions = (rows = []) => {
   state.workspaceClientOptions = Array.isArray(rows) ? rows : [];
   state.workspaceClientOptionMap = new Map();
+  state.workspaceClientOptionById = new Map();
   if (!workspaceClientOptions) return;
   workspaceClientOptions.innerHTML = state.workspaceClientOptions
     .map((row) => {
       const label = `${row.nombre || "-"}${row.nif ? ` · ${row.nif}` : ""}`;
       state.workspaceClientOptionMap.set(label, row);
+      state.workspaceClientOptionById.set(String(row.id || ""), row);
       return `<option value="${label}"></option>`;
     })
     .join("");
+};
+
+const findWorkspaceClientByLookup = (lookup = "", clienteId = "") => {
+  const idKey = String(clienteId || "").trim();
+  if (idKey && state.workspaceClientOptionById instanceof Map && state.workspaceClientOptionById.has(idKey)) {
+    return state.workspaceClientOptionById.get(idKey) || null;
+  }
+  const label = String(lookup || "").trim();
+  if (label && state.workspaceClientOptionMap instanceof Map && state.workspaceClientOptionMap.has(label)) {
+    return state.workspaceClientOptionMap.get(label) || null;
+  }
+  const normalized = normalizeSimple(label);
+  if (!normalized) return null;
+  return (state.workspaceClientOptions || []).find((row) => {
+    const rowLabel = `${row.nombre || ""}${row.nif ? ` · ${row.nif}` : ""}`;
+    return normalizeSimple(rowLabel) === normalized || normalizeSimple(row.nombre || "") === normalized;
+  }) || null;
 };
 
 const fetchWorkspaceClientOptions = async (query = "") => {
@@ -4237,11 +4261,17 @@ const renderWorkspaceBudgetSummary = (rows = []) => {
   const items = Array.isArray(rows) ? rows : [];
   const total = items.reduce((sum, row) => sum + (Number(row.total || 0) || 0), 0);
   const accepted = items.filter((row) => String(row.estado || "").toLowerCase() === "aceptado").length;
+  const estudio = items.filter((row) => normalizeSimple(row.estado || "") === "estudio").length;
+  const rejected = items.filter((row) => normalizeSimple(row.estado || "") === "rechazado").length;
+  const encargoPending = items.filter((row) => normalizeSimple(row.estado || "") === "aceptado" && !["firmada", "firmado"].includes(normalizeSimple(row.encargo_estado || ""))).length;
   workspaceBudgetSummary.innerHTML = `
     <div class="workspace-mini-kpis">
       <div class="workspace-mini-kpi"><span>Presupuestos</span><strong>${numberFormatter.format(items.length)}</strong></div>
       <div class="workspace-mini-kpi"><span>Total propuesto</span><strong>${euroFormatter.format(total)}</strong></div>
       <div class="workspace-mini-kpi"><span>Aceptados</span><strong>${numberFormatter.format(accepted)}</strong></div>
+      <div class="workspace-mini-kpi"><span>En estudio</span><strong>${numberFormatter.format(estudio)}</strong></div>
+      <div class="workspace-mini-kpi"><span>Rechazados</span><strong>${numberFormatter.format(rejected)}</strong></div>
+      <div class="workspace-mini-kpi"><span>Encargo pendiente</span><strong>${numberFormatter.format(encargoPending)}</strong></div>
     </div>
   `;
 };
@@ -4308,14 +4338,21 @@ const fillWorkspaceBudgetForm = (record = null) => {
     empresa_id: companies[0]?.id || "",
     cliente_id: "",
     cliente_lookup: "",
+    cliente_nif: "",
+    cliente_telefono: "",
+    cliente_email: "",
     servicio: "reformas",
     referencia_tipo: "",
     referencia_id: "",
     titulo: "",
     estado: "Borrador",
     fecha: "",
+    fecha_seguimiento: "",
+    motivo_estado: "",
     responsable: "",
     forma_pago: "",
+    encargo_estado: "",
+    fecha_encargo: "",
     observaciones: "",
     subtotal_sugerido: "",
     subtotal: "",
@@ -4327,9 +4364,11 @@ const fillWorkspaceBudgetForm = (record = null) => {
     num_aparcamientos: "",
     lineas_texto: "",
     plantilla_key: "",
+    seguimiento_accion_id: "",
+    encargo_accion_id: "",
     ...(record || {}),
   };
-  ["id", "workspace_id", "empresa_id", "cliente_id", "servicio", "referencia_tipo", "referencia_id", "titulo", "estado", "fecha", "responsable", "forma_pago", "observaciones", "subtotal_sugerido", "subtotal", "impuestos", "total", "num_vecinos", "num_locales", "num_trasteros", "num_aparcamientos", "lineas_texto"].forEach((field) => {
+  ["id", "workspace_id", "empresa_id", "cliente_id", "cliente_nif", "cliente_telefono", "cliente_email", "servicio", "referencia_tipo", "referencia_id", "titulo", "estado", "fecha", "fecha_seguimiento", "motivo_estado", "responsable", "forma_pago", "encargo_estado", "fecha_encargo", "observaciones", "subtotal_sugerido", "subtotal", "impuestos", "total", "num_vecinos", "num_locales", "num_trasteros", "num_aparcamientos", "lineas_texto", "seguimiento_accion_id", "encargo_accion_id"].forEach((field) => {
     const input = workspaceBudgetForm.querySelector(`[name="${field}"]`);
     if (input) input.value = payload[field] ?? "";
   });
@@ -4357,13 +4396,18 @@ const renderWorkspaceBudgetList = (rows = []) => {
           <div>
             <strong>${row.titulo || "Presupuesto"}</strong>
             <div class="muted">${row.empresa_nombre || "-"}${row.cliente_nombre ? ` · ${row.cliente_nombre}` : ""}</div>
-            <div class="muted">${row.servicio || "-"}${row.lineas_total ? ` · ${numberFormatter.format(Number(row.lineas_total || 0))} partidas` : ""}</div>
+            <div class="muted">${row.servicio || "-"}${row.lineas_total ? ` · ${numberFormatter.format(Number(row.lineas_total || 0))} partidas` : ""}${row.fecha_seguimiento ? ` · seguimiento ${row.fecha_seguimiento}` : ""}</div>
+            ${row.motivo_estado ? `<div class="muted">${row.motivo_estado}</div>` : ""}
           </div>
           <div class="workspace-billing-meta">
             <span>${row.fecha || "Sin fecha"}</span>
             <span>${euroFormatter.format(Number(row.total || 0))}</span>
             <span>${row.estado || "Borrador"}</span>
             <a class="secondary ghost button-inline" href="/api/workspace_presupuesto_pdf?id=${encodeURIComponent(row.id || "")}&workspace_id=${encodeURIComponent(state.currentWorkspaceId || "")}" target="_blank" rel="noreferrer">PDF</a>
+            ${normalizeSimple(row.estado || "") === "aceptado" ? `<a class="secondary ghost button-inline" href="/api/workspace_presupuesto_encargo_pdf?id=${encodeURIComponent(row.id || "")}&workspace_id=${encodeURIComponent(state.currentWorkspaceId || "")}" target="_blank" rel="noreferrer">Encargo</a>` : ""}
+            ${normalizeSimple(row.estado || "") !== "estudio" ? `<button type="button" class="secondary ghost" data-budget-status="${row.id}" data-budget-next="Estudio">Estudio</button>` : ""}
+            ${normalizeSimple(row.estado || "") !== "aceptado" ? `<button type="button" class="secondary ghost" data-budget-status="${row.id}" data-budget-next="Aceptado">Aceptar</button>` : ""}
+            ${normalizeSimple(row.estado || "") !== "rechazado" ? `<button type="button" class="secondary ghost" data-budget-status="${row.id}" data-budget-next="Rechazado">Rechazar</button>` : ""}
             <button type="button" class="secondary ghost" data-budget-edit="${row.id}">Editar</button>
           </div>
         </div>
@@ -4380,12 +4424,51 @@ const renderWorkspaceBudgetList = (rows = []) => {
       fillWorkspaceBudgetForm({
         ...row,
         ...calc,
-        cliente_lookup: row.cliente_nombre || "",
+        cliente_lookup: row.cliente_nombre ? `${row.cliente_nombre}${row.cliente_nif ? ` · ${row.cliente_nif}` : ""}` : "",
+        cliente_nif: row.cliente_nif || "",
+        cliente_telefono: row.cliente_telefono || "",
+        cliente_email: row.cliente_email || "",
         lineas_texto: stringifyWorkspaceBudgetLines(row.lineas || []),
         subtotal_sugerido: calc.cuota_sugerida || row.subtotal || "",
       });
       if (workspaceBudgetStatus) workspaceBudgetStatus.textContent = "Editando presupuesto existente.";
       workspaceBudgetForm?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  });
+  workspaceBudgetList.querySelectorAll("[data-budget-status]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const row = state.workspaceBudgetRows.find((item) => String(item.id || "") === String(button.dataset.budgetStatus || ""));
+      if (!row) return;
+      const nextStatus = String(button.dataset.budgetNext || "").trim();
+      const defaultFollowup =
+        nextStatus === "Estudio"
+          ? new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10)
+          : nextStatus === "Rechazado"
+          ? new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10)
+          : "";
+      try {
+        button.disabled = true;
+        const data = await fetch("/api/workspace_presupuestos", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ...row,
+            workspace_id: state.currentWorkspaceId || "",
+            estado: nextStatus,
+            fecha_seguimiento: row.fecha_seguimiento || defaultFollowup,
+            cliente_lookup: row.cliente_nombre || "",
+            cliente_nif: row.cliente_nif || "",
+            cliente_telefono: row.cliente_telefono || "",
+            cliente_email: row.cliente_email || "",
+            lineas: row.lineas || [],
+          }),
+        }).then((res) => res.json());
+        if (data?.error) throw new Error(data.error);
+        await loadWorkspaceDetail(state.currentWorkspaceId);
+      } catch (error) {
+        alert(error.message || "No se pudo actualizar el presupuesto.");
+        button.disabled = false;
+      }
     });
   });
 };
@@ -16969,6 +17052,8 @@ const loadGestoriaDashboard = () => {
     if (gestoriaKpiPuntuales) gestoriaKpiPuntuales.textContent = counts.puntuales ?? 0;
     if (gestoriaKpiModelosMes) gestoriaKpiModelosMes.textContent = counts.modelos_mes ?? 0;
     if (gestoriaKpiRentasPendientes) gestoriaKpiRentasPendientes.textContent = counts.rentas_pendientes_presentar ?? 0;
+    if (gestoriaKpiPresupuestosEstudio) gestoriaKpiPresupuestosEstudio.textContent = counts.presupuestos_estudio ?? 0;
+    if (gestoriaKpiEncargosPendientes) gestoriaKpiEncargosPendientes.textContent = counts.encargos_pendientes ?? 0;
 
     const renderAlertList = (target, items, emptyText, lineBuilder) => {
       if (!target) return;
@@ -17075,6 +17160,39 @@ const loadGestoriaDashboard = () => {
         const ejercicio = row.ejercicio || "-";
         const estado = row.estado_presentacion || "Borrador";
         return `<div class="muted">${ejercicio}</div><div>${cliente}</div><div class="muted">${estado} · ${row.doc_count || 0} docs</div>`;
+      }
+    );
+    renderAlertList(
+      gestoriaAlertPresupuestosEstudio,
+      data.presupuestos_estudio,
+      "Sin presupuestos en estudio.",
+      (row) => {
+        const fecha = formatCell("fecha", row.fecha_seguimiento || row.fecha) || row.fecha_seguimiento || row.fecha || "-";
+        const cliente = row.cliente || "Cliente";
+        const titulo = row.titulo || "Presupuesto";
+        return `<div class="muted">${fecha}</div><div>${cliente}</div><div class="muted">${titulo}</div>`;
+      }
+    );
+    renderAlertList(
+      gestoriaAlertPresupuestosRechazados,
+      data.presupuestos_rechazados,
+      "Sin rechazados a revisar.",
+      (row) => {
+        const fecha = formatCell("fecha", row.fecha_seguimiento || row.fecha) || row.fecha_seguimiento || row.fecha || "-";
+        const cliente = row.cliente || "Cliente";
+        const motivo = row.motivo_estado || row.titulo || "Seguimiento comercial";
+        return `<div class="muted">${fecha}</div><div>${cliente}</div><div class="muted">${motivo}</div>`;
+      }
+    );
+    renderAlertList(
+      gestoriaAlertEncargosPendientes,
+      data.encargos_pendientes,
+      "Sin notas de encargo pendientes.",
+      (row) => {
+        const fecha = formatCell("fecha", row.fecha_encargo || row.fecha) || row.fecha_encargo || row.fecha || "-";
+        const cliente = row.cliente || "Cliente";
+        const estado = row.encargo_estado || "Pendiente";
+        return `<div class="muted">${fecha}</div><div>${cliente}</div><div class="muted">${row.titulo || "Presupuesto"} · ${estado}</div>`;
       }
     );
 
@@ -17309,6 +17427,24 @@ const bindGestoriaDashboardKpis = () => {
         focusElementInView(gestoriaAlertGestiones);
       },
       title: "Gestiones vencidas",
+    },
+    {
+      valueEl: gestoriaKpiPresupuestosEstudio,
+      action: () => {
+        openCompany(FINCAS_COMPANY, { allowRestricted: true });
+        setTab("gestoria-dash");
+        focusElementInView(gestoriaAlertPresupuestosEstudio);
+      },
+      title: "Presupuestos en estudio",
+    },
+    {
+      valueEl: gestoriaKpiEncargosPendientes,
+      action: () => {
+        openCompany(FINCAS_COMPANY, { allowRestricted: true });
+        setTab("gestoria-dash");
+        focusElementInView(gestoriaAlertEncargosPendientes);
+      },
+      title: "Encargos pendientes",
     },
   ];
   configs.forEach(({ valueEl, action, title }) => {
@@ -27178,11 +27314,52 @@ if (workspaceBudgetForm) {
         applyWorkspaceBudgetServiceMode();
         applyWorkspaceBudgetTemplate({ force: true });
       }
+      if (fieldName === "estado") {
+        const stateInput = workspaceBudgetForm.querySelector('[name="estado"]');
+        const followupInput = workspaceBudgetForm.querySelector('[name="fecha_seguimiento"]');
+        const encargoStateInput = workspaceBudgetForm.querySelector('[name="encargo_estado"]');
+        const encargoDateInput = workspaceBudgetForm.querySelector('[name="fecha_encargo"]');
+        const nextState = normalizeSimple(stateInput?.value || "");
+        if (followupInput && !String(followupInput.value || "").trim() && (nextState === "estudio" || nextState === "rechazado")) {
+          const days = nextState === "estudio" ? 7 : 30;
+          followupInput.value = new Date(Date.now() + days * 86400000).toISOString().slice(0, 10);
+        }
+        if (nextState === "aceptado") {
+          if (encargoStateInput && !String(encargoStateInput.value || "").trim()) encargoStateInput.value = "Pendiente";
+          if (encargoDateInput && !String(encargoDateInput.value || "").trim()) encargoDateInput.value = new Date().toISOString().slice(0, 10);
+        }
+      }
       if (watched.has(fieldName)) {
         syncWorkspaceBudgetComputedFields({ forceSubtotal: fieldName === "servicio", forceTotal: fieldName !== "total" });
       }
     });
   });
+  const syncWorkspaceBudgetClient = async () => {
+    const lookup = workspaceBudgetClienteLookup?.value?.trim() || "";
+    const hidden = workspaceBudgetForm.querySelector('[name="cliente_id"]');
+    let match = findWorkspaceClientByLookup(lookup, hidden?.value || "");
+    if (!match && lookup.length >= 2) {
+      try {
+        await fetchWorkspaceClientOptions(lookup);
+        match = findWorkspaceClientByLookup(lookup, hidden?.value || "");
+      } catch (_) {
+        // best effort
+      }
+    }
+    if (hidden) hidden.value = match?.id || "";
+    const nifInput = workspaceBudgetForm.querySelector('[name="cliente_nif"]');
+    const phoneInput = workspaceBudgetForm.querySelector('[name="cliente_telefono"]');
+    const emailInput = workspaceBudgetForm.querySelector('[name="cliente_email"]');
+    if (match) {
+      if (nifInput && !String(nifInput.value || "").trim()) nifInput.value = match.nif || "";
+      if (phoneInput && !String(phoneInput.value || "").trim()) phoneInput.value = match.telefono || "";
+      if (emailInput && !String(emailInput.value || "").trim()) emailInput.value = match.email || "";
+    }
+  };
+  if (workspaceBudgetClienteLookup) {
+    workspaceBudgetClienteLookup.addEventListener("input", syncWorkspaceBudgetClient);
+    workspaceBudgetClienteLookup.addEventListener("change", syncWorkspaceBudgetClient);
+  }
   workspaceBudgetForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (!state.currentWorkspaceId) {
@@ -27191,10 +27368,12 @@ if (workspaceBudgetForm) {
     }
     if (workspaceBudgetStatus) workspaceBudgetStatus.textContent = "Guardando...";
     syncWorkspaceBudgetComputedFields();
+    await syncWorkspaceBudgetClient();
     const formData = new FormData(workspaceBudgetForm);
     const payload = Object.fromEntries(formData.entries());
     payload.workspace_id = state.currentWorkspaceId;
-    const clientMatch = state.workspaceClientOptionMap.get((workspaceBudgetClienteLookup?.value || "").trim());
+    payload.cliente_lookup = workspaceBudgetClienteLookup?.value?.trim() || payload.cliente_lookup || "";
+    const clientMatch = findWorkspaceClientByLookup(payload.cliente_lookup, payload.cliente_id);
     payload.cliente_id = clientMatch?.id || payload.cliente_id || "";
     try {
       const data = await fetch("/api/workspace_presupuestos", {

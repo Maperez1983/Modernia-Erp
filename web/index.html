@@ -91,6 +91,8 @@
                 <input type="hidden" name="workspace_id" />
                 <input type="hidden" name="cliente_id" />
                 <input type="hidden" name="lineas" />
+                <input type="hidden" name="seguimiento_accion_id" />
+                <input type="hidden" name="encargo_accion_id" />
                 <label>
                   Empresa
                   <select name="empresa_id" required></select>
@@ -108,15 +110,6 @@
                   <select name="plantilla_key" id="workspaceBudgetTemplateSelect"></select>
                 </label>
                 <label>
-                  Estado
-                  <select name="estado">
-                    <option>Borrador</option>
-                    <option>Enviado</option>
-                    <option>Aceptado</option>
-                    <option>Rechazado</option>
-                  </select>
-                </label>
-                <label>
                   Fecha
                   <input name="fecha" type="date" />
                 </label>
@@ -124,9 +117,47 @@
                   Cliente
                   <input name="cliente_lookup" id="workspaceBudgetClienteLookup" list="workspaceClientOptions" placeholder="Busca por nombre o DNI" />
                 </label>
+                <label>
+                  DNI / NIF cliente
+                  <input name="cliente_nif" placeholder="Opcional si es alta rápida" />
+                </label>
+                <label>
+                  Teléfono cliente
+                  <input name="cliente_telefono" />
+                </label>
+                <label>
+                  Email cliente
+                  <input name="cliente_email" type="email" />
+                </label>
                 <label class="span-2">
                   Título
                   <input name="titulo" required placeholder="Ej. Reforma integral, asesoría fiscal anual, administración C.P." />
+                </label>
+                <label>
+                  Estado comercial
+                  <select name="estado">
+                    <option value="Borrador">Borrador</option>
+                    <option value="Estudio">Estudio</option>
+                    <option value="Aceptado">Aceptado</option>
+                    <option value="Rechazado">Rechazado</option>
+                  </select>
+                </label>
+                <label>
+                  Próximo seguimiento
+                  <input name="fecha_seguimiento" type="date" />
+                </label>
+                <label>
+                  Estado encargo
+                  <select name="encargo_estado">
+                    <option value="">No aplica</option>
+                    <option value="Pendiente">Pendiente</option>
+                    <option value="Enviado">Enviado</option>
+                    <option value="Firmada">Firmada</option>
+                  </select>
+                </label>
+                <label>
+                  Fecha encargo
+                  <input name="fecha_encargo" type="date" />
                 </label>
                 <label>
                   Responsable
@@ -187,6 +218,10 @@
                   <textarea name="lineas_texto" rows="5" placeholder="Una línea por partida. Formato: categoría | concepto | cantidad | unidad | precio | dto%"></textarea>
                 </label>
                 <p class="muted span-2" id="workspaceBudgetConfigHelp"></p>
+                <label class="span-2">
+                  Motivo / tracking
+                  <textarea name="motivo_estado" rows="2" placeholder="Razón del rechazo, punto pendiente del estudio, matices del cierre..."></textarea>
+                </label>
                 <label class="span-2">
                   Observaciones
                   <textarea name="observaciones" rows="3"></textarea>
@@ -2294,6 +2329,16 @@
                 <div class="kpi-value" id="gestoriaKpiGestionesVencidas">0</div>
                 <div class="muted">Fuera de plazo</div>
               </div>
+              <div class="card kpi-card">
+                <h3>Presupuestos en estudio</h3>
+                <div class="kpi-value" id="gestoriaKpiPresupuestosEstudio">0</div>
+                <div class="muted">Pendientes de interesarse</div>
+              </div>
+              <div class="card kpi-card">
+                <h3>Encargos pendientes</h3>
+                <div class="kpi-value" id="gestoriaKpiEncargosPendientes">0</div>
+                <div class="muted">Aceptados sin formalizar</div>
+              </div>
             </div>
             <div class="crm-split">
               <div class="form-card">
@@ -2323,6 +2368,23 @@
               <h3>Rentas pendientes de presentar</h3>
               <p class="muted">Borradores cargados que todavía no tienen declaración presentada.</p>
               <div id="gestoriaAlertRentasPendientes"></div>
+            </div>
+            <div class="crm-split">
+              <div class="form-card">
+                <h3>Presupuestos en estudio</h3>
+                <p class="muted">Oportunidades abiertas que requieren seguimiento comercial.</p>
+                <div id="gestoriaAlertPresupuestosEstudio"></div>
+              </div>
+              <div class="form-card">
+                <h3>Rechazados a reactivar</h3>
+                <p class="muted">Seguimientos programados para volver a contactar.</p>
+                <div id="gestoriaAlertPresupuestosRechazados"></div>
+              </div>
+            </div>
+            <div class="form-card">
+              <h3>Notas de encargo pendientes</h3>
+              <p class="muted">Presupuestos aceptados a la espera de formalización.</p>
+              <div id="gestoriaAlertEncargosPendientes"></div>
             </div>
             <div class="form-card">
               <h3>Gestiones vencidas</h3>

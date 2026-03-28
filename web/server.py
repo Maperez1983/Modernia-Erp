@@ -11616,18 +11616,38 @@ def ensure_workspace_product_tables(conn):
           titulo TEXT NOT NULL,
           estado TEXT NOT NULL DEFAULT 'Borrador',
           fecha TEXT,
+          fecha_seguimiento TEXT,
+          motivo_estado TEXT,
           responsable TEXT,
           forma_pago TEXT,
+          encargo_estado TEXT,
+          fecha_encargo TEXT,
           observaciones TEXT,
           subtotal REAL,
           impuestos REAL,
           total REAL,
           calculo_json TEXT,
+          seguimiento_accion_id TEXT,
+          encargo_accion_id TEXT,
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL
         )
         """
     )
+    try:
+        workspace_budget_cols = [row[1] for row in conn.execute("PRAGMA table_info(workspace_presupuestos)").fetchall()]
+        for col_name, col_type in {
+            "fecha_seguimiento": "TEXT",
+            "motivo_estado": "TEXT",
+            "encargo_estado": "TEXT",
+            "fecha_encargo": "TEXT",
+            "seguimiento_accion_id": "TEXT",
+            "encargo_accion_id": "TEXT",
+        }.items():
+            if col_name not in workspace_budget_cols:
+                conn.execute(f"ALTER TABLE workspace_presupuestos ADD COLUMN {col_name} {col_type}")
+    except sqlite3.Error:
+        pass
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS workspace_presupuesto_lineas (
@@ -11776,6 +11796,8 @@ def fetch_workspace_clientes(conn, workspace_id, q="", limit=60):
           c.id,
           c.nombre,
           COALESCE(c.nif, '') AS nif,
+          COALESCE(c.telefono, '') AS telefono,
+          COALESCE(c.email, '') AS email,
           GROUP_CONCAT(DISTINCT e.nombre) AS empresas,
           GROUP_CONCAT(DISTINCT ce.servicio) AS servicios
         FROM clientes c
@@ -12035,6 +12057,238 @@ def compute_fincas_cuota_sugerida(num_vecinos=0, num_locales=0, num_trasteros=0,
     return round(max(60, total), 2)
 
 
+def normalize_workspace_budget_state(value):
+    raw = normalize_lookup_text(value)
+    if raw in {"aceptado", "aceptada", "aceptar"}:
+        return "Aceptado"
+    if raw in {"estudio", "en estudio", "pendiente estudio"}:
+        return "Estudio"
+    if raw in {"rechazado", "rechazada", "rechazar", "descartado", "descartada"}:
+        return "Rechazado"
+    if raw in {"encargado", "contratado"}:
+        return "Aceptado"
+    return "Borrador"
+
+
+def workspace_budget_followup_default(status, base_date=""):
+    base = parse_iso_date(base_date) or datetime.now().date()
+    if status == "Estudio":
+        return (base + timedelta(days=7)).isoformat()
+    if status == "Rechazado":
+        return (base + timedelta(days=30)).isoformat()
+    if status == "Aceptado":
+        return base.isoformat()
+    return ""
+
+
+def workspace_budget_service_label(servicio):
+    key = normalize_service_key(servicio or "")
+    if key == "gestoria":
+        return "Gestoría"
+    if key in {"fincas", "administracion fincas"}:
+        return "Administración de fincas"
+    if key == "reformas":
+        return "Reformas"
+    return (servicio or "Gestión").strip() or "Gestión"
+
+
+def workspace_budget_action_service(servicio):
+    key = normalize_service_key(servicio or "")
+    if key in {"gestoria", "fincas", "administracion fincas"}:
+        return "gestoria"
+    return key or "gestoria"
+
+
+def upsert_workspace_budget_action(
+    conn,
+    *,
+    action_id=None,
+    empresa_id=None,
+    servicio=None,
+    cliente_id=None,
+    cliente_nombre=None,
+    fecha=None,
+    tipo=None,
+    responsable=None,
+    estado="Pendiente",
+    notas=None,
+    now=None,
+):
+    if not empresa_id or not fecha or not tipo:
+        return action_id or ""
+    if action_id:
+        existing = conn.execute("SELECT id FROM acciones WHERE id = ? LIMIT 1", (action_id,)).fetchone()
+        if existing:
+            conn.execute(
+                """
+                UPDATE acciones
+                SET empresa_id = ?, servicio = ?, cliente_id = ?, cliente_nombre = ?, fecha = ?, tipo = ?,
+                    responsable = ?, estado = ?, notas = ?, updated_at = datetime(?)
+                WHERE id = ?
+                """,
+                (
+                    empresa_id,
+                    servicio,
+                    cliente_id,
+                    cliente_nombre,
+                    fecha,
+                    tipo,
+                    responsable,
+                    estado,
+                    notas,
+                    now,
+                    action_id,
+                ),
+            )
+            return action_id
+    action_id = os.urandom(16).hex()
+    conn.execute(
+        """
+        INSERT INTO acciones (
+          id, empresa_id, servicio, cliente_id, cliente_nombre, fecha, tipo, responsable, estado, notas, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+        """,
+        (
+            action_id,
+            empresa_id,
+            servicio,
+            cliente_id,
+            cliente_nombre,
+            fecha,
+            tipo,
+            responsable,
+            estado,
+            notas,
+            now,
+            now,
+        ),
+    )
+    return action_id
+
+
+def close_workspace_budget_action(conn, action_id, now=None, status="Hecho"):
+    if not action_id:
+        return
+    conn.execute(
+        "UPDATE acciones SET estado = ?, updated_at = datetime(?) WHERE id = ?",
+        (status, now, action_id),
+    )
+
+
+def ensure_workspace_budget_client(
+    conn,
+    *,
+    workspace_id,
+    empresa_id,
+    servicio,
+    cliente_id=None,
+    cliente_lookup="",
+    cliente_nif="",
+    cliente_telefono="",
+    cliente_email="",
+    fecha_inicio="",
+    now=None,
+):
+    lookup = re.sub(r"\s+", " ", str(cliente_lookup or "")).strip()
+    nif = re.sub(r"\s+", "", str(cliente_nif or "")).upper()
+    row = None
+    if cliente_id:
+        row = conn.execute(
+            "SELECT id, nombre, COALESCE(nif, '') AS nif, COALESCE(telefono, '') AS telefono, COALESCE(email, '') AS email FROM clientes WHERE id = ? LIMIT 1",
+            (cliente_id,),
+        ).fetchone()
+    if not row and nif:
+        row = conn.execute(
+            "SELECT id, nombre, COALESCE(nif, '') AS nif, COALESCE(telefono, '') AS telefono, COALESCE(email, '') AS email FROM clientes WHERE REPLACE(UPPER(COALESCE(nif, '')), ' ', '') = ? LIMIT 1",
+            (nif,),
+        ).fetchone()
+    if not row and lookup:
+        row = conn.execute(
+            "SELECT id, nombre, COALESCE(nif, '') AS nif, COALESCE(telefono, '') AS telefono, COALESCE(email, '') AS email FROM clientes WHERE TRIM(UPPER(nombre)) = ? LIMIT 1",
+            (lookup.upper(),),
+        ).fetchone()
+    if not row and lookup:
+        cliente_id = os.urandom(16).hex()
+        conn.execute(
+            """
+            INSERT INTO clientes (
+              id, nombre, tipo_persona, nif, telefono, email, estado, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+            """,
+            (
+                cliente_id,
+                lookup,
+                "Física",
+                nif or None,
+                str(cliente_telefono or "").strip() or None,
+                str(cliente_email or "").strip() or None,
+                "Lead",
+                now,
+                now,
+            ),
+        )
+        row = conn.execute(
+            "SELECT id, nombre, COALESCE(nif, '') AS nif, COALESCE(telefono, '') AS telefono, COALESCE(email, '') AS email FROM clientes WHERE id = ? LIMIT 1",
+            (cliente_id,),
+        ).fetchone()
+    if row:
+        updates = []
+        values = []
+        if nif and not str(row["nif"] or "").strip():
+            updates.append("nif = ?")
+            values.append(nif)
+        if str(cliente_telefono or "").strip() and not str(row["telefono"] or "").strip():
+            updates.append("telefono = ?")
+            values.append(str(cliente_telefono or "").strip())
+        if str(cliente_email or "").strip() and not str(row["email"] or "").strip():
+            updates.append("email = ?")
+            values.append(str(cliente_email or "").strip())
+        if updates:
+            values.extend([now, row["id"]])
+            conn.execute(
+                f"UPDATE clientes SET {', '.join(updates)}, updated_at = datetime(?) WHERE id = ?",
+                values,
+            )
+        servicio_label = workspace_budget_service_label(servicio)
+        existing_link = conn.execute(
+            """
+            SELECT id FROM clientes_empresas
+            WHERE cliente_id = ? AND empresa_id = ? AND LOWER(servicio) = LOWER(?)
+            LIMIT 1
+            """,
+            (row["id"], empresa_id, servicio_label),
+        ).fetchone()
+        if existing_link:
+            conn.execute(
+                """
+                UPDATE clientes_empresas
+                SET estado = COALESCE(?, estado), fecha_inicio = COALESCE(?, fecha_inicio), updated_at = datetime(?)
+                WHERE id = ?
+                """,
+                ("Presupuesto", fecha_inicio or None, now, existing_link["id"]),
+            )
+        else:
+            conn.execute(
+                """
+                INSERT INTO clientes_empresas (
+                  id, cliente_id, empresa_id, servicio, estado, fecha_inicio, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                """,
+                (
+                    os.urandom(16).hex(),
+                    row["id"],
+                    empresa_id,
+                    servicio_label,
+                    "Presupuesto",
+                    fecha_inicio or None,
+                    now,
+                    now,
+                ),
+            )
+        return row["id"], row["nombre"]
+    return None, lookup
+
+
 def parse_workspace_presupuesto_lineas(raw):
     if raw in (None, ""):
         return []
@@ -12083,19 +12337,28 @@ def fetch_workspace_presupuestos(conn, workspace_id, limit=40):
           p.cliente_id,
           COALESCE(e.nombre, '') AS empresa_nombre,
           COALESCE(c.nombre, '') AS cliente_nombre,
+          COALESCE(c.nif, '') AS cliente_nif,
+          COALESCE(c.telefono, '') AS cliente_telefono,
+          COALESCE(c.email, '') AS cliente_email,
           p.servicio,
           p.referencia_tipo,
           p.referencia_id,
           p.titulo,
           p.estado,
           p.fecha,
+          p.fecha_seguimiento,
+          p.motivo_estado,
           p.responsable,
           p.forma_pago,
+          COALESCE(p.encargo_estado, '') AS encargo_estado,
+          p.fecha_encargo,
           p.observaciones,
           p.subtotal,
           p.impuestos,
           p.total,
           p.calculo_json,
+          p.seguimiento_accion_id,
+          p.encargo_accion_id,
           p.created_at,
           p.updated_at,
           (
@@ -12643,6 +12906,10 @@ def fetch_workspace_budget_pdf_payload(conn, budget_id, workspace_id=None):
         },
         "lineas": [dict(row) for row in lineas],
     }
+
+
+def fetch_workspace_budget_encargo_payload(conn, budget_id, workspace_id=None):
+    return fetch_workspace_budget_pdf_payload(conn, budget_id, workspace_id=workspace_id)
 
 
 def fetch_workspace_detail(conn, workspace_id):
@@ -13519,6 +13786,77 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
     else:
         pages[0].save(buffer, format="PDF", resolution=150.0, save_all=True, append_images=pages[1:])
     return buffer.getvalue()
+
+
+def build_workspace_budget_encargo_pdf(budget, workspace, company, client, lineas):
+    servicio = workspace_budget_service_label(budget.get("servicio") or "")
+    concepto_base = budget.get("titulo") or "Servicio profesional"
+    line_items = []
+    for line in (lineas or []):
+        concepto = str(line.get("concepto") or "").strip()
+        if concepto:
+            line_items.append(
+                f"{line.get('categoria') or 'Servicio'} · {concepto} · {_pdf_format_number(line.get('cantidad'), 2) or '1'} {line.get('unidad') or ''} · {format_eur(line.get('total_linea') or 0)}"
+            )
+    if not line_items:
+        line_items = [f"{concepto_base} · {format_eur(budget.get('total') or 0)}"]
+    sections = [
+        (
+            "Partes",
+            [
+                ("Prestador", company.get("nombre") or workspace.get("nombre") or "Modernia"),
+                ("Cliente", client.get("nombre") or "Pendiente"),
+                ("DNI / NIF", client.get("nif") or "Pendiente"),
+                ("Teléfono", client.get("telefono") or "Pendiente"),
+                ("Email", client.get("email") or "Pendiente"),
+            ],
+        ),
+        (
+            "Objeto del encargo",
+            [
+                ("Servicio", servicio),
+                ("Concepto", concepto_base),
+                ("Fecha presupuesto", budget.get("fecha") or "-"),
+                ("Fecha prevista de formalización", budget.get("fecha_encargo") or budget.get("fecha") or "-"),
+            ],
+        ),
+        (
+            "Condiciones económicas",
+            [
+                ("Subtotal", format_eur(budget.get("subtotal") or 0)),
+                ("Impuestos", format_eur(budget.get("impuestos") or 0)),
+                ("Total presupuesto", format_eur(budget.get("total") or 0)),
+                ("Forma de pago", budget.get("forma_pago") or "Pendiente de concretar"),
+            ],
+        ),
+        ("Alcance incluido", line_items),
+        (
+            "Condiciones operativas",
+            [
+                "La prestación se realizará conforme al alcance descrito y a la información facilitada por el cliente.",
+                "Cualquier trabajo adicional no previsto requerirá aceptación expresa y, en su caso, actualización económica.",
+                "La documentación y datos aportados por el cliente deberán ser veraces y suficientes para ejecutar el servicio.",
+            ],
+        ),
+        (
+            "Aceptación",
+            [
+                "Con la firma del presente documento, el cliente acepta el encargo profesional y las condiciones económicas indicadas.",
+                "El presente documento sirve como base operativa para iniciar el expediente en el workspace.",
+            ],
+        ),
+    ]
+    footer_lines = [
+        "Plantilla operativa de hoja de encargo generada por el sistema. Requiere validación jurídica definitiva antes de su uso masivo en producción.",
+        "Espacio para firmas: Cliente ____________________ · Prestador ____________________",
+    ]
+    return build_branded_document_pdf(
+        "HOJA DE ENCARGO DE SERVICIOS",
+        f"{company.get('nombre') or workspace.get('nombre') or 'Modernia'} · {servicio}",
+        sections,
+        footer_lines,
+        brand_logo_url=company.get("logo_url"),
+    )
 
 
 def build_inmueble_visit_sheet_pdf(company, inmueble, captacion, owners, buyer, demanda=None):
@@ -16326,7 +16664,29 @@ class Handler(BaseHTTPRequestHandler):
             if not workspace_id or not empresa_id or not titulo:
                 json_response(self, {"error": "workspace_id, empresa_id y titulo requeridos"}, status=400)
                 return
-            cliente_id = str(payload.get("cliente_id") or "").strip() or None
+            current = None
+            if record_id:
+                current = conn.execute(
+                    "SELECT * FROM workspace_presupuestos WHERE id = ? AND workspace_id = ? LIMIT 1",
+                    (record_id, workspace_id),
+                ).fetchone()
+                if not current:
+                    json_response(self, {"error": "presupuesto no encontrado"}, status=404)
+                    return
+            cliente_id_raw = str(payload.get("cliente_id") or "").strip() or None
+            cliente_id, cliente_nombre = ensure_workspace_budget_client(
+                conn,
+                workspace_id=workspace_id,
+                empresa_id=empresa_id,
+                servicio=servicio,
+                cliente_id=cliente_id_raw,
+                cliente_lookup=payload.get("cliente_lookup") or "",
+                cliente_nif=payload.get("cliente_nif") or "",
+                cliente_telefono=payload.get("cliente_telefono") or "",
+                cliente_email=payload.get("cliente_email") or "",
+                fecha_inicio=(payload.get("fecha") or "").strip() or "",
+                now=now,
+            )
             referencia_tipo = str(payload.get("referencia_tipo") or "").strip() or None
             referencia_id = str(payload.get("referencia_id") or "").strip() or None
             lineas = parse_workspace_presupuesto_lineas(payload.get("lineas"))
@@ -16363,6 +16723,20 @@ class Handler(BaseHTTPRequestHandler):
             impuestos = round(parse_money_value(payload.get("impuestos")), 2) or 0.0
             total_manual = round(parse_money_value(payload.get("total")), 2) or 0.0
             total = total_manual if total_manual > 0 else round(subtotal + impuestos, 2)
+            estado = normalize_workspace_budget_state(payload.get("estado") or (current["estado"] if current else "") or "Borrador")
+            fecha_base = (payload.get("fecha") or "").strip() or (current["fecha"] if current else "") or datetime.now().date().isoformat()
+            fecha_seguimiento = (payload.get("fecha_seguimiento") or "").strip() or (current["fecha_seguimiento"] if current else "") or ""
+            if not fecha_seguimiento and estado in {"Estudio", "Rechazado"}:
+                fecha_seguimiento = workspace_budget_followup_default(estado, fecha_base)
+            motivo_estado = (payload.get("motivo_estado") or "").strip() or None
+            encargo_estado = (payload.get("encargo_estado") or "").strip() or (current["encargo_estado"] if current else "") or None
+            if estado == "Aceptado" and not encargo_estado:
+                encargo_estado = "Pendiente"
+            fecha_encargo = (payload.get("fecha_encargo") or "").strip() or (current["fecha_encargo"] if current else "") or ""
+            if estado == "Aceptado" and not fecha_encargo:
+                fecha_encargo = workspace_budget_followup_default("Aceptado", fecha_base)
+            seguimiento_accion_id = str(payload.get("seguimiento_accion_id") or (current["seguimiento_accion_id"] if current else "") or "").strip() or None
+            encargo_accion_id = str(payload.get("encargo_accion_id") or (current["encargo_accion_id"] if current else "") or "").strip() or None
             values = (
                 workspace_id,
                 empresa_id,
@@ -16371,23 +16745,31 @@ class Handler(BaseHTTPRequestHandler):
                 referencia_tipo,
                 referencia_id,
                 titulo,
-                (payload.get("estado") or "").strip() or "Borrador",
-                (payload.get("fecha") or "").strip() or None,
+                estado,
+                fecha_base or None,
+                fecha_seguimiento or None,
+                motivo_estado,
                 (payload.get("responsable") or "").strip() or None,
                 (payload.get("forma_pago") or "").strip() or None,
+                encargo_estado,
+                fecha_encargo or None,
                 (payload.get("observaciones") or "").strip() or None,
                 subtotal,
                 impuestos,
                 total,
                 json.dumps(calculo, ensure_ascii=False) if calculo else None,
+                seguimiento_accion_id,
+                encargo_accion_id,
             )
             if record_id:
                 conn.execute(
                     """
                     UPDATE workspace_presupuestos
                     SET workspace_id = ?, empresa_id = ?, cliente_id = ?, servicio = ?, referencia_tipo = ?, referencia_id = ?,
-                        titulo = ?, estado = ?, fecha = ?, responsable = ?, forma_pago = ?, observaciones = ?,
-                        subtotal = ?, impuestos = ?, total = ?, calculo_json = ?, updated_at = datetime(?)
+                        titulo = ?, estado = ?, fecha = ?, fecha_seguimiento = ?, motivo_estado = ?, responsable = ?,
+                        forma_pago = ?, encargo_estado = ?, fecha_encargo = ?, observaciones = ?,
+                        subtotal = ?, impuestos = ?, total = ?, calculo_json = ?, seguimiento_accion_id = ?, encargo_accion_id = ?,
+                        updated_at = datetime(?)
                     WHERE id = ? AND workspace_id = ?
                     """,
                     (*values, now, record_id, workspace_id),
@@ -16399,8 +16781,10 @@ class Handler(BaseHTTPRequestHandler):
                     """
                     INSERT INTO workspace_presupuestos (
                       id, workspace_id, empresa_id, cliente_id, servicio, referencia_tipo, referencia_id,
-                      titulo, estado, fecha, responsable, forma_pago, observaciones, subtotal, impuestos, total, calculo_json, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                      titulo, estado, fecha, fecha_seguimiento, motivo_estado, responsable, forma_pago, encargo_estado,
+                      fecha_encargo, observaciones, subtotal, impuestos, total, calculo_json, seguimiento_accion_id,
+                      encargo_accion_id, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
                     """,
                     (record_id, *values, now, now),
                 )
@@ -16426,6 +16810,60 @@ class Handler(BaseHTTPRequestHandler):
                         now,
                     ),
                 )
+            action_service = workspace_budget_action_service(servicio)
+            action_note_base = f"{workspace_budget_service_label(servicio)} · {titulo}"
+            if estado in {"Estudio", "Rechazado"}:
+                close_workspace_budget_action(conn, encargo_accion_id, now=now, status="Cancelado")
+                encargo_accion_id = None
+                seguimiento_tipo = "Interesarse por presupuesto en estudio" if estado == "Estudio" else "Reactivar presupuesto rechazado"
+                seguimiento_nota = action_note_base
+                if motivo_estado:
+                    seguimiento_nota = f"{seguimiento_nota} · {motivo_estado}"
+                seguimiento_accion_id = upsert_workspace_budget_action(
+                    conn,
+                    action_id=seguimiento_accion_id,
+                    empresa_id=empresa_id,
+                    servicio=action_service,
+                    cliente_id=cliente_id,
+                    cliente_nombre=cliente_nombre,
+                    fecha=fecha_seguimiento or workspace_budget_followup_default(estado, fecha_base),
+                    tipo=seguimiento_tipo,
+                    responsable=(payload.get("responsable") or "").strip() or None,
+                    estado="Pendiente",
+                    notas=seguimiento_nota,
+                    now=now,
+                )
+            elif estado == "Aceptado":
+                close_workspace_budget_action(conn, seguimiento_accion_id, now=now, status="Hecho")
+                seguimiento_accion_id = None
+                encargo_action_state = "Hecho" if normalize_lookup_text(encargo_estado) in {"firmada", "firmado"} else "Pendiente"
+                encargo_accion_id = upsert_workspace_budget_action(
+                    conn,
+                    action_id=encargo_accion_id,
+                    empresa_id=empresa_id,
+                    servicio=action_service,
+                    cliente_id=cliente_id,
+                    cliente_nombre=cliente_nombre,
+                    fecha=fecha_encargo or workspace_budget_followup_default("Aceptado", fecha_base),
+                    tipo="Formalizar nota de encargo",
+                    responsable=(payload.get("responsable") or "").strip() or None,
+                    estado=encargo_action_state,
+                    notas=f"{action_note_base} · Estado encargo: {encargo_estado or 'Pendiente'}",
+                    now=now,
+                )
+            else:
+                close_workspace_budget_action(conn, seguimiento_accion_id, now=now, status="Cancelado")
+                close_workspace_budget_action(conn, encargo_accion_id, now=now, status="Cancelado")
+                seguimiento_accion_id = None
+                encargo_accion_id = None
+            conn.execute(
+                """
+                UPDATE workspace_presupuestos
+                SET seguimiento_accion_id = ?, encargo_accion_id = ?, updated_at = datetime(?)
+                WHERE id = ? AND workspace_id = ?
+                """,
+                (seguimiento_accion_id, encargo_accion_id, now, record_id, workspace_id),
+            )
             auto_created = run_workspace_automations(
                 conn,
                 workspace_id,
@@ -16435,8 +16873,8 @@ class Handler(BaseHTTPRequestHandler):
                     "empresa_id": empresa_id,
                     "cliente_id": cliente_id,
                     "servicio": servicio,
-                    "cliente_nombre": None,
-                    "estado": (payload.get("estado") or "").strip() or "Borrador",
+                    "cliente_nombre": cliente_nombre,
+                    "estado": estado,
                     "importe": total,
                 },
                 now,
@@ -22106,6 +22544,24 @@ class Handler(BaseHTTPRequestHandler):
             binary_response(self, pdf_bytes, content_type="application/pdf", filename=filename)
             return
 
+        if path == "/api/workspace_presupuesto_encargo_pdf":
+            budget_id = params.get("id", [""])[0]
+            workspace_id = params.get("workspace_id", [""])[0]
+            payload = fetch_workspace_budget_encargo_payload(conn, budget_id, workspace_id=workspace_id)
+            if not payload:
+                json_response(self, {"error": "presupuesto no encontrado"}, status=404)
+                return
+            pdf_bytes = build_workspace_budget_encargo_pdf(
+                payload["budget"],
+                payload["workspace"],
+                payload["company"],
+                payload["client"],
+                payload["lineas"],
+            )
+            filename = f"encargo_{budget_id}.pdf"
+            binary_response(self, pdf_bytes, content_type="application/pdf", filename=filename)
+            return
+
         if path == "/api/workspace_fincas_comunidades":
             workspace_id = params.get("workspace_id", [""])[0]
             limit = params.get("limit", ["30"])[0]
@@ -24181,6 +24637,46 @@ class Handler(BaseHTTPRequestHandler):
                 for row in renta_rows
                 if normalize_renta_presentacion_status((row.get("renta_latest") or {}).get("estado_presentacion")) == "Borrador"
             ]
+            presupuestos_estudio = conn.execute(
+                """
+                SELECT p.fecha, p.fecha_seguimiento, p.titulo, p.motivo_estado, COALESCE(c.nombre, '') AS cliente
+                FROM workspace_presupuestos p
+                LEFT JOIN clientes c ON c.id = p.cliente_id
+                WHERE p.empresa_id = ?
+                  AND LOWER(COALESCE(p.servicio, '')) IN ('gestoria', 'administracion fincas', 'fincas')
+                  AND LOWER(COALESCE(p.estado, '')) = 'estudio'
+                ORDER BY COALESCE(p.fecha_seguimiento, p.fecha, p.updated_at) ASC
+                LIMIT 12
+                """,
+                (empresa_id,),
+            ).fetchall()
+            presupuestos_rechazados = conn.execute(
+                """
+                SELECT p.fecha, p.fecha_seguimiento, p.titulo, p.motivo_estado, COALESCE(c.nombre, '') AS cliente
+                FROM workspace_presupuestos p
+                LEFT JOIN clientes c ON c.id = p.cliente_id
+                WHERE p.empresa_id = ?
+                  AND LOWER(COALESCE(p.servicio, '')) IN ('gestoria', 'administracion fincas', 'fincas')
+                  AND LOWER(COALESCE(p.estado, '')) = 'rechazado'
+                ORDER BY COALESCE(p.fecha_seguimiento, p.updated_at) ASC
+                LIMIT 12
+                """,
+                (empresa_id,),
+            ).fetchall()
+            encargos_pendientes = conn.execute(
+                """
+                SELECT p.fecha, p.fecha_encargo, p.titulo, p.encargo_estado, COALESCE(c.nombre, '') AS cliente
+                FROM workspace_presupuestos p
+                LEFT JOIN clientes c ON c.id = p.cliente_id
+                WHERE p.empresa_id = ?
+                  AND LOWER(COALESCE(p.servicio, '')) IN ('gestoria', 'administracion fincas', 'fincas')
+                  AND LOWER(COALESCE(p.estado, '')) = 'aceptado'
+                  AND LOWER(COALESCE(p.encargo_estado, 'pendiente')) != 'firmada'
+                ORDER BY COALESCE(p.fecha_encargo, p.fecha, p.updated_at) ASC
+                LIMIT 12
+                """,
+                (empresa_id,),
+            ).fetchall()
             acciones_pendientes = conn.execute(
                 """
                 SELECT COUNT(*) AS total
@@ -24239,6 +24735,8 @@ class Handler(BaseHTTPRequestHandler):
                     "modelos_mes": modelos_mes["total"] if modelos_mes else 0,
                     "rentas_pendientes_presentar": len(rentas_borrador),
                     "acciones_pendientes": acciones_pendientes["total"] if acciones_pendientes else 0,
+                    "presupuestos_estudio": len(presupuestos_estudio),
+                    "encargos_pendientes": len(encargos_pendientes),
                 },
                 "modelos": [dict(r) for r in modelos],
                 "modelos_vencidos": [dict(r) for r in modelos_vencidos],
@@ -24252,6 +24750,9 @@ class Handler(BaseHTTPRequestHandler):
                     }
                     for row in rentas_borrador[:12]
                 ],
+                "presupuestos_estudio": [dict(r) for r in presupuestos_estudio],
+                "presupuestos_rechazados": [dict(r) for r in presupuestos_rechazados],
+                "encargos_pendientes": [dict(r) for r in encargos_pendientes],
                 "acciones": [dict(r) for r in acciones],
                 "acciones_vencidas": [dict(r) for r in acciones_vencidas],
             },
