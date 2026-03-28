@@ -3557,6 +3557,121 @@ const WORKSPACE_CATEGORY_LABELS = {
   motor: "Motor",
 };
 
+const WORKSPACE_MODULE_STRUCTURE = {
+  crm360: {
+    section: "crm_core",
+    family: "CRM principal",
+    badge: "Base del tenant",
+    description: "Ficha 360, clientes finales y punto de entrada común para todos los servicios.",
+  },
+  gestoria: {
+    section: "crm_services",
+    family: "Subservicio CRM",
+    badge: "Servicio activo",
+    description: "Operativa fiscal, renta y gestiones periódicas del tenant.",
+  },
+  seguros: {
+    section: "crm_services",
+    family: "Subservicio CRM",
+    badge: "Servicio activo",
+    description: "Cartera, renovaciones y seguimiento comercial de seguros.",
+  },
+  inmobiliaria: {
+    section: "crm_services",
+    family: "Subservicio CRM",
+    badge: "Servicio activo",
+    description: "Captaciones, inmuebles, compraventas, alquileres y visitas.",
+  },
+  financiacion: {
+    section: "crm_services",
+    family: "Subservicio CRM",
+    badge: "Servicio activo",
+    description: "Pipeline hipotecario, expedientes y acompañamiento financiero.",
+  },
+  fincas: {
+    section: "crm_services",
+    family: "Subservicio CRM",
+    badge: "Servicio activo",
+    description: "Comunidades, incidencias, juntas y presupuestación de fincas.",
+  },
+  documental: {
+    section: "workspace_engines",
+    family: "Motor transversal",
+    badge: "Core operativo",
+    description: "Entrada documental, unificación de archivos y revisión del tenant.",
+  },
+  dashboard: {
+    section: "workspace_engines",
+    family: "Motor transversal",
+    badge: "Core analítico",
+    description: "KPIs ejecutivos y lectura consolidada del tenant dentro de LIV.",
+  },
+  facturacion: {
+    section: "workspace_engines",
+    family: "Motor transversal",
+    badge: "Core económico",
+    description: "Facturación, cobros, remesas y control económico compartido.",
+  },
+  facturas_recibidas: {
+    section: "workspace_engines",
+    family: "Motor transversal",
+    badge: "Core económico",
+    description: "Recepción documental y operativa de facturas de proveedores.",
+  },
+  portal_cliente: {
+    section: "workspace_engines",
+    family: "Motor transversal",
+    badge: "Experiencia cliente",
+    description: "Portal de acceso, requerimientos y entrega documental del cliente final.",
+  },
+  registro_horario: {
+    section: "workspace_engines",
+    family: "Motor transversal",
+    badge: "People ops",
+    description: "Fichajes y control laboral ligados al tenant.",
+  },
+  automatizaciones: {
+    section: "workspace_engines",
+    family: "Motor transversal",
+    badge: "Escalabilidad",
+    description: "Reglas y automatismos que conectan servicios, portal y documental.",
+  },
+};
+
+const WORKSPACE_SECTION_DEFINITIONS = [
+  {
+    key: "crm_core",
+    title: "CRM principal",
+    subtitle: "El módulo base del tenant dentro de LIV. Desde aquí nacen clientes, actividad y relación 360.",
+  },
+  {
+    key: "crm_services",
+    title: "Subservicios CRM",
+    subtitle: "Verticales operativas que usan el CRM común para trabajar cada línea de negocio.",
+  },
+  {
+    key: "workspace_engines",
+    title: "Motores transversales",
+    subtitle: "Capas compartidas del workspace: documental, facturación, portal, horario y automatización.",
+  },
+];
+
+const getWorkspaceModuleMeta = (row = {}) => {
+  const base = WORKSPACE_MODULE_STRUCTURE[row.modulo_key] || {};
+  return {
+    section: base.section || "workspace_engines",
+    family: base.family || (WORKSPACE_CATEGORY_LABELS[row.categoria] || "Módulo"),
+    badge: base.badge || "Módulo",
+    description: base.description || "Capacidad configurable del tenant dentro de LIV.",
+  };
+};
+
+const groupWorkspaceModulesBySection = (rows = []) =>
+  WORKSPACE_SECTION_DEFINITIONS.map((section) => ({
+    ...section,
+    rows: rows.filter((row) => getWorkspaceModuleMeta(row).section === section.key),
+  })).filter((section) => section.rows.length);
+
 const normalizeWorkspaceViewKey = (value = "") => {
   const key = String(value || "").trim().toLowerCase();
   if (["overview", "tenant", "clients", "operations", "finance", "backoffice", "fincas"].includes(key)) {
@@ -4567,28 +4682,59 @@ const renderWorkspaceLauncher = (workspace = {}, modules = []) => {
     workspaceLauncher.innerHTML = "<p class='muted'>No hay módulos activos en este tenant.</p>";
     return;
   }
+  const grouped = groupWorkspaceModulesBySection(enabled);
   workspaceLauncher.innerHTML = `
-    <div class="workspace-launcher-grid">
-      ${enabled
-        .map((row) => {
-          const config = WORKSPACE_LAUNCHERS[row.modulo_key] || { label: row.modulo_nombre, actionLabel: "Próximo", action: null };
-          return `
-            <div class="workspace-launcher-card">
-              <div>
-                <strong>${config.label || row.modulo_nombre || row.modulo_key}</strong>
-                <div class="muted">${workspace.nombre || "Tenant activo"} · ${WORKSPACE_CATEGORY_LABELS[row.categoria] || row.categoria || "Módulo"}</div>
-              </div>
-              <button
-                type="button"
-                class="secondary ghost"
-                data-workspace-launcher="${row.modulo_key}"
-                ${config.action ? "" : "disabled"}
-              >${config.actionLabel || "Abrir"}</button>
+    <div class="workspace-suite-summary">
+      ${grouped
+        .map(
+          (group) => `
+            <div class="workspace-suite-card">
+              <strong>${group.title}</strong>
+              <div class="muted">${group.subtitle}</div>
+              <span>${numberFormatter.format(group.rows.length)} activos</span>
             </div>
-          `;
-        })
+          `
+        )
         .join("")}
     </div>
+    ${grouped
+      .map(
+        (group) => `
+          <section class="workspace-module-section">
+            <div class="workspace-module-section-head">
+              <div>
+                <h4>${group.title}</h4>
+                <p class="muted">${group.subtitle}</p>
+              </div>
+              <span>${numberFormatter.format(group.rows.length)} activos</span>
+            </div>
+            <div class="workspace-launcher-grid">
+              ${group.rows
+                .map((row) => {
+                  const config = WORKSPACE_LAUNCHERS[row.modulo_key] || { label: row.modulo_nombre, actionLabel: "Próximo", action: null };
+                  const meta = getWorkspaceModuleMeta(row);
+                  return `
+                    <div class="workspace-launcher-card">
+                      <div>
+                        <strong>${config.label || row.modulo_nombre || row.modulo_key}</strong>
+                        <div class="muted">${meta.family} · ${meta.badge}</div>
+                        <div class="muted">${meta.description}</div>
+                      </div>
+                      <button
+                        type="button"
+                        class="secondary ghost"
+                        data-workspace-launcher="${row.modulo_key}"
+                        ${config.action ? "" : "disabled"}
+                      >${config.actionLabel || "Abrir"}</button>
+                    </div>
+                  `;
+                })
+                .join("")}
+            </div>
+          </section>
+        `
+      )
+      .join("")}
   `;
   workspaceLauncher.querySelectorAll("[data-workspace-launcher]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -4607,22 +4753,65 @@ const renderWorkspaceModules = (rows = []) => {
     workspaceModules.innerHTML = "<p class='muted'>Sin módulos configurados.</p>";
     return;
   }
+  const grouped = groupWorkspaceModulesBySection(rows);
+  const activeTotal = rows.filter((row) => Number(row.enabled || 0) === 1).length;
   workspaceModules.innerHTML = `
-    <div class="workspace-module-grid">
-      ${rows
+    <div class="workspace-module-explainer">
+      <strong>Arquitectura del tenant</strong>
+      <p class="muted">
+        En LIV, el tenant activa un <strong>CRM principal</strong> y encima cuelgan sus <strong>subservicios</strong>.
+        Los módulos restantes funcionan como <strong>motores transversales</strong> del workspace.
+      </p>
+      <div class="workspace-module-explainer-meta">
+        <span>${numberFormatter.format(activeTotal)} módulos activos</span>
+        <span>${numberFormatter.format(rows.length)} configurados</span>
+      </div>
+    </div>
+    <div class="workspace-suite-summary">
+      ${grouped
         .map(
-          (row) => `
-            <label class="workspace-module-card">
-              <div>
-                <strong>${row.modulo_nombre || row.modulo_key || "-"}</strong>
-                <div class="muted">${WORKSPACE_CATEGORY_LABELS[row.categoria] || row.categoria || "Módulo"}</div>
-              </div>
-              <input type="checkbox" data-module-id="${row.id}" ${Number(row.enabled || 0) === 1 ? "checked" : ""} />
-            </label>
+          (group) => `
+            <div class="workspace-suite-card">
+              <strong>${group.title}</strong>
+              <div class="muted">${group.subtitle}</div>
+              <span>${numberFormatter.format(group.rows.filter((row) => Number(row.enabled || 0) === 1).length)} / ${numberFormatter.format(group.rows.length)} activos</span>
+            </div>
           `
         )
         .join("")}
     </div>
+    ${grouped
+      .map(
+        (group) => `
+          <section class="workspace-module-section">
+            <div class="workspace-module-section-head">
+              <div>
+                <h4>${group.title}</h4>
+                <p class="muted">${group.subtitle}</p>
+              </div>
+              <span>${numberFormatter.format(group.rows.filter((row) => Number(row.enabled || 0) === 1).length)} activos</span>
+            </div>
+            <div class="workspace-module-grid">
+              ${group.rows
+                .map((row) => {
+                  const meta = getWorkspaceModuleMeta(row);
+                  return `
+                    <label class="workspace-module-card">
+                      <div>
+                        <strong>${row.modulo_nombre || row.modulo_key || "-"}</strong>
+                        <div class="muted">${meta.family} · ${meta.badge}</div>
+                        <div class="muted">${meta.description}</div>
+                      </div>
+                      <input type="checkbox" data-module-id="${row.id}" ${Number(row.enabled || 0) === 1 ? "checked" : ""} />
+                    </label>
+                  `;
+                })
+                .join("")}
+            </div>
+          </section>
+        `
+      )
+      .join("")}
   `;
   workspaceModules.querySelectorAll("[data-module-id]").forEach((input) => {
     input.addEventListener("change", async () => {
