@@ -2080,6 +2080,22 @@ body.crm-fin #companySummary {
   min-width: 120px;
 }
 
+#workspaceEngineTabs {
+  position: static;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  gap: 8px;
+  padding: 6px;
+  -webkit-overflow-scrolling: touch;
+  scroll-snap-type: x proximity;
+}
+
+#workspaceEngineTabs .tab {
+  flex: 0 0 auto;
+  min-width: max-content;
+  scroll-snap-align: start;
+}
+
 .crm-workspace-view {
   display: grid;
   gap: 14px;
