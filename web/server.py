@@ -21,6 +21,7 @@ import imaplib
 import email
 import html
 import textwrap
+import xml.etree.ElementTree as ET
 from io import BytesIO
 from copy import copy as shallow_copy
 from datetime import datetime, timedelta, timezone
@@ -58,6 +59,7 @@ except Exception:
 ROOT = Path(__file__).resolve().parent
 ASSETS = ROOT.parent / "assets"
 LEGAL_COPILOT_PATH = ROOT.parent / "docs" / "legal_inmobiliaria.json"
+LEGAL_RADAR_SOURCES_PATH = ROOT.parent / "docs" / "legal_radar_sources.json"
 DB_DEFAULT = ROOT.parent / "data" / "erp_import2.sqlite"
 OCR_DB_DEFAULT = ROOT.parent / "data" / "ocr_jobs.sqlite"
 TESSDATA_DIR = "/opt/homebrew/share/tessdata"
@@ -117,6 +119,7 @@ AUTH_SESSIONS_LOCK = threading.Lock()
 DEFAULT_WORKSPACE_NAME = "Modernia"
 PLATFORM_NAME = "LIV"
 LEGAL_COPILOT_CACHE = {"mtime": None, "topics": None}
+LEGAL_RADAR_SOURCES_CACHE = {"mtime": None, "payload": None}
 WORKSPACE_MODULE_CATALOG = [
     {"key": "crm360", "nombre": "CRM 360", "categoria": "core", "sort_order": 10},
     {"key": "documental", "nombre": "Inbox Documental", "categoria": "core", "sort_order": 20},
@@ -9728,6 +9731,387 @@ def get_legal_copilot_topics():
     return LEGAL_COPILOT_TOPICS
 
 
+def get_legal_radar_sources_config():
+    try:
+        mtime = LEGAL_RADAR_SOURCES_PATH.stat().st_mtime
+    except FileNotFoundError:
+        return {"version": 1, "area": "inmobiliaria", "auto_sync_knowledge": True, "sources": []}
+    except Exception:
+        return {"version": 1, "area": "inmobiliaria", "auto_sync_knowledge": True, "sources": []}
+    cached_mtime = LEGAL_RADAR_SOURCES_CACHE.get("mtime")
+    cached_payload = LEGAL_RADAR_SOURCES_CACHE.get("payload")
+    if cached_payload and cached_mtime == mtime:
+        return cached_payload
+    try:
+        with LEGAL_RADAR_SOURCES_PATH.open("r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+        if not isinstance(payload, dict):
+            raise ValueError("invalid legal radar sources payload")
+        payload.setdefault("version", 1)
+        payload.setdefault("area", "inmobiliaria")
+        payload.setdefault("auto_sync_knowledge", True)
+        payload["sources"] = [item for item in list(payload.get("sources") or []) if isinstance(item, dict)]
+        LEGAL_RADAR_SOURCES_CACHE["mtime"] = mtime
+        LEGAL_RADAR_SOURCES_CACHE["payload"] = payload
+        return payload
+    except Exception:
+        return {"version": 1, "area": "inmobiliaria", "auto_sync_knowledge": True, "sources": []}
+
+
+def extract_legal_reference(text):
+    value = str(text or "")
+    patterns = [
+        r"\bBOE-A-\d{4}-\d+\b",
+        r"\bBOJA(?:\s*n[úu]m\.)?\s*\d+\b",
+        r"\bLey\s+\d+/\d{4}\b",
+        r"\bReal\s+Decreto(?:-ley)?\s+\d+/\d{4}\b",
+        r"\bDecreto\s+\d+/\d{4}\b",
+        r"\bOrden\s+[A-Z]{2,}\s*/\s*\d+/\d{4}\b",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if match:
+            return re.sub(r"\s+", " ", match.group(0)).strip()
+    return ""
+
+
+def extract_feed_text(element, names):
+    for name in names:
+        node = element.find(name)
+        if node is not None and (node.text or "").strip():
+            return node.text.strip()
+    return ""
+
+
+def parse_legal_feed_entries(raw_bytes, source_config):
+    entries = []
+    if not raw_bytes:
+        return entries
+    try:
+        root = ET.fromstring(raw_bytes)
+    except Exception:
+        return entries
+    source_key = str(source_config.get("key") or source_config.get("fuente") or "source").strip()
+    rss_items = root.findall(".//item")
+    if rss_items:
+        for item in rss_items:
+            title = extract_feed_text(item, ["title"])
+            link = extract_feed_text(item, ["link"])
+            published = extract_feed_text(item, ["pubDate", "dc:date"])
+            summary = extract_feed_text(item, ["description"])
+            guid = extract_feed_text(item, ["guid"])
+            text_parts = [title, summary, guid, link]
+            entries.append(
+                {
+                    "source_key": source_key,
+                    "title": title,
+                    "link": link,
+                    "published": published,
+                    "summary": summary,
+                    "reference": extract_legal_reference(" ".join(part for part in text_parts if part)),
+                    "raw_text": " ".join(part for part in text_parts if part),
+                }
+            )
+        return entries
+    atom_ns = {"atom": "http://www.w3.org/2005/Atom"}
+    atom_items = root.findall(".//atom:entry", atom_ns)
+    for item in atom_items:
+        title = extract_feed_text(item, ["{http://www.w3.org/2005/Atom}title"])
+        published = extract_feed_text(item, ["{http://www.w3.org/2005/Atom}updated", "{http://www.w3.org/2005/Atom}published"])
+        summary = extract_feed_text(item, ["{http://www.w3.org/2005/Atom}summary", "{http://www.w3.org/2005/Atom}content"])
+        link = ""
+        for link_node in item.findall("{http://www.w3.org/2005/Atom}link"):
+            href = str(link_node.attrib.get("href") or "").strip()
+            if href:
+                link = href
+                break
+        entry_id = extract_feed_text(item, ["{http://www.w3.org/2005/Atom}id"])
+        text_parts = [title, summary, entry_id, link]
+        entries.append(
+            {
+                "source_key": source_key,
+                "title": title,
+                "link": link,
+                "published": published,
+                "summary": summary,
+                "reference": extract_legal_reference(" ".join(part for part in text_parts if part)),
+                "raw_text": " ".join(part for part in text_parts if part),
+            }
+        )
+    return entries
+
+
+def classify_legal_feed_entry(area, source_config, entry):
+    if normalize_lookup_text(area or "").lower() != "inmobiliaria":
+        return None
+    haystack = normalize_lookup_text(
+        " ".join(
+            [
+                str(entry.get("title") or ""),
+                str(entry.get("summary") or ""),
+                str(entry.get("reference") or ""),
+                str(entry.get("link") or ""),
+            ]
+        )
+    ).lower()
+    if not haystack:
+        return None
+    best_match = None
+    best_score = 0
+    for rule in list(source_config.get("rules") or []):
+        if not isinstance(rule, dict):
+            continue
+        keywords = [normalize_lookup_text(item).lower() for item in list(rule.get("keywords") or []) if str(item or "").strip()]
+        matched = [keyword for keyword in keywords if keyword and keyword in haystack]
+        score = len(matched)
+        if score <= 0:
+            continue
+        if score > best_score:
+            best_score = score
+            best_match = {
+                "area": area,
+                "source_key": str(source_config.get("key") or "").strip() or None,
+                "fuente": str(source_config.get("fuente") or source_config.get("title") or "").strip() or None,
+                "reference": str(entry.get("reference") or "").strip() or extract_legal_reference(entry.get("raw_text") or ""),
+                "title": str(entry.get("title") or "").strip() or "Novedad legal detectada",
+                "published": str(entry.get("published") or "").strip() or None,
+                "impacto": str(rule.get("impacto") or source_config.get("impacto_default") or "Medio").strip() or "Medio",
+                "topic_key": str(rule.get("topic_key") or "").strip() or None,
+                "url": str(entry.get("link") or "").strip() or None,
+                "summary": str(entry.get("summary") or "").strip() or None,
+                "accion_recomendada": str(rule.get("accion_recomendada") or "").strip() or None,
+                "matched_keywords": matched,
+                "auto_detected": 1,
+            }
+    return best_match
+
+
+def fetch_legal_feed_content(source_config, timeout=20):
+    url = str(source_config.get("feed_url") or "").strip()
+    if not url:
+        raise ValueError("feed_url requerido")
+    request = urllib.request.Request(url, headers={"User-Agent": "ModerniaLegalRadar/1.0"})
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return response.read()
+
+
+def upsert_legal_radar_item_from_detection(conn, detection, now):
+    if not detection:
+        return {"created": False, "updated": False, "id": None}
+    area = str(detection.get("area") or "inmobiliaria").strip().lower() or "inmobiliaria"
+    url = str(detection.get("url") or "").strip()
+    reference = str(detection.get("reference") or "").strip()
+    title = str(detection.get("title") or "").strip()
+    row = None
+    if url:
+        row = conn.execute(
+            "SELECT id FROM legal_radar_items WHERE area = ? AND url = ? LIMIT 1",
+            (area, url),
+        ).fetchone()
+    if row is None and reference and title:
+        row = conn.execute(
+            "SELECT id FROM legal_radar_items WHERE area = ? AND referencia = ? AND titulo = ? LIMIT 1",
+            (area, reference, title),
+        ).fetchone()
+    if row is None and title:
+        row = conn.execute(
+            "SELECT id FROM legal_radar_items WHERE area = ? AND titulo = ? AND COALESCE(fecha_publicacion,'') = COALESCE(?, '') LIMIT 1",
+            (area, title, str(detection.get("published") or "").strip()),
+        ).fetchone()
+    matched_keywords = ", ".join(list(detection.get("matched_keywords") or [])) or None
+    if row is not None:
+        conn.execute(
+            """
+            UPDATE legal_radar_items
+            SET fuente = COALESCE(?, fuente),
+                referencia = COALESCE(?, referencia),
+                fecha_publicacion = COALESCE(?, fecha_publicacion),
+                impacto = COALESCE(?, impacto),
+                topic_key = COALESCE(?, topic_key),
+                url = COALESCE(?, url),
+                resumen = COALESCE(?, resumen),
+                accion_recomendada = COALESCE(?, accion_recomendada),
+                source_key = COALESCE(?, source_key),
+                matched_keywords = COALESCE(?, matched_keywords),
+                auto_detected = CASE WHEN ? THEN 1 ELSE auto_detected END,
+                updated_at = datetime(?)
+            WHERE id = ?
+            """,
+            (
+                detection.get("fuente"),
+                reference or None,
+                detection.get("published"),
+                detection.get("impacto"),
+                detection.get("topic_key"),
+                url or None,
+                detection.get("summary"),
+                detection.get("accion_recomendada"),
+                detection.get("source_key"),
+                matched_keywords,
+                int(bool(detection.get("auto_detected"))),
+                now,
+                row["id"],
+            ),
+        )
+        return {"created": False, "updated": True, "id": row["id"]}
+    item_id = os.urandom(16).hex()
+    conn.execute(
+        """
+        INSERT INTO legal_radar_items (
+          id, area, fuente, referencia, titulo, fecha_publicacion, estado, impacto,
+          topic_key, url, resumen, accion_recomendada, source_key, matched_keywords,
+          auto_detected, created_at, updated_at
+        ) VALUES (
+          ?, ?, ?, ?, ?, ?, 'Pendiente', ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+        )
+        """,
+        (
+            item_id,
+            area,
+            detection.get("fuente"),
+            reference or None,
+            title or "Novedad legal detectada",
+            detection.get("published"),
+            detection.get("impacto"),
+            detection.get("topic_key"),
+            url or None,
+            detection.get("summary"),
+            detection.get("accion_recomendada"),
+            detection.get("source_key"),
+            matched_keywords,
+            int(bool(detection.get("auto_detected"))),
+            now,
+            now,
+        ),
+    )
+    return {"created": True, "updated": False, "id": item_id}
+
+
+def sync_legal_knowledge_updates(conn, area="inmobiliaria", now=None):
+    now_value = now or datetime.now(timezone.utc).isoformat()
+    area_value = str(area or "inmobiliaria").strip().lower() or "inmobiliaria"
+    try:
+        with LEGAL_COPILOT_PATH.open("r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except Exception:
+        payload = {"version": 1, "area": area_value, "topics": json.loads(json.dumps(LEGAL_COPILOT_TOPICS))}
+    payload["version"] = payload.get("version") or 1
+    payload["area"] = payload.get("area") or area_value
+    topics = payload.get("topics")
+    if not isinstance(topics, dict):
+        topics = json.loads(json.dumps(LEGAL_COPILOT_TOPICS))
+        payload["topics"] = topics
+    meta = payload.setdefault("meta", {})
+    rows = conn.execute(
+        """
+        SELECT id, fuente, referencia, titulo, fecha_publicacion, impacto, topic_key, url,
+               resumen, accion_recomendada, source_key, matched_keywords
+        FROM legal_radar_items
+        WHERE area = ?
+          AND auto_detected = 1
+          AND COALESCE(knowledge_synced_at, '') = ''
+        ORDER BY COALESCE(NULLIF(fecha_publicacion, ''), created_at) DESC, updated_at DESC
+        """,
+        (area_value,),
+    ).fetchall()
+    synced = 0
+    topic_counts = {}
+    for row in rows:
+        topic_key = str(row["topic_key"] or "").strip()
+        if not topic_key or topic_key not in topics:
+            continue
+        topic = topics.get(topic_key)
+        if not isinstance(topic, dict):
+            continue
+        recent_updates = [item for item in list(topic.get("recent_updates") or []) if isinstance(item, dict)]
+        if any(str(item.get("radar_item_id") or "") == row["id"] for item in recent_updates):
+            conn.execute(
+                "UPDATE legal_radar_items SET knowledge_synced_at = datetime(?) WHERE id = ?",
+                (now_value, row["id"]),
+            )
+            continue
+        recent_updates.insert(
+            0,
+            {
+                "radar_item_id": row["id"],
+                "title": row["titulo"],
+                "fuente": row["fuente"],
+                "referencia": row["referencia"],
+                "fecha_publicacion": row["fecha_publicacion"],
+                "impacto": row["impacto"],
+                "url": row["url"],
+                "summary": row["resumen"],
+                "accion_recomendada": row["accion_recomendada"],
+                "source_key": row["source_key"],
+                "matched_keywords": [item.strip() for item in str(row["matched_keywords"] or "").split(",") if item.strip()],
+                "synced_at": now_value,
+            },
+        )
+        topic["recent_updates"] = recent_updates[:12]
+        conn.execute(
+            "UPDATE legal_radar_items SET knowledge_synced_at = datetime(?) WHERE id = ?",
+            (now_value, row["id"]),
+        )
+        synced += 1
+        topic_counts[topic_key] = topic_counts.get(topic_key, 0) + 1
+    if synced:
+        history = [item for item in list(meta.get("sync_history") or []) if isinstance(item, dict)]
+        history.insert(0, {"synced_at": now_value, "area": area_value, "items": synced, "topics": topic_counts})
+        meta["sync_history"] = history[:20]
+        meta["last_auto_sync_at"] = now_value
+        meta["last_auto_sync_summary"] = {"items": synced, "topics": topic_counts}
+        with LEGAL_COPILOT_PATH.open("w", encoding="utf-8") as handle:
+            json.dump(payload, handle, ensure_ascii=False, indent=2)
+            handle.write("\n")
+        LEGAL_COPILOT_CACHE["mtime"] = None
+        LEGAL_COPILOT_CACHE["topics"] = None
+    return {"synced": synced, "topics": topic_counts}
+
+
+def scan_legal_radar_sources(conn, area="inmobiliaria", now=None, source_keys=None):
+    config = get_legal_radar_sources_config()
+    now_value = now or datetime.now(timezone.utc).isoformat()
+    target_keys = {str(item).strip() for item in list(source_keys or []) if str(item).strip()}
+    created = 0
+    updated = 0
+    scanned = 0
+    matched = 0
+    errors = []
+    for source in list(config.get("sources") or []):
+        if not isinstance(source, dict):
+            continue
+        source_key = str(source.get("key") or "").strip()
+        if target_keys and source_key not in target_keys:
+            continue
+        if str(source.get("enabled", True)).strip().lower() in {"0", "false", "no", "off"}:
+            continue
+        scanned += 1
+        try:
+            raw = fetch_legal_feed_content(source)
+            entries = parse_legal_feed_entries(raw, source)
+            for entry in entries[: max(1, min(100, int(source.get("max_entries") or 30)) )]:
+                detection = classify_legal_feed_entry(area, source, entry)
+                if not detection:
+                    continue
+                matched += 1
+                outcome = upsert_legal_radar_item_from_detection(conn, detection, now_value)
+                created += 1 if outcome["created"] else 0
+                updated += 1 if outcome["updated"] else 0
+        except Exception as exc:
+            errors.append({"source_key": source_key or None, "error": str(exc)})
+    sync_summary = {"synced": 0, "topics": {}}
+    if bool(config.get("auto_sync_knowledge", True)):
+        sync_summary = sync_legal_knowledge_updates(conn, area=area, now=now_value)
+    return {
+        "scanned_sources": scanned,
+        "matched_entries": matched,
+        "created": created,
+        "updated": updated,
+        "errors": errors,
+        "knowledge_sync": sync_summary,
+    }
+
+
 def resolve_legal_copilot_topic(area, topic, question):
     if str(area or "").strip().lower() != "inmobiliaria":
         return None, None
@@ -9770,7 +10154,8 @@ def fetch_legal_radar_items(conn, area="inmobiliaria", limit=100):
         """
         SELECT id, area, fuente, referencia, titulo, fecha_publicacion, estado, impacto,
                topic_key, url, resumen, accion_recomendada, reviewed_at, reviewed_by,
-               applied_at, created_at, updated_at
+               applied_at, source_key, matched_keywords, auto_detected, knowledge_synced_at,
+               created_at, updated_at
         FROM legal_radar_items
         WHERE area = ?
         ORDER BY
@@ -9786,7 +10171,7 @@ def fetch_legal_radar_items(conn, area="inmobiliaria", limit=100):
         """,
         (area, limit_value),
     ).fetchall()
-    summary = {"pendiente": 0, "revisado": 0, "aplicado": 0}
+    summary = {"pendiente": 0, "revisado": 0, "aplicado": 0, "auto_detected": 0, "knowledge_synced": 0}
     for row in rows:
         key = normalize_lookup_text(row["estado"] or "").lower()
         if key == "pendiente":
@@ -9795,6 +10180,10 @@ def fetch_legal_radar_items(conn, area="inmobiliaria", limit=100):
             summary["revisado"] += 1
         elif key == "aplicado":
             summary["aplicado"] += 1
+        if int(row["auto_detected"] or 0):
+            summary["auto_detected"] += 1
+        if str(row["knowledge_synced_at"] or "").strip():
+            summary["knowledge_synced"] += 1
     return {"rows": [dict(r) for r in rows], "summary": summary}
 
 
@@ -12523,6 +12912,10 @@ def ensure_tables(db_path):
           url TEXT,
           resumen TEXT,
           accion_recomendada TEXT,
+          source_key TEXT,
+          matched_keywords TEXT,
+          auto_detected INTEGER NOT NULL DEFAULT 0,
+          knowledge_synced_at TEXT,
           reviewed_at TEXT,
           reviewed_by TEXT,
           applied_at TEXT,
@@ -12542,6 +12935,10 @@ def ensure_tables(db_path):
     ensure_column(conn, "legal_radar_items", "url", "url TEXT")
     ensure_column(conn, "legal_radar_items", "resumen", "resumen TEXT")
     ensure_column(conn, "legal_radar_items", "accion_recomendada", "accion_recomendada TEXT")
+    ensure_column(conn, "legal_radar_items", "source_key", "source_key TEXT")
+    ensure_column(conn, "legal_radar_items", "matched_keywords", "matched_keywords TEXT")
+    ensure_column(conn, "legal_radar_items", "auto_detected", "auto_detected INTEGER NOT NULL DEFAULT 0")
+    ensure_column(conn, "legal_radar_items", "knowledge_synced_at", "knowledge_synced_at TEXT")
     ensure_column(conn, "legal_radar_items", "reviewed_at", "reviewed_at TEXT")
     ensure_column(conn, "legal_radar_items", "reviewed_by", "reviewed_by TEXT")
     ensure_column(conn, "legal_radar_items", "applied_at", "applied_at TEXT")
@@ -16624,7 +17021,7 @@ class Handler(BaseHTTPRequestHandler):
             return "gestoria"
         if path.startswith("/api/fin_") or path.startswith("/api/hipotecas"):
             return "financiaciones"
-        if path in {"/api/legal_copilot", "/api/legal_radar_items", "/api/legal_radar_items_update"}:
+        if path in {"/api/legal_copilot", "/api/legal_radar_items", "/api/legal_radar_items_update", "/api/legal_radar_scan"}:
             return "inmobiliaria"
         if path.startswith("/api/capt") or path.startswith("/api/inmueble") or path.startswith("/api/demandas") or path.startswith("/api/visitas") or path.startswith("/api/compraventas"):
             return "inmobiliaria"
@@ -16791,6 +17188,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/legal_copilot",
             "/api/legal_radar_items",
             "/api/legal_radar_items_update",
+            "/api/legal_radar_scan",
             "/api/s3_presign",
             "/api/s3_multipart_start",
             "/api/s3_multipart_presign",
@@ -22182,8 +22580,10 @@ class Handler(BaseHTTPRequestHandler):
                 "drafting_help": list(topic_payload.get("drafting_help") or []),
                 "variable_blocks": list(topic_payload.get("variable_blocks") or []),
                 "warnings": list(topic_payload.get("warnings") or []),
+                "recent_updates": [item for item in list(topic_payload.get("recent_updates") or []) if isinstance(item, dict)][:8],
                 "sources": [
                     "Playbook legal inmobiliario interno de Modernia.",
+                    "Base legal editable del repositorio y radar legal autoactualizable.",
                     "Uso operativo orientado a plantillas, estados y documentación del CRM.",
                     "No sustituye revisión jurídica final del despacho.",
                 ],
@@ -22203,6 +22603,15 @@ class Handler(BaseHTTPRequestHandler):
                         "Revisar penalizaciones, prórrogas, representación y efectos económicos antes de activar la plantilla.",
                     ]
             json_response(self, response)
+            return
+        elif parsed.path == "/api/legal_radar_scan":
+            area = str(payload.get("area") or "inmobiliaria").strip().lower() or "inmobiliaria"
+            source_keys = payload.get("source_keys") or []
+            if isinstance(source_keys, str):
+                source_keys = [item.strip() for item in source_keys.split(",") if item.strip()]
+            result = scan_legal_radar_sources(conn, area=area, now=now, source_keys=source_keys)
+            json_response(self, {"ok": True, **result})
+            conn.commit()
             return
         elif parsed.path == "/api/legal_radar_items":
             area = str(payload.get("area") or "inmobiliaria").strip().lower() or "inmobiliaria"

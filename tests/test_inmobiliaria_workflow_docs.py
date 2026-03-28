@@ -1,3 +1,4 @@
+import json
 import sqlite3
 import tempfile
 import unittest
@@ -7,11 +8,16 @@ from unittest.mock import patch
 from web import server
 from web.server import (
     LEGAL_COPILOT_TOPICS,
+    classify_legal_feed_entry,
     fetch_legal_radar_items,
+    get_legal_radar_sources_config,
     get_legal_copilot_topics,
+    parse_legal_feed_entries,
     persist_generated_inmueble_pdf,
     resolve_legal_copilot_topic,
+    scan_legal_radar_sources,
     sync_inmueble_stage_for_action,
+    sync_legal_knowledge_updates,
 )
 
 
@@ -82,6 +88,10 @@ class InmobiliariaWorkflowDocsTests(unittest.TestCase):
               url TEXT,
               resumen TEXT,
               accion_recomendada TEXT,
+              source_key TEXT,
+              matched_keywords TEXT,
+              auto_detected INTEGER DEFAULT 0,
+              knowledge_synced_at TEXT,
               reviewed_at TEXT,
               reviewed_by TEXT,
               applied_at TEXT,
@@ -222,6 +232,131 @@ class InmobiliariaWorkflowDocsTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["pendiente"], 1)
         self.assertEqual(payload["summary"]["revisado"], 1)
         self.assertEqual(payload["summary"]["aplicado"], 1)
+
+    def test_get_legal_radar_sources_config_loads_editable_json(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source_path = Path(tmp) / "sources.json"
+            source_path.write_text(
+                """
+                {
+                  "version": 1,
+                  "sources": [
+                    {"key": "boe_test", "enabled": true, "feed_url": "https://example.test/feed.xml"}
+                  ]
+                }
+                """,
+                encoding="utf-8",
+            )
+            with patch.object(server, "LEGAL_RADAR_SOURCES_PATH", source_path):
+                server.LEGAL_RADAR_SOURCES_CACHE["mtime"] = None
+                server.LEGAL_RADAR_SOURCES_CACHE["payload"] = None
+                payload = get_legal_radar_sources_config()
+        self.assertEqual(payload["sources"][0]["key"], "boe_test")
+
+    def test_parse_and_classify_legal_feed_entries(self):
+        raw = b"""
+        <rss version="2.0">
+          <channel>
+            <item>
+              <title>Real Decreto-ley sobre arrendamientos urbanos y vivienda</title>
+              <link>https://example.test/boe/1</link>
+              <pubDate>Sat, 28 Mar 2026 09:00:00 GMT</pubDate>
+              <description>Cambio en gastos de gestion inmobiliaria de arrendamiento de vivienda.</description>
+              <guid>BOE-A-2026-12345</guid>
+            </item>
+          </channel>
+        </rss>
+        """
+        source = {
+            "key": "boe_general",
+            "fuente": "BOE",
+            "rules": [
+                {
+                    "topic_key": "contrato_privado_arrendamiento",
+                    "keywords": ["arrendamientos urbanos", "gastos de gestion inmobiliaria"],
+                    "impacto": "Alto",
+                    "accion_recomendada": "Revisar contrato de arrendamiento.",
+                }
+            ],
+        }
+        entries = parse_legal_feed_entries(raw, source)
+        self.assertEqual(len(entries), 1)
+        detection = classify_legal_feed_entry("inmobiliaria", source, entries[0])
+        self.assertEqual(detection["topic_key"], "contrato_privado_arrendamiento")
+        self.assertEqual(detection["impacto"], "Alto")
+        self.assertIn("arrendamientos urbanos", detection["matched_keywords"])
+
+    def test_scan_legal_radar_sources_creates_items_and_syncs_knowledge(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            legal_path = Path(tmp) / "legal.json"
+            legal_path.write_text(
+                json_dumps(
+                    {
+                        "version": 1,
+                        "area": "inmobiliaria",
+                        "topics": {
+                            "contrato_privado_arrendamiento": {
+                                "title": "Contrato privado de arrendamiento",
+                                "summary": "Base",
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            source_path = Path(tmp) / "sources.json"
+            source_path.write_text(
+                json_dumps(
+                    {
+                        "version": 1,
+                        "area": "inmobiliaria",
+                        "auto_sync_knowledge": True,
+                        "sources": [
+                            {
+                                "key": "boe_test",
+                                "fuente": "BOE",
+                                "enabled": True,
+                                "feed_url": "https://example.test/feed.xml",
+                                "rules": [
+                                    {
+                                        "topic_key": "contrato_privado_arrendamiento",
+                                        "keywords": ["arrendamientos urbanos"],
+                                        "impacto": "Alto",
+                                        "accion_recomendada": "Actualizar contrato.",
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            raw = b"""
+            <rss version="2.0"><channel><item>
+              <title>Reforma de arrendamientos urbanos</title>
+              <link>https://example.test/boe/2</link>
+              <pubDate>2026-03-28</pubDate>
+              <description>Actualizacion de arrendamientos urbanos.</description>
+            </item></channel></rss>
+            """
+            with patch.object(server, "LEGAL_COPILOT_PATH", legal_path), patch.object(server, "LEGAL_RADAR_SOURCES_PATH", source_path), patch.object(
+                server, "fetch_legal_feed_content", return_value=raw
+            ):
+                server.LEGAL_COPILOT_CACHE["mtime"] = None
+                server.LEGAL_COPILOT_CACHE["topics"] = None
+                server.LEGAL_RADAR_SOURCES_CACHE["mtime"] = None
+                server.LEGAL_RADAR_SOURCES_CACHE["payload"] = None
+                result = scan_legal_radar_sources(self.conn, area="inmobiliaria", now=self.now)
+                self.assertEqual(result["created"], 1)
+                self.assertEqual(result["knowledge_sync"]["synced"], 1)
+                payload = json.loads(legal_path.read_text(encoding="utf-8"))
+        updates = payload["topics"]["contrato_privado_arrendamiento"]["recent_updates"]
+        self.assertEqual(len(updates), 1)
+        self.assertEqual(updates[0]["accion_recomendada"], "Actualizar contrato.")
+
+
+def json_dumps(payload):
+    return json.dumps(payload, ensure_ascii=False, indent=2)
 
 
 if __name__ == "__main__":

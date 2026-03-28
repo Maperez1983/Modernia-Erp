@@ -1,0 +1,67 @@
+{
+  "version": 1,
+  "area": "inmobiliaria",
+  "auto_sync_knowledge": true,
+  "sources": [
+    {
+      "key": "boe_general",
+      "title": "BOE · Diario oficial",
+      "fuente": "BOE",
+      "enabled": true,
+      "feed_url": "https://www.boe.es/rss/boe.php?s=1",
+      "format": "rss",
+      "max_entries": 40,
+      "impacto_default": "Medio",
+      "rules": [
+        {
+          "topic_key": "contrato_privado_arrendamiento",
+          "impacto": "Alto",
+          "keywords": ["arrendamientos urbanos", "arrendamiento de vivienda", "arrendamiento", "alquiler vivienda", "gastos de gestion inmobiliaria"],
+          "accion_recomendada": "Revisar contrato privado de arrendamiento, reparto de gastos y anexos de alquiler."
+        },
+        {
+          "topic_key": "contrato_privado_compraventa",
+          "impacto": "Alto",
+          "keywords": ["compraventa vivienda", "arras", "reserva", "compraventa de inmueble", "vivienda y urbanismo"],
+          "accion_recomendada": "Revisar contrato privado de compraventa, reserva/arras y condiciones suspensivas."
+        },
+        {
+          "topic_key": "consumo_andalucia",
+          "impacto": "Alto",
+          "keywords": ["consumidores y usuarios", "vivienda y urbanismo", "informacion al consumidor", "intermediacion inmobiliaria"],
+          "accion_recomendada": "Revisar documentación de consumo, ficha informativa, DIA y nota de precio."
+        }
+      ]
+    },
+    {
+      "key": "boja_vivienda_consumo",
+      "title": "BOJA · Vivienda y consumo",
+      "fuente": "BOJA",
+      "enabled": true,
+      "feed_url": "https://www.juntadeandalucia.es/eboja/rss/ultimo.xml",
+      "format": "rss",
+      "max_entries": 40,
+      "impacto_default": "Medio",
+      "rules": [
+        {
+          "topic_key": "consumo_andalucia",
+          "impacto": "Alto",
+          "keywords": ["vivienda", "consumo", "informacion al consumidor", "arrendamiento", "compraventa"],
+          "accion_recomendada": "Revisar obligaciones de información previa y plantillas de consumo en Andalucía."
+        },
+        {
+          "topic_key": "encargo_venta",
+          "impacto": "Medio",
+          "keywords": ["intermediacion inmobiliaria", "agentes de la propiedad inmobiliaria", "comercializacion de viviendas"],
+          "accion_recomendada": "Revisar encargo de venta y cláusulas comerciales afectadas por cambios autonómicos."
+        },
+        {
+          "topic_key": "encargo_alquiler",
+          "impacto": "Medio",
+          "keywords": ["alquiler", "arrendamiento", "intermediacion", "vivienda habitual"],
+          "accion_recomendada": "Revisar encargo de alquiler y documentación informativa previa."
+        }
+      ]
+    }
+  ]
+}
