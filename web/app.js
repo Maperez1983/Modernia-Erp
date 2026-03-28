@@ -5330,11 +5330,11 @@ const renderWorkspaceLauncher = (workspace = {}, modules = []) => {
       ${groupWorkspaceModulesBySection(enabled)
         .map(
           (group) => `
-            <div class="workspace-suite-card">
+            <button type="button" class="workspace-suite-card workspace-suite-card-button" data-workspace-summary-open="${group.key}">
               <strong>${group.title}</strong>
               <div class="muted">${group.subtitle}</div>
               <span>${numberFormatter.format(group.rows.length)} activos</span>
-            </div>
+            </button>
           `
         )
         .join("")}
@@ -5364,6 +5364,22 @@ const renderWorkspaceLauncher = (workspace = {}, modules = []) => {
       renderWorkspaceHomeDetail(container, enabledKeys);
       const detail = document.getElementById("workspaceHomeDetail");
       if (detail) detail.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  });
+  workspaceLauncher.querySelectorAll("[data-workspace-summary-open]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const key = button.dataset.workspaceSummaryOpen || "";
+      if (key === "crm_core") {
+        focusWorkspaceView("clients", workspaceClientLookup, { forceTenantView: true });
+        return;
+      }
+      if (key === "crm_services") {
+        focusWorkspaceView("operations", workspaceServiceDesks, { forceTenantView: true });
+        return;
+      }
+      if (key === "workspace_engines") {
+        focusWorkspaceView("motores", workspaceDocumentHub, { forceTenantView: true });
+      }
     });
   });
 };
