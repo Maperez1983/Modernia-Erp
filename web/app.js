@@ -6367,6 +6367,9 @@ const hydrateWorkspaceCompanySelects = () => {
       if (defaultCompanyId) {
         select.value = defaultCompanyId;
       }
+      if (!String(select.value || "").trim() && companies[0]?.id) {
+        select.value = companies[0].id;
+      }
     }
   });
 };

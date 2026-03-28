@@ -14336,6 +14336,32 @@ def ensure_usuarios_schema(conn):
             "INSERT INTO usuarios (id, nombre, apellido, usuario, email, servicio, rol, activo, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))",
             (os.urandom(16).hex(), "Administrador", "General", "admin", "admin@liv.local", "Administración", "Administrador", 1),
         )
+    flagged_count_row = conn.execute(
+        "SELECT COUNT(*) AS total FROM usuarios WHERE COALESCE(registro_horario_activo, 0) = 1"
+    ).fetchone()
+    flagged_total = 0
+    if flagged_count_row:
+        try:
+            flagged_total = int(flagged_count_row["total"] or 0)
+        except (TypeError, KeyError, IndexError, ValueError):
+            flagged_total = int(flagged_count_row[0] or 0)
+    if flagged_total == 0:
+        conn.execute(
+            """
+            UPDATE usuarios
+            SET registro_horario_activo = 1
+            WHERE COALESCE(activo, 1) = 1
+              AND (
+                LOWER(COALESCE(servicio, '')) LIKE '%gestor%'
+                OR LOWER(COALESCE(servicio, '')) LIKE '%inmobili%'
+                OR LOWER(COALESCE(servicio, '')) LIKE '%seguro%'
+                OR LOWER(COALESCE(servicio, '')) LIKE '%finca%'
+                OR LOWER(COALESCE(servicio, '')) LIKE '%financia%'
+                OR LOWER(COALESCE(servicio, '')) LIKE '%obra%'
+                OR LOWER(COALESCE(servicio, '')) LIKE '%reforma%'
+              )
+            """
+        )
 
 
 def ensure_ocr_tables(db_path):
