@@ -107,6 +107,102 @@
       "variable_blocks": [
         "Responsable, finalidad, base legal, destinatarios y ejercicio de derechos."
       ]
+    },
+    "gestion_siniestros": {
+      "title": "Gestión de siniestros",
+      "summary": "Comunicación, documentación, peritación, reservas y seguimiento de la reclamación hasta cierre.",
+      "keywords": ["siniestro", "parte", "peritacion", "reclamacion", "indemnizacion"],
+      "legal_basis": [
+        "Ley de Contrato de Seguro.",
+        "Condiciones de póliza y normativa sectorial aplicable al ramo."
+      ],
+      "mandatory_docs": [
+        "Parte, documentación justificativa, comunicaciones, peritación y resolución."
+      ],
+      "checklist": [
+        "Identificar fecha, causa y daños.",
+        "Controlar plazo de comunicación y respuesta.",
+        "Vincular cada actuación al expediente."
+      ],
+      "editable_fields": [
+        "Fecha del siniestro, daños, cuantía, documentación y seguimiento."
+      ],
+      "clause_alerts": [
+        "Cierre sin resolución documentada o sin soporte del rechazo."
+      ],
+      "warnings": [
+        "La póliza y el ramo condicionan plazos, coberturas y exclusiones."
+      ],
+      "drafting_help": [
+        "El expediente debe distinguir hecho causante, daños, prueba aportada, posición de la compañía y próximo paso."
+      ],
+      "variable_blocks": [
+        "Póliza, siniestro, daños, peritación, comunicaciones y resolución."
+      ]
+    },
+    "renovacion_cancelacion": {
+      "title": "Renovación y cancelación de pólizas",
+      "summary": "Control de vencimientos, oposición a prórroga, cambios de compañía y trazabilidad de comunicaciones.",
+      "keywords": ["renovacion", "cancelacion", "vencimiento", "oposicion prorroga", "cambio compania"],
+      "legal_basis": [
+        "Ley de Contrato de Seguro.",
+        "Condiciones de póliza y normativa de distribución aplicable al proceso de renovación."
+      ],
+      "mandatory_docs": [
+        "Aviso de vencimiento, comunicación al cliente y solicitud de cancelación si existe."
+      ],
+      "checklist": [
+        "Controlar vencimiento y ventana de actuación.",
+        "Relacionar oferta alternativa y decisión del cliente.",
+        "Guardar comunicaciones con compañía y cliente."
+      ],
+      "editable_fields": [
+        "Vencimiento, decisión del cliente, compañía destino y comunicaciones."
+      ],
+      "clause_alerts": [
+        "Tramitar cancelación fuera de plazo sin dejar advertencia al cliente."
+      ],
+      "warnings": [
+        "La operativa de renovación debe dejar muy claro quién pidió el cambio y cuándo."
+      ],
+      "drafting_help": [
+        "En tareas de renovación, deja trazado el vencimiento, la recomendación y la instrucción final del cliente."
+      ],
+      "variable_blocks": [
+        "Póliza, vencimiento, compañía, recomendación y decisión."
+      ]
+    },
+    "ramos_personales": {
+      "title": "Vida, salud y ramos personales",
+      "summary": "Ramos con especial sensibilidad documental y, a menudo, datos reforzados o exclusiones relevantes.",
+      "keywords": ["vida", "salud", "accidentes", "cuestionario salud", "beneficiario"],
+      "legal_basis": [
+        "Ley de Contrato de Seguro.",
+        "Normativa de protección de datos y documentación precontractual aplicable."
+      ],
+      "mandatory_docs": [
+        "Identificación de asegurado y beneficiarios, cuestionarios y documentación precontractual."
+      ],
+      "checklist": [
+        "Revisar cuestionarios o declaraciones previas si existen.",
+        "Identificar beneficiarios y cambios posteriores.",
+        "Controlar datos sensibles y acceso restringido."
+      ],
+      "editable_fields": [
+        "Asegurado, beneficiarios, capitales, exclusiones y observaciones."
+      ],
+      "clause_alerts": [
+        "Uso inadecuado de datos sensibles o cuestionarios incompletos."
+      ],
+      "warnings": [
+        "Estos ramos requieren especial cuidado documental y de privacidad."
+      ],
+      "drafting_help": [
+        "El expediente debe separar identificación, capitales, beneficiarios, cuestionario y documentación entregada."
+      ],
+      "variable_blocks": [
+        "Asegurado, beneficiarios, capitales, cuestionario y documentación."
+      ]
     }
   }
 }

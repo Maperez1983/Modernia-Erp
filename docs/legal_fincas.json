@@ -64,6 +64,102 @@
       "variable_blocks": [
         "Convocatoria, asistencia, acuerdos, mayorías y ejecución."
       ]
+    },
+    "morosidad_comunidad": {
+      "title": "Morosidad en comunidades",
+      "summary": "Reclamación de cuotas, certificación de deuda, seguimiento y trazabilidad de incidencias de cobro.",
+      "keywords": ["morosidad", "cuotas comunidad", "deuda comunidad", "certificacion deuda", "reclamacion cuotas"],
+      "legal_basis": [
+        "Ley de Propiedad Horizontal.",
+        "Normativa procesal y de reclamación de deuda que corresponda."
+      ],
+      "mandatory_docs": [
+        "Detalle de deuda, acuerdos, certificación y comunicaciones."
+      ],
+      "checklist": [
+        "Identificar periodo, importe y propietario.",
+        "Vincular acuerdo o certificación de deuda.",
+        "Dejar trazada la reclamación y su resultado."
+      ],
+      "editable_fields": [
+        "Deudor, periodo, deuda, certificación, reclamación y estado."
+      ],
+      "clause_alerts": [
+        "Reclamar sin soporte de deuda o sin acuerdo trazado."
+      ],
+      "warnings": [
+        "La comunidad debe poder acreditar deuda, titular y trazabilidad del acuerdo."
+      ],
+      "drafting_help": [
+        "El expediente debe separar deuda, certificación, requerimiento y fase de reclamación."
+      ],
+      "variable_blocks": [
+        "Propietario, deuda, certificación, requerimiento y seguimiento."
+      ]
+    },
+    "contratos_proveedores": {
+      "title": "Proveedores y contratos de comunidad",
+      "summary": "Control de presupuestos, contratos de mantenimiento, incidencias y responsabilidades frente a la comunidad.",
+      "keywords": ["proveedor comunidad", "mantenimiento", "presupuesto proveedor", "contrato proveedor"],
+      "legal_basis": [
+        "Ley de Propiedad Horizontal en cuanto al régimen comunitario.",
+        "Código Civil y normativa de consumidores/profesionales según la relación."
+      ],
+      "mandatory_docs": [
+        "Presupuesto, contrato, acuerdo de la comunidad e incidencias."
+      ],
+      "checklist": [
+        "Vincular proveedor y acuerdo de aprobación.",
+        "Controlar alcance, precio y duración.",
+        "Trazar incidencias y renovaciones."
+      ],
+      "editable_fields": [
+        "Proveedor, servicio, importes, duración, incidencias y renovaciones."
+      ],
+      "clause_alerts": [
+        "Servicios recurrentes sin acuerdo claro o sin trazabilidad contractual."
+      ],
+      "warnings": [
+        "Cada proveedor debería quedar vinculado a su soporte contractual y acuerdo comunitario."
+      ],
+      "drafting_help": [
+        "Las fichas de proveedor deben recoger acuerdo, alcance, precio, vigencia e incidencias."
+      ],
+      "variable_blocks": [
+        "Proveedor, servicio, acuerdo, precio, duración e incidencias."
+      ]
+    },
+    "proteccion_datos_comunidades": {
+      "title": "Protección de datos en comunidades",
+      "summary": "Tratamiento de propietarios, morosos, incidencias y proveedores dentro de la gestión de fincas.",
+      "keywords": ["proteccion datos comunidad", "rgpd comunidad", "propietarios", "morosos"],
+      "legal_basis": [
+        "Reglamento (UE) 2016/679.",
+        "Ley Orgánica 3/2018."
+      ],
+      "mandatory_docs": [
+        "Información de privacidad, responsables y encargados si existen."
+      ],
+      "checklist": [
+        "Controlar acceso a datos de propietarios y morosidad.",
+        "Separar uso interno y comunicaciones a terceros.",
+        "Vincular contratos con proveedores que traten datos."
+      ],
+      "editable_fields": [
+        "Responsable, finalidades, cesiones, conservación y accesos."
+      ],
+      "clause_alerts": [
+        "Difusión indebida de datos de morosos o incidencias vecinales."
+      ],
+      "warnings": [
+        "La comunidad maneja datos personales aunque no sea una sociedad mercantil."
+      ],
+      "drafting_help": [
+        "Las plantillas y avisos deben distinguir gestión comunitaria interna, proveedores y reclamaciones."
+      ],
+      "variable_blocks": [
+        "Responsable, finalidades, cesiones, accesos y conservación."
+      ]
     }
   }
 }

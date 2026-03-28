@@ -100,6 +100,103 @@
       "variable_blocks": [
         "Empresa, trabajador, actuación, fecha y soporte documental."
       ]
+    },
+    "contabilidad_mercantil": {
+      "title": "Contabilidad y obligaciones mercantiles",
+      "summary": "Libros, formulación, soporte contable y trazabilidad documental de la contabilidad del cliente.",
+      "keywords": ["contabilidad", "libros contables", "cuentas anuales", "mercantil", "asientos"],
+      "legal_basis": [
+        "Código de Comercio y normativa mercantil sobre libros y contabilidad.",
+        "Plan General de Contabilidad y normas de registro y valoración."
+      ],
+      "mandatory_docs": [
+        "Asientos, facturas, extractos, conciliaciones y soporte documental."
+      ],
+      "checklist": [
+        "Trazar origen de cada asiento relevante.",
+        "Separar soporte fiscal y soporte contable cuando no coinciden.",
+        "Controlar cierres y periodificación."
+      ],
+      "editable_fields": [
+        "Periodo, cuenta, tercero, soporte, observaciones y revisión."
+      ],
+      "clause_alerts": [
+        "Asientos sin soporte o regularizaciones poco trazadas."
+      ],
+      "warnings": [
+        "La automatización contable debe dejar siempre pista documental suficiente."
+      ],
+      "drafting_help": [
+        "Las incidencias contables deben indicar origen del asiento, soporte, criterio aplicado y acción correctora."
+      ],
+      "variable_blocks": [
+        "Periodo, asiento, soporte documental, criterio y revisión."
+      ]
+    },
+    "proteccion_datos_gestoria": {
+      "title": "Protección de datos en gestoría",
+      "summary": "La gestoría trata datos fiscales, laborales, patrimoniales y, a veces, sensibles; exige control documental y de accesos.",
+      "keywords": ["proteccion datos", "rgpd", "lopdgdd", "gestoria", "encargado tratamiento"],
+      "legal_basis": [
+        "Reglamento (UE) 2016/679.",
+        "Ley Orgánica 3/2018."
+      ],
+      "mandatory_docs": [
+        "Información de privacidad, base legitimadora y acuerdos de encargo cuando proceda."
+      ],
+      "checklist": [
+        "Identificar responsable y encargado del tratamiento.",
+        "Controlar acceso a documentación fiscal y laboral.",
+        "Trazar cesiones a AEAT, TGSS, bancos u organismos."
+      ],
+      "editable_fields": [
+        "Finalidad, legitimación, cesiones, conservación y medidas de acceso."
+      ],
+      "clause_alerts": [
+        "Uso de datos del cliente fuera del servicio contratado.",
+        "Compartir documentación con terceros sin soporte suficiente."
+      ],
+      "warnings": [
+        "Gestoría concentra mucha información crítica y requiere disciplina de acceso."
+      ],
+      "drafting_help": [
+        "Las fichas del servicio deben remitir a la política de privacidad y a las cesiones necesarias por trámite."
+      ],
+      "variable_blocks": [
+        "Responsable, finalidad, legitimación, cesiones, conservación y derechos."
+      ]
+    },
+    "sociedades_mercantil": {
+      "title": "Societario y mercantil",
+      "summary": "Actas, acuerdos, poderes, administradores y documentación societaria vinculada al cliente empresa.",
+      "keywords": ["sociedad", "administrador", "junta general", "poderes", "mercantil"],
+      "legal_basis": [
+        "Ley de Sociedades de Capital.",
+        "Reglamento del Registro Mercantil y normativa mercantil complementaria."
+      ],
+      "mandatory_docs": [
+        "Escrituras, poderes, acuerdos y certificaciones societarias."
+      ],
+      "checklist": [
+        "Verificar quién puede firmar o acordar.",
+        "Relacionar acuerdo, órgano competente y documentación acreditativa.",
+        "Controlar vigencia de cargos y poderes."
+      ],
+      "editable_fields": [
+        "Sociedad, cargo, poder, acuerdo, fecha y documentación soporte."
+      ],
+      "clause_alerts": [
+        "Actuar sin verificar representación o vigencia del cargo."
+      ],
+      "warnings": [
+        "El expediente societario debe dejar claro quién actúa y con qué poder."
+      ],
+      "drafting_help": [
+        "Las notas societarias deben identificar sociedad, órgano, acuerdo, certificación y soporte registral o documental."
+      ],
+      "variable_blocks": [
+        "Sociedad, representantes, acuerdo, poder y fecha."
+      ]
     }
   }
 }

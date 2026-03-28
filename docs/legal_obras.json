@@ -65,6 +65,102 @@
       "variable_blocks": [
         "Tipo de actuación, agentes, licencias, seguros y proyecto."
       ]
+    },
+    "licencias_urbanisticas": {
+      "title": "Licencias y control urbanístico",
+      "summary": "La actuación puede requerir licencia, declaración responsable u otro control urbanístico según alcance y municipio.",
+      "keywords": ["licencia urbanistica", "declaracion responsable", "obra menor", "obra mayor", "urbanismo"],
+      "legal_basis": [
+        "Normativa urbanística estatal y autonómica aplicable.",
+        "Ordenanzas y procedimientos municipales correspondientes."
+      ],
+      "mandatory_docs": [
+        "Licencia o título habilitante, proyecto si procede y documentación municipal."
+      ],
+      "checklist": [
+        "Determinar si la actuación necesita licencia o declaración responsable.",
+        "Vincular municipio y soporte administrativo.",
+        "No iniciar obra sin soporte urbanístico cuando sea exigible."
+      ],
+      "editable_fields": [
+        "Municipio, tipo de título habilitante, fecha, expediente y observaciones."
+      ],
+      "clause_alerts": [
+        "Iniciar obra sin verificar el control urbanístico necesario."
+      ],
+      "warnings": [
+        "El régimen puede variar según municipio y tipo de actuación."
+      ],
+      "drafting_help": [
+        "La ficha debe dejar claro si la obra está habilitada, cómo y desde cuándo."
+      ],
+      "variable_blocks": [
+        "Municipio, actuación, licencia/declaración responsable y expediente."
+      ]
+    },
+    "consumo_reformas": {
+      "title": "Consumo en reformas y obras",
+      "summary": "Si el cliente es consumidor, el presupuesto, la aceptación y las condiciones deben ser claras y equilibradas.",
+      "keywords": ["consumo reformas", "consumidor", "presupuesto reforma", "condiciones generales"],
+      "legal_basis": [
+        "Texto Refundido de la Ley General para la Defensa de los Consumidores y Usuarios.",
+        "Normativa civil y contractual aplicable."
+      ],
+      "mandatory_docs": [
+        "Presupuesto, aceptación, condiciones económicas y alcance claro."
+      ],
+      "checklist": [
+        "Separar base, extras y exclusiones.",
+        "Evitar cláusulas oscuras o desequilibradas.",
+        "Trazar aceptación del presupuesto."
+      ],
+      "editable_fields": [
+        "Precio, plazos, extras, garantías y condiciones particulares."
+      ],
+      "clause_alerts": [
+        "Condiciones generales poco transparentes o penalizaciones desproporcionadas."
+      ],
+      "warnings": [
+        "En B2C la transparencia contractual es especialmente sensible."
+      ],
+      "drafting_help": [
+        "El presupuesto debe ser claro, cerrado en lo posible y muy explícito en extras y exclusiones."
+      ],
+      "variable_blocks": [
+        "Precio base, extras, exclusiones, plazos y aceptación."
+      ]
+    },
+    "prl_coordinacion": {
+      "title": "PRL y coordinación de actividades",
+      "summary": "Ciertas obras y reformas exigen control preventivo y coordinación, especialmente con varios intervinientes.",
+      "keywords": ["prevencion riesgos", "prl", "coordinacion actividades", "seguridad obra"],
+      "legal_basis": [
+        "Normativa de prevención de riesgos laborales aplicable.",
+        "Reglas específicas de seguridad en obras de construcción cuando proceda."
+      ],
+      "mandatory_docs": [
+        "Documentación preventiva y coordinación cuando sea exigible."
+      ],
+      "checklist": [
+        "Identificar si hay varios intervinientes y si aplica coordinación.",
+        "Vincular documentación preventiva al expediente.",
+        "No tratar toda reforma como si no tuviera impacto preventivo."
+      ],
+      "editable_fields": [
+        "Intervinientes, documentación preventiva, coordinaciones y seguimiento."
+      ],
+      "clause_alerts": [
+        "Omitir la capa preventiva en actuaciones con riesgo real."
+      ],
+      "warnings": [
+        "No todo expediente de obra es solo civil o urbanístico; puede tener capa preventiva propia."
+      ],
+      "drafting_help": [
+        "La ficha debe indicar si aplica coordinación preventiva y qué documentación la soporta."
+      ],
+      "variable_blocks": [
+        "Intervinientes, PRL, coordinación y documentación."
+      ]
     }
   }
 }

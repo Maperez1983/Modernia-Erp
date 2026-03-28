@@ -65,6 +65,70 @@
       "variable_blocks": [
         "Responsable, legitimación, cesiones, conservación y ejercicio de derechos."
       ]
+    },
+    "tasacion_y_ofertas": {
+      "title": "Tasación, ofertas y seguimiento bancario",
+      "summary": "Fase crítica del expediente hipotecario donde se cruzan análisis del inmueble, ofertas y condiciones reales de concesión.",
+      "keywords": ["tasacion", "oferta bancaria", "seguimiento bancario", "fein", "tipo interes"],
+      "legal_basis": [
+        "Ley 5/2019, reguladora de los contratos de crédito inmobiliario.",
+        "Normativa bancaria y de transparencia aplicable a la fase precontractual."
+      ],
+      "mandatory_docs": [
+        "Tasación, ofertas, comunicaciones bancarias y seguimiento de cambios."
+      ],
+      "checklist": [
+        "Vincular cada oferta al banco y fecha.",
+        "Separar estimación interna de oferta bancaria real.",
+        "Trazar tasación, cambios de condiciones y siguientes hitos."
+      ],
+      "editable_fields": [
+        "Banco, oferta, tasación, condiciones, observaciones y estado."
+      ],
+      "clause_alerts": [
+        "Tratar una simulación comercial como si fuera oferta bancaria cerrada."
+      ],
+      "warnings": [
+        "La fase de bancos y tasación puede cambiar por completo el expediente; debe quedar muy documentada."
+      ],
+      "drafting_help": [
+        "Las notas deben distinguir banco, oferta preliminar, tasación, cambios y riesgo de caída de operación."
+      ],
+      "variable_blocks": [
+        "Banco, oferta, tasación, condiciones y seguimiento."
+      ]
+    },
+    "intermediacion_asesoramiento": {
+      "title": "Intermediación y asesoramiento financiero",
+      "summary": "Diferenciar captación comercial, asesoramiento interno y documentación precontractual emitida por la entidad.",
+      "keywords": ["asesoramiento financiero", "intermediacion", "broker hipotecario", "cliente bancario"],
+      "legal_basis": [
+        "Ley 5/2019 y normativa de transparencia bancaria aplicable.",
+        "Normativa de consumidores y protección de datos en la fase de intermediación."
+      ],
+      "mandatory_docs": [
+        "Encargo o aceptación del servicio, ficha económica y trazabilidad de recomendaciones."
+      ],
+      "checklist": [
+        "Separar asesoramiento interno y oferta oficial del banco.",
+        "Trazar necesidades, solvencia y documentación recibida.",
+        "Vincular actuación al inmueble y al cliente."
+      ],
+      "editable_fields": [
+        "Cliente, necesidad, solvencia, bancos, recomendaciones y observaciones."
+      ],
+      "clause_alerts": [
+        "Prometer resultados bancarios como si dependieran solo del asesor."
+      ],
+      "warnings": [
+        "La intermediación debe evitar confusiones entre recomendación interna y decisión de la entidad."
+      ],
+      "drafting_help": [
+        "Las fichas deben explicar qué hace el despacho, qué hace el banco y qué falta para avanzar."
+      ],
+      "variable_blocks": [
+        "Cliente, inmueble, necesidad, solvencia, recomendación y bancos."
+      ]
     }
   }
 }
