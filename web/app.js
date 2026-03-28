@@ -4725,6 +4725,7 @@ const renderWorkspaceInmoOverview = (payload = {}) => {
 
 const renderWorkspaceServiceDesks = (payload = {}) => {
   if (!workspaceServiceDesks) return;
+  const companyLabel = getWorkspaceCompanyContextLabel();
   const sections = [
     {
       key: "gestoria",
@@ -4772,6 +4773,10 @@ const renderWorkspaceServiceDesks = (payload = {}) => {
     </div>
   `;
   workspaceServiceDesks.innerHTML = `
+    <div class="workspace-context-strip">
+      <strong>Cola operativa de ${companyLabel}</strong>
+      <span class="muted">Las tareas y alertas que ves aquí ya están enfocadas en la empresa activa.</span>
+    </div>
     <div class="workspace-gestoria-columns">
       ${sections
         .map(
