@@ -3477,9 +3477,9 @@ const renderCompanyCards = () => {
     holdingCard.className = "company-card";
     holdingCard.dataset.action = "holding";
     holdingCard.innerHTML = `
-      <h3>LIV Workspace Hub</h3>
-      <div class="company-meta">Control del producto, tenants y módulos.</div>
-      <div class="company-meta">${state.currentWorkspaceName ? `Tenant activo: ${state.currentWorkspaceName}` : "Modernia como primer tenant operativo en LIV."}</div>
+      <h3>Centro de operaciones</h3>
+      <div class="company-meta">Control del tenant, CRM, subservicios y motores transversales.</div>
+      <div class="company-meta">${state.currentWorkspaceName ? `Tenant activo: ${state.currentWorkspaceName}` : "Modernia como primer tenant operativo dentro de LIV."}</div>
       <a class="card-link" href="?holding=1" data-action="holding">Entrar</a>
     `;
     if (isPriv) {
