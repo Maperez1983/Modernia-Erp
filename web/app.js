@@ -3695,8 +3695,13 @@ const findWorkspaceRecord = (rows = [], identifier = "") => {
 
 const updateWorkspaceEntryChrome = () => {
   const mode = state.currentWorkspaceEntryMode || "platform";
+  const workspaceSource =
+    state.currentWorkspaceDetail?.workspace?.nombre
+    || state.currentWorkspaceName
+    || state.currentWorkspaceTarget
+    || (mode === "tenant" ? "modernia" : "");
   const workspaceName = getWorkspaceDisplayName(
-    state.currentWorkspaceDetail?.workspace?.nombre || state.currentWorkspaceName || "Workspace"
+    workspaceSource || "Workspace"
   );
   const companyLabel = getWorkspaceCompanyContextLabel();
   if (holdingTitle) {
