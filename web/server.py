@@ -114,6 +114,7 @@ AUTH_PUBLIC_POST_ENDPOINTS = {"/api/login", "/api/logout", "/api/auth_set_passwo
 AUTH_SESSIONS = {}
 AUTH_SESSIONS_LOCK = threading.Lock()
 DEFAULT_WORKSPACE_NAME = "Modernia"
+PLATFORM_NAME = "LIV"
 WORKSPACE_MODULE_CATALOG = [
     {"key": "crm360", "nombre": "CRM 360", "categoria": "core", "sort_order": 10},
     {"key": "documental", "nombre": "Inbox Documental", "categoria": "core", "sort_order": 20},
@@ -133,19 +134,19 @@ WORKSPACE_MODULE_CATALOG = [
 WORKSPACE_PLAN_PACKAGES = {
     "Base": {
         "label": "Base",
-        "pitch": "CRM unificado y operativa documental para despachos que empiezan a centralizar servicios.",
+        "pitch": "CRM unificado y operativa documental para tenants que empiezan a centralizar servicios en LIV.",
         "focus": ["crm360", "documental", "dashboard"],
         "included": ["CRM 360", "Documental", "Dashboard Ejecutivo", "Agenda y acciones"],
     },
     "Pro": {
         "label": "Pro",
-        "pitch": "Activa verticales de negocio y facturación para operar el despacho desde un único workspace.",
+        "pitch": "Activa verticales de negocio y facturación para operar el tenant desde una única base en LIV.",
         "focus": ["gestoria", "seguros", "inmobiliaria", "financiacion", "facturacion"],
         "included": ["Gestoría", "Seguros", "Inmobiliaria", "Financiación", "Facturación", "Portal Cliente"],
     },
     "Enterprise": {
         "label": "Enterprise",
-        "pitch": "Producto multiservicio completo con automatización, portal y motores transversales listos para escalar.",
+        "pitch": "Producto multiservicio completo para tenants con automatización, portal y motores transversales listos para escalar.",
         "focus": ["automatizaciones", "portal_cliente", "registro_horario", "facturas_recibidas", "fincas"],
         "included": ["Automatizaciones", "Portal Cliente", "Registro Horario", "Facturas Recibidas", "Administración de Fincas"],
     },
@@ -1030,7 +1031,7 @@ def bootstrap_default_workspace(conn):
             WHERE id = ?
             """,
             (
-                "Workspace principal del producto y tenant inicial del grupo.",
+                f"Tenant inicial del producto {PLATFORM_NAME} y primer caso operativo del grupo.",
                 now,
                 workspace_id,
             ),
@@ -1047,7 +1048,7 @@ def bootstrap_default_workspace(conn):
                 workspace_id,
                 DEFAULT_WORKSPACE_NAME,
                 normalize_workspace_slug(DEFAULT_WORKSPACE_NAME),
-                "Workspace principal del producto y tenant inicial del grupo.",
+                f"Tenant inicial del producto {PLATFORM_NAME} y primer caso operativo del grupo.",
                 "#3C6E71",
                 "#5F7A61",
                 now,

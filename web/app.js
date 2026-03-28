@@ -1227,6 +1227,7 @@ const workspaceFormStatus = document.getElementById("workspaceFormStatus");
 const workspaceNewBtn = document.getElementById("workspaceNewBtn");
 const workspaceCompanies = document.getElementById("workspaceCompanies");
 const workspaceModules = document.getElementById("workspaceModules");
+const workspaceClientBase = document.getElementById("workspaceClientBase");
 const workspaceBillingSummary = document.getElementById("workspaceBillingSummary");
 const workspaceDocumentHub = document.getElementById("workspaceDocumentHub");
 const workspaceBillingForm = document.getElementById("workspaceBillingForm");
@@ -3448,9 +3449,9 @@ const renderCompanyCards = () => {
     holdingCard.className = "company-card";
     holdingCard.dataset.action = "holding";
     holdingCard.innerHTML = `
-      <h3>Workspace Central</h3>
+      <h3>LIV Workspace Hub</h3>
       <div class="company-meta">Control del producto, tenants y módulos.</div>
-      <div class="company-meta">${state.currentWorkspaceName ? `Workspace activo: ${state.currentWorkspaceName}` : "Modernia como primer workspace operativo."}</div>
+      <div class="company-meta">${state.currentWorkspaceName ? `Tenant activo: ${state.currentWorkspaceName}` : "Modernia como primer tenant operativo en LIV."}</div>
       <a class="card-link" href="?holding=1" data-action="holding">Entrar</a>
     `;
     if (isPriv) {
@@ -3610,8 +3611,8 @@ const getWorkspaceEnabledModules = (modules = []) =>
 const renderWorkspaceKpis = (summary = {}) => {
   if (!workspaceKpis) return;
   const items = [
-    ["Workspaces", summary.workspaces_total || 0, "Tenants operativos"],
-    ["Empresas", summary.empresas_total || 0, "Sociedades enlazadas"],
+    ["Tenants", summary.workspaces_total || 0, "Clientes de LIV operativos"],
+    ["Empresas operativas", summary.empresas_total || 0, "Sociedades enlazadas a tenants"],
     ["Módulos activos", summary.modulos_activos_total || 0, "Capacidades habilitadas"],
   ];
   workspaceKpis.innerHTML = items
@@ -3633,11 +3634,11 @@ const renderWorkspaceHealth = (data = {}) => {
     const summary = data.summary || {};
     workspaceHealthScore.innerHTML = `
       <div class="workspace-health-score-card">
-        <div class="workspace-health-ring">${score}%</div>
-        <div>
+          <div class="workspace-health-ring">${score}%</div>
+          <div>
           <strong>Readiness del tenant</strong>
           <div class="muted">
-            ${numberFormatter.format(Number(summary.clientes || 0))} clientes ·
+            ${numberFormatter.format(Number(summary.clientes || 0))} clientes finales ·
             ${numberFormatter.format(Number(summary.documentos || 0))} documentos ·
             ${numberFormatter.format(Number(summary.facturas || 0))} movimientos
           </div>
@@ -3754,7 +3755,7 @@ const renderWorkspaceCommercialPack = (workspace = {}, packageData = {}) => {
               ${included.map((item) => `<div class="workspace-chip"><strong>${item}</strong><span>Incluido</span></div>`).join("")}
             </div>
           `
-        : "<p class='muted'>Sin paquete comercial definido todavía.</p>"
+        : "<p class='muted'>Sin paquete comercial definido todavía para este tenant.</p>"
     }
   `;
 };
@@ -3786,6 +3787,35 @@ const renderWorkspacePermissionMatrix = (rows = []) => {
   `;
 };
 
+const renderWorkspaceClientBase = (rows = []) => {
+  if (!workspaceClientBase) return;
+  const items = Array.isArray(rows) ? rows : [];
+  if (!items.length) {
+    workspaceClientBase.innerHTML = "<p class='muted'>Sin clientes finales vinculados todavía a este tenant.</p>";
+    return;
+  }
+  workspaceClientBase.innerHTML = `
+    <div class="workspace-billing-list">
+      ${items
+        .map(
+          (row) => `
+            <div class="workspace-billing-row">
+              <div>
+                <strong>${row.nombre || "-"}</strong>
+                <div class="muted">${row.nif || "Sin DNI/NIF"}${row.telefono ? ` · ${row.telefono}` : ""}${row.email ? ` · ${row.email}` : ""}</div>
+                <div class="muted">${row.servicios || "Sin servicios"}${row.empresas ? ` · ${row.empresas}` : ""}</div>
+              </div>
+              <div class="workspace-billing-meta">
+                <span>Cliente final</span>
+              </div>
+            </div>
+          `
+        )
+        .join("")}
+    </div>
+  `;
+};
+
 const fillWorkspaceForm = (workspace = {}) => {
   if (!workspaceForm) return;
   ["id", "nombre", "slug", "estado", "plan", "descripcion", "logo_url", "primary_color", "accent_color"].forEach((field) => {
@@ -3798,7 +3828,7 @@ const fillWorkspaceForm = (workspace = {}) => {
 const renderWorkspaceList = (rows = []) => {
   if (!workspaceList) return;
   if (!rows.length) {
-    workspaceList.innerHTML = "<p class='muted'>Sin workspaces configurados.</p>";
+    workspaceList.innerHTML = "<p class='muted'>Sin tenants configurados todavía en LIV.</p>";
     return;
   }
   const selectedId =
@@ -3813,7 +3843,8 @@ const renderWorkspaceList = (rows = []) => {
         <button type="button" class="workspace-list-item${isActive ? " is-active" : ""}" data-workspace-id="${row.id}">
           <div>
             <strong>${row.nombre || "-"}</strong>
-            <div class="muted">${row.plan || "Enterprise"} · ${row.estado || "Activo"}</div>
+            <div class="muted">Tenant · ${row.plan || "Enterprise"} · ${row.estado || "Activo"}</div>
+            ${row.descripcion ? `<div class="muted">${row.descripcion}</div>` : ""}
           </div>
           <div class="workspace-list-meta">
             <span>${Number(row.empresas_total || 0)} empresas</span>
@@ -3835,7 +3866,7 @@ const renderWorkspaceList = (rows = []) => {
 const renderWorkspaceCompanies = (rows = []) => {
   if (!workspaceCompanies) return;
   if (!rows.length) {
-    workspaceCompanies.innerHTML = "<p class='muted'>Sin empresas asociadas.</p>";
+    workspaceCompanies.innerHTML = "<p class='muted'>Sin empresas operativas asociadas.</p>";
     return;
   }
   workspaceCompanies.innerHTML = `
@@ -3858,7 +3889,7 @@ const renderWorkspaceLauncher = (workspace = {}, modules = []) => {
   if (!workspaceLauncher) return;
   const enabled = modules.filter((row) => Number(row.enabled || 0) === 1);
   if (!enabled.length) {
-    workspaceLauncher.innerHTML = "<p class='muted'>No hay módulos activos en este workspace.</p>";
+    workspaceLauncher.innerHTML = "<p class='muted'>No hay módulos activos en este tenant.</p>";
     return;
   }
   workspaceLauncher.innerHTML = `
@@ -3870,7 +3901,7 @@ const renderWorkspaceLauncher = (workspace = {}, modules = []) => {
             <div class="workspace-launcher-card">
               <div>
                 <strong>${config.label || row.modulo_nombre || row.modulo_key}</strong>
-                <div class="muted">${workspace.nombre || "Workspace activo"} · ${WORKSPACE_CATEGORY_LABELS[row.categoria] || row.categoria || "Módulo"}</div>
+                <div class="muted">${workspace.nombre || "Tenant activo"} · ${WORKSPACE_CATEGORY_LABELS[row.categoria] || row.categoria || "Módulo"}</div>
               </div>
               <button
                 type="button"
@@ -5429,6 +5460,7 @@ const loadWorkspaceDetail = async (workspaceId) => {
   renderWorkspacePermissionMatrix(detail.permission_matrix || []);
   renderWorkspaceLauncher(detail.workspace || {}, detail.modules || []);
   renderWorkspaceCompanies(detail.companies || []);
+  renderWorkspaceClientBase(workspaceClients.rows || []);
   renderWorkspaceModules(detail.modules || []);
   renderWorkspaceBillingSummary(billing || {});
   renderWorkspaceBillingList(billingRows.rows || []);
@@ -5489,6 +5521,7 @@ const loadWorkspaceCentral = async () => {
     renderWorkspacePermissionMatrix([]);
     renderWorkspaceLauncher({}, []);
     renderWorkspaceCompanies([]);
+    renderWorkspaceClientBase([]);
     renderWorkspaceModules([]);
     renderWorkspaceBillingSummary({});
     renderWorkspaceBillingList([]);
@@ -6214,7 +6247,7 @@ const openWorkspacePortalPublic = async (token) => {
     if (workspacePortalPublicContent) {
       workspacePortalPublicContent.innerHTML = `
         <div class="form-card">
-          <h3>${data.workspace || "Workspace"}</h3>
+          <h3>${data.workspace || "Tenant"}</h3>
           <p class="muted">${data.cliente || "Cliente"}</p>
           <div class="workspace-mini-kpis">
             <div class="workspace-mini-kpi">
@@ -27207,7 +27240,7 @@ if (workspaceForm) {
   workspaceForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (workspaceFormStatus) {
-      workspaceFormStatus.textContent = "Guardando...";
+      workspaceFormStatus.textContent = "Guardando tenant...";
     }
     const formData = new FormData(workspaceForm);
     const payload = Object.fromEntries(formData.entries());
@@ -27222,12 +27255,12 @@ if (workspaceForm) {
       }
       state.currentWorkspaceId = data.id || "";
       if (workspaceFormStatus) {
-        workspaceFormStatus.textContent = "Guardado.";
+        workspaceFormStatus.textContent = "Tenant guardado.";
       }
       await loadWorkspaceCentral();
     } catch (error) {
       if (workspaceFormStatus) {
-        workspaceFormStatus.textContent = error.message || "Error al guardar.";
+        workspaceFormStatus.textContent = error.message || "Error al guardar el tenant.";
       }
     }
   });
@@ -27248,8 +27281,12 @@ if (workspaceNewBtn) {
       primary_color: "#3C6E71",
       accent_color: "#5F7A61",
     });
+    renderWorkspaceHealth({});
+    renderWorkspaceCommercialPack({}, {});
+    renderWorkspacePermissionMatrix([]);
     renderWorkspaceLauncher({}, []);
     renderWorkspaceCompanies([]);
+    renderWorkspaceClientBase([]);
     renderWorkspaceModules([]);
     renderWorkspaceBillingSummary({});
     renderWorkspaceBillingList([]);
@@ -27284,9 +27321,10 @@ if (workspaceNewBtn) {
     fillWorkspaceFincasProviderForm();
     renderWorkspaceFincasMeetingList([]);
     fillWorkspaceFincasMeetingForm();
+    renderWorkspaceDocumentHub({});
     renderCompanyCards();
     if (workspaceFormStatus) {
-      workspaceFormStatus.textContent = "Preparado para crear un workspace nuevo.";
+      workspaceFormStatus.textContent = "Preparado para crear un tenant nuevo.";
     }
   });
 }

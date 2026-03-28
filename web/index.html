@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>LIV · Grupo Modernia</title>
+    <title>LIV · Control de Tenants</title>
     <link rel="stylesheet" href="styles.css?v=135" />
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600;700&family=Source+Sans+3:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" />
   </head>
@@ -12,9 +12,9 @@
       <div class="brand" id="brandHome">
         <img src="/assets/liv_logo.svg" alt="LIV" />
         <div class="brand-copy">
-          <span class="brand-kicker">Modernia group platform</span>
+          <span class="brand-kicker">LIV platform</span>
           <h1>LIV Control Center</h1>
-          <p>CRM operativo, seguimiento comercial y coordinación multiempresa desde una sola interfaz.</p>
+          <p>Plataforma de producto para gestionar tenants, módulos, operación y clientes finales desde una sola interfaz.</p>
         </div>
       </div>
       <div class="meta">
@@ -49,8 +49,8 @@
       <section id="holdingSection" class="hidden">
         <div class="section-head">
           <div>
-            <h2>Workspace Central</h2>
-            <p class="muted">Control de tenants, empresas, módulos y base de producto desde una sola vista.</p>
+            <h2>LIV Workspace Hub</h2>
+            <p class="muted">Control de tenants, empresas operativas, módulos y base de producto desde la capa plataforma.</p>
           </div>
           <button id="holdingBackBtn" class="secondary ghost">Volver a home</button>
         </div>
@@ -60,7 +60,7 @@
             <div class="section-head">
               <div>
                 <h3>Salud del tenant</h3>
-                <p class="muted">Nivel de implantación y readiness del workspace como producto.</p>
+                <p class="muted">Nivel de implantación y readiness del tenant dentro de LIV.</p>
               </div>
             </div>
             <div id="workspaceHealthScore"></div>
@@ -70,7 +70,7 @@
             <div class="section-head">
               <div>
                 <h3>Estado por módulo</h3>
-                <p class="muted">Qué módulos están operativos, configurándose o pendientes.</p>
+                <p class="muted">Qué módulos del tenant están operativos, configurándose o pendientes.</p>
               </div>
             </div>
             <div id="workspaceModuleHealth"></div>
@@ -114,19 +114,19 @@
                   <input name="fecha" type="date" />
                 </label>
                 <label class="span-2">
-                  Cliente
-                  <input name="cliente_lookup" id="workspaceBudgetClienteLookup" list="workspaceClientOptions" placeholder="Busca por nombre o DNI" />
+                  Cliente final
+                  <input name="cliente_lookup" id="workspaceBudgetClienteLookup" list="workspaceClientOptions" placeholder="Busca por nombre o DNI del cliente final" />
                 </label>
                 <label>
-                  DNI / NIF cliente
+                  DNI / NIF cliente final
                   <input name="cliente_nif" placeholder="Opcional si es alta rápida" />
                 </label>
                 <label>
-                  Teléfono cliente
+                  Teléfono cliente final
                   <input name="cliente_telefono" />
                 </label>
                 <label>
-                  Email cliente
+                  Email cliente final
                   <input name="cliente_email" type="email" />
                 </label>
                 <label class="span-2">
@@ -241,7 +241,7 @@
             <div class="section-head">
               <div>
                 <h3>Paquete Comercial</h3>
-                <p class="muted">Cómo se empaqueta y se presenta este workspace dentro del producto.</p>
+                <p class="muted">Cómo se empaqueta y se presenta este tenant dentro del producto LIV.</p>
               </div>
             </div>
             <div id="workspaceCommercialPack"></div>
@@ -250,7 +250,7 @@
             <div class="section-head">
               <div>
                 <h3>Go Live</h3>
-                <p class="muted">Acciones prioritarias para dejar el tenant listo para implantación o venta.</p>
+                <p class="muted">Acciones prioritarias para dejar el tenant listo para implantación o venta en LIV.</p>
               </div>
             </div>
             <div id="workspaceOnboardingActions"></div>
@@ -268,8 +268,8 @@
         <div class="form-card">
           <div class="section-head">
             <div>
-              <h3>Lanzadores del tenant</h3>
-              <p class="muted">Acceso directo a los módulos activos del workspace seleccionado.</p>
+              <h3>Módulos del tenant</h3>
+              <p class="muted">Acceso directo a los módulos activos del tenant seleccionado.</p>
             </div>
           </div>
           <div id="workspaceLauncher"></div>
@@ -278,8 +278,8 @@
           <div class="form-card">
             <div class="section-head">
               <div>
-                <h3>Workspaces</h3>
-                <p class="muted">Cada workspace representa un tenant operando sobre el producto.</p>
+                <h3>Tenants</h3>
+                <p class="muted">Cada workspace representa un tenant cliente de LIV.</p>
               </div>
             </div>
             <div id="workspaceList"></div>
@@ -287,15 +287,15 @@
           <div class="form-card">
             <div class="section-head">
               <div>
-                <h3>Configuración del workspace</h3>
-                <p class="muted">Define branding, estado y plan del tenant.</p>
+                <h3>Configuración del tenant</h3>
+                <p class="muted">Define branding, estado y plan comercial del tenant dentro de LIV.</p>
               </div>
-              <button type="button" id="workspaceNewBtn" class="secondary ghost">Nuevo workspace</button>
+              <button type="button" id="workspaceNewBtn" class="secondary ghost">Nuevo tenant</button>
             </div>
             <form id="workspaceForm" class="form-grid">
               <input type="hidden" name="id" />
               <label>
-                Nombre
+                Nombre del tenant
                 <input name="nombre" required />
               </label>
               <label>
@@ -332,7 +332,7 @@
                 <textarea name="descripcion" rows="3"></textarea>
               </label>
               <div class="form-actions">
-                <button type="submit">Guardar workspace</button>
+                <button type="submit">Guardar tenant</button>
                 <span id="workspaceFormStatus" class="muted"></span>
               </div>
             </form>
@@ -343,7 +343,7 @@
             <div class="section-head">
               <div>
                 <h3>Empresas vinculadas</h3>
-                <p class="muted">Sociedades operativas que cuelgan del workspace.</p>
+                <p class="muted">Sociedades operativas que cuelgan del tenant.</p>
               </div>
             </div>
             <div id="workspaceCompanies"></div>
@@ -352,18 +352,27 @@
             <div class="section-head">
               <div>
                 <h3>Módulos del producto</h3>
-                <p class="muted">Activa o pausa verticales y motores transversales por workspace.</p>
+                <p class="muted">Activa o pausa verticales y motores transversales por tenant.</p>
               </div>
             </div>
             <div id="workspaceModules"></div>
           </div>
+        </div>
+        <div class="form-card">
+          <div class="section-head">
+            <div>
+              <h3>Clientes Finales del Tenant</h3>
+              <p class="muted">Base comercial y operativa de clientes reales del tenant, distinta del propio tenant cliente de LIV.</p>
+            </div>
+          </div>
+          <div id="workspaceClientBase"></div>
         </div>
         <div class="workspace-central-layout">
           <div class="form-card">
             <div class="section-head">
               <div>
                 <h3>Facturación transversal</h3>
-                <p class="muted">Base única para medir facturado, cobrado y potencial operativo por workspace.</p>
+                <p class="muted">Base única para medir facturado, cobrado y potencial operativo por tenant.</p>
               </div>
             </div>
             <div id="workspaceBillingSummary"></div>
@@ -397,7 +406,7 @@
                 </label>
                 <label class="span-2">
                   Cliente
-                  <input name="cliente_lookup" id="workspaceBillingClienteLookup" list="workspaceClientOptions" placeholder="Busca por nombre o DNI" />
+                  <input name="cliente_lookup" id="workspaceBillingClienteLookup" list="workspaceClientOptions" placeholder="Busca por nombre o DNI del cliente final" />
                 </label>
                 <label>
                   Fecha emisión
@@ -548,7 +557,7 @@
               </label>
               <label class="span-2">
                 Cliente sugerido
-                <input id="workspaceInboxClienteLookup" list="workspaceClientOptions" placeholder="Nombre o DNI" />
+                <input id="workspaceInboxClienteLookup" list="workspaceClientOptions" placeholder="Nombre o DNI del cliente final" />
               </label>
               <label class="span-2">
                 Notas
@@ -625,7 +634,7 @@
               <input type="hidden" name="cliente_id" />
               <label class="span-2">
                 Cliente
-                <input id="workspacePortalClienteLookup" list="workspaceClientOptions" placeholder="Nombre o DNI" />
+                <input id="workspacePortalClienteLookup" list="workspaceClientOptions" placeholder="Nombre o DNI del cliente final" />
               </label>
               <label>
                 Email acceso
