@@ -72,7 +72,7 @@
     "fiscal_general": {
       "title": "Gestión fiscal",
       "summary": "Control de obligaciones periódicas, requerimientos, criterio tributario y soporte documental del contribuyente.",
-      "keywords": ["fiscal", "modelo tributario", "iva", "irpf", "sociedades", "requerimiento"],
+      "keywords": ["fiscal", "modelo tributario", "requerimiento", "procedimiento tributario", "gestion fiscal general"],
       "legal_basis": [
         "Ley General Tributaria y normativa material de cada tributo.",
         "Doctrina DGT y criterio administrativo aplicable cuando proceda."
@@ -105,7 +105,7 @@
     "irpf": {
       "title": "IRPF",
       "summary": "Rendimientos, ganancias, deducciones, imputaciones y obligaciones del contribuyente persona física.",
-      "keywords": ["irpf", "renta", "ganancia patrimonial", "deduccion", "rendimientos", "declaracion renta"],
+      "keywords": ["irpf", "renta", "deduccion", "rendimientos", "declaracion renta", "campaña renta"],
       "legal_basis": [
         "Normativa reguladora del Impuesto sobre la Renta de las Personas Físicas.",
         "Reglamento del IRPF y doctrina administrativa aplicable."
@@ -169,7 +169,7 @@
     "renta_inmuebles_alquileres": {
       "title": "Renta de inmuebles y alquileres",
       "summary": "Tratamiento en IRPF de inmuebles, alquileres, imputaciones, gastos deducibles y regularización del rendimiento inmobiliario.",
-      "keywords": ["renta inmuebles", "alquiler irpf", "rendimiento inmobiliario", "imputacion inmobiliaria", "gastos deducibles alquiler"],
+      "keywords": ["renta inmuebles", "alquiler irpf", "rendimiento inmobiliario", "imputacion inmobiliaria", "gastos deducibles alquiler", "alquiler e imputacion inmobiliaria", "renta alquiler imputacion"],
       "legal_basis": [
         "Normativa de IRPF aplicable a inmuebles y rendimientos del capital inmobiliario.",
         "Doctrina y criterios administrativos sobre gastos, reducción y uso del inmueble."
@@ -201,7 +201,7 @@
     "renta_ganancias_patrimoniales": {
       "title": "Renta y ganancias patrimoniales",
       "summary": "Ventas, transmisiones, premios, activos y otras alteraciones patrimoniales con impacto en IRPF.",
-      "keywords": ["ganancia patrimonial", "venta inmueble renta", "transmision", "alteracion patrimonial", "plusvalia renta"],
+      "keywords": ["ganancia patrimonial", "ganancias patrimoniales", "venta inmueble renta", "transmision", "alteracion patrimonial", "plusvalia renta"],
       "legal_basis": [
         "Normativa de IRPF sobre ganancias y pérdidas patrimoniales.",
         "Criterios administrativos aplicables a transmisiones y valores de adquisición/transmisión."
@@ -299,7 +299,7 @@
     "modelos_tributarios": {
       "title": "Modelos tributarios y obligaciones periódicas",
       "summary": "Control de modelos, calendarios, obligaciones informativas y revisión documental asociada a cada presentación.",
-      "keywords": ["modelos tributarios", "modelo 303", "modelo 130", "modelo 111", "modelo 200", "declaracion informativa"],
+      "keywords": ["modelos tributarios", "modelos periodicos", "modelo 303", "modelo 130", "modelo 111", "modelo 200", "declaracion informativa", "autonomo iva irpf", "modelos autonomo"],
       "legal_basis": [
         "Normativa material de cada impuesto y órdenes/modelos aprobados por la Administración tributaria."
       ],

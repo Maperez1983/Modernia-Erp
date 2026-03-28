@@ -5,7 +5,7 @@
     "encargo_venta": {
       "title": "Encargo de venta",
       "summary": "Documento precontractual de intermediación para regular la comercialización del inmueble y los honorarios de la agencia.",
-      "keywords": ["encargo de venta", "nota de encargo", "captacion venta", "intermediacion venta", "honorarios agencia venta", "herederos encargo venta", "cotitulares venta"],
+      "keywords": ["encargo de venta", "nota de encargo", "captacion venta", "intermediacion venta", "honorarios agencia venta"],
       "legal_basis": [
         "Código Civil: autonomía de la voluntad y validez contractual general.",
         "LGDCU: control de cláusulas abusivas y transparencia con consumidores.",
@@ -223,7 +223,7 @@
     "exclusiva_mediacion": {
       "title": "Exclusiva y mediación inmobiliaria",
       "summary": "Cláusulas de exclusiva, duración, prórroga, devengo y trazabilidad comercial del intermediario.",
-      "keywords": ["exclusiva inmobiliaria", "mediacion inmobiliaria", "prorroga", "devengo honorarios", "captacion exclusiva"],
+      "keywords": ["exclusiva inmobiliaria", "mediacion inmobiliaria", "prorroga", "devengo honorarios", "captacion exclusiva", "clausula de exclusiva", "exclusiva con prorroga", "prorroga exclusiva"],
       "legal_basis": [
         "Código Civil: autonomía de la voluntad y límites generales.",
         "LGDCU: transparencia y control de cláusulas no negociadas con consumidores."
@@ -257,7 +257,7 @@
     "varios_titulares_representacion": {
       "title": "Varios titulares y representación",
       "summary": "Encargos, propuestas y contratos cuando intervienen varios propietarios, herederos o apoderados.",
-      "keywords": ["varios titulares", "herederos", "apoderado", "representacion", "copropietarios"],
+      "keywords": ["varios titulares", "herederos", "apoderado", "representacion", "copropietarios", "seis herederos", "firma herederos", "varios propietarios"],
       "legal_basis": [
         "Código Civil sobre consentimiento y representación.",
         "Normativa mercantil o de poderes si interviene una sociedad o representante."
