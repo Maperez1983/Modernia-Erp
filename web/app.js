@@ -1548,6 +1548,9 @@ const cnaeSuggest = document.getElementById("cnaeSuggest");
 const iaeSuggest = document.getElementById("iaeSuggest");
 const actividadSuggest = document.getElementById("actividadSuggest");
 const captacionPropietarios = document.getElementById("captacionPropietarios");
+const captacionPropietarioStatus = document.getElementById("captacionPropietarioStatus");
+const captacionCatastroLookup = document.getElementById("captacionCatastroLookup");
+const captacionCatastroStatus = document.getElementById("captacionCatastroStatus");
 const fincasSegurosForm = document.getElementById("fincasSegurosForm");
 const fincasSegurosFormStatus = document.getElementById("fincasSegurosFormStatus");
 const aieTab = document.getElementById("aieTab");
@@ -9688,6 +9691,15 @@ const POSTAL_PROVINCES = {
 };
 
 const normalizePostalCode = (value) => String(value || "").replace(/\D/g, "").slice(0, 5);
+const normalizeNifValue = (value) =>
+  String(value || "")
+    .toUpperCase()
+    .replace(/[.\-\s]/g, "")
+    .replace(/O/g, "0")
+    .replace(/[IL]/g, "1")
+    .replace(/S/g, "5")
+    .replace(/[^A-Z0-9]/g, "")
+    .slice(0, 12);
 
 const getPostalInfo = (value) => {
   const code = normalizePostalCode(value);
@@ -9714,6 +9726,14 @@ const fetchPostalLookup = (value) => {
       return null;
     })
     .catch(() => null);
+};
+
+const setMultiSelectValues = (selectEl, values = []) => {
+  if (!selectEl) return;
+  const wanted = new Set((values || []).map((item) => String(item || "").trim()).filter(Boolean));
+  Array.from(selectEl.options || []).forEach((option) => {
+    option.selected = wanted.has(String(option.value || "").trim());
+  });
 };
 
 const bindPostalLookup = (formEl) => {
@@ -10858,6 +10878,130 @@ const geocodeInmuebleAddress = (address, latInput, lonInput) => {
       })
       .catch(() => {});
   }, 600);
+};
+
+const getCaptacionField = (name) =>
+  captacionForm ? captacionForm.querySelector(`[name="${name}"]`) : null;
+
+const applyCaptacionOwnerMatch = (cliente, options = {}) => {
+  if (!cliente) return;
+  const nombreInput = getCaptacionField("propietario");
+  const nifInput = getCaptacionField("propietario_nif");
+  const telefonoInput = getCaptacionField("propietario_telefono");
+  const emailInput = getCaptacionField("propietario_email");
+  if (nombreInput && !String(nombreInput.value || "").trim()) {
+    nombreInput.value = cliente.nombre || "";
+  }
+  if (nifInput && cliente.nif) {
+    nifInput.value = normalizeNifValue(cliente.nif);
+  }
+  if (telefonoInput && !String(telefonoInput.value || "").trim()) {
+    telefonoInput.value = cliente.telefono || "";
+  }
+  if (emailInput && !String(emailInput.value || "").trim()) {
+    emailInput.value = cliente.email || "";
+  }
+  if (captacionPropietarios && cliente.id) {
+    const selected = new Set(
+      Array.from(captacionPropietarios.selectedOptions || [])
+        .map((option) => String(option.value || "").trim())
+        .filter(Boolean)
+    );
+    selected.add(String(cliente.id));
+    setMultiSelectValues(captacionPropietarios, Array.from(selected));
+  }
+  if (captacionPropietarioStatus) {
+    captacionPropietarioStatus.textContent =
+      options.message || `Cliente detectado y vinculado: ${cliente.nombre || cliente.id}`;
+  }
+};
+
+const syncCaptacionOwnerByNif = async () => {
+  const nifInput = getCaptacionField("propietario_nif");
+  if (!nifInput) return;
+  const nif = normalizeNifValue(nifInput.value);
+  nifInput.value = nif;
+  if (!nif) {
+    if (captacionPropietarioStatus) captacionPropietarioStatus.textContent = "";
+    return;
+  }
+  try {
+    const data = await api(`/api/cliente_lookup?nif=${encodeURIComponent(nif)}`);
+    if (data?.found && data?.cliente) {
+      applyCaptacionOwnerMatch(data.cliente);
+      return;
+    }
+    if (captacionPropietarioStatus) {
+      captacionPropietarioStatus.textContent = "No existe cliente con ese DNI/NIF. Se creará al guardar.";
+    }
+  } catch {
+    if (captacionPropietarioStatus) {
+      captacionPropietarioStatus.textContent = "No se pudo validar el DNI/NIF ahora mismo.";
+    }
+  }
+};
+
+const syncCaptacionOwnerByName = async () => {
+  const nombreInput = getCaptacionField("propietario");
+  const nifInput = getCaptacionField("propietario_nif");
+  if (!nombreInput) return;
+  if (normalizeNifValue(nifInput ? nifInput.value : "")) return;
+  if (!String(nombreInput.value || "").trim()) return;
+  try {
+    const match = await lookupClienteByNombre(nombreInput.value);
+    if (!match?.id) return;
+    applyCaptacionOwnerMatch(match, { message: `Cliente vinculado por nombre: ${match.nombre}` });
+  } catch {}
+};
+
+const lookupCaptacionCatastro = async () => {
+  const direccionInput = getCaptacionField("direccion");
+  const provinciaInput = getCaptacionField("provincia");
+  const poblacionInput = getCaptacionField("poblacion");
+  const codigoPostalInput = getCaptacionField("codigo_postal");
+  const refInput = getCaptacionField("referencia_catastral");
+  if (!direccionInput) return;
+  const direccion = String(direccionInput.value || "").trim();
+  if (!direccion) {
+    if (captacionCatastroStatus) captacionCatastroStatus.textContent = "Indica la dirección para consultar Catastro.";
+    return;
+  }
+  if (captacionCatastroStatus) captacionCatastroStatus.textContent = "Consultando Catastro...";
+  try {
+    const payload = {
+      direccion,
+      provincia: provinciaInput ? provinciaInput.value.trim() : "",
+      poblacion: poblacionInput ? poblacionInput.value.trim() : "",
+      codigo_postal: codigoPostalInput ? codigoPostalInput.value.trim() : "",
+    };
+    const data = await fetch("/api/inmueble_catastro_lookup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }).then((res) => res.json());
+    if (data?.error) {
+      if (captacionCatastroStatus) captacionCatastroStatus.textContent = data.error;
+      return;
+    }
+    if (data?.match_unique && data?.referencia_catastral && refInput) {
+      refInput.value = data.referencia_catastral;
+      if (captacionCatastroStatus) {
+        captacionCatastroStatus.textContent = `Referencia catastral detectada: ${data.referencia_catastral}`;
+      }
+      return;
+    }
+    const count = Array.isArray(data?.candidates) ? data.candidates.length : 0;
+    if (captacionCatastroStatus) {
+      captacionCatastroStatus.textContent =
+        count > 1
+          ? `Catastro devolvió ${count} coincidencias. Completa más la dirección o revisa manualmente.`
+          : "Catastro no devolvió una coincidencia única.";
+    }
+  } catch {
+    if (captacionCatastroStatus) {
+      captacionCatastroStatus.textContent = "No se pudo consultar Catastro ahora mismo.";
+    }
+  }
 };
 
 const populateClientesSelect = (selectEl, selectedId = "") => {
@@ -33204,6 +33348,26 @@ if (bdtForm) {
 
 if (captacionForm) {
   bindPostalLookup(captacionForm);
+  const captacionPropietarioNif = getCaptacionField("propietario_nif");
+  const captacionPropietarioNombre = getCaptacionField("propietario");
+  if (captacionPropietarioNif) {
+    captacionPropietarioNif.addEventListener("input", () => {
+      captacionPropietarioNif.value = normalizeNifValue(captacionPropietarioNif.value);
+    });
+    captacionPropietarioNif.addEventListener("blur", () => {
+      syncCaptacionOwnerByNif();
+    });
+  }
+  if (captacionPropietarioNombre) {
+    captacionPropietarioNombre.addEventListener("blur", () => {
+      syncCaptacionOwnerByName();
+    });
+  }
+  if (captacionCatastroLookup) {
+    captacionCatastroLookup.addEventListener("click", () => {
+      lookupCaptacionCatastro();
+    });
+  }
   captacionForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (captacionFormStatus) {
@@ -33225,6 +33389,9 @@ if (captacionForm) {
         successMessage: "Guardado.",
         onSuccess: () => {
           captacionForm.reset();
+          if (captacionPropietarioStatus) captacionPropietarioStatus.textContent = "";
+          if (captacionCatastroStatus) captacionCatastroStatus.textContent = "";
+          setMultiSelectValues(captacionPropietarios, []);
           loadCrmCaptaciones();
           loadCrmInmuebles();
         },

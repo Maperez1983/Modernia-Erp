@@ -10,11 +10,13 @@ from web.server import (
     LEGAL_COPILOT_TOPICS,
     build_dgt_consulta_url,
     classify_legal_feed_entry,
+    extract_catastro_candidates_from_xml,
     fetch_legal_radar_items,
     get_legal_copilot_catalog,
     get_legal_radar_sources_config,
     get_legal_copilot_topics,
     get_legal_topic_operations,
+    parse_inmobiliaria_address_for_catastro,
     parse_legal_feed_entries,
     persist_generated_inmueble_pdf,
     resolve_legal_copilot_topic,
@@ -231,6 +233,33 @@ class InmobiliariaWorkflowDocsTests(unittest.TestCase):
         self.assertIsNotNone(audit)
         self.assertEqual(audit["accion"], "Generar documento")
         self.assertEqual(audit["usuario"], "tester")
+
+    def test_parse_inmobiliaria_address_for_catastro_extracts_sigla_and_number(self):
+        parts = parse_inmobiliaria_address_for_catastro("Av. Europa 110, Málaga")
+        self.assertEqual(parts["sigla"], "AV")
+        self.assertEqual(parts["calle"], "EUROPA")
+        self.assertEqual(parts["numero"], "110")
+
+    def test_extract_catastro_candidates_from_xml_reads_unique_reference(self):
+        xml_text = """
+        <consulta xmlns="http://www.catastro.meh.es/">
+          <lrcdnp>
+            <rcdnp>
+              <pc>
+                <pc1>1234567UF</pc1>
+                <pc2>7613S0001AB</pc2>
+              </pc>
+              <dt>
+                <ldt>AV EUROPA 110</ldt>
+              </dt>
+            </rcdnp>
+          </lrcdnp>
+        </consulta>
+        """
+        parsed = extract_catastro_candidates_from_xml(xml_text, fallback_label="Av. Europa 110")
+        self.assertEqual(len(parsed["candidates"]), 1)
+        self.assertEqual(parsed["candidates"][0]["referencia_catastral"], "1234567UF7613S0001AB")
+        self.assertEqual(parsed["candidates"][0]["label"], "AV EUROPA 110")
 
     def test_sync_inmueble_stage_for_action_creates_captacion_and_updates_both_entities(self):
         sync_inmueble_stage_for_action(self.conn, "i1", "adquisicion", self.now)

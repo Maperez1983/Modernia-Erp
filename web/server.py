@@ -11042,6 +11042,187 @@ def normalize_inmobiliaria_address(value):
     return re.sub(r"\s+", " ", normalize_lookup_text(value or "")).strip()
 
 
+CATRASTRO_STREET_TYPE_MAP = {
+    "CALLE": "CL",
+    "CL": "CL",
+    "C": "CL",
+    "AVENIDA": "AV",
+    "AV": "AV",
+    "AVDA": "AV",
+    "PASEO": "PS",
+    "PS": "PS",
+    "PLAZA": "PJ",
+    "PL": "PJ",
+    "CAMINO": "CM",
+    "CM": "CM",
+    "CARRETERA": "CR",
+    "CR": "CR",
+    "RONDA": "RD",
+    "RD": "RD",
+    "URBANIZACION": "UR",
+    "URBANIZACIÓN": "UR",
+    "URB": "UR",
+    "TRAVESIA": "TR",
+    "TRAVESÍA": "TR",
+    "TR": "TR",
+}
+
+CATRASTRO_LOOKUP_URLS = (
+    "https://ovc.catastro.meh.es/ovcservweb/OVCSWLocalizacionRC/OVCCallejeroCodigos.asmx/Consulta_DNPLOC",
+    "https://www1.sedecatastro.gob.es/ovcservweb/OVCSWLocalizacionRC/OVCCallejeroCodigos.asmx/Consulta_DNPLOC",
+)
+
+
+def parse_inmobiliaria_address_for_catastro(value):
+    raw = re.sub(r"\s+", " ", str(value or "").strip())
+    if not raw:
+        return {"sigla": "", "calle": "", "numero": "", "bloque": "", "escalera": "", "planta": "", "puerta": ""}
+    normalized = raw.upper()
+    normalized = normalized.replace("C/", "CALLE ")
+    normalized = normalized.replace("AVDA.", "AVENIDA ")
+    normalized = normalized.replace("AVDA", "AVENIDA ")
+    normalized = normalized.replace("AV.", "AV ")
+    normalized = normalized.replace(",", " ")
+    normalized = normalized.replace("º", " ")
+    normalized = normalized.replace("ª", " ")
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    tokens = normalized.split(" ")
+    sigla = ""
+    body = tokens
+    if tokens:
+        first = re.sub(r"[^A-Z]", "", tokens[0])
+        sigla = CATRASTRO_STREET_TYPE_MAP.get(first, "")
+        if sigla:
+            body = tokens[1:]
+    number_idx = next((idx for idx, token in enumerate(body) if re.fullmatch(r"\d+[A-Z]?", token or "")), -1)
+    calle_tokens = body[:number_idx] if number_idx >= 0 else body
+    numero = body[number_idx] if number_idx >= 0 else ""
+    extras = body[number_idx + 1 :] if number_idx >= 0 else []
+
+    def extract_extra(patterns):
+        for idx, token in enumerate(extras):
+            clean = re.sub(r"[^A-Z0-9]", "", token or "")
+            if clean in patterns and idx + 1 < len(extras):
+                return re.sub(r"[^A-Z0-9]", "", extras[idx + 1] or "")
+        return ""
+
+    return {
+        "sigla": sigla or "CL",
+        "calle": " ".join(calle_tokens).strip(),
+        "numero": numero,
+        "bloque": extract_extra({"BL", "BLOQUE"}),
+        "escalera": extract_extra({"ESC", "ESCALERA"}),
+        "planta": extract_extra({"PL", "PLANTA", "PISO"}),
+        "puerta": extract_extra({"PTA", "PUERTA"}),
+    }
+
+
+def _xml_local_name(tag):
+    return str(tag or "").rsplit("}", 1)[-1].lower()
+
+
+def extract_catastro_candidates_from_xml(xml_text, fallback_label=""):
+    if not xml_text:
+        return {"candidates": [], "messages": []}
+    root = ET.fromstring(xml_text)
+    pc1_values = []
+    pc2_values = []
+    labels = []
+    messages = []
+    for elem in root.iter():
+        tag = _xml_local_name(elem.tag)
+        text = " ".join(part.strip() for part in elem.itertext() if str(part).strip()).strip()
+        if not text:
+            continue
+        if tag == "pc1":
+            pc1_values.append(re.sub(r"\s+", "", text))
+        elif tag == "pc2":
+            pc2_values.append(re.sub(r"\s+", "", text))
+        elif tag in {"ldt", "direccion", "dir"}:
+            labels.append(text)
+        elif tag in {"err", "lerr", "error", "des"}:
+            lowered = text.lower()
+            if "error" in lowered or "no existe" in lowered or "no encontrado" in lowered:
+                messages.append(text)
+    candidates = []
+    seen = set()
+    for index, pc1 in enumerate(pc1_values):
+        pc2 = pc2_values[index] if index < len(pc2_values) else ""
+        ref = re.sub(r"[^A-Z0-9]", "", f"{pc1}{pc2}".upper())
+        if not ref or ref in seen:
+            continue
+        seen.add(ref)
+        label = labels[index] if index < len(labels) else fallback_label
+        candidates.append(
+            {
+                "referencia_catastral": ref,
+                "label": label or fallback_label or ref,
+            }
+        )
+    return {"candidates": candidates, "messages": messages}
+
+
+def lookup_catastro_reference_by_address(*, provincia="", municipio="", direccion="", codigo_postal=""):
+    direccion = str(direccion or "").strip()
+    if not direccion:
+        raise ValueError("dirección requerida")
+    provincia = normalize_person_name(provincia)
+    municipio = normalize_person_name(municipio)
+    parts = parse_inmobiliaria_address_for_catastro(direccion)
+    if not parts["calle"]:
+        raise ValueError("no se pudo interpretar la calle")
+    if not parts["numero"]:
+        raise ValueError("añade número en la dirección para buscar en Catastro")
+    query = {
+        "Provincia": provincia,
+        "Municipio": municipio,
+        "Sigla": parts["sigla"],
+        "Calle": parts["calle"],
+        "Numero": parts["numero"],
+    }
+    for extra_key in ("Bloque", "Escalera", "Planta", "Puerta"):
+        value = parts[extra_key.lower()]
+        if value:
+            query[extra_key] = value
+    last_error = ""
+    for base_url in CATRASTRO_LOOKUP_URLS:
+        url = f"{base_url}?{urllib.parse.urlencode(query)}"
+        try:
+            with urllib.request.urlopen(url, timeout=8) as response:
+                xml_text = response.read().decode("utf-8", errors="ignore")
+            parsed = extract_catastro_candidates_from_xml(xml_text, fallback_label=direccion)
+            if parsed["candidates"]:
+                unique_refs = []
+                seen_refs = set()
+                for item in parsed["candidates"]:
+                    ref = item["referencia_catastral"]
+                    if ref in seen_refs:
+                        continue
+                    seen_refs.add(ref)
+                    unique_refs.append(item)
+                return {
+                    "ok": True,
+                    "direccion_consultada": direccion,
+                    "direccion_normalizada": " ".join(
+                        part for part in [parts["sigla"], parts["calle"], parts["numero"]] if part
+                    ).strip(),
+                    "codigo_postal": codigo_postal or "",
+                    "provincia": provincia or "",
+                    "municipio": municipio or "",
+                    "candidates": unique_refs,
+                    "referencia_catastral": unique_refs[0]["referencia_catastral"] if len(unique_refs) == 1 else "",
+                    "match_unique": len(unique_refs) == 1,
+                    "source_url": url,
+                    "messages": parsed["messages"],
+                }
+            if parsed["messages"]:
+                last_error = "; ".join(parsed["messages"])
+        except Exception as exc:
+            last_error = str(exc)
+            continue
+    raise RuntimeError(last_error or "no se pudo obtener respuesta del Catastro")
+
+
 def resolve_owner_nifs_from_cliente_ids(conn, cliente_ids):
     normalized = []
     seen = set()
@@ -17889,6 +18070,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/captacion_delete",
             "/api/captacion_convert",
             "/api/compraventas",
+            "/api/inmueble_catastro_lookup",
             "/api/inmueble_update",
             "/api/inmueble_delete",
             "/api/inmueble_propietarios_update",
@@ -23899,17 +24081,18 @@ class Handler(BaseHTTPRequestHandler):
                 conn.execute(
                     """
                     INSERT INTO inmuebles (
-                      id, empresa_id, referencia, direccion, codigo_postal, poblacion, provincia, zona, tipo_inmueble,
+                      id, empresa_id, referencia, referencia_catastral, direccion, codigo_postal, poblacion, provincia, zona, tipo_inmueble,
                       m2, habitaciones, banos, precio_objetivo, precio_valoracion,
                       valor_referencia, honorarios, situacion_ocupacion, estado, lat, lon, created_at, updated_at
                     ) VALUES (
-                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
                     )
                     """,
                     (
                         inmueble_id,
                         empresa["id"],
                         payload.get("referencia"),
+                        payload.get("referencia_catastral"),
                         payload.get("direccion"),
                         payload.get("codigo_postal"),
                         payload.get("poblacion"),
@@ -23985,6 +24168,26 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception:
                     pass
                 json_response(self, {"error": f"captaciones_error: {type(exc).__name__}: {exc}"}, status=500)
+                return
+        elif parsed.path == "/api/inmueble_catastro_lookup":
+            try:
+                direccion = str(payload.get("direccion") or "").strip()
+                provincia = str(payload.get("provincia") or "").strip()
+                municipio = str(payload.get("poblacion") or payload.get("municipio") or "").strip()
+                codigo_postal = str(payload.get("codigo_postal") or "").strip()
+                result = lookup_catastro_reference_by_address(
+                    provincia=provincia,
+                    municipio=municipio,
+                    direccion=direccion,
+                    codigo_postal=codigo_postal,
+                )
+                json_response(self, result)
+                return
+            except ValueError as exc:
+                json_response(self, {"error": str(exc)}, status=400)
+                return
+            except Exception as exc:
+                json_response(self, {"error": f"catastro_lookup_error: {type(exc).__name__}: {exc}"}, status=502)
                 return
         elif parsed.path == "/api/captaciones_update":
             record_id = payload.get("id")
@@ -24540,6 +24743,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             allowed = (
                 "referencia",
+                "referencia_catastral",
                 "direccion",
                 "codigo_postal",
                 "poblacion",

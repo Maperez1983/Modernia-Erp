@@ -3966,9 +3966,22 @@
                     Propietario
                     <input name="propietario" required />
                   </label>
+                  <label>
+                    DNI / NIF propietario
+                    <input name="propietario_nif" placeholder="12345678Z / B12345678" />
+                  </label>
+                  <label>
+                    Teléfono propietario
+                    <input name="propietario_telefono" />
+                  </label>
+                  <label>
+                    Email propietario
+                    <input name="propietario_email" type="email" />
+                  </label>
                   <label class="span-2">
                     Propietarios (clientes)
                     <select id="captacionPropietarios" name="propietarios" multiple></select>
+                    <span id="captacionPropietarioStatus" class="muted"></span>
                   </label>
                   <label>
                     Tipo inmueble
@@ -3983,7 +3996,11 @@
                   </label>
                   <label class="span-2">
                     Dirección
-                    <input name="direccion" />
+                    <div class="inline-row">
+                      <input name="direccion" required />
+                      <button type="button" id="captacionCatastroLookup" class="secondary">Buscar catastro</button>
+                    </div>
+                    <span id="captacionCatastroStatus" class="muted"></span>
                   </label>
                   <label>
                     Código postal
@@ -3998,8 +4015,12 @@
                     <input name="provincia" />
                   </label>
                   <label>
-                    Referencia catastral
+                    Referencia interna
                     <input name="referencia" />
+                  </label>
+                  <label>
+                    Referencia catastral
+                    <input name="referencia_catastral" />
                   </label>
                   <label>
                     Zona
