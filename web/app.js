@@ -5545,6 +5545,10 @@ const renderWorkspaceModules = (rows = []) => {
   workspaceModules.querySelectorAll("[data-workspace-section-jump]").forEach((button) => {
     button.addEventListener("click", () => {
       const sectionKey = button.dataset.workspaceSectionJump || "";
+      if (sectionKey === "workspace_engines") {
+        focusWorkspaceView("motores", workspaceDocumentHub);
+        return;
+      }
       const target = workspaceModules.querySelector(`[data-workspace-section="${sectionKey}"]`);
       if (target && typeof target.scrollIntoView === "function") {
         target.scrollIntoView({ behavior: "smooth", block: "start" });
