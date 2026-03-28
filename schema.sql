@@ -212,22 +212,51 @@ CREATE TABLE IF NOT EXISTS workspace_portal_requerimientos (
   FOREIGN KEY (cliente_id) REFERENCES clientes(id)
 );
 
-CREATE TABLE IF NOT EXISTS workspace_registro_horario (
+CREATE TABLE IF NOT EXISTS workspace_registro_personal (
   id TEXT PRIMARY KEY,
   workspace_id TEXT NOT NULL,
   empresa_id TEXT,
   usuario_id TEXT,
-  persona_nombre TEXT NOT NULL,
-  fecha TEXT NOT NULL,
-  hora_inicio TEXT NOT NULL,
-  hora_fin TEXT,
-  pausa_min INTEGER NOT NULL DEFAULT 0,
-  estado TEXT NOT NULL DEFAULT 'Borrador',
+  nombre TEXT NOT NULL,
+  nif TEXT,
+  email TEXT,
+  telefono TEXT,
+  tipo_jornada TEXT NOT NULL DEFAULT 'Completa',
+  horas_pactadas_dia REAL,
+  horas_pactadas_semana REAL,
+  fecha_alta TEXT,
+  fecha_baja TEXT,
+  activo INTEGER NOT NULL DEFAULT 1,
   notas TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   FOREIGN KEY (workspace_id) REFERENCES workspaces(id),
   FOREIGN KEY (empresa_id) REFERENCES empresas(id),
+  FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
+);
+
+CREATE TABLE IF NOT EXISTS workspace_registro_horario (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL,
+  empresa_id TEXT,
+  persona_id TEXT,
+  usuario_id TEXT,
+  persona_nombre TEXT NOT NULL,
+  tipo_jornada TEXT,
+  horas_pactadas_dia REAL,
+  fecha TEXT NOT NULL,
+  hora_inicio TEXT NOT NULL,
+  hora_fin TEXT,
+  pausa_min INTEGER NOT NULL DEFAULT 0,
+  minutos_trabajados INTEGER NOT NULL DEFAULT 0,
+  metodo_registro TEXT,
+  estado TEXT NOT NULL DEFAULT 'Abierto',
+  notas TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (workspace_id) REFERENCES workspaces(id),
+  FOREIGN KEY (empresa_id) REFERENCES empresas(id),
+  FOREIGN KEY (persona_id) REFERENCES workspace_registro_personal(id),
   FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
 );
 

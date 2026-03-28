@@ -1182,6 +1182,9 @@ const state = {
   workspaceBillingRows: [],
   workspaceClientOptions: [],
   workspaceClientOptionMap: new Map(),
+  workspaceTimeEmployees: [],
+  workspaceTimeSummary: null,
+  workspaceTimeMonth: "",
   currentClienteSegurosRows: [],
   currentClienteRamoSelected: "",
   currentSeguroId: "",
@@ -1307,6 +1310,13 @@ const workspaceTimeForm = document.getElementById("workspaceTimeForm");
 const workspaceTimeResetBtn = document.getElementById("workspaceTimeResetBtn");
 const workspaceTimeStatus = document.getElementById("workspaceTimeStatus");
 const workspaceTimeList = document.getElementById("workspaceTimeList");
+const workspaceTimeSummary = document.getElementById("workspaceTimeSummary");
+const workspaceTimeMonth = document.getElementById("workspaceTimeMonth");
+const workspaceTimeExportBtn = document.getElementById("workspaceTimeExportBtn");
+const workspaceTimeEmployeeForm = document.getElementById("workspaceTimeEmployeeForm");
+const workspaceTimeEmployeeResetBtn = document.getElementById("workspaceTimeEmployeeResetBtn");
+const workspaceTimeEmployeeStatus = document.getElementById("workspaceTimeEmployeeStatus");
+const workspaceTimeEmployeeList = document.getElementById("workspaceTimeEmployeeList");
 const workspaceBudgetSummary = document.getElementById("workspaceBudgetSummary");
 const workspaceBudgetForm = document.getElementById("workspaceBudgetForm");
 const workspaceBudgetResetBtn = document.getElementById("workspaceBudgetResetBtn");
@@ -3878,6 +3888,7 @@ const renderWorkspaceCompanyScopedData = () => {
   const seriesRows = filterWorkspaceRowsByCompany(raw.seriesRows || []);
   const inboxRows = filterWorkspaceRowsByCompany(raw.inboxRows || []);
   const timeRows = filterWorkspaceRowsByCompany(raw.timeRows || []);
+  const timeEmployees = filterWorkspaceRowsByCompany(raw.timeEmployees || []);
   const communityRows = filterWorkspaceRowsByCompany(raw.fincasCommunities || []);
   const communityIds = new Set(communityRows.map((row) => String(row.id || "")).filter(Boolean));
   const providerRows = (raw.fincasProviders || []).filter((row) => {
@@ -3894,6 +3905,9 @@ const renderWorkspaceCompanyScopedData = () => {
   renderWorkspaceRemittancesList(remittanceRows);
   renderWorkspaceSeriesList(seriesRows);
   renderWorkspaceInboxList(inboxRows);
+  renderWorkspaceTimeEmployeeList(timeEmployees);
+  hydrateWorkspaceTimeEmployeeSelect(timeEmployees);
+  renderWorkspaceTimeSummary(raw.timeSummary || null);
   renderWorkspaceTimeList(timeRows);
   renderWorkspaceFincasCommunityList(communityRows);
   renderWorkspaceFincasProviderList(providerRows);
@@ -3907,6 +3921,11 @@ const renderWorkspaceCompanyScopedData = () => {
   renderWorkspaceAutomationList(raw.automationRows || []);
   renderWorkspaceAutomationLogs(raw.automationLogRows || []);
   renderWorkspaceDocumentHub(filterWorkspaceDocumentHubData(raw.docs || {}));
+  if (workspaceTimeMonth) workspaceTimeMonth.value = state.workspaceTimeMonth || "";
+  if (workspaceTimeExportBtn) {
+    const companyQuery = state.currentWorkspaceCompanyId ? `&empresa_id=${encodeURIComponent(state.currentWorkspaceCompanyId)}` : "";
+    workspaceTimeExportBtn.href = `/api/workspace_registro_horario_export?workspace_id=${encodeURIComponent(state.currentWorkspaceId || "")}&month=${encodeURIComponent(state.workspaceTimeMonth || "")}${companyQuery}`;
+  }
 };
 
 const loadWorkspaceCompanyScopedPanels = async () => {
@@ -6042,7 +6061,7 @@ const hydrateWorkspaceCompanySelects = () => {
   const companies = state.currentWorkspaceDetail?.companies || [];
   const defaultCompanyId = state.currentWorkspaceCompanyId || companies[0]?.id || "";
   const html = companies.map((row) => `<option value="${row.id}">${row.nombre || "-"}</option>`).join("");
-  [workspaceBillingForm, workspaceBudgetForm, workspaceInboxForm, workspaceSeriesForm, workspaceTimeForm, workspaceFincasCommunityForm, workspaceRemittancesForm, workspaceFincasProviderForm].forEach((form) => {
+  [workspaceBillingForm, workspaceBudgetForm, workspaceInboxForm, workspaceSeriesForm, workspaceTimeForm, workspaceTimeEmployeeForm, workspaceFincasCommunityForm, workspaceRemittancesForm, workspaceFincasProviderForm].forEach((form) => {
     const select = form?.querySelector('[name="empresa_id"]');
     if (select) {
       select.innerHTML = html;
@@ -6398,19 +6417,138 @@ const fillWorkspaceTimeForm = (record = null) => {
     id: "",
     workspace_id: state.currentWorkspaceId || "",
     empresa_id: state.currentWorkspaceCompanyId || companies[0]?.id || "",
+    persona_id: "",
     persona_nombre: "",
+    tipo_jornada: "Completa",
+    horas_pactadas_dia: "",
     fecha: "",
     hora_inicio: "",
     hora_fin: "",
     pausa_min: 0,
-    estado: "Borrador",
+    metodo_registro: "Manual",
+    estado: "Abierto",
     notas: "",
     ...(record || {}),
   };
-  ["id", "workspace_id", "empresa_id", "persona_nombre", "fecha", "hora_inicio", "hora_fin", "pausa_min", "estado", "notas"].forEach((field) => {
+  ["id", "workspace_id", "empresa_id", "persona_id", "persona_nombre", "tipo_jornada", "horas_pactadas_dia", "fecha", "hora_inicio", "hora_fin", "pausa_min", "metodo_registro", "estado", "notas"].forEach((field) => {
     const input = workspaceTimeForm.querySelector(`[name="${field}"]`);
     if (input) input.value = payload[field] ?? "";
   });
+  const lookup = workspaceTimeForm.querySelector('[name="persona_id_lookup"]');
+  if (lookup) {
+    lookup.value = payload.persona_id || "";
+  }
+};
+
+const fillWorkspaceTimeEmployeeForm = (record = null) => {
+  if (!workspaceTimeEmployeeForm) return;
+  hydrateWorkspaceCompanySelects();
+  const companies = state.currentWorkspaceDetail?.companies || [];
+  const payload = {
+    id: "",
+    workspace_id: state.currentWorkspaceId || "",
+    empresa_id: state.currentWorkspaceCompanyId || companies[0]?.id || "",
+    nombre: "",
+    nif: "",
+    email: "",
+    telefono: "",
+    tipo_jornada: "Completa",
+    horas_pactadas_dia: "",
+    horas_pactadas_semana: "",
+    fecha_alta: "",
+    activo: 1,
+    notas: "",
+    ...(record || {}),
+  };
+  ["id", "workspace_id", "empresa_id", "nombre", "nif", "email", "telefono", "tipo_jornada", "horas_pactadas_dia", "horas_pactadas_semana", "fecha_alta", "notas"].forEach((field) => {
+    const input = workspaceTimeEmployeeForm.querySelector(`[name="${field}"]`);
+    if (input) input.value = payload[field] ?? "";
+  });
+  const activeInput = workspaceTimeEmployeeForm.querySelector('[name="activo"]');
+  if (activeInput) activeInput.checked = Number(payload.activo || 0) === 1;
+};
+
+const hydrateWorkspaceTimeEmployeeSelect = (rows = []) => {
+  const select = workspaceTimeForm?.querySelector('[name="persona_id_lookup"]');
+  if (!select) return;
+  const currentValue = String(select.value || "").trim();
+  select.innerHTML = `<option value="">Selecciona persona</option>${
+    rows.map((row) => `<option value="${row.id || ""}">${row.nombre || "-"}${row.empresa_nombre ? ` · ${row.empresa_nombre}` : ""}</option>`).join("")
+  }`;
+  if (currentValue && rows.some((row) => String(row.id || "") === currentValue)) {
+    select.value = currentValue;
+  }
+};
+
+const renderWorkspaceTimeEmployeeList = (rows = []) => {
+  if (!workspaceTimeEmployeeList) return;
+  if (!rows.length) {
+    workspaceTimeEmployeeList.innerHTML = "<p class='muted'>Sin personal configurado todavía.</p>";
+    return;
+  }
+  workspaceTimeEmployeeList.innerHTML = `
+    <div class="workspace-billing-list">
+      ${rows
+        .map(
+          (row) => `
+            <div class="workspace-billing-row">
+              <div>
+                <strong>${row.nombre || "-"}</strong>
+                <div class="muted">${row.empresa_nombre || "-"} · ${row.tipo_jornada || "Completa"}${row.horas_pactadas_dia ? ` · ${row.horas_pactadas_dia} h/día` : ""}</div>
+              </div>
+              <div class="workspace-billing-meta">
+                <span>${Number(row.activo || 0) === 1 ? "Activo" : "Inactivo"}</span>
+                ${row.fecha_alta ? `<span>Alta ${row.fecha_alta}</span>` : ""}
+                <button type="button" class="secondary ghost" data-time-employee-edit="${row.id}">Editar</button>
+              </div>
+            </div>
+          `
+        )
+        .join("")}
+    </div>
+  `;
+  workspaceTimeEmployeeList.querySelectorAll("[data-time-employee-edit]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const record = rows.find((row) => String(row.id || "") === String(button.dataset.timeEmployeeEdit || ""));
+      if (record) fillWorkspaceTimeEmployeeForm(record);
+    });
+  });
+};
+
+const renderWorkspaceTimeSummary = (summary = null) => {
+  if (!workspaceTimeSummary) return;
+  if (!summary) {
+    workspaceTimeSummary.innerHTML = "";
+    return;
+  }
+  const rows = Array.isArray(summary.rows) ? summary.rows : [];
+  workspaceTimeSummary.innerHTML = `
+    <div class="workspace-mini-kpis">
+      <div class="workspace-mini-kpi"><span>Personas</span><strong>${numberFormatter.format(Number(summary.personas_total || 0))}</strong></div>
+      <div class="workspace-mini-kpi"><span>Parciales</span><strong>${numberFormatter.format(Number(summary.personas_parciales || 0))}</strong></div>
+      <div class="workspace-mini-kpi"><span>Horas reales</span><strong>${summary.horas_totales_hhmm || "00:00"}</strong></div>
+      <div class="workspace-mini-kpi"><span>Horas pactadas</span><strong>${summary.horas_pactadas_hhmm || "00:00"}</strong></div>
+      <div class="workspace-mini-kpi"><span>Desviación</span><strong>${summary.desviacion_hhmm || "00:00"}</strong></div>
+      <div class="workspace-mini-kpi"><span>Fichajes abiertos</span><strong>${numberFormatter.format(Number(summary.entradas_abiertas || 0))}</strong></div>
+    </div>
+    <div class="workspace-billing-list">
+      ${rows.length
+        ? rows.map((row) => `
+          <div class="workspace-billing-row">
+            <div>
+              <strong>${row.persona_nombre || "-"}</strong>
+              <div class="muted">${row.empresa_nombre || "-"} · ${row.tipo_jornada || "Completa"} · ${numberFormatter.format(Number(row.dias_registrados || 0))} días</div>
+            </div>
+            <div class="workspace-billing-meta">
+              <span>Real ${row.horas_trabajadas_hhmm || "00:00"}</span>
+              <span>Pactado ${row.horas_pactadas_hhmm || "00:00"}</span>
+              <span>Desv. ${row.desviacion_hhmm || "00:00"}</span>
+            </div>
+          </div>
+        `).join("")
+        : "<p class='muted'>Sin resumen mensual todavía.</p>"}
+    </div>
+  `;
 };
 
 const renderWorkspaceTimeList = (rows = []) => {
@@ -6427,12 +6565,13 @@ const renderWorkspaceTimeList = (rows = []) => {
             <div class="workspace-billing-row">
               <div>
                 <strong>${row.persona_nombre || "-"}</strong>
-                <div class="muted">${row.empresa_nombre || "-"} · ${row.fecha || "-"}</div>
+                <div class="muted">${row.empresa_nombre || "-"} · ${row.fecha || "-"}${row.tipo_jornada ? ` · ${row.tipo_jornada}` : ""}</div>
               </div>
               <div class="workspace-billing-meta">
                 <span>${row.hora_inicio || "-"}${row.hora_fin ? ` - ${row.hora_fin}` : ""}</span>
                 <span>Pausa ${numberFormatter.format(Number(row.pausa_min || 0))} min</span>
-                <span>${row.estado || "Borrador"}</span>
+                <span>${row.minutos_trabajados ? `${Math.floor(Number(row.minutos_trabajados || 0) / 60)}h ${Number(row.minutos_trabajados || 0) % 60}m` : "Pendiente cierre"}</span>
+                <span>${row.estado || "Abierto"}</span>
                 ${!row.hora_fin ? `<button type="button" class="secondary ghost" data-time-close="${row.id}">Cerrar</button>` : ""}
                 <button type="button" class="secondary ghost" data-time-edit="${row.id}">Editar</button>
               </div>
@@ -6458,7 +6597,7 @@ const renderWorkspaceTimeList = (rows = []) => {
         const data = await fetch("/api/workspace_registro_horario", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ...record, workspace_id: state.currentWorkspaceId, hora_fin: currentTime, estado: record.estado || "Validado" }),
+          body: JSON.stringify({ ...record, workspace_id: state.currentWorkspaceId, hora_fin: currentTime, estado: "Cerrado" }),
         }).then((res) => res.json());
         if (data?.error) throw new Error(data.error);
         await loadWorkspaceDetail(state.currentWorkspaceId);
@@ -6854,7 +6993,9 @@ const loadWorkspaceDetail = async (workspaceId) => {
   const companyQuery = state.currentWorkspaceCompanyId
     ? `&empresa_id=${encodeURIComponent(state.currentWorkspaceCompanyId)}`
     : "";
-  const [billing, docs, billingRows, budgetRows, collections, remittances, workspaceClients, health, gestoriaOverview, segurosOverview, finOverview, inmoOverview, serviceDesks, series, inbox, portal, portalRequests, automations, automationLogs, timeRows, fincasCommunities, fincasIncidents, fincasProviders, fincasMeetings] = await Promise.all([
+  const timeMonth = String(state.workspaceTimeMonth || "").trim() || new Date().toISOString().slice(0, 7);
+  state.workspaceTimeMonth = timeMonth;
+  const [billing, docs, billingRows, budgetRows, collections, remittances, workspaceClients, health, gestoriaOverview, segurosOverview, finOverview, inmoOverview, serviceDesks, series, inbox, portal, portalRequests, automations, automationLogs, timeRows, timeEmployees, timeSummary, fincasCommunities, fincasIncidents, fincasProviders, fincasMeetings] = await Promise.all([
     safeWorkspaceApi(`/api/workspace_billing_summary?workspace_id=${encodeURIComponent(workspaceId)}`, {}),
     safeWorkspaceApi(`/api/workspace_document_hub?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [], summary: {} }),
     safeWorkspaceApi(`/api/workspace_facturacion?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [] }),
@@ -6874,7 +7015,9 @@ const loadWorkspaceDetail = async (workspaceId) => {
     safeWorkspaceApi(`/api/workspace_portal_requerimientos?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [] }),
     safeWorkspaceApi(`/api/workspace_automatizaciones?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [] }),
     safeWorkspaceApi(`/api/workspace_automatizacion_logs?workspace_id=${encodeURIComponent(workspaceId)}&limit=12`, { rows: [] }),
-    safeWorkspaceApi(`/api/workspace_registro_horario?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [] }),
+    safeWorkspaceApi(`/api/workspace_registro_horario?workspace_id=${encodeURIComponent(workspaceId)}&month=${encodeURIComponent(timeMonth)}${companyQuery}`, { rows: [] }),
+    safeWorkspaceApi(`/api/workspace_registro_personal?workspace_id=${encodeURIComponent(workspaceId)}${companyQuery}&activos=0`, { rows: [] }),
+    safeWorkspaceApi(`/api/workspace_registro_horario_resumen?workspace_id=${encodeURIComponent(workspaceId)}&month=${encodeURIComponent(timeMonth)}${companyQuery}`, { rows: [] }),
     safeWorkspaceApi(`/api/workspace_fincas_comunidades?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [] }),
     safeWorkspaceApi(`/api/workspace_fincas_incidencias?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [] }),
     safeWorkspaceApi(`/api/workspace_fincas_proveedores?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [] }),
@@ -6894,11 +7037,15 @@ const loadWorkspaceDetail = async (workspaceId) => {
     automationRows: automations.rows || [],
     automationLogRows: automationLogs.rows || [],
     timeRows: timeRows.rows || [],
+    timeEmployees: timeEmployees.rows || [],
+    timeSummary: timeSummary || null,
     fincasCommunities: fincasCommunities.rows || [],
     fincasIncidents: fincasIncidents.rows || [],
     fincasProviders: fincasProviders.rows || [],
     fincasMeetings: fincasMeetings.rows || [],
   };
+  state.workspaceTimeEmployees = timeEmployees.rows || [];
+  state.workspaceTimeSummary = timeSummary || null;
   syncWorkspaceClientOptions(workspaceClients.rows || []);
   fillWorkspaceForm(detail.workspace || {});
   renderWorkspaceHealth(health || {});
@@ -6924,6 +7071,7 @@ const loadWorkspaceDetail = async (workspaceId) => {
   fillWorkspaceInboxForm();
   fillWorkspacePortalRequestForm();
   fillWorkspaceAutomationForm();
+  fillWorkspaceTimeEmployeeForm();
   fillWorkspaceTimeForm();
   fillWorkspaceFincasCommunityForm();
   fillWorkspaceFincasIncidentForm();
@@ -30371,6 +30519,42 @@ if (workspaceTimeResetBtn) {
   });
 }
 
+if (workspaceTimeEmployeeResetBtn) {
+  workspaceTimeEmployeeResetBtn.addEventListener("click", () => {
+    fillWorkspaceTimeEmployeeForm();
+    if (workspaceTimeEmployeeStatus) workspaceTimeEmployeeStatus.textContent = "";
+  });
+}
+
+if (workspaceTimeMonth) {
+  workspaceTimeMonth.addEventListener("change", async () => {
+    state.workspaceTimeMonth = workspaceTimeMonth.value || new Date().toISOString().slice(0, 7);
+    if (state.currentWorkspaceId) {
+      await loadWorkspaceDetail(state.currentWorkspaceId);
+    }
+  });
+}
+
+if (workspaceTimeForm) {
+  const personLookup = workspaceTimeForm.querySelector('[name="persona_id_lookup"]');
+  if (personLookup) {
+    personLookup.addEventListener("change", () => {
+      const selected = (state.workspaceTimeEmployees || []).find((row) => String(row.id || "") === String(personLookup.value || ""));
+      if (!selected) return;
+      const personIdInput = workspaceTimeForm.querySelector('[name="persona_id"]');
+      const nameInput = workspaceTimeForm.querySelector('[name="persona_nombre"]');
+      const companyInput = workspaceTimeForm.querySelector('[name="empresa_id"]');
+      const typeInput = workspaceTimeForm.querySelector('[name="tipo_jornada"]');
+      const hoursInput = workspaceTimeForm.querySelector('[name="horas_pactadas_dia"]');
+      if (personIdInput) personIdInput.value = selected.id || "";
+      if (nameInput) nameInput.value = selected.nombre || "";
+      if (companyInput && selected.empresa_id) companyInput.value = selected.empresa_id;
+      if (typeInput) typeInput.value = selected.tipo_jornada || "Completa";
+      if (hoursInput) hoursInput.value = selected.horas_pactadas_dia ?? "";
+    });
+  }
+}
+
 if (workspaceFincasCommunityResetBtn) {
   workspaceFincasCommunityResetBtn.addEventListener("click", () => {
     fillWorkspaceFincasCommunityForm();
@@ -30603,6 +30787,30 @@ if (workspaceTimeForm) {
       await loadWorkspaceDetail(state.currentWorkspaceId);
     } catch (error) {
       if (workspaceTimeStatus) workspaceTimeStatus.textContent = error.message || "No se pudo guardar.";
+    }
+  });
+}
+
+if (workspaceTimeEmployeeForm) {
+  workspaceTimeEmployeeForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (workspaceTimeEmployeeStatus) workspaceTimeEmployeeStatus.textContent = "Guardando...";
+    const formData = new FormData(workspaceTimeEmployeeForm);
+    const payload = Object.fromEntries(formData.entries());
+    payload.workspace_id = state.currentWorkspaceId;
+    payload.activo = workspaceTimeEmployeeForm.querySelector('[name="activo"]')?.checked ? 1 : 0;
+    try {
+      const data = await fetch("/api/workspace_registro_personal", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }).then((res) => res.json());
+      if (data?.error) throw new Error(data.error);
+      if (workspaceTimeEmployeeStatus) workspaceTimeEmployeeStatus.textContent = "Persona guardada.";
+      await loadWorkspaceDetail(state.currentWorkspaceId);
+      fillWorkspaceTimeEmployeeForm();
+    } catch (error) {
+      if (workspaceTimeEmployeeStatus) workspaceTimeEmployeeStatus.textContent = error.message || "No se pudo guardar.";
     }
   });
 }
