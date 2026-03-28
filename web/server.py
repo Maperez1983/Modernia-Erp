@@ -11123,6 +11123,35 @@ def parse_inmobiliaria_address_for_catastro(value):
     }
 
 
+def build_catastro_street_queries(parts):
+    calle = str(parts.get("calle") or "").strip()
+    sigla = str(parts.get("sigla") or "").strip()
+    if not calle:
+        return []
+    queries = []
+    seen = set()
+
+    def add_query(tipo_via, nombre_via):
+        key = (str(tipo_via or "").strip().upper(), str(nombre_via or "").strip().upper())
+        if not key[1] or key in seen:
+            return
+        seen.add(key)
+        queries.append({"TipoVia": key[0], "NombreVia": key[1]})
+
+    add_query(sigla, calle)
+    add_query("", calle)
+
+    tokens = [token for token in calle.split(" ") if token]
+    if len(tokens) >= 2:
+        add_query("", " ".join(tokens[-2:]))
+    if len(tokens) >= 3:
+        add_query("", " ".join(tokens[-3:]))
+    for token in tokens:
+        if len(token) >= 5:
+            add_query("", token)
+    return queries
+
+
 def _xml_local_name(tag):
     return str(tag or "").rsplit("}", 1)[-1].lower()
 
@@ -11303,11 +11332,7 @@ def lookup_catastro_reference_by_address(*, provincia="", municipio="", direccio
             last_error = str(exc)
             continue
     try:
-        street_queries = []
-        if parts["calle"]:
-            street_queries.append({"TipoVia": parts["sigla"], "NombreVia": parts["calle"]})
-            street_queries.append({"TipoVia": "", "NombreVia": parts["calle"]})
-        for street_query in street_queries:
+        for street_query in build_catastro_street_queries(parts):
             _, street_xml = _fetch_catastro_xml(
                 CATRASTRO_STREET_SEARCH_URL,
                 {
