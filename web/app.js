@@ -5500,11 +5500,11 @@ const renderWorkspaceModules = (rows = []) => {
       ${grouped
         .map(
           (group) => `
-            <div class="workspace-suite-card">
+            <button type="button" class="workspace-suite-card workspace-suite-card-button" data-workspace-section-jump="${group.key}">
               <strong>${group.title}</strong>
               <div class="muted">${group.subtitle}</div>
               <span>${numberFormatter.format(group.rows.filter((row) => Number(row.enabled || 0) === 1).length)} / ${numberFormatter.format(group.rows.length)} activos</span>
-            </div>
+            </button>
           `
         )
         .join("")}
@@ -5512,7 +5512,7 @@ const renderWorkspaceModules = (rows = []) => {
     ${grouped
       .map(
         (group) => `
-          <section class="workspace-module-section">
+          <section class="workspace-module-section" data-workspace-section="${group.key}">
             <div class="workspace-module-section-head">
               <div>
                 <h4>${group.title}</h4>
@@ -5542,6 +5542,15 @@ const renderWorkspaceModules = (rows = []) => {
       )
       .join("")}
   `;
+  workspaceModules.querySelectorAll("[data-workspace-section-jump]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const sectionKey = button.dataset.workspaceSectionJump || "";
+      const target = workspaceModules.querySelector(`[data-workspace-section="${sectionKey}"]`);
+      if (target && typeof target.scrollIntoView === "function") {
+        target.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    });
+  });
   workspaceModules.querySelectorAll("[data-module-id]").forEach((input) => {
     input.addEventListener("change", async () => {
       const moduleId = input.dataset.moduleId || "";

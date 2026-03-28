@@ -1556,6 +1556,19 @@ body.crm-fin #companySummary {
   background: rgba(255, 255, 255, 0.9);
 }
 
+.workspace-suite-card-button {
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+}
+
+.workspace-suite-card-button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 24px rgba(43, 43, 43, 0.08);
+  border-color: rgba(60, 110, 113, 0.28);
+}
+
 .workspace-suite-card span,
 .workspace-module-section-head span {
   color: var(--muted);
