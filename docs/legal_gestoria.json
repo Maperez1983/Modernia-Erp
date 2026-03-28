@@ -167,6 +167,70 @@
         "Periodo, operación, base, cuota, soporte y criterio."
       ]
     },
+    "fiscal_inmobiliaria": {
+      "title": "Fiscalidad inmobiliaria",
+      "summary": "Operaciones con inmuebles, transmisión, arrendamiento, ganancias, retenciones y particularidades fiscales ligadas al activo inmobiliario.",
+      "keywords": ["fiscalidad inmobiliaria", "inmueble", "alquiler", "venta inmueble", "ganancia patrimonial inmueble", "iva inmobiliario"],
+      "legal_basis": [
+        "Normativa de IRPF, IVA, Impuesto sobre Sociedades e IRNR según el sujeto y la operación.",
+        "Normativa de ITP/AJD e Impuesto sobre Sucesiones y Donaciones cuando proceda."
+      ],
+      "mandatory_docs": [
+        "Escrituras, contratos, rentas, gastos, justificantes y documentación registral o bancaria."
+      ],
+      "checklist": [
+        "Identificar si la operación es venta, alquiler, transmisión gratuita o adquisición.",
+        "Relacionar sujeto pasivo, impuesto aplicable y territorio.",
+        "Vincular inmuebles, escrituras, rentas o ganancias al expediente."
+      ],
+      "editable_fields": [
+        "Tipo de operación, inmueble, sujeto, impuesto, periodo y observaciones."
+      ],
+      "clause_alerts": [
+        "Aplicar un único criterio fiscal a cualquier operación inmobiliaria.",
+        "No separar tributación del titular, del inmueble y del tipo de operación."
+      ],
+      "warnings": [
+        "La fiscalidad inmobiliaria suele cruzar varios impuestos a la vez."
+      ],
+      "drafting_help": [
+        "Las notas deben separar operación, inmueble, sujeto, impuesto y soporte documental."
+      ],
+      "variable_blocks": [
+        "Inmueble, operación, sujeto, impuesto, soporte y criterio."
+      ]
+    },
+    "modelos_tributarios": {
+      "title": "Modelos tributarios y obligaciones periódicas",
+      "summary": "Control de modelos, calendarios, obligaciones informativas y revisión documental asociada a cada presentación.",
+      "keywords": ["modelos tributarios", "modelo 303", "modelo 130", "modelo 111", "modelo 200", "declaracion informativa"],
+      "legal_basis": [
+        "Normativa material de cada impuesto y órdenes/modelos aprobados por la Administración tributaria."
+      ],
+      "mandatory_docs": [
+        "Modelo presentado, justificante, cálculo interno y documentación soporte."
+      ],
+      "checklist": [
+        "Vincular modelo, periodo y obligado tributario.",
+        "Guardar justificante de presentación.",
+        "Separar obligación periódica de obligación informativa."
+      ],
+      "editable_fields": [
+        "Modelo, periodo, obligado, soporte, presentación y observaciones."
+      ],
+      "clause_alerts": [
+        "Presentar modelos sin dejar cálculo ni soporte interno."
+      ],
+      "warnings": [
+        "El calendario y el soporte del dato son tan importantes como la propia presentación."
+      ],
+      "drafting_help": [
+        "La ficha debe identificar modelo, periodo, obligado, soporte, fecha y justificante."
+      ],
+      "variable_blocks": [
+        "Modelo, periodo, obligado, soporte, presentación y justificante."
+      ]
+    },
     "sociedades_impuesto": {
       "title": "Impuesto sobre Sociedades",
       "summary": "Base imponible, ajustes, deducciones, gastos fiscalmente relevantes y cierre del ejercicio societario.",
@@ -329,6 +393,38 @@
         "Sociedad, órgano, acuerdo, representación y fecha."
       ]
     },
+    "mercantil_registral": {
+      "title": "Mercantil registral",
+      "summary": "Depósito de cuentas, certificaciones, legalización de libros y trámites frente al Registro Mercantil.",
+      "keywords": ["registro mercantil", "deposito cuentas", "legalizacion libros", "certificacion", "registral"],
+      "legal_basis": [
+        "Reglamento del Registro Mercantil.",
+        "Ley de Sociedades de Capital y normativa mercantil relacionada."
+      ],
+      "mandatory_docs": [
+        "Cuentas, certificaciones, libros, modelos registrales y justificantes."
+      ],
+      "checklist": [
+        "Separar trámite registral de acuerdo societario que lo soporta.",
+        "Vincular libro, certificación o cuentas al expediente.",
+        "Controlar plazo, estado y justificante del Registro."
+      ],
+      "editable_fields": [
+        "Sociedad, trámite, plazo, soporte, presentación y observaciones."
+      ],
+      "clause_alerts": [
+        "Presentaciones registrales sin acuerdo o certificación soporte."
+      ],
+      "warnings": [
+        "El frente registral debe quedar unido al frente societario y contable."
+      ],
+      "drafting_help": [
+        "Las notas deben distinguir trámite registral, soporte societario y estado de presentación."
+      ],
+      "variable_blocks": [
+        "Sociedad, trámite, soporte, plazo y justificante."
+      ]
+    },
     "laboral_general": {
       "title": "Gestión laboral",
       "summary": "Expedientes laborales, altas, bajas, contratos, nóminas e incidencias con impacto laboral y de Seguridad Social.",
@@ -359,6 +455,39 @@
       ],
       "variable_blocks": [
         "Empresa, trabajador, actuación, fecha y soporte documental."
+      ]
+    },
+    "materias_especiales_laboral": {
+      "title": "Materias especiales laborales",
+      "summary": "Permisos, reducciones, excedencias, conciliación, incapacidad temporal y otras incidencias laborales específicas.",
+      "keywords": ["permiso", "excedencia", "reduccion jornada", "conciliacion", "incapacidad temporal", "it laboral"],
+      "legal_basis": [
+        "Estatuto de los Trabajadores.",
+        "Normativa de Seguridad Social y conciliación aplicable.",
+        "Convenio colectivo correspondiente."
+      ],
+      "mandatory_docs": [
+        "Solicitud, resolución, soporte médico o documental y comunicaciones."
+      ],
+      "checklist": [
+        "Identificar la materia concreta y su efecto laboral.",
+        "Vincular solicitud, prueba y resolución.",
+        "Relacionar impacto en nómina, jornada o cotización si existe."
+      ],
+      "editable_fields": [
+        "Trabajador, materia, fechas, soporte, resolución y observaciones."
+      ],
+      "clause_alerts": [
+        "Tratar incidencias especiales como si fueran una simple nota sin efectos colaterales."
+      ],
+      "warnings": [
+        "Estas materias suelen impactar a la vez en laboral, nómina y Seguridad Social."
+      ],
+      "drafting_help": [
+        "La ficha debe indicar materia, fechas, soporte, efectos y siguiente actuación."
+      ],
+      "variable_blocks": [
+        "Trabajador, materia, fechas, soporte, efectos y revisión."
       ]
     },
     "despidos_extinciones": {
@@ -614,6 +743,71 @@
       ],
       "variable_blocks": [
         "Periodo, asiento, soporte documental, criterio y revisión."
+      ]
+    },
+    "plan_general_contable": {
+      "title": "Plan General de Contabilidad",
+      "summary": "Marco base de reconocimiento, valoración, presentación y estructura contable aplicable al expediente contable.",
+      "keywords": ["plan general contable", "pgc", "normas de registro y valoracion", "cuentas anuales", "marco conceptual"],
+      "legal_basis": [
+        "Plan General de Contabilidad.",
+        "Normas de registro y valoración y marco conceptual contable."
+      ],
+      "mandatory_docs": [
+        "Asientos, soporte documental, criterio de registro y cuentas anuales."
+      ],
+      "checklist": [
+        "Separar criterio contable, fiscal y mercantil cuando no coinciden.",
+        "Vincular cada registro relevante a soporte documental.",
+        "Controlar efecto en cuentas anuales y cierres."
+      ],
+      "editable_fields": [
+        "Cuenta, criterio, valoración, periodo, soporte y observaciones."
+      ],
+      "clause_alerts": [
+        "Usar la cuenta correcta sin justificar el criterio de registro o valoración."
+      ],
+      "warnings": [
+        "El PGC no es solo cuadro de cuentas; también es criterio de reconocimiento y valoración."
+      ],
+      "drafting_help": [
+        "Las notas deben identificar hecho económico, cuenta, criterio de valoración y soporte."
+      ],
+      "variable_blocks": [
+        "Hecho económico, cuenta, valoración, periodo y soporte."
+      ]
+    },
+    "leyes_contables": {
+      "title": "Leyes contables y marco mercantil-contable",
+      "summary": "Normativa mercantil y contable que soporta libros, cuentas anuales, formulación, depósito y responsabilidad del órgano de administración.",
+      "keywords": ["leyes contables", "cuentas anuales", "codigo de comercio", "formulacion cuentas", "deposito cuentas"],
+      "legal_basis": [
+        "Código de Comercio.",
+        "Ley de Sociedades de Capital.",
+        "Plan General de Contabilidad y normativa mercantil-contable vinculada."
+      ],
+      "mandatory_docs": [
+        "Libros, balances, memoria, acuerdos de formulación y depósito."
+      ],
+      "checklist": [
+        "Vincular formulación, aprobación y depósito.",
+        "Separar obligación contable de obligación fiscal.",
+        "Relacionar soporte, cierre y órgano responsable."
+      ],
+      "editable_fields": [
+        "Sociedad, ejercicio, cuentas, depósito, responsables y observaciones."
+      ],
+      "clause_alerts": [
+        "Confundir cierre contable con cierre fiscal o con trámite registral."
+      ],
+      "warnings": [
+        "La capa contable y la mercantil deben leerse juntas en sociedades."
+      ],
+      "drafting_help": [
+        "La ficha debe distinguir formulación, aprobación, depósito y soporte contable."
+      ],
+      "variable_blocks": [
+        "Sociedad, ejercicio, cuentas, formulación, depósito y soporte."
       ]
     },
     "proteccion_datos_gestoria": {
