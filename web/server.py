@@ -13673,23 +13673,56 @@ def ensure_workspace_product_tables(conn):
     ensure_column(conn, "workspace_portal_requerimientos", "resolved_doc_id", "resolved_doc_id TEXT")
     conn.execute(
         """
-        CREATE TABLE IF NOT EXISTS workspace_registro_horario (
+        CREATE TABLE IF NOT EXISTS workspace_registro_personal (
           id TEXT PRIMARY KEY,
           workspace_id TEXT NOT NULL,
           empresa_id TEXT,
           usuario_id TEXT,
-          persona_nombre TEXT NOT NULL,
-          fecha TEXT NOT NULL,
-          hora_inicio TEXT NOT NULL,
-          hora_fin TEXT,
-          pausa_min INTEGER NOT NULL DEFAULT 0,
-          estado TEXT NOT NULL DEFAULT 'Borrador',
+          nombre TEXT NOT NULL,
+          nif TEXT,
+          email TEXT,
+          telefono TEXT,
+          tipo_jornada TEXT NOT NULL DEFAULT 'Completa',
+          horas_pactadas_dia REAL,
+          horas_pactadas_semana REAL,
+          fecha_alta TEXT,
+          fecha_baja TEXT,
+          activo INTEGER NOT NULL DEFAULT 1,
           notas TEXT,
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workspace_registro_horario (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          empresa_id TEXT,
+          persona_id TEXT,
+          usuario_id TEXT,
+          persona_nombre TEXT NOT NULL,
+          tipo_jornada TEXT,
+          horas_pactadas_dia REAL,
+          fecha TEXT NOT NULL,
+          hora_inicio TEXT NOT NULL,
+          hora_fin TEXT,
+          pausa_min INTEGER NOT NULL DEFAULT 0,
+          minutos_trabajados INTEGER NOT NULL DEFAULT 0,
+          metodo_registro TEXT,
+          estado TEXT NOT NULL DEFAULT 'Abierto',
+          notas TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    ensure_column(conn, "workspace_registro_horario", "persona_id", "persona_id TEXT")
+    ensure_column(conn, "workspace_registro_horario", "tipo_jornada", "tipo_jornada TEXT")
+    ensure_column(conn, "workspace_registro_horario", "horas_pactadas_dia", "horas_pactadas_dia REAL")
+    ensure_column(conn, "workspace_registro_horario", "minutos_trabajados", "minutos_trabajados INTEGER NOT NULL DEFAULT 0")
+    ensure_column(conn, "workspace_registro_horario", "metodo_registro", "metodo_registro TEXT")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS workspace_presupuestos (
@@ -14981,33 +15014,240 @@ def fetch_workspace_portal_requests(conn, workspace_id, limit=40):
     return {"rows": [dict(row) for row in rows]}
 
 
-def fetch_workspace_time_entries(conn, workspace_id, limit=40):
+def parse_hhmm_to_minutes(value):
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        hours_str, minutes_str = text.split(":", 1)
+        hours = int(hours_str)
+        minutes = int(minutes_str[:2])
+        if hours < 0 or hours > 23 or minutes < 0 or minutes > 59:
+            return None
+        return hours * 60 + minutes
+    except Exception:
+        return None
+
+
+def format_minutes_hhmm(total_minutes):
+    minutes = int(total_minutes or 0)
+    sign = "-" if minutes < 0 else ""
+    minutes = abs(minutes)
+    return f"{sign}{minutes // 60:02d}:{minutes % 60:02d}"
+
+
+def compute_worked_minutes(hora_inicio, hora_fin, pausa_min=0):
+    start = parse_hhmm_to_minutes(hora_inicio)
+    end = parse_hhmm_to_minutes(hora_fin)
+    if start is None or end is None:
+        return 0
+    worked = end - start - max(0, int(pausa_min or 0))
+    return max(0, worked)
+
+
+def normalize_time_entry_state(raw_state, hora_fin):
+    state = normalize_lookup_text(raw_state)
+    if state in {"incidencia", "error"}:
+        return "Incidencia"
+    if not str(hora_fin or "").strip():
+        return "Abierto"
+    if state in {"validado", "cerrado"}:
+        return "Validado"
+    return "Cerrado"
+
+
+def normalize_shift_type(raw_value):
+    value = normalize_lookup_text(raw_value)
+    if value in {"parcial", "tiempo parcial", "part-time"}:
+        return "Parcial"
+    return "Completa"
+
+
+def fetch_workspace_personal(conn, workspace_id, empresa_id=None, only_active=False, limit=200):
+    empresa_ids = resolve_workspace_company_ids(conn, workspace_id, empresa_id=empresa_id)
+    if not empresa_ids:
+        return {"rows": []}
+    where = [f"p.workspace_id = ?", f"p.empresa_id IN ({','.join('?' for _ in empresa_ids)})"]
+    params = [workspace_id, *empresa_ids]
+    if only_active:
+        where.append("COALESCE(p.activo, 1) = 1")
     rows = conn.execute(
-        """
+        f"""
+        SELECT
+          p.id,
+          p.workspace_id,
+          p.empresa_id,
+          COALESCE(e.nombre, '') AS empresa_nombre,
+          p.usuario_id,
+          p.nombre,
+          p.nif,
+          p.email,
+          p.telefono,
+          p.tipo_jornada,
+          p.horas_pactadas_dia,
+          p.horas_pactadas_semana,
+          p.fecha_alta,
+          p.fecha_baja,
+          p.activo,
+          p.notas,
+          p.created_at,
+          p.updated_at
+        FROM workspace_registro_personal p
+        LEFT JOIN empresas e ON e.id = p.empresa_id
+        WHERE {' AND '.join(where)}
+        ORDER BY COALESCE(p.activo, 1) DESC, p.nombre COLLATE NOCASE ASC
+        LIMIT ?
+        """,
+        (*params, max(1, min(int(limit or 200), 500))),
+    ).fetchall()
+    return {"rows": [dict(row) for row in rows]}
+
+
+def fetch_workspace_time_entries(conn, workspace_id, empresa_id=None, limit=40, month=None, persona_id=None):
+    empresa_ids = resolve_workspace_company_ids(conn, workspace_id, empresa_id=empresa_id)
+    if not empresa_ids:
+        return {"rows": []}
+    where = [f"t.workspace_id = ?", f"t.empresa_id IN ({','.join('?' for _ in empresa_ids)})"]
+    params = [workspace_id, *empresa_ids]
+    month_text = str(month or "").strip()
+    if month_text:
+        where.append("substr(t.fecha, 1, 7) = ?")
+        params.append(month_text[:7])
+    persona_text = str(persona_id or "").strip()
+    if persona_text:
+        where.append("t.persona_id = ?")
+        params.append(persona_text)
+    rows = conn.execute(
+        f"""
         SELECT
           t.id,
           t.workspace_id,
           t.empresa_id,
           COALESCE(e.nombre, '') AS empresa_nombre,
+          t.persona_id,
           t.usuario_id,
           t.persona_nombre,
+          t.tipo_jornada,
+          t.horas_pactadas_dia,
           t.fecha,
           t.hora_inicio,
           t.hora_fin,
           t.pausa_min,
+          t.minutos_trabajados,
+          t.metodo_registro,
           t.estado,
           t.notas,
           t.created_at,
           t.updated_at
         FROM workspace_registro_horario t
         LEFT JOIN empresas e ON e.id = t.empresa_id
-        WHERE t.workspace_id = ?
+        WHERE {' AND '.join(where)}
         ORDER BY COALESCE(t.fecha, t.created_at) DESC, t.hora_inicio DESC
         LIMIT ?
         """,
-        (workspace_id, max(1, min(int(limit or 40), 100))),
+        (*params, max(1, min(int(limit or 40), 300))),
     ).fetchall()
     return {"rows": [dict(row) for row in rows]}
+
+
+def build_workspace_time_summary(rows, month=""):
+    grouped = {}
+    total_minutes = 0
+    total_expected = 0
+    open_entries = 0
+    partial_people = set()
+    for row in rows:
+        person_key = str(row.get("persona_id") or row.get("persona_nombre") or "").strip()
+        if not person_key:
+            continue
+        worked = int(row.get("minutos_trabajados") or 0)
+        expected = int(round(float(row.get("horas_pactadas_dia") or 0) * 60))
+        if not row.get("hora_fin"):
+            open_entries += 1
+        if normalize_shift_type(row.get("tipo_jornada")) == "Parcial":
+            partial_people.add(person_key)
+        bucket = grouped.setdefault(
+            person_key,
+            {
+                "persona_id": row.get("persona_id"),
+                "persona_nombre": row.get("persona_nombre") or "-",
+                "empresa_nombre": row.get("empresa_nombre") or "-",
+                "tipo_jornada": normalize_shift_type(row.get("tipo_jornada")),
+                "dias_registrados": 0,
+                "minutos_trabajados": 0,
+                "minutos_pactados": 0,
+                "minutos_pausa": 0,
+                "incidencias": 0,
+                "entradas_abiertas": 0,
+            },
+        )
+        bucket["dias_registrados"] += 1
+        bucket["minutos_trabajados"] += worked
+        bucket["minutos_pactados"] += expected
+        bucket["minutos_pausa"] += int(row.get("pausa_min") or 0)
+        if normalize_lookup_text(row.get("estado")) == "incidencia":
+            bucket["incidencias"] += 1
+        if not row.get("hora_fin"):
+            bucket["entradas_abiertas"] += 1
+        total_minutes += worked
+        total_expected += expected
+    people = sorted(grouped.values(), key=lambda item: (item["empresa_nombre"], item["persona_nombre"]))
+    for item in people:
+        item["horas_trabajadas_hhmm"] = format_minutes_hhmm(item["minutos_trabajados"])
+        item["horas_pactadas_hhmm"] = format_minutes_hhmm(item["minutos_pactados"])
+        item["desviacion_hhmm"] = format_minutes_hhmm(item["minutos_trabajados"] - item["minutos_pactados"])
+    return {
+        "month": month,
+        "personas_total": len(people),
+        "personas_parciales": len(partial_people),
+        "entradas_abiertas": open_entries,
+        "horas_totales_hhmm": format_minutes_hhmm(total_minutes),
+        "horas_pactadas_hhmm": format_minutes_hhmm(total_expected),
+        "desviacion_hhmm": format_minutes_hhmm(total_minutes - total_expected),
+        "rows": people,
+    }
+
+
+def build_workspace_time_csv(rows):
+    output = BytesIO()
+    text = output
+    sio = []
+    header = [
+        "empresa",
+        "persona",
+        "tipo_jornada",
+        "fecha",
+        "hora_inicio",
+        "hora_fin",
+        "pausa_min",
+        "horas_trabajadas",
+        "horas_pactadas_dia",
+        "metodo_registro",
+        "estado",
+        "notas",
+    ]
+    import io
+    string_io = io.StringIO()
+    writer = csv.writer(string_io)
+    writer.writerow(header)
+    for row in rows:
+        writer.writerow(
+            [
+                row.get("empresa_nombre") or "",
+                row.get("persona_nombre") or "",
+                row.get("tipo_jornada") or "",
+                row.get("fecha") or "",
+                row.get("hora_inicio") or "",
+                row.get("hora_fin") or "",
+                row.get("pausa_min") or 0,
+                format_minutes_hhmm(row.get("minutos_trabajados") or 0),
+                row.get("horas_pactadas_dia") or "",
+                row.get("metodo_registro") or "",
+                row.get("estado") or "",
+                row.get("notas") or "",
+            ]
+        )
+    return string_io.getvalue().encode("utf-8-sig")
 
 
 def parse_non_negative_int(value):
@@ -17646,9 +17886,11 @@ class Handler(BaseHTTPRequestHandler):
             "/api/captaciones",
             "/api/captaciones_update",
             "/api/captacion_update",
+            "/api/captacion_delete",
             "/api/captacion_convert",
             "/api/compraventas",
             "/api/inmueble_update",
+            "/api/inmueble_delete",
             "/api/inmueble_propietarios_update",
             "/api/inmueble_docs",
             "/api/inmueble_checklist_generate",
@@ -17666,6 +17908,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/workspace_cobros",
             "/api/workspace_remesas",
             "/api/workspace_portal_requerimientos",
+            "/api/workspace_registro_personal",
             "/api/workspace_registro_horario",
             "/api/workspace_presupuestos",
             "/api/workspace_fincas_comunidades",
@@ -17838,8 +18081,10 @@ class Handler(BaseHTTPRequestHandler):
             "/api/clientes_link",
             "/api/clientes_link_delete",
             "/api/inmueble_update",
+            "/api/inmueble_delete",
             "/api/inmueble_propietarios_update",
             "/api/captacion_update",
+            "/api/captacion_delete",
             "/api/cliente_update",
             "/api/cliente_empresa_update",
             "/api/acciones",
@@ -19640,30 +19885,86 @@ class Handler(BaseHTTPRequestHandler):
             workspace_id = str(payload.get("workspace_id") or "").strip()
             empresa_id = str(payload.get("empresa_id") or "").strip()
             record_id = str(payload.get("id") or "").strip()
+            persona_id = str(payload.get("persona_id") or "").strip()
             persona_nombre = str(payload.get("persona_nombre") or "").strip()
             fecha = str(payload.get("fecha") or "").strip()
             hora_inicio = str(payload.get("hora_inicio") or "").strip()
             if not workspace_id or not empresa_id or not persona_nombre or not fecha or not hora_inicio:
                 json_response(self, {"error": "workspace_id, empresa_id, persona_nombre, fecha y hora_inicio requeridos"}, status=400)
                 return
+            persona_row = None
+            if persona_id:
+                persona_row = conn.execute(
+                    """
+                    SELECT id, nombre, usuario_id, tipo_jornada, horas_pactadas_dia, activo
+                    FROM workspace_registro_personal
+                    WHERE id = ? AND workspace_id = ? AND empresa_id = ?
+                    LIMIT 1
+                    """,
+                    (persona_id, workspace_id, empresa_id),
+                ).fetchone()
+                if not persona_row:
+                    json_response(self, {"error": "persona_id no válido"}, status=400)
+                    return
+                persona_nombre = str(persona_row["nombre"] or "").strip() or persona_nombre
+            hora_fin = str(payload.get("hora_fin") or "").strip()
+            pausa_min = max(0, int(parse_money_value(payload.get("pausa_min")) or 0))
+            if hora_fin:
+                start_min = parse_hhmm_to_minutes(hora_inicio)
+                end_min = parse_hhmm_to_minutes(hora_fin)
+                if start_min is None or end_min is None or end_min < start_min:
+                    json_response(self, {"error": "hora_fin debe ser posterior o igual a hora_inicio"}, status=400)
+                    return
+            elif normalize_lookup_text(payload.get("estado")) in {"validado", "cerrado"}:
+                json_response(self, {"error": "hora_fin requerida para cerrar o validar un fichaje"}, status=400)
+                return
+            if not record_id:
+                duplicate_open = conn.execute(
+                    """
+                    SELECT id
+                    FROM workspace_registro_horario
+                    WHERE workspace_id = ? AND empresa_id = ? AND fecha = ? AND COALESCE(persona_id, '') = COALESCE(?, '')
+                      AND COALESCE(hora_fin, '') = ''
+                    LIMIT 1
+                    """,
+                    (workspace_id, empresa_id, fecha, persona_id or None),
+                ).fetchone()
+                if duplicate_open:
+                    json_response(self, {"error": "Ya existe un fichaje abierto para esa persona en esa fecha"}, status=409)
+                    return
+            tipo_jornada = normalize_shift_type(payload.get("tipo_jornada") or (persona_row["tipo_jornada"] if persona_row else ""))
+            horas_pactadas_dia = payload.get("horas_pactadas_dia")
+            try:
+                horas_pactadas_dia = float(horas_pactadas_dia) if str(horas_pactadas_dia or "").strip() else (
+                    float(persona_row["horas_pactadas_dia"]) if persona_row and persona_row["horas_pactadas_dia"] not in (None, "") else None
+                )
+            except Exception:
+                horas_pactadas_dia = float(persona_row["horas_pactadas_dia"]) if persona_row and persona_row["horas_pactadas_dia"] not in (None, "") else None
+            minutos_trabajados = compute_worked_minutes(hora_inicio, hora_fin, pausa_min)
+            estado = normalize_time_entry_state(payload.get("estado"), hora_fin)
             values = (
                 workspace_id,
                 empresa_id,
-                (payload.get("usuario_id") or "").strip() or None,
+                persona_id or None,
+                (payload.get("usuario_id") or (persona_row["usuario_id"] if persona_row else "") or "").strip() or None,
                 persona_nombre,
+                tipo_jornada,
+                horas_pactadas_dia,
                 fecha,
                 hora_inicio,
-                (payload.get("hora_fin") or "").strip() or None,
-                max(0, int(parse_money_value(payload.get("pausa_min")) or 0)),
-                (payload.get("estado") or "").strip() or "Borrador",
+                hora_fin or None,
+                pausa_min,
+                minutos_trabajados,
+                (payload.get("metodo_registro") or "").strip() or "Manual",
+                estado,
                 (payload.get("notas") or "").strip() or None,
             )
             if record_id:
                 conn.execute(
                     """
                     UPDATE workspace_registro_horario
-                    SET workspace_id = ?, empresa_id = ?, usuario_id = ?, persona_nombre = ?, fecha = ?, hora_inicio = ?,
-                        hora_fin = ?, pausa_min = ?, estado = ?, notas = ?, updated_at = datetime(?)
+                    SET workspace_id = ?, empresa_id = ?, persona_id = ?, usuario_id = ?, persona_nombre = ?, tipo_jornada = ?, horas_pactadas_dia = ?, fecha = ?, hora_inicio = ?,
+                        hora_fin = ?, pausa_min = ?, minutos_trabajados = ?, metodo_registro = ?, estado = ?, notas = ?, updated_at = datetime(?)
                     WHERE id = ? AND workspace_id = ?
                     """,
                     (*values, now, record_id, workspace_id),
@@ -19673,9 +19974,9 @@ class Handler(BaseHTTPRequestHandler):
                 conn.execute(
                     """
                     INSERT INTO workspace_registro_horario (
-                      id, workspace_id, empresa_id, usuario_id, persona_nombre, fecha, hora_inicio, hora_fin,
-                      pausa_min, estado, notas, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                      id, workspace_id, empresa_id, persona_id, usuario_id, persona_nombre, tipo_jornada, horas_pactadas_dia, fecha, hora_inicio, hora_fin,
+                      pausa_min, minutos_trabajados, metodo_registro, estado, notas, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
                     """,
                     (record_id, *values, now, now),
                 )
@@ -19688,6 +19989,64 @@ class Handler(BaseHTTPRequestHandler):
             )
             conn.commit()
             json_response(self, {"ok": True, "id": record_id, "automation_actions": auto_created})
+            return
+        elif parsed.path == "/api/workspace_registro_personal":
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            empresa_id = str(payload.get("empresa_id") or "").strip()
+            record_id = str(payload.get("id") or "").strip()
+            nombre = str(payload.get("nombre") or "").strip()
+            if not workspace_id or not empresa_id or not nombre:
+                json_response(self, {"error": "workspace_id, empresa_id y nombre requeridos"}, status=400)
+                return
+            tipo_jornada = normalize_shift_type(payload.get("tipo_jornada"))
+            try:
+                horas_pactadas_dia = float(payload.get("horas_pactadas_dia")) if str(payload.get("horas_pactadas_dia") or "").strip() else None
+            except Exception:
+                horas_pactadas_dia = None
+            try:
+                horas_pactadas_semana = float(payload.get("horas_pactadas_semana")) if str(payload.get("horas_pactadas_semana") or "").strip() else None
+            except Exception:
+                horas_pactadas_semana = None
+            values = (
+                workspace_id,
+                empresa_id,
+                str(payload.get("usuario_id") or "").strip() or None,
+                nombre,
+                str(payload.get("nif") or "").strip() or None,
+                str(payload.get("email") or "").strip() or None,
+                str(payload.get("telefono") or "").strip() or None,
+                tipo_jornada,
+                horas_pactadas_dia,
+                horas_pactadas_semana,
+                str(payload.get("fecha_alta") or "").strip() or None,
+                str(payload.get("fecha_baja") or "").strip() or None,
+                0 if str(payload.get("activo") or "1").strip().lower() in {"0", "false", "no", "off"} else 1,
+                str(payload.get("notas") or "").strip() or None,
+            )
+            if record_id:
+                conn.execute(
+                    """
+                    UPDATE workspace_registro_personal
+                    SET workspace_id = ?, empresa_id = ?, usuario_id = ?, nombre = ?, nif = ?, email = ?, telefono = ?,
+                        tipo_jornada = ?, horas_pactadas_dia = ?, horas_pactadas_semana = ?, fecha_alta = ?, fecha_baja = ?,
+                        activo = ?, notas = ?, updated_at = datetime(?)
+                    WHERE id = ? AND workspace_id = ?
+                    """,
+                    (*values, now, record_id, workspace_id),
+                )
+            else:
+                record_id = os.urandom(16).hex()
+                conn.execute(
+                    """
+                    INSERT INTO workspace_registro_personal (
+                      id, workspace_id, empresa_id, usuario_id, nombre, nif, email, telefono, tipo_jornada,
+                      horas_pactadas_dia, horas_pactadas_semana, fecha_alta, fecha_baja, activo, notas, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                    """,
+                    (record_id, *values, now, now),
+                )
+            conn.commit()
+            json_response(self, {"ok": True, "id": record_id})
             return
         elif parsed.path == "/api/workspace_presupuestos":
             workspace_id = str(payload.get("workspace_id") or "").strip()
@@ -23717,6 +24076,36 @@ class Handler(BaseHTTPRequestHandler):
                     f"UPDATE inmuebles SET {inm_set}, updated_at = datetime(?) WHERE id = ?",
                     inm_values,
                 )
+        elif parsed.path == "/api/captacion_delete":
+            record_id = str(payload.get("id") or payload.get("captacion_id") or "").strip()
+            if not record_id:
+                json_response(self, {"error": "id requerido"}, status=400)
+                return
+            captacion = conn.execute(
+                """
+                SELECT id, empresa_id, inmueble_id, direccion
+                FROM captaciones
+                WHERE id = ? AND empresa_id = ?
+                LIMIT 1
+                """,
+                (record_id, empresa["id"]),
+            ).fetchone()
+            if not captacion:
+                json_response(self, {"error": "Captación no encontrada"}, status=404)
+                return
+            inmueble_id = str(captacion["inmueble_id"] or "").strip()
+            if inmueble_id:
+                conn.execute("DELETE FROM inmueble_checklist WHERE inmueble_id = ?", (inmueble_id,))
+                conn.execute("DELETE FROM inmueble_docs WHERE inmueble_id = ?", (inmueble_id,))
+                conn.execute("DELETE FROM inmueble_propietarios WHERE inmueble_id = ?", (inmueble_id,))
+                conn.execute("DELETE FROM visitas WHERE inmueble_id = ?", (inmueble_id,))
+                conn.execute("DELETE FROM acciones WHERE inmueble_id = ?", (inmueble_id,))
+            conn.execute("DELETE FROM captaciones WHERE id = ?", (record_id,))
+            if inmueble_id:
+                conn.execute("DELETE FROM inmuebles WHERE id = ?", (inmueble_id,))
+            conn.commit()
+            json_response(self, {"ok": True, "id": record_id, "inmueble_id": inmueble_id})
+            return
         elif parsed.path == "/api/captacion_convert":
             try:
                 captacion_id = str(payload.get("captacion_id") or "").strip()
@@ -24205,6 +24594,28 @@ class Handler(BaseHTTPRequestHandler):
                     f"UPDATE captaciones SET {cap_set}, updated_at = datetime(?) WHERE inmueble_id = ?",
                     cap_values,
                 )
+        elif parsed.path == "/api/inmueble_delete":
+            inmueble_id = str(payload.get("id") or payload.get("inmueble_id") or "").strip()
+            if not inmueble_id:
+                json_response(self, {"error": "inmueble_id requerido"}, status=400)
+                return
+            inmueble = conn.execute(
+                "SELECT id, empresa_id, direccion FROM inmuebles WHERE id = ? AND empresa_id = ? LIMIT 1",
+                (inmueble_id, empresa["id"]),
+            ).fetchone()
+            if not inmueble:
+                json_response(self, {"error": "Inmueble no encontrado"}, status=404)
+                return
+            conn.execute("DELETE FROM inmueble_checklist WHERE inmueble_id = ?", (inmueble_id,))
+            conn.execute("DELETE FROM inmueble_docs WHERE inmueble_id = ?", (inmueble_id,))
+            conn.execute("DELETE FROM inmueble_propietarios WHERE inmueble_id = ?", (inmueble_id,))
+            conn.execute("DELETE FROM visitas WHERE inmueble_id = ?", (inmueble_id,))
+            conn.execute("DELETE FROM acciones WHERE inmueble_id = ?", (inmueble_id,))
+            conn.execute("DELETE FROM captaciones WHERE inmueble_id = ?", (inmueble_id,))
+            conn.execute("DELETE FROM inmuebles WHERE id = ?", (inmueble_id,))
+            conn.commit()
+            json_response(self, {"ok": True, "id": inmueble_id})
+            return
         elif parsed.path == "/api/inmueble_checklist_generate":
             inmueble_id = payload.get("inmueble_id")
             etapa = payload.get("etapa")
@@ -26053,13 +26464,67 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, fetch_workspace_automations(conn, workspace_id))
             return
 
-        if path == "/api/workspace_registro_horario":
+        if path == "/api/workspace_registro_personal":
             workspace_id = params.get("workspace_id", [""])[0]
-            limit = params.get("limit", ["40"])[0]
+            empresa_id = params.get("empresa_id", [""])[0]
             if not workspace_id:
                 json_response(self, {"error": "workspace_id requerido"}, status=400)
                 return
-            json_response(self, fetch_workspace_time_entries(conn, workspace_id, limit=limit))
+            json_response(
+                self,
+                fetch_workspace_personal(
+                    conn,
+                    workspace_id,
+                    empresa_id=empresa_id,
+                    only_active=(params.get("activos", ["0"])[0] in {"1", "true"}),
+                ),
+            )
+            return
+
+        if path == "/api/workspace_registro_horario":
+            workspace_id = params.get("workspace_id", [""])[0]
+            empresa_id = params.get("empresa_id", [""])[0]
+            limit = params.get("limit", ["40"])[0]
+            month = params.get("month", [""])[0]
+            persona_id = params.get("persona_id", [""])[0]
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            json_response(
+                self,
+                fetch_workspace_time_entries(
+                    conn,
+                    workspace_id,
+                    empresa_id=empresa_id,
+                    limit=limit,
+                    month=month,
+                    persona_id=persona_id,
+                ),
+            )
+            return
+
+        if path == "/api/workspace_registro_horario_resumen":
+            workspace_id = params.get("workspace_id", [""])[0]
+            empresa_id = params.get("empresa_id", [""])[0]
+            month = params.get("month", [""])[0]
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            rows = fetch_workspace_time_entries(conn, workspace_id, empresa_id=empresa_id, limit=1000, month=month)["rows"]
+            json_response(self, build_workspace_time_summary(rows, month=month))
+            return
+
+        if path == "/api/workspace_registro_horario_export":
+            workspace_id = params.get("workspace_id", [""])[0]
+            empresa_id = params.get("empresa_id", [""])[0]
+            month = params.get("month", [""])[0]
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            rows = fetch_workspace_time_entries(conn, workspace_id, empresa_id=empresa_id, limit=5000, month=month)["rows"]
+            csv_bytes = build_workspace_time_csv(rows)
+            filename = f"registro_horario_{workspace_id}_{(month or 'completo')}.csv"
+            binary_response(self, csv_bytes, content_type="text/csv; charset=utf-8", filename=filename)
             return
 
         if path == "/api/workspace_presupuestos":
