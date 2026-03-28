@@ -4296,7 +4296,7 @@ const WORKSPACE_HOME_CONTAINERS = [
     modules: ["documental", "facturacion", "facturas_recibidas", "portal_cliente", "registro_horario", "automatizaciones", "copilot"],
     planned: [],
     action: WORKSPACE_LAUNCHERS.documental?.action || null,
-    actionLabel: "Abrir backoffice",
+    actionLabel: "Abrir motores",
   },
 ];
 
@@ -5309,7 +5309,14 @@ const renderWorkspaceLauncher = (workspace = {}, modules = []) => {
                   class="secondary ghost"
                   data-workspace-home-action="${container.key}"
                   ${typeof container.action === "function" ? "" : "disabled"}
-                >${isTenantWorkspaceMode() ? "Ver módulos" : container.actionLabel}</button>
+                >${isTenantWorkspaceMode() ? (container.actionLabel || "Abrir área") : container.actionLabel}</button>
+                ${isTenantWorkspaceMode() ? `
+                  <button
+                    type="button"
+                    class="secondary ghost"
+                    data-workspace-home-detail="${container.key}"
+                  >Ver accesos</button>
+                ` : ""}
               </div>
             </article>
           `;
@@ -5337,14 +5344,24 @@ const renderWorkspaceLauncher = (workspace = {}, modules = []) => {
       const container = WORKSPACE_HOME_CONTAINERS.find((item) => item.key === key);
       if (!container) return;
       if (isTenantWorkspaceMode()) {
-        renderWorkspaceHomeDetail(container, enabledKeys);
-        const detail = document.getElementById("workspaceHomeDetail");
-        if (detail) detail.scrollIntoView({ behavior: "smooth", block: "start" });
+        if (typeof container.action === "function") {
+          container.action();
+        }
         return;
       }
       if (typeof container.action === "function") {
         container.action();
       }
+    });
+  });
+  workspaceLauncher.querySelectorAll("[data-workspace-home-detail]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const key = button.dataset.workspaceHomeDetail || "";
+      const container = WORKSPACE_HOME_CONTAINERS.find((item) => item.key === key);
+      if (!container) return;
+      renderWorkspaceHomeDetail(container, enabledKeys);
+      const detail = document.getElementById("workspaceHomeDetail");
+      if (detail) detail.scrollIntoView({ behavior: "smooth", block: "start" });
     });
   });
 };
