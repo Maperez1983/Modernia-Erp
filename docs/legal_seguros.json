@@ -5,7 +5,7 @@
     "contrato_seguro": {
       "title": "Contrato de seguro",
       "summary": "Base jurídica de la póliza, deber de declaración del riesgo, cobertura, siniestro y pago de indemnización.",
-      "keywords": ["contrato de seguro", "poliza", "siniestro", "indemnizacion", "riesgo"],
+      "keywords": ["contrato de seguro", "poliza", "indemnizacion", "riesgo", "cobertura seguro"],
       "legal_basis": [
         "Ley 50/1980, de Contrato de Seguro.",
         "Normativa de transparencia y documentación precontractual aplicable al producto."
@@ -111,7 +111,7 @@
     "gestion_siniestros": {
       "title": "Gestión de siniestros",
       "summary": "Comunicación, documentación, peritación, reservas y seguimiento de la reclamación hasta cierre.",
-      "keywords": ["siniestro", "parte", "peritacion", "reclamacion", "indemnizacion"],
+      "keywords": ["siniestro", "parte", "peritacion", "reclamacion", "indemnizacion", "siniestro hogar", "parte de hogar", "parte de siniestro"],
       "legal_basis": [
         "Ley de Contrato de Seguro.",
         "Condiciones de póliza y normativa sectorial aplicable al ramo."
@@ -143,7 +143,7 @@
     "renovacion_cancelacion": {
       "title": "Renovación y cancelación de pólizas",
       "summary": "Control de vencimientos, oposición a prórroga, cambios de compañía y trazabilidad de comunicaciones.",
-      "keywords": ["renovacion", "cancelacion", "vencimiento", "oposicion prorroga", "cambio compania"],
+      "keywords": ["renovacion", "cancelacion", "vencimiento", "oposicion prorroga", "cambio compania", "cancelacion poliza", "fuera de plazo", "baja poliza"],
       "legal_basis": [
         "Ley de Contrato de Seguro.",
         "Condiciones de póliza y normativa de distribución aplicable al proceso de renovación."

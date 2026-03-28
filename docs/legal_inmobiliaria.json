@@ -5,6 +5,7 @@
     "encargo_venta": {
       "title": "Encargo de venta",
       "summary": "Documento precontractual de intermediación para regular la comercialización del inmueble y los honorarios de la agencia.",
+      "keywords": ["encargo de venta", "nota de encargo", "captacion venta", "intermediacion venta", "honorarios agencia venta", "herederos encargo venta", "cotitulares venta"],
       "legal_basis": [
         "Código Civil: autonomía de la voluntad y validez contractual general.",
         "LGDCU: control de cláusulas abusivas y transparencia con consumidores.",
@@ -53,6 +54,7 @@
     "encargo_alquiler": {
       "title": "Encargo de alquiler",
       "summary": "Documento de intermediación para comercializar el alquiler, distinto del contrato de arrendamiento final.",
+      "keywords": ["encargo de alquiler", "encargo arrendamiento", "captacion alquiler", "honorarios alquiler", "comercializacion alquiler"],
       "legal_basis": [
         "Ley de Arrendamientos Urbanos para el contrato final de arrendamiento.",
         "LGDCU si el arrendador es consumidor y se usan condiciones generales.",
@@ -95,6 +97,7 @@
     "propuesta_compra": {
       "title": "Propuesta / promesa de compra",
       "summary": "Documento precontractual para fijar una oferta económica y sus condiciones, sin confundirlo con reserva o arras.",
+      "keywords": ["propuesta de compra", "promesa de compra", "oferta de compra", "condicion suspensiva financiacion", "propuesta comprador"],
       "legal_basis": [
         "Código Civil: compraventa y promesa de vender/comprar.",
         "LGDCU si la operación se documenta con cláusulas predispuestas frente a consumidores."
@@ -139,6 +142,7 @@
     "propuesta_alquiler": {
       "title": "Propuesta de alquiler",
       "summary": "Documento previo al cierre del alquiler para fijar oferta económica y condiciones básicas del inquilino.",
+      "keywords": ["propuesta de alquiler", "oferta alquiler", "propuesta inquilino", "renta ofertada", "candidato alquiler"],
       "legal_basis": [
         "Ley de Arrendamientos Urbanos para el contrato definitivo.",
         "LGDCU cuando haya condiciones generales frente a consumidores."
@@ -176,6 +180,7 @@
     "reserva_arras": {
       "title": "Reserva / arras",
       "summary": "Documento de aseguramiento de la operación con entrega de cantidad y efectos económicos en caso de incumplimiento.",
+      "keywords": ["arras", "reserva", "senal compra", "contrato de arras", "reserva inmueble"],
       "legal_basis": [
         "Código Civil: arras y libertad de pactos, con especial cuidado al tipo de arras pactado."
       ],
@@ -320,6 +325,7 @@
     "contrato_privado_compraventa": {
       "title": "Contrato privado de compraventa",
       "summary": "Contrato civil principal previo a escritura para regular transmisión, precio, cargas, posesión y responsabilidades.",
+      "keywords": ["contrato privado de compraventa", "compraventa privada", "contrato privado venta", "escritura publica", "saneamiento compraventa"],
       "legal_basis": [
         "Código Civil: arts. de compraventa sobre cosa, precio, perfección, entrega y saneamiento.",
         "LGDCU en control de condiciones generales si una parte es consumidora y el texto es predispuesto."
@@ -362,6 +368,7 @@
     "contrato_privado_arrendamiento": {
       "title": "Contrato privado de arrendamiento",
       "summary": "Contrato principal del alquiler con renta, duración, prórrogas, fianza, gastos y uso pactado.",
+      "keywords": ["contrato privado de arrendamiento", "contrato de alquiler", "arrendamiento vivienda", "renta fianza", "inventario alquiler"],
       "legal_basis": [
         "Ley de Arrendamientos Urbanos como norma principal.",
         "LGDCU si se usan condiciones generales frente a consumidores."
@@ -407,6 +414,7 @@
     "consumo_andalucia": {
       "title": "Consumo Andalucía",
       "summary": "Marco informativo aplicable cuando la comercialización de vivienda se hace profesionalmente en Andalucía.",
+      "keywords": ["consumo andalucia", "decreto 218/2005", "dia alquiler", "documento informativo abreviado", "nota explicativa precio", "documento informativo andalucia", "segunda mano andalucia"],
       "legal_basis": [
         "Decreto 218/2005 de Andalucía sobre información al consumidor en compraventa y arrendamiento de viviendas."
       ],
@@ -443,6 +451,7 @@
     "visitas": {
       "title": "Hoja de visita",
       "summary": "Documento de trazabilidad comercial para acreditar la visita y su vinculación al expediente, sin sustituir documentos contractuales.",
+      "keywords": ["hoja de visita", "visita inmueble", "parte de visita", "cita comprador", "visita comercial"],
       "legal_basis": [
         "Base contractual y probatoria privada del expediente comercial."
       ],

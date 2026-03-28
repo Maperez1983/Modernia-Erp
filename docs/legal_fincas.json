@@ -36,7 +36,7 @@
     "juntas_propietarios": {
       "title": "Juntas de propietarios",
       "summary": "Convocatoria, celebración, acuerdos, notificación y ejecución de juntas ordinarias y extraordinarias.",
-      "keywords": ["junta propietarios", "convocatoria", "acta", "orden del dia"],
+      "keywords": ["junta propietarios", "junta de propietarios", "convocatoria", "acta", "orden del dia", "acta comunidad"],
       "legal_basis": [
         "Ley de Propiedad Horizontal.",
         "Estatutos y normas internas de la comunidad."
@@ -68,7 +68,7 @@
     "morosidad_comunidad": {
       "title": "Morosidad en comunidades",
       "summary": "Reclamación de cuotas, certificación de deuda, seguimiento y trazabilidad de incidencias de cobro.",
-      "keywords": ["morosidad", "cuotas comunidad", "deuda comunidad", "certificacion deuda", "reclamacion cuotas"],
+      "keywords": ["morosidad", "cuotas comunidad", "deuda comunidad", "certificacion deuda", "reclamacion cuotas", "moroso comunidad", "reclamar moroso"],
       "legal_basis": [
         "Ley de Propiedad Horizontal.",
         "Normativa procesal y de reclamación de deuda que corresponda."

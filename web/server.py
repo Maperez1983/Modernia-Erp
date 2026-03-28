@@ -10257,7 +10257,7 @@ def resolve_legal_copilot_topic(area, topic, question):
         return topic_key, topics[topic_key]
     haystack = normalize_lookup_text(question or "").lower()
     best_key = None
-    best_score = 0
+    best_score = 0.0
     for candidate, payload in topics.items():
         keywords = [normalize_lookup_text(item).lower() for item in list(payload.get("keywords") or []) if str(item or "").strip()]
         if not keywords and area_key == "inmobiliaria":
@@ -10273,7 +10273,21 @@ def resolve_legal_copilot_topic(area, topic, question):
                 "visitas": ["visita", "hoja de visita"],
             }
             keywords = fallback_map.get(candidate, [])
-        score = sum(1 for keyword in keywords if keyword and keyword in haystack)
+        score = 0.0
+        for keyword in keywords:
+            if not keyword:
+                continue
+            if keyword in haystack:
+                score += 4.0 + (0.25 * len(keyword.split()))
+                continue
+            tokens = [token for token in keyword.split() if len(token) >= 4]
+            if not tokens:
+                continue
+            matched_tokens = sum(1 for token in tokens if token in haystack)
+            if not matched_tokens:
+                continue
+            coverage = matched_tokens / len(tokens)
+            score += matched_tokens * coverage
         if score > best_score:
             best_key = candidate
             best_score = score

@@ -69,7 +69,7 @@
     "licencias_urbanisticas": {
       "title": "Licencias y control urbanístico",
       "summary": "La actuación puede requerir licencia, declaración responsable u otro control urbanístico según alcance y municipio.",
-      "keywords": ["licencia urbanistica", "declaracion responsable", "obra menor", "obra mayor", "urbanismo"],
+      "keywords": ["licencia urbanistica", "declaracion responsable", "obra menor", "obra mayor", "urbanismo", "licencia reforma", "permiso obra", "reforma con licencia"],
       "legal_basis": [
         "Normativa urbanística estatal y autonómica aplicable.",
         "Ordenanzas y procedimientos municipales correspondientes."

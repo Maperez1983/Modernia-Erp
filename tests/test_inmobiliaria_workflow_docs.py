@@ -196,6 +196,22 @@ class InmobiliariaWorkflowDocsTests(unittest.TestCase):
         self.assertEqual(topic_key, "contrato_privado_arrendamiento")
         self.assertEqual(payload["title"], LEGAL_COPILOT_TOPICS["contrato_privado_arrendamiento"]["title"])
 
+    def test_resolve_legal_copilot_topic_supports_partial_keyword_matching(self):
+        topic_key, _ = resolve_legal_copilot_topic(
+            "inmobiliaria",
+            "",
+            "Quien paga los gastos de gestion en alquiler de vivienda habitual",
+        )
+        self.assertEqual(topic_key, "alquiler_vivienda_habitual")
+
+    def test_resolve_legal_copilot_topic_detects_consumo_andalucia(self):
+        topic_key, _ = resolve_legal_copilot_topic(
+            "inmobiliaria",
+            "",
+            "Que documento informativo Andalucia debo entregar en segunda mano",
+        )
+        self.assertEqual(topic_key, "consumo_andalucia")
+
     def test_get_legal_copilot_topics_loads_editable_json(self):
         with tempfile.TemporaryDirectory() as tmp:
             legal_path = Path(tmp) / "legal.json"
