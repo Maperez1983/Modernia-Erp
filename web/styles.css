@@ -1660,6 +1660,19 @@ body.crm-fin #companySummary {
     grid-template-columns: 1fr;
   }
 
+  .workspace-list-item,
+  .workspace-module-card,
+  .workspace-launcher-card,
+  .workspace-health-score-card {
+    padding: 13px 14px;
+    border-radius: 15px;
+  }
+
+  .workspace-client-columns,
+  .workspace-gestoria-columns {
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  }
+
   .workspace-billing-row,
   .workspace-check-item,
   .workspace-module-health-row,
@@ -1675,6 +1688,26 @@ body.crm-fin #companySummary {
   .workspace-document-meta {
     justify-items: start;
     text-align: left;
+  }
+
+  .workspace-client-toolbar {
+    flex-wrap: wrap;
+  }
+
+  .workspace-client-toolbar input {
+    flex-basis: 100%;
+  }
+
+  .workspace-client-hero-head {
+    flex-direction: column;
+  }
+
+  .workspace-client-actions {
+    width: 100%;
+  }
+
+  .workspace-client-actions > * {
+    flex: 1 1 180px;
   }
 }
 
@@ -1964,6 +1997,41 @@ tr.is-selected td {
   .inmueble-summary-badges {
     max-width: none;
     justify-content: flex-start;
+  }
+
+  .workspace-kpis .kpi-grid,
+  .crm-kpis .kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .workspace-mini-kpis,
+  .workspace-gestoria-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .workspace-gestoria-columns,
+  .workspace-client-columns,
+  .workspace-module-grid,
+  .workspace-launcher-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .workspace-client-meta span {
+    width: 100%;
+  }
+
+  .crm-workspace-tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding: 8px;
+    scroll-snap-type: x proximity;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .crm-workspace-tabs .tab {
+    flex: 0 0 auto;
+    min-width: max-content;
+    scroll-snap-align: start;
   }
 }
 
@@ -4042,6 +4110,132 @@ body.density-compact [id$="Table"] table {
   #tableContainer table,
   [id$="Table"] table {
     min-width: 680px;
+  }
+
+  .workspace-list-item,
+  .workspace-module-card,
+  .workspace-launcher-card,
+  .workspace-health-score-card,
+  .workspace-client-hero,
+  .workspace-client-card,
+  .workspace-gestoria-card,
+  .workspace-mini-kpi,
+  .workspace-billing-row,
+  .workspace-summary-row,
+  .workspace-document-row,
+  .workspace-check-item,
+  .workspace-module-health-row {
+    padding: 12px;
+    border-radius: 14px;
+  }
+
+  .workspace-list-meta,
+  .workspace-billing-meta,
+  .workspace-summary-metrics,
+  .workspace-document-meta,
+  .workspace-module-health-meta {
+    width: 100%;
+  }
+
+  .workspace-billing-meta > *,
+  .workspace-summary-metrics > *,
+  .workspace-document-meta > * {
+    width: 100%;
+  }
+
+  .workspace-billing-meta button,
+  .workspace-billing-meta .secondary,
+  .workspace-billing-meta .button-inline {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .workspace-client-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .workspace-client-toolbar button,
+  .workspace-client-toolbar .secondary {
+    width: 100%;
+  }
+
+  .workspace-client-actions > * {
+    width: 100%;
+  }
+
+  .form-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .form-grid.inmo-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .form-grid .span-2 {
+    grid-column: auto;
+  }
+
+  .crm-actions,
+  .section-head {
+    align-items: stretch;
+  }
+
+  .section-head .ghost,
+  .section-head .secondary,
+  .crm-actions > * {
+    width: 100%;
+    justify-content: center;
+  }
+}
+
+@media (max-width: 560px) {
+  main {
+    padding: 16px;
+  }
+
+  section {
+    padding: 16px;
+    border-radius: 20px;
+  }
+
+  .workspace-kpis .kpi-grid,
+  .crm-kpis .kpi-grid,
+  .workspace-mini-kpis,
+  .workspace-gestoria-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .workspace-health-score-card {
+    grid-template-columns: 1fr;
+    justify-items: start;
+  }
+
+  .workspace-health-ring {
+    width: 64px;
+    height: 64px;
+  }
+
+  .crm-workspace-tabs {
+    gap: 8px;
+    padding: 6px;
+    border-radius: 16px;
+  }
+
+  .crm-workspace-tabs .tab {
+    min-width: 112px;
+    padding: 9px 12px;
+  }
+
+  .workspace-document-head {
+    align-items: flex-start;
+  }
+
+  .workspace-chip,
+  .workspace-client-card,
+  .workspace-gestoria-card {
+    padding: 12px;
   }
 }
 
