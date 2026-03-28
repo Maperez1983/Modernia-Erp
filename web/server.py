@@ -11494,6 +11494,110 @@ def split_catastro_reference(value):
     return clean[:7], clean[7:14], clean
 
 
+def _geocode_query_candidates(address, municipio="", provincia="", codigo_postal=""):
+    base = str(address or "").strip()
+    town = str(municipio or "").strip()
+    region = str(provincia or "").strip()
+    postal = normalize_postal_code(codigo_postal)
+    if not base:
+        return []
+    first_line = base.split(",")[0].strip()
+    simplified = re.sub(r"\b\d+\s+[A-Z]{1,2}\b$", "", first_line, flags=re.I).strip()
+    simplified = re.sub(r"\b\d+\s+\d+\s*[A-Z]?\b$", lambda m: m.group(0).split()[0], simplified, flags=re.I).strip()
+    parts_full = [base, town, region, postal, "España"]
+    parts_simple = [simplified or first_line, town, region, postal, "España"]
+    candidates = []
+    for parts in (parts_full, parts_simple):
+        query = ", ".join([part for part in parts if part])
+        if query and query not in candidates:
+            candidates.append(query)
+    return candidates
+
+
+def _fetch_nominatim_query(query):
+    params = urllib.parse.urlencode(
+        {
+            "format": "jsonv2",
+            "limit": 1,
+            "countrycodes": "es",
+            "q": query,
+        }
+    )
+    req = urllib.request.Request(
+        f"https://nominatim.openstreetmap.org/search?{params}",
+        headers={
+            "User-Agent": "ModerniaERP/1.0 (contacto@grupomodernia.es)",
+            "Accept-Language": "es",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=8) as response:
+        return json.loads(response.read().decode("utf-8", errors="ignore"))
+
+
+def fetch_geocode_coordinates(address, municipio="", provincia="", codigo_postal=""):
+    base = str(address or "").strip()
+    if not base:
+        raise ValueError("direccion requerida")
+    attempted = []
+    for query in _geocode_query_candidates(base, municipio=municipio, provincia=provincia, codigo_postal=codigo_postal):
+        attempted.append(query)
+        rows = _fetch_nominatim_query(query)
+        if not rows:
+            continue
+        row = rows[0]
+        try:
+            lat = float(row.get("lat"))
+            lon = float(row.get("lon"))
+        except Exception:
+            continue
+        return {
+            "ok": True,
+            "lat": lat,
+            "lon": lon,
+            "display_name": row.get("display_name") or query,
+            "rows": rows,
+            "query": query,
+        }
+    try:
+        catastro = lookup_catastro_reference_by_address(
+            provincia=provincia,
+            municipio=municipio,
+            direccion=base,
+            codigo_postal=codigo_postal,
+        )
+    except Exception:
+        catastro = {}
+    selected = None
+    if catastro.get("match_unique") and catastro.get("candidates"):
+        selected = (catastro.get("candidates") or [None])[0]
+    elif len(catastro.get("candidates") or []) == 1:
+        selected = (catastro.get("candidates") or [None])[0]
+    if selected and selected.get("label"):
+        fallback_query = ", ".join(
+            [part for part in [selected.get("label"), municipio, provincia, normalize_postal_code(codigo_postal), "España"] if part]
+        )
+        if fallback_query and fallback_query not in attempted:
+            rows = _fetch_nominatim_query(fallback_query)
+            if rows:
+                row = rows[0]
+                try:
+                    lat = float(row.get("lat"))
+                    lon = float(row.get("lon"))
+                except Exception:
+                    lat = lon = None
+                if lat is not None and lon is not None:
+                    return {
+                        "ok": True,
+                        "lat": lat,
+                        "lon": lon,
+                        "display_name": row.get("display_name") or fallback_query,
+                        "rows": rows,
+                        "query": fallback_query,
+                        "catastro_fallback": selected,
+                    }
+    return {"ok": False, "rows": [], "queries": attempted, "catastro": catastro}
+
+
 def _strip_html_fragment(value):
     raw = re.sub(r"<br\s*/?>", " ", str(value or ""), flags=re.I)
     raw = re.sub(r"<[^>]+>", "", raw)
@@ -14200,6 +14304,7 @@ def ensure_usuarios_schema(conn):
           email TEXT UNIQUE,
           servicio TEXT,
           rol TEXT,
+          registro_horario_activo INTEGER DEFAULT 0,
           password_hash TEXT,
           activo INTEGER DEFAULT 1,
           invite_token TEXT,
@@ -14214,6 +14319,7 @@ def ensure_usuarios_schema(conn):
     ensure_column(conn, "usuarios", "usuario", "usuario TEXT")
     ensure_column(conn, "usuarios", "email", "email TEXT")
     ensure_column(conn, "usuarios", "servicio", "servicio TEXT")
+    ensure_column(conn, "usuarios", "registro_horario_activo", "registro_horario_activo INTEGER DEFAULT 0")
     ensure_column(conn, "usuarios", "password_hash", "password_hash TEXT")
     ensure_column(conn, "usuarios", "invite_token", "invite_token TEXT")
     ensure_column(conn, "usuarios", "invite_expires_at", "invite_expires_at TEXT")
@@ -15895,7 +16001,8 @@ def sync_workspace_time_personal_from_users(conn, workspace_id, empresa_id=None)
         return []
     user_rows = conn.execute(
         """
-        SELECT id, nombre, apellido, usuario, email, servicio, activo
+        SELECT id, nombre, apellido, usuario, email, servicio, activo,
+               COALESCE(registro_horario_activo, 1) AS registro_horario_activo
         FROM usuarios
         WHERE COALESCE(activo, 1) = 1
         ORDER BY nombre COLLATE NOCASE ASC, apellido COLLATE NOCASE ASC
@@ -15904,6 +16011,28 @@ def sync_workspace_time_personal_from_users(conn, workspace_id, empresa_id=None)
     synced_ids = []
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     for user in user_rows:
+        tracking_enabled = int(user["registro_horario_activo"] or 0) == 1
+        existing = conn.execute(
+            """
+            SELECT id, tipo_jornada, horas_pactadas_dia, horas_pactadas_semana, fecha_alta, fecha_baja,
+                   activo, notas, nif, telefono
+            FROM workspace_registro_personal
+            WHERE workspace_id = ? AND usuario_id = ?
+            LIMIT 1
+            """,
+            (workspace_id, user["id"]),
+        ).fetchone()
+        if not tracking_enabled:
+            if existing:
+                conn.execute(
+                    """
+                    UPDATE workspace_registro_personal
+                    SET activo = 0, updated_at = datetime(?)
+                    WHERE id = ? AND workspace_id = ?
+                    """,
+                    (now, existing["id"], workspace_id),
+                )
+            continue
         empresa_vinculada = infer_workspace_time_company_id(
             conn,
             workspace_id,
@@ -15921,16 +16050,6 @@ def sync_workspace_time_personal_from_users(conn, workspace_id, empresa_id=None)
             full_name = str(user["usuario"] or user["email"] or "").strip()
         if not full_name:
             continue
-        existing = conn.execute(
-            """
-            SELECT id, tipo_jornada, horas_pactadas_dia, horas_pactadas_semana, fecha_alta, fecha_baja,
-                   activo, notas, nif, telefono
-            FROM workspace_registro_personal
-            WHERE workspace_id = ? AND usuario_id = ?
-            LIMIT 1
-            """,
-            (workspace_id, user["id"]),
-        ).fetchone()
         if existing:
             conn.execute(
                 """
@@ -19838,6 +19957,7 @@ class Handler(BaseHTTPRequestHandler):
             email = normalize_email(payload.get("email"))
             servicio = payload.get("servicio")
             password = payload.get("password")
+            registro_horario_activo = 1 if str(payload.get("registro_horario_activo") or "0").strip().lower() in {"1", "true", "si", "sí", "on"} else 0
             if not nombre:
                 json_response(self, {"error": "nombre requerido"}, status=400)
                 return
@@ -19856,8 +19976,8 @@ class Handler(BaseHTTPRequestHandler):
             password_hash = hash_password(password) if password else None
             conn.execute(
                 """
-                INSERT INTO usuarios (id, nombre, apellido, usuario, email, servicio, rol, password_hash, activo, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                INSERT INTO usuarios (id, nombre, apellido, usuario, email, servicio, rol, registro_horario_activo, password_hash, activo, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
                 """,
                 (
                     os.urandom(16).hex(),
@@ -19867,6 +19987,7 @@ class Handler(BaseHTTPRequestHandler):
                     email,
                     servicio,
                     payload.get("rol"),
+                    registro_horario_activo,
                     password_hash,
                     int(payload.get("activo") or 1),
                     now,
@@ -19947,7 +20068,7 @@ class Handler(BaseHTTPRequestHandler):
             if not user_id:
                 json_response(self, {"error": "id requerido"}, status=400)
                 return
-            allowed = ("nombre", "apellido", "usuario", "email", "servicio", "rol", "activo", "password")
+            allowed = ("nombre", "apellido", "usuario", "email", "servicio", "rol", "activo", "password", "registro_horario_activo")
             updates = []
             values = []
             for field in allowed:
@@ -27899,6 +28020,28 @@ class Handler(BaseHTTPRequestHandler):
             )
             return
 
+        if path == "/api/geocode_lookup":
+            query = (params.get("q", [""])[0] or "").strip()
+            municipio = (params.get("municipio", [""])[0] or "").strip()
+            provincia = (params.get("provincia", [""])[0] or "").strip()
+            codigo_postal = (params.get("codigo_postal", [""])[0] or "").strip()
+            if not query:
+                json_response(self, {"error": "q requerido"}, status=400)
+                return
+            try:
+                result = fetch_geocode_coordinates(
+                    query,
+                    municipio=municipio,
+                    provincia=provincia,
+                    codigo_postal=codigo_postal,
+                )
+                json_response(self, result)
+            except ValueError as exc:
+                json_response(self, {"error": str(exc)}, status=400)
+            except Exception as exc:
+                json_response(self, {"error": f"geocode_lookup_error: {type(exc).__name__}: {exc}"}, status=502)
+            return
+
         if path == "/api/clientes_list":
             servicio = (params.get("servicio", [""])[0] or "").strip()
             services = parse_services_param(servicio)
@@ -29548,7 +29691,12 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/usuarios":
             rows = conn.execute(
-                "SELECT id, nombre, apellido, usuario, email, servicio, rol, activo FROM usuarios ORDER BY nombre, apellido"
+                """
+                SELECT id, nombre, apellido, usuario, email, servicio, rol, activo,
+                       COALESCE(registro_horario_activo, 1) AS registro_horario_activo
+                FROM usuarios
+                ORDER BY nombre, apellido
+                """
             ).fetchall()
             json_response(self, {"rows": [dict(r) for r in rows]})
             return

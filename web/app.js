@@ -11370,19 +11370,18 @@ const geocodeInmuebleAddress = (address, latInput, lonInput) => {
     clearTimeout(inmuebleGeocodeTimer);
   }
   inmuebleGeocodeTimer = setTimeout(() => {
-    fetch(
-      `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(
-        address
-      )}&limit=1`,
-      {
-        headers: { "Accept-Language": "es" },
-      }
-    )
-      .then((res) => res.json())
-      .then((rows) => {
-        if (!rows || !rows.length) return;
-        const lat = Number(rows[0].lat);
-        const lon = Number(rows[0].lon);
+    const params = new URLSearchParams({ q: address });
+    const poblacion = document.querySelector('.inline-input[data-target="inmueble"][data-field="poblacion"]');
+    const provincia = document.querySelector('.inline-input[data-target="inmueble"][data-field="provincia"]');
+    const codigoPostal = document.querySelector('.inline-input[data-target="inmueble"][data-field="codigo_postal"]');
+    if (poblacion?.value) params.set("municipio", poblacion.value);
+    if (provincia?.value) params.set("provincia", provincia.value);
+    if (codigoPostal?.value) params.set("codigo_postal", codigoPostal.value);
+    api(`/api/geocode_lookup?${params.toString()}`)
+      .then((data) => {
+        if (!data?.ok) return;
+        const lat = Number(data.lat);
+        const lon = Number(data.lon);
         if (Number.isNaN(lat) || Number.isNaN(lon)) return;
         if (latInput) latInput.value = String(lat);
         if (lonInput) lonInput.value = String(lon);
@@ -11409,15 +11408,15 @@ const geocodeCaptacionAddress = () => {
   ].filter(Boolean);
   const address = pieces.join(", ");
   if (!address) return;
-  fetch(
-    `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}&limit=1`,
-    { headers: { "Accept-Language": "es" } }
-  )
-    .then((res) => res.json())
-    .then((rows) => {
-      if (!rows || !rows.length) return;
-      const lat = Number(rows[0].lat);
-      const lon = Number(rows[0].lon);
+  const params = new URLSearchParams({ q: address });
+  if (poblacionInput?.value) params.set("municipio", poblacionInput.value);
+  if (provinciaInput?.value) params.set("provincia", provinciaInput.value);
+  if (codigoPostalInput?.value) params.set("codigo_postal", codigoPostalInput.value);
+  api(`/api/geocode_lookup?${params.toString()}`)
+    .then((data) => {
+      if (!data?.ok) return;
+      const lat = Number(data.lat);
+      const lon = Number(data.lon);
       if (Number.isNaN(lat) || Number.isNaN(lon)) return;
       if (latInput) latInput.value = String(lat);
       if (lonInput) lonInput.value = String(lon);
@@ -13074,7 +13073,7 @@ const renderUsuariosTable = () => {
     item.innerHTML = `
       <div class="admin-user-name">${name}</div>
       <div class="admin-user-meta">${row.usuario || "-"} · ${row.rol || "Sin rol"}</div>
-      <div class="admin-user-meta">${row.servicio || "Sin servicios"}</div>
+      <div class="admin-user-meta">${row.servicio || "Sin servicios"}${Number(row.registro_horario_activo || 0) === 1 ? " · Registro horario" : ""}</div>
     `;
     item.addEventListener("click", () => {
       state.adminSelectedUserId = row.id;
@@ -13184,6 +13183,13 @@ const renderAdminUserDetail = () => {
     ],
     user.activo ? "1" : "0"
   );
+  const registroHorarioLabel = document.createElement("label");
+  registroHorarioLabel.className = "admin-detail-field inline-check";
+  const registroHorarioCheck = document.createElement("input");
+  registroHorarioCheck.type = "checkbox";
+  registroHorarioCheck.checked = Number(user.registro_horario_activo || 0) === 1;
+  registroHorarioLabel.appendChild(registroHorarioCheck);
+  registroHorarioLabel.appendChild(document.createTextNode(" Vincular a registro horario"));
   const password = buildPasswordInput("Nueva contraseña", "", { placeholder: "Opcional" });
 
   const serviciosLabel = document.createElement("label");
@@ -13199,6 +13205,7 @@ const renderAdminUserDetail = () => {
     email.label,
     rol.label,
     activo.label,
+    registroHorarioLabel,
     password.label,
     serviciosLabel,
   ].forEach((node) => form.appendChild(node));
@@ -13233,6 +13240,7 @@ const renderAdminUserDetail = () => {
       rol: rol.select.value,
       activo: activo.select.value,
       servicio: joinAdminServices(servicios.getSelectedServices()),
+      registro_horario_activo: registroHorarioCheck.checked ? 1 : 0,
     };
     if (password.input.value.trim()) {
       payload.password = password.input.value.trim();
@@ -33408,6 +33416,7 @@ if (adminUserForm) {
     }
     const formData = new FormData(adminUserForm);
     const payload = Object.fromEntries(formData.entries());
+    payload.registro_horario_activo = adminUserForm.querySelector('[name="registro_horario_activo"]')?.checked ? 1 : 0;
     if (!String(payload.servicio || "").trim()) {
       if (adminUserStatus) {
         adminUserStatus.textContent = "Selecciona al menos un servicio.";
@@ -33435,6 +33444,8 @@ if (adminUserForm) {
           adminServicioInput.value = "";
           renderAdminServiceSelector();
         }
+        const timeCheck = adminUserForm.querySelector('[name="registro_horario_activo"]');
+        if (timeCheck) timeCheck.checked = false;
         loadUsuarios().then(() => {
           renderUsuariosSelect();
           renderUsuariosTable();
