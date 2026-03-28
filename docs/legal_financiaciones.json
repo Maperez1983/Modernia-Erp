@@ -1,0 +1,70 @@
+{
+  "version": 1,
+  "area": "financiaciones",
+  "topics": {
+    "lcci": {
+      "title": "Crédito inmobiliario y asesoramiento",
+      "summary": "Marco de transparencia, información precontractual y actuación en expedientes hipotecarios.",
+      "keywords": ["lcci", "hipoteca", "fein", "fiae", "acta notarial", "credito inmobiliario"],
+      "legal_basis": [
+        "Ley 5/2019, reguladora de los contratos de crédito inmobiliario.",
+        "Normativa de transparencia bancaria y protección del prestatario."
+      ],
+      "mandatory_docs": [
+        "FEIN, FIAE, documentación del expediente y trazabilidad del asesoramiento."
+      ],
+      "checklist": [
+        "Vincular expediente financiero al inmueble y cliente.",
+        "Controlar documentación económica y oferta bancaria.",
+        "Dejar trazado cada hito: estudio, bancos, tasación, FEIN y firma."
+      ],
+      "editable_fields": [
+        "Ingresos, endeudamiento, aportación, oferta bancaria y observaciones."
+      ],
+      "clause_alerts": [
+        "No confundir asesoramiento interno con documentación precontractual bancaria oficial."
+      ],
+      "warnings": [
+        "La oferta vinculante y el acta notarial tienen régimen propio y no deben simplificarse."
+      ],
+      "drafting_help": [
+        "Las notas internas deben separar análisis económico, documentación pendiente y siguiente hito bancario."
+      ],
+      "variable_blocks": [
+        "Cliente, inmueble, ingresos, bancos, oferta y hitos."
+      ]
+    },
+    "proteccion_datos_financieros": {
+      "title": "Protección de datos financieros",
+      "summary": "Expedientes hipotecarios manejan datos económicos intensivos y requieren especial trazabilidad.",
+      "keywords": ["proteccion datos", "rgpd", "datos economicos", "financiacion", "hipoteca"],
+      "legal_basis": [
+        "Reglamento (UE) 2016/679.",
+        "Ley Orgánica 3/2018."
+      ],
+      "mandatory_docs": [
+        "Información de protección de datos y base legitimadora del expediente."
+      ],
+      "checklist": [
+        "Limitar acceso a documentación económica.",
+        "Trazar cesiones a entidades bancarias o colaboradores.",
+        "Definir conservación y destrucción del expediente."
+      ],
+      "editable_fields": [
+        "Responsable, legitimación, destinatarios y conservación."
+      ],
+      "clause_alerts": [
+        "Compartir documentación económica sin soporte documental suficiente."
+      ],
+      "warnings": [
+        "Los datos económicos deben protegerse con especial control operativo."
+      ],
+      "drafting_help": [
+        "Las fichas económicas deben remitir al aviso de protección de datos y limitar accesos."
+      ],
+      "variable_blocks": [
+        "Responsable, legitimación, cesiones, conservación y ejercicio de derechos."
+      ]
+    }
+  }
+}

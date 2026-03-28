@@ -8,8 +8,10 @@ from unittest.mock import patch
 from web import server
 from web.server import (
     LEGAL_COPILOT_TOPICS,
+    build_dgt_consulta_url,
     classify_legal_feed_entry,
     fetch_legal_radar_items,
+    get_legal_copilot_catalog,
     get_legal_radar_sources_config,
     get_legal_copilot_topics,
     parse_legal_feed_entries,
@@ -215,6 +217,16 @@ class InmobiliariaWorkflowDocsTests(unittest.TestCase):
                 server.LEGAL_COPILOT_CACHE["topics"] = None
                 topics = get_legal_copilot_topics()
         self.assertEqual(topics["encargo_venta"]["title"], "Encargo editable")
+
+    def test_get_legal_copilot_catalog_returns_area_metadata(self):
+        catalog = get_legal_copilot_catalog()
+        area_keys = {item["key"] for item in catalog["areas"]}
+        self.assertIn("inmobiliaria", area_keys)
+        self.assertIn("gestoria", area_keys)
+
+    def test_build_dgt_consulta_url_normalizes_reference(self):
+        url = build_dgt_consulta_url("0542-23")
+        self.assertEqual(url, "https://petete.tributos.hacienda.gob.es/consultas/?num_consulta=V0542-23")
 
     def test_fetch_legal_radar_items_sorts_pending_first_and_builds_summary(self):
         self.conn.execute(

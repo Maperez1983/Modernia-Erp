@@ -1,0 +1,70 @@
+{
+  "version": 1,
+  "area": "obras",
+  "topics": {
+    "presupuesto_obra": {
+      "title": "Presupuesto y encargo de obra",
+      "summary": "Documento base para definir alcance, precio, plazos y responsabilidades antes de ejecutar una obra o reforma.",
+      "keywords": ["presupuesto obra", "reforma", "encargo obra", "plazo", "precio"],
+      "legal_basis": [
+        "Código Civil en materia de obligaciones y contratos.",
+        "Normativa de consumidores cuando el cliente sea consumidor final."
+      ],
+      "mandatory_docs": [
+        "Presupuesto aceptado, alcance, mediciones y condiciones económicas."
+      ],
+      "checklist": [
+        "Definir alcance y exclusiones.",
+        "Separar materiales, mano de obra y extras.",
+        "Dejar claro plazo y forma de pago."
+      ],
+      "editable_fields": [
+        "Alcance, precio, extras, plazos y responsables."
+      ],
+      "clause_alerts": [
+        "Presupuestos ambiguos que luego impiden controlar extras o responsabilidades."
+      ],
+      "warnings": [
+        "No convertir un presupuesto en contrato cerrado sin revisar alcance y responsabilidades."
+      ],
+      "drafting_help": [
+        "El documento debe diferenciar partida base, extras, plazos y forma de aceptación."
+      ],
+      "variable_blocks": [
+        "Cliente, obra, alcance, precio, plazos y extras."
+      ]
+    },
+    "loe_contratacion": {
+      "title": "LOE y responsabilidades",
+      "summary": "Obras y edificaciones con impacto técnico o estructural requieren vigilar agentes de la edificación y responsabilidades.",
+      "keywords": ["loe", "edificacion", "director obra", "promotor", "constructor"],
+      "legal_basis": [
+        "Ley 38/1999, de Ordenación de la Edificación.",
+        "Normativa urbanística y técnica aplicable."
+      ],
+      "mandatory_docs": [
+        "Proyecto, licencias, agentes intervinientes y documentación técnica cuando proceda."
+      ],
+      "checklist": [
+        "Identificar si la actuación entra en ámbito LOE.",
+        "Vincular técnicos y licencias.",
+        "Controlar documentación técnica y seguros si aplican."
+      ],
+      "editable_fields": [
+        "Promotor, contratista, técnicos, licencias y documentación técnica."
+      ],
+      "clause_alerts": [
+        "Tratar como simple reforma una actuación que exige más soporte técnico o licencia."
+      ],
+      "warnings": [
+        "La obra puede requerir circuito técnico-jurídico distinto a una simple reforma."
+      ],
+      "drafting_help": [
+        "Cuando haya intervención técnica relevante, el expediente debe reflejar agentes, proyecto y licencia."
+      ],
+      "variable_blocks": [
+        "Tipo de actuación, agentes, licencias, seguros y proyecto."
+      ]
+    }
+  }
+}

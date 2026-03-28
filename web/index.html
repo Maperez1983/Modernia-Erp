@@ -87,12 +87,12 @@
             <div id="workspaceModuleHealth"></div>
           </div>
         </div>
-        <div class="workspace-central-layout">
+        <div class="workspace-central-layout crm-workspace-view" data-workspace-view="operations">
           <div class="form-card">
             <div class="section-head">
               <div>
-                <h3>Presupuestos</h3>
-                <p class="muted">Propuestas comerciales para reformas, gestoría y fincas desde una sola base operativa.</p>
+                <h3>Presupuestos del grupo</h3>
+                <p class="muted">Propuestas comerciales para reformas, gestoría y fincas dentro de la operativa del workspace.</p>
               </div>
             </div>
             <div id="workspaceBudgetSummary"></div>
@@ -1658,25 +1658,18 @@
                   <div class="form-card crm-focus-card">
                     <div class="section-head">
                       <div>
-                        <h3>Copiloto legal · Inmobiliaria</h3>
-                        <p class="muted">Asistencia de redacción y revisión legal-operativa para encargos, propuestas, reservas y contratos.</p>
+                        <h3>Copiloto legal · Servicios</h3>
+                        <p class="muted">Asistencia de redacción y revisión legal-operativa por servicio, con base estable y radar normativo.</p>
                       </div>
                     </div>
                     <form id="inmoLegalCopilotForm" class="form-grid">
                       <label>
+                        Área
+                        <select id="inmoLegalArea" name="area"></select>
+                      </label>
+                      <label>
                         Tema
-                        <select id="inmoLegalTopic" name="topic">
-                          <option value="">Selecciona un tema</option>
-                          <option value="encargo_venta">Encargo de venta</option>
-                          <option value="encargo_alquiler">Encargo de alquiler</option>
-                          <option value="propuesta_compra">Propuesta / promesa de compra</option>
-                          <option value="propuesta_alquiler">Propuesta de alquiler</option>
-                          <option value="reserva_arras">Reserva / arras</option>
-                          <option value="contrato_privado_compraventa">Contrato privado de compraventa</option>
-                          <option value="contrato_privado_arrendamiento">Contrato privado de arrendamiento</option>
-                          <option value="consumo_andalucia">Consumo Andalucía</option>
-                          <option value="visitas">Hoja de visita</option>
-                        </select>
+                        <select id="inmoLegalTopic" name="topic"></select>
                       </label>
                       <label class="span-2">
                         Pregunta
@@ -1696,9 +1689,9 @@
                       </div>
                     </div>
                     <div class="crm-focus-list">
-                      <div class="crm-focus-link">1. Selecciona el documento o fase del workflow.</div>
-                      <div class="crm-focus-link">2. Consulta campos editables, alertas y siguiente documento lógico.</div>
-                      <div class="crm-focus-link">3. Usa la respuesta para ajustar plantillas y automatismos del CRM.</div>
+                      <div class="crm-focus-link">1. Selecciona el servicio y el documento o proceso.</div>
+                      <div class="crm-focus-link">2. Consulta campos editables, alertas, legislación base y novedades detectadas.</div>
+                      <div class="crm-focus-link">3. Usa la respuesta para ajustar plantillas, criterios y automatismos del CRM.</div>
                     </div>
                   </div>
                 </div>
@@ -1726,6 +1719,10 @@
                       <div class="crm-focus-link"><strong>Palabras clave</strong><span>Arrendamientos urbanos, vivienda, consumidores, intermediación inmobiliaria, honorarios, reserva, arras, compraventa.</span></div>
                     </div>
                     <form id="legalRadarForm" class="form-grid">
+                      <label>
+                        Área
+                        <select name="area" id="legalRadarArea"></select>
+                      </label>
                       <label>
                         Fuente
                         <select name="fuente">
@@ -1790,6 +1787,51 @@
                         <span id="legalRadarStatus" class="muted"></span>
                       </div>
                     </form>
+                  </div>
+                  <div class="form-card">
+                    <div class="section-head">
+                      <div>
+                        <h3>Consultas vinculantes</h3>
+                        <p class="muted">Consulta oficial DGT por número de referencia y, si quieres, súbela al radar legal.</p>
+                      </div>
+                    </div>
+                    <form id="legalDgtForm" class="form-grid">
+                      <label>
+                        Área
+                        <select name="area" id="legalDgtArea"></select>
+                      </label>
+                      <label>
+                        Nº consulta
+                        <input name="referencia" placeholder="Ej. V0542-23" />
+                      </label>
+                      <label>
+                        Tema relacionado
+                        <select name="topic_key" id="legalDgtTopic"></select>
+                      </label>
+                      <label>
+                        Impacto
+                        <select name="impacto">
+                          <option>Medio</option>
+                          <option>Alto</option>
+                          <option>Bajo</option>
+                        </select>
+                      </label>
+                      <label class="span-2">
+                        Acción recomendada
+                        <input name="accion_recomendada" placeholder="Ej. revisar tributación de la operación o adaptar checklist fiscal" />
+                      </label>
+                      <label class="span-2">
+                        <input type="checkbox" name="registrar_en_radar" value="1" checked />
+                        Registrar también en el radar legal
+                      </label>
+                      <div class="form-actions span-2">
+                        <button type="submit">Consultar DGT</button>
+                        <span id="legalDgtStatus" class="muted"></span>
+                      </div>
+                    </form>
+                    <div id="legalDgtResponse" class="crm-focus-list">
+                      <div class="muted">Introduce una consulta vinculante DGT para enlazarla al conocimiento interno.</div>
+                    </div>
                   </div>
                   <div class="form-card">
                     <div class="section-head">

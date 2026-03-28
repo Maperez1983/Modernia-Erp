@@ -1,0 +1,69 @@
+{
+  "version": 1,
+  "area": "fincas",
+  "topics": {
+    "propiedad_horizontal": {
+      "title": "Propiedad horizontal",
+      "summary": "Marco base para comunidades, cuotas, obras, juntas y régimen jurídico del edificio dividido.",
+      "keywords": ["propiedad horizontal", "comunidad", "cuotas", "presidente", "vecino"],
+      "legal_basis": [
+        "Ley 49/1960, de Propiedad Horizontal."
+      ],
+      "mandatory_docs": [
+        "Título constitutivo, estatutos, actas y acuerdos relevantes."
+      ],
+      "checklist": [
+        "Vincular acuerdo al libro de actas.",
+        "Controlar mayoría exigida y quórum.",
+        "Relacionar proveedores, cuotas o derramas afectadas."
+      ],
+      "editable_fields": [
+        "Comunidad, acuerdo, mayoría, importes y seguimiento."
+      ],
+      "clause_alerts": [
+        "Acuerdos sin mayoría suficiente o sin trazabilidad de acta."
+      ],
+      "warnings": [
+        "No todo acuerdo puede automatizarse sin revisar la mayoría legal exigible."
+      ],
+      "drafting_help": [
+        "Las actas y comunicaciones deben recoger acuerdo, mayoría, asistentes y efectos económicos."
+      ],
+      "variable_blocks": [
+        "Comunidad, fecha de junta, acuerdo, mayoría y efectos económicos."
+      ]
+    },
+    "juntas_propietarios": {
+      "title": "Juntas de propietarios",
+      "summary": "Convocatoria, celebración, acuerdos, notificación y ejecución de juntas ordinarias y extraordinarias.",
+      "keywords": ["junta propietarios", "convocatoria", "acta", "orden del dia"],
+      "legal_basis": [
+        "Ley de Propiedad Horizontal.",
+        "Estatutos y normas internas de la comunidad."
+      ],
+      "mandatory_docs": [
+        "Convocatoria, orden del día, asistencia, acta y notificaciones."
+      ],
+      "checklist": [
+        "Controlar convocatoria y destinatarios.",
+        "Recoger asistentes y cuotas.",
+        "Dejar trazado el acuerdo y su ejecución."
+      ],
+      "editable_fields": [
+        "Orden del día, asistentes, acuerdos y seguimiento."
+      ],
+      "clause_alerts": [
+        "Ejecución de acuerdos sin acta o notificación suficientemente clara."
+      ],
+      "warnings": [
+        "La junta debe soportar prueba documental completa."
+      ],
+      "drafting_help": [
+        "Toda convocatoria y acta debe vincularse a la comunidad, fecha, asistentes y acuerdos."
+      ],
+      "variable_blocks": [
+        "Convocatoria, asistencia, acuerdos, mayorías y ejecución."
+      ]
+    }
+  }
+}

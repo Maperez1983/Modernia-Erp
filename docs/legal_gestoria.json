@@ -1,0 +1,105 @@
+{
+  "version": 1,
+  "area": "gestoria",
+  "topics": {
+    "consultas_hacienda": {
+      "title": "Consultas vinculantes Hacienda",
+      "summary": "Doctrina oficial útil para fiscalidad operativa, interpretación de tributos y criterios aplicables al expediente.",
+      "keywords": ["consulta vinculante", "dgt", "hacienda", "criterio tributario", "tributos"],
+      "legal_basis": [
+        "Doctrina administrativa de la Dirección General de Tributos.",
+        "Normativa tributaria material aplicable al impuesto o hecho imponible."
+      ],
+      "mandatory_docs": [
+        "Número de consulta, resumen del criterio y expediente afectado."
+      ],
+      "checklist": [
+        "Vincular la consulta al servicio y al trámite concreto.",
+        "Verificar que el supuesto de hecho sea comparable.",
+        "No sustituir la norma por una lectura aislada de doctrina."
+      ],
+      "editable_fields": [
+        "Referencia DGT, impuesto afectado, expediente, impacto y recomendación interna."
+      ],
+      "clause_alerts": [
+        "Aplicar una consulta a un supuesto distinto sin revisión técnica.",
+        "Usar doctrina antigua sin revisar si hay cambios normativos posteriores."
+      ],
+      "warnings": [
+        "La consulta orienta, pero debe contrastarse con la norma vigente y el hecho concreto.",
+        "Conviene registrar fecha y versión del criterio seguido."
+      ],
+      "drafting_help": [
+        "En notas internas, identifica número de consulta, criterio útil y acción operativa recomendada."
+      ],
+      "variable_blocks": [
+        "Consulta, impuesto, criterio útil, acción recomendada y expediente vinculado."
+      ]
+    },
+    "fiscal_general": {
+      "title": "Gestión fiscal",
+      "summary": "Control de obligaciones periódicas, requerimientos, criterio tributario y soporte documental del contribuyente.",
+      "keywords": ["fiscal", "modelo tributario", "iva", "irpf", "sociedades", "requerimiento"],
+      "legal_basis": [
+        "Ley General Tributaria y normativa material de cada tributo.",
+        "Doctrina DGT y criterio administrativo aplicable cuando proceda."
+      ],
+      "mandatory_docs": [
+        "Libros, facturas, justificantes y comunicaciones de la AEAT."
+      ],
+      "checklist": [
+        "Trazar origen del dato declarado.",
+        "Conservar soporte documental.",
+        "Vincular criterio fiscal usado y fecha."
+      ],
+      "editable_fields": [
+        "Ejercicio, periodo, impuestos, justificantes y observaciones."
+      ],
+      "clause_alerts": [
+        "Declaraciones sin soporte o criterio documentado.",
+        "Plazos no controlados."
+      ],
+      "warnings": [
+        "Cada impuesto tiene reglas materiales distintas; usar siempre el bloque fiscal concreto."
+      ],
+      "drafting_help": [
+        "Las notas de expediente deben dejar claro origen documental, criterio y próximos plazos."
+      ],
+      "variable_blocks": [
+        "Periodo, impuesto, documentación soporte, criterio y plazos."
+      ]
+    },
+    "laboral_general": {
+      "title": "Gestión laboral",
+      "summary": "Expedientes laborales, altas, bajas, contratos, nóminas e incidencias con impacto laboral y de Seguridad Social.",
+      "keywords": ["laboral", "contrato trabajo", "nomina", "seguridad social", "alta baja"],
+      "legal_basis": [
+        "Estatuto de los Trabajadores.",
+        "Normativa de Seguridad Social y desarrollo reglamentario."
+      ],
+      "mandatory_docs": [
+        "Contrato, variaciones, nóminas, cotización y comunicaciones."
+      ],
+      "checklist": [
+        "Identificar empresa, trabajador y convenio.",
+        "Controlar plazos de alta, baja y variaciones.",
+        "Vincular documentación justificativa."
+      ],
+      "editable_fields": [
+        "Empresa, trabajador, tipo de actuación, fechas y documentación."
+      ],
+      "clause_alerts": [
+        "Falta de soporte documental en incidencias de nómina o contratación."
+      ],
+      "warnings": [
+        "Las decisiones materiales deben validarse con la norma laboral vigente y convenio aplicable."
+      ],
+      "drafting_help": [
+        "Las tareas y notas deben indicar hito laboral, plazo y documentación asociada."
+      ],
+      "variable_blocks": [
+        "Empresa, trabajador, actuación, fecha y soporte documental."
+      ]
+    }
+  }
+}

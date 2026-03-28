@@ -5,6 +5,7 @@
   "sources": [
     {
       "key": "boe_general",
+      "area": "inmobiliaria",
       "title": "BOE · Diario oficial",
       "fuente": "BOE",
       "enabled": true,
@@ -35,6 +36,7 @@
     },
     {
       "key": "boja_vivienda_consumo",
+      "area": "inmobiliaria",
       "title": "BOJA · Vivienda y consumo",
       "fuente": "BOJA",
       "enabled": true,
@@ -60,6 +62,125 @@
           "impacto": "Medio",
           "keywords": ["alquiler", "arrendamiento", "intermediacion", "vivienda habitual"],
           "accion_recomendada": "Revisar encargo de alquiler y documentación informativa previa."
+        }
+      ]
+    },
+    {
+      "key": "boe_fiscal_general",
+      "area": "gestoria",
+      "title": "BOE · Fiscal y tributario",
+      "fuente": "BOE",
+      "enabled": true,
+      "feed_url": "https://www.boe.es/rss/boe.php?s=1",
+      "format": "rss",
+      "max_entries": 40,
+      "impacto_default": "Medio",
+      "rules": [
+        {
+          "topic_key": "consultas_hacienda",
+          "impacto": "Alto",
+          "keywords": ["sistema tributario", "agencia tributaria", "tributos", "iva", "irpf", "sociedades"],
+          "accion_recomendada": "Revisar criterio fiscal y contrastarlo con doctrina DGT aplicable."
+        },
+        {
+          "topic_key": "fiscal_general",
+          "impacto": "Alto",
+          "keywords": ["obligacion tributaria", "declaracion", "tributo", "modelo", "recaudacion"],
+          "accion_recomendada": "Revisar modelos, checklists y notas fiscales del servicio."
+        }
+      ]
+    },
+    {
+      "key": "boe_seguros_general",
+      "area": "seguros",
+      "title": "BOE · Seguros y supervisión",
+      "fuente": "BOE",
+      "enabled": true,
+      "feed_url": "https://www.boe.es/rss/boe.php?s=1",
+      "format": "rss",
+      "max_entries": 40,
+      "impacto_default": "Medio",
+      "rules": [
+        {
+          "topic_key": "contrato_seguro",
+          "impacto": "Alto",
+          "keywords": ["seguro", "aseguradora", "siniestro", "poliza", "contrato de seguro"],
+          "accion_recomendada": "Revisar pólizas, siniestros y cláusulas sensibles del producto."
+        },
+        {
+          "topic_key": "distribucion_seguros",
+          "impacto": "Alto",
+          "keywords": ["distribucion de seguros", "mediacion de seguros", "informacion precontractual", "ipid"],
+          "accion_recomendada": "Revisar documentación de distribución, IPID y trazabilidad comercial."
+        }
+      ]
+    },
+    {
+      "key": "boe_fincas_general",
+      "area": "fincas",
+      "title": "BOE · Comunidades y propiedad horizontal",
+      "fuente": "BOE",
+      "enabled": true,
+      "feed_url": "https://www.boe.es/rss/boe.php?s=1",
+      "format": "rss",
+      "max_entries": 40,
+      "impacto_default": "Medio",
+      "rules": [
+        {
+          "topic_key": "propiedad_horizontal",
+          "impacto": "Alto",
+          "keywords": ["propiedad horizontal", "comunidad de propietarios", "junta de propietarios"],
+          "accion_recomendada": "Revisar acuerdos, actas y automatismos de comunidad afectados."
+        },
+        {
+          "topic_key": "juntas_propietarios",
+          "impacto": "Medio",
+          "keywords": ["convocatoria", "junta", "acta", "vecinos", "comunidad"],
+          "accion_recomendada": "Revisar flujos de convocatorias, actas y mayorías."
+        }
+      ]
+    },
+    {
+      "key": "boe_obras_general",
+      "area": "obras",
+      "title": "BOE · Obras, suelo y edificación",
+      "fuente": "BOE",
+      "enabled": true,
+      "feed_url": "https://www.boe.es/rss/boe.php?s=1",
+      "format": "rss",
+      "max_entries": 40,
+      "impacto_default": "Medio",
+      "rules": [
+        {
+          "topic_key": "presupuesto_obra",
+          "impacto": "Medio",
+          "keywords": ["obras y construcciones", "reforma", "obras", "contrato de obra"],
+          "accion_recomendada": "Revisar presupuestos, encargos y condiciones comerciales de obra."
+        },
+        {
+          "topic_key": "loe_contratacion",
+          "impacto": "Alto",
+          "keywords": ["edificacion", "licencia", "promotor", "constructor", "ordenacion de la edificacion"],
+          "accion_recomendada": "Revisar si el expediente exige circuito LOE, licencias o soporte técnico adicional."
+        }
+      ]
+    },
+    {
+      "key": "boe_financiaciones_general",
+      "area": "financiaciones",
+      "title": "BOE · Hipotecas y crédito inmobiliario",
+      "fuente": "BOE",
+      "enabled": true,
+      "feed_url": "https://www.boe.es/rss/boe.php?s=1",
+      "format": "rss",
+      "max_entries": 40,
+      "impacto_default": "Medio",
+      "rules": [
+        {
+          "topic_key": "lcci",
+          "impacto": "Alto",
+          "keywords": ["credito inmobiliario", "hipoteca", "fein", "acta notarial", "prestamista"],
+          "accion_recomendada": "Revisar workflow hipotecario, documentación precontractual y checklists de firma."
         }
       ]
     }

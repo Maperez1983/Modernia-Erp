@@ -1,0 +1,112 @@
+{
+  "version": 1,
+  "area": "seguros",
+  "topics": {
+    "contrato_seguro": {
+      "title": "Contrato de seguro",
+      "summary": "Base jurídica de la póliza, deber de declaración del riesgo, cobertura, siniestro y pago de indemnización.",
+      "keywords": ["contrato de seguro", "poliza", "siniestro", "indemnizacion", "riesgo"],
+      "legal_basis": [
+        "Ley 50/1980, de Contrato de Seguro.",
+        "Normativa de transparencia y documentación precontractual aplicable al producto."
+      ],
+      "mandatory_docs": [
+        "Solicitud o propuesta firmada si existe.",
+        "Condiciones particulares y generales.",
+        "Recibo, mediador interviniente y fecha de efecto."
+      ],
+      "checklist": [
+        "Verificar tomador, asegurado y beneficiario.",
+        "Delimitar riesgo, franquicias y exclusiones.",
+        "Trazar siniestros, plazos y comunicaciones."
+      ],
+      "editable_fields": [
+        "Datos del tomador, capitales, riesgos cubiertos, primas y vigencia."
+      ],
+      "clause_alerts": [
+        "Cláusulas limitativas sin destacarse ni aceptarse conforme a la ley.",
+        "Desajuste entre riesgo declarado y riesgo real."
+      ],
+      "warnings": [
+        "No confundir oferta comercial con póliza perfeccionada.",
+        "Las exclusiones y limitaciones deben revisarse con especial cuidado."
+      ],
+      "drafting_help": [
+        "La ficha operativa debe separar datos del tomador, riesgos cubiertos, exclusiones principales y pasos tras siniestro."
+      ],
+      "variable_blocks": [
+        "Tomador, capitales, objeto asegurado, prima, vigencia y mediador."
+      ]
+    },
+    "distribucion_seguros": {
+      "title": "Distribución y mediación de seguros",
+      "summary": "Regula deberes de información, gobernanza del producto y actuación del distribuidor.",
+      "keywords": ["distribucion de seguros", "mediacion", "ipid", "informacion precontractual", "distribuidor"],
+      "legal_basis": [
+        "Real Decreto-ley 3/2020, de distribución de seguros y reaseguros privados.",
+        "Ley 20/2015 y desarrollo reglamentario sobre supervisión y solvencia."
+      ],
+      "mandatory_docs": [
+        "IPID o documento de información precontractual cuando proceda.",
+        "Registro de recomendaciones e información facilitada al cliente."
+      ],
+      "checklist": [
+        "Identificar distribuidor y tipo de asesoramiento.",
+        "Acreditar entrega de documentación previa.",
+        "Trazar consentimiento y necesidades del cliente."
+      ],
+      "editable_fields": [
+        "Datos del cliente, producto ofertado, recomendaciones y observaciones."
+      ],
+      "clause_alerts": [
+        "Venta sin trazabilidad de necesidades del cliente.",
+        "Falta de documentación precontractual o recomendación poco justificada."
+      ],
+      "warnings": [
+        "La operativa comercial debe dejar rastro de lo recomendado y entregado.",
+        "La supervisión documental es crítica en seguros de masa."
+      ],
+      "drafting_help": [
+        "En documentos internos, identifica producto, necesidad del cliente, motivo de recomendación y documentación entregada."
+      ],
+      "variable_blocks": [
+        "Cliente, producto, recomendación, documentación entregada y fecha."
+      ]
+    },
+    "proteccion_datos_seguros": {
+      "title": "Protección de datos en seguros",
+      "summary": "Tratamiento intensivo de datos personales y, en algunos casos, categorías especiales en expedientes de seguros.",
+      "keywords": ["proteccion de datos", "rgpd", "lopdgdd", "datos de salud", "seguros"],
+      "legal_basis": [
+        "Reglamento (UE) 2016/679.",
+        "Ley Orgánica 3/2018, de Protección de Datos Personales y garantía de los derechos digitales."
+      ],
+      "mandatory_docs": [
+        "Información básica de protección de datos.",
+        "Base legitimadora y, en su caso, encargados del tratamiento."
+      ],
+      "checklist": [
+        "Controlar acceso a pólizas y siniestros.",
+        "Separar datos sensibles cuando existan.",
+        "Asegurar trazabilidad de cesiones a compañías."
+      ],
+      "editable_fields": [
+        "Responsable, finalidad, base legitimadora, cesiones y plazos de conservación."
+      ],
+      "clause_alerts": [
+        "Tratamiento de datos de salud sin base adecuada.",
+        "Cesiones a terceros sin información suficiente."
+      ],
+      "warnings": [
+        "Seguros puede implicar datos especialmente sensibles.",
+        "No reutilizar datos de una póliza en campañas sin base válida."
+      ],
+      "drafting_help": [
+        "Toda ficha o documento comercial debe remitir al bloque de información de protección de datos aplicable al canal usado."
+      ],
+      "variable_blocks": [
+        "Responsable, finalidad, base legal, destinatarios y ejercicio de derechos."
+      ]
+    }
+  }
+}

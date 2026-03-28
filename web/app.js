@@ -1168,6 +1168,8 @@ const state = {
   currentWorkspaceDetail: null,
   currentWorkspaceEnabledModules: [],
   currentWorkspaceName: "",
+  legalCatalog: null,
+  legalCurrentArea: "inmobiliaria",
   currentWorkspaceTarget: "",
   currentWorkspaceEntryMode: "platform",
   currentWorkspaceCompanyId: "",
@@ -1985,17 +1987,24 @@ const crmViewDemandas = document.getElementById("crmViewDemandas");
 const crmViewVisitas = document.getElementById("crmViewVisitas");
 const crmViewLegal = document.getElementById("crmViewLegal");
 const inmoLegalCopilotForm = document.getElementById("inmoLegalCopilotForm");
+const inmoLegalArea = document.getElementById("inmoLegalArea");
 const inmoLegalTopic = document.getElementById("inmoLegalTopic");
 const inmoLegalQuestion = document.getElementById("inmoLegalQuestion");
 const inmoLegalAskBtn = document.getElementById("inmoLegalAskBtn");
 const inmoLegalStatus = document.getElementById("inmoLegalStatus");
 const inmoLegalResponse = document.getElementById("inmoLegalResponse");
 const legalRadarForm = document.getElementById("legalRadarForm");
+const legalRadarArea = document.getElementById("legalRadarArea");
 const legalRadarStatus = document.getElementById("legalRadarStatus");
 const legalRadarTable = document.getElementById("legalRadarTable");
 const legalRadarInfo = document.getElementById("legalRadarInfo");
 const legalRadarRefreshBtn = document.getElementById("legalRadarRefreshBtn");
 const legalRadarScanBtn = document.getElementById("legalRadarScanBtn");
+const legalDgtForm = document.getElementById("legalDgtForm");
+const legalDgtArea = document.getElementById("legalDgtArea");
+const legalDgtTopic = document.getElementById("legalDgtTopic");
+const legalDgtStatus = document.getElementById("legalDgtStatus");
+const legalDgtResponse = document.getElementById("legalDgtResponse");
 const crmCaptacionesTable = document.getElementById("crmCaptacionesTable");
 const crmCaptacionesInfo = document.getElementById("crmCaptacionesInfo");
 const crmInmueblesTable = document.getElementById("crmInmueblesTable");
@@ -12749,7 +12758,7 @@ const setCrmWorkspaceView = (view = "resumen") => {
     if (inmoLegalResponse && !String(inmoLegalResponse.textContent || "").trim()) {
       inmoLegalResponse.innerHTML = "<div class='muted'>Selecciona un tema o escribe una pregunta para obtener una guía operativa.</div>";
     }
-    loadLegalRadarItems();
+    loadLegalCatalog().then(() => loadLegalRadarItems());
   } else {
     loadCrmCaptaciones();
     loadCrmInmuebles();
@@ -12765,6 +12774,55 @@ const escapeHtml = (value) =>
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+
+const getLegalAreaTopics = (area) => {
+  const areas = Array.isArray(state.legalCatalog?.areas) ? state.legalCatalog.areas : [];
+  return areas.find((item) => item.key === area) || null;
+};
+
+const fillSelectOptions = (select, options = [], placeholder = "Selecciona una opción") => {
+  if (!select) return;
+  const current = select.value;
+  const rendered = [`<option value="">${escapeHtml(placeholder)}</option>`]
+    .concat(options.map((item) => `<option value="${escapeHtml(item.value)}">${escapeHtml(item.label)}</option>`))
+    .join("");
+  select.innerHTML = rendered;
+  if (options.some((item) => item.value === current)) {
+    select.value = current;
+  }
+};
+
+const refreshLegalAreaBindings = () => {
+  const areas = Array.isArray(state.legalCatalog?.areas) ? state.legalCatalog.areas : [];
+  const areaOptions = areas.map((item) => ({ value: item.key, label: item.label }));
+  [inmoLegalArea, legalRadarArea, legalDgtArea].forEach((select) => {
+    fillSelectOptions(select, areaOptions, "Selecciona un área");
+  });
+  if (!areas.length) return;
+  if (!state.legalCurrentArea || !areas.some((item) => item.key === state.legalCurrentArea)) {
+    state.legalCurrentArea = areas[0].key;
+  }
+  [inmoLegalArea, legalRadarArea, legalDgtArea].forEach((select) => {
+    if (select) select.value = state.legalCurrentArea;
+  });
+  const topicArea = getLegalAreaTopics(state.legalCurrentArea);
+  const topicOptions = (topicArea?.topics || []).map((item) => ({ value: item.key, label: item.title }));
+  fillSelectOptions(inmoLegalTopic, topicOptions, "Selecciona un tema");
+  fillSelectOptions(legalDgtTopic, topicOptions, "Sin vincular");
+  if (topicArea?.default_topic && inmoLegalTopic) {
+    inmoLegalTopic.value = topicArea.default_topic;
+  }
+};
+
+const loadLegalCatalog = async () => {
+  try {
+    const payload = await api("/api/legal_copilot_catalog");
+    state.legalCatalog = payload || { areas: [] };
+    refreshLegalAreaBindings();
+  } catch (error) {
+    if (inmoLegalStatus) inmoLegalStatus.textContent = error?.message || "No se pudo cargar el catálogo legal.";
+  }
+};
 
 const renderInmoLegalCopilotResponse = (payload = {}) => {
   if (!inmoLegalResponse) return;
@@ -12850,7 +12908,8 @@ const loadLegalRadarItems = async () => {
   if (!legalRadarTable) return;
   if (legalRadarInfo) legalRadarInfo.textContent = "Cargando...";
   try {
-    const data = await api("/api/legal_radar_items?area=inmobiliaria&limit=100");
+    const area = state.legalCurrentArea || "inmobiliaria";
+    const data = await api(`/api/legal_radar_items?area=${encodeURIComponent(area)}&limit=100`);
     const rows = Array.isArray(data?.rows) ? data.rows : [];
     if (!rows.length) {
       legalRadarTable.innerHTML = "<div class='muted'>Sin alertas legales registradas.</div>";
@@ -27732,7 +27791,7 @@ if (inmoLegalCopilotForm) {
         headers: { "Content-Type": "application/json" },
         credentials: "same-origin",
         body: JSON.stringify({
-          area: "inmobiliaria",
+          area: inmoLegalArea ? inmoLegalArea.value || state.legalCurrentArea || "inmobiliaria" : state.legalCurrentArea || "inmobiliaria",
           topic: inmoLegalTopic ? inmoLegalTopic.value : "",
           question: inmoLegalQuestion ? inmoLegalQuestion.value : "",
         }),
@@ -27753,13 +27812,21 @@ if (inmoLegalCopilotForm) {
   });
 }
 
+if (inmoLegalArea) {
+  inmoLegalArea.addEventListener("change", () => {
+    state.legalCurrentArea = inmoLegalArea.value || "inmobiliaria";
+    refreshLegalAreaBindings();
+    loadLegalRadarItems();
+  });
+}
+
 if (legalRadarForm) {
   legalRadarForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (legalRadarStatus) legalRadarStatus.textContent = "Guardando...";
     try {
       const payload = Object.fromEntries(new FormData(legalRadarForm).entries());
-      payload.area = "inmobiliaria";
+      payload.area = payload.area || state.legalCurrentArea || "inmobiliaria";
       const response = await fetch("/api/legal_radar_items", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -27771,11 +27838,20 @@ if (legalRadarForm) {
         throw new Error(data?.error || `HTTP ${response.status}`);
       }
       legalRadarForm.reset();
+      refreshLegalAreaBindings();
       if (legalRadarStatus) legalRadarStatus.textContent = "Alerta legal guardada.";
       loadLegalRadarItems();
     } catch (error) {
       if (legalRadarStatus) legalRadarStatus.textContent = error?.message || "No se pudo guardar la alerta legal.";
     }
+  });
+}
+
+if (legalRadarArea) {
+  legalRadarArea.addEventListener("change", () => {
+    state.legalCurrentArea = legalRadarArea.value || "inmobiliaria";
+    refreshLegalAreaBindings();
+    loadLegalRadarItems();
   });
 }
 
@@ -27794,7 +27870,7 @@ if (legalRadarScanBtn) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "same-origin",
-        body: JSON.stringify({ area: "inmobiliaria" }),
+        body: JSON.stringify({ area: state.legalCurrentArea || "inmobiliaria" }),
       });
       const data = await response.json();
       if (!response.ok || data?.error) {
@@ -27813,6 +27889,50 @@ if (legalRadarScanBtn) {
       if (legalRadarStatus) legalRadarStatus.textContent = error?.message || "No se pudo escanear el radar legal.";
     } finally {
       legalRadarScanBtn.disabled = false;
+    }
+  });
+}
+
+if (legalDgtArea) {
+  legalDgtArea.addEventListener("change", () => {
+    state.legalCurrentArea = legalDgtArea.value || "inmobiliaria";
+    refreshLegalAreaBindings();
+    loadLegalRadarItems();
+  });
+}
+
+if (legalDgtForm) {
+  legalDgtForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (legalDgtStatus) legalDgtStatus.textContent = "Consultando DGT...";
+    try {
+      const payload = Object.fromEntries(new FormData(legalDgtForm).entries());
+      payload.area = payload.area || state.legalCurrentArea || "gestoria";
+      const response = await fetch("/api/legal_dgt_lookup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify(payload),
+      });
+      const data = await response.json();
+      if (!response.ok || data?.error) {
+        throw new Error(data?.error || `HTTP ${response.status}`);
+      }
+      const chunks = [
+        `<div class="crm-focus-link"><strong>${escapeHtml(data.title || "Consulta DGT")}</strong><span>${escapeHtml(data.referencia || "")}</span></div>`,
+        `<div class="crm-focus-link"><strong>Fuente oficial</strong><span>${data.url ? `<a href="${escapeHtml(data.url)}" target="_blank" rel="noreferrer">${escapeHtml(data.url)}</a>` : "Sin URL"}</span></div>`,
+      ];
+      if (data.page_title || data.summary) {
+        chunks.push(`<div class="crm-focus-link"><strong>Resumen</strong><span>${escapeHtml(data.page_title || data.summary || "")}</span></div>`);
+      }
+      if (data.warning) {
+        chunks.push(`<div class="crm-focus-link"><strong>Nota</strong><span>${escapeHtml(data.warning)}</span></div>`);
+      }
+      legalDgtResponse.innerHTML = chunks.join("");
+      if (legalDgtStatus) legalDgtStatus.textContent = data?.radar_item?.created || data?.radar_item?.updated ? "Consulta registrada en radar legal." : "Consulta preparada.";
+      loadLegalRadarItems();
+    } catch (error) {
+      if (legalDgtStatus) legalDgtStatus.textContent = error?.message || "No se pudo consultar DGT.";
     }
   });
 }

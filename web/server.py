@@ -120,6 +120,39 @@ DEFAULT_WORKSPACE_NAME = "Modernia"
 PLATFORM_NAME = "LIV"
 LEGAL_COPILOT_CACHE = {"mtime": None, "topics": None}
 LEGAL_RADAR_SOURCES_CACHE = {"mtime": None, "payload": None}
+LEGAL_AREA_DEFINITIONS = {
+    "inmobiliaria": {
+        "label": "Inmobiliaria",
+        "path": ROOT.parent / "docs" / "legal_inmobiliaria.json",
+        "default_topic": "encargo_venta",
+    },
+    "seguros": {
+        "label": "Seguros",
+        "path": ROOT.parent / "docs" / "legal_seguros.json",
+        "default_topic": "contrato_seguro",
+    },
+    "gestoria": {
+        "label": "Gestoría",
+        "path": ROOT.parent / "docs" / "legal_gestoria.json",
+        "default_topic": "consultas_hacienda",
+    },
+    "fincas": {
+        "label": "Administración de fincas",
+        "path": ROOT.parent / "docs" / "legal_fincas.json",
+        "default_topic": "propiedad_horizontal",
+    },
+    "obras": {
+        "label": "Obras",
+        "path": ROOT.parent / "docs" / "legal_obras.json",
+        "default_topic": "presupuesto_obra",
+    },
+    "financiaciones": {
+        "label": "Financiaciones",
+        "path": ROOT.parent / "docs" / "legal_financiaciones.json",
+        "default_topic": "lcci",
+    },
+}
+LEGAL_COPILOT_AREA_CACHE = {}
 WORKSPACE_MODULE_CATALOG = [
     {"key": "crm360", "nombre": "CRM 360", "categoria": "core", "sort_order": 10},
     {"key": "documental", "nombre": "Inbox Documental", "categoria": "core", "sort_order": 20},
@@ -9707,28 +9740,77 @@ LEGAL_COPILOT_TOPICS = {
 }
 
 
-def get_legal_copilot_topics():
+def normalize_legal_area(area):
+    key = normalize_lookup_text(area or "").lower()
+    if key in LEGAL_AREA_DEFINITIONS:
+        return key
+    return "inmobiliaria"
+
+
+def get_legal_copilot_path(area="inmobiliaria"):
+    area_key = normalize_legal_area(area)
+    if area_key == "inmobiliaria":
+        return LEGAL_COPILOT_PATH
+    return LEGAL_AREA_DEFINITIONS[area_key]["path"]
+
+
+def get_legal_copilot_payload(area="inmobiliaria"):
+    area_key = normalize_legal_area(area)
+    path = get_legal_copilot_path(area_key)
+    cache = LEGAL_COPILOT_AREA_CACHE.setdefault(area_key, {"mtime": None, "payload": None})
     try:
-        mtime = LEGAL_COPILOT_PATH.stat().st_mtime
+        mtime = path.stat().st_mtime
     except FileNotFoundError:
-        return LEGAL_COPILOT_TOPICS
+        if area_key == "inmobiliaria":
+            return {"version": 1, "area": area_key, "topics": LEGAL_COPILOT_TOPICS}
+        return {"version": 1, "area": area_key, "topics": {}}
     except Exception:
-        return LEGAL_COPILOT_TOPICS
-    cached_mtime = LEGAL_COPILOT_CACHE.get("mtime")
-    cached_topics = LEGAL_COPILOT_CACHE.get("topics")
-    if cached_topics and cached_mtime == mtime:
-        return cached_topics
+        if area_key == "inmobiliaria":
+            return {"version": 1, "area": area_key, "topics": LEGAL_COPILOT_TOPICS}
+        return {"version": 1, "area": area_key, "topics": {}}
+    cached_mtime = cache.get("mtime")
+    cached_payload = cache.get("payload")
+    if cached_payload and cached_mtime == mtime:
+        return cached_payload
     try:
-        with LEGAL_COPILOT_PATH.open("r", encoding="utf-8") as handle:
+        with path.open("r", encoding="utf-8") as handle:
             payload = json.load(handle)
-        topics = payload.get("topics") if isinstance(payload, dict) else None
-        if isinstance(topics, dict) and topics:
-            LEGAL_COPILOT_CACHE["mtime"] = mtime
-            LEGAL_COPILOT_CACHE["topics"] = topics
-            return topics
+        if isinstance(payload, dict) and isinstance(payload.get("topics"), dict):
+            payload.setdefault("version", 1)
+            payload.setdefault("area", area_key)
+            cache["mtime"] = mtime
+            cache["payload"] = payload
+            if area_key == "inmobiliaria":
+                LEGAL_COPILOT_CACHE["mtime"] = mtime
+                LEGAL_COPILOT_CACHE["topics"] = payload.get("topics")
+            return payload
     except Exception:
-        return LEGAL_COPILOT_TOPICS
-    return LEGAL_COPILOT_TOPICS
+        pass
+    if area_key == "inmobiliaria":
+        return {"version": 1, "area": area_key, "topics": LEGAL_COPILOT_TOPICS}
+    return {"version": 1, "area": area_key, "topics": {}}
+
+
+def get_legal_copilot_topics(area="inmobiliaria"):
+    return get_legal_copilot_payload(area).get("topics") or {}
+
+
+def get_legal_copilot_catalog():
+    areas = []
+    for area_key, meta in LEGAL_AREA_DEFINITIONS.items():
+        topics = get_legal_copilot_topics(area_key)
+        areas.append(
+            {
+                "key": area_key,
+                "label": meta["label"],
+                "default_topic": meta.get("default_topic"),
+                "topics": [
+                    {"key": topic_key, "title": str(topic_payload.get("title") or topic_key)}
+                    for topic_key, topic_payload in topics.items()
+                ],
+            }
+        )
+    return {"areas": areas}
 
 
 def get_legal_radar_sources_config():
@@ -9989,17 +10071,16 @@ def upsert_legal_radar_item_from_detection(conn, detection, now):
 
 def sync_legal_knowledge_updates(conn, area="inmobiliaria", now=None):
     now_value = now or datetime.now(timezone.utc).isoformat()
-    area_value = str(area or "inmobiliaria").strip().lower() or "inmobiliaria"
-    try:
-        with LEGAL_COPILOT_PATH.open("r", encoding="utf-8") as handle:
-            payload = json.load(handle)
-    except Exception:
-        payload = {"version": 1, "area": area_value, "topics": json.loads(json.dumps(LEGAL_COPILOT_TOPICS))}
+    area_value = normalize_legal_area(area)
+    path = get_legal_copilot_path(area_value)
+    payload = get_legal_copilot_payload(area_value)
+    if not isinstance(payload, dict):
+        payload = {"version": 1, "area": area_value, "topics": {}}
     payload["version"] = payload.get("version") or 1
     payload["area"] = payload.get("area") or area_value
     topics = payload.get("topics")
     if not isinstance(topics, dict):
-        topics = json.loads(json.dumps(LEGAL_COPILOT_TOPICS))
+        topics = json.loads(json.dumps(LEGAL_COPILOT_TOPICS if area_value == "inmobiliaria" else {}))
         payload["topics"] = topics
     meta = payload.setdefault("meta", {})
     rows = conn.execute(
@@ -10060,15 +10141,18 @@ def sync_legal_knowledge_updates(conn, area="inmobiliaria", now=None):
         meta["sync_history"] = history[:20]
         meta["last_auto_sync_at"] = now_value
         meta["last_auto_sync_summary"] = {"items": synced, "topics": topic_counts}
-        with LEGAL_COPILOT_PATH.open("w", encoding="utf-8") as handle:
+        with path.open("w", encoding="utf-8") as handle:
             json.dump(payload, handle, ensure_ascii=False, indent=2)
             handle.write("\n")
-        LEGAL_COPILOT_CACHE["mtime"] = None
-        LEGAL_COPILOT_CACHE["topics"] = None
+        LEGAL_COPILOT_AREA_CACHE.pop(area_value, None)
+        if area_value == "inmobiliaria":
+            LEGAL_COPILOT_CACHE["mtime"] = None
+            LEGAL_COPILOT_CACHE["topics"] = None
     return {"synced": synced, "topics": topic_counts}
 
 
 def scan_legal_radar_sources(conn, area="inmobiliaria", now=None, source_keys=None):
+    area_value = normalize_legal_area(area)
     config = get_legal_radar_sources_config()
     now_value = now or datetime.now(timezone.utc).isoformat()
     target_keys = {str(item).strip() for item in list(source_keys or []) if str(item).strip()}
@@ -10080,6 +10164,9 @@ def scan_legal_radar_sources(conn, area="inmobiliaria", now=None, source_keys=No
     for source in list(config.get("sources") or []):
         if not isinstance(source, dict):
             continue
+        source_area = normalize_legal_area(source.get("area") or area_value)
+        if source_area != area_value:
+            continue
         source_key = str(source.get("key") or "").strip()
         if target_keys and source_key not in target_keys:
             continue
@@ -10090,7 +10177,7 @@ def scan_legal_radar_sources(conn, area="inmobiliaria", now=None, source_keys=No
             raw = fetch_legal_feed_content(source)
             entries = parse_legal_feed_entries(raw, source)
             for entry in entries[: max(1, min(100, int(source.get("max_entries") or 30)) )]:
-                detection = classify_legal_feed_entry(area, source, entry)
+                detection = classify_legal_feed_entry(area_value, source, entry)
                 if not detection:
                     continue
                 matched += 1
@@ -10101,7 +10188,7 @@ def scan_legal_radar_sources(conn, area="inmobiliaria", now=None, source_keys=No
             errors.append({"source_key": source_key or None, "error": str(exc)})
     sync_summary = {"synced": 0, "topics": {}}
     if bool(config.get("auto_sync_knowledge", True)):
-        sync_summary = sync_legal_knowledge_updates(conn, area=area, now=now_value)
+        sync_summary = sync_legal_knowledge_updates(conn, area=area_value, now=now_value)
     return {
         "scanned_sources": scanned,
         "matched_entries": matched,
@@ -10112,34 +10199,89 @@ def scan_legal_radar_sources(conn, area="inmobiliaria", now=None, source_keys=No
     }
 
 
+def normalize_dgt_reference(value):
+    raw = str(value or "").upper().replace(" ", "")
+    match = re.search(r"\b([A-Z]?\d{4}-\d{2})\b", raw)
+    if not match:
+        return ""
+    ref = match.group(1)
+    if ref[0].isdigit():
+        ref = f"V{ref}"
+    return ref
+
+
+def build_dgt_consulta_url(reference):
+    normalized = normalize_dgt_reference(reference)
+    if not normalized:
+        return ""
+    return f"https://petete.tributos.hacienda.gob.es/consultas/?num_consulta={urllib.parse.quote(normalized)}"
+
+
+def lookup_dgt_consulta(reference):
+    normalized = normalize_dgt_reference(reference)
+    if not normalized:
+        return {"error": "Referencia DGT no válida"}
+    url = build_dgt_consulta_url(normalized)
+    payload = {
+        "fuente": "DGT",
+        "referencia": normalized,
+        "url": url,
+        "title": f"Consulta vinculante {normalized}",
+        "summary": "Consulta tributaria oficial de la Dirección General de Tributos.",
+    }
+    try:
+        request = urllib.request.Request(url, headers={"User-Agent": "ModerniaLegalRadar/1.0"})
+        with urllib.request.urlopen(request, timeout=20) as response:
+            html_text = response.read().decode("utf-8", errors="ignore")
+        title_match = re.search(r"<title>(.*?)</title>", html_text, flags=re.IGNORECASE | re.DOTALL)
+        if title_match:
+            title_text = html.unescape(re.sub(r"\s+", " ", title_match.group(1))).strip()
+            if title_text:
+                payload["page_title"] = title_text
+        snippet_match = re.search(r"<h1[^>]*>(.*?)</h1>", html_text, flags=re.IGNORECASE | re.DOTALL)
+        if snippet_match:
+            heading = html.unescape(re.sub(r"<[^>]+>", " ", snippet_match.group(1)))
+            heading = re.sub(r"\s+", " ", heading).strip()
+            if heading:
+                payload["summary"] = heading
+    except Exception as exc:
+        payload["warning"] = str(exc)
+    return payload
+
+
 def resolve_legal_copilot_topic(area, topic, question):
-    if str(area or "").strip().lower() != "inmobiliaria":
-        return None, None
-    topics = get_legal_copilot_topics()
+    area_key = normalize_legal_area(area)
+    topics = get_legal_copilot_topics(area_key)
     topic_key = str(topic or "").strip()
     if topic_key in topics:
         return topic_key, topics[topic_key]
     haystack = normalize_lookup_text(question or "").lower()
-    keyword_map = [
-        ("encargo alquiler", "encargo_alquiler"),
-        ("encargo venta", "encargo_venta"),
-        ("propuesta alquiler", "propuesta_alquiler"),
-        ("propuesta compra", "propuesta_compra"),
-        ("promesa compra", "propuesta_compra"),
-        ("arras", "reserva_arras"),
-        ("reserva", "reserva_arras"),
-        ("contrato privado compraventa", "contrato_privado_compraventa"),
-        ("compraventa", "contrato_privado_compraventa"),
-        ("contrato privado arrendamiento", "contrato_privado_arrendamiento"),
-        ("arrendamiento", "contrato_privado_arrendamiento"),
-        ("consumo", "consumo_andalucia"),
-        ("andalucia", "consumo_andalucia"),
-        ("visita", "visitas"),
-    ]
-    for needle, candidate in keyword_map:
-        if needle in haystack and candidate in topics:
-            return candidate, topics[candidate]
-    fallback_key = "encargo_venta" if "encargo_venta" in topics else next(iter(topics.keys()), None)
+    best_key = None
+    best_score = 0
+    for candidate, payload in topics.items():
+        keywords = [normalize_lookup_text(item).lower() for item in list(payload.get("keywords") or []) if str(item or "").strip()]
+        if not keywords and area_key == "inmobiliaria":
+            fallback_map = {
+                "encargo_venta": ["encargo venta", "exclusiva venta"],
+                "encargo_alquiler": ["encargo alquiler"],
+                "propuesta_compra": ["propuesta compra", "promesa compra"],
+                "propuesta_alquiler": ["propuesta alquiler"],
+                "reserva_arras": ["arras", "reserva"],
+                "contrato_privado_compraventa": ["contrato privado compraventa", "compraventa"],
+                "contrato_privado_arrendamiento": ["contrato privado arrendamiento", "arrendamiento"],
+                "consumo_andalucia": ["consumo", "andalucia"],
+                "visitas": ["visita", "hoja de visita"],
+            }
+            keywords = fallback_map.get(candidate, [])
+        score = sum(1 for keyword in keywords if keyword and keyword in haystack)
+        if score > best_score:
+            best_key = candidate
+            best_score = score
+    if best_key:
+        return best_key, topics.get(best_key)
+    fallback_key = LEGAL_AREA_DEFINITIONS.get(area_key, {}).get("default_topic")
+    if fallback_key not in topics:
+        fallback_key = next(iter(topics.keys()), None)
     if not fallback_key:
         return None, None
     return fallback_key, topics.get(fallback_key)
@@ -17021,8 +17163,9 @@ class Handler(BaseHTTPRequestHandler):
             return "gestoria"
         if path.startswith("/api/fin_") or path.startswith("/api/hipotecas"):
             return "financiaciones"
-        if path in {"/api/legal_copilot", "/api/legal_radar_items", "/api/legal_radar_items_update", "/api/legal_radar_scan"}:
-            return "inmobiliaria"
+        if path in {"/api/legal_copilot", "/api/legal_copilot_catalog", "/api/legal_radar_items", "/api/legal_radar_items_update", "/api/legal_radar_scan", "/api/legal_dgt_lookup"}:
+            raw_area = normalize_legal_area(payload.get("area") if payload else (params.get("area", [""])[0] if params else ""))
+            return raw_area or "inmobiliaria"
         if path.startswith("/api/capt") or path.startswith("/api/inmueble") or path.startswith("/api/demandas") or path.startswith("/api/visitas") or path.startswith("/api/compraventas"):
             return "inmobiliaria"
         if path in {"/api/acciones", "/api/acciones_update"}:
@@ -17186,9 +17329,11 @@ class Handler(BaseHTTPRequestHandler):
             "/api/ai_seguros_copilot",
             "/api/ai_fin_copilot",
             "/api/legal_copilot",
+            "/api/legal_copilot_catalog",
             "/api/legal_radar_items",
             "/api/legal_radar_items_update",
             "/api/legal_radar_scan",
+            "/api/legal_dgt_lookup",
             "/api/s3_presign",
             "/api/s3_multipart_start",
             "/api/s3_multipart_presign",
@@ -22560,7 +22705,7 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, {"output": output})
             return
         elif parsed.path == "/api/legal_copilot":
-            area = str(payload.get("area") or "inmobiliaria").strip().lower()
+            area = normalize_legal_area(payload.get("area") or "inmobiliaria")
             topic = str(payload.get("topic") or "").strip()
             question = str(payload.get("question") or "").strip()
             topic_key, topic_payload = resolve_legal_copilot_topic(area, topic, question)
@@ -22569,6 +22714,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             response = {
                 "area": area,
+                "area_label": LEGAL_AREA_DEFINITIONS.get(area, {}).get("label") or area.title(),
                 "topic_key": topic_key,
                 "title": topic_payload["title"],
                 "summary": topic_payload["summary"],
@@ -22582,7 +22728,7 @@ class Handler(BaseHTTPRequestHandler):
                 "warnings": list(topic_payload.get("warnings") or []),
                 "recent_updates": [item for item in list(topic_payload.get("recent_updates") or []) if isinstance(item, dict)][:8],
                 "sources": [
-                    "Playbook legal inmobiliario interno de Modernia.",
+                    f"Base jurídica interna de {LEGAL_AREA_DEFINITIONS.get(area, {}).get('label') or area.title()} en Modernia.",
                     "Base legal editable del repositorio y radar legal autoactualizable.",
                     "Uso operativo orientado a plantillas, estados y documentación del CRM.",
                     "No sustituye revisión jurídica final del despacho.",
@@ -22604,8 +22750,39 @@ class Handler(BaseHTTPRequestHandler):
                     ]
             json_response(self, response)
             return
+        elif parsed.path == "/api/legal_dgt_lookup":
+            area = normalize_legal_area(payload.get("area") or "gestoria")
+            reference = str(payload.get("referencia") or payload.get("num_consulta") or "").strip()
+            result = lookup_dgt_consulta(reference)
+            if result.get("error"):
+                json_response(self, result, status=400)
+                return
+            if str(payload.get("registrar_en_radar") or "").strip().lower() in {"1", "true", "yes", "si"}:
+                outcome = upsert_legal_radar_item_from_detection(
+                    conn,
+                    {
+                        "area": area,
+                        "fuente": "DGT",
+                        "reference": result.get("referencia"),
+                        "title": result.get("title"),
+                        "published": str(payload.get("fecha_publicacion") or "").strip() or None,
+                        "impacto": str(payload.get("impacto") or "Medio").strip() or "Medio",
+                        "topic_key": str(payload.get("topic_key") or "").strip() or None,
+                        "url": result.get("url"),
+                        "summary": str(payload.get("resumen") or result.get("summary") or "").strip() or None,
+                        "accion_recomendada": str(payload.get("accion_recomendada") or "Revisar criterio tributario y adaptar documento o proceso si aplica.").strip(),
+                        "source_key": "dgt_manual",
+                        "matched_keywords": [],
+                        "auto_detected": 0,
+                    },
+                    now,
+                )
+                result["radar_item"] = outcome
+                conn.commit()
+            json_response(self, result)
+            return
         elif parsed.path == "/api/legal_radar_scan":
-            area = str(payload.get("area") or "inmobiliaria").strip().lower() or "inmobiliaria"
+            area = normalize_legal_area(payload.get("area") or "inmobiliaria")
             source_keys = payload.get("source_keys") or []
             if isinstance(source_keys, str):
                 source_keys = [item.strip() for item in source_keys.split(",") if item.strip()]
@@ -22614,7 +22791,7 @@ class Handler(BaseHTTPRequestHandler):
             conn.commit()
             return
         elif parsed.path == "/api/legal_radar_items":
-            area = str(payload.get("area") or "inmobiliaria").strip().lower() or "inmobiliaria"
+            area = normalize_legal_area(payload.get("area") or "inmobiliaria")
             titulo = str(payload.get("titulo") or "").strip()
             if not titulo:
                 json_response(self, {"error": "titulo requerido"}, status=400)
@@ -25631,6 +25808,10 @@ class Handler(BaseHTTPRequestHandler):
             area = str(params.get("area", ["inmobiliaria"])[0] or "inmobiliaria").strip().lower()
             limit = params.get("limit", ["100"])[0]
             json_response(self, fetch_legal_radar_items(conn, area=area, limit=limit))
+            return
+
+        if path == "/api/legal_copilot_catalog":
+            json_response(self, get_legal_copilot_catalog())
             return
 
         if path == "/api/workspace_portal_public":
