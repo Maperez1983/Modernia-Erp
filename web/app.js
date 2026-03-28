@@ -3482,6 +3482,7 @@ const renderCompanyCards = () => {
     const primaryRestrictedService = getPrimaryRestrictedHomeService(user);
     const enabledModules = new Set(state.currentWorkspaceEnabledModules || []);
     const workspaceScoped = enabledModules.size > 0;
+    const timeProfile = findCurrentUserTimeProfile();
 
     const appendServiceCard = (serviceKey) => {
       const service = normalizeSimple(serviceKey);
@@ -3545,6 +3546,21 @@ const renderCompanyCards = () => {
         <a class="card-link" href="?holding=1&mode=tenant&workspace=modernia&view=overview" data-action="holding-tenant">Entrar</a>
       `;
       coreCards.appendChild(workspaceCard);
+      if (timeProfile && enabledModules.has("registro_horario")) {
+        const timeCard = document.createElement("div");
+        timeCard.className = "company-card";
+        timeCard.dataset.action = "time-home";
+        const entryLabel = timeProfile.latestEntry
+          ? `${timeProfile.latestEntry.hora_inicio || "--:--"}${timeProfile.latestEntry.hora_fin ? ` - ${timeProfile.latestEntry.hora_fin}` : " · Abierto"}`
+          : "Sin fichaje de hoy";
+        timeCard.innerHTML = `
+          <h3>Mi registro horario</h3>
+          <div class="company-meta">${timeProfile.employee.empresa_nombre || "Grupo Modernia"} · ${timeProfile.employee.tipo_jornada || "Completa"}</div>
+          <div class="company-meta">${entryLabel}</div>
+          <a class="card-link" href="?holding=1&mode=tenant&workspace=modernia&view=motores" data-action="time-home">Abrir ficha</a>
+        `;
+        coreCards.appendChild(timeCard);
+      }
       return;
     }
 
@@ -3569,6 +3585,21 @@ const renderCompanyCards = () => {
       <a class="card-link" href="?holding=1&mode=tenant&workspace=modernia&view=overview" data-action="holding-tenant">Entrar</a>
     `;
     coreCards.appendChild(tenantCard);
+    if (timeProfile && enabledModules.has("registro_horario")) {
+      const timeCard = document.createElement("div");
+      timeCard.className = "company-card";
+      timeCard.dataset.action = "time-home";
+      const entryLabel = timeProfile.latestEntry
+        ? `${timeProfile.latestEntry.hora_inicio || "--:--"}${timeProfile.latestEntry.hora_fin ? ` - ${timeProfile.latestEntry.hora_fin}` : " · Abierto"}`
+        : "Sin fichaje de hoy";
+      timeCard.innerHTML = `
+        <h3>Mi registro horario</h3>
+        <div class="company-meta">${timeProfile.employee.empresa_nombre || "Grupo Modernia"} · ${timeProfile.employee.tipo_jornada || "Completa"}</div>
+        <div class="company-meta">${entryLabel}</div>
+        <a class="card-link" href="?holding=1&mode=tenant&workspace=modernia&view=motores" data-action="time-home">Abrir ficha</a>
+      `;
+      coreCards.appendChild(timeCard);
+    }
   }
 };
 
@@ -6681,15 +6712,16 @@ const fillWorkspaceTimeForm = (record = null) => {
   if (!workspaceTimeForm) return;
   hydrateWorkspaceCompanySelects();
   const companies = state.currentWorkspaceDetail?.companies || [];
+  const defaultProfile = !record ? findCurrentUserTimeProfile() : null;
   const payload = {
     id: "",
     workspace_id: state.currentWorkspaceId || "",
-    empresa_id: state.currentWorkspaceCompanyId || companies[0]?.id || "",
-    persona_id: "",
-    persona_nombre: "",
-    tipo_jornada: "Completa",
-    horas_pactadas_dia: "",
-    fecha: "",
+    empresa_id: defaultProfile?.employee?.empresa_id || state.currentWorkspaceCompanyId || companies[0]?.id || "",
+    persona_id: defaultProfile?.employee?.id || "",
+    persona_nombre: defaultProfile?.employee?.nombre || "",
+    tipo_jornada: defaultProfile?.employee?.tipo_jornada || "Completa",
+    horas_pactadas_dia: defaultProfile?.employee?.horas_pactadas_dia || "",
+    fecha: new Date().toISOString().slice(0, 10),
     hora_inicio: "",
     hora_fin: "",
     pausa_min: 0,
@@ -6708,14 +6740,43 @@ const fillWorkspaceTimeForm = (record = null) => {
   }
 };
 
+const getWorkspaceTimeEligibleUsers = () => {
+  return (state.usersList || [])
+    .filter((user) => Number(user.activo ?? 1) === 1)
+    .sort((a, b) => {
+      const nameA = `${a.nombre || ""} ${a.apellido || ""}`.trim();
+      const nameB = `${b.nombre || ""} ${b.apellido || ""}`.trim();
+      return nameA.localeCompare(nameB, "es", { sensitivity: "base" });
+    });
+};
+
+const hydrateWorkspaceTimeUserSelect = () => {
+  const select = workspaceTimeEmployeeForm?.querySelector('[name="usuario_id_lookup"]');
+  if (!select) return;
+  const currentValue = String(select.value || "").trim();
+  const users = getWorkspaceTimeEligibleUsers();
+  select.innerHTML = `<option value="">Selecciona usuario</option>${
+    users.map((user) => {
+      const fullName = `${user.nombre || ""} ${user.apellido || ""}`.trim() || user.usuario || user.email || "Usuario";
+      const suffix = user.servicio ? ` · ${user.servicio}` : "";
+      return `<option value="${user.id || ""}">${fullName}${suffix}</option>`;
+    }).join("")
+  }`;
+  if (currentValue && users.some((user) => String(user.id || "") === currentValue)) {
+    select.value = currentValue;
+  }
+};
+
 const fillWorkspaceTimeEmployeeForm = (record = null) => {
   if (!workspaceTimeEmployeeForm) return;
   hydrateWorkspaceCompanySelects();
+  hydrateWorkspaceTimeUserSelect();
   const companies = state.currentWorkspaceDetail?.companies || [];
   const payload = {
     id: "",
     workspace_id: state.currentWorkspaceId || "",
     empresa_id: state.currentWorkspaceCompanyId || companies[0]?.id || "",
+    usuario_id: "",
     nombre: "",
     nif: "",
     email: "",
@@ -6728,10 +6789,12 @@ const fillWorkspaceTimeEmployeeForm = (record = null) => {
     notas: "",
     ...(record || {}),
   };
-  ["id", "workspace_id", "empresa_id", "nombre", "nif", "email", "telefono", "tipo_jornada", "horas_pactadas_dia", "horas_pactadas_semana", "fecha_alta", "notas"].forEach((field) => {
+  ["id", "workspace_id", "empresa_id", "usuario_id", "nombre", "nif", "email", "telefono", "tipo_jornada", "horas_pactadas_dia", "horas_pactadas_semana", "fecha_alta", "notas"].forEach((field) => {
     const input = workspaceTimeEmployeeForm.querySelector(`[name="${field}"]`);
     if (input) input.value = payload[field] ?? "";
   });
+  const lookup = workspaceTimeEmployeeForm.querySelector('[name="usuario_id_lookup"]');
+  if (lookup) lookup.value = payload.usuario_id || "";
   const activeInput = workspaceTimeEmployeeForm.querySelector('[name="activo"]');
   if (activeInput) activeInput.checked = Number(payload.activo || 0) === 1;
 };
@@ -6751,7 +6814,7 @@ const hydrateWorkspaceTimeEmployeeSelect = (rows = []) => {
 const renderWorkspaceTimeEmployeeList = (rows = []) => {
   if (!workspaceTimeEmployeeList) return;
   if (!rows.length) {
-    workspaceTimeEmployeeList.innerHTML = "<p class='muted'>Sin personal configurado todavía.</p>";
+    workspaceTimeEmployeeList.innerHTML = "<p class='muted'>Sin usuarios sincronizados todavía.</p>";
     return;
   }
   workspaceTimeEmployeeList.innerHTML = `
@@ -6762,11 +6825,12 @@ const renderWorkspaceTimeEmployeeList = (rows = []) => {
             <div class="workspace-billing-row">
               <div>
                 <strong>${row.nombre || "-"}</strong>
-                <div class="muted">${row.empresa_nombre || "-"} · ${row.tipo_jornada || "Completa"}${row.horas_pactadas_dia ? ` · ${row.horas_pactadas_dia} h/día` : ""}</div>
+                <div class="muted">${row.empresa_nombre || "-"} · ${row.tipo_jornada || "Completa"}${row.horas_pactadas_dia ? ` · ${row.horas_pactadas_dia} h/día` : ""}${row.email ? ` · ${row.email}` : ""}</div>
               </div>
               <div class="workspace-billing-meta">
                 <span>${Number(row.activo || 0) === 1 ? "Activo" : "Inactivo"}</span>
                 ${row.fecha_alta ? `<span>Alta ${row.fecha_alta}</span>` : ""}
+                ${row.usuario_id ? "<span>Usuario vinculado</span>" : "<span>Sin usuario</span>"}
                 <button type="button" class="secondary ghost" data-time-employee-edit="${row.id}">Editar</button>
               </div>
             </div>
@@ -6781,6 +6845,23 @@ const renderWorkspaceTimeEmployeeList = (rows = []) => {
       if (record) fillWorkspaceTimeEmployeeForm(record);
     });
   });
+};
+
+const findCurrentUserTimeProfile = () => {
+  const authUser = getAuthScopeUser();
+  if (!authUser?.id) return null;
+  const employees = state.workspaceTimeEmployees || [];
+  const entries = state.currentWorkspaceData?.timeRows || [];
+  const employee = employees.find((row) => String(row.usuario_id || "") === String(authUser.id));
+  if (!employee) return null;
+  const today = new Date().toISOString().slice(0, 10);
+  const todayEntries = entries.filter((row) => String(row.usuario_id || "") === String(authUser.id) && String(row.fecha || "") === today);
+  const latestEntry = todayEntries.sort((a, b) => {
+    const aVal = `${a.fecha || ""} ${a.hora_inicio || ""}`;
+    const bVal = `${b.fecha || ""} ${b.hora_inicio || ""}`;
+    return bVal.localeCompare(aVal);
+  })[0] || null;
+  return { employee, latestEntry };
 };
 
 const renderWorkspaceTimeSummary = (summary = null) => {
@@ -12951,6 +13032,7 @@ const renderUsuariosSelect = () => {
     setCurrentUser("");
   }
   syncCurrentUserScope();
+  hydrateWorkspaceTimeUserSelect();
 };
 
 const renderUsuariosTable = () => {
@@ -29400,6 +29482,11 @@ if (coreCards) {
       openHolding({ mode: "platform", view: "overview" });
     } else if (action === "holding-tenant") {
       openHolding({ mode: "tenant", workspace: "modernia", view: "overview" });
+    } else if (action === "time-home") {
+      openHolding({ mode: "tenant", workspace: "modernia", view: "motores" });
+      window.setTimeout(() => {
+        focusWorkspaceEngine("registro_horario", workspaceTimeForm, { forceTenantView: true });
+      }, 250);
     } else if (action === "crm-inmo") {
       openCrmInmobiliario();
     } else if (action === "crm-gestoria") {
@@ -31738,6 +31825,27 @@ if (workspaceTimeEmployeeResetBtn) {
     fillWorkspaceTimeEmployeeForm();
     if (workspaceTimeEmployeeStatus) workspaceTimeEmployeeStatus.textContent = "";
   });
+}
+
+if (workspaceTimeEmployeeForm) {
+  const userLookup = workspaceTimeEmployeeForm.querySelector('[name="usuario_id_lookup"]');
+  if (userLookup) {
+    userLookup.addEventListener("change", () => {
+      const selected = (state.usersList || []).find((user) => String(user.id || "") === String(userLookup.value || ""));
+      const usuarioIdInput = workspaceTimeEmployeeForm.querySelector('[name="usuario_id"]');
+      const nameInput = workspaceTimeEmployeeForm.querySelector('[name="nombre"]');
+      const emailInput = workspaceTimeEmployeeForm.querySelector('[name="email"]');
+      if (!usuarioIdInput) return;
+      usuarioIdInput.value = selected?.id || "";
+      if (!selected) return;
+      if (nameInput && !String(nameInput.value || "").trim()) {
+        nameInput.value = `${selected.nombre || ""} ${selected.apellido || ""}`.trim();
+      }
+      if (emailInput && !String(emailInput.value || "").trim()) {
+        emailInput.value = selected.email || "";
+      }
+    });
+  }
 }
 
 if (workspaceTimeMonth) {

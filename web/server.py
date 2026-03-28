@@ -118,6 +118,16 @@ AUTH_SESSIONS = {}
 AUTH_SESSIONS_LOCK = threading.Lock()
 DEFAULT_WORKSPACE_NAME = "Modernia"
 PLATFORM_NAME = "LIV"
+WORKSPACE_TIME_SERVICE_COMPANY_MAP = {
+    "inmobiliaria": ["Estudio Velazquez 2012 SL"],
+    "gestoria": ["Fincas Velazquez", "Grupo Modernia"],
+    "administracion fincas": ["Fincas Velazquez"],
+    "seguros": ["Fincas Velazquez"],
+    "financiaciones": ["Financiaciones Modernia"],
+    "hipotecas": ["Financiaciones Modernia"],
+    "reformas": ["Inmovere Proyect SL", "Grupo Modernia"],
+    "obras": ["Inmovere Proyect SL", "Grupo Modernia"],
+}
 LEGAL_COPILOT_CACHE = {"mtime": None, "topics": None}
 LEGAL_RADAR_SOURCES_CACHE = {"mtime": None, "payload": None}
 LEGAL_AREA_DEFINITIONS = {
@@ -15848,7 +15858,133 @@ def normalize_shift_type(raw_value):
     return "Completa"
 
 
+def infer_workspace_time_company_id(conn, workspace_id, service_raw="", empresa_id=None):
+    company_ids = resolve_workspace_company_ids(conn, workspace_id, empresa_id=empresa_id)
+    if not company_ids:
+        return None
+    company_rows = conn.execute(
+        f"""
+        SELECT id, nombre
+        FROM empresas
+        WHERE id IN ({",".join("?" for _ in company_ids)})
+        """,
+        company_ids,
+    ).fetchall()
+    company_by_name = {
+        normalize_lookup_text(row["nombre"] or ""): str(row["id"] or "")
+        for row in company_rows
+        if row["id"]
+    }
+    service_tokens = [
+        normalize_lookup_text(token)
+        for token in re.split(r"[;,/|]+", str(service_raw or ""))
+        if normalize_lookup_text(token)
+    ]
+    for token in service_tokens:
+        company_candidates = WORKSPACE_TIME_SERVICE_COMPANY_MAP.get(token, [])
+        for company_name in company_candidates:
+            company_id = company_by_name.get(normalize_lookup_text(company_name))
+            if company_id:
+                return company_id
+    return company_ids[0] if company_ids else None
+
+
+def sync_workspace_time_personal_from_users(conn, workspace_id, empresa_id=None):
+    company_ids = resolve_workspace_company_ids(conn, workspace_id, empresa_id=empresa_id)
+    if not company_ids:
+        return []
+    user_rows = conn.execute(
+        """
+        SELECT id, nombre, apellido, usuario, email, servicio, activo
+        FROM usuarios
+        WHERE COALESCE(activo, 1) = 1
+        ORDER BY nombre COLLATE NOCASE ASC, apellido COLLATE NOCASE ASC
+        """
+    ).fetchall()
+    synced_ids = []
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    for user in user_rows:
+        empresa_vinculada = infer_workspace_time_company_id(
+            conn,
+            workspace_id,
+            service_raw=user["servicio"] or "",
+            empresa_id=empresa_id,
+        )
+        if not empresa_vinculada:
+            continue
+        full_name = " ".join(
+            part.strip()
+            for part in [str(user["nombre"] or "").strip(), str(user["apellido"] or "").strip()]
+            if part and str(part).strip()
+        ).strip()
+        if not full_name:
+            full_name = str(user["usuario"] or user["email"] or "").strip()
+        if not full_name:
+            continue
+        existing = conn.execute(
+            """
+            SELECT id, tipo_jornada, horas_pactadas_dia, horas_pactadas_semana, fecha_alta, fecha_baja,
+                   activo, notas, nif, telefono
+            FROM workspace_registro_personal
+            WHERE workspace_id = ? AND usuario_id = ?
+            LIMIT 1
+            """,
+            (workspace_id, user["id"]),
+        ).fetchone()
+        if existing:
+            conn.execute(
+                """
+                UPDATE workspace_registro_personal
+                SET empresa_id = ?, nombre = ?, email = ?, activo = 1, updated_at = datetime(?)
+                WHERE id = ? AND workspace_id = ?
+                """,
+                (
+                    empresa_vinculada,
+                    full_name,
+                    str(user["email"] or "").strip() or None,
+                    now,
+                    existing["id"],
+                    workspace_id,
+                ),
+            )
+            synced_ids.append(existing["id"])
+        else:
+            record_id = os.urandom(16).hex()
+            conn.execute(
+                """
+                INSERT INTO workspace_registro_personal (
+                  id, workspace_id, empresa_id, usuario_id, nombre, nif, email, telefono, tipo_jornada,
+                  horas_pactadas_dia, horas_pactadas_semana, fecha_alta, fecha_baja, activo, notas, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                """,
+                (
+                    record_id,
+                    workspace_id,
+                    empresa_vinculada,
+                    user["id"],
+                    full_name,
+                    None,
+                    str(user["email"] or "").strip() or None,
+                    None,
+                    "Completa",
+                    None,
+                    None,
+                    date.today().isoformat(),
+                    None,
+                    1,
+                    "Sincronizado automáticamente desde usuarios.",
+                    now,
+                    now,
+                ),
+            )
+            synced_ids.append(record_id)
+    if synced_ids:
+        conn.commit()
+    return synced_ids
+
+
 def fetch_workspace_personal(conn, workspace_id, empresa_id=None, only_active=False, limit=200):
+    sync_workspace_time_personal_from_users(conn, workspace_id, empresa_id=empresa_id)
     empresa_ids = resolve_workspace_company_ids(conn, workspace_id, empresa_id=empresa_id)
     if not empresa_ids:
         return {"rows": []}
