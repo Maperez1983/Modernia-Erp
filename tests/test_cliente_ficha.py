@@ -94,6 +94,39 @@ class ClienteFichaTests(unittest.TestCase):
               created_at TEXT,
               updated_at TEXT
             );
+            CREATE TABLE inmuebles (
+              id TEXT PRIMARY KEY,
+              empresa_id TEXT,
+              direccion TEXT,
+              referencia_catastral TEXT,
+              estado TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            );
+            CREATE TABLE inmueble_propietarios (
+              id TEXT PRIMARY KEY,
+              inmueble_id TEXT,
+              cliente_id TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            );
+            CREATE TABLE inmueble_docs (
+              id TEXT PRIMARY KEY,
+              inmueble_id TEXT,
+              nombre TEXT,
+              url TEXT,
+              tipo TEXT,
+              estado TEXT,
+              version INTEGER,
+              plantilla_clave TEXT,
+              origen_tipo TEXT,
+              origen_id TEXT,
+              payload_json TEXT,
+              reviewed_at TEXT,
+              reviewed_by TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            );
             CREATE TABLE gestoria_trabajos (
               id TEXT PRIMARY KEY,
               empresa_id TEXT,
@@ -171,6 +204,13 @@ class ClienteFichaTests(unittest.TestCase):
         )
         self.conn.execute(
             """
+            INSERT INTO clientes_empresas (id, cliente_id, empresa_id, servicio, estado, created_at, updated_at)
+            VALUES ('ce2', 'c1', 'e1', 'inmobiliaria', 'Activo', ?, ?)
+            """,
+            (now, now),
+        )
+        self.conn.execute(
+            """
             INSERT INTO seguros (
               id, empresa_id, cliente_id, fecha_efecto, tomador, compania, ramo,
               poliza_numero, prima_total, estado, poliza_key, poliza_url, created_at, updated_at
@@ -186,6 +226,32 @@ class ClienteFichaTests(unittest.TestCase):
             INSERT INTO gestoria_contabilidad
             (id, empresa_id, cliente_id, fecha, concepto, tipo, importe, created_at, updated_at)
             VALUES ('gc1', 'e1', 'c1', '2026-01-10', 'Honorarios', 'Ingreso', 1200.0, ?, ?)
+            """,
+            (now, now),
+        )
+        self.conn.execute(
+            """
+            INSERT INTO inmuebles (id, empresa_id, direccion, referencia_catastral, estado, created_at, updated_at)
+            VALUES ('i1', 'e1', 'Pasaje Augusto Besada 2 14 D', '0119101UF7601N0078RM', 'Encargo', ?, ?)
+            """,
+            (now, now),
+        )
+        self.conn.execute(
+            """
+            INSERT INTO inmueble_propietarios (id, inmueble_id, cliente_id, created_at, updated_at)
+            VALUES ('ip1', 'i1', 'c1', ?, ?)
+            """,
+            (now, now),
+        )
+        self.conn.execute(
+            """
+            INSERT INTO inmueble_docs (
+              id, inmueble_id, nombre, url, tipo, estado, version, plantilla_clave, created_at, updated_at
+            ) VALUES (
+              'id1', 'i1', 'Ficha Catastro · Pasaje Augusto Besada 2 14 D',
+              '/uploads/inmuebles/generated/ficha_catastro_pasaje_augusto_besada.pdf',
+              'Ficha Catastro', 'Vigente', 1, 'ficha_catastro', ?, ?
+            )
             """,
             (now, now),
         )
@@ -236,6 +302,18 @@ class ClienteFichaTests(unittest.TestCase):
         liquidacion = next((row for row in facturas if row.get("id") == "gc2"), None)
         self.assertIsNotNone(liquidacion)
         self.assertAlmostEqual(float(liquidacion.get("importe_asignado") or 0), 100.0, places=2)
+
+    def test_build_cliente_ficha_payload_backfills_inmobiliaria_docs_for_owner(self):
+        payload = build_cliente_ficha_payload(self.conn, "c1")
+        inmo_docs = payload.get("documentacion", {}).get("by_service", {}).get("inmobiliaria") or []
+        self.assertEqual(len(inmo_docs), 1)
+        self.assertEqual(inmo_docs[0]["referencia_tipo"], "inmobiliaria")
+        self.assertEqual(inmo_docs[0]["referencia_id"], "id1")
+        self.assertEqual(inmo_docs[0]["doc_url"], "/uploads/inmuebles/generated/ficha_catastro_pasaje_augusto_besada.pdf")
+        stored = self.conn.execute(
+            "SELECT COUNT(*) AS n FROM gestoria_docs WHERE cliente_id = 'c1' AND referencia_tipo = 'inmobiliaria' AND referencia_id = 'id1'"
+        ).fetchone()
+        self.assertEqual(stored["n"], 1)
 
 
 if __name__ == "__main__":

@@ -9291,6 +9291,204 @@ def ensure_inmueble_propietario_link(conn, inmueble_id, cliente_id, now):
     )
 
 
+def ensure_inmueble_doc_cliente_link(conn, inmueble_row, doc_row, cliente_id, now):
+    if not inmueble_row or not doc_row or not cliente_id:
+        return None
+    tables = {
+        row["name"]
+        for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('gestoria_docs', 'inmuebles')")
+    }
+    if "gestoria_docs" not in tables or "inmuebles" not in tables:
+        return None
+    empresa_id = str(inmueble_row["empresa_id"] or "").strip()
+    doc_url = str(doc_row["url"] or "").strip()
+    if not empresa_id or not doc_url:
+        return None
+    referencia_id = str(doc_row["id"] or "").strip()
+    existing = conn.execute(
+        """
+        SELECT id
+        FROM gestoria_docs
+        WHERE cliente_id = ?
+          AND empresa_id = ?
+          AND LOWER(COALESCE(referencia_tipo, '')) = 'inmobiliaria'
+          AND (
+            referencia_id = ?
+            OR doc_url = ?
+          )
+        LIMIT 1
+        """,
+        (cliente_id, empresa_id, referencia_id, doc_url),
+    ).fetchone()
+    nombre = str(doc_row["nombre"] or doc_row["tipo"] or "Documento inmobiliario").strip()
+    estado = str(doc_row["estado"] or "Vigente").strip()
+    fecha = str(doc_row["updated_at"] or doc_row["created_at"] or "").strip()
+    if len(fecha) >= 10:
+        fecha = fecha[:10]
+    notas_parts = [
+        str(inmueble_row["direccion"] or "").strip(),
+        str(inmueble_row["referencia_catastral"] or "").strip(),
+        str(doc_row["tipo"] or "").strip(),
+    ]
+    notas = " · ".join(part for part in notas_parts if part)
+    if existing:
+        conn.execute(
+            """
+            UPDATE gestoria_docs
+            SET referencia_id = ?,
+                nombre = COALESCE(NULLIF(?, ''), nombre),
+                tipo = COALESCE(NULLIF(?, ''), tipo),
+                fecha = COALESCE(NULLIF(?, ''), fecha),
+                estado = COALESCE(NULLIF(?, ''), estado),
+                notas = COALESCE(NULLIF(?, ''), notas),
+                doc_url = COALESCE(NULLIF(?, ''), doc_url),
+                updated_at = datetime(?)
+            WHERE id = ?
+            """,
+            (
+                referencia_id,
+                nombre,
+                "Inmobiliaria",
+                fecha,
+                estado,
+                notas,
+                doc_url,
+                now,
+                existing["id"],
+            ),
+        )
+        return existing["id"]
+    doc_id = os.urandom(16).hex()
+    conn.execute(
+        """
+        INSERT INTO gestoria_docs (
+          id, empresa_id, cliente_id, referencia_tipo, referencia_id,
+          nombre, tipo, fecha, estado, notas, doc_url,
+          created_at, updated_at
+        ) VALUES (
+          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+        )
+        """,
+        (
+            doc_id,
+            empresa_id,
+            cliente_id,
+            "inmobiliaria",
+            referencia_id,
+            nombre,
+            "Inmobiliaria",
+            fecha or None,
+            estado or "Vigente",
+            notas or None,
+            doc_url,
+            now,
+            now,
+        ),
+    )
+    return doc_id
+
+
+def sync_inmueble_docs_for_inmueble(conn, inmueble_id, now):
+    if not inmueble_id:
+        return {"linked": 0, "removed": 0}
+    tables = {
+        row["name"]
+        for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('inmuebles', 'inmueble_propietarios', 'inmueble_docs', 'gestoria_docs')"
+        )
+    }
+    required = {"inmuebles", "inmueble_propietarios", "inmueble_docs", "gestoria_docs"}
+    if not required.issubset(tables):
+        return {"linked": 0, "removed": 0}
+    inmueble = conn.execute(
+        "SELECT * FROM inmuebles WHERE id = ? LIMIT 1",
+        (inmueble_id,),
+    ).fetchone()
+    if not inmueble:
+        return {"linked": 0, "removed": 0}
+    owner_ids = [
+        str(row["cliente_id"] or "").strip()
+        for row in conn.execute(
+            "SELECT cliente_id FROM inmueble_propietarios WHERE inmueble_id = ?",
+            (inmueble_id,),
+        ).fetchall()
+        if str(row["cliente_id"] or "").strip()
+    ]
+    docs_rows = conn.execute(
+        """
+        SELECT id, nombre, url, tipo, estado, created_at, updated_at
+        FROM inmueble_docs
+        WHERE inmueble_id = ?
+        ORDER BY created_at DESC
+        """,
+        (inmueble_id,),
+    ).fetchall()
+    doc_ids = [str(row["id"] or "").strip() for row in docs_rows if str(row["id"] or "").strip()]
+    removed = 0
+    if doc_ids:
+        placeholders = ",".join(["?"] * len(doc_ids))
+        values = ["inmobiliaria", *doc_ids]
+        if owner_ids:
+            owner_placeholders = ",".join(["?"] * len(owner_ids))
+            query = (
+                f"DELETE FROM gestoria_docs WHERE LOWER(COALESCE(referencia_tipo, '')) = ? "
+                f"AND referencia_id IN ({placeholders}) AND cliente_id NOT IN ({owner_placeholders})"
+            )
+            values.extend(owner_ids)
+        else:
+            query = (
+                f"DELETE FROM gestoria_docs WHERE LOWER(COALESCE(referencia_tipo, '')) = ? "
+                f"AND referencia_id IN ({placeholders})"
+            )
+        cursor = conn.execute(query, values)
+        removed = cursor.rowcount if cursor.rowcount is not None and cursor.rowcount >= 0 else 0
+    linked = 0
+    if owner_ids:
+        ensure_cliente_servicio_link(conn, owner_ids[0], inmueble["empresa_id"], "inmobiliaria", now)
+    for cliente_id in owner_ids:
+        ensure_cliente_servicio_link(conn, cliente_id, inmueble["empresa_id"], "inmobiliaria", now)
+        for row in docs_rows:
+            if ensure_inmueble_doc_cliente_link(conn, inmueble, row, cliente_id, now):
+                linked += 1
+    return {"linked": linked, "removed": removed}
+
+
+def autolink_inmueble_docs_for_cliente(conn, cliente_id, empresa_id, now):
+    if not cliente_id or not empresa_id:
+        return {"linked": 0, "removed": 0}
+    tables = {
+        row["name"]
+        for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('inmuebles', 'inmueble_propietarios', 'inmueble_docs', 'gestoria_docs')"
+        )
+    }
+    required = {"inmuebles", "inmueble_propietarios", "inmueble_docs", "gestoria_docs"}
+    if not required.issubset(tables):
+        return {"linked": 0, "removed": 0}
+    inmueble_ids = [
+        str(row["inmueble_id"] or "").strip()
+        for row in conn.execute(
+            """
+            SELECT ip.inmueble_id
+            FROM inmueble_propietarios ip
+            JOIN inmuebles i ON i.id = ip.inmueble_id
+            WHERE ip.cliente_id = ? AND i.empresa_id = ?
+            """,
+            (cliente_id, empresa_id),
+        ).fetchall()
+        if str(row["inmueble_id"] or "").strip()
+    ]
+    linked = 0
+    removed = 0
+    for inmueble_id in inmueble_ids:
+        result = sync_inmueble_docs_for_inmueble(conn, inmueble_id, now)
+        linked += int(result.get("linked") or 0)
+        removed += int(result.get("removed") or 0)
+    if inmueble_ids:
+        ensure_cliente_servicio_link(conn, cliente_id, empresa_id, "inmobiliaria", now)
+    return {"linked": linked, "removed": removed}
+
+
 def ensure_captacion_for_inmueble(conn, empresa_id, inmueble_id, now):
     if not inmueble_id:
         return None
@@ -9448,6 +9646,7 @@ def upsert_inmueble_generated_doc(conn, inmueble_id, tipo, nombre, url, now):
             """,
             (nombre or tipo, now, existing["id"]),
         )
+        sync_inmueble_docs_for_inmueble(conn, inmueble_id, now)
         return existing["id"]
     doc_id = os.urandom(16).hex()
     conn.execute(
@@ -9460,6 +9659,7 @@ def upsert_inmueble_generated_doc(conn, inmueble_id, tipo, nombre, url, now):
         """,
         (doc_id, inmueble_id, nombre or tipo, url, tipo, now, now),
     )
+    sync_inmueble_docs_for_inmueble(conn, inmueble_id, now)
     return doc_id
 
 
@@ -9556,6 +9756,7 @@ def persist_generated_inmueble_pdf(
         },
         now=now,
     )
+    sync_inmueble_docs_for_inmueble(conn, inmueble_id, now)
     return {"id": doc_id, "url": url, "path": str(file_path), "version": next_version, "estado": "Vigente"}
 
 
@@ -12479,6 +12680,7 @@ def build_cliente_ficha_payload(conn, cliente_id, services_filter=None):
     cliente = conn.execute("SELECT * FROM clientes WHERE id = ?", (cliente_id,)).fetchone()
     if not cliente:
         return None
+    now = datetime.now(timezone.utc).isoformat()
     services_filter = services_filter or []
     if services_filter and not cliente_has_servicio(conn, cliente_id, services_filter):
         return {"error": "Cliente no disponible para este servicio"}
@@ -12499,6 +12701,7 @@ def build_cliente_ficha_payload(conn, cliente_id, services_filter=None):
     empresas = [dict(r) for r in conn.execute(empresas_query, values).fetchall()]
 
     service_keys = []
+    inmobiliaria_empresa_ids = []
     allowed_keys = {"gestoria", "seguros", "inmobiliaria", "financiaciones"}
     for row in empresas:
         service_key = normalize_service_key(row.get("servicio"))
@@ -12511,7 +12714,11 @@ def build_cliente_ficha_payload(conn, cliente_id, services_filter=None):
             service_key = "financiaciones"
         if service_key in allowed_keys and service_key not in service_keys:
             service_keys.append(service_key)
+        if service_key == "inmobiliaria" and row.get("empresa_id"):
+            inmobiliaria_empresa_ids.append(str(row["empresa_id"]))
     empresa_ids = [row["empresa_id"] for row in empresas if row.get("empresa_id")]
+    for empresa_id in sorted(set(inmobiliaria_empresa_ids)):
+        autolink_inmueble_docs_for_cliente(conn, cliente_id, empresa_id, now)
 
     seguros_rows = [
         dict(r)
@@ -25302,6 +25509,14 @@ class Handler(BaseHTTPRequestHandler):
             if not inmueble:
                 json_response(self, {"error": "Inmueble no encontrado"}, status=404)
                 return
+            conn.execute(
+                """
+                DELETE FROM gestoria_docs
+                WHERE LOWER(COALESCE(referencia_tipo, '')) = 'inmobiliaria'
+                  AND referencia_id IN (SELECT id FROM inmueble_docs WHERE inmueble_id = ?)
+                """,
+                (inmueble_id,),
+            )
             conn.execute("DELETE FROM inmueble_checklist WHERE inmueble_id = ?", (inmueble_id,))
             conn.execute("DELETE FROM inmueble_docs WHERE inmueble_id = ?", (inmueble_id,))
             conn.execute("DELETE FROM inmueble_propietarios WHERE inmueble_id = ?", (inmueble_id,))
@@ -25392,6 +25607,7 @@ class Handler(BaseHTTPRequestHandler):
                     """,
                     (os.urandom(16).hex(), inmueble_id, cliente_id, now, now),
                 )
+            sync_inmueble_docs_for_inmueble(conn, inmueble_id, now)
         elif parsed.path == "/api/inmueble_propietario_create":
             inmueble_id = str(payload.get("inmueble_id") or "").strip()
             nombre = str(payload.get("nombre") or "").strip()
@@ -25421,6 +25637,7 @@ class Handler(BaseHTTPRequestHandler):
                 },
             )
             ensure_inmueble_propietario_link(conn, inmueble_id, cliente_id, now)
+            sync_inmueble_docs_for_inmueble(conn, inmueble_id, now)
             cliente = conn.execute(
                 "SELECT id, nombre, nif, telefono, email FROM clientes WHERE id = ? LIMIT 1",
                 (cliente_id,),
@@ -25465,6 +25682,7 @@ class Handler(BaseHTTPRequestHandler):
                 (doc_id, inmueble_id, nombre, url, tipo, now, now),
             )
             audit("inmueble_docs", doc_id, "Subir documento", usuario=payload.get("usuario"))
+            sync_inmueble_docs_for_inmueble(conn, inmueble_id, now)
         elif parsed.path == "/api/demandas":
             cliente_id = payload.get("cliente_id")
             if not cliente_id:
