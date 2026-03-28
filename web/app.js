@@ -18034,6 +18034,9 @@ const loadCrmCaptaciones = () => {
   });
   params.set("include_id", "1");
   api(`/api/tabla?${params.toString()}`).then((data) => {
+    cachedCrmCaptaciones = Array.isArray(data.rows)
+      ? data.rows.map((row) => buildRowMap(row, data.columns))
+      : [];
     const etapaIndex = data.columns.indexOf("etapa");
     const idIndex = data.columns.indexOf("id");
     const activeEtapa = crmEtapaFilter?.value || crmEtapaFilterMirror?.value || "";
@@ -18059,6 +18062,7 @@ const loadCrmCaptaciones = () => {
       crmKpiEtapa.textContent = maxEtapa ? maxEtapa[0] : "-";
     }
     renderCrmKanban(data);
+    renderCrmResumenDashboard();
     renderTableInto(
       { columns: data.columns, rows: filteredRows },
       crmCaptacionesTable,
@@ -18190,6 +18194,178 @@ const renderCrmKanban = (data) => {
       container.appendChild(column);
     });
   });
+};
+
+const renderCrmResumenDashboard = () => {
+  const captaciones = Array.isArray(cachedCrmCaptaciones) ? cachedCrmCaptaciones : [];
+  const inmuebles = Array.isArray(cachedCrmInmuebles) ? cachedCrmInmuebles : [];
+  const compraventas = Array.isArray(cachedCrmCompraventas) ? cachedCrmCompraventas : [];
+  const visitas = Array.isArray(cachedCrmVisitas) ? cachedCrmVisitas : [];
+
+  if (crmResumenHoy) {
+    const jobs = captaciones
+      .map((row) => {
+        const etapa = String(row.etapa || "Noticia").trim();
+        const proxima = String(row.proxima_accion || "").trim();
+        let priority = 0;
+        let summary = proxima || "Sin próxima acción";
+        if (!proxima) {
+          priority += 4;
+        }
+        if (etapa === "Noticia") {
+          priority += 3;
+          if (!proxima) summary = "Llamada pendiente o sin cierre de noticia";
+        } else if (etapa === "Adquisición") {
+          priority += 2;
+          summary = proxima || "Cita de adquisición pendiente de cierre";
+        } else if (etapa === "Encargo") {
+          priority += 1;
+          summary = proxima || "Encargo activo sin siguiente hito";
+        }
+        return {
+          id: row.inmueble_id || "",
+          title: row.direccion || row.propietario || "Inmueble sin identificar",
+          meta: `${row.propietario || "Propietario pendiente"} · ${etapa}`,
+          summary,
+          priority,
+        };
+      })
+      .sort((a, b) => b.priority - a.priority || a.title.localeCompare(b.title, "es"))
+      .slice(0, 6);
+
+    crmResumenHoy.innerHTML = jobs.length
+      ? jobs
+          .map(
+            (item) => `
+              <button type="button" class="crm-focus-link crm-resumen-link" data-inmueble-id="${escapeHtml(item.id)}">
+                <strong>${escapeHtml(item.title)}</strong>
+                <span>${escapeHtml(item.meta)}</span>
+                <span>${escapeHtml(item.summary)}</span>
+              </button>
+            `
+          )
+          .join("")
+      : "<p class='muted'>Sin trabajo pendiente visible.</p>";
+    crmResumenHoy.querySelectorAll("[data-inmueble-id]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const id = btn.dataset.inmuebleId || "";
+        if (id) openInmuebleDetail(id, "resumen");
+      });
+    });
+  }
+
+  if (crmResumenAlertas) {
+    const missingNext = captaciones.filter((row) => !String(row.proxima_accion || "").trim()).length;
+    const missingCatastro = inmuebles.filter((row) => !String(row.referencia_catastral || "").trim()).length;
+    const missingOwner = inmuebles.filter((row) => !String(row.propietarios || "").trim()).length;
+    const activeEncargos = captaciones.filter((row) => String(row.etapa || "") === "Encargo").length;
+    const alerts = [
+      {
+        title: "Noticias sin siguiente acción",
+        summary: `${missingNext} inmuebles con seguimiento incompleto.`,
+        view: "captaciones",
+      },
+      {
+        title: "Catastro pendiente",
+        summary: `${missingCatastro} inmuebles sin referencia catastral.`,
+        view: "inmuebles",
+      },
+      {
+        title: "Propietario por revisar",
+        summary: `${missingOwner} inmuebles sin propietario enlazado correctamente.`,
+        view: "inmuebles",
+      },
+      {
+        title: "Encargos activos",
+        summary: `${activeEncargos} expedientes en comercialización activa.`,
+        view: "captaciones",
+      },
+    ];
+    crmResumenAlertas.innerHTML = alerts
+      .map(
+        (item) => `
+          <button type="button" class="crm-focus-link" data-crm-view="${escapeHtml(item.view)}">
+            <strong>${escapeHtml(item.title)}</strong>
+            <span>${escapeHtml(item.summary)}</span>
+          </button>
+        `
+      )
+      .join("");
+  }
+
+  if (crmResumenActividad) {
+    const recentItems = [];
+    visitas.slice(0, 4).forEach((row) => {
+      recentItems.push({
+        title: row.inmueble || "Visita",
+        meta: `Visita · ${row.fecha || "-"} ${row.hora || ""}`.trim(),
+        badge: row.estado || "Pendiente",
+      });
+    });
+    compraventas.slice(0, 3).forEach((row) => {
+      recentItems.push({
+        title: row.direccion || "Compraventa",
+        meta: `Venta · ${row.fecha_escritura || row.fecha_contrato || "-"}`,
+        badge: row.estado || "Manual",
+      });
+    });
+    const sorted = recentItems.slice(0, 6);
+    crmResumenActividad.innerHTML = sorted.length
+      ? sorted
+          .map(
+            (item) => `
+              <div class="crm-recent-item">
+                <div>
+                  <strong>${escapeHtml(item.title)}</strong>
+                  <div class="muted">${escapeHtml(item.meta)}</div>
+                </div>
+                <span class="crm-badge">${escapeHtml(item.badge)}</span>
+              </div>
+            `
+          )
+          .join("")
+      : "<p class='muted'>Sin actividad reciente.</p>";
+  }
+
+  if (crmResumenInmuebles) {
+    const hot = inmuebles
+      .map((row) => {
+        const reasons = [];
+        if (!String(row.referencia_catastral || "").trim()) reasons.push("Catastro pendiente");
+        if (!String(row.propietarios || "").trim()) reasons.push("Propietario pendiente");
+        if (String(row.estado || "").trim() === "Noticia") reasons.push("Aún en noticia");
+        return {
+          id: row.id || "",
+          title: row.direccion || "Sin dirección",
+          meta: [row.zona, row.poblacion].filter(Boolean).join(" · ") || "Ubicación pendiente",
+          summary: reasons[0] || "Ficha activa",
+          score: reasons.length,
+        };
+      })
+      .sort((a, b) => b.score - a.score || a.title.localeCompare(b.title, "es"))
+      .slice(0, 6);
+    crmResumenInmuebles.innerHTML = hot.length
+      ? hot
+          .map(
+            (item) => `
+              <button type="button" class="crm-recent-item crm-resumen-card" data-inmueble-id="${escapeHtml(item.id)}">
+                <div>
+                  <strong>${escapeHtml(item.title)}</strong>
+                  <div class="muted">${escapeHtml(item.meta)}</div>
+                  <div class="muted">${escapeHtml(item.summary)}</div>
+                </div>
+              </button>
+            `
+          )
+          .join("")
+      : "<p class='muted'>Sin inmuebles prioritarios.</p>";
+    crmResumenInmuebles.querySelectorAll("[data-inmueble-id]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const id = btn.dataset.inmuebleId || "";
+        if (id) openInmuebleDetail(id, "resumen");
+      });
+    });
+  }
 };
 
 const updateCaptacionEtapa = (id, etapa) => {
@@ -18511,6 +18687,7 @@ const loadCrmInmuebles = () => {
     if (crmKpiInmuebles) {
       crmKpiInmuebles.textContent = String(rows.length);
     }
+    renderCrmResumenDashboard();
   });
 };
 
@@ -18530,6 +18707,7 @@ const loadCrmCompraventas = () => {
   }
   api(`/api/compraventas?${params.toString()}`).then((data) => {
     const rows = Array.isArray(data?.rows) ? data.rows : [];
+    cachedCrmCompraventas = rows;
     const manualCount = rows.filter((row) => {
       const estado = String(row.estado || "").trim().toLowerCase();
       const origen = String(row.origen || "").trim().toLowerCase();
@@ -18628,6 +18806,7 @@ const loadCrmCompraventas = () => {
     if (crmKpiCompraventas) {
       crmKpiCompraventas.textContent = String(data?.kpis?.total || rows.length || 0);
     }
+    renderCrmResumenDashboard();
   });
 };
 
@@ -18729,6 +18908,7 @@ const loadCrmVisitas = () => {
   const params = new URLSearchParams({ empresa_id: empresa.id });
   api(`/api/visitas?${params.toString()}`).then((data) => {
     const rows = data.rows || [];
+    cachedCrmVisitas = rows;
     const table = document.createElement("table");
     const thead = document.createElement("thead");
     const trHead = document.createElement("tr");
@@ -18765,6 +18945,7 @@ const loadCrmVisitas = () => {
     if (crmVisitasInfo) {
       crmVisitasInfo.textContent = `Mostrando ${rows.length} visitas.`;
     }
+    renderCrmResumenDashboard();
   });
 };
 

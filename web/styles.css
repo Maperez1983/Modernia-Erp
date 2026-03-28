@@ -2096,6 +2096,11 @@ body.crm-fin #companySummary {
   gap: 14px;
 }
 
+.crm-summary-secondary {
+  margin-top: 14px;
+  margin-bottom: 14px;
+}
+
 .fin-workflow-stage-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
@@ -2170,6 +2175,14 @@ tr.is-selected td {
 .crm-quick-action span {
   color: var(--muted);
   font-size: 12px;
+}
+
+.crm-resumen-link span {
+  display: block;
+}
+
+.crm-resumen-card {
+  width: 100%;
 }
 
 .crm-quick-action:hover,
