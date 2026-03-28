@@ -271,6 +271,22 @@ button.secondary,
   gap: 10px;
 }
 
+.catastro-brand {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.catastro-brand strong {
+  display: block;
+  font-size: 18px;
+  color: var(--ink);
+}
+
+.catastro-brand p {
+  margin: 2px 0 0;
+}
+
 .catastro-icon {
   display: inline-flex;
   align-items: center;
@@ -2000,6 +2016,18 @@ body.crm-fin #companySummary {
 .map-box {
   display: grid;
   gap: 8px;
+  min-height: 140px;
+}
+
+.map-box-empty {
+  display: grid;
+  align-content: center;
+  gap: 6px;
+  min-height: 140px;
+  padding: 16px;
+  border-radius: 14px;
+  border: 1px dashed rgba(130, 76, 69, 0.18);
+  background: rgba(255, 251, 244, 0.72);
 }
 
 .crm-header {
@@ -2504,6 +2532,7 @@ tr.is-selected td {
   grid-template-columns: minmax(0, 1.3fr) minmax(300px, 0.9fr);
   gap: 14px;
   margin-bottom: 14px;
+  align-items: start;
 }
 
 .inmueble-summary-card,
@@ -3735,6 +3764,7 @@ tr.is-selected td {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 12px;
+  align-items: start;
 }
 
 .crm-kanban-column {
@@ -3744,6 +3774,7 @@ tr.is-selected td {
   padding: 10px;
   display: grid;
   gap: 8px;
+  align-self: start;
 }
 
 .crm-kanban-column h4 {

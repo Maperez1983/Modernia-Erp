@@ -2069,6 +2069,7 @@ const inmuebleVisitaPdfBtn = document.getElementById("inmuebleVisitaPdfBtn");
 const inmuebleVentaFichaPdfBtn = document.getElementById("inmuebleVentaFichaPdfBtn");
 const inmuebleVentaPrecioPdfBtn = document.getElementById("inmuebleVentaPrecioPdfBtn");
 const inmuebleAlquilerDiaPdfBtn = document.getElementById("inmuebleAlquilerDiaPdfBtn");
+const inmuebleDeleteBtn = document.getElementById("inmuebleDeleteBtn");
 const inmuebleTabs = document.getElementById("inmuebleTabs");
 const inmuebleSaveStatus = document.getElementById("inmuebleSaveStatus");
 const inmuebleTabDatos = document.getElementById("inmuebleTabDatos");
@@ -11015,26 +11016,37 @@ const renderEditableGrid = (grid, fields, data, target) => {
     const refInput = inputMap.referencia_catastral || inputMap.referencia;
     if (direccionInput && latInput && lonInput) {
       direccionInput.addEventListener("blur", () => {
-        const address = direccionInput.value.trim();
+        const address = buildInmuebleGeocodeAddress({
+          direccion: direccionInput.value,
+          poblacion: inputMap.poblacion ? inputMap.poblacion.value : "",
+          provincia: inputMap.provincia ? inputMap.provincia.value : "",
+        });
         if (!address) return;
         geocodeInmuebleAddress(address, latInput, lonInput);
       });
     }
     const catastroCard = document.createElement("div");
     catastroCard.className = "card editable-card";
-    const label = document.createElement("h3");
-    label.textContent = "Catastro";
-    catastroCard.appendChild(label);
+    const brand = document.createElement("div");
+    brand.className = "catastro-brand";
+    brand.innerHTML = `
+      <span class="catastro-icon" aria-hidden="true">C</span>
+      <div>
+        <strong>Catastro</strong>
+        <p class="muted">Referencia catastral y ficha pública del inmueble.</p>
+      </div>
+    `;
+    catastroCard.appendChild(brand);
     const hint = document.createElement("p");
     hint.className = "muted";
-    hint.textContent = "Busca la referencia catastral desde la dirección y después, si quieres, abre la ficha pública.";
+    hint.textContent = "Busca la referencia desde la dirección. Después puedes generar la ficha PDF o abrir la ficha pública.";
     catastroCard.appendChild(hint);
     const actions = document.createElement("div");
     actions.className = "catastro-actions";
     const lookupBtn = document.createElement("button");
     lookupBtn.type = "button";
     lookupBtn.className = "secondary catastro-button";
-    lookupBtn.innerHTML = '<span class="catastro-icon" aria-hidden="true">CAT</span><span>Buscar referencia</span>';
+    lookupBtn.textContent = "Buscar referencia";
     lookupBtn.addEventListener("click", async () => {
       await lookupInmuebleCatastro(inputMap);
     });
@@ -11042,7 +11054,7 @@ const renderEditableGrid = (grid, fields, data, target) => {
     const syncBtn = document.createElement("button");
     syncBtn.type = "button";
     syncBtn.className = "secondary catastro-button";
-    syncBtn.innerHTML = '<span class="catastro-icon" aria-hidden="true">CAT</span><span>Ficha PDF</span>';
+    syncBtn.textContent = "Ficha PDF";
     syncBtn.addEventListener("click", async () => {
       await syncInmuebleCatastroFicha(inputMap);
     });
@@ -11050,7 +11062,7 @@ const renderEditableGrid = (grid, fields, data, target) => {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "secondary catastro-button";
-    btn.innerHTML = '<span class="catastro-icon" aria-hidden="true">CAT</span><span>Abrir Catastro</span>';
+    btn.textContent = "Abrir ficha pública";
     btn.addEventListener("click", () => {
       const ref = refInput ? refInput.value.trim() : "";
       const address = direccionInput ? direccionInput.value.trim() : "";
@@ -11066,10 +11078,19 @@ const renderEditableGrid = (grid, fields, data, target) => {
 let inmuebleGeocodeTimer = null;
 let lastGeocodeAddress = "";
 
-const renderMapPreview = (container, lat, lon) => {
+const renderMapPreview = (container, lat, lon, address = "") => {
   if (!container) return;
   if (!lat || !lon) {
-    container.innerHTML = "<p class='muted'>Sin coordenadas.</p>";
+    container.innerHTML = `
+      <div class="map-box-empty">
+        <strong>Mapa pendiente</strong>
+        <p class="muted">${
+          address
+            ? `Se intentará geolocalizar ${address} automáticamente.`
+            : "Añade dirección, población y provincia para dibujar la localización."
+        }</p>
+      </div>
+    `;
     return;
   }
   const bbox = [lon - 0.01, lat - 0.01, lon + 0.01, lat + 0.01].join(",");
@@ -11084,8 +11105,8 @@ const renderMapPreview = (container, lat, lon) => {
   `;
 };
 
-const updateInmuebleMap = (lat, lon) => {
-  renderMapPreview(inmuebleMap, lat, lon);
+const updateInmuebleMap = (lat, lon, address = "") => {
+  renderMapPreview(inmuebleMap, lat, lon, address);
 };
 
 const updateCaptacionMap = (lat, lon) => {
@@ -11109,6 +11130,7 @@ const geocodeInmuebleAddress = (address, latInput, lonInput) => {
   if (!address) return;
   if (address === lastGeocodeAddress) return;
   lastGeocodeAddress = address;
+  updateInmuebleMap(null, null, address);
   if (inmuebleGeocodeTimer) {
     clearTimeout(inmuebleGeocodeTimer);
   }
@@ -11131,7 +11153,7 @@ const geocodeInmuebleAddress = (address, latInput, lonInput) => {
         if (lonInput) lonInput.value = String(lon);
         saveInmuebleField("lat", lat);
         saveInmuebleField("lon", lon);
-        updateInmuebleMap(lat, lon);
+        updateInmuebleMap(lat, lon, address);
       })
       .catch(() => {});
   }, 600);
@@ -18826,7 +18848,19 @@ const openInmuebleDetail = (id, originView = "") => {
         populateAgendaClientes(inmuebleActividadClientes, inmuebleActividadClienteInput, inmuebleActividadClienteId);
       }
       if (inmuebleMap) {
-        updateInmuebleMap(inmueble.lat, inmueble.lon);
+        const lat = Number(inmueble.lat);
+        const lon = Number(inmueble.lon);
+        const address = buildInmuebleGeocodeAddress(inmueble);
+        if (lat && lon) {
+          updateInmuebleMap(lat, lon, address);
+        } else {
+          updateInmuebleMap(null, null, address);
+          const latInput = document.querySelector('.inline-input[data-target="inmueble"][data-field="lat"]');
+          const lonInput = document.querySelector('.inline-input[data-target="inmueble"][data-field="lon"]');
+          if (address) {
+            geocodeInmuebleAddress(address, latInput, lonInput);
+          }
+        }
       }
       if (inmuebleEstadoInfo) {
         inmuebleEstadoInfo.textContent = `Estado actual: ${inmueble.estado || "-"}`;
@@ -31493,6 +31527,50 @@ if (inmuebleBackBtn) {
     setCrmWorkspaceView(state.currentInmuebleOriginView || "inmuebles");
     state.currentInmuebleId = "";
     state.currentInmuebleOriginView = "inmuebles";
+  });
+}
+
+if (inmuebleDeleteBtn) {
+  inmuebleDeleteBtn.addEventListener("click", () => {
+    if (!state.currentInmuebleId) return;
+    const inmueble = state.currentInmueble || state.currentInmuebleContext?.inmueble || {};
+    const label = String(inmueble.direccion || inmueble.referencia || "este inmueble").trim();
+    const confirmed = window.confirm(`Vas a borrar ${label}. Esta acción eliminará también su captación, visitas, acciones y documentos vinculados. ¿Quieres continuar?`);
+    if (!confirmed) return;
+    if (inmuebleSaveStatus) {
+      inmuebleSaveStatus.textContent = "Borrando inmueble...";
+    }
+    fetch("/api/inmueble_delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ inmueble_id: state.currentInmuebleId }),
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.error) {
+          if (inmuebleSaveStatus) {
+            inmuebleSaveStatus.textContent = data.error;
+          }
+          return;
+        }
+        if (inmuebleDetail) {
+          inmuebleDetail.classList.add("hidden");
+        }
+        if (crmWorkspaceShell) {
+          crmWorkspaceShell.classList.remove("hidden");
+        }
+        setCrmWorkspaceView(state.currentInmuebleOriginView || "inmuebles");
+        state.currentInmuebleId = "";
+        state.currentInmueble = null;
+        state.currentInmuebleContext = null;
+        state.currentInmuebleOriginView = "inmuebles";
+        loadCrmInmuebles();
+      })
+      .catch(() => {
+        if (inmuebleSaveStatus) {
+          inmuebleSaveStatus.textContent = "Error al borrar.";
+        }
+      });
   });
 }
 
