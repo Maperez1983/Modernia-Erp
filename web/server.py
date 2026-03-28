@@ -975,6 +975,153 @@ def normalize_lookup_text(value):
     return text
 
 
+def audit_event(conn, empresa_id, entidad, entidad_id, accion, usuario=None, detalles=None, now=None):
+    if not conn or not entidad or not accion:
+        return None
+    detail_value = detalles
+    if isinstance(detalles, (dict, list)):
+        try:
+            detail_value = json.dumps(detalles, ensure_ascii=False)
+        except Exception:
+            detail_value = str(detalles)
+    conn.execute(
+        """
+        INSERT INTO auditoria (
+          id, empresa_id, entidad, entidad_id, accion, usuario, detalles, created_at
+        ) VALUES (
+          ?, ?, ?, ?, ?, ?, ?, datetime(?)
+        )
+        """,
+        (
+            os.urandom(16).hex(),
+            empresa_id,
+            entidad,
+            entidad_id,
+            accion,
+            usuario or "Sistema",
+            detail_value,
+            now or "now",
+        ),
+    )
+    return True
+
+
+LEGAL_TOPIC_OPERATIONS = {
+    "inmobiliaria": {
+        "encargo_venta": {
+            "documents": ["Encargo de venta", "Ficha venta", "Nota precio"],
+            "workflows": ["Captación", "Encargo", "Negociación venta"],
+            "clauses": ["honorarios", "duración", "exclusiva", "prórroga"],
+            "impact_score": 0.92,
+        },
+        "encargo_alquiler": {
+            "documents": ["Encargo de alquiler", "DIA alquiler", "Propuesta de alquiler"],
+            "workflows": ["Captación", "Encargo", "Negociación alquiler"],
+            "clauses": ["honorarios", "duración", "gastos", "exclusiva"],
+            "impact_score": 0.9,
+        },
+        "propuesta_compra": {
+            "documents": ["Propuesta de compra", "Promesa de compra"],
+            "workflows": ["Negociación venta", "Aceptación propietarios"],
+            "clauses": ["precio", "financiación", "vigencia", "señal"],
+            "impact_score": 0.88,
+        },
+        "propuesta_alquiler": {
+            "documents": ["Propuesta de alquiler"],
+            "workflows": ["Negociación alquiler"],
+            "clauses": ["renta", "fianza", "garantías"],
+            "impact_score": 0.82,
+        },
+        "reserva_arras": {
+            "documents": ["Reserva / arras", "Contrato privado de compraventa"],
+            "workflows": ["Reserva", "Venta"],
+            "clauses": ["arras", "incumplimiento", "financiación", "plazos"],
+            "impact_score": 0.95,
+        },
+        "exclusiva_mediacion": {
+            "documents": ["Encargo de venta", "Encargo de alquiler"],
+            "workflows": ["Captación", "Encargo"],
+            "clauses": ["exclusiva", "prórroga", "devengo honorarios"],
+            "impact_score": 0.93,
+        },
+        "varios_titulares_representacion": {
+            "documents": ["Encargo", "Contrato privado", "Reserva / arras"],
+            "workflows": ["Captación", "Firma", "Venta"],
+            "clauses": ["representación", "firmas", "porcentajes"],
+            "impact_score": 0.9,
+        },
+        "alquiler_vivienda_habitual": {
+            "documents": ["Encargo de alquiler", "DIA alquiler", "Contrato privado de arrendamiento"],
+            "workflows": ["Encargo", "Alquiler"],
+            "clauses": ["gastos", "fianza", "duración", "prórrogas"],
+            "impact_score": 0.91,
+        },
+        "contrato_privado_compraventa": {
+            "documents": ["Contrato privado de compraventa", "Reserva / arras"],
+            "workflows": ["Reserva", "Venta"],
+            "clauses": ["precio", "cargas", "posesión", "saneamiento"],
+            "impact_score": 0.97,
+        },
+        "contrato_privado_arrendamiento": {
+            "documents": ["Contrato privado de arrendamiento", "DIA alquiler"],
+            "workflows": ["Alquiler"],
+            "clauses": ["renta", "duración", "gastos", "fianza"],
+            "impact_score": 0.96,
+        },
+        "consumo_andalucia": {
+            "documents": ["Ficha venta", "Nota precio", "DIA alquiler", "Justificante de entrega"],
+            "workflows": ["Encargo", "Venta", "Alquiler"],
+            "clauses": ["información previa", "precio", "gastos"],
+            "impact_score": 0.94,
+        },
+        "visitas": {
+            "documents": ["Hoja de visita"],
+            "workflows": ["Visita comprador"],
+            "clauses": ["trazabilidad", "intermediación"],
+            "impact_score": 0.72,
+        },
+    },
+    "seguros": {
+        "contrato_seguro": {"documents": ["Condiciones particulares", "Resumen de póliza"], "workflows": ["Alta póliza", "Renovación"], "clauses": ["coberturas", "exclusiones", "riesgo"], "impact_score": 0.86},
+        "distribucion_seguros": {"documents": ["IPID", "Ficha de recomendación"], "workflows": ["Venta seguro", "Asesoramiento"], "clauses": ["información precontractual", "recomendación"], "impact_score": 0.92},
+        "gestion_siniestros": {"documents": ["Parte de siniestro", "Expediente de siniestro"], "workflows": ["Siniestro"], "clauses": ["plazos", "comunicación", "rechazo"], "impact_score": 0.84},
+        "renovacion_cancelacion": {"documents": ["Aviso de vencimiento", "Solicitud de cancelación"], "workflows": ["Renovación"], "clauses": ["plazos", "oposición a prórroga"], "impact_score": 0.79},
+    },
+    "gestoria": {
+        "modelos_tributarios": {"documents": ["Checklist fiscal", "Calendario de modelos"], "workflows": ["Campañas fiscales", "Seguimiento autónomos"], "clauses": ["plazos", "obligaciones periódicas"], "impact_score": 0.84},
+        "renta_inmuebles_alquileres": {"documents": ["Checklist renta", "Expediente renta"], "workflows": ["Campaña renta"], "clauses": ["imputación", "gastos deducibles"], "impact_score": 0.86},
+        "consultas_hacienda": {"documents": ["Consulta vinculante", "Informe criterio fiscal"], "workflows": ["Consulta fiscal", "Revisión expediente"], "clauses": ["criterio aplicable", "hechos"], "impact_score": 0.88},
+        "despidos_extinciones": {"documents": ["Carta despido", "Finiquito"], "workflows": ["Laboral"], "clauses": ["causa", "preaviso", "liquidación"], "impact_score": 0.89},
+    },
+    "fincas": {
+        "juntas_propietarios": {"documents": ["Convocatoria", "Acta"], "workflows": ["Juntas"], "clauses": ["mayorías", "orden del día"], "impact_score": 0.82},
+        "morosidad_comunidad": {"documents": ["Certificación de deuda", "Requerimiento"], "workflows": ["Morosidad"], "clauses": ["deuda", "reclamación"], "impact_score": 0.85},
+    },
+    "obras": {
+        "licencias_urbanisticas": {"documents": ["Licencia", "Declaración responsable"], "workflows": ["Presupuesto", "Obra"], "clauses": ["título habilitante"], "impact_score": 0.87},
+        "consumo_reformas": {"documents": ["Presupuesto de obra", "Encargo de obra"], "workflows": ["Presupuesto", "Obra"], "clauses": ["extras", "exclusiones", "garantías"], "impact_score": 0.8},
+    },
+    "financiaciones": {
+        "lcci": {"documents": ["Checklist hipotecario", "FEIN / FIAE"], "workflows": ["Asesoramiento", "Bancos", "Firma"], "clauses": ["asesoramiento", "información previa"], "impact_score": 0.9},
+        "tasacion_y_ofertas": {"documents": ["Oferta bancaria", "Tasación"], "workflows": ["Bancos", "Tasación"], "clauses": ["tasación", "oferta vinculante"], "impact_score": 0.82},
+    },
+}
+
+
+def get_legal_topic_operations(area, topic_key):
+    area_key = normalize_legal_area(area)
+    topic = str(topic_key or "").strip()
+    payload = LEGAL_TOPIC_OPERATIONS.get(area_key, {}).get(topic, {})
+    if not isinstance(payload, dict):
+        payload = {}
+    return {
+        "documents": [item for item in list(payload.get("documents") or []) if str(item or "").strip()],
+        "workflows": [item for item in list(payload.get("workflows") or []) if str(item or "").strip()],
+        "clauses": [item for item in list(payload.get("clauses") or []) if str(item or "").strip()],
+        "impact_score": float(payload.get("impact_score") or 0),
+    }
+
+
 def normalize_workspace_slug(value):
     text = normalize_lookup_text(value or "").lower().replace(" ", "-")
     text = re.sub(r"[^a-z0-9\-]+", "", text)
@@ -9244,6 +9391,19 @@ def sync_inmueble_stage_for_action(conn, inmueble_id, destino, now):
         """,
         (destino_label, now, inmueble_id),
     )
+    inmueble = conn.execute(
+        "SELECT empresa_id FROM inmuebles WHERE id = ? LIMIT 1",
+        (inmueble_id,),
+    ).fetchone()
+    audit_event(
+        conn,
+        str(inmueble["empresa_id"] or "").strip() if inmueble else None,
+        "inmueble",
+        inmueble_id,
+        "Cambio de estado",
+        detalles={"destino": destino_label, "origen": "workflow"},
+        now=now,
+    )
 
 
 def normalize_inmo_action_type(value):
@@ -9302,64 +9462,100 @@ def upsert_inmueble_generated_doc(conn, inmueble_id, tipo, nombre, url, now):
     return doc_id
 
 
-def persist_generated_inmueble_pdf(conn, inmueble_id, tipo, nombre, pdf_bytes, filename_base, now, replace_existing=False):
+def persist_generated_inmueble_pdf(
+    conn,
+    inmueble_id,
+    tipo,
+    nombre,
+    pdf_bytes,
+    filename_base,
+    now,
+    replace_existing=False,
+    empresa_id=None,
+    usuario=None,
+    plantilla_clave=None,
+    origen_tipo=None,
+    origen_id=None,
+    payload_json=None,
+):
     if not inmueble_id or not tipo or not pdf_bytes:
         return None
     folder = UPLOADS / "inmuebles" / "generated"
     folder.mkdir(parents=True, exist_ok=True)
     safe_base = slugify_text(filename_base or nombre or tipo)[:80] or "documento_inmueble"
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
-    doc_id = None
-    existing = None
-    if replace_existing:
-        existing = conn.execute(
-            """
-            SELECT id, url
-            FROM inmueble_docs
-            WHERE inmueble_id = ? AND tipo = ? AND url LIKE '/uploads/inmuebles/generated/%'
-            ORDER BY updated_at DESC, created_at DESC
-            LIMIT 1
-            """,
-            (inmueble_id, tipo),
-        ).fetchone()
-    if existing:
-        doc_id = existing["id"]
-        old_url = str(existing["url"] or "").strip()
-        old_rel = old_url.replace("/uploads/", "", 1) if old_url.startswith("/uploads/") else ""
-        if old_rel:
-            old_path = UPLOADS / old_rel
-            try:
-                if old_path.exists():
-                    old_path.unlink()
-            except Exception:
-                pass
-    else:
-        doc_id = os.urandom(16).hex()
+    existing = conn.execute(
+        """
+        SELECT id, version, url
+        FROM inmueble_docs
+        WHERE inmueble_id = ? AND tipo = ? AND url LIKE '/uploads/inmuebles/generated/%'
+        ORDER BY version DESC, updated_at DESC, created_at DESC
+        LIMIT 1
+        """,
+        (inmueble_id, tipo),
+    ).fetchone()
+    next_version = int(existing["version"] or 1) + 1 if existing else 1
+    doc_id = os.urandom(16).hex()
     filename = f"{safe_base}_{timestamp}_{doc_id[:8]}.pdf"
     file_path = folder / filename
     file_path.write_bytes(pdf_bytes)
     url = f"/uploads/inmuebles/generated/{filename}"
-    if existing:
+    if replace_existing and existing:
         conn.execute(
             """
             UPDATE inmueble_docs
-            SET nombre = ?, url = ?, updated_at = datetime(?)
+            SET estado = 'Reemplazado', updated_at = datetime(?)
             WHERE id = ?
             """,
-            (nombre or tipo, url, now, doc_id),
+            (now, existing["id"]),
         )
-    else:
-        conn.execute(
-            """
-            INSERT INTO inmueble_docs (
-              id, inmueble_id, nombre, url, tipo, created_at, updated_at
-            ) VALUES (
-              ?, ?, ?, ?, ?, datetime(?), datetime(?)
-            )
-            """,
-            (doc_id, inmueble_id, nombre or tipo, url, tipo, now, now),
+    payload_text = payload_json
+    if isinstance(payload_json, (dict, list)):
+        payload_text = json.dumps(payload_json, ensure_ascii=False)
+    conn.execute(
+        """
+        INSERT INTO inmueble_docs (
+          id, inmueble_id, nombre, url, tipo, estado, version, plantilla_clave, origen_tipo, origen_id,
+          payload_json, created_at, updated_at
+        ) VALUES (
+          ?, ?, ?, ?, ?, 'Vigente', ?, ?, ?, ?, ?, datetime(?), datetime(?)
         )
-    return {"id": doc_id, "url": url, "path": str(file_path)}
+        """,
+        (
+            doc_id,
+            inmueble_id,
+            nombre or tipo,
+            url,
+            tipo,
+            next_version,
+            plantilla_clave or slugify_text(tipo) or None,
+            origen_tipo,
+            origen_id,
+            payload_text,
+            now,
+            now,
+        ),
+    )
+    audit_event(
+        conn,
+        empresa_id,
+        "inmueble_docs",
+        doc_id,
+        "Generar documento",
+        usuario=usuario,
+        detalles={
+            "inmueble_id": inmueble_id,
+            "tipo": tipo,
+            "version": next_version,
+            "estado": "Vigente",
+            "plantilla_clave": plantilla_clave or slugify_text(tipo),
+            "origen_tipo": origen_tipo,
+            "origen_id": origen_id,
+            "replace_existing": bool(replace_existing),
+        },
+        now=now,
+    )
+    return {"id": doc_id, "url": url, "path": str(file_path), "version": next_version, "estado": "Vigente"}
 
 
 INMO_ACTION_RESULT_OPTIONS = {
@@ -9924,8 +10120,8 @@ def parse_legal_feed_entries(raw_bytes, source_config):
 
 
 def classify_legal_feed_entry(area, source_config, entry):
-    if normalize_lookup_text(area or "").lower() != "inmobiliaria":
-        return None
+    area_key = normalize_legal_area(area)
+    operations_by_topic = {}
     haystack = normalize_lookup_text(
         " ".join(
             [
@@ -9950,18 +10146,27 @@ def classify_legal_feed_entry(area, source_config, entry):
             continue
         if score > best_score:
             best_score = score
+            topic_key = str(rule.get("topic_key") or "").strip() or None
+            operations = operations_by_topic.get(topic_key)
+            if operations is None:
+                operations = get_legal_topic_operations(area_key, topic_key)
+                operations_by_topic[topic_key] = operations
             best_match = {
-                "area": area,
+                "area": area_key,
                 "source_key": str(source_config.get("key") or "").strip() or None,
                 "fuente": str(source_config.get("fuente") or source_config.get("title") or "").strip() or None,
                 "reference": str(entry.get("reference") or "").strip() or extract_legal_reference(entry.get("raw_text") or ""),
                 "title": str(entry.get("title") or "").strip() or "Novedad legal detectada",
                 "published": str(entry.get("published") or "").strip() or None,
                 "impacto": str(rule.get("impacto") or source_config.get("impacto_default") or "Medio").strip() or "Medio",
-                "topic_key": str(rule.get("topic_key") or "").strip() or None,
+                "topic_key": topic_key,
                 "url": str(entry.get("link") or "").strip() or None,
                 "summary": str(entry.get("summary") or "").strip() or None,
                 "accion_recomendada": str(rule.get("accion_recomendada") or "").strip() or None,
+                "affected_documents": list(rule.get("affected_documents") or operations.get("documents") or []),
+                "affected_workflows": list(rule.get("affected_workflows") or operations.get("workflows") or []),
+                "affected_clauses": list(rule.get("affected_clauses") or operations.get("clauses") or []),
+                "impact_score": rule.get("impact_score") if rule.get("impact_score") not in (None, "") else operations.get("impact_score"),
                 "matched_keywords": matched,
                 "auto_detected": 1,
             }
@@ -10001,6 +10206,13 @@ def upsert_legal_radar_item_from_detection(conn, detection, now):
             (area, title, str(detection.get("published") or "").strip()),
         ).fetchone()
     matched_keywords = ", ".join(list(detection.get("matched_keywords") or [])) or None
+    operations = get_legal_topic_operations(area, detection.get("topic_key"))
+    affected_documents = json.dumps(list(detection.get("affected_documents") or operations.get("documents") or []), ensure_ascii=False)
+    affected_workflows = json.dumps(list(detection.get("affected_workflows") or operations.get("workflows") or []), ensure_ascii=False)
+    affected_clauses = json.dumps(list(detection.get("affected_clauses") or operations.get("clauses") or []), ensure_ascii=False)
+    impact_score = detection.get("impact_score")
+    if impact_score in (None, ""):
+        impact_score = operations.get("impact_score") or None
     if row is not None:
         conn.execute(
             """
@@ -10013,6 +10225,10 @@ def upsert_legal_radar_item_from_detection(conn, detection, now):
                 url = COALESCE(?, url),
                 resumen = COALESCE(?, resumen),
                 accion_recomendada = COALESCE(?, accion_recomendada),
+                affected_documents = COALESCE(?, affected_documents),
+                affected_workflows = COALESCE(?, affected_workflows),
+                affected_clauses = COALESCE(?, affected_clauses),
+                impact_score = COALESCE(?, impact_score),
                 source_key = COALESCE(?, source_key),
                 matched_keywords = COALESCE(?, matched_keywords),
                 auto_detected = CASE WHEN ? THEN 1 ELSE auto_detected END,
@@ -10028,6 +10244,10 @@ def upsert_legal_radar_item_from_detection(conn, detection, now):
                 url or None,
                 detection.get("summary"),
                 detection.get("accion_recomendada"),
+                affected_documents,
+                affected_workflows,
+                affected_clauses,
+                impact_score,
                 detection.get("source_key"),
                 matched_keywords,
                 int(bool(detection.get("auto_detected"))),
@@ -10041,10 +10261,11 @@ def upsert_legal_radar_item_from_detection(conn, detection, now):
         """
         INSERT INTO legal_radar_items (
           id, area, fuente, referencia, titulo, fecha_publicacion, estado, impacto,
-          topic_key, url, resumen, accion_recomendada, source_key, matched_keywords,
+          topic_key, url, resumen, accion_recomendada, affected_documents, affected_workflows,
+          affected_clauses, impact_score, source_key, matched_keywords,
           auto_detected, created_at, updated_at
         ) VALUES (
-          ?, ?, ?, ?, ?, ?, 'Pendiente', ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+          ?, ?, ?, ?, ?, ?, 'Pendiente', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
         )
         """,
         (
@@ -10059,6 +10280,10 @@ def upsert_legal_radar_item_from_detection(conn, detection, now):
             url or None,
             detection.get("summary"),
             detection.get("accion_recomendada"),
+            affected_documents,
+            affected_workflows,
+            affected_clauses,
+            impact_score,
             detection.get("source_key"),
             matched_keywords,
             int(bool(detection.get("auto_detected"))),
@@ -10086,7 +10311,8 @@ def sync_legal_knowledge_updates(conn, area="inmobiliaria", now=None):
     rows = conn.execute(
         """
         SELECT id, fuente, referencia, titulo, fecha_publicacion, impacto, topic_key, url,
-               resumen, accion_recomendada, source_key, matched_keywords
+               resumen, accion_recomendada, affected_documents, affected_workflows,
+               affected_clauses, impact_score, source_key, matched_keywords
         FROM legal_radar_items
         WHERE area = ?
           AND auto_detected = 1
@@ -10123,6 +10349,10 @@ def sync_legal_knowledge_updates(conn, area="inmobiliaria", now=None):
                 "url": row["url"],
                 "summary": row["resumen"],
                 "accion_recomendada": row["accion_recomendada"],
+                "affected_documents": json.loads(row["affected_documents"] or "[]") if str(row["affected_documents"] or "").strip() else [],
+                "affected_workflows": json.loads(row["affected_workflows"] or "[]") if str(row["affected_workflows"] or "").strip() else [],
+                "affected_clauses": json.loads(row["affected_clauses"] or "[]") if str(row["affected_clauses"] or "").strip() else [],
+                "impact_score": row["impact_score"],
                 "source_key": row["source_key"],
                 "matched_keywords": [item.strip() for item in str(row["matched_keywords"] or "").split(",") if item.strip()],
                 "synced_at": now_value,
@@ -10309,7 +10539,8 @@ def fetch_legal_radar_items(conn, area="inmobiliaria", limit=100):
     rows = conn.execute(
         """
         SELECT id, area, fuente, referencia, titulo, fecha_publicacion, estado, impacto,
-               topic_key, url, resumen, accion_recomendada, reviewed_at, reviewed_by,
+               topic_key, url, resumen, accion_recomendada, affected_documents, affected_workflows,
+               affected_clauses, impact_score, reviewed_at, reviewed_by,
                applied_at, source_key, matched_keywords, auto_detected, knowledge_synced_at,
                created_at, updated_at
         FROM legal_radar_items
@@ -10340,7 +10571,20 @@ def fetch_legal_radar_items(conn, area="inmobiliaria", limit=100):
             summary["auto_detected"] += 1
         if str(row["knowledge_synced_at"] or "").strip():
             summary["knowledge_synced"] += 1
-    return {"rows": [dict(r) for r in rows], "summary": summary}
+    parsed_rows = []
+    for row in rows:
+        item = dict(row)
+        for key in ("affected_documents", "affected_workflows", "affected_clauses"):
+            raw_value = str(item.get(key) or "").strip()
+            if raw_value:
+                try:
+                    item[key] = json.loads(raw_value)
+                except Exception:
+                    item[key] = [part.strip() for part in raw_value.split(",") if part.strip()]
+            else:
+                item[key] = []
+        parsed_rows.append(item)
+    return {"rows": parsed_rows, "summary": summary}
 
 
 def validate_inmo_action_result(action_type, estado, resultado):
@@ -10488,6 +10732,15 @@ def ensure_fin_followup_action(
             now,
         ),
     )
+    audit_event(
+        conn,
+        empresa_id,
+        "accion",
+        next_id,
+        "Crear acción de seguimiento",
+        detalles={"servicio": "financiaciones", "tipo": action_type, "asesoramiento_id": asesoramiento_id},
+        now=now,
+    )
     return next_id
 
 
@@ -10561,6 +10814,15 @@ def convert_fin_asesoramiento_to_hipoteca(conn, empresa_id, row, now):
     conn.execute(
         "UPDATE asesoramientos_financiacion SET estado = ?, updated_at = datetime(?) WHERE id = ?",
         ("Convertido", now, row["id"]),
+    )
+    audit_event(
+        conn,
+        empresa_id,
+        "hipoteca",
+        hipoteca_id,
+        "Convertir asesoramiento en hipoteca",
+        detalles={"asesoramiento_id": row["id"], "cliente_id": row["cliente1_id"]},
+        now=now,
     )
     return hipoteca_id
 
@@ -13053,6 +13315,14 @@ def ensure_tables(db_path):
     ensure_column(conn, "acciones", "estado_siguiente", "estado_siguiente TEXT")
     ensure_column(conn, "acciones", "documento_tipo", "documento_tipo TEXT")
     ensure_column(conn, "acciones", "importe_propuesta", "importe_propuesta REAL")
+    ensure_column(conn, "inmueble_docs", "estado", "estado TEXT NOT NULL DEFAULT 'Vigente'")
+    ensure_column(conn, "inmueble_docs", "version", "version INTEGER NOT NULL DEFAULT 1")
+    ensure_column(conn, "inmueble_docs", "plantilla_clave", "plantilla_clave TEXT")
+    ensure_column(conn, "inmueble_docs", "origen_tipo", "origen_tipo TEXT")
+    ensure_column(conn, "inmueble_docs", "origen_id", "origen_id TEXT")
+    ensure_column(conn, "inmueble_docs", "payload_json", "payload_json TEXT")
+    ensure_column(conn, "inmueble_docs", "reviewed_at", "reviewed_at TEXT")
+    ensure_column(conn, "inmueble_docs", "reviewed_by", "reviewed_by TEXT")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS legal_radar_items (
@@ -13091,6 +13361,10 @@ def ensure_tables(db_path):
     ensure_column(conn, "legal_radar_items", "url", "url TEXT")
     ensure_column(conn, "legal_radar_items", "resumen", "resumen TEXT")
     ensure_column(conn, "legal_radar_items", "accion_recomendada", "accion_recomendada TEXT")
+    ensure_column(conn, "legal_radar_items", "affected_documents", "affected_documents TEXT")
+    ensure_column(conn, "legal_radar_items", "affected_workflows", "affected_workflows TEXT")
+    ensure_column(conn, "legal_radar_items", "affected_clauses", "affected_clauses TEXT")
+    ensure_column(conn, "legal_radar_items", "impact_score", "impact_score REAL")
     ensure_column(conn, "legal_radar_items", "source_key", "source_key TEXT")
     ensure_column(conn, "legal_radar_items", "matched_keywords", "matched_keywords TEXT")
     ensure_column(conn, "legal_radar_items", "auto_detected", "auto_detected INTEGER NOT NULL DEFAULT 0")
@@ -22726,6 +23000,7 @@ class Handler(BaseHTTPRequestHandler):
             if not topic_payload:
                 json_response(self, {"error": "Área legal no soportada"}, status=400)
                 return
+            operations = get_legal_topic_operations(area, topic_key)
             response = {
                 "area": area,
                 "area_label": LEGAL_AREA_DEFINITIONS.get(area, {}).get("label") or area.title(),
@@ -22740,6 +23015,10 @@ class Handler(BaseHTTPRequestHandler):
                 "drafting_help": list(topic_payload.get("drafting_help") or []),
                 "variable_blocks": list(topic_payload.get("variable_blocks") or []),
                 "warnings": list(topic_payload.get("warnings") or []),
+                "document_templates": list(operations.get("documents") or []),
+                "workflow_checkpoints": list(operations.get("workflows") or []),
+                "review_recommendations": list(operations.get("clauses") or []),
+                "impact_score": operations.get("impact_score") or None,
                 "recent_updates": [item for item in list(topic_payload.get("recent_updates") or []) if isinstance(item, dict)][:8],
                 "sources": [
                     f"Base jurídica interna de {LEGAL_AREA_DEFINITIONS.get(area, {}).get('label') or area.title()} en Modernia.",
@@ -22810,14 +23089,16 @@ class Handler(BaseHTTPRequestHandler):
             if not titulo:
                 json_response(self, {"error": "titulo requerido"}, status=400)
                 return
+            operations = get_legal_topic_operations(area, payload.get("topic_key"))
             item_id = os.urandom(16).hex()
             conn.execute(
                 """
                 INSERT INTO legal_radar_items (
                   id, area, fuente, referencia, titulo, fecha_publicacion, estado, impacto,
-                  topic_key, url, resumen, accion_recomendada, created_at, updated_at
+                  topic_key, url, resumen, accion_recomendada, affected_documents, affected_workflows,
+                  affected_clauses, impact_score, created_at, updated_at
                 ) VALUES (
-                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
                 )
                 """,
                 (
@@ -22833,10 +23114,15 @@ class Handler(BaseHTTPRequestHandler):
                     str(payload.get("url") or "").strip() or None,
                     str(payload.get("resumen") or "").strip() or None,
                     str(payload.get("accion_recomendada") or "").strip() or None,
+                    json.dumps(list(payload.get("affected_documents") or operations.get("documents") or []), ensure_ascii=False),
+                    json.dumps(list(payload.get("affected_workflows") or operations.get("workflows") or []), ensure_ascii=False),
+                    json.dumps(list(payload.get("affected_clauses") or operations.get("clauses") or []), ensure_ascii=False),
+                    payload.get("impact_score") if payload.get("impact_score") not in (None, "") else operations.get("impact_score") or None,
                     now,
                     now,
                 ),
             )
+            audit_event(conn, empresa["id"], "legal_radar", item_id, "Crear novedad legal", usuario=payload.get("usuario"), detalles={"area": area, "titulo": titulo}, now=now)
             json_response(self, {"ok": True, "id": item_id})
             conn.commit()
             return
@@ -22856,12 +23142,20 @@ class Handler(BaseHTTPRequestHandler):
                 "url",
                 "resumen",
                 "accion_recomendada",
+                "affected_documents",
+                "affected_workflows",
+                "affected_clauses",
+                "impact_score",
                 "reviewed_by",
             )
             updates = {}
             for key in allowed:
                 if key in payload:
-                    value = str(payload.get(key) or "").strip()
+                    raw_value = payload.get(key)
+                    if key in {"affected_documents", "affected_workflows", "affected_clauses"} and isinstance(raw_value, (list, tuple)):
+                        value = json.dumps(list(raw_value), ensure_ascii=False)
+                    else:
+                        value = str(raw_value or "").strip()
                     updates[key] = value or None
             estado_value = normalize_lookup_text(updates.get("estado") or payload.get("estado") or "").lower()
             if estado_value == "revisado":
@@ -22878,6 +23172,7 @@ class Handler(BaseHTTPRequestHandler):
                 f"UPDATE legal_radar_items SET {set_clause}, updated_at = datetime(?) WHERE id = ?",
                 values,
             )
+            audit_event(conn, empresa["id"], "legal_radar", record_id, "Actualizar novedad legal", usuario=payload.get("usuario"), detalles={"area": normalize_legal_area(payload.get("area") or "inmobiliaria"), "estado": updates.get("estado")}, now=now)
             json_response(self, {"ok": True, "id": record_id})
             conn.commit()
             return
@@ -24815,6 +25110,23 @@ class Handler(BaseHTTPRequestHandler):
             action_row = conn.execute(
                 "SELECT * FROM acciones WHERE rowid = last_insert_rowid()"
             ).fetchone()
+            audit_event(
+                conn,
+                empresa["id"],
+                "accion",
+                action_row["id"] if action_row else None,
+                "Crear acción",
+                usuario=payload.get("usuario"),
+                detalles={
+                    "servicio": servicio,
+                    "tipo": tipo,
+                    "estado": estado,
+                    "cliente_id": payload.get("cliente_id"),
+                    "inmueble_id": payload.get("inmueble_id"),
+                    "asesoramiento_id": payload.get("asesoramiento_id"),
+                },
+                now=now,
+            )
             if normalize_inmo_action_type(tipo) == "cita_adquisicion":
                 inmueble_id = str(payload.get("inmueble_id") or "").strip()
                 if inmueble_id:
@@ -24902,6 +25214,22 @@ class Handler(BaseHTTPRequestHandler):
             ).fetchone()
             if normalize_lookup_text(servicio_final) == "financiaciones" and estado_final.lower() != "pendiente":
                 apply_fin_action_workflow(conn, empresa["id"], action_row, now)
+            audit_event(
+                conn,
+                empresa["id"],
+                "accion",
+                record_id,
+                "Actualizar acción",
+                usuario=payload.get("usuario"),
+                detalles={
+                    "servicio": servicio_final,
+                    "tipo": tipo_final,
+                    "estado": estado_final,
+                    "resultado_cierre": resultado_final,
+                    "estado_siguiente": estado_siguiente_final,
+                },
+                now=now,
+            )
             if tipo_norm == "cita_adquisicion" and inmueble_id and estado_final.lower() != "pendiente":
                 resultado_norm = normalize_lookup_text(resultado_final).lower()
                 destino = ""
@@ -28263,10 +28591,10 @@ class Handler(BaseHTTPRequestHandler):
             ).fetchall()
             docs = conn.execute(
                 """
-                SELECT nombre, url, tipo
+                SELECT nombre, url, tipo, estado, version, plantilla_clave, origen_tipo, origen_id
                 FROM inmueble_docs
                 WHERE inmueble_id = ?
-                ORDER BY created_at DESC
+                ORDER BY version DESC, created_at DESC
                 """,
                 (inmueble_id,),
             ).fetchall()
@@ -28361,6 +28689,10 @@ class Handler(BaseHTTPRequestHandler):
                 filename.replace(".pdf", ""),
                 now,
                 replace_existing=True,
+                empresa_id=inmueble["empresa_id"],
+                plantilla_clave="hoja_visita",
+                origen_tipo="inmueble_visita_pdf",
+                origen_id=demanda_id or buyer.get("cliente_id") or inmueble_id,
             )
             conn.commit()
             binary_response(self, pdf_bytes, content_type="application/pdf", filename=filename)
@@ -28410,6 +28742,11 @@ class Handler(BaseHTTPRequestHandler):
                 filename.replace(".pdf", ""),
                 now,
                 replace_existing=False,
+                empresa_id=inmueble["empresa_id"],
+                plantilla_clave="negociacion_pdf",
+                origen_tipo="accion",
+                origen_id=action_id,
+                payload_json={"accion_id": action_id, "documento_tipo": action["documento_tipo"]},
             )
             conn.commit()
             binary_response(self, pdf_bytes, content_type="application/pdf", filename=filename)
@@ -28451,10 +28788,10 @@ class Handler(BaseHTTPRequestHandler):
                 return
             docs = conn.execute(
                 """
-                SELECT nombre, url, tipo
+                SELECT nombre, url, tipo, estado, version, plantilla_clave
                 FROM inmueble_docs
                 WHERE inmueble_id = ?
-                ORDER BY created_at DESC
+                ORDER BY version DESC, created_at DESC
                 """,
                 (inmueble_id,),
             ).fetchall()
@@ -28490,6 +28827,11 @@ class Handler(BaseHTTPRequestHandler):
                 filename.replace(".pdf", ""),
                 now,
                 replace_existing=True,
+                empresa_id=inmueble["empresa_id"],
+                plantilla_clave=doc_kind,
+                origen_tipo="consumo",
+                origen_id=inmueble_id,
+                payload_json={"kind": doc_kind},
             )
             conn.commit()
             binary_response(self, pdf_bytes, content_type="application/pdf", filename=filename)
@@ -28502,14 +28844,80 @@ class Handler(BaseHTTPRequestHandler):
                 return
             rows = conn.execute(
                 """
-                SELECT id, nombre, url, tipo, created_at
+                SELECT id, nombre, url, tipo, estado, version, plantilla_clave, origen_tipo, origen_id,
+                       reviewed_at, reviewed_by, created_at, updated_at
                 FROM inmueble_docs
                 WHERE inmueble_id = ?
-                ORDER BY created_at DESC
+                ORDER BY version DESC, created_at DESC
                 """,
                 (inmueble_id,),
             ).fetchall()
             json_response(self, {"rows": [dict(r) for r in rows]})
+            return
+
+        if path == "/api/inmueble_timeline":
+            inmueble_id = params.get("inmueble_id", [""])[0]
+            if not inmueble_id:
+                json_response(self, {"error": "inmueble_id requerido"}, status=400)
+                return
+            docs_rows = conn.execute(
+                """
+                SELECT id, nombre, tipo, estado, version, url, created_at, updated_at
+                FROM inmueble_docs
+                WHERE inmueble_id = ?
+                """,
+                (inmueble_id,),
+            ).fetchall()
+            action_rows = conn.execute(
+                """
+                SELECT id, tipo, estado, resultado_cierre, responsable, fecha, hora, created_at, updated_at
+                FROM acciones
+                WHERE inmueble_id = ?
+                """,
+                (inmueble_id,),
+            ).fetchall()
+            audit_rows = conn.execute(
+                """
+                SELECT id, entidad, entidad_id, accion, usuario, detalles, created_at
+                FROM auditoria
+                WHERE (entidad = 'inmueble' AND entidad_id = ?)
+                   OR (entidad = 'accion' AND entidad_id IN (SELECT id FROM acciones WHERE inmueble_id = ?))
+                   OR (entidad = 'inmueble_docs' AND entidad_id IN (SELECT id FROM inmueble_docs WHERE inmueble_id = ?))
+                ORDER BY created_at DESC
+                LIMIT 200
+                """,
+                (inmueble_id, inmueble_id, inmueble_id),
+            ).fetchall()
+            items = []
+            for row in docs_rows:
+                items.append({
+                    "kind": "documento",
+                    "id": row["id"],
+                    "title": row["nombre"] or row["tipo"] or "Documento",
+                    "status": row["estado"] or "Vigente",
+                    "meta": {"tipo": row["tipo"], "version": row["version"], "url": row["url"]},
+                    "date": row["created_at"] or row["updated_at"],
+                })
+            for row in action_rows:
+                items.append({
+                    "kind": "accion",
+                    "id": row["id"],
+                    "title": row["tipo"] or "Acción",
+                    "status": row["estado"] or "Pendiente",
+                    "meta": {"resultado": row["resultado_cierre"], "responsable": row["responsable"], "fecha": row["fecha"], "hora": row["hora"]},
+                    "date": row["updated_at"] or row["created_at"],
+                })
+            for row in audit_rows:
+                items.append({
+                    "kind": "auditoria",
+                    "id": row["id"],
+                    "title": row["accion"] or "Evento",
+                    "status": row["entidad"] or "",
+                    "meta": {"usuario": row["usuario"], "detalles": row["detalles"], "entidad_id": row["entidad_id"]},
+                    "date": row["created_at"],
+                })
+            items.sort(key=lambda item: str(item.get("date") or ""), reverse=True)
+            json_response(self, {"rows": items[:250]})
             return
 
         if path == "/api/demandas":

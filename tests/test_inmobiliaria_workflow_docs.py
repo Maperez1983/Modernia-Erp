@@ -14,6 +14,7 @@ from web.server import (
     get_legal_copilot_catalog,
     get_legal_radar_sources_config,
     get_legal_copilot_topics,
+    get_legal_topic_operations,
     parse_legal_feed_entries,
     persist_generated_inmueble_pdf,
     resolve_legal_copilot_topic,
@@ -35,6 +36,14 @@ class InmobiliariaWorkflowDocsTests(unittest.TestCase):
               nombre TEXT,
               url TEXT,
               tipo TEXT,
+              estado TEXT,
+              version INTEGER,
+              plantilla_clave TEXT,
+              origen_tipo TEXT,
+              origen_id TEXT,
+              payload_json TEXT,
+              reviewed_at TEXT,
+              reviewed_by TEXT,
               created_at TEXT,
               updated_at TEXT
             );
@@ -90,6 +99,10 @@ class InmobiliariaWorkflowDocsTests(unittest.TestCase):
               url TEXT,
               resumen TEXT,
               accion_recomendada TEXT,
+              affected_documents TEXT,
+              affected_workflows TEXT,
+              affected_clauses TEXT,
+              impact_score REAL,
               source_key TEXT,
               matched_keywords TEXT,
               auto_detected INTEGER DEFAULT 0,
@@ -99,6 +112,16 @@ class InmobiliariaWorkflowDocsTests(unittest.TestCase):
               applied_at TEXT,
               created_at TEXT,
               updated_at TEXT
+            );
+            CREATE TABLE auditoria (
+              id TEXT PRIMARY KEY,
+              empresa_id TEXT,
+              entidad TEXT,
+              entidad_id TEXT,
+              accion TEXT,
+              usuario TEXT,
+              detalles TEXT,
+              created_at TEXT
             );
             """
         )
@@ -137,13 +160,16 @@ class InmobiliariaWorkflowDocsTests(unittest.TestCase):
                 self.assertTrue(Path(result["path"]).exists())
                 self.assertTrue(result["url"].startswith("/uploads/inmuebles/generated/"))
         doc = self.conn.execute(
-            "SELECT nombre, url, tipo FROM inmueble_docs WHERE inmueble_id = 'i1' LIMIT 1"
+            "SELECT nombre, url, tipo, estado, version, plantilla_clave FROM inmueble_docs WHERE inmueble_id = 'i1' LIMIT 1"
         ).fetchone()
         self.assertIsNotNone(doc)
         self.assertEqual(doc["tipo"], "Hoja de visita")
         self.assertEqual(doc["url"], result["url"])
+        self.assertEqual(doc["estado"], "Vigente")
+        self.assertEqual(doc["version"], 1)
+        self.assertEqual(doc["plantilla_clave"], "hoja_de_visita")
 
-    def test_persist_generated_inmueble_pdf_replace_existing_reuses_doc_and_removes_old_file(self):
+    def test_persist_generated_inmueble_pdf_replace_existing_creates_new_version_and_keeps_history(self):
         with tempfile.TemporaryDirectory() as tmp:
             upload_root = Path(tmp)
             with patch.object(server, "UPLOADS", upload_root):
@@ -168,13 +194,43 @@ class InmobiliariaWorkflowDocsTests(unittest.TestCase):
                     self.now,
                     replace_existing=True,
                 )
-                self.assertEqual(first["id"], second["id"])
+                self.assertNotEqual(first["id"], second["id"])
                 self.assertTrue(Path(second["path"]).exists())
                 self.assertEqual(Path(second["path"]).read_bytes(), b"%PDF new")
-        total = self.conn.execute(
-            "SELECT COUNT(*) AS total FROM inmueble_docs WHERE inmueble_id = 'i1' AND tipo = 'Ficha venta'"
-        ).fetchone()["total"]
-        self.assertEqual(total, 1)
+        rows = self.conn.execute(
+            "SELECT id, estado, version FROM inmueble_docs WHERE inmueble_id = 'i1' AND tipo = 'Ficha venta' ORDER BY version"
+        ).fetchall()
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0]["estado"], "Reemplazado")
+        self.assertEqual(rows[0]["version"], 1)
+        self.assertEqual(rows[1]["estado"], "Vigente")
+        self.assertEqual(rows[1]["version"], 2)
+
+    def test_persist_generated_inmueble_pdf_writes_audit_entry(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            upload_root = Path(tmp)
+            with patch.object(server, "UPLOADS", upload_root):
+                persist_generated_inmueble_pdf(
+                    self.conn,
+                    "i1",
+                    "Nota precio",
+                    "Nota precio · Calle Prueba 1",
+                    b"%PDF data",
+                    "nota_precio_prueba",
+                    self.now,
+                    empresa_id="e1",
+                    usuario="tester",
+                    plantilla_clave="venta_precio",
+                    origen_tipo="consumo",
+                    origen_id="i1",
+                    payload_json={"kind": "venta_precio"},
+                )
+        audit = self.conn.execute(
+            "SELECT entidad, accion, usuario FROM auditoria WHERE entidad = 'inmueble_docs' LIMIT 1"
+        ).fetchone()
+        self.assertIsNotNone(audit)
+        self.assertEqual(audit["accion"], "Generar documento")
+        self.assertEqual(audit["usuario"], "tester")
 
     def test_sync_inmueble_stage_for_action_creates_captacion_and_updates_both_entities(self):
         sync_inmueble_stage_for_action(self.conn, "i1", "adquisicion", self.now)
@@ -212,6 +268,12 @@ class InmobiliariaWorkflowDocsTests(unittest.TestCase):
         )
         self.assertEqual(topic_key, "consumo_andalucia")
 
+    def test_get_legal_topic_operations_returns_operational_context(self):
+        payload = get_legal_topic_operations("inmobiliaria", "reserva_arras")
+        self.assertIn("Reserva / arras", payload["documents"])
+        self.assertIn("Reserva", payload["workflows"])
+        self.assertGreater(payload["impact_score"], 0.9)
+
     def test_get_legal_copilot_topics_loads_editable_json(self):
         with tempfile.TemporaryDirectory() as tmp:
             legal_path = Path(tmp) / "legal.json"
@@ -248,15 +310,16 @@ class InmobiliariaWorkflowDocsTests(unittest.TestCase):
         self.conn.execute(
             """
             INSERT INTO legal_radar_items (
-              id, area, fuente, titulo, fecha_publicacion, estado, created_at, updated_at
+              id, area, fuente, titulo, fecha_publicacion, estado, affected_documents, impact_score, created_at, updated_at
             ) VALUES
-              ('l1', 'inmobiliaria', 'BOE', 'Cambio 1', '2026-03-20', 'Aplicado', '2026-03-20', '2026-03-20'),
-              ('l2', 'inmobiliaria', 'BOJA', 'Cambio 2', '2026-03-21', 'Pendiente', '2026-03-21', '2026-03-21'),
-              ('l3', 'inmobiliaria', 'BOE', 'Cambio 3', '2026-03-22', 'Revisado', '2026-03-22', '2026-03-22')
+              ('l1', 'inmobiliaria', 'BOE', 'Cambio 1', '2026-03-20', 'Aplicado', '[\"Contrato privado\"]', 0.9, '2026-03-20', '2026-03-20'),
+              ('l2', 'inmobiliaria', 'BOJA', 'Cambio 2', '2026-03-21', 'Pendiente', '[\"DIA alquiler\"]', 0.7, '2026-03-21', '2026-03-21'),
+              ('l3', 'inmobiliaria', 'BOE', 'Cambio 3', '2026-03-22', 'Revisado', '[\"Hoja de visita\"]', 0.5, '2026-03-22', '2026-03-22')
             """
         )
         payload = fetch_legal_radar_items(self.conn, area="inmobiliaria", limit=10)
         self.assertEqual(payload["rows"][0]["id"], "l2")
+        self.assertEqual(payload["rows"][0]["affected_documents"], ["DIA alquiler"])
         self.assertEqual(payload["summary"]["pendiente"], 1)
         self.assertEqual(payload["summary"]["revisado"], 1)
         self.assertEqual(payload["summary"]["aplicado"], 1)
@@ -313,6 +376,7 @@ class InmobiliariaWorkflowDocsTests(unittest.TestCase):
         self.assertEqual(detection["topic_key"], "contrato_privado_arrendamiento")
         self.assertEqual(detection["impacto"], "Alto")
         self.assertIn("arrendamientos urbanos", detection["matched_keywords"])
+        self.assertIn("Contrato privado de arrendamiento", detection["affected_documents"])
 
     def test_scan_legal_radar_sources_creates_items_and_syncs_knowledge(self):
         with tempfile.TemporaryDirectory() as tmp:
