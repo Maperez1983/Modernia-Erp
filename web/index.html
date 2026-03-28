@@ -390,7 +390,18 @@
           </div>
         </div>
         <div class="workspace-central-layout crm-workspace-view" data-workspace-view="motores">
-          <div class="form-card">
+          <div class="form-card span-2">
+            <div id="workspaceEngineTabs" class="crm-workspace-tabs">
+              <button type="button" class="tab active" data-workspace-engine-tab="documental">Documental</button>
+              <button type="button" class="tab" data-workspace-engine-tab="facturacion">Facturación</button>
+              <button type="button" class="tab" data-workspace-engine-tab="facturas_recibidas">Facturas recibidas</button>
+              <button type="button" class="tab" data-workspace-engine-tab="portal_cliente">Portal cliente</button>
+              <button type="button" class="tab" data-workspace-engine-tab="registro_horario">Registro horario</button>
+              <button type="button" class="tab" data-workspace-engine-tab="automatizaciones">Automatizaciones</button>
+              <button type="button" class="tab" data-workspace-engine-tab="copilot">Copilot</button>
+            </div>
+          </div>
+          <div class="form-card" data-workspace-engine="facturacion">
             <div class="section-head">
               <div>
                 <h3>Facturación transversal</h3>
@@ -497,7 +508,7 @@
             </div>
           </div>
         </div>
-        <div class="form-card crm-workspace-view" data-workspace-view="motores">
+        <div class="form-card crm-workspace-view" data-workspace-view="motores" data-workspace-engine="documental">
           <div class="section-head">
             <div>
               <h3>Inbox documental unificado</h3>
@@ -506,7 +517,7 @@
           </div>
           <div id="workspaceDocumentHub"></div>
         </div>
-        <div class="form-card crm-workspace-view" data-workspace-view="motores">
+        <div class="form-card crm-workspace-view" data-workspace-view="motores" data-workspace-engine="copilot">
           <div class="section-head">
             <div>
               <h3>Copilot del grupo</h3>
@@ -560,7 +571,7 @@
           </div>
           <div id="workspaceServiceDesks"></div>
         </div>
-        <div class="workspace-central-layout crm-workspace-view" data-workspace-view="motores">
+        <div class="workspace-central-layout crm-workspace-view" data-workspace-view="motores" data-workspace-engine="facturas_recibidas">
           <div class="form-card">
             <div class="section-head">
               <div>
@@ -697,7 +708,7 @@
             <div id="workspaceSeriesList"></div>
           </div>
         </div>
-        <div class="workspace-central-layout crm-workspace-view" data-workspace-view="motores">
+        <div class="workspace-central-layout crm-workspace-view" data-workspace-view="motores" data-workspace-engine="portal_cliente">
           <div class="form-card">
             <div class="section-head">
               <div>
@@ -732,7 +743,7 @@
             <div id="workspacePortalList"></div>
           </div>
         </div>
-        <div class="form-card crm-workspace-view" data-workspace-view="motores">
+        <div class="form-card crm-workspace-view" data-workspace-view="motores" data-workspace-engine="automatizaciones">
           <div class="section-head">
             <div>
               <h3>Automatizaciones</h3>
@@ -789,7 +800,7 @@
           <div id="workspaceAutomationList"></div>
           <div id="workspaceAutomationLogs" class="workspace-automation-logs"></div>
         </div>
-        <div class="workspace-central-layout crm-workspace-view" data-workspace-view="motores">
+        <div class="workspace-central-layout crm-workspace-view" data-workspace-view="motores" data-workspace-engine="facturacion">
           <div class="form-card">
             <div class="section-head">
               <div>
@@ -894,7 +905,7 @@
             <div id="workspaceRemittancesList"></div>
           </div>
         </div>
-        <div class="form-card crm-workspace-view" data-workspace-view="motores">
+        <div class="form-card crm-workspace-view" data-workspace-view="motores" data-workspace-engine="portal_cliente">
           <div class="section-head">
             <div>
               <h3>Requerimientos portal</h3>
@@ -956,7 +967,7 @@
           </form>
           <div id="workspacePortalRequestList"></div>
         </div>
-        <div class="workspace-central-layout crm-workspace-view" data-workspace-view="motores">
+        <div class="workspace-central-layout crm-workspace-view" data-workspace-view="motores" data-workspace-engine="registro_horario">
           <div class="form-card">
             <div class="section-head">
               <div>
@@ -1580,51 +1591,52 @@
                   <div class="form-card crm-focus-card">
                     <div class="section-head">
                       <div>
-                        <h3>Panorama operativo</h3>
-                        <p class="muted">Usa las vistas para entrar rápido en la parte del proceso que toque.</p>
+                        <h3>Trabajo de hoy</h3>
+                        <p class="muted">Qué inmuebles requieren llamada, cita, documentación o siguiente hito.</p>
                       </div>
                     </div>
-                    <div class="crm-focus-list">
-                      <button type="button" class="crm-focus-link" data-crm-view="captaciones">Revisar noticias y próximas acciones</button>
-                      <button type="button" class="crm-focus-link" data-crm-view="inmuebles">Abrir fichas y documentación de inmuebles</button>
-                      <button type="button" class="crm-focus-link" data-crm-view="alquileres">Controlar cierres y rentas alquiladas</button>
-                      <button type="button" class="crm-focus-link" data-crm-view="compraventas">Controlar precio salida, venta y desviación</button>
-                      <button type="button" class="crm-focus-link" data-crm-view="demandas">Ver compradores activos y matching</button>
-                      <button type="button" class="crm-focus-link" data-crm-view="visitas">Consultar visitas realizadas</button>
+                    <div id="crmResumenHoy" class="crm-focus-list"></div>
+                  </div>
+                </div>
+                <div class="crm-split crm-summary-secondary">
+                  <div class="form-card">
+                    <div class="section-head">
+                      <div>
+                        <h3>Alertas del pipeline</h3>
+                        <p class="muted">Incidencias de calidad y expedientes inmobiliarios que se están quedando bloqueados.</p>
+                      </div>
                     </div>
+                    <div id="crmResumenAlertas" class="crm-focus-list"></div>
+                  </div>
+                  <div class="form-card">
+                    <div class="section-head">
+                      <div>
+                        <h3>Actividad reciente</h3>
+                        <p class="muted">Últimas visitas, movimientos comerciales y cierres visibles.</p>
+                      </div>
+                    </div>
+                    <div id="crmResumenActividad" class="crm-recent"></div>
                   </div>
                 </div>
                 <div class="form-card">
                   <div class="section-head">
                     <div>
                       <h3>Pipeline inmobiliario</h3>
-                      <p class="muted">Vista rápida de noticia, adquisición, encargo, reserva y cierre.</p>
+                      <p class="muted">Lectura rápida de carga por etapa. El kanban completo queda en Captaciones.</p>
                     </div>
-                    <select id="crmEtapaFilter">
-                      <option value="">Todas las etapas</option>
-                      <option>Noticia</option>
-                      <option>Adquisición</option>
-                      <option>Encargo</option>
-                      <option>Reservado</option>
-                      <option>Vendido</option>
-                      <option>Cerrado negativamente</option>
-                      <option>Alquiler</option>
-                    </select>
+                    <button type="button" class="secondary" data-crm-view="captaciones">Abrir pipeline</button>
                   </div>
                   <div id="crmPipeline" class="crm-pipeline"></div>
-                  <div id="crmKanban" class="crm-kanban"></div>
                 </div>
                 <div class="crm-split">
                   <div class="form-card">
                     <div class="section-head">
                       <div>
-                        <h3>Inventario activo</h3>
-                        <p class="muted">Acceso directo a las fichas de inmueble que requieren seguimiento.</p>
+                        <h3>Inmuebles que requieren acción</h3>
+                        <p class="muted">Entradas con pendiente comercial, sin catastro o sin siguiente paso definido.</p>
                       </div>
-                      <input id="crmInmuebleSearch" placeholder="Buscar inmueble..." />
                     </div>
-                    <div id="crmInmueblesTable"></div>
-                    <div class="footer" id="crmInmueblesInfo"></div>
+                    <div id="crmResumenInmuebles" class="crm-recent"></div>
                   </div>
                   <div class="form-card">
                     <div class="section-head">

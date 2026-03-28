@@ -1235,6 +1235,7 @@ const holdingSubtitle = document.getElementById("holdingSubtitle");
 const holdingOrgChart = document.getElementById("holdingOrgChart");
 const workspaceKpis = document.getElementById("workspaceKpis");
 const workspaceViewTabs = document.getElementById("workspaceViewTabs");
+const workspaceEngineTabs = document.getElementById("workspaceEngineTabs");
 const workspaceCompanySwitcher = document.getElementById("workspaceCompanySwitcher");
 const workspaceOverviewHealth = document.getElementById("workspaceOverviewHealth");
 const workspaceOverviewCommercial = document.getElementById("workspaceOverviewCommercial");
@@ -1344,6 +1345,8 @@ const workspaceFincasMeetingStatus = document.getElementById("workspaceFincasMee
 const workspaceFincasMeetingList = document.getElementById("workspaceFincasMeetingList");
 const workspaceViewPanels = Array.from(document.querySelectorAll("[data-workspace-view]"));
 const workspaceViewButtons = Array.from(document.querySelectorAll("[data-workspace-view-tab]"));
+const workspaceEngineButtons = Array.from(document.querySelectorAll("[data-workspace-engine-tab]"));
+const workspaceEnginePanels = Array.from(document.querySelectorAll("[data-workspace-engine]"));
 const yearSelect = document.getElementById("yearSelect");
 const densityToggle = document.getElementById("densityToggle");
 const dbStatus = document.getElementById("dbStatus");
@@ -2004,6 +2007,10 @@ const crmViewCompraventas = document.getElementById("crmViewCompraventas");
 const crmViewDemandas = document.getElementById("crmViewDemandas");
 const crmViewVisitas = document.getElementById("crmViewVisitas");
 const crmViewLegal = document.getElementById("crmViewLegal");
+const crmResumenHoy = document.getElementById("crmResumenHoy");
+const crmResumenAlertas = document.getElementById("crmResumenAlertas");
+const crmResumenActividad = document.getElementById("crmResumenActividad");
+const crmResumenInmuebles = document.getElementById("crmResumenInmuebles");
 const inmoLegalCopilotForm = document.getElementById("inmoLegalCopilotForm");
 const inmoLegalArea = document.getElementById("inmoLegalArea");
 const inmoLegalTopic = document.getElementById("inmoLegalTopic");
@@ -4000,6 +4007,28 @@ const normalizeWorkspaceViewKey = (value = "") => {
   return "overview";
 };
 
+const normalizeWorkspaceEngineKey = (value = "") => {
+  const key = String(value || "").trim().toLowerCase();
+  if (["documental", "facturacion", "facturas_recibidas", "portal_cliente", "registro_horario", "automatizaciones", "copilot"].includes(key)) {
+    return key;
+  }
+  return "documental";
+};
+
+const setWorkspaceEngineView = (engine = "documental") => {
+  const normalized = normalizeWorkspaceEngineKey(engine);
+  state.currentWorkspaceEngineView = normalized;
+  workspaceEngineButtons.forEach((button) => {
+    button.classList.toggle("active", (button.dataset.workspaceEngineTab || "") === normalized);
+  });
+  workspaceEnginePanels.forEach((panel) => {
+    const panelEngine = panel.dataset.workspaceEngine || "";
+    const isHidden = panelEngine !== normalized;
+    panel.classList.toggle("hidden", isHidden);
+    panel.hidden = isHidden;
+  });
+};
+
 const setWorkspaceView = (view = "overview", options = {}) => {
   const { scroll = false, forceTenantView = false } = options;
   let normalized = normalizeWorkspaceViewKey(view);
@@ -4018,6 +4047,9 @@ const setWorkspaceView = (view = "overview", options = {}) => {
     panel.classList.toggle("hidden", isHidden);
     panel.hidden = isHidden;
   });
+  if (normalized === "motores") {
+    setWorkspaceEngineView(state.currentWorkspaceEngineView || "documental");
+  }
   if (scroll && workspaceViewTabs) {
     workspaceViewTabs.scrollIntoView({ behavior: "smooth", block: "start" });
   }
@@ -4029,6 +4061,20 @@ const focusWorkspaceView = (view, element = null, options = {}) => {
     element.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 };
+
+const focusWorkspaceEngine = (engine, element = null, options = {}) => {
+  setWorkspaceView("motores", options);
+  setWorkspaceEngineView(engine);
+  if (element && typeof element.scrollIntoView === "function") {
+    element.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+};
+
+workspaceEngineButtons.forEach((button) => {
+  button.addEventListener("click", () => {
+    setWorkspaceEngineView(button.dataset.workspaceEngineTab || "documental");
+  });
+});
 
 const openWorkspaceLegalCopilot = () => {
   openCrmInmobiliario();
@@ -4078,10 +4124,10 @@ const WORKSPACE_LAUNCHERS = {
     actionLabel: "Ver inbox",
     action: () => {
       if (isTenantWorkspaceMode()) {
-        focusWorkspaceView("motores", workspaceDocumentHub, { forceTenantView: true });
+        focusWorkspaceEngine("documental", workspaceDocumentHub, { forceTenantView: true });
         return;
       }
-      focusWorkspaceView("motores", workspaceDocumentHub);
+      focusWorkspaceEngine("documental", workspaceDocumentHub);
     },
   },
   dashboard: { label: "Dashboard Ejecutivo", actionLabel: "Ir a home", action: () => goHome() },
@@ -4156,10 +4202,10 @@ const WORKSPACE_LAUNCHERS = {
     actionLabel: "Gestionar",
     action: () => {
       if (isTenantWorkspaceMode()) {
-        focusWorkspaceView("motores", workspaceBillingForm, { forceTenantView: true });
+        focusWorkspaceEngine("facturacion", workspaceBillingForm, { forceTenantView: true });
         return;
       }
-      focusWorkspaceView("motores", workspaceBillingForm);
+      focusWorkspaceEngine("facturacion", workspaceBillingForm);
     },
   },
   facturas_recibidas: {
@@ -4167,10 +4213,10 @@ const WORKSPACE_LAUNCHERS = {
     actionLabel: "Ver inbox",
     action: () => {
       if (isTenantWorkspaceMode()) {
-        focusWorkspaceView("motores", workspaceInboxForm, { forceTenantView: true });
+        focusWorkspaceEngine("facturas_recibidas", workspaceInboxForm, { forceTenantView: true });
         return;
       }
-      focusWorkspaceView("motores", workspaceInboxForm);
+      focusWorkspaceEngine("facturas_recibidas", workspaceInboxForm);
     },
   },
   portal_cliente: {
@@ -4178,10 +4224,10 @@ const WORKSPACE_LAUNCHERS = {
     actionLabel: "Gestionar",
     action: () => {
       if (isTenantWorkspaceMode()) {
-        focusWorkspaceView("motores", workspacePortalForm, { forceTenantView: true });
+        focusWorkspaceEngine("portal_cliente", workspacePortalForm, { forceTenantView: true });
         return;
       }
-      focusWorkspaceView("motores", workspacePortalForm);
+      focusWorkspaceEngine("portal_cliente", workspacePortalForm);
     },
   },
   registro_horario: {
@@ -4189,10 +4235,10 @@ const WORKSPACE_LAUNCHERS = {
     actionLabel: "Gestionar",
     action: () => {
       if (isTenantWorkspaceMode()) {
-        focusWorkspaceView("motores", workspaceTimeForm, { forceTenantView: true });
+        focusWorkspaceEngine("registro_horario", workspaceTimeForm, { forceTenantView: true });
         return;
       }
-      focusWorkspaceView("motores", workspaceTimeForm);
+      focusWorkspaceEngine("registro_horario", workspaceTimeForm);
     },
   },
   automatizaciones: {
@@ -4200,10 +4246,10 @@ const WORKSPACE_LAUNCHERS = {
     actionLabel: "Gestionar",
     action: () => {
       if (isTenantWorkspaceMode()) {
-        focusWorkspaceView("motores", workspaceAutomationForm, { forceTenantView: true });
+        focusWorkspaceEngine("automatizaciones", workspaceAutomationForm, { forceTenantView: true });
         return;
       }
-      focusWorkspaceView("motores", workspaceAutomationForm);
+      focusWorkspaceEngine("automatizaciones", workspaceAutomationForm);
     },
   },
   copilot: {
@@ -4211,10 +4257,10 @@ const WORKSPACE_LAUNCHERS = {
     actionLabel: "Abrir hub",
     action: () => {
       if (isTenantWorkspaceMode()) {
-        focusWorkspaceView("motores", workspaceCopilotHub, { forceTenantView: true });
+        focusWorkspaceEngine("copilot", workspaceCopilotHub, { forceTenantView: true });
         return;
       }
-      focusWorkspaceView("motores", workspaceCopilotHub);
+      focusWorkspaceEngine("copilot", workspaceCopilotHub);
     },
   },
 };
@@ -4296,7 +4342,7 @@ const WORKSPACE_HOME_CONTAINERS = [
     description: "Capas compartidas del grupo para documental, facturación, portal, horario y automatización.",
     modules: ["documental", "facturacion", "facturas_recibidas", "portal_cliente", "registro_horario", "automatizaciones", "copilot"],
     planned: [],
-    action: () => focusWorkspaceView("motores", workspaceDocumentHub, { forceTenantView: true }),
+    action: () => focusWorkspaceEngine("documental", workspaceDocumentHub, { forceTenantView: true }),
     actionLabel: "Configurar motores",
   },
 ];
@@ -5378,7 +5424,7 @@ const renderWorkspaceLauncher = (workspace = {}, modules = []) => {
         return;
       }
       if (key === "workspace_engines") {
-        focusWorkspaceView("motores", workspaceDocumentHub, { forceTenantView: true });
+        focusWorkspaceEngine("documental", workspaceDocumentHub, { forceTenantView: true });
       }
     });
   });
@@ -5563,7 +5609,7 @@ const renderWorkspaceModules = (rows = []) => {
     button.addEventListener("click", () => {
       const sectionKey = button.dataset.workspaceSectionJump || "";
       if (sectionKey === "workspace_engines") {
-        focusWorkspaceView("motores", workspaceDocumentHub, { forceTenantView: true });
+        focusWorkspaceEngine("documental", workspaceDocumentHub, { forceTenantView: true });
         return;
       }
       const target = workspaceModules.querySelector(`[data-workspace-section="${sectionKey}"]`);
@@ -18164,6 +18210,9 @@ const updateCaptacionEtapa = (id, etapa) => {
 
 let cachedCrmInmuebles = [];
 let cachedCrmDemandas = [];
+let cachedCrmCaptaciones = [];
+let cachedCrmCompraventas = [];
+let cachedCrmVisitas = [];
 
 const formatDisplayCell = (col, value, fallback = "-") => {
   if (value === null || value === undefined || value === "") return fallback;
