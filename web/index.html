@@ -1732,11 +1732,21 @@
                 </div>
               </div>
               <div id="crmViewDemandas" class="crm-workspace-view hidden">
+                <div id="crmDemandasMini" class="crm-mini-list"></div>
                 <div class="form-card">
                   <div class="section-head">
                     <div>
                       <h3>Demandas</h3>
                       <p class="muted">Compradores activos, filtros de búsqueda y acceso a matching.</p>
+                    </div>
+                    <div class="inline-actions">
+                      <input id="crmDemandaSearch" placeholder="Buscar por cliente, zona o tipo..." />
+                      <select id="crmDemandaEstadoFilter">
+                        <option value="">Todos los estados</option>
+                        <option value="activa">Activa</option>
+                        <option value="pausada">Pausada</option>
+                        <option value="cerrada">Cerrada</option>
+                      </select>
                     </div>
                   </div>
                   <div id="crmDemandasTable"></div>
@@ -1744,11 +1754,22 @@
                 </div>
               </div>
               <div id="crmViewVisitas" class="crm-workspace-view hidden">
+                <div id="crmVisitasMini" class="crm-mini-list"></div>
                 <div class="form-card">
                   <div class="section-head">
                     <div>
                       <h3>Visitas</h3>
                       <p class="muted">Histórico de visitas y seguimiento comercial realizado.</p>
+                    </div>
+                    <div class="inline-actions">
+                      <input id="crmVisitaSearch" placeholder="Buscar por inmueble, cliente o asesor..." />
+                      <select id="crmVisitaEstadoFilter">
+                        <option value="">Todos los estados</option>
+                        <option value="pendiente">Pendiente</option>
+                        <option value="realizada">Realizada</option>
+                        <option value="cancelada">Cancelada</option>
+                        <option value="no interesa">No interesa</option>
+                      </select>
                     </div>
                   </div>
                   <div id="crmVisitasTable"></div>

@@ -2046,8 +2046,11 @@ const crmAlquilerSearch = document.getElementById("crmAlquilerSearch");
 const crmCompraventasTable = document.getElementById("crmCompraventasTable");
 const crmCompraventasInfo = document.getElementById("crmCompraventasInfo");
 const crmCompraventaSearch = document.getElementById("crmCompraventaSearch");
+const crmDemandasMini = document.getElementById("crmDemandasMini");
 const crmDemandasTable = document.getElementById("crmDemandasTable");
 const crmDemandasInfo = document.getElementById("crmDemandasInfo");
+const crmDemandaSearch = document.getElementById("crmDemandaSearch");
+const crmDemandaEstadoFilter = document.getElementById("crmDemandaEstadoFilter");
 const crmNuevaDemandaBtn = document.getElementById("crmNuevaDemandaBtn");
 const demandaDetail = document.getElementById("demandaDetail");
 const demandaBackBtn = document.getElementById("demandaBackBtn");
@@ -2058,8 +2061,11 @@ const visitaForm = document.getElementById("visitaForm");
 const visitaFormStatus = document.getElementById("visitaFormStatus");
 const visitaInmueble = document.getElementById("visitaInmueble");
 const visitaDemanda = document.getElementById("visitaDemanda");
+const crmVisitasMini = document.getElementById("crmVisitasMini");
 const crmVisitasTable = document.getElementById("crmVisitasTable");
 const crmVisitasInfo = document.getElementById("crmVisitasInfo");
+const crmVisitaSearch = document.getElementById("crmVisitaSearch");
+const crmVisitaEstadoFilter = document.getElementById("crmVisitaEstadoFilter");
 const crmKanban = document.getElementById("crmKanban");
 const crmCaptacionesKanban = document.getElementById("crmCaptacionesKanban");
 const crmPipeline = document.getElementById("crmPipeline");
@@ -13863,6 +13869,8 @@ const setCrmWorkspaceView = (view = "resumen") => {
     loadCrmInmuebles();
     loadCrmAlquileres();
     loadCrmCompraventas();
+    loadCrmDemandas();
+    loadCrmVisitas();
   }
 };
 
@@ -18196,6 +18204,54 @@ const renderCrmKanban = (data) => {
   });
 };
 
+const parseCrmDateTime = (dateValue, timeValue = "") => {
+  const dateText = String(dateValue || "").trim();
+  if (!dateText) return 0;
+  let year = 0;
+  let month = 0;
+  let day = 0;
+  let match = dateText.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (match) {
+    year = Number(match[1]);
+    month = Number(match[2]) - 1;
+    day = Number(match[3]);
+  } else {
+    match = dateText.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+    if (!match) return 0;
+    day = Number(match[1]);
+    month = Number(match[2]) - 1;
+    year = Number(match[3]);
+  }
+  const [hours, minutes] = String(timeValue || "")
+    .split(":")
+    .map((part) => Number(part || 0));
+  return new Date(year, month, day, Number.isFinite(hours) ? hours : 0, Number.isFinite(minutes) ? minutes : 0).getTime();
+};
+
+const renderCrmMiniCards = (container, items = []) => {
+  if (!container) return;
+  if (!items.length) {
+    container.innerHTML = "";
+    return;
+  }
+  container.innerHTML = items
+    .map(
+      (item) => `
+        <div class="crm-mini-card">
+          <div>
+            <h4>${escapeHtml(item.title)}</h4>
+            <div class="muted">${escapeHtml(item.summary || "")}</div>
+          </div>
+          <div class="crm-mini-meta">
+            <strong>${escapeHtml(String(item.value ?? "-"))}</strong>
+            <span>${escapeHtml(item.meta || "")}</span>
+          </div>
+        </div>
+      `
+    )
+    .join("");
+};
+
 const renderCrmResumenDashboard = () => {
   const captaciones = Array.isArray(cachedCrmCaptaciones) ? cachedCrmCaptaciones : [];
   const inmuebles = Array.isArray(cachedCrmInmuebles) ? cachedCrmInmuebles : [];
@@ -18300,6 +18356,7 @@ const renderCrmResumenDashboard = () => {
         title: row.inmueble || "Visita",
         meta: `Visita · ${row.fecha || "-"} ${row.hora || ""}`.trim(),
         badge: row.estado || "Pendiente",
+        ts: parseCrmDateTime(row.fecha, row.hora),
       });
     });
     compraventas.slice(0, 3).forEach((row) => {
@@ -18307,9 +18364,10 @@ const renderCrmResumenDashboard = () => {
         title: row.direccion || "Compraventa",
         meta: `Venta · ${row.fecha_escritura || row.fecha_contrato || "-"}`,
         badge: row.estado || "Manual",
+        ts: parseCrmDateTime(row.fecha_escritura || row.fecha_contrato, ""),
       });
     });
-    const sorted = recentItems.slice(0, 6);
+    const sorted = recentItems.sort((a, b) => (b.ts || 0) - (a.ts || 0)).slice(0, 6);
     crmResumenActividad.innerHTML = sorted.length
       ? sorted
           .map(
@@ -18823,7 +18881,43 @@ const loadCrmDemandas = () => {
   api(`/api/demandas?${params.toString()}`).then((data) => {
     const rows = data.rows || [];
     cachedCrmDemandas = rows;
+    const q = String(crmDemandaSearch?.value || "").trim().toLowerCase();
+    const estadoFilter = normalizeSimple(crmDemandaEstadoFilter?.value || "");
+    const filteredRows = rows.filter((row) => {
+      const haystack = [
+        row.cliente,
+        row.tipo,
+        row.zona,
+        row.estado,
+        row.prioridad,
+      ]
+        .map((value) => String(value || "").toLowerCase())
+        .join(" ");
+      if (q && !haystack.includes(q)) return false;
+      if (estadoFilter && normalizeSimple(row.estado || "") !== estadoFilter) return false;
+      return true;
+    });
     renderVisitaSelects();
+    renderCrmMiniCards(crmDemandasMini, [
+      {
+        title: "Demandas totales",
+        value: rows.length,
+        meta: "Base activa",
+        summary: "Compradores y necesidades registradas.",
+      },
+      {
+        title: "Demandas activas",
+        value: rows.filter((row) => normalizeSimple(row.estado || "") === "activa").length,
+        meta: "Seguimiento",
+        summary: "Listas para matching y visitas.",
+      },
+      {
+        title: "Prioridad alta",
+        value: rows.filter((row) => normalizeSimple(row.prioridad || "") === "alta").length,
+        meta: "Urgentes",
+        summary: "Compradores que requieren atención comercial rápida.",
+      },
+    ]);
     const table = document.createElement("table");
     const thead = document.createElement("thead");
     const trHead = document.createElement("tr");
@@ -18846,7 +18940,7 @@ const loadCrmDemandas = () => {
     thead.appendChild(trHead);
     table.appendChild(thead);
     const tbody = document.createElement("tbody");
-    rows.forEach((row) => {
+    filteredRows.forEach((row) => {
       const tr = document.createElement("tr");
       const cells = [
         row.cliente || "-",
@@ -18891,8 +18985,9 @@ const loadCrmDemandas = () => {
     crmDemandasTable.innerHTML = "";
     crmDemandasTable.appendChild(table);
     if (crmDemandasInfo) {
-      crmDemandasInfo.textContent = `Mostrando ${rows.length} demandas.`;
+      crmDemandasInfo.textContent = `Mostrando ${filteredRows.length} de ${rows.length} demandas.`;
     }
+    renderCrmResumenDashboard();
   });
 };
 
@@ -18909,6 +19004,41 @@ const loadCrmVisitas = () => {
   api(`/api/visitas?${params.toString()}`).then((data) => {
     const rows = data.rows || [];
     cachedCrmVisitas = rows;
+    const q = String(crmVisitaSearch?.value || "").trim().toLowerCase();
+    const estadoFilter = normalizeSimple(crmVisitaEstadoFilter?.value || "");
+    const filteredRows = rows.filter((row) => {
+      const haystack = [
+        row.inmueble,
+        row.cliente,
+        row.asesor,
+        row.estado,
+      ]
+        .map((value) => String(value || "").toLowerCase())
+        .join(" ");
+      if (q && !haystack.includes(q)) return false;
+      if (estadoFilter && !normalizeSimple(row.estado || "").includes(estadoFilter)) return false;
+      return true;
+    });
+    renderCrmMiniCards(crmVisitasMini, [
+      {
+        title: "Visitas totales",
+        value: rows.length,
+        meta: "Histórico",
+        summary: "Agenda comercial registrada en el CRM.",
+      },
+      {
+        title: "Pendientes",
+        value: rows.filter((row) => normalizeSimple(row.estado || "").includes("pendiente")).length,
+        meta: "Agenda",
+        summary: "Citas aún sin cerrar.",
+      },
+      {
+        title: "Realizadas",
+        value: rows.filter((row) => normalizeSimple(row.estado || "").includes("realizada")).length,
+        meta: "Seguimiento",
+        summary: "Visitas ya completadas con resultado.",
+      },
+    ]);
     const table = document.createElement("table");
     const thead = document.createElement("thead");
     const trHead = document.createElement("tr");
@@ -18920,7 +19050,10 @@ const loadCrmVisitas = () => {
     thead.appendChild(trHead);
     table.appendChild(thead);
     const tbody = document.createElement("tbody");
-    rows.forEach((row) => {
+    filteredRows
+      .slice()
+      .sort((a, b) => parseCrmDateTime(b.fecha, b.hora) - parseCrmDateTime(a.fecha, a.hora))
+      .forEach((row) => {
       const tr = document.createElement("tr");
       const values = [
         row.fecha || "-",
@@ -18938,12 +19071,12 @@ const loadCrmVisitas = () => {
         tr.appendChild(td);
       });
       tbody.appendChild(tr);
-    });
+      });
     table.appendChild(tbody);
     crmVisitasTable.innerHTML = "";
     crmVisitasTable.appendChild(table);
     if (crmVisitasInfo) {
-      crmVisitasInfo.textContent = `Mostrando ${rows.length} visitas.`;
+      crmVisitasInfo.textContent = `Mostrando ${filteredRows.length} de ${rows.length} visitas.`;
     }
     renderCrmResumenDashboard();
   });
@@ -29459,6 +29592,34 @@ if (crmAlquilerSearch) {
     scheduleSave("crm-alquileres-search", () => {
       loadCrmAlquileres();
     }, 300);
+  });
+}
+
+if (crmDemandaSearch) {
+  crmDemandaSearch.addEventListener("input", () => {
+    scheduleSave("crm-demandas-search", () => {
+      loadCrmDemandas();
+    }, 250);
+  });
+}
+
+if (crmDemandaEstadoFilter) {
+  crmDemandaEstadoFilter.addEventListener("change", () => {
+    loadCrmDemandas();
+  });
+}
+
+if (crmVisitaSearch) {
+  crmVisitaSearch.addEventListener("input", () => {
+    scheduleSave("crm-visitas-search", () => {
+      loadCrmVisitas();
+    }, 250);
+  });
+}
+
+if (crmVisitaEstadoFilter) {
+  crmVisitaEstadoFilter.addEventListener("change", () => {
+    loadCrmVisitas();
   });
 }
 
