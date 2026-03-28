@@ -32150,7 +32150,10 @@ if (inmuebleDeleteBtn) {
     fetch("/api/inmueble_delete", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ inmueble_id: state.currentInmuebleId }),
+      body: JSON.stringify({
+        inmueble_id: state.currentInmuebleId,
+        empresa_nombre: DASHBOARD_COMPANY,
+      }),
     })
       .then((res) => res.json())
       .then((data) => {

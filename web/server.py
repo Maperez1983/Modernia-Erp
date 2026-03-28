@@ -25502,10 +25502,24 @@ class Handler(BaseHTTPRequestHandler):
             if not inmueble_id:
                 json_response(self, {"error": "inmueble_id requerido"}, status=400)
                 return
-            inmueble = conn.execute(
-                "SELECT id, empresa_id, direccion FROM inmuebles WHERE id = ? AND empresa_id = ? LIMIT 1",
-                (inmueble_id, empresa["id"]),
-            ).fetchone()
+            target_empresa_id = empresa["id"] if empresa else None
+            if not target_empresa_id:
+                row = conn.execute(
+                    "SELECT empresa_id FROM inmuebles WHERE id = ? LIMIT 1",
+                    (inmueble_id,),
+                ).fetchone()
+                target_empresa_id = row["empresa_id"] if row and row["empresa_id"] else None
+            inmueble = None
+            if target_empresa_id:
+                inmueble = conn.execute(
+                    "SELECT id, empresa_id, direccion FROM inmuebles WHERE id = ? AND empresa_id = ? LIMIT 1",
+                    (inmueble_id, target_empresa_id),
+                ).fetchone()
+            else:
+                inmueble = conn.execute(
+                    "SELECT id, empresa_id, direccion FROM inmuebles WHERE id = ? LIMIT 1",
+                    (inmueble_id,),
+                ).fetchone()
             if not inmueble:
                 json_response(self, {"error": "Inmueble no encontrado"}, status=404)
                 return
