@@ -1688,6 +1688,11 @@ def ensure_gestoria_renta_docs(
     ejercicio: str | None = None,
     estado_presentacion: str | None = None,
 ) -> None:
+    docs_table = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'gestoria_docs'"
+    ).fetchone()
+    if not docs_table:
+        return
     ejercicio = str(ejercicio or record.get("ejercicio") or DEFAULT_EJERCICIO).strip() or DEFAULT_EJERCICIO
     estado_presentacion = detect_renta_doc_status(
         estado_presentacion or record.get("estado_presentacion") or record.get("doc_status")
