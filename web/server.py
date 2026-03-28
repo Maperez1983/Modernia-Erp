@@ -11046,6 +11046,9 @@ CATRASTRO_STREET_TYPE_MAP = {
     "CALLE": "CL",
     "CL": "CL",
     "C": "CL",
+    "BARRIADA": "BA",
+    "BARDA": "BA",
+    "BA": "BA",
     "AVENIDA": "AV",
     "AV": "AV",
     "AVDA": "AV",
@@ -11068,9 +11071,12 @@ CATRASTRO_STREET_TYPE_MAP = {
 }
 
 CATRASTRO_LOOKUP_URLS = (
-    "https://ovc.catastro.meh.es/ovcservweb/OVCSWLocalizacionRC/OVCCallejeroCodigos.asmx/Consulta_DNPLOC",
-    "https://www1.sedecatastro.gob.es/ovcservweb/OVCSWLocalizacionRC/OVCCallejeroCodigos.asmx/Consulta_DNPLOC",
+    "https://ovc.catastro.meh.es/ovcservweb/OVCSWLocalizacionRC/OVCCallejero.asmx/Consulta_DNPLOC",
+    "https://www1.sedecatastro.gob.es/ovcservweb/OVCSWLocalizacionRC/OVCCallejero.asmx/Consulta_DNPLOC",
 )
+
+CATRASTRO_STREET_SEARCH_URL = "https://ovc.catastro.meh.es/ovcservweb/OVCSWLocalizacionRC/OVCCallejero.asmx/ConsultaVia"
+CATRASTRO_NUMBER_SEARCH_URL = "https://ovc.catastro.meh.es/ovcservweb/OVCSWLocalizacionRC/OVCCallejero.asmx/ConsultaNumero"
 
 
 def parse_inmobiliaria_address_for_catastro(value):
@@ -11162,6 +11168,79 @@ def extract_catastro_candidates_from_xml(xml_text, fallback_label=""):
     return {"candidates": candidates, "messages": messages}
 
 
+def extract_catastro_streets_from_xml(xml_text):
+    if not xml_text:
+        return []
+    root = ET.fromstring(xml_text)
+    streets = []
+    seen = set()
+    for calle in root.iter():
+        if _xml_local_name(calle.tag) != "calle":
+            continue
+        tv = ""
+        nv = ""
+        for child in calle.iter():
+            tag = _xml_local_name(child.tag)
+            text = " ".join(part.strip() for part in child.itertext() if str(part).strip()).strip()
+            if tag == "tv" and text:
+                tv = text
+            elif tag == "nv" and text:
+                nv = text
+        key = (tv, nv)
+        if not nv or key in seen:
+            continue
+        seen.add(key)
+        streets.append({"tipo_via": tv, "nombre_via": nv})
+    return streets
+
+
+def extract_catastro_numbers_from_xml(xml_text, *, street_label=""):
+    if not xml_text:
+        return {"candidates": [], "messages": []}
+    root = ET.fromstring(xml_text)
+    messages = []
+    candidates = []
+    seen = set()
+    for elem in root.iter():
+        tag = _xml_local_name(elem.tag)
+        text = " ".join(part.strip() for part in elem.itertext() if str(part).strip()).strip()
+        if tag in {"err", "des"} and text:
+            lowered = text.lower()
+            if "numero" in lowered or "número" in lowered or "error" in lowered:
+                messages.append(text)
+    for nump in root.iter():
+        if _xml_local_name(nump.tag) != "nump":
+            continue
+        pc1 = pc2 = pnp = plp = ""
+        for child in nump.iter():
+            tag = _xml_local_name(child.tag)
+            text = " ".join(part.strip() for part in child.itertext() if str(part).strip()).strip()
+            if tag == "pc1":
+                pc1 = re.sub(r"\s+", "", text)
+            elif tag == "pc2":
+                pc2 = re.sub(r"\s+", "", text)
+            elif tag == "pnp":
+                pnp = re.sub(r"\s+", "", text)
+            elif tag == "plp":
+                plp = re.sub(r"\s+", "", text)
+        ref = re.sub(r"[^A-Z0-9]", "", f"{pc1}{pc2}".upper())
+        if not ref or ref in seen:
+            continue
+        seen.add(ref)
+        suffix = f" {plp}" if plp else ""
+        label = f"{street_label} {pnp}{suffix}".strip()
+        candidates.append({"referencia_catastral": ref, "label": label})
+    return {"candidates": candidates, "messages": messages}
+
+
+def _fetch_catastro_xml(url, params):
+    query = urllib.parse.urlencode(params)
+    full_url = f"{url}?{query}"
+    with urllib.request.urlopen(full_url, timeout=8) as response:
+        xml_text = response.read().decode("utf-8", errors="ignore")
+    return full_url, xml_text
+
+
 def lookup_catastro_reference_by_address(*, provincia="", municipio="", direccion="", codigo_postal=""):
     direccion = str(direccion or "").strip()
     if not direccion:
@@ -11179,12 +11258,13 @@ def lookup_catastro_reference_by_address(*, provincia="", municipio="", direccio
         "Sigla": parts["sigla"],
         "Calle": parts["calle"],
         "Numero": parts["numero"],
+        "Bloque": parts["bloque"],
+        "Escalera": parts["escalera"],
+        "Planta": parts["planta"],
+        "Puerta": parts["puerta"],
     }
-    for extra_key in ("Bloque", "Escalera", "Planta", "Puerta"):
-        value = parts[extra_key.lower()]
-        if value:
-            query[extra_key] = value
     last_error = ""
+    direct_candidates = []
     for base_url in CATRASTRO_LOOKUP_URLS:
         url = f"{base_url}?{urllib.parse.urlencode(query)}"
         try:
@@ -11200,6 +11280,76 @@ def lookup_catastro_reference_by_address(*, provincia="", municipio="", direccio
                         continue
                     seen_refs.add(ref)
                     unique_refs.append(item)
+                if len(unique_refs) == 1 and not parsed["messages"]:
+                    return {
+                        "ok": True,
+                        "direccion_consultada": direccion,
+                        "direccion_normalizada": " ".join(
+                            part for part in [parts["sigla"], parts["calle"], parts["numero"]] if part
+                        ).strip(),
+                        "codigo_postal": codigo_postal or "",
+                        "provincia": provincia or "",
+                        "municipio": municipio or "",
+                        "candidates": unique_refs,
+                        "referencia_catastral": unique_refs[0]["referencia_catastral"],
+                        "match_unique": True,
+                        "source_url": url,
+                        "messages": parsed["messages"],
+                    }
+                direct_candidates = unique_refs
+            if parsed["messages"]:
+                last_error = "; ".join(parsed["messages"])
+        except Exception as exc:
+            last_error = str(exc)
+            continue
+    try:
+        street_queries = []
+        if parts["calle"]:
+            street_queries.append({"TipoVia": parts["sigla"], "NombreVia": parts["calle"]})
+            street_queries.append({"TipoVia": "", "NombreVia": parts["calle"]})
+        for street_query in street_queries:
+            _, street_xml = _fetch_catastro_xml(
+                CATRASTRO_STREET_SEARCH_URL,
+                {
+                    "Provincia": provincia,
+                    "Municipio": municipio,
+                    "TipoVia": street_query["TipoVia"],
+                    "NombreVia": street_query["NombreVia"],
+                },
+            )
+            street_candidates = extract_catastro_streets_from_xml(street_xml)
+            if not street_candidates:
+                continue
+            all_candidates = []
+            seen_refs = set()
+            for street in street_candidates[:8]:
+                street_label = " ".join(part for part in [street.get("tipo_via"), street.get("nombre_via")] if part).strip()
+                _, number_xml = _fetch_catastro_xml(
+                    CATRASTRO_NUMBER_SEARCH_URL,
+                    {
+                        "Provincia": provincia,
+                        "Municipio": municipio,
+                        "TipoVia": street.get("tipo_via", ""),
+                        "NomVia": street.get("nombre_via", ""),
+                        "Numero": parts["numero"],
+                    },
+                )
+                number_result = extract_catastro_numbers_from_xml(number_xml, street_label=street_label)
+                for candidate in number_result["candidates"]:
+                    ref = candidate["referencia_catastral"]
+                    if ref in seen_refs:
+                        continue
+                    seen_refs.add(ref)
+                    all_candidates.append(candidate)
+                if number_result["messages"]:
+                    last_error = "; ".join(number_result["messages"])
+            if all_candidates:
+                exact_candidates = [
+                    item
+                    for item in all_candidates
+                    if re.search(rf"\b{re.escape(parts['numero'])}[A-Z]?\b", item.get("label") or "")
+                ]
+                selected = exact_candidates or all_candidates
                 return {
                     "ok": True,
                     "direccion_consultada": direccion,
@@ -11209,17 +11359,30 @@ def lookup_catastro_reference_by_address(*, provincia="", municipio="", direccio
                     "codigo_postal": codigo_postal or "",
                     "provincia": provincia or "",
                     "municipio": municipio or "",
-                    "candidates": unique_refs,
-                    "referencia_catastral": unique_refs[0]["referencia_catastral"] if len(unique_refs) == 1 else "",
-                    "match_unique": len(unique_refs) == 1,
-                    "source_url": url,
-                    "messages": parsed["messages"],
+                    "candidates": selected,
+                    "referencia_catastral": selected[0]["referencia_catastral"] if len(selected) == 1 else "",
+                    "match_unique": len(selected) == 1,
+                    "source_url": CATRASTRO_NUMBER_SEARCH_URL,
+                    "messages": [last_error] if last_error else [],
                 }
-            if parsed["messages"]:
-                last_error = "; ".join(parsed["messages"])
-        except Exception as exc:
-            last_error = str(exc)
-            continue
+    except Exception as exc:
+        last_error = str(exc)
+    if direct_candidates:
+        return {
+            "ok": True,
+            "direccion_consultada": direccion,
+            "direccion_normalizada": " ".join(
+                part for part in [parts["sigla"], parts["calle"], parts["numero"]] if part
+            ).strip(),
+            "codigo_postal": codigo_postal or "",
+            "provincia": provincia or "",
+            "municipio": municipio or "",
+            "candidates": direct_candidates,
+            "referencia_catastral": direct_candidates[0]["referencia_catastral"] if len(direct_candidates) == 1 else "",
+            "match_unique": len(direct_candidates) == 1,
+            "source_url": CATRASTRO_LOOKUP_URLS[0],
+            "messages": [last_error] if last_error else [],
+        }
     raise RuntimeError(last_error or "no se pudo obtener respuesta del Catastro")
 
 
