@@ -2140,6 +2140,7 @@ const inmuebleVisitasInfo = document.getElementById("inmuebleVisitasInfo");
 const inmuebleMap = document.getElementById("inmuebleMap");
 const inmuebleDocsList = document.getElementById("inmuebleDocsList");
 const inmuebleEstadoInfo = document.getElementById("inmuebleEstadoInfo");
+const inmuebleEstadoValidation = document.getElementById("inmuebleEstadoValidation");
 const inmuebleTitle = document.getElementById("inmuebleTitle");
 const inmuebleSubtitle = document.getElementById("inmuebleSubtitle");
 const aieSection = document.getElementById("aieSection");
@@ -18927,14 +18928,6 @@ const refreshCurrentInmuebleProfile = () => {
           ["Próxima acción", captacion.proxima_accion],
         ],
       },
-      {
-        title: "Checklist por estado",
-        items: (() => {
-          const requirements = getInmuebleStageRequirements(inmueble.estado || captacion.etapa || "", inmueble, captacion, propietarios);
-          if (!requirements.length) return [["Revisión", "Sin requisitos"]];
-          return requirements.slice(0, 5).map((item) => [item.label, item.ok ? "OK" : "Pendiente"]);
-        })(),
-      },
     ];
     inmuebleFactsPanel.innerHTML = cards
       .map(
@@ -18957,6 +18950,35 @@ const refreshCurrentInmuebleProfile = () => {
         `
       )
       .join("");
+  }
+
+  if (inmuebleEstadoValidation) {
+    const requirements = getInmuebleStageRequirements(inmueble.estado || captacion.etapa || "", inmueble, captacion, propietarios);
+    const pendientes = requirements.filter((item) => !item.ok);
+    renderCrmMiniCards(inmuebleEstadoValidation, [
+      {
+        title: "Estado actual",
+        value: inmueble.estado || captacion.etapa || "Sin estado",
+        meta: "Pipeline",
+        summary: "Situación comercial en la que se encuentra ahora mismo el inmueble.",
+      },
+      {
+        title: "Pendientes",
+        value: pendientes.length,
+        meta: "Bloqueos",
+        summary: pendientes.length
+          ? pendientes.slice(0, 2).map((item) => item.label).join(" · ")
+          : "Sin bloqueos de datos para la etapa actual.",
+      },
+      {
+        title: "Datos validados",
+        value: requirements.length ? requirements.length - pendientes.length : 0,
+        meta: "Control",
+        summary: requirements.length
+          ? `${requirements.length} comprobaciones mínimas revisadas para esta etapa.`
+          : "Esta etapa no exige validaciones adicionales.",
+      },
+    ]);
   }
 };
 
