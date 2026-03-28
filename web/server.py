@@ -16169,6 +16169,54 @@ def fetch_workspace_personal(conn, workspace_id, empresa_id=None, only_active=Fa
     return {"rows": [dict(row) for row in rows]}
 
 
+def fetch_workspace_time_users(conn, workspace_id, empresa_id=None, only_enabled=False, limit=200):
+    company_ids = resolve_workspace_company_ids(conn, workspace_id, empresa_id=empresa_id)
+    if not company_ids:
+        return {"rows": []}
+    company_rows = conn.execute(
+        f"""
+        SELECT id, nombre
+        FROM empresas
+        WHERE id IN ({",".join("?" for _ in company_ids)})
+        """,
+        company_ids,
+    ).fetchall()
+    company_name_map = {str(row["id"]): str(row["nombre"] or "") for row in company_rows}
+    where = ["COALESCE(u.activo, 1) = 1"]
+    params = []
+    if only_enabled:
+        where.append("COALESCE(u.registro_horario_activo, 0) = 1")
+    rows = conn.execute(
+        f"""
+        SELECT
+          u.id,
+          u.nombre,
+          u.apellido,
+          u.usuario,
+          u.email,
+          u.servicio,
+          u.rol,
+          u.activo,
+          COALESCE(u.registro_horario_activo, 0) AS registro_horario_activo
+        FROM usuarios u
+        WHERE {" AND ".join(where)}
+        ORDER BY u.nombre COLLATE NOCASE ASC, u.apellido COLLATE NOCASE ASC
+        LIMIT ?
+        """,
+        (*params, max(1, min(int(limit or 200), 500))),
+    ).fetchall()
+    payload_rows = []
+    for row in rows:
+        mapped_company_id = infer_workspace_time_company_id(conn, workspace_id, service_raw=row["servicio"] or "", empresa_id=empresa_id)
+        if not mapped_company_id:
+            continue
+        payload = dict(row)
+        payload["empresa_id"] = mapped_company_id
+        payload["empresa_nombre"] = company_name_map.get(str(mapped_company_id), "")
+        payload_rows.append(payload)
+    return {"rows": payload_rows}
+
+
 def fetch_workspace_time_entries(conn, workspace_id, empresa_id=None, limit=40, month=None, persona_id=None):
     empresa_ids = resolve_workspace_company_ids(conn, workspace_id, empresa_id=empresa_id)
     if not empresa_ids:
@@ -27688,6 +27736,25 @@ class Handler(BaseHTTPRequestHandler):
                     workspace_id,
                     empresa_id=empresa_id,
                     only_active=(params.get("activos", ["0"])[0] in {"1", "true"}),
+                ),
+            )
+            return
+
+        if path == "/api/workspace_registro_usuarios":
+            workspace_id = params.get("workspace_id", [""])[0]
+            empresa_id = params.get("empresa_id", [""])[0]
+            limit = params.get("limit", ["200"])[0]
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            json_response(
+                self,
+                fetch_workspace_time_users(
+                    conn,
+                    workspace_id,
+                    empresa_id=empresa_id,
+                    only_enabled=(params.get("activos", ["0"])[0] in {"1", "true"}),
+                    limit=limit,
                 ),
             )
             return

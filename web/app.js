@@ -1182,6 +1182,7 @@ const state = {
   workspaceBillingRows: [],
   workspaceClientOptions: [],
   workspaceClientOptionMap: new Map(),
+  workspaceTimeUsers: [],
   workspaceTimeEmployees: [],
   workspaceTimeSummary: null,
   workspaceTimeMonth: "",
@@ -6749,7 +6750,10 @@ const fillWorkspaceTimeForm = (record = null) => {
 };
 
 const getWorkspaceTimeEligibleUsers = () => {
-  return (state.usersList || [])
+  const sourceRows = (state.workspaceTimeUsers && state.workspaceTimeUsers.length)
+    ? state.workspaceTimeUsers
+    : state.usersList;
+  return (sourceRows || [])
     .filter((user) => Number(user.activo ?? 1) === 1)
     .sort((a, b) => {
       const nameA = `${a.nombre || ""} ${a.apellido || ""}`.trim();
@@ -7355,6 +7359,11 @@ const loadWorkspaceDetail = async (workspaceId) => {
   const companyQuery = state.currentWorkspaceCompanyId
     ? `&empresa_id=${encodeURIComponent(state.currentWorkspaceCompanyId)}`
     : "";
+  const timeUsers = await safeWorkspaceApi(
+    `/api/workspace_registro_usuarios?workspace_id=${encodeURIComponent(workspaceId)}${companyQuery}&limit=300`,
+    { rows: [] }
+  );
+  state.workspaceTimeUsers = timeUsers.rows || [];
   const timeMonth = String(state.workspaceTimeMonth || "").trim() || new Date().toISOString().slice(0, 7);
   state.workspaceTimeMonth = timeMonth;
   const [billing, docs, billingRows, budgetRows, collections, remittances, workspaceClients, health, gestoriaOverview, segurosOverview, finOverview, inmoOverview, serviceDesks, series, inbox, portal, portalRequests, automations, automationLogs, timeRows, timeEmployees, timeSummary, fincasCommunities, fincasIncidents, fincasProviders, fincasMeetings] = await Promise.all([
@@ -31999,7 +32008,7 @@ if (workspaceTimeEmployeeForm) {
   const userLookup = workspaceTimeEmployeeForm.querySelector('[name="usuario_id_lookup"]');
   if (userLookup) {
     userLookup.addEventListener("change", () => {
-      const selected = (state.usersList || []).find((user) => String(user.id || "") === String(userLookup.value || ""));
+      const selected = getWorkspaceTimeEligibleUsers().find((user) => String(user.id || "") === String(userLookup.value || ""));
       const usuarioIdInput = workspaceTimeEmployeeForm.querySelector('[name="usuario_id"]');
       const nameInput = workspaceTimeEmployeeForm.querySelector('[name="nombre"]');
       const emailInput = workspaceTimeEmployeeForm.querySelector('[name="email"]');

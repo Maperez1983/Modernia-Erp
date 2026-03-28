@@ -1581,6 +1581,15 @@ body.crm-fin #companySummary {
   background: rgba(255, 255, 255, 0.9);
 }
 
+.workspace-suite-card strong {
+  color: rgba(32, 48, 33, 0.96);
+  font-weight: 700;
+}
+
+.workspace-suite-card .muted {
+  color: rgba(67, 84, 68, 0.82);
+}
+
 .workspace-suite-card-button {
   width: 100%;
   text-align: left;
