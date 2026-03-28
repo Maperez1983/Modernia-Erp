@@ -9336,7 +9336,17 @@ INMO_ACTION_RESULT_OPTIONS = {
 LEGAL_COPILOT_TOPICS = {
     "encargo_venta": {
         "title": "Encargo de venta",
-        "summary": "Documento base para formalizar la gestión comercial del inmueble antes de pasar a reserva o venta.",
+        "summary": "Documento precontractual de intermediación para regular la comercialización del inmueble y los honorarios de la agencia.",
+        "legal_basis": [
+            "Código Civil: autonomía de la voluntad y validez contractual general.",
+            "LGDCU: control de cláusulas abusivas y transparencia con consumidores.",
+            "Normativa andaluza de información al consumidor en vivienda cuando interviene profesional.",
+        ],
+        "mandatory_docs": [
+            "Identificación de titulares o representantes.",
+            "Datos del inmueble y título sobre el que actúan.",
+            "Honorarios, duración, alcance del encargo y tipo de exclusiva.",
+        ],
         "checklist": [
             "Identificación completa de los propietarios o representantes.",
             "Identificación del inmueble y título sobre el que actúan.",
@@ -9350,16 +9360,41 @@ LEGAL_COPILOT_TOPICS = {
             "Precio, honorarios, duración y exclusiva.",
             "Cláusulas variables negociadas con el cliente.",
         ],
+        "clause_alerts": [
+            "Exclusiva mal delimitada.",
+            "Prórroga tácita automática poco transparente.",
+            "Penalizaciones desproporcionadas por revocación o venta por tercero.",
+        ],
         "warnings": [
             "Revisar representación cuando firman herederos, cotitulares o apoderados.",
             "Evitar penalizaciones automáticas mal equilibradas.",
             "La revisión jurídica final sigue siendo necesaria antes de uso masivo.",
         ],
-        "next_documents": ["Hoja de visita", "Ficha venta", "Nota precio", "Reserva / arras"],
+        "drafting_help": [
+            "Objeto: la propiedad encomienda a la agencia la promoción y mediación para la venta del inmueble identificado en el presente documento.",
+            "Honorarios: la propiedad abonará a la agencia los honorarios pactados únicamente si la operación se perfecciona en los supuestos expresamente previstos en el encargo.",
+            "Exclusiva: durante la vigencia del encargo, la propiedad se compromete a canalizar a través de la agencia las negociaciones iniciadas por potenciales adquirentes captados por la propia agencia.",
+        ],
+        "variable_blocks": [
+            "Partes intervinientes y representación.",
+            "Inmueble y titularidad.",
+            "Honorarios, plazo y exclusiva.",
+            "Supuestos de devengo y causas de resolución.",
+        ],
     },
     "encargo_alquiler": {
         "title": "Encargo de alquiler",
-        "summary": "Formaliza la comercialización del inmueble para alquiler y prepara la salida documental del arrendamiento.",
+        "summary": "Documento de intermediación para comercializar el alquiler, distinto del contrato de arrendamiento final.",
+        "legal_basis": [
+            "Ley de Arrendamientos Urbanos para el contrato final de arrendamiento.",
+            "LGDCU si el arrendador es consumidor y se usan condiciones generales.",
+            "Normativa andaluza informativa en alquiler de vivienda.",
+        ],
+        "mandatory_docs": [
+            "Titularidad del arrendador.",
+            "Datos del inmueble, renta objetivo y duración del encargo.",
+            "Reparto claro de honorarios y alcance del servicio.",
+        ],
         "checklist": [
             "Titularidad del arrendador y datos del inmueble.",
             "Renta objetivo, honorarios y duración del encargo.",
@@ -9370,15 +9405,37 @@ LEGAL_COPILOT_TOPICS = {
             "Renta, fianza, duración del encargo y honorarios.",
             "Condiciones comerciales pactadas.",
         ],
+        "clause_alerts": [
+            "Cobro de gastos de gestión al inquilino en vivienda habitual cuando no corresponda.",
+            "Cláusulas ambiguas sobre duración o cancelación del encargo.",
+        ],
         "warnings": [
             "Separar claramente encargo comercial y contrato de arrendamiento.",
             "Controlar quién asume gastos de gestión en alquiler de vivienda habitual.",
         ],
-        "next_documents": ["DIA alquiler", "Propuesta de alquiler", "Contrato privado de arrendamiento"],
+        "drafting_help": [
+            "Objeto: el arrendador encomienda a la agencia la promoción y mediación para el arrendamiento del inmueble descrito.",
+            "Honorarios: la retribución de la agencia se ajustará a lo pactado y a la normativa aplicable al tipo de arrendamiento.",
+            "Alcance: la agencia podrá publicitar el inmueble, filtrar candidatos y gestionar visitas y propuestas.",
+        ],
+        "variable_blocks": [
+            "Renta objetivo y duración del encargo.",
+            "Honorarios y gastos.",
+            "Situación posesoria e inventario si existe.",
+        ],
     },
     "propuesta_compra": {
         "title": "Propuesta / promesa de compra",
-        "summary": "Documento de negociación previo a la reserva o a la aceptación por la propiedad.",
+        "summary": "Documento precontractual para fijar una oferta económica y sus condiciones, sin confundirlo con reserva o arras.",
+        "legal_basis": [
+            "Código Civil: compraventa y promesa de vender/comprar.",
+            "LGDCU si la operación se documenta con cláusulas predispuestas frente a consumidores.",
+        ],
+        "mandatory_docs": [
+            "Identificación del comprador y del inmueble.",
+            "Precio ofertado, forma de pago y plazo de aceptación.",
+            "Condiciones suspensivas, especialmente financiación si aplica.",
+        ],
         "checklist": [
             "Identificación del comprador y del inmueble.",
             "Importe ofertado y forma de pago.",
@@ -9390,15 +9447,38 @@ LEGAL_COPILOT_TOPICS = {
             "Necesidad de financiación.",
             "Fecha límite de respuesta.",
         ],
+        "clause_alerts": [
+            "Confundir propuesta con reserva o arras.",
+            "No fijar plazo de vigencia.",
+            "No aclarar si la oferta queda condicionada a financiación.",
+        ],
         "warnings": [
             "Diferenciar propuesta, promesa, reserva y arras para no mezclar efectos.",
             "No avanzar a reservado sin aceptación clara de la propiedad.",
         ],
-        "next_documents": ["Aceptación de propuesta", "Reserva / arras", "Contrato privado de compraventa"],
+        "drafting_help": [
+            "Oferta: la parte compradora formula oferta de compra por el importe indicado, sujeta a las condiciones expresamente recogidas en este documento.",
+            "Vigencia: la presente propuesta podrá ser aceptada hasta la fecha y hora indicadas, quedando sin efecto automáticamente después de dicho plazo.",
+            "Condición suspensiva: la eficacia de la propuesta podrá quedar condicionada a la obtención de financiación en los términos descritos.",
+        ],
+        "variable_blocks": [
+            "Importe ofertado.",
+            "Plazo de aceptación.",
+            "Condiciones suspensivas.",
+            "Señal o entrega inicial si aplica.",
+        ],
     },
     "propuesta_alquiler": {
         "title": "Propuesta de alquiler",
-        "summary": "Documento previo al cierre del alquiler cuando todavía no existe contrato privado firmado.",
+        "summary": "Documento previo al cierre del alquiler para fijar oferta económica y condiciones básicas del inquilino.",
+        "legal_basis": [
+            "Ley de Arrendamientos Urbanos para el contrato definitivo.",
+            "LGDCU cuando haya condiciones generales frente a consumidores.",
+        ],
+        "mandatory_docs": [
+            "Datos de inquilino, inmueble, renta y duración prevista.",
+            "Fianza, garantías y fecha objetivo de firma.",
+        ],
         "checklist": [
             "Datos del inquilino y del inmueble.",
             "Renta, duración y fecha prevista.",
@@ -9407,14 +9487,35 @@ LEGAL_COPILOT_TOPICS = {
         "editable_fields": [
             "Renta, garantías, duración y observaciones.",
         ],
+        "clause_alerts": [
+            "Trasladar al inquilino gastos que no procedan en vivienda habitual.",
+            "Usar una propuesta como si fuera ya contrato.",
+        ],
         "warnings": [
             "No usar esta propuesta como sustituto del contrato privado de arrendamiento.",
         ],
-        "next_documents": ["Aceptación de propuesta de alquiler", "Contrato privado de arrendamiento"],
+        "drafting_help": [
+            "Oferta: la parte interesada propone arrendar el inmueble por la renta y condiciones económicas indicadas.",
+            "Vigencia: la propuesta tendrá validez hasta la fecha señalada, salvo aceptación previa por la propiedad.",
+            "Condición: la formalización definitiva quedará sujeta a la verificación de solvencia y firma del contrato de arrendamiento.",
+        ],
+        "variable_blocks": [
+            "Renta, duración y fecha de entrada.",
+            "Fianza y garantías adicionales.",
+            "Plazo de vigencia de la propuesta.",
+        ],
     },
     "reserva_arras": {
         "title": "Reserva / arras",
-        "summary": "Documento puente entre la aceptación de la propuesta y el contrato privado o la escritura.",
+        "summary": "Documento de aseguramiento de la operación con entrega de cantidad y efectos económicos en caso de incumplimiento.",
+        "legal_basis": [
+            "Código Civil: arras y libertad de pactos, con especial cuidado al tipo de arras pactado.",
+        ],
+        "mandatory_docs": [
+            "Partes, inmueble, precio total y cuantía entregada.",
+            "Plazo de escritura o contrato privado.",
+            "Consecuencias del incumplimiento.",
+        ],
         "checklist": [
             "Partes, inmueble y precio final pactado.",
             "Importe entregado y destino de la cantidad.",
@@ -9426,15 +9527,38 @@ LEGAL_COPILOT_TOPICS = {
             "Plazos y forma de pago restante.",
             "Condiciones suspensivas y penalización pactada.",
         ],
+        "clause_alerts": [
+            "No distinguir arras confirmatorias, penitenciales o penales.",
+            "No concretar destino de la cantidad entregada.",
+        ],
         "warnings": [
             "Distinguir si son arras confirmatorias, penitenciales o penales.",
             "No mezclarla con una simple propuesta si ya produce obligaciones más fuertes.",
         ],
-        "next_documents": ["Contrato privado de compraventa", "Escritura"],
+        "drafting_help": [
+            "Entrega: la parte compradora entrega la cantidad indicada en concepto de reserva/arras, que se imputará al precio final en caso de consumarse la operación.",
+            "Plazo: las partes se comprometen a formalizar contrato privado o escritura antes de la fecha pactada.",
+            "Incumplimiento: las consecuencias del incumplimiento serán las expresamente pactadas conforme a la naturaleza de las arras acordadas.",
+        ],
+        "variable_blocks": [
+            "Importe entregado.",
+            "Naturaleza de las arras.",
+            "Plazo de formalización.",
+            "Consecuencias del incumplimiento.",
+        ],
     },
     "contrato_privado_compraventa": {
         "title": "Contrato privado de compraventa",
-        "summary": "Documento contractual principal antes de escritura, con efectos más intensos que propuesta o reserva.",
+        "summary": "Contrato civil principal previo a escritura para regular transmisión, precio, cargas, posesión y responsabilidades.",
+        "legal_basis": [
+            "Código Civil: arts. de compraventa sobre cosa, precio, perfección, entrega y saneamiento.",
+            "LGDCU en control de condiciones generales si una parte es consumidora y el texto es predispuesto.",
+        ],
+        "mandatory_docs": [
+            "Titularidad y representación de vendedores.",
+            "Estado de cargas, precio y calendario de pagos.",
+            "Entrega de posesión, gastos y saneamiento.",
+        ],
         "checklist": [
             "Identificación completa de todas las partes.",
             "Título, cargas, precio y calendario de pagos.",
@@ -9444,15 +9568,39 @@ LEGAL_COPILOT_TOPICS = {
         "editable_fields": [
             "Precio, pagos, fechas, cargas, posesión y pactos especiales.",
         ],
+        "clause_alerts": [
+            "No reflejar cargas reales o situación posesoria.",
+            "Indefinición en gastos, entrega o saneamiento.",
+            "Representación insuficiente de alguno de los titulares.",
+        ],
         "warnings": [
             "Documento de riesgo jurídico superior: requiere plantilla muy revisada.",
             "Revisar cargas, representación y coherencia con reserva/arras previas.",
         ],
-        "next_documents": ["Escritura", "Recibos o anexos de entrega"],
+        "drafting_help": [
+            "Objeto: la parte vendedora vende y la compradora adquiere el inmueble descrito por el precio cierto pactado.",
+            "Pago: el precio se abonará en la forma, plazos y medios de pago previstos en este contrato, con imputación de las cantidades ya entregadas.",
+            "Entrega: la posesión y entrega documental del inmueble se realizará en la fecha y condiciones expresamente pactadas.",
+        ],
+        "variable_blocks": [
+            "Partes, representación y titularidad.",
+            "Precio y calendario de pagos.",
+            "Cargas, saneamiento y gastos.",
+            "Posesión, entrega y anexos.",
+        ],
     },
     "contrato_privado_arrendamiento": {
         "title": "Contrato privado de arrendamiento",
-        "summary": "Contrato principal del alquiler con renta, duración, fianza y obligaciones de las partes.",
+        "summary": "Contrato principal del alquiler con renta, duración, prórrogas, fianza, gastos y uso pactado.",
+        "legal_basis": [
+            "Ley de Arrendamientos Urbanos como norma principal.",
+            "LGDCU si se usan condiciones generales frente a consumidores.",
+        ],
+        "mandatory_docs": [
+            "Identificación de arrendador e inquilino.",
+            "Descripción del inmueble, renta, duración y fianza.",
+            "Inventario, gastos y garantías adicionales si existen.",
+        ],
         "checklist": [
             "Identificación de arrendador e inquilino.",
             "Objeto arrendado, renta, duración, prórrogas y gastos.",
@@ -9462,15 +9610,39 @@ LEGAL_COPILOT_TOPICS = {
         "editable_fields": [
             "Renta, duración, gastos, inventario y garantías.",
         ],
+        "clause_alerts": [
+            "Cláusulas contrarias a LAU en vivienda habitual.",
+            "Gastos mal repercutidos.",
+            "Garantías o penalizaciones desproporcionadas.",
+        ],
         "warnings": [
             "Separar cláusulas imperativas de las libremente negociables.",
             "Controlar gastos de gestión y formalización según el tipo de arrendamiento.",
         ],
-        "next_documents": ["Inventario", "Entrega de llaves", "Recibos de renta"],
+        "drafting_help": [
+            "Objeto: el arrendador cede en arrendamiento a la parte arrendataria el uso de la vivienda/local descrito en este contrato.",
+            "Renta: la renta inicial, su forma de pago y periodicidad serán las indicadas en la cláusula económica.",
+            "Duración: la duración del contrato, prórrogas y causas de resolución se ajustarán a lo pactado y a la normativa aplicable.",
+        ],
+        "variable_blocks": [
+            "Renta, fianza y garantías.",
+            "Duración y prórrogas.",
+            "Gastos y suministros.",
+            "Inventario y entrega de llaves.",
+        ],
     },
     "consumo_andalucia": {
         "title": "Consumo Andalucía",
-        "summary": "Bloque informativo para controlar qué documentación de consumo debe acompañar la comercialización profesional.",
+        "summary": "Marco informativo aplicable cuando la comercialización de vivienda se hace profesionalmente en Andalucía.",
+        "legal_basis": [
+            "Decreto 218/2005 de Andalucía sobre información al consumidor en compraventa y arrendamiento de viviendas.",
+        ],
+        "mandatory_docs": [
+            "Ficha informativa de venta cuando proceda.",
+            "Nota explicativa del precio y formas de pago.",
+            "DIA de alquiler en arrendamientos.",
+            "Trazabilidad de entrega al consumidor.",
+        ],
         "checklist": [
             "Ficha informativa de venta si procede.",
             "Nota explicativa del precio y formas de pago.",
@@ -9480,15 +9652,30 @@ LEGAL_COPILOT_TOPICS = {
         "editable_fields": [
             "Datos del inmueble, precio, gastos y condiciones concretas.",
         ],
+        "clause_alerts": [
+            "No entregar documentación informativa al consumidor.",
+            "Usar publicidad o fichas con datos incompletos o equívocos.",
+        ],
         "warnings": [
             "No confundir documentación comercial con documentación de consumo.",
             "La entrega de información debe quedar trazada en el expediente.",
         ],
-        "next_documents": ["Ficha venta", "Nota precio", "DIA alquiler"],
+        "drafting_help": [
+            "Usa este bloque para revisar si a la plantilla contractual o comercial le falta la documentación informativa previa exigible.",
+        ],
+        "variable_blocks": [
+            "Precio, gastos, forma de pago e identificación del inmueble.",
+        ],
     },
     "visitas": {
         "title": "Hoja de visita",
-        "summary": "Documento comercial de control de visitas, útil para trazabilidad del comprador y protección del expediente.",
+        "summary": "Documento de trazabilidad comercial para acreditar la visita y su vinculación al expediente, sin sustituir documentos contractuales.",
+        "legal_basis": [
+            "Base contractual y probatoria privada del expediente comercial.",
+        ],
+        "mandatory_docs": [
+            "Datos del visitante, inmueble, fecha y asesor.",
+        ],
         "checklist": [
             "Datos del visitante y del inmueble.",
             "Fecha, asesor y observaciones de la visita.",
@@ -9497,11 +9684,20 @@ LEGAL_COPILOT_TOPICS = {
         "editable_fields": [
             "Visitante, fecha, observaciones y condiciones puntuales.",
         ],
+        "clause_alerts": [
+            "Usarla como si fuera reserva o propuesta.",
+        ],
         "warnings": [
             "No sustituye reserva, propuesta ni contrato.",
             "Debe quedar vinculada al inmueble y al cliente para sostener la negociación posterior.",
         ],
-        "next_documents": ["Propuesta / promesa", "Reserva / arras"],
+        "drafting_help": [
+            "Visita: la parte visitante reconoce haber realizado la visita al inmueble identificado en la fecha indicada con intervención de la agencia.",
+            "Trazabilidad: cualquier negociación posterior sobre el inmueble deberá quedar documentada dentro del expediente comercial correspondiente.",
+        ],
+        "variable_blocks": [
+            "Visitante, fecha, asesor y observaciones.",
+        ],
     },
 }
 
@@ -21872,10 +22068,14 @@ class Handler(BaseHTTPRequestHandler):
                 "topic_key": topic_key,
                 "title": topic_payload["title"],
                 "summary": topic_payload["summary"],
+                "legal_basis": list(topic_payload.get("legal_basis") or []),
+                "mandatory_docs": list(topic_payload.get("mandatory_docs") or []),
                 "checklist": list(topic_payload.get("checklist") or []),
                 "editable_fields": list(topic_payload.get("editable_fields") or []),
+                "clause_alerts": list(topic_payload.get("clause_alerts") or []),
+                "drafting_help": list(topic_payload.get("drafting_help") or []),
+                "variable_blocks": list(topic_payload.get("variable_blocks") or []),
                 "warnings": list(topic_payload.get("warnings") or []),
-                "next_documents": list(topic_payload.get("next_documents") or []),
                 "sources": [
                     "Playbook legal inmobiliario interno de Modernia.",
                     "Uso operativo orientado a plantillas, estados y documentación del CRM.",
@@ -21888,8 +22088,10 @@ class Handler(BaseHTTPRequestHandler):
                     response["editable_fields"] = list(response["editable_fields"]) + [
                         "Las cláusulas genéricas deben quedar bloqueadas y los datos variables como campos editables.",
                     ]
-                if "siguiente" in normalized or "despues" in normalized or "después" in normalized:
-                    response["summary"] += " La respuesta prioriza el siguiente documento lógico dentro del workflow."
+                if "redact" in normalized or "clausula" in normalized or "cláusula" in normalized:
+                    response["drafting_help"] = list(response["drafting_help"]) + [
+                        "La redacción sugerida debe entenderse como base editable antes de cerrar la plantilla final.",
+                    ]
                 if "riesgo" in normalized or "problem" in normalized or "clausula" in normalized or "cláusula" in normalized:
                     response["warnings"] = list(response["warnings"]) + [
                         "Revisar penalizaciones, prórrogas, representación y efectos económicos antes de activar la plantilla.",

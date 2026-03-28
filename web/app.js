@@ -12778,17 +12778,41 @@ const renderInmoLegalCopilotResponse = (payload = {}) => {
   if (!inmoLegalResponse) return;
   const title = payload.title || "Respuesta legal";
   const summary = payload.summary || "";
+  const legalBasis = Array.isArray(payload.legal_basis) ? payload.legal_basis : [];
+  const mandatoryDocs = Array.isArray(payload.mandatory_docs) ? payload.mandatory_docs : [];
   const checklist = Array.isArray(payload.checklist) ? payload.checklist : [];
   const editableFields = Array.isArray(payload.editable_fields) ? payload.editable_fields : [];
+  const clauseAlerts = Array.isArray(payload.clause_alerts) ? payload.clause_alerts : [];
+  const draftingHelp = Array.isArray(payload.drafting_help) ? payload.drafting_help : [];
+  const variableBlocks = Array.isArray(payload.variable_blocks) ? payload.variable_blocks : [];
   const warnings = Array.isArray(payload.warnings) ? payload.warnings : [];
-  const nextDocs = Array.isArray(payload.next_documents) ? payload.next_documents : [];
   const sections = [];
   if (summary) {
     sections.push(`<div class="crm-focus-link"><strong>${title}</strong><span>${summary}</span></div>`);
   }
+  if (legalBasis.length) {
+    sections.push(
+      `<div class="crm-focus-link"><strong>Base legal</strong><span>${legalBasis.map((item) => escapeHtml(item)).join("<br>")}</span></div>`
+    );
+  }
+  if (mandatoryDocs.length) {
+    sections.push(
+      `<div class="crm-focus-link"><strong>Documentación mínima</strong><span>${mandatoryDocs.map((item) => escapeHtml(item)).join("<br>")}</span></div>`
+    );
+  }
   if (checklist.length) {
     sections.push(
       `<div class="crm-focus-link"><strong>Checklist</strong><span>${checklist.map((item) => escapeHtml(item)).join("<br>")}</span></div>`
+    );
+  }
+  if (draftingHelp.length) {
+    sections.push(
+      `<div class="crm-focus-link"><strong>Redacción sugerida</strong><span>${draftingHelp.map((item) => escapeHtml(item)).join("<br><br>")}</span></div>`
+    );
+  }
+  if (variableBlocks.length) {
+    sections.push(
+      `<div class="crm-focus-link"><strong>Bloques variables</strong><span>${variableBlocks.map((item) => escapeHtml(item)).join("<br>")}</span></div>`
     );
   }
   if (editableFields.length) {
@@ -12796,14 +12820,14 @@ const renderInmoLegalCopilotResponse = (payload = {}) => {
       `<div class="crm-focus-link"><strong>Campos editables</strong><span>${editableFields.map((item) => escapeHtml(item)).join("<br>")}</span></div>`
     );
   }
+  if (clauseAlerts.length) {
+    sections.push(
+      `<div class="crm-focus-link"><strong>Cláusulas sensibles</strong><span>${clauseAlerts.map((item) => escapeHtml(item)).join("<br>")}</span></div>`
+    );
+  }
   if (warnings.length) {
     sections.push(
       `<div class="crm-focus-link"><strong>Alertas</strong><span>${warnings.map((item) => escapeHtml(item)).join("<br>")}</span></div>`
-    );
-  }
-  if (nextDocs.length) {
-    sections.push(
-      `<div class="crm-focus-link"><strong>Siguiente documentación</strong><span>${nextDocs.map((item) => escapeHtml(item)).join("<br>")}</span></div>`
     );
   }
   if (Array.isArray(payload.sources) && payload.sources.length) {
