@@ -5276,13 +5276,14 @@ const renderWorkspaceLauncher = (workspace = {}, modules = []) => {
                   class="secondary ghost"
                   data-workspace-home-action="${container.key}"
                   ${typeof container.action === "function" ? "" : "disabled"}
-                >${container.actionLabel}</button>
+                >${isTenantWorkspaceMode() ? "Ver módulos" : container.actionLabel}</button>
               </div>
             </article>
           `;
         })
         .join("")}
     </div>
+    <div id="workspaceHomeDetail"></div>
     <div class="workspace-suite-summary">
       ${groupWorkspaceModulesBySection(enabled)
         .map(
@@ -5300,10 +5301,55 @@ const renderWorkspaceLauncher = (workspace = {}, modules = []) => {
   workspaceLauncher.querySelectorAll("[data-workspace-home-action]").forEach((button) => {
     button.addEventListener("click", () => {
       const key = button.dataset.workspaceHomeAction || "";
-      const action = WORKSPACE_HOME_CONTAINERS.find((container) => container.key === key)?.action;
-      if (typeof action === "function") {
-        action();
+      const container = WORKSPACE_HOME_CONTAINERS.find((item) => item.key === key);
+      if (!container) return;
+      if (isTenantWorkspaceMode()) {
+        renderWorkspaceHomeDetail(container, enabledKeys);
+        const detail = document.getElementById("workspaceHomeDetail");
+        if (detail) detail.scrollIntoView({ behavior: "smooth", block: "start" });
+        return;
       }
+      if (typeof container.action === "function") {
+        container.action();
+      }
+    });
+  });
+};
+
+const renderWorkspaceHomeDetail = (container, enabledKeys = new Set()) => {
+  const target = document.getElementById("workspaceHomeDetail");
+  if (!target || !container) return;
+  const availableModules = (container.modules || []).filter((moduleKey) => enabledKeys.has(moduleKey));
+  target.innerHTML = `
+    <div class="workspace-home-detail-card">
+      <div class="section-head">
+        <div>
+          <h4>${container.title}</h4>
+          <p class="muted">${container.description || ""}</p>
+        </div>
+      </div>
+      <div class="workspace-home-detail-grid">
+        ${availableModules.map((moduleKey) => {
+          const moduleMeta = WORKSPACE_LAUNCHERS[moduleKey] || {};
+          return `
+            <button
+              type="button"
+              class="workspace-home-detail-item"
+              data-workspace-module-open="${moduleKey}"
+            >
+              <strong>${getWorkspaceModuleLabel(moduleKey)}</strong>
+              <span>${moduleMeta.actionLabel || "Abrir"}</span>
+            </button>
+          `;
+        }).join("")}
+      </div>
+    </div>
+  `;
+  target.querySelectorAll("[data-workspace-module-open]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const moduleKey = button.dataset.workspaceModuleOpen || "";
+      const action = WORKSPACE_LAUNCHERS[moduleKey]?.action;
+      if (typeof action === "function") action();
     });
   });
 };
@@ -11024,6 +11070,28 @@ const syncCaptacionOwnerByName = async () => {
   } catch {}
 };
 
+const chooseCatastroCandidate = (candidates = [], title = "Selecciona referencia catastral") => {
+  const list = Array.isArray(candidates) ? candidates.filter((item) => item?.referencia_catastral) : [];
+  if (!list.length) return null;
+  if (list.length === 1) return list[0];
+  const message = [
+    title,
+    "",
+    ...list.map(
+      (item, index) =>
+        `${index + 1}. ${item.label || "Inmueble"} · ${item.referencia_catastral}`
+    ),
+    "",
+    "Escribe el número de la opción.",
+  ].join("\n");
+  const answer = window.prompt(message, "1");
+  const index = Number(answer || 0);
+  if (!Number.isInteger(index) || index < 1 || index > list.length) {
+    return null;
+  }
+  return list[index - 1];
+};
+
 const lookupCaptacionCatastro = async () => {
   const direccionInput = getCaptacionField("direccion");
   const provinciaInput = getCaptacionField("provincia");
@@ -11061,6 +11129,17 @@ const lookupCaptacionCatastro = async () => {
       return;
     }
     const count = Array.isArray(data?.candidates) ? data.candidates.length : 0;
+    const selected = chooseCatastroCandidate(
+      data?.candidates || [],
+      "Catastro devolvió varias coincidencias para esta dirección"
+    );
+    if (selected?.referencia_catastral && refInput) {
+      refInput.value = selected.referencia_catastral;
+      if (captacionCatastroStatus) {
+        captacionCatastroStatus.textContent = `Referencia catastral seleccionada: ${selected.referencia_catastral}`;
+      }
+      return;
+    }
     if (captacionCatastroStatus) {
       captacionCatastroStatus.textContent =
         count > 1
@@ -11110,6 +11189,17 @@ const lookupInmuebleCatastro = async (inputMap = {}) => {
       return data.referencia_catastral;
     }
     const count = Array.isArray(data?.candidates) ? data.candidates.length : 0;
+    const selected = chooseCatastroCandidate(
+      data?.candidates || [],
+      "Catastro devolvió varias coincidencias para este inmueble"
+    );
+    if (selected?.referencia_catastral) {
+      if (refInput) {
+        refInput.value = selected.referencia_catastral;
+      }
+      saveInmuebleField("referencia_catastral", selected.referencia_catastral);
+      return selected.referencia_catastral;
+    }
     setInmuebleSaveStatus(
       count > 1
         ? `Catastro devolvió ${count} coincidencias. Completa más la dirección.`
