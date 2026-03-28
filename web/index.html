@@ -1578,10 +1578,11 @@
                   <div class="form-card crm-focus-card">
                     <div class="section-head">
                       <div>
-                        <h3>Acciones rápidas</h3>
-                        <p class="muted">Arranca trabajo nuevo sin perder tiempo buscando el módulo correcto.</p>
+                        <h3>Panel comercial</h3>
+                        <p class="muted">Lectura rápida del negocio vivo y acceso directo a los expedientes más calientes.</p>
                       </div>
                     </div>
+                    <div id="crmResumenPulse" class="crm-mini-list"></div>
                     <div class="crm-quick-actions">
                       <button type="button" class="crm-quick-action" data-crm-action="captacion">
                         <strong>Nueva noticia</strong>
@@ -1650,8 +1651,8 @@
                   <div class="form-card">
                     <div class="section-head">
                       <div>
-                        <h3>Últimos inmuebles</h3>
-                        <p class="muted">Atajos a fichas recientes.</p>
+                        <h3>Expedientes recientes</h3>
+                        <p class="muted">Últimas fichas tocadas en inventario y comercial.</p>
                       </div>
                     </div>
                     <div id="crmInmueblesRecent" class="crm-recent"></div>
@@ -1659,31 +1660,42 @@
                 </div>
               </div>
               <div id="crmViewCaptaciones" class="crm-workspace-view hidden">
-                <div class="form-card">
-                  <div class="section-head">
-                    <div>
-                      <h3>Pipeline inmobiliario</h3>
-                      <p class="muted">Arrastra para avanzar el estado de cada inmueble dentro del pipeline.</p>
+                <div class="crm-split crm-ops-split">
+                  <div class="form-card">
+                    <div class="section-head">
+                      <div>
+                        <h3>Pipeline inmobiliario</h3>
+                        <p class="muted">Arrastra para avanzar estado y detectar rápido los cuellos de botella comerciales.</p>
+                      </div>
+                      <select id="crmEtapaFilterMirror">
+                        <option value="">Todas las etapas</option>
+                        <option>Noticia</option>
+                        <option>Adquisición</option>
+                        <option>Encargo</option>
+                        <option>Reservado</option>
+                        <option>Vendido</option>
+                        <option>Cerrado negativamente</option>
+                        <option>Alquiler</option>
+                      </select>
                     </div>
-                    <select id="crmEtapaFilterMirror">
-                      <option value="">Todas las etapas</option>
-                      <option>Noticia</option>
-                      <option>Adquisición</option>
-                      <option>Encargo</option>
-                      <option>Reservado</option>
-                      <option>Vendido</option>
-                      <option>Cerrado negativamente</option>
-                      <option>Alquiler</option>
-                    </select>
+                    <div id="crmCaptacionesStageSummary" class="crm-pipeline"></div>
+                    <div id="crmCaptacionesKanban" class="crm-kanban"></div>
                   </div>
-                  <div id="crmCaptacionesStageSummary" class="crm-pipeline"></div>
-                  <div id="crmCaptacionesKanban" class="crm-kanban"></div>
+                  <div class="form-card">
+                    <div class="section-head">
+                      <div>
+                        <h3>Control operativo</h3>
+                        <p class="muted">Expedientes bloqueados, llamadas pendientes y citas que requieren cierre.</p>
+                      </div>
+                    </div>
+                    <div id="crmCaptacionesOps" class="crm-focus-list"></div>
+                  </div>
                 </div>
                 <div class="form-card">
                   <div class="section-head">
                     <div>
-                      <h3>Listado de noticias y encargos</h3>
-                      <p class="muted">Base operativa para seguimiento, adquisición, reserva y cierre.</p>
+                      <h3>Mesa de expedientes</h3>
+                      <p class="muted">Base operativa para seguimiento, adquisición, reserva y cierre con vista de lista.</p>
                     </div>
                   </div>
                   <div id="crmCaptacionesTable"></div>
@@ -1703,14 +1715,25 @@
                     <div id="crmInmueblesTableMirror"></div>
                     <div class="footer" id="crmInmueblesInfoMirror"></div>
                   </div>
-                  <div class="form-card">
-                    <div class="section-head">
-                      <div>
-                        <h3>Calidad del inventario</h3>
-                        <p class="muted">Control rápido de catastro, propietarios, pricing y estado del stock.</p>
+                  <div class="stack">
+                    <div class="form-card">
+                      <div class="section-head">
+                        <div>
+                          <h3>Calidad del inventario</h3>
+                          <p class="muted">Control rápido de Catastro, propietarios, pricing y madurez del stock.</p>
+                        </div>
                       </div>
+                      <div id="crmInmueblesQuality" class="crm-mini-list"></div>
                     </div>
-                    <div id="crmInmueblesQuality" class="crm-mini-list"></div>
+                    <div class="form-card">
+                      <div class="section-head">
+                        <div>
+                          <h3>Acciones recomendadas</h3>
+                          <p class="muted">Atajos para sanear fichas y priorizar el inventario con más riesgo operativo.</p>
+                        </div>
+                      </div>
+                      <div id="crmInmueblesOps" class="crm-focus-list"></div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1743,48 +1766,70 @@
                 </div>
               </div>
               <div id="crmViewDemandas" class="crm-workspace-view hidden">
-                <div id="crmDemandasMini" class="crm-mini-list"></div>
-                <div class="form-card">
-                  <div class="section-head">
-                    <div>
-                      <h3>Demandas</h3>
-                      <p class="muted">Compradores activos, filtros de búsqueda y acceso a matching.</p>
+                <div class="crm-split crm-ops-split">
+                  <div class="form-card">
+                    <div class="section-head">
+                      <div>
+                        <h3>Demandas</h3>
+                        <p class="muted">Compradores activos, filtros de búsqueda y acceso a matching.</p>
+                      </div>
+                      <div class="inline-actions">
+                        <input id="crmDemandaSearch" placeholder="Buscar por cliente, zona o tipo..." />
+                        <select id="crmDemandaEstadoFilter">
+                          <option value="">Todos los estados</option>
+                          <option value="activa">Activa</option>
+                          <option value="pausada">Pausada</option>
+                          <option value="cerrada">Cerrada</option>
+                        </select>
+                      </div>
                     </div>
-                    <div class="inline-actions">
-                      <input id="crmDemandaSearch" placeholder="Buscar por cliente, zona o tipo..." />
-                      <select id="crmDemandaEstadoFilter">
-                        <option value="">Todos los estados</option>
-                        <option value="activa">Activa</option>
-                        <option value="pausada">Pausada</option>
-                        <option value="cerrada">Cerrada</option>
-                      </select>
-                    </div>
+                    <div id="crmDemandasMini" class="crm-mini-list"></div>
+                    <div id="crmDemandasTable"></div>
+                    <div class="footer" id="crmDemandasInfo"></div>
                   </div>
-                  <div id="crmDemandasTable"></div>
-                  <div class="footer" id="crmDemandasInfo"></div>
+                  <div class="form-card">
+                    <div class="section-head">
+                      <div>
+                        <h3>Prioridades de compradores</h3>
+                        <p class="muted">Quién necesita matching, visita o redefinir búsqueda antes de perder la oportunidad.</p>
+                      </div>
+                    </div>
+                    <div id="crmDemandasPriority" class="crm-focus-list"></div>
+                  </div>
                 </div>
               </div>
               <div id="crmViewVisitas" class="crm-workspace-view hidden">
-                <div id="crmVisitasMini" class="crm-mini-list"></div>
-                <div class="form-card">
-                  <div class="section-head">
-                    <div>
-                      <h3>Visitas</h3>
-                      <p class="muted">Histórico de visitas y seguimiento comercial realizado.</p>
+                <div class="crm-split crm-ops-split">
+                  <div class="form-card">
+                    <div class="section-head">
+                      <div>
+                        <h3>Visitas</h3>
+                        <p class="muted">Agenda comercial y trazabilidad de las visitas realizadas.</p>
+                      </div>
+                      <div class="inline-actions">
+                        <input id="crmVisitaSearch" placeholder="Buscar por inmueble, cliente o asesor..." />
+                        <select id="crmVisitaEstadoFilter">
+                          <option value="">Todos los estados</option>
+                          <option value="pendiente">Pendiente</option>
+                          <option value="realizada">Realizada</option>
+                          <option value="cancelada">Cancelada</option>
+                          <option value="no interesa">No interesa</option>
+                        </select>
+                      </div>
                     </div>
-                    <div class="inline-actions">
-                      <input id="crmVisitaSearch" placeholder="Buscar por inmueble, cliente o asesor..." />
-                      <select id="crmVisitaEstadoFilter">
-                        <option value="">Todos los estados</option>
-                        <option value="pendiente">Pendiente</option>
-                        <option value="realizada">Realizada</option>
-                        <option value="cancelada">Cancelada</option>
-                        <option value="no interesa">No interesa</option>
-                      </select>
-                    </div>
+                    <div id="crmVisitasMini" class="crm-mini-list"></div>
+                    <div id="crmVisitasTable"></div>
+                    <div class="footer" id="crmVisitasInfo"></div>
                   </div>
-                  <div id="crmVisitasTable"></div>
-                  <div class="footer" id="crmVisitasInfo"></div>
+                  <div class="form-card">
+                    <div class="section-head">
+                      <div>
+                        <h3>Agenda y seguimiento</h3>
+                        <p class="muted">Próximas citas, cierres pendientes y visitas que requieren reacción comercial.</p>
+                      </div>
+                    </div>
+                    <div id="crmVisitasAgenda" class="crm-focus-list"></div>
+                  </div>
                 </div>
               </div>
               <div id="crmViewLegal" class="crm-workspace-view hidden">

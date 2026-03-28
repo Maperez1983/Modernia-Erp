@@ -2007,6 +2007,7 @@ const crmViewCompraventas = document.getElementById("crmViewCompraventas");
 const crmViewDemandas = document.getElementById("crmViewDemandas");
 const crmViewVisitas = document.getElementById("crmViewVisitas");
 const crmViewLegal = document.getElementById("crmViewLegal");
+const crmResumenPulse = document.getElementById("crmResumenPulse");
 const crmResumenHoy = document.getElementById("crmResumenHoy");
 const crmResumenAlertas = document.getElementById("crmResumenAlertas");
 const crmResumenActividad = document.getElementById("crmResumenActividad");
@@ -2075,6 +2076,10 @@ const crmPipeline = document.getElementById("crmPipeline");
 const crmEtapaFilter = document.getElementById("crmEtapaFilter");
 const crmEtapaFilterMirror = document.getElementById("crmEtapaFilterMirror");
 const crmCaptacionesStageSummary = document.getElementById("crmCaptacionesStageSummary");
+const crmCaptacionesOps = document.getElementById("crmCaptacionesOps");
+const crmInmueblesOps = document.getElementById("crmInmueblesOps");
+const crmDemandasPriority = document.getElementById("crmDemandasPriority");
+const crmVisitasAgenda = document.getElementById("crmVisitasAgenda");
 const crmKpiCaptaciones = document.getElementById("crmKpiCaptaciones");
 const crmKpiInmuebles = document.getElementById("crmKpiInmuebles");
 const crmKpiEtapa = document.getElementById("crmKpiEtapa");
@@ -18241,6 +18246,30 @@ const loadCrmCaptaciones = () => {
       counts[etapa] = (counts[etapa] || 0) + 1;
     });
     renderCrmPipeline(counts, activeEtapa);
+    if (crmCaptacionesOps) {
+      const ops = [...cachedCrmCaptaciones]
+        .map((row) => {
+          const etapa = String(row.etapa || "Noticia").trim();
+          let summary = String(row.proxima_accion || "").trim();
+          let score = 0;
+          if (!summary) {
+            score += 4;
+            summary = "Sin próxima acción definida.";
+          }
+          if (etapa === "Noticia") score += 3;
+          if (etapa === "Adquisición") score += 2;
+          return {
+            inmuebleId: row.inmueble_id || "",
+            title: row.direccion || row.propietario || "Expediente sin dirección",
+            meta: `${row.propietario || "Propietario pendiente"} · ${etapa}`,
+            summary,
+            score,
+          };
+        })
+        .sort((a, b) => b.score - a.score || a.title.localeCompare(b.title, "es"))
+        .slice(0, 6);
+      renderCrmActionList(crmCaptacionesOps, ops, "Sin bloqueos operativos en captaciones.");
+    }
     if (crmKpiCaptaciones) {
       crmKpiCaptaciones.textContent = String(data.rows.length);
     }
@@ -18316,6 +18345,7 @@ const loadCrmAlquileres = () => {
       },
     ]);
     renderTableInto(data, crmAlquileresTable, crmAlquileresInfo, "Alquileres");
+    renderCrmResumenDashboard();
   });
 };
 
@@ -18468,62 +18498,130 @@ const renderCrmMiniCards = (container, items = []) => {
     .join("");
 };
 
+const renderCrmActionList = (container, items = [], emptyMessage = "Sin elementos pendientes.") => {
+  if (!container) return;
+  if (!items.length) {
+    container.innerHTML = `<p class='muted'>${escapeHtml(emptyMessage)}</p>`;
+    return;
+  }
+  container.innerHTML = items
+    .map((item) => {
+      const attrs = [];
+      if (item.inmuebleId) attrs.push(`data-inmueble-id="${escapeHtml(item.inmuebleId)}"`);
+      if (item.crmView) attrs.push(`data-crm-view="${escapeHtml(item.crmView)}"`);
+      const tag = item.inmuebleId || item.crmView ? "button" : "div";
+      const typeAttr = tag === "button" ? ' type="button"' : "";
+      return `
+        <${tag}${typeAttr} class="crm-focus-link"${attrs.length ? ` ${attrs.join(" ")}` : ""}>
+          <strong>${escapeHtml(item.title || "-")}</strong>
+          ${item.meta ? `<span>${escapeHtml(item.meta)}</span>` : ""}
+          ${item.summary ? `<span>${escapeHtml(item.summary)}</span>` : ""}
+        </${tag}>
+      `;
+    })
+    .join("");
+  container.querySelectorAll("[data-inmueble-id]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const id = btn.dataset.inmuebleId || "";
+      if (id) openInmuebleDetail(id, "resumen");
+    });
+  });
+  container.querySelectorAll("[data-crm-view]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const view = btn.dataset.crmView || "";
+      if (view) setCrmWorkspaceView(view);
+    });
+  });
+};
+
 const renderCrmResumenDashboard = () => {
   const captaciones = Array.isArray(cachedCrmCaptaciones) ? cachedCrmCaptaciones : [];
   const inmuebles = Array.isArray(cachedCrmInmuebles) ? cachedCrmInmuebles : [];
   const compraventas = Array.isArray(cachedCrmCompraventas) ? cachedCrmCompraventas : [];
   const visitas = Array.isArray(cachedCrmVisitas) ? cachedCrmVisitas : [];
+  const demandas = Array.isArray(cachedCrmDemandas) ? cachedCrmDemandas : [];
+  const alquileres = Array.isArray(cachedCrmAlquileres) ? cachedCrmAlquileres : [];
+
+  if (crmResumenPulse) {
+    renderCrmMiniCards(crmResumenPulse, [
+      {
+        title: "Noticias vivas",
+        value: captaciones.filter((row) => normalizeSimple(row.etapa || "") === "noticia").length,
+        meta: "Entrada",
+        summary: "Captación inicial pendiente de llamada, cita o descarte.",
+      },
+      {
+        title: "Adquisiciones",
+        value: captaciones.filter((row) => normalizeSimple(row.etapa || "") === "adquisicion").length,
+        meta: "Citas",
+        summary: "Viviendas con cita de adquisición o valoración comercial abierta.",
+      },
+      {
+        title: "Demandas activas",
+        value: demandas.filter((row) => normalizeSimple(row.estado || "") === "activa").length,
+        meta: "Compradores",
+        summary: "Base compradora con potencial de matching o visita.",
+      },
+      {
+        title: "Visitas abiertas",
+        value: visitas.filter((row) => normalizeSimple(row.estado || "").includes("pendiente")).length,
+        meta: "Agenda",
+        summary: "Citas todavía sin resultado o cierre comercial.",
+      },
+    ]);
+  }
 
   if (crmResumenHoy) {
-    const jobs = captaciones
-      .map((row) => {
+    const jobs = [
+      ...captaciones.map((row) => {
         const etapa = String(row.etapa || "Noticia").trim();
         const proxima = String(row.proxima_accion || "").trim();
         let priority = 0;
         let summary = proxima || "Sin próxima acción";
-        if (!proxima) {
-          priority += 4;
-        }
+        if (!proxima) priority += 4;
         if (etapa === "Noticia") {
-          priority += 3;
-          if (!proxima) summary = "Llamada pendiente o sin cierre de noticia";
+          priority += 4;
+          if (!proxima) summary = "Llamada pendiente o noticia sin cierre.";
         } else if (etapa === "Adquisición") {
-          priority += 2;
-          summary = proxima || "Cita de adquisición pendiente de cierre";
+          priority += 3;
+          summary = proxima || "Cita de adquisición pendiente de cierre.";
         } else if (etapa === "Encargo") {
+          priority += 2;
+          summary = proxima || "Encargo activo sin siguiente hito definido.";
+        } else if (etapa === "Reservado") {
           priority += 1;
-          summary = proxima || "Encargo activo sin siguiente hito";
+          summary = proxima || "Reserva sin siguiente paso de cierre.";
         }
         return {
-          id: row.inmueble_id || "",
+          inmuebleId: row.inmueble_id || "",
           title: row.direccion || row.propietario || "Inmueble sin identificar",
           meta: `${row.propietario || "Propietario pendiente"} · ${etapa}`,
           summary,
           priority,
         };
-      })
+      }),
+      ...visitas
+        .filter((row) => normalizeSimple(row.estado || "").includes("pendiente"))
+        .map((row) => ({
+          inmuebleId: row.inmueble_id || "",
+          title: row.inmueble || "Visita pendiente",
+          meta: `${row.cliente || "Cliente pendiente"} · Visita`,
+          summary: `${row.fecha || "-"} ${row.hora || ""}`.trim() || "Pendiente de agenda",
+          priority: 5,
+        })),
+      ...demandas
+        .filter((row) => normalizeSimple(row.estado || "") === "activa" && normalizeSimple(row.prioridad || "") === "alta")
+        .map((row) => ({
+          crmView: "demandas",
+          title: row.cliente || "Demanda prioritaria",
+          meta: `${row.zona || "Zona abierta"} · ${row.tipo || "Tipo pendiente"}`,
+          summary: "Revisar matching, visita o redefinir la búsqueda.",
+          priority: 3,
+        })),
+    ]
       .sort((a, b) => b.priority - a.priority || a.title.localeCompare(b.title, "es"))
       .slice(0, 6);
-
-    crmResumenHoy.innerHTML = jobs.length
-      ? jobs
-          .map(
-            (item) => `
-              <button type="button" class="crm-focus-link crm-resumen-link" data-inmueble-id="${escapeHtml(item.id)}">
-                <strong>${escapeHtml(item.title)}</strong>
-                <span>${escapeHtml(item.meta)}</span>
-                <span>${escapeHtml(item.summary)}</span>
-              </button>
-            `
-          )
-          .join("")
-      : "<p class='muted'>Sin trabajo pendiente visible.</p>";
-    crmResumenHoy.querySelectorAll("[data-inmueble-id]").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const id = btn.dataset.inmuebleId || "";
-        if (id) openInmuebleDetail(id, "resumen");
-      });
-    });
+    renderCrmActionList(crmResumenHoy, jobs, "Sin trabajo pendiente visible.");
   }
 
   if (crmResumenAlertas) {
@@ -18531,43 +18629,46 @@ const renderCrmResumenDashboard = () => {
     const missingCatastro = inmuebles.filter((row) => !String(row.referencia_catastral || "").trim()).length;
     const missingOwner = inmuebles.filter((row) => !String(row.propietarios || "").trim()).length;
     const activeEncargos = captaciones.filter((row) => String(row.etapa || "") === "Encargo").length;
+    const pendingVisits = visitas.filter((row) => normalizeSimple(row.estado || "").includes("pendiente")).length;
+    const urgentDemandas = demandas.filter((row) => normalizeSimple(row.prioridad || "") === "alta" && normalizeSimple(row.estado || "") === "activa").length;
     const alerts = [
       {
         title: "Noticias sin siguiente acción",
         summary: `${missingNext} inmuebles con seguimiento incompleto.`,
-        view: "captaciones",
+        crmView: "captaciones",
       },
       {
         title: "Catastro pendiente",
         summary: `${missingCatastro} inmuebles sin referencia catastral.`,
-        view: "inmuebles",
+        crmView: "inmuebles",
       },
       {
         title: "Propietario por revisar",
         summary: `${missingOwner} inmuebles sin propietario enlazado correctamente.`,
-        view: "inmuebles",
+        crmView: "inmuebles",
       },
       {
         title: "Encargos activos",
         summary: `${activeEncargos} expedientes en comercialización activa.`,
-        view: "captaciones",
+        crmView: "captaciones",
+      },
+      {
+        title: "Visitas por cerrar",
+        summary: `${pendingVisits} citas todavía sin resultado comercial.`,
+        crmView: "visitas",
+      },
+      {
+        title: "Demandas urgentes",
+        summary: `${urgentDemandas} compradores de prioridad alta en seguimiento.`,
+        crmView: "demandas",
       },
     ];
-    crmResumenAlertas.innerHTML = alerts
-      .map(
-        (item) => `
-          <button type="button" class="crm-focus-link" data-crm-view="${escapeHtml(item.view)}">
-            <strong>${escapeHtml(item.title)}</strong>
-            <span>${escapeHtml(item.summary)}</span>
-          </button>
-        `
-      )
-      .join("");
+    renderCrmActionList(crmResumenAlertas, alerts, "Sin alertas activas.");
   }
 
   if (crmResumenActividad) {
     const recentItems = [];
-    visitas.slice(0, 4).forEach((row) => {
+    visitas.forEach((row) => {
       recentItems.push({
         title: row.inmueble || "Visita",
         meta: `Visita · ${row.fecha || "-"} ${row.hora || ""}`.trim(),
@@ -18575,12 +18676,20 @@ const renderCrmResumenDashboard = () => {
         ts: parseCrmDateTime(row.fecha, row.hora),
       });
     });
-    compraventas.slice(0, 3).forEach((row) => {
+    compraventas.forEach((row) => {
       recentItems.push({
         title: row.direccion || "Compraventa",
         meta: `Venta · ${row.fecha_escritura || row.fecha_contrato || "-"}`,
         badge: row.estado || "Manual",
         ts: parseCrmDateTime(row.fecha_escritura || row.fecha_contrato, ""),
+      });
+    });
+    alquileres.forEach((row) => {
+      recentItems.push({
+        title: row.direccion || row.inmueble || "Alquiler",
+        meta: `Alquiler · ${row.fecha_contrato || row.fecha_inicio || "-"}`,
+        badge: row.estado || row.situacion || "Activo",
+        ts: parseCrmDateTime(row.fecha_contrato || row.fecha_inicio, ""),
       });
     });
     const sorted = recentItems.sort((a, b) => (b.ts || 0) - (a.ts || 0)).slice(0, 6);
@@ -18722,27 +18831,8 @@ const refreshCurrentInmuebleProfile = () => {
         value: String(docs.length || 0),
       },
     ];
-    const ownerMarkup = ownerNames.length
-      ? ownerNames
-          .map((name) => {
-            const initials = name
-              .split(/\s+/)
-              .filter(Boolean)
-              .slice(0, 2)
-              .map((part) => part.charAt(0).toUpperCase())
-              .join("");
-            return `
-              <div class="inmueble-owner-card">
-                <span class="inmueble-owner-avatar">${initials || "?"}</span>
-                <div class="inmueble-owner-copy">
-                  <strong>${name}</strong>
-                  <span>${captacion.propietario && ownerNames.length === 1 ? "Propietario principal" : "Propiedad vinculada"}</span>
-                </div>
-              </div>
-            `;
-          })
-          .join("")
-      : "<div class='muted'>Sin propietarios enlazados</div>";
+    const ownerPrimary = ownerNames[0] || "";
+    const ownerExtra = ownerNames.length > 1 ? `+${ownerNames.length - 1} más` : "";
     inmuebleSummaryCard.innerHTML = `
       <div class="inmueble-summary-top">
         <div>
@@ -18752,26 +18842,29 @@ const refreshCurrentInmuebleProfile = () => {
         </div>
         <div class="inmueble-summary-badges">${topBadges}</div>
       </div>
-      <div class="inmueble-summary-body">
-        <div class="inmueble-summary-main">
-          <div class="inmueble-summary-pricing">${priceLine || "Sin pricing definido"}</div>
-          <div class="inmueble-summary-note">${captacion.proxima_accion || inmueble.referencia || "Completa la ficha para mejorar la calidad del inventario."}</div>
-          <div class="inmueble-summary-metrics">
-            ${metrics
-              .map(
-                (item) => `
-                  <div class="inmueble-summary-metric">
-                    <span>${item.label}</span>
-                    <strong>${item.value}</strong>
-                  </div>
-                `
-              )
-              .join("")}
-          </div>
+      <div class="inmueble-summary-pricing">${priceLine || "Sin pricing definido"}</div>
+      <div class="inmueble-summary-note">${captacion.proxima_accion || inmueble.referencia || "Completa la ficha para convertir esta noticia en expediente vendible."}</div>
+      <div class="inmueble-summary-metrics">
+        ${metrics
+          .map(
+            (item) => `
+              <div class="inmueble-summary-metric">
+                <span>${item.label}</span>
+                <strong>${item.value}</strong>
+              </div>
+            `
+          )
+          .join("")}
+      </div>
+      <div class="inmueble-summary-footer">
+        <div class="inmueble-summary-ownerline">
+          <span class="inmueble-summary-ownerlabel">Propiedad</span>
+          <strong>${escapeHtml(ownerPrimary || "Sin propietarios enlazados")}</strong>
+          ${ownerExtra ? `<span class="inmueble-chip">${escapeHtml(ownerExtra)}</span>` : ""}
         </div>
-        <div class="inmueble-summary-side">
-          <div class="inmueble-summary-side-title">Propiedad</div>
-          <div class="inmueble-summary-owners">${ownerMarkup}</div>
+        <div class="inmueble-summary-ownerline">
+          <span class="inmueble-summary-ownerlabel">Checklist</span>
+          <strong>${docs.length} docs · ${visitas.length} visitas · ${demandas.length} demandas</strong>
         </div>
       </div>
     `;
@@ -18789,7 +18882,7 @@ const refreshCurrentInmuebleProfile = () => {
         ],
       },
       {
-        title: "Identificación",
+        title: "Identificación y control",
         items: [
           ["Referencia interna", inmueble.referencia],
           ["Catastro", inmueble.referencia_catastral],
@@ -18799,7 +18892,7 @@ const refreshCurrentInmuebleProfile = () => {
         ],
       },
       {
-        title: "Comercial",
+        title: "Comercial y seguimiento",
         items: [
           ["Propietario", captacion.propietario],
           ["Situación", captacion.situacion_comercial],
@@ -18808,26 +18901,19 @@ const refreshCurrentInmuebleProfile = () => {
           ["Ocupación", inmueble.situacion_ocupacion],
           ["Urgencia", captacion.urgencia],
           ["Asesor", captacion.asesor],
+          ["Demandas", demandas.length],
+          ["Visitas", visitas.length],
+          ["Documentos", docs.length],
+          ["Próxima acción", captacion.proxima_accion],
         ],
       },
       {
         title: "Checklist por estado",
         items: (() => {
           const requirements = getInmuebleStageRequirements(inmueble.estado || captacion.etapa || "", inmueble, captacion, propietarios);
-          if (!requirements.length) {
-            return [["Revisión", "Sin requisitos"]];
-          }
-          return requirements.map((item) => [item.label, item.ok ? "OK" : "Pendiente"]);
+          if (!requirements.length) return [["Revisión", "Sin requisitos"]];
+          return requirements.slice(0, 5).map((item) => [item.label, item.ok ? "OK" : "Pendiente"]);
         })(),
-      },
-      {
-        title: "Actividad",
-        items: [
-          ["Demandas", demandas.length],
-          ["Visitas", visitas.length],
-          ["Documentos", docs.length],
-          ["Próxima acción", captacion.proxima_accion],
-        ],
       },
     ];
     inmuebleFactsPanel.innerHTML = cards
@@ -19003,6 +19089,34 @@ const loadCrmInmuebles = () => {
         summary: "Stock aún sin avanzar a adquisición o encargo.",
       },
     ]);
+    if (crmInmueblesOps) {
+      renderCrmActionList(
+        crmInmueblesOps,
+        [
+          {
+            title: "Completar Catastro",
+            summary: `${sinCatastro} inmuebles siguen sin referencia catastral.`,
+            crmView: "inmuebles",
+          },
+          {
+            title: "Vincular propietarios",
+            summary: `${sinPropietarios} fichas necesitan cliente propietario enlazado.`,
+            crmView: "inmuebles",
+          },
+          {
+            title: "Definir pricing",
+            summary: `${sinPricing} inmuebles siguen sin precio objetivo o adquisición.`,
+            crmView: "inmuebles",
+          },
+          {
+            title: "Mover noticias",
+            summary: `${enNoticia} activos siguen atascados en noticia.`,
+            crmView: "captaciones",
+          },
+        ],
+        "Inventario saneado."
+      );
+    }
     [crmInmueblesInfo, crmInmueblesInfoMirror].filter(Boolean).forEach((target) => {
       target.textContent = `Mostrando ${rows.length} inmuebles.`;
     });
@@ -19213,6 +19327,23 @@ const loadCrmDemandas = () => {
         summary: "Compradores que requieren atención comercial rápida.",
       },
     ]);
+    if (crmDemandasPriority) {
+      const priorityItems = filteredRows
+        .slice()
+        .sort((a, b) => {
+          const scoreA = normalizeSimple(a.prioridad || "") === "alta" ? 2 : normalizeSimple(a.prioridad || "") === "media" ? 1 : 0;
+          const scoreB = normalizeSimple(b.prioridad || "") === "alta" ? 2 : normalizeSimple(b.prioridad || "") === "media" ? 1 : 0;
+          return scoreB - scoreA || String(a.cliente || "").localeCompare(String(b.cliente || ""), "es");
+        })
+        .slice(0, 6)
+        .map((row) => ({
+          title: row.cliente || "Demanda sin cliente",
+          meta: `${row.prioridad || "Prioridad pendiente"} · ${row.estado || "Estado pendiente"}`,
+          summary: `${row.tipo || "Tipo"} · ${row.zona || "Zona abierta"} · ${formatCell("precio_max", row.precio_max) || "Precio abierto"}`,
+          crmView: "demandas",
+        }));
+      renderCrmActionList(crmDemandasPriority, priorityItems, "Sin demandas priorizadas.");
+    }
     const table = document.createElement("table");
     const thead = document.createElement("thead");
     const trHead = document.createElement("tr");
@@ -19334,6 +19465,19 @@ const loadCrmVisitas = () => {
         summary: "Visitas ya completadas con resultado.",
       },
     ]);
+    if (crmVisitasAgenda) {
+      const agendaItems = filteredRows
+        .slice()
+        .sort((a, b) => parseCrmDateTime(a.fecha, a.hora) - parseCrmDateTime(b.fecha, b.hora))
+        .slice(0, 6)
+        .map((row) => ({
+          inmuebleId: row.inmueble_id || "",
+          title: row.inmueble || "Visita",
+          meta: `${row.cliente || "Cliente pendiente"} · ${row.asesor || "Asesor pendiente"}`,
+          summary: `${row.fecha || "-"} ${row.hora || ""} · ${row.estado || "Pendiente"}`.trim(),
+        }));
+      renderCrmActionList(crmVisitasAgenda, agendaItems, "Sin visitas programadas.");
+    }
     const table = document.createElement("table");
     const thead = document.createElement("thead");
     const trHead = document.createElement("tr");
