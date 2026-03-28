@@ -9137,6 +9137,12 @@ const MONEY_COLUMN_TOKENS = [
   "entrada",
   "cesion",
   "cuota",
+  "honorario",
+  "valor",
+  "renta",
+  "alquiler",
+  "aportacion",
+  "capital",
 ];
 
 const QUANTITY_COLUMN_TOKENS = [
@@ -9174,6 +9180,11 @@ const CODELIKE_COLUMN_TOKENS = [
 
 const hasToken = (text, tokens) => tokens.some((token) => text.includes(token));
 
+const isMoneyColumnKey = (value) => {
+  const lower = String(value || "").toLowerCase();
+  return MONEY_COLUMNS.has(lower) || hasToken(lower, MONEY_COLUMN_TOKENS) || lower.includes("comision");
+};
+
 const formatCell = (col, value, tipoPersona = "") => {
   const lower = col.toLowerCase();
   if (["nif", "dni", "cif"].includes(lower)) {
@@ -9191,10 +9202,7 @@ const formatCell = (col, value, tipoPersona = "") => {
   }
   const codeLike = hasToken(lower, CODELIKE_COLUMN_TOKENS) || lower.endsWith("_id");
   const number = toNumber(value);
-  const isMoney =
-    MONEY_COLUMNS.has(lower) ||
-    hasToken(lower, MONEY_COLUMN_TOKENS) ||
-    lower.includes("comision");
+  const isMoney = isMoneyColumnKey(lower);
   if (isMoney && number !== null) {
     return euroFormatter.format(number);
   }
@@ -10835,6 +10843,8 @@ const renderEditableGrid = (grid, fields, data, target) => {
         input.value = normalizeDocumento(currentValue);
       } else if (target === "cliente" && field.key === "nombre") {
         input.value = formatNombreCliente(currentValue);
+      } else if ((target === "cliente" || isInmueble || target === "captacion") && isMoneyColumnKey(field.key)) {
+        input.value = formatMoneyInputValue(currentValue);
       } else {
         input.value = currentValue || "";
       }
@@ -10889,6 +10899,14 @@ const renderEditableGrid = (grid, fields, data, target) => {
         }
         scheduleSave(`${target}:${field.key}`, saveHandler);
       });
+      if ((target === "cliente" || isInmueble || target === "captacion") && isMoneyColumnKey(field.key)) {
+        input.addEventListener("blur", () => {
+          const parsed = toNumber(input.value);
+          if (parsed !== null) {
+            input.value = formatMoneyInputValue(parsed);
+          }
+        });
+      }
       input.addEventListener("blur", saveHandler);
     }
     card.appendChild(input);
@@ -11002,7 +11020,7 @@ const renderEditableGrid = (grid, fields, data, target) => {
     hint.textContent = "Busca la referencia catastral desde la dirección y después, si quieres, abre la ficha pública.";
     catastroCard.appendChild(hint);
     const actions = document.createElement("div");
-    actions.className = "inline-row";
+    actions.className = "catastro-actions";
     const lookupBtn = document.createElement("button");
     lookupBtn.type = "button";
     lookupBtn.className = "secondary catastro-button";

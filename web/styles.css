@@ -2771,6 +2771,7 @@ tr.is-selected td {
 .editable-card {
   display: grid;
   gap: 10px;
+  min-width: 0;
 }
 
 .inline-input {
@@ -2977,6 +2978,14 @@ tr.is-selected td {
   border-radius: 12px;
   border: 1px solid var(--line);
   background: #ffffff;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.inline-row select,
+.inline-row .inline-input {
+  flex: 1 1 220px;
+  min-width: 0;
 }
 
 .company-cell {
@@ -3075,6 +3084,19 @@ tr.is-selected td {
 .inline-actions {
   display: flex;
   gap: 8px;
+  flex-wrap: wrap;
+}
+
+.catastro-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+}
+
+.catastro-actions .catastro-button {
+  width: 100%;
+  min-width: 0;
+  justify-content: flex-start;
 }
 
 .table-tools {
