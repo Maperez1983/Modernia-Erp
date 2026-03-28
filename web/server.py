@@ -9264,6 +9264,66 @@ def upsert_inmueble_generated_doc(conn, inmueble_id, tipo, nombre, url, now):
     return doc_id
 
 
+def persist_generated_inmueble_pdf(conn, inmueble_id, tipo, nombre, pdf_bytes, filename_base, now, replace_existing=False):
+    if not inmueble_id or not tipo or not pdf_bytes:
+        return None
+    folder = UPLOADS / "inmuebles" / "generated"
+    folder.mkdir(parents=True, exist_ok=True)
+    safe_base = slugify_text(filename_base or nombre or tipo)[:80] or "documento_inmueble"
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    doc_id = None
+    existing = None
+    if replace_existing:
+        existing = conn.execute(
+            """
+            SELECT id, url
+            FROM inmueble_docs
+            WHERE inmueble_id = ? AND tipo = ? AND url LIKE '/uploads/inmuebles/generated/%'
+            ORDER BY updated_at DESC, created_at DESC
+            LIMIT 1
+            """,
+            (inmueble_id, tipo),
+        ).fetchone()
+    if existing:
+        doc_id = existing["id"]
+        old_url = str(existing["url"] or "").strip()
+        old_rel = old_url.replace("/uploads/", "", 1) if old_url.startswith("/uploads/") else ""
+        if old_rel:
+            old_path = UPLOADS / old_rel
+            try:
+                if old_path.exists():
+                    old_path.unlink()
+            except Exception:
+                pass
+    else:
+        doc_id = os.urandom(16).hex()
+    filename = f"{safe_base}_{timestamp}_{doc_id[:8]}.pdf"
+    file_path = folder / filename
+    file_path.write_bytes(pdf_bytes)
+    url = f"/uploads/inmuebles/generated/{filename}"
+    if existing:
+        conn.execute(
+            """
+            UPDATE inmueble_docs
+            SET nombre = ?, url = ?, updated_at = datetime(?)
+            WHERE id = ?
+            """,
+            (nombre or tipo, url, now, doc_id),
+        )
+    else:
+        conn.execute(
+            """
+            INSERT INTO inmueble_docs (
+              id, inmueble_id, nombre, url, tipo, created_at, updated_at
+            ) VALUES (
+              ?, ?, ?, ?, ?, datetime(?), datetime(?)
+            )
+            """,
+            (doc_id, inmueble_id, nombre or tipo, url, tipo, now, now),
+        )
+    return {"id": doc_id, "url": url, "path": str(file_path)}
+
+
 INMO_ACTION_RESULT_OPTIONS = {
     "cita_adquisicion": {"Positivo", "Negativo", "Reprogramar", "No realizada"},
     "cita_comprador": {"Estudio", "No interesa", "Interesado"},
@@ -23794,9 +23854,24 @@ class Handler(BaseHTTPRequestHandler):
                         (inmueble_id,),
                     ).fetchone()
                     if inmueble:
-                        url = f"/api/inmueble_negociacion_pdf?action_id={record_id}"
+                        pdf_bytes = build_inmueble_negotiation_offer_pdf(
+                            dict(empresa) if empresa else {},
+                            dict(inmueble),
+                            dict(buyer) if buyer else {},
+                            dict(action_row),
+                        )
                         nombre = f"{documento_tipo} · {buyer['nombre'] if buyer and buyer['nombre'] else inmueble['direccion'] or 'Inmueble'}"
-                        upsert_inmueble_generated_doc(conn, inmueble_id, documento_tipo, nombre, url, now)
+                        filename_base = f"negociacion_{slugify_text(inmueble['direccion'] or inmueble['referencia'] or record_id)[:50] or record_id}"
+                        persist_generated_inmueble_pdf(
+                            conn,
+                            inmueble_id,
+                            documento_tipo,
+                            nombre,
+                            pdf_bytes,
+                            filename_base,
+                            now,
+                            replace_existing=False,
+                        )
                     next_id = os.urandom(16).hex()
                     conn.execute(
                         """
@@ -27040,6 +27115,17 @@ class Handler(BaseHTTPRequestHandler):
             )
             safe_ref = slugify_text(inmueble["direccion"] or inmueble["referencia"] or inmueble_id)[:50] or inmueble_id
             filename = f"hoja_visita_{safe_ref}.pdf"
+            persist_generated_inmueble_pdf(
+                conn,
+                inmueble_id,
+                "Hoja de visita",
+                f"Hoja de visita · {inmueble['direccion'] or safe_ref}",
+                pdf_bytes,
+                filename.replace(".pdf", ""),
+                now,
+                replace_existing=True,
+            )
+            conn.commit()
             binary_response(self, pdf_bytes, content_type="application/pdf", filename=filename)
             return
 
@@ -27078,6 +27164,17 @@ class Handler(BaseHTTPRequestHandler):
             )
             safe_ref = slugify_text(inmueble["direccion"] or inmueble["referencia"] or action_id)[:50] or action_id
             filename = f"negociacion_{safe_ref}.pdf"
+            persist_generated_inmueble_pdf(
+                conn,
+                str(inmueble["id"]),
+                str(action["documento_tipo"] or "Propuesta de compra").strip() or "Propuesta de compra",
+                f"{str(action['documento_tipo'] or 'Propuesta de compra').strip() or 'Propuesta de compra'} · {inmueble['direccion'] or safe_ref}",
+                pdf_bytes,
+                filename.replace(".pdf", ""),
+                now,
+                replace_existing=False,
+            )
+            conn.commit()
             binary_response(self, pdf_bytes, content_type="application/pdf", filename=filename)
             return
 
@@ -27132,15 +27229,32 @@ class Handler(BaseHTTPRequestHandler):
             if doc_kind == "venta_ficha":
                 pdf_bytes = build_inmueble_consumo_sale_sheet_pdf(company_payload, inmueble_payload, captacion_payload, docs_payload)
                 filename = f"ficha_venta_{safe_ref}.pdf"
+                doc_type = "Ficha venta"
+                doc_name = f"Ficha venta · {inmueble['direccion'] or safe_ref}"
             elif doc_kind == "venta_precio":
                 pdf_bytes = build_inmueble_consumo_sale_price_note_pdf(company_payload, inmueble_payload, captacion_payload)
                 filename = f"nota_precio_{safe_ref}.pdf"
+                doc_type = "Nota precio"
+                doc_name = f"Nota precio · {inmueble['direccion'] or safe_ref}"
             elif doc_kind == "alquiler_dia":
                 pdf_bytes = build_inmueble_consumo_rental_dia_pdf(company_payload, inmueble_payload, captacion_payload, docs_payload)
                 filename = f"dia_alquiler_{safe_ref}.pdf"
+                doc_type = "DIA alquiler"
+                doc_name = f"DIA alquiler · {inmueble['direccion'] or safe_ref}"
             else:
                 json_response(self, {"error": "kind no soportado"}, status=400)
                 return
+            persist_generated_inmueble_pdf(
+                conn,
+                inmueble_id,
+                doc_type,
+                doc_name,
+                pdf_bytes,
+                filename.replace(".pdf", ""),
+                now,
+                replace_existing=True,
+            )
+            conn.commit()
             binary_response(self, pdf_bytes, content_type="application/pdf", filename=filename)
             return
 

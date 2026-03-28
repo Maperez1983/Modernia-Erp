@@ -3705,13 +3705,14 @@ const findWorkspaceRecord = (rows = [], identifier = "") => {
 const updateWorkspaceEntryChrome = () => {
   const mode = state.currentWorkspaceEntryMode || "platform";
   const workspaceName = state.currentWorkspaceName || state.currentWorkspaceDetail?.workspace?.nombre || "Cliente";
+  const companyLabel = getWorkspaceCompanyContextLabel();
   if (holdingTitle) {
     holdingTitle.textContent = mode === "tenant" ? workspaceName : "Centro de operaciones";
   }
   if (holdingSubtitle) {
     holdingSubtitle.textContent =
       mode === "tenant"
-        ? "CRM, subservicios y motores activos del cliente dentro de LIV."
+        ? `CRM, subservicios y motores activos de ${companyLabel} dentro del cliente LIV.`
         : "Clientes LIV, módulos, operativa y motores transversales desde la capa plataforma.";
   }
   if (holdingBackBtn) {
@@ -3753,6 +3754,7 @@ const setWorkspaceCompanyContext = (companyId = "", options = {}) => {
 };
 
 const getWorkspaceCompanyFilter = () => String(state.currentWorkspaceCompanyId || "").trim();
+const getWorkspaceCompanyContextLabel = () => state.currentWorkspaceCompanyName || "Empresa activa";
 
 const filterWorkspaceRowsByCompany = (rows = [], field = "empresa_id") => {
   const companyId = getWorkspaceCompanyFilter();
@@ -4049,11 +4051,12 @@ const renderWorkspaceHealth = (data = {}) => {
   if (workspaceHealthScore) {
     const score = Number(data.readiness_score || 0);
     const summary = data.summary || {};
+    const companyLabel = getWorkspaceCompanyContextLabel();
     workspaceHealthScore.innerHTML = `
       <div class="workspace-health-score-card">
           <div class="workspace-health-ring">${score}%</div>
           <div>
-          <strong>Readiness del tenant</strong>
+          <strong>Readiness de ${companyLabel}</strong>
           <div class="muted">
             ${numberFormatter.format(Number(summary.clientes || 0))} clientes finales ·
             ${numberFormatter.format(Number(summary.documentos || 0))} documentos ·
@@ -4913,7 +4916,12 @@ const renderWorkspaceLauncher = (workspace = {}, modules = []) => {
     return;
   }
   const grouped = groupWorkspaceModulesBySection(enabled);
+  const companyLabel = getWorkspaceCompanyContextLabel();
   workspaceLauncher.innerHTML = `
+    <div class="workspace-context-strip">
+      <strong>Empresa en foco: ${companyLabel}</strong>
+      <span class="muted">Los lanzadores del cliente LIV ya se orientan a la operación diaria de esta empresa.</span>
+    </div>
     <div class="workspace-suite-summary">
       ${grouped
         .map(
@@ -4947,7 +4955,7 @@ const renderWorkspaceLauncher = (workspace = {}, modules = []) => {
                     <div class="workspace-launcher-card">
                       <div>
                         <strong>${config.label || row.modulo_nombre || row.modulo_key}</strong>
-                        <div class="muted">${meta.family} · ${meta.badge}</div>
+                        <div class="muted">${companyLabel} · ${meta.family} · ${meta.badge}</div>
                         <div class="muted">${meta.description}</div>
                       </div>
                       <button
@@ -5067,6 +5075,7 @@ const renderWorkspaceModules = (rows = []) => {
 
 const renderWorkspaceBillingSummary = (data = {}) => {
   if (!workspaceBillingSummary) return;
+  const companyLabel = getWorkspaceCompanyContextLabel();
   const metricItems = [
     ["Facturas emitidas", numberFormatter.format(Number(data.facturas_emitidas || 0))],
     ["Facturación", euroFormatter.format(Number(data.facturacion_total || 0))],
@@ -5078,6 +5087,10 @@ const renderWorkspaceBillingSummary = (data = {}) => {
   ];
   const services = Array.isArray(data.servicios) ? data.servicios : [];
   workspaceBillingSummary.innerHTML = `
+    <div class="workspace-context-strip">
+      <strong>Lectura económica de ${companyLabel}</strong>
+      <span class="muted">La operativa se cruza con la empresa activa para que no se confunda con el resto del cliente LIV.</span>
+    </div>
     <div class="workspace-mini-kpis">
       ${metricItems
         .map(

@@ -1707,6 +1707,19 @@ body.crm-fin #companySummary {
   font-size: 12px;
 }
 
+.workspace-context-strip {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(60, 110, 113, 0.16);
+  background: rgba(248, 244, 236, 0.92);
+}
+
 .workspace-summary-list,
 .workspace-document-list {
   display: grid;
