@@ -10838,14 +10838,16 @@ const updateInmuebleMap = (lat, lon) => {
 };
 
 const buildCatastroUrl = (ref, address) => {
-  const base = "https://www.sedecatastro.gob.es/";
-  if (ref) {
-    return `${base}?rc=${encodeURIComponent(ref)}`;
+  const cleanRef = String(ref || "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "");
+  if (cleanRef) {
+    return `https://www1.sedecatastro.gob.es/CYCBienInmueble/OVCConCiud.aspx?RefC=${encodeURIComponent(cleanRef)}`;
   }
-  if (address) {
-    return `${base}?address=${encodeURIComponent(address)}`;
+  if (String(address || "").trim()) {
+    return "https://www.sedecatastro.gob.es/";
   }
-  return base;
+  return "https://www.sedecatastro.gob.es/";
 };
 
 const geocodeInmuebleAddress = (address, latInput, lonInput) => {
