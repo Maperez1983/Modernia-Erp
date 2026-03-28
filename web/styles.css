@@ -265,6 +265,27 @@ button.secondary,
   box-shadow: none;
 }
 
+.catastro-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.catastro-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 36px;
+  height: 30px;
+  padding: 0 8px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #1b4f72, #3f7fb1);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
 .tabs,
 .tab-group {
   background: rgba(253, 251, 247, 0.7);
