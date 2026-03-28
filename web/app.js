@@ -9806,44 +9806,45 @@ const INMUEBLE_CHECKLISTS = {
 };
 
 const INMUEBLE_FIELDS = [
-  { key: "estado", label: "Estado", type: "select", options: CRM_ETAPAS },
-  { key: "tipo_inmueble", label: "Tipo", type: "text" },
-  { key: "zona", label: "Zona", type: "text" },
-  { key: "direccion", label: "Dirección", type: "text" },
-  { key: "codigo_postal", label: "Código postal", type: "text" },
-  { key: "poblacion", label: "Población", type: "text" },
-  { key: "provincia", label: "Provincia", type: "text" },
-  { key: "m2", label: "m²", type: "number" },
-  { key: "anio_construccion", label: "Año construcción", type: "number" },
-  { key: "habitaciones", label: "Habitaciones", type: "number" },
-  { key: "banos", label: "Baños", type: "number" },
-  { key: "precio_objetivo", label: "Precio objetivo", type: "number" },
-  { key: "precio_valoracion", label: "Precio adquisición", type: "number" },
-  { key: "valor_referencia", label: "Valor de referencia", type: "number" },
-  { key: "honorarios", label: "Honorarios agencia", type: "number" },
+  { key: "estado", label: "Estado", type: "select", options: CRM_ETAPAS, section: "Prioridad comercial" },
+  { key: "tipo_inmueble", label: "Tipo", type: "text", section: "Prioridad comercial" },
+  { key: "direccion", label: "Dirección", type: "text", section: "Prioridad comercial" },
+  { key: "precio_objetivo", label: "Precio objetivo", type: "number", section: "Prioridad comercial" },
+  { key: "honorarios", label: "Honorarios agencia", type: "number", section: "Prioridad comercial" },
   {
     key: "situacion_ocupacion",
     label: "Situación de ocupación",
     type: "select",
     options: ["Libre", "Ocupado", "Alquilado"],
+    section: "Prioridad comercial",
   },
-  { key: "referencia", label: "Referencia interna", type: "text" },
-  { key: "referencia_catastral", label: "Referencia catastral", type: "text" },
-  { key: "lat", label: "Latitud", type: "number" },
-  { key: "lon", label: "Longitud", type: "number" },
+  { key: "zona", label: "Zona", type: "text", section: "Ubicación y Catastro" },
+  { key: "codigo_postal", label: "Código postal", type: "text", section: "Ubicación y Catastro" },
+  { key: "poblacion", label: "Población", type: "text", section: "Ubicación y Catastro" },
+  { key: "provincia", label: "Provincia", type: "text", section: "Ubicación y Catastro" },
+  { key: "referencia", label: "Referencia interna", type: "text", section: "Ubicación y Catastro" },
+  { key: "referencia_catastral", label: "Referencia catastral", type: "text", section: "Ubicación y Catastro" },
+  { key: "m2", label: "m²", type: "number", section: "Características" },
+  { key: "anio_construccion", label: "Año construcción", type: "number", section: "Características" },
+  { key: "habitaciones", label: "Habitaciones", type: "number", section: "Características" },
+  { key: "banos", label: "Baños", type: "number", section: "Características" },
+  { key: "precio_valoracion", label: "Precio adquisición", type: "number", section: "Referencia económica" },
+  { key: "valor_referencia", label: "Valor de referencia", type: "number", section: "Referencia económica" },
+  { key: "lat", label: "Latitud", type: "number", section: "Coordenadas" },
+  { key: "lon", label: "Longitud", type: "number", section: "Coordenadas" },
 ];
 
 const CAPTACION_FIELDS = [
-  { key: "propietario", label: "Propietario", type: "text" },
-  { key: "urgencia", label: "Urgencia", type: "select", options: ["Baja", "Media", "Alta"] },
-  { key: "motivo", label: "Motivo", type: "text" },
-  { key: "canal", label: "Canal", type: "text" },
-  { key: "etapa", label: "Etapa", type: "select", options: CRM_ETAPAS },
-  { key: "probabilidad", label: "Probabilidad (%)", type: "number" },
-  { key: "proxima_accion", label: "Próxima acción", type: "text" },
-  { key: "fecha_contacto", label: "Fecha contacto", type: "date" },
-  { key: "asesor", label: "Asesor", type: "text" },
-  { key: "notas", label: "Notas", type: "textarea" },
+  { key: "propietario", label: "Propietario", type: "text", section: "Propiedad y origen" },
+  { key: "asesor", label: "Asesor", type: "text", section: "Propiedad y origen" },
+  { key: "canal", label: "Canal", type: "text", section: "Propiedad y origen" },
+  { key: "motivo", label: "Motivo", type: "text", section: "Propiedad y origen" },
+  { key: "urgencia", label: "Urgencia", type: "select", options: ["Baja", "Media", "Alta"], section: "Propiedad y origen" },
+  { key: "etapa", label: "Etapa", type: "select", options: CRM_ETAPAS, section: "Pipeline" },
+  { key: "probabilidad", label: "Probabilidad (%)", type: "number", section: "Pipeline" },
+  { key: "proxima_accion", label: "Próxima acción", type: "text", section: "Pipeline" },
+  { key: "fecha_contacto", label: "Fecha contacto", type: "date", section: "Pipeline" },
+  { key: "notas", label: "Notas", type: "textarea", section: "Notas internas" },
 ];
 
 const CLIENTE_FIELDS = [
@@ -10616,9 +10617,57 @@ const openInmuebleConsumoPdf = (kind) => {
   window.open(`/api/inmueble_consumo_pdf?${params.toString()}`, "_blank", "noopener");
 };
 
+const getInmuebleStageRequirements = (stage, inmueble = {}, captacion = {}, propietarios = []) => {
+  const normalized = normalizeSimple(stage || "");
+  if (!normalized) return [];
+  const hasPropietario =
+    String(captacion.propietario || "").trim() ||
+    (Array.isArray(propietarios) && propietarios.length > 0);
+  const checks = {
+    direccion: { label: "Dirección", ok: Boolean(String(inmueble.direccion || "").trim()) },
+    poblacion: { label: "Población", ok: Boolean(String(inmueble.poblacion || "").trim()) },
+    provincia: { label: "Provincia", ok: Boolean(String(inmueble.provincia || "").trim()) },
+    tipo: { label: "Tipo de inmueble", ok: Boolean(String(inmueble.tipo_inmueble || "").trim()) },
+    precio: { label: "Precio objetivo", ok: Number(inmueble.precio_objetivo || 0) > 0 },
+    honorarios: { label: "Honorarios agencia", ok: Number(inmueble.honorarios || 0) > 0 },
+    ocupacion: { label: "Situación de ocupación", ok: Boolean(String(inmueble.situacion_ocupacion || "").trim()) },
+    propietario: { label: "Propietario vinculado", ok: Boolean(hasPropietario) },
+    catastro: { label: "Referencia catastral", ok: Boolean(String(inmueble.referencia_catastral || "").trim()) },
+  };
+  const stageMap = {
+    noticia: ["direccion", "poblacion", "provincia", "tipo", "propietario"],
+    adquisicion: ["direccion", "poblacion", "provincia", "tipo", "propietario"],
+    encargo: ["direccion", "poblacion", "provincia", "tipo", "precio", "honorarios", "ocupacion", "propietario"],
+    reservado: ["direccion", "poblacion", "provincia", "tipo", "precio", "honorarios", "ocupacion", "propietario", "catastro"],
+    vendido: ["direccion", "poblacion", "provincia", "tipo", "precio", "honorarios", "ocupacion", "propietario", "catastro"],
+  };
+  return (stageMap[normalized] || [])
+    .map((key) => checks[key])
+    .filter(Boolean);
+};
+
+const validateInmuebleStageTransition = (stage, inmueble = {}, captacion = {}, propietarios = []) => {
+  const requirements = getInmuebleStageRequirements(stage, inmueble, captacion, propietarios);
+  const missing = requirements.filter((item) => !item.ok);
+  return {
+    ok: missing.length === 0,
+    missing,
+  };
+};
+
 const saveInmuebleField = (field, value) => {
   if (!state.currentInmuebleId) {
     return;
+  }
+  if (field === "estado") {
+    const inmueble = { ...(state.currentInmuebleContext?.inmueble || state.currentInmueble || {}), estado: value };
+    const captacion = state.currentInmuebleContext?.captacion || {};
+    const propietarios = state.currentInmuebleContext?.propietarios || [];
+    const validation = validateInmuebleStageTransition(value, inmueble, captacion, propietarios);
+    if (!validation.ok) {
+      setInmuebleSaveStatus(`Faltan datos para pasar a ${value}: ${validation.missing.map((item) => item.label).join(", ")}.`);
+      return;
+    }
   }
   setInmuebleSaveStatus("Guardando...");
   fetch("/api/inmueble_update", {
@@ -10666,6 +10715,16 @@ const saveInmuebleField = (field, value) => {
 const saveCaptacionField = (field, value) => {
   if (!state.currentInmuebleId) {
     return;
+  }
+  if (field === "etapa") {
+    const inmueble = { ...(state.currentInmuebleContext?.inmueble || state.currentInmueble || {}), estado: value };
+    const captacion = { ...(state.currentInmuebleContext?.captacion || {}), etapa: value };
+    const propietarios = state.currentInmuebleContext?.propietarios || [];
+    const validation = validateInmuebleStageTransition(value, inmueble, captacion, propietarios);
+    if (!validation.ok) {
+      setInmuebleSaveStatus(`Faltan datos para pasar a ${value}: ${validation.missing.map((item) => item.label).join(", ")}.`);
+      return;
+    }
   }
   setInmuebleSaveStatus("Guardando...");
   fetch("/api/captacion_update", {
@@ -10878,9 +10937,17 @@ const renderEditableGrid = (grid, fields, data, target) => {
   const isInmueble = target === "inmueble";
   const inputMap = {};
   const cardMap = {};
+  let currentSection = "";
   fields.forEach((field) => {
     if (target === "cliente" && field.key === "apellidos" && isJuridica) {
       return;
+    }
+    if (field.section && field.section !== currentSection) {
+      currentSection = field.section;
+      const section = document.createElement("div");
+      section.className = "form-section";
+      section.textContent = field.section;
+      grid.appendChild(section);
     }
     const card = document.createElement("div");
     card.className = "card editable-card";
@@ -10894,6 +10961,20 @@ const renderEditableGrid = (grid, fields, data, target) => {
       label.textContent = isJuridica ? "CIF" : "DNI";
     } else {
       label.textContent = field.label;
+    }
+    if (target === "inmueble" || target === "captacion") {
+      const requiredBadge = document.createElement("span");
+      requiredBadge.className = "editable-field-hint";
+      if ((field.key === "direccion") || (field.key === "tipo_inmueble") || (field.key === "precio_objetivo") || (field.key === "honorarios") || (field.key === "situacion_ocupacion") || (field.key === "propietario")) {
+        requiredBadge.textContent = "Clave";
+      } else if (field.key === "referencia_catastral") {
+        requiredBadge.textContent = "Obligatorio desde reservado";
+      } else if (field.key === "proxima_accion" || field.key === "asesor") {
+        requiredBadge.textContent = "Seguimiento";
+      }
+      if (requiredBadge.textContent) {
+        label.appendChild(requiredBadge);
+      }
     }
     card.appendChild(label);
 
@@ -18633,6 +18714,16 @@ const refreshCurrentInmuebleProfile = () => {
           ["Urgencia", captacion.urgencia],
           ["Asesor", captacion.asesor],
         ],
+      },
+      {
+        title: "Checklist por estado",
+        items: (() => {
+          const requirements = getInmuebleStageRequirements(inmueble.estado || captacion.etapa || "", inmueble, captacion, propietarios);
+          if (!requirements.length) {
+            return [["Revisión", "Sin requisitos"]];
+          }
+          return requirements.map((item) => [item.label, item.ok ? "OK" : "Pendiente"]);
+        })(),
       },
       {
         title: "Actividad",

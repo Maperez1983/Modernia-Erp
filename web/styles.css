@@ -3209,6 +3209,20 @@ tr.is-selected td {
   margin-top: 8px;
 }
 
+.editable-field-hint {
+  display: inline-flex;
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(191, 153, 74, 0.14);
+  color: #8b6a1d;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  vertical-align: middle;
+}
+
 .agenda-controls {
   display: flex;
   flex-wrap: wrap;
