@@ -3970,6 +3970,84 @@ const WORKSPACE_LAUNCHERS = {
   },
 };
 
+const getWorkspaceModuleLabel = (moduleKey = "") => {
+  const config = WORKSPACE_LAUNCHERS[moduleKey] || {};
+  return config.label || WORKSPACE_MODULE_STRUCTURE[moduleKey]?.family || moduleKey;
+};
+
+const WORKSPACE_HOME_CONTAINERS = [
+  {
+    key: "crm360",
+    title: "Clientes",
+    kicker: "CRM base",
+    description: "Ficha 360, relación con clientes finales y punto de entrada común del grupo.",
+    modules: ["crm360", "documental", "portal_cliente"],
+    planned: ["Copilot"],
+    action: WORKSPACE_LAUNCHERS.crm360?.action || null,
+    actionLabel: "Abrir clientes",
+  },
+  {
+    key: "gestoria",
+    title: "Gestoría",
+    kicker: "Subservicio",
+    description: "Renta, modelos, seguimiento de trabajos y control documental de asesoría.",
+    modules: ["gestoria", "documental", "facturacion", "automatizaciones"],
+    planned: ["Copilot"],
+    action: WORKSPACE_LAUNCHERS.gestoria?.action || null,
+    actionLabel: "Abrir gestoría",
+  },
+  {
+    key: "seguros",
+    title: "Seguros",
+    kicker: "Subservicio",
+    description: "Cartera, renovaciones, oportunidades y seguimiento comercial.",
+    modules: ["seguros", "documental", "automatizaciones"],
+    planned: ["Copilot"],
+    action: WORKSPACE_LAUNCHERS.seguros?.action || null,
+    actionLabel: "Abrir seguros",
+  },
+  {
+    key: "inmobiliaria",
+    title: "Inmobiliaria",
+    kicker: "Subservicio",
+    description: "Captaciones, inmuebles, compraventas, alquileres y visitas.",
+    modules: ["inmobiliaria", "documental", "facturacion", "automatizaciones"],
+    planned: ["Copilot"],
+    action: WORKSPACE_LAUNCHERS.inmobiliaria?.action || null,
+    actionLabel: "Abrir inmobiliaria",
+  },
+  {
+    key: "financiacion",
+    title: "Financiación",
+    kicker: "Subservicio",
+    description: "Pipeline hipotecario, expedientes, firmas y bancos.",
+    modules: ["financiacion", "documental", "portal_cliente", "automatizaciones"],
+    planned: ["Copilot"],
+    action: WORKSPACE_LAUNCHERS.financiacion?.action || null,
+    actionLabel: "Abrir financiación",
+  },
+  {
+    key: "fincas",
+    title: "Fincas",
+    kicker: "Subservicio",
+    description: "Comunidades, incidencias, juntas, presupuestos y seguimiento.",
+    modules: ["fincas", "documental", "facturacion", "automatizaciones"],
+    planned: ["Copilot"],
+    action: WORKSPACE_LAUNCHERS.fincas?.action || null,
+    actionLabel: "Abrir fincas",
+  },
+  {
+    key: "shared",
+    title: "Motores comunes",
+    kicker: "Transversal",
+    description: "Capas compartidas del grupo para documental, facturación, portal, horario y automatización.",
+    modules: ["documental", "facturacion", "portal_cliente", "registro_horario", "automatizaciones"],
+    planned: [],
+    action: WORKSPACE_LAUNCHERS.documental?.action || null,
+    actionLabel: "Abrir backoffice",
+  },
+];
+
 const syncWorkspaceClientOptions = (rows = []) => {
   state.workspaceClientOptions = Array.isArray(rows) ? rows : [];
   state.workspaceClientOptionMap = new Map();
@@ -4929,15 +5007,52 @@ const renderWorkspaceLauncher = (workspace = {}, modules = []) => {
     workspaceLauncher.innerHTML = "<p class='muted'>No hay módulos activos en este workspace.</p>";
     return;
   }
-  const grouped = groupWorkspaceModulesBySection(enabled);
+  const enabledKeys = new Set(enabled.map((row) => row.modulo_key));
   const companyLabel = getWorkspaceCompanyContextLabel();
   workspaceLauncher.innerHTML = `
     <div class="workspace-context-strip">
       <strong>Empresa en foco: ${companyLabel}</strong>
-      <span class="muted">Los lanzadores del cliente LIV ya se orientan a la operación diaria de esta empresa.</span>
+      <span class="muted">El workspace se organiza por áreas de servicio. Entra en cada contenedor para trabajar con esa línea del grupo.</span>
+    </div>
+    <div class="workspace-home-grid">
+      ${WORKSPACE_HOME_CONTAINERS
+        .map((container) => {
+          const availableModules = container.modules.filter((moduleKey) => enabledKeys.has(moduleKey));
+          if (!availableModules.length && container.key !== "shared") return "";
+          if (!availableModules.length && container.key === "shared") return "";
+          return `
+            <article class="workspace-home-card">
+              <div class="workspace-home-card-head">
+                <div>
+                  <span class="workspace-home-kicker">${container.kicker}</span>
+                  <h4>${container.title}</h4>
+                </div>
+                <span class="workspace-home-count">${numberFormatter.format(availableModules.length)} módulos</span>
+              </div>
+              <p class="muted">${container.description}</p>
+              <div class="workspace-home-chip-list">
+                ${availableModules
+                  .map((moduleKey) => `<span class="workspace-home-chip">${getWorkspaceModuleLabel(moduleKey)}</span>`)
+                  .join("")}
+                ${(container.planned || [])
+                  .map((label) => `<span class="workspace-home-chip is-planned">${label} · Próximo</span>`)
+                  .join("")}
+              </div>
+              <div class="workspace-home-card-actions">
+                <button
+                  type="button"
+                  class="secondary ghost"
+                  data-workspace-home-action="${container.key}"
+                  ${typeof container.action === "function" ? "" : "disabled"}
+                >${container.actionLabel}</button>
+              </div>
+            </article>
+          `;
+        })
+        .join("")}
     </div>
     <div class="workspace-suite-summary">
-      ${grouped
+      ${groupWorkspaceModulesBySection(enabled)
         .map(
           (group) => `
             <div class="workspace-suite-card">
@@ -4949,49 +5064,11 @@ const renderWorkspaceLauncher = (workspace = {}, modules = []) => {
         )
         .join("")}
     </div>
-    ${grouped
-      .map(
-        (group) => `
-          <section class="workspace-module-section">
-            <div class="workspace-module-section-head">
-              <div>
-                <h4>${group.title}</h4>
-                <p class="muted">${group.subtitle}</p>
-              </div>
-              <span>${numberFormatter.format(group.rows.length)} activos</span>
-            </div>
-            <div class="workspace-launcher-grid">
-              ${group.rows
-                .map((row) => {
-                  const config = WORKSPACE_LAUNCHERS[row.modulo_key] || { label: row.modulo_nombre, actionLabel: "Próximo", action: null };
-                  const meta = getWorkspaceModuleMeta(row);
-                  return `
-                    <div class="workspace-launcher-card">
-                      <div>
-                        <strong>${config.label || row.modulo_nombre || row.modulo_key}</strong>
-                        <div class="muted">${companyLabel} · ${meta.family} · ${meta.badge}</div>
-                        <div class="muted">${meta.description}</div>
-                      </div>
-                      <button
-                        type="button"
-                        class="secondary ghost"
-                        data-workspace-launcher="${row.modulo_key}"
-                        ${config.action ? "" : "disabled"}
-                      >${config.actionLabel || "Abrir"}</button>
-                    </div>
-                  `;
-                })
-                .join("")}
-            </div>
-          </section>
-        `
-      )
-      .join("")}
   `;
-  workspaceLauncher.querySelectorAll("[data-workspace-launcher]").forEach((button) => {
+  workspaceLauncher.querySelectorAll("[data-workspace-home-action]").forEach((button) => {
     button.addEventListener("click", () => {
-      const key = button.dataset.workspaceLauncher || "";
-      const action = WORKSPACE_LAUNCHERS[key]?.action;
+      const key = button.dataset.workspaceHomeAction || "";
+      const action = WORKSPACE_HOME_CONTAINERS.find((container) => container.key === key)?.action;
       if (typeof action === "function") {
         action();
       }
