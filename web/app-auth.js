@@ -153,8 +153,14 @@
         deps.state.appInitialized = true;
       }
       const targetUser = String(data?.user?.usuario || "").trim().toLowerCase();
+      const targetRole = String(data?.user?.rol || "").trim().toLowerCase();
+      const targetService = String(data?.user?.servicio || "").trim().toLowerCase();
       if (targetUser === "workspace") {
         window.location.assign("?holding=1&mode=tenant&workspace=modernia");
+        return;
+      }
+      if (targetRole === "administrador" || targetService === "administración" || targetService === "administracion") {
+        window.location.assign("?holding=1&mode=platform");
         return;
       }
     } catch {
