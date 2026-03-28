@@ -3993,7 +3993,7 @@ const renderWorkspaceCompanySwitcher = (rows = []) => {
 
 const normalizeWorkspaceViewKey = (value = "") => {
   const key = String(value || "").trim().toLowerCase();
-  if (["overview", "tenant", "clients", "operations", "finance", "backoffice", "fincas"].includes(key)) {
+  if (["overview", "tenant", "clients", "operations", "documental", "facturacion", "facturas_recibidas", "portal_cliente", "registro_horario", "automatizaciones", "copilot", "fincas"].includes(key)) {
     return key;
   }
   return "overview";
@@ -4077,10 +4077,10 @@ const WORKSPACE_LAUNCHERS = {
     actionLabel: "Ver inbox",
     action: () => {
       if (isTenantWorkspaceMode()) {
-        focusWorkspaceView("backoffice", workspaceDocumentHub, { forceTenantView: true });
+        focusWorkspaceView("documental", workspaceDocumentHub, { forceTenantView: true });
         return;
       }
-      focusWorkspaceView("backoffice", workspaceDocumentHub);
+      focusWorkspaceView("documental", workspaceDocumentHub);
     },
   },
   dashboard: { label: "Dashboard Ejecutivo", actionLabel: "Ir a home", action: () => goHome() },
@@ -4155,10 +4155,10 @@ const WORKSPACE_LAUNCHERS = {
     actionLabel: "Gestionar",
     action: () => {
       if (isTenantWorkspaceMode()) {
-        focusWorkspaceView("finance", workspaceBillingForm, { forceTenantView: true });
+        focusWorkspaceView("facturacion", workspaceBillingForm, { forceTenantView: true });
         return;
       }
-      focusWorkspaceView("finance", workspaceBillingForm);
+      focusWorkspaceView("facturacion", workspaceBillingForm);
     },
   },
   facturas_recibidas: {
@@ -4166,10 +4166,10 @@ const WORKSPACE_LAUNCHERS = {
     actionLabel: "Ver inbox",
     action: () => {
       if (isTenantWorkspaceMode()) {
-        focusWorkspaceView("backoffice", workspaceInboxForm, { forceTenantView: true });
+        focusWorkspaceView("facturas_recibidas", workspaceInboxForm, { forceTenantView: true });
         return;
       }
-      focusWorkspaceView("backoffice", workspaceInboxForm);
+      focusWorkspaceView("facturas_recibidas", workspaceInboxForm);
     },
   },
   portal_cliente: {
@@ -4177,10 +4177,10 @@ const WORKSPACE_LAUNCHERS = {
     actionLabel: "Gestionar",
     action: () => {
       if (isTenantWorkspaceMode()) {
-        focusWorkspaceView("backoffice", workspacePortalForm, { forceTenantView: true });
+        focusWorkspaceView("portal_cliente", workspacePortalForm, { forceTenantView: true });
         return;
       }
-      focusWorkspaceView("backoffice", workspacePortalForm);
+      focusWorkspaceView("portal_cliente", workspacePortalForm);
     },
   },
   registro_horario: {
@@ -4188,10 +4188,10 @@ const WORKSPACE_LAUNCHERS = {
     actionLabel: "Gestionar",
     action: () => {
       if (isTenantWorkspaceMode()) {
-        focusWorkspaceView("backoffice", workspaceTimeForm, { forceTenantView: true });
+        focusWorkspaceView("registro_horario", workspaceTimeForm, { forceTenantView: true });
         return;
       }
-      focusWorkspaceView("backoffice", workspaceTimeForm);
+      focusWorkspaceView("registro_horario", workspaceTimeForm);
     },
   },
   automatizaciones: {
@@ -4199,10 +4199,10 @@ const WORKSPACE_LAUNCHERS = {
     actionLabel: "Gestionar",
     action: () => {
       if (isTenantWorkspaceMode()) {
-        focusWorkspaceView("backoffice", workspaceAutomationForm, { forceTenantView: true });
+        focusWorkspaceView("automatizaciones", workspaceAutomationForm, { forceTenantView: true });
         return;
       }
-      focusWorkspaceView("backoffice", workspaceAutomationForm);
+      focusWorkspaceView("automatizaciones", workspaceAutomationForm);
     },
   },
   copilot: {
@@ -4210,10 +4210,10 @@ const WORKSPACE_LAUNCHERS = {
     actionLabel: "Abrir hub",
     action: () => {
       if (isTenantWorkspaceMode()) {
-        focusWorkspaceView("backoffice", workspaceCopilotHub, { forceTenantView: true });
+        focusWorkspaceView("copilot", workspaceCopilotHub, { forceTenantView: true });
         return;
       }
-      focusWorkspaceView("backoffice", workspaceCopilotHub);
+      focusWorkspaceView("copilot", workspaceCopilotHub);
     },
   },
 };
@@ -9720,6 +9720,7 @@ const INMUEBLE_FIELDS = [
   { key: "poblacion", label: "Población", type: "text" },
   { key: "provincia", label: "Provincia", type: "text" },
   { key: "m2", label: "m²", type: "number" },
+  { key: "anio_construccion", label: "Año construcción", type: "number" },
   { key: "habitaciones", label: "Habitaciones", type: "number" },
   { key: "banos", label: "Baños", type: "number" },
   { key: "precio_objetivo", label: "Precio objetivo", type: "number" },
@@ -10996,6 +10997,14 @@ const renderEditableGrid = (grid, fields, data, target) => {
       await lookupInmuebleCatastro(inputMap);
     });
     actions.appendChild(lookupBtn);
+    const syncBtn = document.createElement("button");
+    syncBtn.type = "button";
+    syncBtn.className = "secondary catastro-button";
+    syncBtn.innerHTML = '<span class="catastro-icon" aria-hidden="true">CAT</span><span>Ficha PDF</span>';
+    syncBtn.addEventListener("click", async () => {
+      await syncInmuebleCatastroFicha(inputMap);
+    });
+    actions.appendChild(syncBtn);
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "secondary catastro-button";
@@ -11330,6 +11339,54 @@ const lookupInmuebleCatastro = async (inputMap = {}) => {
     return null;
   } catch {
     setInmuebleSaveStatus("No se pudo consultar Catastro.");
+    return null;
+  }
+};
+
+const syncInmuebleCatastroFicha = async (inputMap = {}) => {
+  if (!state.currentInmuebleId) return null;
+  setInmuebleSaveStatus("Sincronizando ficha de Catastro...");
+  try {
+    const data = await fetch("/api/inmueble_catastro_sync", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        inmueble_id: state.currentInmuebleId,
+        usuario: getCurrentUser(),
+      }),
+    }).then((res) => res.json());
+    if (data?.error) {
+      setInmuebleSaveStatus(data.error);
+      return null;
+    }
+    const updates = data?.updates || {};
+    Object.entries(updates).forEach(([key, value]) => {
+      if (inputMap[key]) {
+        inputMap[key].value = value ?? "";
+      }
+      if (state.currentInmueble) {
+        state.currentInmueble[key] = value;
+      }
+      if (state.currentInmuebleContext?.inmueble) {
+        state.currentInmuebleContext.inmueble[key] = value;
+      }
+    });
+    refreshCurrentInmuebleHeader();
+    if (state.currentInmuebleId) {
+      loadInmuebleDocs(state.currentInmuebleId);
+    }
+    const docUrl = data?.document?.url || "";
+    setInmuebleSaveStatus(
+      docUrl
+        ? "Ficha Catastro generada, datos sincronizados y documento guardado."
+        : "Datos catastrales sincronizados."
+    );
+    if (docUrl) {
+      window.open(docUrl, "_blank", "noopener");
+    }
+    return data;
+  } catch {
+    setInmuebleSaveStatus("No se pudo sincronizar Catastro.");
     return null;
   }
 };

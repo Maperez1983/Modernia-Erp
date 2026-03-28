@@ -60,8 +60,13 @@
             <button class="tab" type="button" data-workspace-view-tab="tenant">Configuración</button>
             <button class="tab" type="button" data-workspace-view-tab="clients">Clientes</button>
             <button class="tab" type="button" data-workspace-view-tab="operations">Operativa</button>
-            <button class="tab" type="button" data-workspace-view-tab="finance">Finanzas</button>
-            <button class="tab" type="button" data-workspace-view-tab="backoffice">Backoffice</button>
+            <button class="tab" type="button" data-workspace-view-tab="documental">Documental</button>
+            <button class="tab" type="button" data-workspace-view-tab="facturacion">Facturación</button>
+            <button class="tab" type="button" data-workspace-view-tab="facturas_recibidas">Facturas recibidas</button>
+            <button class="tab" type="button" data-workspace-view-tab="portal_cliente">Portal cliente</button>
+            <button class="tab" type="button" data-workspace-view-tab="registro_horario">Registro horario</button>
+            <button class="tab" type="button" data-workspace-view-tab="automatizaciones">Automatizaciones</button>
+            <button class="tab" type="button" data-workspace-view-tab="copilot">Copilot</button>
             <button class="tab" type="button" data-workspace-view-tab="fincas">Fincas</button>
           </div>
         <div id="workspaceCompanySwitcher" class="workspace-company-switcher"></div>
@@ -390,7 +395,7 @@
             </div>
           </div>
         </div>
-        <div class="workspace-central-layout crm-workspace-view" data-workspace-view="finance">
+        <div class="workspace-central-layout crm-workspace-view" data-workspace-view="facturacion">
           <div class="form-card">
             <div class="section-head">
               <div>
@@ -498,7 +503,7 @@
             </div>
           </div>
         </div>
-        <div class="form-card crm-workspace-view" data-workspace-view="backoffice">
+        <div class="form-card crm-workspace-view" data-workspace-view="documental">
           <div class="section-head">
             <div>
               <h3>Inbox documental unificado</h3>
@@ -507,7 +512,7 @@
           </div>
           <div id="workspaceDocumentHub"></div>
         </div>
-        <div class="form-card crm-workspace-view" data-workspace-view="backoffice">
+        <div class="form-card crm-workspace-view" data-workspace-view="copilot">
           <div class="section-head">
             <div>
               <h3>Copilot del grupo</h3>
@@ -561,7 +566,7 @@
           </div>
           <div id="workspaceServiceDesks"></div>
         </div>
-        <div class="workspace-central-layout crm-workspace-view" data-workspace-view="backoffice">
+        <div class="workspace-central-layout crm-workspace-view" data-workspace-view="facturas_recibidas">
           <div class="form-card">
             <div class="section-head">
               <div>
@@ -698,7 +703,7 @@
             <div id="workspaceSeriesList"></div>
           </div>
         </div>
-        <div class="workspace-central-layout crm-workspace-view" data-workspace-view="backoffice">
+        <div class="workspace-central-layout crm-workspace-view" data-workspace-view="portal_cliente">
           <div class="form-card">
             <div class="section-head">
               <div>
@@ -732,65 +737,65 @@
             </form>
             <div id="workspacePortalList"></div>
           </div>
-          <div class="form-card">
-            <div class="section-head">
-              <div>
-                <h3>Automatizaciones</h3>
-                <p class="muted">Reglas simples por evento para aumentar el valor operativo del workspace.</p>
-              </div>
-            </div>
-            <form id="workspaceAutomationForm" class="form-grid">
-              <input type="hidden" name="id" />
-              <input type="hidden" name="workspace_id" />
-              <label class="span-2">
-                Nombre
-                <input name="nombre" required />
-              </label>
-              <label>
-                Trigger
-                <select name="trigger_key">
-                  <option value="document_uploaded">Documento entrante</option>
-                  <option value="invoice_created">Factura emitida</option>
-                  <option value="payment_registered">Cobro registrado</option>
-                  <option value="portal_client_invited">Cliente invitado al portal</option>
-                  <option value="time_logged">Fichaje registrado</option>
-                  <option value="sale_closed">Compraventa cerrada</option>
-                  <option value="finca_incidencia_created">Incidencia de fincas</option>
-                </select>
-              </label>
-              <label>
-                Módulo
-                <select name="modulo_key">
-                  <option value="">Transversal</option>
-                  <option value="gestoria">Gestoría</option>
-                  <option value="seguros">Seguros</option>
-                  <option value="inmobiliaria">Inmobiliaria</option>
-                  <option value="facturacion">Facturación</option>
-                </select>
-              </label>
-              <label class="inline-check">
-                <input type="checkbox" name="enabled" checked />
-                Activa
-              </label>
-              <label class="span-2">
-                Acción
-                <input name="action_summary" placeholder="Crear tarea, avisar responsable, mover estado..." />
-              </label>
-              <label class="span-2">
-                Config JSON
-                <textarea name="config_json" rows="3">{}</textarea>
-              </label>
-              <div class="form-actions span-2">
-                <button type="submit">Guardar automatización</button>
-                <button type="button" id="workspaceAutomationResetBtn" class="secondary ghost">Nueva</button>
-                <span id="workspaceAutomationStatus" class="muted"></span>
-              </div>
-            </form>
-            <div id="workspaceAutomationList"></div>
-            <div id="workspaceAutomationLogs" class="workspace-automation-logs"></div>
-          </div>
         </div>
-        <div class="workspace-central-layout crm-workspace-view" data-workspace-view="finance">
+        <div class="form-card crm-workspace-view" data-workspace-view="automatizaciones">
+          <div class="section-head">
+            <div>
+              <h3>Automatizaciones</h3>
+              <p class="muted">Reglas simples por evento para aumentar el valor operativo del workspace.</p>
+            </div>
+          </div>
+          <form id="workspaceAutomationForm" class="form-grid">
+            <input type="hidden" name="id" />
+            <input type="hidden" name="workspace_id" />
+            <label class="span-2">
+              Nombre
+              <input name="nombre" required />
+            </label>
+            <label>
+              Trigger
+              <select name="trigger_key">
+                <option value="document_uploaded">Documento entrante</option>
+                <option value="invoice_created">Factura emitida</option>
+                <option value="payment_registered">Cobro registrado</option>
+                <option value="portal_client_invited">Cliente invitado al portal</option>
+                <option value="time_logged">Fichaje registrado</option>
+                <option value="sale_closed">Compraventa cerrada</option>
+                <option value="finca_incidencia_created">Incidencia de fincas</option>
+              </select>
+            </label>
+            <label>
+              Módulo
+              <select name="modulo_key">
+                <option value="">Transversal</option>
+                <option value="gestoria">Gestoría</option>
+                <option value="seguros">Seguros</option>
+                <option value="inmobiliaria">Inmobiliaria</option>
+                <option value="facturacion">Facturación</option>
+              </select>
+            </label>
+            <label class="inline-check">
+              <input type="checkbox" name="enabled" checked />
+              Activa
+            </label>
+            <label class="span-2">
+              Acción
+              <input name="action_summary" placeholder="Crear tarea, avisar responsable, mover estado..." />
+            </label>
+            <label class="span-2">
+              Config JSON
+              <textarea name="config_json" rows="3">{}</textarea>
+            </label>
+            <div class="form-actions span-2">
+              <button type="submit">Guardar automatización</button>
+              <button type="button" id="workspaceAutomationResetBtn" class="secondary ghost">Nueva</button>
+              <span id="workspaceAutomationStatus" class="muted"></span>
+            </div>
+          </form>
+          <div id="workspaceAutomationList"></div>
+          <div id="workspaceAutomationLogs" class="workspace-automation-logs"></div>
+        </div>
+        <div class="workspace-central-layout crm-workspace-view" data-workspace-view="facturacion">
           <div class="form-card">
             <div class="section-head">
               <div>
@@ -895,7 +900,7 @@
             <div id="workspaceRemittancesList"></div>
           </div>
         </div>
-        <div class="form-card crm-workspace-view" data-workspace-view="backoffice">
+        <div class="form-card crm-workspace-view" data-workspace-view="portal_cliente">
           <div class="section-head">
             <div>
               <h3>Requerimientos portal</h3>
@@ -957,7 +962,7 @@
           </form>
           <div id="workspacePortalRequestList"></div>
         </div>
-        <div class="workspace-central-layout crm-workspace-view" data-workspace-view="backoffice">
+        <div class="workspace-central-layout crm-workspace-view" data-workspace-view="registro_horario">
           <div class="form-card">
             <div class="section-head">
               <div>
