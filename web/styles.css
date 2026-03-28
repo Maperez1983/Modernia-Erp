@@ -1313,6 +1313,10 @@ body.crm-fin #companySummary {
   margin-bottom: 18px;
 }
 
+.workspace-central-layout > .span-2 {
+  grid-column: 1 / -1;
+}
+
 .workspace-list-item {
   width: 100%;
   display: flex;
@@ -2087,6 +2091,7 @@ body.crm-fin #companySummary {
 
 #workspaceEngineTabs {
   position: static;
+  justify-content: flex-start;
   flex-wrap: nowrap;
   overflow-x: auto;
   gap: 8px;
