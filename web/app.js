@@ -2297,6 +2297,7 @@ const DASHBOARD_COMPANY = "Estudio Velazquez 2012 SL";
 const AIE_COMPANY = "Inmovere Gestión AIE";
 const FIN_COMPANY = "Financiaciones Modernia";
 const FINCAS_COMPANY = "Fincas Velazquez";
+const REFORMAS_COMPANY = "Inmovere Proyect SL";
 const SEGUROS_RESPONSABLES_FIJOS = [
   "SEBAS LALLANA",
   "DANI GARCIA",
@@ -3595,6 +3596,12 @@ const WORKSPACE_MODULE_STRUCTURE = {
     badge: "Servicio activo",
     description: "Pipeline hipotecario, expedientes y acompañamiento financiero.",
   },
+  reformas: {
+    section: "crm_services",
+    family: "Subservicio CRM",
+    badge: "Servicio activo",
+    description: "Presupuestos, partidas y seguimiento comercial de obras y reformas.",
+  },
   fincas: {
     section: "crm_services",
     family: "Subservicio CRM",
@@ -3642,6 +3649,12 @@ const WORKSPACE_MODULE_STRUCTURE = {
     family: "Motor transversal",
     badge: "Escalabilidad",
     description: "Reglas y automatismos que conectan servicios, portal y documental.",
+  },
+  copilot: {
+    section: "workspace_engines",
+    family: "Motor transversal",
+    badge: "Asistencia",
+    description: "Asistencia inteligente para soporte legal, comercial y operativo por servicio.",
   },
 };
 
@@ -4030,6 +4043,17 @@ const WORKSPACE_LAUNCHERS = {
       focusWorkspaceView("operations", workspaceFinOverview);
     },
   },
+  reformas: {
+    label: "Reformas",
+    actionLabel: "Ver módulo",
+    action: () => {
+      if (isTenantWorkspaceMode()) {
+        openCompany(REFORMAS_COMPANY, { allowRestricted: true });
+        return;
+      }
+      focusWorkspaceView("operations", workspaceBudgetForm);
+    },
+  },
   fincas: {
     label: "Fincas",
     actionLabel: "Ver módulo",
@@ -4096,6 +4120,17 @@ const WORKSPACE_LAUNCHERS = {
       focusWorkspaceView("backoffice", workspaceAutomationForm);
     },
   },
+  copilot: {
+    label: "Copilot",
+    actionLabel: "Abrir",
+    action: () => {
+      if (isTenantWorkspaceMode()) {
+        openCrmInmobiliario();
+        return;
+      }
+      goHome();
+    },
+  },
 };
 
 const getWorkspaceModuleLabel = (moduleKey = "") => {
@@ -4119,8 +4154,7 @@ const WORKSPACE_HOME_CONTAINERS = [
     title: "Gestoría",
     kicker: "Subservicio",
     description: "Renta, modelos, seguimiento de trabajos y control documental de asesoría.",
-    modules: ["gestoria", "documental", "facturacion", "automatizaciones"],
-    planned: ["Copilot"],
+    modules: ["gestoria", "documental", "facturacion", "automatizaciones", "copilot"],
     action: WORKSPACE_LAUNCHERS.gestoria?.action || null,
     actionLabel: "Abrir gestoría",
   },
@@ -4129,8 +4163,7 @@ const WORKSPACE_HOME_CONTAINERS = [
     title: "Seguros",
     kicker: "Subservicio",
     description: "Cartera, renovaciones, oportunidades y seguimiento comercial.",
-    modules: ["seguros", "documental", "automatizaciones"],
-    planned: ["Copilot"],
+    modules: ["seguros", "documental", "automatizaciones", "copilot"],
     action: WORKSPACE_LAUNCHERS.seguros?.action || null,
     actionLabel: "Abrir seguros",
   },
@@ -4139,8 +4172,7 @@ const WORKSPACE_HOME_CONTAINERS = [
     title: "Inmobiliaria",
     kicker: "Subservicio",
     description: "Captaciones, inmuebles, compraventas, alquileres y visitas.",
-    modules: ["inmobiliaria", "documental", "facturacion", "automatizaciones"],
-    planned: ["Copilot"],
+    modules: ["inmobiliaria", "documental", "facturacion", "automatizaciones", "copilot"],
     action: WORKSPACE_LAUNCHERS.inmobiliaria?.action || null,
     actionLabel: "Abrir inmobiliaria",
   },
@@ -4149,18 +4181,25 @@ const WORKSPACE_HOME_CONTAINERS = [
     title: "Financiación",
     kicker: "Subservicio",
     description: "Pipeline hipotecario, expedientes, firmas y bancos.",
-    modules: ["financiacion", "documental", "portal_cliente", "automatizaciones"],
-    planned: ["Copilot"],
+    modules: ["financiacion", "documental", "portal_cliente", "automatizaciones", "copilot"],
     action: WORKSPACE_LAUNCHERS.financiacion?.action || null,
     actionLabel: "Abrir financiación",
+  },
+  {
+    key: "reformas",
+    title: "Reformas",
+    kicker: "Subservicio",
+    description: "Presupuestos por partidas, obras, seguimiento comercial y documentación técnica.",
+    modules: ["reformas", "documental", "facturacion", "automatizaciones", "copilot"],
+    action: WORKSPACE_LAUNCHERS.reformas?.action || null,
+    actionLabel: "Abrir reformas",
   },
   {
     key: "fincas",
     title: "Fincas",
     kicker: "Subservicio",
     description: "Comunidades, incidencias, juntas, presupuestos y seguimiento.",
-    modules: ["fincas", "documental", "facturacion", "automatizaciones"],
-    planned: ["Copilot"],
+    modules: ["fincas", "documental", "facturacion", "automatizaciones", "copilot"],
     action: WORKSPACE_LAUNCHERS.fincas?.action || null,
     actionLabel: "Abrir fincas",
   },
@@ -4169,7 +4208,7 @@ const WORKSPACE_HOME_CONTAINERS = [
     title: "Motores comunes",
     kicker: "Transversal",
     description: "Capas compartidas del grupo para documental, facturación, portal, horario y automatización.",
-    modules: ["documental", "facturacion", "portal_cliente", "registro_horario", "automatizaciones"],
+    modules: ["documental", "facturacion", "portal_cliente", "registro_horario", "automatizaciones", "copilot"],
     planned: [],
     action: WORKSPACE_LAUNCHERS.documental?.action || null,
     actionLabel: "Abrir backoffice",
@@ -5136,6 +5175,10 @@ const renderWorkspaceLauncher = (workspace = {}, modules = []) => {
     return;
   }
   const enabledKeys = new Set(enabled.map((row) => row.modulo_key));
+  if (isTenantWorkspaceMode()) {
+    enabledKeys.add("reformas");
+    enabledKeys.add("copilot");
+  }
   workspaceLauncher.innerHTML = `
     <div class="workspace-home-grid">
       ${WORKSPACE_HOME_CONTAINERS
