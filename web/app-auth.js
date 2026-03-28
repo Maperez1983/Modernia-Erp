@@ -156,7 +156,7 @@
       const targetRole = String(data?.user?.rol || "").trim().toLowerCase();
       const targetService = String(data?.user?.servicio || "").trim().toLowerCase();
       if (targetUser === "workspace") {
-        window.location.assign("?holding=1&mode=tenant&workspace=modernia");
+        window.location.assign("?holding=1&mode=tenant&workspace=modernia&view=overview");
         return;
       }
       if (targetRole === "administrador" || targetService === "administración" || targetService === "administracion") {

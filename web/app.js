@@ -3506,7 +3506,7 @@ const renderCompanyCards = () => {
         <h3>Workspace ${getWorkspaceDisplayName(state.currentWorkspaceName || "modernia")}</h3>
         <div class="company-meta">Entrada operativa al grupo y a sus empresas activas.</div>
         <div class="company-meta">Desde aquí eliges empresa y luego trabajas en clientes y módulos.</div>
-        <a class="card-link" href="?holding=1&mode=tenant&workspace=modernia" data-action="holding-tenant">Entrar</a>
+        <a class="card-link" href="?holding=1&mode=tenant&workspace=modernia&view=overview" data-action="holding-tenant">Entrar</a>
       `;
       coreCards.appendChild(workspaceCard);
       return;
@@ -3530,7 +3530,7 @@ const renderCompanyCards = () => {
       <h3>Workspace ${getWorkspaceDisplayName(state.currentWorkspaceName || "modernia")}</h3>
       <div class="company-meta">Espacio del grupo donde viven sus empresas, clientes, módulos y operativa diaria.</div>
       <div class="company-meta">Primero entras al workspace y desde ahí eliges la empresa con la que quieres trabajar.</div>
-      <a class="card-link" href="?holding=1&mode=tenant&workspace=modernia" data-action="holding-tenant">Entrar</a>
+      <a class="card-link" href="?holding=1&mode=tenant&workspace=modernia&view=overview" data-action="holding-tenant">Entrar</a>
     `;
     coreCards.appendChild(tenantCard);
   }
@@ -7469,7 +7469,7 @@ const openHolding = (options = {}) => {
   setModule("empresas");
   explorerSection.classList.add("hidden");
   setPage("holding");
-  setWorkspaceView(options.view || (mode === "tenant" ? "operations" : state.currentWorkspaceView || "overview"));
+  setWorkspaceView(options.view || (mode === "tenant" ? "overview" : state.currentWorkspaceView || "overview"));
   updateWorkspaceEntryChrome();
   loadWorkspaceCentral().catch(() => {});
   const params = new URLSearchParams({ holding: "1", mode });
@@ -27737,7 +27737,7 @@ if (coreCards) {
     } else if (action === "holding-admin") {
       openHolding({ mode: "platform", view: "overview" });
     } else if (action === "holding-tenant") {
-      openHolding({ mode: "tenant", workspace: "modernia", view: "operations" });
+      openHolding({ mode: "tenant", workspace: "modernia", view: "overview" });
     } else if (action === "crm-inmo") {
       openCrmInmobiliario();
     } else if (action === "crm-gestoria") {
