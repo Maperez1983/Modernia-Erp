@@ -1170,6 +1170,8 @@ const state = {
   currentWorkspaceName: "",
   currentWorkspaceTarget: "",
   currentWorkspaceEntryMode: "platform",
+  currentWorkspaceCompanyId: "",
+  currentWorkspaceCompanyName: "",
   currentWorkspaceClientId: "",
   currentWorkspaceClientData: null,
   currentWorkspaceClients: [],
@@ -1227,6 +1229,7 @@ const holdingSubtitle = document.getElementById("holdingSubtitle");
 const holdingOrgChart = document.getElementById("holdingOrgChart");
 const workspaceKpis = document.getElementById("workspaceKpis");
 const workspaceViewTabs = document.getElementById("workspaceViewTabs");
+const workspaceCompanySwitcher = document.getElementById("workspaceCompanySwitcher");
 const workspaceHealthScore = document.getElementById("workspaceHealthScore");
 const workspaceChecklist = document.getElementById("workspaceChecklist");
 const workspaceModuleHealth = document.getElementById("workspaceModuleHealth");
@@ -3721,6 +3724,63 @@ const updateWorkspaceEntryChrome = () => {
   });
 };
 
+const setWorkspaceCompanyContext = (companyId = "", options = {}) => {
+  const { rerenderForms = true } = options;
+  const companies = state.currentWorkspaceDetail?.companies || [];
+  const selected =
+    companies.find((row) => String(row.id || "") === String(companyId || ""))
+    || companies[0]
+    || null;
+  state.currentWorkspaceCompanyId = selected?.id || "";
+  state.currentWorkspaceCompanyName = selected?.nombre || "";
+  renderWorkspaceCompanySwitcher(companies);
+  renderWorkspaceCompanies(companies);
+  if (rerenderForms) {
+    fillWorkspaceBillingForm();
+    fillWorkspaceBudgetForm();
+    fillWorkspaceRemittancesForm();
+    fillWorkspaceInboxForm();
+    fillWorkspaceSeriesForm();
+    fillWorkspaceTimeForm();
+    fillWorkspaceFincasCommunityForm();
+    fillWorkspaceFincasProviderForm();
+  }
+};
+
+const renderWorkspaceCompanySwitcher = (rows = []) => {
+  if (!workspaceCompanySwitcher) return;
+  const companies = Array.isArray(rows) ? rows : [];
+  if (!companies.length) {
+    workspaceCompanySwitcher.innerHTML = "";
+    workspaceCompanySwitcher.classList.add("hidden");
+    return;
+  }
+  workspaceCompanySwitcher.classList.remove("hidden");
+  const activeId = String(state.currentWorkspaceCompanyId || companies[0]?.id || "");
+  workspaceCompanySwitcher.innerHTML = `
+    <div class="workspace-company-switcher-card">
+      <div>
+        <strong>Empresa activa</strong>
+        <div class="muted">El trabajo diario del cliente LIV se aterriza sobre una empresa operativa.</div>
+      </div>
+      <div class="workspace-company-switcher-actions">
+        ${companies.map((row) => `
+          <button
+            type="button"
+            class="workspace-company-pill${String(row.id || "") === activeId ? " is-active" : ""}"
+            data-workspace-company-pill="${row.id || ""}"
+          >${row.nombre || "-"}</button>
+        `).join("")}
+      </div>
+    </div>
+  `;
+  workspaceCompanySwitcher.querySelectorAll("[data-workspace-company-pill]").forEach((button) => {
+    button.addEventListener("click", () => {
+      setWorkspaceCompanyContext(button.dataset.workspaceCompanyPill || "");
+    });
+  });
+};
+
 const normalizeWorkspaceViewKey = (value = "") => {
   const key = String(value || "").trim().toLowerCase();
   if (["overview", "tenant", "clients", "operations", "finance", "backoffice", "fincas"].includes(key)) {
@@ -4711,27 +4771,42 @@ const renderWorkspaceCompanies = (rows = []) => {
     workspaceCompanies.innerHTML = "<p class='muted'>Sin empresas operativas asociadas.</p>";
     return;
   }
+  const activeId = String(state.currentWorkspaceCompanyId || rows[0]?.id || "");
   workspaceCompanies.innerHTML = `
     <div class="workspace-chip-list">
       ${rows
         .map(
           (row) => `
-            <div class="workspace-chip workspace-company-chip">
+            <div class="workspace-chip workspace-company-chip${String(row.id || "") === activeId ? " is-active" : ""}">
               <div>
                 <strong>${row.nombre || "-"}</strong>
                 <span>${row.rol || "operativa"} · ${Number(row.activo || 0) === 1 ? "activa" : "inactiva"}</span>
               </div>
-              <button
-                type="button"
-                class="secondary ghost"
-                data-workspace-company-enter="${row.nombre || ""}"
-              >Entrar en empresa</button>
+              <div class="workspace-company-chip-actions">
+                <button
+                  type="button"
+                  class="secondary ghost"
+                  data-workspace-company-focus="${row.id || ""}"
+                >${String(row.id || "") === activeId ? "Empresa activa" : "Activar empresa"}</button>
+                <button
+                  type="button"
+                  class="secondary ghost"
+                  data-workspace-company-enter="${row.nombre || ""}"
+                >Entrar en empresa</button>
+              </div>
             </div>
           `
         )
         .join("")}
     </div>
   `;
+  workspaceCompanies.querySelectorAll("[data-workspace-company-focus]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const companyId = button.dataset.workspaceCompanyFocus || "";
+      if (!companyId) return;
+      setWorkspaceCompanyContext(companyId);
+    });
+  });
   workspaceCompanies.querySelectorAll("[data-workspace-company-enter]").forEach((button) => {
     button.addEventListener("click", () => {
       const companyName = button.dataset.workspaceCompanyEnter || "";
@@ -4961,7 +5036,7 @@ const fillWorkspaceBillingForm = (record = null) => {
   const emptyRecord = {
     id: "",
     workspace_id: state.currentWorkspaceId || "",
-    empresa_id: companies[0]?.id || "",
+    empresa_id: state.currentWorkspaceCompanyId || companies[0]?.id || "",
     cliente_id: "",
     cliente_lookup: "",
     servicio: "",
@@ -5296,7 +5371,7 @@ const fillWorkspaceBudgetForm = (record = null) => {
   const payload = {
     id: "",
     workspace_id: state.currentWorkspaceId || "",
-    empresa_id: companies[0]?.id || "",
+    empresa_id: state.currentWorkspaceCompanyId || companies[0]?.id || "",
     cliente_id: "",
     cliente_lookup: "",
     cliente_nif: "",
@@ -5530,7 +5605,7 @@ const fillWorkspaceRemittancesForm = () => {
   const companies = state.currentWorkspaceDetail?.companies || [];
   const defaults = {
     workspace_id: state.currentWorkspaceId || "",
-    empresa_id: companies[0]?.id || "",
+    empresa_id: state.currentWorkspaceCompanyId || companies[0]?.id || "",
     servicio: "",
     referencia: "",
     fecha_cargo: "",
@@ -5574,10 +5649,16 @@ const renderWorkspaceRemittancesList = (rows = []) => {
 
 const hydrateWorkspaceCompanySelects = () => {
   const companies = state.currentWorkspaceDetail?.companies || [];
+  const defaultCompanyId = state.currentWorkspaceCompanyId || companies[0]?.id || "";
   const html = companies.map((row) => `<option value="${row.id}">${row.nombre || "-"}</option>`).join("");
   [workspaceBillingForm, workspaceBudgetForm, workspaceInboxForm, workspaceSeriesForm, workspaceTimeForm, workspaceFincasCommunityForm, workspaceRemittancesForm, workspaceFincasProviderForm].forEach((form) => {
     const select = form?.querySelector('[name="empresa_id"]');
-    if (select) select.innerHTML = html;
+    if (select) {
+      select.innerHTML = html;
+      if (defaultCompanyId) {
+        select.value = defaultCompanyId;
+      }
+    }
   });
 };
 
@@ -5588,7 +5669,7 @@ const fillWorkspaceInboxForm = (record = null) => {
   const payload = {
     id: "",
     workspace_id: state.currentWorkspaceId || "",
-    empresa_id: companies[0]?.id || "",
+    empresa_id: state.currentWorkspaceCompanyId || companies[0]?.id || "",
     cliente_id: "",
     suggested_cliente_id: "",
     servicio: "",
@@ -5681,7 +5762,7 @@ const fillWorkspaceSeriesForm = (record = null) => {
   const payload = {
     id: "",
     workspace_id: state.currentWorkspaceId || "",
-    empresa_id: companies[0]?.id || "",
+    empresa_id: state.currentWorkspaceCompanyId || companies[0]?.id || "",
     servicio: "",
     serie: "",
     prefijo: "",
@@ -5925,7 +6006,7 @@ const fillWorkspaceTimeForm = (record = null) => {
   const payload = {
     id: "",
     workspace_id: state.currentWorkspaceId || "",
-    empresa_id: companies[0]?.id || "",
+    empresa_id: state.currentWorkspaceCompanyId || companies[0]?.id || "",
     persona_nombre: "",
     fecha: "",
     hora_inicio: "",
@@ -6023,7 +6104,7 @@ const fillWorkspaceFincasCommunityForm = (record = null) => {
   const payload = {
     id: "",
     workspace_id: state.currentWorkspaceId || "",
-    empresa_id: companies[0]?.id || "",
+    empresa_id: state.currentWorkspaceCompanyId || companies[0]?.id || "",
     nombre: "",
     cif: "",
     direccion: "",
@@ -6160,7 +6241,7 @@ const fillWorkspaceFincasProviderForm = (record = null) => {
   const payload = {
     id: "",
     workspace_id: state.currentWorkspaceId || "",
-    empresa_id: companies[0]?.id || "",
+    empresa_id: state.currentWorkspaceCompanyId || companies[0]?.id || "",
     comunidad_id: "",
     nombre: "",
     tipo_servicio: "",
@@ -6391,6 +6472,10 @@ const loadWorkspaceDetail = async (workspaceId) => {
   if (!state.currentWorkspaceTarget) {
     state.currentWorkspaceTarget = detail.workspace?.slug || detail.workspace?.nombre || "";
   }
+  const companies = detail.companies || [];
+  const companyMatch = companies.find((row) => String(row.id || "") === String(state.currentWorkspaceCompanyId || ""));
+  state.currentWorkspaceCompanyId = companyMatch?.id || companies[0]?.id || "";
+  state.currentWorkspaceCompanyName = companyMatch?.nombre || companies[0]?.nombre || "";
   state.currentWorkspaceClients = workspaceClients.rows || [];
   syncWorkspaceClientOptions(workspaceClients.rows || []);
   fillWorkspaceForm(detail.workspace || {});
@@ -6398,7 +6483,8 @@ const loadWorkspaceDetail = async (workspaceId) => {
   renderWorkspaceCommercialPack(detail.workspace || {}, detail.commercial_package || {});
   renderWorkspacePermissionMatrix(detail.permission_matrix || []);
   renderWorkspaceLauncher(detail.workspace || {}, detail.modules || []);
-  renderWorkspaceCompanies(detail.companies || []);
+  renderWorkspaceCompanySwitcher(companies);
+  renderWorkspaceCompanies(companies);
   renderWorkspaceClientBase(workspaceClients.rows || []);
   renderWorkspaceClientDetail(null);
   renderWorkspaceModules(detail.modules || []);
