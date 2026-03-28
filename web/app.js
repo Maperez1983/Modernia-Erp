@@ -1551,6 +1551,7 @@ const captacionPropietarios = document.getElementById("captacionPropietarios");
 const captacionPropietarioStatus = document.getElementById("captacionPropietarioStatus");
 const captacionCatastroLookup = document.getElementById("captacionCatastroLookup");
 const captacionCatastroStatus = document.getElementById("captacionCatastroStatus");
+const captacionMap = document.getElementById("captacionMap");
 const fincasSegurosForm = document.getElementById("fincasSegurosForm");
 const fincasSegurosFormStatus = document.getElementById("fincasSegurosFormStatus");
 const aieTab = document.getElementById("aieTab");
@@ -10819,14 +10820,14 @@ const renderEditableGrid = (grid, fields, data, target) => {
 let inmuebleGeocodeTimer = null;
 let lastGeocodeAddress = "";
 
-const updateInmuebleMap = (lat, lon) => {
-  if (!inmuebleMap) return;
+const renderMapPreview = (container, lat, lon) => {
+  if (!container) return;
   if (!lat || !lon) {
-    inmuebleMap.innerHTML = "<p class='muted'>Sin coordenadas.</p>";
+    container.innerHTML = "<p class='muted'>Sin coordenadas.</p>";
     return;
   }
   const bbox = [lon - 0.01, lat - 0.01, lon + 0.01, lat + 0.01].join(",");
-  inmuebleMap.innerHTML = `
+  container.innerHTML = `
     <iframe
       width="100%"
       height="320"
@@ -10835,6 +10836,14 @@ const updateInmuebleMap = (lat, lon) => {
     ></iframe>
     <a class="muted" href="https://www.openstreetmap.org/?mlat=${lat}&mlon=${lon}#map=16/${lat}/${lon}" target="_blank">Abrir en OpenStreetMap</a>
   `;
+};
+
+const updateInmuebleMap = (lat, lon) => {
+  renderMapPreview(inmuebleMap, lat, lon);
+};
+
+const updateCaptacionMap = (lat, lon) => {
+  renderMapPreview(captacionMap, lat, lon);
 };
 
 const buildCatastroUrl = (ref, address) => {
@@ -10880,6 +10889,38 @@ const geocodeInmuebleAddress = (address, latInput, lonInput) => {
       })
       .catch(() => {});
   }, 600);
+};
+
+const geocodeCaptacionAddress = () => {
+  const direccionInput = getCaptacionField("direccion");
+  const poblacionInput = getCaptacionField("poblacion");
+  const provinciaInput = getCaptacionField("provincia");
+  const latInput = getCaptacionField("lat");
+  const lonInput = getCaptacionField("lon");
+  if (!direccionInput || !captacionMap) return;
+  const pieces = [
+    String(direccionInput.value || "").trim(),
+    String(poblacionInput ? poblacionInput.value : "").trim(),
+    String(provinciaInput ? provinciaInput.value : "").trim(),
+    "España",
+  ].filter(Boolean);
+  const address = pieces.join(", ");
+  if (!address) return;
+  fetch(
+    `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}&limit=1`,
+    { headers: { "Accept-Language": "es" } }
+  )
+    .then((res) => res.json())
+    .then((rows) => {
+      if (!rows || !rows.length) return;
+      const lat = Number(rows[0].lat);
+      const lon = Number(rows[0].lon);
+      if (Number.isNaN(lat) || Number.isNaN(lon)) return;
+      if (latInput) latInput.value = String(lat);
+      if (lonInput) lonInput.value = String(lon);
+      updateCaptacionMap(lat, lon);
+    })
+    .catch(() => {});
 };
 
 const getCaptacionField = (name) =>
@@ -33352,6 +33393,9 @@ if (captacionForm) {
   bindPostalLookup(captacionForm);
   const captacionPropietarioNif = getCaptacionField("propietario_nif");
   const captacionPropietarioNombre = getCaptacionField("propietario");
+  const captacionDireccion = getCaptacionField("direccion");
+  const captacionPoblacion = getCaptacionField("poblacion");
+  const captacionProvincia = getCaptacionField("provincia");
   if (captacionPropietarioNif) {
     captacionPropietarioNif.addEventListener("input", () => {
       captacionPropietarioNif.value = normalizeNifValue(captacionPropietarioNif.value);
@@ -33365,6 +33409,12 @@ if (captacionForm) {
       syncCaptacionOwnerByName();
     });
   }
+  [captacionDireccion, captacionPoblacion, captacionProvincia].forEach((field) => {
+    if (!field) return;
+    field.addEventListener("blur", () => {
+      geocodeCaptacionAddress();
+    });
+  });
   if (captacionCatastroLookup) {
     captacionCatastroLookup.addEventListener("click", () => {
       lookupCaptacionCatastro();
@@ -33393,6 +33443,7 @@ if (captacionForm) {
           captacionForm.reset();
           if (captacionPropietarioStatus) captacionPropietarioStatus.textContent = "";
           if (captacionCatastroStatus) captacionCatastroStatus.textContent = "";
+          updateCaptacionMap("", "");
           setMultiSelectValues(captacionPropietarios, []);
           loadCrmCaptaciones();
           loadCrmInmuebles();
