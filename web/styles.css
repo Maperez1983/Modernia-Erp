@@ -2017,15 +2017,27 @@ body.crm-fin #companySummary {
   }
 }
 
-.map-box iframe {
-  border: 0;
-  border-radius: 12px;
-}
-
 .map-box {
   display: grid;
   gap: 8px;
   min-height: 140px;
+}
+
+.map-box-image {
+  width: 100%;
+  min-height: 220px;
+  object-fit: cover;
+  border: 0;
+  border-radius: 12px;
+  background: rgba(255, 251, 244, 0.72);
+}
+
+.map-box-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
 }
 
 .map-box-empty {

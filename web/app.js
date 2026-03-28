@@ -11339,15 +11339,21 @@ const renderMapPreview = (container, lat, lon, address = "") => {
     `;
     return;
   }
-  const bbox = [lon - 0.01, lat - 0.01, lon + 0.01, lat + 0.01].join(",");
+  const center = `${lat},${lon}`;
+  const staticMapUrl = `https://staticmap.openstreetmap.de/staticmap.php?center=${encodeURIComponent(center)}&zoom=16&size=900x320&maptype=mapnik&markers=${encodeURIComponent(`${center},red-pushpin`)}`;
+  const osmUrl = `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lon}#map=16/${lat}/${lon}`;
   container.innerHTML = `
-    <iframe
-      width="100%"
-      height="320"
-      frameborder="0"
-      src="https://www.openstreetmap.org/export/embed.html?bbox=${bbox}&layer=mapnik&marker=${lat},${lon}"
-    ></iframe>
-    <a class="muted" href="https://www.openstreetmap.org/?mlat=${lat}&mlon=${lon}#map=16/${lat}/${lon}" target="_blank">Abrir en OpenStreetMap</a>
+    <img
+      class="map-box-image"
+      src="${staticMapUrl}"
+      alt="Mapa de localización ${escapeHtml(address || center)}"
+      loading="lazy"
+      referrerpolicy="no-referrer"
+    />
+    <div class="map-box-meta">
+      <span class="muted">${escapeHtml(address || center)}</span>
+      <a class="muted" href="${osmUrl}" target="_blank" rel="noreferrer">Abrir en OpenStreetMap</a>
+    </div>
   `;
 };
 
