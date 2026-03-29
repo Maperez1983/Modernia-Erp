@@ -32402,6 +32402,9 @@ if (workspaceTimeEmployeeForm) {
       const selectedUser = getWorkspaceTimeEligibleUsers().find((user) => String(user.id || "") === String(payload.usuario_id_lookup || payload.usuario_id || ""));
       payload.empresa_id = selectedUser?.empresa_id || state.currentWorkspaceCompanyId || state.currentWorkspaceDetail?.companies?.[0]?.id || "";
     }
+    const companies = state.currentWorkspaceDetail?.companies || [];
+    const matchedCompany = companies.find((company) => String(company.id || "") === String(payload.empresa_id || ""));
+    payload.empresa_nombre = matchedCompany?.nombre || "";
     try {
       const data = await fetch("/api/workspace_registro_personal", {
         method: "POST",
