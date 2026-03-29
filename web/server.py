@@ -32795,6 +32795,7 @@ class Handler(BaseHTTPRequestHandler):
                 f"""
                 SELECT
                   id,
+                  inmueble_id,
                   direccion,
                   referencia_catastral,
                   TRIM(
@@ -32806,6 +32807,7 @@ class Handler(BaseHTTPRequestHandler):
                   fecha_propuesta,
                   fecha_contrato,
                   fecha_escritura,
+                  fecha_operacion,
                   precio_encargo,
                   CASE
                     WHEN COALESCE(precio_contrato, 0) >= 10000 THEN precio_contrato
