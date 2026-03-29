@@ -2583,6 +2583,11 @@ const euroFormatter = new Intl.NumberFormat("es-ES", {
   maximumFractionDigits: 2,
 });
 
+const formatEuros = (value) => {
+  const num = Number(value);
+  return euroFormatter.format(Number.isFinite(num) ? num : 0);
+};
+
 const numberFormatter = new Intl.NumberFormat("es-ES");
 const quantityFormatter = new Intl.NumberFormat("es-ES", {
   minimumFractionDigits: 0,
