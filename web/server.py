@@ -110,6 +110,13 @@ OCR_OPENAI_VISION_DPI = max(120, int(os.environ.get("OCR_OPENAI_VISION_DPI", "22
 OCR_EXPERT_MODE = os.environ.get("OCR_EXPERT_MODE", "1").strip().lower() not in ("0", "false", "no", "off")
 WORKSPACE_TIME_SWEEP_ENABLED = os.environ.get("WORKSPACE_TIME_SWEEP_ENABLED", "1").strip().lower() not in ("0", "false", "no", "off")
 WORKSPACE_TIME_SWEEP_INTERVAL_SECONDS = max(60, int(os.environ.get("WORKSPACE_TIME_SWEEP_INTERVAL_SECONDS", "300")))
+WORKSPACE_TIME_SWEEP_STATE = {
+    "last_run_at": "",
+    "last_error": "",
+    "last_workspaces": 0,
+    "last_notifications": 0,
+}
+WORKSPACE_TIME_SWEEP_STATE_LOCK = threading.Lock()
 APP_SESSION_TTL_SECONDS = max(900, int(os.environ.get("APP_SESSION_TTL_SECONDS", "43200")))
 SESSION_COOKIE_NAME = os.environ.get("APP_SESSION_COOKIE", "crm_session")
 AUTH_ALLOW_FIRST_PASSWORD_SET = os.environ.get("AUTH_ALLOW_FIRST_PASSWORD_SET", "1").strip().lower() not in ("0", "false", "no", "off")
@@ -17413,10 +17420,13 @@ def workspace_time_sweep_loop(db_path, interval_seconds=300):
             conn = get_db(db_path)
             ensure_workspace_product_tables(conn)
             workspaces = conn.execute("SELECT id FROM workspaces").fetchall()
+            notifications_total = 0
+            workspaces_scanned = 0
             for row in workspaces:
                 workspace_id = str(row["id"] if isinstance(row, sqlite3.Row) else row[0])
                 if not workspace_id:
                     continue
+                workspaces_scanned += 1
                 enabled = conn.execute(
                     """
                     SELECT 1
@@ -17430,13 +17440,22 @@ def workspace_time_sweep_loop(db_path, interval_seconds=300):
                     continue
                 created = run_workspace_time_missing_sweep(conn, workspace_id)
                 if created:
+                    notifications_total += len(created)
                     conn.commit()
             conn.close()
-        except Exception:
+            with WORKSPACE_TIME_SWEEP_STATE_LOCK:
+                WORKSPACE_TIME_SWEEP_STATE["last_run_at"] = datetime.now().isoformat()
+                WORKSPACE_TIME_SWEEP_STATE["last_error"] = ""
+                WORKSPACE_TIME_SWEEP_STATE["last_workspaces"] = workspaces_scanned
+                WORKSPACE_TIME_SWEEP_STATE["last_notifications"] = notifications_total
+        except Exception as exc:
             try:
                 conn.close()
             except Exception:
                 pass
+            with WORKSPACE_TIME_SWEEP_STATE_LOCK:
+                WORKSPACE_TIME_SWEEP_STATE["last_run_at"] = datetime.now().isoformat()
+                WORKSPACE_TIME_SWEEP_STATE["last_error"] = str(exc)
         time.sleep(max(60, int(interval_seconds or 300)))
 
 
@@ -17473,6 +17492,11 @@ def run_workspace_time_alerts(conn, workspace_id, entry, now=None):
             log_workspace_notification(conn, workspace_id, persona_id, "worker_exit_log", worker_payload, now=now_ts)
             notifications.append("worker_exit_log")
     return notifications
+
+
+def fetch_workspace_time_sweep_status():
+    with WORKSPACE_TIME_SWEEP_STATE_LOCK:
+        return dict(WORKSPACE_TIME_SWEEP_STATE)
 
 
 def build_workspace_time_xml(rows, persona_name="", company_name="", month=""):
@@ -30104,6 +30128,26 @@ class Handler(BaseHTTPRequestHandler):
             created = run_workspace_time_missing_sweep(conn, workspace_id)
             conn.commit()
             json_response(self, {"ok": True, "notifications": len(created), "channels": created[:12]})
+            return
+
+        if path == "/api/workspace_registro_sweep_status":
+            workspace_id = params.get("workspace_id", [""])[0]
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if session and not workspace_session_is_privileged(session):
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
+            payload = fetch_workspace_time_sweep_status()
+            json_response(
+                self,
+                {
+                    "enabled": bool(WORKSPACE_TIME_SWEEP_ENABLED),
+                    "interval_seconds": int(WORKSPACE_TIME_SWEEP_INTERVAL_SECONDS),
+                    **payload,
+                },
+            )
             return
         if path == "/api/workspace_rrhh_profile":
             workspace_id = params.get("workspace_id", [""])[0]
