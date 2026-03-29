@@ -1232,6 +1232,8 @@ const state = {
   workspaceRrhhShowInactive: false,
   workspaceRrhhEmployeeSearch: "",
   workspaceRrhhProfileRow: null,
+  workspaceRrhhTimeSummary: null,
+  workspaceRrhhTimeRows: [],
   workspaceRrhhAusenciasRows: [],
   workspaceRrhhGastosRows: [],
   workspaceRrhhDocsRows: [],
@@ -4547,7 +4549,7 @@ const WORKSPACE_HOME_CONTAINERS = [
     title: "RRHH",
     kicker: "Transversal",
     description: "Plantilla, ausencias, gastos y documentación del equipo.",
-    modules: ["rrhh", "registro_horario", "documental"],
+    modules: ["rrhh", "registro_horario"],
     planned: ["Portal empleado"],
     action: WORKSPACE_LAUNCHERS.rrhh?.action || null,
     actionLabel: "Abrir RRHH",
@@ -4557,7 +4559,7 @@ const WORKSPACE_HOME_CONTAINERS = [
     title: "Motores comunes",
     kicker: "Transversal",
     description: "Capas compartidas del grupo para documental, facturación, portal, horario y automatización.",
-    modules: ["documental", "facturacion", "facturas_recibidas", "portal_cliente", "registro_horario", "rrhh", "automatizaciones", "copilot"],
+    modules: ["documental", "facturacion", "facturas_recibidas", "portal_cliente", "automatizaciones", "copilot"],
     planned: [],
     action: () => focusWorkspaceEngine("documental", workspaceDocumentHub, { forceTenantView: true }),
     actionLabel: "Configurar motores",
@@ -5791,7 +5793,7 @@ const renderWorkspaceCopilotHub = () => {
 
 const normalizeWorkspaceRrhhTab = (value = "") => {
   const key = String(value || "").trim().toLowerCase();
-  if (["plantilla", "ausencias", "gastos", "docs"].includes(key)) return key;
+  if (["plantilla", "horario", "ausencias", "gastos", "docs"].includes(key)) return key;
   return "plantilla";
 };
 
@@ -5833,17 +5835,21 @@ const refreshWorkspaceRrhh = async () => {
   const scopePersonaId = state.workspaceRrhhScopeAll && isWorkspaceRrhhManager() ? "" : selectedPersonaId;
   const personaQuery = scopePersonaId ? `&persona_id=${encodeURIComponent(scopePersonaId)}` : "";
 
-  const [profile, ausencias, gastos, docs] = await Promise.all([
+  const [profile, ausencias, gastos, docs, timeSummary, timeRows] = await Promise.all([
     scopePersonaId ? safeWorkspaceApi(`/api/workspace_rrhh_profile?workspace_id=${encodeURIComponent(workspaceId)}&persona_id=${encodeURIComponent(scopePersonaId)}`, { row: {} }) : { row: {} },
     safeWorkspaceApi(`/api/workspace_rrhh_ausencias?workspace_id=${encodeURIComponent(workspaceId)}&month=${encodeURIComponent(month)}${companyQuery}${personaQuery}`, { rows: [] }),
     safeWorkspaceApi(`/api/workspace_rrhh_gastos?workspace_id=${encodeURIComponent(workspaceId)}&month=${encodeURIComponent(month)}${companyQuery}${personaQuery}`, { rows: [] }),
     safeWorkspaceApi(`/api/workspace_rrhh_documentos?workspace_id=${encodeURIComponent(workspaceId)}${companyQuery}${personaQuery}`, { rows: [] }),
+    safeWorkspaceApi(`/api/workspace_registro_horario_resumen?workspace_id=${encodeURIComponent(workspaceId)}&month=${encodeURIComponent(month)}${companyQuery}${personaQuery}`, {}),
+    safeWorkspaceApi(`/api/workspace_registro_horario?workspace_id=${encodeURIComponent(workspaceId)}&month=${encodeURIComponent(month)}${companyQuery}${personaQuery}&limit=200`, { rows: [] }),
   ]);
 
   state.workspaceRrhhProfileRow = profile?.row || null;
   state.workspaceRrhhAusenciasRows = ausencias?.rows || [];
   state.workspaceRrhhGastosRows = gastos?.rows || [];
   state.workspaceRrhhDocsRows = docs?.rows || [];
+  state.workspaceRrhhTimeSummary = timeSummary || null;
+  state.workspaceRrhhTimeRows = timeRows?.rows || [];
 
   // Render after data arrives.
   renderWorkspaceRrhhHub();
@@ -5976,6 +5982,8 @@ const renderWorkspaceRrhhHub = () => {
   };
 
   const profile = state.workspaceRrhhProfileRow || {};
+  const timeSummary = state.workspaceRrhhTimeSummary || null;
+  const timeRows = Array.isArray(state.workspaceRrhhTimeRows) ? state.workspaceRrhhTimeRows : [];
   const ausencias = Array.isArray(state.workspaceRrhhAusenciasRows) ? state.workspaceRrhhAusenciasRows : [];
   const gastos = Array.isArray(state.workspaceRrhhGastosRows) ? state.workspaceRrhhGastosRows : [];
   const docs = Array.isArray(state.workspaceRrhhDocsRows) ? state.workspaceRrhhDocsRows : [];
@@ -5990,6 +5998,7 @@ const renderWorkspaceRrhhHub = () => {
     <div class="workspace-rrhh-tabs">
       ${[
         { key: "plantilla", label: "Plantilla" },
+        { key: "horario", label: "Horario" },
         { key: "ausencias", label: "Ausencias" },
         { key: "gastos", label: "Gastos" },
         { key: "docs", label: "Documentos" },
@@ -6004,6 +6013,60 @@ const renderWorkspaceRrhhHub = () => {
         .join("")}
     </div>
   `;
+
+  const renderHorario = () => {
+    const entries = timeRows || [];
+    const today = new Date().toISOString().slice(0, 10);
+    const openToday = entries.find((row) => String(row.fecha || "") === today && !String(row.hora_fin || "").trim()) || null;
+    const canToggle = Boolean(selectedPersonaId && !scopeAll);
+    const totalHoras = timeSummary?.total_horas ?? timeSummary?.horas_totales ?? timeSummary?.horas ?? null;
+    const totalDias = timeSummary?.dias ?? timeSummary?.total_dias ?? null;
+    const totalMin = timeSummary?.total_minutos ?? timeSummary?.minutos_totales ?? null;
+    const headBits = [];
+    if (typeof totalHoras === "number" && !Number.isNaN(totalHoras)) headBits.push(`${totalHoras.toFixed(2)} h`);
+    if (typeof totalMin === "number" && !Number.isNaN(totalMin) && !headBits.length) headBits.push(`${Math.round(totalMin)} min`);
+    if (totalDias !== null && totalDias !== undefined && totalDias !== "") headBits.push(`${totalDias} días`);
+    const headLabel = headBits.length ? headBits.join(" · ") : "Resumen del mes";
+    return `
+      <div class="workspace-rrhh-panel-card">
+        <div class="section-head">
+          <div>
+            <h4>Registro horario ${scopeAll ? "· Equipo" : ""}</h4>
+            <p class="muted">${escapeHtml(headLabel)}. ${scopeAll ? "Vista consolidada del equipo." : "Entrada/salida y listado mensual."}</p>
+          </div>
+          <div class="section-head-actions">
+            ${canToggle ? `
+              <button type="button" class="secondary ghost button-inline" data-rrhh-time-toggle>
+                ${openToday ? "Marcar salida" : "Marcar entrada"}
+              </button>
+            ` : ""}
+            <button type="button" class="secondary ghost button-inline" data-rrhh-open-time>Abrir módulo completo</button>
+          </div>
+        </div>
+        ${!selectedPersonaId && !scopeAll ? "<p class='muted'>Selecciona un empleado para ver su registro horario.</p>" : ""}
+        ${openToday ? `<p class="muted">Hoy: fichaje abierto desde ${escapeHtml(openToday.hora_inicio || "")}.</p>` : ""}
+        <div class="workspace-rrhh-list">
+          ${(entries || []).length
+            ? entries
+                .slice(0, 80)
+                .map((row) => `
+                  <div class="workspace-rrhh-row">
+                    <div>
+                      <strong>${escapeHtml(row.fecha || "")}</strong>
+                      <div class="muted">${escapeHtml(row.persona_nombre || "")}${row.empresa_nombre ? ` · ${escapeHtml(row.empresa_nombre)}` : ""}</div>
+                      <div class="muted">${escapeHtml(row.hora_inicio || "")}${row.hora_fin ? ` a ${escapeHtml(row.hora_fin)}` : " · Abierto"}${row.minutos_trabajados ? ` · ${Math.round(Number(row.minutos_trabajados) / 60 * 100) / 100} h` : ""}${row.estado ? ` · ${escapeHtml(row.estado)}` : ""}</div>
+                    </div>
+                    <div class="workspace-rrhh-row-actions">
+                      <button type="button" class="secondary ghost button-inline" data-rrhh-open-time>Ver</button>
+                    </div>
+                  </div>
+                `)
+                .join("")
+            : "<p class='muted'>Sin fichajes este mes.</p>"}
+        </div>
+      </div>
+    `;
+  };
 
   const renderPlantilla = () => `
     <div class="workspace-rrhh-panel-card">
@@ -6309,7 +6372,12 @@ const renderWorkspaceRrhhHub = () => {
     </div>
   `;
 
-  const panelHtml = tab === "plantilla" ? renderPlantilla() : tab === "ausencias" ? renderAusencias() : tab === "gastos" ? renderGastos() : renderDocs();
+  const panelHtml =
+    tab === "plantilla" ? renderPlantilla()
+    : tab === "horario" ? renderHorario()
+    : tab === "ausencias" ? renderAusencias()
+    : tab === "gastos" ? renderGastos()
+    : renderDocs();
 
   workspaceRrhhHub.innerHTML = `
     <div class="workspace-rrhh-layout" data-mode="${manager ? "manager" : "employee"}">
@@ -6469,6 +6537,28 @@ const renderWorkspaceRrhhHub = () => {
       }
     });
   });
+
+  const timeToggle = workspaceRrhhHub.querySelector("[data-rrhh-time-toggle]");
+  if (timeToggle) {
+    timeToggle.addEventListener("click", async () => {
+      const personaId = String(state.workspaceRrhhSelectedPersonaId || "").trim();
+      if (!state.currentWorkspaceId || !personaId) return;
+      timeToggle.disabled = true;
+      try {
+        const res = await fetch("/api/workspace_registro_horario_toggle", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ workspace_id: state.currentWorkspaceId, persona_id: personaId }),
+        }).then((r) => r.json());
+        if (res?.error) throw new Error(res.error);
+        await refreshWorkspaceRrhh();
+      } catch (error) {
+        alert(error.message || "No se pudo registrar la entrada/salida.");
+      } finally {
+        timeToggle.disabled = false;
+      }
+    });
+  }
 
   const profileForm = document.getElementById("workspaceRrhhProfileForm");
   if (profileForm) {
