@@ -6388,6 +6388,21 @@ const hydrateWorkspaceCompanySelects = () => {
   });
 };
 
+const ensureWorkspaceCompaniesLoaded = async () => {
+  const current = state.currentWorkspaceDetail?.companies || [];
+  if (current.length || !state.currentWorkspaceId) {
+    return current;
+  }
+  const detail = await safeWorkspaceApi(`/api/workspace_detail?id=${encodeURIComponent(state.currentWorkspaceId)}`, null);
+  if (detail?.workspace) {
+    state.currentWorkspaceDetail = {
+      ...(state.currentWorkspaceDetail || {}),
+      ...detail,
+    };
+  }
+  return state.currentWorkspaceDetail?.companies || [];
+};
+
 const fillWorkspaceInboxForm = (record = null) => {
   if (!workspaceInboxForm) return;
   hydrateWorkspaceCompanySelects();
@@ -6798,6 +6813,7 @@ const hydrateWorkspaceTimeUserSelect = () => {
 
 const refreshWorkspaceTimeSetup = async () => {
   if (!state.currentWorkspaceId) return;
+  await ensureWorkspaceCompaniesLoaded();
   const companyQuery = state.currentWorkspaceCompanyId
     ? `&empresa_id=${encodeURIComponent(state.currentWorkspaceCompanyId)}`
     : "";
@@ -32381,6 +32397,7 @@ if (workspaceTimeEmployeeForm) {
     const payload = Object.fromEntries(formData.entries());
     payload.workspace_id = state.currentWorkspaceId;
     payload.activo = workspaceTimeEmployeeForm.querySelector('[name="activo"]')?.checked ? 1 : 0;
+    await ensureWorkspaceCompaniesLoaded();
     if (!String(payload.empresa_id || "").trim()) {
       const selectedUser = getWorkspaceTimeEligibleUsers().find((user) => String(user.id || "") === String(payload.usuario_id_lookup || payload.usuario_id || ""));
       payload.empresa_id = selectedUser?.empresa_id || state.currentWorkspaceCompanyId || state.currentWorkspaceDetail?.companies?.[0]?.id || "";
