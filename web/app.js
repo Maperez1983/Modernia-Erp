@@ -20417,6 +20417,10 @@ const initCrmInmoLinkInterceptor = () => {
   );
 };
 
+// Registrar cuanto antes (no esperar a `init()`), para que los clicks en enlaces del CRM
+// nunca dependan del estado de carga inicial.
+initCrmInmoLinkInterceptor();
+
 const resolveInmuebleDetailRef = async (rowMap = {}, fallbackId = "") => {
   // Captaciones: `rowMap.id` suele ser el id de la captación (no el del inmueble).
   // Para abrir ficha siempre necesitamos un `inmueble_id`. Si no viene, lo aseguramos
