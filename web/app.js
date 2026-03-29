@@ -1361,6 +1361,8 @@ const workspaceTimeSummary = document.getElementById("workspaceTimeSummary");
   const workspaceTimeExportBtn = document.getElementById("workspaceTimeExportBtn");
   const workspaceTimePeriodStatus = document.getElementById("workspaceTimePeriodStatus");
   const workspaceTimePeriodToggle = document.getElementById("workspaceTimePeriodToggle");
+  const workspaceTimeSweepStatus = document.getElementById("workspaceTimeSweepStatus");
+  const workspaceTimeSweepRunNow = document.getElementById("workspaceTimeSweepRunNow");
   const workspaceTimeConfigForm = document.getElementById("workspaceAlertForm");
 const workspaceAlertStatus = document.getElementById("workspaceAlertStatus");
 const workspaceTimeEmployeeForm = document.getElementById("workspaceTimeEmployeeForm");
@@ -4205,6 +4207,7 @@ const focusWorkspaceEngine = async (engine, element = null, options = {}) => {
   if (engine === "registro_horario") {
     if (isWorkspaceTimeManager()) {
       await refreshWorkspaceTimeSetup();
+      await refreshWorkspaceTimeSweepStatus();
       await runWorkspaceTimeAlertSweep();
     } else {
       applyWorkspaceTimeMode();
@@ -4225,6 +4228,7 @@ workspaceEngineButtons.forEach((button) => {
     if (engine === "registro_horario") {
       if (isWorkspaceTimeManager()) {
         await refreshWorkspaceTimeSetup();
+        await refreshWorkspaceTimeSweepStatus();
         await runWorkspaceTimeAlertSweep();
       } else {
         applyWorkspaceTimeMode();
@@ -7772,6 +7776,41 @@ const runWorkspaceTimeAlertSweep = async () => {
   await loadWorkspaceNotifications();
 };
 
+const refreshWorkspaceTimeSweepStatus = async () => {
+  if (!workspaceTimeSweepStatus) return;
+  if (!state.currentWorkspaceId) {
+    workspaceTimeSweepStatus.textContent = "Barrido automático: sin workspace.";
+    return;
+  }
+  if (!isWorkspaceTimeManager()) {
+    workspaceTimeSweepStatus.textContent = "Barrido automático: visible solo para administradores.";
+    if (workspaceTimeSweepRunNow) workspaceTimeSweepRunNow.classList.add("hidden");
+    return;
+  }
+  const companyQuery = state.currentWorkspaceCompanyId
+    ? `&empresa_id=${encodeURIComponent(state.currentWorkspaceCompanyId)}`
+    : "";
+  const data = await safeWorkspaceApi(
+    `/api/workspace_registro_sweep_status?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}${companyQuery}`,
+    null
+  );
+  const enabled = data?.enabled !== false;
+  const interval = Number(data?.interval_seconds || 300) || 300;
+  const last = String(data?.last_run_at || "").trim();
+  const err = String(data?.last_error || "").trim();
+  const notif = Number(data?.last_notifications || 0) || 0;
+  const workspaces = Number(data?.last_workspaces || 0) || 0;
+  const bits = [];
+  bits.push(`Barrido automático: ${enabled ? "activo" : "desactivado"}`);
+  bits.push(`cada ${Math.max(60, interval)}s`);
+  if (last) bits.push(`último: ${last.slice(0, 19).replace("T", " ")}`);
+  bits.push(`workspaces: ${workspaces}`);
+  bits.push(`notifs: ${notif}`);
+  if (err) bits.push(`error: ${err.slice(0, 120)}`);
+  workspaceTimeSweepStatus.textContent = bits.join(" · ");
+  if (workspaceTimeSweepRunNow) workspaceTimeSweepRunNow.classList.remove("hidden");
+};
+
 const fillWorkspaceTimeEmployeeForm = (record = null) => {
   if (!workspaceTimeEmployeeForm) return;
   hydrateWorkspaceCompanySelects();
@@ -8820,6 +8859,7 @@ const loadWorkspaceDetail = async (workspaceId) => {
     if (engine === "registro_horario") {
       if (isWorkspaceTimeManager()) {
         await refreshWorkspaceTimeSetup();
+        await refreshWorkspaceTimeSweepStatus();
         await runWorkspaceTimeAlertSweep();
       } else {
         applyWorkspaceTimeMode();
@@ -13354,6 +13394,44 @@ const populateAgendaClientes = (listEl, inputEl, hiddenEl) => {
     inputEl.addEventListener("input", handler);
     inputEl.addEventListener("change", handler);
   }
+};
+
+const populateAgendaClientesFromCandidates = (listEl, inputEl, hiddenEl, candidates = []) => {
+  if (!listEl) return;
+  const cleaned = (Array.isArray(candidates) ? candidates : [])
+    .map((row) => {
+      const id = String(row.id || row.cliente_id || "").trim();
+      const nombreRaw = row.nombre || row.cliente || row.cliente_nombre || row.propietario || "";
+      const nombre = formatNombreCliente(nombreRaw);
+      return { id, nombre };
+    })
+    .filter((item) => item.nombre);
+  const seen = new Set();
+  const unique = cleaned.filter((item) => {
+    const key = normalizeSimple(item.nombre);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  listEl.innerHTML = "";
+  unique.forEach((item) => {
+    const option = document.createElement("option");
+    option.value = item.nombre;
+    option.dataset.id = item.id || "";
+    listEl.appendChild(option);
+  });
+  if (!inputEl || !hiddenEl) return;
+  const map = new Map(unique.map((item) => [normalizeSimple(item.nombre), item.id || ""]));
+  inputEl._agendaCandidatesMap = map;
+  if (inputEl.dataset.agendaBound === "1") return;
+  inputEl.dataset.agendaBound = "1";
+  const handler = () => {
+    const value = normalizeSimple(inputEl.value || "");
+    const id = (inputEl._agendaCandidatesMap && inputEl._agendaCandidatesMap.get(value)) || "";
+    hiddenEl.value = id || "";
+  };
+  inputEl.addEventListener("input", handler);
+  inputEl.addEventListener("change", handler);
 };
 
 const resolveClienteFromInput = (inputEl, hiddenEl) => {
@@ -19631,6 +19709,23 @@ const INMO_WORKFLOW_RESULT_OPTIONS = {
   "Cita aceptación contraoferta": ["Aceptada", "Rechazada"],
 };
 
+const getInmuebleActividadClienteScope = (type) => {
+  const key = normalizeSimple(type || "");
+  if (key.includes("comprador") || key.includes("propuesta") || key.includes("contraoferta") || key.includes("visita")) {
+    return "demandas";
+  }
+  return "propietarios";
+};
+
+const refreshInmuebleActividadClientesCandidates = (type) => {
+  if (!inmuebleActividadClientes || !inmuebleActividadClienteInput || !inmuebleActividadClienteId) return;
+  const scope = getInmuebleActividadClienteScope(type);
+  const propietarios = Array.isArray(state.currentInmuebleContext?.propietarios) ? state.currentInmuebleContext.propietarios : [];
+  const demandas = Array.isArray(state.currentInmuebleContext?.demandas) ? state.currentInmuebleContext.demandas : [];
+  const candidates = scope === "demandas" ? demandas : propietarios;
+  populateAgendaClientesFromCandidates(inmuebleActividadClientes, inmuebleActividadClienteInput, inmuebleActividadClienteId, candidates);
+};
+
 const syncInmuebleWorkflowForm = () => {
   if (!inmuebleActividadForm) return;
   const tipoSelect = inmuebleActividadForm.querySelector('select[name="tipo"]');
@@ -19655,6 +19750,7 @@ const syncInmuebleWorkflowForm = () => {
     nextOptions.forEach((opt) => nextSelect.appendChild(createOption(opt, opt)));
     nextSelect.value = nextOptions.includes(current) ? current : "";
   }
+  refreshInmuebleActividadClientesCandidates(type);
 };
 
 const runCaptacionConversion = async (captacionId, rowMap = {}, destino = "") => {
@@ -21444,7 +21540,9 @@ const openInmuebleDetail = (id, originView = "") => {
         populateDemandasSelect(inmuebleVisitaDemanda);
       }
       if (inmuebleActividadClientes) {
-        populateAgendaClientes(inmuebleActividadClientes, inmuebleActividadClienteInput, inmuebleActividadClienteId);
+        refreshInmuebleActividadClientesCandidates(
+          inmuebleActividadForm?.querySelector('select[name="tipo"]')?.value || ""
+        );
       }
       if (inmuebleMap) {
         const lat = Number(inmueble.lat);
@@ -21506,6 +21604,9 @@ const loadInmuebleDemandas = (inmuebleId) => {
     if (state.currentInmuebleId === inmuebleId && state.currentInmuebleContext) {
       state.currentInmuebleContext.demandas = rows;
       refreshCurrentInmuebleProfile();
+      refreshInmuebleActividadClientesCandidates(
+        inmuebleActividadForm?.querySelector('select[name="tipo"]')?.value || ""
+      );
     }
     if (!rows.length) {
       inmuebleDemandasTable.innerHTML = "<p class='muted'>Sin demandas compatibles.</p>";
@@ -33870,6 +33971,28 @@ if (workspaceTimePeriodToggle) {
       alert(error.message || "No se pudo actualizar el bloqueo del mes.");
     } finally {
       workspaceTimePeriodToggle.disabled = false;
+    }
+  });
+}
+
+if (workspaceTimeSweepRunNow) {
+  workspaceTimeSweepRunNow.addEventListener("click", async () => {
+    if (!state.currentWorkspaceId) return;
+    if (!isWorkspaceTimeManager()) return;
+    workspaceTimeSweepRunNow.disabled = true;
+    try {
+      const resp = await safeWorkspaceApi(
+        `/api/workspace_registro_horario_alerts_run?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}`,
+        null
+      );
+      if (resp?.error) throw new Error(resp.error);
+      await loadWorkspaceNotifications();
+      await refreshWorkspaceTimeSweepStatus();
+      alert(`Alertas ejecutadas. Notificaciones: ${Number(resp?.notifications || 0) || 0}`);
+    } catch (error) {
+      alert(error.message || "No se pudieron ejecutar las alertas.");
+    } finally {
+      workspaceTimeSweepRunNow.disabled = false;
     }
   });
 }
