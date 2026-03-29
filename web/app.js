@@ -9958,6 +9958,17 @@ const resolveCrmInmoEmpresaId = () => resolveCrmInmoEmpresa()?.id || "";
 
 const openCrmInmobiliario = () => {
   if (!userCanAccessService("inmobiliaria")) return;
+  if (!state.empresas.length) {
+    api("/api/empresas")
+      .then((empresas) => {
+        state.empresas = Array.isArray(empresas) ? empresas : [];
+        openCrmInmobiliario();
+      })
+      .catch(() => {
+        alert("No se pudieron cargar las empresas. Revisa el servidor.");
+      });
+    return;
+  }
   const empresa = resolveCrmInmoEmpresa();
   if (!empresa) {
     alert("No hay empresas disponibles para abrir el CRM inmobiliario.");
@@ -13345,7 +13356,7 @@ const renderEditableGrid = (grid, fields, data, target) => {
     if (isInmueble && field.key === "referencia_catastral") {
       const hint = document.createElement("p");
       hint.className = "muted editable-card-help";
-      hint.textContent = "Busca la referencia desde la dirección, genera la ficha y abre el Catastro público sin salir del expediente.";
+      hint.textContent = "Busca la referencia desde la dirección y genera la ficha PDF para dejar constancia en el expediente.";
       card.appendChild(hint);
       const actions = document.createElement("div");
       actions.className = "catastro-actions";
@@ -13365,20 +13376,6 @@ const renderEditableGrid = (grid, fields, data, target) => {
         await syncInmuebleCatastroFicha(inputMap);
       });
       actions.appendChild(syncBtn);
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "secondary catastro-button";
-      btn.innerHTML = buildCatastroButtonInner("Abrir ficha pública");
-      btn.addEventListener("click", async () => {
-        let ref = String(input.value || "").trim();
-        if (!ref) {
-          ref = (await lookupInmuebleCatastro(inputMap, { silent: false })) || "";
-        }
-        const address = inputMap.direccion ? inputMap.direccion.value.trim() : "";
-        const url = buildCatastroUrl(ref, address);
-        window.open(url, "_blank", "noopener");
-      });
-      actions.appendChild(btn);
       card.appendChild(actions);
     }
     grid.appendChild(card);
@@ -13554,8 +13551,8 @@ const updateCaptacionMap = (lat, lon) => {
 
 const CATASTRO_ICON_SVG = `
   <svg class="catastro-logo" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-    <path fill="currentColor" d="M12 2.5c3.9 0 7 3.1 7 7 0 5.2-7 12-7 12S5 14.7 5 9.5c0-3.9 3.1-7 7-7Zm0 3a4 4 0 0 0-4 4c0 2.2 1.9 5.6 4 8.2 2.1-2.6 4-6 4-8.2a4 4 0 0 0-4-4Z"/>
-    <path fill="currentColor" d="M9.2 9.2h5.6v1.6H9.2z"/>
+    <path d="M12 3.2 3.8 7.9v8.2L12 20.8l8.2-4.7V7.9L12 3.2Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+    <path d="M8 9h8M8 12h8M8 15h8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
   </svg>
 `.trim();
 
@@ -13954,10 +13951,12 @@ const lookupCaptacionCatastro = async () => {
       provincia: provinciaInput ? provinciaInput.value.trim() : "",
       poblacion: poblacionInput ? poblacionInput.value.trim() : "",
       codigo_postal: codigoPostalInput ? codigoPostalInput.value.trim() : "",
+      empresa_nombre: resolveCrmInmoEmpresaNombre(),
     };
     const data = await fetch("/api/inmueble_catastro_lookup", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
       body: JSON.stringify(payload),
     }).then((res) => res.json());
     if (data?.error) {
@@ -14015,6 +14014,7 @@ const lookupInmuebleCatastro = async (inputMap = {}, options = {}) => {
       provincia: provinciaInput ? provinciaInput.value.trim() : "",
       poblacion: poblacionInput ? poblacionInput.value.trim() : "",
       codigo_postal: codigoPostalInput ? codigoPostalInput.value.trim() : "",
+      empresa_nombre: resolveCrmInmoEmpresaNombre(),
     };
     const data = await fetch("/api/inmueble_catastro_lookup", {
       method: "POST",
@@ -14085,6 +14085,7 @@ const syncInmuebleCatastroFicha = async (inputMap = {}) => {
       body: JSON.stringify({
         inmueble_id: state.currentInmuebleId,
         usuario: getCurrentUser(),
+        empresa_nombre: resolveCrmInmoEmpresaNombre(),
       }),
     }).then((res) => res.json());
     if (data?.error) {
