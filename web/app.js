@@ -12098,15 +12098,14 @@ const updateInmuebleMapFromInputs = () => {
   updateInmuebleMap(lat, lon);
 };
 
-const buildInmuebleGeocodeAddress = (source = {}) =>
-  [
-    String(source.direccion || "").trim(),
-    String(source.poblacion || "").trim(),
-    String(source.provincia || "").trim(),
-    "España",
-  ]
-    .filter(Boolean)
-    .join(", ");
+const buildInmuebleDisplayAddress = (source = {}) => {
+  const direccion = String(source.direccion || "").trim();
+  const cp = String(source.codigo_postal || "").trim();
+  const poblacion = String(source.poblacion || "").trim();
+  const provincia = String(source.provincia || "").trim();
+  const locality = [cp, poblacion].filter(Boolean).join(" ") || poblacion || "";
+  return [direccion, locality, provincia].filter(Boolean).join(", ");
+};
 
 const refreshCurrentInmuebleHeader = () => {
   const inmueble = state.currentInmueble || state.currentInmuebleContext?.inmueble || {};
@@ -12809,13 +12808,9 @@ const renderEditableGrid = (grid, fields, data, target) => {
     // Lat/Lon no forman parte del formulario: se guardan internamente en background.
     if (direccionInput) {
       direccionInput.addEventListener("blur", () => {
-        const address = buildInmuebleGeocodeAddress({
-          direccion: direccionInput.value,
-          poblacion: inputMap.poblacion ? inputMap.poblacion.value : "",
-          provincia: inputMap.provincia ? inputMap.provincia.value : "",
-        });
-        if (!address) return;
-        geocodeInmuebleAddress(address, null, null);
+        const street = String(direccionInput.value || "").trim();
+        if (!street) return;
+        geocodeInmuebleAddress(street, null, null, { force: true });
         scheduleAutoInmuebleCatastroLookup(inputMap);
       });
     }
@@ -12830,7 +12825,8 @@ const renderEditableGrid = (grid, fields, data, target) => {
 };
 
 let inmuebleGeocodeTimer = null;
-let lastGeocodeAddress = "";
+let lastGeocodeKey = "";
+let lastGeocodeAt = 0;
 
 const renderMapPreview = (container, lat, lon, address = "") => {
   if (!container) return;
@@ -12844,7 +12840,7 @@ const renderMapPreview = (container, lat, lon, address = "") => {
       ? geocodeState === "failed"
         ? `No se pudo geolocalizar ${safeAddress}. Revisa dirección/población/provincia y vuelve a intentar.`
         : `Se intentará geolocalizar ${safeAddress} automáticamente.`
-      : "Añade dirección, población y provincia para dibujar la localización.";
+      : "Añade al menos la dirección (mejor si incluyes población o provincia) para dibujar la localización.";
     container.innerHTML = `
       <div class="map-box-empty">
         <strong>Mapa pendiente</strong>
@@ -12908,28 +12904,45 @@ const buildCatastroUrl = (ref, address) => {
   return "https://www.sedecatastro.gob.es/";
 };
 
-const geocodeInmuebleAddress = (address, latInput, lonInput) => {
-  if (!address) return;
-  if (address === lastGeocodeAddress) return;
-  lastGeocodeAddress = address;
+const geocodeInmuebleAddress = (direccion, latInput, lonInput, options = {}) => {
+  const street = String(direccion || "").trim();
+  if (!street) return;
   if (inmuebleMap) inmuebleMap.dataset.geocode = "pending";
-  updateInmuebleMap(null, null, address);
+  const poblacion = document.querySelector('.inline-input[data-target="inmueble"][data-field="poblacion"]');
+  const provincia = document.querySelector('.inline-input[data-target="inmueble"][data-field="provincia"]');
+  const codigoPostal = document.querySelector('.inline-input[data-target="inmueble"][data-field="codigo_postal"]');
+  const displayAddress = buildInmuebleDisplayAddress({
+    direccion: street,
+    poblacion: poblacion?.value || "",
+    provincia: provincia?.value || "",
+    codigo_postal: codigoPostal?.value || "",
+  });
+  updateInmuebleMap(null, null, displayAddress || street);
   if (inmuebleGeocodeTimer) {
     clearTimeout(inmuebleGeocodeTimer);
   }
   inmuebleGeocodeTimer = setTimeout(() => {
-    const params = new URLSearchParams({ q: address });
-    const poblacion = document.querySelector('.inline-input[data-target="inmueble"][data-field="poblacion"]');
-    const provincia = document.querySelector('.inline-input[data-target="inmueble"][data-field="provincia"]');
-    const codigoPostal = document.querySelector('.inline-input[data-target="inmueble"][data-field="codigo_postal"]');
-    if (poblacion?.value) params.set("municipio", poblacion.value);
-    if (provincia?.value) params.set("provincia", provincia.value);
-    if (codigoPostal?.value) params.set("codigo_postal", codigoPostal.value);
+    const now = Date.now();
+    const municipioVal = String(poblacion?.value || "").trim();
+    const provinciaVal = String(provincia?.value || "").trim();
+    const cpVal = String(codigoPostal?.value || "").trim();
+    const key = [street, municipioVal, provinciaVal, cpVal].map((v) => normalizeSimple(v)).join("|");
+    const force = Boolean(options && options.force);
+    const allowRetry = force || !lastGeocodeKey || key !== lastGeocodeKey || (now - lastGeocodeAt) > 20000;
+    if (!allowRetry) {
+      return;
+    }
+    lastGeocodeKey = key;
+    lastGeocodeAt = now;
+    const params = new URLSearchParams({ q: street });
+    if (municipioVal) params.set("municipio", municipioVal);
+    if (provinciaVal) params.set("provincia", provinciaVal);
+    if (cpVal) params.set("codigo_postal", cpVal);
     api(`/api/geocode_lookup?${params.toString()}`)
       .then((data) => {
         if (!data?.ok) {
           if (inmuebleMap) inmuebleMap.dataset.geocode = "failed";
-          updateInmuebleMap(null, null, address);
+          updateInmuebleMap(null, null, displayAddress || street);
           return;
         }
         const lat = Number(data.lat);
@@ -12939,26 +12952,22 @@ const geocodeInmuebleAddress = (address, latInput, lonInput) => {
         if (lonInput) lonInput.value = String(lon);
         saveInmuebleField("lat", lat);
         saveInmuebleField("lon", lon);
-        updateInmuebleMap(lat, lon, address);
+        updateInmuebleMap(lat, lon, displayAddress || street);
       })
       .catch(() => {
         if (inmuebleMap) inmuebleMap.dataset.geocode = "failed";
-        updateInmuebleMap(null, null, address);
+        updateInmuebleMap(null, null, displayAddress || street);
       });
   }, 600);
 };
 
 const runInmuebleGeocodeFromUi = () => {
   const direccion = document.querySelector('.inline-input[data-target="inmueble"][data-field="direccion"]')?.value || "";
-  const poblacion = document.querySelector('.inline-input[data-target="inmueble"][data-field="poblacion"]')?.value || "";
-  const provincia = document.querySelector('.inline-input[data-target="inmueble"][data-field="provincia"]')?.value || "";
-  const codigoPostal = document.querySelector('.inline-input[data-target="inmueble"][data-field="codigo_postal"]')?.value || "";
-  const address = buildInmuebleGeocodeAddress({ direccion, poblacion, provincia, codigo_postal: codigoPostal });
-  if (!String(address || "").trim()) {
+  if (!String(direccion || "").trim()) {
     showUiError("No se pudo localizar", "Falta dirección/población/provincia.");
     return;
   }
-  geocodeInmuebleAddress(address, null, null);
+  geocodeInmuebleAddress(direccion, null, null, { force: true });
   scheduleAutoInmuebleCatastroLookup(getInmuebleCatastroInputMapFromDom(), { force: true });
 };
 
@@ -21547,15 +21556,15 @@ const openInmuebleDetail = (id, originView = "") => {
       if (inmuebleMap) {
         const lat = Number(inmueble.lat);
         const lon = Number(inmueble.lon);
-        const address = buildInmuebleGeocodeAddress(inmueble);
+        const address = buildInmuebleDisplayAddress(inmueble);
         if (lat && lon) {
           updateInmuebleMap(lat, lon, address);
         } else {
           updateInmuebleMap(null, null, address);
           const latInput = document.querySelector('.inline-input[data-target="inmueble"][data-field="lat"]');
           const lonInput = document.querySelector('.inline-input[data-target="inmueble"][data-field="lon"]');
-          if (address) {
-            geocodeInmuebleAddress(address, latInput, lonInput);
+          if (String(inmueble.direccion || "").trim()) {
+            geocodeInmuebleAddress(inmueble.direccion, latInput, lonInput);
           }
         }
       }
