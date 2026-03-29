@@ -17,10 +17,15 @@
       return;
     }
     if (params.has("holding")) {
+      const mode = (params.get("mode") || "platform").toLowerCase() === "tenant" ? "tenant" : "platform";
+      const requestedView = (params.get("view") || "").trim();
+      const requestedEngine = (params.get("engine") || "").trim();
       deps.openHolding({
-        mode: params.get("mode") || "platform",
+        mode,
         workspace: params.get("workspace") || "",
-        view: (params.get("mode") || "").toLowerCase() === "tenant" ? "operations" : "overview",
+        // Allow deep links inside tenant mode (e.g. Motores/Registro horario).
+        view: requestedView || (mode === "tenant" ? "overview" : "overview"),
+        engine: requestedEngine || "",
       });
       deps.ui?.refreshContext(deps.state);
       return;

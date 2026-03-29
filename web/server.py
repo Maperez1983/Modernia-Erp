@@ -16406,6 +16406,40 @@ def build_workspace_time_csv(rows):
     return string_io.getvalue().encode("utf-8-sig")
 
 
+def build_workspace_time_xlsx(rows, workspace=None, company=None, persona=None, month=""):
+    if Workbook is None:
+        raise RuntimeError("openpyxl no disponible")
+    workspace = workspace or {}
+    company = company or {}
+    persona = persona or {}
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Registro horario"
+    ws.append(["Workspace", workspace.get("nombre") or ""])
+    ws.append(["Empresa", company.get("nombre") or ""])
+    ws.append(["Trabajador", persona.get("persona_nombre") or persona.get("nombre") or ""])
+    ws.append(["Mes", month or ""])
+    ws.append([])
+    headers = ["Fecha", "Inicio", "Fin", "Pausa (min)", "Minutos trabajados", "Horas (HH:MM)", "Estado", "Notas"]
+    ws.append(headers)
+    for row in rows or []:
+        ws.append(
+            [
+                row.get("fecha") or "",
+                row.get("hora_inicio") or "",
+                row.get("hora_fin") or "",
+                int(row.get("pausa_min") or 0),
+                int(row.get("minutos_trabajados") or 0),
+                format_minutes_hhmm(row.get("minutos_trabajados") or 0),
+                row.get("estado") or "",
+                row.get("notas") or "",
+            ]
+        )
+    buffer = BytesIO()
+    wb.save(buffer)
+    return buffer.getvalue()
+
+
 def fetch_workspace_alert_preferences(conn, workspace_id, persona_id=None):
     where = ["workspace_id = ?"]
     params = [workspace_id]
@@ -16422,19 +16456,30 @@ def fetch_workspace_alert_preferences(conn, workspace_id, persona_id=None):
     ).fetchone()
     if row:
         return dict(row)
-    # fallback to personal record
+    # fallback to personal record (maps legacy column names to the alert schema)
     if persona_id:
         row = conn.execute(
             """
             SELECT *
             FROM workspace_registro_personal
-            WHERE workspace_id = ? AND persona_id = ?
+            WHERE workspace_id = ? AND id = ?
             LIMIT 1
             """,
             (workspace_id, persona_id),
         ).fetchone()
         if row:
-            return dict(row)
+            record = dict(row)
+            return {
+                "workspace_id": workspace_id,
+                "empresa_id": record.get("empresa_id"),
+                "persona_id": record.get("id"),
+                "alert_missing_checkin": record.get("alert_missing_checkin", 1),
+                "alert_missing_checkout": record.get("alert_missing_checkout", 1),
+                "notify_worker": record.get("alert_notify_worker", 1),
+                "notify_admin": record.get("alert_notify_admin", 1),
+                "admin_contact": record.get("alert_admin_contact") or "",
+                "schedule": "",
+            }
     return None
 
 
@@ -16449,16 +16494,13 @@ def upsert_workspace_alert_config(conn, workspace_id, persona_id, payload, now=N
         (workspace_id, persona_id),
     ).fetchone()
     values = (
-        workspace_id,
-        payload.get("empresa_id"),
-        persona_id,
-        payload.get("alert_missing_checkin", 1),
-        payload.get("alert_missing_checkout", 1),
-        payload.get("notify_worker", 1),
-        payload.get("notify_admin", 1),
-        (payload.get("admin_contact") or "").strip(),
-        payload.get("schedule") or "",
-        now_ts,
+        (payload.get("empresa_id") or "").strip() or None,
+        0 if str(payload.get("alert_missing_checkin") or "1").strip().lower() in {"0", "false", "no", "off"} else 1,
+        0 if str(payload.get("alert_missing_checkout") or "1").strip().lower() in {"0", "false", "no", "off"} else 1,
+        0 if str(payload.get("notify_worker") or "1").strip().lower() in {"0", "false", "no", "off"} else 1,
+        0 if str(payload.get("notify_admin") or "1").strip().lower() in {"0", "false", "no", "off"} else 1,
+        (payload.get("admin_contact") or "").strip() or "",
+        (payload.get("schedule") or "").strip() or "",
     )
     if existing:
         conn.execute(
@@ -16467,7 +16509,7 @@ def upsert_workspace_alert_config(conn, workspace_id, persona_id, payload, now=N
             SET empresa_id = ?, alert_missing_checkin = ?, alert_missing_checkout = ?, notify_worker = ?, notify_admin = ?, admin_contact = ?, schedule = ?, updated_at = ?
             WHERE id = ? AND workspace_id = ?
             """,
-            (*values[1:], now_ts, existing["id"], workspace_id),
+            (*values, now_ts, existing["id"], workspace_id),
         )
         return existing["id"]
     record_id = os.urandom(16).hex()
@@ -16478,7 +16520,7 @@ def upsert_workspace_alert_config(conn, workspace_id, persona_id, payload, now=N
           notify_worker, notify_admin, admin_contact, schedule, created_at, updated_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (record_id, *values),
+        (record_id, workspace_id, values[0], persona_id, values[1], values[2], values[3], values[4], values[5], values[6], now_ts, now_ts),
     )
     return record_id
 
@@ -16510,6 +16552,114 @@ def log_workspace_notification(conn, workspace_id, persona_id, channel, payload,
     )
 
 
+def _parse_alert_last_sent(value):
+    raw = str(value or "").strip()
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+        return parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        return {}
+
+
+def _update_alert_last_sent(conn, workspace_id, persona_id, updates, now=None):
+    now_ts = now or datetime.now().isoformat()
+    existing = conn.execute(
+        """
+        SELECT alert_last_sent
+        FROM workspace_registro_personal
+        WHERE workspace_id = ? AND id = ?
+        LIMIT 1
+        """,
+        (workspace_id, persona_id),
+    ).fetchone()
+    current = _parse_alert_last_sent(existing["alert_last_sent"] if existing else "")
+    current.update({k: v for k, v in (updates or {}).items() if v})
+    conn.execute(
+        """
+        UPDATE workspace_registro_personal
+        SET alert_last_sent = ?, updated_at = datetime(?)
+        WHERE workspace_id = ? AND id = ?
+        """,
+        (json.dumps(current, ensure_ascii=False), now_ts, workspace_id, persona_id),
+    )
+
+
+def run_workspace_time_missing_sweep(conn, workspace_id, now=None):
+    now_ts = now or datetime.now().isoformat()
+    now_dt = parse_iso_datetime(now_ts) or datetime.now()
+    today = now_dt.date().isoformat()
+    now_minutes = parse_hhmm_to_minutes(now_dt.strftime("%H:%M")) or 0
+    personal = conn.execute(
+        """
+        SELECT id, workspace_id, empresa_id, nombre, horas_pactadas_dia,
+               COALESCE(alert_missing_checkin, 1) AS alert_missing_checkin,
+               COALESCE(alert_missing_checkout, 1) AS alert_missing_checkout,
+               COALESCE(alert_notify_worker, 1) AS alert_notify_worker,
+               COALESCE(alert_notify_admin, 1) AS alert_notify_admin,
+               COALESCE(alert_admin_contact, '') AS alert_admin_contact,
+               COALESCE(alert_last_sent, '') AS alert_last_sent
+        FROM workspace_registro_personal
+        WHERE workspace_id = ? AND COALESCE(activo, 1) = 1
+        ORDER BY nombre COLLATE NOCASE ASC
+        """,
+        (workspace_id,),
+    ).fetchall()
+    created = []
+    for row in personal:
+        persona_id = str(row["id"] or "").strip()
+        if not persona_id:
+            continue
+        prefs = fetch_workspace_alert_preferences(conn, workspace_id, persona_id=persona_id) or {}
+        schedule = str(prefs.get("schedule") or "").strip() or "10:00"
+        checkin_deadline = parse_hhmm_to_minutes(schedule) or 600
+        horas_pactadas = row["horas_pactadas_dia"]
+        try:
+            horas_pactadas = float(horas_pactadas) if horas_pactadas not in (None, "") else 8.0
+        except Exception:
+            horas_pactadas = 8.0
+        checkout_deadline = checkin_deadline + int(round(horas_pactadas * 60)) + 30
+        last_sent = _parse_alert_last_sent(row["alert_last_sent"])
+        worker_payload = {
+            "persona_nombre": row["nombre"],
+            "fecha": today,
+            "empresa_id": row["empresa_id"],
+            "admin_contact": prefs.get("admin_contact") or row["alert_admin_contact"] or "",
+        }
+        today_entry = conn.execute(
+            """
+            SELECT id, hora_inicio, hora_fin
+            FROM workspace_registro_horario
+            WHERE workspace_id = ? AND persona_id = ? AND fecha = ?
+            ORDER BY hora_inicio DESC
+            LIMIT 1
+            """,
+            (workspace_id, persona_id, today),
+        ).fetchone()
+        has_checkin = bool(today_entry and str(today_entry["hora_inicio"] or "").strip())
+        open_entry = bool(today_entry and not str(today_entry["hora_fin"] or "").strip())
+        if not has_checkin and now_minutes >= checkin_deadline and int(prefs.get("alert_missing_checkin") or row["alert_missing_checkin"] or 0) == 1:
+            if last_sent.get("missing_checkin") != today:
+                if int(prefs.get("notify_worker") or row["alert_notify_worker"] or 0) == 1:
+                    log_workspace_notification(conn, workspace_id, persona_id, "worker_missing_checkin", worker_payload, now=now_ts)
+                    created.append("worker_missing_checkin")
+                if int(prefs.get("notify_admin") or row["alert_notify_admin"] or 0) == 1:
+                    log_workspace_notification(conn, workspace_id, persona_id, "admin_missing_checkin", worker_payload, now=now_ts)
+                    created.append("admin_missing_checkin")
+                _update_alert_last_sent(conn, workspace_id, persona_id, {"missing_checkin": today}, now=now_ts)
+        if open_entry and now_minutes >= checkout_deadline and int(prefs.get("alert_missing_checkout") or row["alert_missing_checkout"] or 0) == 1:
+            if last_sent.get("missing_checkout") != today:
+                if int(prefs.get("notify_worker") or row["alert_notify_worker"] or 0) == 1:
+                    log_workspace_notification(conn, workspace_id, persona_id, "worker_missing_checkout", worker_payload, now=now_ts)
+                    created.append("worker_missing_checkout")
+                if int(prefs.get("notify_admin") or row["alert_notify_admin"] or 0) == 1:
+                    log_workspace_notification(conn, workspace_id, persona_id, "admin_missing_checkout", worker_payload, now=now_ts)
+                    created.append("admin_missing_checkout")
+                _update_alert_last_sent(conn, workspace_id, persona_id, {"missing_checkout": today}, now=now_ts)
+    return created
+
+
 def run_workspace_time_alerts(conn, workspace_id, entry, now=None):
     now_ts = now or datetime.now().isoformat()
     persona_id = entry.get("persona_id")
@@ -16526,60 +16676,22 @@ def run_workspace_time_alerts(conn, workspace_id, entry, now=None):
         "hora_fin": entry.get("hora_fin") or "",
         "empresa_nombre": company_name,
     }
-    missing_checkin = not entry.get("hora_inicio")
-    missing_checkout = not entry.get("hora_fin")
-    if missing_checkin and prefs.get("alert_missing_checkin"):
-        if prefs.get("alert_notify_worker"):
-            log_workspace_notification(
-                conn,
-                workspace_id,
-                persona_id,
-                "worker_missing_checkin",
-                worker_payload,
-                now=now_ts,
-            )
-            notifications.append("worker_missing_checkin")
-        if prefs.get("alert_notify_admin"):
-            log_workspace_notification(
-                conn,
-                workspace_id,
-                persona_id,
-                "admin_missing_checkin",
-                worker_payload,
-                now=now_ts,
-            )
-            notifications.append("admin_missing_checkin")
-    if missing_checkout and prefs.get("alert_missing_checkout"):
-        if prefs.get("alert_notify_worker"):
-            log_workspace_notification(
-                conn,
-                workspace_id,
-                persona_id,
-                "worker_missing_checkout",
-                worker_payload,
-                now=now_ts,
-            )
-            notifications.append("worker_missing_checkout")
-        if prefs.get("alert_notify_admin"):
-            log_workspace_notification(
-                conn,
-                workspace_id,
-                persona_id,
-                "admin_missing_checkout",
-                worker_payload,
-                now=now_ts,
-            )
-            notifications.append("admin_missing_checkout")
-    if not missing_checkin and prefs.get("alert_notify_admin"):
-        log_workspace_notification(
-            conn,
-            workspace_id,
-            persona_id,
-            "admin_entry_log",
-            worker_payload,
-            now=now_ts,
-        )
-        notifications.append("admin_entry_log")
+    event = normalize_lookup_text(entry.get("event") or "")
+    # Missing check-in/out alerts are computed by a periodic sweep endpoint (no background scheduler).
+    if event in {"checkin", "entrada"}:
+        if prefs.get("notify_admin"):
+            log_workspace_notification(conn, workspace_id, persona_id, "admin_entry_log", worker_payload, now=now_ts)
+            notifications.append("admin_entry_log")
+        if prefs.get("notify_worker"):
+            log_workspace_notification(conn, workspace_id, persona_id, "worker_entry_log", worker_payload, now=now_ts)
+            notifications.append("worker_entry_log")
+    if event in {"checkout", "salida", "cierre"}:
+        if prefs.get("notify_admin"):
+            log_workspace_notification(conn, workspace_id, persona_id, "admin_exit_log", worker_payload, now=now_ts)
+            notifications.append("admin_exit_log")
+        if prefs.get("notify_worker"):
+            log_workspace_notification(conn, workspace_id, persona_id, "worker_exit_log", worker_payload, now=now_ts)
+            notifications.append("worker_exit_log")
     return notifications
 
 
@@ -16599,51 +16711,41 @@ def build_workspace_time_xml(rows, persona_name="", company_name="", month=""):
 
 
 def build_workspace_time_pdf(persona, workspace, company, rows):
-    lines = [
-        workspace.get("nombre") or "Workspace",
-        company.get("nombre") or "Empresa",
-        "",
-        f"Trabajador: {persona.get('persona_nombre') or '-'}",
-        f"Usuario: {persona.get('usuario_id') or '-'}",
-        f"Empresa: {company.get('nombre') or '-'}",
-        f"Mes: {persona.get('month') or ''}",
-        f"Jornada: {persona.get('tipo_jornada') or '-'}",
-        "",
+    month = persona.get("month") or ""
+    worker_name = persona.get("persona_nombre") or persona.get("nombre") or "-"
+    sections = [
+        (
+            "Trabajador",
+            [
+                ("Nombre", worker_name),
+                ("Empresa", company.get("nombre") or "-"),
+                ("Workspace", workspace.get("nombre") or "-"),
+                ("Mes", month or "Completo"),
+                ("Jornada", persona.get("tipo_jornada") or "-"),
+                ("Horas pactadas", persona.get("horas_pactadas_hhmm") or "-"),
+                ("Horas reales", persona.get("horas_trabajadas_hhmm") or "-"),
+                ("Desviación", persona.get("desviacion_hhmm") or "-"),
+            ],
+        ),
+        (
+            "Entradas",
+            [
+                f"{row.get('fecha') or '-'} · {row.get('hora_inicio') or '-'} → {row.get('hora_fin') or '-'} · {format_minutes_hhmm(row.get('minutos_trabajados') or 0)} · {row.get('estado') or ''}".strip()
+                for row in (rows or [])
+            ]
+            or ["Sin fichajes en el periodo seleccionado."],
+        ),
     ]
-    for row in rows:
-        lines.append(
-            f"{row.get('fecha') or '-'} · {row.get('hora_inicio') or '-'} → {row.get('hora_fin') or '-'} · {format_minutes_hhmm(row.get('minutos_trabajados') or 0)}"
-        )
-    lines.append("")
-    lines.append("Total horas trabajadas: {}".format(persona.get("horas_trabajadas_hhmm") or "-"))
-    lines.append("Total pactadas: {}".format(persona.get("horas_pactadas_hhmm") or "-"))
-    lines.append("Desviación: {}".format(persona.get("desviacion_hhmm") or "-"))
-    font_obj = "1 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj\n"
-    y = 800
-    page_lines = []
-    for raw in lines[:40]:
-        page_lines.append(f"BT /F1 11 Tf 48 {y} Td ({_pdf_escape(raw)}) Tj ET")
-        y -= 18
-    content_stream = "\n".join(page_lines).encode("latin-1", "replace")
-    objects = [
-        "1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n",
-        "2 0 obj << /Type /Pages /Count 1 /Kids [3 0 R] >> endobj\n",
-        "3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >> endobj\n",
-        font_obj,
+    footer = [
+        "Documento generado por el sistema. Requiere revisión interna para su adecuación final a normativa vigente.",
     ]
-    objects.append(f"5 0 obj << /Length {len(content_stream)} >> stream\n".encode("latin-1") + content_stream + b"\nendstream\nendobj\n")
-    pdf = bytearray(b"%PDF-1.4\n")
-    offsets = [0]
-    for obj in objects:
-        offsets.append(len(pdf))
-        pdf.extend(obj if isinstance(obj, bytes) else obj.encode("latin-1"))
-    xref_pos = len(pdf)
-    pdf.extend(f"xref\n0 {len(offsets)}\n".encode("latin-1"))
-    pdf.extend(b"0000000000 65535 f \n")
-    for offset in offsets[1:]:
-        pdf.extend(f"{offset:010d} 00000 n \n".encode("latin-1"))
-    pdf.extend(f"trailer << /Size {len(offsets)} /Root 1 0 R >>\nstartxref\n{xref_pos}\n%%EOF\n".encode("latin-1"))
-    return bytes(pdf)
+    return build_branded_document_pdf(
+        "REGISTRO HORARIO",
+        f"{company.get('nombre') or 'Empresa'} · {month or 'Periodo completo'}",
+        sections,
+        footer_lines=footer,
+        brand_logo_url=company.get("logo_url"),
+    )
 
 
 def parse_non_negative_int(value):
@@ -21364,6 +21466,17 @@ class Handler(BaseHTTPRequestHandler):
                 persona_nombre = str(persona_row["nombre"] or "").strip() or persona_nombre
             hora_fin = str(payload.get("hora_fin") or "").strip()
             pausa_min = max(0, int(parse_money_value(payload.get("pausa_min")) or 0))
+            prev_row = None
+            if record_id:
+                prev_row = conn.execute(
+                    """
+                    SELECT hora_fin
+                    FROM workspace_registro_horario
+                    WHERE id = ? AND workspace_id = ?
+                    LIMIT 1
+                    """,
+                    (record_id, workspace_id),
+                ).fetchone()
             if hora_fin:
                 start_min = parse_hhmm_to_minutes(hora_inicio)
                 end_min = parse_hhmm_to_minutes(hora_fin)
@@ -21443,6 +21556,13 @@ class Handler(BaseHTTPRequestHandler):
                 now,
             )
             company_row = conn.execute("SELECT nombre FROM empresas WHERE id = ? LIMIT 1", (empresa_id,)).fetchone()
+            event = "update"
+            if not prev_row and not payload.get("id"):
+                event = "checkin"
+            if prev_row:
+                prev_fin = str(prev_row["hora_fin"] or "").strip()
+                if not prev_fin and str(hora_fin or "").strip():
+                    event = "checkout"
             entry_payload = {
                 "persona_id": persona_id,
                 "persona_nombre": persona_nombre,
@@ -21454,10 +21574,145 @@ class Handler(BaseHTTPRequestHandler):
                 "minutos_trabajados": minutos_trabajados,
                 "tipo_jornada": tipo_jornada,
                 "estado": estado,
+                "event": event,
             }
             run_workspace_time_alerts(conn, workspace_id, entry_payload, now=now)
             conn.commit()
             json_response(self, {"ok": True, "id": record_id, "automation_actions": auto_created})
+            return
+        elif parsed.path == "/api/workspace_registro_horario_toggle":
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            persona_id = str(payload.get("persona_id") or "").strip()
+            action = normalize_lookup_text(payload.get("action") or "")
+            if not workspace_id or not persona_id:
+                json_response(self, {"error": "workspace_id y persona_id requeridos"}, status=400)
+                return
+            persona_row = conn.execute(
+                """
+                SELECT id, empresa_id, usuario_id, nombre, tipo_jornada, horas_pactadas_dia
+                FROM workspace_registro_personal
+                WHERE workspace_id = ? AND id = ?
+                LIMIT 1
+                """,
+                (workspace_id, persona_id),
+            ).fetchone()
+            if not persona_row:
+                json_response(self, {"error": "persona no encontrada"}, status=404)
+                return
+            empresa_id = str(payload.get("empresa_id") or persona_row["empresa_id"] or "").strip()
+            if not empresa_id:
+                json_response(self, {"error": "empresa_id requerido"}, status=400)
+                return
+            now_dt = datetime.now()
+            fecha = now_dt.date().isoformat()
+            now_hhmm = now_dt.strftime("%H:%M")
+            open_row = conn.execute(
+                """
+                SELECT id, hora_inicio, COALESCE(hora_fin, '') AS hora_fin, COALESCE(pausa_min, 0) AS pausa_min
+                FROM workspace_registro_horario
+                WHERE workspace_id = ? AND persona_id = ? AND fecha = ? AND COALESCE(hora_fin, '') = ''
+                ORDER BY hora_inicio DESC
+                LIMIT 1
+                """,
+                (workspace_id, persona_id, fecha),
+            ).fetchone()
+            if not action:
+                action = "checkout" if open_row else "checkin"
+            persona_nombre = str(persona_row["nombre"] or "").strip() or "-"
+            tipo_jornada = normalize_shift_type(persona_row["tipo_jornada"] or "")
+            try:
+                horas_pactadas_dia = float(persona_row["horas_pactadas_dia"]) if persona_row["horas_pactadas_dia"] not in (None, "") else None
+            except Exception:
+                horas_pactadas_dia = None
+            if action in {"checkout", "salida"}:
+                if not open_row:
+                    json_response(self, {"error": "no hay fichaje abierto hoy para esa persona"}, status=409)
+                    return
+                start = str(open_row["hora_inicio"] or "").strip()
+                pausa_min = int(open_row["pausa_min"] or 0)
+                minutos = compute_worked_minutes(start, now_hhmm, pausa_min)
+                estado = normalize_time_entry_state("Cerrado", now_hhmm)
+                conn.execute(
+                    """
+                    UPDATE workspace_registro_horario
+                    SET hora_fin = ?, minutos_trabajados = ?, estado = ?, updated_at = datetime(?)
+                    WHERE id = ? AND workspace_id = ?
+                    """,
+                    (now_hhmm, minutos, estado, now, open_row["id"], workspace_id),
+                )
+                company_row = conn.execute("SELECT nombre FROM empresas WHERE id = ? LIMIT 1", (empresa_id,)).fetchone()
+                run_workspace_time_alerts(
+                    conn,
+                    workspace_id,
+                    {
+                        "persona_id": persona_id,
+                        "persona_nombre": persona_nombre,
+                        "empresa_id": empresa_id,
+                        "empresa_nombre": str(company_row["nombre"] or "") if company_row else "",
+                        "fecha": fecha,
+                        "hora_inicio": start,
+                        "hora_fin": now_hhmm,
+                        "minutos_trabajados": minutos,
+                        "tipo_jornada": tipo_jornada,
+                        "estado": estado,
+                        "event": "checkout",
+                    },
+                    now=now,
+                )
+                conn.commit()
+                json_response(self, {"ok": True, "action": "checkout", "id": open_row["id"], "fecha": fecha, "hora_fin": now_hhmm})
+                return
+            # checkin
+            if open_row:
+                json_response(self, {"error": "ya existe un fichaje abierto hoy para esa persona"}, status=409)
+                return
+            record_id = os.urandom(16).hex()
+            estado = normalize_time_entry_state("Abierto", "")
+            conn.execute(
+                """
+                INSERT INTO workspace_registro_horario (
+                  id, workspace_id, empresa_id, persona_id, usuario_id, persona_nombre, tipo_jornada, horas_pactadas_dia,
+                  fecha, hora_inicio, hora_fin, pausa_min, minutos_trabajados, metodo_registro, estado, notas, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 'App', ?, NULL, datetime(?), datetime(?))
+                """,
+                (
+                    record_id,
+                    workspace_id,
+                    empresa_id,
+                    persona_id,
+                    str(persona_row["usuario_id"] or "").strip() or None,
+                    persona_nombre,
+                    tipo_jornada,
+                    horas_pactadas_dia,
+                    fecha,
+                    now_hhmm,
+                    None,
+                    estado,
+                    now,
+                    now,
+                ),
+            )
+            company_row = conn.execute("SELECT nombre FROM empresas WHERE id = ? LIMIT 1", (empresa_id,)).fetchone()
+            run_workspace_time_alerts(
+                conn,
+                workspace_id,
+                {
+                    "persona_id": persona_id,
+                    "persona_nombre": persona_nombre,
+                    "empresa_id": empresa_id,
+                    "empresa_nombre": str(company_row["nombre"] or "") if company_row else "",
+                    "fecha": fecha,
+                    "hora_inicio": now_hhmm,
+                    "hora_fin": "",
+                    "minutos_trabajados": 0,
+                    "tipo_jornada": tipo_jornada,
+                    "estado": estado,
+                    "event": "checkin",
+                },
+                now=now,
+            )
+            conn.commit()
+            json_response(self, {"ok": True, "action": "checkin", "id": record_id, "fecha": fecha, "hora_inicio": now_hhmm})
             return
         elif parsed.path == "/api/workspace_registro_personal":
             workspace_id = str(payload.get("workspace_id") or "").strip()
@@ -28171,6 +28426,16 @@ class Handler(BaseHTTPRequestHandler):
                 return
             json_response(self, fetch_workspace_notifications(conn, workspace_id, limit=limit))
             return
+
+        if path == "/api/workspace_registro_horario_alerts_run":
+            workspace_id = params.get("workspace_id", [""])[0]
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            created = run_workspace_time_missing_sweep(conn, workspace_id)
+            conn.commit()
+            json_response(self, {"ok": True, "notifications": len(created), "channels": created[:12]})
+            return
         if path == "/api/workspace_registro_horario_xml":
             workspace_id = params.get("workspace_id", [""])[0]
             month = params.get("month", [""])[0]
@@ -28201,6 +28466,34 @@ class Handler(BaseHTTPRequestHandler):
             pdf_bytes = build_workspace_time_pdf(persona, workspace, company, rows)
             filename = f"registro_horario_{persona.get('persona_nombre', persona_id)}_{month or 'completo'}.pdf"
             binary_response(self, pdf_bytes, content_type="application/pdf", filename=filename)
+            return
+
+        if path == "/api/workspace_registro_horario_xlsx":
+            workspace_id = params.get("workspace_id", [""])[0]
+            month = params.get("month", [""])[0]
+            persona_id = (params.get("persona_id", [""])[0] or "").strip()
+            if not workspace_id or not persona_id:
+                json_response(self, {"error": "workspace_id y persona_id requeridos"}, status=400)
+                return
+            rows = fetch_workspace_time_entries(conn, workspace_id, limit=5000, month=month, persona_id=persona_id)["rows"]
+            summary = build_workspace_time_summary(rows, month=month)
+            persona = next((row for row in summary["rows"] if str(row.get("persona_id") or "") == persona_id), {})
+            company_id = rows[0]["empresa_id"] if rows else None
+            company_row = conn.execute("SELECT nombre, logo_url FROM empresas WHERE id = ? LIMIT 1", (company_id,)).fetchone()
+            company = dict(company_row) if company_row else {"nombre": "", "logo_url": ""}
+            workspace = fetch_workspace_detail(conn, workspace_id).get("workspace") or {}
+            try:
+                xlsx_bytes = build_workspace_time_xlsx(rows, workspace=workspace, company=company, persona=persona, month=month)
+            except Exception:
+                json_response(self, {"error": "openpyxl no disponible en servidor"}, status=500)
+                return
+            filename = f"registro_horario_{persona.get('persona_nombre', persona_id)}_{month or 'completo'}.xlsx"
+            binary_response(
+                self,
+                xlsx_bytes,
+                content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                filename=filename,
+            )
             return
 
         if path == "/api/workspace_registro_horario_export":

@@ -1317,10 +1317,17 @@ const workspaceTimeList = document.getElementById("workspaceTimeList");
 const workspaceTimeSummary = document.getElementById("workspaceTimeSummary");
 const workspaceTimeMonth = document.getElementById("workspaceTimeMonth");
 const workspaceTimeExportBtn = document.getElementById("workspaceTimeExportBtn");
+const workspaceTimeConfigForm = document.getElementById("workspaceAlertForm");
+const workspaceAlertStatus = document.getElementById("workspaceAlertStatus");
 const workspaceTimeEmployeeForm = document.getElementById("workspaceTimeEmployeeForm");
 const workspaceTimeEmployeeResetBtn = document.getElementById("workspaceTimeEmployeeResetBtn");
 const workspaceTimeEmployeeStatus = document.getElementById("workspaceTimeEmployeeStatus");
 const workspaceTimeEmployeeList = document.getElementById("workspaceTimeEmployeeList");
+const workspaceTimeEmployeePreview = document.getElementById("workspaceTimeEmployeePreview");
+const workspaceTimeNotifications = document.getElementById("workspaceTimeNotifications");
+const workspaceTimeExportXml = document.getElementById("workspaceTimeExportXml");
+const workspaceTimeExportPdf = document.getElementById("workspaceTimeExportPdf");
+const workspaceTimeExportXlsx = document.getElementById("workspaceTimeExportXlsx");
 const workspaceBudgetSummary = document.getElementById("workspaceBudgetSummary");
 const workspaceBudgetForm = document.getElementById("workspaceBudgetForm");
 const workspaceBudgetResetBtn = document.getElementById("workspaceBudgetResetBtn");
@@ -1348,7 +1355,10 @@ const workspaceFincasMeetingList = document.getElementById("workspaceFincasMeeti
 const workspaceViewPanels = Array.from(document.querySelectorAll("[data-workspace-view]"));
 const workspaceViewButtons = Array.from(document.querySelectorAll("[data-workspace-view-tab]"));
 const workspaceEngineButtons = Array.from(document.querySelectorAll("[data-workspace-engine-tab]"));
-const workspaceEnginePanels = Array.from(document.querySelectorAll("[data-workspace-engine]"));
+// Scope engine panels to the Motores view to avoid hiding content from other workspace tabs.
+const workspaceEnginePanels = Array.from(document.querySelectorAll("[data-workspace-engine]")).filter((panel) =>
+  Boolean(panel.closest('[data-workspace-view="motores"]'))
+);
 const yearSelect = document.getElementById("yearSelect");
 const densityToggle = document.getElementById("densityToggle");
 const dbStatus = document.getElementById("dbStatus");
@@ -3565,7 +3575,7 @@ const renderCompanyCards = () => {
           <h3>Mi registro horario</h3>
           <div class="company-meta">${timeProfile.employee.empresa_nombre || "Grupo Modernia"} · ${timeProfile.employee.tipo_jornada || "Completa"}</div>
           <div class="company-meta">${entryLabel}</div>
-          <a class="card-link" href="?holding=1&mode=tenant&workspace=modernia&view=motores" data-action="time-home">Abrir ficha</a>
+          <a class="card-link" href="?holding=1&mode=tenant&workspace=modernia&view=motores&engine=registro_horario" data-action="time-home">Abrir ficha</a>
         `;
         coreCards.appendChild(timeCard);
       }
@@ -3604,7 +3614,7 @@ const renderCompanyCards = () => {
         <h3>Mi registro horario</h3>
         <div class="company-meta">${timeProfile.employee.empresa_nombre || "Grupo Modernia"} · ${timeProfile.employee.tipo_jornada || "Completa"}</div>
         <div class="company-meta">${entryLabel}</div>
-        <a class="card-link" href="?holding=1&mode=tenant&workspace=modernia&view=motores" data-action="time-home">Abrir ficha</a>
+        <a class="card-link" href="?holding=1&mode=tenant&workspace=modernia&view=motores&engine=registro_horario" data-action="time-home">Abrir ficha</a>
       `;
       coreCards.appendChild(timeCard);
     }
@@ -3843,9 +3853,6 @@ const updateWorkspaceEntryChrome = () => {
     holdingBackBtn.textContent = mode === "tenant" ? "Volver al panel" : "Volver al panel";
   }
   const tenantOperationalMode = mode === "tenant";
-  if (tenantOperationalMode && state.currentWorkspaceView !== "overview") {
-    state.currentWorkspaceView = "overview";
-  }
   if (workspaceViewTabs) workspaceViewTabs.classList.toggle("hidden", tenantOperationalMode);
   if (workspaceCompanySwitcher) workspaceCompanySwitcher.classList.toggle("hidden", tenantOperationalMode);
   if (workspaceKpis) workspaceKpis.classList.toggle("hidden", tenantOperationalMode);
@@ -3966,9 +3973,10 @@ const renderWorkspaceCompanyScopedData = () => {
   renderWorkspaceRemittancesList(remittanceRows);
   renderWorkspaceSeriesList(seriesRows);
   renderWorkspaceInboxList(inboxRows);
-  renderWorkspaceTimeEmployeeList(timeEmployees.rows || []);
-  if (timeEmployees.rows?.length) {
-    selectWorkspacePersona(timeEmployees.rows[0]);
+  state.workspaceTimeEmployees = timeEmployees;
+  renderWorkspaceTimeEmployeeList(timeEmployees);
+  if (timeEmployees.length) {
+    selectWorkspacePersona(timeEmployees[0]);
   }
   hydrateWorkspaceTimeEmployeeSelect(timeEmployees);
   renderWorkspaceTimeSummary(raw.timeSummary || null);
@@ -4078,6 +4086,7 @@ const setWorkspaceEngineView = (engine = "documental") => {
     panel.classList.toggle("hidden", isHidden);
     panel.hidden = isHidden;
   });
+  syncHoldingUrlParams();
 };
 
 const setWorkspaceView = (view = "overview", options = {}) => {
@@ -4101,6 +4110,7 @@ const setWorkspaceView = (view = "overview", options = {}) => {
   if (normalized === "motores") {
     setWorkspaceEngineView(state.currentWorkspaceEngineView || "documental");
   }
+  syncHoldingUrlParams();
   if (scroll && workspaceViewTabs) {
     workspaceViewTabs.scrollIntoView({ behavior: "smooth", block: "start" });
   }
@@ -4118,6 +4128,7 @@ const focusWorkspaceEngine = async (engine, element = null, options = {}) => {
   setWorkspaceEngineView(engine);
   if (engine === "registro_horario") {
     await refreshWorkspaceTimeSetup();
+    await runWorkspaceTimeAlertSweep();
   }
   if (element && typeof element.scrollIntoView === "function") {
     element.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -4130,6 +4141,7 @@ workspaceEngineButtons.forEach((button) => {
     setWorkspaceEngineView(engine);
     if (engine === "registro_horario") {
       await refreshWorkspaceTimeSetup();
+      await runWorkspaceTimeAlertSweep();
     }
   });
 });
@@ -4293,10 +4305,10 @@ const WORKSPACE_LAUNCHERS = {
     actionLabel: "Gestionar",
     action: () => {
       if (isTenantWorkspaceMode()) {
-        focusWorkspaceEngine("registro_horario", workspaceTimeForm, { forceTenantView: true });
+        focusWorkspaceEngine("registro_horario", workspaceTimeSummary, { forceTenantView: true });
         return;
       }
-      focusWorkspaceEngine("registro_horario", workspaceTimeForm);
+      focusWorkspaceEngine("registro_horario", workspaceTimeSummary);
     },
   },
   automatizaciones: {
@@ -6830,6 +6842,20 @@ const refreshWorkspaceTimeSetup = async () => {
   hydrateWorkspaceTimeUserSelect();
 };
 
+const runWorkspaceTimeAlertSweep = async () => {
+  if (!state.currentWorkspaceId) return;
+  const now = Date.now();
+  if (state.workspaceTimeLastAlertSweep && now - state.workspaceTimeLastAlertSweep < 5 * 60 * 1000) {
+    return;
+  }
+  state.workspaceTimeLastAlertSweep = now;
+  await safeWorkspaceApi(
+    `/api/workspace_registro_horario_alerts_run?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}`,
+    { ok: true }
+  );
+  await loadWorkspaceNotifications();
+};
+
 const fillWorkspaceTimeEmployeeForm = (record = null) => {
   if (!workspaceTimeEmployeeForm) return;
   hydrateWorkspaceCompanySelects();
@@ -6926,7 +6952,7 @@ const renderWorkspaceTimeEmployeeList = (rows = []) => {
     button.addEventListener("click", () => {
       const record = rows.find((row) => String(row.id || "") === String(button.dataset.timeEmployeeView || ""));
       if (record) selectWorkspacePersona(record);
-      focusWorkspaceEngine("registro_horario", workspaceTimeForm, { forceTenantView: true });
+      focusWorkspaceEngine("registro_horario", workspaceTimeSummary, { forceTenantView: true });
     });
   });
 };
@@ -6945,13 +6971,17 @@ const fillWorkspaceAlertForm = (config = {}) => {
 
 const selectWorkspacePersona = async (record) => {
   state.workspaceTimeSelectedPersonaId = record.id || "";
+  state.workspaceTimeSelectedPersona = record || null;
   const companySelect = workspaceTimeEmployeeForm?.querySelector('[name="empresa_id"]')?.value;
   if (workspaceTimeEmployeeForm) {
     fillWorkspaceTimeEmployeeForm(record);
   }
   if (workspaceTimeConfigForm) {
     fillWorkspaceAlertForm({ workspace_id: state.currentWorkspaceId, persona_id: state.workspaceTimeSelectedPersonaId });
-    const config = await fetch(`/api/workspace_registro_alerts?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}&persona_id=${encodeURIComponent(state.workspaceTimeSelectedPersonaId)}`);
+    const config = await safeWorkspaceApi(
+      `/api/workspace_registro_alerts?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}&persona_id=${encodeURIComponent(state.workspaceTimeSelectedPersonaId)}`,
+      { row: {} }
+    );
     if (config?.row) fillWorkspaceAlertForm(config.row);
   }
   if (workspaceTimeExportXml) {
@@ -6962,6 +6992,11 @@ const selectWorkspacePersona = async (record) => {
     workspaceTimeExportPdf.disabled = false;
     workspaceTimeExportPdf.dataset.personaId = state.workspaceTimeSelectedPersonaId;
   }
+  if (workspaceTimeExportXlsx) {
+    workspaceTimeExportXlsx.disabled = false;
+    workspaceTimeExportXlsx.dataset.personaId = state.workspaceTimeSelectedPersonaId;
+  }
+  renderWorkspaceTimeEmployeePreview();
   loadWorkspaceNotifications();
 };
 
@@ -6993,6 +7028,86 @@ const renderWorkspaceNotifications = (rows = []) => {
         .join("")}
     </ul>
   `;
+};
+
+const getWorkspacePersonaTimeEntries = (personaId, { date = "", month = "" } = {}) => {
+  const entries = Array.isArray(state.currentWorkspaceData?.timeRows) ? state.currentWorkspaceData.timeRows : [];
+  const pid = String(personaId || "").trim();
+  if (!pid) return [];
+  let filtered = entries.filter((row) => String(row.persona_id || "").trim() === pid);
+  if (month) {
+    filtered = filtered.filter((row) => String(row.fecha || "").slice(0, 7) === String(month).slice(0, 7));
+  }
+  if (date) {
+    filtered = filtered.filter((row) => String(row.fecha || "") === date);
+  }
+  return filtered;
+};
+
+const renderWorkspaceTimeEmployeePreview = () => {
+  if (!workspaceTimeEmployeePreview) return;
+  const personaId = String(state.workspaceTimeSelectedPersonaId || "").trim();
+  if (!personaId) {
+    workspaceTimeEmployeePreview.innerHTML = "<p class='muted'>Selecciona un trabajador para ver su vista previa.</p>";
+    return;
+  }
+  const employee =
+    state.workspaceTimeSelectedPersona ||
+    (Array.isArray(state.workspaceTimeEmployees) ? state.workspaceTimeEmployees.find((row) => String(row.id || "") === personaId) : null) ||
+    {};
+  const today = new Date().toISOString().slice(0, 10);
+  const month = String(state.workspaceTimeMonth || "").trim();
+  const todayEntries = getWorkspacePersonaTimeEntries(personaId, { date: today });
+  const openEntry = todayEntries.find((row) => !String(row.hora_fin || "").trim());
+  const latest = todayEntries
+    .slice()
+    .sort((a, b) => `${b.fecha || ""} ${b.hora_inicio || ""}`.localeCompare(`${a.fecha || ""} ${a.hora_inicio || ""}`))[0] || null;
+  const label = latest
+    ? `${latest.hora_inicio || "--:--"}${latest.hora_fin ? ` - ${latest.hora_fin}` : " · Abierto"}`
+    : "Sin fichaje de hoy";
+  const canCheckIn = !openEntry;
+  const canCheckOut = Boolean(openEntry);
+  workspaceTimeEmployeePreview.innerHTML = `
+    <div class="workspace-time-preview">
+      <div class="workspace-document-head">
+        <span class="workspace-document-total">Vista previa</span>
+        <span class="muted">${employee.nombre || "-"} · ${employee.empresa_nombre || "-"}</span>
+      </div>
+      <div class="muted">Hoy: ${label}</div>
+      <div class="form-actions" style="margin-top:10px;">
+        <button type="button" class="secondary ghost button-inline" data-time-checkin ${canCheckIn ? "" : "disabled"}>Fichar entrada</button>
+        <button type="button" class="secondary ghost button-inline" data-time-checkout ${canCheckOut ? "" : "disabled"}>Fichar salida</button>
+      </div>
+      <div class="muted" style="margin-top:10px;">Mes activo: ${month || "actual"} · Exportes desde el panel derecho.</div>
+    </div>
+  `;
+  const runToggle = async (action) => {
+    if (!state.currentWorkspaceId) return;
+    try {
+      const resp = await fetch("/api/workspace_registro_horario_toggle", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          workspace_id: state.currentWorkspaceId,
+          persona_id: personaId,
+          empresa_id: employee.empresa_id || "",
+          action,
+        }),
+      }).then((res) => res.json());
+      if (resp?.error) throw new Error(resp.error);
+      await loadWorkspaceDetail(state.currentWorkspaceId);
+      state.workspaceTimeSelectedPersonaId = personaId;
+      const refreshed = (state.workspaceTimeEmployees || []).find((row) => String(row.id || "") === personaId);
+      if (refreshed) state.workspaceTimeSelectedPersona = refreshed;
+      renderWorkspaceTimeEmployeePreview();
+      await loadWorkspaceNotifications();
+    } catch (error) {
+      workspaceTimeEmployeePreview.querySelectorAll("button").forEach((btn) => (btn.disabled = false));
+      alert(error.message || "No se pudo fichar.");
+    }
+  };
+  workspaceTimeEmployeePreview.querySelector('[data-time-checkin]')?.addEventListener("click", () => runToggle("checkin"));
+  workspaceTimeEmployeePreview.querySelector('[data-time-checkout]')?.addEventListener("click", () => runToggle("checkout"));
 };
 
 const findCurrentUserTimeProfile = () => {
@@ -8332,6 +8447,22 @@ const setClienteDocsTab = (tab) => {
   }
 };
 
+const syncHoldingUrlParams = () => {
+  if (state.currentPage !== "holding") return;
+  const mode = state.currentWorkspaceEntryMode === "tenant" ? "tenant" : "platform";
+  const params = new URLSearchParams({ holding: "1", mode });
+  if (state.currentWorkspaceTarget) {
+    params.set("workspace", state.currentWorkspaceTarget);
+  }
+  if (state.currentWorkspaceView) {
+    params.set("view", state.currentWorkspaceView);
+  }
+  if (state.currentWorkspaceView === "motores" && state.currentWorkspaceEngineView) {
+    params.set("engine", state.currentWorkspaceEngineView);
+  }
+  setUrlParams(params);
+};
+
 const openHolding = (options = {}) => {
   const user = getAuthScopeUser();
   if (!canAccessSharedHomeModules(user)) {
@@ -8340,19 +8471,21 @@ const openHolding = (options = {}) => {
   }
   const mode = options.mode === "tenant" ? "tenant" : "platform";
   const requestedWorkspace = String(options.workspace || "").trim();
+  const requestedView = String(options.view || "").trim();
+  const requestedEngine = String(options.engine || "").trim();
   state.currentWorkspaceEntryMode = mode;
   state.currentWorkspaceTarget = requestedWorkspace || (mode === "tenant" ? "modernia" : "");
+  if (requestedEngine) {
+    state.currentWorkspaceEngineView = normalizeWorkspaceEngineKey(requestedEngine);
+  }
   setModule("empresas");
   explorerSection.classList.add("hidden");
   setPage("holding");
-  setWorkspaceView(options.view || (mode === "tenant" ? "overview" : state.currentWorkspaceView || "overview"));
+  const nextView = requestedView || (mode === "tenant" ? "overview" : state.currentWorkspaceView || "overview");
+  setWorkspaceView(nextView, { forceTenantView: mode === "tenant" && nextView !== "overview" });
   updateWorkspaceEntryChrome();
   loadWorkspaceCentral().catch(() => {});
-  const params = new URLSearchParams({ holding: "1", mode });
-  if (state.currentWorkspaceTarget) {
-    params.set("workspace", state.currentWorkspaceTarget);
-  }
-  setUrlParams(params);
+  syncHoldingUrlParams();
   window.scrollTo({ top: 0, behavior: "smooth" });
 };
 
@@ -18436,6 +18569,7 @@ const loadCrmCaptaciones = () => {
           if (etapa === "Adquisición") score += 2;
           return {
             inmuebleId: row.inmueble_id || "",
+            captacionId: row.inmueble_id ? "" : String(row.id || "").trim(),
             title: row.direccion || row.propietario || "Expediente sin dirección",
             meta: `${row.propietario || "Propietario pendiente"} · ${etapa}`,
             summary,
@@ -18660,6 +18794,7 @@ const renderCrmMiniCards = (container, items = []) => {
     .map((item) => {
       const attrs = [];
       if (item.inmuebleId) attrs.push(`data-inmueble-id="${escapeHtml(item.inmuebleId)}"`);
+      if (item.captacionId) attrs.push(`data-captacion-id="${escapeHtml(item.captacionId)}"`);
       if (item.crmView) attrs.push(`data-crm-view="${escapeHtml(item.crmView)}"`);
       return `
         <div class="crm-mini-card${attrs.length ? " crm-mini-card--linkable" : ""}"${attrs.length ? ` ${attrs.join(" ")}` : ""}>
@@ -18675,10 +18810,22 @@ const renderCrmMiniCards = (container, items = []) => {
       `;
     })
     .join("");
-  container.querySelectorAll(".crm-mini-card[data-inmueble-id]").forEach((card) => {
-    card.addEventListener("click", () => {
-      const id = card.dataset.inmuebleId || "";
-      if (id) openInmuebleDetail(id, "resumen");
+  container.querySelectorAll(".crm-mini-card[data-inmueble-id], .crm-mini-card[data-captacion-id]").forEach((card) => {
+    card.addEventListener("click", async () => {
+      const inmuebleId = String(card.dataset.inmuebleId || "").trim();
+      const captacionId = String(card.dataset.captacionId || "").trim();
+      if (inmuebleId) {
+        openInmuebleDetail(inmuebleId, "resumen");
+        return;
+      }
+      if (captacionId) {
+        const ensured = await ensureInmuebleForCaptacion(captacionId);
+        if (!ensured) {
+          alert("No se pudo abrir la ficha del inmueble (no hay inmueble vinculado).");
+          return;
+        }
+        openInmuebleDetail(ensured, "resumen");
+      }
     });
   });
   container.querySelectorAll(".crm-mini-card[data-crm-view]").forEach((card) => {
@@ -18699,8 +18846,9 @@ const renderCrmActionList = (container, items = [], emptyMessage = "Sin elemento
     .map((item) => {
       const attrs = [];
       if (item.inmuebleId) attrs.push(`data-inmueble-id="${escapeHtml(item.inmuebleId)}"`);
+      if (item.captacionId) attrs.push(`data-captacion-id="${escapeHtml(item.captacionId)}"`);
       if (item.crmView) attrs.push(`data-crm-view="${escapeHtml(item.crmView)}"`);
-      const tag = item.inmuebleId || item.crmView ? "button" : "div";
+      const tag = item.inmuebleId || item.captacionId || item.crmView ? "button" : "div";
       const typeAttr = tag === "button" ? ' type="button"' : "";
       return `
         <${tag}${typeAttr} class="crm-focus-link"${attrs.length ? ` ${attrs.join(" ")}` : ""}>
@@ -18711,10 +18859,22 @@ const renderCrmActionList = (container, items = [], emptyMessage = "Sin elemento
       `;
     })
     .join("");
-  container.querySelectorAll("[data-inmueble-id]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const id = btn.dataset.inmuebleId || "";
-      if (id) ensureCrmOpen(() => openInmuebleDetail(id, "resumen"));
+  container.querySelectorAll("[data-inmueble-id], [data-captacion-id]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const inmuebleId = String(btn.dataset.inmuebleId || "").trim();
+      const captacionId = String(btn.dataset.captacionId || "").trim();
+      if (inmuebleId) {
+        ensureCrmOpen(() => openInmuebleDetail(inmuebleId, "resumen"));
+        return;
+      }
+      if (captacionId) {
+        const ensured = await ensureInmuebleForCaptacion(captacionId);
+        if (!ensured) {
+          alert("No se pudo abrir la ficha del inmueble (no hay inmueble vinculado).");
+          return;
+        }
+        ensureCrmOpen(() => openInmuebleDetail(ensured, "resumen"));
+      }
     });
   });
   container.querySelectorAll("[data-crm-view]").forEach((btn) => {
@@ -18788,7 +18948,8 @@ const renderCrmResumenDashboard = () => {
           summary = proxima || "Reserva sin siguiente paso de cierre.";
         }
         return {
-          inmuebleId: row.inmueble_id || row.id || "",
+          inmuebleId: row.inmueble_id || "",
+          captacionId: row.inmueble_id ? "" : String(row.id || "").trim(),
           title: row.direccion || row.propietario || "Inmueble sin identificar",
           meta: `${row.propietario || "Propietario pendiente"} · ${etapa}`,
           summary,
@@ -18798,7 +18959,7 @@ const renderCrmResumenDashboard = () => {
       ...visitas
         .filter((row) => normalizeSimple(row.estado || "").includes("pendiente"))
         .map((row) => ({
-          inmuebleId: row.inmueble_id || row.id || "",
+          inmuebleId: row.inmueble_id || "",
           title: row.inmueble || "Visita pendiente",
           meta: `${row.cliente || "Cliente pendiente"} · Visita`,
           summary: `${row.fecha || "-"} ${row.hora || ""}`.trim() || "Pendiente de agenda",
@@ -19845,14 +20006,15 @@ const ensureInmuebleForCaptacion = async (captacionId) => {
 };
 
 const resolveInmuebleDetailRef = async (rowMap = {}, fallbackId = "") => {
-  const directId = String(rowMap?.inmueble_id || rowMap?.id || fallbackId || "").trim();
-  if (directId) {
-    return directId;
-  }
+  // Captaciones: `rowMap.id` suele ser el id de la captación (no el del inmueble).
+  // Para abrir ficha siempre necesitamos un `inmueble_id`. Si no viene, lo aseguramos
+  // creando/vinculando un inmueble a partir del `captacion_id`.
+  const inmuebleId = String(rowMap?.inmueble_id || "").trim();
+  if (inmuebleId) return inmuebleId;
   if (fallbackId) {
     return await ensureInmuebleForCaptacion(fallbackId);
   }
-  return "";
+  return String(rowMap?.id || "").trim();
 };
 
 const openInmuebleDetail = (id, originView = "") => {
@@ -29881,9 +30043,9 @@ if (coreCards) {
     } else if (action === "holding-tenant") {
       openHolding({ mode: "tenant", workspace: "modernia", view: "overview" });
     } else if (action === "time-home") {
-      openHolding({ mode: "tenant", workspace: "modernia", view: "motores" });
+      openHolding({ mode: "tenant", workspace: "modernia", view: "motores", engine: "registro_horario" });
       window.setTimeout(() => {
-        focusWorkspaceEngine("registro_horario", workspaceTimeForm, { forceTenantView: true });
+        focusWorkspaceEngine("registro_horario", workspaceTimeSummary, { forceTenantView: true });
       }, 250);
     } else if (action === "crm-inmo") {
       openCrmInmobiliario();
@@ -32604,6 +32766,19 @@ if (workspaceTimeExportPdf) {
   });
 }
 
+if (workspaceTimeExportXlsx) {
+  workspaceTimeExportXlsx.addEventListener("click", () => {
+    if (!state.currentWorkspaceId || !state.workspaceTimeSelectedPersonaId) return;
+    const month = workspaceTimeMonth?.value || "";
+    window.open(
+      `/api/workspace_registro_horario_xlsx?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}&persona_id=${encodeURIComponent(
+        state.workspaceTimeSelectedPersonaId
+      )}&month=${encodeURIComponent(month)}`,
+      "_blank"
+    );
+  });
+}
+
 if (workspaceFincasCommunityForm) {
   workspaceFincasCommunityForm.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -34961,6 +35136,8 @@ if (authActivateForm) {
 
 initDensityToggle();
 UI?.boot(state);
+// Pintamos al menos las tarjetas base del home aunque la carga de datos falle o tarde.
+renderCompanyCards();
 showAuthOverlay("");
 ensureAuthAndBoot();
 
