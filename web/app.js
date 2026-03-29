@@ -11404,9 +11404,6 @@ const INMUEBLE_FIELDS = [
   { key: "banos", label: "Baños", type: "number", section: "Características" },
   { key: "precio_valoracion", label: "Valoración interna", type: "number", section: "Referencia económica" },
   { key: "valor_referencia", label: "Valor de referencia", type: "number", section: "Referencia económica" },
-  // Coordenadas: se calculan automáticamente desde la dirección y no deben formar parte del formulario.
-  { key: "lat", label: "Latitud", type: "number", section: "Coordenadas", hidden: true },
-  { key: "lon", label: "Longitud", type: "number", section: "Coordenadas", hidden: true },
 ];
 
 const CAPTACION_FIELDS = [
