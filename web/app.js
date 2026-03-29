@@ -9913,7 +9913,7 @@ const INMUEBLE_FIELDS = [
   { key: "estado", label: "Estado", type: "select", options: CRM_ETAPAS, section: "Prioridad comercial" },
   { key: "tipo_inmueble", label: "Tipo", type: "text", section: "Prioridad comercial" },
   { key: "direccion", label: "Dirección", type: "text", section: "Prioridad comercial" },
-  { key: "precio_objetivo", label: "Precio objetivo", type: "number", section: "Prioridad comercial" },
+  { key: "precio_objetivo", label: "Precio objetivo venta", type: "number", section: "Prioridad comercial" },
   { key: "honorarios", label: "Honorarios agencia", type: "number", section: "Prioridad comercial" },
   {
     key: "situacion_ocupacion",
@@ -9926,20 +9926,19 @@ const INMUEBLE_FIELDS = [
   { key: "codigo_postal", label: "Código postal", type: "text", section: "Ubicación y Catastro" },
   { key: "poblacion", label: "Población", type: "text", section: "Ubicación y Catastro" },
   { key: "provincia", label: "Provincia", type: "text", section: "Ubicación y Catastro" },
-  { key: "referencia", label: "Referencia interna", type: "text", section: "Ubicación y Catastro" },
   { key: "referencia_catastral", label: "Referencia catastral", type: "text", section: "Ubicación y Catastro" },
+  { key: "referencia", label: "Referencia interna", type: "text", section: "Ubicación y Catastro" },
   { key: "m2", label: "m²", type: "number", section: "Características" },
   { key: "anio_construccion", label: "Año construcción", type: "number", section: "Características" },
   { key: "habitaciones", label: "Habitaciones", type: "number", section: "Características" },
   { key: "banos", label: "Baños", type: "number", section: "Características" },
-  { key: "precio_valoracion", label: "Precio adquisición", type: "number", section: "Referencia económica" },
+  { key: "precio_valoracion", label: "Valoración interna", type: "number", section: "Referencia económica" },
   { key: "valor_referencia", label: "Valor de referencia", type: "number", section: "Referencia económica" },
   { key: "lat", label: "Latitud", type: "number", section: "Coordenadas" },
   { key: "lon", label: "Longitud", type: "number", section: "Coordenadas" },
 ];
 
 const CAPTACION_FIELDS = [
-  { key: "propietario", label: "Propietario", type: "text", section: "Propiedad y origen" },
   { key: "asesor", label: "Asesor", type: "text", section: "Propiedad y origen" },
   { key: "canal", label: "Canal", type: "text", section: "Propiedad y origen" },
   { key: "motivo", label: "Motivo", type: "text", section: "Propiedad y origen" },
@@ -11034,11 +11033,23 @@ const saveClienteEmpresaField = (relId, field, value) => {
 
 const renderEditableGrid = (grid, fields, data, target) => {
   if (!grid) return;
+  grid.classList.remove("editable-grid--inmueble", "editable-grid--captacion", "editable-grid--cliente");
+  grid.classList.add(`editable-grid--${target}`);
   grid.innerHTML = "";
   const tipoPersonaValue =
     target === "cliente" ? String(data?.tipo_persona || "").toLowerCase() : "";
   const isJuridica = target === "cliente" && tipoPersonaValue === "jurídica";
   const isInmueble = target === "inmueble";
+  const sectionCopy = {
+    "Prioridad comercial": "Datos que definen el objetivo y la situación comercial del inmueble.",
+    "Ubicación y Catastro": "Localización, referencia catastral y soporte de geolocalización.",
+    "Características": "Información física y descriptiva útil para comercialización y matching.",
+    "Referencia económica": "Importes de trabajo para valoración, adquisición y control interno.",
+    "Coordenadas": "Datos técnicos de geolocalización, secundarios frente a la dirección.",
+    "Propiedad y origen": "Personas implicadas y origen del expediente comercial.",
+    Pipeline: "Estado, prioridad y siguiente paso del expediente.",
+    "Notas internas": "Observaciones operativas no visibles para cliente.",
+  };
   const inputMap = {};
   const cardMap = {};
   let currentSection = "";
@@ -11050,11 +11061,20 @@ const renderEditableGrid = (grid, fields, data, target) => {
       currentSection = field.section;
       const section = document.createElement("div");
       section.className = "form-section";
-      section.textContent = field.section;
+      section.innerHTML = `
+        <strong>${field.section}</strong>
+        ${sectionCopy[field.section] ? `<span>${sectionCopy[field.section]}</span>` : ""}
+      `;
       grid.appendChild(section);
     }
     const card = document.createElement("div");
     card.className = "card editable-card";
+    if (isInmueble) {
+      if (field.section === "Ubicación y Catastro") card.classList.add("editable-card--location");
+      if (field.section === "Coordenadas") card.classList.add("editable-card--technical");
+      if (field.key === "referencia_catastral") card.classList.add("editable-card--catastro");
+      if (isMoneyColumnKey(field.key)) card.classList.add("editable-card--money");
+    }
     if (target === "cliente") {
       cardMap[field.key] = card;
     }
@@ -11180,6 +11200,42 @@ const renderEditableGrid = (grid, fields, data, target) => {
     if (status) {
       card.appendChild(status);
     }
+    if (isInmueble && field.key === "referencia_catastral") {
+      const hint = document.createElement("p");
+      hint.className = "muted editable-card-help";
+      hint.textContent = "Busca la referencia desde la dirección, genera la ficha y abre el Catastro público sin salir del expediente.";
+      card.appendChild(hint);
+      const actions = document.createElement("div");
+      actions.className = "catastro-actions";
+      const lookupBtn = document.createElement("button");
+      lookupBtn.type = "button";
+      lookupBtn.className = "secondary catastro-button";
+      lookupBtn.innerHTML = `<span class="catastro-icon" aria-hidden="true"><span>CAT</span></span><span>Buscar referencia</span>`;
+      lookupBtn.addEventListener("click", async () => {
+        await lookupInmuebleCatastro(inputMap);
+      });
+      actions.appendChild(lookupBtn);
+      const syncBtn = document.createElement("button");
+      syncBtn.type = "button";
+      syncBtn.className = "secondary catastro-button";
+      syncBtn.innerHTML = `<span class="catastro-icon" aria-hidden="true"><span>CAT</span></span><span>Ficha PDF</span>`;
+      syncBtn.addEventListener("click", async () => {
+        await syncInmuebleCatastroFicha(inputMap);
+      });
+      actions.appendChild(syncBtn);
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "secondary catastro-button";
+      btn.innerHTML = `<span class="catastro-icon" aria-hidden="true"><span>CAT</span></span><span>Abrir ficha pública</span>`;
+      btn.addEventListener("click", () => {
+        const ref = input.value.trim();
+        const address = inputMap.direccion ? inputMap.direccion.value.trim() : "";
+        const url = buildCatastroUrl(ref, address);
+        window.open(url, "_blank");
+      });
+      actions.appendChild(btn);
+      card.appendChild(actions);
+    }
     grid.appendChild(card);
   });
 
@@ -11269,7 +11325,6 @@ const renderEditableGrid = (grid, fields, data, target) => {
     const direccionInput = inputMap.direccion;
     const latInput = inputMap.lat;
     const lonInput = inputMap.lon;
-    const refInput = inputMap.referencia_catastral || inputMap.referencia;
     if (direccionInput && latInput && lonInput) {
       direccionInput.addEventListener("blur", () => {
         const address = buildInmuebleGeocodeAddress({
@@ -11281,53 +11336,6 @@ const renderEditableGrid = (grid, fields, data, target) => {
         geocodeInmuebleAddress(address, latInput, lonInput);
       });
     }
-    const catastroCard = document.createElement("div");
-    catastroCard.className = "card editable-card";
-    const brand = document.createElement("div");
-    brand.className = "catastro-brand";
-    brand.innerHTML = `
-      <span class="catastro-icon" aria-hidden="true"><span>CAT</span></span>
-      <div>
-        <strong>Catastro</strong>
-        <p class="muted">Referencia catastral y ficha pública del inmueble.</p>
-      </div>
-    `;
-    catastroCard.appendChild(brand);
-    const hint = document.createElement("p");
-    hint.className = "muted";
-    hint.textContent = "Busca la referencia desde la dirección. Después puedes generar la ficha PDF o abrir la ficha pública.";
-    catastroCard.appendChild(hint);
-    const actions = document.createElement("div");
-    actions.className = "catastro-actions";
-    const lookupBtn = document.createElement("button");
-    lookupBtn.type = "button";
-    lookupBtn.className = "secondary catastro-button";
-    lookupBtn.innerHTML = `<span class="catastro-icon" aria-hidden="true"><span>CAT</span></span><span>Buscar referencia</span>`;
-    lookupBtn.addEventListener("click", async () => {
-      await lookupInmuebleCatastro(inputMap);
-    });
-    actions.appendChild(lookupBtn);
-    const syncBtn = document.createElement("button");
-    syncBtn.type = "button";
-    syncBtn.className = "secondary catastro-button";
-    syncBtn.innerHTML = `<span class="catastro-icon" aria-hidden="true"><span>CAT</span></span><span>Ficha PDF</span>`;
-    syncBtn.addEventListener("click", async () => {
-      await syncInmuebleCatastroFicha(inputMap);
-    });
-    actions.appendChild(syncBtn);
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "secondary catastro-button";
-    btn.innerHTML = `<span class="catastro-icon" aria-hidden="true"><span>CAT</span></span><span>Abrir ficha pública</span>`;
-    btn.addEventListener("click", () => {
-      const ref = refInput ? refInput.value.trim() : "";
-      const address = direccionInput ? direccionInput.value.trim() : "";
-      const url = buildCatastroUrl(ref, address);
-      window.open(url, "_blank");
-    });
-    actions.appendChild(btn);
-    catastroCard.appendChild(actions);
-    grid.appendChild(catastroCard);
   }
 };
 
@@ -13611,10 +13619,13 @@ const syncAssignEmpresaFromServicio = (service) => {
 };
 
 const renderPropietariosEditor = (propietarios) => {
-  if (!inmuebleDatosGrid) return;
+  if (!inmuebleCaptacionGrid) return;
   const wrapper = document.createElement("div");
-  wrapper.className = "card editable-card";
-  wrapper.innerHTML = "<h3>Propietarios</h3>";
+  wrapper.className = "card editable-card editable-card--owners";
+  wrapper.innerHTML = `
+    <h3>Propietarios vinculados</h3>
+    <p class="muted editable-card-help">Gestiona aquí los clientes propietarios reales del inmueble. Esta vinculación alimenta documentos, expedientes y seguimiento.</p>
+  `;
 
   const list = document.createElement("div");
   list.className = "inline-list";
@@ -13745,7 +13756,7 @@ const renderPropietariosEditor = (propietarios) => {
   actions.appendChild(addBtn);
   actions.appendChild(quickAddBtn);
   wrapper.appendChild(actions);
-  inmuebleDatosGrid.appendChild(wrapper);
+  inmuebleCaptacionGrid.appendChild(wrapper);
 };
 
 const updateTableVisibility = () => {
@@ -18830,8 +18841,8 @@ const refreshCurrentInmuebleProfile = () => {
       inmueble.banos ? `${inmueble.banos} baños` : "",
     ].filter(Boolean).join(" · ");
     const priceLine = [
-      inmueble.precio_objetivo ? `Objetivo ${formatDisplayCell("precio_objetivo", inmueble.precio_objetivo)}` : "",
-      inmueble.precio_valoracion ? `Adquisición ${formatDisplayCell("precio_valoracion", inmueble.precio_valoracion)}` : "",
+      inmueble.precio_objetivo ? `Objetivo venta ${formatDisplayCell("precio_objetivo", inmueble.precio_objetivo)}` : "",
+      inmueble.precio_valoracion ? `Valoración interna ${formatDisplayCell("precio_valoracion", inmueble.precio_valoracion)}` : "",
     ].filter(Boolean).join(" · ");
     const ownerNames = propietarios.map((item) => item.nombre).filter(Boolean);
     const metrics = [
@@ -18884,7 +18895,7 @@ const refreshCurrentInmuebleProfile = () => {
           ${ownerExtra ? `<span class="inmueble-chip">${escapeHtml(ownerExtra)}</span>` : ""}
         </div>
         <div class="inmueble-summary-ownerline">
-          <span class="inmueble-summary-ownerlabel">Checklist</span>
+          <span class="inmueble-summary-ownerlabel">Actividad</span>
           <strong>${docs.length} docs · ${visitas.length} visitas · ${demandas.length} demandas</strong>
         </div>
       </div>
@@ -18915,7 +18926,7 @@ const refreshCurrentInmuebleProfile = () => {
       {
         title: "Comercial y seguimiento",
         items: [
-          ["Propietario", captacion.propietario],
+          ["Propietarios", ownerNames.length ? ownerNames.join(", ") : ""],
           ["Situación", captacion.situacion_comercial],
           ["Canal", captacion.canal],
           ["Honorarios", inmueble.honorarios],

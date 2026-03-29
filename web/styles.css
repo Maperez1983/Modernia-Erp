@@ -2912,8 +2912,40 @@ tr.is-selected td {
 
 .editable-card {
   display: grid;
-  gap: 10px;
+  gap: 8px;
   min-width: 0;
+  padding: 14px;
+  border: 1px solid rgba(60, 110, 113, 0.12);
+  border-radius: 16px;
+  background: linear-gradient(180deg, #fffdfa 0%, #ffffff 100%);
+  box-shadow: none;
+}
+
+.editable-card h3 {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 14px;
+}
+
+.editable-card--location,
+.editable-card--catastro {
+  background: linear-gradient(180deg, #fffdfa 0%, #f8f3ea 100%);
+}
+
+.editable-card--money {
+  background: linear-gradient(180deg, #fffdfa 0%, #f6f2e9 100%);
+}
+
+.editable-card--technical {
+  background: #fbfaf7;
+  border-style: dashed;
+}
+
+.editable-card--owners {
+  grid-column: 1 / -1;
 }
 
 .inline-input {
@@ -3254,10 +3286,22 @@ tr.is-selected td {
 
 .form-section {
   grid-column: 1 / -1;
+  display: grid;
+  gap: 2px;
+  margin-top: 8px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(60, 110, 113, 0.12);
+}
+
+.form-section strong {
   font-family: var(--font-display);
   font-size: 16px;
   color: var(--ink);
-  margin-top: 8px;
+}
+
+.form-section span {
+  font-size: 12px;
+  color: var(--muted);
 }
 
 .editable-field-hint {
@@ -3272,6 +3316,40 @@ tr.is-selected td {
   letter-spacing: 0.04em;
   text-transform: uppercase;
   vertical-align: middle;
+}
+
+.editable-card-help {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.editable-grid--inmueble,
+.editable-grid--captacion {
+  gap: 12px;
+}
+
+.editable-grid--inmueble {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.editable-grid--inmueble .form-section,
+.editable-grid--captacion .form-section {
+  margin-top: 4px;
+}
+
+.editable-grid--captacion {
+  grid-template-columns: 1fr;
+}
+
+.editable-grid--captacion .editable-card:not(.editable-card--owners) {
+  background: #fff;
+}
+
+@media (max-width: 900px) {
+  .editable-grid--inmueble {
+    grid-template-columns: 1fr;
+  }
 }
 
 .agenda-controls {
