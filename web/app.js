@@ -1231,6 +1231,8 @@ const state = {
   workspaceRrhhScopeAll: false,
   workspaceRrhhShowInactive: false,
   workspaceRrhhEmployeeSearch: "",
+  workspaceRrhhUserSearch: "",
+  workspaceRrhhSelectedUserId: "",
   workspaceRrhhProfileRow: null,
   workspaceRrhhTimeSummary: null,
   workspaceRrhhTimeRows: [],
@@ -5793,7 +5795,7 @@ const renderWorkspaceCopilotHub = () => {
 
 const normalizeWorkspaceRrhhTab = (value = "") => {
   const key = String(value || "").trim().toLowerCase();
-  if (["plantilla", "horario", "ausencias", "gastos", "docs"].includes(key)) return key;
+  if (["plantilla", "horario", "ausencias", "gastos", "docs", "usuarios"].includes(key)) return key;
   return "plantilla";
 };
 
@@ -5863,7 +5865,8 @@ const renderWorkspaceRrhhHub = () => {
   const selectedPersonaId = String(state.workspaceRrhhSelectedPersonaId || "").trim();
   const selectedEmployee = employees.find((row) => String(row.id || "") === selectedPersonaId) || null;
   const companyLabel = getWorkspaceCompanyContextLabel();
-  const tab = normalizeWorkspaceRrhhTab(state.workspaceRrhhTab);
+  let tab = normalizeWorkspaceRrhhTab(state.workspaceRrhhTab);
+  if (!manager && tab === "usuarios") tab = "plantilla";
   const scopeAll = Boolean(state.workspaceRrhhScopeAll && manager);
 
   const renderEmployeeList = () => {
@@ -6002,6 +6005,7 @@ const renderWorkspaceRrhhHub = () => {
         { key: "ausencias", label: "Ausencias" },
         { key: "gastos", label: "Gastos" },
         { key: "docs", label: "Documentos" },
+        ...(manager ? [{ key: "usuarios", label: "Usuarios" }] : []),
       ]
         .map(
           (item) => `
@@ -6013,6 +6017,163 @@ const renderWorkspaceRrhhHub = () => {
         .join("")}
     </div>
   `;
+
+  const generateTempPassword = (length = 12) => {
+    const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
+    const extra = "!@#$%";
+    const chars = alphabet + extra;
+    let out = "";
+    for (let i = 0; i < length; i++) {
+      out += chars[Math.floor(Math.random() * chars.length)];
+    }
+    return out;
+  };
+
+  const renderUsuarios = () => {
+    if (!manager) {
+      return `
+        <div class="workspace-rrhh-panel-card">
+          <div class="section-head">
+            <div>
+              <h4>Usuarios</h4>
+              <p class="muted">Visible solo para administradores.</p>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+    const rows = Array.isArray(state.usersList) ? state.usersList : [];
+    const query = normalizeSimple(String(state.workspaceRrhhUserSearch || ""));
+    const filtered = rows
+      .filter((row) => {
+        if (!query) return true;
+        const haystack = normalizeSimple([row.nombre || "", row.apellido || "", row.usuario || "", row.email || "", row.rol || "", row.servicio || ""].join(" "));
+        return haystack.includes(query);
+      })
+      .sort((a, b) => {
+        const nameA = `${a.nombre || ""} ${a.apellido || ""}`.trim() || a.usuario || "";
+        const nameB = `${b.nombre || ""} ${b.apellido || ""}`.trim() || b.usuario || "";
+        return nameA.localeCompare(nameB, "es", { sensitivity: "base" });
+      });
+    const selectedId = String(state.workspaceRrhhSelectedUserId || "").trim();
+    const selected = rows.find((row) => String(row.id || "") === selectedId) || null;
+    const servicesSelected = new Set(parseAdminServices(selected?.servicio || ""));
+    const roleOptions = (typeof ADMIN_ROLE_OPTIONS !== "undefined" && Array.isArray(ADMIN_ROLE_OPTIONS))
+      ? ADMIN_ROLE_OPTIONS
+      : ["Lectura", "Gestoría", "Seguros", "Inmobiliaria", "Financiaciones", "Administrador"];
+    const statusText = selected ? "Edita usuario y permisos." : "Crea un usuario del sistema (login) o selecciona uno para editar.";
+    return `
+      <div class="workspace-rrhh-panel-card">
+        <div class="section-head">
+          <div>
+            <h4>Usuarios del sistema</h4>
+            <p class="muted">${escapeHtml(statusText)}</p>
+          </div>
+        </div>
+        <div class="workspace-rrhh-user-layout">
+          <div>
+            <form id="workspaceRrhhUserForm" class="form-grid">
+              <input type="hidden" name="id" value="${escapeHtml(selected?.id || "")}" />
+              <label>
+                Nombre
+                <input name="nombre" value="${escapeHtml(selected?.nombre || "")}" required />
+              </label>
+              <label>
+                Apellido
+                <input name="apellido" value="${escapeHtml(selected?.apellido || "")}" required />
+              </label>
+              <label>
+                Usuario
+                <input name="usuario" value="${escapeHtml(selected?.usuario || "")}" required />
+              </label>
+              <label>
+                Email
+                <input name="email" type="email" value="${escapeHtml(selected?.email || "")}" required />
+              </label>
+              <label class="span-2">
+                Servicios permitidos
+                <div class="admin-service-multi workspace-rrhh-user-services">
+                  ${(typeof ADMIN_SERVICE_OPTIONS !== "undefined" ? ADMIN_SERVICE_OPTIONS : SERVICE_OPTIONS)
+                    .map((label) => {
+                      const checked = servicesSelected.has(label);
+                      return `
+                        <label class="admin-service-option">
+                          <input type="checkbox" data-rrhh-user-service value="${escapeHtml(label)}" ${checked ? "checked" : ""} />
+                          <span>${escapeHtml(label)}</span>
+                        </label>
+                      `;
+                    })
+                    .join("")}
+                </div>
+              </label>
+              <label>
+                Rol
+                <select name="rol">
+                  ${roleOptions.map((item) => `<option ${String(selected?.rol || "Lectura") === String(item) ? "selected" : ""}>${escapeHtml(item)}</option>`).join("")}
+                </select>
+              </label>
+              <label>
+                Estado
+                <select name="activo">
+                  <option value="1" ${Number(selected?.activo ?? 1) === 1 ? "selected" : ""}>Activo</option>
+                  <option value="0" ${Number(selected?.activo ?? 1) === 0 ? "selected" : ""}>Inactivo</option>
+                </select>
+              </label>
+              <label class="inline-check span-2">
+                <input type="checkbox" name="registro_horario_activo" value="1" ${Number(selected?.registro_horario_activo || 0) === 1 ? "checked" : ""} />
+                Activar registro horario (aparecerá en plantilla)
+              </label>
+              <label class="span-2">
+                Contraseña ${selected ? "(opcional: para cambiar)" : "(opcional)"}
+                <div class="input-with-icon">
+                  <input name="password" id="workspaceRrhhUserPassword" type="password" placeholder="${selected ? "Nueva contraseña" : "Contraseña inicial"}" />
+                  <button type="button" class="icon-btn" id="workspaceRrhhUserPasswordToggle" aria-label="Mostrar contraseña">👁</button>
+                </div>
+                <div class="workspace-rrhh-user-pass-actions">
+                  <button type="button" class="secondary ghost button-inline" data-rrhh-user-pass-generate>Generar</button>
+                </div>
+              </label>
+              <div class="form-actions span-2">
+                <button type="submit">${selected ? "Guardar cambios" : "Crear usuario"}</button>
+                <button type="button" class="secondary ghost" data-rrhh-user-reset>Nuevo</button>
+                ${selected ? `<button type="button" class="secondary" data-rrhh-user-invite>Enviar invitación</button>` : ""}
+                ${selected ? `<button type="button" class="secondary danger" data-rrhh-user-delete>Eliminar</button>` : ""}
+                <span id="workspaceRrhhUserStatus" class="muted"></span>
+              </div>
+            </form>
+          </div>
+          <div>
+            <label>
+              Buscar
+              <input id="workspaceRrhhUserSearch" value="${escapeHtml(state.workspaceRrhhUserSearch || "")}" placeholder="Nombre, usuario, email, rol..." />
+            </label>
+            <div class="workspace-rrhh-list">
+              ${filtered.length
+                ? filtered
+                    .map((row) => {
+                      const active = String(row.id || "") === selectedId;
+                      const name = `${row.nombre || ""} ${row.apellido || ""}`.trim() || row.usuario || "Usuario";
+                      return `
+                        <button type="button" class="workspace-rrhh-row workspace-rrhh-user-row ${active ? "is-active" : ""}" data-rrhh-user-pick="${escapeHtml(String(row.id || ""))}">
+                          <div>
+                            <strong>${escapeHtml(name)}</strong>
+                            <div class="muted">${escapeHtml(row.usuario || "-")} · ${escapeHtml(row.rol || "Sin rol")}</div>
+                            <div class="muted">${escapeHtml(row.servicio || "Sin servicios")}${Number(row.registro_horario_activo || 0) === 1 ? " · Registro horario" : ""}</div>
+                          </div>
+                          <div class="workspace-rrhh-user-row-meta">
+                            <span class="rrhh-pill">${Number(row.activo || 0) === 1 ? "Activo" : "Inactivo"}</span>
+                          </div>
+                        </button>
+                      `;
+                    })
+                    .join("")
+                : "<p class='muted'>Sin usuarios con ese filtro.</p>"}
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  };
 
   const renderHorario = () => {
     const entries = timeRows || [];
@@ -6377,6 +6538,7 @@ const renderWorkspaceRrhhHub = () => {
     : tab === "horario" ? renderHorario()
     : tab === "ausencias" ? renderAusencias()
     : tab === "gastos" ? renderGastos()
+    : tab === "usuarios" ? renderUsuarios()
     : renderDocs();
 
   workspaceRrhhHub.innerHTML = `
@@ -6537,6 +6699,163 @@ const renderWorkspaceRrhhHub = () => {
       }
     });
   });
+
+  const rrhhUserSearch = workspaceRrhhHub.querySelector("#workspaceRrhhUserSearch");
+  if (rrhhUserSearch) {
+    rrhhUserSearch.addEventListener("input", () => {
+      state.workspaceRrhhUserSearch = String(rrhhUserSearch.value || "");
+      renderWorkspaceRrhhHub();
+    });
+  }
+  workspaceRrhhHub.querySelectorAll("[data-rrhh-user-pick]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.workspaceRrhhSelectedUserId = String(button.dataset.rrhhUserPick || "").trim();
+      renderWorkspaceRrhhHub();
+    });
+  });
+  const userReset = workspaceRrhhHub.querySelector("[data-rrhh-user-reset]");
+  if (userReset) {
+    userReset.addEventListener("click", () => {
+      state.workspaceRrhhSelectedUserId = "";
+      renderWorkspaceRrhhHub();
+      const form = document.getElementById("workspaceRrhhUserForm");
+      if (form) form.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  }
+  const userPassToggle = workspaceRrhhHub.querySelector("#workspaceRrhhUserPasswordToggle");
+  const userPassInput = workspaceRrhhHub.querySelector("#workspaceRrhhUserPassword");
+  if (userPassToggle && userPassInput) {
+    userPassToggle.addEventListener("click", () => {
+      const isHidden = userPassInput.type === "password";
+      userPassInput.type = isHidden ? "text" : "password";
+      userPassToggle.textContent = isHidden ? "🙈" : "👁";
+      userPassToggle.setAttribute("aria-label", isHidden ? "Ocultar contraseña" : "Mostrar contraseña");
+    });
+  }
+  const passGenerate = workspaceRrhhHub.querySelector("[data-rrhh-user-pass-generate]");
+  if (passGenerate && userPassInput) {
+    passGenerate.addEventListener("click", () => {
+      userPassInput.value = generateTempPassword(12);
+      userPassInput.type = "text";
+      if (userPassToggle) userPassToggle.textContent = "🙈";
+    });
+  }
+  const userForm = document.getElementById("workspaceRrhhUserForm");
+  if (userForm) {
+    userForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const status = document.getElementById("workspaceRrhhUserStatus");
+      if (status) status.textContent = "Guardando...";
+      const form = new FormData(userForm);
+      const payload = Object.fromEntries(form.entries());
+      const userId = String(payload.id || "").trim();
+      const services = Array.from(userForm.querySelectorAll("[data-rrhh-user-service]"))
+        .filter((el) => el && el.checked)
+        .map((el) => String(el.value || "").trim())
+        .filter(Boolean);
+      payload.servicio = joinAdminServices(services);
+      payload.registro_horario_activo = userForm.querySelector('[name="registro_horario_activo"]')?.checked ? 1 : 0;
+      if (!payload.servicio) {
+        if (status) status.textContent = "Selecciona al menos un servicio.";
+        return;
+      }
+      if (!String(payload.password || "").trim()) delete payload.password;
+      try {
+        const path = userId ? "/api/usuarios_update" : "/api/usuarios";
+        const res = await fetch(path, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }).then((r) => r.json());
+        if (res?.error) throw new Error(res.error);
+        if (status) status.textContent = userId ? "Usuario actualizado." : "Usuario creado.";
+        await loadUsuarios();
+        // Sincroniza el registro horario/persona dentro del workspace para que aparezca en plantilla.
+        let finalId = userId || res?.id || "";
+        if (!finalId) {
+          const normalizedUsuario = normalizeSimple(String(payload.usuario || ""));
+          const normalizedEmail = normalizeSimple(String(payload.email || ""));
+          const match = (state.usersList || []).find((row) => {
+            if (normalizedUsuario && normalizeSimple(String(row.usuario || "")) === normalizedUsuario) return true;
+            if (normalizedEmail && normalizeSimple(String(row.email || "")) === normalizedEmail) return true;
+            return false;
+          });
+          finalId = match?.id || "";
+        }
+        if (finalId && state.currentWorkspaceId) {
+          await fetch("/api/workspace_registro_usuario_toggle", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ workspace_id: state.currentWorkspaceId, usuario_id: finalId, enabled: payload.registro_horario_activo ? 1 : 0 }),
+          }).then((r) => r.json()).catch(() => ({}));
+        }
+        await loadWorkspaceDetail(state.currentWorkspaceId);
+        state.workspaceRrhhSelectedUserId = finalId;
+        renderWorkspaceRrhhHub();
+      } catch (err) {
+        if (status) status.textContent = err.message || "No se pudo guardar.";
+      }
+    });
+  }
+  const userInvite = workspaceRrhhHub.querySelector("[data-rrhh-user-invite]");
+  if (userInvite) {
+    userInvite.addEventListener("click", async () => {
+      const status = document.getElementById("workspaceRrhhUserStatus");
+      const userId = String(state.workspaceRrhhSelectedUserId || "").trim();
+      if (!userId) return;
+      if (status) status.textContent = "Enviando invitación...";
+      userInvite.disabled = true;
+      try {
+        const data = await fetch("/api/usuarios_invitar", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify({ id: userId }),
+        }).then((res) => res.json());
+        if (data?.error) throw new Error(data.error);
+        if (data?.sent) {
+          if (status) status.textContent = "Invitación enviada.";
+        } else {
+          if (data?.invite_link) {
+            try { await navigator.clipboard?.writeText(data.invite_link); } catch {}
+          }
+          if (status) status.textContent = "SMTP no configurado. Enlace copiado al portapapeles.";
+        }
+      } catch (error) {
+        if (status) status.textContent = error.message || "No se pudo enviar.";
+      } finally {
+        userInvite.disabled = false;
+      }
+    });
+  }
+  const userDelete = workspaceRrhhHub.querySelector("[data-rrhh-user-delete]");
+  if (userDelete) {
+    userDelete.addEventListener("click", async () => {
+      const status = document.getElementById("workspaceRrhhUserStatus");
+      const userId = String(state.workspaceRrhhSelectedUserId || "").trim();
+      if (!userId) return;
+      if (!window.confirm("¿Eliminar este usuario del sistema?")) return;
+      if (status) status.textContent = "Eliminando...";
+      userDelete.disabled = true;
+      try {
+        const data = await fetch("/api/usuarios_delete", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: userId }),
+        }).then((res) => res.json());
+        if (data?.error) throw new Error(data.error);
+        state.workspaceRrhhSelectedUserId = "";
+        await loadUsuarios();
+        await loadWorkspaceDetail(state.currentWorkspaceId);
+        renderWorkspaceRrhhHub();
+        if (status) status.textContent = "Usuario eliminado.";
+      } catch (error) {
+        if (status) status.textContent = error.message || "No se pudo eliminar.";
+      } finally {
+        userDelete.disabled = false;
+      }
+    });
+  }
 
   const timeToggle = workspaceRrhhHub.querySelector("[data-rrhh-time-toggle]");
   if (timeToggle) {
@@ -19816,9 +20135,15 @@ const renderTableInto = (data, container, infoEl, label) => {
       const openLink = document.createElement("a");
       openLink.className = "ghost";
       openLink.textContent = "Ficha";
-      openLink.href = `?crm=inmo&captacion=${encodeURIComponent(String(recordId || "").trim())}`;
-      // Delegamos la navegación al interceptor de links para que no dependa de un reload completo.
+      openLink.href = `/?crm=inmo&captacion=${encodeURIComponent(String(recordId || "").trim())}`;
+      // Delegamos la navegación al interceptor de links, pero además prevenimos el reload en click normal.
       openLink.dataset.open = "captacion";
+      openLink.addEventListener("click", (event) => {
+        if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        event.preventDefault();
+        event.stopPropagation();
+        ensureCrmOpen(() => openInmuebleFromCaptacion(String(recordId || "").trim(), "captaciones"));
+      });
       actions.appendChild(openLink);
       [
         ["Noticia", "noticia", "ghost"],
@@ -19848,8 +20173,7 @@ const renderTableInto = (data, container, infoEl, label) => {
         if (event.target && event.target.closest("button, input, select, a")) {
           return;
         }
-        // Fallback robusto: navegamos con un deep-link y dejamos que el router abra la ficha.
-        window.location.assign(`?crm=inmo&captacion=${encodeURIComponent(String(recordId || "").trim())}`);
+        ensureCrmOpen(() => openInmuebleFromCaptacion(String(recordId || "").trim(), "captaciones"));
       });
     }
     if (label === "Seguros" && currentTab === "seguros-crm" && state.segurosTab === "bdt" && String(recordId || "").trim()) {
@@ -20388,7 +20712,8 @@ const renderCrmKanban = (data) => {
         // Importante: no hacemos la tarjeta "draggable" completa porque algunos navegadores
         // se comen el click (y el usuario no puede abrir la ficha). El drag se hace con un handle.
         const captacionId = String(rowMap?.id || rowId || "").trim();
-        const deepLink = `?crm=inmo&captacion=${encodeURIComponent(captacionId)}`;
+        // Deep-link para fallback, pero el click abre dentro de la SPA.
+        const deepLink = `/?crm=inmo&captacion=${encodeURIComponent(captacionId)}`;
         card.innerHTML = `
           <div class="crm-kanban-handle" draggable="true" title="Arrastra para cambiar de etapa" aria-label="Arrastrar"></div>
           <div><strong>${row[propietarioIndex] || "Propietario"}</strong></div>
@@ -20403,7 +20728,17 @@ const renderCrmKanban = (data) => {
             event.dataTransfer.effectAllowed = "move";
           });
         }
-        // Sin handler: dejamos el link navegar. Es el camino mas robusto (no depende de async ni de gestures).
+        // Click en tarjeta/link: abrir la ficha sin reload (más robusto en Render).
+        const openFn = (event) => {
+          if (event?.target?.closest?.(".crm-kanban-handle")) return;
+          if (event?.metaKey || event?.ctrlKey || event?.shiftKey || event?.altKey) return;
+          event?.preventDefault?.();
+          event?.stopPropagation?.();
+          ensureCrmOpen(() => openInmuebleFromCaptacion(captacionId, "captaciones"));
+        };
+        card.addEventListener("click", openFn);
+        const link = card.querySelector('a[data-open="captacion"]');
+        if (link) link.addEventListener("click", openFn);
         column.appendChild(card);
       });
       container.appendChild(column);
@@ -20448,9 +20783,9 @@ const renderCrmMiniCards = (container, items = []) => {
       if (item.captacionId) attrs.push(`data-captacion-id="${escapeHtml(item.captacionId)}"`);
       if (item.crmView) attrs.push(`data-crm-view="${escapeHtml(item.crmView)}"`);
       const href = item.inmuebleId
-        ? `?crm=inmo&inmueble=${encodeURIComponent(item.inmuebleId)}`
+        ? `/?crm=inmo&inmueble=${encodeURIComponent(item.inmuebleId)}`
         : item.captacionId
-          ? `?crm=inmo&captacion=${encodeURIComponent(item.captacionId)}`
+          ? `/?crm=inmo&captacion=${encodeURIComponent(item.captacionId)}`
           : "";
       const tag = href ? "a" : "div";
       const hrefAttr = href ? ` href="${escapeHtml(href)}"` : "";
@@ -20469,7 +20804,12 @@ const renderCrmMiniCards = (container, items = []) => {
     })
     .join("");
   container.querySelectorAll(".crm-mini-card[data-inmueble-id], .crm-mini-card[data-captacion-id]").forEach((card) => {
-    card.addEventListener("click", async () => {
+    card.addEventListener("click", async (event) => {
+      // Evita depender de reload completos (en algunos entornos terminaba en el panel general).
+      // Permitimos abrir en nueva pestaña con Ctrl/⌘ o modificadores.
+      if (!(event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)) {
+        event.preventDefault?.();
+      }
       const inmuebleId = String(card.dataset.inmuebleId || "").trim();
       const captacionId = String(card.dataset.captacionId || "").trim();
       if (inmuebleId) {
@@ -20487,7 +20827,10 @@ const renderCrmMiniCards = (container, items = []) => {
     });
   });
   container.querySelectorAll(".crm-mini-card[data-crm-view]").forEach((card) => {
-    card.addEventListener("click", () => {
+    card.addEventListener("click", (event) => {
+      if (!(event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)) {
+        event.preventDefault?.();
+      }
       const view = card.dataset.crmView || "";
       if (view) setCrmWorkspaceView(view);
     });
@@ -20507,9 +20850,9 @@ const renderCrmActionList = (container, items = [], emptyMessage = "Sin elemento
       if (item.captacionId) attrs.push(`data-captacion-id="${escapeHtml(item.captacionId)}"`);
       if (item.crmView) attrs.push(`data-crm-view="${escapeHtml(item.crmView)}"`);
       const href = item.inmuebleId
-        ? `?crm=inmo&inmueble=${encodeURIComponent(item.inmuebleId)}`
+        ? `/?crm=inmo&inmueble=${encodeURIComponent(item.inmuebleId)}`
         : item.captacionId
-          ? `?crm=inmo&captacion=${encodeURIComponent(item.captacionId)}`
+          ? `/?crm=inmo&captacion=${encodeURIComponent(item.captacionId)}`
           : "";
       const tag = href ? "a" : item.crmView ? "button" : "div";
       const typeAttr = tag === "button" ? ' type="button"' : "";
@@ -20524,7 +20867,10 @@ const renderCrmActionList = (container, items = [], emptyMessage = "Sin elemento
     })
     .join("");
   container.querySelectorAll("[data-inmueble-id], [data-captacion-id]").forEach((btn) => {
-    btn.addEventListener("click", async () => {
+    btn.addEventListener("click", async (event) => {
+      if (!(event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)) {
+        event.preventDefault?.();
+      }
       const inmuebleId = String(btn.dataset.inmuebleId || "").trim();
       const captacionId = String(btn.dataset.captacionId || "").trim();
       if (inmuebleId) {
@@ -20542,7 +20888,10 @@ const renderCrmActionList = (container, items = [], emptyMessage = "Sin elemento
     });
   });
   container.querySelectorAll("[data-crm-view]").forEach((btn) => {
-    btn.addEventListener("click", () => {
+    btn.addEventListener("click", (event) => {
+      if (!(event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)) {
+        event.preventDefault?.();
+      }
       const view = btn.dataset.crmView || "";
       if (view) setCrmWorkspaceView(view);
     });
@@ -22011,7 +22360,9 @@ const initCrmInmoLinkInterceptor = () => {
       if (openType !== "captacion" && openType !== "inmueble") return;
 
       // Permite abrir en nueva pestaña/ventana con modificadores.
-      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      // En algunos navegadores/eventos `button` puede venir undefined.
+      if (typeof event.button === "number" && event.button !== 0) return;
 
       const href = String(link.getAttribute("href") || "").trim();
       if (!href) return;

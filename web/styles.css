@@ -1778,6 +1778,52 @@ body.crm-fin #companySummary {
   font-size: 11px;
 }
 
+.workspace-rrhh-user-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.workspace-rrhh-user-pass-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.workspace-rrhh-user-row {
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+}
+
+.workspace-rrhh-user-row:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 24px rgba(43, 43, 43, 0.08);
+  border-color: rgba(60, 110, 113, 0.22);
+}
+
+.workspace-rrhh-user-row.is-active {
+  border-color: rgba(60, 110, 113, 0.34);
+  background: linear-gradient(135deg, rgba(246, 251, 248, 0.98), rgba(236, 244, 239, 0.95));
+}
+
+.workspace-rrhh-user-row-meta {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+}
+
+.workspace-rrhh-user-services {
+  max-height: 220px;
+  overflow: auto;
+  padding: 10px;
+  border-radius: 14px;
+  border: 1px solid rgba(43, 43, 43, 0.08);
+  background: rgba(253, 251, 247, 0.6);
+}
+
 .workspace-rrhh-tabs {
   display: flex;
   flex-wrap: wrap;
@@ -1860,6 +1906,9 @@ body.crm-fin #companySummary {
     justify-content: flex-start;
   }
   .workspace-rrhh-layout {
+    grid-template-columns: 1fr;
+  }
+  .workspace-rrhh-user-layout {
     grid-template-columns: 1fr;
   }
 }
