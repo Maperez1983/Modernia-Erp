@@ -19725,10 +19725,10 @@ const openInmuebleDetail = (id, originView = "") => {
       }
       if (inmuebleDatosGrid) {
         renderEditableGrid(inmuebleDatosGrid, INMUEBLE_FIELDS, inmueble, "inmueble");
-        renderPropietariosEditor(data.propietarios || []);
       }
       if (inmuebleCaptacionGrid) {
         renderEditableGrid(inmuebleCaptacionGrid, CAPTACION_FIELDS, captacion, "captacion");
+        renderPropietariosEditor(data.propietarios || []);
       }
       if (inmuebleDemandaCliente) {
         populateClientesSelect(inmuebleDemandaCliente);
