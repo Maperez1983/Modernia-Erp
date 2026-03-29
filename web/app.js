@@ -1177,6 +1177,11 @@ const state = {
   clienteDocsTab: "seguros",
   segurosBdtCache: null,
   hipotecaBdtCache: null,
+  crmResumenRange: "12m",
+  crmResumenDesde: "",
+  crmResumenHasta: "",
+  crmResumenResponsable: "",
+  crmResumenOrigen: "",
   segurosRamosSource: null,
   segurosComisionesRows: null,
   segurosCrmData: null,
@@ -2077,6 +2082,17 @@ const crmResumenHoy = document.getElementById("crmResumenHoy");
 const crmResumenAlertas = document.getElementById("crmResumenAlertas");
 const crmResumenActividad = document.getElementById("crmResumenActividad");
 const crmResumenInmuebles = document.getElementById("crmResumenInmuebles");
+const crmResumenDireccionKpis = document.getElementById("crmResumenDireccionKpis");
+const crmResumenTopDesviacion = document.getElementById("crmResumenTopDesviacion");
+const crmResumenTopPlazo = document.getElementById("crmResumenTopPlazo");
+const crmResumenRange = document.getElementById("crmResumenRange");
+const crmResumenDesde = document.getElementById("crmResumenDesde");
+const crmResumenHasta = document.getElementById("crmResumenHasta");
+const crmResumenDesdeWrap = document.getElementById("crmResumenDesdeWrap");
+const crmResumenHastaWrap = document.getElementById("crmResumenHastaWrap");
+const crmResumenResponsable = document.getElementById("crmResumenResponsable");
+const crmResumenOrigen = document.getElementById("crmResumenOrigen");
+const crmResumenReset = document.getElementById("crmResumenReset");
 const inmoLegalCopilotForm = document.getElementById("inmoLegalCopilotForm");
 const inmoLegalArea = document.getElementById("inmoLegalArea");
 const inmoLegalTopic = document.getElementById("inmoLegalTopic");
@@ -2283,7 +2299,7 @@ let currentTab = "operativa";
 let lastDashboardData = null;
 
 const TABLE_LABELS = {
-  movimientos: "BDT (Ingresos/Gastos)",
+  movimientos: "Movimientos (Ingresos/Gastos)",
   seguros: "Seguros",
   gestoria: "Gestoría",
   captaciones: "Pipeline",
@@ -15668,10 +15684,10 @@ const updateEstudioAltaTabs = () => {
   if (!altaSection.dataset.estudioActive) {
     altaSection.dataset.estudioActive = "compraventa";
   }
-  const active = altaSection.dataset.estudioActive;
-  if (estudioAltaBdt) {
-    estudioAltaBdt.classList.toggle("hidden", active !== "bdt");
+  if (altaSection.dataset.estudioActive === "bdt") {
+    altaSection.dataset.estudioActive = "compraventa";
   }
+  const active = altaSection.dataset.estudioActive;
   if (estudioAltaCaptacion) {
     estudioAltaCaptacion.classList.toggle("hidden", active !== "captacion");
   }
@@ -20282,6 +20298,167 @@ const renderCrmActionList = (container, items = [], emptyMessage = "Sin elemento
   });
 };
 
+let crmResumenFiltersInitDone = false;
+
+const _toDateInput = (dt) => {
+  if (!(dt instanceof Date) || Number.isNaN(dt.getTime())) return "";
+  return dt.toISOString().slice(0, 10);
+};
+
+const _startOfMonth = (dt) => new Date(dt.getFullYear(), dt.getMonth(), 1);
+const _startOfYear = (dt) => new Date(dt.getFullYear(), 0, 1);
+
+const computeCrmResumenRange = (rangeKey = "12m") => {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const key = String(rangeKey || "12m").trim().toLowerCase();
+  if (key === "all") {
+    return { desde: "", hasta: "" };
+  }
+  if (key === "mtd") {
+    return { desde: _toDateInput(_startOfMonth(today)), hasta: _toDateInput(today) };
+  }
+  if (key === "ytd") {
+    return { desde: _toDateInput(_startOfYear(today)), hasta: _toDateInput(today) };
+  }
+  if (key === "30d") {
+    const desde = new Date(today);
+    desde.setDate(desde.getDate() - 30);
+    return { desde: _toDateInput(desde), hasta: _toDateInput(today) };
+  }
+  if (key === "12m") {
+    const desde = new Date(today);
+    desde.setFullYear(desde.getFullYear() - 1);
+    return { desde: _toDateInput(desde), hasta: _toDateInput(today) };
+  }
+  return { desde: "", hasta: "" };
+};
+
+const getCrmResumenWindowTs = () => {
+  const rangeKey = String(state.crmResumenRange || "12m").trim().toLowerCase();
+  let desde = String(state.crmResumenDesde || "").trim();
+  let hasta = String(state.crmResumenHasta || "").trim();
+  if (rangeKey !== "custom") {
+    const computed = computeCrmResumenRange(rangeKey);
+    desde = computed.desde;
+    hasta = computed.hasta;
+  }
+  const fromTs = desde ? parseCrmDateTime(desde, "00:00") : 0;
+  const toTs = hasta ? (parseCrmDateTime(hasta, "23:59") || 0) : Number.MAX_SAFE_INTEGER;
+  return { fromTs, toTs };
+};
+
+const getCrmVentaOperacionTs = (row = {}) => {
+  const fecha = String(row.fecha_operacion || row.fecha_escritura || row.fecha_contrato || row.fecha_propuesta || row.fecha_encargo || "").trim();
+  if (!fecha) return 0;
+  return parseCrmDateTime(fecha, "00:00") || 0;
+};
+
+const computeVentaDeviation = (row = {}) => {
+  const salida = Number(row.precio_encargo || 0) || 0;
+  const venta = Number(row.precio_venta || row.precio_escritura || 0) || 0;
+  const legacyEur = Number(row.desviacion_euros || 0) || 0;
+  const legacyPct = Number(row.desviacion_pct || 0) || 0;
+  if (salida > 0 && venta > 0) {
+    const eur = venta - salida;
+    const pct = (eur / salida) * 100;
+    return { eur, pct, salida, venta, ok: true };
+  }
+  if (legacyEur || legacyPct) {
+    return { eur: legacyEur, pct: legacyPct, salida: salida || 0, venta: venta || 0, ok: true };
+  }
+  return { eur: 0, pct: 0, salida: salida || 0, venta: venta || 0, ok: false };
+};
+
+const computeVentaDias = (row = {}) => {
+  const raw = Number(row.dias_hasta_venta || 0) || 0;
+  if (raw > 0) return raw;
+  const start = String(row.fecha_encargo || "").trim();
+  const end = String(row.fecha_escritura || row.fecha_contrato || "").trim();
+  if (!start || !end) return 0;
+  const startTs = parseCrmDateTime(start, "00:00");
+  const endTs = parseCrmDateTime(end, "00:00");
+  if (!startTs || !endTs) return 0;
+  const diffDays = Math.round((endTs - startTs) / (1000 * 60 * 60 * 24));
+  return diffDays > 0 ? diffDays : 0;
+};
+
+const computeVentaVisitas = (row = {}, visitsByInmueble = new Map()) => {
+  const direct = Number(row.num_visitas || 0) || 0;
+  if (direct > 0) return direct;
+  const inmuebleId = String(row.inmueble_id || "").trim();
+  if (!inmuebleId) return 0;
+  return Number(visitsByInmueble.get(inmuebleId) || 0) || 0;
+};
+
+const hydrateCrmResumenFilters = () => {
+  if (!crmResumenRange || !crmResumenDireccionKpis) return;
+  if (crmResumenFiltersInitDone) return;
+  crmResumenFiltersInitDone = true;
+
+  const syncUi = () => {
+    if (crmResumenRange) crmResumenRange.value = String(state.crmResumenRange || "12m");
+    const isCustom = String(state.crmResumenRange || "").trim().toLowerCase() === "custom";
+    if (crmResumenDesdeWrap) crmResumenDesdeWrap.classList.toggle("hidden", !isCustom);
+    if (crmResumenHastaWrap) crmResumenHastaWrap.classList.toggle("hidden", !isCustom);
+    if (crmResumenDesde) crmResumenDesde.value = String(state.crmResumenDesde || "");
+    if (crmResumenHasta) crmResumenHasta.value = String(state.crmResumenHasta || "");
+    if (crmResumenResponsable) crmResumenResponsable.value = String(state.crmResumenResponsable || "");
+    if (crmResumenOrigen) crmResumenOrigen.value = String(state.crmResumenOrigen || "");
+  };
+
+  const ensureDates = () => {
+    const key = String(state.crmResumenRange || "12m").trim().toLowerCase();
+    if (key !== "custom") {
+      const computed = computeCrmResumenRange(key);
+      state.crmResumenDesde = computed.desde;
+      state.crmResumenHasta = computed.hasta;
+      return;
+    }
+    if (!String(state.crmResumenDesde || "").trim() || !String(state.crmResumenHasta || "").trim()) {
+      const fallback = computeCrmResumenRange("30d");
+      state.crmResumenDesde = state.crmResumenDesde || fallback.desde;
+      state.crmResumenHasta = state.crmResumenHasta || fallback.hasta;
+    }
+  };
+
+  ensureDates();
+  syncUi();
+
+  crmResumenRange.addEventListener("change", () => {
+    state.crmResumenRange = String(crmResumenRange.value || "12m");
+    ensureDates();
+    syncUi();
+    renderCrmResumenDashboard();
+  });
+  crmResumenDesde?.addEventListener("change", () => {
+    state.crmResumenDesde = String(crmResumenDesde.value || "");
+    renderCrmResumenDashboard();
+  });
+  crmResumenHasta?.addEventListener("change", () => {
+    state.crmResumenHasta = String(crmResumenHasta.value || "");
+    renderCrmResumenDashboard();
+  });
+  crmResumenResponsable?.addEventListener("change", () => {
+    state.crmResumenResponsable = String(crmResumenResponsable.value || "");
+    renderCrmResumenDashboard();
+  });
+  crmResumenOrigen?.addEventListener("change", () => {
+    state.crmResumenOrigen = String(crmResumenOrigen.value || "");
+    renderCrmResumenDashboard();
+  });
+  crmResumenReset?.addEventListener("click", () => {
+    state.crmResumenRange = "12m";
+    const computed = computeCrmResumenRange("12m");
+    state.crmResumenDesde = computed.desde;
+    state.crmResumenHasta = computed.hasta;
+    state.crmResumenResponsable = "";
+    state.crmResumenOrigen = "";
+    syncUi();
+    renderCrmResumenDashboard();
+  });
+};
+
 const renderCrmResumenDashboard = () => {
   const captaciones = Array.isArray(cachedCrmCaptaciones) ? cachedCrmCaptaciones : [];
   const inmuebles = Array.isArray(cachedCrmInmuebles) ? cachedCrmInmuebles : [];
@@ -20289,6 +20466,145 @@ const renderCrmResumenDashboard = () => {
   const visitas = Array.isArray(cachedCrmVisitas) ? cachedCrmVisitas : [];
   const demandas = Array.isArray(cachedCrmDemandas) ? cachedCrmDemandas : [];
   const alquileres = Array.isArray(cachedCrmAlquileres) ? cachedCrmAlquileres : [];
+
+  hydrateCrmResumenFilters();
+
+  if (crmResumenDireccionKpis || crmResumenTopDesviacion || crmResumenTopPlazo) {
+    const responsables = new Set();
+    const origenes = new Set();
+    compraventas.forEach((row) => {
+      const resp = String(row.responsable_gestion || "").trim();
+      const org = String(row.origen_inmueble || row.origen || "").trim();
+      if (resp) responsables.add(resp);
+      if (org) origenes.add(org);
+    });
+    const sortEs = (a, b) => String(a).localeCompare(String(b), "es", { sensitivity: "base" });
+    if (crmResumenResponsable) {
+      const current = String(state.crmResumenResponsable || "");
+      crmResumenResponsable.innerHTML = `<option value="">Todos</option>${
+        Array.from(responsables).sort(sortEs).map((v) => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join("")
+      }`;
+      if (current) crmResumenResponsable.value = current;
+    }
+    if (crmResumenOrigen) {
+      const current = String(state.crmResumenOrigen || "");
+      crmResumenOrigen.innerHTML = `<option value="">Todos</option>${
+        Array.from(origenes).sort(sortEs).map((v) => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join("")
+      }`;
+      if (current) crmResumenOrigen.value = current;
+    }
+
+    const { fromTs, toTs } = getCrmResumenWindowTs();
+    const responsableFilter = normalizeSimple(state.crmResumenResponsable || "");
+    const origenFilter = normalizeSimple(state.crmResumenOrigen || "");
+    const matchesFilters = (row) => {
+      if (responsableFilter && !normalizeSimple(row.responsable_gestion || "").includes(responsableFilter)) return false;
+      if (origenFilter && !normalizeSimple(row.origen_inmueble || row.origen || "").includes(origenFilter)) return false;
+      const ts = getCrmVentaOperacionTs(row);
+      if (!ts && (fromTs || toTs !== Number.MAX_SAFE_INTEGER)) return false;
+      if (ts && (ts < fromTs || ts > toTs)) return false;
+      return true;
+    };
+
+    const visitasByInmueble = new Map();
+    visitas.forEach((v) => {
+      const inmuebleId = String(v.inmueble_id || "").trim();
+      if (!inmuebleId) return;
+      visitasByInmueble.set(inmuebleId, (Number(visitasByInmueble.get(inmuebleId) || 0) || 0) + 1);
+    });
+
+    const ventas = compraventas.filter(matchesFilters);
+    const cerradas = ventas.filter((row) => String(row.fecha_escritura || "").trim() || Number(row.precio_escritura || 0) > 0);
+    const honorariosTotal = cerradas.reduce((sum, row) => sum + (Number(row.honorarios || 0) || 0), 0);
+    const volumenCierre = cerradas.reduce((sum, row) => sum + (Number(row.precio_escritura || row.precio_venta || 0) || 0), 0);
+    const desviaciones = cerradas.map((row) => computeVentaDeviation(row)).filter((d) => d.ok && Number.isFinite(d.pct));
+    const desvPctAvg = desviaciones.length ? (desviaciones.reduce((sum, d) => sum + (Number(d.pct || 0) || 0), 0) / desviaciones.length) : 0;
+    const desvEurAvg = desviaciones.length ? (desviaciones.reduce((sum, d) => sum + (Number(d.eur || 0) || 0), 0) / desviaciones.length) : 0;
+    const dias = cerradas.map((row) => computeVentaDias(row)).filter((n) => Number(n || 0) > 0);
+    const diasAvg = dias.length ? (dias.reduce((a, b) => a + b, 0) / dias.length) : 0;
+    const visitasVenta = cerradas.map((row) => computeVentaVisitas(row, visitasByInmueble)).filter((n) => Number(n || 0) > 0);
+    const visitasAvg = visitasVenta.length ? (visitasVenta.reduce((a, b) => a + b, 0) / visitasVenta.length) : 0;
+    const ticketMedio = cerradas.length ? (volumenCierre / cerradas.length) : 0;
+    const honorariosMedio = cerradas.length ? (honorariosTotal / cerradas.length) : 0;
+
+    if (crmResumenDireccionKpis) {
+      renderCrmMiniCards(crmResumenDireccionKpis, [
+        {
+          title: "Comisión ganada",
+          value: formatEuros(honorariosTotal),
+          meta: `${cerradas.length} ventas`,
+          summary: "Suma de honorarios en operaciones cerradas dentro del periodo.",
+          crmView: "compraventas",
+        },
+        {
+          title: "Ticket medio escritura",
+          value: formatEuros(ticketMedio),
+          meta: "Precio",
+          summary: "Precio medio de cierre (escritura o venta) en el periodo.",
+          crmView: "compraventas",
+        },
+        {
+          title: "Desviación media",
+          value: `${desvPctAvg ? desvPctAvg.toFixed(1) : "0.0"}%`,
+          meta: formatEuros(desvEurAvg),
+          summary: "Media de (venta - encargo). Negativo indica cierre por debajo de salida.",
+          crmView: "compraventas",
+        },
+        {
+          title: "Plazo medio venta",
+          value: `${diasAvg ? Math.round(diasAvg) : 0} días`,
+          meta: "Encargo → cierre",
+          summary: "Tiempo medio desde fecha de encargo hasta escritura/contrato cuando hay datos.",
+          crmView: "compraventas",
+        },
+        {
+          title: "Visitas por venta",
+          value: `${visitasAvg ? visitasAvg.toFixed(1) : "0.0"}`,
+          meta: "Media",
+          summary: "Promedio de visitas registradas por operación cerrada.",
+          crmView: "visitas",
+        },
+        {
+          title: "Comisión media",
+          value: formatEuros(honorariosMedio),
+          meta: "Por venta",
+          summary: "Honorarios medios por operación cerrada en el periodo.",
+          crmView: "compraventas",
+        },
+      ]);
+    }
+
+    const topDesv = cerradas
+      .map((row) => ({ row, d: computeVentaDeviation(row) }))
+      .filter((item) => item.d.ok)
+      .sort((a, b) => Math.abs(b.d.pct) - Math.abs(a.d.pct))
+      .slice(0, 6)
+      .map((item) => ({
+        inmuebleId: item.row.inmueble_id || "",
+        crmView: "compraventas",
+        title: item.row.direccion || "Operación",
+        meta: `${item.row.responsable_gestion || "Responsable"} · ${item.row.origen_inmueble || item.row.origen || "Origen"}`,
+        summary: `Encargo ${formatEuros(item.d.salida || 0)} → Venta ${formatEuros(item.d.venta || 0)} · ${item.d.pct.toFixed(1)}% (${formatEuros(item.d.eur || 0)})`,
+      }));
+    renderCrmActionList(crmResumenTopDesviacion, topDesv, "Sin ventas con precios de encargo/venta suficientes.");
+
+    const topPlazo = cerradas
+      .map((row) => ({
+        row,
+        dias: computeVentaDias(row),
+        visitas: computeVentaVisitas(row, visitasByInmueble),
+      }))
+      .sort((a, b) => (b.dias - a.dias) || (b.visitas - a.visitas))
+      .slice(0, 6)
+      .map((item) => ({
+        inmuebleId: item.row.inmueble_id || "",
+        crmView: "compraventas",
+        title: item.row.direccion || "Operación",
+        meta: `${item.row.responsable_gestion || "Responsable"} · ${item.row.fecha_escritura || item.row.fecha_contrato || "-"}`,
+        summary: `${item.dias ? `${item.dias} días` : "Plazo pendiente"} · ${item.visitas ? `${item.visitas} visitas` : "Visitas n/d"} · ${formatEuros(Number(item.row.honorarios || 0) || 0)}`,
+      }));
+    renderCrmActionList(crmResumenTopPlazo, topPlazo, "Sin ventas cerradas en el periodo.");
+  }
 
   if (crmResumenPulse) {
     renderCrmMiniCards(crmResumenPulse, [
