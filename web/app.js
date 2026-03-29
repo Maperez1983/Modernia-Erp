@@ -4221,6 +4221,9 @@ workspaceEngineButtons.forEach((button) => {
         applyWorkspaceTimeMode();
       }
     }
+    if (engine === "rrhh") {
+      await refreshWorkspaceRrhh();
+    }
   });
 });
 
