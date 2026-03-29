@@ -18254,21 +18254,11 @@ const renderTableInto = (data, container, infoEl, label) => {
       const td = document.createElement("td");
       const actions = document.createElement("div");
       actions.className = "inline-actions";
-      const openBtn = document.createElement("button");
-      openBtn.type = "button";
-      openBtn.className = "ghost";
-      openBtn.textContent = "Ficha";
-      openBtn.addEventListener("click", async (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        const inmuebleId = await resolveInmuebleDetailRef(rowMap, recordId);
-        if (!inmuebleId) {
-          alert("La captación no tiene inmueble vinculado.");
-          return;
-        }
-        openInmuebleDetail(inmuebleId, "captaciones");
-      });
-      actions.appendChild(openBtn);
+      const openLink = document.createElement("a");
+      openLink.className = "ghost";
+      openLink.textContent = "Ficha";
+      openLink.href = `?crm=inmo&captacion=${encodeURIComponent(String(recordId || "").trim())}`;
+      actions.appendChild(openLink);
       [
         ["Noticia", "noticia", "ghost"],
         ["Adquisición", "adquisicion", "ghost"],
@@ -18297,11 +18287,8 @@ const renderTableInto = (data, container, infoEl, label) => {
         if (event.target && event.target.closest("button, input, select, a")) {
           return;
         }
-        const inmuebleId = await resolveInmuebleDetailRef(rowMap, recordId);
-        if (!inmuebleId) {
-          return;
-        }
-        openInmuebleDetail(inmuebleId, "captaciones");
+        // Fallback robusto: navegamos con un deep-link y dejamos que el router abra la ficha.
+        window.location.assign(`?crm=inmo&captacion=${encodeURIComponent(String(recordId || "").trim())}`);
       });
     }
     if (label === "Seguros" && currentTab === "seguros-crm" && state.segurosTab === "bdt" && String(recordId || "").trim()) {
@@ -18837,14 +18824,7 @@ const renderCrmKanban = (data) => {
             event.dataTransfer.effectAllowed = "move";
           });
         }
-        const openBtn = card.querySelector("a[data-open]");
-        if (openBtn) {
-          openBtn.addEventListener("click", async (event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            await openInmuebleFromCaptacion(captacionId, "captaciones");
-          });
-        }
+        // Sin handler: dejamos el link navegar. Es el camino mas robusto (no depende de async ni de gestures).
         column.appendChild(card);
       });
       container.appendChild(column);
@@ -20100,25 +20080,40 @@ const setInmuebleTab = (tab) => {
   if (inmuebleTabEstado) inmuebleTabEstado.classList.toggle("hidden", tab !== "estado");
 };
 
+const showUiError = (title, detail = "") => {
+  const toast = document.getElementById("uiErrorToast");
+  if (!toast) return;
+  toast.classList.remove("hidden");
+  toast.innerHTML = "";
+  const strong = document.createElement("strong");
+  strong.textContent = title || "Error";
+  toast.appendChild(strong);
+  if (detail) {
+    const pre = document.createElement("pre");
+    pre.textContent = String(detail).slice(0, 2000);
+    toast.appendChild(pre);
+  }
+};
+
 const ensureInmuebleForCaptacion = async (captacionId) => {
   if (!captacionId) return "";
-  try {
-    const data = await api(`/api/inmueble_ensure?captacion_id=${encodeURIComponent(captacionId)}`);
-    return String(data?.inmueble_id || "").trim();
-  } catch {
-    return "";
-  }
+  const data = await api(`/api/inmueble_ensure?captacion_id=${encodeURIComponent(captacionId)}`);
+  return String(data?.inmueble_id || "").trim();
 };
 
 const openInmuebleFromCaptacion = async (captacionId, originView = "captaciones") => {
   const id = String(captacionId || "").trim();
   if (!id) return;
-  const inmuebleId = await ensureInmuebleForCaptacion(id);
-  if (!inmuebleId) {
-    alert("No se pudo abrir la ficha del inmueble (captación sin inmueble vinculado).");
-    return;
+  try {
+    const inmuebleId = await ensureInmuebleForCaptacion(id);
+    if (!inmuebleId) {
+      showUiError("No se pudo abrir la ficha del inmueble", "La captación no devolvió un inmueble_id.");
+      return;
+    }
+    openInmuebleDetail(inmuebleId, originView);
+  } catch (error) {
+    showUiError("No se pudo abrir la ficha del inmueble", error?.message || "Error desconocido");
   }
-  openInmuebleDetail(inmuebleId, originView);
 };
 
 const resolveInmuebleDetailRef = async (rowMap = {}, fallbackId = "") => {
@@ -20139,7 +20134,14 @@ const openInmuebleDetail = (id, originView = "") => {
   state.currentInmuebleOriginView = originView || state.crmWorkspaceView || "inmuebles";
   state.currentInmueble = null;
   state.currentInmuebleContext = null;
-  setInmuebleSaveStatus("");
+  setInmuebleSaveStatus("Cargando ficha...");
+  // Feedback inmediato: si falla la carga, el usuario debe ver la ficha y el error.
+  if (crmWorkspaceShell) crmWorkspaceShell.classList.add("hidden");
+  inmuebleDetail.classList.remove("hidden");
+  if (inmuebleTitle) inmuebleTitle.textContent = "Cargando ficha...";
+  if (inmuebleSubtitle) inmuebleSubtitle.textContent = String(id || "").trim() || "Id sin asignar";
+  setInmuebleTab("datos");
+  window.scrollTo({ top: 0, behavior: "smooth" });
   const empresa = state.empresas.find((e) => e.nombre === DASHBOARD_COMPANY);
   const empresaId = empresa ? empresa.id : "";
   Promise.all([
@@ -20228,10 +20230,8 @@ const openInmuebleDetail = (id, originView = "") => {
       inmuebleDetail.classList.remove("hidden");
       setInmuebleTab("datos");
     })
-    .catch(() => {
-      if (inmuebleSaveStatus) {
-        inmuebleSaveStatus.textContent = "Error al cargar.";
-      }
+    .catch((error) => {
+      if (inmuebleSaveStatus) inmuebleSaveStatus.textContent = error?.message || "Error al cargar.";
     });
 };
 

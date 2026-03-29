@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>LIV · Plataforma Operativa</title>
-    <link rel="stylesheet" href="styles.css?v=146" />
+    <link rel="stylesheet" href="styles.css?v=148" />
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600;700&family=Source+Sans+3:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" />
   </head>
   <body class="theme-operativa">
@@ -1088,7 +1088,7 @@
           <div id="workspacePortalRequestList"></div>
         </div>
         <div class="workspace-central-layout crm-workspace-view" data-workspace-view="motores" data-workspace-engine="registro_horario">
-          <div class="workspace-time-layout">
+          <div class="workspace-time-layout" id="workspaceTimeLayout">
             <div class="workspace-time-config">
               <div class="section-head">
                 <div>
@@ -1143,8 +1143,18 @@
                   <h4>Personal activo</h4>
                   <p class="muted">Selecciona a un empleado para ver su vista previa, exportar y editar su ficha.</p>
                 </div>
+                <div class="section-head-actions">
+                  <button type="button" id="workspaceTimeEmployeeNewBtn" class="secondary ghost button-inline">Nuevo trabajador</button>
+                </div>
               </div>
               <div id="workspaceTimeEmployeeList"></div>
+              <div class="section-head">
+                <div>
+                  <h4>Usuarios del sistema</h4>
+                  <p class="muted">Activa el registro horario en usuarios existentes para que aparezcan como personal.</p>
+                </div>
+              </div>
+              <div id="workspaceTimeSystemUsers"></div>
               <div class="workspace-time-exports">
                 <button type="button" id="workspaceTimeExportXml" class="secondary ghost button-inline" disabled>Exportar XML</button>
                 <button type="button" id="workspaceTimeExportPdf" class="secondary ghost button-inline" disabled>Exportar PDF</button>
@@ -6768,7 +6778,7 @@
 
     <script src="ui-foundation.js?v=2"></script>
     <script src="app-auth.js?v=2"></script>
-    <script src="app-routing.js?v=5"></script>
-    <script src="app.js?v=356"></script>
+    <script src="app-routing.js?v=7"></script>
+    <script src="app.js?v=358"></script>
   </body>
 </html>
