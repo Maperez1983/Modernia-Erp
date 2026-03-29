@@ -4481,7 +4481,7 @@ const WORKSPACE_HOME_CONTAINERS = [
     kicker: "CRM base",
     description: "Ficha 360, relación con clientes finales y punto de entrada común del grupo.",
     modules: ["crm360", "documental", "portal_cliente"],
-    planned: ["Copilot"],
+    planned: [],
     action: WORKSPACE_LAUNCHERS.crm360?.action || null,
     actionLabel: "Abrir clientes",
   },
@@ -4545,7 +4545,7 @@ const WORKSPACE_HOME_CONTAINERS = [
     kicker: "Transversal",
     description: "Plantilla, ausencias, gastos y documentación del equipo.",
     modules: ["rrhh", "registro_horario", "documental"],
-    planned: ["Portal empleado · Próximo"],
+    planned: ["Portal empleado"],
     action: WORKSPACE_LAUNCHERS.rrhh?.action || null,
     actionLabel: "Abrir RRHH",
   },
@@ -5520,6 +5520,14 @@ const renderWorkspaceLauncher = (workspace = {}, modules = []) => {
     workspaceLauncher.innerHTML = "<p class='muted'>No hay módulos activos en este workspace.</p>";
     return;
   }
+  const roadmapFlag = (() => {
+    try {
+      return new URLSearchParams(window.location.search).get("roadmap") === "1";
+    } catch (error) {
+      return false;
+    }
+  })();
+  const roadmapEnabled = Boolean(roadmapFlag && (getAuthScopeUser && isPrivilegedUser) && isPrivilegedUser(getAuthScopeUser()));
   const buildWorkspaceSummaryHref = (sectionKey = "") => {
     const mode = isTenantWorkspaceMode() ? "tenant" : "platform";
     const params = new URLSearchParams({ holding: "1", mode });
@@ -5574,14 +5582,21 @@ const renderWorkspaceLauncher = (workspace = {}, modules = []) => {
                 <span class="workspace-home-count">${numberFormatter.format(availableModules.length)} módulos</span>
               </div>
               <p class="muted">${container.description}</p>
-              <div class="workspace-home-chip-list">
-                ${availableModules
-                  .map((moduleKey) => `<span class="workspace-home-chip">${getWorkspaceModuleLabel(moduleKey)}</span>`)
-                  .join("")}
-                ${(container.planned || [])
-                  .map((label) => `<span class="workspace-home-chip is-planned">${label} · Próximo</span>`)
-                  .join("")}
-              </div>
+	              <div class="workspace-home-chip-list">
+	                ${availableModules
+	                  .map((moduleKey) => `<span class="workspace-home-chip">${getWorkspaceModuleLabel(moduleKey)}</span>`)
+	                  .join("")}
+	                ${roadmapEnabled
+	                  ? (container.planned || [])
+	                      .map((label) => {
+	                        const text = String(label || "").trim();
+	                        if (!text) return "";
+	                        const finalLabel = /pr[oó]ximo/i.test(text) ? text : `${text} · Próximo`;
+	                        return `<span class="workspace-home-chip is-planned">${finalLabel}</span>`;
+	                      })
+	                      .join("")
+	                  : ""}
+	              </div>
               <div class="workspace-home-card-actions">
                 <button
                   type="button"
@@ -9076,9 +9091,9 @@ const updateExplorerHeader = (empresaName) => {
       setTab("gestoria-dash");
     }
   }
-  if (empresaName === FINCAS_COMPANY && (currentTab === "alta" || currentTab === "bdt")) {
-    state.gestoriaCrmView = currentTab === "alta" ? "alta" : "crm";
-    setTab(currentTab === "alta" ? "gestoria-crm" : "gestoria-docs");
+  if (empresaName === FINCAS_COMPANY && currentTab === "alta") {
+    state.gestoriaCrmView = "alta";
+    setTab("gestoria-crm");
   }
   if (crmTab) {
     const showCrm = empresaName === DASHBOARD_COMPANY;
@@ -10100,7 +10115,7 @@ const setModule = (moduleName) => {
     empresaSelect.value = "";
     updateExplorerHeader("Clientes");
     explorerSection.classList.remove("hidden");
-    setTab("bdt");
+    setTab("operativa");
     if (searchInput) {
       searchInput.placeholder = "Buscar cliente...";
     }
@@ -10127,21 +10142,21 @@ const ensureOperativaTable = () => {
 };
 
 const setTab = (tabName) => {
-  currentTab = tabName;
+  // La pestaña BDT (explorador legacy) se ha eliminado de la interfaz.
+  // Si llega algún estado antiguo/URL pidiendo "bdt", lo redirigimos al Dashboard.
+  const normalized = tabName === "bdt" ? "operativa" : tabName;
+  currentTab = normalized;
   viewTabs.querySelectorAll(".tab").forEach((btn) => {
-    btn.classList.toggle("active", btn.dataset.tab === tabName);
+    btn.classList.toggle("active", btn.dataset.tab === normalized);
   });
   updateCompanySummary(state.currentEmpresaName || (state.currentModule === "clientes" ? "Clientes" : ""));
-  if (tabName === "fin-sim") {
+  if (normalized === "fin-sim") {
     initFinSimulator();
   }
   populateTables();
   tablaSelect.selectedIndex = 0;
   if (state.currentModule !== "clientes") {
     const selectedCompany = state.empresas.find((e) => e.id === empresaSelect.value)?.nombre;
-    if (currentTab === "bdt") {
-      tablaSelect.value = selectedCompany === FIN_COMPANY ? "hipotecas" : "movimientos";
-    }
   } else {
     tablaSelect.value = "clientes";
   }
@@ -10159,19 +10174,9 @@ const populateTables = () => {
   }
   const selectedCompany = state.currentEmpresaName || state.empresas.find((e) => e.id === empresaSelect.value)?.nombre;
   let tables = [];
-  if (currentTab === "bdt") {
-    if (selectedCompany === FIN_COMPANY) {
-      tables = ["hipotecas"];
-    } else if (selectedCompany === FINCAS_COMPANY) {
-      tables = ["movimientos"];
-    } else {
-      tables = ["movimientos"];
-    }
-  } else {
-    tables = state.tablas.filter((t) => t !== "movimientos");
-    if (selectedCompany !== DASHBOARD_COMPANY) {
-      tables = tables.filter((t) => t !== "captaciones");
-    }
+  tables = state.tablas.filter((t) => t !== "movimientos");
+  if (selectedCompany !== DASHBOARD_COMPANY) {
+    tables = tables.filter((t) => t !== "captaciones");
   }
   tables.forEach((tabla) => {
     tablaSelect.appendChild(
@@ -15524,7 +15529,7 @@ const updateTableVisibility = () => {
   if (clientesShowAllBtn) {
     clientesShowAllBtn.classList.toggle("hidden", true);
   }
-  const showTable = currentTab === "bdt";
+  const showTable = state.currentModule === "clientes";
   if (bdtSection) {
     bdtSection.classList.toggle("hidden", !showTable || isClientePage || isServiceCrm);
   }
@@ -19059,18 +19064,8 @@ const loadFincasRenewalAlert = () => {
     button.type = "button";
     button.textContent = "Ver pólizas";
     button.addEventListener("click", () => {
-      const empresa = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
-      if (!empresa) return;
-      empresaSelect.value = empresa.id;
-      state.currentEmpresaId = empresa.id;
-      state.currentEmpresaName = empresa.nombre;
-      updateExplorerHeader(empresa.nombre);
-      setTab("bdt");
-      tablaSelect.value = "seguros";
-      updateFincasBdtTabs();
-      explorerSection.classList.remove("hidden");
-      loadTable();
-      window.scrollTo({ top: tableContainer.offsetTop - 120, behavior: "smooth" });
+      openSegurosCrm();
+      setSegurosTab("bdt");
     });
     renewalAlert.appendChild(text);
     renewalAlert.appendChild(button);
@@ -30910,7 +30905,7 @@ const closeSeguroPage = () => {
   }
   if (returnPage === "empresa") {
     setModule(state.prevModule || "empresas");
-    setTab(state.prevTab || "bdt");
+    setTab(state.prevTab || "operativa");
     setPage("empresa");
     updateTableVisibility();
     if (state.currentEmpresaName) {
@@ -31792,7 +31787,7 @@ resetBtn.addEventListener("click", () => {
       clientesAltaSection.classList.add("hidden");
     }
     updateExplorerHeader("Clientes");
-    setTab("bdt");
+    setTab("operativa");
     loadClientesTable();
     updateTableVisibility();
     return;
