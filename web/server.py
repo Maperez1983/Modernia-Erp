@@ -11571,30 +11571,169 @@ def _fetch_nominatim_query(query):
         return json.loads(response.read().decode("utf-8", errors="ignore"))
 
 
+# --- New helper: _fetch_photon_query
+def _fetch_photon_query(query):
+    params = urllib.parse.urlencode(
+        {
+            "q": query,
+            "limit": 1,
+            "lang": "es",
+        }
+    )
+    req = urllib.request.Request(
+        f"https://photon.komoot.io/api/?{params}",
+        headers={
+            "User-Agent": "ModerniaERP/1.0 (contacto@grupomodernia.es)",
+            "Accept-Language": "es",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=8) as response:
+        payload = json.loads(response.read().decode("utf-8", errors="ignore"))
+    return payload.get("features") or []
+
+
+# --- New helper: _fetch_arcgis_query
+def _fetch_arcgis_query(query):
+    params = urllib.parse.urlencode(
+        {
+            "f": "json",
+            "maxLocations": 1,
+            "outFields": "Match_addr,Addr_type",
+            "singleLine": query,
+            "sourceCountry": "ESP",
+        }
+    )
+    req = urllib.request.Request(
+        f"https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/findAddressCandidates?{params}",
+        headers={
+            "User-Agent": "ModerniaERP/1.0 (contacto@grupomodernia.es)",
+            "Accept-Language": "es",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=8) as response:
+        payload = json.loads(response.read().decode("utf-8", errors="ignore"))
+    return payload.get("candidates") or []
+
+
+
 def fetch_geocode_coordinates(address, municipio="", provincia="", codigo_postal=""):
     base = str(address or "").strip()
     if not base:
         raise ValueError("direccion requerida")
+
     attempted = []
-    for query in _geocode_query_candidates(base, municipio=municipio, provincia=provincia, codigo_postal=codigo_postal):
-        attempted.append(query)
-        rows = _fetch_nominatim_query(query)
-        if not rows:
-            continue
-        row = rows[0]
-        try:
-            lat = float(row.get("lat"))
-            lon = float(row.get("lon"))
-        except Exception:
-            continue
-        return {
+    provider_errors = []
+
+    def _append_attempt(provider, query):
+        attempted.append({"provider": provider, "query": query})
+
+    def _append_error(provider, query, exc):
+        provider_errors.append(
+            {
+                "provider": provider,
+                "query": query,
+                "error": f"{type(exc).__name__}: {exc}",
+            }
+        )
+
+    def _success_payload(*, provider, query, lat, lon, display_name, rows, extra=None):
+        payload = {
             "ok": True,
             "lat": lat,
             "lon": lon,
-            "display_name": row.get("display_name") or query,
+            "display_name": display_name or query,
             "rows": rows,
             "query": query,
+            "provider": provider,
+            "queries": attempted,
         }
+        if extra:
+            payload.update(extra)
+        return payload
+
+    def _try_nominatim(query, extra=None):
+        _append_attempt("nominatim", query)
+        rows = _fetch_nominatim_query(query)
+        if not rows:
+            return None
+        row = rows[0]
+        lat = float(row.get("lat"))
+        lon = float(row.get("lon"))
+        return _success_payload(
+            provider="nominatim",
+            query=query,
+            lat=lat,
+            lon=lon,
+            display_name=row.get("display_name") or query,
+            rows=rows,
+            extra=extra,
+        )
+
+    def _try_photon(query, extra=None):
+        _append_attempt("photon", query)
+        rows = _fetch_photon_query(query)
+        if not rows:
+            return None
+        row = rows[0]
+        geometry = row.get("geometry") or {}
+        coords = geometry.get("coordinates") or []
+        if len(coords) < 2:
+            return None
+        lon = float(coords[0])
+        lat = float(coords[1])
+        props = row.get("properties") or {}
+        display_name = props.get("name") or props.get("street") or props.get("city") or query
+        return _success_payload(
+            provider="photon",
+            query=query,
+            lat=lat,
+            lon=lon,
+            display_name=display_name,
+            rows=rows,
+            extra=extra,
+        )
+
+    def _try_arcgis(query, extra=None):
+        _append_attempt("arcgis", query)
+        rows = _fetch_arcgis_query(query)
+        if not rows:
+            return None
+        row = rows[0]
+        location = row.get("location") or {}
+        lat = float(location.get("y"))
+        lon = float(location.get("x"))
+        return _success_payload(
+            provider="arcgis",
+            query=query,
+            lat=lat,
+            lon=lon,
+            display_name=row.get("address") or row.get("Match_addr") or query,
+            rows=rows,
+            extra=extra,
+        )
+
+    providers = (
+        ("nominatim", _try_nominatim),
+        ("photon", _try_photon),
+        ("arcgis", _try_arcgis),
+    )
+
+    def _run_provider_chain(query, extra=None):
+        for provider_name, provider_fn in providers:
+            try:
+                result = provider_fn(query, extra=extra)
+            except Exception as exc:
+                _append_error(provider_name, query, exc)
+                continue
+            if result:
+                return result
+        return None
+
+    for query in _geocode_query_candidates(base, municipio=municipio, provincia=provincia, codigo_postal=codigo_postal):
+        result = _run_provider_chain(query)
+        if result:
+            return result
+
     try:
         catastro = lookup_catastro_reference_by_address(
             provincia=provincia,
@@ -11602,37 +11741,36 @@ def fetch_geocode_coordinates(address, municipio="", provincia="", codigo_postal
             direccion=base,
             codigo_postal=codigo_postal,
         )
-    except Exception:
+    except Exception as exc:
         catastro = {}
+        provider_errors.append({"provider": "catastro", "query": base, "error": f"{type(exc).__name__}: {exc}"})
+
     selected = None
     if catastro.get("match_unique") and catastro.get("candidates"):
         selected = (catastro.get("candidates") or [None])[0]
     elif len(catastro.get("candidates") or []) == 1:
         selected = (catastro.get("candidates") or [None])[0]
+
     if selected and selected.get("label"):
         fallback_query = ", ".join(
-            [part for part in [selected.get("label"), municipio, provincia, normalize_postal_code(codigo_postal), "España"] if part]
+            [
+                part
+                for part in [selected.get("label"), municipio, provincia, normalize_postal_code(codigo_postal), "España"]
+                if part
+            ]
         )
-        if fallback_query and fallback_query not in attempted:
-            rows = _fetch_nominatim_query(fallback_query)
-            if rows:
-                row = rows[0]
-                try:
-                    lat = float(row.get("lat"))
-                    lon = float(row.get("lon"))
-                except Exception:
-                    lat = lon = None
-                if lat is not None and lon is not None:
-                    return {
-                        "ok": True,
-                        "lat": lat,
-                        "lon": lon,
-                        "display_name": row.get("display_name") or fallback_query,
-                        "rows": rows,
-                        "query": fallback_query,
-                        "catastro_fallback": selected,
-                    }
-    return {"ok": False, "rows": [], "queries": attempted, "catastro": catastro}
+        if fallback_query:
+            result = _run_provider_chain(fallback_query, extra={"catastro_fallback": selected})
+            if result:
+                return result
+
+    return {
+        "ok": False,
+        "rows": [],
+        "queries": attempted,
+        "catastro": catastro,
+        "provider_errors": provider_errors,
+    }
 
 
 def _strip_html_fragment(value):
