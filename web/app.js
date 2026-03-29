@@ -2714,23 +2714,23 @@ const getVisibleServiceKeys = () => {
 
 const isPrivilegedService = (value) => {
   const normalized = normalizeSimple(value);
-  return ["direccion", "administracion"].includes(normalized);
+  return ["direccion", "administracion", "control"].includes(normalized);
 };
 
 const isPrivilegedRole = (value) => {
   const normalized = normalizeSimple(value);
-  return ["administrador", "direccion", "administracion"].includes(normalized);
+  return ["administrador", "admin", "direccion", "administracion", "control"].includes(normalized);
 };
 
 const isPrivilegedUser = (user) => {
   if (!user) return false;
+  // En el backend, "Administrador/Dirección/Administración/Control" implica permisos globales aunque tenga servicios asignados.
+  if (isPrivilegedRole(user.rol)) return true;
   const services = expandServiceAliases(parseServiceList(user.servicio || ""));
   if (isPrivilegedService(user.servicio) || services.some((service) => isPrivilegedService(service))) {
     return true;
   }
-  if (!isPrivilegedRole(user.rol)) return false;
-  if (!services.length) return true;
-  return services.some((service) => isPrivilegedService(service));
+  return false;
 };
 
 const canAccessAdminPanel = (user) => {
