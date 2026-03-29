@@ -20774,7 +20774,7 @@ class Handler(BaseHTTPRequestHandler):
             if not empresa:
                 json_response(self, {"error": "Empresa no encontrada"}, status=400)
                 return
-        if parsed.path not in (
+        if (not parsed.path.startswith("/api/workspace_")) and parsed.path not in (
             "/api/hipotecas/firmar",
             "/api/hipotecas_update",
             "/api/hipotecas_delete",
