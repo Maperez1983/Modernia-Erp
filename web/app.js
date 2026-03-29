@@ -6127,7 +6127,7 @@ const renderWorkspaceRrhhHub = () => {
         </label>
         <label class="span-2">
           Archivo
-          <input type="file" name="archivo" required />
+          <input type="file" name="archivo" />
         </label>
         <input type="hidden" name="doc_key" />
         <input type="hidden" name="doc_url" />
@@ -6477,6 +6477,9 @@ const renderWorkspaceRrhhHub = () => {
         const payload = Object.fromEntries(form.entries());
         payload.permanente = docForm.querySelector('[name="permanente"]').checked ? "1" : "0";
         if (!manager) payload.persona_id = selectedPersonaId;
+        if (!String(payload.id || "").trim() && !String(payload.doc_key || "").trim() && !String(payload.doc_url || "").trim()) {
+          throw new Error("Sube un archivo antes de guardar el documento.");
+        }
         const res = await fetch("/api/workspace_rrhh_documento", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
