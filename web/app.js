@@ -18568,9 +18568,12 @@ const renderCrmMiniCards = (container, items = []) => {
     return;
   }
   container.innerHTML = items
-    .map(
-      (item) => `
-        <div class="crm-mini-card">
+    .map((item) => {
+      const attrs = [];
+      if (item.inmuebleId) attrs.push(`data-inmueble-id="${escapeHtml(item.inmuebleId)}"`);
+      if (item.crmView) attrs.push(`data-crm-view="${escapeHtml(item.crmView)}"`);
+      return `
+        <div class="crm-mini-card${attrs.length ? " crm-mini-card--linkable" : ""}"${attrs.length ? ` ${attrs.join(" ")}` : ""}>
           <div>
             <h4>${escapeHtml(item.title)}</h4>
             <div class="muted">${escapeHtml(item.summary || "")}</div>
@@ -18580,9 +18583,21 @@ const renderCrmMiniCards = (container, items = []) => {
             <span>${escapeHtml(item.meta || "")}</span>
           </div>
         </div>
-      `
-    )
+      `;
+    })
     .join("");
+  container.querySelectorAll(".crm-mini-card[data-inmueble-id]").forEach((card) => {
+    card.addEventListener("click", () => {
+      const id = card.dataset.inmuebleId || "";
+      if (id) openInmuebleDetail(id, "resumen");
+    });
+  });
+  container.querySelectorAll(".crm-mini-card[data-crm-view]").forEach((card) => {
+    card.addEventListener("click", () => {
+      const view = card.dataset.crmView || "";
+      if (view) setCrmWorkspaceView(view);
+    });
+  });
 };
 
 const renderCrmActionList = (container, items = [], emptyMessage = "Sin elementos pendientes.") => {
@@ -18636,24 +18651,28 @@ const renderCrmResumenDashboard = () => {
         value: captaciones.filter((row) => normalizeSimple(row.etapa || "") === "noticia").length,
         meta: "Entrada",
         summary: "Captación inicial pendiente de llamada, cita o descarte.",
+        crmView: "captaciones",
       },
       {
         title: "Adquisiciones",
         value: captaciones.filter((row) => normalizeSimple(row.etapa || "") === "adquisicion").length,
         meta: "Citas",
         summary: "Viviendas con cita de adquisición o valoración comercial abierta.",
+        crmView: "captaciones",
       },
       {
         title: "Demandas activas",
         value: demandas.filter((row) => normalizeSimple(row.estado || "") === "activa").length,
         meta: "Compradores",
         summary: "Base compradora con potencial de matching o visita.",
+        crmView: "demandas",
       },
       {
         title: "Visitas abiertas",
         value: visitas.filter((row) => normalizeSimple(row.estado || "").includes("pendiente")).length,
         meta: "Agenda",
         summary: "Citas todavía sin resultado o cierre comercial.",
+        crmView: "visitas",
       },
     ]);
   }
