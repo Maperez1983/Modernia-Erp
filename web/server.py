@@ -108,6 +108,8 @@ OCR_PDF_DPI = max(120, int(os.environ.get("OCR_PDF_DPI", "280")))
 OCR_OPENAI_VISION_PAGES = max(0, int(os.environ.get("OCR_OPENAI_VISION_PAGES", "2")))
 OCR_OPENAI_VISION_DPI = max(120, int(os.environ.get("OCR_OPENAI_VISION_DPI", "220")))
 OCR_EXPERT_MODE = os.environ.get("OCR_EXPERT_MODE", "1").strip().lower() not in ("0", "false", "no", "off")
+WORKSPACE_TIME_SWEEP_ENABLED = os.environ.get("WORKSPACE_TIME_SWEEP_ENABLED", "1").strip().lower() not in ("0", "false", "no", "off")
+WORKSPACE_TIME_SWEEP_INTERVAL_SECONDS = max(60, int(os.environ.get("WORKSPACE_TIME_SWEEP_INTERVAL_SECONDS", "300")))
 APP_SESSION_TTL_SECONDS = max(900, int(os.environ.get("APP_SESSION_TTL_SECONDS", "43200")))
 SESSION_COOKIE_NAME = os.environ.get("APP_SESSION_COOKIE", "crm_session")
 AUTH_ALLOW_FIRST_PASSWORD_SET = os.environ.get("AUTH_ALLOW_FIRST_PASSWORD_SET", "1").strip().lower() not in ("0", "false", "no", "off")
@@ -14657,12 +14659,39 @@ def ensure_workspace_product_tables(conn):
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workspace_registro_audit (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          empresa_id TEXT,
+          persona_id TEXT,
+          entity_type TEXT NOT NULL,
+          entity_id TEXT,
+          action TEXT NOT NULL,
+          actor_user_id TEXT,
+          actor_nombre TEXT,
+          before_json TEXT,
+          after_json TEXT,
+          created_at TEXT NOT NULL
+        )
+        """
+    )
     ensure_column(conn, "workspace_registro_personal", "alert_missing_checkin", "alert_missing_checkin INTEGER NOT NULL DEFAULT 1")
     ensure_column(conn, "workspace_registro_personal", "alert_missing_checkout", "alert_missing_checkout INTEGER NOT NULL DEFAULT 1")
     ensure_column(conn, "workspace_registro_personal", "alert_notify_worker", "alert_notify_worker INTEGER NOT NULL DEFAULT 1")
     ensure_column(conn, "workspace_registro_personal", "alert_notify_admin", "alert_notify_admin INTEGER NOT NULL DEFAULT 1")
     ensure_column(conn, "workspace_registro_personal", "alert_admin_contact", "alert_admin_contact TEXT")
     ensure_column(conn, "workspace_registro_personal", "alert_last_sent", "alert_last_sent TEXT")
+    ensure_column(conn, "workspace_registro_audit", "empresa_id", "empresa_id TEXT")
+    ensure_column(conn, "workspace_registro_audit", "persona_id", "persona_id TEXT")
+    ensure_column(conn, "workspace_registro_audit", "entity_type", "entity_type TEXT")
+    ensure_column(conn, "workspace_registro_audit", "entity_id", "entity_id TEXT")
+    ensure_column(conn, "workspace_registro_audit", "action", "action TEXT")
+    ensure_column(conn, "workspace_registro_audit", "actor_user_id", "actor_user_id TEXT")
+    ensure_column(conn, "workspace_registro_audit", "actor_nombre", "actor_nombre TEXT")
+    ensure_column(conn, "workspace_registro_audit", "before_json", "before_json TEXT")
+    ensure_column(conn, "workspace_registro_audit", "after_json", "after_json TEXT")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS workspace_registro_horario (
@@ -16606,6 +16635,62 @@ def workspace_persona_id_for_user(conn, workspace_id, user_id):
         return str(row[0] or "")
 
 
+def log_workspace_registro_audit(conn, workspace_id, *, empresa_id=None, persona_id=None, entity_type="", entity_id="", action="", actor=None, before=None, after=None, now=None):
+    now_ts = now or datetime.now().isoformat()
+    session = actor or {}
+    actor_user_id = str(session.get("user_id") or "").strip() or None
+    actor_nombre = " ".join(
+        part for part in [str(session.get("nombre") or "").strip(), str(session.get("apellido") or "").strip()] if part
+    ).strip() or (str(session.get("usuario") or "").strip() or None)
+    record_id = os.urandom(16).hex()
+    before_json = json.dumps(before, ensure_ascii=False) if before is not None else None
+    after_json = json.dumps(after, ensure_ascii=False) if after is not None else None
+    conn.execute(
+        """
+        INSERT INTO workspace_registro_audit (
+          id, workspace_id, empresa_id, persona_id, entity_type, entity_id, action,
+          actor_user_id, actor_nombre, before_json, after_json, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            record_id,
+            workspace_id,
+            str(empresa_id or "").strip() or None,
+            str(persona_id or "").strip() or None,
+            str(entity_type or "").strip() or "registro",
+            str(entity_id or "").strip() or None,
+            str(action or "").strip() or "update",
+            actor_user_id,
+            actor_nombre,
+            before_json,
+            after_json,
+            now_ts,
+        ),
+    )
+    return record_id
+
+
+def fetch_workspace_registro_audit(conn, workspace_id, *, persona_id=None, limit=60):
+    where = ["workspace_id = ?"]
+    params = [workspace_id]
+    pid = str(persona_id or "").strip()
+    if pid:
+        where.append("persona_id = ?")
+        params.append(pid)
+    rows = conn.execute(
+        f"""
+        SELECT id, workspace_id, empresa_id, persona_id, entity_type, entity_id, action,
+               actor_user_id, actor_nombre, before_json, after_json, created_at
+        FROM workspace_registro_audit
+        WHERE {' AND '.join(where)}
+        ORDER BY created_at DESC
+        LIMIT ?
+        """,
+        (*params, max(1, min(int(limit or 60), 200))),
+    ).fetchall()
+    return {"rows": [dict(row) for row in rows]}
+
+
 def _parse_alert_last_sent(value):
     raw = str(value or "").strip()
     if not raw:
@@ -16712,6 +16797,39 @@ def run_workspace_time_missing_sweep(conn, workspace_id, now=None):
                     created.append("admin_missing_checkout")
                 _update_alert_last_sent(conn, workspace_id, persona_id, {"missing_checkout": today}, now=now_ts)
     return created
+
+
+def workspace_time_sweep_loop(db_path, interval_seconds=300):
+    while True:
+        try:
+            conn = get_db(db_path)
+            ensure_workspace_product_tables(conn)
+            workspaces = conn.execute("SELECT id FROM workspaces").fetchall()
+            for row in workspaces:
+                workspace_id = str(row["id"] if isinstance(row, sqlite3.Row) else row[0])
+                if not workspace_id:
+                    continue
+                enabled = conn.execute(
+                    """
+                    SELECT 1
+                    FROM workspace_modulos
+                    WHERE workspace_id = ? AND modulo_key = 'registro_horario' AND COALESCE(enabled, 0) = 1
+                    LIMIT 1
+                    """,
+                    (workspace_id,),
+                ).fetchone()
+                if not enabled:
+                    continue
+                created = run_workspace_time_missing_sweep(conn, workspace_id)
+                if created:
+                    conn.commit()
+            conn.close()
+        except Exception:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        time.sleep(max(60, int(interval_seconds or 300)))
 
 
 def run_workspace_time_alerts(conn, workspace_id, entry, now=None):
@@ -19519,6 +19637,9 @@ class Handler(BaseHTTPRequestHandler):
             "/api/workspace_portal_requerimientos",
             "/api/workspace_registro_personal",
             "/api/workspace_registro_horario",
+            "/api/workspace_registro_horario_toggle",
+            "/api/workspace_registro_alerts",
+            "/api/workspace_registro_usuario_toggle",
             "/api/workspace_presupuestos",
             "/api/workspace_fincas_comunidades",
             "/api/workspace_fincas_incidencias",
@@ -21535,6 +21656,13 @@ class Handler(BaseHTTPRequestHandler):
                     """,
                     (record_id, workspace_id),
                 ).fetchone()
+            audit_before = None
+            if record_id:
+                existing_row = conn.execute(
+                    "SELECT * FROM workspace_registro_horario WHERE id = ? AND workspace_id = ? LIMIT 1",
+                    (record_id, workspace_id),
+                ).fetchone()
+                audit_before = dict(existing_row) if existing_row else None
             if hora_fin:
                 start_min = parse_hhmm_to_minutes(hora_inicio)
                 end_min = parse_hhmm_to_minutes(hora_fin)
@@ -21606,6 +21734,11 @@ class Handler(BaseHTTPRequestHandler):
                     """,
                     (record_id, *values, now, now),
                 )
+                audit_before = None
+            audit_after_row = conn.execute(
+                "SELECT * FROM workspace_registro_horario WHERE id = ? AND workspace_id = ? LIMIT 1",
+                (record_id, workspace_id),
+            ).fetchone()
             auto_created = run_workspace_automations(
                 conn,
                 workspace_id,
@@ -21635,6 +21768,19 @@ class Handler(BaseHTTPRequestHandler):
                 "event": event,
             }
             run_workspace_time_alerts(conn, workspace_id, entry_payload, now=now)
+            log_workspace_registro_audit(
+                conn,
+                workspace_id,
+                empresa_id=empresa_id,
+                persona_id=persona_id or None,
+                entity_type="fichaje_manual",
+                entity_id=record_id,
+                action="update" if payload.get("id") else "create",
+                actor=session,
+                before=audit_before,
+                after=dict(audit_after_row) if audit_after_row else None,
+                now=now,
+            )
             conn.commit()
             json_response(self, {"ok": True, "id": record_id, "automation_actions": auto_created})
             return
@@ -21723,6 +21869,19 @@ class Handler(BaseHTTPRequestHandler):
                     },
                     now=now,
                 )
+                log_workspace_registro_audit(
+                    conn,
+                    workspace_id,
+                    empresa_id=empresa_id,
+                    persona_id=persona_id,
+                    entity_type="fichaje",
+                    entity_id=open_row["id"],
+                    action="checkout",
+                    actor=session,
+                    before={"hora_fin": "", "hora_inicio": start, "fecha": fecha},
+                    after={"hora_fin": now_hhmm, "minutos_trabajados": minutos, "fecha": fecha},
+                    now=now,
+                )
                 conn.commit()
                 json_response(self, {"ok": True, "action": "checkout", "id": open_row["id"], "fecha": fecha, "hora_fin": now_hhmm})
                 return
@@ -21775,6 +21934,19 @@ class Handler(BaseHTTPRequestHandler):
                 },
                 now=now,
             )
+            log_workspace_registro_audit(
+                conn,
+                workspace_id,
+                empresa_id=empresa_id,
+                persona_id=persona_id,
+                entity_type="fichaje",
+                entity_id=record_id,
+                action="checkin",
+                actor=session,
+                before=None,
+                after={"fecha": fecha, "hora_inicio": now_hhmm, "hora_fin": "", "estado": estado},
+                now=now,
+            )
             conn.commit()
             json_response(self, {"ok": True, "action": "checkin", "id": record_id, "fecha": fecha, "hora_inicio": now_hhmm})
             return
@@ -21818,6 +21990,10 @@ class Handler(BaseHTTPRequestHandler):
                 str(payload.get("notas") or "").strip() or None,
             )
             if record_id:
+                prev = conn.execute(
+                    "SELECT * FROM workspace_registro_personal WHERE id = ? AND workspace_id = ? LIMIT 1",
+                    (record_id, workspace_id),
+                ).fetchone()
                 conn.execute(
                     """
                     UPDATE workspace_registro_personal
@@ -21839,14 +22015,76 @@ class Handler(BaseHTTPRequestHandler):
                     """,
                     (record_id, *values, now, now),
                 )
+                prev = None
             # Si vinculamos a un usuario del sistema, activamos el registro horario para evitar que el sync lo desactive.
             if usuario_id_value and active_flag == 1:
                 conn.execute(
                     "UPDATE usuarios SET registro_horario_activo = 1 WHERE id = ?",
                     (usuario_id_value,),
                 )
+            after_row = conn.execute(
+                "SELECT * FROM workspace_registro_personal WHERE id = ? AND workspace_id = ? LIMIT 1",
+                (record_id, workspace_id),
+            ).fetchone()
+            log_workspace_registro_audit(
+                conn,
+                workspace_id,
+                empresa_id=empresa_id,
+                persona_id=record_id,
+                entity_type="persona",
+                entity_id=record_id,
+                action="create" if not payload.get("id") else "update",
+                actor=session,
+                before=dict(prev) if prev else None,
+                after=dict(after_row) if after_row else None,
+                now=now,
+            )
             conn.commit()
             json_response(self, {"ok": True, "id": record_id})
+            return
+        elif parsed.path == "/api/workspace_registro_usuario_toggle":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not workspace_session_is_privileged(session):
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            usuario_id = str(payload.get("usuario_id") or payload.get("id") or "").strip()
+            enabled = 1 if str(payload.get("enabled") or payload.get("registro_horario_activo") or "").strip().lower() in {"1", "true", "si", "sí", "on"} else 0
+            if not workspace_id or not usuario_id:
+                json_response(self, {"error": "workspace_id y usuario_id requeridos"}, status=400)
+                return
+            prev_user = conn.execute(
+                "SELECT id, nombre, apellido, usuario, email, servicio, rol, activo, COALESCE(registro_horario_activo, 0) AS registro_horario_activo FROM usuarios WHERE id = ? LIMIT 1",
+                (usuario_id,),
+            ).fetchone()
+            if not prev_user:
+                json_response(self, {"error": "usuario no encontrado"}, status=404)
+                return
+            conn.execute(
+                "UPDATE usuarios SET registro_horario_activo = ?, updated_at = datetime(?) WHERE id = ?",
+                (enabled, now, usuario_id),
+            )
+            # Sincroniza plantilla de personal para reflejar el cambio inmediatamente.
+            sync_workspace_time_personal_from_users(conn, workspace_id)
+            after_user = conn.execute(
+                "SELECT id, nombre, apellido, usuario, email, servicio, rol, activo, COALESCE(registro_horario_activo, 0) AS registro_horario_activo FROM usuarios WHERE id = ? LIMIT 1",
+                (usuario_id,),
+            ).fetchone()
+            log_workspace_registro_audit(
+                conn,
+                workspace_id,
+                empresa_id=None,
+                persona_id=None,
+                entity_type="usuario",
+                entity_id=usuario_id,
+                action="registro_horario_activo",
+                actor=session,
+                before=dict(prev_user) if prev_user else None,
+                after=dict(after_user) if after_user else None,
+                now=now,
+            )
+            conn.commit()
+            json_response(self, {"ok": True, "id": usuario_id, "enabled": enabled})
             return
         elif parsed.path == "/api/workspace_registro_alerts":
             workspace_id = str(payload.get("workspace_id") or params.get("workspace_id", [""])[0] or "").strip()
@@ -21866,6 +22104,7 @@ class Handler(BaseHTTPRequestHandler):
                 config = fetch_workspace_alert_preferences(conn, workspace_id, persona_id=persona_id or None)
                 json_response(self, {"row": config or {}})
                 return
+            before = fetch_workspace_alert_preferences(conn, workspace_id, persona_id=persona_id) or None
             config_id = upsert_workspace_alert_config(
                 conn,
                 workspace_id,
@@ -21879,6 +22118,20 @@ class Handler(BaseHTTPRequestHandler):
                     "admin_contact": payload.get("admin_contact") or "",
                     "schedule": payload.get("schedule") or "",
                 },
+                now=now,
+            )
+            after = fetch_workspace_alert_preferences(conn, workspace_id, persona_id=persona_id) or None
+            log_workspace_registro_audit(
+                conn,
+                workspace_id,
+                empresa_id=str(payload.get("empresa_id") or "").strip() or None,
+                persona_id=persona_id,
+                entity_type="alerta",
+                entity_id=config_id,
+                action="update",
+                actor=session,
+                before=before,
+                after=after,
                 now=now,
             )
             conn.commit()
@@ -28566,6 +28819,23 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, fetch_workspace_notifications(conn, workspace_id, limit=limit, persona_id=persona_id or None))
             return
 
+        if path == "/api/workspace_registro_audit":
+            workspace_id = params.get("workspace_id", [""])[0]
+            limit = params.get("limit", ["60"])[0]
+            persona_id = (params.get("persona_id", [""])[0] or "").strip()
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if session and not workspace_session_is_privileged(session):
+                user_id = str(session.get("user_id") or "").strip()
+                persona_id = workspace_persona_id_for_user(conn, workspace_id, user_id)
+                if not persona_id:
+                    json_response(self, {"rows": []})
+                    return
+            json_response(self, fetch_workspace_registro_audit(conn, workspace_id, persona_id=persona_id or None, limit=limit))
+            return
+
         if path == "/api/workspace_registro_horario_alerts_run":
             workspace_id = params.get("workspace_id", [""])[0]
             if not workspace_id:
@@ -33934,6 +34204,14 @@ def main():
         )
         worker.start()
         workers.append(worker)
+    if WORKSPACE_TIME_SWEEP_ENABLED:
+        sweep_thread = threading.Thread(
+            target=workspace_time_sweep_loop,
+            args=(args.db, WORKSPACE_TIME_SWEEP_INTERVAL_SECONDS),
+            name="workspace-time-sweep",
+            daemon=True,
+        )
+        sweep_thread.start()
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     print(
         f"Servidor activo en http://{args.host}:{args.port} · db={Path(args.db).resolve()} · "

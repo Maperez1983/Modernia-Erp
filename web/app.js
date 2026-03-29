@@ -1355,11 +1355,13 @@ const workspaceTimeEmployeeNewBtn = document.getElementById("workspaceTimeEmploy
 const workspaceTimeEmployeeResetBtn = document.getElementById("workspaceTimeEmployeeResetBtn");
 const workspaceTimeEmployeeStatus = document.getElementById("workspaceTimeEmployeeStatus");
 const workspaceTimeEmployeeList = document.getElementById("workspaceTimeEmployeeList");
+const workspaceTimeSystemUsers = document.getElementById("workspaceTimeSystemUsers");
 const workspaceTimeEmployeeModal = document.getElementById("workspaceTimeEmployeeModal");
 const workspaceTimeEmployeeModalClose = document.getElementById("workspaceTimeEmployeeModalClose");
 const workspaceTimeEmployeeModalSubtitle = document.getElementById("workspaceTimeEmployeeModalSubtitle");
 const workspaceTimeEmployeePreview = document.getElementById("workspaceTimeEmployeePreview");
 const workspaceTimeNotifications = document.getElementById("workspaceTimeNotifications");
+const workspaceTimeAudit = document.getElementById("workspaceTimeAudit");
 const workspaceTimeExportXml = document.getElementById("workspaceTimeExportXml");
 const workspaceTimeExportPdf = document.getElementById("workspaceTimeExportPdf");
 const workspaceTimeExportXlsx = document.getElementById("workspaceTimeExportXlsx");
@@ -4026,6 +4028,7 @@ const renderWorkspaceCompanyScopedData = () => {
     state.workspaceTimeSelectedPersonaId = "";
     state.workspaceTimeSelectedPersona = null;
     renderWorkspaceTimeEmployeePreview();
+    renderWorkspaceTimeAudit([]);
   }
   hydrateWorkspaceTimeEmployeeSelect(timeEmployees);
   renderWorkspaceTimeSummary(raw.timeSummary || null);
@@ -7078,10 +7081,10 @@ const renderWorkspaceTimeSystemUsers = (rows = []) => {
       if (!userId) return;
       button.disabled = true;
       try {
-        const data = await fetch("/api/usuarios_update", {
+        const data = await fetch("/api/workspace_registro_usuario_toggle", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ id: userId, registro_horario_activo: next }),
+          body: JSON.stringify({ workspace_id: state.currentWorkspaceId, usuario_id: userId, enabled: next }),
         }).then((res) => res.json());
         if (data?.error) throw new Error(data.error);
         await loadWorkspaceDetail(state.currentWorkspaceId);
@@ -7188,6 +7191,7 @@ const selectWorkspacePersona = async (record) => {
   }
   renderWorkspaceTimeEmployeePreview();
   loadWorkspaceNotifications();
+  loadWorkspaceTimeAudit();
 };
 
 const loadWorkspaceNotifications = async () => {
@@ -7215,6 +7219,56 @@ const renderWorkspaceNotifications = (rows = []) => {
             </li>
           `
         )
+        .join("")}
+    </ul>
+  `;
+};
+
+const loadWorkspaceTimeAudit = async () => {
+  if (!workspaceTimeAudit || !state.currentWorkspaceId) return;
+  const limit = 30;
+  const personaId = String(state.workspaceTimeSelectedPersonaId || "").trim();
+  const params = new URLSearchParams({
+    workspace_id: state.currentWorkspaceId,
+    limit: String(limit),
+  });
+  if (personaId) params.set("persona_id", personaId);
+  const audit = await safeWorkspaceApi(`/api/workspace_registro_audit?${params.toString()}`, { rows: [] });
+  renderWorkspaceTimeAudit(audit.rows || []);
+};
+
+const renderWorkspaceTimeAudit = (rows = []) => {
+  if (!workspaceTimeAudit) return;
+  if (!rows.length) {
+    workspaceTimeAudit.innerHTML = "<p class='muted'>Sin cambios recientes.</p>";
+    return;
+  }
+  const fmtAction = (row) => {
+    const type = String(row.entity_type || "").trim();
+    const action = String(row.action || "").trim();
+    if (type === "fichaje" && action === "checkin") return "Fichaje entrada";
+    if (type === "fichaje" && action === "checkout") return "Fichaje salida";
+    if (type === "persona") return action === "create" ? "Alta trabajador" : "Edición trabajador";
+    if (type === "alerta") return "Configuración alertas";
+    if (type === "usuario") return "Activación registro horario";
+    if (type === "fichaje_manual") return action === "create" ? "Fichaje manual" : "Edición fichaje";
+    return `${type || "registro"} · ${action || "update"}`;
+  };
+  workspaceTimeAudit.innerHTML = `
+    <ul class="workspace-notification-list">
+      ${rows
+        .map((row) => {
+          const who = row.actor_nombre || "Sistema";
+          const when = row.created_at || "";
+          const label = fmtAction(row);
+          return `
+            <li>
+              <strong>${label}</strong>
+              <span>${when}</span>
+              <p class="muted">${who}</p>
+            </li>
+          `;
+        })
         .join("")}
     </ul>
   `;
