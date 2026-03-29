@@ -1146,6 +1146,7 @@ const state = {
   clientesStats: null,
   currentEmpresaId: "",
   currentEmpresaName: "",
+  crmInmoEmpresaId: "",
   currentModule: "empresas",
   currentInmuebleId: "",
   currentInmuebleOriginView: "inmuebles",
@@ -4161,7 +4162,7 @@ const renderWorkspaceCompanySwitcher = (rows = []) => {
 
 const normalizeWorkspaceViewKey = (value = "") => {
   const key = String(value || "").trim().toLowerCase();
-  if (["overview", "tenant", "clients", "operations", "motores", "fincas"].includes(key)) {
+  if (["overview", "tenant", "clients", "operations", "rrhh", "motores", "fincas"].includes(key)) {
     return key;
   }
   return "overview";
@@ -4169,7 +4170,8 @@ const normalizeWorkspaceViewKey = (value = "") => {
 
 const normalizeWorkspaceEngineKey = (value = "") => {
   const key = String(value || "").trim().toLowerCase();
-  if (["documental", "facturacion", "facturas_recibidas", "portal_cliente", "registro_horario", "rrhh", "automatizaciones", "copilot"].includes(key)) {
+  // "rrhh" vive como vista propia del workspace (no como motor de configuración).
+  if (["documental", "facturacion", "facturas_recibidas", "portal_cliente", "registro_horario", "automatizaciones", "copilot"].includes(key)) {
     return key;
   }
   return "documental";
@@ -4210,6 +4212,10 @@ const setWorkspaceView = (view = "overview", options = {}) => {
   });
   if (normalized === "motores") {
     setWorkspaceEngineView(state.currentWorkspaceEngineView || "documental");
+  }
+  if (normalized === "rrhh") {
+    // RRHH es un espacio propio, no un "motor" de configuración.
+    void refreshWorkspaceRrhh();
   }
   syncHoldingUrlParams();
   if (scroll && workspaceViewTabs) {
@@ -4446,10 +4452,10 @@ const WORKSPACE_LAUNCHERS = {
     actionLabel: "Abrir",
     action: () => {
       if (isTenantWorkspaceMode()) {
-        focusWorkspaceEngine("rrhh", workspaceRrhhHub, { forceTenantView: true });
+        focusWorkspaceView("rrhh", workspaceRrhhHub, { forceTenantView: true });
         return;
       }
-      focusWorkspaceEngine("rrhh", workspaceRrhhHub);
+      focusWorkspaceView("rrhh", workspaceRrhhHub);
     },
   },
   automatizaciones: {
@@ -9703,7 +9709,7 @@ const updateExplorerHeader = (empresaName) => {
     setTab("gestoria-crm");
   }
   if (crmTab) {
-    const showCrm = empresaName === DASHBOARD_COMPANY;
+    const showCrm = userCanAccessService("inmobiliaria");
     crmTab.classList.toggle("hidden", !showCrm);
     if (!showCrm && currentTab === "crm") {
       setTab("operativa");
@@ -9920,9 +9926,46 @@ const openClientesModule = () => {
   setUrlParams(new URLSearchParams({ clientes: "1" }));
 };
 
+const resolveEmpresaById = (empresaId) => {
+  const id = String(empresaId || "").trim();
+  if (!id) return null;
+  return state.empresas.find((e) => e.id === id) || null;
+};
+
+const resolveCrmInmoEmpresa = () => {
+  // 1) Si ya hay empresa "Inmo" fijada (p.ej. usuario cambiando de ficha), úsala.
+  const explicit = resolveEmpresaById(state.crmInmoEmpresaId);
+  if (explicit) return explicit;
+
+  // 2) Si el usuario ya está trabajando sobre una empresa, úsala.
+  const current = resolveEmpresaById(state.currentEmpresaId);
+  if (current) return current;
+
+  // 3) Fallback: intenta la empresa mapeada para el servicio; si no existe, usa la primera disponible.
+  const preferredName = SERVICE_COMPANY_MAP?.Inmobiliaria || DASHBOARD_COMPANY;
+  const preferred = state.empresas.find((e) => e.nombre === preferredName) || null;
+  if (preferred) return preferred;
+
+  const modernia =
+    state.empresas.find((e) => normalizeSimple(e.nombre).includes("modernia")) || null;
+  if (modernia) return modernia;
+
+  return state.empresas[0] || null;
+};
+
+const resolveCrmInmoEmpresaNombre = () => resolveCrmInmoEmpresa()?.nombre || "";
+const resolveCrmInmoEmpresaId = () => resolveCrmInmoEmpresa()?.id || "";
+
 const openCrmInmobiliario = () => {
   if (!userCanAccessService("inmobiliaria")) return;
-  openCompany(DASHBOARD_COMPANY, { allowRestricted: true });
+  const empresa = resolveCrmInmoEmpresa();
+  if (!empresa) {
+    alert("No hay empresas disponibles para abrir el CRM inmobiliario.");
+    return;
+  }
+  // Asegura contexto de empresa (necesario para endpoints que requieren empresa_nombre).
+  openCompany(empresa.nombre, { allowRestricted: true });
+  state.crmInmoEmpresaId = empresa.id;
   setTab("crm");
   updateTableVisibility();
   syncCrmLegalAvailability();
@@ -9930,6 +9973,14 @@ const openCrmInmobiliario = () => {
   loadCrmCaptaciones();
   loadCrmInmuebles();
   loadCrmCompraventas();
+  // Mantener URL "crm=inmo" para que los deep-links funcionen aunque `openCompany` haya puesto `?empresa=...`.
+  const currentParams = new URLSearchParams(window.location.search);
+  currentParams.delete("empresa");
+  currentParams.delete("clientes");
+  currentParams.delete("cliente");
+  currentParams.delete("poliza");
+  currentParams.set("crm", "inmo");
+  setUrlParams(currentParams);
 };
 
 const ensureCrmOpen = (action) => {
@@ -10292,11 +10343,18 @@ const openHolding = (options = {}) => {
   }
   const mode = options.mode === "tenant" ? "tenant" : "platform";
   const requestedWorkspace = String(options.workspace || "").trim();
-  const requestedView = String(options.view || "").trim();
+  let requestedView = String(options.view || "").trim();
   const requestedEngine = String(options.engine || "").trim();
   state.currentWorkspaceEntryMode = mode;
   state.currentWorkspaceTarget = requestedWorkspace || (mode === "tenant" ? "modernia" : "");
-  if (requestedEngine) {
+  const engineKey = normalizeSimple(requestedEngine);
+  if (engineKey === "rrhh") {
+    // Compatibilidad: URLs antiguas que apuntaban a motores->rrhh ahora abren la vista RRHH.
+    if (!requestedView || normalizeSimple(requestedView) === "motores") {
+      requestedView = "rrhh";
+    }
+    state.currentWorkspaceEngineView = "documental";
+  } else if (requestedEngine) {
     state.currentWorkspaceEngineView = normalizeWorkspaceEngineKey(requestedEngine);
   }
   setModule("empresas");
@@ -10762,7 +10820,8 @@ const populateTables = () => {
   const selectedCompany = state.currentEmpresaName || state.empresas.find((e) => e.id === empresaSelect.value)?.nombre;
   let tables = [];
   tables = state.tablas.filter((t) => t !== "movimientos");
-  if (selectedCompany !== DASHBOARD_COMPANY) {
+  // Captaciones es un módulo inmobiliario, no exclusivo de una empresa concreta.
+  if (!userCanAccessService("inmobiliaria")) {
     tables = tables.filter((t) => t !== "captaciones");
   }
   tables.forEach((tabla) => {
@@ -10779,11 +10838,10 @@ const setDefaultTableForCompany = (resumenItem) => {
   const selectedCompany =
     state.currentEmpresaName ||
     state.empresas.find((e) => e.id === empresaSelect.value)?.nombre;
-  if (selectedCompany === DASHBOARD_COMPANY) {
-    if (state.tablas.includes("captaciones")) {
-      tablaSelect.value = "captaciones";
-      return;
-    }
+  if (userCanAccessService("inmobiliaria") && state.tablas.includes("captaciones")) {
+    // Si el usuario trabaja en inmobiliaria, es una tabla prioritaria para empezar.
+    tablaSelect.value = "captaciones";
+    return;
   }
   const candidates = [
     { key: "seguros", table: "seguros" },
@@ -13459,16 +13517,26 @@ const renderMapPreview = (container, lat, lon, address = "") => {
   }
   container.dataset.geocode = "ok";
   const center = `${lat},${lon}`;
-  const staticMapUrl = `https://staticmap.openstreetmap.de/staticmap.php?center=${encodeURIComponent(center)}&zoom=16&size=900x320&maptype=mapnik&markers=${encodeURIComponent(`${center},red-pushpin`)}`;
+  // Usamos embed oficial de OpenStreetMap para evitar depender de un proveedor de "static maps" externo.
+  const delta = 0.006;
+  const bbox = [
+    Number(lon) - delta,
+    Number(lat) - delta,
+    Number(lon) + delta,
+    Number(lat) + delta,
+  ];
+  const embedUrl = `https://www.openstreetmap.org/export/embed.html?bbox=${encodeURIComponent(
+    `${bbox[0]},${bbox[1]},${bbox[2]},${bbox[3]}`
+  )}&layer=mapnik&marker=${encodeURIComponent(`${lat},${lon}`)}`;
   const osmUrl = `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lon}#map=16/${lat}/${lon}`;
   container.innerHTML = `
-    <img
-      class="map-box-image"
-      src="${staticMapUrl}"
-      alt="Mapa de localización ${escapeHtml(address || center)}"
+    <iframe
+      class="map-box-embed"
+      title="Mapa de localización ${escapeHtml(address || center)}"
       loading="lazy"
       referrerpolicy="no-referrer"
-    />
+      src="${embedUrl}"
+    ></iframe>
     <div class="map-box-meta">
       <span class="muted">${escapeHtml(address || center)}</span>
       <a class="muted" href="${osmUrl}" target="_blank" rel="noreferrer">Abrir en OpenStreetMap</a>
@@ -13515,8 +13583,28 @@ const clientSideGeocodeLookup = async (query) => {
   const q = String(query || "").trim();
   if (!q) return null;
 
-  const tryPhoton = async () => {
-    const url = `https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=1&lang=es`;
+  const candidates = (() => {
+    const parts = q.split(",").map((p) => p.trim()).filter(Boolean);
+    const first = parts[0] || q;
+    let simplified = first;
+    simplified = simplified.replace(/\b\d+\s+[A-Z]{1,2}\b$/i, "").trim();
+    simplified = simplified.replace(/\b\d+\s+\d+\s*[A-Z]?\b$/i, (m) => m.split(/\s+/)[0]).trim();
+    simplified = simplified.replace(/\b(piso|planta|pta\.?|puerta|portal|bloque|esc|escalera)\b.*$/i, "").trim();
+    const baseTail = parts.slice(1).join(", ");
+    const list = [];
+    const push = (value) => {
+      const text = String(value || "").replace(/\s+/g, " ").trim();
+      if (text && !list.includes(text)) list.push(text);
+    };
+    push(q);
+    if (simplified && simplified !== first) push([simplified, baseTail].filter(Boolean).join(", "));
+    if (simplified) push(simplified);
+    if (first) push(first);
+    return list;
+  })();
+
+  const tryPhoton = async (candidate) => {
+    const url = `https://photon.komoot.io/api/?q=${encodeURIComponent(candidate)}&limit=1&lang=es`;
     const res = await fetch(url, { headers: { "Accept-Language": "es" } });
     if (!res.ok) return null;
     const payload = await res.json();
@@ -13531,12 +13619,12 @@ const clientSideGeocodeLookup = async (query) => {
       provider: "photon-browser",
       lat,
       lon,
-      display_name: props.name || props.street || props.city || q,
+      display_name: props.name || props.street || props.city || candidate,
     };
   };
 
-  const tryNominatim = async () => {
-    const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=es&q=${encodeURIComponent(q)}`;
+  const tryNominatim = async (candidate) => {
+    const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=es&q=${encodeURIComponent(candidate)}`;
     const res = await fetch(url, { headers: { "Accept-Language": "es" } });
     if (!res.ok) return null;
     const rows = await res.json();
@@ -13549,16 +13637,41 @@ const clientSideGeocodeLookup = async (query) => {
       provider: "nominatim-browser",
       lat,
       lon,
-      display_name: row.display_name || q,
+      display_name: row.display_name || candidate,
     };
   };
 
-  const providers = [tryPhoton, tryNominatim];
-  for (const fn of providers) {
-    try {
-      const hit = await fn();
-      if (hit) return hit;
-    } catch {}
+  const tryArcgis = async (candidate) => {
+    const url = `https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/findAddressCandidates?f=json&maxLocations=1&outFields=Match_addr,Addr_type&sourceCountry=ESP&singleLine=${encodeURIComponent(candidate)}`;
+    const res = await fetch(url, { headers: { "Accept-Language": "es" } });
+    if (!res.ok) return null;
+    const payload = await res.json();
+    const row = (payload?.candidates || [])[0];
+    if (!row) return null;
+    const loc = row.location || {};
+    const lat = Number(loc.y);
+    const lon = Number(loc.x);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+    return {
+      provider: "arcgis-browser",
+      lat,
+      lon,
+      display_name: row.address || candidate,
+    };
+  };
+
+  const providers = [tryPhoton, tryNominatim, tryArcgis];
+  for (const candidate of candidates) {
+    for (const fn of providers) {
+      try {
+        const hit = await fn(candidate);
+        if (hit) {
+          hit.query_used = candidate;
+          hit.query_attempts = candidates.slice();
+          return hit;
+        }
+      } catch {}
+    }
   }
   return null;
 };
@@ -20314,7 +20427,7 @@ const buildCaptacionConversionPayload = (rowMap, destino) => {
   const payload = {
     captacion_id: rowMap.id,
     destino,
-    empresa_nombre: DASHBOARD_COMPANY,
+    empresa_nombre: resolveCrmInmoEmpresaNombre(),
   };
   if (destino === "encargo") {
     const precio = window.prompt(
@@ -20585,7 +20698,7 @@ const loadCrmCaptaciones = () => {
   if (!crmCaptacionesTable) {
     return;
   }
-  const empresa = state.empresas.find((e) => e.nombre === DASHBOARD_COMPANY);
+  const empresa = resolveCrmInmoEmpresa();
   if (!empresa) {
     crmCaptacionesTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
     return;
@@ -20663,7 +20776,7 @@ const loadCrmAlquileres = () => {
   if (!crmAlquileresTable) {
     return;
   }
-  const empresa = state.empresas.find((e) => e.nombre === DASHBOARD_COMPANY);
+  const empresa = resolveCrmInmoEmpresa();
   if (!empresa) {
     crmAlquileresTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
     return;
@@ -21803,7 +21916,7 @@ const loadCrmInmuebles = () => {
   if (!crmInmueblesTable && !crmInmueblesTableMirror) {
     return;
   }
-  const empresa = state.empresas.find((e) => e.nombre === DASHBOARD_COMPANY);
+  const empresa = resolveCrmInmoEmpresa();
   if (!empresa) {
     [crmInmueblesTable, crmInmueblesTableMirror].filter(Boolean).forEach((target) => {
       target.innerHTML = "<p class='muted'>Sin empresa.</p>";
@@ -21902,7 +22015,7 @@ const loadCrmCompraventas = () => {
   if (!crmCompraventasTable) {
     return;
   }
-  const empresa = state.empresas.find((e) => e.nombre === DASHBOARD_COMPANY);
+  const empresa = resolveCrmInmoEmpresa();
   if (!empresa) {
     crmCompraventasTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
     return;
@@ -22052,7 +22165,7 @@ const loadCrmDemandas = () => {
   if (!crmDemandasTable) {
     return;
   }
-  const empresa = state.empresas.find((e) => e.nombre === DASHBOARD_COMPANY);
+  const empresa = resolveCrmInmoEmpresa();
   if (!empresa) {
     crmDemandasTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
     return;
@@ -22192,7 +22305,7 @@ const loadCrmVisitas = () => {
   if (!crmVisitasTable) {
     return;
   }
-  const empresa = state.empresas.find((e) => e.nombre === DASHBOARD_COMPANY);
+  const empresa = resolveCrmInmoEmpresa();
   if (!empresa) {
     crmVisitasTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
     return;
@@ -22313,7 +22426,7 @@ const renderVisitaSelects = () => {
 
 const openDemandaDetail = (id) => {
   if (!demandaDetail) return;
-  const empresa = state.empresas.find((e) => e.nombre === DASHBOARD_COMPANY);
+  const empresa = resolveCrmInmoEmpresa();
   if (!empresa) return;
   api(`/api/matching?empresa_id=${empresa.id}&demanda_id=${id}`).then((data) => {
     if (demandaTitle) {
@@ -36775,7 +36888,7 @@ if (inmuebleDemandaForm) {
     }
     const formData = new FormData(inmuebleDemandaForm);
     const payload = Object.fromEntries(formData.entries());
-    payload.empresa_nombre = DASHBOARD_COMPANY;
+    payload.empresa_nombre = resolveCrmInmoEmpresaNombre();
     fetch("/api/demandas", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -36796,7 +36909,7 @@ if (inmuebleDemandaForm) {
         if (state.currentInmuebleId) {
           loadInmuebleDemandas(state.currentInmuebleId);
         }
-        const empresa = state.empresas.find((e) => e.nombre === DASHBOARD_COMPANY);
+        const empresa = resolveCrmInmoEmpresa();
         loadDemandasList(empresa ? empresa.id : "").then(() => {
           populateDemandasSelect(inmuebleVisitaDemanda);
         });
@@ -36817,7 +36930,7 @@ if (inmuebleVisitaForm) {
     }
     const formData = new FormData(inmuebleVisitaForm);
     const payload = Object.fromEntries(formData.entries());
-    payload.empresa_nombre = DASHBOARD_COMPANY;
+    payload.empresa_nombre = resolveCrmInmoEmpresaNombre();
     payload.inmueble_id = state.currentInmuebleId;
     fetch("/api/visitas", {
       method: "POST",
@@ -36836,7 +36949,7 @@ if (inmuebleVisitaForm) {
           inmuebleVisitaStatus.textContent = "Guardada.";
         }
         inmuebleVisitaForm.reset();
-        const empresa = state.empresas.find((e) => e.nombre === DASHBOARD_COMPANY);
+        const empresa = resolveCrmInmoEmpresa();
         if (state.currentInmuebleId && empresa) {
           loadInmuebleVisitas(state.currentInmuebleId, empresa.id);
         }
@@ -36913,7 +37026,7 @@ if (inmuebleActividadForm) {
       payload,
       resolveClienteFromInput(inmuebleActividadClienteInput, inmuebleActividadClienteId)
     );
-    payload.empresa_nombre = DASHBOARD_COMPANY;
+    payload.empresa_nombre = resolveCrmInmoEmpresaNombre();
     payload.servicio = "inmobiliaria";
     payload.inmueble_id = state.currentInmuebleId;
     fetch("/api/acciones", {
@@ -36929,7 +37042,7 @@ if (inmuebleActividadForm) {
         if (!data.error) {
           inmuebleActividadForm.reset();
           syncInmuebleWorkflowForm();
-          const empresa = state.empresas.find((e) => e.nombre === DASHBOARD_COMPANY);
+          const empresa = resolveCrmInmoEmpresa();
           if (empresa) {
             loadInmuebleActividad(state.currentInmuebleId, empresa.id);
           }
@@ -36965,7 +37078,7 @@ if (inmuebleDocsForm) {
     const formData = new FormData(inmuebleDocsForm);
     const payload = Object.fromEntries(formData.entries());
     payload.inmueble_id = state.currentInmuebleId;
-    payload.empresa_nombre = DASHBOARD_COMPANY;
+    payload.empresa_nombre = resolveCrmInmoEmpresaNombre();
     payload.nombre = payload.nombre || file.name;
     const reader = new FileReader();
     reader.onload = () => {
@@ -37622,6 +37735,16 @@ if (empresaSelect) {
     const empresaName = state.empresas.find((e) => e.id === empresaSelect.value)?.nombre || "";
     state.currentEmpresaId = empresaSelect.value;
     state.currentEmpresaName = empresaName;
+    if (currentTab === "crm") {
+      // El CRM inmobiliario usa la empresa seleccionada como contexto.
+      state.crmInmoEmpresaId = empresaSelect.value;
+      loadCrmCaptaciones();
+      loadCrmInmuebles();
+      loadCrmCompraventas();
+      loadCrmDemandas();
+      loadCrmVisitas();
+      loadCrmAlquileres();
+    }
     updateExplorerHeader(empresaName);
     populateTables();
     ensureOperativaTable();
@@ -37696,7 +37819,8 @@ if (bdtForm) {
     }
     const formData = new FormData(bdtForm);
     const payload = Object.fromEntries(formData.entries());
-    payload.empresa_nombre = DASHBOARD_COMPANY;
+    payload.empresa_nombre =
+      state.currentEmpresaName || resolveCrmInmoEmpresaNombre() || DASHBOARD_COMPANY;
     fetch("/api/movimientos", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -37725,9 +37849,7 @@ if (bdtForm) {
           bdtForm.sl.value = "Estudio Velazquez";
         }
         // refresh dashboard without changing tabs
-        const empresa = state.empresas.find(
-          (item) => item.nombre === DASHBOARD_COMPANY
-        );
+        const empresa = state.empresas.find((item) => item.nombre === payload.empresa_nombre) || resolveCrmInmoEmpresa();
         if (empresa) {
           renderDashboard(empresa.nombre, empresa.id);
         }
@@ -37783,7 +37905,7 @@ if (captacionForm) {
         (option) => option.value
       );
     }
-    payload.empresa_nombre = DASHBOARD_COMPANY;
+    payload.empresa_nombre = resolveCrmInmoEmpresaNombre();
     try {
       const result = await submitInmobiliariaWithDuplicateCheck({
         endpoint: "/api/captaciones",
@@ -37819,7 +37941,7 @@ if (compraventaForm) {
     }
     const formData = new FormData(compraventaForm);
     const payload = Object.fromEntries(formData.entries());
-    payload.empresa_nombre = DASHBOARD_COMPANY;
+    payload.empresa_nombre = resolveCrmInmoEmpresaNombre();
     try {
       const result = await submitInmobiliariaWithDuplicateCheck({
         endpoint: "/api/compraventas",
@@ -37855,7 +37977,7 @@ if (demandaForm) {
     }
     const formData = new FormData(demandaForm);
     const payload = Object.fromEntries(formData.entries());
-    payload.empresa_nombre = DASHBOARD_COMPANY;
+    payload.empresa_nombre = resolveCrmInmoEmpresaNombre();
     fetch("/api/demandas", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -37874,7 +37996,7 @@ if (demandaForm) {
         }
         demandaForm.reset();
         loadCrmDemandas();
-        const empresa = state.empresas.find((e) => e.nombre === DASHBOARD_COMPANY);
+        const empresa = resolveCrmInmoEmpresa();
         loadDemandasList(empresa ? empresa.id : "").then(() => {
           populateDemandasSelect(inmuebleVisitaDemanda);
           if (state.currentInmuebleId) {
@@ -37898,7 +38020,7 @@ if (visitaForm) {
     }
     const formData = new FormData(visitaForm);
     const payload = Object.fromEntries(formData.entries());
-    payload.empresa_nombre = DASHBOARD_COMPANY;
+    payload.empresa_nombre = resolveCrmInmoEmpresaNombre();
     fetch("/api/visitas", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
