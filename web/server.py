@@ -11303,6 +11303,8 @@ CATRASTRO_STREET_TYPE_MAP = {
     "AVDA": "AV",
     "PASEO": "PS",
     "PS": "PS",
+    "PASAJE": "PJ",
+    "PJ": "PJ",
     "PLAZA": "PJ",
     "PL": "PJ",
     "CAMINO": "CM",
@@ -11331,6 +11333,10 @@ CATRASTRO_PUBLIC_LIST_URL = "https://www1.sedecatastro.gob.es/CYCBienInmueble/OV
 
 def parse_inmobiliaria_address_for_catastro(value):
     raw = re.sub(r"\s+", " ", str(value or "").strip())
+    # En la UI a veces viene como "Dirección · Zona" o con separadores visuales.
+    # Para Catastro sólo usamos la parte de la calle + número.
+    raw = raw.split("·", 1)[0].strip()
+    raw = raw.split("|", 1)[0].strip()
     if not raw:
         return {"sigla": "", "calle": "", "numero": "", "bloque": "", "escalera": "", "planta": "", "puerta": ""}
     normalized = raw.upper()
@@ -11338,6 +11344,7 @@ def parse_inmobiliaria_address_for_catastro(value):
     normalized = normalized.replace("AVDA.", "AVENIDA ")
     normalized = normalized.replace("AVDA", "AVENIDA ")
     normalized = normalized.replace("AV.", "AV ")
+    normalized = normalized.replace("·", " ")
     normalized = normalized.replace(",", " ")
     normalized = normalized.replace("º", " ")
     normalized = normalized.replace("ª", " ")

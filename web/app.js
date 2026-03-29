@@ -3598,7 +3598,7 @@ const renderCompanyCards = () => {
           <h3>CRM Inmobiliario</h3>
           <div class="company-meta">Noticias, inmuebles y operaciones.</div>
           <div class="company-meta">Servicio inmobiliario.</div>
-          <a class="card-link" href="?crm=inmo" data-action="crm-inmo">Entrar</a>
+          <a class="card-link" href="/?crm=inmo" data-action="crm-inmo">Entrar</a>
         `;
       } else if (service === "gestoria") {
         card.dataset.action = "crm-gestoria";
@@ -3606,7 +3606,7 @@ const renderCompanyCards = () => {
           <h3>CRM Gestoría</h3>
           <div class="company-meta">Clientes en gestión y seguimiento.</div>
           <div class="company-meta">Servicio de gestoría.</div>
-          <a class="card-link" href="?crm=gestoria" data-action="crm-gestoria">Entrar</a>
+          <a class="card-link" href="/?crm=gestoria" data-action="crm-gestoria">Entrar</a>
         `;
       } else if (service === "seguros") {
         card.dataset.action = "crm-seguros";
@@ -3614,7 +3614,7 @@ const renderCompanyCards = () => {
           <h3>CRM Seguros</h3>
           <div class="company-meta">Pólizas, renovaciones y oportunidades.</div>
           <div class="company-meta">Servicio de seguros.</div>
-          <a class="card-link" href="?crm=seguros" data-action="crm-seguros">Entrar</a>
+          <a class="card-link" href="/?crm=seguros" data-action="crm-seguros">Entrar</a>
         `;
       } else if (service === "financiaciones") {
         card.dataset.action = "crm-fin";
@@ -13507,6 +13507,60 @@ const buildCatastroUrl = (ref, address) => {
   return "https://www.sedecatastro.gob.es/";
 };
 
+// Fallback de geocodificación en cliente: si el backend no puede resolver (bloqueo/red/DNS),
+// intentamos desde el navegador con proveedores que suelen permitir CORS.
+const clientSideGeocodeLookup = async (query) => {
+  const q = String(query || "").trim();
+  if (!q) return null;
+
+  const tryPhoton = async () => {
+    const url = `https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=1&lang=es`;
+    const res = await fetch(url, { headers: { "Accept-Language": "es" } });
+    if (!res.ok) return null;
+    const payload = await res.json();
+    const feat = (payload?.features || [])[0];
+    const coords = feat?.geometry?.coordinates || [];
+    if (coords.length < 2) return null;
+    const lon = Number(coords[0]);
+    const lat = Number(coords[1]);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+    const props = feat?.properties || {};
+    return {
+      provider: "photon-browser",
+      lat,
+      lon,
+      display_name: props.name || props.street || props.city || q,
+    };
+  };
+
+  const tryNominatim = async () => {
+    const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=es&q=${encodeURIComponent(q)}`;
+    const res = await fetch(url, { headers: { "Accept-Language": "es" } });
+    if (!res.ok) return null;
+    const rows = await res.json();
+    const row = Array.isArray(rows) ? rows[0] : null;
+    if (!row) return null;
+    const lat = Number(row.lat);
+    const lon = Number(row.lon);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+    return {
+      provider: "nominatim-browser",
+      lat,
+      lon,
+      display_name: row.display_name || q,
+    };
+  };
+
+  const providers = [tryPhoton, tryNominatim];
+  for (const fn of providers) {
+    try {
+      const hit = await fn();
+      if (hit) return hit;
+    } catch {}
+  }
+  return null;
+};
+
 const geocodeInmuebleAddress = (direccion, latInput, lonInput, options = {}) => {
   const street = String(direccion || "").trim();
   if (!street) return;
@@ -13542,8 +13596,20 @@ const geocodeInmuebleAddress = (direccion, latInput, lonInput, options = {}) => 
     if (provinciaVal) params.set("provincia", provinciaVal);
     if (cpVal) params.set("codigo_postal", cpVal);
     api(`/api/geocode_lookup?${params.toString()}`)
-      .then((data) => {
+      .then(async (data) => {
         if (!data?.ok) {
+          const fallback = await clientSideGeocodeLookup(displayAddress || street);
+          if (fallback) {
+            const lat = Number(fallback.lat);
+            const lon = Number(fallback.lon);
+            if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+            if (latInput) latInput.value = String(lat);
+            if (lonInput) lonInput.value = String(lon);
+            saveInmuebleField("lat", lat);
+            saveInmuebleField("lon", lon);
+            updateInmuebleMap(lat, lon, displayAddress || street);
+            return;
+          }
           if (inmuebleMap) inmuebleMap.dataset.geocode = "failed";
           updateInmuebleMap(null, null, displayAddress || street);
           return;
@@ -13557,7 +13623,19 @@ const geocodeInmuebleAddress = (direccion, latInput, lonInput, options = {}) => 
         saveInmuebleField("lon", lon);
         updateInmuebleMap(lat, lon, displayAddress || street);
       })
-      .catch(() => {
+      .catch(async () => {
+        const fallback = await clientSideGeocodeLookup(displayAddress || street);
+        if (fallback) {
+          const lat = Number(fallback.lat);
+          const lon = Number(fallback.lon);
+          if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+          if (latInput) latInput.value = String(lat);
+          if (lonInput) lonInput.value = String(lon);
+          saveInmuebleField("lat", lat);
+          saveInmuebleField("lon", lon);
+          updateInmuebleMap(lat, lon, displayAddress || street);
+          return;
+        }
         if (inmuebleMap) inmuebleMap.dataset.geocode = "failed";
         updateInmuebleMap(null, null, displayAddress || street);
       });
@@ -13578,6 +13656,7 @@ const geocodeCaptacionAddress = () => {
   const direccionInput = getCaptacionField("direccion");
   const poblacionInput = getCaptacionField("poblacion");
   const provinciaInput = getCaptacionField("provincia");
+  const codigoPostalInput = getCaptacionField("codigo_postal");
   const latInput = getCaptacionField("lat");
   const lonInput = getCaptacionField("lon");
   if (!direccionInput || !captacionMap) return;
@@ -22422,12 +22501,9 @@ const openInmuebleDetail = (id, originView = "") => {
   if (inmuebleSubtitle) inmuebleSubtitle.textContent = String(id || "").trim() || "Id sin asignar";
   setInmuebleTab("datos");
   window.scrollTo({ top: 0, behavior: "smooth" });
-  const empresa = state.empresas.find((e) => e.nombre === DASHBOARD_COMPANY);
-  const empresaId = empresa ? empresa.id : "";
   Promise.all([
     api(`/api/inmueble?id=${id}`),
     loadClientesList().catch(() => null),
-    loadDemandasList(empresaId).catch(() => null),
   ])
     .then(([data]) => {
       const inmueble = data.inmueble || {};
@@ -22461,7 +22537,11 @@ const openInmuebleDetail = (id, originView = "") => {
         populateClientesSelect(inmuebleDemandaCliente);
       }
       if (inmuebleVisitaDemanda) {
-        populateDemandasSelect(inmuebleVisitaDemanda);
+        // Demandas: cargamos en background usando empresa_id del inmueble (evita depender de constantes).
+        const empresaId = String(inmueble.empresa_id || "").trim();
+        loadDemandasList(empresaId)
+          .then(() => populateDemandasSelect(inmuebleVisitaDemanda))
+          .catch(() => populateDemandasSelect(inmuebleVisitaDemanda));
       }
       if (inmuebleActividadClientes) {
         refreshInmuebleActividadClientesCandidates(
@@ -35320,7 +35400,7 @@ if (inmuebleBackBtn) {
   });
 }
 
-  if (inmuebleDeleteBtn) {
+if (inmuebleDeleteBtn) {
   inmuebleDeleteBtn.addEventListener("click", () => {
     if (!state.currentInmuebleId) return;
     const inmueble = state.currentInmueble || state.currentInmuebleContext?.inmueble || {};
@@ -35333,9 +35413,10 @@ if (inmuebleBackBtn) {
     fetch("/api/inmueble_delete", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
       body: JSON.stringify({
         inmueble_id: state.currentInmuebleId,
-        empresa_nombre: DASHBOARD_COMPANY,
+        usuario: getCurrentUser(),
       }),
     })
       .then((res) => res.json())
