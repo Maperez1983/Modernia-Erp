@@ -4109,17 +4109,24 @@ const focusWorkspaceView = (view, element = null, options = {}) => {
   }
 };
 
-const focusWorkspaceEngine = (engine, element = null, options = {}) => {
+const focusWorkspaceEngine = async (engine, element = null, options = {}) => {
   setWorkspaceView("motores", options);
   setWorkspaceEngineView(engine);
+  if (engine === "registro_horario") {
+    await refreshWorkspaceTimeSetup();
+  }
   if (element && typeof element.scrollIntoView === "function") {
     element.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 };
 
 workspaceEngineButtons.forEach((button) => {
-  button.addEventListener("click", () => {
-    setWorkspaceEngineView(button.dataset.workspaceEngineTab || "documental");
+  button.addEventListener("click", async () => {
+    const engine = button.dataset.workspaceEngineTab || "documental";
+    setWorkspaceEngineView(engine);
+    if (engine === "registro_horario") {
+      await refreshWorkspaceTimeSetup();
+    }
   });
 });
 
@@ -6778,6 +6785,20 @@ const hydrateWorkspaceTimeUserSelect = () => {
   if (currentValue && users.some((user) => String(user.id || "") === currentValue)) {
     select.value = currentValue;
   }
+};
+
+const refreshWorkspaceTimeSetup = async () => {
+  if (!state.currentWorkspaceId) return;
+  const companyQuery = state.currentWorkspaceCompanyId
+    ? `&empresa_id=${encodeURIComponent(state.currentWorkspaceCompanyId)}`
+    : "";
+  const timeUsers = await safeWorkspaceApi(
+    `/api/workspace_registro_usuarios?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}${companyQuery}&limit=300`,
+    { rows: [] }
+  );
+  state.workspaceTimeUsers = timeUsers.rows || [];
+  hydrateWorkspaceCompanySelects();
+  hydrateWorkspaceTimeUserSelect();
 };
 
 const fillWorkspaceTimeEmployeeForm = (record = null) => {
