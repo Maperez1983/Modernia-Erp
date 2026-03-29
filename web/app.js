@@ -1217,6 +1217,14 @@ const state = {
   workspaceTimeSummary: null,
   workspaceTimeMonth: "",
   workspaceTimeSelectedPersonaId: "",
+  workspaceRrhhTab: "plantilla",
+  workspaceRrhhSelectedPersonaId: "",
+  workspaceRrhhMonth: "",
+  workspaceRrhhScopeAll: false,
+  workspaceRrhhProfileRow: null,
+  workspaceRrhhAusenciasRows: [],
+  workspaceRrhhGastosRows: [],
+  workspaceRrhhDocsRows: [],
   currentClienteSegurosRows: [],
   currentClienteRamoSelected: "",
   currentSeguroId: "",
@@ -4193,6 +4201,9 @@ const focusWorkspaceEngine = async (engine, element = null, options = {}) => {
       applyWorkspaceTimeMode();
     }
   }
+  if (engine === "rrhh") {
+    await refreshWorkspaceRrhh();
+  }
   if (element && typeof element.scrollIntoView === "function") {
     element.scrollIntoView({ behavior: "smooth", block: "start" });
   }
@@ -5728,55 +5739,773 @@ const renderWorkspaceCopilotHub = () => {
   });
 };
 
+const normalizeWorkspaceRrhhTab = (value = "") => {
+  const key = String(value || "").trim().toLowerCase();
+  if (["plantilla", "ausencias", "gastos", "docs"].includes(key)) return key;
+  return "plantilla";
+};
+
+const isWorkspaceRrhhManager = () => isWorkspaceTimeManager();
+
+const resolveWorkspacePersonaForAuthUser = () => {
+  const user = getAuthScopeUser();
+  if (!user?.id) return "";
+  const employees = Array.isArray(state.workspaceTimeEmployees) ? state.workspaceTimeEmployees : [];
+  const match = employees.find((row) => String(row.usuario_id || "") === String(user.id || ""));
+  return match?.id || "";
+};
+
+const refreshWorkspaceRrhh = async () => {
+  if (!workspaceRrhhHub) return;
+  const workspaceId = state.currentWorkspaceId;
+  if (!workspaceId) return;
+
+  const month = String(state.workspaceRrhhMonth || state.workspaceTimeMonth || "").trim() || new Date().toISOString().slice(0, 7);
+  state.workspaceRrhhMonth = month;
+  state.workspaceRrhhTab = normalizeWorkspaceRrhhTab(state.workspaceRrhhTab);
+
+  if (!isWorkspaceRrhhManager()) {
+    state.workspaceRrhhScopeAll = false;
+  }
+
+  const employees = Array.isArray(state.workspaceTimeEmployees) ? state.workspaceTimeEmployees : [];
+  if (!state.workspaceRrhhSelectedPersonaId) {
+    if (isWorkspaceRrhhManager()) {
+      const firstActive = employees.find((row) => Number(row.activo ?? 1) === 1) || employees[0] || null;
+      state.workspaceRrhhSelectedPersonaId = firstActive?.id || "";
+    } else {
+      state.workspaceRrhhSelectedPersonaId = resolveWorkspacePersonaForAuthUser();
+    }
+  }
+
+  const selectedPersonaId = String(state.workspaceRrhhSelectedPersonaId || "").trim();
+  const companyQuery = state.currentWorkspaceCompanyId ? `&empresa_id=${encodeURIComponent(state.currentWorkspaceCompanyId)}` : "";
+  const scopePersonaId = state.workspaceRrhhScopeAll && isWorkspaceRrhhManager() ? "" : selectedPersonaId;
+  const personaQuery = scopePersonaId ? `&persona_id=${encodeURIComponent(scopePersonaId)}` : "";
+
+  const [profile, ausencias, gastos, docs] = await Promise.all([
+    scopePersonaId ? safeWorkspaceApi(`/api/workspace_rrhh_profile?workspace_id=${encodeURIComponent(workspaceId)}&persona_id=${encodeURIComponent(scopePersonaId)}`, { row: {} }) : { row: {} },
+    safeWorkspaceApi(`/api/workspace_rrhh_ausencias?workspace_id=${encodeURIComponent(workspaceId)}&month=${encodeURIComponent(month)}${companyQuery}${personaQuery}`, { rows: [] }),
+    safeWorkspaceApi(`/api/workspace_rrhh_gastos?workspace_id=${encodeURIComponent(workspaceId)}&month=${encodeURIComponent(month)}${companyQuery}${personaQuery}`, { rows: [] }),
+    safeWorkspaceApi(`/api/workspace_rrhh_documentos?workspace_id=${encodeURIComponent(workspaceId)}${companyQuery}${personaQuery}`, { rows: [] }),
+  ]);
+
+  state.workspaceRrhhProfileRow = profile?.row || null;
+  state.workspaceRrhhAusenciasRows = ausencias?.rows || [];
+  state.workspaceRrhhGastosRows = gastos?.rows || [];
+  state.workspaceRrhhDocsRows = docs?.rows || [];
+
+  // Render after data arrives.
+  renderWorkspaceRrhhHub();
+};
+
 const renderWorkspaceRrhhHub = () => {
   if (!workspaceRrhhHub) return;
+  const manager = isWorkspaceRrhhManager();
   const employees = Array.isArray(state.workspaceTimeEmployees) ? state.workspaceTimeEmployees : [];
-  const activeCount = employees.filter((row) => Number(row.activo ?? 1) === 1).length;
-  const month = String(state.workspaceTimeMonth || "").trim();
+  const month = String(state.workspaceRrhhMonth || "").trim() || new Date().toISOString().slice(0, 7);
+  const selectedPersonaId = String(state.workspaceRrhhSelectedPersonaId || "").trim();
+  const selectedEmployee = employees.find((row) => String(row.id || "") === selectedPersonaId) || null;
   const companyLabel = getWorkspaceCompanyContextLabel();
-  workspaceRrhhHub.innerHTML = `
-    <div class="workspace-home-detail-card">
+  const tab = normalizeWorkspaceRrhhTab(state.workspaceRrhhTab);
+  const scopeAll = Boolean(state.workspaceRrhhScopeAll && manager);
+
+  const renderEmployeeList = () => {
+    if (!manager) return "";
+    if (!employees.length) {
+      return "<p class='muted'>Sin personal todavía. Activa usuarios en Registro horario o crea un trabajador nuevo.</p>";
+    }
+    return `
+      <div class="workspace-rrhh-employee-list">
+        ${employees
+          .filter((row) => Number(row.activo ?? 1) === 1)
+          .map((row) => {
+            const active = String(row.id || "") === selectedPersonaId;
+            return `
+              <button type="button" class="workspace-rrhh-employee${active ? " is-active" : ""}" data-rrhh-persona="${row.id || ""}">
+                <strong>${escapeHtml(row.nombre || "-")}</strong>
+                <span>${escapeHtml(row.empresa_nombre || row.empresa || "")}${row.usuario_id ? " · Vinculado" : ""}</span>
+              </button>
+            `;
+          })
+          .join("")}
+      </div>
+    `;
+  };
+
+  const profile = state.workspaceRrhhProfileRow || {};
+  const ausencias = Array.isArray(state.workspaceRrhhAusenciasRows) ? state.workspaceRrhhAusenciasRows : [];
+  const gastos = Array.isArray(state.workspaceRrhhGastosRows) ? state.workspaceRrhhGastosRows : [];
+  const docs = Array.isArray(state.workspaceRrhhDocsRows) ? state.workspaceRrhhDocsRows : [];
+
+  const headerEmployeeLabel = () => {
+    if (scopeAll) return "Todo el equipo";
+    if (selectedEmployee) return `${selectedEmployee.nombre || "Empleado"}${selectedEmployee.empresa_nombre ? ` · ${selectedEmployee.empresa_nombre}` : ""}`;
+    return manager ? "Selecciona empleado" : "Mi ficha";
+  };
+
+  const renderTabs = () => `
+    <div class="workspace-rrhh-tabs">
+      ${[
+        { key: "plantilla", label: "Plantilla" },
+        { key: "ausencias", label: "Ausencias" },
+        { key: "gastos", label: "Gastos" },
+        { key: "docs", label: "Documentos" },
+      ]
+        .map(
+          (item) => `
+            <button type="button" class="tab${item.key === tab ? " active" : ""}" data-rrhh-tab="${item.key}">
+              ${escapeHtml(item.label)}
+            </button>
+          `
+        )
+        .join("")}
+    </div>
+  `;
+
+  const renderPlantilla = () => `
+    <div class="workspace-rrhh-panel-card">
       <div class="section-head">
         <div>
-          <h4>RRHH del workspace</h4>
-          <p class="muted">Plantilla, ausencias, gastos y documentación del equipo en ${companyLabel}.</p>
+          <h4>${escapeHtml(headerEmployeeLabel())}</h4>
+          <p class="muted">Ficha laboral y accesos directos al registro horario.</p>
+        </div>
+        <div class="section-head-actions">
+          <button type="button" class="secondary ghost button-inline" data-rrhh-open-time>Ver registro horario</button>
         </div>
       </div>
-      <div class="workspace-mini-kpis">
-        <div class="workspace-mini-kpi"><span>Personal activo</span><strong>${numberFormatter.format(activeCount)}</strong></div>
-        <div class="workspace-mini-kpi"><span>Mes operativo</span><strong>${month || "Actual"}</strong></div>
+      ${!selectedPersonaId && !scopeAll ? "<p class='muted'>Selecciona un empleado.</p>" : ""}
+      <form id="workspaceRrhhProfileForm" class="form-grid ${!manager || !selectedPersonaId || scopeAll ? "hidden" : ""}">
+        <input type="hidden" name="workspace_id" value="${escapeHtml(state.currentWorkspaceId)}" />
+        <input type="hidden" name="persona_id" value="${escapeHtml(selectedPersonaId)}" />
+        <label>
+          Puesto
+          <input name="puesto" value="${escapeHtml(profile.puesto || "")}" />
+        </label>
+        <label>
+          Departamento
+          <input name="departamento" value="${escapeHtml(profile.departamento || "")}" />
+        </label>
+        <label>
+          Tipo contrato
+          <input name="tipo_contrato" value="${escapeHtml(profile.tipo_contrato || "")}" placeholder="Indefinido, temporal, prácticas..." />
+        </label>
+        <label>
+          Centro trabajo
+          <input name="centro_trabajo" value="${escapeHtml(profile.centro_trabajo || "")}" />
+        </label>
+        <label>
+          Fecha inicio
+          <input type="date" name="fecha_inicio" value="${escapeHtml(profile.fecha_inicio || "")}" />
+        </label>
+        <label>
+          Fecha fin
+          <input type="date" name="fecha_fin" value="${escapeHtml(profile.fecha_fin || "")}" />
+        </label>
+        <label class="span-2">
+          Notas
+          <textarea name="notas" rows="3">${escapeHtml(profile.notas || "")}</textarea>
+        </label>
+        <div class="form-actions span-2">
+          <button type="submit">Guardar ficha RRHH</button>
+          <span id="workspaceRrhhProfileStatus" class="muted"></span>
+        </div>
+      </form>
+      ${!manager ? "<p class='muted'>La ficha laboral se edita desde un usuario administrador.</p>" : ""}
+    </div>
+  `;
+
+  const renderAusencias = () => `
+    <div class="workspace-rrhh-panel-card">
+      <div class="section-head">
+        <div>
+          <h4>Ausencias ${scopeAll ? "· Equipo" : ""}</h4>
+          <p class="muted">Vacaciones, bajas y permisos. ${manager ? "Aprueba o rechaza solicitudes." : "Crea solicitudes y cancela pendientes."}</p>
+        </div>
       </div>
-      <div class="workspace-home-detail-grid" style="margin-top: 12px;">
-        <button type="button" class="workspace-home-detail-item" data-rrhh-open="plantilla">
-          <strong>Plantilla</strong>
-          <span>Ver personal y fichajes</span>
-        </button>
-        <button type="button" class="workspace-home-detail-item" data-rrhh-open="ausencias">
-          <strong>Ausencias</strong>
-          <span>Vacaciones, bajas y permisos (Próximo)</span>
-        </button>
-        <button type="button" class="workspace-home-detail-item" data-rrhh-open="gastos">
-          <strong>Gastos</strong>
-          <span>Tiquets y reembolsos (Próximo)</span>
-        </button>
-        <button type="button" class="workspace-home-detail-item" data-rrhh-open="docs">
-          <strong>Documentación</strong>
-          <span>Contratos, certificados, formaciones (Próximo)</span>
-        </button>
-      </div>
-      <div class="form-actions" style="margin-top: 12px;">
-        <button type="button" class="secondary ghost button-inline" data-rrhh-open="registro_horario">Abrir registro horario</button>
+      <form id="workspaceRrhhAusenciaForm" class="form-grid">
+        <input type="hidden" name="id" />
+        <input type="hidden" name="workspace_id" value="${escapeHtml(state.currentWorkspaceId)}" />
+        <label class="span-2">
+          Persona
+          <select name="persona_id" ${manager ? "" : "disabled"} required>
+            ${(manager ? employees : employees.filter((row) => String(row.id || "") === selectedPersonaId))
+              .filter(Boolean)
+              .map((row) => `<option value="${row.id || ""}">${escapeHtml(row.nombre || "-")}${row.empresa_nombre ? ` · ${escapeHtml(row.empresa_nombre)}` : ""}</option>`)
+              .join("")}
+          </select>
+        </label>
+        <label>
+          Tipo
+          <select name="tipo">
+            <option>Vacaciones</option>
+            <option>Permiso</option>
+            <option>Baja</option>
+            <option>Asuntos propios</option>
+            <option>Otro</option>
+          </select>
+        </label>
+        <label>
+          Inicio
+          <input type="date" name="fecha_inicio" required />
+        </label>
+        <label>
+          Fin
+          <input type="date" name="fecha_fin" required />
+        </label>
+        <label class="span-2">
+          Motivo
+          <input name="motivo" />
+        </label>
+        <label class="span-2">
+          Comentario
+          <textarea name="comentario" rows="2"></textarea>
+        </label>
+        <div class="form-actions span-2">
+          <button type="submit">Guardar solicitud</button>
+          <button type="button" class="secondary ghost" data-rrhh-ausencia-reset>Nueva</button>
+          <span id="workspaceRrhhAusenciaStatus" class="muted"></span>
+        </div>
+      </form>
+      <div class="workspace-rrhh-list">
+        ${(ausencias || []).length
+          ? ausencias
+              .map((row) => {
+                const estado = row.estado || "-";
+                const canApprove = manager && estado === "Solicitada";
+                const canReject = manager && estado === "Solicitada";
+                const canCancel = !manager ? ["Solicitada", "Aprobada"].includes(estado) : estado === "Solicitada";
+                return `
+                  <div class="workspace-rrhh-row">
+                    <div>
+                      <strong>${escapeHtml(row.tipo || "Ausencia")}</strong>
+                      <div class="muted">${escapeHtml(row.persona_nombre || "")}${row.empresa_nombre ? ` · ${escapeHtml(row.empresa_nombre)}` : ""}</div>
+                      <div class="muted">${escapeHtml(row.fecha_inicio || "")} a ${escapeHtml(row.fecha_fin || "")} · <span class="rrhh-pill">${escapeHtml(estado)}</span></div>
+                    </div>
+                    <div class="workspace-rrhh-row-actions">
+                      <button type="button" class="secondary ghost button-inline" data-rrhh-ausencia-edit="${row.id || ""}">Editar</button>
+                      ${canApprove ? `<button type="button" class="secondary ghost button-inline" data-rrhh-ausencia-action="aprobar" data-rrhh-ausencia-id="${row.id || ""}">Aprobar</button>` : ""}
+                      ${canReject ? `<button type="button" class="secondary ghost button-inline" data-rrhh-ausencia-action="rechazar" data-rrhh-ausencia-id="${row.id || ""}">Rechazar</button>` : ""}
+                      ${canCancel ? `<button type="button" class="secondary ghost button-inline" data-rrhh-ausencia-action="cancelar" data-rrhh-ausencia-id="${row.id || ""}">Cancelar</button>` : ""}
+                    </div>
+                  </div>
+                `;
+              })
+              .join("")
+          : "<p class='muted'>Sin ausencias registradas este mes.</p>"}
       </div>
     </div>
   `;
-  workspaceRrhhHub.querySelectorAll("[data-rrhh-open]").forEach((button) => {
-    button.addEventListener("click", () => {
-      const key = button.dataset.rrhhOpen || "";
-      if (key === "registro_horario" || key === "plantilla") {
-        focusWorkspaceEngine("registro_horario", workspaceTimeSummary, { forceTenantView: true });
-        return;
+
+  const renderGastos = () => `
+    <div class="workspace-rrhh-panel-card">
+      <div class="section-head">
+        <div>
+          <h4>Gastos ${scopeAll ? "· Equipo" : ""}</h4>
+          <p class="muted">Tiquets y reembolsos. ${manager ? "Aprueba, rechaza o marca como pagado." : "Crea y cancela gastos pendientes."}</p>
+        </div>
+      </div>
+      <form id="workspaceRrhhGastoForm" class="form-grid">
+        <input type="hidden" name="id" />
+        <input type="hidden" name="workspace_id" value="${escapeHtml(state.currentWorkspaceId)}" />
+        <label class="span-2">
+          Persona
+          <select name="persona_id" ${manager ? "" : "disabled"} required>
+            ${(manager ? employees : employees.filter((row) => String(row.id || "") === selectedPersonaId))
+              .filter(Boolean)
+              .map((row) => `<option value="${row.id || ""}">${escapeHtml(row.nombre || "-")}${row.empresa_nombre ? ` · ${escapeHtml(row.empresa_nombre)}` : ""}</option>`)
+              .join("")}
+          </select>
+        </label>
+        <label>
+          Fecha
+          <input type="date" name="fecha" required />
+        </label>
+        <label>
+          Importe
+          <input type="number" step="0.01" name="importe" required />
+        </label>
+        <label>
+          Categoría
+          <input name="categoria" placeholder="Transporte, dietas..." />
+        </label>
+        <label>
+          Proveedor
+          <input name="proveedor" />
+        </label>
+        <label class="span-2">
+          Concepto
+          <input name="concepto" />
+        </label>
+        <label class="span-2">
+          Justificante
+          <input type="file" name="archivo" />
+        </label>
+        <input type="hidden" name="doc_key" />
+        <input type="hidden" name="doc_url" />
+        <div class="form-actions span-2">
+          <button type="submit">Guardar gasto</button>
+          <button type="button" class="secondary ghost" data-rrhh-gasto-reset>Nuevo</button>
+          <span id="workspaceRrhhGastoStatus" class="muted"></span>
+        </div>
+      </form>
+      <div class="workspace-rrhh-list">
+        ${(gastos || []).length
+          ? gastos
+              .map((row) => {
+                const estado = row.estado || "-";
+                const canApprove = manager && estado === "Pendiente";
+                const canReject = manager && estado === "Pendiente";
+                const canPay = manager && estado === "Aprobado";
+                const canCancel = !manager ? estado === "Pendiente" : estado === "Pendiente";
+                return `
+                  <div class="workspace-rrhh-row">
+                    <div>
+                      <strong>${escapeHtml(row.concepto || row.categoria || "Gasto")}</strong>
+                      <div class="muted">${escapeHtml(row.persona_nombre || "")}${row.empresa_nombre ? ` · ${escapeHtml(row.empresa_nombre)}` : ""}</div>
+                      <div class="muted">${escapeHtml(row.fecha || "")} · ${numberFormatter.format(Number(row.importe || 0))} € · <span class="rrhh-pill">${escapeHtml(estado)}</span></div>
+                      ${row.doc_url ? `<div class="muted"><a href="${escapeHtml(row.doc_url)}" target="_blank" rel="noreferrer">Ver justificante</a></div>` : ""}
+                    </div>
+                    <div class="workspace-rrhh-row-actions">
+                      <button type="button" class="secondary ghost button-inline" data-rrhh-gasto-edit="${row.id || ""}">Editar</button>
+                      ${canApprove ? `<button type="button" class="secondary ghost button-inline" data-rrhh-gasto-action="aprobar" data-rrhh-gasto-id="${row.id || ""}">Aprobar</button>` : ""}
+                      ${canReject ? `<button type="button" class="secondary ghost button-inline" data-rrhh-gasto-action="rechazar" data-rrhh-gasto-id="${row.id || ""}">Rechazar</button>` : ""}
+                      ${canPay ? `<button type="button" class="secondary ghost button-inline" data-rrhh-gasto-action="pagar" data-rrhh-gasto-id="${row.id || ""}">Pagado</button>` : ""}
+                      ${canCancel ? `<button type="button" class="secondary ghost button-inline" data-rrhh-gasto-action="cancelar" data-rrhh-gasto-id="${row.id || ""}">Cancelar</button>` : ""}
+                    </div>
+                  </div>
+                `;
+              })
+              .join("")
+          : "<p class='muted'>Sin gastos registrados este mes.</p>"}
+      </div>
+    </div>
+  `;
+
+  const renderDocs = () => `
+    <div class="workspace-rrhh-panel-card">
+      <div class="section-head">
+        <div>
+          <h4>Documentos ${scopeAll ? "· Equipo" : ""}</h4>
+          <p class="muted">Contratos, DNI, certificados y formaciones del equipo.</p>
+        </div>
+      </div>
+      <form id="workspaceRrhhDocForm" class="form-grid">
+        <input type="hidden" name="id" />
+        <input type="hidden" name="workspace_id" value="${escapeHtml(state.currentWorkspaceId)}" />
+        <label class="span-2">
+          Persona
+          <select name="persona_id" ${manager ? "" : "disabled"} required>
+            ${(manager ? employees : employees.filter((row) => String(row.id || "") === selectedPersonaId))
+              .filter(Boolean)
+              .map((row) => `<option value="${row.id || ""}">${escapeHtml(row.nombre || "-")}${row.empresa_nombre ? ` · ${escapeHtml(row.empresa_nombre)}` : ""}</option>`)
+              .join("")}
+          </select>
+        </label>
+        <label>
+          Tipo
+          <input name="tipo" value="Documento" />
+        </label>
+        <label>
+          Nombre
+          <input name="nombre" placeholder="Contrato, DNI, certificado..." />
+        </label>
+        <label>
+          Fecha emisión
+          <input type="date" name="fecha_emision" />
+        </label>
+        <label>
+          Fecha caducidad
+          <input type="date" name="fecha_caducidad" />
+        </label>
+        <label class="inline-check">
+          <input type="checkbox" name="permanente" />
+          Permanente
+        </label>
+        <label class="span-2">
+          Archivo
+          <input type="file" name="archivo" required />
+        </label>
+        <input type="hidden" name="doc_key" />
+        <input type="hidden" name="doc_url" />
+        <div class="form-actions span-2">
+          <button type="submit">Guardar documento</button>
+          <button type="button" class="secondary ghost" data-rrhh-doc-reset>Nuevo</button>
+          <span id="workspaceRrhhDocStatus" class="muted"></span>
+        </div>
+      </form>
+      <div class="workspace-rrhh-list">
+        ${(docs || []).length
+          ? docs
+              .map(
+                (row) => `
+                  <div class="workspace-rrhh-row">
+                    <div>
+                      <strong>${escapeHtml(row.tipo || "Documento")}${row.nombre ? ` · ${escapeHtml(row.nombre)}` : ""}</strong>
+                      <div class="muted">${escapeHtml(row.persona_nombre || "")}${row.empresa_nombre ? ` · ${escapeHtml(row.empresa_nombre)}` : ""}</div>
+                      <div class="muted">${row.fecha_emision ? `Emisión: ${escapeHtml(row.fecha_emision)}` : ""}${row.permanente ? " · Permanente" : (row.fecha_caducidad ? ` · Caduca: ${escapeHtml(row.fecha_caducidad)}` : "")}</div>
+                      ${row.doc_url ? `<div class="muted"><a href="${escapeHtml(row.doc_url)}" target="_blank" rel="noreferrer">Abrir archivo</a></div>` : ""}
+                    </div>
+                    <div class="workspace-rrhh-row-actions">
+                      <button type="button" class="secondary ghost button-inline" data-rrhh-doc-edit="${row.id || ""}">Editar</button>
+                    </div>
+                  </div>
+                `
+              )
+              .join("")
+          : "<p class='muted'>Sin documentos cargados todavía.</p>"}
+      </div>
+    </div>
+  `;
+
+  const panelHtml = tab === "plantilla" ? renderPlantilla() : tab === "ausencias" ? renderAusencias() : tab === "gastos" ? renderGastos() : renderDocs();
+
+  workspaceRrhhHub.innerHTML = `
+    <div class="workspace-rrhh-layout" data-mode="${manager ? "manager" : "employee"}">
+      <aside class="workspace-rrhh-sidebar">
+        <div class="section-head">
+          <div>
+            <h4>RRHH · ${escapeHtml(companyLabel)}</h4>
+            <p class="muted">${manager ? "Configura plantilla y gestiona solicitudes del equipo." : "Tu ficha, solicitudes y documentación."}</p>
+          </div>
+        </div>
+        <div class="workspace-rrhh-controls">
+          <label>
+            Mes
+            <input id="workspaceRrhhMonth" type="month" value="${escapeHtml(month)}" />
+          </label>
+          ${manager ? `
+            <label class="inline-check">
+              <input id="workspaceRrhhScopeAll" type="checkbox" ${scopeAll ? "checked" : ""} />
+              Ver todo el equipo
+            </label>
+          ` : ""}
+        </div>
+        ${renderEmployeeList()}
+      </aside>
+      <section class="workspace-rrhh-main">
+        ${renderTabs()}
+        ${panelHtml}
+      </section>
+    </div>
+  `;
+
+  const monthInput = document.getElementById("workspaceRrhhMonth");
+  if (monthInput) {
+    monthInput.addEventListener("change", async () => {
+      state.workspaceRrhhMonth = String(monthInput.value || "").trim();
+      await refreshWorkspaceRrhh();
+    });
+  }
+  const scopeAllInput = document.getElementById("workspaceRrhhScopeAll");
+  if (scopeAllInput) {
+    scopeAllInput.addEventListener("change", async () => {
+      state.workspaceRrhhScopeAll = Boolean(scopeAllInput.checked);
+      await refreshWorkspaceRrhh();
+    });
+  }
+
+  workspaceRrhhHub.querySelectorAll("[data-rrhh-tab]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      state.workspaceRrhhTab = normalizeWorkspaceRrhhTab(btn.dataset.rrhhTab || "plantilla");
+      renderWorkspaceRrhhHub();
+    });
+  });
+
+  workspaceRrhhHub.querySelectorAll("[data-rrhh-persona]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      state.workspaceRrhhSelectedPersonaId = btn.dataset.rrhhPersona || "";
+      state.workspaceRrhhScopeAll = false;
+      await refreshWorkspaceRrhh();
+    });
+  });
+
+  const openTime = workspaceRrhhHub.querySelector("[data-rrhh-open-time]");
+  if (openTime) {
+    openTime.addEventListener("click", () => {
+      focusWorkspaceEngine("registro_horario", workspaceTimeSummary, { forceTenantView: true });
+    });
+  }
+
+  const profileForm = document.getElementById("workspaceRrhhProfileForm");
+  if (profileForm) {
+    profileForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const status = document.getElementById("workspaceRrhhProfileStatus");
+      if (status) status.textContent = "Guardando...";
+      try {
+        const form = new FormData(profileForm);
+        const payload = Object.fromEntries(form.entries());
+        const res = await fetch("/api/workspace_rrhh_profile", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }).then((r) => r.json());
+        if (res.error) throw new Error(res.error);
+        if (status) status.textContent = "Guardado.";
+        await refreshWorkspaceRrhh();
+      } catch (err) {
+        if (status) status.textContent = err.message || "No se pudo guardar.";
       }
-      alert("Este bloque de RRHH está planificado como siguiente fase.");
+    });
+  }
+
+  const ausenciaForm = document.getElementById("workspaceRrhhAusenciaForm");
+  if (ausenciaForm) {
+    const reset = () => {
+      ausenciaForm.querySelector('[name="id"]').value = "";
+      ausenciaForm.querySelector('[name="tipo"]').value = "Vacaciones";
+      ausenciaForm.querySelector('[name="fecha_inicio"]').value = "";
+      ausenciaForm.querySelector('[name="fecha_fin"]').value = "";
+      ausenciaForm.querySelector('[name="motivo"]').value = "";
+      ausenciaForm.querySelector('[name="comentario"]').value = "";
+      if (manager && selectedPersonaId) {
+        const personaSelect = ausenciaForm.querySelector('[name="persona_id"]');
+        if (personaSelect) personaSelect.value = selectedPersonaId;
+      }
+    };
+    reset();
+    const resetBtn = workspaceRrhhHub.querySelector("[data-rrhh-ausencia-reset]");
+    if (resetBtn) resetBtn.addEventListener("click", reset);
+    ausenciaForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const status = document.getElementById("workspaceRrhhAusenciaStatus");
+      if (status) status.textContent = "Guardando...";
+      try {
+        const form = new FormData(ausenciaForm);
+        const payload = Object.fromEntries(form.entries());
+        if (!manager) payload.persona_id = selectedPersonaId;
+        const res = await fetch("/api/workspace_rrhh_ausencia", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }).then((r) => r.json());
+        if (res.error) throw new Error(res.error);
+        if (status) status.textContent = "Guardado.";
+        reset();
+        await refreshWorkspaceRrhh();
+      } catch (err) {
+        if (status) status.textContent = err.message || "No se pudo guardar.";
+      }
+    });
+  }
+
+  workspaceRrhhHub.querySelectorAll("[data-rrhh-ausencia-edit]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const id = btn.dataset.rrhhAusenciaEdit || "";
+      const row = (state.workspaceRrhhAusenciasRows || []).find((r) => String(r.id || "") === String(id));
+      const form = document.getElementById("workspaceRrhhAusenciaForm");
+      if (!form || !row) return;
+      form.querySelector('[name="id"]').value = row.id || "";
+      const personaSelect = form.querySelector('[name="persona_id"]');
+      if (personaSelect) personaSelect.value = row.persona_id || selectedPersonaId;
+      form.querySelector('[name="tipo"]').value = row.tipo || "Vacaciones";
+      form.querySelector('[name="fecha_inicio"]').value = row.fecha_inicio || "";
+      form.querySelector('[name="fecha_fin"]').value = row.fecha_fin || "";
+      form.querySelector('[name="motivo"]').value = row.motivo || "";
+      form.querySelector('[name="comentario"]').value = row.comentario || "";
+      form.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  });
+  workspaceRrhhHub.querySelectorAll("[data-rrhh-ausencia-action]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const id = btn.dataset.rrhhAusenciaId || "";
+      const action = btn.dataset.rrhhAusenciaAction || "";
+      const status = document.getElementById("workspaceRrhhAusenciaStatus");
+      if (status) status.textContent = "Actualizando...";
+      try {
+        const res = await fetch("/api/workspace_rrhh_ausencia_estado", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ workspace_id: state.currentWorkspaceId, id, action }),
+        }).then((r) => r.json());
+        if (res.error) throw new Error(res.error);
+        if (status) status.textContent = "Actualizado.";
+        await refreshWorkspaceRrhh();
+      } catch (err) {
+        if (status) status.textContent = err.message || "No se pudo actualizar.";
+      }
+    });
+  });
+
+  const gastoForm = document.getElementById("workspaceRrhhGastoForm");
+  if (gastoForm) {
+    const reset = () => {
+      gastoForm.querySelector('[name="id"]').value = "";
+      gastoForm.querySelector('[name="fecha"]').value = "";
+      gastoForm.querySelector('[name="importe"]').value = "";
+      gastoForm.querySelector('[name="categoria"]').value = "";
+      gastoForm.querySelector('[name="proveedor"]').value = "";
+      gastoForm.querySelector('[name="concepto"]').value = "";
+      gastoForm.querySelector('[name="doc_key"]').value = "";
+      gastoForm.querySelector('[name="doc_url"]').value = "";
+      const file = gastoForm.querySelector('[name="archivo"]');
+      if (file) file.value = "";
+      if (manager && selectedPersonaId) {
+        const personaSelect = gastoForm.querySelector('[name="persona_id"]');
+        if (personaSelect) personaSelect.value = selectedPersonaId;
+      }
+    };
+    reset();
+    const resetBtn = workspaceRrhhHub.querySelector("[data-rrhh-gasto-reset]");
+    if (resetBtn) resetBtn.addEventListener("click", reset);
+    const fileInput = gastoForm.querySelector('[name="archivo"]');
+    if (fileInput) {
+      fileInput.addEventListener("change", async () => {
+        const status = document.getElementById("workspaceRrhhGastoStatus");
+        const file = fileInput.files && fileInput.files[0] ? fileInput.files[0] : null;
+        if (!file) return;
+        try {
+          const upload = await uploadFileToS3(file, "rrhh", status);
+          gastoForm.querySelector('[name="doc_key"]').value = upload?.key || "";
+          gastoForm.querySelector('[name="doc_url"]').value = upload?.public_url || "";
+          if (status) status.textContent = "Justificante subido.";
+        } catch (err) {
+          if (status) status.textContent = err.message || "No se pudo subir.";
+        }
+      });
+    }
+    gastoForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const status = document.getElementById("workspaceRrhhGastoStatus");
+      if (status) status.textContent = "Guardando...";
+      try {
+        const form = new FormData(gastoForm);
+        const payload = Object.fromEntries(form.entries());
+        if (!manager) payload.persona_id = selectedPersonaId;
+        const res = await fetch("/api/workspace_rrhh_gasto", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }).then((r) => r.json());
+        if (res.error) throw new Error(res.error);
+        if (status) status.textContent = "Guardado.";
+        reset();
+        await refreshWorkspaceRrhh();
+      } catch (err) {
+        if (status) status.textContent = err.message || "No se pudo guardar.";
+      }
+    });
+  }
+
+  workspaceRrhhHub.querySelectorAll("[data-rrhh-gasto-edit]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const id = btn.dataset.rrhhGastoEdit || "";
+      const row = (state.workspaceRrhhGastosRows || []).find((r) => String(r.id || "") === String(id));
+      const form = document.getElementById("workspaceRrhhGastoForm");
+      if (!form || !row) return;
+      form.querySelector('[name="id"]').value = row.id || "";
+      const personaSelect = form.querySelector('[name="persona_id"]');
+      if (personaSelect) personaSelect.value = row.persona_id || selectedPersonaId;
+      form.querySelector('[name="fecha"]').value = row.fecha || "";
+      form.querySelector('[name="importe"]').value = row.importe != null ? String(row.importe) : "";
+      form.querySelector('[name="categoria"]').value = row.categoria || "";
+      form.querySelector('[name="proveedor"]').value = row.proveedor || "";
+      form.querySelector('[name="concepto"]').value = row.concepto || "";
+      form.querySelector('[name="doc_key"]').value = row.doc_key || "";
+      form.querySelector('[name="doc_url"]').value = row.doc_url || "";
+      form.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  });
+  workspaceRrhhHub.querySelectorAll("[data-rrhh-gasto-action]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const id = btn.dataset.rrhhGastoId || "";
+      const action = btn.dataset.rrhhGastoAction || "";
+      const status = document.getElementById("workspaceRrhhGastoStatus");
+      if (status) status.textContent = "Actualizando...";
+      try {
+        const res = await fetch("/api/workspace_rrhh_gasto_estado", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ workspace_id: state.currentWorkspaceId, id, action }),
+        }).then((r) => r.json());
+        if (res.error) throw new Error(res.error);
+        if (status) status.textContent = "Actualizado.";
+        await refreshWorkspaceRrhh();
+      } catch (err) {
+        if (status) status.textContent = err.message || "No se pudo actualizar.";
+      }
+    });
+  });
+
+  const docForm = document.getElementById("workspaceRrhhDocForm");
+  if (docForm) {
+    const reset = () => {
+      docForm.querySelector('[name="id"]').value = "";
+      docForm.querySelector('[name="tipo"]').value = "Documento";
+      docForm.querySelector('[name="nombre"]').value = "";
+      docForm.querySelector('[name="fecha_emision"]').value = "";
+      docForm.querySelector('[name="fecha_caducidad"]').value = "";
+      docForm.querySelector('[name="permanente"]').checked = false;
+      docForm.querySelector('[name="doc_key"]').value = "";
+      docForm.querySelector('[name="doc_url"]').value = "";
+      const file = docForm.querySelector('[name="archivo"]');
+      if (file) file.value = "";
+      if (manager && selectedPersonaId) {
+        const personaSelect = docForm.querySelector('[name="persona_id"]');
+        if (personaSelect) personaSelect.value = selectedPersonaId;
+      }
+    };
+    reset();
+    const resetBtn = workspaceRrhhHub.querySelector("[data-rrhh-doc-reset]");
+    if (resetBtn) resetBtn.addEventListener("click", reset);
+    const fileInput = docForm.querySelector('[name="archivo"]');
+    if (fileInput) {
+      fileInput.addEventListener("change", async () => {
+        const status = document.getElementById("workspaceRrhhDocStatus");
+        const file = fileInput.files && fileInput.files[0] ? fileInput.files[0] : null;
+        if (!file) return;
+        try {
+          const upload = await uploadFileToS3(file, "rrhh", status);
+          docForm.querySelector('[name="doc_key"]').value = upload?.key || "";
+          docForm.querySelector('[name="doc_url"]').value = upload?.public_url || "";
+          if (status) status.textContent = "Archivo subido.";
+        } catch (err) {
+          if (status) status.textContent = err.message || "No se pudo subir.";
+        }
+      });
+    }
+    docForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const status = document.getElementById("workspaceRrhhDocStatus");
+      if (status) status.textContent = "Guardando...";
+      try {
+        const form = new FormData(docForm);
+        const payload = Object.fromEntries(form.entries());
+        payload.permanente = docForm.querySelector('[name="permanente"]').checked ? "1" : "0";
+        if (!manager) payload.persona_id = selectedPersonaId;
+        const res = await fetch("/api/workspace_rrhh_documento", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }).then((r) => r.json());
+        if (res.error) throw new Error(res.error);
+        if (status) status.textContent = "Guardado.";
+        reset();
+        await refreshWorkspaceRrhh();
+      } catch (err) {
+        if (status) status.textContent = err.message || "No se pudo guardar.";
+      }
+    });
+  }
+
+  workspaceRrhhHub.querySelectorAll("[data-rrhh-doc-edit]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const id = btn.dataset.rrhhDocEdit || "";
+      const row = (state.workspaceRrhhDocsRows || []).find((r) => String(r.id || "") === String(id));
+      const form = document.getElementById("workspaceRrhhDocForm");
+      if (!form || !row) return;
+      form.querySelector('[name="id"]').value = row.id || "";
+      const personaSelect = form.querySelector('[name="persona_id"]');
+      if (personaSelect) personaSelect.value = row.persona_id || selectedPersonaId;
+      form.querySelector('[name="tipo"]').value = row.tipo || "Documento";
+      form.querySelector('[name="nombre"]').value = row.nombre || "";
+      form.querySelector('[name="fecha_emision"]').value = row.fecha_emision || "";
+      form.querySelector('[name="fecha_caducidad"]').value = row.fecha_caducidad || "";
+      form.querySelector('[name="permanente"]').checked = Number(row.permanente || 0) === 1;
+      form.querySelector('[name="doc_key"]').value = row.doc_key || "";
+      form.querySelector('[name="doc_url"]').value = row.doc_url || "";
+      form.scrollIntoView({ behavior: "smooth", block: "start" });
     });
   });
 };
@@ -8027,6 +8756,20 @@ const loadWorkspaceDetail = async (workspaceId) => {
   renderWorkspaceServiceDesks(serviceDesks || {});
   renderWorkspaceCopilotHub();
   renderWorkspaceRrhhHub();
+  if (state.currentWorkspaceView === "motores") {
+    const engine = state.currentWorkspaceEngineView || "documental";
+    if (engine === "registro_horario") {
+      if (isWorkspaceTimeManager()) {
+        await refreshWorkspaceTimeSetup();
+        await runWorkspaceTimeAlertSweep();
+      } else {
+        applyWorkspaceTimeMode();
+      }
+    }
+    if (engine === "rrhh") {
+      await refreshWorkspaceRrhh();
+    }
+  }
   fillWorkspaceBillingForm();
   fillWorkspaceBudgetForm();
   fillWorkspaceCollectionsForm();

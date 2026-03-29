@@ -1631,6 +1631,105 @@ body.crm-fin #companySummary {
   align-content: start;
 }
 
+.workspace-rrhh-layout {
+  display: grid;
+  grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.workspace-rrhh-sidebar,
+.workspace-rrhh-panel-card {
+  border: 1px solid rgba(60, 110, 113, 0.15);
+  border-radius: 16px;
+  padding: 18px;
+  background: rgba(255, 255, 255, 0.93);
+  box-shadow: 0 12px 24px rgba(43, 43, 43, 0.05);
+}
+
+.workspace-rrhh-controls {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.workspace-rrhh-employee-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.workspace-rrhh-employee {
+  display: grid;
+  gap: 4px;
+  text-align: left;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(43, 43, 43, 0.08);
+  background: rgba(255, 255, 255, 0.94);
+  cursor: pointer;
+  transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+}
+
+.workspace-rrhh-employee:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 24px rgba(43, 43, 43, 0.08);
+  border-color: rgba(60, 110, 113, 0.24);
+}
+
+.workspace-rrhh-employee.is-active {
+  border-color: rgba(60, 110, 113, 0.34);
+  background: linear-gradient(135deg, rgba(246, 251, 248, 0.98), rgba(236, 244, 239, 0.95));
+}
+
+.workspace-rrhh-employee span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.workspace-rrhh-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.workspace-rrhh-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.workspace-rrhh-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(43, 43, 43, 0.08);
+  background: rgba(255, 255, 255, 0.94);
+}
+
+.workspace-rrhh-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: flex-start;
+  justify-content: flex-end;
+}
+
+.rrhh-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(60, 110, 113, 0.18);
+  background: rgba(60, 110, 113, 0.1);
+  color: #2b2b2b;
+  font-size: 11px;
+  font-weight: 700;
+}
+
 .workspace-motores-nav #workspaceEngineTabs {
   display: grid;
   gap: 10px;
@@ -1659,19 +1758,18 @@ body.crm-fin #companySummary {
     position: static;
   }
   .workspace-motores-nav #workspaceEngineTabs {
-    display: flex;
-    flex-wrap: nowrap;
-    overflow-x: auto;
+    display: grid;
     gap: 8px;
-    padding: 6px;
-    -webkit-overflow-scrolling: touch;
-    scroll-snap-type: x proximity;
+    padding: 0;
+    overflow: visible;
   }
   .workspace-motores-nav #workspaceEngineTabs .tab {
-    width: auto;
-    min-width: max-content;
-    justify-content: center;
-    scroll-snap-align: start;
+    width: 100%;
+    min-width: 0;
+    justify-content: flex-start;
+  }
+  .workspace-rrhh-layout {
+    grid-template-columns: 1fr;
   }
 }
 

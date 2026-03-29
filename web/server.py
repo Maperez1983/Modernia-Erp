@@ -14752,6 +14752,94 @@ def ensure_workspace_product_tables(conn):
     ensure_column(conn, "workspace_registro_horario", "metodo_registro", "metodo_registro TEXT")
     conn.execute(
         """
+        CREATE TABLE IF NOT EXISTS workspace_rrhh_profile (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          persona_id TEXT NOT NULL,
+          empresa_id TEXT,
+          puesto TEXT,
+          departamento TEXT,
+          tipo_contrato TEXT,
+          fecha_inicio TEXT,
+          fecha_fin TEXT,
+          centro_trabajo TEXT,
+          notas TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          UNIQUE (workspace_id, persona_id)
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workspace_rrhh_ausencias (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          empresa_id TEXT,
+          persona_id TEXT NOT NULL,
+          tipo TEXT NOT NULL,
+          fecha_inicio TEXT NOT NULL,
+          fecha_fin TEXT NOT NULL,
+          estado TEXT NOT NULL DEFAULT 'Solicitada',
+          motivo TEXT,
+          comentario TEXT,
+          aprobado_por TEXT,
+          aprobado_at TEXT,
+          rechazado_at TEXT,
+          cancelado_at TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workspace_rrhh_gastos (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          empresa_id TEXT,
+          persona_id TEXT NOT NULL,
+          fecha TEXT NOT NULL,
+          categoria TEXT,
+          proveedor TEXT,
+          concepto TEXT,
+          importe REAL NOT NULL DEFAULT 0,
+          estado TEXT NOT NULL DEFAULT 'Pendiente',
+          doc_key TEXT,
+          doc_url TEXT,
+          notas TEXT,
+          aprobado_por TEXT,
+          aprobado_at TEXT,
+          rechazado_at TEXT,
+          pagado_at TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workspace_rrhh_documentos (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          empresa_id TEXT,
+          persona_id TEXT NOT NULL,
+          tipo TEXT NOT NULL,
+          nombre TEXT,
+          doc_key TEXT,
+          doc_url TEXT,
+          fecha_emision TEXT,
+          fecha_caducidad TEXT,
+          permanente INTEGER NOT NULL DEFAULT 0,
+          estado TEXT NOT NULL DEFAULT 'Activo',
+          notas TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS workspace_presupuestos (
           id TEXT PRIMARY KEY,
           workspace_id TEXT NOT NULL,
@@ -16716,6 +16804,112 @@ def fetch_workspace_registro_audit(conn, workspace_id, *, persona_id=None, limit
         LIMIT ?
         """,
         (*params, max(1, min(int(limit or 60), 200))),
+    ).fetchall()
+    return {"rows": [dict(row) for row in rows]}
+
+
+def fetch_workspace_rrhh_profile(conn, workspace_id, persona_id):
+    row = conn.execute(
+        """
+        SELECT p.*, COALESCE(e.nombre, '') AS empresa_nombre
+        FROM workspace_rrhh_profile p
+        LEFT JOIN empresas e ON e.id = p.empresa_id
+        WHERE p.workspace_id = ? AND p.persona_id = ?
+        LIMIT 1
+        """,
+        (workspace_id, persona_id),
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def fetch_workspace_rrhh_ausencias(conn, workspace_id, *, empresa_id=None, persona_id=None, month=None, limit=120):
+    empresa_ids = resolve_workspace_company_ids(conn, workspace_id, empresa_id=empresa_id)
+    if not empresa_ids:
+        return {"rows": []}
+    where = [f"a.workspace_id = ?", f"COALESCE(a.empresa_id, '') IN ({','.join('?' for _ in empresa_ids)})"]
+    params = [workspace_id, *empresa_ids]
+    pid = str(persona_id or "").strip()
+    if pid:
+        where.append("a.persona_id = ?")
+        params.append(pid)
+    month_text = str(month or "").strip()
+    if month_text:
+        where.append("(substr(a.fecha_inicio, 1, 7) = ? OR substr(a.fecha_fin, 1, 7) = ?)")
+        params.extend([month_text[:7], month_text[:7]])
+    rows = conn.execute(
+        f"""
+        SELECT
+          a.*,
+          COALESCE(p.nombre, '') AS persona_nombre,
+          COALESCE(e.nombre, '') AS empresa_nombre
+        FROM workspace_rrhh_ausencias a
+        LEFT JOIN workspace_registro_personal p ON p.id = a.persona_id
+        LEFT JOIN empresas e ON e.id = a.empresa_id
+        WHERE {' AND '.join(where)}
+        ORDER BY a.fecha_inicio DESC, a.created_at DESC
+        LIMIT ?
+        """,
+        (*params, max(1, min(int(limit or 120), 300))),
+    ).fetchall()
+    return {"rows": [dict(row) for row in rows]}
+
+
+def fetch_workspace_rrhh_gastos(conn, workspace_id, *, empresa_id=None, persona_id=None, month=None, limit=120):
+    empresa_ids = resolve_workspace_company_ids(conn, workspace_id, empresa_id=empresa_id)
+    if not empresa_ids:
+        return {"rows": []}
+    where = [f"g.workspace_id = ?", f"COALESCE(g.empresa_id, '') IN ({','.join('?' for _ in empresa_ids)})"]
+    params = [workspace_id, *empresa_ids]
+    pid = str(persona_id or "").strip()
+    if pid:
+        where.append("g.persona_id = ?")
+        params.append(pid)
+    month_text = str(month or "").strip()
+    if month_text:
+        where.append("substr(g.fecha, 1, 7) = ?")
+        params.append(month_text[:7])
+    rows = conn.execute(
+        f"""
+        SELECT
+          g.*,
+          COALESCE(p.nombre, '') AS persona_nombre,
+          COALESCE(e.nombre, '') AS empresa_nombre
+        FROM workspace_rrhh_gastos g
+        LEFT JOIN workspace_registro_personal p ON p.id = g.persona_id
+        LEFT JOIN empresas e ON e.id = g.empresa_id
+        WHERE {' AND '.join(where)}
+        ORDER BY g.fecha DESC, g.created_at DESC
+        LIMIT ?
+        """,
+        (*params, max(1, min(int(limit or 120), 300))),
+    ).fetchall()
+    return {"rows": [dict(row) for row in rows]}
+
+
+def fetch_workspace_rrhh_documentos(conn, workspace_id, *, empresa_id=None, persona_id=None, limit=200):
+    empresa_ids = resolve_workspace_company_ids(conn, workspace_id, empresa_id=empresa_id)
+    if not empresa_ids:
+        return {"rows": []}
+    where = [f"d.workspace_id = ?", f"COALESCE(d.empresa_id, '') IN ({','.join('?' for _ in empresa_ids)})"]
+    params = [workspace_id, *empresa_ids]
+    pid = str(persona_id or "").strip()
+    if pid:
+        where.append("d.persona_id = ?")
+        params.append(pid)
+    rows = conn.execute(
+        f"""
+        SELECT
+          d.*,
+          COALESCE(p.nombre, '') AS persona_nombre,
+          COALESCE(e.nombre, '') AS empresa_nombre
+        FROM workspace_rrhh_documentos d
+        LEFT JOIN workspace_registro_personal p ON p.id = d.persona_id
+        LEFT JOIN empresas e ON e.id = d.empresa_id
+        WHERE {' AND '.join(where)}
+        ORDER BY COALESCE(d.fecha_emision, d.created_at) DESC
+        LIMIT ?
+        """,
+        (*params, max(1, min(int(limit or 200), 400))),
     ).fetchall()
     return {"rows": [dict(row) for row in rows]}
 
@@ -19554,6 +19748,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
+        params = urllib.parse.parse_qs(parsed.query)
         if parsed.path not in (
             "/api/movimientos",
             "/api/hipotecas",
@@ -19670,6 +19865,12 @@ class Handler(BaseHTTPRequestHandler):
             "/api/workspace_registro_horario_toggle",
             "/api/workspace_registro_alerts",
             "/api/workspace_registro_usuario_toggle",
+            "/api/workspace_rrhh_profile",
+            "/api/workspace_rrhh_ausencia",
+            "/api/workspace_rrhh_ausencia_estado",
+            "/api/workspace_rrhh_gasto",
+            "/api/workspace_rrhh_gasto_estado",
+            "/api/workspace_rrhh_documento",
             "/api/workspace_presupuestos",
             "/api/workspace_fincas_comunidades",
             "/api/workspace_fincas_incidencias",
@@ -19831,7 +20032,8 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         empresa_nombre = payload.get("empresa_nombre")
-        if parsed.path not in (
+        # Workspace endpoints are scoped by workspace_id/empresa_id; do not enforce empresa_nombre.
+        if (not str(parsed.path or "").startswith("/api/workspace_")) and parsed.path not in (
             "/api/hipotecas/firmar",
             "/api/hipotecas_update",
             "/api/hipotecas_delete",
@@ -22115,6 +22317,575 @@ class Handler(BaseHTTPRequestHandler):
             )
             conn.commit()
             json_response(self, {"ok": True, "id": usuario_id, "enabled": enabled})
+            return
+        elif parsed.path == "/api/workspace_rrhh_profile":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not workspace_session_is_privileged(session):
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            persona_id = str(payload.get("persona_id") or "").strip()
+            if not workspace_id or not persona_id:
+                json_response(self, {"error": "workspace_id y persona_id requeridos"}, status=400)
+                return
+            persona_row = conn.execute(
+                "SELECT id, empresa_id FROM workspace_registro_personal WHERE workspace_id = ? AND id = ? LIMIT 1",
+                (workspace_id, persona_id),
+            ).fetchone()
+            if not persona_row:
+                json_response(self, {"error": "persona no encontrada"}, status=404)
+                return
+            empresa_id = str(payload.get("empresa_id") or persona_row["empresa_id"] or "").strip() or None
+            prev = fetch_workspace_rrhh_profile(conn, workspace_id, persona_id)
+            record = conn.execute(
+                "SELECT id FROM workspace_rrhh_profile WHERE workspace_id = ? AND persona_id = ? LIMIT 1",
+                (workspace_id, persona_id),
+            ).fetchone()
+            if record:
+                record_id = record["id"] if isinstance(record, sqlite3.Row) else record[0]
+                conn.execute(
+                    """
+                    UPDATE workspace_rrhh_profile
+                    SET empresa_id = ?, puesto = ?, departamento = ?, tipo_contrato = ?, fecha_inicio = ?, fecha_fin = ?,
+                        centro_trabajo = ?, notas = ?, updated_at = datetime(?)
+                    WHERE id = ? AND workspace_id = ?
+                    """,
+                    (
+                        empresa_id,
+                        str(payload.get("puesto") or "").strip() or None,
+                        str(payload.get("departamento") or "").strip() or None,
+                        str(payload.get("tipo_contrato") or "").strip() or None,
+                        str(payload.get("fecha_inicio") or "").strip() or None,
+                        str(payload.get("fecha_fin") or "").strip() or None,
+                        str(payload.get("centro_trabajo") or "").strip() or None,
+                        str(payload.get("notas") or "").strip() or None,
+                        now,
+                        record_id,
+                        workspace_id,
+                    ),
+                )
+            else:
+                record_id = os.urandom(16).hex()
+                conn.execute(
+                    """
+                    INSERT INTO workspace_rrhh_profile (
+                      id, workspace_id, persona_id, empresa_id, puesto, departamento, tipo_contrato,
+                      fecha_inicio, fecha_fin, centro_trabajo, notas, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                    """,
+                    (
+                        record_id,
+                        workspace_id,
+                        persona_id,
+                        empresa_id,
+                        str(payload.get("puesto") or "").strip() or None,
+                        str(payload.get("departamento") or "").strip() or None,
+                        str(payload.get("tipo_contrato") or "").strip() or None,
+                        str(payload.get("fecha_inicio") or "").strip() or None,
+                        str(payload.get("fecha_fin") or "").strip() or None,
+                        str(payload.get("centro_trabajo") or "").strip() or None,
+                        str(payload.get("notas") or "").strip() or None,
+                        now,
+                        now,
+                    ),
+                )
+            after = fetch_workspace_rrhh_profile(conn, workspace_id, persona_id) or None
+            log_workspace_registro_audit(
+                conn,
+                workspace_id,
+                empresa_id=empresa_id,
+                persona_id=persona_id,
+                entity_type="rrhh_profile",
+                entity_id=record_id,
+                action="update" if record else "create",
+                actor=session,
+                before=prev,
+                after=after,
+                now=now,
+            )
+            conn.commit()
+            json_response(self, {"ok": True, "id": record_id})
+            return
+        elif parsed.path == "/api/workspace_rrhh_ausencia":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            persona_id = str(payload.get("persona_id") or "").strip()
+            if not workspace_id or not persona_id:
+                json_response(self, {"error": "workspace_id y persona_id requeridos"}, status=400)
+                return
+            if session and not workspace_session_is_privileged(session):
+                user_id = str(session.get("user_id") or "").strip()
+                own_persona = workspace_persona_id_for_user(conn, workspace_id, user_id)
+                if not own_persona or own_persona != persona_id:
+                    json_response(self, {"error": "No autorizado"}, status=403)
+                    return
+            persona_row = conn.execute(
+                "SELECT id, empresa_id FROM workspace_registro_personal WHERE workspace_id = ? AND id = ? LIMIT 1",
+                (workspace_id, persona_id),
+            ).fetchone()
+            if not persona_row:
+                json_response(self, {"error": "persona no encontrada"}, status=404)
+                return
+            empresa_id = str(persona_row["empresa_id"] or "").strip() or None
+            record_id = str(payload.get("id") or "").strip()
+            tipo = str(payload.get("tipo") or "").strip() or "Ausencia"
+            fecha_inicio = str(payload.get("fecha_inicio") or "").strip()
+            fecha_fin = str(payload.get("fecha_fin") or "").strip()
+            if not fecha_inicio or not fecha_fin:
+                json_response(self, {"error": "fecha_inicio y fecha_fin requeridos"}, status=400)
+                return
+            prev = None
+            if record_id:
+                row = conn.execute(
+                    "SELECT * FROM workspace_rrhh_ausencias WHERE id = ? AND workspace_id = ? LIMIT 1",
+                    (record_id, workspace_id),
+                ).fetchone()
+                if not row:
+                    json_response(self, {"error": "ausencia no encontrada"}, status=404)
+                    return
+                if str(row["persona_id"] or "").strip() != persona_id:
+                    json_response(self, {"error": "persona_id no coincide"}, status=409)
+                    return
+                prev = dict(row)
+                if session and not workspace_session_is_privileged(session):
+                    if str(row["estado"] or "") != "Solicitada":
+                        json_response(self, {"error": "Solo se puede editar una solicitud pendiente"}, status=409)
+                        return
+                conn.execute(
+                    """
+                    UPDATE workspace_rrhh_ausencias
+                    SET tipo = ?, fecha_inicio = ?, fecha_fin = ?, motivo = ?, comentario = ?, updated_at = datetime(?)
+                    WHERE id = ? AND workspace_id = ?
+                    """,
+                    (
+                        tipo,
+                        fecha_inicio,
+                        fecha_fin,
+                        str(payload.get("motivo") or "").strip() or None,
+                        str(payload.get("comentario") or "").strip() or None,
+                        now,
+                        record_id,
+                        workspace_id,
+                    ),
+                )
+            else:
+                record_id = os.urandom(16).hex()
+                conn.execute(
+                    """
+                    INSERT INTO workspace_rrhh_ausencias (
+                      id, workspace_id, empresa_id, persona_id, tipo, fecha_inicio, fecha_fin, estado, motivo, comentario,
+                      aprobado_por, aprobado_at, rechazado_at, cancelado_at, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'Solicitada', ?, ?, NULL, NULL, NULL, NULL, datetime(?), datetime(?))
+                    """,
+                    (
+                        record_id,
+                        workspace_id,
+                        empresa_id,
+                        persona_id,
+                        tipo,
+                        fecha_inicio,
+                        fecha_fin,
+                        str(payload.get("motivo") or "").strip() or None,
+                        str(payload.get("comentario") or "").strip() or None,
+                        now,
+                        now,
+                    ),
+                )
+            after = conn.execute(
+                "SELECT * FROM workspace_rrhh_ausencias WHERE id = ? AND workspace_id = ? LIMIT 1",
+                (record_id, workspace_id),
+            ).fetchone()
+            log_workspace_registro_audit(
+                conn,
+                workspace_id,
+                empresa_id=empresa_id,
+                persona_id=persona_id,
+                entity_type="rrhh_ausencia",
+                entity_id=record_id,
+                action="update" if payload.get("id") else "create",
+                actor=session,
+                before=prev,
+                after=dict(after) if after else None,
+                now=now,
+            )
+            conn.commit()
+            json_response(self, {"ok": True, "id": record_id})
+            return
+        elif parsed.path == "/api/workspace_rrhh_ausencia_estado":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            record_id = str(payload.get("id") or "").strip()
+            action = normalize_lookup_text(payload.get("action") or payload.get("estado") or "")
+            if not workspace_id or not record_id or not action:
+                json_response(self, {"error": "workspace_id, id y action requeridos"}, status=400)
+                return
+            row = conn.execute(
+                "SELECT * FROM workspace_rrhh_ausencias WHERE id = ? AND workspace_id = ? LIMIT 1",
+                (record_id, workspace_id),
+            ).fetchone()
+            if not row:
+                json_response(self, {"error": "ausencia no encontrada"}, status=404)
+                return
+            persona_id = str(row["persona_id"] or "").strip()
+            empresa_id = str(row["empresa_id"] or "").strip() or None
+            prev = dict(row)
+            is_priv = workspace_session_is_privileged(session)
+            if not is_priv:
+                user_id = str(session.get("user_id") or "").strip() if session else ""
+                own_persona = workspace_persona_id_for_user(conn, workspace_id, user_id)
+                if not own_persona or own_persona != persona_id:
+                    json_response(self, {"error": "No autorizado"}, status=403)
+                    return
+                if action not in {"cancelar", "cancelado", "cancelada"}:
+                    json_response(self, {"error": "No autorizado"}, status=403)
+                    return
+            next_estado = str(row["estado"] or "Solicitada")
+            updates = []
+            values = []
+            if action in {"aprobar", "aprobada", "aprobado"}:
+                if not is_priv:
+                    json_response(self, {"error": "No autorizado"}, status=403)
+                    return
+                next_estado = "Aprobada"
+                updates.extend(["estado = ?", "aprobado_por = ?", "aprobado_at = ?"])
+                values.extend([next_estado, str(session.get("user_id") or "") if session else "", now])
+            elif action in {"rechazar", "rechazada", "rechazado"}:
+                if not is_priv:
+                    json_response(self, {"error": "No autorizado"}, status=403)
+                    return
+                next_estado = "Rechazada"
+                updates.extend(["estado = ?", "rechazado_at = ?"])
+                values.extend([next_estado, now])
+            elif action in {"cancelar", "cancelado", "cancelada"}:
+                next_estado = "Cancelada"
+                updates.extend(["estado = ?", "cancelado_at = ?"])
+                values.extend([next_estado, now])
+            else:
+                json_response(self, {"error": "action no soportada"}, status=400)
+                return
+            conn.execute(
+                f"""
+                UPDATE workspace_rrhh_ausencias
+                SET {", ".join(updates)}, updated_at = datetime(?)
+                WHERE id = ? AND workspace_id = ?
+                """,
+                (*values, now, record_id, workspace_id),
+            )
+            after = conn.execute(
+                "SELECT * FROM workspace_rrhh_ausencias WHERE id = ? AND workspace_id = ? LIMIT 1",
+                (record_id, workspace_id),
+            ).fetchone()
+            log_workspace_registro_audit(
+                conn,
+                workspace_id,
+                empresa_id=empresa_id,
+                persona_id=persona_id,
+                entity_type="rrhh_ausencia",
+                entity_id=record_id,
+                action=f"estado:{next_estado}",
+                actor=session,
+                before=prev,
+                after=dict(after) if after else None,
+                now=now,
+            )
+            conn.commit()
+            json_response(self, {"ok": True, "id": record_id, "estado": next_estado})
+            return
+        elif parsed.path == "/api/workspace_rrhh_gasto":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            persona_id = str(payload.get("persona_id") or "").strip()
+            fecha = str(payload.get("fecha") or "").strip()
+            if not workspace_id or not persona_id or not fecha:
+                json_response(self, {"error": "workspace_id, persona_id y fecha requeridos"}, status=400)
+                return
+            if session and not workspace_session_is_privileged(session):
+                user_id = str(session.get("user_id") or "").strip()
+                own_persona = workspace_persona_id_for_user(conn, workspace_id, user_id)
+                if not own_persona or own_persona != persona_id:
+                    json_response(self, {"error": "No autorizado"}, status=403)
+                    return
+            persona_row = conn.execute(
+                "SELECT id, empresa_id FROM workspace_registro_personal WHERE workspace_id = ? AND id = ? LIMIT 1",
+                (workspace_id, persona_id),
+            ).fetchone()
+            if not persona_row:
+                json_response(self, {"error": "persona no encontrada"}, status=404)
+                return
+            empresa_id = str(persona_row["empresa_id"] or "").strip() or None
+            record_id = str(payload.get("id") or "").strip()
+            prev = None
+            if record_id:
+                row = conn.execute(
+                    "SELECT * FROM workspace_rrhh_gastos WHERE id = ? AND workspace_id = ? LIMIT 1",
+                    (record_id, workspace_id),
+                ).fetchone()
+                if not row:
+                    json_response(self, {"error": "gasto no encontrado"}, status=404)
+                    return
+                if str(row["persona_id"] or "").strip() != persona_id:
+                    json_response(self, {"error": "persona_id no coincide"}, status=409)
+                    return
+                prev = dict(row)
+                if session and not workspace_session_is_privileged(session):
+                    if str(row["estado"] or "") != "Pendiente":
+                        json_response(self, {"error": "Solo se puede editar un gasto pendiente"}, status=409)
+                        return
+                conn.execute(
+                    """
+                    UPDATE workspace_rrhh_gastos
+                    SET fecha = ?, categoria = ?, proveedor = ?, concepto = ?, importe = ?, doc_key = ?, doc_url = ?, notas = ?, updated_at = datetime(?)
+                    WHERE id = ? AND workspace_id = ?
+                    """,
+                    (
+                        fecha,
+                        str(payload.get("categoria") or "").strip() or None,
+                        str(payload.get("proveedor") or "").strip() or None,
+                        str(payload.get("concepto") or "").strip() or None,
+                        round(parse_money_value(payload.get("importe")), 2) or 0.0,
+                        str(payload.get("doc_key") or "").strip() or None,
+                        str(payload.get("doc_url") or "").strip() or None,
+                        str(payload.get("notas") or "").strip() or None,
+                        now,
+                        record_id,
+                        workspace_id,
+                    ),
+                )
+            else:
+                record_id = os.urandom(16).hex()
+                conn.execute(
+                    """
+                    INSERT INTO workspace_rrhh_gastos (
+                      id, workspace_id, empresa_id, persona_id, fecha, categoria, proveedor, concepto, importe, estado,
+                      doc_key, doc_url, notas, aprobado_por, aprobado_at, rechazado_at, pagado_at, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pendiente', ?, ?, ?, NULL, NULL, NULL, NULL, datetime(?), datetime(?))
+                    """,
+                    (
+                        record_id,
+                        workspace_id,
+                        empresa_id,
+                        persona_id,
+                        fecha,
+                        str(payload.get("categoria") or "").strip() or None,
+                        str(payload.get("proveedor") or "").strip() or None,
+                        str(payload.get("concepto") or "").strip() or None,
+                        round(parse_money_value(payload.get("importe")), 2) or 0.0,
+                        str(payload.get("doc_key") or "").strip() or None,
+                        str(payload.get("doc_url") or "").strip() or None,
+                        str(payload.get("notas") or "").strip() or None,
+                        now,
+                        now,
+                    ),
+                )
+            after = conn.execute(
+                "SELECT * FROM workspace_rrhh_gastos WHERE id = ? AND workspace_id = ? LIMIT 1",
+                (record_id, workspace_id),
+            ).fetchone()
+            log_workspace_registro_audit(
+                conn,
+                workspace_id,
+                empresa_id=empresa_id,
+                persona_id=persona_id,
+                entity_type="rrhh_gasto",
+                entity_id=record_id,
+                action="update" if payload.get("id") else "create",
+                actor=session,
+                before=prev,
+                after=dict(after) if after else None,
+                now=now,
+            )
+            conn.commit()
+            json_response(self, {"ok": True, "id": record_id})
+            return
+        elif parsed.path == "/api/workspace_rrhh_gasto_estado":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            record_id = str(payload.get("id") or "").strip()
+            action = normalize_lookup_text(payload.get("action") or payload.get("estado") or "")
+            if not workspace_id or not record_id or not action:
+                json_response(self, {"error": "workspace_id, id y action requeridos"}, status=400)
+                return
+            row = conn.execute(
+                "SELECT * FROM workspace_rrhh_gastos WHERE id = ? AND workspace_id = ? LIMIT 1",
+                (record_id, workspace_id),
+            ).fetchone()
+            if not row:
+                json_response(self, {"error": "gasto no encontrado"}, status=404)
+                return
+            persona_id = str(row["persona_id"] or "").strip()
+            empresa_id = str(row["empresa_id"] or "").strip() or None
+            prev = dict(row)
+            is_priv = workspace_session_is_privileged(session)
+            if not is_priv:
+                user_id = str(session.get("user_id") or "").strip() if session else ""
+                own_persona = workspace_persona_id_for_user(conn, workspace_id, user_id)
+                if not own_persona or own_persona != persona_id:
+                    json_response(self, {"error": "No autorizado"}, status=403)
+                    return
+                if action not in {"cancelar", "cancelado", "cancelada"}:
+                    json_response(self, {"error": "No autorizado"}, status=403)
+                    return
+            next_estado = str(row["estado"] or "Pendiente")
+            updates = []
+            values = []
+            if action in {"aprobar", "aprobado", "aprobada"}:
+                if not is_priv:
+                    json_response(self, {"error": "No autorizado"}, status=403)
+                    return
+                next_estado = "Aprobado"
+                updates.extend(["estado = ?", "aprobado_por = ?", "aprobado_at = ?"])
+                values.extend([next_estado, str(session.get("user_id") or "") if session else "", now])
+            elif action in {"rechazar", "rechazado", "rechazada"}:
+                if not is_priv:
+                    json_response(self, {"error": "No autorizado"}, status=403)
+                    return
+                next_estado = "Rechazado"
+                updates.extend(["estado = ?", "rechazado_at = ?"])
+                values.extend([next_estado, now])
+            elif action in {"pagar", "pagado", "pagada"}:
+                if not is_priv:
+                    json_response(self, {"error": "No autorizado"}, status=403)
+                    return
+                next_estado = "Pagado"
+                updates.extend(["estado = ?", "pagado_at = ?"])
+                values.extend([next_estado, now])
+            elif action in {"cancelar", "cancelado", "cancelada"}:
+                next_estado = "Cancelado"
+                updates.extend(["estado = ?"])
+                values.extend([next_estado])
+            else:
+                json_response(self, {"error": "action no soportada"}, status=400)
+                return
+            conn.execute(
+                f"""
+                UPDATE workspace_rrhh_gastos
+                SET {", ".join(updates)}, updated_at = datetime(?)
+                WHERE id = ? AND workspace_id = ?
+                """,
+                (*values, now, record_id, workspace_id),
+            )
+            after = conn.execute(
+                "SELECT * FROM workspace_rrhh_gastos WHERE id = ? AND workspace_id = ? LIMIT 1",
+                (record_id, workspace_id),
+            ).fetchone()
+            log_workspace_registro_audit(
+                conn,
+                workspace_id,
+                empresa_id=empresa_id,
+                persona_id=persona_id,
+                entity_type="rrhh_gasto",
+                entity_id=record_id,
+                action=f"estado:{next_estado}",
+                actor=session,
+                before=prev,
+                after=dict(after) if after else None,
+                now=now,
+            )
+            conn.commit()
+            json_response(self, {"ok": True, "id": record_id, "estado": next_estado})
+            return
+        elif parsed.path == "/api/workspace_rrhh_documento":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            persona_id = str(payload.get("persona_id") or "").strip()
+            tipo = str(payload.get("tipo") or "").strip() or "Documento"
+            if not workspace_id or not persona_id:
+                json_response(self, {"error": "workspace_id y persona_id requeridos"}, status=400)
+                return
+            if session and not workspace_session_is_privileged(session):
+                user_id = str(session.get("user_id") or "").strip()
+                own_persona = workspace_persona_id_for_user(conn, workspace_id, user_id)
+                if not own_persona or own_persona != persona_id:
+                    json_response(self, {"error": "No autorizado"}, status=403)
+                    return
+            persona_row = conn.execute(
+                "SELECT id, empresa_id FROM workspace_registro_personal WHERE workspace_id = ? AND id = ? LIMIT 1",
+                (workspace_id, persona_id),
+            ).fetchone()
+            if not persona_row:
+                json_response(self, {"error": "persona no encontrada"}, status=404)
+                return
+            empresa_id = str(persona_row["empresa_id"] or "").strip() or None
+            record_id = str(payload.get("id") or "").strip()
+            prev = None
+            permanente = 1 if str(payload.get("permanente") or "").strip().lower() in {"1", "true", "si", "sí", "on"} else 0
+            if record_id:
+                row = conn.execute(
+                    "SELECT * FROM workspace_rrhh_documentos WHERE id = ? AND workspace_id = ? LIMIT 1",
+                    (record_id, workspace_id),
+                ).fetchone()
+                if not row:
+                    json_response(self, {"error": "documento no encontrado"}, status=404)
+                    return
+                prev = dict(row)
+                conn.execute(
+                    """
+                    UPDATE workspace_rrhh_documentos
+                    SET tipo = ?, nombre = ?, doc_key = ?, doc_url = ?, fecha_emision = ?, fecha_caducidad = ?, permanente = ?, estado = ?, notas = ?,
+                        updated_at = datetime(?)
+                    WHERE id = ? AND workspace_id = ?
+                    """,
+                    (
+                        tipo,
+                        str(payload.get("nombre") or "").strip() or None,
+                        str(payload.get("doc_key") or "").strip() or None,
+                        str(payload.get("doc_url") or "").strip() or None,
+                        str(payload.get("fecha_emision") or "").strip() or None,
+                        str(payload.get("fecha_caducidad") or "").strip() or None,
+                        permanente,
+                        str(payload.get("estado") or "").strip() or "Activo",
+                        str(payload.get("notas") or "").strip() or None,
+                        now,
+                        record_id,
+                        workspace_id,
+                    ),
+                )
+            else:
+                record_id = os.urandom(16).hex()
+                conn.execute(
+                    """
+                    INSERT INTO workspace_rrhh_documentos (
+                      id, workspace_id, empresa_id, persona_id, tipo, nombre, doc_key, doc_url, fecha_emision, fecha_caducidad,
+                      permanente, estado, notas, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                    """,
+                    (
+                        record_id,
+                        workspace_id,
+                        empresa_id,
+                        persona_id,
+                        tipo,
+                        str(payload.get("nombre") or "").strip() or None,
+                        str(payload.get("doc_key") or "").strip() or None,
+                        str(payload.get("doc_url") or "").strip() or None,
+                        str(payload.get("fecha_emision") or "").strip() or None,
+                        str(payload.get("fecha_caducidad") or "").strip() or None,
+                        permanente,
+                        str(payload.get("estado") or "").strip() or "Activo",
+                        str(payload.get("notas") or "").strip() or None,
+                        now,
+                        now,
+                    ),
+                )
+            after = conn.execute(
+                "SELECT * FROM workspace_rrhh_documentos WHERE id = ? AND workspace_id = ? LIMIT 1",
+                (record_id, workspace_id),
+            ).fetchone()
+            log_workspace_registro_audit(
+                conn,
+                workspace_id,
+                empresa_id=empresa_id,
+                persona_id=persona_id,
+                entity_type="rrhh_documento",
+                entity_id=record_id,
+                action="update" if payload.get("id") else "create",
+                actor=session,
+                before=prev,
+                after=dict(after) if after else None,
+                now=now,
+            )
+            conn.commit()
+            json_response(self, {"ok": True, "id": record_id})
             return
         elif parsed.path == "/api/workspace_registro_alerts":
             workspace_id = str(payload.get("workspace_id") or params.get("workspace_id", [""])[0] or "").strip()
@@ -28878,6 +29649,77 @@ class Handler(BaseHTTPRequestHandler):
             created = run_workspace_time_missing_sweep(conn, workspace_id)
             conn.commit()
             json_response(self, {"ok": True, "notifications": len(created), "channels": created[:12]})
+            return
+        if path == "/api/workspace_rrhh_profile":
+            workspace_id = params.get("workspace_id", [""])[0]
+            persona_id = (params.get("persona_id", [""])[0] or "").strip()
+            if not workspace_id or not persona_id:
+                json_response(self, {"error": "workspace_id y persona_id requeridos"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if session and not workspace_session_is_privileged(session):
+                user_id = str(session.get("user_id") or "").strip()
+                own_persona = workspace_persona_id_for_user(conn, workspace_id, user_id)
+                if not own_persona or own_persona != persona_id:
+                    json_response(self, {"error": "No autorizado"}, status=403)
+                    return
+            json_response(self, {"row": fetch_workspace_rrhh_profile(conn, workspace_id, persona_id) or {}})
+            return
+
+        if path == "/api/workspace_rrhh_ausencias":
+            workspace_id = params.get("workspace_id", [""])[0]
+            empresa_id = params.get("empresa_id", [""])[0]
+            month = params.get("month", [""])[0]
+            persona_id = (params.get("persona_id", [""])[0] or "").strip()
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if session and not workspace_session_is_privileged(session):
+                user_id = str(session.get("user_id") or "").strip()
+                persona_id = workspace_persona_id_for_user(conn, workspace_id, user_id)
+                empresa_id = ""
+                if not persona_id:
+                    json_response(self, {"rows": []})
+                    return
+            json_response(self, fetch_workspace_rrhh_ausencias(conn, workspace_id, empresa_id=empresa_id, persona_id=persona_id or None, month=month))
+            return
+
+        if path == "/api/workspace_rrhh_gastos":
+            workspace_id = params.get("workspace_id", [""])[0]
+            empresa_id = params.get("empresa_id", [""])[0]
+            month = params.get("month", [""])[0]
+            persona_id = (params.get("persona_id", [""])[0] or "").strip()
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if session and not workspace_session_is_privileged(session):
+                user_id = str(session.get("user_id") or "").strip()
+                persona_id = workspace_persona_id_for_user(conn, workspace_id, user_id)
+                empresa_id = ""
+                if not persona_id:
+                    json_response(self, {"rows": []})
+                    return
+            json_response(self, fetch_workspace_rrhh_gastos(conn, workspace_id, empresa_id=empresa_id, persona_id=persona_id or None, month=month))
+            return
+
+        if path == "/api/workspace_rrhh_documentos":
+            workspace_id = params.get("workspace_id", [""])[0]
+            empresa_id = params.get("empresa_id", [""])[0]
+            persona_id = (params.get("persona_id", [""])[0] or "").strip()
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if session and not workspace_session_is_privileged(session):
+                user_id = str(session.get("user_id") or "").strip()
+                persona_id = workspace_persona_id_for_user(conn, workspace_id, user_id)
+                empresa_id = ""
+                if not persona_id:
+                    json_response(self, {"rows": []})
+                    return
+            json_response(self, fetch_workspace_rrhh_documentos(conn, workspace_id, empresa_id=empresa_id, persona_id=persona_id or None))
             return
         if path == "/api/workspace_registro_horario_xml":
             workspace_id = params.get("workspace_id", [""])[0]
