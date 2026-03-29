@@ -179,6 +179,7 @@ WORKSPACE_MODULE_CATALOG = [
     {"key": "portal_cliente", "nombre": "Portal Cliente", "categoria": "motor", "sort_order": 110},
     {"key": "registro_horario", "nombre": "Registro Horario", "categoria": "motor", "sort_order": 120},
     {"key": "automatizaciones", "nombre": "Automatizaciones", "categoria": "motor", "sort_order": 130},
+    {"key": "rrhh", "nombre": "RRHH", "categoria": "motor", "sort_order": 140},
 ]
 
 WORKSPACE_PLAN_PACKAGES = {
@@ -197,7 +198,7 @@ WORKSPACE_PLAN_PACKAGES = {
     "Enterprise": {
         "label": "Enterprise",
         "pitch": "Producto multiservicio completo para tenants con automatización, portal y motores transversales listos para escalar.",
-        "focus": ["automatizaciones", "portal_cliente", "registro_horario", "facturas_recibidas", "fincas"],
+        "focus": ["automatizaciones", "portal_cliente", "registro_horario", "facturas_recibidas", "rrhh", "fincas"],
         "included": ["Automatizaciones", "Portal Cliente", "Registro Horario", "Facturas Recibidas", "Administración de Fincas"],
     },
 }
@@ -1282,6 +1283,33 @@ def bootstrap_default_workspace(conn):
                 now,
             ),
         )
+
+def ensure_workspace_catalog_modules(conn):
+    # Garantiza que workspaces existentes reciban nuevos módulos del catálogo.
+    now = datetime.now(timezone.utc).isoformat()
+    workspace_rows = conn.execute("SELECT id FROM workspaces").fetchall()
+    for ws in workspace_rows:
+        ws_id = ws["id"] if isinstance(ws, sqlite3.Row) else ws[0]
+        if not ws_id:
+            continue
+        for module in WORKSPACE_MODULE_CATALOG:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO workspace_modulos (
+                  id, workspace_id, modulo_key, modulo_nombre, categoria, enabled, sort_order, config_json, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, 1, ?, '{}', datetime(?), datetime(?))
+                """,
+                (
+                    os.urandom(16).hex(),
+                    ws_id,
+                    module["key"],
+                    module["nombre"],
+                    module["categoria"],
+                    module["sort_order"],
+                    now,
+                    now,
+                ),
+            )
 
 
 def is_gestoria_dashboard_active_state(value):
@@ -14290,6 +14318,7 @@ def ensure_tables(db_path):
     ensure_column(conn, "gestoria_facturas", "import_documento_id", "import_documento_id TEXT")
     ensure_column(conn, "gestoria_facturas", "origen_importacion", "origen_importacion TEXT")
     bootstrap_default_workspace(conn)
+    ensure_workspace_catalog_modules(conn)
     load_postal_catalog(conn)
     conn.commit()
     conn.close()
@@ -17834,10 +17863,11 @@ def fetch_workspace_detail(conn, workspace_id):
     package["enabled_modules_total"] = len(enabled_keys)
     permission_matrix = []
     profiles = [
-        ("Dirección", {"crm360", "dashboard", "documental", "gestoria", "seguros", "inmobiliaria", "financiacion", "fincas", "facturacion", "facturas_recibidas", "portal_cliente", "registro_horario", "automatizaciones"}),
-        ("Operaciones", {"crm360", "dashboard", "documental", "gestoria", "facturacion", "facturas_recibidas", "portal_cliente", "registro_horario"}),
+        ("Dirección", {"crm360", "dashboard", "documental", "gestoria", "seguros", "inmobiliaria", "financiacion", "fincas", "facturacion", "facturas_recibidas", "portal_cliente", "registro_horario", "rrhh", "automatizaciones"}),
+        ("Operaciones", {"crm360", "dashboard", "documental", "gestoria", "facturacion", "facturas_recibidas", "portal_cliente", "registro_horario", "rrhh"}),
         ("Comercial", {"crm360", "dashboard", "documental", "seguros", "inmobiliaria", "financiacion", "portal_cliente"}),
-        ("Backoffice", {"crm360", "documental", "gestoria", "facturacion", "facturas_recibidas", "fincas", "registro_horario"}),
+        ("Backoffice", {"crm360", "documental", "gestoria", "facturacion", "facturas_recibidas", "fincas", "registro_horario", "rrhh"}),
+        ("RRHH", {"crm360", "documental", "registro_horario", "rrhh"}),
     ]
     for role_name, allowed_modules in profiles:
         granted = [row["modulo_nombre"] for row in module_rows if row["modulo_key"] in enabled_keys and row["modulo_key"] in allowed_modules]

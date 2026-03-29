@@ -1331,6 +1331,7 @@ const workspacePortalRequestResetBtn = document.getElementById("workspacePortalR
 const workspacePortalRequestStatus = document.getElementById("workspacePortalRequestStatus");
 const workspacePortalRequestList = document.getElementById("workspacePortalRequestList");
 const workspaceCopilotHub = document.getElementById("workspaceCopilotHub");
+const workspaceRrhhHub = document.getElementById("workspaceRrhhHub");
 const workspaceAutomationForm = document.getElementById("workspaceAutomationForm");
 const workspaceAutomationResetBtn = document.getElementById("workspaceAutomationResetBtn");
 const workspaceAutomationStatus = document.getElementById("workspaceAutomationStatus");
@@ -3762,6 +3763,12 @@ const WORKSPACE_MODULE_STRUCTURE = {
     badge: "People ops",
     description: "Fichajes y control laboral ligados al workspace.",
   },
+  rrhh: {
+    section: "workspace_engines",
+    family: "Motor transversal",
+    badge: "People ops",
+    description: "Plantilla, ausencias, gastos y portal empleado sobre el workspace.",
+  },
   automatizaciones: {
     section: "workspace_engines",
     family: "Motor transversal",
@@ -4120,7 +4127,7 @@ const normalizeWorkspaceViewKey = (value = "") => {
 
 const normalizeWorkspaceEngineKey = (value = "") => {
   const key = String(value || "").trim().toLowerCase();
-  if (["documental", "facturacion", "facturas_recibidas", "portal_cliente", "registro_horario", "automatizaciones", "copilot"].includes(key)) {
+  if (["documental", "facturacion", "facturas_recibidas", "portal_cliente", "registro_horario", "rrhh", "automatizaciones", "copilot"].includes(key)) {
     return key;
   }
   return "documental";
@@ -4384,6 +4391,17 @@ const WORKSPACE_LAUNCHERS = {
       focusWorkspaceEngine("registro_horario", workspaceTimeSummary);
     },
   },
+  rrhh: {
+    label: "RRHH",
+    actionLabel: "Abrir",
+    action: () => {
+      if (isTenantWorkspaceMode()) {
+        focusWorkspaceEngine("rrhh", workspaceRrhhHub, { forceTenantView: true });
+        return;
+      }
+      focusWorkspaceEngine("rrhh", workspaceRrhhHub);
+    },
+  },
   automatizaciones: {
     label: "Automatizaciones",
     actionLabel: "Gestionar",
@@ -4479,11 +4497,21 @@ const WORKSPACE_HOME_CONTAINERS = [
     actionLabel: "Abrir fincas",
   },
   {
+    key: "rrhh",
+    title: "RRHH",
+    kicker: "Transversal",
+    description: "Plantilla, ausencias, gastos y documentación del equipo.",
+    modules: ["rrhh", "registro_horario", "documental"],
+    planned: ["Portal empleado · Próximo"],
+    action: WORKSPACE_LAUNCHERS.rrhh?.action || null,
+    actionLabel: "Abrir RRHH",
+  },
+  {
     key: "shared",
     title: "Motores comunes",
     kicker: "Transversal",
     description: "Capas compartidas del grupo para documental, facturación, portal, horario y automatización.",
-    modules: ["documental", "facturacion", "facturas_recibidas", "portal_cliente", "registro_horario", "automatizaciones", "copilot"],
+    modules: ["documental", "facturacion", "facturas_recibidas", "portal_cliente", "registro_horario", "rrhh", "automatizaciones", "copilot"],
     planned: [],
     action: () => focusWorkspaceEngine("documental", workspaceDocumentHub, { forceTenantView: true }),
     actionLabel: "Configurar motores",
@@ -5478,6 +5506,7 @@ const renderWorkspaceLauncher = (workspace = {}, modules = []) => {
     enabledKeys.add("facturas_recibidas");
     enabledKeys.add("portal_cliente");
     enabledKeys.add("registro_horario");
+    enabledKeys.add("rrhh");
     enabledKeys.add("automatizaciones");
     enabledKeys.add("reformas");
     if (isGrupoModerniaWorkspace() || enabledKeys.has("copilot")) {
@@ -5695,6 +5724,59 @@ const renderWorkspaceCopilotHub = () => {
       if (service === "financiacion") {
         openWorkspaceFinCopilot();
       }
+    });
+  });
+};
+
+const renderWorkspaceRrhhHub = () => {
+  if (!workspaceRrhhHub) return;
+  const employees = Array.isArray(state.workspaceTimeEmployees) ? state.workspaceTimeEmployees : [];
+  const activeCount = employees.filter((row) => Number(row.activo ?? 1) === 1).length;
+  const month = String(state.workspaceTimeMonth || "").trim();
+  const companyLabel = getWorkspaceCompanyContextLabel();
+  workspaceRrhhHub.innerHTML = `
+    <div class="workspace-home-detail-card">
+      <div class="section-head">
+        <div>
+          <h4>RRHH del workspace</h4>
+          <p class="muted">Plantilla, ausencias, gastos y documentación del equipo en ${companyLabel}.</p>
+        </div>
+      </div>
+      <div class="workspace-mini-kpis">
+        <div class="workspace-mini-kpi"><span>Personal activo</span><strong>${numberFormatter.format(activeCount)}</strong></div>
+        <div class="workspace-mini-kpi"><span>Mes operativo</span><strong>${month || "Actual"}</strong></div>
+      </div>
+      <div class="workspace-home-detail-grid" style="margin-top: 12px;">
+        <button type="button" class="workspace-home-detail-item" data-rrhh-open="plantilla">
+          <strong>Plantilla</strong>
+          <span>Ver personal y fichajes</span>
+        </button>
+        <button type="button" class="workspace-home-detail-item" data-rrhh-open="ausencias">
+          <strong>Ausencias</strong>
+          <span>Vacaciones, bajas y permisos (Próximo)</span>
+        </button>
+        <button type="button" class="workspace-home-detail-item" data-rrhh-open="gastos">
+          <strong>Gastos</strong>
+          <span>Tiquets y reembolsos (Próximo)</span>
+        </button>
+        <button type="button" class="workspace-home-detail-item" data-rrhh-open="docs">
+          <strong>Documentación</strong>
+          <span>Contratos, certificados, formaciones (Próximo)</span>
+        </button>
+      </div>
+      <div class="form-actions" style="margin-top: 12px;">
+        <button type="button" class="secondary ghost button-inline" data-rrhh-open="registro_horario">Abrir registro horario</button>
+      </div>
+    </div>
+  `;
+  workspaceRrhhHub.querySelectorAll("[data-rrhh-open]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const key = button.dataset.rrhhOpen || "";
+      if (key === "registro_horario" || key === "plantilla") {
+        focusWorkspaceEngine("registro_horario", workspaceTimeSummary, { forceTenantView: true });
+        return;
+      }
+      alert("Este bloque de RRHH está planificado como siguiente fase.");
     });
   });
 };
@@ -7944,6 +8026,7 @@ const loadWorkspaceDetail = async (workspaceId) => {
   renderWorkspaceInmoOverview(inmoOverview || {});
   renderWorkspaceServiceDesks(serviceDesks || {});
   renderWorkspaceCopilotHub();
+  renderWorkspaceRrhhHub();
   fillWorkspaceBillingForm();
   fillWorkspaceBudgetForm();
   fillWorkspaceCollectionsForm();
@@ -18428,6 +18511,8 @@ const renderTableInto = (data, container, infoEl, label) => {
       openLink.className = "ghost";
       openLink.textContent = "Ficha";
       openLink.href = `?crm=inmo&captacion=${encodeURIComponent(String(recordId || "").trim())}`;
+      // Delegamos la navegación al interceptor de links para que no dependa de un reload completo.
+      openLink.dataset.open = "captacion";
       actions.appendChild(openLink);
       [
         ["Noticia", "noticia", "ghost"],
@@ -20284,6 +20369,52 @@ const openInmuebleFromCaptacion = async (captacionId, originView = "captaciones"
   } catch (error) {
     showUiError("No se pudo abrir la ficha del inmueble", error?.message || "Error desconocido");
   }
+};
+
+let crmInmoLinkInterceptorReady = false;
+const initCrmInmoLinkInterceptor = () => {
+  if (crmInmoLinkInterceptorReady) return;
+  crmInmoLinkInterceptorReady = true;
+  // Intercepta enlaces del CRM Inmo y abre fichas dentro de la SPA.
+  // Motivo: algunos entornos terminaban en el panel general tras el reload (routing/session),
+  // dando la sensación de que "no abre". Con esto, el click siempre abre la ficha.
+  document.addEventListener(
+    "click",
+    (event) => {
+      const link = event.target?.closest?.("a[data-open]");
+      if (!link) return;
+      const openType = String(link.dataset.open || "").trim();
+      if (openType !== "captacion" && openType !== "inmueble") return;
+
+      // Permite abrir en nueva pestaña/ventana con modificadores.
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
+
+      const href = String(link.getAttribute("href") || "").trim();
+      if (!href) return;
+      let url = null;
+      try {
+        url = new URL(href, window.location.href);
+      } catch {
+        return;
+      }
+      if (url.searchParams.get("crm") !== "inmo") return;
+
+      event.preventDefault();
+      event.stopPropagation();
+
+      if (openType === "inmueble") {
+        const inmuebleId = String(url.searchParams.get("inmueble") || "").trim();
+        if (!inmuebleId) return;
+        ensureCrmOpen(() => openInmuebleDetail(inmuebleId, "resumen"));
+        return;
+      }
+
+      const captacionId = String(url.searchParams.get("captacion") || "").trim();
+      if (!captacionId) return;
+      ensureCrmOpen(() => openInmuebleFromCaptacion(captacionId, "captaciones"));
+    },
+    true
+  );
 };
 
 const resolveInmuebleDetailRef = async (rowMap = {}, fallbackId = "") => {
@@ -30230,6 +30361,7 @@ const init = async () => {
     renderCompanyCards();
     loadTable();
     updateTableVisibility();
+    initCrmInmoLinkInterceptor();
     handleRoute();
     UI?.boot(state);
     const okCount = results.filter((r) => r.status === "fulfilled").length;
