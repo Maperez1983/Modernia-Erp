@@ -5822,6 +5822,12 @@ const refreshWorkspaceRrhh = async () => {
     state.workspaceRrhhScopeAll = false;
   }
 
+  // Asegura que la lista global de usuarios esté cargada para mostrar "Usuarios del sistema" y la pestaña Usuarios.
+  if (isWorkspaceRrhhManager() && (!Array.isArray(state.usersList) || !state.usersList.length)) {
+    const users = await safeWorkspaceApi("/api/usuarios", { rows: [] });
+    state.usersList = users?.rows || [];
+  }
+
   const employees = Array.isArray(state.workspaceTimeEmployees) ? state.workspaceTimeEmployees : [];
   if (!state.workspaceRrhhSelectedPersonaId) {
     if (isWorkspaceRrhhManager()) {
@@ -5882,7 +5888,6 @@ const renderWorkspaceRrhhHub = () => {
       const haystack = `${row.nombre || ""} ${row.nif || ""} ${row.email || ""} ${row.empresa_nombre || ""}`.toLowerCase();
       return haystack.includes(search);
     });
-    const systemUsers = Array.isArray(state.workspaceTimeUsers) ? state.workspaceTimeUsers : [];
     const linkedUserIds = new Set(
       normalized
         .map((row) => String(row.usuario_id || "").trim())
@@ -5893,13 +5898,9 @@ const renderWorkspaceRrhhHub = () => {
         .filter((row) => String(row.usuario_id || "").trim())
         .map((row) => [String(row.usuario_id || "").trim(), String(row.id || "").trim()])
     );
-    const eligibleUsers = systemUsers
-      .filter((user) => Number(user.activo ?? 1) === 1)
-      .sort((a, b) => {
-        const nameA = `${a.nombre || ""} ${a.apellido || ""}`.trim();
-        const nameB = `${b.nombre || ""} ${b.apellido || ""}`.trim();
-        return nameA.localeCompare(nameB, "es", { sensitivity: "base" });
-      });
+    // Fuente de "usuarios del sistema": preferimos /api/workspace_registro_usuarios (mapeado a empresa),
+    // pero si viene vacío usamos la lista global /api/usuarios.
+    const eligibleUsers = getWorkspaceTimeEligibleUsers();
     const enabledUsers = eligibleUsers.filter((user) => Number(user.registro_horario_activo || 0) === 1);
     const empty = !normalized.length;
     const emptyHint = empty
@@ -5952,7 +5953,8 @@ const renderWorkspaceRrhhHub = () => {
                   const linked = linkedUserIds.has(String(user.id || "").trim());
                   const personaId = userToPersona.get(String(user.id || "").trim()) || "";
                   const fullName = `${user.nombre || ""} ${user.apellido || ""}`.trim() || user.usuario || user.email || "Usuario";
-                  const subtitle = `${user.servicio ? `${user.servicio}` : "Sistema"}${enabled ? " · Activo" : " · Inactivo"}`;
+                  const empresaSuffix = user.empresa_nombre ? ` · ${user.empresa_nombre}` : "";
+                  const subtitle = `${user.servicio ? `${user.servicio}` : "Sistema"}${empresaSuffix}${enabled ? " · Activo" : " · Inactivo"}`;
                   const primaryLabel = linked ? "Abrir ficha" : (enabled ? "Añadir a plantilla" : "Activar y añadir");
                   return `
                     <div class="workspace-rrhh-sysuser-row">

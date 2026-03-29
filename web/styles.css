@@ -5605,6 +5605,11 @@ body.theme-operativa section {
   overflow: hidden;
 }
 
+/* En la zona de workspaces (holdingSection) hay módulos con listas largas (RRHH, etc). */
+body.theme-operativa #holdingSection {
+  overflow: visible;
+}
+
 body.theme-operativa section::before {
   content: "";
   position: absolute;
