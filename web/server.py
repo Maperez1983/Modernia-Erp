@@ -19997,6 +19997,7 @@ def send_file(handler, path):
         data = path.read_bytes()
         handler.send_response(200)
         handler.send_header("Content-Type", content_type)
+        handler.send_header("X-Content-Type-Options", "nosniff")
         handler.send_header("Content-Length", str(len(data)))
         handler.end_headers()
         handler.wfile.write(data)
@@ -20005,6 +20006,28 @@ def send_file(handler, path):
         handler.send_header("Content-Type", "text/plain; charset=utf-8")
         handler.end_headers()
         handler.wfile.write(b"Failed to read file")
+
+
+def safe_resolve_under(base_dir, rel_path):
+    """
+    Devuelve una ruta segura dentro de `base_dir` o None si intenta salir del directorio.
+    Protege contra path traversal (../) y normaliza percent-encoding.
+    """
+    base_dir = Path(base_dir).resolve()
+    rel = str(rel_path or "")
+    rel = urllib.parse.unquote(rel)
+    rel = rel.lstrip("/").replace("\\", "/")
+    if not rel:
+        return None
+    # Bloquea patrones obvios antes de resolver.
+    if rel.startswith("../") or "/../" in rel or rel.startswith("..\\") or "\\..\\" in rel:
+        return None
+    candidate = (base_dir / rel).resolve()
+    if candidate == base_dir:
+        return None
+    if base_dir not in candidate.parents:
+        return None
+    return candidate
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -20288,17 +20311,31 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if parsed.path.startswith("/assets/"):
-            rel = parsed.path.replace("/assets/", "")
-            send_file(self, ASSETS / rel)
+            rel = parsed.path.replace("/assets/", "", 1)
+            safe_path = safe_resolve_under(ASSETS, rel)
+            if not safe_path:
+                self.send_error(404, "Not found")
+                return
+            send_file(self, safe_path)
             return
         if parsed.path.startswith("/uploads/"):
-            rel = parsed.path.replace("/uploads/", "")
-            send_file(self, UPLOADS / rel)
+            # Documentación interna: requiere sesión.
+            if not self._require_api_auth():
+                return
+            rel = parsed.path.replace("/uploads/", "", 1)
+            safe_path = safe_resolve_under(UPLOADS, rel)
+            if not safe_path:
+                self.send_error(404, "Not found")
+                return
+            send_file(self, safe_path)
             return
 
         rel_path = parsed.path.lstrip("/")
-        file_path = ROOT / rel_path
-        send_file(self, file_path)
+        safe_path = safe_resolve_under(ROOT, rel_path)
+        if not safe_path:
+            self.send_error(404, "Not found")
+            return
+        send_file(self, safe_path)
 
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
