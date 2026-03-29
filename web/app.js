@@ -1323,6 +1323,9 @@ const workspaceTimeEmployeeForm = document.getElementById("workspaceTimeEmployee
 const workspaceTimeEmployeeResetBtn = document.getElementById("workspaceTimeEmployeeResetBtn");
 const workspaceTimeEmployeeStatus = document.getElementById("workspaceTimeEmployeeStatus");
 const workspaceTimeEmployeeList = document.getElementById("workspaceTimeEmployeeList");
+const workspaceTimeEmployeeModal = document.getElementById("workspaceTimeEmployeeModal");
+const workspaceTimeEmployeeModalClose = document.getElementById("workspaceTimeEmployeeModalClose");
+const workspaceTimeEmployeeModalSubtitle = document.getElementById("workspaceTimeEmployeeModalSubtitle");
 const workspaceTimeEmployeePreview = document.getElementById("workspaceTimeEmployeePreview");
 const workspaceTimeNotifications = document.getElementById("workspaceTimeNotifications");
 const workspaceTimeExportXml = document.getElementById("workspaceTimeExportXml");
@@ -6897,6 +6900,21 @@ const fillWorkspaceTimeEmployeeForm = (record = null) => {
   if (activeInput) activeInput.checked = Number(payload.activo || 0) === 1;
 };
 
+const openWorkspaceTimeEmployeeModal = (subtitle = "") => {
+  if (!workspaceTimeEmployeeModal) return;
+  if (workspaceTimeEmployeeModalSubtitle) {
+    workspaceTimeEmployeeModalSubtitle.textContent = subtitle || "Edita jornada, horas pactadas y activación del registro horario.";
+  }
+  workspaceTimeEmployeeModal.classList.remove("hidden");
+  document.body.classList.add("modal-open");
+};
+
+const closeWorkspaceTimeEmployeeModal = () => {
+  if (!workspaceTimeEmployeeModal) return;
+  workspaceTimeEmployeeModal.classList.add("hidden");
+  document.body.classList.remove("modal-open");
+};
+
 const hydrateWorkspaceTimeEmployeeSelect = (rows = []) => {
   const select = workspaceTimeForm?.querySelector('[name="persona_id_lookup"]');
   if (!select) return;
@@ -6945,7 +6963,10 @@ const renderWorkspaceTimeEmployeeList = (rows = []) => {
   workspaceTimeEmployeeList.querySelectorAll("[data-time-employee-edit]").forEach((button) => {
     button.addEventListener("click", () => {
       const record = rows.find((row) => String(row.id || "") === String(button.dataset.timeEmployeeEdit || ""));
-      if (record) fillWorkspaceTimeEmployeeForm(record);
+      if (record) {
+        fillWorkspaceTimeEmployeeForm(record);
+        openWorkspaceTimeEmployeeModal(`Editando: ${record.nombre || "trabajador"}`);
+      }
     });
   });
   workspaceTimeEmployeeList.querySelectorAll("[data-time-employee-view]").forEach((button) => {
@@ -7077,6 +7098,7 @@ const renderWorkspaceTimeEmployeePreview = () => {
       <div class="form-actions" style="margin-top:10px;">
         <button type="button" class="secondary ghost button-inline" data-time-checkin ${canCheckIn ? "" : "disabled"}>Fichar entrada</button>
         <button type="button" class="secondary ghost button-inline" data-time-checkout ${canCheckOut ? "" : "disabled"}>Fichar salida</button>
+        <button type="button" class="secondary ghost button-inline" data-time-edit>Editar ficha</button>
       </div>
       <div class="muted" style="margin-top:10px;">Mes activo: ${month || "actual"} · Exportes desde el panel derecho.</div>
     </div>
@@ -7108,6 +7130,10 @@ const renderWorkspaceTimeEmployeePreview = () => {
   };
   workspaceTimeEmployeePreview.querySelector('[data-time-checkin]')?.addEventListener("click", () => runToggle("checkin"));
   workspaceTimeEmployeePreview.querySelector('[data-time-checkout]')?.addEventListener("click", () => runToggle("checkout"));
+  workspaceTimeEmployeePreview.querySelector('[data-time-edit]')?.addEventListener("click", () => {
+    fillWorkspaceTimeEmployeeForm(employee);
+    openWorkspaceTimeEmployeeModal(`Editando: ${employee.nombre || "trabajador"}`);
+  });
 };
 
 const findCurrentUserTimeProfile = () => {
@@ -32407,6 +32433,20 @@ if (workspaceTimeConfigForm) {
       await loadWorkspaceNotifications();
     } catch (error) {
       if (workspaceAlertStatus) workspaceAlertStatus.textContent = error.message || "No se pudo guardar la alerta.";
+    }
+  });
+}
+
+if (workspaceTimeEmployeeModalClose) {
+  workspaceTimeEmployeeModalClose.addEventListener("click", () => {
+    closeWorkspaceTimeEmployeeModal();
+  });
+}
+
+if (workspaceTimeEmployeeModal) {
+  workspaceTimeEmployeeModal.addEventListener("click", (event) => {
+    if (event.target === workspaceTimeEmployeeModal) {
+      closeWorkspaceTimeEmployeeModal();
     }
   });
 }

@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>LIV · Plataforma Operativa</title>
-    <link rel="stylesheet" href="styles.css?v=141" />
+    <link rel="stylesheet" href="styles.css?v=142" />
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600;700&family=Source+Sans+3:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" />
   </head>
   <body class="theme-operativa">
@@ -1040,8 +1040,17 @@
               <div id="workspaceTimeNotifications"></div>
             </div>
           </div>
-          <div class="workspace-time-form hidden">
-            <form id="workspaceTimeEmployeeForm" class="form-grid">
+          <div id="workspaceTimeEmployeeModal" class="modal hidden">
+            <div class="modal-content hipoteca-ficha-modal-content">
+              <div class="modal-header">
+                <div>
+                  <h3>Ficha de trabajador</h3>
+                  <p class="muted" id="workspaceTimeEmployeeModalSubtitle">Edita jornada, horas pactadas y activación del registro horario.</p>
+                </div>
+                <button type="button" id="workspaceTimeEmployeeModalClose" class="secondary ghost">Cerrar</button>
+              </div>
+              <div class="modal-body">
+                <form id="workspaceTimeEmployeeForm" class="form-grid">
               <input type="hidden" name="id" />
               <input type="hidden" name="workspace_id" />
               <input type="hidden" name="usuario_id" />
@@ -1089,75 +1098,10 @@
                 <button type="button" id="workspaceTimeEmployeeResetBtn" class="secondary ghost">Nueva</button>
                 <span id="workspaceTimeEmployeeStatus" class="muted"></span>
               </div>
-            </form>
-            <form id="workspaceTimeForm" class="form-grid">
-              <input type="hidden" name="id" />
-              <input type="hidden" name="workspace_id" />
-              <input type="hidden" name="persona_id" />
-              <label>
-                Empresa
-                <select name="empresa_id" required></select>
-              </label>
-              <label>
-                Persona registrada
-                <select name="persona_id_lookup"></select>
-              </label>
-              <label>
-                Fecha
-                <input name="fecha" type="date" required />
-              </label>
-              <label>
-                Inicio
-                <input name="hora_inicio" type="time" required />
-              </label>
-              <label>
-                Fin
-                <input name="hora_fin" type="time" />
-              </label>
-              <label>
-                Pausa min
-                <input name="pausa_min" type="number" min="0" step="1" value="0" />
-              </label>
-              <label>
-                Tipo jornada
-                <select name="tipo_jornada">
-                  <option>Completa</option>
-                  <option>Parcial</option>
-                </select>
-              </label>
-              <label>
-                Horas pactadas/día
-                <input name="horas_pactadas_dia" type="number" min="0" step="0.25" />
-              </label>
-              <label>
-                Método
-                <select name="metodo_registro">
-                  <option>Manual</option>
-                  <option>Portal empleado</option>
-                  <option>Importado</option>
-                </select>
-              </label>
-              <label>
-                Estado
-                <select name="estado">
-                  <option>Abierto</option>
-                  <option>Cerrado</option>
-                  <option>Validado</option>
-                  <option>Incidencia</option>
-                </select>
-              </label>
-              <label class="span-2">
-                Notas
-                <textarea name="notas" rows="2"></textarea>
-              </label>
-              <div class="form-actions span-2">
-                <button type="submit">Registrar fichaje</button>
-                <button type="button" id="workspaceTimeResetBtn" class="secondary ghost">Nuevo</button>
-                <span id="workspaceTimeStatus" class="muted"></span>
+                </form>
               </div>
-            </form>
+            </div>
           </div>
-          <div id="workspaceTimeList"></div>
         </div>
         <div class="workspace-central-layout crm-workspace-view" data-workspace-view="fincas">
           <div class="form-card">
@@ -6703,6 +6647,6 @@
     <script src="ui-foundation.js?v=2"></script>
     <script src="app-auth.js?v=2"></script>
     <script src="app-routing.js?v=2"></script>
-    <script src="app.js?v=351"></script>
+    <script src="app.js?v=352"></script>
   </body>
 </html>
