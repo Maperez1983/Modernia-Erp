@@ -6882,26 +6882,31 @@ const hydrateWorkspaceTimeEmployeeSelect = (rows = []) => {
 const renderWorkspaceTimeEmployeeList = (rows = []) => {
   if (!workspaceTimeEmployeeList) return;
   if (!rows.length) {
-    workspaceTimeEmployeeList.innerHTML = "<p class='muted'>Sin usuarios sincronizados todavía.</p>";
+    workspaceTimeEmployeeList.innerHTML = "<p class='muted'>Sin trabajadores activos todavía.</p>";
     return;
   }
   workspaceTimeEmployeeList.innerHTML = `
-    <div class="workspace-billing-list">
+    <div class="workspace-time-cardstack">
       ${rows
         .map(
           (row) => `
-            <div class="workspace-billing-row">
-              <div>
+            <article class="workspace-time-card ${Number(row.activo || 0) === 1 ? "" : "muted"}" data-time-persona="${row.id}">
+              <header>
                 <strong>${row.nombre || "-"}</strong>
-                <div class="muted">${row.empresa_nombre || "-"} · ${row.tipo_jornada || "Completa"}${row.horas_pactadas_dia ? ` · ${row.horas_pactadas_dia} h/día` : ""}${row.email ? ` · ${row.email}` : ""}</div>
+                <small class="muted">${row.empresa_nombre || "-"} · ${row.tipo_jornada || "Completa"}</small>
+              </header>
+              <div>
+                <span>${row.email || "-"}</span>
+                <div class="workspace-time-meta">
+                  ${row.horas_pactadas_dia ? `<span>${row.horas_pactadas_dia} h/día</span>` : ""}
+                  ${row.fecha_alta ? `<span>Alta ${row.fecha_alta}</span>` : ""}
+                </div>
               </div>
-              <div class="workspace-billing-meta">
-                <span>${Number(row.activo || 0) === 1 ? "Activo" : "Inactivo"}</span>
-                ${row.fecha_alta ? `<span>Alta ${row.fecha_alta}</span>` : ""}
-                ${row.usuario_id ? "<span>Usuario vinculado</span>" : "<span>Sin usuario</span>"}
+              <footer>
                 <button type="button" class="secondary ghost" data-time-employee-edit="${row.id}">Editar</button>
-              </div>
-            </div>
+                <button type="button" class="secondary ghost workspace-time-view" data-time-employee-view="${row.id}">Ver ficha</button>
+              </footer>
+            </article>
           `
         )
         .join("")}
@@ -6912,6 +6917,9 @@ const renderWorkspaceTimeEmployeeList = (rows = []) => {
       const record = rows.find((row) => String(row.id || "") === String(button.dataset.timeEmployeeEdit || ""));
       if (record) fillWorkspaceTimeEmployeeForm(record);
     });
+  });
+  workspaceTimeEmployeeList.querySelectorAll("[data-time-employee-view]").forEach((button) => {
+    button.addEventListener("click", () => focusWorkspaceEngine("registro_horario", workspaceTimeForm, { forceTenantView: true }));
   });
 };
 
@@ -7914,6 +7922,15 @@ const openCrmInmobiliario = () => {
   loadCrmCaptaciones();
   loadCrmInmuebles();
   loadCrmCompraventas();
+};
+
+const ensureCrmOpen = (action) => {
+  if (crmWorkspaceShell && !crmWorkspaceShell.classList.contains("hidden")) {
+    action();
+    return;
+  }
+  openCrmInmobiliario();
+  setTimeout(action, 360);
 };
 
 const openInmuebleFromAgenda = (inmuebleId) => {
@@ -18625,7 +18642,7 @@ const renderCrmActionList = (container, items = [], emptyMessage = "Sin elemento
   container.querySelectorAll("[data-inmueble-id]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const id = btn.dataset.inmuebleId || "";
-      if (id) openInmuebleDetail(id, "resumen");
+      if (id) ensureCrmOpen(() => openInmuebleDetail(id, "resumen"));
     });
   });
   container.querySelectorAll("[data-crm-view]").forEach((btn) => {
