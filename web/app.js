@@ -1268,6 +1268,7 @@ const holdingOrgChart = document.getElementById("holdingOrgChart");
 const workspaceKpis = document.getElementById("workspaceKpis");
 const workspaceViewTabs = document.getElementById("workspaceViewTabs");
 const workspaceEngineTabs = document.getElementById("workspaceEngineTabs");
+const workspaceMotoresBackBtn = document.getElementById("workspaceMotoresBackBtn");
 const workspaceCompanySwitcher = document.getElementById("workspaceCompanySwitcher");
 const workspaceOverviewHealth = document.getElementById("workspaceOverviewHealth");
 const workspaceOverviewCommercial = document.getElementById("workspaceOverviewCommercial");
@@ -1350,6 +1351,7 @@ const workspaceTimeExportBtn = document.getElementById("workspaceTimeExportBtn")
 const workspaceTimeConfigForm = document.getElementById("workspaceAlertForm");
 const workspaceAlertStatus = document.getElementById("workspaceAlertStatus");
 const workspaceTimeEmployeeForm = document.getElementById("workspaceTimeEmployeeForm");
+const workspaceTimeEmployeeNewBtn = document.getElementById("workspaceTimeEmployeeNewBtn");
 const workspaceTimeEmployeeResetBtn = document.getElementById("workspaceTimeEmployeeResetBtn");
 const workspaceTimeEmployeeStatus = document.getElementById("workspaceTimeEmployeeStatus");
 const workspaceTimeEmployeeList = document.getElementById("workspaceTimeEmployeeList");
@@ -4179,6 +4181,19 @@ workspaceEngineButtons.forEach((button) => {
   });
 });
 
+if (workspaceMotoresBackBtn) {
+  workspaceMotoresBackBtn.addEventListener("click", () => {
+    focusWorkspaceView("overview", workspaceLauncher, { scroll: true, forceTenantView: true });
+  });
+}
+
+if (workspaceTimeEmployeeNewBtn) {
+  workspaceTimeEmployeeNewBtn.addEventListener("click", () => {
+    fillWorkspaceTimeEmployeeForm(null);
+    openWorkspaceTimeEmployeeModal("Nuevo trabajador");
+  });
+}
+
 const openWorkspaceLegalCopilot = () => {
   openCrmInmobiliario();
   window.setTimeout(() => {
@@ -5409,6 +5424,22 @@ const renderWorkspaceLauncher = (workspace = {}, modules = []) => {
     workspaceLauncher.innerHTML = "<p class='muted'>No hay módulos activos en este workspace.</p>";
     return;
   }
+  const buildWorkspaceSummaryHref = (sectionKey = "") => {
+    const mode = isTenantWorkspaceMode() ? "tenant" : "platform";
+    const params = new URLSearchParams({ holding: "1", mode });
+    if (state.currentWorkspaceTarget) params.set("workspace", state.currentWorkspaceTarget);
+    if (sectionKey === "crm_core") {
+      params.set("view", "clients");
+    } else if (sectionKey === "crm_services") {
+      params.set("view", "operations");
+    } else if (sectionKey === "workspace_engines") {
+      params.set("view", "motores");
+      params.set("engine", state.currentWorkspaceEngineView || "documental");
+    } else {
+      params.set("view", "overview");
+    }
+    return `?${params.toString()}`;
+  };
   const enabledKeys = new Set(enabled.map((row) => row.modulo_key));
   if (isTenantWorkspaceMode()) {
     enabledKeys.add("crm360");
@@ -5474,21 +5505,21 @@ const renderWorkspaceLauncher = (workspace = {}, modules = []) => {
         })
         .join("")}
     </div>
-    <div id="workspaceHomeDetail"></div>
-    <div class="workspace-suite-summary">
-      ${groupWorkspaceModulesBySection(enabled)
-        .map(
-          (group) => `
-            <button type="button" class="workspace-suite-card workspace-suite-card-button" data-workspace-summary-open="${group.key}">
-              <strong>${group.title}</strong>
-              <div class="muted">${group.subtitle}</div>
-              <span>${numberFormatter.format(group.rows.length)} activos</span>
-            </button>
-          `
-        )
-        .join("")}
-    </div>
-  `;
+	    <div id="workspaceHomeDetail"></div>
+	    <div class="workspace-suite-summary">
+	      ${groupWorkspaceModulesBySection(enabled)
+	        .map(
+	          (group) => `
+	            <a class="workspace-suite-card workspace-suite-card-button" href="${buildWorkspaceSummaryHref(group.key)}" data-workspace-summary-open="${group.key}">
+	              <strong>${group.title}</strong>
+	              <div class="muted">${group.subtitle}</div>
+	              <span>${numberFormatter.format(group.rows.length)} activos</span>
+	            </a>
+	          `
+	        )
+	        .join("")}
+	    </div>
+	  `;
   workspaceLauncher.querySelectorAll("[data-workspace-home-action]").forEach((button) => {
     button.addEventListener("click", () => {
       const key = button.dataset.workspaceHomeAction || "";
@@ -5515,22 +5546,23 @@ const renderWorkspaceLauncher = (workspace = {}, modules = []) => {
       if (detail) detail.scrollIntoView({ behavior: "smooth", block: "start" });
     });
   });
-  workspaceLauncher.querySelectorAll("[data-workspace-summary-open]").forEach((button) => {
-    button.addEventListener("click", () => {
-      const key = button.dataset.workspaceSummaryOpen || "";
-      if (key === "crm_core") {
-        focusWorkspaceView("clients", workspaceClientLookup, { forceTenantView: true });
-        return;
-      }
-      if (key === "crm_services") {
-        focusWorkspaceView("operations", workspaceServiceDesks, { forceTenantView: true });
-        return;
-      }
-      if (key === "workspace_engines") {
-        focusWorkspaceEngine("documental", workspaceDocumentHub, { forceTenantView: true });
-      }
-    });
-  });
+	  workspaceLauncher.querySelectorAll("[data-workspace-summary-open]").forEach((button) => {
+	    button.addEventListener("click", (event) => {
+	      event.preventDefault();
+	      const key = button.dataset.workspaceSummaryOpen || "";
+	      if (key === "crm_core") {
+	        focusWorkspaceView("clients", workspaceClientLookup, { forceTenantView: true });
+	        return;
+	      }
+	      if (key === "crm_services") {
+	        focusWorkspaceView("operations", workspaceServiceDesks, { forceTenantView: true });
+	        return;
+	      }
+	      if (key === "workspace_engines") {
+	        focusWorkspaceEngine("documental", workspaceDocumentHub, { forceTenantView: true });
+	      }
+	    });
+	  });
 };
 
 const renderWorkspaceHomeDetail = (container, enabledKeys = new Set()) => {
@@ -18787,19 +18819,24 @@ const renderCrmKanban = (data) => {
         const rowMap = buildRowMap(row, data.columns);
         const card = document.createElement("div");
         card.className = "crm-kanban-card";
-        card.setAttribute("draggable", "true");
-        card.addEventListener("dragstart", (event) => {
-          event.dataTransfer.setData("text/plain", rowId);
-          event.dataTransfer.effectAllowed = "move";
-        });
+        // Importante: no hacemos la tarjeta "draggable" completa porque algunos navegadores
+        // se comen el click (y el usuario no puede abrir la ficha). El drag se hace con un handle.
         const captacionId = String(rowMap?.id || rowId || "").trim();
         const deepLink = `?crm=inmo&captacion=${encodeURIComponent(captacionId)}`;
         card.innerHTML = `
+          <div class="crm-kanban-handle" draggable="true" title="Arrastra para cambiar de etapa" aria-label="Arrastrar"></div>
           <div><strong>${row[propietarioIndex] || "Propietario"}</strong></div>
           <div>${row[direccionIndex] || "-"} · ${row[zonaIndex] || "-"}</div>
           <div class="muted">${row[proximaIndex] || "Sin próxima acción"}</div>
           <div class="inline-actions"><a class="ghost" href="${deepLink}" data-open="captacion">Abrir ficha</a></div>
         `;
+        const handle = card.querySelector(".crm-kanban-handle");
+        if (handle) {
+          handle.addEventListener("dragstart", (event) => {
+            event.dataTransfer.setData("text/plain", captacionId || rowId);
+            event.dataTransfer.effectAllowed = "move";
+          });
+        }
         const openBtn = card.querySelector("a[data-open]");
         if (openBtn) {
           openBtn.addEventListener("click", async (event) => {
@@ -18851,8 +18888,15 @@ const renderCrmMiniCards = (container, items = []) => {
       if (item.inmuebleId) attrs.push(`data-inmueble-id="${escapeHtml(item.inmuebleId)}"`);
       if (item.captacionId) attrs.push(`data-captacion-id="${escapeHtml(item.captacionId)}"`);
       if (item.crmView) attrs.push(`data-crm-view="${escapeHtml(item.crmView)}"`);
+      const href = item.inmuebleId
+        ? `?crm=inmo&inmueble=${encodeURIComponent(item.inmuebleId)}`
+        : item.captacionId
+          ? `?crm=inmo&captacion=${encodeURIComponent(item.captacionId)}`
+          : "";
+      const tag = href ? "a" : "div";
+      const hrefAttr = href ? ` href="${escapeHtml(href)}"` : "";
       return `
-        <div class="crm-mini-card${attrs.length ? " crm-mini-card--linkable" : ""}"${attrs.length ? ` ${attrs.join(" ")}` : ""}>
+        <${tag}${hrefAttr} class="crm-mini-card${attrs.length ? " crm-mini-card--linkable" : ""}"${attrs.length ? ` ${attrs.join(" ")}` : ""}>
           <div>
             <h4>${escapeHtml(item.title)}</h4>
             <div class="muted">${escapeHtml(item.summary || "")}</div>
@@ -18861,7 +18905,7 @@ const renderCrmMiniCards = (container, items = []) => {
             <strong>${escapeHtml(String(item.value ?? "-"))}</strong>
             <span>${escapeHtml(item.meta || "")}</span>
           </div>
-        </div>
+        </${tag}>
       `;
     })
     .join("");
@@ -18903,10 +18947,16 @@ const renderCrmActionList = (container, items = [], emptyMessage = "Sin elemento
       if (item.inmuebleId) attrs.push(`data-inmueble-id="${escapeHtml(item.inmuebleId)}"`);
       if (item.captacionId) attrs.push(`data-captacion-id="${escapeHtml(item.captacionId)}"`);
       if (item.crmView) attrs.push(`data-crm-view="${escapeHtml(item.crmView)}"`);
-      const tag = item.inmuebleId || item.captacionId || item.crmView ? "button" : "div";
+      const href = item.inmuebleId
+        ? `?crm=inmo&inmueble=${encodeURIComponent(item.inmuebleId)}`
+        : item.captacionId
+          ? `?crm=inmo&captacion=${encodeURIComponent(item.captacionId)}`
+          : "";
+      const tag = href ? "a" : item.crmView ? "button" : "div";
       const typeAttr = tag === "button" ? ' type="button"' : "";
+      const hrefAttr = tag === "a" ? ` href="${escapeHtml(href)}"` : "";
       return `
-        <${tag}${typeAttr} class="crm-focus-link"${attrs.length ? ` ${attrs.join(" ")}` : ""}>
+        <${tag}${typeAttr}${hrefAttr} class="crm-focus-link"${attrs.length ? ` ${attrs.join(" ")}` : ""}>
           <strong>${escapeHtml(item.title || "-")}</strong>
           ${item.meta ? `<span>${escapeHtml(item.meta)}</span>` : ""}
           ${item.summary ? `<span>${escapeHtml(item.summary)}</span>` : ""}

@@ -1582,7 +1582,7 @@ body.crm-fin #companySummary {
 }
 
 .workspace-suite-card strong {
-  color: var(--ink);
+  color: #1b1f1e;
   font-weight: 700;
 }
 
@@ -1595,6 +1595,69 @@ body.crm-fin #companySummary {
   grid-template-columns: minmax(280px, 1fr) minmax(320px, 420px);
   gap: 18px;
   align-items: start;
+}
+
+.workspace-motores-layout {
+  display: grid;
+  grid-template-columns: minmax(240px, 320px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.workspace-motores-nav {
+  position: sticky;
+  top: 18px;
+  align-self: start;
+}
+
+.workspace-motores-body {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+}
+
+.workspace-motores-nav #workspaceEngineTabs {
+  display: grid;
+  gap: 10px;
+  padding: 0;
+  overflow: visible;
+  flex-wrap: unset;
+}
+
+.workspace-motores-nav #workspaceEngineTabs .tab {
+  width: 100%;
+  min-width: 0;
+  justify-content: flex-start;
+}
+
+.section-head-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+@media (max-width: 900px) {
+  .workspace-motores-layout {
+    grid-template-columns: 1fr;
+  }
+  .workspace-motores-nav {
+    position: static;
+  }
+  .workspace-motores-nav #workspaceEngineTabs {
+    display: flex;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    gap: 8px;
+    padding: 6px;
+    -webkit-overflow-scrolling: touch;
+    scroll-snap-type: x proximity;
+  }
+  .workspace-motores-nav #workspaceEngineTabs .tab {
+    width: auto;
+    min-width: max-content;
+    justify-content: center;
+    scroll-snap-align: start;
+  }
 }
 
 .workspace-time-config,
@@ -4146,8 +4209,19 @@ tr.is-selected td {
   font-size: 12px;
   display: grid;
   gap: 6px;
-  cursor: grab;
+  cursor: default;
   box-shadow: 0 8px 18px rgba(34, 28, 20, 0.04);
+}
+
+.crm-kanban-handle {
+  width: 42px;
+  height: 18px;
+  border-radius: 999px;
+  border: 1px dashed rgba(60, 110, 113, 0.35);
+  background:
+    radial-gradient(circle, rgba(60, 110, 113, 0.25) 0%, rgba(60, 110, 113, 0) 65%),
+    rgba(255, 255, 255, 0.6);
+  cursor: grab;
 }
 
 .crm-timeline {
