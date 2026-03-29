@@ -2,6 +2,7 @@ vision-sa.json
 .env
 .DS_Store
 data/.DS_Store
+data/*.sqlite
 data/*.bak_*
 *.sqlite-wal
 *.sqlite-shm
@@ -9,3 +10,4 @@ data/*.bak_*
 __pycache__/
 .pytest_cache/
 web/uploads/
+reports/catastro/
