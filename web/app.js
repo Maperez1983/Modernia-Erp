@@ -744,26 +744,18 @@ const runSegurosBdtRowOcr = async (recordId, file, statusEl, rowMap = {}) => {
     if (statusEl) statusEl.textContent = `OCR aplicado. Error al subir: ${err.message}`;
   }
   try {
-    await fetch("/api/seguros_enrich", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(enrichPayload),
-    }).then((res) => res.json());
+    await apiPost("/api/seguros_enrich", enrichPayload);
   } catch {
     if (statusEl) statusEl.textContent = "OCR aplicado, pero falló al actualizar el registro.";
     return;
   }
   if (upload && upload.key) {
-    await fetch("/api/seguros_update", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        empresa_nombre: FINCAS_COMPANY,
-        id: recordId,
-        poliza_key: upload.key,
-        poliza_url: upload.public_url || "",
-      }),
-    }).then((res) => res.json());
+   await apiPost("/api/seguros_update", {
+      empresa_nombre: FINCAS_COMPANY,
+      id: recordId,
+      poliza_key: upload.key,
+      poliza_url: upload.public_url || "",
+   });
   }
   if (statusEl) statusEl.textContent = "OCR aplicado y póliza cargada.";
   loadSegurosCrm();
@@ -1237,6 +1229,8 @@ const state = {
   workspaceRrhhSelectedPersonaId: "",
   workspaceRrhhMonth: "",
   workspaceRrhhScopeAll: false,
+  workspaceRrhhShowInactive: false,
+  workspaceRrhhEmployeeSearch: "",
   workspaceRrhhProfileRow: null,
   workspaceRrhhAusenciasRows: [],
   workspaceRrhhGastosRows: [],
@@ -5868,24 +5862,116 @@ const renderWorkspaceRrhhHub = () => {
 
   const renderEmployeeList = () => {
     if (!manager) return "";
-    if (!employees.length) {
-      return "<p class='muted'>Sin personal todavía. Activa usuarios en Registro horario o crea un trabajador nuevo.</p>";
-    }
+    const search = String(state.workspaceRrhhEmployeeSearch || "").trim().toLowerCase();
+    const showInactive = Boolean(state.workspaceRrhhShowInactive);
+    const normalized = (employees || []).filter(Boolean);
+    const activeCount = normalized.filter((row) => Number(row.activo ?? 1) === 1).length;
+    const filtered = normalized.filter((row) => {
+      const isActive = Number(row.activo ?? 1) === 1;
+      if (!showInactive && !isActive) return false;
+      if (!search) return true;
+      const haystack = `${row.nombre || ""} ${row.nif || ""} ${row.email || ""} ${row.empresa_nombre || ""}`.toLowerCase();
+      return haystack.includes(search);
+    });
+    const systemUsers = Array.isArray(state.workspaceTimeUsers) ? state.workspaceTimeUsers : [];
+    const linkedUserIds = new Set(
+      normalized
+        .map((row) => String(row.usuario_id || "").trim())
+        .filter(Boolean)
+    );
+    const userToPersona = new Map(
+      normalized
+        .filter((row) => String(row.usuario_id || "").trim())
+        .map((row) => [String(row.usuario_id || "").trim(), String(row.id || "").trim()])
+    );
+    const eligibleUsers = systemUsers
+      .filter((user) => Number(user.activo ?? 1) === 1)
+      .sort((a, b) => {
+        const nameA = `${a.nombre || ""} ${a.apellido || ""}`.trim();
+        const nameB = `${b.nombre || ""} ${b.apellido || ""}`.trim();
+        return nameA.localeCompare(nameB, "es", { sensitivity: "base" });
+      });
+    const enabledUsers = eligibleUsers.filter((user) => Number(user.registro_horario_activo || 0) === 1);
+    const empty = !normalized.length;
+    const emptyHint = empty
+      ? `
+        <div class="workspace-rrhh-empty">
+          <p class="muted">Sin empleados todavía en este workspace.</p>
+          <p class="muted">Puedes dar de alta un empleado manual o activar un usuario del sistema para que se sincronice con la plantilla.</p>
+        </div>
+      `
+      : "";
     return `
+      <div class="workspace-rrhh-sidebar-summary">
+        <strong>Plantilla</strong>
+        <span class="muted">${numberFormatter.format(activeCount)} activos · ${numberFormatter.format(normalized.length)} total</span>
+      </div>
+      <div class="workspace-rrhh-sidebar-actions">
+        <button type="button" class="secondary ghost" data-rrhh-employee-new>Alta empleado</button>
+        <button type="button" class="secondary ghost" data-rrhh-open-time>Registro horario</button>
+      </div>
+      <label class="workspace-rrhh-search">
+        Buscar
+        <input id="workspaceRrhhEmployeeSearch" value="${escapeHtml(state.workspaceRrhhEmployeeSearch || "")}" placeholder="Nombre, DNI, email..." />
+      </label>
+      <label class="inline-check">
+        <input id="workspaceRrhhShowInactive" type="checkbox" ${showInactive ? "checked" : ""} />
+        Ver inactivos
+      </label>
+      ${emptyHint}
       <div class="workspace-rrhh-employee-list">
-        ${employees
-          .filter((row) => Number(row.activo ?? 1) === 1)
+        ${(filtered.length ? filtered : normalized.filter((row) => Number(row.activo ?? 1) === 1))
           .map((row) => {
             const active = String(row.id || "") === selectedPersonaId;
+            const inactive = Number(row.activo ?? 1) !== 1;
             return `
-              <button type="button" class="workspace-rrhh-employee${active ? " is-active" : ""}" data-rrhh-persona="${row.id || ""}">
+              <button type="button" class="workspace-rrhh-employee${active ? " is-active" : ""}${inactive ? " is-inactive" : ""}" data-rrhh-persona="${row.id || ""}">
                 <strong>${escapeHtml(row.nombre || "-")}</strong>
-                <span>${escapeHtml(row.empresa_nombre || row.empresa || "")}${row.usuario_id ? " · Vinculado" : ""}</span>
+                <span>${escapeHtml(row.empresa_nombre || row.empresa || "")}${row.usuario_id ? " · Vinculado" : ""}${inactive ? " · Inactivo" : ""}</span>
               </button>
             `;
           })
           .join("")}
       </div>
+      <details class="workspace-rrhh-sysusers" ${empty ? "open" : ""}>
+        <summary>Usuarios del sistema (${numberFormatter.format(enabledUsers.length)} activos)</summary>
+        <div class="workspace-rrhh-sysuser-list">
+          ${eligibleUsers.length
+            ? eligibleUsers
+                .map((user) => {
+                  const enabled = Number(user.registro_horario_activo || 0) === 1;
+                  const linked = linkedUserIds.has(String(user.id || "").trim());
+                  const personaId = userToPersona.get(String(user.id || "").trim()) || "";
+                  const fullName = `${user.nombre || ""} ${user.apellido || ""}`.trim() || user.usuario || user.email || "Usuario";
+                  const subtitle = `${user.servicio ? `${user.servicio}` : "Sistema"}${enabled ? " · Activo" : " · Inactivo"}`;
+                  const primaryLabel = linked ? "Abrir ficha" : (enabled ? "Añadir a plantilla" : "Activar y añadir");
+                  return `
+                    <div class="workspace-rrhh-sysuser-row">
+                      <div>
+                        <strong>${escapeHtml(fullName)}</strong>
+                        <div class="muted">${escapeHtml(subtitle)}</div>
+                      </div>
+                      <div class="workspace-rrhh-sysuser-actions">
+                        <button
+                          type="button"
+                          class="secondary ghost button-inline"
+                          data-rrhh-sysuser-primary="${escapeHtml(String(user.id || ""))}"
+                          data-rrhh-sysuser-persona="${escapeHtml(personaId)}"
+                        >${escapeHtml(primaryLabel)}</button>
+                        <button
+                          type="button"
+                          class="secondary ghost button-inline"
+                          data-rrhh-sysuser-toggle="${escapeHtml(String(user.id || ""))}"
+                          data-rrhh-sysuser-next="${enabled ? "0" : "1"}"
+                        >${enabled ? "Desactivar" : "Activar"}</button>
+                      </div>
+                    </div>
+                  `;
+                })
+                .join("")
+            : "<p class='muted'>No hay usuarios disponibles.</p>"}
+        </div>
+      </details>
     `;
   };
 
@@ -5927,9 +6013,18 @@ const renderWorkspaceRrhhHub = () => {
           <p class="muted">Ficha laboral y accesos directos al registro horario.</p>
         </div>
         <div class="section-head-actions">
+          ${manager && selectedEmployee && !scopeAll ? `<button type="button" class="secondary ghost button-inline" data-rrhh-employee-edit="${escapeHtml(selectedEmployee.id || "")}">Editar empleado</button>` : ""}
           <button type="button" class="secondary ghost button-inline" data-rrhh-open-time>Ver registro horario</button>
         </div>
       </div>
+      ${selectedEmployee && !scopeAll ? `
+        <div class="workspace-rrhh-employee-kv">
+          <div><span class="muted">Empresa</span><strong>${escapeHtml(selectedEmployee.empresa_nombre || "-")}</strong></div>
+          <div><span class="muted">DNI</span><strong>${escapeHtml(selectedEmployee.nif || "-")}</strong></div>
+          <div><span class="muted">Email</span><strong>${escapeHtml(selectedEmployee.email || "-")}</strong></div>
+          <div><span class="muted">Jornada</span><strong>${escapeHtml(selectedEmployee.tipo_jornada || "Completa")}${selectedEmployee.horas_pactadas_dia ? ` · ${escapeHtml(String(selectedEmployee.horas_pactadas_dia))} h/día` : ""}</strong></div>
+        </div>
+      ` : ""}
       ${!selectedPersonaId && !scopeAll ? "<p class='muted'>Selecciona un empleado.</p>" : ""}
       <form id="workspaceRrhhProfileForm" class="form-grid ${!manager || !selectedPersonaId || scopeAll ? "hidden" : ""}">
         <input type="hidden" name="workspace_id" value="${escapeHtml(state.currentWorkspaceId)}" />
@@ -6276,12 +6371,104 @@ const renderWorkspaceRrhhHub = () => {
     });
   });
 
-  const openTime = workspaceRrhhHub.querySelector("[data-rrhh-open-time]");
-  if (openTime) {
-    openTime.addEventListener("click", () => {
+  workspaceRrhhHub.querySelectorAll("[data-rrhh-open-time]").forEach((button) => {
+    button.addEventListener("click", () => {
       focusWorkspaceEngine("registro_horario", workspaceTimeSummary, { forceTenantView: true });
     });
+  });
+
+  const employeeSearch = workspaceRrhhHub.querySelector("#workspaceRrhhEmployeeSearch");
+  if (employeeSearch) {
+    employeeSearch.addEventListener("input", () => {
+      state.workspaceRrhhEmployeeSearch = String(employeeSearch.value || "");
+      renderWorkspaceRrhhHub();
+    });
   }
+  const showInactive = workspaceRrhhHub.querySelector("#workspaceRrhhShowInactive");
+  if (showInactive) {
+    showInactive.addEventListener("change", () => {
+      state.workspaceRrhhShowInactive = Boolean(showInactive.checked);
+      renderWorkspaceRrhhHub();
+    });
+  }
+
+  workspaceRrhhHub.querySelectorAll("[data-rrhh-employee-new]").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (!isWorkspaceRrhhManager()) return;
+      fillWorkspaceTimeEmployeeForm(null);
+      openWorkspaceTimeEmployeeModal("Alta de empleado: crea la ficha y, si quieres, vincúlala a un usuario del sistema.");
+    });
+  });
+
+  workspaceRrhhHub.querySelectorAll("[data-rrhh-employee-edit]").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (!isWorkspaceRrhhManager()) return;
+      const personaId = String(button.dataset.rrhhEmployeeEdit || "").trim();
+      const rows = Array.isArray(state.workspaceTimeEmployees) ? state.workspaceTimeEmployees : [];
+      const record = rows.find((row) => String(row.id || "") === personaId) || null;
+      if (!record) return;
+      fillWorkspaceTimeEmployeeForm(record);
+      openWorkspaceTimeEmployeeModal(`Editando: ${record.nombre || "empleado"}`);
+    });
+  });
+
+  workspaceRrhhHub.querySelectorAll("[data-rrhh-sysuser-primary]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      if (!isWorkspaceRrhhManager()) return;
+      const userId = String(button.dataset.rrhhSysuserPrimary || "").trim();
+      const personaId = String(button.dataset.rrhhSysuserPersona || "").trim();
+      if (!userId) return;
+      if (personaId) {
+        state.workspaceRrhhSelectedPersonaId = personaId;
+        state.workspaceRrhhScopeAll = false;
+        await refreshWorkspaceRrhh();
+        return;
+      }
+      button.disabled = true;
+      try {
+        const res = await fetch("/api/workspace_registro_usuario_toggle", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ workspace_id: state.currentWorkspaceId, usuario_id: userId, enabled: 1 }),
+        }).then((r) => r.json());
+        if (res?.error) throw new Error(res.error);
+        await loadWorkspaceDetail(state.currentWorkspaceId);
+        const rows = Array.isArray(state.workspaceTimeEmployees) ? state.workspaceTimeEmployees : [];
+        const linked = rows.find((row) => String(row.usuario_id || "").trim() === userId) || null;
+        if (linked) {
+          state.workspaceRrhhSelectedPersonaId = linked.id || "";
+          state.workspaceRrhhScopeAll = false;
+          await refreshWorkspaceRrhh();
+        }
+      } catch (error) {
+        alert(error.message || "No se pudo añadir el usuario a la plantilla.");
+      } finally {
+        button.disabled = false;
+      }
+    });
+  });
+
+  workspaceRrhhHub.querySelectorAll("[data-rrhh-sysuser-toggle]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      if (!isWorkspaceRrhhManager()) return;
+      const userId = String(button.dataset.rrhhSysuserToggle || "").trim();
+      const next = Number(button.dataset.rrhhSysuserNext || 0) === 1 ? 1 : 0;
+      if (!userId) return;
+      button.disabled = true;
+      try {
+        const res = await fetch("/api/workspace_registro_usuario_toggle", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ workspace_id: state.currentWorkspaceId, usuario_id: userId, enabled: next }),
+        }).then((r) => r.json());
+        if (res?.error) throw new Error(res.error);
+        await loadWorkspaceDetail(state.currentWorkspaceId);
+      } catch (error) {
+        alert(error.message || "No se pudo actualizar el usuario.");
+        button.disabled = false;
+      }
+    });
+  });
 
   const profileForm = document.getElementById("workspaceRrhhProfileForm");
   if (profileForm) {

@@ -1658,6 +1658,33 @@ body.crm-fin #companySummary {
   margin-top: 10px;
 }
 
+.workspace-rrhh-sidebar-summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.workspace-rrhh-sidebar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.workspace-rrhh-search input {
+  width: 100%;
+}
+
+.workspace-rrhh-empty {
+  margin-top: 10px;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px dashed rgba(60, 110, 113, 0.28);
+  background: rgba(246, 251, 248, 0.6);
+}
+
 .workspace-rrhh-employee-list {
   display: grid;
   gap: 8px;
@@ -1687,9 +1714,68 @@ body.crm-fin #companySummary {
   background: linear-gradient(135deg, rgba(246, 251, 248, 0.98), rgba(236, 244, 239, 0.95));
 }
 
+.workspace-rrhh-employee.is-inactive {
+  opacity: 0.8;
+}
+
 .workspace-rrhh-employee span {
   color: var(--muted);
   font-size: 12px;
+}
+
+.workspace-rrhh-sysusers {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(43, 43, 43, 0.08);
+}
+
+.workspace-rrhh-sysusers summary {
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.workspace-rrhh-sysuser-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.workspace-rrhh-sysuser-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(43, 43, 43, 0.08);
+  background: rgba(255, 255, 255, 0.94);
+}
+
+.workspace-rrhh-sysuser-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+  align-items: flex-start;
+}
+
+.workspace-rrhh-employee-kv {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 16px;
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(43, 43, 43, 0.08);
+  background: rgba(253, 251, 247, 0.78);
+}
+
+.workspace-rrhh-employee-kv > div {
+  display: grid;
+  gap: 4px;
+}
+
+.workspace-rrhh-employee-kv span {
+  font-size: 11px;
 }
 
 .workspace-rrhh-tabs {
@@ -1774,6 +1860,18 @@ body.crm-fin #companySummary {
     justify-content: flex-start;
   }
   .workspace-rrhh-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 560px) {
+  .workspace-rrhh-sysuser-row {
+    flex-direction: column;
+  }
+  .workspace-rrhh-sysuser-actions {
+    justify-content: flex-start;
+  }
+  .workspace-rrhh-employee-kv {
     grid-template-columns: 1fr;
   }
 }

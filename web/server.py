@@ -30818,7 +30818,11 @@ class Handler(BaseHTTPRequestHandler):
                     if isinstance(result, dict):
                         result = dict(result)
                         result.setdefault("query_used", candidate)
-                        result.setdefault("query_attempts", candidates)
+                        existing_attempts = result.get("query_attempts")
+                        if not isinstance(existing_attempts, list) or not existing_attempts:
+                            result["query_attempts"] = list(candidates)
+                        if result.get("queries") is None:
+                            result["queries"] = []
                     json_response(self, result)
                     return
                 except ValueError as exc:
