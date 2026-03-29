@@ -17933,7 +17933,7 @@ const renderTableInto = (data, container, infoEl, label) => {
       openBtn.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
-        const inmuebleId = String(rowMap.inmueble_id || "").trim();
+        const inmuebleId = resolveInmuebleDetailRef(rowMap, recordId);
         if (!inmuebleId) {
           alert("La captación no tiene inmueble vinculado.");
           return;
@@ -17969,7 +17969,7 @@ const renderTableInto = (data, container, infoEl, label) => {
         if (event.target && event.target.closest("button, input, select, a")) {
           return;
         }
-        const inmuebleId = String(rowMap.inmueble_id || "").trim();
+        const inmuebleId = resolveInmuebleDetailRef(rowMap, recordId);
         if (!inmuebleId) {
           return;
         }
@@ -18506,7 +18506,7 @@ const renderCrmKanban = (data) => {
           openBtn.addEventListener("click", (event) => {
             event.preventDefault();
             event.stopPropagation();
-            const inmuebleId = String(rowMap.inmueble_id || "").trim();
+            const inmuebleId = resolveInmuebleDetailRef(rowMap, rowId);
             if (!inmuebleId) {
               alert("La captación no tiene inmueble vinculado.");
               return;
@@ -19709,6 +19709,9 @@ const setInmuebleTab = (tab) => {
   if (inmuebleTabDocs) inmuebleTabDocs.classList.toggle("hidden", tab !== "docs");
   if (inmuebleTabEstado) inmuebleTabEstado.classList.toggle("hidden", tab !== "estado");
 };
+
+const resolveInmuebleDetailRef = (rowMap = {}, fallbackId = "") =>
+  String(rowMap?.inmueble_id || rowMap?.id || fallbackId || "").trim();
 
 const openInmuebleDetail = (id, originView = "") => {
   if (!inmuebleDetail) return;

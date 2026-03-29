@@ -30348,6 +30348,22 @@ class Handler(BaseHTTPRequestHandler):
                 (inmueble_id,),
             ).fetchone()
             if not inmueble:
+                captacion_ref = conn.execute(
+                    """
+                    SELECT inmueble_id
+                    FROM captaciones
+                    WHERE id = ?
+                    LIMIT 1
+                    """,
+                    (inmueble_id,),
+                ).fetchone()
+                if captacion_ref and str(captacion_ref["inmueble_id"] or "").strip():
+                    inmueble_id = str(captacion_ref["inmueble_id"]).strip()
+                    inmueble = conn.execute(
+                        "SELECT * FROM inmuebles WHERE id = ?",
+                        (inmueble_id,),
+                    ).fetchone()
+            if not inmueble:
                 json_response(self, {"error": "Inmueble no encontrado"}, status=404)
                 return
             propietarios = conn.execute(
