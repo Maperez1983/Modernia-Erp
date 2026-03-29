@@ -10077,29 +10077,9 @@ const updateBdtFiltersVisibility = () => {
   if (!bdtYearFilter || !bdtFieldFilter) {
     return;
   }
-  const selectedCompany =
-    state.currentEmpresaName ||
-    state.empresas.find((e) => e.id === empresaSelect.value)?.nombre;
-  const show =
-    currentTab === "bdt" &&
-    selectedCompany === DASHBOARD_COMPANY &&
-    tablaSelect.value === "movimientos";
-  bdtYearFilter.classList.toggle("hidden", !show);
-  bdtFieldFilter.classList.toggle("hidden", !show);
-  if (!show) {
-    return;
-  }
-  const currentYear = String(new Date().getFullYear());
-  if (!bdtYearFilter.options.length) {
-    const years = state.homeYears.length ? state.homeYears : [currentYear];
-    bdtYearFilter.innerHTML = "";
-    years.forEach((year) => {
-      bdtYearFilter.appendChild(createOption(year, year));
-    });
-  }
-  if (!bdtYearFilter.value) {
-    bdtYearFilter.value = currentYear;
-  }
+  // BDT eliminado: estos filtros eran específicos del explorador legacy.
+  bdtYearFilter.classList.add("hidden");
+  bdtFieldFilter.classList.add("hidden");
 };
 
 const setModule = (moduleName) => {
@@ -15659,19 +15639,9 @@ const updateFincasBdtTabs = () => {
   if (!fincasBdtTabs || !tablaSelect) {
     return;
   }
-  const company =
-    state.currentEmpresaName ||
-    state.empresas.find((e) => e.id === empresaSelect.value)?.nombre;
-  const showTabs = currentTab === "bdt" && company === FINCAS_COMPANY;
-  fincasBdtTabs.classList.toggle("hidden", !showTabs);
-  tablaSelect.classList.toggle("hidden", showTabs);
-  if (!showTabs) {
-    return;
-  }
-  const activeTable = tablaSelect.value || "movimientos";
-  fincasBdtTabs.querySelectorAll(".tab").forEach((btn) => {
-    btn.classList.toggle("active", btn.dataset.table === activeTable);
-  });
+  // BDT eliminado: este sub-tab ya no aplica.
+  fincasBdtTabs.classList.add("hidden");
+  tablaSelect.classList.remove("hidden");
 };
 
 const updateEstudioAltaTabs = () => {
@@ -31499,53 +31469,17 @@ const loadTable = () => {
   }
   const empresaId = empresaSelect.value || "";
   const selectedCompany = state.currentEmpresaName || state.empresas.find((e) => e.id === empresaId)?.nombre;
-  let tabla =
-    tablaSelect.value ||
-    (currentTab === "bdt"
-      ? (selectedCompany === FIN_COMPANY ? "hipotecas" : "movimientos")
-      : state.tablas.find((t) => t !== "movimientos"));
-  if (currentTab === "bdt" && selectedCompany === FIN_COMPANY) {
-    tabla = "hipotecas";
-    tablaSelect.value = "hipotecas";
-  }
+  let tabla = tablaSelect.value || state.tablas.find((t) => t !== "movimientos");
   if (currentTab === "operativa" && tabla === "movimientos") {
     tabla = state.tablas.find((t) => t !== "movimientos");
     tablaSelect.value = tabla;
   }
   const q = searchInput.value.trim();
-  const showActions =
-    currentTab === "bdt" &&
-    selectedCompany === FIN_COMPANY &&
-    tabla === "hipotecas";
-  const isEditableTable =
-    currentTab === "bdt" &&
-    (
-      (selectedCompany === FINCAS_COMPANY && (tabla === "seguros" || tabla === "gestoria")) ||
-      (selectedCompany === FIN_COMPANY && tabla === "hipotecas")
-    );
   const params = new URLSearchParams({
     tabla,
     empresa_id: empresaId,
     q,
   });
-  if (
-    currentTab === "bdt" &&
-    selectedCompany === DASHBOARD_COMPANY &&
-    tabla === "movimientos"
-  ) {
-    const currentYear = String(new Date().getFullYear());
-    const yearValue = bdtYearFilter?.value || currentYear;
-    params.set("year", yearValue);
-    if (bdtFieldFilter?.value) {
-      params.set("field", bdtFieldFilter.value);
-    }
-  }
-  if (showActions) {
-    params.set("include_id", "1");
-  }
-  if (isEditableTable) {
-    params.set("include_id", "1");
-  }
   api(`/api/tabla?${params.toString()}`).then((data) => {
     if (state.currentModule !== requestModule || currentTab !== requestTab) {
       return;
