@@ -14847,7 +14847,7 @@ def ensure_workspace_product_tables(conn):
         CREATE TABLE IF NOT EXISTS workspace_registro_periodos (
           id TEXT PRIMARY KEY,
           workspace_id TEXT NOT NULL,
-          empresa_id TEXT,
+          empresa_id TEXT NOT NULL DEFAULT '',
           month TEXT NOT NULL,
           locked INTEGER NOT NULL DEFAULT 0,
           locked_at TEXT,
@@ -14857,10 +14857,26 @@ def ensure_workspace_product_tables(conn):
           digest_sha256 TEXT,
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL,
-          UNIQUE (workspace_id, COALESCE(empresa_id, ''), month)
+          UNIQUE (workspace_id, empresa_id, month)
         )
         """
     )
+    # Normaliza nulls legacy antes de crear el índice unique (si la tabla ya existía).
+    try:
+        conn.execute("UPDATE workspace_registro_periodos SET empresa_id = '' WHERE empresa_id IS NULL")
+    except Exception:
+        pass
+    # Refuerza unicidad vía índice (útil si la tabla existía antes sin constraint).
+    try:
+        conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_workspace_registro_periodos_unique
+            ON workspace_registro_periodos (workspace_id, empresa_id, month)
+            """
+        )
+    except Exception:
+        # No bloqueamos el arranque por un índice; el workflow seguirá usando SELECT/UPDATE.
+        pass
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS workspace_registro_audit (
@@ -17229,7 +17245,7 @@ def upsert_workspace_registro_periodo_lock(conn, workspace_id, month, locked, ac
         (
             record_id,
             workspace_id,
-            empresa_key or None,
+            empresa_key,
             month_key,
             locked_int,
             now_ts if locked_int else None,
