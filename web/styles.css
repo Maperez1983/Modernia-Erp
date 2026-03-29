@@ -4910,6 +4910,33 @@ body.auth-locked {
   display: none !important;
 }
 
+.ui-error-toast {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  width: min(520px, calc(100vw - 36px));
+  max-height: min(60vh, 520px);
+  overflow: auto;
+  z-index: 10000;
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid rgba(130, 76, 69, 0.28);
+  box-shadow: 0 20px 60px rgba(43, 43, 43, 0.18);
+  color: var(--ink);
+}
+
+.ui-error-toast.hidden {
+  display: none !important;
+}
+
+.ui-error-toast pre {
+  margin: 10px 0 0;
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--muted);
+}
+
 .auth-login-card {
   width: min(460px, 100%);
   background: #fff;

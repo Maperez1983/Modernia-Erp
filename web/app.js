@@ -1105,7 +1105,7 @@ const RoutingModule = window.CRMAppRouting || null;
 // Diagnóstico mínimo para no quedarnos con pantallas "vacías" sin feedback.
 // En Render, si hay un error JS, lo mostramos en un banner visible.
 (function setupClientDiagnostics() {
-  const banner = document.getElementById("renewalAlert");
+  const banner = document.getElementById("uiErrorToast") || document.getElementById("renewalAlert");
   if (!banner) return;
   const show = (title, detail) => {
     try {
@@ -18792,7 +18792,8 @@ const renderCrmKanban = (data) => {
           event.dataTransfer.setData("text/plain", rowId);
           event.dataTransfer.effectAllowed = "move";
         });
-        const deepLink = `?crm=inmo&captacion=${encodeURIComponent(rowId)}`;
+        const captacionId = String(rowMap?.id || rowId || "").trim();
+        const deepLink = `?crm=inmo&captacion=${encodeURIComponent(captacionId)}`;
         card.innerHTML = `
           <div><strong>${row[propietarioIndex] || "Propietario"}</strong></div>
           <div>${row[direccionIndex] || "-"} · ${row[zonaIndex] || "-"}</div>
@@ -18804,7 +18805,7 @@ const renderCrmKanban = (data) => {
           openBtn.addEventListener("click", async (event) => {
             event.preventDefault();
             event.stopPropagation();
-            await openInmuebleFromCaptacion(rowId, "captaciones");
+            await openInmuebleFromCaptacion(captacionId, "captaciones");
           });
         }
         column.appendChild(card);
