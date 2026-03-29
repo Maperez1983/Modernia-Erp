@@ -1417,3 +1417,46 @@ CREATE TABLE IF NOT EXISTS usuarios (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+
+-- Cache persistente de geocodificación (reduce dependencias de terceros).
+CREATE TABLE IF NOT EXISTS geocode_cache (
+  cache_key TEXT PRIMARY KEY,
+  query TEXT,
+  municipio TEXT,
+  provincia TEXT,
+  codigo_postal TEXT,
+  lat REAL,
+  lon REAL,
+  display_name TEXT,
+  provider TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+-- Índices mínimos para rendimiento (CREATE INDEX IF NOT EXISTS es idempotente).
+CREATE INDEX IF NOT EXISTS idx_clientes_empresa_id ON clientes(empresa_id);
+CREATE INDEX IF NOT EXISTS idx_clientes_nif ON clientes(nif);
+CREATE INDEX IF NOT EXISTS idx_clientes_nombre ON clientes(nombre);
+
+CREATE INDEX IF NOT EXISTS idx_captaciones_empresa_etapa ON captaciones(empresa_id, etapa);
+CREATE INDEX IF NOT EXISTS idx_captaciones_inmueble_id ON captaciones(inmueble_id);
+
+CREATE INDEX IF NOT EXISTS idx_inmuebles_empresa_estado ON inmuebles(empresa_id, estado);
+CREATE INDEX IF NOT EXISTS idx_inmuebles_empresa_refcat ON inmuebles(empresa_id, referencia_catastral);
+CREATE INDEX IF NOT EXISTS idx_inmuebles_empresa_direccion ON inmuebles(empresa_id, direccion);
+
+CREATE INDEX IF NOT EXISTS idx_inmueble_docs_inmueble_tipo ON inmueble_docs(inmueble_id, tipo);
+CREATE INDEX IF NOT EXISTS idx_inmueble_propietarios_inmueble ON inmueble_propietarios(inmueble_id);
+
+CREATE INDEX IF NOT EXISTS idx_demandas_empresa_estado ON demandas(empresa_id, estado);
+
+CREATE INDEX IF NOT EXISTS idx_visitas_empresa_fecha ON visitas(empresa_id, fecha);
+CREATE INDEX IF NOT EXISTS idx_visitas_inmueble_id ON visitas(inmueble_id);
+CREATE INDEX IF NOT EXISTS idx_visitas_demanda_id ON visitas(demanda_id);
+
+CREATE INDEX IF NOT EXISTS idx_acciones_empresa_servicio_fecha ON acciones(empresa_id, servicio, fecha);
+CREATE INDEX IF NOT EXISTS idx_acciones_inmueble_id ON acciones(inmueble_id);
+CREATE INDEX IF NOT EXISTS idx_acciones_cliente_id ON acciones(cliente_id);
+
+CREATE INDEX IF NOT EXISTS idx_gestoria_docs_empresa_cliente ON gestoria_docs(empresa_id, cliente_id);
+CREATE INDEX IF NOT EXISTS idx_geocode_cache_updated_at ON geocode_cache(updated_at);

@@ -125,6 +125,14 @@ AUTH_PUBLIC_GET_ENDPOINTS = {"/api/health", "/api/me", "/api/auth_invite_status"
 AUTH_PUBLIC_POST_ENDPOINTS = {"/api/login", "/api/logout", "/api/auth_set_password", "/api/workspace_portal_upload"}
 AUTH_SESSIONS = {}
 AUTH_SESSIONS_LOCK = threading.Lock()
+SQLITE_FOREIGN_KEYS_ENABLED = os.environ.get("APP_SQLITE_FOREIGN_KEYS", "1").strip().lower() not in ("0", "false", "no", "off")
+
+# Anti-fuerza bruta /api/login (en memoria).
+LOGIN_RATE_WINDOW_SECONDS = max(60, int(os.environ.get("APP_LOGIN_RATE_WINDOW_SECONDS", "300")))
+LOGIN_RATE_MAX_ATTEMPTS = max(3, int(os.environ.get("APP_LOGIN_RATE_MAX_ATTEMPTS", "10")))
+LOGIN_RATE_LOCK_SECONDS = max(60, int(os.environ.get("APP_LOGIN_RATE_LOCK_SECONDS", "600")))
+_LOGIN_RATE_STATE = {}
+_LOGIN_RATE_LOCK = threading.Lock()
 DEFAULT_WORKSPACE_NAME = "Modernia"
 PLATFORM_NAME = "LIV"
 WORKSPACE_TIME_SERVICE_COMPANY_MAP = {
@@ -2955,6 +2963,79 @@ def delete_auth_session(token):
         return
     with AUTH_SESSIONS_LOCK:
         AUTH_SESSIONS.pop(token, None)
+
+def _get_client_ip(handler):
+    xff = (handler.headers.get("X-Forwarded-For") or "").strip()
+    if xff:
+        # Formato: "client, proxy1, proxy2"
+        return xff.split(",")[0].strip()
+    xri = (handler.headers.get("X-Real-IP") or "").strip()
+    if xri:
+        return xri
+    try:
+        return handler.client_address[0] if handler.client_address else ""
+    except Exception:
+        return ""
+
+
+def _login_rate_key(ip, username):
+    ip = str(ip or "").strip()
+    user = normalize_lookup_text(username or "")
+    if ip and user:
+        return f"{ip}|{user}"
+    if ip:
+        return f"{ip}|"
+    if user:
+        return f"|{user}"
+    return ""
+
+
+def check_login_rate_limit(ip, username):
+    """
+    Devuelve (allowed: bool, retry_after_seconds: int).
+    Limitación básica en memoria para evitar fuerza bruta en /api/login.
+    """
+    key = _login_rate_key(ip, username)
+    if not key:
+        return True, 0
+    now = time.time()
+    with _LOGIN_RATE_LOCK:
+        entry = _LOGIN_RATE_STATE.get(key) or {}
+        locked_until = float(entry.get("locked_until") or 0)
+        if locked_until and locked_until > now:
+            return False, int(max(1, locked_until - now))
+        attempts = entry.get("attempts") or []
+        # Limpia ventana
+        attempts = [ts for ts in attempts if (now - float(ts)) <= LOGIN_RATE_WINDOW_SECONDS]
+        entry["attempts"] = attempts
+        entry["locked_until"] = 0
+        _LOGIN_RATE_STATE[key] = entry
+        if len(attempts) >= LOGIN_RATE_MAX_ATTEMPTS:
+            entry["locked_until"] = now + LOGIN_RATE_LOCK_SECONDS
+            _LOGIN_RATE_STATE[key] = entry
+            return False, LOGIN_RATE_LOCK_SECONDS
+        return True, 0
+
+
+def register_login_attempt(ip, username, ok=False):
+    key = _login_rate_key(ip, username)
+    if not key:
+        return
+    now = time.time()
+    with _LOGIN_RATE_LOCK:
+        if ok:
+            # En login correcto, limpiamos para no penalizar.
+            _LOGIN_RATE_STATE.pop(key, None)
+            return
+        entry = _LOGIN_RATE_STATE.get(key) or {}
+        attempts = entry.get("attempts") or []
+        attempts.append(now)
+        # Limpiar ventana
+        attempts = [ts for ts in attempts if (now - float(ts)) <= LOGIN_RATE_WINDOW_SECONDS]
+        entry["attempts"] = attempts
+        if len(attempts) >= LOGIN_RATE_MAX_ATTEMPTS:
+            entry["locked_until"] = now + LOGIN_RATE_LOCK_SECONDS
+        _LOGIN_RATE_STATE[key] = entry
 
 
 def send_mail_smtp(subject, to_email, text_body, html_body=None):
@@ -11558,6 +11639,107 @@ def _geocode_query_candidates(address, municipio="", provincia="", codigo_postal
     return candidates
 
 
+GEOCODE_CACHE_MAX_AGE_DAYS = max(1, int(os.environ.get("APP_GEOCODE_CACHE_MAX_AGE_DAYS", "365")))
+
+
+def _geocode_cache_key(query, municipio="", provincia="", codigo_postal=""):
+    parts = [
+        normalize_lookup_text(query or ""),
+        normalize_lookup_text(municipio or ""),
+        normalize_lookup_text(provincia or ""),
+        normalize_postal_code(codigo_postal or ""),
+    ]
+    return "|".join(parts).strip("|")
+
+
+def get_geocode_cache(conn, query, municipio="", provincia="", codigo_postal=""):
+    if not conn:
+        return None
+    key = _geocode_cache_key(query, municipio=municipio, provincia=provincia, codigo_postal=codigo_postal)
+    if not key:
+        return None
+    try:
+        row = conn.execute(
+            """
+            SELECT lat, lon, display_name, provider, updated_at
+            FROM geocode_cache
+            WHERE cache_key = ?
+            LIMIT 1
+            """,
+            (key,),
+        ).fetchone()
+    except sqlite3.Error:
+        return None
+    if not row:
+        return None
+    updated_raw = str(row["updated_at"] or "").strip()
+    if updated_raw:
+        try:
+            dt = datetime.fromisoformat(updated_raw.replace("Z", ""))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            age_days = (datetime.now(timezone.utc) - dt).days
+            if age_days > GEOCODE_CACHE_MAX_AGE_DAYS:
+                return None
+        except Exception:
+            pass
+    try:
+        lat = float(row["lat"])
+        lon = float(row["lon"])
+    except Exception:
+        return None
+    if not lat or not lon:
+        return None
+    return {
+        "ok": True,
+        "lat": lat,
+        "lon": lon,
+        "display_name": row["display_name"] or str(query or ""),
+        "provider": (row["provider"] or "cache"),
+        "cached": True,
+    }
+
+
+def upsert_geocode_cache(conn, query, municipio, provincia, codigo_postal, lat, lon, display_name, provider, now_iso):
+    if not conn:
+        return False
+    key = _geocode_cache_key(query, municipio=municipio, provincia=provincia, codigo_postal=codigo_postal)
+    if not key:
+        return False
+    try:
+        conn.execute(
+            """
+            INSERT INTO geocode_cache (
+              cache_key, query, municipio, provincia, codigo_postal, lat, lon, display_name, provider, created_at, updated_at
+            ) VALUES (
+              ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+            )
+            ON CONFLICT(cache_key) DO UPDATE SET
+              lat = excluded.lat,
+              lon = excluded.lon,
+              display_name = excluded.display_name,
+              provider = excluded.provider,
+              updated_at = excluded.updated_at
+            """,
+            (
+                key,
+                str(query or "").strip(),
+                str(municipio or "").strip(),
+                str(provincia or "").strip(),
+                normalize_postal_code(codigo_postal or ""),
+                float(lat),
+                float(lon),
+                str(display_name or "").strip(),
+                str(provider or "").strip(),
+                now_iso,
+                now_iso,
+            ),
+        )
+        return True
+    except sqlite3.Error:
+        return False
+
+
 def _fetch_nominatim_query(query):
     params = urllib.parse.urlencode(
         {
@@ -13648,6 +13830,11 @@ def open_sqlite_conn(db_path, with_row_factory=False):
         conn.execute("PRAGMA journal_mode=WAL")
     except Exception:
         pass
+    if SQLITE_FOREIGN_KEYS_ENABLED:
+        try:
+            conn.execute("PRAGMA foreign_keys=ON")
+        except Exception:
+            pass
     try:
         conn.execute("PRAGMA busy_timeout=90000")
     except Exception:
@@ -19210,7 +19397,7 @@ def _pdf_escape(value):
 def format_eur(value):
     amount = float(value or 0.0)
     raw = f"{amount:,.2f}"
-    return raw.replace(",", "X").replace(".", ",").replace("X", ".") + " EUR"
+    return raw.replace(",", "X").replace(".", ",").replace("X", ".") + " €"
 
 
 def build_workspace_invoice_pdf(invoice, workspace, company, client, collections):
@@ -20517,6 +20704,16 @@ class Handler(BaseHTTPRequestHandler):
             if not usuario_raw or not password:
                 json_response(self, {"error": "usuario y contraseña requeridos"}, status=400)
                 return
+            ip = _get_client_ip(self)
+            allowed, retry_after = check_login_rate_limit(ip, usuario_raw)
+            if not allowed:
+                json_response(
+                    self,
+                    {"error": "Demasiados intentos. Espera y vuelve a intentarlo."},
+                    status=429,
+                    extra_headers=[("Retry-After", str(int(retry_after or 1)))],
+                )
+                return
             conn = get_db(self.db_path)
             self._track_conn(conn)
             ensure_usuarios_schema(conn)
@@ -20535,12 +20732,14 @@ class Handler(BaseHTTPRequestHandler):
                 (usuario_raw, usuario_raw),
             ).fetchone()
             if not row:
+                register_login_attempt(ip, usuario_raw, ok=False)
                 json_response(self, {"error": "Usuario o contraseña incorrectos"}, status=401)
                 return
             first_password_set = False
             stored_hash = row["password_hash"]
             if stored_hash:
                 if not verify_password(password, stored_hash):
+                    register_login_attempt(ip, usuario_raw, ok=False)
                     json_response(self, {"error": "Usuario o contraseña incorrectos"}, status=401)
                     return
                 if needs_password_rehash(stored_hash):
@@ -20558,6 +20757,7 @@ class Handler(BaseHTTPRequestHandler):
                     ).fetchone()
             else:
                 if not AUTH_ALLOW_FIRST_PASSWORD_SET:
+                    register_login_attempt(ip, usuario_raw, ok=False)
                     json_response(self, {"error": "Usuario sin contraseña inicializada"}, status=403)
                     return
                 if len(password) < 8:
@@ -20576,6 +20776,7 @@ class Handler(BaseHTTPRequestHandler):
                     """,
                     (row["id"],),
                 ).fetchone()
+            register_login_attempt(ip, usuario_raw, ok=True)
             session = create_auth_session(row)
             json_response(
                 self,
@@ -30834,6 +31035,15 @@ class Handler(BaseHTTPRequestHandler):
             if not query:
                 json_response(self, {"error": "q requerido"}, status=400)
                 return
+            # Cache persistente para minimizar llamadas a terceros y mejorar fiabilidad.
+            conn = get_db(self.db_path)
+            self._track_conn(conn)
+            cached = get_geocode_cache(conn, query, municipio=municipio, provincia=provincia, codigo_postal=codigo_postal)
+            if cached and cached.get("ok"):
+                cached["query_used"] = query
+                cached["query_attempts"] = [query]
+                json_response(self, cached)
+                return
 
             def _clean_geocode_part(value):
                 text = str(value or "").strip(" ,")
@@ -30875,6 +31085,23 @@ class Handler(BaseHTTPRequestHandler):
                         provincia=provincia,
                         codigo_postal=codigo_postal,
                     )
+                    if isinstance(result, dict) and result.get("ok") and result.get("lat") and result.get("lon"):
+                        try:
+                            upsert_geocode_cache(
+                                conn,
+                                query,
+                                municipio,
+                                provincia,
+                                codigo_postal,
+                                result.get("lat"),
+                                result.get("lon"),
+                                result.get("display_name") or candidate,
+                                result.get("provider") or "geocode",
+                                datetime.now(timezone.utc).isoformat(),
+                            )
+                            conn.commit()
+                        except Exception:
+                            pass
                     if isinstance(result, dict):
                         result = dict(result)
                         result.setdefault("query_used", candidate)
