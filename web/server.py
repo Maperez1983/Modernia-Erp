@@ -30636,18 +30636,94 @@ class Handler(BaseHTTPRequestHandler):
             if not query:
                 json_response(self, {"error": "q requerido"}, status=400)
                 return
-            try:
-                result = fetch_geocode_coordinates(
-                    query,
-                    municipio=municipio,
-                    provincia=provincia,
-                    codigo_postal=codigo_postal,
+
+            def _clean_geocode_part(value):
+                text = str(value or "").strip(" ,")
+                return " ".join(text.split())
+
+            parts = [_clean_geocode_part(query)]
+            if municipio:
+                parts.append(_clean_geocode_part(municipio))
+            if provincia and provincia.lower() != municipio.lower():
+                parts.append(_clean_geocode_part(provincia))
+            if codigo_postal:
+                parts.append(_clean_geocode_part(codigo_postal))
+
+            candidates = []
+
+            def _add_candidate(*items):
+                cleaned = [_clean_geocode_part(item) for item in items if _clean_geocode_part(item)]
+                candidate = ", ".join(cleaned).strip(" ,")
+                if candidate and candidate not in candidates:
+                    candidates.append(candidate)
+
+            _add_candidate(query, municipio, provincia, codigo_postal, "España")
+            _add_candidate(query, municipio, provincia, "España")
+            _add_candidate(query, municipio, codigo_postal, "España")
+            _add_candidate(query, municipio, "España")
+            _add_candidate(query, provincia, "España")
+            _add_candidate(query, "España")
+            _add_candidate(*parts)
+
+            last_value_error = None
+            last_exception = None
+            used_candidate = query
+
+            for candidate in candidates:
+                try:
+                    result = fetch_geocode_coordinates(
+                        candidate,
+                        municipio=municipio,
+                        provincia=provincia,
+                        codigo_postal=codigo_postal,
+                    )
+                    if isinstance(result, dict):
+                        result = dict(result)
+                        result.setdefault("query_used", candidate)
+                        result.setdefault("query_attempts", candidates)
+                    json_response(self, result)
+                    return
+                except ValueError as exc:
+                    last_value_error = exc
+                    used_candidate = candidate
+                    continue
+                except Exception as exc:
+                    last_exception = exc
+                    used_candidate = candidate
+                    continue
+
+            if last_value_error is not None:
+                json_response(
+                    self,
+                    {
+                        "error": str(last_value_error),
+                        "query_used": used_candidate,
+                        "query_attempts": candidates,
+                    },
+                    status=400,
                 )
-                json_response(self, result)
-            except ValueError as exc:
-                json_response(self, {"error": str(exc)}, status=400)
-            except Exception as exc:
-                json_response(self, {"error": f"geocode_lookup_error: {type(exc).__name__}: {exc}"}, status=502)
+                return
+
+            if last_exception is not None:
+                json_response(
+                    self,
+                    {
+                        "error": f"geocode_lookup_error: {type(last_exception).__name__}: {last_exception}",
+                        "query_used": used_candidate,
+                        "query_attempts": candidates,
+                    },
+                    status=502,
+                )
+                return
+
+            json_response(
+                self,
+                {
+                    "error": "No se pudo geocodificar la dirección",
+                    "query_attempts": candidates,
+                },
+                status=400,
+            )
             return
 
         if path == "/api/clientes_list":
