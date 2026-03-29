@@ -16528,16 +16528,22 @@ def upsert_workspace_alert_config(conn, workspace_id, persona_id, payload, now=N
     return record_id
 
 
-def fetch_workspace_notifications(conn, workspace_id, limit=40):
+def fetch_workspace_notifications(conn, workspace_id, limit=40, persona_id=None):
+    where = ["workspace_id = ?"]
+    params = [workspace_id]
+    persona_text = str(persona_id or "").strip()
+    if persona_text:
+        where.append("persona_id = ?")
+        params.append(persona_text)
     rows = conn.execute(
-        """
+        f"""
         SELECT id, workspace_id, persona_id, channel, payload, created_at
         FROM workspace_registro_notifications
-        WHERE workspace_id = ?
+        WHERE {' AND '.join(where)}
         ORDER BY created_at DESC
         LIMIT ?
         """,
-        (workspace_id, max(1, min(int(limit or 40), 200))),
+        (*params, max(1, min(int(limit or 40), 200))),
     ).fetchall()
     return {"rows": [dict(row) for row in rows]}
 
@@ -16553,6 +16559,51 @@ def log_workspace_notification(conn, workspace_id, persona_id, channel, payload,
         """,
         (notification_id, workspace_id, persona_id, channel, json.dumps(payload, ensure_ascii=False), now_ts),
     )
+
+
+def _normalize_service_tokens(value):
+    raw = str(value or "")
+    if not raw.strip():
+        return set()
+    # servicios puede venir como string con comas: "Gestoría, Seguros"
+    tokens = []
+    for chunk in raw.replace(";", ",").split(","):
+        token = normalize_lookup_text(chunk)
+        if token:
+            tokens.append(token)
+    return set(tokens)
+
+
+def workspace_session_is_privileged(session):
+    if not session:
+        return False
+    rol = normalize_lookup_text(session.get("rol") or "")
+    if rol in {"administrador", "admin", "direccion", "dirección", "control"}:
+        return True
+    services = _normalize_service_tokens(session.get("servicio") or "")
+    if services.intersection({"administracion", "administración", "control", "direccion", "dirección"}):
+        return True
+    return False
+
+
+def workspace_persona_id_for_user(conn, workspace_id, user_id):
+    if not workspace_id or not user_id:
+        return ""
+    row = conn.execute(
+        """
+        SELECT id
+        FROM workspace_registro_personal
+        WHERE workspace_id = ? AND usuario_id = ? AND COALESCE(activo, 1) = 1
+        LIMIT 1
+        """,
+        (workspace_id, user_id),
+    ).fetchone()
+    if not row:
+        return ""
+    try:
+        return str(row["id"] or "")
+    except Exception:
+        return str(row[0] or "")
 
 
 def _parse_alert_last_sent(value):
@@ -21449,6 +21500,10 @@ class Handler(BaseHTTPRequestHandler):
             persona_nombre = str(payload.get("persona_nombre") or "").strip()
             fecha = str(payload.get("fecha") or "").strip()
             hora_inicio = str(payload.get("hora_inicio") or "").strip()
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if session and not workspace_session_is_privileged(session):
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
             if not workspace_id or not empresa_id or not persona_nombre or not fecha or not hora_inicio:
                 json_response(self, {"error": "workspace_id, empresa_id, persona_nombre, fecha y hora_inicio requeridos"}, status=400)
                 return
@@ -21594,7 +21649,7 @@ class Handler(BaseHTTPRequestHandler):
                 """
                 SELECT id, empresa_id, usuario_id, nombre, tipo_jornada, horas_pactadas_dia
                 FROM workspace_registro_personal
-                WHERE workspace_id = ? AND id = ?
+                WHERE workspace_id = ? AND id = ? AND COALESCE(activo, 1) = 1
                 LIMIT 1
                 """,
                 (workspace_id, persona_id),
@@ -21602,7 +21657,13 @@ class Handler(BaseHTTPRequestHandler):
             if not persona_row:
                 json_response(self, {"error": "persona no encontrada"}, status=404)
                 return
-            empresa_id = str(payload.get("empresa_id") or persona_row["empresa_id"] or "").strip()
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if session and not workspace_session_is_privileged(session):
+                user_id = str(session.get("user_id") or "").strip()
+                if not user_id or str(persona_row["usuario_id"] or "").strip() != user_id:
+                    json_response(self, {"error": "No autorizado"}, status=403)
+                    return
+            empresa_id = str(persona_row["empresa_id"] or "").strip()
             if not empresa_id:
                 json_response(self, {"error": "empresa_id requerido"}, status=400)
                 return
@@ -21722,6 +21783,10 @@ class Handler(BaseHTTPRequestHandler):
             empresa_id = str(payload.get("empresa_id") or "").strip()
             record_id = str(payload.get("id") or "").strip()
             nombre = str(payload.get("nombre") or "").strip()
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if session and not workspace_session_is_privileged(session):
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
             if not workspace_id or not empresa_id or not nombre:
                 json_response(self, {"error": "workspace_id, empresa_id y nombre requeridos"}, status=400)
                 return
@@ -21784,11 +21849,19 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, {"ok": True, "id": record_id})
             return
         elif parsed.path == "/api/workspace_registro_alerts":
-            workspace_id = params.get("workspace_id", [""])[0]
-            persona_id = (params.get("persona_id", [""])[0] or payload.get("persona_id") or "").strip()
+            workspace_id = str(payload.get("workspace_id") or params.get("workspace_id", [""])[0] or "").strip()
+            persona_id = str(payload.get("persona_id") or params.get("persona_id", [""])[0] or "").strip()
             if not workspace_id:
                 json_response(self, {"error": "workspace_id requerido"}, status=400)
                 return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if session and not workspace_session_is_privileged(session):
+                user_id = str(session.get("user_id") or "").strip()
+                own_persona = workspace_persona_id_for_user(conn, workspace_id, user_id)
+                if not own_persona or (persona_id and persona_id != own_persona):
+                    json_response(self, {"error": "No autorizado"}, status=403)
+                    return
+                persona_id = own_persona
             if self.command == "GET":
                 config = fetch_workspace_alert_preferences(conn, workspace_id, persona_id=persona_id or None)
                 json_response(self, {"row": config or {}})
@@ -28358,6 +28431,25 @@ class Handler(BaseHTTPRequestHandler):
             if not workspace_id:
                 json_response(self, {"error": "workspace_id requerido"}, status=400)
                 return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if session and not workspace_session_is_privileged(session):
+                user_id = str(session.get("user_id") or "").strip()
+                if not user_id:
+                    json_response(self, {"error": "No autenticado"}, status=401)
+                    return
+                sync_workspace_time_personal_from_users(conn, workspace_id, empresa_id=empresa_id)
+                row = conn.execute(
+                    """
+                    SELECT p.*, COALESCE(e.nombre, '') AS empresa_nombre
+                    FROM workspace_registro_personal p
+                    LEFT JOIN empresas e ON e.id = p.empresa_id
+                    WHERE p.workspace_id = ? AND p.usuario_id = ? AND COALESCE(p.activo, 1) = 1
+                    LIMIT 1
+                    """,
+                    (workspace_id, user_id),
+                ).fetchone()
+                json_response(self, {"rows": [dict(row)] if row else []})
+                return
             json_response(
                 self,
                 fetch_workspace_personal(
@@ -28375,6 +28467,10 @@ class Handler(BaseHTTPRequestHandler):
             limit = params.get("limit", ["200"])[0]
             if not workspace_id:
                 json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if session and not workspace_session_is_privileged(session):
+                json_response(self, {"rows": []})
                 return
             json_response(
                 self,
@@ -28397,6 +28493,14 @@ class Handler(BaseHTTPRequestHandler):
             if not workspace_id:
                 json_response(self, {"error": "workspace_id requerido"}, status=400)
                 return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if session and not workspace_session_is_privileged(session):
+                user_id = str(session.get("user_id") or "").strip()
+                persona_id = workspace_persona_id_for_user(conn, workspace_id, user_id)
+                empresa_id = ""
+                if not persona_id:
+                    json_response(self, {"rows": []})
+                    return
             json_response(
                 self,
                 fetch_workspace_time_entries(
@@ -28417,7 +28521,16 @@ class Handler(BaseHTTPRequestHandler):
             if not workspace_id:
                 json_response(self, {"error": "workspace_id requerido"}, status=400)
                 return
-            rows = fetch_workspace_time_entries(conn, workspace_id, empresa_id=empresa_id, limit=1000, month=month)["rows"]
+            session = getattr(self, "auth_session", None) or self._current_session()
+            persona_id = ""
+            if session and not workspace_session_is_privileged(session):
+                user_id = str(session.get("user_id") or "").strip()
+                persona_id = workspace_persona_id_for_user(conn, workspace_id, user_id)
+                empresa_id = ""
+                if not persona_id:
+                    json_response(self, build_workspace_time_summary([], month=month))
+                    return
+            rows = fetch_workspace_time_entries(conn, workspace_id, empresa_id=empresa_id, limit=1000, month=month, persona_id=persona_id)["rows"]
             json_response(self, build_workspace_time_summary(rows, month=month))
             return
         if path == "/api/workspace_registro_alerts":
@@ -28426,6 +28539,13 @@ class Handler(BaseHTTPRequestHandler):
             if not workspace_id:
                 json_response(self, {"error": "workspace_id requerido"}, status=400)
                 return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if session and not workspace_session_is_privileged(session):
+                user_id = str(session.get("user_id") or "").strip()
+                persona_id = workspace_persona_id_for_user(conn, workspace_id, user_id)
+                if not persona_id:
+                    json_response(self, {"row": {}})
+                    return
             config = fetch_workspace_alert_preferences(conn, workspace_id, persona_id=persona_id or None)
             json_response(self, {"row": config or {}})
             return
@@ -28435,13 +28555,25 @@ class Handler(BaseHTTPRequestHandler):
             if not workspace_id:
                 json_response(self, {"error": "workspace_id requerido"}, status=400)
                 return
-            json_response(self, fetch_workspace_notifications(conn, workspace_id, limit=limit))
+            session = getattr(self, "auth_session", None) or self._current_session()
+            persona_id = ""
+            if session and not workspace_session_is_privileged(session):
+                user_id = str(session.get("user_id") or "").strip()
+                persona_id = workspace_persona_id_for_user(conn, workspace_id, user_id)
+                if not persona_id:
+                    json_response(self, {"rows": []})
+                    return
+            json_response(self, fetch_workspace_notifications(conn, workspace_id, limit=limit, persona_id=persona_id or None))
             return
 
         if path == "/api/workspace_registro_horario_alerts_run":
             workspace_id = params.get("workspace_id", [""])[0]
             if not workspace_id:
                 json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if session and not workspace_session_is_privileged(session):
+                json_response(self, {"error": "No autorizado"}, status=403)
                 return
             created = run_workspace_time_missing_sweep(conn, workspace_id)
             conn.commit()
@@ -28454,6 +28586,14 @@ class Handler(BaseHTTPRequestHandler):
             if not workspace_id:
                 json_response(self, {"error": "workspace_id requerido"}, status=400)
                 return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if session and not workspace_session_is_privileged(session):
+                user_id = str(session.get("user_id") or "").strip()
+                own_persona = workspace_persona_id_for_user(conn, workspace_id, user_id)
+                if not own_persona:
+                    json_response(self, {"error": "No autorizado"}, status=403)
+                    return
+                persona_id = own_persona
             rows = fetch_workspace_time_entries(conn, workspace_id, limit=5000, month=month, persona_id=persona_id)["rows"]
             person = {"persona_nombre": rows[0]["persona_nombre"] if rows else "", "empresa_nombre": rows[0]["empresa_nombre"] if rows else ""}
             xml_bytes = build_workspace_time_xml(rows, persona_name=person["persona_nombre"], company_name=person["empresa_nombre"], month=month)
@@ -28467,6 +28607,13 @@ class Handler(BaseHTTPRequestHandler):
             if not workspace_id or not persona_id:
                 json_response(self, {"error": "workspace_id y persona_id requeridos"}, status=400)
                 return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if session and not workspace_session_is_privileged(session):
+                user_id = str(session.get("user_id") or "").strip()
+                own_persona = workspace_persona_id_for_user(conn, workspace_id, user_id)
+                if not own_persona or own_persona != persona_id:
+                    json_response(self, {"error": "No autorizado"}, status=403)
+                    return
             rows = fetch_workspace_time_entries(conn, workspace_id, limit=5000, month=month, persona_id=persona_id)["rows"]
             summary = build_workspace_time_summary(rows, month=month)
             persona = next((row for row in summary["rows"] if str(row.get("persona_id") or "") == persona_id), {})
@@ -28486,6 +28633,13 @@ class Handler(BaseHTTPRequestHandler):
             if not workspace_id or not persona_id:
                 json_response(self, {"error": "workspace_id y persona_id requeridos"}, status=400)
                 return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if session and not workspace_session_is_privileged(session):
+                user_id = str(session.get("user_id") or "").strip()
+                own_persona = workspace_persona_id_for_user(conn, workspace_id, user_id)
+                if not own_persona or own_persona != persona_id:
+                    json_response(self, {"error": "No autorizado"}, status=403)
+                    return
             rows = fetch_workspace_time_entries(conn, workspace_id, limit=5000, month=month, persona_id=persona_id)["rows"]
             summary = build_workspace_time_summary(rows, month=month)
             persona = next((row for row in summary["rows"] if str(row.get("persona_id") or "") == persona_id), {})
@@ -28514,7 +28668,16 @@ class Handler(BaseHTTPRequestHandler):
             if not workspace_id:
                 json_response(self, {"error": "workspace_id requerido"}, status=400)
                 return
-            rows = fetch_workspace_time_entries(conn, workspace_id, empresa_id=empresa_id, limit=5000, month=month)["rows"]
+            session = getattr(self, "auth_session", None) or self._current_session()
+            persona_id = ""
+            if session and not workspace_session_is_privileged(session):
+                user_id = str(session.get("user_id") or "").strip()
+                persona_id = workspace_persona_id_for_user(conn, workspace_id, user_id)
+                empresa_id = ""
+                if not persona_id:
+                    json_response(self, {"error": "No autorizado"}, status=403)
+                    return
+            rows = fetch_workspace_time_entries(conn, workspace_id, empresa_id=empresa_id, limit=5000, month=month, persona_id=persona_id)["rows"]
             csv_bytes = build_workspace_time_csv(rows)
             filename = f"registro_horario_{workspace_id}_{(month or 'completo')}.csv"
             binary_response(self, csv_bytes, content_type="text/csv; charset=utf-8", filename=filename)

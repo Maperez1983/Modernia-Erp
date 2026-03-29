@@ -4010,8 +4010,22 @@ const renderWorkspaceCompanyScopedData = () => {
   renderWorkspaceInboxList(inboxRows);
   state.workspaceTimeEmployees = timeEmployees;
   renderWorkspaceTimeEmployeeList(timeEmployees);
+  applyWorkspaceTimeMode();
+  renderWorkspaceTimeSystemUsers(state.workspaceTimeUsers || []);
   if (timeEmployees.length) {
-    selectWorkspacePersona(timeEmployees[0]);
+    let selected = timeEmployees[0];
+    const authUser = getAuthScopeUser();
+    if (authUser?.id && !isWorkspaceTimeManager()) {
+      const mine = timeEmployees.find((row) => String(row.usuario_id || "") === String(authUser.id));
+      if (mine) selected = mine;
+    }
+    if (selected) {
+      selectWorkspacePersona(selected);
+    }
+  } else {
+    state.workspaceTimeSelectedPersonaId = "";
+    state.workspaceTimeSelectedPersona = null;
+    renderWorkspaceTimeEmployeePreview();
   }
   hydrateWorkspaceTimeEmployeeSelect(timeEmployees);
   renderWorkspaceTimeSummary(raw.timeSummary || null);
@@ -4162,8 +4176,12 @@ const focusWorkspaceEngine = async (engine, element = null, options = {}) => {
   setWorkspaceView("motores", options);
   setWorkspaceEngineView(engine);
   if (engine === "registro_horario") {
-    await refreshWorkspaceTimeSetup();
-    await runWorkspaceTimeAlertSweep();
+    if (isWorkspaceTimeManager()) {
+      await refreshWorkspaceTimeSetup();
+      await runWorkspaceTimeAlertSweep();
+    } else {
+      applyWorkspaceTimeMode();
+    }
   }
   if (element && typeof element.scrollIntoView === "function") {
     element.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -4175,8 +4193,12 @@ workspaceEngineButtons.forEach((button) => {
     const engine = button.dataset.workspaceEngineTab || "documental";
     setWorkspaceEngineView(engine);
     if (engine === "registro_horario") {
-      await refreshWorkspaceTimeSetup();
-      await runWorkspaceTimeAlertSweep();
+      if (isWorkspaceTimeManager()) {
+        await refreshWorkspaceTimeSetup();
+        await runWorkspaceTimeAlertSweep();
+      } else {
+        applyWorkspaceTimeMode();
+      }
     }
   });
 });
@@ -6989,12 +7011,96 @@ const hydrateWorkspaceTimeEmployeeSelect = (rows = []) => {
   }
 };
 
+const isWorkspaceTimeManager = () => {
+  const authUser = getAuthScopeUser();
+  return Boolean(authUser && isPrivilegedUser(authUser));
+};
+
+const applyWorkspaceTimeMode = () => {
+  const layout = document.getElementById("workspaceTimeLayout");
+  if (!layout) return;
+  const manager = isWorkspaceTimeManager();
+  layout.dataset.mode = manager ? "manager" : "employee";
+
+  const newBtn = document.getElementById("workspaceTimeEmployeeNewBtn");
+  if (newBtn) newBtn.classList.toggle("hidden", !manager);
+
+  if (workspaceTimeSystemUsers) {
+    const head = workspaceTimeSystemUsers.previousElementSibling;
+    if (head && head.classList && head.classList.contains("section-head")) {
+      head.classList.toggle("hidden", !manager);
+    }
+    workspaceTimeSystemUsers.classList.toggle("hidden", !manager);
+  }
+};
+
+const renderWorkspaceTimeSystemUsers = (rows = []) => {
+  if (!workspaceTimeSystemUsers) return;
+  if (!isWorkspaceTimeManager()) {
+    workspaceTimeSystemUsers.innerHTML = "";
+    return;
+  }
+  const users = Array.isArray(rows) && rows.length ? rows : getWorkspaceTimeEligibleUsers();
+  if (!users.length) {
+    workspaceTimeSystemUsers.innerHTML = "<p class='muted'>Sin usuarios activos todavía.</p>";
+    return;
+  }
+  workspaceTimeSystemUsers.innerHTML = `
+    <div class="workspace-time-userlist">
+      ${users
+        .map((user) => {
+          const fullName = `${user.nombre || ""} ${user.apellido || ""}`.trim() || user.usuario || user.email || "Usuario";
+          const enabled = Number(user.registro_horario_activo || 0) === 1;
+          const serviceLabel = user.servicio ? `${user.servicio}` : "Sin servicio";
+          const companyLabel = user.empresa_nombre || "-";
+          return `
+            <div class="workspace-time-userrow" data-time-user-row="${user.id || ""}">
+              <div>
+                <strong>${fullName}</strong>
+                <small>${companyLabel} · ${serviceLabel}${enabled ? " · Registro horario" : ""}</small>
+              </div>
+              <button
+                type="button"
+                class="secondary ghost button-inline"
+                data-time-user-toggle="${user.id || ""}"
+                data-time-user-next="${enabled ? "0" : "1"}"
+              >${enabled ? "Desactivar" : "Activar"}</button>
+            </div>
+          `;
+        })
+        .join("")}
+    </div>
+  `;
+  workspaceTimeSystemUsers.querySelectorAll("[data-time-user-toggle]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const userId = button.dataset.timeUserToggle || "";
+      const next = Number(button.dataset.timeUserNext || 0) === 1 ? 1 : 0;
+      if (!userId) return;
+      button.disabled = true;
+      try {
+        const data = await fetch("/api/usuarios_update", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: userId, registro_horario_activo: next }),
+        }).then((res) => res.json());
+        if (data?.error) throw new Error(data.error);
+        await loadWorkspaceDetail(state.currentWorkspaceId);
+        applyWorkspaceTimeMode();
+      } catch (error) {
+        alert(error.message || "No se pudo actualizar el usuario.");
+        button.disabled = false;
+      }
+    });
+  });
+};
+
 const renderWorkspaceTimeEmployeeList = (rows = []) => {
   if (!workspaceTimeEmployeeList) return;
   if (!rows.length) {
     workspaceTimeEmployeeList.innerHTML = "<p class='muted'>Sin trabajadores activos todavía.</p>";
     return;
   }
+  const canEdit = isWorkspaceTimeManager();
   workspaceTimeEmployeeList.innerHTML = `
     <div class="workspace-time-cardstack">
       ${rows
@@ -7013,7 +7119,7 @@ const renderWorkspaceTimeEmployeeList = (rows = []) => {
                 </div>
               </div>
               <footer>
-                <button type="button" class="secondary ghost" data-time-employee-edit="${row.id}">Editar</button>
+                ${canEdit ? `<button type="button" class="secondary ghost" data-time-employee-edit="${row.id}">Editar</button>` : ""}
                 <button type="button" class="secondary ghost workspace-time-view" data-time-employee-view="${row.id}">Ver ficha</button>
               </footer>
             </article>
@@ -7022,15 +7128,17 @@ const renderWorkspaceTimeEmployeeList = (rows = []) => {
         .join("")}
     </div>
   `;
-  workspaceTimeEmployeeList.querySelectorAll("[data-time-employee-edit]").forEach((button) => {
-    button.addEventListener("click", () => {
-      const record = rows.find((row) => String(row.id || "") === String(button.dataset.timeEmployeeEdit || ""));
-      if (record) {
-        fillWorkspaceTimeEmployeeForm(record);
-        openWorkspaceTimeEmployeeModal(`Editando: ${record.nombre || "trabajador"}`);
-      }
+  if (canEdit) {
+    workspaceTimeEmployeeList.querySelectorAll("[data-time-employee-edit]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const record = rows.find((row) => String(row.id || "") === String(button.dataset.timeEmployeeEdit || ""));
+        if (record) {
+          fillWorkspaceTimeEmployeeForm(record);
+          openWorkspaceTimeEmployeeModal(`Editando: ${record.nombre || "trabajador"}`);
+        }
+      });
     });
-  });
+  }
   workspaceTimeEmployeeList.querySelectorAll("[data-time-employee-view]").forEach((button) => {
     button.addEventListener("click", () => {
       const record = rows.find((row) => String(row.id || "") === String(button.dataset.timeEmployeeView || ""));
@@ -7055,11 +7163,10 @@ const fillWorkspaceAlertForm = (config = {}) => {
 const selectWorkspacePersona = async (record) => {
   state.workspaceTimeSelectedPersonaId = record.id || "";
   state.workspaceTimeSelectedPersona = record || null;
-  const companySelect = workspaceTimeEmployeeForm?.querySelector('[name="empresa_id"]')?.value;
-  if (workspaceTimeEmployeeForm) {
+  if (workspaceTimeEmployeeForm && isWorkspaceTimeManager()) {
     fillWorkspaceTimeEmployeeForm(record);
   }
-  if (workspaceTimeConfigForm) {
+  if (workspaceTimeConfigForm && isWorkspaceTimeManager()) {
     fillWorkspaceAlertForm({ workspace_id: state.currentWorkspaceId, persona_id: state.workspaceTimeSelectedPersonaId });
     const config = await safeWorkspaceApi(
       `/api/workspace_registro_alerts?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}&persona_id=${encodeURIComponent(state.workspaceTimeSelectedPersonaId)}`,
@@ -7134,6 +7241,7 @@ const renderWorkspaceTimeEmployeePreview = () => {
     workspaceTimeEmployeePreview.innerHTML = "<p class='muted'>Selecciona un trabajador para ver su vista previa.</p>";
     return;
   }
+  const canEdit = isWorkspaceTimeManager();
   const employee =
     state.workspaceTimeSelectedPersona ||
     (Array.isArray(state.workspaceTimeEmployees) ? state.workspaceTimeEmployees.find((row) => String(row.id || "") === personaId) : null) ||
@@ -7160,7 +7268,7 @@ const renderWorkspaceTimeEmployeePreview = () => {
       <div class="form-actions" style="margin-top:10px;">
         <button type="button" class="secondary ghost button-inline" data-time-checkin ${canCheckIn ? "" : "disabled"}>Fichar entrada</button>
         <button type="button" class="secondary ghost button-inline" data-time-checkout ${canCheckOut ? "" : "disabled"}>Fichar salida</button>
-        <button type="button" class="secondary ghost button-inline" data-time-edit>Editar ficha</button>
+        ${canEdit ? `<button type="button" class="secondary ghost button-inline" data-time-edit>Editar ficha</button>` : ""}
       </div>
       <div class="muted" style="margin-top:10px;">Mes activo: ${month || "actual"} · Exportes desde el panel derecho.</div>
     </div>
@@ -7192,10 +7300,12 @@ const renderWorkspaceTimeEmployeePreview = () => {
   };
   workspaceTimeEmployeePreview.querySelector('[data-time-checkin]')?.addEventListener("click", () => runToggle("checkin"));
   workspaceTimeEmployeePreview.querySelector('[data-time-checkout]')?.addEventListener("click", () => runToggle("checkout"));
-  workspaceTimeEmployeePreview.querySelector('[data-time-edit]')?.addEventListener("click", () => {
-    fillWorkspaceTimeEmployeeForm(employee);
-    openWorkspaceTimeEmployeeModal(`Editando: ${employee.nombre || "trabajador"}`);
-  });
+  if (canEdit) {
+    workspaceTimeEmployeePreview.querySelector('[data-time-edit]')?.addEventListener("click", () => {
+      fillWorkspaceTimeEmployeeForm(employee);
+      openWorkspaceTimeEmployeeModal(`Editando: ${employee.nombre || "trabajador"}`);
+    });
+  }
 };
 
 const findCurrentUserTimeProfile = () => {
@@ -7678,11 +7788,17 @@ const safeWorkspaceApi = async (path, fallback) => {
 const loadWorkspaceDetail = async (workspaceId) => {
   if (!workspaceId) return;
   state.currentWorkspaceId = workspaceId;
-  await safeWorkspaceApi("/api/usuarios", { rows: [] }).then((data) => {
-    state.usersList = data.rows || [];
-    populateResponsableSelects();
-    refreshSegurosColaboradoresList();
-  });
+  const authUser = getAuthScopeUser();
+  const canManageWorkspace = Boolean(authUser && isPrivilegedUser(authUser));
+  if (canManageWorkspace) {
+    await safeWorkspaceApi("/api/usuarios", { rows: [] }).then((data) => {
+      state.usersList = data.rows || [];
+      populateResponsableSelects();
+      refreshSegurosColaboradoresList();
+    });
+  } else {
+    state.usersList = authUser ? [authUser] : [];
+  }
   const detail = await api(`/api/workspace_detail?id=${encodeURIComponent(workspaceId)}`);
   state.currentWorkspaceDetail = detail;
   state.currentWorkspaceEnabledModules = getWorkspaceEnabledModules(detail.modules || []);
