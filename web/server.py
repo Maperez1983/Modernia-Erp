@@ -30759,21 +30759,69 @@ class Handler(BaseHTTPRequestHandler):
                 (inmueble_id,),
             ).fetchone()
             if not inmueble:
-                captacion_ref = conn.execute(
-                    """
-                    SELECT inmueble_id
-                    FROM captaciones
-                    WHERE id = ?
-                    LIMIT 1
-                    """,
+                captacion_row = conn.execute(
+                    "SELECT * FROM captaciones WHERE id = ? LIMIT 1",
                     (inmueble_id,),
                 ).fetchone()
-                if captacion_ref and str(captacion_ref["inmueble_id"] or "").strip():
-                    inmueble_id = str(captacion_ref["inmueble_id"]).strip()
-                    inmueble = conn.execute(
-                        "SELECT * FROM inmuebles WHERE id = ?",
-                        (inmueble_id,),
-                    ).fetchone()
+                if captacion_row:
+                    linked_inmueble_id = str(captacion_row["inmueble_id"] or "").strip()
+                    if linked_inmueble_id:
+                        inmueble_id = linked_inmueble_id
+                        inmueble = conn.execute(
+                            "SELECT * FROM inmuebles WHERE id = ?",
+                            (inmueble_id,),
+                        ).fetchone()
+                    else:
+                        # Legacy captaciones may not have an inmueble yet. Create a minimal one on-demand so
+                        # any "Abrir ficha" entry point works reliably.
+                        new_id = os.urandom(16).hex()
+                        now = datetime.utcnow().isoformat()
+                        conn.execute(
+                            """
+                            INSERT INTO inmuebles (
+                                id, empresa_id, referencia, direccion, referencia_catastral,
+                                codigo_postal, poblacion, provincia, zona, tipo_inmueble,
+                                m2, anio_construccion, habitaciones, banos,
+                                precio_objetivo, precio_valoracion, honorarios, situacion_ocupacion,
+                                estado, lat, lon, created_at, updated_at
+                            )
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            """,
+                            (
+                                new_id,
+                                captacion_row["empresa_id"],
+                                "",
+                                captacion_row["direccion"],
+                                "",
+                                captacion_row["codigo_postal"],
+                                captacion_row["poblacion"],
+                                captacion_row["provincia"],
+                                captacion_row["zona"],
+                                captacion_row["tipo_inmueble"],
+                                captacion_row["m2"],
+                                captacion_row["anio_construccion"],
+                                captacion_row["habitaciones"],
+                                captacion_row["banos"],
+                                captacion_row["precio_objetivo"],
+                                captacion_row["precio_valoracion"],
+                                None,
+                                "",
+                                "Noticia",
+                                None,
+                                None,
+                                now,
+                                now,
+                            ),
+                        )
+                        conn.execute(
+                            "UPDATE captaciones SET inmueble_id = ?, updated_at = ? WHERE id = ?",
+                            (new_id, now, captacion_row["id"]),
+                        )
+                        inmueble_id = new_id
+                        inmueble = conn.execute(
+                            "SELECT * FROM inmuebles WHERE id = ?",
+                            (inmueble_id,),
+                        ).fetchone()
             if not inmueble:
                 json_response(self, {"error": "Inmueble no encontrado"}, status=404)
                 return
