@@ -16406,6 +16406,246 @@ def build_workspace_time_csv(rows):
     return string_io.getvalue().encode("utf-8-sig")
 
 
+def fetch_workspace_alert_preferences(conn, workspace_id, persona_id=None):
+    where = ["workspace_id = ?"]
+    params = [workspace_id]
+    if persona_id:
+        where.append("persona_id = ?")
+        params.append(persona_id)
+    row = conn.execute(
+        f"""
+        SELECT * FROM workspace_registro_alerts
+        WHERE {' AND '.join(where)}
+        LIMIT 1
+        """,
+        params,
+    ).fetchone()
+    if row:
+        return dict(row)
+    # fallback to personal record
+    if persona_id:
+        row = conn.execute(
+            """
+            SELECT *
+            FROM workspace_registro_personal
+            WHERE workspace_id = ? AND persona_id = ?
+            LIMIT 1
+            """,
+            (workspace_id, persona_id),
+        ).fetchone()
+        if row:
+            return dict(row)
+    return None
+
+
+def upsert_workspace_alert_config(conn, workspace_id, persona_id, payload, now=None):
+    now_ts = now or datetime.now().isoformat()
+    existing = conn.execute(
+        """
+        SELECT id FROM workspace_registro_alerts
+        WHERE workspace_id = ? AND persona_id = ?
+        LIMIT 1
+        """,
+        (workspace_id, persona_id),
+    ).fetchone()
+    values = (
+        workspace_id,
+        payload.get("empresa_id"),
+        persona_id,
+        payload.get("alert_missing_checkin", 1),
+        payload.get("alert_missing_checkout", 1),
+        payload.get("notify_worker", 1),
+        payload.get("notify_admin", 1),
+        (payload.get("admin_contact") or "").strip(),
+        payload.get("schedule") or "",
+        now_ts,
+    )
+    if existing:
+        conn.execute(
+            """
+            UPDATE workspace_registro_alerts
+            SET empresa_id = ?, alert_missing_checkin = ?, alert_missing_checkout = ?, notify_worker = ?, notify_admin = ?, admin_contact = ?, schedule = ?, updated_at = ?
+            WHERE id = ? AND workspace_id = ?
+            """,
+            (*values[1:], now_ts, existing["id"], workspace_id),
+        )
+        return existing["id"]
+    record_id = os.urandom(16).hex()
+    conn.execute(
+        """
+        INSERT INTO workspace_registro_alerts (
+          id, workspace_id, empresa_id, persona_id, alert_missing_checkin, alert_missing_checkout,
+          notify_worker, notify_admin, admin_contact, schedule, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (record_id, *values),
+    )
+    return record_id
+
+
+def fetch_workspace_notifications(conn, workspace_id, limit=40):
+    rows = conn.execute(
+        """
+        SELECT id, workspace_id, persona_id, channel, payload, created_at
+        FROM workspace_registro_notifications
+        WHERE workspace_id = ?
+        ORDER BY created_at DESC
+        LIMIT ?
+        """,
+        (workspace_id, max(1, min(int(limit or 40), 200))),
+    ).fetchall()
+    return {"rows": [dict(row) for row in rows]}
+
+
+def log_workspace_notification(conn, workspace_id, persona_id, channel, payload, now=None):
+    now_ts = now or datetime.now().isoformat()
+    notification_id = os.urandom(16).hex()
+    conn.execute(
+        """
+        INSERT INTO workspace_registro_notifications (
+          id, workspace_id, persona_id, channel, payload, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (notification_id, workspace_id, persona_id, channel, json.dumps(payload, ensure_ascii=False), now_ts),
+    )
+
+
+def run_workspace_time_alerts(conn, workspace_id, entry, now=None):
+    now_ts = now or datetime.now().isoformat()
+    persona_id = entry.get("persona_id")
+    persona_nombre = entry.get("persona_nombre")
+    company_name = entry.get("empresa_nombre") or ""
+    prefs = fetch_workspace_alert_preferences(conn, workspace_id, persona_id=persona_id)
+    if not prefs:
+        return []
+    notifications = []
+    worker_payload = {
+        "persona_nombre": persona_nombre,
+        "fecha": entry.get("fecha"),
+        "hora_inicio": entry.get("hora_inicio") or "",
+        "hora_fin": entry.get("hora_fin") or "",
+        "empresa_nombre": company_name,
+    }
+    missing_checkin = not entry.get("hora_inicio")
+    missing_checkout = not entry.get("hora_fin")
+    if missing_checkin and prefs.get("alert_missing_checkin"):
+        if prefs.get("alert_notify_worker"):
+            log_workspace_notification(
+                conn,
+                workspace_id,
+                persona_id,
+                "worker_missing_checkin",
+                worker_payload,
+                now=now_ts,
+            )
+            notifications.append("worker_missing_checkin")
+        if prefs.get("alert_notify_admin"):
+            log_workspace_notification(
+                conn,
+                workspace_id,
+                persona_id,
+                "admin_missing_checkin",
+                worker_payload,
+                now=now_ts,
+            )
+            notifications.append("admin_missing_checkin")
+    if missing_checkout and prefs.get("alert_missing_checkout"):
+        if prefs.get("alert_notify_worker"):
+            log_workspace_notification(
+                conn,
+                workspace_id,
+                persona_id,
+                "worker_missing_checkout",
+                worker_payload,
+                now=now_ts,
+            )
+            notifications.append("worker_missing_checkout")
+        if prefs.get("alert_notify_admin"):
+            log_workspace_notification(
+                conn,
+                workspace_id,
+                persona_id,
+                "admin_missing_checkout",
+                worker_payload,
+                now=now_ts,
+            )
+            notifications.append("admin_missing_checkout")
+    if not missing_checkin and prefs.get("alert_notify_admin"):
+        log_workspace_notification(
+            conn,
+            workspace_id,
+            persona_id,
+            "admin_entry_log",
+            worker_payload,
+            now=now_ts,
+        )
+        notifications.append("admin_entry_log")
+    return notifications
+
+
+def build_workspace_time_xml(rows, persona_name="", company_name="", month=""):
+    root = ET.Element("registro_horario", workspace=normalize_lookup_text(persona_name or ""), empresa=company_name or "", mes=month or "")
+    for row in rows:
+        entry = ET.SubElement(root, "entrada")
+        ET.SubElement(entry, "fecha").text = row.get("fecha") or ""
+        ET.SubElement(entry, "hora_inicio").text = row.get("hora_inicio") or ""
+        ET.SubElement(entry, "hora_fin").text = row.get("hora_fin") or ""
+        ET.SubElement(entry, "pausa_min").text = str(row.get("pausa_min") or 0)
+        ET.SubElement(entry, "minutos_trabajados").text = str(row.get("minutos_trabajados") or 0)
+        ET.SubElement(entry, "tipo_jornada").text = row.get("tipo_jornada") or ""
+        ET.SubElement(entry, "estado").text = row.get("estado") or ""
+        ET.SubElement(entry, "notas").text = row.get("notas") or ""
+    return ET.tostring(root, encoding="utf-8", xml_declaration=True)
+
+
+def build_workspace_time_pdf(persona, workspace, company, rows):
+    lines = [
+        workspace.get("nombre") or "Workspace",
+        company.get("nombre") or "Empresa",
+        "",
+        f"Trabajador: {persona.get('persona_nombre') or '-'}",
+        f"Usuario: {persona.get('usuario_id') or '-'}",
+        f"Empresa: {company.get('nombre') or '-'}",
+        f"Mes: {persona.get('month') or ''}",
+        f"Jornada: {persona.get('tipo_jornada') or '-'}",
+        "",
+    ]
+    for row in rows:
+        lines.append(
+            f"{row.get('fecha') or '-'} · {row.get('hora_inicio') or '-'} → {row.get('hora_fin') or '-'} · {format_minutes_hhmm(row.get('minutos_trabajados') or 0)}"
+        )
+    lines.append("")
+    lines.append("Total horas trabajadas: {}".format(persona.get("horas_trabajadas_hhmm") or "-"))
+    lines.append("Total pactadas: {}".format(persona.get("horas_pactadas_hhmm") or "-"))
+    lines.append("Desviación: {}".format(persona.get("desviacion_hhmm") or "-"))
+    font_obj = "1 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj\n"
+    y = 800
+    page_lines = []
+    for raw in lines[:40]:
+        page_lines.append(f"BT /F1 11 Tf 48 {y} Td ({_pdf_escape(raw)}) Tj ET")
+        y -= 18
+    content_stream = "\n".join(page_lines).encode("latin-1", "replace")
+    objects = [
+        "1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n",
+        "2 0 obj << /Type /Pages /Count 1 /Kids [3 0 R] >> endobj\n",
+        "3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >> endobj\n",
+        font_obj,
+    ]
+    objects.append(f"5 0 obj << /Length {len(content_stream)} >> stream\n".encode("latin-1") + content_stream + b"\nendstream\nendobj\n")
+    pdf = bytearray(b"%PDF-1.4\n")
+    offsets = [0]
+    for obj in objects:
+        offsets.append(len(pdf))
+        pdf.extend(obj if isinstance(obj, bytes) else obj.encode("latin-1"))
+    xref_pos = len(pdf)
+    pdf.extend(f"xref\n0 {len(offsets)}\n".encode("latin-1"))
+    pdf.extend(b"0000000000 65535 f \n")
+    for offset in offsets[1:]:
+        pdf.extend(f"{offset:010d} 00000 n \n".encode("latin-1"))
+    pdf.extend(f"trailer << /Size {len(offsets)} /Root 1 0 R >>\nstartxref\n{xref_pos}\n%%EOF\n".encode("latin-1"))
+    return bytes(pdf)
+
+
 def parse_non_negative_int(value):
     text = str(value or "").strip()
     if not text:
@@ -21202,6 +21442,20 @@ class Handler(BaseHTTPRequestHandler):
                 {"time_entry_id": record_id, "empresa_id": empresa_id, "servicio": "registro_horario", "cliente_nombre": persona_nombre, "estado": (payload.get("estado") or "").strip() or "Borrador"},
                 now,
             )
+            company_row = conn.execute("SELECT nombre FROM empresas WHERE id = ? LIMIT 1", (empresa_id,)).fetchone()
+            entry_payload = {
+                "persona_id": persona_id,
+                "persona_nombre": persona_nombre,
+                "empresa_id": empresa_id,
+                "empresa_nombre": str(company_row["nombre"] or "") if company_row else "",
+                "fecha": fecha,
+                "hora_inicio": hora_inicio,
+                "hora_fin": hora_fin,
+                "minutos_trabajados": minutos_trabajados,
+                "tipo_jornada": tipo_jornada,
+                "estado": estado,
+            }
+            run_workspace_time_alerts(conn, workspace_id, entry_payload, now=now)
             conn.commit()
             json_response(self, {"ok": True, "id": record_id, "automation_actions": auto_created})
             return
@@ -21262,6 +21516,73 @@ class Handler(BaseHTTPRequestHandler):
                 )
             conn.commit()
             json_response(self, {"ok": True, "id": record_id})
+            return
+        elif parsed.path == "/api/workspace_registro_alerts":
+            workspace_id = params.get("workspace_id", [""])[0]
+            persona_id = (params.get("persona_id", [""])[0] or payload.get("persona_id") or "").strip()
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            if self.command == "GET":
+                config = fetch_workspace_alert_preferences(conn, workspace_id, persona_id=persona_id or None)
+                json_response(self, {"row": config or {}})
+                return
+            config_id = upsert_workspace_alert_config(
+                conn,
+                workspace_id,
+                persona_id,
+                {
+                    "empresa_id": str(payload.get("empresa_id") or "").strip(),
+                    "alert_missing_checkin": int(payload.get("alert_missing_checkin") or "1"),
+                    "alert_missing_checkout": int(payload.get("alert_missing_checkout") or "1"),
+                    "notify_worker": int(payload.get("notify_worker") or "1"),
+                    "notify_admin": int(payload.get("notify_admin") or "1"),
+                    "admin_contact": payload.get("admin_contact") or "",
+                    "schedule": payload.get("schedule") or "",
+                },
+                now=now,
+            )
+            conn.commit()
+            json_response(self, {"ok": True, "id": config_id})
+            return
+        elif parsed.path == "/api/workspace_registro_notifications":
+            workspace_id = params.get("workspace_id", [""])[0]
+            limit = params.get("limit", ["40"])[0]
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            json_response(self, fetch_workspace_notifications(conn, workspace_id, limit=limit))
+            return
+        elif parsed.path == "/api/workspace_registro_horario_xml":
+            workspace_id = params.get("workspace_id", [""])[0]
+            month = params.get("month", [""])[0]
+            persona_id = (params.get("persona_id", [""])[0] or "").strip()
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            rows = fetch_workspace_time_entries(conn, workspace_id, limit=5000, month=month, persona_id=persona_id)["rows"]
+            person = {"persona_nombre": rows[0]["persona_nombre"] if rows else "", "empresa_nombre": rows[0]["empresa_nombre"] if rows else ""}
+            xml_bytes = build_workspace_time_xml(rows, persona_name=person["persona_nombre"], company_name=person["empresa_nombre"], month=month)
+            filename = f"registro_horario_{workspace_id}_{month or 'completo'}.xml"
+            binary_response(self, xml_bytes, content_type="application/xml; charset=utf-8", filename=filename)
+            return
+        elif parsed.path == "/api/workspace_registro_horario_pdf":
+            workspace_id = params.get("workspace_id", [""])[0]
+            month = params.get("month", [""])[0]
+            persona_id = (params.get("persona_id", [""])[0] or "").strip()
+            if not workspace_id or not persona_id:
+                json_response(self, {"error": "workspace_id y persona_id requeridos"}, status=400)
+                return
+            rows = fetch_workspace_time_entries(conn, workspace_id, limit=5000, month=month, persona_id=persona_id)["rows"]
+            summary = build_workspace_time_summary(rows, month=month)
+            persona = next((row for row in summary["rows"] if str(row.get("persona_id") or "") == persona_id), {})
+            company_id = rows[0]["empresa_id"] if rows else None
+            company_row = conn.execute("SELECT nombre, logo_url FROM empresas WHERE id = ? LIMIT 1", (company_id,)).fetchone()
+            company = dict(company_row) if company_row else {"nombre": "", "logo_url": ""}
+            workspace = fetch_workspace_detail(conn, workspace_id).get("workspace") or {}
+            pdf_bytes = build_workspace_time_pdf(persona, workspace, company, rows)
+            filename = f"registro_horario_{persona.get('persona_nombre', persona_id)}_{month or 'completo'}.pdf"
+            binary_response(self, pdf_bytes, content_type="application/pdf", filename=filename)
             return
         elif parsed.path == "/api/workspace_presupuestos":
             workspace_id = str(payload.get("workspace_id") or "").strip()
@@ -27832,6 +28153,54 @@ class Handler(BaseHTTPRequestHandler):
                 return
             rows = fetch_workspace_time_entries(conn, workspace_id, empresa_id=empresa_id, limit=1000, month=month)["rows"]
             json_response(self, build_workspace_time_summary(rows, month=month))
+            return
+        if path == "/api/workspace_registro_alerts":
+            workspace_id = params.get("workspace_id", [""])[0]
+            persona_id = (params.get("persona_id", [""])[0] or "").strip()
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            config = fetch_workspace_alert_preferences(conn, workspace_id, persona_id=persona_id or None)
+            json_response(self, {"row": config or {}})
+            return
+        if path == "/api/workspace_registro_notifications":
+            workspace_id = params.get("workspace_id", [""])[0]
+            limit = params.get("limit", ["40"])[0]
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            json_response(self, fetch_workspace_notifications(conn, workspace_id, limit=limit))
+            return
+        if path == "/api/workspace_registro_horario_xml":
+            workspace_id = params.get("workspace_id", [""])[0]
+            month = params.get("month", [""])[0]
+            persona_id = (params.get("persona_id", [""])[0] or "").strip()
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            rows = fetch_workspace_time_entries(conn, workspace_id, limit=5000, month=month, persona_id=persona_id)["rows"]
+            person = {"persona_nombre": rows[0]["persona_nombre"] if rows else "", "empresa_nombre": rows[0]["empresa_nombre"] if rows else ""}
+            xml_bytes = build_workspace_time_xml(rows, persona_name=person["persona_nombre"], company_name=person["empresa_nombre"], month=month)
+            filename = f"registro_horario_{workspace_id}_{month or 'completo'}.xml"
+            binary_response(self, xml_bytes, content_type="application/xml; charset=utf-8", filename=filename)
+            return
+        if path == "/api/workspace_registro_horario_pdf":
+            workspace_id = params.get("workspace_id", [""])[0]
+            month = params.get("month", [""])[0]
+            persona_id = (params.get("persona_id", [""])[0] or "").strip()
+            if not workspace_id or not persona_id:
+                json_response(self, {"error": "workspace_id y persona_id requeridos"}, status=400)
+                return
+            rows = fetch_workspace_time_entries(conn, workspace_id, limit=5000, month=month, persona_id=persona_id)["rows"]
+            summary = build_workspace_time_summary(rows, month=month)
+            persona = next((row for row in summary["rows"] if str(row.get("persona_id") or "") == persona_id), {})
+            company_id = rows[0]["empresa_id"] if rows else None
+            company_row = conn.execute("SELECT nombre, logo_url FROM empresas WHERE id = ? LIMIT 1", (company_id,)).fetchone()
+            company = dict(company_row) if company_row else {"nombre": "", "logo_url": ""}
+            workspace = fetch_workspace_detail(conn, workspace_id).get("workspace") or {}
+            pdf_bytes = build_workspace_time_pdf(persona, workspace, company, rows)
+            filename = f"registro_horario_{persona.get('persona_nombre', persona_id)}_{month or 'completo'}.pdf"
+            binary_response(self, pdf_bytes, content_type="application/pdf", filename=filename)
             return
 
         if path == "/api/workspace_registro_horario_export":

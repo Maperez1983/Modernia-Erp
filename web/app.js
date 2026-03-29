@@ -18699,7 +18699,7 @@ const renderCrmResumenDashboard = () => {
           summary = proxima || "Reserva sin siguiente paso de cierre.";
         }
         return {
-          inmuebleId: row.inmueble_id || "",
+          inmuebleId: row.inmueble_id || row.id || "",
           title: row.direccion || row.propietario || "Inmueble sin identificar",
           meta: `${row.propietario || "Propietario pendiente"} · ${etapa}`,
           summary,
@@ -18709,7 +18709,7 @@ const renderCrmResumenDashboard = () => {
       ...visitas
         .filter((row) => normalizeSimple(row.estado || "").includes("pendiente"))
         .map((row) => ({
-          inmuebleId: row.inmueble_id || "",
+          inmuebleId: row.inmueble_id || row.id || "",
           title: row.inmueble || "Visita pendiente",
           meta: `${row.cliente || "Cliente pendiente"} · Visita`,
           summary: `${row.fecha || "-"} ${row.hora || ""}`.trim() || "Pendiente de agenda",
