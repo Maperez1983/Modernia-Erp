@@ -16070,7 +16070,7 @@ def sync_workspace_time_personal_from_users(conn, workspace_id, empresa_id=None)
     user_rows = conn.execute(
         """
         SELECT id, nombre, apellido, usuario, email, servicio, activo,
-               COALESCE(registro_horario_activo, 1) AS registro_horario_activo
+               COALESCE(registro_horario_activo, 0) AS registro_horario_activo
         FROM usuarios
         WHERE COALESCE(activo, 1) = 1
         ORDER BY nombre COLLATE NOCASE ASC, apellido COLLATE NOCASE ASC
@@ -16247,9 +16247,12 @@ def fetch_workspace_time_users(conn, workspace_id, empresa_id=None, only_enabled
         """,
         (*params, max(1, min(int(limit or 200), 500))),
     ).fetchall()
+    default_company_id = str(empresa_id or "").strip() or (company_ids[0] if company_ids else "")
     payload_rows = []
     for row in rows:
         mapped_company_id = infer_workspace_time_company_id(conn, workspace_id, service_raw=row["servicio"] or "", empresa_id=empresa_id)
+        if not mapped_company_id:
+            mapped_company_id = default_company_id
         if not mapped_company_id:
             continue
         payload = dict(row)
@@ -21731,10 +21734,12 @@ class Handler(BaseHTTPRequestHandler):
                 horas_pactadas_semana = float(payload.get("horas_pactadas_semana")) if str(payload.get("horas_pactadas_semana") or "").strip() else None
             except Exception:
                 horas_pactadas_semana = None
+            active_flag = 0 if str(payload.get("activo") or "1").strip().lower() in {"0", "false", "no", "off"} else 1
+            usuario_id_value = str(payload.get("usuario_id") or "").strip() or None
             values = (
                 workspace_id,
                 empresa_id,
-                str(payload.get("usuario_id") or "").strip() or None,
+                usuario_id_value,
                 nombre,
                 str(payload.get("nif") or "").strip() or None,
                 str(payload.get("email") or "").strip() or None,
@@ -21744,7 +21749,7 @@ class Handler(BaseHTTPRequestHandler):
                 horas_pactadas_semana,
                 str(payload.get("fecha_alta") or "").strip() or None,
                 str(payload.get("fecha_baja") or "").strip() or None,
-                0 if str(payload.get("activo") or "1").strip().lower() in {"0", "false", "no", "off"} else 1,
+                active_flag,
                 str(payload.get("notas") or "").strip() or None,
             )
             if record_id:
@@ -21768,6 +21773,12 @@ class Handler(BaseHTTPRequestHandler):
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
                     """,
                     (record_id, *values, now, now),
+                )
+            # Si vinculamos a un usuario del sistema, activamos el registro horario para evitar que el sync lo desactive.
+            if usuario_id_value and active_flag == 1:
+                conn.execute(
+                    "UPDATE usuarios SET registro_horario_activo = 1 WHERE id = ?",
+                    (usuario_id_value,),
                 )
             conn.commit()
             json_response(self, {"ok": True, "id": record_id})
