@@ -6749,7 +6749,16 @@ const fillWorkspaceTimeForm = (record = null) => {
   };
   ["id", "workspace_id", "empresa_id", "persona_id", "persona_nombre", "tipo_jornada", "horas_pactadas_dia", "fecha", "hora_inicio", "hora_fin", "pausa_min", "metodo_registro", "estado", "notas"].forEach((field) => {
     const input = workspaceTimeForm.querySelector(`[name="${field}"]`);
-    if (input) input.value = payload[field] ?? "";
+    if (!input) return;
+    let value = payload[field] ?? "";
+    if (input.type === "date") {
+      value = String(value || "").trim().slice(0, 10);
+      if (value && !/^\d{4}-\d{2}-\d{2}$/.test(value)) value = "";
+    } else if (input.type === "number") {
+      value = String(value || "").trim();
+      if (value && Number.isNaN(Number(value))) value = "";
+    }
+    input.value = value;
   });
   const lookup = workspaceTimeForm.querySelector('[name="persona_id_lookup"]');
   if (lookup) {
@@ -6825,7 +6834,16 @@ const fillWorkspaceTimeEmployeeForm = (record = null) => {
   };
   ["id", "workspace_id", "empresa_id", "usuario_id", "nombre", "nif", "email", "telefono", "tipo_jornada", "horas_pactadas_dia", "horas_pactadas_semana", "fecha_alta", "notas"].forEach((field) => {
     const input = workspaceTimeEmployeeForm.querySelector(`[name="${field}"]`);
-    if (input) input.value = payload[field] ?? "";
+    if (!input) return;
+    let value = payload[field] ?? "";
+    if (input.type === "date") {
+      value = String(value || "").trim().slice(0, 10);
+      if (value && !/^\d{4}-\d{2}-\d{2}$/.test(value)) value = "";
+    } else if (input.type === "number") {
+      value = String(value || "").trim();
+      if (value && Number.isNaN(Number(value))) value = "";
+    }
+    input.value = value;
   });
   const lookup = workspaceTimeEmployeeForm.querySelector('[name="usuario_id_lookup"]');
   if (lookup) lookup.value = payload.usuario_id || "";
@@ -19701,7 +19719,11 @@ const openInmuebleDetail = (id, originView = "") => {
   setInmuebleSaveStatus("");
   const empresa = state.empresas.find((e) => e.nombre === DASHBOARD_COMPANY);
   const empresaId = empresa ? empresa.id : "";
-  Promise.all([api(`/api/inmueble?id=${id}`), loadClientesList(), loadDemandasList(empresaId)])
+  Promise.all([
+    api(`/api/inmueble?id=${id}`),
+    loadClientesList().catch(() => null),
+    loadDemandasList(empresaId).catch(() => null),
+  ])
     .then(([data]) => {
       const inmueble = data.inmueble || {};
       state.currentInmueble = inmueble;
@@ -32066,9 +32088,13 @@ if (workspaceTimeEmployeeForm) {
       const usuarioIdInput = workspaceTimeEmployeeForm.querySelector('[name="usuario_id"]');
       const nameInput = workspaceTimeEmployeeForm.querySelector('[name="nombre"]');
       const emailInput = workspaceTimeEmployeeForm.querySelector('[name="email"]');
+      const companyInput = workspaceTimeEmployeeForm.querySelector('[name="empresa_id"]');
       if (!usuarioIdInput) return;
       usuarioIdInput.value = selected?.id || "";
       if (!selected) return;
+      if (companyInput && selected.empresa_id) {
+        companyInput.value = selected.empresa_id;
+      }
       if (nameInput && !String(nameInput.value || "").trim()) {
         nameInput.value = `${selected.nombre || ""} ${selected.apellido || ""}`.trim();
       }
@@ -32352,6 +32378,10 @@ if (workspaceTimeEmployeeForm) {
     const payload = Object.fromEntries(formData.entries());
     payload.workspace_id = state.currentWorkspaceId;
     payload.activo = workspaceTimeEmployeeForm.querySelector('[name="activo"]')?.checked ? 1 : 0;
+    if (!String(payload.empresa_id || "").trim()) {
+      const selectedUser = getWorkspaceTimeEligibleUsers().find((user) => String(user.id || "") === String(payload.usuario_id_lookup || payload.usuario_id || ""));
+      payload.empresa_id = selectedUser?.empresa_id || state.currentWorkspaceCompanyId || state.currentWorkspaceDetail?.companies?.[0]?.id || "";
+    }
     try {
       const data = await fetch("/api/workspace_registro_personal", {
         method: "POST",
