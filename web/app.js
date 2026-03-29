@@ -1186,6 +1186,7 @@ const state = {
   workspaceTimeEmployees: [],
   workspaceTimeSummary: null,
   workspaceTimeMonth: "",
+  workspaceTimeSelectedPersonaId: "",
   currentClienteSegurosRows: [],
   currentClienteRamoSelected: "",
   currentSeguroId: "",
@@ -3965,7 +3966,10 @@ const renderWorkspaceCompanyScopedData = () => {
   renderWorkspaceRemittancesList(remittanceRows);
   renderWorkspaceSeriesList(seriesRows);
   renderWorkspaceInboxList(inboxRows);
-  renderWorkspaceTimeEmployeeList(timeEmployees);
+  renderWorkspaceTimeEmployeeList(timeEmployees.rows || []);
+  if (timeEmployees.rows?.length) {
+    selectWorkspacePersona(timeEmployees.rows[0]);
+  }
   hydrateWorkspaceTimeEmployeeSelect(timeEmployees);
   renderWorkspaceTimeSummary(raw.timeSummary || null);
   renderWorkspaceTimeList(timeRows);
@@ -6919,8 +6923,76 @@ const renderWorkspaceTimeEmployeeList = (rows = []) => {
     });
   });
   workspaceTimeEmployeeList.querySelectorAll("[data-time-employee-view]").forEach((button) => {
-    button.addEventListener("click", () => focusWorkspaceEngine("registro_horario", workspaceTimeForm, { forceTenantView: true }));
+    button.addEventListener("click", () => {
+      const record = rows.find((row) => String(row.id || "") === String(button.dataset.timeEmployeeView || ""));
+      if (record) selectWorkspacePersona(record);
+      focusWorkspaceEngine("registro_horario", workspaceTimeForm, { forceTenantView: true });
+    });
   });
+};
+
+const fillWorkspaceAlertForm = (config = {}) => {
+  if (!workspaceTimeConfigForm) return;
+  workspaceTimeConfigForm.querySelector('[name="workspace_id"]').value = state.currentWorkspaceId || "";
+  workspaceTimeConfigForm.querySelector('[name="persona_id"]').value = state.workspaceTimeSelectedPersonaId || "";
+  workspaceTimeConfigForm.querySelector('[name="alert_missing_checkin"]').checked = Number(config.alert_missing_checkin || 1) === 1;
+  workspaceTimeConfigForm.querySelector('[name="alert_missing_checkout"]').checked = Number(config.alert_missing_checkout || 1) === 1;
+  workspaceTimeConfigForm.querySelector('[name="notify_worker"]').checked = Number(config.notify_worker || 1) === 1;
+  workspaceTimeConfigForm.querySelector('[name="notify_admin"]').checked = Number(config.notify_admin || 1) === 1;
+  workspaceTimeConfigForm.querySelector('[name="admin_contact"]').value = config.admin_contact || "";
+  workspaceTimeConfigForm.querySelector('[name="schedule"]').value = config.schedule || "";
+};
+
+const selectWorkspacePersona = async (record) => {
+  state.workspaceTimeSelectedPersonaId = record.id || "";
+  const companySelect = workspaceTimeEmployeeForm?.querySelector('[name="empresa_id"]')?.value;
+  if (workspaceTimeEmployeeForm) {
+    fillWorkspaceTimeEmployeeForm(record);
+  }
+  if (workspaceTimeConfigForm) {
+    fillWorkspaceAlertForm({ workspace_id: state.currentWorkspaceId, persona_id: state.workspaceTimeSelectedPersonaId });
+    const config = await fetch(`/api/workspace_registro_alerts?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}&persona_id=${encodeURIComponent(state.workspaceTimeSelectedPersonaId)}`);
+    if (config?.row) fillWorkspaceAlertForm(config.row);
+  }
+  if (workspaceTimeExportXml) {
+    workspaceTimeExportXml.disabled = false;
+    workspaceTimeExportXml.dataset.personaId = state.workspaceTimeSelectedPersonaId;
+  }
+  if (workspaceTimeExportPdf) {
+    workspaceTimeExportPdf.disabled = false;
+    workspaceTimeExportPdf.dataset.personaId = state.workspaceTimeSelectedPersonaId;
+  }
+  loadWorkspaceNotifications();
+};
+
+const loadWorkspaceNotifications = async () => {
+  if (!workspaceTimeNotifications || !state.currentWorkspaceId) return;
+  const limit = 20;
+  const notifications = await safeWorkspaceApi(`/api/workspace_registro_notifications?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}&limit=${limit}`, { rows: [] });
+  renderWorkspaceNotifications(notifications.rows || []);
+};
+
+const renderWorkspaceNotifications = (rows = []) => {
+  if (!workspaceTimeNotifications) return;
+  if (!rows.length) {
+    workspaceTimeNotifications.innerHTML = "<p class='muted'>Sin notificaciones recientes.</p>";
+    return;
+  }
+  workspaceTimeNotifications.innerHTML = `
+    <ul class="workspace-notification-list">
+      ${rows
+        .map(
+          (row) => `
+            <li>
+              <strong>${row.channel}</strong>
+              <span>${row.created_at}</span>
+              <p class="muted">${row.payload || ""}</p>
+            </li>
+          `
+        )
+        .join("")}
+    </ul>
+  `;
 };
 
 const findCurrentUserTimeProfile = () => {
@@ -32146,6 +32218,37 @@ if (workspaceTimeResetBtn) {
   });
 }
 
+if (workspaceTimeConfigForm) {
+  workspaceTimeConfigForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (!state.workspaceTimeSelectedPersonaId) {
+      if (workspaceAlertStatus) workspaceAlertStatus.textContent = "Selecciona un trabajador para configurar alertas.";
+      return;
+    }
+    if (workspaceAlertStatus) workspaceAlertStatus.textContent = "Guardando...";
+    const formData = new FormData(workspaceTimeConfigForm);
+    const payload = Object.fromEntries(formData.entries());
+    payload.workspace_id = state.currentWorkspaceId;
+    payload.persona_id = state.workspaceTimeSelectedPersonaId;
+    payload.alert_missing_checkin = workspaceTimeConfigForm.querySelector('[name="alert_missing_checkin"]').checked ? 1 : 0;
+    payload.alert_missing_checkout = workspaceTimeConfigForm.querySelector('[name="alert_missing_checkout"]').checked ? 1 : 0;
+    payload.notify_worker = workspaceTimeConfigForm.querySelector('[name="notify_worker"]').checked ? 1 : 0;
+    payload.notify_admin = workspaceTimeConfigForm.querySelector('[name="notify_admin"]').checked ? 1 : 0;
+    try {
+      const data = await fetch("/api/workspace_registro_alerts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }).then((res) => res.json());
+      if (data?.error) throw new Error(data.error);
+      if (workspaceAlertStatus) workspaceAlertStatus.textContent = "Configuración guardada.";
+      await loadWorkspaceNotifications();
+    } catch (error) {
+      if (workspaceAlertStatus) workspaceAlertStatus.textContent = error.message || "No se pudo guardar la alerta.";
+    }
+  });
+}
+
 if (workspaceTimeEmployeeResetBtn) {
   workspaceTimeEmployeeResetBtn.addEventListener("click", () => {
     fillWorkspaceTimeEmployeeForm();
@@ -32460,8 +32563,8 @@ if (workspaceTimeEmployeeForm) {
     const matchedCompany = companies.find((company) => String(company.id || "") === String(payload.empresa_id || ""));
     payload.empresa_nombre = matchedCompany?.nombre || "";
     try {
-      const data = await fetch("/api/workspace_registro_personal", {
-        method: "POST",
+  const data = await fetch("/api/workspace_registro_personal", {
+    method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       }).then((res) => res.json());
@@ -32472,6 +32575,32 @@ if (workspaceTimeEmployeeForm) {
     } catch (error) {
       if (workspaceTimeEmployeeStatus) workspaceTimeEmployeeStatus.textContent = error.message || "No se pudo guardar.";
     }
+  });
+}
+
+if (workspaceTimeExportXml) {
+  workspaceTimeExportXml.addEventListener("click", () => {
+    if (!state.currentWorkspaceId || !state.workspaceTimeSelectedPersonaId) return;
+    const month = workspaceTimeMonth?.value || "";
+    window.open(
+      `/api/workspace_registro_horario_xml?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}&persona_id=${encodeURIComponent(
+        state.workspaceTimeSelectedPersonaId
+      )}&month=${encodeURIComponent(month)}`,
+      "_blank"
+    );
+  });
+}
+
+if (workspaceTimeExportPdf) {
+  workspaceTimeExportPdf.addEventListener("click", () => {
+    if (!state.currentWorkspaceId || !state.workspaceTimeSelectedPersonaId) return;
+    const month = workspaceTimeMonth?.value || "";
+    window.open(
+      `/api/workspace_registro_horario_pdf?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}&persona_id=${encodeURIComponent(
+        state.workspaceTimeSelectedPersonaId
+      )}&month=${encodeURIComponent(month)}`,
+      "_blank"
+    );
   });
 }
 

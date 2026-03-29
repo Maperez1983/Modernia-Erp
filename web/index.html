@@ -968,21 +968,77 @@
           <div id="workspacePortalRequestList"></div>
         </div>
         <div class="workspace-central-layout crm-workspace-view" data-workspace-view="motores" data-workspace-engine="registro_horario">
-          <div class="form-card">
-            <div class="section-head">
-              <div>
-                <h3>Registro horario</h3>
-                <p class="muted">Registro diario de inicio y fin, plantilla de personal y resumen mensual exportable.</p>
+          <div class="workspace-time-layout">
+            <div class="workspace-time-config">
+              <div class="section-head">
+                <div>
+                  <h3>Registro horario</h3>
+                  <p class="muted">Configuración de alertas, exportes y seguimiento del personal activo.</p>
+                </div>
               </div>
+              <div id="workspaceTimeSummary" class="workspace-time-summary"></div>
+              <div class="form-actions">
+                <label>
+                  Mes
+                  <input id="workspaceTimeMonth" type="month" />
+                </label>
+                <a id="workspaceTimeExportBtn" class="secondary ghost button-inline" href="#" target="_blank" rel="noreferrer">Exportar CSV</a>
+              </div>
+              <form id="workspaceAlertForm" class="form-grid">
+                <input type="hidden" name="workspace_id" />
+                <input type="hidden" name="persona_id" />
+                <label>
+                  Alerta entrada
+                  <input type="checkbox" name="alert_missing_checkin" />
+                </label>
+                <label>
+                  Alerta salida
+                  <input type="checkbox" name="alert_missing_checkout" />
+                </label>
+                <label>
+                  Notifica trabajador
+                  <input type="checkbox" name="notify_worker" />
+                </label>
+                <label>
+                  Notifica responsable
+                  <input type="checkbox" name="notify_admin" />
+                </label>
+                <label class="span-2">
+                  Contacto responsable
+                  <input name="admin_contact" type="text" />
+                </label>
+                <label class="span-2">
+                  Horario para alertas
+                  <input name="schedule" placeholder="09:30" />
+                </label>
+                <div class="form-actions span-2">
+                  <button type="submit">Guardar alerta</button>
+                  <span id="workspaceAlertStatus" class="muted"></span>
+                </div>
+              </form>
             </div>
-            <div id="workspaceTimeSummary" class="workspace-time-summary"></div>
-            <div class="form-actions">
-              <label>
-                Mes
-                <input id="workspaceTimeMonth" type="month" />
-              </label>
-              <a id="workspaceTimeExportBtn" class="secondary ghost button-inline" href="#" target="_blank" rel="noreferrer">Exportar CSV</a>
+            <div class="workspace-time-sidebar">
+              <div class="section-head">
+                <div>
+                  <h4>Personal activo</h4>
+                  <p class="muted">Selecciona a un empleado para ver su vista previa, exportar y editar su ficha.</p>
+                </div>
+              </div>
+              <div id="workspaceTimeEmployeeList"></div>
+              <div class="workspace-time-exports">
+                <button type="button" id="workspaceTimeExportXml" class="secondary ghost button-inline" disabled>Exportar XML</button>
+                <button type="button" id="workspaceTimeExportPdf" class="secondary ghost button-inline" disabled>Exportar PDF</button>
+              </div>
+              <div class="section-head">
+                <div>
+                  <h4>Notificaciones enviadas</h4>
+                  <p class="muted">Histórico del sistema al trabajador y al responsable.</p>
+                </div>
+              </div>
+              <div id="workspaceTimeNotifications"></div>
             </div>
+          </div>
+          <div class="workspace-time-form hidden">
             <form id="workspaceTimeEmployeeForm" class="form-grid">
               <input type="hidden" name="id" />
               <input type="hidden" name="workspace_id" />
@@ -1015,10 +1071,6 @@
                 <input name="horas_pactadas_dia" type="number" min="0" step="0.25" />
               </label>
               <label>
-                Horas pactadas/semana
-                <input name="horas_pactadas_semana" type="number" min="0" step="0.25" />
-              </label>
-              <label>
                 Fecha alta
                 <input name="fecha_alta" type="date" />
               </label>
@@ -1036,7 +1088,6 @@
                 <span id="workspaceTimeEmployeeStatus" class="muted"></span>
               </div>
             </form>
-            <div id="workspaceTimeEmployeeList"></div>
             <form id="workspaceTimeForm" class="form-grid">
               <input type="hidden" name="id" />
               <input type="hidden" name="workspace_id" />
@@ -1048,10 +1099,6 @@
               <label>
                 Persona registrada
                 <select name="persona_id_lookup"></select>
-              </label>
-              <label>
-                Persona
-                <input name="persona_nombre" required />
               </label>
               <label>
                 Fecha
@@ -1107,8 +1154,8 @@
                 <span id="workspaceTimeStatus" class="muted"></span>
               </div>
             </form>
-            <div id="workspaceTimeList"></div>
           </div>
+          <div id="workspaceTimeList"></div>
         </div>
         <div class="workspace-central-layout crm-workspace-view" data-workspace-view="fincas">
           <div class="form-card">

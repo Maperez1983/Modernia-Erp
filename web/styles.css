@@ -1590,6 +1590,73 @@ body.crm-fin #companySummary {
   color: rgba(67, 84, 68, 0.82);
 }
 
+.workspace-time-layout {
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) minmax(320px, 420px);
+  gap: 18px;
+  align-items: start;
+}
+
+.workspace-time-config,
+.workspace-time-sidebar {
+  border: 1px solid rgba(60, 110, 113, 0.15);
+  border-radius: 16px;
+  padding: 18px;
+  background: rgba(255, 255, 255, 0.93);
+  box-shadow: 0 12px 24px rgba(43, 43, 43, 0.05);
+}
+
+.workspace-time-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.workspace-time-layout .workspace-time-exports {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.workspace-time-exports button {
+  width: 100%;
+}
+
+.workspace-time-preview {
+  border: 1px dashed rgba(60, 110, 113, 0.2);
+  border-radius: 12px;
+  padding: 10px;
+  margin-top: 12px;
+  background: rgba(245, 249, 247, 0.8);
+}
+
+.workspace-time-hidden {
+  display: none;
+}
+
+.workspace-time-cardstack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.workspace-time-card {
+  border: 1px solid rgba(43, 43, 43, 0.08);
+  border-radius: 14px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.95);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.workspace-time-card footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+}
+
 .workspace-suite-card-button {
   width: 100%;
   text-align: left;
