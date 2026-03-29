@@ -12713,19 +12713,29 @@ let lastGeocodeAddress = "";
 
 const renderMapPreview = (container, lat, lon, address = "") => {
   if (!container) return;
+  const geocodeState = String(container.dataset.geocode || "").trim();
   if (!lat || !lon) {
+    const safeAddress = String(address || "").trim();
+    const searchUrl = safeAddress
+      ? `https://www.openstreetmap.org/search?query=${encodeURIComponent(safeAddress)}`
+      : "https://www.openstreetmap.org/";
+    const message = safeAddress
+      ? geocodeState === "failed"
+        ? `No se pudo geolocalizar ${safeAddress}. Revisa dirección/población/provincia y vuelve a intentar.`
+        : `Se intentará geolocalizar ${safeAddress} automáticamente.`
+      : "Añade dirección, población y provincia para dibujar la localización.";
     container.innerHTML = `
       <div class="map-box-empty">
         <strong>Mapa pendiente</strong>
-        <p class="muted">${
-          address
-            ? `Se intentará geolocalizar ${address} automáticamente.`
-            : "Añade dirección, población y provincia para dibujar la localización."
-        }</p>
+        <p class="muted">${escapeHtml(message)}</p>
+        <div class="map-box-meta">
+          <a class="muted" href="${searchUrl}" target="_blank" rel="noreferrer">Buscar en OpenStreetMap</a>
+        </div>
       </div>
     `;
     return;
   }
+  container.dataset.geocode = "ok";
   const center = `${lat},${lon}`;
   const staticMapUrl = `https://staticmap.openstreetmap.de/staticmap.php?center=${encodeURIComponent(center)}&zoom=16&size=900x320&maptype=mapnik&markers=${encodeURIComponent(`${center},red-pushpin`)}`;
   const osmUrl = `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lon}#map=16/${lat}/${lon}`;
@@ -12771,6 +12781,7 @@ const geocodeInmuebleAddress = (address, latInput, lonInput) => {
   if (!address) return;
   if (address === lastGeocodeAddress) return;
   lastGeocodeAddress = address;
+  if (inmuebleMap) inmuebleMap.dataset.geocode = "pending";
   updateInmuebleMap(null, null, address);
   if (inmuebleGeocodeTimer) {
     clearTimeout(inmuebleGeocodeTimer);
@@ -12785,7 +12796,11 @@ const geocodeInmuebleAddress = (address, latInput, lonInput) => {
     if (codigoPostal?.value) params.set("codigo_postal", codigoPostal.value);
     api(`/api/geocode_lookup?${params.toString()}`)
       .then((data) => {
-        if (!data?.ok) return;
+        if (!data?.ok) {
+          if (inmuebleMap) inmuebleMap.dataset.geocode = "failed";
+          updateInmuebleMap(null, null, address);
+          return;
+        }
         const lat = Number(data.lat);
         const lon = Number(data.lon);
         if (Number.isNaN(lat) || Number.isNaN(lon)) return;
@@ -12795,7 +12810,10 @@ const geocodeInmuebleAddress = (address, latInput, lonInput) => {
         saveInmuebleField("lon", lon);
         updateInmuebleMap(lat, lon, address);
       })
-      .catch(() => {});
+      .catch(() => {
+        if (inmuebleMap) inmuebleMap.dataset.geocode = "failed";
+        updateInmuebleMap(null, null, address);
+      });
   }, 600);
 };
 
