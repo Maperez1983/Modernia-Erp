@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>LIV · Plataforma Operativa</title>
-    <link rel="stylesheet" href="styles.css?v=150" />
+    <link rel="stylesheet" href="styles.css?v=151" />
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600;700&family=Source+Sans+3:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" />
   </head>
   <body class="theme-operativa">
@@ -1104,6 +1104,13 @@
                   <input id="workspaceTimeMonth" type="month" />
                 </label>
                 <a id="workspaceTimeExportBtn" class="secondary ghost button-inline" href="#" target="_blank" rel="noreferrer">Exportar CSV</a>
+              </div>
+              <div class="workspace-time-period-lock" id="workspaceTimePeriodLock">
+                <div>
+                  <strong>Bloqueo del mes</strong>
+                  <div class="muted" id="workspaceTimePeriodStatus">Selecciona un mes para ver el estado.</div>
+                </div>
+                <button type="button" id="workspaceTimePeriodToggle" class="secondary ghost button-inline hidden">Bloquear</button>
               </div>
               <form id="workspaceAlertForm" class="form-grid">
                 <input type="hidden" name="workspace_id" />
@@ -2205,6 +2212,9 @@
                         <h3>Mapa y geolocalización</h3>
                         <p class="muted">Vista rápida de localización y apoyo para Catastro.</p>
                       </div>
+                      <div class="form-actions">
+                        <button class="secondary" type="button" id="inmuebleGeocodeBtn">Localizar</button>
+                      </div>
                     </div>
                     <div id="inmuebleMap" class="map-box"></div>
                   </div>
@@ -2328,10 +2338,10 @@
                       <option>Cancelada</option>
                     </select>
                   </label>
-                  <label>
-                    Asesor
-                    <input name="asesor" />
-                  </label>
+	                  <label>
+	                    Asesor
+	                    <select name="asesor" class="asesor-select" data-service="Inmobiliaria"></select>
+	                  </label>
                   <label>
                     Notas
                     <textarea name="notas" rows="2"></textarea>
@@ -4174,10 +4184,10 @@
                     Pisos vendidos
                     <input name="pisos_vendidos" />
                   </label>
-                  <label>
-                    Asesor
-                    <input name="asesor" />
-                  </label>
+	                  <label>
+	                    Asesor
+	                    <select name="asesor" class="asesor-select" data-service="Inmobiliaria"></select>
+	                  </label>
                   <label>
                     Año
                     <input name="anio" type="number" min="2000" max="2100" />
@@ -6798,6 +6808,6 @@
     <script src="ui-foundation.js?v=2"></script>
     <script src="app-auth.js?v=2"></script>
     <script src="app-routing.js?v=7"></script>
-    <script src="app.js?v=366"></script>
+    <script src="app.js?v=367"></script>
   </body>
 </html>

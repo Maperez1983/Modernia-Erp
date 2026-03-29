@@ -14690,6 +14690,25 @@ def ensure_workspace_product_tables(conn):
     )
     conn.execute(
         """
+        CREATE TABLE IF NOT EXISTS workspace_registro_periodos (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          empresa_id TEXT,
+          month TEXT NOT NULL,
+          locked INTEGER NOT NULL DEFAULT 0,
+          locked_at TEXT,
+          locked_by TEXT,
+          entries_total INTEGER NOT NULL DEFAULT 0,
+          minutos_total INTEGER NOT NULL DEFAULT 0,
+          digest_sha256 TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          UNIQUE (workspace_id, COALESCE(empresa_id, ''), month)
+        )
+        """
+    )
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS workspace_registro_audit (
           id TEXT PRIMARY KEY,
           workspace_id TEXT NOT NULL,
@@ -16556,36 +16575,135 @@ def build_workspace_time_csv(rows):
 
 
 def build_workspace_time_xlsx(rows, workspace=None, company=None, persona=None, month=""):
-    if Workbook is None:
-        raise RuntimeError("openpyxl no disponible")
     workspace = workspace or {}
     company = company or {}
     persona = persona or {}
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Registro horario"
-    ws.append(["Workspace", workspace.get("nombre") or ""])
-    ws.append(["Empresa", company.get("nombre") or ""])
-    ws.append(["Trabajador", persona.get("persona_nombre") or persona.get("nombre") or ""])
-    ws.append(["Mes", month or ""])
-    ws.append([])
-    headers = ["Fecha", "Inicio", "Fin", "Pausa (min)", "Minutos trabajados", "Horas (HH:MM)", "Estado", "Notas"]
-    ws.append(headers)
+    # Generate a minimal .xlsx (OOXML) without external dependencies (openpyxl).
+    # Excel can open this file normally.
+    import zipfile
+    from xml.sax.saxutils import escape as xml_escape
+
+    def col_letter(idx):
+        idx = int(idx)
+        letters = ""
+        while idx > 0:
+            idx, rem = divmod(idx - 1, 26)
+            letters = chr(65 + rem) + letters
+        return letters
+
+    def cell_ref(row_idx, col_idx):
+        return f"{col_letter(col_idx)}{row_idx}"
+
+    def xml_cell(row_idx, col_idx, value):
+        ref = cell_ref(row_idx, col_idx)
+        if value is None:
+            return f'<c r="{ref}"/>'
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return f'<c r="{ref}"><v>{value}</v></c>'
+        text = str(value)
+        # Keep newlines; Excel supports them in inline strings.
+        text = xml_escape(text)
+        return f'<c r="{ref}" t="inlineStr"><is><t xml:space="preserve">{text}</t></is></c>'
+
+    lines = []
+    worker_name = persona.get("persona_nombre") or persona.get("nombre") or ""
+    lines.append(["Workspace", workspace.get("nombre") or ""])
+    lines.append(["Empresa", company.get("nombre") or ""])
+    lines.append(["Trabajador", worker_name])
+    lines.append(["Mes", month or ""])
+    lines.append([])
+    lines.append(["Fecha", "Inicio", "Fin", "Pausa (min)", "Minutos trabajados", "Horas (HH:MM)", "Estado", "Notas"])
     for row in rows or []:
-        ws.append(
+        minutos = int(row.get("minutos_trabajados") or 0)
+        lines.append(
             [
                 row.get("fecha") or "",
                 row.get("hora_inicio") or "",
                 row.get("hora_fin") or "",
                 int(row.get("pausa_min") or 0),
-                int(row.get("minutos_trabajados") or 0),
-                format_minutes_hhmm(row.get("minutos_trabajados") or 0),
+                minutos,
+                format_minutes_hhmm(minutos),
                 row.get("estado") or "",
                 row.get("notas") or "",
             ]
         )
+
+    sheet_rows = []
+    for r_idx, row in enumerate(lines, start=1):
+        if not row:
+            sheet_rows.append(f'<row r="{r_idx}"></row>')
+            continue
+        cells = []
+        for c_idx, val in enumerate(row, start=1):
+            cells.append(xml_cell(r_idx, c_idx, val))
+        sheet_rows.append(f'<row r="{r_idx}">{"".join(cells)}</row>')
+
+    sheet_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+        "<sheetData>"
+        + "".join(sheet_rows)
+        + "</sheetData>"
+        "</worksheet>"
+    )
+
+    workbook_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
+        'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+        "<sheets>"
+        '<sheet name="Registro horario" sheetId="1" r:id="rId1"/>'
+        "</sheets>"
+        "</workbook>"
+    )
+
+    rels_root = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>'
+        "</Relationships>"
+    )
+
+    rels_wb = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>'
+        '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
+        "</Relationships>"
+    )
+
+    # Minimal styles (required by some Excel versions to avoid warnings).
+    styles_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+        "<fonts count=\"1\"><font><sz val=\"11\"/><color rgb=\"FF000000\"/><name val=\"Calibri\"/><family val=\"2\"/></font></fonts>"
+        "<fills count=\"1\"><fill><patternFill patternType=\"none\"/></fill></fills>"
+        "<borders count=\"1\"><border><left/><right/><top/><bottom/><diagonal/></border></borders>"
+        "<cellStyleXfs count=\"1\"><xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/></cellStyleXfs>"
+        "<cellXfs count=\"1\"><xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\" xfId=\"0\" applyFont=\"1\"/></cellXfs>"
+        "<cellStyles count=\"1\"><cellStyle name=\"Normal\" xfId=\"0\" builtinId=\"0\"/></cellStyles>"
+        "</styleSheet>"
+    )
+
+    content_types = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+        '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+        '<Default Extension="xml" ContentType="application/xml"/>'
+        '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+        '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+        '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'
+        "</Types>"
+    )
+
     buffer = BytesIO()
-    wb.save(buffer)
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("[Content_Types].xml", content_types)
+        zf.writestr("_rels/.rels", rels_root)
+        zf.writestr("xl/workbook.xml", workbook_xml)
+        zf.writestr("xl/_rels/workbook.xml.rels", rels_wb)
+        zf.writestr("xl/worksheets/sheet1.xml", sheet_xml)
+        zf.writestr("xl/styles.xml", styles_xml)
     return buffer.getvalue()
 
 
@@ -16705,6 +16823,271 @@ def log_workspace_notification(conn, workspace_id, persona_id, channel, payload,
         """,
         (notification_id, workspace_id, persona_id, channel, json.dumps(payload, ensure_ascii=False), now_ts),
     )
+    try:
+        maybe_send_workspace_notification_email(conn, workspace_id, persona_id, notification_id, channel, payload, now=now_ts)
+    except Exception:
+        pass
+
+
+def _mask_email(value):
+    email_value = str(value or "").strip()
+    if "@" not in email_value:
+        return ""
+    local, domain = email_value.split("@", 1)
+    if len(local) <= 2:
+        local_mask = local[:1] + "*"
+    else:
+        local_mask = local[:1] + "*" * (len(local) - 2) + local[-1:]
+    return f"{local_mask}@{domain}"
+
+
+def _extract_emails(value):
+    raw = str(value or "").strip()
+    if not raw:
+        return []
+    tokens = re.split(r"[,\s;]+", raw)
+    emails = []
+    for token in tokens:
+        token = token.strip()
+        if not token:
+            continue
+        if "@" not in token:
+            continue
+        emails.append(token)
+    return emails
+
+
+def send_email_smtp(subject, to_email, text_body, html_body=None):
+    # Wrapper around the existing send_mail_smtp.
+    if not to_email:
+        return {"ok": False, "skipped": True, "error": "no_recipients"}
+    try:
+        send_mail_smtp(subject, to_email, text_body, html_body=html_body)
+        return {"ok": True}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+def maybe_send_workspace_notification_email(conn, workspace_id, persona_id, notification_id, channel, payload, now=None):
+    # SMTP is optional; if not configured, keep DB notification only.
+    if not (os.environ.get("SMTP_HOST") or "").strip():
+        return {"ok": False, "skipped": True}
+    ch = str(channel or "").strip()
+    is_admin = ch.startswith("admin_")
+    is_worker = ch.startswith("worker_")
+    if not (is_admin or is_worker):
+        return {"ok": False, "skipped": True}
+
+    prefs = fetch_workspace_alert_preferences(conn, workspace_id, persona_id=persona_id) or {}
+    recipients = []
+    if is_admin:
+        recipients.extend(_extract_emails(prefs.get("admin_contact") or payload.get("admin_contact") or ""))
+    if is_worker:
+        person = conn.execute(
+            "SELECT email, usuario_id FROM workspace_registro_personal WHERE workspace_id = ? AND id = ? LIMIT 1",
+            (workspace_id, persona_id),
+        ).fetchone()
+        if person and str(person["email"] or "").strip():
+            recipients.extend(_extract_emails(person["email"]))
+        else:
+            usuario_id = str(person["usuario_id"] or "").strip() if person else ""
+            if usuario_id:
+                user = conn.execute("SELECT email FROM usuarios WHERE id = ? LIMIT 1", (usuario_id,)).fetchone()
+                if user and str(user["email"] or "").strip():
+                    recipients.extend(_extract_emails(user["email"]))
+
+    recipients = list(dict.fromkeys([r.strip() for r in recipients if r.strip()]))
+    if not recipients:
+        return {"ok": False, "skipped": True}
+
+    persona_nombre = str(payload.get("persona_nombre") or "").strip() or "-"
+    empresa_nombre = str(payload.get("empresa_nombre") or "").strip()
+    fecha = str(payload.get("fecha") or "").strip()
+    hora_inicio = str(payload.get("hora_inicio") or "").strip()
+    hora_fin = str(payload.get("hora_fin") or "").strip()
+
+    subject_map = {
+        "admin_entry_log": "Registro horario: entrada registrada",
+        "admin_exit_log": "Registro horario: salida registrada",
+        "worker_entry_log": "Tu registro horario: entrada registrada",
+        "worker_exit_log": "Tu registro horario: salida registrada",
+        "admin_missing_checkin": "Registro horario: falta entrada",
+        "admin_missing_checkout": "Registro horario: falta salida",
+        "worker_missing_checkin": "Te falta registrar la entrada",
+        "worker_missing_checkout": "Te falta registrar la salida",
+    }
+    subject = subject_map.get(ch, f"Notificación registro horario ({ch})")
+    lines = [
+        subject,
+        "",
+        f"Persona: {persona_nombre}",
+    ]
+    if empresa_nombre:
+        lines.append(f"Empresa: {empresa_nombre}")
+    if fecha:
+        lines.append(f"Fecha: {fecha}")
+    if hora_inicio:
+        lines.append(f"Entrada: {hora_inicio}")
+    if hora_fin:
+        lines.append(f"Salida: {hora_fin}")
+    lines.append("")
+    lines.append("Mensaje generado automáticamente por LIV.")
+    body = "\n".join(lines)
+
+    ok_any = True
+    sent_to = []
+    for addr in recipients:
+        result = send_email_smtp(subject, addr, body)
+        ok_any = ok_any and bool(result.get("ok"))
+        sent_to.append(_mask_email(addr))
+
+    # Store delivery traceability (masked).
+    try:
+        payload2 = dict(payload or {})
+        payload2["delivery"] = {"method": "email", "to": sent_to, "ok": bool(ok_any)}
+        conn.execute(
+            "UPDATE workspace_registro_notifications SET payload = ? WHERE id = ?",
+            (json.dumps(payload2, ensure_ascii=False), notification_id),
+        )
+    except Exception:
+        pass
+    return {"ok": bool(ok_any)}
+
+
+def _normalize_month(value):
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    if re.match(r"^\\d{4}-\\d{2}$", raw):
+        return raw
+    if len(raw) >= 7 and re.match(r"^\\d{4}-\\d{2}", raw):
+        return raw[:7]
+    return ""
+
+
+def compute_workspace_time_period_digest(conn, workspace_id, month, empresa_id=None):
+    month_key = _normalize_month(month)
+    if not workspace_id or not month_key:
+        return {"entries_total": 0, "minutos_total": 0, "digest_sha256": ""}
+    empresa_ids = resolve_workspace_company_ids(conn, workspace_id, empresa_id=empresa_id)
+    if not empresa_ids:
+        return {"entries_total": 0, "minutos_total": 0, "digest_sha256": ""}
+    rows = conn.execute(
+        f"""
+        SELECT id, empresa_id, persona_id, usuario_id, persona_nombre, tipo_jornada, horas_pactadas_dia,
+               fecha, hora_inicio, hora_fin, pausa_min, minutos_trabajados, metodo_registro, estado, COALESCE(notas,'') AS notas
+        FROM workspace_registro_horario
+        WHERE workspace_id = ?
+          AND empresa_id IN ({",".join("?" for _ in empresa_ids)})
+          AND substr(fecha, 1, 7) = ?
+        ORDER BY fecha ASC, hora_inicio ASC, id ASC
+        """,
+        (workspace_id, *empresa_ids, month_key),
+    ).fetchall()
+    h = hashlib.sha256()
+    total_min = 0
+    for row in rows:
+        d = dict(row)
+        total_min += int(d.get("minutos_trabajados") or 0)
+        h.update(json.dumps(d, ensure_ascii=False, sort_keys=True).encode("utf-8"))
+        h.update(b"\n")
+    return {"entries_total": len(rows), "minutos_total": int(total_min), "digest_sha256": h.hexdigest()}
+
+
+def is_workspace_time_month_locked(conn, workspace_id, month, empresa_id=None):
+    month_key = _normalize_month(month)
+    if not workspace_id or not month_key:
+        return False
+    empresa_key = str(empresa_id or "").strip()
+    row = conn.execute(
+        """
+        SELECT locked
+        FROM workspace_registro_periodos
+        WHERE workspace_id = ? AND COALESCE(empresa_id, '') = ? AND month = ?
+        LIMIT 1
+        """,
+        (workspace_id, empresa_key, month_key),
+    ).fetchone()
+    if not row:
+        return False
+    return int(row["locked"] or 0) == 1
+
+
+def fetch_workspace_registro_periodos(conn, workspace_id, empresa_id=None, limit=36):
+    empresa_key = str(empresa_id or "").strip()
+    where = ["workspace_id = ?"]
+    params = [workspace_id]
+    if empresa_key:
+        where.append("COALESCE(empresa_id,'') = ?")
+        params.append(empresa_key)
+    rows = conn.execute(
+        f"""
+        SELECT id, workspace_id, empresa_id, month, locked, locked_at, locked_by, entries_total, minutos_total, digest_sha256, created_at, updated_at
+        FROM workspace_registro_periodos
+        WHERE {' AND '.join(where)}
+        ORDER BY month DESC
+        LIMIT ?
+        """,
+        (*params, max(1, min(int(limit or 36), 120))),
+    ).fetchall()
+    return {"rows": [dict(r) for r in rows]}
+
+
+def upsert_workspace_registro_periodo_lock(conn, workspace_id, month, locked, actor_user_id="", empresa_id=None, now=None):
+    now_ts = now or datetime.now().isoformat()
+    month_key = _normalize_month(month)
+    if not workspace_id or not month_key:
+        return {"error": "workspace_id y month requeridos"}
+    empresa_key = str(empresa_id or "").strip()
+    existing = conn.execute(
+        "SELECT id FROM workspace_registro_periodos WHERE workspace_id = ? AND COALESCE(empresa_id,'') = ? AND month = ? LIMIT 1",
+        (workspace_id, empresa_key, month_key),
+    ).fetchone()
+    digest = compute_workspace_time_period_digest(conn, workspace_id, month_key, empresa_id=empresa_id)
+    locked_int = 1 if int(locked or 0) == 1 else 0
+    if existing:
+        conn.execute(
+            """
+            UPDATE workspace_registro_periodos
+            SET locked = ?, locked_at = ?, locked_by = ?, entries_total = ?, minutos_total = ?, digest_sha256 = ?, updated_at = datetime(?)
+            WHERE id = ? AND workspace_id = ?
+            """,
+            (
+                locked_int,
+                now_ts if locked_int else None,
+                actor_user_id or None,
+                int(digest["entries_total"] or 0),
+                int(digest["minutos_total"] or 0),
+                digest["digest_sha256"] if locked_int else None,
+                now_ts,
+                existing["id"],
+                workspace_id,
+            ),
+        )
+        return {"id": existing["id"], "month": month_key, "locked": locked_int, **digest}
+    record_id = os.urandom(16).hex()
+    conn.execute(
+        """
+        INSERT INTO workspace_registro_periodos (
+          id, workspace_id, empresa_id, month, locked, locked_at, locked_by, entries_total, minutos_total, digest_sha256, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+        """,
+        (
+            record_id,
+            workspace_id,
+            empresa_key or None,
+            month_key,
+            locked_int,
+            now_ts if locked_int else None,
+            actor_user_id or None,
+            int(digest["entries_total"] or 0),
+            int(digest["minutos_total"] or 0),
+            digest["digest_sha256"] if locked_int else None,
+            now_ts,
+            now_ts,
+        ),
+    )
+    return {"id": record_id, "month": month_key, "locked": locked_int, **digest}
 
 
 def _normalize_service_tokens(value):
@@ -19865,6 +20248,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/workspace_registro_horario_toggle",
             "/api/workspace_registro_alerts",
             "/api/workspace_registro_usuario_toggle",
+            "/api/workspace_registro_periodo_lock",
             "/api/workspace_rrhh_profile",
             "/api/workspace_rrhh_ausencia",
             "/api/workspace_rrhh_ausencia_estado",
@@ -21860,6 +22244,9 @@ class Handler(BaseHTTPRequestHandler):
             if not workspace_id or not empresa_id or not persona_nombre or not fecha or not hora_inicio:
                 json_response(self, {"error": "workspace_id, empresa_id, persona_nombre, fecha y hora_inicio requeridos"}, status=400)
                 return
+            if is_workspace_time_month_locked(conn, workspace_id, fecha, empresa_id=empresa_id):
+                json_response(self, {"error": "Mes bloqueado: desbloquea el periodo para editar fichajes."}, status=409)
+                return
             persona_row = None
             if persona_id:
                 persona_row = conn.execute(
@@ -22047,6 +22434,9 @@ class Handler(BaseHTTPRequestHandler):
                 return
             now_dt = datetime.now()
             fecha = now_dt.date().isoformat()
+            if is_workspace_time_month_locked(conn, workspace_id, fecha, empresa_id=str(persona_row["empresa_id"] or "").strip()):
+                json_response(self, {"error": "Mes bloqueado: desbloquea el periodo para fichar."}, status=409)
+                return
             now_hhmm = now_dt.strftime("%H:%M")
             open_row = conn.execute(
                 """
@@ -22317,6 +22707,54 @@ class Handler(BaseHTTPRequestHandler):
             )
             conn.commit()
             json_response(self, {"ok": True, "id": usuario_id, "enabled": enabled})
+            return
+        elif parsed.path == "/api/workspace_registro_periodo_lock":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not workspace_session_is_privileged(session):
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            month = str(payload.get("month") or payload.get("mes") or "").strip()
+            empresa_id = str(payload.get("empresa_id") or "").strip() or None
+            locked = 1 if str(payload.get("locked") or payload.get("bloqueado") or "").strip().lower() in {"1", "true", "si", "sí", "on"} else 0
+            if not workspace_id or not month:
+                json_response(self, {"error": "workspace_id y month requeridos"}, status=400)
+                return
+            before = conn.execute(
+                "SELECT * FROM workspace_registro_periodos WHERE workspace_id = ? AND COALESCE(empresa_id,'') = ? AND month = ? LIMIT 1",
+                (workspace_id, str(empresa_id or ""), _normalize_month(month)),
+            ).fetchone()
+            result = upsert_workspace_registro_periodo_lock(
+                conn,
+                workspace_id,
+                month,
+                locked,
+                actor_user_id=str(session.get("user_id") or "") if session else "",
+                empresa_id=empresa_id,
+                now=now,
+            )
+            after = conn.execute(
+                "SELECT * FROM workspace_registro_periodos WHERE id = ? AND workspace_id = ? LIMIT 1",
+                (result.get("id"), workspace_id),
+            ).fetchone() if result.get("id") else None
+            log_workspace_registro_audit(
+                conn,
+                workspace_id,
+                empresa_id=empresa_id,
+                persona_id=None,
+                entity_type="registro_periodo",
+                entity_id=result.get("id") if isinstance(result, dict) else None,
+                action="lock" if locked else "unlock",
+                actor=session,
+                before=dict(before) if before else None,
+                after=dict(after) if after else None,
+                now=now,
+            )
+            conn.commit()
+            if result.get("error"):
+                json_response(self, {"error": result.get("error")}, status=400)
+                return
+            json_response(self, {"ok": True, "row": result})
             return
         elif parsed.path == "/api/workspace_rrhh_profile":
             session = getattr(self, "auth_session", None) or self._current_session()
@@ -29515,6 +29953,19 @@ class Handler(BaseHTTPRequestHandler):
             )
             return
 
+        if path == "/api/workspace_registro_periodos":
+            workspace_id = params.get("workspace_id", [""])[0]
+            empresa_id = params.get("empresa_id", [""])[0]
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if session and not workspace_session_is_privileged(session):
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
+            json_response(self, fetch_workspace_registro_periodos(conn, workspace_id, empresa_id=empresa_id))
+            return
+
         if path == "/api/workspace_registro_usuarios":
             workspace_id = params.get("workspace_id", [""])[0]
             empresa_id = params.get("empresa_id", [""])[0]
@@ -29789,11 +30240,7 @@ class Handler(BaseHTTPRequestHandler):
             company_row = conn.execute("SELECT nombre, logo_url FROM empresas WHERE id = ? LIMIT 1", (company_id,)).fetchone()
             company = dict(company_row) if company_row else {"nombre": "", "logo_url": ""}
             workspace = fetch_workspace_detail(conn, workspace_id).get("workspace") or {}
-            try:
-                xlsx_bytes = build_workspace_time_xlsx(rows, workspace=workspace, company=company, persona=persona, month=month)
-            except Exception:
-                json_response(self, {"error": "openpyxl no disponible en servidor"}, status=500)
-                return
+            xlsx_bytes = build_workspace_time_xlsx(rows, workspace=workspace, company=company, persona=persona, month=month)
             filename = f"registro_horario_{persona.get('persona_nombre', persona_id)}_{month or 'completo'}.xlsx"
             binary_response(
                 self,

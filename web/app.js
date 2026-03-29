@@ -1217,6 +1217,8 @@ const state = {
   workspaceTimeSummary: null,
   workspaceTimeMonth: "",
   workspaceTimeSelectedPersonaId: "",
+  workspaceTimePeriods: [],
+  workspaceTimePeriodRow: null,
   workspaceRrhhTab: "plantilla",
   workspaceRrhhSelectedPersonaId: "",
   workspaceRrhhMonth: "",
@@ -1355,9 +1357,11 @@ const workspaceTimeResetBtn = document.getElementById("workspaceTimeResetBtn");
 const workspaceTimeStatus = document.getElementById("workspaceTimeStatus");
 const workspaceTimeList = document.getElementById("workspaceTimeList");
 const workspaceTimeSummary = document.getElementById("workspaceTimeSummary");
-const workspaceTimeMonth = document.getElementById("workspaceTimeMonth");
-const workspaceTimeExportBtn = document.getElementById("workspaceTimeExportBtn");
-const workspaceTimeConfigForm = document.getElementById("workspaceAlertForm");
+  const workspaceTimeMonth = document.getElementById("workspaceTimeMonth");
+  const workspaceTimeExportBtn = document.getElementById("workspaceTimeExportBtn");
+  const workspaceTimePeriodStatus = document.getElementById("workspaceTimePeriodStatus");
+  const workspaceTimePeriodToggle = document.getElementById("workspaceTimePeriodToggle");
+  const workspaceTimeConfigForm = document.getElementById("workspaceAlertForm");
 const workspaceAlertStatus = document.getElementById("workspaceAlertStatus");
 const workspaceTimeEmployeeForm = document.getElementById("workspaceTimeEmployeeForm");
 const workspaceTimeEmployeeNewBtn = document.getElementById("workspaceTimeEmployeeNewBtn");
@@ -1596,6 +1600,7 @@ const clienteServiciosInmoCard = document.getElementById("clienteServiciosInmoCa
 const clienteServiciosHipotecasCard = document.getElementById("clienteServiciosHipotecasCard");
 const clienteProfesionalScope = document.getElementById("clienteProfesionalScope");
 const responsableSelects = document.querySelectorAll(".responsable-select");
+const asesorSelects = document.querySelectorAll(".asesor-select");
 const clienteProfesionalSection = document.getElementById("clienteProfesionalSection");
 const clienteProfesionalList = document.getElementById("clienteProfesionalList");
 const clienteProfesionalHint = document.getElementById("clienteProfesionalHint");
@@ -2149,6 +2154,7 @@ const inmuebleVentaFichaPdfBtn = document.getElementById("inmuebleVentaFichaPdfB
 const inmuebleVentaPrecioPdfBtn = document.getElementById("inmuebleVentaPrecioPdfBtn");
 const inmuebleAlquilerDiaPdfBtn = document.getElementById("inmuebleAlquilerDiaPdfBtn");
 const inmuebleDeleteBtn = document.getElementById("inmuebleDeleteBtn");
+const inmuebleGeocodeBtn = document.getElementById("inmuebleGeocodeBtn");
 const inmuebleTabs = document.getElementById("inmuebleTabs");
 const inmuebleSaveStatus = document.getElementById("inmuebleSaveStatus");
 const inmuebleTabDatos = document.getElementById("inmuebleTabDatos");
@@ -4009,6 +4015,7 @@ const renderWorkspaceCompanyScopedData = () => {
   const inboxRows = filterWorkspaceRowsByCompany(raw.inboxRows || []);
   const timeRows = filterWorkspaceRowsByCompany(raw.timeRows || []);
   const timeEmployees = filterWorkspaceRowsByCompany(raw.timeEmployees || []);
+  const timePeriods = filterWorkspaceRowsByCompany(raw.timePeriods || []);
   const communityRows = filterWorkspaceRowsByCompany(raw.fincasCommunities || []);
   const communityIds = new Set(communityRows.map((row) => String(row.id || "")).filter(Boolean));
   const providerRows = (raw.fincasProviders || []).filter((row) => {
@@ -4061,6 +4068,8 @@ const renderWorkspaceCompanyScopedData = () => {
   renderWorkspaceAutomationLogs(raw.automationLogRows || []);
   renderWorkspaceDocumentHub(filterWorkspaceDocumentHubData(raw.docs || {}));
   if (workspaceTimeMonth) workspaceTimeMonth.value = state.workspaceTimeMonth || "";
+  state.workspaceTimePeriods = timePeriods;
+  renderWorkspaceTimePeriodLock(timePeriods);
   if (workspaceTimeExportBtn) {
     const companyQuery = state.currentWorkspaceCompanyId ? `&empresa_id=${encodeURIComponent(state.currentWorkspaceCompanyId)}` : "";
     workspaceTimeExportBtn.href = `/api/workspace_registro_horario_export?workspace_id=${encodeURIComponent(state.currentWorkspaceId || "")}&month=${encodeURIComponent(state.workspaceTimeMonth || "")}${companyQuery}`;
@@ -8232,6 +8241,45 @@ const renderWorkspaceTimeSummary = (summary = null) => {
   `;
 };
 
+const renderWorkspaceTimePeriodLock = (rows = []) => {
+  if (!workspaceTimePeriodStatus || !workspaceTimePeriodToggle) return;
+  if (!isWorkspaceTimeManager()) {
+    workspaceTimePeriodToggle.classList.add("hidden");
+    workspaceTimePeriodStatus.textContent = "Disponible solo para administradores del workspace.";
+    return;
+  }
+  const month = String(state.workspaceTimeMonth || "").trim();
+  if (!month) {
+    workspaceTimePeriodToggle.classList.add("hidden");
+    workspaceTimePeriodStatus.textContent = "Selecciona un mes para ver el estado.";
+    return;
+  }
+  const row = (Array.isArray(rows) ? rows : []).find((r) => String(r.month || "").slice(0, 7) === month) || null;
+  state.workspaceTimePeriodRow = row;
+  const locked = Number(row?.locked || 0) === 1;
+  const lockedAt = String(row?.locked_at || "").trim();
+  const lockedBy = String(row?.locked_by || "").trim();
+  const summaryBits = [];
+  if (typeof row?.entries_total !== "undefined") summaryBits.push(`${Number(row.entries_total || 0)} fichajes`);
+  if (typeof row?.minutos_total !== "undefined") {
+    const minutes = Math.max(0, Number(row.minutos_total || 0) || 0);
+    const hh = Math.floor(minutes / 60);
+    const mm = Math.floor(minutes % 60);
+    summaryBits.push(`${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`);
+  }
+  const summaryText = summaryBits.length ? ` · ${summaryBits.join(" · ")}` : "";
+  if (locked) {
+    workspaceTimePeriodStatus.textContent = `Mes ${month} bloqueado${lockedAt ? ` (${lockedAt.slice(0, 10)})` : ""}${lockedBy ? ` por ${lockedBy}` : ""}${summaryText}.`;
+    workspaceTimePeriodToggle.textContent = "Desbloquear mes";
+  } else {
+    workspaceTimePeriodStatus.textContent = `Mes ${month} abierto${summaryText}.`;
+    workspaceTimePeriodToggle.textContent = "Bloquear mes";
+  }
+  workspaceTimePeriodToggle.dataset.month = month;
+  workspaceTimePeriodToggle.dataset.locked = locked ? "1" : "0";
+  workspaceTimePeriodToggle.classList.remove("hidden");
+};
+
 const renderWorkspaceTimeList = (rows = []) => {
   if (!workspaceTimeList) return;
   if (!rows.length) {
@@ -8665,10 +8713,13 @@ const loadWorkspaceDetail = async (workspaceId) => {
     await safeWorkspaceApi("/api/usuarios", { rows: [] }).then((data) => {
       state.usersList = data.rows || [];
       populateResponsableSelects();
+      populateAsesorSelects();
       refreshSegurosColaboradoresList();
     });
   } else {
     state.usersList = authUser ? [authUser] : [];
+    populateResponsableSelects();
+    populateAsesorSelects();
   }
   const detail = await api(`/api/workspace_detail?id=${encodeURIComponent(workspaceId)}`);
   state.currentWorkspaceDetail = detail;
@@ -8692,7 +8743,7 @@ const loadWorkspaceDetail = async (workspaceId) => {
   state.workspaceTimeUsers = timeUsers.rows || [];
   const timeMonth = String(state.workspaceTimeMonth || "").trim() || new Date().toISOString().slice(0, 7);
   state.workspaceTimeMonth = timeMonth;
-  const [billing, docs, billingRows, budgetRows, collections, remittances, workspaceClients, health, gestoriaOverview, segurosOverview, finOverview, inmoOverview, serviceDesks, series, inbox, portal, portalRequests, automations, automationLogs, timeRows, timeEmployees, timeSummary, fincasCommunities, fincasIncidents, fincasProviders, fincasMeetings] = await Promise.all([
+  const [billing, docs, billingRows, budgetRows, collections, remittances, workspaceClients, health, gestoriaOverview, segurosOverview, finOverview, inmoOverview, serviceDesks, series, inbox, portal, portalRequests, automations, automationLogs, timeRows, timeEmployees, timeSummary, timePeriods, fincasCommunities, fincasIncidents, fincasProviders, fincasMeetings] = await Promise.all([
     safeWorkspaceApi(`/api/workspace_billing_summary?workspace_id=${encodeURIComponent(workspaceId)}`, {}),
     safeWorkspaceApi(`/api/workspace_document_hub?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [], summary: {} }),
     safeWorkspaceApi(`/api/workspace_facturacion?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [] }),
@@ -8715,6 +8766,7 @@ const loadWorkspaceDetail = async (workspaceId) => {
     safeWorkspaceApi(`/api/workspace_registro_horario?workspace_id=${encodeURIComponent(workspaceId)}&month=${encodeURIComponent(timeMonth)}${companyQuery}`, { rows: [] }),
     safeWorkspaceApi(`/api/workspace_registro_personal?workspace_id=${encodeURIComponent(workspaceId)}${companyQuery}&activos=0`, { rows: [] }),
     safeWorkspaceApi(`/api/workspace_registro_horario_resumen?workspace_id=${encodeURIComponent(workspaceId)}&month=${encodeURIComponent(timeMonth)}${companyQuery}`, { rows: [] }),
+    safeWorkspaceApi(`/api/workspace_registro_periodos?workspace_id=${encodeURIComponent(workspaceId)}${companyQuery}`, { rows: [] }),
     safeWorkspaceApi(`/api/workspace_fincas_comunidades?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [] }),
     safeWorkspaceApi(`/api/workspace_fincas_incidencias?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [] }),
     safeWorkspaceApi(`/api/workspace_fincas_proveedores?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [] }),
@@ -8736,6 +8788,7 @@ const loadWorkspaceDetail = async (workspaceId) => {
     timeRows: timeRows.rows || [],
     timeEmployees: timeEmployees.rows || [],
     timeSummary: timeSummary || null,
+    timePeriods: timePeriods.rows || [],
     fincasCommunities: fincasCommunities.rows || [],
     fincasIncidents: fincasIncidents.rows || [],
     fincasProviders: fincasProviders.rows || [],
@@ -11235,6 +11288,13 @@ const CRM_ETAPAS = [
   "Alquiler",
 ];
 
+const INMOBILIARIA_ASESORES = [
+  "Bárbara Salazar",
+  "Sebastián Lallana",
+  "Miguel Angel Pérez",
+  "Daniel García",
+];
+
 const INMUEBLE_CHECKLISTS = {
   Noticia: [
     "Registrar lead y origen",
@@ -11303,12 +11363,19 @@ const INMUEBLE_FIELDS = [
   { key: "banos", label: "Baños", type: "number", section: "Características" },
   { key: "precio_valoracion", label: "Valoración interna", type: "number", section: "Referencia económica" },
   { key: "valor_referencia", label: "Valor de referencia", type: "number", section: "Referencia económica" },
-  { key: "lat", label: "Latitud", type: "number", section: "Coordenadas" },
-  { key: "lon", label: "Longitud", type: "number", section: "Coordenadas" },
+  // Coordenadas: se calculan automáticamente desde la dirección y no deben formar parte del formulario.
+  { key: "lat", label: "Latitud", type: "number", section: "Coordenadas", hidden: true },
+  { key: "lon", label: "Longitud", type: "number", section: "Coordenadas", hidden: true },
 ];
 
 const CAPTACION_FIELDS = [
-  { key: "asesor", label: "Asesor", type: "text", section: "Propiedad y origen" },
+  {
+    key: "asesor",
+    label: "Asesor",
+    type: "select",
+    options: INMOBILIARIA_ASESORES,
+    section: "Propiedad y origen",
+  },
   { key: "canal", label: "Canal", type: "text", section: "Propiedad y origen" },
   { key: "motivo", label: "Motivo", type: "text", section: "Propiedad y origen" },
   { key: "urgencia", label: "Urgencia", type: "select", options: ["Baja", "Media", "Alta"], section: "Propiedad y origen" },
@@ -12423,6 +12490,9 @@ const renderEditableGrid = (grid, fields, data, target) => {
   const cardMap = {};
   let currentSection = "";
   fields.forEach((field) => {
+    if (field && field.hidden) {
+      return;
+    }
     if (target === "cliente" && field.key === "apellidos" && isJuridica) {
       return;
     }
@@ -12579,15 +12649,15 @@ const renderEditableGrid = (grid, fields, data, target) => {
       const lookupBtn = document.createElement("button");
       lookupBtn.type = "button";
       lookupBtn.className = "secondary catastro-button";
-      lookupBtn.innerHTML = `<span class="catastro-icon" aria-hidden="true"><span>CAT</span></span><span>Buscar referencia</span>`;
+      lookupBtn.innerHTML = buildCatastroButtonInner("Buscar referencia");
       lookupBtn.addEventListener("click", async () => {
-        await lookupInmuebleCatastro(inputMap);
+        await lookupInmuebleCatastro(inputMap, { silent: false });
       });
       actions.appendChild(lookupBtn);
       const syncBtn = document.createElement("button");
       syncBtn.type = "button";
       syncBtn.className = "secondary catastro-button";
-      syncBtn.innerHTML = `<span class="catastro-icon" aria-hidden="true"><span>CAT</span></span><span>Ficha PDF</span>`;
+      syncBtn.innerHTML = buildCatastroButtonInner("Ficha PDF");
       syncBtn.addEventListener("click", async () => {
         await syncInmuebleCatastroFicha(inputMap);
       });
@@ -12595,12 +12665,15 @@ const renderEditableGrid = (grid, fields, data, target) => {
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "secondary catastro-button";
-      btn.innerHTML = `<span class="catastro-icon" aria-hidden="true"><span>CAT</span></span><span>Abrir ficha pública</span>`;
-      btn.addEventListener("click", () => {
-        const ref = input.value.trim();
+      btn.innerHTML = buildCatastroButtonInner("Abrir ficha pública");
+      btn.addEventListener("click", async () => {
+        let ref = String(input.value || "").trim();
+        if (!ref) {
+          ref = (await lookupInmuebleCatastro(inputMap, { silent: false })) || "";
+        }
         const address = inputMap.direccion ? inputMap.direccion.value.trim() : "";
         const url = buildCatastroUrl(ref, address);
-        window.open(url, "_blank");
+        window.open(url, "_blank", "noopener");
       });
       actions.appendChild(btn);
       card.appendChild(actions);
@@ -12692,9 +12765,8 @@ const renderEditableGrid = (grid, fields, data, target) => {
 
   if (isInmueble) {
     const direccionInput = inputMap.direccion;
-    const latInput = inputMap.lat;
-    const lonInput = inputMap.lon;
-    if (direccionInput && latInput && lonInput) {
+    // Lat/Lon no forman parte del formulario: se guardan internamente en background.
+    if (direccionInput) {
       direccionInput.addEventListener("blur", () => {
         const address = buildInmuebleGeocodeAddress({
           direccion: direccionInput.value,
@@ -12702,9 +12774,17 @@ const renderEditableGrid = (grid, fields, data, target) => {
           provincia: inputMap.provincia ? inputMap.provincia.value : "",
         });
         if (!address) return;
-        geocodeInmuebleAddress(address, latInput, lonInput);
+        geocodeInmuebleAddress(address, null, null);
+        scheduleAutoInmuebleCatastroLookup(inputMap);
       });
     }
+    ["poblacion", "provincia", "codigo_postal"].forEach((key) => {
+      const el = inputMap[key];
+      if (!el) return;
+      el.addEventListener("blur", () => {
+        scheduleAutoInmuebleCatastroLookup(inputMap);
+      });
+    });
   }
 };
 
@@ -12762,6 +12842,16 @@ const updateCaptacionMap = (lat, lon) => {
   renderMapPreview(captacionMap, lat, lon);
 };
 
+const CATASTRO_ICON_SVG = `
+  <svg class="catastro-logo" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+    <path fill="currentColor" d="M12 2.5c3.9 0 7 3.1 7 7 0 5.2-7 12-7 12S5 14.7 5 9.5c0-3.9 3.1-7 7-7Zm0 3a4 4 0 0 0-4 4c0 2.2 1.9 5.6 4 8.2 2.1-2.6 4-6 4-8.2a4 4 0 0 0-4-4Z"/>
+    <path fill="currentColor" d="M9.2 9.2h5.6v1.6H9.2z"/>
+  </svg>
+`.trim();
+
+const buildCatastroButtonInner = (label) =>
+  `<span class="catastro-icon" aria-hidden="true">${CATASTRO_ICON_SVG}</span><span>${label}</span>`;
+
 const buildCatastroUrl = (ref, address) => {
   const cleanRef = String(ref || "")
     .toUpperCase()
@@ -12815,6 +12905,20 @@ const geocodeInmuebleAddress = (address, latInput, lonInput) => {
         updateInmuebleMap(null, null, address);
       });
   }, 600);
+};
+
+const runInmuebleGeocodeFromUi = () => {
+  const direccion = document.querySelector('.inline-input[data-target="inmueble"][data-field="direccion"]')?.value || "";
+  const poblacion = document.querySelector('.inline-input[data-target="inmueble"][data-field="poblacion"]')?.value || "";
+  const provincia = document.querySelector('.inline-input[data-target="inmueble"][data-field="provincia"]')?.value || "";
+  const codigoPostal = document.querySelector('.inline-input[data-target="inmueble"][data-field="codigo_postal"]')?.value || "";
+  const address = buildInmuebleGeocodeAddress({ direccion, poblacion, provincia, codigo_postal: codigoPostal });
+  if (!String(address || "").trim()) {
+    showUiError("No se pudo localizar", "Falta dirección/población/provincia.");
+    return;
+  }
+  geocodeInmuebleAddress(address, null, null);
+  scheduleAutoInmuebleCatastroLookup(getInmuebleCatastroInputMapFromDom(), { force: true });
 };
 
 const geocodeCaptacionAddress = () => {
@@ -12945,6 +13049,45 @@ const chooseCatastroCandidate = (candidates = [], title = "Selecciona referencia
   return list[index - 1];
 };
 
+let inmuebleCatastroTimer = null;
+let lastCatastroLookupKey = "";
+
+const buildInmuebleCatastroLookupPayload = (inputMap = {}) => ({
+  direccion: String(inputMap?.direccion?.value || "").trim(),
+  provincia: String(inputMap?.provincia?.value || "").trim(),
+  poblacion: String(inputMap?.poblacion?.value || "").trim(),
+  codigo_postal: String(inputMap?.codigo_postal?.value || "").trim(),
+});
+
+const getInmuebleCatastroInputMapFromDom = () => ({
+  direccion: document.querySelector('.inline-input[data-target="inmueble"][data-field="direccion"]'),
+  provincia: document.querySelector('.inline-input[data-target="inmueble"][data-field="provincia"]'),
+  poblacion: document.querySelector('.inline-input[data-target="inmueble"][data-field="poblacion"]'),
+  codigo_postal: document.querySelector('.inline-input[data-target="inmueble"][data-field="codigo_postal"]'),
+  referencia_catastral: document.querySelector('.inline-input[data-target="inmueble"][data-field="referencia_catastral"]'),
+});
+
+const scheduleAutoInmuebleCatastroLookup = (inputMap = {}, options = {}) => {
+  const force = Boolean(options.force);
+  if (!state.currentInmuebleId) return;
+  const ref = String(
+    inputMap?.referencia_catastral?.value ||
+      state.currentInmueble?.referencia_catastral ||
+      state.currentInmuebleContext?.inmueble?.referencia_catastral ||
+      ""
+  ).trim();
+  if (!force && ref) return;
+  const payload = buildInmuebleCatastroLookupPayload(inputMap);
+  if (!payload.direccion) return;
+  const key = JSON.stringify(payload).toLowerCase();
+  if (!force && key === lastCatastroLookupKey) return;
+  lastCatastroLookupKey = key;
+  if (inmuebleCatastroTimer) clearTimeout(inmuebleCatastroTimer);
+  inmuebleCatastroTimer = setTimeout(() => {
+    lookupInmuebleCatastro(inputMap, { silent: true }).catch(() => {});
+  }, 900);
+};
+
 const lookupCaptacionCatastro = async () => {
   const direccionInput = getCaptacionField("direccion");
   const provinciaInput = getCaptacionField("provincia");
@@ -13006,7 +13149,8 @@ const lookupCaptacionCatastro = async () => {
   }
 };
 
-const lookupInmuebleCatastro = async (inputMap = {}) => {
+const lookupInmuebleCatastro = async (inputMap = {}, options = {}) => {
+  const silent = Boolean(options.silent);
   const direccionInput = inputMap.direccion;
   const provinciaInput = inputMap.provincia;
   const poblacionInput = inputMap.poblacion;
@@ -13014,10 +13158,10 @@ const lookupInmuebleCatastro = async (inputMap = {}) => {
   const refInput = inputMap.referencia_catastral || inputMap.referencia;
   const direccion = String(direccionInput ? direccionInput.value : "").trim();
   if (!direccion) {
-    setInmuebleSaveStatus("Indica la dirección para consultar Catastro.");
+    if (!silent) setInmuebleSaveStatus("Indica la dirección para consultar Catastro.");
     return null;
   }
-  setInmuebleSaveStatus("Consultando Catastro...");
+  if (!silent) setInmuebleSaveStatus("Consultando Catastro...");
   try {
     const payload = {
       direccion,
@@ -13028,10 +13172,11 @@ const lookupInmuebleCatastro = async (inputMap = {}) => {
     const data = await fetch("/api/inmueble_catastro_lookup", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
       body: JSON.stringify(payload),
     }).then((res) => res.json());
     if (data?.error) {
-      setInmuebleSaveStatus(data.error);
+      if (!silent) setInmuebleSaveStatus(data.error);
       return null;
     }
     if (data?.match_unique && data?.referencia_catastral) {
@@ -13042,36 +13187,54 @@ const lookupInmuebleCatastro = async (inputMap = {}) => {
       return data.referencia_catastral;
     }
     const count = Array.isArray(data?.candidates) ? data.candidates.length : 0;
-    const selected = chooseCatastroCandidate(
-      data?.candidates || [],
-      "Catastro devolvió varias coincidencias para este inmueble"
-    );
-    if (selected?.referencia_catastral) {
-      if (refInput) {
-        refInput.value = selected.referencia_catastral;
+    if (!silent) {
+      const selected = chooseCatastroCandidate(
+        data?.candidates || [],
+        "Catastro devolvió varias coincidencias para este inmueble"
+      );
+      if (selected?.referencia_catastral) {
+        if (refInput) {
+          refInput.value = selected.referencia_catastral;
+        }
+        saveInmuebleField("referencia_catastral", selected.referencia_catastral);
+        return selected.referencia_catastral;
       }
-      saveInmuebleField("referencia_catastral", selected.referencia_catastral);
-      return selected.referencia_catastral;
+      setInmuebleSaveStatus(
+        count > 1
+          ? `Catastro devolvió ${count} coincidencias. Completa más la dirección.`
+          : "Catastro no devolvió una coincidencia única."
+      );
     }
-    setInmuebleSaveStatus(
-      count > 1
-        ? `Catastro devolvió ${count} coincidencias. Completa más la dirección.`
-        : "Catastro no devolvió una coincidencia única."
-    );
     return null;
   } catch {
-    setInmuebleSaveStatus("No se pudo consultar Catastro.");
+    if (!silent) setInmuebleSaveStatus("No se pudo consultar Catastro.");
     return null;
   }
 };
 
 const syncInmuebleCatastroFicha = async (inputMap = {}) => {
   if (!state.currentInmuebleId) return null;
-  setInmuebleSaveStatus("Sincronizando ficha de Catastro...");
   try {
+    // Garantiza RC: si falta, la buscamos desde la dirección antes de pedir la ficha.
+    const currentRef = String(
+      inputMap?.referencia_catastral?.value ||
+        state.currentInmueble?.referencia_catastral ||
+        state.currentInmuebleContext?.inmueble?.referencia_catastral ||
+        ""
+    ).trim();
+    if (!currentRef) {
+      setInmuebleSaveStatus("Buscando referencia catastral...");
+      const ensured = await lookupInmuebleCatastro(inputMap, { silent: false });
+      if (!ensured) {
+        setInmuebleSaveStatus("No se pudo detectar una referencia catastral única desde la dirección.");
+        return null;
+      }
+    }
+    setInmuebleSaveStatus("Obteniendo ficha catastral...");
     const data = await fetch("/api/inmueble_catastro_sync", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
       body: JSON.stringify({
         inmueble_id: state.currentInmuebleId,
         usuario: getCurrentUser(),
@@ -14375,10 +14538,34 @@ const populateResponsableSelects = () => {
   });
 };
 
+const populateAsesorSelects = () => {
+  if (!asesorSelects || !asesorSelects.length) return;
+  asesorSelects.forEach((selectEl) => {
+    if (!selectEl) return;
+    const serviceFilter = normalizeSimple(selectEl.dataset.service || "");
+    const current = String(selectEl.value || "").trim();
+    const currentNorm = normalizeSimple(current);
+    selectEl.innerHTML = "";
+    selectEl.appendChild(createOption("", "Selecciona asesor"));
+    if (serviceFilter === "inmobiliaria") {
+      INMOBILIARIA_ASESORES.forEach((name) => selectEl.appendChild(createOption(name, name)));
+    }
+    if (current) {
+      selectEl.value = current;
+      if (normalizeSimple(selectEl.value) !== currentNorm) {
+        // Valor legacy que no está en el catálogo fijo.
+        selectEl.appendChild(createOption(current, current));
+        selectEl.value = current;
+      }
+    }
+  });
+};
+
 const loadUsuarios = () =>
   api("/api/usuarios").then((data) => {
     state.usersList = data.rows || [];
     populateResponsableSelects();
+    populateAsesorSelects();
     refreshSegurosColaboradoresList();
     return state.usersList;
   });
@@ -21273,6 +21460,8 @@ const openInmuebleDetail = (id, originView = "") => {
           }
         }
       }
+      // Auto-catastro: intenta detectar RC desde la dirección (sin prompts).
+      scheduleAutoInmuebleCatastroLookup(getInmuebleCatastroInputMapFromDom());
       if (inmuebleEstadoInfo) {
         inmuebleEstadoInfo.textContent = `Estado actual: ${inmueble.estado || "-"}`;
       }
@@ -33655,6 +33844,35 @@ if (workspaceTimeMonth) {
   });
 }
 
+if (workspaceTimePeriodToggle) {
+  workspaceTimePeriodToggle.addEventListener("click", async () => {
+    if (!state.currentWorkspaceId) return;
+    if (!isWorkspaceTimeManager()) return;
+    const month = String(workspaceTimePeriodToggle.dataset.month || state.workspaceTimeMonth || "").trim();
+    if (!month) return;
+    const currentlyLocked = String(workspaceTimePeriodToggle.dataset.locked || "0") === "1";
+    workspaceTimePeriodToggle.disabled = true;
+    try {
+      const resp = await fetch("/api/workspace_registro_periodo_lock", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          workspace_id: state.currentWorkspaceId,
+          empresa_id: state.currentWorkspaceCompanyId || "",
+          month,
+          locked: currentlyLocked ? 0 : 1,
+        }),
+      }).then((res) => res.json());
+      if (resp?.error) throw new Error(resp.error);
+      await loadWorkspaceDetail(state.currentWorkspaceId);
+    } catch (error) {
+      alert(error.message || "No se pudo actualizar el bloqueo del mes.");
+    } finally {
+      workspaceTimePeriodToggle.disabled = false;
+    }
+  });
+}
+
 if (workspaceTimeForm) {
   const personLookup = workspaceTimeForm.querySelector('[name="persona_id_lookup"]');
   if (personLookup) {
@@ -34090,7 +34308,7 @@ if (inmuebleBackBtn) {
   });
 }
 
-if (inmuebleDeleteBtn) {
+  if (inmuebleDeleteBtn) {
   inmuebleDeleteBtn.addEventListener("click", () => {
     if (!state.currentInmuebleId) return;
     const inmueble = state.currentInmueble || state.currentInmuebleContext?.inmueble || {};
@@ -35554,6 +35772,12 @@ if (inmuebleActividadForm) {
   if (tipoSelect) {
     tipoSelect.addEventListener("change", () => {
       syncInmuebleWorkflowForm();
+    });
+  }
+
+  if (inmuebleGeocodeBtn) {
+    inmuebleGeocodeBtn.addEventListener("click", () => {
+      runInmuebleGeocodeFromUi();
     });
   }
   syncInmuebleWorkflowForm();
