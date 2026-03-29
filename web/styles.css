@@ -2500,6 +2500,14 @@ body.crm-fin #companySummary {
   background: rgba(255, 251, 244, 0.72);
 }
 
+.map-box-embed {
+  width: 100%;
+  min-height: 220px;
+  border: 0;
+  border-radius: 12px;
+  background: rgba(255, 251, 244, 0.72);
+}
+
 .map-box-meta {
   display: flex;
   justify-content: space-between;
