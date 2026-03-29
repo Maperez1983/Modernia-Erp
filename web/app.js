@@ -18,6 +18,31 @@ const api = async (path) => {
   return data;
 };
 
+const apiPost = async (url, payload = {}) => {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "same-origin",
+    body: JSON.stringify(payload),
+  });
+
+  let data = null;
+  try {
+    data = await res.json();
+  } catch {
+    data = null;
+  }
+
+  if (!res.ok || data?.error) {
+    const error = new Error((data && (data.error || data.detail)) || `HTTP ${res.status}`);
+    error.status = res.status;
+    error.data = data;
+    throw error;
+  }
+
+  return data;
+};
+
 const randomId = () => {
   const bytes = new Uint8Array(16);
   crypto.getRandomValues(bytes);
@@ -204,19 +229,15 @@ const uploadFileMultipartToS3 = async (file, prefix, statusEl) => {
     statusEl.textContent = `Subiendo a la nube... ${pct}%`;
   };
 
-  const uploadOnePart = async (partNumber) => {
+const uploadOnePart = async (partNumber) => {
     const startByte = (partNumber - 1) * partSize;
     const endByte = Math.min(startByte + partSize, file.size);
     const blob = file.slice(startByte, endByte);
-    const presign = await fetch("/api/s3_multipart_presign", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        key,
-        upload_id: uploadId,
-        part_number: partNumber,
-      }),
-    }).then((res) => res.json());
+    const presign = await apiPost("/api/s3_multipart_presign", {
+      key,
+      upload_id: uploadId,
+      part_number: partNumber,
+    });
     if (presign.error || !presign.url) {
       throw new Error(presign.error || "No se pudo firmar parte multipart.");
     }
@@ -242,14 +263,10 @@ const uploadFileMultipartToS3 = async (file, prefix, statusEl) => {
       () => worker()
     );
     await Promise.all(workers);
-    const complete = await fetch("/api/s3_multipart_complete", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        key,
-        upload_id: uploadId,
-      }),
-    }).then((res) => res.json());
+    const complete = await apiPost("/api/s3_multipart_complete", {
+      key,
+      upload_id: uploadId,
+    });
     if (complete.error) {
       throw new Error(complete.error);
     }
@@ -259,13 +276,9 @@ const uploadFileMultipartToS3 = async (file, prefix, statusEl) => {
     };
   } catch (err) {
     try {
-      await fetch("/api/s3_multipart_abort", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          key,
-          upload_id: uploadId,
-        }),
+      await apiPost("/api/s3_multipart_abort", {
+        key,
+        upload_id: uploadId,
       });
     } catch {}
     throw err;
@@ -289,16 +302,12 @@ const uploadFileToS3 = async (file, prefix, statusEl) => {
     }
     return multipartResult;
   }
-  if (statusEl) statusEl.textContent = "Firmando subida...";
-  const presign = await fetch("/api/s3_presign", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      filename: fileToUpload.name || "archivo.pdf",
-      content_type: fileToUpload.type || "application/pdf",
-      prefix: prefix || "seguros",
-    }),
-  }).then((res) => res.json());
+    if (statusEl) statusEl.textContent = "Firmando subida...";
+  const presign = await apiPost("/api/s3_presign", {
+    filename: fileToUpload.name || "archivo.pdf",
+    content_type: fileToUpload.type || "application/pdf",
+    prefix: prefix || "seguros",
+  });
   if (presign.error) {
     throw new Error(presign.error);
   }
