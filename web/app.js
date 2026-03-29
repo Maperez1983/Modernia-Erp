@@ -17946,10 +17946,10 @@ const renderTableInto = (data, container, infoEl, label) => {
       openBtn.type = "button";
       openBtn.className = "ghost";
       openBtn.textContent = "Ficha";
-      openBtn.addEventListener("click", (event) => {
+      openBtn.addEventListener("click", async (event) => {
         event.preventDefault();
         event.stopPropagation();
-        const inmuebleId = resolveInmuebleDetailRef(rowMap, recordId);
+        const inmuebleId = await resolveInmuebleDetailRef(rowMap, recordId);
         if (!inmuebleId) {
           alert("La captación no tiene inmueble vinculado.");
           return;
@@ -17981,11 +17981,11 @@ const renderTableInto = (data, container, infoEl, label) => {
       tr.appendChild(td);
     }
     if (showCaptacionActions && String(recordId || "").trim()) {
-      tr.addEventListener("click", (event) => {
+      tr.addEventListener("click", async (event) => {
         if (event.target && event.target.closest("button, input, select, a")) {
           return;
         }
-        const inmuebleId = resolveInmuebleDetailRef(rowMap, recordId);
+        const inmuebleId = await resolveInmuebleDetailRef(rowMap, recordId);
         if (!inmuebleId) {
           return;
         }
@@ -18519,10 +18519,10 @@ const renderCrmKanban = (data) => {
         `;
         const openBtn = card.querySelector("button");
         if (openBtn) {
-          openBtn.addEventListener("click", (event) => {
+          openBtn.addEventListener("click", async (event) => {
             event.preventDefault();
             event.stopPropagation();
-            const inmuebleId = resolveInmuebleDetailRef(rowMap, rowId);
+            const inmuebleId = await resolveInmuebleDetailRef(rowMap, rowId);
             if (!inmuebleId) {
               alert("La captación no tiene inmueble vinculado.");
               return;
@@ -19726,8 +19726,26 @@ const setInmuebleTab = (tab) => {
   if (inmuebleTabEstado) inmuebleTabEstado.classList.toggle("hidden", tab !== "estado");
 };
 
-const resolveInmuebleDetailRef = (rowMap = {}, fallbackId = "") =>
-  String(rowMap?.inmueble_id || rowMap?.id || fallbackId || "").trim();
+const ensureInmuebleForCaptacion = async (captacionId) => {
+  if (!captacionId) return "";
+  try {
+    const data = await api(`/api/inmueble_ensure?captacion_id=${encodeURIComponent(captacionId)}`);
+    return String(data?.inmueble_id || "").trim();
+  } catch {
+    return "";
+  }
+};
+
+const resolveInmuebleDetailRef = async (rowMap = {}, fallbackId = "") => {
+  const directId = String(rowMap?.inmueble_id || rowMap?.id || fallbackId || "").trim();
+  if (directId) {
+    return directId;
+  }
+  if (fallbackId) {
+    return await ensureInmuebleForCaptacion(fallbackId);
+  }
+  return "";
+};
 
 const openInmuebleDetail = (id, originView = "") => {
   if (!inmuebleDetail) return;

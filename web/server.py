@@ -30405,6 +30405,59 @@ class Handler(BaseHTTPRequestHandler):
             )
             return
 
+        if path == "/api/inmueble_ensure":
+            captacion_id = params.get("captacion_id", [""])[0].strip()
+            if not captacion_id:
+                json_response(self, {"error": "captacion_id requerido"}, status=400)
+                return
+            captacion = conn.execute(
+                "SELECT * FROM captaciones WHERE id = ? LIMIT 1",
+                (captacion_id,),
+            ).fetchone()
+            if not captacion:
+                json_response(self, {"error": "Captación no encontrada"}, status=404)
+                return
+            inmueble_id = str(captacion["inmueble_id"] or "").strip()
+            if inmueble_id:
+                json_response(self, {"inmueble_id": inmueble_id, "created": False})
+                return
+            new_id = os.urandom(16).hex()
+            now = datetime.utcnow().isoformat()
+            conn.execute(
+                """
+                INSERT INTO inmuebles (
+                    id, empresa_id, direccion, zona, poblacion, provincia, tipo_inmueble,
+                    m2, anio_construccion, habitaciones, banos, precio_objetivo, precio_valoracion,
+                    estado, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    new_id,
+                    captacion["empresa_id"],
+                    captacion["direccion"],
+                    captacion["zona"],
+                    captacion["poblacion"],
+                    captacion["provincia"],
+                    captacion["tipo_inmueble"],
+                    captacion["m2"],
+                    captacion["anio_construccion"],
+                    captacion["habitaciones"],
+                    captacion["banos"],
+                    captacion["precio_objetivo"],
+                    captacion["precio_valoracion"],
+                    "Noticia",
+                    now,
+                    now,
+                ),
+            )
+            conn.execute(
+                "UPDATE captaciones SET inmueble_id = ?, updated_at = ? WHERE id = ?",
+                (new_id, now, captacion_id),
+            )
+            json_response(self, {"inmueble_id": new_id, "created": True})
+            return
+
         if path == "/api/inmueble_visita_pdf":
             inmueble_id = params.get("id", [""])[0]
             demanda_id = params.get("demanda_id", [""])[0].strip()
