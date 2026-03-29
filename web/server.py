@@ -14616,11 +14616,53 @@ def ensure_workspace_product_tables(conn):
           fecha_baja TEXT,
           activo INTEGER NOT NULL DEFAULT 1,
           notas TEXT,
+          alert_missing_checkin INTEGER NOT NULL DEFAULT 1,
+          alert_missing_checkout INTEGER NOT NULL DEFAULT 1,
+          alert_notify_worker INTEGER NOT NULL DEFAULT 1,
+          alert_notify_admin INTEGER NOT NULL DEFAULT 1,
+          alert_admin_contact TEXT,
+          alert_last_sent TEXT,
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workspace_registro_alerts (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          empresa_id TEXT,
+          persona_id TEXT,
+          alert_missing_checkin INTEGER NOT NULL DEFAULT 1,
+          alert_missing_checkout INTEGER NOT NULL DEFAULT 1,
+          notify_worker INTEGER NOT NULL DEFAULT 1,
+          notify_admin INTEGER NOT NULL DEFAULT 1,
+          admin_contact TEXT,
+          schedule TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workspace_registro_notifications (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          persona_id TEXT,
+          channel TEXT NOT NULL,
+          payload TEXT,
+          created_at TEXT NOT NULL
+        )
+        """
+    )
+    ensure_column(conn, "workspace_registro_personal", "alert_missing_checkin", "alert_missing_checkin INTEGER NOT NULL DEFAULT 1")
+    ensure_column(conn, "workspace_registro_personal", "alert_missing_checkout", "alert_missing_checkout INTEGER NOT NULL DEFAULT 1")
+    ensure_column(conn, "workspace_registro_personal", "alert_notify_worker", "alert_notify_worker INTEGER NOT NULL DEFAULT 1")
+    ensure_column(conn, "workspace_registro_personal", "alert_notify_admin", "alert_notify_admin INTEGER NOT NULL DEFAULT 1")
+    ensure_column(conn, "workspace_registro_personal", "alert_admin_contact", "alert_admin_contact TEXT")
+    ensure_column(conn, "workspace_registro_personal", "alert_last_sent", "alert_last_sent TEXT")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS workspace_registro_horario (
