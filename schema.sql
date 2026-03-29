@@ -893,6 +893,7 @@ CREATE TABLE IF NOT EXISTS inmuebles (
   precio_valoracion REAL,
   valor_referencia REAL,
   honorarios REAL,
+  asesor TEXT,
   situacion_ocupacion TEXT,
   estado TEXT,
   lat REAL,

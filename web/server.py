@@ -13629,6 +13629,8 @@ def ensure_tables(db_path):
             conn.execute("ALTER TABLE inmuebles ADD COLUMN poblacion TEXT")
         if "provincia" not in inm_cols:
             conn.execute("ALTER TABLE inmuebles ADD COLUMN provincia TEXT")
+        if "asesor" not in inm_cols:
+            conn.execute("ALTER TABLE inmuebles ADD COLUMN asesor TEXT")
     except sqlite3.Error:
         pass
     conn.execute(
@@ -27980,6 +27982,7 @@ class Handler(BaseHTTPRequestHandler):
                 "precio_valoracion",
                 "valor_referencia",
                 "honorarios",
+                "asesor",
                 "situacion_ocupacion",
                 "estado",
                 "lat",
@@ -28011,6 +28014,7 @@ class Handler(BaseHTTPRequestHandler):
                 "banos",
                 "precio_objetivo",
                 "precio_valoracion",
+                "asesor",
             )
             cap_updates = {key: updates[key] for key in shared if key in updates}
             if "estado" in updates:

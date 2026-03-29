@@ -11344,6 +11344,7 @@ const INMUEBLE_FIELDS = [
   { key: "direccion", label: "Dirección", type: "text", section: "Prioridad comercial" },
   { key: "precio_objetivo", label: "Precio objetivo venta", type: "number", section: "Prioridad comercial" },
   { key: "honorarios", label: "Honorarios agencia", type: "number", section: "Prioridad comercial" },
+  { key: "asesor", label: "Asesor", type: "select", options: INMOBILIARIA_ASESORES, section: "Prioridad comercial" },
   {
     key: "situacion_ocupacion",
     label: "Situación de ocupación",
@@ -20550,7 +20551,7 @@ const refreshCurrentInmuebleProfile = () => {
           ["Honorarios", inmueble.honorarios],
           ["Ocupación", inmueble.situacion_ocupacion],
           ["Urgencia", captacion.urgencia],
-          ["Asesor", captacion.asesor],
+          ["Asesor", inmueble.asesor || captacion.asesor],
           ["Demandas", demandas.length],
           ["Visitas", visitas.length],
           ["Documentos", docs.length],
