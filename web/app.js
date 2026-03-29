@@ -1102,6 +1102,36 @@ const UI = window.CRMUI || null;
 const AuthModule = window.CRMAppAuth || null;
 const RoutingModule = window.CRMAppRouting || null;
 
+// Diagnóstico mínimo para no quedarnos con pantallas "vacías" sin feedback.
+// En Render, si hay un error JS, lo mostramos en un banner visible.
+(function setupClientDiagnostics() {
+  const banner = document.getElementById("renewalAlert");
+  if (!banner) return;
+  const show = (title, detail) => {
+    try {
+      banner.classList.remove("hidden");
+      banner.innerHTML = "";
+      const strong = document.createElement("strong");
+      strong.textContent = title;
+      const pre = document.createElement("pre");
+      pre.style.whiteSpace = "pre-wrap";
+      pre.style.marginTop = "8px";
+      pre.textContent = String(detail || "").slice(0, 2000);
+      banner.appendChild(strong);
+      if (detail) banner.appendChild(pre);
+    } catch {}
+  };
+  window.addEventListener("error", (event) => {
+    const detail = event?.error?.stack || event?.message || "Error desconocido";
+    show("Error en la interfaz", detail);
+  });
+  window.addEventListener("unhandledrejection", (event) => {
+    const reason = event?.reason;
+    const detail = reason?.stack || reason?.message || String(reason || "Promise rechazada");
+    show("Error interno (promesa)", detail);
+  });
+})();
+
 const state = {
   appInitialized: false,
   authUser: null,
@@ -8824,6 +8854,8 @@ const handleRoute = () => {
     openHolding,
     openClientesModule,
     openCrmInmobiliario,
+    openInmuebleDetail,
+    openInmuebleFromCaptacion,
     openGestoriaCrm,
     openSegurosCrm,
     openFinCrm,
@@ -18760,23 +18792,19 @@ const renderCrmKanban = (data) => {
           event.dataTransfer.setData("text/plain", rowId);
           event.dataTransfer.effectAllowed = "move";
         });
+        const deepLink = `?crm=inmo&captacion=${encodeURIComponent(rowId)}`;
         card.innerHTML = `
           <div><strong>${row[propietarioIndex] || "Propietario"}</strong></div>
           <div>${row[direccionIndex] || "-"} · ${row[zonaIndex] || "-"}</div>
           <div class="muted">${row[proximaIndex] || "Sin próxima acción"}</div>
-          <div class="inline-actions"><button type="button" class="ghost">Abrir ficha</button></div>
+          <div class="inline-actions"><a class="ghost" href="${deepLink}" data-open="captacion">Abrir ficha</a></div>
         `;
-        const openBtn = card.querySelector("button");
+        const openBtn = card.querySelector("a[data-open]");
         if (openBtn) {
           openBtn.addEventListener("click", async (event) => {
             event.preventDefault();
             event.stopPropagation();
-            const inmuebleId = await resolveInmuebleDetailRef(rowMap, rowId);
-            if (!inmuebleId) {
-              alert("La captación no tiene inmueble vinculado.");
-              return;
-            }
-            openInmuebleDetail(inmuebleId, "captaciones");
+            await openInmuebleFromCaptacion(rowId, "captaciones");
           });
         }
         column.appendChild(card);
@@ -20029,6 +20057,17 @@ const ensureInmuebleForCaptacion = async (captacionId) => {
   } catch {
     return "";
   }
+};
+
+const openInmuebleFromCaptacion = async (captacionId, originView = "captaciones") => {
+  const id = String(captacionId || "").trim();
+  if (!id) return;
+  const inmuebleId = await ensureInmuebleForCaptacion(id);
+  if (!inmuebleId) {
+    alert("No se pudo abrir la ficha del inmueble (captación sin inmueble vinculado).");
+    return;
+  }
+  openInmuebleDetail(inmuebleId, originView);
 };
 
 const resolveInmuebleDetailRef = async (rowMap = {}, fallbackId = "") => {

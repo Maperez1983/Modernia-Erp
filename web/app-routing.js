@@ -39,6 +39,22 @@
       const crm = params.get("crm");
       if (crm === "inmo") {
         deps.openCrmInmobiliario();
+        const inmuebleId = (params.get("inmueble") || "").trim();
+        const captacionId = (params.get("captacion") || "").trim();
+        if (inmuebleId && typeof deps.openInmuebleDetail === "function") {
+          setTimeout(() => {
+            deps.openInmuebleDetail(inmuebleId, "resumen");
+            deps.ui?.refreshContext(deps.state);
+          }, 250);
+          return;
+        }
+        if (captacionId && typeof deps.openInmuebleFromCaptacion === "function") {
+          setTimeout(() => {
+            deps.openInmuebleFromCaptacion(captacionId, "captaciones");
+            deps.ui?.refreshContext(deps.state);
+          }, 250);
+          return;
+        }
         deps.ui?.refreshContext(deps.state);
         return;
       }
