@@ -5637,7 +5637,7 @@ const renderWorkspaceList = (rows = []) => {
     btn.addEventListener("click", () => {
       const workspaceId = btn.dataset.workspaceId || "";
       if (!workspaceId) return;
-      loadWorkspaceDetail(workspaceId);
+      loadWorkspaceDetail(workspaceId).catch(() => {});
     });
   });
 };
