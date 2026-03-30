@@ -102,13 +102,27 @@ S3_BUCKET = os.environ.get("AWS_S3_BUCKET") or os.environ.get("S3_BUCKET")
 S3_REGION = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION")
 OCR_SUBPROCESS_TIMEOUT_SECONDS = max(15, int(os.environ.get("OCR_SUBPROCESS_TIMEOUT_SECONDS", "90")))
 OCR_JOB_STALE_MINUTES = max(1, int(os.environ.get("OCR_JOB_STALE_MINUTES", "15")))
-OCR_WORKERS = max(1, min(8, int(os.environ.get("OCR_WORKERS", "2"))))
+OCR_WORKERS = max(
+    1,
+    min(
+        8,
+        int(
+            os.environ.get(
+                "OCR_WORKERS",
+                "1" if os.environ.get("RENDER") else "2",
+            )
+        ),
+    ),
+)
 OCR_PDF_MAX_PAGES = max(0, int(os.environ.get("OCR_PDF_MAX_PAGES", "4")))
 OCR_PDF_DPI = max(120, int(os.environ.get("OCR_PDF_DPI", "280")))
 OCR_OPENAI_VISION_PAGES = max(0, int(os.environ.get("OCR_OPENAI_VISION_PAGES", "2")))
 OCR_OPENAI_VISION_DPI = max(120, int(os.environ.get("OCR_OPENAI_VISION_DPI", "220")))
 OCR_EXPERT_MODE = os.environ.get("OCR_EXPERT_MODE", "1").strip().lower() not in ("0", "false", "no", "off")
-WORKSPACE_TIME_SWEEP_ENABLED = os.environ.get("WORKSPACE_TIME_SWEEP_ENABLED", "1").strip().lower() not in ("0", "false", "no", "off")
+WORKSPACE_TIME_SWEEP_ENABLED = (
+    os.environ.get("WORKSPACE_TIME_SWEEP_ENABLED", "0" if os.environ.get("RENDER") else "1").strip().lower()
+    not in ("0", "false", "no", "off")
+)
 WORKSPACE_TIME_SWEEP_INTERVAL_SECONDS = max(60, int(os.environ.get("WORKSPACE_TIME_SWEEP_INTERVAL_SECONDS", "300")))
 WORKSPACE_TIME_SWEEP_STATE = {
     "last_run_at": "",
@@ -15101,6 +15115,22 @@ def ensure_workspace_product_tables(conn):
     ensure_column(conn, "workspace_registro_personal", "usuario_manual", "usuario_manual INTEGER NOT NULL DEFAULT 0")
     ensure_column(conn, "workspace_registro_personal", "source", "source TEXT NOT NULL DEFAULT 'manual'")
     ensure_column(conn, "workspace_registro_personal", "foto_url", "foto_url TEXT")
+    # Índices: la tabla puede crecer mucho por sincronizaciones; sin índices los UPDATE/SELECT pueden provocar timeouts (Render → 502).
+    try:
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_workspace_registro_personal_ws ON workspace_registro_personal (workspace_id)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_workspace_registro_personal_ws_empresa ON workspace_registro_personal (workspace_id, empresa_id)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_workspace_registro_personal_ws_usuario ON workspace_registro_personal (workspace_id, usuario_id)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_workspace_registro_personal_ws_nombre ON workspace_registro_personal (workspace_id, nombre)"
+        )
+    except Exception:
+        pass
     # Backfill: fichas legacy auto-sincronizadas desde usuarios (para no mostrarlas si el admin no las confirma).
     try:
         conn.execute(
@@ -23254,6 +23284,7 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, {"ok": True, "action": "checkin", "id": record_id, "fecha": fecha, "hora_inicio": now_hhmm})
             return
         elif parsed.path == "/api/workspace_registro_personal":
+            t0 = time.monotonic()
             workspace_id = str(payload.get("workspace_id") or "").strip()
             empresa_id = str(payload.get("empresa_id") or "").strip()
             record_id = str(payload.get("id") or "").strip()
@@ -23374,6 +23405,13 @@ class Handler(BaseHTTPRequestHandler):
                 now=now,
             )
             conn.commit()
+            try:
+                elapsed_ms = int((time.monotonic() - t0) * 1000)
+                print(
+                    f"[workspace_registro_personal] ok elapsed_ms={elapsed_ms} workspace_id={workspace_id} persona_id={record_id} has_usuario={1 if usuario_id_value else 0}"
+                )
+            except Exception:
+                pass
             json_response(self, {"ok": True, "id": record_id})
             return
         elif parsed.path == "/api/workspace_registro_personal_self_photo":
