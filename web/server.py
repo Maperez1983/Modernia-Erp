@@ -16280,88 +16280,113 @@ def fetch_workspace_service_desks(conn, workspace_id, empresa_id=None):
         empresa_ids,
     ).fetchall()
 
-    financiacion_rows = conn.execute(
+    # Financiación: evitar UNION y ORDER BY global (se vuelve muy costoso con tablas grandes).
+    financiacion_rows = []
+    financiacion_ases = conn.execute(
         f"""
-        SELECT *
-        FROM (
-          SELECT
-            af.cliente1_id AS cliente_id,
-            COALESCE(NULLIF(TRIM(af.cliente1_nombre), ''), NULLIF(TRIM(af.cliente2_nombre), ''), '') AS titulo,
-            'Asesoramiento financiero' AS subtitulo,
-            COALESCE(af.estado, 'Pendiente') AS estado,
-            af.fecha AS fecha,
-            CASE WHEN COALESCE(af.ingresos_conjuntos, 0) > 0 THEN printf('%.2f €', af.ingresos_conjuntos) ELSE '' END AS valor,
-            1 AS sort_group
-          FROM asesoramientos_financiacion af
-          WHERE af.empresa_id IN ({placeholders})
-            AND LOWER(COALESCE(af.estado, '')) NOT IN ('firmada', 'cerrado', 'cerrada', 'cancelado', 'cancelada', 'rechazado', 'rechazada')
-          UNION ALL
-          SELECT
-            h.cliente_id,
-            COALESCE(NULLIF(TRIM(h.cliente), ''), c.nombre, '') AS titulo,
-            COALESCE(NULLIF(TRIM(h.banco), ''), 'Hipoteca') AS subtitulo,
-            COALESCE(h.estado, 'Firmada') AS estado,
-            h.fecha_firma AS fecha,
-            CASE WHEN COALESCE(h.comision, h.comision_modernia, 0) > 0 THEN printf('%.2f €', COALESCE(h.comision, h.comision_modernia, 0)) ELSE '' END AS valor,
-            2 AS sort_group
-          FROM hipotecas h
-          LEFT JOIN clientes c ON c.id = h.cliente_id
-          WHERE h.empresa_id IN ({placeholders})
-        )
-        ORDER BY sort_group ASC, DATE(COALESCE(fecha, '9999-12-31')) DESC, titulo COLLATE NOCASE ASC
-        LIMIT 16
+        SELECT
+          af.cliente1_id AS cliente_id,
+          COALESCE(NULLIF(TRIM(af.cliente1_nombre), ''), NULLIF(TRIM(af.cliente2_nombre), ''), '') AS titulo,
+          'Asesoramiento financiero' AS subtitulo,
+          COALESCE(af.estado, 'Pendiente') AS estado,
+          COALESCE(af.fecha, af.updated_at, af.created_at) AS fecha,
+          CASE WHEN COALESCE(af.ingresos_conjuntos, 0) > 0 THEN printf('%.2f €', af.ingresos_conjuntos) ELSE '' END AS valor,
+          1 AS sort_group
+        FROM asesoramientos_financiacion af
+        WHERE af.empresa_id IN ({placeholders})
+          AND LOWER(COALESCE(af.estado, '')) NOT IN ('firmada', 'cerrado', 'cerrada', 'cancelado', 'cancelada', 'rechazado', 'rechazada')
+        ORDER BY DATE(COALESCE(af.fecha, af.updated_at, af.created_at, '1900-01-01')) DESC, titulo COLLATE NOCASE ASC
+        LIMIT 8
         """,
-        [*empresa_ids, *empresa_ids],
+        empresa_ids,
     ).fetchall()
+    financiacion_hipotecas = conn.execute(
+        f"""
+        SELECT
+          h.cliente_id,
+          COALESCE(NULLIF(TRIM(h.cliente), ''), c.nombre, '') AS titulo,
+          COALESCE(NULLIF(TRIM(h.banco), ''), 'Hipoteca') AS subtitulo,
+          COALESCE(h.estado, 'Firmada') AS estado,
+          COALESCE(h.fecha_firma, h.fecha_encargo, h.updated_at, h.created_at) AS fecha,
+          CASE WHEN COALESCE(h.comision, h.comision_modernia, 0) > 0 THEN printf('%.2f €', COALESCE(h.comision, h.comision_modernia, 0)) ELSE '' END AS valor,
+          2 AS sort_group
+        FROM hipotecas h
+        LEFT JOIN clientes c ON c.id = h.cliente_id
+        WHERE h.empresa_id IN ({placeholders})
+        ORDER BY DATE(COALESCE(h.fecha_firma, h.fecha_encargo, h.updated_at, h.created_at, '1900-01-01')) DESC, titulo COLLATE NOCASE ASC
+        LIMIT 8
+        """,
+        empresa_ids,
+    ).fetchall()
+    financiacion_rows = [*financiacion_ases, *financiacion_hipotecas]
+    # Orden estable: grupo ASC, fecha DESC, título ASC.
+    financiacion_rows.sort(key=lambda row: str(row["titulo"] or "").lower())
+    financiacion_rows.sort(key=lambda row: str(row["fecha"] or "")[:10], reverse=True)
+    financiacion_rows.sort(key=lambda row: int(row["sort_group"] or 9))
+    financiacion_rows = financiacion_rows[:16]
 
-    inmobiliaria_rows = conn.execute(
+    # Inmobiliaria: evitar UNION global (muy costoso) y limitar cada fuente.
+    inmobiliaria_rows = []
+    inmo_captaciones = conn.execute(
         f"""
-        SELECT *
-        FROM (
-          SELECT
-            '' AS cliente_id,
-            COALESCE(NULLIF(TRIM(c.direccion), ''), 'Captación') AS titulo,
-            COALESCE(NULLIF(TRIM(c.zona), ''), 'Sin zona') AS subtitulo,
-            COALESCE(c.etapa, 'Captación') AS estado,
-            COALESCE(c.fecha_contacto, c.updated_at, c.created_at) AS fecha,
-            CASE WHEN COALESCE(c.precio_objetivo, 0) > 0 THEN printf('%.2f €', c.precio_objetivo) ELSE '' END AS valor,
-            1 AS sort_group
-          FROM captaciones c
-          WHERE c.empresa_id IN ({placeholders})
-            AND LOWER(COALESCE(c.etapa, '')) NOT IN ('cerrado negativamente', 'vendido', 'alquiler')
-          UNION ALL
-          SELECT
-            COALESCE(o.contraparte1_id, o.propietario1_id, '') AS cliente_id,
-            COALESCE(NULLIF(TRIM(o.direccion), ''), 'Compraventa') AS titulo,
-            COALESCE(NULLIF(TRIM(o.tipo_operacion), ''), 'Operación') AS subtitulo,
-            COALESCE(o.estado, 'Cerrada') AS estado,
-            COALESCE(o.fecha_escritura, o.fecha_operacion, o.fecha_contrato, o.fecha_propuesta, '') AS fecha,
-            CASE WHEN COALESCE(o.precio_escritura, o.precio_contrato, o.precio_propuesta, 0) > 0 THEN printf('%.2f €', COALESCE(o.precio_escritura, o.precio_contrato, o.precio_propuesta, 0)) ELSE '' END AS valor,
-            2 AS sort_group
-          FROM operaciones_inmobiliarias o
-          WHERE o.empresa_id IN ({placeholders})
-          UNION ALL
-          SELECT
-            d.cliente_id,
-            COALESCE(NULLIF(TRIM(i.direccion), ''), 'Visita') AS titulo,
-            COALESCE(c.nombre, 'Sin demanda') AS subtitulo,
-            COALESCE(v.estado, 'Pendiente') AS estado,
-            v.fecha || CASE WHEN COALESCE(v.hora, '') <> '' THEN ' ' || v.hora ELSE '' END AS fecha,
-            '' AS valor,
-            3 AS sort_group
-          FROM visitas v
-          LEFT JOIN inmuebles i ON i.id = v.inmueble_id
-          LEFT JOIN demandas d ON d.id = v.demanda_id
-          LEFT JOIN clientes c ON c.id = d.cliente_id
-          WHERE v.empresa_id IN ({placeholders})
-            AND v.fecha IS NOT NULL
-            AND DATE(v.fecha) >= DATE(?)
-        )
-        ORDER BY sort_group ASC, DATE(SUBSTR(COALESCE(fecha, '9999-12-31'), 1, 10)) DESC, titulo COLLATE NOCASE ASC
-        LIMIT 16
+        SELECT
+          '' AS cliente_id,
+          COALESCE(NULLIF(TRIM(c.direccion), ''), 'Captación') AS titulo,
+          COALESCE(NULLIF(TRIM(c.zona), ''), 'Sin zona') AS subtitulo,
+          COALESCE(c.etapa, 'Captación') AS estado,
+          COALESCE(c.fecha_contacto, c.updated_at, c.created_at) AS fecha,
+          CASE WHEN COALESCE(c.precio_objetivo, 0) > 0 THEN printf('%.2f €', c.precio_objetivo) ELSE '' END AS valor,
+          1 AS sort_group
+        FROM captaciones c
+        WHERE c.empresa_id IN ({placeholders})
+          AND LOWER(COALESCE(c.etapa, '')) NOT IN ('cerrado negativamente', 'vendido', 'alquiler')
+        ORDER BY DATE(COALESCE(c.fecha_contacto, c.updated_at, c.created_at, '1900-01-01')) DESC, titulo COLLATE NOCASE ASC
+        LIMIT 6
         """,
-        [*empresa_ids, *empresa_ids, *empresa_ids, today],
+        empresa_ids,
     ).fetchall()
+    inmo_operaciones = conn.execute(
+        f"""
+        SELECT
+          COALESCE(o.contraparte1_id, o.propietario1_id, '') AS cliente_id,
+          COALESCE(NULLIF(TRIM(o.direccion), ''), 'Compraventa') AS titulo,
+          COALESCE(NULLIF(TRIM(o.tipo_operacion), ''), 'Operación') AS subtitulo,
+          COALESCE(o.estado, 'Cerrada') AS estado,
+          COALESCE(o.fecha_escritura, o.fecha_operacion, o.fecha_contrato, o.fecha_propuesta, o.updated_at, o.created_at) AS fecha,
+          CASE WHEN COALESCE(o.precio_escritura, o.precio_contrato, o.precio_propuesta, 0) > 0 THEN printf('%.2f €', COALESCE(o.precio_escritura, o.precio_contrato, o.precio_propuesta, 0)) ELSE '' END AS valor,
+          2 AS sort_group
+        FROM operaciones_inmobiliarias o
+        WHERE o.empresa_id IN ({placeholders})
+        ORDER BY DATE(COALESCE(o.fecha_escritura, o.fecha_operacion, o.fecha_contrato, o.fecha_propuesta, o.updated_at, o.created_at, '1900-01-01')) DESC, titulo COLLATE NOCASE ASC
+        LIMIT 6
+        """,
+        empresa_ids,
+    ).fetchall()
+    inmo_visitas = conn.execute(
+        f"""
+        SELECT
+          d.cliente_id,
+          COALESCE(NULLIF(TRIM(i.direccion), ''), 'Visita') AS titulo,
+          COALESCE(c.nombre, 'Sin demanda') AS subtitulo,
+          COALESCE(v.estado, 'Pendiente') AS estado,
+          v.fecha || CASE WHEN COALESCE(v.hora, '') <> '' THEN ' ' || v.hora ELSE '' END AS fecha,
+          '' AS valor,
+          3 AS sort_group
+        FROM visitas v
+        LEFT JOIN inmuebles i ON i.id = v.inmueble_id
+        LEFT JOIN demandas d ON d.id = v.demanda_id
+        LEFT JOIN clientes c ON c.id = d.cliente_id
+        WHERE v.empresa_id IN ({placeholders})
+          AND v.fecha IS NOT NULL
+          AND DATE(v.fecha) >= DATE(?)
+          AND LOWER(COALESCE(v.estado, '')) NOT IN ('cancelada', 'cancelado', 'hecha', 'realizada')
+        ORDER BY DATE(v.fecha) ASC, TIME(COALESCE(v.hora, '23:59')) ASC, titulo COLLATE NOCASE ASC
+        LIMIT 6
+        """,
+        [*empresa_ids, today],
+    ).fetchall()
+    inmobiliaria_rows = [*inmo_captaciones, *inmo_operaciones, *inmo_visitas]
+    inmobiliaria_rows = inmobiliaria_rows[:16]
 
     return {
         "gestoria": [dict(r) for r in gestoria_rows],

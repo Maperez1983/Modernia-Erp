@@ -1,5 +1,28 @@
+const API_TIMEOUT_MS = 15000;
+
+const fetchWithTimeout = async (input, init = {}, timeoutMs = API_TIMEOUT_MS) => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), Math.max(1000, Number(timeoutMs) || API_TIMEOUT_MS));
+  try {
+    return await fetch(input, { ...(init || {}), signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
 const api = async (path) => {
-  const res = await fetch(path, { cache: "no-store", credentials: "same-origin" });
+  let res;
+  try {
+    res = await fetchWithTimeout(path, { cache: "no-store", credentials: "same-origin" });
+  } catch (err) {
+    const message = err?.name === "AbortError"
+      ? "Tiempo de espera agotado."
+      : "No se pudo conectar con el servidor.";
+    const error = new Error(message);
+    error.cause = err;
+    error.status = 0;
+    throw error;
+  }
   let data = null;
   try {
     data = await res.json();
@@ -19,12 +42,23 @@ const api = async (path) => {
 };
 
 const apiPost = async (url, payload = {}) => {
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    credentials: "same-origin",
-    body: JSON.stringify(payload),
-  });
+  let res;
+  try {
+    res = await fetchWithTimeout(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify(payload),
+    });
+  } catch (err) {
+    const message = err?.name === "AbortError"
+      ? "Tiempo de espera agotado."
+      : "No se pudo conectar con el servidor.";
+    const error = new Error(message);
+    error.cause = err;
+    error.status = 0;
+    throw error;
+  }
 
   let data = null;
   try {
@@ -8667,7 +8701,7 @@ const renderWorkspaceModules = (rows = []) => {
         if (data?.error) {
           throw new Error(data.error);
         }
-        loadWorkspaceCentral();
+        loadWorkspaceCentral().catch(() => {});
       } catch (error) {
         input.checked = !enabled;
         alert(error.message || "No se pudo actualizar el módulo.");
@@ -10801,6 +10835,65 @@ const safeWorkspaceApi = async (path, fallback) => {
   }
 };
 
+const clearCurrentWorkspaceUi = () => {
+  state.currentWorkspaceDetail = null;
+  state.currentWorkspaceEnabledModules = [];
+  state.currentWorkspaceName = "";
+  state.currentWorkspaceClientId = "";
+  state.currentWorkspaceClientData = null;
+  state.currentWorkspaceClients = [];
+  state.currentWorkspaceData = {};
+  state.workspaceTimeUsers = [];
+  state.workspaceTimeEmployees = [];
+  state.workspaceTimeSummary = null;
+  fillWorkspaceForm({});
+  renderWorkspaceHealth({});
+  renderWorkspaceCommercialPack({}, {});
+  renderWorkspacePermissionMatrix([]);
+  renderWorkspaceLauncher({}, []);
+  renderWorkspaceCompanies([]);
+  renderWorkspaceClientBase([]);
+  renderWorkspaceClientDetail(null);
+  renderWorkspaceModules([]);
+  renderWorkspaceBillingSummary({});
+  renderWorkspaceBillingList([]);
+  renderWorkspaceGestoriaOverview({});
+  renderWorkspaceSegurosOverview({});
+  renderWorkspaceFinOverview({});
+  renderWorkspaceInmoOverview({});
+  renderWorkspaceServiceDesks({});
+  renderWorkspaceCollectionsList([]);
+  fillWorkspaceBillingForm();
+  fillWorkspaceCollectionsForm();
+  renderWorkspaceRemittancesList([]);
+  fillWorkspaceRemittancesForm();
+  renderWorkspaceSeriesList([]);
+  fillWorkspaceSeriesForm();
+  renderWorkspaceInboxList([]);
+  fillWorkspaceInboxForm();
+  renderWorkspacePortalList([]);
+  hydrateWorkspacePortalRequestTargets([]);
+  renderWorkspacePortalRequestList([]);
+  fillWorkspacePortalRequestForm();
+  renderWorkspaceAutomationList([]);
+  renderWorkspaceAutomationLogs([]);
+  fillWorkspaceAutomationForm();
+  renderWorkspaceTimeList([]);
+  fillWorkspaceTimeForm();
+  renderWorkspaceFincasCommunityList([]);
+  fillWorkspaceFincasCommunityForm();
+  hydrateWorkspaceCommunitySelect([]);
+  hydrateWorkspaceProviderSelect([]);
+  renderWorkspaceFincasIncidentList([]);
+  fillWorkspaceFincasIncidentForm();
+  renderWorkspaceFincasProviderList([]);
+  fillWorkspaceFincasProviderForm();
+  renderWorkspaceFincasMeetingList([]);
+  fillWorkspaceFincasMeetingForm();
+  renderWorkspaceDocumentHub({});
+  syncCrmLegalAvailability();
+};
+
 const loadWorkspaceDetail = async (workspaceId) => {
   if (!workspaceId) return;
   state.currentWorkspaceId = workspaceId;
@@ -10818,7 +10911,18 @@ const loadWorkspaceDetail = async (workspaceId) => {
     populateResponsableSelects();
     populateAsesorSelects();
   }
-  const detail = await api(`/api/workspace_detail?id=${encodeURIComponent(workspaceId)}`);
+  // Reset inmediato para evitar que, si falla la carga, se queden datos “pegados” del workspace/persona anterior.
+  state.currentWorkspaceClients = [];
+  state.currentWorkspaceData = {};
+  state.workspaceTimeEmployees = [];
+  state.workspaceTimeSummary = null;
+  const detail = await safeWorkspaceApi(`/api/workspace_detail?id=${encodeURIComponent(workspaceId)}`, null);
+  if (!detail) {
+    clearCurrentWorkspaceUi();
+    alert("No se pudo cargar el workspace (servidor no disponible).");
+    updateWorkspaceEntryChrome();
+    return;
+  }
   state.currentWorkspaceDetail = detail;
   state.currentWorkspaceEnabledModules = getWorkspaceEnabledModules(detail.modules || []);
   state.currentWorkspaceName = detail.workspace?.nombre || "";
@@ -10960,7 +11064,14 @@ const loadWorkspaceDetail = async (workspaceId) => {
 };
 
 const loadWorkspaceCentral = async () => {
-  const data = await api("/api/workspaces");
+  const data = await safeWorkspaceApi("/api/workspaces", null);
+  if (!data) {
+    clearCurrentWorkspaceUi();
+    renderWorkspaceList([]);
+    alert("Servidor no disponible. Intenta recargar en unos segundos.");
+    updateWorkspaceEntryChrome();
+    return;
+  }
   state.workspaces = data.rows || [];
   renderWorkspaceKpis(data.summary || {});
   renderWorkspaceList(state.workspaces);
@@ -10974,58 +11085,7 @@ const loadWorkspaceCentral = async () => {
   if (selectedId) {
     await loadWorkspaceDetail(selectedId);
   } else {
-    state.currentWorkspaceDetail = null;
-    state.currentWorkspaceEnabledModules = [];
-    state.currentWorkspaceName = "";
-    state.currentWorkspaceClientId = "";
-    state.currentWorkspaceClientData = null;
-    state.currentWorkspaceClients = [];
-    fillWorkspaceForm({});
-    renderWorkspaceHealth({});
-    renderWorkspaceCommercialPack({}, {});
-    renderWorkspacePermissionMatrix([]);
-    renderWorkspaceLauncher({}, []);
-    renderWorkspaceCompanies([]);
-    renderWorkspaceClientBase([]);
-    renderWorkspaceClientDetail(null);
-    renderWorkspaceModules([]);
-    renderWorkspaceBillingSummary({});
-    renderWorkspaceBillingList([]);
-    renderWorkspaceGestoriaOverview({});
-    renderWorkspaceSegurosOverview({});
-    renderWorkspaceFinOverview({});
-    renderWorkspaceInmoOverview({});
-    renderWorkspaceServiceDesks({});
-    renderWorkspaceCollectionsList([]);
-    fillWorkspaceBillingForm();
-    fillWorkspaceCollectionsForm();
-    renderWorkspaceRemittancesList([]);
-    fillWorkspaceRemittancesForm();
-    renderWorkspaceSeriesList([]);
-    fillWorkspaceSeriesForm();
-    renderWorkspaceInboxList([]);
-    fillWorkspaceInboxForm();
-    renderWorkspacePortalList([]);
-    hydrateWorkspacePortalRequestTargets([]);
-    renderWorkspacePortalRequestList([]);
-    syncCrmLegalAvailability();
-    fillWorkspacePortalRequestForm();
-    renderWorkspaceAutomationList([]);
-    renderWorkspaceAutomationLogs([]);
-    fillWorkspaceAutomationForm();
-    renderWorkspaceTimeList([]);
-    fillWorkspaceTimeForm();
-    renderWorkspaceFincasCommunityList([]);
-    fillWorkspaceFincasCommunityForm();
-    hydrateWorkspaceCommunitySelect([]);
-    hydrateWorkspaceProviderSelect([]);
-    renderWorkspaceFincasIncidentList([]);
-    fillWorkspaceFincasIncidentForm();
-    renderWorkspaceFincasProviderList([]);
-    fillWorkspaceFincasProviderForm();
-    renderWorkspaceFincasMeetingList([]);
-    fillWorkspaceFincasMeetingForm();
-    renderWorkspaceDocumentHub({});
+    clearCurrentWorkspaceUi();
     setWorkspaceView(state.currentWorkspaceView || "overview");
     renderCompanyCards();
   }
