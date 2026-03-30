@@ -1867,6 +1867,60 @@ body.crm-fin #companySummary {
   font-weight: 700;
 }
 
+.rrhh-pill-warn {
+  border-color: rgba(176, 127, 0, 0.25);
+  background: rgba(255, 214, 102, 0.28);
+}
+
+.rrhh-member-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.rrhh-member-card {
+  text-align: left;
+  padding: 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(43, 43, 43, 0.08);
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 10px 20px rgba(43, 43, 43, 0.05);
+  cursor: pointer;
+}
+
+.rrhh-member-card:hover {
+  border-color: rgba(60, 110, 113, 0.25);
+  box-shadow: 0 14px 26px rgba(43, 43, 43, 0.07);
+}
+
+.rrhh-member-card-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: flex-start;
+  margin-bottom: 4px;
+}
+
+.rrhh-member-detail {
+  display: grid;
+  gap: 12px;
+}
+
+.rrhh-member-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+
+.rrhh-member-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
 .workspace-motores-nav #workspaceEngineTabs {
   display: grid;
   gap: 10px;

@@ -1235,6 +1235,9 @@ const state = {
   workspaceRrhhUserSearch: "",
   workspaceRrhhSelectedUserId: "",
   workspaceRrhhRosterSearch: "",
+  workspaceRrhhEquipoView: "list",
+  workspaceRrhhEquipoMemberKey: "",
+  workspaceRrhhEquipoMemberTab: "personal",
   workspaceRrhhProfileRow: null,
   workspaceRrhhTimeSummary: null,
   workspaceRrhhTimeRows: [],
@@ -6292,39 +6295,108 @@ const renderWorkspaceRrhhHub = () => {
       `;
     }
     const companies = state.currentWorkspaceDetail?.companies || [];
-    const query = normalizeSimple(String(state.workspaceRrhhRosterSearch || ""));
-    const users = getWorkspaceTimeEligibleUsers()
-      .filter((row) => Number(row.activo ?? 1) === 1)
-      .filter((row) => {
-        if (!query) return true;
-        const hay = normalizeSimple([row.nombre || "", row.apellido || "", row.usuario || "", row.email || "", row.servicio || ""].join(" "));
-        return hay.includes(query);
-      })
-      .sort((a, b) => {
-        const nameA = `${a.nombre || ""} ${a.apellido || ""}`.trim() || a.usuario || "";
-        const nameB = `${b.nombre || ""} ${b.apellido || ""}`.trim() || b.usuario || "";
-        return nameA.localeCompare(nameB, "es", { sensitivity: "base" });
+    const employeesAll = Array.isArray(state.workspaceTimeEmployees) ? state.workspaceTimeEmployees : [];
+    const employees = employeesAll.filter((row) => String(row?.source || "").trim() !== "auto");
+    const usersAll = Array.isArray(state.usersList) ? state.usersList : [];
+    const usersById = new Map(usersAll.map((row) => [String(row.id || "").trim(), row]));
+
+    const normalizeMemberTab = (value = "") => {
+      const key = String(value || "").trim().toLowerCase();
+      if (["personal", "acceso", "docs"].includes(key)) return key;
+      return "personal";
+    };
+
+    const parseMemberKey = (key = "") => {
+      const raw = String(key || "").trim();
+      if (raw.startsWith("user:")) return { kind: "user", id: raw.slice(5) };
+      if (raw.startsWith("emp:")) return { kind: "emp", id: raw.slice(4) };
+      return { kind: "", id: "" };
+    };
+
+    const buildMembers = () => {
+      const membersByKey = new Map();
+      const addMember = (member) => {
+        if (!member || !member.key) return;
+        membersByKey.set(member.key, member);
+      };
+
+      const employeeByUser = new Map(
+        employees
+          .filter((row) => Number(row.usuario_manual || 0) === 1 && String(row.usuario_id || "").trim())
+          .map((row) => [String(row.usuario_id || "").trim(), row])
+      );
+
+      // 1) Usuarios del sistema (login)
+      const eligibleUsers = getWorkspaceTimeEligibleUsers().filter((row) => Number(row.activo ?? 1) === 1);
+      eligibleUsers.forEach((u) => {
+        const userId = String(u.id || "").trim();
+        if (!userId) return;
+        const employee = employeeByUser.get(userId) || null;
+        const fullName = `${u.nombre || ""} ${u.apellido || ""}`.trim() || u.usuario || u.email || "Usuario";
+        addMember({
+          key: `user:${userId}`,
+          kind: "user",
+          userId,
+          personaId: employee?.id || "",
+          user: usersById.get(userId) || u,
+          employee,
+          nombre: fullName,
+          empresa_nombre: employee?.empresa_nombre || "",
+          servicios: u.servicio || "",
+          activo: employee ? Number(employee.activo ?? 1) === 1 : true,
+          hasFicha: Boolean(employee),
+        });
       });
-    const employees = Array.isArray(state.workspaceTimeEmployees) ? state.workspaceTimeEmployees : [];
-    const employeeByUser = new Map(
-      employees
-        .filter((row) => Number(row.usuario_manual || 0) === 1 && String(row.usuario_id || "").trim())
-        .map((row) => [String(row.usuario_id || "").trim(), row])
-    );
-    const companyOptions = [
-      `<option value="">Selecciona empresa</option>`,
-      ...companies.map((c) => `<option value="${escapeHtml(String(c.id || ""))}">${escapeHtml(c.nombre || "-")}</option>`),
-    ].join("");
-    const unlinkedEmployees = employees
-      .filter((row) => String(row?.source || "").trim() !== "auto")
-      .filter((row) => Number(row?.usuario_manual || 0) !== 1)
-      .sort((a, b) => String(a?.nombre || "").localeCompare(String(b?.nombre || ""), "es", { sensitivity: "base" }));
-    return `
+
+      // 2) Fichas de plantilla (aunque el usuario no esté “eligible”)
+      employees.forEach((emp) => {
+        const personaId = String(emp.id || "").trim();
+        if (!personaId) return;
+        const linkedUserId = String(emp.usuario_id || "").trim();
+        const linkedManual = Number(emp.usuario_manual || 0) === 1;
+        const key = linkedManual && linkedUserId ? `user:${linkedUserId}` : `emp:${personaId}`;
+        if (membersByKey.has(key)) {
+          // Merge info si faltaba
+          const prev = membersByKey.get(key);
+          membersByKey.set(key, { ...(prev || {}), employee: emp, personaId, empresa_nombre: emp.empresa_nombre || "" });
+          return;
+        }
+        const user = linkedManual && linkedUserId ? (usersById.get(linkedUserId) || null) : null;
+        addMember({
+          key,
+          kind: linkedManual && linkedUserId ? "user" : "emp",
+          userId: linkedManual && linkedUserId ? linkedUserId : "",
+          personaId,
+          user,
+          employee: emp,
+          nombre: emp.nombre || "Empleado",
+          empresa_nombre: emp.empresa_nombre || "",
+          servicios: user?.servicio || "",
+          activo: Number(emp.activo ?? 1) === 1,
+          hasFicha: true,
+        });
+      });
+
+      return Array.from(membersByKey.values()).sort((a, b) => String(a?.nombre || "").localeCompare(String(b?.nombre || ""), "es", { sensitivity: "base" }));
+    };
+
+    const members = buildMembers();
+    const view = String(state.workspaceRrhhEquipoView || "list");
+    const memberKey = String(state.workspaceRrhhEquipoMemberKey || "").trim();
+    const selected = members.find((m) => String(m.key || "") === memberKey) || null;
+    const query = normalizeSimple(String(state.workspaceRrhhRosterSearch || ""));
+    const filtered = members.filter((m) => {
+      if (!query) return true;
+      const hay = normalizeSimple([m.nombre || "", m.empresa_nombre || "", m.servicios || "", m.user?.usuario || "", m.user?.email || ""].join(" "));
+      return hay.includes(query);
+    });
+
+    const renderMemberList = () => `
       <div class="workspace-rrhh-panel-card">
         <div class="section-head">
           <div>
             <h4>Equipo</h4>
-            <p class="muted">Listado de usuarios actuales. Crea/edita su ficha de plantilla (empresa, jornada, horas) de forma manual.</p>
+            <p class="muted">1 card por miembro. Pulsa para abrir su ficha.</p>
           </div>
           <div class="section-head-actions">
             <button type="button" class="secondary ghost button-inline" data-rrhh-employee-new>Alta empleado</button>
@@ -6332,97 +6404,271 @@ const renderWorkspaceRrhhHub = () => {
         </div>
         <label>
           Buscar
-          <input id="workspaceRrhhRosterSearch" value="${escapeHtml(state.workspaceRrhhRosterSearch || "")}" placeholder="Nombre, usuario, email, servicio..." />
+          <input id="workspaceRrhhRosterSearch" value="${escapeHtml(state.workspaceRrhhRosterSearch || "")}" placeholder="Nombre, usuario, email, empresa..." />
         </label>
-        <div class="workspace-rrhh-list">
-          ${users.length
-            ? users.map((user) => {
-              const userId = String(user.id || "").trim();
-              const employee = employeeByUser.get(userId) || null;
-              const fullName = `${user.nombre || ""} ${user.apellido || ""}`.trim() || user.usuario || user.email || "Usuario";
-              const defaultCompany = employee?.empresa_id || "";
-              const jornada = employee?.tipo_jornada || "Completa";
-              const horas = employee?.horas_pactadas_dia ?? "";
-              const isActive = Number(employee?.activo ?? 1) === 1;
-              const status = employee ? `En plantilla · ${employee.empresa_nombre || ""}` : "Sin ficha de plantilla";
+        <div class="rrhh-member-grid">
+          ${(filtered.length ? filtered : members).length
+            ? (filtered.length ? filtered : members).map((m) => {
+              const company = String(m.empresa_nombre || "").trim();
+              const status = m.hasFicha ? "En plantilla" : "Sin ficha";
+              const pill = m.hasFicha ? "rrhh-pill" : "rrhh-pill rrhh-pill-warn";
+              const subtitleBits = [];
+              if (m.servicios) subtitleBits.push(m.servicios);
+              if (company) subtitleBits.push(company);
+              if (!company && m.hasFicha) subtitleBits.push("Sin empresa");
+              const subtitle = subtitleBits.length ? subtitleBits.join(" · ") : "—";
               return `
-                <div class="workspace-rrhh-row" data-rrhh-roster-user="${escapeHtml(userId)}" data-rrhh-roster-default-company="${escapeHtml(String(defaultCompany || ""))}" data-rrhh-roster-employee-id="${escapeHtml(String(employee?.id || ""))}">
-                  <div>
-                    <strong>${escapeHtml(fullName)}</strong>
-                    <div class="muted">${escapeHtml(user.servicio || "Sin servicio")} · ${escapeHtml(status)}</div>
+                <button type="button" class="rrhh-member-card" data-rrhh-member-open="${escapeHtml(m.key)}">
+                  <div class="rrhh-member-card-head">
+                    <strong>${escapeHtml(m.nombre || "Miembro")}</strong>
+                    <span class="${pill}">${escapeHtml(status)}</span>
                   </div>
-                  <div class="workspace-rrhh-row-actions">
-                    <label class="muted">
-                      DNI
-                      <input data-rrhh-roster-nif value="${escapeHtml(String(employee?.nif || ""))}" placeholder="DNI/NIE" style="width: 140px;" />
-                    </label>
-                    <label class="muted">
-                      Email
-                      <input data-rrhh-roster-email value="${escapeHtml(String(employee?.email || user.email || ""))}" placeholder="email@..." style="width: 220px;" />
-                    </label>
-                    <label class="muted">
-                      Teléfono
-                      <input data-rrhh-roster-telefono value="${escapeHtml(String(employee?.telefono || ""))}" placeholder="Teléfono" style="width: 140px;" />
-                    </label>
-                    <label class="muted">
-                      Empresa
-                      <select data-rrhh-roster-empresa>${companyOptions}</select>
-                    </label>
-                    <label class="muted">
-                      Jornada
-                      <select data-rrhh-roster-jornada>
-                        <option ${jornada === "Completa" ? "selected" : ""}>Completa</option>
-                        <option ${jornada === "Parcial" ? "selected" : ""}>Parcial</option>
-                      </select>
-                    </label>
-                    <label class="muted">
-                      h/día
-                      <input data-rrhh-roster-horas type="number" min="0" step="0.25" value="${escapeHtml(String(horas))}" style="width: 90px;" />
-                    </label>
-                    <label class="inline-check muted">
-                      <input data-rrhh-roster-activo type="checkbox" ${isActive ? "checked" : ""} />
-                      Activo
-                    </label>
-                    <button type="button" class="secondary ghost button-inline" data-rrhh-roster-edit="${escapeHtml(userId)}">${employee ? "Editar" : "Crear"}</button>
-                    <button type="button" class="secondary button-inline" data-rrhh-roster-save="${escapeHtml(userId)}">Guardar</button>
-                  </div>
-                </div>
+                  <div class="muted">${escapeHtml(subtitle)}</div>
+                  ${m.user?.usuario || m.user?.email ? `<div class="muted">${escapeHtml(m.user?.usuario || m.user?.email || "")}</div>` : ""}
+                </button>
               `;
             }).join("")
-            : "<p class='muted'>No hay usuarios activos.</p>"
+            : "<p class='muted'>No hay miembros todavía.</p>"
           }
         </div>
-        <div id="workspaceRrhhRosterStatus" class="muted"></div>
-        ${unlinkedEmployees.length ? `
-          <div class="workspace-rrhh-panel-card" style="margin-top: 14px;">
-            <div class="section-head">
-              <div>
-                <h4>Empleados sin usuario</h4>
-                <p class="muted">Fichas creadas manualmente (sin login). Puedes editarlas y vincularlas después si lo necesitas.</p>
-              </div>
-            </div>
-            <div class="workspace-rrhh-list">
-              ${unlinkedEmployees.map((row) => `
-                <div class="workspace-rrhh-row">
-                  <div>
-                    <strong>${escapeHtml(row.nombre || "-")}</strong>
-                    <div class="muted">${escapeHtml(row.empresa_nombre || "-")}${Number(row.activo ?? 1) === 1 ? "" : " · Inactivo"}</div>
-                    <div class="muted">${escapeHtml(row.nif || "-")}${row.email ? ` · ${escapeHtml(row.email)}` : ""}${row.telefono ? ` · ${escapeHtml(row.telefono)}` : ""}</div>
-                  </div>
-                  <div class="workspace-rrhh-row-actions">
-                    <button type="button" class="secondary ghost button-inline" data-rrhh-employee-edit="${escapeHtml(String(row.id || ""))}">Editar</button>
-                  </div>
-                </div>
-              `).join("")}
-            </div>
-          </div>
-        ` : ""}
-        <details class="workspace-rrhh-sysusers" style="margin-top: 14px;">
-          <summary>Usuarios del sistema (login) · Crear/editar</summary>
-          ${renderUsuarios()}
-        </details>
       </div>
     `;
+
+    const renderMemberDocs = (emp) => {
+      if (!emp?.id) {
+        return `<p class="muted">Crea primero la ficha del empleado para gestionar documentación.</p>`;
+      }
+      const personaId = String(emp.id || "").trim();
+      const rows = (docs || []).filter((row) => String(row.persona_id || "") === personaId);
+      return `
+        <div class="workspace-rrhh-panel-card">
+          <div class="section-head">
+            <div>
+              <h4>Documentación</h4>
+              <p class="muted">Contratos, DNI, certificados y formaciones.</p>
+            </div>
+          </div>
+          <form id="workspaceRrhhDocForm" class="form-grid">
+            <input type="hidden" name="id" />
+            <input type="hidden" name="workspace_id" value="${escapeHtml(state.currentWorkspaceId)}" />
+            <input type="hidden" name="persona_id" value="${escapeHtml(personaId)}" />
+            <label class="span-2">
+              Persona
+              <select name="persona_id" disabled required>
+                <option value="${escapeHtml(personaId)}">${escapeHtml(emp.nombre || "-")}${emp.empresa_nombre ? ` · ${escapeHtml(emp.empresa_nombre)}` : ""}</option>
+              </select>
+            </label>
+            <label>
+              Tipo
+              <input name="tipo" value="Documento" />
+            </label>
+            <label>
+              Nombre
+              <input name="nombre" placeholder="Contrato, DNI, certificado..." />
+            </label>
+            <label>
+              Fecha emisión
+              <input type="date" name="fecha_emision" />
+            </label>
+            <label>
+              Fecha caducidad
+              <input type="date" name="fecha_caducidad" />
+            </label>
+            <label class="inline-check">
+              <input type="checkbox" name="permanente" />
+              Permanente
+            </label>
+            <label class="span-2">
+              Archivo
+              <input type="file" name="archivo" />
+            </label>
+            <input type="hidden" name="doc_key" />
+            <input type="hidden" name="doc_url" />
+            <div class="form-actions span-2">
+              <button type="submit">Guardar documento</button>
+              <button type="button" class="secondary ghost" data-rrhh-doc-reset>Nuevo</button>
+              <span id="workspaceRrhhDocStatus" class="muted"></span>
+            </div>
+          </form>
+          <div class="workspace-rrhh-list">
+            ${rows.length
+              ? rows.map((row) => `
+                <div class="workspace-rrhh-row">
+                  <div>
+                    <strong>${escapeHtml(row.tipo || "Documento")}${row.nombre ? ` · ${escapeHtml(row.nombre)}` : ""}</strong>
+                    <div class="muted">${row.fecha_emision ? `Emisión: ${escapeHtml(row.fecha_emision)}` : ""}${row.permanente ? " · Permanente" : (row.fecha_caducidad ? ` · Caduca: ${escapeHtml(row.fecha_caducidad)}` : "")}</div>
+                    ${row.doc_url ? `<div class="muted"><a href="${escapeHtml(row.doc_url)}" target="_blank" rel="noreferrer">Abrir archivo</a></div>` : ""}
+                  </div>
+                  <div class="workspace-rrhh-row-actions">
+                    <button type="button" class="secondary ghost button-inline" data-rrhh-doc-edit="${row.id || ""}">Editar</button>
+                  </div>
+                </div>
+              `).join("")
+              : "<p class='muted'>Sin documentos cargados todavía.</p>"
+            }
+          </div>
+        </div>
+      `;
+    };
+
+    const renderMemberDetail = (m) => {
+      const employee = m?.employee || null;
+      const user = m?.user || null;
+      const memberTab = normalizeMemberTab(state.workspaceRrhhEquipoMemberTab || "personal");
+      const companiesOptions = [
+        `<option value="">Selecciona empresa</option>`,
+        ...companies.map((c) => `<option value="${escapeHtml(String(c.id || ""))}">${escapeHtml(c.nombre || "-")}</option>`),
+      ].join("");
+
+      const defaultEmpresaId = String(employee?.empresa_id || "").trim();
+      const tipoJornada = String(employee?.tipo_jornada || "Completa").trim() || "Completa";
+      const horasDia = employee?.horas_pactadas_dia ?? "";
+      const isActive = employee ? Number(employee.activo ?? 1) === 1 : true;
+
+      const headerSubtitle = [
+        employee?.empresa_nombre ? employee.empresa_nombre : "",
+        employee?.id ? "En plantilla" : "Sin ficha",
+      ].filter(Boolean).join(" · ");
+
+      const personalHtml = `
+        <div class="workspace-rrhh-panel-card">
+          <div class="section-head">
+            <div>
+              <h4>Datos personales</h4>
+              <p class="muted">Edita y guarda la ficha del trabajador.</p>
+            </div>
+          </div>
+          <form id="rrhhMemberPersonalForm" class="form-grid">
+            <input type="hidden" name="id" value="${escapeHtml(String(employee?.id || ""))}" />
+            <input type="hidden" name="workspace_id" value="${escapeHtml(state.currentWorkspaceId)}" />
+            <input type="hidden" name="usuario_id" value="${escapeHtml(String(employee?.usuario_manual ? (employee?.usuario_id || "") : (m.userId || "")))}" />
+            <label class="span-2">
+              Empresa
+              <select name="empresa_id" required data-default-empresa="${escapeHtml(defaultEmpresaId)}">${companiesOptions}</select>
+            </label>
+            <label>
+              Nombre
+              <input name="nombre" required value="${escapeHtml(String(employee?.nombre || m.nombre || ""))}" />
+            </label>
+            <label>
+              DNI
+              <input name="nif" value="${escapeHtml(String(employee?.nif || ""))}" />
+            </label>
+            <label>
+              Email
+              <input name="email" value="${escapeHtml(String(employee?.email || user?.email || ""))}" />
+            </label>
+            <label>
+              Teléfono
+              <input name="telefono" value="${escapeHtml(String(employee?.telefono || ""))}" />
+            </label>
+            <label>
+              Jornada
+              <select name="tipo_jornada">
+                <option ${tipoJornada === "Completa" ? "selected" : ""}>Completa</option>
+                <option ${tipoJornada === "Parcial" ? "selected" : ""}>Parcial</option>
+              </select>
+            </label>
+            <label>
+              Horas/día
+              <input name="horas_pactadas_dia" type="number" min="0" step="0.25" value="${escapeHtml(String(horasDia))}" />
+            </label>
+            <label class="inline-check">
+              <input name="activo" type="checkbox" ${isActive ? "checked" : ""} />
+              Activo
+            </label>
+            <label class="span-2">
+              Notas
+              <textarea name="notas" rows="3">${escapeHtml(String(employee?.notas || ""))}</textarea>
+            </label>
+            <div class="form-actions span-2">
+              <button type="submit">Guardar ficha</button>
+              <span id="rrhhMemberPersonalStatus" class="muted"></span>
+            </div>
+          </form>
+        </div>
+      `;
+
+      const accessHtml = `
+        <div class="workspace-rrhh-panel-card">
+          <div class="section-head">
+            <div>
+              <h4>Datos de acceso</h4>
+              <p class="muted">Vincula/desvincula el login y activa registro horario.</p>
+            </div>
+          </div>
+          <div class="workspace-rrhh-list">
+            <div class="workspace-rrhh-row">
+              <div>
+                <strong>Usuario del sistema</strong>
+                <div class="muted">${escapeHtml(user?.usuario || user?.email || "—")}</div>
+                <div class="muted">${escapeHtml(user?.rol || "—")}${user?.servicio ? ` · ${escapeHtml(user.servicio)}` : ""}</div>
+              </div>
+              <div class="workspace-rrhh-row-actions">
+                ${user?.id ? `<button type="button" class="secondary ghost button-inline" data-rrhh-member-toggle-registro="${escapeHtml(String(user.id))}" data-rrhh-member-toggle-next="${Number(user.registro_horario_activo || 0) === 1 ? "0" : "1"}">${Number(user.registro_horario_activo || 0) === 1 ? "Desactivar registro" : "Activar registro"}</button>` : ""}
+              </div>
+            </div>
+            ${employee?.id ? `
+              <div class="workspace-rrhh-row">
+                <div>
+                  <strong>Vínculo</strong>
+                  <div class="muted">${employee?.usuario_manual ? "Vinculado" : "Sin vincular"}</div>
+                </div>
+                <div class="workspace-rrhh-row-actions">
+                  ${employee?.usuario_manual ? `
+                    <button type="button" class="secondary danger button-inline" data-rrhh-member-unlink>Desvincular</button>
+                  ` : `
+                    <label class="muted">
+                      Vincular a
+                      <select id="rrhhMemberLinkUser">
+                        <option value="">Selecciona usuario</option>
+                        ${usersAll
+                          .filter((u) => Number(u.activo ?? 1) === 1)
+                          .sort((a, b) => `${a.nombre || ""} ${a.apellido || ""}`.localeCompare(`${b.nombre || ""} ${b.apellido || ""}`, "es", { sensitivity: "base" }))
+                          .map((u) => `<option value="${escapeHtml(String(u.id || ""))}">${escapeHtml(`${u.nombre || ""} ${u.apellido || ""}`.trim() || u.usuario || u.email || "Usuario")}</option>`)
+                          .join("")}
+                      </select>
+                    </label>
+                    <button type="button" class="secondary button-inline" data-rrhh-member-link>Vincular</button>
+                  `}
+                  <span id="rrhhMemberAccessStatus" class="muted"></span>
+                </div>
+              </div>
+            ` : `
+              <p class="muted">Para vincular accesos primero crea la ficha del trabajador en “Datos personales”.</p>
+            `}
+          </div>
+        </div>
+      `;
+
+      const docsHtml = renderMemberDocs(employee);
+
+      const tabHtml = memberTab === "acceso" ? accessHtml : memberTab === "docs" ? docsHtml : personalHtml;
+      return `
+        <div class="rrhh-member-detail">
+          <div class="rrhh-member-header">
+            <button type="button" class="secondary ghost button-inline" data-rrhh-member-back>← Volver a Equipo</button>
+            <div>
+              <h3 style="margin: 10px 0 4px 0;">${escapeHtml(m.nombre || "Miembro")}</h3>
+              <div class="muted">${escapeHtml(headerSubtitle || "")}</div>
+            </div>
+          </div>
+          <div class="rrhh-member-tabs">
+            ${[
+              { key: "personal", label: "Datos personales" },
+              { key: "acceso", label: "Datos de acceso" },
+              { key: "docs", label: "Documentación" },
+            ].map((t) => `<button type="button" class="tab${t.key === memberTab ? " active" : ""}" data-rrhh-member-tab="${t.key}">${escapeHtml(t.label)}</button>`).join("")}
+          </div>
+          ${tabHtml}
+        </div>
+      `;
+    };
+
+    if (view === "member" && selected) {
+      return renderMemberDetail(selected);
+    }
+    return renderMemberList();
   };
 
   const renderHorario = () => {
@@ -6852,6 +7098,195 @@ const renderWorkspaceRrhhHub = () => {
     rosterSearch.addEventListener("input", () => {
       state.workspaceRrhhRosterSearch = String(rosterSearch.value || "");
       renderWorkspaceRrhhHub();
+    });
+  }
+
+  // Equipo: cards -> ficha por miembro.
+  workspaceRrhhHub.querySelectorAll("[data-rrhh-member-open]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      if (!isWorkspaceRrhhManager()) return;
+      const key = String(button.dataset.rrhhMemberOpen || "").trim();
+      if (!key) return;
+      state.workspaceRrhhEquipoView = "member";
+      state.workspaceRrhhEquipoMemberKey = key;
+      state.workspaceRrhhEquipoMemberTab = "personal";
+      // Si existe ficha, la seleccionamos para cargar docs/ausencias/etc.
+      const employees = Array.isArray(state.workspaceTimeEmployees) ? state.workspaceTimeEmployees : [];
+      let personaId = "";
+      if (key.startsWith("user:")) {
+        const userId = key.slice(5);
+        const match = employees.find((row) => Number(row.usuario_manual || 0) === 1 && String(row.usuario_id || "").trim() === String(userId || "").trim());
+        personaId = match?.id || "";
+      } else if (key.startsWith("emp:")) {
+        personaId = key.slice(4);
+      }
+      if (personaId) {
+        state.workspaceRrhhSelectedPersonaId = personaId;
+        state.workspaceRrhhScopeAll = false;
+        await refreshWorkspaceRrhh();
+        return;
+      }
+      renderWorkspaceRrhhHub();
+    });
+  });
+
+  const backBtn = workspaceRrhhHub.querySelector("[data-rrhh-member-back]");
+  if (backBtn) {
+    backBtn.addEventListener("click", () => {
+      state.workspaceRrhhEquipoView = "list";
+      state.workspaceRrhhEquipoMemberKey = "";
+      state.workspaceRrhhEquipoMemberTab = "personal";
+      renderWorkspaceRrhhHub();
+    });
+  }
+
+  workspaceRrhhHub.querySelectorAll("[data-rrhh-member-tab]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.workspaceRrhhEquipoMemberTab = String(button.dataset.rrhhMemberTab || "personal").trim().toLowerCase();
+      renderWorkspaceRrhhHub();
+    });
+  });
+
+  const personalForm = document.getElementById("rrhhMemberPersonalForm");
+  if (personalForm) {
+    const empresaSelect = personalForm.querySelector('[name="empresa_id"]');
+    if (empresaSelect) {
+      const wanted = String(empresaSelect.dataset.defaultEmpresa || "").trim();
+      if (wanted && Array.from(empresaSelect.options || []).some((opt) => String(opt.value || "") === wanted)) {
+        empresaSelect.value = wanted;
+      }
+    }
+    personalForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const status = document.getElementById("rrhhMemberPersonalStatus");
+      if (status) status.textContent = "Guardando...";
+      const submit = personalForm.querySelector('button[type="submit"]');
+      if (submit) submit.disabled = true;
+      try {
+        const form = new FormData(personalForm);
+        const payload = Object.fromEntries(form.entries());
+        payload.activo = personalForm.querySelector('[name="activo"]')?.checked ? 1 : 0;
+        payload.empresa_manual = 1;
+        const resp = await apiPost("/api/workspace_registro_personal", payload);
+        if (status) status.textContent = "Guardado.";
+        if (resp?.id) {
+          state.workspaceRrhhSelectedPersonaId = String(resp.id || "");
+          state.workspaceRrhhScopeAll = false;
+        }
+        await loadWorkspaceDetail(state.currentWorkspaceId);
+        await refreshWorkspaceRrhh();
+      } catch (error) {
+        if (status) status.textContent = error.message || "No se pudo guardar.";
+      } finally {
+        if (submit) submit.disabled = false;
+      }
+    });
+  }
+
+  const accessStatus = document.getElementById("rrhhMemberAccessStatus");
+  const toggleRegistro = workspaceRrhhHub.querySelector("[data-rrhh-member-toggle-registro]");
+  if (toggleRegistro) {
+    toggleRegistro.addEventListener("click", async () => {
+      if (!isWorkspaceRrhhManager()) return;
+      const userId = String(toggleRegistro.dataset.rrhhMemberToggleRegistro || "").trim();
+      const next = Number(toggleRegistro.dataset.rrhhMemberToggleNext || 0) === 1 ? 1 : 0;
+      if (!userId) return;
+      toggleRegistro.disabled = true;
+      try {
+        await apiPost("/api/workspace_registro_usuario_toggle", { workspace_id: state.currentWorkspaceId, usuario_id: userId, enabled: next });
+        if (accessStatus) accessStatus.textContent = "Actualizado.";
+        await loadWorkspaceDetail(state.currentWorkspaceId);
+        await refreshWorkspaceRrhh();
+      } catch (error) {
+        if (accessStatus) accessStatus.textContent = error.message || "No se pudo actualizar.";
+      } finally {
+        toggleRegistro.disabled = false;
+      }
+    });
+  }
+
+  const linkBtn = workspaceRrhhHub.querySelector("[data-rrhh-member-link]");
+  if (linkBtn) {
+    linkBtn.addEventListener("click", async () => {
+      if (!isWorkspaceRrhhManager()) return;
+      const select = document.getElementById("rrhhMemberLinkUser");
+      const userId = String(select?.value || "").trim();
+      if (!userId) {
+        if (accessStatus) accessStatus.textContent = "Selecciona un usuario para vincular.";
+        return;
+      }
+      const employees = Array.isArray(state.workspaceTimeEmployees) ? state.workspaceTimeEmployees : [];
+      const personaId = String(state.workspaceRrhhSelectedPersonaId || "").trim();
+      const emp = employees.find((row) => String(row.id || "").trim() === personaId) || null;
+      if (!emp?.id) {
+        if (accessStatus) accessStatus.textContent = "Crea/guarda primero la ficha del trabajador.";
+        return;
+      }
+      if (!String(emp.empresa_id || "").trim()) {
+        if (accessStatus) accessStatus.textContent = "Selecciona empresa en la ficha antes de vincular.";
+        return;
+      }
+      linkBtn.disabled = true;
+      try {
+        await apiPost("/api/workspace_registro_personal", {
+          id: emp.id,
+          workspace_id: state.currentWorkspaceId,
+          empresa_id: emp.empresa_id,
+          empresa_manual: 1,
+          usuario_id: userId,
+          nombre: emp.nombre,
+          nif: emp.nif || "",
+          email: emp.email || "",
+          telefono: emp.telefono || "",
+          tipo_jornada: emp.tipo_jornada || "Completa",
+          horas_pactadas_dia: emp.horas_pactadas_dia ?? "",
+          activo: Number(emp.activo ?? 1) === 1 ? 1 : 0,
+          notas: emp.notas || "",
+        });
+        if (accessStatus) accessStatus.textContent = "Vinculado.";
+        await loadWorkspaceDetail(state.currentWorkspaceId);
+        await refreshWorkspaceRrhh();
+      } catch (error) {
+        if (accessStatus) accessStatus.textContent = error.message || "No se pudo vincular.";
+      } finally {
+        linkBtn.disabled = false;
+      }
+    });
+  }
+
+  const unlinkBtn = workspaceRrhhHub.querySelector("[data-rrhh-member-unlink]");
+  if (unlinkBtn) {
+    unlinkBtn.addEventListener("click", async () => {
+      if (!isWorkspaceRrhhManager()) return;
+      const employees = Array.isArray(state.workspaceTimeEmployees) ? state.workspaceTimeEmployees : [];
+      const personaId = String(state.workspaceRrhhSelectedPersonaId || "").trim();
+      const emp = employees.find((row) => String(row.id || "").trim() === personaId) || null;
+      if (!emp?.id) return;
+      unlinkBtn.disabled = true;
+      try {
+        await apiPost("/api/workspace_registro_personal", {
+          id: emp.id,
+          workspace_id: state.currentWorkspaceId,
+          empresa_id: emp.empresa_id,
+          empresa_manual: 1,
+          usuario_id: "",
+          nombre: emp.nombre,
+          nif: emp.nif || "",
+          email: emp.email || "",
+          telefono: emp.telefono || "",
+          tipo_jornada: emp.tipo_jornada || "Completa",
+          horas_pactadas_dia: emp.horas_pactadas_dia ?? "",
+          activo: Number(emp.activo ?? 1) === 1 ? 1 : 0,
+          notas: emp.notas || "",
+        });
+        if (accessStatus) accessStatus.textContent = "Desvinculado.";
+        await loadWorkspaceDetail(state.currentWorkspaceId);
+        await refreshWorkspaceRrhh();
+      } catch (error) {
+        if (accessStatus) accessStatus.textContent = error.message || "No se pudo desvincular.";
+      } finally {
+        unlinkBtn.disabled = false;
+      }
     });
   }
 
