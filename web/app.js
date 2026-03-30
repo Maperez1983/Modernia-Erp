@@ -6667,14 +6667,26 @@ const renderWorkspaceRrhhHub = () => {
       `;
     };
 
-	    const renderMemberDetail = (m) => {
-	      const employee = m?.employee || null;
-	      const user = m?.user || null;
-	      const memberTab = normalizeMemberTab(state.workspaceRrhhEquipoMemberTab || "personal");
-      const companiesOptions = [
-        `<option value="">Selecciona empresa</option>`,
-        ...companies.map((c) => `<option value="${escapeHtml(String(c.id || ""))}">${escapeHtml(c.nombre || "-")}</option>`),
-      ].join("");
+		    const renderMemberDetail = (m) => {
+		      const employee = m?.employee || null;
+		      const user = m?.user || null;
+		      const memberTab = normalizeMemberTab(state.workspaceRrhhEquipoMemberTab || "personal");
+          const normalizeName = (value) =>
+            String(value || "")
+              .trim()
+              .toLowerCase()
+              .normalize("NFD")
+              .replace(/[\u0300-\u036f]/g, "")
+              .replace(/\s+/g, " ");
+          const userFullName = `${user?.nombre || ""} ${user?.apellido || ""}`.trim();
+          const fichaName = String(employee?.nombre || "").trim();
+          const displayName = fichaName || userFullName || String(m?.nombre || "").trim() || "Miembro";
+          const mismatch =
+            Boolean(fichaName && userFullName && normalizeName(fichaName) !== normalizeName(userFullName));
+	      const companiesOptions = [
+	        `<option value="">Selecciona empresa</option>`,
+	        ...companies.map((c) => `<option value="${escapeHtml(String(c.id || ""))}">${escapeHtml(c.nombre || "-")}</option>`),
+	      ].join("");
 
 	      const defaultEmpresaId = String(employee?.empresa_id || "").trim();
 	      const tipoJornada = String(employee?.tipo_jornada || "Completa").trim() || "Completa";
@@ -6689,14 +6701,15 @@ const renderWorkspaceRrhhHub = () => {
 	        .map((part) => part[0]?.toUpperCase() || "")
 	        .join("") || "—";
 
-	      const headerSubtitle = [
-	        employee?.empresa_nombre ? employee.empresa_nombre : "",
-	        employee?.id ? "En plantilla" : "Sin ficha",
-	      ].filter(Boolean).join(" · ");
+		      const headerSubtitle = [
+		        employee?.empresa_nombre ? employee.empresa_nombre : "",
+		        employee?.id ? "En plantilla" : "Sin ficha",
+            mismatch ? `Usuario: ${userFullName}` : "",
+		      ].filter(Boolean).join(" · ");
 
-	      const personalHtml = `
-	        <div class="workspace-rrhh-panel-card">
-          <div class="section-head">
+		      const personalHtml = `
+		        <div class="workspace-rrhh-panel-card">
+	          <div class="section-head">
             <div>
               <h4>Datos personales</h4>
               <p class="muted">Edita y guarda la ficha del trabajador.</p>
@@ -6723,10 +6736,10 @@ const renderWorkspaceRrhhHub = () => {
 	              Empresa
 	              <select name="empresa_id" required data-default-empresa="${escapeHtml(defaultEmpresaId)}">${companiesOptions}</select>
 	            </label>
-            <label>
-              Nombre
-              <input name="nombre" required value="${escapeHtml(String(employee?.nombre || m.nombre || ""))}" />
-            </label>
+	            <label>
+	              Nombre
+	              <input name="nombre" required value="${escapeHtml(String(fichaName || displayName || ""))}" />
+	            </label>
             <label>
               DNI
               <input name="nif" value="${escapeHtml(String(employee?.nif || ""))}" />
@@ -6766,32 +6779,55 @@ const renderWorkspaceRrhhHub = () => {
         </div>
       `;
 
-      const accessHtml = `
-        <div class="workspace-rrhh-panel-card">
-          <div class="section-head">
-            <div>
-              <h4>Datos de acceso</h4>
-              <p class="muted">Vincula/desvincula el login y activa registro horario.</p>
-            </div>
-          </div>
-          <div class="workspace-rrhh-list">
-            <div class="workspace-rrhh-row">
-              <div>
-                <strong>Usuario del sistema</strong>
-                <div class="muted">${escapeHtml(user?.usuario || user?.email || "—")}</div>
-                <div class="muted">${escapeHtml(user?.rol || "—")}${user?.servicio ? ` · ${escapeHtml(user.servicio)}` : ""}</div>
-              </div>
-              <div class="workspace-rrhh-row-actions">
-                ${user?.id ? `<button type="button" class="secondary ghost button-inline" data-rrhh-member-toggle-registro="${escapeHtml(String(user.id))}" data-rrhh-member-toggle-next="${Number(user.registro_horario_activo || 0) === 1 ? "0" : "1"}">${Number(user.registro_horario_activo || 0) === 1 ? "Desactivar registro" : "Activar registro"}</button>` : ""}
-              </div>
-            </div>
-            ${employee?.id ? `
-              <div class="workspace-rrhh-row">
-                <div>
-                  <strong>Vínculo</strong>
-                  <div class="muted">${employee?.usuario_manual ? "Vinculado" : "Sin vincular"}</div>
+	      const accessHtml = `
+	        <div class="workspace-rrhh-panel-card">
+	          <div class="section-head">
+	            <div>
+	              <h4>Datos de acceso</h4>
+	              <p class="muted">Invitación, contraseña y vínculo del login. También puedes activar registro horario.</p>
+	            </div>
+	          </div>
+	          <div class="workspace-rrhh-list">
+	            <div class="workspace-rrhh-row">
+	              <div>
+	                <strong>Usuario del sistema</strong>
+	                <div class="muted">${escapeHtml(user?.usuario || user?.email || "—")}</div>
+	                <div class="muted">${escapeHtml(user?.rol || "—")}${user?.servicio ? ` · ${escapeHtml(user.servicio)}` : ""}</div>
+	              </div>
+	              <div class="workspace-rrhh-row-actions">
+	                ${user?.id ? `<button type="button" class="secondary ghost button-inline" data-rrhh-member-toggle-registro="${escapeHtml(String(user.id))}" data-rrhh-member-toggle-next="${Number(user.registro_horario_activo || 0) === 1 ? "0" : "1"}">${Number(user.registro_horario_activo || 0) === 1 ? "Desactivar registro" : "Activar registro"}</button>` : ""}
+	              </div>
+	            </div>
+              ${user?.id ? `
+                <div class="workspace-rrhh-row">
+                  <div>
+                    <strong>Invitación (enlace de acceso)</strong>
+                    <div class="muted">Envía un link para activar el acceso y definir contraseña.</div>
+                    <div class="muted" id="rrhhMemberInviteLink"></div>
+                  </div>
+                  <div class="workspace-rrhh-row-actions">
+                    <button type="button" class="secondary ghost button-inline" data-rrhh-member-invite="${escapeHtml(String(user.id))}">Enviar invitación</button>
+                  </div>
                 </div>
-                <div class="workspace-rrhh-row-actions">
+                <div class="workspace-rrhh-row">
+                  <div>
+                    <strong>Contraseña temporal</strong>
+                    <div class="muted">Genera una contraseña y compártela (se invalida al cambiarla).</div>
+                    <input id="rrhhMemberTempPassword" class="rrhh-inline-input" type="text" readonly value="" placeholder="Genera una contraseña..." />
+                  </div>
+                  <div class="workspace-rrhh-row-actions">
+                    <button type="button" class="secondary ghost button-inline" data-rrhh-member-pass="${escapeHtml(String(user.id))}">Generar</button>
+                    <button type="button" class="secondary ghost button-inline" data-rrhh-member-pass-copy>Copiar</button>
+                  </div>
+                </div>
+              ` : ""}
+	            ${employee?.id ? `
+	              <div class="workspace-rrhh-row">
+	                <div>
+	                  <strong>Vínculo</strong>
+	                  <div class="muted">${employee?.usuario_manual ? "Vinculado" : "Sin vincular"}</div>
+	                </div>
+	                <div class="workspace-rrhh-row-actions">
                   ${employee?.usuario_manual ? `
                     <button type="button" class="secondary danger button-inline" data-rrhh-member-unlink>Desvincular</button>
                   ` : `
@@ -6821,15 +6857,15 @@ const renderWorkspaceRrhhHub = () => {
       const docsHtml = renderMemberDocs(employee);
 
       const tabHtml = memberTab === "acceso" ? accessHtml : memberTab === "docs" ? docsHtml : personalHtml;
-      return `
-        <div class="rrhh-member-detail">
-          <div class="rrhh-member-header">
-            <button type="button" class="secondary ghost button-inline" data-rrhh-member-back>← Volver a Equipo</button>
-            <div>
-              <h3 style="margin: 10px 0 4px 0;">${escapeHtml(m.nombre || "Miembro")}</h3>
-              <div class="muted">${escapeHtml(headerSubtitle || "")}</div>
-            </div>
-          </div>
+	      return `
+	        <div class="rrhh-member-detail">
+	          <div class="rrhh-member-header">
+	            <button type="button" class="secondary ghost button-inline" data-rrhh-member-back>← Volver a Equipo</button>
+	            <div>
+	              <h3 style="margin: 10px 0 4px 0;">${escapeHtml(displayName)}</h3>
+	              <div class="muted">${escapeHtml(headerSubtitle || "")}</div>
+	            </div>
+	          </div>
           <div class="rrhh-member-tabs">
             ${[
               { key: "personal", label: "Datos personales" },
@@ -7399,6 +7435,7 @@ const renderWorkspaceRrhhHub = () => {
     : tab === "ausencias" ? renderAusencias()
     : tab === "gastos" ? renderGastos()
     : renderDocs();
+  const hideMainTabs = Boolean(manager && tab === "equipo" && String(state.workspaceRrhhEquipoView || "") === "member");
 
   workspaceRrhhHub.innerHTML = `
     <div class="workspace-rrhh-layout" data-mode="${manager ? "manager" : "employee"}"${wideLayout ? ' style="grid-template-columns: 1fr;"' : ""}>
@@ -7426,7 +7463,7 @@ const renderWorkspaceRrhhHub = () => {
         `}
       </aside>
       <section class="workspace-rrhh-main">
-        ${renderTabs()}
+        ${hideMainTabs ? "" : renderTabs()}
         ${panelHtml}
       </section>
     </div>
@@ -7637,6 +7674,69 @@ const renderWorkspaceRrhhHub = () => {
   }
 
   const accessStatus = document.getElementById("rrhhMemberAccessStatus");
+  const inviteLinkEl = document.getElementById("rrhhMemberInviteLink");
+  const tempPassInput = document.getElementById("rrhhMemberTempPassword");
+  const inviteBtn = workspaceRrhhHub.querySelector("[data-rrhh-member-invite]");
+  if (inviteBtn) {
+    inviteBtn.addEventListener("click", async () => {
+      if (!isWorkspaceRrhhManager()) return;
+      const userId = String(inviteBtn.dataset.rrhhMemberInvite || "").trim();
+      if (!userId) return;
+      inviteBtn.disabled = true;
+      if (accessStatus) accessStatus.textContent = "Enviando invitación...";
+      try {
+        const resp = await apiPost("/api/usuarios_invitar", { id: userId });
+        if (resp?.error) throw new Error(resp.error);
+        const link = String(resp?.invite_link || "").trim();
+        if (inviteLinkEl) {
+          inviteLinkEl.innerHTML = link
+            ? `<a href="${escapeHtml(link)}" target="_blank" rel="noreferrer">${escapeHtml(link)}</a>`
+            : "";
+        }
+        if (accessStatus) accessStatus.textContent = resp?.sent ? "Invitación enviada." : "Invitación generada (no se pudo enviar por email).";
+      } catch (error) {
+        if (accessStatus) accessStatus.textContent = error.message || "No se pudo enviar la invitación.";
+      } finally {
+        inviteBtn.disabled = false;
+      }
+    });
+  }
+  const passBtn = workspaceRrhhHub.querySelector("[data-rrhh-member-pass]");
+  if (passBtn) {
+    passBtn.addEventListener("click", async () => {
+      if (!isWorkspaceRrhhManager()) return;
+      const userId = String(passBtn.dataset.rrhhMemberPass || "").trim();
+      if (!userId) return;
+      const password = generateTempPassword(12);
+      passBtn.disabled = true;
+      if (accessStatus) accessStatus.textContent = "Generando contraseña...";
+      try {
+        const resp = await apiPost("/api/usuarios_update", { id: userId, password });
+        if (resp?.error) throw new Error(resp.error);
+        if (tempPassInput) tempPassInput.value = password;
+        if (accessStatus) accessStatus.textContent = "Contraseña generada.";
+      } catch (error) {
+        if (accessStatus) accessStatus.textContent = error.message || "No se pudo generar la contraseña.";
+      } finally {
+        passBtn.disabled = false;
+      }
+    });
+  }
+  const passCopyBtn = workspaceRrhhHub.querySelector("[data-rrhh-member-pass-copy]");
+  if (passCopyBtn) {
+    passCopyBtn.addEventListener("click", async () => {
+      const value = String(tempPassInput?.value || "").trim();
+      if (!value) return;
+      try {
+        await navigator.clipboard.writeText(value);
+        if (accessStatus) accessStatus.textContent = "Contraseña copiada.";
+      } catch {
+        try {
+          window.prompt("Copia la contraseña:", value);
+        } catch {}
+      }
+    });
+  }
   const toggleRegistro = workspaceRrhhHub.querySelector("[data-rrhh-member-toggle-registro]");
   if (toggleRegistro) {
     toggleRegistro.addEventListener("click", async () => {
