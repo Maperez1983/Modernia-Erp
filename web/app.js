@@ -332,6 +332,35 @@ const uploadFileToS3 = async (file, prefix, statusEl) => {
   return presign;
 };
 
+const extractS3KeyFromUrl = (value = "") => {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (raw.startsWith("s3://")) {
+    return raw.slice(5).replace(/^\/+/, "");
+  }
+  try {
+    const u = new URL(raw);
+    const host = String(u.hostname || "").toLowerCase();
+    const isAws = host.endsWith("amazonaws.com");
+    const isS3 = host.includes(".s3.") || host === "s3.amazonaws.com" || host.includes(".s3-");
+    if (!isAws || !isS3) return "";
+    const key = decodeURIComponent(String(u.pathname || "").replace(/^\/+/, ""));
+    return key;
+  } catch {
+    return "";
+  }
+};
+
+const buildPhotoSrc = (photoUrl = "") => {
+  const raw = String(photoUrl || "").trim();
+  if (!raw) return "";
+  if (raw.startsWith("data:image/")) return raw;
+  if (raw.startsWith("/api/s3_redirect?key=")) return raw;
+  const key = extractS3KeyFromUrl(raw);
+  if (key) return `/api/s3_redirect?key=${encodeURIComponent(key)}`;
+  return raw;
+};
+
 const fileToBase64 = (file) =>
   new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -3644,7 +3673,7 @@ const renderCompanyCards = () => {
       card.innerHTML = `
         <div class="company-card-head">
           <div class="rrhh-avatar">
-            ${photoUrl ? `<img src="${escapeHtml(photoUrl)}" alt="" />` : `<span class="rrhh-avatar-initials">${escapeHtml(buildInitials(displayName))}</span>`}
+            ${photoUrl ? `<img src="${escapeHtml(buildPhotoSrc(photoUrl))}" alt="" />` : `<span class="rrhh-avatar-initials">${escapeHtml(buildInitials(displayName))}</span>`}
           </div>
           <div>
             <h3>Personal</h3>
@@ -6588,11 +6617,11 @@ const renderWorkspaceRrhhHub = () => {
                   .map((part) => part[0]?.toUpperCase() || "")
                   .join("") || "—";
                 return `
-                  <button type="button" class="rrhh-member-card" data-rrhh-member-open="${escapeHtml(m.key)}">
+                  <button type="button" class="rrhh-member-card" data-rrhh-member-open="${escapeHtml(m.key)}" data-rrhh-member-persona="${escapeHtml(personaId)}" data-rrhh-member-user="${escapeHtml(String(m.userId || ""))}">
                     <div class="rrhh-member-card-head">
                       <div class="rrhh-member-card-left">
                         <div class="rrhh-avatar" aria-hidden="true">
-                          ${photoUrl ? `<img src="${escapeHtml(photoUrl)}" alt="" />` : `<span class="rrhh-avatar-initials">${escapeHtml(initials)}</span>`}
+                          ${photoUrl ? `<img src="${escapeHtml(buildPhotoSrc(photoUrl))}" alt="" />` : `<span class="rrhh-avatar-initials">${escapeHtml(initials)}</span>`}
                         </div>
                         <div class="rrhh-member-card-title">
                           <strong>${escapeHtml(m.nombre || "Miembro")}</strong>
@@ -6753,11 +6782,11 @@ const renderWorkspaceRrhhHub = () => {
 	          <form id="${escapeHtml(personalFormId)}" class="form-grid" data-rrhh-member-personal-form="1">
 	            <input type="hidden" name="id" value="${escapeHtml(String(employee?.id || ""))}" />
 	            <input type="hidden" name="workspace_id" value="${escapeHtml(state.currentWorkspaceId)}" />
-	            <input type="hidden" name="usuario_id" value="${escapeHtml(String(employee?.usuario_manual ? (employee?.usuario_id || "") : (m.userId || "")))}" />
+	            <input type="hidden" name="usuario_id" value="${escapeHtml(String(employee?.usuario_id || ""))}" />
 	            <input type="hidden" name="foto_url" value="${escapeHtml(photoUrl)}" />
 	            <div class="span-2 rrhh-photo-row">
 	              <div class="rrhh-avatar rrhh-avatar-lg" aria-hidden="true">
-	                ${photoUrl ? `<img id="rrhhMemberPhotoPreview" src="${escapeHtml(photoUrl)}" alt="" />` : `<span id="rrhhMemberPhotoPreview" class="rrhh-avatar-initials">${escapeHtml(initials)}</span>`}
+	                ${photoUrl ? `<img id="rrhhMemberPhotoPreview" src="${escapeHtml(buildPhotoSrc(photoUrl))}" alt="" />` : `<span id="rrhhMemberPhotoPreview" class="rrhh-avatar-initials">${escapeHtml(initials)}</span>`}
 	              </div>
 	              <div class="rrhh-photo-actions">
 	                <label class="muted">
@@ -7135,7 +7164,7 @@ const renderWorkspaceRrhhHub = () => {
           </div>
           <div class="rrhh-photo-row">
             <div class="rrhh-avatar rrhh-avatar-lg">
-              ${photoUrl ? `<img id="rrhhSelfPhotoPreview" src="${escapeHtml(photoUrl)}" alt="" />` : `<span id="rrhhSelfPhotoPreview" class="rrhh-avatar-initials">${escapeHtml(initials)}</span>`}
+              ${photoUrl ? `<img id="rrhhSelfPhotoPreview" src="${escapeHtml(buildPhotoSrc(photoUrl))}" alt="" />` : `<span id="rrhhSelfPhotoPreview" class="rrhh-avatar-initials">${escapeHtml(initials)}</span>`}
             </div>
             <div class="rrhh-photo-actions">
               <strong>Mi foto</strong>
@@ -7565,17 +7594,17 @@ const renderWorkspaceRrhhHub = () => {
         patchPhoto(state.currentWorkspaceData?.timeEmployees);
         const preview = document.getElementById("rrhhSelfPhotoPreview");
         if (preview) {
-          const tag = String(preview.tagName || "").toUpperCase();
-          if (tag === "IMG") {
-            preview.src = url;
-          } else {
-            const img = document.createElement("img");
-            img.id = "rrhhSelfPhotoPreview";
-            img.src = url;
-            img.alt = "";
-            preview.replaceWith(img);
+            const tag = String(preview.tagName || "").toUpperCase();
+            if (tag === "IMG") {
+              preview.src = buildPhotoSrc(url);
+            } else {
+              const img = document.createElement("img");
+              img.id = "rrhhSelfPhotoPreview";
+              img.src = buildPhotoSrc(url);
+              img.alt = "";
+              preview.replaceWith(img);
+            }
           }
-        }
         if (status) status.textContent = "Foto guardada.";
         renderCompanyCards();
       } catch (error) {
@@ -7603,17 +7632,9 @@ const renderWorkspaceRrhhHub = () => {
       state.workspaceRrhhEquipoView = "member";
       state.workspaceRrhhEquipoMemberKey = key;
       state.workspaceRrhhEquipoMemberTab = "personal";
-      // Si existe ficha, la seleccionamos para cargar docs/ausencias/etc.
-      const employees = Array.isArray(state.workspaceTimeEmployees) ? state.workspaceTimeEmployees : [];
-      let personaId = "";
-      let userId = "";
-      if (key.startsWith("user:")) {
-        userId = key.slice(5);
-        const match = employees.find((row) => Number(row.usuario_manual || 0) === 1 && String(row.usuario_id || "").trim() === String(userId || "").trim());
-        personaId = match?.id || "";
-      } else if (key.startsWith("emp:")) {
-        personaId = key.slice(4);
-      }
+      // Usar el contexto de la card (evita cruces de datos por búsquedas ambiguas).
+      const personaId = String(button.dataset.rrhhMemberPersona || "").trim();
+      const userId = String(button.dataset.rrhhMemberUser || "").trim();
       state.workspaceRrhhEquipoMemberPersonaId = personaId || "";
       state.workspaceRrhhEquipoMemberUserId = userId || "";
       if (personaId) {
@@ -7673,11 +7694,11 @@ const renderWorkspaceRrhhHub = () => {
           if (preview) {
             const tag = String(preview.tagName || "").toUpperCase();
             if (tag === "IMG") {
-              preview.src = url;
+              preview.src = buildPhotoSrc(url);
             } else {
               const img = document.createElement("img");
               img.id = "rrhhMemberPhotoPreview";
-              img.src = url;
+              img.src = buildPhotoSrc(url);
               img.alt = "";
               preview.replaceWith(img);
             }
@@ -34018,6 +34039,9 @@ if (coreCards) {
       openAgenda();
     } else if (action === "admin") {
       openAdmin();
+    } else if (action === "rrhh-home") {
+      const workspace = String(state.currentWorkspaceTarget || state.currentWorkspaceName || "modernia").trim() || "modernia";
+      openHolding({ mode: "tenant", workspace, view: "motores", engine: "rrhh" });
     }
   });
 }

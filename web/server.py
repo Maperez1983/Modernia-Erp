@@ -23204,8 +23204,14 @@ class Handler(BaseHTTPRequestHandler):
                 ).fetchone()
             foto_provided = "foto_url" in payload
             foto_url_value = str(payload.get("foto_url") or "").strip() or None
-            if record_id and (not foto_provided) and prev and prev.get("foto_url"):
-                foto_url_value = str(prev.get("foto_url") or "").strip() or None
+            prev_foto = None
+            if prev is not None:
+                try:
+                    prev_foto = prev["foto_url"]
+                except Exception:
+                    prev_foto = None
+            if record_id and (not foto_provided) and prev_foto:
+                foto_url_value = str(prev_foto or "").strip() or None
             values = (
                 workspace_id,
                 empresa_id,
@@ -31179,6 +31185,39 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "No se pudo firmar el archivo"}, status=500)
                 return
             json_response(self, {"url": url})
+            return
+        if path == "/api/s3_redirect":
+            key = params.get("key", [""])[0]
+            if not key:
+                json_response(self, {"error": "key requerido"}, status=400)
+                return
+            client = s3_client()
+            if not client:
+                bucket, region = s3_config()
+                missing = []
+                if not bucket:
+                    missing.append("AWS_S3_BUCKET")
+                if not region:
+                    missing.append("AWS_REGION")
+                if not S3_BOTO3_AVAILABLE:
+                    missing.append("boto3")
+                detail = f" (faltan: {', '.join(missing)})" if missing else ""
+                json_response(self, {"error": f"S3 no configurado{detail}"}, status=400)
+                return
+            bucket, _region = s3_config()
+            try:
+                url = client.generate_presigned_url(
+                    "get_object",
+                    Params={"Bucket": bucket, "Key": key},
+                    ExpiresIn=3600,
+                )
+            except Exception:
+                json_response(self, {"error": "No se pudo firmar el archivo"}, status=500)
+                return
+            self.send_response(302)
+            self.send_header("Location", url)
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
             return
 
         if path == "/api/tablas":
