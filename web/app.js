@@ -6337,6 +6337,18 @@ const renderWorkspaceRrhhHub = () => {
                   </div>
                   <div class="workspace-rrhh-row-actions">
                     <label class="muted">
+                      DNI
+                      <input data-rrhh-roster-nif value="${escapeHtml(String(employee?.nif || ""))}" placeholder="DNI/NIE" style="width: 140px;" />
+                    </label>
+                    <label class="muted">
+                      Email
+                      <input data-rrhh-roster-email value="${escapeHtml(String(employee?.email || user.email || ""))}" placeholder="email@..." style="width: 220px;" />
+                    </label>
+                    <label class="muted">
+                      Teléfono
+                      <input data-rrhh-roster-telefono value="${escapeHtml(String(employee?.telefono || ""))}" placeholder="Teléfono" style="width: 140px;" />
+                    </label>
+                    <label class="muted">
                       Empresa
                       <select data-rrhh-roster-empresa>${companyOptions}</select>
                     </label>
@@ -6813,6 +6825,9 @@ const renderWorkspaceRrhhHub = () => {
       if (!userId) return;
       const row = button.closest("[data-rrhh-roster-user]");
       const empresaId = row?.querySelector("[data-rrhh-roster-empresa]")?.value || "";
+      const nif = String(row?.querySelector("[data-rrhh-roster-nif]")?.value || "").trim();
+      const email = String(row?.querySelector("[data-rrhh-roster-email]")?.value || "").trim();
+      const telefono = String(row?.querySelector("[data-rrhh-roster-telefono]")?.value || "").trim();
       const jornada = row?.querySelector("[data-rrhh-roster-jornada]")?.value || "Completa";
       const horas = row?.querySelector("[data-rrhh-roster-horas]")?.value || "";
       const activo = row?.querySelector("[data-rrhh-roster-activo]")?.checked ? 1 : 0;
@@ -6820,7 +6835,6 @@ const renderWorkspaceRrhhHub = () => {
       const employees = Array.isArray(state.workspaceTimeEmployees) ? state.workspaceTimeEmployees : [];
       const existing = employees.find((e) => Number(e.usuario_manual || 0) === 1 && String(e.usuario_id || "").trim() === userId) || null;
       await ensureWorkspaceCompaniesLoaded();
-      const companies = state.currentWorkspaceDetail?.companies || [];
       const fullName = `${user?.nombre || ""} ${user?.apellido || ""}`.trim() || user?.usuario || user?.email || "";
       fillWorkspaceTimeEmployeeForm({
         ...(existing || {}),
@@ -6829,7 +6843,9 @@ const renderWorkspaceRrhhHub = () => {
         empresa_id: String(empresaId || existing?.empresa_id || "").trim(),
         usuario_id: userId,
         nombre: fullName || existing?.nombre || "",
-        email: user?.email || existing?.email || "",
+        nif: nif || existing?.nif || "",
+        email: email || user?.email || existing?.email || "",
+        telefono: telefono || existing?.telefono || "",
         tipo_jornada: jornada,
         horas_pactadas_dia: horas,
         activo,
@@ -6848,6 +6864,9 @@ const renderWorkspaceRrhhHub = () => {
       if (!row) return;
       const status = workspaceRrhhHub.querySelector("#workspaceRrhhRosterStatus");
       const empresaId = String(row.querySelector("[data-rrhh-roster-empresa]")?.value || "").trim();
+      const nif = String(row.querySelector("[data-rrhh-roster-nif]")?.value || "").trim();
+      const email = String(row.querySelector("[data-rrhh-roster-email]")?.value || "").trim();
+      const telefono = String(row.querySelector("[data-rrhh-roster-telefono]")?.value || "").trim();
       const jornada = String(row.querySelector("[data-rrhh-roster-jornada]")?.value || "Completa").trim();
       const horas = String(row.querySelector("[data-rrhh-roster-horas]")?.value || "").trim();
       const activo = row.querySelector("[data-rrhh-roster-activo]")?.checked ? 1 : 0;
@@ -6868,7 +6887,9 @@ const renderWorkspaceRrhhHub = () => {
           empresa_id: empresaId,
           usuario_id: userId,
           nombre: fullName || existing?.nombre || "Empleado",
-          email: user?.email || existing?.email || "",
+          nif: nif || existing?.nif || "",
+          email: email || user?.email || existing?.email || "",
+          telefono: telefono || existing?.telefono || "",
           tipo_jornada: jornada,
           horas_pactadas_dia: horas,
           activo,
@@ -6984,6 +7005,7 @@ const renderWorkspaceRrhhHub = () => {
         await loadWorkspaceDetail(state.currentWorkspaceId);
       } catch (error) {
         alert(error.message || "No se pudo actualizar el usuario.");
+      } finally {
         button.disabled = false;
       }
     });
@@ -35630,7 +35652,7 @@ if (workspaceTimeForm) {
   });
 }
 
-if (workspaceTimeEmployeeForm) {
+  if (workspaceTimeEmployeeForm) {
   workspaceTimeEmployeeForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (workspaceTimeEmployeeStatus) workspaceTimeEmployeeStatus.textContent = "Guardando...";
@@ -35640,9 +35662,10 @@ if (workspaceTimeEmployeeForm) {
     payload.activo = workspaceTimeEmployeeForm.querySelector('[name="activo"]')?.checked ? 1 : 0;
     await ensureWorkspaceCompaniesLoaded();
     if (!String(payload.empresa_id || "").trim()) {
-      const selectedUser = getWorkspaceTimeEligibleUsers().find((user) => String(user.id || "") === String(payload.usuario_id_lookup || payload.usuario_id || ""));
-      payload.empresa_id = selectedUser?.empresa_id || state.currentWorkspaceCompanyId || state.currentWorkspaceDetail?.companies?.[0]?.id || "";
+      if (workspaceTimeEmployeeStatus) workspaceTimeEmployeeStatus.textContent = "Selecciona empresa antes de guardar.";
+      return;
     }
+    payload.empresa_manual = 1;
     const companies = state.currentWorkspaceDetail?.companies || [];
     const matchedCompany = companies.find((company) => String(company.id || "") === String(payload.empresa_id || ""));
     payload.empresa_nombre = matchedCompany?.nombre || "";
