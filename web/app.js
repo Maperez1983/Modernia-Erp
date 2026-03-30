@@ -3946,18 +3946,11 @@ const updateWorkspaceEntryChrome = () => {
   const tenantOperationalMode = mode === "tenant";
   if (workspaceViewTabs) workspaceViewTabs.classList.remove("hidden");
   if (workspaceCompanySwitcher) workspaceCompanySwitcher.classList.toggle("hidden", tenantOperationalMode);
-  if (workspaceKpis) workspaceKpis.classList.toggle("hidden", tenantOperationalMode);
-  if (workspaceOverviewHealth) workspaceOverviewHealth.classList.toggle("hidden", tenantOperationalMode);
-  if (workspaceOverviewCommercial) workspaceOverviewCommercial.classList.toggle("hidden", tenantOperationalMode);
   if (workspaceOverviewLauncherCard) workspaceOverviewLauncherCard.classList.toggle("tenant-home-card", tenantOperationalMode);
-  const overviewBtn = workspaceViewTabs ? workspaceViewTabs.querySelector('[data-workspace-view-tab="overview"]') : null;
-  if (overviewBtn) {
-    overviewBtn.textContent = tenantOperationalMode ? "Operativa" : "Resumen";
-  }
   workspaceViewButtons.forEach((button) => {
     const viewKey = button.dataset.workspaceViewTab || "";
     if (tenantOperationalMode) {
-      const shouldShow = viewKey === "overview" || (viewKey === "tenant" && canManageWorkspace);
+      const shouldShow = viewKey === "operations" || (viewKey === "tenant" && canManageWorkspace);
       button.classList.toggle("hidden", !shouldShow);
       button.disabled = viewKey === "tenant" && !canManageWorkspace;
       return;
@@ -4212,13 +4205,16 @@ const setWorkspaceView = (view = "overview", options = {}) => {
   const { scroll = false, forceTenantView = false } = options;
   let normalized = normalizeWorkspaceViewKey(view);
   const tenantMode = (state.currentWorkspaceEntryMode || "platform") === "tenant";
+  if (tenantMode && normalized === "overview") {
+    normalized = "operations";
+  }
   if (tenantMode && !forceTenantView && normalized !== "tenant") {
-    normalized = "overview";
+    normalized = "operations";
   }
   if (tenantMode && normalized === "tenant") {
     const user = getAuthScopeUser();
     if (!isPrivilegedUser(user)) {
-      normalized = "overview";
+      normalized = "operations";
     }
   }
   state.currentWorkspaceView = normalized;
@@ -10391,8 +10387,8 @@ const openHolding = (options = {}) => {
   setModule("empresas");
   explorerSection.classList.add("hidden");
   setPage("holding");
-  const nextView = requestedView || (mode === "tenant" ? "overview" : state.currentWorkspaceView || "overview");
-  setWorkspaceView(nextView, { forceTenantView: mode === "tenant" && nextView !== "overview" });
+  const nextView = requestedView || (mode === "tenant" ? "operations" : state.currentWorkspaceView || "overview");
+  setWorkspaceView(nextView, { forceTenantView: mode === "tenant" && nextView !== "operations" });
   updateWorkspaceEntryChrome();
   loadWorkspaceCentral().catch(() => {});
   syncHoldingUrlParams();
