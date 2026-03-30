@@ -1887,6 +1887,11 @@ body.crm-fin #companySummary {
   background: rgba(255, 255, 255, 0.96);
   box-shadow: 0 10px 20px rgba(43, 43, 43, 0.05);
   cursor: pointer;
+  color: var(--ink);
+}
+
+.rrhh-member-card strong {
+  color: var(--ink);
 }
 
 .rrhh-member-card:hover {
