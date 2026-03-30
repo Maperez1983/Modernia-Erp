@@ -6232,7 +6232,7 @@ const renderWorkspaceRrhhHub = () => {
         </div>
         <div class="workspace-rrhh-user-layout">
           <div>
-            <form id="workspaceRrhhUserForm" class="form-grid">
+            <form id="workspaceRrhhUserForm" class="form-grid" data-ui-draft="0" data-ui-persist="0">
               <input type="hidden" name="id" value="${escapeHtml(selected?.id || "")}" />
               <label>
                 Nombre
@@ -6748,7 +6748,7 @@ const renderWorkspaceRrhhHub = () => {
               <p class="muted">Edita y guarda la ficha del trabajador.</p>
             </div>
 	          </div>
-	          <form id="rrhhMemberPersonalForm" class="form-grid">
+	          <form id="rrhhMemberPersonalForm" class="form-grid" data-ui-draft="0" data-ui-persist="0">
 	            <input type="hidden" name="id" value="${escapeHtml(String(employee?.id || ""))}" />
 	            <input type="hidden" name="workspace_id" value="${escapeHtml(state.currentWorkspaceId)}" />
 	            <input type="hidden" name="usuario_id" value="${escapeHtml(String(employee?.usuario_manual ? (employee?.usuario_id || "") : (m.userId || "")))}" />

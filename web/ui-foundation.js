@@ -31,6 +31,9 @@
 
   const isPersistableControl = (el) => {
     if (!el || !getElementKey(el)) return false;
+    const form = el.closest && el.closest("form");
+    if (form && String(form.dataset.uiPersist || "") === "0") return false;
+    if (String(el.dataset?.uiPersist || "") === "0") return false;
     if (el.type && /password|file|hidden/.test(el.type)) return false;
     if ((el.tagName || "").toLowerCase() === "textarea") return true;
     if ((el.tagName || "").toLowerCase() === "select") return true;
@@ -38,7 +41,11 @@
   };
 
   const getEligibleForms = (root = document) =>
-    Array.from(root.querySelectorAll("form[id]")).filter((form) => !DRAFT_SKIP_RE.test(form.id));
+    Array.from(root.querySelectorAll("form[id]")).filter((form) => {
+      if (!form || !form.id) return false;
+      if (String(form.dataset.uiDraft || "") === "0") return false;
+      return !DRAFT_SKIP_RE.test(form.id);
+    });
 
   const getDraftControls = (form) =>
     Array.from(form.elements || []).filter((el) => {
