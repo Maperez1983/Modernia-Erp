@@ -3864,6 +3864,11 @@ const groupWorkspaceModulesBySection = (rows = []) =>
 
 const normalizeWorkspaceIdentifier = (value = "") => normalizeSimple(String(value || "").trim());
 const isTenantWorkspaceMode = () => (state.currentWorkspaceEntryMode || "platform") === "tenant";
+const normalizeMonthValue = (value = "") => {
+  const raw = String(value || "").trim();
+  if (/^\d{4}-\d{2}$/.test(raw)) return raw;
+  return new Date().toISOString().slice(0, 7);
+};
 
 const getWorkspaceDisplayName = (workspace = null) => {
   const rawName =
@@ -4123,7 +4128,13 @@ const renderWorkspaceCompanyScopedData = () => {
   renderWorkspaceAutomationList(raw.automationRows || []);
   renderWorkspaceAutomationLogs(raw.automationLogRows || []);
   renderWorkspaceDocumentHub(filterWorkspaceDocumentHubData(raw.docs || {}));
-  if (workspaceTimeMonth) workspaceTimeMonth.value = state.workspaceTimeMonth || "";
+  if (workspaceTimeMonth) {
+    try {
+      workspaceTimeMonth.value = normalizeMonthValue(state.workspaceTimeMonth || "");
+    } catch {
+      workspaceTimeMonth.value = "";
+    }
+  }
   state.workspaceTimePeriods = timePeriods;
   renderWorkspaceTimePeriodLock(timePeriods);
   if (workspaceTimeExportBtn) {
@@ -6619,7 +6630,7 @@ const renderWorkspaceRrhhHub = () => {
   const monthInput = document.getElementById("workspaceRrhhMonth");
   if (monthInput) {
     monthInput.addEventListener("change", async () => {
-      state.workspaceRrhhMonth = String(monthInput.value || "").trim();
+      state.workspaceRrhhMonth = normalizeMonthValue(monthInput.value || "");
       await refreshWorkspaceRrhh();
     });
   }
@@ -9461,7 +9472,7 @@ const loadWorkspaceDetail = async (workspaceId) => {
     { rows: [] }
   );
   state.workspaceTimeUsers = timeUsers.rows || [];
-  const timeMonth = String(state.workspaceTimeMonth || "").trim() || new Date().toISOString().slice(0, 7);
+  const timeMonth = normalizeMonthValue(state.workspaceTimeMonth || "");
   state.workspaceTimeMonth = timeMonth;
   const [billing, docs, billingRows, budgetRows, collections, remittances, workspaceClients, health, gestoriaOverview, segurosOverview, finOverview, inmoOverview, serviceDesks, series, inbox, portal, portalRequests, automations, automationLogs, timeRows, timeEmployees, timeSummary, timePeriods, fincasCommunities, fincasIncidents, fincasProviders, fincasMeetings] = await Promise.all([
     safeWorkspaceApi(`/api/workspace_billing_summary?workspace_id=${encodeURIComponent(workspaceId)}`, {}),
@@ -35060,7 +35071,7 @@ if (workspaceTimeEmployeeForm) {
 
 if (workspaceTimeMonth) {
   workspaceTimeMonth.addEventListener("change", async () => {
-    state.workspaceTimeMonth = workspaceTimeMonth.value || new Date().toISOString().slice(0, 7);
+    state.workspaceTimeMonth = normalizeMonthValue(workspaceTimeMonth.value || "");
     if (state.currentWorkspaceId) {
       await loadWorkspaceDetail(state.currentWorkspaceId);
     }
