@@ -6930,22 +6930,21 @@ const renderWorkspaceRrhhHub = () => {
         await refreshWorkspaceRrhh();
         return;
       }
-      // No lo añadimos “a ciegas”: abrimos la ficha para que el admin elija empresa manualmente.
+      // No abrimos el modal del motor (puede estar oculto y parecer que “se congela” la pantalla).
+      // En su lugar, llevamos al admin al listado editable "Equipo" para crear/vincular manualmente.
+      closeWorkspaceTimeEmployeeModal();
       const user = getWorkspaceTimeEligibleUsers().find((row) => String(row.id || "").trim() === userId) || null;
       const fullName = `${user?.nombre || ""} ${user?.apellido || ""}`.trim() || user?.usuario || user?.email || "";
-      await ensureWorkspaceCompaniesLoaded();
-      const companies = state.currentWorkspaceDetail?.companies || [];
-      fillWorkspaceTimeEmployeeForm({
-        id: "",
-        workspace_id: state.currentWorkspaceId,
-        empresa_id: user?.empresa_id || state.currentWorkspaceCompanyId || companies[0]?.id || "",
-        usuario_id: userId,
-        nombre: fullName,
-        email: user?.email || "",
-        activo: 1,
-        notas: "Vinculado desde usuario del sistema.",
-      });
-      openWorkspaceTimeEmployeeModal("Añadir a plantilla: elige la empresa para vincular este usuario.");
+      state.workspaceRrhhTab = "equipo";
+      state.workspaceRrhhRosterSearch = fullName || user?.usuario || user?.email || userId;
+      renderWorkspaceRrhhHub();
+      const cssEscaped = (globalThis.CSS && typeof CSS.escape === "function")
+        ? CSS.escape(userId)
+        : userId.replace(/["\\]/g, "\\$&");
+      const target = workspaceRrhhHub.querySelector(`[data-rrhh-roster-user="${cssEscaped}"]`);
+      if (target && typeof target.scrollIntoView === "function") {
+        target.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
     });
   });
 
