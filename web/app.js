@@ -6232,7 +6232,7 @@ const renderWorkspaceRrhhHub = () => {
         </div>
         <div class="workspace-rrhh-user-layout">
           <div>
-            <form id="workspaceRrhhUserForm" class="form-grid" data-ui-draft="0" data-ui-persist="0">
+            <form id="workspaceRrhhUserForm_${escapeHtml(String(selected?.id || "new").replace(/[^a-z0-9_-]/gi, "_"))}" class="form-grid" data-rrhh-user-form="1">
               <input type="hidden" name="id" value="${escapeHtml(selected?.id || "")}" />
               <label>
                 Nombre
@@ -6704,6 +6704,8 @@ const renderWorkspaceRrhhHub = () => {
 		      const employee = m?.employee || null;
 		      const user = m?.user || null;
 		      const memberTab = normalizeMemberTab(state.workspaceRrhhEquipoMemberTab || "personal");
+          const safeKey = String(m?.key || "member").replace(/[^a-z0-9_-]/gi, "_");
+          const personalFormId = `rrhhMemberPersonalForm_${safeKey}`;
           const normalizeName = (value) =>
             String(value || "")
               .trim()
@@ -6748,7 +6750,7 @@ const renderWorkspaceRrhhHub = () => {
               <p class="muted">Edita y guarda la ficha del trabajador.</p>
             </div>
 	          </div>
-	          <form id="rrhhMemberPersonalForm" class="form-grid" data-ui-draft="0" data-ui-persist="0">
+	          <form id="${escapeHtml(personalFormId)}" class="form-grid" data-rrhh-member-personal-form="1">
 	            <input type="hidden" name="id" value="${escapeHtml(String(employee?.id || ""))}" />
 	            <input type="hidden" name="workspace_id" value="${escapeHtml(state.currentWorkspaceId)}" />
 	            <input type="hidden" name="usuario_id" value="${escapeHtml(String(employee?.usuario_manual ? (employee?.usuario_id || "") : (m.userId || "")))}" />
@@ -7646,7 +7648,7 @@ const renderWorkspaceRrhhHub = () => {
     });
   });
 
-  const personalForm = document.getElementById("rrhhMemberPersonalForm");
+  const personalForm = workspaceRrhhHub.querySelector('form[data-rrhh-member-personal-form="1"]');
   if (personalForm) {
     const empresaSelect = personalForm.querySelector('[name="empresa_id"]');
     if (empresaSelect) {
@@ -8127,7 +8129,7 @@ const renderWorkspaceRrhhHub = () => {
       if (userPassToggle) userPassToggle.textContent = "🙈";
     });
   }
-  const userForm = document.getElementById("workspaceRrhhUserForm");
+  const userForm = workspaceRrhhHub.querySelector('form[data-rrhh-user-form="1"]');
   if (userForm) {
     userForm.addEventListener("submit", async (event) => {
       event.preventDefault();

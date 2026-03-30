@@ -24,6 +24,14 @@
 
   const storageKey = (prefix, id) => `crm_ui_${prefix}_${id}`;
 
+  const resolveControlStorageKey = (el) => {
+    const key = getElementKey(el);
+    if (!key) return "";
+    const form = el?.closest ? el.closest("form[id]") : null;
+    if (form?.id) return storageKey("control", `${form.id}__${key}`);
+    return storageKey("control", key);
+  };
+
   const getElementKey = (el) => {
     if (!el) return "";
     return String(el.id || el.name || "").trim();
@@ -136,14 +144,17 @@
   const saveControlState = (el) => {
     if (!isPersistableControl(el)) return;
     try {
-      localStorage.setItem(storageKey("control", getElementKey(el)), String(el.value ?? ""));
+      const key = resolveControlStorageKey(el);
+      if (!key) return;
+      localStorage.setItem(key, String(el.value ?? ""));
     } catch {}
   };
 
   const restoreControlState = (root = document) => {
     Array.from(root.querySelectorAll("input, select, textarea")).forEach((el) => {
       if (!isPersistableControl(el)) return;
-      const key = storageKey("control", getElementKey(el));
+      const key = resolveControlStorageKey(el);
+      if (!key) return;
       let saved = "";
       try {
         saved = localStorage.getItem(key) || "";
