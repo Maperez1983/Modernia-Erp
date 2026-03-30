@@ -21774,6 +21774,10 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, {"error": "Usa GET"}, status=405)
             return
         elif parsed.path == "/api/usuarios":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if session and not workspace_session_is_privileged(session):
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
             nombre = payload.get("nombre")
             apellido = payload.get("apellido")
             usuario = payload.get("usuario")
@@ -21797,13 +21801,14 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "servicio requerido"}, status=400)
                 return
             password_hash = hash_password(password) if password else None
+            user_id = os.urandom(16).hex()
             conn.execute(
                 """
                 INSERT INTO usuarios (id, nombre, apellido, usuario, email, servicio, rol, registro_horario_activo, password_hash, activo, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
                 """,
                 (
-                    os.urandom(16).hex(),
+                    user_id,
                     nombre,
                     apellido,
                     usuario,
@@ -21817,6 +21822,9 @@ class Handler(BaseHTTPRequestHandler):
                     now,
                 ),
             )
+            conn.commit()
+            json_response(self, {"ok": True, "id": user_id})
+            return
         elif parsed.path == "/api/usuarios_invitar":
             user_id = str(payload.get("id") or "").strip()
             if not user_id:
@@ -21887,6 +21895,10 @@ class Handler(BaseHTTPRequestHandler):
             )
             return
         elif parsed.path == "/api/usuarios_update":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if session and not workspace_session_is_privileged(session):
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
             user_id = payload.get("id")
             if not user_id:
                 json_response(self, {"error": "id requerido"}, status=400)
@@ -21915,12 +21927,22 @@ class Handler(BaseHTTPRequestHandler):
                 """,
                 (*values, now, user_id),
             )
+            conn.commit()
+            json_response(self, {"ok": True, "id": user_id})
+            return
         elif parsed.path == "/api/usuarios_delete":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if session and not workspace_session_is_privileged(session):
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
             user_id = payload.get("id")
             if not user_id:
                 json_response(self, {"error": "id requerido"}, status=400)
                 return
             conn.execute("DELETE FROM usuarios WHERE id = ?", (user_id,))
+            conn.commit()
+            json_response(self, {"ok": True})
+            return
         elif parsed.path == "/api/workspace_update":
             workspace_id = str(payload.get("id") or "").strip()
             nombre = str(payload.get("nombre") or "").strip()

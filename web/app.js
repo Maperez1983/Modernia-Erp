@@ -6759,14 +6759,22 @@ const renderWorkspaceRrhhHub = () => {
                 <option ${tipoJornada === "Parcial" ? "selected" : ""}>Parcial</option>
               </select>
             </label>
-            <label>
-              Horas/día
-              <input name="horas_pactadas_dia" type="number" min="0" step="0.25" value="${escapeHtml(String(horasDia))}" />
-            </label>
-            <label class="inline-check">
-              <input name="activo" type="checkbox" ${isActive ? "checked" : ""} />
-              Activo
-            </label>
+	            <label>
+	              Horas/día
+	              <input name="horas_pactadas_dia" type="number" min="0" step="0.25" value="${escapeHtml(String(horasDia))}" />
+	            </label>
+              <label>
+                Fecha ingreso
+                <input type="date" name="fecha_alta" value="${escapeHtml(String(employee?.fecha_alta || ""))}" />
+              </label>
+              <label>
+                Fecha baja
+                <input type="date" name="fecha_baja" value="${escapeHtml(String(employee?.fecha_baja || ""))}" />
+              </label>
+	            <label class="inline-check">
+	              <input name="activo" type="checkbox" ${isActive ? "checked" : ""} />
+	              Activo
+	            </label>
             <label class="span-2">
               Notas
               <textarea name="notas" rows="3">${escapeHtml(String(employee?.notas || ""))}</textarea>
