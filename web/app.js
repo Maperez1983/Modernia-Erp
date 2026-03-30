@@ -3951,6 +3951,20 @@ const updateWorkspaceEntryChrome = () => {
   if (workspaceKpis) workspaceKpis.dataset.workspaceView = overviewTargetView;
   if (workspaceOverviewHealth) workspaceOverviewHealth.dataset.workspaceView = overviewTargetView;
   if (workspaceOverviewCommercial) workspaceOverviewCommercial.dataset.workspaceView = overviewTargetView;
+  // En tenant, movemos el detalle operativo (presupuestos + paneles por servicio) a Configuración,
+  // dejando Operativa como "home" de accesos.
+  const operationsTargetView = tenantOperationalMode ? "tenant" : "operations";
+  const operationsPanels = [
+    workspaceBudgetForm?.closest('[data-workspace-view]'),
+    workspaceGestoriaOverview?.closest('[data-workspace-view]'),
+    workspaceSegurosOverview?.closest('[data-workspace-view]'),
+    workspaceFinOverview?.closest('[data-workspace-view]'),
+    workspaceInmoOverview?.closest('[data-workspace-view]'),
+    workspaceServiceDesks?.closest('[data-workspace-view]'),
+  ].filter(Boolean);
+  operationsPanels.forEach((panel) => {
+    panel.dataset.workspaceView = operationsTargetView;
+  });
   if (workspaceViewTabs) workspaceViewTabs.classList.remove("hidden");
   if (workspaceCompanySwitcher) workspaceCompanySwitcher.classList.toggle("hidden", tenantOperationalMode);
   if (workspaceOverviewLauncherCard) workspaceOverviewLauncherCard.classList.toggle("tenant-home-card", tenantOperationalMode);
