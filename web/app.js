@@ -1237,6 +1237,8 @@ const state = {
   workspaceRrhhRosterSearch: "",
   workspaceRrhhEquipoView: "list",
   workspaceRrhhEquipoMemberKey: "",
+  workspaceRrhhEquipoMemberPersonaId: "",
+  workspaceRrhhEquipoMemberUserId: "",
   workspaceRrhhEquipoMemberTab: "personal",
   workspaceRrhhVacSummaryYear: "",
   workspaceRrhhVacSummaryRows: [],
@@ -5881,7 +5883,7 @@ const isWorkspaceRrhhManager = () => isWorkspaceTimeManager();
     return match?.id || "";
   };
 
-const refreshWorkspaceRrhh = async () => {
+  const refreshWorkspaceRrhh = async () => {
   if (!workspaceRrhhHub) return;
   const workspaceId = state.currentWorkspaceId;
   if (!workspaceId) return;
@@ -5913,6 +5915,15 @@ const refreshWorkspaceRrhh = async () => {
   const visibleEmployees = manager
     ? employees.filter((row) => String(row?.source || "").trim() !== "auto")
     : employees;
+
+  // Si estamos en la ficha de un miembro, forzamos la selección a esa persona (evita “mezclas” al recargar).
+  if (manager && String(state.workspaceRrhhEquipoView || "") === "member") {
+    const forcedPersona = String(state.workspaceRrhhEquipoMemberPersonaId || "").trim();
+    if (forcedPersona) {
+      state.workspaceRrhhSelectedPersonaId = forcedPersona;
+      state.workspaceRrhhScopeAll = false;
+    }
+  }
   if (!state.workspaceRrhhSelectedPersonaId) {
     if (manager) {
       const firstActive = visibleEmployees.find((row) => Number(row.activo ?? 1) === 1) || visibleEmployees[0] || null;
@@ -6811,8 +6822,42 @@ const renderWorkspaceRrhhHub = () => {
       `;
     };
 
-    if (view === "member" && selected) {
-      return renderMemberDetail(selected);
+    const resolveSelectedMember = () => {
+      if (view !== "member") return null;
+      const key = String(memberKey || "").trim();
+      if (!key) return null;
+      const forcedPersonaId = String(state.workspaceRrhhEquipoMemberPersonaId || "").trim();
+      const forcedUserId = String(state.workspaceRrhhEquipoMemberUserId || "").trim();
+      const employeeByPersona = forcedPersonaId
+        ? (employees.find((row) => String(row?.id || "").trim() === forcedPersonaId) || null)
+        : null;
+      const employeeByUser = forcedUserId
+        ? (employees.find((row) => Number(row.usuario_manual || 0) === 1 && String(row.usuario_id || "").trim() === forcedUserId) || null)
+        : null;
+      const employee = employeeByPersona || employeeByUser || (selected?.employee || null);
+      const userId = forcedUserId || String(selected?.userId || "").trim() || (employee && Number(employee.usuario_manual || 0) === 1 ? String(employee.usuario_id || "").trim() : "");
+      const user = userId ? (usersAll.find((row) => String(row.id || "").trim() === userId) || selected?.user || null) : (selected?.user || null);
+      const nombre =
+        employee?.nombre
+        || `${user?.nombre || ""} ${user?.apellido || ""}`.trim()
+        || selected?.nombre
+        || "Miembro";
+      return {
+        ...(selected || {}),
+        key,
+        userId,
+        personaId: String(employee?.id || forcedPersonaId || selected?.personaId || "").trim(),
+        employee,
+        user,
+        nombre,
+        empresa_nombre: employee?.empresa_nombre || selected?.empresa_nombre || "",
+        hasFicha: Boolean(employee?.id || selected?.hasFicha),
+      };
+    };
+
+    const resolvedMember = resolveSelectedMember();
+    if (resolvedMember) {
+      return renderMemberDetail(resolvedMember);
     }
     return renderMemberList();
   };
@@ -7259,19 +7304,25 @@ const renderWorkspaceRrhhHub = () => {
       // Si existe ficha, la seleccionamos para cargar docs/ausencias/etc.
       const employees = Array.isArray(state.workspaceTimeEmployees) ? state.workspaceTimeEmployees : [];
       let personaId = "";
+      let userId = "";
       if (key.startsWith("user:")) {
-        const userId = key.slice(5);
+        userId = key.slice(5);
         const match = employees.find((row) => Number(row.usuario_manual || 0) === 1 && String(row.usuario_id || "").trim() === String(userId || "").trim());
         personaId = match?.id || "";
       } else if (key.startsWith("emp:")) {
         personaId = key.slice(4);
       }
+      state.workspaceRrhhEquipoMemberPersonaId = personaId || "";
+      state.workspaceRrhhEquipoMemberUserId = userId || "";
       if (personaId) {
         state.workspaceRrhhSelectedPersonaId = personaId;
         state.workspaceRrhhScopeAll = false;
         await refreshWorkspaceRrhh();
         return;
       }
+      // Sin ficha: no tocamos selección global (evita que se “cuelen” datos de otro).
+      state.workspaceRrhhSelectedPersonaId = "";
+      state.workspaceRrhhScopeAll = false;
       renderWorkspaceRrhhHub();
     });
   });
@@ -7281,6 +7332,8 @@ const renderWorkspaceRrhhHub = () => {
     backBtn.addEventListener("click", () => {
       state.workspaceRrhhEquipoView = "list";
       state.workspaceRrhhEquipoMemberKey = "";
+      state.workspaceRrhhEquipoMemberPersonaId = "";
+      state.workspaceRrhhEquipoMemberUserId = "";
       state.workspaceRrhhEquipoMemberTab = "personal";
       renderWorkspaceRrhhHub();
     });
