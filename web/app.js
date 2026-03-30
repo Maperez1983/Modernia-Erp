@@ -3870,6 +3870,18 @@ const normalizeMonthValue = (value = "") => {
   return new Date().toISOString().slice(0, 7);
 };
 
+const safeSetMonthInputValue = (input, value) => {
+  if (!input) return;
+  const normalized = normalizeMonthValue(value);
+  try {
+    input.value = normalized;
+  } catch {
+    try {
+      input.value = "";
+    } catch {}
+  }
+};
+
 const getWorkspaceDisplayName = (workspace = null) => {
   const rawName =
     typeof workspace === "string"
@@ -5868,7 +5880,7 @@ const refreshWorkspaceRrhh = async () => {
   const workspaceId = state.currentWorkspaceId;
   if (!workspaceId) return;
 
-  const month = String(state.workspaceRrhhMonth || state.workspaceTimeMonth || "").trim() || new Date().toISOString().slice(0, 7);
+  const month = normalizeMonthValue(state.workspaceRrhhMonth || state.workspaceTimeMonth || "");
   state.workspaceRrhhMonth = month;
   state.workspaceRrhhTab = normalizeWorkspaceRrhhTab(state.workspaceRrhhTab);
 
@@ -5921,7 +5933,7 @@ const renderWorkspaceRrhhHub = () => {
   if (!workspaceRrhhHub) return;
   const manager = isWorkspaceRrhhManager();
   const employees = Array.isArray(state.workspaceTimeEmployees) ? state.workspaceTimeEmployees : [];
-  const month = String(state.workspaceRrhhMonth || "").trim() || new Date().toISOString().slice(0, 7);
+  const month = normalizeMonthValue(state.workspaceRrhhMonth || state.workspaceTimeMonth || "");
   const selectedPersonaId = String(state.workspaceRrhhSelectedPersonaId || "").trim();
   const selectedEmployee = employees.find((row) => String(row.id || "") === selectedPersonaId) || null;
   const companyLabel = getWorkspaceCompanyContextLabel();
@@ -6606,15 +6618,15 @@ const renderWorkspaceRrhhHub = () => {
             <p class="muted">${manager ? "Configura plantilla y gestiona solicitudes del equipo." : "Tu ficha, solicitudes y documentación."}</p>
           </div>
         </div>
-        <div class="workspace-rrhh-controls">
-          <label>
-            Mes
-            <input id="workspaceRrhhMonth" type="month" value="${escapeHtml(month)}" />
-          </label>
-          ${manager ? `
-            <label class="inline-check">
-              <input id="workspaceRrhhScopeAll" type="checkbox" ${scopeAll ? "checked" : ""} />
-              Ver todo el equipo
+	        <div class="workspace-rrhh-controls">
+	          <label>
+	            Mes
+	            <input id="workspaceRrhhMonth" type="month" />
+	          </label>
+	          ${manager ? `
+	            <label class="inline-check">
+	              <input id="workspaceRrhhScopeAll" type="checkbox" ${scopeAll ? "checked" : ""} />
+	              Ver todo el equipo
             </label>
           ` : ""}
         </div>
@@ -6629,6 +6641,7 @@ const renderWorkspaceRrhhHub = () => {
 
   const monthInput = document.getElementById("workspaceRrhhMonth");
   if (monthInput) {
+    safeSetMonthInputValue(monthInput, month);
     monthInput.addEventListener("change", async () => {
       state.workspaceRrhhMonth = normalizeMonthValue(monthInput.value || "");
       await refreshWorkspaceRrhh();
