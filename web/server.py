@@ -17464,10 +17464,11 @@ def workspace_session_is_privileged(session):
     if not session:
         return False
     rol = normalize_lookup_text(session.get("rol") or "")
-    if rol in {"administrador", "admin", "direccion", "dirección", "control"}:
+    # `normalize_lookup_text` devuelve tokens en MAYÚSCULAS (sin acentos).
+    if rol in {"ADMINISTRADOR", "ADMIN", "DIRECCION", "CONTROL"}:
         return True
     services = _normalize_service_tokens(session.get("servicio") or "")
-    if services.intersection({"administracion", "administración", "control", "direccion", "dirección"}):
+    if services.intersection({"ADMINISTRACION", "CONTROL", "DIRECCION"}):
         return True
     return False
 
