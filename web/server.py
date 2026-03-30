@@ -14984,6 +14984,7 @@ def ensure_workspace_product_tables(conn):
           nif TEXT,
           email TEXT,
           telefono TEXT,
+          foto_url TEXT,
           tipo_jornada TEXT NOT NULL DEFAULT 'Completa',
           horas_pactadas_dia REAL,
           horas_pactadas_semana REAL,
@@ -15094,6 +15095,7 @@ def ensure_workspace_product_tables(conn):
     ensure_column(conn, "workspace_registro_personal", "empresa_manual", "empresa_manual INTEGER NOT NULL DEFAULT 0")
     ensure_column(conn, "workspace_registro_personal", "usuario_manual", "usuario_manual INTEGER NOT NULL DEFAULT 0")
     ensure_column(conn, "workspace_registro_personal", "source", "source TEXT NOT NULL DEFAULT 'manual'")
+    ensure_column(conn, "workspace_registro_personal", "foto_url", "foto_url TEXT")
     # Backfill: fichas legacy auto-sincronizadas desde usuarios (para no mostrarlas si el admin no las confirma).
     try:
         conn.execute(
@@ -15171,12 +15173,14 @@ def ensure_workspace_product_tables(conn):
           fecha_fin TEXT,
           centro_trabajo TEXT,
           notas TEXT,
+          vacaciones_dias_anuales REAL NOT NULL DEFAULT 22,
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL,
           UNIQUE (workspace_id, persona_id)
         )
         """
     )
+    ensure_column(conn, "workspace_rrhh_profile", "vacaciones_dias_anuales", "vacaciones_dias_anuales REAL NOT NULL DEFAULT 22")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS workspace_rrhh_ausencias (
@@ -16757,6 +16761,7 @@ def fetch_workspace_personal(conn, workspace_id, empresa_id=None, only_active=Fa
           p.nif,
           p.email,
           p.telefono,
+          p.foto_url,
           p.tipo_jornada,
           p.horas_pactadas_dia,
           p.horas_pactadas_semana,
@@ -17697,6 +17702,104 @@ def fetch_workspace_rrhh_documentos(conn, workspace_id, *, empresa_id=None, pers
         (*params, max(1, min(int(limit or 200), 400))),
     ).fetchall()
     return {"rows": [dict(row) for row in rows]}
+
+
+def _parse_iso_date(value):
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    try:
+        return datetime.strptime(raw[:10], "%Y-%m-%d").date()
+    except Exception:
+        return None
+
+
+def _count_business_days(start_date, end_date):
+    if not start_date or not end_date or end_date < start_date:
+        return 0
+    days = 0
+    cursor = start_date
+    while cursor <= end_date:
+        if cursor.weekday() < 5:
+            days += 1
+        cursor += timedelta(days=1)
+    return days
+
+
+def fetch_workspace_rrhh_vacaciones_summary(conn, workspace_id, year=None):
+    try:
+        year_int = int(str(year or "").strip() or datetime.now().year)
+    except Exception:
+        year_int = datetime.now().year
+    year_int = max(2000, min(year_int, 2100))
+    year_start = date(year_int, 1, 1)
+    year_end = date(year_int, 12, 31)
+
+    # Totales por persona (si no hay perfil, asumimos 22).
+    profile_rows = conn.execute(
+        """
+        SELECT persona_id, COALESCE(vacaciones_dias_anuales, 22) AS dias_total
+        FROM workspace_rrhh_profile
+        WHERE workspace_id = ?
+        """,
+        (workspace_id,),
+    ).fetchall()
+    total_map = {str(r["persona_id"]): float(r["dias_total"] or 22) for r in profile_rows if str(r["persona_id"] or "").strip()}
+
+    # Personas del workspace (excluye legacy auto).
+    personal_rows = conn.execute(
+        """
+        SELECT id AS persona_id
+        FROM workspace_registro_personal
+        WHERE workspace_id = ?
+          AND COALESCE(source, 'manual') != 'auto'
+        """,
+        (workspace_id,),
+    ).fetchall()
+    persona_ids = [str(r["persona_id"]) for r in personal_rows if str(r["persona_id"] or "").strip()]
+
+    # Vacaciones aprobadas del año.
+    abs_rows = conn.execute(
+        """
+        SELECT persona_id, fecha_inicio, fecha_fin
+        FROM workspace_rrhh_ausencias
+        WHERE workspace_id = ?
+          AND tipo = 'Vacaciones'
+          AND estado = 'Aprobada'
+          AND (substr(fecha_inicio, 1, 4) = ? OR substr(fecha_fin, 1, 4) = ?)
+        """,
+        (workspace_id, str(year_int), str(year_int)),
+    ).fetchall()
+    used_map = {pid: 0 for pid in persona_ids}
+    for row in abs_rows:
+        pid = str(row["persona_id"] or "").strip()
+        if not pid:
+            continue
+        start = _parse_iso_date(row["fecha_inicio"])
+        end = _parse_iso_date(row["fecha_fin"])
+        if not start or not end:
+            continue
+        if end < year_start or start > year_end:
+            continue
+        clipped_start = max(start, year_start)
+        clipped_end = min(end, year_end)
+        used_map[pid] = used_map.get(pid, 0) + _count_business_days(clipped_start, clipped_end)
+
+    rows = []
+    for pid in persona_ids:
+        total = float(total_map.get(pid, 22) or 22)
+        used = float(used_map.get(pid, 0) or 0)
+        pending = max(total - used, 0.0)
+        rows.append(
+            {
+                "persona_id": pid,
+                "year": year_int,
+                "dias_total": round(total, 2),
+                "dias_usados": round(used, 2),
+                "dias_pendientes": round(pending, 2),
+            }
+        )
+    return {"rows": rows}
 
 
 def _parse_alert_last_sent(value):
@@ -23070,6 +23173,16 @@ class Handler(BaseHTTPRequestHandler):
             active_flag = 0 if str(payload.get("activo") or "1").strip().lower() in {"0", "false", "no", "off"} else 1
             usuario_id_value = str(payload.get("usuario_id") or "").strip() or None
             usuario_manual_flag = 1 if usuario_id_value else 0
+            prev = None
+            if record_id:
+                prev = conn.execute(
+                    "SELECT * FROM workspace_registro_personal WHERE id = ? AND workspace_id = ? LIMIT 1",
+                    (record_id, workspace_id),
+                ).fetchone()
+            foto_provided = "foto_url" in payload
+            foto_url_value = str(payload.get("foto_url") or "").strip() or None
+            if record_id and (not foto_provided) and prev and prev.get("foto_url"):
+                foto_url_value = str(prev.get("foto_url") or "").strip() or None
             values = (
                 workspace_id,
                 empresa_id,
@@ -23081,6 +23194,7 @@ class Handler(BaseHTTPRequestHandler):
                 str(payload.get("nif") or "").strip() or None,
                 str(payload.get("email") or "").strip() or None,
                 str(payload.get("telefono") or "").strip() or None,
+                foto_url_value,
                 tipo_jornada,
                 horas_pactadas_dia,
                 horas_pactadas_semana,
@@ -23090,14 +23204,10 @@ class Handler(BaseHTTPRequestHandler):
                 str(payload.get("notas") or "").strip() or None,
             )
             if record_id:
-                prev = conn.execute(
-                    "SELECT * FROM workspace_registro_personal WHERE id = ? AND workspace_id = ? LIMIT 1",
-                    (record_id, workspace_id),
-                ).fetchone()
                 conn.execute(
                     """
                     UPDATE workspace_registro_personal
-                    SET workspace_id = ?, empresa_id = ?, empresa_manual = ?, usuario_id = ?, usuario_manual = ?, source = ?, nombre = ?, nif = ?, email = ?, telefono = ?,
+                    SET workspace_id = ?, empresa_id = ?, empresa_manual = ?, usuario_id = ?, usuario_manual = ?, source = ?, nombre = ?, nif = ?, email = ?, telefono = ?, foto_url = ?,
                         tipo_jornada = ?, horas_pactadas_dia = ?, horas_pactadas_semana = ?, fecha_alta = ?, fecha_baja = ?,
                         activo = ?, notas = ?, updated_at = datetime(?)
                     WHERE id = ? AND workspace_id = ?
@@ -23109,7 +23219,7 @@ class Handler(BaseHTTPRequestHandler):
                 conn.execute(
                     """
                     INSERT INTO workspace_registro_personal (
-                      id, workspace_id, empresa_id, empresa_manual, usuario_id, usuario_manual, source, nombre, nif, email, telefono, tipo_jornada,
+                      id, workspace_id, empresa_id, empresa_manual, usuario_id, usuario_manual, source, nombre, nif, email, telefono, foto_url, tipo_jornada,
                       horas_pactadas_dia, horas_pactadas_semana, fecha_alta, fecha_baja, activo, notas, created_at, updated_at
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
                     """,
@@ -30641,6 +30751,19 @@ class Handler(BaseHTTPRequestHandler):
                     json_response(self, {"rows": []})
                     return
             json_response(self, fetch_workspace_rrhh_ausencias(conn, workspace_id, empresa_id=empresa_id, persona_id=persona_id or None, month=month))
+            return
+
+        if path == "/api/workspace_rrhh_vacaciones_summary":
+            workspace_id = params.get("workspace_id", [""])[0]
+            year = params.get("year", [""])[0]
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if session and not workspace_session_is_privileged(session):
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
+            json_response(self, fetch_workspace_rrhh_vacaciones_summary(conn, workspace_id, year=year))
             return
 
         if path == "/api/workspace_rrhh_gastos":

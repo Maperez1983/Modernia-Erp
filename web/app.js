@@ -1238,6 +1238,8 @@ const state = {
   workspaceRrhhEquipoView: "list",
   workspaceRrhhEquipoMemberKey: "",
   workspaceRrhhEquipoMemberTab: "personal",
+  workspaceRrhhVacSummaryYear: "",
+  workspaceRrhhVacSummaryRows: [],
   workspaceRrhhProfileRow: null,
   workspaceRrhhTimeSummary: null,
   workspaceRrhhTimeRows: [],
@@ -5934,13 +5936,15 @@ const refreshWorkspaceRrhh = async () => {
   const scopePersonaId = state.workspaceRrhhScopeAll && isWorkspaceRrhhManager() ? "" : selectedPersonaId;
   const personaQuery = scopePersonaId ? `&persona_id=${encodeURIComponent(scopePersonaId)}` : "";
 
-  const [profile, ausencias, gastos, docs, timeSummary, timeRows] = await Promise.all([
+  const year = (String(month || "").slice(0, 4) || String(new Date().getFullYear())).trim();
+  const [profile, ausencias, gastos, docs, timeSummary, timeRows, vacSummary] = await Promise.all([
     scopePersonaId ? safeWorkspaceApi(`/api/workspace_rrhh_profile?workspace_id=${encodeURIComponent(workspaceId)}&persona_id=${encodeURIComponent(scopePersonaId)}`, { row: {} }) : { row: {} },
     safeWorkspaceApi(`/api/workspace_rrhh_ausencias?workspace_id=${encodeURIComponent(workspaceId)}&month=${encodeURIComponent(month)}${companyQuery}${personaQuery}`, { rows: [] }),
     safeWorkspaceApi(`/api/workspace_rrhh_gastos?workspace_id=${encodeURIComponent(workspaceId)}&month=${encodeURIComponent(month)}${companyQuery}${personaQuery}`, { rows: [] }),
     safeWorkspaceApi(`/api/workspace_rrhh_documentos?workspace_id=${encodeURIComponent(workspaceId)}${companyQuery}${personaQuery}`, { rows: [] }),
     safeWorkspaceApi(`/api/workspace_registro_horario_resumen?workspace_id=${encodeURIComponent(workspaceId)}&month=${encodeURIComponent(month)}${companyQuery}${personaQuery}`, {}),
     safeWorkspaceApi(`/api/workspace_registro_horario?workspace_id=${encodeURIComponent(workspaceId)}&month=${encodeURIComponent(month)}${companyQuery}${personaQuery}&limit=200`, { rows: [] }),
+    manager ? safeWorkspaceApi(`/api/workspace_rrhh_vacaciones_summary?workspace_id=${encodeURIComponent(workspaceId)}&year=${encodeURIComponent(year)}`, { rows: [] }) : { rows: [] },
   ]);
 
   state.workspaceRrhhProfileRow = profile?.row || null;
@@ -5949,6 +5953,8 @@ const refreshWorkspaceRrhh = async () => {
   state.workspaceRrhhDocsRows = docs?.rows || [];
   state.workspaceRrhhTimeSummary = timeSummary || null;
   state.workspaceRrhhTimeRows = timeRows?.rows || [];
+  state.workspaceRrhhVacSummaryYear = year;
+  state.workspaceRrhhVacSummaryRows = vacSummary?.rows || [];
 
   // Render after data arrives.
   renderWorkspaceRrhhHub();
@@ -6480,17 +6486,25 @@ const renderWorkspaceRrhhHub = () => {
                 if (within(fecha, weekStart, weekEnd)) agg.weekMin += minutes;
                 if (within(fecha, monthStart, monthEnd)) agg.monthMin += minutes;
               });
+              const vacRows = Array.isArray(state.workspaceRrhhVacSummaryRows) ? state.workspaceRrhhVacSummaryRows : [];
+              const vacByPersona = new Map(
+                vacRows
+                  .map((r) => [String(r?.persona_id || "").trim(), r])
+                  .filter(([k]) => Boolean(k))
+              );
+              const formatVac = (row) => {
+                const total = Number(row?.dias_total ?? row?.dias_anuales ?? 0) || 0;
+                const used = Number(row?.dias_usados ?? row?.dias_disfrutados ?? 0) || 0;
+                const pending = Number(row?.dias_pendientes ?? row?.dias_restantes ?? 0) || Math.max(total - used, 0);
+                const pct = total > 0 ? Math.max(0, Math.min(1, used / total)) : 0;
+                return { total, used, pending, pct };
+              };
 
               const list = (filtered.length ? filtered : members);
               return list.map((m) => {
                 const company = String(m.empresa_nombre || "").trim();
                 const status = m.hasFicha ? "En plantilla" : "Sin ficha";
                 const pill = m.hasFicha ? "rrhh-pill" : "rrhh-pill rrhh-pill-warn";
-                const subtitleBits = [];
-                if (m.servicios) subtitleBits.push(m.servicios);
-                if (company) subtitleBits.push(company);
-                if (!company && m.hasFicha) subtitleBits.push("Sin empresa");
-                const subtitle = subtitleBits.length ? subtitleBits.join(" · ") : "—";
                 const personaId = String(m.personaId || m.employee?.id || "").trim();
                 const agg = personaId ? (aggByPersona.get(personaId) || null) : null;
                 const todayLine = agg?.todayIn
@@ -6499,16 +6513,40 @@ const renderWorkspaceRrhhHub = () => {
                 const totalsLine = agg
                   ? `Semana: ${formatHours(agg.weekMin)} · Mes: ${formatHours(agg.monthMin)}`
                   : "Semana: — · Mes: —";
+                const vac = personaId ? vacByPersona.get(personaId) : null;
+                const vacFmt = vac ? formatVac(vac) : null;
+                const vacLabel = vacFmt ? `Vacaciones: ${vacFmt.pending} pendientes` : "Vacaciones: —";
+                const photoUrl = String(m.employee?.foto_url || "").trim();
+                const initials = String(m.nombre || "")
+                  .trim()
+                  .split(/\s+/)
+                  .filter(Boolean)
+                  .slice(0, 2)
+                  .map((part) => part[0]?.toUpperCase() || "")
+                  .join("") || "—";
                 return `
                   <button type="button" class="rrhh-member-card" data-rrhh-member-open="${escapeHtml(m.key)}">
                     <div class="rrhh-member-card-head">
-                      <strong>${escapeHtml(m.nombre || "Miembro")}</strong>
+                      <div class="rrhh-member-card-left">
+                        <div class="rrhh-avatar" aria-hidden="true">
+                          ${photoUrl ? `<img src="${escapeHtml(photoUrl)}" alt="" />` : `<span class="rrhh-avatar-initials">${escapeHtml(initials)}</span>`}
+                        </div>
+                        <div class="rrhh-member-card-title">
+                          <strong>${escapeHtml(m.nombre || "Miembro")}</strong>
+                          <div class="muted">${escapeHtml(company || (m.hasFicha ? "Sin empresa" : "Sin ficha"))}</div>
+                        </div>
+                      </div>
                       <span class="${pill}">${escapeHtml(status)}</span>
                     </div>
-                    <div class="muted">${escapeHtml(subtitle)}</div>
                     <div class="rrhh-member-metrics">
                       <span>${escapeHtml(todayLine)}</span>
                       <span>${escapeHtml(totalsLine)}</span>
+                      <div class="rrhh-vac">
+                        <div class="rrhh-vac-label">${escapeHtml(vacLabel)}</div>
+                        <div class="rrhh-vacbar" role="img" aria-label="${escapeHtml(vacLabel)}">
+                          <div class="rrhh-vacbar-fill" style="width: ${vacFmt ? Math.round(vacFmt.pct * 100) : 0}%;"></div>
+                        </div>
+                      </div>
                     </div>
                     ${m.user?.usuario || m.user?.email ? `<div class="muted">${escapeHtml(m.user?.usuario || m.user?.email || "")}</div>` : ""}
                   </button>
@@ -6598,41 +6636,62 @@ const renderWorkspaceRrhhHub = () => {
       `;
     };
 
-    const renderMemberDetail = (m) => {
-      const employee = m?.employee || null;
-      const user = m?.user || null;
-      const memberTab = normalizeMemberTab(state.workspaceRrhhEquipoMemberTab || "personal");
+	    const renderMemberDetail = (m) => {
+	      const employee = m?.employee || null;
+	      const user = m?.user || null;
+	      const memberTab = normalizeMemberTab(state.workspaceRrhhEquipoMemberTab || "personal");
       const companiesOptions = [
         `<option value="">Selecciona empresa</option>`,
         ...companies.map((c) => `<option value="${escapeHtml(String(c.id || ""))}">${escapeHtml(c.nombre || "-")}</option>`),
       ].join("");
 
-      const defaultEmpresaId = String(employee?.empresa_id || "").trim();
-      const tipoJornada = String(employee?.tipo_jornada || "Completa").trim() || "Completa";
-      const horasDia = employee?.horas_pactadas_dia ?? "";
-      const isActive = employee ? Number(employee.activo ?? 1) === 1 : true;
+	      const defaultEmpresaId = String(employee?.empresa_id || "").trim();
+	      const tipoJornada = String(employee?.tipo_jornada || "Completa").trim() || "Completa";
+	      const horasDia = employee?.horas_pactadas_dia ?? "";
+	      const isActive = employee ? Number(employee.activo ?? 1) === 1 : true;
+	      const photoUrl = String(employee?.foto_url || "").trim();
+	      const initials = String(employee?.nombre || m?.nombre || "")
+	        .trim()
+	        .split(/\s+/)
+	        .filter(Boolean)
+	        .slice(0, 2)
+	        .map((part) => part[0]?.toUpperCase() || "")
+	        .join("") || "—";
 
-      const headerSubtitle = [
-        employee?.empresa_nombre ? employee.empresa_nombre : "",
-        employee?.id ? "En plantilla" : "Sin ficha",
-      ].filter(Boolean).join(" · ");
+	      const headerSubtitle = [
+	        employee?.empresa_nombre ? employee.empresa_nombre : "",
+	        employee?.id ? "En plantilla" : "Sin ficha",
+	      ].filter(Boolean).join(" · ");
 
-      const personalHtml = `
-        <div class="workspace-rrhh-panel-card">
+	      const personalHtml = `
+	        <div class="workspace-rrhh-panel-card">
           <div class="section-head">
             <div>
               <h4>Datos personales</h4>
               <p class="muted">Edita y guarda la ficha del trabajador.</p>
             </div>
-          </div>
-          <form id="rrhhMemberPersonalForm" class="form-grid">
-            <input type="hidden" name="id" value="${escapeHtml(String(employee?.id || ""))}" />
-            <input type="hidden" name="workspace_id" value="${escapeHtml(state.currentWorkspaceId)}" />
-            <input type="hidden" name="usuario_id" value="${escapeHtml(String(employee?.usuario_manual ? (employee?.usuario_id || "") : (m.userId || "")))}" />
-            <label class="span-2">
-              Empresa
-              <select name="empresa_id" required data-default-empresa="${escapeHtml(defaultEmpresaId)}">${companiesOptions}</select>
-            </label>
+	          </div>
+	          <form id="rrhhMemberPersonalForm" class="form-grid">
+	            <input type="hidden" name="id" value="${escapeHtml(String(employee?.id || ""))}" />
+	            <input type="hidden" name="workspace_id" value="${escapeHtml(state.currentWorkspaceId)}" />
+	            <input type="hidden" name="usuario_id" value="${escapeHtml(String(employee?.usuario_manual ? (employee?.usuario_id || "") : (m.userId || "")))}" />
+	            <input type="hidden" name="foto_url" value="${escapeHtml(photoUrl)}" />
+	            <div class="span-2 rrhh-photo-row">
+	              <div class="rrhh-avatar rrhh-avatar-lg" aria-hidden="true">
+	                ${photoUrl ? `<img id="rrhhMemberPhotoPreview" src="${escapeHtml(photoUrl)}" alt="" />` : `<span id="rrhhMemberPhotoPreview" class="rrhh-avatar-initials">${escapeHtml(initials)}</span>`}
+	              </div>
+	              <div class="rrhh-photo-actions">
+	                <label class="muted">
+	                  Foto del trabajador
+	                  <input id="rrhhMemberPhotoInput" type="file" accept="image/*" />
+	                </label>
+	                <div id="rrhhMemberPhotoStatus" class="muted"></div>
+	              </div>
+	            </div>
+	            <label class="span-2">
+	              Empresa
+	              <select name="empresa_id" required data-default-empresa="${escapeHtml(defaultEmpresaId)}">${companiesOptions}</select>
+	            </label>
             <label>
               Nombre
               <input name="nombre" required value="${escapeHtml(String(employee?.nombre || m.nombre || ""))}" />
@@ -7242,6 +7301,39 @@ const renderWorkspaceRrhhHub = () => {
       if (wanted && Array.from(empresaSelect.options || []).some((opt) => String(opt.value || "") === wanted)) {
         empresaSelect.value = wanted;
       }
+    }
+    const photoInput = document.getElementById("rrhhMemberPhotoInput");
+    const photoStatus = document.getElementById("rrhhMemberPhotoStatus");
+    const photoHidden = personalForm.querySelector('[name="foto_url"]');
+    if (photoInput && photoHidden) {
+      photoInput.addEventListener("change", async () => {
+        const file = photoInput.files && photoInput.files[0] ? photoInput.files[0] : null;
+        if (!file) return;
+        try {
+          const upload = await uploadFileToS3(file, "rrhh_fotos", photoStatus);
+          const url = String(upload?.public_url || "").trim();
+          if (!url) throw new Error("No se pudo subir la foto.");
+          photoHidden.value = url;
+          const preview = document.getElementById("rrhhMemberPhotoPreview");
+          if (preview) {
+            const tag = String(preview.tagName || "").toUpperCase();
+            if (tag === "IMG") {
+              preview.src = url;
+            } else {
+              const img = document.createElement("img");
+              img.id = "rrhhMemberPhotoPreview";
+              img.src = url;
+              img.alt = "";
+              preview.replaceWith(img);
+            }
+          }
+          if (photoStatus) photoStatus.textContent = "Foto subida.";
+        } catch (error) {
+          if (photoStatus) photoStatus.textContent = error.message || "No se pudo subir la foto.";
+        } finally {
+          photoInput.value = "";
+        }
+      });
     }
     personalForm.addEventListener("submit", async (event) => {
       event.preventDefault();
