@@ -15655,9 +15655,11 @@ def fetch_workspace_gestoria_overview(conn, workspace_id, empresa_id=None):
     active_ids = {row["cliente_id"] for row in active_rows if is_gestoria_dashboard_active_state(row["estado"])}
     modelos_mes = conn.execute(
         f"""
-        SELECT COUNT(*) AS total
+        SELECT COUNT(DISTINCT m.id) AS total
         FROM gestoria_modelos m
-        WHERE m.empresa_id IN ({placeholders})
+        JOIN clientes_empresas ce ON ce.cliente_id = m.cliente_id
+        WHERE ce.empresa_id IN ({placeholders})
+          AND {service_filter}
           AND m.proxima_fecha IS NOT NULL
           AND strftime('%Y-%m', m.proxima_fecha) = ?
         """,
@@ -15665,10 +15667,12 @@ def fetch_workspace_gestoria_overview(conn, workspace_id, empresa_id=None):
     ).fetchone()
     modelos_vencidos = conn.execute(
         f"""
-        SELECT c.nombre AS cliente, m.modelo, m.proxima_fecha, m.estado
+        SELECT DISTINCT c.nombre AS cliente, m.modelo, m.proxima_fecha, m.estado
         FROM gestoria_modelos m
         JOIN clientes c ON c.id = m.cliente_id
-        WHERE m.empresa_id IN ({placeholders})
+        JOIN clientes_empresas ce ON ce.cliente_id = c.id
+        WHERE ce.empresa_id IN ({placeholders})
+          AND {service_filter}
           AND m.proxima_fecha IS NOT NULL
           AND date(m.proxima_fecha) < date(?)
           AND (m.estado IS NULL OR LOWER(m.estado) != 'presentado')
@@ -20384,9 +20388,20 @@ def safe_resolve_under(base_dir, rel_path):
 class Handler(BaseHTTPRequestHandler):
     db_path = DB_DEFAULT
     ocr_db_path = OCR_DB_DEFAULT
+    _db_ready = False
+    _db_ready_lock = threading.Lock()
 
     def log_message(self, format, *args):
         return
+
+    def _ensure_db_ready(self):
+        if Handler._db_ready:
+            return
+        with Handler._db_ready_lock:
+            if Handler._db_ready:
+                return
+            ensure_tables(self.db_path)
+            Handler._db_ready = True
 
     def _track_conn(self, conn):
         if conn is None:
@@ -20654,7 +20669,11 @@ class Handler(BaseHTTPRequestHandler):
             get_params = urllib.parse.parse_qs(parsed.query)
             if not self._enforce_service_access(parsed.path, params=get_params):
                 return
-            self.handle_api(parsed)
+            try:
+                self._ensure_db_ready()
+                self.handle_api(parsed)
+            except Exception as exc:
+                json_response(self, {"error": "API error", "detail": f"{type(exc).__name__}: {exc}"}, status=500)
             return
 
         if parsed.path == "/" or parsed.path == "":
@@ -20835,6 +20854,11 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path not in AUTH_PUBLIC_POST_ENDPOINTS and not self._require_api_auth():
             return
         if not self._enforce_service_access(parsed.path, payload=payload):
+            return
+        try:
+            self._ensure_db_ready()
+        except Exception as exc:
+            json_response(self, {"error": "API error", "detail": f"{type(exc).__name__}: {exc}"}, status=500)
             return
 
         if parsed.path == "/api/logout":
