@@ -5881,27 +5881,40 @@ const refreshWorkspaceRrhh = async () => {
   const workspaceId = state.currentWorkspaceId;
   if (!workspaceId) return;
 
+  const manager = isWorkspaceRrhhManager();
   const month = normalizeMonthValue(state.workspaceRrhhMonth || state.workspaceTimeMonth || "");
   state.workspaceRrhhMonth = month;
   state.workspaceRrhhTab = normalizeWorkspaceRrhhTab(state.workspaceRrhhTab);
 
-  if (!isWorkspaceRrhhManager()) {
+  if (!manager) {
     state.workspaceRrhhScopeAll = false;
   }
 
   // Asegura que la lista global de usuarios esté cargada para mostrar "Usuarios del sistema" y la pestaña Usuarios.
-  if (isWorkspaceRrhhManager() && (!Array.isArray(state.usersList) || !state.usersList.length)) {
+  if (manager && (!Array.isArray(state.usersList) || !state.usersList.length)) {
     const users = await safeWorkspaceApi("/api/usuarios", { rows: [] });
     state.usersList = users?.rows || [];
   }
 
   const employees = Array.isArray(state.workspaceTimeEmployees) ? state.workspaceTimeEmployees : [];
+  const visibleEmployees = manager
+    ? employees.filter((row) => String(row?.source || "").trim() !== "auto")
+    : employees;
   if (!state.workspaceRrhhSelectedPersonaId) {
-    if (isWorkspaceRrhhManager()) {
-      const firstActive = employees.find((row) => Number(row.activo ?? 1) === 1) || employees[0] || null;
+    if (manager) {
+      const firstActive = visibleEmployees.find((row) => Number(row.activo ?? 1) === 1) || visibleEmployees[0] || null;
       state.workspaceRrhhSelectedPersonaId = firstActive?.id || "";
     } else {
       state.workspaceRrhhSelectedPersonaId = resolveWorkspacePersonaForAuthUser();
+    }
+  }
+  // Si está seleccionado un registro "auto", lo ignoramos en RRHH hasta confirmación manual.
+  if (manager && state.workspaceRrhhSelectedPersonaId) {
+    const selectedId = String(state.workspaceRrhhSelectedPersonaId || "").trim();
+    const exists = visibleEmployees.some((row) => String(row?.id || "").trim() === selectedId);
+    if (!exists) {
+      const first = visibleEmployees.find((row) => Number(row.activo ?? 1) === 1) || visibleEmployees[0] || null;
+      state.workspaceRrhhSelectedPersonaId = first?.id || "";
     }
   }
 
@@ -5933,7 +5946,10 @@ const refreshWorkspaceRrhh = async () => {
 const renderWorkspaceRrhhHub = () => {
   if (!workspaceRrhhHub) return;
   const manager = isWorkspaceRrhhManager();
-  const employees = Array.isArray(state.workspaceTimeEmployees) ? state.workspaceTimeEmployees : [];
+  const allEmployees = Array.isArray(state.workspaceTimeEmployees) ? state.workspaceTimeEmployees : [];
+  const employees = manager
+    ? allEmployees.filter((row) => String(row?.source || "").trim() !== "auto")
+    : allEmployees;
   const month = normalizeMonthValue(state.workspaceRrhhMonth || state.workspaceTimeMonth || "");
   const selectedPersonaId = String(state.workspaceRrhhSelectedPersonaId || "").trim();
   const selectedEmployee = employees.find((row) => String(row.id || "") === selectedPersonaId) || null;
@@ -6027,7 +6043,7 @@ const renderWorkspaceRrhhHub = () => {
                   const personaId = userToPersona.get(String(user.id || "").trim()) || "";
                   const fullName = `${user.nombre || ""} ${user.apellido || ""}`.trim() || user.usuario || user.email || "Usuario";
                   const linkedEmployee = userToEmployee.get(String(user.id || "").trim()) || null;
-                  const empresaLabel = linkedEmployee?.empresa_nombre || user.empresa_nombre || "";
+                  const empresaLabel = linkedEmployee?.empresa_nombre || "";
                   const empresaSuffix = empresaLabel ? ` · ${empresaLabel}` : "";
                   const subtitle = `${user.servicio ? `${user.servicio}` : "Sistema"}${empresaSuffix}${enabled ? " · Activo" : " · Inactivo"}`;
                   const primaryLabel = linked ? "Abrir ficha" : (enabled ? "Añadir a plantilla" : "Activar y añadir");
@@ -6308,7 +6324,7 @@ const renderWorkspaceRrhhHub = () => {
               const userId = String(user.id || "").trim();
               const employee = employeeByUser.get(userId) || null;
               const fullName = `${user.nombre || ""} ${user.apellido || ""}`.trim() || user.usuario || user.email || "Usuario";
-              const defaultCompany = employee?.empresa_id || (companies.length === 1 ? companies[0]?.id : "");
+              const defaultCompany = employee?.empresa_id || "";
               const jornada = employee?.tipo_jornada || "Completa";
               const horas = employee?.horas_pactadas_dia ?? "";
               const isActive = Number(employee?.activo ?? 1) === 1;
@@ -6810,7 +6826,7 @@ const renderWorkspaceRrhhHub = () => {
         ...(existing || {}),
         id: existing?.id || "",
         workspace_id: state.currentWorkspaceId,
-        empresa_id: String(empresaId || existing?.empresa_id || (companies.length === 1 ? companies[0]?.id : "")).trim(),
+        empresa_id: String(empresaId || existing?.empresa_id || "").trim(),
         usuario_id: userId,
         nombre: fullName || existing?.nombre || "",
         email: user?.email || existing?.email || "",
@@ -6921,29 +6937,33 @@ const renderWorkspaceRrhhHub = () => {
   workspaceRrhhHub.querySelectorAll("[data-rrhh-sysuser-primary]").forEach((button) => {
     button.addEventListener("click", async () => {
       if (!isWorkspaceRrhhManager()) return;
-      const userId = String(button.dataset.rrhhSysuserPrimary || "").trim();
-      const personaId = String(button.dataset.rrhhSysuserPersona || "").trim();
-      if (!userId) return;
-      if (personaId) {
-        state.workspaceRrhhSelectedPersonaId = personaId;
-        state.workspaceRrhhScopeAll = false;
-        await refreshWorkspaceRrhh();
-        return;
-      }
-      // No abrimos el modal del motor (puede estar oculto y parecer que “se congela” la pantalla).
-      // En su lugar, llevamos al admin al listado editable "Equipo" para crear/vincular manualmente.
-      closeWorkspaceTimeEmployeeModal();
-      const user = getWorkspaceTimeEligibleUsers().find((row) => String(row.id || "").trim() === userId) || null;
-      const fullName = `${user?.nombre || ""} ${user?.apellido || ""}`.trim() || user?.usuario || user?.email || "";
-      state.workspaceRrhhTab = "equipo";
-      state.workspaceRrhhRosterSearch = fullName || user?.usuario || user?.email || userId;
-      renderWorkspaceRrhhHub();
-      const cssEscaped = (globalThis.CSS && typeof CSS.escape === "function")
-        ? CSS.escape(userId)
-        : userId.replace(/["\\]/g, "\\$&");
-      const target = workspaceRrhhHub.querySelector(`[data-rrhh-roster-user="${cssEscaped}"]`);
-      if (target && typeof target.scrollIntoView === "function") {
-        target.scrollIntoView({ behavior: "smooth", block: "center" });
+      try {
+        const userId = String(button.dataset.rrhhSysuserPrimary || "").trim();
+        const personaId = String(button.dataset.rrhhSysuserPersona || "").trim();
+        if (!userId) return;
+        if (personaId) {
+          state.workspaceRrhhSelectedPersonaId = personaId;
+          state.workspaceRrhhScopeAll = false;
+          await refreshWorkspaceRrhh();
+          return;
+        }
+        // No abrimos el modal del motor (puede estar oculto y parecer que “se congela” la pantalla).
+        // En su lugar, llevamos al admin al listado editable "Equipo" para crear/vincular manualmente.
+        closeWorkspaceTimeEmployeeModal();
+        document.body.classList.remove("modal-open");
+        const user = getWorkspaceTimeEligibleUsers().find((row) => String(row.id || "").trim() === userId) || null;
+        const fullName = `${user?.nombre || ""} ${user?.apellido || ""}`.trim() || user?.usuario || user?.email || "";
+        state.workspaceRrhhTab = "equipo";
+        state.workspaceRrhhRosterSearch = fullName || user?.usuario || user?.email || userId;
+        renderWorkspaceRrhhHub();
+        if (globalThis.CSS && typeof CSS.escape === "function") {
+          const target = workspaceRrhhHub.querySelector(`[data-rrhh-roster-user="${CSS.escape(userId)}"]`);
+          if (target && typeof target.scrollIntoView === "function") {
+            target.scrollIntoView({ behavior: "smooth", block: "center" });
+          }
+        }
+      } catch (error) {
+        alert(error?.message || "No se pudo abrir el listado de Equipo.");
       }
     });
   });
@@ -8724,7 +8744,8 @@ const fillWorkspaceTimeEmployeeForm = (record = null) => {
   const payload = {
     id: "",
     workspace_id: state.currentWorkspaceId || "",
-    empresa_id: state.currentWorkspaceCompanyId || companies[0]?.id || "",
+    // RRHH: no asignamos empresa por defecto; el admin debe elegirla manualmente.
+    empresa_id: "",
     usuario_id: "",
     nombre: "",
     nif: "",
@@ -8738,6 +8759,16 @@ const fillWorkspaceTimeEmployeeForm = (record = null) => {
     notas: "",
     ...(record || {}),
   };
+  // Empresa: añade placeholder y evita selección automática al abrir el modal.
+  const companySelect = workspaceTimeEmployeeForm.querySelector('[name="empresa_id"]');
+  if (companySelect) {
+    const options = [
+      `<option value="">Selecciona empresa</option>`,
+      ...companies.map((row) => `<option value="${row.id}">${row.nombre || "-"}</option>`),
+    ].join("");
+    companySelect.innerHTML = options;
+    companySelect.value = String(payload.empresa_id || "").trim();
+  }
   ["id", "workspace_id", "empresa_id", "usuario_id", "nombre", "nif", "email", "telefono", "tipo_jornada", "horas_pactadas_dia", "horas_pactadas_semana", "fecha_alta", "notas"].forEach((field) => {
     const input = workspaceTimeEmployeeForm.querySelector(`[name="${field}"]`);
     if (!input) return;
@@ -8767,8 +8798,9 @@ const openWorkspaceTimeEmployeeModal = (subtitle = "") => {
 };
 
 const closeWorkspaceTimeEmployeeModal = () => {
-  if (!workspaceTimeEmployeeModal) return;
-  workspaceTimeEmployeeModal.classList.add("hidden");
+  if (workspaceTimeEmployeeModal) {
+    workspaceTimeEmployeeModal.classList.add("hidden");
+  }
   document.body.classList.remove("modal-open");
 };
 
