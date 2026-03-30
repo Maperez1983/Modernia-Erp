@@ -5967,6 +5967,7 @@ const renderWorkspaceRrhhHub = () => {
   if (!manager && ["equipo", "usuarios"].includes(tab)) tab = "plantilla";
   state.workspaceRrhhTab = tab;
   const scopeAll = Boolean(state.workspaceRrhhScopeAll && manager);
+  const wideLayout = Boolean(manager && tab === "equipo");
 
   const renderEmployeeList = () => {
     if (!manager) return "";
@@ -6791,7 +6792,7 @@ const renderWorkspaceRrhhHub = () => {
     : renderDocs();
 
   workspaceRrhhHub.innerHTML = `
-    <div class="workspace-rrhh-layout" data-mode="${manager ? "manager" : "employee"}">
+    <div class="workspace-rrhh-layout" data-mode="${manager ? "manager" : "employee"}"${wideLayout ? ' style="grid-template-columns: 1fr;"' : ""}>
       <aside class="workspace-rrhh-sidebar ${manager && tab === "equipo" ? "hidden" : ""}">
         <div class="section-head">
           <div>
