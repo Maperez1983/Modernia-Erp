@@ -3620,7 +3620,24 @@ const renderCompanyCards = () => {
       const entryLabel = timeProfile?.latestEntry
         ? `${timeProfile.latestEntry.hora_inicio || "--:--"}${timeProfile.latestEntry.hora_fin ? ` - ${timeProfile.latestEntry.hora_fin}` : " · Abierto"}`
         : "Sin fichaje de hoy";
-      const subtitle = employee ? `${companyLabel} · ${entryLabel}` : "Completa tu ficha y documentación en RRHH.";
+      const seniority = (() => {
+        const iso = String(employee?.fecha_alta || "").slice(0, 10);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return "";
+        const parts = iso.split("-").map((v) => Number(v));
+        const start = new Date(parts[0], parts[1] - 1, parts[2]);
+        if (Number.isNaN(start.getTime())) return "";
+        const end = new Date();
+        const endDate = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+        let months = (endDate.getFullYear() - start.getFullYear()) * 12 + (endDate.getMonth() - start.getMonth());
+        if (endDate.getDate() < start.getDate()) months -= 1;
+        months = Math.max(0, months);
+        const years = Math.floor(months / 12);
+        const rem = months % 12;
+        return years > 0 ? `${years}a ${rem}m` : `${months}m`;
+      })();
+      const subtitle = employee
+        ? `${companyLabel} · ${entryLabel}${seniority ? ` · Antigüedad ${seniority}` : ""}`
+        : "Completa tu ficha y documentación en RRHH.";
       const card = document.createElement("div");
       card.className = "company-card personal-card";
       card.dataset.action = "rrhh-home";
@@ -6146,7 +6163,7 @@ const renderWorkspaceRrhhHub = () => {
       ${[
         ...(manager ? [{ key: "equipo", label: "Equipo" }] : [{ key: "plantilla", label: "Personal" }]),
         { key: "horario", label: "Horario" },
-        { key: "ausencias", label: "Ausencias" },
+        { key: "ausencias", label: "Vacaciones" },
         { key: "gastos", label: "Gastos" },
         { key: "docs", label: "Documentación" },
       ]
@@ -6544,6 +6561,21 @@ const renderWorkspaceRrhhHub = () => {
                 const totalsLine = agg
                   ? `Semana: ${formatHours(agg.weekMin)} · Mes: ${formatHours(agg.monthMin)}`
                   : "Semana: — · Mes: —";
+                const seniorityLine = (() => {
+                  const startIso = String(m.employee?.fecha_alta || "").slice(0, 10);
+                  const start = parseDateLocal(startIso);
+                  if (!start) return "Antigüedad: —";
+                  const end = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+                  let months =
+                    (end.getFullYear() - start.getFullYear()) * 12
+                    + (end.getMonth() - start.getMonth());
+                  if (end.getDate() < start.getDate()) months -= 1;
+                  months = Math.max(0, months);
+                  const years = Math.floor(months / 12);
+                  const rem = months % 12;
+                  const label = years > 0 ? `${years}a ${rem}m` : `${months}m`;
+                  return `Antigüedad: ${label}`;
+                })();
                 const vac = personaId ? vacByPersona.get(personaId) : null;
                 const vacFmt = vac ? formatVac(vac) : null;
                 const vacLabel = vacFmt ? `Vacaciones: ${vacFmt.pending} pendientes` : "Vacaciones: —";
@@ -6572,6 +6604,7 @@ const renderWorkspaceRrhhHub = () => {
                     <div class="rrhh-member-metrics">
                       <span>${escapeHtml(todayLine)}</span>
                       <span>${escapeHtml(totalsLine)}</span>
+                      <span>${escapeHtml(seniorityLine)}</span>
                       <div class="rrhh-vac">
                         <div class="rrhh-vac-label">${escapeHtml(vacLabel)}</div>
                         <div class="rrhh-vacbar" role="img" aria-label="${escapeHtml(vacLabel)}">
@@ -7197,8 +7230,8 @@ const renderWorkspaceRrhhHub = () => {
     <div class="workspace-rrhh-panel-card">
       <div class="section-head">
         <div>
-          <h4>Ausencias ${scopeAll ? "· Equipo" : ""}</h4>
-          <p class="muted">Vacaciones, bajas y permisos. ${manager ? "Aprueba o rechaza solicitudes." : "Crea solicitudes y cancela pendientes."}</p>
+          <h4>Vacaciones y permisos ${scopeAll ? "· Equipo" : ""}</h4>
+          <p class="muted">Vacaciones y días libres (permisos). ${manager ? "Aprueba o rechaza solicitudes." : "Pide vacaciones/días libres y cancela pendientes."}</p>
         </div>
       </div>
       <form id="workspaceRrhhAusenciaForm" class="form-grid">
@@ -7217,6 +7250,7 @@ const renderWorkspaceRrhhHub = () => {
           Tipo
           <select name="tipo">
             <option>Vacaciones</option>
+            <option>Día libre</option>
             <option>Permiso</option>
             <option>Baja</option>
             <option>Asuntos propios</option>
