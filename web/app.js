@@ -3944,6 +3944,13 @@ const updateWorkspaceEntryChrome = () => {
     holdingBackBtn.textContent = mode === "tenant" ? "Volver al panel" : "Volver al panel";
   }
   const tenantOperationalMode = mode === "tenant";
+  // En tenant queremos separar claramente:
+  // - Operativa: "Áreas del grupo" (launcher)
+  // - Configuración: KPIs/Salud/Comercial + setup del workspace
+  const overviewTargetView = tenantOperationalMode ? "tenant" : "overview";
+  if (workspaceKpis) workspaceKpis.dataset.workspaceView = overviewTargetView;
+  if (workspaceOverviewHealth) workspaceOverviewHealth.dataset.workspaceView = overviewTargetView;
+  if (workspaceOverviewCommercial) workspaceOverviewCommercial.dataset.workspaceView = overviewTargetView;
   if (workspaceViewTabs) workspaceViewTabs.classList.remove("hidden");
   if (workspaceCompanySwitcher) workspaceCompanySwitcher.classList.toggle("hidden", tenantOperationalMode);
   if (workspaceOverviewLauncherCard) workspaceOverviewLauncherCard.classList.toggle("tenant-home-card", tenantOperationalMode);
@@ -10388,8 +10395,8 @@ const openHolding = (options = {}) => {
   explorerSection.classList.add("hidden");
   setPage("holding");
   const nextView = requestedView || (mode === "tenant" ? "operations" : state.currentWorkspaceView || "overview");
-  setWorkspaceView(nextView, { forceTenantView: mode === "tenant" && nextView !== "operations" });
   updateWorkspaceEntryChrome();
+  setWorkspaceView(nextView, { forceTenantView: mode === "tenant" && nextView !== "operations" });
   loadWorkspaceCentral().catch(() => {});
   syncHoldingUrlParams();
   window.scrollTo({ top: 0, behavior: "smooth" });
