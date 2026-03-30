@@ -5964,6 +5964,11 @@ const renderWorkspaceRrhhHub = () => {
         .filter((row) => String(row.usuario_id || "").trim())
         .map((row) => [String(row.usuario_id || "").trim(), String(row.id || "").trim()])
     );
+    const userToEmployee = new Map(
+      normalized
+        .filter((row) => String(row.usuario_id || "").trim())
+        .map((row) => [String(row.usuario_id || "").trim(), row])
+    );
     // Fuente de "usuarios del sistema": preferimos /api/workspace_registro_usuarios (mapeado a empresa),
     // pero si viene vacío usamos la lista global /api/usuarios.
     const eligibleUsers = getWorkspaceTimeEligibleUsers();
@@ -6019,7 +6024,9 @@ const renderWorkspaceRrhhHub = () => {
                   const linked = linkedUserIds.has(String(user.id || "").trim());
                   const personaId = userToPersona.get(String(user.id || "").trim()) || "";
                   const fullName = `${user.nombre || ""} ${user.apellido || ""}`.trim() || user.usuario || user.email || "Usuario";
-                  const empresaSuffix = user.empresa_nombre ? ` · ${user.empresa_nombre}` : "";
+                  const linkedEmployee = userToEmployee.get(String(user.id || "").trim()) || null;
+                  const empresaLabel = linkedEmployee?.empresa_nombre || user.empresa_nombre || "";
+                  const empresaSuffix = empresaLabel ? ` · ${empresaLabel}` : "";
                   const subtitle = `${user.servicio ? `${user.servicio}` : "Sistema"}${empresaSuffix}${enabled ? " · Activo" : " · Inactivo"}`;
                   const primaryLabel = linked ? "Abrir ficha" : (enabled ? "Añadir a plantilla" : "Activar y añadir");
                   return `
@@ -6723,26 +6730,22 @@ const renderWorkspaceRrhhHub = () => {
         await refreshWorkspaceRrhh();
         return;
       }
-      button.disabled = true;
-      try {
-        await apiPost("/api/workspace_registro_usuario_toggle", {
-          workspace_id: state.currentWorkspaceId,
-          usuario_id: userId,
-          enabled: 1,
-        });
-        await loadWorkspaceDetail(state.currentWorkspaceId);
-        const rows = Array.isArray(state.workspaceTimeEmployees) ? state.workspaceTimeEmployees : [];
-        const linked = rows.find((row) => String(row.usuario_id || "").trim() === userId) || null;
-        if (linked) {
-          state.workspaceRrhhSelectedPersonaId = linked.id || "";
-          state.workspaceRrhhScopeAll = false;
-          await refreshWorkspaceRrhh();
-        }
-      } catch (error) {
-        alert(error.message || "No se pudo añadir el usuario a la plantilla.");
-      } finally {
-        button.disabled = false;
-      }
+      // No lo añadimos “a ciegas”: abrimos la ficha para que el admin elija empresa manualmente.
+      const user = getWorkspaceTimeEligibleUsers().find((row) => String(row.id || "").trim() === userId) || null;
+      const fullName = `${user?.nombre || ""} ${user?.apellido || ""}`.trim() || user?.usuario || user?.email || "";
+      await ensureWorkspaceCompaniesLoaded();
+      const companies = state.currentWorkspaceDetail?.companies || [];
+      fillWorkspaceTimeEmployeeForm({
+        id: "",
+        workspace_id: state.currentWorkspaceId,
+        empresa_id: user?.empresa_id || state.currentWorkspaceCompanyId || companies[0]?.id || "",
+        usuario_id: userId,
+        nombre: fullName,
+        email: user?.email || "",
+        activo: 1,
+        notas: "Vinculado desde usuario del sistema.",
+      });
+      openWorkspaceTimeEmployeeModal("Añadir a plantilla: elige la empresa para vincular este usuario.");
     });
   });
 
@@ -35413,14 +35416,21 @@ if (workspaceTimeEmployeeForm) {
     const matchedCompany = companies.find((company) => String(company.id || "") === String(payload.empresa_id || ""));
     payload.empresa_nombre = matchedCompany?.nombre || "";
     try {
-  const data = await fetch("/api/workspace_registro_personal", {
-    method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      }).then((res) => res.json());
+      const data = await fetch("/api/workspace_registro_personal", {
+        method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          }).then((res) => res.json());
       if (data?.error) throw new Error(data.error);
       if (workspaceTimeEmployeeStatus) workspaceTimeEmployeeStatus.textContent = "Persona guardada.";
       await loadWorkspaceDetail(state.currentWorkspaceId);
+      if (data?.id) {
+        state.workspaceRrhhSelectedPersonaId = String(data.id || "");
+        state.workspaceRrhhScopeAll = false;
+      }
+      if (state.currentWorkspaceView === "rrhh") {
+        await refreshWorkspaceRrhh();
+      }
       fillWorkspaceTimeEmployeeForm();
     } catch (error) {
       if (workspaceTimeEmployeeStatus) workspaceTimeEmployeeStatus.textContent = error.message || "No se pudo guardar.";
