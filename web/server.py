@@ -14979,6 +14979,7 @@ def ensure_workspace_product_tables(conn):
           empresa_manual INTEGER NOT NULL DEFAULT 0,
           usuario_id TEXT,
           usuario_manual INTEGER NOT NULL DEFAULT 0,
+          source TEXT NOT NULL DEFAULT 'manual',
           nombre TEXT NOT NULL,
           nif TEXT,
           email TEXT,
@@ -15092,6 +15093,19 @@ def ensure_workspace_product_tables(conn):
     ensure_column(conn, "workspace_registro_personal", "alert_last_sent", "alert_last_sent TEXT")
     ensure_column(conn, "workspace_registro_personal", "empresa_manual", "empresa_manual INTEGER NOT NULL DEFAULT 0")
     ensure_column(conn, "workspace_registro_personal", "usuario_manual", "usuario_manual INTEGER NOT NULL DEFAULT 0")
+    ensure_column(conn, "workspace_registro_personal", "source", "source TEXT NOT NULL DEFAULT 'manual'")
+    # Backfill: fichas legacy auto-sincronizadas desde usuarios (para no mostrarlas si el admin no las confirma).
+    try:
+        conn.execute(
+            """
+            UPDATE workspace_registro_personal
+            SET source = 'auto'
+            WHERE (source IS NULL OR TRIM(source) = '' OR source = 'manual')
+              AND COALESCE(notas, '') LIKE '%Sincronizado automáticamente desde usuarios.%'
+            """
+        )
+    except Exception:
+        pass
     ensure_column(conn, "workspace_registro_audit", "empresa_id", "empresa_id TEXT")
     ensure_column(conn, "workspace_registro_audit", "persona_id", "persona_id TEXT")
     ensure_column(conn, "workspace_registro_audit", "entity_type", "entity_type TEXT")
@@ -16670,9 +16684,9 @@ def sync_workspace_time_personal_from_users(conn, workspace_id, empresa_id=None)
             conn.execute(
                 """
                 INSERT INTO workspace_registro_personal (
-                  id, workspace_id, empresa_id, empresa_manual, usuario_id, nombre, nif, email, telefono, tipo_jornada,
+                  id, workspace_id, empresa_id, empresa_manual, usuario_id, usuario_manual, source, nombre, nif, email, telefono, tipo_jornada,
                   horas_pactadas_dia, horas_pactadas_semana, fecha_alta, fecha_baja, activo, notas, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
                 """,
                 (
                     record_id,
@@ -16680,6 +16694,8 @@ def sync_workspace_time_personal_from_users(conn, workspace_id, empresa_id=None)
                     empresa_vinculada,
                     0,
                     user["id"],
+                    0,
+                    "auto",
                     full_name,
                     None,
                     str(user["email"] or "").strip() or None,
@@ -16705,7 +16721,11 @@ def fetch_workspace_personal(conn, workspace_id, empresa_id=None, only_active=Fa
     empresa_ids = resolve_workspace_company_ids(conn, workspace_id, empresa_id=empresa_id)
     if not empresa_ids:
         return {"rows": []}
-    where = [f"p.workspace_id = ?", f"p.empresa_id IN ({','.join('?' for _ in empresa_ids)})"]
+    where = [
+        "p.workspace_id = ?",
+        f"p.empresa_id IN ({','.join('?' for _ in empresa_ids)})",
+        "COALESCE(p.source, 'manual') != 'auto'",
+    ]
     params = [workspace_id, *empresa_ids]
     if only_active:
         where.append("COALESCE(p.activo, 1) = 1")
@@ -16717,6 +16737,9 @@ def fetch_workspace_personal(conn, workspace_id, empresa_id=None, only_active=Fa
           p.empresa_id,
           COALESCE(e.nombre, '') AS empresa_nombre,
           p.usuario_id,
+          COALESCE(p.usuario_manual, 0) AS usuario_manual,
+          COALESCE(p.empresa_manual, 0) AS empresa_manual,
+          COALESCE(p.source, 'manual') AS source,
           p.nombre,
           p.nif,
           p.email,
@@ -23040,6 +23063,7 @@ class Handler(BaseHTTPRequestHandler):
                 manual_flag,
                 usuario_id_value,
                 usuario_manual_flag,
+                "manual",
                 nombre,
                 str(payload.get("nif") or "").strip() or None,
                 str(payload.get("email") or "").strip() or None,
@@ -23060,7 +23084,7 @@ class Handler(BaseHTTPRequestHandler):
                 conn.execute(
                     """
                     UPDATE workspace_registro_personal
-                    SET workspace_id = ?, empresa_id = ?, empresa_manual = ?, usuario_id = ?, usuario_manual = ?, nombre = ?, nif = ?, email = ?, telefono = ?,
+                    SET workspace_id = ?, empresa_id = ?, empresa_manual = ?, usuario_id = ?, usuario_manual = ?, source = ?, nombre = ?, nif = ?, email = ?, telefono = ?,
                         tipo_jornada = ?, horas_pactadas_dia = ?, horas_pactadas_semana = ?, fecha_alta = ?, fecha_baja = ?,
                         activo = ?, notas = ?, updated_at = datetime(?)
                     WHERE id = ? AND workspace_id = ?
@@ -23072,9 +23096,9 @@ class Handler(BaseHTTPRequestHandler):
                 conn.execute(
                     """
                     INSERT INTO workspace_registro_personal (
-                      id, workspace_id, empresa_id, empresa_manual, usuario_id, usuario_manual, nombre, nif, email, telefono, tipo_jornada,
+                      id, workspace_id, empresa_id, empresa_manual, usuario_id, usuario_manual, source, nombre, nif, email, telefono, tipo_jornada,
                       horas_pactadas_dia, horas_pactadas_semana, fecha_alta, fecha_baja, activo, notas, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
                     """,
                     (record_id, *values, now, now),
                 )
