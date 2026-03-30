@@ -6408,26 +6408,113 @@ const renderWorkspaceRrhhHub = () => {
         </label>
         <div class="rrhh-member-grid">
           ${(filtered.length ? filtered : members).length
-            ? (filtered.length ? filtered : members).map((m) => {
-              const company = String(m.empresa_nombre || "").trim();
-              const status = m.hasFicha ? "En plantilla" : "Sin ficha";
-              const pill = m.hasFicha ? "rrhh-pill" : "rrhh-pill rrhh-pill-warn";
-              const subtitleBits = [];
-              if (m.servicios) subtitleBits.push(m.servicios);
-              if (company) subtitleBits.push(company);
-              if (!company && m.hasFicha) subtitleBits.push("Sin empresa");
-              const subtitle = subtitleBits.length ? subtitleBits.join(" · ") : "—";
-              return `
-                <button type="button" class="rrhh-member-card" data-rrhh-member-open="${escapeHtml(m.key)}">
-                  <div class="rrhh-member-card-head">
-                    <strong>${escapeHtml(m.nombre || "Miembro")}</strong>
-                    <span class="${pill}">${escapeHtml(status)}</span>
-                  </div>
-                  <div class="muted">${escapeHtml(subtitle)}</div>
-                  ${m.user?.usuario || m.user?.email ? `<div class="muted">${escapeHtml(m.user?.usuario || m.user?.email || "")}</div>` : ""}
-                </button>
-              `;
-            }).join("")
+            ? (() => {
+              const rowsAll = Array.isArray(state.workspaceRrhhTimeRows) && state.workspaceRrhhTimeRows.length
+                ? state.workspaceRrhhTimeRows
+                : (Array.isArray(state.currentWorkspaceData?.timeRows) ? state.currentWorkspaceData.timeRows : []);
+              const now = new Date();
+              const todayStr = now.toISOString().slice(0, 10);
+              const monthText = String(normalizeMonthValue(state.workspaceRrhhMonth || state.workspaceTimeMonth || "") || now.toISOString().slice(0, 7)).slice(0, 7);
+              const parseDateLocal = (iso) => {
+                const s = String(iso || "").slice(0, 10);
+                const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+                if (!m) return null;
+                return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+              };
+              const startOfWeek = (d) => {
+                const copy = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+                const day = copy.getDay(); // 0 domingo
+                const diff = day === 0 ? -6 : 1 - day; // lunes
+                copy.setDate(copy.getDate() + diff);
+                copy.setHours(0, 0, 0, 0);
+                return copy;
+              };
+              const weekStart = startOfWeek(now);
+              const weekEnd = new Date(weekStart);
+              weekEnd.setDate(weekStart.getDate() + 6);
+              weekEnd.setHours(23, 59, 59, 999);
+              const monthStart = parseDateLocal(`${monthText}-01`) || new Date(now.getFullYear(), now.getMonth(), 1);
+              const monthEnd = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 0);
+              monthStart.setHours(0, 0, 0, 0);
+              monthEnd.setHours(23, 59, 59, 999);
+              const within = (iso, start, end) => {
+                const d = parseDateLocal(iso);
+                if (!d) return false;
+                const t = d.getTime();
+                return t >= start.getTime() && t <= end.getTime();
+              };
+              const toMinutes = (row) => {
+                const val = Number(row?.minutos_trabajados ?? row?.minutos ?? 0);
+                if (!Number.isNaN(val) && val > 0) return val;
+                // fallback: si hay fin e inicio, intentamos calcular
+                const hi = String(row?.hora_inicio || "").trim();
+                const hf = String(row?.hora_fin || "").trim();
+                const m1 = /^(\d{2}):(\d{2})$/.exec(hi);
+                const m2 = /^(\d{2}):(\d{2})$/.exec(hf);
+                if (!m1 || !m2) return 0;
+                const a = Number(m1[1]) * 60 + Number(m1[2]);
+                const b = Number(m2[1]) * 60 + Number(m2[2]);
+                return b > a ? b - a : 0;
+              };
+              const formatHours = (min) => {
+                const h = (Number(min || 0) || 0) / 60;
+                return `${Math.round(h * 10) / 10}h`;
+              };
+              const aggByPersona = new Map();
+              rowsAll.forEach((row) => {
+                const pid = String(row?.persona_id || "").trim();
+                if (!pid) return;
+                if (!aggByPersona.has(pid)) {
+                  aggByPersona.set(pid, { weekMin: 0, monthMin: 0, todayIn: "", todayOut: "" });
+                }
+                const agg = aggByPersona.get(pid);
+                if (String(row?.fecha || "").slice(0, 10) === todayStr) {
+                  const hi = String(row?.hora_inicio || "").trim();
+                  const hf = String(row?.hora_fin || "").trim();
+                  if (hi && (!agg.todayIn || hi < agg.todayIn)) agg.todayIn = hi;
+                  if (hf && (!agg.todayOut || hf > agg.todayOut)) agg.todayOut = hf;
+                }
+                const minutes = toMinutes(row);
+                if (minutes <= 0) return;
+                const fecha = String(row?.fecha || "").slice(0, 10);
+                if (within(fecha, weekStart, weekEnd)) agg.weekMin += minutes;
+                if (within(fecha, monthStart, monthEnd)) agg.monthMin += minutes;
+              });
+
+              const list = (filtered.length ? filtered : members);
+              return list.map((m) => {
+                const company = String(m.empresa_nombre || "").trim();
+                const status = m.hasFicha ? "En plantilla" : "Sin ficha";
+                const pill = m.hasFicha ? "rrhh-pill" : "rrhh-pill rrhh-pill-warn";
+                const subtitleBits = [];
+                if (m.servicios) subtitleBits.push(m.servicios);
+                if (company) subtitleBits.push(company);
+                if (!company && m.hasFicha) subtitleBits.push("Sin empresa");
+                const subtitle = subtitleBits.length ? subtitleBits.join(" · ") : "—";
+                const personaId = String(m.personaId || m.employee?.id || "").trim();
+                const agg = personaId ? (aggByPersona.get(personaId) || null) : null;
+                const todayLine = agg?.todayIn
+                  ? `Hoy: ${agg.todayIn}${agg.todayOut ? ` → ${agg.todayOut}` : " → —"}`
+                  : "Hoy: —";
+                const totalsLine = agg
+                  ? `Semana: ${formatHours(agg.weekMin)} · Mes: ${formatHours(agg.monthMin)}`
+                  : "Semana: — · Mes: —";
+                return `
+                  <button type="button" class="rrhh-member-card" data-rrhh-member-open="${escapeHtml(m.key)}">
+                    <div class="rrhh-member-card-head">
+                      <strong>${escapeHtml(m.nombre || "Miembro")}</strong>
+                      <span class="${pill}">${escapeHtml(status)}</span>
+                    </div>
+                    <div class="muted">${escapeHtml(subtitle)}</div>
+                    <div class="rrhh-member-metrics">
+                      <span>${escapeHtml(todayLine)}</span>
+                      <span>${escapeHtml(totalsLine)}</span>
+                    </div>
+                    ${m.user?.usuario || m.user?.email ? `<div class="muted">${escapeHtml(m.user?.usuario || m.user?.email || "")}</div>` : ""}
+                  </button>
+                `;
+              }).join("");
+            })()
             : "<p class='muted'>No hay miembros todavía.</p>"
           }
         </div>

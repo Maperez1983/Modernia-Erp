@@ -1902,6 +1902,20 @@ body.crm-fin #companySummary {
   margin-bottom: 4px;
 }
 
+.rrhh-member-metrics {
+  display: grid;
+  gap: 4px;
+  margin-top: 8px;
+  font-size: 12px;
+  color: rgba(43, 43, 43, 0.72);
+}
+
+.rrhh-member-metrics span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .rrhh-member-detail {
   display: grid;
   gap: 12px;
