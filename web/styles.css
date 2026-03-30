@@ -1248,6 +1248,17 @@ body.crm-fin #companySummary {
   transition: transform 0.25s ease, box-shadow 0.25s ease;
 }
 
+.company-card-head {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.company-card.personal-card .rrhh-avatar {
+  width: 52px;
+  height: 52px;
+}
+
 .company-card h3 {
   margin: 0;
   font-size: 18px;

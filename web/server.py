@@ -20801,11 +20801,12 @@ class Handler(BaseHTTPRequestHandler):
             "/api/workspace_portal_upload",
             "/api/workspace_cobros",
             "/api/workspace_remesas",
-            "/api/workspace_portal_requerimientos",
-            "/api/workspace_registro_personal",
-            "/api/workspace_registro_horario",
-            "/api/workspace_registro_horario_toggle",
-            "/api/workspace_registro_alerts",
+	            "/api/workspace_portal_requerimientos",
+	            "/api/workspace_registro_personal",
+	            "/api/workspace_registro_personal_self_photo",
+	            "/api/workspace_registro_horario",
+	            "/api/workspace_registro_horario_toggle",
+	            "/api/workspace_registro_alerts",
             "/api/workspace_registro_usuario_toggle",
             "/api/workspace_registro_periodo_lock",
             "/api/workspace_rrhh_profile",
@@ -23261,6 +23262,54 @@ class Handler(BaseHTTPRequestHandler):
             )
             conn.commit()
             json_response(self, {"ok": True, "id": record_id})
+            return
+        elif parsed.path == "/api/workspace_registro_personal_self_photo":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            if not session:
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
+            user_id = str(session.get("user_id") or "").strip()
+            if not workspace_id or not user_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            if "foto_url" not in payload:
+                json_response(self, {"error": "foto_url requerido"}, status=400)
+                return
+            foto_url = str(payload.get("foto_url") or "").strip() or None
+            persona_id = workspace_persona_id_for_user(conn, workspace_id, user_id)
+            if not persona_id:
+                json_response(self, {"error": "Ficha de plantilla no encontrada"}, status=404)
+                return
+            prev_row = conn.execute(
+                "SELECT foto_url FROM workspace_registro_personal WHERE id = ? AND workspace_id = ? LIMIT 1",
+                (persona_id, workspace_id),
+            ).fetchone()
+            prev = {"foto_url": str(prev_row["foto_url"] or "")} if prev_row else None
+            conn.execute(
+                "UPDATE workspace_registro_personal SET foto_url = ?, updated_at = datetime(?) WHERE id = ? AND workspace_id = ?",
+                (foto_url, now, persona_id, workspace_id),
+            )
+            after_row = conn.execute(
+                "SELECT foto_url FROM workspace_registro_personal WHERE id = ? AND workspace_id = ? LIMIT 1",
+                (persona_id, workspace_id),
+            ).fetchone()
+            after = {"foto_url": str(after_row["foto_url"] or "")} if after_row else None
+            log_workspace_registro_audit(
+                conn,
+                workspace_id,
+                empresa_id=None,
+                persona_id=persona_id,
+                entity_type="persona",
+                entity_id=persona_id,
+                action="self_photo",
+                actor=session,
+                before=prev,
+                after=after,
+                now=now,
+            )
+            conn.commit()
+            json_response(self, {"ok": True, "id": persona_id, "foto_url": foto_url or ""})
             return
         elif parsed.path == "/api/workspace_registro_usuario_toggle":
             session = getattr(self, "auth_session", None) or self._current_session()

@@ -3592,6 +3592,53 @@ const renderCompanyCards = () => {
     const enabledModules = new Set(state.currentWorkspaceEnabledModules || []);
     const workspaceScoped = enabledModules.size > 0;
     const timeProfile = findCurrentUserTimeProfile();
+    const workspaceSlug = String(state.currentWorkspaceTarget || state.currentWorkspaceName || "modernia").trim() || "modernia";
+    const rrhhHref = `?holding=1&mode=tenant&workspace=${encodeURIComponent(workspaceSlug)}&view=motores&engine=rrhh`;
+
+    const buildInitials = (value) => {
+      const parts = String(value || "")
+        .trim()
+        .split(/\s+/)
+        .filter(Boolean);
+      if (!parts.length) return "U";
+      const letters = parts.slice(0, 2).map((p) => p[0]).join("");
+      return letters.toUpperCase();
+    };
+
+    const appendPersonalCard = () => {
+      const employee = timeProfile?.employee || null;
+      const displayName =
+        employee?.nombre
+        || `${user?.nombre || ""} ${user?.apellido || ""}`.trim()
+        || user?.usuario
+        || user?.email
+        || "Usuario";
+      const companyLabel =
+        employee?.empresa_nombre
+        || getWorkspaceDisplayName(state.currentWorkspaceName || workspaceSlug || "modernia");
+      const photoUrl = String(employee?.foto_url || "").trim();
+      const entryLabel = timeProfile?.latestEntry
+        ? `${timeProfile.latestEntry.hora_inicio || "--:--"}${timeProfile.latestEntry.hora_fin ? ` - ${timeProfile.latestEntry.hora_fin}` : " · Abierto"}`
+        : "Sin fichaje de hoy";
+      const subtitle = employee ? `${companyLabel} · ${entryLabel}` : "Completa tu ficha y documentación en RRHH.";
+      const card = document.createElement("div");
+      card.className = "company-card personal-card";
+      card.dataset.action = "rrhh-home";
+      card.innerHTML = `
+        <div class="company-card-head">
+          <div class="rrhh-avatar">
+            ${photoUrl ? `<img src="${escapeHtml(photoUrl)}" alt="" />` : `<span class="rrhh-avatar-initials">${escapeHtml(buildInitials(displayName))}</span>`}
+          </div>
+          <div>
+            <h3>Personal</h3>
+            <div class="company-meta">${escapeHtml(displayName)}</div>
+            <div class="company-meta">${escapeHtml(subtitle)}</div>
+          </div>
+        </div>
+        <a class="card-link" href="${rrhhHref}" data-action="rrhh-home">Abrir</a>
+      `;
+      coreCards.appendChild(card);
+    };
 
     const appendServiceCard = (serviceKey) => {
       const service = normalizeSimple(serviceKey);
@@ -3645,6 +3692,7 @@ const renderCompanyCards = () => {
     };
 
     if (!isPriv) {
+      appendPersonalCard();
       const workspaceCard = document.createElement("div");
       workspaceCard.className = "company-card";
       workspaceCard.dataset.action = "holding-tenant";
@@ -3655,24 +3703,10 @@ const renderCompanyCards = () => {
         <a class="card-link" href="?holding=1&mode=tenant&workspace=modernia&view=overview" data-action="holding-tenant">Entrar</a>
       `;
       coreCards.appendChild(workspaceCard);
-      if (timeProfile && enabledModules.has("registro_horario")) {
-        const timeCard = document.createElement("div");
-        timeCard.className = "company-card";
-        timeCard.dataset.action = "time-home";
-        const entryLabel = timeProfile.latestEntry
-          ? `${timeProfile.latestEntry.hora_inicio || "--:--"}${timeProfile.latestEntry.hora_fin ? ` - ${timeProfile.latestEntry.hora_fin}` : " · Abierto"}`
-          : "Sin fichaje de hoy";
-        timeCard.innerHTML = `
-          <h3>Mi registro horario</h3>
-          <div class="company-meta">${timeProfile.employee.empresa_nombre || "Grupo Modernia"} · ${timeProfile.employee.tipo_jornada || "Completa"}</div>
-          <div class="company-meta">${entryLabel}</div>
-          <a class="card-link" href="?holding=1&mode=tenant&workspace=modernia&view=motores&engine=registro_horario" data-action="time-home">Abrir ficha</a>
-        `;
-        coreCards.appendChild(timeCard);
-      }
       return;
     }
 
+    appendPersonalCard();
     const platformCard = document.createElement("div");
     platformCard.className = "company-card";
     platformCard.dataset.action = "holding-admin";
@@ -3694,21 +3728,6 @@ const renderCompanyCards = () => {
       <a class="card-link" href="?holding=1&mode=tenant&workspace=modernia&view=overview" data-action="holding-tenant">Entrar</a>
     `;
     coreCards.appendChild(tenantCard);
-    if (timeProfile && enabledModules.has("registro_horario")) {
-      const timeCard = document.createElement("div");
-      timeCard.className = "company-card";
-      timeCard.dataset.action = "time-home";
-      const entryLabel = timeProfile.latestEntry
-        ? `${timeProfile.latestEntry.hora_inicio || "--:--"}${timeProfile.latestEntry.hora_fin ? ` - ${timeProfile.latestEntry.hora_fin}` : " · Abierto"}`
-        : "Sin fichaje de hoy";
-      timeCard.innerHTML = `
-        <h3>Mi registro horario</h3>
-        <div class="company-meta">${timeProfile.employee.empresa_nombre || "Grupo Modernia"} · ${timeProfile.employee.tipo_jornada || "Completa"}</div>
-        <div class="company-meta">${entryLabel}</div>
-        <a class="card-link" href="?holding=1&mode=tenant&workspace=modernia&view=motores&engine=registro_horario" data-action="time-home">Abrir ficha</a>
-      `;
-      coreCards.appendChild(timeCard);
-    }
   }
 };
 
@@ -5946,11 +5965,12 @@ const isWorkspaceRrhhManager = () => isWorkspaceTimeManager();
   const companyQuery = state.currentWorkspaceCompanyId ? `&empresa_id=${encodeURIComponent(state.currentWorkspaceCompanyId)}` : "";
   const scopePersonaId = state.workspaceRrhhScopeAll && isWorkspaceRrhhManager() ? "" : selectedPersonaId;
   const personaQuery = scopePersonaId ? `&persona_id=${encodeURIComponent(scopePersonaId)}` : "";
+  const ausenciasMonthQuery = manager ? `&month=${encodeURIComponent(month)}` : "";
 
   const year = (String(month || "").slice(0, 4) || String(new Date().getFullYear())).trim();
   const [profile, ausencias, gastos, docs, timeSummary, timeRows, vacSummary] = await Promise.all([
     scopePersonaId ? safeWorkspaceApi(`/api/workspace_rrhh_profile?workspace_id=${encodeURIComponent(workspaceId)}&persona_id=${encodeURIComponent(scopePersonaId)}`, { row: {} }) : { row: {} },
-    safeWorkspaceApi(`/api/workspace_rrhh_ausencias?workspace_id=${encodeURIComponent(workspaceId)}&month=${encodeURIComponent(month)}${companyQuery}${personaQuery}`, { rows: [] }),
+    safeWorkspaceApi(`/api/workspace_rrhh_ausencias?workspace_id=${encodeURIComponent(workspaceId)}${ausenciasMonthQuery}${companyQuery}${personaQuery}`, { rows: [] }),
     safeWorkspaceApi(`/api/workspace_rrhh_gastos?workspace_id=${encodeURIComponent(workspaceId)}&month=${encodeURIComponent(month)}${companyQuery}${personaQuery}`, { rows: [] }),
     safeWorkspaceApi(`/api/workspace_rrhh_documentos?workspace_id=${encodeURIComponent(workspaceId)}${companyQuery}${personaQuery}`, { rows: [] }),
     safeWorkspaceApi(`/api/workspace_registro_horario_resumen?workspace_id=${encodeURIComponent(workspaceId)}&month=${encodeURIComponent(month)}${companyQuery}${personaQuery}`, {}),
@@ -5987,7 +6007,7 @@ const renderWorkspaceRrhhHub = () => {
   if (!manager && ["equipo", "usuarios"].includes(tab)) tab = "plantilla";
   state.workspaceRrhhTab = tab;
   const scopeAll = Boolean(state.workspaceRrhhScopeAll && manager);
-  const wideLayout = Boolean(manager && tab === "equipo");
+  const wideLayout = Boolean((manager && tab === "equipo") || !manager);
 
   const renderEmployeeList = () => {
     if (!manager) return "";
@@ -6124,11 +6144,11 @@ const renderWorkspaceRrhhHub = () => {
   const renderTabs = () => `
     <div class="workspace-rrhh-tabs">
       ${[
-        ...(manager ? [{ key: "equipo", label: "Equipo" }] : [{ key: "plantilla", label: "Mi ficha" }]),
+        ...(manager ? [{ key: "equipo", label: "Equipo" }] : [{ key: "plantilla", label: "Personal" }]),
         { key: "horario", label: "Horario" },
         { key: "ausencias", label: "Ausencias" },
         { key: "gastos", label: "Gastos" },
-        { key: "docs", label: "Documentos" },
+        { key: "docs", label: "Documentación" },
       ]
         .map(
           (item) => `
@@ -6916,66 +6936,218 @@ const renderWorkspaceRrhhHub = () => {
     `;
   };
 
-  const renderPlantilla = () => `
-    <div class="workspace-rrhh-panel-card">
-      <div class="section-head">
-        <div>
-          <h4>${escapeHtml(headerEmployeeLabel())}</h4>
-          <p class="muted">Ficha laboral y accesos directos al registro horario.</p>
+  const renderPlantilla = () => {
+    if (!manager) {
+      if (!selectedEmployee || scopeAll) {
+        return `
+          <div class="workspace-rrhh-panel-card">
+            <div class="section-head">
+              <div>
+                <h4>Personal</h4>
+                <p class="muted">No hay ficha vinculada a tu usuario todavía.</p>
+              </div>
+            </div>
+            <p class="muted">Pide a un administrador que te asigne una ficha de plantilla.</p>
+          </div>
+        `;
+      }
+      const employee = selectedEmployee;
+      const photoUrl = String(employee.foto_url || "").trim();
+      const displayName = employee.nombre || "Empleado";
+      const initials =
+        String(displayName || "")
+          .trim()
+          .split(/\s+/)
+          .filter(Boolean)
+          .slice(0, 2)
+          .map((p) => p[0])
+          .join("")
+          .toUpperCase() || "U";
+      const now = new Date();
+      const todayStr = now.toISOString().slice(0, 10);
+      const parseDateLocal = (iso) => {
+        const s = String(iso || "").slice(0, 10);
+        const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+        if (!m) return null;
+        return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+      };
+      const startOfWeek = (d) => {
+        const copy = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+        const day = copy.getDay();
+        const diff = day === 0 ? -6 : 1 - day;
+        copy.setDate(copy.getDate() + diff);
+        copy.setHours(0, 0, 0, 0);
+        return copy;
+      };
+      const weekStart = startOfWeek(now);
+      const weekEnd = new Date(weekStart);
+      weekEnd.setDate(weekStart.getDate() + 6);
+      weekEnd.setHours(23, 59, 59, 999);
+      const within = (iso, start, end) => {
+        const d = parseDateLocal(iso);
+        if (!d) return false;
+        const t = d.getTime();
+        return t >= start.getTime() && t <= end.getTime();
+      };
+      const toMinutes = (row) => {
+        const val = Number(row?.minutos_trabajados ?? row?.minutos ?? 0);
+        if (!Number.isNaN(val) && val > 0) return val;
+        const hi = String(row?.hora_inicio || "").trim();
+        const hf = String(row?.hora_fin || "").trim();
+        const m1 = /^(\d{2}):(\d{2})$/.exec(hi);
+        const m2 = /^(\d{2}):(\d{2})$/.exec(hf);
+        if (!m1 || !m2) return 0;
+        const a = Number(m1[1]) * 60 + Number(m1[2]);
+        const b = Number(m2[1]) * 60 + Number(m2[2]);
+        return b > a ? b - a : 0;
+      };
+      const formatHours = (min) => {
+        const h = (Number(min || 0) || 0) / 60;
+        return `${Math.round(h * 10) / 10} h`;
+      };
+
+      const todayEntries = (timeRows || []).filter((row) => String(row.fecha || "").slice(0, 10) === todayStr);
+      const todayIn = todayEntries.map((r) => String(r.hora_inicio || "").trim()).filter(Boolean).sort()[0] || "";
+      const todayOut = todayEntries.map((r) => String(r.hora_fin || "").trim()).filter(Boolean).sort().slice(-1)[0] || "";
+      const openToday = todayEntries.find((r) => !String(r.hora_fin || "").trim()) || null;
+      const todayLabel = todayIn
+        ? `${todayIn}${todayOut ? ` - ${todayOut}` : (openToday ? " · Abierto" : "")}`
+        : "Sin fichaje";
+
+      const weekMin = (timeRows || [])
+        .filter((row) => within(row.fecha, weekStart, weekEnd))
+        .reduce((acc, row) => acc + toMinutes(row), 0);
+      const monthMin = (timeRows || []).reduce((acc, row) => acc + toMinutes(row), 0);
+
+      const annual = Number(profile?.vacaciones_dias_anuales || 22) || 22;
+      const yearText = String(now.getFullYear());
+      const countBusinessDaysThisYear = (startIso, endIso) => {
+        const start = parseDateLocal(startIso);
+        const end = parseDateLocal(endIso);
+        if (!start || !end || end < start) return 0;
+        let days = 0;
+        const cur = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+        const last = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+        while (cur <= last) {
+          const y = String(cur.getFullYear());
+          const dow = cur.getDay();
+          if (y === yearText && dow !== 0 && dow !== 6) days += 1;
+          cur.setDate(cur.getDate() + 1);
+        }
+        return days;
+      };
+      const vacacionesUsadas = (ausencias || [])
+        .filter((row) => String(row.tipo || "").toLowerCase() === "vacaciones" && String(row.estado || "").toLowerCase() === "aprobada")
+        .reduce((acc, row) => acc + countBusinessDaysThisYear(row.fecha_inicio, row.fecha_fin), 0);
+      const vacacionesPendientes = Math.max(0, annual - vacacionesUsadas);
+      const vacPct = annual > 0 ? Math.max(0, Math.min(100, (vacacionesUsadas / annual) * 100)) : 0;
+
+      return `
+        <div class="workspace-rrhh-panel-card">
+          <div class="section-head">
+            <div>
+              <h4>${escapeHtml(displayName)}${employee.empresa_nombre ? ` · ${escapeHtml(employee.empresa_nombre)}` : ""}</h4>
+              <p class="muted">Tu dashboard personal, foto y accesos a documentación.</p>
+            </div>
+            <div class="section-head-actions">
+              <button type="button" class="secondary ghost button-inline" data-rrhh-open-time>Registro horario</button>
+              <button type="button" class="secondary ghost button-inline" data-rrhh-tab="docs">Documentación</button>
+            </div>
+          </div>
+          <div class="rrhh-photo-row">
+            <div class="rrhh-avatar rrhh-avatar-lg">
+              ${photoUrl ? `<img id="rrhhSelfPhotoPreview" src="${escapeHtml(photoUrl)}" alt="" />` : `<span id="rrhhSelfPhotoPreview" class="rrhh-avatar-initials">${escapeHtml(initials)}</span>`}
+            </div>
+            <div class="rrhh-photo-actions">
+              <strong>Mi foto</strong>
+              <div class="muted">Se muestra en tu ficha y en la card Personal.</div>
+              <input id="rrhhSelfPhotoInput" type="file" accept="image/*" />
+              <div id="rrhhSelfPhotoStatus" class="muted"></div>
+            </div>
+          </div>
+          <div class="workspace-mini-kpis" style="margin-top: 14px;">
+            <div class="workspace-mini-kpi"><span>Hoy</span><strong>${escapeHtml(todayLabel)}</strong></div>
+            <div class="workspace-mini-kpi"><span>Semana</span><strong>${escapeHtml(formatHours(weekMin))}</strong></div>
+            <div class="workspace-mini-kpi"><span>Mes</span><strong>${escapeHtml(formatHours(monthMin))}</strong></div>
+            <div class="workspace-mini-kpi"><span>Vacaciones</span><strong>${escapeHtml(String(vacacionesPendientes))} pendientes</strong></div>
+            <div class="workspace-mini-kpi"><span>Docs</span><strong>${escapeHtml(String((docs || []).length))}</strong></div>
+          </div>
+          <div class="rrhh-vac">
+            <div class="rrhh-vac-label">${escapeHtml(`Vacaciones usadas ${vacacionesUsadas}/${annual} (${yearText})`)}</div>
+            <div class="rrhh-vacbar"><div class="rrhh-vacbar-fill" style="width:${vacPct}%;"></div></div>
+          </div>
+          <div class="workspace-rrhh-employee-kv" style="margin-top: 14px;">
+            <div><span class="muted">DNI</span><strong>${escapeHtml(employee.nif || "-")}</strong></div>
+            <div><span class="muted">Email</span><strong>${escapeHtml(employee.email || "-")}</strong></div>
+            <div><span class="muted">Teléfono</span><strong>${escapeHtml(employee.telefono || "-")}</strong></div>
+            <div><span class="muted">Jornada</span><strong>${escapeHtml(employee.tipo_jornada || "Completa")}${employee.horas_pactadas_dia ? ` · ${escapeHtml(String(employee.horas_pactadas_dia))} h/día` : ""}</strong></div>
+            <div><span class="muted">Fecha alta</span><strong>${escapeHtml(employee.fecha_alta || "-")}</strong></div>
+          </div>
+          <p class="muted" style="margin-top:10px;">Los datos laborales (puesto, contrato, empresa) se editan desde un usuario administrador.</p>
         </div>
-        <div class="section-head-actions">
-          ${manager && selectedEmployee && !scopeAll ? `<button type="button" class="secondary ghost button-inline" data-rrhh-employee-edit="${escapeHtml(selectedEmployee.id || "")}">Editar empleado</button>` : ""}
-          <button type="button" class="secondary ghost button-inline" data-rrhh-open-time>Ver registro horario</button>
+      `;
+    }
+
+    return `
+      <div class="workspace-rrhh-panel-card">
+        <div class="section-head">
+          <div>
+            <h4>${escapeHtml(headerEmployeeLabel())}</h4>
+            <p class="muted">Ficha laboral y accesos directos al registro horario.</p>
+          </div>
+          <div class="section-head-actions">
+            ${manager && selectedEmployee && !scopeAll ? `<button type="button" class="secondary ghost button-inline" data-rrhh-employee-edit="${escapeHtml(selectedEmployee.id || "")}">Editar empleado</button>` : ""}
+            <button type="button" class="secondary ghost button-inline" data-rrhh-open-time>Ver registro horario</button>
+          </div>
         </div>
+        ${selectedEmployee && !scopeAll ? `
+          <div class="workspace-rrhh-employee-kv">
+            <div><span class="muted">Empresa</span><strong>${escapeHtml(selectedEmployee.empresa_nombre || "-")}</strong></div>
+            <div><span class="muted">DNI</span><strong>${escapeHtml(selectedEmployee.nif || "-")}</strong></div>
+            <div><span class="muted">Email</span><strong>${escapeHtml(selectedEmployee.email || "-")}</strong></div>
+            <div><span class="muted">Jornada</span><strong>${escapeHtml(selectedEmployee.tipo_jornada || "Completa")}${selectedEmployee.horas_pactadas_dia ? ` · ${escapeHtml(String(selectedEmployee.horas_pactadas_dia))} h/día` : ""}</strong></div>
+          </div>
+        ` : ""}
+        ${!selectedPersonaId && !scopeAll ? "<p class='muted'>Selecciona un empleado.</p>" : ""}
+        <form id="workspaceRrhhProfileForm" class="form-grid ${!manager || !selectedPersonaId || scopeAll ? "hidden" : ""}">
+          <input type="hidden" name="workspace_id" value="${escapeHtml(state.currentWorkspaceId)}" />
+          <input type="hidden" name="persona_id" value="${escapeHtml(selectedPersonaId)}" />
+          <label>
+            Puesto
+            <input name="puesto" value="${escapeHtml(profile.puesto || "")}" />
+          </label>
+          <label>
+            Departamento
+            <input name="departamento" value="${escapeHtml(profile.departamento || "")}" />
+          </label>
+          <label>
+            Tipo contrato
+            <input name="tipo_contrato" value="${escapeHtml(profile.tipo_contrato || "")}" placeholder="Indefinido, temporal, prácticas..." />
+          </label>
+          <label>
+            Centro trabajo
+            <input name="centro_trabajo" value="${escapeHtml(profile.centro_trabajo || "")}" />
+          </label>
+          <label>
+            Fecha inicio
+            <input type="date" name="fecha_inicio" value="${escapeHtml(profile.fecha_inicio || "")}" />
+          </label>
+          <label>
+            Fecha fin
+            <input type="date" name="fecha_fin" value="${escapeHtml(profile.fecha_fin || "")}" />
+          </label>
+          <label class="span-2">
+            Notas
+            <textarea name="notas" rows="3">${escapeHtml(profile.notas || "")}</textarea>
+          </label>
+          <div class="form-actions span-2">
+            <button type="submit">Guardar ficha RRHH</button>
+            <span id="workspaceRrhhProfileStatus" class="muted"></span>
+          </div>
+        </form>
       </div>
-      ${selectedEmployee && !scopeAll ? `
-        <div class="workspace-rrhh-employee-kv">
-          <div><span class="muted">Empresa</span><strong>${escapeHtml(selectedEmployee.empresa_nombre || "-")}</strong></div>
-          <div><span class="muted">DNI</span><strong>${escapeHtml(selectedEmployee.nif || "-")}</strong></div>
-          <div><span class="muted">Email</span><strong>${escapeHtml(selectedEmployee.email || "-")}</strong></div>
-          <div><span class="muted">Jornada</span><strong>${escapeHtml(selectedEmployee.tipo_jornada || "Completa")}${selectedEmployee.horas_pactadas_dia ? ` · ${escapeHtml(String(selectedEmployee.horas_pactadas_dia))} h/día` : ""}</strong></div>
-        </div>
-      ` : ""}
-      ${!selectedPersonaId && !scopeAll ? "<p class='muted'>Selecciona un empleado.</p>" : ""}
-      <form id="workspaceRrhhProfileForm" class="form-grid ${!manager || !selectedPersonaId || scopeAll ? "hidden" : ""}">
-        <input type="hidden" name="workspace_id" value="${escapeHtml(state.currentWorkspaceId)}" />
-        <input type="hidden" name="persona_id" value="${escapeHtml(selectedPersonaId)}" />
-        <label>
-          Puesto
-          <input name="puesto" value="${escapeHtml(profile.puesto || "")}" />
-        </label>
-        <label>
-          Departamento
-          <input name="departamento" value="${escapeHtml(profile.departamento || "")}" />
-        </label>
-        <label>
-          Tipo contrato
-          <input name="tipo_contrato" value="${escapeHtml(profile.tipo_contrato || "")}" placeholder="Indefinido, temporal, prácticas..." />
-        </label>
-        <label>
-          Centro trabajo
-          <input name="centro_trabajo" value="${escapeHtml(profile.centro_trabajo || "")}" />
-        </label>
-        <label>
-          Fecha inicio
-          <input type="date" name="fecha_inicio" value="${escapeHtml(profile.fecha_inicio || "")}" />
-        </label>
-        <label>
-          Fecha fin
-          <input type="date" name="fecha_fin" value="${escapeHtml(profile.fecha_fin || "")}" />
-        </label>
-        <label class="span-2">
-          Notas
-          <textarea name="notas" rows="3">${escapeHtml(profile.notas || "")}</textarea>
-        </label>
-        <div class="form-actions span-2">
-          <button type="submit">Guardar ficha RRHH</button>
-          <span id="workspaceRrhhProfileStatus" class="muted"></span>
-        </div>
-      </form>
-      ${!manager ? "<p class='muted'>La ficha laboral se edita desde un usuario administrador.</p>" : ""}
-    </div>
-  `;
+    `;
+  };
 
   const renderAusencias = () => `
     <div class="workspace-rrhh-panel-card">
@@ -7230,7 +7402,7 @@ const renderWorkspaceRrhhHub = () => {
 
   workspaceRrhhHub.innerHTML = `
     <div class="workspace-rrhh-layout" data-mode="${manager ? "manager" : "employee"}"${wideLayout ? ' style="grid-template-columns: 1fr;"' : ""}>
-      <aside class="workspace-rrhh-sidebar ${manager && tab === "equipo" ? "hidden" : ""}">
+      <aside class="workspace-rrhh-sidebar ${manager && tab === "equipo" ? "hidden" : ""} ${!manager ? "hidden" : ""}">
         <div class="section-head">
           <div>
             <h4>RRHH · ${escapeHtml(companyLabel)}</h4>
@@ -7283,6 +7455,55 @@ const renderWorkspaceRrhhHub = () => {
       renderWorkspaceRrhhHub();
     });
   });
+
+  const selfPhotoInput = document.getElementById("rrhhSelfPhotoInput");
+  if (selfPhotoInput) {
+    const status = document.getElementById("rrhhSelfPhotoStatus");
+    const personaId = String(selectedPersonaId || "").trim();
+    selfPhotoInput.addEventListener("change", async () => {
+      const file = selfPhotoInput.files && selfPhotoInput.files[0] ? selfPhotoInput.files[0] : null;
+      if (!file) return;
+      if (status) status.textContent = "Subiendo foto...";
+      try {
+        const upload = await uploadFileToS3(file, "rrhh_fotos", status);
+        const url = String(upload?.public_url || "").trim();
+        if (!url) throw new Error("No se pudo subir la foto.");
+        const res = await apiPost("/api/workspace_registro_personal_self_photo", {
+          workspace_id: state.currentWorkspaceId,
+          foto_url: url,
+        });
+        if (res?.error) throw new Error(res.error);
+        // Actualiza cache local para que se vea en ficha y en la home sin recargar todo el workspace.
+        const patchPhoto = (list) => {
+          if (!Array.isArray(list)) return;
+          list.forEach((row) => {
+            if (String(row?.id || "") === personaId) row.foto_url = url;
+          });
+        };
+        patchPhoto(state.workspaceTimeEmployees);
+        patchPhoto(state.currentWorkspaceData?.timeEmployees);
+        const preview = document.getElementById("rrhhSelfPhotoPreview");
+        if (preview) {
+          const tag = String(preview.tagName || "").toUpperCase();
+          if (tag === "IMG") {
+            preview.src = url;
+          } else {
+            const img = document.createElement("img");
+            img.id = "rrhhSelfPhotoPreview";
+            img.src = url;
+            img.alt = "";
+            preview.replaceWith(img);
+          }
+        }
+        if (status) status.textContent = "Foto guardada.";
+        renderCompanyCards();
+      } catch (error) {
+        if (status) status.textContent = error.message || "No se pudo guardar la foto.";
+      } finally {
+        selfPhotoInput.value = "";
+      }
+    });
+  }
 
   const rosterSearch = workspaceRrhhHub.querySelector("#workspaceRrhhRosterSearch");
   if (rosterSearch) {
