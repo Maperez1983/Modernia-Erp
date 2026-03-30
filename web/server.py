@@ -14978,6 +14978,7 @@ def ensure_workspace_product_tables(conn):
           empresa_id TEXT,
           empresa_manual INTEGER NOT NULL DEFAULT 0,
           usuario_id TEXT,
+          usuario_manual INTEGER NOT NULL DEFAULT 0,
           nombre TEXT NOT NULL,
           nif TEXT,
           email TEXT,
@@ -15090,6 +15091,7 @@ def ensure_workspace_product_tables(conn):
     ensure_column(conn, "workspace_registro_personal", "alert_admin_contact", "alert_admin_contact TEXT")
     ensure_column(conn, "workspace_registro_personal", "alert_last_sent", "alert_last_sent TEXT")
     ensure_column(conn, "workspace_registro_personal", "empresa_manual", "empresa_manual INTEGER NOT NULL DEFAULT 0")
+    ensure_column(conn, "workspace_registro_personal", "usuario_manual", "usuario_manual INTEGER NOT NULL DEFAULT 0")
     ensure_column(conn, "workspace_registro_audit", "empresa_id", "empresa_id TEXT")
     ensure_column(conn, "workspace_registro_audit", "persona_id", "persona_id TEXT")
     ensure_column(conn, "workspace_registro_audit", "entity_type", "entity_type TEXT")
@@ -16700,7 +16702,6 @@ def sync_workspace_time_personal_from_users(conn, workspace_id, empresa_id=None)
 
 
 def fetch_workspace_personal(conn, workspace_id, empresa_id=None, only_active=False, limit=200):
-    sync_workspace_time_personal_from_users(conn, workspace_id, empresa_id=empresa_id)
     empresa_ids = resolve_workspace_company_ids(conn, workspace_id, empresa_id=empresa_id)
     if not empresa_ids:
         return {"rows": []}
@@ -17487,7 +17488,7 @@ def workspace_persona_id_for_user(conn, workspace_id, user_id):
         """
         SELECT id
         FROM workspace_registro_personal
-        WHERE workspace_id = ? AND usuario_id = ? AND COALESCE(activo, 1) = 1
+        WHERE workspace_id = ? AND usuario_id = ? AND COALESCE(usuario_manual, 0) = 1 AND COALESCE(activo, 1) = 1
         LIMIT 1
         """,
         (workspace_id, user_id),
@@ -23032,11 +23033,13 @@ class Handler(BaseHTTPRequestHandler):
                 horas_pactadas_semana = None
             active_flag = 0 if str(payload.get("activo") or "1").strip().lower() in {"0", "false", "no", "off"} else 1
             usuario_id_value = str(payload.get("usuario_id") or "").strip() or None
+            usuario_manual_flag = 1 if usuario_id_value else 0
             values = (
                 workspace_id,
                 empresa_id,
                 manual_flag,
                 usuario_id_value,
+                usuario_manual_flag,
                 nombre,
                 str(payload.get("nif") or "").strip() or None,
                 str(payload.get("email") or "").strip() or None,
@@ -23057,7 +23060,7 @@ class Handler(BaseHTTPRequestHandler):
                 conn.execute(
                     """
                     UPDATE workspace_registro_personal
-                    SET workspace_id = ?, empresa_id = ?, empresa_manual = ?, usuario_id = ?, nombre = ?, nif = ?, email = ?, telefono = ?,
+                    SET workspace_id = ?, empresa_id = ?, empresa_manual = ?, usuario_id = ?, usuario_manual = ?, nombre = ?, nif = ?, email = ?, telefono = ?,
                         tipo_jornada = ?, horas_pactadas_dia = ?, horas_pactadas_semana = ?, fecha_alta = ?, fecha_baja = ?,
                         activo = ?, notas = ?, updated_at = datetime(?)
                     WHERE id = ? AND workspace_id = ?
@@ -23069,13 +23072,23 @@ class Handler(BaseHTTPRequestHandler):
                 conn.execute(
                     """
                     INSERT INTO workspace_registro_personal (
-                      id, workspace_id, empresa_id, empresa_manual, usuario_id, nombre, nif, email, telefono, tipo_jornada,
+                      id, workspace_id, empresa_id, empresa_manual, usuario_id, usuario_manual, nombre, nif, email, telefono, tipo_jornada,
                       horas_pactadas_dia, horas_pactadas_semana, fecha_alta, fecha_baja, activo, notas, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
                     """,
                     (record_id, *values, now, now),
                 )
                 prev = None
+            # Garantiza unicidad del vínculo: un usuario del sistema solo puede estar en una ficha por workspace.
+            if usuario_id_value:
+                conn.execute(
+                    """
+                    UPDATE workspace_registro_personal
+                    SET usuario_id = NULL, usuario_manual = 0, updated_at = datetime(?)
+                    WHERE workspace_id = ? AND usuario_id = ? AND id != ?
+                    """,
+                    (now, workspace_id, usuario_id_value, record_id),
+                )
             # Si vinculamos a un usuario del sistema, activamos el registro horario para evitar que el sync lo desactive.
             if usuario_id_value and active_flag == 1:
                 conn.execute(
@@ -23124,8 +23137,6 @@ class Handler(BaseHTTPRequestHandler):
                 "UPDATE usuarios SET registro_horario_activo = ?, updated_at = datetime(?) WHERE id = ?",
                 (enabled, now, usuario_id),
             )
-            # Sincroniza plantilla de personal para reflejar el cambio inmediatamente.
-            sync_workspace_time_personal_from_users(conn, workspace_id)
             after_user = conn.execute(
                 "SELECT id, nombre, apellido, usuario, email, servicio, rol, activo, COALESCE(registro_horario_activo, 0) AS registro_horario_activo FROM usuarios WHERE id = ? LIMIT 1",
                 (usuario_id,),
@@ -30369,13 +30380,12 @@ class Handler(BaseHTTPRequestHandler):
                 if not user_id:
                     json_response(self, {"error": "No autenticado"}, status=401)
                     return
-                sync_workspace_time_personal_from_users(conn, workspace_id, empresa_id=empresa_id)
                 row = conn.execute(
                     """
                     SELECT p.*, COALESCE(e.nombre, '') AS empresa_nombre
                     FROM workspace_registro_personal p
                     LEFT JOIN empresas e ON e.id = p.empresa_id
-                    WHERE p.workspace_id = ? AND p.usuario_id = ? AND COALESCE(p.activo, 1) = 1
+                    WHERE p.workspace_id = ? AND p.usuario_id = ? AND COALESCE(p.usuario_manual, 0) = 1 AND COALESCE(p.activo, 1) = 1
                     LIMIT 1
                     """,
                     (workspace_id, user_id),

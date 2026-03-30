@@ -5867,13 +5867,13 @@ const normalizeWorkspaceRrhhTab = (value = "") => {
 
 const isWorkspaceRrhhManager = () => isWorkspaceTimeManager();
 
-const resolveWorkspacePersonaForAuthUser = () => {
-  const user = getAuthScopeUser();
-  if (!user?.id) return "";
-  const employees = Array.isArray(state.workspaceTimeEmployees) ? state.workspaceTimeEmployees : [];
-  const match = employees.find((row) => String(row.usuario_id || "") === String(user.id || ""));
-  return match?.id || "";
-};
+  const resolveWorkspacePersonaForAuthUser = () => {
+    const user = getAuthScopeUser();
+    if (!user?.id) return "";
+    const employees = Array.isArray(state.workspaceTimeEmployees) ? state.workspaceTimeEmployees : [];
+    const match = employees.find((row) => Number(row.usuario_manual || 0) === 1 && String(row.usuario_id || "") === String(user.id || ""));
+    return match?.id || "";
+  };
 
 const refreshWorkspaceRrhh = async () => {
   if (!workspaceRrhhHub) return;
@@ -5956,17 +5956,18 @@ const renderWorkspaceRrhhHub = () => {
     });
     const linkedUserIds = new Set(
       normalized
+        .filter((row) => Number(row.usuario_manual || 0) === 1)
         .map((row) => String(row.usuario_id || "").trim())
         .filter(Boolean)
     );
     const userToPersona = new Map(
       normalized
-        .filter((row) => String(row.usuario_id || "").trim())
+        .filter((row) => Number(row.usuario_manual || 0) === 1 && String(row.usuario_id || "").trim())
         .map((row) => [String(row.usuario_id || "").trim(), String(row.id || "").trim()])
     );
     const userToEmployee = new Map(
       normalized
-        .filter((row) => String(row.usuario_id || "").trim())
+        .filter((row) => Number(row.usuario_manual || 0) === 1 && String(row.usuario_id || "").trim())
         .map((row) => [String(row.usuario_id || "").trim(), row])
     );
     // Fuente de "usuarios del sistema": preferimos /api/workspace_registro_usuarios (mapeado a empresa),
@@ -5978,7 +5979,7 @@ const renderWorkspaceRrhhHub = () => {
       ? `
         <div class="workspace-rrhh-empty">
           <p class="muted">Sin empleados todavía en este workspace.</p>
-          <p class="muted">Puedes dar de alta un empleado manual o activar un usuario del sistema para que se sincronice con la plantilla.</p>
+          <p class="muted">Puedes dar de alta un empleado manual o activar un usuario del sistema y añadirlo a la plantilla cuando quieras.</p>
         </div>
       `
       : "";
@@ -6008,12 +6009,12 @@ const renderWorkspaceRrhhHub = () => {
             return `
               <button type="button" class="workspace-rrhh-employee${active ? " is-active" : ""}${inactive ? " is-inactive" : ""}" data-rrhh-persona="${row.id || ""}">
                 <strong>${escapeHtml(row.nombre || "-")}</strong>
-                <span>${escapeHtml(row.empresa_nombre || row.empresa || "")}${row.usuario_id ? " · Vinculado" : ""}${inactive ? " · Inactivo" : ""}</span>
+                <span>${escapeHtml(row.empresa_nombre || row.empresa || "")}${Number(row.usuario_manual || 0) === 1 && row.usuario_id ? " · Vinculado" : ""}${inactive ? " · Inactivo" : ""}</span>
               </button>
             `;
           })
           .join("")}
-      </div>
+    </div>
       <details class="workspace-rrhh-sysusers" ${empty ? "open" : ""}>
         <summary>Usuarios del sistema (${numberFormatter.format(enabledUsers.length)} activos)</summary>
         <div class="workspace-rrhh-sysuser-list">
@@ -6196,7 +6197,7 @@ const renderWorkspaceRrhhHub = () => {
               </label>
               <label class="inline-check span-2">
                 <input type="checkbox" name="registro_horario_activo" value="1" ${Number(selected?.registro_horario_activo || 0) === 1 ? "checked" : ""} />
-                Activar registro horario (aparecerá en plantilla)
+                Activar registro horario (podrás añadirlo a plantilla)
               </label>
               <label class="span-2">
                 Contraseña ${selected ? "(opcional: para cambiar)" : "(opcional)"}
