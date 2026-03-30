@@ -24,7 +24,7 @@ import textwrap
 import xml.etree.ElementTree as ET
 from io import BytesIO
 from copy import copy as shallow_copy
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, date
 from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
 from pathlib import Path
 import unicodedata

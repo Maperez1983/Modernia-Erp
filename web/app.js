@@ -6725,12 +6725,11 @@ const renderWorkspaceRrhhHub = () => {
       }
       button.disabled = true;
       try {
-        const res = await fetch("/api/workspace_registro_usuario_toggle", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ workspace_id: state.currentWorkspaceId, usuario_id: userId, enabled: 1 }),
-        }).then((r) => r.json());
-        if (res?.error) throw new Error(res.error);
+        await apiPost("/api/workspace_registro_usuario_toggle", {
+          workspace_id: state.currentWorkspaceId,
+          usuario_id: userId,
+          enabled: 1,
+        });
         await loadWorkspaceDetail(state.currentWorkspaceId);
         const rows = Array.isArray(state.workspaceTimeEmployees) ? state.workspaceTimeEmployees : [];
         const linked = rows.find((row) => String(row.usuario_id || "").trim() === userId) || null;
@@ -6755,12 +6754,11 @@ const renderWorkspaceRrhhHub = () => {
       if (!userId) return;
       button.disabled = true;
       try {
-        const res = await fetch("/api/workspace_registro_usuario_toggle", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ workspace_id: state.currentWorkspaceId, usuario_id: userId, enabled: next }),
-        }).then((r) => r.json());
-        if (res?.error) throw new Error(res.error);
+        await apiPost("/api/workspace_registro_usuario_toggle", {
+          workspace_id: state.currentWorkspaceId,
+          usuario_id: userId,
+          enabled: next,
+        });
         await loadWorkspaceDetail(state.currentWorkspaceId);
       } catch (error) {
         alert(error.message || "No se pudo actualizar el usuario.");
@@ -6852,11 +6850,11 @@ const renderWorkspaceRrhhHub = () => {
           finalId = match?.id || "";
         }
         if (finalId && state.currentWorkspaceId) {
-          await fetch("/api/workspace_registro_usuario_toggle", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ workspace_id: state.currentWorkspaceId, usuario_id: finalId, enabled: payload.registro_horario_activo ? 1 : 0 }),
-          }).then((r) => r.json()).catch(() => ({}));
+          await apiPost("/api/workspace_registro_usuario_toggle", {
+            workspace_id: state.currentWorkspaceId,
+            usuario_id: finalId,
+            enabled: payload.registro_horario_activo ? 1 : 0,
+          }).catch(() => ({}));
         }
         await loadWorkspaceDetail(state.currentWorkspaceId);
         state.workspaceRrhhSelectedUserId = finalId;
