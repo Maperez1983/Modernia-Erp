@@ -3921,6 +3921,8 @@ const findWorkspaceRecord = (rows = [], identifier = "") => {
 
 const updateWorkspaceEntryChrome = () => {
   const mode = state.currentWorkspaceEntryMode || "platform";
+  const authUser = getAuthScopeUser();
+  const canManageWorkspace = Boolean(authUser && isPrivilegedUser(authUser));
   const workspaceSource =
     state.currentWorkspaceDetail?.workspace?.nombre
     || state.currentWorkspaceName
@@ -3942,17 +3944,26 @@ const updateWorkspaceEntryChrome = () => {
     holdingBackBtn.textContent = mode === "tenant" ? "Volver al panel" : "Volver al panel";
   }
   const tenantOperationalMode = mode === "tenant";
-  if (workspaceViewTabs) workspaceViewTabs.classList.toggle("hidden", tenantOperationalMode);
+  if (workspaceViewTabs) workspaceViewTabs.classList.remove("hidden");
   if (workspaceCompanySwitcher) workspaceCompanySwitcher.classList.toggle("hidden", tenantOperationalMode);
   if (workspaceKpis) workspaceKpis.classList.toggle("hidden", tenantOperationalMode);
   if (workspaceOverviewHealth) workspaceOverviewHealth.classList.toggle("hidden", tenantOperationalMode);
   if (workspaceOverviewCommercial) workspaceOverviewCommercial.classList.toggle("hidden", tenantOperationalMode);
   if (workspaceOverviewLauncherCard) workspaceOverviewLauncherCard.classList.toggle("tenant-home-card", tenantOperationalMode);
+  const overviewBtn = workspaceViewTabs ? workspaceViewTabs.querySelector('[data-workspace-view-tab="overview"]') : null;
+  if (overviewBtn) {
+    overviewBtn.textContent = tenantOperationalMode ? "Operativa" : "Resumen";
+  }
   workspaceViewButtons.forEach((button) => {
     const viewKey = button.dataset.workspaceViewTab || "";
-    if (viewKey === "tenant") {
-      button.classList.toggle("hidden", mode === "tenant");
+    if (tenantOperationalMode) {
+      const shouldShow = viewKey === "overview" || (viewKey === "tenant" && canManageWorkspace);
+      button.classList.toggle("hidden", !shouldShow);
+      button.disabled = viewKey === "tenant" && !canManageWorkspace;
+      return;
     }
+    button.classList.remove("hidden");
+    button.disabled = false;
   });
 };
 
@@ -4200,11 +4211,15 @@ const setWorkspaceEngineView = (engine = "documental") => {
 const setWorkspaceView = (view = "overview", options = {}) => {
   const { scroll = false, forceTenantView = false } = options;
   let normalized = normalizeWorkspaceViewKey(view);
-  if (isTenantWorkspaceMode() && !forceTenantView) {
+  const tenantMode = (state.currentWorkspaceEntryMode || "platform") === "tenant";
+  if (tenantMode && !forceTenantView && normalized !== "tenant") {
     normalized = "overview";
   }
-  if ((state.currentWorkspaceEntryMode || "platform") === "tenant" && normalized === "tenant") {
-    normalized = "operations";
+  if (tenantMode && normalized === "tenant") {
+    const user = getAuthScopeUser();
+    if (!isPrivilegedUser(user)) {
+      normalized = "overview";
+    }
   }
   state.currentWorkspaceView = normalized;
   workspaceViewButtons.forEach((button) => {
