@@ -5885,6 +5885,14 @@ const refreshWorkspaceRrhh = async () => {
   const month = normalizeMonthValue(state.workspaceRrhhMonth || state.workspaceTimeMonth || "");
   state.workspaceRrhhMonth = month;
   state.workspaceRrhhTab = normalizeWorkspaceRrhhTab(state.workspaceRrhhTab);
+  // UX: para admin, centralizamos en "Equipo" (Plantilla/Usuarios se integran ahí).
+  if (manager && ["plantilla", "usuarios"].includes(state.workspaceRrhhTab)) {
+    state.workspaceRrhhTab = "equipo";
+  }
+  // Para trabajador, solo su ficha (no Equipo/Usuarios).
+  if (!manager && ["equipo", "usuarios"].includes(state.workspaceRrhhTab)) {
+    state.workspaceRrhhTab = "plantilla";
+  }
 
   if (!manager) {
     state.workspaceRrhhScopeAll = false;
@@ -5955,7 +5963,9 @@ const renderWorkspaceRrhhHub = () => {
   const selectedEmployee = employees.find((row) => String(row.id || "") === selectedPersonaId) || null;
   const companyLabel = getWorkspaceCompanyContextLabel();
   let tab = normalizeWorkspaceRrhhTab(state.workspaceRrhhTab);
-  if (!manager && tab === "usuarios") tab = "plantilla";
+  if (manager && ["plantilla", "usuarios"].includes(tab)) tab = "equipo";
+  if (!manager && ["equipo", "usuarios"].includes(tab)) tab = "plantilla";
+  state.workspaceRrhhTab = tab;
   const scopeAll = Boolean(state.workspaceRrhhScopeAll && manager);
 
   const renderEmployeeList = () => {
@@ -6093,13 +6103,11 @@ const renderWorkspaceRrhhHub = () => {
   const renderTabs = () => `
     <div class="workspace-rrhh-tabs">
       ${[
-        { key: "plantilla", label: "Plantilla" },
-        ...(manager ? [{ key: "equipo", label: "Equipo" }] : []),
+        ...(manager ? [{ key: "equipo", label: "Equipo" }] : [{ key: "plantilla", label: "Mi ficha" }]),
         { key: "horario", label: "Horario" },
         { key: "ausencias", label: "Ausencias" },
         { key: "gastos", label: "Gastos" },
         { key: "docs", label: "Documentos" },
-        ...(manager ? [{ key: "usuarios", label: "Usuarios" }] : []),
       ]
         .map(
           (item) => `
@@ -6306,12 +6314,19 @@ const renderWorkspaceRrhhHub = () => {
       `<option value="">Selecciona empresa</option>`,
       ...companies.map((c) => `<option value="${escapeHtml(String(c.id || ""))}">${escapeHtml(c.nombre || "-")}</option>`),
     ].join("");
+    const unlinkedEmployees = employees
+      .filter((row) => String(row?.source || "").trim() !== "auto")
+      .filter((row) => Number(row?.usuario_manual || 0) !== 1)
+      .sort((a, b) => String(a?.nombre || "").localeCompare(String(b?.nombre || ""), "es", { sensitivity: "base" }));
     return `
       <div class="workspace-rrhh-panel-card">
         <div class="section-head">
           <div>
             <h4>Equipo</h4>
             <p class="muted">Listado de usuarios actuales. Crea/edita su ficha de plantilla (empresa, jornada, horas) de forma manual.</p>
+          </div>
+          <div class="section-head-actions">
+            <button type="button" class="secondary ghost button-inline" data-rrhh-employee-new>Alta empleado</button>
           </div>
         </div>
         <label>
@@ -6377,6 +6392,34 @@ const renderWorkspaceRrhhHub = () => {
           }
         </div>
         <div id="workspaceRrhhRosterStatus" class="muted"></div>
+        ${unlinkedEmployees.length ? `
+          <div class="workspace-rrhh-panel-card" style="margin-top: 14px;">
+            <div class="section-head">
+              <div>
+                <h4>Empleados sin usuario</h4>
+                <p class="muted">Fichas creadas manualmente (sin login). Puedes editarlas y vincularlas después si lo necesitas.</p>
+              </div>
+            </div>
+            <div class="workspace-rrhh-list">
+              ${unlinkedEmployees.map((row) => `
+                <div class="workspace-rrhh-row">
+                  <div>
+                    <strong>${escapeHtml(row.nombre || "-")}</strong>
+                    <div class="muted">${escapeHtml(row.empresa_nombre || "-")}${Number(row.activo ?? 1) === 1 ? "" : " · Inactivo"}</div>
+                    <div class="muted">${escapeHtml(row.nif || "-")}${row.email ? ` · ${escapeHtml(row.email)}` : ""}${row.telefono ? ` · ${escapeHtml(row.telefono)}` : ""}</div>
+                  </div>
+                  <div class="workspace-rrhh-row-actions">
+                    <button type="button" class="secondary ghost button-inline" data-rrhh-employee-edit="${escapeHtml(String(row.id || ""))}">Editar</button>
+                  </div>
+                </div>
+              `).join("")}
+            </div>
+          </div>
+        ` : ""}
+        <details class="workspace-rrhh-sysusers" style="margin-top: 14px;">
+          <summary>Usuarios del sistema (login) · Crear/editar</summary>
+          ${renderUsuarios()}
+        </details>
       </div>
     `;
   };
@@ -6740,36 +6783,37 @@ const renderWorkspaceRrhhHub = () => {
   `;
 
   const panelHtml =
-    tab === "plantilla" ? renderPlantilla()
-    : tab === "equipo" ? renderEquipo()
+    tab === "equipo" ? renderEquipo()
+    : tab === "plantilla" ? renderPlantilla()
     : tab === "horario" ? renderHorario()
     : tab === "ausencias" ? renderAusencias()
     : tab === "gastos" ? renderGastos()
-    : tab === "usuarios" ? renderUsuarios()
     : renderDocs();
 
   workspaceRrhhHub.innerHTML = `
     <div class="workspace-rrhh-layout" data-mode="${manager ? "manager" : "employee"}">
-      <aside class="workspace-rrhh-sidebar">
+      <aside class="workspace-rrhh-sidebar ${manager && tab === "equipo" ? "hidden" : ""}">
         <div class="section-head">
           <div>
             <h4>RRHH · ${escapeHtml(companyLabel)}</h4>
             <p class="muted">${manager ? "Configura plantilla y gestiona solicitudes del equipo." : "Tu ficha, solicitudes y documentación."}</p>
           </div>
         </div>
-	        <div class="workspace-rrhh-controls">
-	          <label>
-	            Mes
-	            <input id="workspaceRrhhMonth" type="month" />
-	          </label>
-	          ${manager ? `
-	            <label class="inline-check">
-	              <input id="workspaceRrhhScopeAll" type="checkbox" ${scopeAll ? "checked" : ""} />
-	              Ver todo el equipo
+        ${manager && tab === "equipo" ? "" : `
+          <div class="workspace-rrhh-controls">
+            <label>
+              Mes
+              <input id="workspaceRrhhMonth" type="month" />
             </label>
-          ` : ""}
-        </div>
-        ${renderEmployeeList()}
+            ${manager ? `
+              <label class="inline-check">
+                <input id="workspaceRrhhScopeAll" type="checkbox" ${scopeAll ? "checked" : ""} />
+                Ver todo el equipo
+              </label>
+            ` : ""}
+          </div>
+          ${renderEmployeeList()}
+        `}
       </aside>
       <section class="workspace-rrhh-main">
         ${renderTabs()}
@@ -6796,7 +6840,8 @@ const renderWorkspaceRrhhHub = () => {
 
   workspaceRrhhHub.querySelectorAll("[data-rrhh-tab]").forEach((btn) => {
     btn.addEventListener("click", () => {
-      state.workspaceRrhhTab = normalizeWorkspaceRrhhTab(btn.dataset.rrhhTab || "plantilla");
+      const fallback = isWorkspaceRrhhManager() ? "equipo" : "plantilla";
+      state.workspaceRrhhTab = normalizeWorkspaceRrhhTab(btn.dataset.rrhhTab || fallback);
       renderWorkspaceRrhhHub();
     });
   });
