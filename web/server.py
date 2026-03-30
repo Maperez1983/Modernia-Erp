@@ -20755,6 +20755,20 @@ class Handler(BaseHTTPRequestHandler):
         send_file(self, safe_path)
 
     def do_POST(self):
+        try:
+            self._do_POST()
+        except Exception as exc:
+            # Evita que una excepción no controlada cierre la conexión (Render lo reporta como 502).
+            try:
+                json_response(self, {"error": "API error", "detail": f"{type(exc).__name__}: {exc}"}, status=500)
+            except Exception:
+                try:
+                    self.send_error(500, "API error")
+                except Exception:
+                    pass
+            return
+
+    def _do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
         params = urllib.parse.parse_qs(parsed.query)
         if parsed.path not in (

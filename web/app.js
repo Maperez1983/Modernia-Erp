@@ -8332,12 +8332,7 @@ const renderWorkspaceRrhhHub = () => {
       try {
         const form = new FormData(profileForm);
         const payload = Object.fromEntries(form.entries());
-        const res = await fetch("/api/workspace_rrhh_profile", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        }).then((r) => r.json());
-        if (res.error) throw new Error(res.error);
+        await apiPost("/api/workspace_rrhh_profile", payload);
         if (status) status.textContent = "Guardado.";
         await refreshWorkspaceRrhh();
       } catch (err) {
@@ -36800,13 +36795,8 @@ if (workspaceTimeForm) {
     const payload = Object.fromEntries(formData.entries());
     payload.workspace_id = state.currentWorkspaceId;
     try {
-      const data = await fetch("/api/workspace_registro_horario", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      }).then((res) => res.json());
-      if (data?.error) throw new Error(data.error);
-      if (workspaceTimeStatus) workspaceTimeStatus.textContent = `Fichaje guardado.${data.automation_actions ? ` Automatizaciones: ${data.automation_actions}` : ""}`;
+      const data = await apiPost("/api/workspace_registro_horario", payload);
+      if (workspaceTimeStatus) workspaceTimeStatus.textContent = `Fichaje guardado.${data?.automation_actions ? ` Automatizaciones: ${data.automation_actions}` : ""}`;
       await loadWorkspaceDetail(state.currentWorkspaceId);
     } catch (error) {
       if (workspaceTimeStatus) workspaceTimeStatus.textContent = error.message || "No se pudo guardar.";
@@ -36832,12 +36822,7 @@ if (workspaceTimeForm) {
     const matchedCompany = companies.find((company) => String(company.id || "") === String(payload.empresa_id || ""));
     payload.empresa_nombre = matchedCompany?.nombre || "";
     try {
-      const data = await fetch("/api/workspace_registro_personal", {
-        method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload),
-          }).then((res) => res.json());
-      if (data?.error) throw new Error(data.error);
+      const data = await apiPost("/api/workspace_registro_personal", payload);
       if (workspaceTimeEmployeeStatus) workspaceTimeEmployeeStatus.textContent = "Persona guardada.";
       await loadWorkspaceDetail(state.currentWorkspaceId);
       if (data?.id) {
