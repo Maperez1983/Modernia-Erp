@@ -127,6 +127,25 @@ AUTH_SESSIONS = {}
 AUTH_SESSIONS_LOCK = threading.Lock()
 SQLITE_FOREIGN_KEYS_ENABLED = os.environ.get("APP_SQLITE_FOREIGN_KEYS", "1").strip().lower() not in ("0", "false", "no", "off")
 
+# Store de sesiones: "sqlite" (recomendado) o "memory" (solo dev).
+APP_SESSION_STORE = (os.environ.get("APP_SESSION_STORE") or "").strip().lower() or ("sqlite" if os.environ.get("RENDER") else "sqlite")
+SESSION_TOUCH_INTERVAL_SECONDS = max(30, int(os.environ.get("APP_SESSION_TOUCH_INTERVAL_SECONDS", "180")))
+SESSION_CLEANUP_INTERVAL_SECONDS = max(60, int(os.environ.get("APP_SESSION_CLEANUP_INTERVAL_SECONDS", "600")))
+_LAST_SESSION_CLEANUP_AT = 0.0
+
+# Cache local para no leer SQLite en cada request (sigue siendo multi-instancia porque SQLite es fuente de verdad).
+SESSION_CACHE_MAX = max(200, int(os.environ.get("APP_SESSION_CACHE_MAX", "1500")))
+AUTH_SESSION_CACHE = {}
+AUTH_SESSION_CACHE_LOCK = threading.Lock()
+
+# CORS: por defecto se permite solo el origen "mismo host" (y opcionalmente una lista).
+APP_CORS_ALLOW_ALL = os.environ.get("APP_CORS_ALLOW_ALL", "0").strip().lower() in ("1", "true", "yes", "on")
+APP_ALLOWED_ORIGINS = [
+    o.strip().rstrip("/")
+    for o in (os.environ.get("APP_ALLOWED_ORIGINS") or "").split(",")
+    if o.strip()
+]
+
 # Anti-fuerza bruta /api/login (en memoria).
 LOGIN_RATE_WINDOW_SECONDS = max(60, int(os.environ.get("APP_LOGIN_RATE_WINDOW_SECONDS", "300")))
 LOGIN_RATE_MAX_ATTEMPTS = max(3, int(os.environ.get("APP_LOGIN_RATE_MAX_ATTEMPTS", "10")))
@@ -2923,6 +2942,82 @@ def _cleanup_expired_sessions():
     for token in expired:
         AUTH_SESSIONS.pop(token, None)
 
+def ensure_auth_sessions_schema(conn):
+    if not conn:
+        return
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS auth_sessions (
+          token TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          usuario TEXT,
+          nombre TEXT,
+          apellido TEXT,
+          rol TEXT,
+          email TEXT,
+          servicio TEXT,
+          ip TEXT,
+          user_agent TEXT,
+          created_at REAL NOT NULL,
+          expires_at REAL NOT NULL,
+          updated_at REAL NOT NULL
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_auth_sessions_user_id ON auth_sessions(user_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_auth_sessions_expires_at ON auth_sessions(expires_at)")
+
+
+def _session_cache_get(token):
+    if not token:
+        return None
+    with AUTH_SESSION_CACHE_LOCK:
+        row = AUTH_SESSION_CACHE.get(token)
+        if not row:
+            return None
+        if float(row.get("expires_at") or 0) <= time.time():
+            AUTH_SESSION_CACHE.pop(token, None)
+            return None
+        return dict(row)
+
+
+def _session_cache_put(session):
+    token = session.get("token") if isinstance(session, dict) else ""
+    if not token:
+        return
+    with AUTH_SESSION_CACHE_LOCK:
+        AUTH_SESSION_CACHE[token] = dict(session)
+        # Limpieza simple si crece demasiado.
+        if len(AUTH_SESSION_CACHE) > SESSION_CACHE_MAX:
+            # borra expiradas primero
+            now = time.time()
+            expired = [k for k, v in AUTH_SESSION_CACHE.items() if float(v.get("expires_at") or 0) <= now]
+            for k in expired[: max(1, len(expired))]:
+                AUTH_SESSION_CACHE.pop(k, None)
+            # si sigue grande, borra arbitrariamente el exceso
+            if len(AUTH_SESSION_CACHE) > SESSION_CACHE_MAX:
+                for k in list(AUTH_SESSION_CACHE.keys())[: len(AUTH_SESSION_CACHE) - SESSION_CACHE_MAX]:
+                    AUTH_SESSION_CACHE.pop(k, None)
+
+
+def _session_cache_delete(token):
+    if not token:
+        return
+    with AUTH_SESSION_CACHE_LOCK:
+        AUTH_SESSION_CACHE.pop(token, None)
+
+
+def _sqlite_cleanup_sessions(conn):
+    global _LAST_SESSION_CLEANUP_AT
+    now = time.time()
+    if (now - float(_LAST_SESSION_CLEANUP_AT or 0)) < SESSION_CLEANUP_INTERVAL_SECONDS:
+        return
+    _LAST_SESSION_CLEANUP_AT = now
+    try:
+        conn.execute("DELETE FROM auth_sessions WHERE expires_at <= ?", (now,))
+    except Exception:
+        pass
+
 
 def create_auth_session(user_row):
     now = time.time()
@@ -2938,15 +3033,116 @@ def create_auth_session(user_row):
         "expires_at": now + APP_SESSION_TTL_SECONDS,
         "created_at": now,
     }
-    with AUTH_SESSIONS_LOCK:
-        _cleanup_expired_sessions()
-        AUTH_SESSIONS[session["token"]] = session
+    # Persistencia en SQLite (recomendado).
+    if APP_SESSION_STORE == "sqlite":
+        try:
+            conn = open_sqlite_conn(DB_CONFIGURED, with_row_factory=False)
+            ensure_auth_sessions_schema(conn)
+            _sqlite_cleanup_sessions(conn)
+            conn.execute(
+                """
+                INSERT INTO auth_sessions (
+                  token, user_id, usuario, nombre, apellido, rol, email, servicio, ip, user_agent,
+                  created_at, expires_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    session["token"],
+                    session["user_id"],
+                    session["usuario"],
+                    session["nombre"],
+                    session["apellido"],
+                    session["rol"],
+                    session["email"],
+                    session["servicio"],
+                    "",
+                    "",
+                    now,
+                    session["expires_at"],
+                    now,
+                ),
+            )
+            conn.commit()
+            conn.close()
+        except Exception:
+            # Fallback a memoria si SQLite falla por cualquier motivo.
+            with AUTH_SESSIONS_LOCK:
+                _cleanup_expired_sessions()
+                AUTH_SESSIONS[session["token"]] = session
+    else:
+        with AUTH_SESSIONS_LOCK:
+            _cleanup_expired_sessions()
+            AUTH_SESSIONS[session["token"]] = session
+    _session_cache_put(session)
     return session
 
 
-def get_auth_session(token):
+def get_auth_session(token, db_path=None):
     if not token:
         return None
+    # Cache rápido.
+    cached = _session_cache_get(token)
+    if cached and cached.get("token") == token:
+        # Extiende TTL en cache y en DB solo cada cierto intervalo (no en cada request).
+        now = time.time()
+        cached["expires_at"] = now + APP_SESSION_TTL_SECONDS
+        _session_cache_put(cached)
+        if APP_SESSION_STORE != "sqlite":
+            return cached
+        last_touch = float(cached.get("_last_touch") or 0)
+        if (now - last_touch) < SESSION_TOUCH_INTERVAL_SECONDS:
+            return cached
+
+    if APP_SESSION_STORE == "sqlite":
+        path = db_path or DB_CONFIGURED
+        try:
+            conn = open_sqlite_conn(path, with_row_factory=True)
+            ensure_auth_sessions_schema(conn)
+            _sqlite_cleanup_sessions(conn)
+            row = conn.execute(
+                """
+                SELECT token, user_id, usuario, nombre, apellido, rol, email, servicio, ip, user_agent, created_at, expires_at, updated_at
+                FROM auth_sessions
+                WHERE token = ?
+                LIMIT 1
+                """,
+                (token,),
+            ).fetchone()
+            if not row:
+                conn.close()
+                _session_cache_delete(token)
+                return None
+            if float(row["expires_at"] or 0) <= time.time():
+                try:
+                    conn.execute("DELETE FROM auth_sessions WHERE token = ?", (token,))
+                    conn.commit()
+                except Exception:
+                    pass
+                conn.close()
+                _session_cache_delete(token)
+                return None
+            session = dict(row)
+            session["token"] = token
+            now = time.time()
+            new_exp = now + APP_SESSION_TTL_SECONDS
+            last_upd = float(row["updated_at"] or 0)
+            if (now - last_upd) >= SESSION_TOUCH_INTERVAL_SECONDS:
+                try:
+                    conn.execute(
+                        "UPDATE auth_sessions SET expires_at = ?, updated_at = ? WHERE token = ?",
+                        (new_exp, now, token),
+                    )
+                    conn.commit()
+                except Exception:
+                    pass
+            conn.close()
+            session["expires_at"] = new_exp
+            session["_last_touch"] = now
+            _session_cache_put(session)
+            return session
+        except Exception:
+            return None
+
     with AUTH_SESSIONS_LOCK:
         session = AUTH_SESSIONS.get(token)
         if not session:
@@ -2955,12 +3151,24 @@ def get_auth_session(token):
             AUTH_SESSIONS.pop(token, None)
             return None
         session["expires_at"] = time.time() + APP_SESSION_TTL_SECONDS
+        _session_cache_put(session)
         return dict(session)
 
 
-def delete_auth_session(token):
+def delete_auth_session(token, db_path=None):
     if not token:
         return
+    _session_cache_delete(token)
+    if APP_SESSION_STORE == "sqlite":
+        path = db_path or DB_CONFIGURED
+        try:
+            conn = open_sqlite_conn(path, with_row_factory=False)
+            ensure_auth_sessions_schema(conn)
+            conn.execute("DELETE FROM auth_sessions WHERE token = ?", (token,))
+            conn.commit()
+            conn.close()
+        except Exception:
+            pass
     with AUTH_SESSIONS_LOCK:
         AUTH_SESSIONS.pop(token, None)
 
@@ -17464,10 +17672,11 @@ def workspace_session_is_privileged(session):
     if not session:
         return False
     rol = normalize_lookup_text(session.get("rol") or "")
-    if rol in {"administrador", "admin", "direccion", "dirección", "control"}:
+    # `normalize_lookup_text` devuelve siempre tokens en MAYÚSCULAS (sin acentos).
+    if rol in {"ADMINISTRADOR", "ADMIN", "DIRECCION", "CONTROL"}:
         return True
     services = _normalize_service_tokens(session.get("servicio") or "")
-    if services.intersection({"administracion", "administración", "control", "direccion", "dirección"}):
+    if services.intersection({"ADMINISTRACION", "CONTROL", "DIRECCION"}):
         return True
     return False
 
