@@ -14976,6 +14976,7 @@ def ensure_workspace_product_tables(conn):
           id TEXT PRIMARY KEY,
           workspace_id TEXT NOT NULL,
           empresa_id TEXT,
+          empresa_manual INTEGER NOT NULL DEFAULT 0,
           usuario_id TEXT,
           nombre TEXT NOT NULL,
           nif TEXT,
@@ -15088,6 +15089,7 @@ def ensure_workspace_product_tables(conn):
     ensure_column(conn, "workspace_registro_personal", "alert_notify_admin", "alert_notify_admin INTEGER NOT NULL DEFAULT 1")
     ensure_column(conn, "workspace_registro_personal", "alert_admin_contact", "alert_admin_contact TEXT")
     ensure_column(conn, "workspace_registro_personal", "alert_last_sent", "alert_last_sent TEXT")
+    ensure_column(conn, "workspace_registro_personal", "empresa_manual", "empresa_manual INTEGER NOT NULL DEFAULT 0")
     ensure_column(conn, "workspace_registro_audit", "empresa_id", "empresa_id TEXT")
     ensure_column(conn, "workspace_registro_audit", "persona_id", "persona_id TEXT")
     ensure_column(conn, "workspace_registro_audit", "entity_type", "entity_type TEXT")
@@ -16604,7 +16606,8 @@ def sync_workspace_time_personal_from_users(conn, workspace_id, empresa_id=None)
         tracking_enabled = int(user["registro_horario_activo"] or 0) == 1
         existing = conn.execute(
             """
-            SELECT id, tipo_jornada, horas_pactadas_dia, horas_pactadas_semana, fecha_alta, fecha_baja,
+            SELECT id, empresa_id, COALESCE(empresa_manual, 0) AS empresa_manual,
+                   tipo_jornada, horas_pactadas_dia, horas_pactadas_semana, fecha_alta, fecha_baja,
                    activo, notas, nif, telefono
             FROM workspace_registro_personal
             WHERE workspace_id = ? AND usuario_id = ?
@@ -16641,6 +16644,9 @@ def sync_workspace_time_personal_from_users(conn, workspace_id, empresa_id=None)
         if not full_name:
             continue
         if existing:
+            manual_company = int(existing["empresa_manual"] or 0) == 1
+            current_company = str(existing["empresa_id"] or "").strip()
+            empresa_to_set = current_company if manual_company and current_company else empresa_vinculada
             conn.execute(
                 """
                 UPDATE workspace_registro_personal
@@ -16648,7 +16654,7 @@ def sync_workspace_time_personal_from_users(conn, workspace_id, empresa_id=None)
                 WHERE id = ? AND workspace_id = ?
                 """,
                 (
-                    empresa_vinculada,
+                    empresa_to_set,
                     full_name,
                     str(user["email"] or "").strip() or None,
                     now,
@@ -16662,14 +16668,15 @@ def sync_workspace_time_personal_from_users(conn, workspace_id, empresa_id=None)
             conn.execute(
                 """
                 INSERT INTO workspace_registro_personal (
-                  id, workspace_id, empresa_id, usuario_id, nombre, nif, email, telefono, tipo_jornada,
+                  id, workspace_id, empresa_id, empresa_manual, usuario_id, nombre, nif, email, telefono, tipo_jornada,
                   horas_pactadas_dia, horas_pactadas_semana, fecha_alta, fecha_baja, activo, notas, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
                 """,
                 (
                     record_id,
                     workspace_id,
                     empresa_vinculada,
+                    0,
                     user["id"],
                     full_name,
                     None,
@@ -23010,6 +23017,10 @@ class Handler(BaseHTTPRequestHandler):
             if not workspace_id or not empresa_id or not nombre:
                 json_response(self, {"error": "workspace_id, empresa_id y nombre requeridos"}, status=400)
                 return
+            manual_flag = 1
+            manual_raw = str(payload.get("empresa_manual") or "").strip().lower()
+            if manual_raw in {"0", "false", "no", "off"}:
+                manual_flag = 0
             tipo_jornada = normalize_shift_type(payload.get("tipo_jornada"))
             try:
                 horas_pactadas_dia = float(payload.get("horas_pactadas_dia")) if str(payload.get("horas_pactadas_dia") or "").strip() else None
@@ -23024,6 +23035,7 @@ class Handler(BaseHTTPRequestHandler):
             values = (
                 workspace_id,
                 empresa_id,
+                manual_flag,
                 usuario_id_value,
                 nombre,
                 str(payload.get("nif") or "").strip() or None,
@@ -23045,7 +23057,7 @@ class Handler(BaseHTTPRequestHandler):
                 conn.execute(
                     """
                     UPDATE workspace_registro_personal
-                    SET workspace_id = ?, empresa_id = ?, usuario_id = ?, nombre = ?, nif = ?, email = ?, telefono = ?,
+                    SET workspace_id = ?, empresa_id = ?, empresa_manual = ?, usuario_id = ?, nombre = ?, nif = ?, email = ?, telefono = ?,
                         tipo_jornada = ?, horas_pactadas_dia = ?, horas_pactadas_semana = ?, fecha_alta = ?, fecha_baja = ?,
                         activo = ?, notas = ?, updated_at = datetime(?)
                     WHERE id = ? AND workspace_id = ?
@@ -23057,9 +23069,9 @@ class Handler(BaseHTTPRequestHandler):
                 conn.execute(
                     """
                     INSERT INTO workspace_registro_personal (
-                      id, workspace_id, empresa_id, usuario_id, nombre, nif, email, telefono, tipo_jornada,
+                      id, workspace_id, empresa_id, empresa_manual, usuario_id, nombre, nif, email, telefono, tipo_jornada,
                       horas_pactadas_dia, horas_pactadas_semana, fecha_alta, fecha_baja, activo, notas, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
                     """,
                     (record_id, *values, now, now),
                 )
