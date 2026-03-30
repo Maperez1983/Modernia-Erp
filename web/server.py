@@ -15106,6 +15106,19 @@ def ensure_workspace_product_tables(conn):
         )
     except Exception:
         pass
+    # Si tiene usuario_id pero no fue vinculado manualmente, lo tratamos como auto/legacy para que no salga en plantilla.
+    try:
+        conn.execute(
+            """
+            UPDATE workspace_registro_personal
+            SET source = 'auto'
+            WHERE (source IS NULL OR TRIM(source) = '' OR source = 'manual')
+              AND COALESCE(usuario_id, '') != ''
+              AND COALESCE(usuario_manual, 0) = 0
+            """
+        )
+    except Exception:
+        pass
     ensure_column(conn, "workspace_registro_audit", "empresa_id", "empresa_id TEXT")
     ensure_column(conn, "workspace_registro_audit", "persona_id", "persona_id TEXT")
     ensure_column(conn, "workspace_registro_audit", "entity_type", "entity_type TEXT")
