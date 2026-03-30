@@ -13822,7 +13822,11 @@ def get_db(db_path):
 
 
 def open_sqlite_conn(db_path, with_row_factory=False):
-    conn = sqlite3.connect(db_path, timeout=90)
+    try:
+        timeout_seconds = float(os.environ.get("APP_SQLITE_TIMEOUT_SECONDS") or "5")
+    except Exception:
+        timeout_seconds = 5.0
+    conn = sqlite3.connect(db_path, timeout=max(1.0, timeout_seconds))
     if with_row_factory:
         conn.row_factory = sqlite3.Row
     # Reduce bloqueos en escenarios multi-hilo (web + OCR worker).
@@ -13836,7 +13840,8 @@ def open_sqlite_conn(db_path, with_row_factory=False):
         except Exception:
             pass
     try:
-        conn.execute("PRAGMA busy_timeout=90000")
+        busy_ms = int(os.environ.get("APP_SQLITE_BUSY_TIMEOUT_MS") or "5000")
+        conn.execute(f"PRAGMA busy_timeout={max(0, busy_ms)}")
     except Exception:
         pass
     try:
@@ -16200,44 +16205,61 @@ def fetch_workspace_service_desks(conn, workspace_id, empresa_id=None):
         return {"gestoria": [], "seguros": [], "financiacion": [], "inmobiliaria": []}
     placeholders = ",".join(["?"] * len(empresa_ids))
     today = datetime.now().date().isoformat()
-
-    gestoria_rows = conn.execute(
+    # Gestoría: evitar UNION pesado (reduce tiempos y cuelgues en SQLite).
+    service_filter = (
+        "LOWER(ce.servicio) IN ('gestoria', 'gestoría', "
+        "'administracion fincas', 'administración fincas')"
+    )
+    modelo_rows = conn.execute(
         f"""
-        SELECT *
-        FROM (
-          SELECT
-            c.id AS cliente_id,
-            COALESCE(c.nombre, '') AS titulo,
-            'Modelo ' || COALESCE(m.modelo, '') AS subtitulo,
-            COALESCE(m.estado, 'Pendiente') AS estado,
-            m.proxima_fecha AS fecha,
-            '' AS valor,
-            1 AS sort_group
-          FROM gestoria_modelos m
-          JOIN clientes c ON c.id = m.cliente_id
-          JOIN clientes_empresas ce ON ce.cliente_id = c.id
-          WHERE ce.empresa_id IN ({placeholders})
-            AND m.proxima_fecha IS NOT NULL
-            AND DATE(m.proxima_fecha) <= DATE(?, '+30 day')
-          UNION ALL
-          SELECT
-            gt.cliente_id,
-            COALESCE(c.nombre, '') AS titulo,
-            COALESCE(gt.tipo_trabajo, 'Trabajo') AS subtitulo,
-            COALESCE(gt.estado, 'Pendiente') AS estado,
-            COALESCE(gt.fecha_fin, gt.fecha_inicio, '') AS fecha,
-            CASE WHEN COALESCE(gt.importe, 0) > 0 THEN printf('%.2f €', gt.importe) ELSE '' END AS valor,
-            2 AS sort_group
-          FROM gestoria_trabajos gt
-          LEFT JOIN clientes c ON c.id = gt.cliente_id
-          WHERE gt.empresa_id IN ({placeholders})
-            AND LOWER(COALESCE(gt.estado, '')) NOT IN ('finalizado', 'finalizada', 'cancelado', 'cancelada')
-        )
-        ORDER BY sort_group ASC, DATE(COALESCE(fecha, '9999-12-31')) ASC, titulo COLLATE NOCASE ASC
-        LIMIT 16
+        SELECT
+          c.id AS cliente_id,
+          COALESCE(c.nombre, '') AS titulo,
+          'Modelo ' || COALESCE(m.modelo, '') AS subtitulo,
+          COALESCE(m.estado, 'Pendiente') AS estado,
+          m.proxima_fecha AS fecha,
+          '' AS valor,
+          1 AS sort_group
+        FROM gestoria_modelos m
+        JOIN clientes c ON c.id = m.cliente_id
+        JOIN clientes_empresas ce ON ce.cliente_id = c.id
+        WHERE ce.empresa_id IN ({placeholders})
+          AND {service_filter}
+          AND m.proxima_fecha IS NOT NULL
+          AND DATE(m.proxima_fecha) <= DATE(?, '+30 day')
+        ORDER BY DATE(m.proxima_fecha) ASC, titulo COLLATE NOCASE ASC
+        LIMIT 8
         """,
-        [*empresa_ids, today, *empresa_ids],
+        [*empresa_ids, today],
     ).fetchall()
+    trabajo_rows = conn.execute(
+        f"""
+        SELECT
+          gt.cliente_id,
+          COALESCE(c.nombre, '') AS titulo,
+          COALESCE(gt.tipo_trabajo, 'Trabajo') AS subtitulo,
+          COALESCE(gt.estado, 'Pendiente') AS estado,
+          COALESCE(gt.fecha_fin, gt.fecha_inicio, '') AS fecha,
+          CASE WHEN COALESCE(gt.importe, 0) > 0 THEN printf('%.2f €', gt.importe) ELSE '' END AS valor,
+          2 AS sort_group
+        FROM gestoria_trabajos gt
+        LEFT JOIN clientes c ON c.id = gt.cliente_id
+        WHERE gt.empresa_id IN ({placeholders})
+          AND LOWER(COALESCE(gt.estado, '')) NOT IN ('finalizado', 'finalizada', 'cancelado', 'cancelada')
+        ORDER BY DATE(COALESCE(gt.fecha_fin, gt.fecha_inicio, '9999-12-31')) ASC, titulo COLLATE NOCASE ASC
+        LIMIT 8
+        """,
+        empresa_ids,
+    ).fetchall()
+    gestoria_rows = [*modelo_rows, *trabajo_rows]
+    gestoria_rows.sort(
+        key=lambda row: (
+            int(row["sort_group"] or 9) if isinstance(row, sqlite3.Row) else int(row.get("sort_group") or 9),
+            str((row["fecha"] if isinstance(row, sqlite3.Row) else row.get("fecha")) or "9999-12-31")[:10],
+            str((row["titulo"] if isinstance(row, sqlite3.Row) else row.get("titulo")) or "").lower(),
+        )
+    )
+    gestoria_rows = gestoria_rows[:16]
 
     seguros_rows = conn.execute(
         f"""
