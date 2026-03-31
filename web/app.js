@@ -8190,7 +8190,21 @@ const renderWorkspaceRrhhHub = () => {
 
   workspaceRrhhHub.querySelectorAll("[data-rrhh-persona]").forEach((btn) => {
     btn.addEventListener("click", async () => {
-      state.workspaceRrhhSelectedPersonaId = btn.dataset.rrhhPersona || "";
+      const personaId = String(btn.dataset.rrhhPersona || "").trim();
+      if (!personaId) return;
+      // Si estamos dentro de la ficha de un miembro, navegar desde la barra lateral debe
+      // cambiar realmente la ficha (si no, parece que “se quedan” los datos del anterior).
+      if (isWorkspaceRrhhManager() && String(state.workspaceRrhhEquipoView || "") === "member") {
+        const employees = Array.isArray(state.workspaceTimeEmployees) ? state.workspaceTimeEmployees : [];
+        const emp = employees.find((row) => String(row?.id || "").trim() === personaId) || null;
+        const userId = emp && Number(emp.usuario_manual || 0) === 1 ? String(emp.usuario_id || "").trim() : "";
+        state.workspaceRrhhEquipoView = "member";
+        state.workspaceRrhhEquipoMemberKey = `emp:${personaId}`;
+        state.workspaceRrhhEquipoMemberPersonaId = personaId;
+        state.workspaceRrhhEquipoMemberUserId = userId;
+        state.workspaceRrhhEquipoMemberTab = state.workspaceRrhhEquipoMemberTab || "personal";
+      }
+      state.workspaceRrhhSelectedPersonaId = personaId;
       state.workspaceRrhhScopeAll = false;
       await refreshWorkspaceRrhh();
     });
