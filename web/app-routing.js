@@ -20,12 +20,14 @@
       const mode = (params.get("mode") || "platform").toLowerCase() === "tenant" ? "tenant" : "platform";
       const requestedView = (params.get("view") || "").trim();
       const requestedEngine = (params.get("engine") || "").trim();
+      const requestedRrhh = (params.get("rrhh") || "").trim();
       deps.openHolding({
         mode,
         workspace: params.get("workspace") || "",
         // Allow deep links inside tenant mode (e.g. Motores/Registro horario).
         view: requestedView || (mode === "tenant" ? "overview" : "overview"),
         engine: requestedEngine || "",
+        rrhh: requestedRrhh || "",
       });
       deps.ui?.refreshContext(deps.state);
       return;

@@ -6074,22 +6074,32 @@ const upsertWorkspaceEmployeeLocal = (patch = {}) => {
     ? employees.filter((row) => String(row?.source || "").trim() !== "auto")
     : employees;
 
-  // Si estamos en la ficha de un miembro, forzamos la selección a esa persona (evita “mezclas” al recargar).
-  if (manager && String(state.workspaceRrhhEquipoView || "") === "member") {
-    const forcedPersona = String(state.workspaceRrhhEquipoMemberPersonaId || "").trim();
-    if (forcedPersona) {
-      state.workspaceRrhhSelectedPersonaId = forcedPersona;
-      state.workspaceRrhhScopeAll = false;
-    }
-  }
-  if (!state.workspaceRrhhSelectedPersonaId) {
-    if (manager) {
-      const firstActive = visibleEmployees.find((row) => Number(row.activo ?? 1) === 1) || visibleEmployees[0] || null;
-      state.workspaceRrhhSelectedPersonaId = firstActive?.id || "";
-    } else {
-      state.workspaceRrhhSelectedPersonaId = resolveWorkspacePersonaForAuthUser();
-    }
-  }
+	  // Si estamos en la ficha de un miembro, forzamos la selección a esa persona (evita “mezclas” al recargar).
+	  if (manager && String(state.workspaceRrhhEquipoView || "") === "member") {
+	    const forcedPersona = String(state.workspaceRrhhEquipoMemberPersonaId || "").trim();
+	    if (forcedPersona) {
+	      state.workspaceRrhhSelectedPersonaId = forcedPersona;
+	      state.workspaceRrhhScopeAll = false;
+	    } else {
+	      // Si el miembro no tiene ficha aún, no seleccionamos "otro" empleado por defecto.
+	      // Evita que se muestren datos de otra persona al abrir una card sin persona_id.
+	      state.workspaceRrhhSelectedPersonaId = "";
+	      state.workspaceRrhhScopeAll = false;
+	    }
+	  }
+	  const isMemberWithoutPersona = Boolean(
+	    manager &&
+	      String(state.workspaceRrhhEquipoView || "") === "member" &&
+	      !String(state.workspaceRrhhEquipoMemberPersonaId || "").trim()
+	  );
+	  if (!state.workspaceRrhhSelectedPersonaId && !isMemberWithoutPersona) {
+	    if (manager) {
+	      const firstActive = visibleEmployees.find((row) => Number(row.activo ?? 1) === 1) || visibleEmployees[0] || null;
+	      state.workspaceRrhhSelectedPersonaId = firstActive?.id || "";
+	    } else {
+	      state.workspaceRrhhSelectedPersonaId = resolveWorkspacePersonaForAuthUser();
+	    }
+	  }
   // Si está seleccionado un registro "auto", lo ignoramos en RRHH hasta confirmación manual.
   if (manager && state.workspaceRrhhSelectedPersonaId) {
     const selectedId = String(state.workspaceRrhhSelectedPersonaId || "").trim();
@@ -6535,13 +6545,30 @@ const renderWorkspaceRrhhHub = () => {
           .filter((row) => Number(row.usuario_manual || 0) === 1 && String(row.usuario_id || "").trim())
           .map((row) => [String(row.usuario_id || "").trim(), row])
       );
+      const employeeByEmail = (() => {
+        const pickNewest = (a, b) => {
+          const aStamp = String(a?.updated_at || a?.created_at || "").trim();
+          const bStamp = String(b?.updated_at || b?.created_at || "").trim();
+          if (aStamp && bStamp) return bStamp.localeCompare(aStamp) > 0 ? b : a;
+          return bStamp ? b : a;
+        };
+        const map = new Map();
+        employees.forEach((emp) => {
+          const email = String(emp?.email || "").trim().toLowerCase();
+          if (!email) return;
+          const existing = map.get(email) || null;
+          map.set(email, existing ? pickNewest(existing, emp) : emp);
+        });
+        return map;
+      })();
 
       // 1) Usuarios del sistema (login)
       const eligibleUsers = getWorkspaceTimeEligibleUsers().filter((row) => Number(row.activo ?? 1) === 1);
       eligibleUsers.forEach((u) => {
         const userId = String(u.id || "").trim();
         if (!userId) return;
-        const employee = employeeByUser.get(userId) || null;
+        const primaryEmail = String((u.email || usersById.get(userId)?.email || "")).trim().toLowerCase();
+        const employee = employeeByUser.get(userId) || (primaryEmail ? (employeeByEmail.get(primaryEmail) || null) : null);
         const fullName = `${u.nombre || ""} ${u.apellido || ""}`.trim() || u.usuario || u.email || "Usuario";
         addMember({
           key: `user:${userId}`,
@@ -6564,11 +6591,31 @@ const renderWorkspaceRrhhHub = () => {
         if (!personaId) return;
         const linkedUserId = String(emp.usuario_id || "").trim();
         const linkedManual = Number(emp.usuario_manual || 0) === 1;
-        const key = linkedManual && linkedUserId ? `user:${linkedUserId}` : `emp:${personaId}`;
+        const email = String(emp?.email || "").trim().toLowerCase();
+        const candidateUserKey = (() => {
+          if (!email) return "";
+          // Buscamos un usuario existente con ese email para consolidar fichas sin duplicar cards.
+          for (const [k, member] of membersByKey.entries()) {
+            if (!String(k || "").startsWith("user:")) continue;
+            const memberEmail = String(member?.user?.email || "").trim().toLowerCase();
+            if (memberEmail && memberEmail === email) return k;
+          }
+          return "";
+        })();
+        const key = (linkedManual && linkedUserId)
+          ? `user:${linkedUserId}`
+          : (candidateUserKey || `emp:${personaId}`);
         if (membersByKey.has(key)) {
           // Merge info si faltaba
           const prev = membersByKey.get(key);
-          membersByKey.set(key, { ...(prev || {}), employee: emp, personaId, empresa_nombre: emp.empresa_nombre || "" });
+          const nextEmployee = prev?.employee || emp;
+          membersByKey.set(key, {
+            ...(prev || {}),
+            employee: nextEmployee,
+            personaId: String(nextEmployee?.id || personaId || prev?.personaId || "").trim(),
+            empresa_nombre: nextEmployee?.empresa_nombre || prev?.empresa_nombre || "",
+            hasFicha: Boolean(nextEmployee?.id || prev?.hasFicha),
+          });
           return;
         }
         const user = linkedManual && linkedUserId ? (usersById.get(linkedUserId) || null) : null;
@@ -7848,7 +7895,7 @@ const renderWorkspaceRrhhHub = () => {
         const form = new FormData(personalForm);
         const payload = Object.fromEntries(form.entries());
         payload.activo = personalForm.querySelector('[name="activo"]')?.checked ? 1 : 0;
-        payload.empresa_manual = 1;
+        payload.empresa_manual = String(payload.empresa_id || "").trim() ? 1 : 0;
         const resp = await apiPost("/api/workspace_registro_personal", payload);
         if (status) status.textContent = "Guardado.";
         if (resp?.id) {
@@ -9916,13 +9963,20 @@ const getWorkspaceTimeEligibleUsers = () => {
   const sourceRows = (state.workspaceTimeUsers && state.workspaceTimeUsers.length)
     ? state.workspaceTimeUsers
     : state.usersList;
-  return (sourceRows || [])
-    .filter((user) => Number(user.activo ?? 1) === 1)
-    .sort((a, b) => {
-      const nameA = `${a.nombre || ""} ${a.apellido || ""}`.trim();
-      const nameB = `${b.nombre || ""} ${b.apellido || ""}`.trim();
-      return nameA.localeCompare(nameB, "es", { sensitivity: "base" });
-    });
+  const seen = new Set();
+  const deduped = (sourceRows || []).filter((user) => {
+    if (Number(user.activo ?? 1) !== 1) return false;
+    const id = String(user?.id || "").trim();
+    if (!id) return false;
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+  return deduped.sort((a, b) => {
+    const nameA = `${a.nombre || ""} ${a.apellido || ""}`.trim();
+    const nameB = `${b.nombre || ""} ${b.apellido || ""}`.trim();
+    return nameA.localeCompare(nameB, "es", { sensitivity: "base" });
+  });
 };
 
 const hydrateWorkspaceTimeUserSelect = () => {
@@ -10439,7 +10493,11 @@ const findCurrentUserTimeProfile = () => {
   if (!authUser?.id) return null;
   const employees = state.workspaceTimeEmployees || [];
   const entries = state.currentWorkspaceData?.timeRows || [];
-  const employee = employees.find((row) => String(row.usuario_id || "") === String(authUser.id));
+  const employee = employees.find(
+    (row) =>
+      Number(row?.usuario_manual || 0) === 1 &&
+      String(row?.usuario_id || "") === String(authUser.id)
+  );
   if (!employee) return null;
   const today = new Date().toISOString().slice(0, 10);
   const todayEntries = entries.filter((row) => String(row.usuario_id || "") === String(authUser.id) && String(row.fecha || "") === today);
@@ -36988,11 +37046,7 @@ if (workspaceTimeForm) {
     payload.workspace_id = state.currentWorkspaceId;
     payload.activo = workspaceTimeEmployeeForm.querySelector('[name="activo"]')?.checked ? 1 : 0;
     await ensureWorkspaceCompaniesLoaded();
-    if (!String(payload.empresa_id || "").trim()) {
-      if (workspaceTimeEmployeeStatus) workspaceTimeEmployeeStatus.textContent = "Selecciona empresa antes de guardar.";
-      return;
-    }
-    payload.empresa_manual = 1;
+    payload.empresa_manual = String(payload.empresa_id || "").trim() ? 1 : 0;
     const companies = state.currentWorkspaceDetail?.companies || [];
     const matchedCompany = companies.find((company) => String(company.id || "") === String(payload.empresa_id || ""));
     payload.empresa_nombre = matchedCompany?.nombre || "";

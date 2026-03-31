@@ -16816,15 +16816,29 @@ def sync_workspace_time_personal_from_users(conn, workspace_id, empresa_id=None)
 
 
 def fetch_workspace_personal(conn, workspace_id, empresa_id=None, only_active=False, limit=200):
-    empresa_ids = resolve_workspace_company_ids(conn, workspace_id, empresa_id=empresa_id)
-    if not empresa_ids:
-        return {"rows": []}
+    requested_company = str(empresa_id or "").strip()
+    empresa_ids = resolve_workspace_company_ids(conn, workspace_id, empresa_id=requested_company or None)
     where = [
         "p.workspace_id = ?",
-        f"p.empresa_id IN ({','.join('?' for _ in empresa_ids)})",
         "COALESCE(p.source, 'manual') != 'auto'",
     ]
-    params = [workspace_id, *empresa_ids]
+    params = [workspace_id]
+    if requested_company:
+        # En vistas por empresa solo consideramos asignaciones confirmadas manualmente.
+        if not empresa_ids or requested_company not in {str(x) for x in empresa_ids}:
+            return {"rows": []}
+        where.append("COALESCE(p.empresa_manual, 0) = 1")
+        where.append("p.empresa_id = ?")
+        params.append(requested_company)
+    else:
+        # En RRHH (vista de equipo) queremos ver también fichas sin empresa asignada.
+        # A la vez, evitamos devolver registros que apunten a empresas fuera del workspace.
+        workspace_company_ids = resolve_workspace_company_ids(conn, workspace_id, empresa_id=None)
+        if workspace_company_ids:
+            where.append(
+                f"(p.empresa_id IS NULL OR TRIM(COALESCE(p.empresa_id, '')) = '' OR p.empresa_id IN ({','.join('?' for _ in workspace_company_ids)}))"
+            )
+            params.extend(workspace_company_ids)
     if only_active:
         where.append("COALESCE(p.activo, 1) = 1")
     rows = conn.execute(
@@ -16832,9 +16846,9 @@ def fetch_workspace_personal(conn, workspace_id, empresa_id=None, only_active=Fa
         SELECT
           p.id,
           p.workspace_id,
-          p.empresa_id,
-          COALESCE(e.nombre, '') AS empresa_nombre,
-          p.usuario_id,
+          CASE WHEN COALESCE(p.empresa_manual, 0) = 1 THEN p.empresa_id ELSE '' END AS empresa_id,
+          CASE WHEN COALESCE(p.empresa_manual, 0) = 1 THEN COALESCE(e.nombre, '') ELSE '' END AS empresa_nombre,
+          CASE WHEN COALESCE(p.usuario_manual, 0) = 1 THEN p.usuario_id ELSE '' END AS usuario_id,
           COALESCE(p.usuario_manual, 0) AS usuario_manual,
           COALESCE(p.empresa_manual, 0) AS empresa_manual,
           COALESCE(p.source, 'manual') AS source,
@@ -23299,6 +23313,8 @@ class Handler(BaseHTTPRequestHandler):
             manual_flag = 1
             manual_raw = str(payload.get("empresa_manual") or "").strip().lower()
             if manual_raw in {"0", "false", "no", "off"}:
+                manual_flag = 0
+            if not empresa_id:
                 manual_flag = 0
             tipo_jornada = normalize_shift_type(payload.get("tipo_jornada"))
             try:
