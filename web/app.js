@@ -3673,9 +3673,8 @@ const renderCompanyCards = () => {
 	    const workspaceScoped = enabledModules.size > 0;
 	    const timeProfile = findCurrentUserTimeProfile();
 	    const workspaceSlug = String(state.currentWorkspaceTarget || state.currentWorkspaceName || "modernia").trim() || "modernia";
-	    const rrhhHref = `?holding=1&mode=tenant&workspace=${encodeURIComponent(workspaceSlug)}&view=rrhh&rrhh=self`;
 
-    const buildInitials = (value) => {
+	    const buildInitials = (value) => {
       const parts = String(value || "")
         .trim()
         .split(/\s+/)
@@ -3685,11 +3684,18 @@ const renderCompanyCards = () => {
       return letters.toUpperCase();
     };
 
-    const appendPersonalCard = () => {
-      const employee = timeProfile?.employee || null;
-      const displayName =
-        employee?.nombre
-        || `${user?.nombre || ""} ${user?.apellido || ""}`.trim()
+	    const appendPersonalCard = () => {
+	      const employee = timeProfile?.employee || null;
+	      const personaId = String(employee?.id || "").trim();
+	      const isAdmin = isPrivilegedUser(user) || canAccessAdminPanel(user);
+	      // Para admins: abrir RRHH en modo manager (con botones Alta/Desactivar) y saltar a su ficha.
+	      // Para no-admin: abrir "self" (solo su ficha).
+	      const rrhhHref = isAdmin
+	        ? `?holding=1&mode=tenant&workspace=${encodeURIComponent(workspaceSlug)}&view=rrhh${personaId ? `&persona=${encodeURIComponent(personaId)}` : ""}`
+	        : `?holding=1&mode=tenant&workspace=${encodeURIComponent(workspaceSlug)}&view=rrhh&rrhh=self`;
+	      const displayName =
+	        employee?.nombre
+	        || `${user?.nombre || ""} ${user?.apellido || ""}`.trim()
         || user?.usuario
         || user?.email
         || "Usuario";
@@ -3718,11 +3724,12 @@ const renderCompanyCards = () => {
       const subtitle = employee
         ? `${companyLabel} · ${entryLabel}${seniority ? ` · Antigüedad ${seniority}` : ""}`
         : "Completa tu ficha y documentación en RRHH.";
-      const card = document.createElement("div");
-      card.className = "company-card personal-card";
-      card.dataset.action = "rrhh-home";
-      card.innerHTML = `
-        <div class="company-card-head">
+	      const card = document.createElement("div");
+	      card.className = "company-card personal-card";
+	      card.dataset.action = "rrhh-home";
+	      if (personaId) card.dataset.rrhhPersona = personaId;
+	      card.innerHTML = `
+	        <div class="company-card-head">
           <div class="rrhh-avatar">
             ${photoUrl ? `<img src="${escapeHtml(buildPhotoSrc(photoUrl))}" alt="" />` : `<span class="rrhh-avatar-initials">${escapeHtml(buildInitials(displayName))}</span>`}
           </div>
@@ -3732,10 +3739,10 @@ const renderCompanyCards = () => {
             <div class="company-meta">${escapeHtml(subtitle)}</div>
           </div>
         </div>
-        <a class="card-link" href="${rrhhHref}" data-action="rrhh-home">Abrir</a>
-      `;
-      coreCards.appendChild(card);
-    };
+	        <a class="card-link" href="${rrhhHref}" data-action="rrhh-home">Abrir</a>
+	      `;
+	      coreCards.appendChild(card);
+	    };
 
     const appendServiceCard = (serviceKey) => {
       const service = normalizeSimple(serviceKey);
@@ -6074,8 +6081,8 @@ const upsertWorkspaceEmployeeLocal = (patch = {}) => {
     ? employees.filter((row) => String(row?.source || "").trim() !== "auto")
     : employees;
 
-	  // Si estamos en la ficha de un miembro, forzamos la selección a esa persona (evita “mezclas” al recargar).
-	  if (manager && String(state.workspaceRrhhEquipoView || "") === "member") {
+  // Si estamos en la ficha de un miembro, forzamos la selección a esa persona (evita “mezclas” al recargar).
+  if (manager && String(state.workspaceRrhhEquipoView || "") === "member") {
 	    const forcedPersona = String(state.workspaceRrhhEquipoMemberPersonaId || "").trim();
 	    if (forcedPersona) {
 	      state.workspaceRrhhSelectedPersonaId = forcedPersona;
@@ -6107,6 +6114,23 @@ const upsertWorkspaceEmployeeLocal = (patch = {}) => {
     if (!exists) {
       const first = visibleEmployees.find((row) => Number(row.activo ?? 1) === 1) || visibleEmployees[0] || null;
       state.workspaceRrhhSelectedPersonaId = first?.id || "";
+    }
+  }
+
+  // Deep-link para admins: abrir directamente la ficha de una persona desde la Home (card Personal).
+  if (manager && String(state.workspaceRrhhJumpPersonaId || "").trim()) {
+    const jumpId = String(state.workspaceRrhhJumpPersonaId || "").trim();
+    state.workspaceRrhhJumpPersonaId = "";
+    const exists = visibleEmployees.some((row) => String(row?.id || "").trim() === jumpId);
+    if (exists) {
+      state.workspaceRrhhTab = "equipo";
+      state.workspaceRrhhEquipoView = "member";
+      state.workspaceRrhhEquipoMemberKey = `emp:${jumpId}`;
+      state.workspaceRrhhEquipoMemberPersonaId = jumpId;
+      state.workspaceRrhhEquipoMemberUserId = "";
+      state.workspaceRrhhEquipoMemberTab = state.workspaceRrhhEquipoMemberTab || "personal";
+      state.workspaceRrhhSelectedPersonaId = jumpId;
+      state.workspaceRrhhScopeAll = false;
     }
   }
 
@@ -6979,6 +7003,14 @@ const renderWorkspaceRrhhHub = () => {
                 <input type="date" name="fecha_alta" value="${escapeHtml(String(employee?.fecha_alta || ""))}" />
               </label>
               <label>
+                Fecha nacimiento
+                <input type="date" name="fecha_nacimiento" value="${escapeHtml(String(employee?.fecha_nacimiento || ""))}" />
+              </label>
+              <label>
+                Tipo contrato
+                <input name="tipo_contrato" value="${escapeHtml(String(employee?.tipo_contrato || ""))}" placeholder="Indefinido, temporal, prácticas..." />
+              </label>
+              <label>
                 Fecha baja
                 <input type="date" name="fecha_baja" value="${escapeHtml(String(employee?.fecha_baja || ""))}" />
               </label>
@@ -7076,15 +7108,25 @@ const renderWorkspaceRrhhHub = () => {
       const docsHtml = renderMemberDocs(employee);
 
       const tabHtml = memberTab === "acceso" ? accessHtml : memberTab === "docs" ? docsHtml : personalHtml;
-	      return `
-	        <div class="rrhh-member-detail">
-	          <div class="rrhh-member-header">
-	            <button type="button" class="secondary ghost button-inline" data-rrhh-member-back>← Volver a Equipo</button>
-	            <div>
-	              <h3 style="margin: 10px 0 4px 0;">${escapeHtml(displayName)}</h3>
-	              <div class="muted">${escapeHtml(headerSubtitle || "")}</div>
-	            </div>
-	          </div>
+      const canDeactivate = Boolean(isWorkspaceRrhhManager() && employee?.id);
+      const deactivateLabel = Number(employee?.activo ?? 1) === 1 ? "Desactivar ficha" : "Reactivar ficha";
+      return `
+        <div class="rrhh-member-detail">
+          <div class="rrhh-member-header">
+            <button type="button" class="secondary ghost button-inline" data-rrhh-member-back>← Volver a Equipo</button>
+            <div>
+              <h3 style="margin: 10px 0 4px 0;">${escapeHtml(displayName)}</h3>
+              <div class="muted">${escapeHtml(headerSubtitle || "")}</div>
+            </div>
+            ${canDeactivate ? `
+              <div class="rrhh-member-header-actions">
+                <button type="button" class="secondary danger" data-rrhh-member-deactivate>
+                  ${escapeHtml(deactivateLabel)}
+                </button>
+                <span id="rrhhMemberDeactivateStatus" class="muted"></span>
+              </div>
+            ` : ""}
+          </div>
           <div class="rrhh-member-tabs">
             ${[
               { key: "personal", label: "Datos personales" },
@@ -7797,7 +7839,7 @@ const renderWorkspaceRrhhHub = () => {
     });
   });
 
-  const backBtn = workspaceRrhhHub.querySelector("[data-rrhh-member-back]");
+    const backBtn = workspaceRrhhHub.querySelector("[data-rrhh-member-back]");
   if (backBtn) {
     backBtn.addEventListener("click", () => {
       state.workspaceRrhhEquipoView = "list";
@@ -7806,6 +7848,52 @@ const renderWorkspaceRrhhHub = () => {
       state.workspaceRrhhEquipoMemberUserId = "";
       state.workspaceRrhhEquipoMemberTab = "personal";
       renderWorkspaceRrhhHub();
+    });
+  }
+
+  const deactivateBtn = workspaceRrhhHub.querySelector("[data-rrhh-member-deactivate]");
+  if (deactivateBtn) {
+    deactivateBtn.addEventListener("click", async () => {
+      if (!isWorkspaceRrhhManager()) return;
+      const personaId = String(state.workspaceRrhhEquipoMemberPersonaId || state.workspaceRrhhSelectedPersonaId || "").trim();
+      if (!personaId) return;
+      const status = document.getElementById("rrhhMemberDeactivateStatus");
+      const employees = Array.isArray(state.workspaceTimeEmployees) ? state.workspaceTimeEmployees : [];
+      const emp = employees.find((row) => String(row?.id || "").trim() === personaId) || null;
+      if (!emp?.id) return;
+      const nextActive = Number(emp.activo ?? 1) === 1 ? 0 : 1;
+      if (!window.confirm(nextActive ? "¿Reactivar esta ficha?" : "¿Desactivar esta ficha?")) return;
+      deactivateBtn.disabled = true;
+      if (status) status.textContent = "Actualizando...";
+      try {
+        await apiPost("/api/workspace_registro_personal", {
+          id: emp.id,
+          workspace_id: state.currentWorkspaceId,
+          empresa_id: emp.empresa_id || "",
+          empresa_manual: Number(emp.empresa_manual || 0) === 1 ? 1 : 0,
+          usuario_id: emp.usuario_manual ? (emp.usuario_id || "") : "",
+          nombre: emp.nombre || "Empleado",
+          nif: emp.nif || "",
+          email: emp.email || "",
+          telefono: emp.telefono || "",
+          tipo_jornada: emp.tipo_jornada || "Completa",
+          horas_pactadas_dia: emp.horas_pactadas_dia ?? "",
+          fecha_alta: emp.fecha_alta || "",
+          fecha_baja: emp.fecha_baja || "",
+          activo: nextActive,
+          notas: emp.notas || "",
+          foto_url: emp.foto_url || "",
+        });
+        // Actualiza UI local
+        upsertWorkspaceEmployeeLocal({ ...emp, activo: nextActive });
+        renderCompanyCards();
+        await refreshWorkspaceRrhh();
+        if (status) status.textContent = nextActive ? "Reactivado." : "Desactivado.";
+      } catch (err) {
+        if (status) status.textContent = err.message || "No se pudo actualizar.";
+      } finally {
+        deactivateBtn.disabled = false;
+      }
     });
   }
 
@@ -10077,6 +10165,9 @@ const fillWorkspaceTimeEmployeeForm = (record = null) => {
     nif: "",
     email: "",
     telefono: "",
+    fecha_nacimiento: "",
+    tipo_contrato: "",
+    foto_url: "",
     tipo_jornada: "Completa",
     horas_pactadas_dia: "",
     horas_pactadas_semana: "",
@@ -10095,7 +10186,7 @@ const fillWorkspaceTimeEmployeeForm = (record = null) => {
     companySelect.innerHTML = options;
     companySelect.value = String(payload.empresa_id || "").trim();
   }
-  ["id", "workspace_id", "empresa_id", "usuario_id", "nombre", "nif", "email", "telefono", "tipo_jornada", "horas_pactadas_dia", "horas_pactadas_semana", "fecha_alta", "notas"].forEach((field) => {
+  ["id", "workspace_id", "empresa_id", "usuario_id", "nombre", "nif", "email", "telefono", "fecha_nacimiento", "tipo_contrato", "foto_url", "tipo_jornada", "horas_pactadas_dia", "horas_pactadas_semana", "fecha_alta", "notas"].forEach((field) => {
     const input = workspaceTimeEmployeeForm.querySelector(`[name="${field}"]`);
     if (!input) return;
     let value = payload[field] ?? "";
@@ -10112,6 +10203,8 @@ const fillWorkspaceTimeEmployeeForm = (record = null) => {
   if (lookup) lookup.value = payload.usuario_id || "";
   const activeInput = workspaceTimeEmployeeForm.querySelector('[name="activo"]');
   if (activeInput) activeInput.checked = Number(payload.activo || 0) === 1;
+  const photoStatus = document.getElementById("workspaceTimeEmployeePhotoStatus");
+  if (photoStatus) photoStatus.textContent = "";
 };
 
 const openWorkspaceTimeEmployeeModal = (subtitle = "") => {
@@ -12043,6 +12136,7 @@ const openHolding = (options = {}) => {
   const requestedWorkspace = String(options.workspace || "").trim();
   let requestedView = String(options.view || "").trim();
   const requestedEngine = String(options.engine || "").trim();
+  const requestedPersona = String(options.persona || new URLSearchParams(window.location.search || "").get("persona") || "").trim();
   const requestedRrhh = String(
     options.rrhh || new URLSearchParams(window.location.search || "").get("rrhh") || ""
   )
@@ -12051,6 +12145,7 @@ const openHolding = (options = {}) => {
   state.currentWorkspaceEntryMode = mode;
   state.currentWorkspaceTarget = requestedWorkspace || (mode === "tenant" ? "modernia" : "");
   state.workspaceRrhhEntry = requestedRrhh === "self" ? "self" : "";
+  state.workspaceRrhhJumpPersonaId = requestedPersona;
   const engineKey = normalizeSimple(requestedEngine);
   if (engineKey === "rrhh") {
     // Compatibilidad: URLs antiguas que apuntaban a motores->rrhh ahora abren la vista RRHH.
@@ -12063,6 +12158,7 @@ const openHolding = (options = {}) => {
   }
   if (normalizeSimple(requestedView) !== "rrhh") {
     state.workspaceRrhhEntry = "";
+    state.workspaceRrhhJumpPersonaId = "";
   }
   setModule("empresas");
   explorerSection.classList.add("hidden");
@@ -34329,12 +34425,15 @@ if (coreCards) {
       openAgenda();
     } else if (action === "admin") {
       openAdmin();
-    } else if (action === "rrhh-home") {
-      const workspace = String(state.currentWorkspaceTarget || state.currentWorkspaceName || "modernia").trim() || "modernia";
-      openHolding({ mode: "tenant", workspace, view: "rrhh", rrhh: "self" });
-    }
-  });
-}
+	    } else if (action === "rrhh-home") {
+	      const workspace = String(state.currentWorkspaceTarget || state.currentWorkspaceName || "modernia").trim() || "modernia";
+	      const user = getAuthScopeUser();
+	      const isAdmin = isPrivilegedUser(user) || canAccessAdminPanel(user);
+	      const personaId = String(target.dataset.rrhhPersona || "").trim();
+	      openHolding({ mode: "tenant", workspace, view: "rrhh", rrhh: isAdmin ? "" : "self", persona: isAdmin ? personaId : "" });
+	    }
+	  });
+	}
 
 viewTabs.addEventListener("click", (event) => {
   const btn = event.target.closest(".tab");
@@ -36723,6 +36822,30 @@ if (workspaceTimeEmployeeForm) {
       }
       if (emailInput && !String(emailInput.value || "").trim()) {
         emailInput.value = selected.email || "";
+      }
+    });
+  }
+}
+
+if (workspaceTimeEmployeeForm) {
+  const photoInput = document.getElementById("workspaceTimeEmployeePhotoInput");
+  const photoStatus = document.getElementById("workspaceTimeEmployeePhotoStatus");
+  const photoHidden = workspaceTimeEmployeeForm.querySelector('[name="foto_url"]');
+  if (photoInput && photoHidden) {
+    photoInput.addEventListener("change", async () => {
+      const file = photoInput.files && photoInput.files[0] ? photoInput.files[0] : null;
+      if (!file) return;
+      try {
+        if (photoStatus) photoStatus.textContent = "Subiendo foto...";
+        const upload = await uploadFileToS3(file, "rrhh_fotos", photoStatus);
+        const url = upload?.key ? `s3://${String(upload.key)}` : String(upload?.public_url || "").trim();
+        if (!url) throw new Error("No se pudo subir la foto.");
+        photoHidden.value = url;
+        if (photoStatus) photoStatus.textContent = "Foto subida.";
+      } catch (err) {
+        if (photoStatus) photoStatus.textContent = err.message || "No se pudo subir la foto.";
+      } finally {
+        photoInput.value = "";
       }
     });
   }

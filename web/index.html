@@ -1203,6 +1203,7 @@
               <input type="hidden" name="id" />
               <input type="hidden" name="workspace_id" />
               <input type="hidden" name="usuario_id" />
+              <input type="hidden" name="foto_url" />
               <label>
                 Empresa
                 <select name="empresa_id" required></select>
@@ -1212,12 +1213,20 @@
                 <select name="usuario_id_lookup"></select>
               </label>
               <label>
-                Persona
+                Nombre y apellidos
                 <input name="nombre" required />
               </label>
               <label>
                 DNI
                 <input name="nif" />
+              </label>
+              <label>
+                Fecha nacimiento
+                <input name="fecha_nacimiento" type="date" />
+              </label>
+              <label>
+                Tipo contrato
+                <input name="tipo_contrato" placeholder="Indefinido, temporal, prácticas..." />
               </label>
               <label>
                 Tipo jornada
@@ -1233,6 +1242,11 @@
               <label>
                 Fecha alta
                 <input name="fecha_alta" type="date" />
+              </label>
+              <label class="span-2">
+                Fotografía
+                <input id="workspaceTimeEmployeePhotoInput" type="file" accept="image/*" />
+                <span id="workspaceTimeEmployeePhotoStatus" class="muted"></span>
               </label>
               <label class="inline-check">
                 <input type="checkbox" name="activo" checked />

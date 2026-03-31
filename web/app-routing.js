@@ -21,6 +21,7 @@
       const requestedView = (params.get("view") || "").trim();
       const requestedEngine = (params.get("engine") || "").trim();
       const requestedRrhh = (params.get("rrhh") || "").trim();
+      const requestedPersona = (params.get("persona") || "").trim();
       deps.openHolding({
         mode,
         workspace: params.get("workspace") || "",
@@ -28,6 +29,7 @@
         view: requestedView || (mode === "tenant" ? "overview" : "overview"),
         engine: requestedEngine || "",
         rrhh: requestedRrhh || "",
+        persona: requestedPersona || "",
       });
       deps.ui?.refreshContext(deps.state);
       return;

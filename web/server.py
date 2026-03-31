@@ -15004,6 +15004,8 @@ def ensure_workspace_product_tables(conn):
           email TEXT,
           telefono TEXT,
           foto_url TEXT,
+          fecha_nacimiento TEXT,
+          tipo_contrato TEXT,
           tipo_jornada TEXT NOT NULL DEFAULT 'Completa',
           horas_pactadas_dia REAL,
           horas_pactadas_semana REAL,
@@ -15115,6 +15117,8 @@ def ensure_workspace_product_tables(conn):
     ensure_column(conn, "workspace_registro_personal", "usuario_manual", "usuario_manual INTEGER NOT NULL DEFAULT 0")
     ensure_column(conn, "workspace_registro_personal", "source", "source TEXT NOT NULL DEFAULT 'manual'")
     ensure_column(conn, "workspace_registro_personal", "foto_url", "foto_url TEXT")
+    ensure_column(conn, "workspace_registro_personal", "fecha_nacimiento", "fecha_nacimiento TEXT")
+    ensure_column(conn, "workspace_registro_personal", "tipo_contrato", "tipo_contrato TEXT")
     # Índices: la tabla puede crecer mucho por sincronizaciones; sin índices los UPDATE/SELECT pueden provocar timeouts (Render → 502).
     try:
         conn.execute(
@@ -16857,6 +16861,8 @@ def fetch_workspace_personal(conn, workspace_id, empresa_id=None, only_active=Fa
           p.email,
           p.telefono,
           p.foto_url,
+          p.fecha_nacimiento,
+          p.tipo_contrato,
           p.tipo_jornada,
           p.horas_pactadas_dia,
           p.horas_pactadas_semana,
@@ -23383,6 +23389,8 @@ class Handler(BaseHTTPRequestHandler):
                 str(payload.get("email") or "").strip() or None,
                 str(payload.get("telefono") or "").strip() or None,
                 foto_url_value,
+                str(payload.get("fecha_nacimiento") or "").strip() or None,
+                str(payload.get("tipo_contrato") or "").strip() or None,
                 tipo_jornada,
                 horas_pactadas_dia,
                 horas_pactadas_semana,
@@ -23398,6 +23406,7 @@ class Handler(BaseHTTPRequestHandler):
                         """
                         UPDATE workspace_registro_personal
                         SET workspace_id = ?, empresa_id = ?, empresa_manual = ?, usuario_id = ?, usuario_manual = ?, source = ?, nombre = ?, nif = ?, email = ?, telefono = ?, foto_url = ?,
+                            fecha_nacimiento = ?, tipo_contrato = ?,
                             tipo_jornada = ?, horas_pactadas_dia = ?, horas_pactadas_semana = ?, fecha_alta = ?, fecha_baja = ?,
                             activo = ?, notas = ?, updated_at = datetime(?)
                         WHERE id = ? AND workspace_id = ?
@@ -23409,9 +23418,9 @@ class Handler(BaseHTTPRequestHandler):
                     conn.execute(
                         """
                         INSERT INTO workspace_registro_personal (
-                          id, workspace_id, empresa_id, empresa_manual, usuario_id, usuario_manual, source, nombre, nif, email, telefono, foto_url, tipo_jornada,
+                          id, workspace_id, empresa_id, empresa_manual, usuario_id, usuario_manual, source, nombre, nif, email, telefono, foto_url, fecha_nacimiento, tipo_contrato, tipo_jornada,
                           horas_pactadas_dia, horas_pactadas_semana, fecha_alta, fecha_baja, activo, notas, created_at, updated_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
                         """,
                         (record_id, *values, now, now),
                     )
