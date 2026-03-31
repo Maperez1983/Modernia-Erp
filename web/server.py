@@ -23346,8 +23346,14 @@ class Handler(BaseHTTPRequestHandler):
                         """,
                         (workspace_id, usuario_id_value),
                     ).fetchone()
-                    if existing and existing.get("id"):
-                        record_id = str(existing["id"] or "").strip()
+                    existing_id = ""
+                    if existing is not None:
+                        try:
+                            existing_id = str(existing["id"] or "").strip()
+                        except Exception:
+                            existing_id = ""
+                    if existing_id:
+                        record_id = existing_id
                 except Exception:
                     pass
             if record_id:
