@@ -5925,16 +5925,34 @@ const renderWorkspaceLauncher = (workspace = {}, modules = []) => {
 
 const refreshWorkspaceHomeAlerts = async () => {
   const user = getAuthScopeUser();
-  if (!user?.id || !isPrivilegedUser(user) || !state.currentWorkspaceId) {
+  if (!user?.id || !state.currentWorkspaceId) {
     renderWorkspaceHomeAlerts();
     return;
   }
-  const resp = await safeWorkspaceApi(
-    `/api/workspace_rrhh_ausencias?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}`,
-    { rows: [] }
-  );
-  if (resp && Array.isArray(resp.rows)) {
-    state.workspaceRrhhAusenciasAllRows = resp.rows;
+
+  const now = new Date();
+  const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  const isPrivileged = isPrivilegedUser(user);
+  const personaId = isPrivileged ? String(resolveWorkspacePersonaForAuthUser() || "").trim() : "";
+  const personaQuery = isPrivileged && personaId ? `&persona_id=${encodeURIComponent(personaId)}` : "";
+  if (!isPrivileged || personaId) {
+    const timeRows = await safeWorkspaceApi(
+      `/api/workspace_registro_horario?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}&month=${encodeURIComponent(month)}&limit=40${personaQuery}`,
+      { rows: [] }
+    );
+    state.workspaceHomeTimeRows = (timeRows && Array.isArray(timeRows.rows)) ? timeRows.rows : [];
+  } else {
+    state.workspaceHomeTimeRows = [];
+  }
+
+  if (isPrivileged) {
+    const resp = await safeWorkspaceApi(
+      `/api/workspace_rrhh_ausencias?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}`,
+      { rows: [] }
+    );
+    if (resp && Array.isArray(resp.rows)) {
+      state.workspaceRrhhAusenciasAllRows = resp.rows;
+    }
   }
   renderWorkspaceHomeAlerts();
 };
@@ -5943,35 +5961,81 @@ const renderWorkspaceHomeAlerts = () => {
   const target = document.getElementById("workspaceHomeAlerts");
   if (!target) return;
   const user = getAuthScopeUser();
-  if (!user?.id || !isPrivilegedUser(user)) {
+  if (!user?.id) {
     target.innerHTML = "";
     return;
   }
+
   const enabledModules = new Set(state.currentWorkspaceEnabledModules || []);
-  if (enabledModules.size && !enabledModules.has("rrhh")) {
-    target.innerHTML = "";
-    return;
-  }
-  const rows = Array.isArray(state.workspaceRrhhAusenciasAllRows) ? state.workspaceRrhhAusenciasAllRows : [];
-  const pending = rows.filter((row) => String(row?.estado || "").trim() === "Solicitada");
-  if (!pending.length) {
-    target.innerHTML = "";
-    return;
-  }
-  target.innerHTML = `
-    <div class="rrhh-alert">
-      <div>
-        <strong>RRHH · ${pending.length} solicitud${pending.length === 1 ? "" : "es"} pendiente${pending.length === 1 ? "" : "s"} por validar</strong>
-        <div class="muted">Vacaciones y permisos del equipo.</div>
+  const alerts = [];
+
+  // 1) Registro horario del día (para todos los usuarios con ficha).
+  if (!enabledModules.size || enabledModules.has("registro_horario")) {
+    const now = new Date();
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    const rows = Array.isArray(state.workspaceHomeTimeRows) ? state.workspaceHomeTimeRows : [];
+    const todayRows = rows.filter((row) => String(row?.fecha || "").slice(0, 10) === today);
+    const open = todayRows.find((row) => !String(row?.hora_fin || "").trim()) || null;
+    const latest = todayRows.length
+      ? [...todayRows].sort((a, b) => String(b?.hora_inicio || "").localeCompare(String(a?.hora_inicio || "")))[0]
+      : null;
+    const entry = String((open || latest)?.hora_inicio || "").trim();
+    const exit = String((open || latest)?.hora_fin || "").trim();
+
+    const title = entry
+      ? (exit ? "Registro horario · Entrada y salida registradas" : "Registro horario · Entrada registrada")
+      : "Registro horario · Sin entrada registrada hoy";
+    const detail = entry
+      ? (exit ? `Entrada: ${entry} · Salida: ${exit}` : `Entrada: ${entry} · Salida pendiente`)
+      : "Registra tu entrada para que quede constancia del día.";
+    alerts.push(`
+      <div class="rrhh-alert">
+        <div>
+          <strong>${escapeHtml(title)}</strong>
+          <div class="muted">${escapeHtml(detail)}</div>
+        </div>
+        <div class="rrhh-alert-actions">
+          <button type="button" class="secondary ghost button-inline" data-workspace-time-today>Ver</button>
+        </div>
       </div>
-      <div class="rrhh-alert-actions">
-        <button type="button" class="secondary ghost button-inline" data-workspace-rrhh-validations>Revisar</button>
-      </div>
-    </div>
-  `;
-  const btn = target.querySelector("[data-workspace-rrhh-validations]");
-  if (btn) {
-    btn.addEventListener("click", () => {
+    `);
+  }
+
+  // 2) RRHH pendientes (solo admins).
+  if (isPrivilegedUser(user) && (!enabledModules.size || enabledModules.has("rrhh"))) {
+    const rows = Array.isArray(state.workspaceRrhhAusenciasAllRows) ? state.workspaceRrhhAusenciasAllRows : [];
+    const pending = rows.filter((row) => String(row?.estado || "").trim() === "Solicitada");
+    if (pending.length) {
+      alerts.push(`
+        <div class="rrhh-alert">
+          <div>
+            <strong>RRHH · ${pending.length} solicitud${pending.length === 1 ? "" : "es"} pendiente${pending.length === 1 ? "" : "s"} por validar</strong>
+            <div class="muted">Vacaciones y permisos del equipo.</div>
+          </div>
+          <div class="rrhh-alert-actions">
+            <button type="button" class="secondary ghost button-inline" data-workspace-rrhh-validations>Revisar</button>
+          </div>
+        </div>
+      `);
+    }
+  }
+
+  target.innerHTML = alerts.join("");
+
+  const timeBtn = target.querySelector("[data-workspace-time-today]");
+  if (timeBtn) {
+    timeBtn.addEventListener("click", () => {
+      if (isTenantWorkspaceMode()) {
+        focusWorkspaceEngine("registro_horario", workspaceTimeSummary, { forceTenantView: true });
+        return;
+      }
+      focusWorkspaceEngine("registro_horario", workspaceTimeSummary);
+    });
+  }
+
+  const rrhhBtn = target.querySelector("[data-workspace-rrhh-validations]");
+  if (rrhhBtn) {
+    rrhhBtn.addEventListener("click", () => {
       state.workspaceRrhhEntry = "";
       state.workspaceRrhhTab = "ausencias";
       state.workspaceRrhhScopeAll = true;
