@@ -5974,6 +5974,8 @@ const renderWorkspaceHomeAlerts = () => {
     const now = new Date();
     const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
     const rows = Array.isArray(state.workspaceHomeTimeRows) ? state.workspaceHomeTimeRows : [];
+    const selfPersonaId = String(resolveWorkspacePersonaForAuthUser() || "").trim();
+    const hasFicha = Boolean(selfPersonaId) || rows.length > 0;
     const todayRows = rows.filter((row) => String(row?.fecha || "").slice(0, 10) === today);
     const open = todayRows.find((row) => !String(row?.hora_fin || "").trim()) || null;
     const latest = todayRows.length
@@ -5982,10 +5984,14 @@ const renderWorkspaceHomeAlerts = () => {
     const entry = String((open || latest)?.hora_inicio || "").trim();
     const exit = String((open || latest)?.hora_fin || "").trim();
 
-    const title = entry
+    const title = !hasFicha
+      ? "Registro horario · Sin ficha vinculada"
+      : entry
       ? (exit ? "Registro horario · Entrada y salida registradas" : "Registro horario · Entrada registrada")
       : "Registro horario · Sin entrada registrada hoy";
-    const detail = entry
+    const detail = !hasFicha
+      ? "Pide a administración que te vincule a una ficha de registro horario."
+      : entry
       ? (exit ? `Entrada: ${entry} · Salida: ${exit}` : `Entrada: ${entry} · Salida pendiente`)
       : "Registra tu entrada para que quede constancia del día.";
     alerts.push(`
