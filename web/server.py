@@ -20750,7 +20750,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._ensure_db_ready()
                 self.handle_api(parsed)
             except Exception as exc:
-                json_response(self, {"error": "API error", "detail": f"{type(exc).__name__}: {exc}"}, status=500)
+                json_response(self, {"error": f"{type(exc).__name__}: {exc}"}, status=500)
             return
 
         if parsed.path == "/" or parsed.path == "":
@@ -20790,7 +20790,7 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as exc:
             # Evita que una excepción no controlada cierre la conexión (Render lo reporta como 502).
             try:
-                json_response(self, {"error": "API error", "detail": f"{type(exc).__name__}: {exc}"}, status=500)
+                json_response(self, {"error": f"{type(exc).__name__}: {exc}"}, status=500)
             except Exception:
                 try:
                     self.send_error(500, "API error")
@@ -23348,45 +23348,59 @@ class Handler(BaseHTTPRequestHandler):
                 active_flag,
                 str(payload.get("notas") or "").strip() or None,
             )
-            if record_id:
-                conn.execute(
-                    """
-                    UPDATE workspace_registro_personal
-                    SET workspace_id = ?, empresa_id = ?, empresa_manual = ?, usuario_id = ?, usuario_manual = ?, source = ?, nombre = ?, nif = ?, email = ?, telefono = ?, foto_url = ?,
-                        tipo_jornada = ?, horas_pactadas_dia = ?, horas_pactadas_semana = ?, fecha_alta = ?, fecha_baja = ?,
-                        activo = ?, notas = ?, updated_at = datetime(?)
-                    WHERE id = ? AND workspace_id = ?
-                    """,
-                    (*values, now, record_id, workspace_id),
-                )
-            else:
-                record_id = os.urandom(16).hex()
-                conn.execute(
-                    """
-                    INSERT INTO workspace_registro_personal (
-                      id, workspace_id, empresa_id, empresa_manual, usuario_id, usuario_manual, source, nombre, nif, email, telefono, foto_url, tipo_jornada,
-                      horas_pactadas_dia, horas_pactadas_semana, fecha_alta, fecha_baja, activo, notas, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
-                    """,
-                    (record_id, *values, now, now),
-                )
-                prev = None
-            # Garantiza unicidad del vínculo: un usuario del sistema solo puede estar en una ficha por workspace.
-            if usuario_id_value:
-                conn.execute(
-                    """
-                    UPDATE workspace_registro_personal
-                    SET usuario_id = NULL, usuario_manual = 0, updated_at = datetime(?)
-                    WHERE workspace_id = ? AND usuario_id = ? AND id != ?
-                    """,
-                    (now, workspace_id, usuario_id_value, record_id),
-                )
-            # Si vinculamos a un usuario del sistema, activamos el registro horario para evitar que el sync lo desactive.
-            if usuario_id_value and active_flag == 1:
-                conn.execute(
-                    "UPDATE usuarios SET registro_horario_activo = 1 WHERE id = ?",
-                    (usuario_id_value,),
-                )
+            def _run_write():
+                nonlocal record_id, prev
+                if record_id:
+                    conn.execute(
+                        """
+                        UPDATE workspace_registro_personal
+                        SET workspace_id = ?, empresa_id = ?, empresa_manual = ?, usuario_id = ?, usuario_manual = ?, source = ?, nombre = ?, nif = ?, email = ?, telefono = ?, foto_url = ?,
+                            tipo_jornada = ?, horas_pactadas_dia = ?, horas_pactadas_semana = ?, fecha_alta = ?, fecha_baja = ?,
+                            activo = ?, notas = ?, updated_at = datetime(?)
+                        WHERE id = ? AND workspace_id = ?
+                        """,
+                        (*values, now, record_id, workspace_id),
+                    )
+                else:
+                    record_id = os.urandom(16).hex()
+                    conn.execute(
+                        """
+                        INSERT INTO workspace_registro_personal (
+                          id, workspace_id, empresa_id, empresa_manual, usuario_id, usuario_manual, source, nombre, nif, email, telefono, foto_url, tipo_jornada,
+                          horas_pactadas_dia, horas_pactadas_semana, fecha_alta, fecha_baja, activo, notas, created_at, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                        """,
+                        (record_id, *values, now, now),
+                    )
+                    prev = None
+                # Garantiza unicidad del vínculo: un usuario del sistema solo puede estar en una ficha por workspace.
+                if usuario_id_value:
+                    conn.execute(
+                        """
+                        UPDATE workspace_registro_personal
+                        SET usuario_id = NULL, usuario_manual = 0, updated_at = datetime(?)
+                        WHERE workspace_id = ? AND usuario_id = ? AND id != ?
+                        """,
+                        (now, workspace_id, usuario_id_value, record_id),
+                    )
+                # Si vinculamos a un usuario del sistema, activamos el registro horario para evitar que el sync lo desactive.
+                if usuario_id_value and active_flag == 1:
+                    conn.execute(
+                        "UPDATE usuarios SET registro_horario_activo = 1 WHERE id = ?",
+                        (usuario_id_value,),
+                    )
+
+            # Retries por bloqueos de SQLite (Render multitarea → 500).
+            for attempt in range(6):
+                try:
+                    _run_write()
+                    break
+                except sqlite3.OperationalError as exc:
+                    msg = str(exc).lower()
+                    if "locked" in msg or "busy" in msg:
+                        time.sleep(0.12 * (attempt + 1))
+                        continue
+                    raise
             after_row = conn.execute(
                 "SELECT * FROM workspace_registro_personal WHERE id = ? AND workspace_id = ? LIMIT 1",
                 (record_id, workspace_id),

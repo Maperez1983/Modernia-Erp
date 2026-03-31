@@ -30,7 +30,12 @@ const api = async (path) => {
     data = null;
   }
   if (!res.ok) {
-    const error = new Error((data && data.error) || `HTTP ${res.status}`);
+    const msg =
+      (data && data.detail)
+      || (data && data.error && data.error !== "API error" ? data.error : "")
+      || (data && data.error)
+      || `HTTP ${res.status}`;
+    const error = new Error(msg);
     error.status = res.status;
     error.data = data;
     if (res.status === 401) {
@@ -68,7 +73,12 @@ const apiPost = async (url, payload = {}) => {
   }
 
   if (!res.ok || data?.error) {
-    const error = new Error((data && (data.error || data.detail)) || `HTTP ${res.status}`);
+    const msg =
+      (data && data.detail)
+      || (data && data.error && data.error !== "API error" ? data.error : "")
+      || (data && data.error)
+      || `HTTP ${res.status}`;
+    const error = new Error(msg);
     error.status = res.status;
     error.data = data;
     throw error;
@@ -11035,35 +11045,70 @@ const loadWorkspaceDetail = async (workspaceId) => {
   state.workspaceTimeUsers = timeUsers.rows || [];
   const timeMonth = normalizeMonthValue(state.workspaceTimeMonth || "");
   state.workspaceTimeMonth = timeMonth;
+  const viewHint = String(
+    state.currentWorkspaceView
+      || new URLSearchParams(window.location.search || "").get("view")
+      || ""
+  )
+    .trim()
+    .toLowerCase();
+  const minimalForRrhh = viewHint === "rrhh";
   // Evitar "stampede" de decenas de requests concurrentes al entrar en el workspace.
   // SQLite + Render puede devolver 502 si saturamos conexiones/tiempos de respuesta.
-  const billing = await safeWorkspaceApi(`/api/workspace_billing_summary?workspace_id=${encodeURIComponent(workspaceId)}`, {});
-  const docs = await safeWorkspaceApi(`/api/workspace_document_hub?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [], summary: {} });
-  const billingRows = await safeWorkspaceApi(`/api/workspace_facturacion?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [] });
-  const budgetRows = await safeWorkspaceApi(`/api/workspace_presupuestos?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [] });
-  const collections = await safeWorkspaceApi(`/api/workspace_cobros?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [] });
-  const remittances = await safeWorkspaceApi(`/api/workspace_remesas?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [] });
-  const workspaceClients = await safeWorkspaceApi(`/api/workspace_clientes?workspace_id=${encodeURIComponent(workspaceId)}&limit=60`, { rows: [] });
-  const health = await safeWorkspaceApi(`/api/workspace_health?workspace_id=${encodeURIComponent(workspaceId)}`, {});
-  const gestoriaOverview = await safeWorkspaceApi(`/api/workspace_gestoria_overview?workspace_id=${encodeURIComponent(workspaceId)}${companyQuery}`, {});
-  const segurosOverview = await safeWorkspaceApi(`/api/workspace_seguros_overview?workspace_id=${encodeURIComponent(workspaceId)}${companyQuery}`, {});
-  const finOverview = await safeWorkspaceApi(`/api/workspace_fin_overview?workspace_id=${encodeURIComponent(workspaceId)}${companyQuery}`, {});
-  const inmoOverview = await safeWorkspaceApi(`/api/workspace_inmo_overview?workspace_id=${encodeURIComponent(workspaceId)}${companyQuery}`, {});
-  const serviceDesks = await safeWorkspaceApi(`/api/workspace_service_desks?workspace_id=${encodeURIComponent(workspaceId)}${companyQuery}`, {});
-  const series = await safeWorkspaceApi(`/api/workspace_series?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [] });
-  const inbox = await safeWorkspaceApi(`/api/workspace_inbox?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [] });
-  const portal = await safeWorkspaceApi(`/api/workspace_portal?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [] });
-  const portalRequests = await safeWorkspaceApi(`/api/workspace_portal_requerimientos?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [] });
-  const automations = await safeWorkspaceApi(`/api/workspace_automatizaciones?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [] });
-  const automationLogs = await safeWorkspaceApi(`/api/workspace_automatizacion_logs?workspace_id=${encodeURIComponent(workspaceId)}&limit=12`, { rows: [] });
-  const timeRows = await safeWorkspaceApi(`/api/workspace_registro_horario?workspace_id=${encodeURIComponent(workspaceId)}&month=${encodeURIComponent(timeMonth)}${companyQuery}`, { rows: [] });
-  const timeEmployees = await safeWorkspaceApi(`/api/workspace_registro_personal?workspace_id=${encodeURIComponent(workspaceId)}${companyQuery}&activos=0`, { rows: [] });
-  const timeSummary = await safeWorkspaceApi(`/api/workspace_registro_horario_resumen?workspace_id=${encodeURIComponent(workspaceId)}&month=${encodeURIComponent(timeMonth)}${companyQuery}`, { rows: [] });
+  let billing = {};
+  let docs = { rows: [], summary: {} };
+  let billingRows = { rows: [] };
+  let budgetRows = { rows: [] };
+  let collections = { rows: [] };
+  let remittances = { rows: [] };
+  let workspaceClients = { rows: [] };
+  let health = {};
+  let gestoriaOverview = {};
+  let segurosOverview = {};
+  let finOverview = {};
+  let inmoOverview = {};
+  let serviceDesks = {};
+  let series = { rows: [] };
+  let inbox = { rows: [] };
+  let portal = { rows: [] };
+  let portalRequests = { rows: [] };
+  let automations = { rows: [] };
+  let automationLogs = { rows: [] };
+  // RRHH necesita estos datos para pintar cards y jornada.
+  const timeRows = await safeWorkspaceApi(`/api/workspace_registro_horario?workspace_id=${encodeURIComponent(workspaceId)}&month=${encodeURIComponent(timeMonth)}${companyQuery}&limit=250`, { rows: [] });
+  const timeEmployees = await safeWorkspaceApi(`/api/workspace_registro_personal?workspace_id=${encodeURIComponent(workspaceId)}${companyQuery}&activos=0&limit=500`, { rows: [] });
+  const timeSummary = await safeWorkspaceApi(`/api/workspace_registro_horario_resumen?workspace_id=${encodeURIComponent(workspaceId)}&month=${encodeURIComponent(timeMonth)}${companyQuery}`, {});
   const timePeriods = await safeWorkspaceApi(`/api/workspace_registro_periodos?workspace_id=${encodeURIComponent(workspaceId)}${companyQuery}`, { rows: [] });
-  const fincasCommunities = await safeWorkspaceApi(`/api/workspace_fincas_comunidades?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [] });
-  const fincasIncidents = await safeWorkspaceApi(`/api/workspace_fincas_incidencias?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [] });
-  const fincasProviders = await safeWorkspaceApi(`/api/workspace_fincas_proveedores?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [] });
-  const fincasMeetings = await safeWorkspaceApi(`/api/workspace_fincas_juntas?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [] });
+  let fincasCommunities = { rows: [] };
+  let fincasIncidents = { rows: [] };
+  let fincasProviders = { rows: [] };
+  let fincasMeetings = { rows: [] };
+
+  if (!minimalForRrhh) {
+    billing = await safeWorkspaceApi(`/api/workspace_billing_summary?workspace_id=${encodeURIComponent(workspaceId)}`, {});
+    docs = await safeWorkspaceApi(`/api/workspace_document_hub?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [], summary: {} });
+    billingRows = await safeWorkspaceApi(`/api/workspace_facturacion?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [] });
+    budgetRows = await safeWorkspaceApi(`/api/workspace_presupuestos?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [] });
+    collections = await safeWorkspaceApi(`/api/workspace_cobros?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [] });
+    remittances = await safeWorkspaceApi(`/api/workspace_remesas?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [] });
+    workspaceClients = await safeWorkspaceApi(`/api/workspace_clientes?workspace_id=${encodeURIComponent(workspaceId)}&limit=60`, { rows: [] });
+    health = await safeWorkspaceApi(`/api/workspace_health?workspace_id=${encodeURIComponent(workspaceId)}`, {});
+    gestoriaOverview = await safeWorkspaceApi(`/api/workspace_gestoria_overview?workspace_id=${encodeURIComponent(workspaceId)}${companyQuery}`, {});
+    segurosOverview = await safeWorkspaceApi(`/api/workspace_seguros_overview?workspace_id=${encodeURIComponent(workspaceId)}${companyQuery}`, {});
+    finOverview = await safeWorkspaceApi(`/api/workspace_fin_overview?workspace_id=${encodeURIComponent(workspaceId)}${companyQuery}`, {});
+    inmoOverview = await safeWorkspaceApi(`/api/workspace_inmo_overview?workspace_id=${encodeURIComponent(workspaceId)}${companyQuery}`, {});
+    serviceDesks = await safeWorkspaceApi(`/api/workspace_service_desks?workspace_id=${encodeURIComponent(workspaceId)}${companyQuery}`, {});
+    series = await safeWorkspaceApi(`/api/workspace_series?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [] });
+    inbox = await safeWorkspaceApi(`/api/workspace_inbox?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [] });
+    portal = await safeWorkspaceApi(`/api/workspace_portal?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [] });
+    portalRequests = await safeWorkspaceApi(`/api/workspace_portal_requerimientos?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [] });
+    automations = await safeWorkspaceApi(`/api/workspace_automatizaciones?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [] });
+    automationLogs = await safeWorkspaceApi(`/api/workspace_automatizacion_logs?workspace_id=${encodeURIComponent(workspaceId)}&limit=12`, { rows: [] });
+    fincasCommunities = await safeWorkspaceApi(`/api/workspace_fincas_comunidades?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [] });
+    fincasIncidents = await safeWorkspaceApi(`/api/workspace_fincas_incidencias?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [] });
+    fincasProviders = await safeWorkspaceApi(`/api/workspace_fincas_proveedores?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [] });
+    fincasMeetings = await safeWorkspaceApi(`/api/workspace_fincas_juntas?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [] });
+  }
   state.currentWorkspaceClients = workspaceClients.rows || [];
   state.currentWorkspaceData = {
     docs,
@@ -38291,11 +38336,13 @@ if (adminUserForm) {
         }
         const timeCheck = adminUserForm.querySelector('[name="registro_horario_activo"]');
         if (timeCheck) timeCheck.checked = false;
-        loadUsuarios().then(() => {
-          renderUsuariosSelect();
-          renderUsuariosTable();
-          renderCompanyCards();
-        });
+        loadUsuarios()
+          .then(() => {
+            renderUsuariosSelect();
+            renderUsuariosTable();
+            renderCompanyCards();
+          })
+          .catch(() => {});
       })
       .catch(() => {
         if (adminUserStatus) {
