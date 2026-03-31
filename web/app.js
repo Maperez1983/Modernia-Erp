@@ -1310,6 +1310,8 @@ const state = {
   workspaceRrhhVacSummaryYear: "",
   workspaceRrhhVacSummaryRows: [],
   workspaceRrhhProfileRow: null,
+  workspaceRrhhPersonaCache: new Map(),
+  workspaceRrhhPersonaCacheId: "",
   workspaceRrhhTimeSummary: null,
   workspaceRrhhTimeRows: [],
   workspaceRrhhAusenciasRows: [],
@@ -5978,6 +5980,38 @@ const normalizeWorkspaceRrhhTab = (value = "") => {
 
 const isWorkspaceRrhhManager = () => isWorkspaceTimeManager();
 
+const upsertWorkspaceEmployeeLocal = (patch = {}) => {
+  const rawId = String(patch?.id || "").trim();
+  if (!rawId) return;
+  const employees = Array.isArray(state.workspaceTimeEmployees) ? [...state.workspaceTimeEmployees] : [];
+  const idx = employees.findIndex((row) => String(row?.id || "").trim() === rawId);
+  const prev = idx >= 0 ? employees[idx] : {};
+  const companies = state.currentWorkspaceDetail?.companies || [];
+  const empresaId = String(patch?.empresa_id ?? prev?.empresa_id ?? "").trim();
+  const matchedCompany = empresaId ? companies.find((c) => String(c.id || "") === empresaId) : null;
+  const empresaNombre =
+    String(patch?.empresa_nombre || "").trim()
+    || String(prev?.empresa_nombre || "").trim()
+    || String(matchedCompany?.nombre || "").trim();
+  const next = {
+    ...prev,
+    ...patch,
+    id: rawId,
+    empresa_id: empresaId || (prev?.empresa_id || ""),
+    empresa_nombre: empresaNombre || "",
+  };
+  if (!String(next.source || "").trim()) next.source = "manual";
+  if (idx >= 0) {
+    employees[idx] = next;
+  } else {
+    employees.unshift(next);
+  }
+  state.workspaceTimeEmployees = employees;
+  if (state.currentWorkspaceData) {
+    state.currentWorkspaceData.timeEmployees = employees;
+  }
+};
+
   const resolveWorkspacePersonaForAuthUser = () => {
     const user = getAuthScopeUser();
     if (!user?.id) return "";
@@ -6051,6 +6085,26 @@ const isWorkspaceRrhhManager = () => isWorkspaceTimeManager();
   const personaQuery = scopePersonaId ? `&persona_id=${encodeURIComponent(scopePersonaId)}` : "";
   const ausenciasMonthQuery = manager ? `&month=${encodeURIComponent(month)}` : "";
 
+  // Evita “arrastrar” datos de otra persona: usa caché por persona si existe, o limpia solo esa parte.
+  if (scopePersonaId) {
+    const lastCacheId = String(state.workspaceRrhhPersonaCacheId || "").trim();
+    if (lastCacheId !== scopePersonaId) {
+      const cached = state.workspaceRrhhPersonaCache?.get
+        ? state.workspaceRrhhPersonaCache.get(scopePersonaId)
+        : null;
+      state.workspaceRrhhProfileRow = cached?.profileRow || null;
+      state.workspaceRrhhAusenciasRows = cached?.ausenciasRows || [];
+      state.workspaceRrhhGastosRows = cached?.gastosRows || [];
+      state.workspaceRrhhDocsRows = cached?.docsRows || [];
+      state.workspaceRrhhTimeSummary = cached?.timeSummary || null;
+      state.workspaceRrhhTimeRows = cached?.timeRows || [];
+      state.workspaceRrhhPersonaCacheId = scopePersonaId;
+      renderWorkspaceRrhhHub();
+    }
+  } else {
+    state.workspaceRrhhPersonaCacheId = "";
+  }
+
   const year = (String(month || "").slice(0, 4) || String(new Date().getFullYear())).trim();
   const [profile, ausencias, gastos, docs, timeSummary, timeRows, vacSummary] = await Promise.all([
     scopePersonaId ? safeWorkspaceApi(`/api/workspace_rrhh_profile?workspace_id=${encodeURIComponent(workspaceId)}&persona_id=${encodeURIComponent(scopePersonaId)}`, { row: {} }) : { row: {} },
@@ -6070,6 +6124,17 @@ const isWorkspaceRrhhManager = () => isWorkspaceTimeManager();
   state.workspaceRrhhTimeRows = timeRows?.rows || [];
   state.workspaceRrhhVacSummaryYear = year;
   state.workspaceRrhhVacSummaryRows = vacSummary?.rows || [];
+
+  if (scopePersonaId && state.workspaceRrhhPersonaCache?.set) {
+    state.workspaceRrhhPersonaCache.set(scopePersonaId, {
+      profileRow: state.workspaceRrhhProfileRow,
+      ausenciasRows: state.workspaceRrhhAusenciasRows,
+      gastosRows: state.workspaceRrhhGastosRows,
+      docsRows: state.workspaceRrhhDocsRows,
+      timeSummary: state.workspaceRrhhTimeSummary,
+      timeRows: state.workspaceRrhhTimeRows,
+    });
+  }
 
   // Render after data arrives.
   renderWorkspaceRrhhHub();
@@ -7766,6 +7831,16 @@ const renderWorkspaceRrhhHub = () => {
           state.workspaceRrhhSelectedPersonaId = String(resp.id || "");
           state.workspaceRrhhScopeAll = false;
         }
+        // Actualiza las cards inmediatamente aunque falle el reload (evita que “no se pinte” lo guardado).
+        const personaId = String(resp?.id || payload.id || "").trim();
+        if (personaId) {
+          upsertWorkspaceEmployeeLocal({
+            ...payload,
+            id: personaId,
+            empresa_nombre: (state.currentWorkspaceDetail?.companies || []).find((c) => String(c.id || "") === String(payload.empresa_id || ""))?.nombre || "",
+          });
+          renderWorkspaceRrhhHub();
+        }
         await loadWorkspaceDetail(state.currentWorkspaceId);
         await refreshWorkspaceRrhh();
       } catch (error) {
@@ -8033,6 +8108,23 @@ const renderWorkspaceRrhhHub = () => {
           empresa_manual: 1,
         });
         if (status) status.textContent = "Ficha guardada.";
+        upsertWorkspaceEmployeeLocal({
+          id: existing?.id || "",
+          workspace_id: state.currentWorkspaceId,
+          empresa_id: empresaId,
+          empresa_nombre: (state.currentWorkspaceDetail?.companies || []).find((c) => String(c.id || "") === String(empresaId || ""))?.nombre || "",
+          usuario_id: userId,
+          usuario_manual: 1,
+          nombre: fullName || existing?.nombre || "Empleado",
+          nif: nif || existing?.nif || "",
+          email: email || user?.email || existing?.email || "",
+          telefono: telefono || existing?.telefono || "",
+          tipo_jornada: jornada,
+          horas_pactadas_dia: horas,
+          activo,
+          empresa_manual: 1,
+        });
+        renderWorkspaceRrhhHub();
         await loadWorkspaceDetail(state.currentWorkspaceId);
         await refreshWorkspaceRrhh();
       } catch (error) {
@@ -8047,14 +8139,6 @@ const renderWorkspaceRrhhHub = () => {
     btn.addEventListener("click", async () => {
       state.workspaceRrhhSelectedPersonaId = btn.dataset.rrhhPersona || "";
       state.workspaceRrhhScopeAll = false;
-      // Evita "arrastrar" valores del formulario anterior mientras cargan los datos del nuevo miembro.
-      state.workspaceRrhhProfileRow = null;
-      state.workspaceRrhhAusenciasRows = [];
-      state.workspaceRrhhGastosRows = [];
-      state.workspaceRrhhDocsRows = [];
-      state.workspaceRrhhTimeSummary = null;
-      state.workspaceRrhhTimeRows = [];
-      renderWorkspaceRrhhHub();
       await refreshWorkspaceRrhh();
     });
   });
@@ -36844,6 +36928,15 @@ if (workspaceTimeForm) {
     try {
       const data = await apiPost("/api/workspace_registro_personal", payload);
       if (workspaceTimeEmployeeStatus) workspaceTimeEmployeeStatus.textContent = "Persona guardada.";
+      if (data?.id) {
+        upsertWorkspaceEmployeeLocal({
+          ...payload,
+          id: String(data.id || "").trim(),
+          empresa_nombre: matchedCompany?.nombre || "",
+        });
+        // Re-render inmediato para que la card/listado refleje el cambio aunque el reload falle.
+        renderWorkspaceRrhhHub();
+      }
       await loadWorkspaceDetail(state.currentWorkspaceId);
       if (data?.id) {
         state.workspaceRrhhSelectedPersonaId = String(data.id || "");
