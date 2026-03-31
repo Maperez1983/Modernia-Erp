@@ -23286,15 +23286,15 @@ class Handler(BaseHTTPRequestHandler):
         elif parsed.path == "/api/workspace_registro_personal":
             t0 = time.monotonic()
             workspace_id = str(payload.get("workspace_id") or "").strip()
-            empresa_id = str(payload.get("empresa_id") or "").strip()
+            empresa_id = str(payload.get("empresa_id") or "").strip() or None
             record_id = str(payload.get("id") or "").strip()
             nombre = str(payload.get("nombre") or "").strip()
             session = getattr(self, "auth_session", None) or self._current_session()
             if session and not workspace_session_is_privileged(session):
                 json_response(self, {"error": "No autorizado"}, status=403)
                 return
-            if not workspace_id or not empresa_id or not nombre:
-                json_response(self, {"error": "workspace_id, empresa_id y nombre requeridos"}, status=400)
+            if not workspace_id or not nombre:
+                json_response(self, {"error": "workspace_id y nombre requeridos"}, status=400)
                 return
             manual_flag = 1
             manual_raw = str(payload.get("empresa_manual") or "").strip().lower()

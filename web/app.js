@@ -1304,6 +1304,7 @@ const state = {
   workspaceTimePeriods: [],
   workspaceTimePeriodRow: null,
   workspaceRrhhTab: "plantilla",
+  workspaceRrhhEntry: "",
   workspaceRrhhSelectedPersonaId: "",
   workspaceRrhhMonth: "",
   workspaceRrhhScopeAll: false,
@@ -3668,11 +3669,11 @@ const renderCompanyCards = () => {
     const canSeguros = userCanAccessService("seguros");
     const canFin = userCanAccessService("financiaciones");
     const primaryRestrictedService = getPrimaryRestrictedHomeService(user);
-    const enabledModules = new Set(state.currentWorkspaceEnabledModules || []);
-    const workspaceScoped = enabledModules.size > 0;
-    const timeProfile = findCurrentUserTimeProfile();
-    const workspaceSlug = String(state.currentWorkspaceTarget || state.currentWorkspaceName || "modernia").trim() || "modernia";
-    const rrhhHref = `?holding=1&mode=tenant&workspace=${encodeURIComponent(workspaceSlug)}&view=motores&engine=rrhh`;
+	    const enabledModules = new Set(state.currentWorkspaceEnabledModules || []);
+	    const workspaceScoped = enabledModules.size > 0;
+	    const timeProfile = findCurrentUserTimeProfile();
+	    const workspaceSlug = String(state.currentWorkspaceTarget || state.currentWorkspaceName || "modernia").trim() || "modernia";
+	    const rrhhHref = `?holding=1&mode=tenant&workspace=${encodeURIComponent(workspaceSlug)}&view=rrhh&rrhh=self`;
 
     const buildInitials = (value) => {
       const parts = String(value || "")
@@ -4383,6 +4384,9 @@ const setWorkspaceView = (view = "overview", options = {}) => {
     if (!isPrivilegedUser(user)) {
       normalized = "operations";
     }
+  }
+  if (normalized !== "rrhh") {
+    state.workspaceRrhhEntry = "";
   }
   state.currentWorkspaceView = normalized;
   workspaceViewButtons.forEach((button) => {
@@ -6031,19 +6035,26 @@ const upsertWorkspaceEmployeeLocal = (patch = {}) => {
   };
 
   const refreshWorkspaceRrhh = async () => {
-  if (!workspaceRrhhHub) return;
-  const workspaceId = state.currentWorkspaceId;
-  if (!workspaceId) return;
+	  if (!workspaceRrhhHub) return;
+	  const workspaceId = state.currentWorkspaceId;
+	  if (!workspaceId) return;
 
-  const manager = isWorkspaceRrhhManager();
-  const month = normalizeMonthValue(state.workspaceRrhhMonth || state.workspaceTimeMonth || "");
-  state.workspaceRrhhMonth = month;
-  state.workspaceRrhhTab = normalizeWorkspaceRrhhTab(state.workspaceRrhhTab);
-  // UX: para admin, centralizamos en "Equipo" (Plantilla/Usuarios se integran ahí).
-  if (manager && ["plantilla", "usuarios"].includes(state.workspaceRrhhTab)) {
-    state.workspaceRrhhTab = "equipo";
-  }
-  // Para trabajador, solo su ficha (no Equipo/Usuarios).
+	  const rrhhEntry = String(state.workspaceRrhhEntry || "").trim().toLowerCase();
+	  const selfScope = rrhhEntry === "self";
+	  const manager = isWorkspaceRrhhManager() && !selfScope;
+	  const month = normalizeMonthValue(state.workspaceRrhhMonth || state.workspaceTimeMonth || "");
+	  state.workspaceRrhhMonth = month;
+	  state.workspaceRrhhTab = normalizeWorkspaceRrhhTab(state.workspaceRrhhTab);
+	  if (selfScope) {
+	    state.workspaceRrhhTab = "plantilla";
+	    state.workspaceRrhhScopeAll = false;
+	    state.workspaceRrhhEquipoView = "list";
+	  }
+	  // UX: para admin, centralizamos en "Equipo" (Plantilla/Usuarios se integran ahí).
+	  if (manager && ["plantilla", "usuarios"].includes(state.workspaceRrhhTab)) {
+	    state.workspaceRrhhTab = "equipo";
+	  }
+	  // Para trabajador, solo su ficha (no Equipo/Usuarios).
   if (!manager && ["equipo", "usuarios"].includes(state.workspaceRrhhTab)) {
     state.workspaceRrhhTab = "plantilla";
   }
@@ -6152,7 +6163,9 @@ const upsertWorkspaceEmployeeLocal = (patch = {}) => {
 
 const renderWorkspaceRrhhHub = () => {
   if (!workspaceRrhhHub) return;
-  const manager = isWorkspaceRrhhManager();
+  const rrhhEntry = String(state.workspaceRrhhEntry || "").trim().toLowerCase();
+  const selfScope = rrhhEntry === "self";
+  const manager = isWorkspaceRrhhManager() && !selfScope;
   const allEmployees = Array.isArray(state.workspaceTimeEmployees) ? state.workspaceTimeEmployees : [];
   const employees = manager
     ? allEmployees.filter((row) => String(row?.source || "").trim() !== "auto")
@@ -6162,6 +6175,7 @@ const renderWorkspaceRrhhHub = () => {
   const selectedEmployee = employees.find((row) => String(row.id || "") === selectedPersonaId) || null;
   const companyLabel = getWorkspaceCompanyContextLabel();
   let tab = normalizeWorkspaceRrhhTab(state.workspaceRrhhTab);
+  if (selfScope) tab = "plantilla";
   if (manager && ["plantilla", "usuarios"].includes(tab)) tab = "equipo";
   if (!manager && ["equipo", "usuarios"].includes(tab)) tab = "plantilla";
   state.workspaceRrhhTab = tab;
@@ -6909,10 +6923,10 @@ const renderWorkspaceRrhhHub = () => {
 	                <div id="rrhhMemberPhotoStatus" class="muted"></div>
 	              </div>
 	            </div>
-	            <label class="span-2">
-	              Empresa
-	              <select name="empresa_id" required data-default-empresa="${escapeHtml(defaultEmpresaId)}">${companiesOptions}</select>
-	            </label>
+		            <label class="span-2">
+		              Empresa
+		              <select name="empresa_id" data-default-empresa="${escapeHtml(defaultEmpresaId)}">${companiesOptions}</select>
+		            </label>
 	            <label>
 	              Nombre
 	              <input name="nombre" required value="${escapeHtml(String(fichaName || displayName || ""))}" />
@@ -11950,6 +11964,9 @@ const syncHoldingUrlParams = () => {
   if (state.currentWorkspaceView) {
     params.set("view", state.currentWorkspaceView);
   }
+  if (state.currentWorkspaceView === "rrhh" && String(state.workspaceRrhhEntry || "").trim() === "self") {
+    params.set("rrhh", "self");
+  }
   if (state.currentWorkspaceView === "motores" && state.currentWorkspaceEngineView) {
     params.set("engine", state.currentWorkspaceEngineView);
   }
@@ -11966,8 +11983,14 @@ const openHolding = (options = {}) => {
   const requestedWorkspace = String(options.workspace || "").trim();
   let requestedView = String(options.view || "").trim();
   const requestedEngine = String(options.engine || "").trim();
+  const requestedRrhh = String(
+    options.rrhh || new URLSearchParams(window.location.search || "").get("rrhh") || ""
+  )
+    .trim()
+    .toLowerCase();
   state.currentWorkspaceEntryMode = mode;
   state.currentWorkspaceTarget = requestedWorkspace || (mode === "tenant" ? "modernia" : "");
+  state.workspaceRrhhEntry = requestedRrhh === "self" ? "self" : "";
   const engineKey = normalizeSimple(requestedEngine);
   if (engineKey === "rrhh") {
     // Compatibilidad: URLs antiguas que apuntaban a motores->rrhh ahora abren la vista RRHH.
@@ -11977,6 +12000,9 @@ const openHolding = (options = {}) => {
     state.currentWorkspaceEngineView = "documental";
   } else if (requestedEngine) {
     state.currentWorkspaceEngineView = normalizeWorkspaceEngineKey(requestedEngine);
+  }
+  if (normalizeSimple(requestedView) !== "rrhh") {
+    state.workspaceRrhhEntry = "";
   }
   setModule("empresas");
   explorerSection.classList.add("hidden");
@@ -34245,7 +34271,7 @@ if (coreCards) {
       openAdmin();
     } else if (action === "rrhh-home") {
       const workspace = String(state.currentWorkspaceTarget || state.currentWorkspaceName || "modernia").trim() || "modernia";
-      openHolding({ mode: "tenant", workspace, view: "motores", engine: "rrhh" });
+      openHolding({ mode: "tenant", workspace, view: "rrhh", rrhh: "self" });
     }
   });
 }
