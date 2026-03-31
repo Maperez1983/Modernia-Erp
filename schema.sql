@@ -1409,6 +1409,7 @@ CREATE TABLE IF NOT EXISTS usuarios (
   email TEXT UNIQUE,
   servicio TEXT,
   rol TEXT,
+  registro_horario_activo INTEGER DEFAULT 0,
   password_hash TEXT,
   activo INTEGER DEFAULT 1,
   invite_token TEXT,

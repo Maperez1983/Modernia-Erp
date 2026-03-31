@@ -1842,6 +1842,41 @@ body.crm-fin #companySummary {
   margin-bottom: 12px;
 }
 
+.rrhh-tab-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 6px;
+  margin-left: 6px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, var(--gold) 0%, var(--gold-deep) 100%);
+  color: #2b2b2b;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.rrhh-alert {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 12px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(176, 127, 0, 0.22);
+  background: rgba(255, 247, 224, 0.55);
+  margin: 10px 0 12px;
+}
+
+.rrhh-alert-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
 .workspace-rrhh-list {
   display: grid;
   gap: 12px;
@@ -1886,19 +1921,41 @@ body.crm-fin #companySummary {
 .rrhh-member-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: 12px;
+  gap: 14px;
   margin-top: 12px;
 }
 
 .rrhh-member-card {
+  --rrhh-accent: rgba(60, 110, 113, 0.85);
+  --rrhh-accent-2: rgba(218, 170, 83, 0.9);
+  position: relative;
+  overflow: hidden;
   text-align: left;
   padding: 14px;
   border-radius: 16px;
   border: 1px solid rgba(43, 43, 43, 0.08);
-  background: rgba(255, 255, 255, 0.96);
-  box-shadow: 0 10px 20px rgba(43, 43, 43, 0.05);
+  background: linear-gradient(180deg, rgba(246, 251, 248, 0.85) 0%, rgba(255, 255, 255, 0.97) 46%, rgba(255, 255, 255, 0.96) 100%);
+  box-shadow: 0 10px 22px rgba(43, 43, 43, 0.06);
   cursor: pointer;
   color: var(--ink);
+  transition: transform 140ms ease, box-shadow 140ms ease, border-color 140ms ease;
+}
+
+.rrhh-member-card::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 4px;
+  background: linear-gradient(90deg, var(--rrhh-accent) 0%, var(--rrhh-accent-2) 100%);
+  opacity: 0.9;
+}
+
+.rrhh-member-card.no-ficha {
+  --rrhh-accent: rgba(176, 127, 0, 0.85);
+  --rrhh-accent-2: rgba(218, 170, 83, 0.95);
+  background: linear-gradient(180deg, rgba(255, 247, 224, 0.7) 0%, rgba(255, 255, 255, 0.97) 52%, rgba(255, 255, 255, 0.96) 100%);
 }
 
 .rrhh-member-card strong {
@@ -1907,7 +1964,21 @@ body.crm-fin #companySummary {
 
 .rrhh-member-card:hover {
   border-color: rgba(60, 110, 113, 0.25);
-  box-shadow: 0 14px 26px rgba(43, 43, 43, 0.07);
+  box-shadow: 0 18px 34px rgba(43, 43, 43, 0.09);
+  transform: translateY(-2px);
+}
+
+.rrhh-member-card:active {
+  transform: translateY(-1px);
+}
+
+.rrhh-member-card:focus-visible {
+  outline: 3px solid rgba(218, 170, 83, 0.35);
+  outline-offset: 2px;
+}
+
+.rrhh-member-card.no-ficha:hover {
+  border-color: rgba(176, 127, 0, 0.3);
 }
 
 .rrhh-member-card-head {
@@ -1952,6 +2023,12 @@ body.crm-fin #companySummary {
   background: rgba(60, 110, 113, 0.12);
   border: 1px solid rgba(60, 110, 113, 0.18);
   flex: 0 0 auto;
+}
+
+.rrhh-member-card .rrhh-avatar {
+  width: 46px;
+  height: 46px;
+  box-shadow: 0 6px 14px rgba(43, 43, 43, 0.08);
 }
 
 .rrhh-avatar img {
@@ -2004,6 +2081,22 @@ body.crm-fin #companySummary {
   color: rgba(43, 43, 43, 0.72);
 }
 
+.rrhh-member-metrics > span {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.rrhh-member-metrics > span::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, var(--rrhh-accent) 0%, var(--rrhh-accent-2) 100%);
+  opacity: 0.55;
+  flex: 0 0 auto;
+}
+
 .rrhh-member-metrics span {
   white-space: nowrap;
   overflow: hidden;
@@ -2052,6 +2145,112 @@ body.crm-fin #companySummary {
   flex-wrap: wrap;
   gap: 10px;
   margin-bottom: 10px;
+}
+
+.rrhh-service-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px 12px;
+  margin-top: 10px;
+}
+
+.rrhh-calendar {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.rrhh-cal-head {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: rgba(43, 43, 43, 0.6);
+  text-transform: uppercase;
+  padding: 2px 6px;
+}
+
+.rrhh-cal-day {
+  position: relative;
+  min-height: 44px;
+  border-radius: 14px;
+  border: 1px solid rgba(60, 110, 113, 0.14);
+  background: rgba(255, 255, 255, 0.86);
+  padding: 6px 8px;
+  overflow: hidden;
+}
+
+.rrhh-cal-day.is-out {
+  opacity: 0.35;
+}
+
+.rrhh-cal-day.is-weekend {
+  background: rgba(60, 110, 113, 0.06);
+}
+
+.rrhh-cal-day.is-approved {
+  background: rgba(70, 165, 98, 0.12);
+  border-color: rgba(70, 165, 98, 0.26);
+}
+
+.rrhh-cal-day.is-requested {
+  background: rgba(185, 150, 60, 0.12);
+  border-color: rgba(185, 150, 60, 0.26);
+}
+
+.rrhh-cal-day.is-rejected {
+  background: rgba(186, 77, 70, 0.12);
+  border-color: rgba(186, 77, 70, 0.26);
+}
+
+.rrhh-cal-day.is-canceled {
+  background: rgba(120, 120, 120, 0.10);
+  border-color: rgba(120, 120, 120, 0.22);
+}
+
+.rrhh-cal-num {
+  font-size: 12px;
+  font-weight: 700;
+  color: rgba(43, 43, 43, 0.78);
+}
+
+.rrhh-cal-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.rrhh-cal-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(60, 110, 113, 0.14);
+  background: rgba(255, 255, 255, 0.85);
+  font-size: 11px;
+  color: rgba(43, 43, 43, 0.72);
+}
+
+.rrhh-cal-chip.is-approved {
+  border-color: rgba(70, 165, 98, 0.28);
+  background: rgba(70, 165, 98, 0.12);
+}
+
+.rrhh-cal-chip.is-requested {
+  border-color: rgba(185, 150, 60, 0.28);
+  background: rgba(185, 150, 60, 0.12);
+}
+
+.rrhh-cal-chip.is-rejected {
+  border-color: rgba(186, 77, 70, 0.28);
+  background: rgba(186, 77, 70, 0.12);
+}
+
+.rrhh-cal-chip.is-canceled {
+  border-color: rgba(120, 120, 120, 0.24);
+  background: rgba(120, 120, 120, 0.10);
 }
 
 .workspace-motores-nav #workspaceEngineTabs {

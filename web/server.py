@@ -427,6 +427,95 @@ def normalize_email(value):
         return ""
     return str(value).strip().lower()
 
+def normalize_username(value):
+    if not value:
+        return ""
+    text = str(value).strip()
+    text = re.sub(r"\s+", " ", text)
+    return text
+
+def _usuarios_conflict_id(conn, *, usuario=None, email=None, exclude_id=None):
+    usuario_norm = normalize_username(usuario)
+    email_norm = normalize_email(email)
+    exclude = str(exclude_id or "").strip()
+
+    if usuario_norm:
+        if exclude:
+            row = conn.execute(
+                """
+                SELECT id
+                FROM usuarios
+                WHERE LOWER(TRIM(COALESCE(usuario, ''))) = LOWER(TRIM(?))
+                  AND id != ?
+                LIMIT 1
+                """,
+                (usuario_norm, exclude),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                """
+                SELECT id
+                FROM usuarios
+                WHERE LOWER(TRIM(COALESCE(usuario, ''))) = LOWER(TRIM(?))
+                LIMIT 1
+                """,
+                (usuario_norm,),
+            ).fetchone()
+        if row:
+            try:
+                conflict_id = row["id"]
+            except Exception:
+                conflict_id = row[0]
+            return {"field": "usuario", "id": conflict_id}
+
+    if email_norm:
+        if exclude:
+            row = conn.execute(
+                """
+                SELECT id
+                FROM usuarios
+                WHERE LOWER(TRIM(COALESCE(email, ''))) = LOWER(TRIM(?))
+                  AND id != ?
+                LIMIT 1
+                """,
+                (email_norm, exclude),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                """
+                SELECT id
+                FROM usuarios
+                WHERE LOWER(TRIM(COALESCE(email, ''))) = LOWER(TRIM(?))
+                LIMIT 1
+                """,
+                (email_norm,),
+            ).fetchone()
+        if row:
+            try:
+                conflict_id = row["id"]
+            except Exception:
+                conflict_id = row[0]
+            return {"field": "email", "id": conflict_id}
+
+    return None
+
+def fetch_active_users_by_login(conn, login_value):
+    login = str(login_value or "").strip()
+    if not login:
+        return []
+    return conn.execute(
+        """
+        SELECT id, nombre, apellido, usuario, email, servicio, rol, activo, password_hash
+        FROM usuarios
+        WHERE activo = 1
+          AND (
+            LOWER(TRIM(COALESCE(usuario, ''))) = LOWER(TRIM(?))
+            OR LOWER(TRIM(COALESCE(email, ''))) = LOWER(TRIM(?))
+          )
+        """,
+        (login, login),
+    ).fetchall()
+
 def normalize_person_name(value):
     if not value:
         return ""
@@ -1014,6 +1103,18 @@ def normalize_lookup_text(value):
     text = text.upper()
     text = re.sub(r"[^A-Z0-9]+", " ", text)
     text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def normalize_action_key(value):
+    if not value:
+        return ""
+    text = str(value).strip()
+    text = unicodedata.normalize("NFD", text)
+    text = "".join(ch for ch in text if unicodedata.category(ch) != "Mn")
+    text = text.lower()
+    text = re.sub(r"[^a-z0-9]+", "_", text)
+    text = re.sub(r"_+", "_", text).strip("_")
     return text
 
 
@@ -14753,6 +14854,15 @@ def ensure_usuarios_schema(conn):
               )
             """
         )
+    # Unicidad por "usuario/email" ignorando mayúsculas/espacios: mejor esfuerzo (puede fallar si ya hay duplicados).
+    try:
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_usuarios_usuario_ci ON usuarios(LOWER(TRIM(usuario)))")
+    except Exception:
+        pass
+    try:
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_usuarios_email_ci ON usuarios(LOWER(TRIM(email)))")
+    except Exception:
+        pass
 
 
 def ensure_ocr_tables(db_path):
@@ -15158,6 +15268,55 @@ def ensure_workspace_product_tables(conn):
               AND COALESCE(usuario_manual, 0) = 0
             """
         )
+    except Exception:
+        pass
+    # Limpieza: fichas marcadas como auto no deben conservar un vínculo manual (evita cruces al abrir fichas).
+    try:
+        conn.execute(
+            """
+            UPDATE workspace_registro_personal
+            SET usuario_id = NULL, usuario_manual = 0, updated_at = datetime('now')
+            WHERE COALESCE(source, '') = 'auto' AND COALESCE(usuario_manual, 0) = 1
+            """
+        )
+    except Exception:
+        pass
+    # Limpieza: si por errores históricos hay más de una ficha vinculada al mismo usuario en un workspace,
+    # conservamos la más reciente y desvinculamos el resto.
+    try:
+        dups = conn.execute(
+            """
+            SELECT workspace_id, usuario_id, COUNT(*) AS n
+            FROM workspace_registro_personal
+            WHERE COALESCE(usuario_id, '') != '' AND COALESCE(usuario_manual, 0) = 1
+            GROUP BY workspace_id, usuario_id
+            HAVING n > 1
+            """
+        ).fetchall()
+        for ws_row in dups or []:
+            ws_id = ws_row[0]
+            user_id = ws_row[1]
+            keep = conn.execute(
+                """
+                SELECT id
+                FROM workspace_registro_personal
+                WHERE workspace_id = ? AND usuario_id = ? AND COALESCE(usuario_manual, 0) = 1
+                ORDER BY COALESCE(updated_at, created_at) DESC
+                LIMIT 1
+                """,
+                (ws_id, user_id),
+            ).fetchone()
+            keep_id = keep[0] if keep else ""
+            if not keep_id:
+                continue
+            conn.execute(
+                """
+                UPDATE workspace_registro_personal
+                SET usuario_id = NULL, usuario_manual = 0, updated_at = datetime('now')
+                WHERE workspace_id = ? AND usuario_id = ? AND id != ?
+                """,
+                (ws_id, user_id, keep_id),
+            )
     except Exception:
         pass
     ensure_column(conn, "workspace_registro_audit", "empresa_id", "empresa_id TEXT")
@@ -17622,6 +17781,34 @@ def workspace_session_is_privileged(session):
         return True
     return False
 
+def workspace_actor_is_privileged(conn, session):
+    """
+    Determina permisos usando la sesión y, si hace falta, refrescando contra la DB.
+    Evita falsos 403 si el usuario fue promovido a admin y su sesión aún no refleja rol/servicio.
+    """
+    if workspace_session_is_privileged(session):
+        return True
+    if not session or not conn:
+        return False
+    user_id = str(session.get("user_id") or "").strip()
+    if not user_id:
+        return False
+    try:
+        row = conn.execute(
+            "SELECT rol, servicio, activo FROM usuarios WHERE id = ? LIMIT 1",
+            (user_id,),
+        ).fetchone()
+    except Exception:
+        row = None
+    if not row:
+        return False
+    try:
+        if int(row["activo"] or 0) != 1:
+            return False
+    except Exception:
+        pass
+    return workspace_session_is_privileged({"rol": row["rol"] or "", "servicio": row["servicio"] or ""})
+
 
 def workspace_persona_id_for_user(conn, workspace_id, user_id):
     if not workspace_id or not user_id:
@@ -17715,10 +17902,14 @@ def fetch_workspace_rrhh_profile(conn, workspace_id, persona_id):
 
 def fetch_workspace_rrhh_ausencias(conn, workspace_id, *, empresa_id=None, persona_id=None, month=None, limit=120):
     empresa_ids = resolve_workspace_company_ids(conn, workspace_id, empresa_id=empresa_id)
-    if not empresa_ids:
-        return {"rows": []}
-    where = [f"a.workspace_id = ?", f"COALESCE(a.empresa_id, '') IN ({','.join('?' for _ in empresa_ids)})"]
-    params = [workspace_id, *empresa_ids]
+    where = [f"a.workspace_id = ?"]
+    params = [workspace_id]
+    # Permite registros sin empresa_id (ficha incompleta / legacy) sin ocultarlos del panel.
+    if empresa_ids:
+        where.append(f"(COALESCE(a.empresa_id, '') = '' OR COALESCE(a.empresa_id, '') IN ({','.join('?' for _ in empresa_ids)}))")
+        params.extend(empresa_ids)
+    else:
+        where.append("COALESCE(a.empresa_id, '') = ''")
     pid = str(persona_id or "").strip()
     if pid:
         where.append("a.persona_id = ?")
@@ -17734,7 +17925,7 @@ def fetch_workspace_rrhh_ausencias(conn, workspace_id, *, empresa_id=None, perso
           COALESCE(p.nombre, '') AS persona_nombre,
           COALESCE(e.nombre, '') AS empresa_nombre
         FROM workspace_rrhh_ausencias a
-        LEFT JOIN workspace_registro_personal p ON p.id = a.persona_id
+        LEFT JOIN workspace_registro_personal p ON p.workspace_id = a.workspace_id AND p.id = a.persona_id
         LEFT JOIN empresas e ON e.id = a.empresa_id
         WHERE {' AND '.join(where)}
         ORDER BY a.fecha_inicio DESC, a.created_at DESC
@@ -17747,10 +17938,14 @@ def fetch_workspace_rrhh_ausencias(conn, workspace_id, *, empresa_id=None, perso
 
 def fetch_workspace_rrhh_gastos(conn, workspace_id, *, empresa_id=None, persona_id=None, month=None, limit=120):
     empresa_ids = resolve_workspace_company_ids(conn, workspace_id, empresa_id=empresa_id)
-    if not empresa_ids:
-        return {"rows": []}
-    where = [f"g.workspace_id = ?", f"COALESCE(g.empresa_id, '') IN ({','.join('?' for _ in empresa_ids)})"]
-    params = [workspace_id, *empresa_ids]
+    where = [f"g.workspace_id = ?"]
+    params = [workspace_id]
+    # Permite registros sin empresa_id (ficha incompleta / legacy) sin ocultarlos del panel.
+    if empresa_ids:
+        where.append(f"(COALESCE(g.empresa_id, '') = '' OR COALESCE(g.empresa_id, '') IN ({','.join('?' for _ in empresa_ids)}))")
+        params.extend(empresa_ids)
+    else:
+        where.append("COALESCE(g.empresa_id, '') = ''")
     pid = str(persona_id or "").strip()
     if pid:
         where.append("g.persona_id = ?")
@@ -17766,7 +17961,7 @@ def fetch_workspace_rrhh_gastos(conn, workspace_id, *, empresa_id=None, persona_
           COALESCE(p.nombre, '') AS persona_nombre,
           COALESCE(e.nombre, '') AS empresa_nombre
         FROM workspace_rrhh_gastos g
-        LEFT JOIN workspace_registro_personal p ON p.id = g.persona_id
+        LEFT JOIN workspace_registro_personal p ON p.workspace_id = g.workspace_id AND p.id = g.persona_id
         LEFT JOIN empresas e ON e.id = g.empresa_id
         WHERE {' AND '.join(where)}
         ORDER BY g.fecha DESC, g.created_at DESC
@@ -17779,10 +17974,14 @@ def fetch_workspace_rrhh_gastos(conn, workspace_id, *, empresa_id=None, persona_
 
 def fetch_workspace_rrhh_documentos(conn, workspace_id, *, empresa_id=None, persona_id=None, limit=200):
     empresa_ids = resolve_workspace_company_ids(conn, workspace_id, empresa_id=empresa_id)
-    if not empresa_ids:
-        return {"rows": []}
-    where = [f"d.workspace_id = ?", f"COALESCE(d.empresa_id, '') IN ({','.join('?' for _ in empresa_ids)})"]
-    params = [workspace_id, *empresa_ids]
+    where = [f"d.workspace_id = ?"]
+    params = [workspace_id]
+    # Permite registros sin empresa_id (ficha incompleta / legacy) sin ocultarlos del panel.
+    if empresa_ids:
+        where.append(f"(COALESCE(d.empresa_id, '') = '' OR COALESCE(d.empresa_id, '') IN ({','.join('?' for _ in empresa_ids)}))")
+        params.extend(empresa_ids)
+    else:
+        where.append("COALESCE(d.empresa_id, '') = ''")
     pid = str(persona_id or "").strip()
     if pid:
         where.append("d.persona_id = ?")
@@ -17794,7 +17993,7 @@ def fetch_workspace_rrhh_documentos(conn, workspace_id, *, empresa_id=None, pers
           COALESCE(p.nombre, '') AS persona_nombre,
           COALESCE(e.nombre, '') AS empresa_nombre
         FROM workspace_rrhh_documentos d
-        LEFT JOIN workspace_registro_personal p ON p.id = d.persona_id
+        LEFT JOIN workspace_registro_personal p ON p.workspace_id = d.workspace_id AND p.id = d.persona_id
         LEFT JOIN empresas e ON e.id = d.empresa_id
         WHERE {' AND '.join(where)}
         ORDER BY COALESCE(d.fecha_emision, d.created_at) DESC
@@ -20450,6 +20649,10 @@ def send_file(handler, path):
         handler.send_response(200)
         handler.send_header("Content-Type", content_type)
         handler.send_header("X-Content-Type-Options", "nosniff")
+        # Evita cachés agresivos en Safari/Cloudflare que impiden ver cambios en local (RRHH).
+        if path.suffix in {".html", ".js", ".css"}:
+            handler.send_header("Cache-Control", "no-store")
+            handler.send_header("Pragma", "no-cache")
         handler.send_header("Content-Length", str(len(data)))
         handler.end_headers()
         handler.wfile.write(data)
@@ -20933,6 +21136,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/workspace_remesas",
 	            "/api/workspace_portal_requerimientos",
 	            "/api/workspace_registro_personal",
+	            "/api/workspace_registro_personal_delete",
 	            "/api/workspace_registro_personal_self_photo",
 	            "/api/workspace_registro_horario",
 	            "/api/workspace_registro_horario_toggle",
@@ -20942,14 +21146,15 @@ class Handler(BaseHTTPRequestHandler):
             "/api/workspace_rrhh_profile",
             "/api/workspace_rrhh_ausencia",
             "/api/workspace_rrhh_ausencia_estado",
-            "/api/workspace_rrhh_gasto",
-            "/api/workspace_rrhh_gasto_estado",
-            "/api/workspace_rrhh_documento",
-            "/api/workspace_presupuestos",
-            "/api/workspace_fincas_comunidades",
-            "/api/workspace_fincas_incidencias",
-            "/api/workspace_fincas_proveedores",
-            "/api/workspace_fincas_juntas",
+	            "/api/workspace_rrhh_gasto",
+	            "/api/workspace_rrhh_gasto_estado",
+	            "/api/workspace_rrhh_documento",
+	            "/api/workspace_rrhh_reset",
+	            "/api/workspace_presupuestos",
+	            "/api/workspace_fincas_comunidades",
+	            "/api/workspace_fincas_incidencias",
+	            "/api/workspace_fincas_proveedores",
+	            "/api/workspace_fincas_juntas",
         ):
             json_response(self, {"error": "Endpoint no valido"}, status=404)
             return
@@ -21002,23 +21207,16 @@ class Handler(BaseHTTPRequestHandler):
             self._track_conn(conn)
             ensure_usuarios_schema(conn)
             conn.commit()
-            row = conn.execute(
-                """
-                SELECT id, nombre, apellido, usuario, email, servicio, rol, activo, password_hash
-                FROM usuarios
-                WHERE activo = 1
-                  AND (
-                    LOWER(COALESCE(usuario, '')) = LOWER(?)
-                    OR LOWER(COALESCE(email, '')) = LOWER(?)
-                  )
-                LIMIT 1
-                """,
-                (usuario_raw, usuario_raw),
-            ).fetchone()
-            if not row:
+            matches = fetch_active_users_by_login(conn, usuario_raw)
+            if not matches:
                 register_login_attempt(ip, usuario_raw, ok=False)
                 json_response(self, {"error": "Usuario o contraseña incorrectos"}, status=401)
                 return
+            if len(matches) > 1:
+                register_login_attempt(ip, usuario_raw, ok=False)
+                json_response(self, {"error": "Usuario duplicado. Contacta con administración."}, status=409)
+                return
+            row = matches[0]
             first_password_set = False
             stored_hash = row["password_hash"]
             if stored_hash:
@@ -21910,15 +22108,15 @@ class Handler(BaseHTTPRequestHandler):
             return
         elif parsed.path == "/api/usuarios":
             session = getattr(self, "auth_session", None) or self._current_session()
-            if session and not workspace_session_is_privileged(session):
+            if not workspace_actor_is_privileged(conn, session):
                 json_response(self, {"error": "No autorizado"}, status=403)
                 return
-            nombre = payload.get("nombre")
-            apellido = payload.get("apellido")
-            usuario = payload.get("usuario")
+            nombre = normalize_person_name(payload.get("nombre"))
+            apellido = normalize_person_name(payload.get("apellido"))
+            usuario = normalize_username(payload.get("usuario"))
             email = normalize_email(payload.get("email"))
-            servicio = payload.get("servicio")
-            password = payload.get("password")
+            servicio = str(payload.get("servicio") or "").strip()
+            password = str(payload.get("password") or "")
             registro_horario_activo = 1 if str(payload.get("registro_horario_activo") or "0").strip().lower() in {"1", "true", "si", "sí", "on"} else 0
             if not nombre:
                 json_response(self, {"error": "nombre requerido"}, status=400)
@@ -21935,32 +22133,54 @@ class Handler(BaseHTTPRequestHandler):
             if not servicio:
                 json_response(self, {"error": "servicio requerido"}, status=400)
                 return
+            if password and len(password) < 8:
+                json_response(self, {"error": "La contraseña debe tener al menos 8 caracteres"}, status=400)
+                return
+            conflict = _usuarios_conflict_id(conn, usuario=usuario, email=email)
+            if conflict:
+                if conflict["field"] == "usuario":
+                    json_response(self, {"error": "usuario ya en uso"}, status=409)
+                else:
+                    json_response(self, {"error": "email ya en uso"}, status=409)
+                return
             password_hash = hash_password(password) if password else None
             user_id = os.urandom(16).hex()
-            conn.execute(
-                """
-                INSERT INTO usuarios (id, nombre, apellido, usuario, email, servicio, rol, registro_horario_activo, password_hash, activo, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
-                """,
-                (
-                    user_id,
-                    nombre,
-                    apellido,
-                    usuario,
-                    email,
-                    servicio,
-                    payload.get("rol"),
-                    registro_horario_activo,
-                    password_hash,
-                    int(payload.get("activo") or 1),
-                    now,
-                    now,
-                ),
-            )
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO usuarios (id, nombre, apellido, usuario, email, servicio, rol, registro_horario_activo, password_hash, activo, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                    """,
+                    (
+                        user_id,
+                        nombre,
+                        apellido,
+                        usuario,
+                        email,
+                        servicio,
+                        str(payload.get("rol") or "").strip() or None,
+                        int(registro_horario_activo),
+                        password_hash,
+                        1 if str(payload.get("activo") or "1").strip() in {"1", "true", "si", "sí", "on"} else 0,
+                        now,
+                        now,
+                    ),
+                )
+            except sqlite3.IntegrityError:
+                conflict = _usuarios_conflict_id(conn, usuario=usuario, email=email)
+                if conflict and conflict["field"] == "email":
+                    json_response(self, {"error": "email ya en uso"}, status=409)
+                else:
+                    json_response(self, {"error": "usuario ya en uso"}, status=409)
+                return
             conn.commit()
             json_response(self, {"ok": True, "id": user_id})
             return
         elif parsed.path == "/api/usuarios_invitar":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not workspace_actor_is_privileged(conn, session):
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
             user_id = str(payload.get("id") or "").strip()
             if not user_id:
                 json_response(self, {"error": "id requerido"}, status=400)
@@ -22031,7 +22251,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         elif parsed.path == "/api/usuarios_update":
             session = getattr(self, "auth_session", None) or self._current_session()
-            if session and not workspace_session_is_privileged(session):
+            if not workspace_actor_is_privileged(conn, session):
                 json_response(self, {"error": "No autorizado"}, status=403)
                 return
             user_id = payload.get("id")
@@ -22041,33 +22261,73 @@ class Handler(BaseHTTPRequestHandler):
             allowed = ("nombre", "apellido", "usuario", "email", "servicio", "rol", "activo", "password", "registro_horario_activo")
             updates = []
             values = []
+            incoming_usuario = normalize_username(payload.get("usuario")) if "usuario" in payload else ""
+            incoming_email = normalize_email(payload.get("email")) if "email" in payload else ""
+            conflict = _usuarios_conflict_id(conn, usuario=incoming_usuario, email=incoming_email, exclude_id=user_id)
+            if conflict:
+                if conflict["field"] == "usuario":
+                    json_response(self, {"error": "usuario ya en uso"}, status=409)
+                else:
+                    json_response(self, {"error": "email ya en uso"}, status=409)
+                return
             for field in allowed:
-                if field in payload:
-                    if field == "password":
-                        updates.append("password_hash = ?")
-                        values.append(hash_password(payload.get("password")))
-                        updates.append("invite_token = NULL")
-                        updates.append("invite_expires_at = NULL")
-                    else:
-                        updates.append(f"{field} = ?")
-                        values.append(payload.get(field))
+                if field not in payload:
+                    continue
+                if field == "password":
+                    raw_pw = str(payload.get("password") or "")
+                    if not raw_pw:
+                        json_response(self, {"error": "password requerido"}, status=400)
+                        return
+                    if len(raw_pw) < 8:
+                        json_response(self, {"error": "La contraseña debe tener al menos 8 caracteres"}, status=400)
+                        return
+                    updates.append("password_hash = ?")
+                    values.append(hash_password(raw_pw))
+                    updates.append("invite_token = NULL")
+                    updates.append("invite_expires_at = NULL")
+                elif field == "email":
+                    updates.append("email = ?")
+                    values.append(incoming_email or None)
+                elif field == "usuario":
+                    updates.append("usuario = ?")
+                    values.append(incoming_usuario or None)
+                elif field in {"nombre", "apellido"}:
+                    updates.append(f"{field} = ?")
+                    values.append(normalize_person_name(payload.get(field)) or None)
+                elif field == "registro_horario_activo":
+                    updates.append("registro_horario_activo = ?")
+                    values.append(1 if str(payload.get(field) or "0").strip().lower() in {"1", "true", "si", "sí", "on"} else 0)
+                elif field == "activo":
+                    updates.append("activo = ?")
+                    values.append(1 if str(payload.get(field) or "1").strip().lower() in {"1", "true", "si", "sí", "on"} else 0)
+                else:
+                    updates.append(f"{field} = ?")
+                    values.append(str(payload.get(field) or "").strip() or None)
             if not updates:
                 json_response(self, {"error": "sin cambios"}, status=400)
                 return
-            conn.execute(
-                f"""
-                UPDATE usuarios
-                SET {", ".join(updates)}, updated_at = datetime(?)
-                WHERE id = ?
-                """,
-                (*values, now, user_id),
-            )
+            try:
+                conn.execute(
+                    f"""
+                    UPDATE usuarios
+                    SET {", ".join(updates)}, updated_at = datetime(?)
+                    WHERE id = ?
+                    """,
+                    (*values, now, user_id),
+                )
+            except sqlite3.IntegrityError:
+                conflict = _usuarios_conflict_id(conn, usuario=incoming_usuario, email=incoming_email, exclude_id=user_id)
+                if conflict and conflict["field"] == "email":
+                    json_response(self, {"error": "email ya en uso"}, status=409)
+                else:
+                    json_response(self, {"error": "usuario ya en uso"}, status=409)
+                return
             conn.commit()
             json_response(self, {"ok": True, "id": user_id})
             return
         elif parsed.path == "/api/usuarios_delete":
             session = getattr(self, "auth_session", None) or self._current_session()
-            if session and not workspace_session_is_privileged(session):
+            if not workspace_actor_is_privileged(conn, session):
                 json_response(self, {"error": "No autorizado"}, status=403)
                 return
             user_id = payload.get("id")
@@ -22651,7 +22911,7 @@ class Handler(BaseHTTPRequestHandler):
         elif parsed.path == "/api/workspace_inbox_review":
             workspace_id = str(payload.get("workspace_id") or "").strip()
             record_id = str(payload.get("id") or "").strip()
-            action = normalize_lookup_text(payload.get("action") or "")
+            action = normalize_action_key(payload.get("action") or "")
             reviewer = str(payload.get("reviewed_by") or payload.get("usuario") or "").strip() or "Sistema"
             if not workspace_id or not record_id or not action:
                 json_response(self, {"error": "workspace_id, id y action requeridos"}, status=400)
@@ -23137,7 +23397,7 @@ class Handler(BaseHTTPRequestHandler):
         elif parsed.path == "/api/workspace_registro_horario_toggle":
             workspace_id = str(payload.get("workspace_id") or "").strip()
             persona_id = str(payload.get("persona_id") or "").strip()
-            action = normalize_lookup_text(payload.get("action") or "")
+            action = normalize_action_key(payload.get("action") or "")
             if not workspace_id or not persona_id:
                 json_response(self, {"error": "workspace_id y persona_id requeridos"}, status=400)
                 return
@@ -23306,16 +23566,15 @@ class Handler(BaseHTTPRequestHandler):
         elif parsed.path == "/api/workspace_registro_personal":
             t0 = time.monotonic()
             workspace_id = str(payload.get("workspace_id") or "").strip()
-            empresa_id = str(payload.get("empresa_id") or "").strip() or None
             record_id = str(payload.get("id") or "").strip()
             nombre = str(payload.get("nombre") or "").strip()
             session = getattr(self, "auth_session", None) or self._current_session()
-            if session and not workspace_session_is_privileged(session):
-                json_response(self, {"error": "No autorizado"}, status=403)
-                return
+            actor_user_id = str((session or {}).get("user_id") or "").strip()
+            is_privileged = workspace_actor_is_privileged(conn, session)
             if not workspace_id or not nombre:
                 json_response(self, {"error": "workspace_id y nombre requeridos"}, status=400)
                 return
+            empresa_id = str(payload.get("empresa_id") or "").strip() or None
             manual_flag = 1
             manual_raw = str(payload.get("empresa_manual") or "").strip().lower()
             if manual_raw in {"0", "false", "no", "off"}:
@@ -23332,13 +23591,94 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 horas_pactadas_semana = None
             active_flag = 0 if str(payload.get("activo") or "1").strip().lower() in {"0", "false", "no", "off"} else 1
-            usuario_id_value = str(payload.get("usuario_id") or "").strip() or None
+            usuario_provided = "usuario_id" in payload
+            usuario_id_value = (str(payload.get("usuario_id") or "").strip() or None) if usuario_provided else None
             usuario_manual_flag = 1 if usuario_id_value else 0
             prev = None
+
+            # Modo empleado (no privilegiado): solo puede editar su propia ficha (y no puede re-vincular usuario/empresa/estado).
+            if session and not is_privileged:
+                if not actor_user_id:
+                    json_response(self, {"error": "No autenticado"}, status=401)
+                    return
+                # Si intentan enviar un usuario_id distinto, bloqueamos.
+                if usuario_id_value and usuario_id_value != actor_user_id:
+                    json_response(self, {"error": "No autorizado: no puedes asignar otro usuario"}, status=403)
+                    return
+                if record_id:
+                    prev = conn.execute(
+                        "SELECT * FROM workspace_registro_personal WHERE id = ? AND workspace_id = ? LIMIT 1",
+                        (record_id, workspace_id),
+                    ).fetchone()
+                    if prev is None:
+                        json_response(self, {"error": "Ficha no encontrada"}, status=404)
+                        return
+                else:
+                    # Upsert: si ya hay ficha ligada al usuario, actualizamos esa (evita duplicados al guardar en self-scope).
+                    existing = conn.execute(
+                        """
+                        SELECT id
+                        FROM workspace_registro_personal
+                        WHERE workspace_id = ? AND usuario_id = ?
+                          AND COALESCE(usuario_manual, 0) = 1
+                        ORDER BY COALESCE(updated_at, created_at) DESC
+                        LIMIT 1
+                        """,
+                        (workspace_id, actor_user_id),
+                    ).fetchone()
+                    existing_id = ""
+                    if existing is not None:
+                        try:
+                            existing_id = str(existing["id"] or "").strip()
+                        except Exception:
+                            existing_id = ""
+                    if existing_id:
+                        record_id = existing_id
+                        prev = conn.execute(
+                            "SELECT * FROM workspace_registro_personal WHERE id = ? AND workspace_id = ? LIMIT 1",
+                            (record_id, workspace_id),
+                        ).fetchone()
+                # Validación de propiedad.
+                if prev is not None:
+                    try:
+                        prev_user_id = str(prev["usuario_id"] or "").strip()
+                    except Exception:
+                        prev_user_id = ""
+                    try:
+                        prev_user_manual = int(prev["usuario_manual"] or 0)
+                    except Exception:
+                        prev_user_manual = 0
+                    if prev_user_id != actor_user_id or prev_user_manual != 1:
+                        json_response(self, {"error": "No autorizado: solo puedes editar tu ficha"}, status=403)
+                        return
+                    # Congela campos sensibles.
+                    try:
+                        empresa_id = str(prev["empresa_id"] or "").strip() or None
+                    except Exception:
+                        empresa_id = None
+                    try:
+                        manual_flag = 1 if int(prev["empresa_manual"] or 0) == 1 and empresa_id else 0
+                    except Exception:
+                        manual_flag = 0
+                    try:
+                        active_flag = 1 if int(prev["activo"] or 1) == 1 else 0
+                    except Exception:
+                        active_flag = 1
+                    usuario_provided = False
+                    usuario_id_value = actor_user_id
+                    usuario_manual_flag = 1
+                else:
+                    # Primera ficha: siempre ligada al usuario autenticado, sin permitir asignar empresa/estado.
+                    empresa_id = None
+                    manual_flag = 0
+                    active_flag = 1
+                    usuario_provided = True
+                    usuario_id_value = actor_user_id
+                    usuario_manual_flag = 1
             # Idempotencia: si se está creando una ficha ligada a un usuario del sistema y ya existe una ficha manual
             # para ese usuario en este workspace, actualizamos esa ficha en lugar de insertar otra nueva.
             # Esto evita duplicados cuando el frontend reintenta tras errores de red/502.
-            if (not record_id) and usuario_id_value:
+            if (not record_id) and usuario_provided and usuario_id_value:
                 try:
                     existing = conn.execute(
                         """
@@ -23367,6 +23707,19 @@ class Handler(BaseHTTPRequestHandler):
                     "SELECT * FROM workspace_registro_personal WHERE id = ? AND workspace_id = ? LIMIT 1",
                     (record_id, workspace_id),
                 ).fetchone()
+                if prev is None:
+                    json_response(self, {"error": "Ficha no encontrada"}, status=404)
+                    return
+            # Si no se pasa usuario_id, preservamos el vínculo actual (evita cruces al editar datos personales).
+            if prev is not None and not usuario_provided:
+                try:
+                    usuario_id_value = str(prev["usuario_id"] or "").strip() or None
+                except Exception:
+                    usuario_id_value = None
+                try:
+                    usuario_manual_flag = 1 if (usuario_id_value and int(prev["usuario_manual"] or 0) == 1) else 0
+                except Exception:
+                    usuario_manual_flag = 1 if usuario_id_value else 0
             foto_provided = "foto_url" in payload
             foto_url_value = str(payload.get("foto_url") or "").strip() or None
             prev_foto = None
@@ -23399,6 +23752,7 @@ class Handler(BaseHTTPRequestHandler):
                 active_flag,
                 str(payload.get("notas") or "").strip() or None,
             )
+            audit_action = "update" if prev is not None else "create"
             def _run_write():
                 nonlocal record_id, prev
                 if record_id:
@@ -23426,7 +23780,7 @@ class Handler(BaseHTTPRequestHandler):
                     )
                     prev = None
                 # Garantiza unicidad del vínculo: un usuario del sistema solo puede estar en una ficha por workspace.
-                if usuario_id_value:
+                if usuario_provided and usuario_id_value:
                     conn.execute(
                         """
                         UPDATE workspace_registro_personal
@@ -23436,7 +23790,7 @@ class Handler(BaseHTTPRequestHandler):
                         (now, workspace_id, usuario_id_value, record_id),
                     )
                 # Si vinculamos a un usuario del sistema, activamos el registro horario para evitar que el sync lo desactive.
-                if usuario_id_value and active_flag == 1:
+                if usuario_provided and usuario_id_value and active_flag == 1:
                     conn.execute(
                         "UPDATE usuarios SET registro_horario_activo = 1 WHERE id = ?",
                         (usuario_id_value,),
@@ -23464,7 +23818,7 @@ class Handler(BaseHTTPRequestHandler):
                 persona_id=record_id,
                 entity_type="persona",
                 entity_id=record_id,
-                action="create" if not payload.get("id") else "update",
+                action=audit_action,
                 actor=session,
                 before=dict(prev) if prev else None,
                 after=dict(after_row) if after_row else None,
@@ -23479,6 +23833,88 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 pass
             json_response(self, {"ok": True, "id": record_id})
+            return
+        elif parsed.path == "/api/workspace_registro_personal_delete":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not workspace_session_is_privileged(session):
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            record_id = str(payload.get("id") or "").strip()
+            usuario_id_value = str(payload.get("usuario_id") or "").strip()
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            if not record_id and usuario_id_value:
+                row = conn.execute(
+                    "SELECT id FROM workspace_registro_personal WHERE workspace_id = ? AND usuario_id = ? LIMIT 1",
+                    (workspace_id, usuario_id_value),
+                ).fetchone()
+                if row is not None:
+                    try:
+                        record_id = str(row["id"] or "").strip()
+                    except Exception:
+                        record_id = ""
+            if not record_id:
+                json_response(self, {"error": "id o usuario_id requerido"}, status=400)
+                return
+            # Snapshot (audit)
+            prev = conn.execute(
+                "SELECT * FROM workspace_registro_personal WHERE id = ? AND workspace_id = ? LIMIT 1",
+                (record_id, workspace_id),
+            ).fetchone()
+            if prev is None:
+                json_response(self, {"error": "Ficha no encontrada"}, status=404)
+                return
+            persona_id = record_id
+            now_ts = now
+            empresa_prev = None
+            try:
+                empresa_prev = str(prev["empresa_id"] or "").strip() or None
+            except Exception:
+                empresa_prev = None
+            try:
+                # Cascada best-effort: limpiamos tablas RRHH y registro asociadas a la persona.
+                for sql, params in (
+                    ("DELETE FROM workspace_rrhh_profile WHERE workspace_id = ? AND persona_id = ?", (workspace_id, persona_id)),
+                    ("DELETE FROM workspace_rrhh_ausencias WHERE workspace_id = ? AND persona_id = ?", (workspace_id, persona_id)),
+                    ("DELETE FROM workspace_rrhh_gastos WHERE workspace_id = ? AND persona_id = ?", (workspace_id, persona_id)),
+                    ("DELETE FROM workspace_rrhh_documentos WHERE workspace_id = ? AND persona_id = ?", (workspace_id, persona_id)),
+                    ("DELETE FROM workspace_registro_horario WHERE workspace_id = ? AND persona_id = ?", (workspace_id, persona_id)),
+                    ("DELETE FROM workspace_registro_alerts WHERE workspace_id = ? AND persona_id = ?", (workspace_id, persona_id)),
+                    ("DELETE FROM workspace_registro_notifications WHERE workspace_id = ? AND persona_id = ?", (workspace_id, persona_id)),
+                    ("DELETE FROM workspace_registro_audit WHERE workspace_id = ? AND persona_id = ?", (workspace_id, persona_id)),
+                ):
+                    try:
+                        conn.execute(sql, params)
+                    except Exception:
+                        pass
+                conn.execute(
+                    "DELETE FROM workspace_registro_personal WHERE id = ? AND workspace_id = ?",
+                    (persona_id, workspace_id),
+                )
+                log_workspace_registro_audit(
+                    conn,
+                    workspace_id,
+                    empresa_id=empresa_prev,
+                    persona_id=persona_id,
+                    entity_type="persona",
+                    entity_id=persona_id,
+                    action="delete",
+                    actor=session,
+                    before=dict(prev) if prev else None,
+                    after=None,
+                    now=now_ts,
+                )
+                conn.commit()
+            except Exception as exc:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                json_response(self, {"error": str(exc) or "No se pudo borrar la ficha"}, status=500)
+                return
+            json_response(self, {"ok": True, "id": persona_id})
             return
         elif parsed.path == "/api/workspace_registro_personal_self_photo":
             session = getattr(self, "auth_session", None) or self._current_session()
@@ -23527,6 +23963,53 @@ class Handler(BaseHTTPRequestHandler):
             )
             conn.commit()
             json_response(self, {"ok": True, "id": persona_id, "foto_url": foto_url or ""})
+            return
+        elif parsed.path == "/api/workspace_rrhh_reset":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not workspace_session_is_privileged(session):
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            delete_users_flag = str(payload.get("delete_users") or "").strip().lower() in {"1", "true", "si", "sí", "on"}
+            user_id = str(session.get("user_id") or "").strip() if session else ""
+            try:
+                # Borra toda la operativa RRHH/registro asociada al workspace.
+                for sql, params in (
+                    ("DELETE FROM workspace_rrhh_profile WHERE workspace_id = ?", (workspace_id,)),
+                    ("DELETE FROM workspace_rrhh_ausencias WHERE workspace_id = ?", (workspace_id,)),
+                    ("DELETE FROM workspace_rrhh_gastos WHERE workspace_id = ?", (workspace_id,)),
+                    ("DELETE FROM workspace_rrhh_documentos WHERE workspace_id = ?", (workspace_id,)),
+                    ("DELETE FROM workspace_registro_horario WHERE workspace_id = ?", (workspace_id,)),
+                    ("DELETE FROM workspace_registro_alerts WHERE workspace_id = ?", (workspace_id,)),
+                    ("DELETE FROM workspace_registro_notifications WHERE workspace_id = ?", (workspace_id,)),
+                    ("DELETE FROM workspace_registro_audit WHERE workspace_id = ?", (workspace_id,)),
+                    ("DELETE FROM workspace_registro_personal WHERE workspace_id = ?", (workspace_id,)),
+                ):
+                    try:
+                        conn.execute(sql, params)
+                    except Exception:
+                        pass
+                # Opcional: borra usuarios del sistema (heredados), manteniendo el usuario actual para no perder el acceso.
+                deleted_users = 0
+                if delete_users_flag:
+                    if user_id:
+                        deleted_users = conn.execute("SELECT COUNT(*) FROM usuarios WHERE id != ?", (user_id,)).fetchone()[0]
+                        conn.execute("DELETE FROM usuarios WHERE id != ?", (user_id,))
+                    else:
+                        deleted_users = conn.execute("SELECT COUNT(*) FROM usuarios").fetchone()[0]
+                        conn.execute("DELETE FROM usuarios")
+                conn.commit()
+            except Exception as exc:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                json_response(self, {"error": str(exc) or "No se pudo resetear RRHH"}, status=500)
+                return
+            json_response(self, {"ok": True, "workspace_id": workspace_id, "deleted_users": int(deleted_users or 0)})
             return
         elif parsed.path == "/api/workspace_registro_usuario_toggle":
             session = getattr(self, "auth_session", None) or self._current_session()
@@ -23720,13 +24203,21 @@ class Handler(BaseHTTPRequestHandler):
                     json_response(self, {"error": "No autorizado"}, status=403)
                     return
             persona_row = conn.execute(
-                "SELECT id, empresa_id FROM workspace_registro_personal WHERE workspace_id = ? AND id = ? LIMIT 1",
+                "SELECT id, empresa_id, nombre FROM workspace_registro_personal WHERE workspace_id = ? AND id = ? LIMIT 1",
                 (workspace_id, persona_id),
             ).fetchone()
             if not persona_row:
                 json_response(self, {"error": "persona no encontrada"}, status=404)
                 return
             empresa_id = str(persona_row["empresa_id"] or "").strip() or None
+            persona_nombre = str(persona_row["nombre"] or "").strip() or persona_id
+            empresa_nombre = ""
+            if empresa_id:
+                try:
+                    row_empresa = conn.execute("SELECT nombre FROM empresas WHERE id = ? LIMIT 1", (empresa_id,)).fetchone()
+                    empresa_nombre = str(row_empresa["nombre"] or "").strip() if row_empresa else ""
+                except Exception:
+                    empresa_nombre = ""
             record_id = str(payload.get("id") or "").strip()
             tipo = str(payload.get("tipo") or "").strip() or "Ausencia"
             fecha_inicio = str(payload.get("fecha_inicio") or "").strip()
@@ -23769,13 +24260,32 @@ class Handler(BaseHTTPRequestHandler):
                     ),
                 )
             else:
+                # Regla: si son vacaciones ya pasadas (fecha_fin anterior a hoy), las consideramos consumidas y aprobadas.
+                auto_approve = False
+                try:
+                    today_iso = datetime.now().date().isoformat()
+                    tipo_key = normalize_lookup_text(tipo)
+                    if tipo_key.startswith("vac") and re.match(r"^\\d{4}-\\d{2}-\\d{2}$", fecha_fin) and fecha_fin < today_iso:
+                        auto_approve = True
+                except Exception:
+                    auto_approve = False
+                estado = "Aprobada" if auto_approve else "Solicitada"
+                aprobado_por = None
+                aprobado_at = None
+                if auto_approve:
+                    try:
+                        aprobado_por = str(session.get("user_id") or "") if session else ""
+                    except Exception:
+                        aprobado_por = ""
+                    aprobado_por = aprobado_por or "auto"
+                    aprobado_at = now
                 record_id = os.urandom(16).hex()
                 conn.execute(
                     """
                     INSERT INTO workspace_rrhh_ausencias (
                       id, workspace_id, empresa_id, persona_id, tipo, fecha_inicio, fecha_fin, estado, motivo, comentario,
                       aprobado_por, aprobado_at, rechazado_at, cancelado_at, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'Solicitada', ?, ?, NULL, NULL, NULL, NULL, datetime(?), datetime(?))
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, datetime(?), datetime(?))
                     """,
                     (
                         record_id,
@@ -23785,12 +24295,37 @@ class Handler(BaseHTTPRequestHandler):
                         tipo,
                         fecha_inicio,
                         fecha_fin,
+                        estado,
                         str(payload.get("motivo") or "").strip() or None,
                         str(payload.get("comentario") or "").strip() or None,
+                        aprobado_por,
+                        aprobado_at,
                         now,
                         now,
                     ),
                 )
+                # Notificaciones: el trabajador solicita → avisar a admin (y al propio trabajador).
+                try:
+                    is_priv = workspace_session_is_privileged(session)
+                    notif_payload = {
+                        "type": "rrhh_ausencia",
+                        "action": "create",
+                        "estado": estado,
+                        "ausencia_id": record_id,
+                        "persona_id": persona_id,
+                        "persona_nombre": persona_nombre,
+                        "empresa_id": empresa_id,
+                        "empresa_nombre": empresa_nombre,
+                        "tipo": tipo,
+                        "fecha_inicio": fecha_inicio,
+                        "fecha_fin": fecha_fin,
+                    }
+                    if (not is_priv) and (not auto_approve):
+                        log_workspace_notification(conn, workspace_id, persona_id, "admin_rrhh_ausencia_solicitada", notif_payload, now=now)
+                    if not is_priv:
+                        log_workspace_notification(conn, workspace_id, persona_id, "worker_rrhh_ausencia_creada", notif_payload, now=now)
+                except Exception:
+                    pass
             after = conn.execute(
                 "SELECT * FROM workspace_rrhh_ausencias WHERE id = ? AND workspace_id = ? LIMIT 1",
                 (record_id, workspace_id),
@@ -23815,7 +24350,7 @@ class Handler(BaseHTTPRequestHandler):
             session = getattr(self, "auth_session", None) or self._current_session()
             workspace_id = str(payload.get("workspace_id") or "").strip()
             record_id = str(payload.get("id") or "").strip()
-            action = normalize_lookup_text(payload.get("action") or payload.get("estado") or "")
+            action = normalize_action_key(payload.get("action") or payload.get("estado") or "")
             if not workspace_id or not record_id or not action:
                 json_response(self, {"error": "workspace_id, id y action requeridos"}, status=400)
                 return
@@ -23888,6 +24423,45 @@ class Handler(BaseHTTPRequestHandler):
                 after=dict(after) if after else None,
                 now=now,
             )
+            # Notificaciones de estado (admin → trabajador / trabajador → admin al cancelar)
+            try:
+                persona_row2 = conn.execute(
+                    "SELECT nombre FROM workspace_registro_personal WHERE workspace_id = ? AND id = ? LIMIT 1",
+                    (workspace_id, persona_id),
+                ).fetchone()
+                persona_nombre = str(persona_row2["nombre"] or "").strip() if persona_row2 else persona_id
+                empresa_nombre = ""
+                if empresa_id:
+                    row_empresa = conn.execute("SELECT nombre FROM empresas WHERE id = ? LIMIT 1", (empresa_id,)).fetchone()
+                    empresa_nombre = str(row_empresa["nombre"] or "").strip() if row_empresa else ""
+                notif_payload = {
+                    "type": "rrhh_ausencia",
+                    "action": "estado",
+                    "estado": next_estado,
+                    "ausencia_id": record_id,
+                    "persona_id": persona_id,
+                    "persona_nombre": persona_nombre,
+                    "empresa_id": empresa_id,
+                    "empresa_nombre": empresa_nombre,
+                    "tipo": str(row["tipo"] or ""),
+                    "fecha_inicio": str(row["fecha_inicio"] or ""),
+                    "fecha_fin": str(row["fecha_fin"] or ""),
+                }
+                if is_priv:
+                    ch = "worker_rrhh_ausencia_actualizada"
+                    if next_estado == "Aprobada":
+                        ch = "worker_rrhh_ausencia_aprobada"
+                    elif next_estado == "Rechazada":
+                        ch = "worker_rrhh_ausencia_rechazada"
+                    elif next_estado == "Cancelada":
+                        ch = "worker_rrhh_ausencia_cancelada"
+                    log_workspace_notification(conn, workspace_id, persona_id, ch, notif_payload, now=now)
+                else:
+                    # El trabajador cancela → avisar a admin
+                    if next_estado == "Cancelada":
+                        log_workspace_notification(conn, workspace_id, persona_id, "admin_rrhh_ausencia_cancelada", notif_payload, now=now)
+            except Exception:
+                pass
             conn.commit()
             json_response(self, {"ok": True, "id": record_id, "estado": next_estado})
             return
@@ -24001,7 +24575,7 @@ class Handler(BaseHTTPRequestHandler):
             session = getattr(self, "auth_session", None) or self._current_session()
             workspace_id = str(payload.get("workspace_id") or "").strip()
             record_id = str(payload.get("id") or "").strip()
-            action = normalize_lookup_text(payload.get("action") or payload.get("estado") or "")
+            action = normalize_action_key(payload.get("action") or payload.get("estado") or "")
             if not workspace_id or not record_id or not action:
                 json_response(self, {"error": "workspace_id, id y action requeridos"}, status=400)
                 return
@@ -30535,6 +31109,43 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, {"ok": True, "user": self._auth_user_payload(refreshed_session)})
             return
 
+        if path == "/api/debug_auth":
+            if str(os.environ.get("APP_DEBUG_AUTH") or "").strip().lower() not in {"1", "true", "yes", "on"}:
+                json_response(self, {"error": "No disponible"}, status=404)
+                return
+            session = self._current_session()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            user_id = str(session.get("user_id") or "").strip()
+            db_user = None
+            if user_id:
+                try:
+                    db_user = conn.execute(
+                        "SELECT id, usuario, email, rol, servicio, activo FROM usuarios WHERE id = ? LIMIT 1",
+                        (user_id,),
+                    ).fetchone()
+                except Exception:
+                    db_user = None
+            json_response(
+                self,
+                {
+                    "ok": True,
+                    "session": {
+                        "user_id": session.get("user_id"),
+                        "usuario": session.get("usuario"),
+                        "email": session.get("email"),
+                        "rol": session.get("rol"),
+                        "servicio": session.get("servicio"),
+                        "expires_at": session.get("expires_at"),
+                    },
+                    "db_user": dict(db_user) if db_user else None,
+                    "is_privileged_session": bool(workspace_session_is_privileged(session)),
+                    "is_privileged_db": bool(workspace_actor_is_privileged(conn, session)),
+                },
+            )
+            return
+
         if path == "/api/auth_invite_status":
             token = (params.get("token", [""])[0] or "").strip()
             if not token:
@@ -33288,7 +33899,7 @@ class Handler(BaseHTTPRequestHandler):
             rows = conn.execute(
                 """
                 SELECT id, nombre, apellido, usuario, email, servicio, rol, activo,
-                       COALESCE(registro_horario_activo, 1) AS registro_horario_activo
+                       COALESCE(registro_horario_activo, 0) AS registro_horario_activo
                 FROM usuarios
                 ORDER BY nombre, apellido
                 """
