@@ -23329,6 +23329,27 @@ class Handler(BaseHTTPRequestHandler):
             usuario_id_value = str(payload.get("usuario_id") or "").strip() or None
             usuario_manual_flag = 1 if usuario_id_value else 0
             prev = None
+            # Idempotencia: si se está creando una ficha ligada a un usuario del sistema y ya existe una ficha manual
+            # para ese usuario en este workspace, actualizamos esa ficha en lugar de insertar otra nueva.
+            # Esto evita duplicados cuando el frontend reintenta tras errores de red/502.
+            if (not record_id) and usuario_id_value:
+                try:
+                    existing = conn.execute(
+                        """
+                        SELECT id
+                        FROM workspace_registro_personal
+                        WHERE workspace_id = ? AND usuario_id = ?
+                          AND COALESCE(usuario_manual, 0) = 1
+                          AND COALESCE(source, 'manual') != 'auto'
+                        ORDER BY COALESCE(updated_at, created_at) DESC
+                        LIMIT 1
+                        """,
+                        (workspace_id, usuario_id_value),
+                    ).fetchone()
+                    if existing and existing.get("id"):
+                        record_id = str(existing["id"] or "").strip()
+                except Exception:
+                    pass
             if record_id:
                 prev = conn.execute(
                     "SELECT * FROM workspace_registro_personal WHERE id = ? AND workspace_id = ? LIMIT 1",

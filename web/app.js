@@ -6545,30 +6545,15 @@ const renderWorkspaceRrhhHub = () => {
           .filter((row) => Number(row.usuario_manual || 0) === 1 && String(row.usuario_id || "").trim())
           .map((row) => [String(row.usuario_id || "").trim(), row])
       );
-      const employeeByEmail = (() => {
-        const pickNewest = (a, b) => {
-          const aStamp = String(a?.updated_at || a?.created_at || "").trim();
-          const bStamp = String(b?.updated_at || b?.created_at || "").trim();
-          if (aStamp && bStamp) return bStamp.localeCompare(aStamp) > 0 ? b : a;
-          return bStamp ? b : a;
-        };
-        const map = new Map();
-        employees.forEach((emp) => {
-          const email = String(emp?.email || "").trim().toLowerCase();
-          if (!email) return;
-          const existing = map.get(email) || null;
-          map.set(email, existing ? pickNewest(existing, emp) : emp);
-        });
-        return map;
-      })();
 
       // 1) Usuarios del sistema (login)
       const eligibleUsers = getWorkspaceTimeEligibleUsers().filter((row) => Number(row.activo ?? 1) === 1);
       eligibleUsers.forEach((u) => {
         const userId = String(u.id || "").trim();
         if (!userId) return;
-        const primaryEmail = String((u.email || usersById.get(userId)?.email || "")).trim().toLowerCase();
-        const employee = employeeByUser.get(userId) || (primaryEmail ? (employeeByEmail.get(primaryEmail) || null) : null);
+        // Importante: NO inferimos el vínculo por email. Muchos usuarios comparten emails genéricos y esto
+        // provoca que se muestren datos cruzados entre personas. La vinculación debe ser explícita (usuario_manual).
+        const employee = employeeByUser.get(userId) || null;
         const fullName = `${u.nombre || ""} ${u.apellido || ""}`.trim() || u.usuario || u.email || "Usuario";
         addMember({
           key: `user:${userId}`,
@@ -6591,20 +6576,7 @@ const renderWorkspaceRrhhHub = () => {
         if (!personaId) return;
         const linkedUserId = String(emp.usuario_id || "").trim();
         const linkedManual = Number(emp.usuario_manual || 0) === 1;
-        const email = String(emp?.email || "").trim().toLowerCase();
-        const candidateUserKey = (() => {
-          if (!email) return "";
-          // Buscamos un usuario existente con ese email para consolidar fichas sin duplicar cards.
-          for (const [k, member] of membersByKey.entries()) {
-            if (!String(k || "").startsWith("user:")) continue;
-            const memberEmail = String(member?.user?.email || "").trim().toLowerCase();
-            if (memberEmail && memberEmail === email) return k;
-          }
-          return "";
-        })();
-        const key = (linkedManual && linkedUserId)
-          ? `user:${linkedUserId}`
-          : (candidateUserKey || `emp:${personaId}`);
+        const key = (linkedManual && linkedUserId) ? `user:${linkedUserId}` : `emp:${personaId}`;
         if (membersByKey.has(key)) {
           // Merge info si faltaba
           const prev = membersByKey.get(key);
@@ -6907,8 +6879,8 @@ const renderWorkspaceRrhhHub = () => {
 		      const employee = m?.employee || null;
 		      const user = m?.user || null;
 		      const memberTab = normalizeMemberTab(state.workspaceRrhhEquipoMemberTab || "personal");
-          const safeKey = String(m?.key || "member").replace(/[^a-z0-9_-]/gi, "_");
-          const personalFormId = `rrhhMemberPersonalForm_${safeKey}`;
+      const safeKey = String(m?.key || "member").replace(/[^a-z0-9_-]/gi, "_");
+      const personalFormId = `rrhhMemberPersonalForm_${safeKey}`;
           const normalizeName = (value) =>
             String(value || "")
               .trim()
@@ -6926,11 +6898,12 @@ const renderWorkspaceRrhhHub = () => {
 	        ...companies.map((c) => `<option value="${escapeHtml(String(c.id || ""))}">${escapeHtml(c.nombre || "-")}</option>`),
 	      ].join("");
 
-	      const defaultEmpresaId = String(employee?.empresa_id || "").trim();
-	      const tipoJornada = String(employee?.tipo_jornada || "Completa").trim() || "Completa";
-	      const horasDia = employee?.horas_pactadas_dia ?? "";
-	      const isActive = employee ? Number(employee.activo ?? 1) === 1 : true;
-	      const photoUrl = String(employee?.foto_url || "").trim();
+          const defaultEmpresaId = String(employee?.empresa_id || "").trim();
+          const tipoJornada = String(employee?.tipo_jornada || "Completa").trim() || "Completa";
+          const horasDia = employee?.horas_pactadas_dia ?? "";
+          const isActive = employee ? Number(employee.activo ?? 1) === 1 : true;
+          const photoUrl = String(employee?.foto_url || "").trim();
+          const boundUserId = String(m?.userId || "").trim();
 	      const initials = String(employee?.nombre || m?.nombre || "")
 	        .trim()
 	        .split(/\s+/)
@@ -6956,8 +6929,8 @@ const renderWorkspaceRrhhHub = () => {
 	          <form id="${escapeHtml(personalFormId)}" class="form-grid" data-rrhh-member-personal-form="1">
 	            <input type="hidden" name="id" value="${escapeHtml(String(employee?.id || ""))}" />
 	            <input type="hidden" name="workspace_id" value="${escapeHtml(state.currentWorkspaceId)}" />
-	            <input type="hidden" name="usuario_id" value="${escapeHtml(String(employee?.usuario_id || ""))}" />
-	            <input type="hidden" name="foto_url" value="${escapeHtml(photoUrl)}" />
+              <input type="hidden" name="usuario_id" value="${escapeHtml(boundUserId)}" />
+              <input type="hidden" name="foto_url" value="${escapeHtml(photoUrl)}" />
 	            <div class="span-2 rrhh-photo-row">
 	              <div class="rrhh-avatar rrhh-avatar-lg" aria-hidden="true">
 	                ${photoUrl ? `<img id="rrhhMemberPhotoPreview" src="${escapeHtml(buildPhotoSrc(photoUrl))}" alt="" />` : `<span id="rrhhMemberPhotoPreview" class="rrhh-avatar-initials">${escapeHtml(initials)}</span>`}
@@ -7750,7 +7723,7 @@ const renderWorkspaceRrhhHub = () => {
       if (status) status.textContent = "Subiendo foto...";
       try {
         const upload = await uploadFileToS3(file, "rrhh_fotos", status);
-        const url = String(upload?.public_url || "").trim();
+        const url = upload?.key ? `s3://${String(upload.key)}` : String(upload?.public_url || "").trim();
         if (!url) throw new Error("No se pudo subir la foto.");
         const res = await apiPost("/api/workspace_registro_personal_self_photo", {
           workspace_id: state.currentWorkspaceId,
@@ -7861,7 +7834,7 @@ const renderWorkspaceRrhhHub = () => {
         if (!file) return;
         try {
           const upload = await uploadFileToS3(file, "rrhh_fotos", photoStatus);
-          const url = String(upload?.public_url || "").trim();
+          const url = upload?.key ? `s3://${String(upload.key)}` : String(upload?.public_url || "").trim();
           if (!url) throw new Error("No se pudo subir la foto.");
           photoHidden.value = url;
           const preview = document.getElementById("rrhhMemberPhotoPreview");
@@ -7901,6 +7874,9 @@ const renderWorkspaceRrhhHub = () => {
         if (resp?.id) {
           state.workspaceRrhhSelectedPersonaId = String(resp.id || "");
           state.workspaceRrhhScopeAll = false;
+          if (String(state.workspaceRrhhEquipoView || "") === "member") {
+            state.workspaceRrhhEquipoMemberPersonaId = String(resp.id || "");
+          }
         }
         // Actualiza las cards inmediatamente aunque falle el reload (evita que “no se pinte” lo guardado).
         const personaId = String(resp?.id || payload.id || "").trim();
@@ -7912,7 +7888,9 @@ const renderWorkspaceRrhhHub = () => {
           });
           renderWorkspaceRrhhHub();
         }
-        await loadWorkspaceDetail(state.currentWorkspaceId);
+        // Evitar recargar el workspace completo: además de ser lento, puede forzar volver a "Operativa"
+        // si la URL actual no está en `view=rrhh` y dispara muchas APIs (causando 502).
+        renderCompanyCards();
         await refreshWorkspaceRrhh();
       } catch (error) {
         if (status) status.textContent = error.message || "No se pudo guardar.";
@@ -7997,7 +7975,8 @@ const renderWorkspaceRrhhHub = () => {
       try {
         await apiPost("/api/workspace_registro_usuario_toggle", { workspace_id: state.currentWorkspaceId, usuario_id: userId, enabled: next });
         if (accessStatus) accessStatus.textContent = "Actualizado.";
-        await loadWorkspaceDetail(state.currentWorkspaceId);
+        await refreshWorkspaceTimeSetup();
+        renderCompanyCards();
         await refreshWorkspaceRrhh();
       } catch (error) {
         if (accessStatus) accessStatus.textContent = error.message || "No se pudo actualizar.";
@@ -8046,7 +8025,8 @@ const renderWorkspaceRrhhHub = () => {
           notas: emp.notas || "",
         });
         if (accessStatus) accessStatus.textContent = "Vinculado.";
-        await loadWorkspaceDetail(state.currentWorkspaceId);
+        await refreshWorkspaceTimeSetup();
+        renderCompanyCards();
         await refreshWorkspaceRrhh();
       } catch (error) {
         if (accessStatus) accessStatus.textContent = error.message || "No se pudo vincular.";
@@ -8082,7 +8062,8 @@ const renderWorkspaceRrhhHub = () => {
           notas: emp.notas || "",
         });
         if (accessStatus) accessStatus.textContent = "Desvinculado.";
-        await loadWorkspaceDetail(state.currentWorkspaceId);
+        await refreshWorkspaceTimeSetup();
+        renderCompanyCards();
         await refreshWorkspaceRrhh();
       } catch (error) {
         if (accessStatus) accessStatus.textContent = error.message || "No se pudo desvincular.";
@@ -8196,7 +8177,8 @@ const renderWorkspaceRrhhHub = () => {
           empresa_manual: 1,
         });
         renderWorkspaceRrhhHub();
-        await loadWorkspaceDetail(state.currentWorkspaceId);
+        await refreshWorkspaceTimeSetup();
+        renderCompanyCards();
         await refreshWorkspaceRrhh();
       } catch (error) {
         if (status) status.textContent = error.message || "No se pudo guardar.";
@@ -8302,7 +8284,9 @@ const renderWorkspaceRrhhHub = () => {
           usuario_id: userId,
           enabled: next,
         });
-        await loadWorkspaceDetail(state.currentWorkspaceId);
+        await refreshWorkspaceTimeSetup();
+        renderCompanyCards();
+        await refreshWorkspaceRrhh();
       } catch (error) {
         alert(error.message || "No se pudo actualizar el usuario.");
       } finally {
@@ -8400,7 +8384,9 @@ const renderWorkspaceRrhhHub = () => {
             enabled: payload.registro_horario_activo ? 1 : 0,
           }).catch(() => ({}));
         }
-        await loadWorkspaceDetail(state.currentWorkspaceId);
+        await refreshWorkspaceTimeSetup();
+        renderCompanyCards();
+        await refreshWorkspaceRrhh();
         state.workspaceRrhhSelectedUserId = finalId;
         renderWorkspaceRrhhHub();
       } catch (err) {
@@ -8457,7 +8443,9 @@ const renderWorkspaceRrhhHub = () => {
         if (data?.error) throw new Error(data.error);
         state.workspaceRrhhSelectedUserId = "";
         await loadUsuarios();
-        await loadWorkspaceDetail(state.currentWorkspaceId);
+        await refreshWorkspaceTimeSetup();
+        renderCompanyCards();
+        await refreshWorkspaceRrhh();
         renderWorkspaceRrhhHub();
         if (status) status.textContent = "Usuario eliminado.";
       } catch (error) {
