@@ -23368,7 +23368,7 @@ class Handler(BaseHTTPRequestHandler):
                         INSERT INTO workspace_registro_personal (
                           id, workspace_id, empresa_id, empresa_manual, usuario_id, usuario_manual, source, nombre, nif, email, telefono, foto_url, tipo_jornada,
                           horas_pactadas_dia, horas_pactadas_semana, fecha_alta, fecha_baja, activo, notas, created_at, updated_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
                         """,
                         (record_id, *values, now, now),
                     )
