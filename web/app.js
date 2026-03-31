@@ -1193,6 +1193,10 @@ const RoutingModule = window.CRMAppRouting || null;
     const reason = event?.reason;
     const detail = reason?.stack || reason?.message || String(reason || "Promise rechazada");
     show("Error interno (promesa)", detail);
+    try {
+      // Safari/Chrome: evita el mensaje "Unhandled Promise Rejection" en consola cuando ya lo mostramos en UI.
+      event.preventDefault();
+    } catch {}
   });
 })();
 
@@ -8043,6 +8047,14 @@ const renderWorkspaceRrhhHub = () => {
     btn.addEventListener("click", async () => {
       state.workspaceRrhhSelectedPersonaId = btn.dataset.rrhhPersona || "";
       state.workspaceRrhhScopeAll = false;
+      // Evita "arrastrar" valores del formulario anterior mientras cargan los datos del nuevo miembro.
+      state.workspaceRrhhProfileRow = null;
+      state.workspaceRrhhAusenciasRows = [];
+      state.workspaceRrhhGastosRows = [];
+      state.workspaceRrhhDocsRows = [];
+      state.workspaceRrhhTimeSummary = null;
+      state.workspaceRrhhTimeRows = [];
+      renderWorkspaceRrhhHub();
       await refreshWorkspaceRrhh();
     });
   });
@@ -33782,20 +33794,28 @@ const loadTable = () => {
     empresa_id: empresaId,
     q,
   });
-  api(`/api/tabla?${params.toString()}`).then((data) => {
-    if (state.currentModule !== requestModule || currentTab !== requestTab) {
-      return;
-    }
-    renderTable(data, { showActions, editableTable: isEditableTable ? tabla : null });
-    const baseText = `Mostrando ${data.rows.length} filas de ${TABLE_LABELS[tabla] || tabla}.`;
-    tableInfo.textContent = baseText;
-    tableInfo.dataset.baseText = baseText;
-    const empresaName = state.empresas.find((e) => e.id === empresaId)?.nombre;
-    if (currentTab === "operativa") {
-      renderDashboard(empresaName, empresaId);
-    }
-    updateTableVisibility();
-  });
+  api(`/api/tabla?${params.toString()}`)
+    .then((data) => {
+      if (state.currentModule !== requestModule || currentTab !== requestTab) {
+        return;
+      }
+      renderTable(data, { showActions, editableTable: isEditableTable ? tabla : null });
+      const baseText = `Mostrando ${data.rows.length} filas de ${TABLE_LABELS[tabla] || tabla}.`;
+      tableInfo.textContent = baseText;
+      tableInfo.dataset.baseText = baseText;
+      const empresaName = state.empresas.find((e) => e.id === empresaId)?.nombre;
+      if (currentTab === "operativa") {
+        renderDashboard(empresaName, empresaId);
+      }
+      updateTableVisibility();
+    })
+    .catch((error) => {
+      console.error("Tabla API failed:", error);
+      if (tableInfo) {
+        tableInfo.textContent = error?.message || "No se pudo cargar la tabla.";
+        tableInfo.dataset.baseText = tableInfo.textContent;
+      }
+    });
 };
 
 const setAuthUi = (user) => {
