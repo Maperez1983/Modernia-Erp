@@ -8428,6 +8428,13 @@ const renderWorkspaceRrhhHub = () => {
         if (Array.isArray(state.usersList)) {
           state.usersList = state.usersList.filter((u) => String(u?.id || "").trim() !== userId);
         }
+        if (Array.isArray(state.workspaceTimeUsers)) {
+          state.workspaceTimeUsers = state.workspaceTimeUsers.filter((u) => String(u?.id || "").trim() !== userId);
+        }
+        if (String(state.workspaceRrhhSelectedUserId || "").trim() === userId) {
+          state.workspaceRrhhSelectedUserId = "";
+        }
+        await refreshWorkspaceTimeSetup();
         // Volver al listado.
         state.workspaceRrhhSelectedPersonaId = "";
         state.workspaceRrhhEquipoView = "list";
