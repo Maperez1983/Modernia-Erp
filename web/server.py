@@ -328,9 +328,11 @@ def app_now():
     # Render suele ejecutar en UTC; para registro horario necesitamos hora local (España por defecto).
     if ZoneInfo:
         try:
-            return datetime.now(ZoneInfo(APP_TIMEZONE))
+            # Usa UTC -> zona horaria para evitar depender de la TZ del sistema.
+            return datetime.now(timezone.utc).astimezone(ZoneInfo(APP_TIMEZONE))
         except Exception:
             pass
+    # Fallback: naive local time (puede ser UTC si el sistema no tiene TZ configurada).
     return datetime.now()
 
 # Anti-fuerza bruta /api/login (en memoria).
