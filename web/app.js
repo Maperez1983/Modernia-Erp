@@ -1462,10 +1462,17 @@ const workspaceList = document.getElementById("workspaceList");
 const workspaceForm = document.getElementById("workspaceForm");
 const workspaceFormStatus = document.getElementById("workspaceFormStatus");
 const workspaceNewBtn = document.getElementById("workspaceNewBtn");
-const workspaceNewCustomerBtn = document.getElementById("workspaceNewCustomerBtn");
-const workspaceCompanies = document.getElementById("workspaceCompanies");
-const workspaceMembers = document.getElementById("workspaceMembers");
-const workspaceModules = document.getElementById("workspaceModules");
+	const workspaceNewCustomerBtn = document.getElementById("workspaceNewCustomerBtn");
+	const workspaceCompanies = document.getElementById("workspaceCompanies");
+	const workspaceCompanyEditor = document.getElementById("workspaceCompanyEditor");
+	const workspaceCompanyEditorClose = document.getElementById("workspaceCompanyEditorClose");
+	const workspaceCompanyForm = document.getElementById("workspaceCompanyForm");
+	const workspaceCompanyFormStatus = document.getElementById("workspaceCompanyFormStatus");
+	const workspaceCompanyCnaeQuery = document.getElementById("workspaceCompanyCnaeQuery");
+	const workspaceCompanyCnaeResults = document.getElementById("workspaceCompanyCnaeResults");
+	const workspaceCompanyCnaes = document.getElementById("workspaceCompanyCnaes");
+	const workspaceMembers = document.getElementById("workspaceMembers");
+	const workspaceModules = document.getElementById("workspaceModules");
 const workspaceClientBase = document.getElementById("workspaceClientBase");
 const workspaceClientLookup = document.getElementById("workspaceClientLookup");
 const workspaceClientRefreshBtn = document.getElementById("workspaceClientRefreshBtn");
@@ -2259,18 +2266,24 @@ const crmResumenHastaWrap = document.getElementById("crmResumenHastaWrap");
 const crmResumenResponsable = document.getElementById("crmResumenResponsable");
 const crmResumenOrigen = document.getElementById("crmResumenOrigen");
 const crmResumenReset = document.getElementById("crmResumenReset");
-const inmoLegalCopilotForm = document.getElementById("inmoLegalCopilotForm");
-const inmoLegalArea = document.getElementById("inmoLegalArea");
-const inmoLegalTopic = document.getElementById("inmoLegalTopic");
-const inmoLegalQuestion = document.getElementById("inmoLegalQuestion");
-const inmoLegalAskBtn = document.getElementById("inmoLegalAskBtn");
-const inmoLegalStatus = document.getElementById("inmoLegalStatus");
-const inmoLegalResponse = document.getElementById("inmoLegalResponse");
-const legalRadarForm = document.getElementById("legalRadarForm");
-const legalRadarArea = document.getElementById("legalRadarArea");
-const legalRadarStatus = document.getElementById("legalRadarStatus");
-const legalRadarTable = document.getElementById("legalRadarTable");
-const legalRadarInfo = document.getElementById("legalRadarInfo");
+	const inmoLegalCopilotForm = document.getElementById("inmoLegalCopilotForm");
+	const inmoLegalArea = document.getElementById("inmoLegalArea");
+	const inmoLegalTopic = document.getElementById("inmoLegalTopic");
+	const inmoLegalQuestion = document.getElementById("inmoLegalQuestion");
+	const inmoLegalAskBtn = document.getElementById("inmoLegalAskBtn");
+	const inmoLegalStatus = document.getElementById("inmoLegalStatus");
+	const inmoLegalResponse = document.getElementById("inmoLegalResponse");
+	const copilotWebForm = document.getElementById("copilotWebForm");
+	const copilotWebUrl = document.getElementById("copilotWebUrl");
+	const copilotWebQuestion = document.getElementById("copilotWebQuestion");
+	const copilotWebAskBtn = document.getElementById("copilotWebAskBtn");
+	const copilotWebStatus = document.getElementById("copilotWebStatus");
+	const copilotWebResponse = document.getElementById("copilotWebResponse");
+	const legalRadarForm = document.getElementById("legalRadarForm");
+	const legalRadarArea = document.getElementById("legalRadarArea");
+	const legalRadarStatus = document.getElementById("legalRadarStatus");
+	const legalRadarTable = document.getElementById("legalRadarTable");
+	const legalRadarInfo = document.getElementById("legalRadarInfo");
 const legalRadarRefreshBtn = document.getElementById("legalRadarRefreshBtn");
 const legalRadarScanBtn = document.getElementById("legalRadarScanBtn");
 const legalDgtForm = document.getElementById("legalDgtForm");
@@ -5843,12 +5856,13 @@ const renderWorkspaceCompanies = (rows = []) => {
                   data-workspace-company-enter="${row.nombre || ""}"
                 >Entrar en empresa</button>
 	                <button
-                  type="button"
-                  class="secondary ghost"
-                  data-workspace-company-edit="${row.id || ""}"
-                  data-workspace-company-edit-nif="${escapeHtml(String(row.nif || ""))}"
-                  data-workspace-company-edit-dir="${escapeHtml(String(row.direccion || ""))}"
-                  data-workspace-company-edit-sector="${escapeHtml(String(row.sector || ""))}"
+	                  type="button"
+	                  class="secondary ghost"
+	                  data-workspace-company-edit="${row.id || ""}"
+	                  data-workspace-company-edit-name="${escapeHtml(String(row.nombre || \"\"))}"
+	                  data-workspace-company-edit-nif="${escapeHtml(String(row.nif || ""))}"
+	                  data-workspace-company-edit-dir="${escapeHtml(String(row.direccion || ""))}"
+	                  data-workspace-company-edit-sector="${escapeHtml(String(row.sector || ""))}"
                   data-workspace-company-edit-cnae="${escapeHtml(String(row.cnae || ""))}"
                   data-workspace-company-edit-cnaes="${escapeHtml(String((row._cnaes || []).join(\", \")))}"
                   data-workspace-company-edit-cnaes-json="${escapeHtml(String(row.cnaes_json || \"\"))}"
@@ -5891,70 +5905,35 @@ const renderWorkspaceCompanies = (rows = []) => {
       openCompany(companyName, { allowRestricted: true });
     });
   });
-  workspaceCompanies.querySelectorAll("[data-workspace-company-edit]").forEach((button) => {
-    button.addEventListener("click", async () => {
-      if (!canEdit) return;
-      const companyId = button.dataset.workspaceCompanyEdit || "";
-      if (!companyId) return;
-      const currentNif = String(button.dataset.workspaceCompanyEditNif || "").trim();
-      const currentDir = String(button.dataset.workspaceCompanyEditDir || "").trim();
-      const currentSector = String(button.dataset.workspaceCompanyEditSector || "").trim();
-      const currentCnaes = String(button.dataset.workspaceCompanyEditCnaes || "").trim();
-      const currentConvenioKey = String(button.dataset.workspaceCompanyEditConvenioKey || "").trim();
-      const currentConvenio = String(button.dataset.workspaceCompanyEditConvenio || "").trim();
-      const currentVacModo = String(button.dataset.workspaceCompanyEditVacModo || "habiles").trim();
-      const currentVacDias = String(button.dataset.workspaceCompanyEditVacDias || "").trim();
-      const nif = window.prompt("CIF/NIF de la empresa", currentNif);
-      if (nif === null) return;
-      const direccion = window.prompt("Dirección / centro de trabajo (opcional)", currentDir);
-      if (direccion === null) return;
-      const sector = window.prompt("Sector (ej: inmobiliaria, gestoría, fincas, etc.)", currentSector);
-      if (sector === null) return;
-      const actividad = window.prompt("Actividad (texto) para sugerir CNAE (opcional)", "");
-      if (actividad === null) return;
-      if (String(actividad || "").trim()) {
-        try {
-          const match = await api(`/api/catalogo_match?texto=${encodeURIComponent(String(actividad || '').trim())}`);
-          const cnaeRows = Array.isArray(match?.cnae) ? match.cnae : [];
-          if (cnaeRows.length) {
-            const suggestion = cnaeRows
-              .slice(0, 5)
-              .map((row) => `${row.codigo || ""} - ${row.descripcion || ""}`.trim())
-              .filter(Boolean)
-              .join("\n");
-            alert(`Sugerencias CNAE:\n${suggestion}`);
-          }
-        } catch {}
-      }
-      const cnaes = window.prompt("CNAE(s) separados por coma (opcional)", currentCnaes);
-      if (cnaes === null) return;
-      const convenioNombre = window.prompt("Convenio (nombre o referencia)", currentConvenio);
-      if (convenioNombre === null) return;
-      const convenioKey = window.prompt("Convenio key (opcional, interno)", currentConvenioKey);
-      if (convenioKey === null) return;
-      const vacacionesModo = window.prompt("Vacaciones: habiles o naturales", currentVacModo);
-      if (vacacionesModo === null) return;
-      const vacacionesDias = window.prompt("Vacaciones días/año (opcional)", currentVacDias);
-      if (vacacionesDias === null) return;
-      try {
-        await postJsonWithDbRetry("/api/empresa_update", {
-          workspace_id: state.currentWorkspaceId,
-          id: companyId,
-          nif: String(nif || "").trim(),
-          direccion: String(direccion || "").trim(),
-          sector: String(sector || "").trim(),
-          cnaes: String(cnaes || "").trim(),
-          convenio_nombre: String(convenioNombre || "").trim(),
-          convenio_key: String(convenioKey || "").trim(),
-          vacaciones_modo: String(vacacionesModo || "").trim(),
-          vacaciones_dias_anuales: String(vacacionesDias || "").trim(),
-        });
-        await loadWorkspaceDetail(state.currentWorkspaceId);
-      } catch (error) {
-        alert(error?.message || "No se pudo guardar la empresa.");
-      }
-    });
-  });
+	  workspaceCompanies.querySelectorAll("[data-workspace-company-edit]").forEach((button) => {
+	    button.addEventListener("click", async () => {
+	      if (!canEdit) return;
+	      if (!workspaceCompanyEditor || !workspaceCompanyForm) return;
+	      const companyId = String(button.dataset.workspaceCompanyEdit || "").trim();
+	      if (!companyId) return;
+	      workspaceCompanyEditor.classList.remove("hidden");
+	      if (workspaceCompanyFormStatus) workspaceCompanyFormStatus.textContent = "";
+	      const set = (name, value) => {
+	        const el = workspaceCompanyForm.querySelector(`[name="${name}"]`);
+	        if (el) el.value = value ?? "";
+	      };
+	      set("id", companyId);
+	      set("nombre", String(button.dataset.workspaceCompanyEditName || ""));
+	      set("nif", String(button.dataset.workspaceCompanyEditNif || ""));
+	      set("direccion", String(button.dataset.workspaceCompanyEditDir || ""));
+	      set("sector", String(button.dataset.workspaceCompanyEditSector || ""));
+	      if (workspaceCompanyCnaes) {
+	        workspaceCompanyCnaes.value = String(button.dataset.workspaceCompanyEditCnaes || "");
+	      }
+	      set("convenio_key", String(button.dataset.workspaceCompanyEditConvenioKey || ""));
+	      set("convenio_nombre", String(button.dataset.workspaceCompanyEditConvenio || ""));
+	      set("vacaciones_modo", String(button.dataset.workspaceCompanyEditVacModo || "habiles"));
+	      set("vacaciones_dias_anuales", String(button.dataset.workspaceCompanyEditVacDias || ""));
+	      if (typeof workspaceCompanyEditor.scrollIntoView === "function") {
+	        workspaceCompanyEditor.scrollIntoView({ behavior: "smooth", block: "start" });
+	      }
+	    });
+	  });
   workspaceCompanies.querySelectorAll("[data-workspace-company-unlink]").forEach((button) => {
     button.addEventListener("click", async () => {
       if (!canEdit) return;
@@ -35921,6 +35900,60 @@ if (inmoLegalCopilotForm) {
   });
 }
 
+if (copilotWebForm) {
+  copilotWebForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const url = String(copilotWebUrl?.value || "").trim();
+    const question = String(copilotWebQuestion?.value || "").trim();
+    if (!url) {
+      if (copilotWebStatus) copilotWebStatus.textContent = "Introduce una URL.";
+      return;
+    }
+    if (copilotWebStatus) copilotWebStatus.textContent = "Consultando...";
+    if (copilotWebAskBtn) copilotWebAskBtn.disabled = true;
+    if (copilotWebResponse) copilotWebResponse.innerHTML = "<div class='muted'>Cargando...</div>";
+    try {
+      const endpoint = question ? "/api/copilot_web_ask" : "/api/copilot_web_fetch";
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ url, question }),
+      });
+      const data = await response.json();
+      if (!response.ok || data?.error) {
+        throw new Error(data?.error || `HTTP ${response.status}`);
+      }
+      const title = data?.title ? escapeHtml(String(data.title)) : "";
+      const href = escapeHtml(String(data?.url || url));
+      if (endpoint === "/api/copilot_web_fetch") {
+        const text = escapeHtml(String(data?.text || "").slice(0, 6000));
+        if (copilotWebResponse) {
+          copilotWebResponse.innerHTML = `
+            <div class="crm-focus-link"><strong>${title || "Contenido extraído"}</strong><span>${href}</span></div>
+            <div class="crm-focus-link"><strong>Texto</strong><span>${text || "-"}</span></div>
+          `;
+        }
+        if (copilotWebStatus) copilotWebStatus.textContent = "Contenido extraído.";
+      } else {
+        const answer = escapeHtml(String(data?.answer || ""));
+        if (copilotWebResponse) {
+          copilotWebResponse.innerHTML = `
+            <div class="crm-focus-link"><strong>${title || "Respuesta"}</strong><span>${href}</span></div>
+            <div class="crm-focus-link"><strong>Salida</strong><span>${answer.replace(/\\n/g, "<br>") || "-"}</span></div>
+          `;
+        }
+        if (copilotWebStatus) copilotWebStatus.textContent = "Respuesta generada.";
+      }
+    } catch (error) {
+      if (copilotWebStatus) copilotWebStatus.textContent = error?.message || "No se pudo consultar la web.";
+      if (copilotWebResponse) copilotWebResponse.innerHTML = "<div class='muted'>No se pudo consultar la web.</div>";
+    } finally {
+      if (copilotWebAskBtn) copilotWebAskBtn.disabled = false;
+    }
+  });
+}
+
 if (inmoLegalArea) {
   inmoLegalArea.addEventListener("change", () => {
     state.legalCurrentArea = inmoLegalArea.value || "inmobiliaria";
@@ -37740,6 +37773,114 @@ workspaceViewButtons.forEach((button) => {
     setWorkspaceView(view, { scroll: true, forceTenantView: tenantMode && normalizeSimple(view) !== "operations" });
   });
 });
+
+const normalizeCnaeCode = (value = "") =>
+  String(value || "")
+    .trim()
+    .replace(/[^0-9.]/g, "")
+    .replace(/\.+/g, ".")
+    .replace(/^\.+/, "")
+    .replace(/\.+$/, "")
+    .trim();
+
+const parseCnaesInput = (value = "") => {
+  const parts = String(value || "")
+    .split(/[,\n;]+/)
+    .map((item) => normalizeCnaeCode(item))
+    .filter(Boolean);
+  const unique = [];
+  const seen = new Set();
+  parts.forEach((code) => {
+    if (seen.has(code)) return;
+    seen.add(code);
+    unique.push(code);
+  });
+  return unique.slice(0, 10);
+};
+
+const addCnaeToInput = (code) => {
+  if (!workspaceCompanyCnaes) return;
+  const current = parseCnaesInput(workspaceCompanyCnaes.value);
+  const nextCode = normalizeCnaeCode(code);
+  if (!nextCode) return;
+  if (!current.includes(nextCode)) current.push(nextCode);
+  workspaceCompanyCnaes.value = current.join(", ");
+};
+
+if (workspaceCompanyEditorClose && workspaceCompanyEditor) {
+  workspaceCompanyEditorClose.addEventListener("click", () => {
+    workspaceCompanyEditor.classList.add("hidden");
+    if (workspaceCompanyFormStatus) workspaceCompanyFormStatus.textContent = "";
+    if (workspaceCompanyCnaeResults) workspaceCompanyCnaeResults.innerHTML = "";
+    if (workspaceCompanyCnaeQuery) workspaceCompanyCnaeQuery.value = "";
+  });
+}
+
+if (workspaceCompanyForm) {
+  workspaceCompanyForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (!state.currentWorkspaceId) {
+      if (workspaceCompanyFormStatus) workspaceCompanyFormStatus.textContent = "Workspace no seleccionado.";
+      return;
+    }
+    if (workspaceCompanyFormStatus) workspaceCompanyFormStatus.textContent = "Guardando empresa...";
+    const payload = Object.fromEntries(new FormData(workspaceCompanyForm).entries());
+    payload.workspace_id = state.currentWorkspaceId;
+    payload.id = payload.id || payload.empresa_id || "";
+    payload.cnaes = parseCnaesInput(workspaceCompanyCnaes?.value || "").join(", ");
+    try {
+      const data = await postJsonWithDbRetry("/api/empresa_update", payload);
+      if (data?.error) throw new Error(data.error);
+      if (workspaceCompanyFormStatus) workspaceCompanyFormStatus.textContent = "Empresa guardada.";
+      await loadWorkspaceDetail(state.currentWorkspaceId);
+      if (workspaceCompanyEditor) workspaceCompanyEditor.classList.add("hidden");
+    } catch (error) {
+      if (workspaceCompanyFormStatus) workspaceCompanyFormStatus.textContent = error?.message || "No se pudo guardar la empresa.";
+    }
+  });
+}
+
+if (workspaceCompanyCnaeQuery) {
+  workspaceCompanyCnaeQuery.addEventListener("input", () => {
+    const q = String(workspaceCompanyCnaeQuery.value || "").trim();
+    scheduleSave(
+      "workspace-company-cnae-query",
+      async () => {
+        if (!workspaceCompanyCnaeResults) return;
+        if (!q || q.length < 3) {
+          workspaceCompanyCnaeResults.innerHTML = "";
+          return;
+        }
+        try {
+          const match = await api(`/api/catalogo_match?texto=${encodeURIComponent(q)}`);
+          const rows = Array.isArray(match?.cnae) ? match.cnae : [];
+          if (!rows.length) {
+            workspaceCompanyCnaeResults.innerHTML = "<div class='muted'>Sin sugerencias.</div>";
+            return;
+          }
+          workspaceCompanyCnaeResults.innerHTML = rows
+            .slice(0, 5)
+            .map(
+              (row) => `
+                <button type="button" class="secondary ghost" data-cnae-suggest="${escapeHtml(String(row.codigo || ""))}">
+                  ${escapeHtml(String(row.codigo || ""))} · ${escapeHtml(String(row.descripcion || ""))}
+                </button>
+              `
+            )
+            .join("");
+          workspaceCompanyCnaeResults.querySelectorAll("[data-cnae-suggest]").forEach((btn) => {
+            btn.addEventListener("click", () => {
+              addCnaeToInput(btn.dataset.cnaeSuggest || "");
+            });
+          });
+        } catch {
+          workspaceCompanyCnaeResults.innerHTML = "<div class='muted'>No se pudo buscar CNAE.</div>";
+        }
+      },
+      250
+    );
+  });
+}
 
 if (workspaceForm) {
   workspaceForm.addEventListener("submit", async (event) => {

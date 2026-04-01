@@ -353,18 +353,80 @@
           </div>
         </div>
         <div class="workspace-central-layout crm-workspace-view" data-workspace-view="tenant">
-          <div class="form-card">
-            <div class="section-head">
-              <div>
-                <h3>Empresas del grupo</h3>
-                <p class="muted">Sociedades operativas que viven dentro del workspace.</p>
-              </div>
-            </div>
-            <div id="workspaceCompanies"></div>
-          </div>
-          <div class="form-card">
-            <div class="section-head">
-              <div>
+	          <div class="form-card">
+	            <div class="section-head">
+	              <div>
+	                <h3>Empresas del grupo</h3>
+	                <p class="muted">Sociedades operativas que viven dentro del workspace.</p>
+	              </div>
+	            </div>
+	            <div id="workspaceCompanies"></div>
+	            <div id="workspaceCompanyEditor" class="form-card hidden" style="margin-top: 14px;">
+	              <div class="section-head">
+	                <div>
+	                  <h3>Editar empresa</h3>
+	                  <p class="muted">CIF/dirección, sector, convenio y CNAE (múltiples).</p>
+	                </div>
+	                <div class="toolbar">
+	                  <button type="button" id="workspaceCompanyEditorClose" class="secondary ghost">Cerrar</button>
+	                </div>
+	              </div>
+	              <form id="workspaceCompanyForm" class="form-grid">
+	                <input type="hidden" name="id" />
+	                <label>
+	                  Empresa
+	                  <input name="nombre" disabled />
+	                </label>
+	                <label>
+	                  CIF/NIF
+	                  <input name="nif" placeholder="B12345678" />
+	                </label>
+	                <label class="span-2">
+	                  Dirección
+	                  <input name="direccion" placeholder="C/ ... · Ciudad" />
+	                </label>
+	                <label class="span-2">
+	                  Sector / actividad
+	                  <input name="sector" placeholder="Ej. Administración de fincas, inmobiliaria..." />
+	                </label>
+	                <label class="span-2">
+	                  Buscar CNAE por actividad (texto)
+	                  <input id="workspaceCompanyCnaeQuery" placeholder="Ej. gestión de comunidades, asesoría laboral..." />
+	                </label>
+	                <div id="workspaceCompanyCnaeResults" class="crm-mini-list span-2"></div>
+	                <label class="span-2">
+	                  CNAE(s) (separados por coma)
+	                  <input id="workspaceCompanyCnaes" name="cnaes" placeholder="68.32, 69.20" />
+	                </label>
+	                <label class="span-2">
+	                  Convenio (nombre o referencia)
+	                  <input name="convenio_nombre" placeholder="Ej. Oficinas y despachos provincial..." />
+	                </label>
+	                <label>
+	                  Convenio key (interno)
+	                  <input name="convenio_key" placeholder="oficinas_y_despachos" />
+	                </label>
+	                <label>
+	                  Vacaciones (modo)
+	                  <select name="vacaciones_modo">
+	                    <option value="habiles">Hábiles</option>
+	                    <option value="naturales">Naturales</option>
+	                  </select>
+	                </label>
+	                <label>
+	                  Vacaciones días/año
+	                  <input name="vacaciones_dias_anuales" placeholder="22" />
+	                </label>
+	                <div class="form-actions span-2">
+	                  <button type="submit">Guardar empresa</button>
+	                  <span id="workspaceCompanyFormStatus" class="muted"></span>
+	                </div>
+	              </form>
+	            </div>
+	          </div>
+	          <div class="form-card">
+	            <div class="section-head">
+	              <div>
                 <h3>Miembros</h3>
                 <p class="muted">Usuarios con acceso a este workspace (recomendado para modo comercial multi-tenant).</p>
               </div>
@@ -2115,21 +2177,46 @@
                     </div>
                   </div>
                 </div>
-                <div class="form-card">
-                  <div class="section-head">
-                    <div>
-                        <h3>Respuesta</h3>
-                      <p class="muted">Base legal, impacto operativo, checkpoints del workflow, texto sugerido y partes variables del documento.</p>
-                    </div>
-                  </div>
-                  <div id="inmoLegalResponse" class="crm-focus-list">
-                    <div class="muted">Selecciona un tema o escribe una pregunta para obtener una guía operativa.</div>
-                  </div>
-                </div>
-                <div class="crm-summary-grid">
-                  <div class="form-card">
-                    <div class="section-head">
-                      <div>
+	                <div class="form-card">
+	                  <div class="section-head">
+	                    <div>
+	                        <h3>Respuesta</h3>
+	                      <p class="muted">Base legal, impacto operativo, checkpoints del workflow, texto sugerido y partes variables del documento.</p>
+	                    </div>
+	                  </div>
+	                  <div id="inmoLegalResponse" class="crm-focus-list">
+	                    <div class="muted">Selecciona un tema o escribe una pregunta para obtener una guía operativa.</div>
+	                  </div>
+	                </div>
+	                <div class="form-card">
+	                  <div class="section-head">
+	                    <div>
+	                      <h3>Consulta web (tiempo real)</h3>
+	                      <p class="muted">Extrae contenido oficial desde fuentes permitidas y, si quieres, genera un resumen guiado por tu pregunta.</p>
+	                    </div>
+	                  </div>
+	                  <form id="copilotWebForm" class="form-grid">
+	                    <label class="span-2">
+	                      URL
+	                      <input id="copilotWebUrl" name="url" placeholder="https://www.boe.es/..." />
+	                    </label>
+	                    <label class="span-2">
+	                      Pregunta (opcional)
+	                      <textarea id="copilotWebQuestion" name="question" rows="3" placeholder="Ej. ¿qué cambios introduce y qué impacto tiene en el registro horario o en vacaciones?"></textarea>
+	                    </label>
+	                    <div class="form-actions span-2">
+	                      <button type="submit" id="copilotWebAskBtn" class="secondary">Consultar web</button>
+	                      <span id="copilotWebStatus" class="muted"></span>
+	                    </div>
+	                  </form>
+	                  <div id="copilotWebResponse" class="crm-focus-list">
+	                    <div class="muted">Pega una URL oficial y consulta el contenido en tiempo real.</div>
+	                  </div>
+	                </div>
+	                <div class="crm-summary-grid">
+	                  <div class="form-card">
+	                    <div class="section-head">
+	                      <div>
                         <h3>Radar legal</h3>
                         <p class="muted">Registra novedades BOE/BOJA, evalúa impacto y deja trazada la revisión.</p>
                       </div>

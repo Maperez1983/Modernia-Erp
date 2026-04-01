@@ -227,6 +227,35 @@ WORKSPACE_MEMBERSHIP_ENFORCE = os.environ.get("APP_WORKSPACE_MEMBERSHIP_ENFORCE"
 # Compat/backfill legacy: si un workspace no tiene empresas asociadas, opcionalmente auto-vincula todas las activas.
 # En modo comercial multi-tenant se recomienda desactivarlo (0) para evitar fugas entre workspaces.
 WORKSPACE_AUTO_LINK_COMPANIES = os.environ.get("APP_WORKSPACE_AUTO_LINK_COMPANIES", "1").strip().lower() not in ("0", "false", "no", "off")
+COPILOT_WEB_TIMEOUT_SECONDS = max(3, int(os.environ.get("COPILOT_WEB_TIMEOUT_SECONDS", "15")))
+COPILOT_WEB_MAX_BYTES = max(50_000, min(int(os.environ.get("COPILOT_WEB_MAX_BYTES", "900000")), 3_000_000))
+COPILOT_WEB_MAX_CHARS = max(10_000, min(int(os.environ.get("COPILOT_WEB_MAX_CHARS", "120000")), 300_000))
+COPILOT_WEB_CACHE_TTL_SECONDS = max(0, int(os.environ.get("COPILOT_WEB_CACHE_TTL_SECONDS", "600")))
+_DEFAULT_COPILOT_WEB_ALLOWED_DOMAINS = {
+    # Oficiales / administración
+    "boe.es",
+    "bop.jcyl.es",
+    "juntadeandalucia.es",
+    "boja.juntadeandalucia.es",
+    "agenciatributaria.es",
+    "www.agenciatributaria.es",
+    "seg-social.es",
+    "sede.seg-social.gob.es",
+    "sepe.es",
+    "mites.gob.es",
+    "insst.es",
+    "ine.es",
+    # Documentación técnica conocida
+    "eur-lex.europa.eu",
+}
+_extra_domains = {
+    d.strip().lower()
+    for d in (os.environ.get("COPILOT_WEB_ALLOWED_DOMAINS") or "").split(",")
+    if d.strip()
+}
+COPILOT_WEB_ALLOWED_DOMAINS = {d for d in (_DEFAULT_COPILOT_WEB_ALLOWED_DOMAINS | _extra_domains) if d}
+COPILOT_WEB_CACHE = {}
+COPILOT_WEB_CACHE_LOCK = threading.Lock()
 
 
 def app_now():
@@ -6242,6 +6271,187 @@ def call_openai_content(user_content, model=None, temperature=0.0, max_tokens=70
     except Exception as err:
         return "", f"OpenAI error: {err}"
     return extract_openai_output(res), ""
+
+
+def _is_ip_literal(hostname):
+    value = str(hostname or "").strip()
+    if not value:
+        return False
+    # IPv6 literal
+    if ":" in value:
+        return True
+    # IPv4 literal
+    return bool(re.match(r"^\d{1,3}(\.\d{1,3}){3}$", value))
+
+
+def _is_disallowed_hostname(hostname):
+    host = str(hostname or "").strip().lower()
+    if not host:
+        return True
+    if host in {"localhost", "localhost.localdomain"}:
+        return True
+    if host.endswith(".local"):
+        return True
+    if _is_ip_literal(host):
+        # Block direct IPs to reduce SSRF risk (no private range checks needed if we ban IP literals).
+        return True
+    return False
+
+
+def _domain_is_allowed(hostname):
+    host = str(hostname or "").strip().lower().rstrip(".")
+    if not host or _is_disallowed_hostname(host):
+        return False
+    for allowed in COPILOT_WEB_ALLOWED_DOMAINS:
+        allowed = str(allowed or "").strip().lower().rstrip(".")
+        if not allowed:
+            continue
+        if host == allowed or host.endswith("." + allowed):
+            return True
+    return False
+
+
+def _html_to_text(html_text):
+    value = str(html_text or "")
+    value = re.sub(r"(?is)<(script|style|noscript)[^>]*>.*?</\\1>", " ", value)
+    value = re.sub(r"(?is)<[^>]+>", " ", value)
+    value = html.unescape(value)
+    value = re.sub(r"[\\t\\r\\f\\v]+", " ", value)
+    value = re.sub(r"\\n\\s*\\n+", "\\n\\n", value)
+    value = re.sub(r"\\s{2,}", " ", value)
+    return value.strip()
+
+
+def _extract_title(html_text):
+    text = str(html_text or "")
+    m = re.search(r"(?is)<title[^>]*>(.*?)</title>", text)
+    if not m:
+        return ""
+    title = re.sub(r"(?s)<[^>]+>", " ", m.group(1))
+    title = html.unescape(re.sub(r"\\s+", " ", title)).strip()
+    return title
+
+
+def copilot_web_fetch_url(url, *, timeout_seconds=None, max_bytes=None, max_chars=None, now=None):
+    raw = str(url or "").strip()
+    if not raw:
+        return {"error": "url requerida"}
+    try:
+        parsed = urllib.parse.urlparse(raw)
+    except Exception:
+        return {"error": "url inválida"}
+    if parsed.scheme not in {"http", "https"}:
+        return {"error": "Solo se permiten URLs http/https"}
+    if not _domain_is_allowed(parsed.hostname):
+        return {"error": "Dominio no permitido para Copilot web"}
+    timeout_seconds = float(timeout_seconds or COPILOT_WEB_TIMEOUT_SECONDS)
+    max_bytes = int(max_bytes or COPILOT_WEB_MAX_BYTES)
+    max_chars = int(max_chars or COPILOT_WEB_MAX_CHARS)
+    cache_key = raw
+    now_ts = now or datetime.now(timezone.utc).isoformat()
+    if COPILOT_WEB_CACHE_TTL_SECONDS > 0:
+        with COPILOT_WEB_CACHE_LOCK:
+            cached = COPILOT_WEB_CACHE.get(cache_key) or {}
+        cached_at = str(cached.get("fetched_at") or "").strip()
+        if cached_at:
+            try:
+                dt = datetime.fromisoformat(cached_at.replace("Z", ""))
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                if (datetime.now(timezone.utc) - dt).total_seconds() <= COPILOT_WEB_CACHE_TTL_SECONDS:
+                    return dict(cached)
+            except Exception:
+                pass
+
+    headers = {"User-Agent": "ModerniaCopilotWeb/1.0"}
+    request = urllib.request.Request(raw, headers=headers)
+    try:
+        with urllib.request.urlopen(request, timeout=timeout_seconds) as resp:
+            status = int(getattr(resp, "status", 200) or 200)
+            full_ct = str(resp.headers.get("Content-Type") or "")
+            content_type = full_ct.split(";")[0].strip().lower()
+            data = resp.read(max(1, max_bytes))
+    except urllib.error.HTTPError as err:
+        try:
+            status = int(err.code or 0)
+        except Exception:
+            status = 0
+        return {"error": f"HTTP {status}", "status": status, "url": raw}
+    except Exception as err:
+        return {"error": str(err), "url": raw}
+
+    # Decode best-effort.
+    encoding = "utf-8"
+    try:
+        m = re.search(r"charset=([A-Za-z0-9_\\-]+)", str(full_ct or ""), flags=re.IGNORECASE)
+        if m:
+            encoding = m.group(1)
+    except Exception:
+        encoding = "utf-8"
+    try:
+        body_text = data.decode(encoding, errors="replace")
+    except Exception:
+        body_text = data.decode("utf-8", errors="replace")
+
+    title = ""
+    text = ""
+    if content_type in {"text/html", "application/xhtml+xml", ""}:
+        title = _extract_title(body_text)
+        text = _html_to_text(body_text)
+    elif content_type.startswith("text/"):
+        text = re.sub(r"\\s+", " ", body_text).strip()
+    else:
+        return {"error": f"Content-Type no soportado ({content_type or 'desconocido'})", "status": status, "url": raw}
+
+    if len(text) > max_chars:
+        text = text[:max_chars] + "\n\n[Contenido truncado]"
+
+    payload = {
+        "ok": True,
+        "url": raw,
+        "status": status,
+        "content_type": content_type or "text/html",
+        "title": title,
+        "text": text,
+        "fetched_at": now_ts,
+        "bytes": len(data or b""),
+    }
+    if COPILOT_WEB_CACHE_TTL_SECONDS > 0:
+        with COPILOT_WEB_CACHE_LOCK:
+            COPILOT_WEB_CACHE[cache_key] = dict(payload)
+    return payload
+
+
+def copilot_web_answer(question, url, *, timeout_seconds=None):
+    fetched = copilot_web_fetch_url(url, timeout_seconds=timeout_seconds)
+    if fetched.get("error"):
+        return fetched
+    if not openai_available():
+        return {"error": "OPENAI_API_KEY no configurada"}
+    q = str(question or "").strip()
+    if not q:
+        q = "Resume el contenido y extrae los puntos operativos clave."
+    source = fetched.get("url") or url
+    title = fetched.get("title") or ""
+    content = fetched.get("text") or ""
+    prompt = (
+        "Responde en español. Usa ÚNICAMENTE el contenido proporcionado como fuente.\n"
+        "Si falta información, dilo.\n\n"
+        f"Fuente: {source}\n"
+        f"Título: {title}\n\n"
+        f"Pregunta: {q}\n\n"
+        "Contenido:\n"
+        "-----\n"
+        f"{content}\n"
+        "-----\n\n"
+        "Devuelve:\n"
+        "1) Respuesta (máximo 12 líneas)\n"
+        "2) Citas: 3-6 bullets con frases cortas textuales del contenido que sustentan la respuesta\n"
+    )
+    output, err = call_openai(prompt, temperature=0.2, max_tokens=900)
+    if err:
+        return {"error": err}
+    return {"ok": True, "url": source, "title": title, "answer": output, "fetched_at": fetched.get("fetched_at")}
 
 
 def pdf_to_png_data_urls(pdf_path, max_pages=2, dpi=220):
@@ -22174,6 +22384,8 @@ class Handler(BaseHTTPRequestHandler):
             "/api/legal_radar_items_update",
             "/api/legal_radar_scan",
             "/api/legal_dgt_lookup",
+            "/api/copilot_web_fetch",
+            "/api/copilot_web_ask",
             "/api/s3_presign",
             "/api/s3_multipart_start",
             "/api/s3_multipart_presign",
@@ -30330,6 +30542,34 @@ class Handler(BaseHTTPRequestHandler):
                 conn.commit()
             json_response(self, result)
             return
+        elif parsed.path == "/api/copilot_web_fetch":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not workspace_actor_is_privileged(conn, session):
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
+            url = payload.get("url") or payload.get("href") or ""
+            timeout = payload.get("timeout_seconds") or None
+            max_chars = payload.get("max_chars") or None
+            result = copilot_web_fetch_url(url, timeout_seconds=timeout, max_chars=max_chars, now=now)
+            if result.get("error"):
+                json_response(self, result, status=400)
+                return
+            json_response(self, result)
+            return
+        elif parsed.path == "/api/copilot_web_ask":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not workspace_actor_is_privileged(conn, session):
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
+            url = payload.get("url") or payload.get("href") or ""
+            question = payload.get("question") or payload.get("q") or ""
+            timeout = payload.get("timeout_seconds") or None
+            result = copilot_web_answer(question, url, timeout_seconds=timeout)
+            if result.get("error"):
+                json_response(self, result, status=400)
+                return
+            json_response(self, result)
+            return
         elif parsed.path == "/api/legal_radar_scan":
             area = normalize_legal_area(payload.get("area") or "inmobiliaria")
             source_keys = payload.get("source_keys") or []
@@ -33325,6 +33565,10 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/convenios_catalog":
             json_response(self, get_convenios_catalog())
+            return
+
+        if path == "/api/copilot_web_domains":
+            json_response(self, {"domains": sorted(COPILOT_WEB_ALLOWED_DOMAINS)})
             return
 
         if path == "/api/legal_radar_auto_status":
