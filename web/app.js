@@ -2276,6 +2276,7 @@ const crmResumenReset = document.getElementById("crmResumenReset");
 	const copilotWebForm = document.getElementById("copilotWebForm");
 	const copilotWebUrl = document.getElementById("copilotWebUrl");
 	const copilotWebQuestion = document.getElementById("copilotWebQuestion");
+	const copilotWebSaveLibrary = document.getElementById("copilotWebSaveLibrary");
 	const copilotWebAskBtn = document.getElementById("copilotWebAskBtn");
 	const copilotWebStatus = document.getElementById("copilotWebStatus");
 	const copilotWebResponse = document.getElementById("copilotWebResponse");
@@ -2286,6 +2287,8 @@ const crmResumenReset = document.getElementById("crmResumenReset");
 	const legalRadarInfo = document.getElementById("legalRadarInfo");
 const legalRadarRefreshBtn = document.getElementById("legalRadarRefreshBtn");
 const legalRadarScanBtn = document.getElementById("legalRadarScanBtn");
+const legalRadarDigestBtn = document.getElementById("legalRadarDigestBtn");
+const legalRadarDigest = document.getElementById("legalRadarDigest");
 const legalDgtForm = document.getElementById("legalDgtForm");
 const legalDgtArea = document.getElementById("legalDgtArea");
 const legalDgtTopic = document.getElementById("legalDgtTopic");
@@ -2469,6 +2472,7 @@ const fincasRenovacionChart = document.getElementById("fincasRenovacionChart");
 const fincasOportunidadesChart = document.getElementById("fincasOportunidadesChart");
 const fincasBdtTabs = document.getElementById("fincasBdtTabs");
 const renewalAlert = document.getElementById("renewalAlert");
+const legalRadarAlert = document.getElementById("legalRadarAlert");
 const companySummary = document.getElementById("companySummary");
 const companySummaryTitle = document.getElementById("companySummaryTitle");
 const companySummarySubtitle = document.getElementById("companySummarySubtitle");
@@ -5859,17 +5863,17 @@ const renderWorkspaceCompanies = (rows = []) => {
 	                  type="button"
 	                  class="secondary ghost"
 	                  data-workspace-company-edit="${row.id || ""}"
-	                  data-workspace-company-edit-name="${escapeHtml(String(row.nombre || \"\"))}"
+	                  data-workspace-company-edit-name="${escapeHtml(String(row.nombre || ""))}"
 	                  data-workspace-company-edit-nif="${escapeHtml(String(row.nif || ""))}"
 	                  data-workspace-company-edit-dir="${escapeHtml(String(row.direccion || ""))}"
 	                  data-workspace-company-edit-sector="${escapeHtml(String(row.sector || ""))}"
                   data-workspace-company-edit-cnae="${escapeHtml(String(row.cnae || ""))}"
-                  data-workspace-company-edit-cnaes="${escapeHtml(String((row._cnaes || []).join(\", \")))}"
-                  data-workspace-company-edit-cnaes-json="${escapeHtml(String(row.cnaes_json || \"\"))}"
+                  data-workspace-company-edit-cnaes="${escapeHtml(String((row._cnaes || []).join(", ")))}"
+                  data-workspace-company-edit-cnaes-json="${escapeHtml(String(row.cnaes_json || ""))}"
                   data-workspace-company-edit-convenio-key="${escapeHtml(String(row.convenio_key || ""))}"
                   data-workspace-company-edit-convenio="${escapeHtml(String(row.convenio_nombre || ""))}"
-                  data-workspace-company-edit-vac-modo="${escapeHtml(String(row.vacaciones_modo || \"habiles\"))}"
-                  data-workspace-company-edit-vac-dias="${escapeHtml(String(row.vacaciones_dias_anuales || \"\"))}"
+                  data-workspace-company-edit-vac-modo="${escapeHtml(String(row.vacaciones_modo || "habiles"))}"
+                  data-workspace-company-edit-vac-dias="${escapeHtml(String(row.vacaciones_dias_anuales || ""))}"
                   ${canEdit ? "" : "disabled"}
                 >Editar datos</button>
 	                <button
@@ -19732,6 +19736,7 @@ const renderInmoLegalCopilotResponse = (payload = {}) => {
   const variableBlocks = Array.isArray(payload.variable_blocks) ? payload.variable_blocks : [];
   const warnings = Array.isArray(payload.warnings) ? payload.warnings : [];
   const recentUpdates = Array.isArray(payload.recent_updates) ? payload.recent_updates : [];
+  const libraryDocs = Array.isArray(payload.library_docs) ? payload.library_docs : [];
   const documentTemplates = Array.isArray(payload.document_templates) ? payload.document_templates : [];
   const workflowCheckpoints = Array.isArray(payload.workflow_checkpoints) ? payload.workflow_checkpoints : [];
   const reviewRecommendations = Array.isArray(payload.review_recommendations) ? payload.review_recommendations : [];
@@ -19819,6 +19824,20 @@ const renderInmoLegalCopilotResponse = (payload = {}) => {
           return parts.join(" · ");
         })
         .join("<br><br>")}</span></div>`
+    );
+  }
+  if (libraryDocs.length) {
+    sections.push(
+      `<div class="crm-focus-link"><strong>Biblioteca legal</strong><span>${libraryDocs
+        .map((doc) => {
+          const t = escapeHtml(String(doc?.title || doc?.url || "Fuente"));
+          const u = String(doc?.url || "").trim();
+          if (u) {
+            return `<a href="${escapeHtml(u)}" target="_blank" rel="noreferrer">${t}</a>`;
+          }
+          return t;
+        })
+        .join("<br>")}</span></div>`
     );
   }
   if (Array.isArray(payload.sources) && payload.sources.length) {
@@ -22961,6 +22980,52 @@ const loadFincasRenewalAlert = () => {
     });
     renewalAlert.appendChild(text);
     renewalAlert.appendChild(button);
+  });
+};
+
+const loadLegalRadarHomeAlert = () => {
+  if (!legalRadarAlert) return Promise.resolve();
+  const user = getAuthScopeUser();
+  const canSee = isPrivilegedUser(user) || canAccessAdminPanel(user) || canUseLegalCopilot();
+  if (!canSee) {
+    legalRadarAlert.classList.add("hidden");
+    legalRadarAlert.textContent = "";
+    return Promise.resolve();
+  }
+  const params = new URLSearchParams({ area: "rrhh" });
+  return api(`/api/legal_radar_counts?${params.toString()}`).then((data) => {
+    const pending = Number(data?.pendiente || 0) || 0;
+    if (!pending) {
+      legalRadarAlert.classList.add("hidden");
+      legalRadarAlert.textContent = "";
+      return;
+    }
+    legalRadarAlert.classList.remove("hidden");
+    legalRadarAlert.innerHTML = "";
+    const text = document.createElement("div");
+    text.textContent = `Radar legal RRHH: ${pending} alerta${pending === 1 ? "" : "s"} pendiente${pending === 1 ? "" : "s"}.`;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = "Abrir radar";
+    button.addEventListener("click", () => {
+      openCrmInmobiliario();
+      setTimeout(() => {
+        setCrmWorkspaceView("legal");
+        loadLegalCatalog()
+          .then(() => {
+            state.legalCurrentArea = "rrhh";
+            refreshLegalAreaBindings();
+            loadLegalRadarItems();
+          })
+          .catch(() => null);
+      }, 420);
+    });
+    legalRadarAlert.appendChild(text);
+    legalRadarAlert.appendChild(button);
+  }).catch(() => {
+    // Silencioso: si falla el radar no bloquea el Home.
+    legalRadarAlert.classList.add("hidden");
+    legalRadarAlert.textContent = "";
   });
 };
 
@@ -35633,6 +35698,7 @@ const init = async () => {
     setGestoriaCrmTab(state.gestoriaCrmTab || "autonomo");
     initSegurosTabs();
     await safe(loadFincasRenewalAlert());
+    await safe(loadLegalRadarHomeAlert());
     setupCatalogoInputs();
     renderCompanyCards();
     loadTable();
@@ -35945,6 +36011,34 @@ if (copilotWebForm) {
         }
         if (copilotWebStatus) copilotWebStatus.textContent = "Respuesta generada.";
       }
+      if (copilotWebSaveLibrary?.checked) {
+        const area = (inmoLegalArea?.value || state.legalCurrentArea || "rrhh").trim();
+        const topicKey = String(inmoLegalTopic?.value || "").trim();
+        try {
+          const saveRes = await fetch("/api/legal_library_import", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "same-origin",
+            body: JSON.stringify({
+              area,
+              topic_key: topicKey,
+              url,
+              title: data?.title || "",
+            }),
+          });
+          const saved = await saveRes.json();
+          if (!saveRes.ok || saved?.error) {
+            throw new Error(saved?.error || `HTTP ${saveRes.status}`);
+          }
+          if (copilotWebStatus) {
+            copilotWebStatus.textContent = `${copilotWebStatus.textContent || "OK"} · Guardado en biblioteca legal.`;
+          }
+        } catch (err) {
+          if (copilotWebStatus) {
+            copilotWebStatus.textContent = `No se pudo guardar en biblioteca: ${err?.message || "Error"}`;
+          }
+        }
+      }
     } catch (error) {
       if (copilotWebStatus) copilotWebStatus.textContent = error?.message || "No se pudo consultar la web.";
       if (copilotWebResponse) copilotWebResponse.innerHTML = "<div class='muted'>No se pudo consultar la web.</div>";
@@ -36031,6 +36125,37 @@ if (legalRadarScanBtn) {
       if (legalRadarStatus) legalRadarStatus.textContent = error?.message || "No se pudo escanear el radar legal.";
     } finally {
       legalRadarScanBtn.disabled = false;
+    }
+  });
+}
+
+if (legalRadarDigestBtn) {
+  legalRadarDigestBtn.addEventListener("click", async () => {
+    if (legalRadarStatus) legalRadarStatus.textContent = "Generando resumen...";
+    legalRadarDigestBtn.disabled = true;
+    if (legalRadarDigest) legalRadarDigest.innerHTML = "<div class='muted'>Generando…</div>";
+    try {
+      const area = state.legalCurrentArea || "rrhh";
+      const resp = await fetch("/api/legal_radar_digest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ area, estado: "pendiente", limit: 12, include_text: 1 }),
+      });
+      const data = await resp.json();
+      if (!resp.ok || data?.error) throw new Error(data?.error || `HTTP ${resp.status}`);
+      const mode = String(data?.mode || "").trim();
+      const prefix = mode === "basic" ? "<div class='muted'>Resumen básico (sin IA).</div>" : "";
+      const out = escapeHtml(String(data?.digest || "")).replace(/\\n/g, "<br>");
+      if (legalRadarDigest) {
+        legalRadarDigest.innerHTML = out ? `${prefix}<div class="crm-focus-link"><strong>Resumen</strong><span>${out}</span></div>` : "<div class='muted'>Sin salida.</div>";
+      }
+      if (legalRadarStatus) legalRadarStatus.textContent = "Resumen generado.";
+    } catch (error) {
+      if (legalRadarStatus) legalRadarStatus.textContent = error?.message || "No se pudo generar el resumen.";
+      if (legalRadarDigest) legalRadarDigest.innerHTML = "<div class='muted'>No se pudo generar el resumen.</div>";
+    } finally {
+      legalRadarDigestBtn.disabled = false;
     }
   });
 }

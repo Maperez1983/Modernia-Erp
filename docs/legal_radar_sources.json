@@ -310,6 +310,38 @@
           "accion_recomendada": "Registrar el convenio/actualización y evaluar impacto en políticas internas y nómina."
         }
       ]
+    },
+    {
+      "key": "jurisprudencia_rrhh_laboral",
+      "area": "rrhh",
+      "title": "Jurisprudencia · Laboral (configurable)",
+      "fuente": "Jurisprudencia",
+      "enabled": false,
+      "enabled_env": "LEGAL_RADAR_JURIS_ENABLED",
+      "feed_url_env": "LEGAL_RADAR_JURIS_RSS_URLS",
+      "format": "rss",
+      "max_entries": 40,
+      "impacto_default": "Medio",
+      "rules": [
+        {
+          "topic_key": "registro_horario",
+          "impacto": "Alto",
+          "keywords": ["registro de jornada", "registro horario", "horas extraordinarias", "inspección de trabajo", "control horario", "sentencia"],
+          "accion_recomendada": "Revisar el sistema de registro horario, conservación, firma/validación y criterios de inspección a la luz de la jurisprudencia."
+        },
+        {
+          "topic_key": "vacaciones_convenio",
+          "impacto": "Alto",
+          "keywords": ["vacaciones", "días naturales", "días hábiles", "calendario laboral", "convenio colectivo", "sentencia"],
+          "accion_recomendada": "Revisar el modo de cómputo de vacaciones (naturales vs hábiles) y su encaje con el convenio y la jurisprudencia."
+        },
+        {
+          "topic_key": "convenio_colectivo",
+          "impacto": "Medio",
+          "keywords": ["convenio colectivo", "acuerdo colectivo", "ultraactividad", "tabla salarial", "sentencia", "doctrina"],
+          "accion_recomendada": "Revisar el convenio aplicable y los criterios operativos de RRHH/nómina derivados de resoluciones relevantes."
+        }
+      ]
     }
   ]
 }

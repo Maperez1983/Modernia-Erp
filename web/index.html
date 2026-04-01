@@ -27,6 +27,7 @@
       </div>
       </header>
     <div id="renewalAlert" class="alert hidden"></div>
+    <div id="legalRadarAlert" class="alert hidden"></div>
 
     <main>
       <section class="hero" id="homeSection">
@@ -2204,6 +2205,10 @@
 	                      Pregunta (opcional)
 	                      <textarea id="copilotWebQuestion" name="question" rows="3" placeholder="Ej. ¿qué cambios introduce y qué impacto tiene en el registro horario o en vacaciones?"></textarea>
 	                    </label>
+	                    <label class="span-2" style="display:flex;gap:10px;align-items:center;">
+	                      <input type="checkbox" id="copilotWebSaveLibrary" name="save_library" value="1" />
+	                      Guardar esta URL en la biblioteca legal (área/tema actuales)
+	                    </label>
 	                    <div class="form-actions span-2">
 	                      <button type="submit" id="copilotWebAskBtn" class="secondary">Consultar web</button>
 	                      <span id="copilotWebStatus" class="muted"></span>
@@ -2288,13 +2293,17 @@
                         Acción recomendada
                         <textarea name="accion_recomendada" rows="2" placeholder="Ej. revisar cláusula de gastos, actualizar contrato de arrendamiento, ajustar encargo..."></textarea>
                       </label>
-                      <div class="form-actions span-2">
-                        <button type="submit">Guardar alerta legal</button>
-                        <button type="button" id="legalRadarScanBtn" class="secondary">Escanear fuentes oficiales</button>
-                        <span id="legalRadarStatus" class="muted"></span>
-                      </div>
-                    </form>
+                    <div class="form-actions span-2">
+                      <button type="submit">Guardar alerta legal</button>
+                      <button type="button" id="legalRadarScanBtn" class="secondary">Escanear fuentes oficiales</button>
+                      <button type="button" id="legalRadarDigestBtn" class="secondary ghost">Resumen novedades</button>
+                      <span id="legalRadarStatus" class="muted"></span>
+                    </div>
+                  </form>
+                  <div id="legalRadarDigest" class="crm-focus-list">
+                    <div class="muted">Genera un resumen accionable de las novedades del radar (requiere OPENAI_API_KEY).</div>
                   </div>
+                </div>
                   <div class="form-card">
                     <div class="section-head">
                       <div>
