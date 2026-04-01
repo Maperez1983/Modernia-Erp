@@ -65,6 +65,7 @@ ASSETS = ROOT.parent / "assets"
 LEGAL_COPILOT_PATH = ROOT.parent / "docs" / "legal_inmobiliaria.json"
 LEGAL_RADAR_SOURCES_PATH = ROOT.parent / "docs" / "legal_radar_sources.json"
 DB_DEFAULT = ROOT.parent / "data" / "erp_import2.sqlite"
+DB_LOCAL_FALLBACK = ROOT.parent / "data" / "erp_import2.local.sqlite"
 OCR_DB_DEFAULT = ROOT.parent / "data" / "ocr_jobs.sqlite"
 TESSDATA_DIR = "/opt/homebrew/share/tessdata"
 POSTAL_CATALOG_PATH = ROOT.parent / "data" / "catalogos" / "postal_catalogo.csv"
@@ -95,7 +96,45 @@ UPLOADS = Path(
     or ("/var/data/uploads" if Path("/var/data").exists() else str(ROOT / "uploads"))
 )
 UPLOADS.mkdir(parents=True, exist_ok=True)
-DB_CONFIGURED = Path(os.environ.get("DB_PATH") or os.environ.get("DATABASE_PATH") or str(DB_DEFAULT))
+
+def choose_primary_db_path():
+    configured = (os.environ.get("DB_PATH") or os.environ.get("DATABASE_PATH") or "").strip()
+    if configured:
+        return Path(configured).expanduser()
+
+    # Local DX: en desarrollo, algunos flujos han generado `erp_import2.local.sqlite` como base principal
+    # (p. ej., al probar RRHH/registro horario). Si existe y contiene datos RRHH, preferimos esa para no
+    # “perder” fichas al reiniciar el servidor sin DB_PATH explícito.
+    if not os.environ.get("RENDER") and DB_LOCAL_FALLBACK.exists():
+        try:
+            import sqlite3 as _sqlite3
+
+            def _count_personal(db_path: Path) -> int:
+                if not db_path.exists():
+                    return 0
+                conn = _sqlite3.connect(str(db_path))
+                try:
+                    cur = conn.execute(
+                        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='workspace_registro_personal'"
+                    )
+                    exists = int((cur.fetchone() or [0])[0] or 0)
+                    if not exists:
+                        return 0
+                    return int((conn.execute("SELECT COUNT(*) FROM workspace_registro_personal").fetchone() or [0])[0] or 0)
+                finally:
+                    conn.close()
+
+            local_personal = _count_personal(DB_LOCAL_FALLBACK)
+            default_personal = _count_personal(DB_DEFAULT)
+            if local_personal > 0 and default_personal == 0:
+                return DB_LOCAL_FALLBACK
+        except Exception:
+            pass
+
+    return DB_DEFAULT
+
+
+DB_CONFIGURED = choose_primary_db_path()
 OCR_DB_CONFIGURED = Path(
     os.environ.get("OCR_DB_PATH")
     or os.environ.get("DATABASE_OCR_PATH")
@@ -15364,13 +15403,30 @@ def ensure_workspace_product_tables(conn):
         )
     except Exception:
         pass
-    # Si tiene usuario_id pero no fue vinculado manualmente, lo tratamos como auto/legacy para que no salga en plantilla.
+    # Backfill: si una ficha legacy ya tenía `usuario_id` pero el flag `usuario_manual` no existía todavía,
+    # lo tratamos como vínculo manual salvo que sepamos que venía de sync automático (por notas).
+    try:
+        conn.execute(
+            """
+            UPDATE workspace_registro_personal
+            SET usuario_manual = 1,
+                source = COALESCE(NULLIF(TRIM(source), ''), 'manual')
+            WHERE COALESCE(usuario_id, '') != ''
+              AND COALESCE(usuario_manual, 0) = 0
+              AND COALESCE(notas, '') NOT LIKE '%Sincronizado automáticamente desde usuarios.%'
+              AND COALESCE(source, 'manual') != 'auto'
+            """
+        )
+    except Exception:
+        pass
+    # Si tiene usuario_id y no fue vinculado manualmente, lo tratamos como auto/legacy SOLO cuando el source era vacío.
+    # Evita que una ficha manual existente “desaparezca” de RRHH tras añadir columnas nuevas.
     try:
         conn.execute(
             """
             UPDATE workspace_registro_personal
             SET source = 'auto'
-            WHERE (source IS NULL OR TRIM(source) = '' OR source = 'manual')
+            WHERE (source IS NULL OR TRIM(source) = '')
               AND COALESCE(usuario_id, '') != ''
               AND COALESCE(usuario_manual, 0) = 0
             """
