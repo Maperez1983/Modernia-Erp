@@ -5,6 +5,11 @@ from contextlib import contextmanager
 
 
 def is_postgres_enabled():
+    forced = (os.environ.get("APP_DB_BACKEND") or "").strip().lower()
+    if forced in {"sqlite", "sqlite3"}:
+        return False
+    if forced in {"postgres", "postgresql", "pg"}:
+        return True
     raw = (os.environ.get("DATABASE_URL") or os.environ.get("POSTGRES_URL") or "").strip()
     return raw.lower().startswith("postgres")
 
