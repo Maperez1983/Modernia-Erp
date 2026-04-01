@@ -183,13 +183,30 @@ class PostgresCompatConnection:
 
     def execute(self, sql, params=None):
         sql2 = translate_sqlite_sql_to_postgres(sql)
-        if params is None:
-            return self._conn.execute(sql2)
-        return self._conn.execute(sql2, params)
+        try:
+            if params is None:
+                return self._conn.execute(sql2)
+            return self._conn.execute(sql2, params)
+        except Exception:
+            # En Postgres, un error deja la transacción abortada hasta rollback.
+            # Mucho código llama a execute dentro de try/except "best-effort" y luego continúa.
+            # Si no hacemos rollback aquí, el siguiente comando puede fallar con InFailedSqlTransaction.
+            try:
+                self._conn.rollback()
+            except Exception:
+                pass
+            raise
 
     def executemany(self, sql, seq_of_params):
         sql2 = translate_sqlite_sql_to_postgres(sql)
-        return self._conn.executemany(sql2, seq_of_params)
+        try:
+            return self._conn.executemany(sql2, seq_of_params)
+        except Exception:
+            try:
+                self._conn.rollback()
+            except Exception:
+                pass
+            raise
 
     def commit(self):
         return self._conn.commit()
