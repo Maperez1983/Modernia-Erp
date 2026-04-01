@@ -109,6 +109,39 @@ const apiPost = async (url, payload = {}) => {
   return data;
 };
 
+const getGeoLocation = async (timeoutMs = 3500) => {
+  try {
+    if (!navigator.geolocation) return null;
+    return await new Promise((resolve) => {
+      let done = false;
+      const timer = setTimeout(() => {
+        if (done) return;
+        done = true;
+        resolve(null);
+      }, Math.max(1200, Number(timeoutMs) || 3500));
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          if (done) return;
+          done = true;
+          clearTimeout(timer);
+          const c = pos?.coords;
+          if (!c) return resolve(null);
+          resolve({ lat: c.latitude, lon: c.longitude, acc: c.accuracy, source: "browser" });
+        },
+        () => {
+          if (done) return;
+          done = true;
+          clearTimeout(timer);
+          resolve(null);
+        },
+        { enableHighAccuracy: true, maximumAge: 60000, timeout: Math.max(1200, Number(timeoutMs) || 3500) }
+      );
+    });
+  } catch {
+    return null;
+  }
+};
+
 const randomId = () => {
   const bytes = new Uint8Array(16);
   crypto.getRandomValues(bytes);
@@ -7584,8 +7617,18 @@ const renderWorkspaceRrhhHub = () => {
 		              <div class="workspace-rrhh-row">
 		                <div>
 		                  <strong>Kiosko de fichaje (QR)</strong>
-		                  <div class="muted">Genera un enlace público para fichar entrada/salida desde un dispositivo compartido.</div>
+		                  <div class="muted">Genera un enlace (QR) para fichar entrada/salida. Recomendado para móvil/tablet; requiere PIN de kiosko.</div>
 		                  <input id="rrhhMemberKioskUrl" class="rrhh-inline-input" type="text" readonly value="${escapeHtml(buildKioskUrl(employee?.kiosk_token || ""))}" placeholder="Genera un enlace..." />
+                      <div style="margin-top:10px;">
+                        ${employee?.kiosk_token ? `
+                          <img
+                            id="rrhhMemberKioskQr"
+                            alt="QR kiosko"
+                            style="width:180px;height:180px;border:1px solid rgba(0,0,0,0.08);border-radius:12px;background:#fff;"
+                            src="/api/workspace_kiosk_qr?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}&persona_id=${encodeURIComponent(String(employee?.id || ''))}&v=${encodeURIComponent(String(employee?.kiosk_token || ''))}"
+                          />
+                        ` : `<div class="muted">Genera el enlace para ver el QR.</div>`}
+                      </div>
 		                </div>
 		                <div class="workspace-rrhh-row-actions">
 		                  <button type="button" class="secondary ghost button-inline" data-rrhh-member-kiosk-generate ${isWorkspaceRrhhManager() ? "" : "disabled"}>Generar enlace</button>
@@ -8930,6 +8973,7 @@ const renderWorkspaceRrhhHub = () => {
   }
 
   const kioskUrlInput = document.getElementById("rrhhMemberKioskUrl");
+  const kioskQrImg = document.getElementById("rrhhMemberKioskQr");
   const kioskGenerateBtn = workspaceRrhhHub.querySelector("[data-rrhh-member-kiosk-generate]");
   if (kioskGenerateBtn && kioskUrlInput) {
     kioskGenerateBtn.addEventListener("click", async () => {
@@ -8946,6 +8990,11 @@ const renderWorkspaceRrhhHub = () => {
         if (resp?.token) {
           upsertWorkspaceEmployeeLocal({ id: personaId, kiosk_token: String(resp.token || "") });
           renderCompanyCards();
+          if (kioskQrImg) {
+            kioskQrImg.src = `/api/workspace_kiosk_qr?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}&persona_id=${encodeURIComponent(personaId)}&v=${encodeURIComponent(String(resp.token || ''))}&t=${Date.now()}`;
+          } else {
+            renderWorkspaceRrhhHub();
+          }
         }
         if (accessStatus) accessStatus.textContent = "Enlace kiosko generado.";
       } catch (error) {
@@ -9545,10 +9594,18 @@ const renderWorkspaceRrhhHub = () => {
       if (!state.currentWorkspaceId || !personaId) return;
       timeToggle.disabled = true;
       try {
+        const emp = (state.workspaceTimeEmployees || []).find((row) => String(row?.id || "") === personaId) || null;
+        const authUser = getAuthScopeUser();
+        const isSelf = Boolean(
+          authUser?.id
+          && Number(emp?.usuario_manual || 0) === 1
+          && String(emp?.usuario_id || "") === String(authUser.id)
+        );
+        const geo = isSelf ? await getGeoLocation(3500) : null;
         const res = await fetch("/api/workspace_registro_horario_toggle", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ workspace_id: state.currentWorkspaceId, persona_id: personaId }),
+          body: JSON.stringify({ workspace_id: state.currentWorkspaceId, persona_id: personaId, ...(geo ? { geo } : {}) }),
         }).then((r) => r.json());
         if (res?.error) throw new Error(res.error);
         await refreshWorkspaceRrhh();
@@ -11538,6 +11595,13 @@ const renderWorkspaceTimeEmployeePreview = () => {
   const runToggle = async (action) => {
     if (!state.currentWorkspaceId) return;
     try {
+      const authUser = getAuthScopeUser();
+      const isSelf = Boolean(
+        authUser?.id
+        && Number(employee?.usuario_manual || 0) === 1
+        && String(employee?.usuario_id || "") === String(authUser.id)
+      );
+      const geo = isSelf ? await getGeoLocation(3500) : null;
       const resp = await fetch("/api/workspace_registro_horario_toggle", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -11546,6 +11610,7 @@ const renderWorkspaceTimeEmployeePreview = () => {
           persona_id: personaId,
           empresa_id: employee.empresa_id || "",
           action,
+          ...(geo ? { geo } : {}),
         }),
       }).then((res) => res.json());
       if (resp?.error) throw new Error(resp.error);

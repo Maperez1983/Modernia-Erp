@@ -8,6 +8,7 @@ import urllib.parse
 import urllib.error
 import hashlib
 import base64
+import hmac
 import re
 import subprocess
 import tempfile
@@ -1371,6 +1372,8 @@ def ensure_workspace_core_tables(conn):
           logo_url TEXT,
           primary_color TEXT,
           accent_color TEXT,
+          kiosk_pin_hash TEXT,
+          kiosk_pin_required INTEGER NOT NULL DEFAULT 0,
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL
         )
@@ -1410,6 +1413,8 @@ def ensure_workspace_core_tables(conn):
     ensure_column(conn, "workspaces", "logo_url", "logo_url TEXT")
     ensure_column(conn, "workspaces", "primary_color", "primary_color TEXT")
     ensure_column(conn, "workspaces", "accent_color", "accent_color TEXT")
+    ensure_column(conn, "workspaces", "kiosk_pin_hash", "kiosk_pin_hash TEXT")
+    ensure_column(conn, "workspaces", "kiosk_pin_required", "kiosk_pin_required INTEGER NOT NULL DEFAULT 0")
     ensure_column(conn, "workspace_modulos", "config_json", "config_json TEXT")
 
 
@@ -15536,6 +15541,17 @@ def ensure_workspace_product_tables(conn):
     ensure_column(conn, "workspace_registro_horario", "horas_pactadas_dia", "horas_pactadas_dia REAL")
     ensure_column(conn, "workspace_registro_horario", "minutos_trabajados", "minutos_trabajados INTEGER NOT NULL DEFAULT 0")
     ensure_column(conn, "workspace_registro_horario", "metodo_registro", "metodo_registro TEXT")
+    # Geo (móvil/cita): guardamos ubicación en entrada/salida si el navegador la facilita.
+    ensure_column(conn, "workspace_registro_horario", "geo_in_lat", "geo_in_lat REAL")
+    ensure_column(conn, "workspace_registro_horario", "geo_in_lon", "geo_in_lon REAL")
+    ensure_column(conn, "workspace_registro_horario", "geo_in_acc", "geo_in_acc REAL")
+    ensure_column(conn, "workspace_registro_horario", "geo_in_source", "geo_in_source TEXT")
+    ensure_column(conn, "workspace_registro_horario", "geo_in_at", "geo_in_at TEXT")
+    ensure_column(conn, "workspace_registro_horario", "geo_out_lat", "geo_out_lat REAL")
+    ensure_column(conn, "workspace_registro_horario", "geo_out_lon", "geo_out_lon REAL")
+    ensure_column(conn, "workspace_registro_horario", "geo_out_acc", "geo_out_acc REAL")
+    ensure_column(conn, "workspace_registro_horario", "geo_out_source", "geo_out_source TEXT")
+    ensure_column(conn, "workspace_registro_horario", "geo_out_at", "geo_out_at TEXT")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS workspace_rrhh_profile (
@@ -17235,6 +17251,7 @@ def fetch_workspace_personal(conn, workspace_id, empresa_id=None, only_active=Fa
           p.foto_url,
           p.fecha_nacimiento,
           p.tipo_contrato,
+          p.kiosk_token,
           p.tipo_jornada,
           p.horas_pactadas_dia,
           p.horas_pactadas_semana,
@@ -21365,6 +21382,8 @@ class Handler(BaseHTTPRequestHandler):
     body{{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;max-width:820px;margin:32px auto;padding:0 18px;color:#1d1d1f}}
     .card{{border:1px solid #e7e7ea;border-radius:14px;padding:18px}}
     .muted{{color:#6b7280}}
+    label{{display:block;margin-top:12px}}
+    input{{width:100%;padding:10px 12px;border-radius:10px;border:1px solid #d1d5db}}
     button{{padding:10px 14px;border-radius:10px;border:1px solid #d1d5db;background:#111827;color:#fff;cursor:pointer}}
     button.secondary{{background:#fff;color:#111827}}
     .row{{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:12px}}
@@ -21374,36 +21393,79 @@ class Handler(BaseHTTPRequestHandler):
 <body>
   <h2>Kiosko de fichaje</h2>
   <div class="card">
-    <p class="muted">Usa este botón para fichar (entrada o salida). Si no tienes token, pide a un administrador que te lo genere.</p>
+    <p class="muted">Fichaje rápido por QR. Escanea tu QR (o pega el token) y confirma el PIN del kiosko.</p>
+    <label class="muted">Token (QR)
+      <input id="tokenInput" autocomplete="off" placeholder="Pega token o abre /kiosk?token=..." value="{html.escape(token) if token else ""}" />
+    </label>
+    <label class="muted">PIN kiosko
+      <input id="pinInput" type="password" inputmode="numeric" autocomplete="off" placeholder="PIN" />
+    </label>
     <div class="row">
       <button id="punchBtn">Fichar ahora</button>
       <button id="refreshBtn" class="secondary">Actualizar estado</button>
     </div>
     <p id="status" class="muted" style="margin-top:12px;"></p>
-    <p class="muted" style="margin-top:12px;">Token: <code id="token">{html.escape(token) if token else ""}</code></p>
+    <p class="muted" style="margin-top:12px;">Consejo: si estás fuera, permite ubicación para registrar la cita.</p>
   </div>
   <script>
-    const token = {json.dumps(token or "")};
     const statusEl = document.getElementById("status");
     const punchBtn = document.getElementById("punchBtn");
     const refreshBtn = document.getElementById("refreshBtn");
+    const tokenInput = document.getElementById("tokenInput");
+    const pinInput = document.getElementById("pinInput");
+    const readToken = () => String(tokenInput?.value || "").trim();
+    const readPin = () => String(pinInput?.value || "").trim();
+
+    function getGeo(timeoutMs) {{
+      return new Promise((resolve) => {{
+        try {{
+          if (!navigator.geolocation) return resolve(null);
+          let done = false;
+          const timer = setTimeout(() => {{
+            if (done) return;
+            done = true;
+            resolve(null);
+          }}, Math.max(1200, Number(timeoutMs) || 3500));
+          navigator.geolocation.getCurrentPosition((pos) => {{
+            if (done) return;
+            done = true;
+            clearTimeout(timer);
+            const c = pos && pos.coords ? pos.coords : null;
+            if (!c) return resolve(null);
+            resolve({{ lat: c.latitude, lon: c.longitude, acc: c.accuracy, source: "browser" }});
+          }}, () => {{
+            if (done) return;
+            done = true;
+            clearTimeout(timer);
+            resolve(null);
+          }}, {{ enableHighAccuracy: true, maximumAge: 60000, timeout: Math.max(1200, Number(timeoutMs) || 3500) }});
+        }} catch {{
+          resolve(null);
+        }}
+      }});
+    }}
     async function refresh() {{
+      const token = readToken();
       if (!token) {{ statusEl.textContent = "Token vacío."; return; }}
       statusEl.textContent = "Consultando…";
       const res = await fetch("/api/workspace_kiosk_status?token=" + encodeURIComponent(token)).then(r => r.json()).catch(() => ({{error:"Error"}}));
       if (res.error) {{ statusEl.textContent = res.error; return; }}
       const t = res.today || {{}};
       const label = t.open ? "Fichaje abierto: falta salida" : (t.missing_checkin ? "Hoy sin fichaje" : "Hoy fichaje cerrado");
-      statusEl.textContent = label + (t.checkin ? ` · Entrada ${t.checkin}` : "") + (t.checkout ? ` · Salida ${t.checkout}` : "");
+      statusEl.textContent = label + (t.checkin ? " · Entrada " + t.checkin : "") + (t.checkout ? " · Salida " + t.checkout : "");
     }}
     async function punch() {{
+      const token = readToken();
+      const pin = readPin();
       if (!token) {{ statusEl.textContent = "Token vacío."; return; }}
+      if (!pin) {{ statusEl.textContent = "Introduce el PIN del kiosko."; return; }}
       punchBtn.disabled = true;
       statusEl.textContent = "Enviando…";
+      const geo = await getGeo(3500);
       const res = await fetch("/api/workspace_kiosk_toggle", {{
         method: "POST",
         headers: {{ "Content-Type": "application/json" }},
-        body: JSON.stringify({{ token }})
+        body: JSON.stringify({{ token, pin, geo }})
       }}).then(r => r.json()).catch(() => ({{error:"Error"}}));
       punchBtn.disabled = false;
       if (res.error) {{ statusEl.textContent = res.error; return; }}
@@ -23874,6 +23936,24 @@ class Handler(BaseHTTPRequestHandler):
             workspace_id = str(payload.get("workspace_id") or "").strip()
             persona_id = str(payload.get("persona_id") or "").strip()
             action = normalize_action_key(payload.get("action") or "")
+            geo = payload.get("geo") if isinstance(payload, dict) else None
+            if not isinstance(geo, dict):
+                geo = {}
+            def _geo_float(key):
+                try:
+                    val = geo.get(key)
+                except Exception:
+                    val = None
+                if val is None or val == "":
+                    return None
+                try:
+                    return float(val)
+                except Exception:
+                    return None
+            geo_lat = _geo_float("lat")
+            geo_lon = _geo_float("lon")
+            geo_acc = _geo_float("acc")
+            geo_source = str(geo.get("source") or "").strip() or None
             if not workspace_id or not persona_id:
                 json_response(self, {"error": "workspace_id y persona_id requeridos"}, status=400)
                 return
@@ -23934,10 +24014,29 @@ class Handler(BaseHTTPRequestHandler):
                 conn.execute(
                     """
                     UPDATE workspace_registro_horario
-                    SET hora_fin = ?, minutos_trabajados = ?, estado = ?, updated_at = datetime(?)
+                    SET hora_fin = ?, minutos_trabajados = ?, estado = ?,
+                        geo_out_lat = COALESCE(?, geo_out_lat),
+                        geo_out_lon = COALESCE(?, geo_out_lon),
+                        geo_out_acc = COALESCE(?, geo_out_acc),
+                        geo_out_source = COALESCE(?, geo_out_source),
+                        geo_out_at = CASE WHEN ? IS NULL THEN geo_out_at ELSE datetime(?) END,
+                        updated_at = datetime(?)
                     WHERE id = ? AND workspace_id = ?
                     """,
-                    (now_hhmm, minutos, estado, now, open_row["id"], workspace_id),
+                    (
+                        now_hhmm,
+                        minutos,
+                        estado,
+                        geo_lat,
+                        geo_lon,
+                        geo_acc,
+                        geo_source,
+                        geo_lat,
+                        now,
+                        now,
+                        open_row["id"],
+                        workspace_id,
+                    ),
                 )
                 company_row = conn.execute("SELECT nombre FROM empresas WHERE id = ? LIMIT 1", (empresa_id,)).fetchone()
                 run_workspace_time_alerts(
@@ -23985,7 +24084,10 @@ class Handler(BaseHTTPRequestHandler):
                 INSERT INTO workspace_registro_horario (
                   id, workspace_id, empresa_id, persona_id, usuario_id, persona_nombre, tipo_jornada, horas_pactadas_dia,
                   fecha, hora_inicio, hora_fin, pausa_min, minutos_trabajados, metodo_registro, estado, notas, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 'App', ?, NULL, datetime(?), datetime(?))
+                  , geo_in_lat, geo_in_lon, geo_in_acc, geo_in_source, geo_in_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 'App', ?, NULL, datetime(?), datetime(?)
+                  , ?, ?, ?, ?, datetime(?)
+                )
                 """,
                 (
                     record_id,
@@ -24001,6 +24103,11 @@ class Handler(BaseHTTPRequestHandler):
                     None,
                     estado,
                     now,
+                    now,
+                    geo_lat,
+                    geo_lon,
+                    geo_acc,
+                    geo_source,
                     now,
                 ),
             )
@@ -24077,6 +24184,25 @@ class Handler(BaseHTTPRequestHandler):
             return
         elif parsed.path == "/api/workspace_kiosk_toggle":
             token = str(payload.get("token") or "").strip()
+            pin = str(payload.get("pin") or "").strip()
+            geo = payload.get("geo") if isinstance(payload, dict) else None
+            if not isinstance(geo, dict):
+                geo = {}
+            def _geo_float(key):
+                try:
+                    val = geo.get(key)
+                except Exception:
+                    val = None
+                if val is None or val == "":
+                    return None
+                try:
+                    return float(val)
+                except Exception:
+                    return None
+            geo_lat = _geo_float("lat")
+            geo_lon = _geo_float("lon")
+            geo_acc = _geo_float("acc")
+            geo_source = str(geo.get("source") or "").strip() or None
             if not token:
                 json_response(self, {"error": "token requerido"}, status=400)
                 return
@@ -24101,6 +24227,29 @@ class Handler(BaseHTTPRequestHandler):
             if not workspace_id or not persona_id or not empresa_id:
                 json_response(self, {"error": "configuración incompleta (workspace/empresa/persona)"}, status=409)
                 return
+            # PIN obligatorio (kiosko): por env var o por configuración en DB del workspace.
+            env_pin = str(os.environ.get("WORKSPACE_KIOSK_PIN") or "").strip()
+            if env_pin:
+                if not pin or not hmac.compare_digest(pin, env_pin):
+                    json_response(self, {"error": "PIN de kiosko incorrecto"}, status=403)
+                    return
+            else:
+                try:
+                    ws_cfg = conn.execute(
+                        "SELECT COALESCE(kiosk_pin_required, 0) AS required, COALESCE(kiosk_pin_hash, '') AS pin_hash FROM workspaces WHERE id = ? LIMIT 1",
+                        (workspace_id,),
+                    ).fetchone()
+                except Exception:
+                    ws_cfg = None
+                try:
+                    required = int(row_value(ws_cfg, "required") or 0) == 1 if ws_cfg else False
+                except Exception:
+                    required = False
+                if required:
+                    stored_hash = str(row_value(ws_cfg, "pin_hash") or "").strip() if ws_cfg else ""
+                    if not pin or not stored_hash or not verify_password(pin, stored_hash):
+                        json_response(self, {"error": "PIN de kiosko incorrecto"}, status=403)
+                        return
             now_dt = datetime.now()
             fecha = now_dt.date().isoformat()
             if is_workspace_time_month_locked(conn, workspace_id, fecha, empresa_id=empresa_id):
@@ -24132,10 +24281,30 @@ class Handler(BaseHTTPRequestHandler):
                 conn.execute(
                     """
                     UPDATE workspace_registro_horario
-                    SET hora_fin = ?, minutos_trabajados = ?, estado = ?, metodo_registro = 'Kiosk', updated_at = datetime(?)
+                    SET hora_fin = ?, minutos_trabajados = ?, estado = ?,
+                        metodo_registro = 'Kiosk',
+                        geo_out_lat = COALESCE(?, geo_out_lat),
+                        geo_out_lon = COALESCE(?, geo_out_lon),
+                        geo_out_acc = COALESCE(?, geo_out_acc),
+                        geo_out_source = COALESCE(?, geo_out_source),
+                        geo_out_at = CASE WHEN ? IS NULL THEN geo_out_at ELSE datetime(?) END,
+                        updated_at = datetime(?)
                     WHERE id = ? AND workspace_id = ?
                     """,
-                    (now_hhmm, minutos, estado, now, row_value(open_row, "id"), workspace_id),
+                    (
+                        now_hhmm,
+                        minutos,
+                        estado,
+                        geo_lat,
+                        geo_lon,
+                        geo_acc,
+                        geo_source,
+                        geo_lat,
+                        now,
+                        now,
+                        row_value(open_row, "id"),
+                        workspace_id,
+                    ),
                 )
                 conn.commit()
                 json_response(self, {"ok": True, "action": "checkout", "id": row_value(open_row, "id"), "fecha": fecha, "hora_fin": now_hhmm, "persona_nombre": persona_nombre})
@@ -24147,8 +24316,11 @@ class Handler(BaseHTTPRequestHandler):
                 """
                 INSERT INTO workspace_registro_horario (
                   id, workspace_id, empresa_id, persona_id, usuario_id, persona_nombre, tipo_jornada, horas_pactadas_dia,
-                  fecha, hora_inicio, hora_fin, pausa_min, minutos_trabajados, metodo_registro, estado, notas, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 'Kiosk', ?, NULL, datetime(?), datetime(?))
+                  fecha, hora_inicio, hora_fin, pausa_min, minutos_trabajados, metodo_registro, estado, notas, created_at, updated_at,
+                  geo_in_lat, geo_in_lon, geo_in_acc, geo_in_source, geo_in_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 'Kiosk', ?, NULL, datetime(?), datetime(?),
+                  ?, ?, ?, ?, datetime(?)
+                )
                 """,
                 (
                     record_id,
@@ -24164,6 +24336,11 @@ class Handler(BaseHTTPRequestHandler):
                     None,
                     estado,
                     now,
+                    now,
+                    geo_lat,
+                    geo_lon,
+                    geo_acc,
+                    geo_source,
                     now,
                 ),
             )
@@ -32212,6 +32389,51 @@ class Handler(BaseHTTPRequestHandler):
                     },
                 },
             )
+            return
+
+        if path == "/api/workspace_kiosk_qr":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not workspace_actor_is_privileged(conn, session):
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
+            workspace_id = (params.get("workspace_id", [""])[0] or "").strip()
+            persona_id = (params.get("persona_id", [""])[0] or "").strip()
+            if not workspace_id or not persona_id:
+                json_response(self, {"error": "workspace_id y persona_id requeridos"}, status=400)
+                return
+            row = conn.execute(
+                """
+                SELECT id, nombre, COALESCE(kiosk_token, '') AS kiosk_token
+                FROM workspace_registro_personal
+                WHERE workspace_id = ? AND id = ?
+                LIMIT 1
+                """,
+                (workspace_id, persona_id),
+            ).fetchone()
+            if not row:
+                json_response(self, {"error": "persona no encontrada"}, status=404)
+                return
+            token = str(row_value(row, "kiosk_token") or "").strip()
+            if not token:
+                token = secrets.token_urlsafe(24)
+                conn.execute(
+                    "UPDATE workspace_registro_personal SET kiosk_token = ?, updated_at = datetime(?) WHERE workspace_id = ? AND id = ?",
+                    (token, now, workspace_id, persona_id),
+                )
+                conn.commit()
+            url = f"{self._external_base_url()}/kiosk?token={urllib.parse.quote(token)}"
+            try:
+                import qrcode
+            except Exception as exc:
+                json_response(self, {"error": f"qrcode no instalado: {exc}"}, status=500)
+                return
+            try:
+                img = qrcode.make(url)
+                buff = BytesIO()
+                img.save(buff, format="PNG")
+                binary_response(self, buff.getvalue(), content_type="image/png")
+            except Exception as exc:
+                json_response(self, {"error": f"{type(exc).__name__}: {exc}"}, status=500)
             return
 
         if path == "/api/workspace_registro_audit":

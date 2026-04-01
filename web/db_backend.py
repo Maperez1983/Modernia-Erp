@@ -521,6 +521,11 @@ def ensure_postgres_sqlite_compat(conn):
         DECLARE v text;
         BEGIN
           f := btrim(coalesce(fmt,''));
+          -- Nuestra capa de compatibilidad escapa '%' como '%%' para evitar que psycopg3
+          -- lo interprete como placeholder. Normalizamos aquí para que '%Y' y '%%Y' funcionen igual.
+          WHILE position('%%' in f) > 0 LOOP
+            f := replace(f, '%%', '%');
+          END LOOP;
           v := btrim(coalesce(arg1,''));
           IF v = '' THEN
             RETURN NULL;
@@ -536,6 +541,19 @@ def ensure_postgres_sqlite_compat(conn):
           END IF;
           RETURN v;
         END;
+        $$;
+        """
+    )
+
+    # round(double precision, integer) no existe en Postgres (solo round(numeric, integer)).
+    # Creamos un shim para que SQL legado con ROUND(x, 2) funcione aunque no pase por el traductor.
+    conn.execute(
+        """
+        CREATE OR REPLACE FUNCTION round(val double precision, digits integer)
+        RETURNS double precision
+        LANGUAGE SQL
+        AS $$
+          SELECT round(val::numeric, digits)::double precision
         $$;
         """
     )
