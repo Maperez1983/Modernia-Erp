@@ -23476,15 +23476,22 @@ class Handler(BaseHTTPRequestHandler):
         ):
             ensure_usuarios_schema(conn)
             conn.commit()
-        # Enforce tenant isolation (optional) for authenticated users on workspace-scoped POSTs.
-        session = getattr(self, "auth_session", None) or self._current_session()
-        if session and isinstance(payload, dict):
-            ws_id = str(payload.get("workspace_id") or "").strip()
-            if ws_id:
-                ok, err = enforce_workspace_membership(conn, session, ws_id)
-                if not ok:
-                    json_response(self, {"error": err or "No autorizado"}, status=403)
+
+        # Enforce tenant isolation for workspace write endpoints too (when enabled).
+        # Centralizado para no depender de checks individuales.
+        if WORKSPACE_MEMBERSHIP_ENFORCE and isinstance(payload, dict) and str(parsed.path or "").startswith("/api/workspace_"):
+            # Public workspace endpoints (portal) use tokens instead of session.
+            if parsed.path not in {"/api/workspace_portal_upload"}:
+                session = getattr(self, "auth_session", None) or self._current_session()
+                if not session:
+                    json_response(self, {"error": "No autenticado"}, status=401)
                     return
+                ws_id = str(payload.get("workspace_id") or (params.get("workspace_id", [""])[0] if params else "") or "").strip()
+                if ws_id:
+                    ok, err = enforce_workspace_membership(conn, session, ws_id, write=True)
+                    if not ok:
+                        json_response(self, {"error": err or "No autorizado"}, status=403)
+                        return
         empresa = None
         if parsed.path in ("/api/acciones", "/api/acciones_update") and empresa_nombre:
             empresa = conn.execute(

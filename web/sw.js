@@ -1,0 +1,127 @@
+/* Minimal PWA service worker:
+ * - Precaches the app shell
+ * - Network-first for navigations
+ * - Cache-first for static assets (CSS/JS/images)
+ * - Never caches /api or /uploads
+ */
+
+const CACHE_VERSION = "v1";
+const SHELL_CACHE = `liv-shell-${CACHE_VERSION}`;
+const RUNTIME_CACHE = `liv-runtime-${CACHE_VERSION}`;
+
+const SHELL_URLS = [
+  "/",
+  "/index.html",
+  "/styles.css",
+  "/ui-foundation.js",
+  "/app-auth.js",
+  "/app-routing.js",
+  "/app.js",
+  "/manifest.webmanifest",
+  "/icons/icon-192.png",
+  "/icons/icon-512.png",
+];
+
+const isSameOrigin = (url) => {
+  try {
+    return new URL(url, self.location.href).origin === self.location.origin;
+  } catch {
+    return false;
+  }
+};
+
+const isCacheablePath = (pathname) => {
+  if (!pathname) return false;
+  if (pathname.startsWith("/api/")) return false;
+  if (pathname.startsWith("/uploads/")) return false;
+  return true;
+};
+
+const normalizeCacheKey = (request) => {
+  // Strip cache-busting query for static assets while keeping path.
+  try {
+    const url = new URL(request.url);
+    if (!isSameOrigin(url.href)) return request;
+    const pathname = url.pathname || "";
+    if (!isCacheablePath(pathname)) return request;
+    if (/\.(css|js|png|jpg|jpeg|svg|webmanifest)$/i.test(pathname)) {
+      return new Request(url.origin + pathname, { method: request.method, headers: request.headers, credentials: "same-origin" });
+    }
+    return request;
+  } catch {
+    return request;
+  }
+};
+
+self.addEventListener("install", (event) => {
+  event.waitUntil(
+    (async () => {
+      const cache = await caches.open(SHELL_CACHE);
+      await cache.addAll(SHELL_URLS);
+      await self.skipWaiting();
+    })()
+  );
+});
+
+self.addEventListener("activate", (event) => {
+  event.waitUntil(
+    (async () => {
+      const keys = await caches.keys();
+      await Promise.all(
+        keys.map((key) => {
+          if (key.startsWith("liv-") && ![SHELL_CACHE, RUNTIME_CACHE].includes(key)) {
+            return caches.delete(key);
+          }
+          return null;
+        })
+      );
+      await self.clients.claim();
+    })()
+  );
+});
+
+self.addEventListener("fetch", (event) => {
+  const req = event.request;
+  if (req.method !== "GET") return;
+  const url = new URL(req.url);
+  if (!isSameOrigin(url.href)) return;
+  if (!isCacheablePath(url.pathname)) return;
+
+  const isNavigation = req.mode === "navigate" || (req.headers.get("accept") || "").includes("text/html");
+  const key = normalizeCacheKey(req);
+
+  if (isNavigation) {
+    // Network-first so we always get the latest app shell when online.
+    event.respondWith(
+      (async () => {
+        try {
+          const fresh = await fetch(req);
+          const cache = await caches.open(SHELL_CACHE);
+          cache.put("/index.html", fresh.clone());
+          return fresh;
+        } catch {
+          const cache = await caches.open(SHELL_CACHE);
+          return (await cache.match("/index.html")) || (await cache.match("/")) || Response.error();
+        }
+      })()
+    );
+    return;
+  }
+
+  // Static assets: cache-first with runtime refresh.
+  event.respondWith(
+    (async () => {
+      const cache = await caches.open(RUNTIME_CACHE);
+      const cached = await cache.match(key);
+      if (cached) return cached;
+      const resp = await fetch(req);
+      if (resp && resp.ok) {
+        try {
+          cache.put(key, resp.clone());
+        } catch {}
+      }
+      return resp;
+    })()
+  );
+});
+

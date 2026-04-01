@@ -3,8 +3,13 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#3C6E71" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <title>LIV · Plataforma Operativa</title>
     <link rel="stylesheet" href="styles.css?v=152" />
+    <link rel="manifest" href="manifest.webmanifest?v=1" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600;700&family=Source+Sans+3:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" />
   </head>
   <body class="theme-operativa auth-pending">
@@ -6985,5 +6990,13 @@
     <script src="app-auth.js?v=3"></script>
     <script src="app-routing.js?v=7"></script>
     <script src="app.js?v=377"></script>
+    <script>
+      (function () {
+        if (!("serviceWorker" in navigator)) return;
+        window.addEventListener("load", function () {
+          navigator.serviceWorker.register("/sw.js?v=1").catch(function () {});
+        });
+      })();
+    </script>
   </body>
 </html>
