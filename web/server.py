@@ -21393,13 +21393,13 @@ class Handler(BaseHTTPRequestHandler):
 <body>
   <h2>Kiosko de fichaje</h2>
   <div class="card">
-    <p class="muted">Fichaje rápido por QR. Escanea tu QR (o pega el token) y confirma el PIN del kiosko.</p>
+	    <p class="muted">Fichaje rápido por QR. Escanea tu QR (o pega el token). Si tu empresa ha configurado PIN de kiosko, introdúcelo.</p>
     <label class="muted">Token (QR)
       <input id="tokenInput" autocomplete="off" placeholder="Pega token o abre /kiosk?token=..." value="{html.escape(token) if token else ""}" />
     </label>
-    <label class="muted">PIN kiosko
-      <input id="pinInput" type="password" inputmode="numeric" autocomplete="off" placeholder="PIN" />
-    </label>
+	    <label class="muted">PIN kiosko (si aplica)
+	      <input id="pinInput" type="password" inputmode="numeric" autocomplete="off" placeholder="PIN (opcional)" />
+	    </label>
     <div class="row">
       <button id="punchBtn">Fichar ahora</button>
       <button id="refreshBtn" class="secondary">Actualizar estado</button>
@@ -21458,7 +21458,7 @@ class Handler(BaseHTTPRequestHandler):
       const token = readToken();
       const pin = readPin();
       if (!token) {{ statusEl.textContent = "Token vacío."; return; }}
-      if (!pin) {{ statusEl.textContent = "Introduce el PIN del kiosko."; return; }}
+	      // PIN: si no está configurado, el backend lo ignorará; si está configurado, devolverá 403.
       punchBtn.disabled = true;
       statusEl.textContent = "Enviando…";
       const geo = await getGeo(3500);
