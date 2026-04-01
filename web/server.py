@@ -20879,11 +20879,20 @@ class Handler(BaseHTTPRequestHandler):
         }
 
     def _external_base_url(self):
+        # Prefer explicit public base URL (Render/custom domain).
         configured = (os.environ.get("APP_BASE_URL") or "").strip().rstrip("/")
         if configured:
             return configured
-        proto = (self.headers.get("X-Forwarded-Proto") or "").strip() or ("https" if os.environ.get("RENDER") else "http")
-        host = (self.headers.get("X-Forwarded-Host") or self.headers.get("Host") or "").strip()
+        # Some platforms expose the public URL via env vars.
+        for env_key in ("RENDER_EXTERNAL_URL", "PUBLIC_BASE_URL", "PUBLIC_URL", "APP_PUBLIC_URL"):
+            value = (os.environ.get(env_key) or "").strip().rstrip("/")
+            if value:
+                return value
+        # Fall back to proxy headers / Host. Render sets X-Forwarded-* when behind the edge proxy.
+        forwarded_proto = (self.headers.get("X-Forwarded-Proto") or "").strip()
+        proto = (forwarded_proto.split(",")[0].strip() if forwarded_proto else "") or ("https" if os.environ.get("RENDER") else "http")
+        forwarded_host = (self.headers.get("X-Forwarded-Host") or "").strip()
+        host = (forwarded_host.split(",")[0].strip() if forwarded_host else "") or (self.headers.get("Host") or "").strip()
         if host:
             return f"{proto}://{host}"
         return "http://localhost:8000"
@@ -22400,13 +22409,14 @@ class Handler(BaseHTTPRequestHandler):
                     f"{invite_link}\n\n"
                     f"Este enlace caduca en {int(AUTH_INVITE_TTL_SECONDS/3600)} horas.\n"
                 )
+                safe_link = html.escape(invite_link, quote=True)
                 html_body = (
-                    f"<p>Hola {greeting},</p>"
+                    f"<p>Hola {html.escape(greeting)},</p>"
                     "<p>Te han invitado a acceder al CRM.</p>"
-                    "<p><a href=\"%s\">Pulsa aquí para validar tu acceso y definir tu contraseña</a></p>"
+                    f"<p><a href=\"{safe_link}\">Pulsa aquí para validar tu acceso y definir tu contraseña</a></p>"
                     "<p>Si el botón no funciona, copia este enlace:</p>"
-                    f"<p>{invite_link}</p>"
-                ) % invite_link
+                    f"<p>{safe_link}</p>"
+                )
                 send_mail_smtp(subject, email, text_body, html_body=html_body)
                 sent = True
             except Exception as exc:

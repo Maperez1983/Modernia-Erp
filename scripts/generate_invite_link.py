@@ -24,7 +24,13 @@ def _default_db_path():
 
 def _default_base_url():
     configured = (os.environ.get("APP_BASE_URL") or "").strip().rstrip("/")
-    return configured or "http://localhost:8000"
+    if configured:
+        return configured
+    for env_key in ("RENDER_EXTERNAL_URL", "PUBLIC_BASE_URL", "PUBLIC_URL", "APP_PUBLIC_URL"):
+        value = (os.environ.get(env_key) or "").strip().rstrip("/")
+        if value:
+            return value
+    return "http://localhost:8000"
 
 
 def _invite_ttl_seconds():
