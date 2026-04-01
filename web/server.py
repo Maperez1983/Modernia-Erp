@@ -23,6 +23,8 @@ import email
 import html
 import textwrap
 import xml.etree.ElementTree as ET
+import socket
+import ipaddress
 from io import BytesIO
 from copy import copy as shallow_copy
 from datetime import datetime, timedelta, timezone, date
@@ -228,25 +230,37 @@ WORKSPACE_MEMBERSHIP_ENFORCE = os.environ.get("APP_WORKSPACE_MEMBERSHIP_ENFORCE"
 # En modo comercial multi-tenant se recomienda desactivarlo (0) para evitar fugas entre workspaces.
 WORKSPACE_AUTO_LINK_COMPANIES = os.environ.get("APP_WORKSPACE_AUTO_LINK_COMPANIES", "1").strip().lower() not in ("0", "false", "no", "off")
 COPILOT_WEB_TIMEOUT_SECONDS = max(3, int(os.environ.get("COPILOT_WEB_TIMEOUT_SECONDS", "15")))
-COPILOT_WEB_MAX_BYTES = max(50_000, min(int(os.environ.get("COPILOT_WEB_MAX_BYTES", "900000")), 3_000_000))
+COPILOT_WEB_MAX_BYTES = max(50_000, min(int(os.environ.get("COPILOT_WEB_MAX_BYTES", "3000000")), 8_000_000))
 COPILOT_WEB_MAX_CHARS = max(10_000, min(int(os.environ.get("COPILOT_WEB_MAX_CHARS", "120000")), 300_000))
 COPILOT_WEB_CACHE_TTL_SECONDS = max(0, int(os.environ.get("COPILOT_WEB_CACHE_TTL_SECONDS", "600")))
 _DEFAULT_COPILOT_WEB_ALLOWED_DOMAINS = {
     # Oficiales / administración
     "boe.es",
+    "www.boe.es",
+    "gob.es",
     "bop.jcyl.es",
     "juntadeandalucia.es",
     "boja.juntadeandalucia.es",
     "agenciatributaria.es",
     "www.agenciatributaria.es",
+    "hacienda.gob.es",
+    "www.hacienda.gob.es",
     "seg-social.es",
     "sede.seg-social.gob.es",
+    "www.seg-social.es",
     "sepe.es",
+    "www.sepe.es",
     "mites.gob.es",
+    "www.mites.gob.es",
     "insst.es",
+    "www.insst.es",
+    "aepd.es",
+    "www.aepd.es",
     "ine.es",
+    "www.ine.es",
     # Documentación técnica conocida
     "eur-lex.europa.eu",
+    "europa.eu",
 }
 _extra_domains = {
     d.strip().lower()
@@ -6311,6 +6325,37 @@ def _domain_is_allowed(hostname):
     return False
 
 
+def _hostname_resolves_to_disallowed_ip(hostname):
+    host = str(hostname or "").strip()
+    if not host:
+        return True, "hostname vacío"
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except Exception:
+        return True, "no se pudo resolver DNS"
+    ips = []
+    for info in infos or []:
+        try:
+            sockaddr = info[4]
+            ip = sockaddr[0]
+        except Exception:
+            continue
+        if not ip:
+            continue
+        ips.append(ip)
+    if not ips:
+        return True, "sin IPs resueltas"
+    for ip in ips:
+        try:
+            obj = ipaddress.ip_address(ip)
+        except Exception:
+            return True, "IP no válida"
+        # Permitimos solo direcciones globales.
+        if not getattr(obj, "is_global", False):
+            return True, f"resuelve a IP no global ({ip})"
+    return False, ""
+
+
 def _html_to_text(html_text):
     value = str(html_text or "")
     value = re.sub(r"(?is)<(script|style|noscript)[^>]*>.*?</\\1>", " ", value)
@@ -6344,6 +6389,9 @@ def copilot_web_fetch_url(url, *, timeout_seconds=None, max_bytes=None, max_char
         return {"error": "Solo se permiten URLs http/https"}
     if not _domain_is_allowed(parsed.hostname):
         return {"error": "Dominio no permitido para Copilot web"}
+    bad, reason = _hostname_resolves_to_disallowed_ip(parsed.hostname)
+    if bad:
+        return {"error": f"Destino no permitido ({reason})"}
     timeout_seconds = float(timeout_seconds or COPILOT_WEB_TIMEOUT_SECONDS)
     max_bytes = int(max_bytes or COPILOT_WEB_MAX_BYTES)
     max_chars = int(max_chars or COPILOT_WEB_MAX_CHARS)
@@ -6370,6 +6418,12 @@ def copilot_web_fetch_url(url, *, timeout_seconds=None, max_bytes=None, max_char
             status = int(getattr(resp, "status", 200) or 200)
             full_ct = str(resp.headers.get("Content-Type") or "")
             content_type = full_ct.split(";")[0].strip().lower()
+            try:
+                content_length = int(str(resp.headers.get("Content-Length") or "0").strip() or "0")
+            except Exception:
+                content_length = 0
+            if content_length and content_length > max_bytes:
+                return {"error": "Contenido demasiado grande", "status": status, "url": raw}
             data = resp.read(max(1, max_bytes))
     except urllib.error.HTTPError as err:
         try:
@@ -6400,6 +6454,27 @@ def copilot_web_fetch_url(url, *, timeout_seconds=None, max_bytes=None, max_char
         text = _html_to_text(body_text)
     elif content_type.startswith("text/"):
         text = re.sub(r"\\s+", " ", body_text).strip()
+    elif content_type == "application/pdf" or raw.lower().endswith(".pdf"):
+        # Extraer texto de PDF (best-effort) usando el extractor existente.
+        tmp_name = ""
+        try:
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
+            tmp.write(data)
+            tmp.flush()
+            tmp.close()
+            tmp_name = tmp.name
+            pdf_text, err_detail, _method = extract_pdf_text(tmp.name)
+        except Exception as exc:
+            return {"error": f"No se pudo procesar PDF: {exc}", "status": status, "url": raw}
+        finally:
+            try:
+                if tmp_name:
+                    os.unlink(tmp_name)
+            except Exception:
+                pass
+        if err_detail and not pdf_text:
+            return {"error": err_detail or "No se pudo extraer texto del PDF", "status": status, "url": raw}
+        text = str(pdf_text or "").strip()
     else:
         return {"error": f"Content-Type no soportado ({content_type or 'desconocido'})", "status": status, "url": raw}
 
