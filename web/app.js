@@ -10,6 +10,26 @@ const fetchWithTimeout = async (input, init = {}, timeoutMs = API_TIMEOUT_MS) =>
   }
 };
 
+const sanitizeApiUrl = (value) => {
+  const raw = String(value || "");
+  if (!raw) return raw;
+  const [base, query] = raw.split("?", 2);
+  if (!query) return base;
+  const scrubKeys = new Set(["token", "password", "activar_token", "portal_token"]);
+  const parts = query
+    .split("&")
+    .filter(Boolean)
+    .map((part) => {
+      const [k, v = ""] = part.split("=", 2);
+      const key = String(k || "").trim();
+      if (!key) return "";
+      if (scrubKeys.has(key)) return `${key}=***`;
+      return `${key}=${v}`;
+    })
+    .filter(Boolean);
+  return parts.length ? `${base}?${parts.join("&")}` : base;
+};
+
 const api = async (path) => {
   let res;
   try {
@@ -35,7 +55,8 @@ const api = async (path) => {
       || (data && data.error && data.error !== "API error" ? data.error : "")
       || (data && data.error)
       || `HTTP ${res.status}`;
-    const error = new Error(msg);
+    const safePath = sanitizeApiUrl(path);
+    const error = new Error(safePath ? `${msg} · ${safePath}` : msg);
     error.status = res.status;
     error.data = data;
     if (res.status === 401) {
@@ -78,7 +99,8 @@ const apiPost = async (url, payload = {}) => {
       || (data && data.error && data.error !== "API error" ? data.error : "")
       || (data && data.error)
       || `HTTP ${res.status}`;
-    const error = new Error(msg);
+    const safeUrl = sanitizeApiUrl(url);
+    const error = new Error(safeUrl ? `${msg} · ${safeUrl}` : msg);
     error.status = res.status;
     error.data = data;
     throw error;
@@ -1196,12 +1218,15 @@ const RoutingModule = window.CRMAppRouting || null;
     } catch {}
   };
   window.addEventListener("error", (event) => {
-    const detail = event?.error?.stack || event?.message || "Error desconocido";
+    const err = event?.error;
+    const detail = (err?.message ? `${err.message}\n` : "")
+      + (err?.stack || event?.message || "Error desconocido");
     show("Error en la interfaz", detail);
   });
   window.addEventListener("unhandledrejection", (event) => {
     const reason = event?.reason;
-    const detail = reason?.stack || reason?.message || String(reason || "Promise rechazada");
+    const detail = (reason?.message ? `${reason.message}\n` : "")
+      + (reason?.stack || String(reason || "Promise rechazada"));
     show("Error interno (promesa)", detail);
     try {
       // Safari/Chrome: evita el mensaje "Unhandled Promise Rejection" en consola cuando ya lo mostramos en UI.
