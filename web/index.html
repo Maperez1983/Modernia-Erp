@@ -6783,7 +6783,64 @@
           </label>
           <label>
             Contraseña
-            <input id="authLoginPass" type="password" autocomplete="current-password" required />
+            <div class="auth-input-wrap">
+              <input id="authLoginPass" type="password" autocomplete="current-password" required />
+              <button
+                type="button"
+                id="authLoginPassToggle"
+                class="auth-pass-toggle"
+                aria-label="Mostrar contraseña"
+                aria-pressed="false"
+                title="Mostrar contraseña"
+              >
+                <svg class="icon-eye" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path
+                    d="M2.4 12c1.8-4.6 6.1-7.6 9.6-7.6s7.8 3 9.6 7.6c-1.8 4.6-6.1 7.6-9.6 7.6S4.2 16.6 2.4 12Z"
+                    stroke="currentColor"
+                    stroke-width="1.7"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                  <path
+                    d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z"
+                    stroke="currentColor"
+                    stroke-width="1.7"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                </svg>
+                <svg class="icon-eye-off" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path
+                    d="M3 12c1.8-4.6 6.1-7.6 9.6-7.6 1.8 0 3.8.7 5.6 2"
+                    stroke="currentColor"
+                    stroke-width="1.7"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                  <path
+                    d="M21 12c-1.8 4.6-6.1 7.6-9.6 7.6-1.8 0-3.8-.7-5.6-2"
+                    stroke="currentColor"
+                    stroke-width="1.7"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                  <path
+                    d="M10 14.2a3.2 3.2 0 0 1 4.2-4.2"
+                    stroke="currentColor"
+                    stroke-width="1.7"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                  <path
+                    d="M3.5 3.5 20.5 20.5"
+                    stroke="currentColor"
+                    stroke-width="1.7"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                </svg>
+              </button>
+            </div>
           </label>
           <div class="auth-login-actions">
             <button type="submit">Entrar</button>

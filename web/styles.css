@@ -5790,6 +5790,56 @@ body.auth-locked {
   font-size: 0.95rem;
 }
 
+.auth-input-wrap {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+}
+
+.auth-input-wrap input {
+  width: 100%;
+  padding-right: 48px;
+}
+
+.auth-pass-toggle {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  border: 1px solid rgba(60, 110, 113, 0.2);
+  background: rgba(245, 245, 245, 0.86);
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.auth-pass-toggle:hover {
+  background: rgba(235, 235, 235, 0.92);
+}
+
+.auth-pass-toggle:focus-visible {
+  outline: 2px solid rgba(60, 110, 113, 0.28);
+  outline-offset: 2px;
+}
+
+.auth-pass-toggle svg {
+  width: 18px;
+  height: 18px;
+}
+
+.auth-pass-toggle[aria-pressed="true"] .icon-eye {
+  display: none;
+}
+
+.auth-pass-toggle[aria-pressed="false"] .icon-eye-off {
+  display: none;
+}
+
 .auth-login-actions {
   display: flex;
   align-items: center;

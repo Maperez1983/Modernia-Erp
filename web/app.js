@@ -1580,6 +1580,7 @@ const authLoginOverlay = document.getElementById("authLoginOverlay");
 const authLoginForm = document.getElementById("authLoginForm");
 const authLoginUser = document.getElementById("authLoginUser");
 const authLoginPass = document.getElementById("authLoginPass");
+const authLoginPassToggle = document.getElementById("authLoginPassToggle");
 const authLoginStatus = document.getElementById("authLoginStatus");
 const authSessionPill = document.getElementById("authSessionPill");
 const authLogoutBtn = document.getElementById("authLogoutBtn");
@@ -40671,6 +40672,22 @@ if (authLoginForm) {
   authLoginForm.addEventListener("submit", (event) => {
     event.preventDefault();
     submitAuthLogin();
+  });
+}
+
+if (authLoginPassToggle && authLoginPass) {
+  const applyPasswordVisibility = (visible) => {
+    authLoginPass.type = visible ? "text" : "password";
+    authLoginPassToggle.setAttribute("aria-pressed", visible ? "true" : "false");
+    authLoginPassToggle.setAttribute("aria-label", visible ? "Ocultar contraseña" : "Mostrar contraseña");
+    authLoginPassToggle.setAttribute("title", visible ? "Ocultar contraseña" : "Mostrar contraseña");
+  };
+  // Estado inicial.
+  applyPasswordVisibility(false);
+  authLoginPassToggle.addEventListener("click", () => {
+    const visible = String(authLoginPass.type || "").toLowerCase() !== "password";
+    applyPasswordVisibility(!visible);
+    authLoginPass.focus();
   });
 }
 
