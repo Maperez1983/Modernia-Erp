@@ -23479,8 +23479,22 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         empresa_nombre = payload.get("empresa_nombre")
-        # Workspace endpoints are scoped by workspace_id/empresa_id; do not enforce empresa_nombre.
-        if (not str(parsed.path or "").startswith("/api/workspace_")) and parsed.path not in (
+        path_value = str(parsed.path or "")
+        empresa_scope_exempt = (
+            path_value.startswith("/api/workspace_")
+            or path_value.startswith("/api/legal_")
+            or path_value.startswith("/api/copilot_web_")
+            or path_value
+            in {
+                "/api/convenios_catalog",
+                "/api/copilot_web_domains",
+                "/api/legal_library_documents",
+                "/api/legal_radar_auto_status",
+                "/api/legal_radar_counts",
+            }
+        )
+        # Workspace endpoints are scoped by workspace_id/empresa_id; legal/copilot endpoints are scoped by `area`.
+        if (not empresa_scope_exempt) and parsed.path not in (
             "/api/hipotecas/firmar",
             "/api/hipotecas_update",
             "/api/hipotecas_delete",
@@ -23641,7 +23655,7 @@ class Handler(BaseHTTPRequestHandler):
             if not empresa:
                 json_response(self, {"error": "Empresa no encontrada"}, status=400)
                 return
-        if (not parsed.path.startswith("/api/workspace_")) and parsed.path not in (
+        if (not empresa_scope_exempt) and parsed.path not in (
             "/api/hipotecas/firmar",
             "/api/hipotecas_update",
             "/api/hipotecas_delete",
@@ -23695,6 +23709,18 @@ class Handler(BaseHTTPRequestHandler):
             "/api/seguros_ipid_register",
             "/api/seguros_campanas_import_email",
             "/api/ai_seguros_copilot",
+            # Legal / Copilot web endpoints are scoped by `area` and do not require `empresa_nombre`.
+            "/api/legal_copilot",
+            "/api/legal_copilot_catalog",
+            "/api/legal_radar_items",
+            "/api/legal_radar_items_update",
+            "/api/legal_radar_scan",
+            "/api/legal_radar_import",
+            "/api/legal_radar_digest",
+            "/api/legal_dgt_lookup",
+            "/api/legal_library_import",
+            "/api/copilot_web_fetch",
+            "/api/copilot_web_ask",
         ):
             empresa = conn.execute(
                 "SELECT id FROM empresas WHERE nombre = ?",
