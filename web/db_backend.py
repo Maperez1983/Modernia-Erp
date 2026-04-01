@@ -146,6 +146,9 @@ def translate_sqlite_sql_to_postgres(sql):
         return sql
     text = sql
     text = _strip_collate_nocase(text)
+    # SQLite ROUND(x, n) acepta floats; en Postgres, ROUND(x, n) solo existe para NUMERIC.
+    # Reescribimos a un shim que hace cast seguro.
+    text = re.sub(r"\bROUND\s*\(", "sqlite_round(", text, flags=re.IGNORECASE)
     # SQLite GROUP_CONCAT -> Postgres STRING_AGG.
     # - GROUP_CONCAT(x) -> STRING_AGG(x, ',')
     # - GROUP_CONCAT(DISTINCT x) -> STRING_AGG(DISTINCT x, ',')
@@ -340,6 +343,72 @@ def ensure_postgres_sqlite_compat(conn):
             RETURN v || ':00';
           END IF;
           RETURN v;
+        END;
+        $$;
+        """
+    )
+
+    # ROUND shim (SQLite compatibility):
+    # - sqlite_round(double precision, int) -> round(arg1::numeric, int)::double precision
+    # - sqlite_round(double precision) -> round(arg1)
+    # - sqlite_round(numeric, int) -> round(arg1, int)::double precision
+    # - sqlite_round(numeric) -> round(arg1)::double precision
+    conn.execute(
+        """
+        CREATE OR REPLACE FUNCTION sqlite_round(arg1 double precision)
+        RETURNS double precision
+        LANGUAGE plpgsql
+        AS $$
+        BEGIN
+          IF arg1 IS NULL THEN
+            RETURN NULL;
+          END IF;
+          RETURN round(arg1);
+        END;
+        $$;
+        """
+    )
+    conn.execute(
+        """
+        CREATE OR REPLACE FUNCTION sqlite_round(arg1 double precision, arg2 integer)
+        RETURNS double precision
+        LANGUAGE plpgsql
+        AS $$
+        BEGIN
+          IF arg1 IS NULL THEN
+            RETURN NULL;
+          END IF;
+          RETURN round(arg1::numeric, arg2)::double precision;
+        END;
+        $$;
+        """
+    )
+    conn.execute(
+        """
+        CREATE OR REPLACE FUNCTION sqlite_round(arg1 numeric)
+        RETURNS double precision
+        LANGUAGE plpgsql
+        AS $$
+        BEGIN
+          IF arg1 IS NULL THEN
+            RETURN NULL;
+          END IF;
+          RETURN round(arg1)::double precision;
+        END;
+        $$;
+        """
+    )
+    conn.execute(
+        """
+        CREATE OR REPLACE FUNCTION sqlite_round(arg1 numeric, arg2 integer)
+        RETURNS double precision
+        LANGUAGE plpgsql
+        AS $$
+        BEGIN
+          IF arg1 IS NULL THEN
+            RETURN NULL;
+          END IF;
+          RETURN round(arg1, arg2)::double precision;
         END;
         $$;
         """
