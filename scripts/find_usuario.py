@@ -1,8 +1,14 @@
 #!/usr/bin/env python3
 import argparse
 import os
-from web.db_backend import open_db_conn
+import sys
 from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from web.db_backend import is_postgres_enabled, open_db_conn  # noqa: E402
 
 
 def _default_db_path():
@@ -20,7 +26,7 @@ def main():
     args = parser.parse_args()
 
     db_path = Path(args.db).expanduser().resolve()
-    if not db_path.exists():
+    if not is_postgres_enabled() and not db_path.exists():
         raise SystemExit(f"DB no encontrada: {db_path}")
 
     q = str(args.q or "").strip()
