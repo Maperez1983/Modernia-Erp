@@ -301,7 +301,10 @@
                 <h3>Configuración del workspace</h3>
                 <p class="muted">Define branding, estado y plan comercial del workspace dentro de LIV.</p>
               </div>
-              <button type="button" id="workspaceNewBtn" class="secondary ghost">Nuevo workspace</button>
+              <div class="toolbar">
+                <button type="button" id="workspaceNewCustomerBtn" class="secondary ghost">Nuevo cliente</button>
+                <button type="button" id="workspaceNewBtn" class="secondary ghost">Nuevo workspace</button>
+              </div>
             </div>
             <form id="workspaceForm" class="form-grid">
               <input type="hidden" name="id" />
@@ -358,6 +361,15 @@
               </div>
             </div>
             <div id="workspaceCompanies"></div>
+          </div>
+          <div class="form-card">
+            <div class="section-head">
+              <div>
+                <h3>Miembros</h3>
+                <p class="muted">Usuarios con acceso a este workspace (recomendado para modo comercial multi-tenant).</p>
+              </div>
+            </div>
+            <div id="workspaceMembers"></div>
           </div>
           <div class="form-card">
             <div class="section-head">

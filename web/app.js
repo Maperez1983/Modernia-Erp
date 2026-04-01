@@ -1456,7 +1456,9 @@ const workspaceList = document.getElementById("workspaceList");
 const workspaceForm = document.getElementById("workspaceForm");
 const workspaceFormStatus = document.getElementById("workspaceFormStatus");
 const workspaceNewBtn = document.getElementById("workspaceNewBtn");
+const workspaceNewCustomerBtn = document.getElementById("workspaceNewCustomerBtn");
 const workspaceCompanies = document.getElementById("workspaceCompanies");
+const workspaceMembers = document.getElementById("workspaceMembers");
 const workspaceModules = document.getElementById("workspaceModules");
 const workspaceClientBase = document.getElementById("workspaceClientBase");
 const workspaceClientLookup = document.getElementById("workspaceClientLookup");
@@ -5770,6 +5772,14 @@ const renderWorkspaceCompanies = (rows = []) => {
     workspaceCompanies.innerHTML = "<p class='muted'>Sin empresas operativas asociadas.</p>";
     return;
   }
+  const canEdit = (() => {
+    try {
+      const authUser = getAuthScopeUser();
+      return Boolean(authUser && isPrivilegedUser(authUser));
+    } catch (error) {
+      return false;
+    }
+  })();
   const activeId = String(state.currentWorkspaceCompanyId || rows[0]?.id || "");
   workspaceCompanies.innerHTML = `
     <div class="workspace-chip-list">
@@ -5780,6 +5790,7 @@ const renderWorkspaceCompanies = (rows = []) => {
               <div>
                 <strong>${row.nombre || "-"}</strong>
                 <span>${row.rol || "operativa"} · ${Number(row.activo || 0) === 1 ? "activa" : "inactiva"}</span>
+                <div class="muted">${row.nif ? `CIF/NIF: ${escapeHtml(String(row.nif || ""))}` : "Sin CIF/NIF"}${row.direccion ? ` · ${escapeHtml(String(row.direccion || ""))}` : ""}</div>
               </div>
               <div class="workspace-company-chip-actions">
                 <button
@@ -5792,6 +5803,14 @@ const renderWorkspaceCompanies = (rows = []) => {
                   class="secondary ghost"
                   data-workspace-company-enter="${row.nombre || ""}"
                 >Entrar en empresa</button>
+                <button
+                  type="button"
+                  class="secondary ghost"
+                  data-workspace-company-edit="${row.id || ""}"
+                  data-workspace-company-edit-nif="${escapeHtml(String(row.nif || ""))}"
+                  data-workspace-company-edit-dir="${escapeHtml(String(row.direccion || ""))}"
+                  ${canEdit ? "" : "disabled"}
+                >Editar CIF/dirección</button>
               </div>
             </div>
           `
@@ -5811,6 +5830,130 @@ const renderWorkspaceCompanies = (rows = []) => {
       const companyName = button.dataset.workspaceCompanyEnter || "";
       if (!companyName) return;
       openCompany(companyName, { allowRestricted: true });
+    });
+  });
+  workspaceCompanies.querySelectorAll("[data-workspace-company-edit]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      if (!canEdit) return;
+      const companyId = button.dataset.workspaceCompanyEdit || "";
+      if (!companyId) return;
+      const currentNif = String(button.dataset.workspaceCompanyEditNif || "").trim();
+      const currentDir = String(button.dataset.workspaceCompanyEditDir || "").trim();
+      const nif = window.prompt("CIF/NIF de la empresa", currentNif) ?? "";
+      if (nif === null) return;
+      const direccion = window.prompt("Dirección / centro de trabajo (opcional)", currentDir) ?? "";
+      if (direccion === null) return;
+      try {
+        await postJsonWithDbRetry("/api/empresa_update", {
+          workspace_id: state.currentWorkspaceId,
+          id: companyId,
+          nif: String(nif || "").trim(),
+          direccion: String(direccion || "").trim(),
+        });
+        await loadWorkspaceDetail(state.currentWorkspaceId);
+      } catch (error) {
+        alert(error?.message || "No se pudo guardar la empresa.");
+      }
+    });
+  });
+};
+
+const renderWorkspaceMembers = (rows = []) => {
+  if (!workspaceMembers) return;
+  const authUser = getAuthScopeUser();
+  const canManage = Boolean(authUser && isPrivilegedUser(authUser));
+  if (!state.currentWorkspaceId) {
+    workspaceMembers.innerHTML = "<p class='muted'>Selecciona un workspace.</p>";
+    return;
+  }
+  if (!canManage) {
+    workspaceMembers.innerHTML = "<p class='muted'>Solo visible para administración.</p>";
+    return;
+  }
+  const listHtml = (rows || [])
+    .map((row) => {
+      const fullName = `${row.nombre || ""} ${row.apellido || ""}`.trim() || "-";
+      return `
+        <div class="workspace-chip workspace-company-chip">
+          <div>
+            <strong>${escapeHtml(fullName)}</strong>
+            <div class="muted">${escapeHtml(row.usuario || "-")}${row.email ? ` · ${escapeHtml(row.email)}` : ""}</div>
+            <div class="muted">Rol: ${escapeHtml(row.rol || "Miembro")}</div>
+          </div>
+          <div class="workspace-company-chip-actions">
+            <button type="button" class="secondary ghost" data-workspace-member-remove="${escapeHtml(String(row.usuario_id || ""))}">Quitar</button>
+          </div>
+        </div>
+      `;
+    })
+    .join("");
+  workspaceMembers.innerHTML = `
+    <div class="workspace-context-strip">
+      <strong>Acceso al workspace</strong>
+      <span class="muted">Añade usuarios por email/usuario y asigna rol.</span>
+    </div>
+    <div class="row" style="gap:10px;align-items:flex-end;flex-wrap:wrap">
+      <label style="min-width:280px;flex:1">
+        Usuario o email
+        <input id="workspaceMemberLogin" placeholder="mperez / correo@dominio.com" />
+      </label>
+      <label style="min-width:220px">
+        Rol
+        <select id="workspaceMemberRole">
+          <option>Owner</option>
+          <option>Admin</option>
+          <option selected>Miembro</option>
+          <option>Lectura</option>
+        </select>
+      </label>
+      <button type="button" id="workspaceMemberAddBtn" class="secondary">Añadir</button>
+      <span id="workspaceMemberStatus" class="muted"></span>
+    </div>
+    <div class="workspace-chip-list">${listHtml || "<p class='muted'>Sin miembros asignados todavía.</p>"}</div>
+  `;
+  const loginInput = document.getElementById("workspaceMemberLogin");
+  const roleSelect = document.getElementById("workspaceMemberRole");
+  const addBtn = document.getElementById("workspaceMemberAddBtn");
+  const status = document.getElementById("workspaceMemberStatus");
+  if (addBtn) {
+    addBtn.addEventListener("click", async () => {
+      const login = String(loginInput?.value || "").trim();
+      const role = String(roleSelect?.value || "Miembro").trim();
+      if (!login) {
+        if (status) status.textContent = "Introduce un usuario o email.";
+        return;
+      }
+      try {
+        if (status) status.textContent = "Añadiendo...";
+        await postJsonWithDbRetry("/api/workspace_member_upsert", {
+          workspace_id: state.currentWorkspaceId,
+          login,
+          role,
+        });
+        const members = await safeWorkspaceApi(`/api/workspace_members?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}`, { rows: [] });
+        state.currentWorkspaceMembers = members.rows || [];
+        renderWorkspaceMembers(state.currentWorkspaceMembers);
+      } catch (error) {
+        if (status) status.textContent = error?.message || "No se pudo añadir.";
+      }
+    });
+  }
+  workspaceMembers.querySelectorAll("[data-workspace-member-remove]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const usuarioId = String(btn.dataset.workspaceMemberRemove || "").trim();
+      if (!usuarioId) return;
+      if (!window.confirm("¿Quitar acceso a este usuario?")) return;
+      try {
+        await postJsonWithDbRetry("/api/workspace_member_delete", {
+          workspace_id: state.currentWorkspaceId,
+          usuario_id: usuarioId,
+        });
+        const members = await safeWorkspaceApi(`/api/workspace_members?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}`, { rows: [] });
+        state.currentWorkspaceMembers = members.rows || [];
+        renderWorkspaceMembers(state.currentWorkspaceMembers);
+      } catch (error) {
+        alert(error?.message || "No se pudo quitar.");
+      }
     });
   });
 };
@@ -12265,6 +12408,11 @@ const loadWorkspaceDetail = async (workspaceId) => {
     { rows: [] }
   );
   state.workspaceTimeUsers = timeUsers.rows || [];
+  let members = { rows: [] };
+  if (canManageWorkspace) {
+    members = await safeWorkspaceApi(`/api/workspace_members?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [] });
+  }
+  state.currentWorkspaceMembers = members.rows || [];
   const timeMonth = normalizeMonthValue(state.workspaceTimeMonth || "");
   state.workspaceTimeMonth = timeMonth;
   const viewHint = String(
@@ -12364,6 +12512,7 @@ const loadWorkspaceDetail = async (workspaceId) => {
   void refreshWorkspaceHomeAlerts();
   renderWorkspaceCompanySwitcher(companies);
   renderWorkspaceCompanies(companies);
+  renderWorkspaceMembers(state.currentWorkspaceMembers || []);
   renderWorkspaceClientBase(workspaceClients.rows || []);
   renderWorkspaceClientDetail(null);
   renderWorkspaceModules(detail.modules || []);
@@ -37506,6 +37655,7 @@ if (workspaceNewBtn) {
     renderWorkspacePermissionMatrix([]);
     renderWorkspaceLauncher({}, []);
     renderWorkspaceCompanies([]);
+    renderWorkspaceMembers([]);
     renderWorkspaceClientBase([]);
     renderWorkspaceClientDetail(null);
     renderWorkspaceModules([]);
@@ -37551,6 +37701,36 @@ if (workspaceNewBtn) {
     renderCompanyCards();
     if (workspaceFormStatus) {
       workspaceFormStatus.textContent = "Preparado para crear un workspace nuevo.";
+    }
+  });
+}
+
+if (workspaceNewCustomerBtn) {
+  workspaceNewCustomerBtn.addEventListener("click", async () => {
+    const authUser = getAuthScopeUser();
+    if (!authUser || !isPrivilegedUser(authUser)) {
+      alert("No autorizado.");
+      return;
+    }
+    const wsName = (window.prompt("Nombre del cliente / workspace", "") || "").trim();
+    if (!wsName) return;
+    const empresaNombre = (window.prompt("Razón social (empresa operativa)", wsName) || "").trim();
+    if (!empresaNombre) return;
+    const empresaNif = (window.prompt("CIF/NIF (opcional)", "") || "").trim();
+    const empresaDireccion = (window.prompt("Dirección / centro (opcional)", "") || "").trim();
+    try {
+      const data = await postJsonWithDbRetry("/api/workspace_customer_create", {
+        workspace_nombre: wsName,
+        empresa_nombre: empresaNombre,
+        empresa_nif: empresaNif,
+        empresa_direccion: empresaDireccion,
+      });
+      if (data?.error) throw new Error(data.error);
+      state.currentWorkspaceId = String(data.workspace_id || "");
+      await loadWorkspaceCentral();
+      if (workspaceFormStatus) workspaceFormStatus.textContent = "Cliente creado.";
+    } catch (error) {
+      alert(error?.message || "No se pudo crear el cliente.");
     }
   });
 }

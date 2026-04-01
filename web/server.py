@@ -203,6 +203,10 @@ AUTH_SESSIONS = {}
 AUTH_SESSIONS_LOCK = threading.Lock()
 SQLITE_FOREIGN_KEYS_ENABLED = os.environ.get("APP_SQLITE_FOREIGN_KEYS", "1").strip().lower() not in ("0", "false", "no", "off")
 APP_TIMEZONE = (os.environ.get("APP_TIMEZONE") or os.environ.get("APP_TZ") or "Europe/Madrid").strip() or "Europe/Madrid"
+WORKSPACE_MEMBERSHIP_ENFORCE = os.environ.get("APP_WORKSPACE_MEMBERSHIP_ENFORCE", "0").strip().lower() in ("1", "true", "yes", "si", "sí", "on")
+# Compat/backfill legacy: si un workspace no tiene empresas asociadas, opcionalmente auto-vincula todas las activas.
+# En modo comercial multi-tenant se recomienda desactivarlo (0) para evitar fugas entre workspaces.
+WORKSPACE_AUTO_LINK_COMPANIES = os.environ.get("APP_WORKSPACE_AUTO_LINK_COMPANIES", "1").strip().lower() not in ("0", "false", "no", "off")
 
 
 def app_now():
@@ -1424,6 +1428,19 @@ def ensure_workspace_core_tables(conn):
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workspace_miembros (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          usuario_id TEXT NOT NULL,
+          rol TEXT NOT NULL DEFAULT 'Miembro',
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          UNIQUE (workspace_id, usuario_id)
+        )
+        """
+    )
     ensure_column(conn, "workspaces", "descripcion", "descripcion TEXT")
     ensure_column(conn, "workspaces", "logo_url", "logo_url TEXT")
     ensure_column(conn, "workspaces", "primary_color", "primary_color TEXT")
@@ -1431,6 +1448,58 @@ def ensure_workspace_core_tables(conn):
     ensure_column(conn, "workspaces", "kiosk_pin_hash", "kiosk_pin_hash TEXT")
     ensure_column(conn, "workspaces", "kiosk_pin_required", "kiosk_pin_required INTEGER NOT NULL DEFAULT 0")
     ensure_column(conn, "workspace_modulos", "config_json", "config_json TEXT")
+
+def ensure_workspace_membership_backfill(conn):
+    """
+    Best-effort para despliegues legacy:
+    - Si hay fichas de personal con usuario_id, damos acceso a esos usuarios al workspace.
+    - Si no hay ningún miembro y solo existe 1 workspace, damos acceso a todos los usuarios activos.
+    Diseñado para no romper instalaciones existentes cuando se activa APP_WORKSPACE_MEMBERSHIP_ENFORCE.
+    """
+    try:
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        ws_rows = conn.execute("SELECT id FROM workspaces").fetchall()
+        workspaces = [str(row_value(row, "id") or row_value(row, 0) or "").strip() for row in (ws_rows or [])]
+        workspaces = [ws for ws in workspaces if ws]
+        if not workspaces:
+            return
+        # 1) Backfill desde RRHH/personas (lo más preciso).
+        try:
+            pairs = conn.execute(
+                """
+                SELECT DISTINCT workspace_id, usuario_id
+                FROM workspace_registro_personal
+                WHERE COALESCE(usuario_id, '') != ''
+                """
+            ).fetchall()
+        except Exception:
+            pairs = []
+        for row in pairs or []:
+            ws_id = str(row_value(row, "workspace_id") or row_value(row, 0) or "").strip()
+            uid = str(row_value(row, "usuario_id") or row_value(row, 1) or "").strip()
+            if not ws_id or not uid:
+                continue
+            ensure_workspace_member(conn, ws_id, uid, role="Miembro", now=now)
+        # 2) Si sigue vacío y solo hay 1 workspace, mantenemos comportamiento legacy.
+        try:
+            any_member = conn.execute("SELECT 1 FROM workspace_miembros LIMIT 1").fetchone()
+        except Exception:
+            any_member = None
+        if not any_member and len(workspaces) == 1:
+            try:
+                users = conn.execute("SELECT id, rol, servicio FROM usuarios WHERE COALESCE(activo, 1) = 1").fetchall()
+            except Exception:
+                users = []
+            ws_id = workspaces[0]
+            for u in users or []:
+                uid = str(row_value(u, "id") or row_value(u, 0) or "").strip()
+                if not uid:
+                    continue
+                # Promueve admins a Owner para facilitar arranque.
+                role = "Owner" if workspace_session_is_privileged({"rol": row_value(u, "rol") or "", "servicio": row_value(u, "servicio") or ""}) else "Miembro"
+                ensure_workspace_member(conn, ws_id, uid, role=role, now=now)
+    except Exception:
+        return
 
 
 def bootstrap_default_workspace(conn):
@@ -14139,9 +14208,12 @@ def ensure_tables(db_path):
         conn = open_sqlite_conn(db_path, with_row_factory=False)
     apply_schema_file(conn, ROOT.parent / "schema.sql")
     ensure_column(conn, "empresas", "logo_url", "logo_url TEXT")
+    ensure_column(conn, "empresas", "nif", "nif TEXT")
+    ensure_column(conn, "empresas", "direccion", "direccion TEXT")
     ensure_workspace_core_tables(conn)
     ensure_workspace_facturacion_table(conn)
     ensure_workspace_product_tables(conn)
+    ensure_workspace_membership_backfill(conn)
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS ocr_jobs (
@@ -15074,6 +15146,44 @@ def fetch_workspace_rows(conn):
     return [dict(row) for row in rows]
 
 
+def fetch_workspace_rows_for_user(conn, session):
+    """
+    Legacy: si no activamos el enforcement multi-tenant, devolvemos todo como siempre.
+    En modo enforce: admins ven todo; resto ve solo workspaces donde es miembro.
+    """
+    if not WORKSPACE_MEMBERSHIP_ENFORCE:
+        return fetch_workspace_rows(conn)
+    if workspace_actor_is_privileged(conn, session):
+        return fetch_workspace_rows(conn)
+    user_id = str((session or {}).get("user_id") or "").strip()
+    if not user_id:
+        return []
+    rows = conn.execute(
+        """
+        SELECT
+          w.id,
+          w.nombre,
+          w.slug,
+          w.estado,
+          w.plan,
+          w.descripcion,
+          w.logo_url,
+          w.primary_color,
+          w.accent_color,
+          COUNT(DISTINCT we.empresa_id) AS empresas_total,
+          COUNT(DISTINCT CASE WHEN COALESCE(wm.enabled, 0) = 1 THEN wm.modulo_key END) AS modulos_activos
+        FROM workspaces w
+        JOIN workspace_miembros mem ON mem.workspace_id = w.id AND mem.usuario_id = ?
+        LEFT JOIN workspace_empresas we ON we.workspace_id = w.id
+        LEFT JOIN workspace_modulos wm ON wm.workspace_id = w.id
+        GROUP BY w.id, w.nombre, w.slug, w.estado, w.plan, w.descripcion, w.logo_url, w.primary_color, w.accent_color
+        ORDER BY w.nombre COLLATE NOCASE ASC
+        """,
+        (user_id,),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
 def ensure_workspace_facturacion_table(conn):
     conn.execute(
         """
@@ -15836,6 +15946,8 @@ def fetch_workspace_company_ids(conn, workspace_id):
     empresa_ids = [eid for eid in empresa_ids if eid]
     if empresa_ids:
         return empresa_ids
+    if not WORKSPACE_AUTO_LINK_COMPANIES:
+        return []
     # Backfill: si el workspace no tiene empresas asociadas, no podemos mostrar RRHH/operativa.
     # Creamos los links por defecto usando empresas activas existentes.
     try:
@@ -17362,6 +17474,8 @@ def fetch_workspace_time_entries(conn, workspace_id, empresa_id=None, limit=40, 
           t.persona_id,
           t.usuario_id,
           t.persona_nombre,
+          COALESCE(p.nif, '') AS persona_nif,
+          COALESCE(p.email, '') AS persona_email,
           t.tipo_jornada,
           t.horas_pactadas_dia,
           t.fecha,
@@ -17370,12 +17484,23 @@ def fetch_workspace_time_entries(conn, workspace_id, empresa_id=None, limit=40, 
           t.pausa_min,
           t.minutos_trabajados,
           t.metodo_registro,
+          t.geo_in_lat,
+          t.geo_in_lon,
+          t.geo_in_acc,
+          t.geo_in_source,
+          t.geo_in_at,
+          t.geo_out_lat,
+          t.geo_out_lon,
+          t.geo_out_acc,
+          t.geo_out_source,
+          t.geo_out_at,
           t.estado,
           t.notas,
           t.created_at,
           t.updated_at
         FROM workspace_registro_horario t
         LEFT JOIN empresas e ON e.id = t.empresa_id
+        LEFT JOIN workspace_registro_personal p ON p.workspace_id = t.workspace_id AND p.id = t.persona_id
         WHERE {' AND '.join(where)}
         ORDER BY COALESCE(t.fecha, t.created_at) DESC, t.hora_inicio DESC
         LIMIT ?
@@ -17593,22 +17718,36 @@ def build_workspace_time_summary(rows, month=""):
 
 
 def build_workspace_time_csv(rows):
-    output = BytesIO()
-    text = output
-    sio = []
     header = [
+        "empresa_id",
         "empresa",
+        "persona_id",
         "persona",
+        "dni_nif",
+        "email",
         "tipo_jornada",
         "fecha",
         "hora_inicio",
         "hora_fin",
         "pausa_min",
+        "minutos_trabajados",
         "horas_trabajadas",
         "horas_pactadas_dia",
         "metodo_registro",
+        "geo_in_lat",
+        "geo_in_lon",
+        "geo_in_acc",
+        "geo_in_source",
+        "geo_in_at",
+        "geo_out_lat",
+        "geo_out_lon",
+        "geo_out_acc",
+        "geo_out_source",
+        "geo_out_at",
         "estado",
         "notas",
+        "created_at",
+        "updated_at",
     ]
     import io
     string_io = io.StringIO()
@@ -17617,18 +17756,35 @@ def build_workspace_time_csv(rows):
     for row in rows:
         writer.writerow(
             [
+                row.get("empresa_id") or "",
                 row.get("empresa_nombre") or "",
+                row.get("persona_id") or "",
                 row.get("persona_nombre") or "",
+                row.get("persona_nif") or "",
+                row.get("persona_email") or "",
                 row.get("tipo_jornada") or "",
                 row.get("fecha") or "",
                 row.get("hora_inicio") or "",
                 row.get("hora_fin") or "",
                 row.get("pausa_min") or 0,
+                int(row.get("minutos_trabajados") or 0),
                 format_minutes_hhmm(row.get("minutos_trabajados") or 0),
                 row.get("horas_pactadas_dia") or "",
                 row.get("metodo_registro") or "",
+                row.get("geo_in_lat") if row.get("geo_in_lat") not in (None, "") else "",
+                row.get("geo_in_lon") if row.get("geo_in_lon") not in (None, "") else "",
+                row.get("geo_in_acc") if row.get("geo_in_acc") not in (None, "") else "",
+                row.get("geo_in_source") or "",
+                row.get("geo_in_at") or "",
+                row.get("geo_out_lat") if row.get("geo_out_lat") not in (None, "") else "",
+                row.get("geo_out_lon") if row.get("geo_out_lon") not in (None, "") else "",
+                row.get("geo_out_acc") if row.get("geo_out_acc") not in (None, "") else "",
+                row.get("geo_out_source") or "",
+                row.get("geo_out_at") or "",
                 row.get("estado") or "",
                 row.get("notas") or "",
+                row.get("created_at") or "",
+                row.get("updated_at") or "",
             ]
         )
     return string_io.getvalue().encode("utf-8-sig")
@@ -17667,14 +17823,44 @@ def build_workspace_time_xlsx(rows, workspace=None, company=None, persona=None, 
 
     lines = []
     worker_name = persona.get("persona_nombre") or persona.get("nombre") or ""
+    worker_nif = persona.get("nif") or persona.get("persona_nif") or ""
+    worker_email = persona.get("email") or persona.get("persona_email") or ""
     lines.append(["Workspace", workspace.get("nombre") or ""])
     lines.append(["Empresa", company.get("nombre") or ""])
     lines.append(["Trabajador", worker_name])
+    if worker_nif:
+        lines.append(["DNI/NIF", worker_nif])
+    if worker_email:
+        lines.append(["Email", worker_email])
     lines.append(["Mes", month or ""])
+    lines.append(["Zona horaria", APP_TIMEZONE])
+    lines.append(["Generado", app_now().strftime("%Y-%m-%d %H:%M:%S")])
     lines.append([])
-    lines.append(["Fecha", "Inicio", "Fin", "Pausa (min)", "Minutos trabajados", "Horas (HH:MM)", "Estado", "Notas"])
+    lines.append(
+        [
+            "Fecha",
+            "Inicio",
+            "Fin",
+            "Pausa (min)",
+            "Minutos trabajados",
+            "Horas (HH:MM)",
+            "Método",
+            "Geo entrada",
+            "Geo salida",
+            "Estado",
+            "Notas",
+            "Creado",
+            "Actualizado",
+        ]
+    )
     for row in rows or []:
         minutos = int(row.get("minutos_trabajados") or 0)
+        geo_in = ""
+        if row.get("geo_in_lat") not in (None, "") and row.get("geo_in_lon") not in (None, ""):
+            geo_in = f"{row.get('geo_in_lat')},{row.get('geo_in_lon')}" + (f" ±{row.get('geo_in_acc')}m" if row.get("geo_in_acc") not in (None, "") else "")
+        geo_out = ""
+        if row.get("geo_out_lat") not in (None, "") and row.get("geo_out_lon") not in (None, ""):
+            geo_out = f"{row.get('geo_out_lat')},{row.get('geo_out_lon')}" + (f" ±{row.get('geo_out_acc')}m" if row.get("geo_out_acc") not in (None, "") else "")
         lines.append(
             [
                 row.get("fecha") or "",
@@ -17683,8 +17869,13 @@ def build_workspace_time_xlsx(rows, workspace=None, company=None, persona=None, 
                 int(row.get("pausa_min") or 0),
                 minutos,
                 format_minutes_hhmm(minutos),
+                row.get("metodo_registro") or "",
+                geo_in,
+                geo_out,
                 row.get("estado") or "",
                 row.get("notas") or "",
+                row.get("created_at") or "",
+                row.get("updated_at") or "",
             ]
         )
 
@@ -18203,6 +18394,91 @@ def workspace_actor_is_privileged(conn, session):
     return workspace_session_is_privileged({"rol": row["rol"] or "", "servicio": row["servicio"] or ""})
 
 
+def _normalize_workspace_member_role(value):
+    raw = normalize_lookup_text(value)
+    if raw in {"OWNER", "PROPIETARIO"}:
+        return "Owner"
+    if raw in {"ADMIN", "ADMINISTRADOR"}:
+        return "Admin"
+    if raw in {"LECTURA", "READONLY", "READ_ONLY", "READ ONLY"}:
+        return "Lectura"
+    if raw in {"MIEMBRO", "MEMBER"}:
+        return "Miembro"
+    return (str(value or "").strip() or "Miembro")
+
+
+def workspace_member_can_write(role):
+    role_norm = _normalize_workspace_member_role(role)
+    return role_norm not in {"Lectura"}
+
+
+def fetch_workspace_member(conn, workspace_id, user_id):
+    ws_id = str(workspace_id or "").strip()
+    uid = str(user_id or "").strip()
+    if not ws_id or not uid:
+        return None
+    row = conn.execute(
+        """
+        SELECT id, workspace_id, usuario_id, rol
+        FROM workspace_miembros
+        WHERE workspace_id = ? AND usuario_id = ?
+        LIMIT 1
+        """,
+        (ws_id, uid),
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def ensure_workspace_member(conn, workspace_id, user_id, role="Miembro", now=None):
+    ws_id = str(workspace_id or "").strip()
+    uid = str(user_id or "").strip()
+    if not ws_id or not uid:
+        return ""
+    role_norm = _normalize_workspace_member_role(role)
+    now_ts = now or datetime.now(timezone.utc).isoformat()
+    record_id = os.urandom(16).hex()
+    try:
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO workspace_miembros (
+              id, workspace_id, usuario_id, rol, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, datetime(?), datetime(?))
+            """,
+            (record_id, ws_id, uid, role_norm, now_ts, now_ts),
+        )
+    except Exception:
+        pass
+    # Return existing id if it already existed.
+    existing = conn.execute(
+        "SELECT id FROM workspace_miembros WHERE workspace_id = ? AND usuario_id = ? LIMIT 1",
+        (ws_id, uid),
+    ).fetchone()
+    return str(row_value(existing, "id") or row_value(existing, 0) or record_id)
+
+
+def enforce_workspace_membership(conn, session, workspace_id, *, write=False):
+    """
+    En modo comercial multi-tenant, exige que el usuario pertenezca al workspace.
+    Para no romper setups legacy, se puede desactivar con APP_WORKSPACE_MEMBERSHIP_ENFORCE=0.
+    """
+    if not WORKSPACE_MEMBERSHIP_ENFORCE:
+        return True, ""
+    if workspace_actor_is_privileged(conn, session):
+        return True, ""
+    if not session:
+        return False, "No autorizado"
+    uid = str(session.get("user_id") or "").strip()
+    ws_id = str(workspace_id or "").strip()
+    if not uid or not ws_id:
+        return False, "No autorizado"
+    member = fetch_workspace_member(conn, ws_id, uid)
+    if not member:
+        return False, "No autorizado"
+    if write and not workspace_member_can_write(member.get("rol")):
+        return False, "No autorizado"
+    return True, ""
+
+
 def workspace_persona_id_for_user(conn, workspace_id, user_id):
     if not workspace_id or not user_id:
         return ""
@@ -18507,7 +18783,7 @@ def _parse_alert_last_sent(value):
 
 
 def _update_alert_last_sent(conn, workspace_id, persona_id, updates, now=None):
-    now_ts = now or datetime.now().isoformat()
+    now_ts = now or app_now().isoformat()
     existing = conn.execute(
         """
         SELECT alert_last_sent
@@ -18530,8 +18806,13 @@ def _update_alert_last_sent(conn, workspace_id, persona_id, updates, now=None):
 
 
 def run_workspace_time_missing_sweep(conn, workspace_id, now=None):
-    now_ts = now or datetime.now().isoformat()
-    now_dt = parse_iso_datetime(now_ts) or datetime.now()
+    # Importante: Render suele ejecutar en UTC. Para alertas (faltan entrada/salida) usamos hora local.
+    if now:
+        now_ts = now
+        now_dt = parse_iso_datetime(now_ts) or app_now()
+    else:
+        now_dt = app_now()
+        now_ts = now_dt.isoformat()
     today = now_dt.date().isoformat()
     now_minutes = parse_hhmm_to_minutes(now_dt.strftime("%H:%M")) or 0
     personal = conn.execute(
@@ -18706,14 +18987,30 @@ def build_workspace_time_xml(rows, persona_name="", company_name="", month=""):
 def build_workspace_time_pdf(persona, workspace, company, rows):
     month = persona.get("month") or ""
     worker_name = persona.get("persona_nombre") or persona.get("nombre") or "-"
+    worker_nif = persona.get("nif") or persona.get("persona_nif") or ""
+    worker_email = persona.get("email") or persona.get("persona_email") or ""
+    company_nif = company.get("nif") or company.get("cif") or ""
+    company_addr = company.get("direccion") or ""
+    generated_at = app_now().strftime("%d/%m/%Y %H:%M:%S")
     sections = [
         (
-            "Trabajador",
+            "Identificación",
             [
                 ("Nombre", worker_name),
+                ("DNI/NIF", worker_nif or "-"),
+                ("Email", worker_email or "-"),
                 ("Empresa", company.get("nombre") or "-"),
+                ("CIF/NIF empresa", company_nif or "-"),
+                ("Centro / dirección", company_addr or "-"),
                 ("Workspace", workspace.get("nombre") or "-"),
                 ("Mes", month or "Completo"),
+                ("Zona horaria", APP_TIMEZONE),
+                ("Generado", generated_at),
+            ],
+        ),
+        (
+            "Resumen",
+            [
                 ("Jornada", persona.get("tipo_jornada") or "-"),
                 ("Horas pactadas", persona.get("horas_pactadas_hhmm") or "-"),
                 ("Horas reales", persona.get("horas_trabajadas_hhmm") or "-"),
@@ -18721,16 +19018,28 @@ def build_workspace_time_pdf(persona, workspace, company, rows):
             ],
         ),
         (
-            "Entradas",
+            "Detalle diario",
             [
-                f"{row.get('fecha') or '-'} · {row.get('hora_inicio') or '-'} → {row.get('hora_fin') or '-'} · {format_minutes_hhmm(row.get('minutos_trabajados') or 0)} · {row.get('estado') or ''}".strip()
+                (
+                    f"{row.get('fecha') or '-'} · Entrada {row.get('hora_inicio') or '-'} · Salida {row.get('hora_fin') or '-'}"
+                    f" · Pausa {int(row.get('pausa_min') or 0)}m · Trabajado {format_minutes_hhmm(row.get('minutos_trabajados') or 0)}"
+                    f" · Método {row.get('metodo_registro') or '-'} · Estado {row.get('estado') or '-'}"
+                ).strip()
                 for row in (rows or [])
             ]
             or ["Sin fichajes en el periodo seleccionado."],
         ),
+        (
+            "Firmas",
+            [
+                "Firma trabajador: ________________________________",
+                "Firma empresa: ___________________________________",
+            ],
+        ),
     ]
     footer = [
-        "Documento generado por el sistema. Requiere revisión interna para su adecuación final a normativa vigente.",
+        "Registro horario diario (art. 34.9 Estatuto de los Trabajadores). Conservar durante 4 años y mantener accesible para la persona trabajadora y la representación legal.",
+        f"Las horas reflejadas están en hora local ({APP_TIMEZONE}).",
     ]
     return build_branded_document_pdf(
         "REGISTRO HORARIO",
@@ -19628,6 +19937,9 @@ def fetch_workspace_detail(conn, workspace_id):
     ).fetchone()
     if not workspace:
         return None
+    # Enforce membership for non-admin users when enabled.
+    # (Admins can see all workspaces.)
+    # Note: some public endpoints call fetch_workspace_detail without a session; enforcement is handled in request layer.
     # Backfill: si el workspace aún no tiene empresas linkadas (p. ej. tras migraciones),
     # las asociamos automáticamente para que RRHH y formularios tengan el desplegable de empresa.
     try:
@@ -19636,7 +19948,14 @@ def fetch_workspace_detail(conn, workspace_id):
         pass
     companies = conn.execute(
         """
-        SELECT e.id, e.nombre, COALESCE(we.rol, '') AS rol, COALESCE(e.activo, 1) AS activo
+        SELECT
+          e.id,
+          e.nombre,
+          COALESCE(e.nif, '') AS nif,
+          COALESCE(e.direccion, '') AS direccion,
+          COALESCE(e.logo_url, '') AS logo_url,
+          COALESCE(we.rol, '') AS rol,
+          COALESCE(e.activo, 1) AS activo
         FROM workspace_empresas we
         JOIN empresas e ON e.id = we.empresa_id
         WHERE we.workspace_id = ?
@@ -21628,6 +21947,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/cliente_profesional",
             "/api/cliente_profesional_update",
             "/api/cliente_profesional_delete",
+            "/api/empresa_update",
             "/api/captaciones",
             "/api/captaciones_update",
             "/api/captacion_update",
@@ -21650,6 +21970,22 @@ class Handler(BaseHTTPRequestHandler):
             "/api/login",
             "/api/logout",
             "/api/auth_set_password",
+            "/api/workspace_customer_create",
+            "/api/empresa_create",
+            "/api/workspace_empresa_link",
+            "/api/workspace_empresa_unlink",
+            "/api/workspace_member_upsert",
+            "/api/workspace_member_delete",
+            "/api/workspace_update",
+            "/api/workspace_module_update",
+            "/api/workspace_facturacion",
+            "/api/workspace_series",
+            "/api/workspace_inbox",
+            "/api/workspace_inbox_review",
+            "/api/workspace_portal",
+            "/api/workspace_automatizaciones",
+            "/api/workspace_registro_notifications",
+            "/api/workspace_document_assign",
             "/api/workspace_portal_upload",
             "/api/workspace_cobros",
             "/api/workspace_remesas",
@@ -21969,6 +22305,15 @@ class Handler(BaseHTTPRequestHandler):
         ):
             ensure_usuarios_schema(conn)
             conn.commit()
+        # Enforce tenant isolation (optional) for authenticated users on workspace-scoped POSTs.
+        session = getattr(self, "auth_session", None) or self._current_session()
+        if session and isinstance(payload, dict):
+            ws_id = str(payload.get("workspace_id") or "").strip()
+            if ws_id:
+                ok, err = enforce_workspace_membership(conn, session, ws_id)
+                if not ok:
+                    json_response(self, {"error": err or "No autorizado"}, status=403)
+                    return
         empresa = None
         if parsed.path in ("/api/acciones", "/api/acciones_update") and empresa_nombre:
             empresa = conn.execute(
@@ -22867,7 +23212,275 @@ class Handler(BaseHTTPRequestHandler):
             conn.commit()
             json_response(self, {"ok": True})
             return
+        elif parsed.path == "/api/empresa_update":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not workspace_actor_is_privileged(conn, session):
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            empresa_id = str(payload.get("id") or payload.get("empresa_id") or "").strip()
+            if not workspace_id or not empresa_id:
+                json_response(self, {"error": "workspace_id e id requeridos"}, status=400)
+                return
+            linked = conn.execute(
+                "SELECT 1 FROM workspace_empresas WHERE workspace_id = ? AND empresa_id = ? LIMIT 1",
+                (workspace_id, empresa_id),
+            ).fetchone()
+            if not linked:
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
+            nif = str(payload.get("nif") or "").strip() or None
+            direccion = str(payload.get("direccion") or "").strip() or None
+            conn.execute(
+                """
+                UPDATE empresas
+                SET nif = ?, direccion = ?, updated_at = datetime(?)
+                WHERE id = ?
+                """,
+                (nif, direccion, now, empresa_id),
+            )
+            conn.commit()
+            json_response(self, {"ok": True, "id": empresa_id})
+            return
+        elif parsed.path == "/api/empresa_create":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not workspace_actor_is_privileged(conn, session):
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
+            nombre = str(payload.get("nombre") or "").strip()
+            if not nombre:
+                json_response(self, {"error": "nombre requerido"}, status=400)
+                return
+            empresa_id = os.urandom(16).hex()
+            nif = str(payload.get("nif") or "").strip() or None
+            direccion = str(payload.get("direccion") or "").strip() or None
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO empresas (id, nombre, activo, nif, direccion, created_at, updated_at)
+                    VALUES (?, ?, 1, ?, ?, datetime(?), datetime(?))
+                    """,
+                    (empresa_id, nombre, nif, direccion, now, now),
+                )
+            except Exception:
+                existing = conn.execute("SELECT id FROM empresas WHERE nombre = ? LIMIT 1", (nombre,)).fetchone()
+                if existing:
+                    empresa_id = str(row_value(existing, "id") or row_value(existing, 0) or "").strip() or empresa_id
+                else:
+                    json_response(self, {"error": "No se pudo crear la empresa"}, status=500)
+                    return
+            conn.commit()
+            json_response(self, {"ok": True, "id": empresa_id})
+            return
+        elif parsed.path == "/api/workspace_empresa_link":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not workspace_actor_is_privileged(conn, session):
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            empresa_id = str(payload.get("empresa_id") or "").strip()
+            if not workspace_id or not empresa_id:
+                json_response(self, {"error": "workspace_id y empresa_id requeridos"}, status=400)
+                return
+            rol = str(payload.get("rol") or "operativa").strip() or "operativa"
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO workspace_empresas (
+                  id, workspace_id, empresa_id, rol, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, datetime(?), datetime(?))
+                """,
+                (os.urandom(16).hex(), workspace_id, empresa_id, rol, now, now),
+            )
+            conn.commit()
+            json_response(self, {"ok": True})
+            return
+        elif parsed.path == "/api/workspace_empresa_unlink":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not workspace_actor_is_privileged(conn, session):
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            empresa_id = str(payload.get("empresa_id") or "").strip()
+            if not workspace_id or not empresa_id:
+                json_response(self, {"error": "workspace_id y empresa_id requeridos"}, status=400)
+                return
+            conn.execute(
+                "DELETE FROM workspace_empresas WHERE workspace_id = ? AND empresa_id = ?",
+                (workspace_id, empresa_id),
+            )
+            conn.commit()
+            json_response(self, {"ok": True})
+            return
+        elif parsed.path == "/api/workspace_member_upsert":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not workspace_actor_is_privileged(conn, session):
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            login = str(payload.get("login") or "").strip()
+            role = _normalize_workspace_member_role(payload.get("role") or "Miembro")
+            if not workspace_id or not login:
+                json_response(self, {"error": "workspace_id y login requeridos"}, status=400)
+                return
+            matches = fetch_active_users_by_login(conn, login)
+            if not matches:
+                json_response(self, {"error": "Usuario no encontrado"}, status=404)
+                return
+            if len(matches) > 1:
+                json_response(self, {"error": "Usuario ambiguo (duplicado)."}, status=409)
+                return
+            user_id = str(matches[0]["id"] or "").strip()
+            if not user_id:
+                json_response(self, {"error": "Usuario inválido"}, status=400)
+                return
+            existing = conn.execute(
+                "SELECT id FROM workspace_miembros WHERE workspace_id = ? AND usuario_id = ? LIMIT 1",
+                (workspace_id, user_id),
+            ).fetchone()
+            if existing:
+                conn.execute(
+                    "UPDATE workspace_miembros SET rol = ?, updated_at = datetime(?) WHERE id = ?",
+                    (role, now, existing["id"]),
+                )
+            else:
+                conn.execute(
+                    """
+                    INSERT INTO workspace_miembros (id, workspace_id, usuario_id, rol, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, datetime(?), datetime(?))
+                    """,
+                    (os.urandom(16).hex(), workspace_id, user_id, role, now, now),
+                )
+            conn.commit()
+            json_response(self, {"ok": True})
+            return
+        elif parsed.path == "/api/workspace_member_delete":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not workspace_actor_is_privileged(conn, session):
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            user_id = str(payload.get("usuario_id") or "").strip()
+            if not workspace_id or not user_id:
+                json_response(self, {"error": "workspace_id y usuario_id requeridos"}, status=400)
+                return
+            conn.execute(
+                "DELETE FROM workspace_miembros WHERE workspace_id = ? AND usuario_id = ?",
+                (workspace_id, user_id),
+            )
+            conn.commit()
+            json_response(self, {"ok": True})
+            return
+        elif parsed.path == "/api/workspace_customer_create":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not workspace_actor_is_privileged(conn, session):
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
+            ws_name = str(payload.get("workspace_nombre") or "").strip()
+            if not ws_name:
+                json_response(self, {"error": "workspace_nombre requerido"}, status=400)
+                return
+            ws_slug = normalize_workspace_slug(payload.get("workspace_slug") or ws_name)
+            existing_slug = conn.execute(
+                "SELECT id FROM workspaces WHERE slug = ? LIMIT 1",
+                (ws_slug,),
+            ).fetchone()
+            if existing_slug:
+                json_response(self, {"error": "slug ya en uso"}, status=409)
+                return
+            empresa_nombre = str(payload.get("empresa_nombre") or ws_name).strip()
+            if not empresa_nombre:
+                json_response(self, {"error": "empresa_nombre requerido"}, status=400)
+                return
+            empresa_nif = str(payload.get("empresa_nif") or "").strip() or None
+            empresa_direccion = str(payload.get("empresa_direccion") or "").strip() or None
+            # 1) Crea empresa (o reutiliza si ya existe).
+            empresa_id = os.urandom(16).hex()
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO empresas (id, nombre, activo, nif, direccion, created_at, updated_at)
+                    VALUES (?, ?, 1, ?, ?, datetime(?), datetime(?))
+                    """,
+                    (empresa_id, empresa_nombre, empresa_nif, empresa_direccion, now, now),
+                )
+            except Exception:
+                existing = conn.execute("SELECT id FROM empresas WHERE nombre = ? LIMIT 1", (empresa_nombre,)).fetchone()
+                if existing:
+                    empresa_id = str(row_value(existing, "id") or row_value(existing, 0) or "").strip() or empresa_id
+                else:
+                    json_response(self, {"error": "No se pudo crear la empresa"}, status=500)
+                    return
+            # 2) Crea workspace con módulos.
+            workspace_id = os.urandom(16).hex()
+            conn.execute(
+                """
+                INSERT INTO workspaces (
+                  id, nombre, slug, estado, plan, descripcion, logo_url, primary_color, accent_color, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                """,
+                (
+                    workspace_id,
+                    ws_name,
+                    ws_slug,
+                    str(payload.get("estado") or "Activo"),
+                    str(payload.get("plan") or "Enterprise"),
+                    str(payload.get("descripcion") or "").strip(),
+                    str(payload.get("logo_url") or "").strip(),
+                    str(payload.get("primary_color") or "#3C6E71").strip(),
+                    str(payload.get("accent_color") or "#5F7A61").strip(),
+                    now,
+                    now,
+                ),
+            )
+            # Módulos: por defecto activamos todo para mantener el comportamiento del workspace actual.
+            requested = payload.get("modules_enabled")
+            requested_set = set()
+            if isinstance(requested, (list, tuple)):
+                requested_set = {normalize_lookup_text(x) for x in requested if str(x or "").strip()}
+            for module in WORKSPACE_MODULE_CATALOG:
+                key = module["key"]
+                enabled = 1
+                if requested_set:
+                    enabled = 1 if normalize_lookup_text(key) in requested_set else 0
+                conn.execute(
+                    """
+                    INSERT INTO workspace_modulos (
+                      id, workspace_id, modulo_key, modulo_nombre, categoria, enabled, sort_order, config_json, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, '{}', datetime(?), datetime(?))
+                    """,
+                    (
+                        os.urandom(16).hex(),
+                        workspace_id,
+                        key,
+                        module["nombre"],
+                        module["categoria"],
+                        enabled,
+                        module["sort_order"],
+                        now,
+                        now,
+                    ),
+                )
+            # 3) Vincula empresa al workspace.
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO workspace_empresas (
+                  id, workspace_id, empresa_id, rol, created_at, updated_at
+                ) VALUES (?, ?, ?, 'operativa', datetime(?), datetime(?))
+                """,
+                (os.urandom(16).hex(), workspace_id, empresa_id, now, now),
+            )
+            # 4) Asigna al creador como owner.
+            creator_id = str((session or {}).get("user_id") or "").strip()
+            if creator_id:
+                ensure_workspace_member(conn, workspace_id, creator_id, role="Owner", now=now)
+            conn.commit()
+            json_response(self, {"ok": True, "workspace_id": workspace_id, "empresa_id": empresa_id})
+            return
         elif parsed.path == "/api/workspace_update":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not workspace_actor_is_privileged(conn, session):
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
             workspace_id = str(payload.get("id") or "").strip()
             nombre = str(payload.get("nombre") or "").strip()
             slug_value = normalize_workspace_slug(payload.get("slug") or nombre)
@@ -22942,10 +23555,18 @@ class Handler(BaseHTTPRequestHandler):
                             now,
                         ),
                     )
+                # El creador entra como owner del workspace recién creado.
+                creator_id = str((session or {}).get("user_id") or "").strip()
+                if creator_id:
+                    ensure_workspace_member(conn, workspace_id, creator_id, role="Owner", now=now)
             conn.commit()
             json_response(self, {"ok": True, "id": workspace_id})
             return
         elif parsed.path == "/api/workspace_module_update":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not workspace_actor_is_privileged(conn, session):
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
             record_id = str(payload.get("id") or "").strip()
             if not record_id:
                 json_response(self, {"error": "id requerido"}, status=400)
@@ -25649,8 +26270,23 @@ class Handler(BaseHTTPRequestHandler):
             rows = fetch_workspace_time_entries(conn, workspace_id, limit=5000, month=month, persona_id=persona_id)["rows"]
             summary = build_workspace_time_summary(rows, month=month)
             persona = next((row for row in summary["rows"] if str(row.get("persona_id") or "") == persona_id), {})
+            if month:
+                persona["month"] = str(month or "").strip()[:7]
             company_id = rows[0]["empresa_id"] if rows else None
-            company_row = conn.execute("SELECT nombre, logo_url FROM empresas WHERE id = ? LIMIT 1", (company_id,)).fetchone()
+            if not company_id:
+                personal_row = conn.execute(
+                    "SELECT nombre, nif, email, empresa_id FROM workspace_registro_personal WHERE workspace_id = ? AND id = ? LIMIT 1",
+                    (workspace_id, persona_id),
+                ).fetchone()
+                if personal_row:
+                    persona.setdefault("persona_nombre", str(personal_row["nombre"] or "").strip())
+                    persona.setdefault("persona_nif", str(personal_row["nif"] or "").strip())
+                    persona.setdefault("persona_email", str(personal_row["email"] or "").strip())
+                    company_id = str(personal_row["empresa_id"] or "").strip() or company_id
+            if rows:
+                persona.setdefault("persona_nif", str(rows[0].get("persona_nif") or "").strip())
+                persona.setdefault("persona_email", str(rows[0].get("persona_email") or "").strip())
+            company_row = conn.execute("SELECT nombre, logo_url, nif, direccion FROM empresas WHERE id = ? LIMIT 1", (company_id,)).fetchone()
             company = dict(company_row) if company_row else {"nombre": "", "logo_url": ""}
             workspace = fetch_workspace_detail(conn, workspace_id).get("workspace") or {}
             pdf_bytes = build_workspace_time_pdf(persona, workspace, company, rows)
@@ -31877,8 +32513,22 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 pass
 
+        # Enforce tenant isolation (optional) for authenticated users.
+        session = getattr(self, "auth_session", None) or self._current_session()
+        if session:
+            ws_id = ""
+            if path == "/api/workspace_detail":
+                ws_id = (params.get("id", [""])[0] or "").strip()
+            elif path.startswith("/api/workspace_"):
+                ws_id = (params.get("workspace_id", [""])[0] or "").strip()
+            if ws_id:
+                ok, err = enforce_workspace_membership(conn, session, ws_id)
+                if not ok:
+                    json_response(self, {"error": err or "No autorizado"}, status=403)
+                    return
+
         if path == "/api/me":
-            session = self._current_session()
+            session = session or self._current_session()
             if not session:
                 json_response(self, {"error": "No autenticado"}, status=401)
                 return
@@ -32000,13 +32650,14 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/empresas":
             rows = conn.execute(
-                "SELECT id, nombre, COALESCE(logo_url, '') AS logo_url FROM empresas ORDER BY nombre"
+                "SELECT id, nombre, COALESCE(logo_url, '') AS logo_url, COALESCE(nif, '') AS nif, COALESCE(direccion, '') AS direccion FROM empresas ORDER BY nombre"
             ).fetchall()
             json_response(self, [dict(r) for r in rows])
             return
 
         if path == "/api/workspaces":
-            rows = fetch_workspace_rows(conn)
+            session = getattr(self, "auth_session", None) or self._current_session()
+            rows = fetch_workspace_rows_for_user(conn, session)
             total_empresas = sum(int(item.get("empresas_total") or 0) for item in rows)
             total_modulos_activos = sum(int(item.get("modulos_activos") or 0) for item in rows)
             json_response(
@@ -32032,6 +32683,35 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "workspace no encontrado"}, status=404)
                 return
             json_response(self, payload)
+            return
+
+        if path == "/api/workspace_members":
+            workspace_id = (params.get("workspace_id", [""])[0] or "").strip()
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not workspace_actor_is_privileged(conn, session):
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
+            rows = conn.execute(
+                """
+                SELECT
+                  mem.usuario_id,
+                  mem.rol,
+                  u.nombre,
+                  u.apellido,
+                  u.usuario,
+                  u.email,
+                  u.activo
+                FROM workspace_miembros mem
+                JOIN usuarios u ON u.id = mem.usuario_id
+                WHERE mem.workspace_id = ?
+                ORDER BY u.nombre COLLATE NOCASE ASC, u.apellido COLLATE NOCASE ASC
+                """,
+                (workspace_id,),
+            ).fetchall()
+            json_response(self, {"rows": [dict(r) for r in rows]})
             return
 
         if path == "/api/workspace_billing_summary":
@@ -32375,7 +33055,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             workspace_id = str(row_value(persona_row, "workspace_id") or "").strip()
             persona_id = str(row_value(persona_row, "id") or "").strip()
-            today = datetime.now().date().isoformat()
+            today = app_now().date().isoformat()
             today_row = conn.execute(
                 """
                 SELECT id, hora_inicio, hora_fin
@@ -32626,7 +33306,7 @@ class Handler(BaseHTTPRequestHandler):
             summary = build_workspace_time_summary(rows, month=month)
             persona = next((row for row in summary["rows"] if str(row.get("persona_id") or "") == persona_id), {})
             company_id = rows[0]["empresa_id"] if rows else None
-            company_row = conn.execute("SELECT nombre, logo_url FROM empresas WHERE id = ? LIMIT 1", (company_id,)).fetchone()
+            company_row = conn.execute("SELECT nombre, logo_url, nif, direccion FROM empresas WHERE id = ? LIMIT 1", (company_id,)).fetchone()
             company = dict(company_row) if company_row else {"nombre": "", "logo_url": ""}
             workspace = fetch_workspace_detail(conn, workspace_id).get("workspace") or {}
             pdf_bytes = build_workspace_time_pdf(persona, workspace, company, rows)
@@ -32651,8 +33331,23 @@ class Handler(BaseHTTPRequestHandler):
             rows = fetch_workspace_time_entries(conn, workspace_id, limit=5000, month=month, persona_id=persona_id)["rows"]
             summary = build_workspace_time_summary(rows, month=month)
             persona = next((row for row in summary["rows"] if str(row.get("persona_id") or "") == persona_id), {})
+            if month:
+                persona["month"] = str(month or "").strip()[:7]
             company_id = rows[0]["empresa_id"] if rows else None
-            company_row = conn.execute("SELECT nombre, logo_url FROM empresas WHERE id = ? LIMIT 1", (company_id,)).fetchone()
+            if not company_id:
+                personal_row = conn.execute(
+                    "SELECT nombre, nif, email, empresa_id FROM workspace_registro_personal WHERE workspace_id = ? AND id = ? LIMIT 1",
+                    (workspace_id, persona_id),
+                ).fetchone()
+                if personal_row:
+                    persona.setdefault("persona_nombre", str(personal_row["nombre"] or "").strip())
+                    persona.setdefault("persona_nif", str(personal_row["nif"] or "").strip())
+                    persona.setdefault("persona_email", str(personal_row["email"] or "").strip())
+                    company_id = str(personal_row["empresa_id"] or "").strip() or company_id
+            if rows:
+                persona.setdefault("persona_nif", str(rows[0].get("persona_nif") or "").strip())
+                persona.setdefault("persona_email", str(rows[0].get("persona_email") or "").strip())
+            company_row = conn.execute("SELECT nombre, logo_url, nif, direccion FROM empresas WHERE id = ? LIMIT 1", (company_id,)).fetchone()
             company = dict(company_row) if company_row else {"nombre": "", "logo_url": ""}
             workspace = fetch_workspace_detail(conn, workspace_id).get("workspace") or {}
             xlsx_bytes = build_workspace_time_xlsx(rows, workspace=workspace, company=company, persona=persona, month=month)
@@ -34819,6 +35514,24 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/usuarios":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if session and not workspace_actor_is_privileged(conn, session):
+                user_id = str(session.get("user_id") or "").strip()
+                if not user_id:
+                    json_response(self, {"rows": []})
+                    return
+                row = conn.execute(
+                    """
+                    SELECT id, nombre, apellido, usuario, email, servicio, rol, activo,
+                           COALESCE(registro_horario_activo, 0) AS registro_horario_activo
+                    FROM usuarios
+                    WHERE id = ?
+                    LIMIT 1
+                    """,
+                    (user_id,),
+                ).fetchone()
+                json_response(self, {"rows": [dict(row)] if row else []})
+                return
             rows = conn.execute(
                 """
                 SELECT id, nombre, apellido, usuario, email, servicio, rol, activo,
