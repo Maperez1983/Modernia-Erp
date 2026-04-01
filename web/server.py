@@ -14053,8 +14053,15 @@ def open_sqlite_conn(db_path, with_row_factory=False):
 def ensure_tables(db_path):
     if db_is_postgres_enabled():
         conn = open_postgres_conn(with_row_factory=False)
-        # Shim para mantener SQL estilo SQLite (DATE/DATETIME/STRFTIME, etc.)
-        ensure_postgres_sqlite_compat(conn)
+        # En Postgres, muchos "best-effort" (índices, backfills) están envueltos en try/except.
+        # En Postgres un error deja la transacción en estado abortado hasta rollback, así que usamos autocommit
+        # durante el bootstrap del esquema para no bloquear el arranque por errores no críticos.
+        try:
+            raw_conn = getattr(conn, "_conn", None)
+            if raw_conn is not None:
+                raw_conn.autocommit = True
+        except Exception:
+            pass
     else:
         conn = open_sqlite_conn(db_path, with_row_factory=False)
     apply_schema_file(conn, ROOT.parent / "schema.sql")
@@ -14860,7 +14867,10 @@ def ensure_tables(db_path):
     bootstrap_default_workspace(conn)
     ensure_workspace_catalog_modules(conn)
     load_postal_catalog(conn)
-    conn.commit()
+    try:
+        conn.commit()
+    except Exception:
+        pass
     conn.close()
 
 
