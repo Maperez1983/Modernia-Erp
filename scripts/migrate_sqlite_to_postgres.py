@@ -77,15 +77,79 @@ def pg_table_columns(conn, table: str) -> set[str]:
     return out
 
 
+def pg_table_column_types(conn, table: str) -> dict[str, str]:
+    table = norm_ident(table)
+    rows = conn.execute(
+        """
+        SELECT column_name, data_type, udt_name
+        FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = %s
+        """,
+        (table,),
+    ).fetchall()
+    out: dict[str, str] = {}
+    for row in rows:
+        if isinstance(row, dict):
+            col = row.get("column_name")
+            data_type = row.get("data_type")
+            udt = row.get("udt_name")
+        else:
+            col = row[0] if len(row) > 0 else None
+            data_type = row[1] if len(row) > 1 else None
+            udt = row[2] if len(row) > 2 else None
+        if not col:
+            continue
+        key = str(col).strip().lower()
+        out[key] = str(udt or data_type or "").strip().lower()
+    return out
+
+
+def _coerce_pg_value(value, pg_type: str):
+    if value is None:
+        return None
+    t = str(pg_type or "").lower()
+    is_int = t in {"int2", "int4", "int8", "smallint", "integer", "bigint"}
+    is_num = is_int or t in {"float4", "float8", "real", "double precision", "numeric", "decimal"}
+    if not is_num:
+        return value
+    if isinstance(value, str):
+        v = value.strip()
+        if v == "":
+            return None
+        # Normaliza decimal con coma si apareciera.
+        v2 = v.replace(",", ".")
+        try:
+            if is_int:
+                f = float(v2)
+                return int(f) if f.is_integer() else None
+            return float(v2)
+        except Exception:
+            return None
+    if isinstance(value, (int, float)):
+        if is_int:
+            try:
+                f = float(value)
+                return int(f) if f.is_integer() else None
+            except Exception:
+                return None
+        try:
+            return float(value)
+        except Exception:
+            return None
+    return value
+
+
 def copy_table(*, sqlite_conn: sqlite3.Connection, pg_conn, table: str, batch_size: int = 500) -> int:
     table = norm_ident(table)
     sqlite_cols = sqlite_table_columns(sqlite_conn, table)
     if not sqlite_cols:
         return 0
     dest_cols = pg_table_columns(pg_conn, table)
+    dest_types = pg_table_column_types(pg_conn, table)
     cols = [c for c in sqlite_cols if c in dest_cols]
     if not cols:
         return 0
+    types = [dest_types.get(c, "") for c in cols]
 
     select_cols = ", ".join([qident(c) for c in cols])
     insert_cols = ", ".join([qident(c) for c in cols])
@@ -98,7 +162,11 @@ def copy_table(*, sqlite_conn: sqlite3.Connection, pg_conn, table: str, batch_si
         rows = cur.fetchmany(batch_size)
         if not rows:
             break
-        pg_conn.executemany(insert_sql, rows)
+        coerced = []
+        for row in rows:
+            # sqlite3 row is tuple-like
+            coerced.append(tuple(_coerce_pg_value(v, t) for v, t in zip(row, types)))
+        pg_conn.executemany(insert_sql, coerced)
         total += len(rows)
     return total
 
