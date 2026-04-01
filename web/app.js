@@ -1336,7 +1336,13 @@ const state = {
   currentClienteData: null,
   currentClienteGestoriaData: null,
   workspaces: [],
-  currentWorkspaceId: "",
+  currentWorkspaceId: (() => {
+    try {
+      return localStorage.getItem("crm.currentWorkspaceId") || "";
+    } catch {
+      return "";
+    }
+  })(),
   currentWorkspaceDetail: null,
   currentWorkspaceEnabledModules: [],
   currentWorkspaceName: "",
@@ -5739,6 +5745,9 @@ const renderWorkspaceList = (rows = []) => {
       ? state.currentWorkspaceId
       : rows[0].id;
   state.currentWorkspaceId = selectedId;
+  try {
+    localStorage.setItem("crm.currentWorkspaceId", String(selectedId || ""));
+  } catch {}
   workspaceList.innerHTML = rows
     .map((row) => {
       const isActive = String(row.id || "") === String(selectedId || "");
@@ -5781,18 +5790,22 @@ const renderWorkspaceCompanies = (rows = []) => {
     }
   })();
   const activeId = String(state.currentWorkspaceCompanyId || rows[0]?.id || "");
-  workspaceCompanies.innerHTML = `
-    <div class="workspace-chip-list">
-      ${rows
-        .map(
-          (row) => `
+	  workspaceCompanies.innerHTML = `
+	    <div class="workspace-chip-list">
+	      ${rows
+	        .map(
+	          (row) => `
             <div class="workspace-chip workspace-company-chip${String(row.id || "") === activeId ? " is-active" : ""}">
               <div>
-                <strong>${row.nombre || "-"}</strong>
-                <span>${row.rol || "operativa"} · ${Number(row.activo || 0) === 1 ? "activa" : "inactiva"}</span>
-                <div class="muted">${row.nif ? `CIF/NIF: ${escapeHtml(String(row.nif || ""))}` : "Sin CIF/NIF"}${row.direccion ? ` · ${escapeHtml(String(row.direccion || ""))}` : ""}</div>
-              </div>
-              <div class="workspace-company-chip-actions">
+	                <strong>${row.nombre || "-"}</strong>
+	                <span>${row.rol || "operativa"} · ${Number(row.activo || 0) === 1 ? "activa" : "inactiva"}</span>
+	                <div class="muted">
+	                  ${row.nif ? `CIF/NIF: ${escapeHtml(String(row.nif || ""))}` : "Sin CIF/NIF"}
+	                  ${row.direccion ? ` · ${escapeHtml(String(row.direccion || ""))}` : ""}
+	                  ${row.convenio_nombre ? ` · Convenio: ${escapeHtml(String(row.convenio_nombre || ""))}` : ""}
+	                </div>
+	              </div>
+	              <div class="workspace-company-chip-actions">
                 <button
                   type="button"
                   class="secondary ghost"
@@ -5803,19 +5816,25 @@ const renderWorkspaceCompanies = (rows = []) => {
                   class="secondary ghost"
                   data-workspace-company-enter="${row.nombre || ""}"
                 >Entrar en empresa</button>
-                <button
-                  type="button"
-                  class="secondary ghost"
-                  data-workspace-company-edit="${row.id || ""}"
-                  data-workspace-company-edit-nif="${escapeHtml(String(row.nif || ""))}"
-                  data-workspace-company-edit-dir="${escapeHtml(String(row.direccion || ""))}"
-                  ${canEdit ? "" : "disabled"}
-                >Editar CIF/dirección</button>
-                <button
-                  type="button"
-                  class="secondary ghost"
-                  data-workspace-company-unlink="${row.id || ""}"
-                  ${canEdit ? "" : "disabled"}
+	                <button
+	                  type="button"
+	                  class="secondary ghost"
+	                  data-workspace-company-edit="${row.id || ""}"
+	                  data-workspace-company-edit-nif="${escapeHtml(String(row.nif || ""))}"
+	                  data-workspace-company-edit-dir="${escapeHtml(String(row.direccion || ""))}"
+	                  data-workspace-company-edit-sector="${escapeHtml(String(row.sector || ""))}"
+	                  data-workspace-company-edit-cnae="${escapeHtml(String(row.cnae || ""))}"
+	                  data-workspace-company-edit-convenio-key="${escapeHtml(String(row.convenio_key || ""))}"
+	                  data-workspace-company-edit-convenio="${escapeHtml(String(row.convenio_nombre || ""))}"
+	                  data-workspace-company-edit-vac-modo="${escapeHtml(String(row.vacaciones_modo || \"habiles\"))}"
+	                  data-workspace-company-edit-vac-dias="${escapeHtml(String(row.vacaciones_dias_anuales || \"\"))}"
+	                  ${canEdit ? "" : "disabled"}
+	                >Editar datos</button>
+	                <button
+	                  type="button"
+	                  class="secondary ghost"
+	                  data-workspace-company-unlink="${row.id || ""}"
+	                  ${canEdit ? "" : "disabled"}
                 >Desvincular</button>
                 <button
                   type="button"
@@ -5844,30 +5863,54 @@ const renderWorkspaceCompanies = (rows = []) => {
       openCompany(companyName, { allowRestricted: true });
     });
   });
-  workspaceCompanies.querySelectorAll("[data-workspace-company-edit]").forEach((button) => {
-    button.addEventListener("click", async () => {
-      if (!canEdit) return;
-      const companyId = button.dataset.workspaceCompanyEdit || "";
-      if (!companyId) return;
-      const currentNif = String(button.dataset.workspaceCompanyEditNif || "").trim();
-      const currentDir = String(button.dataset.workspaceCompanyEditDir || "").trim();
-      const nif = window.prompt("CIF/NIF de la empresa", currentNif) ?? "";
-      if (nif === null) return;
-      const direccion = window.prompt("Dirección / centro de trabajo (opcional)", currentDir) ?? "";
-      if (direccion === null) return;
-      try {
-        await postJsonWithDbRetry("/api/empresa_update", {
-          workspace_id: state.currentWorkspaceId,
-          id: companyId,
-          nif: String(nif || "").trim(),
-          direccion: String(direccion || "").trim(),
-        });
-        await loadWorkspaceDetail(state.currentWorkspaceId);
-      } catch (error) {
-        alert(error?.message || "No se pudo guardar la empresa.");
-      }
-    });
-  });
+	  workspaceCompanies.querySelectorAll("[data-workspace-company-edit]").forEach((button) => {
+	    button.addEventListener("click", async () => {
+	      if (!canEdit) return;
+	      const companyId = button.dataset.workspaceCompanyEdit || "";
+	      if (!companyId) return;
+	      const currentNif = String(button.dataset.workspaceCompanyEditNif || "").trim();
+	      const currentDir = String(button.dataset.workspaceCompanyEditDir || "").trim();
+	      const currentSector = String(button.dataset.workspaceCompanyEditSector || "").trim();
+	      const currentCnae = String(button.dataset.workspaceCompanyEditCnae || "").trim();
+	      const currentConvenioKey = String(button.dataset.workspaceCompanyEditConvenioKey || "").trim();
+	      const currentConvenio = String(button.dataset.workspaceCompanyEditConvenio || "").trim();
+	      const currentVacModo = String(button.dataset.workspaceCompanyEditVacModo || "habiles").trim();
+	      const currentVacDias = String(button.dataset.workspaceCompanyEditVacDias || "").trim();
+	      const nif = window.prompt("CIF/NIF de la empresa", currentNif) ?? "";
+	      if (nif === null) return;
+	      const direccion = window.prompt("Dirección / centro de trabajo (opcional)", currentDir) ?? "";
+	      if (direccion === null) return;
+	      const sector = window.prompt("Sector (ej: inmobiliaria, gestoría, fincas, etc.)", currentSector) ?? "";
+	      if (sector === null) return;
+	      const cnae = window.prompt("CNAE (opcional)", currentCnae) ?? "";
+	      if (cnae === null) return;
+	      const convenioNombre = window.prompt("Convenio (nombre o referencia)", currentConvenio) ?? "";
+	      if (convenioNombre === null) return;
+	      const convenioKey = window.prompt("Convenio key (opcional, interno)", currentConvenioKey) ?? "";
+	      if (convenioKey === null) return;
+	      const vacacionesModo = window.prompt("Vacaciones: habiles o naturales", currentVacModo) ?? "";
+	      if (vacacionesModo === null) return;
+	      const vacacionesDias = window.prompt("Vacaciones días/año (opcional)", currentVacDias) ?? "";
+	      if (vacacionesDias === null) return;
+	      try {
+	        await postJsonWithDbRetry("/api/empresa_update", {
+	          workspace_id: state.currentWorkspaceId,
+	          id: companyId,
+	          nif: String(nif || "").trim(),
+	          direccion: String(direccion || "").trim(),
+	          sector: String(sector || "").trim(),
+	          cnae: String(cnae || "").trim(),
+	          convenio_nombre: String(convenioNombre || "").trim(),
+	          convenio_key: String(convenioKey || "").trim(),
+	          vacaciones_modo: String(vacacionesModo || "").trim(),
+	          vacaciones_dias_anuales: String(vacacionesDias || "").trim(),
+	        });
+	        await loadWorkspaceDetail(state.currentWorkspaceId);
+	      } catch (error) {
+	        alert(error?.message || "No se pudo guardar la empresa.");
+	      }
+	    });
+	  });
   workspaceCompanies.querySelectorAll("[data-workspace-company-unlink]").forEach((button) => {
     button.addEventListener("click", async () => {
       if (!canEdit) return;
@@ -12410,6 +12453,9 @@ const clearCurrentWorkspaceUi = () => {
 const loadWorkspaceDetail = async (workspaceId) => {
   if (!workspaceId) return;
   state.currentWorkspaceId = workspaceId;
+  try {
+    localStorage.setItem("crm.currentWorkspaceId", String(workspaceId || ""));
+  } catch {}
   const authUser = getAuthScopeUser();
   const canManageWorkspace = Boolean(authUser && isPrivilegedUser(authUser));
   if (canManageWorkspace) {

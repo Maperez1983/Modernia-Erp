@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "convenios": [
+    {
+      "key": "administracion_de_fincas",
+      "title": "Convenio de administración de fincas (referencia genérica)",
+      "keywords": ["administración de fincas", "administracion de fincas", "fincas", "comunidades"],
+      "cnae_prefixes": ["68"],
+      "vacaciones_modo": "habiles",
+      "vacaciones_dias_anuales": 22,
+      "source_url": "https://www.boe.es/"
+    },
+    {
+      "key": "oficinas_y_despachos",
+      "title": "Convenio colectivo de oficinas y despachos (referencia genérica)",
+      "keywords": ["oficinas", "despachos", "administrativo"],
+      "cnae_prefixes": ["82", "69"],
+      "vacaciones_modo": "habiles",
+      "vacaciones_dias_anuales": 23,
+      "source_url": "https://www.boe.es/"
+    },
+    {
+      "key": "inmobiliarias",
+      "title": "Convenio colectivo del sector inmobiliario (referencia genérica)",
+      "keywords": ["inmobiliaria", "intermediación inmobiliaria", "agencia inmobiliaria"],
+      "cnae_prefixes": ["68"],
+      "vacaciones_modo": "naturales",
+      "vacaciones_dias_anuales": 30,
+      "source_url": "https://www.boe.es/"
+    }
+  ]
+}

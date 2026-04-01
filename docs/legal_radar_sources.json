@@ -279,6 +279,37 @@
           "accion_recomendada": "Revisar workflow hipotecario, documentación precontractual y checklists de firma."
         }
       ]
+    },
+    {
+      "key": "boe_rrhh_general",
+      "area": "rrhh",
+      "title": "BOE · Laboral y registro de jornada",
+      "fuente": "BOE",
+      "enabled": true,
+      "feed_url": "https://www.boe.es/rss/boe.php?s=1",
+      "format": "rss",
+      "max_entries": 50,
+      "impacto_default": "Medio",
+      "rules": [
+        {
+          "topic_key": "registro_horario",
+          "impacto": "Alto",
+          "keywords": ["registro de jornada", "jornada", "horas extraordinarias", "inspección de trabajo"],
+          "accion_recomendada": "Revisar el sistema de registro horario, export/firmas y trazabilidad ante inspección."
+        },
+        {
+          "topic_key": "vacaciones_convenio",
+          "impacto": "Alto",
+          "keywords": ["vacaciones", "permisos retribuidos", "días naturales", "días hábiles", "convenio colectivo"],
+          "accion_recomendada": "Revisar convenio aplicable (días naturales vs hábiles) y parametrización de vacaciones."
+        },
+        {
+          "topic_key": "convenio_colectivo",
+          "impacto": "Medio",
+          "keywords": ["convenio colectivo", "acuerdo colectivo", "tabla salarial", "ultraactividad"],
+          "accion_recomendada": "Registrar el convenio/actualización y evaluar impacto en políticas internas y nómina."
+        }
+      ]
     }
   ]
 }

@@ -4,6 +4,15 @@ CREATE TABLE IF NOT EXISTS empresas (
   id TEXT PRIMARY KEY,
   nombre TEXT NOT NULL UNIQUE,
   activo INTEGER NOT NULL DEFAULT 1,
+  logo_url TEXT,
+  nif TEXT,
+  direccion TEXT,
+  sector TEXT,
+  cnae TEXT,
+  convenio_key TEXT,
+  convenio_nombre TEXT,
+  vacaciones_modo TEXT NOT NULL DEFAULT 'habiles',
+  vacaciones_dias_anuales REAL,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );

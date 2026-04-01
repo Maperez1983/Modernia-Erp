@@ -69,6 +69,7 @@ ROOT = Path(__file__).resolve().parent
 ASSETS = ROOT.parent / "assets"
 LEGAL_COPILOT_PATH = ROOT.parent / "docs" / "legal_inmobiliaria.json"
 LEGAL_RADAR_SOURCES_PATH = ROOT.parent / "docs" / "legal_radar_sources.json"
+CONVENIOS_CATALOG_PATH = ROOT.parent / "docs" / "convenios_catalog.json"
 DB_DEFAULT = ROOT.parent / "data" / "erp_import2.sqlite"
 DB_LOCAL_FALLBACK = ROOT.parent / "data" / "erp_import2.local.sqlite"
 OCR_DB_DEFAULT = ROOT.parent / "data" / "ocr_jobs.sqlite"
@@ -179,6 +180,25 @@ WORKSPACE_TIME_SWEEP_STATE = {
     "last_notifications": 0,
 }
 WORKSPACE_TIME_SWEEP_STATE_LOCK = threading.Lock()
+LEGAL_RADAR_AUTO_SCAN_ENABLED = os.environ.get("LEGAL_RADAR_AUTO_SCAN_ENABLED", "0").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+    "si",
+    "sí",
+    "on",
+)
+LEGAL_RADAR_AUTO_SCAN_INTERVAL_SECONDS = max(
+    300, int(os.environ.get("LEGAL_RADAR_AUTO_SCAN_INTERVAL_SECONDS", "3600"))
+)
+LEGAL_RADAR_AUTO_SCAN_ON_START = os.environ.get("LEGAL_RADAR_AUTO_SCAN_ON_START", "1").strip().lower() not in (
+    "0",
+    "false",
+    "no",
+    "off",
+)
+LEGAL_RADAR_AUTO_SCAN_STATE = {"last_run_at": "", "last_error": "", "last_created": 0, "last_updated": 0}
+LEGAL_RADAR_AUTO_SCAN_LOCK = threading.Lock()
 APP_SESSION_TTL_SECONDS = max(900, int(os.environ.get("APP_SESSION_TTL_SECONDS", "43200")))
 SESSION_COOKIE_NAME = os.environ.get("APP_SESSION_COOKIE", "crm_session")
 AUTH_ALLOW_FIRST_PASSWORD_SET = os.environ.get("AUTH_ALLOW_FIRST_PASSWORD_SET", "1").strip().lower() not in ("0", "false", "no", "off")
@@ -238,6 +258,7 @@ WORKSPACE_TIME_SERVICE_COMPANY_MAP = {
 }
 LEGAL_COPILOT_CACHE = {"mtime": None, "topics": None}
 LEGAL_RADAR_SOURCES_CACHE = {"mtime": None, "payload": None}
+CONVENIOS_CATALOG_CACHE = {"mtime": None, "payload": None}
 LEGAL_AREA_DEFINITIONS = {
     "inmobiliaria": {
         "label": "Inmobiliaria",
@@ -268,6 +289,11 @@ LEGAL_AREA_DEFINITIONS = {
         "label": "Financiaciones",
         "path": ROOT.parent / "docs" / "legal_financiaciones.json",
         "default_topic": "lcci",
+    },
+    "rrhh": {
+        "label": "RRHH",
+        "path": ROOT.parent / "docs" / "legal_rrhh.json",
+        "default_topic": "vacaciones_convenio",
     },
 }
 LEGAL_COPILOT_AREA_CACHE = {}
@@ -10692,6 +10718,47 @@ def get_legal_radar_sources_config():
         return {"version": 1, "area": "inmobiliaria", "auto_sync_knowledge": True, "sources": []}
 
 
+def get_convenios_catalog():
+    try:
+        mtime = CONVENIOS_CATALOG_PATH.stat().st_mtime
+    except FileNotFoundError:
+        return {"version": 1, "convenios": []}
+    except Exception:
+        return {"version": 1, "convenios": []}
+    cached_mtime = CONVENIOS_CATALOG_CACHE.get("mtime")
+    cached_payload = CONVENIOS_CATALOG_CACHE.get("payload")
+    if cached_payload and cached_mtime == mtime:
+        return cached_payload
+    try:
+        with CONVENIOS_CATALOG_PATH.open("r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+        if not isinstance(payload, dict):
+            raise ValueError("invalid convenios payload")
+        payload.setdefault("version", 1)
+        payload["convenios"] = [item for item in list(payload.get("convenios") or []) if isinstance(item, dict)]
+        CONVENIOS_CATALOG_CACHE["mtime"] = mtime
+        CONVENIOS_CATALOG_CACHE["payload"] = payload
+        return payload
+    except Exception:
+        return {"version": 1, "convenios": []}
+
+
+def suggest_convenio_for_company(sector, cnae=""):
+    sector_norm = normalize_lookup_text(sector or "").lower()
+    cnae_norm = re.sub(r"[^0-9]", "", str(cnae or ""))
+    catalog = get_convenios_catalog()
+    for item in list(catalog.get("convenios") or []):
+        keywords = [normalize_lookup_text(k).lower() for k in list(item.get("keywords") or []) if str(k or "").strip()]
+        cnae_prefixes = [re.sub(r"[^0-9]", "", str(p or "")) for p in list(item.get("cnae_prefixes") or []) if str(p or "").strip()]
+        if cnae_norm and cnae_prefixes:
+            if any(cnae_norm.startswith(prefix) for prefix in cnae_prefixes if prefix):
+                return item
+        if sector_norm and keywords:
+            if any(keyword and keyword in sector_norm for keyword in keywords):
+                return item
+    return None
+
+
 def extract_legal_reference(text):
     value = str(text or "")
     patterns = [
@@ -11037,7 +11104,7 @@ def sync_legal_knowledge_updates(conn, area="inmobiliaria", now=None):
     return {"synced": synced, "topics": topic_counts}
 
 
-def scan_legal_radar_sources(conn, area="inmobiliaria", now=None, source_keys=None):
+def scan_legal_radar_sources(conn, area="inmobiliaria", now=None, source_keys=None, *, sync_knowledge=True):
     area_value = normalize_legal_area(area)
     config = get_legal_radar_sources_config()
     now_value = now or datetime.now(timezone.utc).isoformat()
@@ -11073,7 +11140,7 @@ def scan_legal_radar_sources(conn, area="inmobiliaria", now=None, source_keys=No
         except Exception as exc:
             errors.append({"source_key": source_key or None, "error": str(exc)})
     sync_summary = {"synced": 0, "topics": {}}
-    if bool(config.get("auto_sync_knowledge", True)):
+    if sync_knowledge and bool(config.get("auto_sync_knowledge", True)):
         sync_summary = sync_legal_knowledge_updates(conn, area=area_value, now=now_value)
     return {
         "scanned_sources": scanned,
@@ -14210,6 +14277,12 @@ def ensure_tables(db_path):
     ensure_column(conn, "empresas", "logo_url", "logo_url TEXT")
     ensure_column(conn, "empresas", "nif", "nif TEXT")
     ensure_column(conn, "empresas", "direccion", "direccion TEXT")
+    ensure_column(conn, "empresas", "sector", "sector TEXT")
+    ensure_column(conn, "empresas", "cnae", "cnae TEXT")
+    ensure_column(conn, "empresas", "convenio_key", "convenio_key TEXT")
+    ensure_column(conn, "empresas", "convenio_nombre", "convenio_nombre TEXT")
+    ensure_column(conn, "empresas", "vacaciones_modo", "vacaciones_modo TEXT NOT NULL DEFAULT 'habiles'")
+    ensure_column(conn, "empresas", "vacaciones_dias_anuales", "vacaciones_dias_anuales REAL")
     ensure_workspace_core_tables(conn)
     ensure_workspace_facturacion_table(conn)
     ensure_workspace_product_tables(conn)
@@ -17636,7 +17709,7 @@ def fetch_workspace_payroll_summary(conn, workspace_id, *, empresa_id=None, mont
 
     aus_rows = conn.execute(
         """
-        SELECT persona_id, tipo, estado, fecha_inicio, fecha_fin
+        SELECT persona_id, empresa_id, tipo, estado, fecha_inicio, fecha_fin
         FROM workspace_rrhh_ausencias
         WHERE workspace_id = ?
           AND estado = 'Aprobada'
@@ -17644,6 +17717,8 @@ def fetch_workspace_payroll_summary(conn, workspace_id, *, empresa_id=None, mont
         """,
         (workspace_id, month_text, month_text),
     ).fetchall()
+    empresa_ids = {str(r["empresa_id"] or "").strip() for r in aus_rows if str(r["empresa_id"] or "").strip()}
+    vac_mode_map = _fetch_empresa_vacaciones_modo_map(conn, empresa_ids)
     vac_days = {}
     abs_days = {}
     for r in aus_rows:
@@ -17657,10 +17732,14 @@ def fetch_workspace_payroll_summary(conn, workspace_id, *, empresa_id=None, mont
         if month_start and month_end:
             start = max(start, month_start)
             end = min(end, month_end)
-        days = _count_business_days(start, end)
+        tipo = str(r["tipo"] or "").strip().lower()
+        if tipo == "vacaciones":
+            modo = vac_mode_map.get(str(r["empresa_id"] or "").strip(), "habiles")
+            days = _count_absence_days(start, end, modo)
+        else:
+            days = _count_business_days(start, end)
         if days <= 0:
             continue
-        tipo = str(r["tipo"] or "").strip().lower()
         if tipo == "vacaciones":
             vac_days[pid] = vac_days.get(pid, 0) + days
         else:
@@ -18498,6 +18577,38 @@ def enforce_workspace_membership(conn, session, workspace_id, *, write=False):
     return True, ""
 
 
+def infer_workspace_id_for_empresa(conn, session, empresa_id):
+    """
+    Devuelve el workspace_id más probable para una empresa, a partir del usuario autenticado.
+    Útil cuando el frontend no envía workspace_id (estado perdido).
+
+    - Si hay 1 candidato: devuelve (workspace_id, []).
+    - Si hay varios: devuelve ("", [candidatos]).
+    - Si no hay: devuelve ("", []).
+    """
+    if not workspace_actor_is_privileged(conn, session):
+        return "", []
+    uid = str((session or {}).get("user_id") or "").strip()
+    eid = str(empresa_id or "").strip()
+    if not uid or not eid:
+        return "", []
+    rows = conn.execute(
+        """
+        SELECT DISTINCT mem.workspace_id
+        FROM workspace_miembros mem
+        JOIN workspace_empresas we ON we.workspace_id = mem.workspace_id
+        WHERE mem.usuario_id = ? AND we.empresa_id = ?
+        LIMIT 8
+        """,
+        (uid, eid),
+    ).fetchall()
+    candidates = [str(row_value(r, "workspace_id") or row_value(r, 0) or "").strip() for r in rows]
+    candidates = [c for c in candidates if c]
+    if len(candidates) == 1:
+        return candidates[0], []
+    return "", candidates
+
+
 def workspace_persona_id_for_user(conn, workspace_id, user_id):
     if not workspace_id or not user_id:
         return ""
@@ -18714,6 +18825,31 @@ def _count_business_days(start_date, end_date):
     return days
 
 
+def _count_calendar_days(start_date, end_date):
+    if not start_date or not end_date or end_date < start_date:
+        return 0
+    return (end_date - start_date).days + 1
+
+
+def _count_absence_days(start_date, end_date, mode="habiles"):
+    mode_key = str(mode or "").strip().lower()
+    if mode_key in {"naturales", "natural", "calendario", "calendar"}:
+        return _count_calendar_days(start_date, end_date)
+    return _count_business_days(start_date, end_date)
+
+
+def _fetch_empresa_vacaciones_modo_map(conn, empresa_ids):
+    ids = [str(i or "").strip() for i in list(empresa_ids or []) if str(i or "").strip()]
+    if not ids:
+        return {}
+    placeholders = ",".join(["?"] * len(ids))
+    rows = conn.execute(
+        f"SELECT id, COALESCE(NULLIF(vacaciones_modo,''), 'habiles') AS modo FROM empresas WHERE id IN ({placeholders})",
+        ids,
+    ).fetchall()
+    return {str(r["id"]): str(r["modo"] or "habiles") for r in rows if str(r["id"] or "").strip()}
+
+
 def fetch_workspace_rrhh_vacaciones_summary(conn, workspace_id, year=None):
     try:
         year_int = int(str(year or "").strip() or datetime.now().year)
@@ -18749,7 +18885,7 @@ def fetch_workspace_rrhh_vacaciones_summary(conn, workspace_id, year=None):
     # Vacaciones aprobadas del año.
     abs_rows = conn.execute(
         """
-        SELECT persona_id, fecha_inicio, fecha_fin
+        SELECT persona_id, empresa_id, fecha_inicio, fecha_fin
         FROM workspace_rrhh_ausencias
         WHERE workspace_id = ?
           AND tipo = 'Vacaciones'
@@ -18758,6 +18894,8 @@ def fetch_workspace_rrhh_vacaciones_summary(conn, workspace_id, year=None):
         """,
         (workspace_id, str(year_int), str(year_int)),
     ).fetchall()
+    empresa_ids = {str(r["empresa_id"] or "").strip() for r in abs_rows if str(r["empresa_id"] or "").strip()}
+    vac_mode_map = _fetch_empresa_vacaciones_modo_map(conn, empresa_ids)
     used_map = {pid: 0 for pid in persona_ids}
     for row in abs_rows:
         pid = str(row["persona_id"] or "").strip()
@@ -18771,7 +18909,8 @@ def fetch_workspace_rrhh_vacaciones_summary(conn, workspace_id, year=None):
             continue
         clipped_start = max(start, year_start)
         clipped_end = min(end, year_end)
-        used_map[pid] = used_map.get(pid, 0) + _count_business_days(clipped_start, clipped_end)
+        modo = vac_mode_map.get(str(row["empresa_id"] or "").strip(), "habiles")
+        used_map[pid] = used_map.get(pid, 0) + _count_absence_days(clipped_start, clipped_end, modo)
 
     rows = []
     for pid in persona_ids:
@@ -18946,6 +19085,45 @@ def workspace_time_sweep_loop(db_path, interval_seconds=300):
                 WORKSPACE_TIME_SWEEP_STATE["last_run_at"] = datetime.now().isoformat()
                 WORKSPACE_TIME_SWEEP_STATE["last_error"] = str(exc)
         time.sleep(max(60, int(interval_seconds or 300)))
+
+
+def legal_radar_auto_scan_loop(db_path, interval_seconds=3600):
+    # No usamos sync_knowledge aquí para evitar que un proceso background reescriba JSON del repo.
+    # El "reservorio" principal es la tabla legal_radar_items; el admin puede sincronizar manualmente si lo desea.
+    if LEGAL_RADAR_AUTO_SCAN_ON_START:
+        time.sleep(5)
+    while True:
+        try:
+            conn = get_db(db_path)
+            now_ts = datetime.now(timezone.utc).isoformat()
+            created_total = 0
+            updated_total = 0
+            for area_key in list(LEGAL_AREA_DEFINITIONS.keys()):
+                result = scan_legal_radar_sources(conn, area=area_key, now=now_ts, sync_knowledge=False)
+                created_total += int(result.get("created") or 0)
+                updated_total += int(result.get("updated") or 0)
+            try:
+                conn.commit()
+            except Exception:
+                pass
+            try:
+                conn.close()
+            except Exception:
+                pass
+            with LEGAL_RADAR_AUTO_SCAN_LOCK:
+                LEGAL_RADAR_AUTO_SCAN_STATE["last_run_at"] = now_ts
+                LEGAL_RADAR_AUTO_SCAN_STATE["last_error"] = ""
+                LEGAL_RADAR_AUTO_SCAN_STATE["last_created"] = created_total
+                LEGAL_RADAR_AUTO_SCAN_STATE["last_updated"] = updated_total
+        except Exception as exc:
+            try:
+                conn.close()
+            except Exception:
+                pass
+            with LEGAL_RADAR_AUTO_SCAN_LOCK:
+                LEGAL_RADAR_AUTO_SCAN_STATE["last_run_at"] = datetime.now(timezone.utc).isoformat()
+                LEGAL_RADAR_AUTO_SCAN_STATE["last_error"] = str(exc)
+        time.sleep(max(300, int(interval_seconds or 3600)))
 
 
 def run_workspace_time_alerts(conn, workspace_id, entry, now=None):
@@ -19972,6 +20150,12 @@ def fetch_workspace_detail(conn, workspace_id):
           e.nombre,
           COALESCE(e.nif, '') AS nif,
           COALESCE(e.direccion, '') AS direccion,
+          COALESCE(e.sector, '') AS sector,
+          COALESCE(e.cnae, '') AS cnae,
+          COALESCE(e.convenio_key, '') AS convenio_key,
+          COALESCE(e.convenio_nombre, '') AS convenio_nombre,
+          COALESCE(e.vacaciones_modo, '') AS vacaciones_modo,
+          COALESCE(e.vacaciones_dias_anuales, '') AS vacaciones_dias_anuales,
           COALESCE(e.logo_url, '') AS logo_url,
           COALESCE(we.rol, '') AS rol,
           COALESCE(e.activo, 1) AS activo
@@ -23237,28 +23421,139 @@ class Handler(BaseHTTPRequestHandler):
             if not workspace_actor_is_privileged(conn, session):
                 json_response(self, {"error": "No autorizado"}, status=403)
                 return
-            workspace_id = str(payload.get("workspace_id") or "").strip()
             empresa_id = str(payload.get("id") or payload.get("empresa_id") or "").strip()
-            if not workspace_id or not empresa_id:
-                json_response(self, {"error": "workspace_id e id requeridos"}, status=400)
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            if not empresa_id:
+                json_response(self, {"error": "id requerido"}, status=400)
                 return
+            if not workspace_id:
+                inferred_ws, candidates = infer_workspace_id_for_empresa(conn, session, empresa_id)
+                if inferred_ws:
+                    workspace_id = inferred_ws
+                elif candidates:
+                    json_response(
+                        self,
+                        {
+                            "error": "Workspace ambiguo para esta empresa. Reabre el workspace y reintenta.",
+                            "candidates": candidates,
+                        },
+                        status=409,
+                    )
+                    return
             linked = conn.execute(
                 "SELECT 1 FROM workspace_empresas WHERE workspace_id = ? AND empresa_id = ? LIMIT 1",
                 (workspace_id, empresa_id),
             ).fetchone()
             if not linked:
-                json_response(self, {"error": "No autorizado"}, status=403)
-                return
-            nif = str(payload.get("nif") or "").strip() or None
-            direccion = str(payload.get("direccion") or "").strip() or None
-            conn.execute(
-                """
-                UPDATE empresas
-                SET nif = ?, direccion = ?, updated_at = datetime(?)
-                WHERE id = ?
-                """,
-                (nif, direccion, now, empresa_id),
-            )
+                inferred_ws, _candidates = infer_workspace_id_for_empresa(conn, session, empresa_id)
+                if inferred_ws and inferred_ws != workspace_id:
+                    workspace_id = inferred_ws
+                    linked = conn.execute(
+                        "SELECT 1 FROM workspace_empresas WHERE workspace_id = ? AND empresa_id = ? LIMIT 1",
+                        (workspace_id, empresa_id),
+                    ).fetchone()
+                if not linked:
+                    json_response(self, {"error": "No autorizado"}, status=403)
+                    return
+
+            updates = []
+            values = []
+            if "nif" in payload:
+                nif = str(payload.get("nif") or "").strip() or None
+                updates.append("nif = ?")
+                values.append(nif)
+            if "direccion" in payload:
+                direccion = str(payload.get("direccion") or "").strip() or None
+                updates.append("direccion = ?")
+                values.append(direccion)
+            if "sector" in payload:
+                sector = str(payload.get("sector") or "").strip() or None
+                updates.append("sector = ?")
+                values.append(sector)
+            if "cnae" in payload:
+                cnae = str(payload.get("cnae") or "").strip() or None
+                updates.append("cnae = ?")
+                values.append(cnae)
+            if "convenio_key" in payload:
+                convenio_key = str(payload.get("convenio_key") or "").strip() or None
+                updates.append("convenio_key = ?")
+                values.append(convenio_key)
+            if "convenio_nombre" in payload:
+                convenio_nombre = str(payload.get("convenio_nombre") or "").strip() or None
+                updates.append("convenio_nombre = ?")
+                values.append(convenio_nombre)
+            if "vacaciones_modo" in payload:
+                modo = str(payload.get("vacaciones_modo") or "").strip().lower()
+                if modo in {"habiles", "hábiles", "laborables"}:
+                    modo = "habiles"
+                elif modo in {"naturales", "natural", "calendario"}:
+                    modo = "naturales"
+                else:
+                    modo = ""
+                if modo:
+                    updates.append("vacaciones_modo = ?")
+                    values.append(modo)
+            if "vacaciones_dias_anuales" in payload:
+                raw_days = str(payload.get("vacaciones_dias_anuales") or "").strip()
+                try:
+                    days_val = float(raw_days) if raw_days else None
+                except Exception:
+                    days_val = None
+                updates.append("vacaciones_dias_anuales = ?")
+                values.append(days_val)
+
+            wants_suggest = ("sector" in payload or "cnae" in payload) and ("convenio_key" not in payload and "convenio_nombre" not in payload)
+            if wants_suggest:
+                existing = conn.execute(
+                    """
+                    SELECT COALESCE(sector,'') AS sector, COALESCE(cnae,'') AS cnae,
+                           COALESCE(convenio_key,'') AS convenio_key, COALESCE(convenio_nombre,'') AS convenio_nombre,
+                           COALESCE(vacaciones_modo,'') AS vacaciones_modo, vacaciones_dias_anuales
+                    FROM empresas
+                    WHERE id = ?
+                    LIMIT 1
+                    """,
+                    (empresa_id,),
+                ).fetchone()
+                if existing and not str(existing["convenio_key"] or "").strip() and not str(existing["convenio_nombre"] or "").strip():
+                    sector_val = str(payload.get("sector") if "sector" in payload else existing["sector"] or "").strip()
+                    cnae_val = str(payload.get("cnae") if "cnae" in payload else existing["cnae"] or "").strip()
+                    suggested = suggest_convenio_for_company(sector_val, cnae_val)
+                    if suggested:
+                        suggested_key = str(suggested.get("key") or "").strip()
+                        suggested_name = str(suggested.get("title") or suggested.get("nombre") or "").strip()
+                        if suggested_key:
+                            updates.append("convenio_key = ?")
+                            values.append(suggested_key)
+                        if suggested_name:
+                            updates.append("convenio_nombre = ?")
+                            values.append(suggested_name)
+                        if "vacaciones_modo" not in payload:
+                            modo_s = str(suggested.get("vacaciones_modo") or "").strip().lower()
+                            if modo_s in {"naturales", "natural", "calendario"}:
+                                updates.append("vacaciones_modo = ?")
+                                values.append("naturales")
+                            elif modo_s in {"habiles", "hábiles", "laborables"}:
+                                updates.append("vacaciones_modo = ?")
+                                values.append("habiles")
+                        if "vacaciones_dias_anuales" not in payload:
+                            try:
+                                days_s = float(suggested.get("vacaciones_dias_anuales")) if suggested.get("vacaciones_dias_anuales") is not None else None
+                            except Exception:
+                                days_s = None
+                            if days_s is not None:
+                                updates.append("vacaciones_dias_anuales = ?")
+                                values.append(days_s)
+
+            if updates:
+                conn.execute(
+                    f"""
+                    UPDATE empresas
+                    SET {", ".join(updates)}, updated_at = datetime(?)
+                    WHERE id = ?
+                    """,
+                    (*values, now, empresa_id),
+                )
             conn.commit()
             json_response(self, {"ok": True, "id": empresa_id})
             return
@@ -23274,13 +23569,63 @@ class Handler(BaseHTTPRequestHandler):
             empresa_id = os.urandom(16).hex()
             nif = str(payload.get("nif") or "").strip() or None
             direccion = str(payload.get("direccion") or "").strip() or None
+            sector = str(payload.get("sector") or "").strip() or None
+            cnae = str(payload.get("cnae") or "").strip() or None
+            convenio_key = str(payload.get("convenio_key") or "").strip() or None
+            convenio_nombre = str(payload.get("convenio_nombre") or "").strip() or None
+            modo = str(payload.get("vacaciones_modo") or "").strip().lower()
+            if modo in {"habiles", "hábiles", "laborables"}:
+                modo = "habiles"
+            elif modo in {"naturales", "natural", "calendario"}:
+                modo = "naturales"
+            else:
+                modo = ""
+            raw_days = str(payload.get("vacaciones_dias_anuales") or "").strip()
+            try:
+                days_val = float(raw_days) if raw_days else None
+            except Exception:
+                days_val = None
+            if (sector or cnae) and not convenio_key and not convenio_nombre:
+                suggested = suggest_convenio_for_company(sector or "", cnae or "")
+                if suggested:
+                    convenio_key = str(suggested.get("key") or "").strip() or convenio_key
+                    convenio_nombre = str(suggested.get("title") or suggested.get("nombre") or "").strip() or convenio_nombre
+                    if not modo:
+                        modo_s = str(suggested.get("vacaciones_modo") or "").strip().lower()
+                        if modo_s in {"naturales", "natural", "calendario"}:
+                            modo = "naturales"
+                        elif modo_s in {"habiles", "hábiles", "laborables"}:
+                            modo = "habiles"
+                    if days_val is None:
+                        try:
+                            days_val = float(suggested.get("vacaciones_dias_anuales")) if suggested.get("vacaciones_dias_anuales") is not None else None
+                        except Exception:
+                            days_val = None
             try:
                 conn.execute(
                     """
-                    INSERT INTO empresas (id, nombre, activo, nif, direccion, created_at, updated_at)
-                    VALUES (?, ?, 1, ?, ?, datetime(?), datetime(?))
+                    INSERT INTO empresas (
+                      id, nombre, activo, nif, direccion,
+                      sector, cnae, convenio_key, convenio_nombre,
+                      vacaciones_modo, vacaciones_dias_anuales,
+                      created_at, updated_at
+                    )
+                    VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
                     """,
-                    (empresa_id, nombre, nif, direccion, now, now),
+                    (
+                        empresa_id,
+                        nombre,
+                        nif,
+                        direccion,
+                        sector,
+                        cnae,
+                        convenio_key,
+                        convenio_nombre,
+                        modo or "habiles",
+                        days_val,
+                        now,
+                        now,
+                    ),
                 )
             except Exception:
                 existing = conn.execute("SELECT id FROM empresas WHERE nombre = ? LIMIT 1", (nombre,)).fetchone()
@@ -32741,9 +33086,33 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/empresas":
             rows = conn.execute(
-                "SELECT id, nombre, COALESCE(logo_url, '') AS logo_url, COALESCE(nif, '') AS nif, COALESCE(direccion, '') AS direccion FROM empresas ORDER BY nombre"
+                """
+                SELECT
+                  id,
+                  nombre,
+                  COALESCE(logo_url, '') AS logo_url,
+                  COALESCE(nif, '') AS nif,
+                  COALESCE(direccion, '') AS direccion,
+                  COALESCE(sector, '') AS sector,
+                  COALESCE(cnae, '') AS cnae,
+                  COALESCE(convenio_key, '') AS convenio_key,
+                  COALESCE(convenio_nombre, '') AS convenio_nombre,
+                  COALESCE(vacaciones_modo, '') AS vacaciones_modo,
+                  COALESCE(vacaciones_dias_anuales, '') AS vacaciones_dias_anuales
+                FROM empresas
+                ORDER BY nombre
+                """
             ).fetchall()
             json_response(self, [dict(r) for r in rows])
+            return
+
+        if path == "/api/convenios_catalog":
+            json_response(self, get_convenios_catalog())
+            return
+
+        if path == "/api/legal_radar_auto_status":
+            with LEGAL_RADAR_AUTO_SCAN_LOCK:
+                json_response(self, {"enabled": bool(LEGAL_RADAR_AUTO_SCAN_ENABLED), "state": dict(LEGAL_RADAR_AUTO_SCAN_STATE)})
             return
 
         if path == "/api/workspaces":
@@ -38908,6 +39277,14 @@ def main():
             daemon=True,
         )
         sweep_thread.start()
+    if LEGAL_RADAR_AUTO_SCAN_ENABLED:
+        legal_thread = threading.Thread(
+            target=legal_radar_auto_scan_loop,
+            args=(args.db, LEGAL_RADAR_AUTO_SCAN_INTERVAL_SECONDS),
+            name="legal-radar-auto-scan",
+            daemon=True,
+        )
+        legal_thread.start()
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     print(
         f"Servidor activo en http://{args.host}:{args.port} · db={Path(args.db).resolve()} · "
