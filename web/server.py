@@ -22658,6 +22658,13 @@ class Handler(BaseHTTPRequestHandler):
                 """,
                 (token, expires_at, user_id),
             )
+            # Muy importante: persistimos el token antes de enviar el email.
+            # Si no hacemos commit, al cerrar la conexión al final de la request el token se pierde
+            # y el enlace de invitación se considera "inválido" al instante.
+            try:
+                conn.commit()
+            except Exception:
+                pass
             invite_link = f"{self._external_base_url()}/?activar_token={urllib.parse.quote(token)}"
             sent = False
             mail_error = None
