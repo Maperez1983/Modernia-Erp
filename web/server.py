@@ -16704,6 +16704,24 @@ def ensure_workspace_product_tables(conn):
     ensure_column(conn, "workspace_rrhh_profile", "vacaciones_dias_anuales", "vacaciones_dias_anuales REAL NOT NULL DEFAULT 22")
     conn.execute(
         """
+        CREATE TABLE IF NOT EXISTS workspace_rrhh_turnos (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          persona_id TEXT NOT NULL,
+          weekday INTEGER NOT NULL,
+          enabled INTEGER NOT NULL DEFAULT 1,
+          hora_inicio TEXT,
+          hora_fin TEXT,
+          pausa_min INTEGER NOT NULL DEFAULT 0,
+          notas TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          UNIQUE (workspace_id, persona_id, weekday)
+        )
+        """
+    )
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS workspace_rrhh_ausencias (
           id TEXT PRIMARY KEY,
           workspace_id TEXT NOT NULL,
@@ -19629,6 +19647,102 @@ def fetch_workspace_rrhh_profile(conn, workspace_id, persona_id):
     return dict(row) if row else None
 
 
+def fetch_workspace_rrhh_turnos(conn, workspace_id, persona_id):
+    ws_id = str(workspace_id or "").strip()
+    pid = str(persona_id or "").strip()
+    if not ws_id or not pid:
+        return {"rows": []}
+    rows = conn.execute(
+        """
+        SELECT id, workspace_id, persona_id, weekday, enabled,
+               COALESCE(hora_inicio, '') AS hora_inicio,
+               COALESCE(hora_fin, '') AS hora_fin,
+               COALESCE(pausa_min, 0) AS pausa_min,
+               COALESCE(notas, '') AS notas
+        FROM workspace_rrhh_turnos
+        WHERE workspace_id = ? AND persona_id = ?
+        ORDER BY weekday ASC
+        """,
+        (ws_id, pid),
+    ).fetchall()
+    by_day = {int(r["weekday"] or 0): dict(r) for r in (rows or []) if int(r.get("weekday") or 0) in range(1, 8)}
+    out = []
+    for weekday in range(1, 8):
+        item = by_day.get(weekday) or {
+            "id": "",
+            "workspace_id": ws_id,
+            "persona_id": pid,
+            "weekday": weekday,
+            "enabled": 0,
+            "hora_inicio": "",
+            "hora_fin": "",
+            "pausa_min": 0,
+            "notas": "",
+        }
+        out.append(item)
+    return {"rows": out}
+
+
+def upsert_workspace_rrhh_turnos(conn, workspace_id, persona_id, days, now=None):
+    ws_id = str(workspace_id or "").strip()
+    pid = str(persona_id or "").strip()
+    if not ws_id or not pid:
+        raise ValueError("workspace_id y persona_id requeridos")
+    if not isinstance(days, (list, tuple)):
+        raise ValueError("days debe ser una lista")
+    now_ts = now or datetime.now(timezone.utc).isoformat()
+    for day in days:
+        if not isinstance(day, dict):
+            continue
+        try:
+            weekday = int(day.get("weekday") or 0)
+        except Exception:
+            weekday = 0
+        if weekday not in range(1, 8):
+            continue
+        enabled = 1 if str(day.get("enabled") or "").strip().lower() in {"1", "true", "yes", "si", "sí", "on"} else 0
+        hora_inicio = str(day.get("hora_inicio") or "").strip()
+        hora_fin = str(day.get("hora_fin") or "").strip()
+        if hora_inicio and parse_hhmm_to_minutes(hora_inicio) is None:
+            raise ValueError(f"hora_inicio inválida ({weekday})")
+        if hora_fin and parse_hhmm_to_minutes(hora_fin) is None:
+            raise ValueError(f"hora_fin inválida ({weekday})")
+        try:
+            pausa_min = int(float(day.get("pausa_min") or 0))
+        except Exception:
+            pausa_min = 0
+        pausa_min = max(0, min(pausa_min, 240))
+        notas = str(day.get("notas") or "").strip() or None
+        existing = conn.execute(
+            """
+            SELECT id
+            FROM workspace_rrhh_turnos
+            WHERE workspace_id = ? AND persona_id = ? AND weekday = ?
+            LIMIT 1
+            """,
+            (ws_id, pid, weekday),
+        ).fetchone()
+        if existing:
+            conn.execute(
+                """
+                UPDATE workspace_rrhh_turnos
+                SET enabled = ?, hora_inicio = ?, hora_fin = ?, pausa_min = ?, notas = ?, updated_at = datetime(?)
+                WHERE id = ? AND workspace_id = ?
+                """,
+                (enabled, hora_inicio or None, hora_fin or None, pausa_min, notas, now_ts, existing["id"], ws_id),
+            )
+        else:
+            record_id = os.urandom(16).hex()
+            conn.execute(
+                """
+                INSERT INTO workspace_rrhh_turnos (
+                  id, workspace_id, persona_id, weekday, enabled, hora_inicio, hora_fin, pausa_min, notas, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                """,
+                (record_id, ws_id, pid, weekday, enabled, hora_inicio or None, hora_fin or None, pausa_min, notas, now_ts, now_ts),
+            )
+
+
 def fetch_workspace_rrhh_ausencias(conn, workspace_id, *, empresa_id=None, persona_id=None, month=None, limit=120):
     empresa_ids = resolve_workspace_company_ids(conn, workspace_id, empresa_id=empresa_id)
     where = [f"a.workspace_id = ?"]
@@ -19902,6 +20016,7 @@ def run_workspace_time_missing_sweep(conn, workspace_id, now=None):
         now_dt = app_now()
         now_ts = now_dt.isoformat()
     today = now_dt.date().isoformat()
+    weekday = now_dt.isoweekday()  # 1=Lunes .. 7=Domingo
     now_minutes = parse_hhmm_to_minutes(now_dt.strftime("%H:%M")) or 0
     personal = conn.execute(
         """
@@ -19924,14 +20039,38 @@ def run_workspace_time_missing_sweep(conn, workspace_id, now=None):
         if not persona_id:
             continue
         prefs = fetch_workspace_alert_preferences(conn, workspace_id, persona_id=persona_id) or {}
+        turno = None
+        try:
+            turno = conn.execute(
+                """
+                SELECT enabled, COALESCE(hora_inicio,'') AS hora_inicio, COALESCE(hora_fin,'') AS hora_fin
+                FROM workspace_rrhh_turnos
+                WHERE workspace_id = ? AND persona_id = ? AND weekday = ?
+                LIMIT 1
+                """,
+                (workspace_id, persona_id, int(weekday)),
+            ).fetchone()
+        except Exception:
+            turno = None
+        if turno is not None:
+            try:
+                if int(turno.get("enabled") or turno["enabled"] or 0) == 0:
+                    continue
+            except Exception:
+                pass
         schedule = str(prefs.get("schedule") or "").strip() or "10:00"
-        checkin_deadline = parse_hhmm_to_minutes(schedule) or 600
+        turno_inicio = str((turno.get("hora_inicio") if isinstance(turno, dict) else turno["hora_inicio"]) or "").strip() if turno is not None else ""
+        turno_fin = str((turno.get("hora_fin") if isinstance(turno, dict) else turno["hora_fin"]) or "").strip() if turno is not None else ""
+        checkin_deadline = parse_hhmm_to_minutes(turno_inicio) if turno_inicio else (parse_hhmm_to_minutes(schedule) or 600)
         horas_pactadas = row["horas_pactadas_dia"]
         try:
             horas_pactadas = float(horas_pactadas) if horas_pactadas not in (None, "") else 8.0
         except Exception:
             horas_pactadas = 8.0
-        checkout_deadline = checkin_deadline + int(round(horas_pactadas * 60)) + 30
+        if turno_fin:
+            checkout_deadline = (parse_hhmm_to_minutes(turno_fin) or (checkin_deadline + int(round(horas_pactadas * 60)))) + 30
+        else:
+            checkout_deadline = checkin_deadline + int(round(horas_pactadas * 60)) + 30
         last_sent = _parse_alert_last_sent(row["alert_last_sent"])
         worker_payload = {
             "persona_nombre": row["nombre"],
@@ -23157,11 +23296,12 @@ class Handler(BaseHTTPRequestHandler):
             "/api/workspace_kiosk_toggle",
             "/api/workspace_kiosk_token",
 	            "/api/workspace_registro_alerts",
-            "/api/workspace_registro_usuario_toggle",
-            "/api/workspace_registro_periodo_lock",
-            "/api/workspace_rrhh_profile",
-            "/api/workspace_rrhh_ausencia",
-            "/api/workspace_rrhh_ausencia_estado",
+	            "/api/workspace_registro_usuario_toggle",
+	            "/api/workspace_registro_periodo_lock",
+	            "/api/workspace_rrhh_profile",
+	            "/api/workspace_rrhh_turnos",
+	            "/api/workspace_rrhh_ausencia",
+	            "/api/workspace_rrhh_ausencia_estado",
 	            "/api/workspace_rrhh_gasto",
 	            "/api/workspace_rrhh_gasto_estado",
 	            "/api/workspace_rrhh_documento",
@@ -26887,6 +27027,7 @@ class Handler(BaseHTTPRequestHandler):
                 # Borra toda la operativa RRHH/registro asociada al workspace.
                 for sql, params in (
                     ("DELETE FROM workspace_rrhh_profile WHERE workspace_id = ?", (workspace_id,)),
+                    ("DELETE FROM workspace_rrhh_turnos WHERE workspace_id = ?", (workspace_id,)),
                     ("DELETE FROM workspace_rrhh_ausencias WHERE workspace_id = ?", (workspace_id,)),
                     ("DELETE FROM workspace_rrhh_gastos WHERE workspace_id = ?", (workspace_id,)),
                     ("DELETE FROM workspace_rrhh_documentos WHERE workspace_id = ?", (workspace_id,)),
@@ -27101,6 +27242,45 @@ class Handler(BaseHTTPRequestHandler):
             )
             conn.commit()
             json_response(self, {"ok": True, "id": record_id})
+            return
+        elif parsed.path == "/api/workspace_rrhh_turnos":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not workspace_session_is_privileged(session):
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            persona_id = str(payload.get("persona_id") or "").strip()
+            days = payload.get("days")
+            if not workspace_id or not persona_id:
+                json_response(self, {"error": "workspace_id y persona_id requeridos"}, status=400)
+                return
+            if not isinstance(days, (list, tuple)):
+                json_response(self, {"error": "days requerido (lista)"}, status=400)
+                return
+            try:
+                upsert_workspace_rrhh_turnos(conn, workspace_id, persona_id, days, now=now)
+                log_workspace_registro_audit(
+                    conn,
+                    workspace_id,
+                    empresa_id=None,
+                    persona_id=persona_id,
+                    entity_type="rrhh_turnos",
+                    entity_id=persona_id,
+                    action="update",
+                    actor=session,
+                    before=None,
+                    after={"days": days},
+                    now=now,
+                )
+                conn.commit()
+            except Exception as exc:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                json_response(self, {"error": str(exc) or "No se pudo guardar turnos"}, status=400)
+                return
+            json_response(self, {"ok": True})
             return
         elif parsed.path == "/api/workspace_rrhh_ausencia":
             session = getattr(self, "auth_session", None) or self._current_session()
@@ -34961,6 +35141,22 @@ class Handler(BaseHTTPRequestHandler):
                     json_response(self, {"error": "No autorizado"}, status=403)
                     return
             json_response(self, {"row": fetch_workspace_rrhh_profile(conn, workspace_id, persona_id) or {}})
+            return
+
+        if path == "/api/workspace_rrhh_turnos":
+            workspace_id = params.get("workspace_id", [""])[0]
+            persona_id = (params.get("persona_id", [""])[0] or "").strip()
+            if not workspace_id or not persona_id:
+                json_response(self, {"error": "workspace_id y persona_id requeridos"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if session and not workspace_session_is_privileged(session):
+                user_id = str(session.get("user_id") or "").strip()
+                own_persona = workspace_persona_id_for_user(conn, workspace_id, user_id)
+                if not own_persona or own_persona != persona_id:
+                    json_response(self, {"error": "No autorizado"}, status=403)
+                    return
+            json_response(self, fetch_workspace_rrhh_turnos(conn, workspace_id, persona_id))
             return
 
         if path == "/api/workspace_rrhh_ausencias":

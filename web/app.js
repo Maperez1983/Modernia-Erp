@@ -6527,7 +6527,7 @@ const renderWorkspaceCopilotHub = () => {
 
 const normalizeWorkspaceRrhhTab = (value = "") => {
   const key = String(value || "").trim().toLowerCase();
-  if (["plantilla", "equipo", "horario", "ausencias", "gastos", "docs", "usuarios"].includes(key)) return key;
+  if (["plantilla", "equipo", "horario", "turnos", "ausencias", "gastos", "docs", "usuarios"].includes(key)) return key;
   return "plantilla";
 };
 
@@ -6687,59 +6687,63 @@ const upsertWorkspaceEmployeeLocal = (patch = {}) => {
 	  const canFetchPersonaData = Boolean(allowUnscoped || scopePersonaId);
 
   // Evita “arrastrar” datos de otra persona: usa caché por persona si existe, o limpia solo esa parte.
-  if (scopePersonaId) {
-    const lastCacheId = String(state.workspaceRrhhPersonaCacheId || "").trim();
-    if (lastCacheId !== scopePersonaId) {
-      const cached = state.workspaceRrhhPersonaCache?.get
-        ? state.workspaceRrhhPersonaCache.get(scopePersonaId)
-        : null;
-      state.workspaceRrhhProfileRow = cached?.profileRow || null;
-      state.workspaceRrhhAusenciasRows = cached?.ausenciasRows || [];
-      state.workspaceRrhhGastosRows = cached?.gastosRows || [];
-      state.workspaceRrhhDocsRows = cached?.docsRows || [];
-      state.workspaceRrhhTimeSummary = cached?.timeSummary || null;
-      state.workspaceRrhhTimeRows = cached?.timeRows || [];
-      state.workspaceRrhhPersonaCacheId = scopePersonaId;
-      renderWorkspaceRrhhHub();
-    }
-  } else {
-    state.workspaceRrhhPersonaCacheId = "";
-  }
+	  if (scopePersonaId) {
+	    const lastCacheId = String(state.workspaceRrhhPersonaCacheId || "").trim();
+	    if (lastCacheId !== scopePersonaId) {
+	      const cached = state.workspaceRrhhPersonaCache?.get
+	        ? state.workspaceRrhhPersonaCache.get(scopePersonaId)
+	        : null;
+	      state.workspaceRrhhProfileRow = cached?.profileRow || null;
+	      state.workspaceRrhhAusenciasRows = cached?.ausenciasRows || [];
+	      state.workspaceRrhhGastosRows = cached?.gastosRows || [];
+	      state.workspaceRrhhDocsRows = cached?.docsRows || [];
+	      state.workspaceRrhhTurnosRows = cached?.turnosRows || [];
+	      state.workspaceRrhhTimeSummary = cached?.timeSummary || null;
+	      state.workspaceRrhhTimeRows = cached?.timeRows || [];
+	      state.workspaceRrhhPersonaCacheId = scopePersonaId;
+	      renderWorkspaceRrhhHub();
+	    }
+	  } else {
+	    state.workspaceRrhhPersonaCacheId = "";
+	  }
 
-  const year = (String(month || "").slice(0, 4) || String(new Date().getFullYear())).trim();
-  const [profile, ausencias, gastos, docs, timeSummary, timeRows, vacSummary, ausenciasAll] = await Promise.all([
-    scopePersonaId ? safeWorkspaceApi(`/api/workspace_rrhh_profile?workspace_id=${encodeURIComponent(workspaceId)}&persona_id=${encodeURIComponent(scopePersonaId)}`, { row: {} }) : { row: {} },
-    canFetchPersonaData ? safeWorkspaceApi(`/api/workspace_rrhh_ausencias?workspace_id=${encodeURIComponent(workspaceId)}${ausenciasMonthQuery}${companyQuery}${personaQuery}`, { rows: [] }) : { rows: [] },
-    canFetchPersonaData ? safeWorkspaceApi(`/api/workspace_rrhh_gastos?workspace_id=${encodeURIComponent(workspaceId)}&month=${encodeURIComponent(month)}${companyQuery}${personaQuery}`, { rows: [] }) : { rows: [] },
-    canFetchPersonaData ? safeWorkspaceApi(`/api/workspace_rrhh_documentos?workspace_id=${encodeURIComponent(workspaceId)}${companyQuery}${personaQuery}`, { rows: [] }) : { rows: [] },
-    canFetchPersonaData ? safeWorkspaceApi(`/api/workspace_registro_horario_resumen?workspace_id=${encodeURIComponent(workspaceId)}&month=${encodeURIComponent(month)}${companyQuery}${personaQuery}`, {}) : {},
-    canFetchPersonaData ? safeWorkspaceApi(`/api/workspace_registro_horario?workspace_id=${encodeURIComponent(workspaceId)}&month=${encodeURIComponent(month)}${companyQuery}${personaQuery}&limit=200`, { rows: [] }) : { rows: [] },
-    manager ? safeWorkspaceApi(`/api/workspace_rrhh_vacaciones_summary?workspace_id=${encodeURIComponent(workspaceId)}&year=${encodeURIComponent(year)}`, { rows: [] }) : { rows: [] },
-    canSeeTeamRequests ? safeWorkspaceApi(`/api/workspace_rrhh_ausencias?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [] }) : { rows: [] },
-  ]);
-  if (isStale()) return;
+	  const year = (String(month || "").slice(0, 4) || String(new Date().getFullYear())).trim();
+	  const [profile, ausencias, gastos, docs, timeSummary, timeRows, vacSummary, ausenciasAll, turnos] = await Promise.all([
+	    scopePersonaId ? safeWorkspaceApi(`/api/workspace_rrhh_profile?workspace_id=${encodeURIComponent(workspaceId)}&persona_id=${encodeURIComponent(scopePersonaId)}`, { row: {} }) : { row: {} },
+	    canFetchPersonaData ? safeWorkspaceApi(`/api/workspace_rrhh_ausencias?workspace_id=${encodeURIComponent(workspaceId)}${ausenciasMonthQuery}${companyQuery}${personaQuery}`, { rows: [] }) : { rows: [] },
+	    canFetchPersonaData ? safeWorkspaceApi(`/api/workspace_rrhh_gastos?workspace_id=${encodeURIComponent(workspaceId)}&month=${encodeURIComponent(month)}${companyQuery}${personaQuery}`, { rows: [] }) : { rows: [] },
+	    canFetchPersonaData ? safeWorkspaceApi(`/api/workspace_rrhh_documentos?workspace_id=${encodeURIComponent(workspaceId)}${companyQuery}${personaQuery}`, { rows: [] }) : { rows: [] },
+	    canFetchPersonaData ? safeWorkspaceApi(`/api/workspace_registro_horario_resumen?workspace_id=${encodeURIComponent(workspaceId)}&month=${encodeURIComponent(month)}${companyQuery}${personaQuery}`, {}) : {},
+	    canFetchPersonaData ? safeWorkspaceApi(`/api/workspace_registro_horario?workspace_id=${encodeURIComponent(workspaceId)}&month=${encodeURIComponent(month)}${companyQuery}${personaQuery}&limit=200`, { rows: [] }) : { rows: [] },
+	    manager ? safeWorkspaceApi(`/api/workspace_rrhh_vacaciones_summary?workspace_id=${encodeURIComponent(workspaceId)}&year=${encodeURIComponent(year)}`, { rows: [] }) : { rows: [] },
+	    canSeeTeamRequests ? safeWorkspaceApi(`/api/workspace_rrhh_ausencias?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [] }) : { rows: [] },
+	    scopePersonaId ? safeWorkspaceApi(`/api/workspace_rrhh_turnos?workspace_id=${encodeURIComponent(workspaceId)}&persona_id=${encodeURIComponent(scopePersonaId)}`, { rows: [] }) : { rows: [] },
+	  ]);
+	  if (isStale()) return;
 
-  state.workspaceRrhhProfileRow = profile?.row || null;
-  state.workspaceRrhhAusenciasRows = ausencias?.rows || [];
-  state.workspaceRrhhAusenciasAllRows = ausenciasAll?.rows || [];
-  state.workspaceRrhhGastosRows = gastos?.rows || [];
-  state.workspaceRrhhDocsRows = docs?.rows || [];
-  state.workspaceRrhhTimeSummary = timeSummary || null;
-  state.workspaceRrhhTimeRows = timeRows?.rows || [];
-  state.workspaceRrhhVacSummaryYear = year;
-  state.workspaceRrhhVacSummaryRows = vacSummary?.rows || [];
-  renderWorkspaceHomeAlerts();
+	  state.workspaceRrhhProfileRow = profile?.row || null;
+	  state.workspaceRrhhAusenciasRows = ausencias?.rows || [];
+	  state.workspaceRrhhAusenciasAllRows = ausenciasAll?.rows || [];
+	  state.workspaceRrhhGastosRows = gastos?.rows || [];
+	  state.workspaceRrhhDocsRows = docs?.rows || [];
+	  state.workspaceRrhhTurnosRows = turnos?.rows || [];
+	  state.workspaceRrhhTimeSummary = timeSummary || null;
+	  state.workspaceRrhhTimeRows = timeRows?.rows || [];
+	  state.workspaceRrhhVacSummaryYear = year;
+	  state.workspaceRrhhVacSummaryRows = vacSummary?.rows || [];
+	  renderWorkspaceHomeAlerts();
 
-  if (scopePersonaId && state.workspaceRrhhPersonaCache?.set) {
-    state.workspaceRrhhPersonaCache.set(scopePersonaId, {
-      profileRow: state.workspaceRrhhProfileRow,
-      ausenciasRows: state.workspaceRrhhAusenciasRows,
-      gastosRows: state.workspaceRrhhGastosRows,
-      docsRows: state.workspaceRrhhDocsRows,
-      timeSummary: state.workspaceRrhhTimeSummary,
-      timeRows: state.workspaceRrhhTimeRows,
-    });
-  }
+	  if (scopePersonaId && state.workspaceRrhhPersonaCache?.set) {
+	    state.workspaceRrhhPersonaCache.set(scopePersonaId, {
+	      profileRow: state.workspaceRrhhProfileRow,
+	      ausenciasRows: state.workspaceRrhhAusenciasRows,
+	      gastosRows: state.workspaceRrhhGastosRows,
+	      docsRows: state.workspaceRrhhDocsRows,
+	      turnosRows: state.workspaceRrhhTurnosRows,
+	      timeSummary: state.workspaceRrhhTimeSummary,
+	      timeRows: state.workspaceRrhhTimeRows,
+	    });
+	  }
 
   // Render after data arrives.
   renderWorkspaceRrhhHub();
@@ -6904,15 +6908,16 @@ const renderWorkspaceRrhhHub = () => {
     : [];
   const pendingTeamAusenciasCount = pendingTeamAusencias.length;
 
-  const renderTabs = () => `
-    <div class="workspace-rrhh-tabs">
-      ${[
-        ...(manager ? [{ key: "equipo", label: "Equipo" }] : [{ key: "plantilla", label: "Personal" }]),
-        { key: "horario", label: "Horario" },
-        { key: "ausencias", label: "Vacaciones" },
-        { key: "gastos", label: "Gastos" },
-        { key: "docs", label: "Documentación" },
-      ]
+	  const renderTabs = () => `
+	    <div class="workspace-rrhh-tabs">
+	      ${[
+	        ...(manager ? [{ key: "equipo", label: "Equipo" }] : [{ key: "plantilla", label: "Personal" }]),
+	        { key: "horario", label: "Horario" },
+	        { key: "turnos", label: "Turnos" },
+	        { key: "ausencias", label: "Vacaciones" },
+	        { key: "gastos", label: "Gastos" },
+	        { key: "docs", label: "Documentación" },
+	      ]
         .map(
           (item) => `
             <button type="button" class="tab${item.key === tab ? " active" : ""}" data-rrhh-tab="${item.key}">
@@ -8037,7 +8042,7 @@ const renderWorkspaceRrhhHub = () => {
     return renderMemberList();
   };
 
-	  const renderHorario = () => {
+		  const renderHorario = () => {
     const entries = timeRows || [];
     const today = new Date().toISOString().slice(0, 10);
     const openToday = entries.find((row) => String(row.fecha || "") === today && !String(row.hora_fin || "").trim()) || null;
@@ -8090,9 +8095,80 @@ const renderWorkspaceRrhhHub = () => {
         </div>
       </div>
 	    `;
+		  };
+	
+	  const renderTurnos = () => {
+	    if (!selectedPersonaId || scopeAll) {
+	      return `
+	        <div class="workspace-rrhh-panel-card">
+	          <div class="section-head">
+	            <div>
+	              <h4>Turnos</h4>
+	              <p class="muted">Selecciona un empleado para ver su horario semanal.</p>
+	            </div>
+	          </div>
+	        </div>
+	      `;
+	    }
+	    const rows = Array.isArray(state.workspaceRrhhTurnosRows) ? state.workspaceRrhhTurnosRows : [];
+	    const byDay = new Map();
+	    rows.forEach((row) => {
+	      const w = Number(row?.weekday || 0);
+	      if (w >= 1 && w <= 7) byDay.set(w, row);
+	    });
+	    const labels = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
+	    const canEdit = Boolean(manager);
+	    const dayRow = (weekday, label) => {
+	      const row = byDay.get(weekday) || {};
+	      const enabled = Number(row.enabled || 0) === 1;
+	      const hi = String(row.hora_inicio || "").trim();
+	      const hf = String(row.hora_fin || "").trim();
+	      const pausa = String(row.pausa_min ?? 0);
+	      return `
+	        <div class="inline-row">
+	          <strong>${escapeHtml(label)}</strong>
+	          <label class="inline-check">
+	            <input type="checkbox" name="d${weekday}_enabled" ${enabled ? "checked" : ""} ${canEdit ? "" : "disabled"} />
+	            <span class="muted">Laborable</span>
+	          </label>
+	          <label class="muted">
+	            Inicio
+	            <input type="time" name="d${weekday}_hora_inicio" value="${escapeHtml(hi)}" ${canEdit ? "" : "disabled"} />
+	          </label>
+	          <label class="muted">
+	            Fin
+	            <input type="time" name="d${weekday}_hora_fin" value="${escapeHtml(hf)}" ${canEdit ? "" : "disabled"} />
+	          </label>
+	          <label class="muted">
+	            Pausa (min)
+	            <input type="number" min="0" max="240" name="d${weekday}_pausa_min" value="${escapeHtml(pausa)}" ${canEdit ? "" : "disabled"} />
+	          </label>
+	        </div>
+	      `;
+	    };
+	    return `
+	      <div class="workspace-rrhh-panel-card">
+	        <div class="section-head">
+	          <div>
+	            <h4>Turnos</h4>
+	            <p class="muted">Horario semanal para calcular alertas y cierre de jornada.</p>
+	          </div>
+	        </div>
+	        <form id="workspaceRrhhTurnosForm" class="form-grid">
+	          <input type="hidden" name="persona_id" value="${escapeHtml(String(selectedPersonaId || ""))}" />
+	          <div class="span-2">
+	            ${labels.map((label, idx) => dayRow(idx + 1, label)).join("")}
+	          </div>
+	          <div class="form-actions span-2">
+	            ${canEdit ? `<button type="submit">Guardar turnos</button>` : ""}
+	            <span id="workspaceRrhhTurnosStatus" class="muted"></span>
+	          </div>
+	        </form>
+	      </div>
+	    `;
 	  };
 
-  const renderPlantilla = () => {
+	  const renderPlantilla = () => {
     if (!manager) {
       const validationsBanner = selfScope && canSeeTeamRequests && pendingTeamAusenciasCount
         ? `
@@ -8611,13 +8687,14 @@ const renderWorkspaceRrhhHub = () => {
     </div>
   `;
 
-  const panelHtml =
-    tab === "equipo" ? renderEquipo()
-    : tab === "plantilla" ? renderPlantilla()
-    : tab === "horario" ? renderHorario()
-    : tab === "ausencias" ? renderAusencias()
-    : tab === "gastos" ? renderGastos()
-    : renderDocs();
+	  const panelHtml =
+	    tab === "equipo" ? renderEquipo()
+	    : tab === "plantilla" ? renderPlantilla()
+	    : tab === "horario" ? renderHorario()
+	    : tab === "turnos" ? renderTurnos()
+	    : tab === "ausencias" ? renderAusencias()
+	    : tab === "gastos" ? renderGastos()
+	    : renderDocs();
   const hideMainTabs = Boolean(manager && tab === "equipo" && String(state.workspaceRrhhEquipoView || "") === "member");
 
   workspaceRrhhHub.innerHTML = `
@@ -8668,17 +8745,47 @@ const renderWorkspaceRrhhHub = () => {
     });
   }
 
-  workspaceRrhhHub.querySelectorAll("[data-rrhh-tab]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const fallback = isWorkspaceRrhhManager() ? "equipo" : "plantilla";
-      state.workspaceRrhhTab = normalizeWorkspaceRrhhTab(btn.dataset.rrhhTab || fallback);
-      renderWorkspaceRrhhHub();
-    });
-  });
+	  workspaceRrhhHub.querySelectorAll("[data-rrhh-tab]").forEach((btn) => {
+	    btn.addEventListener("click", () => {
+	      const fallback = isWorkspaceRrhhManager() ? "equipo" : "plantilla";
+	      state.workspaceRrhhTab = normalizeWorkspaceRrhhTab(btn.dataset.rrhhTab || fallback);
+	      renderWorkspaceRrhhHub();
+	    });
+	  });
+	
+	  const turnosForm = document.getElementById("workspaceRrhhTurnosForm");
+	  if (turnosForm) {
+	    turnosForm.addEventListener("submit", async (event) => {
+	      event.preventDefault();
+	      if (!isWorkspaceRrhhManager()) return;
+	      const status = document.getElementById("workspaceRrhhTurnosStatus");
+	      if (status) status.textContent = "Guardando...";
+	      try {
+	        const days = [];
+	        for (let weekday = 1; weekday <= 7; weekday++) {
+	          const enabled = turnosForm.querySelector(`[name="d${weekday}_enabled"]`)?.checked ? 1 : 0;
+	          const hora_inicio = String(turnosForm.querySelector(`[name="d${weekday}_hora_inicio"]`)?.value || "").trim();
+	          const hora_fin = String(turnosForm.querySelector(`[name="d${weekday}_hora_fin"]`)?.value || "").trim();
+	          const pausa_min = String(turnosForm.querySelector(`[name="d${weekday}_pausa_min"]`)?.value || "").trim();
+	          days.push({ weekday, enabled, hora_inicio, hora_fin, pausa_min });
+	        }
+	        const resp = await apiPost("/api/workspace_rrhh_turnos", {
+	          workspace_id: state.currentWorkspaceId,
+	          persona_id: String(state.workspaceRrhhSelectedPersonaId || "").trim(),
+	          days,
+	        });
+	        if (resp?.error) throw new Error(resp.error);
+	        if (status) status.textContent = "Turnos guardados.";
+	        await refreshWorkspaceRrhh();
+	      } catch (error) {
+	        if (status) status.textContent = error.message || "No se pudo guardar.";
+	      }
+	    });
+	  }
 
-  const validationsBtn = workspaceRrhhHub.querySelector("[data-rrhh-open-validations]");
-  if (validationsBtn) {
-    validationsBtn.addEventListener("click", async () => {
+	  const validationsBtn = workspaceRrhhHub.querySelector("[data-rrhh-open-validations]");
+	  if (validationsBtn) {
+	    validationsBtn.addEventListener("click", async () => {
       state.workspaceRrhhEntry = "";
       state.workspaceRrhhTab = "ausencias";
       state.workspaceRrhhScopeAll = true;
