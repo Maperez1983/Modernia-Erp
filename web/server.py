@@ -21967,6 +21967,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/cliente_profesional_update",
             "/api/cliente_profesional_delete",
             "/api/empresa_update",
+            "/api/empresa_delete",
             "/api/captaciones",
             "/api/captaciones_update",
             "/api/captacion_update",
@@ -23290,6 +23291,77 @@ class Handler(BaseHTTPRequestHandler):
                     return
             conn.commit()
             json_response(self, {"ok": True, "id": empresa_id})
+            return
+        elif parsed.path == "/api/empresa_delete":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not workspace_actor_is_privileged(conn, session):
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
+            empresa_id = str(payload.get("id") or payload.get("empresa_id") or "").strip()
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            hard = str(payload.get("hard") or "").strip().lower() in {"1", "true", "yes", "si", "sí", "on"}
+            if not empresa_id:
+                json_response(self, {"error": "id requerido"}, status=400)
+                return
+
+            def _count(table, where_sql, params):
+                try:
+                    row = conn.execute(f"SELECT COUNT(*) AS n FROM {table} WHERE {where_sql}", params).fetchone()
+                    return int(row_value(row, "n") or row_value(row, 0) or 0)
+                except Exception:
+                    return 0
+
+            # Hard delete solo si no hay referencias operativas (evita orfandades).
+            if hard:
+                tables_to_check = [
+                    "clientes",
+                    "clientes_empresas",
+                    "gestoria_trabajos",
+                    "gestoria_docs",
+                    "gestoria_contabilidad",
+                    *TABLES,
+                    "workspace_facturacion",
+                    "workspace_facturacion_series",
+                    "workspace_facturacion_remesas",
+                    "workspace_facturacion_cobros",
+                    "workspace_registro_personal",
+                    "workspace_registro_horario",
+                    "workspace_documentos_inbox",
+                ]
+                usage = {}
+                for t in tables_to_check:
+                    cols = table_columns(conn, t) or set()
+                    if "empresa_id" in cols:
+                        usage[t] = _count(t, "empresa_id = ?", (empresa_id,))
+                blocking = {k: v for k, v in usage.items() if int(v or 0) > 0}
+                if blocking:
+                    json_response(
+                        self,
+                        {
+                            "error": "La empresa tiene datos asociados. Archívala o desvincúlala del workspace en lugar de borrarla.",
+                            "usage": blocking,
+                        },
+                        status=409,
+                    )
+                    return
+                conn.execute("DELETE FROM workspace_empresas WHERE empresa_id = ?", (empresa_id,))
+                conn.execute("DELETE FROM empresas WHERE id = ?", (empresa_id,))
+                conn.commit()
+                json_response(self, {"ok": True, "deleted": True, "id": empresa_id})
+                return
+
+            # Soft delete: archiva (mantiene histórico).
+            conn.execute(
+                "UPDATE empresas SET activo = 0, updated_at = datetime(?) WHERE id = ?",
+                (now, empresa_id),
+            )
+            if workspace_id:
+                conn.execute(
+                    "DELETE FROM workspace_empresas WHERE workspace_id = ? AND empresa_id = ?",
+                    (workspace_id, empresa_id),
+                )
+            conn.commit()
+            json_response(self, {"ok": True, "archived": True, "id": empresa_id})
             return
         elif parsed.path == "/api/workspace_empresa_link":
             session = getattr(self, "auth_session", None) or self._current_session()

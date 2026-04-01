@@ -5811,6 +5811,18 @@ const renderWorkspaceCompanies = (rows = []) => {
                   data-workspace-company-edit-dir="${escapeHtml(String(row.direccion || ""))}"
                   ${canEdit ? "" : "disabled"}
                 >Editar CIF/dirección</button>
+                <button
+                  type="button"
+                  class="secondary ghost"
+                  data-workspace-company-unlink="${row.id || ""}"
+                  ${canEdit ? "" : "disabled"}
+                >Desvincular</button>
+                <button
+                  type="button"
+                  class="secondary ghost"
+                  data-workspace-company-archive="${row.id || ""}"
+                  ${canEdit ? "" : "disabled"}
+                >Archivar</button>
               </div>
             </div>
           `
@@ -5853,6 +5865,41 @@ const renderWorkspaceCompanies = (rows = []) => {
         await loadWorkspaceDetail(state.currentWorkspaceId);
       } catch (error) {
         alert(error?.message || "No se pudo guardar la empresa.");
+      }
+    });
+  });
+  workspaceCompanies.querySelectorAll("[data-workspace-company-unlink]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      if (!canEdit) return;
+      const companyId = String(button.dataset.workspaceCompanyUnlink || "").trim();
+      if (!companyId) return;
+      if (!window.confirm("¿Desvincular esta empresa del workspace?")) return;
+      try {
+        await postJsonWithDbRetry("/api/workspace_empresa_unlink", {
+          workspace_id: state.currentWorkspaceId,
+          empresa_id: companyId,
+        });
+        await loadWorkspaceDetail(state.currentWorkspaceId);
+      } catch (error) {
+        alert(error?.message || "No se pudo desvincular.");
+      }
+    });
+  });
+  workspaceCompanies.querySelectorAll("[data-workspace-company-archive]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      if (!canEdit) return;
+      const companyId = String(button.dataset.workspaceCompanyArchive || "").trim();
+      if (!companyId) return;
+      if (!window.confirm("¿Archivar esta empresa? No borra datos históricos, pero deja de estar activa.")) return;
+      try {
+        await postJsonWithDbRetry("/api/empresa_delete", {
+          workspace_id: state.currentWorkspaceId,
+          id: companyId,
+          hard: false,
+        });
+        await loadWorkspaceDetail(state.currentWorkspaceId);
+      } catch (error) {
+        alert(error?.message || "No se pudo archivar.");
       }
     });
   });
