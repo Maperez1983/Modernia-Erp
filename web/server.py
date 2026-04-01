@@ -26,6 +26,10 @@ import xml.etree.ElementTree as ET
 from io import BytesIO
 from copy import copy as shallow_copy
 from datetime import datetime, timedelta, timezone, date
+try:
+    from zoneinfo import ZoneInfo
+except Exception:  # pragma: no cover
+    ZoneInfo = None
 from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
 from pathlib import Path
 import unicodedata
@@ -198,6 +202,17 @@ AUTH_PUBLIC_POST_ENDPOINTS = {
 AUTH_SESSIONS = {}
 AUTH_SESSIONS_LOCK = threading.Lock()
 SQLITE_FOREIGN_KEYS_ENABLED = os.environ.get("APP_SQLITE_FOREIGN_KEYS", "1").strip().lower() not in ("0", "false", "no", "off")
+APP_TIMEZONE = (os.environ.get("APP_TIMEZONE") or os.environ.get("APP_TZ") or "Europe/Madrid").strip() or "Europe/Madrid"
+
+
+def app_now():
+    # Render suele ejecutar en UTC; para registro horario necesitamos hora local (España por defecto).
+    if ZoneInfo:
+        try:
+            return datetime.now(ZoneInfo(APP_TIMEZONE))
+        except Exception:
+            pass
+    return datetime.now()
 
 # Anti-fuerza bruta /api/login (en memoria).
 LOGIN_RATE_WINDOW_SECONDS = max(60, int(os.environ.get("APP_LOGIN_RATE_WINDOW_SECONDS", "300")))
@@ -23979,12 +23994,13 @@ class Handler(BaseHTTPRequestHandler):
             if not empresa_id:
                 json_response(self, {"error": "empresa_id requerido"}, status=400)
                 return
-            now_dt = datetime.now()
+            now_dt = app_now()
             fecha = now_dt.date().isoformat()
             if is_workspace_time_month_locked(conn, workspace_id, fecha, empresa_id=str(persona_row["empresa_id"] or "").strip()):
                 json_response(self, {"error": "Mes bloqueado: desbloquea el periodo para fichar."}, status=409)
                 return
             now_hhmm = now_dt.strftime("%H:%M")
+            now = now_dt.strftime("%Y-%m-%d %H:%M:%S")
             open_row = conn.execute(
                 """
                 SELECT id, hora_inicio, COALESCE(hora_fin, '') AS hora_fin, COALESCE(pausa_min, 0) AS pausa_min
@@ -24250,12 +24266,13 @@ class Handler(BaseHTTPRequestHandler):
                     if not pin or not stored_hash or not verify_password(pin, stored_hash):
                         json_response(self, {"error": "PIN de kiosko incorrecto"}, status=403)
                         return
-            now_dt = datetime.now()
+            now_dt = app_now()
             fecha = now_dt.date().isoformat()
             if is_workspace_time_month_locked(conn, workspace_id, fecha, empresa_id=empresa_id):
                 json_response(self, {"error": "Mes bloqueado: no se puede fichar."}, status=409)
                 return
             now_hhmm = now_dt.strftime("%H:%M")
+            now = now_dt.strftime("%Y-%m-%d %H:%M:%S")
             open_row = conn.execute(
                 """
                 SELECT id, hora_inicio, COALESCE(hora_fin, '') AS hora_fin, COALESCE(pausa_min, 0) AS pausa_min
