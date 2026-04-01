@@ -6416,13 +6416,15 @@ const upsertWorkspaceEmployeeLocal = (patch = {}) => {
     }
   }
 
-  const selectedPersonaId = String(state.workspaceRrhhSelectedPersonaId || "").trim();
-  const companyQuery = state.currentWorkspaceCompanyId ? `&empresa_id=${encodeURIComponent(state.currentWorkspaceCompanyId)}` : "";
-  const allowUnscoped = Boolean(manager && state.workspaceRrhhScopeAll);
-  const scopePersonaId = allowUnscoped ? "" : selectedPersonaId;
-  const personaQuery = scopePersonaId ? `&persona_id=${encodeURIComponent(scopePersonaId)}` : "";
-  const ausenciasMonthQuery = manager ? `&month=${encodeURIComponent(month)}` : "";
-  const canFetchPersonaData = Boolean(allowUnscoped || scopePersonaId);
+	  const selectedPersonaId = String(state.workspaceRrhhSelectedPersonaId || "").trim();
+	  const companyQuery = state.currentWorkspaceCompanyId ? `&empresa_id=${encodeURIComponent(state.currentWorkspaceCompanyId)}` : "";
+	  const allowUnscoped = Boolean(manager && state.workspaceRrhhScopeAll);
+	  const scopePersonaId = allowUnscoped ? "" : selectedPersonaId;
+	  const personaQuery = scopePersonaId ? `&persona_id=${encodeURIComponent(scopePersonaId)}` : "";
+	  // UX: para ver/editar ausencias de una persona, mostramos su histórico completo (sin filtrar por mes).
+	  // Solo filtramos por mes cuando el gestor activa "Ver todo el equipo".
+	  const ausenciasMonthQuery = allowUnscoped ? `&month=${encodeURIComponent(month)}` : "";
+	  const canFetchPersonaData = Boolean(allowUnscoped || scopePersonaId);
 
   // Evita “arrastrar” datos de otra persona: usa caché por persona si existe, o limpia solo esa parte.
   if (scopePersonaId) {
@@ -7298,9 +7300,9 @@ const renderWorkspaceRrhhHub = () => {
                   `;
                 })
                 .join("")
-            : "<p class='muted'>Sin solicitudes este mes.</p>"}
-        </div>
-      `;
+	            : "<p class='muted'>Sin solicitudes registradas.</p>"}
+	        </div>
+	      `;
 
       return `
         <div class="workspace-rrhh-panel-card">
@@ -8158,9 +8160,9 @@ const renderWorkspaceRrhhHub = () => {
           </div>
         </form>
         <div class="workspace-rrhh-list">
-          ${(ausencias || []).length
-            ? ausencias
-                .map((row) => {
+	          ${(ausencias || []).length
+	            ? ausencias
+	                .map((row) => {
                   const estado = row.estado || "-";
                   const canApprove = manager && estado === "Solicitada";
                   const canReject = manager && estado === "Solicitada";
@@ -8182,11 +8184,11 @@ const renderWorkspaceRrhhHub = () => {
                   `;
                 })
                 .join("")
-            : "<p class='muted'>Sin ausencias registradas este mes.</p>"}
-        </div>
-      </div>
-    `;
-  };
+	            : `<p class='muted'>Sin ausencias registradas${scopeAll ? " este mes" : ""}.</p>`}
+	        </div>
+	      </div>
+	    `;
+	  };
 
   const renderGastos = () => `
     <div class="workspace-rrhh-panel-card">
