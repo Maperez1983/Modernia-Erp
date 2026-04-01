@@ -140,6 +140,28 @@ def _qmark_to_pyformat(sql):
         i += 1
     return "".join(out)
 
+def _escape_psycopg_pyformat_percents(sql: str) -> str:
+    # psycopg3 pyformat placeholders use %s (and %b/%t). Any other % sequence must be escaped as %%,
+    # otherwise psycopg raises: "only '%s', '%b', '%t' are allowed as placeholders".
+    out = []
+    i = 0
+    while i < len(sql):
+        ch = sql[i]
+        if ch != "%":
+            out.append(ch)
+            i += 1
+            continue
+        nxt = sql[i + 1] if i + 1 < len(sql) else ""
+        if nxt in {"s", "b", "t", "%"}:
+            out.append("%")
+            if nxt:
+                out.append(nxt)
+            i += 2
+            continue
+        out.append("%%")
+        i += 1
+    return "".join(out)
+
 
 def translate_sqlite_sql_to_postgres(sql):
     if not isinstance(sql, str):
@@ -180,6 +202,7 @@ def translate_sqlite_sql_to_postgres(sql):
     text = _rewrite_insert_or_replace(text)
     text = _strip_foreign_keys(text)
     text = _qmark_to_pyformat(text)
+    text = _escape_psycopg_pyformat_percents(text)
     return text
 
 
