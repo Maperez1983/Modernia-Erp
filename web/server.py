@@ -16753,7 +16753,26 @@ def fetch_workspace_service_desks(conn, workspace_id, empresa_id=None):
     if not empresa_ids:
         return {"gestoria": [], "seguros": [], "financiacion": [], "inmobiliaria": []}
     placeholders = ",".join(["?"] * len(empresa_ids))
-    today = datetime.now().date().isoformat()
+    today = app_now().date().isoformat()
+
+    def _format_valor(rows):
+        formatted = []
+        for item in rows or []:
+            row = dict(item) if not isinstance(item, dict) else dict(item)
+            raw = row.get("valor")
+            if raw in (None, ""):
+                row["valor"] = ""
+                formatted.append(row)
+                continue
+            try:
+                num = float(raw)
+            except Exception:
+                row["valor"] = str(raw or "")
+                formatted.append(row)
+                continue
+            row["valor"] = format_eur(num) if num > 0 else ""
+            formatted.append(row)
+        return formatted
     # Gestoría: evitar UNION pesado (reduce tiempos y cuelgues en SQLite).
     service_filter = (
         "LOWER(ce.servicio) IN ('gestoria', 'gestoría', "
@@ -16789,7 +16808,7 @@ def fetch_workspace_service_desks(conn, workspace_id, empresa_id=None):
           COALESCE(gt.tipo_trabajo, 'Trabajo') AS subtitulo,
           COALESCE(gt.estado, 'Pendiente') AS estado,
           COALESCE(gt.fecha_fin, gt.fecha_inicio, '') AS fecha,
-          CASE WHEN COALESCE(gt.importe, 0) > 0 THEN printf('%.2f €', gt.importe) ELSE '' END AS valor,
+          CASE WHEN COALESCE(gt.importe, 0) > 0 THEN COALESCE(gt.importe, 0) ELSE NULL END AS valor,
           2 AS sort_group
         FROM gestoria_trabajos gt
         LEFT JOIN clientes c ON c.id = gt.cliente_id
@@ -16818,7 +16837,7 @@ def fetch_workspace_service_desks(conn, workspace_id, empresa_id=None):
           COALESCE(NULLIF(TRIM(s.compania), ''), 'Sin compañía') || ' · ' || COALESCE(NULLIF(TRIM(s.ramo), ''), 'Sin ramo') AS subtitulo,
           COALESCE(NULLIF(TRIM(s.estado), ''), 'Pendiente') AS estado,
           COALESCE({seguro_date_sql('fecha_vencimiento', 's')}, {seguro_date_sql('fecha_efecto', 's')}) AS fecha,
-          CASE WHEN COALESCE(s.prima_total, s.prima_neta, 0) > 0 THEN printf('%.2f €', COALESCE(s.prima_total, s.prima_neta, 0)) ELSE '' END AS valor
+          CASE WHEN COALESCE(s.prima_total, s.prima_neta, 0) > 0 THEN COALESCE(s.prima_total, s.prima_neta, 0) ELSE NULL END AS valor
         FROM seguros s
         LEFT JOIN clientes c ON c.id = s.cliente_id
         WHERE s.empresa_id IN ({placeholders})
@@ -16839,7 +16858,7 @@ def fetch_workspace_service_desks(conn, workspace_id, empresa_id=None):
           'Asesoramiento financiero' AS subtitulo,
           COALESCE(af.estado, 'Pendiente') AS estado,
           COALESCE(af.fecha, af.updated_at, af.created_at) AS fecha,
-          CASE WHEN COALESCE(af.ingresos_conjuntos, 0) > 0 THEN printf('%.2f €', af.ingresos_conjuntos) ELSE '' END AS valor,
+          CASE WHEN COALESCE(af.ingresos_conjuntos, 0) > 0 THEN COALESCE(af.ingresos_conjuntos, 0) ELSE NULL END AS valor,
           1 AS sort_group
         FROM asesoramientos_financiacion af
         WHERE af.empresa_id IN ({placeholders})
@@ -16857,7 +16876,7 @@ def fetch_workspace_service_desks(conn, workspace_id, empresa_id=None):
           COALESCE(NULLIF(TRIM(h.banco), ''), 'Hipoteca') AS subtitulo,
           COALESCE(h.estado, 'Firmada') AS estado,
           COALESCE(h.fecha_firma, h.fecha_encargo, h.updated_at, h.created_at) AS fecha,
-          CASE WHEN COALESCE(h.comision, h.comision_modernia, 0) > 0 THEN printf('%.2f €', COALESCE(h.comision, h.comision_modernia, 0)) ELSE '' END AS valor,
+          CASE WHEN COALESCE(h.comision, h.comision_modernia, 0) > 0 THEN COALESCE(h.comision, h.comision_modernia, 0) ELSE NULL END AS valor,
           2 AS sort_group
         FROM hipotecas h
         LEFT JOIN clientes c ON c.id = h.cliente_id
@@ -16884,7 +16903,7 @@ def fetch_workspace_service_desks(conn, workspace_id, empresa_id=None):
           COALESCE(NULLIF(TRIM(c.zona), ''), 'Sin zona') AS subtitulo,
           COALESCE(c.etapa, 'Captación') AS estado,
           COALESCE(c.fecha_contacto, c.updated_at, c.created_at) AS fecha,
-          CASE WHEN COALESCE(c.precio_objetivo, 0) > 0 THEN printf('%.2f €', c.precio_objetivo) ELSE '' END AS valor,
+          CASE WHEN COALESCE(c.precio_objetivo, 0) > 0 THEN COALESCE(c.precio_objetivo, 0) ELSE NULL END AS valor,
           1 AS sort_group
         FROM captaciones c
         WHERE c.empresa_id IN ({placeholders})
@@ -16902,7 +16921,7 @@ def fetch_workspace_service_desks(conn, workspace_id, empresa_id=None):
           COALESCE(NULLIF(TRIM(o.tipo_operacion), ''), 'Operación') AS subtitulo,
           COALESCE(o.estado, 'Cerrada') AS estado,
           COALESCE(o.fecha_escritura, o.fecha_operacion, o.fecha_contrato, o.fecha_propuesta, o.updated_at, o.created_at) AS fecha,
-          CASE WHEN COALESCE(o.precio_escritura, o.precio_contrato, o.precio_propuesta, 0) > 0 THEN printf('%.2f €', COALESCE(o.precio_escritura, o.precio_contrato, o.precio_propuesta, 0)) ELSE '' END AS valor,
+          CASE WHEN COALESCE(o.precio_escritura, o.precio_contrato, o.precio_propuesta, 0) > 0 THEN COALESCE(o.precio_escritura, o.precio_contrato, o.precio_propuesta, 0) ELSE NULL END AS valor,
           2 AS sort_group
         FROM operaciones_inmobiliarias o
         WHERE o.empresa_id IN ({placeholders})
@@ -16938,10 +16957,10 @@ def fetch_workspace_service_desks(conn, workspace_id, empresa_id=None):
     inmobiliaria_rows = inmobiliaria_rows[:16]
 
     return {
-        "gestoria": [dict(r) for r in gestoria_rows],
-        "seguros": [dict(r) for r in seguros_rows],
-        "financiacion": [dict(r) for r in financiacion_rows],
-        "inmobiliaria": [dict(r) for r in inmobiliaria_rows],
+        "gestoria": _format_valor(gestoria_rows),
+        "seguros": _format_valor(seguros_rows),
+        "financiacion": _format_valor(financiacion_rows),
+        "inmobiliaria": _format_valor(inmobiliaria_rows),
     }
 
 
