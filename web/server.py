@@ -15722,11 +15722,47 @@ def infer_workspace_doc_classification(nombre, tipo, servicio):
 
 
 def fetch_workspace_company_ids(conn, workspace_id):
+    ws_id = str(workspace_id or "").strip()
+    if not ws_id:
+        return []
     rows = conn.execute(
         "SELECT empresa_id FROM workspace_empresas WHERE workspace_id = ?",
-        (workspace_id,),
+        (ws_id,),
     ).fetchall()
-    return [str(row_value(row, "empresa_id") or row_value(row, 0) or "").strip() for row in rows]
+    empresa_ids = [str(row_value(row, "empresa_id") or row_value(row, 0) or "").strip() for row in rows]
+    empresa_ids = [eid for eid in empresa_ids if eid]
+    if empresa_ids:
+        return empresa_ids
+    # Backfill: si el workspace no tiene empresas asociadas, no podemos mostrar RRHH/operativa.
+    # Creamos los links por defecto usando empresas activas existentes.
+    try:
+        all_rows = conn.execute(
+            "SELECT id FROM empresas WHERE COALESCE(activo, 1) = 1 ORDER BY nombre",
+        ).fetchall()
+    except Exception:
+        all_rows = []
+    fallback = [str(row_value(row, "id") or row_value(row, 0) or "").strip() for row in (all_rows or [])]
+    fallback = [eid for eid in fallback if eid]
+    if not fallback:
+        return []
+    now = datetime.now(timezone.utc).isoformat()
+    for eid in fallback:
+        try:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO workspace_empresas (
+                  id, workspace_id, empresa_id, rol, created_at, updated_at
+                ) VALUES (?, ?, ?, 'operativa', datetime(?), datetime(?))
+                """,
+                (os.urandom(16).hex(), ws_id, eid, now, now),
+            )
+        except Exception:
+            pass
+    try:
+        conn.commit()
+    except Exception:
+        pass
+    return fallback
 
 
 def resolve_workspace_company_ids(conn, workspace_id, empresa_id=None):
