@@ -160,7 +160,9 @@ def copy_table(*, sqlite_conn: sqlite3.Connection, pg_conn, table: str, batch_si
     select_cols = ", ".join([qident(c) for c in cols])
     insert_cols = ", ".join([qident(c) for c in cols])
     placeholders = ", ".join(["?"] * len(cols))
-    insert_sql = f"INSERT INTO {qident(table)} ({insert_cols}) VALUES ({placeholders})"
+    # Idempotencia: usamos INSERT OR IGNORE para que el wrapper de Postgres lo traduzca a
+    # "INSERT ... ON CONFLICT DO NOTHING" y así no se rompa si ya hay datos en Postgres.
+    insert_sql = f"INSERT OR IGNORE INTO {qident(table)} ({insert_cols}) VALUES ({placeholders})"
 
     cur = sqlite_conn.execute(f"SELECT {select_cols} FROM {qident(table)}")
     total = 0
