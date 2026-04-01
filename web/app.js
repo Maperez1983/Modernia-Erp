@@ -12502,10 +12502,12 @@ const loadWorkspaceDetail = async (workspaceId) => {
   state.currentWorkspaceData = {};
   state.workspaceTimeEmployees = [];
   state.workspaceTimeSummary = null;
-  const detail = await safeWorkspaceApi(`/api/workspace_detail?id=${encodeURIComponent(workspaceId)}`, null);
-  if (!detail) {
+  let detail = null;
+  try {
+    detail = await api(`/api/workspace_detail?id=${encodeURIComponent(workspaceId)}`);
+  } catch (error) {
     clearCurrentWorkspaceUi();
-    alert("No se pudo cargar el workspace (servidor no disponible).");
+    alert(error?.message || "No se pudo cargar el workspace.");
     updateWorkspaceEntryChrome();
     return;
   }
@@ -13019,7 +13021,7 @@ const openCompany = (empresaName, options = {}) => {
   if (currentTab === "crm") {
     loadCrmCaptaciones();
   }
-  window.scrollTo({ top: 0, behavior: "smooth" });
+  window.scrollTo({ top: 0, behavior: state.booting ? "auto" : "smooth" });
 };
 
 const openClientesModule = () => {
@@ -13502,7 +13504,7 @@ const openHolding = (options = {}) => {
   setWorkspaceView(nextView, { forceTenantView: mode === "tenant" && nextView !== "operations" });
   loadWorkspaceCentral().catch(() => {});
   syncHoldingUrlParams();
-  window.scrollTo({ top: 0, behavior: "smooth" });
+  window.scrollTo({ top: 0, behavior: state.booting ? "auto" : "smooth" });
 };
 
 const openAgenda = () => {
@@ -13519,7 +13521,7 @@ const openAgenda = () => {
   }
   loadAgendaGeneral();
   setUrlParams(new URLSearchParams({ agenda: "1" }));
-  window.scrollTo({ top: 0, behavior: "smooth" });
+  window.scrollTo({ top: 0, behavior: state.booting ? "auto" : "smooth" });
 };
 
 const openWorkspacePortalPublic = async (token) => {
@@ -13734,7 +13736,7 @@ const openWorkspacePortalPublic = async (token) => {
         });
       });
     }
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    window.scrollTo({ top: 0, behavior: state.booting ? "auto" : "smooth" });
   } catch (error) {
     if (workspacePortalPublicContent) {
       workspacePortalPublicContent.innerHTML = `<p class='muted'>${error.message || "No se pudo abrir el portal."}</p>`;
@@ -13762,7 +13764,7 @@ const openAdmin = () => {
       }
     });
   setUrlParams(new URLSearchParams({ admin: "1" }));
-  window.scrollTo({ top: 0, behavior: "smooth" });
+  window.scrollTo({ top: 0, behavior: state.booting ? "auto" : "smooth" });
 };
 
 const goHome = () => {
@@ -13801,7 +13803,7 @@ const goHome = () => {
   }
   setPage("home");
   setUrlParams(new URLSearchParams());
-  window.scrollTo({ top: 0, behavior: "smooth" });
+  window.scrollTo({ top: 0, behavior: state.booting ? "auto" : "smooth" });
 };
 
 const handleRoute = () => {
@@ -25803,7 +25805,7 @@ const openInmuebleDetail = (id, originView = "") => {
   if (inmuebleTitle) inmuebleTitle.textContent = "Cargando ficha...";
   if (inmuebleSubtitle) inmuebleSubtitle.textContent = String(id || "").trim() || "Id sin asignar";
   setInmuebleTab("datos");
-  window.scrollTo({ top: 0, behavior: "smooth" });
+  window.scrollTo({ top: 0, behavior: state.booting ? "auto" : "smooth" });
   Promise.all([
     api(`/api/inmueble?id=${id}`),
     loadClientesList().catch(() => null),
@@ -34880,7 +34882,7 @@ const openSeguroPage = (row, cliente = {}, options = {}) => {
   const params = new URLSearchParams({ poliza: state.currentSeguroId });
   if (cliente?.id) params.set("cliente", String(cliente.id));
   setUrlParams(params);
-  window.scrollTo({ top: 0, behavior: "smooth" });
+  window.scrollTo({ top: 0, behavior: state.booting ? "auto" : "smooth" });
 };
 
 const closeSeguroPage = () => {
@@ -35645,6 +35647,7 @@ const logoutAuthSession = async () => {
 };
 
 const init = async () => {
+  state.booting = true;
   try {
   const results = await Promise.allSettled([
     api("/api/empresas"),
@@ -35720,6 +35723,8 @@ const init = async () => {
       "<p class='muted'>Error al cargar los datos.</p>";
     renderCompanyCards();
     UI?.boot(state);
+  } finally {
+    state.booting = false;
   }
 };
 

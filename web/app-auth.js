@@ -19,6 +19,7 @@
     const portalToken = (params.get("portal_token") || "").trim();
     if (activateToken) {
       await deps.prepareActivationFlow(activateToken);
+      try { document.body.classList.remove("auth-pending"); } catch {}
       return;
     }
     if (portalToken) {
@@ -30,11 +31,13 @@
       } else if (typeof deps.openPublicPortal === "function") {
         await deps.openPublicPortal(portalToken);
       }
+      try { document.body.classList.remove("auth-pending"); } catch {}
       return;
     }
     const user = await fetchCurrentSessionUser();
     if (!user) {
       deps.showAuthOverlay("");
+      try { document.body.classList.remove("auth-pending"); } catch {}
       return;
     }
     deps.setAuthUi(user);
@@ -43,6 +46,7 @@
       await deps.init();
       deps.state.appInitialized = true;
     }
+    try { document.body.classList.remove("auth-pending"); } catch {}
   }
 
   function handleAuthExpired(deps) {
