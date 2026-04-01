@@ -17240,9 +17240,158 @@ def fetch_workspace_time_entries(conn, workspace_id, empresa_id=None, limit=40, 
         ORDER BY COALESCE(t.fecha, t.created_at) DESC, t.hora_inicio DESC
         LIMIT ?
         """,
-        (*params, max(1, min(int(limit or 40), 300))),
+        # Subimos el tope: el export y los resúmenes mensuales necesitan más de 300 filas (p.ej. 20 empleados × 22 días).
+        (*params, max(1, min(int(limit or 40), 5000))),
     ).fetchall()
     return {"rows": [dict(row) for row in rows]}
+
+
+def build_workspace_payroll_summary_csv(rows, month=""):
+    import io
+
+    string_io = io.StringIO()
+    writer = csv.writer(string_io)
+    writer.writerow(
+        [
+            "mes",
+            "empresa",
+            "persona_id",
+            "persona",
+            "dni",
+            "email",
+            "tipo_jornada",
+            "horas_pactadas_dia",
+            "minutos_trabajados",
+            "horas_trabajadas_hhmm",
+            "dias_registrados",
+            "entradas_abiertas",
+            "incidencias",
+            "vacaciones_aprobadas_dias",
+            "ausencias_aprobadas_dias",
+        ]
+    )
+    for row in rows or []:
+        writer.writerow(
+            [
+                month or "",
+                row.get("empresa_nombre") or "",
+                row.get("persona_id") or "",
+                row.get("persona_nombre") or "",
+                row.get("nif") or "",
+                row.get("email") or "",
+                row.get("tipo_jornada") or "",
+                row.get("horas_pactadas_dia") or "",
+                int(row.get("minutos_trabajados") or 0),
+                row.get("horas_trabajadas_hhmm") or "",
+                int(row.get("dias_registrados") or 0),
+                int(row.get("entradas_abiertas") or 0),
+                int(row.get("incidencias") or 0),
+                float(row.get("vacaciones_aprobadas_dias") or 0) or 0,
+                float(row.get("ausencias_aprobadas_dias") or 0) or 0,
+            ]
+        )
+    return string_io.getvalue().encode("utf-8-sig")
+
+
+def fetch_workspace_payroll_summary(conn, workspace_id, *, empresa_id=None, month=""):
+    workspace_id = str(workspace_id or "").strip()
+    month_text = str(month or "").strip()[:7]
+    if not workspace_id or not month_text:
+        return {"rows": []}
+
+    empresa_ids = resolve_workspace_company_ids(conn, workspace_id, empresa_id=empresa_id)
+    if not empresa_ids:
+        return {"rows": []}
+    where = ["t.workspace_id = ?", f"t.empresa_id IN ({','.join('?' for _ in empresa_ids)})", "substr(t.fecha, 1, 7) = ?"]
+    params = [workspace_id, *empresa_ids, month_text]
+    grouped = conn.execute(
+        f"""
+        SELECT
+          t.persona_id,
+          COALESCE(t.persona_nombre, '') AS persona_nombre,
+          t.empresa_id,
+          COALESCE(e.nombre, '') AS empresa_nombre,
+          COALESCE(MAX(t.tipo_jornada), '') AS tipo_jornada,
+          COALESCE(MAX(t.horas_pactadas_dia), '') AS horas_pactadas_dia,
+          COUNT(*) AS dias_registrados,
+          SUM(COALESCE(t.minutos_trabajados, 0)) AS minutos_trabajados,
+          SUM(CASE WHEN COALESCE(t.hora_fin, '') = '' THEN 1 ELSE 0 END) AS entradas_abiertas,
+          SUM(CASE WHEN LOWER(COALESCE(t.estado, '')) = 'incidencia' THEN 1 ELSE 0 END) AS incidencias
+        FROM workspace_registro_horario t
+        LEFT JOIN empresas e ON e.id = t.empresa_id
+        WHERE {' AND '.join(where)}
+        GROUP BY t.persona_id, t.empresa_id, e.nombre, t.persona_nombre
+        ORDER BY COALESCE(e.nombre, '') COLLATE NOCASE ASC, COALESCE(t.persona_nombre, '') COLLATE NOCASE ASC
+        """,
+        params,
+    ).fetchall()
+    people = [dict(r) for r in grouped]
+
+    # Enriquecemos con NIF/email desde la ficha (si existe).
+    personal_rows = conn.execute(
+        """
+        SELECT id, COALESCE(nif, '') AS nif, COALESCE(email, '') AS email
+        FROM workspace_registro_personal
+        WHERE workspace_id = ?
+        """,
+        (workspace_id,),
+    ).fetchall()
+    personal_map = {str(r["id"] or ""): dict(r) for r in personal_rows if str(r["id"] or "").strip()}
+
+    # Ausencias aprobadas (vacaciones/permisos) en el mes.
+    # Nota: contamos días laborables L-V dentro del mes (sin festivos por ahora).
+    try:
+        month_start = datetime.strptime(f"{month_text}-01", "%Y-%m-%d").date()
+        if month_start.month == 12:
+            month_end = date(month_start.year + 1, 1, 1) - timedelta(days=1)
+        else:
+            month_end = date(month_start.year, month_start.month + 1, 1) - timedelta(days=1)
+    except Exception:
+        month_start = None
+        month_end = None
+
+    aus_rows = conn.execute(
+        """
+        SELECT persona_id, tipo, estado, fecha_inicio, fecha_fin
+        FROM workspace_rrhh_ausencias
+        WHERE workspace_id = ?
+          AND estado = 'Aprobada'
+          AND (substr(fecha_inicio, 1, 7) = ? OR substr(fecha_fin, 1, 7) = ?)
+        """,
+        (workspace_id, month_text, month_text),
+    ).fetchall()
+    vac_days = {}
+    abs_days = {}
+    for r in aus_rows:
+        pid = str(r["persona_id"] or "").strip()
+        if not pid:
+            continue
+        start = _parse_iso_date(r["fecha_inicio"])
+        end = _parse_iso_date(r["fecha_fin"])
+        if not start or not end:
+            continue
+        if month_start and month_end:
+            start = max(start, month_start)
+            end = min(end, month_end)
+        days = _count_business_days(start, end)
+        if days <= 0:
+            continue
+        tipo = str(r["tipo"] or "").strip().lower()
+        if tipo == "vacaciones":
+            vac_days[pid] = vac_days.get(pid, 0) + days
+        else:
+            abs_days[pid] = abs_days.get(pid, 0) + days
+
+    for item in people:
+        pid = str(item.get("persona_id") or "").strip()
+        ficha = personal_map.get(pid) or {}
+        item["nif"] = ficha.get("nif") or ""
+        item["email"] = ficha.get("email") or ""
+        item["tipo_jornada"] = normalize_shift_type(item.get("tipo_jornada") or "")
+        item["horas_trabajadas_hhmm"] = format_minutes_hhmm(item.get("minutos_trabajados") or 0)
+        item["vacaciones_aprobadas_dias"] = float(vac_days.get(pid, 0) or 0)
+        item["ausencias_aprobadas_dias"] = float(abs_days.get(pid, 0) or 0)
+    return {"rows": people}
 
 
 def build_workspace_time_summary(rows, month=""):
@@ -32175,6 +32324,27 @@ class Handler(BaseHTTPRequestHandler):
             rows = fetch_workspace_time_entries(conn, workspace_id, empresa_id=empresa_id, limit=5000, month=month, persona_id=persona_id)["rows"]
             csv_bytes = build_workspace_time_csv(rows)
             filename = f"registro_horario_{workspace_id}_{(month or 'completo')}.csv"
+            binary_response(self, csv_bytes, content_type="text/csv; charset=utf-8", filename=filename)
+            return
+
+        if path == "/api/workspace_rrhh_payroll_export":
+            workspace_id = params.get("workspace_id", [""])[0]
+            empresa_id = params.get("empresa_id", [""])[0]
+            month = params.get("month", [""])[0]
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if session and not workspace_session_is_privileged(session):
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
+            month_text = str(month or "").strip()
+            if not month_text:
+                json_response(self, {"error": "month requerido (YYYY-MM)"}, status=400)
+                return
+            summary = fetch_workspace_payroll_summary(conn, workspace_id, empresa_id=empresa_id, month=month_text)
+            csv_bytes = build_workspace_payroll_summary_csv(summary.get("rows") or [], month=month_text[:7])
+            filename = f"rrhh_nomina_resumen_{workspace_id}_{month_text[:7]}.csv"
             binary_response(self, csv_bytes, content_type="text/csv; charset=utf-8", filename=filename)
             return
 

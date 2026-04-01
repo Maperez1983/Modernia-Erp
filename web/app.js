@@ -7706,7 +7706,7 @@ const renderWorkspaceRrhhHub = () => {
     return renderMemberList();
   };
 
-  const renderHorario = () => {
+	  const renderHorario = () => {
     const entries = timeRows || [];
     const today = new Date().toISOString().slice(0, 10);
     const openToday = entries.find((row) => String(row.fecha || "") === today && !String(row.hora_fin || "").trim()) || null;
@@ -7719,22 +7719,23 @@ const renderWorkspaceRrhhHub = () => {
     if (typeof totalMin === "number" && !Number.isNaN(totalMin) && !headBits.length) headBits.push(`${Math.round(totalMin)} min`);
     if (totalDias !== null && totalDias !== undefined && totalDias !== "") headBits.push(`${totalDias} días`);
     const headLabel = headBits.length ? headBits.join(" · ") : "Resumen del mes";
-    return `
-      <div class="workspace-rrhh-panel-card">
-        <div class="section-head">
-          <div>
-            <h4>Registro horario ${scopeAll ? "· Equipo" : ""}</h4>
-            <p class="muted">${escapeHtml(headLabel)}. ${scopeAll ? "Vista consolidada del equipo." : "Entrada/salida y listado mensual."}</p>
-          </div>
-          <div class="section-head-actions">
-            ${canToggle ? `
-              <button type="button" class="secondary ghost button-inline" data-rrhh-time-toggle>
-                ${openToday ? "Marcar salida" : "Marcar entrada"}
-              </button>
-            ` : ""}
-            <button type="button" class="secondary ghost button-inline" data-rrhh-open-time>Abrir módulo completo</button>
-          </div>
-        </div>
+	    return `
+	      <div class="workspace-rrhh-panel-card">
+	        <div class="section-head">
+	          <div>
+	            <h4>Registro horario ${scopeAll ? "· Equipo" : ""}</h4>
+	            <p class="muted">${escapeHtml(headLabel)}. ${scopeAll ? "Vista consolidada del equipo." : "Entrada/salida y listado mensual."}</p>
+	          </div>
+	          <div class="section-head-actions">
+	            ${canToggle ? `
+	              <button type="button" class="secondary ghost button-inline" data-rrhh-time-toggle>
+	                ${openToday ? "Marcar salida" : "Marcar entrada"}
+	              </button>
+	            ` : ""}
+	            ${manager ? `<button type="button" class="secondary ghost button-inline" data-rrhh-payroll-export>Export nóminas</button>` : ""}
+	            <button type="button" class="secondary ghost button-inline" data-rrhh-open-time>Abrir módulo completo</button>
+	          </div>
+	        </div>
         ${!selectedPersonaId && !scopeAll ? "<p class='muted'>Selecciona un empleado para ver su registro horario.</p>" : ""}
         ${openToday ? `<p class="muted">Hoy: fichaje abierto desde ${escapeHtml(openToday.hora_inicio || "")}.</p>` : ""}
         <div class="workspace-rrhh-list">
@@ -7757,8 +7758,8 @@ const renderWorkspaceRrhhHub = () => {
             : "<p class='muted'>Sin fichajes este mes.</p>"}
         </div>
       </div>
-    `;
-  };
+	    `;
+	  };
 
   const renderPlantilla = () => {
     if (!manager) {
@@ -9196,6 +9197,22 @@ const renderWorkspaceRrhhHub = () => {
       focusWorkspaceEngine("registro_horario", workspaceTimeSummary, { forceTenantView: true });
     });
   });
+
+  const payrollBtn = workspaceRrhhHub.querySelector("[data-rrhh-payroll-export]");
+  if (payrollBtn) {
+    payrollBtn.addEventListener("click", () => {
+      if (!isWorkspaceRrhhManager()) return;
+      if (!state.currentWorkspaceId) return;
+      const month = normalizeMonthValue(state.workspaceRrhhMonth || state.workspaceTimeMonth || "");
+      if (!month) {
+        alert("Selecciona un mes para exportar.");
+        return;
+      }
+      const companyQuery = state.currentWorkspaceCompanyId ? `&empresa_id=${encodeURIComponent(state.currentWorkspaceCompanyId)}` : "";
+      const url = `/api/workspace_rrhh_payroll_export?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}&month=${encodeURIComponent(month)}${companyQuery}`;
+      window.open(url, "_blank");
+    });
+  }
 
   const employeeSearch = workspaceRrhhHub.querySelector("#workspaceRrhhEmployeeSearch");
   if (employeeSearch) {
