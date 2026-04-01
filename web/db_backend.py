@@ -200,7 +200,10 @@ class PostgresCompatConnection:
     def executemany(self, sql, seq_of_params):
         sql2 = translate_sqlite_sql_to_postgres(sql)
         try:
-            return self._conn.executemany(sql2, seq_of_params)
+            # psycopg3: executemany lives on cursors, not on the connection.
+            cur = self._conn.cursor()
+            cur.executemany(sql2, seq_of_params)
+            return cur
         except Exception:
             try:
                 self._conn.rollback()
