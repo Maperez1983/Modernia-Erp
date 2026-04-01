@@ -139,6 +139,12 @@ def _coerce_pg_value(value, pg_type: str):
     return value
 
 
+def _norm_ci_key(value) -> str:
+    if value is None:
+        return ""
+    return str(value).strip().lower()
+
+
 def copy_table(*, sqlite_conn: sqlite3.Connection, pg_conn, table: str, batch_size: int = 500) -> int:
     table = norm_ident(table)
     sqlite_cols = sqlite_table_columns(sqlite_conn, table)
@@ -158,6 +164,10 @@ def copy_table(*, sqlite_conn: sqlite3.Connection, pg_conn, table: str, batch_si
 
     cur = sqlite_conn.execute(f"SELECT {select_cols} FROM {qident(table)}")
     total = 0
+    seen_usernames: set[str] = set()
+    seen_emails: set[str] = set()
+    email_idx = cols.index("email") if table == "usuarios" and "email" in cols else -1
+    user_idx = cols.index("usuario") if table == "usuarios" and "usuario" in cols else -1
     while True:
         rows = cur.fetchmany(batch_size)
         if not rows:
@@ -165,7 +175,21 @@ def copy_table(*, sqlite_conn: sqlite3.Connection, pg_conn, table: str, batch_si
         coerced = []
         for row in rows:
             # sqlite3 row is tuple-like
-            coerced.append(tuple(_coerce_pg_value(v, t) for v, t in zip(row, types)))
+            values = list(row)
+            if table == "usuarios":
+                if email_idx >= 0:
+                    key = _norm_ci_key(values[email_idx])
+                    if key and key in seen_emails:
+                        values[email_idx] = None
+                    elif key:
+                        seen_emails.add(key)
+                if user_idx >= 0:
+                    key = _norm_ci_key(values[user_idx])
+                    if key and key in seen_usernames:
+                        values[user_idx] = None
+                    elif key:
+                        seen_usernames.add(key)
+            coerced.append(tuple(_coerce_pg_value(v, t) for v, t in zip(values, types)))
         pg_conn.executemany(insert_sql, coerced)
         total += len(rows)
     return total
