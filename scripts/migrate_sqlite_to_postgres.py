@@ -200,6 +200,11 @@ def main():
     parser.add_argument("--sqlite", required=True, help="Ruta a la SQLite origen (ej: /var/data/erp.sqlite).")
     parser.add_argument("--only", action="append", default=[], help="Tabla(s) a copiar (puede repetirse).")
     parser.add_argument("--skip", action="append", default=[], help="Tabla(s) a saltar (puede repetirse).")
+    parser.add_argument(
+        "--rrhh-only",
+        action="store_true",
+        help="Atajo: copia solo tablas de RRHH/Registro Horario (más workspaces/empresas/usuarios).",
+    )
     parser.add_argument("--truncate", action="store_true", help="TRUNCATE de tablas destino antes de copiar (destructivo).")
     parser.add_argument("--batch-size", type=int, default=500, help="Tamaño de lote para inserts.")
     parser.add_argument("--yes", action="store_true", help="Confirma acciones destructivas (truncate).")
@@ -224,7 +229,26 @@ def main():
 
     try:
         tables = sqlite_table_names(sqlite_conn)
-        only = [norm_ident(t) for t in (args.only or []) if str(t or "").strip()]
+        rrhh_only = []
+        if args.rrhh_only:
+            rrhh_only = [
+                "usuarios",
+                "empresas",
+                "workspaces",
+                "workspace_empresas",
+                "workspace_modulos",
+                "workspace_registro_personal",
+                "workspace_registro_horario",
+                "workspace_registro_periodos",
+                "workspace_registro_audit",
+                "workspace_registro_alerts",
+                "workspace_registro_notifications",
+                "workspace_rrhh_profile",
+                "workspace_rrhh_ausencias",
+                "workspace_rrhh_gastos",
+                "workspace_rrhh_documentos",
+            ]
+        only = [norm_ident(t) for t in ([*rrhh_only, *(args.only or [])]) if str(t or "").strip()]
         skip = {norm_ident(t) for t in (args.skip or []) if str(t or "").strip()}
         if only:
             tables = [t for t in tables if norm_ident(t) in set(only)]
