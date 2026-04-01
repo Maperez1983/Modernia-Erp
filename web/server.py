@@ -139,8 +139,22 @@ APP_SESSION_TTL_SECONDS = max(900, int(os.environ.get("APP_SESSION_TTL_SECONDS",
 SESSION_COOKIE_NAME = os.environ.get("APP_SESSION_COOKIE", "crm_session")
 AUTH_ALLOW_FIRST_PASSWORD_SET = os.environ.get("AUTH_ALLOW_FIRST_PASSWORD_SET", "1").strip().lower() not in ("0", "false", "no", "off")
 AUTH_INVITE_TTL_SECONDS = max(1800, int(os.environ.get("AUTH_INVITE_TTL_SECONDS", "172800")))
-AUTH_PUBLIC_GET_ENDPOINTS = {"/api/health", "/api/me", "/api/auth_invite_status", "/api/workspace_portal_public", "/api/workspace_factura_pdf_public"}
-AUTH_PUBLIC_POST_ENDPOINTS = {"/api/login", "/api/logout", "/api/auth_set_password", "/api/workspace_portal_upload"}
+AUTH_PUBLIC_GET_ENDPOINTS = {
+    "/api/health",
+    "/api/me",
+    "/api/auth_invite_status",
+    "/api/workspace_portal_public",
+    "/api/workspace_factura_pdf_public",
+    "/api/workspace_kiosk_status",
+    "/kiosk",
+}
+AUTH_PUBLIC_POST_ENDPOINTS = {
+    "/api/login",
+    "/api/logout",
+    "/api/auth_set_password",
+    "/api/workspace_portal_upload",
+    "/api/workspace_kiosk_toggle",
+}
 AUTH_SESSIONS = {}
 AUTH_SESSIONS_LOCK = threading.Lock()
 SQLITE_FOREIGN_KEYS_ENABLED = os.environ.get("APP_SQLITE_FOREIGN_KEYS", "1").strip().lower() not in ("0", "false", "no", "off")
@@ -15318,6 +15332,7 @@ def ensure_workspace_product_tables(conn):
     ensure_column(conn, "workspace_registro_personal", "foto_url", "foto_url TEXT")
     ensure_column(conn, "workspace_registro_personal", "fecha_nacimiento", "fecha_nacimiento TEXT")
     ensure_column(conn, "workspace_registro_personal", "tipo_contrato", "tipo_contrato TEXT")
+    ensure_column(conn, "workspace_registro_personal", "kiosk_token", "kiosk_token TEXT")
     # Índices: la tabla puede crecer mucho por sincronizaciones; sin índices los UPDATE/SELECT pueden provocar timeouts (Render → 502).
     try:
         conn.execute(
@@ -15331,6 +15346,9 @@ def ensure_workspace_product_tables(conn):
         )
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_workspace_registro_personal_ws_nombre ON workspace_registro_personal (workspace_id, nombre)"
+        )
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_workspace_registro_personal_kiosk_token ON workspace_registro_personal (workspace_id, kiosk_token)"
         )
     except Exception:
         pass
@@ -17563,7 +17581,6 @@ def fetch_workspace_notifications(conn, workspace_id, limit=40, persona_id=None)
         (*params, max(1, min(int(limit or 40), 200))),
     ).fetchall()
     return {"rows": [dict(row) for row in rows]}
-
 
 def log_workspace_notification(conn, workspace_id, persona_id, channel, payload, now=None):
     now_ts = now or datetime.now().isoformat()
@@ -21063,6 +21080,72 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": f"{type(exc).__name__}: {exc}"}, status=500)
             return
 
+        if parsed.path == "/kiosk":
+            params = urllib.parse.parse_qs(parsed.query or "")
+            token = (params.get("token", [""])[0] or "").strip()
+            page = f"""<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Kiosko · Fichaje</title>
+  <style>
+    body{{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;max-width:820px;margin:32px auto;padding:0 18px;color:#1d1d1f}}
+    .card{{border:1px solid #e7e7ea;border-radius:14px;padding:18px}}
+    .muted{{color:#6b7280}}
+    button{{padding:10px 14px;border-radius:10px;border:1px solid #d1d5db;background:#111827;color:#fff;cursor:pointer}}
+    button.secondary{{background:#fff;color:#111827}}
+    .row{{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:12px}}
+    code{{background:#f3f4f6;padding:2px 6px;border-radius:6px}}
+  </style>
+  </head>
+<body>
+  <h2>Kiosko de fichaje</h2>
+  <div class="card">
+    <p class="muted">Usa este botón para fichar (entrada o salida). Si no tienes token, pide a un administrador que te lo genere.</p>
+    <div class="row">
+      <button id="punchBtn">Fichar ahora</button>
+      <button id="refreshBtn" class="secondary">Actualizar estado</button>
+    </div>
+    <p id="status" class="muted" style="margin-top:12px;"></p>
+    <p class="muted" style="margin-top:12px;">Token: <code id="token">{html.escape(token) if token else ""}</code></p>
+  </div>
+  <script>
+    const token = {json.dumps(token or "")};
+    const statusEl = document.getElementById("status");
+    const punchBtn = document.getElementById("punchBtn");
+    const refreshBtn = document.getElementById("refreshBtn");
+    async function refresh() {{
+      if (!token) {{ statusEl.textContent = "Token vacío."; return; }}
+      statusEl.textContent = "Consultando…";
+      const res = await fetch("/api/workspace_kiosk_status?token=" + encodeURIComponent(token)).then(r => r.json()).catch(() => ({{error:"Error"}}));
+      if (res.error) {{ statusEl.textContent = res.error; return; }}
+      const t = res.today || {{}};
+      const label = t.open ? "Fichaje abierto: falta salida" : (t.missing_checkin ? "Hoy sin fichaje" : "Hoy fichaje cerrado");
+      statusEl.textContent = label + (t.checkin ? ` · Entrada ${t.checkin}` : "") + (t.checkout ? ` · Salida ${t.checkout}` : "");
+    }}
+    async function punch() {{
+      if (!token) {{ statusEl.textContent = "Token vacío."; return; }}
+      punchBtn.disabled = true;
+      statusEl.textContent = "Enviando…";
+      const res = await fetch("/api/workspace_kiosk_toggle", {{
+        method: "POST",
+        headers: {{ "Content-Type": "application/json" }},
+        body: JSON.stringify({{ token }})
+      }}).then(r => r.json()).catch(() => ({{error:"Error"}}));
+      punchBtn.disabled = false;
+      if (res.error) {{ statusEl.textContent = res.error; return; }}
+      await refresh();
+    }}
+    refreshBtn.addEventListener("click", refresh);
+    punchBtn.addEventListener("click", punch);
+    refresh();
+  </script>
+</body>
+</html>"""
+            binary_response(self, page.encode("utf-8"), content_type="text/html; charset=utf-8")
+            return
+
         if parsed.path == "/" or parsed.path == "":
             send_file(self, ROOT / "index.html")
             return
@@ -21226,7 +21309,9 @@ class Handler(BaseHTTPRequestHandler):
 	            "/api/workspace_registro_personal_delete",
 	            "/api/workspace_registro_personal_self_photo",
 	            "/api/workspace_registro_horario",
-	            "/api/workspace_registro_horario_toggle",
+            "/api/workspace_registro_horario_toggle",
+            "/api/workspace_kiosk_toggle",
+            "/api/workspace_kiosk_token",
 	            "/api/workspace_registro_alerts",
             "/api/workspace_registro_usuario_toggle",
             "/api/workspace_registro_periodo_lock",
@@ -23674,6 +23759,137 @@ class Handler(BaseHTTPRequestHandler):
             conn.commit()
             json_response(self, {"ok": True, "action": "checkin", "id": record_id, "fecha": fecha, "hora_inicio": now_hhmm})
             return
+        elif parsed.path == "/api/workspace_kiosk_token":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not workspace_session_is_privileged(session):
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            persona_id = str(payload.get("persona_id") or "").strip()
+            if not workspace_id or not persona_id:
+                json_response(self, {"error": "workspace_id y persona_id requeridos"}, status=400)
+                return
+            row = conn.execute(
+                """
+                SELECT id, nombre
+                FROM workspace_registro_personal
+                WHERE workspace_id = ? AND id = ?
+                LIMIT 1
+                """,
+                (workspace_id, persona_id),
+            ).fetchone()
+            if not row:
+                json_response(self, {"error": "persona no encontrada"}, status=404)
+                return
+            token = secrets.token_urlsafe(24)
+            conn.execute(
+                """
+                UPDATE workspace_registro_personal
+                SET kiosk_token = ?, updated_at = datetime(?)
+                WHERE workspace_id = ? AND id = ?
+                """,
+                (token, now, workspace_id, persona_id),
+            )
+            conn.commit()
+            base_url = (os.environ.get("APP_BASE_URL") or "").strip().rstrip("/")
+            kiosk_url = f"{base_url}/kiosk?token={urllib.parse.quote(token)}" if base_url else f"/kiosk?token={urllib.parse.quote(token)}"
+            json_response(self, {"ok": True, "persona_id": persona_id, "persona_nombre": str(row_value(row, "nombre") or "").strip(), "token": token, "kiosk_url": kiosk_url})
+            return
+        elif parsed.path == "/api/workspace_kiosk_toggle":
+            token = str(payload.get("token") or "").strip()
+            if not token:
+                json_response(self, {"error": "token requerido"}, status=400)
+                return
+            persona_row = conn.execute(
+                """
+                SELECT id, workspace_id, empresa_id, usuario_id, nombre, tipo_jornada, horas_pactadas_dia, activo
+                FROM workspace_registro_personal
+                WHERE kiosk_token = ?
+                LIMIT 1
+                """,
+                (token,),
+            ).fetchone()
+            if not persona_row:
+                json_response(self, {"error": "token no válido"}, status=404)
+                return
+            if int(row_value(persona_row, "activo") or 0) != 1:
+                json_response(self, {"error": "persona inactiva"}, status=409)
+                return
+            workspace_id = str(row_value(persona_row, "workspace_id") or "").strip()
+            persona_id = str(row_value(persona_row, "id") or "").strip()
+            empresa_id = str(row_value(persona_row, "empresa_id") or "").strip()
+            if not workspace_id or not persona_id or not empresa_id:
+                json_response(self, {"error": "configuración incompleta (workspace/empresa/persona)"}, status=409)
+                return
+            now_dt = datetime.now()
+            fecha = now_dt.date().isoformat()
+            if is_workspace_time_month_locked(conn, workspace_id, fecha, empresa_id=empresa_id):
+                json_response(self, {"error": "Mes bloqueado: no se puede fichar."}, status=409)
+                return
+            now_hhmm = now_dt.strftime("%H:%M")
+            open_row = conn.execute(
+                """
+                SELECT id, hora_inicio, COALESCE(hora_fin, '') AS hora_fin, COALESCE(pausa_min, 0) AS pausa_min
+                FROM workspace_registro_horario
+                WHERE workspace_id = ? AND persona_id = ? AND fecha = ? AND COALESCE(hora_fin, '') = ''
+                ORDER BY hora_inicio DESC
+                LIMIT 1
+                """,
+                (workspace_id, persona_id, fecha),
+            ).fetchone()
+            action = "checkout" if open_row else "checkin"
+            persona_nombre = str(row_value(persona_row, "nombre") or "").strip() or "-"
+            tipo_jornada = normalize_shift_type(row_value(persona_row, "tipo_jornada") or "")
+            try:
+                horas_pactadas_dia = float(row_value(persona_row, "horas_pactadas_dia")) if row_value(persona_row, "horas_pactadas_dia") not in (None, "") else None
+            except Exception:
+                horas_pactadas_dia = None
+            if action == "checkout":
+                start = str(row_value(open_row, "hora_inicio") or "").strip()
+                pausa_min = int(row_value(open_row, "pausa_min") or 0)
+                minutos = compute_worked_minutes(start, now_hhmm, pausa_min)
+                estado = normalize_time_entry_state("Cerrado", now_hhmm)
+                conn.execute(
+                    """
+                    UPDATE workspace_registro_horario
+                    SET hora_fin = ?, minutos_trabajados = ?, estado = ?, metodo_registro = 'Kiosk', updated_at = datetime(?)
+                    WHERE id = ? AND workspace_id = ?
+                    """,
+                    (now_hhmm, minutos, estado, now, row_value(open_row, "id"), workspace_id),
+                )
+                conn.commit()
+                json_response(self, {"ok": True, "action": "checkout", "id": row_value(open_row, "id"), "fecha": fecha, "hora_fin": now_hhmm, "persona_nombre": persona_nombre})
+                return
+            # checkin
+            record_id = os.urandom(16).hex()
+            estado = normalize_time_entry_state("Abierto", "")
+            conn.execute(
+                """
+                INSERT INTO workspace_registro_horario (
+                  id, workspace_id, empresa_id, persona_id, usuario_id, persona_nombre, tipo_jornada, horas_pactadas_dia,
+                  fecha, hora_inicio, hora_fin, pausa_min, minutos_trabajados, metodo_registro, estado, notas, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 'Kiosk', ?, NULL, datetime(?), datetime(?))
+                """,
+                (
+                    record_id,
+                    workspace_id,
+                    empresa_id,
+                    persona_id,
+                    str(row_value(persona_row, "usuario_id") or "").strip() or None,
+                    persona_nombre,
+                    tipo_jornada,
+                    horas_pactadas_dia,
+                    fecha,
+                    now_hhmm,
+                    None,
+                    estado,
+                    now,
+                    now,
+                ),
+            )
+            conn.commit()
+            json_response(self, {"ok": True, "action": "checkin", "id": record_id, "fecha": fecha, "hora_inicio": now_hhmm, "persona_nombre": persona_nombre})
+            return
         elif parsed.path == "/api/workspace_registro_personal":
             t0 = time.monotonic()
             workspace_id = str(payload.get("workspace_id") or "").strip()
@@ -24235,13 +24451,16 @@ class Handler(BaseHTTPRequestHandler):
                 "SELECT id FROM workspace_rrhh_profile WHERE workspace_id = ? AND persona_id = ? LIMIT 1",
                 (workspace_id, persona_id),
             ).fetchone()
+            vacaciones_dias = round(parse_money_value(payload.get("vacaciones_dias_anuales")), 2) if str(payload.get("vacaciones_dias_anuales") or "").strip() else 22.0
+            if not vacaciones_dias or vacaciones_dias <= 0:
+                vacaciones_dias = 22.0
             if record:
                 record_id = str(row_value(record, "id") or row_value(record, 0) or "").strip()
                 conn.execute(
                     """
                     UPDATE workspace_rrhh_profile
                     SET empresa_id = ?, puesto = ?, departamento = ?, tipo_contrato = ?, fecha_inicio = ?, fecha_fin = ?,
-                        centro_trabajo = ?, notas = ?, updated_at = datetime(?)
+                        centro_trabajo = ?, notas = ?, vacaciones_dias_anuales = ?, updated_at = datetime(?)
                     WHERE id = ? AND workspace_id = ?
                     """,
                     (
@@ -24253,6 +24472,7 @@ class Handler(BaseHTTPRequestHandler):
                         str(payload.get("fecha_fin") or "").strip() or None,
                         str(payload.get("centro_trabajo") or "").strip() or None,
                         str(payload.get("notas") or "").strip() or None,
+                        vacaciones_dias,
                         now,
                         record_id,
                         workspace_id,
@@ -24264,8 +24484,8 @@ class Handler(BaseHTTPRequestHandler):
                     """
                     INSERT INTO workspace_rrhh_profile (
                       id, workspace_id, persona_id, empresa_id, puesto, departamento, tipo_contrato,
-                      fecha_inicio, fecha_fin, centro_trabajo, notas, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                      fecha_inicio, fecha_fin, centro_trabajo, notas, vacaciones_dias_anuales, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
                     """,
                     (
                         record_id,
@@ -24279,6 +24499,7 @@ class Handler(BaseHTTPRequestHandler):
                         str(payload.get("fecha_fin") or "").strip() or None,
                         str(payload.get("centro_trabajo") or "").strip() or None,
                         str(payload.get("notas") or "").strip() or None,
+                        vacaciones_dias,
                         now,
                         now,
                     ),
@@ -31656,6 +31877,61 @@ class Handler(BaseHTTPRequestHandler):
                     json_response(self, {"rows": []})
                     return
             json_response(self, fetch_workspace_notifications(conn, workspace_id, limit=limit, persona_id=persona_id or None))
+            return
+
+        if path == "/api/workspace_kiosk_status":
+            token = (params.get("token", [""])[0] or "").strip()
+            if not token:
+                json_response(self, {"error": "token requerido"}, status=400)
+                return
+            persona_row = conn.execute(
+                """
+                SELECT id, workspace_id, empresa_id, nombre, activo
+                FROM workspace_registro_personal
+                WHERE kiosk_token = ?
+                LIMIT 1
+                """,
+                (token,),
+            ).fetchone()
+            if not persona_row:
+                json_response(self, {"error": "token no válido"}, status=404)
+                return
+            if int(row_value(persona_row, "activo") or 0) != 1:
+                json_response(self, {"error": "persona inactiva"}, status=409)
+                return
+            workspace_id = str(row_value(persona_row, "workspace_id") or "").strip()
+            persona_id = str(row_value(persona_row, "id") or "").strip()
+            today = datetime.now().date().isoformat()
+            today_row = conn.execute(
+                """
+                SELECT id, hora_inicio, hora_fin
+                FROM workspace_registro_horario
+                WHERE workspace_id = ? AND persona_id = ? AND fecha = ?
+                ORDER BY hora_inicio DESC
+                LIMIT 1
+                """,
+                (workspace_id, persona_id, today),
+            ).fetchone()
+            today_in = str(row_value(today_row, "hora_inicio") or "").strip() if today_row else ""
+            today_out = str(row_value(today_row, "hora_fin") or "").strip() if today_row else ""
+            open_entry = bool(today_in and not today_out)
+            json_response(
+                self,
+                {
+                    "ok": True,
+                    "workspace_id": workspace_id,
+                    "persona_id": persona_id,
+                    "persona_nombre": str(row_value(persona_row, "nombre") or "").strip(),
+                    "today": {
+                        "date": today,
+                        "checkin": today_in,
+                        "checkout": today_out,
+                        "open": bool(open_entry),
+                        "missing_checkin": bool(not today_in),
+                        "missing_checkout": bool(open_entry),
+                    },
+                },
+            )
             return
 
         if path == "/api/workspace_registro_audit":

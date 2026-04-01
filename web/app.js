@@ -5954,6 +5954,22 @@ const refreshWorkspaceHomeAlerts = async () => {
       state.workspaceRrhhAusenciasAllRows = resp.rows;
     }
   }
+
+  // RRHH: solicitudes propias (para todos, incluyendo admins con ficha vinculada).
+  {
+    const enabledModules = new Set(state.currentWorkspaceEnabledModules || []);
+    const allowRrhh = !enabledModules.size || enabledModules.has("rrhh");
+    const ownPersonaId = String(resolveWorkspacePersonaForAuthUser() || "").trim();
+    if (allowRrhh && ownPersonaId) {
+      const resp = await safeWorkspaceApi(
+        `/api/workspace_rrhh_ausencias?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}&month=${encodeURIComponent(month)}&persona_id=${encodeURIComponent(ownPersonaId)}`,
+        { rows: [] }
+      );
+      state.workspaceHomeMyAusenciasRows = (resp && Array.isArray(resp.rows)) ? resp.rows : [];
+    } else {
+      state.workspaceHomeMyAusenciasRows = [];
+    }
+  }
   renderWorkspaceHomeAlerts();
 };
 
@@ -6007,7 +6023,26 @@ const renderWorkspaceHomeAlerts = () => {
     `);
   }
 
-  // 2) RRHH pendientes (solo admins).
+  // 2) Mis solicitudes RRHH.
+  if (!enabledModules.size || enabledModules.has("rrhh")) {
+    const myRows = Array.isArray(state.workspaceHomeMyAusenciasRows) ? state.workspaceHomeMyAusenciasRows : [];
+    const pendingMine = myRows.filter((row) => String(row?.estado || "").trim() === "Solicitada");
+    if (pendingMine.length) {
+      alerts.push(`
+        <div class="rrhh-alert">
+          <div>
+            <strong>RRHH · ${pendingMine.length} solicitud${pendingMine.length === 1 ? "" : "es"} pendiente${pendingMine.length === 1 ? "" : "s"} (mías)</strong>
+            <div class="muted">Vacaciones y permisos a la espera de validación.</div>
+          </div>
+          <div class="rrhh-alert-actions">
+            <button type="button" class="secondary ghost button-inline" data-workspace-rrhh-myrequests>Ver</button>
+          </div>
+        </div>
+      `);
+    }
+  }
+
+  // 3) RRHH pendientes (solo admins).
   if (isPrivilegedUser(user) && (!enabledModules.size || enabledModules.has("rrhh"))) {
     const rows = Array.isArray(state.workspaceRrhhAusenciasAllRows) ? state.workspaceRrhhAusenciasAllRows : [];
     const pending = rows.filter((row) => String(row?.estado || "").trim() === "Solicitada");
@@ -6036,6 +6071,17 @@ const renderWorkspaceHomeAlerts = () => {
         return;
       }
       focusWorkspaceEngine("registro_horario", workspaceTimeSummary);
+    });
+  }
+
+  const myReqBtn = target.querySelector("[data-workspace-rrhh-myrequests]");
+  if (myReqBtn) {
+    myReqBtn.addEventListener("click", () => {
+      state.workspaceRrhhEntry = "self";
+      state.workspaceRrhhTab = "ausencias";
+      state.workspaceRrhhScopeAll = false;
+      state.workspaceRrhhEquipoView = "list";
+      setWorkspaceView("rrhh", { scroll: true, forceTenantView: true });
     });
   }
 
@@ -6566,6 +6612,12 @@ const renderWorkspaceRrhhHub = () => {
       out += chars[Math.floor(Math.random() * chars.length)];
     }
     return out;
+  };
+
+  const buildKioskUrl = (token = "") => {
+    const t = String(token || "").trim();
+    if (!t) return "";
+    return `${window.location.origin}/kiosk?token=${encodeURIComponent(t)}`;
   };
 
   const renderUsuarios = () => {
@@ -7501,12 +7553,25 @@ const renderWorkspaceRrhhHub = () => {
                     <button type="button" class="secondary ghost button-inline" data-rrhh-member-pass="${escapeHtml(String(user.id))}">Generar</button>
                     <button type="button" class="secondary ghost button-inline" data-rrhh-member-pass-copy>Copiar</button>
                   </div>
-                </div>
-              ` : ""}
-	            ${employee?.id ? `
-	              <div class="workspace-rrhh-row">
-	                <div>
-	                  <strong>Vínculo</strong>
+	                </div>
+	              ` : ""}
+		            ${employee?.id ? `
+		              <div class="workspace-rrhh-row">
+		                <div>
+		                  <strong>Kiosko de fichaje (QR)</strong>
+		                  <div class="muted">Genera un enlace público para fichar entrada/salida desde un dispositivo compartido.</div>
+		                  <input id="rrhhMemberKioskUrl" class="rrhh-inline-input" type="text" readonly value="${escapeHtml(buildKioskUrl(employee?.kiosk_token || ""))}" placeholder="Genera un enlace..." />
+		                </div>
+		                <div class="workspace-rrhh-row-actions">
+		                  <button type="button" class="secondary ghost button-inline" data-rrhh-member-kiosk-generate ${isWorkspaceRrhhManager() ? "" : "disabled"}>Generar enlace</button>
+		                  <button type="button" class="secondary ghost button-inline" data-rrhh-member-kiosk-copy>Copiar</button>
+		                </div>
+		              </div>
+		            ` : ""}
+		            ${employee?.id ? `
+		              <div class="workspace-rrhh-row">
+		                <div>
+		                  <strong>Vínculo</strong>
 	                  <div class="muted">${employee?.usuario_manual ? "Vinculado" : "Sin vincular"}</div>
 	                </div>
 	                <div class="workspace-rrhh-row-actions">
@@ -7894,16 +7959,26 @@ const renderWorkspaceRrhhHub = () => {
             Departamento
             <input name="departamento" value="${escapeHtml(profile.departamento || "")}" />
           </label>
-          <label>
-            Tipo contrato
-            <select name="tipo_contrato">
-              ${buildRrhhContractTypeOptions(profile.tipo_contrato || "")}
-            </select>
-          </label>
-          <label>
-            Centro trabajo
-            <input name="centro_trabajo" value="${escapeHtml(profile.centro_trabajo || "")}" />
-          </label>
+	          <label>
+	            Tipo contrato
+	            <select name="tipo_contrato">
+	              ${buildRrhhContractTypeOptions(profile.tipo_contrato || "")}
+	            </select>
+	          </label>
+	          <label>
+	            Vacaciones/año
+	            <input
+	              name="vacaciones_dias_anuales"
+	              type="number"
+	              min="1"
+	              step="0.5"
+	              value="${escapeHtml(String(profile.vacaciones_dias_anuales ?? 22))}"
+	            />
+	          </label>
+	          <label>
+	            Centro trabajo
+	            <input name="centro_trabajo" value="${escapeHtml(profile.centro_trabajo || "")}" />
+	          </label>
           <label>
             Fecha inicio
             <input type="date" name="fecha_inicio" value="${escapeHtml(profile.fecha_inicio || "")}" />
@@ -8827,6 +8902,49 @@ const renderWorkspaceRrhhHub = () => {
       }
     });
   }
+
+  const kioskUrlInput = document.getElementById("rrhhMemberKioskUrl");
+  const kioskGenerateBtn = workspaceRrhhHub.querySelector("[data-rrhh-member-kiosk-generate]");
+  if (kioskGenerateBtn && kioskUrlInput) {
+    kioskGenerateBtn.addEventListener("click", async () => {
+      if (!isWorkspaceRrhhManager()) return;
+      const personaId = String(state.workspaceRrhhEquipoMemberPersonaId || "").trim();
+      if (!state.currentWorkspaceId || !personaId) return;
+      kioskGenerateBtn.disabled = true;
+      if (accessStatus) accessStatus.textContent = "Generando enlace kiosko...";
+      try {
+        const resp = await apiPost("/api/workspace_kiosk_token", { workspace_id: state.currentWorkspaceId, persona_id: personaId });
+        if (resp?.error) throw new Error(resp.error);
+        const url = String(resp?.kiosk_url || "") || buildKioskUrl(resp?.token || "");
+        kioskUrlInput.value = url;
+        if (resp?.token) {
+          upsertWorkspaceEmployeeLocal({ id: personaId, kiosk_token: String(resp.token || "") });
+          renderCompanyCards();
+        }
+        if (accessStatus) accessStatus.textContent = "Enlace kiosko generado.";
+      } catch (error) {
+        if (accessStatus) accessStatus.textContent = error.message || "No se pudo generar el enlace.";
+      } finally {
+        kioskGenerateBtn.disabled = false;
+      }
+    });
+  }
+  const kioskCopyBtn = workspaceRrhhHub.querySelector("[data-rrhh-member-kiosk-copy]");
+  if (kioskCopyBtn && kioskUrlInput) {
+    kioskCopyBtn.addEventListener("click", async () => {
+      const value = String(kioskUrlInput.value || "").trim();
+      if (!value) return;
+      try {
+        await navigator.clipboard.writeText(value);
+        if (accessStatus) accessStatus.textContent = "Enlace kiosko copiado.";
+      } catch {
+        try {
+          window.prompt("Copia el enlace:", value);
+        } catch {}
+      }
+    });
+  }
+
   const toggleRegistro = workspaceRrhhHub.querySelector("[data-rrhh-member-toggle-registro]");
   if (toggleRegistro) {
     toggleRegistro.addEventListener("click", async () => {

@@ -217,6 +217,7 @@ CREATE TABLE IF NOT EXISTS workspace_registro_personal (
   workspace_id TEXT NOT NULL,
   empresa_id TEXT,
   usuario_id TEXT,
+  kiosk_token TEXT,
   nombre TEXT NOT NULL,
   nif TEXT,
   email TEXT,
