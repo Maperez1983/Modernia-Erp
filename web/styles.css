@@ -5812,10 +5812,12 @@ body.auth-locked {
   transform: translateY(-50%);
   width: 36px;
   height: 36px;
+  padding: 0;
   border-radius: 12px;
   border: 1px solid rgba(60, 110, 113, 0.2);
   background: rgba(245, 245, 245, 0.86);
   color: var(--ink-soft);
+  box-shadow: none;
   z-index: 2;
   display: inline-flex;
   align-items: center;
