@@ -21092,7 +21092,7 @@ def fetch_workspace_detail(conn, workspace_id):
           COALESCE(e.convenio_key, '') AS convenio_key,
           COALESCE(e.convenio_nombre, '') AS convenio_nombre,
           COALESCE(e.vacaciones_modo, '') AS vacaciones_modo,
-          COALESCE(e.vacaciones_dias_anuales, '') AS vacaciones_dias_anuales,
+          COALESCE(CAST(e.vacaciones_dias_anuales AS TEXT), '') AS vacaciones_dias_anuales,
           COALESCE(e.logo_url, '') AS logo_url,
           COALESCE(we.rol, '') AS rol,
           COALESCE(e.activo, 1) AS activo
@@ -31092,7 +31092,7 @@ class Handler(BaseHTTPRequestHandler):
                                COALESCE(convenio_key, '') AS convenio_key,
                                COALESCE(convenio_nombre, '') AS convenio_nombre,
                                COALESCE(vacaciones_modo, '') AS vacaciones_modo,
-                               COALESCE(vacaciones_dias_anuales, '') AS vacaciones_dias_anuales
+                               COALESCE(CAST(vacaciones_dias_anuales AS TEXT), '') AS vacaciones_dias_anuales
                         FROM empresas
                         WHERE id = ?
                         LIMIT 1
@@ -34364,7 +34364,7 @@ class Handler(BaseHTTPRequestHandler):
                   COALESCE(convenio_key, '') AS convenio_key,
                   COALESCE(convenio_nombre, '') AS convenio_nombre,
                   COALESCE(vacaciones_modo, '') AS vacaciones_modo,
-                  COALESCE(vacaciones_dias_anuales, '') AS vacaciones_dias_anuales
+                  COALESCE(CAST(vacaciones_dias_anuales AS TEXT), '') AS vacaciones_dias_anuales
                 FROM empresas
                 ORDER BY nombre
                 """
