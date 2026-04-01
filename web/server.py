@@ -15403,6 +15403,22 @@ def ensure_workspace_product_tables(conn):
         )
     except Exception:
         pass
+    # Backfill: si la ficha tiene `empresa_id` (legacy) pero aún no existía `empresa_manual`, marcamos como manual.
+    # Si no lo hacemos, al entrar con un tenant/empresa seleccionada el endpoint filtra y “desaparecen” todas las fichas.
+    try:
+        conn.execute(
+            """
+            UPDATE workspace_registro_personal
+            SET empresa_manual = 1,
+                source = COALESCE(NULLIF(TRIM(source), ''), 'manual')
+            WHERE COALESCE(empresa_id, '') != ''
+              AND COALESCE(empresa_manual, 0) = 0
+              AND COALESCE(source, 'manual') != 'auto'
+              AND COALESCE(notas, '') NOT LIKE '%Sincronizado automáticamente desde usuarios.%'
+            """
+        )
+    except Exception:
+        pass
     # Backfill: si una ficha legacy ya tenía `usuario_id` pero el flag `usuario_manual` no existía todavía,
     # lo tratamos como vínculo manual salvo que sepamos que venía de sync automático (por notas).
     try:
@@ -19580,6 +19596,12 @@ def fetch_workspace_detail(conn, workspace_id):
     ).fetchone()
     if not workspace:
         return None
+    # Backfill: si el workspace aún no tiene empresas linkadas (p. ej. tras migraciones),
+    # las asociamos automáticamente para que RRHH y formularios tengan el desplegable de empresa.
+    try:
+        fetch_workspace_company_ids(conn, workspace_id)
+    except Exception:
+        pass
     companies = conn.execute(
         """
         SELECT e.id, e.nombre, COALESCE(we.rol, '') AS rol, COALESCE(e.activo, 1) AS activo
