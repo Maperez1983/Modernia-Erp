@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS empresas (
   direccion TEXT,
   sector TEXT,
   cnae TEXT,
+  cnaes_json TEXT,
   convenio_key TEXT,
   convenio_nombre TEXT,
   vacaciones_modo TEXT NOT NULL DEFAULT 'habiles',

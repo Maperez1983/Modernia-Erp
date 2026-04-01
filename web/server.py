@@ -11310,6 +11310,49 @@ def fetch_legal_radar_items(conn, area="inmobiliaria", limit=100):
     return {"rows": parsed_rows, "summary": summary}
 
 
+def fetch_legal_radar_recent_updates(conn, *, area="inmobiliaria", topic_key="", limit=8):
+    try:
+        limit_value = max(1, min(50, int(limit)))
+    except Exception:
+        limit_value = 8
+    area_value = normalize_legal_area(area)
+    topic_value = str(topic_key or "").strip()
+    if not topic_value:
+        return []
+    rows = conn.execute(
+        """
+        SELECT id, fuente, referencia, titulo, fecha_publicacion, impacto, url,
+               accion_recomendada, auto_detected, created_at, updated_at
+        FROM legal_radar_items
+        WHERE area = ?
+          AND topic_key = ?
+        ORDER BY
+          COALESCE(NULLIF(fecha_publicacion, ''), created_at) DESC,
+          updated_at DESC
+        LIMIT ?
+        """,
+        (area_value, topic_value, limit_value),
+    ).fetchall()
+    updates = []
+    for row in rows:
+        updates.append(
+            {
+                "radar_item_id": row_value(row, "id") or row_value(row, 0) or "",
+                "fuente": row_value(row, "fuente") or "",
+                "referencia": row_value(row, "referencia") or "",
+                "fecha_publicacion": row_value(row, "fecha_publicacion") or "",
+                "impacto": row_value(row, "impacto") or "",
+                "url": row_value(row, "url") or "",
+                "accion_recomendada": row_value(row, "accion_recomendada") or "",
+                "title": row_value(row, "titulo") or "",
+                "auto_detected": int(row_value(row, "auto_detected") or 0),
+                "created_at": row_value(row, "created_at") or "",
+                "updated_at": row_value(row, "updated_at") or "",
+            }
+        )
+    return updates
+
+
 def validate_inmo_action_result(action_type, estado, resultado):
     normalized_type = normalize_inmo_action_type(action_type)
     if normalized_type not in INMO_ACTION_RESULT_OPTIONS:
@@ -14279,6 +14322,7 @@ def ensure_tables(db_path):
     ensure_column(conn, "empresas", "direccion", "direccion TEXT")
     ensure_column(conn, "empresas", "sector", "sector TEXT")
     ensure_column(conn, "empresas", "cnae", "cnae TEXT")
+    ensure_column(conn, "empresas", "cnaes_json", "cnaes_json TEXT")
     ensure_column(conn, "empresas", "convenio_key", "convenio_key TEXT")
     ensure_column(conn, "empresas", "convenio_nombre", "convenio_nombre TEXT")
     ensure_column(conn, "empresas", "vacaciones_modo", "vacaciones_modo TEXT NOT NULL DEFAULT 'habiles'")
@@ -20152,6 +20196,7 @@ def fetch_workspace_detail(conn, workspace_id):
           COALESCE(e.direccion, '') AS direccion,
           COALESCE(e.sector, '') AS sector,
           COALESCE(e.cnae, '') AS cnae,
+          COALESCE(e.cnaes_json, '') AS cnaes_json,
           COALESCE(e.convenio_key, '') AS convenio_key,
           COALESCE(e.convenio_nombre, '') AS convenio_nombre,
           COALESCE(e.vacaciones_modo, '') AS vacaciones_modo,
@@ -23470,10 +23515,34 @@ class Handler(BaseHTTPRequestHandler):
                 sector = str(payload.get("sector") or "").strip() or None
                 updates.append("sector = ?")
                 values.append(sector)
-            if "cnae" in payload:
-                cnae = str(payload.get("cnae") or "").strip() or None
+            cnaes_payload = None
+            if "cnaes" in payload:
+                cnaes_payload = payload.get("cnaes")
+            elif "cnae" in payload:
+                cnaes_payload = payload.get("cnae")
+            if cnaes_payload is not None:
+                if isinstance(cnaes_payload, list):
+                    parts = [str(x).strip() for x in cnaes_payload if str(x).strip()]
+                else:
+                    parts = [p.strip() for p in re.split(r"[,\n;]+", str(cnaes_payload or "")) if p.strip()]
+                normalized_list = []
+                seen_codes = set()
+                for part in parts:
+                    code = re.sub(r"[^0-9.]", "", part)
+                    code = re.sub(r"\.+", ".", code).strip(".").strip()
+                    if not code:
+                        continue
+                    if code in seen_codes:
+                        continue
+                    seen_codes.add(code)
+                    normalized_list.append(code)
+                    if len(normalized_list) >= 10:
+                        break
+                primary_cnae = normalized_list[0] if normalized_list else None
                 updates.append("cnae = ?")
-                values.append(cnae)
+                values.append(primary_cnae)
+                updates.append("cnaes_json = ?")
+                values.append(json.dumps(normalized_list, ensure_ascii=False) if normalized_list else "")
             if "convenio_key" in payload:
                 convenio_key = str(payload.get("convenio_key") or "").strip() or None
                 updates.append("convenio_key = ?")
@@ -23502,11 +23571,13 @@ class Handler(BaseHTTPRequestHandler):
                 updates.append("vacaciones_dias_anuales = ?")
                 values.append(days_val)
 
-            wants_suggest = ("sector" in payload or "cnae" in payload) and ("convenio_key" not in payload and "convenio_nombre" not in payload)
+            wants_suggest = ("sector" in payload or "cnae" in payload or "cnaes" in payload) and (
+                "convenio_key" not in payload and "convenio_nombre" not in payload
+            )
             if wants_suggest:
                 existing = conn.execute(
                     """
-                    SELECT COALESCE(sector,'') AS sector, COALESCE(cnae,'') AS cnae,
+                    SELECT COALESCE(sector,'') AS sector, COALESCE(cnae,'') AS cnae, COALESCE(cnaes_json,'') AS cnaes_json,
                            COALESCE(convenio_key,'') AS convenio_key, COALESCE(convenio_nombre,'') AS convenio_nombre,
                            COALESCE(vacaciones_modo,'') AS vacaciones_modo, vacaciones_dias_anuales
                     FROM empresas
@@ -23517,7 +23588,37 @@ class Handler(BaseHTTPRequestHandler):
                 ).fetchone()
                 if existing and not str(existing["convenio_key"] or "").strip() and not str(existing["convenio_nombre"] or "").strip():
                     sector_val = str(payload.get("sector") if "sector" in payload else existing["sector"] or "").strip()
-                    cnae_val = str(payload.get("cnae") if "cnae" in payload else existing["cnae"] or "").strip()
+                    raw_existing_list = str(existing["cnaes_json"] or "").strip()
+                    existing_list = []
+                    if raw_existing_list:
+                        try:
+                            parsed = json.loads(raw_existing_list)
+                            if isinstance(parsed, list):
+                                existing_list = [str(x).strip() for x in parsed if str(x).strip()]
+                        except Exception:
+                            existing_list = []
+                    existing_primary = str(existing["cnae"] or "").strip()
+                    if existing_primary and existing_primary not in existing_list:
+                        existing_list.insert(0, existing_primary)
+                    payload_primary = ""
+                    if "cnaes" in payload or "cnae" in payload:
+                        raw_value = payload.get("cnaes") if "cnaes" in payload else payload.get("cnae")
+                        if isinstance(raw_value, list):
+                            raw_parts = [str(x).strip() for x in raw_value if str(x).strip()]
+                        else:
+                            raw_parts = [p.strip() for p in re.split(r"[,\n;]+", str(raw_value or "")) if p.strip()]
+                        for part in raw_parts:
+                            code = re.sub(r"[^0-9.]", "", part)
+                            code = re.sub(r"\.+", ".", code).strip(".").strip()
+                            if code:
+                                payload_primary = code
+                                break
+                    if "cnaes" in payload:
+                        cnae_val = payload_primary
+                    elif "cnae" in payload:
+                        cnae_val = payload_primary
+                    else:
+                        cnae_val = existing_primary
                     suggested = suggest_convenio_for_company(sector_val, cnae_val)
                     if suggested:
                         suggested_key = str(suggested.get("key") or "").strip()
@@ -23570,7 +23671,26 @@ class Handler(BaseHTTPRequestHandler):
             nif = str(payload.get("nif") or "").strip() or None
             direccion = str(payload.get("direccion") or "").strip() or None
             sector = str(payload.get("sector") or "").strip() or None
-            cnae = str(payload.get("cnae") or "").strip() or None
+            raw_cnaes = payload.get("cnaes") if "cnaes" in payload else payload.get("cnae")
+            if isinstance(raw_cnaes, list):
+                parts = [str(x).strip() for x in raw_cnaes if str(x).strip()]
+            else:
+                parts = [p.strip() for p in re.split(r"[,\n;]+", str(raw_cnaes or "")) if p.strip()]
+            normalized_list = []
+            seen_codes = set()
+            for part in parts:
+                code = re.sub(r"[^0-9.]", "", part)
+                code = re.sub(r"\.+", ".", code).strip(".").strip()
+                if not code:
+                    continue
+                if code in seen_codes:
+                    continue
+                seen_codes.add(code)
+                normalized_list.append(code)
+                if len(normalized_list) >= 10:
+                    break
+            cnae = normalized_list[0] if normalized_list else None
+            cnaes_json = json.dumps(normalized_list, ensure_ascii=False) if normalized_list else ""
             convenio_key = str(payload.get("convenio_key") or "").strip() or None
             convenio_nombre = str(payload.get("convenio_nombre") or "").strip() or None
             modo = str(payload.get("vacaciones_modo") or "").strip().lower()
@@ -23606,11 +23726,11 @@ class Handler(BaseHTTPRequestHandler):
                     """
                     INSERT INTO empresas (
                       id, nombre, activo, nif, direccion,
-                      sector, cnae, convenio_key, convenio_nombre,
+                      sector, cnae, cnaes_json, convenio_key, convenio_nombre,
                       vacaciones_modo, vacaciones_dias_anuales,
                       created_at, updated_at
                     )
-                    VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                    VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
                     """,
                     (
                         empresa_id,
@@ -23619,6 +23739,7 @@ class Handler(BaseHTTPRequestHandler):
                         direccion,
                         sector,
                         cnae,
+                        cnaes_json,
                         convenio_key,
                         convenio_nombre,
                         modo or "habiles",
@@ -30041,6 +30162,71 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "Área legal no soportada"}, status=400)
                 return
             operations = get_legal_topic_operations(area, topic_key)
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            empresa_id = str(payload.get("empresa_id") or "").strip()
+            company = None
+            company_warning = ""
+            if empresa_id:
+                try:
+                    if workspace_id:
+                        linked = conn.execute(
+                            "SELECT 1 FROM workspace_empresas WHERE workspace_id = ? AND empresa_id = ? LIMIT 1",
+                            (workspace_id, empresa_id),
+                        ).fetchone()
+                        if not linked:
+                            company_warning = "Empresa no vinculada al workspace."
+                    row = conn.execute(
+                        """
+                        SELECT id, nombre,
+                               COALESCE(sector, '') AS sector,
+                               COALESCE(cnae, '') AS cnae,
+                               COALESCE(cnaes_json, '') AS cnaes_json,
+                               COALESCE(convenio_key, '') AS convenio_key,
+                               COALESCE(convenio_nombre, '') AS convenio_nombre,
+                               COALESCE(vacaciones_modo, '') AS vacaciones_modo,
+                               COALESCE(vacaciones_dias_anuales, '') AS vacaciones_dias_anuales
+                        FROM empresas
+                        WHERE id = ?
+                        LIMIT 1
+                        """,
+                        (empresa_id,),
+                    ).fetchone()
+                    if row:
+                        cnaes_list = []
+                        raw_cnaes = str(row_value(row, "cnaes_json") or "").strip()
+                        if raw_cnaes:
+                            try:
+                                parsed = json.loads(raw_cnaes)
+                                if isinstance(parsed, list):
+                                    cnaes_list = [str(x).strip() for x in parsed if str(x).strip()]
+                            except Exception:
+                                cnaes_list = []
+                        if not cnaes_list:
+                            fallback = str(row_value(row, "cnae") or "").strip()
+                            if fallback:
+                                cnaes_list = [fallback]
+                        company = {
+                            "id": row_value(row, "id") or "",
+                            "nombre": row_value(row, "nombre") or "",
+                            "sector": row_value(row, "sector") or "",
+                            "cnaes": cnaes_list,
+                            "convenio_key": row_value(row, "convenio_key") or "",
+                            "convenio_nombre": row_value(row, "convenio_nombre") or "",
+                            "vacaciones_modo": row_value(row, "vacaciones_modo") or "",
+                            "vacaciones_dias_anuales": row_value(row, "vacaciones_dias_anuales") or "",
+                        }
+                        if not company.get("convenio_key") and not company.get("convenio_nombre"):
+                            suggested = suggest_convenio_for_company(company.get("sector") or "", (company.get("cnaes") or [""])[0])
+                            if suggested:
+                                company["convenio_sugerido"] = {
+                                    "key": str(suggested.get("key") or ""),
+                                    "title": str(suggested.get("title") or suggested.get("nombre") or ""),
+                                    "vacaciones_modo": str(suggested.get("vacaciones_modo") or ""),
+                                    "vacaciones_dias_anuales": suggested.get("vacaciones_dias_anuales"),
+                                    "source_url": str(suggested.get("source_url") or ""),
+                                }
+                except Exception:
+                    company = None
             response = {
                 "area": area,
                 "area_label": LEGAL_AREA_DEFINITIONS.get(area, {}).get("label") or area.title(),
@@ -30059,7 +30245,7 @@ class Handler(BaseHTTPRequestHandler):
                 "workflow_checkpoints": list(operations.get("workflows") or []),
                 "review_recommendations": list(operations.get("clauses") or []),
                 "impact_score": operations.get("impact_score") or None,
-                "recent_updates": [item for item in list(topic_payload.get("recent_updates") or []) if isinstance(item, dict)][:8],
+                "recent_updates": [],
                 "sources": [
                     f"Base jurídica interna de {LEGAL_AREA_DEFINITIONS.get(area, {}).get('label') or area.title()} en Modernia.",
                     "Base legal editable del repositorio y radar legal autoactualizable.",
@@ -30067,6 +30253,36 @@ class Handler(BaseHTTPRequestHandler):
                     "No sustituye revisión jurídica final del despacho.",
                 ],
             }
+            db_updates = fetch_legal_radar_recent_updates(conn, area=area, topic_key=topic_key, limit=8)
+            static_updates = [item for item in list(topic_payload.get("recent_updates") or []) if isinstance(item, dict)]
+            merged = []
+            seen = set()
+            for item in list(db_updates or []) + list(static_updates or []):
+                if not isinstance(item, dict):
+                    continue
+                dedupe_key = str(item.get("radar_item_id") or "").strip() or (
+                    f"{str(item.get('title') or '').strip()}|{str(item.get('fecha_publicacion') or '').strip()}"
+                )
+                if not dedupe_key or dedupe_key in seen:
+                    continue
+                seen.add(dedupe_key)
+                merged.append(item)
+            response["recent_updates"] = merged[:8]
+            if company:
+                response["company"] = company
+                if topic_key in {"vacaciones_convenio", "convenio_colectivo"}:
+                    convenio_label = company.get("convenio_nombre") or (company.get("convenio_sugerido") or {}).get("title") or ""
+                    vac_mode = company.get("vacaciones_modo") or (company.get("convenio_sugerido") or {}).get("vacaciones_modo") or ""
+                    vac_days = company.get("vacaciones_dias_anuales") or (company.get("convenio_sugerido") or {}).get("vacaciones_dias_anuales") or ""
+                    extra = []
+                    if convenio_label:
+                        extra.append(f"Convenio: {convenio_label}")
+                    if vac_mode or vac_days:
+                        extra.append(f"Vacaciones: {vac_days or '?'} días/año · modo {vac_mode or 'habiles'}")
+                    if extra:
+                        response["checklist"] = [*list(response.get("checklist") or []), *extra]
+            if company_warning:
+                response["warnings"] = list(response["warnings"]) + [company_warning]
             if question:
                 normalized = normalize_lookup_text(question).lower()
                 if "editable" in normalized or "rellenable" in normalized or "pdf" in normalized:
@@ -33095,6 +33311,7 @@ class Handler(BaseHTTPRequestHandler):
                   COALESCE(direccion, '') AS direccion,
                   COALESCE(sector, '') AS sector,
                   COALESCE(cnae, '') AS cnae,
+                  COALESCE(cnaes_json, '') AS cnaes_json,
                   COALESCE(convenio_key, '') AS convenio_key,
                   COALESCE(convenio_nombre, '') AS convenio_nombre,
                   COALESCE(vacaciones_modo, '') AS vacaciones_modo,
