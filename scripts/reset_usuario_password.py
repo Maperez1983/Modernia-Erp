@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import os
-import sqlite3
+from web.db_backend import open_db_conn
 import sys
 from getpass import getpass
 from pathlib import Path
@@ -46,14 +46,12 @@ def main():
     if not db_path.exists():
         raise SystemExit(f"DB no encontrada: {db_path}")
 
-    conn = sqlite3.connect(str(db_path))
-    conn.row_factory = sqlite3.Row
+    conn = open_db_conn(str(db_path), with_row_factory=True)
     try:
-        has_table = conn.execute(
-            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'usuarios' LIMIT 1"
-        ).fetchone()
-        if not has_table:
-            raise SystemExit("Tabla usuarios no existe en esta DB.")
+        try:
+            conn.execute("SELECT 1 FROM usuarios LIMIT 1").fetchone()
+        except Exception:
+            raise SystemExit("Tabla usuarios no existe o DB no inicializada.")
 
         matches = find_users(conn, args.login)
         if not matches:

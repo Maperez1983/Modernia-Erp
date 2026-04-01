@@ -3,7 +3,6 @@ import argparse
 import hashlib
 import os
 import secrets
-import sqlite3
 import sys
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -15,6 +14,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from web.auth_security import hash_password  # noqa: E402
+from web.db_backend import open_db_conn  # noqa: E402
 from web.server import ensure_tables  # noqa: E402
 
 
@@ -309,8 +309,7 @@ def main():
     db_path.parent.mkdir(parents=True, exist_ok=True)
     ensure_tables(str(db_path))
 
-    conn = sqlite3.connect(str(db_path))
-    conn.row_factory = sqlite3.Row
+    conn = open_db_conn(str(db_path), with_row_factory=True)
     try:
         workspace_id = ensure_workspace(conn, slug=str(args.workspace_slug).strip(), name=str(args.workspace_name).strip())
         empresa_a = ensure_empresa(conn, nombre="Modernia Demo SL")
