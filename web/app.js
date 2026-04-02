@@ -2393,9 +2393,11 @@ const inmuebleChecklistTable = document.getElementById("inmuebleChecklistTable")
 const inmuebleChecklistInfo = document.getElementById("inmuebleChecklistInfo");
 const inmuebleChecklistBtn = document.getElementById("inmuebleChecklistBtn");
 const inmuebleConvertInmuebleBtn = document.getElementById("inmuebleConvertInmuebleBtn");
-const inmuebleConvertValoracionBtn = document.getElementById("inmuebleConvertValoracionBtn");
+const inmuebleConvertNoticiaBtn = document.getElementById("inmuebleConvertNoticiaBtn");
 const inmuebleConvertEncargoBtn = document.getElementById("inmuebleConvertEncargoBtn");
+const inmuebleConvertPropuestaBtn = document.getElementById("inmuebleConvertPropuestaBtn");
 const inmuebleConvertReservadoBtn = document.getElementById("inmuebleConvertReservadoBtn");
+const inmuebleConvertArrasBtn = document.getElementById("inmuebleConvertArrasBtn");
 const inmuebleConvertVentaBtn = document.getElementById("inmuebleConvertVentaBtn");
 const inmuebleConvertCerradoBtn = document.getElementById("inmuebleConvertCerradoBtn");
 const inmuebleConvertAlquilerBtn = document.getElementById("inmuebleConvertAlquilerBtn");
@@ -15253,10 +15255,12 @@ const isValidDocumento = (value) => {
 };
 
 const CRM_ETAPAS = [
+  "Inmueble",
   "Noticia",
-  "Adquisición",
   "Encargo",
+  "Propuesta",
   "Reservado",
+  "Contrato de arras",
   "Vendido",
   "Cerrado negativamente",
   "Alquiler",
@@ -15270,17 +15274,17 @@ const INMOBILIARIA_ASESORES = [
 ];
 
 const INMUEBLE_CHECKLISTS = {
+  Inmueble: [
+    "Alta básica de la ficha",
+    "Completar dirección y zona",
+    "Identificar propietario(s)",
+    "Definir siguiente paso comercial",
+  ],
   Noticia: [
     "Registrar lead y origen",
     "Verificar datos del propietario",
     "Primera llamada de contacto",
     "Calificar interés",
-  ],
-  "Adquisición": [
-    "Agendar cita de adquisición",
-    "Enviar dossier inicial",
-    "Confirmar documentación básica",
-    "Recoger datos registrales",
   ],
   Encargo: [
     "Firmar encargo",
@@ -15289,11 +15293,23 @@ const INMUEBLE_CHECKLISTS = {
     "Solicitar nota simple",
     "Verificar referencia catastral",
   ],
+  Propuesta: [
+    "Recibir propuesta/oferta",
+    "Verificar condiciones y plazos",
+    "Negociación y contrapropuesta",
+    "Subir documento de propuesta",
+  ],
   Reservado: [
     "Subir reserva firmada",
     "Confirmar señal entregada",
     "Bloquear comercialización",
     "Coordinar siguiente hito con las partes",
+  ],
+  "Contrato de arras": [
+    "Subir contrato de arras",
+    "Preparar documentación pre-escritura",
+    "Validar financiación/condiciones suspensivas",
+    "Coordinar firma de escritura",
   ],
   Vendido: [
     "Subir escritura pública",
@@ -23872,10 +23888,12 @@ const renderTableInto = (data, container, infoEl, label) => {
       });
       actions.appendChild(openLink);
       [
+        ["Inmueble", "inmueble", "ghost"],
         ["Noticia", "noticia", "ghost"],
-        ["Adquisición", "adquisicion", "ghost"],
         ["Encargo", "encargo", "secondary"],
+        ["Propuesta", "propuesta", "secondary"],
         ["Reservado", "reservado", "secondary"],
+        ["Contrato de arras", "arras", "secondary"],
         ["Vendido", "compraventa", "secondary"],
         ["Cerrado negativamente", "cerrado_negativamente", "ghost"],
         ["Alquiler", "alquiler", "secondary"],
@@ -24020,7 +24038,7 @@ const prepareInmuebleAcquisitionAppointment = () => {
   const siguienteSelect = inmuebleActividadForm.querySelector('select[name="estado_siguiente"]');
   if (siguienteSelect) siguienteSelect.value = "Encargo";
   if (inmuebleActividadStatus) {
-    inmuebleActividadStatus.textContent = "Programa aquí la cita de adquisición para pasar el inmueble a Adquisición.";
+    inmuebleActividadStatus.textContent = "Programa aquí la cita de adquisición para preparar el paso a Encargo.";
   }
 };
 
@@ -24079,23 +24097,16 @@ const syncInmuebleWorkflowForm = () => {
 const runCaptacionConversion = async (captacionId, rowMap = {}, destino = "") => {
   if (!captacionId || !destino) return;
   if (destino === "adquisicion" || destino === "valoracion") {
-    const inmuebleId = String(rowMap.inmueble_id || "").trim();
-    if (!inmuebleId) {
-      alert("La captación no tiene inmueble vinculado para programar la cita de adquisición.");
-      return;
-    }
-    openInmuebleDetail(inmuebleId, "captaciones");
-    setTimeout(() => {
-      prepareInmuebleAcquisitionAppointment();
-    }, 250);
-    return;
+    // Legacy: antes existía el paso "Adquisición". Ahora equivale a "Inmueble".
+    destino = "inmueble";
   }
   const destinationLabel = {
+    inmueble: "Inmueble",
     noticia: "Noticia",
-    valoracion: "Adquisición",
-    adquisicion: "Adquisición",
     encargo: "Encargo",
+    propuesta: "Propuesta",
     reservado: "Reservado",
+    arras: "Contrato de arras",
     compraventa: "Vendido",
     vendido: "Vendido",
     cerrado_negativamente: "Cerrado negativamente",
@@ -24154,8 +24165,8 @@ const runCaptacionConversion = async (captacionId, rowMap = {}, destino = "") =>
 
 const runCurrentInmuebleConversion = (destino) => {
   if (destino === "adquisicion" || destino === "valoracion") {
-    prepareInmuebleAcquisitionAppointment();
-    return;
+    // Legacy: antes existía el paso "Adquisición". Ahora equivale a "Inmueble".
+    destino = "inmueble";
   }
   const captacion = state.currentInmuebleContext?.captacion || {};
   const inmueble = state.currentInmuebleContext?.inmueble || state.currentInmueble || {};
@@ -24174,11 +24185,12 @@ const runCurrentInmuebleConversion = (destino) => {
     payload.inmueble_id = inmuebleId;
   }
   const destinationLabel = {
+    inmueble: "Inmueble",
     noticia: "Noticia",
-    valoracion: "Adquisición",
-    adquisicion: "Adquisición",
     encargo: "Encargo",
+    propuesta: "Propuesta",
     reservado: "Reservado",
+    arras: "Contrato de arras",
     compraventa: "Vendido",
     vendido: "Vendido",
     cerrado_negativamente: "Cerrado negativamente",
@@ -24244,9 +24256,22 @@ const loadCrmCaptaciones = () => {
     const rowMaps = Array.isArray(data.rows)
       ? data.rows.map((row) => buildRowMap(row, data.columns))
       : [];
+    rowMaps.forEach((row) => {
+      if (!row) return;
+      if (row.etapa === "Adquisición") row.etapa = "Inmueble";
+      if (!row.etapa) row.etapa = "Inmueble";
+    });
     cachedCrmCaptaciones = rowMaps;
     const etapaIndex = data.columns.indexOf("etapa");
     const idIndex = data.columns.indexOf("id");
+    // Compat legacy: algunos entornos tenían "Adquisición" como etapa. Ahora se llama "Inmueble".
+    if (Array.isArray(data.rows) && etapaIndex >= 0) {
+      data.rows.forEach((row) => {
+        if (!Array.isArray(row)) return;
+        if (row[etapaIndex] === "Adquisición") row[etapaIndex] = "Inmueble";
+        if (!row[etapaIndex]) row[etapaIndex] = "Inmueble";
+      });
+    }
     const activeEtapa = crmEtapaFilter?.value || crmEtapaFilterMirror?.value || "";
     if (crmEtapaFilter) crmEtapaFilter.value = activeEtapa;
     if (crmEtapaFilterMirror) crmEtapaFilterMirror.value = activeEtapa;
@@ -24278,7 +24303,7 @@ const loadCrmCaptaciones = () => {
     };
     const matchQuick = (rowMap) => {
       if (!quickKey) return true;
-      const etapa = String(rowMap?.etapa || "Noticia").trim();
+      const etapa = String(rowMap?.etapa || "Inmueble").trim();
       const ocupacion = normalizeSimple(rowMap?.situacion_ocupacion || "");
       const ocupadoPor = normalizeSimple(rowMap?.ocupado_por || "");
       const proxima = String(rowMap?.proxima_accion || "").trim();
@@ -24329,7 +24354,7 @@ const loadCrmCaptaciones = () => {
             summary = summary ? `${summary} · Noticia sin verificar` : "Noticia sin verificar.";
           }
           if (etapa === "Noticia") score += 3;
-          if (etapa === "Adquisición") score += 2;
+          if (etapa === "Inmueble") score += 2;
           return {
             inmuebleId: row.inmueble_id || "",
             captacionId: row.inmueble_id ? "" : String(row.id || "").trim(),
@@ -24457,7 +24482,7 @@ const renderCrmKanban = (data) => {
   const etapas = [...CRM_ETAPAS];
   const grouped = new Map(etapas.map((e) => [e, []]));
   data.rows.forEach((row) => {
-    const etapa = row[etapaIndex] || "Noticia";
+    const etapa = row[etapaIndex] || "Inmueble";
     if (!grouped.has(etapa)) {
       grouped.set(etapa, []);
     }
@@ -24999,10 +25024,17 @@ const renderCrmResumenDashboard = () => {
         crmView: "captaciones",
       },
       {
-        title: "Adquisiciones",
-        value: captaciones.filter((row) => normalizeSimple(row.etapa || "") === "adquisicion").length,
-        meta: "Citas",
-        summary: "Viviendas con cita de adquisición o valoración comercial abierta.",
+        title: "Inmuebles en entrada",
+        value: captaciones.filter((row) => ["inmueble", "adquisicion"].includes(normalizeSimple(row.etapa || ""))).length,
+        meta: "Base",
+        summary: "Fichas en inventario aún sin cualificar o sin siguiente paso.",
+        crmView: "captaciones",
+      },
+      {
+        title: "Propuestas",
+        value: captaciones.filter((row) => normalizeSimple(row.etapa || "") === "propuesta").length,
+        meta: "Oferta",
+        summary: "Ofertas presentadas pendientes de aceptación o contraoferta.",
         crmView: "captaciones",
       },
       {
@@ -25025,23 +25057,29 @@ const renderCrmResumenDashboard = () => {
   if (crmResumenHoy) {
     const jobs = [
       ...captaciones.map((row) => {
-        const etapa = String(row.etapa || "Noticia").trim();
+        const etapa = String(row.etapa || "Inmueble").trim();
         const proxima = String(row.proxima_accion || "").trim();
         let priority = 0;
         let summary = proxima || "Sin próxima acción";
         if (!proxima) priority += 4;
-        if (etapa === "Noticia") {
+        if (etapa === "Inmueble") {
+          priority += 4;
+          summary = proxima || "Completar ficha y cualificar (pasar a Noticia).";
+        } else if (etapa === "Noticia") {
           priority += 4;
           if (!proxima) summary = "Llamada pendiente o noticia sin cierre.";
-        } else if (etapa === "Adquisición") {
-          priority += 3;
-          summary = proxima || "Cita de adquisición pendiente de cierre.";
         } else if (etapa === "Encargo") {
           priority += 2;
           summary = proxima || "Encargo activo sin siguiente hito definido.";
+        } else if (etapa === "Propuesta") {
+          priority += 2;
+          summary = proxima || "Propuesta/oferta pendiente de respuesta.";
         } else if (etapa === "Reservado") {
           priority += 1;
           summary = proxima || "Reserva sin siguiente paso de cierre.";
+        } else if (etapa === "Contrato de arras") {
+          priority += 1;
+          summary = proxima || "Arras firmadas: preparar pre-escritura y agenda.";
         }
         return {
           inmuebleId: row.inmueble_id || "",
@@ -40074,13 +40112,13 @@ if (inmuebleGoEstadoBtn) {
 
 if (inmuebleConvertInmuebleBtn) {
   inmuebleConvertInmuebleBtn.addEventListener("click", () => {
-    runCurrentInmuebleConversion("noticia");
+    runCurrentInmuebleConversion("inmueble");
   });
 }
 
-if (inmuebleConvertValoracionBtn) {
-  inmuebleConvertValoracionBtn.addEventListener("click", () => {
-    runCurrentInmuebleConversion("adquisicion");
+if (inmuebleConvertNoticiaBtn) {
+  inmuebleConvertNoticiaBtn.addEventListener("click", () => {
+    runCurrentInmuebleConversion("noticia");
   });
 }
 
@@ -40090,9 +40128,21 @@ if (inmuebleConvertEncargoBtn) {
   });
 }
 
+if (inmuebleConvertPropuestaBtn) {
+  inmuebleConvertPropuestaBtn.addEventListener("click", () => {
+    runCurrentInmuebleConversion("propuesta");
+  });
+}
+
 if (inmuebleConvertReservadoBtn) {
   inmuebleConvertReservadoBtn.addEventListener("click", () => {
     runCurrentInmuebleConversion("reservado");
+  });
+}
+
+if (inmuebleConvertArrasBtn) {
+  inmuebleConvertArrasBtn.addEventListener("click", () => {
+    runCurrentInmuebleConversion("arras");
   });
 }
 

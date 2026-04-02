@@ -1981,10 +1981,12 @@
                       </div>
 	                      <select id="crmEtapaFilterMirror">
 	                        <option value="">Todas las etapas</option>
+	                        <option>Inmueble</option>
 	                        <option>Noticia</option>
-	                        <option>Adquisición</option>
 	                        <option>Encargo</option>
+	                        <option>Propuesta</option>
 	                        <option>Reservado</option>
+	                        <option>Contrato de arras</option>
 	                        <option>Vendido</option>
 	                        <option>Cerrado negativamente</option>
 	                        <option>Alquiler</option>
@@ -2788,9 +2790,15 @@
                     Estado siguiente
                     <select name="estado_siguiente">
                       <option value="">Sin cambio automático</option>
-                      <option>Adquisición</option>
+                      <option>Inmueble</option>
+                      <option>Noticia</option>
                       <option>Encargo</option>
+                      <option>Propuesta</option>
+                      <option>Reservado</option>
+                      <option>Contrato de arras</option>
+                      <option>Vendido</option>
                       <option>Cerrado negativamente</option>
+                      <option>Alquiler</option>
                     </select>
                   </label>
                   <label class="span-2">
@@ -2843,14 +2851,16 @@
                 <div class="section-head">
                   <div>
                     <h3>Conversión comercial</h3>
-                    <p class="muted">Mueve el inmueble por noticia, adquisición, encargo, reserva, cierre o alquiler desde su expediente.</p>
+                    <p class="muted">Mueve el inmueble por inventario, noticia, encargo, propuesta, reserva, arras o cierre desde su expediente.</p>
                   </div>
                 </div>
                 <div class="inline-actions">
-                  <button type="button" class="ghost" id="inmuebleConvertInmuebleBtn">Noticia</button>
-                  <button type="button" class="ghost" id="inmuebleConvertValoracionBtn">Adquisición</button>
+                  <button type="button" class="ghost" id="inmuebleConvertInmuebleBtn">Inmueble</button>
+                  <button type="button" class="ghost" id="inmuebleConvertNoticiaBtn">Noticia</button>
                   <button type="button" class="secondary" id="inmuebleConvertEncargoBtn">Encargo</button>
+                  <button type="button" class="secondary" id="inmuebleConvertPropuestaBtn">Propuesta</button>
                   <button type="button" class="secondary" id="inmuebleConvertReservadoBtn">Reservado</button>
+                  <button type="button" class="secondary" id="inmuebleConvertArrasBtn">Contrato de arras</button>
                   <button type="button" class="secondary" id="inmuebleConvertVentaBtn">Vendido</button>
                   <button type="button" class="ghost" id="inmuebleConvertCerradoBtn">Cerrado negativamente</button>
                   <button type="button" class="secondary" id="inmuebleConvertAlquilerBtn">Alquiler</button>
@@ -4706,10 +4716,12 @@
                   <label>
                     Etapa
                     <select name="etapa">
+                      <option>Inmueble</option>
                       <option>Noticia</option>
-                      <option>Adquisición</option>
                       <option>Encargo</option>
+                      <option>Propuesta</option>
                       <option>Reservado</option>
+                      <option>Contrato de arras</option>
                       <option>Vendido</option>
                       <option>Cerrado negativamente</option>
                       <option>Alquiler</option>

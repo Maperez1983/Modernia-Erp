@@ -10420,11 +10420,15 @@ def ensure_captacion_for_inmueble(conn, empresa_id, inmueble_id, now):
 
 def sync_inmueble_stage_for_action(conn, inmueble_id, destino, now):
     destino_label = {
+        "inmueble": "Inmueble",
         "noticia": "Noticia",
-        "valoracion": "Adquisición",
-        "adquisicion": "Adquisición",
+        # Legacy: "Adquisición" pasa a ser "Inmueble".
+        "valoracion": "Inmueble",
+        "adquisicion": "Inmueble",
         "encargo": "Encargo",
+        "propuesta": "Propuesta",
         "reservado": "Reservado",
+        "arras": "Contrato de arras",
         "vendido": "Vendido",
         "compraventa": "Vendido",
         "cerrado_negativamente": "Cerrado negativamente",
@@ -10506,17 +10510,17 @@ def sync_inmueble_stage_for_action(conn, inmueble_id, destino, now):
 
 
 INMO_STAGE_CHECKLISTS = {
+    "Inmueble": [
+        "Alta básica de la ficha",
+        "Completar dirección y zona",
+        "Identificar propietario(s)",
+        "Definir siguiente paso comercial",
+    ],
     "Noticia": [
         "Registrar lead y origen",
         "Verificar datos del propietario",
         "Primera llamada de contacto",
         "Calificar interés",
-    ],
-    "Adquisición": [
-        "Agendar cita de adquisición",
-        "Enviar dossier inicial",
-        "Confirmar documentación básica",
-        "Recoger datos registrales",
     ],
     "Encargo": [
         "Firmar encargo",
@@ -10525,11 +10529,23 @@ INMO_STAGE_CHECKLISTS = {
         "Solicitar nota simple",
         "Verificar referencia catastral",
     ],
+    "Propuesta": [
+        "Recibir propuesta/oferta",
+        "Verificar condiciones y plazos",
+        "Negociación y contrapropuesta",
+        "Subir documento de propuesta",
+    ],
     "Reservado": [
         "Subir reserva firmada",
         "Confirmar señal entregada",
         "Bloquear comercialización",
         "Coordinar siguiente hito con las partes",
+    ],
+    "Contrato de arras": [
+        "Subir contrato de arras",
+        "Preparar documentación pre-escritura",
+        "Validar financiación/condiciones suspensivas",
+        "Coordinar firma de escritura",
     ],
     "Vendido": [
         "Subir escritura pública",
@@ -10588,9 +10604,12 @@ def ensure_pending_inmueble_stage_actions(conn, empresa_id, inmueble_id, etapa, 
     if not empresa_id or not inmueble_id or not etapa:
         return False
     defaults = {
+        "Inmueble": [("Seguimiento", "Completar ficha y cualificar")],
         "Noticia": [("Llamada", "Primera llamada de contacto")],
         "Encargo": [("Seguimiento", "Firmar encargo"), ("Seguimiento", "Preparar anuncio")],
+        "Propuesta": [("Seguimiento", "Revisar propuesta/oferta")],
         "Reservado": [("Seguimiento", "Subir reserva firmada")],
+        "Contrato de arras": [("Seguimiento", "Subir contrato de arras")],
         "Vendido": [("Seguimiento", "Subir escritura pública")],
         "Alquiler": [("Seguimiento", "Formalizar contrato de alquiler")],
         "Cerrado negativamente": [("Seguimiento", "Registrar motivo pérdida")],
@@ -15535,6 +15554,30 @@ def ensure_tables(db_path):
             ensure_column(conn, "inmuebles", col_name, col_sql)
         except Exception:
             pass
+    # Compat: migramos el estado legacy "Adquisición" a "Inmueble" (mismo significado en el nuevo pipeline).
+    try:
+        conn.execute(
+            """
+            UPDATE captaciones
+            SET etapa = 'Inmueble',
+                situacion_comercial = COALESCE(NULLIF(situacion_comercial, ''), 'Inmueble'),
+                updated_at = datetime('now','localtime')
+            WHERE TRIM(COALESCE(etapa, '')) = 'Adquisición'
+            """
+        )
+    except Exception:
+        pass
+    try:
+        conn.execute(
+            """
+            UPDATE inmuebles
+            SET estado = 'Inmueble',
+                updated_at = datetime('now','localtime')
+            WHERE TRIM(COALESCE(estado, '')) = 'Adquisición'
+            """
+        )
+    except Exception:
+        pass
     # Best-effort backfill: keep captaciones aligned with inmuebles for zona/prioridades.
     try:
         conn.execute(
@@ -32440,7 +32483,7 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 inmueble_id = os.urandom(16).hex()
                 captacion_id = os.urandom(16).hex()
-                etapa_value = (payload.get("etapa") or "").strip() or "Noticia"
+                etapa_value = (payload.get("etapa") or "").strip() or "Inmueble"
                 conn.execute(
                     """
                     INSERT INTO inmuebles (
@@ -32862,11 +32905,14 @@ class Handler(BaseHTTPRequestHandler):
                 destino = normalize_lookup_text(payload.get("destino") or "")
                 destino_map = {
                     "noticia": "Noticia",
-                    "inmueble": "Noticia",
-                    "valoracion": "Adquisición",
-                    "adquisicion": "Adquisición",
+                    "inmueble": "Inmueble",
+                    # Legacy: "Adquisición" pasa a ser "Inmueble".
+                    "valoracion": "Inmueble",
+                    "adquisicion": "Inmueble",
                     "encargo": "Encargo",
+                    "propuesta": "Propuesta",
                     "reservado": "Reservado",
+                    "arras": "Contrato de arras",
                     "compraventa": "Vendido",
                     "vendido": "Vendido",
                     "venta": "Vendido",
@@ -32918,33 +32964,12 @@ class Handler(BaseHTTPRequestHandler):
                         return fallback
                     return ""
 
-                if destino_label == "Adquisición":
-                    json_response(self, {"error": "El paso a Adquisición se genera al fijar una cita de adquisición en la agenda del inmueble"}, status=400)
-                    return
-
                 if destino_label == "Encargo":
-                    cita_adquisicion = conn.execute(
-                        """
-                        SELECT id, estado, resultado_cierre
-                        FROM acciones
-                        WHERE inmueble_id = ?
-                          AND LOWER(COALESCE(tipo, '')) = 'cita de adquisición'
-                        ORDER BY fecha DESC, hora DESC, updated_at DESC
-                        LIMIT 1
-                        """,
-                        (captacion["inmueble_id"],),
-                    ).fetchone()
-                    if not cita_adquisicion:
-                        json_response(self, {"error": "No puedes pasar a Encargo sin una cita de adquisición registrada"}, status=400)
-                        return
-                    if str(cita_adquisicion["estado"] or "").strip().lower() == "pendiente":
-                        json_response(self, {"error": "La cita de adquisición debe estar cerrada antes de pasar a Encargo"}, status=400)
-                        return
-                    if normalize_lookup_text(cita_adquisicion["resultado_cierre"] or "") != "positivo":
-                        json_response(self, {"error": "Solo una cita de adquisición cerrada en positivo puede generar Encargo"}, status=400)
-                        return
+                    # Antes se exigía una "cita de adquisición" para pasar a Encargo.
+                    # En el flujo actual (Tecnocasa-like) permitimos el paso directo si ya existe encargo.
+                    pass
 
-                if destino_label in {"Noticia", "Reservado", "Cerrado negativamente"}:
+                if destino_label in {"Inmueble", "Noticia", "Propuesta", "Reservado", "Contrato de arras", "Cerrado negativamente"}:
                     conn.execute(
                         """
                         UPDATE captaciones
