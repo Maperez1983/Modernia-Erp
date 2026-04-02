@@ -1,19 +1,56 @@
 (function () {
-  async function fetchCurrentSessionUser() {
-    const res = await fetch("/api/me", { cache: "no-store", credentials: "same-origin" });
-    let data = null;
-    try {
-      data = await res.json();
-    } catch {
-      data = null;
+  async function waitForHealth(deps, options) {
+    const maxMs = Math.max(5000, Number(options?.maxMs || 45000) || 45000);
+    const started = Date.now();
+    let attempt = 0;
+    while (Date.now() - started < maxMs) {
+      attempt += 1;
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 5000);
+        try {
+          const res = await fetch("/api/health", { cache: "no-store", credentials: "same-origin", signal: controller.signal });
+          if (res && res.ok) {
+            return true;
+          }
+        } finally {
+          clearTimeout(timer);
+        }
+      } catch {}
+      const delay = Math.min(6000, 250 * Math.pow(1.8, attempt));
+      if (deps?.authLoginStatus) {
+        deps.authLoginStatus.textContent = attempt <= 2 ? "Arrancando servidor..." : `Arrancando servidor... (${Math.round(delay)}ms)`;
+      }
+      await new Promise((resolve) => setTimeout(resolve, delay));
     }
-    if (!res.ok) {
+    return false;
+  }
+
+  async function fetchCurrentSessionUser() {
+    try {
+      const res = await fetch("/api/me", { cache: "no-store", credentials: "same-origin" });
+      let data = null;
+      try {
+        data = await res.json();
+      } catch {
+        data = null;
+      }
+      if (!res.ok) {
+        return null;
+      }
+      return data?.user || null;
+    } catch {
       return null;
     }
-    return data?.user || null;
   }
 
   async function ensureAuthAndBoot(deps) {
+    const healthy = await waitForHealth(deps, { maxMs: 45000 });
+    if (!healthy) {
+      deps.showAuthOverlay("Servidor no disponible. Espera unos segundos y recarga.");
+      try { document.body.classList.remove("auth-pending"); } catch {}
+      return;
+    }
     const params = new URLSearchParams(window.location.search);
     const activateToken = (params.get("activar_token") || "").trim();
     const portalToken = (params.get("portal_token") || "").trim();
@@ -132,6 +169,7 @@
       return;
     }
     if (deps.authLoginStatus) deps.authLoginStatus.textContent = "Accediendo...";
+    await waitForHealth(deps, { maxMs: 30000 });
     try {
       const res = await fetch("/api/login", {
         method: "POST",
