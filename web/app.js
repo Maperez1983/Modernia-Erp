@@ -1,4 +1,6 @@
-const API_TIMEOUT_MS = 15000;
+// Render puede tener cold starts que superan 15s en la primera petición.
+// Subimos el timeout para evitar falsos "Servidor no disponible" al arrancar.
+const API_TIMEOUT_MS = 30000;
 
 const fetchWithTimeout = async (input, init = {}, timeoutMs = API_TIMEOUT_MS) => {
   const controller = new AbortController();
@@ -12866,10 +12868,26 @@ const loadWorkspaceCentral = async () => {
   if (!data) {
     clearCurrentWorkspaceUi();
     renderWorkspaceList([]);
-    alert("Servidor no disponible. Intenta recargar en unos segundos.");
+    // Evita un alert bloqueante: en Render esto suele ser un reinicio/deploy o cold start.
+    try {
+      const toast = document.getElementById("uiErrorToast");
+      if (toast) {
+        toast.classList.remove("hidden");
+        toast.innerHTML = "<strong>Servidor no disponible</strong><pre>Reintentando cargar el workspace en unos segundos...</pre>";
+      }
+    } catch {}
     updateWorkspaceEntryChrome();
+    // Reintento con backoff simple.
+    const attempt = Number(state.workspaceCentralRetryAttempt || 0) || 0;
+    const nextAttempt = Math.min(6, attempt + 1);
+    state.workspaceCentralRetryAttempt = nextAttempt;
+    const delayMs = Math.min(30000, 1000 * Math.pow(2, nextAttempt));
+    window.setTimeout(() => {
+      loadWorkspaceCentral().catch(() => {});
+    }, delayMs);
     return;
   }
+  state.workspaceCentralRetryAttempt = 0;
   state.workspaces = data.rows || [];
   renderWorkspaceKpis(data.summary || {});
   renderWorkspaceList(state.workspaces);
@@ -13257,9 +13275,10 @@ const openCrmInmobiliario = () => {
   updateTableVisibility();
   syncCrmLegalAvailability();
   setCrmWorkspaceView(state.crmWorkspaceView || "resumen");
+  // Evita lanzar 3 requests grandes a la vez (Render/PG puede estar frío).
   loadCrmCaptaciones();
-  loadCrmInmuebles();
-  loadCrmCompraventas();
+  window.setTimeout(() => loadCrmInmuebles(), 120);
+  window.setTimeout(() => loadCrmCompraventas(), 240);
   // Mantener URL "crm=inmo" para que los deep-links funcionen aunque `openCompany` haya puesto `?empresa=...`.
   const currentParams = new URLSearchParams(window.location.search);
   currentParams.delete("empresa");
@@ -36613,8 +36632,8 @@ const loadTable = () => {
   }
   if (currentTab === "crm") {
     loadCrmCaptaciones();
-    loadCrmInmuebles();
-    loadCrmCompraventas();
+    window.setTimeout(() => loadCrmInmuebles(), 100);
+    window.setTimeout(() => loadCrmCompraventas(), 200);
     return;
   }
   const empresaId = empresaSelect.value || "";
