@@ -159,12 +159,25 @@
       const targetUser = String(data?.user?.usuario || "").trim().toLowerCase();
       const targetRole = String(data?.user?.rol || "").trim().toLowerCase();
       const targetService = String(data?.user?.servicio || "").trim().toLowerCase();
+      const navigate = (query) => {
+        if (typeof deps.navigate === "function") {
+          try {
+            deps.navigate(query || {});
+            return true;
+          } catch {}
+        }
+        return false;
+      };
       if (targetUser === "workspace") {
-        window.location.assign("?holding=1&mode=tenant&workspace=modernia&view=overview");
+        if (!navigate({ holding: "1", mode: "tenant", workspace: "modernia", view: "overview" })) {
+          window.location.assign("?holding=1&mode=tenant&workspace=modernia&view=overview");
+        }
         return;
       }
       if (targetRole === "administrador" || targetService === "administración" || targetService === "administracion") {
-        window.location.assign("?holding=1&mode=platform");
+        if (!navigate({ holding: "1", mode: "platform" })) {
+          window.location.assign("?holding=1&mode=platform");
+        }
         return;
       }
     } catch {

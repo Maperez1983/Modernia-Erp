@@ -38,14 +38,20 @@ const isCacheablePath = (pathname) => {
 };
 
 const normalizeCacheKey = (request) => {
-  // Strip cache-busting query for static assets while keeping path.
+  // Keep versioned URLs for CSS/JS so deployments (e.g. app.js?v=378) bust caches reliably.
+  // We only normalize images/icons where query params are usually irrelevant.
   try {
     const url = new URL(request.url);
     if (!isSameOrigin(url.href)) return request;
     const pathname = url.pathname || "";
     if (!isCacheablePath(pathname)) return request;
-    if (/\.(css|js|png|jpg|jpeg|svg|webmanifest)$/i.test(pathname)) {
-      return new Request(url.origin + pathname, { method: request.method, headers: request.headers, credentials: "same-origin" });
+    if (/\.(css|js|webmanifest)$/i.test(pathname)) return request;
+    if (/\.(png|jpg|jpeg|svg)$/i.test(pathname)) {
+      return new Request(url.origin + pathname, {
+        method: request.method,
+        headers: request.headers,
+        credentials: "same-origin",
+      });
     }
     return request;
   } catch {
@@ -124,4 +130,3 @@ self.addEventListener("fetch", (event) => {
     })()
   );
 });
-

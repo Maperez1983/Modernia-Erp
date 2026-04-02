@@ -42,6 +42,10 @@ body.auth-pending main {
   visibility: hidden;
 }
 
+body.auth-locked main {
+  visibility: hidden;
+}
+
 body.modal-open {
   overflow: hidden;
 }

@@ -36525,6 +36525,25 @@ const submitAuthLogin = async () => {
     authLoginStatus,
     setAuthUi,
     hideAuthOverlay,
+    navigate: (query = {}) => {
+      const params = new URLSearchParams();
+      Object.entries(query || {}).forEach(([key, value]) => {
+        if (value === null || value === undefined) return;
+        const v = String(value);
+        if (!v) return;
+        params.set(key, v);
+      });
+      const url = new URL(window.location.href);
+      url.search = params.toString();
+      history.replaceState({}, "", url.toString());
+      const prevBoot = state.booting;
+      state.booting = true;
+      try {
+        handleRoute();
+      } finally {
+        state.booting = prevBoot;
+      }
+    },
   });
 };
 
