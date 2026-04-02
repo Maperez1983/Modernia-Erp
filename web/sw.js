@@ -5,7 +5,7 @@
  * - Never caches /api or /uploads
  */
 
-const CACHE_VERSION = "v3";
+const CACHE_VERSION = "v4";
 const SHELL_CACHE = `liv-shell-${CACHE_VERSION}`;
 const RUNTIME_CACHE = `liv-runtime-${CACHE_VERSION}`;
 
@@ -16,7 +16,7 @@ const SHELL_URLS = [
   "/ui-foundation.js?v=2",
   "/app-auth.js?v=3",
   "/app-routing.js?v=7",
-  "/app.js?v=379",
+  "/app.js?v=380",
   "/manifest.webmanifest?v=1",
   "/icons/icon-192.png",
   "/icons/icon-512.png",
@@ -82,6 +82,14 @@ self.addEventListener("activate", (event) => {
         })
       );
       await self.clients.claim();
+      try {
+        const clients = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+        clients.forEach((client) => {
+          try {
+            client.postMessage({ type: "SW_ACTIVATED", version: CACHE_VERSION });
+          } catch {}
+        });
+      } catch {}
     })()
   );
 });

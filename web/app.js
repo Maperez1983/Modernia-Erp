@@ -2,6 +2,9 @@
 // Subimos el timeout para evitar falsos "Servidor no disponible" al arrancar.
 const API_TIMEOUT_MS = 30000;
 
+// Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
+const APP_SW_VERSION = "v4";
+
 const fetchWithTimeout = async (input, init = {}, timeoutMs = API_TIMEOUT_MS) => {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), Math.max(1000, Number(timeoutMs) || API_TIMEOUT_MS));
@@ -42556,6 +42559,26 @@ UI?.boot(state);
 renderCompanyCards();
 showAuthOverlay("");
 ensureAuthAndBoot();
+
+// Si el service worker se actualiza, algunos navegadores (sobre todo iOS/Safari) pueden quedarse con un app.js viejo.
+// Cuando recibimos la activación del SW, forzamos una recarga única.
+try {
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.addEventListener("message", (event) => {
+      const data = event?.data || {};
+      if (!data || data.type !== "SW_ACTIVATED") return;
+      const version = String(data.version || "").trim();
+      if (!version) return;
+      const prev = String(localStorage.getItem("crm.swVersion") || "");
+      if (version === prev) return;
+      localStorage.setItem("crm.swVersion", version);
+      if (version !== APP_SW_VERSION) {
+        // Si llega un SW más nuevo que este JS (o viceversa), recargamos para alinear.
+        window.location.reload();
+      }
+    });
+  }
+} catch {}
 
 populateGestoriaSubtipos("");
 
