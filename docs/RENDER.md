@@ -51,3 +51,14 @@ Render suele inyectar `PORT`. El servidor ya lo respeta:
 ```bash
 python3 web/server.py --db "$DB_PATH" --port "$PORT"
 ```
+
+## 6) Dependencias (build)
+
+Si en Render ves errores tipo `ModuleNotFoundError` (por ejemplo `No module named 'PIL'`), significa que no se han instalado las dependencias.
+
+- Opción A (simple): `python3 -m pip install -r requirements.txt`
+- Opción B (más robusta, evita desajustes de Python/pip): `python3 -m venv .venv && ./.venv/bin/pip install -r requirements.txt`
+
+Start Command (recomendado):
+- Si usas A: `python3 web/server.py --db "$DB_PATH" --host 0.0.0.0`
+- Si usas B: `./.venv/bin/python web/server.py --db "$DB_PATH" --host 0.0.0.0`

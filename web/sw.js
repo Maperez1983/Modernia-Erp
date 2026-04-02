@@ -5,7 +5,7 @@
  * - Never caches /api or /uploads
  */
 
-const CACHE_VERSION = "v7";
+const CACHE_VERSION = "v9";
 const SHELL_CACHE = `liv-shell-${CACHE_VERSION}`;
 const RUNTIME_CACHE = `liv-runtime-${CACHE_VERSION}`;
 
@@ -16,7 +16,7 @@ const SHELL_URLS = [
   "/ui-foundation.js?v=2",
   "/app-auth.js?v=5",
   "/app-routing.js?v=7",
-  "/app.js?v=381",
+  "/app.js?v=383",
   "/manifest.webmanifest?v=1",
   "/icons/icon-192.png",
   "/icons/icon-512.png",

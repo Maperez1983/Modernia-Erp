@@ -15,6 +15,43 @@ const fetchWithTimeout = async (input, init = {}, timeoutMs = API_TIMEOUT_MS) =>
   }
 };
 
+const setUiToast = (title, detail = "") => {
+  const toast = document.getElementById("uiErrorToast");
+  if (!toast) return;
+  toast.classList.remove("hidden");
+  toast.innerHTML = "";
+  const strong = document.createElement("strong");
+  strong.textContent = title || "";
+  toast.appendChild(strong);
+  if (detail) {
+    const pre = document.createElement("pre");
+    pre.textContent = String(detail).slice(0, 2000);
+    toast.appendChild(pre);
+  }
+};
+
+const hideUiToast = () => {
+  const toast = document.getElementById("uiErrorToast");
+  if (!toast) return;
+  toast.classList.add("hidden");
+  toast.innerHTML = "";
+};
+
+const probeDbHealth = async () => {
+  try {
+    const res = await fetchWithTimeout(
+      "/api/health",
+      { cache: "no-store", credentials: "same-origin" },
+      4500
+    );
+    const body = await res.text().catch(() => "");
+    return { ok: res.ok, status: res.status, body: String(body || "").trim() };
+  } catch (err) {
+    const msg = err?.name === "AbortError" ? "Tiempo de espera agotado." : "No se pudo conectar con el servidor.";
+    return { ok: false, status: 0, body: msg };
+  }
+};
+
 const sanitizeApiUrl = (value) => {
   const raw = String(value || "");
   if (!raw) return raw;
@@ -2261,6 +2298,7 @@ const crmNuevaCompraventaBtn = document.getElementById("crmNuevaCompraventaBtn")
 const crmWorkspaceShell = document.getElementById("crmWorkspaceShell");
 const crmWorkspaceTabs = document.getElementById("crmWorkspaceTabs");
 const crmViewResumen = document.getElementById("crmViewResumen");
+const crmViewAnalisis = document.getElementById("crmViewAnalisis");
 const crmViewCaptaciones = document.getElementById("crmViewCaptaciones");
 const crmViewInmuebles = document.getElementById("crmViewInmuebles");
 const crmViewAlquileres = document.getElementById("crmViewAlquileres");
@@ -12632,6 +12670,24 @@ const loadWorkspaceDetail = async (workspaceId) => {
   try {
     localStorage.setItem("crm.currentWorkspaceId", String(workspaceId || ""));
   } catch {}
+  // Evita cargar un workspace con DB todavía "fría" (Render/PG): si no, se muestran fichas vacías y
+  // el usuario siente que "se han borrado" configuraciones.
+  {
+    const health = await probeDbHealth();
+    if (!health.ok) {
+      const attempt = Number(state.workspaceDetailRetryAttempt || 0) || 0;
+      const nextAttempt = Math.min(8, attempt + 1);
+      state.workspaceDetailRetryAttempt = nextAttempt;
+      const delayMs = Math.min(45000, 1200 * Math.pow(1.6, nextAttempt));
+      setUiToast("Base de datos no disponible", `${health.body || `HTTP ${health.status}`} · Reintentando en ${Math.round(delayMs / 1000)}s...`);
+      window.setTimeout(() => {
+        loadWorkspaceDetail(workspaceId).catch(() => {});
+      }, delayMs);
+      return;
+    }
+    state.workspaceDetailRetryAttempt = 0;
+  }
+  hideUiToast();
   const authUser = getAuthScopeUser();
   const canManageWorkspace = Boolean(authUser && isPrivilegedUser(authUser));
   if (canManageWorkspace) {
@@ -12867,17 +12923,35 @@ const loadWorkspaceDetail = async (workspaceId) => {
 };
 
 const loadWorkspaceCentral = async () => {
+  // Si la DB está fría, /api/workspaces puede tardar 30s por timeout. Mejor gatear con /api/health (rápido)
+  // y reintentar con backoff.
+  const health = await probeDbHealth();
+  if (!health.ok) {
+    clearCurrentWorkspaceUi();
+    renderWorkspaceList([]);
+    try {
+      setUiToast(
+        "Base de datos no disponible",
+        `${health.body || `HTTP ${health.status}`} · Reintentando cargar el workspace en unos segundos...`
+      );
+    } catch {}
+    updateWorkspaceEntryChrome();
+    const attempt = Number(state.workspaceCentralRetryAttempt || 0) || 0;
+    const nextAttempt = Math.min(7, attempt + 1);
+    state.workspaceCentralRetryAttempt = nextAttempt;
+    const delayMs = Math.min(45000, 1000 * Math.pow(1.8, nextAttempt));
+    window.setTimeout(() => {
+      loadWorkspaceCentral().catch(() => {});
+    }, delayMs);
+    return;
+  }
   const data = await safeWorkspaceApi("/api/workspaces", null);
   if (!data) {
     clearCurrentWorkspaceUi();
     renderWorkspaceList([]);
     // Evita un alert bloqueante: en Render esto suele ser un reinicio/deploy o cold start.
     try {
-      const toast = document.getElementById("uiErrorToast");
-      if (toast) {
-        toast.classList.remove("hidden");
-        toast.innerHTML = "<strong>Servidor no disponible</strong><pre>Reintentando cargar el workspace en unos segundos...</pre>";
-      }
+      setUiToast("Servidor no disponible", "Reintentando cargar el workspace en unos segundos...");
     } catch {}
     updateWorkspaceEntryChrome();
     // Reintento con backoff simple.
@@ -12890,6 +12964,7 @@ const loadWorkspaceCentral = async () => {
     }, delayMs);
     return;
   }
+  hideUiToast();
   state.workspaceCentralRetryAttempt = 0;
   state.workspaces = data.rows || [];
   renderWorkspaceKpis(data.summary || {});
@@ -19997,6 +20072,7 @@ const updateEstudioAltaTabs = () => {
 const setCrmWorkspaceView = (view = "resumen") => {
   const allowed = new Set([
     "resumen",
+    "analisis",
     "captaciones",
     "inmuebles",
     "alquileres",
@@ -20023,6 +20099,7 @@ const setCrmWorkspaceView = (view = "resumen") => {
 
   const viewMap = {
     resumen: crmViewResumen,
+    analisis: crmViewAnalisis,
     captaciones: crmViewCaptaciones,
     inmuebles: crmViewInmuebles,
     alquileres: crmViewAlquileres,
@@ -20047,6 +20124,8 @@ const setCrmWorkspaceView = (view = "resumen") => {
 
   if (nextView === "captaciones") {
     loadCrmCaptaciones();
+  } else if (nextView === "analisis") {
+    renderCrmResumenDashboard();
   } else if (nextView === "inmuebles") {
     loadCrmInmuebles();
   } else if (nextView === "alquileres") {

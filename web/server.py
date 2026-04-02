@@ -41894,12 +41894,22 @@ def main():
     # En entornos cloud (Render, etc.) debe escuchar en 0.0.0.0 para pasar health checks.
     parser.add_argument("--host", default="0.0.0.0", help="Host.")
     env_port = os.environ.get("PORT")
-    try:
-        env_port = int(env_port) if env_port else None
-    except ValueError:
-        env_port = None
-    parser.add_argument("--port", type=int, default=env_port or 8000, help="Port.")
+    parser.add_argument("--port", default=(env_port or "8000"), help="Port.")
     args = parser.parse_args()
+    try:
+        raw_port = str(args.port or "").strip()
+        if raw_port in {"$PORT", "${PORT}", "PORT"}:
+            raw_port = str(os.environ.get("PORT") or "").strip()
+        if raw_port:
+            args.port = int(raw_port)
+        else:
+            args.port = 8000
+    except Exception:
+        # Evita que un "Start Command" con --port $PORT (sin expansión) mate el proceso.
+        try:
+            args.port = int(str(os.environ.get("PORT") or "").strip() or "8000")
+        except Exception:
+            args.port = 8000
 
     try:
         ensure_tables(args.db)

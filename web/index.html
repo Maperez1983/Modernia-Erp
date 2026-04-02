@@ -1807,9 +1807,10 @@
               <div class="muted">Histórico visible</div>
             </div>
           </div>
-          <div id="crmWorkspaceShell" class="crm-workspace-shell">
+            <div id="crmWorkspaceShell" class="crm-workspace-shell">
             <div id="crmWorkspaceTabs" class="crm-workspace-tabs">
               <button type="button" class="tab active" data-crm-view="resumen">Resumen</button>
+              <button type="button" class="tab" data-crm-view="analisis">Análisis</button>
               <button type="button" class="tab" data-crm-view="captaciones">Pipeline</button>
               <button type="button" class="tab" data-crm-view="inmuebles">Inmuebles</button>
               <button type="button" class="tab" data-crm-view="alquileres">Alquileres</button>
@@ -1823,6 +1824,51 @@
                   </div>
             <div id="crmWorkspace">
               <div id="crmViewResumen" class="crm-workspace-view">
+                <div class="crm-summary-grid">
+                  <div class="form-card crm-focus-card">
+                    <div class="section-head">
+                      <div>
+                        <h3>Panel comercial</h3>
+                        <p class="muted">Lectura rápida del negocio vivo y acceso directo a los expedientes más calientes.</p>
+                      </div>
+                    </div>
+                    <div id="crmResumenPulse" class="crm-mini-list"></div>
+                    <div class="crm-quick-actions">
+                      <button type="button" class="crm-quick-action" data-crm-action="captacion">
+                        <strong>Nuevo inmueble</strong>
+                        <span>Alta inicial del inmueble, propietario y canal de entrada</span>
+                      </button>
+                      <button type="button" class="crm-quick-action" data-crm-action="compraventa">
+                        <strong>Nueva compraventa</strong>
+                        <span>Venta nueva con precios, honorarios y documentación</span>
+                      </button>
+                      <button type="button" class="crm-quick-action" data-crm-action="demanda">
+                        <strong>Nueva demanda</strong>
+                        <span>Comprador potencial con matching posterior</span>
+                      </button>
+                    </div>
+                  </div>
+                  <div class="form-card crm-focus-card">
+                    <div class="section-head">
+                      <div>
+                        <h3>Trabajo de hoy</h3>
+                        <p class="muted">Qué inmuebles requieren llamada, cita, documentación o siguiente hito.</p>
+                      </div>
+                    </div>
+                    <div id="crmResumenHoy" class="crm-focus-list"></div>
+                  </div>
+                </div>
+                <div class="form-card">
+                  <div class="section-head">
+                    <div>
+                      <h3>Alertas del pipeline</h3>
+                      <p class="muted">Incidencias de calidad y expedientes inmobiliarios que se están quedando bloqueados.</p>
+                    </div>
+                  </div>
+                  <div id="crmResumenAlertas" class="crm-focus-list"></div>
+                </div>
+              </div>
+              <div id="crmViewAnalisis" class="crm-workspace-view hidden">
                 <div class="form-card">
                   <div class="section-head">
                     <div>
@@ -1884,90 +1930,6 @@
                       </div>
                       <div id="crmResumenTopPlazo" class="crm-focus-list"></div>
                     </div>
-                  </div>
-                </div>
-                <div class="crm-summary-grid">
-                  <div class="form-card crm-focus-card">
-                    <div class="section-head">
-                      <div>
-                        <h3>Panel comercial</h3>
-                        <p class="muted">Lectura rápida del negocio vivo y acceso directo a los expedientes más calientes.</p>
-                      </div>
-                    </div>
-                    <div id="crmResumenPulse" class="crm-mini-list"></div>
-                    <div class="crm-quick-actions">
-                      <button type="button" class="crm-quick-action" data-crm-action="captacion">
-                        <strong>Nuevo inmueble</strong>
-                        <span>Alta inicial del inmueble, propietario y canal de entrada</span>
-                      </button>
-                      <button type="button" class="crm-quick-action" data-crm-action="compraventa">
-                        <strong>Nueva compraventa</strong>
-                        <span>Venta nueva con precios, honorarios y documentación</span>
-                      </button>
-                      <button type="button" class="crm-quick-action" data-crm-action="demanda">
-                        <strong>Nueva demanda</strong>
-                        <span>Comprador potencial con matching posterior</span>
-                      </button>
-                    </div>
-                  </div>
-                  <div class="form-card crm-focus-card">
-                    <div class="section-head">
-                      <div>
-                        <h3>Trabajo de hoy</h3>
-                        <p class="muted">Qué inmuebles requieren llamada, cita, documentación o siguiente hito.</p>
-                      </div>
-                    </div>
-                    <div id="crmResumenHoy" class="crm-focus-list"></div>
-                  </div>
-                </div>
-                <div class="crm-split crm-summary-secondary">
-                  <div class="form-card">
-                    <div class="section-head">
-                      <div>
-                        <h3>Alertas del pipeline</h3>
-                        <p class="muted">Incidencias de calidad y expedientes inmobiliarios que se están quedando bloqueados.</p>
-                      </div>
-                    </div>
-                    <div id="crmResumenAlertas" class="crm-focus-list"></div>
-                  </div>
-                  <div class="form-card">
-                    <div class="section-head">
-                      <div>
-                        <h3>Actividad reciente</h3>
-                        <p class="muted">Últimas visitas, movimientos comerciales y cierres visibles.</p>
-                      </div>
-                    </div>
-                    <div id="crmResumenActividad" class="crm-recent"></div>
-                  </div>
-                </div>
-                <div class="form-card">
-                  <div class="section-head">
-                    <div>
-                      <h3>Pipeline inmobiliario</h3>
-                      <p class="muted">Lectura rápida de carga por etapa. El kanban completo queda en Pipeline.</p>
-                    </div>
-                    <button type="button" class="secondary" data-crm-view="captaciones">Abrir pipeline</button>
-                  </div>
-                  <div id="crmPipeline" class="crm-pipeline"></div>
-                </div>
-                <div class="crm-split">
-                  <div class="form-card">
-                    <div class="section-head">
-                      <div>
-                        <h3>Inmuebles que requieren acción</h3>
-                        <p class="muted">Entradas con pendiente comercial, sin catastro o sin siguiente paso definido.</p>
-                      </div>
-                    </div>
-                    <div id="crmResumenInmuebles" class="crm-recent"></div>
-                  </div>
-                  <div class="form-card">
-                    <div class="section-head">
-                      <div>
-                        <h3>Expedientes recientes</h3>
-                        <p class="muted">Últimas fichas tocadas en inventario y comercial.</p>
-                      </div>
-                    </div>
-                    <div id="crmInmueblesRecent" class="crm-recent"></div>
                   </div>
                 </div>
               </div>
@@ -7494,7 +7456,7 @@
     <script src="ui-foundation.js?v=2"></script>
     <script src="app-auth.js?v=5"></script>
     <script src="app-routing.js?v=7"></script>
-    <script src="app.js?v=381"></script>
+    <script src="app.js?v=383"></script>
     <script>
       (function () {
         if (!("serviceWorker" in navigator)) return;
