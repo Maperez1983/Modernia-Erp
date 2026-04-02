@@ -41326,11 +41326,11 @@ class Handler(BaseHTTPRequestHandler):
 
                 captaciones_series = conn.execute(
                     """
-                    SELECT CAST(STRFTIME('%Y', COALESCE(NULLIF(updated_at, ''), created_at)) AS INTEGER) AS year,
+                    SELECT substr(COALESCE(NULLIF(updated_at, ''), created_at), 1, 4) AS year,
                            COUNT(*) AS total
                     FROM captaciones
                     WHERE empresa_id = ?
-                    GROUP BY CAST(STRFTIME('%Y', COALESCE(NULLIF(updated_at, ''), created_at)) AS INTEGER)
+                    GROUP BY substr(COALESCE(NULLIF(updated_at, ''), created_at), 1, 4)
                     ORDER BY year
                     """,
                     (empresa_id,),
@@ -41338,11 +41338,11 @@ class Handler(BaseHTTPRequestHandler):
 
                 inmuebles_series = conn.execute(
                     """
-                    SELECT CAST(STRFTIME('%Y', COALESCE(NULLIF(updated_at, ''), created_at)) AS INTEGER) AS year,
+                    SELECT substr(COALESCE(NULLIF(updated_at, ''), created_at), 1, 4) AS year,
                            COUNT(*) AS total
                     FROM inmuebles
                     WHERE empresa_id = ?
-                    GROUP BY CAST(STRFTIME('%Y', COALESCE(NULLIF(updated_at, ''), created_at)) AS INTEGER)
+                    GROUP BY substr(COALESCE(NULLIF(updated_at, ''), created_at), 1, 4)
                     ORDER BY year
                     """,
                     (empresa_id,),
