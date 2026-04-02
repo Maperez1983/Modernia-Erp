@@ -39107,6 +39107,7 @@ class Handler(BaseHTTPRequestHandler):
                   CASE
                     WHEN COALESCE(precio_contrato, 0) >= 10000 THEN precio_contrato
                     WHEN COALESCE(precio_propuesta, 0) >= 10000 THEN precio_propuesta
+                    WHEN COALESCE(precio_escritura, 0) >= 10000 THEN precio_escritura
                     ELSE NULL
                   END AS precio_venta,
                   precio_propuesta,

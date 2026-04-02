@@ -1251,6 +1251,10 @@ def extract_case_data(case: CaseEntry, root: Path) -> dict[str, object]:
             texts.get("arras", ""),
             ("propuesta de compraventa", "reserva", "arras"),
         )
+    # En muchos expedientes, "arras/reserva" contiene importes de señal (ej. 3.000€) que NO son precio de venta.
+    # Normalizamos: si el importe es demasiado bajo, lo ignoramos como "precio_propuesta".
+    if price_propuesta is not None and price_propuesta < 10_000:
+        price_propuesta = None
     price_contrato = find_money_near_keywords(
         texts.get("contrato_privado", ""),
         ("precio que se fija para la transmision", "precio que se fija para la transmisión", "precio para la transmisión"),
