@@ -36843,45 +36843,57 @@ const init = async () => {
 
     populateTables();
 
-    const safe = (promise) => promise.catch(() => null);
-    await safe(loadHomeDashboard());
-    await safe(loadHomeHipotecaStats());
-    await safe(loadHomeFincasStats(yearSelect?.value));
-    await safe(loadWorkspaceCentral());
-    await safe(loadUsuarios());
-    renderUsuariosSelect();
-    renderUsuariosTable();
-    await safe(loadClientesCardStats());
-    await safe(loadClientesStats());
-    const clientes = (await safe(loadClientesList())) || [];
-    renderClientesSelects(clientes);
-    populateGestoriaClientes();
-    populateAgendaClientes(segurosAgendaClientes, segurosAgendaClienteInput, segurosAgendaClienteId);
-    populateAgendaClientes(gestoriaAgendaClientes, gestoriaAgendaClienteInput, gestoriaAgendaClienteId);
-    populateAgendaClientes(finAgendaClientes, finAgendaClienteInput, finAgendaClienteId);
-    populateAgendaClientes(actionModalClientes, actionModalClienteInput, actionModalClienteId);
-    populateAgendaClientes(segurosCrmClientes, segurosCrmClienteInput, segurosCrmClienteId);
-    populateAgendaClientes(gestoriaCrmClientes, gestoriaCrmSearch, null);
-    populateAgendaClientes(finCrmClientes, finCrmClienteInput, finCrmClienteId);
-    populateClientesSelect(gestoriaContabilidadCliente);
-    populateClientesSelect(segurosContabilidadCliente);
-    if (segurosContabilidadClientesMulti) {
-      populateSegurosContabilidadClientesSelect(segurosContabilidadClientesMulti);
-    }
-    populateServiciosSelect(clientesServicioSelect);
-    refreshClientesAltaSelects();
-    initFinSimulator();
-    setGestoriaCrmTab(state.gestoriaCrmTab || "autonomo");
-    initSegurosTabs();
-    await safe(loadFincasRenewalAlert());
-    await safe(loadLegalRadarHomeAlert());
-    setupCatalogoInputs();
-    renderCompanyCards();
-    loadTable();
+    // Pintado y routing básicos primero: evita que el login tarde minutos en Render cuando hay cold start.
     updateTableVisibility();
     initCrmInmoLinkInterceptor();
     handleRoute();
     UI?.boot(state);
+    renderCompanyCards();
+
+    // Cargas pesadas en segundo plano: stats, clientes, workspaces, etc.
+    const safe = (promise) => promise.catch(() => null);
+    window.setTimeout(() => {
+      (async () => {
+        await safe(loadHomeDashboard());
+        await safe(loadHomeHipotecaStats());
+        await safe(loadHomeFincasStats(yearSelect?.value));
+        await safe(loadWorkspaceCentral());
+        await safe(loadUsuarios());
+        renderUsuariosSelect();
+        renderUsuariosTable();
+        await safe(loadClientesCardStats());
+        await safe(loadClientesStats());
+        const clientes = (await safe(loadClientesList())) || [];
+        renderClientesSelects(clientes);
+        populateGestoriaClientes();
+        populateAgendaClientes(segurosAgendaClientes, segurosAgendaClienteInput, segurosAgendaClienteId);
+        populateAgendaClientes(gestoriaAgendaClientes, gestoriaAgendaClienteInput, gestoriaAgendaClienteId);
+        populateAgendaClientes(finAgendaClientes, finAgendaClienteInput, finAgendaClienteId);
+        populateAgendaClientes(actionModalClientes, actionModalClienteInput, actionModalClienteId);
+        populateAgendaClientes(segurosCrmClientes, segurosCrmClienteInput, segurosCrmClienteId);
+        populateAgendaClientes(gestoriaCrmClientes, gestoriaCrmSearch, null);
+        populateAgendaClientes(finCrmClientes, finCrmClienteInput, finCrmClienteId);
+        populateClientesSelect(gestoriaContabilidadCliente);
+        populateClientesSelect(segurosContabilidadCliente);
+        if (segurosContabilidadClientesMulti) {
+          populateSegurosContabilidadClientesSelect(segurosContabilidadClientesMulti);
+        }
+        populateServiciosSelect(clientesServicioSelect);
+        refreshClientesAltaSelects();
+        initFinSimulator();
+        setGestoriaCrmTab(state.gestoriaCrmTab || "autonomo");
+        initSegurosTabs();
+        await safe(loadFincasRenewalAlert());
+        await safe(loadLegalRadarHomeAlert());
+        setupCatalogoInputs();
+        renderCompanyCards();
+        // Solo recarga la tabla si estamos realmente en una vista que la necesita.
+        if (state.currentModule === "clientes" || currentTab === "operativa" || currentTab === "crm") {
+          loadTable();
+        }
+        updateTableVisibility();
+      })().catch(() => {});
+    }, 0);
     const okCount = results.filter((r) => r.status === "fulfilled").length;
     if (dbStatus) {
       dbStatus.innerHTML = okCount === 3
