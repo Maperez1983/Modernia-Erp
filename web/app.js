@@ -12656,16 +12656,6 @@ const loadWorkspaceDetail = async (workspaceId) => {
   const companyQuery = state.currentWorkspaceCompanyId
     ? `&empresa_id=${encodeURIComponent(state.currentWorkspaceCompanyId)}`
     : "";
-  const timeUsers = await safeWorkspaceApi(
-    `/api/workspace_registro_usuarios?workspace_id=${encodeURIComponent(workspaceId)}${companyQuery}&limit=300`,
-    { rows: [] }
-  );
-  state.workspaceTimeUsers = timeUsers.rows || [];
-  let members = { rows: [] };
-  if (canManageWorkspace) {
-    members = await safeWorkspaceApi(`/api/workspace_members?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [] });
-  }
-  state.currentWorkspaceMembers = members.rows || [];
   const timeMonth = normalizeMonthValue(state.workspaceTimeMonth || "");
   state.workspaceTimeMonth = timeMonth;
   const viewHint = String(
@@ -12676,6 +12666,36 @@ const loadWorkspaceDetail = async (workspaceId) => {
     .trim()
     .toLowerCase();
   const minimalForRrhh = viewHint === "rrhh";
+
+  // Pintado rápido del workspace: módulos + estructura, sin esperar a cargar paneles pesados.
+  // Esto mejora mucho el "time-to-first-cards" al entrar en Operativa.
+  fillWorkspaceForm(detail.workspace || {});
+  renderWorkspaceCommercialPack(detail.workspace || {}, detail.commercial_package || {});
+  renderWorkspacePermissionMatrix(detail.permission_matrix || []);
+  renderWorkspaceLauncher(detail.workspace || {}, detail.modules || []);
+  renderWorkspaceCompanySwitcher(companies);
+  renderWorkspaceCompanies(companies);
+  renderWorkspaceModules(detail.modules || []);
+  updateWorkspaceEntryChrome();
+  syncCrmLegalAvailability();
+  {
+    const tenantMode = (state.currentWorkspaceEntryMode || "platform") === "tenant";
+    const view = state.currentWorkspaceView || "overview";
+    setWorkspaceView(view, { forceTenantView: tenantMode && normalizeSimple(view) !== "operations" });
+  }
+  renderWorkspaceList(state.workspaces || []);
+  renderCompanyCards();
+
+  const timeUsers = await safeWorkspaceApi(
+    `/api/workspace_registro_usuarios?workspace_id=${encodeURIComponent(workspaceId)}${companyQuery}&limit=300`,
+    { rows: [] }
+  );
+  state.workspaceTimeUsers = timeUsers.rows || [];
+  let members = { rows: [] };
+  if (canManageWorkspace) {
+    members = await safeWorkspaceApi(`/api/workspace_members?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [] });
+  }
+  state.currentWorkspaceMembers = members.rows || [];
   // Evitar "stampede" de decenas de requests concurrentes al entrar en el workspace.
   // SQLite + Render puede devolver 502 si saturamos conexiones/tiempos de respuesta.
   let billing = {};
@@ -36743,6 +36763,10 @@ const logoutAuthSession = async () => {
 const init = async () => {
   state.booting = true;
   try {
+    // Pintado inmediato: el panel no debe quedarse vacío mientras cargan APIs.
+    // Se re-renderiza automáticamente conforme llegan datos (resumen, workspace, etc.).
+    renderCompanyCards();
+
   const results = await Promise.allSettled([
     api("/api/empresas"),
     api("/api/tablas"),
