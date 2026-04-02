@@ -5820,7 +5820,7 @@ body.auth-locked {
   border-radius: 12px;
   border: 1px solid rgba(60, 110, 113, 0.2);
   background: rgba(245, 245, 245, 0.86);
-  color: var(--ink-soft);
+  color: var(--ink);
   box-shadow: none;
   z-index: 2;
   display: inline-flex;
@@ -5839,6 +5839,7 @@ body.auth-locked {
 }
 
 .auth-pass-toggle svg {
+  display: block;
   width: 18px;
   height: 18px;
 }

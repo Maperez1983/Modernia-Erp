@@ -42253,8 +42253,6 @@ if (authLoginPassToggle && authLoginPass) {
     authLoginPassToggle.setAttribute("aria-pressed", visible ? "true" : "false");
     authLoginPassToggle.setAttribute("aria-label", visible ? "Ocultar contraseña" : "Mostrar contraseña");
     authLoginPassToggle.setAttribute("title", visible ? "Ocultar contraseña" : "Mostrar contraseña");
-    // Icono visible incluso si el SVG no renderiza/cacha bien.
-    authLoginPassToggle.textContent = visible ? "🙈" : "👁";
   };
   // Estado inicial.
   applyPasswordVisibility(false);

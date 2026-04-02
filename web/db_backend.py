@@ -8,7 +8,8 @@ def is_postgres_enabled():
     forced = (os.environ.get("APP_DB_BACKEND") or "").strip().lower()
     if forced in {"sqlite", "sqlite3"}:
         return False
-    if forced in {"postgres", "postgresql", "pg"}:
+    # Toleramos errores comunes de escritura en Render (p.ej. "postgre").
+    if forced in {"postgres", "postgresql", "postgre", "pg"}:
         return True
     raw = (os.environ.get("DATABASE_URL") or os.environ.get("POSTGRES_URL") or "").strip()
     return raw.lower().startswith("postgres")
@@ -168,9 +169,9 @@ def translate_sqlite_sql_to_postgres(sql):
         return sql
     text = sql
     text = _strip_collate_nocase(text)
-    # SQLite ROUND(x, n) acepta floats; en Postgres, ROUND(x, n) solo existe para NUMERIC.
-    # Reescribimos a un shim que hace cast seguro.
-    text = re.sub(r"\bROUND\s*\(", "sqlite_round(", text, flags=re.IGNORECASE)
+    # Nota: No reescribimos ROUND(...) aquí porque también se ejecuta sobre DDL (CREATE FUNCTION),
+    # y eso puede “autorreferenciar” nuestras funciones shim. En su lugar, creamos overloads de
+    # round(real/int) en ensure_postgres_sqlite_compat.
     # SQLite GROUP_CONCAT -> Postgres STRING_AGG.
     # - GROUP_CONCAT(x) -> STRING_AGG(x, ',')
     # - GROUP_CONCAT(DISTINCT x) -> STRING_AGG(DISTINCT x, ',')
@@ -545,8 +546,18 @@ def ensure_postgres_sqlite_compat(conn):
         """
     )
 
-    # round(double precision, integer) no existe en Postgres (solo round(numeric, integer)).
-    # Creamos un shim para que SQL legado con ROUND(x, 2) funcione aunque no pase por el traductor.
+    # round(real|double precision, integer) no existe en Postgres (solo round(numeric, integer)).
+    # Creamos shims para que SQL legado con ROUND(x, 2) funcione.
+    conn.execute(
+        """
+        CREATE OR REPLACE FUNCTION round(val real, digits integer)
+        RETURNS double precision
+        LANGUAGE SQL
+        AS $$
+          SELECT round(val::numeric, digits)::double precision
+        $$;
+        """
+    )
     conn.execute(
         """
         CREATE OR REPLACE FUNCTION round(val double precision, digits integer)
