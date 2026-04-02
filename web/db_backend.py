@@ -283,7 +283,7 @@ def open_sqlite_conn(db_path, with_row_factory=False):
     return conn
 
 
-def open_postgres_conn(with_row_factory=False, *, skip_compat=False):
+def open_postgres_conn(with_row_factory=False, *, skip_compat=False, connect_timeout_override=None):
     dsn = _postgres_dsn()
     if not dsn:
         raise RuntimeError("DATABASE_URL/POSTGRES_URL no configurado.")
@@ -292,10 +292,17 @@ def open_postgres_conn(with_row_factory=False, *, skip_compat=False):
         from psycopg.rows import dict_row
     except Exception as exc:
         raise RuntimeError("psycopg no instalado. Añade `psycopg[binary]` a requirements.txt.") from exc
-    try:
-        connect_timeout = int(os.environ.get("APP_PG_CONNECT_TIMEOUT", "5"))
-    except Exception:
-        connect_timeout = 5
+    connect_timeout = None
+    if connect_timeout_override is not None:
+        try:
+            connect_timeout = int(connect_timeout_override)
+        except Exception:
+            connect_timeout = None
+    if connect_timeout is None:
+        try:
+            connect_timeout = int(os.environ.get("APP_PG_CONNECT_TIMEOUT", "5"))
+        except Exception:
+            connect_timeout = 5
     conn = psycopg.connect(
         dsn,
         row_factory=(dict_row if with_row_factory else None),

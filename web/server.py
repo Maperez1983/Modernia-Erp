@@ -23254,6 +23254,10 @@ class Handler(BaseHTTPRequestHandler):
     _db_ready_lock = threading.Lock()
     _db_ready_last_attempt_at = 0.0
     _db_ready_last_error = ""
+    _health_lock = threading.Lock()
+    _health_last_at = 0.0
+    _health_last_status = 0
+    _health_last_body = b""
 
     def log_message(self, format, *args):
         return
@@ -23558,41 +23562,72 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
-        if parsed.path in ("/health", "/api/health"):
-            # Health real: comprobamos conectividad a DB para evitar que el front espere minutos
-            # mientras Postgres está caído/no accesible.
+        if parsed.path == "/health":
+            # Liveness: NO depende de DB (evita 502/restarts si Postgres está caído).
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.end_headers()
             try:
-                if db_is_postgres_enabled():
-                    conn = open_postgres_conn(with_row_factory=False, skip_compat=True)
-                    try:
-                        conn.execute("SELECT 1")
-                    finally:
-                        try:
-                            conn.close()
-                        except Exception:
-                            pass
-                else:
-                    conn = open_sqlite_conn(self.db_path, with_row_factory=False)
-                    try:
-                        conn.execute("SELECT 1")
-                    finally:
-                        try:
-                            conn.close()
-                        except Exception:
-                            pass
-                self.send_response(200)
-                self.send_header("Content-Type", "text/plain; charset=utf-8")
-                self.end_headers()
                 self.wfile.write(b"ok")
-                return
-            except Exception as exc:
-                self.send_response(503)
-                self.send_header("Content-Type", "text/plain; charset=utf-8")
+            except BrokenPipeError:
+                pass
+            return
+        if parsed.path == "/api/health":
+            # Readiness: comprobamos conectividad a DB para que el front no espere minutos.
+            # Circuit breaker: cacheamos el resultado unos segundos para evitar avalanchas de conexiones.
+            ttl_s = max(1.0, float(os.environ.get("APP_HEALTH_CACHE_SECONDS", "3") or 3))
+            now_ts = time.time()
+            try:
+                with Handler._health_lock:
+                    if (now_ts - float(Handler._health_last_at or 0.0)) < ttl_s and Handler._health_last_status:
+                        status = int(Handler._health_last_status)
+                        body = Handler._health_last_body or b""
+                    else:
+                        try:
+                            if db_is_postgres_enabled():
+                                conn = open_postgres_conn(
+                                    with_row_factory=False,
+                                    skip_compat=True,
+                                    connect_timeout_override=int(os.environ.get("APP_HEALTH_PG_TIMEOUT", "2") or 2),
+                                )
+                                try:
+                                    conn.execute("SELECT 1")
+                                finally:
+                                    try:
+                                        conn.close()
+                                    except Exception:
+                                        pass
+                            else:
+                                conn = open_sqlite_conn(self.db_path, with_row_factory=False)
+                                try:
+                                    conn.execute("SELECT 1")
+                                finally:
+                                    try:
+                                        conn.close()
+                                    except Exception:
+                                        pass
+                            status = 200
+                            body = b"ok"
+                        except Exception as exc:
+                            status = 503
+                            msg = f"db_unavailable: {type(exc).__name__}: {exc}"
+                            body = msg.encode("utf-8", errors="ignore")
+                        Handler._health_last_at = now_ts
+                        Handler._health_last_status = status
+                        Handler._health_last_body = body
+            except Exception:
+                status = 503
+                body = b"db_unavailable: probe_failed"
+            self.send_response(status)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            if status != 200:
                 self.send_header("Cache-Control", "no-store")
-                self.end_headers()
-                msg = f"db_unavailable: {type(exc).__name__}: {exc}"
-                self.wfile.write(msg.encode("utf-8", errors="ignore"))
-                return
+            self.end_headers()
+            try:
+                self.wfile.write(body)
+            except BrokenPipeError:
+                pass
+            return
         if parsed.path.startswith("/api/"):
             if parsed.path not in AUTH_PUBLIC_GET_ENDPOINTS and not self._require_api_auth():
                 return
