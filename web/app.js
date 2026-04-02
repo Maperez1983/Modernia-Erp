@@ -1374,6 +1374,13 @@ const state = {
   crmResumenHasta: "",
   crmResumenResponsable: "",
   crmResumenOrigen: "",
+  crmInmueblesEstadoFilter: (() => {
+    try {
+      return localStorage.getItem("crm.inmuebles.estadoFilter") || "activos";
+    } catch {
+      return "activos";
+    }
+  })(),
   segurosRamosSource: null,
   segurosComisionesRows: null,
   segurosCrmData: null,
@@ -2377,6 +2384,8 @@ const crmInmueblesRecent = document.getElementById("crmInmueblesRecent");
 const crmInmueblesQuality = document.getElementById("crmInmueblesQuality");
 const crmInmuebleSearch = document.getElementById("crmInmuebleSearch");
 const crmInmuebleSearchMirror = document.getElementById("crmInmuebleSearchMirror");
+const crmInmuebleEstadoFilter = document.getElementById("crmInmuebleEstadoFilter");
+const crmInmuebleEstadoFilterMirror = document.getElementById("crmInmuebleEstadoFilterMirror");
 const crmInmueblesTableMirror = document.getElementById("crmInmueblesTableMirror");
 const crmInmueblesInfoMirror = document.getElementById("crmInmueblesInfoMirror");
 const crmInmueblesRecentMirror = document.getElementById("crmInmueblesRecentMirror");
@@ -25062,7 +25071,14 @@ const renderCrmResumenDashboard = () => {
     const text = String(raw || "").trim();
     if (!text) return "Inmueble";
     if (text === "Adquisición") return "Inmueble";
+    const key = normalizeSimple(text);
+    if (key === "historico vendido") return "Vendido";
     return text;
+  };
+
+  const isClosedStage = (raw) => {
+    const key = normalizeSimple(raw || "");
+    return key === "vendido" || key === "cerrado negativamente";
   };
 
   // Fuente de verdad visual: inmuebles (estado). Captaciones solo aporta "siguiente paso" y señales legacy.
@@ -25101,6 +25117,7 @@ const renderCrmResumenDashboard = () => {
     })
     .filter((row) => row && String(row.inmueble_id || "").trim());
   const stageCount = (name) => pipelineItems.filter((row) => row.stage === name).length;
+  const activePipelineItems = pipelineItems.filter((row) => !isClosedStage(row.stage));
 
   if (crmResumenDireccionKpis || crmResumenTopDesviacion || crmResumenTopPlazo) {
     const responsables = new Set();
@@ -25301,7 +25318,7 @@ const renderCrmResumenDashboard = () => {
   if (crmResumenHoy) {
     const jobs = [
       ...pipelineItems
-        .filter((row) => !["Vendido", "Cerrado negativamente"].includes(String(row.stage || "")))
+        .filter((row) => !isClosedStage(row.stage))
         .map((row) => {
         const etapa = String(row.stage || "Inmueble").trim();
         const proxima = String(row.proxima_accion || "").trim();
@@ -25370,9 +25387,9 @@ const renderCrmResumenDashboard = () => {
 
   if (crmResumenAlertas) {
     const activeStages = new Set(["Inmueble", "Noticia", "Encargo", "Propuesta", "Reservado", "Contrato de arras"]);
-    const missingNext = pipelineItems.filter((row) => activeStages.has(String(row.stage || "")) && !String(row.proxima_accion || "").trim()).length;
-    const missingCatastro = inmuebles.filter((row) => !String(row.referencia_catastral || "").trim()).length;
-    const missingOwner = inmuebles.filter((row) => !String(row.propietarios || "").trim()).length;
+    const missingNext = activePipelineItems.filter((row) => activeStages.has(String(row.stage || "")) && !String(row.proxima_accion || "").trim()).length;
+    const missingCatastro = activePipelineItems.filter((row) => !String(row.referencia_catastral || "").trim()).length;
+    const missingOwner = activePipelineItems.filter((row) => !String(row.propietarios || "").trim()).length;
     const activeEncargos = stageCount("Encargo");
     const pendingPropuestas = stageCount("Propuesta");
     const pendingReservas = stageCount("Reservado");
@@ -25478,7 +25495,7 @@ const renderCrmResumenDashboard = () => {
   }
 
   if (crmResumenInmuebles) {
-    const hot = pipelineItems
+    const hot = activePipelineItems
       .map((row) => {
         const reasons = [];
         if (!String(row.referencia_catastral || "").trim()) reasons.push("Catastro pendiente");
@@ -25838,6 +25855,34 @@ const loadCrmInmuebles = () => {
     });
     return;
   }
+  const resolveEstadoFilter = () => {
+    const raw =
+      crmInmuebleEstadoFilterMirror?.value
+      || crmInmuebleEstadoFilter?.value
+      || state.crmInmueblesEstadoFilter
+      || "activos";
+    const key = String(raw || "").trim().toLowerCase();
+    return ["activos", "vendidos", "cerrados", "todos"].includes(key) ? key : "activos";
+  };
+  const persistEstadoFilter = (key) => {
+    try {
+      localStorage.setItem("crm.inmuebles.estadoFilter", String(key || "activos"));
+    } catch {}
+  };
+  const estadoToBucket = (raw) => {
+    const key = normalizeSimple(raw || "");
+    if (key === "historico vendido") return "vendido";
+    if (key === "vendido") return "vendido";
+    if (key === "cerrado negativamente") return "cerrado";
+    return "activo";
+  };
+  const filterRowsByEstado = (rows = [], filterKey = "activos") => {
+    if (filterKey === "todos") return rows;
+    if (filterKey === "vendidos") return rows.filter((row) => estadoToBucket(row?.estado) === "vendido");
+    if (filterKey === "cerrados") return rows.filter((row) => estadoToBucket(row?.estado) === "cerrado");
+    return rows.filter((row) => estadoToBucket(row?.estado) === "activo");
+  };
+
   const q = crmInmuebleSearchMirror?.value?.trim() || crmInmuebleSearch?.value?.trim() || "";
   if (crmInmuebleSearch && crmInmuebleSearch.value !== q) {
     crmInmuebleSearch.value = q;
@@ -25845,14 +25890,24 @@ const loadCrmInmuebles = () => {
   if (crmInmuebleSearchMirror && crmInmuebleSearchMirror.value !== q) {
     crmInmuebleSearchMirror.value = q;
   }
+  const estadoFilter = resolveEstadoFilter();
+  state.crmInmueblesEstadoFilter = estadoFilter;
+  if (crmInmuebleEstadoFilter && crmInmuebleEstadoFilter.value !== estadoFilter) {
+    crmInmuebleEstadoFilter.value = estadoFilter;
+  }
+  if (crmInmuebleEstadoFilterMirror && crmInmuebleEstadoFilterMirror.value !== estadoFilter) {
+    crmInmuebleEstadoFilterMirror.value = estadoFilter;
+  }
+  persistEstadoFilter(estadoFilter);
   const params = new URLSearchParams({ empresa_id: empresa.id });
   if (q) {
     params.set("q", q);
   }
   api(`/api/inmuebles?${params.toString()}`)
     .then((data) => {
-    const rows = data.rows || [];
-    cachedCrmInmuebles = rows;
+    const allRows = data.rows || [];
+    cachedCrmInmuebles = allRows;
+    const rows = filterRowsByEstado(allRows, estadoFilter);
     renderCrmInmueblesRecent(rows);
     renderCrmInmueblesCatalog(rows);
     const sinCatastro = rows.filter((row) => !String(row.referencia_catastral || "").trim()).length;
@@ -25918,7 +25973,9 @@ const loadCrmInmuebles = () => {
       );
     }
     [crmInmueblesInfo, crmInmueblesInfoMirror].filter(Boolean).forEach((target) => {
-      target.textContent = `Mostrando ${rows.length} inmuebles.`;
+      target.textContent = estadoFilter === "todos"
+        ? `Mostrando ${rows.length} inmuebles.`
+        : `Mostrando ${rows.length} de ${allRows.length} inmuebles.`;
     });
     if (crmKpiInmuebles) {
       crmKpiInmuebles.textContent = String(rows.length);
@@ -37643,6 +37700,32 @@ if (crmInmuebleSearchMirror) {
     scheduleSave("crm-inmuebles-search-mirror", () => {
       loadCrmInmuebles();
     }, 300);
+  });
+}
+
+if (crmInmuebleEstadoFilter) {
+  crmInmuebleEstadoFilter.addEventListener("change", () => {
+    if (crmInmuebleEstadoFilterMirror) {
+      crmInmuebleEstadoFilterMirror.value = crmInmuebleEstadoFilter.value;
+    }
+    state.crmInmueblesEstadoFilter = String(crmInmuebleEstadoFilter.value || "activos");
+    try {
+      localStorage.setItem("crm.inmuebles.estadoFilter", String(state.crmInmueblesEstadoFilter));
+    } catch {}
+    loadCrmInmuebles();
+  });
+}
+
+if (crmInmuebleEstadoFilterMirror) {
+  crmInmuebleEstadoFilterMirror.addEventListener("change", () => {
+    if (crmInmuebleEstadoFilter) {
+      crmInmuebleEstadoFilter.value = crmInmuebleEstadoFilterMirror.value;
+    }
+    state.crmInmueblesEstadoFilter = String(crmInmuebleEstadoFilterMirror.value || "activos");
+    try {
+      localStorage.setItem("crm.inmuebles.estadoFilter", String(state.crmInmueblesEstadoFilter));
+    } catch {}
+    loadCrmInmuebles();
   });
 }
 

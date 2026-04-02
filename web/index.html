@@ -1994,7 +1994,15 @@
                         <h3>Inmuebles</h3>
                         <p class="muted">Busca por referencia, dirección, zona o estado.</p>
                       </div>
-                      <input id="crmInmuebleSearchMirror" placeholder="Buscar inmueble..." />
+                      <div class="inline-actions">
+                        <select id="crmInmuebleEstadoFilterMirror" title="Filtrar por estado">
+                          <option value="activos">Activos</option>
+                          <option value="vendidos">Vendidos (incl. histórico)</option>
+                          <option value="cerrados">Cerrados negativos</option>
+                          <option value="todos">Todos</option>
+                        </select>
+                        <input id="crmInmuebleSearchMirror" placeholder="Buscar inmueble..." />
+                      </div>
                     </div>
                     <div id="crmInmueblesTableMirror"></div>
                     <div class="footer" id="crmInmueblesInfoMirror"></div>
@@ -7456,12 +7464,12 @@
     <script src="ui-foundation.js?v=2"></script>
     <script src="app-auth.js?v=5"></script>
     <script src="app-routing.js?v=7"></script>
-    <script src="app.js?v=383"></script>
+    <script src="app.js?v=384"></script>
     <script>
       (function () {
         if (!("serviceWorker" in navigator)) return;
         window.addEventListener("load", function () {
-          navigator.serviceWorker.register("/sw.js?v=6").catch(function () {});
+          navigator.serviceWorker.register("/sw.js?v=7").catch(function () {});
         });
       })();
     </script>
