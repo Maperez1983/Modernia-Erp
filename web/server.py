@@ -233,6 +233,37 @@ AUTH_PUBLIC_POST_ENDPOINTS = {
 }
 AUTH_SESSIONS = {}
 AUTH_SESSIONS_LOCK = threading.Lock()
+
+
+def ensure_auth_sessions_table(conn):
+    # Persist auth sessions in DB so Render restarts / multi-worker deployments don't invalidate cookies.
+    # This keeps login stable across deploys and avoids sporadic 401s (especially noticeable when entrando al CRM).
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS auth_sessions (
+          token TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          usuario TEXT,
+          nombre TEXT,
+          apellido TEXT,
+          rol TEXT,
+          email TEXT,
+          servicio TEXT,
+          expires_at REAL NOT NULL,
+          created_at REAL NOT NULL
+        )
+        """
+    )
+    try:
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_auth_sessions_expires_at ON auth_sessions (expires_at)")
+    except Exception:
+        pass
+
+
+def open_auth_store_conn(with_row_factory=True):
+    if db_is_postgres_enabled():
+        return open_postgres_conn(with_row_factory=with_row_factory)
+    return open_sqlite_conn(str(DB_CONFIGURED), with_row_factory=with_row_factory)
 SQLITE_FOREIGN_KEYS_ENABLED = os.environ.get("APP_SQLITE_FOREIGN_KEYS", "1").strip().lower() not in ("0", "false", "no", "off")
 APP_TIMEZONE = (os.environ.get("APP_TIMEZONE") or os.environ.get("APP_TZ") or "Europe/Madrid").strip() or "Europe/Madrid"
 WORKSPACE_MEMBERSHIP_ENFORCE = os.environ.get("APP_WORKSPACE_MEMBERSHIP_ENFORCE", "0").strip().lower() in ("1", "true", "yes", "si", "sí", "on")
@@ -3368,6 +3399,16 @@ def _cleanup_expired_sessions():
             expired.append(token)
     for token in expired:
         AUTH_SESSIONS.pop(token, None)
+    # Best-effort DB cleanup (do not fail requests if DB is temporarily locked).
+    try:
+        conn = open_auth_store_conn(with_row_factory=False)
+        try:
+            conn.execute("DELETE FROM auth_sessions WHERE expires_at <= ?", [now])
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception:
+        pass
 
 
 def create_auth_session(user_row):
@@ -3387,6 +3428,43 @@ def create_auth_session(user_row):
     with AUTH_SESSIONS_LOCK:
         _cleanup_expired_sessions()
         AUTH_SESSIONS[session["token"]] = session
+    # Persist in DB so cookie remains valid across server restarts.
+    try:
+        conn = open_auth_store_conn(with_row_factory=False)
+        try:
+            conn.execute(
+                """
+                INSERT INTO auth_sessions (
+                  token, user_id, usuario, nombre, apellido, rol, email, servicio, expires_at, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(token) DO UPDATE SET
+                  user_id=excluded.user_id,
+                  usuario=excluded.usuario,
+                  nombre=excluded.nombre,
+                  apellido=excluded.apellido,
+                  rol=excluded.rol,
+                  email=excluded.email,
+                  servicio=excluded.servicio,
+                  expires_at=excluded.expires_at
+                """,
+                [
+                    session["token"],
+                    session["user_id"],
+                    session["usuario"],
+                    session["nombre"],
+                    session["apellido"],
+                    session["rol"],
+                    session["email"],
+                    session["servicio"],
+                    float(session["expires_at"]),
+                    float(session["created_at"]),
+                ],
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception:
+        pass
     return session
 
 
@@ -3396,12 +3474,53 @@ def get_auth_session(token):
     with AUTH_SESSIONS_LOCK:
         session = AUTH_SESSIONS.get(token)
         if not session:
-            return None
+            session = None
         if float(session.get("expires_at") or 0) <= time.time():
             AUTH_SESSIONS.pop(token, None)
-            return None
-        session["expires_at"] = time.time() + APP_SESSION_TTL_SECONDS
+            session = None
+        if session:
+            session["expires_at"] = time.time() + APP_SESSION_TTL_SECONDS
+            # Refresh in DB as best-effort (keeps the TTL rolling).
+            try:
+                conn = open_auth_store_conn(with_row_factory=False)
+                try:
+                    conn.execute("UPDATE auth_sessions SET expires_at = ? WHERE token = ?", [float(session["expires_at"]), token])
+                    conn.commit()
+                finally:
+                    conn.close()
+            except Exception:
+                pass
+            return dict(session)
+
+    # Cache miss: try DB (useful after restarts/deploys).
+    try:
+        conn = open_auth_store_conn(with_row_factory=True)
+        try:
+            row = conn.execute("SELECT * FROM auth_sessions WHERE token = ?", [token]).fetchone()
+            if not row:
+                return None
+            session = dict(row)
+            if float(session.get("expires_at") or 0) <= time.time():
+                try:
+                    conn.execute("DELETE FROM auth_sessions WHERE token = ?", [token])
+                    conn.commit()
+                except Exception:
+                    pass
+                return None
+            session["expires_at"] = time.time() + APP_SESSION_TTL_SECONDS
+            try:
+                conn.execute("UPDATE auth_sessions SET expires_at = ? WHERE token = ?", [float(session["expires_at"]), token])
+                conn.commit()
+            except Exception:
+                pass
+        finally:
+            conn.close()
+        # Rehydrate in-memory cache.
+        with AUTH_SESSIONS_LOCK:
+            AUTH_SESSIONS[token] = session
         return dict(session)
+    except Exception:
+        return None
 
 
 def delete_auth_session(token):
@@ -3409,6 +3528,15 @@ def delete_auth_session(token):
         return
     with AUTH_SESSIONS_LOCK:
         AUTH_SESSIONS.pop(token, None)
+    try:
+        conn = open_auth_store_conn(with_row_factory=False)
+        try:
+            conn.execute("DELETE FROM auth_sessions WHERE token = ?", [token])
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception:
+        pass
 
 def _get_client_ip(handler):
     xff = (handler.headers.get("X-Forwarded-For") or "").strip()
@@ -15423,6 +15551,7 @@ def ensure_tables(db_path):
     else:
         conn = open_sqlite_conn(db_path, with_row_factory=False)
     apply_schema_file(conn, ROOT.parent / "schema.sql")
+    ensure_auth_sessions_table(conn)
     ensure_column(conn, "empresas", "logo_url", "logo_url TEXT")
     ensure_column(conn, "empresas", "nif", "nif TEXT")
     ensure_column(conn, "empresas", "direccion", "direccion TEXT")
