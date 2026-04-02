@@ -1813,11 +1813,14 @@
               <button type="button" class="tab" data-crm-view="captaciones">Captaciones</button>
               <button type="button" class="tab" data-crm-view="inmuebles">Inmuebles</button>
               <button type="button" class="tab" data-crm-view="alquileres">Alquileres</button>
-              <button type="button" class="tab" data-crm-view="compraventas">Compraventas</button>
-              <button type="button" class="tab" data-crm-view="demandas">Demandas</button>
-              <button type="button" class="tab" data-crm-view="visitas">Visitas</button>
-              <button type="button" class="tab" data-crm-view="legal">Copiloto legal</button>
-            </div>
+                    <button type="button" class="tab" data-crm-view="compraventas">Compraventas</button>
+                    <button type="button" class="tab" data-crm-view="demandas">Demandas</button>
+                    <button type="button" class="tab" data-crm-view="visitas">Visitas</button>
+                    <button type="button" class="tab" data-crm-view="agenda">Agenda</button>
+                    <button type="button" class="tab" data-crm-view="informadores">Informadores</button>
+                    <button type="button" class="tab" data-crm-view="edificios">Edificios/Complejos</button>
+                    <button type="button" class="tab" data-crm-view="legal">Copiloto legal</button>
+                  </div>
             <div id="crmWorkspace">
               <div id="crmViewResumen" class="crm-workspace-view">
                 <div class="form-card">
@@ -1976,17 +1979,25 @@
                         <h3>Pipeline inmobiliario</h3>
                         <p class="muted">Arrastra para avanzar estado y detectar rápido los cuellos de botella comerciales.</p>
                       </div>
-                      <select id="crmEtapaFilterMirror">
-                        <option value="">Todas las etapas</option>
-                        <option>Noticia</option>
-                        <option>Adquisición</option>
-                        <option>Encargo</option>
-                        <option>Reservado</option>
-                        <option>Vendido</option>
-                        <option>Cerrado negativamente</option>
-                        <option>Alquiler</option>
-                      </select>
-                    </div>
+	                      <select id="crmEtapaFilterMirror">
+	                        <option value="">Todas las etapas</option>
+	                        <option>Noticia</option>
+	                        <option>Adquisición</option>
+	                        <option>Encargo</option>
+	                        <option>Reservado</option>
+	                        <option>Vendido</option>
+	                        <option>Cerrado negativamente</option>
+	                        <option>Alquiler</option>
+	                      </select>
+	                      <select id="crmCaptacionesQuickFilter">
+	                        <option value="">Búsquedas rápidas</option>
+	                        <option value="quick_pisos_vacios">Pisos vacíos</option>
+	                        <option value="quick_alquilados">Alquilados (inquilinos)</option>
+	                        <option value="quick_sin_contacto_120">Sin contacto &gt;120 días</option>
+	                        <option value="quick_noticia_sin_verificar">Noticias sin verificar</option>
+	                        <option value="quick_sin_proxima_accion">Sin próxima acción</option>
+	                      </select>
+	                    </div>
                     <div id="crmCaptacionesStageSummary" class="crm-pipeline"></div>
                     <div id="crmCaptacionesKanban" class="crm-kanban"></div>
                   </div>
@@ -2139,6 +2150,140 @@
                     </div>
                     <div id="crmVisitasAgenda" class="crm-focus-list"></div>
                   </div>
+                </div>
+              </div>
+              <div id="crmViewAgenda" class="crm-workspace-view hidden">
+                <div class="crm-split">
+                  <div class="form-card">
+                    <div class="section-head">
+                      <div>
+                        <h3>Agenda comercial</h3>
+                        <p class="muted">Actividades y citas del equipo (equivalente a listados de Actividades/Citas).</p>
+                      </div>
+                    </div>
+                    <div class="stack">
+                      <div class="inline-row">
+                        <input id="crmAgendaSearch" placeholder="Buscar por asunto, cliente, tipo, responsable..." />
+                        <select id="crmAgendaEstadoFilter">
+                          <option value="">Todos los estados</option>
+                          <option>Pendiente</option>
+                          <option>Completada</option>
+                          <option>Cancelada</option>
+                        </select>
+                      </div>
+                      <div id="crmAgendaTable"></div>
+                      <div class="footer" id="crmAgendaInfo"></div>
+                    </div>
+                  </div>
+                  <div class="form-card">
+                    <h3>Nueva actividad/cita</h3>
+                    <p class="muted">Registra una acción con fecha/hora, cliente e inmueble si aplica.</p>
+                    <form id="crmAgendaForm" class="form-grid">
+                      <label>
+                        Fecha de vencimiento
+                        <input name="fecha" type="date" required />
+                      </label>
+                      <label>
+                        Hora
+                        <input name="hora" type="time" />
+                      </label>
+                      <label>
+                        Fin
+                        <input name="hora_fin" type="time" />
+                      </label>
+                      <label class="span-2">
+                        Asunto
+                        <input name="asunto" placeholder="Ej. Seguimiento pedido / Cita adquisición" />
+                      </label>
+                      <label>
+                        Tipo
+                        <select name="tipo">
+                          <option>Llamada</option>
+                          <option>Cita</option>
+                          <option>Visita</option>
+                          <option>Email</option>
+                          <option>Nota interna</option>
+                          <option>Seguimiento</option>
+                        </select>
+                      </label>
+                      <label>
+                        Modalidad contacto
+                        <select name="modalidad_contacto">
+                          <option value=""></option>
+                          <option>Contacto directo</option>
+                          <option>Llamada</option>
+                          <option>WhatsApp</option>
+                          <option>Email</option>
+                          <option>Visita</option>
+                          <option>Otro</option>
+                        </select>
+                      </label>
+                      <label>
+                        Responsable
+                        <select name="responsable" class="responsable-select" data-service="Inmobiliaria"></select>
+                      </label>
+                      <label>
+                        Estado
+                        <select name="estado">
+                          <option>Pendiente</option>
+                          <option>Completada</option>
+                          <option>Cancelada</option>
+                        </select>
+                      </label>
+                      <label class="span-2">
+                        Cliente (opcional)
+                        <select id="crmAgendaCliente" name="cliente_id"></select>
+                      </label>
+                      <label class="span-2">
+                        Inmueble (opcional)
+                        <select id="crmAgendaInmueble" name="inmueble_id"></select>
+                      </label>
+                      <label class="span-2">
+                        Notas
+                        <textarea name="notas" rows="3"></textarea>
+                      </label>
+                      <div class="form-actions">
+                        <button type="submit">Guardar</button>
+                        <span id="crmAgendaStatus" class="muted"></span>
+                      </div>
+                    </form>
+                  </div>
+                </div>
+              </div>
+              <div id="crmViewInformadores" class="crm-workspace-view hidden">
+                <div class="form-card">
+                  <div class="section-head">
+                    <div>
+                      <h3>Informadores</h3>
+                      <p class="muted">Contactos que alimentan captaciones (perfil Informador).</p>
+                    </div>
+                    <button type="button" class="secondary" id="crmInformadoresCrear">Crear informador</button>
+                  </div>
+                  <div class="inline-row">
+                    <input id="crmInformadoresSearch" placeholder="Buscar por nombre, teléfono, email..." />
+                  </div>
+                  <div id="crmInformadoresTable"></div>
+                  <div class="footer" id="crmInformadoresInfo"></div>
+                </div>
+              </div>
+              <div id="crmViewEdificios" class="crm-workspace-view hidden">
+                <div class="form-card">
+                  <div class="section-head">
+                    <div>
+                      <h3>Edificios y complejos</h3>
+                      <p class="muted">Agrupaciones de inmuebles (listados de Edificios/Complejos).</p>
+                    </div>
+                    <select id="crmEdificiosTipoFilter">
+                      <option value="">Todos</option>
+                      <option value="edificios">Edificios</option>
+                      <option value="complejos">Complejos</option>
+                    </select>
+                  </div>
+                  <div class="inline-row">
+                    <input id="crmEdificiosSearch" placeholder="Buscar por inmueble, zona, responsable..." />
+                  </div>
+                  <div id="crmEdificiosTable"></div>
+                  <div class="footer" id="crmEdificiosInfo"></div>
                 </div>
               </div>
               <div id="crmViewLegal" class="crm-workspace-view hidden">
@@ -2442,6 +2587,12 @@
             </div>
             <div id="inmuebleTabDemandas" class="hidden">
               <div class="form-card">
+                <h3>Iteración con compradores</h3>
+                <p class="muted">Lista operativa de compradores para este inmueble (contacto, próxima acción, notas).</p>
+                <div id="inmuebleCompradoresTable"></div>
+                <div class="footer" id="inmuebleCompradoresInfo"></div>
+              </div>
+              <div class="form-card">
                 <h3>Demandas compatibles</h3>
                 <div id="inmuebleDemandasTable"></div>
               </div>
@@ -2575,6 +2726,26 @@
                   <label>
                     Hora
                     <input name="hora" type="time" />
+                  </label>
+                  <label>
+                    Hora fin
+                    <input name="hora_fin" type="time" />
+                  </label>
+                  <label class="span-2">
+                    Asunto
+                    <input name="asunto" placeholder="Ej. Llamada de seguimiento / Cita adquisición" />
+                  </label>
+                  <label>
+                    Modalidad contacto
+                    <select name="modalidad_contacto">
+                      <option value=""></option>
+                      <option>Contacto directo</option>
+                      <option>Llamada</option>
+                      <option>WhatsApp</option>
+                      <option>Email</option>
+                      <option>Visita</option>
+                      <option>Otro</option>
+                    </select>
                   </label>
                   <label>
                     Tipo
@@ -4358,6 +4529,14 @@
               <form id="captacionForm">
                 <div class="form-grid inmo-grid">
                   <label>
+                    Focalización
+                    <input name="focalizacion" />
+                  </label>
+                  <label>
+                    Responsable
+                    <input name="responsable" />
+                  </label>
+                  <label>
                     Propietario
                     <input name="propietario" required />
                   </label>
@@ -4389,6 +4568,14 @@
                       <option>Otro</option>
                     </select>
                   </label>
+                  <label>
+                    Subtipología
+                    <input name="subtipologia" placeholder="Ej. Bajo, Ático, Dúplex..." />
+                  </label>
+                  <label>
+                    Inmueble
+                    <input name="titulo" placeholder="Ej. Piso 3D / Edificio Delicias" />
+                  </label>
                   <label class="span-2">
                     Dirección
                     <div class="inline-row">
@@ -4401,8 +4588,28 @@
                     <span id="captacionCatastroStatus" class="muted"></span>
                   </label>
                   <label>
+                    Número
+                    <input name="direccion_numero" />
+                  </label>
+                  <label>
+                    Interior
+                    <input name="interior" />
+                  </label>
+                  <label>
+                    Escalera
+                    <input name="escalera" />
+                  </label>
+                  <label>
+                    Edificio
+                    <input name="edificio" />
+                  </label>
+                  <label>
                     Código postal
                     <input name="codigo_postal" />
+                  </label>
+                  <label>
+                    Localidad
+                    <input name="localidad" />
                   </label>
                   <label>
                     Población
@@ -4425,6 +4632,10 @@
                     <input name="zona" />
                   </label>
                   <label>
+                    Informador relacionado
+                    <input name="informador_nombre" placeholder="Nombre del informador" />
+                  </label>
+                  <label>
                     m²
                     <input name="m2" type="number" step="0.01" />
                   </label>
@@ -4441,8 +4652,24 @@
                     <input name="precio_objetivo" type="number" step="0.01" />
                   </label>
                   <label>
+                    Precio encargo
+                    <input name="precio_encargo" type="number" step="0.01" />
+                  </label>
+                  <label>
                     Precio adquisición
                     <input name="precio_valoracion" type="number" step="0.01" />
+                  </label>
+                  <label>
+                    Precio pedido cliente
+                    <input name="precio_pedido_cliente" type="number" step="0.01" />
+                  </label>
+                  <label>
+                    Fecha valoración
+                    <input name="fecha_valoracion" type="date" />
+                  </label>
+                  <label>
+                    Desviación (%)
+                    <input name="desviacion_pct" type="number" step="0.01" />
                   </label>
 	                  <input name="lat" type="hidden" />
 	                  <input name="lon" type="hidden" />
@@ -4489,12 +4716,109 @@
                     </select>
                   </label>
                   <label>
+                    Noticia verificada
+                    <select name="noticia_verificada">
+                      <option value="0">No</option>
+                      <option value="1">Sí</option>
+                    </select>
+                  </label>
+                  <label>
+                    Situación ocupación
+                    <select name="situacion_ocupacion">
+                      <option value=""></option>
+                      <option>Libre</option>
+                      <option>Ocupado</option>
+                      <option>Alquilado</option>
+                    </select>
+                  </label>
+                  <label>
+                    Ocupado por
+                    <select name="ocupado_por">
+                      <option value=""></option>
+                      <option>Propietario</option>
+                      <option>Inquilino</option>
+                      <option>Familiar</option>
+                      <option>Tercero</option>
+                      <option>Desconocido</option>
+                    </select>
+                  </label>
+                  <label>
                     Probabilidad (%)
                     <input name="probabilidad" type="number" min="0" max="100" step="1" />
                   </label>
                   <label>
                     Próxima acción
                     <input name="proxima_accion" />
+                  </label>
+                  <label>
+                    Modalidad último contacto
+                    <select name="modalidad_ultimo_contacto">
+                      <option value=""></option>
+                      <option>Contacto directo</option>
+                      <option>Llamada</option>
+                      <option>WhatsApp</option>
+                      <option>Email</option>
+                      <option>Visita</option>
+                      <option>Otro</option>
+                    </select>
+                  </label>
+                  <label>
+                    Estado de contacto
+                    <input name="estado_contacto" placeholder="Ej. Gestionado, No localizado..." />
+                  </label>
+                  <label>
+                    Planificado
+                    <select name="planificado">
+                      <option value="0">No</option>
+                      <option value="1">Sí</option>
+                    </select>
+                  </label>
+                  <label>
+                    Fecha planificación
+                    <input name="fecha_planificacion" type="date" />
+                  </label>
+                  <label>
+                    No molestar
+                    <select name="no_molestar">
+                      <option value="0">No</option>
+                      <option value="1">Sí</option>
+                    </select>
+                  </label>
+                  <label>
+                    Prioridad noticia
+                    <select name="prioridad_noticia">
+                      <option value=""></option>
+                      <option>Alta</option>
+                      <option>Media</option>
+                      <option>Baja</option>
+                    </select>
+                  </label>
+                  <label>
+                    Planificación encargo
+                    <input name="planificacion_encargo" placeholder="Ej. Llamada semanal / Seguimiento quincenal" />
+                  </label>
+                  <label>
+                    Última renov./rebaja
+                    <input name="fecha_ultima_renov_rebaja" type="date" />
+                  </label>
+                  <label>
+                    Encargo competencia
+                    <select name="encargo_competencia">
+                      <option value="0">No</option>
+                      <option value="1">Sí</option>
+                    </select>
+                  </label>
+                  <label class="span-2">
+                    Necesidad venta/alquiler
+                    <input name="necesidad_venta_alquiler" />
+                  </label>
+                  <label class="span-2">
+                    Motivación
+                    <input name="motivacion" />
+                  </label>
+                  <label>
+                    Tipo procedencia
+                    <input name="tipo_procedencia" />
                   </label>
                   <label>
                     Fecha contacto
@@ -4689,6 +5013,14 @@
               <form id="demandaForm">
                 <div class="form-grid">
                   <label>
+                    Focalización
+                    <input name="focalizacion" />
+                  </label>
+                  <label>
+                    Pedido
+                    <input name="pedido" placeholder="Código o referencia interna" />
+                  </label>
+                  <label>
                     Cliente
                     <select id="demandaCliente" name="cliente_id"></select>
                   </label>
@@ -4716,8 +5048,25 @@
                     </select>
                   </label>
                   <label>
+                    Fase
+                    <select name="fase">
+                      <option value=""></option>
+                      <option>Gestión</option>
+                      <option>Visita</option>
+                      <option>Negociaciones avanzadas</option>
+                    </select>
+                  </label>
+                  <label>
                     Zona
                     <input name="zona" />
+                  </label>
+                  <label>
+                    Tipología
+                    <input name="tipologia" />
+                  </label>
+                  <label>
+                    Subtipología
+                    <input name="subtipologia" />
                   </label>
                   <label>
                     Precio máximo
@@ -4750,6 +5099,67 @@
                       <option>Alta</option>
                       <option>Baja</option>
                     </select>
+                  </label>
+                  <label>
+                    Motivo
+                    <input name="motivo" />
+                  </label>
+                  <label>
+                    Agencia inserción
+                    <input name="agencia_insercion" />
+                  </label>
+                  <label>
+                    Origen
+                    <input name="origen" />
+                  </label>
+                  <label>
+                    Pedido web
+                    <select name="pedido_web">
+                      <option value="0">No</option>
+                      <option value="1">Sí</option>
+                    </select>
+                  </label>
+                  <label>
+                    Anuncio de mi cartera
+                    <select name="anuncio_mi_cartera">
+                      <option value="0">No</option>
+                      <option value="1">Sí</option>
+                    </select>
+                  </label>
+                  <label>
+                    Presentación del servicio
+                    <select name="presentacion_servicio">
+                      <option value="0">No</option>
+                      <option value="1">Sí</option>
+                    </select>
+                  </label>
+                  <label>
+                    Fecha inserción
+                    <input name="fecha_insercion" type="date" />
+                  </label>
+                  <label>
+                    Motivo último contacto
+                    <input name="motivo_ultimo_contacto" />
+                  </label>
+                  <label>
+                    Fecha último contacto interno
+                    <input name="fecha_ultimo_contacto_interno" type="date" />
+                  </label>
+                  <label>
+                    Fecha próx. act./cita
+                    <input name="fecha_prox_act_cita" type="date" />
+                  </label>
+                  <label>
+                    Fecha última cita venta red
+                    <input name="fecha_ultima_cita_venta_red" type="date" />
+                  </label>
+                  <label>
+                    Estado de contacto
+                    <input name="estado_contacto" />
+                  </label>
+                  <label>
+                    Responsable
+                    <input name="responsable" />
                   </label>
                   <label>
                     Notas
@@ -4798,8 +5208,62 @@
                   <input name="telefono" />
                 </label>
                 <label>
+                  Móvil
+                  <input name="movil" />
+                </label>
+                <label>
+                  Otro teléfono
+                  <input name="otro_telefono" />
+                </label>
+                <label>
                   Email
                   <input name="email" type="email" />
+                </label>
+                <label>
+                  Id. personal
+                  <input name="id_personal" />
+                </label>
+                <label>
+                  Cliente genérico web
+                  <select name="cliente_generico_web">
+                    <option value="0">No</option>
+                    <option value="1">Sí</option>
+                  </select>
+                </label>
+                <label>
+                  Tiene pedido
+                  <select name="tiene_pedido">
+                    <option value="0">No</option>
+                    <option value="1">Sí</option>
+                  </select>
+                </label>
+                <label>
+                  Viabilidad
+                  <select name="viabilidad">
+                    <option value=""></option>
+                    <option>Alta</option>
+                    <option>Media</option>
+                    <option>Baja</option>
+                  </select>
+                </label>
+                <label>
+                  Fecha estudio
+                  <input name="fecha_estudio" type="date" />
+                </label>
+                <label>
+                  Valor máximo de piso
+                  <input name="valor_maximo_piso" type="number" step="0.01" />
+                </label>
+                <label>
+                  Perfil Kiron
+                  <input name="perfil_kiron" />
+                </label>
+                <label>
+                  Estudio VIP
+                  <select name="estudio_vip">
+                    <option value="0">No</option>
+                    <option value="1">Sí</option>
+                  </select>
                 </label>
                 <label>
                   Fecha nacimiento
@@ -4810,8 +5274,16 @@
                   <input name="direccion" />
                 </label>
                 <label>
+                  Número
+                  <input name="direccion_numero" />
+                </label>
+                <label>
                   Código postal
                   <input name="codigo_postal" />
+                </label>
+                <label>
+                  Localidad
+                  <input name="localidad" />
                 </label>
                 <label>
                   Población
@@ -4820,6 +5292,27 @@
                 <label>
                   Provincia
                   <input name="provincia" />
+                </label>
+                <label>
+                  Perfil
+                  <select name="perfil">
+                    <option value=""></option>
+                    <option>Particular</option>
+                    <option>Comprador</option>
+                    <option>Vendedor</option>
+                    <option>Inquilino</option>
+                    <option>Arrendador</option>
+                    <option>Informador</option>
+                    <option>Autónomo</option>
+                    <option>Empresa</option>
+                    <option>Comunidad</option>
+                    <option>Promotor</option>
+                    <option>Inversor</option>
+                  </select>
+                </label>
+                <label>
+                  Estado
+                  <input name="estado" />
                 </label>
               </div>
               <div class="form-actions">

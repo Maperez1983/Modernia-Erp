@@ -1797,6 +1797,52 @@ def parse_money_value(value):
         return 0.0
 
 
+def parse_optional_float(value):
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value).strip()
+    if not text:
+        return None
+    text = text.replace(".", "").replace(",", ".")
+    text = re.sub(r"[^0-9.\-]+", "", text)
+    if not text or text in ("-", "."):
+        return None
+    try:
+        return float(text)
+    except ValueError:
+        return None
+
+
+def parse_optional_int(value):
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return 1 if value else 0
+    if isinstance(value, int):
+        return int(value)
+    if isinstance(value, float):
+        return int(value)
+    text = str(value).strip()
+    if not text:
+        return None
+    text = re.sub(r"[^0-9\-]+", "", text)
+    if not text or text == "-":
+        return None
+    try:
+        return int(text)
+    except ValueError:
+        return None
+
+
+def parse_boolish(value):
+    raw = str(value or "").strip().lower()
+    if not raw:
+        return 0
+    return 1 if raw in {"1", "true", "yes", "si", "sí", "on"} else 0
+
+
 MALAGA_BONUS_OFFICES = {
     "MODERNIA NORTE",
     "MODERNIA OESTE",
@@ -10394,13 +10440,17 @@ def sync_inmueble_stage_for_action(conn, inmueble_id, destino, now):
         return
     captacion = ensure_captacion_for_inmueble(conn, inmueble["empresa_id"], inmueble_id, now)
     if captacion:
+        extra_set = ""
+        extra_vals = []
+        if destino_label == "Encargo":
+            extra_set = ", noticia_verificada = 1"
         conn.execute(
             """
             UPDATE captaciones
-            SET etapa = ?, situacion_comercial = ?, updated_at = datetime(?)
+            SET etapa = ?, situacion_comercial = ?""" + extra_set + """, updated_at = datetime(?)
             WHERE id = ?
             """,
-            (destino_label, destino_label, now, captacion["id"]),
+            (destino_label, destino_label, *extra_vals, now, captacion["id"]),
         )
     conn.execute(
         """
@@ -10423,6 +10473,178 @@ def sync_inmueble_stage_for_action(conn, inmueble_id, destino, now):
         detalles={"destino": destino_label, "origen": "workflow"},
         now=now,
     )
+    try:
+        resp_row = conn.execute(
+            """
+            SELECT
+              COALESCE(
+                NULLIF(TRIM(c.asesor), ''),
+                NULLIF(TRIM(c.responsable), ''),
+                NULLIF(TRIM(i.asesor), ''),
+                NULLIF(TRIM(i.responsable), ''),
+                ''
+              ) AS responsable
+            FROM inmuebles i
+            LEFT JOIN captaciones c ON c.inmueble_id = i.id
+            WHERE i.id = ?
+            ORDER BY COALESCE(NULLIF(c.updated_at, ''), c.created_at) DESC
+            LIMIT 1
+            """,
+            (inmueble_id,),
+        ).fetchone()
+        responsable = str((resp_row["responsable"] if resp_row else "") or "").strip()
+    except Exception:
+        responsable = ""
+    try:
+        ensure_inmueble_checklist_defaults_if_empty(conn, inmueble_id, destino_label, now, responsable=responsable)
+    except Exception:
+        pass
+    try:
+        ensure_pending_inmueble_stage_actions(conn, str(inmueble["empresa_id"] or "").strip(), inmueble_id, destino_label, now, responsable=responsable)
+    except Exception:
+        pass
+
+
+INMO_STAGE_CHECKLISTS = {
+    "Noticia": [
+        "Registrar lead y origen",
+        "Verificar datos del propietario",
+        "Primera llamada de contacto",
+        "Calificar interés",
+    ],
+    "Adquisición": [
+        "Agendar cita de adquisición",
+        "Enviar dossier inicial",
+        "Confirmar documentación básica",
+        "Recoger datos registrales",
+    ],
+    "Encargo": [
+        "Firmar encargo",
+        "Subir documentación",
+        "Preparar anuncio",
+        "Solicitar nota simple",
+        "Verificar referencia catastral",
+    ],
+    "Reservado": [
+        "Subir reserva firmada",
+        "Confirmar señal entregada",
+        "Bloquear comercialización",
+        "Coordinar siguiente hito con las partes",
+    ],
+    "Vendido": [
+        "Subir escritura pública",
+        "Cerrar expediente documental",
+        "Comunicar cierre al propietario",
+    ],
+    "Cerrado negativamente": [
+        "Registrar motivo pérdida",
+        "Cerrar expediente",
+        "Programar seguimiento futuro",
+    ],
+    "Alquiler": [
+        "Formalizar contrato de alquiler",
+        "Subir documentación del arrendamiento",
+        "Cerrar seguimiento comercial",
+    ],
+}
+
+
+def ensure_inmueble_checklist_defaults_if_empty(conn, inmueble_id, etapa, now, responsable=""):
+    if not inmueble_id or not etapa:
+        return False
+    tareas = INMO_STAGE_CHECKLISTS.get(etapa) or []
+    if not tareas:
+        return False
+    existing = conn.execute(
+        "SELECT COUNT(*) AS n FROM inmueble_checklist WHERE inmueble_id = ? AND etapa = ?",
+        (inmueble_id, etapa),
+    ).fetchone()
+    if existing and int(existing["n"] or 0) > 0:
+        return False
+    for tarea in tareas:
+        conn.execute(
+            """
+            INSERT INTO inmueble_checklist (
+              id, inmueble_id, etapa, tarea, estado, responsable, fecha_limite, created_at, updated_at
+            ) VALUES (
+              ?, ?, ?, ?, 'Pendiente', ?, NULL, datetime(?), datetime(?)
+            )
+            """,
+            (os.urandom(16).hex(), inmueble_id, etapa, tarea, responsable or "", now, now),
+        )
+    audit_event(
+        conn,
+        None,
+        "inmueble_checklist",
+        inmueble_id,
+        f"Auto-checklist {etapa}",
+        detalles={"etapa": etapa, "origen": "auto"},
+        now=now,
+    )
+    return True
+
+
+def ensure_pending_inmueble_stage_actions(conn, empresa_id, inmueble_id, etapa, now, responsable=""):
+    if not empresa_id or not inmueble_id or not etapa:
+        return False
+    defaults = {
+        "Noticia": [("Llamada", "Primera llamada de contacto")],
+        "Encargo": [("Seguimiento", "Firmar encargo"), ("Seguimiento", "Preparar anuncio")],
+        "Reservado": [("Seguimiento", "Subir reserva firmada")],
+        "Vendido": [("Seguimiento", "Subir escritura pública")],
+        "Alquiler": [("Seguimiento", "Formalizar contrato de alquiler")],
+        "Cerrado negativamente": [("Seguimiento", "Registrar motivo pérdida")],
+    }.get(etapa)
+    if not defaults:
+        return False
+    created_any = False
+    for tipo, asunto in defaults:
+        exists = conn.execute(
+            """
+            SELECT id
+            FROM acciones
+            WHERE empresa_id = ?
+              AND servicio = 'inmobiliaria'
+              AND inmueble_id = ?
+              AND LOWER(COALESCE(estado, '')) = 'pendiente'
+              AND COALESCE(tipo, '') = ?
+              AND COALESCE(asunto, '') = ?
+            LIMIT 1
+            """,
+            (empresa_id, inmueble_id, tipo, asunto),
+        ).fetchone()
+        if exists:
+            continue
+        action_id = os.urandom(16).hex()
+        conn.execute(
+            """
+            INSERT INTO acciones (
+              id, empresa_id, servicio, cliente_id, inmueble_id, asesoramiento_id, cliente_nombre,
+              fecha, hora, hora_fin, asunto, tipo, modalidad_contacto, responsable, estado,
+              resultado_cierre, estado_siguiente, documento_tipo, importe_propuesta, notas, recordatorio_min,
+              related_id, related_tipo,
+              created_at, updated_at
+            ) VALUES (
+              ?, ?, 'inmobiliaria', NULL, ?, NULL, NULL,
+              date('now','localtime'), '10:00', NULL, ?, ?, NULL, ?, 'Pendiente',
+              NULL, NULL, NULL, NULL, NULL, NULL,
+              NULL, NULL,
+              datetime(?), datetime(?)
+            )
+            """,
+            (action_id, empresa_id, inmueble_id, asunto, tipo, responsable or "", now, now),
+        )
+        created_any = True
+        audit_event(
+            conn,
+            empresa_id,
+            "accion",
+            action_id,
+            "Auto-acción por etapa",
+            detalles={"etapa": etapa, "tipo": tipo, "asunto": asunto, "origen": "auto"},
+            now=now,
+        )
+    return created_any
 
 
 def normalize_inmo_action_type(value):
@@ -15292,6 +15514,10 @@ def ensure_tables(db_path):
         "provincia": "provincia TEXT",
         "situacion_comercial": "situacion_comercial TEXT",
         "fecha_conversion": "fecha_conversion TEXT",
+        # TecnoCloud-style fields (zona/priorización).
+        "situacion_ocupacion": "situacion_ocupacion TEXT",
+        "ocupado_por": "ocupado_por TEXT",
+        "noticia_verificada": "noticia_verificada INTEGER NOT NULL DEFAULT 0",
     }.items():
         try:
             ensure_column(conn, "captaciones", col_name, col_sql)
@@ -15303,11 +15529,39 @@ def ensure_tables(db_path):
         "poblacion": "poblacion TEXT",
         "provincia": "provincia TEXT",
         "asesor": "asesor TEXT",
+        "ocupado_por": "ocupado_por TEXT",
     }.items():
         try:
             ensure_column(conn, "inmuebles", col_name, col_sql)
         except Exception:
             pass
+    # Best-effort backfill: keep captaciones aligned with inmuebles for zona/prioridades.
+    try:
+        conn.execute(
+            """
+            UPDATE captaciones
+            SET situacion_ocupacion = (
+              SELECT i.situacion_ocupacion FROM inmuebles i WHERE i.id = captaciones.inmueble_id LIMIT 1
+            )
+            WHERE (situacion_ocupacion IS NULL OR TRIM(situacion_ocupacion) = '')
+              AND inmueble_id IS NOT NULL
+            """
+        )
+    except Exception:
+        pass
+    try:
+        conn.execute(
+            """
+            UPDATE captaciones
+            SET ocupado_por = (
+              SELECT i.ocupado_por FROM inmuebles i WHERE i.id = captaciones.inmueble_id LIMIT 1
+            )
+            WHERE (ocupado_por IS NULL OR TRIM(ocupado_por) = '')
+              AND inmueble_id IS NOT NULL
+            """
+        )
+    except Exception:
+        pass
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS operaciones_inmobiliarias (
@@ -15904,6 +16158,19 @@ def ensure_tables(db_path):
     ensure_column(conn, "clientes", "codigo_postal", "codigo_postal TEXT")
     ensure_column(conn, "clientes", "poblacion", "poblacion TEXT")
     ensure_column(conn, "clientes", "provincia", "provincia TEXT")
+    # CRM inmobiliaria: campos Tecnocloud (clientes/informadores).
+    ensure_column(conn, "clientes", "movil", "movil TEXT")
+    ensure_column(conn, "clientes", "otro_telefono", "otro_telefono TEXT")
+    ensure_column(conn, "clientes", "direccion_numero", "direccion_numero TEXT")
+    ensure_column(conn, "clientes", "localidad", "localidad TEXT")
+    ensure_column(conn, "clientes", "id_personal", "id_personal TEXT")
+    ensure_column(conn, "clientes", "cliente_generico_web", "cliente_generico_web INTEGER NOT NULL DEFAULT 0")
+    ensure_column(conn, "clientes", "tiene_pedido", "tiene_pedido INTEGER NOT NULL DEFAULT 0")
+    ensure_column(conn, "clientes", "viabilidad", "viabilidad TEXT")
+    ensure_column(conn, "clientes", "fecha_estudio", "fecha_estudio TEXT")
+    ensure_column(conn, "clientes", "valor_maximo_piso", "valor_maximo_piso REAL")
+    ensure_column(conn, "clientes", "perfil_kiron", "perfil_kiron TEXT")
+    ensure_column(conn, "clientes", "estudio_vip", "estudio_vip INTEGER NOT NULL DEFAULT 0")
     ensure_column(conn, "gestoria_modelos", "responsable", "responsable TEXT")
     ensure_column(conn, "gestoria_trabajos", "responsable", "responsable TEXT")
     ensure_column(conn, "gestoria_trabajos", "sla_dias", "sla_dias INTEGER")
@@ -15915,6 +16182,11 @@ def ensure_tables(db_path):
     ensure_column(conn, "acciones", "estado_siguiente", "estado_siguiente TEXT")
     ensure_column(conn, "acciones", "documento_tipo", "documento_tipo TEXT")
     ensure_column(conn, "acciones", "importe_propuesta", "importe_propuesta REAL")
+    ensure_column(conn, "acciones", "hora_fin", "hora_fin TEXT")
+    ensure_column(conn, "acciones", "asunto", "asunto TEXT")
+    ensure_column(conn, "acciones", "modalidad_contacto", "modalidad_contacto TEXT")
+    ensure_column(conn, "acciones", "related_id", "related_id TEXT")
+    ensure_column(conn, "acciones", "related_tipo", "related_tipo TEXT")
     ensure_column(conn, "inmueble_docs", "estado", "estado TEXT NOT NULL DEFAULT 'Vigente'")
     ensure_column(conn, "inmueble_docs", "version", "version INTEGER NOT NULL DEFAULT 1")
     ensure_column(conn, "inmueble_docs", "plantilla_clave", "plantilla_clave TEXT")
@@ -15997,8 +16269,105 @@ def ensure_tables(db_path):
     ensure_column(conn, "inmuebles", "valor_referencia", "valor_referencia REAL")
     ensure_column(conn, "inmuebles", "honorarios", "honorarios REAL")
     ensure_column(conn, "inmuebles", "situacion_ocupacion", "situacion_ocupacion TEXT")
+    ensure_column(conn, "inmuebles", "ocupado_por", "ocupado_por TEXT")
     ensure_column(conn, "inmuebles", "anio_construccion", "anio_construccion INTEGER")
     ensure_column(conn, "captaciones", "anio_construccion", "anio_construccion INTEGER")
+    # CRM inmobiliaria: campos Tecnocloud (inmuebles/captaciones/pedidos).
+    for col_name, col_sql in {
+        "titulo": "titulo TEXT",
+        "direccion_numero": "direccion_numero TEXT",
+        "interior": "interior TEXT",
+        "escalera": "escalera TEXT",
+        "edificio": "edificio TEXT",
+        "localidad": "localidad TEXT",
+        "focalizacion": "focalizacion TEXT",
+        "subtipologia": "subtipologia TEXT",
+        "responsable": "responsable TEXT",
+        "descripcion": "descripcion TEXT",
+        "categoria": "categoria TEXT",
+        "anio_reforma": "anio_reforma INTEGER",
+        "propietario_telefono": "propietario_telefono TEXT",
+        "propietario_email": "propietario_email TEXT",
+        "precio_encargo": "precio_encargo REAL",
+        "precio_pedido_cliente": "precio_pedido_cliente REAL",
+        "fecha_valoracion": "fecha_valoracion TEXT",
+        "desviacion_pct": "desviacion_pct REAL",
+        "planificacion_encargo": "planificacion_encargo TEXT",
+        "fecha_ultima_renov_rebaja": "fecha_ultima_renov_rebaja TEXT",
+        "informador_id": "informador_id TEXT",
+        "informador_nombre": "informador_nombre TEXT",
+        "estado_inmueble": "estado_inmueble TEXT",
+        "potencial_adquisicion": "potencial_adquisicion TEXT",
+        "propietario_localizado": "propietario_localizado INTEGER NOT NULL DEFAULT 0",
+        "fecha_primer_contacto": "fecha_primer_contacto TEXT",
+        "ultima_fecha_contacto": "ultima_fecha_contacto TEXT",
+        "modalidad_ultimo_contacto": "modalidad_ultimo_contacto TEXT",
+        "estado_contacto": "estado_contacto TEXT",
+        "no_molestar": "no_molestar INTEGER NOT NULL DEFAULT 0",
+        "planificado": "planificado INTEGER NOT NULL DEFAULT 0",
+        "fecha_planificacion": "fecha_planificacion TEXT",
+        "con_inquilino": "con_inquilino INTEGER NOT NULL DEFAULT 0",
+    }.items():
+        try:
+            ensure_column(conn, "inmuebles", col_name, col_sql)
+        except Exception:
+            pass
+    for col_name, col_sql in {
+        "focalizacion": "focalizacion TEXT",
+        "subtipologia": "subtipologia TEXT",
+        "direccion_numero": "direccion_numero TEXT",
+        "interior": "interior TEXT",
+        "escalera": "escalera TEXT",
+        "edificio": "edificio TEXT",
+        "localidad": "localidad TEXT",
+        "propietario_telefono": "propietario_telefono TEXT",
+        "propietario_email": "propietario_email TEXT",
+        "motivacion": "motivacion TEXT",
+        "necesidad_venta_alquiler": "necesidad_venta_alquiler TEXT",
+        "tipo_procedencia": "tipo_procedencia TEXT",
+        "precio_encargo": "precio_encargo REAL",
+        "precio_pedido_cliente": "precio_pedido_cliente REAL",
+        "fecha_valoracion": "fecha_valoracion TEXT",
+        "desviacion_pct": "desviacion_pct REAL",
+        "modalidad_ultimo_contacto": "modalidad_ultimo_contacto TEXT",
+        "estado_contacto": "estado_contacto TEXT",
+        "no_molestar": "no_molestar INTEGER NOT NULL DEFAULT 0",
+        "planificado": "planificado INTEGER NOT NULL DEFAULT 0",
+        "fecha_planificacion": "fecha_planificacion TEXT",
+        "planificacion_encargo": "planificacion_encargo TEXT",
+        "fecha_ultima_renov_rebaja": "fecha_ultima_renov_rebaja TEXT",
+        "prioridad_noticia": "prioridad_noticia TEXT",
+        "encargo_competencia": "encargo_competencia INTEGER NOT NULL DEFAULT 0",
+        "responsable": "responsable TEXT",
+    }.items():
+        try:
+            ensure_column(conn, "captaciones", col_name, col_sql)
+        except Exception:
+            pass
+    for col_name, col_sql in {
+        "focalizacion": "focalizacion TEXT",
+        "pedido": "pedido TEXT",
+        "tipologia": "tipologia TEXT",
+        "subtipologia": "subtipologia TEXT",
+        "fase": "fase TEXT",
+        "motivo": "motivo TEXT",
+        "agencia_insercion": "agencia_insercion TEXT",
+        "origen": "origen TEXT",
+        "pedido_web": "pedido_web INTEGER NOT NULL DEFAULT 0",
+        "anuncio_mi_cartera": "anuncio_mi_cartera INTEGER NOT NULL DEFAULT 0",
+        "presentacion_servicio": "presentacion_servicio INTEGER NOT NULL DEFAULT 0",
+        "fecha_insercion": "fecha_insercion TEXT",
+        "motivo_ultimo_contacto": "motivo_ultimo_contacto TEXT",
+        "fecha_ultimo_contacto_interno": "fecha_ultimo_contacto_interno TEXT",
+        "fecha_prox_act_cita": "fecha_prox_act_cita TEXT",
+        "fecha_ultima_cita_venta_red": "fecha_ultima_cita_venta_red TEXT",
+        "estado_contacto": "estado_contacto TEXT",
+        "responsable": "responsable TEXT",
+    }.items():
+        try:
+            ensure_column(conn, "demandas", col_name, col_sql)
+        except Exception:
+            pass
     ensure_column(conn, "gestoria_contabilidad", "gestion", "gestion TEXT")
     ensure_column(conn, "gestoria_contabilidad", "seguro_id", "seguro_id TEXT")
     ensure_column(conn, "gestoria_contabilidad", "hipoteca_id", "hipoteca_id TEXT")
@@ -23255,6 +23624,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/inmueble_catastro_lookup",
             "/api/inmueble_update",
             "/api/inmueble_delete",
+            "/api/inmueble_compradores",
             "/api/inmueble_propietarios_update",
             "/api/inmueble_docs",
             "/api/inmueble_checklist_generate",
@@ -23505,6 +23875,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/clientes_link_delete",
             "/api/inmueble_update",
             "/api/inmueble_delete",
+            "/api/inmueble_compradores",
             "/api/inmueble_propietarios_update",
             "/api/captacion_update",
             "/api/captacion_delete",
@@ -32069,39 +32440,86 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 inmueble_id = os.urandom(16).hex()
                 captacion_id = os.urandom(16).hex()
+                etapa_value = (payload.get("etapa") or "").strip() or "Noticia"
                 conn.execute(
                     """
                     INSERT INTO inmuebles (
-                      id, empresa_id, referencia, referencia_catastral, direccion, codigo_postal, poblacion, provincia, zona, tipo_inmueble,
-                      m2, anio_construccion, habitaciones, banos, precio_objetivo, precio_valoracion,
-                      valor_referencia, honorarios, situacion_ocupacion, estado, lat, lon, created_at, updated_at
+                      id, empresa_id, referencia, titulo, referencia_catastral, direccion, direccion_numero, interior, escalera, edificio,
+                      codigo_postal, localidad, poblacion, provincia, zona, focalizacion, tipo_inmueble, subtipologia,
+                      m2, anio_construccion, anio_reforma, habitaciones, banos, precio_objetivo, precio_encargo, precio_valoracion,
+                      precio_pedido_cliente, fecha_valoracion, desviacion_pct,
+                      valor_referencia, honorarios, asesor, responsable, descripcion,
+                      categoria,
+                      situacion_ocupacion, ocupado_por,
+                      propietario_telefono, propietario_email,
+                      informador_id, informador_nombre,
+                      estado_inmueble, potencial_adquisicion, propietario_localizado,
+                      fecha_primer_contacto, ultima_fecha_contacto, modalidad_ultimo_contacto, estado_contacto,
+                      no_molestar, planificado, fecha_planificacion, con_inquilino,
+                      planificacion_encargo, fecha_ultima_renov_rebaja,
+                      estado, lat, lon, created_at, updated_at
                     ) VALUES (
-                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
                     )
                     """,
                     (
                         inmueble_id,
                         empresa["id"],
                         payload.get("referencia"),
+                        payload.get("titulo"),
                         payload.get("referencia_catastral"),
                         payload.get("direccion"),
+                        payload.get("direccion_numero"),
+                        payload.get("interior"),
+                        payload.get("escalera"),
+                        payload.get("edificio"),
                         payload.get("codigo_postal"),
+                        payload.get("localidad"),
                         payload.get("poblacion"),
                         payload.get("provincia"),
                         payload.get("zona"),
+                        payload.get("focalizacion"),
                         payload.get("tipo_inmueble"),
-                        payload.get("m2"),
-                        payload.get("anio_construccion"),
-                        payload.get("habitaciones"),
-                        payload.get("banos"),
-                        payload.get("precio_objetivo"),
-                        payload.get("precio_valoracion"),
-                        payload.get("valor_referencia"),
-                        parse_money_value(payload.get("honorarios")) or None,
+                        payload.get("subtipologia"),
+                        parse_optional_float(payload.get("m2")),
+                        parse_optional_int(payload.get("anio_construccion")),
+                        parse_optional_int(payload.get("anio_reforma")),
+                        parse_optional_int(payload.get("habitaciones")),
+                        parse_optional_int(payload.get("banos")),
+                        parse_optional_float(payload.get("precio_objetivo")),
+                        parse_optional_float(payload.get("precio_encargo")),
+                        parse_optional_float(payload.get("precio_valoracion")),
+                        parse_optional_float(payload.get("precio_pedido_cliente")),
+                        payload.get("fecha_valoracion"),
+                        parse_optional_float(payload.get("desviacion_pct")),
+                        parse_optional_float(payload.get("valor_referencia")),
+                        parse_optional_float(payload.get("honorarios")),
+                        payload.get("asesor"),
+                        payload.get("responsable"),
+                        payload.get("descripcion"),
+                        payload.get("categoria"),
                         payload.get("situacion_ocupacion"),
-                        payload.get("situacion_comercial") or payload.get("etapa") or "Noticia",
-                        payload.get("lat"),
-                        payload.get("lon"),
+                        payload.get("ocupado_por"),
+                        payload.get("propietario_telefono"),
+                        payload.get("propietario_email"),
+                        payload.get("informador_id"),
+                        payload.get("informador_nombre"),
+                        payload.get("estado_inmueble"),
+                        payload.get("potencial_adquisicion"),
+                        parse_boolish(payload.get("propietario_localizado")),
+                        payload.get("fecha_primer_contacto"),
+                        payload.get("ultima_fecha_contacto"),
+                        payload.get("modalidad_ultimo_contacto"),
+                        payload.get("estado_contacto"),
+                        parse_boolish(payload.get("no_molestar")),
+                        parse_boolish(payload.get("planificado")),
+                        payload.get("fecha_planificacion"),
+                        parse_boolish(payload.get("con_inquilino")),
+                        payload.get("planificacion_encargo"),
+                        payload.get("fecha_ultima_renov_rebaja"),
+                        payload.get("situacion_comercial") or etapa_value,
+                        parse_optional_float(payload.get("lat")),
+                        parse_optional_float(payload.get("lon")),
                         now,
                         now,
                     ),
@@ -32109,13 +32527,19 @@ class Handler(BaseHTTPRequestHandler):
                 conn.execute(
                     """
                     INSERT INTO captaciones (
-                      id, empresa_id, inmueble_id, propietario, tipo_inmueble, direccion, codigo_postal, poblacion, provincia, zona, m2,
-                      anio_construccion, habitaciones, banos, precio_objetivo, precio_valoracion, urgencia,
+                      id, empresa_id, inmueble_id, propietario, focalizacion, tipo_inmueble, subtipologia, direccion, direccion_numero, interior, escalera, edificio,
+                      codigo_postal, localidad, poblacion, provincia, zona, m2, anio_construccion, habitaciones, banos,
+                      precio_objetivo, precio_encargo, precio_valoracion, precio_pedido_cliente, fecha_valoracion, desviacion_pct,
+                      urgencia, motivo, motivacion, necesidad_venta_alquiler, canal, tipo_procedencia,
                       situacion_comercial, fecha_conversion,
-                      motivo, canal, etapa, probabilidad, proxima_accion, fecha_contacto,
-                      asesor, notas, created_at, updated_at
+                      etapa, noticia_verificada, situacion_ocupacion, ocupado_por,
+                      probabilidad, proxima_accion, fecha_contacto, modalidad_ultimo_contacto, estado_contacto,
+                      no_molestar, planificado, fecha_planificacion, prioridad_noticia, encargo_competencia,
+                      planificacion_encargo, fecha_ultima_renov_rebaja,
+                      propietario_telefono, propietario_email,
+                      asesor, responsable, notas, created_at, updated_at
                     ) VALUES (
-                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
                     )
                     """,
                     (
@@ -32123,28 +32547,57 @@ class Handler(BaseHTTPRequestHandler):
                         empresa["id"],
                         inmueble_id,
                         payload.get("propietario"),
+                        payload.get("focalizacion"),
                         payload.get("tipo_inmueble"),
+                        payload.get("subtipologia"),
                         payload.get("direccion"),
+                        payload.get("direccion_numero"),
+                        payload.get("interior"),
+                        payload.get("escalera"),
+                        payload.get("edificio"),
                         payload.get("codigo_postal"),
+                        payload.get("localidad"),
                         payload.get("poblacion"),
                         payload.get("provincia"),
                         payload.get("zona"),
-                        payload.get("m2"),
-                        payload.get("anio_construccion"),
-                        payload.get("habitaciones"),
-                        payload.get("banos"),
-                        payload.get("precio_objetivo"),
-                        payload.get("precio_valoracion"),
+                        parse_optional_float(payload.get("m2")),
+                        parse_optional_int(payload.get("anio_construccion")),
+                        parse_optional_int(payload.get("habitaciones")),
+                        parse_optional_int(payload.get("banos")),
+                        parse_optional_float(payload.get("precio_objetivo")),
+                        parse_optional_float(payload.get("precio_encargo")),
+                        parse_optional_float(payload.get("precio_valoracion")),
+                        parse_optional_float(payload.get("precio_pedido_cliente")),
+                        payload.get("fecha_valoracion"),
+                        parse_optional_float(payload.get("desviacion_pct")),
                         payload.get("urgencia"),
-                        payload.get("situacion_comercial") or payload.get("etapa") or "Noticia",
-                        None,
                         payload.get("motivo"),
+                        payload.get("motivacion"),
+                        payload.get("necesidad_venta_alquiler"),
                         payload.get("canal"),
-                        payload.get("etapa"),
-                        payload.get("probabilidad"),
+                        payload.get("tipo_procedencia"),
+                        payload.get("situacion_comercial") or etapa_value,
+                        None,
+                        etapa_value,
+                        parse_boolish(payload.get("noticia_verificada")),
+                        payload.get("situacion_ocupacion"),
+                        payload.get("ocupado_por"),
+                        parse_optional_int(payload.get("probabilidad")),
                         payload.get("proxima_accion"),
                         payload.get("fecha_contacto"),
+                        payload.get("modalidad_ultimo_contacto"),
+                        payload.get("estado_contacto"),
+                        parse_boolish(payload.get("no_molestar")),
+                        parse_boolish(payload.get("planificado")),
+                        payload.get("fecha_planificacion"),
+                        payload.get("prioridad_noticia"),
+                        parse_boolish(payload.get("encargo_competencia")),
+                        payload.get("planificacion_encargo"),
+                        payload.get("fecha_ultima_renov_rebaja"),
+                        payload.get("propietario_telefono"),
+                        payload.get("propietario_email"),
                         payload.get("asesor"),
+                        payload.get("responsable"),
                         payload.get("notas"),
                         now,
                         now,
@@ -32246,9 +32699,18 @@ class Handler(BaseHTTPRequestHandler):
                 return
             allowed = (
                 "propietario",
+                "propietario_telefono",
+                "propietario_email",
+                "focalizacion",
                 "tipo_inmueble",
+                "subtipologia",
                 "direccion",
+                "direccion_numero",
+                "interior",
+                "escalera",
+                "edificio",
                 "codigo_postal",
+                "localidad",
                 "poblacion",
                 "provincia",
                 "zona",
@@ -32257,22 +32719,56 @@ class Handler(BaseHTTPRequestHandler):
                 "habitaciones",
                 "banos",
                 "precio_objetivo",
+                "precio_encargo",
                 "precio_valoracion",
+                "precio_pedido_cliente",
+                "fecha_valoracion",
+                "desviacion_pct",
                 "urgencia",
                 "motivo",
+                "motivacion",
+                "necesidad_venta_alquiler",
                 "canal",
+                "tipo_procedencia",
                 "etapa",
                 "situacion_comercial",
+                "situacion_ocupacion",
+                "ocupado_por",
+                "noticia_verificada",
                 "probabilidad",
                 "proxima_accion",
                 "fecha_contacto",
+                "modalidad_ultimo_contacto",
+                "estado_contacto",
+                "no_molestar",
+                "planificado",
+                "fecha_planificacion",
+                "prioridad_noticia",
+                "encargo_competencia",
+                "planificacion_encargo",
+                "fecha_ultima_renov_rebaja",
                 "asesor",
+                "responsable",
                 "notas",
             )
             updates = {key: payload.get(key) for key in allowed if key in payload}
             if not updates:
                 json_response(self, {"error": "Sin cambios"}, status=400)
                 return
+            if "noticia_verificada" in updates:
+                updates["noticia_verificada"] = parse_boolish(updates.get("noticia_verificada"))
+            for key in ("no_molestar", "planificado", "encargo_competencia"):
+                if key in updates:
+                    updates[key] = parse_boolish(updates.get(key))
+            for key in ("m2", "precio_objetivo", "precio_valoracion"):
+                if key in updates:
+                    updates[key] = parse_optional_float(updates.get(key))
+            for key in ("precio_encargo", "precio_pedido_cliente", "desviacion_pct"):
+                if key in updates:
+                    updates[key] = parse_optional_float(updates.get(key))
+            for key in ("anio_construccion", "habitaciones", "banos", "probabilidad"):
+                if key in updates:
+                    updates[key] = parse_optional_int(updates.get(key))
             if "etapa" in updates and "situacion_comercial" not in updates:
                 updates["situacion_comercial"] = updates["etapa"]
             set_clause = ", ".join([f"{key} = ?" for key in updates])
@@ -32282,9 +32778,16 @@ class Handler(BaseHTTPRequestHandler):
                 values,
             )
             shared = (
+                "focalizacion",
                 "tipo_inmueble",
+                "subtipologia",
                 "direccion",
+                "direccion_numero",
+                "interior",
+                "escalera",
+                "edificio",
                 "codigo_postal",
+                "localidad",
                 "poblacion",
                 "provincia",
                 "zona",
@@ -32293,13 +32796,28 @@ class Handler(BaseHTTPRequestHandler):
                 "habitaciones",
                 "banos",
                 "precio_objetivo",
+                "precio_encargo",
                 "precio_valoracion",
+                "precio_pedido_cliente",
+                "fecha_valoracion",
+                "desviacion_pct",
+                "situacion_ocupacion",
+                "ocupado_por",
+                "responsable",
             )
             inm_updates = {key: updates[key] for key in shared if key in updates}
             if "etapa" in updates:
                 inm_updates["estado"] = updates["etapa"]
             if "situacion_comercial" in updates:
                 inm_updates["estado"] = updates["situacion_comercial"]
+            if "propietario_telefono" in updates:
+                inm_updates["propietario_telefono"] = updates["propietario_telefono"]
+            if "propietario_email" in updates:
+                inm_updates["propietario_email"] = updates["propietario_email"]
+            if "planificacion_encargo" in updates:
+                inm_updates["planificacion_encargo"] = updates["planificacion_encargo"]
+            if "fecha_ultima_renov_rebaja" in updates:
+                inm_updates["fecha_ultima_renov_rebaja"] = updates["fecha_ultima_renov_rebaja"]
             if inm_updates:
                 inm_set = ", ".join([f"{key} = ?" for key in inm_updates])
                 inm_values = list(inm_updates.values()) + [now, inmueble_id]
@@ -32439,6 +32957,20 @@ class Handler(BaseHTTPRequestHandler):
                         "UPDATE inmuebles SET estado = ?, updated_at = datetime(?) WHERE id = ?",
                         (destino_label, now, captacion["inmueble_id"]),
                     )
+                    try:
+                        responsable = str(
+                            (captacion["asesor"] or captacion["responsable"] or inmueble["asesor"] or inmueble["responsable"] or "")
+                        ).strip()
+                    except Exception:
+                        responsable = ""
+                    try:
+                        ensure_inmueble_checklist_defaults_if_empty(conn, captacion["inmueble_id"], destino_label, now, responsable=responsable)
+                    except Exception:
+                        pass
+                    try:
+                        ensure_pending_inmueble_stage_actions(conn, empresa["id"], captacion["inmueble_id"], destino_label, now, responsable=responsable)
+                    except Exception:
+                        pass
                     conn.commit()
                     json_response(self, {"ok": True, "destino": destino_label, "inmueble_id": captacion["inmueble_id"]})
                     return
@@ -32449,6 +32981,7 @@ class Handler(BaseHTTPRequestHandler):
                         "situacion_comercial": destino_label,
                         "fecha_conversion": now,
                         "etapa": "Encargo",
+                        "noticia_verificada": 1,
                     }
                     if precio_encargo is not None:
                         cap_updates["precio_objetivo"] = precio_encargo
@@ -32467,6 +33000,20 @@ class Handler(BaseHTTPRequestHandler):
                         f"UPDATE inmuebles SET {inm_set_clause}, updated_at = datetime(?) WHERE id = ?",
                         [*inm_updates.values(), now, captacion["inmueble_id"]],
                     )
+                    try:
+                        responsable = str(
+                            (captacion["asesor"] or captacion["responsable"] or inmueble["asesor"] or inmueble["responsable"] or "")
+                        ).strip()
+                    except Exception:
+                        responsable = ""
+                    try:
+                        ensure_inmueble_checklist_defaults_if_empty(conn, captacion["inmueble_id"], destino_label, now, responsable=responsable)
+                    except Exception:
+                        pass
+                    try:
+                        ensure_pending_inmueble_stage_actions(conn, empresa["id"], captacion["inmueble_id"], destino_label, now, responsable=responsable)
+                    except Exception:
+                        pass
                     conn.commit()
                     json_response(self, {"ok": True, "destino": destino_label, "inmueble_id": captacion["inmueble_id"]})
                     return
@@ -32754,6 +33301,20 @@ class Handler(BaseHTTPRequestHandler):
                     "UPDATE inmuebles SET estado = ?, updated_at = datetime(?) WHERE id = ?",
                     (destino_label, now, captacion["inmueble_id"]),
                 )
+                try:
+                    responsable = str(
+                        (captacion["asesor"] or captacion["responsable"] or inmueble["asesor"] or inmueble["responsable"] or "")
+                    ).strip()
+                except Exception:
+                    responsable = ""
+                try:
+                    ensure_inmueble_checklist_defaults_if_empty(conn, captacion["inmueble_id"], destino_label, now, responsable=responsable)
+                except Exception:
+                    pass
+                try:
+                    ensure_pending_inmueble_stage_actions(conn, empresa["id"], captacion["inmueble_id"], destino_label, now, responsable=responsable)
+                except Exception:
+                    pass
                 conn.commit()
                 json_response(self, {"ok": True, "destino": destino_label, "id": alquiler_id, "inmueble_id": captacion["inmueble_id"], "inquilino_id": inquilino_id})
                 return
@@ -32771,23 +33332,57 @@ class Handler(BaseHTTPRequestHandler):
                 return
             allowed = (
                 "referencia",
+                "titulo",
                 "referencia_catastral",
                 "direccion",
+                "direccion_numero",
+                "interior",
+                "escalera",
+                "edificio",
                 "codigo_postal",
+                "localidad",
                 "poblacion",
                 "provincia",
                 "zona",
+                "focalizacion",
                 "tipo_inmueble",
+                "subtipologia",
                 "m2",
                 "anio_construccion",
+                "anio_reforma",
                 "habitaciones",
                 "banos",
                 "precio_objetivo",
+                "precio_encargo",
                 "precio_valoracion",
+                "precio_pedido_cliente",
+                "fecha_valoracion",
+                "desviacion_pct",
                 "valor_referencia",
                 "honorarios",
                 "asesor",
+                "responsable",
+                "descripcion",
+                "categoria",
                 "situacion_ocupacion",
+                "ocupado_por",
+                "propietario_telefono",
+                "propietario_email",
+                "informador_id",
+                "informador_nombre",
+                "estado_inmueble",
+                "potencial_adquisicion",
+                "propietario_localizado",
+                "fecha_primer_contacto",
+                "ultima_fecha_contacto",
+                "modalidad_ultimo_contacto",
+                "estado_contacto",
+                "no_molestar",
+                "planificado",
+                "fecha_planificacion",
+                "con_inquilino",
+                "planificacion_encargo",
+                "fecha_ultima_renov_rebaja",
                 "estado",
                 "lat",
                 "lon",
@@ -32798,7 +33393,19 @@ class Handler(BaseHTTPRequestHandler):
                 return
             for money_key in ("precio_objetivo", "precio_valoracion", "valor_referencia", "honorarios"):
                 if money_key in updates:
-                    updates[money_key] = parse_money_value(updates[money_key]) if updates[money_key] not in (None, "") else None
+                    updates[money_key] = parse_optional_float(updates[money_key])
+            for float_key in ("m2", "lat", "lon"):
+                if float_key in updates:
+                    updates[float_key] = parse_optional_float(updates[float_key])
+            for int_key in ("anio_construccion", "anio_reforma", "habitaciones", "banos"):
+                if int_key in updates:
+                    updates[int_key] = parse_optional_int(updates[int_key])
+            for float_key in ("precio_encargo", "precio_pedido_cliente", "desviacion_pct"):
+                if float_key in updates:
+                    updates[float_key] = parse_optional_float(updates[float_key])
+            for bool_key in ("propietario_localizado", "no_molestar", "planificado", "con_inquilino"):
+                if bool_key in updates:
+                    updates[bool_key] = parse_boolish(updates[bool_key])
             set_clause = ", ".join([f"{key} = ?" for key in updates])
             values = list(updates.values()) + [now, inmueble_id]
             conn.execute(
@@ -32806,9 +33413,16 @@ class Handler(BaseHTTPRequestHandler):
                 values,
             )
             shared = (
+                "focalizacion",
                 "tipo_inmueble",
+                "subtipologia",
                 "direccion",
+                "direccion_numero",
+                "interior",
+                "escalera",
+                "edificio",
                 "codigo_postal",
+                "localidad",
                 "poblacion",
                 "provincia",
                 "zona",
@@ -32817,12 +33431,27 @@ class Handler(BaseHTTPRequestHandler):
                 "habitaciones",
                 "banos",
                 "precio_objetivo",
+                "precio_encargo",
                 "precio_valoracion",
+                "precio_pedido_cliente",
+                "fecha_valoracion",
+                "desviacion_pct",
                 "asesor",
+                "situacion_ocupacion",
+                "ocupado_por",
+                "responsable",
             )
             cap_updates = {key: updates[key] for key in shared if key in updates}
             if "estado" in updates:
                 cap_updates["situacion_comercial"] = updates["estado"]
+            if "propietario_telefono" in updates:
+                cap_updates["propietario_telefono"] = updates["propietario_telefono"]
+            if "propietario_email" in updates:
+                cap_updates["propietario_email"] = updates["propietario_email"]
+            if "planificacion_encargo" in updates:
+                cap_updates["planificacion_encargo"] = updates["planificacion_encargo"]
+            if "fecha_ultima_renov_rebaja" in updates:
+                cap_updates["fecha_ultima_renov_rebaja"] = updates["fecha_ultima_renov_rebaja"]
             if cap_updates:
                 cap_set = ", ".join([f"{key} = ?" for key in cap_updates])
                 cap_values = list(cap_updates.values()) + [now, inmueble_id]
@@ -32830,6 +33459,29 @@ class Handler(BaseHTTPRequestHandler):
                     f"UPDATE captaciones SET {cap_set}, updated_at = datetime(?) WHERE inmueble_id = ?",
                     cap_values,
                 )
+            if "estado" in updates:
+                etapa_value = str(updates.get("estado") or "").strip()
+                if etapa_value:
+                    try:
+                        empresa_row = conn.execute(
+                            "SELECT empresa_id, asesor, responsable FROM inmuebles WHERE id = ? LIMIT 1",
+                            (inmueble_id,),
+                        ).fetchone()
+                        empresa_id_value = str((empresa_row["empresa_id"] if empresa_row else "") or "").strip()
+                        responsable_value = str(
+                            (empresa_row["asesor"] if empresa_row else "") or (empresa_row["responsable"] if empresa_row else "") or ""
+                        ).strip()
+                    except Exception:
+                        empresa_id_value = ""
+                        responsable_value = ""
+                    try:
+                        ensure_inmueble_checklist_defaults_if_empty(conn, inmueble_id, etapa_value, now, responsable=responsable_value)
+                    except Exception:
+                        pass
+                    try:
+                        ensure_pending_inmueble_stage_actions(conn, empresa_id_value, inmueble_id, etapa_value, now, responsable=responsable_value)
+                    except Exception:
+                        pass
         elif parsed.path == "/api/inmueble_delete":
             inmueble_id = str(payload.get("id") or payload.get("inmueble_id") or "").strip()
             if not inmueble_id:
@@ -32991,6 +33643,97 @@ class Handler(BaseHTTPRequestHandler):
             ).fetchone()
             json_response(self, {"ok": True, "cliente": dict(cliente) if cliente else {"id": cliente_id, "nombre": nombre}})
             return
+        elif parsed.path == "/api/inmueble_compradores":
+            inmueble_id = str(payload.get("inmueble_id") or "").strip()
+            demanda_id = str(payload.get("demanda_id") or "").strip()
+            if not inmueble_id or not demanda_id:
+                json_response(self, {"error": "inmueble_id y demanda_id requeridos"}, status=400)
+                return
+            remove = str(payload.get("remove") or "").strip().lower() in {"1", "true", "yes", "si", "sí"}
+            inmueble = conn.execute(
+                "SELECT id, empresa_id FROM inmuebles WHERE id = ? LIMIT 1",
+                (inmueble_id,),
+            ).fetchone()
+            if not inmueble:
+                json_response(self, {"error": "Inmueble no encontrado"}, status=404)
+                return
+            demanda = conn.execute(
+                "SELECT id, empresa_id, cliente_id FROM demandas WHERE id = ? AND empresa_id = ? LIMIT 1",
+                (demanda_id, inmueble["empresa_id"]),
+            ).fetchone()
+            if not demanda:
+                json_response(self, {"error": "Demanda no encontrada"}, status=404)
+                return
+            if remove:
+                conn.execute(
+                    "DELETE FROM inmueble_compradores WHERE inmueble_id = ? AND demanda_id = ?",
+                    (inmueble_id, demanda_id),
+                )
+                conn.commit()
+                json_response(self, {"ok": True, "removed": True})
+                return
+
+            estado = str(payload.get("estado") or "Pendiente").strip() or "Pendiente"
+            fecha_ultimo_contacto = str(payload.get("fecha_ultimo_contacto") or "").strip()
+            fecha_proxima_accion = str(payload.get("fecha_proxima_accion") or "").strip()
+            notas = str(payload.get("notas") or "").strip()
+            cliente_id_value = str(payload.get("cliente_id") or demanda["cliente_id"] or "").strip() or None
+
+            if not fecha_ultimo_contacto and normalize_lookup_text(estado) not in {"", "pendiente"}:
+                fecha_ultimo_contacto = now[:10]
+
+            existing = conn.execute(
+                "SELECT id FROM inmueble_compradores WHERE inmueble_id = ? AND demanda_id = ? LIMIT 1",
+                (inmueble_id, demanda_id),
+            ).fetchone()
+            if existing:
+                record_id = str(existing["id"] or "").strip()
+                conn.execute(
+                    """
+                    UPDATE inmueble_compradores
+                    SET cliente_id = ?, estado = ?, fecha_ultimo_contacto = ?, fecha_proxima_accion = ?, notas = ?,
+                        updated_at = datetime(?)
+                    WHERE id = ?
+                    """,
+                    (
+                        cliente_id_value,
+                        estado,
+                        fecha_ultimo_contacto or None,
+                        fecha_proxima_accion or None,
+                        notas or None,
+                        now,
+                        record_id,
+                    ),
+                )
+            else:
+                record_id = os.urandom(16).hex()
+                conn.execute(
+                    """
+                    INSERT INTO inmueble_compradores (
+                      id, empresa_id, inmueble_id, demanda_id, cliente_id, estado,
+                      fecha_ultimo_contacto, fecha_proxima_accion, notas,
+                      created_at, updated_at
+                    ) VALUES (
+                      ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                    )
+                    """,
+                    (
+                        record_id,
+                        inmueble["empresa_id"],
+                        inmueble_id,
+                        demanda_id,
+                        cliente_id_value,
+                        estado,
+                        fecha_ultimo_contacto or None,
+                        fecha_proxima_accion or None,
+                        notas or None,
+                        now,
+                        now,
+                    ),
+                )
+            conn.commit()
+            json_response(self, {"ok": True, "id": record_id})
+            return
         elif parsed.path == "/api/inmueble_docs":
             inmueble_id = payload.get("inmueble_id")
             nombre = payload.get("nombre") or ""
@@ -33047,25 +33790,49 @@ class Handler(BaseHTTPRequestHandler):
             conn.execute(
                 """
                 INSERT INTO demandas (
-                  id, empresa_id, cliente_id, tipo, zona, precio_max, m2_min,
-                  habitaciones_min, banos_min, estado, prioridad, notas,
+                  id, empresa_id, cliente_id, focalizacion, pedido, tipo, zona, tipologia, subtipologia,
+                  precio_max, m2_min, habitaciones_min, banos_min,
+                  estado, fase, prioridad,
+                  motivo, agencia_insercion, origen,
+                  pedido_web, anuncio_mi_cartera, presentacion_servicio,
+                  fecha_insercion, motivo_ultimo_contacto, fecha_ultimo_contacto_interno, fecha_prox_act_cita, fecha_ultima_cita_venta_red,
+                  estado_contacto, responsable,
+                  notas,
                   created_at, updated_at
                 ) VALUES (
-                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
                 )
                 """,
                 (
                     os.urandom(16).hex(),
                     empresa["id"],
                     cliente_id,
+                    payload.get("focalizacion"),
+                    payload.get("pedido"),
                     payload.get("tipo"),
                     payload.get("zona"),
-                    payload.get("precio_max"),
-                    payload.get("m2_min"),
-                    payload.get("habitaciones_min"),
-                    payload.get("banos_min"),
+                    payload.get("tipologia"),
+                    payload.get("subtipologia"),
+                    parse_optional_float(payload.get("precio_max")),
+                    parse_optional_float(payload.get("m2_min")),
+                    parse_optional_int(payload.get("habitaciones_min")),
+                    parse_optional_int(payload.get("banos_min")),
                     payload.get("estado"),
+                    payload.get("fase"),
                     payload.get("prioridad"),
+                    payload.get("motivo"),
+                    payload.get("agencia_insercion"),
+                    payload.get("origen"),
+                    parse_boolish(payload.get("pedido_web")),
+                    parse_boolish(payload.get("anuncio_mi_cartera")),
+                    parse_boolish(payload.get("presentacion_servicio")),
+                    payload.get("fecha_insercion"),
+                    payload.get("motivo_ultimo_contacto"),
+                    payload.get("fecha_ultimo_contacto_interno"),
+                    payload.get("fecha_prox_act_cita"),
+                    payload.get("fecha_ultima_cita_venta_red"),
+                    payload.get("estado_contacto"),
+                    payload.get("responsable"),
                     payload.get("notas"),
                     now,
                     now,
@@ -33121,10 +33888,12 @@ class Handler(BaseHTTPRequestHandler):
             conn.execute(
                 """
                 INSERT INTO clientes (
-                  id, nombre, tipo_persona, nif, telefono, email, fecha_nacimiento, direccion,
-                  codigo_postal, poblacion, provincia, tipo, perfil, estado, created_at, updated_at
+                  id, nombre, tipo_persona, nif, telefono, movil, otro_telefono, email, fecha_nacimiento,
+                  direccion, direccion_numero, codigo_postal, localidad, poblacion, provincia,
+                  id_personal, cliente_generico_web, tiene_pedido, viabilidad, fecha_estudio, valor_maximo_piso,
+                  perfil_kiron, estudio_vip, tipo, perfil, estado, created_at, updated_at
                 ) VALUES (
-                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
                 )
                 """,
                 (
@@ -33133,12 +33902,24 @@ class Handler(BaseHTTPRequestHandler):
                     payload.get("tipo_persona"),
                     payload.get("nif"),
                     payload.get("telefono"),
+                    payload.get("movil"),
+                    payload.get("otro_telefono"),
                     payload.get("email"),
                     payload.get("fecha_nacimiento"),
                     payload.get("direccion"),
+                    payload.get("direccion_numero"),
                     payload.get("codigo_postal"),
+                    payload.get("localidad"),
                     payload.get("poblacion"),
                     payload.get("provincia"),
+                    payload.get("id_personal"),
+                    parse_boolish(payload.get("cliente_generico_web")),
+                    parse_boolish(payload.get("tiene_pedido")),
+                    payload.get("viabilidad"),
+                    payload.get("fecha_estudio"),
+                    parse_optional_float(payload.get("valor_maximo_piso")),
+                    payload.get("perfil_kiron"),
+                    parse_boolish(payload.get("estudio_vip")),
                     payload.get("tipo"),
                     payload.get("perfil"),
                     payload.get("estado"),
@@ -33305,12 +34086,24 @@ class Handler(BaseHTTPRequestHandler):
                 "tipo_persona",
                 "nif",
                 "telefono",
+                "movil",
+                "otro_telefono",
                 "email",
                 "fecha_nacimiento",
                 "direccion",
+                "direccion_numero",
                 "codigo_postal",
+                "localidad",
                 "poblacion",
                 "provincia",
+                "id_personal",
+                "cliente_generico_web",
+                "tiene_pedido",
+                "viabilidad",
+                "fecha_estudio",
+                "valor_maximo_piso",
+                "perfil_kiron",
+                "estudio_vip",
                 "tipo",
                 "perfil",
                 "estado",
@@ -33319,6 +34112,11 @@ class Handler(BaseHTTPRequestHandler):
             if not updates:
                 json_response(self, {"error": "Sin cambios"}, status=400)
                 return
+            for key in ("cliente_generico_web", "tiene_pedido", "estudio_vip"):
+                if key in updates:
+                    updates[key] = parse_boolish(updates.get(key))
+            if "valor_maximo_piso" in updates:
+                updates["valor_maximo_piso"] = parse_optional_float(updates.get("valor_maximo_piso"))
             sync = {"linked": 0, "docs": 0}
             sync_warning = None
             updated = False
@@ -33751,10 +34549,12 @@ class Handler(BaseHTTPRequestHandler):
                 """
                 INSERT INTO acciones (
                   id, empresa_id, servicio, cliente_id, inmueble_id, asesoramiento_id, cliente_nombre,
-                  fecha, hora, tipo, responsable, estado, resultado_cierre, estado_siguiente,
-                  documento_tipo, importe_propuesta, notas, recordatorio_min, created_at, updated_at
+                  fecha, hora, hora_fin, asunto, tipo, modalidad_contacto, responsable, estado,
+                  resultado_cierre, estado_siguiente, documento_tipo, importe_propuesta, notas, recordatorio_min,
+                  related_id, related_tipo,
+                  created_at, updated_at
                 ) VALUES (
-                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
                 )
                 """,
                 (
@@ -33767,7 +34567,10 @@ class Handler(BaseHTTPRequestHandler):
                     payload.get("cliente_nombre"),
                     payload.get("fecha"),
                     payload.get("hora"),
+                    payload.get("hora_fin"),
+                    payload.get("asunto"),
                     tipo,
+                    payload.get("modalidad_contacto"),
                     payload.get("responsable"),
                     estado,
                     resultado_cierre or None,
@@ -33776,6 +34579,8 @@ class Handler(BaseHTTPRequestHandler):
                     parse_money_value(payload.get("importe_propuesta")) or None,
                     payload.get("notas"),
                     payload.get("recordatorio_min"),
+                    payload.get("related_id"),
+                    payload.get("related_tipo"),
                     now,
                     now,
                 ),
@@ -33839,7 +34644,10 @@ class Handler(BaseHTTPRequestHandler):
             for key in (
                 "fecha",
                 "hora",
+                "hora_fin",
+                "asunto",
                 "tipo",
+                "modalidad_contacto",
                 "responsable",
                 "estado",
                 "resultado_cierre",
@@ -33852,6 +34660,8 @@ class Handler(BaseHTTPRequestHandler):
                 "inmueble_id",
                 "asesoramiento_id",
                 "recordatorio_min",
+                "related_id",
+                "related_tipo",
             ):
                 if key in payload:
                     updates[key] = payload.get(key)
@@ -36126,11 +36936,12 @@ class Handler(BaseHTTPRequestHandler):
             rows = conn.execute(
                 """
                 SELECT
-                  a.id, a.cliente_id, a.asesoramiento_id, a.fecha, a.hora,
+                  a.id, a.cliente_id, a.asesoramiento_id, a.fecha, a.hora, a.hora_fin, a.asunto, a.modalidad_contacto,
                   COALESCE(c.nombre, a.cliente_nombre) AS cliente,
                   a.tipo, a.responsable, a.estado, a.resultado_cierre, a.estado_siguiente,
                   a.documento_tipo, a.importe_propuesta,
-                  a.notas, a.servicio, a.recordatorio_min, a.inmueble_id
+                  a.notas, a.servicio, a.recordatorio_min, a.inmueble_id,
+                  a.related_id, a.related_tipo
                 FROM acciones a
                 LEFT JOIN clientes c ON c.id = a.cliente_id
                 WHERE LOWER(a.servicio) = LOWER(?)
@@ -38672,8 +39483,12 @@ class Handler(BaseHTTPRequestHandler):
             where_clause = " AND ".join(where)
             rows = conn.execute(
                 f"""
-                SELECT d.id, d.tipo, d.zona, d.precio_max, d.m2_min,
+                SELECT d.id,
+                       d.id AS demanda_id,
+                       d.cliente_id,
+                       d.tipo, d.zona, d.precio_max, d.m2_min,
                        d.habitaciones_min, d.banos_min, d.estado,
+                       d.fase,
                        c.nombre AS cliente
                 FROM demandas d
                 LEFT JOIN clientes c ON c.id = d.cliente_id
@@ -38682,6 +39497,48 @@ class Handler(BaseHTTPRequestHandler):
                 LIMIT 100
                 """,
                 values,
+            ).fetchall()
+            json_response(self, {"rows": [dict(r) for r in rows]})
+            return
+
+        if path == "/api/inmueble_compradores":
+            inmueble_id = params.get("inmueble_id", [""])[0]
+            if not inmueble_id:
+                json_response(self, {"error": "inmueble_id requerido"}, status=400)
+                return
+            inmueble = conn.execute(
+                "SELECT id, empresa_id FROM inmuebles WHERE id = ? LIMIT 1",
+                (inmueble_id,),
+            ).fetchone()
+            if not inmueble:
+                json_response(self, {"error": "Inmueble no encontrado"}, status=404)
+                return
+            rows = conn.execute(
+                """
+                SELECT
+                  ic.id,
+                  ic.inmueble_id,
+                  ic.demanda_id,
+                  COALESCE(ic.cliente_id, d.cliente_id) AS cliente_id,
+                  ic.estado,
+                  ic.fecha_ultimo_contacto,
+                  ic.fecha_proxima_accion,
+                  ic.notas,
+                  d.tipo AS demanda_tipo,
+                  d.zona AS demanda_zona,
+                  d.fase AS demanda_fase,
+                  d.estado AS demanda_estado,
+                  c.nombre AS cliente
+                FROM inmueble_compradores ic
+                LEFT JOIN demandas d ON d.id = ic.demanda_id
+                LEFT JOIN clientes c ON c.id = COALESCE(ic.cliente_id, d.cliente_id)
+                WHERE ic.inmueble_id = ?
+                ORDER BY
+                  CASE WHEN ic.fecha_proxima_accion IS NULL OR TRIM(ic.fecha_proxima_accion) = '' THEN 1 ELSE 0 END,
+                  ic.fecha_proxima_accion ASC,
+                  ic.updated_at DESC
+                """,
+                (inmueble_id,),
             ).fetchall()
             json_response(self, {"rows": [dict(r) for r in rows]})
             return

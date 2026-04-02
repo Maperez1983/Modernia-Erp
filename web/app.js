@@ -2249,6 +2249,9 @@ const crmViewAlquileres = document.getElementById("crmViewAlquileres");
 const crmViewCompraventas = document.getElementById("crmViewCompraventas");
 const crmViewDemandas = document.getElementById("crmViewDemandas");
 const crmViewVisitas = document.getElementById("crmViewVisitas");
+const crmViewAgenda = document.getElementById("crmViewAgenda");
+const crmViewInformadores = document.getElementById("crmViewInformadores");
+const crmViewEdificios = document.getElementById("crmViewEdificios");
 const crmViewLegal = document.getElementById("crmViewLegal");
 const crmResumenPulse = document.getElementById("crmResumenPulse");
 const crmResumenHoy = document.getElementById("crmResumenHoy");
@@ -2266,6 +2269,22 @@ const crmResumenHastaWrap = document.getElementById("crmResumenHastaWrap");
 const crmResumenResponsable = document.getElementById("crmResumenResponsable");
 const crmResumenOrigen = document.getElementById("crmResumenOrigen");
 const crmResumenReset = document.getElementById("crmResumenReset");
+const crmAgendaSearch = document.getElementById("crmAgendaSearch");
+const crmAgendaEstadoFilter = document.getElementById("crmAgendaEstadoFilter");
+const crmAgendaTable = document.getElementById("crmAgendaTable");
+const crmAgendaInfo = document.getElementById("crmAgendaInfo");
+const crmAgendaForm = document.getElementById("crmAgendaForm");
+const crmAgendaStatus = document.getElementById("crmAgendaStatus");
+const crmAgendaCliente = document.getElementById("crmAgendaCliente");
+const crmAgendaInmueble = document.getElementById("crmAgendaInmueble");
+const crmInformadoresSearch = document.getElementById("crmInformadoresSearch");
+const crmInformadoresTable = document.getElementById("crmInformadoresTable");
+const crmInformadoresInfo = document.getElementById("crmInformadoresInfo");
+const crmInformadoresCrear = document.getElementById("crmInformadoresCrear");
+const crmEdificiosTipoFilter = document.getElementById("crmEdificiosTipoFilter");
+const crmEdificiosSearch = document.getElementById("crmEdificiosSearch");
+const crmEdificiosTable = document.getElementById("crmEdificiosTable");
+const crmEdificiosInfo = document.getElementById("crmEdificiosInfo");
 	const inmoLegalCopilotForm = document.getElementById("inmoLegalCopilotForm");
 	const inmoLegalArea = document.getElementById("inmoLegalArea");
 	const inmoLegalTopic = document.getElementById("inmoLegalTopic");
@@ -2338,6 +2357,7 @@ const crmCaptacionesKanban = document.getElementById("crmCaptacionesKanban");
 const crmPipeline = document.getElementById("crmPipeline");
 const crmEtapaFilter = document.getElementById("crmEtapaFilter");
 const crmEtapaFilterMirror = document.getElementById("crmEtapaFilterMirror");
+const crmCaptacionesQuickFilter = document.getElementById("crmCaptacionesQuickFilter");
 const crmCaptacionesStageSummary = document.getElementById("crmCaptacionesStageSummary");
 const crmCaptacionesOps = document.getElementById("crmCaptacionesOps");
 const crmInmueblesOps = document.getElementById("crmInmueblesOps");
@@ -2392,6 +2412,8 @@ const inmuebleSummaryCard = document.getElementById("inmuebleSummaryCard");
 const inmuebleFactsPanel = document.getElementById("inmuebleFactsPanel");
 const inmuebleCaptacionGrid = document.getElementById("inmuebleCaptacionGrid");
 const inmuebleDemandasTable = document.getElementById("inmuebleDemandasTable");
+const inmuebleCompradoresTable = document.getElementById("inmuebleCompradoresTable");
+const inmuebleCompradoresInfo = document.getElementById("inmuebleCompradoresInfo");
 const inmuebleDemandaForm = document.getElementById("inmuebleDemandaForm");
 const inmuebleDemandaStatus = document.getElementById("inmuebleDemandaStatus");
 const inmuebleDemandaCliente = document.getElementById("inmuebleDemandaCliente");
@@ -15292,11 +15314,57 @@ const INMUEBLE_CHECKLISTS = {
 
 const INMUEBLE_FIELDS = [
   { key: "estado", label: "Estado", type: "select", options: CRM_ETAPAS, section: "Prioridad comercial" },
+  { key: "focalizacion", label: "Focalización", type: "text", section: "Prioridad comercial" },
+  { key: "estado_contacto", label: "Estado de contacto", type: "text", section: "Prioridad comercial" },
+  {
+    key: "planificado",
+    label: "Planificado",
+    type: "select",
+    options: [
+      { value: "0", label: "No" },
+      { value: "1", label: "Sí" },
+    ],
+    section: "Prioridad comercial",
+  },
+  { key: "fecha_planificacion", label: "Fecha planificación", type: "date", section: "Prioridad comercial" },
+  {
+    key: "no_molestar",
+    label: "No molestar",
+    type: "select",
+    options: [
+      { value: "0", label: "No" },
+      { value: "1", label: "Sí" },
+    ],
+    section: "Prioridad comercial",
+  },
   { key: "tipo_inmueble", label: "Tipo", type: "text", section: "Prioridad comercial" },
+  { key: "subtipologia", label: "Subtipología", type: "text", section: "Prioridad comercial" },
+  { key: "titulo", label: "Inmueble", type: "text", section: "Prioridad comercial" },
   { key: "direccion", label: "Dirección", type: "text", section: "Prioridad comercial" },
+  { key: "direccion_numero", label: "Número", type: "text", section: "Prioridad comercial" },
+  { key: "interior", label: "Interior", type: "text", section: "Prioridad comercial" },
+  { key: "escalera", label: "Escalera", type: "text", section: "Prioridad comercial" },
+  { key: "edificio", label: "Edificio", type: "text", section: "Prioridad comercial" },
   { key: "precio_objetivo", label: "Precio objetivo venta", type: "number", section: "Prioridad comercial" },
+  { key: "precio_encargo", label: "Precio encargo", type: "number", section: "Prioridad comercial" },
+  { key: "precio_pedido_cliente", label: "Precio pedido cliente", type: "number", section: "Prioridad comercial" },
+  { key: "fecha_valoracion", label: "Fecha valoración", type: "date", section: "Prioridad comercial" },
+  { key: "desviacion_pct", label: "Desviación (%)", type: "number", section: "Prioridad comercial" },
   { key: "honorarios", label: "Honorarios agencia", type: "number", section: "Prioridad comercial" },
   { key: "asesor", label: "Asesor", type: "select", options: INMOBILIARIA_ASESORES, section: "Prioridad comercial" },
+  { key: "responsable", label: "Responsable", type: "text", section: "Prioridad comercial" },
+  { key: "categoria", label: "Categoría", type: "text", section: "Prioridad comercial" },
+  { key: "informador_nombre", label: "Informador relacionado", type: "text", section: "Prioridad comercial" },
+  {
+    key: "propietario_localizado",
+    label: "Propietario localizado",
+    type: "select",
+    options: [
+      { value: "0", label: "No" },
+      { value: "1", label: "Sí" },
+    ],
+    section: "Prioridad comercial",
+  },
   {
     key: "situacion_ocupacion",
     label: "Situación de ocupación",
@@ -15304,8 +15372,36 @@ const INMUEBLE_FIELDS = [
     options: ["Libre", "Ocupado", "Alquilado"],
     section: "Prioridad comercial",
   },
+  {
+    key: "ocupado_por",
+    label: "Ocupado por",
+    type: "select",
+    options: ["", "Propietario", "Inquilino", "Familiar", "Tercero", "Desconocido"],
+    section: "Prioridad comercial",
+  },
+  { key: "estado_inmueble", label: "Estado inmueble", type: "text", section: "Seguimiento" },
+  { key: "potencial_adquisicion", label: "Potencial adquisición", type: "text", section: "Seguimiento" },
+  { key: "fecha_primer_contacto", label: "Fecha 1er contacto", type: "date", section: "Seguimiento" },
+  { key: "ultima_fecha_contacto", label: "Última fecha contacto", type: "date", section: "Seguimiento" },
+  { key: "modalidad_ultimo_contacto", label: "Modalidad último contacto", type: "text", section: "Seguimiento" },
+  { key: "anio_reforma", label: "Año reforma", type: "number", section: "Seguimiento" },
+  { key: "planificacion_encargo", label: "Planificación encargo", type: "text", section: "Seguimiento" },
+  { key: "fecha_ultima_renov_rebaja", label: "Última renov./rebaja", type: "date", section: "Seguimiento" },
+  { key: "propietario_telefono", label: "Tel. propietario", type: "text", section: "Seguimiento" },
+  { key: "propietario_email", label: "Email propietario", type: "text", section: "Seguimiento" },
+  {
+    key: "con_inquilino",
+    label: "Con inquilino",
+    type: "select",
+    options: [
+      { value: "0", label: "No" },
+      { value: "1", label: "Sí" },
+    ],
+    section: "Seguimiento",
+  },
   { key: "zona", label: "Zona", type: "text", section: "Ubicación y Catastro" },
   { key: "codigo_postal", label: "Código postal", type: "text", section: "Ubicación y Catastro" },
+  { key: "localidad", label: "Localidad", type: "text", section: "Ubicación y Catastro" },
   { key: "poblacion", label: "Población", type: "text", section: "Ubicación y Catastro" },
   { key: "provincia", label: "Provincia", type: "text", section: "Ubicación y Catastro" },
   { key: "referencia_catastral", label: "Referencia catastral", type: "text", section: "Ubicación y Catastro" },
@@ -15326,13 +15422,84 @@ const CAPTACION_FIELDS = [
     options: INMOBILIARIA_ASESORES,
     section: "Propiedad y origen",
   },
+  { key: "responsable", label: "Responsable", type: "text", section: "Propiedad y origen" },
+  { key: "focalizacion", label: "Focalización", type: "text", section: "Propiedad y origen" },
   { key: "canal", label: "Canal", type: "text", section: "Propiedad y origen" },
+  { key: "tipo_procedencia", label: "Tipo procedencia", type: "text", section: "Propiedad y origen" },
   { key: "motivo", label: "Motivo", type: "text", section: "Propiedad y origen" },
+  { key: "motivacion", label: "Motivación", type: "text", section: "Propiedad y origen" },
+  { key: "necesidad_venta_alquiler", label: "Necesidad venta/alquiler", type: "text", section: "Propiedad y origen" },
+  { key: "propietario_telefono", label: "Tel. propietario", type: "text", section: "Propiedad y origen" },
+  { key: "propietario_email", label: "Email propietario", type: "text", section: "Propiedad y origen" },
   { key: "urgencia", label: "Urgencia", type: "select", options: ["Baja", "Media", "Alta"], section: "Propiedad y origen" },
   { key: "etapa", label: "Etapa", type: "select", options: CRM_ETAPAS, section: "Pipeline" },
+  {
+    key: "noticia_verificada",
+    label: "Noticia verificada",
+    type: "select",
+    options: [
+      { value: "0", label: "No" },
+      { value: "1", label: "Sí" },
+    ],
+    section: "Pipeline",
+  },
+  {
+    key: "situacion_ocupacion",
+    label: "Situación de ocupación",
+    type: "select",
+    options: ["", "Libre", "Ocupado", "Alquilado"],
+    section: "Pipeline",
+  },
+  {
+    key: "ocupado_por",
+    label: "Ocupado por",
+    type: "select",
+    options: ["", "Propietario", "Inquilino", "Familiar", "Tercero", "Desconocido"],
+    section: "Pipeline",
+  },
   { key: "probabilidad", label: "Probabilidad (%)", type: "number", section: "Pipeline" },
+  { key: "precio_encargo", label: "Precio encargo", type: "number", section: "Pipeline" },
+  { key: "precio_pedido_cliente", label: "Precio pedido cliente", type: "number", section: "Pipeline" },
+  { key: "fecha_valoracion", label: "Fecha valoración", type: "date", section: "Pipeline" },
+  { key: "desviacion_pct", label: "Desviación (%)", type: "number", section: "Pipeline" },
   { key: "proxima_accion", label: "Próxima acción", type: "text", section: "Pipeline" },
   { key: "fecha_contacto", label: "Fecha contacto", type: "date", section: "Pipeline" },
+  { key: "modalidad_ultimo_contacto", label: "Modalidad último contacto", type: "text", section: "Pipeline" },
+  { key: "estado_contacto", label: "Estado de contacto", type: "text", section: "Pipeline" },
+  {
+    key: "no_molestar",
+    label: "No molestar",
+    type: "select",
+    options: [
+      { value: "0", label: "No" },
+      { value: "1", label: "Sí" },
+    ],
+    section: "Pipeline",
+  },
+  {
+    key: "planificado",
+    label: "Planificado",
+    type: "select",
+    options: [
+      { value: "0", label: "No" },
+      { value: "1", label: "Sí" },
+    ],
+    section: "Pipeline",
+  },
+  { key: "fecha_planificacion", label: "Fecha planificación", type: "date", section: "Pipeline" },
+  { key: "planificacion_encargo", label: "Planificación encargo", type: "text", section: "Pipeline" },
+  { key: "fecha_ultima_renov_rebaja", label: "Última renov./rebaja", type: "date", section: "Pipeline" },
+  { key: "prioridad_noticia", label: "Prioridad noticia", type: "text", section: "Pipeline" },
+  {
+    key: "encargo_competencia",
+    label: "Encargo competencia",
+    type: "select",
+    options: [
+      { value: "0", label: "No" },
+      { value: "1", label: "Sí" },
+    ],
+    section: "Pipeline",
+  },
   { key: "notas", label: "Notas", type: "textarea", section: "Notas internas" },
 ];
 
@@ -15342,10 +15509,46 @@ const CLIENTE_FIELDS = [
   { key: "nombre", label: "Nombre", type: "text" },
   { key: "nif", label: "NIF", type: "text" },
   { key: "telefono", label: "Teléfono", type: "text" },
+  { key: "movil", label: "Móvil", type: "text" },
+  { key: "otro_telefono", label: "Otro teléfono", type: "text" },
   { key: "email", label: "Email", type: "text" },
+  { key: "id_personal", label: "Id. personal", type: "text" },
+  {
+    key: "cliente_generico_web",
+    label: "Cliente genérico web",
+    type: "select",
+    options: [
+      { value: "0", label: "No" },
+      { value: "1", label: "Sí" },
+    ],
+  },
+  {
+    key: "tiene_pedido",
+    label: "Tiene pedido",
+    type: "select",
+    options: [
+      { value: "0", label: "No" },
+      { value: "1", label: "Sí" },
+    ],
+  },
+  { key: "viabilidad", label: "Viabilidad", type: "select", options: ["", "Alta", "Media", "Baja"] },
+  { key: "fecha_estudio", label: "Fecha estudio", type: "date" },
+  { key: "valor_maximo_piso", label: "Valor máximo de piso", type: "number" },
+  { key: "perfil_kiron", label: "Perfil Kiron", type: "text" },
+  {
+    key: "estudio_vip",
+    label: "Estudio VIP",
+    type: "select",
+    options: [
+      { value: "0", label: "No" },
+      { value: "1", label: "Sí" },
+    ],
+  },
   { key: "fecha_nacimiento", label: "Fecha nacimiento", type: "date" },
   { key: "direccion", label: "Dirección", type: "text" },
+  { key: "direccion_numero", label: "Número", type: "text" },
   { key: "codigo_postal", label: "Código postal", type: "text" },
+  { key: "localidad", label: "Localidad", type: "text" },
   { key: "poblacion", label: "Población", type: "text" },
   { key: "provincia", label: "Provincia", type: "text" },
   {
@@ -15361,6 +15564,7 @@ const CLIENTE_FIELDS = [
       "Vendedor",
       "Inquilino",
       "Arrendador",
+      "Informador",
       "Promotor",
       "Inversor",
     ],
@@ -16498,14 +16702,21 @@ const renderEditableGrid = (grid, fields, data, target) => {
     if (field.type === "select") {
       input = document.createElement("select");
       const options = field.options || [];
-      options.forEach((option) => {
-        input.appendChild(createOption(option, option));
+      const normalizedOptions = options.map((option) => {
+        if (option && typeof option === "object") {
+          return { value: String(option.value ?? ""), label: String(option.label ?? option.value ?? "") };
+        }
+        return { value: String(option ?? ""), label: String(option ?? "") };
       });
-      if (currentValue && !options.includes(currentValue)) {
-        input.appendChild(createOption(currentValue, currentValue));
+      normalizedOptions.forEach((option) => {
+        input.appendChild(createOption(option.value, option.label));
+      });
+      const normalizedCurrent = String(currentValue ?? "");
+      if (normalizedCurrent && !normalizedOptions.some((opt) => opt.value === normalizedCurrent)) {
+        input.appendChild(createOption(normalizedCurrent, normalizedCurrent));
       }
-      if (currentValue) {
-        input.value = currentValue;
+      if (normalizedCurrent) {
+        input.value = normalizedCurrent;
       }
     } else if (field.type === "textarea") {
       input = document.createElement("textarea");
@@ -17442,7 +17653,7 @@ const populateAgendaClientesFromCandidates = (listEl, inputEl, hiddenEl, candida
   if (!listEl) return;
   const cleaned = (Array.isArray(candidates) ? candidates : [])
     .map((row) => {
-      const id = String(row.id || row.cliente_id || "").trim();
+      const id = String(row.cliente_id || row.id || "").trim();
       const nombreRaw = row.nombre || row.cliente || row.cliente_nombre || row.propietario || "";
       const nombre = formatNombreCliente(nombreRaw);
       return { id, nombre };
@@ -19713,7 +19924,19 @@ const updateEstudioAltaTabs = () => {
 };
 
 const setCrmWorkspaceView = (view = "resumen") => {
-  const allowed = new Set(["resumen", "captaciones", "inmuebles", "alquileres", "compraventas", "demandas", "visitas", "legal"]);
+  const allowed = new Set([
+    "resumen",
+    "captaciones",
+    "inmuebles",
+    "alquileres",
+    "compraventas",
+    "demandas",
+    "visitas",
+    "agenda",
+    "informadores",
+    "edificios",
+    "legal",
+  ]);
   let nextView = allowed.has(view) ? view : "resumen";
   if (nextView === "legal" && !canUseLegalCopilot()) {
     nextView = "resumen";
@@ -19735,6 +19958,9 @@ const setCrmWorkspaceView = (view = "resumen") => {
     compraventas: crmViewCompraventas,
     demandas: crmViewDemandas,
     visitas: crmViewVisitas,
+    agenda: crmViewAgenda,
+    informadores: crmViewInformadores,
+    edificios: crmViewEdificios,
     legal: crmViewLegal,
   };
   Object.entries(viewMap).forEach(([key, node]) => {
@@ -19760,6 +19986,12 @@ const setCrmWorkspaceView = (view = "resumen") => {
     loadCrmDemandas();
   } else if (nextView === "visitas") {
     loadCrmVisitas();
+  } else if (nextView === "agenda") {
+    loadCrmAgenda();
+  } else if (nextView === "informadores") {
+    loadCrmInformadores();
+  } else if (nextView === "edificios") {
+    loadCrmEdificios();
   } else if (nextView === "legal") {
     if (inmoLegalResponse && !String(inmoLegalResponse.textContent || "").trim()) {
       inmoLegalResponse.innerHTML = "<div class='muted'>Selecciona un tema o escribe una pregunta para obtener una guía operativa.</div>";
@@ -19772,6 +20004,9 @@ const setCrmWorkspaceView = (view = "resumen") => {
     loadCrmCompraventas();
     loadCrmDemandas();
     loadCrmVisitas();
+    loadCrmAgenda();
+    loadCrmInformadores();
+    loadCrmEdificios();
   }
 };
 
@@ -24006,28 +24241,80 @@ const loadCrmCaptaciones = () => {
   });
   params.set("include_id", "1");
   api(`/api/tabla?${params.toString()}`).then((data) => {
-    cachedCrmCaptaciones = Array.isArray(data.rows)
+    const rowMaps = Array.isArray(data.rows)
       ? data.rows.map((row) => buildRowMap(row, data.columns))
       : [];
+    cachedCrmCaptaciones = rowMaps;
     const etapaIndex = data.columns.indexOf("etapa");
     const idIndex = data.columns.indexOf("id");
     const activeEtapa = crmEtapaFilter?.value || crmEtapaFilterMirror?.value || "";
     if (crmEtapaFilter) crmEtapaFilter.value = activeEtapa;
     if (crmEtapaFilterMirror) crmEtapaFilterMirror.value = activeEtapa;
-    const filteredRows = data.rows.filter((row) => {
-      if (!activeEtapa) {
-        return true;
+    const quickKey = String(crmCaptacionesQuickFilter?.value || "").trim();
+    const parseDateMs = (value) => {
+      const dateText = String(value || "").trim();
+      if (!dateText) return 0;
+      let year = 0;
+      let month = 0;
+      let day = 0;
+      let match = dateText.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (match) {
+        year = Number(match[1]);
+        month = Number(match[2]) - 1;
+        day = Number(match[3]);
+      } else {
+        match = dateText.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+        if (!match) return 0;
+        day = Number(match[1]);
+        month = Number(match[2]) - 1;
+        year = Number(match[3]);
       }
+      return new Date(year, month, day, 0, 0, 0).getTime();
+    };
+    const daysSince = (value) => {
+      const ts = parseDateMs(value);
+      if (!ts) return Number.POSITIVE_INFINITY;
+      return Math.floor((Date.now() - ts) / 86400000);
+    };
+    const matchQuick = (rowMap) => {
+      if (!quickKey) return true;
+      const etapa = String(rowMap?.etapa || "Noticia").trim();
+      const ocupacion = normalizeSimple(rowMap?.situacion_ocupacion || "");
+      const ocupadoPor = normalizeSimple(rowMap?.ocupado_por || "");
+      const proxima = String(rowMap?.proxima_accion || "").trim();
+      const dias = daysSince(rowMap?.fecha_contacto);
+      const verificada = String(rowMap?.noticia_verificada ?? "").trim();
+      if (quickKey === "quick_pisos_vacios") {
+        return ocupacion === "libre" || ocupadoPor === "vacio" || ocupadoPor === "vacío";
+      }
+      if (quickKey === "quick_alquilados") {
+        return ocupacion.includes("alquil") || ocupadoPor.includes("inquilin");
+      }
+      if (quickKey === "quick_sin_contacto_120") {
+        return dias === Number.POSITIVE_INFINITY || dias > 120;
+      }
+      if (quickKey === "quick_noticia_sin_verificar") {
+        return etapa === "Noticia" && verificada !== "1";
+      }
+      if (quickKey === "quick_sin_proxima_accion") {
+        return !proxima;
+      }
+      return true;
+    };
+    const baseRows = data.rows.filter((row, index) => matchQuick(rowMaps[index]));
+    const filteredRows = baseRows.filter((row) => {
+      if (!activeEtapa) return true;
       return row[etapaIndex] === activeEtapa;
     });
     const counts = {};
-    data.rows.forEach((row) => {
+    baseRows.forEach((row) => {
       const etapa = row[etapaIndex] || "Sin etapa";
       counts[etapa] = (counts[etapa] || 0) + 1;
     });
     renderCrmPipeline(counts, activeEtapa);
     if (crmCaptacionesOps) {
-      const ops = [...cachedCrmCaptaciones]
+      const ops = [...rowMaps]
+        .filter((rowMap) => matchQuick(rowMap))
         .map((row) => {
           const etapa = String(row.etapa || "Noticia").trim();
           let summary = String(row.proxima_accion || "").trim();
@@ -24035,6 +24322,11 @@ const loadCrmCaptaciones = () => {
           if (!summary) {
             score += 4;
             summary = "Sin próxima acción definida.";
+          }
+          const verificada = String(row.noticia_verificada ?? "").trim();
+          if (etapa === "Noticia" && verificada !== "1") {
+            score += 3;
+            summary = summary ? `${summary} · Noticia sin verificar` : "Noticia sin verificar.";
           }
           if (etapa === "Noticia") score += 3;
           if (etapa === "Adquisición") score += 2;
@@ -24058,7 +24350,7 @@ const loadCrmCaptaciones = () => {
       const maxEtapa = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
       crmKpiEtapa.textContent = maxEtapa ? maxEtapa[0] : "-";
     }
-    renderCrmKanban(data);
+    renderCrmKanban({ columns: data.columns, rows: baseRows });
     renderCrmResumenDashboard();
     renderTableInto(
       { columns: data.columns, rows: filteredRows },
@@ -25702,6 +25994,244 @@ const loadCrmVisitas = () => {
   });
 };
 
+const loadCrmAgenda = () => {
+  if (!crmAgendaTable) {
+    return;
+  }
+  ensureCrmAgendaSelectors().catch(() => {});
+  const empresa = resolveCrmInmoEmpresa();
+  if (!empresa) {
+    crmAgendaTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
+    return;
+  }
+  const params = new URLSearchParams({ empresa_id: empresa.id, servicio: "inmobiliaria" });
+  api(`/api/acciones?${params.toString()}`).then((data) => {
+    const rows = Array.isArray(data.rows) ? data.rows : [];
+    const q = String(crmAgendaSearch?.value || "").trim().toLowerCase();
+    const estadoFilter = normalizeSimple(crmAgendaEstadoFilter?.value || "");
+    const filtered = rows.filter((row) => {
+      const haystack = [
+        row.asunto,
+        row.cliente,
+        row.tipo,
+        row.responsable,
+        row.modalidad_contacto,
+        row.estado,
+      ]
+        .map((v) => String(v || "").toLowerCase())
+        .join(" ");
+      if (q && !haystack.includes(q)) return false;
+      if (estadoFilter && normalizeSimple(row.estado || "") !== estadoFilter) return false;
+      return true;
+    });
+
+    const table = document.createElement("table");
+    const thead = document.createElement("thead");
+    const trh = document.createElement("tr");
+    ["fecha", "hora", "hora_fin", "asunto", "cliente", "tipo", "modalidad_contacto", "responsable", "estado", "accion"].forEach((col) => {
+      const th = document.createElement("th");
+      th.textContent = formatHeader(col);
+      trh.appendChild(th);
+    });
+    thead.appendChild(trh);
+    table.appendChild(thead);
+    const tbody = document.createElement("tbody");
+    filtered.forEach((row) => {
+      const tr = document.createElement("tr");
+      const cells = [
+        row.fecha || "",
+        row.hora || "",
+        row.hora_fin || "",
+        row.asunto || "",
+        row.cliente || "",
+        row.tipo || "",
+        row.modalidad_contacto || "",
+        row.responsable || "",
+        row.estado || "",
+      ];
+      const colNames = ["fecha", "hora", "hora_fin", "asunto", "cliente", "tipo", "modalidad_contacto", "responsable", "estado"];
+      cells.forEach((val, idx) => {
+        const td = document.createElement("td");
+        td.textContent = formatCell(colNames[idx], val) || "";
+        tr.appendChild(td);
+      });
+      const actionTd = document.createElement("td");
+      const openBtns = document.createElement("div");
+      openBtns.className = "inline-row";
+      if (row.inmueble_id) {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.textContent = "Inmueble";
+        b.addEventListener("click", () => openInmuebleFromAgenda(row.inmueble_id));
+        openBtns.appendChild(b);
+      }
+      if (row.cliente_id) {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "secondary";
+        b.textContent = "Cliente";
+        b.addEventListener("click", () => openClienteDetail(row.cliente_id));
+        openBtns.appendChild(b);
+      }
+      if (!openBtns.children.length) {
+        openBtns.textContent = "-";
+      }
+      actionTd.appendChild(openBtns);
+      tr.appendChild(actionTd);
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    crmAgendaTable.innerHTML = "";
+    crmAgendaTable.appendChild(table);
+    if (crmAgendaInfo) {
+      crmAgendaInfo.textContent = `Mostrando ${filtered.length} de ${rows.length} acciones.`;
+    }
+  });
+};
+
+const ensureCrmAgendaSelectors = async () => {
+  if (crmAgendaCliente) {
+    await loadClientesList().catch(() => null);
+    populateClientesSelect(crmAgendaCliente);
+  }
+  if (crmAgendaInmueble) {
+    const empresa = resolveCrmInmoEmpresa();
+    if (!empresa) return;
+    const params = new URLSearchParams({ tabla: "inmuebles", empresa_id: empresa.id, include_id: "1", limit: "400" });
+    const data = await api(`/api/tabla?${params.toString()}`).catch(() => null);
+    crmAgendaInmueble.innerHTML = "";
+    crmAgendaInmueble.appendChild(createOption("", "Selecciona inmueble"));
+    if (!data || !Array.isArray(data.rows) || !Array.isArray(data.columns)) return;
+    const rowMaps = data.rows.map((row) => buildRowMap(row, data.columns));
+    rowMaps.forEach((row) => {
+      const label = row.titulo || row.direccion || row.referencia || row.id || "Inmueble";
+      crmAgendaInmueble.appendChild(createOption(row.id, String(label)));
+    });
+  }
+};
+
+const loadCrmInformadores = async () => {
+  if (!crmInformadoresTable) return;
+  const params = new URLSearchParams({ tabla: "clientes", include_id: "1", limit: "600" });
+  const data = await api(`/api/tabla?${params.toString()}`).catch(() => null);
+  if (!data || !Array.isArray(data.rows) || !Array.isArray(data.columns)) {
+    crmInformadoresTable.innerHTML = "<p class='muted'>No se pudieron cargar los informadores.</p>";
+    return;
+  }
+  const rowMaps = data.rows.map((row) => buildRowMap(row, data.columns));
+  const q = String(crmInformadoresSearch?.value || "").trim().toLowerCase();
+  const items = rowMaps.filter((row) => {
+    const perfil = normalizeSimple(row.perfil || "");
+    if (!perfil.includes("informador")) return false;
+    const hay = [row.nombre, row.telefono, row.movil, row.email, row.id_personal].map((v) => String(v || "").toLowerCase()).join(" ");
+    if (q && !hay.includes(q)) return false;
+    return true;
+  });
+  const table = document.createElement("table");
+  const thead = document.createElement("thead");
+  const trh = document.createElement("tr");
+  ["nombre", "telefono", "movil", "email", "id_personal", "accion"].forEach((col) => {
+    const th = document.createElement("th");
+    th.textContent = formatHeader(col);
+    trh.appendChild(th);
+  });
+  thead.appendChild(trh);
+  table.appendChild(thead);
+  const tbody = document.createElement("tbody");
+  items.forEach((row) => {
+    const tr = document.createElement("tr");
+    [row.nombre, row.telefono, row.movil, row.email, row.id_personal].forEach((val) => {
+      const td = document.createElement("td");
+      td.textContent = String(val || "");
+      tr.appendChild(td);
+    });
+    const tdAction = document.createElement("td");
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = "Abrir";
+    btn.addEventListener("click", () => openClienteDetail(row.id));
+    tdAction.appendChild(btn);
+    tr.appendChild(tdAction);
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  crmInformadoresTable.innerHTML = "";
+  crmInformadoresTable.appendChild(table);
+  if (crmInformadoresInfo) {
+    crmInformadoresInfo.textContent = `Mostrando ${items.length} informadores.`;
+  }
+};
+
+const loadCrmEdificios = async () => {
+  if (!crmEdificiosTable) return;
+  const empresa = resolveCrmInmoEmpresa();
+  if (!empresa) {
+    crmEdificiosTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
+    return;
+  }
+  const params = new URLSearchParams({ tabla: "inmuebles", empresa_id: empresa.id, include_id: "1", limit: "600" });
+  const data = await api(`/api/tabla?${params.toString()}`).catch(() => null);
+  if (!data || !Array.isArray(data.rows) || !Array.isArray(data.columns)) {
+    crmEdificiosTable.innerHTML = "<p class='muted'>No se pudieron cargar los inmuebles.</p>";
+    return;
+  }
+  const rowMaps = data.rows.map((row) => buildRowMap(row, data.columns));
+  const tipoFilter = String(crmEdificiosTipoFilter?.value || "").trim().toLowerCase();
+  const q = String(crmEdificiosSearch?.value || "").trim().toLowerCase();
+  const items = rowMaps.filter((row) => {
+    const tipo = normalizeSimple(row.tipo_inmueble || "");
+    const categoria = normalizeSimple(row.categoria || "");
+    if (tipoFilter === "edificios" && !tipo.includes("edific")) return false;
+    if (tipoFilter === "complejos" && !(tipo.includes("complej") || categoria)) return false;
+    const hay = [row.titulo, row.direccion, row.localidad, row.zona, row.responsable, row.categoria].map((v) => String(v || "").toLowerCase()).join(" ");
+    if (q && !hay.includes(q)) return false;
+    return tipo.includes("edific") || tipo.includes("complej") || categoria;
+  });
+  const table = document.createElement("table");
+  const thead = document.createElement("thead");
+  const trh = document.createElement("tr");
+  ["inmueble", "direccion", "localidad", "zona", "anio_construccion", "anio_reforma", "categoria", "responsable", "accion"].forEach((col) => {
+    const th = document.createElement("th");
+    th.textContent = formatHeader(col);
+    trh.appendChild(th);
+  });
+  thead.appendChild(trh);
+  table.appendChild(thead);
+  const tbody = document.createElement("tbody");
+  items.forEach((row) => {
+    const tr = document.createElement("tr");
+    const cells = [
+      row.titulo || row.direccion || "",
+      row.direccion || "",
+      row.localidad || row.poblacion || "",
+      row.zona || "",
+      row.anio_construccion || "",
+      row.anio_reforma || "",
+      row.categoria || "",
+      row.responsable || "",
+    ];
+    cells.forEach((val) => {
+      const td = document.createElement("td");
+      td.textContent = String(val || "");
+      tr.appendChild(td);
+    });
+    const tdAction = document.createElement("td");
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = "Abrir";
+    btn.addEventListener("click", () => openInmuebleDetail(row.id, "edificios"));
+    tdAction.appendChild(btn);
+    tr.appendChild(tdAction);
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  crmEdificiosTable.innerHTML = "";
+  crmEdificiosTable.appendChild(table);
+  if (crmEdificiosInfo) {
+    crmEdificiosInfo.textContent = `Mostrando ${items.length} registros.`;
+  }
+};
+
 const renderVisitaSelects = () => {
   if (visitaInmueble) {
     visitaInmueble.innerHTML = "";
@@ -25997,6 +26527,7 @@ const openInmuebleDetail = (id, originView = "") => {
       refreshCurrentInmuebleProfile();
       refreshInmuebleVisitSheetButton();
       loadInmuebleDemandas(id);
+      loadInmuebleCompradores(id);
       loadInmuebleVisitas(id, empresaId);
       loadInmuebleActividad(id, empresaId);
       loadInmuebleDocs(id);
@@ -26008,6 +26539,195 @@ const openInmuebleDetail = (id, originView = "") => {
     })
     .catch((error) => {
       if (inmuebleSaveStatus) inmuebleSaveStatus.textContent = error?.message || "Error al cargar.";
+  });
+};
+
+const upsertInmuebleComprador = async (inmuebleId, demandaId, updates = {}) => {
+  if (!inmuebleId || !demandaId) return { error: "inmueble_id y demanda_id requeridos" };
+  const payload = { inmueble_id: inmuebleId, demanda_id: demandaId, ...updates };
+  try {
+    const res = await fetch("/api/inmueble_compradores", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!res.ok || data?.error) return { error: data?.error || "Error" };
+    return data;
+  } catch (error) {
+    return { error: error?.message || "Error" };
+  }
+};
+
+const prefillBuyerActionFromIteration = (row) => {
+  if (!row || !state.currentInmuebleId) return;
+  setInmuebleTab("actividad");
+  if (!inmuebleActividadForm) return;
+  const today = new Date();
+  const tomorrow = new Date(today.getTime() + 24 * 60 * 60 * 1000);
+  const fechaInput = inmuebleActividadForm.querySelector('input[name="fecha"]');
+  const horaInput = inmuebleActividadForm.querySelector('input[name="hora"]');
+  const tipoSelect = inmuebleActividadForm.querySelector('select[name="tipo"]');
+  const estadoSelect = inmuebleActividadForm.querySelector('select[name="estado"]');
+  const asuntoInput = inmuebleActividadForm.querySelector('input[name="asunto"]');
+  if (tipoSelect) tipoSelect.value = "Cita comprador";
+  if (estadoSelect) estadoSelect.value = "Pendiente";
+  if (fechaInput) fechaInput.value = tomorrow.toISOString().slice(0, 10);
+  if (horaInput) horaInput.value = "11:00";
+  if (asuntoInput) asuntoInput.value = `Cita comprador · ${row?.demanda_tipo || "Demanda"}`;
+  if (inmuebleActividadClienteInput) inmuebleActividadClienteInput.value = formatNombreCliente(row.cliente || "");
+  if (inmuebleActividadClienteId) inmuebleActividadClienteId.value = String(row.cliente_id || "").trim();
+  syncInmuebleWorkflowForm();
+  if (inmuebleActividadStatus) {
+    inmuebleActividadStatus.textContent = "Cita comprador preparada. Revisa y guarda para agendarla.";
+  }
+};
+
+const renderInmuebleCompradores = (rows = [], inmuebleId = "") => {
+  if (!inmuebleCompradoresTable) return;
+  const items = Array.isArray(rows) ? rows : [];
+  if (!items.length) {
+    inmuebleCompradoresTable.innerHTML = "<p class='muted'>Sin iteración aún. Usa “Añadir a iteración” desde Demandas compatibles.</p>";
+    if (inmuebleCompradoresInfo) inmuebleCompradoresInfo.textContent = "0 compradores en iteración.";
+    return;
+  }
+  const ESTADOS = ["Pendiente", "Contactado", "Interesado", "Visitado", "Oferta", "Negociación", "Descartado", "Cerrado"];
+  const table = document.createElement("table");
+  const thead = document.createElement("thead");
+  thead.innerHTML = `
+    <tr>
+      <th>Comprador</th>
+      <th>Demanda</th>
+      <th>Estado</th>
+      <th>Último contacto</th>
+      <th>Próxima acción</th>
+      <th>Notas</th>
+      <th>Acción</th>
+    </tr>
+  `;
+  table.appendChild(thead);
+  const tbody = document.createElement("tbody");
+  items.forEach((row) => {
+    const tr = document.createElement("tr");
+    const demandaId = row.demanda_id || row.id || "";
+    const compradorCell = document.createElement("td");
+    compradorCell.innerHTML = `<strong>${escapeHtml(row.cliente || "Sin cliente")}</strong>${row.cliente_id ? `<div class="muted">${escapeHtml(row.cliente_id)}</div>` : ""}`;
+    tr.appendChild(compradorCell);
+
+    const demandaCell = document.createElement("td");
+    const demandaParts = [row.demanda_tipo, row.demanda_zona, row.demanda_fase, row.demanda_estado].filter(Boolean);
+    demandaCell.innerHTML = demandaParts.length ? demandaParts.map((p) => `<div>${escapeHtml(p)}</div>`).join("") : "<span class='muted'>-</span>";
+    tr.appendChild(demandaCell);
+
+    const estadoCell = document.createElement("td");
+    const estadoSelect = document.createElement("select");
+    ESTADOS.forEach((opt) => estadoSelect.appendChild(createOption(opt, opt)));
+    estadoSelect.value = row.estado || "Pendiente";
+    estadoCell.appendChild(estadoSelect);
+    tr.appendChild(estadoCell);
+
+    const lastCell = document.createElement("td");
+    const lastInput = document.createElement("input");
+    lastInput.type = "date";
+    lastInput.value = row.fecha_ultimo_contacto || "";
+    lastCell.appendChild(lastInput);
+    tr.appendChild(lastCell);
+
+    const nextCell = document.createElement("td");
+    const nextInput = document.createElement("input");
+    nextInput.type = "date";
+    nextInput.value = row.fecha_proxima_accion || "";
+    nextCell.appendChild(nextInput);
+    tr.appendChild(nextCell);
+
+    const notasCell = document.createElement("td");
+    const notasInput = document.createElement("input");
+    notasInput.value = row.notas || "";
+    notasCell.appendChild(notasInput);
+    tr.appendChild(notasCell);
+
+    const actionsCell = document.createElement("td");
+    const saveBtn = document.createElement("button");
+    saveBtn.type = "button";
+    saveBtn.className = "secondary ghost button-inline";
+    saveBtn.textContent = "Guardar";
+    const citaBtn = document.createElement("button");
+    citaBtn.type = "button";
+    citaBtn.className = "secondary ghost button-inline";
+    citaBtn.textContent = "Cita comprador";
+    const removeBtn = document.createElement("button");
+    removeBtn.type = "button";
+    removeBtn.className = "danger ghost button-inline";
+    removeBtn.textContent = "Quitar";
+    actionsCell.appendChild(saveBtn);
+    actionsCell.appendChild(citaBtn);
+    actionsCell.appendChild(removeBtn);
+    tr.appendChild(actionsCell);
+
+    const persist = async (extra = {}) => {
+      const payload = {
+        estado: estadoSelect.value,
+        fecha_ultimo_contacto: lastInput.value,
+        fecha_proxima_accion: nextInput.value,
+        notas: notasInput.value,
+        ...extra,
+      };
+      const result = await upsertInmuebleComprador(inmuebleId, demandaId, payload);
+      if (result?.error) {
+        alert(result.error);
+        return;
+      }
+      loadInmuebleCompradores(inmuebleId);
+    };
+
+    saveBtn.addEventListener("click", () => persist());
+    estadoSelect.addEventListener("change", () => persist());
+    lastInput.addEventListener("change", () => persist());
+    nextInput.addEventListener("change", () => persist());
+    notasInput.addEventListener("blur", () => persist());
+    citaBtn.addEventListener("click", () => {
+      if (!row.cliente_id) {
+        alert("Esta demanda no tiene cliente vinculado. Vincula el cliente a la demanda para poder agendar una cita.");
+        return;
+      }
+      prefillBuyerActionFromIteration(row);
+    });
+    removeBtn.addEventListener("click", async () => {
+      if (!window.confirm("¿Quitar este comprador de la iteración?")) return;
+      const result = await upsertInmuebleComprador(inmuebleId, demandaId, { remove: 1 });
+      if (result?.error) {
+        alert(result.error);
+        return;
+      }
+      loadInmuebleCompradores(inmuebleId);
+    });
+
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  inmuebleCompradoresTable.innerHTML = "";
+  inmuebleCompradoresTable.appendChild(table);
+  if (inmuebleCompradoresInfo) inmuebleCompradoresInfo.textContent = `${items.length} compradores en iteración.`;
+};
+
+const loadInmuebleCompradores = (inmuebleId) => {
+  if (!inmuebleCompradoresTable || !inmuebleId) return;
+  api(`/api/inmueble_compradores?inmueble_id=${encodeURIComponent(inmuebleId)}`)
+    .then((data) => {
+      const rows = Array.isArray(data?.rows) ? data.rows : [];
+      if (state.currentInmuebleId === inmuebleId && state.currentInmuebleContext) {
+        state.currentInmuebleContext.compradores = rows;
+      }
+      renderInmuebleCompradores(rows, inmuebleId);
+      // Re-render matching para desactivar botones "Añadir" ya presentes en iteración.
+      if (state.currentInmuebleId === inmuebleId) {
+        loadInmuebleDemandas(inmuebleId);
+      }
+    })
+    .catch((error) => {
+      inmuebleCompradoresTable.innerHTML = "<p class='muted'>No se pudo cargar la iteración.</p>";
+      if (inmuebleCompradoresInfo) inmuebleCompradoresInfo.textContent = error?.message || "Error";
     });
 };
 
@@ -26029,10 +26749,12 @@ const loadInmuebleDemandas = (inmuebleId) => {
       return;
     }
     const inmueble = state.currentInmueble || {};
+    const iterRows = Array.isArray(state.currentInmuebleContext?.compradores) ? state.currentInmuebleContext.compradores : [];
+    const iterDemandaIds = new Set(iterRows.map((r) => String(r.demanda_id || r.id || "").trim()).filter(Boolean));
     const table = document.createElement("table");
     const thead = document.createElement("thead");
     const trHead = document.createElement("tr");
-    ["score", "cliente", "tipo", "zona", "precio_max", "m2_min", "habitaciones_min", "banos_min", "estado"].forEach((col) => {
+    ["score", "cliente", "tipo", "zona", "precio_max", "m2_min", "habitaciones_min", "banos_min", "estado", "accion"].forEach((col) => {
       const th = document.createElement("th");
       th.textContent = formatHeader(col);
       trHead.appendChild(th);
@@ -26040,8 +26762,7 @@ const loadInmuebleDemandas = (inmuebleId) => {
     thead.appendChild(trHead);
     table.appendChild(thead);
     const tbody = document.createElement("tbody");
-    rows.forEach((row) => {
-      const tr = document.createElement("tr");
+    const scored = rows.map((row) => {
       const constraints = [
         { key: "tipo", val: row.tipo, match: !row.tipo || row.tipo === inmueble.tipo_inmueble },
         { key: "zona", val: row.zona, match: !row.zona || (inmueble.zona || "").toLowerCase().includes(String(row.zona).toLowerCase()) },
@@ -26053,6 +26774,12 @@ const loadInmuebleDemandas = (inmuebleId) => {
       const active = constraints.filter((c) => c.val !== null && c.val !== undefined && c.val !== "").length;
       const matched = constraints.filter((c) => c.match).length;
       const score = active ? Math.round((matched / active) * 100) : 100;
+      return { row, score };
+    });
+    scored.sort((a, b) => b.score - a.score);
+    scored.forEach(({ row, score }) => {
+      const tr = document.createElement("tr");
+      const demandaId = row.demanda_id || row.id || "";
       const values = [
         `${score}%`,
         row.cliente || "-",
@@ -26063,18 +26790,73 @@ const loadInmuebleDemandas = (inmuebleId) => {
         row.habitaciones_min,
         row.banos_min,
         row.estado || "-",
+        "",
       ];
-      const cols = ["score", "cliente", "tipo", "zona", "precio_max", "m2_min", "habitaciones_min", "banos_min", "estado"];
+      const cols = ["score", "cliente", "tipo", "zona", "precio_max", "m2_min", "habitaciones_min", "banos_min", "estado", "accion"];
       values.forEach((value, idx) => {
         const td = document.createElement("td");
         const formatted = formatCell(cols[idx], value);
-        td.textContent = formatted === null ? "" : formatted;
+        if (cols[idx] === "accion") {
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "secondary ghost button-inline";
+          const already = iterDemandaIds.has(String(demandaId || "").trim());
+          btn.textContent = already ? "En iteración" : "Añadir a iteración";
+          btn.disabled = already;
+          btn.addEventListener("click", async () => {
+            const result = await upsertInmuebleComprador(inmuebleId, demandaId, { estado: "Pendiente" });
+            if (result?.error) {
+              alert(result.error);
+              return;
+            }
+            loadInmuebleCompradores(inmuebleId);
+          });
+          td.appendChild(btn);
+        } else {
+          td.textContent = formatted === null ? "" : formatted;
+        }
         tr.appendChild(td);
       });
       tbody.appendChild(tr);
     });
     table.appendChild(tbody);
     inmuebleDemandasTable.innerHTML = "";
+    const suggestionBar = document.createElement("div");
+    suggestionBar.style.display = "flex";
+    suggestionBar.style.gap = "10px";
+    suggestionBar.style.flexWrap = "wrap";
+    suggestionBar.style.alignItems = "center";
+    suggestionBar.style.marginBottom = "12px";
+    const addTopBtn = document.createElement("button");
+    addTopBtn.type = "button";
+    addTopBtn.className = "secondary ghost";
+    addTopBtn.textContent = "Añadir sugeridas (top 5 ≥80%)";
+    addTopBtn.addEventListener("click", async () => {
+      const candidates = scored
+        .filter((it) => it.score >= 80)
+        .map((it) => it.row)
+        .filter((r) => !iterDemandaIds.has(String(r.demanda_id || r.id || "").trim()))
+        .slice(0, 5);
+      if (!candidates.length) {
+        alert("No hay sugeridas nuevas (o ya están en iteración).");
+        return;
+      }
+      const ok = window.confirm(`¿Añadir ${candidates.length} compradores sugeridos a la iteración?`);
+      if (!ok) return;
+      for (const r of candidates) {
+        const demandaId = String(r.demanda_id || r.id || "").trim();
+        if (!demandaId) continue;
+        // Insertamos solo tras confirmación (método Tecnocloud).
+        await upsertInmuebleComprador(inmuebleId, demandaId, { estado: "Pendiente" });
+      }
+      loadInmuebleCompradores(inmuebleId);
+    });
+    const hint = document.createElement("span");
+    hint.className = "muted";
+    hint.textContent = "Sugerencias basadas en compatibilidad (score). No inserta nada sin confirmar.";
+    suggestionBar.appendChild(addTopBtn);
+    suggestionBar.appendChild(hint);
+    inmuebleDemandasTable.appendChild(suggestionBar);
     inmuebleDemandasTable.appendChild(table);
   });
 };
@@ -36392,6 +37174,78 @@ if (crmEtapaFilterMirror) {
       crmEtapaFilter.value = crmEtapaFilterMirror.value;
     }
     loadCrmCaptaciones();
+  });
+}
+
+if (crmCaptacionesQuickFilter) {
+  crmCaptacionesQuickFilter.addEventListener("change", () => {
+    loadCrmCaptaciones();
+  });
+}
+
+if (crmAgendaSearch) {
+  crmAgendaSearch.addEventListener("input", () => {
+    scheduleSave("crm-agenda-search", () => loadCrmAgenda(), 250);
+  });
+}
+
+if (crmAgendaEstadoFilter) {
+  crmAgendaEstadoFilter.addEventListener("change", () => {
+    loadCrmAgenda();
+  });
+}
+
+if (crmAgendaForm) {
+  crmAgendaForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    if (crmAgendaStatus) crmAgendaStatus.textContent = "Guardando...";
+    const formData = new FormData(crmAgendaForm);
+    const payload = Object.fromEntries(formData.entries());
+    payload.empresa_nombre = resolveCrmInmoEmpresaNombre();
+    payload.servicio = "inmobiliaria";
+    fetch("/api/acciones", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (crmAgendaStatus) crmAgendaStatus.textContent = data.error || "Guardado.";
+        if (data.error) return;
+        crmAgendaForm.reset();
+        ensureCrmAgendaSelectors().catch(() => {});
+        loadCrmAgenda();
+      })
+      .catch(() => {
+        if (crmAgendaStatus) crmAgendaStatus.textContent = "Error al guardar.";
+      });
+  });
+}
+
+if (crmInformadoresSearch) {
+  crmInformadoresSearch.addEventListener("input", () => {
+    scheduleSave("crm-informadores-search", () => loadCrmInformadores(), 250);
+  });
+}
+
+if (crmInformadoresCrear) {
+  crmInformadoresCrear.addEventListener("click", () => {
+    openClientesModule();
+    // Preselección suave: al abrir, el usuario puede marcar Perfil=Informador en el alta.
+    const perfil = document.querySelector('#clientesForm [name="perfil"]');
+    if (perfil) perfil.value = "Informador";
+  });
+}
+
+if (crmEdificiosTipoFilter) {
+  crmEdificiosTipoFilter.addEventListener("change", () => {
+    loadCrmEdificios();
+  });
+}
+
+if (crmEdificiosSearch) {
+  crmEdificiosSearch.addEventListener("input", () => {
+    scheduleSave("crm-edificios-search", () => loadCrmEdificios(), 250);
   });
 }
 
