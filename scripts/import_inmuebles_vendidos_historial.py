@@ -526,7 +526,8 @@ def gather_cases(root: Path, default_year: int = 0, default_month: str = "") -> 
                     )
                 )
                 continue
-            month = MONTH_NAMES.get(child.name.upper(), child.name)
+            # Soporta carpetas tipo "01 ENERO", "1 ENERO", "ENERO", etc.
+            month = infer_month_from_name(child.name) or MONTH_NAMES.get(child.name.upper(), child.name)
             for grand in sorted(child.iterdir()):
                 if grand.is_file():
                     cases.append(
