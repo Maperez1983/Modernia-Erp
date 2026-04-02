@@ -7,6 +7,7 @@ import sqlite3
 import urllib.parse
 import urllib.error
 import hashlib
+import gzip
 import base64
 import hmac
 import re
@@ -23060,10 +23061,27 @@ def send_file(handler, path):
         handler.send_response(200)
         handler.send_header("Content-Type", content_type)
         handler.send_header("X-Content-Type-Options", "nosniff")
-        # Evita cachés agresivos en Safari/Cloudflare que impiden ver cambios en local (RRHH).
-        if path.suffix in {".html", ".js", ".css"}:
+
+        # Caché: el HTML nunca se cachea (evita pantallas rotas tras deploy).
+        # Los assets estáticos sí pueden cachearse fuerte porque van versionados con `?v=...`.
+        if path.suffix == ".html":
             handler.send_header("Cache-Control", "no-store")
             handler.send_header("Pragma", "no-cache")
+        elif path.suffix in {".js", ".css", ".webmanifest", ".svg", ".png", ".jpg", ".jpeg", ".gif"}:
+            handler.send_header("Cache-Control", "public, max-age=31536000, immutable")
+
+        # Compresión gzip para acelerar cargas (app.js es grande).
+        accept_encoding = (handler.headers.get("Accept-Encoding") or "").lower()
+        can_gzip = "gzip" in accept_encoding
+        is_text_like = path.suffix in {".html", ".js", ".css", ".webmanifest", ".svg"}
+        if can_gzip and is_text_like and len(data) > 1024:
+            gz = gzip.compress(data, compresslevel=6)
+            # Solo si compensa (evita inflar SVG/manifest pequeños).
+            if len(gz) + 64 < len(data):
+                data = gz
+                handler.send_header("Content-Encoding", "gzip")
+                handler.send_header("Vary", "Accept-Encoding")
+
         handler.send_header("Content-Length", str(len(data)))
         handler.end_headers()
         handler.wfile.write(data)

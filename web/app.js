@@ -60,6 +60,7 @@ const api = async (path) => {
     error.status = res.status;
     error.data = data;
     if (res.status === 401) {
+      error.isAuthError = true;
       handleAuthExpired();
     }
     throw error;
@@ -1258,9 +1259,13 @@ const RoutingModule = window.CRMAppRouting || null;
   });
   window.addEventListener("unhandledrejection", (event) => {
     const reason = event?.reason;
+    const isAuthError =
+      (reason && Number(reason.status || 0) === 401)
+      || (reason && reason.isAuthError === true)
+      || /no autenticad/i.test(String(reason?.message || reason || ""));
     // Si expira sesión y alguna promesa no la captura, evitamos ensuciar la UI:
     // `api()` ya llama a `handleAuthExpired()` en 401.
-    if (reason && Number(reason.status || 0) === 401) {
+    if (isAuthError) {
       try {
         event.preventDefault();
       } catch {}
