@@ -1,6 +1,7 @@
 import os
 import re
 import sqlite3
+import threading
 from contextlib import contextmanager
 
 
@@ -293,16 +294,27 @@ def open_postgres_conn(with_row_factory=False):
         raise RuntimeError("psycopg no instalado. Añade `psycopg[binary]` a requirements.txt.") from exc
     conn = psycopg.connect(dsn, row_factory=(dict_row if with_row_factory else None))
     wrapped = PostgresCompatConnection(conn)
+    # Importante: crear las funciones shim en cada conexión puede ser MUY costoso (muchos CREATE OR REPLACE).
+    # Las funciones se crean a nivel de BD, así que basta con hacerlo una sola vez por proceso.
+    global _PG_COMPAT_READY
     if os.environ.get("APP_PG_SQLITE_COMPAT", "1").strip().lower() not in ("0", "false", "no", "off"):
-        try:
-            ensure_postgres_sqlite_compat(wrapped)
-            wrapped.commit()
-        except Exception:
-            try:
-                wrapped.rollback()
-            except Exception:
-                pass
+        if not _PG_COMPAT_READY:
+            with _PG_COMPAT_LOCK:
+                if not _PG_COMPAT_READY:
+                    try:
+                        ensure_postgres_sqlite_compat(wrapped)
+                        wrapped.commit()
+                        _PG_COMPAT_READY = True
+                    except Exception:
+                        try:
+                            wrapped.rollback()
+                        except Exception:
+                            pass
     return wrapped
+
+
+_PG_COMPAT_READY = False
+_PG_COMPAT_LOCK = threading.Lock()
 
 
 def open_db_conn(db_path, with_row_factory=False):
