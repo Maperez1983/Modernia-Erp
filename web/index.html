@@ -758,7 +758,7 @@
           <div class="section-head">
             <div>
               <h3>Inmobiliaria del workspace</h3>
-              <p class="muted">Captaciones, inmuebles, compraventas y seguimiento comercial dentro del workspace.</p>
+              <p class="muted">Pipeline, inmuebles, compraventas y seguimiento comercial dentro del workspace.</p>
             </div>
           </div>
           <div id="workspaceInmoOverview"></div>
@@ -1777,17 +1777,17 @@
           <div class="crm-header crm-header-stack">
             <div>
               <h3>CRM Inmobiliario</h3>
-              <p class="muted">Control de captaciones, inmuebles, compraventas, demandas y visitas.</p>
+              <p class="muted">Control de pipeline, inmuebles, compraventas, demandas y visitas.</p>
             </div>
             <div class="crm-actions">
-              <button type="button" id="crmNuevaCaptacionBtn">Nueva captación</button>
+              <button type="button" id="crmNuevaCaptacionBtn">Nuevo inmueble</button>
               <button type="button" id="crmNuevaCompraventaBtn" class="secondary">Nueva compraventa</button>
               <button type="button" id="crmNuevaDemandaBtn" class="secondary">Nueva demanda</button>
             </div>
           </div>
           <div class="grid crm-kpis">
             <div class="card kpi-card kpi-clickable" data-crm-view="captaciones">
-              <h3>Captaciones activas</h3>
+              <h3>Pipeline activo</h3>
               <div class="kpi-value" id="crmKpiCaptaciones">0</div>
               <div class="muted">Pipeline</div>
             </div>
@@ -1799,7 +1799,7 @@
             <div class="card kpi-card kpi-clickable" data-crm-view="captaciones">
               <h3>Etapa más activa</h3>
               <div class="kpi-value" id="crmKpiEtapa">-</div>
-              <div class="muted">Captaciones</div>
+              <div class="muted">Pipeline</div>
             </div>
             <div class="card kpi-card kpi-clickable" data-crm-view="compraventas">
               <h3>Compraventas</h3>
@@ -1810,7 +1810,7 @@
           <div id="crmWorkspaceShell" class="crm-workspace-shell">
             <div id="crmWorkspaceTabs" class="crm-workspace-tabs">
               <button type="button" class="tab active" data-crm-view="resumen">Resumen</button>
-              <button type="button" class="tab" data-crm-view="captaciones">Captaciones</button>
+              <button type="button" class="tab" data-crm-view="captaciones">Pipeline</button>
               <button type="button" class="tab" data-crm-view="inmuebles">Inmuebles</button>
               <button type="button" class="tab" data-crm-view="alquileres">Alquileres</button>
                     <button type="button" class="tab" data-crm-view="compraventas">Compraventas</button>
@@ -1897,7 +1897,7 @@
                     <div id="crmResumenPulse" class="crm-mini-list"></div>
                     <div class="crm-quick-actions">
                       <button type="button" class="crm-quick-action" data-crm-action="captacion">
-                        <strong>Nueva captación</strong>
+                        <strong>Nuevo inmueble</strong>
                         <span>Alta inicial del inmueble, propietario y canal de entrada</span>
                       </button>
                       <button type="button" class="crm-quick-action" data-crm-action="compraventa">
@@ -1944,7 +1944,7 @@
                   <div class="section-head">
                     <div>
                       <h3>Pipeline inmobiliario</h3>
-                      <p class="muted">Lectura rápida de carga por etapa. El kanban completo queda en Captaciones.</p>
+                      <p class="muted">Lectura rápida de carga por etapa. El kanban completo queda en Pipeline.</p>
                     </div>
                     <button type="button" class="secondary" data-crm-view="captaciones">Abrir pipeline</button>
                   </div>
@@ -2061,12 +2061,12 @@
               </div>
               <div id="crmViewAlquileres" class="crm-workspace-view hidden">
                 <div id="crmAlquileresMini" class="crm-mini-list"></div>
-                <div class="form-card">
-                  <div class="section-head">
-                    <div>
-                      <h3>Alquileres</h3>
-                      <p class="muted">Operaciones alquiladas convertidas desde captación o dadas de alta manualmente.</p>
-                    </div>
+                  <div class="form-card">
+                    <div class="section-head">
+                      <div>
+                        <h3>Alquileres</h3>
+                        <p class="muted">Operaciones alquiladas convertidas desde el pipeline o dadas de alta manualmente.</p>
+                      </div>
                     <input id="crmAlquilerSearch" placeholder="Buscar por dirección, propietario o inquilino..." />
                   </div>
                   <div id="crmAlquileresTable"></div>
@@ -2253,12 +2253,12 @@
                 </div>
               </div>
               <div id="crmViewInformadores" class="crm-workspace-view hidden">
-                <div class="form-card">
-                  <div class="section-head">
-                    <div>
-                      <h3>Informadores</h3>
-                      <p class="muted">Contactos que alimentan captaciones (perfil Informador).</p>
-                    </div>
+                  <div class="form-card">
+                    <div class="section-head">
+                      <div>
+                        <h3>Informadores</h3>
+                        <p class="muted">Contactos que alimentan el pipeline (perfil Informador).</p>
+                      </div>
                     <button type="button" class="secondary" id="crmInformadoresCrear">Crear informador</button>
                   </div>
                   <div class="inline-row">

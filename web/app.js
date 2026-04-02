@@ -4027,7 +4027,7 @@ const WORKSPACE_MODULE_STRUCTURE = {
     section: "crm_services",
     family: "Subservicio CRM",
     badge: "Servicio activo",
-    description: "Captaciones, inmuebles, compraventas, alquileres y visitas.",
+    description: "Pipeline, inmuebles, compraventas, alquileres y visitas.",
   },
   financiacion: {
     section: "crm_services",
@@ -4858,7 +4858,7 @@ const WORKSPACE_HOME_CONTAINERS = [
     key: "inmobiliaria",
     title: "Inmobiliaria",
     kicker: "Subservicio",
-    description: "Captaciones, inmuebles, compraventas, alquileres y visitas.",
+    description: "Pipeline, inmuebles, compraventas, alquileres y visitas.",
     modules: ["inmobiliaria", "documental", "facturacion", "automatizaciones", "copilot"],
     action: WORKSPACE_LAUNCHERS.inmobiliaria?.action || null,
     actionLabel: "Abrir inmobiliaria",
@@ -5599,7 +5599,7 @@ const renderWorkspaceInmoOverview = (payload = {}) => {
   workspaceInmoOverview.innerHTML = `
     <div class="workspace-gestoria-grid workspace-mini-kpis">
       <div class="workspace-mini-kpi"><span>Inmuebles</span><strong>${numberFormatter.format(Number(counts.inmuebles || 0))}</strong></div>
-      <div class="workspace-mini-kpi"><span>Captaciones activas</span><strong>${numberFormatter.format(Number(counts.captaciones_activas || 0))}</strong></div>
+      <div class="workspace-mini-kpi"><span>Pipeline activo</span><strong>${numberFormatter.format(Number(counts.captaciones_activas || 0))}</strong></div>
       <div class="workspace-mini-kpi"><span>Compraventas</span><strong>${numberFormatter.format(Number(counts.compraventas || 0))}</strong></div>
       <div class="workspace-mini-kpi"><span>Volumen cierre</span><strong>${formatEuros(Number(counts.volumen_cierre || 0))}</strong></div>
       <div class="workspace-mini-kpi"><span>Visitas programadas</span><strong>${numberFormatter.format(Number(counts.visitas_programadas || 0))}</strong></div>
@@ -5607,7 +5607,7 @@ const renderWorkspaceInmoOverview = (payload = {}) => {
     </div>
     <div class="workspace-gestoria-columns">
       <div class="workspace-gestoria-card">
-        <h4>Captaciones activas</h4>
+        <h4>Pipeline activo</h4>
         ${listHtml(
           captaciones,
           (row) => `
@@ -14090,7 +14090,7 @@ const populateTables = () => {
   const selectedCompany = state.currentEmpresaName || state.empresas.find((e) => e.id === empresaSelect.value)?.nombre;
   let tables = [];
   tables = state.tablas.filter((t) => t !== "movimientos");
-  // Captaciones es un módulo inmobiliario, no exclusivo de una empresa concreta.
+  // Pipeline es un módulo inmobiliario, no exclusivo de una empresa concreta.
   if (!userCanAccessService("inmobiliaria")) {
     tables = tables.filter((t) => t !== "captaciones");
   }
@@ -21774,7 +21774,7 @@ const renderDashboard = (empresaName, empresaId) => {
               : "Sin fecha de encargo suficiente",
           },
           {
-            title: "Captaciones activas",
+            title: "Pipeline activo",
             value: numberFormatter.format(summary.captaciones_activas || 0),
             note: `${numberFormatter.format(captacionesYear)} registradas en ${currentYear}`,
           },
@@ -21883,7 +21883,7 @@ const renderDashboard = (empresaName, empresaId) => {
         alquilerYears,
         [
           {
-            label: isRealEstateDashboard ? "Captaciones" : "Alquileres",
+            label: isRealEstateDashboard ? "Pipeline" : "Alquileres",
             values: alignSeries(alquilerYears, isRealEstateDashboard ? (data.captaciones || []) : data.alquileres),
             color: "#cca33c",
             format: (value) => numberFormatter.format(value),
@@ -23622,7 +23622,7 @@ const renderTableInto = (data, container, infoEl, label) => {
   const showSeguroFichaAction =
     label === "Seguros" && currentTab === "seguros-crm" && state.segurosTab === "bdt";
   const showHipotecaActions = label === "Hipotecas";
-  const showCaptacionActions = label === "Captaciones" && currentTab === "crm";
+  const showCaptacionActions = (label === "Captaciones" || label === "Pipeline") && currentTab === "crm";
   const enableColumnFilters =
     label === "Seguros" && currentTab === "seguros-crm" && state.segurosTab === "bdt";
   const segurosCompactColumns = [
@@ -23874,17 +23874,26 @@ const renderTableInto = (data, container, infoEl, label) => {
       const td = document.createElement("td");
       const actions = document.createElement("div");
       actions.className = "inline-actions";
+      const inmuebleLinkId = String(rowMap?.inmueble_id || "").trim();
       const openLink = document.createElement("a");
       openLink.className = "ghost";
       openLink.textContent = "Ficha";
-      openLink.href = `/?crm=inmo&captacion=${encodeURIComponent(String(recordId || "").trim())}`;
+      openLink.href = inmuebleLinkId
+        ? `/?crm=inmo&inmueble=${encodeURIComponent(inmuebleLinkId)}`
+        : `/?crm=inmo&captacion=${encodeURIComponent(String(recordId || "").trim())}`;
       // Delegamos la navegación al interceptor de links, pero además prevenimos el reload en click normal.
-      openLink.dataset.open = "captacion";
+      openLink.dataset.open = inmuebleLinkId ? "inmueble" : "captacion";
       openLink.addEventListener("click", (event) => {
         if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
         event.preventDefault();
         event.stopPropagation();
-        ensureCrmOpen(() => openInmuebleFromCaptacion(String(recordId || "").trim(), "captaciones"));
+        ensureCrmOpen(() => {
+          if (inmuebleLinkId) {
+            openInmuebleDetail(inmuebleLinkId, "captaciones");
+            return;
+          }
+          openInmuebleFromCaptacion(String(recordId || "").trim(), "captaciones");
+        });
       });
       actions.appendChild(openLink);
       [
@@ -23917,7 +23926,14 @@ const renderTableInto = (data, container, infoEl, label) => {
         if (event.target && event.target.closest("button, input, select, a")) {
           return;
         }
-        ensureCrmOpen(() => openInmuebleFromCaptacion(String(recordId || "").trim(), "captaciones"));
+        const inmuebleId = String(rowMap?.inmueble_id || "").trim();
+        ensureCrmOpen(() => {
+          if (inmuebleId) {
+            openInmuebleDetail(inmuebleId, "captaciones");
+            return;
+          }
+          openInmuebleFromCaptacion(String(recordId || "").trim(), "captaciones");
+        });
       });
     }
     if (label === "Seguros" && currentTab === "seguros-crm" && state.segurosTab === "bdt" && String(recordId || "").trim()) {
@@ -24366,7 +24382,7 @@ const loadCrmCaptaciones = () => {
         })
         .sort((a, b) => b.score - a.score || a.title.localeCompare(b.title, "es"))
         .slice(0, 6);
-      renderCrmActionList(crmCaptacionesOps, ops, "Sin bloqueos operativos en captaciones.");
+      renderCrmActionList(crmCaptacionesOps, ops, "Sin bloqueos operativos en el pipeline.");
     }
     if (crmKpiCaptaciones) {
       crmKpiCaptaciones.textContent = String(data.rows.length);
@@ -24381,7 +24397,7 @@ const loadCrmCaptaciones = () => {
       { columns: data.columns, rows: filteredRows },
       crmCaptacionesTable,
       crmCaptacionesInfo,
-      "Captaciones"
+      "Pipeline"
     );
   });
 };
@@ -24520,14 +24536,17 @@ const renderCrmKanban = (data) => {
         // Importante: no hacemos la tarjeta "draggable" completa porque algunos navegadores
         // se comen el click (y el usuario no puede abrir la ficha). El drag se hace con un handle.
         const captacionId = String(rowMap?.id || rowId || "").trim();
+        const inmuebleId = String(rowMap?.inmueble_id || "").trim();
         // Deep-link para fallback, pero el click abre dentro de la SPA.
-        const deepLink = `/?crm=inmo&captacion=${encodeURIComponent(captacionId)}`;
+        const deepLink = inmuebleId
+          ? `/?crm=inmo&inmueble=${encodeURIComponent(inmuebleId)}`
+          : `/?crm=inmo&captacion=${encodeURIComponent(captacionId)}`;
         card.innerHTML = `
           <div class="crm-kanban-handle" draggable="true" title="Arrastra para cambiar de etapa" aria-label="Arrastrar"></div>
           <div><strong>${row[propietarioIndex] || "Propietario"}</strong></div>
           <div>${row[direccionIndex] || "-"} · ${row[zonaIndex] || "-"}</div>
           <div class="muted">${row[proximaIndex] || "Sin próxima acción"}</div>
-          <div class="inline-actions"><a class="ghost" href="${deepLink}" data-open="captacion">Abrir ficha</a></div>
+          <div class="inline-actions"><a class="ghost" href="${deepLink}" data-open="${inmuebleId ? "inmueble" : "captacion"}">Abrir ficha</a></div>
         `;
         const handle = card.querySelector(".crm-kanban-handle");
         if (handle) {
@@ -24542,10 +24561,16 @@ const renderCrmKanban = (data) => {
           if (event?.metaKey || event?.ctrlKey || event?.shiftKey || event?.altKey) return;
           event?.preventDefault?.();
           event?.stopPropagation?.();
-          ensureCrmOpen(() => openInmuebleFromCaptacion(captacionId, "captaciones"));
+          ensureCrmOpen(() => {
+            if (inmuebleId) {
+              openInmuebleDetail(inmuebleId, "captaciones");
+              return;
+            }
+            openInmuebleFromCaptacion(captacionId, "captaciones");
+          });
         };
         card.addEventListener("click", openFn);
-        const link = card.querySelector('a[data-open="captacion"]');
+        const link = card.querySelector('a[data-open="captacion"], a[data-open="inmueble"]');
         if (link) link.addEventListener("click", openFn);
         column.appendChild(card);
       });
@@ -24590,6 +24615,7 @@ const renderCrmMiniCards = (container, items = []) => {
       if (item.inmuebleId) attrs.push(`data-inmueble-id="${escapeHtml(item.inmuebleId)}"`);
       if (item.captacionId) attrs.push(`data-captacion-id="${escapeHtml(item.captacionId)}"`);
       if (item.crmView) attrs.push(`data-crm-view="${escapeHtml(item.crmView)}"`);
+      if (item.etapa) attrs.push(`data-etapa="${escapeHtml(item.etapa)}"`);
       const href = item.inmuebleId
         ? `/?crm=inmo&inmueble=${encodeURIComponent(item.inmuebleId)}`
         : item.captacionId
@@ -24640,7 +24666,14 @@ const renderCrmMiniCards = (container, items = []) => {
         event.preventDefault?.();
       }
       const view = card.dataset.crmView || "";
-      if (view) setCrmWorkspaceView(view);
+      if (!view) return;
+      setCrmWorkspaceView(view);
+      const etapa = String(card.dataset.etapa || "").trim();
+      if (view === "captaciones" && etapa) {
+        if (crmEtapaFilter) crmEtapaFilter.value = etapa;
+        if (crmEtapaFilterMirror) crmEtapaFilterMirror.value = etapa;
+        loadCrmCaptaciones();
+      }
     });
   });
 };
@@ -24657,6 +24690,7 @@ const renderCrmActionList = (container, items = [], emptyMessage = "Sin elemento
       if (item.inmuebleId) attrs.push(`data-inmueble-id="${escapeHtml(item.inmuebleId)}"`);
       if (item.captacionId) attrs.push(`data-captacion-id="${escapeHtml(item.captacionId)}"`);
       if (item.crmView) attrs.push(`data-crm-view="${escapeHtml(item.crmView)}"`);
+      if (item.etapa) attrs.push(`data-etapa="${escapeHtml(item.etapa)}"`);
       const href = item.inmuebleId
         ? `/?crm=inmo&inmueble=${encodeURIComponent(item.inmuebleId)}`
         : item.captacionId
@@ -24701,7 +24735,14 @@ const renderCrmActionList = (container, items = [], emptyMessage = "Sin elemento
         event.preventDefault?.();
       }
       const view = btn.dataset.crmView || "";
-      if (view) setCrmWorkspaceView(view);
+      if (!view) return;
+      setCrmWorkspaceView(view);
+      const etapa = String(btn.dataset.etapa || "").trim();
+      if (view === "captaciones" && etapa) {
+        if (crmEtapaFilter) crmEtapaFilter.value = etapa;
+        if (crmEtapaFilterMirror) crmEtapaFilterMirror.value = etapa;
+        loadCrmCaptaciones();
+      }
     });
   });
 };
@@ -24877,6 +24918,50 @@ const renderCrmResumenDashboard = () => {
 
   hydrateCrmResumenFilters();
 
+  const normalizeStageLabel = (raw) => {
+    const text = String(raw || "").trim();
+    if (!text) return "Inmueble";
+    if (text === "Adquisición") return "Inmueble";
+    return text;
+  };
+
+  // Fuente de verdad visual: inmuebles (estado). Captaciones solo aporta "siguiente paso" y señales legacy.
+  const captacionByInmueble = new Map();
+  captaciones.forEach((row) => {
+    const inmuebleId = String(row?.inmueble_id || "").trim();
+    if (!inmuebleId) return;
+    const prev = captacionByInmueble.get(inmuebleId);
+    if (!prev) {
+      captacionByInmueble.set(inmuebleId, row);
+      return;
+    }
+    const prevTs = parseCrmDateTime(prev.updated_at || prev.created_at || "", "");
+    const nextTs = parseCrmDateTime(row.updated_at || row.created_at || "", "");
+    if ((nextTs || 0) >= (prevTs || 0)) {
+      captacionByInmueble.set(inmuebleId, row);
+    }
+  });
+
+  const pipelineItems = inmuebles
+    .map((row) => {
+      const inmuebleId = String(row?.id || "").trim();
+      const cap = inmuebleId ? (captacionByInmueble.get(inmuebleId) || {}) : {};
+      const stage = normalizeStageLabel(row?.estado || cap?.etapa || "Inmueble");
+      const proxima = String(cap?.proxima_accion || "").trim();
+      const verificada = String(cap?.noticia_verificada ?? "").trim() === "1";
+      const propietario = String(cap?.propietario || "").trim();
+      return {
+        ...row,
+        inmueble_id: inmuebleId,
+        stage,
+        proxima_accion: proxima,
+        noticia_verificada: verificada,
+        propietario,
+      };
+    })
+    .filter((row) => row && String(row.inmueble_id || "").trim());
+  const stageCount = (name) => pipelineItems.filter((row) => row.stage === name).length;
+
   if (crmResumenDireccionKpis || crmResumenTopDesviacion || crmResumenTopPlazo) {
     const responsables = new Set();
     const origenes = new Set();
@@ -25017,25 +25102,44 @@ const renderCrmResumenDashboard = () => {
   if (crmResumenPulse) {
     renderCrmMiniCards(crmResumenPulse, [
       {
-        title: "Noticias vivas",
-        value: captaciones.filter((row) => normalizeSimple(row.etapa || "") === "noticia").length,
-        meta: "Entrada",
-        summary: "Captación inicial pendiente de llamada, cita o descarte.",
+        title: "Entrada (inventario)",
+        value: stageCount("Inmueble"),
+        meta: "Inmueble",
+        summary: "Fichas en inventario por cualificar (pasar a Noticia).",
         crmView: "captaciones",
+        etapa: "Inmueble",
       },
       {
-        title: "Inmuebles en entrada",
-        value: captaciones.filter((row) => ["inmueble", "adquisicion"].includes(normalizeSimple(row.etapa || ""))).length,
-        meta: "Base",
-        summary: "Fichas en inventario aún sin cualificar o sin siguiente paso.",
+        title: "Noticias vivas",
+        value: stageCount("Noticia"),
+        meta: "Noticia",
+        summary: "Oportunidades activas pendientes de cualificación o siguientes pasos.",
         crmView: "captaciones",
+        etapa: "Noticia",
+      },
+      {
+        title: "Encargos",
+        value: stageCount("Encargo"),
+        meta: "Encargo",
+        summary: "Comercialización activa: anuncio, documentación, visitas y negociación.",
+        crmView: "captaciones",
+        etapa: "Encargo",
       },
       {
         title: "Propuestas",
-        value: captaciones.filter((row) => normalizeSimple(row.etapa || "") === "propuesta").length,
+        value: stageCount("Propuesta"),
         meta: "Oferta",
-        summary: "Ofertas presentadas pendientes de aceptación o contraoferta.",
+        summary: "Ofertas presentadas pendientes de respuesta o contraoferta.",
         crmView: "captaciones",
+        etapa: "Propuesta",
+      },
+      {
+        title: "Arras",
+        value: stageCount("Contrato de arras"),
+        meta: "Pre-cierre",
+        summary: "Arras firmadas: coordinación pre-escritura y firma.",
+        crmView: "captaciones",
+        etapa: "Contrato de arras",
       },
       {
         title: "Demandas activas",
@@ -25056,9 +25160,12 @@ const renderCrmResumenDashboard = () => {
 
   if (crmResumenHoy) {
     const jobs = [
-      ...captaciones.map((row) => {
-        const etapa = String(row.etapa || "Inmueble").trim();
+      ...pipelineItems
+        .filter((row) => !["Vendido", "Cerrado negativamente"].includes(String(row.stage || "")))
+        .map((row) => {
+        const etapa = String(row.stage || "Inmueble").trim();
         const proxima = String(row.proxima_accion || "").trim();
+        const verificada = !!row.noticia_verificada;
         let priority = 0;
         let summary = proxima || "Sin próxima acción";
         if (!proxima) priority += 4;
@@ -25067,7 +25174,12 @@ const renderCrmResumenDashboard = () => {
           summary = proxima || "Completar ficha y cualificar (pasar a Noticia).";
         } else if (etapa === "Noticia") {
           priority += 4;
-          if (!proxima) summary = "Llamada pendiente o noticia sin cierre.";
+          if (!verificada) {
+            priority += 3;
+            summary = proxima ? `${proxima} · Noticia sin verificar` : "Noticia sin verificar: llamada/cita pendiente.";
+          } else if (!proxima) {
+            summary = "Llamada pendiente o noticia sin siguiente acción.";
+          }
         } else if (etapa === "Encargo") {
           priority += 2;
           summary = proxima || "Encargo activo sin siguiente hito definido.";
@@ -25076,18 +25188,20 @@ const renderCrmResumenDashboard = () => {
           summary = proxima || "Propuesta/oferta pendiente de respuesta.";
         } else if (etapa === "Reservado") {
           priority += 1;
-          summary = proxima || "Reserva sin siguiente paso de cierre.";
+          summary = proxima || "Reserva lista para arras o siguiente paso documental.";
         } else if (etapa === "Contrato de arras") {
           priority += 1;
           summary = proxima || "Arras firmadas: preparar pre-escritura y agenda.";
         }
+        const ownerLabel = String(row.propietario || row.propietarios || "").trim();
         return {
-          inmuebleId: row.inmueble_id || "",
-          captacionId: row.inmueble_id ? "" : String(row.id || "").trim(),
-          title: row.direccion || row.propietario || "Inmueble sin identificar",
-          meta: `${row.propietario || "Propietario pendiente"} · ${etapa}`,
+          inmuebleId: row.inmueble_id || row.id || "",
+          title: row.direccion || "Inmueble sin dirección",
+          meta: `${ownerLabel || "Propietario pendiente"} · ${etapa}`,
           summary,
           priority,
+          crmView: "captaciones",
+          etapa,
         };
       }),
       ...visitas
@@ -25115,16 +25229,20 @@ const renderCrmResumenDashboard = () => {
   }
 
   if (crmResumenAlertas) {
-    const missingNext = captaciones.filter((row) => !String(row.proxima_accion || "").trim()).length;
+    const activeStages = new Set(["Inmueble", "Noticia", "Encargo", "Propuesta", "Reservado", "Contrato de arras"]);
+    const missingNext = pipelineItems.filter((row) => activeStages.has(String(row.stage || "")) && !String(row.proxima_accion || "").trim()).length;
     const missingCatastro = inmuebles.filter((row) => !String(row.referencia_catastral || "").trim()).length;
     const missingOwner = inmuebles.filter((row) => !String(row.propietarios || "").trim()).length;
-    const activeEncargos = captaciones.filter((row) => String(row.etapa || "") === "Encargo").length;
+    const activeEncargos = stageCount("Encargo");
+    const pendingPropuestas = stageCount("Propuesta");
+    const pendingReservas = stageCount("Reservado");
+    const pendingArras = stageCount("Contrato de arras");
     const pendingVisits = visitas.filter((row) => normalizeSimple(row.estado || "").includes("pendiente")).length;
     const urgentDemandas = demandas.filter((row) => normalizeSimple(row.prioridad || "") === "alta" && normalizeSimple(row.estado || "") === "activa").length;
     const alerts = [
       {
-        title: "Noticias sin siguiente acción",
-        summary: `${missingNext} inmuebles con seguimiento incompleto.`,
+        title: "Pipeline sin siguiente acción",
+        summary: `${missingNext} inmuebles sin siguiente paso definido.`,
         crmView: "captaciones",
       },
       {
@@ -25141,6 +25259,25 @@ const renderCrmResumenDashboard = () => {
         title: "Encargos activos",
         summary: `${activeEncargos} expedientes en comercialización activa.`,
         crmView: "captaciones",
+        etapa: "Encargo",
+      },
+      {
+        title: "Propuestas pendientes",
+        summary: `${pendingPropuestas} propuestas/ofertas a la espera de aceptación.`,
+        crmView: "captaciones",
+        etapa: "Propuesta",
+      },
+      {
+        title: "Reservas pendientes",
+        summary: `${pendingReservas} reservas pendientes de arras o siguiente hito.`,
+        crmView: "captaciones",
+        etapa: "Reservado",
+      },
+      {
+        title: "Arras pendientes de escritura",
+        summary: `${pendingArras} expedientes en fase de arras.`,
+        crmView: "captaciones",
+        etapa: "Contrato de arras",
       },
       {
         title: "Visitas por cerrar",
@@ -25201,18 +25338,29 @@ const renderCrmResumenDashboard = () => {
   }
 
   if (crmResumenInmuebles) {
-    const hot = inmuebles
+    const hot = pipelineItems
       .map((row) => {
         const reasons = [];
         if (!String(row.referencia_catastral || "").trim()) reasons.push("Catastro pendiente");
         if (!String(row.propietarios || "").trim()) reasons.push("Propietario pendiente");
-        if (String(row.estado || "").trim() === "Noticia") reasons.push("Aún en noticia");
+        const stage = normalizeStageLabel(row.stage || row.estado || "Inmueble");
+        if (stage === "Inmueble") reasons.push("En entrada (sin cualificar)");
+        else if (stage === "Noticia") reasons.push("Noticia: cualificar y siguiente acción");
+        else if (stage === "Propuesta") reasons.push("Propuesta pendiente");
+        else if (stage === "Reservado") reasons.push("Reserva pendiente");
+        else if (stage === "Contrato de arras") reasons.push("Arras: preparar escritura");
+        const proxima = String(row.proxima_accion || "").trim();
+        if (!proxima) reasons.push("Sin próxima acción");
+        let score = reasons.length;
+        if (stage === "Inmueble") score += 2;
+        if (stage === "Propuesta") score += 2;
+        if (stage === "Contrato de arras") score += 1;
         return {
           id: row.id || "",
           title: row.direccion || "Sin dirección",
-          meta: [row.zona, row.poblacion].filter(Boolean).join(" · ") || "Ubicación pendiente",
-          summary: reasons[0] || "Ficha activa",
-          score: reasons.length,
+          meta: [row.stage || row.estado, row.zona, row.poblacion].filter(Boolean).join(" · ") || "Ubicación pendiente",
+          summary: proxima || reasons[0] || "Ficha activa",
+          score,
         };
       })
       .sort((a, b) => b.score - a.score || a.title.localeCompare(b.title, "es"))
@@ -26456,7 +26604,7 @@ const initCrmInmoLinkInterceptor = () => {
 initCrmInmoLinkInterceptor();
 
 const resolveInmuebleDetailRef = async (rowMap = {}, fallbackId = "") => {
-  // Captaciones: `rowMap.id` suele ser el id de la captación (no el del inmueble).
+  // Pipeline: `rowMap.id` suele ser el id de la captación (no el del inmueble).
   // Para abrir ficha siempre necesitamos un `inmueble_id`. Si no viene, lo aseguramos
   // creando/vinculando un inmueble a partir del `captacion_id`.
   const inmuebleId = String(rowMap?.inmueble_id || "").trim();
