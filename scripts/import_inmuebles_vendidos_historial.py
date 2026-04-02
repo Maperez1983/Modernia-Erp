@@ -1606,6 +1606,11 @@ def upsert_inmueble(conn: sqlite3.Connection, empresa_id: str, record: dict[str,
             updates["referencia_catastral"] = referencia_catastral
         if record.get("precio_encargo") and not existing["precio_objetivo"]:
             updates["precio_objetivo"] = record.get("precio_encargo")
+        # Los expedientes de esta importación son inmuebles ya vendidos (histórico).
+        # Normalizamos el estado a "Vendido" para que el CRM los trate como inactivos.
+        existing_estado = compact_spaces(existing["estado"])
+        if existing_estado and norm_text(existing_estado) in {"historico vendido", "histórico vendido"}:
+            updates["estado"] = "Vendido"
         if updates:
             set_clause = ", ".join(f"{key} = ?" for key in updates)
             conn.execute(
@@ -1630,7 +1635,7 @@ def upsert_inmueble(conn: sqlite3.Connection, empresa_id: str, record: dict[str,
             referencia_catastral,
             "",
             record.get("precio_encargo"),
-            "Historico vendido",
+            "Vendido",
             now,
             now,
         ),
