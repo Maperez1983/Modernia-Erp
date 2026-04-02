@@ -1258,6 +1258,14 @@ const RoutingModule = window.CRMAppRouting || null;
   });
   window.addEventListener("unhandledrejection", (event) => {
     const reason = event?.reason;
+    // Si expira sesión y alguna promesa no la captura, evitamos ensuciar la UI:
+    // `api()` ya llama a `handleAuthExpired()` en 401.
+    if (reason && Number(reason.status || 0) === 401) {
+      try {
+        event.preventDefault();
+      } catch {}
+      return;
+    }
     const detail = (reason?.message ? `${reason.message}\n` : "")
       + (reason?.stack || String(reason || "Promise rechazada"));
     show("Error interno (promesa)", detail);
@@ -24288,7 +24296,8 @@ const loadCrmCaptaciones = () => {
     empresa_id: empresa.id,
   });
   params.set("include_id", "1");
-  api(`/api/tabla?${params.toString()}`).then((data) => {
+  api(`/api/tabla?${params.toString()}`)
+    .then((data) => {
     const rowMaps = Array.isArray(data.rows)
       ? data.rows.map((row) => buildRowMap(row, data.columns))
       : [];
@@ -24419,7 +24428,12 @@ const loadCrmCaptaciones = () => {
       crmCaptacionesInfo,
       "Pipeline"
     );
-  });
+    })
+    .catch((error) => {
+      if (Number(error?.status || 0) === 401) return;
+      crmCaptacionesTable.innerHTML = "<p class='muted'>No se pudo cargar el pipeline.</p>";
+      console.error("loadCrmCaptaciones failed:", error);
+    });
 };
 
 const loadCrmAlquileres = () => {
@@ -25729,7 +25743,8 @@ const loadCrmInmuebles = () => {
   if (q) {
     params.set("q", q);
   }
-  api(`/api/inmuebles?${params.toString()}`).then((data) => {
+  api(`/api/inmuebles?${params.toString()}`)
+    .then((data) => {
     const rows = data.rows || [];
     cachedCrmInmuebles = rows;
     renderCrmInmueblesRecent(rows);
@@ -25803,7 +25818,14 @@ const loadCrmInmuebles = () => {
       crmKpiInmuebles.textContent = String(rows.length);
     }
     renderCrmResumenDashboard();
-  });
+    })
+    .catch((error) => {
+      if (Number(error?.status || 0) === 401) return;
+      [crmInmueblesTable, crmInmueblesTableMirror].filter(Boolean).forEach((target) => {
+        target.innerHTML = "<p class='muted'>No se pudieron cargar los inmuebles.</p>";
+      });
+      console.error("loadCrmInmuebles failed:", error);
+    });
 };
 
 const loadCrmCompraventas = () => {
@@ -25820,7 +25842,8 @@ const loadCrmCompraventas = () => {
   if (q) {
     params.set("q", q);
   }
-  api(`/api/compraventas?${params.toString()}`).then((data) => {
+  api(`/api/compraventas?${params.toString()}`)
+    .then((data) => {
     const rows = Array.isArray(data?.rows) ? data.rows : [];
     cachedCrmCompraventas = rows;
     const manualCount = rows.filter((row) => {
@@ -25953,7 +25976,12 @@ const loadCrmCompraventas = () => {
       crmKpiCompraventas.textContent = String(data?.kpis?.total || rows.length || 0);
     }
     renderCrmResumenDashboard();
-  });
+    })
+    .catch((error) => {
+      if (Number(error?.status || 0) === 401) return;
+      crmCompraventasTable.innerHTML = "<p class='muted'>No se pudieron cargar las compraventas.</p>";
+      console.error("loadCrmCompraventas failed:", error);
+    });
 };
 
 const loadCrmDemandas = () => {
