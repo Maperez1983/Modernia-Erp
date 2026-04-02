@@ -472,6 +472,9 @@ def infer_month_from_name(value: str) -> str:
 def gather_cases(root: Path, default_year: int = 0, default_month: str = "") -> list[CaseEntry]:
     cases: list[CaseEntry] = []
     year_dirs = sorted(p for p in root.iterdir() if p.is_dir() and p.name.isdigit())
+    # Soporta pasar directamente la carpeta del año (p.ej. ".../INMUEBLES VENDIDOS/2020").
+    if not year_dirs and root.is_dir() and root.name.isdigit():
+        year_dirs = [root]
     if not year_dirs:
         month = default_month or infer_month_from_name(root.name)
         for child in sorted(root.iterdir()):
