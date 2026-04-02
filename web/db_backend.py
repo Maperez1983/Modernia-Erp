@@ -392,23 +392,24 @@ def ensure_postgres_sqlite_compat(conn):
         """
     )
 
-    # ROUND shim (SQLite compatibility):
-    # - sqlite_round(double precision, int) -> round(arg1::numeric, int)::double precision
-    # - sqlite_round(double precision) -> round(arg1)
-    # - sqlite_round(numeric, int) -> round(arg1, int)::double precision
-    # - sqlite_round(numeric) -> round(arg1)::double precision
+    # ROUND shim (SQLite compatibility)
+    #
+    # Nota: en versiones anteriores, reescrituras de SQL podían transformar `round(...)` dentro de estas
+    # funciones y provocar recursion (stack depth exceeded). Para evitarlo:
+    # - Definimos las funciones en LANGUAGE SQL (sin plpgsql).
+    # - Referenciamos explícitamente `pg_catalog.round`.
+    # - Hacemos DROP IF EXISTS antes para “limpiar” definiciones antiguas erróneas.
+    conn.execute("DROP FUNCTION IF EXISTS sqlite_round(double precision)")
+    conn.execute("DROP FUNCTION IF EXISTS sqlite_round(double precision, integer)")
+    conn.execute("DROP FUNCTION IF EXISTS sqlite_round(numeric)")
+    conn.execute("DROP FUNCTION IF EXISTS sqlite_round(numeric, integer)")
     conn.execute(
         """
         CREATE OR REPLACE FUNCTION sqlite_round(arg1 double precision)
         RETURNS double precision
-        LANGUAGE plpgsql
+        LANGUAGE SQL
         AS $$
-        BEGIN
-          IF arg1 IS NULL THEN
-            RETURN NULL;
-          END IF;
-          RETURN round(arg1);
-        END;
+          SELECT CASE WHEN arg1 IS NULL THEN NULL ELSE pg_catalog.round(arg1) END
         $$;
         """
     )
@@ -416,14 +417,9 @@ def ensure_postgres_sqlite_compat(conn):
         """
         CREATE OR REPLACE FUNCTION sqlite_round(arg1 double precision, arg2 integer)
         RETURNS double precision
-        LANGUAGE plpgsql
+        LANGUAGE SQL
         AS $$
-        BEGIN
-          IF arg1 IS NULL THEN
-            RETURN NULL;
-          END IF;
-          RETURN round(arg1::numeric, arg2)::double precision;
-        END;
+          SELECT CASE WHEN arg1 IS NULL THEN NULL ELSE pg_catalog.round(arg1::numeric, arg2)::double precision END
         $$;
         """
     )
@@ -431,14 +427,9 @@ def ensure_postgres_sqlite_compat(conn):
         """
         CREATE OR REPLACE FUNCTION sqlite_round(arg1 numeric)
         RETURNS double precision
-        LANGUAGE plpgsql
+        LANGUAGE SQL
         AS $$
-        BEGIN
-          IF arg1 IS NULL THEN
-            RETURN NULL;
-          END IF;
-          RETURN round(arg1)::double precision;
-        END;
+          SELECT CASE WHEN arg1 IS NULL THEN NULL ELSE pg_catalog.round(arg1)::double precision END
         $$;
         """
     )
@@ -446,14 +437,9 @@ def ensure_postgres_sqlite_compat(conn):
         """
         CREATE OR REPLACE FUNCTION sqlite_round(arg1 numeric, arg2 integer)
         RETURNS double precision
-        LANGUAGE plpgsql
+        LANGUAGE SQL
         AS $$
-        BEGIN
-          IF arg1 IS NULL THEN
-            RETURN NULL;
-          END IF;
-          RETURN round(arg1, arg2)::double precision;
-        END;
+          SELECT CASE WHEN arg1 IS NULL THEN NULL ELSE pg_catalog.round(arg1, arg2)::double precision END
         $$;
         """
     )
@@ -574,7 +560,7 @@ def ensure_postgres_sqlite_compat(conn):
         RETURNS double precision
         LANGUAGE SQL
         AS $$
-          SELECT round(val::numeric, digits)::double precision
+          SELECT pg_catalog.round(val::numeric, digits)::double precision
         $$;
         """
     )
@@ -584,7 +570,57 @@ def ensure_postgres_sqlite_compat(conn):
         RETURNS double precision
         LANGUAGE SQL
         AS $$
-          SELECT round(val::numeric, digits)::double precision
+          SELECT pg_catalog.round(val::numeric, digits)::double precision
+        $$;
+        """
+    )
+
+    # printf shim (SQLite compatibility)
+    # Usado en algunos SELECT legacy (formateo '%.2f'). Implementación limitada pero suficiente.
+    conn.execute("DROP FUNCTION IF EXISTS printf(text, real)")
+    conn.execute("DROP FUNCTION IF EXISTS printf(text, double precision)")
+    conn.execute("DROP FUNCTION IF EXISTS printf(text, numeric)")
+    conn.execute(
+        """
+        CREATE OR REPLACE FUNCTION printf(fmt text, val double precision)
+        RETURNS text
+        LANGUAGE plpgsql
+        AS $$
+        DECLARE f text;
+        DECLARE digits int;
+        DECLARE pattern text;
+        BEGIN
+          f := btrim(coalesce(fmt, ''));
+          IF val IS NULL THEN
+            RETURN NULL;
+          END IF;
+          IF f ~ '^%\\.[0-9]+f$' THEN
+            digits := (regexp_replace(f, '[^0-9]', '', 'g'))::int;
+            pattern := 'FM999999999999990' || CASE WHEN digits > 0 THEN '.' || repeat('0', digits) ELSE '' END;
+            RETURN btrim(to_char(val::numeric, pattern));
+          END IF;
+          RETURN val::text;
+        END;
+        $$;
+        """
+    )
+    conn.execute(
+        """
+        CREATE OR REPLACE FUNCTION printf(fmt text, val real)
+        RETURNS text
+        LANGUAGE SQL
+        AS $$
+          SELECT printf(fmt, val::double precision)
+        $$;
+        """
+    )
+    conn.execute(
+        """
+        CREATE OR REPLACE FUNCTION printf(fmt text, val numeric)
+        RETURNS text
+        LANGUAGE SQL
+        AS $$
+          SELECT printf(fmt, val::double precision)
         $$;
         """
     )
