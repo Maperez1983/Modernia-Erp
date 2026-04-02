@@ -283,7 +283,7 @@ def open_sqlite_conn(db_path, with_row_factory=False):
     return conn
 
 
-def open_postgres_conn(with_row_factory=False):
+def open_postgres_conn(with_row_factory=False, *, skip_compat=False):
     dsn = _postgres_dsn()
     if not dsn:
         raise RuntimeError("DATABASE_URL/POSTGRES_URL no configurado.")
@@ -292,12 +292,20 @@ def open_postgres_conn(with_row_factory=False):
         from psycopg.rows import dict_row
     except Exception as exc:
         raise RuntimeError("psycopg no instalado. Añade `psycopg[binary]` a requirements.txt.") from exc
-    conn = psycopg.connect(dsn, row_factory=(dict_row if with_row_factory else None))
+    try:
+        connect_timeout = int(os.environ.get("APP_PG_CONNECT_TIMEOUT", "5"))
+    except Exception:
+        connect_timeout = 5
+    conn = psycopg.connect(
+        dsn,
+        row_factory=(dict_row if with_row_factory else None),
+        connect_timeout=max(2, connect_timeout),
+    )
     wrapped = PostgresCompatConnection(conn)
     # Importante: crear las funciones shim en cada conexión puede ser MUY costoso (muchos CREATE OR REPLACE).
     # Las funciones se crean a nivel de BD, así que basta con hacerlo una sola vez por proceso.
     global _PG_COMPAT_READY
-    if os.environ.get("APP_PG_SQLITE_COMPAT", "1").strip().lower() not in ("0", "false", "no", "off"):
+    if (not skip_compat) and os.environ.get("APP_PG_SQLITE_COMPAT", "1").strip().lower() not in ("0", "false", "no", "off"):
         if not _PG_COMPAT_READY:
             with _PG_COMPAT_LOCK:
                 if not _PG_COMPAT_READY:

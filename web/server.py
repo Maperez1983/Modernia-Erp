@@ -23536,11 +23536,40 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
         if parsed.path in ("/health", "/api/health"):
-            self.send_response(200)
-            self.send_header("Content-Type", "text/plain; charset=utf-8")
-            self.end_headers()
-            self.wfile.write(b"ok")
-            return
+            # Health real: comprobamos conectividad a DB para evitar que el front espere minutos
+            # mientras Postgres está caído/no accesible.
+            try:
+                if db_is_postgres_enabled():
+                    conn = open_postgres_conn(with_row_factory=False, skip_compat=True)
+                    try:
+                        conn.execute("SELECT 1")
+                    finally:
+                        try:
+                            conn.close()
+                        except Exception:
+                            pass
+                else:
+                    conn = open_sqlite_conn(self.db_path, with_row_factory=False)
+                    try:
+                        conn.execute("SELECT 1")
+                    finally:
+                        try:
+                            conn.close()
+                        except Exception:
+                            pass
+                self.send_response(200)
+                self.send_header("Content-Type", "text/plain; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(b"ok")
+                return
+            except Exception as exc:
+                self.send_response(503)
+                self.send_header("Content-Type", "text/plain; charset=utf-8")
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                msg = f"db_unavailable: {type(exc).__name__}: {exc}"
+                self.wfile.write(msg.encode("utf-8", errors="ignore"))
+                return
         if parsed.path.startswith("/api/"):
             if parsed.path not in AUTH_PUBLIC_GET_ENDPOINTS and not self._require_api_auth():
                 return
