@@ -3,6 +3,7 @@
     const maxMs = Math.max(5000, Number(options?.maxMs || 45000) || 45000);
     const started = Date.now();
     let attempt = 0;
+    let lastDetail = "";
     while (Date.now() - started < maxMs) {
       attempt += 1;
       try {
@@ -11,7 +12,19 @@
         try {
           const res = await fetch("/api/health", { cache: "no-store", credentials: "same-origin", signal: controller.signal });
           if (res && res.ok) {
+            try { deps._lastHealthDetail = ""; } catch {}
             return true;
+          }
+          if (res && res.status === 503) {
+            try {
+              lastDetail = (await res.text()) || "";
+            } catch {
+              lastDetail = "";
+            }
+            try { deps._lastHealthDetail = lastDetail; } catch {}
+            if (deps?.authLoginStatus && lastDetail) {
+              deps.authLoginStatus.textContent = `Base de datos no disponible. ${lastDetail}`;
+            }
           }
         } finally {
           clearTimeout(timer);
@@ -47,7 +60,8 @@
   async function ensureAuthAndBoot(deps) {
     const healthy = await waitForHealth(deps, { maxMs: 45000 });
     if (!healthy) {
-      deps.showAuthOverlay("Servidor no disponible. Espera unos segundos y recarga.");
+      const detail = String(deps?._lastHealthDetail || "").trim();
+      deps.showAuthOverlay(detail ? `Base de datos no disponible. ${detail}` : "Servidor no disponible. Espera unos segundos y recarga.");
       try { document.body.classList.remove("auth-pending"); } catch {}
       return;
     }

@@ -235,6 +235,10 @@ AUTH_SESSIONS = {}
 AUTH_SESSIONS_LOCK = threading.Lock()
 
 
+class DbUnavailableError(RuntimeError):
+    pass
+
+
 def ensure_auth_sessions_table(conn):
     # Persist auth sessions in DB so Render restarts / multi-worker deployments don't invalidate cookies.
     # This keeps login stable across deploys and avoids sporadic 401s (especially noticeable when entrando al CRM).
@@ -23248,6 +23252,8 @@ class Handler(BaseHTTPRequestHandler):
     ocr_db_path = OCR_DB_DEFAULT
     _db_ready = False
     _db_ready_lock = threading.Lock()
+    _db_ready_last_attempt_at = 0.0
+    _db_ready_last_error = ""
 
     def log_message(self, format, *args):
         return
@@ -23255,11 +23261,28 @@ class Handler(BaseHTTPRequestHandler):
     def _ensure_db_ready(self):
         if Handler._db_ready:
             return
+
+        retry_after_s = max(1.0, float(os.environ.get("APP_DB_READY_RETRY_SECONDS", "5") or 5))
+        now_ts = time.time()
+        # Evita que cada request dispare `ensure_tables()` cuando la DB está caída.
+        if Handler._db_ready_last_error and (now_ts - float(Handler._db_ready_last_attempt_at or 0.0)) < retry_after_s:
+            raise DbUnavailableError(Handler._db_ready_last_error)
+
         with Handler._db_ready_lock:
             if Handler._db_ready:
                 return
-            ensure_tables(self.db_path)
-            Handler._db_ready = True
+            now_ts = time.time()
+            if Handler._db_ready_last_error and (now_ts - float(Handler._db_ready_last_attempt_at or 0.0)) < retry_after_s:
+                raise DbUnavailableError(Handler._db_ready_last_error)
+            Handler._db_ready_last_attempt_at = now_ts
+            try:
+                ensure_tables(self.db_path)
+                Handler._db_ready = True
+                Handler._db_ready_last_error = ""
+            except Exception as exc:
+                Handler._db_ready = False
+                Handler._db_ready_last_error = f"{type(exc).__name__}: {exc}"
+                raise DbUnavailableError(Handler._db_ready_last_error)
 
     def _track_conn(self, conn):
         if conn is None:
@@ -23579,6 +23602,8 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 self._ensure_db_ready()
                 self.handle_api(parsed)
+            except DbUnavailableError as exc:
+                json_response(self, {"error": "DB no disponible", "detail": str(exc)}, status=503)
             except Exception as exc:
                 json_response(self, {"error": f"{type(exc).__name__}: {exc}"}, status=500)
             return
@@ -23918,6 +23943,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         try:
             self._ensure_db_ready()
+        except DbUnavailableError as exc:
+            json_response(self, {"error": "DB no disponible", "detail": str(exc)}, status=503)
+            return
         except Exception as exc:
             json_response(self, {"error": "API error", "detail": f"{type(exc).__name__}: {exc}"}, status=500)
             return
@@ -41838,8 +41866,23 @@ def main():
     parser.add_argument("--port", type=int, default=env_port or 8000, help="Port.")
     args = parser.parse_args()
 
-    ensure_tables(args.db)
-    ensure_ocr_tables(args.ocr_db)
+    try:
+        ensure_tables(args.db)
+        Handler._db_ready = True
+        Handler._db_ready_last_error = ""
+        Handler._db_ready_last_attempt_at = time.time()
+    except Exception as exc:
+        # Importante: si Postgres/SQLite no está disponible, no matamos el proceso.
+        # Arrancamos el servidor para poder servir estáticos + /api/health devolviendo 503 con detalle.
+        Handler._db_ready = False
+        Handler._db_ready_last_error = f"{type(exc).__name__}: {exc}"
+        Handler._db_ready_last_attempt_at = time.time()
+        print(f"[WARN] DB no disponible al arrancar: {Handler._db_ready_last_error}")
+
+    try:
+        ensure_ocr_tables(args.ocr_db)
+    except Exception as exc:
+        print(f"[WARN] OCR DB no disponible al arrancar: {type(exc).__name__}: {exc}")
     Handler.db_path = args.db
     Handler.ocr_db_path = args.ocr_db
     ocr_workers = max(1, min(8, int(args.ocr_workers or 1)))
