@@ -10,6 +10,7 @@ import subprocess
 import tempfile
 import sys
 import os
+import shutil
 import unicodedata
 import uuid
 import zipfile
@@ -345,14 +346,8 @@ def first_unique(items: Iterable[str]) -> list[str]:
 
 def command_exists(name: str) -> bool:
     try:
-        return subprocess.run(
-            ["which", name],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=max(3.0, min(8.0, subprocess_timeout_seconds())),
-        ).returncode == 0
-    except subprocess.TimeoutExpired:
+        return shutil.which(name) is not None
+    except Exception:
         return False
 
 
@@ -392,6 +387,8 @@ def read_doc_text(path: Path) -> tuple[str, str]:
             return text, "text"
         # Fallback a textutil (a veces guarda el contenido en el cuerpo como "texto plano" aunque el XML venga raro).
     if suffix in {".doc", ".docx"}:
+        if not command_exists("textutil"):
+            return "", "missing_textutil"
         try:
             proc = subprocess.run(
                 ["textutil", "-convert", "txt", "-stdout", str(path)],
@@ -400,6 +397,8 @@ def read_doc_text(path: Path) -> tuple[str, str]:
                 check=False,
                 timeout=subprocess_timeout_seconds(),
             )
+        except FileNotFoundError:
+            return "", "missing_textutil"
         except subprocess.TimeoutExpired:
             return "", "timeout"
         if compact_spaces(proc.stdout):
@@ -419,6 +418,8 @@ def read_image_ocr(path: Path) -> tuple[str, str]:
             check=False,
             timeout=max(10.0, subprocess_timeout_seconds()),
         )
+    except FileNotFoundError:
+        return "", "missing_tesseract"
     except subprocess.TimeoutExpired:
         return "", "timeout"
     return proc.stdout or "", "ocr"
@@ -433,13 +434,17 @@ def read_pdf_text(path: Path, max_ocr_pages: int) -> tuple[str, str]:
             check=False,
             timeout=subprocess_timeout_seconds(),
         )
+    except FileNotFoundError:
+        proc = None
     except subprocess.TimeoutExpired:
         return "", "timeout"
-    text = proc.stdout or ""
+    text = (proc.stdout or "") if proc is not None else ""
     if compact_spaces(text):
         return text, "text"
-    if not command_exists("pdftoppm") or not command_exists("tesseract"):
-        return "", "empty"
+    if not command_exists("pdftoppm"):
+        return "", "missing_pdftoppm"
+    if not command_exists("tesseract"):
+        return "", "missing_tesseract"
     with tempfile.TemporaryDirectory() as tmpdir:
         prefix = Path(tmpdir) / "page"
         try:
@@ -450,6 +455,8 @@ def read_pdf_text(path: Path, max_ocr_pages: int) -> tuple[str, str]:
                 check=False,
                 timeout=max(15.0, subprocess_timeout_seconds()),
             )
+        except FileNotFoundError:
+            return "", "missing_pdftoppm"
         except subprocess.TimeoutExpired:
             return "", "timeout"
         if render.returncode != 0:
@@ -464,6 +471,8 @@ def read_pdf_text(path: Path, max_ocr_pages: int) -> tuple[str, str]:
                     check=False,
                     timeout=max(10.0, subprocess_timeout_seconds()),
                 )
+            except FileNotFoundError:
+                return "", "missing_tesseract"
             except subprocess.TimeoutExpired:
                 continue
             if compact_spaces(ocr.stdout):
