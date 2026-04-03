@@ -13205,6 +13205,8 @@ def parse_inmobiliaria_address_for_catastro(value):
     # Para Catastro sólo usamos la parte de la calle + número.
     raw = raw.split("·", 1)[0].strip()
     raw = raw.split("|", 1)[0].strip()
+    # Algunos imports guardan la dirección como "108 - Calle X 12 3ºA" (prefijo de referencia interna).
+    raw = re.sub(r"^\s*\d+\s*[-–—]\s*", "", raw).strip()
     if not raw:
         return {"sigla": "", "calle": "", "numero": "", "bloque": "", "escalera": "", "planta": "", "puerta": ""}
     normalized = raw.upper()
