@@ -23085,56 +23085,117 @@ def build_inmueble_nota_encargo_pdf(company, inmueble, captacion, owners, extra=
         if not str(renta_raw or "").strip():
             renta_raw = captacion.get("precio_objetivo") or inmueble.get("precio_objetivo")
         renta_value = parse_money_value(renta_raw)
-        renta_text = format_eur_short(renta_value) if renta_value and renta_value > 0 else "…………………………………………………………"
-        honorarios_alquiler_text = str(extra.get("honorarios_text") or extra.get("honorarios_alquiler") or "").strip() or "una mensualidad + IVA"
+        renta_text = format_eur_short(renta_value) if renta_value and renta_value > 0 else "..............."
+
+        honorarios_mensualidades = str(extra.get("honorarios_mensualidades") or extra.get("honorarios_text") or "").strip()
+        if not honorarios_mensualidades:
+            honorarios_mensualidades = "....................."
+        plazo_arrendamiento = str(extra.get("plazo_arrendamiento") or "").strip() or ".............."
+        garantia_adicional = str(extra.get("garantia_adicional") or "").strip() or "..........................................................................................................."
+        entrega_fecha = str(extra.get("entrega_fecha") or "").strip() or ".............................................................................."
+
+        datos_registrales_alq = str(extra.get("datos_registrales") or "").strip() or "……………………………………………………………………………..……………………………………….."
+        ref_catastral_alq = str(inmueble.get("referencia_catastral") or "").strip() or "…………………………………………………………………………….."
+        direccion_alq = str(direccion_full or "").strip() or "………………………………………………………………………………………………………………………………………………"
+        otros_alq = otros or "……..………………………………………………………………………………………………………………………………………………."
+        m2_cons = str(_pdf_format_number(m2_construidos, 0) or "").strip() if m2_construidos not in (None, "") else ""
+        m2_util = str(m2_utiles or "").strip()
+        m2_cons = m2_cons or "…….……"
+        m2_util = m2_util or "…………"
+
         body = []
-        for idx, owner in enumerate(owners[:2], start=1):
-            owner = owner or {}
-            nombre = pick_text(owner.get("nombre"), "…………………………………………………………")
-            nif = pick_text(owner.get("nif"), "……………………………………………….")
-            telefono = pick_text(owner.get("telefono"), "………………………")
-            email_value = pick_text(owner.get("email"), "…………………………………………………………")
-            domicilio = pick_text(owner.get("direccion") or owner.get("domicilio"), "……………………………. c/…………………………………………………….")
-            body.append(f"D./Dª {nombre}, mayor de edad, con domicilio en {domicilio}, teléfono {telefono}, e-mail {email_value} N.I.F: {nif}.")
-        if not body:
-            body.append("Dª ………………………………………………………. mayor de edad, con domicilio en…………………………….c/……………………………………………………., teléfono ………………………, e-mail…………………………………………………………N.I.F:……………………………………………….")
+        for idx in range(2):
+            owner = owners[idx] if idx < len(owners) else {}
+            nombre = str(owner.get("nombre") or "").strip() or ".............................................................................................................................."
+            domicilio = str(owner.get("direccion") or owner.get("domicilio") or "").strip() or "…………………………………………………………….. C/…………………………………………."
+            telefono = str(owner.get("telefono") or "").strip() or "................................................"
+            email_value = str(owner.get("email") or "").strip() or "......................................................"
+            nif = str(owner.get("nif") or "").strip() or "..................................................................................."
+            body.append(f"{idx + 1}.   De D./Dª{nombre} mayor de edad, con domicilio en {domicilio},teléfono {telefono}, e-mail {email_value} N.I.F:{nif}.")
+            body.append("")
+
         body += [
-            "Actuando:",
-            "en su propio nombre y representación (en adelante, el/los Cliente/s)",
-            "en nombre y representación de …………………………………………………………….con domicilio en …………………., c/………………………………….. ………………… provisto de N.I.F.:………………….., en su calidad de ………………………….según acredita documentalmente",
+            "    Actuando:",
             "",
-            "En su propio nombre y representación (en adelante, el Cliente),",
+            "    □ en su propio nombre y representación (en adelante, el Cliente)",
+            "        □ en nombre y representación de ………………………………………………… (en adelante, el Cliente)",
+            "              con domicilio en................................................., c/ …………………………………………………………….",
+            "              Provisto de N.I.F./C.I.F.: ………………………………….. en calidad de ………….………….. según acredita",
+            "              documentalmente",
             "",
-            f"ENCARGA, de forma exclusiva, a la sociedad {company_name} (en adelante, el Franquiciado), que acepta el encargo, la localización de un arrendatario para el inmueble identificado como sigue:",
-            f"Dirección: {direccion_full}",
-            f"Datos Registrales: {datos_registrales}",
-            f"Datos catastrales: {ref_catastral}{superficie_suffix}",
-            f"Otros: {otros or '—'}",
-            "2) La agencia se obliga a realizar las gestiones de mediación oportunas para la localización de un arrendatario, y a mantener informado de tales gestiones al cliente.",
-            f"3) El cliente fija el precio mensual de la renta en {renta_text}",
-            f"4) Los honorarios, IVA incluido, a percibir por el Franquiciado del Cliente será de {honorarios_alquiler_text}.",
-            f"5) El encargo tendrá validez desde el día {fmt_ddmmyyyy(fecha_inicio)} hasta el {fmt_ddmmyyyy(fecha_fin)}. Este plazo se presumirá tácitamente renovado, de forma sucesiva, por idénticos períodos de tiempo, salvo que cualquiera de las dos partes notifique por escrito a la otra su voluntad en contrario con, al menos, 7 días de antelación respecto de la finalización del plazo o de cualquiera de sus prórrogas.",
-            "Expirado el plazo antes citado o cualquiera de sus prórrogas sin que el Franquiciado haya localizado un arrendatario conforme con el presente encargo, éste no tendrá derecho a percibir cantidad alguna en concepto de honorarios.",
-            "6) El cliente autoriza a la agencia a solicitar y recibir los importes correspondientes a la fianza y a una mensualidad de la renta anticipada, ya retenerlas como depositaria de las mismas hasta la firma del contrato de arrendamiento.",
-            "7) El Cliente autoriza, asimismo, al Franquiciado a ofertar y publicitar el inmueble. Del mismo modo, el Cliente autoriza que el Franquiciado realice visitas comerciales al inmueble acompañado de potenciales arrendatarios.",
-            "8) El cliente declara tener total y exclusiva disponibilidad del inmueble en su afirmada condición de propietaria, según deberá acreditar documentalmente.",
-            "9) El cliente efectuará la entrega del inmueble en el momento/fecha de firma de contrato de arrendamiento.",
-            "10) Los honorarios fijados en el punto cuarto deberán ser abonados por el cliente en el supuesto de que sin justa causa se negara a aceptar una propuesta de arrendamiento conforme al precio del encargo, o habiendo aceptado la propuesta, se negara a firmar el contrato de arrendamiento.",
-            "11) …………………………………………………………………………………………………………………",
+            f"ENCARGA, de forma exclusiva, a la sociedad {company_name} (en adelante, la Agencia)",
+            "que acepta el encargo, la localización de un arrendatario para el inmueble identificado como sigue:",
+            f"Dirección: {direccion_alq}",
+            f"Datos Registrales: {datos_registrales_alq} Datos",
+            f"Catastrales:{ref_catastral_alq} m2 construidos: {m2_cons} m2 útiles: {m2_util}",
+            f"Otros:{otros_alq}",
             "",
-            f"Y para que así conste, lo firman, en {lugar_firma} a {fecha_firma}.",
-            "Por el Franquiciado                                Por el cliente/Representante",
-            "Nombre y Apellidos                                 Nombre y Apellidos",
+            "3. La Agencia se obliga a realizar las gestiones de mediación oportunas para la localización de un arrendatario,",
+            "   y a mantener informado de tales gestiones al Cliente",
+            f"4. El Cliente fija el precio mensual del arrendamiento del inmueble en {renta_text} Euros.",
+            f"5. El Cliente determina que el plazo de duración del arrendamiento será de {plazo_arrendamiento} meses/años (táchese lo",
+            "   que no proceda), destinándose el inmueble a:",
             "",
-            "La fórmula de la franquicia prevé la colaboración entre un empresario, Franquiciador, y otros empresarios, Franquiciados, todos ellos jurídica y económicamente independientes los unos de los otros. La marca Tecnocasa es un símbolo distintivo sin personalidad jurídica que identifica una red de intermediarios inmobiliarios en franquicia, cada uno de los cuales es una persona jurídica autónoma, independiente y directamente responsable de los actos relacionados con el desarrollo de su actividad profesional y empresarial.",
-            "INFORMACIÓN SOBRE PROTECCIÓN DE DATOS. El Franquiciado, en calidad de responsable, tratará la información que usted nos facilite con el fin de prestarle los servicios solicitados (intermediación inmobiliaria y/o financiera y obtención de seguros) así como, en caso de habernos otorgado el preceptivo consentimiento, para realizar actividades de prospección comercial y de envío de publicidad relacionada con los servicios ofrecidos, la cual podrá realizarse por cualquier medio (correo postal, e-mail, teléfono, mensajería instantánea, etc.) y, además, de habernos otorgado el preceptivo consentimiento, podrá ser adaptada a sus preferencias e intereses. La legitimación para el tratamiento se obtiene de la relación contractual derivada de la prestación de servicios profesionales demandada, pudiendo coexistir con consentimientos específicos, intereses legítimos y/o obligaciones legales. Podrán ser destinatarios de los datos las sociedades que integran las redes en franquicia de las enseñas Tecnocasa, Kíron y Tecnorete, así como las empresas del Grupo Tecnocasa. Se dispone de encargados de Tratamiento dentro y fuera de la UE acogidos a “Privacy Shield” o amparados por alguna otra base legal. Usted tiene derecho a acceder, rectificar y suprimir los datos, así como otros derechos, como se explica en la información adicional que ponemos a su disposición y que también puede consultar en la sección “Política de Privacidad” en la página web corporativa Tecnocasa.es.",
+            "          □ vivienda □ uso distinto de vivienda",
+            "6.   El importe que el arrendatario deberá entregar en concepto de Fianza corresponderá (art. 36 LAU) a:",
+            "",
+            "          □ una mensualidad (arrendamiento de vivienda)",
+            "          □ dos mensualidades (arrendamiento para uso distinto del de vivienda)",
+            "7. El Cliente requiere que el arrendatario aporte una garantía adicional consistente",
+            f"   en {garantia_adicional}",
+            f"8. Los honorarios a percibir por la Agencia serán equivalentes a {honorarios_mensualidades} mensualidad de renta + I.V.A.,",
+            "   que se abonarán a la firma del contrato de arrendamiento y serán satisfechos por partes iguales por el",
+            "   Cliente y el arrendatario.",
+            "",
+            f"9.  El encargo tendrá validez desde el día {fmt_ddmmyyyy(fecha_inicio)} hasta el {fmt_ddmmyyyy(fecha_fin)}. Este plazo se presumirá",
+            "    tácitamente renovado, de forma sucesiva, por idénticos períodos de tiempo, si el Cliente no manifiesta por",
+            "    escrito a la Agencia su voluntad en contrario con, al menos, 7 días de antelación respecto de la finalización",
+            "    del plazo o de cualquiera de sus prórrogas.",
+            "    Expirado el plazo antes citado o cualquiera de sus prórrogas sin que la Agencia haya localizado un",
+            "    arrendatario conforme con el presente encargo, ésta no tendrá derecho a percibir cantidad alguna en",
+            "    concepto de honorarios.",
+            "10. El Cliente autoriza a la Agencia a solicitar y recibir los importes correspondientes a la Fianza y a una",
+            "    mensualidad de renta anticipada, y a retenerlas como depositaria de las mismas hasta la firma del contrato",
+            "    de arrendamiento.",
+            "11. El Cliente autoriza, asimismo, a la Agencia a ofertar y publicitar el inmueble.",
+            "12. El Cliente declara tener la total y exclusiva disponibilidad del inmueble, en su afirmada condición de",
+            "    propietario, según deberá acreditar documentalmente",
+            "13. El Cliente efectuará la entrega del inmueble en el",
+            f"    momento/fecha {entrega_fecha}",
+            "14. En los siguientes supuestos, el Cliente abonará a la Agencia la totalidad de los gastos en los que ésta haya",
+            "    incurrido con ocasión de las gestiones objeto del presente encargo, y los honorarios correspondientes:",
+            "    - el arrendamiento se lleva a cabo por el Cliente o terceros durante el plazo de vigencia del presente",
+            "      encargo;",
+            "    - en el transcurso de un año desde la fecha de finalización del encargo, se realizase el arrendamiento a",
+            "      favor de personas presentadas al Cliente por la Agencia;",
+            "    - revoca el encargo antes de su caducidad.",
+            "15. Los honorarios fijados en el punto séptimo deberán ser abonados por el Cliente en el supuesto de que sin",
+            "    justa causa se negara a aceptar una propuesta de arrendamiento conforme con el encargo, habiendo",
+            "    aceptado la propuesta, se negara a firmar el contrato de arrendamiento.",
+            "",
+            "",
+            "     Y para que así conste, lo firman, en …………..……….a…..………. de …….………………. de ……………..",
+            "",
+            "",
+            "            Por El Intermediario                                                               Por el cliente/Representante",
+            "",
+            "           Nombre y Apellidos                                                                             Nombre y Apellidos",
+            "",
+            "",
+            "INFORMACIÓN SOBRE PROTECCIÓN DE DATOS. El Intermediario, en calidad de responsable, tratará la información que usted nos facilite con el",
+            "fin de prestarle los servicios solicitados (intermediación inmobiliaria y/o financiera y obtención de seguros) así como, en caso de habernos otorgado",
+            "el preceptivo consentimiento, para realizar actividades de prospección comercial y de envío de publicidad relacionada con los servicios ofrecidos, la",
+            "cual podrá realizarse por cualquier medio (correo postal, e-mail, teléfono, mensajería instantánea, etc.) y, además, de habernos otorgado el",
+            "preceptivo consentimiento, podrá ser adaptada a sus preferencias e intereses. La legitimación para el tratamiento se obtiene de la relación",
+            "contractual derivada de la prestación de servicios profesionales demandada, pudiendo coexistir con consentimientos específicos, intereses legítimos",
+            "y/o obligaciones legales. Usted tiene derecho a acceder, rectificar y suprimir los datos, así como otros derechos.",
         ]
         footer = [
             "Documento generado por el CRM Modernia a partir de la ficha del inmueble. Revisar legalmente antes de firma.",
         ]
         return build_branded_text_document_pdf(
-            "ENCARGO DE INTERMEDIACIÓN · ARRENDAMIENTO",
-            f"{company_name} · Nota de encargo alquiler",
+            "CONTRATO DE INTERMEDIACIÓN - ARRENDAMIENTO",
+            f"{company_name} · Nota de encargo arrendamiento",
             body,
             footer,
             brand_logo_url=company.get("logo_url"),
@@ -32573,7 +32634,12 @@ class Handler(BaseHTTPRequestHandler):
                         renta = (captacion or {}).get("precio_objetivo") or inmueble.get("precio_objetivo")
                     if renta not in (None, ""):
                         out["renta_mensual"] = str(renta)
-                    out["honorarios_text"] = "una mensualidad + IVA"
+                    out["honorarios_mensualidades"] = "1"
+                    out["plazo_arrendamiento"] = ""
+                    out["destino_arrendamiento"] = "vivienda"
+                    out["fianza_tipo"] = "una"
+                    out["garantia_adicional"] = ""
+                    out["entrega_fecha"] = ""
                 else:
                     precio = None
                     if operacion:
@@ -40279,6 +40345,12 @@ class Handler(BaseHTTPRequestHandler):
                 "renta_mensual": params.get("renta_mensual", [""])[0],
                 "honorarios_pct": params.get("honorarios_pct", [""])[0],
                 "honorarios_text": params.get("honorarios_text", [""])[0],
+                "honorarios_mensualidades": params.get("honorarios_mensualidades", [""])[0],
+                "plazo_arrendamiento": params.get("plazo_arrendamiento", [""])[0],
+                "destino_arrendamiento": params.get("destino_arrendamiento", [""])[0],
+                "fianza_tipo": params.get("fianza_tipo", [""])[0],
+                "garantia_adicional": params.get("garantia_adicional", [""])[0],
+                "entrega_fecha": params.get("entrega_fecha", [""])[0],
                 "iva_pct": params.get("iva_pct", [""])[0],
                 "fecha_inicio": params.get("fecha_inicio", [""])[0],
                 "fecha_fin": params.get("fecha_fin", [""])[0],
@@ -40299,8 +40371,12 @@ class Handler(BaseHTTPRequestHandler):
                         extra["renta_mensual"] = operacion.get("precio_encargo")
                     else:
                         extra["renta_mensual"] = captacion.get("precio_objetivo") or inmueble.get("precio_objetivo") or ""
-                if not str(extra.get("honorarios_text") or "").strip():
-                    extra["honorarios_text"] = "una mensualidad + IVA"
+                if not str(extra.get("honorarios_mensualidades") or "").strip():
+                    extra["honorarios_mensualidades"] = "1"
+                if not str(extra.get("destino_arrendamiento") or "").strip():
+                    extra["destino_arrendamiento"] = "vivienda"
+                if not str(extra.get("fianza_tipo") or "").strip():
+                    extra["fianza_tipo"] = "una"
             else:
                 if not str(extra.get("precio_venta") or "").strip():
                     if operacion and operacion.get("precio_encargo") not in (None, ""):

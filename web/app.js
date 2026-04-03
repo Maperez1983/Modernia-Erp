@@ -16547,8 +16547,34 @@ const openInmuebleNotaEncargoPdf = () => {
                 <input name="renta_mensual" />
               </label>
               <label data-encargo-only="alquiler">
-                Honorarios alquiler (texto)
-                <input name="honorarios_text" placeholder="Ej. una mensualidad + IVA" />
+                Honorarios (mensualidades)
+                <input name="honorarios_mensualidades" placeholder="Ej. 1" />
+              </label>
+              <label data-encargo-only="alquiler">
+                Plazo arrendamiento (meses/años)
+                <input name="plazo_arrendamiento" placeholder="Ej. 12 meses" />
+              </label>
+              <label data-encargo-only="alquiler">
+                Destino del inmueble
+                <select name="destino_arrendamiento">
+                  <option value="vivienda">Vivienda</option>
+                  <option value="uso_distinto">Uso distinto</option>
+                </select>
+              </label>
+              <label data-encargo-only="alquiler">
+                Fianza (art. 36 LAU)
+                <select name="fianza_tipo">
+                  <option value="una">Una mensualidad</option>
+                  <option value="dos">Dos mensualidades</option>
+                </select>
+              </label>
+              <label data-encargo-only="alquiler" class="span-2">
+                Garantía adicional (opcional)
+                <input name="garantia_adicional" />
+              </label>
+              <label data-encargo-only="alquiler" class="span-2">
+                Entrega del inmueble (momento/fecha)
+                <input name="entrega_fecha" />
               </label>
               <label>
                 IVA (%)
@@ -16633,7 +16659,12 @@ const openInmuebleNotaEncargoPdf = () => {
       setValue("precio_venta", defaultPrice);
       setValue("honorarios_pct", defaultHonorariosPct);
       setValue("renta_mensual", defaultPrice);
-      setValue("honorarios_text", "una mensualidad + IVA");
+      setValue("honorarios_mensualidades", "1");
+      setValue("plazo_arrendamiento", "");
+      setValue("destino_arrendamiento", "vivienda");
+      setValue("fianza_tipo", "una");
+      setValue("garantia_adicional", "");
+      setValue("entrega_fecha", "");
       setValue("iva_pct", "21");
       setValue("fecha_inicio", defaultStart);
       setValue("fecha_fin", defaultEnd);
@@ -16743,8 +16774,8 @@ const openInmuebleNotaEncargoPdf = () => {
             alert("Renta mensual requerida.");
             return;
           }
-          if (!values.honorarios_text) {
-            alert("Honorarios alquiler (texto) requeridos.");
+          if (!values.honorarios_mensualidades) {
+            alert("Honorarios (mensualidades) requeridos.");
             return;
           }
         } else {
@@ -16775,7 +16806,12 @@ const openInmuebleNotaEncargoPdf = () => {
           "precio_venta",
           "renta_mensual",
           "honorarios_pct",
-          "honorarios_text",
+          "honorarios_mensualidades",
+          "plazo_arrendamiento",
+          "destino_arrendamiento",
+          "fianza_tipo",
+          "garantia_adicional",
+          "entrega_fecha",
           "iva_pct",
           "fecha_inicio",
           "fecha_fin",
