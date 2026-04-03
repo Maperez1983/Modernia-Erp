@@ -4425,7 +4425,9 @@ def extract_invoice_amount(text, labels, kind="generic"):
         return 0.0
     money_decimal_re = re.compile(r"(?<![\dA-Z])(-?\d{1,3}(?:[.\s]\d{3})*(?:[.,]\d{2}))(?![\d%]|[.,]\d)", re.IGNORECASE)
     money_int_re = re.compile(r"(?<![\dA-Z])(-?\d{1,6})(?![\dA-Z])", re.IGNORECASE)
-    best_total = 0.0
+    kind_key = str(kind or "generic").strip().lower()
+    best_value = 0.0
+    best_pos = -1
     for label in labels:
         label_raw = str(label or "").strip()
         if not label_raw:
@@ -4442,7 +4444,10 @@ def extract_invoice_amount(text, labels, kind="generic"):
                 phrase = r"\s+".join(re.escape(w) for w in words)
                 label_re = rf"\b{phrase}\b"
         for match in re.finditer(rf"{label_re}\s*[:\-]?\s*", text, re.IGNORECASE):
-            tail = text[match.end() : match.end() + 180]
+            tail = text[match.end() : match.end() + 220]
+            # En \"TOTAL\" ignoramos los subtotales tipo \"Total IVA\" / \"Total REE\".
+            if kind_key == "total" and re.match(r"^\s*(IVA|REE)\b", tail, re.IGNORECASE):
+                continue
             values = []
             values_decimal = []
             has_any_decimal = bool(re.search(r"\d[.,]\d{2}\b", tail))
@@ -4470,28 +4475,15 @@ def extract_invoice_amount(text, labels, kind="generic"):
             candidates = values_decimal or values
             if not candidates:
                 continue
-            kind_key = str(kind or "generic").strip().lower()
-            if kind_key == "total":
-                best_total = max(best_total, max(candidates))
-                continue
-            if kind_key == "base":
-                if len(candidates) == 1:
-                    return candidates[0]
-                sorted_vals = sorted(candidates, reverse=True)
-                for value in sorted_vals[1:]:
-                    if value > 0:
-                        return value
-                return sorted_vals[0]
-            if kind_key in ("iva", "irpf"):
-                max_value = max(candidates)
-                smaller = [value for value in candidates if value <= max_value * 0.5]
-                if smaller:
-                    return max(smaller)
-                return min(candidates)
-            return candidates[0]
-    if str(kind or "").strip().lower() == "total":
-        return best_total
-    return 0.0
+            # Heurística: nos quedamos con el último match (más abajo en el texto), usando el primer importe.
+            # Suele corresponder al total/base/IVA de resumen al final de la factura.
+            candidate = candidates[0]
+            if match.start() >= best_pos:
+                best_pos = match.start()
+                best_value = candidate
+            if kind_key == "generic":
+                return candidate
+    return best_value if best_value > 0 else 0.0
 
 
 def parse_invoice_text(text):

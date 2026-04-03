@@ -249,6 +249,12 @@ def detect_document_type(path: Path, text: str, parsed: dict[str, Any]) -> str:
 
 
 def infer_vendor(text: str, source_path: Path) -> str:
+    filename_norm = norm(source_path.name)
+    text_norm = norm(text)
+    if "APPLE" in filename_norm or "APPLE" in text_norm:
+        return "APPLE"
+    if "REGISTRO DE LA PROPIEDAD" in text_norm:
+        return "REGISTRO DE LA PROPIEDAD"
     known = canonical_supplier_name(text)
     if known != str(text or "").strip():
         return known
@@ -270,6 +276,11 @@ def infer_vendor(text: str, source_path: Path) -> str:
             continue
         line = re.sub(r"\s+", " ", line).strip()
         upper = norm(line)
+        if not upper:
+            continue
+        letters = re.sub(r"[^A-Z]", "", upper)
+        if len(letters) < 3:
+            continue
         if " CLIENTE " in f" {upper} ":
             left = re.split(r"\bCLIENTE\b", line, flags=re.IGNORECASE)[0].strip(" .:-")
             if len(left) >= 3:
@@ -630,6 +641,12 @@ def enrich_parsed(path: Path, text: str, parsed: dict[str, Any]) -> dict[str, An
             if not is_implausible_vat(inferred_base, inferred_iva, total_val):
                 result["base_imponible"] = inferred_base
                 result["cuota_iva"] = inferred_iva
+                base_val = inferred_base
+                iva_val = inferred_iva
+        # Último recurso: si el IVA extraído está claramente mal (p. ej. tickets Apple), tratamos el gasto como sin IVA.
+        if is_implausible_vat(float(result.get("base_imponible") or 0.0), float(result.get("cuota_iva") or 0.0), total_val):
+            result["base_imponible"] = round(total_val, 2)
+            result["cuota_iva"] = 0.0
     result["descripcion"] = result.get("descripcion") or f"{result.get('numero') or 'Documento'} · {result.get('tercero') or path.stem}"
     return result
 
