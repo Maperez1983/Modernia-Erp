@@ -4643,8 +4643,16 @@
                     <div class="inline-row">
                       <input name="direccion" required />
                       <button type="button" id="captacionCatastroLookup" class="secondary catastro-button">
-                        <span class="catastro-icon" aria-hidden="true">CAT</span>
+                        <span class="catastro-icon catastro-icon--catastro" aria-hidden="true">
+                          <img class="catastro-logo-img" src="icons/catastro.png" alt="" loading="lazy" />
+                        </span>
                         <span>Buscar catastro</span>
+                      </button>
+                      <button type="button" id="captacionCatastroOpen" class="secondary catastro-button" title="Abrir Catastro">
+                        <span class="catastro-icon catastro-icon--catastro" aria-hidden="true">
+                          <img class="catastro-logo-img" src="icons/catastro.png" alt="" loading="lazy" />
+                        </span>
+                        <span>Abrir</span>
                       </button>
                     </div>
                     <span id="captacionCatastroStatus" class="muted"></span>

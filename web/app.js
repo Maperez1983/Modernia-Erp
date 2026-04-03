@@ -17334,6 +17334,22 @@ const renderEditableGrid = (grid, fields, data, target) => {
       card.appendChild(hint);
       const actions = document.createElement("div");
       actions.className = "catastro-actions";
+      const openBtn = document.createElement("button");
+      openBtn.type = "button";
+      openBtn.className = "secondary catastro-button";
+      openBtn.innerHTML = buildCatastroButtonInner("Abrir Catastro");
+      openBtn.addEventListener("click", () => {
+        const ref = String(refInput ? refInput.value : "").trim();
+        const address = buildInmuebleDisplayAddress({
+          direccion: String(inputMap?.direccion?.value || "").trim(),
+          poblacion: String(inputMap?.poblacion?.value || "").trim(),
+          provincia: String(inputMap?.provincia?.value || "").trim(),
+          codigo_postal: String(inputMap?.codigo_postal?.value || "").trim(),
+        });
+        const url = buildCatastroUrl(ref, address);
+        window.open(url, "_blank", "noopener");
+      });
+      actions.appendChild(openBtn);
       const lookupBtn = document.createElement("button");
       lookupBtn.type = "button";
       lookupBtn.className = "secondary catastro-button";
@@ -43779,6 +43795,15 @@ if (captacionForm) {
   if (captacionCatastroLookup) {
     captacionCatastroLookup.addEventListener("click", () => {
       lookupCaptacionCatastro();
+    });
+  }
+  const captacionCatastroOpen = document.getElementById("captacionCatastroOpen");
+  if (captacionCatastroOpen) {
+    captacionCatastroOpen.addEventListener("click", () => {
+      const direccion = String(getCaptacionField("direccion")?.value || "").trim();
+      const ref = String(getCaptacionField("referencia_catastral")?.value || "").trim();
+      const url = buildCatastroUrl(ref, direccion);
+      window.open(url, "_blank", "noopener");
     });
   }
   captacionForm.addEventListener("submit", async (event) => {
