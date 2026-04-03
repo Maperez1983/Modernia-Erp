@@ -264,6 +264,96 @@ def ensure_auth_sessions_table(conn):
         pass
 
 
+def ensure_crm_stage_events_schema(conn):
+    """
+    Tabla de eventos de etapa (embudo/conversión) para CRM Inmobiliario.
+    Se crea de forma perezosa para no romper DBs existentes.
+    """
+    if not conn:
+        return
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS crm_stage_events (
+          id TEXT PRIMARY KEY,
+          empresa_id TEXT NOT NULL,
+          captacion_id TEXT,
+          inmueble_id TEXT,
+          from_etapa TEXT,
+          to_etapa TEXT NOT NULL,
+          usuario TEXT,
+          responsable TEXT,
+          created_at TEXT NOT NULL,
+          FOREIGN KEY (empresa_id) REFERENCES empresas(id)
+        )
+        """
+    )
+    try:
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_crm_stage_events_empresa_created ON crm_stage_events (empresa_id, created_at)")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_crm_stage_events_empresa_responsable_created ON crm_stage_events (empresa_id, responsable, created_at)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_crm_stage_events_empresa_to_etapa_created ON crm_stage_events (empresa_id, to_etapa, created_at)"
+        )
+    except Exception:
+        pass
+
+
+def _session_user_label(session):
+    if not session:
+        return ""
+    usuario = str(session.get("usuario") or "").strip()
+    if usuario:
+        return usuario
+    nombre = str(session.get("nombre") or "").strip()
+    apellido = str(session.get("apellido") or "").strip()
+    return " ".join([chunk for chunk in (nombre, apellido) if chunk]).strip()
+
+
+def log_crm_stage_event(
+    conn,
+    empresa_id,
+    inmueble_id,
+    captacion_id,
+    to_etapa,
+    now="now",
+    from_etapa=None,
+    session=None,
+    responsable=None,
+):
+    if not conn:
+        return
+    eid = str(empresa_id or "").strip()
+    to_value = str(to_etapa or "").strip()
+    if not eid or not to_value:
+        return
+    ensure_crm_stage_events_schema(conn)
+    usuario = _session_user_label(session) or "Sistema"
+    resp_value = str(responsable or "").strip()
+    if not resp_value:
+        resp_value = usuario if usuario != "Sistema" else ""
+    conn.execute(
+        """
+        INSERT INTO crm_stage_events (
+          id, empresa_id, captacion_id, inmueble_id, from_etapa, to_etapa, usuario, responsable, created_at
+        ) VALUES (
+          ?, ?, ?, ?, ?, ?, ?, ?, datetime(?)
+        )
+        """,
+        (
+            os.urandom(16).hex(),
+            eid,
+            str(captacion_id or "").strip() or None,
+            str(inmueble_id or "").strip() or None,
+            str(from_etapa or "").strip() or None,
+            to_value,
+            usuario,
+            resp_value or None,
+            now,
+        ),
+    )
+
+
 def open_auth_store_conn(with_row_factory=True):
     if db_is_postgres_enabled():
         return open_postgres_conn(with_row_factory=with_row_factory)
@@ -10804,10 +10894,26 @@ def normalize_inmo_action_type(value):
     aliases = {
         "cita de adquisicion": "cita_adquisicion",
         "cita adquisicion": "cita_adquisicion",
+        "cita de venta/alquiler": "cita_comprador",
+        "cita de venta alquiler": "cita_comprador",
         "cita comprador": "cita_comprador",
         "cita de comprador": "cita_comprador",
+        "cita de gestion encargo (seguimiento)": "cita_gestion_encargo",
+        "cita de gestion encargo seguimiento": "cita_gestion_encargo",
+        "cita gestion encargo (seguimiento)": "cita_gestion_encargo",
+        "cita gestion encargo seguimiento": "cita_gestion_encargo",
+        "cita general (no comercial)": "cita_general",
+        "cita general no comercial": "cita_general",
         "cita propuesta": "cita_propuesta",
         "cita de propuesta": "cita_propuesta",
+        "cita de propuesta de compra/alquiler": "cita_propuesta",
+        "cita de propuesta de compra alquiler": "cita_propuesta",
+        "cita acept. de la propuesta": "cita_propietarios",
+        "cita acept de la propuesta": "cita_propietarios",
+        "cita aceptacion de la propuesta": "cita_propietarios",
+        "post-aceptacion": "cita_notaria",
+        "post aceptacion": "cita_notaria",
+        "estudio financiero": "estudio_financiero",
         "cita propietarios": "cita_propietarios",
         "cita de propietarios": "cita_propietarios",
         "cita aceptacion propietarios": "cita_propietarios",
@@ -10815,6 +10921,8 @@ def normalize_inmo_action_type(value):
         "cita contraoferta": "cita_contraoferta",
         "cita aceptacion contraoferta": "cita_contraoferta",
         "cita de aceptacion contraoferta": "cita_contraoferta",
+        "cita notaria": "cita_notaria",
+        "cita de notaria": "cita_notaria",
     }
     return aliases.get(normalized, normalized)
 
@@ -10957,9 +11065,13 @@ def persist_generated_inmueble_pdf(
 INMO_ACTION_RESULT_OPTIONS = {
     "cita_adquisicion": {"Positivo", "Negativo", "Reprogramar", "No realizada"},
     "cita_comprador": {"Estudio", "No interesa", "Interesado"},
+    "cita_gestion_encargo": {"Realizada", "Reprogramar", "No realizada"},
+    "cita_general": {"Realizada", "Reprogramar", "No realizada"},
     "cita_propuesta": {"Se realiza propuesta", "No se realiza"},
     "cita_propietarios": {"Aceptada", "Rechazada", "Contraoferta"},
     "cita_contraoferta": {"Aceptada", "Rechazada"},
+    "cita_notaria": {"Firmada", "Reprogramar", "No realizada"},
+    "estudio_financiero": {"Viable", "No viable", "Pendiente documentación"},
 }
 
 
@@ -32887,6 +32999,20 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 for cliente_id in propietarios:
                     ensure_inmueble_propietario_link(conn, inmueble_id, cliente_id, now)
+                try:
+                    log_crm_stage_event(
+                        conn,
+                        empresa["id"],
+                        inmueble_id,
+                        captacion_id,
+                        etapa_value,
+                        now=now,
+                        from_etapa=None,
+                        session=session,
+                        responsable=payload.get("responsable") or payload.get("asesor"),
+                    )
+                except Exception:
+                    pass
                 conn.commit()
                 json_response(self, {"ok": True, "id": captacion_id, "inmueble_id": inmueble_id})
                 return
@@ -32956,6 +33082,13 @@ class Handler(BaseHTTPRequestHandler):
             if not record_id or not etapa:
                 json_response(self, {"error": "id y etapa requeridos"}, status=400)
                 return
+            try:
+                prev = conn.execute(
+                    "SELECT etapa, situacion_comercial, inmueble_id, responsable, asesor FROM captaciones WHERE id = ? LIMIT 1",
+                    (record_id,),
+                ).fetchone()
+            except Exception:
+                prev = None
             conn.execute(
                 """
                 UPDATE captaciones
@@ -32974,11 +33107,36 @@ class Handler(BaseHTTPRequestHandler):
                 """,
                 (etapa, now, record_id),
             )
+            try:
+                inmueble_id = str(prev["inmueble_id"] or "").strip() if prev else ""
+                responsable = str((prev["responsable"] or prev["asesor"] or "") if prev else "").strip()
+                from_etapa = str(prev["situacion_comercial"] or prev["etapa"] or "").strip() if prev else ""
+                if inmueble_id:
+                    log_crm_stage_event(
+                        conn,
+                        empresa["id"],
+                        inmueble_id,
+                        record_id,
+                        etapa,
+                        now=now,
+                        from_etapa=from_etapa,
+                        session=session,
+                        responsable=responsable,
+                    )
+            except Exception:
+                pass
         elif parsed.path == "/api/captacion_update":
             inmueble_id = payload.get("inmueble_id")
             if not inmueble_id:
                 json_response(self, {"error": "inmueble_id requerido"}, status=400)
                 return
+            try:
+                prev = conn.execute(
+                    "SELECT id, etapa, situacion_comercial, responsable, asesor FROM captaciones WHERE inmueble_id = ? LIMIT 1",
+                    (inmueble_id,),
+                ).fetchone()
+            except Exception:
+                prev = None
             allowed = (
                 "propietario",
                 "propietario_telefono",
@@ -33053,6 +33211,7 @@ class Handler(BaseHTTPRequestHandler):
                     updates[key] = parse_optional_int(updates.get(key))
             if "etapa" in updates and "situacion_comercial" not in updates:
                 updates["situacion_comercial"] = updates["etapa"]
+            next_stage = str(updates.get("situacion_comercial") or updates.get("etapa") or "").strip()
             set_clause = ", ".join([f"{key} = ?" for key in updates])
             values = list(updates.values()) + [now, inmueble_id]
             conn.execute(
@@ -33107,6 +33266,25 @@ class Handler(BaseHTTPRequestHandler):
                     f"UPDATE inmuebles SET {inm_set}, updated_at = datetime(?) WHERE id = ?",
                     inm_values,
                 )
+            try:
+                from_stage = str((prev["situacion_comercial"] or prev["etapa"] or "") if prev else "").strip()
+                captacion_id = str(prev["id"] or "").strip() if prev else ""
+                prev_resp = str((prev["responsable"] or prev["asesor"] or "") if prev else "").strip()
+                responsable = str(updates.get("responsable") or updates.get("asesor") or prev_resp or "").strip()
+                if next_stage and captacion_id and next_stage != from_stage:
+                    log_crm_stage_event(
+                        conn,
+                        empresa["id"],
+                        inmueble_id,
+                        captacion_id,
+                        next_stage,
+                        now=now,
+                        from_etapa=from_stage,
+                        session=session,
+                        responsable=responsable,
+                    )
+            except Exception:
+                pass
         elif parsed.path == "/api/captacion_delete":
             record_id = str(payload.get("id") or payload.get("captacion_id") or "").strip()
             if not record_id:
@@ -33189,6 +33367,11 @@ class Handler(BaseHTTPRequestHandler):
                     json_response(self, {"error": "Inmueble no encontrado"}, status=404)
                     return
 
+                try:
+                    from_stage = str(captacion["etapa"] or captacion["situacion_comercial"] or "").strip()
+                except Exception:
+                    from_stage = ""
+
                 propietarios = get_inmueble_propietarios(conn, captacion["inmueble_id"])
                 owner1 = propietarios[0] if len(propietarios) > 0 else {}
                 owner2 = propietarios[1] if len(propietarios) > 1 else {}
@@ -33235,12 +33418,27 @@ class Handler(BaseHTTPRequestHandler):
                         ensure_pending_inmueble_stage_actions(conn, empresa["id"], captacion["inmueble_id"], destino_label, now, responsable=responsable)
                     except Exception:
                         pass
+                    try:
+                        log_crm_stage_event(
+                            conn,
+                            empresa["id"],
+                            captacion["inmueble_id"],
+                            captacion_id,
+                            destino_label,
+                            now=now,
+                            from_etapa=from_stage,
+                            session=session,
+                            responsable=responsable,
+                        )
+                    except Exception:
+                        pass
                     conn.commit()
                     json_response(self, {"ok": True, "destino": destino_label, "inmueble_id": captacion["inmueble_id"]})
                     return
 
                 if destino_label == "Encargo":
                     precio_encargo = parse_money_value(payload.get("precio_encargo"))
+                    honorarios = parse_money_value(payload.get("honorarios"))
                     cap_updates = {
                         "situacion_comercial": destino_label,
                         "fecha_conversion": now,
@@ -33259,6 +33457,8 @@ class Handler(BaseHTTPRequestHandler):
                     if precio_encargo is not None:
                         inm_updates["precio_objetivo"] = precio_encargo
                         inm_updates["precio_valoracion"] = precio_encargo
+                    if honorarios is not None:
+                        inm_updates["honorarios"] = honorarios
                     inm_set_clause = ", ".join([f"{key} = ?" for key in inm_updates])
                     conn.execute(
                         f"UPDATE inmuebles SET {inm_set_clause}, updated_at = datetime(?) WHERE id = ?",
@@ -33276,6 +33476,20 @@ class Handler(BaseHTTPRequestHandler):
                         pass
                     try:
                         ensure_pending_inmueble_stage_actions(conn, empresa["id"], captacion["inmueble_id"], destino_label, now, responsable=responsable)
+                    except Exception:
+                        pass
+                    try:
+                        log_crm_stage_event(
+                            conn,
+                            empresa["id"],
+                            captacion["inmueble_id"],
+                            captacion_id,
+                            destino_label,
+                            now=now,
+                            from_etapa=from_stage,
+                            session=session,
+                            responsable=responsable,
+                        )
                     except Exception:
                         pass
                     conn.commit()
@@ -33467,6 +33681,34 @@ class Handler(BaseHTTPRequestHandler):
                         "UPDATE inmuebles SET estado = ?, updated_at = datetime(?) WHERE id = ?",
                         (destino_label, now, captacion["inmueble_id"]),
                     )
+                    try:
+                        responsable = str(
+                            (
+                                payload.get("responsable_gestion")
+                                or payload.get("agente")
+                                or captacion["asesor"]
+                                or captacion["responsable"]
+                                or inmueble.get("asesor")
+                                or inmueble.get("responsable")
+                                or ""
+                            )
+                        ).strip()
+                    except Exception:
+                        responsable = ""
+                    try:
+                        log_crm_stage_event(
+                            conn,
+                            empresa["id"],
+                            captacion["inmueble_id"],
+                            captacion_id,
+                            destino_label,
+                            now=now,
+                            from_etapa=from_stage,
+                            session=session,
+                            responsable=responsable,
+                        )
+                    except Exception:
+                        pass
                     conn.commit()
                     json_response(self, {"ok": True, "destino": destino_label, "id": record_id, "inmueble_id": captacion["inmueble_id"]})
                     return
@@ -33577,6 +33819,20 @@ class Handler(BaseHTTPRequestHandler):
                     pass
                 try:
                     ensure_pending_inmueble_stage_actions(conn, empresa["id"], captacion["inmueble_id"], destino_label, now, responsable=responsable)
+                except Exception:
+                    pass
+                try:
+                    log_crm_stage_event(
+                        conn,
+                        empresa["id"],
+                        captacion["inmueble_id"],
+                        captacion_id,
+                        destino_label,
+                        now=now,
+                        from_etapa=from_stage,
+                        session=session,
+                        responsable=responsable,
+                    )
                 except Exception:
                     pass
                 conn.commit()
@@ -41782,6 +42038,409 @@ class Handler(BaseHTTPRequestHandler):
                     "ingresos": [dict(r) for r in ingresos],
                     "gastos": [dict(r) for r in gastos],
                     "alquileres": [dict(r) for r in alquileres],
+                },
+            )
+            return
+
+        if path == "/api/crm_resumen_ytd":
+            empresa_id = (params.get("empresa_id", [""])[0] or "").strip()
+            if not empresa_id:
+                json_response(self, {"error": "empresa_id requerido"}, status=400)
+                return
+            raw_year = (params.get("year", [""])[0] or "").strip()
+            year = raw_year if re.match(r"^\d{4}$", raw_year or "") else str(datetime.now().year)
+            session = getattr(self, "auth_session", None) or self._current_session()
+            is_privileged = bool(workspace_actor_is_privileged(conn, session))
+
+            responsable_param = str((params.get("responsable", [""])[0] or "")).strip()
+            if not is_privileged:
+                responsable_param = responsable_param or _session_user_label(session)
+            responsable_like = f"%{responsable_param.lower()}%" if responsable_param else ""
+
+            try:
+                ensure_crm_stage_events_schema(conn)
+                conn.commit()
+            except Exception:
+                pass
+
+            def apply_like(where, values, column_expr):
+                if not responsable_like:
+                    return
+                where.append(f"LOWER(COALESCE({column_expr}, '')) LIKE ?")
+                values.append(responsable_like)
+
+            # --- Ventas (compraventas cerradas) ---
+            venta_fecha_expr = "COALESCE(NULLIF(o.fecha_escritura, ''), NULLIF(o.fecha_operacion, ''), NULLIF(o.fecha_contrato, ''))"
+            ventas_where = [
+                "o.empresa_id = ?",
+                "LOWER(COALESCE(o.tipo_operacion, 'venta')) = 'venta'",
+                f"substr({venta_fecha_expr}, 1, 4) = ?",
+                "((o.fecha_escritura IS NOT NULL AND TRIM(o.fecha_escritura) <> '') OR COALESCE(o.precio_escritura, 0) > 0)",
+            ]
+            ventas_values = [empresa_id, year]
+            apply_like(ventas_where, ventas_values, "COALESCE(o.responsable_gestion, o.agente, i.responsable, '')")
+            ventas_by_month = conn.execute(
+                f"""
+                SELECT substr({venta_fecha_expr}, 1, 7) AS month,
+                       COUNT(*) AS total,
+                       ROUND(SUM(COALESCE(NULLIF(o.honorarios, 0), i.honorarios, 0)), 2) AS comision
+                FROM operaciones_inmobiliarias o
+                LEFT JOIN inmuebles i ON i.id = o.inmueble_id
+                WHERE {' AND '.join(ventas_where)}
+                GROUP BY substr({venta_fecha_expr}, 1, 7)
+                ORDER BY month
+                """,
+                ventas_values,
+            ).fetchall()
+            ventas_total = int(sum(int(r["total"] or 0) for r in ventas_by_month) or 0)
+            ventas_comision = float(sum(float(r["comision"] or 0) for r in ventas_by_month) or 0.0)
+
+            # --- Alquileres ---
+            alquiler_where = ["empresa_id = ?", "fecha IS NOT NULL", "substr(fecha, 1, 4) = ?"]
+            alquiler_values = [empresa_id, year]
+            apply_like(alquiler_where, alquiler_values, "agente")
+            alquileres_by_month = conn.execute(
+                f"""
+                SELECT substr(fecha, 1, 7) AS month,
+                       COUNT(*) AS total,
+                       ROUND(SUM(COALESCE(importe_comision, 0)), 2) AS comision
+                FROM alquileres
+                WHERE {' AND '.join(alquiler_where)}
+                GROUP BY substr(fecha, 1, 7)
+                ORDER BY month
+                """,
+                alquiler_values,
+            ).fetchall()
+            alquileres_total = int(sum(int(r["total"] or 0) for r in alquileres_by_month) or 0)
+            alquileres_comision = float(sum(float(r["comision"] or 0) for r in alquileres_by_month) or 0.0)
+
+            # --- Citas (acciones tipo "cita") ---
+            citas_where = [
+                "empresa_id = ?",
+                "LOWER(COALESCE(servicio, '')) = 'inmobiliaria'",
+                "fecha IS NOT NULL",
+                "substr(fecha, 1, 4) = ?",
+                "("
+                "LOWER(COALESCE(tipo, '')) LIKE 'cita%'"
+                " OR LOWER(COALESCE(tipo, '')) IN ('post-aceptación', 'post-aceptacion', 'estudio financiero', 'personal')"
+                ")",
+            ]
+            citas_values = [empresa_id, year]
+            apply_like(citas_where, citas_values, "responsable")
+            citas_by_month = conn.execute(
+                f"""
+                SELECT substr(fecha, 1, 7) AS month,
+                       COUNT(*) AS total
+                FROM acciones
+                WHERE {' AND '.join(citas_where)}
+                GROUP BY substr(fecha, 1, 7)
+                ORDER BY month
+                """,
+                citas_values,
+            ).fetchall()
+            citas_total = int(sum(int(r["total"] or 0) for r in citas_by_month) or 0)
+
+            # --- Embudo (eventos de etapa) ---
+            embudo_where = ["empresa_id = ?", "substr(created_at, 1, 4) = ?"]
+            embudo_values = [empresa_id, year]
+            apply_like(embudo_where, embudo_values, "responsable")
+            embudo = conn.execute(
+                f"""
+                SELECT
+                  SUM(CASE WHEN to_etapa = 'Noticia' THEN 1 ELSE 0 END) AS noticias,
+                  SUM(CASE WHEN to_etapa = 'Encargo' THEN 1 ELSE 0 END) AS encargos,
+                  SUM(CASE WHEN to_etapa = 'Propuesta' THEN 1 ELSE 0 END) AS propuestas
+                FROM crm_stage_events
+                WHERE {' AND '.join(embudo_where)}
+                """,
+                embudo_values,
+            ).fetchone()
+            noticias_total = int((embudo["noticias"] if embudo else 0) or 0)
+            encargos_total = int((embudo["encargos"] if embudo else 0) or 0)
+            propuestas_total = int((embudo["propuestas"] if embudo else 0) or 0)
+            funnel_source = "events"
+            try:
+                events_total_row = conn.execute(
+                    f"SELECT COUNT(*) AS total FROM crm_stage_events WHERE {' AND '.join(embudo_where)}",
+                    embudo_values,
+                ).fetchone()
+                events_total = int((events_total_row["total"] if events_total_row else 0) or 0)
+            except Exception:
+                events_total = 0
+            if events_total <= 0:
+                # Fallback: si aún no hay tracking de eventos, muestra estado actual del pipeline.
+                pipeline_where = ["empresa_id = ?"]
+                pipeline_values = [empresa_id]
+                if responsable_like:
+                    pipeline_where.append("LOWER(COALESCE(responsable, '')) LIKE ?")
+                    pipeline_values.append(responsable_like)
+                try:
+                    pipeline = conn.execute(
+                        f"""
+                        SELECT
+                          SUM(CASE WHEN estado = 'Noticia' THEN 1 ELSE 0 END) AS noticias,
+                          SUM(CASE WHEN estado = 'Encargo' THEN 1 ELSE 0 END) AS encargos,
+                          SUM(CASE WHEN estado = 'Propuesta' THEN 1 ELSE 0 END) AS propuestas
+                        FROM inmuebles
+                        WHERE {' AND '.join(pipeline_where)}
+                        """,
+                        pipeline_values,
+                    ).fetchone()
+                except Exception:
+                    pipeline = None
+                if pipeline:
+                    noticias_total = int(pipeline["noticias"] or 0)
+                    encargos_total = int(pipeline["encargos"] or 0)
+                    propuestas_total = int(pipeline["propuestas"] or 0)
+                    funnel_source = "pipeline"
+
+            # --- Pisos propuestos (match inmueble-demanda) ---
+            pisos_where = ["ic.empresa_id = ?", "substr(ic.created_at, 1, 4) = ?"]
+            pisos_values = [empresa_id, year]
+            if responsable_like:
+                pisos_where.append("LOWER(COALESCE(i.responsable, '')) LIKE ?")
+                pisos_values.append(responsable_like)
+            pisos_by_month = conn.execute(
+                f"""
+                SELECT substr(ic.created_at, 1, 7) AS month,
+                       COUNT(*) AS total
+                FROM inmueble_compradores ic
+                JOIN inmuebles i ON i.id = ic.inmueble_id
+                WHERE {' AND '.join(pisos_where)}
+                GROUP BY substr(ic.created_at, 1, 7)
+                ORDER BY month
+                """,
+                pisos_values,
+            ).fetchall()
+            pisos_total = int(sum(int(r["total"] or 0) for r in pisos_by_month) or 0)
+
+            # --- Recordatorios (acciones + visitas) ---
+            tz = None
+            if ZoneInfo:
+                try:
+                    tz = ZoneInfo(APP_TIMEZONE)
+                except Exception:
+                    tz = None
+            now_dt = datetime.now(tz or timezone.utc)
+            today = now_dt.date()
+            from_day = today.isoformat()
+            to_day = (today + timedelta(days=7)).isoformat()
+
+            def estado_is_closed(raw):
+                key = normalize_lookup_text(raw or "")
+                return key in {
+                    "COMPLETADA",
+                    "COMPLETADO",
+                    "HECHA",
+                    "REALIZADA",
+                    "CERRADA",
+                    "CERRADO",
+                    "CANCELADA",
+                    "CANCELADO",
+                    "ANULADA",
+                    "ANULADO",
+                }
+
+            upcoming = []
+            overdue = []
+            upcoming_count = 0
+            overdue_count = 0
+
+            try:
+                acciones_rows = conn.execute(
+                    """
+                    SELECT id, fecha, hora, hora_fin, asunto, tipo, modalidad_contacto, responsable, estado, cliente_id, cliente_nombre, inmueble_id
+                    FROM acciones
+                    WHERE empresa_id = ?
+                      AND LOWER(COALESCE(servicio, '')) = 'inmobiliaria'
+                      AND fecha IS NOT NULL
+                      AND TRIM(fecha) <> ''
+                      AND substr(fecha, 1, 4) = ?
+                    ORDER BY fecha ASC, hora ASC, updated_at DESC
+                    LIMIT 800
+                    """,
+                    (empresa_id, year),
+                ).fetchall()
+            except Exception:
+                acciones_rows = []
+
+            for row in acciones_rows:
+                try:
+                    fecha = str(row["fecha"] or "").strip()
+                except Exception:
+                    fecha = ""
+                if not fecha or len(fecha) < 10:
+                    continue
+                if responsable_like:
+                    resp = str(row["responsable"] or "").strip().lower()
+                    if responsable_param and responsable_param.lower() not in resp:
+                        continue
+                if estado_is_closed((row.get("estado") if isinstance(row, dict) else row["estado"])):
+                    continue
+                item = {
+                    "kind": "accion",
+                    "id": row["id"],
+                    "fecha": fecha,
+                    "hora": (row["hora"] or "").strip() if isinstance(row["hora"], str) else (row["hora"] or ""),
+                    "asunto": row["asunto"] or "",
+                    "tipo": row["tipo"] or "",
+                    "responsable": row["responsable"] or "",
+                    "estado": row["estado"] or "",
+                    "cliente_id": row["cliente_id"] or "",
+                    "cliente": row["cliente_nombre"] or "",
+                    "inmueble_id": row["inmueble_id"] or "",
+                }
+                if from_day <= fecha <= to_day:
+                    upcoming_count += 1
+                    if len(upcoming) < 8:
+                        upcoming.append(item)
+                if fecha < from_day:
+                    overdue_count += 1
+                    if len(overdue) < 8:
+                        overdue.append(item)
+
+            try:
+                visitas_rows = conn.execute(
+                    """
+                    SELECT id, inmueble_id, demanda_id, fecha, hora, estado, asesor, notas
+                    FROM visitas
+                    WHERE empresa_id = ?
+                      AND fecha IS NOT NULL
+                      AND TRIM(fecha) <> ''
+                      AND substr(fecha, 1, 4) = ?
+                    ORDER BY fecha ASC, hora ASC, updated_at DESC
+                    LIMIT 800
+                    """,
+                    (empresa_id, year),
+                ).fetchall()
+            except Exception:
+                visitas_rows = []
+
+            for row in visitas_rows:
+                try:
+                    fecha = str(row["fecha"] or "").strip()
+                except Exception:
+                    fecha = ""
+                if not fecha or len(fecha) < 10:
+                    continue
+                if responsable_like:
+                    asesor = str(row["asesor"] or "").strip().lower()
+                    if responsable_param and responsable_param.lower() not in asesor:
+                        continue
+                if estado_is_closed((row.get("estado") if isinstance(row, dict) else row["estado"])):
+                    continue
+                item = {
+                    "kind": "visita",
+                    "id": row["id"],
+                    "fecha": fecha,
+                    "hora": (row["hora"] or "").strip() if isinstance(row["hora"], str) else (row["hora"] or ""),
+                    "asunto": "Visita",
+                    "tipo": "Visita",
+                    "responsable": row["asesor"] or "",
+                    "estado": row["estado"] or "",
+                    "cliente_id": "",
+                    "cliente": "",
+                    "inmueble_id": row["inmueble_id"] or "",
+                }
+                if from_day <= fecha <= to_day:
+                    upcoming_count += 1
+                    if len(upcoming) < 12:
+                        upcoming.append(item)
+                if fecha < from_day:
+                    overdue_count += 1
+                    if len(overdue) < 12:
+                        overdue.append(item)
+
+            upcoming.sort(key=lambda item: (item.get("fecha") or "", item.get("hora") or ""))
+            overdue.sort(key=lambda item: (item.get("fecha") or "", item.get("hora") or ""))
+
+            responsables = []
+            if is_privileged:
+                found = set()
+                try:
+                    rows = conn.execute(
+                        """
+                        SELECT DISTINCT responsable AS v FROM inmuebles
+                        WHERE empresa_id = ? AND responsable IS NOT NULL AND TRIM(responsable) <> ''
+                        """,
+                        (empresa_id,),
+                    ).fetchall()
+                    for r in rows:
+                        found.add(str(r["v"] or "").strip())
+                except Exception:
+                    pass
+                try:
+                    rows = conn.execute(
+                        """
+                        SELECT DISTINCT responsable_gestion AS v FROM operaciones_inmobiliarias
+                        WHERE empresa_id = ? AND responsable_gestion IS NOT NULL AND TRIM(responsable_gestion) <> ''
+                        """,
+                        (empresa_id,),
+                    ).fetchall()
+                    for r in rows:
+                        found.add(str(r["v"] or "").strip())
+                except Exception:
+                    pass
+                try:
+                    rows = conn.execute(
+                        """
+                        SELECT DISTINCT agente AS v FROM alquileres
+                        WHERE empresa_id = ? AND agente IS NOT NULL AND TRIM(agente) <> ''
+                        """,
+                        (empresa_id,),
+                    ).fetchall()
+                    for r in rows:
+                        found.add(str(r["v"] or "").strip())
+                except Exception:
+                    pass
+                try:
+                    rows = conn.execute(
+                        """
+                        SELECT DISTINCT responsable AS v FROM acciones
+                        WHERE empresa_id = ? AND LOWER(COALESCE(servicio, '')) = 'inmobiliaria'
+                          AND responsable IS NOT NULL AND TRIM(responsable) <> ''
+                        """,
+                        (empresa_id,),
+                    ).fetchall()
+                    for r in rows:
+                        found.add(str(r["v"] or "").strip())
+                except Exception:
+                    pass
+                responsables = sorted([v for v in found if v], key=lambda x: x.lower())
+
+            noticias_por_encargo = (noticias_total / encargos_total) if encargos_total > 0 else 0.0
+            citas_por_propuesta = (citas_total / propuestas_total) if propuestas_total > 0 else 0.0
+
+            json_response(
+                self,
+                {
+                    "year": year,
+                    "responsable": responsable_param if is_privileged else (responsable_param or ""),
+                    "is_privileged": bool(is_privileged),
+                    "funnel_source": funnel_source,
+                    "responsables": responsables,
+                    "kpis": {
+                        "ventas": ventas_total,
+                        "comision_ventas": round(ventas_comision, 2),
+                        "alquileres": alquileres_total,
+                        "comision_alquileres": round(alquileres_comision, 2),
+                        "noticias": noticias_total,
+                        "encargos": encargos_total,
+                        "propuestas": propuestas_total,
+                        "citas": citas_total,
+                        "pisos_propuestos": pisos_total,
+                        "noticias_por_encargo": round(noticias_por_encargo, 2),
+                        "citas_por_propuesta": round(citas_por_propuesta, 2),
+                        "pendientes": int(overdue_count or 0),
+                        "proximas": int(upcoming_count or 0),
+                    },
+                    "series": {
+                        "ventas_by_month": [dict(r) for r in ventas_by_month],
+                        "alquileres_by_month": [dict(r) for r in alquileres_by_month],
+                        "citas_by_month": [dict(r) for r in citas_by_month],
+                        "pisos_propuestos_by_month": [dict(r) for r in pisos_by_month],
+                    },
+                    "reminders": {"upcoming": upcoming[:12], "overdue": overdue[:12]},
                 },
             )
             return

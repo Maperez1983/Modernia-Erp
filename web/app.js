@@ -1374,6 +1374,20 @@ const state = {
   crmResumenHasta: "",
   crmResumenResponsable: "",
   crmResumenOrigen: "",
+  crmResumenYtdYear: (() => {
+    try {
+      return localStorage.getItem("crm.resumen.ytdYear") || String(new Date().getFullYear());
+    } catch {
+      return String(new Date().getFullYear());
+    }
+  })(),
+  crmResumenYtdResponsable: (() => {
+    try {
+      return localStorage.getItem("crm.resumen.ytdResponsable") || "";
+    } catch {
+      return "";
+    }
+  })(),
   crmInmueblesEstadoFilter: (() => {
     try {
       return localStorage.getItem("crm.inmuebles.estadoFilter") || "activos";
@@ -2332,6 +2346,17 @@ const crmResumenHastaWrap = document.getElementById("crmResumenHastaWrap");
 const crmResumenResponsable = document.getElementById("crmResumenResponsable");
 const crmResumenOrigen = document.getElementById("crmResumenOrigen");
 const crmResumenReset = document.getElementById("crmResumenReset");
+const crmResumenYtdBoard = document.getElementById("crmResumenYtdBoard");
+const crmResumenYtdTitle = document.getElementById("crmResumenYtdTitle");
+const crmResumenYtdYear = document.getElementById("crmResumenYtdYear");
+const crmResumenYtdResponsableWrap = document.getElementById("crmResumenYtdResponsableWrap");
+const crmResumenYtdResponsable = document.getElementById("crmResumenYtdResponsable");
+const crmResumenYtdKpis = document.getElementById("crmResumenYtdKpis");
+const crmYtdOperacionesChart = document.getElementById("crmYtdOperacionesChart");
+const crmYtdComisionesChart = document.getElementById("crmYtdComisionesChart");
+const crmYtdEmbudoChart = document.getElementById("crmYtdEmbudoChart");
+const crmResumenProximas = document.getElementById("crmResumenProximas");
+const crmResumenPendientes = document.getElementById("crmResumenPendientes");
 const crmAgendaSearch = document.getElementById("crmAgendaSearch");
 const crmAgendaEstadoFilter = document.getElementById("crmAgendaEstadoFilter");
 const crmAgendaTable = document.getElementById("crmAgendaTable");
@@ -24146,6 +24171,13 @@ const buildCaptacionConversionPayload = (rowMap, destino) => {
     if (precio !== null && String(precio).trim()) {
       payload.precio_encargo = String(precio).trim();
     }
+    const honorarios = window.prompt(
+      "Honorarios/comisión de agencia (opcional). Se usa para KPIs si no hay facturación.",
+      rowMap.honorarios || ""
+    );
+    if (honorarios !== null && String(honorarios).trim()) {
+      payload.honorarios = String(honorarios).trim();
+    }
   }
   if (destino === "compraventa") {
     const fecha = window.prompt(
@@ -24203,15 +24235,29 @@ const prepareInmuebleAcquisitionAppointment = () => {
 
 const INMO_WORKFLOW_RESULT_OPTIONS = {
   "Cita de adquisición": ["Positivo", "Negativo", "Reprogramar", "No realizada"],
+  "Cita de venta/alquiler": ["Estudio", "No interesa", "Interesado"],
+  "Cita de propuesta de compra/alquiler": ["Se realiza propuesta", "No se realiza"],
+  "Cita acept. de la propuesta": ["Aceptada", "Rechazada", "Contraoferta"],
+  "Post-aceptación": ["Firmada", "Reprogramar", "No realizada"],
+  "Cita de gestión encargo (seguimiento)": ["Realizada", "Reprogramar", "No realizada"],
+  "Cita general (no comercial)": ["Realizada", "Reprogramar", "No realizada"],
+  "Estudio financiero": ["Viable", "No viable", "Pendiente documentación"],
   "Cita comprador": ["Estudio", "No interesa", "Interesado"],
   "Cita propuesta": ["Se realiza propuesta", "No se realiza"],
   "Cita aceptación propietarios": ["Aceptada", "Rechazada", "Contraoferta"],
   "Cita aceptación contraoferta": ["Aceptada", "Rechazada"],
+  "Cita notaria": ["Firmada", "Reprogramar", "No realizada"],
 };
 
 const getInmuebleActividadClienteScope = (type) => {
   const key = normalizeSimple(type || "");
-  if (key.includes("comprador") || key.includes("propuesta") || key.includes("contraoferta") || key.includes("visita")) {
+  if (
+    key.includes("comprador")
+    || key.includes("propuesta")
+    || key.includes("contraoferta")
+    || key.includes("visita")
+    || key.includes("notaria")
+  ) {
     return "demandas";
   }
   return "propietarios";
@@ -25057,6 +25103,280 @@ const hydrateCrmResumenFilters = () => {
   });
 };
 
+let crmResumenYtdInitDone = false;
+let crmResumenYtdInFlightKey = "";
+let crmResumenYtdLastData = null;
+
+const hydrateCrmResumenYtdControls = () => {
+  if (crmResumenYtdInitDone) return;
+  if (!crmResumenYtdBoard || !crmResumenYtdYear) return;
+  crmResumenYtdInitDone = true;
+
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const years = [currentYear, currentYear - 1, currentYear - 2].map((y) => String(y));
+  crmResumenYtdYear.innerHTML = years.map((y) => `<option value="${escapeHtml(y)}">${escapeHtml(y)}</option>`).join("");
+  crmResumenYtdYear.value = years.includes(String(state.crmResumenYtdYear || "")) ? String(state.crmResumenYtdYear) : String(currentYear);
+  state.crmResumenYtdYear = crmResumenYtdYear.value;
+
+  crmResumenYtdYear.addEventListener("change", () => {
+    state.crmResumenYtdYear = String(crmResumenYtdYear.value || String(currentYear));
+    try {
+      localStorage.setItem("crm.resumen.ytdYear", state.crmResumenYtdYear);
+    } catch {}
+    renderCrmResumenYtdBoard({ force: true });
+  });
+
+  crmResumenYtdResponsable?.addEventListener("change", () => {
+    state.crmResumenYtdResponsable = String(crmResumenYtdResponsable.value || "");
+    try {
+      localStorage.setItem("crm.resumen.ytdResponsable", state.crmResumenYtdResponsable);
+    } catch {}
+    renderCrmResumenYtdBoard({ force: true });
+  });
+};
+
+const buildCrmYtdMonths = (year) => {
+  const y = Number(year || 0) || new Date().getFullYear();
+  const now = new Date();
+  const maxMonth = y === now.getFullYear() ? (now.getMonth() + 1) : 12;
+  const months = Array.from({ length: maxMonth }, (_, idx) => `${y}-${String(idx + 1).padStart(2, "0")}`);
+  const labelsEs = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
+  const labels = months.map((m) => labelsEs[Math.max(0, Math.min(11, Number(m.slice(5, 7)) - 1))] || m);
+  return { months, labels };
+};
+
+const alignMonthlySeries = (rows, months, field) => {
+  const map = new Map();
+  (Array.isArray(rows) ? rows : []).forEach((row) => {
+    const key = String(row?.month || "").trim();
+    if (!key) return;
+    map.set(key, row);
+  });
+  return months.map((m) => {
+    const row = map.get(m);
+    const raw = row ? row[field] : 0;
+    const n = Number(raw || 0);
+    return Number.isFinite(n) ? n : 0;
+  });
+};
+
+const renderCrmResumenYtdBoard = async ({ force = false } = {}) => {
+  if (!crmResumenYtdBoard || !crmResumenYtdKpis) return;
+  if (crmViewResumen && crmViewResumen.classList.contains("hidden")) return;
+  const empresa = resolveCrmInmoEmpresa();
+  if (!empresa?.id) return;
+  hydrateCrmResumenYtdControls();
+
+  const authUser = getAuthScopeUser();
+  const isPrivileged = Boolean(authUser && isPrivilegedUser(authUser));
+  if (crmResumenYtdResponsableWrap) {
+    crmResumenYtdResponsableWrap.classList.toggle("hidden", !isPrivileged);
+  }
+  if (!isPrivileged) {
+    state.crmResumenYtdResponsable = "";
+    if (crmResumenYtdResponsable) crmResumenYtdResponsable.value = "";
+  }
+
+  const year = String(state.crmResumenYtdYear || new Date().getFullYear());
+  const responsable = isPrivileged ? String(state.crmResumenYtdResponsable || "") : "";
+  const key = `${empresa.id}::${year}::${responsable}::${isPrivileged ? "1" : "0"}`;
+  if (!force && crmResumenYtdLastData && crmResumenYtdInFlightKey === "" && crmResumenYtdLastData.__key === key) {
+    // Ya renderizado.
+    return;
+  }
+  if (crmResumenYtdInFlightKey === key) return;
+  crmResumenYtdInFlightKey = key;
+
+  const params = new URLSearchParams({ empresa_id: empresa.id, year });
+  if (responsable) params.set("responsable", responsable);
+  try {
+    const data = await api(`/api/crm_resumen_ytd?${params.toString()}`);
+    crmResumenYtdInFlightKey = "";
+    crmResumenYtdLastData = { ...data, __key: key };
+
+    const safeYear = String(data?.year || year);
+    if (crmResumenYtdTitle) {
+      const suffix = isPrivileged && responsable ? ` · ${responsable}` : "";
+      crmResumenYtdTitle.textContent = `KPIs ${safeYear}${suffix}`;
+    }
+    if (crmResumenYtdYear) crmResumenYtdYear.value = safeYear;
+
+    if (isPrivileged && crmResumenYtdResponsable) {
+      const current = String(state.crmResumenYtdResponsable || "");
+      const opts = Array.isArray(data?.responsables) ? data.responsables : [];
+      crmResumenYtdResponsable.innerHTML = `<option value="">Todos</option>${opts
+        .map((v) => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`)
+        .join("")}`;
+      if (current) crmResumenYtdResponsable.value = current;
+    }
+
+    const kpis = data?.kpis || {};
+    const funnelMeta = String(data?.funnel_source || "") === "pipeline" ? "pipeline actual" : "eventos YTD";
+    renderCrmMiniCards(crmResumenYtdKpis, [
+      {
+        title: "Ventas realizadas",
+        value: Number(kpis.ventas || 0) || 0,
+        meta: safeYear,
+        summary: "Operaciones de venta cerradas (escritura/precio).",
+        crmView: "compraventas",
+      },
+      {
+        title: "Comisión oficina",
+        value: formatEuros(Number(kpis.comision_ventas || 0) || 0),
+        meta: "Ventas",
+        summary: "Suma de honorarios en ventas cerradas.",
+        crmView: "compraventas",
+      },
+      {
+        title: "Alquileres realizados",
+        value: Number(kpis.alquileres || 0) || 0,
+        meta: safeYear,
+        summary: "Contratos de alquiler registrados.",
+        crmView: "alquileres",
+      },
+      {
+        title: "Comisión alquileres",
+        value: formatEuros(Number(kpis.comision_alquileres || 0) || 0),
+        meta: "Alquileres",
+        summary: "Suma de importe de comisión en alquileres.",
+        crmView: "alquileres",
+      },
+      {
+        title: "Noticias por encargo",
+        value: Number(kpis.noticias_por_encargo || 0).toFixed(2),
+        meta: `${Number(kpis.noticias || 0) || 0} → ${Number(kpis.encargos || 0) || 0}`,
+        summary: `Conversión Noticia→Encargo (${funnelMeta}).`,
+        crmView: "captaciones",
+        etapa: "Noticia",
+      },
+      {
+        title: "Citas por propuesta",
+        value: Number(kpis.citas_por_propuesta || 0).toFixed(2),
+        meta: `${Number(kpis.citas || 0) || 0} → ${Number(kpis.propuestas || 0) || 0}`,
+        summary: "Ratio de citas registradas por propuesta generada.",
+        crmView: "agenda",
+      },
+      {
+        title: "Pisos propuestos",
+        value: Number(kpis.pisos_propuestos || 0) || 0,
+        meta: safeYear,
+        summary: "Matches inmueble–demanda creados.",
+        crmView: "demandas",
+      },
+      {
+        title: "Pendientes",
+        value: Number(kpis.pendientes || 0) || 0,
+        meta: "Vencidas",
+        summary: "Acciones/visitas vencidas (sin cierre).",
+        crmView: "agenda",
+      },
+      {
+        title: "Próximas 7d",
+        value: Number(kpis.proximas || 0) || 0,
+        meta: "Agenda",
+        summary: "Acciones/visitas en los próximos 7 días.",
+        crmView: "agenda",
+      },
+    ]);
+
+    const mapReminder = (item) => {
+      const kind = String(item?.kind || "").trim();
+      const fecha = String(item?.fecha || "-");
+      const hora = String(item?.hora || "").trim();
+      const responsableLabel = String(item?.responsable || "").trim();
+      const when = `${fecha}${hora ? ` ${hora}` : ""}`.trim();
+      const inmuebleId = String(item?.inmueble_id || "").trim();
+      const base = {
+        title: kind === "visita" ? "Visita" : (String(item?.asunto || "").trim() || String(item?.tipo || "").trim() || "Acción"),
+        meta: [when, responsableLabel].filter(Boolean).join(" · "),
+        summary: [String(item?.tipo || "").trim(), String(item?.estado || "").trim(), String(item?.cliente || "").trim()].filter(Boolean).join(" · "),
+      };
+      if (inmuebleId) return { ...base, inmuebleId };
+      return { ...base, crmView: kind === "visita" ? "visitas" : "agenda" };
+    };
+
+    const upcoming = Array.isArray(data?.reminders?.upcoming) ? data.reminders.upcoming : [];
+    const overdue = Array.isArray(data?.reminders?.overdue) ? data.reminders.overdue : [];
+    renderCrmActionList(crmResumenProximas, upcoming.map(mapReminder).slice(0, 8), "Sin próximos hitos.");
+    renderCrmActionList(crmResumenPendientes, overdue.map(mapReminder).slice(0, 8), "Sin pendientes vencidos.");
+
+    const { months, labels } = buildCrmYtdMonths(safeYear);
+    const series = data?.series || {};
+    requestAnimationFrame(() => {
+      drawBarChart(
+        crmYtdOperacionesChart,
+        labels,
+        [
+          {
+            label: "Ventas",
+            values: alignMonthlySeries(series.ventas_by_month, months, "total"),
+            color: "#824c45",
+            format: (value) => numberFormatter.format(value),
+          },
+          {
+            label: "Alquileres",
+            values: alignMonthlySeries(series.alquileres_by_month, months, "total"),
+            color: "#cca33c",
+            format: (value) => numberFormatter.format(value),
+          },
+          {
+            label: "Citas",
+            values: alignMonthlySeries(series.citas_by_month, months, "total"),
+            color: "#3c6e71",
+            format: (value) => numberFormatter.format(value),
+          },
+        ],
+        { legend: true, showValues: false }
+      );
+
+      drawBarChart(
+        crmYtdComisionesChart,
+        labels,
+        [
+          {
+            label: "Comisión ventas",
+            values: alignMonthlySeries(series.ventas_by_month, months, "comision"),
+            color: "#d7b04c",
+            format: (value) => euroFormatter.format(value),
+          },
+          {
+            label: "Comisión alquileres",
+            values: alignMonthlySeries(series.alquileres_by_month, months, "comision"),
+            color: "#7e8878",
+            format: (value) => euroFormatter.format(value),
+          },
+        ],
+        { legend: true, showValues: false }
+      );
+
+      const embudoLabels = ["Noticias", "Encargos", "Propuestas", "Pisos propuestos"];
+      const embudoValues = [
+        Number(kpis.noticias || 0) || 0,
+        Number(kpis.encargos || 0) || 0,
+        Number(kpis.propuestas || 0) || 0,
+        Number(kpis.pisos_propuestos || 0) || 0,
+      ];
+      drawBarChart(
+        crmYtdEmbudoChart,
+        embudoLabels,
+        [
+          {
+            label: "Total",
+            values: embudoValues,
+            color: "#7e8878",
+            format: (value) => numberFormatter.format(value),
+          },
+        ],
+        { legend: false, showValues: true }
+      );
+    });
+  } catch (err) {
+    crmResumenYtdInFlightKey = "";
+    crmResumenYtdKpis.innerHTML = "<p class='muted'>No se pudieron cargar los KPIs del año.</p>";
+  }
+};
+
 const renderCrmResumenDashboard = () => {
   const captaciones = Array.isArray(cachedCrmCaptaciones) ? cachedCrmCaptaciones : [];
   const inmuebles = Array.isArray(cachedCrmInmuebles) ? cachedCrmInmuebles : [];
@@ -25544,6 +25864,8 @@ const renderCrmResumenDashboard = () => {
       });
     });
   }
+
+  renderCrmResumenYtdBoard().catch(() => {});
 };
 
 const updateCaptacionEtapa = (id, etapa) => {
@@ -26087,7 +26409,7 @@ const loadCrmCompraventas = () => {
       if (raw.startsWith("http://") || raw.startsWith("https://") || raw.startsWith("/uploads/")) {
         return raw;
       }
-      return docsPrefix + encodeURI(raw.replace(/^\\/+/, ""));
+      return docsPrefix + encodeURI(raw.replace(/^[\\/]+/, ""));
     };
     const addDocLink = (container, label, value) => {
       const url = docUrl(value);

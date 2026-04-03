@@ -5142,6 +5142,15 @@ tr.is-selected td {
   border-radius: 10px;
 }
 
+/* CRM resumen: charts más compactos para no comerse la pantalla. */
+#crmResumenYtdBoard .chart-card {
+  min-height: 290px;
+}
+
+#crmResumenYtdBoard .chart-card canvas {
+  height: 230px;
+}
+
 /* Seguros dashboard: more room for labels and values */
 #fincasDashboardSection .dashboard-charts {
   grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));

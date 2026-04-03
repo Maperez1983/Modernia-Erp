@@ -1858,6 +1858,61 @@
                     <div id="crmResumenHoy" class="crm-focus-list"></div>
                   </div>
                 </div>
+                <div class="form-card" id="crmResumenYtdBoard">
+                  <div class="section-head">
+                    <div>
+                      <h3 id="crmResumenYtdTitle">KPIs del año</h3>
+                      <p class="muted">Ventas, comisiones, captación y actividad comercial (YTD).</p>
+                    </div>
+                  </div>
+                  <div class="crm-resumen-toolbar">
+                    <label>
+                      Año
+                      <select id="crmResumenYtdYear"></select>
+                    </label>
+                    <label class="hidden" id="crmResumenYtdResponsableWrap">
+                      Asesor
+                      <select id="crmResumenYtdResponsable">
+                        <option value="">Todos</option>
+                      </select>
+                    </label>
+                  </div>
+                  <div id="crmResumenYtdKpis" class="crm-mini-list"></div>
+                  <div class="grid dashboard-charts crm-ytd-charts">
+                    <div class="chart-card">
+                      <h4>Actividad y cierres (mes)</h4>
+                      <canvas id="crmYtdOperacionesChart"></canvas>
+                    </div>
+                    <div class="chart-card">
+                      <h4>Comisiones (mes)</h4>
+                      <canvas id="crmYtdComisionesChart"></canvas>
+                    </div>
+                    <div class="chart-card">
+                      <h4>Embudo (YTD)</h4>
+                      <canvas id="crmYtdEmbudoChart"></canvas>
+                    </div>
+                  </div>
+                  <div class="crm-split">
+                    <div>
+                      <div class="section-head compact">
+                        <div>
+                          <h4>Próximas</h4>
+                          <p class="muted">Citas, visitas y acciones en los próximos 7 días.</p>
+                        </div>
+                      </div>
+                      <div id="crmResumenProximas" class="crm-focus-list"></div>
+                    </div>
+                    <div>
+                      <div class="section-head compact">
+                        <div>
+                          <h4>Pendientes</h4>
+                          <p class="muted">Acciones/visitas vencidas que requieren cierre.</p>
+                        </div>
+                      </div>
+                      <div id="crmResumenPendientes" class="crm-focus-list"></div>
+                    </div>
+                  </div>
+                </div>
                 <div class="form-card">
                   <div class="section-head">
                     <div>
@@ -2724,10 +2779,19 @@
                     <select name="tipo">
                       <option>Llamada</option>
                       <option>Cita de adquisición</option>
+                      <option>Cita de venta/alquiler</option>
+                      <option>Cita de propuesta de compra/alquiler</option>
+                      <option>Cita acept. de la propuesta</option>
+                      <option>Post-aceptación</option>
+                      <option>Cita de gestión encargo (seguimiento)</option>
+                      <option>Cita general (no comercial)</option>
+                      <option>Estudio financiero</option>
+                      <option>Personal</option>
                       <option>Cita comprador</option>
                       <option>Cita propuesta</option>
                       <option>Cita aceptación propietarios</option>
                       <option>Cita aceptación contraoferta</option>
+                      <option>Cita notaria</option>
                       <option>Visita</option>
                       <option>Email</option>
                       <option>Nota interna</option>

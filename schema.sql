@@ -863,6 +863,30 @@ CREATE TABLE IF NOT EXISTS auditoria (
   FOREIGN KEY (empresa_id) REFERENCES empresas(id)
 );
 
+-- Eventos de etapa (para métricas de embudo y conversión a lo largo del tiempo).
+-- Nota: se alimenta desde el backend cuando se crea/actualiza una captación o se mueve de etapa.
+CREATE TABLE IF NOT EXISTS crm_stage_events (
+  id TEXT PRIMARY KEY,
+  empresa_id TEXT NOT NULL,
+  captacion_id TEXT,
+  inmueble_id TEXT,
+  from_etapa TEXT,
+  to_etapa TEXT NOT NULL,
+  usuario TEXT,
+  responsable TEXT,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY (empresa_id) REFERENCES empresas(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_crm_stage_events_empresa_created
+ON crm_stage_events (empresa_id, created_at);
+
+CREATE INDEX IF NOT EXISTS idx_crm_stage_events_empresa_responsable_created
+ON crm_stage_events (empresa_id, responsable, created_at);
+
+CREATE INDEX IF NOT EXISTS idx_crm_stage_events_empresa_to_etapa_created
+ON crm_stage_events (empresa_id, to_etapa, created_at);
+
 CREATE TABLE IF NOT EXISTS captaciones (
   id TEXT PRIMARY KEY,
   empresa_id TEXT,
