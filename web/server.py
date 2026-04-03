@@ -23093,6 +23093,21 @@ def build_inmueble_nota_encargo_pdf(company, inmueble, captacion, owners, extra=
         plazo_arrendamiento = str(extra.get("plazo_arrendamiento") or "").strip() or ".............."
         garantia_adicional = str(extra.get("garantia_adicional") or "").strip() or "..........................................................................................................."
         entrega_fecha = str(extra.get("entrega_fecha") or "").strip() or ".............................................................................."
+        destino_raw = str(extra.get("destino_arrendamiento") or "").strip().lower()
+        if destino_raw in {"uso distinto", "uso_distinto", "uso-distinto", "usodistinto", "distinto"}:
+            destino_raw = "uso_distinto"
+        if destino_raw not in {"vivienda", "uso_distinto"}:
+            destino_raw = "vivienda"
+        fianza_raw = str(extra.get("fianza_tipo") or "").strip().lower()
+        if fianza_raw in {"1", "una", "uno"}:
+            fianza_raw = "una"
+        elif fianza_raw in {"2", "dos"}:
+            fianza_raw = "dos"
+        else:
+            fianza_raw = "una"
+
+        def checkbox(checked):
+            return "☑" if checked else "☐"
 
         datos_registrales_alq = str(extra.get("datos_registrales") or "").strip() or "……………………………………………………………………………..……………………………………….."
         ref_catastral_alq = str(inmueble.get("referencia_catastral") or "").strip() or "…………………………………………………………………………….."
@@ -23136,11 +23151,11 @@ def build_inmueble_nota_encargo_pdf(company, inmueble, captacion, owners, extra=
             f"5. El Cliente determina que el plazo de duración del arrendamiento será de {plazo_arrendamiento} meses/años (táchese lo",
             "   que no proceda), destinándose el inmueble a:",
             "",
-            "          □ vivienda □ uso distinto de vivienda",
+            f"          {checkbox(destino_raw == 'vivienda')} vivienda {checkbox(destino_raw == 'uso_distinto')} uso distinto de vivienda",
             "6.   El importe que el arrendatario deberá entregar en concepto de Fianza corresponderá (art. 36 LAU) a:",
             "",
-            "          □ una mensualidad (arrendamiento de vivienda)",
-            "          □ dos mensualidades (arrendamiento para uso distinto del de vivienda)",
+            f"          {checkbox(fianza_raw == 'una')} una mensualidad (arrendamiento de vivienda)",
+            f"          {checkbox(fianza_raw == 'dos')} dos mensualidades (arrendamiento para uso distinto del de vivienda)",
             "7. El Cliente requiere que el arrendatario aporte una garantía adicional consistente",
             f"   en {garantia_adicional}",
             f"8. Los honorarios a percibir por la Agencia serán equivalentes a {honorarios_mensualidades} mensualidad de renta + I.V.A.,",
