@@ -13967,6 +13967,23 @@ def lookup_catastro_reference_by_address(*, provincia="", municipio="", direccio
     }
     last_error = ""
     direct_candidates = []
+
+    def _candidate_matches_requested_number(candidate, requested_number):
+        label = str((candidate or {}).get("label") or "").strip()
+        number = str(requested_number or "").strip()
+        if not label or not number:
+            return False
+        try:
+            return bool(re.search(rf"\b{re.escape(number)}[A-Z]?\b", label))
+        except Exception:
+            return False
+
+    def _filter_candidates_by_number(candidates, requested_number):
+        items = list(candidates or [])
+        if not requested_number:
+            return items
+        return [item for item in items if _candidate_matches_requested_number(item, requested_number)]
+
     for base_url in CATRASTRO_LOOKUP_URLS:
         url = f"{base_url}?{urllib.parse.urlencode(query)}"
         try:
@@ -13982,6 +13999,7 @@ def lookup_catastro_reference_by_address(*, provincia="", municipio="", direccio
                         continue
                     seen_refs.add(ref)
                     unique_refs.append(item)
+                unique_refs = _filter_candidates_by_number(unique_refs, parts["numero"])
                 if len(unique_refs) == 1 and not parsed["messages"]:
                     return {
                         "ok": True,
@@ -14047,7 +14065,31 @@ def lookup_catastro_reference_by_address(*, provincia="", municipio="", direccio
                     for item in all_candidates
                     if re.search(rf"\b{re.escape(parts['numero'])}[A-Z]?\b", item.get("label") or "")
                 ]
-                selected = exact_candidates or all_candidates
+                if not exact_candidates:
+                    return {
+                        "ok": True,
+                        "direccion_consultada": direccion,
+                        "direccion_normalizada": " ".join(
+                            part for part in [parts["sigla"], parts["calle"], parts["numero"]] if part
+                        ).strip(),
+                        "codigo_postal": codigo_postal or "",
+                        "provincia": provincia or "",
+                        "municipio": municipio or "",
+                        "candidates": [],
+                        "referencia_catastral": "",
+                        "match_unique": False,
+                        "source_url": CATRASTRO_NUMBER_SEARCH_URL,
+                        "messages": [
+                            item
+                            for item in [
+                                last_error,
+                                "Catastro no devolvió una coincidencia exacta para el número indicado. Revisa el número de portal.",
+                            ]
+                            if item
+                        ],
+                        "candidates_sugeridos": all_candidates[:10],
+                    }
+                selected = exact_candidates
                 return {
                     "ok": True,
                     "direccion_consultada": direccion,
@@ -14066,6 +14108,30 @@ def lookup_catastro_reference_by_address(*, provincia="", municipio="", direccio
     except Exception as exc:
         last_error = str(exc)
     if direct_candidates:
+        direct_candidates = _filter_candidates_by_number(direct_candidates, parts["numero"])
+        if not direct_candidates:
+            return {
+                "ok": True,
+                "direccion_consultada": direccion,
+                "direccion_normalizada": " ".join(
+                    part for part in [parts["sigla"], parts["calle"], parts["numero"]] if part
+                ).strip(),
+                "codigo_postal": codigo_postal or "",
+                "provincia": provincia or "",
+                "municipio": municipio or "",
+                "candidates": [],
+                "referencia_catastral": "",
+                "match_unique": False,
+                "source_url": CATRASTRO_LOOKUP_URLS[0],
+                "messages": [
+                    item
+                    for item in [
+                        last_error,
+                        "Catastro devolvió coincidencias, pero ninguna corresponde al número indicado. Revisa el número de portal.",
+                    ]
+                    if item
+                ],
+            }
         return {
             "ok": True,
             "direccion_consultada": direccion,
