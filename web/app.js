@@ -2475,6 +2475,10 @@ const inmuebleTabActividad = document.getElementById("inmuebleTabActividad");
 const inmuebleTabMapa = document.getElementById("inmuebleTabMapa");
 const inmuebleTabDocs = document.getElementById("inmuebleTabDocs");
 const inmuebleTabEstado = document.getElementById("inmuebleTabEstado");
+const inmuebleGenerarEncargoTabBtn = document.getElementById("inmuebleGenerarEncargoTabBtn");
+const inmuebleTabGenerarEncargo = document.getElementById("inmuebleTabGenerarEncargo");
+const inmuebleGenerarEncargoBtn = document.getElementById("inmuebleGenerarEncargoBtn");
+const inmuebleGenerarEncargoStatus = document.getElementById("inmuebleGenerarEncargoStatus");
 const inmuebleGoEstadoBtn = document.getElementById("inmuebleGoEstadoBtn");
 const inmuebleDocsForm = document.getElementById("inmuebleDocsForm");
 const inmuebleDocsFile = document.getElementById("inmuebleDocsFile");
@@ -24227,9 +24231,9 @@ const prepareInmuebleAcquisitionAppointment = () => {
   if (estadoSelect) estadoSelect.value = "Pendiente";
   syncInmuebleWorkflowForm();
   const siguienteSelect = inmuebleActividadForm.querySelector('select[name="estado_siguiente"]');
-  if (siguienteSelect) siguienteSelect.value = "Encargo";
+  if (siguienteSelect) siguienteSelect.value = "";
   if (inmuebleActividadStatus) {
-    inmuebleActividadStatus.textContent = "Programa aquí la cita de adquisición para preparar el paso a Encargo.";
+    inmuebleActividadStatus.textContent = "Programa aquí la cita de adquisición. Al cerrarla con resultado positivo podrás pasar el inmueble a Noticia.";
   }
 };
 
@@ -24288,9 +24292,15 @@ const syncInmuebleWorkflowForm = () => {
   }
   if (nextSelect) {
     const current = nextSelect.value;
-    const nextOptions = type === "Cita de adquisición"
-      ? ["Encargo", "Cerrado negativamente"]
-      : [];
+    let nextOptions = [];
+    if (type === "Cita de adquisición") {
+      const resultFinal = String(resultSelect?.value || "").trim();
+      if (resultFinal === "Positivo") {
+        nextOptions = ["Noticia", "Encargo"];
+      } else if (resultFinal === "Negativo") {
+        nextOptions = ["Cerrado negativamente"];
+      }
+    }
     nextSelect.innerHTML = "";
     nextSelect.appendChild(createOption("", nextOptions.length ? "Sin cambio automático" : "No aplica"));
     nextOptions.forEach((opt) => nextSelect.appendChild(createOption(opt, opt)));
@@ -27079,10 +27089,25 @@ const setInmuebleTab = (tab) => {
     btn.classList.toggle("active", btn.dataset.tab === tab);
   });
   if (inmuebleTabDatos) inmuebleTabDatos.classList.toggle("hidden", tab !== "datos");
+  if (inmuebleTabGenerarEncargo) inmuebleTabGenerarEncargo.classList.toggle("hidden", tab !== "generar_encargo");
   if (inmuebleTabDemandas) inmuebleTabDemandas.classList.toggle("hidden", tab !== "demandas");
   if (inmuebleTabActividad) inmuebleTabActividad.classList.toggle("hidden", tab !== "actividad");
   if (inmuebleTabDocs) inmuebleTabDocs.classList.toggle("hidden", tab !== "docs");
   if (inmuebleTabEstado) inmuebleTabEstado.classList.toggle("hidden", tab !== "estado");
+};
+
+const syncInmuebleGenerarEncargoTab = (inmueble = {}) => {
+  if (!inmuebleTabs || !inmuebleGenerarEncargoTabBtn || !inmuebleTabGenerarEncargo) return;
+  const stage = normalizeSimple(inmueble?.estado || "");
+  const available = stage === "noticia";
+  inmuebleGenerarEncargoTabBtn.classList.toggle("hidden", !available);
+  if (!available) {
+    inmuebleTabGenerarEncargo.classList.add("hidden");
+    const active = inmuebleTabs.querySelector(".tab.active")?.dataset?.tab || "";
+    if (active === "generar_encargo") {
+      setInmuebleTab("datos");
+    }
+  }
 };
 
 const showUiError = (title, detail = "") => {
@@ -27215,6 +27240,7 @@ const openInmuebleDetail = (id, originView = "") => {
         demandas: [],
         visitas: [],
       };
+      syncInmuebleGenerarEncargoTab(inmueble);
       if (inmuebleTitle) {
         inmuebleTitle.textContent = inmueble.direccion || "Ficha de inmueble";
       }
@@ -27975,6 +28001,41 @@ const loadInmuebleActividad = (inmuebleId, empresaId) => {
 };
 
 const closeInmuebleWorkflowAction = (row, empresaId) => {
+  const submitClosePayload = (payload, type, resultado) => {
+    fetch("/api/acciones_update", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data?.error) {
+          alert(data.error);
+          return;
+        }
+        const financeMessages = [];
+        if (data?.financiacion_oportunidad_id) {
+          financeMessages.push("Se creó una oportunidad en CRM Financiaciones.");
+        }
+        if (data?.financiacion_asesoramiento_id) {
+          const missing = Array.isArray(data.financiacion_missing_fields) && data.financiacion_missing_fields.length
+            ? ` Faltan: ${data.financiacion_missing_fields.join(", ")}.`
+            : "";
+          financeMessages.push(`Se generó un asesoramiento financiero.${missing}`);
+        }
+        if (inmuebleActividadStatus) {
+          inmuebleActividadStatus.textContent = `${type} cerrada con resultado ${resultado}.${financeMessages.length ? ` ${financeMessages.join(" ")}` : ""}`;
+        }
+        if (state.currentInmuebleId && empresaId) {
+          loadInmuebleActividad(state.currentInmuebleId, empresaId);
+          openInmuebleDetail(state.currentInmuebleId, state.currentInmuebleOriginView || "inmuebles");
+        }
+      })
+      .catch(() => {
+        alert("No se pudo cerrar la cita.");
+      });
+  };
+
   const findInmoClientContext = (clienteId, fallbackName = "") => {
     const id = String(clienteId || "").trim();
     const fallback = String(fallbackName || "").trim();
@@ -28196,6 +28257,138 @@ const closeInmuebleWorkflowAction = (row, empresaId) => {
     });
 
   const type = String(row.tipo || "").trim();
+  if (type === "Cita de adquisición") {
+    const openAcquisitionCloseModal = () =>
+      new Promise((resolve) => {
+        let modal = document.getElementById("inmoActionCloseModal");
+        if (!modal) {
+          modal = document.createElement("div");
+          modal.id = "inmoActionCloseModal";
+          modal.className = "modal hidden";
+          modal.innerHTML = `
+            <div class="modal-content" style="max-width: 560px;">
+              <div class="modal-header">
+                <h3 data-inmo-close-title>Cerrar cita</h3>
+                <button type="button" class="ghost" data-inmo-close-x>✕</button>
+              </div>
+              <div class="modal-body form-grid">
+                <label>
+                  Resultado
+                  <select data-inmo-close-result class="inline-input"></select>
+                </label>
+                <label data-inmo-close-next-wrap class="hidden">
+                  Estado siguiente (opcional)
+                  <select data-inmo-close-next class="inline-input"></select>
+                </label>
+                <div class="muted" style="grid-column: 1 / -1;" data-inmo-close-hint></div>
+              </div>
+              <div class="modal-actions">
+                <button type="button" class="secondary" data-inmo-close-cancel>Cancelar</button>
+                <button type="button" data-inmo-close-save>Cerrar</button>
+              </div>
+            </div>
+          `;
+          document.body.appendChild(modal);
+        }
+        const titleEl = modal.querySelector("[data-inmo-close-title]");
+        const resultSelect = modal.querySelector("[data-inmo-close-result]");
+        const nextWrap = modal.querySelector("[data-inmo-close-next-wrap]");
+        const nextSelect = modal.querySelector("[data-inmo-close-next]");
+        const hintEl = modal.querySelector("[data-inmo-close-hint]");
+        const xBtn = modal.querySelector("[data-inmo-close-x]");
+        const cancelBtn = modal.querySelector("[data-inmo-close-cancel]");
+        const saveBtn = modal.querySelector("[data-inmo-close-save]");
+
+        const setHint = (text) => {
+          if (hintEl) hintEl.textContent = text || "";
+        };
+        const fillSelect = (el, options, placeholder) => {
+          if (!el) return;
+          el.innerHTML = "";
+          el.appendChild(createOption("", placeholder || "Selecciona"));
+          options.forEach((opt) => el.appendChild(createOption(opt, opt)));
+        };
+        const onResultChange = () => {
+          const value = String(resultSelect?.value || "").trim();
+          if (!nextWrap || !nextSelect) return;
+          if (value === "Positivo") {
+            nextWrap.classList.remove("hidden");
+            fillSelect(nextSelect, ["Noticia", "Encargo"], "Sin cambio automático");
+            nextSelect.value = "Noticia";
+            setHint("Si eliges Noticia, aparecerá la pestaña “Generar encargo” en la ficha.");
+            return;
+          }
+          if (value === "Negativo") {
+            nextWrap.classList.remove("hidden");
+            fillSelect(nextSelect, ["Cerrado negativamente"], "Sin cambio automático");
+            nextSelect.value = "Cerrado negativamente";
+            setHint("");
+            return;
+          }
+          nextWrap.classList.add("hidden");
+          fillSelect(nextSelect, [], "No aplica");
+          nextSelect.value = "";
+          setHint(value === "Reprogramar" ? "Consejo: crea una nueva cita con la nueva fecha/hora." : "");
+        };
+
+        if (titleEl) titleEl.textContent = "Cerrar cita de adquisición";
+        fillSelect(resultSelect, INMO_WORKFLOW_RESULT_OPTIONS["Cita de adquisición"] || [], "Selecciona resultado");
+        fillSelect(nextSelect, [], "No aplica");
+        if (resultSelect) {
+          resultSelect.value = "";
+          resultSelect.onchange = onResultChange;
+        }
+        onResultChange();
+
+        let resolved = false;
+        const cleanup = (value) => {
+          if (resolved) return;
+          resolved = true;
+          modal.classList.add("hidden");
+          modal.classList.remove("open");
+          resolve(value);
+        };
+        if (xBtn) xBtn.onclick = () => cleanup(null);
+        if (cancelBtn) cancelBtn.onclick = () => cleanup(null);
+        if (saveBtn) {
+          saveBtn.onclick = () => {
+            const resultado = String(resultSelect?.value || "").trim();
+            if (!resultado) {
+              alert("Selecciona un resultado.");
+              return;
+            }
+            cleanup({
+              resultado,
+              estado_siguiente: String(nextSelect?.value || "").trim(),
+            });
+          };
+        }
+        modal.onclick = (event) => {
+          if (event.target === modal) cleanup(null);
+        };
+        modal.classList.remove("hidden");
+        modal.classList.add("open");
+      });
+
+    openAcquisitionCloseModal().then((data) => {
+      if (!data) return;
+      const payload = {
+        id: row.id,
+        estado: "Completada",
+        resultado_cierre: data.resultado,
+        estado_siguiente: data.estado_siguiente || "",
+        documento_tipo: "",
+        importe_propuesta: "",
+      };
+      if (data.resultado !== "Positivo" && data.resultado !== "Negativo") {
+        payload.estado = "Cancelada";
+        payload.estado_siguiente = "";
+      }
+      submitClosePayload(payload, type, data.resultado);
+    });
+    return;
+  }
+
   const workflows = {
     "Cita de adquisición": {
       options: INMO_WORKFLOW_RESULT_OPTIONS["Cita de adquisición"],
@@ -28288,38 +28481,7 @@ const closeInmuebleWorkflowAction = (row, empresaId) => {
     if (result && typeof result.then === "function") {
       result
         .then(() => {
-          fetch("/api/acciones_update", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload),
-          })
-            .then((res) => res.json())
-            .then((data) => {
-              if (data?.error) {
-                alert(data.error);
-                return;
-              }
-              const financeMessages = [];
-              if (data?.financiacion_oportunidad_id) {
-                financeMessages.push("Se creó una oportunidad en CRM Financiaciones.");
-              }
-              if (data?.financiacion_asesoramiento_id) {
-                const missing = Array.isArray(data.financiacion_missing_fields) && data.financiacion_missing_fields.length
-                  ? ` Faltan: ${data.financiacion_missing_fields.join(", ")}.`
-                  : "";
-                financeMessages.push(`Se generó un asesoramiento financiero.${missing}`);
-              }
-              if (inmuebleActividadStatus) {
-                inmuebleActividadStatus.textContent = `${type} cerrada con resultado ${resultado}.${financeMessages.length ? ` ${financeMessages.join(" ")}` : ""}`;
-              }
-              if (state.currentInmuebleId && empresaId) {
-                loadInmuebleActividad(state.currentInmuebleId, empresaId);
-                openInmuebleDetail(state.currentInmuebleId, state.currentInmuebleOriginView || "inmuebles");
-              }
-            })
-            .catch(() => {
-              alert("No se pudo cerrar la cita.");
-            });
+          submitClosePayload(payload, type, resultado);
         })
         .catch(() => {
           alert("No se pudo preparar el asesoramiento financiero.");
@@ -28327,38 +28489,7 @@ const closeInmuebleWorkflowAction = (row, empresaId) => {
       return;
     }
   }
-  fetch("/api/acciones_update", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  })
-    .then((res) => res.json())
-    .then((data) => {
-      if (data?.error) {
-        alert(data.error);
-        return;
-      }
-      const financeMessages = [];
-      if (data?.financiacion_oportunidad_id) {
-        financeMessages.push("Se creó una oportunidad en CRM Financiaciones.");
-      }
-      if (data?.financiacion_asesoramiento_id) {
-        const missing = Array.isArray(data.financiacion_missing_fields) && data.financiacion_missing_fields.length
-          ? ` Faltan: ${data.financiacion_missing_fields.join(", ")}.`
-          : "";
-        financeMessages.push(`Se generó un asesoramiento financiero.${missing}`);
-      }
-      if (inmuebleActividadStatus) {
-        inmuebleActividadStatus.textContent = `${type} cerrada con resultado ${resultado}.${financeMessages.length ? ` ${financeMessages.join(" ")}` : ""}`;
-      }
-      if (state.currentInmuebleId && empresaId) {
-        loadInmuebleActividad(state.currentInmuebleId, empresaId);
-        openInmuebleDetail(state.currentInmuebleId, state.currentInmuebleOriginView || "inmuebles");
-      }
-    })
-    .catch(() => {
-      alert("No se pudo cerrar la cita.");
-    });
+  submitClosePayload(payload, type, resultado);
 };
 
 const loadGestoriaCrm = async () => {
@@ -40924,6 +41055,13 @@ if (inmuebleConvertAlquilerBtn) {
   });
 }
 
+if (inmuebleGenerarEncargoBtn) {
+  inmuebleGenerarEncargoBtn.addEventListener("click", () => {
+    if (inmuebleGenerarEncargoStatus) inmuebleGenerarEncargoStatus.textContent = "";
+    runCurrentInmuebleConversion("encargo");
+  });
+}
+
 if (clienteDetailBack) {
   clienteDetailBack.addEventListener("click", () => {
     closeClienteDetail();
@@ -42268,8 +42406,14 @@ if (inmuebleChecklistBtn) {
 
 if (inmuebleActividadForm) {
   const tipoSelect = inmuebleActividadForm.querySelector('select[name="tipo"]');
+  const resultSelect = inmuebleActividadForm.querySelector('select[name="resultado_cierre"]');
   if (tipoSelect) {
     tipoSelect.addEventListener("change", () => {
+      syncInmuebleWorkflowForm();
+    });
+  }
+  if (resultSelect) {
+    resultSelect.addEventListener("change", () => {
       syncInmuebleWorkflowForm();
     });
   }

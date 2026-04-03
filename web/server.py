@@ -35238,7 +35238,7 @@ class Handler(BaseHTTPRequestHandler):
                 resultado_norm = normalize_lookup_text(resultado_final).lower()
                 destino = ""
                 if resultado_norm == "positivo":
-                    destino = estado_siguiente_final or "Encargo"
+                    destino = estado_siguiente_final or "Noticia"
                 elif resultado_norm == "negativo":
                     destino = estado_siguiente_final or "Cerrado negativamente"
                 if destino:
