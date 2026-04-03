@@ -2,9 +2,15 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from datetime import datetime, timezone
+from pathlib import Path
 
-from web.db_backend import open_db_conn
+REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from web.db_backend import open_db_conn  # type: ignore
 
 
 def now_iso() -> str:
@@ -130,4 +136,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

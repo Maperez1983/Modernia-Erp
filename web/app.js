@@ -26071,6 +26071,7 @@ const loadCrmCompraventas = () => {
       "dias_hasta_venta",
       "num_visitas",
       "estado_documental",
+      "docs",
     ].forEach((col) => {
       const th = document.createElement("th");
       th.textContent = formatHeader(col);
@@ -26079,6 +26080,26 @@ const loadCrmCompraventas = () => {
     thead.appendChild(trHead);
     table.appendChild(thead);
     const tbody = document.createElement("tbody");
+    const docsPrefix = "/uploads/inmuebles_vendidos/";
+    const docUrl = (value) => {
+      const raw = String(value || "").trim();
+      if (!raw) return "";
+      if (raw.startsWith("http://") || raw.startsWith("https://") || raw.startsWith("/uploads/")) {
+        return raw;
+      }
+      return docsPrefix + encodeURI(raw.replace(/^\\/+/, ""));
+    };
+    const addDocLink = (container, label, value) => {
+      const url = docUrl(value);
+      if (!url) return;
+      const a = document.createElement("a");
+      a.href = url;
+      a.target = "_blank";
+      a.rel = "noopener";
+      a.className = "pill";
+      a.textContent = label;
+      container.appendChild(a);
+    };
     rows.forEach((row) => {
       const tr = document.createElement("tr");
       const rowValues = [
@@ -26100,6 +26121,7 @@ const loadCrmCompraventas = () => {
         row.dias_hasta_venta,
         row.num_visitas,
         row.estado_documental || "-",
+        null,
       ];
       const rowColumns = [
         "direccion",
@@ -26120,11 +26142,26 @@ const loadCrmCompraventas = () => {
         "dias_hasta_venta",
         "num_visitas",
         "estado_documental",
+        "docs",
       ];
       rowValues.forEach((value, idx) => {
         const td = document.createElement("td");
-        const formatted = formatCell(rowColumns[idx], value);
-        td.textContent = formatted === null ? "" : formatted;
+        const col = rowColumns[idx];
+        if (col === "docs") {
+          td.className = "pill-group";
+          addDocLink(td, "Encargo", row.doc_nota_encargo_path);
+          addDocLink(td, "Propuesta", row.doc_propuesta_path);
+          addDocLink(td, "Escritura", row.doc_escritura_path);
+          addDocLink(td, "Nota", row.doc_nota_simple_path);
+          const visitas = String(row.doc_partes_visita_paths || "").trim();
+          if (visitas) {
+            const first = visitas.split("|")[0].trim();
+            addDocLink(td, "Visitas", first);
+          }
+        } else {
+          const formatted = formatCell(col, value);
+          td.textContent = formatted === null ? "" : formatted;
+        }
         tr.appendChild(td);
       });
       tbody.appendChild(tr);

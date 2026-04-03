@@ -3,6 +3,33 @@ import re
 import sqlite3
 import threading
 from contextlib import contextmanager
+from pathlib import Path
+
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+ENV_PATH = REPO_ROOT / ".env"
+
+
+def _load_env_file() -> None:
+    # Keep this lightweight and dependency-free (no python-dotenv).
+    if not ENV_PATH.exists():
+        return
+    try:
+        with ENV_PATH.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                raw = line.strip()
+                if not raw or raw.startswith("#") or "=" not in raw:
+                    continue
+                key, value = raw.split("=", 1)
+                key = key.strip()
+                value = value.strip().strip('"').strip("'")
+                if key and key not in os.environ:
+                    os.environ[key] = value
+    except Exception:
+        return
+
+
+_load_env_file()
 
 
 def is_postgres_enabled():
@@ -286,7 +313,10 @@ def open_sqlite_conn(db_path, with_row_factory=False):
 def open_postgres_conn(with_row_factory=False, *, skip_compat=False, connect_timeout_override=None):
     dsn = _postgres_dsn()
     if not dsn:
-        raise RuntimeError("DATABASE_URL/POSTGRES_URL no configurado.")
+        raise RuntimeError(
+            "DATABASE_URL/POSTGRES_URL no configurado. "
+            "En local puedes exportar la variable o añadirla al archivo `.env` en la raíz del repo."
+        )
     try:
         import psycopg
         from psycopg.rows import dict_row
@@ -333,6 +363,15 @@ _PG_COMPAT_LOCK = threading.Lock()
 
 
 def open_db_conn(db_path, with_row_factory=False):
+    # Backend selection:
+    # - If APP_DB_BACKEND forces a backend, obey it.
+    # - Otherwise, if DATABASE_URL/POSTGRES_URL indicates Postgres, use Postgres.
+    # - Otherwise, use SQLite at the provided path.
+    forced = (os.environ.get("APP_DB_BACKEND") or "").strip().lower()
+    if forced in {"sqlite", "sqlite3"}:
+        return open_sqlite_conn(db_path, with_row_factory=with_row_factory)
+    if forced in {"postgres", "postgresql", "postgre", "pg"}:
+        return open_postgres_conn(with_row_factory=with_row_factory)
     if is_postgres_enabled():
         return open_postgres_conn(with_row_factory=with_row_factory)
     return open_sqlite_conn(db_path, with_row_factory=with_row_factory)

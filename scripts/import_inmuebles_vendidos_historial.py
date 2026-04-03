@@ -9,17 +9,21 @@ import sqlite3
 import subprocess
 import tempfile
 import sys
+import os
 import unicodedata
 import uuid
+import zipfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
+from xml.etree import ElementTree as ET
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from web.db_backend import is_postgres_enabled, open_db_conn
 from web.schema_support import apply_schema_file, ensure_column
 
 
@@ -182,6 +186,18 @@ class CaseEntry:
     case_path: Path
     files: list[Path]
 
+def subprocess_timeout_seconds() -> float:
+    try:
+        return float(os.environ.get("IMPORT_SUBPROCESS_TIMEOUT_S", "25") or 25)
+    except Exception:
+        return 25.0
+
+def ocr_dpi() -> int:
+    try:
+        return max(72, min(300, int(os.environ.get("IMPORT_OCR_DPI", "150") or 150)))
+    except Exception:
+        return 150
+
 
 def compact_spaces(value: object) -> str:
     return re.sub(r"\s+", " ", str(value or "")).strip()
@@ -328,41 +344,97 @@ def first_unique(items: Iterable[str]) -> list[str]:
 
 
 def command_exists(name: str) -> bool:
-    return subprocess.run(["which", name], capture_output=True, text=True, check=False).returncode == 0
+    try:
+        return subprocess.run(
+            ["which", name],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=max(3.0, min(8.0, subprocess_timeout_seconds())),
+        ).returncode == 0
+    except subprocess.TimeoutExpired:
+        return False
+
+
+def read_docx_text(path: Path) -> str:
+    try:
+        with zipfile.ZipFile(path) as zf:
+            xml = zf.read("word/document.xml")
+    except Exception:
+        return ""
+    try:
+        root = ET.fromstring(xml)
+    except Exception:
+        return ""
+    ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+    paragraphs: list[str] = []
+    for p in root.findall(".//w:p", ns):
+        chunks: list[str] = []
+        for node in p.iter():
+            tag = node.tag
+            if tag.endswith("}t") and node.text:
+                chunks.append(node.text)
+            elif tag.endswith("}tab"):
+                chunks.append("\t")
+            elif tag.endswith("}br") or tag.endswith("}cr"):
+                chunks.append("\n")
+        text = compact_spaces("".join(chunks))
+        if text:
+            paragraphs.append(text)
+    return "\n".join(paragraphs)
 
 
 def read_doc_text(path: Path) -> tuple[str, str]:
     suffix = path.suffix.lower()
+    if suffix == ".docx":
+        text = read_docx_text(path)
+        if compact_spaces(text):
+            return text, "text"
+        # Fallback a textutil (a veces guarda el contenido en el cuerpo como "texto plano" aunque el XML venga raro).
     if suffix in {".doc", ".docx"}:
-        proc = subprocess.run(
-            ["textutil", "-convert", "txt", "-stdout", str(path)],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        return proc.stdout or "", "text"
+        try:
+            proc = subprocess.run(
+                ["textutil", "-convert", "txt", "-stdout", str(path)],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=subprocess_timeout_seconds(),
+            )
+        except subprocess.TimeoutExpired:
+            return "", "timeout"
+        if compact_spaces(proc.stdout):
+            return proc.stdout or "", "text"
+        return "", "empty"
     return "", "binary"
 
 
 def read_image_ocr(path: Path) -> tuple[str, str]:
     if not command_exists("tesseract"):
         return "", "missing_tesseract"
-    proc = subprocess.run(
-        ["tesseract", str(path), "stdout", "-l", "spa+eng"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        proc = subprocess.run(
+            ["tesseract", str(path), "stdout", "-l", "spa+eng"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=max(10.0, subprocess_timeout_seconds()),
+        )
+    except subprocess.TimeoutExpired:
+        return "", "timeout"
     return proc.stdout or "", "ocr"
 
 
 def read_pdf_text(path: Path, max_ocr_pages: int) -> tuple[str, str]:
-    proc = subprocess.run(
-        ["pdftotext", "-f", "1", "-l", str(max_ocr_pages), str(path), "-"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        proc = subprocess.run(
+            ["pdftotext", "-f", "1", "-l", str(max_ocr_pages), str(path), "-"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=subprocess_timeout_seconds(),
+        )
+    except subprocess.TimeoutExpired:
+        return "", "timeout"
     text = proc.stdout or ""
     if compact_spaces(text):
         return text, "text"
@@ -370,22 +442,30 @@ def read_pdf_text(path: Path, max_ocr_pages: int) -> tuple[str, str]:
         return "", "empty"
     with tempfile.TemporaryDirectory() as tmpdir:
         prefix = Path(tmpdir) / "page"
-        render = subprocess.run(
-            ["pdftoppm", "-f", "1", "-l", str(max_ocr_pages), "-r", "180", "-png", str(path), str(prefix)],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        try:
+            render = subprocess.run(
+                ["pdftoppm", "-f", "1", "-l", str(max_ocr_pages), "-r", str(ocr_dpi()), "-png", str(path), str(prefix)],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=max(15.0, subprocess_timeout_seconds()),
+            )
+        except subprocess.TimeoutExpired:
+            return "", "timeout"
         if render.returncode != 0:
             return "", "empty"
         chunks: list[str] = []
         for image_path in sorted(Path(tmpdir).glob("*.png")):
-            ocr = subprocess.run(
-                ["tesseract", str(image_path), "stdout", "-l", "spa+eng"],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
+            try:
+                ocr = subprocess.run(
+                    ["tesseract", str(image_path), "stdout", "-l", "spa+eng"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=max(10.0, subprocess_timeout_seconds()),
+                )
+            except subprocess.TimeoutExpired:
+                continue
             if compact_spaces(ocr.stdout):
                 chunks.append(ocr.stdout)
         return "\n".join(chunks), "ocr" if chunks else "empty"
@@ -394,7 +474,8 @@ def read_pdf_text(path: Path, max_ocr_pages: int) -> tuple[str, str]:
 def read_file_text(path: Path, doc_type: str) -> tuple[str, str]:
     suffix = path.suffix.lower()
     if suffix == ".pdf":
-        max_pages = 14 if doc_type in {"escritura", "copia_simple"} else 3 if doc_type == "propuesta" else 2
+        # OCR de PDFs escaneados puede ser costoso; reducimos páginas por defecto para acelerar bulk imports.
+        max_pages = 8 if doc_type in {"escritura", "copia_simple"} else 3 if doc_type == "propuesta" else 2
         return read_pdf_text(path, max_pages)
     if suffix in {".doc", ".docx"}:
         return read_doc_text(path)
@@ -478,6 +559,8 @@ def gather_cases(root: Path, default_year: int = 0, default_month: str = "") -> 
     if not year_dirs:
         month = default_month or infer_month_from_name(root.name)
         for child in sorted(root.iterdir()):
+            if child.name.startswith("."):
+                continue
             if child.is_file():
                 cases.append(
                     CaseEntry(
@@ -504,6 +587,8 @@ def gather_cases(root: Path, default_year: int = 0, default_month: str = "") -> 
     for year_dir in year_dirs:
         year = int(year_dir.name)
         for child in sorted(year_dir.iterdir()):
+            if child.name.startswith("."):
+                continue
             if child.is_file():
                 cases.append(
                     CaseEntry(
@@ -517,7 +602,8 @@ def gather_cases(root: Path, default_year: int = 0, default_month: str = "") -> 
                 continue
             if not child.is_dir():
                 continue
-            direct_files = [p for p in child.iterdir() if p.is_file()]
+            # Ignora archivos ocultos tipo ".DS_Store" para no confundir carpetas de meses con expedientes.
+            direct_files = [p for p in child.iterdir() if p.is_file() and not p.name.startswith(".")]
             if direct_files:
                 cases.append(
                     CaseEntry(
@@ -532,6 +618,8 @@ def gather_cases(root: Path, default_year: int = 0, default_month: str = "") -> 
             # Soporta carpetas tipo "01 ENERO", "1 ENERO", "ENERO", etc.
             month = infer_month_from_name(child.name) or MONTH_NAMES.get(child.name.upper(), child.name)
             for grand in sorted(child.iterdir()):
+                if grand.name.startswith("."):
+                    continue
                 if grand.is_file():
                     cases.append(
                         CaseEntry(
@@ -967,6 +1055,76 @@ def find_money_near_keywords(text: str, keywords: Iterable[str]) -> float | None
     return max(matches) if matches else None
 
 
+def find_best_sale_price(text: str, min_value: float = 10_000.0) -> float | None:
+    if not text:
+        return None
+
+    positive_hints = (
+        "precio",
+        "importe",
+        "total",
+        "compraventa",
+        "venta",
+        "transmision",
+        "transmisión",
+        "queda fijado",
+        "se fija",
+        "por el precio",
+    )
+    negative_hints = (
+        "arras",
+        "señal",
+        "senal",
+        "reserva",
+        "fianza",
+        "tasacion",
+        "tasación",
+        "valor catastral",
+        "valor de referencia",
+        "honorarios",
+        "comision",
+        "comisión",
+        "iva",
+        "itp",
+        "impuesto",
+        "notaria",
+        "notaría",
+        "registro",
+        "gastos",
+        "intermediacion",
+        "intermediación",
+    )
+
+    candidates: list[tuple[float, int, int]] = []
+    for match in MONEY_RE.finditer(text or ""):
+        value = parse_money(match.group(1))
+        if value is None or value < 100 or value > 2_000_000:
+            continue
+        candidates.append((value, match.start(), match.end()))
+    for match in PLAIN_AMOUNT_RE.finditer(text or ""):
+        value = parse_money(match.group(1))
+        if value is None or value < 1000 or value > 2_000_000:
+            continue
+        candidates.append((value, match.start(), match.end()))
+
+    best: tuple[float, float] | None = None  # (score, value)
+    for value, start, end in candidates:
+        if value < min_value:
+            continue
+        window = text[max(0, start - 180) : min(len(text), end + 180)]
+        ctx = norm_text(window)
+        score = float(value)
+        if any(hint in ctx for hint in positive_hints):
+            score *= 1.15
+        if "precio" in ctx:
+            score *= 1.15
+        if any(hint in ctx for hint in negative_hints):
+            score *= 0.25
+        if best is None or score > best[0]:
+            best = (score, float(value))
+    return best[1] if best else None
+
+
 def extract_encargo_price(text: str) -> float | None:
     if not text:
         return None
@@ -983,10 +1141,10 @@ def extract_encargo_price(text: str) -> float | None:
             "precio",
         ),
     )
-    if value is not None:
+    if value is not None and value >= 10_000:
         return value
     opening = text[:2500]
-    candidates = [amount for amount in money_candidates(opening) + numeric_amount_candidates(opening) if amount >= 1000]
+    candidates = [amount for amount in money_candidates(opening) + numeric_amount_candidates(opening) if amount >= 10_000]
     if not candidates:
         return None
     unique = sorted(set(round(amount, 2) for amount in candidates))
@@ -1121,22 +1279,42 @@ def extract_case_data(case: CaseEntry, root: Path) -> dict[str, object]:
     texts: dict[str, str] = {}
     quality_marks: list[str] = []
     chosen_docs: dict[str, str] = {}
+    chosen_docs_quality: dict[str, list[dict[str, object]]] = {}
     for doc_type, files in grouped.items():
         if not files:
             continue
-        selected = files[:4] if doc_type == "dni" else files[:1]
+        # Algunos expedientes tienen versiones "mal exportadas" (p.ej. .docx que no es ZIP) o documentos vacíos.
+        # Probamos varios candidatos por tipo hasta conseguir texto.
+        if doc_type == "dni":
+            max_candidates = 4
+        elif doc_type in {"propuesta", "arras", "encargo", "contrato_privado"}:
+            max_candidates = 3
+        elif doc_type in {"escritura", "copia_simple", "nota_simple", "catastro"}:
+            max_candidates = 2
+        else:
+            max_candidates = 1
+        selected = files[:max_candidates]
         chunks: list[str] = []
         selected_paths: list[str] = []
         local_marks: list[str] = []
+        per_file: list[dict[str, object]] = []
         for chosen in selected:
             text, quality = read_file_text(chosen, doc_type)
             if compact_spaces(text):
                 chunks.append(text)
             local_marks.append(quality)
             selected_paths.append(str(chosen.relative_to(root)))
+            try:
+                per_file.append({"path": selected_paths[-1], "calidad": quality, "bytes": chosen.stat().st_size})
+            except Exception:
+                per_file.append({"path": selected_paths[-1], "calidad": quality})
+            if doc_type != "dni" and chunks:
+                # Para la mayoría de tipos, con el primer documento "bueno" basta.
+                break
         texts[doc_type] = "\n".join(chunks)
         quality_marks.extend(local_marks)
         chosen_docs[doc_type] = selected_paths[0] if len(selected_paths) == 1 else selected_paths
+        chosen_docs_quality[doc_type] = per_file
 
     contract_buyers = extract_contract_party(texts.get("contrato_privado", ""), "compradora")
     contract_sellers = extract_contract_party(texts.get("contrato_privado", ""), "vendedora")
@@ -1250,11 +1428,15 @@ def extract_case_data(case: CaseEntry, root: Path) -> dict[str, object]:
         texts.get("propuesta", ""),
         ("precio propuesto", "precio propuesto para la compra", "precio queda fijado"),
     )
+    if price_propuesta is None:
+        price_propuesta = find_best_sale_price(texts.get("propuesta", ""), min_value=10_000.0)
     if price_propuesta is None and not texts.get("contrato_privado", ""):
         price_propuesta = find_money_near_keywords(
             texts.get("arras", ""),
             ("propuesta de compraventa", "reserva", "arras"),
         )
+        if price_propuesta is None:
+            price_propuesta = find_best_sale_price(texts.get("arras", ""), min_value=10_000.0)
     # En muchos expedientes, "arras/reserva" contiene importes de señal (ej. 3.000€) que NO son precio de venta.
     # Normalizamos: si el importe es demasiado bajo, lo ignoramos como "precio_propuesta".
     if price_propuesta is not None and price_propuesta < 10_000:
@@ -1264,12 +1446,26 @@ def extract_case_data(case: CaseEntry, root: Path) -> dict[str, object]:
         ("precio que se fija para la transmision", "precio que se fija para la transmisión", "precio para la transmisión"),
     )
     price_escritura = extract_escritura_price(escritura_text)
+    # Si tenemos precio de escritura, descartamos propuestas claramente erróneas (tasación/valor/ref) para no contaminar KPIs.
+    if price_escritura is not None and price_propuesta is not None:
+        try:
+            if price_propuesta > price_escritura * 1.7 or price_propuesta < price_escritura * 0.6:
+                price_propuesta = None
+        except Exception:
+            pass
     honorarios = (
         find_money_near_keywords(texts.get("encargo", ""), ("honorarios", "comision", "intermediacion"))
         or find_money_near_keywords(texts.get("contrato_privado", ""), ("honorarios", "comision", "intermediacion"))
         or find_money_near_keywords(texts.get("propuesta", ""), ("honorarios", "comision", "intermediacion"))
     )
-    sale_price = price_propuesta if price_propuesta is not None else price_contrato if price_contrato is not None else price_escritura
+    # En histórico vendido, el precio de escritura suele ser el más fiable (precio final).
+    sale_price = (
+        price_escritura
+        if price_escritura is not None
+        else price_contrato
+        if price_contrato is not None
+        else price_propuesta
+    )
     desviacion_euros = round(price_encargo - sale_price, 2) if price_encargo is not None and sale_price is not None else None
     desviacion_pct = calculate_percentage_delta(price_encargo, sale_price)
     fecha_encargo = first_or_empty(encargo_dates[:1])
@@ -1346,6 +1542,7 @@ def extract_case_data(case: CaseEntry, root: Path) -> dict[str, object]:
         "datos_extraidos_json": json.dumps(
             {
                 "documentos": chosen_docs,
+                "documentos_calidad": chosen_docs_quality,
                 "estado_documental": estado_documental,
                 "num_visitas": num_visitas,
                 "owner_names_detected": owner_names,
@@ -1380,7 +1577,12 @@ def extract_case_data(case: CaseEntry, root: Path) -> dict[str, object]:
 
 
 def ensure_schema(conn: sqlite3.Connection, repo_root: Path) -> None:
-    apply_schema_file(conn, repo_root / "schema.sql")
+    try:
+        apply_schema_file(conn, repo_root / "schema.sql")
+    except Exception:
+        # En Postgres, el schema.sql puede contener DDL no aplicable en ciertos entornos.
+        # El import intenta ser idempotente: si el esquema ya existe, continuamos y solo aseguramos columnas.
+        pass
     ensure_column(conn, "inmuebles", "referencia_catastral", "referencia_catastral TEXT")
     for column_name, column_sql in {
         "origen_inmueble": "origen_inmueble TEXT",
@@ -1909,7 +2111,7 @@ def main() -> int:
     db_path = (REPO_ROOT / args.db).resolve() if not args.db.is_absolute() else args.db.resolve()
     if not root.exists():
         raise SystemExit(f"No existe la ruta {root}")
-    if not db_path.exists():
+    if not is_postgres_enabled() and not db_path.exists():
         raise SystemExit(f"No existe la base {db_path}")
 
     cases = gather_cases(root, default_year=args.default_year, default_month=args.default_month)
@@ -1923,19 +2125,40 @@ def main() -> int:
     if args.limit > 0:
         cases = cases[: args.limit]
 
-    conn = sqlite3.connect(str(db_path))
-    conn.row_factory = sqlite3.Row
+    conn = open_db_conn(str(db_path), with_row_factory=True)
+    if getattr(conn, "__crm_backend__", "") != "postgres":
+        try:
+            conn.execute("PRAGMA busy_timeout=60000")
+        except Exception:
+            pass
     ensure_schema(conn, REPO_ROOT)
     company = ensure_company(conn, args.company)
     now = datetime.now(timezone.utc).isoformat()
 
     imported: list[dict[str, object]] = []
     try:
-        for case in cases:
+        total = len(cases)
+        for idx, case in enumerate(cases, start=1):
+            if idx == 1 or idx % 5 == 0 or idx == total:
+                try:
+                    rel = str(case.case_path.relative_to(root))
+                except Exception:
+                    rel = str(case.case_path)
+                print(f"[import] {idx}/{total} {rel}", file=sys.stderr)
             imported.append(import_case(conn, company["id"], case, root, now))
-        if args.apply:
-            conn.commit()
-        else:
+            if args.apply:
+                # Commit temprano para:
+                # - reducir el tiempo de bloqueo en SQLite
+                # - permitir reanudar imports largos si algo falla en mitad
+                try:
+                    conn.commit()
+                except Exception:
+                    try:
+                        conn.rollback()
+                    except Exception:
+                        pass
+                    raise
+        if not args.apply:
             conn.rollback()
     finally:
         conn.close()

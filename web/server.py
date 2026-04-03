@@ -39123,7 +39123,12 @@ class Handler(BaseHTTPRequestHandler):
                   estado,
                   origen,
                   origen_inmueble,
-                  estado_documental
+                  estado_documental,
+                  doc_nota_encargo_path,
+                  doc_propuesta_path,
+                  doc_escritura_path,
+                  doc_nota_simple_path,
+                  doc_partes_visita_paths
                 FROM operaciones_inmobiliarias
                 WHERE {' AND '.join(where)}
                 ORDER BY COALESCE(NULLIF(fecha_escritura, ''), NULLIF(fecha_operacion, ''), updated_at, created_at) DESC

@@ -460,6 +460,15 @@ h2 {
   border: 1px solid rgba(60, 110, 113, 0.4);
 }
 
+a.pill {
+  text-decoration: none;
+}
+
+a.pill:hover {
+  text-decoration: none;
+  filter: brightness(0.98);
+}
+
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
