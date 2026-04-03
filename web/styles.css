@@ -310,14 +310,18 @@ button.secondary,
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
 }
 
-.catastro-icon span {
-  transform: translateY(1px);
+.catastro-icon--catastro {
+  background: #fff;
+  color: var(--ink);
+  box-shadow: inset 0 0 0 1px rgba(130, 76, 69, 0.16);
 }
 
-.catastro-icon .catastro-logo {
-  width: 18px;
-  height: 18px;
+.catastro-icon--catastro .catastro-logo-img {
   display: block;
+  height: 18px;
+  width: auto;
+  max-width: 140px;
+  object-fit: contain;
 }
 
 .tabs,

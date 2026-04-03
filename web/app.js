@@ -17523,15 +17523,12 @@ const updateCaptacionMap = (lat, lon) => {
   renderMapPreview(captacionMap, lat, lon);
 };
 
-const CATASTRO_ICON_SVG = `
-  <svg class="catastro-logo" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-    <path d="M12 3.2 3.8 7.9v8.2L12 20.8l8.2-4.7V7.9L12 3.2Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
-    <path d="M8 9h8M8 12h8M8 15h8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-  </svg>
+const CATASTRO_ICON_HTML = `
+  <img class="catastro-logo-img" src="icons/catastro.png" alt="" loading="lazy" />
 `.trim();
 
 const buildCatastroButtonInner = (label) =>
-  `<span class="catastro-icon" aria-hidden="true">${CATASTRO_ICON_SVG}</span><span>${label}</span>`;
+  `<span class="catastro-icon catastro-icon--catastro" aria-hidden="true">${CATASTRO_ICON_HTML}</span><span>${label}</span>`;
 
 const buildCatastroUrl = (ref, address) => {
   const cleanRef = String(ref || "")
