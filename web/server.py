@@ -4424,12 +4424,21 @@ def extract_invoice_amount(text, labels):
     if not text:
         return 0.0
     for label in labels:
-        pattern = rf"{label}\s*[:\-]?\s*([0-9][0-9\.\,\s€]*)"
-        match = re.search(pattern, text, re.IGNORECASE)
-        if match:
-            value = parse_decimal_eu(match.group(1))
-            if value > 0:
-                return value
+        for match in re.finditer(rf"{label}\s*[:\-]?\s*", text, re.IGNORECASE):
+            tail = text[match.end() : match.end() + 120]
+            for num_match in re.finditer(r"([0-9][0-9\.\,\s€]{0,24})", tail):
+                after = tail[num_match.end() : num_match.end() + 6]
+                if re.match(r"^\s*%", after):
+                    continue
+                raw_token = str(num_match.group(1) or "")
+                # Evita confundir NIF/IVA/VAT ID (p. ej. "IVA: ESB93227643") con importes.
+                digit_count = len(re.sub(r"[^0-9]", "", raw_token))
+                has_decimal = ("," in raw_token) or ("." in raw_token)
+                if digit_count >= 7 and not has_decimal:
+                    continue
+                value = parse_decimal_eu(num_match.group(1))
+                if value > 0:
+                    return value
     return 0.0
 
 
@@ -4494,6 +4503,13 @@ def parse_invoice_text(text):
         iva_pct = parse_decimal_eu(pct_match.group(1))
     elif base > 0 and cuota_iva > 0:
         iva_pct = round((cuota_iva / base) * 100.0, 2)
+    if iva_pct > 0 and base > 0 and cuota_iva <= 0:
+        inferred_iva = round((base * iva_pct) / 100.0, 2)
+        inferred_total = round(base + inferred_iva - cuota_irpf, 2)
+        if total <= 0 or abs(inferred_total - total) <= max(1.0, total * 0.15):
+            cuota_iva = inferred_iva
+            if total <= 0:
+                total = inferred_total
     descripcion = numero or "Factura"
     if tercero:
         descripcion = f"{descripcion} · {tercero}"
