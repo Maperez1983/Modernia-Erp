@@ -360,10 +360,16 @@ def extract_text(path: Path, pdf_pages: int = 2) -> tuple[str, str, str]:
     suffix = path.suffix.lower()
     if suffix == ".pdf":
         text, err = pdftotext_extract_fast(path, pages=pdf_pages)
+        text_score = score_ocr_text(text)
+        if norm(text) and not needs_ocr_rescue(text):
+            return text, "pdftotext", err
+        ocr_text, ocr_err = ocr_pdf_pages_fast(path, pages=max(1, pdf_pages))
+        ocr_score = score_ocr_text(ocr_text)
+        if ocr_score > text_score:
+            return ocr_text, "ocr_pdf_pages", ocr_err
         if norm(text):
             return text, "pdftotext", err
-        text, err = ocr_pdf_first_page_fast(path)
-        return text, "ocr_pdf_first_page", err
+        return ocr_text, "ocr_pdf_pages", ocr_err
     if suffix in {".png", ".jpg", ".jpeg"}:
         text, err = ocr_image_file_fast(path)
         return text, "ocr_image_file", err
@@ -412,6 +418,17 @@ def tesseract_stdout(image_path: Path, timeout_seconds: int = 20, psm: int = 6) 
         return "", "tesseract timeout"
     except subprocess.CalledProcessError as exc:
         return "", (exc.stderr or "").strip()
+
+def best_tesseract_text(image_path: Path, timeout_seconds: int = 20, psms: tuple[int, ...] = (6, 11, 4)) -> tuple[str, str]:
+    best_text = ""
+    best_err = ""
+    best_score = -1
+    for psm in psms:
+        text, err = tesseract_stdout(image_path, timeout_seconds=timeout_seconds, psm=psm)
+        score = score_ocr_text(text)
+        if score > best_score:
+            best_text, best_err, best_score = text, err, score
+    return best_text, best_err
 
 
 def score_ocr_text(text: str) -> int:
@@ -465,21 +482,21 @@ def sips_transform(src: Path, out: Path, rotate: int | None = None, max_size: in
 
 
 def ocr_image_file_fast(path: Path) -> tuple[str, str]:
-    best_text, best_err = tesseract_stdout(path, psm=6)
+    best_text, best_err = best_tesseract_text(path, psms=(6,))
     best_score = score_ocr_text(best_text)
     if not needs_ocr_rescue(best_text):
         return best_text, best_err
     with tempfile.TemporaryDirectory() as tmpdir:
         candidates: list[tuple[str, str]] = [(best_text, best_err)]
-        rescue_psm11, rescue_err = tesseract_stdout(path, psm=11)
-        candidates.append((rescue_psm11, rescue_err))
+        rescue, rescue_err = best_tesseract_text(path, psms=(11, 6, 4))
+        candidates.append((rescue, rescue_err))
         big_path = Path(tmpdir) / "big.jpg"
         if sips_transform(path, big_path, max_size=2600):
-            candidates.append(tesseract_stdout(big_path, psm=11))
+            candidates.append(best_tesseract_text(big_path, psms=(11, 6, 4)))
         for angle in (90, 270):
             rotated = Path(tmpdir) / f"rot_{angle}.jpg"
             if sips_transform(path, rotated, rotate=angle, max_size=2600):
-                candidates.append(tesseract_stdout(rotated, psm=11))
+                candidates.append(best_tesseract_text(rotated, psms=(11, 6, 4)))
         for text, err in candidates:
             score = score_ocr_text(text)
             if score > best_score:
@@ -487,7 +504,7 @@ def ocr_image_file_fast(path: Path) -> tuple[str, str]:
     return best_text, best_err
 
 
-def ocr_pdf_first_page_fast(path: Path, timeout_seconds: int = 20) -> tuple[str, str]:
+def ocr_pdf_pages_fast(path: Path, pages: int = 2, dpi: int = 300, timeout_seconds: int = 60) -> tuple[str, str]:
     pdftoppm = shutil.which("pdftoppm") or "/opt/homebrew/bin/pdftoppm" or "/usr/local/bin/pdftoppm"
     if not pdftoppm or not os.path.exists(pdftoppm):
         return "", "pdftoppm no encontrado"
@@ -495,7 +512,7 @@ def ocr_pdf_first_page_fast(path: Path, timeout_seconds: int = 20) -> tuple[str,
         out_base = Path(tmpdir) / "page"
         try:
             subprocess.run(
-                [pdftoppm, "-png", "-f", "1", "-singlefile", str(path), str(out_base)],
+                [pdftoppm, "-png", "-r", str(max(120, int(dpi))), "-f", "1", "-l", str(max(1, int(pages))), str(path), str(out_base)],
                 check=True,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.PIPE,
@@ -506,10 +523,24 @@ def ocr_pdf_first_page_fast(path: Path, timeout_seconds: int = 20) -> tuple[str,
             return "", "pdftoppm timeout"
         except subprocess.CalledProcessError as exc:
             return "", (exc.stderr or "").strip()
-        image_path = out_base.with_suffix(".png")
-        if not image_path.exists():
+        image_paths = sorted(Path(tmpdir).glob("page-*.png"))
+        if not image_paths:
+            single = out_base.with_suffix(".png")
+            image_paths = [single] if single.exists() else []
+        if not image_paths:
             return "", "pdftoppm sin salida"
-        return tesseract_stdout(image_path, timeout_seconds=timeout_seconds)
+        chunks: list[str] = []
+        for idx, image_path in enumerate(image_paths, start=1):
+            page_text, _page_err = best_tesseract_text(image_path, timeout_seconds=min(45, timeout_seconds), psms=(6, 11, 4))
+            if page_text.strip():
+                chunks.append(page_text.strip())
+            if idx >= pages:
+                break
+        return "\n\n".join(chunks).strip(), ""
+
+
+def ocr_pdf_first_page_fast(path: Path, timeout_seconds: int = 20) -> tuple[str, str]:
+    return ocr_pdf_pages_fast(path, pages=1, dpi=300, timeout_seconds=timeout_seconds)
 
 
 def enrich_parsed(path: Path, text: str, parsed: dict[str, Any]) -> dict[str, Any]:
@@ -566,6 +597,9 @@ def enrich_parsed(path: Path, text: str, parsed: dict[str, Any]) -> dict[str, An
         result["cuota_iva"] = triplet_iva
     if float(result.get("base_imponible") or 0.0) <= 0 and total > 0:
         base = extract_amount_by_labels(text, ("base imponible", "subtotal", "base"))
+        cuota_iva_val = float(result.get("cuota_iva") or 0.0)
+        if base <= 0 and cuota_iva_val > 0 and total > cuota_iva_val:
+            base = total - cuota_iva_val
         if base <= 0:
             base = total
         result["base_imponible"] = round(base, 2)
@@ -577,8 +611,25 @@ def enrich_parsed(path: Path, text: str, parsed: dict[str, Any]) -> dict[str, An
         signed_total = extract_amount_by_labels(text, ("total factura", "total"))
         if signed_total != 0:
             result["total"] = round(signed_total, 2)
-    if float(result.get("cuota_iva") or 0.0) <= 0 and float(result.get("total") or 0.0) > float(result.get("base_imponible") or 0.0):
-        result["cuota_iva"] = round(float(result["total"]) - float(result["base_imponible"]), 2)
+    base_val = float(result.get("base_imponible") or 0.0)
+    iva_val = float(result.get("cuota_iva") or 0.0)
+    total_val = float(result.get("total") or 0.0)
+    if iva_val <= 0 and total_val > 0 and base_val > 0 and total_val > base_val:
+        base_label = extract_amount_by_labels(text, ("base imponible", "subtotal", "base"))
+        if base_label > 0 and abs(base_label - base_val) <= max(1.0, total_val * 0.15):
+            inferred_iva = round(total_val - base_val, 2)
+            if not is_implausible_vat(base_val, inferred_iva, total_val):
+                result["cuota_iva"] = inferred_iva
+                iva_val = inferred_iva
+    if total_val > 0 and is_implausible_vat(base_val, iva_val, total_val):
+        pct_match = re.search(r"\b(4|10|21)(?:[.,]0+)?\s*%\b", text)
+        if pct_match:
+            pct = float(pct_match.group(1))
+            inferred_base = round(total_val / (1.0 + (pct / 100.0)), 2)
+            inferred_iva = round(total_val - inferred_base, 2)
+            if not is_implausible_vat(inferred_base, inferred_iva, total_val):
+                result["base_imponible"] = inferred_base
+                result["cuota_iva"] = inferred_iva
     result["descripcion"] = result.get("descripcion") or f"{result.get('numero') or 'Documento'} · {result.get('tercero') or path.stem}"
     return result
 

@@ -4420,13 +4420,35 @@ def parse_decimal_eu(value):
         return 0.0
 
 
-def extract_invoice_amount(text, labels):
+def extract_invoice_amount(text, labels, kind="generic"):
     if not text:
         return 0.0
+    money_decimal_re = re.compile(r"(?<![\dA-Z])(-?\d{1,3}(?:[.\s]\d{3})*(?:[.,]\d{2}))(?![\d%]|[.,]\d)", re.IGNORECASE)
+    money_int_re = re.compile(r"(?<![\dA-Z])(-?\d{1,6})(?![\dA-Z])", re.IGNORECASE)
+    best_total = 0.0
     for label in labels:
-        for match in re.finditer(rf"{label}\s*[:\-]?\s*", text, re.IGNORECASE):
-            tail = text[match.end() : match.end() + 120]
-            for num_match in re.finditer(r"([0-9][0-9\.\,\s€]{0,24})", tail):
+        label_raw = str(label or "").strip()
+        if not label_raw:
+            continue
+        # Evita matches accidentales tipo "TOTALBI" cuando buscamos "total".
+        looks_like_regex = ("\\" in label_raw) or ("[" in label_raw) or ("(" in label_raw) or ("." in label_raw)
+        if looks_like_regex:
+            label_re = label_raw
+        else:
+            words = [w for w in re.split(r"\s+", label_raw) if w]
+            if len(words) == 1:
+                label_re = rf"\b{re.escape(words[0])}\b"
+            else:
+                phrase = r"\s+".join(re.escape(w) for w in words)
+                label_re = rf"\b{phrase}\b"
+        for match in re.finditer(rf"{label_re}\s*[:\-]?\s*", text, re.IGNORECASE):
+            tail = text[match.end() : match.end() + 180]
+            values = []
+            values_decimal = []
+            has_any_decimal = bool(re.search(r"\d[.,]\d{2}\b", tail))
+            decimal_matches = list(money_decimal_re.finditer(tail))
+            int_matches = [] if decimal_matches else list(money_int_re.finditer(tail))
+            for num_match in (decimal_matches or int_matches):
                 after = tail[num_match.end() : num_match.end() + 6]
                 if re.match(r"^\s*%", after):
                     continue
@@ -4436,9 +4458,39 @@ def extract_invoice_amount(text, labels):
                 has_decimal = ("," in raw_token) or ("." in raw_token)
                 if digit_count >= 7 and not has_decimal:
                     continue
-                value = parse_decimal_eu(num_match.group(1))
-                if value > 0:
-                    return value
+                value = parse_decimal_eu(raw_token)
+                if value <= 0 or value > 10000000:
+                    continue
+                # Evita capturar tipos de IVA (4/10/21) como importes cuando hay importes decimales cerca.
+                if not has_decimal and value in (4.0, 10.0, 21.0) and has_any_decimal:
+                    continue
+                values.append(value)
+                if has_decimal:
+                    values_decimal.append(value)
+            candidates = values_decimal or values
+            if not candidates:
+                continue
+            kind_key = str(kind or "generic").strip().lower()
+            if kind_key == "total":
+                best_total = max(best_total, max(candidates))
+                continue
+            if kind_key == "base":
+                if len(candidates) == 1:
+                    return candidates[0]
+                sorted_vals = sorted(candidates, reverse=True)
+                for value in sorted_vals[1:]:
+                    if value > 0:
+                        return value
+                return sorted_vals[0]
+            if kind_key in ("iva", "irpf"):
+                max_value = max(candidates)
+                smaller = [value for value in candidates if value <= max_value * 0.5]
+                if smaller:
+                    return max(smaller)
+                return min(candidates)
+            return candidates[0]
+    if str(kind or "").strip().lower() == "total":
+        return best_total
     return 0.0
 
 
@@ -4455,11 +4507,15 @@ def parse_invoice_text(text):
     )
     if numero_match:
         numero = numero_match.group(1).strip()
-    fecha = ""
-    fecha_match = re.search(r"\b(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})\b", raw)
-    if fecha_match:
-        fecha = fecha_match.group(1).strip()
     fecha_iso = ""
+    fecha = ""
+    fecha_match = re.search(r"\b(\d{4}-\d{2}-\d{2})\b", raw)
+    if fecha_match:
+        fecha_iso = fecha_match.group(1).strip()
+    else:
+        fecha_match = re.search(r"\b(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})\b", raw)
+        if fecha_match:
+            fecha = fecha_match.group(1).strip()
     if fecha:
         date_bits = re.split(r"[\/\-]", fecha)
         if len(date_bits) == 3:
@@ -4470,6 +4526,33 @@ def parse_invoice_text(text):
                 fecha_iso = f"{int(year):04d}-{int(month):02d}-{int(day):02d}"
             except Exception:
                 fecha_iso = ""
+    if not fecha_iso:
+        months = {
+            "enero": 1,
+            "febrero": 2,
+            "marzo": 3,
+            "abril": 4,
+            "mayo": 5,
+            "junio": 6,
+            "julio": 7,
+            "agosto": 8,
+            "septiembre": 9,
+            "setiembre": 9,
+            "octubre": 10,
+            "noviembre": 11,
+            "diciembre": 12,
+        }
+        m = re.search(
+            r"\b(\d{1,2})\s*(?:de\s+)?(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)\s*(?:de\s+)?(\d{4})\b",
+            raw,
+            re.IGNORECASE,
+        )
+        if m:
+            day = int(m.group(1))
+            month = months.get(m.group(2).strip().lower(), 0)
+            year = int(m.group(3))
+            if month:
+                fecha_iso = f"{year:04d}-{month:02d}-{day:02d}"
     nif_candidates = re.findall(
         r"\b(?:[ABCDEFGHJNPQRSUVW]\d{7}[0-9A-J]|\d{8}[A-Z])\b",
         upper,
@@ -4489,27 +4572,79 @@ def parse_invoice_text(text):
     tipo = "compra"
     if any(token in upper for token in ("FACTURA EMITIDA", "TOTAL A COBRAR", "CLIENTE")):
         tipo = "venta"
-    base = extract_invoice_amount(raw, ["base imponible", "subtotal", "base"])
-    cuota_iva = extract_invoice_amount(raw, ["cuota iva", "iva", "i\\.v\\.a\\."])
-    cuota_irpf = extract_invoice_amount(raw, ["retencion", "irpf"])
-    total = extract_invoice_amount(raw, ["total factura", "importe total", "total a pagar", "total"])
+    base = extract_invoice_amount(raw, ["base imponible", "subtotal", "base"], kind="base")
+    cuota_iva = extract_invoice_amount(raw, ["cuota iva", "iva", "i\\.v\\.a\\."], kind="iva")
+    cuota_irpf = extract_invoice_amount(raw, ["retencion", "irpf"], kind="irpf")
+    total = extract_invoice_amount(raw, ["total factura", "importe total", "total a pagar", "total"], kind="total")
+    if cuota_irpf < 0:
+        cuota_irpf = 0.0
+    if total > 0 and cuota_irpf > max(5.0, total * 0.4):
+        # En OCR es habitual confundir \"IRPF\" con el total. Si se dispara, lo anulamos.
+        cuota_irpf = 0.0
     if base <= 0 and total > 0:
         base = max(0.0, total - cuota_iva + cuota_irpf)
     if total <= 0 and base > 0:
         total = max(0.0, base + cuota_iva - cuota_irpf)
     iva_pct = 0.0
+    iva_pct_explicit = 0.0
     pct_match = re.search(r"\b(4|10|21)(?:[.,]0+)?\s*%\b", raw)
     if pct_match:
-        iva_pct = parse_decimal_eu(pct_match.group(1))
+        iva_pct_explicit = parse_decimal_eu(pct_match.group(1))
+        iva_pct = iva_pct_explicit
     elif base > 0 and cuota_iva > 0:
         iva_pct = round((cuota_iva / base) * 100.0, 2)
-    if iva_pct > 0 and base > 0 and cuota_iva <= 0:
-        inferred_iva = round((base * iva_pct) / 100.0, 2)
-        inferred_total = round(base + inferred_iva - cuota_irpf, 2)
-        if total <= 0 or abs(inferred_total - total) <= max(1.0, total * 0.15):
-            cuota_iva = inferred_iva
-            if total <= 0:
-                total = inferred_total
+    def vat_is_implausible(base_value, iva_value, total_value, irpf_value):
+        base_value = float(base_value or 0.0)
+        iva_value = float(iva_value or 0.0)
+        total_value = float(total_value or 0.0)
+        irpf_value = float(irpf_value or 0.0)
+        if iva_value < 0:
+            return True
+        if iva_value <= 0:
+            return False
+        if total_value > 0 and iva_value > total_value + 0.01:
+            return True
+        if base_value > 0:
+            if iva_value / max(base_value, 0.01) > 0.30:
+                return True
+            if total_value > 0 and abs((base_value + iva_value - irpf_value) - total_value) > max(1.0, total_value * 0.15):
+                return True
+        return False
+    def vat_combo_ok(base_value, iva_value, total_value, irpf_value):
+        base_value = float(base_value or 0.0)
+        iva_value = float(iva_value or 0.0)
+        total_value = float(total_value or 0.0)
+        irpf_value = float(irpf_value or 0.0)
+        if total_value <= 0 or base_value <= 0:
+            return False
+        if iva_value < 0:
+            return False
+        if iva_value > 0 and (iva_value / max(base_value, 0.01)) > 0.30:
+            return False
+        return abs((base_value + iva_value - irpf_value) - total_value) <= max(1.0, total_value * 0.15)
+
+    # Ajustes conservadores: solo aceptamos un desglose Base/IVA si cuadra con el total.
+    if total > 0:
+        if vat_combo_ok(base, cuota_iva, total, cuota_irpf):
+            pass
+        elif iva_pct_explicit in (4.0, 10.0, 21.0):
+            inferred_base = round((total + cuota_irpf) / (1.0 + (iva_pct_explicit / 100.0)), 2)
+            inferred_iva = round((inferred_base * iva_pct_explicit) / 100.0, 2)
+            if vat_combo_ok(inferred_base, inferred_iva, total, cuota_irpf):
+                base = inferred_base
+                cuota_iva = inferred_iva
+                iva_pct = iva_pct_explicit
+            else:
+                base = round(total + cuota_irpf, 2)
+                cuota_iva = 0.0
+        else:
+            base = round(total + cuota_irpf, 2)
+            cuota_iva = 0.0
+    else:
+        if base > 0 and cuota_iva > 0:
+            total = round(base + cuota_iva - cuota_irpf, 2)
+        elif base > 0:
+            total = round(base - cuota_irpf, 2)
     descripcion = numero or "Factura"
     if tercero:
         descripcion = f"{descripcion} · {tercero}"
