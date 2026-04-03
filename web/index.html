@@ -2566,7 +2566,7 @@
               <button class="tab hidden" type="button" data-tab="generar_encargo" id="inmuebleGenerarEncargoTabBtn">Generar encargo</button>
               <button class="tab" type="button" data-tab="demandas">Demandas</button>
               <button class="tab" type="button" data-tab="actividad">Actividad</button>
-              <button class="tab" type="button" data-tab="docs">Documentos</button>
+              <button class="tab" type="button" data-tab="docs">Repositorio</button>
               <button class="tab" type="button" data-tab="estado">Estado</button>
             </div>
             <div id="inmuebleTabDatos">
@@ -2864,8 +2864,8 @@
             </div>
             <div id="inmuebleTabDocs" class="hidden">
               <div class="form-card">
-                <h3>Documentación</h3>
-                <p class="muted">Sube escrituras, nota simple, contratos y fotos.</p>
+                <h3>Repositorio del inmueble</h3>
+                <p class="muted">Sube escrituras, nota simple, contratos y fotos (puedes seleccionar varios archivos).</p>
                 <form id="inmuebleDocsForm" class="form-grid">
                   <label>
                     Tipo
@@ -2874,6 +2874,8 @@
                       <option>Nota simple</option>
                       <option>Contrato</option>
                       <option>Fotos</option>
+                      <option>Plano</option>
+                      <option>Certificado</option>
                       <option>Otros</option>
                     </select>
                   </label>
@@ -2883,7 +2885,7 @@
                   </label>
                   <label class="span-2">
                     Archivo
-                    <input name="archivo" id="inmuebleDocsFile" type="file" />
+                    <input name="archivo" id="inmuebleDocsFile" type="file" multiple accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg,.webp" />
                   </label>
                   <div class="form-actions">
                     <button type="submit">Subir documento</button>

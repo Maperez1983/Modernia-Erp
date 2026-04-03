@@ -28041,36 +28041,89 @@ const renderInmuebleDocs = (rows = []) => {
     inmuebleDocsList.innerHTML = "<p class='muted'>Sin documentos.</p>";
     return;
   }
-  const list = document.createElement("div");
-  list.className = "inline-list";
-  rows.forEach((row) => {
-    const item = document.createElement("div");
-    item.className = "inline-row";
-    const name = row.nombre || row.url || "Documento";
-    const tipo = row.tipo || "Documento";
-    const version = row.version ? `v${row.version}` : "";
-    const estado = row.estado || "Sin estado";
-    const plantilla = row.plantilla_clave || "";
-    const origen = [row.origen_tipo, row.origen_id].filter(Boolean).join(" · ");
-    const reviewers = [row.reviewed_by, row.reviewed_at ? formatCell("fecha", String(row.reviewed_at).slice(0, 10)) : ""].filter(Boolean).join(" · ");
-    const link = row.url ? `<a href="${escapeHtml(row.url)}" target="_blank" rel="noreferrer">Ver</a>` : "";
-    item.innerHTML = `
-      <div>
-        <strong>${escapeHtml(name)}</strong>
-        <div class="muted">${escapeHtml(tipo)}${plantilla ? ` · plantilla ${escapeHtml(plantilla)}` : ""}</div>
-        ${origen ? `<div class="muted">Origen: ${escapeHtml(origen)}</div>` : ""}
-        ${reviewers ? `<div class="muted">Revisión: ${escapeHtml(reviewers)}</div>` : ""}
-      </div>
-      <div class="inmueble-summary-badges">
-        ${version ? `<span class="inmueble-chip">${escapeHtml(version)}</span>` : ""}
-        <span class="inmueble-badge tone-${normalizeSimple(estado).includes("vigente") ? "accent" : "soft"}">${escapeHtml(estado)}</span>
-      </div>
-      <div>${link}</div>
-    `;
-    list.appendChild(item);
+  const isPhotoRow = (row) => {
+    const tipo = normalizeSimple(row?.tipo || "");
+    if (tipo.includes("foto")) return true;
+    const raw = String(row?.url || "").split("?", 1)[0].toLowerCase();
+    return raw.endsWith(".jpg") || raw.endsWith(".jpeg") || raw.endsWith(".png") || raw.endsWith(".webp") || raw.endsWith(".gif");
+  };
+
+  const photos = [];
+  const docs = [];
+  (rows || []).forEach((row) => {
+    if (isPhotoRow(row)) photos.push(row);
+    else docs.push(row);
   });
+
+  const wrapper = document.createElement("div");
+  wrapper.className = "inmueble-repo";
+
+  if (photos.length) {
+    const block = document.createElement("div");
+    block.innerHTML = `<div class="muted" style="margin-bottom:10px;">Fotos (${photos.length})</div>`;
+    const grid = document.createElement("div");
+    grid.className = "inmueble-media-grid";
+    photos.forEach((row) => {
+      const url = row.url ? buildPhotoSrc(row.url) : "";
+      const name = row.nombre || "Foto";
+      const estado = row.estado || "Vigente";
+      const a = document.createElement("a");
+      a.className = "inmueble-media-item";
+      a.href = url || "#";
+      a.target = "_blank";
+      a.rel = "noreferrer";
+      a.innerHTML = `
+        ${url ? `<img src="${escapeHtml(url)}" loading="lazy" alt="" />` : `<div class="muted">Sin imagen</div>`}
+        <div class="inmueble-media-meta">
+          <div class="inmueble-media-name">${escapeHtml(name)}</div>
+          <div class="muted">${escapeHtml(estado)}</div>
+        </div>
+      `;
+      grid.appendChild(a);
+    });
+    block.appendChild(grid);
+    wrapper.appendChild(block);
+  }
+
+  if (docs.length) {
+    const block = document.createElement("div");
+    block.style.marginTop = photos.length ? "18px" : "0";
+    block.innerHTML = `<div class="muted" style="margin-bottom:10px;">Documentos (${docs.length})</div>`;
+    const list = document.createElement("div");
+    list.className = "inline-list";
+    docs.forEach((row) => {
+      const item = document.createElement("div");
+      item.className = "inline-row";
+      const name = row.nombre || row.url || "Documento";
+      const tipo = row.tipo || "Documento";
+      const version = row.version ? `v${row.version}` : "";
+      const estado = row.estado || "Sin estado";
+      const plantilla = row.plantilla_clave || "";
+      const origen = [row.origen_tipo, row.origen_id].filter(Boolean).join(" · ");
+      const reviewers = [row.reviewed_by, row.reviewed_at ? formatCell("fecha", String(row.reviewed_at).slice(0, 10)) : ""].filter(Boolean).join(" · ");
+      const href = row.url ? buildPhotoSrc(row.url) : "";
+      const link = href ? `<a href="${escapeHtml(href)}" target="_blank" rel="noreferrer">Ver</a>` : "";
+      item.innerHTML = `
+        <div>
+          <strong>${escapeHtml(name)}</strong>
+          <div class="muted">${escapeHtml(tipo)}${plantilla ? ` · plantilla ${escapeHtml(plantilla)}` : ""}</div>
+          ${origen ? `<div class="muted">Origen: ${escapeHtml(origen)}</div>` : ""}
+          ${reviewers ? `<div class="muted">Revisión: ${escapeHtml(reviewers)}</div>` : ""}
+        </div>
+        <div class="inmueble-summary-badges">
+          ${version ? `<span class="inmueble-chip">${escapeHtml(version)}</span>` : ""}
+          <span class="inmueble-badge tone-${normalizeSimple(estado).includes("vigente") ? "accent" : "soft"}">${escapeHtml(estado)}</span>
+        </div>
+        <div>${link}</div>
+      `;
+      list.appendChild(item);
+    });
+    block.appendChild(list);
+    wrapper.appendChild(block);
+  }
+
   inmuebleDocsList.innerHTML = "";
-  inmuebleDocsList.appendChild(list);
+  inmuebleDocsList.appendChild(wrapper);
 };
 
 const loadInmuebleDocs = (inmuebleId) => {
@@ -42842,7 +42895,7 @@ if (inmuebleActividadForm) {
 }
 
 if (inmuebleDocsForm) {
-  inmuebleDocsForm.addEventListener("submit", (event) => {
+  inmuebleDocsForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (!state.currentInmuebleId) {
       if (inmuebleDocsStatus) {
@@ -42850,51 +42903,68 @@ if (inmuebleDocsForm) {
       }
       return;
     }
-    if (!inmuebleDocsFile || !inmuebleDocsFile.files || !inmuebleDocsFile.files[0]) {
+    const files = Array.from(inmuebleDocsFile?.files || []).filter(Boolean);
+    if (!files.length) {
       if (inmuebleDocsStatus) {
         inmuebleDocsStatus.textContent = "Selecciona un archivo.";
       }
       return;
     }
-    if (inmuebleDocsStatus) {
-      inmuebleDocsStatus.textContent = "Subiendo...";
-    }
-    const file = inmuebleDocsFile.files[0];
-    const formData = new FormData(inmuebleDocsForm);
-    const payload = Object.fromEntries(formData.entries());
-    payload.inmueble_id = state.currentInmuebleId;
-    payload.empresa_nombre = resolveCrmInmoEmpresaNombre();
-    payload.nombre = payload.nombre || file.name;
-    const reader = new FileReader();
-    reader.onload = () => {
-      payload.file_base64 = reader.result;
-      fetch("/api/inmueble_docs", {
+    const tipo = String(inmuebleDocsForm.querySelector('[name="tipo"]')?.value || "").trim();
+    const nombreBase = String(inmuebleDocsForm.querySelector('[name="nombre"]')?.value || "").trim();
+
+    const uploadOne = async (file, index) => {
+      const maxInline = 2_000_000;
+      const payload = {
+        inmueble_id: state.currentInmuebleId,
+        empresa_nombre: resolveCrmInmoEmpresaNombre(),
+        usuario: getCurrentUser(),
+        tipo,
+        nombre: files.length === 1 && nombreBase ? nombreBase : file.name,
+      };
+      try {
+        if (file.size > maxInline) {
+          try {
+            if (inmuebleDocsStatus) inmuebleDocsStatus.textContent = `Subiendo ${index + 1}/${files.length} (S3)...`;
+            const upload = await uploadFileToS3(file, `inmuebles/${state.currentInmuebleId}`, inmuebleDocsStatus);
+            if (upload?.key) {
+              payload.s3_key = upload.key;
+            } else {
+              payload.file_base64 = await fileToBase64(file);
+            }
+          } catch (err) {
+            payload.file_base64 = await fileToBase64(file);
+          }
+        } else {
+          if (inmuebleDocsStatus) inmuebleDocsStatus.textContent = `Subiendo ${index + 1}/${files.length}...`;
+          payload.file_base64 = await fileToBase64(file);
+        }
+      } catch (err) {
+        throw new Error(err?.message || "No se pudo leer el archivo.");
+      }
+      if (inmuebleDocsStatus) inmuebleDocsStatus.textContent = `Registrando ${index + 1}/${files.length}...`;
+      const res = await fetch("/api/inmueble_docs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
-      })
-        .then((res) => res.json())
-        .then((data) => {
-          if (inmuebleDocsStatus) {
-            inmuebleDocsStatus.textContent = data.error || "Documento subido.";
-          }
-          if (!data.error) {
-            inmuebleDocsForm.reset();
-            loadInmuebleDocs(state.currentInmuebleId);
-          }
-        })
-        .catch(() => {
-          if (inmuebleDocsStatus) {
-            inmuebleDocsStatus.textContent = "Error al subir.";
-          }
-        });
-    };
-    reader.onerror = () => {
-      if (inmuebleDocsStatus) {
-        inmuebleDocsStatus.textContent = "No se pudo leer el archivo.";
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data?.error) {
+        throw new Error(data?.error || "Error al subir.");
       }
+      return data;
     };
-    reader.readAsDataURL(file);
+
+    try {
+      for (let i = 0; i < files.length; i += 1) {
+        await uploadOne(files[i], i);
+      }
+      if (inmuebleDocsStatus) inmuebleDocsStatus.textContent = `Subida completada (${files.length}).`;
+      inmuebleDocsForm.reset();
+      loadInmuebleDocs(state.currentInmuebleId);
+    } catch (err) {
+      if (inmuebleDocsStatus) inmuebleDocsStatus.textContent = err?.message || "Error al subir.";
+    }
   });
 }
 

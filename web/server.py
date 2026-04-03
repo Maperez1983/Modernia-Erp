@@ -34979,29 +34979,50 @@ class Handler(BaseHTTPRequestHandler):
             inmueble_id = payload.get("inmueble_id")
             nombre = payload.get("nombre") or ""
             tipo = payload.get("tipo") or ""
+            s3_key = str(payload.get("s3_key") or "").strip()
             data_uri = payload.get("file_base64") or payload.get("data") or ""
-            if not inmueble_id or not data_uri:
+            if not inmueble_id or (not data_uri and not s3_key):
                 json_response(self, {"error": "inmueble_id y archivo requeridos"}, status=400)
                 return
-            if "," in data_uri:
-                data_uri = data_uri.split(",", 1)[1]
-            try:
-                file_bytes = base64.b64decode(data_uri)
-            except Exception:
-                json_response(self, {"error": "Base64 invalido"}, status=400)
-                return
-            ext = ""
-            if nombre and "." in nombre:
-                ext = "." + nombre.split(".")[-1].lower()
-            if not ext:
-                ext = ".pdf"
-            folder = UPLOADS / "inmuebles"
-            folder.mkdir(parents=True, exist_ok=True)
+            inmueble_folder = re.sub(r"[^A-Za-z0-9_-]+", "_", str(inmueble_id)).strip("_") or "inmueble"
             doc_id = os.urandom(16).hex()
-            filename = f"{doc_id}{ext}"
-            file_path = folder / filename
-            file_path.write_bytes(file_bytes)
-            url = f"/uploads/inmuebles/{filename}"
+            url = ""
+            if s3_key:
+                safe_key = s3_key.replace("\\", "/").lstrip("/")
+                url = f"s3://{safe_key}"
+            else:
+                mime = ""
+                if isinstance(data_uri, str) and data_uri.startswith("data:") and ";base64," in data_uri:
+                    header = data_uri.split(";base64,", 1)[0]
+                    mime = header.replace("data:", "", 1).strip()
+                if "," in data_uri:
+                    data_uri = data_uri.split(",", 1)[1]
+                try:
+                    file_bytes = base64.b64decode(data_uri)
+                except Exception:
+                    json_response(self, {"error": "Base64 invalido"}, status=400)
+                    return
+                ext = ""
+                if nombre and "." in nombre:
+                    ext = "." + nombre.split(".")[-1].lower()
+                if not ext:
+                    guessed = {
+                        "image/jpeg": ".jpg",
+                        "image/jpg": ".jpg",
+                        "image/png": ".png",
+                        "image/webp": ".webp",
+                        "image/gif": ".gif",
+                        "application/pdf": ".pdf",
+                }.get(mime, "")
+                    ext = guessed or ".pdf"
+                is_image = str(mime or "").lower().startswith("image/") or ext.lower() in {".jpg", ".jpeg", ".png", ".webp", ".gif"}
+                subdir = "fotos" if is_image else "docs"
+                folder = UPLOADS / "inmuebles" / inmueble_folder / subdir
+                folder.mkdir(parents=True, exist_ok=True)
+                filename = f"{doc_id}{ext}"
+                file_path = folder / filename
+                file_path.write_bytes(file_bytes)
+                url = f"/uploads/inmuebles/{inmueble_folder}/{subdir}/{filename}"
             conn.execute(
                 """
                 INSERT INTO inmueble_docs (
