@@ -26,6 +26,7 @@ import textwrap
 import xml.etree.ElementTree as ET
 import socket
 import ipaddress
+import calendar
 from io import BytesIO
 from copy import copy as shallow_copy
 from datetime import datetime, timedelta, timezone, date
@@ -22828,6 +22829,391 @@ def build_workspace_budget_encargo_pdf(budget, workspace, company, client, linea
     )
 
 
+def _add_months_safe(value: date, months: int) -> date:
+    months = int(months or 0)
+    year = value.year + ((value.month - 1 + months) // 12)
+    month = ((value.month - 1 + months) % 12) + 1
+    last_day = calendar.monthrange(year, month)[1]
+    day = min(value.day, last_day)
+    return date(year, month, day)
+
+
+def format_spanish_long_date(value) -> str:
+    parsed = parse_iso_date(value)
+    if not parsed:
+        return str(value or "").strip()
+    months = {
+        1: "enero",
+        2: "febrero",
+        3: "marzo",
+        4: "abril",
+        5: "mayo",
+        6: "junio",
+        7: "julio",
+        8: "agosto",
+        9: "septiembre",
+        10: "octubre",
+        11: "noviembre",
+        12: "diciembre",
+    }
+    return f"{parsed.day} de {months.get(parsed.month, str(parsed.month))} de {parsed.year}"
+
+
+def format_spanish_long_date_capitalized(value) -> str:
+    text = str(format_spanish_long_date(value) or "").strip()
+    if not text:
+        return text
+    match = re.match(r"^(\\d{1,2}) de ([a-záéíóúñ]+) de (\\d{4})$", text, flags=re.IGNORECASE)
+    if not match:
+        return text
+    return f"{match.group(1)} de {match.group(2).capitalize()} de {match.group(3)}"
+
+
+def format_eur_short(value) -> str:
+    amount = parse_money_value(value)
+    if amount is None:
+        try:
+            amount = float(value or 0.0)
+        except Exception:
+            amount = None
+    if amount is None:
+        return ""
+    rounded = round(amount)
+    if abs(amount - rounded) < 0.005:
+        raw = f"{int(rounded):,}"
+        return raw.replace(",", ".") + " €"
+    raw = f"{amount:,.2f}"
+    return raw.replace(",", "X").replace(".", ",").replace("X", ".") + " €"
+
+
+def _spanish_number_words(value: int) -> str:
+    value = int(value or 0)
+    if value == 0:
+        return "cero"
+    if value < 0:
+        return "menos " + _spanish_number_words(abs(value))
+    units = [
+        "",
+        "uno",
+        "dos",
+        "tres",
+        "cuatro",
+        "cinco",
+        "seis",
+        "siete",
+        "ocho",
+        "nueve",
+        "diez",
+        "once",
+        "doce",
+        "trece",
+        "catorce",
+        "quince",
+        "dieciséis",
+        "diecisiete",
+        "dieciocho",
+        "diecinueve",
+    ]
+    tens = ["", "", "veinte", "treinta", "cuarenta", "cincuenta", "sesenta", "setenta", "ochenta", "noventa"]
+    hundreds = [
+        "",
+        "ciento",
+        "doscientos",
+        "trescientos",
+        "cuatrocientos",
+        "quinientos",
+        "seiscientos",
+        "setecientos",
+        "ochocientos",
+        "novecientos",
+    ]
+
+    def words_under_100(n: int) -> str:
+        if n < 20:
+            return units[n]
+        t, u = divmod(n, 10)
+        if t == 2:
+            if u == 0:
+                return "veinte"
+            special = {
+                1: "veintiuno",
+                2: "veintidós",
+                3: "veintitrés",
+                4: "veinticuatro",
+                5: "veinticinco",
+                6: "veintiséis",
+                7: "veintisiete",
+                8: "veintiocho",
+                9: "veintinueve",
+            }
+            return special.get(u, f"veinti{units[u]}")
+        if u == 0:
+            return tens[t]
+        return f"{tens[t]} y {units[u]}"
+
+    def words_under_1000(n: int) -> str:
+        if n == 0:
+            return ""
+        if n < 100:
+            return words_under_100(n)
+        if n == 100:
+            return "cien"
+        h, r = divmod(n, 100)
+        head = hundreds[h]
+        tail = words_under_100(r) if r else ""
+        return f"{head} {tail}".strip()
+
+    parts = []
+    millions, remainder = divmod(value, 1_000_000)
+    thousands, rest = divmod(remainder, 1_000)
+    if millions:
+        if millions == 1:
+            parts.append("un millón")
+        else:
+            parts.append(f"{_spanish_number_words(millions)} millones")
+    if thousands:
+        if thousands == 1:
+            parts.append("mil")
+        else:
+            parts.append(f"{words_under_1000(thousands)} mil")
+    if rest:
+        parts.append(words_under_1000(rest))
+    return " ".join([p for p in parts if p]).strip()
+
+
+def format_eur_words(value) -> str:
+    amount = parse_money_value(value)
+    if amount is None:
+        try:
+            amount = float(value or 0.0)
+        except Exception:
+            amount = None
+    if amount is None or amount <= 0:
+        return ""
+    euros = int(round(amount))
+    if euros == 1:
+        return "un euro"
+    return f"{_spanish_number_words(euros)} euros"
+
+
+def build_inmueble_nota_encargo_pdf(company, inmueble, captacion, owners, extra=None):
+    extra = extra or {}
+    owners = owners or []
+
+    def pick_text(value, fallback="Pendiente"):
+        raw = str(value or "").strip()
+        return raw if raw else fallback
+
+    def fmt_ddmmyyyy(value, fallback=""):
+        raw = str(value or "").strip()
+        if not raw:
+            return str(fallback or "").strip()
+        if re.match(r"^\\d{2}/\\d{2}/\\d{4}$", raw):
+            return raw
+        parsed = parse_iso_date(raw)
+        if parsed:
+            return parsed.strftime("%d/%m/%Y")
+        return raw
+
+    def normalize_tipo_operacion(value):
+        raw = str(value or "").strip().lower()
+        if raw in {"alquiler", "arrendamiento", "renta"}:
+            return "alquiler"
+        return "venta"
+
+    def owner_sale_lines(owner, idx, domicilio_default):
+        owner = owner or {}
+        label = f"C{idx}"
+        nombre = pick_text(owner.get("nombre"), "Pendiente")
+        nif = pick_text(owner.get("nif"), "Pendiente")
+        domicilio = pick_text(owner.get("direccion") or owner.get("domicilio"), domicilio_default)
+        return [
+            f"{label}: {nombre}, mayor de edad con NIF {nif}, con domicilio a efectos de notificaciones en {domicilio}.",
+            f"□ {label} Actuando en su propio nombre y representación.",
+            f"□ {label} Representada por D. ª: ………………………………………………………………………...…………………., con NIF: …………………………. con domicilio en………………………, c/……………………….………………………………………………, teléfono:…………….……….. y e-mail: …………………………………………………………. en calidad de …………………………………, según acredita documentalmente.",
+        ]
+
+    direccion = pick_text(inmueble.get("direccion"))
+    cp = str(inmueble.get("codigo_postal") or "").strip()
+    poblacion = str(inmueble.get("poblacion") or "").strip()
+    provincia = str(inmueble.get("provincia") or "").strip()
+    locality = " ".join([part for part in [cp, poblacion] if part]).strip() or poblacion or ""
+    direccion_full = ", ".join([part for part in [direccion, locality, provincia] if part]).strip() or direccion
+
+    tipo_operacion = normalize_tipo_operacion(extra.get("tipo_operacion") or extra.get("tipo"))
+
+    datos_registrales = pick_text(extra.get("datos_registrales"), "Pendiente")
+    ref_catastral = pick_text(inmueble.get("referencia_catastral"), "Pendiente")
+    m2_construidos = inmueble.get("m2")
+    m2_utiles = extra.get("m2_utiles")
+    otros = str(extra.get("otros") or "").strip()
+    cargas = pick_text(extra.get("cargas"), "NADA")
+
+    honorarios_pct = extra.get("honorarios_pct")
+    iva_pct = extra.get("iva_pct")
+    try:
+        honorarios_pct_val = float(str(honorarios_pct).replace(",", ".").strip()) if str(honorarios_pct or "").strip() else None
+    except Exception:
+        honorarios_pct_val = None
+    try:
+        iva_pct_val = float(str(iva_pct).replace(",", ".").strip()) if str(iva_pct or "").strip() else 21.0
+    except Exception:
+        iva_pct_val = 21.0
+
+    fecha_inicio = str(extra.get("fecha_inicio") or "").strip() or datetime.now(timezone.utc).date().isoformat()
+    fecha_fin = str(extra.get("fecha_fin") or "").strip()
+    if not fecha_fin:
+        try:
+            fecha_fin = _add_months_safe(parse_iso_date(fecha_inicio) or datetime.now(timezone.utc).date(), 6).isoformat()
+        except Exception:
+            fecha_fin = ""
+
+    lugar_firma = pick_text(extra.get("lugar_firma") or poblacion or provincia, "Pendiente")
+    fecha_firma = format_spanish_long_date_capitalized(extra.get("fecha_firma") or datetime.now(timezone.utc).date().isoformat())
+
+    superficie_bits = []
+    if m2_construidos not in (None, "") and str(m2_construidos).strip():
+        superficie_bits.append(f"M2 Construidos: {_pdf_format_number(m2_construidos, 0) or m2_construidos}.")
+    if str(m2_utiles or "").strip():
+        superficie_bits.append(f"M2 Útiles: {str(m2_utiles).strip()}.")
+    superficie_suffix = (" " + " ".join(superficie_bits)).rstrip() if superficie_bits else ""
+
+    company_name = str(company.get("nombre") or "ESTUDIO VELAZQUEZ 2012 S.L.").strip() or "ESTUDIO VELAZQUEZ 2012 S.L."
+
+    if tipo_operacion == "alquiler":
+        renta_raw = extra.get("renta_mensual") or extra.get("precio_alquiler") or extra.get("precio")
+        if not str(renta_raw or "").strip():
+            renta_raw = captacion.get("precio_objetivo") or inmueble.get("precio_objetivo")
+        renta_value = parse_money_value(renta_raw)
+        renta_text = format_eur_short(renta_value) if renta_value and renta_value > 0 else "…………………………………………………………"
+        honorarios_alquiler_text = str(extra.get("honorarios_text") or extra.get("honorarios_alquiler") or "").strip() or "una mensualidad + IVA"
+        body = []
+        for idx, owner in enumerate(owners[:2], start=1):
+            owner = owner or {}
+            nombre = pick_text(owner.get("nombre"), "…………………………………………………………")
+            nif = pick_text(owner.get("nif"), "……………………………………………….")
+            telefono = pick_text(owner.get("telefono"), "………………………")
+            email_value = pick_text(owner.get("email"), "…………………………………………………………")
+            domicilio = pick_text(owner.get("direccion") or owner.get("domicilio"), "……………………………. c/…………………………………………………….")
+            body.append(f"D./Dª {nombre}, mayor de edad, con domicilio en {domicilio}, teléfono {telefono}, e-mail {email_value} N.I.F: {nif}.")
+        if not body:
+            body.append("Dª ………………………………………………………. mayor de edad, con domicilio en…………………………….c/……………………………………………………., teléfono ………………………, e-mail…………………………………………………………N.I.F:……………………………………………….")
+        body += [
+            "Actuando:",
+            "en su propio nombre y representación (en adelante, el/los Cliente/s)",
+            "en nombre y representación de …………………………………………………………….con domicilio en …………………., c/………………………………….. ………………… provisto de N.I.F.:………………….., en su calidad de ………………………….según acredita documentalmente",
+            "",
+            "En su propio nombre y representación (en adelante, el Cliente),",
+            "",
+            f"ENCARGA, de forma exclusiva, a la sociedad {company_name} (en adelante, el Franquiciado), que acepta el encargo, la localización de un arrendatario para el inmueble identificado como sigue:",
+            f"Dirección: {direccion_full}",
+            f"Datos Registrales: {datos_registrales}",
+            f"Datos catastrales: {ref_catastral}{superficie_suffix}",
+            f"Otros: {otros or '—'}",
+            "2) La agencia se obliga a realizar las gestiones de mediación oportunas para la localización de un arrendatario, y a mantener informado de tales gestiones al cliente.",
+            f"3) El cliente fija el precio mensual de la renta en {renta_text}",
+            f"4) Los honorarios, IVA incluido, a percibir por el Franquiciado del Cliente será de {honorarios_alquiler_text}.",
+            f"5) El encargo tendrá validez desde el día {fmt_ddmmyyyy(fecha_inicio)} hasta el {fmt_ddmmyyyy(fecha_fin)}. Este plazo se presumirá tácitamente renovado, de forma sucesiva, por idénticos períodos de tiempo, salvo que cualquiera de las dos partes notifique por escrito a la otra su voluntad en contrario con, al menos, 7 días de antelación respecto de la finalización del plazo o de cualquiera de sus prórrogas.",
+            "Expirado el plazo antes citado o cualquiera de sus prórrogas sin que el Franquiciado haya localizado un arrendatario conforme con el presente encargo, éste no tendrá derecho a percibir cantidad alguna en concepto de honorarios.",
+            "6) El cliente autoriza a la agencia a solicitar y recibir los importes correspondientes a la fianza y a una mensualidad de la renta anticipada, ya retenerlas como depositaria de las mismas hasta la firma del contrato de arrendamiento.",
+            "7) El Cliente autoriza, asimismo, al Franquiciado a ofertar y publicitar el inmueble. Del mismo modo, el Cliente autoriza que el Franquiciado realice visitas comerciales al inmueble acompañado de potenciales arrendatarios.",
+            "8) El cliente declara tener total y exclusiva disponibilidad del inmueble en su afirmada condición de propietaria, según deberá acreditar documentalmente.",
+            "9) El cliente efectuará la entrega del inmueble en el momento/fecha de firma de contrato de arrendamiento.",
+            "10) Los honorarios fijados en el punto cuarto deberán ser abonados por el cliente en el supuesto de que sin justa causa se negara a aceptar una propuesta de arrendamiento conforme al precio del encargo, o habiendo aceptado la propuesta, se negara a firmar el contrato de arrendamiento.",
+            "11) …………………………………………………………………………………………………………………",
+            "",
+            f"Y para que así conste, lo firman, en {lugar_firma} a {fecha_firma}.",
+            "Por el Franquiciado                                Por el cliente/Representante",
+            "Nombre y Apellidos                                 Nombre y Apellidos",
+            "",
+            "La fórmula de la franquicia prevé la colaboración entre un empresario, Franquiciador, y otros empresarios, Franquiciados, todos ellos jurídica y económicamente independientes los unos de los otros. La marca Tecnocasa es un símbolo distintivo sin personalidad jurídica que identifica una red de intermediarios inmobiliarios en franquicia, cada uno de los cuales es una persona jurídica autónoma, independiente y directamente responsable de los actos relacionados con el desarrollo de su actividad profesional y empresarial.",
+            "INFORMACIÓN SOBRE PROTECCIÓN DE DATOS. El Franquiciado, en calidad de responsable, tratará la información que usted nos facilite con el fin de prestarle los servicios solicitados (intermediación inmobiliaria y/o financiera y obtención de seguros) así como, en caso de habernos otorgado el preceptivo consentimiento, para realizar actividades de prospección comercial y de envío de publicidad relacionada con los servicios ofrecidos, la cual podrá realizarse por cualquier medio (correo postal, e-mail, teléfono, mensajería instantánea, etc.) y, además, de habernos otorgado el preceptivo consentimiento, podrá ser adaptada a sus preferencias e intereses. La legitimación para el tratamiento se obtiene de la relación contractual derivada de la prestación de servicios profesionales demandada, pudiendo coexistir con consentimientos específicos, intereses legítimos y/o obligaciones legales. Podrán ser destinatarios de los datos las sociedades que integran las redes en franquicia de las enseñas Tecnocasa, Kíron y Tecnorete, así como las empresas del Grupo Tecnocasa. Se dispone de encargados de Tratamiento dentro y fuera de la UE acogidos a “Privacy Shield” o amparados por alguna otra base legal. Usted tiene derecho a acceder, rectificar y suprimir los datos, así como otros derechos, como se explica en la información adicional que ponemos a su disposición y que también puede consultar en la sección “Política de Privacidad” en la página web corporativa Tecnocasa.es.",
+        ]
+        footer = [
+            "Documento generado por el CRM Modernia a partir de la ficha del inmueble. Revisar legalmente antes de firma.",
+        ]
+        return build_branded_text_document_pdf(
+            "ENCARGO DE INTERMEDIACIÓN · ARRENDAMIENTO",
+            f"{company_name} · Nota de encargo alquiler",
+            body,
+            footer,
+            brand_logo_url=company.get("logo_url"),
+        )
+
+    precio_venta_raw = (
+        extra.get("precio_venta")
+        or inmueble.get("precio_encargo")
+        or captacion.get("precio_encargo")
+        or inmueble.get("precio_objetivo")
+        or captacion.get("precio_objetivo")
+    )
+    precio_venta_value = parse_money_value(precio_venta_raw)
+    precio_venta_text = format_eur_short(precio_venta_value) if precio_venta_value and precio_venta_value > 0 else "Pendiente"
+    precio_venta_words = format_eur_words(precio_venta_value)
+    precio_words_suffix = f" ({precio_venta_words})" if precio_venta_words else ""
+
+    fecha_venta_desde = str(extra.get("fecha_venta_desde") or "").strip() or "xx/xx/xxxx"
+    fecha_venta_antes = str(extra.get("fecha_venta_antes") or "").strip()
+    if not fecha_venta_antes:
+        try:
+            fecha_venta_antes = fmt_ddmmyyyy(_add_months_safe(parse_iso_date(fecha_inicio) or datetime.now(timezone.utc).date(), 12).isoformat())
+        except Exception:
+            fecha_venta_antes = "xx/xx/xxxx"
+
+    owners_block = []
+    for idx, owner in enumerate(owners[:2], start=1):
+        owners_block.extend(owner_sale_lines(owner, idx, direccion_full))
+    if not owners_block:
+        owners_block = [
+            "C1: Pendiente de identificar propietarios en el CRM.",
+            "□ C1 Actuando en su propio nombre y representación.",
+            "□ C1 Representada por D. ª: ………………………………………………………………………...…………………., con NIF: …………………………. con domicilio en………………………, c/……………………….………………………………………………, teléfono:…………….……….. y e-mail: …………………………………………………………. en calidad de …………………………………, según acredita documentalmente.",
+        ]
+
+    honorarios_pct_text = f"{honorarios_pct_val:g}% + IVA" if honorarios_pct_val is not None else "Pendiente"
+    body = [
+        "De una parte, El cliente, ostentando el pleno dominio, según acreditará documentalmente, del inmueble identificado como sigue:",
+        f"Dirección: {direccion_full}",
+        f"Datos Registrales: {datos_registrales}",
+        f"Datos catastrales: {ref_catastral}.{superficie_suffix}",
+        f"Otros: {otros or '—'}",
+        *owners_block,
+        "",
+        "De otra parte, el intermediario identificado en el encabezado, acuerdan, que este asuma la realización de manera exclusiva de labores encaminadas a la búsqueda, localización y aproximación de potenciales compradores con el fin de facilitar la eventual perfección de una promesa de compraventa o contrato de compraventa sobre el Inmueble, obligándose a realizar su labor con diligencia y discreción, así como a informar periódicamente sobre ella al Cliente.",
+        f"El Cliente declara tener la total y exclusiva disponibilidad del Inmueble y afirma, bajo su responsabilidad, que sobre el mismo no existen litigios, evicciones, vicios, así como cargas o gravámenes a excepción de {cargas}.",
+        f"El Cliente fija el precio de venta del inmueble en {precio_venta_text}{precio_words_suffix}.",
+        f"El Cliente declara que el contrato de compraventa del inmueble deberá realizarse a partir de {fecha_venta_desde} y en todo caso, antes de (momento/fecha) {fecha_venta_antes}.",
+        "El Cliente autoriza al Intermediario a ofertar y publicitar el Inmueble, así como a realizar visitas acompañado de potenciales compradores, obligándose a facilitar las mismas, así como a proporcionar cuanta información y colaboración sean necesarias para desarrollar la labor de intermediación.",
+        f"Los honorarios para percibir por el Intermediario, del Cliente serán del {honorarios_pct_text} del precio de venta. El intermediario, además, podrá percibir de la parte compradora honorarios conformes a las tarifas expuestas en su punto de venta.",
+        "El derecho al cobro de los honorarios se generará en el momento en que El Cliente tenga conocimiento de la suscripción de una promesa de compra contrato o, no siendo conforme, finalmente fuese aceptada por El Cliente. No obstante, y sin perjuicio de lo anterior, los honorarios se abonarán a la firma del contrato privado de compraventa o, en el caso de que esta no tuviera lugar, a la firma de la escritura pública.",
+        f"El presente contrato tendrá validez desde el día {fmt_ddmmyyyy(fecha_inicio)} hasta el {fmt_ddmmyyyy(fecha_fin)}. Este plazo se presumirá tácitamente renovado, de forma sucesiva, por idénticos períodos de tiempo, salvo que cualquiera de las dos partes notifique por escrito a la otra su voluntad en contrario con, al menos, 7 días de antelación respecto de la finalización del plazo o de cualquiera de sus prórrogas. Expirados los plazos citados sin que se hubiese suscrito por parte de un potencial comprador una “promesa” o, habiéndose suscrito dentro de plazo, esta finalmente no fuese aceptada formalmente por El Cliente en el plazo de 15 días, el Intermediario no tendrá derecho a percibir honorarios, todo ello sin perjuicio de los supuestos previstos en las cláusulas 10 y 1.",
+        "El Cliente, como prueba de la voluntad de los potenciales compradores de suscribir un contrato de compraventa, autoriza al Intermediario a solicitar y recibir de aquellos, con carácter penitencial, una garantía, por un importe máximo del 20% del precio de la propuesta y a retenerla como depositario hasta el primer día laborable siguiente a la suscripción por ambas partes de una “promesa”. Habiéndose suscrito por ambas partes una “promesa”, la falta de suscripción del contrato de compraventa por el potencial comprador comportará la pérdida, a favor de El Cliente, del importe abonado. Si la causa de dicha falta de suscripción fuera imputable a El Cliente, esta deberá entregar al potencial comprador el citado importe doblado.",
+        "En el supuesto que la “promesa” fuese rechazada o no fuese formalmente aceptada por El Cliente en el plazo de 15 días naturales desde su suscripción por el comprador, este deberá recibir el importe entregado como garantía, que el Intermediario tendrá en depósito, en el plazo máximo de 5 días naturales a contar desde el vencimiento del plazo de los 15 días o desde el momento del rechazo.",
+        "Se generará el derecho a percibir por el Intermediario la totalidad de los honorarios si: 1. Sin mediar justa y objetiva causa El Cliente se negará a suscribir una “promesa” conforme con el presente contrato u obstaculizará deliberadamente o impidiera la ejecución del mismo. 2. Durante la vigencia del presente contrato, vulnerando la exclusiva concedida al Intermediario, El Cliente, directamente o a través de un tercero, realizara la venta o la entrega de la posesión del Inmueble o, en el trascurso de un año desde su finalización, la venta o la entrega de la posesión se llevará a cabo a favor de personas que hubieran visitado el Inmueble o hubieran sido presentadas a El Cliente por el Intermediario, o a cualquier otra persona interpuesta a estas.",
+        "Se generará el derecho a percibir por Intermediario los honorarios que proporcionalmente le correspondan, atendiendo a las actividades realizadas, los cuales no podrán ser superiores al 75% de los honorarios inicialmente establecidos, cuando El Cliente revocase o desistiera, expresa o tácitamente, del presente contrato antes de su caducidad, salvo que lo hiciera en fraude de la labor del Intermediario, en cuyo caso este tendrá derecho a percibir la totalidad de los honorarios.",
+        "El Cliente, en el caso que el Intermediario injustificadamente revocase el contrato o incumpliera gravemente sus deberes, de causarle un daño, tendrá derecho a ser indemnizado hasta un máximo equivalente al importe de los honorarios inicialmente establecidos.",
+        "Para determinar los honorarios/indemnizaciones en los casos previstos en las cláusulas 10 y 11, se tomará como referencia la cantidad prevista en la cláusula 6 o, en su caso, la cantidad resultante de aplicar al precio del Inmueble fijado en la cláusula 3, el porcentaje estipulado en la cláusula 6. Los citados conceptos se abonarán en el plazo máximo de 5 días naturales a contar desde su presentación al cobro.",
+        "El gasto de la plusvalía municipal será a cargo de la parte vendedora y los gastos de notaria, registro, ITP/AJD/IVA, gestoría, tasaciones, serán a cargo de la parte compradora.",
+        "",
+        f"Y para que así conste, lo firman, en {lugar_firma} a {fecha_firma}.",
+        "Por el Intermediario                                Por el cliente/Representante",
+        "Nombre y Apellidos                                 Nombre y Apellidos",
+        "",
+        "INFORMACIÓN SOBRE PROTECCIÓN DE DATOS. El Intermediario, en calidad de responsable, tratará la información que usted nos facilite con el fin de prestarle los servicios solicitados (intermediación inmobiliaria y/o financiera y obtención de seguros) así como, en caso de habernos otorgado el preceptivo consentimiento, para realizar actividades de prospección comercial y de envío de publicidad relacionada con los servicios ofrecidos, la cual podrá realizarse por cualquier medio (correo postal, e-mail, teléfono, mensajería instantánea, etc.) y, además, de habernos otorgado el preceptivo consentimiento, podrá ser adaptada a sus preferencias e intereses. La legitimación para el tratamiento se obtiene de la relación contractual derivada de la prestación de servicios profesionales demandada, pudiendo coexistir con consentimientos específicos, intereses legítimos y/o obligaciones legales. Usted tiene derecho a acceder, rectificar y suprimir los datos, así como otros derechos.",
+    ]
+    footer = [
+        "Documento generado por el CRM Modernia a partir de la ficha del inmueble. Revisar legalmente antes de firma.",
+        f"IVA orientativo: {iva_pct_val:g}% (ajústalo si aplica un tipo distinto).",
+    ]
+    return build_branded_text_document_pdf(
+        "CONTRATO DE INTERMEDIACIÓN",
+        f"{company_name} · Nota de encargo venta",
+        body,
+        footer,
+        brand_logo_url=company.get("logo_url"),
+    )
+
+
 def build_inmueble_visit_sheet_pdf(company, inmueble, captacion, owners, buyer, demanda=None):
     buyer_name = str((buyer or {}).get("nombre") or "").strip() or "-"
     buyer_nif = str((buyer or {}).get("nif") or "").strip() or "-"
@@ -23015,6 +23401,71 @@ def build_branded_document_pdf(title, subtitle, sections, footer_lines=None, bra
 
     for line in footer_lines:
         wrapped, line_height, total_height = _pil_multiline(draw, line, font_footer, width=100, line_gap=5)
+        ensure_space(total_height + 4)
+        draw.multiline_text((margin_x, y), "\n".join(wrapped), fill=(106, 111, 116), font=font_footer, spacing=5)
+        y += total_height + 4
+
+    pages.append(image)
+    buffer = BytesIO()
+    if len(pages) == 1:
+        pages[0].save(buffer, format="PDF", resolution=150.0)
+    else:
+        pages[0].save(buffer, format="PDF", resolution=150.0, save_all=True, append_images=pages[1:])
+    return buffer.getvalue()
+
+
+def build_branded_text_document_pdf(title, subtitle, body_lines, footer_lines=None, brand_logo_url=None):
+    footer_lines = footer_lines or []
+    body_lines = body_lines or []
+    page_width, page_height = 1240, 1754
+    margin_x, top_margin, bottom_margin = 90, 70, 90
+    logo = _load_brand_logo(brand_logo_url, max_width=560)
+    font_title = _document_font(34, bold=True)
+    font_subtitle = _document_font(18, bold=False)
+    font_body = _document_font(17, bold=False)
+    font_footer = _document_font(15, bold=False)
+    pages = []
+
+    def new_page():
+        image = Image.new("RGB", (page_width, page_height), "white")
+        draw = ImageDraw.Draw(image)
+        y = top_margin
+        if logo:
+            image.paste(logo, (margin_x, y), logo)
+            y += logo.height + 30
+        if title:
+            draw.text((margin_x, y), title, fill=(48, 54, 58), font=font_title)
+            title_box = draw.textbbox((margin_x, y), title, font=font_title)
+            y = title_box[3] + 12
+        if subtitle:
+            subtitle_lines, sub_line_height, sub_height = _pil_multiline(draw, subtitle, font_subtitle, width=94, line_gap=6)
+            draw.multiline_text((margin_x, y), "\n".join(subtitle_lines), fill=(110, 116, 120), font=font_subtitle, spacing=6)
+            y += sub_height + 18
+        return image, draw, y
+
+    image, draw, y = new_page()
+    usable_bottom = page_height - bottom_margin
+
+    def ensure_space(required_height):
+        nonlocal image, draw, y
+        if y + required_height <= usable_bottom:
+            return
+        pages.append(image)
+        image, draw, y = new_page()
+
+    for line in body_lines:
+        raw = str(line or "")
+        if not raw.strip():
+            ensure_space(24)
+            y += 18
+            continue
+        wrapped, line_height, total_height = _pil_multiline(draw, raw, font_body, width=96, line_gap=6)
+        ensure_space(total_height + 8)
+        draw.multiline_text((margin_x, y), "\n".join(wrapped), fill=(25, 28, 31), font=font_body, spacing=6)
+        y += total_height + 8
+
+    for line in footer_lines:
+        wrapped, line_height, total_height = _pil_multiline(draw, str(line or ""), font_footer, width=100, line_gap=5)
         ensure_space(total_height + 4)
         draw.multiline_text((margin_x, y), "\n".join(wrapped), fill=(106, 111, 116), font=font_footer, spacing=5)
         y += total_height + 4
@@ -32053,6 +32504,195 @@ class Handler(BaseHTTPRequestHandler):
                 return
             json_response(self, {"output": output})
             return
+        elif parsed.path == "/api/ai_inmo_encargo_copilot":
+            inmueble_id = str(payload.get("inmueble_id") or "").strip()
+            if not inmueble_id:
+                json_response(self, {"error": "inmueble_id requerido"}, status=400)
+                return
+            task = str(payload.get("task") or "rellenar").strip().lower()
+            values = payload.get("values") or {}
+            if not isinstance(values, dict):
+                values = {}
+
+            tipo_operacion = str(payload.get("tipo_operacion") or values.get("tipo_operacion") or values.get("tipo") or "venta").strip().lower()
+            if tipo_operacion in {"arrendamiento", "renta"}:
+                tipo_operacion = "alquiler"
+            if tipo_operacion not in {"venta", "alquiler"}:
+                tipo_operacion = "venta"
+
+            inmueble = conn.execute("SELECT * FROM inmuebles WHERE id = ? LIMIT 1", (inmueble_id,)).fetchone()
+            if not inmueble:
+                json_response(self, {"error": "Inmueble no encontrado"}, status=404)
+                return
+            captacion = conn.execute(
+                """
+                SELECT *
+                FROM captaciones
+                WHERE inmueble_id = ?
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                (inmueble_id,),
+            ).fetchone()
+            owners = get_inmueble_propietarios(conn, inmueble_id)
+
+            operacion = conn.execute(
+                """
+                SELECT *
+                FROM operaciones_inmobiliarias
+                WHERE empresa_id = ?
+                  AND inmueble_id = ?
+                  AND LOWER(COALESCE(tipo_operacion, 'venta')) = ?
+                ORDER BY updated_at DESC, created_at DESC
+                LIMIT 1
+                """,
+                (inmueble["empresa_id"], inmueble_id, tipo_operacion),
+            ).fetchone()
+
+            def suggested_defaults():
+                today = datetime.now(timezone.utc).date().isoformat()
+                out = {
+                    "tipo_operacion": tipo_operacion,
+                    "fecha_inicio": today,
+                    "fecha_fin": _add_months_safe(parse_iso_date(today) or datetime.now(timezone.utc).date(), 6).isoformat(),
+                    "lugar_firma": str(inmueble.get("poblacion") or inmueble.get("provincia") or "").strip(),
+                    "cargas": "NADA",
+                    "iva_pct": "21",
+                }
+                if operacion and str(operacion.get("fecha_encargo") or "").strip():
+                    out["fecha_inicio"] = str(operacion.get("fecha_encargo") or "").strip()
+                    try:
+                        out["fecha_fin"] = _add_months_safe(parse_iso_date(out["fecha_inicio"]) or datetime.now(timezone.utc).date(), 6).isoformat()
+                    except Exception:
+                        pass
+                if tipo_operacion == "alquiler":
+                    renta = None
+                    if operacion:
+                        renta = operacion.get("precio_renta") or operacion.get("precio_encargo")
+                    if renta in (None, ""):
+                        renta = (captacion or {}).get("precio_objetivo") or inmueble.get("precio_objetivo")
+                    if renta not in (None, ""):
+                        out["renta_mensual"] = str(renta)
+                    out["honorarios_text"] = "una mensualidad + IVA"
+                else:
+                    precio = None
+                    if operacion:
+                        precio = operacion.get("precio_encargo")
+                    if precio in (None, ""):
+                        precio = inmueble.get("precio_encargo") or inmueble.get("precio_objetivo") or (captacion or {}).get("precio_objetivo")
+                    if precio not in (None, ""):
+                        out["precio_venta"] = str(precio)
+                    pct = inmueble.get("honorarios")
+                    if (pct in (None, "") or float(pct or 0) <= 0) and operacion:
+                        pct = operacion.get("honorarios")
+                    try:
+                        if pct not in (None, "") and float(pct) > 0 and float(pct) <= 25:
+                            out["honorarios_pct"] = str(float(pct))
+                    except Exception:
+                        pass
+                    out["fecha_venta_desde"] = ""
+                    try:
+                        out["fecha_venta_antes"] = _add_months_safe(parse_iso_date(out["fecha_inicio"]) or datetime.now(timezone.utc).date(), 12).isoformat()
+                    except Exception:
+                        out["fecha_venta_antes"] = ""
+                return out
+
+            if task == "rellenar":
+                suggested = suggested_defaults()
+                json_response(self, {"suggested": suggested, "mode": "basic"})
+                return
+
+            if task != "mejoras":
+                json_response(self, {"error": "task no soportada"}, status=400)
+                return
+
+            topic = "encargo_alquiler" if tipo_operacion == "alquiler" else "encargo_venta"
+            topic_key, topic_payload = resolve_legal_copilot_topic("inmobiliaria", topic, topic)
+            checklist = list((topic_payload or {}).get("checklist") or [])
+            warnings = list((topic_payload or {}).get("warnings") or [])
+            legal_basis = list((topic_payload or {}).get("legal_basis") or [])
+            mandatory_docs = list((topic_payload or {}).get("mandatory_docs") or [])
+            drafting_help = list((topic_payload or {}).get("drafting_help") or [])
+            recent_updates = []
+            try:
+                items = fetch_legal_radar_items(conn, area="inmobiliaria", limit=60)
+                for item in list(items.get("rows") or []):
+                    if str(item.get("topic_key") or "").strip() != str(topic_key or "").strip():
+                        continue
+                    recent_updates.append(item)
+            except Exception:
+                recent_updates = []
+
+            def build_basic_output():
+                lines = []
+                lines.append("Copilot legal (borrador): revisa con asesoría jurídica antes de usar en firma.")
+                lines.append(f"Tipo de encargo: {tipo_operacion}.")
+                if legal_basis:
+                    lines.append("")
+                    lines.append("Base legal / referencias:")
+                    lines.extend([f"- {x}" for x in legal_basis[:8]])
+                if mandatory_docs:
+                    lines.append("")
+                    lines.append("Documentación mínima sugerida:")
+                    lines.extend([f"- {x}" for x in mandatory_docs[:10]])
+                if checklist:
+                    lines.append("")
+                    lines.append("Checklist de cláusulas / puntos a revisar:")
+                    lines.extend([f"- {x}" for x in checklist[:18]])
+                if drafting_help:
+                    lines.append("")
+                    lines.append("Ayuda de redacción:")
+                    lines.extend([f"- {x}" for x in drafting_help[:10]])
+                if warnings:
+                    lines.append("")
+                    lines.append("Riesgos / alertas:")
+                    lines.extend([f"- {x}" for x in warnings[:10]])
+                if recent_updates:
+                    lines.append("")
+                    lines.append("Cambios recientes (Legal Radar) relacionados:")
+                    for item in recent_updates[:6]:
+                        title = str(item.get("titulo") or item.get("title") or "").strip()
+                        fecha = str(item.get("fecha_publicacion") or "").strip()
+                        accion = str(item.get("accion_recomendada") or "").strip()
+                        bits = [b for b in [fecha, title] if b]
+                        head = " · ".join(bits) if bits else title or "Actualización"
+                        if accion:
+                            lines.append(f"- {head}: {accion}")
+                        else:
+                            lines.append(f"- {head}")
+                return "\n".join(lines).strip()
+
+            mode = "basic"
+            output = build_basic_output()
+            if openai_available():
+                context = {
+                    "tipo_operacion": tipo_operacion,
+                    "inmueble": dict(inmueble),
+                    "captacion": dict(captacion) if captacion else {},
+                    "propietarios": owners,
+                    "valores_formulario": values,
+                    "legal_topic": {"topic_key": topic_key, **(topic_payload or {})},
+                    "recent_updates": recent_updates[:6],
+                }
+                prompt = (
+                    "Eres un copiloto legal inmobiliario para un CRM en España. "
+                    "Propón mejoras legislativas/contractuales para una nota de encargo (intermediación), "
+                    "en formato de lista con acciones concretas. No inventes datos. "
+                    "Incluye un bloque 'Campos a validar antes de firmar'. "
+                    "No des asesoramiento legal definitivo.\n\n"
+                    f"Contexto (JSON): {json.dumps(context, ensure_ascii=False)}"
+                )
+                ai_output, err = call_openai(
+                    prompt,
+                    temperature=0.15,
+                    max_tokens=900,
+                    system_text="Responde en español. Sé práctico, breve y orientado a checklist.",
+                )
+                if not err and str(ai_output or "").strip():
+                    output = str(ai_output).strip()
+                    mode = "openai"
+            json_response(self, {"output": output, "mode": mode, "topic_key": topic_key or topic})
+            return
         elif parsed.path == "/api/legal_copilot":
             area = normalize_legal_area(payload.get("area") or "inmobiliaria")
             topic = str(payload.get("topic") or "").strip()
@@ -39578,6 +40218,151 @@ class Handler(BaseHTTPRequestHandler):
                 (new_id, now, captacion_id),
             )
             json_response(self, {"inmueble_id": new_id, "created": True})
+            return
+
+        if path == "/api/inmueble_encargo_pdf":
+            inmueble_id = params.get("id", [""])[0]
+            if not inmueble_id:
+                json_response(self, {"error": "id requerido"}, status=400)
+                return
+            tipo_operacion = (params.get("tipo_operacion", [""])[0] or params.get("tipo", [""])[0] or "venta").strip().lower()
+            if tipo_operacion in {"arrendamiento", "renta"}:
+                tipo_operacion = "alquiler"
+            if tipo_operacion not in {"venta", "alquiler"}:
+                tipo_operacion = "venta"
+            inmueble = conn.execute(
+                "SELECT * FROM inmuebles WHERE id = ? LIMIT 1",
+                (inmueble_id,),
+            ).fetchone()
+            if not inmueble:
+                json_response(self, {"error": "Inmueble no encontrado"}, status=404)
+                return
+            empresa = conn.execute(
+                "SELECT * FROM empresas WHERE id = ? LIMIT 1",
+                (inmueble["empresa_id"],),
+            ).fetchone()
+            captacion = conn.execute(
+                """
+                SELECT *
+                FROM captaciones
+                WHERE inmueble_id = ?
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                (inmueble_id,),
+            ).fetchone()
+            if not captacion:
+                json_response(self, {"error": "Captación no encontrada"}, status=404)
+                return
+            status = str(captacion["situacion_comercial"] or inmueble["estado"] or "").strip().lower()
+            if status != "encargo":
+                json_response(self, {"error": "La nota de encargo solo está disponible para inmuebles en Encargo"}, status=400)
+                return
+            owners = get_inmueble_propietarios(conn, inmueble_id)
+
+            # Defaults desde la última operación si existe.
+            operacion = conn.execute(
+                """
+                SELECT *
+                FROM operaciones_inmobiliarias
+                WHERE empresa_id = ?
+                  AND inmueble_id = ?
+                  AND LOWER(COALESCE(tipo_operacion, 'venta')) = ?
+                ORDER BY updated_at DESC, created_at DESC
+                LIMIT 1
+                """,
+                (inmueble["empresa_id"], inmueble_id, tipo_operacion),
+            ).fetchone()
+            extra = {
+                "tipo_operacion": tipo_operacion,
+                "precio_venta": params.get("precio_venta", [""])[0],
+                "renta_mensual": params.get("renta_mensual", [""])[0],
+                "honorarios_pct": params.get("honorarios_pct", [""])[0],
+                "honorarios_text": params.get("honorarios_text", [""])[0],
+                "iva_pct": params.get("iva_pct", [""])[0],
+                "fecha_inicio": params.get("fecha_inicio", [""])[0],
+                "fecha_fin": params.get("fecha_fin", [""])[0],
+                "fecha_venta_desde": params.get("fecha_venta_desde", [""])[0],
+                "fecha_venta_antes": params.get("fecha_venta_antes", [""])[0],
+                "datos_registrales": params.get("datos_registrales", [""])[0],
+                "m2_utiles": params.get("m2_utiles", [""])[0],
+                "cargas": params.get("cargas", [""])[0],
+                "otros": params.get("otros", [""])[0],
+                "lugar_firma": params.get("lugar_firma", [""])[0],
+            }
+            # Normaliza defaults si vienen vacíos.
+            if tipo_operacion == "alquiler":
+                if not str(extra.get("renta_mensual") or "").strip():
+                    if operacion and operacion.get("precio_renta") not in (None, ""):
+                        extra["renta_mensual"] = operacion.get("precio_renta")
+                    elif operacion and operacion.get("precio_encargo") not in (None, ""):
+                        extra["renta_mensual"] = operacion.get("precio_encargo")
+                    else:
+                        extra["renta_mensual"] = captacion.get("precio_objetivo") or inmueble.get("precio_objetivo") or ""
+                if not str(extra.get("honorarios_text") or "").strip():
+                    extra["honorarios_text"] = "una mensualidad + IVA"
+            else:
+                if not str(extra.get("precio_venta") or "").strip():
+                    if operacion and operacion.get("precio_encargo") not in (None, ""):
+                        extra["precio_venta"] = operacion.get("precio_encargo")
+                    else:
+                        extra["precio_venta"] = inmueble.get("precio_encargo") or inmueble.get("precio_objetivo") or captacion.get("precio_objetivo")
+                if not str(extra.get("honorarios_pct") or "").strip():
+                    candidate = inmueble.get("honorarios")
+                    if (candidate in (None, "") or float(candidate or 0) <= 0) and operacion:
+                        candidate = operacion.get("honorarios")
+                    try:
+                        if candidate not in (None, "") and float(candidate) > 0 and float(candidate) <= 25:
+                            extra["honorarios_pct"] = float(candidate)
+                    except Exception:
+                        pass
+            if not str(extra.get("iva_pct") or "").strip():
+                extra["iva_pct"] = 21
+            if not str(extra.get("fecha_inicio") or "").strip():
+                if operacion and str(operacion.get("fecha_encargo") or "").strip():
+                    extra["fecha_inicio"] = str(operacion.get("fecha_encargo") or "").strip()
+                else:
+                    extra["fecha_inicio"] = datetime.now(timezone.utc).date().isoformat()
+            if not str(extra.get("fecha_fin") or "").strip():
+                try:
+                    extra["fecha_fin"] = _add_months_safe(parse_iso_date(extra["fecha_inicio"]) or datetime.now(timezone.utc).date(), 6).isoformat()
+                except Exception:
+                    pass
+            if tipo_operacion == "alquiler":
+                if not str(extra.get("renta_mensual") or "").strip():
+                    json_response(self, {"error": "renta_mensual requerida"}, status=400)
+                    return
+            else:
+                if not str(extra.get("precio_venta") or "").strip():
+                    json_response(self, {"error": "precio_venta requerido"}, status=400)
+                    return
+
+            pdf_bytes = build_inmueble_nota_encargo_pdf(
+                dict(empresa) if empresa else {},
+                dict(inmueble),
+                dict(captacion),
+                owners,
+                extra=extra,
+            )
+            safe_ref = slugify_text(inmueble["direccion"] or inmueble["referencia"] or inmueble_id)[:50] or inmueble_id
+            filename = f"nota_encargo_{safe_ref}.pdf"
+            persist_generated_inmueble_pdf(
+                conn,
+                inmueble_id,
+                "Nota de encargo",
+                f"Nota de encargo · {inmueble['direccion'] or safe_ref}",
+                pdf_bytes,
+                filename.replace(".pdf", ""),
+                now,
+                replace_existing=False,
+                empresa_id=inmueble["empresa_id"],
+                plantilla_clave="nota_encargo",
+                origen_tipo="inmueble_encargo_pdf",
+                origen_id=inmueble_id,
+                payload_json=extra,
+            )
+            conn.commit()
+            binary_response(self, pdf_bytes, content_type="application/pdf", filename=filename)
             return
 
         if path == "/api/inmueble_visita_pdf":

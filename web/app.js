@@ -2462,6 +2462,7 @@ const inmuebleBackBtn = document.getElementById("inmuebleBackBtn");
 const inmuebleVisitaPdfBtn = document.getElementById("inmuebleVisitaPdfBtn");
 const inmuebleVentaFichaPdfBtn = document.getElementById("inmuebleVentaFichaPdfBtn");
 const inmuebleVentaPrecioPdfBtn = document.getElementById("inmuebleVentaPrecioPdfBtn");
+const inmuebleEncargoPdfBtn = document.getElementById("inmuebleEncargoPdfBtn");
 const inmuebleAlquilerDiaPdfBtn = document.getElementById("inmuebleAlquilerDiaPdfBtn");
 const inmuebleDeleteBtn = document.getElementById("inmuebleDeleteBtn");
 const inmuebleGeocodeBtn = document.getElementById("inmuebleGeocodeBtn");
@@ -16426,6 +16427,7 @@ const refreshInmuebleVisitSheetButton = () => {
   inmuebleVisitaPdfBtn.classList.toggle("hidden", !visible);
   inmuebleVentaFichaPdfBtn?.classList.toggle("hidden", !visible);
   inmuebleVentaPrecioPdfBtn?.classList.toggle("hidden", !visible);
+  inmuebleEncargoPdfBtn?.classList.toggle("hidden", !visible);
   inmuebleAlquilerDiaPdfBtn?.classList.toggle("hidden", !visible);
 };
 
@@ -16491,6 +16493,312 @@ const openInmuebleConsumoPdf = (kind) => {
   if (!state.currentInmuebleId || !kind) return;
   const params = new URLSearchParams({ id: state.currentInmuebleId, kind });
   window.open(`/api/inmueble_consumo_pdf?${params.toString()}`, "_blank", "noopener");
+};
+
+const openInmuebleNotaEncargoPdf = () => {
+  if (!state.currentInmuebleId) return;
+  const inmueble = state.currentInmueble || state.currentInmuebleContext?.inmueble || {};
+
+  const addMonths = (isoDate, months) => {
+    const base = isoDate ? new Date(`${isoDate}T00:00:00`) : new Date();
+    if (Number.isNaN(base.getTime())) return isoDate || "";
+    const year = base.getFullYear();
+    const month = base.getMonth();
+    const day = base.getDate();
+    const targetMonth = month + Number(months || 0);
+    const candidate = new Date(year, targetMonth, 1);
+    const endOfMonth = new Date(candidate.getFullYear(), candidate.getMonth() + 1, 0);
+    const finalDay = Math.min(day, endOfMonth.getDate());
+    const result = new Date(candidate.getFullYear(), candidate.getMonth(), finalDay);
+    return result.toISOString().slice(0, 10);
+  };
+
+  const openModal = () =>
+    new Promise((resolve) => {
+      let modal = document.getElementById("inmoEncargoPdfModal");
+      if (!modal) {
+        modal = document.createElement("div");
+        modal.id = "inmoEncargoPdfModal";
+        modal.className = "modal hidden";
+        modal.innerHTML = `
+          <div class="modal-content" style="max-width: 980px;">
+            <div class="modal-header">
+              <h3>Nota de encargo (PDF)</h3>
+              <button type="button" class="ghost" data-encargo-close>✕</button>
+            </div>
+            <form class="modal-body form-grid" data-encargo-form>
+              <label>
+                Tipo de encargo
+                <select name="tipo_operacion">
+                  <option value="venta">Venta</option>
+                  <option value="alquiler">Alquiler</option>
+                </select>
+              </label>
+              <label data-encargo-only="venta">
+                Precio de venta (EUR)
+                <input name="precio_venta" />
+              </label>
+              <label data-encargo-only="venta">
+                Honorarios (% sin IVA)
+                <input name="honorarios_pct" />
+              </label>
+              <label data-encargo-only="alquiler">
+                Renta mensual (EUR)
+                <input name="renta_mensual" />
+              </label>
+              <label data-encargo-only="alquiler">
+                Honorarios alquiler (texto)
+                <input name="honorarios_text" placeholder="Ej. una mensualidad + IVA" />
+              </label>
+              <label>
+                IVA (%)
+                <input name="iva_pct" />
+              </label>
+              <label>
+                Fecha inicio (YYYY-MM-DD)
+                <input name="fecha_inicio" type="date" />
+              </label>
+              <label>
+                Fecha fin (YYYY-MM-DD)
+                <input name="fecha_fin" type="date" />
+              </label>
+              <label data-encargo-only="venta">
+                Venta a partir de (opcional)
+                <input name="fecha_venta_desde" placeholder="YYYY-MM-DD" />
+              </label>
+              <label data-encargo-only="venta">
+                Venta antes de (opcional)
+                <input name="fecha_venta_antes" placeholder="YYYY-MM-DD" />
+              </label>
+              <label class="span-2">
+                Datos registrales (opcional)
+                <input name="datos_registrales" placeholder="Ej. Finca Nº..., folio..." />
+              </label>
+              <label>
+                m² útiles (opcional)
+                <input name="m2_utiles" />
+              </label>
+              <label>
+                Cargas/gravámenes
+                <input name="cargas" />
+              </label>
+              <label class="span-2">
+                Otros (opcional)
+                <input name="otros" />
+              </label>
+              <label>
+                Lugar de firma
+                <input name="lugar_firma" />
+              </label>
+              <label class="span-2">
+                Copilot (mejoras legislativas / checklist)
+                <textarea name="copilot_mejoras" rows="5" placeholder="Pulsa “Copilot: mejoras” para obtener sugerencias."></textarea>
+              </label>
+              <div class="form-actions span-2" style="display:flex;gap:10px;flex-wrap:wrap;">
+                <button type="button" class="secondary" data-encargo-copilot-fill>Copilot: rellenar</button>
+                <button type="button" class="secondary ghost" data-encargo-copilot-legal>Copilot: mejoras</button>
+                <button type="button" data-encargo-generate>Generar PDF</button>
+                <span class="muted" data-encargo-status></span>
+              </div>
+            </form>
+          </div>
+        `;
+        document.body.appendChild(modal);
+      }
+
+      const form = modal.querySelector("[data-encargo-form]");
+      const closeBtn = modal.querySelector("[data-encargo-close]");
+      const generateBtn = modal.querySelector("[data-encargo-generate]");
+      const fillBtn = modal.querySelector("[data-encargo-copilot-fill]");
+      const legalBtn = modal.querySelector("[data-encargo-copilot-legal]");
+      const statusEl = modal.querySelector("[data-encargo-status]");
+      const tipoSelect = modal.querySelector('[name="tipo_operacion"]');
+
+      const setValue = (name, value) => {
+        const el = form?.querySelector(`[name="${name}"]`);
+        if (!el) return;
+        el.value = value || "";
+      };
+
+      const todayIso = new Date().toISOString().slice(0, 10);
+      const defaultStart = todayIso;
+      const defaultEnd = addMonths(defaultStart, 6);
+      const defaultPrice = String(inmueble.precio_encargo || inmueble.precio_objetivo || "").trim();
+      const honorariosRaw = Number(inmueble.honorarios || 0);
+      const defaultHonorariosPct =
+        honorariosRaw > 0 && honorariosRaw <= 25 ? String(honorariosRaw) : "4";
+
+      form?.reset();
+      setValue("tipo_operacion", "venta");
+      setValue("precio_venta", defaultPrice);
+      setValue("honorarios_pct", defaultHonorariosPct);
+      setValue("renta_mensual", defaultPrice);
+      setValue("honorarios_text", "una mensualidad + IVA");
+      setValue("iva_pct", "21");
+      setValue("fecha_inicio", defaultStart);
+      setValue("fecha_fin", defaultEnd);
+      setValue("fecha_venta_desde", "");
+      setValue("fecha_venta_antes", "");
+      setValue("datos_registrales", "");
+      setValue("m2_utiles", "");
+      setValue("cargas", "NADA");
+      setValue("otros", "");
+      setValue("lugar_firma", String(inmueble.poblacion || inmueble.provincia || "").trim());
+      setValue("copilot_mejoras", "");
+
+      const syncTipoUi = () => {
+        const tipo = String(form?.querySelector('[name="tipo_operacion"]')?.value || "venta").trim();
+        const nodes = Array.from(form?.querySelectorAll("[data-encargo-only]") || []);
+        nodes.forEach((node) => {
+          const only = node.getAttribute("data-encargo-only");
+          node.classList.toggle("hidden", only && only !== tipo);
+        });
+        // Campos venta (precio/honorarios pct) se siguen mostrando aunque no tengan data-encargo-only,
+        // pero los validamos según tipo.
+      };
+      tipoSelect?.addEventListener("change", syncTipoUi);
+      syncTipoUi();
+
+      const readValues = () => {
+        const values = Object.fromEntries(new FormData(form).entries());
+        return Object.fromEntries(
+          Object.entries(values).map(([key, value]) => [key, String(value || "").trim()])
+        );
+      };
+
+      const applySuggestedValues = (suggested = {}) => {
+        Object.entries(suggested || {}).forEach(([key, value]) => {
+          if (key === "copilot_mejoras") return;
+          if (value === null || value === undefined) return;
+          setValue(key, String(value));
+        });
+        syncTipoUi();
+      };
+
+      let resolved = false;
+      const cleanup = (value) => {
+        if (resolved) return;
+        resolved = true;
+        modal.classList.add("hidden");
+        modal.classList.remove("open");
+        resolve(value);
+      };
+      closeBtn.onclick = () => cleanup(null);
+      modal.onclick = (event) => {
+        if (event.target === modal) cleanup(null);
+      };
+
+      fillBtn.onclick = async () => {
+        if (statusEl) statusEl.textContent = "Copilot rellenando...";
+        try {
+          const res = await fetch("/api/ai_inmo_encargo_copilot", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              inmueble_id: state.currentInmuebleId,
+              tipo_operacion: readValues().tipo_operacion,
+              task: "rellenar",
+              values: readValues(),
+            }),
+          });
+          const data = await res.json();
+          if (data?.error) throw new Error(data.error);
+          if (data?.suggested) {
+            const ok = window.confirm("Aplicar valores sugeridos por Copilot al formulario?");
+            if (ok) applySuggestedValues(data.suggested);
+          }
+          if (statusEl) statusEl.textContent = "Sugerencias listas.";
+        } catch (error) {
+          if (statusEl) statusEl.textContent = error?.message || "No se pudo rellenar.";
+        }
+      };
+
+      legalBtn.onclick = async () => {
+        if (statusEl) statusEl.textContent = "Copilot generando mejoras...";
+        try {
+          const res = await fetch("/api/ai_inmo_encargo_copilot", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              inmueble_id: state.currentInmuebleId,
+              tipo_operacion: readValues().tipo_operacion,
+              task: "mejoras",
+              values: readValues(),
+            }),
+          });
+          const data = await res.json();
+          if (data?.error) throw new Error(data.error);
+          setValue("copilot_mejoras", data?.output || "");
+          if (statusEl) statusEl.textContent = data?.mode === "openai" ? "Mejoras listas (OpenAI)." : "Mejoras listas.";
+        } catch (error) {
+          if (statusEl) statusEl.textContent = error?.message || "No se pudieron generar mejoras.";
+        }
+      };
+
+      generateBtn.onclick = () => {
+        const values = readValues();
+        const tipo = values.tipo_operacion || "venta";
+        if (tipo === "alquiler") {
+          if (!values.renta_mensual) {
+            alert("Renta mensual requerida.");
+            return;
+          }
+          if (!values.honorarios_text) {
+            alert("Honorarios alquiler (texto) requeridos.");
+            return;
+          }
+        } else {
+          if (!values.precio_venta) {
+            alert("Precio de venta requerido.");
+            return;
+          }
+          if (!values.honorarios_pct) {
+            alert("Honorarios (%) requeridos.");
+            return;
+          }
+          if (!values.iva_pct) {
+            alert("IVA (%) requerido.");
+            return;
+          }
+        }
+        if (!values.fecha_inicio) {
+          alert("Fecha inicio requerida.");
+          return;
+        }
+        if (!values.fecha_fin) {
+          alert("Fecha fin requerida.");
+          return;
+        }
+        const params = new URLSearchParams({ id: state.currentInmuebleId });
+        [
+          "tipo_operacion",
+          "precio_venta",
+          "renta_mensual",
+          "honorarios_pct",
+          "honorarios_text",
+          "iva_pct",
+          "fecha_inicio",
+          "fecha_fin",
+          "fecha_venta_desde",
+          "fecha_venta_antes",
+          "datos_registrales",
+          "m2_utiles",
+          "cargas",
+          "otros",
+          "lugar_firma",
+        ].forEach((key) => {
+          const value = values[key];
+          if (value) params.set(key, value);
+        });
+        window.open(`/api/inmueble_encargo_pdf?${params.toString()}`, "_blank", "noopener");
+        cleanup(values);
+      };
+
+      modal.classList.remove("hidden");
+      modal.classList.add("open");
+    });
+
+  openModal();
 };
 
 const getInmuebleStageRequirements = (stage, inmueble = {}, captacion = {}, propietarios = []) => {
@@ -40986,6 +41294,12 @@ if (inmuebleVentaFichaPdfBtn) {
 if (inmuebleVentaPrecioPdfBtn) {
   inmuebleVentaPrecioPdfBtn.addEventListener("click", () => {
     openInmuebleConsumoPdf("venta_precio");
+  });
+}
+
+if (inmuebleEncargoPdfBtn) {
+  inmuebleEncargoPdfBtn.addEventListener("click", () => {
+    openInmuebleNotaEncargoPdf();
   });
 }
 
