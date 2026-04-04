@@ -381,6 +381,45 @@ def ensure_postgres_sqlite_compat(conn):
     # Create small shim functions to support our SQLite-ish SQL in Postgres.
     if getattr(conn, "__crm_backend__", "") != "postgres":
         return
+    # DB-level guard: estas funciones viven en la base de datos, así que no necesitamos recrearlas
+    # en cada cold start. Guardamos un marker para saltarlas si ya están creadas.
+    compat_key = "pg_sqlite_compat_v1"
+    try:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS crm_meta (
+              key TEXT PRIMARY KEY,
+              value TEXT,
+              updated_at TEXT
+            )
+            """
+        )
+        marker = None
+        try:
+            row = conn.execute("SELECT value FROM crm_meta WHERE key = ?", (compat_key,)).fetchone()
+            if row:
+                marker = (row.get("value") if isinstance(row, dict) else row[0])
+        except Exception:
+            marker = None
+        if str(marker or "").strip() == "1":
+            # Verify one known function exists; if it does, we can safely skip.
+            try:
+                exists = conn.execute(
+                    """
+                    SELECT 1
+                    FROM pg_proc p
+                    JOIN pg_namespace n ON n.oid = p.pronamespace
+                    WHERE p.proname = 'sqlite_datetime'
+                    LIMIT 1
+                    """
+                ).fetchone()
+            except Exception:
+                exists = None
+            if exists:
+                return
+    except Exception:
+        # If meta probes fail, fall back to creating compat functions.
+        pass
     conn.execute(
         """
         CREATE OR REPLACE FUNCTION sqlite_datetime(arg1 text)
@@ -550,6 +589,19 @@ def ensure_postgres_sqlite_compat(conn):
         $$;
         """
     )
+    try:
+        conn.execute(
+            """
+            INSERT INTO crm_meta (key, value, updated_at)
+            VALUES (?, '1', sqlite_datetime('now'))
+            ON CONFLICT (key) DO UPDATE
+            SET value = EXCLUDED.value,
+                updated_at = EXCLUDED.updated_at
+            """,
+            (compat_key,),
+        )
+    except Exception:
+        pass
     conn.execute(
         """
         CREATE OR REPLACE FUNCTION sqlite_date(arg1 text, modifier1 text, modifier2 text)

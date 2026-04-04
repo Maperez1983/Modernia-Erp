@@ -16367,7 +16367,115 @@ def ensure_tables(db_path):
             pass
     else:
         conn = open_sqlite_conn(db_path, with_row_factory=False)
-    apply_schema_file(conn, ROOT.parent / "schema.sql")
+
+    def _backend_name(_conn):
+        backend = getattr(_conn, "__crm_backend__", "") or ""
+        if not backend and hasattr(_conn, "executescript"):
+            backend = "sqlite"
+        return backend or "sqlite"
+
+    def _meta_tables(_conn):
+        try:
+            _conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS crm_meta (
+                  key TEXT PRIMARY KEY,
+                  value TEXT,
+                  updated_at TEXT
+                )
+                """
+            )
+        except Exception:
+            pass
+        try:
+            _conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS crm_migrations (
+                  key TEXT PRIMARY KEY,
+                  applied_at TEXT NOT NULL
+                )
+                """
+            )
+        except Exception:
+            pass
+
+    def _meta_get(_conn, key):
+        try:
+            row = _conn.execute("SELECT value FROM crm_meta WHERE key = ?", (str(key),)).fetchone()
+        except Exception:
+            return ""
+        if not row:
+            return ""
+        try:
+            return str(row.get("value") or "")
+        except Exception:
+            try:
+                return str(row[0] or "")
+            except Exception:
+                return ""
+
+    def _meta_set(_conn, key, value):
+        backend = _backend_name(_conn)
+        now_expr = "sqlite_datetime('now')" if backend == "postgres" else "datetime('now')"
+        if backend == "postgres":
+            _conn.execute(
+                f"""
+                INSERT INTO crm_meta (key, value, updated_at)
+                VALUES (?, ?, {now_expr})
+                ON CONFLICT (key) DO UPDATE
+                SET value = EXCLUDED.value,
+                    updated_at = EXCLUDED.updated_at
+                """,
+                (str(key), str(value)),
+            )
+            return
+        _conn.execute(
+            f"INSERT OR REPLACE INTO crm_meta (key, value, updated_at) VALUES (?, ?, {now_expr})",
+            (str(key), str(value)),
+        )
+
+    def _migration_done(_conn, key):
+        try:
+            row = _conn.execute("SELECT 1 FROM crm_migrations WHERE key = ? LIMIT 1", (str(key),)).fetchone()
+            return bool(row)
+        except Exception:
+            return False
+
+    def _migration_mark(_conn, key):
+        backend = _backend_name(_conn)
+        now_expr = "sqlite_datetime('now')" if backend == "postgres" else "datetime('now')"
+        if backend == "postgres":
+            try:
+                _conn.execute(
+                    f"""
+                    INSERT INTO crm_migrations (key, applied_at)
+                    VALUES (?, {now_expr})
+                    ON CONFLICT (key) DO NOTHING
+                    """,
+                    (str(key),),
+                )
+            except Exception:
+                pass
+            return
+        try:
+            _conn.execute(
+                f"INSERT OR IGNORE INTO crm_migrations (key, applied_at) VALUES (?, {now_expr})",
+                (str(key),),
+            )
+        except Exception:
+            pass
+
+    _meta_tables(conn)
+    # Evita ejecutar `schema.sql` completo en cada cold start si ya está aplicado.
+    try:
+        schema_path = ROOT.parent / "schema.sql"
+        schema_text = schema_path.read_bytes()
+        schema_sha = hashlib.sha256(schema_text).hexdigest()
+        if _meta_get(conn, "schema_sql_sha256") != schema_sha:
+            apply_schema_file(conn, schema_path)
+            _meta_set(conn, "schema_sql_sha256", schema_sha)
+    except Exception:
+        apply_schema_file(conn, ROOT.parent / "schema.sql")
     ensure_auth_sessions_table(conn)
     ensure_column(conn, "empresas", "logo_url", "logo_url TEXT")
     ensure_column(conn, "empresas", "nif", "nif TEXT")
@@ -16382,7 +16490,13 @@ def ensure_tables(db_path):
     ensure_workspace_core_tables(conn)
     ensure_workspace_facturacion_table(conn)
     ensure_workspace_product_tables(conn)
-    ensure_workspace_membership_backfill(conn)
+    # Backfills legacy: ejecutar una vez por DB (puede ser caro en Postgres grande).
+    try:
+        if not _migration_done(conn, "workspace_membership_backfill_v1"):
+            ensure_workspace_membership_backfill(conn)
+            _migration_mark(conn, "workspace_membership_backfill_v1")
+    except Exception:
+        pass
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS ocr_jobs (
@@ -16501,55 +16615,59 @@ def ensure_tables(db_path):
             ensure_column(conn, "inmuebles", col_name, col_sql)
         except Exception:
             pass
-    # Compat: migramos el estado legacy "Adquisición" a "Inmueble" (mismo significado en el nuevo pipeline).
+    # Backfills inmobiliaria (una vez por DB; pueden tardar mucho si hay miles de filas).
     try:
-        conn.execute(
-            """
-            UPDATE captaciones
-            SET etapa = 'Inmueble',
-                situacion_comercial = COALESCE(NULLIF(situacion_comercial, ''), 'Inmueble'),
-                updated_at = datetime('now','localtime')
-            WHERE TRIM(COALESCE(etapa, '')) = 'Adquisición'
-            """
-        )
-    except Exception:
-        pass
-    try:
-        conn.execute(
-            """
-            UPDATE inmuebles
-            SET estado = 'Inmueble',
-                updated_at = datetime('now','localtime')
-            WHERE TRIM(COALESCE(estado, '')) = 'Adquisición'
-            """
-        )
-    except Exception:
-        pass
-    # Best-effort backfill: keep captaciones aligned with inmuebles for zona/prioridades.
-    try:
-        conn.execute(
-            """
-            UPDATE captaciones
-            SET situacion_ocupacion = (
-              SELECT i.situacion_ocupacion FROM inmuebles i WHERE i.id = captaciones.inmueble_id LIMIT 1
-            )
-            WHERE (situacion_ocupacion IS NULL OR TRIM(situacion_ocupacion) = '')
-              AND inmueble_id IS NOT NULL
-            """
-        )
-    except Exception:
-        pass
-    try:
-        conn.execute(
-            """
-            UPDATE captaciones
-            SET ocupado_por = (
-              SELECT i.ocupado_por FROM inmuebles i WHERE i.id = captaciones.inmueble_id LIMIT 1
-            )
-            WHERE (ocupado_por IS NULL OR TRIM(ocupado_por) = '')
-              AND inmueble_id IS NOT NULL
-            """
-        )
+        if not _migration_done(conn, "inmobiliaria_backfills_v1"):
+            try:
+                conn.execute(
+                    """
+                    UPDATE captaciones
+                    SET etapa = 'Inmueble',
+                        situacion_comercial = COALESCE(NULLIF(situacion_comercial, ''), 'Inmueble'),
+                        updated_at = datetime('now','localtime')
+                    WHERE TRIM(COALESCE(etapa, '')) = 'Adquisición'
+                    """
+                )
+            except Exception:
+                pass
+            try:
+                conn.execute(
+                    """
+                    UPDATE inmuebles
+                    SET estado = 'Inmueble',
+                        updated_at = datetime('now','localtime')
+                    WHERE TRIM(COALESCE(estado, '')) = 'Adquisición'
+                    """
+                )
+            except Exception:
+                pass
+            try:
+                conn.execute(
+                    """
+                    UPDATE captaciones
+                    SET situacion_ocupacion = (
+                      SELECT i.situacion_ocupacion FROM inmuebles i WHERE i.id = captaciones.inmueble_id LIMIT 1
+                    )
+                    WHERE (situacion_ocupacion IS NULL OR TRIM(situacion_ocupacion) = '')
+                      AND inmueble_id IS NOT NULL
+                    """
+                )
+            except Exception:
+                pass
+            try:
+                conn.execute(
+                    """
+                    UPDATE captaciones
+                    SET ocupado_por = (
+                      SELECT i.ocupado_por FROM inmuebles i WHERE i.id = captaciones.inmueble_id LIMIT 1
+                    )
+                    WHERE (ocupado_por IS NULL OR TRIM(ocupado_por) = '')
+                      AND inmueble_id IS NOT NULL
+                    """
+                )
+            except Exception:
+                pass
+            _migration_mark(conn, "inmobiliaria_backfills_v1")
     except Exception:
         pass
     conn.execute(

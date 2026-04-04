@@ -1,15 +1,33 @@
 from pathlib import Path
 
 
+def _detect_backend(conn) -> str:
+    backend = getattr(conn, "__crm_backend__", "") or ""
+    # sqlite3.Connection doesn't expose our marker; detect it by capability.
+    if not backend and hasattr(conn, "executescript"):
+        backend = "sqlite"
+    return backend or "sqlite"
+
+
+def _columns_cache(conn) -> dict:
+    cache = getattr(conn, "__crm_table_columns_cache__", None)
+    if isinstance(cache, dict):
+        return cache
+    cache = {}
+    try:
+        setattr(conn, "__crm_table_columns_cache__", cache)
+    except Exception:
+        # If the connection object doesn't allow attributes, we fallback to no caching.
+        return {}
+    return cache
+
+
 def apply_schema_file(conn, schema_path):
     path = Path(schema_path)
     if not path.exists():
         return False
     text = path.read_text(encoding="utf-8")
-    backend = getattr(conn, "__crm_backend__", "")
-    # sqlite3.Connection doesn't expose our marker; detect it by capability.
-    if not backend and hasattr(conn, "executescript"):
-        backend = "sqlite"
+    backend = _detect_backend(conn)
     if backend != "postgres":
         conn.executescript(text)
         return True
@@ -36,14 +54,20 @@ def apply_schema_file(conn, schema_path):
 
 
 def table_columns(conn, table_name):
-    backend = getattr(conn, "__crm_backend__", "")
-    if not backend and hasattr(conn, "executescript"):
-        backend = "sqlite"
+    backend = _detect_backend(conn)
+    key = str(table_name or "").strip().lower()
+    cache = _columns_cache(conn)
+    if key and key in cache:
+        cols = cache.get(key) or set()
+        return {c for c in set(cols) if c}
     if backend != "postgres":
         try:
-            return {row[1] for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()}
+            cols = {row[1] for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()}
         except Exception:
-            return set()
+            cols = set()
+        if key and isinstance(cache, dict):
+            cache[key] = set(cols)
+        return {c for c in cols if c}
     try:
         rows = conn.execute(
             """
@@ -59,7 +83,10 @@ def table_columns(conn, table_name):
                 cols.add(row.get("column_name"))
             else:
                 cols.add(row[0])
-        return {c for c in cols if c}
+        cols = {c for c in cols if c}
+        if key and isinstance(cache, dict):
+            cache[key] = set(cols)
+        return cols
     except Exception:
         return set()
 
@@ -67,12 +94,18 @@ def table_columns(conn, table_name):
 def ensure_column(conn, table_name, column_name, column_sql):
     if column_name in table_columns(conn, table_name):
         return False
-    backend = getattr(conn, "__crm_backend__", "")
-    if not backend and hasattr(conn, "executescript"):
-        backend = "sqlite"
+    backend = _detect_backend(conn)
     if backend == "postgres":
         # Postgres supports IF NOT EXISTS.
         conn.execute(f"ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS {column_sql}")
+        cache = _columns_cache(conn)
+        key = str(table_name or "").strip().lower()
+        if key and isinstance(cache, dict):
+            cache.setdefault(key, set()).add(column_name)
         return True
     conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_sql}")
+    cache = _columns_cache(conn)
+    key = str(table_name or "").strip().lower()
+    if key and isinstance(cache, dict):
+        cache.setdefault(key, set()).add(column_name)
     return True
