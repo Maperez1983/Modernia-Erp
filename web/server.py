@@ -219,6 +219,7 @@ AUTH_ALLOW_FIRST_PASSWORD_SET = os.environ.get("AUTH_ALLOW_FIRST_PASSWORD_SET", 
 AUTH_INVITE_TTL_SECONDS = max(1800, int(os.environ.get("AUTH_INVITE_TTL_SECONDS", "172800")))
 AUTH_PUBLIC_GET_ENDPOINTS = {
     "/api/health",
+    "/api/build_info",
     "/api/me",
     "/api/auth_invite_status",
     "/api/workspace_portal_public",
@@ -23549,6 +23550,20 @@ def json_response(handler, data, status=200, cookies=None, extra_headers=None):
     for cookie_value in (cookies or []):
         handler.send_header("Set-Cookie", cookie_value)
     handler.send_header("Content-Type", "application/json; charset=utf-8")
+
+    # Gzip JSON si compensa (reduce mucho tiempo en iOS/PWA y conexiones lentas).
+    try:
+        accept_encoding = (handler.headers.get("Accept-Encoding") or "").lower()
+        can_gzip = "gzip" in accept_encoding
+        if can_gzip and payload and len(payload) > 1200:
+            gz = gzip.compress(payload, compresslevel=6)
+            if len(gz) + 80 < len(payload):
+                payload = gz
+                handler.send_header("Content-Encoding", "gzip")
+                handler.send_header("Vary", "Accept-Encoding")
+    except Exception:
+        pass
+
     handler.send_header("Content-Length", str(len(payload)))
     handler.end_headers()
     handler.wfile.write(payload)
@@ -24973,6 +24988,7 @@ class Handler(BaseHTTPRequestHandler):
     _health_last_at = 0.0
     _health_last_status = 0
     _health_last_body = b""
+    _started_at = datetime.now().isoformat()
 
     def log_message(self, format, *args):
         return
@@ -25427,6 +25443,25 @@ class Handler(BaseHTTPRequestHandler):
                 self.wfile.write(body)
             except BrokenPipeError:
                 pass
+            return
+        if parsed.path == "/api/build_info":
+            backend = "postgres" if db_is_postgres_enabled() else "sqlite"
+            commit = (
+                (os.environ.get("RENDER_GIT_COMMIT") or os.environ.get("GIT_COMMIT") or os.environ.get("COMMIT_SHA") or "")
+                .strip()
+            )
+            json_response(
+                self,
+                {
+                    "ok": True,
+                    "backend": backend,
+                    "commit": commit[:12] if commit else "",
+                    "started_at": getattr(Handler, "_started_at", ""),
+                    "pid": os.getpid(),
+                    "db_ready": bool(Handler._db_ready),
+                    "build_tag": "workspace_boot_v1",
+                },
+            )
             return
         if parsed.path.startswith("/api/"):
             if parsed.path not in AUTH_PUBLIC_GET_ENDPOINTS and not self._require_api_auth():
