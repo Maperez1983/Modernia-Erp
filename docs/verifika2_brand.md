@@ -6,6 +6,8 @@
 - `assets/verifika2/verifika2_wordmark_dark.svg` (fondo oscuro)
 - `assets/verifika2/verifika2_wordmark_gradient.svg` (opcional, “v” degradada)
 - `assets/verifika2/verifika2_wordmark_gradient_dark.svg` (opcional, “v” degradada)
+- `assets/verifika2/verifika2_wordmark_traced.svg` (vector desde PNG original, check verde)
+- `assets/verifika2/verifika2_wordmark_traced_dark.svg` (vector desde PNG original, check verde)
 - `assets/verifika2/verifika2_mark.svg` (isotipo check)
 - `assets/verifika2/verifika2_badge_gold.svg` (sello oro)
 - `assets/verifika2/verifika2_badge_silver.svg` (sello plata)
