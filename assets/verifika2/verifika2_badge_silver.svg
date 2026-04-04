@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 320" role="img" aria-label="Verificado por verifika2 (plata)">
+  <defs>
+    <radialGradient id="silverBg" cx="30%" cy="30%" r="70%">
+      <stop offset="0" stop-color="#FFFFFF" />
+      <stop offset="0.45" stop-color="#E7EDF2" />
+      <stop offset="1" stop-color="#A8B4C0" />
+    </radialGradient>
+    <linearGradient id="silverStroke" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FFFFFF" />
+      <stop offset="0.6" stop-color="#CBD5E1" />
+      <stop offset="1" stop-color="#64748B" />
+    </linearGradient>
+  </defs>
+  <circle cx="160" cy="160" r="146" fill="url(#silverBg)" />
+  <circle cx="160" cy="160" r="146" fill="none" stroke="url(#silverStroke)" stroke-width="10" />
+  <circle cx="160" cy="160" r="126" fill="none" stroke="rgba(11,29,51,0.14)" stroke-width="2" />
+  <path
+    d="M104 164l30 30 82-82"
+    fill="none"
+    stroke="#0B1D33"
+    stroke-width="18"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+  <text x="160" y="86" text-anchor="middle" font-family="Space Grotesk, Source Sans 3, sans-serif" font-size="18" font-weight="700" fill="#0B1D33" letter-spacing="1.8">
+    VERIFICADO
+  </text>
+  <text x="160" y="246" text-anchor="middle" font-family="Space Grotesk, Source Sans 3, sans-serif" font-size="28" font-weight="700" fill="#0B1D33">
+    verifika<tspan font-size="18" baseline-shift="super">2</tspan>
+  </text>
+</svg>
+

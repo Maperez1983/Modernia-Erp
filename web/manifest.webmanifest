@@ -1,12 +1,12 @@
 {
-  "name": "LIV Plataforma Operativa",
-  "short_name": "LIV",
+  "name": "Verifika² · CRM",
+  "short_name": "Verifika²",
   "id": "/",
   "start_url": "/?source=pwa",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#f4f3ee",
-  "theme_color": "#3C6E71",
+  "background_color": "#F5F7FB",
+  "theme_color": "#0B1D33",
   "icons": [
     {
       "src": "/icons/icon-192.png",

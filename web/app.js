@@ -21924,12 +21924,12 @@ const loadHipotecaDashboard = () => {
         hipotecaPorcentajeChart,
         plazoYears,
         [
-          {
-            label: "Días",
-            values: alignSeries(plazoYears, data?.series_plazo || []),
-            color: "#3C6E71",
-            format: (value) => formatDaysMetric(value),
-          },
+	          {
+	            label: "Días",
+	            values: alignSeries(plazoYears, data?.series_plazo || []),
+	            color: "#0B1D33",
+	            format: (value) => formatDaysMetric(value),
+	          },
         ],
         { legend: false, showValues: true, tooltip: true }
       );
@@ -22735,27 +22735,27 @@ const renderFincasDashboard = (empresaId) => {
       const responsables = (data.responsables || []).slice(0, 8);
       const respLabels = responsables.map((item) => item.label);
       const respValues = responsables.map((item) => item.total);
-      const rankingPalette = [
-        "#2f7a50",
-        "#3C6E71",
-        "#c17817",
-        "#5F7A61",
-        "#4e8f96",
-        "#7b6d4f",
-        "#2f5d8a",
-        "#7a5448",
-      ];
+	      const rankingPalette = [
+	        "#0B1D33",
+	        "#F2C14E",
+	        "#22C55E",
+	        "#38BDF8",
+	        "#64748B",
+	        "#B9892B",
+	        "#0F2742",
+	        "#94A3B8",
+	      ];
       drawBarChart(
         fincasResponsableChart,
         respLabels,
         [
-          {
-            label: "Pólizas",
-            values: respValues,
-            color: "#3C6E71",
-            colors: respLabels.map((_, idx) => rankingPalette[idx % rankingPalette.length]),
-            format: (value) => numberFormatter.format(value),
-          },
+	          {
+	            label: "Pólizas",
+	            values: respValues,
+	            color: "#0B1D33",
+	            colors: respLabels.map((_, idx) => rankingPalette[idx % rankingPalette.length]),
+	            format: (value) => numberFormatter.format(value),
+	          },
         ],
         { legend: false, showValues: true }
       );
@@ -22764,7 +22764,7 @@ const renderFincasDashboard = (empresaId) => {
         fincasConversionChart,
         ["Presupuestos", "Contratadas", "En vigor", "Rechazadas"],
         [
-          {
+	          {
             label: `Embudo ${current.year || effectiveSelectedYear}`,
             values: [
               Number(current.presupuesto || 0),
@@ -22772,9 +22772,9 @@ const renderFincasDashboard = (empresaId) => {
               Number(current.en_vigor || 0),
               Number(current.rechazada || 0),
             ],
-            color: "#3C6E71",
-            format: (value) => numberFormatter.format(value),
-          },
+	            color: "#0B1D33",
+	            format: (value) => numberFormatter.format(value),
+	          },
         ],
         { legend: false, showValues: true, tooltip: true }
       );
@@ -22790,13 +22790,13 @@ const renderFincasDashboard = (empresaId) => {
         fincasComisionCompaniaChart,
         comisionCompaniaLabels,
         [
-          {
-            label: "Comisionado",
-            values: comisionCompaniaValues,
-            color: "#3C6E71",
-            colors: comisionCompaniaLabels.map((_, idx) => rankingPalette[idx % rankingPalette.length]),
-            format: (value) => euroFormatter.format(value),
-          },
+	          {
+	            label: "Comisionado",
+	            values: comisionCompaniaValues,
+	            color: "#0B1D33",
+	            colors: comisionCompaniaLabels.map((_, idx) => rankingPalette[idx % rankingPalette.length]),
+	            format: (value) => euroFormatter.format(value),
+	          },
         ],
         { legend: false, showValues: true, tooltip: true }
       );
@@ -22812,13 +22812,13 @@ const renderFincasDashboard = (empresaId) => {
         fincasComisionRamoChart,
         comisionRamoLabels,
         [
-          {
-            label: "Comisionado",
-            values: comisionRamoValues,
-            color: "#5F7A61",
-            colors: comisionRamoLabels.map((_, idx) => rankingPalette[idx % rankingPalette.length]),
-            format: (value) => euroFormatter.format(value),
-          },
+	          {
+	            label: "Comisionado",
+	            values: comisionRamoValues,
+	            color: "#F2C14E",
+	            colors: comisionRamoLabels.map((_, idx) => rankingPalette[idx % rankingPalette.length]),
+	            format: (value) => euroFormatter.format(value),
+	          },
         ],
         { legend: false, showValues: true, tooltip: true }
       );
@@ -22916,13 +22916,13 @@ const renderFincasDashboard = (empresaId) => {
         fincasOportunidadesChart,
         oportunidadLabels,
         [
-          {
-            label: "Oportunidades",
-            values: oportunidadValues,
-            color: "#3C6E71",
-            colors: oportunidadLabels.map((_, idx) => rankingPalette[idx % rankingPalette.length]),
-            format: (value) => numberFormatter.format(value),
-          },
+	          {
+	            label: "Oportunidades",
+	            values: oportunidadValues,
+	            color: "#0B1D33",
+	            colors: oportunidadLabels.map((_, idx) => rankingPalette[idx % rankingPalette.length]),
+	            format: (value) => numberFormatter.format(value),
+	          },
         ],
         { legend: false, showValues: true, tooltip: true }
       );
@@ -25132,6 +25132,7 @@ const renderCrmKanban = (data) => {
       rows.slice(0, 5).forEach((row) => {
         const rowId = row[idIndex];
         const rowMap = buildRowMap(row, data.columns);
+        const isVerified = String(rowMap?.noticia_verificada ?? "").trim() === "1";
         const card = document.createElement("div");
         card.className = "crm-kanban-card";
         // Importante: no hacemos la tarjeta "draggable" completa porque algunos navegadores
@@ -25142,9 +25143,13 @@ const renderCrmKanban = (data) => {
         const deepLink = inmuebleId
           ? `/?crm=inmo&inmueble=${encodeURIComponent(inmuebleId)}`
           : `/?crm=inmo&captacion=${encodeURIComponent(captacionId)}`;
+        const verifikaBadge = buildVerifika2Badge(isVerified, { compact: true });
         card.innerHTML = `
           <div class="crm-kanban-handle" draggable="true" title="Arrastra para cambiar de etapa" aria-label="Arrastrar"></div>
-          <div><strong>${row[propietarioIndex] || "Propietario"}</strong></div>
+          <div class="crm-kanban-titleline">
+            <strong>${row[propietarioIndex] || "Propietario"}</strong>
+            ${verifikaBadge}
+          </div>
           <div>${row[direccionIndex] || "-"} · ${row[zonaIndex] || "-"}</div>
           <div class="muted">${row[proximaIndex] || "Sin próxima acción"}</div>
           <div class="inline-actions"><a class="ghost" href="${deepLink}" data-open="${inmuebleId ? "inmueble" : "captacion"}">Abrir ficha</a></div>
@@ -26309,6 +26314,16 @@ const buildInmuebleBadge = (value, tone = "neutral") => {
   return `<span class="inmueble-badge tone-${tone}">${text}</span>`;
 };
 
+const buildVerifika2Badge = (isVerified, { compact = false } = {}) => {
+  if (!isVerified) return "";
+  return `
+    <span class="inmueble-badge verifika2${compact ? " compact" : ""}" title="Verificado por Verifika² (documentación revisada)">
+      <img src="/assets/verifika2/verifika2_mark.svg" alt="" aria-hidden="true" loading="lazy" />
+      <span>Verifika²</span>
+    </span>
+  `;
+};
+
 const refreshCurrentInmuebleProfile = () => {
   const context = state.currentInmuebleContext || {};
   const inmueble = context.inmueble || {};
@@ -26321,7 +26336,9 @@ const refreshCurrentInmuebleProfile = () => {
   if (inmuebleSummaryCard) {
     const address = inmueble.direccion || "Sin dirección";
     const locality = [inmueble.zona, inmueble.poblacion].filter(Boolean).join(" · ");
+    const isVerified = String(captacion.noticia_verificada ?? "").trim() === "1";
     const topBadges = [
+      buildVerifika2Badge(isVerified),
       buildInmuebleBadge(inmueble.estado || "Sin estado", "accent"),
       buildInmuebleBadge(inmueble.tipo_inmueble || "Sin tipo"),
       captacion.etapa ? buildInmuebleBadge(captacion.etapa, "soft") : "",
@@ -30099,7 +30116,7 @@ const renderSegurosRamosDashboard = () => {
       label: item.ramo,
       value: item.total,
       display: `${item.total} póliza${item.total === 1 ? "" : "s"}`,
-      color: ["#3C6E71", "#5F7A61", "#2B2B2B", "#8A9A8A", "#6B7C6B"][idx % 5],
+      color: ["#0B1D33", "#F2C14E", "#22C55E", "#38BDF8", "#64748B"][idx % 5],
       onClick: () => applySegurosBdtDashboardFilter({ ramo: item.ramo }),
       title: `Ver pólizas del ramo ${item.ramo}`,
     }))
@@ -35616,7 +35633,7 @@ const renderClienteRamosDashboard = (rows = [], cliente = null) => {
       label: item.ramo,
       value: item.total,
       display: `${item.total} póliza${item.total === 1 ? "" : "s"}`,
-      color: ["#3C6E71", "#5F7A61", "#2B2B2B", "#8A9A8A", "#6B7C6B"][idx % 5],
+      color: ["#0B1D33", "#F2C14E", "#22C55E", "#38BDF8", "#64748B"][idx % 5],
     }))
   );
   const selected =
@@ -40409,15 +40426,15 @@ if (workspaceNewBtn) {
     state.currentWorkspaceClientId = "";
     state.currentWorkspaceClientData = null;
     state.currentWorkspaceClients = [];
-    fillWorkspaceForm({
-      nombre: "",
-      slug: "",
-      estado: "Activo",
-      plan: "Enterprise",
-      descripcion: "",
-      primary_color: "#3C6E71",
-      accent_color: "#5F7A61",
-    });
+	    fillWorkspaceForm({
+	      nombre: "",
+	      slug: "",
+	      estado: "Activo",
+	      plan: "Enterprise",
+	      descripcion: "",
+	      primary_color: "#0B1D33",
+	      accent_color: "#F2C14E",
+	    });
     renderWorkspaceHealth({});
     renderWorkspaceCommercialPack({}, {});
     renderWorkspacePermissionMatrix([]);
