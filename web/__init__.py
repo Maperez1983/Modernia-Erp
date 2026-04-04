@@ -1,1 +1,1 @@
-"""ERP Modernia web package."""
+"""Verifika² CRM web package."""

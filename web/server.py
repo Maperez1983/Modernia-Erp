@@ -468,7 +468,7 @@ LOGIN_RATE_MAX_ATTEMPTS = max(3, int(os.environ.get("APP_LOGIN_RATE_MAX_ATTEMPTS
 LOGIN_RATE_LOCK_SECONDS = max(60, int(os.environ.get("APP_LOGIN_RATE_LOCK_SECONDS", "600")))
 _LOGIN_RATE_STATE = {}
 _LOGIN_RATE_LOCK = threading.Lock()
-DEFAULT_WORKSPACE_NAME = "Modernia"
+DEFAULT_WORKSPACE_NAME = "Verifika²"
 PLATFORM_NAME = "LIV"
 WORKSPACE_TIME_SERVICE_COMPANY_MAP = {
     "inmobiliaria": ["Estudio Velazquez 2012 SL"],
@@ -2439,7 +2439,7 @@ def build_hipotecas_firmadas_excel_workbook(items, selected_year=None):
     summary["B6"] = sum(float(item.get("cesion") or 0) for item in items)
     summary["A7"] = "Cesión Juan"
     summary["B7"] = sum(float(item.get("comision_juan") or 0) for item in items)
-    summary["A8"] = "Margen Modernia"
+    summary["A8"] = "Margen oficina"
     summary["B8"] = sum(float(item.get("comision_modernia") or 0) for item in items)
 
     month_headers = ("Mes firma", "Operaciones", "Volumen", "Honorarios")
@@ -2504,7 +2504,7 @@ def build_hipotecas_firmadas_excel_workbook(items, selected_year=None):
         ("Honorarios", "honorarios"),
         ("Cesión inmobiliaria", "cesion"),
         ("Cesión Juan", "comision_juan"),
-        ("Margen Modernia", "comision_modernia"),
+        ("Margen oficina", "comision_modernia"),
         ("Inmobiliaria", "inmobiliaria"),
         ("Oficina", "oficina"),
         ("Asesor", "asesor"),
@@ -7260,7 +7260,7 @@ def copilot_web_fetch_url(url, *, timeout_seconds=None, max_bytes=None, max_char
             except Exception:
                 pass
 
-    headers = {"User-Agent": "ModerniaCopilotWeb/1.0"}
+    headers = {"User-Agent": "Verifika2CopilotWeb/1.0"}
     request = urllib.request.Request(raw, headers=headers)
     try:
         with urllib.request.urlopen(request, timeout=timeout_seconds) as resp:
@@ -12304,7 +12304,7 @@ def fetch_legal_feed_content(source_config, timeout=20):
     url = str(source_config.get("feed_url") or "").strip()
     if not url:
         raise ValueError("feed_url requerido")
-    request = urllib.request.Request(url, headers={"User-Agent": "ModerniaLegalRadar/1.0"})
+    request = urllib.request.Request(url, headers={"User-Agent": "Verifika2LegalRadar/1.0"})
     with urllib.request.urlopen(request, timeout=timeout) as response:
         return response.read()
 
@@ -12593,7 +12593,7 @@ def lookup_dgt_consulta(reference):
         "summary": "Consulta tributaria oficial de la Dirección General de Tributos.",
     }
     try:
-        request = urllib.request.Request(url, headers={"User-Agent": "ModerniaLegalRadar/1.0"})
+        request = urllib.request.Request(url, headers={"User-Agent": "Verifika2LegalRadar/1.0"})
         with urllib.request.urlopen(request, timeout=20) as response:
             html_text = response.read().decode("utf-8", errors="ignore")
         title_match = re.search(r"<title>(.*?)</title>", html_text, flags=re.IGNORECASE | re.DOTALL)
@@ -14065,7 +14065,7 @@ def _fetch_nominatim_query(query):
     req = urllib.request.Request(
         f"https://nominatim.openstreetmap.org/search?{params}",
         headers={
-            "User-Agent": "ModerniaERP/1.0 (contacto@grupomodernia.es)",
+            "User-Agent": "Verifika2CRM/1.0 (contacto@grupomodernia.es)",
             "Accept-Language": "es",
         },
     )
@@ -14085,7 +14085,7 @@ def _fetch_photon_query(query):
     req = urllib.request.Request(
         f"https://photon.komoot.io/api/?{params}",
         headers={
-            "User-Agent": "ModerniaERP/1.0 (contacto@grupomodernia.es)",
+            "User-Agent": "Verifika2CRM/1.0 (contacto@grupomodernia.es)",
             "Accept-Language": "es",
         },
     )
@@ -14108,7 +14108,7 @@ def _fetch_arcgis_query(query):
     req = urllib.request.Request(
         f"https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/findAddressCandidates?{params}",
         headers={
-            "User-Agent": "ModerniaERP/1.0 (contacto@grupomodernia.es)",
+            "User-Agent": "Verifika2CRM/1.0 (contacto@grupomodernia.es)",
             "Accept-Language": "es",
         },
     )
@@ -23620,7 +23620,7 @@ def build_workspace_budget_encargo_pdf(budget, workspace, company, client, linea
         (
             "Partes",
             [
-                ("Prestador", company.get("nombre") or workspace.get("nombre") or "Modernia"),
+                ("Prestador", company.get("nombre") or workspace.get("nombre") or "Verifika²"),
                 ("Cliente", client.get("nombre") or "Pendiente"),
                 ("DNI / NIF", client.get("nif") or "Pendiente"),
                 ("Teléfono", client.get("telefono") or "Pendiente"),
@@ -23668,7 +23668,7 @@ def build_workspace_budget_encargo_pdf(budget, workspace, company, client, linea
     ]
     return build_branded_document_pdf(
         "HOJA DE ENCARGO DE SERVICIOS",
-        f"{company.get('nombre') or workspace.get('nombre') or 'Modernia'} · {servicio}",
+        f"{company.get('nombre') or workspace.get('nombre') or 'Verifika²'} · {servicio}",
         sections,
         footer_lines,
         brand_logo_url=company.get("logo_url"),
@@ -24052,7 +24052,7 @@ def build_inmueble_nota_encargo_pdf(company, inmueble, captacion, owners, extra=
             "y/o obligaciones legales. Usted tiene derecho a acceder, rectificar y suprimir los datos, así como otros derechos.",
         ]
         footer = [
-            "Documento generado por el CRM Modernia a partir de la ficha del inmueble. Revisar legalmente antes de firma.",
+            "Documento generado por el CRM Verifika² a partir de la ficha del inmueble. Revisar legalmente antes de firma.",
         ]
         return build_branded_text_document_pdf(
             "CONTRATO DE INTERMEDIACIÓN - ARRENDAMIENTO",
@@ -24124,7 +24124,7 @@ def build_inmueble_nota_encargo_pdf(company, inmueble, captacion, owners, extra=
         "INFORMACIÓN SOBRE PROTECCIÓN DE DATOS. El Intermediario, en calidad de responsable, tratará la información que usted nos facilite con el fin de prestarle los servicios solicitados (intermediación inmobiliaria y/o financiera y obtención de seguros) así como, en caso de habernos otorgado el preceptivo consentimiento, para realizar actividades de prospección comercial y de envío de publicidad relacionada con los servicios ofrecidos, la cual podrá realizarse por cualquier medio (correo postal, e-mail, teléfono, mensajería instantánea, etc.) y, además, de habernos otorgado el preceptivo consentimiento, podrá ser adaptada a sus preferencias e intereses. La legitimación para el tratamiento se obtiene de la relación contractual derivada de la prestación de servicios profesionales demandada, pudiendo coexistir con consentimientos específicos, intereses legítimos y/o obligaciones legales. Usted tiene derecho a acceder, rectificar y suprimir los datos, así como otros derechos.",
     ]
     footer = [
-        "Documento generado por el CRM Modernia a partir de la ficha del inmueble. Revisar legalmente antes de firma.",
+        "Documento generado por el CRM Verifika² a partir de la ficha del inmueble. Revisar legalmente antes de firma.",
         f"IVA orientativo: {iva_pct_val:g}% (ajústalo si aplica un tipo distinto).",
     ]
     return build_branded_text_document_pdf(
@@ -24408,7 +24408,7 @@ def build_inmueble_consumo_sale_sheet_pdf(company, inmueble, captacion, docs):
         str(item.get("tipo") or item.get("nombre") or "").strip()
         for item in (docs or [])
         if str(item.get("tipo") or item.get("nombre") or "").strip()
-    ) or "Documentación en expediente Modernia"
+    ) or "Documentación en expediente Verifika²"
     sections = [
         (
             "Identificación de la vivienda",
@@ -24506,7 +24506,7 @@ def build_inmueble_consumo_rental_dia_pdf(company, inmueble, captacion, docs):
         str(item.get("tipo") or item.get("nombre") or "").strip()
         for item in (docs or [])
         if str(item.get("tipo") or item.get("nombre") or "").strip()
-    ) or "Documentación en expediente Modernia"
+    ) or "Documentación en expediente Verifika²"
     sections = [
         (
             "Identificación de la vivienda",
@@ -33597,7 +33597,7 @@ class Handler(BaseHTTPRequestHandler):
                 "impact_score": operations.get("impact_score") or None,
                 "recent_updates": [],
                 "sources": [
-                    f"Base jurídica interna de {LEGAL_AREA_DEFINITIONS.get(area, {}).get('label') or area.title()} en Modernia.",
+                    f"Base jurídica interna de {LEGAL_AREA_DEFINITIONS.get(area, {}).get('label') or area.title()} en Verifika².",
                     "Base legal editable del repositorio y radar legal autoactualizable.",
                     "Uso operativo orientado a plantillas, estados y documentación del CRM.",
                     "No sustituye revisión jurídica final del despacho.",
@@ -44181,7 +44181,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="ERP Modernia local server.")
+    parser = argparse.ArgumentParser(description="Verifika² · CRM local server.")
     parser.add_argument("--db", default=str(DB_CONFIGURED), help="SQLite path.")
     parser.add_argument("--ocr-db", default=str(OCR_DB_CONFIGURED), help="SQLite OCR jobs path.")
     parser.add_argument("--ocr-workers", type=int, default=OCR_WORKERS, help="Numero de workers OCR en paralelo.")

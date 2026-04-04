@@ -1,4 +1,4 @@
-# Modelo Fase 1 - ERP Modernia
+# Modelo Fase 1 - Verifika² (CRM)
 
 ## Empresas (nombres exactos)
 
