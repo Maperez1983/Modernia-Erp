@@ -5,6 +5,26 @@ const API_TIMEOUT_MS = 30000;
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
 const APP_SW_VERSION = "v4";
 
+// Workspace tenant por defecto del producto (branding de software). Mantiene compatibilidad con slugs legacy.
+const DEFAULT_TENANT_WORKSPACE_SLUG = "verifika2";
+const LEGACY_TENANT_WORKSPACE_SLUGS = new Set(["modernia", "grupomodernia", "grupo-modernia"]);
+const normalizeSlugLike = (value) =>
+  String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "-")
+    .replace(/[^a-z0-9\-]+/g, "")
+    .replace(/\-+/g, "-")
+    .replace(/^\-+|\-+$/g, "");
+
+const normalizeTenantWorkspaceSlug = (value, fallback = DEFAULT_TENANT_WORKSPACE_SLUG) => {
+  const raw = String(value || "").trim();
+  if (!raw) return fallback;
+  const normalized = normalizeSlugLike(raw);
+  if (LEGACY_TENANT_WORKSPACE_SLUGS.has(normalized)) return fallback;
+  return raw;
+};
+
 const fetchWithTimeout = async (input, init = {}, timeoutMs = API_TIMEOUT_MS) => {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), Math.max(1000, Number(timeoutMs) || API_TIMEOUT_MS));
@@ -3914,7 +3934,9 @@ const renderCompanyCards = () => {
 	    const enabledModules = new Set(state.currentWorkspaceEnabledModules || []);
 	    const workspaceScoped = enabledModules.size > 0;
 	    const timeProfile = findCurrentUserTimeProfile();
-	    const workspaceSlug = String(state.currentWorkspaceTarget || state.currentWorkspaceName || "modernia").trim() || "modernia";
+	    const workspaceSlug = normalizeTenantWorkspaceSlug(
+	      state.currentWorkspaceTarget || state.currentWorkspaceName || DEFAULT_TENANT_WORKSPACE_SLUG
+	    );
 
 	    const buildInitials = (value) => {
       const parts = String(value || "")
@@ -3941,7 +3963,7 @@ const renderCompanyCards = () => {
         || "Usuario";
       const companyLabel =
         employee?.empresa_nombre
-        || getWorkspaceDisplayName(state.currentWorkspaceName || workspaceSlug || "modernia");
+        || getWorkspaceDisplayName(state.currentWorkspaceName || workspaceSlug || DEFAULT_TENANT_WORKSPACE_SLUG);
       const photoUrl = String(employee?.foto_url || "").trim();
       const entryLabel = timeProfile?.latestEntry
         ? `${timeProfile.latestEntry.hora_inicio || "--:--"}${timeProfile.latestEntry.hora_fin ? ` - ${timeProfile.latestEntry.hora_fin}` : " · Abierto"}`
@@ -4041,10 +4063,10 @@ const renderCompanyCards = () => {
       workspaceCard.className = "company-card";
       workspaceCard.dataset.action = "holding-tenant";
       workspaceCard.innerHTML = `
-        <h3>Workspace ${getWorkspaceDisplayName(state.currentWorkspaceName || "modernia")}</h3>
+        <h3>Workspace ${getWorkspaceDisplayName(state.currentWorkspaceName || DEFAULT_TENANT_WORKSPACE_SLUG)}</h3>
         <div class="company-meta">Entrada operativa al grupo y a sus empresas activas.</div>
         <div class="company-meta">Desde aquí eliges empresa y luego trabajas en clientes y módulos.</div>
-        <a class="card-link" href="?holding=1&mode=tenant&workspace=modernia&view=overview" data-action="holding-tenant">Entrar</a>
+        <a class="card-link" href="?holding=1&mode=tenant&workspace=${encodeURIComponent(DEFAULT_TENANT_WORKSPACE_SLUG)}&view=overview" data-action="holding-tenant">Entrar</a>
       `;
       coreCards.appendChild(workspaceCard);
       return;
@@ -4066,10 +4088,10 @@ const renderCompanyCards = () => {
     tenantCard.className = "company-card";
     tenantCard.dataset.action = "holding-tenant";
     tenantCard.innerHTML = `
-      <h3>Workspace ${getWorkspaceDisplayName(state.currentWorkspaceName || "modernia")}</h3>
+      <h3>Workspace ${getWorkspaceDisplayName(state.currentWorkspaceName || DEFAULT_TENANT_WORKSPACE_SLUG)}</h3>
       <div class="company-meta">Espacio del grupo donde viven sus empresas, clientes, módulos y operativa diaria.</div>
       <div class="company-meta">Primero entras al workspace y desde ahí eliges la empresa con la que quieres trabajar.</div>
-      <a class="card-link" href="?holding=1&mode=tenant&workspace=modernia&view=overview" data-action="holding-tenant">Entrar</a>
+      <a class="card-link" href="?holding=1&mode=tenant&workspace=${encodeURIComponent(DEFAULT_TENANT_WORKSPACE_SLUG)}&view=overview" data-action="holding-tenant">Entrar</a>
     `;
     coreCards.appendChild(tenantCard);
   }
@@ -4260,8 +4282,8 @@ const getWorkspaceDisplayName = (workspace = null) => {
       : workspace?.nombre || workspace?.name || workspace?.slug || workspace?.id || "";
   const normalized = normalizeWorkspaceIdentifier(rawName);
   if (!normalized) return "Workspace";
-  if (["modernia", "grupomodernia", "grupo-modernia"].includes(normalized)) {
-    return "Grupo Modernia";
+  if (["modernia", "grupomodernia", "grupo-modernia", "verifika2", "verifika", "verifika-2"].includes(normalized)) {
+    return "Verifika²";
   }
   return rawName;
 };
@@ -4275,7 +4297,7 @@ const isGrupoModerniaWorkspace = () => {
   ];
   return candidates.some((value) => {
     const normalized = normalizeWorkspaceIdentifier(value || "");
-    return ["modernia", "grupomodernia", "grupo-modernia"].includes(normalized);
+    return ["modernia", "grupomodernia", "grupo-modernia", "verifika2", "verifika", "verifika-2"].includes(normalized);
   });
 };
 
@@ -4315,7 +4337,7 @@ const updateWorkspaceEntryChrome = () => {
     state.currentWorkspaceDetail?.workspace?.nombre
     || state.currentWorkspaceName
     || state.currentWorkspaceTarget
-    || (mode === "tenant" ? "modernia" : "");
+    || (mode === "tenant" ? DEFAULT_TENANT_WORKSPACE_SLUG : "");
   const workspaceName = getWorkspaceDisplayName(
     workspaceSource || "Workspace"
   );
@@ -4423,7 +4445,7 @@ const getWorkspaceCompanyFilter = () =>
     : String(state.currentWorkspaceCompanyId || "").trim();
 const getWorkspaceCompanyContextLabel = () =>
   (state.currentWorkspaceEntryMode || "platform") === "tenant"
-    ? getWorkspaceDisplayName(state.currentWorkspaceName || state.currentWorkspaceTarget || "modernia")
+    ? getWorkspaceDisplayName(state.currentWorkspaceName || state.currentWorkspaceTarget || DEFAULT_TENANT_WORKSPACE_SLUG)
     : (state.currentWorkspaceCompanyName || "Empresa activa");
 
 const filterWorkspaceRowsByCompany = (rows = [], field = "empresa_id") => {
@@ -13025,7 +13047,10 @@ const loadWorkspaceCentral = async () => {
   renderWorkspaceKpis(data.summary || {});
   renderWorkspaceList(state.workspaces);
   renderHoldingOrgChart();
-  const targetedWorkspace = findWorkspaceRecord(state.workspaces, state.currentWorkspaceTarget || "");
+  const targetedWorkspace = findWorkspaceRecord(
+    state.workspaces,
+    normalizeTenantWorkspaceSlug(state.currentWorkspaceTarget || "", "")
+  );
   const selectedId =
     targetedWorkspace?.id
       || (state.workspaces.some((row) => String(row.id || "") === String(state.currentWorkspaceId || ""))
@@ -13784,7 +13809,7 @@ const openHolding = (options = {}) => {
     return;
   }
   const mode = options.mode === "tenant" ? "tenant" : "platform";
-  const requestedWorkspace = String(options.workspace || "").trim();
+  const requestedWorkspace = normalizeTenantWorkspaceSlug(String(options.workspace || "").trim(), "");
   let requestedView = String(options.view || "").trim();
   const requestedEngine = String(options.engine || "").trim();
   const urlParams = new URLSearchParams(window.location.search || "");
@@ -13795,7 +13820,7 @@ const openHolding = (options = {}) => {
     .trim()
     .toLowerCase();
   state.currentWorkspaceEntryMode = mode;
-  state.currentWorkspaceTarget = requestedWorkspace || (mode === "tenant" ? "modernia" : "");
+  state.currentWorkspaceTarget = requestedWorkspace || (mode === "tenant" ? DEFAULT_TENANT_WORKSPACE_SLUG : "");
   state.workspaceRrhhEntry = requestedRrhh === "self" ? "self" : "";
   state.workspaceRrhhJumpPersonaId = requestedPersona;
   const engineKey = normalizeSimple(requestedEngine);
@@ -38083,9 +38108,9 @@ if (coreCards) {
     } else if (action === "holding-admin") {
       openHolding({ mode: "platform", view: "overview" });
     } else if (action === "holding-tenant") {
-      openHolding({ mode: "tenant", workspace: "modernia", view: "overview" });
+      openHolding({ mode: "tenant", workspace: DEFAULT_TENANT_WORKSPACE_SLUG, view: "overview" });
     } else if (action === "time-home") {
-      openHolding({ mode: "tenant", workspace: "modernia", view: "motores", engine: "registro_horario" });
+      openHolding({ mode: "tenant", workspace: DEFAULT_TENANT_WORKSPACE_SLUG, view: "motores", engine: "registro_horario" });
       window.setTimeout(() => {
         focusWorkspaceEngine("registro_horario", workspaceTimeSummary, { forceTenantView: true });
       }, 250);
@@ -38104,7 +38129,9 @@ if (coreCards) {
 	    } else if (action === "admin") {
 	      openAdmin();
 	    } else if (action === "rrhh-home") {
-	      const workspace = String(state.currentWorkspaceTarget || state.currentWorkspaceName || "modernia").trim() || "modernia";
+	      const workspace = normalizeTenantWorkspaceSlug(
+	        state.currentWorkspaceTarget || state.currentWorkspaceName || DEFAULT_TENANT_WORKSPACE_SLUG
+	      );
 	      // La card Personal siempre abre RRHH en modo self (también para admins).
 	      openHolding({ mode: "tenant", workspace, view: "rrhh", rrhh: "self" });
 	    }
@@ -44739,7 +44766,7 @@ if (hipotecaForm) {
     const cesionRate = hasBonus ? 0.25 : 0.2;
     if (cesionHint) {
       cesionHint.textContent = hasBonus
-        ? "Aplicando 25% (Modernia Centro/Norte/Oeste)."
+        ? "Aplicando 25% (Centro/Norte/Oeste)."
         : "Aplicando 20% general.";
     }
     if (Number.isNaN(total)) {

@@ -14,4 +14,4 @@ http://127.0.0.1:8000
 
 ## Logo
 
-El logo se lee desde `assets/logo.jpg`.
+El logo del software se sirve desde `assets/verifika2/` (por defecto `assets/verifika2/verifika2_wordmark_check_green_transparent.png`).

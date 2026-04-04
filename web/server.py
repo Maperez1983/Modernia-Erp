@@ -1770,9 +1770,13 @@ def ensure_workspace_membership_backfill(conn):
 
 def bootstrap_default_workspace(conn):
     now = datetime.now(timezone.utc).isoformat()
+    default_slug = normalize_workspace_slug(DEFAULT_WORKSPACE_NAME)
+    default_logo_url = "/assets/verifika2/verifika2_wordmark_check_green_transparent.png"
+    default_primary = "#0B1D33"
+    default_accent = "#F2C14E"
     workspace = conn.execute(
         "SELECT id FROM workspaces WHERE nombre = ? OR slug = ? LIMIT 1",
-        (DEFAULT_WORKSPACE_NAME, normalize_workspace_slug(DEFAULT_WORKSPACE_NAME)),
+        (DEFAULT_WORKSPACE_NAME, default_slug),
     ).fetchone()
     if workspace:
         workspace_id = str(row_value(workspace, "id") or row_value(workspace, 0) or "").strip()
@@ -1780,6 +1784,9 @@ def bootstrap_default_workspace(conn):
             """
             UPDATE workspaces
             SET descripcion = COALESCE(NULLIF(descripcion, ''), ?),
+                logo_url = COALESCE(NULLIF(logo_url, ''), ?),
+                primary_color = COALESCE(NULLIF(primary_color, ''), ?),
+                accent_color = COALESCE(NULLIF(accent_color, ''), ?),
                 estado = COALESCE(NULLIF(estado, ''), 'Activo'),
                 plan = COALESCE(NULLIF(plan, ''), 'Enterprise'),
                 updated_at = datetime(?)
@@ -1787,29 +1794,72 @@ def bootstrap_default_workspace(conn):
             """,
             (
                 f"Tenant inicial del producto {PLATFORM_NAME} y primer caso operativo del grupo.",
+                default_logo_url,
+                default_primary,
+                default_accent,
                 now,
                 workspace_id,
             ),
         )
     else:
-        workspace_id = os.urandom(16).hex()
-        conn.execute(
+        # Migración suave: si existe un workspace legacy (p. ej. "modernia") lo renombramos en lugar de crear uno nuevo.
+        legacy = conn.execute(
             """
-            INSERT INTO workspaces (
-              id, nombre, slug, estado, plan, descripcion, primary_color, accent_color, created_at, updated_at
-            ) VALUES (?, ?, ?, 'Activo', 'Enterprise', ?, ?, ?, datetime(?), datetime(?))
-            """,
-            (
-                workspace_id,
-                DEFAULT_WORKSPACE_NAME,
-                normalize_workspace_slug(DEFAULT_WORKSPACE_NAME),
-                f"Tenant inicial del producto {PLATFORM_NAME} y primer caso operativo del grupo.",
-                "#3C6E71",
-                "#5F7A61",
-                now,
-                now,
-            ),
-        )
+            SELECT id, nombre, slug
+            FROM workspaces
+            WHERE slug IN ('modernia', 'grupomodernia', 'grupo-modernia')
+               OR LOWER(nombre) IN ('modernia', 'grupo modernia', 'grupomodernia', 'grupo-modernia')
+            ORDER BY created_at ASC
+            LIMIT 1
+            """
+        ).fetchone()
+        if legacy:
+            workspace_id = str(row_value(legacy, "id") or row_value(legacy, 0) or "").strip()
+            conn.execute(
+                """
+                UPDATE workspaces
+                SET nombre = ?,
+                    slug = ?,
+                    descripcion = COALESCE(NULLIF(descripcion, ''), ?),
+                    logo_url = COALESCE(NULLIF(logo_url, ''), ?),
+                    primary_color = COALESCE(NULLIF(primary_color, ''), ?),
+                    accent_color = COALESCE(NULLIF(accent_color, ''), ?),
+                    estado = COALESCE(NULLIF(estado, ''), 'Activo'),
+                    plan = COALESCE(NULLIF(plan, ''), 'Enterprise'),
+                    updated_at = datetime(?)
+                WHERE id = ?
+                """,
+                (
+                    DEFAULT_WORKSPACE_NAME,
+                    default_slug,
+                    f"Tenant inicial del producto {PLATFORM_NAME} y primer caso operativo del grupo.",
+                    default_logo_url,
+                    default_primary,
+                    default_accent,
+                    now,
+                    workspace_id,
+                ),
+            )
+        else:
+            workspace_id = os.urandom(16).hex()
+            conn.execute(
+                """
+                INSERT INTO workspaces (
+                  id, nombre, slug, estado, plan, descripcion, logo_url, primary_color, accent_color, created_at, updated_at
+                ) VALUES (?, ?, ?, 'Activo', 'Enterprise', ?, ?, ?, ?, datetime(?), datetime(?))
+                """,
+                (
+                    workspace_id,
+                    DEFAULT_WORKSPACE_NAME,
+                    default_slug,
+                    f"Tenant inicial del producto {PLATFORM_NAME} y primer caso operativo del grupo.",
+                    default_logo_url,
+                    default_primary,
+                    default_accent,
+                    now,
+                    now,
+                ),
+            )
 
     empresas = conn.execute("SELECT id FROM empresas ORDER BY nombre").fetchall()
     for row in empresas:
@@ -2752,7 +2802,7 @@ def render_hipoteca_print_html(payload, auto_print=False):
 <body>
   <div class="sheet">
     <div class="hero">
-      <img src="/assets/logo.jpg" alt="Grupo Modernia" />
+      <img src="/assets/verifika2/verifika2_wordmark_check_green_transparent.png" alt="Verifika²" />
       <div>
         <h1>Ficha de Operación Hipotecaria</h1>
         <p>{cliente} · {banco}</p>
@@ -24247,7 +24297,9 @@ def _load_brand_logo(logo_url=None, max_width=520):
             if candidate.exists():
                 logo_path = candidate
     if logo_path is None:
-        logo_path = ASSETS / "grupo_modernia_logo.png"
+        logo_path = ASSETS / "verifika2" / "verifika2_wordmark_check_green_transparent.png"
+        if not logo_path.exists():
+            logo_path = ASSETS / "verifika2" / "verifika2_wordmark_check_green.png"
     if not logo_path.exists():
         return None
     try:
@@ -24442,7 +24494,7 @@ def build_inmueble_consumo_sale_sheet_pdf(company, inmueble, captacion, docs):
             "Suministros e información adicional",
             [
                 ("Suministros", "Electricidad, agua, teléfono y gas: pendiente de validar"),
-                ("Intermediación", company.get("nombre") or "Grupo Modernia"),
+                ("Intermediación", company.get("nombre") or "la agencia"),
                 ("Observaciones", captacion.get("notas") or "Sin observaciones adicionales"),
             ],
         ),
@@ -24484,7 +24536,7 @@ def build_inmueble_consumo_sale_price_note_pdf(company, inmueble, captacion):
             "Mención obligatoria",
             [
                 "Del precio total de la venta se deducirá cualquier cantidad que entregue el adquirente antes de la formalización del contrato, salvo que conste de manera inequívoca que dicha entrega se realiza en otro concepto.",
-                f"Intermediación comercial gestionada por {company.get('nombre') or 'Grupo Modernia'}.",
+                f"Intermediación comercial gestionada por {company.get('nombre') or 'la agencia'}.",
             ],
         ),
     ]
@@ -24541,7 +24593,7 @@ def build_inmueble_consumo_rental_dia_pdf(company, inmueble, captacion, docs):
         (
             "Intermediación",
             [
-                ("Entidad intermediaria", company.get("nombre") or "Grupo Modernia"),
+                ("Entidad intermediaria", company.get("nombre") or "la agencia"),
                 ("Observaciones", captacion.get("notas") or "Sin observaciones adicionales"),
             ],
         ),
@@ -24595,7 +24647,7 @@ def build_inmueble_negotiation_offer_pdf(company, inmueble, buyer, action):
     ]
     return build_branded_document_pdf(
         doc_kind.upper(),
-        f"{company.get('nombre') or 'Grupo Modernia'} · expediente de negociación",
+        f"{company.get('nombre') or 'Verifika²'} · expediente de negociación",
         sections,
         footer,
     )
@@ -24644,7 +24696,7 @@ def build_inmueble_catastro_sheet_pdf(company, inmueble, catastro_summary):
         ),
     ]
     footer = [
-        f"Documento generado automáticamente por {company.get('nombre') or 'Grupo Modernia'} a partir de la ficha pública del Catastro.",
+        f"Documento generado automáticamente por {company.get('nombre') or 'Verifika²'} a partir de la ficha pública del Catastro.",
         "Los datos catastrales deben revisarse dentro del expediente antes de usarlos contractualmente.",
     ]
     return build_branded_document_pdf(
