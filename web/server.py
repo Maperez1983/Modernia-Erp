@@ -37787,6 +37787,120 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, payload)
             return
 
+        if path == "/api/workspace_boot":
+            # Bundle de carga inicial para reducir latencia en PWA/iOS:
+            # en vez de 20-25 requests (cada uno con handshake + DB), devolvemos todo lo necesario en 1.
+            workspace_id = (params.get("workspace_id", [""])[0] or "").strip()
+            empresa_id = (params.get("empresa_id", [""])[0] or "").strip()
+            month = (params.get("month", [""])[0] or "").strip()
+            minimal = (params.get("minimal", ["0"])[0] or "").strip().lower() in {"1", "true", "yes", "si", "sí"}
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            privileged = True
+            if session and not workspace_session_is_privileged(session):
+                privileged = False
+
+            # RRHH (horario): aplica el mismo control que endpoints individuales.
+            persona_id = ""
+            if session and not privileged:
+                user_id = str(session.get("user_id") or "").strip()
+                persona_id = workspace_persona_id_for_user(conn, workspace_id, user_id)
+                # Non-priv: forzamos empresa_id vacío como en endpoints.
+                empresa_id = ""
+
+            # Time entries (1 query) -> list + summary
+            time_entries_full = fetch_workspace_time_entries(
+                conn,
+                workspace_id,
+                empresa_id=empresa_id,
+                limit=1000,
+                month=month,
+                persona_id=persona_id,
+            )
+            time_rows_full = time_entries_full.get("rows") or []
+            time_rows = {"rows": time_rows_full[:250]}
+            time_summary = build_workspace_time_summary(time_rows_full, month=month)
+
+            # Employees / personal
+            time_employees = {"rows": []}
+            if session and not privileged:
+                # Mismo comportamiento que /api/workspace_registro_personal para usuarios no privilegiados.
+                user_id = str(session.get("user_id") or "").strip()
+                if user_id:
+                    row = conn.execute(
+                        """
+                        SELECT p.*, COALESCE(e.nombre, '') AS empresa_nombre
+                        FROM workspace_registro_personal p
+                        LEFT JOIN empresas e ON e.id = p.empresa_id
+                        WHERE p.workspace_id = ? AND p.usuario_id = ? AND COALESCE(p.usuario_manual, 0) = 1 AND COALESCE(p.activo, 1) = 1
+                        LIMIT 1
+                        """,
+                        (workspace_id, user_id),
+                    ).fetchone()
+                    time_employees = {"rows": [dict(row)] if row else []}
+            else:
+                # Admin: lista completa (activos=0 como usa el front).
+                time_employees = fetch_workspace_personal(conn, workspace_id, empresa_id=empresa_id, only_active=False, limit=500)
+
+            # Usuarios habilitados para registro (solo admin en UI actual).
+            time_users = {"rows": []}
+            if privileged:
+                time_users = fetch_workspace_time_users(conn, workspace_id, empresa_id=empresa_id, only_enabled=False, limit=300)
+
+            # Periodos (solo privilegiados)
+            time_periods = {"rows": []}
+            if privileged:
+                try:
+                    time_periods = fetch_workspace_registro_periodos(conn, workspace_id, empresa_id=empresa_id)
+                except Exception:
+                    time_periods = {"rows": []}
+
+            payload = {
+                "ok": True,
+                "workspace_id": workspace_id,
+                "empresa_id": empresa_id,
+                "month": month,
+                "time_users": time_users,
+                "time_rows": time_rows,
+                "time_employees": time_employees,
+                "time_summary": time_summary,
+                "time_periods": time_periods,
+            }
+
+            if not minimal:
+                payload.update(
+                    {
+                        "billing_summary": fetch_workspace_billing_summary(conn, workspace_id),
+                        "docs": fetch_workspace_document_hub(conn, workspace_id, limit=20),
+                        "billing_rows": fetch_workspace_billing_rows(conn, workspace_id, limit=25),
+                        "budget_rows": fetch_workspace_presupuestos(conn, workspace_id, limit=40),
+                        "collections": fetch_workspace_billing_collections(conn, workspace_id, limit=40),
+                        "remittances": fetch_workspace_remesas(conn, workspace_id, limit=30),
+                        "clients": fetch_workspace_clientes(conn, workspace_id, q="", limit=60),
+                        "health": fetch_workspace_health(conn, workspace_id) or {},
+                        "gestoria_overview": fetch_workspace_gestoria_overview(conn, workspace_id, empresa_id=empresa_id),
+                        "seguros_overview": fetch_workspace_seguros_overview(conn, workspace_id, empresa_id=empresa_id),
+                        "fin_overview": fetch_workspace_fin_overview(conn, workspace_id, empresa_id=empresa_id),
+                        "inmo_overview": fetch_workspace_inmo_overview(conn, workspace_id, empresa_id=empresa_id),
+                        "service_desks": fetch_workspace_service_desks(conn, workspace_id, empresa_id=empresa_id),
+                        "series": fetch_workspace_series(conn, workspace_id),
+                        "inbox": fetch_workspace_inbox_queue(conn, workspace_id, limit=40),
+                        "portal": fetch_workspace_portal_clients(conn, workspace_id, limit=40),
+                        "portal_requests": fetch_workspace_portal_requests(conn, workspace_id, limit=40),
+                        "automations": fetch_workspace_automations(conn, workspace_id, limit=50),
+                        "automation_logs": fetch_workspace_automation_logs(conn, workspace_id, limit=12),
+                        "fincas_communities": fetch_workspace_fincas_comunidades(conn, workspace_id, limit=30),
+                        "fincas_incidents": fetch_workspace_fincas_incidencias(conn, workspace_id, limit=40),
+                        "fincas_providers": fetch_workspace_fincas_proveedores(conn, workspace_id, limit=40),
+                        "fincas_meetings": fetch_workspace_fincas_juntas(conn, workspace_id, limit=40),
+                    }
+                )
+
+            json_response(self, payload)
+            return
+
         if path == "/api/workspace_members":
             workspace_id = (params.get("workspace_id", [""])[0] or "").strip()
             if not workspace_id:
