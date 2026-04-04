@@ -8,6 +8,7 @@ import os
 import re
 import sqlite3
 import subprocess
+import shutil
 import sys
 import tempfile
 import unicodedata
@@ -18,16 +19,51 @@ from pathlib import Path
 
 
 GESTORIA_COMPANY = "Fincas Velazquez"
-DEFAULT_SOURCE_DIR = (
-    "/Users/miguelperezrodriguez/Library/Mobile Documents/com~apple~CloudDocs/"
-    "MIGUE TRABAJO/RENTAS 2024"
-)
 RENTA_SERVICE = "gestoria"
 RENTA_ACTIVITY_TYPE = "Declaración en periodo"
 DEFAULT_EJERCICIO = str(datetime.now(timezone.utc).year - 1)
+DEFAULT_SOURCE_DIR_BASE = (
+    Path.home()
+    / "Library"
+    / "Mobile Documents"
+    / "com~apple~CloudDocs"
+    / "MIGUE TRABAJO"
+)
+
+
+def guess_default_source_dir(ejercicio: str) -> str:
+    base = DEFAULT_SOURCE_DIR_BASE
+    preferred = base / f"RENTAS {ejercicio}"
+    if preferred.exists():
+        return str(preferred)
+    candidates: list[tuple[int, Path]] = []
+    if base.exists():
+        for path in base.glob("RENTAS 20[0-9][0-9]"):
+            normalized_name = re.sub(r"\s+", " ", str(path.name or "").strip())
+            match = re.fullmatch(r"RENTAS\s+(20[0-9]{2})", normalized_name, re.IGNORECASE)
+            if not match:
+                continue
+            try:
+                year = int(match.group(1))
+            except ValueError:
+                continue
+            if path.exists():
+                candidates.append((year, path))
+    if candidates:
+        candidates.sort(key=lambda item: item[0], reverse=True)
+        return str(candidates[0][1])
+    return str(preferred)
+
+
+DEFAULT_SOURCE_DIR = guess_default_source_dir(DEFAULT_EJERCICIO)
 PDFTOTEXT_TIMEOUT_SECONDS = 20
 TESSERACT_TIMEOUT_SECONDS = 45
 PDFTOPPM_TIMEOUT_SECONDS = 45
+RENTA_OCR_HEAD_PAGES = max(1, int(os.environ.get("RENTA_OCR_HEAD_PAGES", "2") or 2))
+RENTA_OCR_TAIL_PAGES = max(0, int(os.environ.get("RENTA_OCR_TAIL_PAGES", "2") or 2))
+RENTA_OCR_DPI = max(120, int(os.environ.get("RENTA_OCR_DPI", "300") or 300))
+RENTA_OCR_RESCUE_DPI = max(RENTA_OCR_DPI, int(os.environ.get("RENTA_OCR_RESCUE_DPI", "400") or 400))
+RENTA_OCR_PSMS_RAW = os.environ.get("RENTA_OCR_PSMS", "6,11,4")
 CRITICAL_FIELDS = (
     "cliente_nombre",
     "cliente_nif",
@@ -53,6 +89,132 @@ def slug(value: object) -> str:
 
 def compact_spaces(value: object) -> str:
     return re.sub(r"\s+", " ", str(value or "")).strip()
+
+
+def parse_int_tuple(raw: str, default: tuple[int, ...]) -> tuple[int, ...]:
+    cleaned = compact_spaces(raw).replace(" ", "")
+    if not cleaned:
+        return default
+    items: list[int] = []
+    for chunk in cleaned.split(","):
+        if not chunk:
+            continue
+        try:
+            value = int(chunk)
+        except ValueError:
+            continue
+        if value not in items:
+            items.append(value)
+    return tuple(items) if items else default
+
+
+RENTA_OCR_PSMS = parse_int_tuple(RENTA_OCR_PSMS_RAW, (6, 11, 4))
+
+
+def command_exists(name: str) -> bool:
+    cmd = shutil.which(name)
+    return bool(cmd and os.path.exists(cmd))
+
+def pdf_page_count(pdf_path: Path) -> int:
+    cmd = shutil.which("pdfinfo") or "/opt/homebrew/bin/pdfinfo" or "/usr/local/bin/pdfinfo"
+    if not cmd or not os.path.exists(cmd):
+        return 0
+    try:
+        proc = subprocess.run(
+            [cmd, str(pdf_path)],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=8,
+        )
+    except Exception:
+        return 0
+    if proc.returncode != 0:
+        return 0
+    match = re.search(r"^Pages:\s+(\d+)\s*$", proc.stdout or "", re.MULTILINE)
+    if not match:
+        return 0
+    try:
+        return max(0, int(match.group(1)))
+    except ValueError:
+        return 0
+
+
+def score_renta_ocr_text(text: str) -> int:
+    normalized = norm_text(text)
+    if not normalized:
+        return 0
+    score = min(len(normalized), 2600) // 13
+    for token, weight in (
+        ("agencia tributaria", 30),
+        ("modelo 100", 60),
+        ("impuesto sobre la renta", 55),
+        ("resultado de la declaracion", 35),
+        ("codigo seguro de verificacion", 25),
+        ("expediente", 18),
+        ("nif", 14),
+        ("declarante", 10),
+        ("euros", 8),
+    ):
+        if token in normalized:
+            score += weight
+    if re.search(r"\b[0-9]{2}/[0-9]{2}/[0-9]{4}\b", text):
+        score += 12
+    if re.search(r"\b[0-9]{8}[A-Z]\b", text):
+        score += 12
+    if re.search(r"(?<![0-9])[0-9]{1,3}(?:\.[0-9]{3})*,[0-9]{2}(?![0-9])", text):
+        score += 14
+    return score
+
+
+def tesseract_stdout(image_path: Path, timeout_seconds: int = 20, psm: int = 6) -> tuple[str, str]:
+    cmd = shutil.which("tesseract") or "/opt/homebrew/bin/tesseract" or "/usr/local/bin/tesseract"
+    if not cmd or not os.path.exists(cmd):
+        return "", "tesseract no encontrado"
+    try:
+        result = subprocess.run(
+            [cmd, str(image_path), "stdout", "-l", "spa+eng", "--oem", "1", "--psm", str(psm), "-c", "preserve_interword_spaces=1"],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=timeout_seconds,
+        )
+        return result.stdout or "", ""
+    except subprocess.TimeoutExpired:
+        return "", "tesseract timeout"
+    except subprocess.CalledProcessError as exc:
+        return "", (exc.stderr or "").strip()
+
+
+def best_tesseract_text(image_path: Path, timeout_seconds: int = 20, psms: tuple[int, ...] = (6, 11, 4)) -> tuple[str, str]:
+    best_text = ""
+    best_err = ""
+    best_score = -1
+    for psm in psms:
+        text, err = tesseract_stdout(image_path, timeout_seconds=timeout_seconds, psm=psm)
+        score = score_renta_ocr_text(text)
+        if score > best_score:
+            best_text, best_err, best_score = text, err, score
+        if best_score >= 170:
+            break
+    return best_text, best_err
+
+
+def sips_transform(src: Path, out: Path, rotate: int | None = None, max_size: int | None = None) -> bool:
+    if not os.path.exists("/usr/bin/sips"):
+        return False
+    cmd = ["/usr/bin/sips"]
+    if rotate is not None:
+        cmd.extend(["-r", str(rotate)])
+    if max_size is not None:
+        cmd.extend(["-Z", str(max_size)])
+    cmd.extend([str(src), "--out", str(out)])
+    try:
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=25)
+        return out.exists()
+    except Exception:
+        return False
 
 
 def clean_ocr_text_value(value: object) -> str:
@@ -433,9 +595,12 @@ def extract_iban_accounts(text: str) -> list[str]:
 
 
 def run_pdftotext(pdf_path: Path) -> str:
+    cmd = shutil.which("pdftotext") or "/opt/homebrew/bin/pdftotext" or "/usr/local/bin/pdftotext"
+    if not cmd or not os.path.exists(cmd):
+        return ""
     try:
         proc = subprocess.run(
-            ["pdftotext", str(pdf_path), "-"],
+            [cmd, "-layout", "-nopgbrk", str(pdf_path), "-"],
             capture_output=True,
             text=True,
             check=False,
@@ -449,37 +614,99 @@ def run_pdftotext(pdf_path: Path) -> str:
 
 
 def run_tesseract_ocr(pdf_path: Path) -> str:
-    try:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            prefix = Path(tmpdir) / "page"
-            try:
-                proc = subprocess.run(
-                    ["pdftoppm", "-r", "300", "-png", str(pdf_path), str(prefix)],
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                    timeout=PDFTOPPM_TIMEOUT_SECONDS,
-                )
-            except subprocess.TimeoutExpired:
-                return ""
-            if proc.returncode != 0:
-                return ""
-            chunks = []
-            for image_path in sorted(Path(tmpdir).glob("*.png")):
-                try:
-                    ocr = subprocess.run(
-                        ["tesseract", str(image_path), "stdout", "-l", "spa+eng"],
-                        capture_output=True,
-                        text=True,
-                        check=False,
-                        timeout=TESSERACT_TIMEOUT_SECONDS,
+    pdftoppm = shutil.which("pdftoppm") or "/opt/homebrew/bin/pdftoppm" or "/usr/local/bin/pdftoppm"
+    if not pdftoppm or not os.path.exists(pdftoppm):
+        return ""
+    if not command_exists("tesseract"):
+        return ""
+
+    def ocr_with_dpi(dpi: int) -> str:
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                total_pages = pdf_page_count(pdf_path)
+                head_pages = max(1, int(RENTA_OCR_HEAD_PAGES))
+                tail_pages = max(0, int(RENTA_OCR_TAIL_PAGES))
+                if total_pages <= 0:
+                    total_pages = head_pages + tail_pages
+                head_end = min(total_pages, head_pages)
+                tail_start = max(1, total_pages - max(0, tail_pages) + 1)
+
+                prefixes = []
+                prefixes.append((Path(tmpdir) / "head", 1, head_end))
+                if tail_pages > 0 and tail_start > head_end:
+                    prefixes.append((Path(tmpdir) / "tail", tail_start, total_pages))
+
+                for prefix, start_page, end_page in prefixes:
+                    try:
+                        proc = subprocess.run(
+                            [
+                                pdftoppm,
+                                "-r",
+                                str(max(120, int(dpi))),
+                                "-png",
+                                "-f",
+                                str(start_page),
+                                "-l",
+                                str(end_page),
+                                str(pdf_path),
+                                str(prefix),
+                            ],
+                            capture_output=True,
+                            text=True,
+                            check=False,
+                            timeout=PDFTOPPM_TIMEOUT_SECONDS,
+                        )
+                    except subprocess.TimeoutExpired:
+                        continue
+                    if proc.returncode != 0:
+                        continue
+
+                image_paths = list(Path(tmpdir).glob("*.png"))
+                if not image_paths:
+                    return ""
+                def page_num(path: Path) -> int:
+                    match = re.search(r"-([0-9]+)\\.png$", path.name)
+                    if not match:
+                        return 10**9
+                    try:
+                        return int(match.group(1))
+                    except ValueError:
+                        return 10**9
+                image_paths = sorted(image_paths, key=page_num)
+                chunks = []
+                for image_path in image_paths:
+                    best_text, best_err = best_tesseract_text(
+                        image_path,
+                        timeout_seconds=TESSERACT_TIMEOUT_SECONDS,
+                        psms=RENTA_OCR_PSMS,
                     )
-                except subprocess.TimeoutExpired:
-                    continue
-                if ocr.returncode == 0 and compact_spaces(ocr.stdout):
-                    chunks.append(ocr.stdout)
-            return "\n".join(chunks)
-    except FileNotFoundError:
+                    best_score = score_renta_ocr_text(best_text)
+                    if best_score < 70:
+                        candidates: list[tuple[str, str, int]] = [(best_text, best_err, best_score)]
+                        big_path = Path(tmpdir) / f"{image_path.stem}_big.jpg"
+                        if sips_transform(image_path, big_path, max_size=2600):
+                            text2, err2 = best_tesseract_text(big_path, timeout_seconds=TESSERACT_TIMEOUT_SECONDS, psms=RENTA_OCR_PSMS)
+                            candidates.append((text2, err2, score_renta_ocr_text(text2)))
+                        for angle in (90, 270):
+                            rotated = Path(tmpdir) / f"{image_path.stem}_rot_{angle}.jpg"
+                            if sips_transform(image_path, rotated, rotate=angle, max_size=2600):
+                                text3, err3 = best_tesseract_text(rotated, timeout_seconds=TESSERACT_TIMEOUT_SECONDS, psms=RENTA_OCR_PSMS)
+                                candidates.append((text3, err3, score_renta_ocr_text(text3)))
+                        best_text, best_err, best_score = max(candidates, key=lambda item: item[2])
+                    if compact_spaces(best_text):
+                        chunks.append(best_text)
+                return "\n".join(chunks)
+        except FileNotFoundError:
+            return ""
+
+    try:
+        first = ocr_with_dpi(RENTA_OCR_DPI)
+        if (not compact_spaces(first) or score_renta_ocr_text(first) < 60) and RENTA_OCR_RESCUE_DPI > RENTA_OCR_DPI:
+            rescue = ocr_with_dpi(RENTA_OCR_RESCUE_DPI)
+            if score_renta_ocr_text(rescue) > score_renta_ocr_text(first):
+                return rescue
+        return first
+    except Exception:
         return ""
 
 
@@ -499,6 +726,7 @@ def classify_pdf(text: str, pdf_path: Path) -> str:
     if any(
         token in name
         for token in (
+            "firma",
             "fraccionamiento",
             "aplazamiento",
             "aplaz",
@@ -523,7 +751,7 @@ def classify_pdf(text: str, pdf_path: Path) -> str:
         return "datos_fiscales"
     if "modelo 100" in upper and "impuesto sobre la renta de las personas fisicas" in upper:
         return "modelo_100"
-    if "renta 2024" in upper and "adjuntos" in upper:
+    if re.search(r"\brenta\s+20[0-9]{2}\b", upper) and "adjuntos" in upper:
         return "notas"
     if "rentas clientes" in norm_text(str(pdf_path.parent)):
         return "soporte_cliente"
@@ -863,7 +1091,7 @@ def parse_modelo_100_text(text: str) -> dict:
     if data.get("resultado_declaracion") is None:
         data["resultado_declaracion"] = extract_money_near_line(
             normalized,
-            r"Resultado de la declaraci[oó]n|Resultado a ingresar o devolver",
+            r"Resultado de la declaraci[oó]n|Resultado a ingresar(?:\s+[o0])?\s+devolver|Resultado a ingresar o devolver",
             window=4,
         )
     if data.get("resultado_declaracion") is None:
@@ -1103,7 +1331,7 @@ def infer_name_from_sources(paths: list[str]) -> str:
     if not paths:
         return ""
     first = Path(paths[0])
-    if first.parent.name and first.parent.name != "RENTAS 2024":
+    if first.parent.name and not re.fullmatch(r"RENTAS\s+20[0-9]{2}", compact_spaces(first.parent.name), re.IGNORECASE):
         return compact_spaces(first.parent.name)
     stem = first.stem
     stem = re.sub(
@@ -1990,9 +2218,9 @@ def main() -> None:
     parser.add_argument("--source-dir", default=DEFAULT_SOURCE_DIR, help="Carpeta raíz con PDFs de renta.")
     parser.add_argument("--db", default="data/erp_import2.sqlite", help="Ruta a la SQLite del CRM.")
     parser.add_argument("--company", default=GESTORIA_COMPANY, help="Empresa destino para vincular clientes.")
-    parser.add_argument("--out-json", default="data/rentas_2024_preview.json", help="Salida JSON consolidada.")
-    parser.add_argument("--out-csv", default="data/rentas_2024_preview.csv", help="Salida CSV resumida.")
-    parser.add_argument("--review-json", default="data/rentas_2024_review_queue.json", help="Cola de revisión para casos dudosos.")
+    parser.add_argument("--out-json", default=f"data/rentas_{DEFAULT_EJERCICIO}_preview.json", help="Salida JSON consolidada.")
+    parser.add_argument("--out-csv", default=f"data/rentas_{DEFAULT_EJERCICIO}_preview.csv", help="Salida CSV resumida.")
+    parser.add_argument("--review-json", default=f"data/rentas_{DEFAULT_EJERCICIO}_review_queue.json", help="Cola de revisión para casos dudosos.")
     parser.add_argument("--ejercicio", default=DEFAULT_EJERCICIO, help="Ejercicio fiscal a cargar. En 2026, normalmente será 2025.")
     parser.add_argument("--estado-presentacion", default="Presentada", choices=("Borrador", "Presentada"), help="Estado documental de la renta importada.")
     parser.add_argument("--limit", type=int, default=0, help="Limita el número de PDFs procesados.")
