@@ -59,6 +59,7 @@ DEFAULT_SOURCE_DIR = guess_default_source_dir(DEFAULT_EJERCICIO)
 PDFTOTEXT_TIMEOUT_SECONDS = 20
 TESSERACT_TIMEOUT_SECONDS = 45
 PDFTOPPM_TIMEOUT_SECONDS = 45
+RENTA_USE_OCRMYPDF = str(os.environ.get("RENTA_USE_OCRMYPDF", "") or "").strip().lower() in {"1", "true", "yes", "si", "sí"}
 RENTA_OCR_HEAD_PAGES = max(1, int(os.environ.get("RENTA_OCR_HEAD_PAGES", "2") or 2))
 RENTA_OCR_TAIL_PAGES = max(0, int(os.environ.get("RENTA_OCR_TAIL_PAGES", "2") or 2))
 RENTA_OCR_DPI = max(120, int(os.environ.get("RENTA_OCR_DPI", "300") or 300))
@@ -612,6 +613,48 @@ def run_pdftotext(pdf_path: Path) -> str:
         return ""
     return proc.stdout or ""
 
+def run_ocrmypdf_text(pdf_path: Path) -> str:
+    cmd = shutil.which("ocrmypdf")
+    if not cmd:
+        for candidate in ("/opt/homebrew/bin/ocrmypdf", "/usr/local/bin/ocrmypdf"):
+            if os.path.exists(candidate):
+                cmd = candidate
+                break
+    if not cmd:
+        return ""
+    if not command_exists("tesseract"):
+        return ""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        out_pdf = Path(tmpdir) / "ocr.pdf"
+        try:
+            proc = subprocess.run(
+                [
+                    cmd,
+                    "--skip-text",
+                    "--deskew",
+                    "--rotate-pages",
+                    "--clean",
+                    "--remove-background",
+                    "--optimize",
+                    "0",
+                    "--jobs",
+                    "2",
+                    "--language",
+                    "spa+eng",
+                    str(pdf_path),
+                    str(out_pdf),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=max(60, PDFTOPPM_TIMEOUT_SECONDS * 2),
+            )
+        except subprocess.TimeoutExpired:
+            return ""
+        if proc.returncode != 0 or not out_pdf.exists():
+            return ""
+        return run_pdftotext(out_pdf)
+
 
 def run_tesseract_ocr(pdf_path: Path) -> str:
     pdftoppm = shutil.which("pdftoppm") or "/opt/homebrew/bin/pdftoppm" or "/usr/local/bin/pdftoppm"
@@ -714,6 +757,10 @@ def get_pdf_text(pdf_path: Path) -> tuple[str, str]:
     text = run_pdftotext(pdf_path)
     if len(compact_spaces(text)) >= 40:
         return text, "pdftotext"
+    if RENTA_USE_OCRMYPDF:
+        ocrpdf = run_ocrmypdf_text(pdf_path)
+        if len(compact_spaces(ocrpdf)) >= 80:
+            return ocrpdf, "ocrmypdf"
     ocr_text = run_tesseract_ocr(pdf_path)
     if compact_spaces(ocr_text):
         return ocr_text, "ocr"

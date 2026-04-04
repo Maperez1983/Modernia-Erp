@@ -171,6 +171,7 @@ OCR_PDF_MAX_PAGES = max(0, int(os.environ.get("OCR_PDF_MAX_PAGES", "4")))
 OCR_PDF_DPI = max(120, int(os.environ.get("OCR_PDF_DPI", "280")))
 OCR_OPENAI_VISION_PAGES = max(0, int(os.environ.get("OCR_OPENAI_VISION_PAGES", "2")))
 OCR_OPENAI_VISION_DPI = max(120, int(os.environ.get("OCR_OPENAI_VISION_DPI", "220")))
+OCR_USE_OCRMYPDF = os.environ.get("OCR_USE_OCRMYPDF", "0").strip().lower() in ("1", "true", "yes", "si", "sí", "on")
 OCR_EXPERT_MODE = os.environ.get("OCR_EXPERT_MODE", "1").strip().lower() not in ("0", "false", "no", "off")
 WORKSPACE_TIME_SWEEP_ENABLED = (
     os.environ.get("WORKSPACE_TIME_SWEEP_ENABLED", "0" if os.environ.get("RENDER") else "1").strip().lower()
@@ -8100,6 +8101,10 @@ def extract_pdf_text(pdf_path):
     text, err = pdftotext_extract(pdf_path, pages=None)
     if text and len(text.strip()) >= 30:
         return text, "", "pdftotext"
+    if OCR_USE_OCRMYPDF:
+        ocr_text, ocr_err = ocrmypdf_extract_text(pdf_path)
+        if ocr_text and len(ocr_text.strip()) >= 30:
+            return ocr_text, "", "ocrmypdf"
     images, img_err, tmpdir = pdftoppm_first_page(pdf_path, pages=None)
     if images:
         combined = []
@@ -8118,6 +8123,59 @@ def extract_pdf_text(pdf_path):
     if text:
         return text, "", "tesseract"
     return "", err or img_err or ocr_err, "tesseract"
+
+def ocrmypdf_extract_text(pdf_path):
+    cmd = shutil.which("ocrmypdf")
+    if not cmd:
+        for candidate in ("/opt/homebrew/bin/ocrmypdf", "/usr/local/bin/ocrmypdf"):
+            if os.path.exists(candidate):
+                cmd = candidate
+                break
+    if not cmd or not os.path.exists(cmd):
+        return "", "ocrmypdf no encontrado"
+    tesseract_cmd = (
+        shutil.which("tesseract")
+        or "/opt/homebrew/bin/tesseract"
+        or "/usr/local/bin/tesseract"
+    )
+    if not tesseract_cmd or not os.path.exists(tesseract_cmd):
+        return "", "tesseract no encontrado"
+    with tempfile.TemporaryDirectory() as tmpdir:
+        out_pdf = os.path.join(tmpdir, "ocr.pdf")
+        try:
+            run_subprocess(
+                [
+                    cmd,
+                    "--skip-text",
+                    "--deskew",
+                    "--rotate-pages",
+                    "--clean",
+                    "--remove-background",
+                    "--optimize",
+                    "0",
+                    "--jobs",
+                    "2",
+                    "-l",
+                    "spa+eng",
+                    pdf_path,
+                    out_pdf,
+                ],
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=max(OCR_SUBPROCESS_TIMEOUT_SECONDS, 180),
+            )
+        except subprocess.TimeoutExpired:
+            return "", "ocrmypdf timeout"
+        except subprocess.CalledProcessError as err:
+            return "", f"ocrmypdf: {err.stderr.strip()}"
+        except Exception as err:
+            return "", f"ocrmypdf: {err}"
+        text, err = pdftotext_extract(out_pdf, pages=None)
+        if text and len(text.strip()) >= 30:
+            return text, ""
+        return "", err or "ocrmypdf: sin texto"
 
 def ocr_pdf_all_pages(pdf_path, use_external=False):
     images, img_err, tmpdir = pdftoppm_first_page(pdf_path, pages=None)
