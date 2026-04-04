@@ -24967,6 +24967,8 @@ class Handler(BaseHTTPRequestHandler):
     _db_ready_lock = threading.Lock()
     _db_ready_last_attempt_at = 0.0
     _db_ready_last_error = ""
+    _db_bootstrap_started = False
+    _db_bootstrap_lock = threading.Lock()
     _health_lock = threading.Lock()
     _health_last_at = 0.0
     _health_last_status = 0
@@ -25000,6 +25002,39 @@ class Handler(BaseHTTPRequestHandler):
                 Handler._db_ready = False
                 Handler._db_ready_last_error = f"{type(exc).__name__}: {exc}"
                 raise DbUnavailableError(Handler._db_ready_last_error)
+
+    @staticmethod
+    def _trigger_db_bootstrap_async(db_path):
+        try:
+            if Handler._db_ready:
+                return
+            with Handler._db_bootstrap_lock:
+                if Handler._db_bootstrap_started:
+                    return
+                Handler._db_bootstrap_started = True
+            def _loop():
+                backoff = 2.0
+                try:
+                    while not Handler._db_ready:
+                        try:
+                            ensure_tables(db_path)
+                            Handler._db_ready = True
+                            Handler._db_ready_last_error = ""
+                            Handler._db_ready_last_attempt_at = time.time()
+                            return
+                        except Exception as exc:
+                            Handler._db_ready = False
+                            Handler._db_ready_last_error = f"{type(exc).__name__}: {exc}"
+                            Handler._db_ready_last_attempt_at = time.time()
+                        time.sleep(max(1.0, backoff))
+                        backoff = min(12.0, backoff * 1.6)
+                finally:
+                    with Handler._db_bootstrap_lock:
+                        Handler._db_bootstrap_started = False
+            t = threading.Thread(target=_loop, name="db-bootstrap", daemon=True)
+            t.start()
+        except Exception:
+            return
 
     def _track_conn(self, conn):
         if conn is None:
@@ -25287,7 +25322,11 @@ class Handler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/health":
             # Readiness: el front usa esto para saber si puede operar.
-            # Importante: no solo verificamos conectividad, también que el bootstrap de tablas haya terminado.
+            # Importante: NO bloqueamos aquí con migraciones pesadas (evita 502/timeouts en cold start).
+            # En su lugar:
+            # - Si ya está listo: 200
+            # - Si conecta a DB pero faltan tablas: 503 bootstrapping (y disparamos bootstrap en background)
+            # - Si no conecta: 503 con error
             # Circuit breaker: cacheamos el resultado unos segundos para evitar avalanchas.
             ttl_s = max(1.0, float(os.environ.get("APP_HEALTH_CACHE_SECONDS", "3") or 3))
             now_ts = time.time()
@@ -25298,24 +25337,42 @@ class Handler(BaseHTTPRequestHandler):
                         status = int(Handler._health_last_status)
                         body = Handler._health_last_body or b""
                     else:
-                        try:
-                            # Si ya estamos listos, respondemos rápido.
-                            if Handler._db_ready:
-                                status = 200
-                                body = f"ok backend={backend}".encode("utf-8")
-                            else:
-                                # Intentamos completar bootstrap (una sola vez por proceso, lockado).
-                                self._ensure_db_ready()
-                                status = 200
-                                body = f"ok backend={backend}".encode("utf-8")
-                        except DbUnavailableError as exc:
-                            status = 503
-                            msg = f"db_unavailable backend={backend}: {exc}"
-                            body = msg.encode("utf-8", errors="ignore")
-                        except Exception as exc:
-                            status = 503
-                            msg = f"db_unavailable backend={backend}: {type(exc).__name__}: {exc}"
-                            body = msg.encode("utf-8", errors="ignore")
+                        if Handler._db_ready:
+                            status = 200
+                            body = f"ok backend={backend}".encode("utf-8")
+                        else:
+                            # Quick probe (2s) to distinguish "DB down" from "bootstrapping".
+                            try:
+                                if db_is_postgres_enabled():
+                                    conn = open_postgres_conn(
+                                        with_row_factory=False,
+                                        skip_compat=True,
+                                        connect_timeout_override=int(os.environ.get("APP_HEALTH_PG_TIMEOUT", "2") or 2),
+                                    )
+                                    try:
+                                        conn.execute("SELECT 1")
+                                    finally:
+                                        try:
+                                            conn.close()
+                                        except Exception:
+                                            pass
+                                else:
+                                    conn = open_sqlite_conn(self.db_path, with_row_factory=False)
+                                    try:
+                                        conn.execute("SELECT 1")
+                                    finally:
+                                        try:
+                                            conn.close()
+                                        except Exception:
+                                            pass
+                                # DB responde: estamos en bootstrap (tablas/migraciones). Disparamos en background.
+                                Handler._trigger_db_bootstrap_async(self.db_path)
+                                status = 503
+                                body = f"bootstrapping backend={backend}".encode("utf-8")
+                            except Exception as exc:
+                                status = 503
+                                msg = f"db_unavailable backend={backend}: {type(exc).__name__}: {exc}"
+                                body = msg.encode("utf-8", errors="ignore")
                         Handler._health_last_at = now_ts
                         Handler._health_last_status = status
                         Handler._health_last_body = body
@@ -44424,23 +44481,6 @@ def main():
         except Exception:
             args.port = 8000
 
-    try:
-        ensure_tables(args.db)
-        Handler._db_ready = True
-        Handler._db_ready_last_error = ""
-        Handler._db_ready_last_attempt_at = time.time()
-    except Exception as exc:
-        # Importante: si Postgres/SQLite no está disponible, no matamos el proceso.
-        # Arrancamos el servidor para poder servir estáticos + /api/health devolviendo 503 con detalle.
-        Handler._db_ready = False
-        Handler._db_ready_last_error = f"{type(exc).__name__}: {exc}"
-        Handler._db_ready_last_attempt_at = time.time()
-        print(f"[WARN] DB no disponible al arrancar: {Handler._db_ready_last_error}")
-
-    try:
-        ensure_ocr_tables(args.ocr_db)
-    except Exception as exc:
-        print(f"[WARN] OCR DB no disponible al arrancar: {type(exc).__name__}: {exc}")
     Handler.db_path = args.db
     Handler.ocr_db_path = args.ocr_db
     ocr_workers = max(1, min(8, int(args.ocr_workers or 1)))
@@ -44470,7 +44510,20 @@ def main():
             daemon=True,
         )
         legal_thread.start()
+    # Creamos el servidor ANTES de bootstraps pesados para evitar 502 en plataformas (Render) con timeouts de arranque.
     server = ThreadingHTTPServer((args.host, args.port), Handler)
+    # Bootstrap DB en background (no bloquea bind del puerto).
+    try:
+        Handler._trigger_db_bootstrap_async(args.db)
+    except Exception:
+        pass
+    # OCR tables también en background (best-effort).
+    def _ocr_bootstrap():
+        try:
+            ensure_ocr_tables(args.ocr_db)
+        except Exception as exc:
+            print(f"[WARN] OCR DB no disponible al arrancar: {type(exc).__name__}: {exc}")
+    threading.Thread(target=_ocr_bootstrap, name="ocr-bootstrap", daemon=True).start()
     print(
         f"Servidor activo en http://{args.host}:{args.port} · db={Path(args.db).resolve()} · "
         f"ocr_db={Path(args.ocr_db).resolve()} · ocr_workers={ocr_workers}"

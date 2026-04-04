@@ -24,7 +24,12 @@
             }
             try { deps._lastHealthDetail = lastDetail; } catch {}
             if (deps?.authLoginStatus && lastDetail) {
-              deps.authLoginStatus.textContent = `Base de datos no disponible. ${lastDetail}`;
+              const clean = String(lastDetail || "").trim();
+              if (clean.toLowerCase().startsWith("bootstrapping")) {
+                deps.authLoginStatus.textContent = `Arrancando base de datos… ${clean}`;
+              } else {
+                deps.authLoginStatus.textContent = `Base de datos no disponible. ${clean}`;
+              }
             }
           }
         } finally {
