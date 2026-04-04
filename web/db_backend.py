@@ -465,6 +465,7 @@ class _PooledPostgresCompatConnection(PostgresCompatConnection):
 
 def _pg_pool_acquire(dsn, *, row_factory, connect_timeout):
     # Returns a PostgresCompatConnection whose `.close()` returns the raw connection to the pool.
+    global _PG_POOL_CREATED
     _pg_pool_configured()
     if _PG_POOL_MAX <= 0:
         return None
@@ -476,7 +477,6 @@ def _pg_pool_acquire(dsn, *, row_factory, connect_timeout):
         raw = None
     if raw is None:
         with _PG_POOL_LOCK:
-            global _PG_POOL_CREATED
             if _PG_POOL_CREATED < _PG_POOL_MAX:
                 _PG_POOL_CREATED += 1
                 raw = "CREATE"
@@ -485,7 +485,6 @@ def _pg_pool_acquire(dsn, *, row_factory, connect_timeout):
             import psycopg
         except Exception:
             with _PG_POOL_LOCK:
-                global _PG_POOL_CREATED
                 _PG_POOL_CREATED = max(0, _PG_POOL_CREATED - 1)
             return None
         raw = psycopg.connect(
@@ -508,6 +507,7 @@ def _pg_pool_acquire(dsn, *, row_factory, connect_timeout):
 
 
 def _pg_pool_release(raw_conn, *, broken=False):
+    global _PG_POOL_CREATED
     _pg_pool_configured()
     if raw_conn is None:
         return
@@ -538,7 +538,6 @@ def _pg_pool_release(raw_conn, *, broken=False):
         except Exception:
             pass
         with _PG_POOL_LOCK:
-            global _PG_POOL_CREATED
             _PG_POOL_CREATED = max(0, _PG_POOL_CREATED - 1)
         return
     try:
@@ -549,7 +548,6 @@ def _pg_pool_release(raw_conn, *, broken=False):
         except Exception:
             pass
         with _PG_POOL_LOCK:
-            global _PG_POOL_CREATED
             _PG_POOL_CREATED = max(0, _PG_POOL_CREATED - 1)
 
 
