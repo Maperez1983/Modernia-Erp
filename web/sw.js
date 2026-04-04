@@ -5,31 +5,41 @@
  * - Never caches /api or /uploads
  */
 
-const CACHE_VERSION = "v16";
+const CACHE_VERSION = "v17";
 const SHELL_CACHE = `verifika2-shell-${CACHE_VERSION}`;
 const RUNTIME_CACHE = `verifika2-runtime-${CACHE_VERSION}`;
+const FONTS_CACHE = `verifika2-fonts-${CACHE_VERSION}`;
 
 const SHELL_URLS = [
   "/",
   "/index.html",
-  "/styles.css?v=154",
+  "/styles.css?v=155",
   "/ui-foundation.js?v=2",
-  "/app-auth.js?v=6",
+  "/app-auth.js?v=7",
   "/app-routing.js?v=7",
-  "/app.js?v=389",
-  "/manifest.webmanifest?v=2",
+  "/app.js?v=390",
+  "/manifest.webmanifest?v=3",
   "/assets/verifika2/verifika2_mark.svg",
   "/assets/verifika2/verifika2_badge_gold.svg",
   "/assets/verifika2/verifika2_badge_silver.svg",
   "/assets/verifika2/verifika2_badge_carbon.svg",
-  "/icons/icon-192.png",
-  "/icons/icon-512.png",
-  "/icons/apple-touch-icon.png",
+  "/icons/icon-192-v17.png",
+  "/icons/icon-512-v17.png",
+  "/icons/apple-touch-icon-v17.png",
 ];
 
 const isSameOrigin = (url) => {
   try {
     return new URL(url, self.location.href).origin === self.location.origin;
+  } catch {
+    return false;
+  }
+};
+
+const isFontRequest = (url) => {
+  try {
+    const u = new URL(url, self.location.href);
+    return u.origin === "https://fonts.googleapis.com" || u.origin === "https://fonts.gstatic.com";
   } catch {
     return false;
   }
@@ -103,11 +113,14 @@ self.addEventListener("fetch", (event) => {
   const req = event.request;
   if (req.method !== "GET") return;
   const url = new URL(req.url);
-  if (!isSameOrigin(url.href)) return;
-  if (!isCacheablePath(url.pathname)) return;
+  const isFonts = isFontRequest(url.href);
+  if (!isFonts) {
+    if (!isSameOrigin(url.href)) return;
+    if (!isCacheablePath(url.pathname)) return;
+  }
 
-  const isNavigation = req.mode === "navigate" || (req.headers.get("accept") || "").includes("text/html");
-  const key = normalizeCacheKey(req);
+  const isNavigation = !isFonts && (req.mode === "navigate" || (req.headers.get("accept") || "").includes("text/html"));
+  const key = isFonts ? req : normalizeCacheKey(req);
 
   if (isNavigation) {
     // Network-first so we always get the latest app shell when online.
@@ -122,6 +135,25 @@ self.addEventListener("fetch", (event) => {
           const cache = await caches.open(SHELL_CACHE);
           return (await cache.match("/index.html")) || (await cache.match("/")) || Response.error();
         }
+      })()
+    );
+    return;
+  }
+
+  if (isFonts) {
+    // Cache-first for Google Fonts to speed up PWA (iOS/Android).
+    event.respondWith(
+      (async () => {
+        const cache = await caches.open(FONTS_CACHE);
+        const cached = await cache.match(req);
+        if (cached) return cached;
+        const resp = await fetch(req);
+        if (resp) {
+          try {
+            cache.put(req, resp.clone());
+          } catch {}
+        }
+        return resp;
       })()
     );
     return;

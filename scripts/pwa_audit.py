@@ -54,12 +54,33 @@ def main() -> int:
     manifest = json.loads(read_text(manifest_path))
     if manifest.get("display") != "standalone":
         raise ValueError("El manifest no usa display=standalone.")
-    if not manifest.get("icons"):
+    icons = manifest.get("icons") or []
+    if not icons:
         raise ValueError("El manifest no tiene iconos.")
 
-    assert_icon(WEB / "icons" / "icon-192.png", (192, 192))
-    assert_icon(WEB / "icons" / "icon-512.png", (512, 512))
-    assert_icon(WEB / "icons" / "apple-touch-icon.png", (180, 180))
+    # Validar iconos del manifest.
+    for icon in icons:
+        src = str(icon.get("src") or "").strip()
+        sizes = str(icon.get("sizes") or "").strip()
+        if not src or not sizes:
+            continue
+        if not src.startswith("/icons/"):
+            continue
+        try:
+            w_str, h_str = sizes.lower().split("x", 1)
+            size = (int(w_str), int(h_str))
+        except Exception:
+            continue
+        assert_icon(WEB / src.lstrip("/"), size)
+
+    # Validar apple-touch-icon del HTML.
+    m = re.search(r'<link\s+rel="apple-touch-icon"\s+href="([^"]+)"\s*/?>', index_text)
+    if not m:
+        raise ValueError("No se encontró link apple-touch-icon en index.html.")
+    touch_href = str(m.group(1)).strip()
+    if not touch_href.startswith("/icons/"):
+        raise ValueError("apple-touch-icon no apunta a /icons/.")
+    assert_icon(WEB / touch_href.lstrip("/"), (180, 180))
 
     print("OK: PWA/Icons/SW coherentes.")
     return 0
@@ -71,4 +92,3 @@ if __name__ == "__main__":
     except Exception as err:
         print(f"ERROR: {err}", file=sys.stderr)
         raise SystemExit(1)
-

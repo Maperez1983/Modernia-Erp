@@ -1,6 +1,7 @@
 (function () {
   async function waitForHealth(deps, options) {
-    const maxMs = Math.max(5000, Number(options?.maxMs || 45000) || 45000);
+    const maxMs = Math.max(5000, Number(options?.maxMs || 120000) || 120000);
+    const reqTimeoutMs = Math.max(1500, Number(options?.requestTimeoutMs || 10000) || 10000);
     const started = Date.now();
     let attempt = 0;
     let lastDetail = "";
@@ -8,7 +9,7 @@
       attempt += 1;
       try {
         const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 5000);
+        const timer = setTimeout(() => controller.abort(), reqTimeoutMs);
         try {
           const res = await fetch("/api/health", { cache: "no-store", credentials: "same-origin", signal: controller.signal });
           if (res && res.ok) {
@@ -30,9 +31,13 @@
           clearTimeout(timer);
         }
       } catch {}
-      const delay = Math.min(6000, 250 * Math.pow(1.8, attempt));
+      const delay = Math.min(7000, 250 * Math.pow(1.8, attempt));
       if (deps?.authLoginStatus) {
-        deps.authLoginStatus.textContent = attempt <= 2 ? "Arrancando servidor..." : `Arrancando servidor... (${Math.round(delay)}ms)`;
+        const remaining = Math.max(0, maxMs - (Date.now() - started));
+        const remainingLabel = remaining ? `${Math.ceil(remaining / 1000)}s` : "";
+        deps.authLoginStatus.textContent = attempt <= 2
+          ? "Arrancando servidor... (Render puede tardar 1-2 min)"
+          : `Arrancando servidor... reintento en ${Math.round(delay / 1000)}s · queda ${remainingLabel}`;
       }
       await new Promise((resolve) => setTimeout(resolve, delay));
     }
@@ -58,10 +63,12 @@
   }
 
   async function ensureAuthAndBoot(deps) {
-    const healthy = await waitForHealth(deps, { maxMs: 45000 });
+    const healthy = await waitForHealth(deps, { maxMs: 120000, requestTimeoutMs: 12000 });
     if (!healthy) {
       const detail = String(deps?._lastHealthDetail || "").trim();
-      deps.showAuthOverlay(detail ? `Base de datos no disponible. ${detail}` : "Servidor no disponible. Espera unos segundos y recarga.");
+      deps.showAuthOverlay(detail
+        ? `Base de datos no disponible. ${detail}`
+        : "Servidor arrancando (Render puede tardar 1-2 min). Espera unos segundos y recarga si no avanza.");
       try { document.body.classList.remove("auth-pending"); } catch {}
       return;
     }
@@ -183,7 +190,7 @@
       return;
     }
     if (deps.authLoginStatus) deps.authLoginStatus.textContent = "Accediendo...";
-    await waitForHealth(deps, { maxMs: 30000 });
+    await waitForHealth(deps, { maxMs: 90000, requestTimeoutMs: 12000 });
     try {
       const res = await fetch("/api/login", {
         method: "POST",

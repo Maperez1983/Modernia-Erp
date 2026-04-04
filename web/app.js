@@ -1,9 +1,9 @@
 // Render puede tener cold starts que superan 15s en la primera petición.
 // Subimos el timeout para evitar falsos "Servidor no disponible" al arrancar.
-const API_TIMEOUT_MS = 30000;
+const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v16";
+const APP_SW_VERSION = "v17";
 
 // Workspace tenant por defecto del producto (branding de software). Mantiene compatibilidad con slugs legacy.
 const DEFAULT_TENANT_WORKSPACE_SLUG = "verifika2";
