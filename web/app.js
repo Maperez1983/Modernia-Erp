@@ -12793,12 +12793,19 @@ const loadWorkspaceDetail = async (workspaceId) => {
   state.workspaceTimeEmployees = [];
   state.workspaceTimeSummary = null;
   let detail = null;
-  try {
-    detail = await api(`/api/workspace_detail?id=${encodeURIComponent(workspaceId)}`);
-  } catch (error) {
+  detail = await safeWorkspaceApi(`/api/workspace_detail?id=${encodeURIComponent(workspaceId)}`, null);
+  if (!detail || !detail.workspace) {
     clearCurrentWorkspaceUi();
-    alert(error?.message || "No se pudo cargar el workspace.");
     updateWorkspaceEntryChrome();
+    const attempt = Number(state.workspaceDetailRetryAttempt || 0) || 0;
+    const nextAttempt = Math.min(8, attempt + 1);
+    state.workspaceDetailRetryAttempt = nextAttempt;
+    const delayMs = Math.min(45000, 1200 * Math.pow(1.6, nextAttempt));
+    const lastErr = state.lastApiError?.message ? String(state.lastApiError.message) : "No se pudo cargar el workspace.";
+    setUiToast("Error cargando el workspace", `${lastErr} · Reintentando en ${Math.round(delayMs / 1000)}s...`);
+    window.setTimeout(() => {
+      loadWorkspaceDetail(workspaceId).catch(() => {});
+    }, delayMs);
     return;
   }
   state.currentWorkspaceDetail = detail;

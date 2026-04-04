@@ -1,7 +1,9 @@
 import os
+import queue
 import re
 import sqlite3
 import threading
+import time
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -333,12 +335,27 @@ def open_postgres_conn(with_row_factory=False, *, skip_compat=False, connect_tim
             connect_timeout = int(os.environ.get("APP_PG_CONNECT_TIMEOUT", "5"))
         except Exception:
             connect_timeout = 5
-    conn = psycopg.connect(
-        dsn,
-        row_factory=(dict_row if with_row_factory else None),
-        connect_timeout=max(2, connect_timeout),
-    )
-    wrapped = PostgresCompatConnection(conn)
+
+    # Pool ligero (sin dependencias) para Render/PG:
+    # - Reduce el coste de handshake SSL + auth (muy notable en iOS/PWA).
+    # - Evita avalanchas de conexiones que pueden tumbar Postgres (y se ven como "server closed connection unexpectedly").
+    # Si se especifica connect_timeout_override (health probes), evitamos pool para no bloquear.
+    use_pool = connect_timeout_override is None
+    wrapped = None
+    if use_pool:
+        wrapped = _pg_pool_acquire(
+            dsn,
+            row_factory=(dict_row if with_row_factory else None),
+            connect_timeout=max(2, connect_timeout),
+        )
+    if wrapped is None:
+        conn = psycopg.connect(
+            dsn,
+            row_factory=(dict_row if with_row_factory else None),
+            connect_timeout=max(2, connect_timeout),
+        )
+        wrapped = PostgresCompatConnection(conn)
+
     # Importante: crear las funciones shim en cada conexión puede ser MUY costoso (muchos CREATE OR REPLACE).
     # Las funciones se crean a nivel de BD, así que basta con hacerlo una sola vez por proceso.
     global _PG_COMPAT_READY
@@ -356,6 +373,184 @@ def open_postgres_conn(with_row_factory=False, *, skip_compat=False, connect_tim
                         except Exception:
                             pass
     return wrapped
+
+
+_PG_POOL_MAX = 0
+_PG_POOL_WAIT_S = 0.0
+_PG_POOL_QUEUE = None
+_PG_POOL_LOCK = threading.Lock()
+_PG_POOL_CREATED = 0
+
+
+def _pg_pool_configured():
+    global _PG_POOL_MAX, _PG_POOL_WAIT_S, _PG_POOL_QUEUE
+    if _PG_POOL_QUEUE is not None:
+        return
+    try:
+        _PG_POOL_MAX = int(os.environ.get("APP_PG_POOL_MAX", "10") or 10)
+    except Exception:
+        _PG_POOL_MAX = 10
+    try:
+        _PG_POOL_WAIT_S = float(os.environ.get("APP_PG_POOL_WAIT_SECONDS", "4") or 4)
+    except Exception:
+        _PG_POOL_WAIT_S = 4.0
+    _PG_POOL_MAX = max(0, min(50, _PG_POOL_MAX))
+    _PG_POOL_WAIT_S = max(0.1, min(15.0, _PG_POOL_WAIT_S))
+    _PG_POOL_QUEUE = queue.LifoQueue(maxsize=max(1, _PG_POOL_MAX or 1))
+
+
+def _pg_is_connection_error(exc):
+    name = (type(exc).__name__ or "").lower()
+    mod = (type(exc).__module__ or "").lower()
+    if "psycopg" in mod and name in {"operationalerror", "interfaceerror", "adminshutdown", "crashshutdown"}:
+        return True
+    msg = str(exc or "").lower()
+    if "server closed the connection unexpectedly" in msg:
+        return True
+    if "connection failed" in msg and "port" in msg:
+        return True
+    if "terminating connection" in msg or "connection reset" in msg:
+        return True
+    return False
+
+
+class _PooledPostgresCompatConnection(PostgresCompatConnection):
+    def __init__(self, conn, *, pool_dsn):
+        super().__init__(conn)
+        self._pool_dsn = pool_dsn
+        self._pool_released = False
+        self._pool_broken = False
+
+    def execute(self, sql, params=None):
+        try:
+            return super().execute(sql, params)
+        except Exception as exc:
+            if _pg_is_connection_error(exc):
+                self._pool_broken = True
+            raise
+
+    def executemany(self, sql, seq_of_params):
+        try:
+            return super().executemany(sql, seq_of_params)
+        except Exception as exc:
+            if _pg_is_connection_error(exc):
+                self._pool_broken = True
+            raise
+
+    def commit(self):
+        try:
+            return super().commit()
+        except Exception as exc:
+            if _pg_is_connection_error(exc):
+                self._pool_broken = True
+            raise
+
+    def rollback(self):
+        try:
+            return super().rollback()
+        except Exception as exc:
+            if _pg_is_connection_error(exc):
+                self._pool_broken = True
+            raise
+
+    def close(self):
+        if self._pool_released:
+            return
+        self._pool_released = True
+        raw = getattr(self, "_conn", None)
+        if raw is None:
+            return
+        _pg_pool_release(raw, broken=bool(self._pool_broken))
+
+
+def _pg_pool_acquire(dsn, *, row_factory, connect_timeout):
+    # Returns a PostgresCompatConnection whose `.close()` returns the raw connection to the pool.
+    _pg_pool_configured()
+    if _PG_POOL_MAX <= 0:
+        return None
+    # Best-effort to reuse an existing connection.
+    raw = None
+    try:
+        raw = _PG_POOL_QUEUE.get_nowait()
+    except Exception:
+        raw = None
+    if raw is None:
+        with _PG_POOL_LOCK:
+            global _PG_POOL_CREATED
+            if _PG_POOL_CREATED < _PG_POOL_MAX:
+                _PG_POOL_CREATED += 1
+                raw = "CREATE"
+    if raw == "CREATE":
+        try:
+            import psycopg
+        except Exception:
+            with _PG_POOL_LOCK:
+                global _PG_POOL_CREATED
+                _PG_POOL_CREATED = max(0, _PG_POOL_CREATED - 1)
+            return None
+        raw = psycopg.connect(
+            dsn,
+            row_factory=row_factory,
+            connect_timeout=connect_timeout,
+        )
+    if raw is None:
+        # Pool saturated: wait a bit to avoid opening infinite connections.
+        try:
+            raw = _PG_POOL_QUEUE.get(timeout=_PG_POOL_WAIT_S)
+        except Exception:
+            return None
+    # Configure row_factory for this borrower.
+    try:
+        raw.row_factory = row_factory
+    except Exception:
+        pass
+    return _PooledPostgresCompatConnection(raw, pool_dsn=dsn)
+
+
+def _pg_pool_release(raw_conn, *, broken=False):
+    _pg_pool_configured()
+    if raw_conn is None:
+        return
+    if _PG_POOL_MAX <= 0:
+        try:
+            raw_conn.close()
+        except Exception:
+            pass
+        return
+    # Reset transaction state before reuse.
+    try:
+        raw_conn.rollback()
+    except Exception:
+        pass
+    # Reset autocommit if someone enabled it (bootstrap does this).
+    try:
+        raw_conn.autocommit = False
+    except Exception:
+        pass
+    closed = False
+    try:
+        closed = bool(getattr(raw_conn, "closed", False))
+    except Exception:
+        closed = False
+    if broken or closed:
+        try:
+            raw_conn.close()
+        except Exception:
+            pass
+        with _PG_POOL_LOCK:
+            global _PG_POOL_CREATED
+            _PG_POOL_CREATED = max(0, _PG_POOL_CREATED - 1)
+        return
+    try:
+        _PG_POOL_QUEUE.put_nowait(raw_conn)
+    except Exception:
+        try:
+            raw_conn.close()
+        except Exception:
+            pass
+        with _PG_POOL_LOCK:
+            global _PG_POOL_CREATED
+            _PG_POOL_CREATED = max(0, _PG_POOL_CREATED - 1)
 
 
 _PG_COMPAT_READY = False

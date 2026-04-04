@@ -24977,6 +24977,39 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         return
 
+    @staticmethod
+    def _is_db_disconnect_error(exc):
+        name = (type(exc).__name__ or "").lower()
+        mod = (type(exc).__module__ or "").lower()
+        if "psycopg" in mod and name in {"operationalerror", "interfaceerror", "adminshutdown", "crashshutdown"}:
+            return True
+        if "sqlite3" in mod and name in {"operationalerror", "databaseerror"}:
+            msg = str(exc or "").lower()
+            if "database is locked" in msg or "disk i/o error" in msg:
+                return True
+        msg = str(exc or "").lower()
+        if "server closed the connection unexpectedly" in msg:
+            return True
+        if "connection failed" in msg and "port" in msg:
+            return True
+        if "connection reset" in msg or "terminating connection" in msg:
+            return True
+        return False
+
+    @staticmethod
+    def _mark_db_unavailable(exc=None):
+        try:
+            Handler._db_ready = False
+            Handler._db_ready_last_attempt_at = time.time()
+            # No filtramos detalles (IPs internas) al front; guardamos solo el tipo para diagnóstico.
+            Handler._db_ready_last_error = f"{type(exc).__name__}" if exc else "DbUnavailable"
+            # Forzamos que el próximo /api/health reprobe.
+            Handler._health_last_at = 0.0
+            Handler._health_last_status = 0
+            Handler._health_last_body = b""
+        except Exception:
+            pass
+
     def _ensure_db_ready(self):
         if Handler._db_ready:
             return
@@ -25337,42 +25370,48 @@ class Handler(BaseHTTPRequestHandler):
                         status = int(Handler._health_last_status)
                         body = Handler._health_last_body or b""
                     else:
-                        if Handler._db_ready:
-                            status = 200
-                            body = f"ok backend={backend}".encode("utf-8")
-                        else:
-                            # Quick probe (2s) to distinguish "DB down" from "bootstrapping".
-                            try:
-                                if db_is_postgres_enabled():
-                                    conn = open_postgres_conn(
-                                        with_row_factory=False,
-                                        skip_compat=True,
-                                        connect_timeout_override=int(os.environ.get("APP_HEALTH_PG_TIMEOUT", "2") or 2),
-                                    )
+                        # Siempre hacemos un probe rápido: si Postgres ha reiniciado tras marcar _db_ready,
+                        # evitamos "falsos OK" que luego explotan en /api/workspace_detail.
+                        timeout_s = int(os.environ.get("APP_HEALTH_PG_TIMEOUT", "2") or 2)
+                        try:
+                            if db_is_postgres_enabled():
+                                conn = open_postgres_conn(
+                                    with_row_factory=False,
+                                    skip_compat=True,
+                                    connect_timeout_override=timeout_s,
+                                )
+                                try:
+                                    conn.execute("SELECT 1")
+                                finally:
                                     try:
-                                        conn.execute("SELECT 1")
-                                    finally:
-                                        try:
-                                            conn.close()
-                                        except Exception:
-                                            pass
-                                else:
-                                    conn = open_sqlite_conn(self.db_path, with_row_factory=False)
+                                        conn.close()
+                                    except Exception:
+                                        pass
+                            else:
+                                conn = open_sqlite_conn(self.db_path, with_row_factory=False)
+                                try:
+                                    conn.execute("SELECT 1")
+                                finally:
                                     try:
-                                        conn.execute("SELECT 1")
-                                    finally:
-                                        try:
-                                            conn.close()
-                                        except Exception:
-                                            pass
-                                # DB responde: estamos en bootstrap (tablas/migraciones). Disparamos en background.
+                                        conn.close()
+                                    except Exception:
+                                        pass
+                            if Handler._db_ready:
+                                status = 200
+                                body = f"ok backend={backend}".encode("utf-8")
+                            else:
+                                # DB responde pero todavía no hemos terminado bootstrap de esquema.
                                 Handler._trigger_db_bootstrap_async(self.db_path)
                                 status = 503
                                 body = f"bootstrapping backend={backend}".encode("utf-8")
-                            except Exception as exc:
-                                status = 503
-                                msg = f"db_unavailable backend={backend}: {type(exc).__name__}: {exc}"
-                                body = msg.encode("utf-8", errors="ignore")
+                        except Exception as exc:
+                            Handler._mark_db_unavailable(exc)
+                            try:
+                                Handler._trigger_db_bootstrap_async(self.db_path)
+                            except Exception:
+                                pass
+                            status = 503
+                            body = f"db_unavailable backend={backend}".encode("utf-8")
                         Handler._health_last_at = now_ts
                         Handler._health_last_status = status
                         Handler._health_last_body = body
@@ -25399,9 +25438,17 @@ class Handler(BaseHTTPRequestHandler):
                 self._ensure_db_ready()
                 self.handle_api(parsed)
             except DbUnavailableError as exc:
-                json_response(self, {"error": "DB no disponible", "detail": str(exc)}, status=503)
+                json_response(self, {"error": "DB no disponible", "detail": "Reintenta en unos segundos."}, status=503)
             except Exception as exc:
-                json_response(self, {"error": f"{type(exc).__name__}: {exc}"}, status=500)
+                if Handler._is_db_disconnect_error(exc):
+                    Handler._mark_db_unavailable(exc)
+                    try:
+                        Handler._trigger_db_bootstrap_async(self.db_path)
+                    except Exception:
+                        pass
+                    json_response(self, {"error": "DB no disponible", "detail": "Reintenta en unos segundos."}, status=503)
+                else:
+                    json_response(self, {"error": "API error"}, status=500)
             return
 
         if parsed.path == "/kiosk":
@@ -25552,7 +25599,15 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as exc:
             # Evita que una excepción no controlada cierre la conexión (Render lo reporta como 502).
             try:
-                json_response(self, {"error": f"{type(exc).__name__}: {exc}"}, status=500)
+                if isinstance(exc, DbUnavailableError) or Handler._is_db_disconnect_error(exc):
+                    Handler._mark_db_unavailable(exc)
+                    try:
+                        Handler._trigger_db_bootstrap_async(self.db_path)
+                    except Exception:
+                        pass
+                    json_response(self, {"error": "DB no disponible", "detail": "Reintenta en unos segundos."}, status=503)
+                else:
+                    json_response(self, {"error": "API error"}, status=500)
             except Exception:
                 try:
                     self.send_error(500, "API error")
