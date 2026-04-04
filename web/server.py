@@ -25358,6 +25358,35 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self):
+        try:
+            self._do_GET()
+        except BrokenPipeError:
+            # Cliente cerró conexión (iOS/Safari puede hacerlo al recargar).
+            return
+        except DbUnavailableError:
+            try:
+                json_response(self, {"error": "DB no disponible", "detail": "Reintenta en unos segundos."}, status=503)
+            except Exception:
+                try:
+                    self.send_error(503, "DB no disponible")
+                except Exception:
+                    pass
+        except Exception as exc:
+            # Evita que una excepción no controlada se traduzca en 502 (Render).
+            try:
+                if str(self.path or "").startswith("/api/"):
+                    json_response(self, {"error": "API error"}, status=500)
+                else:
+                    self.send_error(500, "Server error")
+            except Exception:
+                pass
+            try:
+                # Log simple para Render logs
+                print(f"[ERROR] GET {self.path}: {type(exc).__name__}: {exc}")
+            except Exception:
+                pass
+
+    def _do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
         if parsed.path == "/health":
             # Liveness: NO depende de DB (evita 502/restarts si Postgres está caído).
