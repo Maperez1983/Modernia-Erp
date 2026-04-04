@@ -4508,13 +4508,25 @@ def parse_invoice_text(text):
     if not raw.strip():
         return {}
     numero = ""
-    numero_match = re.search(
-        r"(?:factura|fra\.?|n[úu]m(?:ero)?|n[º°])\s*[:#-]?\s*([A-Z0-9][A-Z0-9\-\/\.]{2,})",
-        raw,
-        re.IGNORECASE,
-    )
-    if numero_match:
-        numero = numero_match.group(1).strip()
+    numero_candidates = []
+    for pat in (
+        # "Factura Nº: F-001"
+        r"\bfactura\s*(?:n[úu]m(?:ero)?|n[º°]|no\.?)\s*[:#-]?\s*([A-Z0-9][A-Z0-9\-\/\.]{2,})",
+        # "Nº: F-001" / "Num: 2026/001"
+        r"\b(?:n[úu]m(?:ero)?|n[º°]|no\.?)\s*[:#-]?\s*([A-Z0-9][A-Z0-9\-\/\.]{2,})",
+        # "FRA: 2026-001"
+        r"\bfra\.?\s*[:#-]?\s*([A-Z0-9][A-Z0-9\-\/\.]{2,})",
+    ):
+        for m in re.finditer(pat, raw, re.IGNORECASE):
+            cand = (m.group(1) or "").strip().strip(" .;:")
+            if not cand:
+                continue
+            # Evita falsos positivos (p. ej. "FACTURA" seguido de un texto sin número).
+            if not re.search(r"\d", cand):
+                continue
+            numero_candidates.append(cand)
+    if numero_candidates:
+        numero = numero_candidates[0]
     fecha_iso = ""
     fecha = ""
     fecha_match = re.search(r"\b(\d{4}-\d{2}-\d{2})\b", raw)
@@ -6487,8 +6499,32 @@ def ocr_image_file(image_path):
                     pass
 
 def ocr_image_external(image_bytes):
-    credentials_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
-    api_key = os.environ.get("GOOGLE_VISION_API_KEY") or os.environ.get("VISION_API_KEY")
+    def _env_first_line(name):
+        raw = os.environ.get(name)
+        if raw in (None, ""):
+            return ""
+        try:
+            raw = str(raw)
+        except Exception:
+            return ""
+        for line in raw.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            # Evita que variables mal exportadas (con nuevas líneas) rompan URLs o paths.
+            if line.startswith("export "):
+                continue
+            return line.strip().strip('"').strip("'")
+        return str(raw).strip().strip('"').strip("'")
+
+    def _env_first_token(name):
+        line = _env_first_line(name)
+        if not line:
+            return ""
+        return line.split()[0].strip()
+
+    credentials_path = _env_first_line("GOOGLE_APPLICATION_CREDENTIALS")
+    api_key = _env_first_token("GOOGLE_VISION_API_KEY") or _env_first_token("VISION_API_KEY")
     auth_header = None
     if credentials_path and os.path.exists(credentials_path):
         try:
@@ -6527,7 +6563,10 @@ def ocr_image_external(image_bytes):
         with urllib.request.urlopen(req, timeout=20) as resp:
             res = json.loads(resp.read().decode("utf-8"))
     except Exception as err:
-        return "", f"OCR externo: {err}"
+        msg = str(err)
+        if api_key and api_key in msg:
+            msg = msg.replace(api_key, "***")
+        return "", f"OCR externo: {msg}"
     try:
         text = res["responses"][0].get("fullTextAnnotation", {}).get("text", "")
         return text, ""
@@ -6535,8 +6574,31 @@ def ocr_image_external(image_bytes):
         return "", "OCR externo: sin texto"
 
 def external_ocr_available():
-    credentials_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
-    api_key = os.environ.get("GOOGLE_VISION_API_KEY") or os.environ.get("VISION_API_KEY")
+    def _env_first_line(name):
+        raw = os.environ.get(name)
+        if raw in (None, ""):
+            return ""
+        try:
+            raw = str(raw)
+        except Exception:
+            return ""
+        for line in raw.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            if line.startswith("export "):
+                continue
+            return line.strip().strip('"').strip("'")
+        return str(raw).strip().strip('"').strip("'")
+
+    def _env_first_token(name):
+        line = _env_first_line(name)
+        if not line:
+            return ""
+        return line.split()[0].strip()
+
+    credentials_path = _env_first_line("GOOGLE_APPLICATION_CREDENTIALS")
+    api_key = _env_first_token("GOOGLE_VISION_API_KEY") or _env_first_token("VISION_API_KEY")
     return bool(api_key) or (credentials_path and os.path.exists(credentials_path))
 
 def docai_available():
