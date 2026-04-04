@@ -11,6 +11,14 @@
 - `assets/verifika2/verifika2_badge_silver.svg` (sello plata)
 - `assets/verifika2/verifika2_badge_carbon.svg` (sello oscuro)
 
+Nota: los `wordmark*.svg` son una recreación para uso web. El logo original (fiel) está en PNG y es el que se debe usar si se necesita coincidencia exacta.
+
+## Activos (raster, fieles al logo original)
+
+- `assets/verifika2/verifika2_wordmark_original.png` (original, fondo blanco)
+- `assets/verifika2/verifika2_wordmark_check_green.png` (check verde `#22C55E`, fondo blanco)
+- `assets/verifika2/verifika2_wordmark_check_green_transparent.png` (check verde, fondo transparente)
+
 ## Paleta sugerida
 
 - Navy (texto principal): `#0B1D33`
