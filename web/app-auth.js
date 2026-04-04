@@ -46,7 +46,18 @@
 
   async function fetchCurrentSessionUser() {
     try {
-      const res = await fetch("/api/me", { cache: "no-store", credentials: "same-origin" });
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 4500);
+      let res;
+      try {
+        res = await fetch("/api/me", {
+          cache: "no-store",
+          credentials: "same-origin",
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timer);
+      }
       let data = null;
       try {
         data = await res.json();
@@ -63,24 +74,36 @@
   }
 
   async function ensureAuthAndBoot(deps) {
-    const healthy = await waitForHealth(deps, { maxMs: 120000, requestTimeoutMs: 12000 });
-    if (!healthy) {
-      const detail = String(deps?._lastHealthDetail || "").trim();
-      deps.showAuthOverlay(detail
-        ? `Base de datos no disponible. ${detail}`
-        : "Servidor arrancando (Render puede tardar 1-2 min). Espera unos segundos y recarga si no avanza.");
-      try { document.body.classList.remove("auth-pending"); } catch {}
-      return;
-    }
     const params = new URLSearchParams(window.location.search);
     const activateToken = (params.get("activar_token") || "").trim();
     const portalToken = (params.get("portal_token") || "").trim();
     if (activateToken) {
+      const healthy = await waitForHealth(deps, { maxMs: 120000, requestTimeoutMs: 12000 });
+      if (!healthy) {
+        const detail = String(deps?._lastHealthDetail || "").trim();
+        deps.showActivationOverlay("Servidor arrancando…");
+        if (deps.authActivateStatus) {
+          deps.authActivateStatus.textContent = detail
+            ? `Base de datos no disponible. ${detail}`
+            : "Servidor arrancando (Render puede tardar 1-2 min). Espera unos segundos y recarga.";
+        }
+        try { document.body.classList.remove("auth-pending"); } catch {}
+        return;
+      }
       await deps.prepareActivationFlow(activateToken);
       try { document.body.classList.remove("auth-pending"); } catch {}
       return;
     }
     if (portalToken) {
+      const healthy = await waitForHealth(deps, { maxMs: 120000, requestTimeoutMs: 12000 });
+      if (!healthy) {
+        const detail = String(deps?._lastHealthDetail || "").trim();
+        deps.showAuthOverlay(detail
+          ? `Base de datos no disponible. ${detail}`
+          : "Servidor arrancando (Render puede tardar 1-2 min). Espera unos segundos y recarga si no avanza.");
+        try { document.body.classList.remove("auth-pending"); } catch {}
+        return;
+      }
       deps.setAuthUi(null);
       deps.hideAuthOverlay();
       if (!deps.state.appInitialized) {
@@ -94,7 +117,22 @@
     }
     const user = await fetchCurrentSessionUser();
     if (!user) {
-      deps.showAuthOverlay("");
+      // No bloqueamos la UI esperando el cold start: mostramos login y dejamos el health probe en background.
+      deps.showAuthOverlay("Arrancando servidor... (Render puede tardar 1-2 min)");
+      waitForHealth(deps, { maxMs: 120000, requestTimeoutMs: 12000 }).then(async (ok) => {
+        if (!ok) return;
+        const userReady = await fetchCurrentSessionUser();
+        if (!userReady) {
+          if (deps?.authLoginStatus) deps.authLoginStatus.textContent = "";
+          return;
+        }
+        deps.setAuthUi(userReady);
+        deps.hideAuthOverlay();
+        if (!deps.state.appInitialized) {
+          await deps.init();
+          deps.state.appInitialized = true;
+        }
+      }).catch(() => {});
       try { document.body.classList.remove("auth-pending"); } catch {}
       return;
     }

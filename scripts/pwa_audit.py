@@ -73,14 +73,30 @@ def main() -> int:
             continue
         assert_icon(WEB / src.lstrip("/"), size)
 
-    # Validar apple-touch-icon del HTML.
-    m = re.search(r'<link\s+rel="apple-touch-icon"\s+href="([^"]+)"\s*/?>', index_text)
-    if not m:
-        raise ValueError("No se encontró link apple-touch-icon en index.html.")
-    touch_href = str(m.group(1)).strip()
-    if not touch_href.startswith("/icons/"):
-        raise ValueError("apple-touch-icon no apunta a /icons/.")
-    assert_icon(WEB / touch_href.lstrip("/"), (180, 180))
+    # Validar apple-touch-icon(s) del HTML.
+    apple_links = re.findall(r'<link[^>]+rel="apple-touch-icon"[^>]*>', index_text)
+    if not apple_links:
+        raise ValueError("No se encontraron links apple-touch-icon en index.html.")
+    seen_180 = False
+    for raw in apple_links:
+        href_m = re.search(r'href="([^"]+)"', raw)
+        if not href_m:
+            continue
+        href = str(href_m.group(1)).strip()
+        if not href.startswith("/icons/"):
+            raise ValueError("apple-touch-icon no apunta a /icons/.")
+        sizes_m = re.search(r'sizes="([0-9]+)x([0-9]+)"', raw)
+        if sizes_m:
+            size = (int(sizes_m.group(1)), int(sizes_m.group(2)))
+            assert_icon(WEB / href.lstrip("/"), size)
+            if size == (180, 180):
+                seen_180 = True
+        else:
+            # Si no hay sizes, esperamos 180x180 por convención.
+            assert_icon(WEB / href.lstrip("/"), (180, 180))
+            seen_180 = True
+    if not seen_180:
+        raise ValueError("No se encontró apple-touch-icon 180x180 en index.html.")
 
     print("OK: PWA/Icons/SW coherentes.")
     return 0
