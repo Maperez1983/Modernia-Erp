@@ -5,7 +5,7 @@
  * - Never caches /api or /uploads
  */
 
-const CACHE_VERSION = "v11";
+const CACHE_VERSION = "v12";
 const SHELL_CACHE = `verifika2-shell-${CACHE_VERSION}`;
 const RUNTIME_CACHE = `verifika2-runtime-${CACHE_VERSION}`;
 
@@ -16,10 +16,11 @@ const SHELL_URLS = [
   "/ui-foundation.js?v=2",
   "/app-auth.js?v=6",
   "/app-routing.js?v=7",
-  "/app.js?v=385",
+  "/app.js?v=386",
   "/manifest.webmanifest?v=2",
   "/icons/icon-192.png",
   "/icons/icon-512.png",
+  "/icons/apple-touch-icon.png",
 ];
 
 const isSameOrigin = (url) => {
