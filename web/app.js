@@ -3,7 +3,7 @@
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v19";
+const APP_SW_VERSION = "v20";
 
 // Workspace tenant por defecto del producto (branding de software). Mantiene compatibilidad con slugs legacy.
 const DEFAULT_TENANT_WORKSPACE_SLUG = "verifika2";
@@ -12675,9 +12675,17 @@ const renderWorkspaceDocumentHub = (data = {}) => {
 
 const safeWorkspaceApi = async (path, fallback) => {
   try {
+    state.lastApiError = null;
     return await api(path);
   } catch (error) {
-    console.error("Workspace API failed:", path, error);
+    const payload = {
+      path,
+      status: Number(error?.status || 0) || 0,
+      message: String(error?.message || error || "").slice(0, 900),
+      at: new Date().toISOString(),
+    };
+    state.lastApiError = payload;
+    console.error("Workspace API failed:", payload);
     return fallback;
   }
 };
@@ -13028,7 +13036,14 @@ const loadWorkspaceCentral = async () => {
     renderWorkspaceList([]);
     // Evita un alert bloqueante: en Render esto suele ser un reinicio/deploy o cold start.
     try {
-      setUiToast("Servidor no disponible", "Reintentando cargar el workspace en unos segundos...");
+      const last = state.lastApiError || {};
+      if (document.body.classList.contains("auth-locked") || last.status === 401) {
+        // Si hemos caído a login, no mostramos toast extra.
+      } else if (last.status) {
+        setUiToast("Error al cargar", last.message || `HTTP ${last.status}`);
+      } else {
+        setUiToast("Servidor no disponible", (last.message || "Reintentando...").trim() || "Reintentando...");
+      }
     } catch {}
     updateWorkspaceEntryChrome();
     // Reintento con backoff simple.
