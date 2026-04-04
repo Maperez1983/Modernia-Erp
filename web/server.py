@@ -25286,10 +25286,12 @@ class Handler(BaseHTTPRequestHandler):
                 pass
             return
         if parsed.path == "/api/health":
-            # Readiness: comprobamos conectividad a DB para que el front no espere minutos.
-            # Circuit breaker: cacheamos el resultado unos segundos para evitar avalanchas de conexiones.
+            # Readiness: el front usa esto para saber si puede operar.
+            # Importante: no solo verificamos conectividad, también que el bootstrap de tablas haya terminado.
+            # Circuit breaker: cacheamos el resultado unos segundos para evitar avalanchas.
             ttl_s = max(1.0, float(os.environ.get("APP_HEALTH_CACHE_SECONDS", "3") or 3))
             now_ts = time.time()
+            backend = "postgres" if db_is_postgres_enabled() else "sqlite"
             try:
                 with Handler._health_lock:
                     if (now_ts - float(Handler._health_last_at or 0.0)) < ttl_s and Handler._health_last_status:
@@ -25297,40 +25299,29 @@ class Handler(BaseHTTPRequestHandler):
                         body = Handler._health_last_body or b""
                     else:
                         try:
-                            if db_is_postgres_enabled():
-                                conn = open_postgres_conn(
-                                    with_row_factory=False,
-                                    skip_compat=True,
-                                    connect_timeout_override=int(os.environ.get("APP_HEALTH_PG_TIMEOUT", "2") or 2),
-                                )
-                                try:
-                                    conn.execute("SELECT 1")
-                                finally:
-                                    try:
-                                        conn.close()
-                                    except Exception:
-                                        pass
+                            # Si ya estamos listos, respondemos rápido.
+                            if Handler._db_ready:
+                                status = 200
+                                body = f"ok backend={backend}".encode("utf-8")
                             else:
-                                conn = open_sqlite_conn(self.db_path, with_row_factory=False)
-                                try:
-                                    conn.execute("SELECT 1")
-                                finally:
-                                    try:
-                                        conn.close()
-                                    except Exception:
-                                        pass
-                            status = 200
-                            body = b"ok"
+                                # Intentamos completar bootstrap (una sola vez por proceso, lockado).
+                                self._ensure_db_ready()
+                                status = 200
+                                body = f"ok backend={backend}".encode("utf-8")
+                        except DbUnavailableError as exc:
+                            status = 503
+                            msg = f"db_unavailable backend={backend}: {exc}"
+                            body = msg.encode("utf-8", errors="ignore")
                         except Exception as exc:
                             status = 503
-                            msg = f"db_unavailable: {type(exc).__name__}: {exc}"
+                            msg = f"db_unavailable backend={backend}: {type(exc).__name__}: {exc}"
                             body = msg.encode("utf-8", errors="ignore")
                         Handler._health_last_at = now_ts
                         Handler._health_last_status = status
                         Handler._health_last_body = body
             except Exception:
                 status = 503
-                body = b"db_unavailable: probe_failed"
+                body = f"db_unavailable backend={backend}: probe_failed".encode("utf-8")
             self.send_response(status)
             self.send_header("Content-Type", "text/plain; charset=utf-8")
             if status != 200:
