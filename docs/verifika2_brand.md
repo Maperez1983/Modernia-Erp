@@ -17,7 +17,7 @@
 - Navy 2 (fondos/gradientes): `#0F2742`
 - Oro (acento/verificación): `#F2C14E`
 - Oro deep: `#B9892B`
-- Verde (acento “emoji” V): `#22C55E`
+- Verde (acento “emoji” check): `#22C55E`
 - Azul (acento “emoji” V): `#38BDF8`
 - Fondo claro: `#F5F7FB`
 
