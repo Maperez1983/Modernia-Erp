@@ -21,6 +21,8 @@
   --layout-gutter: clamp(14px, 2.2vw, 38px);
   --section-pad-x: clamp(16px, 1.6vw, 28px);
   --section-pad-y: clamp(16px, 1.4vw, 24px);
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 * {
@@ -37,6 +39,7 @@ body {
     radial-gradient(circle at 75% 95%, rgba(34, 197, 94, 0.11), transparent 52%),
     linear-gradient(180deg, var(--paper) 0%, var(--cream) 100%);
   min-height: 100vh;
+  min-height: 100svh;
 }
 
 body.auth-pending main {
@@ -57,7 +60,7 @@ header {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 28px clamp(16px, 2.4vw, 40px) 26px;
+  padding: calc(28px + var(--safe-top)) clamp(16px, 2.4vw, 40px) 26px;
   border-bottom: 1px solid rgba(242, 193, 78, 0.22);
   background:
     radial-gradient(circle at 8% 20%, rgba(242, 193, 78, 0.28), transparent 42%),
@@ -161,6 +164,7 @@ main {
   max-width: var(--layout-max);
   width: 100%;
   margin: 0 auto;
+  padding-bottom: calc(64px + var(--safe-bottom));
 }
 
 .ui-context-bar {
@@ -5815,6 +5819,41 @@ body.density-compact [id$="Table"] table {
   .workspace-client-card,
   .workspace-gestoria-card {
     padding: 12px;
+  }
+}
+
+@media (max-width: 420px) {
+  header {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+
+  .brand {
+    gap: 12px;
+  }
+
+  .brand img {
+    width: 60px;
+    height: 60px;
+  }
+
+  .brand h1 {
+    font-size: 22px;
+    letter-spacing: 0.6px;
+  }
+
+  .brand p {
+    font-size: 12px;
+    line-height: 1.25;
+  }
+}
+
+@media (max-width: 720px) {
+  /* iOS Safari: evita zoom al enfocar inputs <16px */
+  input,
+  select,
+  textarea {
+    font-size: 16px;
   }
 }
 
