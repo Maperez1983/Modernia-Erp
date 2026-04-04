@@ -236,6 +236,8 @@ AUTH_PUBLIC_POST_ENDPOINTS = {
 }
 AUTH_SESSIONS = {}
 AUTH_SESSIONS_LOCK = threading.Lock()
+AUTH_SESSION_DB_REFRESH_AT = {}
+AUTH_SESSION_DB_REFRESH_SECONDS = max(15, int(os.environ.get("APP_SESSION_DB_REFRESH_SECONDS", "90") or "90"))
 
 
 class DbUnavailableError(RuntimeError):
@@ -3634,26 +3636,36 @@ def create_auth_session(user_row):
 def get_auth_session(token):
     if not token:
         return None
+    now_ts = time.time()
+    session_copy = None
+    refresh_db = False
     with AUTH_SESSIONS_LOCK:
-        session = AUTH_SESSIONS.get(token)
-        if not session:
-            session = None
-        if float(session.get("expires_at") or 0) <= time.time():
+        session = AUTH_SESSIONS.get(token) or None
+        if session and float(session.get("expires_at") or 0) <= now_ts:
             AUTH_SESSIONS.pop(token, None)
+            AUTH_SESSION_DB_REFRESH_AT.pop(token, None)
             session = None
         if session:
-            session["expires_at"] = time.time() + APP_SESSION_TTL_SECONDS
-            # Refresh in DB as best-effort (keeps the TTL rolling).
+            session["expires_at"] = now_ts + APP_SESSION_TTL_SECONDS
+            session_copy = dict(session)
+            last_refresh = float(AUTH_SESSION_DB_REFRESH_AT.get(token) or 0.0)
+            if (now_ts - last_refresh) >= float(AUTH_SESSION_DB_REFRESH_SECONDS or 0):
+                AUTH_SESSION_DB_REFRESH_AT[token] = now_ts
+                refresh_db = True
+
+    if session_copy:
+        # Refresh TTL in DB as best-effort (debounced; avoids abrir conexión en cada /api/me).
+        if refresh_db:
             try:
                 conn = open_auth_store_conn(with_row_factory=False)
                 try:
-                    conn.execute("UPDATE auth_sessions SET expires_at = ? WHERE token = ?", [float(session["expires_at"]), token])
+                    conn.execute("UPDATE auth_sessions SET expires_at = ? WHERE token = ?", [float(session_copy["expires_at"]), token])
                     conn.commit()
                 finally:
                     conn.close()
             except Exception:
                 pass
-            return dict(session)
+        return session_copy
 
     # Cache miss: try DB (useful after restarts/deploys).
     try:
@@ -3681,6 +3693,7 @@ def get_auth_session(token):
         # Rehydrate in-memory cache.
         with AUTH_SESSIONS_LOCK:
             AUTH_SESSIONS[token] = session
+            AUTH_SESSION_DB_REFRESH_AT[token] = now_ts
         return dict(session)
     except Exception:
         return None
@@ -3691,6 +3704,7 @@ def delete_auth_session(token):
         return
     with AUTH_SESSIONS_LOCK:
         AUTH_SESSIONS.pop(token, None)
+        AUTH_SESSION_DB_REFRESH_AT.pop(token, None)
     try:
         conn = open_auth_store_conn(with_row_factory=False)
         try:
@@ -25388,6 +25402,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def _do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
+        if parsed.path == "/sw=0":
+            # Common typo when user copies "?sw=0".
+            self.send_response(302)
+            self.send_header("Location", "/?sw=0")
+            self.end_headers()
+            return
         if parsed.path == "/health":
             # Liveness: NO depende de DB (evita 502/restarts si Postgres está caído).
             self.send_response(200)
@@ -25491,6 +25511,23 @@ class Handler(BaseHTTPRequestHandler):
                     "build_tag": "workspace_boot_v1",
                 },
             )
+            return
+        if parsed.path == "/api/me":
+            # Fast path: evita abrir DB cuando el front solo está comprobando sesión.
+            token = (self._parse_cookies().get(SESSION_COOKIE_NAME, "") or "").strip()
+            if not token:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            session = get_auth_session(token)
+            if not session:
+                json_response(
+                    self,
+                    {"error": "Sesión inválida"},
+                    status=401,
+                    cookies=[self._build_session_cookie("", max_age=0)],
+                )
+                return
+            json_response(self, {"ok": True, "user": self._auth_user_payload(session)})
             return
         if parsed.path.startswith("/api/"):
             if parsed.path not in AUTH_PUBLIC_GET_ENDPOINTS and not self._require_api_auth():
