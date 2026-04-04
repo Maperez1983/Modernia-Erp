@@ -1456,6 +1456,22 @@ def normalize_action_key(value):
     return text
 
 
+def looks_like_invoice_document(nombre="", clasificacion="", tipo=""):
+    haystack = " ".join([str(nombre or ""), str(clasificacion or ""), str(tipo or "")]).strip()
+    norm = normalize_lookup_text(haystack)
+    if not norm:
+        return False
+    keywords = (
+        "FACTURA",
+        "TICKET",
+        "RECIBO",
+        "GASTO",
+        "ALBARAN",
+        "ALBARÁN",
+    )
+    return any(k in norm for k in keywords)
+
+
 def audit_event(conn, empresa_id, entidad, entidad_id, accion, usuario=None, detalles=None, now=None):
     if not conn or not entidad or not accion:
         return None
@@ -5883,6 +5899,302 @@ def process_seguros_ocr(payload, conn):
             os.unlink(tmp_path)
 
 
+def process_gestoria_factura_ocr(payload, conn, empresa_id, now="now"):
+    if not empresa_id:
+        raise ValueError("empresa_id requerido")
+    cliente_id = (payload.get("cliente_id") or "").strip() or None
+    tipo_factura = (payload.get("tipo_factura") or payload.get("tipo") or "").strip().lower()
+    if tipo_factura not in ("compra", "venta"):
+        tipo_factura = "compra"
+    doc_bytes, mime, source_hint = decode_document_payload(payload)
+    tmp_path = None
+    text = ""
+    err_detail = ""
+    method = "tesseract"
+    try:
+        suffix = ".pdf"
+        if mime.startswith("image/"):
+            ext = mime.split("/", 1)[1] or "jpg"
+            suffix = f".{ext}"
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp_file:
+            tmp_file.write(doc_bytes)
+            tmp_path = tmp_file.name
+        if mime.startswith("image/"):
+            if external_ocr_available():
+                text, err_detail = ocr_image_external(doc_bytes)
+                method = "vision" if text else "tesseract"
+            if not text:
+                text, err_detail = ocr_image_file(tmp_path)
+                method = "tesseract"
+            if docai_available():
+                doc_text, _doc_fields, doc_err = ocr_image_docai(doc_bytes, mime)
+                if doc_text and len(doc_text) > len(text or ""):
+                    text = doc_text
+                    method = "docai"
+                elif doc_err and not err_detail:
+                    err_detail = doc_err
+        else:
+            text, err_detail, method = extract_pdf_text(tmp_path)
+            if not text:
+                text, page_err = ocr_pdf_all_pages(tmp_path, use_external=external_ocr_available())
+                if text:
+                    method = "ocr_all_pages"
+                elif page_err and not err_detail:
+                    err_detail = page_err
+        if not text:
+            raise ValueError(err_detail or "No se pudo extraer texto de la factura")
+        parsed_factura = parse_invoice_text(text)
+        if not parsed_factura:
+            raise ValueError("No se pudieron extraer datos de factura")
+        parsed_factura["tipo"] = tipo_factura
+        for key_src, key_dst in (
+            ("numero", "numero"),
+            ("fecha", "fecha"),
+            ("nif", "nif"),
+            ("tercero", "tercero"),
+        ):
+            incoming = str(payload.get(key_src) or "").strip()
+            if incoming:
+                parsed_factura[key_dst] = incoming
+        for num_key in ("base_imponible", "cuota_iva", "cuota_irpf", "total", "iva_pct"):
+            incoming = payload.get(num_key)
+            if incoming not in (None, ""):
+                parsed_factura[num_key] = round(parse_decimal_eu(incoming), 2)
+        if not parsed_factura.get("fecha"):
+            parsed_factura["fecha"] = datetime.now().strftime("%Y-%m-%d")
+        third_type = "cliente" if tipo_factura == "venta" else ("proveedor" if parsed_factura.get("numero") else "acreedor")
+        tercero_id, counterpart_account = ensure_gestoria_tercero(
+            conn,
+            empresa_id,
+            parsed_factura.get("nif"),
+            parsed_factura.get("tercero"),
+            third_type,
+            now,
+        )
+        factura_id = os.urandom(16).hex()
+        doc_key = (payload.get("s3_key") or "").strip()
+        conn.execute(
+            """
+            INSERT INTO gestoria_facturas (
+              id, empresa_id, cliente_id, tercero_id, tipo, numero, fecha_emision, descripcion,
+              base_imponible, cuota_iva, cuota_irpf, total, iva_pct, estado_ocr, doc_key, raw_text,
+              created_at, updated_at
+            ) VALUES (
+              ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+            )
+            """,
+            (
+                factura_id,
+                empresa_id,
+                cliente_id,
+                tercero_id,
+                tipo_factura,
+                parsed_factura.get("numero"),
+                parsed_factura.get("fecha"),
+                parsed_factura.get("descripcion"),
+                parsed_factura.get("base_imponible") or 0.0,
+                parsed_factura.get("cuota_iva") or 0.0,
+                parsed_factura.get("cuota_irpf") or 0.0,
+                parsed_factura.get("total") or 0.0,
+                parsed_factura.get("iva_pct") or 0.0,
+                "ok",
+                doc_key,
+                parsed_factura.get("raw_text") or text,
+                now,
+                now,
+            ),
+        )
+        lines, total_debe, total_haber = build_invoice_asiento(parsed_factura, counterpart_account)
+        asiento_id = os.urandom(16).hex()
+        referencia = parsed_factura.get("numero") or factura_id
+        concepto = parsed_factura.get("descripcion") or "Factura OCR"
+        conn.execute(
+            """
+            INSERT INTO gestoria_asientos (
+              id, empresa_id, cliente_id, factura_id, fecha, concepto, diario, referencia,
+              total_debe, total_haber, created_at, updated_at
+            ) VALUES (
+              ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+            )
+            """,
+            (
+                asiento_id,
+                empresa_id,
+                cliente_id,
+                factura_id,
+                parsed_factura.get("fecha"),
+                concepto,
+                "FACT",
+                referencia,
+                total_debe,
+                total_haber,
+                now,
+                now,
+            ),
+        )
+        for item in lines:
+            conn.execute(
+                """
+                INSERT INTO gestoria_asiento_lineas (
+                  id, asiento_id, tercero_id, cuenta, descripcion, debe, haber,
+                  impuesto_tipo, impuesto_pct, created_at, updated_at
+                ) VALUES (
+                  ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                )
+                """,
+                (
+                    os.urandom(16).hex(),
+                    asiento_id,
+                    tercero_id,
+                    item.get("cuenta"),
+                    item.get("descripcion"),
+                    item.get("debe") or 0.0,
+                    item.get("haber") or 0.0,
+                    item.get("impuesto"),
+                    item.get("porcentaje"),
+                    now,
+                    now,
+                ),
+            )
+        conn.execute(
+            """
+            INSERT INTO gestoria_contabilidad (
+              id, empresa_id, cliente_id, cliente_ids_json, fecha, concepto, gestion, tipo, importe, notas, created_at, updated_at
+            ) VALUES (
+              ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+            )
+            """,
+            (
+                os.urandom(16).hex(),
+                empresa_id,
+                cliente_id,
+                json.dumps([cliente_id], ensure_ascii=False) if cliente_id else None,
+                parsed_factura.get("fecha"),
+                concepto,
+                "Contable",
+                "Ingreso" if tipo_factura == "venta" else "Gasto",
+                parsed_factura.get("total") or 0.0,
+                f"Factura OCR {referencia} · asiento {asiento_id}",
+                now,
+                now,
+            ),
+        )
+        return {
+            "ok": True,
+            "factura_id": factura_id,
+            "asiento_id": asiento_id,
+            "ocr_method": method,
+            "parsed": parsed_factura,
+            "lineas": lines,
+            "totales": {"debe": total_debe, "haber": total_haber},
+            "source_hint": source_hint,
+        }
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
+
+
+def _update_workspace_inbox_ocr(conn, workspace_id, document_id, fields, now="now"):
+    if not workspace_id or not document_id:
+        return False
+    allowed = ("estado", "ocr_job_id", "ocr_status", "ocr_error", "ocr_method", "factura_id", "asiento_id")
+    updates = []
+    values = []
+    for key in allowed:
+        if key in fields:
+            updates.append(f"{key} = ?")
+            values.append(fields.get(key))
+    if not updates:
+        return False
+    values.extend([now, document_id, workspace_id])
+    conn.execute(
+        f"""
+        UPDATE workspace_documentos_inbox
+        SET {", ".join(updates)}, updated_at = datetime(?)
+        WHERE id = ? AND workspace_id = ?
+        """,
+        values,
+    )
+    return True
+
+
+def process_workspace_factura_ocr_job(payload, conn, now="now"):
+    workspace_id = str(payload.get("workspace_id") or "").strip()
+    document_id = str(payload.get("document_id") or payload.get("document_inbox_id") or "").strip()
+    empresa_id = str(payload.get("empresa_id") or "").strip()
+    cliente_id = (payload.get("cliente_id") or "").strip() or None
+    s3_key = (payload.get("s3_key") or "").strip()
+    enriched = dict(payload)
+    if workspace_id and document_id:
+        row = conn.execute(
+            """
+            SELECT empresa_id, cliente_id, doc_key, nombre, clasificacion
+            FROM workspace_documentos_inbox
+            WHERE id = ? AND workspace_id = ?
+            LIMIT 1
+            """,
+            (document_id, workspace_id),
+        ).fetchone()
+        if row:
+            if not empresa_id:
+                empresa_id = str(row["empresa_id"] or "").strip()
+            if not cliente_id:
+                cliente_id = str(row["cliente_id"] or "").strip() or None
+            if not s3_key:
+                s3_key = str(row["doc_key"] or "").strip()
+            if not enriched.get("filename"):
+                enriched["filename"] = str(row["nombre"] or "").strip()
+            if not enriched.get("source_hint"):
+                enriched["source_hint"] = str(row["clasificacion"] or "").strip()
+    if not empresa_id:
+        raise ValueError("empresa_id no disponible para OCR de factura")
+    if not s3_key and not (enriched.get("file_base64") or enriched.get("data")):
+        raise ValueError("Documento sin doc_key/s3_key")
+    if not enriched.get("s3_key") and s3_key:
+        enriched["s3_key"] = s3_key
+    if not enriched.get("cliente_id") and cliente_id:
+        enriched["cliente_id"] = cliente_id
+    if workspace_id and document_id:
+        _update_workspace_inbox_ocr(
+            conn,
+            workspace_id,
+            document_id,
+            {"estado": "OCR procesando", "ocr_status": "processing"},
+            now=now,
+        )
+    try:
+        result = process_gestoria_factura_ocr(enriched, conn, empresa_id=empresa_id, now=now)
+    except Exception as exc:
+        if workspace_id and document_id:
+            _update_workspace_inbox_ocr(
+                conn,
+                workspace_id,
+                document_id,
+                {"estado": "Revisar", "ocr_status": "error", "ocr_error": str(exc)},
+                now=now,
+            )
+        raise
+    if workspace_id and document_id:
+        _update_workspace_inbox_ocr(
+            conn,
+            workspace_id,
+            document_id,
+            {
+                "estado": "Procesado",
+                "ocr_status": "done",
+                "ocr_error": None,
+                "ocr_method": result.get("ocr_method"),
+                "factura_id": result.get("factura_id"),
+                "asiento_id": result.get("asiento_id"),
+            },
+            now=now,
+        )
+    return result
+
+
 def enqueue_ocr_job(db_path, kind, payload):
     job_id = os.urandom(16).hex()
     now = datetime.now(timezone.utc).isoformat()
@@ -6004,6 +6316,13 @@ def ocr_worker_loop(jobs_db_path, main_db_path):
                 main_conn = open_sqlite_conn(main_db_path, with_row_factory=True)
                 try:
                     result = process_seguros_ocr(payload, main_conn)
+                finally:
+                    main_conn.close()
+            elif kind == "factura":
+                main_conn = open_sqlite_conn(main_db_path, with_row_factory=True)
+                try:
+                    result = process_workspace_factura_ocr_job(payload, main_conn, now="now")
+                    main_conn.commit()
                 finally:
                     main_conn.close()
             else:
@@ -17129,6 +17448,12 @@ def ensure_workspace_product_tables(conn):
           doc_key TEXT,
           doc_url TEXT,
           notas TEXT,
+          ocr_job_id TEXT,
+          ocr_status TEXT,
+          ocr_error TEXT,
+          ocr_method TEXT,
+          factura_id TEXT,
+          asiento_id TEXT,
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL
         )
@@ -17138,6 +17463,12 @@ def ensure_workspace_product_tables(conn):
     ensure_column(conn, "workspace_documentos_inbox", "origen_id", "origen_id TEXT")
     ensure_column(conn, "workspace_documentos_inbox", "reviewed_at", "reviewed_at TEXT")
     ensure_column(conn, "workspace_documentos_inbox", "reviewed_by", "reviewed_by TEXT")
+    ensure_column(conn, "workspace_documentos_inbox", "ocr_job_id", "ocr_job_id TEXT")
+    ensure_column(conn, "workspace_documentos_inbox", "ocr_status", "ocr_status TEXT")
+    ensure_column(conn, "workspace_documentos_inbox", "ocr_error", "ocr_error TEXT")
+    ensure_column(conn, "workspace_documentos_inbox", "ocr_method", "ocr_method TEXT")
+    ensure_column(conn, "workspace_documentos_inbox", "factura_id", "factura_id TEXT")
+    ensure_column(conn, "workspace_documentos_inbox", "asiento_id", "asiento_id TEXT")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS workspace_portal_clientes (
@@ -18901,6 +19232,12 @@ def fetch_workspace_inbox_queue(conn, workspace_id, limit=40):
           q.doc_url,
           q.origen_tipo,
           q.origen_id,
+          q.ocr_job_id,
+          q.ocr_status,
+          q.ocr_error,
+          q.ocr_method,
+          q.factura_id,
+          q.asiento_id,
           q.reviewed_at,
           q.reviewed_by,
           q.notas,
@@ -27263,6 +27600,38 @@ class Handler(BaseHTTPRequestHandler):
                 new_state = "Archivado"
             elif action == "link_request":
                 new_state = "Recibido"
+            ocr_job_id = ""
+            if action == "factura_ocr":
+                empresa_id = str(row["empresa_id"] or "").strip()
+                doc_key = str(row["doc_key"] or "").strip()
+                if not empresa_id:
+                    json_response(self, {"error": "Documento sin empresa_id"}, status=400)
+                    return
+                if not doc_key:
+                    json_response(self, {"error": "Documento sin doc_key"}, status=400)
+                    return
+                tipo_factura = (payload.get("tipo_factura") or payload.get("tipo") or "").strip().lower()
+                if tipo_factura not in ("compra", "venta"):
+                    tipo_factura = "compra"
+                try:
+                    ocr_job_id = enqueue_ocr_job(
+                        self.ocr_db_path,
+                        "factura",
+                        {
+                            "workspace_id": workspace_id,
+                            "document_id": record_id,
+                            "empresa_id": empresa_id,
+                            "cliente_id": cliente_id,
+                            "tipo_factura": tipo_factura,
+                            "s3_key": doc_key,
+                            "filename": row["nombre"],
+                            "source_hint": row["clasificacion"],
+                        },
+                    )
+                except Exception as exc:
+                    json_response(self, {"error": f"No se pudo encolar OCR: {exc}"}, status=500)
+                    return
+                new_state = "OCR en cola"
             conn.execute(
                 """
                 UPDATE workspace_documentos_inbox
@@ -27271,6 +27640,15 @@ class Handler(BaseHTTPRequestHandler):
                 """,
                 (cliente_id, new_state, now, reviewer, now, record_id, workspace_id),
             )
+            if ocr_job_id:
+                conn.execute(
+                    """
+                    UPDATE workspace_documentos_inbox
+                    SET ocr_job_id = ?, ocr_status = 'pending', ocr_error = NULL, updated_at = datetime(?)
+                    WHERE id = ? AND workspace_id = ?
+                    """,
+                    (ocr_job_id, now, record_id, workspace_id),
+                )
             origen_tipo = str(payload.get("origen_tipo") or row["origen_tipo"] or "").strip()
             origen_id = str(payload.get("origen_id") or row["origen_id"] or "").strip()
             if origen_tipo == "portal_requerimiento" and origen_id:
@@ -27285,7 +27663,7 @@ class Handler(BaseHTTPRequestHandler):
                     (request_state, record_id, completed_at, now, origen_id, workspace_id),
                 )
             conn.commit()
-            json_response(self, {"ok": True, "id": record_id, "estado": new_state, "cliente_id": cliente_id})
+            json_response(self, {"ok": True, "id": record_id, "estado": new_state, "cliente_id": cliente_id, "ocr_job_id": ocr_job_id})
             return
         elif parsed.path == "/api/workspace_portal":
             workspace_id = str(payload.get("workspace_id") or "").strip()
@@ -27492,8 +27870,45 @@ class Handler(BaseHTTPRequestHandler):
                 },
                 now,
             )
+            ocr_job_id = ""
+            doc_key = (payload.get("doc_key") or "").strip()
+            doc_tipo = (payload.get("tipo") or "").strip()
+            doc_clasificacion = (payload.get("clasificacion") or (request_row["clasificacion"] if request_row else "")).strip()
+            if doc_key and looks_like_invoice_document(nombre, doc_clasificacion, doc_tipo):
+                try:
+                    ocr_job_id = enqueue_ocr_job(
+                        self.ocr_db_path,
+                        "factura",
+                        {
+                            "workspace_id": portal["workspace_id"],
+                            "document_id": record_id,
+                            "empresa_id": empresa_id,
+                            "cliente_id": portal["cliente_id"],
+                            "tipo_factura": "compra",
+                            "s3_key": doc_key,
+                            "filename": nombre,
+                            "source_hint": doc_clasificacion,
+                        },
+                    )
+                    conn.execute(
+                        """
+                        UPDATE workspace_documentos_inbox
+                        SET ocr_job_id = ?, ocr_status = 'pending', ocr_error = NULL, estado = 'OCR en cola', updated_at = datetime(?)
+                        WHERE id = ? AND workspace_id = ?
+                        """,
+                        (ocr_job_id, now, record_id, portal["workspace_id"]),
+                    )
+                except Exception as exc:
+                    conn.execute(
+                        """
+                        UPDATE workspace_documentos_inbox
+                        SET ocr_status = 'error', ocr_error = ?, estado = 'Revisar', updated_at = datetime(?)
+                        WHERE id = ? AND workspace_id = ?
+                        """,
+                        (str(exc), now, record_id, portal["workspace_id"]),
+                    )
             conn.commit()
-            json_response(self, {"ok": True, "id": record_id, "automation_actions": auto_created})
+            json_response(self, {"ok": True, "id": record_id, "automation_actions": auto_created, "ocr_job_id": ocr_job_id})
             return
         elif parsed.path == "/api/workspace_automatizaciones":
             workspace_id = str(payload.get("workspace_id") or "").strip()
@@ -30125,208 +30540,13 @@ class Handler(BaseHTTPRequestHandler):
                 (*values, now, record_id),
             )
         elif parsed.path == "/api/gestoria_factura_ocr":
-            cliente_id = (payload.get("cliente_id") or "").strip() or None
-            tipo_factura = (payload.get("tipo_factura") or payload.get("tipo") or "").strip().lower()
-            if tipo_factura not in ("compra", "venta"):
-                tipo_factura = "compra"
             try:
-                doc_bytes, mime, source_hint = decode_document_payload(payload)
+                result = process_gestoria_factura_ocr(payload, conn, empresa_id=empresa["id"], now=now)
             except ValueError as exc:
                 json_response(self, {"error": str(exc)}, status=400)
                 return
-            tmp_path = None
-            text = ""
-            err_detail = ""
-            method = "tesseract"
-            try:
-                suffix = ".pdf"
-                if mime.startswith("image/"):
-                    ext = mime.split("/", 1)[1] or "jpg"
-                    suffix = f".{ext}"
-                with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp_file:
-                    tmp_file.write(doc_bytes)
-                    tmp_path = tmp_file.name
-                if mime.startswith("image/"):
-                    if external_ocr_available():
-                        text, err_detail = ocr_image_external(doc_bytes)
-                        method = "vision" if text else "tesseract"
-                    if not text:
-                        text, err_detail = ocr_image_file(tmp_path)
-                        method = "tesseract"
-                    if docai_available():
-                        doc_text, _doc_fields, doc_err = ocr_image_docai(doc_bytes, mime)
-                        if doc_text and len(doc_text) > len(text or ""):
-                            text = doc_text
-                            method = "docai"
-                        elif doc_err and not err_detail:
-                            err_detail = doc_err
-                else:
-                    text, err_detail, method = extract_pdf_text(tmp_path)
-                    if not text:
-                        text, page_err = ocr_pdf_all_pages(tmp_path, use_external=external_ocr_available())
-                        if text:
-                            method = "ocr_all_pages"
-                        elif page_err and not err_detail:
-                            err_detail = page_err
-                if not text:
-                    json_response(self, {"error": err_detail or "No se pudo extraer texto de la factura"}, status=400)
-                    return
-                parsed_factura = parse_invoice_text(text)
-                if not parsed_factura:
-                    json_response(self, {"error": "No se pudieron extraer datos de factura"}, status=400)
-                    return
-                parsed_factura["tipo"] = tipo_factura
-                for key_src, key_dst in (
-                    ("numero", "numero"),
-                    ("fecha", "fecha"),
-                    ("nif", "nif"),
-                    ("tercero", "tercero"),
-                ):
-                    incoming = str(payload.get(key_src) or "").strip()
-                    if incoming:
-                        parsed_factura[key_dst] = incoming
-                for num_key in ("base_imponible", "cuota_iva", "cuota_irpf", "total", "iva_pct"):
-                    incoming = payload.get(num_key)
-                    if incoming not in (None, ""):
-                        parsed_factura[num_key] = round(parse_decimal_eu(incoming), 2)
-                if not parsed_factura.get("fecha"):
-                    parsed_factura["fecha"] = datetime.now().strftime("%Y-%m-%d")
-                third_type = "cliente" if tipo_factura == "venta" else ("proveedor" if parsed_factura.get("numero") else "acreedor")
-                tercero_id, counterpart_account = ensure_gestoria_tercero(
-                    conn,
-                    empresa["id"],
-                    parsed_factura.get("nif"),
-                    parsed_factura.get("tercero"),
-                    third_type,
-                    now,
-                )
-                factura_id = os.urandom(16).hex()
-                doc_key = (payload.get("s3_key") or "").strip()
-                conn.execute(
-                    """
-                    INSERT INTO gestoria_facturas (
-                      id, empresa_id, cliente_id, tercero_id, tipo, numero, fecha_emision, descripcion,
-                      base_imponible, cuota_iva, cuota_irpf, total, iva_pct, estado_ocr, doc_key, raw_text,
-                      created_at, updated_at
-                    ) VALUES (
-                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
-                    )
-                    """,
-                    (
-                        factura_id,
-                        empresa["id"],
-                        cliente_id,
-                        tercero_id,
-                        tipo_factura,
-                        parsed_factura.get("numero"),
-                        parsed_factura.get("fecha"),
-                        parsed_factura.get("descripcion"),
-                        parsed_factura.get("base_imponible") or 0.0,
-                        parsed_factura.get("cuota_iva") or 0.0,
-                        parsed_factura.get("cuota_irpf") or 0.0,
-                        parsed_factura.get("total") or 0.0,
-                        parsed_factura.get("iva_pct") or 0.0,
-                        "ok",
-                        doc_key,
-                        parsed_factura.get("raw_text") or text,
-                        now,
-                        now,
-                    ),
-                )
-                lines, total_debe, total_haber = build_invoice_asiento(parsed_factura, counterpart_account)
-                asiento_id = os.urandom(16).hex()
-                referencia = parsed_factura.get("numero") or factura_id
-                concepto = parsed_factura.get("descripcion") or "Factura OCR"
-                conn.execute(
-                    """
-                    INSERT INTO gestoria_asientos (
-                      id, empresa_id, cliente_id, factura_id, fecha, concepto, diario, referencia,
-                      total_debe, total_haber, created_at, updated_at
-                    ) VALUES (
-                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
-                    )
-                    """,
-                    (
-                        asiento_id,
-                        empresa["id"],
-                        cliente_id,
-                        factura_id,
-                        parsed_factura.get("fecha"),
-                        concepto,
-                        "FACT",
-                        referencia,
-                        total_debe,
-                        total_haber,
-                        now,
-                        now,
-                    ),
-                )
-                for item in lines:
-                    conn.execute(
-                        """
-                        INSERT INTO gestoria_asiento_lineas (
-                          id, asiento_id, tercero_id, cuenta, descripcion, debe, haber,
-                          impuesto_tipo, impuesto_pct, created_at, updated_at
-                        ) VALUES (
-                          ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
-                        )
-                        """,
-                        (
-                            os.urandom(16).hex(),
-                            asiento_id,
-                            tercero_id,
-                            item.get("cuenta"),
-                            item.get("descripcion"),
-                            item.get("debe") or 0.0,
-                            item.get("haber") or 0.0,
-                            item.get("impuesto"),
-                            item.get("porcentaje"),
-                            now,
-                            now,
-                        ),
-                    )
-                conn.execute(
-                    """
-                    INSERT INTO gestoria_contabilidad (
-                      id, empresa_id, cliente_id, cliente_ids_json, fecha, concepto, gestion, tipo, importe, notas, created_at, updated_at
-                    ) VALUES (
-                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
-                    )
-                    """,
-                    (
-                        os.urandom(16).hex(),
-                        empresa["id"],
-                        cliente_id,
-                        json.dumps([cliente_id], ensure_ascii=False) if cliente_id else None,
-                        parsed_factura.get("fecha"),
-                        concepto,
-                        "Contable",
-                        "Ingreso" if tipo_factura == "venta" else "Gasto",
-                        parsed_factura.get("total") or 0.0,
-                        f"Factura OCR {referencia} · asiento {asiento_id}",
-                        now,
-                        now,
-                    ),
-                )
-                json_response(
-                    self,
-                    {
-                        "ok": True,
-                        "factura_id": factura_id,
-                        "asiento_id": asiento_id,
-                        "ocr_method": method,
-                        "parsed": parsed_factura,
-                        "lineas": lines,
-                        "totales": {"debe": total_debe, "haber": total_haber},
-                    },
-                )
-                return
-            finally:
-                if tmp_path and os.path.exists(tmp_path):
-                    try:
-                        os.unlink(tmp_path)
-                    except Exception:
-                        pass
+            json_response(self, result)
+            return
         elif parsed.path == "/api/gestoria_contabilidad_delete":
             record_id = payload.get("id")
             if not record_id:

@@ -627,19 +627,20 @@ const pollOcrJob = async (jobId, onUpdate, timeoutMs = 3 * 60 * 1000) => {
       delay = Math.min(delay + 400, 5000);
       continue;
     }
-    if (onUpdate) onUpdate(data);
-    if (data.status === "queued") {
+    const status = data.status === "pending" ? "queued" : data.status;
+    if (onUpdate) onUpdate({ ...data, status });
+    if (status === "queued") {
       if (!queuedSince) queuedSince = Date.now();
       if (Date.now() - queuedSince > 70 * 1000) {
         throw new Error("Cola OCR saturada.");
       }
-    } else if (data.status === "processing") {
+    } else if (status === "processing") {
       queuedSince = 0;
     }
-    if (data.status === "done") {
+    if (status === "done") {
       return data.result || null;
     }
-    if (data.status === "error") {
+    if (status === "error") {
       throw new Error(data.error || "OCR falló");
     }
     await new Promise((resolve) => setTimeout(resolve, delay));
@@ -11244,12 +11245,23 @@ const renderWorkspaceInboxList = (rows = []) => {
   workspaceInboxList.innerHTML = `
     <div class="workspace-billing-list">
       ${rows
-        .map(
-          (row) => `
+        .map((row) => {
+          const hint = `${row.nombre || ""} ${row.tipo || ""} ${row.clasificacion || ""}`.toLowerCase();
+          const isInvoice = /(factura|ticket|recibo|gasto|albaran)/i.test(hint);
+          const ocrStatus = String(row.ocr_status || "").toLowerCase();
+          const ocrBusy = ["pending", "processing"].includes(ocrStatus);
+          const canOcrFactura = isInvoice && row.doc_key && !row.factura_id && !ocrBusy;
+          const ocrLine = row.ocr_status
+            ? `OCR: ${row.ocr_status}${row.ocr_method ? ` · ${row.ocr_method}` : ""}${row.factura_id ? " · vinculada" : ""}`
+            : "";
+          const ocrErrorLine = row.ocr_error ? `OCR error: ${String(row.ocr_error).slice(0, 120)}` : "";
+          return `
             <div class="workspace-billing-row">
               <div>
                 <strong>${row.nombre || "Documento"}</strong>
                 <div class="muted">${row.empresa_nombre || "-"} · ${row.servicio || "sin servicio"} · ${row.estado || "Pendiente"}</div>
+                ${ocrLine ? `<div class="muted">${ocrLine}</div>` : ""}
+                ${ocrErrorLine ? `<div class="workspace-document-suggestion">${ocrErrorLine}</div>` : ""}
                 ${row.suggested_cliente_nombre ? `<div class="workspace-document-suggestion">Cliente sugerido: ${row.suggested_cliente_nombre}</div>` : ""}
                 ${row.requerimiento_titulo ? `<div class="muted">Requerimiento: ${row.requerimiento_titulo}</div>` : ""}
               </div>
@@ -11257,13 +11269,14 @@ const renderWorkspaceInboxList = (rows = []) => {
                 <span>${row.canal_entrada || "Manual"}</span>
                 <span>${row.prioridad || "Normal"}</span>
                 ${row.doc_url ? `<a class="secondary ghost button-inline" href="${row.doc_url}" target="_blank" rel="noreferrer">Abrir</a>` : ""}
+                ${canOcrFactura ? `<button type="button" class="secondary ghost" data-inbox-ocr="${row.id}">OCR factura</button>` : ""}
                 ${row.suggested_cliente_id && !row.cliente_id ? `<button type="button" class="secondary ghost" data-inbox-accept="${row.id}">Aceptar sugerido</button>` : ""}
                 ${row.estado !== "Procesado" ? `<button type="button" class="secondary ghost" data-inbox-process="${row.id}">Procesar</button>` : ""}
                 <button type="button" class="secondary ghost" data-inbox-edit="${row.id}">Editar</button>
               </div>
             </div>
-          `
-        )
+          `;
+        })
         .join("")}
     </div>
   `;
@@ -11294,6 +11307,9 @@ const renderWorkspaceInboxList = (rows = []) => {
   });
   workspaceInboxList.querySelectorAll("[data-inbox-process]").forEach((button) => {
     button.addEventListener("click", () => runInboxAction(button.dataset.inboxProcess || "", "mark_processed"));
+  });
+  workspaceInboxList.querySelectorAll("[data-inbox-ocr]").forEach((button) => {
+    button.addEventListener("click", () => runInboxAction(button.dataset.inboxOcr || "", "factura_ocr"));
   });
 };
 
@@ -13880,23 +13896,31 @@ const openWorkspacePortalPublic = async (token) => {
               Servicio
               <input name="servicio" value="portal_cliente" />
             </label>
-            <label>
-              Clasificación
-              <input name="clasificacion" placeholder="Fiscal, identidad, factura..." />
-            </label>
+	            <label>
+	              Clasificación
+	              <input name="clasificacion" list="workspacePortalClasificaciones" placeholder="Fiscal, identidad, factura..." />
+	            </label>
             <label class="span-2">
               Notas
               <textarea name="notas" rows="3" placeholder="Información útil para el equipo"></textarea>
             </label>
-            <label class="span-2">
-              Archivo
-              <input type="file" name="archivo" required />
-            </label>
-            <div class="form-actions span-2">
-              <button type="submit">Subir al portal</button>
-              <span id="workspacePortalPublicUploadStatus" class="muted"></span>
-            </div>
-          </form>
+	            <label class="span-2">
+	              Archivo
+	              <input type="file" name="archivo" required accept="application/pdf,image/*" />
+	            </label>
+              <datalist id="workspacePortalClasificaciones">
+                <option value="Factura"></option>
+                <option value="Ticket"></option>
+                <option value="Recibo"></option>
+                <option value="Fiscal"></option>
+                <option value="Identidad"></option>
+                <option value="Otro"></option>
+              </datalist>
+	            <div class="form-actions span-2">
+	              <button type="submit">Subir al portal</button>
+	              <span id="workspacePortalPublicUploadStatus" class="muted"></span>
+	            </div>
+	          </form>
         </div>
         <div class="workspace-central-layout">
           <div class="form-card">
@@ -14007,20 +14031,35 @@ const openWorkspacePortalPublic = async (token) => {
             doc_key: upload?.key || "",
             doc_url: upload?.public_url || "",
           };
-          const response = await fetch("/api/workspace_portal_upload", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload),
-          }).then((res) => res.json());
-          if (response?.error) throw new Error(response.error);
-          if (uploadStatus) {
-            uploadStatus.textContent = `Documento enviado.${response.automation_actions ? ` Automatizaciones: ${response.automation_actions}` : ""}`;
-          }
-          await openWorkspacePortalPublic(token);
-        } catch (error) {
-          if (uploadStatus) uploadStatus.textContent = error.message || "No se pudo subir el documento.";
-        }
-      });
+	          const response = await fetch("/api/workspace_portal_upload", {
+	            method: "POST",
+	            headers: { "Content-Type": "application/json" },
+	            body: JSON.stringify(payload),
+	          }).then((res) => res.json());
+	          if (response?.error) throw new Error(response.error);
+	          if (uploadStatus) {
+	            uploadStatus.textContent = `Documento enviado.${response.automation_actions ? ` Automatizaciones: ${response.automation_actions}` : ""}${response.ocr_job_id ? " OCR en cola..." : ""}`;
+	          }
+	          if (response?.ocr_job_id) {
+	            try {
+	              await pollOcrJob(
+	                response.ocr_job_id,
+	                (job) => {
+	                  const status = job?.status || "";
+	                  if (uploadStatus) uploadStatus.textContent = `OCR: ${status}...`;
+	                },
+	                4 * 60 * 1000
+	              );
+	              if (uploadStatus) uploadStatus.textContent = "OCR completado.";
+	            } catch (ocrErr) {
+	              if (uploadStatus) uploadStatus.textContent = ocrErr?.message || "OCR falló.";
+	            }
+	          }
+	          await openWorkspacePortalPublic(token);
+	        } catch (error) {
+	          if (uploadStatus) uploadStatus.textContent = error.message || "No se pudo subir el documento.";
+	        }
+	      });
       document.querySelectorAll("[data-portal-request-upload]").forEach((button) => {
         button.addEventListener("click", () => {
           const requestId = button.dataset.portalRequestUpload || "";
