@@ -1,5 +1,7 @@
 # Verifika² · Identidad (borrador)
 
+Manual completo: `docs/manual_identidad_verifika2.md`.
+
 ## Activos (vector)
 
 - `assets/verifika2/verifika2_wordmark.svg` (fondo claro)
