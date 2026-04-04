@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Verifika² App Icon">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0B1D33" />
+      <stop offset="1" stop-color="#182F55" />
+    </linearGradient>
+    <radialGradient id="glow" cx="22%" cy="18%" r="70%">
+      <stop offset="0" stop-color="#38BDF8" stop-opacity="0.18" />
+      <stop offset="0.55" stop-color="#38BDF8" stop-opacity="0.05" />
+      <stop offset="1" stop-color="#38BDF8" stop-opacity="0" />
+    </radialGradient>
+    <radialGradient id="gold" cx="78%" cy="88%" r="70%">
+      <stop offset="0" stop-color="#F2C14E" stop-opacity="0.14" />
+      <stop offset="0.6" stop-color="#F2C14E" stop-opacity="0.04" />
+      <stop offset="1" stop-color="#F2C14E" stop-opacity="0" />
+    </radialGradient>
+  </defs>
+
+  <rect width="512" height="512" fill="url(#bg)" />
+  <rect width="512" height="512" fill="url(#glow)" />
+  <rect width="512" height="512" fill="url(#gold)" />
+
+  <!-- Check “V” (trazado desde el logo original) -->
+  <g transform="translate(256 296) scale(2.05) translate(-65.45 -67.85)">
+    <g transform="translate(0,162) scale(0.1,-0.1)" fill="#22C55E" stroke="none">
+      <path d="M1309 1357 c-290 -98 -503 -324 -714 -759 l-51 -106 -64 151 c-123 295 -135 316 -176 333 -21 9 -79 18 -129 21 -127 8 -131 1 -77 -115 23 -48 65 -143 95 -212 30 -69 71 -160 91 -202 19 -42 55 -123 80 -180 76 -176 86 -196 102 -202 26 -10 152 -7 177 5 18 8 43 53 102 187 109 248 274 574 352 700 90 145 142 211 245 316 49 49 88 91 88 93 0 8 -32 0 -121 -30z" />
+    </g>
+  </g>
+</svg>

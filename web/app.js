@@ -3,7 +3,7 @@
 const API_TIMEOUT_MS = 30000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v4";
+const APP_SW_VERSION = "v11";
 
 // Workspace tenant por defecto del producto (branding de software). Mantiene compatibilidad con slugs legacy.
 const DEFAULT_TENANT_WORKSPACE_SLUG = "verifika2";
@@ -4077,8 +4077,8 @@ const renderCompanyCards = () => {
     platformCard.className = "company-card";
     platformCard.dataset.action = "holding-admin";
     platformCard.innerHTML = `
-      <h3>LIV Admin</h3>
-      <div class="company-meta">Configuración de clientes LIV, módulos, branding y control de plataforma.</div>
+      <h3>Admin Verifika²</h3>
+      <div class="company-meta">Configuración de workspaces, módulos, branding y control de plataforma.</div>
       <div class="company-meta">Vista de administración global.</div>
       <a class="card-link" href="?holding=1&mode=platform" data-action="holding-admin">Entrar</a>
     `;
@@ -4175,7 +4175,7 @@ const WORKSPACE_MODULE_STRUCTURE = {
     section: "workspace_engines",
     family: "Motor transversal",
     badge: "Core analítico",
-    description: "KPIs ejecutivos y lectura consolidada del workspace dentro de LIV.",
+    description: "KPIs ejecutivos y lectura consolidada del workspace dentro de Verifika².",
   },
   facturacion: {
     section: "workspace_engines",
@@ -4245,7 +4245,7 @@ const getWorkspaceModuleMeta = (row = {}) => {
     section: base.section || "workspace_engines",
     family: base.family || (WORKSPACE_CATEGORY_LABELS[row.categoria] || "Módulo"),
     badge: base.badge || "Módulo",
-    description: base.description || "Capacidad configurable del workspace dentro de LIV.",
+    description: base.description || "Capacidad configurable del workspace dentro de Verifika².",
   };
 };
 
@@ -4348,7 +4348,7 @@ const updateWorkspaceEntryChrome = () => {
     holdingSubtitle.textContent =
       mode === "tenant"
         ? `Todo lo operativo de ${workspaceName} se organiza desde este workspace por contenedores de servicio.`
-        : "Administra workspaces de LIV, módulos activos, branding y estructura de clientes.";
+        : "Administra workspaces, módulos activos, branding y estructura de clientes.";
   }
   if (holdingBackBtn) {
     holdingBackBtn.textContent = mode === "tenant" ? "Volver al panel" : "Volver al panel";
@@ -5099,7 +5099,7 @@ const getWorkspaceEnabledModules = (modules = []) =>
 const renderWorkspaceKpis = (summary = {}) => {
   if (!workspaceKpis) return;
   const items = [
-    ["Workspaces", summary.workspaces_total || 0, "Clientes de LIV operativos"],
+    ["Workspaces", summary.workspaces_total || 0, "Clientes operativos"],
     ["Empresas operativas", summary.empresas_total || 0, "Sociedades enlazadas a workspaces"],
     ["Módulos activos", summary.modulos_activos_total || 0, "Capacidades habilitadas"],
   ];
@@ -5896,7 +5896,7 @@ const fillWorkspaceForm = (workspace = {}) => {
 const renderWorkspaceList = (rows = []) => {
   if (!workspaceList) return;
   if (!rows.length) {
-    workspaceList.innerHTML = "<p class='muted'>Sin workspaces configurados todavía en LIV.</p>";
+    workspaceList.innerHTML = "<p class='muted'>Sin workspaces configurados todavía.</p>";
     return;
   }
   const selectedId =
@@ -10429,7 +10429,7 @@ const renderWorkspaceModules = (rows = []) => {
     <div class="workspace-module-explainer">
       <strong>Arquitectura del workspace</strong>
       <p class="muted">
-        En LIV, el workspace activa un <strong>CRM principal</strong> y encima cuelgan sus <strong>subservicios</strong>.
+        En Verifika², el workspace activa un <strong>CRM principal</strong> y encima cuelgan sus <strong>subservicios</strong>.
         Los módulos restantes funcionan como <strong>motores transversales</strong> del workspace.
       </p>
       <div class="workspace-module-explainer-meta">
@@ -10534,7 +10534,7 @@ const renderWorkspaceBillingSummary = (data = {}) => {
   workspaceBillingSummary.innerHTML = `
     <div class="workspace-context-strip">
       <strong>Lectura económica de ${companyLabel}</strong>
-      <span class="muted">La operativa se cruza con la empresa activa para que no se confunda con el resto del cliente LIV.</span>
+      <span class="muted">La operativa se cruza con la empresa activa para que no se confunda con el resto del cliente.</span>
     </div>
     <div class="workspace-mini-kpis">
       ${metricItems
@@ -43750,7 +43750,7 @@ initDensityToggle();
 UI?.boot(state);
 // Pintamos al menos las tarjetas base del home aunque la carga de datos falle o tarde.
 renderCompanyCards();
-showAuthOverlay("");
+showAuthOverlay("Conectando con el servidor… (si es la primera visita puede tardar unos segundos)");
 ensureAuthAndBoot();
 
 // Si el service worker se actualiza, algunos navegadores (sobre todo iOS/Safari) pueden quedarse con un app.js viejo.

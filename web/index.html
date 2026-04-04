@@ -7,15 +7,15 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <title>Verifika² · CRM & Portal</title>
-    <link rel="stylesheet" href="styles.css?v=152" />
-    <link rel="manifest" href="manifest.webmanifest?v=1" />
-    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+    <link rel="stylesheet" href="styles.css?v=153" />
+    <link rel="manifest" href="manifest.webmanifest?v=2" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.png?v=2" />
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600;700&family=Source+Sans+3:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" />
   </head>
-  <body class="theme-operativa auth-pending">
+  <body class="auth-pending">
     <header>
       <div class="brand" id="brandHome">
-        <img src="/assets/verifika2/verifika2_mark.svg" alt="Verifika2" />
+        <img src="/assets/verifika2/verifika2_wordmark_traced_dark.svg" alt="Verifika²" />
         <div class="brand-copy">
           <span class="brand-kicker">Verifika²</span>
           <h1>CRM · Operativa inmobiliaria</h1>
@@ -56,7 +56,7 @@
         <div class="section-head">
           <div>
             <h2 id="holdingTitle">Gestión de workspaces</h2>
-            <p id="holdingSubtitle" class="muted">Configura workspaces de LIV y entra después en la operativa de cada grupo.</p>
+            <p id="holdingSubtitle" class="muted">Configura workspaces y entra después en la operativa de cada cliente.</p>
           </div>
           <button id="holdingBackBtn" class="secondary ghost">Volver al panel</button>
         </div>
@@ -77,7 +77,7 @@
             <div class="section-head">
               <div>
                 <h3>Salud del workspace</h3>
-                <p class="muted">Nivel de implantación y readiness del workspace dentro de LIV.</p>
+                <p class="muted">Nivel de configuración y readiness del workspace dentro de Verifika².</p>
               </div>
             </div>
             <div id="workspaceHealthScore"></div>
@@ -258,7 +258,7 @@
             <div class="section-head">
               <div>
                 <h3>Paquete Comercial</h3>
-                <p class="muted">Cómo se empaqueta y se presenta este workspace dentro del producto LIV.</p>
+                <p class="muted">Cómo se empaqueta y se presenta este workspace dentro del producto Verifika².</p>
               </div>
             </div>
             <div id="workspaceCommercialPack"></div>
@@ -267,7 +267,7 @@
             <div class="section-head">
               <div>
                 <h3>Go Live</h3>
-                <p class="muted">Acciones prioritarias para dejar el workspace listo para implantación o venta en LIV.</p>
+                <p class="muted">Acciones prioritarias para dejar el workspace listo para implantación o comercialización.</p>
               </div>
             </div>
             <div id="workspaceOnboardingActions"></div>
@@ -296,7 +296,7 @@
             <div class="section-head">
               <div>
                 <h3>Workspaces</h3>
-                <p class="muted">Cada workspace agrupa las empresas y módulos de un cliente de LIV.</p>
+                <p class="muted">Cada workspace agrupa las empresas y módulos de un cliente dentro de Verifika².</p>
               </div>
             </div>
             <div id="workspaceList"></div>
@@ -305,7 +305,7 @@
             <div class="section-head">
               <div>
                 <h3>Configuración del workspace</h3>
-                <p class="muted">Define branding, estado y plan comercial del workspace dentro de LIV.</p>
+                <p class="muted">Define branding, estado y plan comercial del workspace dentro de Verifika².</p>
               </div>
               <div class="toolbar">
                 <button type="button" id="workspaceNewCustomerBtn" class="secondary ghost">Nuevo cliente</button>
@@ -453,7 +453,7 @@
           <div class="section-head">
             <div>
               <h3>CRM 360 del workspace</h3>
-              <p class="muted">Base comercial y operativa de clientes reales del grupo, distinta del propio workspace dentro de LIV.</p>
+              <p class="muted">Base comercial y operativa de clientes reales del grupo, distinta del propio workspace.</p>
             </div>
           </div>
           <div class="workspace-client-toolbar">
@@ -7452,6 +7452,10 @@
 
     <div id="authLoginOverlay" class="auth-login-overlay hidden">
       <div class="auth-login-card">
+        <div class="auth-brand">
+          <img src="/assets/verifika2/verifika2_wordmark_traced.svg" alt="Verifika²" />
+          <p class="muted">CRM · Operativa inmobiliaria</p>
+        </div>
         <h2>Acceso</h2>
         <p class="muted">Introduce tu usuario o email y tu contraseña.</p>
         <form id="authLoginForm" class="auth-login-form">
@@ -7530,6 +7534,10 @@
 
     <div id="authActivateOverlay" class="auth-login-overlay hidden">
       <div class="auth-login-card">
+        <div class="auth-brand">
+          <img src="/assets/verifika2/verifika2_wordmark_traced.svg" alt="Verifika²" />
+          <p class="muted">CRM · Operativa inmobiliaria</p>
+        </div>
         <h2>Activar acceso</h2>
         <p class="muted" id="authActivateIntro">Valida tu acceso y define tu contraseña.</p>
         <form id="authActivateForm" class="auth-login-form">
@@ -7552,14 +7560,14 @@
     <div id="uiErrorToast" class="ui-error-toast hidden" role="alert"></div>
 
     <script src="ui-foundation.js?v=2"></script>
-    <script src="app-auth.js?v=5"></script>
+    <script src="app-auth.js?v=6"></script>
     <script src="app-routing.js?v=7"></script>
-    <script src="app.js?v=384"></script>
+    <script src="app.js?v=385"></script>
     <script>
       (function () {
         if (!("serviceWorker" in navigator)) return;
         window.addEventListener("load", function () {
-          navigator.serviceWorker.register("/sw.js?v=7").catch(function () {});
+          navigator.serviceWorker.register("/sw.js?v=8").catch(function () {});
         });
       })();
     </script>

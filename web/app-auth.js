@@ -221,8 +221,8 @@
         return false;
       };
       if (targetUser === "workspace") {
-        if (!navigate({ holding: "1", mode: "tenant", workspace: "modernia", view: "overview" })) {
-          window.location.assign("?holding=1&mode=tenant&workspace=modernia&view=overview");
+        if (!navigate({ holding: "1", mode: "tenant", workspace: "verifika2", view: "overview" })) {
+          window.location.assign("?holding=1&mode=tenant&workspace=verifika2&view=overview");
         }
         return;
       }

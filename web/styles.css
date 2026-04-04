@@ -77,8 +77,8 @@ header {
 }
 
 .brand img {
-  width: 88px;
-  height: 88px;
+  width: 240px;
+  height: 56px;
   object-fit: contain;
   border-radius: 0;
   background: transparent;
@@ -174,7 +174,7 @@ main {
   gap: 12px;
   padding: 12px clamp(16px, 2.4vw, 40px);
   background: rgba(255, 255, 255, 0.82);
-  border-bottom: 1px solid rgba(60, 110, 113, 0.14);
+  border-bottom: 1px solid rgba(226, 232, 240, 0.9);
   backdrop-filter: blur(10px);
   position: sticky;
   top: 0;
@@ -5880,9 +5880,10 @@ body.auth-locked {
   justify-content: center;
   padding: 24px;
   background:
-    radial-gradient(circle at 15% 10%, rgba(95, 122, 97, 0.18), transparent 45%),
-    radial-gradient(circle at 85% 20%, rgba(60, 110, 113, 0.2), transparent 42%),
-    rgba(245, 245, 245, 0.92);
+    radial-gradient(circle at 12% 0%, rgba(242, 193, 78, 0.18), transparent 46%),
+    radial-gradient(circle at 85% 8%, rgba(56, 189, 248, 0.14), transparent 48%),
+    radial-gradient(circle at 72% 100%, rgba(34, 197, 94, 0.12), transparent 52%),
+    rgba(245, 247, 251, 0.92);
   backdrop-filter: blur(6px);
 }
 
@@ -5920,10 +5921,27 @@ body.auth-locked {
 .auth-login-card {
   width: min(460px, 100%);
   background: #fff;
-  border: 1px solid rgba(60, 110, 113, 0.18);
+  border: 1px solid rgba(226, 232, 240, 0.9);
   border-radius: 20px;
   padding: 22px 22px 18px;
   box-shadow: 0 20px 60px rgba(43, 43, 43, 0.12);
+}
+
+.auth-brand {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.auth-brand img {
+  width: min(260px, 100%);
+  height: auto;
+  display: block;
+}
+
+.auth-brand p {
+  margin: 0;
+  font-size: 13px;
 }
 
 .auth-login-card h2 {
@@ -5962,7 +5980,7 @@ body.auth-locked {
   height: 36px;
   padding: 0;
   border-radius: 12px;
-  border: 1px solid rgba(60, 110, 113, 0.2);
+  border: 1px solid rgba(226, 232, 240, 0.95);
   background: rgba(245, 245, 245, 0.86);
   color: var(--ink);
   box-shadow: none;
@@ -5978,7 +5996,7 @@ body.auth-locked {
 }
 
 .auth-pass-toggle:focus-visible {
-  outline: 2px solid rgba(60, 110, 113, 0.28);
+  outline: 2px solid rgba(56, 189, 248, 0.4);
   outline-offset: 2px;
 }
 
@@ -6008,8 +6026,15 @@ body.auth-locked {
 }
 
 .auth-login-card .success {
-  color: #3c6e71;
+  color: #22C55E;
   font-weight: 600;
+}
+
+@media (max-width: 760px) {
+  .brand img {
+    width: 190px;
+    height: 46px;
+  }
 }
 
 body.theme-operativa {

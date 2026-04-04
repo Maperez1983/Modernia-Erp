@@ -469,7 +469,7 @@ LOGIN_RATE_LOCK_SECONDS = max(60, int(os.environ.get("APP_LOGIN_RATE_LOCK_SECOND
 _LOGIN_RATE_STATE = {}
 _LOGIN_RATE_LOCK = threading.Lock()
 DEFAULT_WORKSPACE_NAME = "Verifika²"
-PLATFORM_NAME = "LIV"
+PLATFORM_NAME = "Verifika²"
 WORKSPACE_TIME_SERVICE_COMPANY_MAP = {
     "inmobiliaria": ["Estudio Velazquez 2012 SL"],
     "gestoria": ["Fincas Velazquez", "Grupo Modernia"],
@@ -541,13 +541,13 @@ WORKSPACE_MODULE_CATALOG = [
 WORKSPACE_PLAN_PACKAGES = {
     "Base": {
         "label": "Base",
-        "pitch": "CRM unificado y operativa documental para tenants que empiezan a centralizar servicios en LIV.",
+        "pitch": "CRM unificado y operativa documental para equipos que empiezan a centralizar servicios en Verifika².",
         "focus": ["crm360", "documental", "dashboard"],
         "included": ["CRM 360", "Documental", "Dashboard Ejecutivo", "Agenda y acciones"],
     },
     "Pro": {
         "label": "Pro",
-        "pitch": "Activa verticales de negocio y facturación para operar el tenant desde una única base en LIV.",
+        "pitch": "Activa verticales de negocio y motores para operar desde una única base en Verifika².",
         "focus": ["gestoria", "seguros", "inmobiliaria", "financiacion", "facturacion"],
         "included": ["Gestoría", "Seguros", "Inmobiliaria", "Financiación", "Facturación", "Portal Cliente"],
     },
@@ -20782,7 +20782,7 @@ def maybe_send_workspace_notification_email(conn, workspace_id, persona_id, noti
     if hora_fin:
         lines.append(f"Salida: {hora_fin}")
     lines.append("")
-    lines.append("Mensaje generado automáticamente por LIV.")
+    lines.append("Mensaje generado automáticamente por Verifika².")
     body = "\n".join(lines)
 
     ok_any = True

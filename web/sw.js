@@ -5,19 +5,19 @@
  * - Never caches /api or /uploads
  */
 
-const CACHE_VERSION = "v10";
-const SHELL_CACHE = `liv-shell-${CACHE_VERSION}`;
-const RUNTIME_CACHE = `liv-runtime-${CACHE_VERSION}`;
+const CACHE_VERSION = "v11";
+const SHELL_CACHE = `verifika2-shell-${CACHE_VERSION}`;
+const RUNTIME_CACHE = `verifika2-runtime-${CACHE_VERSION}`;
 
 const SHELL_URLS = [
   "/",
   "/index.html",
-  "/styles.css?v=152",
+  "/styles.css?v=153",
   "/ui-foundation.js?v=2",
-  "/app-auth.js?v=5",
+  "/app-auth.js?v=6",
   "/app-routing.js?v=7",
-  "/app.js?v=384",
-  "/manifest.webmanifest?v=1",
+  "/app.js?v=385",
+  "/manifest.webmanifest?v=2",
   "/icons/icon-192.png",
   "/icons/icon-512.png",
 ];
@@ -75,7 +75,7 @@ self.addEventListener("activate", (event) => {
       const keys = await caches.keys();
       await Promise.all(
         keys.map((key) => {
-          if (key.startsWith("liv-") && ![SHELL_CACHE, RUNTIME_CACHE].includes(key)) {
+          if ((key.startsWith("liv-") || key.startsWith("verifika2-")) && ![SHELL_CACHE, RUNTIME_CACHE].includes(key)) {
             return caches.delete(key);
           }
           return null;
