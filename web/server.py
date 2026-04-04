@@ -25408,6 +25408,12 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Location", "/?sw=0")
             self.end_headers()
             return
+        if parsed.path == "/build_info":
+            # Convenience alias.
+            self.send_response(302)
+            self.send_header("Location", "/api/build_info")
+            self.end_headers()
+            return
         if parsed.path == "/health":
             # Liveness: NO depende de DB (evita 502/restarts si Postgres está caído).
             self.send_response(200)
