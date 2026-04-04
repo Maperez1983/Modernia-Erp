@@ -1,7 +1,7 @@
-# Auditoría Completa del Sistema (Modernia ERP)
+# Auditoría Completa del Sistema (Verifika²)
 
 Fecha: 2026-03-29  
-Repo: `Modernia-Erp` (workspace local)  
+Repo: `Modernia-Erp` (repo técnico / workspace local)  
 Entorno objetivo: Render (SQLite en `/var/data`, servidor Python + frontend estático)
 
 ## Alcance
@@ -183,4 +183,3 @@ Notas:
 
 - Crear usuario, asignar servicios, comprobar acceso.
 - Reset/alta password por invitación y expiración del token.
-

@@ -1,12 +1,12 @@
-# Replica Tecnocloud (Tecnocasa) → Modernia CRM Inmobiliario
+# Replica Tecnocloud (Tecnocasa) → Verifika² CRM Inmobiliario
 
 Este documento aterriza, a partir de:
 - exports CSV (Actividades/Citas/Clientes/Informadores/Inmuebles/Pedidos/Noticias/Control zona),
 - PDF de formación “Tecnocloud y Herramientas Operativas 2019”,
 
-una réplica **práctica** de lo que aporta Tecnocloud/Lightning, adaptada a Modernia y sin “cosas de franquicia” que no aporten.
+una réplica **práctica** de lo que aporta Tecnocloud/Lightning, adaptada a **Verifika²** (caso cliente Modernia) y sin “cosas de franquicia” que no aporten.
 
-## 1) Qué ya tenemos en Modernia (estado actual)
+## 1) Qué ya tenemos en Verifika² (estado actual)
 
 - **Pipeline captaciones** (kanban + lista) con etapas: Noticia → Adquisición → Encargo → Reservado → Vendido (+ Cerrado negativo / Alquiler).
 - **Ficha de inmueble** con checklist por etapa y generación de PDFs (visita/venta/alquiler) cuando procede.
@@ -25,7 +25,7 @@ una réplica **práctica** de lo que aporta Tecnocloud/Lightning, adaptada a Mod
 6) **Movilidad**: zona en móvil (captura rápida de info, reposicionamiento, etc.).
 7) **Marketing operativo**: alertas y campañas “ligeras” ligadas al flujo (ej. alertas email de búsqueda).
 
-## 3) Qué replicamos en Modernia (por fases)
+## 3) Qué replicamos en Verifika² (por fases)
 
 ### Fase 1 (rápida, sin romper)
 - `Noticia verificada` en captaciones.

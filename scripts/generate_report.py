@@ -15,6 +15,8 @@ TABLES = [
     "inversure_operaciones",
 ]
 
+PRODUCT_NAME = "Verifika²"
+
 
 def fetch_all(conn, query, params=None):
     cur = conn.execute(query, params or ())
@@ -51,8 +53,8 @@ def main():
     )
     parser.add_argument(
         "--logo",
-        default="assets/logo.jpg",
-        help="Path to a logo image to show in the report.",
+        default="assets/verifika2/verifika2_wordmark_check_green.png",
+        help="Path to a logo image to show in the report (wordmark recomendado).",
     )
     parser.add_argument("--limit", type=int, default=100, help="Rows per table.")
     args = parser.parse_args()
@@ -87,62 +89,61 @@ def main():
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>ERP Modernia - Reporte</title>
+	  <title>{PRODUCT_NAME} - Reporte</title>
   <style>
     :root {{
       color-scheme: light;
-      --sage: #7e8878;
-      --oxblood: #824c45;
-      --gold: #d7b04c;
-      --bronze: #cca33c;
-      --ink: #1f1d1b;
-      --paper: #f8f6f2;
-      --mist: #efede8;
+	      --gold: #F2C14E;
+	      --gold-deep: #B9892B;
+	      --sage: #22C55E;
+	      --ink: #0B1D33;
+	      --paper: #F5F7FB;
+	      --mist: #EEF2F6;
     }}
     * {{ box-sizing: border-box; }}
     body {{
       margin: 0;
-      font-family: "Baskerville", "Palatino Linotype", "Palatino", "Garamond", serif;
+	      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
       color: var(--ink);
-      background: radial-gradient(circle at 10% 0%, #f4efe5, #fbfaf8 35%, #ffffff 60%) fixed;
+	      background: radial-gradient(circle at 10% 0%, rgba(242, 193, 78, 0.14), var(--paper) 35%, #ffffff 60%) fixed;
     }}
     header {{
       display: flex;
       align-items: center;
       justify-content: space-between;
       padding: 28px 32px;
-      background: linear-gradient(120deg, #ffffff 0%, #f7f2e7 45%, #f1ede4 100%);
-      border-bottom: 1px solid #e0ddd6;
+	      background: linear-gradient(120deg, #ffffff 0%, rgba(242, 193, 78, 0.08) 45%, rgba(34, 197, 94, 0.04) 100%);
+	      border-bottom: 1px solid rgba(226, 232, 240, 0.9);
     }}
     .brand {{
       display: flex;
       align-items: center;
       gap: 18px;
     }}
-    .brand img {{
-      width: 72px;
-      height: auto;
-      border-radius: 10px;
-      background: #ffffff;
-      box-shadow: 0 8px 24px rgba(0,0,0,0.08);
-    }}
-    .brand h1 {{
-      margin: 0;
-      font-size: 30px;
-      letter-spacing: 0.5px;
-    }}
-    .brand p {{
-      margin: 6px 0 0;
-      color: var(--sage);
-      font-size: 14px;
-      letter-spacing: 0.3px;
-    }}
-    .meta {{
-      text-align: right;
-      color: var(--oxblood);
-      font-size: 13px;
-      letter-spacing: 0.2px;
-    }}
+	    .brand img {{
+	      width: 220px;
+	      height: auto;
+	      border-radius: 0;
+	      background: transparent;
+	      box-shadow: none;
+	    }}
+	    .brand h1 {{
+	      margin: 0;
+	      font-size: 22px;
+	      letter-spacing: 0.2px;
+	    }}
+	    .brand p {{
+	      margin: 6px 0 0;
+	      color: var(--ink);
+	      font-size: 14px;
+	      letter-spacing: 0.3px;
+	    }}
+	    .meta {{
+	      text-align: right;
+	      color: rgba(11, 29, 51, 0.72);
+	      font-size: 13px;
+	      letter-spacing: 0.2px;
+	    }}
     main {{
       padding: 28px 32px 48px;
       display: grid;
@@ -158,22 +159,22 @@ def main():
     }}
     section:nth-of-type(2) {{ animation-delay: 0.08s; }}
     section:nth-of-type(3) {{ animation-delay: 0.16s; }}
-    h2 {{
-      margin: 0 0 12px;
-      font-size: 22px;
-      color: var(--oxblood);
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }}
-    .pill {{
+	    h2 {{
+	      margin: 0 0 12px;
+	      font-size: 22px;
+	      color: var(--ink);
+	      display: flex;
+	      align-items: center;
+	      gap: 10px;
+	    }}
+	    .pill {{
       display: inline-flex;
       align-items: center;
       gap: 6px;
       padding: 4px 10px;
       border-radius: 999px;
-      background: rgba(215, 176, 76, 0.18);
-      color: var(--oxblood);
+	      background: rgba(242, 193, 78, 0.18);
+	      color: var(--ink);
       font-size: 12px;
       letter-spacing: 0.4px;
       text-transform: uppercase;
@@ -209,11 +210,11 @@ def main():
       padding: 8px 10px;
       text-align: left;
     }}
-    th {{
-      background: linear-gradient(90deg, #f7f0df 0%, #f1ede4 100%);
-      color: var(--oxblood);
-      font-weight: 600;
-    }}
+	    th {{
+	      background: linear-gradient(90deg, rgba(242, 193, 78, 0.16) 0%, rgba(56, 189, 248, 0.06) 100%);
+	      color: var(--ink);
+	      font-weight: 600;
+	    }}
     tbody tr:nth-child(even) {{ background: #fbfaf7; }}
     .note {{ color: #7b7369; margin-top: -4px; }}
     .toolbar {{
@@ -230,14 +231,14 @@ def main():
       background: #ffffff;
       min-width: 240px;
     }}
-    .tag {{
-      background: rgba(130, 76, 69, 0.1);
-      color: var(--oxblood);
-      padding: 4px 10px;
-      border-radius: 999px;
-      font-size: 12px;
-      letter-spacing: 0.3px;
-    }}
+	    .tag {{
+	      background: rgba(34, 197, 94, 0.12);
+	      color: var(--ink);
+	      padding: 4px 10px;
+	      border-radius: 999px;
+	      font-size: 12px;
+	      letter-spacing: 0.3px;
+	    }}
     @keyframes fadeUp {{
       from {{ opacity: 0; transform: translateY(14px); }}
       to {{ opacity: 1; transform: translateY(0); }}
@@ -251,13 +252,13 @@ def main():
 </head>
 <body>
   <header>
-    <div class="brand">
-      <img src="{html.escape(args.logo)}" alt="Grupo Modernia" onerror="this.style.display='none'" />
-      <div>
-        <h1>ERP Modernia</h1>
-        <p>Panel base de datos · Fase 1</p>
-      </div>
-    </div>
+	    <div class="brand">
+	      <img src="{html.escape(args.logo)}" alt="{PRODUCT_NAME}" onerror="this.style.display='none'" />
+	      <div>
+	        <h1>{PRODUCT_NAME}</h1>
+	        <p>Panel base de datos · Fase 1</p>
+	      </div>
+	    </div>
     <div class="meta">
       <div>Reporte interno</div>
       <div>Datos importados desde Excel</div>
