@@ -15,7 +15,9 @@ if str(ROOT) not in sys.path:
 
 from web.server import (  # noqa: E402
     GESTORIA_EXCEL_TEMPLATE,
+    add_gestoria_facturas_control_sheets,
     ensure_tables,
+    fetch_gestoria_facturas_for_excel,
     normalize_lookup_text,
     open_sqlite_conn,
     normalize_service_key,
@@ -190,6 +192,8 @@ def main() -> None:
     try:
         rows = build_rows(conn, str(args.empresa_id).strip(), str(args.cliente_id).strip())
         wb = build_workbook(rows, template_path)
+        facturas_rows = fetch_gestoria_facturas_for_excel(conn, str(args.empresa_id).strip(), str(args.cliente_id).strip())
+        add_gestoria_facturas_control_sheets(wb, facturas_rows)
         out_path.parent.mkdir(parents=True, exist_ok=True)
         wb.save(out_path)
         cliente = conn.execute("SELECT nombre FROM clientes WHERE id = ?", (str(args.cliente_id).strip(),)).fetchone()

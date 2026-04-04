@@ -19320,6 +19320,242 @@ def fetch_workspace_inbox_queue(conn, workspace_id, limit=40):
     return {"rows": [dict(row) for row in rows]}
 
 
+def fetch_gestoria_facturas_for_excel(conn, empresa_id, cliente_id):
+    empresa_id = str(empresa_id or "").strip()
+    cliente_id = str(cliente_id or "").strip()
+    if not empresa_id or not cliente_id:
+        return []
+    rows = conn.execute(
+        """
+        SELECT
+          f.id,
+          COALESCE(f.fecha_emision, '') AS fecha_emision,
+          COALESCE(f.numero, '') AS numero,
+          COALESCE(f.tipo, '') AS tipo,
+          COALESCE(f.base_imponible, 0) AS base_imponible,
+          COALESCE(f.cuota_iva, 0) AS cuota_iva,
+          COALESCE(f.cuota_irpf, 0) AS cuota_irpf,
+          COALESCE(f.total, 0) AS total,
+          COALESCE(f.iva_pct, 0) AS iva_pct,
+          COALESCE(f.estado_ocr, '') AS estado_ocr,
+          COALESCE(f.doc_key, '') AS doc_key,
+          COALESCE(t.nombre, '') AS tercero,
+          COALESCE(t.nif, '') AS tercero_nif
+        FROM gestoria_facturas f
+        LEFT JOIN gestoria_terceros t ON t.id = f.tercero_id
+        WHERE f.empresa_id = ? AND f.cliente_id = ?
+        ORDER BY
+          CASE WHEN COALESCE(f.fecha_emision, '') = '' THEN 1 ELSE 0 END,
+          f.fecha_emision ASC,
+          f.numero ASC,
+          f.created_at ASC
+        """,
+        (empresa_id, cliente_id),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def _excel_clear_sheet(ws, keep_rows=0):
+    try:
+        max_row = int(ws.max_row or 0)
+    except Exception:
+        max_row = 0
+    if max_row <= keep_rows:
+        return
+    ws.delete_rows(keep_rows + 1, max_row - keep_rows)
+
+
+def add_gestoria_facturas_control_sheets(wb, facturas_rows):
+    """
+    Añade 2 hojas al workbook:
+    - 'Listado Facturas': listado numerado y ordenado por fecha.
+    - 'Control IVA': totalizador de base/IVA/retenciones + descuadres.
+    """
+    try:
+        from openpyxl.styles import Alignment, Font
+    except Exception:
+        Alignment = None
+        Font = None
+
+    list_title = "Listado Facturas"
+    ctrl_title = "Control IVA"
+    if list_title in wb.sheetnames:
+        ws_list = wb[list_title]
+        _excel_clear_sheet(ws_list, keep_rows=0)
+    else:
+        ws_list = wb.create_sheet(list_title)
+    if ctrl_title in wb.sheetnames:
+        ws_ctrl = wb[ctrl_title]
+        _excel_clear_sheet(ws_ctrl, keep_rows=0)
+    else:
+        ws_ctrl = wb.create_sheet(ctrl_title)
+
+    headers = [
+        "#",
+        "FECHA",
+        "TIPO",
+        "Nº FACTURA",
+        "TERCERO",
+        "NIF",
+        "BASE IMPONIBLE",
+        "IVA",
+        "RETENCIÓN",
+        "TOTAL",
+        "% IVA",
+        "DESCUADRE",
+        "ESTADO OCR",
+        "DOC KEY",
+    ]
+    ws_list.append(headers)
+    if Font:
+        for col in range(1, len(headers) + 1):
+            ws_list.cell(1, col).font = Font(bold=True)
+    if Alignment:
+        ws_list.freeze_panes = "A2"
+        ws_list.cell(1, 1).alignment = Alignment(horizontal="center")
+
+    for idx, row in enumerate(facturas_rows or [], start=1):
+        fecha = str(row.get("fecha_emision") or "").strip()
+        tipo = str(row.get("tipo") or "").strip().lower()
+        numero = str(row.get("numero") or "").strip()
+        tercero = str(row.get("tercero") or "").strip()
+        nif = str(row.get("tercero_nif") or "").strip()
+        base = round(float(row.get("base_imponible") or 0.0), 2)
+        iva = round(float(row.get("cuota_iva") or 0.0), 2)
+        irpf = round(float(row.get("cuota_irpf") or 0.0), 2)
+        total = round(float(row.get("total") or 0.0), 2)
+        iva_pct = round(float(row.get("iva_pct") or 0.0), 2)
+        estado = str(row.get("estado_ocr") or "").strip()
+        doc_key = str(row.get("doc_key") or "").strip()
+
+        ws_list.append(
+            [
+                idx,
+                fecha,
+                tipo,
+                numero,
+                tercero,
+                nif,
+                base,
+                iva,
+                irpf,
+                total,
+                iva_pct,
+                None,
+                estado,
+                doc_key,
+            ]
+        )
+        r = 1 + idx
+        # Descuadre = Total - (Base + IVA - Retención)
+        ws_list.cell(r, 12).value = f"=J{r}-(G{r}+H{r}-I{r})"
+
+        for col in (7, 8, 9, 10, 11, 12):
+            ws_list.cell(r, col).number_format = "#,##0.00"
+        ws_list.cell(r, 1).number_format = "0"
+
+    last_row = max(2, (len(facturas_rows or []) + 1))
+    # Autoanchos mínimos.
+    try:
+        ws_list.column_dimensions["A"].width = 5
+        ws_list.column_dimensions["B"].width = 12
+        ws_list.column_dimensions["C"].width = 10
+        ws_list.column_dimensions["D"].width = 16
+        ws_list.column_dimensions["E"].width = 28
+        ws_list.column_dimensions["F"].width = 14
+        ws_list.column_dimensions["G"].width = 16
+        ws_list.column_dimensions["H"].width = 12
+        ws_list.column_dimensions["I"].width = 12
+        ws_list.column_dimensions["J"].width = 12
+        ws_list.column_dimensions["K"].width = 10
+        ws_list.column_dimensions["L"].width = 12
+        ws_list.column_dimensions["M"].width = 12
+        ws_list.column_dimensions["N"].width = 40
+    except Exception:
+        pass
+
+    # Control IVA: fórmulas sobre el listado para poder auditar.
+    ws_ctrl.append(
+        [
+            "CONCEPTO",
+            "Nº FACTURAS",
+            "BASE IMPONIBLE",
+            "IVA",
+            "RETENCIONES",
+            "TOTAL",
+            "DESCUADRE",
+        ]
+    )
+    if Font:
+        for col in range(1, 8):
+            ws_ctrl.cell(1, col).font = Font(bold=True)
+    if Alignment:
+        ws_ctrl.freeze_panes = "A2"
+
+    list_sheet = f"'{list_title}'"
+    tipo_rng = f"{list_sheet}!C2:C{last_row}"
+    base_rng = f"{list_sheet}!G2:G{last_row}"
+    iva_rng = f"{list_sheet}!H2:H{last_row}"
+    irpf_rng = f"{list_sheet}!I2:I{last_row}"
+    total_rng = f"{list_sheet}!J2:J{last_row}"
+    desc_rng = f"{list_sheet}!L2:L{last_row}"
+
+    ws_ctrl.append(
+        [
+            "IVA SOPORTADO (COMPRAS)",
+            f"=COUNTIF({tipo_rng},\"compra\")",
+            f"=SUMIF({tipo_rng},\"compra\",{base_rng})",
+            f"=SUMIF({tipo_rng},\"compra\",{iva_rng})",
+            f"=SUMIF({tipo_rng},\"compra\",{irpf_rng})",
+            f"=SUMIF({tipo_rng},\"compra\",{total_rng})",
+            f"=SUMIF({tipo_rng},\"compra\",{desc_rng})",
+        ]
+    )
+    ws_ctrl.append(
+        [
+            "IVA REPERCUTIDO (VENTAS)",
+            f"=COUNTIF({tipo_rng},\"venta\")",
+            f"=SUMIF({tipo_rng},\"venta\",{base_rng})",
+            f"=SUMIF({tipo_rng},\"venta\",{iva_rng})",
+            f"=SUMIF({tipo_rng},\"venta\",{irpf_rng})",
+            f"=SUMIF({tipo_rng},\"venta\",{total_rng})",
+            f"=SUMIF({tipo_rng},\"venta\",{desc_rng})",
+        ]
+    )
+    ws_ctrl.append(
+        [
+            "TOTAL",
+            "=SUM(B2:B3)",
+            "=SUM(C2:C3)",
+            "=SUM(D2:D3)",
+            "=SUM(E2:E3)",
+            "=SUM(F2:F3)",
+            "=SUM(G2:G3)",
+        ]
+    )
+    ws_ctrl.append(["IVA NETO (REPERCUTIDO - SOPORTADO)", "", "", "=D3-D2", "", "", ""])
+
+    for r in range(2, ws_ctrl.max_row + 1):
+        for col in range(2, 8):
+            cell = ws_ctrl.cell(r, col)
+            if col == 2:
+                cell.number_format = "0"
+            else:
+                cell.number_format = "#,##0.00"
+    try:
+        ws_ctrl.column_dimensions["A"].width = 34
+        ws_ctrl.column_dimensions["B"].width = 12
+        ws_ctrl.column_dimensions["C"].width = 16
+        ws_ctrl.column_dimensions["D"].width = 12
+        ws_ctrl.column_dimensions["E"].width = 14
+        ws_ctrl.column_dimensions["F"].width = 12
+        ws_ctrl.column_dimensions["G"].width = 12
+    except Exception:
+        pass
+
+    return wb
+
+
 def fetch_workspace_portal_clients(conn, workspace_id, limit=40):
     rows = conn.execute(
         """
@@ -39991,6 +40227,9 @@ class Handler(BaseHTTPRequestHandler):
                 ws.cell(row_idx, 14).value = row[13]
                 ws.cell(row_idx, 15).value = row[14]
                 ws.cell(row_idx, 16).value = row[15]
+
+            facturas_rows = fetch_gestoria_facturas_for_excel(conn, empresa_id, cliente_id)
+            add_gestoria_facturas_control_sheets(wb, facturas_rows)
             bio = BytesIO()
             wb.save(bio)
             payload = bio.getvalue()
