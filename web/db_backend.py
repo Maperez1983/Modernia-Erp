@@ -41,12 +41,14 @@ def is_postgres_enabled():
     # Toleramos errores comunes de escritura en Render (p.ej. "postgre").
     if forced in {"postgres", "postgresql", "postgre", "pg"}:
         return True
-    raw = (os.environ.get("DATABASE_URL") or os.environ.get("POSTGRES_URL") or "").strip()
+    # En Render, DATABASE_URL suele ser "internalConnectionString" (host privado).
+    # Permitimos override explícito con POSTGRES_URL (p.ej. externalConnectionString) sin tener que tocar DATABASE_URL.
+    raw = (os.environ.get("POSTGRES_URL") or os.environ.get("DATABASE_URL") or "").strip()
     return raw.lower().startswith("postgres")
 
 
 def _postgres_dsn():
-    raw = (os.environ.get("DATABASE_URL") or os.environ.get("POSTGRES_URL") or "").strip()
+    raw = (os.environ.get("POSTGRES_URL") or os.environ.get("DATABASE_URL") or "").strip()
     return raw
 
 
