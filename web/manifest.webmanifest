@@ -9,25 +9,25 @@
   "theme_color": "#0B1D33",
   "icons": [
     {
-      "src": "/icons/ios/v22/icon-192.png",
+      "src": "/icons/ios/v23/icon-192.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/icons/ios/v22/icon-192.png",
+      "src": "/icons/ios/v23/icon-192.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "maskable"
     },
     {
-      "src": "/icons/ios/v22/icon-512.png",
+      "src": "/icons/ios/v23/icon-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/icons/ios/v22/icon-512.png",
+      "src": "/icons/ios/v23/icon-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"
