@@ -323,7 +323,7 @@ def open_postgres_conn(with_row_factory=False, *, skip_compat=False, connect_tim
         )
     try:
         import psycopg
-        from psycopg.rows import dict_row
+        from psycopg.rows import dict_row, tuple_row
     except Exception as exc:
         raise RuntimeError("psycopg no instalado. Añade `psycopg[binary]` a requirements.txt.") from exc
     connect_timeout = None
@@ -344,12 +344,13 @@ def open_postgres_conn(with_row_factory=False, *, skip_compat=False, connect_tim
     # Incluso para probes de health, reusar conexiones evita superar el max_connections y es más rápido.
     use_pool = True
     wrapped = None
+    row_factory = dict_row if with_row_factory else tuple_row
     if use_pool:
         # Asegura que _PG_POOL_MAX/_PG_POOL_WAIT_S están inicializados.
         _pg_pool_configured()
         wrapped = _pg_pool_acquire(
             dsn,
-            row_factory=(dict_row if with_row_factory else None),
+            row_factory=row_factory,
             connect_timeout=max(2, connect_timeout),
         )
     if wrapped is None:
@@ -364,7 +365,7 @@ def open_postgres_conn(with_row_factory=False, *, skip_compat=False, connect_tim
             )
         conn = psycopg.connect(
             dsn,
-            row_factory=(dict_row if with_row_factory else None),
+            row_factory=row_factory,
             connect_timeout=max(2, connect_timeout),
             application_name=(os.environ.get("APP_PG_APP_NAME") or "verifika2-crm").strip() or "verifika2-crm",
         )
@@ -565,7 +566,7 @@ def _pg_pool_acquire(dsn, *, row_factory, connect_timeout):
             raw = _PG_POOL_QUEUE.get(timeout=_PG_POOL_WAIT_S)
         except Exception:
             return None
-    # Configure row_factory for this borrower.
+    # Configure row_factory for this borrower (psycopg requiere callable; nunca usar None).
     try:
         raw.row_factory = row_factory
     except Exception:
