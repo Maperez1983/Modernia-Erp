@@ -48,6 +48,7 @@ try:
     from .schema_support import apply_schema_file, ensure_column, table_columns
     from .db_backend import is_postgres_enabled as db_is_postgres_enabled
     from .db_backend import open_postgres_conn, ensure_postgres_sqlite_compat, get_postgres_pool_stats
+    from .db_backend import set_conn_tracker as db_set_conn_tracker, reset_conn_tracker as db_reset_conn_tracker
     from .seguros_state import can_transition_seguro_estado as runtime_can_transition_seguro_estado
     from .seguros_state import normalize_seguro_estado_value as runtime_normalize_seguro_estado_value
 except ImportError:
@@ -57,6 +58,7 @@ except ImportError:
     from schema_support import apply_schema_file, ensure_column, table_columns
     from db_backend import is_postgres_enabled as db_is_postgres_enabled
     from db_backend import open_postgres_conn, ensure_postgres_sqlite_compat, get_postgres_pool_stats
+    from db_backend import set_conn_tracker as db_set_conn_tracker, reset_conn_tracker as db_reset_conn_tracker
     from seguros_state import can_transition_seguro_estado as runtime_can_transition_seguro_estado
     from seguros_state import normalize_seguro_estado_value as runtime_normalize_seguro_estado_value
 
@@ -25007,6 +25009,16 @@ class Handler(BaseHTTPRequestHandler):
     _years_cached_payload = None
     _started_at = datetime.now().isoformat()
 
+    def setup(self):
+        super().setup()
+        # Auto-track connections opened during this request (no importa en qué función se abran).
+        # Evita fugas al pool de Postgres cuando algún endpoint olvida cerrar la conexión.
+        self._db_conn_tracker_token = None
+        try:
+            self._db_conn_tracker_token = db_set_conn_tracker(self._track_conn)
+        except Exception:
+            self._db_conn_tracker_token = None
+
     def log_message(self, format, *args):
         return
 
@@ -25129,6 +25141,12 @@ class Handler(BaseHTTPRequestHandler):
         try:
             super().finish()
         finally:
+            try:
+                token = getattr(self, "_db_conn_tracker_token", None)
+                if token is not None:
+                    db_reset_conn_tracker(token)
+            except Exception:
+                pass
             self._close_tracked_conns()
 
     def _parse_cookies(self):
@@ -25787,13 +25805,13 @@ class Handler(BaseHTTPRequestHandler):
             # Respondemos con los iconos actuales si existen, para evitar 404 al abrir desde
             # acceso directo en pantalla de inicio.
             try:
-                # /icons/ios/v20/<file> -> /icons/ios/v23/<file>
+                # /icons/ios/vXX/<file> -> /icons/ios/v24/<file>
                 parts = [p for p in (parsed.path or "").split("/") if p]
                 if len(parts) >= 4 and parts[0] == "icons" and parts[1] == "ios" and parts[2].startswith("v"):
                     ver_raw = parts[2][1:]
-                    if ver_raw.isdigit() and int(ver_raw) != 23:
+                    if ver_raw.isdigit() and int(ver_raw) != 24:
                         rel = "/".join(parts[3:])
-                        mapped = safe_resolve_under(ROOT / "icons" / "ios" / "v23", rel)
+                        mapped = safe_resolve_under(ROOT / "icons" / "ios" / "v24", rel)
                         if mapped and mapped.exists():
                             send_file(self, mapped)
                             return
@@ -25811,7 +25829,7 @@ class Handler(BaseHTTPRequestHandler):
                 }
                 target = legacy_map.get(legacy_name)
                 if target:
-                    mapped = safe_resolve_under(ROOT / "icons" / "ios" / "v23", target)
+                    mapped = safe_resolve_under(ROOT / "icons" / "ios" / "v24", target)
                     if mapped and mapped.exists():
                         send_file(self, mapped)
                         return
@@ -25819,6 +25837,20 @@ class Handler(BaseHTTPRequestHandler):
                 pass
 
         rel_path = parsed.path.lstrip("/")
+        # No servir ficheros arbitrarios desde `web/` (evita exponer código fuente/secretos).
+        allowlist = {
+            "index.html",
+            "styles.css",
+            "ui-foundation.js",
+            "app-auth.js",
+            "app-routing.js",
+            "app.js",
+            "manifest.webmanifest",
+            "sw.js",
+        }
+        if rel_path not in allowlist:
+            self.send_error(404, "Not found")
+            return
         safe_path = safe_resolve_under(ROOT, rel_path)
         if not safe_path:
             self.send_error(404, "Not found")
@@ -26029,7 +26061,23 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, {"error": "Endpoint no valido"}, status=404)
             return
 
-        content_length = int(self.headers.get("Content-Length", 0))
+        try:
+            content_length = int(self.headers.get("Content-Length", 0))
+        except Exception:
+            content_length = 0
+        try:
+            max_post_bytes = int(os.environ.get("APP_MAX_POST_BYTES", str(10 * 1024 * 1024)) or (10 * 1024 * 1024))
+        except Exception:
+            max_post_bytes = 10 * 1024 * 1024
+        max_post_bytes = max(64 * 1024, min(50 * 1024 * 1024, max_post_bytes))
+        if content_length > max_post_bytes:
+            json_response(
+                self,
+                {"error": "Payload demasiado grande", "detail": f"Máximo {max_post_bytes} bytes"},
+                status=413,
+                extra_headers=[("Cache-Control", "no-store")],
+            )
+            return
         body = self.rfile.read(content_length or 0)
         try:
             payload = json.loads(body.decode("utf-8"))
