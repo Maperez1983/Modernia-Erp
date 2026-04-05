@@ -419,14 +419,15 @@ def _pg_pool_configured():
     if _PG_POOL_QUEUE is not None:
         return
     try:
-        # Default conservador: los planes pequeños de Postgres suelen tener pocos slots.
-        _PG_POOL_MAX = int(os.environ.get("APP_PG_POOL_MAX", "4") or 4)
+        # Default (Render): necesitamos algo más de margen porque iOS/PWA hace bursts de requests
+        # (health/me/assets) y 4 conexiones puede saturarse fácilmente durante bootstrap o queries lentas.
+        _PG_POOL_MAX = int(os.environ.get("APP_PG_POOL_MAX", "8") or 8)
     except Exception:
-        _PG_POOL_MAX = 4
+        _PG_POOL_MAX = 8
     try:
-        _PG_POOL_WAIT_S = float(os.environ.get("APP_PG_POOL_WAIT_SECONDS", "4") or 4)
+        _PG_POOL_WAIT_S = float(os.environ.get("APP_PG_POOL_WAIT_SECONDS", "8") or 8)
     except Exception:
-        _PG_POOL_WAIT_S = 4.0
+        _PG_POOL_WAIT_S = 8.0
     _PG_POOL_MAX = max(0, min(50, _PG_POOL_MAX))
     _PG_POOL_WAIT_S = max(0.1, min(15.0, _PG_POOL_WAIT_S))
     _PG_POOL_QUEUE = queue.LifoQueue(maxsize=max(1, _PG_POOL_MAX or 1))
