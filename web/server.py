@@ -25477,13 +25477,12 @@ class Handler(BaseHTTPRequestHandler):
                                         import psycopg
 
                                         dsn = (os.environ.get("POSTGRES_URL") or os.environ.get("DATABASE_URL") or "").strip()
-                                        raw = psycopg.connect(
+                                        conn = psycopg.connect(
                                             dsn,
                                             connect_timeout=timeout_s,
                                             application_name=(os.environ.get("APP_PG_APP_NAME") or "verifika2-crm-health").strip()
                                             or "verifika2-crm-health",
                                         )
-                                        conn = PostgresCompatConnection(raw)
                                     except Exception:
                                         raise
                                 try:
