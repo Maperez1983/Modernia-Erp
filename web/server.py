@@ -25396,6 +25396,19 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception:
                     pass
         except Exception as exc:
+            # Backpressure: si el pool de Postgres está saturado, devolvemos 503 en vez de 500.
+            try:
+                msg = str(exc or "").lower()
+                if "pool postgres saturado" in msg:
+                    json_response(
+                        self,
+                        {"error": "Servidor ocupado", "detail": "Demasiadas peticiones simultáneas. Reintenta en unos segundos."},
+                        status=503,
+                        extra_headers=[("Retry-After", "2")],
+                    )
+                    return
+            except Exception:
+                pass
             # Evita que una excepción no controlada se traduzca en 502 (Render).
             try:
                 if str(self.path or "").startswith("/api/"):
@@ -25768,6 +25781,23 @@ class Handler(BaseHTTPRequestHandler):
         try:
             self._do_POST()
         except Exception as exc:
+            try:
+                print(f"[ERROR] POST {self.path}: {type(exc).__name__}: {exc}")
+            except Exception:
+                pass
+            # Backpressure: pool saturado -> 503 con Retry-After (evita toast genérico “API error”).
+            try:
+                msg = str(exc or "").lower()
+                if "pool postgres saturado" in msg:
+                    json_response(
+                        self,
+                        {"error": "Servidor ocupado", "detail": "Demasiadas peticiones simultáneas. Reintenta en unos segundos."},
+                        status=503,
+                        extra_headers=[("Retry-After", "2")],
+                    )
+                    return
+            except Exception:
+                pass
             # Evita que una excepción no controlada cierre la conexión (Render lo reporta como 502).
             try:
                 if isinstance(exc, DbUnavailableError) or Handler._is_db_disconnect_error(exc):
