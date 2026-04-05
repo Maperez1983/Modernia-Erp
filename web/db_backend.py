@@ -343,12 +343,23 @@ def open_postgres_conn(with_row_factory=False, *, skip_compat=False, connect_tim
     use_pool = True
     wrapped = None
     if use_pool:
+        # Asegura que _PG_POOL_MAX/_PG_POOL_WAIT_S están inicializados.
+        _pg_pool_configured()
         wrapped = _pg_pool_acquire(
             dsn,
             row_factory=(dict_row if with_row_factory else None),
             connect_timeout=max(2, connect_timeout),
         )
     if wrapped is None:
+        # Importante: si el pool está configurado (APP_PG_POOL_MAX>0) y está saturado,
+        # abrir conexiones "extra" rompe el propósito del pool y puede tumbar Postgres en planes pequeños.
+        # Por defecto aplicamos backpressure (fallar rápido) y solo permitimos unpooled si el usuario lo fuerza.
+        allow_unpooled = (os.environ.get("APP_PG_ALLOW_UNPOOLED") or "").strip().lower() in {"1", "true", "yes", "on"}
+        if (not allow_unpooled) and (_PG_POOL_MAX or 0) > 0:
+            raise RuntimeError(
+                "Pool Postgres saturado. "
+                "Aumenta APP_PG_POOL_MAX/APP_PG_POOL_WAIT_SECONDS o habilita APP_PG_ALLOW_UNPOOLED=1 (no recomendado)."
+            )
         conn = psycopg.connect(
             dsn,
             row_factory=(dict_row if with_row_factory else None),
