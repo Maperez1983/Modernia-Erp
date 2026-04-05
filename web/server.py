@@ -25460,13 +25460,49 @@ class Handler(BaseHTTPRequestHandler):
                         timeout_s = max(1, min(10, timeout_s))
                         try:
                             if db_is_postgres_enabled():
-                                conn = open_postgres_conn(
-                                    with_row_factory=False,
-                                    skip_compat=True,
-                                    connect_timeout_override=timeout_s,
-                                )
+                                # Probe rápido. Si el pool está saturado, hacemos fallback a conexión directa
+                                # para no dar falsos "db_unavailable" cuando Postgres está OK.
+                                conn = None
+                                try:
+                                    conn = open_postgres_conn(
+                                        with_row_factory=False,
+                                        skip_compat=True,
+                                        connect_timeout_override=timeout_s,
+                                    )
+                                except Exception:
+                                    # Fallback: incluso si el pool está OK, puede devolverse una conexión rota
+                                    # (DB reiniciada, SSL renegociación, etc.). En ese caso un connect directo
+                                    # evita falsos negativos en /api/health cuando Postgres sí responde.
+                                    try:
+                                        import psycopg
+
+                                        dsn = (os.environ.get("POSTGRES_URL") or os.environ.get("DATABASE_URL") or "").strip()
+                                        raw = psycopg.connect(
+                                            dsn,
+                                            connect_timeout=timeout_s,
+                                            application_name=(os.environ.get("APP_PG_APP_NAME") or "verifika2-crm-health").strip()
+                                            or "verifika2-crm-health",
+                                        )
+                                        conn = PostgresCompatConnection(raw)
+                                    except Exception:
+                                        raise
                                 try:
                                     conn.execute("SELECT 1")
+                                    # Si el esquema principal ya existe, marcamos ready para desbloquear el front.
+                                    if not Handler._db_ready:
+                                        try:
+                                            row = conn.execute("SELECT to_regclass('public.workspaces') AS t").fetchone()
+                                            exists = None
+                                            try:
+                                                exists = row.get("t") if isinstance(row, dict) else row[0]
+                                            except Exception:
+                                                exists = None
+                                            if exists:
+                                                Handler._db_ready = True
+                                                Handler._db_ready_last_error = ""
+                                                Handler._db_ready_last_attempt_at = now_ts
+                                        except Exception:
+                                            pass
                                 finally:
                                     try:
                                         conn.close()
@@ -25476,19 +25512,23 @@ class Handler(BaseHTTPRequestHandler):
                                 conn = open_sqlite_conn(self.db_path, with_row_factory=False)
                                 try:
                                     conn.execute("SELECT 1")
+                                    if not Handler._db_ready:
+                                        Handler._db_ready = True
+                                        Handler._db_ready_last_error = ""
+                                        Handler._db_ready_last_attempt_at = now_ts
                                 finally:
                                     try:
                                         conn.close()
                                     except Exception:
                                         pass
-                            if Handler._db_ready:
-                                status = 200
-                                body = f"ok backend={backend}".encode("utf-8")
-                            else:
-                                # DB responde pero todavía no hemos terminado bootstrap de esquema.
-                                Handler._trigger_db_bootstrap_async(self.db_path)
-                                status = 503
-                                body = f"bootstrapping backend={backend}".encode("utf-8")
+                            status = 200
+                            body = f"ok backend={backend}".encode("utf-8")
+                            if not Handler._db_ready:
+                                # Arranca bootstrap en background, pero no bloquea readiness.
+                                try:
+                                    Handler._trigger_db_bootstrap_async(self.db_path)
+                                except Exception:
+                                    pass
                         except Exception as exc:
                             Handler._mark_db_unavailable(exc)
                             try:
@@ -25496,7 +25536,8 @@ class Handler(BaseHTTPRequestHandler):
                             except Exception:
                                 pass
                             status = 503
-                            body = f"db_unavailable backend={backend}".encode("utf-8")
+                            err = (type(exc).__name__ or "Error").strip() or "Error"
+                            body = f"db_unavailable backend={backend} err={err}".encode("utf-8")
                         Handler._health_last_at = now_ts
                         Handler._health_last_status = status
                         Handler._health_last_body = body
