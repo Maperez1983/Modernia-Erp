@@ -25453,7 +25453,11 @@ class Handler(BaseHTTPRequestHandler):
                     else:
                         # Siempre hacemos un probe rápido: si Postgres ha reiniciado tras marcar _db_ready,
                         # evitamos "falsos OK" que luego explotan en /api/workspace_detail.
-                        timeout_s = int(os.environ.get("APP_HEALTH_PG_TIMEOUT", "2") or 2)
+                        try:
+                            timeout_s = int(os.environ.get("APP_HEALTH_PG_TIMEOUT", "4") or 4)
+                        except Exception:
+                            timeout_s = 4
+                        timeout_s = max(1, min(10, timeout_s))
                         try:
                             if db_is_postgres_enabled():
                                 conn = open_postgres_conn(
@@ -25515,6 +25519,14 @@ class Handler(BaseHTTPRequestHandler):
                 (os.environ.get("RENDER_GIT_COMMIT") or os.environ.get("GIT_COMMIT") or os.environ.get("COMMIT_SHA") or "")
                 .strip()
             )
+            db_source = "postgres_url" if (os.environ.get("POSTGRES_URL") or "").strip() else "database_url"
+            db_host = ""
+            try:
+                raw_dsn = (os.environ.get("POSTGRES_URL") or os.environ.get("DATABASE_URL") or "").strip()
+                if raw_dsn:
+                    db_host = urllib.parse.urlparse(raw_dsn).hostname or ""
+            except Exception:
+                db_host = ""
             json_response(
                 self,
                 {
@@ -25525,6 +25537,8 @@ class Handler(BaseHTTPRequestHandler):
                     "pid": os.getpid(),
                     "db_ready": bool(Handler._db_ready),
                     "build_tag": "workspace_boot_v1",
+                    "db_dsn_source": db_source,
+                    "db_host": db_host,
                 },
             )
             return

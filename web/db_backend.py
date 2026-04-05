@@ -370,6 +370,24 @@ def open_postgres_conn(with_row_factory=False, *, skip_compat=False, connect_tim
         )
         wrapped = PostgresCompatConnection(conn)
 
+    # Safety defaults: evita queries colgadas que saturen la DB en planes pequeños.
+    # Configurable por env. Se aplica por sesión y no requiere privilegios especiales.
+    try:
+        statement_ms = int(os.environ.get("APP_PG_STATEMENT_TIMEOUT_MS", "45000") or 45000)
+    except Exception:
+        statement_ms = 45000
+    try:
+        lock_ms = int(os.environ.get("APP_PG_LOCK_TIMEOUT_MS", "10000") or 10000)
+    except Exception:
+        lock_ms = 10000
+    statement_ms = max(1000, min(300000, statement_ms))
+    lock_ms = max(250, min(60000, lock_ms))
+    try:
+        wrapped.execute(f"SET statement_timeout TO '{statement_ms}ms'")
+        wrapped.execute(f"SET lock_timeout TO '{lock_ms}ms'")
+    except Exception:
+        pass
+
     # Importante: crear las funciones shim en cada conexión puede ser MUY costoso (muchos CREATE OR REPLACE).
     # Las funciones se crean a nivel de BD, así que basta con hacerlo una sola vez por proceso.
     global _PG_COMPAT_READY
