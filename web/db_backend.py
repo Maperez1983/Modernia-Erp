@@ -339,8 +339,8 @@ def open_postgres_conn(with_row_factory=False, *, skip_compat=False, connect_tim
     # Pool ligero (sin dependencias) para Render/PG:
     # - Reduce el coste de handshake SSL + auth (muy notable en iOS/PWA).
     # - Evita avalanchas de conexiones que pueden tumbar Postgres (y se ven como "server closed connection unexpectedly").
-    # Si se especifica connect_timeout_override (health probes), evitamos pool para no bloquear.
-    use_pool = connect_timeout_override is None
+    # Incluso para probes de health, reusar conexiones evita superar el max_connections y es más rápido.
+    use_pool = True
     wrapped = None
     if use_pool:
         wrapped = _pg_pool_acquire(
@@ -387,9 +387,10 @@ def _pg_pool_configured():
     if _PG_POOL_QUEUE is not None:
         return
     try:
-        _PG_POOL_MAX = int(os.environ.get("APP_PG_POOL_MAX", "10") or 10)
+        # Default conservador: los planes pequeños de Postgres suelen tener pocos slots.
+        _PG_POOL_MAX = int(os.environ.get("APP_PG_POOL_MAX", "4") or 4)
     except Exception:
-        _PG_POOL_MAX = 10
+        _PG_POOL_MAX = 4
     try:
         _PG_POOL_WAIT_S = float(os.environ.get("APP_PG_POOL_WAIT_SECONDS", "4") or 4)
     except Exception:

@@ -25078,13 +25078,20 @@ class Handler(BaseHTTPRequestHandler):
             def _loop():
                 backoff = 2.0
                 try:
+                    # Deja respirar al servidor tras bind del puerto (Render/iOS pueden hacer burst de requests).
+                    time.sleep(0.2)
                     while not Handler._db_ready:
                         try:
-                            ensure_tables(db_path)
-                            Handler._db_ready = True
-                            Handler._db_ready_last_error = ""
-                            Handler._db_ready_last_attempt_at = time.time()
-                            return
+                            # Reutiliza el mismo lock que _ensure_db_ready para evitar bootstraps concurrentes
+                            # (pueden saturar CPU/DB y hacer que incluso endpoints "ligeros" parezcan colgados).
+                            with Handler._db_ready_lock:
+                                if Handler._db_ready:
+                                    return
+                                ensure_tables(db_path)
+                                Handler._db_ready = True
+                                Handler._db_ready_last_error = ""
+                                Handler._db_ready_last_attempt_at = time.time()
+                                return
                         except Exception as exc:
                             Handler._db_ready = False
                             Handler._db_ready_last_error = f"{type(exc).__name__}: {exc}"
