@@ -628,6 +628,10 @@ CREATE TABLE IF NOT EXISTS gestoria_contabilidad (
   FOREIGN KEY (empresa_id) REFERENCES empresas(id)
 );
 
+-- Índices para acelerar filtros por año/fecha (muy usado en dashboard y /api/years).
+CREATE INDEX IF NOT EXISTS idx_gestoria_contabilidad_fecha ON gestoria_contabilidad (fecha);
+CREATE INDEX IF NOT EXISTS idx_gestoria_contabilidad_year ON gestoria_contabilidad (substr(fecha, 1, 4));
+
 CREATE TABLE IF NOT EXISTS hipotecas_contabilidad_excluidas (
   id TEXT PRIMARY KEY,
   empresa_id TEXT NOT NULL,

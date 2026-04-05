@@ -1348,7 +1348,7 @@ def compute_seguros_contabilidad_totals(conn, empresa_id, year=None):
     where = [ "gc.empresa_id = ?", seguros_contabilidad_where_clause("gc") ]
     values = [empresa_id]
     if year:
-        where.append("STRFTIME('%Y', gc.fecha) = ?")
+        where.append("substr(NULLIF(gc.fecha, ''), 1, 4) = ?")
         values.append(str(year))
     rows = conn.execute(
         f"""
@@ -2233,7 +2233,7 @@ def compute_hipotecas_contabilidad_totals(conn, empresa_id, year=None):
     where = ["gc.empresa_id = ?", hipotecas_contabilidad_where_clause("gc")]
     values = [empresa_id]
     if year:
-        where.append("STRFTIME('%Y', gc.fecha) = ?")
+        where.append("substr(NULLIF(gc.fecha, ''), 1, 4) = ?")
         values.append(str(year))
     rows = conn.execute(
         f"""
@@ -2269,15 +2269,15 @@ def compute_hipotecas_contabilidad_totals(conn, empresa_id, year=None):
 def compute_hipotecas_commission_series(conn, empresa_id):
     rows = conn.execute(
         f"""
-        SELECT STRFTIME('%Y', gc.fecha) AS year, SUM(COALESCE(gc.importe, 0)) AS total
+        SELECT substr(NULLIF(gc.fecha, ''), 1, 4) AS year, SUM(COALESCE(gc.importe, 0)) AS total
         FROM gestoria_contabilidad gc
         WHERE gc.empresa_id = ?
           AND {hipotecas_contabilidad_where_clause("gc")}
           AND LOWER(TRIM(COALESCE(gc.gestion, ''))) IN ('comision cliente', 'comisión cliente')
           AND LOWER(TRIM(COALESCE(gc.tipo, ''))) <> 'gasto'
-          AND STRFTIME('%Y', gc.fecha) IS NOT NULL
-        GROUP BY STRFTIME('%Y', gc.fecha)
-        ORDER BY STRFTIME('%Y', gc.fecha)
+          AND substr(NULLIF(gc.fecha, ''), 1, 4) IS NOT NULL
+        GROUP BY substr(NULLIF(gc.fecha, ''), 1, 4)
+        ORDER BY substr(NULLIF(gc.fecha, ''), 1, 4)
         """,
         (empresa_id,),
     ).fetchall()
@@ -2296,7 +2296,7 @@ def compute_hipotecas_commission_by_bank(conn, empresa_id, year=None):
     ]
     values = [empresa_id]
     if year:
-        where.append("STRFTIME('%Y', gc.fecha) = ?")
+        where.append("substr(NULLIF(gc.fecha, ''), 1, 4) = ?")
         values.append(str(year))
     rows = conn.execute(
         f"""
@@ -25002,6 +25002,9 @@ class Handler(BaseHTTPRequestHandler):
     _health_last_at = 0.0
     _health_last_status = 0
     _health_last_body = b""
+    _years_lock = threading.Lock()
+    _years_last_at = 0.0
+    _years_cached_payload = None
     _started_at = datetime.now().isoformat()
 
     def log_message(self, format, *args):
@@ -38882,6 +38885,18 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/years":
+            ttl_s = max(5.0, float(os.environ.get("APP_YEARS_CACHE_SECONDS", "120") or 120))
+            now_ts = time.time()
+            try:
+                with Handler._years_lock:
+                    if (
+                        Handler._years_cached_payload
+                        and (now_ts - float(Handler._years_last_at or 0.0)) < ttl_s
+                    ):
+                        json_response(self, Handler._years_cached_payload)
+                        return
+            except Exception:
+                pass
             years = set()
             tables = [
                 "movimientos",
@@ -38911,13 +38926,24 @@ class Handler(BaseHTTPRequestHandler):
                 elif "fecha" in cols:
                     try:
                         for row in conn.execute(
-                            f"SELECT DISTINCT strftime('%Y', fecha) AS y FROM {table} WHERE fecha IS NOT NULL"
+                            f"""
+                            SELECT DISTINCT substr(NULLIF(fecha, ''), 1, 4) AS y
+                            FROM {table}
+                            WHERE fecha IS NOT NULL AND length(fecha) >= 4
+                            """
                         ).fetchall():
                             if row["y"]:
                                 years.add(str(row["y"]))
                     except Exception:
                         pass
-            json_response(self, {"years": sorted(years)})
+            payload = {"years": sorted(years)}
+            try:
+                with Handler._years_lock:
+                    Handler._years_cached_payload = payload
+                    Handler._years_last_at = now_ts
+            except Exception:
+                pass
+            json_response(self, payload)
             return
 
         if path == "/api/s3_url":
@@ -43465,7 +43491,7 @@ class Handler(BaseHTTPRequestHandler):
                     LEFT JOIN seguros s ON s.id = gc.seguro_id
                     WHERE gc.empresa_id = ?
                       AND {seguros_contabilidad_where_clause('gc')}
-                      AND STRFTIME('%Y', gc.fecha) = ?
+                      AND substr(NULLIF(gc.fecha, ''), 1, 4) = ?
                     """,
                     (empresa_id, str(year)),
                 ).fetchall()
