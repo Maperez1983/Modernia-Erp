@@ -353,6 +353,7 @@ def open_postgres_conn(with_row_factory=False, *, skip_compat=False, connect_tim
             dsn,
             row_factory=(dict_row if with_row_factory else None),
             connect_timeout=max(2, connect_timeout),
+            application_name=(os.environ.get("APP_PG_APP_NAME") or "verifika2-crm").strip() or "verifika2-crm",
         )
         wrapped = PostgresCompatConnection(conn)
 
@@ -492,6 +493,7 @@ def _pg_pool_acquire(dsn, *, row_factory, connect_timeout):
             dsn,
             row_factory=row_factory,
             connect_timeout=connect_timeout,
+            application_name=(os.environ.get("APP_PG_APP_NAME") or "verifika2-crm").strip() or "verifika2-crm",
         )
     if raw is None:
         # Pool saturated: wait a bit to avoid opening infinite connections.
