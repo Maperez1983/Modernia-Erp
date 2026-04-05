@@ -25782,6 +25782,42 @@ class Handler(BaseHTTPRequestHandler):
             send_file(self, safe_path)
             return
 
+        if parsed.path.startswith("/icons/"):
+            # Compat: iOS/PWA cachea rutas antiguas y puede pedir iconos de versiones previas.
+            # Respondemos con los iconos actuales si existen, para evitar 404 al abrir desde
+            # acceso directo en pantalla de inicio.
+            try:
+                # /icons/ios/v20/<file> -> /icons/ios/v23/<file>
+                parts = [p for p in (parsed.path or "").split("/") if p]
+                if len(parts) >= 4 and parts[0] == "icons" and parts[1] == "ios" and parts[2].startswith("v"):
+                    ver_raw = parts[2][1:]
+                    if ver_raw.isdigit() and int(ver_raw) != 23:
+                        rel = "/".join(parts[3:])
+                        mapped = safe_resolve_under(ROOT / "icons" / "ios" / "v23", rel)
+                        if mapped and mapped.exists():
+                            send_file(self, mapped)
+                            return
+                # Rutas legacy en /icons/...
+                legacy_name = parts[-1] if parts else ""
+                legacy_map = {
+                    "icon-192.png": "icon-192.png",
+                    "icon-512.png": "icon-512.png",
+                    "apple-touch-icon-180.png": "apple-touch-icon-180.png",
+                    "apple-touch-icon-167.png": "apple-touch-icon-167.png",
+                    "apple-touch-icon-152.png": "apple-touch-icon-152.png",
+                    "apple-touch-icon-120.png": "apple-touch-icon-120.png",
+                    "apple-touch-icon.png": "apple-touch-icon-180.png",
+                    "apple-touch-icon-precomposed.png": "apple-touch-icon-180.png",
+                }
+                target = legacy_map.get(legacy_name)
+                if target:
+                    mapped = safe_resolve_under(ROOT / "icons" / "ios" / "v23", target)
+                    if mapped and mapped.exists():
+                        send_file(self, mapped)
+                        return
+            except Exception:
+                pass
+
         rel_path = parsed.path.lstrip("/")
         safe_path = safe_resolve_under(ROOT, rel_path)
         if not safe_path:
