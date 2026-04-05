@@ -25632,6 +25632,10 @@ class Handler(BaseHTTPRequestHandler):
                         pass
                     json_response(self, {"error": "DB no disponible", "detail": "Reintenta en unos segundos."}, status=503)
                 else:
+                    try:
+                        print(f"[ERROR] API {self.path}: {type(exc).__name__}: {exc}")
+                    except Exception:
+                        pass
                     json_response(self, {"error": "API error"}, status=500)
             return
 
@@ -25999,6 +26003,10 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, {"error": "DB no disponible", "detail": str(exc)}, status=503)
             return
         except Exception as exc:
+            try:
+                print(f"[ERROR] DB_READY {parsed.path}: {type(exc).__name__}: {exc}")
+            except Exception:
+                pass
             json_response(self, {"error": "API error", "detail": f"{type(exc).__name__}: {exc}"}, status=500)
             return
 
