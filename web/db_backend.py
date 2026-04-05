@@ -421,16 +421,48 @@ def _pg_pool_configured():
     try:
         # Default (Render): necesitamos algo más de margen porque iOS/PWA hace bursts de requests
         # (health/me/assets) y 4 conexiones puede saturarse fácilmente durante bootstrap o queries lentas.
-        _PG_POOL_MAX = int(os.environ.get("APP_PG_POOL_MAX", "8") or 8)
+        _PG_POOL_MAX = int(os.environ.get("APP_PG_POOL_MAX", "16") or 16)
     except Exception:
-        _PG_POOL_MAX = 8
+        _PG_POOL_MAX = 16
     try:
-        _PG_POOL_WAIT_S = float(os.environ.get("APP_PG_POOL_WAIT_SECONDS", "8") or 8)
+        _PG_POOL_WAIT_S = float(os.environ.get("APP_PG_POOL_WAIT_SECONDS", "15") or 15)
     except Exception:
-        _PG_POOL_WAIT_S = 8.0
+        _PG_POOL_WAIT_S = 15.0
     _PG_POOL_MAX = max(0, min(50, _PG_POOL_MAX))
     _PG_POOL_WAIT_S = max(0.1, min(15.0, _PG_POOL_WAIT_S))
     _PG_POOL_QUEUE = queue.LifoQueue(maxsize=max(1, _PG_POOL_MAX or 1))
+
+
+def get_postgres_pool_stats():
+    """
+    Devuelve estadísticas del pool interno de Postgres para diagnóstico.
+    No hace IO de red.
+    """
+    try:
+        _pg_pool_configured()
+        max_size = int(_PG_POOL_MAX or 0)
+        wait_s = float(_PG_POOL_WAIT_S or 0.0)
+        created = int(_PG_POOL_CREATED or 0)
+        available = None
+        try:
+            available = int(_PG_POOL_QUEUE.qsize()) if _PG_POOL_QUEUE is not None else None
+        except Exception:
+            available = None
+        in_use = None
+        try:
+            if available is not None:
+                in_use = max(0, created - available)
+        except Exception:
+            in_use = None
+        return {
+            "max": max_size,
+            "created": created,
+            "available": available,
+            "in_use": in_use,
+            "wait_seconds": wait_s,
+        }
+    except Exception:
+        return {}
 
 
 def _pg_is_connection_error(exc):

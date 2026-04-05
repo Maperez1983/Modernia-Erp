@@ -47,7 +47,7 @@ try:
     from .auth_security import verify_password as runtime_verify_password
     from .schema_support import apply_schema_file, ensure_column, table_columns
     from .db_backend import is_postgres_enabled as db_is_postgres_enabled
-    from .db_backend import open_postgres_conn, ensure_postgres_sqlite_compat
+    from .db_backend import open_postgres_conn, ensure_postgres_sqlite_compat, get_postgres_pool_stats
     from .seguros_state import can_transition_seguro_estado as runtime_can_transition_seguro_estado
     from .seguros_state import normalize_seguro_estado_value as runtime_normalize_seguro_estado_value
 except ImportError:
@@ -56,7 +56,7 @@ except ImportError:
     from auth_security import verify_password as runtime_verify_password
     from schema_support import apply_schema_file, ensure_column, table_columns
     from db_backend import is_postgres_enabled as db_is_postgres_enabled
-    from db_backend import open_postgres_conn, ensure_postgres_sqlite_compat
+    from db_backend import open_postgres_conn, ensure_postgres_sqlite_compat, get_postgres_pool_stats
     from seguros_state import can_transition_seguro_estado as runtime_can_transition_seguro_estado
     from seguros_state import normalize_seguro_estado_value as runtime_normalize_seguro_estado_value
 
@@ -25580,6 +25580,12 @@ class Handler(BaseHTTPRequestHandler):
                     db_host = urllib.parse.urlparse(raw_dsn).hostname or ""
             except Exception:
                 db_host = ""
+            pool_stats = {}
+            if backend == "postgres":
+                try:
+                    pool_stats = get_postgres_pool_stats() or {}
+                except Exception:
+                    pool_stats = {}
             json_response(
                 self,
                 {
@@ -25589,9 +25595,11 @@ class Handler(BaseHTTPRequestHandler):
                     "started_at": getattr(Handler, "_started_at", ""),
                     "pid": os.getpid(),
                     "db_ready": bool(Handler._db_ready),
+                    "db_ready_last_error": str(getattr(Handler, "_db_ready_last_error", "") or ""),
                     "build_tag": "workspace_boot_v1",
                     "db_dsn_source": db_source,
                     "db_host": db_host,
+                    "pg_pool": pool_stats,
                 },
             )
             return
