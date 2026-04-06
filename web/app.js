@@ -5559,11 +5559,13 @@ const renderWorkspaceSegurosOverview = (payload = {}) => {
       : `<p class="muted">${emptyText}</p>`;
   workspaceSegurosOverview.innerHTML = `
     <div class="workspace-gestoria-grid workspace-mini-kpis">
-      <div class="workspace-mini-kpi"><span>Pólizas</span><strong>${numberFormatter.format(Number(counts.total || 0))}</strong></div>
-      <div class="workspace-mini-kpi"><span>En vigor</span><strong>${numberFormatter.format(Number(counts.en_vigor || 0))}</strong></div>
+      <div class="workspace-mini-kpi"><span>Pólizas subidas</span><strong>${numberFormatter.format(Number(counts.subidas_total || 0))}</strong></div>
+      <div class="workspace-mini-kpi"><span>En vigor (subidas)</span><strong>${numberFormatter.format(Number(counts.subidas_en_vigor || 0))}</strong></div>
+      <div class="workspace-mini-kpi"><span>Pólizas (BDT)</span><strong>${numberFormatter.format(Number(counts.total || 0))}</strong></div>
+      <div class="workspace-mini-kpi"><span>En vigor (BDT)</span><strong>${numberFormatter.format(Number(counts.en_vigor || 0))}</strong></div>
       <div class="workspace-mini-kpi"><span>Presupuestos</span><strong>${numberFormatter.format(Number(counts.presupuesto || 0))}</strong></div>
       <div class="workspace-mini-kpi"><span>Renovaciones 30d</span><strong>${numberFormatter.format(Number(counts.renovaciones_30d || 0))}</strong></div>
-      <div class="workspace-mini-kpi"><span>Prima anual</span><strong>${formatEuros(Number(counts.prima_total || 0))}</strong></div>
+      <div class="workspace-mini-kpi"><span>Prima anual (subidas)</span><strong>${formatEuros(Number(counts.subidas_prima_total || 0))}</strong></div>
       <div class="workspace-mini-kpi"><span>Alertas abiertas</span><strong>${numberFormatter.format(Number(counts.alertas_abiertas || 0))}</strong></div>
     </div>
     <div class="workspace-gestoria-columns">

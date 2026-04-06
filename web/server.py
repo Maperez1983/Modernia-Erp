@@ -19706,10 +19706,13 @@ def fetch_workspace_seguros_overview(conn, workspace_id, empresa_id=None):
         return {
             "counts": {
                 "total": 0,
+                "subidas_total": 0,
                 "en_vigor": 0,
+                "subidas_en_vigor": 0,
                 "presupuesto": 0,
                 "renovaciones_30d": 0,
                 "prima_total": 0,
+                "subidas_prima_total": 0,
                 "alertas_abiertas": 0,
             },
             "renovaciones_proximas": [],
@@ -19726,6 +19729,7 @@ def fetch_workspace_seguros_overview(conn, workspace_id, empresa_id=None):
     )
     compania_expr = "LOWER(TRIM(COALESCE(s.compania, '')))"
     today = datetime.now().date().isoformat()
+    uploaded_clause = uploaded_policy_filter("s")
 
     totals = conn.execute(
         f"""
@@ -19743,6 +19747,20 @@ def fetch_workspace_seguros_overview(conn, workspace_id, empresa_id=None):
           AND ({compania_expr} = '' OR {compania_expr} != 'sin seguro')
         """,
         [today, today, *empresa_ids],
+    ).fetchone()
+
+    uploaded_totals = conn.execute(
+        f"""
+        SELECT
+          COUNT(*) AS total,
+          SUM(CASE WHEN {bucket_expr} = 'en_vigor' THEN 1 ELSE 0 END) AS en_vigor,
+          SUM(COALESCE(s.prima_total, s.prima_neta, 0)) AS prima_total
+        FROM seguros s
+        WHERE s.empresa_id IN ({placeholders})
+          AND ({compania_expr} = '' OR {compania_expr} != 'sin seguro')
+          AND ({uploaded_clause})
+        """,
+        empresa_ids,
     ).fetchone()
 
     renovaciones = conn.execute(
@@ -19830,6 +19848,9 @@ def fetch_workspace_seguros_overview(conn, workspace_id, empresa_id=None):
             "presupuesto": int((totals["presupuesto"] if totals else 0) or 0),
             "renovaciones_30d": int((totals["renovaciones_30d"] if totals else 0) or 0),
             "prima_total": round(parse_money_value(totals["prima_total"] if totals else 0), 2),
+            "subidas_total": int((uploaded_totals["total"] if uploaded_totals else 0) or 0),
+            "subidas_en_vigor": int((uploaded_totals["en_vigor"] if uploaded_totals else 0) or 0),
+            "subidas_prima_total": round(parse_money_value(uploaded_totals["prima_total"] if uploaded_totals else 0), 2),
             "alertas_abiertas": len(alertas),
         },
         "renovaciones_proximas": [dict(r) for r in renovaciones],
