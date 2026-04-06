@@ -1594,6 +1594,22 @@ CREATE TABLE IF NOT EXISTS usuarios (
   updated_at TEXT NOT NULL
 );
 
+-- Invitaciones persistentes (evita que reenviar invalide enlaces previos).
+CREATE TABLE IF NOT EXISTS auth_invites (
+  token TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  expires_at TEXT,
+  created_at TEXT NOT NULL,
+  sent_at TEXT,
+  used_at TEXT,
+  revoked_at TEXT,
+  notes TEXT,
+  FOREIGN KEY (user_id) REFERENCES usuarios(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_auth_invites_user_id ON auth_invites(user_id);
+CREATE INDEX IF NOT EXISTS idx_auth_invites_expires ON auth_invites(expires_at, used_at, revoked_at);
+
 -- Cache persistente de geocodificación (reduce dependencias de terceros).
 CREATE TABLE IF NOT EXISTS geocode_cache (
   cache_key TEXT PRIMARY KEY,

@@ -26999,7 +26999,71 @@ class Handler(BaseHTTPRequestHandler):
             conn = get_db(self.db_path)
             self._track_conn(conn)
             ensure_usuarios_schema(conn)
+            ensure_auth_invites_table(conn)
             conn.commit()
+            # Nuevo flujo (auth_invites): permite reenvíos sin invalidar enlaces previos, pero se anulan al activar.
+            invite = None
+            try:
+                invite = conn.execute(
+                    """
+                    SELECT
+                      ai.user_id,
+                      ai.expires_at,
+                      ai.used_at,
+                      ai.revoked_at,
+                      u.activo,
+                      u.password_hash
+                    FROM auth_invites ai
+                    JOIN usuarios u ON u.id = ai.user_id
+                    WHERE ai.token = ?
+                    LIMIT 1
+                    """,
+                    (token,),
+                ).fetchone()
+            except Exception:
+                invite = None
+            if invite:
+                user_id = str(invite["user_id"] or "").strip()
+                if not user_id:
+                    json_response(self, {"error": "Invitación inválida"}, status=404)
+                    return
+                if not bool(invite["activo"]):
+                    json_response(self, {"error": "Usuario inactivo"}, status=403)
+                    return
+                if str(invite["revoked_at"] or "").strip() or str(invite["used_at"] or "").strip():
+                    json_response(self, {"error": "Invitación inválida"}, status=404)
+                    return
+                if str(invite["password_hash"] or "").strip():
+                    json_response(self, {"error": "La cuenta ya está activada"}, status=409)
+                    return
+                expires_dt = _parse_iso_dt_utc(invite["expires_at"])
+                if expires_dt and expires_dt < datetime.now(timezone.utc):
+                    json_response(self, {"error": "Invitación caducada"}, status=410)
+                    return
+                conn.execute(
+                    """
+                    UPDATE usuarios
+                    SET password_hash = ?, invite_token = NULL, invite_expires_at = NULL, updated_at = datetime('now')
+                    WHERE id = ?
+                    """,
+                    (hash_password(password), user_id),
+                )
+                # Invalida todas las invitaciones pendientes del usuario (evita que alguien cambie la contraseña con otro token).
+                try:
+                    conn.execute(
+                        """
+                        UPDATE auth_invites
+                        SET used_at = COALESCE(NULLIF(used_at, ''), datetime('now'))
+                        WHERE user_id = ?
+                          AND revoked_at IS NULL
+                        """,
+                        (user_id,),
+                    )
+                except Exception:
+                    pass
+                conn.commit()
+                json_response(self, {"ok": True})
+                return
             row = conn.execute(
                 """
                 SELECT id, activo, invite_expires_at
@@ -27018,10 +27082,8 @@ class Handler(BaseHTTPRequestHandler):
             expires_raw = str(row["invite_expires_at"] or "").strip()
             if expires_raw:
                 try:
-                    dt = datetime.fromisoformat(expires_raw.replace("Z", ""))
-                    if dt.tzinfo is None:
-                        dt = dt.replace(tzinfo=timezone.utc)
-                    if dt < datetime.now(timezone.utc):
+                    dt = _parse_iso_dt_utc(expires_raw)
+                    if dt and dt < datetime.now(timezone.utc):
                         json_response(self, {"error": "Invitación caducada"}, status=410)
                         return
                 except Exception:
@@ -27988,13 +28050,19 @@ class Handler(BaseHTTPRequestHandler):
             if not workspace_actor_is_privileged(conn, session):
                 json_response(self, {"error": "No autorizado"}, status=403)
                 return
+            try:
+                ensure_usuarios_schema(conn)
+                ensure_auth_invites_table(conn)
+                conn.commit()
+            except Exception:
+                pass
             user_id = str(payload.get("id") or "").strip()
             if not user_id:
                 json_response(self, {"error": "id requerido"}, status=400)
                 return
             row = conn.execute(
                 """
-                SELECT id, nombre, apellido, usuario, email, activo
+                SELECT id, nombre, apellido, usuario, email, activo, password_hash
                 FROM usuarios
                 WHERE id = ?
                 LIMIT 1
@@ -28007,12 +28075,34 @@ class Handler(BaseHTTPRequestHandler):
             if not row["activo"]:
                 json_response(self, {"error": "Usuario inactivo"}, status=400)
                 return
+            existing_hash = ""
+            try:
+                existing_hash = str(row["password_hash"] or "").strip()
+            except Exception:
+                try:
+                    existing_hash = str(row[6] or "").strip()
+                except Exception:
+                    existing_hash = ""
+            if existing_hash:
+                json_response(self, {"error": "El usuario ya tiene contraseña. Usa reset o genera una temporal."}, status=400)
+                return
             email = normalize_email(row["email"] or "")
             if not email:
                 json_response(self, {"error": "El usuario no tiene email válido"}, status=400)
                 return
             token = secrets.token_urlsafe(32)
             expires_at = (datetime.now(timezone.utc) + timedelta(seconds=AUTH_INVITE_TTL_SECONDS)).isoformat()
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO auth_invites (token, user_id, expires_at, created_at, sent_at, notes)
+                    VALUES (?, ?, ?, datetime('now'), datetime('now'), ?)
+                    """,
+                    (token, user_id, expires_at, "usuarios_invitar_v2"),
+                )
+            except Exception:
+                # Best-effort: no bloqueamos si la tabla no existe en un dataset legacy.
+                pass
             conn.execute(
                 """
                 UPDATE usuarios
@@ -38835,9 +38925,63 @@ class Handler(BaseHTTPRequestHandler):
             if not token:
                 json_response(self, {"error": "token requerido"}, status=400)
                 return
+            ensure_auth_invites_table(conn)
+            # Preferimos el flujo nuevo (auth_invites) para tolerar reenvíos.
+            invite = None
+            try:
+                invite = conn.execute(
+                    """
+                    SELECT
+                      ai.user_id,
+                      ai.expires_at,
+                      ai.used_at,
+                      ai.revoked_at,
+                      u.id,
+                      u.nombre,
+                      u.apellido,
+                      u.usuario,
+                      u.email,
+                      u.activo,
+                      u.password_hash
+                    FROM auth_invites ai
+                    JOIN usuarios u ON u.id = ai.user_id
+                    WHERE ai.token = ?
+                    LIMIT 1
+                    """,
+                    (token,),
+                ).fetchone()
+            except Exception:
+                invite = None
+            if invite:
+                expires_dt = _parse_iso_dt_utc(invite["expires_at"])
+                expired = bool(expires_dt and expires_dt < datetime.now(timezone.utc))
+                used = bool(str(invite["used_at"] or "").strip())
+                revoked = bool(str(invite["revoked_at"] or "").strip())
+                activated = bool(str(invite["password_hash"] or "").strip())
+                ok_user = bool(invite["activo"])
+                valid = bool(ok_user and (not expired) and (not used) and (not revoked) and (not activated))
+                json_response(
+                    self,
+                    {
+                        "ok": True,
+                        "valid": valid,
+                        "expired": expired,
+                        "used": used,
+                        "activated": activated,
+                        "user": {
+                            "id": invite["id"],
+                            "nombre": invite["nombre"] or "",
+                            "apellido": invite["apellido"] or "",
+                            "usuario": invite["usuario"] or "",
+                            "email": invite["email"] or "",
+                        },
+                    },
+                )
+                return
+            # Fallback legacy: usuarios.invite_token (1 token por usuario).
             row = conn.execute(
                 """
-                SELECT id, nombre, apellido, usuario, email, activo, invite_expires_at
+                SELECT id, nombre, apellido, usuario, email, activo, password_hash, invite_expires_at
                 FROM usuarios
                 WHERE invite_token = ?
                 LIMIT 1
@@ -38851,18 +38995,19 @@ class Handler(BaseHTTPRequestHandler):
             expired = False
             if expires_raw:
                 try:
-                    dt = datetime.fromisoformat(expires_raw.replace("Z", ""))
-                    if dt.tzinfo is None:
-                        dt = dt.replace(tzinfo=timezone.utc)
-                    expired = dt < datetime.now(timezone.utc)
+                    dt = _parse_iso_dt_utc(expires_raw)
+                    expired = bool(dt and dt < datetime.now(timezone.utc))
                 except Exception:
                     expired = False
+            activated = bool(str(row["password_hash"] or "").strip())
             json_response(
                 self,
                 {
                     "ok": True,
-                    "valid": bool(row["activo"]) and bool(token) and not expired,
+                    "valid": bool(row["activo"]) and bool(token) and (not expired) and (not activated),
                     "expired": expired,
+                    "used": False,
+                    "activated": activated,
                     "user": {
                         "id": row["id"],
                         "nombre": row["nombre"] or "",

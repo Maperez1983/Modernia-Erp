@@ -3,7 +3,7 @@
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v29";
+const APP_SW_VERSION = "v36";
 
 // Workspace tenant por defecto del producto (branding de software). Mantiene compatibilidad con slugs legacy.
 const DEFAULT_TENANT_WORKSPACE_SLUG = "verifika2";
@@ -1568,7 +1568,8 @@ const workspaceNewBtn = document.getElementById("workspaceNewBtn");
 	const workspaceCompanyCnaeQuery = document.getElementById("workspaceCompanyCnaeQuery");
 	const workspaceCompanyCnaeResults = document.getElementById("workspaceCompanyCnaeResults");
 	const workspaceCompanyCnaes = document.getElementById("workspaceCompanyCnaes");
-	const workspaceMembers = document.getElementById("workspaceMembers");
+const workspaceMembers = document.getElementById("workspaceMembers");
+const workspaceLinks = document.getElementById("workspaceLinks");
 	const workspaceModules = document.getElementById("workspaceModules");
 const workspaceClientBase = document.getElementById("workspaceClientBase");
 const workspaceClientLookup = document.getElementById("workspaceClientLookup");
@@ -4157,13 +4158,13 @@ const WORKSPACE_MODULE_STRUCTURE = {
     section: "crm_services",
     family: "Subservicio CRM",
     badge: "Servicio activo",
-    description: "Obras, seguimiento comercial y documentación técnica (presupuestos en el motor de Facturación).",
+    description: "Obras, seguimiento comercial y documentación técnica.",
   },
   fincas: {
     section: "crm_services",
     family: "Subservicio CRM",
     badge: "Servicio activo",
-    description: "Comunidades, incidencias, juntas y seguimiento (presupuestos en el motor de Facturación).",
+    description: "Comunidades, incidencias, juntas y seguimiento.",
   },
   documental: {
     section: "workspace_engines",
@@ -4845,7 +4846,7 @@ const WORKSPACE_LAUNCHERS = {
         openCompany(REFORMAS_COMPANY, { allowRestricted: true });
         return;
       }
-      focusWorkspaceEngine("facturacion", workspaceBudgetForm);
+      openCompany(REFORMAS_COMPANY, { allowRestricted: true });
     },
   },
   fincas: {
@@ -4994,7 +4995,7 @@ const WORKSPACE_HOME_CONTAINERS = [
     key: "reformas",
     title: "Reformas",
     kicker: "Subservicio",
-    description: "Obras, seguimiento comercial y documentación técnica (presupuestos en Facturación).",
+    description: "Obras, seguimiento comercial y documentación técnica.",
     modules: ["reformas", "documental", "facturacion", "automatizaciones", "copilot"],
     action: WORKSPACE_LAUNCHERS.reformas?.action || null,
     actionLabel: "Abrir reformas",
@@ -5003,7 +5004,7 @@ const WORKSPACE_HOME_CONTAINERS = [
     key: "fincas",
     title: "Fincas",
     kicker: "Subservicio",
-    description: "Comunidades, incidencias, juntas y seguimiento (presupuestos en Facturación).",
+    description: "Comunidades, incidencias, juntas y seguimiento.",
     modules: ["fincas", "documental", "facturacion", "automatizaciones", "copilot"],
     action: WORKSPACE_LAUNCHERS.fincas?.action || null,
     actionLabel: "Abrir fincas",
@@ -5886,7 +5887,7 @@ const renderWorkspaceServiceDesks = (payload = {}) => {
 
 const fillWorkspaceForm = (workspace = {}) => {
   if (!workspaceForm) return;
-  ["id", "nombre", "slug", "estado", "plan", "descripcion", "logo_url", "primary_color", "accent_color"].forEach((field) => {
+  ["id", "nombre", "kind", "slug", "estado", "plan", "descripcion", "logo_url", "primary_color", "accent_color"].forEach((field) => {
     const el = workspaceForm.querySelector(`[name="${field}"]`);
     if (!el) return;
     el.value = workspace[field] || "";
@@ -6217,6 +6218,117 @@ const renderWorkspaceMembers = (rows = []) => {
   });
 };
 
+const renderWorkspaceLinks = (rows = []) => {
+  if (!workspaceLinks) return;
+  const authUser = getAuthScopeUser();
+  const canManage = Boolean(authUser && isPrivilegedUser(authUser));
+  if (!state.currentWorkspaceId) {
+    workspaceLinks.innerHTML = "<p class='muted'>Selecciona un workspace.</p>";
+    return;
+  }
+  if (!canManage) {
+    workspaceLinks.innerHTML = "<p class='muted'>Solo visible para administración.</p>";
+    return;
+  }
+  const allWorkspaces = Array.isArray(state.workspaces) ? state.workspaces : [];
+  const options = allWorkspaces
+    .map((w) => `<option value="${escapeHtml(String(w.slug || w.nombre || ""))}">${escapeHtml(String(w.nombre || w.slug || ""))}</option>`)
+    .join("");
+  const list = (rows || []).filter((row) => Number(row.enabled ?? 1) === 1);
+  const listHtml = list
+    .map((row) => {
+      const label = `${row.source_slug || row.source_nombre || "-"} → ${row.target_slug || row.target_nombre || "-"}`;
+      return `
+        <div class="workspace-chip workspace-company-chip">
+          <div>
+            <strong>${escapeHtml(label)}</strong>
+            <div class="muted">Tipo: ${escapeHtml(row.link_type || "-")} · Rol: ${escapeHtml(row.role || "Miembro")}</div>
+            ${row.notes ? `<div class="muted">${escapeHtml(row.notes)}</div>` : ""}
+          </div>
+          <div class="workspace-company-chip-actions">
+            <button type="button" class="secondary ghost" data-workspace-link-remove="${escapeHtml(String(row.id || ""))}">Quitar</button>
+          </div>
+        </div>
+      `;
+    })
+    .join("");
+  workspaceLinks.innerHTML = `
+    <div class="workspace-context-strip">
+      <strong>Gestoría ↔ Cliente</strong>
+      <span class="muted">Crea un vínculo y se copiarán los Owner/Admin del workspace origen como miembros del destino.</span>
+    </div>
+    <div class="row" style="gap:10px;align-items:flex-end;flex-wrap:wrap">
+      <label style="min-width:280px;flex:1">
+        Workspace gestoría (slug)
+        <input id="workspaceLinkSourceSlug" list="workspaceSlugOptions" placeholder="ej. gestoria_velazquez" />
+      </label>
+      <datalist id="workspaceSlugOptions">${options}</datalist>
+      <label style="min-width:220px">
+        Rol en destino
+        <select id="workspaceLinkRole">
+          <option>Miembro</option>
+          <option>Lectura</option>
+        </select>
+      </label>
+      <button type="button" id="workspaceLinkCreateBtn" class="secondary">Vincular</button>
+      <span id="workspaceLinkStatus" class="muted"></span>
+    </div>
+    <div class="workspace-chip-list">${listHtml || "<p class='muted'>Sin vínculos todavía.</p>"}</div>
+  `;
+  const sourceInput = document.getElementById("workspaceLinkSourceSlug");
+  const roleSelect = document.getElementById("workspaceLinkRole");
+  const status = document.getElementById("workspaceLinkStatus");
+  const btn = document.getElementById("workspaceLinkCreateBtn");
+  if (btn) {
+    btn.addEventListener("click", async () => {
+      const slug = String(sourceInput?.value || "").trim();
+      const role = String(roleSelect?.value || "Miembro").trim();
+      if (!slug) {
+        if (status) status.textContent = "Indica el slug del workspace gestoría.";
+        return;
+      }
+      const source = allWorkspaces.find((w) => String(w.slug || "") === slug) || allWorkspaces.find((w) => String(w.nombre || "") === slug);
+      if (!source?.id) {
+        if (status) status.textContent = "No encuentro ese workspace.";
+        return;
+      }
+      try {
+        if (status) status.textContent = "Vinculando...";
+        const resp = await postJsonWithDbRetry("/api/workspace_link_upsert", {
+          source_workspace_id: String(source.id || ""),
+          target_workspace_id: String(state.currentWorkspaceId || ""),
+          link_type: "gestoria_partner",
+          role,
+          enabled: 1,
+          notes: "ui_link",
+        });
+        const added = Number(resp?.members_added || 0) || 0;
+        if (status) status.textContent = added ? `Vínculo creado. Miembros añadidos: ${added}.` : "Vínculo creado.";
+        const links = await safeWorkspaceApi(`/api/workspace_links?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}`, { rows: [] });
+        state.currentWorkspaceLinks = links.rows || [];
+        renderWorkspaceLinks(state.currentWorkspaceLinks);
+      } catch (error) {
+        if (status) status.textContent = error?.message || "No se pudo vincular.";
+      }
+    });
+  }
+  workspaceLinks.querySelectorAll("[data-workspace-link-remove]").forEach((removeBtn) => {
+    removeBtn.addEventListener("click", async () => {
+      const linkId = String(removeBtn.dataset.workspaceLinkRemove || "").trim();
+      if (!linkId) return;
+      if (!window.confirm("¿Eliminar este vínculo? (No quita miembros automáticamente)")) return;
+      try {
+        await postJsonWithDbRetry("/api/workspace_link_delete", { id: linkId });
+        const links = await safeWorkspaceApi(`/api/workspace_links?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}`, { rows: [] });
+        state.currentWorkspaceLinks = links.rows || [];
+        renderWorkspaceLinks(state.currentWorkspaceLinks);
+      } catch (error) {
+        alert(error?.message || "No se pudo eliminar.");
+      }
+    });
+  });
+};
+
 const renderWorkspaceLauncher = (workspace = {}, modules = []) => {
   if (!workspaceLauncher) return;
   const enabled = modules.filter((row) => Number(row.enabled || 0) === 1);
@@ -6247,43 +6359,62 @@ const renderWorkspaceLauncher = (workspace = {}, modules = []) => {
       params.set("view", "overview");
     }
     return `?${params.toString()}`;
-  };
-  const enabledKeys = new Set(enabled.map((row) => row.modulo_key));
-  if (isTenantWorkspaceMode()) {
-    enabledKeys.add("crm360");
-    enabledKeys.add("gestoria");
-    enabledKeys.add("seguros");
-    enabledKeys.add("inmobiliaria");
-    enabledKeys.add("financiacion");
-    enabledKeys.add("fincas");
-    enabledKeys.add("documental");
-    enabledKeys.add("facturacion");
-    enabledKeys.add("facturas_recibidas");
-    enabledKeys.add("portal_cliente");
-    enabledKeys.add("registro_horario");
-    enabledKeys.add("rrhh");
-    enabledKeys.add("automatizaciones");
-    enabledKeys.add("reformas");
-    if (isGrupoModerniaWorkspace() || enabledKeys.has("copilot")) {
-      enabledKeys.add("copilot");
-    }
-  }
-  workspaceLauncher.innerHTML = `
-    <div id="workspaceHomeAlerts"></div>
-    <div class="workspace-home-grid">
-      ${WORKSPACE_HOME_CONTAINERS
-        .filter((container) => !(isTenantWorkspaceMode() && container.key === "shared"))
-        .map((container) => {
-          const availableModules = container.modules.filter((moduleKey) => enabledKeys.has(moduleKey));
-          if (!availableModules.length && container.key !== "shared") return "";
-          if (!availableModules.length && container.key === "shared") return "";
-          return `
-            <article class="workspace-home-card">
-              <div class="workspace-home-card-head">
-                <div>
-                  <span class="workspace-home-kicker">${container.kicker}</span>
-                  <h4>${container.title}</h4>
-                </div>
+	  };
+	  const enabledKeys = new Set(enabled.map((row) => row.modulo_key));
+	  const workspaceAuthUser = getAuthScopeUser();
+	  const tenantNonAdmin = Boolean(isTenantWorkspaceMode() && workspaceAuthUser && !isPrivilegedUser(workspaceAuthUser));
+	  let tenantEnabledKeys = enabledKeys;
+	  if (isTenantWorkspaceMode()) {
+	    if (tenantNonAdmin) {
+	      const services = expandServiceAliases(parseServiceList(workspaceAuthUser?.servicio || ""));
+	      tenantEnabledKeys = new Set();
+	      tenantEnabledKeys.add("rrhh");
+	      tenantEnabledKeys.add("registro_horario");
+	      if (services.includes("inmobiliaria")) tenantEnabledKeys.add("inmobiliaria");
+	      if (services.includes("seguros")) tenantEnabledKeys.add("seguros");
+	      if (services.includes("gestoria") || services.includes("administracion fincas") || services.includes("administracion de fincas")) {
+	        tenantEnabledKeys.add("gestoria");
+	      }
+	      if (services.includes("financiaciones") || services.includes("hipotecas")) tenantEnabledKeys.add("financiacion");
+	      if (services.includes("fincas")) tenantEnabledKeys.add("fincas");
+	      if (services.includes("reformas") || services.includes("obras")) tenantEnabledKeys.add("reformas");
+	    } else {
+	      enabledKeys.add("crm360");
+	      enabledKeys.add("gestoria");
+	      enabledKeys.add("seguros");
+	      enabledKeys.add("inmobiliaria");
+	      enabledKeys.add("financiacion");
+	      enabledKeys.add("fincas");
+	      enabledKeys.add("documental");
+	      enabledKeys.add("facturacion");
+	      enabledKeys.add("facturas_recibidas");
+	      enabledKeys.add("portal_cliente");
+	      enabledKeys.add("registro_horario");
+	      enabledKeys.add("rrhh");
+	      enabledKeys.add("automatizaciones");
+	      enabledKeys.add("reformas");
+	      if (isGrupoModerniaWorkspace() || enabledKeys.has("copilot")) {
+	        enabledKeys.add("copilot");
+	      }
+	      tenantEnabledKeys = enabledKeys;
+	    }
+	  }
+	  workspaceLauncher.innerHTML = `
+	    <div id="workspaceHomeAlerts"></div>
+	    <div class="workspace-home-grid">
+	      ${WORKSPACE_HOME_CONTAINERS
+	        .filter((container) => !(isTenantWorkspaceMode() && container.key === "shared"))
+	        .map((container) => {
+	          const availableModules = container.modules.filter((moduleKey) => tenantEnabledKeys.has(moduleKey));
+	          if (!availableModules.length && container.key !== "shared") return "";
+	          if (!availableModules.length && container.key === "shared") return "";
+	          return `
+	            <article class="workspace-home-card" ${typeof container.action === "function" ? `data-workspace-home-action="${container.key}" role="button" tabindex="0"` : ""}>
+	              <div class="workspace-home-card-head">
+	                <div>
+	                  <span class="workspace-home-kicker">${container.kicker}</span>
+	                  <h4>${container.title}</h4>
+	                </div>
                 <span class="workspace-home-count">${numberFormatter.format(availableModules.length)} módulos</span>
               </div>
               <p class="muted">${container.description}</p>
@@ -6302,16 +6433,15 @@ const renderWorkspaceLauncher = (workspace = {}, modules = []) => {
 	                      .join("")
 	                  : ""}
 	              </div>
-              <div class="workspace-home-card-actions">
-                <button
-                  type="button"
-                  class="secondary ghost"
-                  data-workspace-home-action="${container.key}"
-                  ${typeof container.action === "function" ? "" : "disabled"}
-                >${isTenantWorkspaceMode() ? (container.actionLabel || "Abrir área") : container.actionLabel}</button>
-                ${isTenantWorkspaceMode() ? `
-                  <button
-                    type="button"
+	              <div class="workspace-home-card-actions">
+	                <button
+	                  type="button"
+	                  class="secondary ghost"
+	                  ${typeof container.action === "function" ? "" : "disabled"}
+	                >${isTenantWorkspaceMode() ? (container.actionLabel || "Abrir área") : container.actionLabel}</button>
+	                ${isTenantWorkspaceMode() ? `
+	                  <button
+	                    type="button"
                     class="secondary ghost"
                     data-workspace-home-detail="${container.key}"
                   >Ver accesos</button>
@@ -6320,23 +6450,25 @@ const renderWorkspaceLauncher = (workspace = {}, modules = []) => {
             </article>
           `;
         })
-        .join("")}
-    </div>
-	    <div id="workspaceHomeDetail"></div>
-	    <div class="workspace-suite-summary">
-	      ${groupWorkspaceModulesBySection(enabled)
-	        .map(
-	          (group) => `
-	            <a class="workspace-suite-card workspace-suite-card-button" href="${buildWorkspaceSummaryHref(group.key)}" data-workspace-summary-open="${group.key}">
-	              <strong>${group.title}</strong>
-	              <div class="muted">${group.subtitle}</div>
-	              <span>${numberFormatter.format(group.rows.length)} activos</span>
-	            </a>
-	          `
-	        )
 	        .join("")}
 	    </div>
-	  `;
+		    <div id="workspaceHomeDetail"></div>
+		    ${tenantNonAdmin ? "" : `
+		      <div class="workspace-suite-summary">
+		        ${groupWorkspaceModulesBySection(enabled)
+		          .map(
+		            (group) => `
+		              <a class="workspace-suite-card workspace-suite-card-button" href="${buildWorkspaceSummaryHref(group.key)}" data-workspace-summary-open="${group.key}">
+		                <strong>${group.title}</strong>
+		                <div class="muted">${group.subtitle}</div>
+		                <span>${numberFormatter.format(group.rows.length)} activos</span>
+		              </a>
+		            `
+		          )
+		          .join("")}
+		      </div>
+		    `}
+		  `;
   workspaceLauncher.querySelectorAll("[data-workspace-home-action]").forEach((button) => {
     button.addEventListener("click", () => {
       const key = button.dataset.workspaceHomeAction || "";
@@ -6353,16 +6485,16 @@ const renderWorkspaceLauncher = (workspace = {}, modules = []) => {
       }
     });
   });
-  workspaceLauncher.querySelectorAll("[data-workspace-home-detail]").forEach((button) => {
-    button.addEventListener("click", () => {
-      const key = button.dataset.workspaceHomeDetail || "";
-      const container = WORKSPACE_HOME_CONTAINERS.find((item) => item.key === key);
-      if (!container) return;
-      renderWorkspaceHomeDetail(container, enabledKeys);
-      const detail = document.getElementById("workspaceHomeDetail");
-      if (detail) detail.scrollIntoView({ behavior: "smooth", block: "start" });
-    });
-  });
+	  workspaceLauncher.querySelectorAll("[data-workspace-home-detail]").forEach((button) => {
+	    button.addEventListener("click", () => {
+	      const key = button.dataset.workspaceHomeDetail || "";
+	      const container = WORKSPACE_HOME_CONTAINERS.find((item) => item.key === key);
+	      if (!container) return;
+	      renderWorkspaceHomeDetail(container, tenantEnabledKeys);
+	      const detail = document.getElementById("workspaceHomeDetail");
+	      if (detail) detail.scrollIntoView({ behavior: "smooth", block: "start" });
+	    });
+	  });
 	  workspaceLauncher.querySelectorAll("[data-workspace-summary-open]").forEach((button) => {
 	    button.addEventListener("click", (event) => {
 	      event.preventDefault();
@@ -12876,6 +13008,11 @@ const loadWorkspaceDetail = async (workspaceId) => {
     members = await safeWorkspaceApi(`/api/workspace_members?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [] });
   }
   state.currentWorkspaceMembers = members.rows || [];
+  let links = { rows: [] };
+  if (canManageWorkspace) {
+    links = await safeWorkspaceApi(`/api/workspace_links?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [] });
+  }
+  state.currentWorkspaceLinks = links.rows || [];
 
   // Evitar "stampede" de decenas de requests al entrar en el workspace.
   let billing = {};
@@ -12979,6 +13116,7 @@ const loadWorkspaceDetail = async (workspaceId) => {
   renderWorkspaceCompanySwitcher(companies);
   renderWorkspaceCompanies(companies);
   renderWorkspaceMembers(state.currentWorkspaceMembers || []);
+  renderWorkspaceLinks(state.currentWorkspaceLinks || []);
   renderWorkspaceClientBase(workspaceClients.rows || []);
   renderWorkspaceClientDetail(null);
   renderWorkspaceModules(detail.modules || []);
@@ -38083,16 +38221,16 @@ const setAuthUi = (user) => {
       setCurrentUser(userValue);
     }
   }
-  if (authSessionPill) {
-    if (user) {
-      const label = user.nombre_completo || user.usuario || user.email || "Sesión activa";
-      authSessionPill.textContent = label;
-      authSessionPill.classList.remove("hidden");
-    } else {
-      authSessionPill.textContent = "";
-      authSessionPill.classList.add("hidden");
-    }
-  }
+	  if (authSessionPill) {
+	    if (user) {
+	      const label = user.nombre_completo || user.usuario || user.email || "Sesión activa";
+	      authSessionPill.textContent = `${label} · ${APP_SW_VERSION}`;
+	      authSessionPill.classList.remove("hidden");
+	    } else {
+	      authSessionPill.textContent = "";
+	      authSessionPill.classList.add("hidden");
+	    }
+	  }
   if (authLogoutBtn) {
     authLogoutBtn.classList.toggle("hidden", !user);
   }
@@ -38374,7 +38512,11 @@ brandHome.addEventListener("click", () => {
 
 if (coreCards) {
   coreCards.addEventListener("click", (event) => {
-    const target = event.target.closest("[data-action]");
+    const raw = event?.target || null;
+    const element = (raw && raw.nodeType === 1)
+      ? raw
+      : (raw && raw.parentElement ? raw.parentElement : null);
+    const target = element?.closest ? element.closest("[data-action]") : null;
     if (!target || !coreCards.contains(target)) {
       return;
     }

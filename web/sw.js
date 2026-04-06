@@ -5,7 +5,7 @@
  * - Never caches /api or /uploads
  */
 
-const CACHE_VERSION = "v30";
+const CACHE_VERSION = "v36";
 const SHELL_CACHE = `verifika2-shell-${CACHE_VERSION}`;
 const RUNTIME_CACHE = `verifika2-runtime-${CACHE_VERSION}`;
 const FONTS_CACHE = `verifika2-fonts-${CACHE_VERSION}`;
@@ -13,12 +13,12 @@ const FONTS_CACHE = `verifika2-fonts-${CACHE_VERSION}`;
 const SHELL_URLS = [
   "/",
   "/index.html",
-  "/styles.css?v=157",
+  "/styles.css?v=158",
   "/ui-foundation.js?v=2",
   "/app-auth.js?v=9",
   "/app-routing.js?v=7",
-  "/app.js?v=397",
-  "/manifest.webmanifest?v=13",
+  "/app.js?v=403",
+  "/manifest.webmanifest?v=14",
   "/assets/verifika2/verifika2_mark.svg",
   "/assets/verifika2/verifika2_badge_gold.svg",
   "/assets/verifika2/verifika2_badge_silver.svg",
@@ -47,6 +47,7 @@ const isFontRequest = (url) => {
 
 const isCacheablePath = (pathname) => {
   if (!pathname) return false;
+  if (pathname === "/sw.js") return false;
   if (pathname.startsWith("/api/")) return false;
   if (pathname.startsWith("/uploads/")) return false;
   return true;

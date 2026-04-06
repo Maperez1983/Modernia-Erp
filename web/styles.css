@@ -1520,6 +1520,10 @@ body.crm-fin #companySummary {
   box-shadow: 0 14px 26px rgba(43, 43, 43, 0.06);
 }
 
+.workspace-home-card[data-workspace-home-action] {
+  cursor: pointer;
+}
+
 .workspace-home-card-head {
   display: flex;
   justify-content: space-between;
