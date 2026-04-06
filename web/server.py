@@ -1903,8 +1903,10 @@ def normalize_service_key(value):
         "INMOBILIARIA": "inmobiliaria",
         "FINANCIACIONES": "financiaciones",
         "HIPOTECAS": "financiaciones",
-        "ADMINISTRACION FINCAS": "administracion fincas",
-        "ADMINISTRACION DE FINCAS": "administracion fincas",
+        "ADMINISTRACION FINCAS": "fincas",
+        "ADMINISTRACION DE FINCAS": "fincas",
+        "ADMIN DE FINCAS": "fincas",
+        "FINCAS": "fincas",
     }
     return aliases.get(text, text.lower().strip())
 
@@ -20809,7 +20811,7 @@ def infer_workspace_time_company_id(conn, workspace_id, service_raw="", empresa_
         if normalize_lookup_text(token)
     ]
     for token in service_tokens:
-        company_candidates = WORKSPACE_TIME_SERVICE_COMPANY_MAP.get(token, [])
+        company_candidates = WORKSPACE_TIME_SERVICE_COMPANY_MAP.get(token.lower(), [])
         for company_name in company_candidates:
             company_id = company_by_name.get(normalize_lookup_text(company_name))
             if company_id:
@@ -26161,10 +26163,6 @@ class Handler(BaseHTTPRequestHandler):
         # If admin role has explicit services configured, keep service scoping.
         if rol in {"administrador", "direccion", "administracion"} and not expanded:
             return None
-        if "gestoria" in expanded:
-            expanded.add("administracion fincas")
-        if "administracion fincas" in expanded:
-            expanded.add("gestoria")
         if "financiaciones" in expanded:
             expanded.add("hipotecas")
         if "hipotecas" in expanded:
@@ -26225,8 +26223,11 @@ class Handler(BaseHTTPRequestHandler):
             empresa_nombre = normalize_lookup_text(payload.get("empresa_nombre") or "")
             if empresa_nombre == normalize_lookup_text("Financiaciones Modernia"):
                 return "financiaciones"
+            # "Fincas Velazquez" puede operar varios servicios (gestoría/fincas/seguros); no inferimos.
             if empresa_nombre == normalize_lookup_text("Fincas Velazquez"):
-                return "gestoria"
+                return ""
+        if path.startswith("/api/workspace_fincas_") or path.startswith("/api/fincas_"):
+            return "fincas"
         if path.startswith("/api/seguros"):
             return "seguros"
         if path.startswith("/api/gestoria") or path.startswith("/api/cliente_gestoria"):
@@ -26254,7 +26255,7 @@ class Handler(BaseHTTPRequestHandler):
             return normalize_service_key(raw)
         if path == "/api/workspace_presupuestos":
             raw = normalize_service_key(payload.get("servicio") or (params.get("servicio", [""])[0] if params else "") or "")
-            return raw if raw in {"gestoria", "administracion fincas"} else ""
+            return raw if raw in {"gestoria", "fincas"} else ""
         if path in {"/api/clientes_link", "/api/cliente_empresa_update"}:
             raw = payload.get("servicio") or ""
             return normalize_service_key(raw)
@@ -26288,9 +26289,6 @@ class Handler(BaseHTTPRequestHandler):
         if not required:
             return True
         required = normalize_service_key(required)
-        if required in {"administracion fincas", "gestoria"}:
-            if "gestoria" in allowed or "administracion fincas" in allowed:
-                return True
         if required in {"financiaciones", "hipotecas"}:
             if "financiaciones" in allowed or "hipotecas" in allowed:
                 return True

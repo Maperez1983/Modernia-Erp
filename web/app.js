@@ -2975,7 +2975,7 @@ const ADMIN_SERVICE_OPTIONS = [
   "Seguros",
   "Inmobiliaria",
   "Financiaciones",
-  "Administración Fincas",
+  "Admin de fincas",
   "Dirección",
   "Administración",
 ];
@@ -3012,6 +3012,7 @@ const parseAdminServices = (value) => {
   keys.forEach((key) => {
     if (key === "hipotecas") key = "financiaciones";
     if (key === "administracion de fincas") key = "administracion fincas";
+    if (["administracion fincas", "administracion de fincas", "admin de fincas"].includes(key)) key = "fincas";
     const label = ADMIN_SERVICE_BY_KEY[key] || getServiceLabelFromNormalized(key) || key;
     if (label && !ordered.includes(label)) {
       ordered.push(label);
@@ -16041,7 +16042,7 @@ const CLIENTE_FIELDS = [
 const SERVICE_OPTIONS = [
   "Inmobiliaria",
   "Gestoría",
-  "Administración Fincas",
+  "Admin de fincas",
   "Seguros",
   "Hipotecas",
   "Obras",
@@ -16051,7 +16052,7 @@ const SERVICE_OPTIONS = [
 const SERVICE_LABELS = {
   inmobiliaria: "Inmobiliaria",
   gestoria: "Gestoría",
-  fincas: "Administración Fincas",
+  fincas: "Admin de fincas",
   seguros: "Seguros",
   financiaciones: "Hipotecas",
   hipotecas: "Hipotecas",
@@ -16063,7 +16064,9 @@ const SERVICE_LABELS = {
 const SERVICE_COMPANY_MAP = {
   Inmobiliaria: "Estudio Velazquez 2012 SL",
   "Gestoría": "Fincas Velazquez",
+  "Admin de fincas": "Fincas Velazquez",
   "Administración Fincas": "Fincas Velazquez",
+  "Administración de Fincas": "Fincas Velazquez",
   Seguros: "Fincas Velazquez",
   Hipotecas: "Financiaciones Modernia",
   Obras: "Grupo Modernia",
