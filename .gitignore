@@ -12,4 +12,5 @@ __pycache__/
 web/uploads/
 reports/catastro/
 reports/aon_miconversor/
+reports/miconversor_autonomos_ocr.xlsx
 .venv/
