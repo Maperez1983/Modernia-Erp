@@ -1134,7 +1134,23 @@ def slugify_text(value):
 
 def uploaded_policy_filter(alias=""):
     prefix = f"{alias}." if alias else ""
-    return f"(COALESCE({prefix}poliza_key, '') <> '' OR COALESCE({prefix}poliza_url, '') <> '')"
+    # Consider a policy "uploaded" if either the policy carries an explicit S3 key/url
+    # OR there's a document already linked to the policy in gestoria_docs.
+    #
+    # Important: when no alias is provided, many queries use `FROM seguros` without an alias;
+    # referencing `seguros.id` avoids ambiguity inside the EXISTS subquery.
+    outer_id = f"{prefix}id" if prefix else "seguros.id"
+    return (
+        "("
+        f"COALESCE({prefix}poliza_key, '') <> '' "
+        f"OR COALESCE({prefix}poliza_url, '') <> '' "
+        "OR EXISTS ("
+        "  SELECT 1 FROM gestoria_docs gd "
+        "  WHERE LOWER(COALESCE(gd.referencia_tipo, '')) = 'seguros' "
+        f"    AND gd.referencia_id = {outer_id}"
+        ")"
+        ")"
+    )
 
 
 def seguro_date_sql(field, alias=""):
@@ -40654,10 +40670,10 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/resumen":
             rows = conn.execute(
-                """
+                f"""
                 SELECT e.nombre AS empresa,
                   (SELECT COUNT(*) FROM movimientos m WHERE m.empresa_id = e.id) AS bdt,
-                  (SELECT COUNT(*) FROM seguros s WHERE s.empresa_id = e.id) AS seguros,
+                  (SELECT COUNT(*) FROM seguros s WHERE s.empresa_id = e.id AND {uploaded_policy_filter("s")}) AS seguros,
                   (SELECT COUNT(*) FROM gestoria g WHERE g.empresa_id = e.id) AS gestoria,
                   (SELECT COUNT(*) FROM hipotecas h WHERE h.empresa_id = e.id) AS hipotecas,
                   (SELECT COUNT(*) FROM alquileres a WHERE a.empresa_id = e.id) AS alquileres,
@@ -41649,18 +41665,6 @@ class Handler(BaseHTTPRequestHandler):
             exclude_sin_seguro = f"({compania_expr} IS NULL OR {compania_expr} = '' OR {compania_expr} != 'sin seguro')"
             uploaded_clause = uploaded_policy_filter()
             uploaded_param = 1 if uploaded_only else 0
-            if uploaded_only:
-                uploaded_count = conn.execute(
-                    f"""
-                    SELECT COUNT(*) AS total
-                    FROM seguros
-                    WHERE empresa_id = ?
-                      AND {uploaded_clause}
-                    """,
-                    (empresa_id,),
-                ).fetchone()
-                if not uploaded_count or int(uploaded_count["total"] or 0) <= 0:
-                    uploaded_param = 0
             por_ramo_raw = conn.execute(
                 f"""
                 SELECT ramo
@@ -44670,18 +44674,6 @@ class Handler(BaseHTTPRequestHandler):
             in_vigor_expr = in_vigor_policy_filter()
             estado_bucket_expr = seguro_estado_bucket_expr()
             uploaded_param = 1 if uploaded_only else 0
-            if uploaded_only:
-                uploaded_count = conn.execute(
-                    f"""
-                    SELECT COUNT(*) AS total
-                    FROM seguros
-                    WHERE empresa_id = ?
-                      AND {uploaded_clause}
-                    """,
-                    (empresa_id,),
-                ).fetchone()
-                if not uploaded_count or int(uploaded_count["total"] or 0) <= 0:
-                    uploaded_param = 0
 
             current = conn.execute(
                 f"""
@@ -45414,18 +45406,6 @@ class Handler(BaseHTTPRequestHandler):
             compania_expr = "LOWER(TRIM(compania))"
             exclude_sin_seguro = f"({compania_expr} IS NULL OR {compania_expr} = '' OR {compania_expr} != 'sin seguro')"
             uploaded_param = 1 if uploaded_only else 0
-            if uploaded_only:
-                uploaded_count = conn.execute(
-                    f"""
-                    SELECT COUNT(*) AS total
-                    FROM seguros
-                    WHERE empresa_id = ?
-                      AND {uploaded_clause}
-                    """,
-                    (empresa_id,),
-                ).fetchone()
-                if not uploaded_count or int(uploaded_count["total"] or 0) <= 0:
-                    uploaded_param = 0
             total = conn.execute(
                 f"""
                 SELECT COUNT(*) AS total
@@ -46332,21 +46312,8 @@ class Handler(BaseHTTPRequestHandler):
                 where.append("t.empresa_id = ?")
                 values.append(empresa_id)
             if tabla == "seguros":
-                uploaded_param = 1 if uploaded_only else 0
-                if uploaded_only:
-                    uploaded_count = conn.execute(
-                        f"""
-                        SELECT COUNT(*) AS total
-                        FROM {tabla}
-                        WHERE empresa_id = ?
-                          AND ({uploaded_policy_filter()})
-                        """,
-                        (empresa_id,),
-                    ).fetchone()
-                    if not uploaded_count or int(uploaded_count["total"] or 0) <= 0:
-                        uploaded_param = 0
                 where.append(f"({uploaded_policy_filter('t')} OR ? = 0)")
-                values.append(uploaded_param)
+                values.append(1 if uploaded_only else 0)
 
             if year_filter and tabla == "movimientos":
                 where.append("t.anio = ?")

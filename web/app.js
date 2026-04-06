@@ -30737,7 +30737,9 @@ const populateSegurosOperationalSelects = () => {
 
 const loadSegurosComplianceKpis = (empresaId) => {
   if (!segurosComplianceKpis || !empresaId) return;
-  api(`/api/seguros_compliance_kpis?empresa_id=${encodeURIComponent(empresaId)}`)
+  const params = new URLSearchParams({ empresa_id: empresaId });
+  params.set("uploaded_only", SEGUROS_ONLY_UPLOADED_MODE ? "1" : "0");
+  api(`/api/seguros_compliance_kpis?${params.toString()}`)
     .then((data) => {
       const wrapper = document.createElement("div");
       wrapper.className = "grid crm-kpis";
@@ -31434,7 +31436,9 @@ const loadSegurosComisiones = () => {
 
 const loadSegurosInsights = (empresaId) => {
   if (!segurosInsights || !empresaId) return;
-  api(`/api/seguros_insights?empresa_id=${empresaId}`).then((data) => {
+  const params = new URLSearchParams({ empresa_id: empresaId });
+  params.set("uploaded_only", SEGUROS_ONLY_UPLOADED_MODE ? "1" : "0");
+  api(`/api/seguros_insights?${params.toString()}`).then((data) => {
     const porRamo = data.por_ramo || [];
     const porCompania = data.por_compania || [];
     const ofertasEstado = data.ofertas_estado || [];
