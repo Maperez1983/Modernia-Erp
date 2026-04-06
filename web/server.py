@@ -1918,6 +1918,7 @@ def ensure_workspace_core_tables(conn):
           slug TEXT NOT NULL UNIQUE,
           estado TEXT NOT NULL DEFAULT 'Activo',
           plan TEXT NOT NULL DEFAULT 'Enterprise',
+          kind TEXT NOT NULL DEFAULT 'Directo',
           descripcion TEXT,
           logo_url TEXT,
           primary_color TEXT,
@@ -1976,9 +1977,34 @@ def ensure_workspace_core_tables(conn):
     ensure_column(conn, "workspaces", "logo_url", "logo_url TEXT")
     ensure_column(conn, "workspaces", "primary_color", "primary_color TEXT")
     ensure_column(conn, "workspaces", "accent_color", "accent_color TEXT")
+    ensure_column(conn, "workspaces", "kind", "kind TEXT NOT NULL DEFAULT 'Directo'")
     ensure_column(conn, "workspaces", "kiosk_pin_hash", "kiosk_pin_hash TEXT")
     ensure_column(conn, "workspaces", "kiosk_pin_required", "kiosk_pin_required INTEGER NOT NULL DEFAULT 0")
     ensure_column(conn, "workspace_modulos", "config_json", "config_json TEXT")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workspace_links (
+          id TEXT PRIMARY KEY,
+          source_workspace_id TEXT NOT NULL,
+          target_workspace_id TEXT NOT NULL,
+          link_type TEXT NOT NULL,
+          role TEXT,
+          enabled INTEGER NOT NULL DEFAULT 1,
+          notes TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          UNIQUE (source_workspace_id, target_workspace_id, link_type)
+        )
+        """
+    )
+    ensure_column(conn, "workspace_links", "role", "role TEXT")
+    ensure_column(conn, "workspace_links", "enabled", "enabled INTEGER NOT NULL DEFAULT 1")
+    ensure_column(conn, "workspace_links", "notes", "notes TEXT")
+    try:
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_workspace_links_source ON workspace_links (source_workspace_id, enabled, link_type)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_workspace_links_target ON workspace_links (target_workspace_id, enabled, link_type)")
+    except Exception:
+        pass
 
 def ensure_workspace_membership_backfill(conn):
     """
@@ -18355,6 +18381,7 @@ def fetch_workspace_rows(conn):
           w.slug,
           w.estado,
           w.plan,
+          w.kind,
           w.descripcion,
           w.logo_url,
           w.primary_color,
@@ -18364,7 +18391,7 @@ def fetch_workspace_rows(conn):
         FROM workspaces w
         LEFT JOIN workspace_empresas we ON we.workspace_id = w.id
         LEFT JOIN workspace_modulos wm ON wm.workspace_id = w.id
-        GROUP BY w.id, w.nombre, w.slug, w.estado, w.plan, w.descripcion, w.logo_url, w.primary_color, w.accent_color
+        GROUP BY w.id, w.nombre, w.slug, w.estado, w.plan, w.kind, w.descripcion, w.logo_url, w.primary_color, w.accent_color
         ORDER BY w.nombre COLLATE NOCASE ASC
         """
     ).fetchall()
@@ -18391,6 +18418,7 @@ def fetch_workspace_rows_for_user(conn, session):
           w.slug,
           w.estado,
           w.plan,
+          w.kind,
           w.descripcion,
           w.logo_url,
           w.primary_color,
@@ -18401,7 +18429,7 @@ def fetch_workspace_rows_for_user(conn, session):
         JOIN workspace_miembros mem ON mem.workspace_id = w.id AND mem.usuario_id = ?
         LEFT JOIN workspace_empresas we ON we.workspace_id = w.id
         LEFT JOIN workspace_modulos wm ON wm.workspace_id = w.id
-        GROUP BY w.id, w.nombre, w.slug, w.estado, w.plan, w.descripcion, w.logo_url, w.primary_color, w.accent_color
+        GROUP BY w.id, w.nombre, w.slug, w.estado, w.plan, w.kind, w.descripcion, w.logo_url, w.primary_color, w.accent_color
         ORDER BY w.nombre COLLATE NOCASE ASC
         """,
         (user_id,),
@@ -22031,6 +22059,86 @@ def ensure_workspace_member(conn, workspace_id, user_id, role="Miembro", now=Non
     return str(row_value(existing, "id") or row_value(existing, 0) or record_id)
 
 
+def normalize_workspace_kind(value):
+    raw = normalize_lookup_text(value)
+    if raw in {"GESTORIA", "HUB"}:
+        return "Gestoría"
+    if raw in {"CLIENTE", "DIRECTO", "DIRECT"}:
+        return "Directo"
+    return (str(value or "").strip() or "Directo")
+
+
+def normalize_workspace_link_type(value):
+    raw = normalize_lookup_text(value)
+    if raw in {"GESTORIA", "GESTORIA_CLIENTE", "HUB", "PARTNER", "PROVIDER"}:
+        return "gestoria_partner"
+    return (str(value or "").strip() or "gestoria_partner")
+
+
+def fetch_workspace_link_rows(conn, workspace_id):
+    ws_id = str(workspace_id or "").strip()
+    if not ws_id:
+        return []
+    ensure_workspace_core_tables(conn)
+    rows = conn.execute(
+        """
+        SELECT
+          l.id,
+          l.source_workspace_id,
+          ws.nombre AS source_nombre,
+          ws.slug AS source_slug,
+          l.target_workspace_id,
+          wt.nombre AS target_nombre,
+          wt.slug AS target_slug,
+          l.link_type,
+          COALESCE(l.role, '') AS role,
+          COALESCE(l.enabled, 1) AS enabled,
+          COALESCE(l.notes, '') AS notes,
+          l.created_at,
+          l.updated_at
+        FROM workspace_links l
+        LEFT JOIN workspaces ws ON ws.id = l.source_workspace_id
+        LEFT JOIN workspaces wt ON wt.id = l.target_workspace_id
+        WHERE (l.source_workspace_id = ? OR l.target_workspace_id = ?)
+        ORDER BY COALESCE(l.updated_at, l.created_at) DESC
+        LIMIT 200
+        """,
+        (ws_id, ws_id),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def ensure_partner_membership(conn, source_workspace_id, target_workspace_id, *, role="Miembro", now=None):
+    """
+    Al vincular una gestoría (source) con un cliente (target), damos acceso a los miembros Owner/Admin del source.
+    Additivo: no elimina permisos existentes.
+    """
+    src = str(source_workspace_id or "").strip()
+    tgt = str(target_workspace_id or "").strip()
+    if not src or not tgt or src == tgt:
+        return 0
+    now_ts = now or datetime.now(timezone.utc).isoformat()
+    members = conn.execute(
+        "SELECT usuario_id, rol FROM workspace_miembros WHERE workspace_id = ?",
+        (src,),
+    ).fetchall()
+    added = 0
+    for row in members or []:
+        uid = str(row_value(row, "usuario_id") or row_value(row, 0) or "").strip()
+        mrole = str(row_value(row, "rol") or row_value(row, 1) or "").strip()
+        if not uid:
+            continue
+        mrole_norm = _normalize_workspace_member_role(mrole)
+        if mrole_norm not in {"Owner", "Admin"}:
+            continue
+        before = fetch_workspace_member(conn, tgt, uid)
+        ensure_workspace_member(conn, tgt, uid, role=role, now=now_ts)
+        after = fetch_workspace_member(conn, tgt, uid)
+        if (not before) and after:
+            added += 1
+    return added
+
+
 def enforce_workspace_membership(conn, session, workspace_id, *, write=False):
     """
     En modo comercial multi-tenant, exige que el usuario pertenezca al workspace.
@@ -23733,7 +23841,7 @@ def fetch_workspace_budget_encargo_payload(conn, budget_id, workspace_id=None):
 def fetch_workspace_detail(conn, workspace_id):
     workspace = conn.execute(
         """
-        SELECT id, nombre, slug, estado, plan, descripcion, logo_url, primary_color, accent_color
+        SELECT id, nombre, slug, estado, plan, kind, descripcion, logo_url, primary_color, accent_color
         FROM workspaces
         WHERE id = ?
         LIMIT 1
@@ -28768,11 +28876,12 @@ class Handler(BaseHTTPRequestHandler):
                     return
             # 2) Crea workspace con módulos.
             workspace_id = os.urandom(16).hex()
+            ws_kind = normalize_workspace_kind(payload.get("kind") or payload.get("workspace_kind") or "Directo")
             conn.execute(
                 """
                 INSERT INTO workspaces (
-                  id, nombre, slug, estado, plan, descripcion, logo_url, primary_color, accent_color, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                  id, nombre, slug, estado, plan, kind, descripcion, logo_url, primary_color, accent_color, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
                 """,
                 (
                     workspace_id,
@@ -28780,6 +28889,7 @@ class Handler(BaseHTTPRequestHandler):
                     ws_slug,
                     str(payload.get("estado") or "Activo"),
                     str(payload.get("plan") or "Enterprise"),
+                    ws_kind,
                     str(payload.get("descripcion") or "").strip(),
                     str(payload.get("logo_url") or "").strip(),
                     str(payload.get("primary_color") or "#3C6E71").strip(),
@@ -28829,6 +28939,41 @@ class Handler(BaseHTTPRequestHandler):
             creator_id = str((session or {}).get("user_id") or "").strip()
             if creator_id:
                 ensure_workspace_member(conn, workspace_id, creator_id, role="Owner", now=now)
+            # 5) Link opcional con gestoría (partner). Si se indica, copiamos owners/admins.
+            partner_slug = str(payload.get("partner_workspace_slug") or "").strip()
+            if partner_slug:
+                ensure_workspace_core_tables(conn)
+                partner = conn.execute(
+                    "SELECT id FROM workspaces WHERE slug = ? LIMIT 1",
+                    (normalize_workspace_slug(partner_slug),),
+                ).fetchone()
+                partner_id = str(row_value(partner, "id") or row_value(partner, 0) or "").strip()
+                if partner_id and partner_id != workspace_id:
+                    link_id = os.urandom(16).hex()
+                    try:
+                        conn.execute(
+                            """
+                            INSERT OR IGNORE INTO workspace_links (
+                              id, source_workspace_id, target_workspace_id, link_type, role, enabled, notes, created_at, updated_at
+                            ) VALUES (?, ?, ?, ?, ?, 1, ?, datetime(?), datetime(?))
+                            """,
+                            (
+                                link_id,
+                                partner_id,
+                                workspace_id,
+                                "gestoria_partner",
+                                "Miembro",
+                                "autolink_customer_create",
+                                now,
+                                now,
+                            ),
+                        )
+                    except Exception:
+                        pass
+                    try:
+                        ensure_partner_membership(conn, partner_id, workspace_id, role="Miembro", now=now)
+                    except Exception:
+                        pass
             conn.commit()
             json_response(self, {"ok": True, "workspace_id": workspace_id, "empresa_id": empresa_id})
             return
@@ -28840,6 +28985,7 @@ class Handler(BaseHTTPRequestHandler):
             workspace_id = str(payload.get("id") or "").strip()
             nombre = str(payload.get("nombre") or "").strip()
             slug_value = normalize_workspace_slug(payload.get("slug") or nombre)
+            kind_value = normalize_workspace_kind(payload.get("kind") or payload.get("workspace_kind") or "Directo")
             if not nombre:
                 json_response(self, {"error": "nombre requerido"}, status=400)
                 return
@@ -28854,7 +29000,7 @@ class Handler(BaseHTTPRequestHandler):
                 conn.execute(
                     """
                     UPDATE workspaces
-                    SET nombre = ?, slug = ?, estado = ?, plan = ?, descripcion = ?,
+                    SET nombre = ?, slug = ?, estado = ?, plan = ?, kind = ?, descripcion = ?,
                         logo_url = ?, primary_color = ?, accent_color = ?, updated_at = datetime(?)
                     WHERE id = ?
                     """,
@@ -28863,6 +29009,7 @@ class Handler(BaseHTTPRequestHandler):
                         slug_value,
                         payload.get("estado") or "Activo",
                         payload.get("plan") or "Enterprise",
+                        kind_value,
                         payload.get("descripcion") or "",
                         payload.get("logo_url") or "",
                         payload.get("primary_color") or "",
@@ -28876,8 +29023,8 @@ class Handler(BaseHTTPRequestHandler):
                 conn.execute(
                     """
                     INSERT INTO workspaces (
-                      id, nombre, slug, estado, plan, descripcion, logo_url, primary_color, accent_color, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                      id, nombre, slug, estado, plan, kind, descripcion, logo_url, primary_color, accent_color, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
                     """,
                     (
                         workspace_id,
@@ -28885,6 +29032,7 @@ class Handler(BaseHTTPRequestHandler):
                         slug_value,
                         payload.get("estado") or "Activo",
                         payload.get("plan") or "Enterprise",
+                        kind_value,
                         payload.get("descripcion") or "",
                         payload.get("logo_url") or "",
                         payload.get("primary_color") or "",
@@ -28934,6 +29082,115 @@ class Handler(BaseHTTPRequestHandler):
             )
             conn.commit()
             json_response(self, {"ok": True, "id": record_id, "enabled": enabled})
+            return
+        elif parsed.path == "/api/workspace_link_upsert":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not workspace_actor_is_privileged(conn, session):
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
+            ensure_workspace_core_tables(conn)
+            source_id = str(payload.get("source_workspace_id") or "").strip()
+            target_id = str(payload.get("target_workspace_id") or "").strip()
+            link_type = normalize_workspace_link_type(payload.get("link_type") or payload.get("type") or "gestoria_partner")
+            role = _normalize_workspace_member_role(payload.get("role") or "Miembro")
+            enabled = 1 if str(payload.get("enabled") or "").strip().lower() in {"", "1", "true", "yes", "si", "sí", "on"} else 0
+            notes = str(payload.get("notes") or "").strip()
+            if not source_id or not target_id or source_id == target_id:
+                json_response(self, {"error": "source_workspace_id y target_workspace_id requeridos"}, status=400)
+                return
+            ok, err = enforce_workspace_membership(conn, session, source_id, write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            ok, err = enforce_workspace_membership(conn, session, target_id, write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            # Por defecto: 1 cliente -> 1 gestoría. Deshabilita otros vínculos activos del mismo tipo hacia el target.
+            if link_type == "gestoria_partner" and enabled == 1:
+                try:
+                    conn.execute(
+                        """
+                        UPDATE workspace_links
+                        SET enabled = 0, updated_at = datetime(?), notes = COALESCE(NULLIF(notes, ''), 'auto_disabled_relink')
+                        WHERE target_workspace_id = ?
+                          AND link_type = ?
+                          AND source_workspace_id <> ?
+                          AND COALESCE(enabled, 1) = 1
+                        """,
+                        (now, target_id, link_type, source_id),
+                    )
+                except Exception:
+                    pass
+            existing = conn.execute(
+                """
+                SELECT id
+                FROM workspace_links
+                WHERE source_workspace_id = ? AND target_workspace_id = ? AND link_type = ?
+                LIMIT 1
+                """,
+                (source_id, target_id, link_type),
+            ).fetchone()
+            link_id = str(row_value(existing, "id") or row_value(existing, 0) or "").strip() if existing else os.urandom(16).hex()
+            if existing:
+                conn.execute(
+                    """
+                    UPDATE workspace_links
+                    SET role = ?, enabled = ?, notes = COALESCE(NULLIF(?, ''), notes), updated_at = datetime(?)
+                    WHERE id = ?
+                    """,
+                    (role, enabled, notes, now, link_id),
+                )
+            else:
+                conn.execute(
+                    """
+                    INSERT INTO workspace_links (
+                      id, source_workspace_id, target_workspace_id, link_type, role, enabled, notes, created_at, updated_at
+                    ) VALUES (
+                      ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                    )
+                    """,
+                    (link_id, source_id, target_id, link_type, role, enabled, notes or None, now, now),
+                )
+            added = 0
+            if enabled == 1 and link_type == "gestoria_partner":
+                try:
+                    added = ensure_partner_membership(conn, source_id, target_id, role=role, now=now)
+                except Exception:
+                    added = 0
+            conn.commit()
+            json_response(self, {"ok": True, "id": link_id, "members_added": added})
+            return
+        elif parsed.path == "/api/workspace_link_delete":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not workspace_actor_is_privileged(conn, session):
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
+            ensure_workspace_core_tables(conn)
+            link_id = str(payload.get("id") or "").strip()
+            if not link_id:
+                json_response(self, {"error": "id requerido"}, status=400)
+                return
+            row = conn.execute(
+                "SELECT id, source_workspace_id, target_workspace_id FROM workspace_links WHERE id = ? LIMIT 1",
+                (link_id,),
+            ).fetchone()
+            if not row:
+                json_response(self, {"error": "link no encontrado"}, status=404)
+                return
+            source_id = str(row_value(row, "source_workspace_id") or row_value(row, 1) or "").strip()
+            target_id = str(row_value(row, "target_workspace_id") or row_value(row, 2) or "").strip()
+            ok, err = enforce_workspace_membership(conn, session, source_id, write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            ok, err = enforce_workspace_membership(conn, session, target_id, write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            conn.execute("DELETE FROM workspace_links WHERE id = ?", (link_id,))
+            conn.commit()
+            json_response(self, {"ok": True})
             return
         elif parsed.path == "/api/workspace_facturacion":
             workspace_id = str(payload.get("workspace_id") or "").strip()
@@ -39084,6 +39341,22 @@ class Handler(BaseHTTPRequestHandler):
                     },
                 },
             )
+            return
+
+        if path == "/api/workspace_links":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not workspace_actor_is_privileged(conn, session):
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
+            workspace_id = (params.get("workspace_id", [""])[0] or "").strip()
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            ok, err = enforce_workspace_membership(conn, session, workspace_id)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            json_response(self, {"rows": fetch_workspace_link_rows(conn, workspace_id)})
             return
 
         if path == "/api/workspace_detail":
