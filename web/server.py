@@ -85,6 +85,262 @@ ENV_PATH = ROOT.parent / ".env"
 SEGUROS_COMPANY_HINTS_PATH = ROOT.parent / "data" / "seguros_company_hints.json"
 S3_BOTO3_AVAILABLE = True
 
+S3_SCOPE_ENFORCE = os.environ.get("APP_S3_SCOPE_ENFORCE", "").strip().lower() in ("1", "true", "yes", "si", "sí", "on")
+S3_SCOPE_ENFORCE = bool(S3_SCOPE_ENFORCE or WORKSPACE_MEMBERSHIP_ENFORCE)
+try:
+    S3_GRANT_TTL_SECONDS = int(os.environ.get("APP_S3_GRANT_TTL_SECONDS", "3600") or 3600)
+except Exception:
+    S3_GRANT_TTL_SECONDS = 3600
+S3_GRANT_TTL_SECONDS = max(60, min(24 * 3600, S3_GRANT_TTL_SECONDS))
+S3_GRANTS_LOCK = threading.Lock()
+S3_GRANTS = {}  # {user_id: {key: expires_ts}}
+S3_AUTH_CACHE_LOCK = threading.Lock()
+S3_AUTH_CACHE = {}  # {(user_id, key): (expires_ts, ok)}
+
+
+def _normalize_s3_key(key):
+    raw = str(key or "").strip().replace("\\", "/")
+    return raw.lstrip("/")
+
+
+def _s3_grant_key(session, key, *, ttl_seconds=None):
+    if not session:
+        return
+    uid = str(session.get("user_id") or "").strip()
+    if not uid:
+        return
+    safe = _normalize_s3_key(key)
+    if not safe:
+        return
+    ttl = int(ttl_seconds or S3_GRANT_TTL_SECONDS)
+    ttl = max(60, min(24 * 3600, ttl))
+    expires = time.time() + ttl
+    try:
+        with S3_GRANTS_LOCK:
+            bucket = S3_GRANTS.get(uid)
+            if not bucket:
+                bucket = {}
+                S3_GRANTS[uid] = bucket
+            bucket[safe] = expires
+            # best-effort cleanup
+            for k, exp in list(bucket.items()):
+                if exp and exp < time.time():
+                    bucket.pop(k, None)
+            if len(bucket) > 512:
+                # keep newest-ish by expiry
+                items = sorted(bucket.items(), key=lambda it: float(it[1] or 0), reverse=True)[:512]
+                S3_GRANTS[uid] = {k: exp for k, exp in items}
+    except Exception:
+        return
+
+
+def _s3_key_granted(session, key):
+    if not session:
+        return False
+    uid = str(session.get("user_id") or "").strip()
+    safe = _normalize_s3_key(key)
+    if not uid or not safe:
+        return False
+    now_ts = time.time()
+    try:
+        with S3_GRANTS_LOCK:
+            bucket = S3_GRANTS.get(uid) or {}
+            exp = bucket.get(safe)
+            if exp and exp > now_ts:
+                return True
+            if exp:
+                bucket.pop(safe, None)
+    except Exception:
+        return False
+    return False
+
+
+def _s3_key_visible_for_user(conn, session, key):
+    """
+    Autoriza acceso a un objeto S3 si:
+    - El usuario es privilegiado, o
+    - El key fue emitido por este servidor para este usuario recientemente (grant), o
+    - El key está referenciado en registros DB accesibles por el usuario (multi-tenant).
+    """
+    if not S3_SCOPE_ENFORCE:
+        return True, ""
+    if workspace_actor_is_privileged(conn, session):
+        return True, ""
+    uid = str((session or {}).get("user_id") or "").strip()
+    safe_key = _normalize_s3_key(key)
+    if not uid or not safe_key:
+        return False, "No autorizado"
+    if _s3_key_granted(session, safe_key):
+        return True, ""
+
+    cache_key = (uid, safe_key)
+    now_ts = time.time()
+    try:
+        with S3_AUTH_CACHE_LOCK:
+            cached = S3_AUTH_CACHE.get(cache_key)
+            if cached and cached[0] > now_ts:
+                return bool(cached[1]), "" if cached[1] else "No autorizado"
+    except Exception:
+        cached = None
+
+    s3_url_value = f"s3://{safe_key}"
+    ok = False
+    try:
+        # 1) Workspace tables con workspace_id directo
+        row = conn.execute(
+            """
+            SELECT 1
+            FROM workspace_documentos_inbox q
+            JOIN workspace_miembros m ON m.workspace_id = q.workspace_id AND m.usuario_id = ?
+            WHERE q.doc_key = ? OR q.doc_url = ?
+            LIMIT 1
+            """,
+            (uid, safe_key, s3_url_value),
+        ).fetchone()
+        ok = bool(row)
+    except Exception:
+        ok = False
+    if not ok:
+        try:
+            row = conn.execute(
+                """
+                SELECT 1
+                FROM workspace_rrhh_documentos d
+                JOIN workspace_miembros m ON m.workspace_id = d.workspace_id AND m.usuario_id = ?
+                WHERE d.doc_key = ? OR d.doc_url = ?
+                LIMIT 1
+                """,
+                (uid, safe_key, s3_url_value),
+            ).fetchone()
+            ok = bool(row)
+        except Exception:
+            ok = False
+    if not ok:
+        try:
+            row = conn.execute(
+                """
+                SELECT 1
+                FROM workspace_rrhh_gastos g
+                JOIN workspace_miembros m ON m.workspace_id = g.workspace_id AND m.usuario_id = ?
+                WHERE g.doc_key = ? OR g.doc_url = ?
+                LIMIT 1
+                """,
+                (uid, safe_key, s3_url_value),
+            ).fetchone()
+            ok = bool(row)
+        except Exception:
+            ok = False
+    if not ok:
+        try:
+            row = conn.execute(
+                """
+                SELECT 1
+                FROM workspace_registro_personal p
+                JOIN workspace_miembros m ON m.workspace_id = p.workspace_id AND m.usuario_id = ?
+                WHERE p.foto_url = ? OR p.foto_url = ?
+                LIMIT 1
+                """,
+                (uid, safe_key, s3_url_value),
+            ).fetchone()
+            ok = bool(row)
+        except Exception:
+            ok = False
+
+    # 2) Tablas por empresa_id → workspace_empresas → workspace_miembros
+    if not ok:
+        try:
+            row = conn.execute(
+                """
+                SELECT 1
+                FROM gestoria_docs d
+                JOIN workspace_empresas we ON we.empresa_id = d.empresa_id
+                JOIN workspace_miembros m ON m.workspace_id = we.workspace_id AND m.usuario_id = ?
+                WHERE d.doc_key = ? OR d.doc_url = ?
+                LIMIT 1
+                """,
+                (uid, safe_key, s3_url_value),
+            ).fetchone()
+            ok = bool(row)
+        except Exception:
+            ok = False
+    if not ok:
+        try:
+            row = conn.execute(
+                """
+                SELECT 1
+                FROM gestoria_facturas f
+                JOIN workspace_empresas we ON we.empresa_id = f.empresa_id
+                JOIN workspace_miembros m ON m.workspace_id = we.workspace_id AND m.usuario_id = ?
+                WHERE f.doc_key = ?
+                LIMIT 1
+                """,
+                (uid, safe_key),
+            ).fetchone()
+            ok = bool(row)
+        except Exception:
+            ok = False
+    if not ok:
+        try:
+            row = conn.execute(
+                """
+                SELECT 1
+                FROM gestoria_import_documentos d
+                JOIN workspace_empresas we ON we.empresa_id = d.empresa_id
+                JOIN workspace_miembros m ON m.workspace_id = we.workspace_id AND m.usuario_id = ?
+                WHERE d.doc_key = ?
+                LIMIT 1
+                """,
+                (uid, safe_key),
+            ).fetchone()
+            ok = bool(row)
+        except Exception:
+            ok = False
+    if not ok:
+        try:
+            row = conn.execute(
+                """
+                SELECT 1
+                FROM seguros s
+                JOIN workspace_empresas we ON we.empresa_id = s.empresa_id
+                JOIN workspace_miembros m ON m.workspace_id = we.workspace_id AND m.usuario_id = ?
+                WHERE s.poliza_key = ?
+                LIMIT 1
+                """,
+                (uid, safe_key),
+            ).fetchone()
+            ok = bool(row)
+        except Exception:
+            ok = False
+    if not ok:
+        try:
+            row = conn.execute(
+                """
+                SELECT 1
+                FROM inmueble_docs idoc
+                JOIN inmuebles i ON i.id = idoc.inmueble_id
+                JOIN workspace_empresas we ON we.empresa_id = i.empresa_id
+                JOIN workspace_miembros m ON m.workspace_id = we.workspace_id AND m.usuario_id = ?
+                WHERE idoc.url = ?
+                LIMIT 1
+                """,
+                (uid, s3_url_value),
+            ).fetchone()
+            ok = bool(row)
+        except Exception:
+            ok = False
+
+    try:
+        with S3_AUTH_CACHE_LOCK:
+            S3_AUTH_CACHE[cache_key] = (now_ts + 120.0, bool(ok))
+            # cleanup best-effort
+            if len(S3_AUTH_CACHE) > 5000:
+                for k, (exp, _ok) in list(S3_AUTH_CACHE.items())[:1000]:
+                    if exp < now_ts:
+                        S3_AUTH_CACHE.pop(k, None)
+    except Exception:
+        pass
+    return bool(ok), "" if ok else "No autorizado"
+
 def load_env_file():
     if not ENV_PATH.exists():
         return
@@ -4423,12 +4679,17 @@ def s3_get_object_bytes(key):
         return None, str(exc)
 
 
-def decode_seguros_payload(payload):
+def decode_seguros_payload(payload, *, conn=None, session=None):
     data_uri = payload.get("file_base64") or payload.get("data")
     s3_key = (payload.get("s3_key") or "").strip()
     pdf_bytes = None
     if s3_key:
-        pdf_bytes, s3_err = s3_get_object_bytes(s3_key)
+        safe_key = _normalize_s3_key(s3_key)
+        if conn is not None and session is not None:
+            ok, err = _s3_key_visible_for_user(conn, session, safe_key)
+            if not ok:
+                raise ValueError(err or "No autorizado")
+        pdf_bytes, s3_err = s3_get_object_bytes(safe_key)
         if not pdf_bytes:
             raise ValueError(f"S3: {s3_err}")
     else:
@@ -4443,14 +4704,19 @@ def decode_seguros_payload(payload):
     return pdf_bytes
 
 
-def decode_document_payload(payload):
+def decode_document_payload(payload, *, conn=None, session=None):
     data_uri = payload.get("file_base64") or payload.get("data")
     s3_key = (payload.get("s3_key") or "").strip()
     raw_bytes = None
     mime = ""
     filename = str(payload.get("filename") or "").strip()
     if s3_key:
-        raw_bytes, s3_err = s3_get_object_bytes(s3_key)
+        safe_key = _normalize_s3_key(s3_key)
+        if conn is not None and session is not None:
+            ok, err = _s3_key_visible_for_user(conn, session, safe_key)
+            if not ok:
+                raise ValueError(err or "No autorizado")
+        raw_bytes, s3_err = s3_get_object_bytes(safe_key)
         if not raw_bytes:
             raise ValueError(f"S3: {s3_err}")
         lower_key = s3_key.lower()
@@ -5659,8 +5925,8 @@ def apply_gestoria_import_lote(conn, lote_id, empresa_id, now, limit=None):
         lote = dict(lote) if lote else None
     return {"applied": applied, "errors": errors, "lote": lote}
 
-def process_seguros_ocr(payload, conn):
-    pdf_bytes = decode_seguros_payload(payload)
+def process_seguros_ocr(payload, conn, *, session=None):
+    pdf_bytes = decode_seguros_payload(payload, conn=conn, session=session)
     fast_mode = str(payload.get("fast_mode") or "").strip().lower() in ("1", "true", "yes", "on")
     tmp_path = None
     text = ""
@@ -5979,14 +6245,14 @@ def process_seguros_ocr(payload, conn):
             os.unlink(tmp_path)
 
 
-def process_gestoria_factura_ocr(payload, conn, empresa_id, now="now"):
+def process_gestoria_factura_ocr(payload, conn, empresa_id, now="now", *, session=None):
     if not empresa_id:
         raise ValueError("empresa_id requerido")
     cliente_id = (payload.get("cliente_id") or "").strip() or None
     tipo_factura = (payload.get("tipo_factura") or payload.get("tipo") or "").strip().lower()
     if tipo_factura not in ("compra", "venta"):
         tipo_factura = "compra"
-    doc_bytes, mime, source_hint = decode_document_payload(payload)
+    doc_bytes, mime, source_hint = decode_document_payload(payload, conn=conn, session=session)
     tmp_path = None
     text = ""
     err_detail = ""
@@ -25805,13 +26071,13 @@ class Handler(BaseHTTPRequestHandler):
             # Respondemos con los iconos actuales si existen, para evitar 404 al abrir desde
             # acceso directo en pantalla de inicio.
             try:
-                # /icons/ios/vXX/<file> -> /icons/ios/v24/<file>
+                # /icons/ios/vXX/<file> -> /icons/ios/v25/<file>
                 parts = [p for p in (parsed.path or "").split("/") if p]
                 if len(parts) >= 4 and parts[0] == "icons" and parts[1] == "ios" and parts[2].startswith("v"):
                     ver_raw = parts[2][1:]
-                    if ver_raw.isdigit() and int(ver_raw) != 24:
+                    if ver_raw.isdigit() and int(ver_raw) != 25:
                         rel = "/".join(parts[3:])
-                        mapped = safe_resolve_under(ROOT / "icons" / "ios" / "v24", rel)
+                        mapped = safe_resolve_under(ROOT / "icons" / "ios" / "v25", rel)
                         if mapped and mapped.exists():
                             send_file(self, mapped)
                             return
@@ -25829,7 +26095,7 @@ class Handler(BaseHTTPRequestHandler):
                 }
                 target = legacy_map.get(legacy_name)
                 if target:
-                    mapped = safe_resolve_under(ROOT / "icons" / "ios" / "v24", target)
+                    mapped = safe_resolve_under(ROOT / "icons" / "ios" / "v25", target)
                     if mapped and mapped.exists():
                         send_file(self, mapped)
                         return
@@ -26554,6 +26820,11 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "No se pudo firmar la subida"}, status=500)
                 return
             public_url = f"https://{bucket}.s3.{region}.amazonaws.com/{key}"
+            try:
+                session = getattr(self, "auth_session", None) or self._current_session()
+                _s3_grant_key(session, key)
+            except Exception:
+                pass
             json_response(self, {"url": url, "key": key, "public_url": public_url})
             return
         if parsed.path == "/api/s3_multipart_start":
@@ -26594,6 +26865,11 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "UploadId no disponible"}, status=500)
                 return
             public_url = f"https://{bucket}.s3.{region}.amazonaws.com/{key}"
+            try:
+                session = getattr(self, "auth_session", None) or self._current_session()
+                _s3_grant_key(session, key)
+            except Exception:
+                pass
             json_response(
                 self,
                 {
@@ -26619,6 +26895,13 @@ class Handler(BaseHTTPRequestHandler):
             if not client or not bucket or not region:
                 json_response(self, {"error": "S3 no configurado"}, status=400)
                 return
+            try:
+                session = getattr(self, "auth_session", None) or self._current_session()
+                if S3_SCOPE_ENFORCE and (not workspace_actor_is_privileged(conn, session)) and (not _s3_key_granted(session, key)):
+                    json_response(self, {"error": "No autorizado"}, status=403)
+                    return
+            except Exception:
+                pass
             try:
                 url = client.generate_presigned_url(
                     "upload_part",
@@ -26647,6 +26930,13 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "S3 no configurado"}, status=400)
                 return
             try:
+                session = getattr(self, "auth_session", None) or self._current_session()
+                if S3_SCOPE_ENFORCE and (not workspace_actor_is_privileged(conn, session)) and (not _s3_key_granted(session, key)):
+                    json_response(self, {"error": "No autorizado"}, status=403)
+                    return
+            except Exception:
+                pass
+            try:
                 parts = []
                 kwargs = {"Bucket": bucket, "Key": key, "UploadId": upload_id}
                 while True:
@@ -26672,6 +26962,11 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "No se pudo completar la subida multipart"}, status=500)
                 return
             public_url = f"https://{bucket}.s3.{region}.amazonaws.com/{key}"
+            try:
+                session = getattr(self, "auth_session", None) or self._current_session()
+                _s3_grant_key(session, key)
+            except Exception:
+                pass
             json_response(self, {"ok": True, "key": key, "public_url": public_url})
             return
         if parsed.path == "/api/s3_multipart_abort":
@@ -26685,6 +26980,13 @@ class Handler(BaseHTTPRequestHandler):
             if not client or not bucket or not region:
                 json_response(self, {"error": "S3 no configurado"}, status=400)
                 return
+            try:
+                session = getattr(self, "auth_session", None) or self._current_session()
+                if S3_SCOPE_ENFORCE and (not workspace_actor_is_privileged(conn, session)) and (not _s3_key_granted(session, key)):
+                    json_response(self, {"error": "No autorizado"}, status=403)
+                    return
+            except Exception:
+                pass
             try:
                 client.abort_multipart_upload(
                     Bucket=bucket,
@@ -31471,7 +31773,8 @@ class Handler(BaseHTTPRequestHandler):
             )
         elif parsed.path == "/api/gestoria_factura_ocr":
             try:
-                result = process_gestoria_factura_ocr(payload, conn, empresa_id=empresa["id"], now=now)
+                session = getattr(self, "auth_session", None) or self._current_session()
+                result = process_gestoria_factura_ocr(payload, conn, empresa_id=empresa["id"], now=now, session=session)
             except ValueError as exc:
                 json_response(self, {"error": str(exc)}, status=400)
                 return
@@ -31579,7 +31882,8 @@ class Handler(BaseHTTPRequestHandler):
             audit("gestoria_conta_tasks", record_id, "Actualizar tarea contable", usuario=payload.get("usuario"))
         elif parsed.path == "/api/seguros_ocr":
             try:
-                result = process_seguros_ocr(payload, conn)
+                session = getattr(self, "auth_session", None) or self._current_session()
+                result = process_seguros_ocr(payload, conn, session=session)
                 json_response(self, result)
                 return
             except Exception as exc:
@@ -39135,6 +39439,12 @@ class Handler(BaseHTTPRequestHandler):
             if not key:
                 json_response(self, {"error": "key requerido"}, status=400)
                 return
+            key = _normalize_s3_key(key)
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok, err = _s3_key_visible_for_user(conn, session, key)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
             client = s3_client()
             if not client:
                 bucket, region = s3_config()
@@ -39164,6 +39474,12 @@ class Handler(BaseHTTPRequestHandler):
             key = params.get("key", [""])[0]
             if not key:
                 json_response(self, {"error": "key requerido"}, status=400)
+                return
+            key = _normalize_s3_key(key)
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok, err = _s3_key_visible_for_user(conn, session, key)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
                 return
             client = s3_client()
             if not client:
