@@ -16780,6 +16780,38 @@ def ensure_tables(db_path):
             _migration_mark(conn, "workspace_membership_backfill_v1")
     except Exception:
         pass
+    # Índices de rendimiento (evita scans completos que saturan Postgres en planes pequeños).
+    try:
+        if not _migration_done(conn, "perf_indexes_v1"):
+            backend = _backend_name(conn)
+            idx_prefix = "CREATE INDEX"
+            if backend == "postgres":
+                # Autocommit ya está activo en Postgres dentro de ensure_tables(). `CONCURRENTLY` minimiza locks.
+                idx_prefix = "CREATE INDEX CONCURRENTLY"
+            index_sql = [
+                f"{idx_prefix} IF NOT EXISTS idx_acciones_empresa_servicio_estado_fecha ON acciones (empresa_id, servicio, estado, fecha)",
+                f"{idx_prefix} IF NOT EXISTS idx_acciones_empresa_servicio_tipo_fecha ON acciones (empresa_id, servicio, tipo, fecha)",
+                f"{idx_prefix} IF NOT EXISTS idx_acciones_empresa_inmueble_fecha ON acciones (empresa_id, inmueble_id, fecha)",
+                f"{idx_prefix} IF NOT EXISTS idx_acciones_empresa_responsable_fecha ON acciones (empresa_id, responsable, fecha)",
+                f"{idx_prefix} IF NOT EXISTS idx_acciones_empresa_related ON acciones (empresa_id, related_tipo, related_id)",
+                f"{idx_prefix} IF NOT EXISTS idx_inmuebles_empresa_estado ON inmuebles (empresa_id, estado)",
+                f"{idx_prefix} IF NOT EXISTS idx_inmuebles_empresa_responsable ON inmuebles (empresa_id, responsable)",
+                f"{idx_prefix} IF NOT EXISTS idx_inmueble_docs_inmueble_created ON inmueble_docs (inmueble_id, created_at)",
+                f"{idx_prefix} IF NOT EXISTS idx_operaciones_inmo_empresa_anio_tipo ON operaciones_inmobiliarias (empresa_id, anio, tipo_operacion)",
+                f"{idx_prefix} IF NOT EXISTS idx_alquileres_empresa_fecha ON alquileres (empresa_id, fecha)",
+                f"{idx_prefix} IF NOT EXISTS idx_visitas_empresa_fecha_estado ON visitas (empresa_id, fecha, estado)",
+                f"{idx_prefix} IF NOT EXISTS idx_demandas_empresa_estado ON demandas (empresa_id, estado)",
+                f"{idx_prefix} IF NOT EXISTS idx_captaciones_empresa_updated ON captaciones (empresa_id, updated_at)",
+            ]
+            for sql in index_sql:
+                try:
+                    conn.execute(sql)
+                except Exception:
+                    # Best-effort: si una tabla no existe en un dataset legacy, seguimos.
+                    pass
+            _migration_mark(conn, "perf_indexes_v1")
+    except Exception:
+        pass
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS ocr_jobs (
