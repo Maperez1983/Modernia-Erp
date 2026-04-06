@@ -456,9 +456,11 @@ def _pg_pool_configured():
     try:
         # Default (Render): necesitamos algo más de margen porque iOS/PWA hace bursts de requests
         # (health/me/assets) y 4 conexiones puede saturarse fácilmente durante bootstrap o queries lentas.
-        _PG_POOL_MAX = int(os.environ.get("APP_PG_POOL_MAX", "16") or 16)
+        # Por defecto: 8 conexiones es suficiente para bursts de PWA/iOS en un ThreadingHTTPServer,
+        # sin penalizar planes pequeños de Postgres (cada conexión consume RAM en el servidor).
+        _PG_POOL_MAX = int(os.environ.get("APP_PG_POOL_MAX", "8") or 8)
     except Exception:
-        _PG_POOL_MAX = 16
+        _PG_POOL_MAX = 8
     try:
         _PG_POOL_WAIT_S = float(os.environ.get("APP_PG_POOL_WAIT_SECONDS", "15") or 15)
     except Exception:

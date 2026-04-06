@@ -16812,6 +16812,29 @@ def ensure_tables(db_path):
             _migration_mark(conn, "perf_indexes_v1")
     except Exception:
         pass
+    # Índices extra (iteración 2): añaden tablas que empezaron a pesar más con PWA/PG.
+    try:
+        if not _migration_done(conn, "perf_indexes_v2"):
+            backend = _backend_name(conn)
+            idx_prefix = "CREATE INDEX"
+            if backend == "postgres":
+                idx_prefix = "CREATE INDEX CONCURRENTLY"
+            index_sql = [
+                f"{idx_prefix} IF NOT EXISTS idx_gestoria_contabilidad_empresa_fecha ON gestoria_contabilidad (empresa_id, fecha)",
+                f"{idx_prefix} IF NOT EXISTS idx_gestoria_contabilidad_empresa_cliente ON gestoria_contabilidad (empresa_id, cliente_id)",
+                f"{idx_prefix} IF NOT EXISTS idx_gestoria_modelos_cliente_fecha ON gestoria_modelos (cliente_id, proxima_fecha)",
+                f"{idx_prefix} IF NOT EXISTS idx_gestoria_trabajos_empresa_estado_fecha ON gestoria_trabajos (empresa_id, estado, fecha_fin)",
+                f"{idx_prefix} IF NOT EXISTS idx_hipotecas_empresa_estado ON hipotecas (empresa_id, estado)",
+                f"{idx_prefix} IF NOT EXISTS idx_seguros_empresa_estado ON seguros (empresa_id, estado)",
+            ]
+            for sql in index_sql:
+                try:
+                    conn.execute(sql)
+                except Exception:
+                    pass
+            _migration_mark(conn, "perf_indexes_v2")
+    except Exception:
+        pass
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS ocr_jobs (
@@ -19040,7 +19063,8 @@ def fetch_workspace_gestoria_overview(conn, workspace_id, empresa_id=None):
         WHERE ce.empresa_id IN ({placeholders})
           AND {service_filter}
           AND m.proxima_fecha IS NOT NULL
-          AND strftime('%Y-%m', m.proxima_fecha) = ?
+          AND length(m.proxima_fecha) >= 7
+          AND substr(NULLIF(m.proxima_fecha, ''), 1, 7) = ?
         """,
         [*empresa_ids, current_month],
     ).fetchone()
@@ -25798,7 +25822,12 @@ class Handler(BaseHTTPRequestHandler):
                                         skip_compat=True,
                                         connect_timeout_override=timeout_s,
                                     )
-                                except Exception:
+                                except Exception as exc:
+                                    # Si el pool está saturado, NO abrimos conexiones extra: puede tumbar Postgres
+                                    # en planes pequeños. En ese caso devolvemos 503 y dejamos que el backpressure
+                                    # haga su trabajo.
+                                    if "pool postgres saturado" in str(exc or "").lower():
+                                        raise
                                     # Fallback: incluso si el pool está OK, puede devolverse una conexión rota
                                     # (DB reiniciada, SSL renegociación, etc.). En ese caso un connect directo
                                     # evita falsos negativos en /api/health cuando Postgres sí responde.
@@ -26102,14 +26131,15 @@ class Handler(BaseHTTPRequestHandler):
             # Compat: iOS/PWA cachea rutas antiguas y puede pedir iconos de versiones previas.
             # Respondemos con los iconos actuales si existen, para evitar 404 al abrir desde
             # acceso directo en pantalla de inicio.
+            CURRENT_ICON_VERSION = 26
             try:
-                # /icons/ios/vXX/<file> -> /icons/ios/v25/<file>
+                # /icons/ios/vXX/<file> -> /icons/ios/v{CURRENT_ICON_VERSION}/<file>
                 parts = [p for p in (parsed.path or "").split("/") if p]
                 if len(parts) >= 4 and parts[0] == "icons" and parts[1] == "ios" and parts[2].startswith("v"):
                     ver_raw = parts[2][1:]
-                    if ver_raw.isdigit() and int(ver_raw) != 25:
+                    if ver_raw.isdigit() and int(ver_raw) != CURRENT_ICON_VERSION:
                         rel = "/".join(parts[3:])
-                        mapped = safe_resolve_under(ROOT / "icons" / "ios" / "v25", rel)
+                        mapped = safe_resolve_under(ROOT / "icons" / "ios" / f"v{CURRENT_ICON_VERSION}", rel)
                         if mapped and mapped.exists():
                             send_file(self, mapped)
                             return
@@ -26127,7 +26157,7 @@ class Handler(BaseHTTPRequestHandler):
                 }
                 target = legacy_map.get(legacy_name)
                 if target:
-                    mapped = safe_resolve_under(ROOT / "icons" / "ios" / "v25", target)
+                    mapped = safe_resolve_under(ROOT / "icons" / "ios" / f"v{CURRENT_ICON_VERSION}", target)
                     if mapped and mapped.exists():
                         send_file(self, mapped)
                         return
@@ -41587,7 +41617,8 @@ class Handler(BaseHTTPRequestHandler):
                 JOIN clientes_empresas ce ON ce.cliente_id = m.cliente_id
                 WHERE ce.empresa_id = ? AND {service_filter}
                   AND m.proxima_fecha IS NOT NULL
-                  AND strftime('%Y-%m', m.proxima_fecha) = ?
+                  AND length(m.proxima_fecha) >= 7
+                  AND substr(NULLIF(m.proxima_fecha, ''), 1, 7) = ?
                 """,
                 (empresa_id, today.strftime("%Y-%m")),
             ).fetchone()
@@ -42859,7 +42890,8 @@ class Handler(BaseHTTPRequestHandler):
                 + signed_expr
                 + """
                   AND fecha_firma IS NOT NULL
-                  AND strftime('%Y-%m', fecha_firma) = strftime('%Y-%m', 'now', 'localtime')
+                  AND length(fecha_firma) >= 7
+                  AND substr(NULLIF(fecha_firma, ''), 1, 7) = substr(datetime('now','localtime'), 1, 7)
                 """,
                 (empresa_id,),
             ).fetchone()
@@ -43064,7 +43096,8 @@ class Handler(BaseHTTPRequestHandler):
                   AND """
                 + signed_expr
                 + """
-                  AND strftime('%Y-%m', fecha_firma) = strftime('%Y-%m', 'now', 'localtime')
+                  AND length(fecha_firma) >= 7
+                  AND substr(NULLIF(fecha_firma, ''), 1, 7) = substr(datetime('now','localtime'), 1, 7)
                 """,
                 (empresa_id,),
             ).fetchone()
@@ -44686,14 +44719,15 @@ class Handler(BaseHTTPRequestHandler):
 
                 alquileres = conn.execute(
                     """
-                    SELECT STRFTIME('%Y', fecha) AS year,
+                    SELECT substr(NULLIF(fecha, ''), 1, 4) AS year,
                            COUNT(*) AS total,
                            SUM(COALESCE(precio, 0)) AS facturado
                     FROM alquileres
                     WHERE empresa_id = ?
                       AND fecha IS NOT NULL
-                    GROUP BY STRFTIME('%Y', fecha)
-                    ORDER BY STRFTIME('%Y', fecha)
+                      AND length(fecha) >= 4
+                    GROUP BY substr(NULLIF(fecha, ''), 1, 4)
+                    ORDER BY substr(NULLIF(fecha, ''), 1, 4)
                     """,
                     (empresa_id,),
                 ).fetchall()
@@ -44765,14 +44799,15 @@ class Handler(BaseHTTPRequestHandler):
 
             alquileres = conn.execute(
                 """
-                SELECT STRFTIME('%Y', fecha) AS year,
+                SELECT substr(NULLIF(fecha, ''), 1, 4) AS year,
                        COUNT(*) AS total,
                        SUM(COALESCE(precio, 0)) AS facturado
                 FROM alquileres
                 WHERE empresa_id = ?
                   AND fecha IS NOT NULL
-                GROUP BY STRFTIME('%Y', fecha)
-                ORDER BY STRFTIME('%Y', fecha)
+                  AND length(fecha) >= 4
+                GROUP BY substr(NULLIF(fecha, ''), 1, 4)
+                ORDER BY substr(NULLIF(fecha, ''), 1, 4)
                 """,
                 (empresa_id,),
             ).fetchall()
