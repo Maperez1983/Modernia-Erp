@@ -76,7 +76,23 @@ def apply_schema_file(conn, schema_path):
             continue
         statements.append(stmt)
     for stmt in statements:
-        conn.execute(stmt)
+        head = stmt.lstrip()[:60].upper()
+        try:
+            conn.execute(stmt)
+        except Exception as exc:
+            # Best-effort: en despliegues legacy el schema.sql puede incluir índices sobre columnas
+            # que se añaden después con ensure_column(). Si intentamos crear el índice antes,
+            # Postgres falla con "column ... does not exist" y tumba el arranque.
+            msg = str(exc or "").lower()
+            is_index = head.startswith("CREATE INDEX") or head.startswith("CREATE UNIQUE INDEX")
+            if is_index and (
+                "does not exist" in msg
+                or "undefinedcolumn" in msg
+                or "undefinedtable" in msg
+                or "relation" in msg and "does not exist" in msg
+            ):
+                continue
+            raise
     return True
 
 
