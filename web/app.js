@@ -3,7 +3,7 @@
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v39";
+const APP_SW_VERSION = "v40";
 
 // Workspace tenant por defecto del producto (branding de software). Mantiene compatibilidad con slugs legacy.
 const DEFAULT_TENANT_WORKSPACE_SLUG = "verifika2";
@@ -38546,18 +38546,23 @@ brandHome.addEventListener("click", () => {
 
 if (coreCards) {
   coreCards.addEventListener("click", (event) => {
-    const raw = event?.target || null;
-    const element = (raw && raw.nodeType === 1)
-      ? raw
-      : (raw && raw.parentElement ? raw.parentElement : null);
-    const target = element?.closest ? element.closest("[data-action]") : null;
+    const target = closestFromEvent(event, "[data-action]");
     if (!target || !coreCards.contains(target)) {
+      return;
+    }
+    const action = target.dataset.action;
+    const authUser = getAuthScopeUser();
+    // Si aún no hay sesión en memoria (boot lento / SW viejo), dejamos que el enlace navegue normal.
+    if (!authUser?.id) {
+      const fallbackLink = target.tagName === "A" ? target : target.querySelector("a[href]");
+      if (fallbackLink && fallbackLink.href) {
+        window.location.href = fallbackLink.href;
+      }
       return;
     }
     if (target.tagName === "A") {
       event.preventDefault();
     }
-    const action = target.dataset.action;
     if (action === "holding") {
       openHolding();
     } else if (action === "holding-admin") {
