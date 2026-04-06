@@ -3,7 +3,7 @@
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v36";
+const APP_SW_VERSION = "v37";
 
 // Workspace tenant por defecto del producto (branding de software). Mantiene compatibilidad con slugs legacy.
 const DEFAULT_TENANT_WORKSPACE_SLUG = "verifika2";
@@ -1559,18 +1559,17 @@ const workspaceList = document.getElementById("workspaceList");
 const workspaceForm = document.getElementById("workspaceForm");
 const workspaceFormStatus = document.getElementById("workspaceFormStatus");
 const workspaceNewBtn = document.getElementById("workspaceNewBtn");
-	const workspaceNewCustomerBtn = document.getElementById("workspaceNewCustomerBtn");
-	const workspaceCompanies = document.getElementById("workspaceCompanies");
-	const workspaceCompanyEditor = document.getElementById("workspaceCompanyEditor");
-	const workspaceCompanyEditorClose = document.getElementById("workspaceCompanyEditorClose");
-	const workspaceCompanyForm = document.getElementById("workspaceCompanyForm");
-	const workspaceCompanyFormStatus = document.getElementById("workspaceCompanyFormStatus");
-	const workspaceCompanyCnaeQuery = document.getElementById("workspaceCompanyCnaeQuery");
-	const workspaceCompanyCnaeResults = document.getElementById("workspaceCompanyCnaeResults");
-	const workspaceCompanyCnaes = document.getElementById("workspaceCompanyCnaes");
+const workspaceNewCustomerBtn = document.getElementById("workspaceNewCustomerBtn");
+const workspaceCompanies = document.getElementById("workspaceCompanies");
+const workspaceCompanyEditor = document.getElementById("workspaceCompanyEditor");
+const workspaceCompanyEditorClose = document.getElementById("workspaceCompanyEditorClose");
+const workspaceCompanyForm = document.getElementById("workspaceCompanyForm");
+const workspaceCompanyFormStatus = document.getElementById("workspaceCompanyFormStatus");
+const workspaceCompanyCnaeQuery = document.getElementById("workspaceCompanyCnaeQuery");
+const workspaceCompanyCnaeResults = document.getElementById("workspaceCompanyCnaeResults");
+const workspaceCompanyCnaes = document.getElementById("workspaceCompanyCnaes");
 const workspaceMembers = document.getElementById("workspaceMembers");
-const workspaceLinks = document.getElementById("workspaceLinks");
-	const workspaceModules = document.getElementById("workspaceModules");
+const workspaceModules = document.getElementById("workspaceModules");
 const workspaceClientBase = document.getElementById("workspaceClientBase");
 const workspaceClientLookup = document.getElementById("workspaceClientLookup");
 const workspaceClientRefreshBtn = document.getElementById("workspaceClientRefreshBtn");
@@ -1785,11 +1784,24 @@ const setDensityMode = (mode = DENSITY_NORMAL, persist = true) => {
   }
 };
 
+const resolveEventTargetElement = (event) => {
+  const raw = event?.target || null;
+  if (!raw) return null;
+  if (raw.nodeType === 1) return raw;
+  return raw.parentElement || null;
+};
+
+const closestFromEvent = (event, selector) => {
+  const el = resolveEventTargetElement(event);
+  if (!el || typeof el.closest !== "function") return null;
+  return el.closest(selector);
+};
+
 const initDensityToggle = () => {
   applyDensityMode(getStoredDensityMode());
   if (!densityToggle) return;
   densityToggle.addEventListener("click", (event) => {
-    const btn = event.target.closest("[data-density]");
+    const btn = closestFromEvent(event, "[data-density]");
     if (!btn || !densityToggle.contains(btn)) return;
     setDensityMode(btn.dataset.density, true);
   });
@@ -5887,7 +5899,7 @@ const renderWorkspaceServiceDesks = (payload = {}) => {
 
 const fillWorkspaceForm = (workspace = {}) => {
   if (!workspaceForm) return;
-  ["id", "nombre", "kind", "slug", "estado", "plan", "descripcion", "logo_url", "primary_color", "accent_color"].forEach((field) => {
+  ["id", "nombre", "slug", "estado", "plan", "descripcion", "logo_url", "primary_color", "accent_color"].forEach((field) => {
     const el = workspaceForm.querySelector(`[name="${field}"]`);
     if (!el) return;
     el.value = workspace[field] || "";
@@ -6213,117 +6225,6 @@ const renderWorkspaceMembers = (rows = []) => {
         renderWorkspaceMembers(state.currentWorkspaceMembers);
       } catch (error) {
         alert(error?.message || "No se pudo quitar.");
-      }
-    });
-  });
-};
-
-const renderWorkspaceLinks = (rows = []) => {
-  if (!workspaceLinks) return;
-  const authUser = getAuthScopeUser();
-  const canManage = Boolean(authUser && isPrivilegedUser(authUser));
-  if (!state.currentWorkspaceId) {
-    workspaceLinks.innerHTML = "<p class='muted'>Selecciona un workspace.</p>";
-    return;
-  }
-  if (!canManage) {
-    workspaceLinks.innerHTML = "<p class='muted'>Solo visible para administración.</p>";
-    return;
-  }
-  const allWorkspaces = Array.isArray(state.workspaces) ? state.workspaces : [];
-  const options = allWorkspaces
-    .map((w) => `<option value="${escapeHtml(String(w.slug || w.nombre || ""))}">${escapeHtml(String(w.nombre || w.slug || ""))}</option>`)
-    .join("");
-  const list = (rows || []).filter((row) => Number(row.enabled ?? 1) === 1);
-  const listHtml = list
-    .map((row) => {
-      const label = `${row.source_slug || row.source_nombre || "-"} → ${row.target_slug || row.target_nombre || "-"}`;
-      return `
-        <div class="workspace-chip workspace-company-chip">
-          <div>
-            <strong>${escapeHtml(label)}</strong>
-            <div class="muted">Tipo: ${escapeHtml(row.link_type || "-")} · Rol: ${escapeHtml(row.role || "Miembro")}</div>
-            ${row.notes ? `<div class="muted">${escapeHtml(row.notes)}</div>` : ""}
-          </div>
-          <div class="workspace-company-chip-actions">
-            <button type="button" class="secondary ghost" data-workspace-link-remove="${escapeHtml(String(row.id || ""))}">Quitar</button>
-          </div>
-        </div>
-      `;
-    })
-    .join("");
-  workspaceLinks.innerHTML = `
-    <div class="workspace-context-strip">
-      <strong>Gestoría ↔ Cliente</strong>
-      <span class="muted">Crea un vínculo y se copiarán los Owner/Admin del workspace origen como miembros del destino.</span>
-    </div>
-    <div class="row" style="gap:10px;align-items:flex-end;flex-wrap:wrap">
-      <label style="min-width:280px;flex:1">
-        Workspace gestoría (slug)
-        <input id="workspaceLinkSourceSlug" list="workspaceSlugOptions" placeholder="ej. gestoria_velazquez" />
-      </label>
-      <datalist id="workspaceSlugOptions">${options}</datalist>
-      <label style="min-width:220px">
-        Rol en destino
-        <select id="workspaceLinkRole">
-          <option>Miembro</option>
-          <option>Lectura</option>
-        </select>
-      </label>
-      <button type="button" id="workspaceLinkCreateBtn" class="secondary">Vincular</button>
-      <span id="workspaceLinkStatus" class="muted"></span>
-    </div>
-    <div class="workspace-chip-list">${listHtml || "<p class='muted'>Sin vínculos todavía.</p>"}</div>
-  `;
-  const sourceInput = document.getElementById("workspaceLinkSourceSlug");
-  const roleSelect = document.getElementById("workspaceLinkRole");
-  const status = document.getElementById("workspaceLinkStatus");
-  const btn = document.getElementById("workspaceLinkCreateBtn");
-  if (btn) {
-    btn.addEventListener("click", async () => {
-      const slug = String(sourceInput?.value || "").trim();
-      const role = String(roleSelect?.value || "Miembro").trim();
-      if (!slug) {
-        if (status) status.textContent = "Indica el slug del workspace gestoría.";
-        return;
-      }
-      const source = allWorkspaces.find((w) => String(w.slug || "") === slug) || allWorkspaces.find((w) => String(w.nombre || "") === slug);
-      if (!source?.id) {
-        if (status) status.textContent = "No encuentro ese workspace.";
-        return;
-      }
-      try {
-        if (status) status.textContent = "Vinculando...";
-        const resp = await postJsonWithDbRetry("/api/workspace_link_upsert", {
-          source_workspace_id: String(source.id || ""),
-          target_workspace_id: String(state.currentWorkspaceId || ""),
-          link_type: "gestoria_partner",
-          role,
-          enabled: 1,
-          notes: "ui_link",
-        });
-        const added = Number(resp?.members_added || 0) || 0;
-        if (status) status.textContent = added ? `Vínculo creado. Miembros añadidos: ${added}.` : "Vínculo creado.";
-        const links = await safeWorkspaceApi(`/api/workspace_links?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}`, { rows: [] });
-        state.currentWorkspaceLinks = links.rows || [];
-        renderWorkspaceLinks(state.currentWorkspaceLinks);
-      } catch (error) {
-        if (status) status.textContent = error?.message || "No se pudo vincular.";
-      }
-    });
-  }
-  workspaceLinks.querySelectorAll("[data-workspace-link-remove]").forEach((removeBtn) => {
-    removeBtn.addEventListener("click", async () => {
-      const linkId = String(removeBtn.dataset.workspaceLinkRemove || "").trim();
-      if (!linkId) return;
-      if (!window.confirm("¿Eliminar este vínculo? (No quita miembros automáticamente)")) return;
-      try {
-        await postJsonWithDbRetry("/api/workspace_link_delete", { id: linkId });
-        const links = await safeWorkspaceApi(`/api/workspace_links?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}`, { rows: [] });
-        state.currentWorkspaceLinks = links.rows || [];
-        renderWorkspaceLinks(state.currentWorkspaceLinks);
-      } catch (error) {
-        alert(error?.message || "No se pudo eliminar.");
       }
     });
   });
@@ -13008,11 +12909,6 @@ const loadWorkspaceDetail = async (workspaceId) => {
     members = await safeWorkspaceApi(`/api/workspace_members?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [] });
   }
   state.currentWorkspaceMembers = members.rows || [];
-  let links = { rows: [] };
-  if (canManageWorkspace) {
-    links = await safeWorkspaceApi(`/api/workspace_links?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [] });
-  }
-  state.currentWorkspaceLinks = links.rows || [];
 
   // Evitar "stampede" de decenas de requests al entrar en el workspace.
   let billing = {};
@@ -13116,7 +13012,6 @@ const loadWorkspaceDetail = async (workspaceId) => {
   renderWorkspaceCompanySwitcher(companies);
   renderWorkspaceCompanies(companies);
   renderWorkspaceMembers(state.currentWorkspaceMembers || []);
-  renderWorkspaceLinks(state.currentWorkspaceLinks || []);
   renderWorkspaceClientBase(workspaceClients.rows || []);
   renderWorkspaceClientDetail(null);
   renderWorkspaceModules(detail.modules || []);
@@ -20149,7 +20044,7 @@ const initSegurosTabs = () => {
   }
   tabs.dataset.ready = "1";
   tabs.addEventListener("click", (event) => {
-    const btn = event.target.closest(".tab");
+    const btn = closestFromEvent(event, ".tab");
     if (!btn || !btn.dataset.segurosTab) return;
     setSegurosTab(btn.dataset.segurosTab);
   });
@@ -20157,7 +20052,7 @@ const initSegurosTabs = () => {
 };
 
 document.addEventListener("click", (event) => {
-  const btn = event.target.closest("[data-seguros-tab]");
+  const btn = closestFromEvent(event, "[data-seguros-tab]");
   if (!btn) return;
   setSegurosTab(btn.dataset.segurosTab);
 });
@@ -24703,7 +24598,7 @@ const renderTableInto = (data, container, infoEl, label) => {
     }
     if (showCaptacionActions && String(recordId || "").trim()) {
       tr.addEventListener("click", async (event) => {
-        if (event.target && event.target.closest("button, input, select, a")) {
+        if (closestFromEvent(event, "button, input, select, a")) {
           return;
         }
         const inmuebleId = String(rowMap?.inmueble_id || "").trim();
@@ -24718,7 +24613,7 @@ const renderTableInto = (data, container, infoEl, label) => {
     }
     if (label === "Seguros" && currentTab === "seguros-crm" && state.segurosTab === "bdt" && String(recordId || "").trim()) {
       tr.addEventListener("click", (event) => {
-        if (event.target && event.target.closest("button, input, select, a")) {
+        if (closestFromEvent(event, "button, input, select, a")) {
           return;
         }
         openSeguroById(recordId, rowMap.cliente_id || "");
@@ -32466,7 +32361,7 @@ const loadGestoriaBdt = async () => {
       actionTd.appendChild(btn);
       tr.appendChild(actionTd);
       tr.addEventListener("click", (event) => {
-        if (event.target && event.target.closest("button, input, select, a")) {
+        if (closestFromEvent(event, "button, input, select, a")) {
           return;
         }
         openCliente();
@@ -38560,7 +38455,7 @@ if (coreCards) {
 	}
 
 viewTabs.addEventListener("click", (event) => {
-  const btn = event.target.closest(".tab");
+  const btn = closestFromEvent(event, ".tab");
   if (!btn) return;
   setTab(btn.dataset.tab);
   if (state.currentModule === "clientes") {
@@ -38635,7 +38530,7 @@ viewTabs.addEventListener("click", (event) => {
 
 if (fincasBdtTabs) {
   fincasBdtTabs.addEventListener("click", (event) => {
-    const btn = event.target.closest("[data-table]");
+    const btn = closestFromEvent(event, "[data-table]");
     if (!btn) return;
     tablaSelect.value = btn.dataset.table;
     updateFincasBdtTabs();
@@ -38645,7 +38540,7 @@ if (fincasBdtTabs) {
 
 if (estudioAltaTabs) {
   estudioAltaTabs.addEventListener("click", (event) => {
-    const btn = event.target.closest("[data-section]");
+    const btn = closestFromEvent(event, "[data-section]");
     if (!btn) return;
     if (altaSection) {
       altaSection.dataset.estudioActive = btn.dataset.section;
@@ -38656,7 +38551,7 @@ if (estudioAltaTabs) {
 
 if (crmWorkspaceTabs) {
   crmWorkspaceTabs.addEventListener("click", (event) => {
-    const btn = event.target.closest("[data-crm-view]");
+    const btn = closestFromEvent(event, "[data-crm-view]");
     if (!btn) return;
     setCrmWorkspaceView(btn.dataset.crmView);
   });
@@ -38936,7 +38831,7 @@ if (legalDgtForm) {
 
 if (legalRadarTable) {
   legalRadarTable.addEventListener("click", async (event) => {
-    const btn = event.target.closest("[data-legal-radar-action][data-id]");
+    const btn = closestFromEvent(event, "[data-legal-radar-action][data-id]");
     if (!btn) return;
     const id = btn.dataset.id || "";
     const nextState = btn.dataset.legalRadarAction || "";
@@ -38965,12 +38860,12 @@ if (legalRadarTable) {
 
 if (crmSection) {
   crmSection.addEventListener("click", (event) => {
-    const kpiLink = event.target.closest(".kpi-clickable[data-crm-view], .crm-focus-link[data-crm-view]");
+    const kpiLink = closestFromEvent(event, ".kpi-clickable[data-crm-view], .crm-focus-link[data-crm-view]");
     if (kpiLink) {
       setCrmWorkspaceView(kpiLink.dataset.crmView);
       return;
     }
-    const actionLink = event.target.closest(".crm-quick-action[data-crm-action]");
+    const actionLink = closestFromEvent(event, ".crm-quick-action[data-crm-action]");
     if (actionLink) {
       goToEstudioAlta(actionLink.dataset.crmAction || "compraventa");
     }
@@ -39262,7 +39157,7 @@ if (gestoriaAlertDays) {
 
 if (gestoriaCrmTabs) {
   gestoriaCrmTabs.addEventListener("click", (event) => {
-    const btn = event.target.closest("[data-gestoria-tab]");
+    const btn = closestFromEvent(event, "[data-gestoria-tab]");
     if (!btn) return;
     if (gestoriaCrmSearch) gestoriaCrmSearch.value = "";
     if (gestoriaCrmEstado) gestoriaCrmEstado.value = "";
@@ -39274,7 +39169,7 @@ if (gestoriaCrmTabs) {
 
 if (gestoriaCrmViews) {
   gestoriaCrmViews.addEventListener("click", (event) => {
-    const btn = event.target.closest("[data-gestoria-view]");
+    const btn = closestFromEvent(event, "[data-gestoria-view]");
     if (!btn) return;
     setGestoriaCrmView(btn.dataset.gestoriaView || "crm");
   });
@@ -41997,7 +41892,7 @@ if (seguroDetailBack) {
 
 if (clienteTabs) {
   clienteTabs.addEventListener("click", (event) => {
-    const btn = event.target.closest("[data-tab]");
+    const btn = closestFromEvent(event, "[data-tab]");
     if (!btn) return;
     setClienteTab(btn.dataset.tab);
   });
@@ -42005,7 +41900,7 @@ if (clienteTabs) {
 
 if (clienteOperativaTabs) {
   clienteOperativaTabs.addEventListener("click", (event) => {
-    const btn = event.target.closest("[data-operativa-tab]");
+    const btn = closestFromEvent(event, "[data-operativa-tab]");
     if (!btn) return;
     setClienteOperativaTab(btn.dataset.operativaTab);
   });
@@ -42013,7 +41908,7 @@ if (clienteOperativaTabs) {
 
 if (clienteDocsTabs) {
   clienteDocsTabs.addEventListener("click", (event) => {
-    const btn = event.target.closest("[data-docs-tab]");
+    const btn = closestFromEvent(event, "[data-docs-tab]");
     if (!btn) return;
     setClienteDocsTab(btn.dataset.docsTab);
   });
@@ -42021,7 +41916,7 @@ if (clienteDocsTabs) {
 
 if (gestoriaModuleTabs) {
   gestoriaModuleTabs.addEventListener("click", (event) => {
-    const btn = event.target.closest("[data-gestoria-module]");
+    const btn = closestFromEvent(event, "[data-gestoria-module]");
     if (!btn) return;
     setGestoriaClientModuleTab(btn.dataset.gestoriaModule);
   });
@@ -42029,7 +41924,7 @@ if (gestoriaModuleTabs) {
 
 if (gestoriaContaInnerTabs) {
   gestoriaContaInnerTabs.addEventListener("click", (event) => {
-    const btn = event.target.closest("[data-gestoria-conta-tab]");
+    const btn = closestFromEvent(event, "[data-gestoria-conta-tab]");
     if (!btn) return;
     setGestoriaClienteContaTab(btn.dataset.gestoriaContaTab);
   });
@@ -43224,7 +43119,7 @@ if (demandaBackBtn) {
 
 if (inmuebleTabs) {
   inmuebleTabs.addEventListener("click", (event) => {
-    const btn = event.target.closest("[data-tab]");
+    const btn = closestFromEvent(event, "[data-tab]");
     if (!btn) return;
     setInmuebleTab(btn.dataset.tab);
   });
@@ -43848,7 +43743,7 @@ if (gestoriaContaQueueFilter) {
 
 if (gestoriaClienteLibrosTabs) {
   gestoriaClienteLibrosTabs.addEventListener("click", (event) => {
-    const btn = event.target.closest("[data-libro-tab]");
+    const btn = closestFromEvent(event, "[data-libro-tab]");
     if (!btn) return;
     setGestoriaClienteLibroTab(btn.dataset.libroTab || "diario");
   });
