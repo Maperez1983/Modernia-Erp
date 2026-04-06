@@ -34,7 +34,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from scripts.build_gapp_facturas_excel import extract_text, infer_vendor, norm  # noqa: E402
+from scripts.build_gapp_facturas_excel import extract_text, enrich_parsed, infer_vendor, norm  # noqa: E402
 from web.server import infer_expense_account, infer_revenue_account, parse_invoice_text
 
 
@@ -129,7 +129,7 @@ class DocRecord:
 
 def _parse_doc(path: Path, tercero_accounts: Dict[str, str], counters: Dict[str, int], *, pdf_pages: int = 2) -> DocRecord:
     text, method, err = extract_text(path, pdf_pages=pdf_pages)
-    parsed = parse_invoice_text(text)
+    parsed = enrich_parsed(path, text, parse_invoice_text(text))
     tercero = (parsed.get("tercero") or "").strip()
     if not tercero:
         tercero = infer_vendor(text, path)
