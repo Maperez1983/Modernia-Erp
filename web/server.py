@@ -5551,6 +5551,55 @@ def upsert_gestoria_import_document(conn, lote_id, empresa_id, default_cliente_i
     if confianza_extraccion <= 0:
         confianza_extraccion = 1.0 if total > 0 else 0.0
     raw_text = str(record.get("raw_text") or record.get("descripcion") or "").strip()
+    archivo_hash = str(record.get("archivo_hash") or "").strip() or None
+    # Detección de duplicados (soft): por hash de archivo y por firma de factura.
+    # Esto permite importación incremental sin ir generando duplicados cuando el cliente sube
+    # documentos poco a poco.
+    try:
+        if archivo_hash and estado != "DUPLICADO":
+            dup_doc = conn.execute(
+                """
+                SELECT id
+                FROM gestoria_import_documentos
+                WHERE empresa_id = ? AND archivo_hash = ? AND id != ?
+                LIMIT 1
+                """,
+                (empresa_id, archivo_hash, document_id),
+            ).fetchone()
+            if dup_doc:
+                estado = "DUPLICADO"
+                motivos = normalize_import_reasons((motivos + ",duplicado_hash") if motivos else "duplicado_hash")
+    except Exception:
+        pass
+    try:
+        if estado != "DUPLICADO":
+            firma = compute_gestoria_factura_dedupe_key(
+                empresa_id=empresa_id,
+                cliente_id=cliente_id,
+                tipo=tipo,
+                tercero_nif=nif,
+                tercero_nombre=tercero,
+                numero=numero,
+                fecha_emision=fecha,
+                total=total,
+                base=base,
+                cuota_iva=cuota_iva,
+            )
+            if firma:
+                dup_fact = conn.execute(
+                    """
+                    SELECT id
+                    FROM gestoria_facturas
+                    WHERE empresa_id = ? AND COALESCE(cliente_id, '') = COALESCE(?, '') AND dedupe_key = ?
+                    LIMIT 1
+                    """,
+                    (empresa_id, cliente_id or "", firma),
+                ).fetchone()
+                if dup_fact:
+                    estado = "DUPLICADO"
+                    motivos = normalize_import_reasons((motivos + ",duplicado_factura") if motivos else "duplicado_factura")
+    except Exception:
+        pass
     values = (
         document_id,
         lote_id,
@@ -5560,7 +5609,7 @@ def upsert_gestoria_import_document(conn, lote_id, empresa_id, default_cliente_i
         existing["tercero_id"] if existing else None,
         existing["gestoria_doc_id"] if existing else None,
         archivo_nombre,
-        str(record.get("archivo_hash") or "").strip() or None,
+        archivo_hash,
         str(record.get("doc_key") or "").strip() or None,
         numero or None,
         fecha or None,
@@ -5654,6 +5703,158 @@ def upsert_gestoria_import_document(conn, lote_id, empresa_id, default_cliente_i
     return document_id
 
 
+def compute_gestoria_factura_dedupe_key(
+    *,
+    empresa_id="",
+    cliente_id="",
+    tipo="",
+    tercero_nif="",
+    tercero_nombre="",
+    numero="",
+    fecha_emision="",
+    total=0.0,
+    base=0.0,
+    cuota_iva=0.0,
+) -> str:
+    empresa_id = str(empresa_id or "").strip()
+    if not empresa_id:
+        return ""
+    total_value = round(parse_money_value(total), 2)
+    if total_value <= 0:
+        return ""
+    fecha_emision = str(fecha_emision or "").strip()
+    if not fecha_emision:
+        return ""
+    numero = str(numero or "").strip()
+    tercero_nif = str(tercero_nif or "").strip().upper()
+    tercero_nombre = str(tercero_nombre or "").strip()
+    if not (numero or tercero_nif or tercero_nombre):
+        return ""
+    payload = "|".join(
+        [
+            normalize_lookup_text(empresa_id),
+            normalize_lookup_text(str(cliente_id or "")),
+            normalize_lookup_text(str(tipo or "")),
+            normalize_lookup_text(tercero_nif),
+            normalize_lookup_text(tercero_nombre),
+            normalize_lookup_text(numero),
+            normalize_lookup_text(fecha_emision),
+            f"{total_value:.2f}",
+            f"{round(parse_money_value(base), 2):.2f}",
+            f"{round(parse_money_value(cuota_iva), 2):.2f}",
+        ]
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def ensure_factura_doc_link(
+    conn,
+    *,
+    empresa_id,
+    cliente_id,
+    factura_id,
+    doc_key="",
+    doc_url="",
+    nombre="",
+    fecha="",
+    estado="Recibido",
+    notas="",
+    calidad_ocr=None,
+    campos_ocr="",
+    now,
+):
+    empresa_id = str(empresa_id or "").strip()
+    factura_id = str(factura_id or "").strip()
+    if not empresa_id or not factura_id:
+        return None
+    doc_key = str(doc_key or "").strip()
+    doc_url = str(doc_url or "").strip()
+    if not doc_key and not doc_url:
+        return None
+    where = ["empresa_id = ?", "LOWER(COALESCE(referencia_tipo, '')) = 'facturas'"]
+    values = [empresa_id]
+    if cliente_id:
+        where.append("cliente_id = ?")
+        values.append(str(cliente_id).strip())
+    key_or_url = []
+    if doc_key:
+        key_or_url.append("doc_key = ?")
+        values.append(doc_key)
+    if doc_url:
+        key_or_url.append("doc_url = ?")
+        values.append(doc_url)
+    if key_or_url:
+        where.append(f"({' OR '.join(key_or_url)})")
+    exists = conn.execute(
+        f"SELECT id FROM gestoria_docs WHERE {' AND '.join(where)} LIMIT 1",
+        values,
+    ).fetchone()
+    if exists:
+        conn.execute(
+            """
+            UPDATE gestoria_docs
+            SET referencia_id = COALESCE(?, referencia_id),
+                nombre = COALESCE(NULLIF(?, ''), nombre),
+                tipo = COALESCE(NULLIF(?, ''), tipo),
+                fecha = COALESCE(NULLIF(?, ''), fecha),
+                estado = COALESCE(NULLIF(?, ''), estado),
+                notas = COALESCE(NULLIF(?, ''), notas),
+                doc_key = COALESCE(NULLIF(?, ''), doc_key),
+                doc_url = COALESCE(NULLIF(?, ''), doc_url),
+                calidad_ocr = COALESCE(NULLIF(?, ''), calidad_ocr),
+                campos_ocr = COALESCE(NULLIF(?, ''), campos_ocr),
+                updated_at = datetime(?)
+            WHERE id = ?
+            """,
+            (
+                factura_id,
+                nombre or "Factura",
+                "Factura",
+                fecha or "",
+                estado or "",
+                notas or "",
+                doc_key or "",
+                doc_url or "",
+                str(calidad_ocr or ""),
+                str(campos_ocr or ""),
+                now,
+                exists["id"],
+            ),
+        )
+        return exists["id"]
+    doc_id = os.urandom(16).hex()
+    conn.execute(
+        """
+        INSERT INTO gestoria_docs (
+          id, empresa_id, cliente_id, referencia_tipo, referencia_id,
+          nombre, tipo, fecha, estado, notas, doc_key, doc_url,
+          calidad_ocr, campos_ocr, created_at, updated_at
+        ) VALUES (
+          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+        )
+        """,
+        (
+            doc_id,
+            empresa_id,
+            str(cliente_id or "").strip() or None,
+            "facturas",
+            factura_id,
+            nombre or "Factura",
+            "Factura",
+            fecha or "",
+            estado or "Recibido",
+            notas or "",
+            doc_key or None,
+            doc_url or None,
+            str(calidad_ocr or "") if calidad_ocr is not None else None,
+            str(campos_ocr or ""),
+            now,
+            now,
+        ),
+    )
+    return doc_id
+
+
 def apply_gestoria_import_document(conn, document_row, now):
     if not isinstance(document_row, dict):
         document_row = dict(document_row)
@@ -5714,6 +5915,81 @@ def apply_gestoria_import_document(conn, document_row, now):
         "descripcion": concepto,
         "raw_text": document_row["raw_text"] or "",
     }
+    archivo_hash = str(document_row.get("archivo_hash") or "").strip() or None
+    dedupe_key = compute_gestoria_factura_dedupe_key(
+        empresa_id=document_row["empresa_id"],
+        cliente_id=document_row["cliente_id"],
+        tipo=tipo,
+        tercero_nif=tercero_nif,
+        tercero_nombre=tercero_nombre,
+        numero=numero,
+        fecha_emision=fecha,
+        total=total,
+        base=base,
+        cuota_iva=cuota_iva,
+    )
+    try:
+        dup = None
+        if archivo_hash:
+            dup = conn.execute(
+                """
+                SELECT id
+                FROM gestoria_facturas
+                WHERE empresa_id = ? AND COALESCE(cliente_id, '') = COALESCE(?, '') AND archivo_hash = ?
+                LIMIT 1
+                """,
+                (document_row["empresa_id"], document_row["cliente_id"] or "", archivo_hash),
+            ).fetchone()
+        if not dup and dedupe_key:
+            dup = conn.execute(
+                """
+                SELECT id
+                FROM gestoria_facturas
+                WHERE empresa_id = ? AND COALESCE(cliente_id, '') = COALESCE(?, '') AND dedupe_key = ?
+                LIMIT 1
+                """,
+                (document_row["empresa_id"], document_row["cliente_id"] or "", dedupe_key),
+            ).fetchone()
+        if dup:
+            dup_id = str(dup["id"]).strip()
+            asiento = conn.execute(
+                "SELECT id FROM gestoria_asientos WHERE factura_id = ? LIMIT 1",
+                (dup_id,),
+            ).fetchone()
+            conn.execute(
+                """
+                UPDATE gestoria_import_documentos
+                SET estado_revision = 'DUPLICADO',
+                    motivos_revision = COALESCE(NULLIF(TRIM(COALESCE(motivos_revision, '') || ',duplicado_factura'), ''), 'duplicado_factura'),
+                    factura_id = COALESCE(factura_id, ?),
+                    tercero_id = COALESCE(tercero_id, ?),
+                    updated_at = datetime(?)
+                WHERE id = ?
+                """,
+                (dup_id, tercero_id, now, document_row["id"]),
+            )
+            ensure_factura_doc_link(
+                conn,
+                empresa_id=document_row["empresa_id"],
+                cliente_id=document_row["cliente_id"],
+                factura_id=dup_id,
+                doc_key=document_row.get("doc_key") or "",
+                nombre=document_row.get("archivo_nombre") or (numero or "Factura"),
+                fecha=fecha,
+                estado="Recibido",
+                notas=f"Importador facturas · lote {document_row['lote_id']} · documento {document_row['id']}",
+                now=now,
+            )
+            return {
+                "factura_id": dup_id,
+                "asiento_id": (asiento["id"] if asiento else None),
+                "tercero_id": tercero_id,
+                "duplicate_of": dup_id,
+                "lineas": [],
+                "totales": {"debe": 0.0, "haber": 0.0},
+            }
+    except Exception:
+        pass
     lines, total_debe, total_haber = build_invoice_asiento(parsed_factura, counterpart_account)
     forced_account = str(document_row["cuenta_sugerida"] or "").strip() or map_import_category_to_account(categoria)
     if forced_account:
@@ -5731,9 +6007,9 @@ def apply_gestoria_import_document(conn, document_row, now):
         INSERT INTO gestoria_facturas (
           id, empresa_id, cliente_id, tercero_id, tipo, numero, fecha_emision, descripcion,
           base_imponible, cuota_iva, cuota_irpf, total, iva_pct, estado_ocr, doc_key, raw_text,
-          import_documento_id, origen_importacion, created_at, updated_at
+          archivo_hash, dedupe_key, import_documento_id, origen_importacion, created_at, updated_at
         ) VALUES (
-          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
         )
         """,
         (
@@ -5753,12 +6029,29 @@ def apply_gestoria_import_document(conn, document_row, now):
             "importado",
             document_row["doc_key"],
             document_row["raw_text"],
+            archivo_hash,
+            dedupe_key or None,
             document_row["id"],
             "gestoria_import",
             now,
             now,
         ),
     )
+    try:
+        ensure_factura_doc_link(
+            conn,
+            empresa_id=document_row["empresa_id"],
+            cliente_id=document_row["cliente_id"],
+            factura_id=factura_id,
+            doc_key=document_row.get("doc_key") or "",
+            nombre=document_row.get("archivo_nombre") or (numero or "Factura"),
+            fecha=fecha,
+            estado="Recibido",
+            notas=f"Importador facturas · lote {document_row['lote_id']} · documento {document_row['id']}",
+            now=now,
+        )
+    except Exception:
+        pass
     asiento_id = os.urandom(16).hex()
     referencia = numero or factura_id
     conn.execute(
@@ -6320,16 +6613,91 @@ def process_gestoria_factura_ocr(payload, conn, empresa_id, now="now", *, sessio
             third_type,
             now,
         )
-        factura_id = os.urandom(16).hex()
         doc_key = (payload.get("s3_key") or "").strip()
+        archivo_hash = hashlib.sha256(doc_bytes).hexdigest() if doc_bytes else ""
+        dedupe_key = compute_gestoria_factura_dedupe_key(
+            empresa_id=empresa_id,
+            cliente_id=cliente_id,
+            tipo=tipo_factura,
+            tercero_nif=parsed_factura.get("nif"),
+            tercero_nombre=parsed_factura.get("tercero"),
+            numero=parsed_factura.get("numero"),
+            fecha_emision=parsed_factura.get("fecha"),
+            total=parsed_factura.get("total") or 0.0,
+            base=parsed_factura.get("base_imponible") or 0.0,
+            cuota_iva=parsed_factura.get("cuota_iva") or 0.0,
+        )
+        try:
+            dup = None
+            if archivo_hash:
+                dup = conn.execute(
+                    """
+                    SELECT id, COALESCE(doc_key, '') AS doc_key
+                    FROM gestoria_facturas
+                    WHERE empresa_id = ? AND COALESCE(cliente_id, '') = COALESCE(?, '') AND archivo_hash = ?
+                    LIMIT 1
+                    """,
+                    (empresa_id, cliente_id or "", archivo_hash),
+                ).fetchone()
+            if not dup and dedupe_key:
+                dup = conn.execute(
+                    """
+                    SELECT id, COALESCE(doc_key, '') AS doc_key
+                    FROM gestoria_facturas
+                    WHERE empresa_id = ? AND COALESCE(cliente_id, '') = COALESCE(?, '') AND dedupe_key = ?
+                    LIMIT 1
+                    """,
+                    (empresa_id, cliente_id or "", dedupe_key),
+                ).fetchone()
+            if dup:
+                dup_id = str(dup["id"]).strip()
+                existing_doc_key = str((dup["doc_key"] or "")).strip()
+                if doc_key and not existing_doc_key:
+                    conn.execute(
+                        "UPDATE gestoria_facturas SET doc_key = ?, archivo_hash = ?, dedupe_key = ?, updated_at = datetime(?) WHERE id = ?",
+                        (doc_key, archivo_hash or None, dedupe_key or None, now, dup_id),
+                    )
+                asiento = conn.execute(
+                    "SELECT id FROM gestoria_asientos WHERE factura_id = ? LIMIT 1",
+                    (dup_id,),
+                ).fetchone()
+                try:
+                    ensure_factura_doc_link(
+                        conn,
+                        empresa_id=empresa_id,
+                        cliente_id=cliente_id,
+                        factura_id=dup_id,
+                        doc_key=doc_key,
+                        nombre=(payload.get("filename") or parsed_factura.get("numero") or "Factura"),
+                        fecha=parsed_factura.get("fecha") or "",
+                        estado="Recibido",
+                        notas="OCR factura (duplicado)",
+                        calidad_ocr=None,
+                        campos_ocr="",
+                        now=now,
+                    )
+                except Exception:
+                    pass
+                return {
+                    "factura_id": dup_id,
+                    "asiento_id": (asiento["id"] if asiento else None),
+                    "tercero_id": tercero_id,
+                    "duplicate_of": dup_id,
+                    "ocr_method": method,
+                }
+        except Exception:
+            pass
+
+        factura_id = os.urandom(16).hex()
         conn.execute(
             """
             INSERT INTO gestoria_facturas (
               id, empresa_id, cliente_id, tercero_id, tipo, numero, fecha_emision, descripcion,
               base_imponible, cuota_iva, cuota_irpf, total, iva_pct, estado_ocr, doc_key, raw_text,
+              archivo_hash, dedupe_key,
               created_at, updated_at
             ) VALUES (
-              ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+              ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
             )
             """,
             (
@@ -6349,10 +6717,29 @@ def process_gestoria_factura_ocr(payload, conn, empresa_id, now="now", *, sessio
                 "ok",
                 doc_key,
                 parsed_factura.get("raw_text") or text,
+                archivo_hash or None,
+                dedupe_key or None,
                 now,
                 now,
             ),
         )
+        try:
+            ensure_factura_doc_link(
+                conn,
+                empresa_id=empresa_id,
+                cliente_id=cliente_id,
+                factura_id=factura_id,
+                doc_key=doc_key,
+                nombre=(payload.get("filename") or parsed_factura.get("numero") or "Factura"),
+                fecha=parsed_factura.get("fecha") or "",
+                estado="Recibido",
+                notas="OCR factura",
+                calidad_ocr=None,
+                campos_ocr="",
+                now=now,
+            )
+        except Exception:
+            pass
         lines, total_debe, total_haber = build_invoice_asiento(parsed_factura, counterpart_account)
         asiento_id = os.urandom(16).hex()
         referencia = parsed_factura.get("numero") or factura_id
@@ -6527,12 +6914,13 @@ def process_workspace_factura_ocr_job(payload, conn, now="now"):
             )
         raise
     if workspace_id and document_id:
+        estado_final = "Duplicado" if (result.get("duplicate_of") or "") else "Procesado"
         _update_workspace_inbox_ocr(
             conn,
             workspace_id,
             document_id,
             {
-                "estado": "Procesado",
+                "estado": estado_final,
                 "ocr_status": "done",
                 "ocr_error": None,
                 "ocr_method": result.get("ocr_method"),
@@ -17299,6 +17687,8 @@ def ensure_tables(db_path):
           iva_pct REAL,
           estado_ocr TEXT,
           doc_key TEXT,
+          archivo_hash TEXT,
+          dedupe_key TEXT,
           raw_text TEXT,
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL
@@ -17827,9 +18217,23 @@ def ensure_tables(db_path):
     ensure_column(conn, "gestoria_facturas", "iva_pct", "iva_pct REAL")
     ensure_column(conn, "gestoria_facturas", "estado_ocr", "estado_ocr TEXT")
     ensure_column(conn, "gestoria_facturas", "doc_key", "doc_key TEXT")
+    ensure_column(conn, "gestoria_facturas", "archivo_hash", "archivo_hash TEXT")
+    ensure_column(conn, "gestoria_facturas", "dedupe_key", "dedupe_key TEXT")
     ensure_column(conn, "gestoria_facturas", "raw_text", "raw_text TEXT")
     ensure_column(conn, "gestoria_facturas", "import_documento_id", "import_documento_id TEXT")
     ensure_column(conn, "gestoria_facturas", "origen_importacion", "origen_importacion TEXT")
+    try:
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_gestoria_facturas_cliente_fecha ON gestoria_facturas (empresa_id, cliente_id, fecha_emision)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_gestoria_facturas_hash ON gestoria_facturas (empresa_id, cliente_id, archivo_hash)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_gestoria_facturas_dedupe ON gestoria_facturas (empresa_id, cliente_id, dedupe_key)"
+        )
+    except Exception:
+        pass
     bootstrap_default_workspace(conn)
     ensure_workspace_catalog_modules(conn)
     load_postal_catalog(conn)
@@ -19907,6 +20311,9 @@ def fetch_gestoria_facturas_for_excel(conn, empresa_id, cliente_id):
           COALESCE(f.iva_pct, 0) AS iva_pct,
           COALESCE(f.estado_ocr, '') AS estado_ocr,
           COALESCE(f.doc_key, '') AS doc_key,
+          COALESCE(f.archivo_hash, '') AS archivo_hash,
+          COALESCE(f.dedupe_key, '') AS dedupe_key,
+          COALESCE(f.created_at, '') AS created_at,
           COALESCE(t.nombre, '') AS tercero,
           COALESCE(t.nif, '') AS tercero_nif
         FROM gestoria_facturas f
@@ -19920,7 +20327,48 @@ def fetch_gestoria_facturas_for_excel(conn, empresa_id, cliente_id):
         """,
         (empresa_id, cliente_id),
     ).fetchall()
-    return [dict(r) for r in rows]
+    # Defensa extra: si en BD ya existen duplicados (histórico o race conditions),
+    # no deben contaminar el Excel ni los totalizadores.
+    out = [dict(r) for r in rows]
+    buckets = {}
+    for row in out:
+        tipo = str(row.get("tipo") or "").strip().lower()
+        tercero_nif = str(row.get("tercero_nif") or "").strip().upper()
+        tercero_nombre = str(row.get("tercero") or "").strip()
+        numero = str(row.get("numero") or "").strip()
+        fecha = str(row.get("fecha_emision") or "").strip()
+        total = float(row.get("total") or 0.0)
+        base = float(row.get("base_imponible") or 0.0)
+        cuota_iva = float(row.get("cuota_iva") or 0.0)
+        key = str(row.get("dedupe_key") or "").strip()
+        if not key:
+            key = compute_gestoria_factura_dedupe_key(
+                empresa_id=empresa_id,
+                cliente_id=cliente_id,
+                tipo=tipo,
+                tercero_nif=tercero_nif,
+                tercero_nombre=tercero_nombre,
+                numero=numero,
+                fecha_emision=fecha,
+                total=total,
+                base=base,
+                cuota_iva=cuota_iva,
+            )
+        if not key:
+            key = f"id:{row.get('id')}"
+        score = (
+            1 if str(row.get("doc_key") or "").strip() else 0,
+            1 if numero else 0,
+            1 if tercero_nif else 0,
+            1 if tercero_nombre else 0,
+            abs(total),
+        )
+        current = buckets.get(key)
+        if not current or score > current[0]:
+            buckets[key] = (score, row)
+    chosen_ids = {item[1].get("id") for item in buckets.values() if item and item[1]}
+    deduped = [row for row in out if row.get("id") in chosen_ids]
+    return deduped
 
 
 def _excel_clear_sheet(ws, keep_rows=0):

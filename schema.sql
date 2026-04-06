@@ -694,6 +694,8 @@ CREATE TABLE IF NOT EXISTS gestoria_facturas (
   iva_pct REAL,
   estado_ocr TEXT,
   doc_key TEXT,
+  archivo_hash TEXT,
+  dedupe_key TEXT,
   raw_text TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
@@ -701,6 +703,10 @@ CREATE TABLE IF NOT EXISTS gestoria_facturas (
   FOREIGN KEY (cliente_id) REFERENCES clientes(id),
   FOREIGN KEY (tercero_id) REFERENCES gestoria_terceros(id)
 );
+
+CREATE INDEX IF NOT EXISTS idx_gestoria_facturas_cliente_fecha ON gestoria_facturas (empresa_id, cliente_id, fecha_emision);
+CREATE INDEX IF NOT EXISTS idx_gestoria_facturas_hash ON gestoria_facturas (empresa_id, cliente_id, archivo_hash);
+CREATE INDEX IF NOT EXISTS idx_gestoria_facturas_dedupe ON gestoria_facturas (empresa_id, cliente_id, dedupe_key);
 
 CREATE TABLE IF NOT EXISTS gestoria_asientos (
   id TEXT PRIMARY KEY,

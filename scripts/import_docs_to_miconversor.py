@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as _dt
+import csv
 import os
 import re
 import sys
@@ -346,12 +347,82 @@ def _write_output(template_path: Path, out_path: Path, records: List[DocRecord],
     wb.save(out_path)
 
 
+def _write_csv_listado(out_path: Path, records: List[DocRecord]) -> None:
+    records_sorted = sorted(records, key=lambda r: (r.fecha, r.numero, r.tercero))
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with out_path.open("w", encoding="utf-8-sig", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(
+            [
+                "#",
+                "FECHA",
+                "Nº FACTURA",
+                "TERCERO",
+                "NIF",
+                "TIPO",
+                "BASE",
+                "IVA",
+                "IRPF/RET",
+                "TOTAL",
+                "IVA_TIPO",
+                "OCR_METODO",
+                "OCR_ERROR",
+                "ORIGEN",
+                "RUTA",
+            ]
+        )
+        for i, rec in enumerate(records_sorted, start=1):
+            w.writerow(
+                [
+                    i,
+                    rec.fecha.isoformat() if rec.fecha else "",
+                    rec.numero,
+                    rec.tercero,
+                    rec.nif,
+                    rec.tipo,
+                    f"{float(rec.base or 0.0):.2f}",
+                    f"{float(rec.iva or 0.0):.2f}",
+                    f"{float(rec.irpf or 0.0):.2f}",
+                    f"{float(rec.total or 0.0):.2f}",
+                    rec.iva_bucket,
+                    rec.ocr_method,
+                    rec.ocr_error,
+                    os.path.basename(rec.source_file),
+                    rec.source_file,
+                ]
+            )
+
+
+def _write_csv_totalizador(out_path: Path, records: List[DocRecord], *, title: str) -> None:
+    records_sorted = sorted(records, key=lambda r: (r.fecha, r.numero, r.tercero))
+    base_sum = sum(float(r.base or 0.0) for r in records_sorted)
+    iva_sum = sum(float(r.iva or 0.0) for r in records_sorted)
+    ret_sum = sum(float(r.irpf or 0.0) for r in records_sorted)
+    total_sum = sum(float(r.total or 0.0) for r in records_sorted)
+    iva_rep = sum(float(r.iva or 0.0) for r in records_sorted if r.iva_bucket == "repercutido")
+    iva_sop = sum(float(r.iva or 0.0) for r in records_sorted if r.iva_bucket == "soportado")
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with out_path.open("w", encoding="utf-8-sig", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["CAMPO", "VALOR"])
+        w.writerow(["RESUMEN", title])
+        w.writerow(["Nº FACTURAS", len(records_sorted)])
+        w.writerow(["BASE IMPONIBLE (SUMA)", f"{base_sum:.2f}"])
+        w.writerow(["IVA (SUMA)", f"{iva_sum:.2f}"])
+        w.writerow(["RETENCIONES (SUMA)", f"{ret_sum:.2f}"])
+        w.writerow(["TOTAL (SUMA)", f"{total_sum:.2f}"])
+        w.writerow(["IVA REPERCUTIDO (SUMA)", f"{iva_rep:.2f}"])
+        w.writerow(["IVA SOPORTADO (SUMA)", f"{iva_sop:.2f}"])
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--root", required=True, help="Carpeta con facturas/tickets (pdf/jpg/png).")
     ap.add_argument("--template", required=True, help="Plantilla MiConversor (empresas).xlsx")
     ap.add_argument("--out", default="reports/miconversor_autonomos_ocr.xlsx", help="Ruta de salida (XLSX) para modo single.")
     ap.add_argument("--out-dir", default="", help="Carpeta de salida para modo batch (un XLSX por subcarpeta).")
+    ap.add_argument("--csv-per-folder", action="store_true", help="En modo batch, genera también 2 CSV por carpeta (listado + totalizador).")
     ap.add_argument("--pdf-pages", type=int, default=2, help="Máx páginas PDF a leer/OCR.")
     ap.add_argument("--workers", type=int, default=1, help="Paralelismo (1-8) al procesar documentos.")
     ap.add_argument("--batch-top-level", action="store_true", help="Genera un XLSX por cada subcarpeta inmediata dentro de --root.")
@@ -420,6 +491,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         safe = _sanitize_filename(folder.name)
         out_file = out_dir / f"{safe}_miconversor.xlsx"
         _write_output(template, out_file, records, title=folder.name)
+        if args.csv_per_folder:
+            _write_csv_listado(out_dir / f"{safe}_CONTROL_LISTADO.csv", records)
+            _write_csv_totalizador(out_dir / f"{safe}_CONTROL_TOTALIZADOR.csv", records, title=folder.name)
         folder_summary = {
             "folder": folder.name,
             "docs": len(records),
