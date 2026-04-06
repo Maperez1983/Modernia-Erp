@@ -22110,7 +22110,9 @@ def fetch_workspace_link_rows(conn, workspace_id):
 
 def ensure_partner_membership(conn, source_workspace_id, target_workspace_id, *, role="Miembro", now=None):
     """
-    Al vincular una gestoría (source) con un cliente (target), damos acceso a los miembros Owner/Admin del source.
+    Al vincular una gestoría (source) con un cliente (target), damos acceso a:
+    - miembros Owner/Admin del source
+    - usuarios del source cuyo `usuarios.servicio` incluya Gestoría (o Administración de fincas)
     Additivo: no elimina permisos existentes.
     """
     src = str(source_workspace_id or "").strip()
@@ -22122,6 +22124,25 @@ def ensure_partner_membership(conn, source_workspace_id, target_workspace_id, *,
         "SELECT usuario_id, rol FROM workspace_miembros WHERE workspace_id = ?",
         (src,),
     ).fetchall()
+    user_ids = [
+        str(row_value(row, "usuario_id") or row_value(row, 0) or "").strip()
+        for row in (members or [])
+        if str(row_value(row, "usuario_id") or row_value(row, 0) or "").strip()
+    ]
+    services_by_user_id = {}
+    if user_ids:
+        try:
+            rows = conn.execute(
+                f"SELECT id, COALESCE(servicio, '') AS servicio FROM usuarios WHERE id IN ({','.join('?' for _ in user_ids)})",
+                user_ids,
+            ).fetchall()
+            for row in rows or []:
+                uid = str(row_value(row, "id") or row_value(row, 0) or "").strip()
+                servicio = str(row_value(row, "servicio") or row_value(row, 1) or "").strip()
+                if uid:
+                    services_by_user_id[uid] = servicio
+        except Exception:
+            services_by_user_id = {}
     added = 0
     for row in members or []:
         uid = str(row_value(row, "usuario_id") or row_value(row, 0) or "").strip()
@@ -22129,7 +22150,9 @@ def ensure_partner_membership(conn, source_workspace_id, target_workspace_id, *,
         if not uid:
             continue
         mrole_norm = _normalize_workspace_member_role(mrole)
-        if mrole_norm not in {"Owner", "Admin"}:
+        services = _normalize_service_tokens(services_by_user_id.get(uid, ""))
+        is_gestoria_staff = bool(services.intersection({"GESTORIA", "ADMINISTRACION FINCAS", "FINCAS"}))
+        if mrole_norm not in {"Owner", "Admin"} and not is_gestoria_staff:
             continue
         before = fetch_workspace_member(conn, tgt, uid)
         ensure_workspace_member(conn, tgt, uid, role=role, now=now_ts)
