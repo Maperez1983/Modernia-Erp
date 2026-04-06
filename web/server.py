@@ -18369,8 +18369,46 @@ def ensure_ocr_tables(db_path):
           finished_at TEXT
         )
         """
-    )
+        )
     conn.commit()
+
+
+def ensure_auth_invites_table(conn):
+    """
+    Tabla de invitaciones para activación de contraseña.
+    Compatible con SQLite y Postgres (vía capa de compatibilidad).
+    """
+    try:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS auth_invites (
+              token TEXT PRIMARY KEY,
+              user_id TEXT NOT NULL,
+              expires_at TEXT,
+              created_at TEXT NOT NULL,
+              sent_at TEXT,
+              used_at TEXT,
+              revoked_at TEXT,
+              notes TEXT
+            )
+            """
+        )
+    except Exception:
+        return
+    # Best-effort: evolutivo
+    try:
+        ensure_column(conn, "auth_invites", "expires_at", "expires_at TEXT")
+        ensure_column(conn, "auth_invites", "sent_at", "sent_at TEXT")
+        ensure_column(conn, "auth_invites", "used_at", "used_at TEXT")
+        ensure_column(conn, "auth_invites", "revoked_at", "revoked_at TEXT")
+        ensure_column(conn, "auth_invites", "notes", "notes TEXT")
+    except Exception:
+        pass
+    try:
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_auth_invites_user_id ON auth_invites(user_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_auth_invites_expires ON auth_invites(expires_at, used_at, revoked_at)")
+    except Exception:
+        pass
     conn.close()
 
 
