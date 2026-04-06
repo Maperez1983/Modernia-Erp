@@ -27247,6 +27247,230 @@ const loadCrmVisitas = () => {
   });
 };
 
+const normalizeInmoActionType = (value) => {
+  const normalized = normalizeLookupText(value || "").toLowerCase();
+  const aliases = {
+    "cita de adquisicion": "cita_adquisicion",
+    "cita adquisicion": "cita_adquisicion",
+    "cita de venta/alquiler": "cita_comprador",
+    "cita de venta alquiler": "cita_comprador",
+    "cita comprador": "cita_comprador",
+    "cita de comprador": "cita_comprador",
+    "cita de gestion encargo (seguimiento)": "cita_gestion_encargo",
+    "cita de gestion encargo seguimiento": "cita_gestion_encargo",
+    "cita gestion encargo (seguimiento)": "cita_gestion_encargo",
+    "cita gestion encargo seguimiento": "cita_gestion_encargo",
+    "cita general (no comercial)": "cita_general",
+    "cita general no comercial": "cita_general",
+    "cita propuesta": "cita_propuesta",
+    "cita de propuesta": "cita_propuesta",
+    "cita propietarios": "cita_propietarios",
+    "cita de propietarios": "cita_propietarios",
+    "cita contraoferta": "cita_contraoferta",
+    "cita aceptacion contraoferta": "cita_contraoferta",
+    "cita notaria": "cita_notaria",
+    "cita de notaria": "cita_notaria",
+    "post-aceptacion": "cita_notaria",
+    "post aceptacion": "cita_notaria",
+    "estudio financiero": "estudio_financiero",
+  };
+  return aliases[normalized] || normalized;
+};
+
+const INMO_ACTION_RESULT_OPTIONS = {
+  cita_adquisicion: ["Positivo", "Negativo", "Reprogramar", "No realizada"],
+  cita_comprador: ["Estudio", "No interesa", "Interesado"],
+  cita_gestion_encargo: ["Realizada", "Reprogramar", "No realizada"],
+  cita_general: ["Realizada", "Reprogramar", "No realizada"],
+  cita_propuesta: ["Se realiza propuesta", "No se realiza"],
+  cita_propietarios: ["Aceptada", "Rechazada", "Contraoferta"],
+  cita_contraoferta: ["Aceptada", "Rechazada"],
+  cita_notaria: ["Firmada", "Reprogramar", "No realizada"],
+  estudio_financiero: ["Viable", "No viable", "Pendiente documentación"],
+};
+
+const openCrmAgendaEditModal = (row) => {
+  if (!row || !row.id) return;
+  let modal = document.getElementById("crmAgendaEditModal");
+  if (!modal) {
+    modal = document.createElement("div");
+    modal.id = "crmAgendaEditModal";
+    modal.className = "modal hidden";
+    modal.innerHTML = `
+      <div class="modal-content" style="max-width: 820px;">
+        <div class="modal-header">
+          <div>
+            <h3>Editar actividad/cita</h3>
+            <p class="muted" style="margin:0;">Cierra la cita con resultado y, si aplica, cambia etapa del inmueble.</p>
+          </div>
+          <button type="button" class="secondary ghost" data-agenda-close>Cerrar</button>
+        </div>
+        <form class="modal-body form-grid" data-agenda-form>
+          <input type="hidden" name="id" />
+          <label>
+            Fecha
+            <input name="fecha" type="date" required />
+          </label>
+          <label>
+            Hora
+            <input name="hora" type="time" />
+          </label>
+          <label>
+            Fin
+            <input name="hora_fin" type="time" />
+          </label>
+          <label class="span-2">
+            Asunto
+            <input name="asunto" />
+          </label>
+          <label>
+            Tipo
+            <select name="tipo"></select>
+          </label>
+          <label>
+            Responsable
+            <select name="responsable"></select>
+          </label>
+          <label>
+            Estado
+            <select name="estado">
+              <option>Pendiente</option>
+              <option>Completada</option>
+              <option>Cancelada</option>
+            </select>
+          </label>
+          <label class="span-2 hidden" data-agenda-result-wrap>
+            Resultado cierre
+            <select name="resultado_cierre"></select>
+          </label>
+          <label class="span-2 hidden" data-agenda-next-wrap>
+            Estado siguiente (solo cita adquisición)
+            <select name="estado_siguiente">
+              <option value=""></option>
+              <option>Noticia</option>
+              <option>Cerrado negativamente</option>
+            </select>
+          </label>
+          <label class="span-2">
+            Notas
+            <textarea name="notas" rows="3"></textarea>
+          </label>
+          <div class="modal-actions">
+            <span class="muted" data-agenda-status></span>
+            <button type="submit">Guardar cambios</button>
+          </div>
+        </form>
+      </div>
+    `;
+    modal.addEventListener("click", (event) => {
+      if (event.target === modal) {
+        modal.classList.add("hidden");
+        modal.classList.remove("open");
+        document.body.classList.remove("modal-open");
+      }
+    });
+    document.body.appendChild(modal);
+  }
+
+  const closeBtn = modal.querySelector("[data-agenda-close]");
+  const form = modal.querySelector("[data-agenda-form]");
+  const statusEl = modal.querySelector("[data-agenda-status]");
+  const tipoSelect = modal.querySelector('select[name="tipo"]');
+  const responsableSelect = modal.querySelector('select[name="responsable"]');
+  const estadoSelect = modal.querySelector('select[name="estado"]');
+  const resultadoWrap = modal.querySelector("[data-agenda-result-wrap]");
+  const resultadoSelect = modal.querySelector('select[name="resultado_cierre"]');
+  const nextWrap = modal.querySelector("[data-agenda-next-wrap]");
+  const nextSelect = modal.querySelector('select[name="estado_siguiente"]');
+
+  const syncCatalog = () => {
+    const srcTipo = crmAgendaForm?.querySelector('select[name="tipo"]');
+    if (srcTipo && tipoSelect) {
+      tipoSelect.innerHTML = srcTipo.innerHTML;
+    }
+    const srcResp = crmAgendaForm?.querySelector('select[name="responsable"]');
+    if (srcResp && responsableSelect) {
+      responsableSelect.innerHTML = srcResp.innerHTML;
+      if (!responsableSelect.querySelector('option[value=""]')) {
+        responsableSelect.insertBefore(createOption("", "Selecciona responsable"), responsableSelect.firstChild);
+      }
+    }
+  };
+
+  const syncResultOptions = () => {
+    if (!resultadoWrap || !resultadoSelect || !estadoSelect) return;
+    const estado = String(estadoSelect.value || "");
+    const tipoKey = normalizeInmoActionType(String(tipoSelect?.value || ""));
+    const opts = INMO_ACTION_RESULT_OPTIONS[tipoKey] || [];
+    const show = estado.toLowerCase() !== "pendiente" && opts.length > 0;
+    resultadoWrap.classList.toggle("hidden", !show);
+    resultadoSelect.innerHTML = "";
+    resultadoSelect.appendChild(createOption("", "Selecciona resultado"));
+    opts.forEach((opt) => resultadoSelect.appendChild(createOption(opt, opt)));
+
+    const showNext = tipoKey === "cita_adquisicion" && estado.toLowerCase() !== "pendiente";
+    if (nextWrap) nextWrap.classList.toggle("hidden", !showNext);
+    if (!showNext && nextSelect) nextSelect.value = "";
+  };
+
+  syncCatalog();
+  if (statusEl) statusEl.textContent = "";
+  if (form) {
+    form.querySelector('[name="id"]').value = row.id || "";
+    form.querySelector('[name="fecha"]').value = row.fecha || "";
+    form.querySelector('[name="hora"]').value = row.hora || "";
+    form.querySelector('[name="hora_fin"]').value = row.hora_fin || "";
+    form.querySelector('[name="asunto"]').value = row.asunto || "";
+    if (tipoSelect) tipoSelect.value = row.tipo || (tipoSelect.options[0]?.value || "");
+    if (responsableSelect) responsableSelect.value = row.responsable || "";
+    if (estadoSelect) estadoSelect.value = row.estado || "Pendiente";
+    if (form.querySelector('[name="notas"]')) form.querySelector('[name="notas"]').value = row.notas || "";
+  }
+
+  syncResultOptions();
+  if (resultadoSelect) resultadoSelect.value = row.resultado_cierre || "";
+  if (nextSelect) nextSelect.value = row.estado_siguiente || "";
+
+  const cleanup = () => {
+    modal.classList.add("hidden");
+    modal.classList.remove("open");
+    document.body.classList.remove("modal-open");
+    if (statusEl) statusEl.textContent = "";
+  };
+
+  closeBtn?.addEventListener("click", cleanup, { once: true });
+  if (tipoSelect) tipoSelect.onchange = syncResultOptions;
+  if (estadoSelect) estadoSelect.onchange = syncResultOptions;
+
+  if (form) {
+    form.onsubmit = async (event) => {
+      event.preventDefault();
+      if (statusEl) statusEl.textContent = "Guardando...";
+      const formData = new FormData(form);
+      const payload = Object.fromEntries(formData.entries());
+      payload.empresa_nombre = resolveCrmInmoEmpresaNombre();
+      payload.servicio = "inmobiliaria";
+      try {
+        const data = await apiPost("/api/acciones_update", payload);
+        if (data?.error) {
+          if (statusEl) statusEl.textContent = data.error;
+          return;
+        }
+        cleanup();
+        loadCrmAgenda();
+        renderCrmResumenDashboard();
+        renderCrmResumenYtdBoard({ force: true }).catch(() => {});
+      } catch (err) {
+        if (statusEl) statusEl.textContent = err?.message || "No se pudo guardar.";
+      }
+    };
+  }
+
+  modal.classList.remove("hidden");
+  modal.classList.add("open");
+  document.body.classList.add("modal-open");
+};
+
 const loadCrmAgenda = () => {
   if (!crmAgendaTable) {
     return;
@@ -27326,6 +27550,12 @@ const loadCrmAgenda = () => {
         b.addEventListener("click", () => openClienteDetail(row.cliente_id));
         openBtns.appendChild(b);
       }
+      const editBtn = document.createElement("button");
+      editBtn.type = "button";
+      editBtn.className = "ghost";
+      editBtn.textContent = "Editar";
+      editBtn.addEventListener("click", () => openCrmAgendaEditModal(row));
+      openBtns.appendChild(editBtn);
       if (!openBtns.children.length) {
         openBtns.textContent = "-";
       }

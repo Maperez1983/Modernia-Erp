@@ -2230,17 +2230,30 @@
                         Asunto
                         <input name="asunto" placeholder="Ej. Seguimiento pedido / Cita adquisición" />
                       </label>
-                      <label>
-                        Tipo
-                        <select name="tipo">
-                          <option>Llamada</option>
-                          <option>Cita</option>
-                          <option>Visita</option>
-                          <option>Email</option>
-                          <option>Nota interna</option>
-                          <option>Seguimiento</option>
-                        </select>
-                      </label>
+	                      <label>
+	                        Tipo
+	                        <select name="tipo">
+	                          <optgroup label="Citas (CRM)">
+	                            <option>Cita de adquisición</option>
+	                            <option>Cita de venta/alquiler</option>
+	                            <option>Cita de gestion encargo (seguimiento)</option>
+	                            <option>Cita general (no comercial)</option>
+	                            <option>Cita propuesta</option>
+	                            <option>Cita propietarios</option>
+	                            <option>Cita contraoferta</option>
+	                            <option>Cita notaria</option>
+	                            <option>Post-aceptación</option>
+	                            <option>Estudio financiero</option>
+	                          </optgroup>
+	                          <optgroup label="Tareas">
+	                            <option>Llamada</option>
+	                            <option>Visita</option>
+	                            <option>Email</option>
+	                            <option>Seguimiento</option>
+	                            <option>Nota interna</option>
+	                          </optgroup>
+	                        </select>
+	                      </label>
                       <label>
                         Modalidad contacto
                         <select name="modalidad_contacto">
