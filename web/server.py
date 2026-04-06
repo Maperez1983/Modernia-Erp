@@ -19287,33 +19287,36 @@ def fetch_workspace_clientes(conn, workspace_id, q="", limit=60):
     empresa_ids = fetch_workspace_company_ids(conn, workspace_id)
     if not empresa_ids:
         return {"rows": []}
-    placeholders = ",".join(["?"] * len(empresa_ids))
-    where = [f"ce.empresa_id IN ({placeholders})"]
-    values = list(empresa_ids)
-    if q:
-        where.append("(c.nombre LIKE ? OR c.nif LIKE ? OR c.telefono LIKE ? OR c.email LIKE ?)")
-        values.extend([f"%{q}%"] * 4)
-    rows = conn.execute(
-        f"""
-        SELECT
-          c.id,
-          c.nombre,
-          COALESCE(c.nif, '') AS nif,
-          COALESCE(c.telefono, '') AS telefono,
-          COALESCE(c.email, '') AS email,
-          GROUP_CONCAT(DISTINCT e.nombre) AS empresas,
-          GROUP_CONCAT(DISTINCT ce.servicio) AS servicios
-        FROM clientes c
-        JOIN clientes_empresas ce ON ce.cliente_id = c.id
-        LEFT JOIN empresas e ON e.id = ce.empresa_id
-        WHERE {' AND '.join(where)}
-        GROUP BY c.id
-        ORDER BY c.nombre COLLATE NOCASE ASC
-        LIMIT ?
-        """,
-        [*values, max(1, min(int(limit or 60), 150))],
-    ).fetchall()
-    return {"rows": [dict(row) for row in rows]}
+    try:
+        placeholders = ",".join(["?"] * len(empresa_ids))
+        where = [f"ce.empresa_id IN ({placeholders})"]
+        values = list(empresa_ids)
+        if q:
+            where.append("(c.nombre LIKE ? OR c.nif LIKE ? OR c.telefono LIKE ? OR c.email LIKE ?)")
+            values.extend([f"%{q}%"] * 4)
+        rows = conn.execute(
+            f"""
+            SELECT
+              c.id,
+              c.nombre,
+              COALESCE(c.nif, '') AS nif,
+              COALESCE(c.telefono, '') AS telefono,
+              COALESCE(c.email, '') AS email,
+              GROUP_CONCAT(DISTINCT e.nombre) AS empresas,
+              GROUP_CONCAT(DISTINCT ce.servicio) AS servicios
+            FROM clientes c
+            JOIN clientes_empresas ce ON ce.cliente_id = c.id
+            LEFT JOIN empresas e ON e.id = ce.empresa_id
+            WHERE {' AND '.join(where)}
+            GROUP BY c.id
+            ORDER BY c.nombre COLLATE NOCASE ASC
+            LIMIT ?
+            """,
+            [*values, max(1, min(int(limit or 60), 150))],
+        ).fetchall()
+        return {"rows": [dict(row) for row in rows]}
+    except Exception:
+        return {"rows": []}
 
 
 def fetch_workspace_cliente_360(conn, workspace_id, cliente_id):
@@ -24074,58 +24077,67 @@ def fetch_workspace_billing_rows(conn, workspace_id, limit=25):
     empresa_ids = fetch_workspace_company_ids(conn, workspace_id)
     if not empresa_ids:
         return {"rows": []}
-    placeholders = ",".join(["?"] * len(empresa_ids))
-    rows = conn.execute(
-        f"""
-        SELECT
-          wf.id,
-          wf.workspace_id,
-          wf.empresa_id,
-          wf.cliente_id,
-          wf.servicio,
-          wf.origen_tipo,
-          wf.origen_id,
-          wf.serie,
-          wf.numero,
-          wf.fecha_emision,
-          wf.fecha_vencimiento,
-          wf.concepto,
-          wf.subtotal,
-          wf.impuestos,
-          wf.total,
-          wf.estado,
-          wf.remesa_id,
-          wf.conciliacion_estado,
-          wf.cobrada,
-          wf.fecha_cobro,
-          wf.forma_cobro,
-          wf.responsable,
-          wf.notas,
-          wf.created_at,
-          wf.updated_at,
-          COALESCE(e.nombre, '') AS empresa_nombre,
-          COALESCE(c.nombre, '') AS cliente_nombre,
-          COALESCE(c.nif, '') AS cliente_nif,
-          COALESCE((SELECT SUM(COALESCE(col.importe, 0)) FROM workspace_facturacion_cobros col WHERE col.factura_id = wf.id AND COALESCE(col.estado, 'Aplicado') != 'Devuelto'), 0) AS cobrado_total,
-          CASE
-            WHEN (COALESCE(wf.total, 0) - COALESCE((SELECT SUM(COALESCE(col.importe, 0)) FROM workspace_facturacion_cobros col WHERE col.factura_id = wf.id AND COALESCE(col.estado, 'Aplicado') != 'Devuelto'), 0)) < 0
-              THEN 0
-            ELSE (COALESCE(wf.total, 0) - COALESCE((SELECT SUM(COALESCE(col.importe, 0)) FROM workspace_facturacion_cobros col WHERE col.factura_id = wf.id AND COALESCE(col.estado, 'Aplicado') != 'Devuelto'), 0))
-          END AS saldo_pendiente
-        FROM workspace_facturacion wf
-        LEFT JOIN empresas e ON e.id = wf.empresa_id
-        LEFT JOIN clientes c ON c.id = wf.cliente_id
-        WHERE wf.workspace_id = ?
-          AND wf.empresa_id IN ({placeholders})
-        ORDER BY COALESCE(wf.fecha_emision, wf.created_at) DESC, wf.updated_at DESC
-        LIMIT ?
-        """,
-        [workspace_id, *empresa_ids, max(1, min(int(limit or 25), 100))],
-    ).fetchall()
-    return {"rows": [dict(row) for row in rows]}
+    try:
+        placeholders = ",".join(["?"] * len(empresa_ids))
+        rows = conn.execute(
+            f"""
+            SELECT
+              wf.id,
+              wf.workspace_id,
+              wf.empresa_id,
+              wf.cliente_id,
+              wf.servicio,
+              wf.origen_tipo,
+              wf.origen_id,
+              wf.serie,
+              wf.numero,
+              wf.fecha_emision,
+              wf.fecha_vencimiento,
+              wf.concepto,
+              wf.subtotal,
+              wf.impuestos,
+              wf.total,
+              wf.estado,
+              wf.remesa_id,
+              wf.conciliacion_estado,
+              wf.cobrada,
+              wf.fecha_cobro,
+              wf.forma_cobro,
+              wf.responsable,
+              wf.notas,
+              wf.created_at,
+              wf.updated_at,
+              COALESCE(e.nombre, '') AS empresa_nombre,
+              COALESCE(c.nombre, '') AS cliente_nombre,
+              COALESCE(c.nif, '') AS cliente_nif,
+              COALESCE((SELECT SUM(COALESCE(col.importe, 0)) FROM workspace_facturacion_cobros col WHERE col.factura_id = wf.id AND COALESCE(col.estado, 'Aplicado') != 'Devuelto'), 0) AS cobrado_total,
+              CASE
+                WHEN (COALESCE(wf.total, 0) - COALESCE((SELECT SUM(COALESCE(col.importe, 0)) FROM workspace_facturacion_cobros col WHERE col.factura_id = wf.id AND COALESCE(col.estado, 'Aplicado') != 'Devuelto'), 0)) < 0
+                  THEN 0
+                ELSE (COALESCE(wf.total, 0) - COALESCE((SELECT SUM(COALESCE(col.importe, 0)) FROM workspace_facturacion_cobros col WHERE col.factura_id = wf.id AND COALESCE(col.estado, 'Aplicado') != 'Devuelto'), 0))
+              END AS saldo_pendiente
+            FROM workspace_facturacion wf
+            LEFT JOIN empresas e ON e.id = wf.empresa_id
+            LEFT JOIN clientes c ON c.id = wf.cliente_id
+            WHERE wf.workspace_id = ?
+              AND wf.empresa_id IN ({placeholders})
+            ORDER BY COALESCE(wf.fecha_emision, wf.created_at) DESC, wf.updated_at DESC
+            LIMIT ?
+            """,
+            [workspace_id, *empresa_ids, max(1, min(int(limit or 25), 100))],
+        ).fetchall()
+        return {"rows": [dict(row) for row in rows]}
+    except Exception:
+        return {"rows": []}
 
 
 def fetch_workspace_health(conn, workspace_id):
+    def _safe(fn, fallback):
+        try:
+            return fn()
+        except Exception:
+            return fallback
+
     workspace_detail = fetch_workspace_detail(conn, workspace_id)
     if not workspace_detail:
         return None
@@ -24144,68 +24156,92 @@ def fetch_workspace_health(conn, workspace_id):
             },
         }
     placeholders = ",".join(["?"] * len(empresa_ids))
-    clientes_total_row = conn.execute(
-        f"""
-        SELECT COUNT(DISTINCT ce.cliente_id) AS total
-        FROM clientes_empresas ce
-        WHERE ce.empresa_id IN ({placeholders})
-        """,
-        empresa_ids,
-    ).fetchone()
+    clientes_total_row = _safe(
+        lambda: conn.execute(
+            f"""
+            SELECT COUNT(DISTINCT ce.cliente_id) AS total
+            FROM clientes_empresas ce
+            WHERE ce.empresa_id IN ({placeholders})
+            """,
+            empresa_ids,
+        ).fetchone(),
+        None,
+    )
     clientes_total = int(row_value(clientes_total_row, "total", 0) or 0)
-    docs_summary = fetch_workspace_document_hub(conn, workspace_id, limit=5)["summary"]
-    billing_rows = fetch_workspace_billing_rows(conn, workspace_id, limit=5)["rows"]
-    presupuesto_rows = fetch_workspace_presupuestos(conn, workspace_id, limit=5)["rows"]
-    inbox_rows = fetch_workspace_inbox_queue(conn, workspace_id, limit=5)["rows"]
-    portal_rows = fetch_workspace_portal_clients(conn, workspace_id, limit=5)["rows"]
-    portal_requests = fetch_workspace_portal_requests(conn, workspace_id, limit=5)["rows"]
-    automation_rows = fetch_workspace_automations(conn, workspace_id, limit=5)["rows"]
-    billing_collections = fetch_workspace_billing_collections(conn, workspace_id, limit=5)["rows"]
-    remittance_rows = fetch_workspace_remesas(conn, workspace_id, limit=5)["rows"]
-    time_rows = fetch_workspace_time_entries(conn, workspace_id, limit=5)["rows"]
-    fincas_communities = fetch_workspace_fincas_comunidades(conn, workspace_id, limit=5)["rows"]
-    fincas_incidents = fetch_workspace_fincas_incidencias(conn, workspace_id, limit=5)["rows"]
-    fincas_providers = fetch_workspace_fincas_proveedores(conn, workspace_id, limit=5)["rows"]
-    fincas_meetings = fetch_workspace_fincas_juntas(conn, workspace_id, limit=5)["rows"]
-    series_rows = fetch_workspace_series(conn, workspace_id)["rows"]
-    facturas_total_row = conn.execute(
-        f"""
-        SELECT COUNT(*) AS total
-        FROM workspace_facturacion
-        WHERE workspace_id = ? AND empresa_id IN ({placeholders})
-        """,
-        [workspace_id, *empresa_ids],
-    ).fetchone()
+    docs_summary = (_safe(lambda: fetch_workspace_document_hub(conn, workspace_id, limit=5), {"summary": {"documentos_total": 0}}).get("summary") or {})
+    billing_rows = (_safe(lambda: fetch_workspace_billing_rows(conn, workspace_id, limit=5), {"rows": []}).get("rows") or [])
+    presupuesto_rows = (_safe(lambda: fetch_workspace_presupuestos(conn, workspace_id, limit=5), {"rows": []}).get("rows") or [])
+    inbox_rows = (_safe(lambda: fetch_workspace_inbox_queue(conn, workspace_id, limit=5), {"rows": []}).get("rows") or [])
+    portal_rows = (_safe(lambda: fetch_workspace_portal_clients(conn, workspace_id, limit=5), {"rows": []}).get("rows") or [])
+    portal_requests = (_safe(lambda: fetch_workspace_portal_requests(conn, workspace_id, limit=5), {"rows": []}).get("rows") or [])
+    automation_rows = (_safe(lambda: fetch_workspace_automations(conn, workspace_id, limit=5), {"rows": []}).get("rows") or [])
+    billing_collections = (_safe(lambda: fetch_workspace_billing_collections(conn, workspace_id, limit=5), {"rows": []}).get("rows") or [])
+    remittance_rows = (_safe(lambda: fetch_workspace_remesas(conn, workspace_id, limit=5), {"rows": []}).get("rows") or [])
+    time_rows = (_safe(lambda: fetch_workspace_time_entries(conn, workspace_id, limit=5), {"rows": []}).get("rows") or [])
+    fincas_communities = (_safe(lambda: fetch_workspace_fincas_comunidades(conn, workspace_id, limit=5), {"rows": []}).get("rows") or [])
+    fincas_incidents = (_safe(lambda: fetch_workspace_fincas_incidencias(conn, workspace_id, limit=5), {"rows": []}).get("rows") or [])
+    fincas_providers = (_safe(lambda: fetch_workspace_fincas_proveedores(conn, workspace_id, limit=5), {"rows": []}).get("rows") or [])
+    fincas_meetings = (_safe(lambda: fetch_workspace_fincas_juntas(conn, workspace_id, limit=5), {"rows": []}).get("rows") or [])
+    series_rows = (_safe(lambda: fetch_workspace_series(conn, workspace_id), {"rows": []}).get("rows") or [])
+    facturas_total_row = _safe(
+        lambda: conn.execute(
+            f"""
+            SELECT COUNT(*) AS total
+            FROM workspace_facturacion
+            WHERE workspace_id = ? AND empresa_id IN ({placeholders})
+            """,
+            [workspace_id, *empresa_ids],
+        ).fetchone(),
+        None,
+    )
     facturas_total = int(row_value(facturas_total_row, "total", 0) or 0)
-    seguros_total_row = conn.execute(
-        f"SELECT COUNT(*) AS total FROM seguros WHERE empresa_id IN ({placeholders})",
-        empresa_ids,
-    ).fetchone()
+    seguros_total_row = _safe(
+        lambda: conn.execute(
+            f"SELECT COUNT(*) AS total FROM seguros WHERE empresa_id IN ({placeholders})",
+            empresa_ids,
+        ).fetchone(),
+        None,
+    )
     seguros_total = int(row_value(seguros_total_row, "total", 0) or 0)
-    gestoria_total_row = conn.execute(
-        f"SELECT COUNT(*) AS total FROM gestoria_trabajos WHERE empresa_id IN ({placeholders})",
-        empresa_ids,
-    ).fetchone()
+    gestoria_total_row = _safe(
+        lambda: conn.execute(
+            f"SELECT COUNT(*) AS total FROM gestoria_trabajos WHERE empresa_id IN ({placeholders})",
+            empresa_ids,
+        ).fetchone(),
+        None,
+    )
     gestoria_total = int(row_value(gestoria_total_row, "total", 0) or 0)
-    inmuebles_total_row = conn.execute(
-        f"SELECT COUNT(*) AS total FROM inmuebles WHERE empresa_id IN ({placeholders})",
-        empresa_ids,
-    ).fetchone()
+    inmuebles_total_row = _safe(
+        lambda: conn.execute(
+            f"SELECT COUNT(*) AS total FROM inmuebles WHERE empresa_id IN ({placeholders})",
+            empresa_ids,
+        ).fetchone(),
+        None,
+    )
     inmuebles_total = int(row_value(inmuebles_total_row, "total", 0) or 0)
-    operaciones_total_row = conn.execute(
-        f"SELECT COUNT(*) AS total FROM operaciones_inmobiliarias WHERE empresa_id IN ({placeholders})",
-        empresa_ids,
-    ).fetchone()
+    operaciones_total_row = _safe(
+        lambda: conn.execute(
+            f"SELECT COUNT(*) AS total FROM operaciones_inmobiliarias WHERE empresa_id IN ({placeholders})",
+            empresa_ids,
+        ).fetchone(),
+        None,
+    )
     operaciones_total = int(row_value(operaciones_total_row, "total", 0) or 0)
-    hipotecas_total_row = conn.execute(
-        f"SELECT COUNT(*) AS total FROM hipotecas WHERE empresa_id IN ({placeholders})",
-        empresa_ids,
-    ).fetchone()
+    hipotecas_total_row = _safe(
+        lambda: conn.execute(
+            f"SELECT COUNT(*) AS total FROM hipotecas WHERE empresa_id IN ({placeholders})",
+            empresa_ids,
+        ).fetchone(),
+        None,
+    )
     hipotecas_total = int(row_value(hipotecas_total_row, "total", 0) or 0)
-    facturas_recibidas_total_row = conn.execute(
-        f"SELECT COUNT(*) AS total FROM gestoria_facturas WHERE empresa_id IN ({placeholders})",
-        empresa_ids,
-    ).fetchone()
+    facturas_recibidas_total_row = _safe(
+        lambda: conn.execute(
+            f"SELECT COUNT(*) AS total FROM gestoria_facturas WHERE empresa_id IN ({placeholders})",
+            empresa_ids,
+        ).fetchone(),
+        None,
+    )
     facturas_recibidas_total = int(row_value(facturas_recibidas_total_row, "total", 0) or 0)
     enabled_modules = [row for row in modules if int(row.get("enabled") or 0) == 1]
     branding_ready = bool((workspace.get("descripcion") or "").strip() and (workspace.get("primary_color") or "").strip())
@@ -24377,110 +24413,113 @@ def fetch_workspace_document_hub(conn, workspace_id, limit=20):
     empresa_ids = fetch_workspace_company_ids(conn, workspace_id)
     if not empresa_ids:
         return {"rows": [], "summary": {"documentos_total": 0}}
-    placeholders = ",".join(["?"] * len(empresa_ids))
-    rows = conn.execute(
-        f"""
-        SELECT *
-        FROM (
-          SELECT
-            d.id,
-            'gestoria_docs' AS source_table,
-            d.empresa_id,
-            COALESCE(e.nombre, '') AS empresa,
-            COALESCE(c.nombre, '') AS cliente,
-            d.cliente_id,
-            COALESCE(NULLIF(d.referencia_tipo, ''), 'gestoria') AS referencia_tipo,
-            COALESCE(NULLIF(d.referencia_tipo, ''), d.tipo, 'gestoria') AS servicio,
-            d.nombre,
-            d.tipo,
-            d.fecha,
-            d.estado,
-            d.notas,
-            d.doc_key,
-            d.doc_url,
-            d.created_at AS sort_date
-          FROM gestoria_docs d
-          LEFT JOIN clientes c ON c.id = d.cliente_id
-          LEFT JOIN empresas e ON e.id = d.empresa_id
-          WHERE d.empresa_id IN ({placeholders})
-          UNION ALL
-          SELECT
-            idoc.id,
-            'inmueble_docs' AS source_table,
-            i.empresa_id,
-            COALESCE(e.nombre, '') AS empresa,
-            COALESCE(i.direccion, '') AS cliente,
-            NULL AS cliente_id,
-            'inmobiliaria' AS referencia_tipo,
-            'inmobiliaria' AS servicio,
-            COALESCE(idoc.nombre, 'Documento inmueble') AS nombre,
-            COALESCE(idoc.tipo, 'Inmueble') AS tipo,
-            COALESCE(idoc.created_at, '') AS fecha,
-            '' AS estado,
-            '' AS notas,
-            NULL AS doc_key,
-            COALESCE(idoc.url, '') AS doc_url,
-            idoc.created_at AS sort_date
-          FROM inmueble_docs idoc
-          JOIN inmuebles i ON i.id = idoc.inmueble_id
-          LEFT JOIN empresas e ON e.id = i.empresa_id
-          WHERE i.empresa_id IN ({placeholders})
-        )
-        ORDER BY COALESCE(fecha, sort_date) DESC, sort_date DESC
-        LIMIT ?
-        """,
-        [*empresa_ids, *empresa_ids, max(1, min(int(limit or 20), 100))],
-    ).fetchall()
-    candidates = conn.execute(
-        f"""
-        SELECT DISTINCT c.id, c.nombre, COALESCE(c.nif, '') AS nif
-        FROM clientes c
-        JOIN clientes_empresas ce ON ce.cliente_id = c.id
-        WHERE ce.empresa_id IN ({placeholders})
-        ORDER BY LENGTH(COALESCE(c.nombre, '')) DESC, c.nombre COLLATE NOCASE ASC
-        LIMIT 500
-        """,
-        empresa_ids,
-    ).fetchall()
-    candidate_rows = [dict(row) for row in candidates]
-    processed_rows = []
-    pending_assignments = 0
-    for row in rows:
-        item = dict(row)
-        item["assignable"] = 1 if item.get("source_table") == "gestoria_docs" else 0
-        item["suggested_cliente_id"] = ""
-        item["suggested_cliente"] = ""
-        if item["assignable"] and not item.get("cliente_id"):
-            suggestion = suggest_workspace_document_cliente(
-                candidate_rows,
-                " ".join(
-                    part
-                    for part in [item.get("nombre"), item.get("notas"), item.get("tipo"), item.get("servicio")]
-                    if part
-                ),
+    try:
+        placeholders = ",".join(["?"] * len(empresa_ids))
+        rows = conn.execute(
+            f"""
+            SELECT *
+            FROM (
+              SELECT
+                d.id,
+                'gestoria_docs' AS source_table,
+                d.empresa_id,
+                COALESCE(e.nombre, '') AS empresa,
+                COALESCE(c.nombre, '') AS cliente,
+                d.cliente_id,
+                COALESCE(NULLIF(d.referencia_tipo, ''), 'gestoria') AS referencia_tipo,
+                COALESCE(NULLIF(d.referencia_tipo, ''), d.tipo, 'gestoria') AS servicio,
+                d.nombre,
+                d.tipo,
+                d.fecha,
+                d.estado,
+                d.notas,
+                d.doc_key,
+                d.doc_url,
+                d.created_at AS sort_date
+              FROM gestoria_docs d
+              LEFT JOIN clientes c ON c.id = d.cliente_id
+              LEFT JOIN empresas e ON e.id = d.empresa_id
+              WHERE d.empresa_id IN ({placeholders})
+              UNION ALL
+              SELECT
+                idoc.id,
+                'inmueble_docs' AS source_table,
+                i.empresa_id,
+                COALESCE(e.nombre, '') AS empresa,
+                COALESCE(i.direccion, '') AS cliente,
+                NULL AS cliente_id,
+                'inmobiliaria' AS referencia_tipo,
+                'inmobiliaria' AS servicio,
+                COALESCE(idoc.nombre, 'Documento inmueble') AS nombre,
+                COALESCE(idoc.tipo, 'Inmueble') AS tipo,
+                COALESCE(idoc.created_at, '') AS fecha,
+                '' AS estado,
+                '' AS notas,
+                NULL AS doc_key,
+                COALESCE(idoc.url, '') AS doc_url,
+                idoc.created_at AS sort_date
+              FROM inmueble_docs idoc
+              JOIN inmuebles i ON i.id = idoc.inmueble_id
+              LEFT JOIN empresas e ON e.id = i.empresa_id
+              WHERE i.empresa_id IN ({placeholders})
             )
-            if suggestion:
-                item["suggested_cliente_id"] = suggestion["id"]
-                item["suggested_cliente"] = suggestion["nombre"]
-                pending_assignments += 1
-        processed_rows.append(item)
-    total_docs = conn.execute(
-        f"""
-        SELECT
-          (SELECT COUNT(*) FROM gestoria_docs WHERE empresa_id IN ({placeholders}))
-          +
-          (SELECT COUNT(*) FROM inmueble_docs idoc JOIN inmuebles i ON i.id = idoc.inmueble_id WHERE i.empresa_id IN ({placeholders}))
-          AS total
-        """,
-        [*empresa_ids, *empresa_ids],
-    ).fetchone()
-    return {
-        "rows": processed_rows,
-        "summary": {
-            "documentos_total": int(total_docs["total"] or 0) if total_docs else 0,
-            "pendientes_asignacion": pending_assignments,
-        },
-    }
+            ORDER BY COALESCE(fecha, sort_date) DESC, sort_date DESC
+            LIMIT ?
+            """,
+            [*empresa_ids, *empresa_ids, max(1, min(int(limit or 20), 100))],
+        ).fetchall()
+        candidates = conn.execute(
+            f"""
+            SELECT DISTINCT c.id, c.nombre, COALESCE(c.nif, '') AS nif
+            FROM clientes c
+            JOIN clientes_empresas ce ON ce.cliente_id = c.id
+            WHERE ce.empresa_id IN ({placeholders})
+            ORDER BY LENGTH(COALESCE(c.nombre, '')) DESC, c.nombre COLLATE NOCASE ASC
+            LIMIT 500
+            """,
+            empresa_ids,
+        ).fetchall()
+        candidate_rows = [dict(row) for row in candidates]
+        processed_rows = []
+        pending_assignments = 0
+        for row in rows:
+            item = dict(row)
+            item["assignable"] = 1 if item.get("source_table") == "gestoria_docs" else 0
+            item["suggested_cliente_id"] = ""
+            item["suggested_cliente"] = ""
+            if item["assignable"] and not item.get("cliente_id"):
+                suggestion = suggest_workspace_document_cliente(
+                    candidate_rows,
+                    " ".join(
+                        part
+                        for part in [item.get("nombre"), item.get("notas"), item.get("tipo"), item.get("servicio")]
+                        if part
+                    ),
+                )
+                if suggestion:
+                    item["suggested_cliente_id"] = suggestion["id"]
+                    item["suggested_cliente"] = suggestion["nombre"]
+                    pending_assignments += 1
+            processed_rows.append(item)
+        total_docs = conn.execute(
+            f"""
+            SELECT
+              (SELECT COUNT(*) FROM gestoria_docs WHERE empresa_id IN ({placeholders}))
+              +
+              (SELECT COUNT(*) FROM inmueble_docs idoc JOIN inmuebles i ON i.id = idoc.inmueble_id WHERE i.empresa_id IN ({placeholders}))
+              AS total
+            """,
+            [*empresa_ids, *empresa_ids],
+        ).fetchone()
+        return {
+            "rows": processed_rows,
+            "summary": {
+                "documentos_total": int(total_docs["total"] or 0) if total_docs else 0,
+                "pendientes_asignacion": pending_assignments,
+            },
+        }
+    except Exception:
+        return {"rows": [], "summary": {"documentos_total": 0, "pendientes_asignacion": 0}}
 
 
 def json_response(handler, data, status=200, cookies=None, extra_headers=None):
@@ -25937,7 +25976,46 @@ class Handler(BaseHTTPRequestHandler):
     _years_lock = threading.Lock()
     _years_last_at = 0.0
     _years_cached_payload = None
+    _api_err_lock = threading.Lock()
+    _api_err_ring = []  # newest last; items are small dicts (no secrets)
     _started_at = datetime.now().isoformat()
+
+    @staticmethod
+    def _record_api_error(path, exc):
+        try:
+            p = str(path or "")[:500]
+            name = str(type(exc).__name__ or "Error")[:80]
+            msg = str(exc or "")
+            # Redacta DSNs/token-ish strings por seguridad (best-effort).
+            msg = re.sub(r"postgres(?:ql)?://[^\\s]+", "postgresql://<redacted>", msg, flags=re.IGNORECASE)
+            msg = re.sub(r"Bearer\\s+[A-Za-z0-9._\\-]+", "Bearer <redacted>", msg, flags=re.IGNORECASE)
+            msg = msg.replace("\n", " ").strip()
+            item = {
+                "at": datetime.now(timezone.utc).isoformat(),
+                "path": p,
+                "type": name,
+                "message": msg[:220],
+            }
+            with Handler._api_err_lock:
+                Handler._api_err_ring.append(item)
+                # Mantén un buffer pequeño para no crecer en memoria.
+                if len(Handler._api_err_ring) > 30:
+                    Handler._api_err_ring = Handler._api_err_ring[-30:]
+        except Exception:
+            return
+
+    @staticmethod
+    def _recent_api_errors(limit=10):
+        try:
+            n = max(0, min(int(limit or 10), 30))
+        except Exception:
+            n = 10
+        try:
+            with Handler._api_err_lock:
+                items = list(Handler._api_err_ring or [])
+            return items[-n:] if n else []
+        except Exception:
+            return []
 
     def setup(self):
         super().setup()
@@ -26548,6 +26626,7 @@ class Handler(BaseHTTPRequestHandler):
                     "db_dsn_source": db_source,
                     "db_host": db_host,
                     "pg_pool": pool_stats,
+                    "recent_api_errors": Handler._recent_api_errors(limit=12),
                 },
             )
             return
@@ -26592,6 +26671,7 @@ class Handler(BaseHTTPRequestHandler):
                         print(f"[ERROR] API {self.path}: {type(exc).__name__}: {exc}")
                     except Exception:
                         pass
+                    Handler._record_api_error(self.path, exc)
                     json_response(self, {"error": "API error"}, status=500)
             return
 
@@ -39489,31 +39569,37 @@ class Handler(BaseHTTPRequestHandler):
             }
 
             if not minimal:
+                def _safe(fn, fallback):
+                    try:
+                        return fn()
+                    except Exception:
+                        return fallback
+
                 payload.update(
                     {
-                        "billing_summary": fetch_workspace_billing_summary(conn, workspace_id),
-                        "docs": fetch_workspace_document_hub(conn, workspace_id, limit=20),
-                        "billing_rows": fetch_workspace_billing_rows(conn, workspace_id, limit=25),
-                        "budget_rows": fetch_workspace_presupuestos(conn, workspace_id, limit=40),
-                        "collections": fetch_workspace_billing_collections(conn, workspace_id, limit=40),
-                        "remittances": fetch_workspace_remesas(conn, workspace_id, limit=30),
-                        "clients": fetch_workspace_clientes(conn, workspace_id, q="", limit=60),
-                        "health": fetch_workspace_health(conn, workspace_id) or {},
-                        "gestoria_overview": fetch_workspace_gestoria_overview(conn, workspace_id, empresa_id=empresa_id),
-                        "seguros_overview": fetch_workspace_seguros_overview(conn, workspace_id, empresa_id=empresa_id),
-                        "fin_overview": fetch_workspace_fin_overview(conn, workspace_id, empresa_id=empresa_id),
-                        "inmo_overview": fetch_workspace_inmo_overview(conn, workspace_id, empresa_id=empresa_id),
-                        "service_desks": fetch_workspace_service_desks(conn, workspace_id, empresa_id=empresa_id),
-                        "series": fetch_workspace_series(conn, workspace_id),
-                        "inbox": fetch_workspace_inbox_queue(conn, workspace_id, limit=40),
-                        "portal": fetch_workspace_portal_clients(conn, workspace_id, limit=40),
-                        "portal_requests": fetch_workspace_portal_requests(conn, workspace_id, limit=40),
-                        "automations": fetch_workspace_automations(conn, workspace_id, limit=50),
-                        "automation_logs": fetch_workspace_automation_logs(conn, workspace_id, limit=12),
-                        "fincas_communities": fetch_workspace_fincas_comunidades(conn, workspace_id, limit=30),
-                        "fincas_incidents": fetch_workspace_fincas_incidencias(conn, workspace_id, limit=40),
-                        "fincas_providers": fetch_workspace_fincas_proveedores(conn, workspace_id, limit=40),
-                        "fincas_meetings": fetch_workspace_fincas_juntas(conn, workspace_id, limit=40),
+                        "billing_summary": _safe(lambda: fetch_workspace_billing_summary(conn, workspace_id), {}),
+                        "docs": _safe(lambda: fetch_workspace_document_hub(conn, workspace_id, limit=20), {"rows": [], "summary": {"documentos_total": 0}}),
+                        "billing_rows": _safe(lambda: fetch_workspace_billing_rows(conn, workspace_id, limit=25), {"rows": []}),
+                        "budget_rows": _safe(lambda: fetch_workspace_presupuestos(conn, workspace_id, limit=40), {"rows": []}),
+                        "collections": _safe(lambda: fetch_workspace_billing_collections(conn, workspace_id, limit=40), {"rows": []}),
+                        "remittances": _safe(lambda: fetch_workspace_remesas(conn, workspace_id, limit=30), {"rows": []}),
+                        "clients": _safe(lambda: fetch_workspace_clientes(conn, workspace_id, q="", limit=60), {"rows": []}),
+                        "health": _safe(lambda: fetch_workspace_health(conn, workspace_id) or {}, {}),
+                        "gestoria_overview": _safe(lambda: fetch_workspace_gestoria_overview(conn, workspace_id, empresa_id=empresa_id), {}),
+                        "seguros_overview": _safe(lambda: fetch_workspace_seguros_overview(conn, workspace_id, empresa_id=empresa_id), {}),
+                        "fin_overview": _safe(lambda: fetch_workspace_fin_overview(conn, workspace_id, empresa_id=empresa_id), {}),
+                        "inmo_overview": _safe(lambda: fetch_workspace_inmo_overview(conn, workspace_id, empresa_id=empresa_id), {}),
+                        "service_desks": _safe(lambda: fetch_workspace_service_desks(conn, workspace_id, empresa_id=empresa_id), {}),
+                        "series": _safe(lambda: fetch_workspace_series(conn, workspace_id), {"rows": []}),
+                        "inbox": _safe(lambda: fetch_workspace_inbox_queue(conn, workspace_id, limit=40), {"rows": []}),
+                        "portal": _safe(lambda: fetch_workspace_portal_clients(conn, workspace_id, limit=40), {"rows": []}),
+                        "portal_requests": _safe(lambda: fetch_workspace_portal_requests(conn, workspace_id, limit=40), {"rows": []}),
+                        "automations": _safe(lambda: fetch_workspace_automations(conn, workspace_id, limit=50), {"rows": []}),
+                        "automation_logs": _safe(lambda: fetch_workspace_automation_logs(conn, workspace_id, limit=12), {"rows": []}),
+                        "fincas_communities": _safe(lambda: fetch_workspace_fincas_comunidades(conn, workspace_id, limit=30), {"rows": []}),
+                        "fincas_incidents": _safe(lambda: fetch_workspace_fincas_incidencias(conn, workspace_id, limit=40), {"rows": []}),
+                        "fincas_providers": _safe(lambda: fetch_workspace_fincas_proveedores(conn, workspace_id, limit=40), {"rows": []}),
+                        "fincas_meetings": _safe(lambda: fetch_workspace_fincas_juntas(conn, workspace_id, limit=40), {"rows": []}),
                     }
                 )
 
