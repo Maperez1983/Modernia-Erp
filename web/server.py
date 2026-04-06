@@ -26131,7 +26131,7 @@ class Handler(BaseHTTPRequestHandler):
             # Compat: iOS/PWA cachea rutas antiguas y puede pedir iconos de versiones previas.
             # Respondemos con los iconos actuales si existen, para evitar 404 al abrir desde
             # acceso directo en pantalla de inicio.
-            CURRENT_ICON_VERSION = 26
+            CURRENT_ICON_VERSION = 27
             try:
                 # /icons/ios/vXX/<file> -> /icons/ios/v{CURRENT_ICON_VERSION}/<file>
                 parts = [p for p in (parsed.path or "").split("/") if p]

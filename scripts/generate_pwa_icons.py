@@ -7,7 +7,7 @@ from PIL import Image
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SRC_SVG = REPO_ROOT / "assets" / "verifika2" / "verifika2_app_icon.svg"
-OUT_DIR = REPO_ROOT / "web" / "icons" / "ios" / "v26"
+OUT_DIR = REPO_ROOT / "web" / "icons" / "ios" / "v27"
 
 
 SIZES = [
@@ -41,10 +41,9 @@ def _foreground_center_delta(png_path: Path) -> tuple[float, float]:
             r, g, b, a = px[x, y]
             if a < 10:
                 continue
-            # Verde del check y dorado del "²" (tolerante).
+            # Centramos usando SOLO la V-check (verde). El "²" va desplazado a propósito.
             is_green = g > 120 and r < 130 and b < 130
-            is_gold = r > 160 and g > 110 and b < 150
-            if is_green or is_gold:
+            if is_green:
                 pts.append((x, y))
     if not pts:
         return 0.0, 0.0

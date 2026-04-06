@@ -9,7 +9,7 @@
 
 ### PWA / iOS
 
-- Se regeneran iconos centrados en `web/icons/ios/v26/` y se alinean referencias:
+- Se regeneran iconos centrados en `web/icons/ios/v27/` y se alinean referencias:
   - `web/index.html` (apple-touch-icon + manifest + favicon)
   - `web/manifest.webmanifest` (icon-192/icon-512)
   - `web/sw.js` (precache shell)
@@ -41,4 +41,3 @@
 ### Operación / mantenimiento
 
 - Añadir un “runbook” de incidencias (qué mirar en `/api/build_info`, cómo identificar pool saturado, cómo validar iconos/PWA).
-

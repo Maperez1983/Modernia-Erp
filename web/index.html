@@ -9,13 +9,13 @@
     <meta name="apple-mobile-web-app-title" content="Verifika²" />
     <title>Verifika² · CRM & Portal</title>
     <link rel="stylesheet" href="styles.css?v=157" />
-    <link rel="manifest" href="manifest.webmanifest?v=12" />
-    <link rel="icon" href="/icons/ios/v26/icon-192.png" />
-    <link rel="apple-touch-icon" sizes="180x180" href="/icons/ios/v26/apple-touch-icon-180.png" />
-    <link rel="apple-touch-icon" sizes="167x167" href="/icons/ios/v26/apple-touch-icon-167.png" />
-    <link rel="apple-touch-icon" sizes="152x152" href="/icons/ios/v26/apple-touch-icon-152.png" />
-    <link rel="apple-touch-icon" sizes="120x120" href="/icons/ios/v26/apple-touch-icon-120.png" />
-    <link rel="apple-touch-icon-precomposed" href="/icons/ios/v26/apple-touch-icon-180.png" />
+    <link rel="manifest" href="manifest.webmanifest?v=13" />
+    <link rel="icon" href="/icons/ios/v27/icon-192.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/icons/ios/v27/apple-touch-icon-180.png" />
+    <link rel="apple-touch-icon" sizes="167x167" href="/icons/ios/v27/apple-touch-icon-167.png" />
+    <link rel="apple-touch-icon" sizes="152x152" href="/icons/ios/v27/apple-touch-icon-152.png" />
+    <link rel="apple-touch-icon" sizes="120x120" href="/icons/ios/v27/apple-touch-icon-120.png" />
+    <link rel="apple-touch-icon-precomposed" href="/icons/ios/v27/apple-touch-icon-180.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600;700&family=Source+Sans+3:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" />
@@ -99,166 +99,6 @@
               </div>
             </div>
             <div id="workspaceModuleHealth"></div>
-          </div>
-        </div>
-        <div class="workspace-central-layout crm-workspace-view" data-workspace-view="operations">
-          <div class="form-card">
-            <div class="section-head">
-              <div>
-                <h3>Presupuestos del grupo</h3>
-                <p class="muted">Propuestas comerciales para reformas, gestoría y fincas dentro de la operativa del workspace.</p>
-              </div>
-            </div>
-            <div id="workspaceBudgetSummary"></div>
-            <div class="workspace-billing-layout">
-              <form id="workspaceBudgetForm" class="form-grid">
-                <input type="hidden" name="id" />
-                <input type="hidden" name="workspace_id" />
-                <input type="hidden" name="cliente_id" />
-                <input type="hidden" name="lineas" />
-                <input type="hidden" name="seguimiento_accion_id" />
-                <input type="hidden" name="encargo_accion_id" />
-                <label>
-                  Empresa
-                  <select name="empresa_id" required></select>
-                </label>
-                <label>
-                  Servicio
-                  <select name="servicio">
-                    <option value="reformas">Reformas</option>
-                    <option value="gestoria">Gestoría</option>
-                    <option value="fincas">Fincas</option>
-                  </select>
-                </label>
-                <label>
-                  Configuración
-                  <select name="plantilla_key" id="workspaceBudgetTemplateSelect"></select>
-                </label>
-                <label>
-                  Fecha
-                  <input name="fecha" type="date" />
-                </label>
-                <label class="span-2">
-                  Cliente final
-                  <input name="cliente_lookup" id="workspaceBudgetClienteLookup" list="workspaceClientOptions" placeholder="Busca por nombre o DNI del cliente final" />
-                </label>
-                <label>
-                  DNI / NIF cliente final
-                  <input name="cliente_nif" placeholder="Opcional si es alta rápida" />
-                </label>
-                <label>
-                  Teléfono cliente final
-                  <input name="cliente_telefono" />
-                </label>
-                <label>
-                  Email cliente final
-                  <input name="cliente_email" type="email" />
-                </label>
-                <label class="span-2">
-                  Título
-                  <input name="titulo" required placeholder="Ej. Reforma integral, asesoría fiscal anual, administración C.P." />
-                </label>
-                <label>
-                  Estado comercial
-                  <select name="estado">
-                    <option value="Borrador">Borrador</option>
-                    <option value="Estudio">Estudio</option>
-                    <option value="Aceptado">Aceptado</option>
-                    <option value="Rechazado">Rechazado</option>
-                  </select>
-                </label>
-                <label>
-                  Próximo seguimiento
-                  <input name="fecha_seguimiento" type="date" />
-                </label>
-                <label>
-                  Estado encargo
-                  <select name="encargo_estado">
-                    <option value="">No aplica</option>
-                    <option value="Pendiente">Pendiente</option>
-                    <option value="Enviado">Enviado</option>
-                    <option value="Firmada">Firmada</option>
-                  </select>
-                </label>
-                <label>
-                  Fecha encargo
-                  <input name="fecha_encargo" type="date" />
-                </label>
-                <label>
-                  Responsable
-                  <input name="responsable" />
-                </label>
-                <label>
-                  Forma de pago
-                  <select name="forma_pago">
-                    <option value="">Sin definir</option>
-                    <option>Efectivo</option>
-                    <option>Tarjeta</option>
-                    <option>Transferencia</option>
-                    <option>Remesa</option>
-                  </select>
-                </label>
-                <label>
-                  Ref. tipo
-                  <input name="referencia_tipo" placeholder="obra, comunidad, expediente..." />
-                </label>
-                <label>
-                  Ref. id
-                  <input name="referencia_id" placeholder="Opcional" />
-                </label>
-                <label data-budget-fincas="1">
-                  Vecinos
-                  <input name="num_vecinos" type="number" min="0" step="1" />
-                </label>
-                <label data-budget-fincas="1">
-                  Locales
-                  <input name="num_locales" type="number" min="0" step="1" />
-                </label>
-                <label data-budget-fincas="1">
-                  Trasteros
-                  <input name="num_trasteros" type="number" min="0" step="1" />
-                </label>
-                <label data-budget-fincas="1">
-                  Aparcamientos
-                  <input name="num_aparcamientos" type="number" min="0" step="1" />
-                </label>
-                <label>
-                  Base sugerida
-                  <input name="subtotal_sugerido" type="number" step="0.01" readonly />
-                </label>
-                <label>
-                  Subtotal editable
-                  <input name="subtotal" type="number" step="0.01" />
-                </label>
-                <label>
-                  IVA / impuestos
-                  <input name="impuestos" type="number" step="0.01" value="0" />
-                </label>
-                <label>
-                  Total editable
-                  <input name="total" type="number" step="0.01" />
-                </label>
-                <label class="span-2">
-                  Partidas
-                  <textarea name="lineas_texto" rows="5" placeholder="Una línea por partida. Formato: categoría | concepto | cantidad | unidad | precio | dto%"></textarea>
-                </label>
-                <p class="muted span-2" id="workspaceBudgetConfigHelp"></p>
-                <label class="span-2">
-                  Motivo / tracking
-                  <textarea name="motivo_estado" rows="2" placeholder="Razón del rechazo, punto pendiente del estudio, matices del cierre..."></textarea>
-                </label>
-                <label class="span-2">
-                  Observaciones
-                  <textarea name="observaciones" rows="3"></textarea>
-                </label>
-                <div class="form-actions span-2">
-                  <button type="submit">Guardar presupuesto</button>
-                  <button type="button" id="workspaceBudgetResetBtn" class="secondary ghost">Nuevo</button>
-                  <span id="workspaceBudgetStatus" class="muted"></span>
-                </div>
-              </form>
-              <div id="workspaceBudgetList"></div>
-            </div>
           </div>
         </div>
         <div id="workspaceOverviewCommercial" class="workspace-central-layout crm-workspace-view" data-workspace-view="overview">
@@ -508,6 +348,167 @@
                 </div>
               </div>
               <div id="workspaceDocumentHub"></div>
+            </div>
+
+            <div class="workspace-central-layout crm-workspace-view" data-workspace-view="motores" data-workspace-engine="facturacion">
+              <div class="form-card">
+                <div class="section-head">
+                  <div>
+                    <h3>Presupuestos del grupo</h3>
+                    <p class="muted">Propuestas comerciales para reformas, gestoría y fincas dentro del motor económico del workspace.</p>
+                  </div>
+                </div>
+                <div id="workspaceBudgetSummary"></div>
+                <div class="workspace-billing-layout">
+                  <form id="workspaceBudgetForm" class="form-grid">
+                    <input type="hidden" name="id" />
+                    <input type="hidden" name="workspace_id" />
+                    <input type="hidden" name="cliente_id" />
+                    <input type="hidden" name="lineas" />
+                    <input type="hidden" name="seguimiento_accion_id" />
+                    <input type="hidden" name="encargo_accion_id" />
+                    <label>
+                      Empresa
+                      <select name="empresa_id" required></select>
+                    </label>
+                    <label>
+                      Servicio
+                      <select name="servicio">
+                        <option value="reformas">Reformas</option>
+                        <option value="gestoria">Gestoría</option>
+                        <option value="fincas">Fincas</option>
+                      </select>
+                    </label>
+                    <label>
+                      Configuración
+                      <select name="plantilla_key" id="workspaceBudgetTemplateSelect"></select>
+                    </label>
+                    <label>
+                      Fecha
+                      <input name="fecha" type="date" />
+                    </label>
+                    <label class="span-2">
+                      Cliente final
+                      <input name="cliente_lookup" id="workspaceBudgetClienteLookup" list="workspaceClientOptions" placeholder="Busca por nombre o DNI del cliente final" />
+                    </label>
+                    <label>
+                      DNI / NIF cliente final
+                      <input name="cliente_nif" placeholder="Opcional si es alta rápida" />
+                    </label>
+                    <label>
+                      Teléfono cliente final
+                      <input name="cliente_telefono" />
+                    </label>
+                    <label>
+                      Email cliente final
+                      <input name="cliente_email" type="email" />
+                    </label>
+                    <label class="span-2">
+                      Título
+                      <input name="titulo" required placeholder="Ej. Reforma integral, asesoría fiscal anual, administración C.P." />
+                    </label>
+                    <label>
+                      Estado comercial
+                      <select name="estado">
+                        <option value="Borrador">Borrador</option>
+                        <option value="Estudio">Estudio</option>
+                        <option value="Aceptado">Aceptado</option>
+                        <option value="Rechazado">Rechazado</option>
+                      </select>
+                    </label>
+                    <label>
+                      Próximo seguimiento
+                      <input name="fecha_seguimiento" type="date" />
+                    </label>
+                    <label>
+                      Estado encargo
+                      <select name="encargo_estado">
+                        <option value="">No aplica</option>
+                        <option value="Pendiente">Pendiente</option>
+                        <option value="Enviado">Enviado</option>
+                        <option value="Firmada">Firmada</option>
+                      </select>
+                    </label>
+                    <label>
+                      Fecha encargo
+                      <input name="fecha_encargo" type="date" />
+                    </label>
+                    <label>
+                      Responsable
+                      <input name="responsable" />
+                    </label>
+                    <label>
+                      Forma de pago
+                      <select name="forma_pago">
+                        <option value="">Sin definir</option>
+                        <option>Efectivo</option>
+                        <option>Tarjeta</option>
+                        <option>Transferencia</option>
+                        <option>Remesa</option>
+                      </select>
+                    </label>
+                    <label>
+                      Ref. tipo
+                      <input name="referencia_tipo" placeholder="obra, comunidad, expediente..." />
+                    </label>
+                    <label>
+                      Ref. id
+                      <input name="referencia_id" placeholder="Opcional" />
+                    </label>
+                    <label data-budget-fincas="1">
+                      Vecinos
+                      <input name="num_vecinos" type="number" min="0" step="1" />
+                    </label>
+                    <label data-budget-fincas="1">
+                      Locales
+                      <input name="num_locales" type="number" min="0" step="1" />
+                    </label>
+                    <label data-budget-fincas="1">
+                      Trasteros
+                      <input name="num_trasteros" type="number" min="0" step="1" />
+                    </label>
+                    <label data-budget-fincas="1">
+                      Aparcamientos
+                      <input name="num_aparcamientos" type="number" min="0" step="1" />
+                    </label>
+                    <label>
+                      Base sugerida
+                      <input name="subtotal_sugerido" type="number" step="0.01" readonly />
+                    </label>
+                    <label>
+                      Subtotal editable
+                      <input name="subtotal" type="number" step="0.01" />
+                    </label>
+                    <label>
+                      IVA / impuestos
+                      <input name="impuestos" type="number" step="0.01" value="0" />
+                    </label>
+                    <label>
+                      Total editable
+                      <input name="total" type="number" step="0.01" />
+                    </label>
+                    <label class="span-2">
+                      Partidas
+                      <textarea name="lineas_texto" rows="5" placeholder="Una línea por partida. Formato: categoría | concepto | cantidad | unidad | precio | dto%"></textarea>
+                    </label>
+                    <p class="muted span-2" id="workspaceBudgetConfigHelp"></p>
+                    <label class="span-2">
+                      Motivo / tracking
+                      <textarea name="motivo_estado" rows="2" placeholder="Razón del rechazo, punto pendiente del estudio, matices del cierre..."></textarea>
+                    </label>
+                    <label class="span-2">
+                      Observaciones
+                      <textarea name="observaciones" rows="3"></textarea>
+                    </label>
+                    <div class="form-actions span-2">
+                      <button type="submit">Guardar presupuesto</button>
+                      <button type="button" id="workspaceBudgetResetBtn" class="secondary ghost">Nuevo</button>
+                      <span id="workspaceBudgetStatus" class="muted"></span>
+                    </div>
+                  </form>
+                  <div id="workspaceBudgetList"></div>
+                </div>
+              </div>
             </div>
 
             <div class="workspace-central-layout crm-workspace-view" data-workspace-view="motores" data-workspace-engine="facturacion">
@@ -7611,7 +7612,7 @@
           }
         } catch {}
         window.addEventListener("load", function () {
-          navigator.serviceWorker.register("/sw.js?v=28").catch(function () {});
+          navigator.serviceWorker.register("/sw.js?v=29").catch(function () {});
         });
       })();
     </script>

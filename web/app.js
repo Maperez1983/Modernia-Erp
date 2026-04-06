@@ -3,7 +3,7 @@
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v28";
+const APP_SW_VERSION = "v29";
 
 // Workspace tenant por defecto del producto (branding de software). Mantiene compatibilidad con slugs legacy.
 const DEFAULT_TENANT_WORKSPACE_SLUG = "verifika2";
@@ -4157,13 +4157,13 @@ const WORKSPACE_MODULE_STRUCTURE = {
     section: "crm_services",
     family: "Subservicio CRM",
     badge: "Servicio activo",
-    description: "Presupuestos, partidas y seguimiento comercial de obras y reformas.",
+    description: "Obras, seguimiento comercial y documentación técnica (presupuestos en el motor de Facturación).",
   },
   fincas: {
     section: "crm_services",
     family: "Subservicio CRM",
     badge: "Servicio activo",
-    description: "Comunidades, incidencias, juntas y presupuestación de fincas.",
+    description: "Comunidades, incidencias, juntas y seguimiento (presupuestos en el motor de Facturación).",
   },
   documental: {
     section: "workspace_engines",
@@ -4845,7 +4845,7 @@ const WORKSPACE_LAUNCHERS = {
         openCompany(REFORMAS_COMPANY, { allowRestricted: true });
         return;
       }
-      focusWorkspaceView("operations", workspaceBudgetForm);
+      focusWorkspaceEngine("facturacion", workspaceBudgetForm);
     },
   },
   fincas: {
@@ -4994,7 +4994,7 @@ const WORKSPACE_HOME_CONTAINERS = [
     key: "reformas",
     title: "Reformas",
     kicker: "Subservicio",
-    description: "Presupuestos por partidas, obras, seguimiento comercial y documentación técnica.",
+    description: "Obras, seguimiento comercial y documentación técnica (presupuestos en Facturación).",
     modules: ["reformas", "documental", "facturacion", "automatizaciones", "copilot"],
     action: WORKSPACE_LAUNCHERS.reformas?.action || null,
     actionLabel: "Abrir reformas",
@@ -5003,7 +5003,7 @@ const WORKSPACE_HOME_CONTAINERS = [
     key: "fincas",
     title: "Fincas",
     kicker: "Subservicio",
-    description: "Comunidades, incidencias, juntas, presupuestos y seguimiento.",
+    description: "Comunidades, incidencias, juntas y seguimiento (presupuestos en Facturación).",
     modules: ["fincas", "documental", "facturacion", "automatizaciones", "copilot"],
     action: WORKSPACE_LAUNCHERS.fincas?.action || null,
     actionLabel: "Abrir fincas",
