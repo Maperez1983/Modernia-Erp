@@ -27558,13 +27558,30 @@ class Handler(BaseHTTPRequestHandler):
                 """,
                 (token, expires_at, user_id),
             )
-            # Muy importante: persistimos el token antes de enviar el email.
-            # Si no hacemos commit, al cerrar la conexión al final de la request el token se pierde
-            # y el enlace de invitación se considera "inválido" al instante.
+            # Muy importante: persistimos el token ANTES de enviar el email.
+            # Si el commit falla y seguimos, el usuario recibirá un enlace que da "Invitación inválida".
             try:
                 conn.commit()
             except Exception:
-                pass
+                json_response(self, {"error": "No se pudo guardar la invitación (DB no disponible). Reintenta."}, status=503)
+                return
+            # Verificación defensiva: evita enviar enlaces rotos si hay replicas/caídas intermitentes.
+            try:
+                probe = conn.execute(
+                    "SELECT invite_token FROM usuarios WHERE id = ? LIMIT 1",
+                    (user_id,),
+                ).fetchone()
+                stored = ""
+                try:
+                    stored = (probe.get("invite_token") if isinstance(probe, dict) else probe[0]) if probe else ""
+                except Exception:
+                    stored = ""
+                if str(stored or "") != str(token or ""):
+                    json_response(self, {"error": "No se pudo confirmar la invitación (token no persistido). Reintenta."}, status=503)
+                    return
+            except Exception:
+                json_response(self, {"error": "No se pudo confirmar la invitación (DB no disponible). Reintenta."}, status=503)
+                return
             invite_link = f"{self._external_base_url()}/?activar_token={urllib.parse.quote(token)}"
             sent = False
             mail_error = None
