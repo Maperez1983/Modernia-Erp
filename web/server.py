@@ -24107,7 +24107,11 @@ def fetch_workspace_billing_rows(conn, workspace_id, limit=25):
           COALESCE(c.nombre, '') AS cliente_nombre,
           COALESCE(c.nif, '') AS cliente_nif,
           COALESCE((SELECT SUM(COALESCE(col.importe, 0)) FROM workspace_facturacion_cobros col WHERE col.factura_id = wf.id AND COALESCE(col.estado, 'Aplicado') != 'Devuelto'), 0) AS cobrado_total,
-          MAX(COALESCE(wf.total, 0) - COALESCE((SELECT SUM(COALESCE(col.importe, 0)) FROM workspace_facturacion_cobros col WHERE col.factura_id = wf.id AND COALESCE(col.estado, 'Aplicado') != 'Devuelto'), 0), 0) AS saldo_pendiente
+          CASE
+            WHEN (COALESCE(wf.total, 0) - COALESCE((SELECT SUM(COALESCE(col.importe, 0)) FROM workspace_facturacion_cobros col WHERE col.factura_id = wf.id AND COALESCE(col.estado, 'Aplicado') != 'Devuelto'), 0)) < 0
+              THEN 0
+            ELSE (COALESCE(wf.total, 0) - COALESCE((SELECT SUM(COALESCE(col.importe, 0)) FROM workspace_facturacion_cobros col WHERE col.factura_id = wf.id AND COALESCE(col.estado, 'Aplicado') != 'Devuelto'), 0))
+          END AS saldo_pendiente
         FROM workspace_facturacion wf
         LEFT JOIN empresas e ON e.id = wf.empresa_id
         LEFT JOIN clientes c ON c.id = wf.cliente_id
@@ -24140,14 +24144,15 @@ def fetch_workspace_health(conn, workspace_id):
             },
         }
     placeholders = ",".join(["?"] * len(empresa_ids))
-    clientes_total = conn.execute(
+    clientes_total_row = conn.execute(
         f"""
-        SELECT COUNT(DISTINCT ce.cliente_id)
+        SELECT COUNT(DISTINCT ce.cliente_id) AS total
         FROM clientes_empresas ce
         WHERE ce.empresa_id IN ({placeholders})
         """,
         empresa_ids,
-    ).fetchone()[0]
+    ).fetchone()
+    clientes_total = int(row_value(clientes_total_row, "total", 0) or 0)
     docs_summary = fetch_workspace_document_hub(conn, workspace_id, limit=5)["summary"]
     billing_rows = fetch_workspace_billing_rows(conn, workspace_id, limit=5)["rows"]
     presupuesto_rows = fetch_workspace_presupuestos(conn, workspace_id, limit=5)["rows"]
@@ -24163,38 +24168,45 @@ def fetch_workspace_health(conn, workspace_id):
     fincas_providers = fetch_workspace_fincas_proveedores(conn, workspace_id, limit=5)["rows"]
     fincas_meetings = fetch_workspace_fincas_juntas(conn, workspace_id, limit=5)["rows"]
     series_rows = fetch_workspace_series(conn, workspace_id)["rows"]
-    facturas_total = conn.execute(
+    facturas_total_row = conn.execute(
         f"""
-        SELECT COUNT(*)
+        SELECT COUNT(*) AS total
         FROM workspace_facturacion
         WHERE workspace_id = ? AND empresa_id IN ({placeholders})
         """,
         [workspace_id, *empresa_ids],
-    ).fetchone()[0]
-    seguros_total = conn.execute(
-        f"SELECT COUNT(*) FROM seguros WHERE empresa_id IN ({placeholders})",
+    ).fetchone()
+    facturas_total = int(row_value(facturas_total_row, "total", 0) or 0)
+    seguros_total_row = conn.execute(
+        f"SELECT COUNT(*) AS total FROM seguros WHERE empresa_id IN ({placeholders})",
         empresa_ids,
-    ).fetchone()[0]
-    gestoria_total = conn.execute(
-        f"SELECT COUNT(*) FROM gestoria_trabajos WHERE empresa_id IN ({placeholders})",
+    ).fetchone()
+    seguros_total = int(row_value(seguros_total_row, "total", 0) or 0)
+    gestoria_total_row = conn.execute(
+        f"SELECT COUNT(*) AS total FROM gestoria_trabajos WHERE empresa_id IN ({placeholders})",
         empresa_ids,
-    ).fetchone()[0]
-    inmuebles_total = conn.execute(
-        f"SELECT COUNT(*) FROM inmuebles WHERE empresa_id IN ({placeholders})",
+    ).fetchone()
+    gestoria_total = int(row_value(gestoria_total_row, "total", 0) or 0)
+    inmuebles_total_row = conn.execute(
+        f"SELECT COUNT(*) AS total FROM inmuebles WHERE empresa_id IN ({placeholders})",
         empresa_ids,
-    ).fetchone()[0]
-    operaciones_total = conn.execute(
-        f"SELECT COUNT(*) FROM operaciones_inmobiliarias WHERE empresa_id IN ({placeholders})",
+    ).fetchone()
+    inmuebles_total = int(row_value(inmuebles_total_row, "total", 0) or 0)
+    operaciones_total_row = conn.execute(
+        f"SELECT COUNT(*) AS total FROM operaciones_inmobiliarias WHERE empresa_id IN ({placeholders})",
         empresa_ids,
-    ).fetchone()[0]
-    hipotecas_total = conn.execute(
-        f"SELECT COUNT(*) FROM hipotecas WHERE empresa_id IN ({placeholders})",
+    ).fetchone()
+    operaciones_total = int(row_value(operaciones_total_row, "total", 0) or 0)
+    hipotecas_total_row = conn.execute(
+        f"SELECT COUNT(*) AS total FROM hipotecas WHERE empresa_id IN ({placeholders})",
         empresa_ids,
-    ).fetchone()[0]
-    facturas_recibidas_total = conn.execute(
-        f"SELECT COUNT(*) FROM gestoria_facturas WHERE empresa_id IN ({placeholders})",
+    ).fetchone()
+    hipotecas_total = int(row_value(hipotecas_total_row, "total", 0) or 0)
+    facturas_recibidas_total_row = conn.execute(
+        f"SELECT COUNT(*) AS total FROM gestoria_facturas WHERE empresa_id IN ({placeholders})",
         empresa_ids,
-    ).fetchone()[0]
+    ).fetchone()
+    facturas_recibidas_total = int(row_value(facturas_recibidas_total_row, "total", 0) or 0)
     enabled_modules = [row for row in modules if int(row.get("enabled") or 0) == 1]
     branding_ready = bool((workspace.get("descripcion") or "").strip() and (workspace.get("primary_color") or "").strip())
     checklist = [
@@ -26467,14 +26479,24 @@ class Handler(BaseHTTPRequestHandler):
                                 except Exception:
                                     pass
                         except Exception as exc:
-                            Handler._mark_db_unavailable(exc)
-                            try:
-                                Handler._trigger_db_bootstrap_async(self.db_path)
-                            except Exception:
-                                pass
-                            status = 503
-                            err = (type(exc).__name__ or "Error").strip() or "Error"
-                            body = f"db_unavailable backend={backend} err={err}".encode("utf-8")
+                            # Si ya estuvimos "ready", evitamos falsos negativos por picos (pool saturado,
+                            # timeouts cortos, etc.). El front ya gestionará errores reales en /api/*.
+                            if Handler._db_ready:
+                                status = 200
+                                body = f"ok backend={backend}".encode("utf-8")
+                            else:
+                                # En arranque (no-ready) sí reportamos 503 para que el front espere.
+                                try:
+                                    Handler._mark_db_unavailable(exc)
+                                except Exception:
+                                    pass
+                                try:
+                                    Handler._trigger_db_bootstrap_async(self.db_path)
+                                except Exception:
+                                    pass
+                                status = 503
+                                err = (type(exc).__name__ or "Error").strip() or "Error"
+                                body = f"db_unavailable backend={backend} err={err}".encode("utf-8")
                         Handler._health_last_at = now_ts
                         Handler._health_last_status = status
                         Handler._health_last_body = body
@@ -29413,9 +29435,10 @@ class Handler(BaseHTTPRequestHandler):
                     (record_id, *values, now, now),
                 )
             total_cobrado = conn.execute(
-                "SELECT COALESCE(SUM(importe), 0) FROM workspace_facturacion_cobros WHERE factura_id = ?",
+                "SELECT COALESCE(SUM(importe), 0) AS total FROM workspace_facturacion_cobros WHERE factura_id = ?",
                 (factura_id,),
-            ).fetchone()[0]
+            ).fetchone()
+            total_cobrado = float(row_value(total_cobrado, "total", 0.0) or 0.0)
             cobrada = 1 if float(total_cobrado or 0.0) >= float(factura["total"] or 0.0) > 0 else 0
             conn.execute(
                 """
@@ -31139,10 +31162,12 @@ class Handler(BaseHTTPRequestHandler):
                 deleted_users = 0
                 if delete_users_flag:
                     if user_id:
-                        deleted_users = conn.execute("SELECT COUNT(*) FROM usuarios WHERE id != ?", (user_id,)).fetchone()[0]
+                        deleted_users_row = conn.execute("SELECT COUNT(*) AS total FROM usuarios WHERE id != ?", (user_id,)).fetchone()
+                        deleted_users = int(row_value(deleted_users_row, "total", 0) or 0)
                         conn.execute("DELETE FROM usuarios WHERE id != ?", (user_id,))
                     else:
-                        deleted_users = conn.execute("SELECT COUNT(*) FROM usuarios").fetchone()[0]
+                        deleted_users_row = conn.execute("SELECT COUNT(*) AS total FROM usuarios").fetchone()
+                        deleted_users = int(row_value(deleted_users_row, "total", 0) or 0)
                         conn.execute("DELETE FROM usuarios")
                 conn.commit()
             except Exception as exc:
