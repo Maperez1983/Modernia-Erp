@@ -796,7 +796,7 @@ WORKSPACE_MODULE_CATALOG = [
     {"key": "financiacion", "nombre": "Financiación", "categoria": "vertical", "sort_order": 70},
     {"key": "fincas", "nombre": "Administración de Fincas", "categoria": "vertical", "sort_order": 80},
     {"key": "facturacion", "nombre": "Facturación", "categoria": "motor", "sort_order": 90},
-    {"key": "facturas_recibidas", "nombre": "Facturas Recibidas", "categoria": "motor", "sort_order": 100},
+    {"key": "facturas_recibidas", "nombre": "Importador Facturas", "categoria": "motor", "sort_order": 100},
     {"key": "portal_cliente", "nombre": "Portal Cliente", "categoria": "motor", "sort_order": 110},
     {"key": "registro_horario", "nombre": "Registro Horario", "categoria": "motor", "sort_order": 120},
     {"key": "automatizaciones", "nombre": "Automatizaciones", "categoria": "motor", "sort_order": 130},
@@ -18510,6 +18510,7 @@ def ensure_workspace_product_tables(conn):
           cliente_id TEXT NOT NULL,
           email_acceso TEXT,
           estado TEXT NOT NULL DEFAULT 'Invitado',
+          importador_facturas INTEGER NOT NULL DEFAULT 0,
           token TEXT,
           ultimo_acceso_at TEXT,
           created_at TEXT NOT NULL,
@@ -18517,6 +18518,12 @@ def ensure_workspace_product_tables(conn):
           UNIQUE (workspace_id, cliente_id)
         )
         """
+    )
+    ensure_column(
+        conn,
+        "workspace_portal_clientes",
+        "importador_facturas",
+        "importador_facturas INTEGER NOT NULL DEFAULT 0",
     )
     conn.execute(
         """
@@ -20583,6 +20590,7 @@ def fetch_workspace_portal_clients(conn, workspace_id, limit=40):
           COALESCE(c.nif, '') AS cliente_nif,
           COALESCE(p.email_acceso, c.email, '') AS email_acceso,
           p.estado,
+          COALESCE(p.importador_facturas, 0) AS importador_facturas,
           p.token,
           p.ultimo_acceso_at,
           p.created_at,
@@ -23541,6 +23549,7 @@ def fetch_workspace_portal_public(conn, token):
           p.workspace_id,
           p.cliente_id,
           p.estado,
+          COALESCE(p.importador_facturas, 0) AS importador_facturas,
           p.token,
           p.ultimo_acceso_at,
           c.nombre AS cliente_nombre,
@@ -23603,6 +23612,7 @@ def fetch_workspace_portal_public(conn, token):
         "workspace": row["workspace_nombre"],
         "cliente": row["cliente_nombre"],
         "estado": row["estado"],
+        "importador_facturas": int(row["importador_facturas"] or 0),
         "email": row["email"],
         "docs": [dict(item) for item in docs],
         "facturas": [dict(item) for item in bills],
@@ -29435,6 +29445,7 @@ class Handler(BaseHTTPRequestHandler):
             if not workspace_id or not cliente_id:
                 json_response(self, {"error": "workspace_id y cliente_id requeridos"}, status=400)
                 return
+            importador_facturas = 1 if str(payload.get("importador_facturas") or "").strip().lower() in {"1", "true", "yes", "si", "sí", "on"} else 0
             existing = conn.execute(
                 "SELECT id FROM workspace_portal_clientes WHERE workspace_id = ? AND cliente_id = ? LIMIT 1",
                 (workspace_id, cliente_id),
@@ -29444,12 +29455,13 @@ class Handler(BaseHTTPRequestHandler):
                 conn.execute(
                     """
                     UPDATE workspace_portal_clientes
-                    SET email_acceso = ?, estado = ?, token = ?, updated_at = datetime(?)
+                    SET email_acceso = ?, estado = ?, importador_facturas = ?, token = ?, updated_at = datetime(?)
                     WHERE id = ?
                     """,
                     (
                         (payload.get("email_acceso") or "").strip() or None,
                         (payload.get("estado") or "").strip() or "Invitado",
+                        importador_facturas,
                         token,
                         now,
                         existing[0],
@@ -29461,8 +29473,8 @@ class Handler(BaseHTTPRequestHandler):
                 conn.execute(
                     """
                     INSERT INTO workspace_portal_clientes (
-                      id, workspace_id, cliente_id, email_acceso, estado, token, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                      id, workspace_id, cliente_id, email_acceso, estado, importador_facturas, token, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
                     """,
                     (
                         record_id,
@@ -29470,6 +29482,7 @@ class Handler(BaseHTTPRequestHandler):
                         cliente_id,
                         (payload.get("email_acceso") or "").strip() or None,
                         (payload.get("estado") or "").strip() or "Invitado",
+                        importador_facturas,
                         token,
                         now,
                         now,
@@ -29489,7 +29502,7 @@ class Handler(BaseHTTPRequestHandler):
                 now,
             )
             conn.commit()
-            json_response(self, {"ok": True, "id": record_id, "token": token, "automation_actions": auto_created})
+            json_response(self, {"ok": True, "id": record_id, "token": token, "importador_facturas": importador_facturas, "automation_actions": auto_created})
             return
         elif parsed.path == "/api/workspace_portal_requerimientos":
             workspace_id = str(payload.get("workspace_id") or "").strip()
@@ -29551,7 +29564,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             portal = conn.execute(
                 """
-                SELECT id, workspace_id, cliente_id
+                SELECT id, workspace_id, cliente_id, COALESCE(importador_facturas, 0) AS importador_facturas
                 FROM workspace_portal_clientes
                 WHERE token = ?
                 LIMIT 1
@@ -29638,7 +29651,11 @@ class Handler(BaseHTTPRequestHandler):
             doc_key = (payload.get("doc_key") or "").strip()
             doc_tipo = (payload.get("tipo") or "").strip()
             doc_clasificacion = (payload.get("clasificacion") or (request_row["clasificacion"] if request_row else "")).strip()
-            if doc_key and looks_like_invoice_document(nombre, doc_clasificacion, doc_tipo):
+            if (
+                doc_key
+                and int(portal["importador_facturas"] or 0) == 1
+                and looks_like_invoice_document(nombre, doc_clasificacion, doc_tipo)
+            ):
                 try:
                     ocr_job_id = enqueue_ocr_job(
                         self.ocr_db_path,
@@ -29671,6 +29688,18 @@ class Handler(BaseHTTPRequestHandler):
                         """,
                         (str(exc), now, record_id, portal["workspace_id"]),
                     )
+            elif doc_key and looks_like_invoice_document(nombre, doc_clasificacion, doc_tipo) and int(portal["importador_facturas"] or 0) != 1:
+                # Si parece factura pero el add-on no está activo para este portal, no encolamos OCR.
+                # Queda en inbox como pendiente para evitar pérdida de documento.
+                conn.execute(
+                    """
+                    UPDATE workspace_documentos_inbox
+                    SET notas = COALESCE(NULLIF(?, ''), notas),
+                        updated_at = datetime(?)
+                    WHERE id = ? AND workspace_id = ?
+                    """,
+                    ("Importador Facturas no activo para este cliente portal.", now, record_id, portal["workspace_id"]),
+                )
             conn.commit()
             json_response(self, {"ok": True, "id": record_id, "automation_actions": auto_created, "ocr_job_id": ocr_job_id})
             return

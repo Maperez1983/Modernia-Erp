@@ -41427,6 +41427,7 @@ if (workspacePortalForm) {
     const formData = new FormData(workspacePortalForm);
     const payload = Object.fromEntries(formData.entries());
     payload.workspace_id = state.currentWorkspaceId;
+    payload.importador_facturas = workspacePortalForm.querySelector('[name="importador_facturas"]')?.checked ? 1 : 0;
     try {
       const data = await fetch("/api/workspace_portal", {
         method: "POST",

@@ -146,6 +146,7 @@ CREATE TABLE IF NOT EXISTS workspace_portal_clientes (
   cliente_id TEXT NOT NULL,
   email_acceso TEXT,
   estado TEXT NOT NULL DEFAULT 'Invitado',
+  importador_facturas INTEGER NOT NULL DEFAULT 0,
   token TEXT,
   ultimo_acceso_at TEXT,
   created_at TEXT NOT NULL,
