@@ -85,6 +85,7 @@ ENV_PATH = ROOT.parent / ".env"
 SEGUROS_COMPANY_HINTS_PATH = ROOT.parent / "data" / "seguros_company_hints.json"
 S3_BOTO3_AVAILABLE = True
 
+WORKSPACE_MEMBERSHIP_ENFORCE = False  # se recalcula tras cargar .env/config
 S3_SCOPE_ENFORCE = os.environ.get("APP_S3_SCOPE_ENFORCE", "").strip().lower() in ("1", "true", "yes", "si", "sí", "on")
 S3_SCOPE_ENFORCE = bool(S3_SCOPE_ENFORCE or WORKSPACE_MEMBERSHIP_ENFORCE)
 try:
@@ -624,6 +625,8 @@ def open_auth_store_conn(with_row_factory=True):
 SQLITE_FOREIGN_KEYS_ENABLED = os.environ.get("APP_SQLITE_FOREIGN_KEYS", "1").strip().lower() not in ("0", "false", "no", "off")
 APP_TIMEZONE = (os.environ.get("APP_TIMEZONE") or os.environ.get("APP_TZ") or "Europe/Madrid").strip() or "Europe/Madrid"
 WORKSPACE_MEMBERSHIP_ENFORCE = os.environ.get("APP_WORKSPACE_MEMBERSHIP_ENFORCE", "0").strip().lower() in ("1", "true", "yes", "si", "sí", "on")
+S3_SCOPE_ENFORCE = os.environ.get("APP_S3_SCOPE_ENFORCE", "").strip().lower() in ("1", "true", "yes", "si", "sí", "on")
+S3_SCOPE_ENFORCE = bool(S3_SCOPE_ENFORCE or WORKSPACE_MEMBERSHIP_ENFORCE)
 # Compat/backfill legacy: si un workspace no tiene empresas asociadas, opcionalmente auto-vincula todas las activas.
 # En modo comercial multi-tenant se recomienda desactivarlo (0) para evitar fugas entre workspaces.
 WORKSPACE_AUTO_LINK_COMPANIES = os.environ.get("APP_WORKSPACE_AUTO_LINK_COMPANIES", "1").strip().lower() not in ("0", "false", "no", "off")
