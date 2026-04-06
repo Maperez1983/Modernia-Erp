@@ -7476,6 +7476,52 @@
       </div>
     </div>
 
+    <div id="workspaceCustomerModal" class="modal hidden">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3>Nuevo cliente (workspace)</h3>
+          <button type="button" id="workspaceCustomerModalClose" class="ghost">✕</button>
+        </div>
+        <form id="workspaceCustomerForm" class="modal-body form-grid">
+          <label class="span-2">
+            Nombre del cliente / workspace
+            <input name="workspace_nombre" required />
+          </label>
+          <label class="span-2">
+            Razón social (empresa operativa)
+            <input name="empresa_nombre" required />
+          </label>
+          <label>
+            CIF/NIF (opcional)
+            <input name="empresa_nif" />
+          </label>
+          <label>
+            Dirección / centro (opcional)
+            <input name="empresa_direccion" />
+          </label>
+          <label class="span-2">
+            Gestoría partner (slug, opcional)
+            <input name="partner_workspace_slug" placeholder="ej. gestoria_velazquez" />
+          </label>
+          <label class="span-2" style="display:flex;gap:10px;align-items:center">
+            <input type="checkbox" name="enable_all" />
+            Activar todos los módulos (demo)
+          </label>
+          <div class="span-2">
+            <strong>Módulos para el cliente</strong>
+            <p class="muted">Recomendado: Importador Facturas + Registro horario + Portal + Documental.</p>
+            <div id="workspaceCustomerModules" class="form-grid" style="grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:10px"></div>
+          </div>
+          <button type="submit" class="hidden" aria-hidden="true"></button>
+        </form>
+        <div class="modal-actions">
+          <button type="button" class="secondary" id="workspaceCustomerCancelBtn">Cancelar</button>
+          <button type="button" id="workspaceCustomerCreateBtn">Crear cliente</button>
+          <span id="workspaceCustomerStatus" class="muted"></span>
+        </div>
+      </div>
+    </div>
+
     <div id="authLoginOverlay" class="auth-login-overlay hidden">
       <div class="auth-login-card">
         <div class="auth-brand">

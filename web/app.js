@@ -1559,17 +1559,25 @@ const workspaceList = document.getElementById("workspaceList");
 const workspaceForm = document.getElementById("workspaceForm");
 const workspaceFormStatus = document.getElementById("workspaceFormStatus");
 const workspaceNewBtn = document.getElementById("workspaceNewBtn");
-const workspaceNewCustomerBtn = document.getElementById("workspaceNewCustomerBtn");
-const workspaceCompanies = document.getElementById("workspaceCompanies");
-const workspaceCompanyEditor = document.getElementById("workspaceCompanyEditor");
-const workspaceCompanyEditorClose = document.getElementById("workspaceCompanyEditorClose");
-const workspaceCompanyForm = document.getElementById("workspaceCompanyForm");
+	const workspaceNewCustomerBtn = document.getElementById("workspaceNewCustomerBtn");
+const workspaceCustomerModal = document.getElementById("workspaceCustomerModal");
+const workspaceCustomerModalClose = document.getElementById("workspaceCustomerModalClose");
+const workspaceCustomerForm = document.getElementById("workspaceCustomerForm");
+const workspaceCustomerStatus = document.getElementById("workspaceCustomerStatus");
+const workspaceCustomerModules = document.getElementById("workspaceCustomerModules");
+const workspaceCustomerCancelBtn = document.getElementById("workspaceCustomerCancelBtn");
+const workspaceCustomerCreateBtn = document.getElementById("workspaceCustomerCreateBtn");
+	const workspaceCompanies = document.getElementById("workspaceCompanies");
+	const workspaceCompanyEditor = document.getElementById("workspaceCompanyEditor");
+	const workspaceCompanyEditorClose = document.getElementById("workspaceCompanyEditorClose");
+	const workspaceCompanyForm = document.getElementById("workspaceCompanyForm");
 const workspaceCompanyFormStatus = document.getElementById("workspaceCompanyFormStatus");
 const workspaceCompanyCnaeQuery = document.getElementById("workspaceCompanyCnaeQuery");
 const workspaceCompanyCnaeResults = document.getElementById("workspaceCompanyCnaeResults");
 const workspaceCompanyCnaes = document.getElementById("workspaceCompanyCnaes");
 const workspaceMembers = document.getElementById("workspaceMembers");
-const workspaceModules = document.getElementById("workspaceModules");
+const workspaceLinks = document.getElementById("workspaceLinks");
+	const workspaceModules = document.getElementById("workspaceModules");
 const workspaceClientBase = document.getElementById("workspaceClientBase");
 const workspaceClientLookup = document.getElementById("workspaceClientLookup");
 const workspaceClientRefreshBtn = document.getElementById("workspaceClientRefreshBtn");
@@ -5899,7 +5907,7 @@ const renderWorkspaceServiceDesks = (payload = {}) => {
 
 const fillWorkspaceForm = (workspace = {}) => {
   if (!workspaceForm) return;
-  ["id", "nombre", "slug", "estado", "plan", "descripcion", "logo_url", "primary_color", "accent_color"].forEach((field) => {
+  ["id", "nombre", "slug", "estado", "plan", "kind", "descripcion", "logo_url", "primary_color", "accent_color"].forEach((field) => {
     const el = workspaceForm.querySelector(`[name="${field}"]`);
     if (!el) return;
     el.value = workspace[field] || "";
@@ -5927,7 +5935,7 @@ const renderWorkspaceList = (rows = []) => {
         <button type="button" class="workspace-list-item${isActive ? " is-active" : ""}" data-workspace-id="${row.id}">
           <div>
             <strong>${getWorkspaceDisplayName(row)}</strong>
-            <div class="muted">Workspace · ${row.plan || "Enterprise"} · ${row.estado || "Activo"}</div>
+            <div class="muted">${escapeHtml(String(row.kind || "Directo"))} · ${row.plan || "Enterprise"} · ${row.estado || "Activo"}</div>
             ${row.descripcion ? `<div class="muted">${row.descripcion}</div>` : ""}
           </div>
           <div class="workspace-list-meta">
@@ -6225,6 +6233,118 @@ const renderWorkspaceMembers = (rows = []) => {
         renderWorkspaceMembers(state.currentWorkspaceMembers);
       } catch (error) {
         alert(error?.message || "No se pudo quitar.");
+      }
+    });
+  });
+};
+
+const renderWorkspaceLinks = (rows = []) => {
+  if (!workspaceLinks) return;
+  const authUser = getAuthScopeUser();
+  const canManage = Boolean(authUser && isPrivilegedUser(authUser));
+  if (!state.currentWorkspaceId) {
+    workspaceLinks.innerHTML = "<p class='muted'>Selecciona un workspace.</p>";
+    return;
+  }
+  if (!canManage) {
+    workspaceLinks.innerHTML = "<p class='muted'>Solo visible para administración.</p>";
+    return;
+  }
+  const allWorkspaces = Array.isArray(state.workspaces) ? state.workspaces : [];
+  const gestorias = allWorkspaces.filter((w) => String(w.kind || "").trim() === "Gestoría");
+  const options = gestorias
+    .map((w) => `<option value="${escapeHtml(String(w.slug || w.nombre || ""))}">${escapeHtml(String(w.nombre || w.slug || ""))}</option>`)
+    .join("");
+  const list = (rows || []).filter((row) => Number(row.enabled ?? 1) === 1);
+  const listHtml = list
+    .map((row) => {
+      const label = `${row.source_slug || row.source_nombre || "-"} → ${row.target_slug || row.target_nombre || "-"}`;
+      return `
+        <div class="workspace-chip workspace-company-chip">
+          <div>
+            <strong>${escapeHtml(label)}</strong>
+            <div class="muted">Tipo: ${escapeHtml(row.link_type || "-")} · Rol: ${escapeHtml(row.role || "Miembro")}</div>
+            ${row.notes ? `<div class="muted">${escapeHtml(row.notes)}</div>` : ""}
+          </div>
+          <div class="workspace-company-chip-actions">
+            <button type="button" class="secondary ghost" data-workspace-link-remove="${escapeHtml(String(row.id || ""))}">Quitar</button>
+          </div>
+        </div>
+      `;
+    })
+    .join("");
+  workspaceLinks.innerHTML = `
+    <div class="workspace-context-strip">
+      <strong>Gestoría ↔ Cliente</strong>
+      <span class="muted">Vincula un cliente a una gestoría. Si ya hay otra vinculada, se deshabilita automáticamente.</span>
+    </div>
+    <div class="row" style="gap:10px;align-items:flex-end;flex-wrap:wrap">
+      <label style="min-width:280px;flex:1">
+        Gestoría (slug)
+        <input id="workspaceLinkSourceSlug" list="workspaceGestoriaSlugOptions" placeholder="ej. gestoria_velazquez" />
+      </label>
+      <datalist id="workspaceGestoriaSlugOptions">${options}</datalist>
+      <label style="min-width:220px">
+        Rol en destino
+        <select id="workspaceLinkRole">
+          <option>Miembro</option>
+          <option>Lectura</option>
+        </select>
+      </label>
+      <button type="button" id="workspaceLinkCreateBtn" class="secondary">Vincular</button>
+      <span id="workspaceLinkStatus" class="muted"></span>
+    </div>
+    <div class="workspace-chip-list">${listHtml || "<p class='muted'>Sin vínculos todavía.</p>"}</div>
+  `;
+  const sourceInput = document.getElementById("workspaceLinkSourceSlug");
+  const roleSelect = document.getElementById("workspaceLinkRole");
+  const status = document.getElementById("workspaceLinkStatus");
+  const btn = document.getElementById("workspaceLinkCreateBtn");
+  if (btn) {
+    btn.addEventListener("click", async () => {
+      const slug = String(sourceInput?.value || "").trim();
+      const role = String(roleSelect?.value || "Miembro").trim();
+      if (!slug) {
+        if (status) status.textContent = "Indica el slug del workspace gestoría.";
+        return;
+      }
+      const source = gestorias.find((w) => String(w.slug || "") === slug) || gestorias.find((w) => String(w.nombre || "") === slug);
+      if (!source?.id) {
+        if (status) status.textContent = "No encuentro esa gestoría.";
+        return;
+      }
+      try {
+        if (status) status.textContent = "Vinculando...";
+        const resp = await postJsonWithDbRetry("/api/workspace_link_upsert", {
+          source_workspace_id: String(source.id || ""),
+          target_workspace_id: String(state.currentWorkspaceId || ""),
+          link_type: "gestoria_partner",
+          role,
+          enabled: 1,
+          notes: "ui_link",
+        });
+        const added = Number(resp?.members_added || 0) || 0;
+        if (status) status.textContent = added ? `Vínculo creado. Miembros añadidos: ${added}.` : "Vínculo creado.";
+        const links = await safeWorkspaceApi(`/api/workspace_links?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}`, { rows: [] });
+        state.currentWorkspaceLinks = links.rows || [];
+        renderWorkspaceLinks(state.currentWorkspaceLinks);
+      } catch (error) {
+        if (status) status.textContent = error?.message || "No se pudo vincular.";
+      }
+    });
+  }
+  workspaceLinks.querySelectorAll("[data-workspace-link-remove]").forEach((removeBtn) => {
+    removeBtn.addEventListener("click", async () => {
+      const linkId = String(removeBtn.dataset.workspaceLinkRemove || "").trim();
+      if (!linkId) return;
+      if (!window.confirm("¿Eliminar este vínculo? (No quita miembros automáticamente)")) return;
+      try {
+        await postJsonWithDbRetry("/api/workspace_link_delete", { id: linkId });
+        const links = await safeWorkspaceApi(`/api/workspace_links?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}`, { rows: [] });
+        state.currentWorkspaceLinks = links.rows || [];
+        renderWorkspaceLinks(state.currentWorkspaceLinks);
+      } catch (error) {
+        alert(error?.message || "No se pudo eliminar.");
       }
     });
   });
@@ -12909,6 +13029,11 @@ const loadWorkspaceDetail = async (workspaceId) => {
     members = await safeWorkspaceApi(`/api/workspace_members?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [] });
   }
   state.currentWorkspaceMembers = members.rows || [];
+  let links = { rows: [] };
+  if (canManageWorkspace) {
+    links = await safeWorkspaceApi(`/api/workspace_links?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [] });
+  }
+  state.currentWorkspaceLinks = links.rows || [];
 
   // Evitar "stampede" de decenas de requests al entrar en el workspace.
   let billing = {};
@@ -13012,6 +13137,7 @@ const loadWorkspaceDetail = async (workspaceId) => {
   renderWorkspaceCompanySwitcher(companies);
   renderWorkspaceCompanies(companies);
   renderWorkspaceMembers(state.currentWorkspaceMembers || []);
+  renderWorkspaceLinks(state.currentWorkspaceLinks || []);
   renderWorkspaceClientBase(workspaceClients.rows || []);
   renderWorkspaceClientDetail(null);
   renderWorkspaceModules(detail.modules || []);
@@ -40771,6 +40897,7 @@ if (workspaceNewBtn) {
     state.currentWorkspaceClients = [];
 	    fillWorkspaceForm({
 	      nombre: "",
+	      kind: "Directo",
 	      slug: "",
 	      estado: "Activo",
 	      plan: "Enterprise",
@@ -40784,6 +40911,7 @@ if (workspaceNewBtn) {
     renderWorkspaceLauncher({}, []);
     renderWorkspaceCompanies([]);
     renderWorkspaceMembers([]);
+    renderWorkspaceLinks([]);
     renderWorkspaceClientBase([]);
     renderWorkspaceClientDetail(null);
     renderWorkspaceModules([]);
@@ -40833,6 +40961,71 @@ if (workspaceNewBtn) {
   });
 }
 
+const WORKSPACE_CUSTOMER_MODULE_CHOICES = [
+  { key: "facturas_recibidas", label: "Importador Facturas" },
+  { key: "registro_horario", label: "Registro horario" },
+  { key: "rrhh", label: "RRHH" },
+  { key: "portal_cliente", label: "Portal cliente" },
+  { key: "documental", label: "Documental" },
+  { key: "crm360", label: "CRM 360" },
+  { key: "facturacion", label: "Facturación" },
+  { key: "automatizaciones", label: "Automatizaciones" },
+  { key: "copilot", label: "Copilot" },
+];
+
+const openWorkspaceCustomerModal = () => {
+  if (!workspaceCustomerModal || !workspaceCustomerForm) return false;
+  const current = state.workspaces?.find((w) => String(w.id || "") === String(state.currentWorkspaceId || "")) || {};
+  const currentKind = String(current.kind || "").trim();
+  const partnerField = workspaceCustomerForm.querySelector('[name="partner_workspace_slug"]');
+  if (partnerField) {
+    partnerField.value = currentKind === "Gestoría" ? String(current.slug || "") : "";
+  }
+  const packEl = workspaceCustomerForm.querySelector('[name="pack"]');
+  if (packEl) packEl.value = "gestoria_min";
+  const allEl = workspaceCustomerForm.querySelector('[name="enable_all"]');
+  if (allEl) allEl.checked = false;
+  const defaults = new Set(["crm360", "documental", "portal_cliente", "facturas_recibidas", "registro_horario"]);
+  if (workspaceCustomerModules) {
+    workspaceCustomerModules.innerHTML = WORKSPACE_CUSTOMER_MODULE_CHOICES.map((m) => {
+      const checked = defaults.has(m.key) ? "checked" : "";
+      return `<label style="display:flex;gap:10px;align-items:center"><input type="checkbox" data-ws-module="${escapeHtml(m.key)}" ${checked} /> ${escapeHtml(m.label)}</label>`;
+    }).join("");
+  }
+  if (workspaceCustomerStatus) workspaceCustomerStatus.textContent = "";
+  workspaceCustomerModal.classList.remove("hidden");
+  document.body.classList.add("modal-open");
+  return true;
+};
+
+const closeWorkspaceCustomerModal = () => {
+  if (!workspaceCustomerModal) return;
+  workspaceCustomerModal.classList.add("hidden");
+  document.body.classList.remove("modal-open");
+};
+
+if (workspaceCustomerModalClose) {
+  workspaceCustomerModalClose.addEventListener("click", closeWorkspaceCustomerModal);
+}
+if (workspaceCustomerCancelBtn) {
+  workspaceCustomerCancelBtn.addEventListener("click", closeWorkspaceCustomerModal);
+}
+if (workspaceCustomerCreateBtn) {
+  workspaceCustomerCreateBtn.addEventListener("click", () => {
+    try {
+      workspaceCustomerForm?.requestSubmit();
+    } catch {
+      // fallback
+      workspaceCustomerForm?.dispatchEvent(new Event("submit"));
+    }
+  });
+}
+if (workspaceCustomerModal) {
+  workspaceCustomerModal.addEventListener("click", (event) => {
+    if (event.target === workspaceCustomerModal) closeWorkspaceCustomerModal();
+  });
+}
+
 if (workspaceNewCustomerBtn) {
   workspaceNewCustomerBtn.addEventListener("click", async () => {
     const authUser = getAuthScopeUser();
@@ -40840,25 +41033,57 @@ if (workspaceNewCustomerBtn) {
       alert("No autorizado.");
       return;
     }
-    const wsName = (window.prompt("Nombre del cliente / workspace", "") || "").trim();
-    if (!wsName) return;
-    const empresaNombre = (window.prompt("Razón social (empresa operativa)", wsName) || "").trim();
-    if (!empresaNombre) return;
-    const empresaNif = (window.prompt("CIF/NIF (opcional)", "") || "").trim();
-    const empresaDireccion = (window.prompt("Dirección / centro (opcional)", "") || "").trim();
+    if (!openWorkspaceCustomerModal()) {
+      alert("No se pudo abrir el formulario de cliente.");
+    }
+  });
+}
+
+if (workspaceCustomerForm) {
+  workspaceCustomerForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const authUser = getAuthScopeUser();
+    if (!authUser || !isPrivilegedUser(authUser)) {
+      alert("No autorizado.");
+      return;
+    }
+    const formData = new FormData(workspaceCustomerForm);
+    const wsName = String(formData.get("workspace_nombre") || "").trim();
+    const empresaNombre = String(formData.get("empresa_nombre") || wsName).trim();
+    if (!wsName || !empresaNombre) {
+      if (workspaceCustomerStatus) workspaceCustomerStatus.textContent = "Nombre y empresa requeridos.";
+      return;
+    }
+    const partnerSlug = String(formData.get("partner_workspace_slug") || "").trim();
+    const enableAll = String(formData.get("enable_all") || "").trim().toLowerCase() === "on";
+    const modules = [];
+    if (!enableAll && workspaceCustomerModules) {
+      workspaceCustomerModules.querySelectorAll('input[type="checkbox"][data-ws-module]').forEach((cb) => {
+        if (cb && cb.checked) {
+          const k = String(cb.dataset.wsModule || "").trim();
+          if (k) modules.push(k);
+        }
+      });
+    }
     try {
-      const data = await postJsonWithDbRetry("/api/workspace_customer_create", {
+      if (workspaceCustomerStatus) workspaceCustomerStatus.textContent = "Creando cliente...";
+      const payload = {
         workspace_nombre: wsName,
         empresa_nombre: empresaNombre,
-        empresa_nif: empresaNif,
-        empresa_direccion: empresaDireccion,
-      });
+        empresa_nif: String(formData.get("empresa_nif") || "").trim(),
+        empresa_direccion: String(formData.get("empresa_direccion") || "").trim(),
+        kind: "Directo",
+      };
+      if (partnerSlug) payload.partner_workspace_slug = partnerSlug;
+      if (!enableAll) payload.modules_enabled = modules;
+      const data = await postJsonWithDbRetry("/api/workspace_customer_create", payload);
       if (data?.error) throw new Error(data.error);
+      closeWorkspaceCustomerModal();
       state.currentWorkspaceId = String(data.workspace_id || "");
       await loadWorkspaceCentral();
       if (workspaceFormStatus) workspaceFormStatus.textContent = "Cliente creado.";
     } catch (error) {
-      alert(error?.message || "No se pudo crear el cliente.");
+      if (workspaceCustomerStatus) workspaceCustomerStatus.textContent = error?.message || "No se pudo crear el cliente.";
     }
   });
 }
