@@ -3054,6 +3054,8 @@ const expandServiceAliases = (services) => {
   if (set.has("hipotecas")) set.add("financiaciones");
   if (set.has("administracion fincas")) set.add("administracion de fincas");
   if (set.has("administracion de fincas")) set.add("administracion fincas");
+  if (set.has("administracion fincas") || set.has("administracion de fincas")) set.add("fincas");
+  if (set.has("fincas")) set.add("administracion fincas");
   return Array.from(set);
 };
 
@@ -3128,9 +3130,8 @@ const getPrimaryRestrictedHomeService = (user) => {
   const services = expandServiceAliases(parseServiceList(user.servicio || ""));
   for (const service of services) {
     if (service === "inmobiliaria") return "inmobiliaria";
-    if (service === "gestoria" || service === "administracion fincas" || service === "administracion de fincas") {
-      return "gestoria";
-    }
+    if (service === "gestoria") return "gestoria";
+    if (service === "fincas" || service === "administracion fincas" || service === "administracion de fincas") return "fincas";
     if (service === "seguros") return "seguros";
     if (service === "financiaciones" || service === "hipotecas") return "financiaciones";
   }
@@ -3147,7 +3148,7 @@ const resolveRestrictedCompanyAccess = (empresaName) => {
   const fincasServices = [
     userCanAccessService("seguros") ? "seguros" : "",
     userCanAccessService("gestoria") ? "gestoria" : "",
-    userCanAccessService("administracion fincas") ? "gestoria" : "",
+    userCanAccessService("fincas") ? "fincas" : "",
   ].filter(Boolean);
   if (empresaName === FINCAS_COMPANY && fincasServices.length === 1) {
     return fincasServices[0];
@@ -3219,11 +3220,8 @@ const userCanAccessService = (serviceKey) => {
   if (isPrivilegedUser(user)) return true;
   const allowed = new Set(expandServiceAliases(parseServiceList(user.servicio || "")));
   if (!allowed.size) return false;
-  if (normalized === "administracion fincas") {
-    return allowed.has("administracion fincas") || allowed.has("gestoria");
-  }
-  if (normalized === "gestoria") {
-    return allowed.has("gestoria") || allowed.has("administracion fincas");
+  if (normalized === "fincas") {
+    return allowed.has("fincas") || allowed.has("administracion fincas") || allowed.has("administracion de fincas");
   }
   if (normalized === "hipotecas") {
     return allowed.has("hipotecas") || allowed.has("financiaciones");
@@ -6394,11 +6392,9 @@ const renderWorkspaceLauncher = (workspace = {}, modules = []) => {
 	      tenantEnabledKeys.add("registro_horario");
 	      if (services.includes("inmobiliaria")) tenantEnabledKeys.add("inmobiliaria");
 	      if (services.includes("seguros")) tenantEnabledKeys.add("seguros");
-	      if (services.includes("gestoria") || services.includes("administracion fincas") || services.includes("administracion de fincas")) {
-	        tenantEnabledKeys.add("gestoria");
-	      }
+	      if (services.includes("gestoria")) tenantEnabledKeys.add("gestoria");
 	      if (services.includes("financiaciones") || services.includes("hipotecas")) tenantEnabledKeys.add("financiacion");
-	      if (services.includes("fincas")) tenantEnabledKeys.add("fincas");
+	      if (services.includes("fincas") || services.includes("administracion fincas") || services.includes("administracion de fincas")) tenantEnabledKeys.add("fincas");
 	      if (services.includes("reformas") || services.includes("obras")) tenantEnabledKeys.add("reformas");
 	    } else {
 	      enabledKeys.add("crm360");

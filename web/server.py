@@ -22151,7 +22151,7 @@ def ensure_partner_membership(conn, source_workspace_id, target_workspace_id, *,
             continue
         mrole_norm = _normalize_workspace_member_role(mrole)
         services = _normalize_service_tokens(services_by_user_id.get(uid, ""))
-        is_gestoria_staff = bool(services.intersection({"GESTORIA", "ADMINISTRACION FINCAS", "FINCAS"}))
+        is_gestoria_staff = "GESTORIA" in services
         if mrole_norm not in {"Owner", "Admin"} and not is_gestoria_staff:
             continue
         before = fetch_workspace_member(conn, tgt, uid)
