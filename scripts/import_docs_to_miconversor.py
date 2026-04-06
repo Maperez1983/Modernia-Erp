@@ -25,6 +25,7 @@ import os
 import re
 import sys
 from dataclasses import dataclass
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 
@@ -107,6 +108,15 @@ def _iter_docs(root: Path) -> Iterable[Path]:
             yield p
 
 
+def _sanitize_filename(value: str) -> str:
+    raw = str(value or "").strip()
+    raw = re.sub(r"\s+", " ", raw)
+    raw = re.sub(r"[^A-Za-z0-9._ -]+", "", raw)
+    raw = raw.strip(" ._-")
+    raw = raw.replace(" ", "_")
+    return raw[:120] or "autonomo"
+
+
 @dataclass
 class DocRecord:
     fecha: _dt.date
@@ -127,7 +137,7 @@ class DocRecord:
     ocr_error: str
 
 
-def _parse_doc(path: Path, tercero_accounts: Dict[str, str], counters: Dict[str, int], *, pdf_pages: int = 2) -> DocRecord:
+def _parse_doc(path: Path, *, pdf_pages: int = 2) -> DocRecord:
     text, method, err = extract_text(path, pdf_pages=pdf_pages)
     parsed = enrich_parsed(path, text, parse_invoice_text(text))
     tercero = (parsed.get("tercero") or "").strip()
@@ -146,17 +156,6 @@ def _parse_doc(path: Path, tercero_accounts: Dict[str, str], counters: Dict[str,
     total = round(_safe_float(parsed.get("total")) or round(base + iva - irpf, 2), 2)
     iva_pct = _infer_iva_pct(parsed)
 
-    # Subcuenta de tercero: determinística por NIF o nombre
-    key = (nif or norm(tercero) or path.stem).strip()
-    key = key or path.stem
-    kind_prefix = "430" if tipo == "venta" else "410"
-    account_key = f"{kind_prefix}:{key}"
-    if account_key not in tercero_accounts:
-        counters.setdefault(kind_prefix, 0)
-        counters[kind_prefix] += 1
-        tercero_accounts[account_key] = _pad_account(kind_prefix, counters[kind_prefix])
-    tercero_subcuenta = tercero_accounts[account_key]
-
     gasto_ingreso = _guess_gasto_ingreso_account(parsed)
     iva_bucket = "repercutido" if tipo == "venta" else "soportado"
 
@@ -171,7 +170,7 @@ def _parse_doc(path: Path, tercero_accounts: Dict[str, str], counters: Dict[str,
         irpf=irpf,
         total=total,
         iva_pct=iva_pct,
-        tercero_subcuenta=tercero_subcuenta,
+        tercero_subcuenta="",
         gasto_ingreso_subcuenta=gasto_ingreso,
         iva_bucket=iva_bucket,
         source_file=str(path),
@@ -179,6 +178,56 @@ def _parse_doc(path: Path, tercero_accounts: Dict[str, str], counters: Dict[str,
         ocr_error=err or "",
     )
 
+def _assign_tercero_subcuentas(records: List[DocRecord]) -> None:
+    """
+    Asigna `tercero_subcuenta` de forma estable/determinística para evitar dependencia del orden/threads.
+    - Compras -> prefijo 410
+    - Ventas  -> prefijo 430
+    Key preferida: NIF, si no, nombre normalizado.
+    """
+    buckets: Dict[str, Dict[str, str]] = {"410": {}, "430": {}}
+    for prefix in ("410", "430"):
+        keys = set()
+        for r in records:
+            p = "430" if (r.tipo or "").strip().lower() == "venta" else "410"
+            if p != prefix:
+                continue
+            key = (r.nif or "").strip() or norm(r.tercero or "")
+            key = key.strip() or os.path.basename(r.source_file)
+            keys.add(key)
+        for idx, key in enumerate(sorted(keys), start=1):
+            buckets[prefix][key] = _pad_account(prefix, idx)
+    for r in records:
+        prefix = "430" if (r.tipo or "").strip().lower() == "venta" else "410"
+        key = (r.nif or "").strip() or norm(r.tercero or "")
+        key = key.strip() or os.path.basename(r.source_file)
+        r.tercero_subcuenta = buckets[prefix].get(key) or _pad_account(prefix, 1)
+
+
+def _scan_folder_docs(folder: Path, *, pdf_pages: int, workers: int = 1, verbose: bool = False) -> List[DocRecord]:
+    docs = sorted(set(_iter_docs(folder)))
+    if not docs:
+        return []
+    workers = int(workers or 1)
+    workers = max(1, min(8, workers))
+    records: List[DocRecord] = []
+    if workers == 1:
+        for idx, p in enumerate(docs, start=1):
+            records.append(_parse_doc(p, pdf_pages=pdf_pages))
+            if verbose and (idx % 50 == 0):
+                print(f"[{folder.name}] {idx}/{len(docs)}")
+        _assign_tercero_subcuentas(records)
+        return records
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        futs = {ex.submit(_parse_doc, p, pdf_pages=pdf_pages): p for p in docs}
+        done = 0
+        for fut in as_completed(futs):
+            records.append(fut.result())
+            done += 1
+            if verbose and (done % 50 == 0):
+                print(f"[{folder.name}] {done}/{len(docs)}")
+    _assign_tercero_subcuentas(records)
+    return records
 
 def _write_output(template_path: Path, out_path: Path, records: List[DocRecord], *, title: str):
     wb = load_workbook(template_path)
@@ -301,33 +350,93 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--root", required=True, help="Carpeta con facturas/tickets (pdf/jpg/png).")
     ap.add_argument("--template", required=True, help="Plantilla MiConversor (empresas).xlsx")
-    ap.add_argument("--out", default="reports/miconversor_autonomos_ocr.xlsx", help="Ruta de salida (XLSX).")
+    ap.add_argument("--out", default="reports/miconversor_autonomos_ocr.xlsx", help="Ruta de salida (XLSX) para modo single.")
+    ap.add_argument("--out-dir", default="", help="Carpeta de salida para modo batch (un XLSX por subcarpeta).")
     ap.add_argument("--pdf-pages", type=int, default=2, help="Máx páginas PDF a leer/OCR.")
+    ap.add_argument("--workers", type=int, default=1, help="Paralelismo (1-8) al procesar documentos.")
+    ap.add_argument("--batch-top-level", action="store_true", help="Genera un XLSX por cada subcarpeta inmediata dentro de --root.")
+    ap.add_argument("--summary", default="", help="Ruta JSON de resumen (opcional).")
+    ap.add_argument("--max-folders", type=int, default=0, help="Límite de carpetas en modo batch (0 = sin límite).")
+    ap.add_argument("--verbose", action="store_true", help="Imprime progreso (útil para lotes grandes).")
     args = ap.parse_args(argv)
 
     root = Path(args.root).expanduser().resolve()
     template = Path(args.template).expanduser().resolve()
     out_path = Path(args.out).expanduser().resolve()
+    out_dir = Path(args.out_dir).expanduser().resolve() if str(args.out_dir or "").strip() else None
+    summary_path = Path(args.summary).expanduser().resolve() if str(args.summary or "").strip() else None
 
     if not root.exists():
         raise SystemExit(f"No existe root: {root}")
     if not template.exists():
         raise SystemExit(f"No existe template: {template}")
 
-    docs = sorted(set(_iter_docs(root)))
-    if not docs:
-        raise SystemExit("No he encontrado PDFs/JPG/PNG en la ruta indicada.")
+    pdf_pages = max(1, int(args.pdf_pages))
+    workers = max(1, min(8, int(args.workers or 1)))
+    verbose = bool(args.verbose)
 
-    tercero_accounts: Dict[str, str] = {}
-    counters: Dict[str, int] = {}
-    records: List[DocRecord] = []
-    for p in docs:
-        rec = _parse_doc(p, tercero_accounts, counters, pdf_pages=max(1, int(args.pdf_pages)))
-        records.append(rec)
+    if not args.batch_top_level:
+        records = _scan_folder_docs(root, pdf_pages=pdf_pages, workers=workers, verbose=verbose)
+        if not records:
+            raise SystemExit("No he encontrado PDFs/JPG/PNG en la ruta indicada.")
+        title = root.name
+        _write_output(template, out_path, records, title=title)
+        if summary_path:
+            payload = {
+                "mode": "single",
+                "root": str(root),
+                "docs": len(records),
+                "with_total": sum(1 for r in records if (r.total or 0.0) > 0),
+                "zero_total": sum(1 for r in records if (r.total or 0.0) <= 0),
+            }
+            summary_path.parent.mkdir(parents=True, exist_ok=True)
+            summary_path.write_text(__import__("json").dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(str(out_path))
+        return 0
 
-    title = root.name
-    _write_output(template, out_path, records, title=title)
-    print(str(out_path))
+    if out_dir is None:
+        out_dir = ROOT / "reports" / "miconversor_autonomos_batch"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Batch por subcarpeta inmediata
+    subfolders = [p for p in sorted(root.iterdir()) if p.is_dir() and not p.name.startswith(".")]
+    if args.max_folders and args.max_folders > 0:
+        subfolders = subfolders[: int(args.max_folders)]
+
+    summary = {
+        "mode": "batch_top_level",
+        "root": str(root),
+        "out_dir": str(out_dir),
+        "folders": [],
+        "totals": {"folders": 0, "docs": 0, "with_total": 0, "zero_total": 0},
+    }
+
+    for folder in subfolders:
+        records = _scan_folder_docs(folder, pdf_pages=pdf_pages, workers=workers, verbose=verbose)
+        if not records:
+            continue
+        if verbose:
+            print(f"[DONE] {folder.name} docs={len(records)}")
+        safe = _sanitize_filename(folder.name)
+        out_file = out_dir / f"{safe}_miconversor.xlsx"
+        _write_output(template, out_file, records, title=folder.name)
+        folder_summary = {
+            "folder": folder.name,
+            "docs": len(records),
+            "with_total": sum(1 for r in records if (r.total or 0.0) > 0),
+            "zero_total": sum(1 for r in records if (r.total or 0.0) <= 0),
+            "out": str(out_file),
+        }
+        summary["folders"].append(folder_summary)
+        summary["totals"]["folders"] += 1
+        summary["totals"]["docs"] += int(folder_summary["docs"])
+        summary["totals"]["with_total"] += int(folder_summary["with_total"])
+        summary["totals"]["zero_total"] += int(folder_summary["zero_total"])
+        print(str(out_file))
+
+    if summary_path:
+        summary_path.parent.mkdir(parents=True, exist_ok=True)
+        summary_path.write_text(__import__("json").dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
     return 0
 
 
