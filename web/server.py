@@ -25266,7 +25266,9 @@ def send_file(handler, path):
 
         # Caché: el HTML nunca se cachea (evita pantallas rotas tras deploy).
         # Los assets estáticos sí pueden cachearse fuerte porque van versionados con `?v=...`.
-        if path.suffix == ".html":
+        # Importante: el service worker NO debe cachearse con immutable, o los clientes se quedan
+        # enganchados a un SW viejo y la UI puede quedar desincronizada tras deploy.
+        if path.suffix == ".html" or path.name == "sw.js":
             handler.send_header("Cache-Control", "no-store")
             handler.send_header("Pragma", "no-cache")
         elif path.suffix in {".js", ".css", ".webmanifest", ".svg", ".png", ".jpg", ".jpeg", ".gif"}:
