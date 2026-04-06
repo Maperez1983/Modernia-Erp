@@ -17035,6 +17035,39 @@ def row_value(row, key, default=None):
             return default
 
 
+def resolve_uploaded_only_param(conn, uploaded_only, *, empresa_id="", table="seguros", uploaded_clause=None):
+    """
+    Many UI flows default to `uploaded_only=1` for Seguros. When there are no uploaded
+    policies yet (no S3 key/url and no linked `gestoria_docs`), the strict filter makes
+    the CRM look "empty". To preserve UX, we fall back to showing all policies when the
+    uploaded subset is empty.
+
+    Returns 1/0 (int) to be used with `(... OR ? = 0)` patterns.
+    """
+    if not uploaded_only:
+        return 0
+    clause = uploaded_clause or uploaded_policy_filter()
+    try:
+        empresa_id = str(empresa_id or "").strip()
+    except Exception:
+        empresa_id = ""
+    try:
+        if empresa_id:
+            row = conn.execute(
+                f"SELECT COUNT(*) AS total FROM {table} WHERE empresa_id = ? AND {clause}",
+                (empresa_id,),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                f"SELECT COUNT(*) AS total FROM {table} WHERE {clause}",
+            ).fetchone()
+        total = int(row_value(row, "total", 0) or 0)
+        return 1 if total > 0 else 0
+    except Exception:
+        # If the probe fails for any reason, prefer availability over strictness.
+        return 0
+
+
 def get_db(db_path):
     if db_is_postgres_enabled():
         return open_postgres_conn(with_row_factory=True)
@@ -40673,7 +40706,8 @@ class Handler(BaseHTTPRequestHandler):
                 f"""
                 SELECT e.nombre AS empresa,
                   (SELECT COUNT(*) FROM movimientos m WHERE m.empresa_id = e.id) AS bdt,
-                  (SELECT COUNT(*) FROM seguros s WHERE s.empresa_id = e.id AND {uploaded_policy_filter("s")}) AS seguros,
+                  (SELECT COUNT(*) FROM seguros s WHERE s.empresa_id = e.id) AS seguros,
+                  (SELECT COUNT(*) FROM seguros s WHERE s.empresa_id = e.id AND {uploaded_policy_filter("s")}) AS seguros_subidas,
                   (SELECT COUNT(*) FROM gestoria g WHERE g.empresa_id = e.id) AS gestoria,
                   (SELECT COUNT(*) FROM hipotecas h WHERE h.empresa_id = e.id) AS hipotecas,
                   (SELECT COUNT(*) FROM alquileres a WHERE a.empresa_id = e.id) AS alquileres,
@@ -40700,7 +40734,14 @@ class Handler(BaseHTTPRequestHandler):
                     where.append("s.empresa_id = ?")
                     values.append(empresa_id)
                 where.append(f"({uploaded_policy_filter('s')} OR ? = 0)")
-                values.append(1 if uploaded_only else 0)
+                values.append(
+                    resolve_uploaded_only_param(
+                        conn,
+                        uploaded_only,
+                        empresa_id=empresa_id,
+                        uploaded_clause=uploaded_policy_filter("s"),
+                    )
+                )
                 total = conn.execute(
                     f"""
                     SELECT COUNT(DISTINCT c.id) AS total
@@ -40906,7 +40947,14 @@ class Handler(BaseHTTPRequestHandler):
                     where.append("s.empresa_id = ?")
                     values.append(empresa_id)
                 where.append(f"({uploaded_policy_filter('s')} OR ? = 0)")
-                values.append(1 if uploaded_only else 0)
+                values.append(
+                    resolve_uploaded_only_param(
+                        conn,
+                        uploaded_only,
+                        empresa_id=empresa_id,
+                        uploaded_clause=uploaded_policy_filter("s"),
+                    )
+                )
                 rows = conn.execute(
                     f"""
                     SELECT DISTINCT c.id, c.nombre
@@ -41504,6 +41552,12 @@ class Handler(BaseHTTPRequestHandler):
             now = datetime.now(timezone.utc).isoformat()
             uploaded_only = (params.get("uploaded_only", ["1"])[0] or "1").strip() in ("1", "true", "yes")
             uploaded_filter_sql = uploaded_policy_filter()
+            uploaded_param = resolve_uploaded_only_param(
+                conn,
+                uploaded_only,
+                empresa_id=empresa_id,
+                uploaded_clause=uploaded_filter_sql,
+            )
             if not cliente_id:
                 json_response(self, {"error": "cliente_id requerido"}, status=400)
                 return
@@ -41512,8 +41566,8 @@ class Handler(BaseHTTPRequestHandler):
             if empresa_id:
                 where.append("empresa_id = ?")
                 values.append(empresa_id)
-            if uploaded_only:
-                where.append(uploaded_policy_filter())
+            where.append(f"({uploaded_filter_sql} OR ? = 0)")
+            values.append(uploaded_param)
             rows = conn.execute(
                 f"""
                 SELECT
@@ -41543,7 +41597,7 @@ class Handler(BaseHTTPRequestHandler):
                       AND ({uploaded_filter_sql} OR ? = 0)
                     ORDER BY COALESCE(fecha_efecto, created_at) DESC
                     """,
-                    (tomador, empresa_id, empresa_id, 1 if uploaded_only else 0),
+                    (tomador, empresa_id, empresa_id, uploaded_param),
                 ).fetchall()
                 if not tomador_rows:
                     # Fallback robusto: coincidencia por tokens normalizados de nombre (orden flexible).
@@ -41563,7 +41617,7 @@ class Handler(BaseHTTPRequestHandler):
                               AND ({uploaded_filter_sql} OR ? = 0)
                             ORDER BY COALESCE(fecha_efecto, created_at) DESC
                             """,
-                            (empresa_id, empresa_id, 1 if uploaded_only else 0),
+                            (empresa_id, empresa_id, uploaded_param),
                         ).fetchall()
                         matched = []
                         wanted_set = set(wanted_tokens)
@@ -41611,7 +41665,7 @@ class Handler(BaseHTTPRequestHandler):
                               AND ({uploaded_filter_sql} OR ? = 0)
                             ORDER BY COALESCE(fecha_efecto, created_at) DESC
                             """,
-                            (cliente_id, empresa_id, empresa_id, 1 if uploaded_only else 0),
+                            (cliente_id, empresa_id, empresa_id, uploaded_param),
                         ).fetchall()
                 if not rows:
                     rows = [
@@ -41664,7 +41718,7 @@ class Handler(BaseHTTPRequestHandler):
             compania_expr = "LOWER(TRIM(compania))"
             exclude_sin_seguro = f"({compania_expr} IS NULL OR {compania_expr} = '' OR {compania_expr} != 'sin seguro')"
             uploaded_clause = uploaded_policy_filter()
-            uploaded_param = 1 if uploaded_only else 0
+            uploaded_param = resolve_uploaded_only_param(conn, uploaded_only, empresa_id=empresa_id, uploaded_clause=uploaded_clause)
             por_ramo_raw = conn.execute(
                 f"""
                 SELECT ramo
@@ -42889,7 +42943,14 @@ class Handler(BaseHTTPRequestHandler):
                     where.append("c.estado = ?")
                     values.append(estado)
                 where.append(f"({uploaded_policy_filter('s')} OR ? = 0)")
-                values.append(1 if uploaded_only else 0)
+                values.append(
+                    resolve_uploaded_only_param(
+                        conn,
+                        uploaded_only,
+                        empresa_id=empresa_id,
+                        uploaded_clause=uploaded_policy_filter("s"),
+                    )
+                )
                 where_clause = f"WHERE {' AND '.join(where)}"
                 rows = conn.execute(
                     f"""
@@ -44573,15 +44634,17 @@ class Handler(BaseHTTPRequestHandler):
                 (empresa_id,),
             ).fetchone()
 
+            uploaded_clause = uploaded_policy_filter()
+            uploaded_param = resolve_uploaded_only_param(conn, uploaded_only, empresa_id=empresa_id, uploaded_clause=uploaded_clause)
             polizas = conn.execute(
                 f"""
                 SELECT COUNT(*) AS total
                 FROM seguros
                 WHERE empresa_id = ?
-                  AND (COALESCE(poliza_key, '') <> '' OR COALESCE(poliza_url, '') <> '' OR ? = 0)
+                  AND ({uploaded_clause} OR ? = 0)
                   AND {in_vigor_policy_filter()}
                 """,
-                (empresa_id, 1 if uploaded_only else 0),
+                (empresa_id, uploaded_param),
             ).fetchone()
 
             json_response(
@@ -44673,7 +44736,7 @@ class Handler(BaseHTTPRequestHandler):
             uploaded_clause = uploaded_policy_filter()
             in_vigor_expr = in_vigor_policy_filter()
             estado_bucket_expr = seguro_estado_bucket_expr()
-            uploaded_param = 1 if uploaded_only else 0
+            uploaded_param = resolve_uploaded_only_param(conn, uploaded_only, empresa_id=empresa_id, uploaded_clause=uploaded_clause)
 
             current = conn.execute(
                 f"""
@@ -45342,6 +45405,8 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 days_int = 30
             estado_bucket_expr = seguro_estado_bucket_expr()
+            uploaded_clause = uploaded_policy_filter()
+            uploaded_param = resolve_uploaded_only_param(conn, uploaded_only, empresa_id=empresa_id, uploaded_clause=uploaded_clause)
             rows_venc = conn.execute(
                 f"""
                 SELECT
@@ -45356,14 +45421,14 @@ class Handler(BaseHTTPRequestHandler):
                   COALESCE(fecha_vencimiento, DATE(fecha_efecto, '+1 year')) AS fecha_vencimiento
                 FROM seguros
                 WHERE empresa_id = ?
-                  AND ({uploaded_policy_filter()} OR ? = 0)
+                  AND ({uploaded_clause} OR ? = 0)
                   AND COALESCE(fecha_vencimiento, DATE(fecha_efecto, '+1 year')) IS NOT NULL
                   AND DATE(COALESCE(fecha_vencimiento, DATE(fecha_efecto, '+1 year'))) BETWEEN DATE('now','localtime')
                       AND DATE('now','localtime', '+{days_int} days')
                 ORDER BY DATE(COALESCE(fecha_vencimiento, DATE(fecha_efecto, '+1 year'))) ASC
                 LIMIT 50
                 """,
-                (empresa_id, 1 if uploaded_only else 0),
+                (empresa_id, uploaded_param),
             ).fetchall()
             rows_efecto = conn.execute(
                 f"""
@@ -45379,7 +45444,7 @@ class Handler(BaseHTTPRequestHandler):
                   COALESCE(fecha_vencimiento, DATE(fecha_efecto, '+1 year')) AS fecha_vencimiento
                 FROM seguros
                 WHERE empresa_id = ?
-                  AND ({uploaded_policy_filter()} OR ? = 0)
+                  AND ({uploaded_clause} OR ? = 0)
                   AND fecha_efecto IS NOT NULL
                   AND DATE(fecha_efecto) BETWEEN DATE('now','localtime')
                       AND DATE('now','localtime', '+{days_int} days')
@@ -45387,7 +45452,7 @@ class Handler(BaseHTTPRequestHandler):
                 ORDER BY DATE(fecha_efecto) ASC
                 LIMIT 50
                 """,
-                (empresa_id, 1 if uploaded_only else 0),
+                (empresa_id, uploaded_param),
             ).fetchall()
             items = [dict(r) for r in rows_efecto] + [dict(r) for r in rows_venc]
             items.sort(key=lambda r: str(r.get("fecha_efecto") or r.get("fecha_vencimiento") or ""))
@@ -45405,7 +45470,7 @@ class Handler(BaseHTTPRequestHandler):
             uploaded_clause = uploaded_policy_filter()
             compania_expr = "LOWER(TRIM(compania))"
             exclude_sin_seguro = f"({compania_expr} IS NULL OR {compania_expr} = '' OR {compania_expr} != 'sin seguro')"
-            uploaded_param = 1 if uploaded_only else 0
+            uploaded_param = resolve_uploaded_only_param(conn, uploaded_only, empresa_id=empresa_id, uploaded_clause=uploaded_clause)
             total = conn.execute(
                 f"""
                 SELECT COUNT(*) AS total
@@ -46313,7 +46378,14 @@ class Handler(BaseHTTPRequestHandler):
                 values.append(empresa_id)
             if tabla == "seguros":
                 where.append(f"({uploaded_policy_filter('t')} OR ? = 0)")
-                values.append(1 if uploaded_only else 0)
+                values.append(
+                    resolve_uploaded_only_param(
+                        conn,
+                        uploaded_only,
+                        empresa_id=empresa_id,
+                        uploaded_clause=uploaded_policy_filter("t"),
+                    )
+                )
 
             if year_filter and tabla == "movimientos":
                 where.append("t.anio = ?")

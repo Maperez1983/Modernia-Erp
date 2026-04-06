@@ -38217,6 +38217,7 @@ const loadTable = () => {
     tabla = state.tablas.find((t) => t !== "movimientos");
     tablaSelect.value = tabla;
   }
+  const showActions = tabla === "hipotecas";
   const q = searchInput.value.trim();
   const params = new URLSearchParams({
     tabla,
