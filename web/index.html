@@ -8,7 +8,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Verifika²" />
     <title>Verifika² · CRM & Portal</title>
-    <link rel="stylesheet" href="styles.css?v=158" />
+    <link rel="stylesheet" href="styles.css?v=159" />
     <link rel="manifest" href="manifest.webmanifest?v=14" />
     <link rel="icon" href="/icons/ios/v28/icon-192.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/icons/ios/v28/apple-touch-icon-180.png" />
@@ -26,8 +26,7 @@
         <img src="/assets/verifika2/verifika2_wordmark_traced_dark.svg" alt="Verifika²" />
         <div class="brand-copy">
           <span class="brand-kicker">Verifika²</span>
-          <h1>CRM · Operativa inmobiliaria</h1>
-          <p>Gestiona captación, documentación, verificación y publicación de inmuebles reales de mercado. Portal Verifika² (próximamente).</p>
+          <h1>CRM 360</h1>
         </div>
       </div>
       <div class="meta">
@@ -46,7 +45,7 @@
       <section class="hero" id="homeSection">
         <div class="hero-shell">
           <div class="hero-copy">
-            <h2>CRM Verifika² <span class="pill">Beta</span></h2>
+            <h2>CRM 360 <span class="pill">Beta</span></h2>
             <p>Panel operativo: inmuebles, agenda, documentación y automatizaciones. Preparado para un portal de inmuebles verificados.</p>
             <div class="toolbar" id="tableToolbar">
               <span class="pill">Año</span>
@@ -7406,10 +7405,9 @@
         </div>
       </section>
     </main>
-    <footer class="app-footer">
-      <div>by Lex &amp; Vere</div>
-      <img src="/assets/lexvere_logo.svg" alt="Lex &amp; Vere" />
-    </footer>
+	    <footer class="app-footer">
+	      <div>Verifika²</div>
+	    </footer>
     <div id="actionModal" class="modal hidden">
       <div class="modal-content">
         <div class="modal-header">
@@ -7634,7 +7632,7 @@
     <script src="ui-foundation.js?v=2"></script>
     <script src="app-auth.js?v=9"></script>
     <script src="app-routing.js?v=7"></script>
-    <script src="app.js?v=405"></script>
+    <script src="app.js?v=406"></script>
     <script>
       (function () {
         if (!("serviceWorker" in navigator)) return;
@@ -7662,7 +7660,7 @@
           }
         } catch {}
         window.addEventListener("load", function () {
-          navigator.serviceWorker.register("/sw.js?v=38").catch(function () {});
+          navigator.serviceWorker.register("/sw.js?v=39").catch(function () {});
         });
       })();
     </script>

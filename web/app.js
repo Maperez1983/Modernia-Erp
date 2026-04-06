@@ -3,11 +3,12 @@
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v38";
+const APP_SW_VERSION = "v39";
 
 // Workspace tenant por defecto del producto (branding de software). Mantiene compatibilidad con slugs legacy.
 const DEFAULT_TENANT_WORKSPACE_SLUG = "verifika2";
 const LEGACY_TENANT_WORKSPACE_SLUGS = new Set(["modernia", "grupomodernia", "grupo-modernia"]);
+const DEFAULT_TENANT_WORKSPACE_NAME = "Modernia";
 const normalizeSlugLike = (value) =>
   String(value || "")
     .trim()
@@ -4304,7 +4305,7 @@ const getWorkspaceDisplayName = (workspace = null) => {
   const normalized = normalizeWorkspaceIdentifier(rawName);
   if (!normalized) return "Workspace";
   if (["modernia", "grupomodernia", "grupo-modernia", "verifika2", "verifika", "verifika-2"].includes(normalized)) {
-    return "Verifika²";
+    return DEFAULT_TENANT_WORKSPACE_NAME;
   }
   return rawName;
 };
@@ -14012,11 +14013,17 @@ const syncHoldingUrlParams = () => {
 
 const openHolding = (options = {}) => {
   const user = getAuthScopeUser();
-  if (!canAccessSharedHomeModules(user)) {
+  const mode = options.mode === "tenant" ? "tenant" : "platform";
+  const canManageWorkspace = Boolean(user && isPrivilegedUser(user));
+  // En modo plataforma (admin), exigimos permisos globales. En tenant, cualquier usuario autenticado debe poder entrar.
+  if (mode === "platform" && !canAccessSharedHomeModules(user)) {
     goHome();
     return;
   }
-  const mode = options.mode === "tenant" ? "tenant" : "platform";
+  if (!user) {
+    goHome();
+    return;
+  }
   const requestedWorkspace = normalizeTenantWorkspaceSlug(String(options.workspace || "").trim(), "");
   let requestedView = String(options.view || "").trim();
   const requestedEngine = String(options.engine || "").trim();
@@ -14027,6 +14034,12 @@ const openHolding = (options = {}) => {
   const requestedRrhh = (("rrhh" in options) ? String(options.rrhh || "") : String(urlParams.get("rrhh") || ""))
     .trim()
     .toLowerCase();
+  if (mode === "tenant" && !canManageWorkspace) {
+    const viewKey = normalizeSimple(requestedView);
+    if (viewKey && !["operations", "rrhh"].includes(viewKey)) {
+      requestedView = "";
+    }
+  }
   state.currentWorkspaceEntryMode = mode;
   state.currentWorkspaceTarget = requestedWorkspace || (mode === "tenant" ? DEFAULT_TENANT_WORKSPACE_SLUG : "");
   state.workspaceRrhhEntry = requestedRrhh === "self" ? "self" : "";

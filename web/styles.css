@@ -7088,6 +7088,14 @@ body.theme-operativa .meta-user select {
 
 body.theme-operativa #authLogoutBtn {
   justify-self: start;
+  color: rgba(255, 248, 236, 0.92);
+  border-color: rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+body.theme-operativa #authLogoutBtn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.38);
 }
 
 body.theme-operativa .meta-status {
