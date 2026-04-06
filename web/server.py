@@ -17035,6 +17035,32 @@ def row_value(row, key, default=None):
             return default
 
 
+def row_to_cells(row, columns):
+    """
+    Normaliza una fila (sqlite3.Row, tuple_row, dict_row) a una lista de celdas
+    siguiendo el orden de `columns`.
+
+    En Postgres usamos dict_row por defecto (with_row_factory=True); `list(dict_row)`
+    devuelve las *claves*, lo que rompe los listados (todas las filas iguales con los
+    nombres de columna). Esta función evita ese bug.
+    """
+    if row is None:
+        return [None for _ in columns]
+    if isinstance(row, dict):
+        return [row.get(col) for col in columns]
+    try:
+        # sqlite3.Row soporta acceso por nombre.
+        if hasattr(row, "keys"):
+            return [row[col] for col in columns]
+    except Exception:
+        pass
+    try:
+        # tuple_row / list-like
+        return list(row)
+    except Exception:
+        return [row_value(row, col) for col in columns]
+
+
 def resolve_uploaded_only_param(conn, uploaded_only, *, empresa_id="", table="seguros", uploaded_clause=None):
     """
     Many UI flows default to `uploaded_only=1` for Seguros. When there are no uploaded
@@ -43062,7 +43088,7 @@ class Handler(BaseHTTPRequestHandler):
             ]
             if include_id:
                 columns = ["id"] + columns
-            json_response(self, {"columns": columns, "rows": [list(r) for r in rows]})
+            json_response(self, {"columns": columns, "rows": [row_to_cells(r, columns) for r in rows]})
             return
 
         if path == "/api/inmuebles":
@@ -44527,7 +44553,7 @@ class Handler(BaseHTTPRequestHandler):
                 """,
                 values,
             ).fetchall()
-            json_response(self, {"columns": columns, "rows": [list(r) for r in rows]})
+            json_response(self, {"columns": columns, "rows": [row_to_cells(r, columns) for r in rows]})
             return
 
         if path == "/api/hipoteca_ficha_print":
@@ -46459,9 +46485,10 @@ class Handler(BaseHTTPRequestHandler):
                 f"{limit_clause}"
             )
             rows = conn.execute(query, values).fetchall()
+            out_columns = ["empresa"] + visible_columns
             json_response(
                 self,
-                {"columns": ["empresa"] + visible_columns, "rows": [list(r) for r in rows]},
+                {"columns": out_columns, "rows": [row_to_cells(r, out_columns) for r in rows]},
             )
             return
 
