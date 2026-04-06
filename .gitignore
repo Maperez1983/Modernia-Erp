@@ -11,4 +11,5 @@ __pycache__/
 .pytest_cache/
 web/uploads/
 reports/catastro/
+reports/aon_miconversor/
 .venv/
