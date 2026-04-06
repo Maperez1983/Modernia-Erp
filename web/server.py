@@ -26384,7 +26384,7 @@ class Handler(BaseHTTPRequestHandler):
             # Importante: NO bloqueamos aquí con migraciones pesadas (evita 502/timeouts en cold start).
             # En su lugar:
             # - Si ya está listo: 200
-            # - Si conecta a DB pero faltan tablas: 503 bootstrapping (y disparamos bootstrap en background)
+            # - Si conecta a DB pero aún no está listo: 503 bootstrapping (y disparamos bootstrap en background)
             # - Si no conecta: 503 con error
             # Circuit breaker: cacheamos el resultado unos segundos para evitar avalanchas.
             ttl_s = max(1.0, float(os.environ.get("APP_HEALTH_CACHE_SECONDS", "3") or 3))
@@ -26397,7 +26397,7 @@ class Handler(BaseHTTPRequestHandler):
                         body = Handler._health_last_body or b""
                     else:
                         # Siempre hacemos un probe rápido: si Postgres ha reiniciado tras marcar _db_ready,
-                        # evitamos "falsos OK" que luego explotan en /api/workspace_detail.
+                        # evitamos "falsos OK" que luego explotan en endpoints posteriores.
                         try:
                             timeout_s = int(os.environ.get("APP_HEALTH_PG_TIMEOUT", "4") or 4)
                         except Exception:
@@ -26437,21 +26437,6 @@ class Handler(BaseHTTPRequestHandler):
                                         raise
                                 try:
                                     conn.execute("SELECT 1")
-                                    # Si el esquema principal ya existe, marcamos ready para desbloquear el front.
-                                    if not Handler._db_ready:
-                                        try:
-                                            row = conn.execute("SELECT to_regclass('public.workspaces') AS t").fetchone()
-                                            exists = None
-                                            try:
-                                                exists = row.get("t") if isinstance(row, dict) else row[0]
-                                            except Exception:
-                                                exists = None
-                                            if exists:
-                                                Handler._db_ready = True
-                                                Handler._db_ready_last_error = ""
-                                                Handler._db_ready_last_attempt_at = now_ts
-                                        except Exception:
-                                            pass
                                 finally:
                                     try:
                                         conn.close()
@@ -26461,19 +26446,22 @@ class Handler(BaseHTTPRequestHandler):
                                 conn = open_sqlite_conn(self.db_path, with_row_factory=False)
                                 try:
                                     conn.execute("SELECT 1")
-                                    if not Handler._db_ready:
-                                        Handler._db_ready = True
-                                        Handler._db_ready_last_error = ""
-                                        Handler._db_ready_last_attempt_at = now_ts
                                 finally:
                                     try:
                                         conn.close()
                                     except Exception:
                                         pass
-                            status = 200
-                            body = f"ok backend={backend}".encode("utf-8")
-                            if not Handler._db_ready:
-                                # Arranca bootstrap en background, pero no bloquea readiness.
+                            if Handler._db_ready:
+                                status = 200
+                                body = f"ok backend={backend}".encode("utf-8")
+                            else:
+                                # DB responde pero todavía no está lista (bootstrap/migraciones en curso).
+                                # El front espera 503 hasta que este endpoint devuelva 200.
+                                last_err = str(getattr(Handler, "_db_ready_last_error", "") or "").strip()
+                                err_name = (last_err.split(":", 1)[0] or "").strip()
+                                suffix = f" last_err={err_name}" if err_name else ""
+                                status = 503
+                                body = f"bootstrapping backend={backend}{suffix}".encode("utf-8")
                                 try:
                                     Handler._trigger_db_bootstrap_async(self.db_path)
                                 except Exception:
@@ -26497,6 +26485,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "text/plain; charset=utf-8")
             if status != 200:
                 self.send_header("Cache-Control", "no-store")
+                self.send_header("Retry-After", "2")
             self.end_headers()
             try:
                 self.wfile.write(body)
