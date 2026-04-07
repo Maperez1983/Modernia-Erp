@@ -22575,6 +22575,58 @@ def ensure_workspace_persona_for_self(conn, workspace_id, session):
         if not time_enabled:
             return ""
 
+        user_email = normalize_email(row_value(user_row, "email") or "")
+
+        # Si existe una ficha con el mismo email (y sin usuario_id), la vinculamos.
+        # Esto evita que el usuario vea "sin ficha" aunque RRHH ya haya creado su registro.
+        if user_email:
+            try:
+                email_rows = conn.execute(
+                    """
+                    SELECT id, COALESCE(usuario_id, '') AS usuario_id,
+                           COALESCE(usuario_manual, 0) AS usuario_manual,
+                           COALESCE(empresa_id, '') AS empresa_id,
+                           COALESCE(source, '') AS source
+                    FROM workspace_registro_personal
+                    WHERE workspace_id = ?
+                      AND LOWER(TRIM(COALESCE(email, ''))) = LOWER(TRIM(?))
+                      AND COALESCE(activo, 1) = 1
+                    ORDER BY COALESCE(updated_at, created_at) DESC
+                    LIMIT 2
+                    """,
+                    (ws_id, user_email),
+                ).fetchall()
+            except Exception:
+                email_rows = []
+            if email_rows and len(email_rows) == 1:
+                candidate = email_rows[0]
+                candidate_id = str(row_value(candidate, "id") or row_value(candidate, 0) or "").strip()
+                existing_uid = str(row_value(candidate, "usuario_id") or "").strip()
+                if candidate_id and (not existing_uid or existing_uid == user_id):
+                    # Empresa por defecto: usamos la primera empresa vinculada al workspace.
+                    empresa_ids = fetch_workspace_company_ids(conn, ws_id)
+                    empresa_default = str(empresa_ids[0] if empresa_ids else "").strip()
+                    updates = ["usuario_id = ?", "usuario_manual = 1"]
+                    params = [user_id]
+                    source = str(row_value(candidate, "source") or "").strip()
+                    if not source or source == "auto":
+                        updates.append("source = 'manual'")
+                    empresa_id = str(row_value(candidate, "empresa_id") or "").strip()
+                    if not empresa_id and empresa_default:
+                        updates.append("empresa_id = ?")
+                        params.append(empresa_default)
+                        updates.append("empresa_manual = 1")
+                    now = datetime.now(timezone.utc).isoformat()
+                    conn.execute(
+                        f"UPDATE workspace_registro_personal SET {', '.join(updates)}, updated_at = datetime(?) WHERE workspace_id = ? AND id = ?",
+                        [*params, now, ws_id, candidate_id],
+                    )
+                    try:
+                        conn.commit()
+                    except Exception:
+                        pass
+                    return candidate_id
+
         # Preferimos una ficha manual, pero aceptamos cualquier ficha vinculada y la "promovemos".
         persona = conn.execute(
             """
@@ -40280,20 +40332,64 @@ class Handler(BaseHTTPRequestHandler):
             if not session:
                 json_response(self, {"error": "No autenticado"}, status=401)
                 return
-            # Resolve workspace preferido: el tenant por defecto (slug verifika2) si existe.
+            # Resolve workspace preferido para registro horario:
+            # 1) si el usuario tiene ficha en algún workspace -> ese workspace
+            # 2) si no -> heurística por slug conocido
+            # 3) si no -> primer workspace visible
             ws_rows = []
             try:
                 ws_rows = fetch_workspace_rows_for_user(conn, session) or []
             except Exception:
                 ws_rows = []
-            default_slug = normalize_workspace_slug(DEFAULT_WORKSPACE_NAME)
             chosen = None
-            for row in ws_rows:
-                if str(row.get("slug") or "").strip() == default_slug:
-                    chosen = row
-                    break
-            if not chosen and ws_rows:
-                chosen = ws_rows[0]
+            try:
+                if ws_rows:
+                    if len(ws_rows) == 1:
+                        chosen = ws_rows[0]
+                    else:
+                        user_id = str(session.get("user_id") or "").strip()
+                        workspace_ids = [str(row.get("id") or "").strip() for row in ws_rows if str(row.get("id") or "").strip()]
+                        workspace_ids = [w for w in workspace_ids if w]
+                        # Preferir el workspace donde ya existe ficha (usuario_id -> persona).
+                        if user_id and workspace_ids:
+                            try:
+                                placeholders = ",".join(["?"] * len(workspace_ids))
+                                row = conn.execute(
+                                    f"""
+                                    SELECT workspace_id
+                                    FROM workspace_registro_personal
+                                    WHERE usuario_id = ?
+                                      AND COALESCE(activo, 1) = 1
+                                      AND workspace_id IN ({placeholders})
+                                    ORDER BY COALESCE(usuario_manual, 0) DESC, COALESCE(updated_at, created_at) DESC
+                                    LIMIT 1
+                                    """,
+                                    (user_id, *workspace_ids),
+                                ).fetchone()
+                            except Exception:
+                                row = None
+                            ws_pick = str(row_value(row, "workspace_id") or row_value(row, 0) or "").strip() if row else ""
+                            if ws_pick:
+                                chosen = next((it for it in ws_rows if str(it.get("id") or "").strip() == ws_pick), None)
+                        # Heurística por slug/nombre (soft default).
+                        if not chosen:
+                            slug_targets = [
+                                "verifika2",
+                                normalize_workspace_slug(DEFAULT_WORKSPACE_NAME),
+                                "modernia",
+                            ]
+                            for target in slug_targets:
+                                for row in ws_rows:
+                                    raw = str(row.get("slug") or row.get("nombre") or "").strip()
+                                    if normalize_workspace_slug(raw) == normalize_workspace_slug(target):
+                                        chosen = row
+                                        break
+                                if chosen:
+                                    break
+                        if not chosen:
+                            chosen = ws_rows[0]
+            except Exception:
+                chosen = ws_rows[0] if ws_rows else None
             workspace_id = str((chosen or {}).get("id") or "").strip()
             if not workspace_id:
                 json_response(self, {"ok": True, "workspace_id": "", "persona": None, "today": {}, "note": "no_workspace"})
