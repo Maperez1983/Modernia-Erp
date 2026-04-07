@@ -3160,23 +3160,12 @@ const isPrivilegedRole = (value) => {
 
 const isPrivilegedUser = (user) => {
   if (!user) return false;
-  // En el backend, "Administrador/Dirección/Administración/Control" implica permisos globales aunque tenga servicios asignados.
-  if (isPrivilegedRole(user.rol)) return true;
-  const services = expandServiceAliases(parseServiceList(user.servicio || ""));
-  if (isPrivilegedService(user.servicio) || services.some((service) => isPrivilegedService(service))) {
-    return true;
-  }
-  return false;
+  return isPrivilegedRole(user.rol);
 };
 
 const canAccessAdminPanel = (user) => {
   if (!user) return false;
-  const services = expandServiceAliases(parseServiceList(user.servicio || ""));
-  return (
-    isPrivilegedRole(user.rol)
-    || isPrivilegedService(user.servicio)
-    || services.some((service) => isPrivilegedService(service))
-  );
+  return isPrivilegedRole(user.rol);
 };
 
 const canAccessSharedHomeModules = (user) => isPrivilegedUser(user);

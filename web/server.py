@@ -22618,9 +22618,6 @@ def workspace_session_is_privileged(session):
     # `normalize_lookup_text` devuelve tokens en MAYÚSCULAS (sin acentos).
     if rol in {"ADMINISTRADOR", "ADMIN", "DIRECCION", "CONTROL"}:
         return True
-    services = _normalize_service_tokens(session.get("servicio") or "")
-    if services.intersection({"ADMINISTRACION", "CONTROL", "DIRECCION"}):
-        return True
     return False
 
 def workspace_actor_is_privileged(conn, session):
@@ -27565,13 +27562,7 @@ class Handler(BaseHTTPRequestHandler):
             if key:
                 services.add(key)
         expanded = set(services)
-        if any(item in {"direccion", "administracion"} for item in expanded):
-            return None
-        servicio_key = normalize_service_key(servicio_raw)
-        if servicio_key in {"direccion", "administracion"}:
-            return None
-        # If admin role has explicit services configured, keep service scoping.
-        if rol in {"administrador", "direccion", "administracion"} and not expanded:
+        if rol in {"administrador", "admin", "direccion", "administracion", "control"}:
             return None
         if "financiaciones" in expanded:
             expanded.add("hipotecas")
@@ -47807,8 +47798,6 @@ class Handler(BaseHTTPRequestHandler):
             is_privileged = bool(workspace_actor_is_privileged(conn, session))
 
             responsable_param = str((params.get("responsable", [""])[0] or "")).strip()
-            if not is_privileged:
-                responsable_param = responsable_param or _session_user_label(session)
             responsable_like = f"%{responsable_param.lower()}%" if responsable_param else ""
 
             try:
@@ -48108,59 +48097,57 @@ class Handler(BaseHTTPRequestHandler):
             upcoming.sort(key=lambda item: (item.get("fecha") or "", item.get("hora") or ""))
             overdue.sort(key=lambda item: (item.get("fecha") or "", item.get("hora") or ""))
 
-            responsables = []
-            if is_privileged:
-                found = set()
-                try:
-                    rows = conn.execute(
-                        """
-                        SELECT DISTINCT responsable AS v FROM inmuebles
-                        WHERE empresa_id = ? AND responsable IS NOT NULL AND TRIM(responsable) <> ''
-                        """,
-                        (empresa_id,),
-                    ).fetchall()
-                    for r in rows:
-                        found.add(str(r["v"] or "").strip())
-                except Exception:
-                    pass
-                try:
-                    rows = conn.execute(
-                        """
-                        SELECT DISTINCT responsable_gestion AS v FROM operaciones_inmobiliarias
-                        WHERE empresa_id = ? AND responsable_gestion IS NOT NULL AND TRIM(responsable_gestion) <> ''
-                        """,
-                        (empresa_id,),
-                    ).fetchall()
-                    for r in rows:
-                        found.add(str(r["v"] or "").strip())
-                except Exception:
-                    pass
-                try:
-                    rows = conn.execute(
-                        """
-                        SELECT DISTINCT agente AS v FROM alquileres
-                        WHERE empresa_id = ? AND agente IS NOT NULL AND TRIM(agente) <> ''
-                        """,
-                        (empresa_id,),
-                    ).fetchall()
-                    for r in rows:
-                        found.add(str(r["v"] or "").strip())
-                except Exception:
-                    pass
-                try:
-                    rows = conn.execute(
-                        """
-                        SELECT DISTINCT responsable AS v FROM acciones
-                        WHERE empresa_id = ? AND LOWER(COALESCE(servicio, '')) = 'inmobiliaria'
-                          AND responsable IS NOT NULL AND TRIM(responsable) <> ''
-                        """,
-                        (empresa_id,),
-                    ).fetchall()
-                    for r in rows:
-                        found.add(str(r["v"] or "").strip())
-                except Exception:
-                    pass
-                responsables = sorted([v for v in found if v], key=lambda x: x.lower())
+            found = set()
+            try:
+                rows = conn.execute(
+                    """
+                    SELECT DISTINCT responsable AS v FROM inmuebles
+                    WHERE empresa_id = ? AND responsable IS NOT NULL AND TRIM(responsable) <> ''
+                    """,
+                    (empresa_id,),
+                ).fetchall()
+                for r in rows:
+                    found.add(str(r["v"] or "").strip())
+            except Exception:
+                pass
+            try:
+                rows = conn.execute(
+                    """
+                    SELECT DISTINCT responsable_gestion AS v FROM operaciones_inmobiliarias
+                    WHERE empresa_id = ? AND responsable_gestion IS NOT NULL AND TRIM(responsable_gestion) <> ''
+                    """,
+                    (empresa_id,),
+                ).fetchall()
+                for r in rows:
+                    found.add(str(r["v"] or "").strip())
+            except Exception:
+                pass
+            try:
+                rows = conn.execute(
+                    """
+                    SELECT DISTINCT agente AS v FROM alquileres
+                    WHERE empresa_id = ? AND agente IS NOT NULL AND TRIM(agente) <> ''
+                    """,
+                    (empresa_id,),
+                ).fetchall()
+                for r in rows:
+                    found.add(str(r["v"] or "").strip())
+            except Exception:
+                pass
+            try:
+                rows = conn.execute(
+                    """
+                    SELECT DISTINCT responsable AS v FROM acciones
+                    WHERE empresa_id = ? AND LOWER(COALESCE(servicio, '')) = 'inmobiliaria'
+                      AND responsable IS NOT NULL AND TRIM(responsable) <> ''
+                    """,
+                    (empresa_id,),
+                ).fetchall()
+                for r in rows:
+                    found.add(str(r["v"] or "").strip())
+            except Exception:
+                pass
+            responsables = sorted([v for v in found if v], key=lambda x: x.lower())
 
             noticias_por_encargo = (noticias_total / encargos_total) if encargos_total > 0 else 0.0
             citas_por_propuesta = (citas_total / propuestas_total) if propuestas_total > 0 else 0.0
@@ -48169,7 +48156,7 @@ class Handler(BaseHTTPRequestHandler):
                 self,
                 {
                     "year": year,
-                    "responsable": responsable_param if is_privileged else (responsable_param or ""),
+                    "responsable": responsable_param or "",
                     "is_privileged": bool(is_privileged),
                     "funnel_source": funnel_source,
                     "responsables": responsables,

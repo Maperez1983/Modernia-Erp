@@ -276,7 +276,7 @@
         }
         return;
       }
-      if (targetRole === "administrador" || targetService === "administración" || targetService === "administracion") {
+      if (["administrador", "admin", "direccion", "administracion", "control"].includes(targetRole)) {
         if (!navigate({ holding: "1", mode: "platform" })) {
           window.location.assign("?holding=1&mode=platform");
         }
