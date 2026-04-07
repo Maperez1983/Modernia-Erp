@@ -45928,10 +45928,12 @@ class Handler(BaseHTTPRequestHandler):
             if not empresa_id:
                 json_response(self, {"error": "empresa_id requerido"}, status=400)
                 return
+            is_pg = getattr(conn, "__crm_backend__", "") == "postgres"
             if not year:
-                year = conn.execute(
-                    "SELECT strftime('%Y','now','localtime') AS y"
-                ).fetchone()["y"]
+                if is_pg:
+                    year = str(datetime.now().year)
+                else:
+                    year = conn.execute("SELECT strftime('%Y','now','localtime') AS y").fetchone()["y"]
 
             estado_expr = "LOWER(TRIM(estado))"
             compania_expr = "LOWER(TRIM(compania))"
@@ -45962,7 +45964,6 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 responsable_expr = "NULL"
             # Use the real policy timeline first; fallback to import/create timestamps.
-            is_pg = getattr(conn, "__crm_backend__", "") == "postgres"
             slash_match = (
                 "TRIM(COALESCE(fecha_efecto, '')) ~ '^[0-3][0-9]/[0-1][0-9]/[1-2][0-9]{3}$'"
                 if is_pg
@@ -45973,25 +45974,50 @@ class Handler(BaseHTTPRequestHandler):
                 if is_pg
                 else "TRIM(COALESCE(fecha_efecto, '')) GLOB '[0-3][0-9]-[0-1][0-9]-[1-2][0-9][0-9][0-9]'"
             )
-            year_expr = (
-                "COALESCE("
-                "CASE "
-                "WHEN DATE(fecha_efecto) IS NOT NULL "
-                "  AND CAST(STRFTIME('%Y', DATE(fecha_efecto)) AS INTEGER) BETWEEN 2000 "
-                "      AND (CAST(STRFTIME('%Y','now','localtime') AS INTEGER) + 1) "
-                "THEN STRFTIME('%Y', DATE(fecha_efecto)) "
-                f"WHEN {slash_match} "
-                "  AND CAST(SUBSTR(TRIM(fecha_efecto), 7, 4) AS INTEGER) BETWEEN 2000 "
-                "      AND (CAST(STRFTIME('%Y','now','localtime') AS INTEGER) + 1) "
-                "THEN SUBSTR(TRIM(fecha_efecto), 7, 4) "
-                f"WHEN {dash_match} "
-                "  AND CAST(SUBSTR(TRIM(fecha_efecto), 7, 4) AS INTEGER) BETWEEN 2000 "
-                "      AND (CAST(STRFTIME('%Y','now','localtime') AS INTEGER) + 1) "
-                "THEN SUBSTR(TRIM(fecha_efecto), 7, 4) "
-                "ELSE NULL END, "
-                "STRFTIME('%Y', created_at)"
-                ")"
-            )
+            max_year = datetime.now().year + 1
+            if is_pg:
+                fecha_head = "substr(TRIM(COALESCE(fecha_efecto, '')), 1, 10)"
+                created_head = "substr(TRIM(COALESCE(created_at, '')), 1, 10)"
+                iso_match = f"{fecha_head} ~ '^[0-9]{{4}}-[0-9]{{2}}-[0-9]{{2}}$'"
+                dmy_dash_match = f"{fecha_head} ~ '^[0-9]{{2}}-[0-9]{{2}}-[0-9]{{4}}$'"
+                dmy_slash_match = f"{fecha_head} ~ '^[0-9]{{2}}/[0-9]{{2}}/[0-9]{{4}}$'"
+                created_year_match = f"{created_head} ~ '^[0-9]{{4}}'"
+                year_expr = (
+                    "COALESCE("
+                    "CASE "
+                    f"WHEN {iso_match} "
+                    f"  AND CAST(substr({fecha_head}, 1, 4) AS INTEGER) BETWEEN 2000 AND {max_year} "
+                    f"THEN substr({fecha_head}, 1, 4) "
+                    f"WHEN {dmy_slash_match} "
+                    f"  AND CAST(substr({fecha_head}, 7, 4) AS INTEGER) BETWEEN 2000 AND {max_year} "
+                    f"THEN substr({fecha_head}, 7, 4) "
+                    f"WHEN {dmy_dash_match} "
+                    f"  AND CAST(substr({fecha_head}, 7, 4) AS INTEGER) BETWEEN 2000 AND {max_year} "
+                    f"THEN substr({fecha_head}, 7, 4) "
+                    "ELSE NULL END, "
+                    f"CASE WHEN {created_year_match} THEN substr({created_head}, 1, 4) ELSE NULL END"
+                    ")"
+                )
+            else:
+                year_expr = (
+                    "COALESCE("
+                    "CASE "
+                    "WHEN DATE(fecha_efecto) IS NOT NULL "
+                    "  AND CAST(STRFTIME('%Y', DATE(fecha_efecto)) AS INTEGER) BETWEEN 2000 "
+                    "      AND (CAST(STRFTIME('%Y','now','localtime') AS INTEGER) + 1) "
+                    "THEN STRFTIME('%Y', DATE(fecha_efecto)) "
+                    f"WHEN {slash_match} "
+                    "  AND CAST(SUBSTR(TRIM(fecha_efecto), 7, 4) AS INTEGER) BETWEEN 2000 "
+                    "      AND (CAST(STRFTIME('%Y','now','localtime') AS INTEGER) + 1) "
+                    "THEN SUBSTR(TRIM(fecha_efecto), 7, 4) "
+                    f"WHEN {dash_match} "
+                    "  AND CAST(SUBSTR(TRIM(fecha_efecto), 7, 4) AS INTEGER) BETWEEN 2000 "
+                    "      AND (CAST(STRFTIME('%Y','now','localtime') AS INTEGER) + 1) "
+                    "THEN SUBSTR(TRIM(fecha_efecto), 7, 4) "
+                    "ELSE NULL END, "
+                    "STRFTIME('%Y', created_at)"
+                    ")"
+                )
             exclude_sin_seguro = f"({compania_expr} IS NULL OR {compania_expr} = '' OR {compania_expr} != 'sin seguro')"
             uploaded_clause = uploaded_policy_filter()
             in_vigor_expr = in_vigor_policy_filter()
@@ -46074,17 +46100,38 @@ class Handler(BaseHTTPRequestHandler):
                 series_payload.append(row_dict)
 
             def build_cliente_responsable_map():
-                rows = conn.execute(
-                    """
-                    SELECT cliente_id, responsable, fecha, created_at
-                    FROM acciones
-                    WHERE empresa_id = ?
-                      AND LOWER(TRIM(COALESCE(servicio, ''))) = 'seguros'
-                      AND TRIM(COALESCE(responsable, '')) <> ''
-                    ORDER BY DATE(COALESCE(fecha, created_at)) DESC, created_at DESC
-                    """,
-                    (empresa_id,),
-                ).fetchall()
+                if is_pg:
+                    fecha_head = "substr(TRIM(COALESCE(fecha, '')), 1, 10)"
+                    created_head = "substr(TRIM(COALESCE(created_at, '')), 1, 10)"
+                    fecha_iso = f"{fecha_head} ~ '^[0-9]{{4}}-[0-9]{{2}}-[0-9]{{2}}$'"
+                    fecha_dmy = f"{fecha_head} ~ '^[0-9]{{2}}/[0-9]{{2}}/[0-9]{{4}}$'"
+                    order_date = (
+                        "CASE "
+                        f"WHEN {fecha_iso} THEN to_date({fecha_head}, 'YYYY-MM-DD') "
+                        f"WHEN {fecha_dmy} THEN to_date({fecha_head}, 'DD/MM/YYYY') "
+                        "ELSE NULL END"
+                    )
+                    sql = (
+                        "SELECT cliente_id, responsable, fecha, created_at "
+                        "FROM acciones "
+                        "WHERE empresa_id = ? "
+                        "  AND LOWER(TRIM(COALESCE(servicio, ''))) = 'seguros' "
+                        "  AND TRIM(COALESCE(responsable, '')) <> '' "
+                        f"ORDER BY {order_date} DESC NULLS LAST, {created_head} DESC"
+                    )
+                    rows = conn.execute(sql, (empresa_id,)).fetchall()
+                else:
+                    rows = conn.execute(
+                        """
+                        SELECT cliente_id, responsable, fecha, created_at
+                        FROM acciones
+                        WHERE empresa_id = ?
+                          AND LOWER(TRIM(COALESCE(servicio, ''))) = 'seguros'
+                          AND TRIM(COALESCE(responsable, '')) <> ''
+                        ORDER BY DATE(COALESCE(fecha, created_at)) DESC, created_at DESC
+                        """,
+                        (empresa_id,),
+                    ).fetchall()
                 mapping = {}
                 for row in rows:
                     key = str(row["cliente_id"] or "").strip()
