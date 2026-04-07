@@ -228,6 +228,23 @@ const UPLOAD_IMAGE_QUALITY = 0.82;
 const S3_MULTIPART_MIN_BYTES = 10 * 1024 * 1024;
 const S3_MULTIPART_CONCURRENCY = 3;
 
+const guessMimeType = (file) => {
+  const explicit = String(file?.type || "").trim().toLowerCase();
+  if (explicit) return explicit;
+  const name = String(file?.name || "").trim().toLowerCase();
+  if (name.endsWith(".pdf")) return "application/pdf";
+  if (name.endsWith(".jpg") || name.endsWith(".jpeg")) return "image/jpeg";
+  if (name.endsWith(".png")) return "image/png";
+  if (name.endsWith(".webp")) return "image/webp";
+  if (name.endsWith(".gif")) return "image/gif";
+  if (name.endsWith(".svg")) return "image/svg+xml";
+  if (name.endsWith(".doc")) return "application/msword";
+  if (name.endsWith(".docx")) return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  if (name.endsWith(".xls")) return "application/vnd.ms-excel";
+  if (name.endsWith(".xlsx")) return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+  return "application/octet-stream";
+};
+
 const isCompressibleImage = (file) => {
   const mime = String(file?.type || "").toLowerCase();
   if (!mime.startsWith("image/")) return false;
@@ -285,11 +302,12 @@ const maybeCompressUploadFile = async (file, statusEl) => {
   }
 };
 
-const uploadBlobToSignedUrl = (url, file, statusEl) =>
+const uploadBlobToSignedUrl = (url, file, statusEl, contentTypeOverride = "") =>
   new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("PUT", url, true);
-    xhr.setRequestHeader("Content-Type", file.type || "application/octet-stream");
+    const contentType = String(contentTypeOverride || "").trim() || guessMimeType(file);
+    xhr.setRequestHeader("Content-Type", contentType);
     xhr.upload.onprogress = (event) => {
       if (!statusEl || !event.lengthComputable) return;
       const pct = Math.max(0, Math.min(100, Math.round((event.loaded / event.total) * 100)));
@@ -312,10 +330,11 @@ const uploadBlobToSignedUrl = (url, file, statusEl) =>
     xhr.send(file);
   });
 
-const uploadBlobToSignedUrlWithFetch = async (url, file) => {
+const uploadBlobToSignedUrlWithFetch = async (url, file, contentTypeOverride = "") => {
+  const contentType = String(contentTypeOverride || "").trim() || guessMimeType(file);
   const putRes = await fetch(url, {
     method: "PUT",
-    headers: { "Content-Type": file.type || "application/octet-stream" },
+    headers: { "Content-Type": contentType },
     body: file,
   });
   if (!putRes.ok) {
@@ -364,7 +383,7 @@ const uploadFileMultipartToS3 = async (file, prefix, statusEl) => {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       filename: file.name || "archivo.bin",
-      content_type: file.type || "application/octet-stream",
+      content_type: guessMimeType(file),
       prefix: prefix || "docs",
       size: file.size || 0,
     }),
@@ -452,6 +471,7 @@ const uploadFileToS3 = async (file, prefix, statusEl) => {
   if (!file) return null;
   const optimized = await maybeCompressUploadFile(file, statusEl);
   const fileToUpload = optimized.file || file;
+  const contentType = guessMimeType(fileToUpload);
   if ((fileToUpload.size || 0) >= S3_MULTIPART_MIN_BYTES) {
     const multipartResult = await uploadFileMultipartToS3(fileToUpload, prefix, statusEl);
     if (statusEl && optimized.optimized && optimized.originalSize && optimized.optimizedSize) {
@@ -465,10 +485,10 @@ const uploadFileToS3 = async (file, prefix, statusEl) => {
     }
     return multipartResult;
   }
-    if (statusEl) statusEl.textContent = "Firmando subida...";
+	    if (statusEl) statusEl.textContent = "Firmando subida...";
   const presign = await apiPost("/api/s3_presign", {
     filename: fileToUpload.name || "archivo.pdf",
-    content_type: fileToUpload.type || "application/pdf",
+    content_type: contentType || "application/octet-stream",
     prefix: prefix || "seguros",
   });
   if (presign.error) {
@@ -478,10 +498,10 @@ const uploadFileToS3 = async (file, prefix, statusEl) => {
     throw new Error("Presign inválido.");
   }
   try {
-    await uploadBlobToSignedUrl(presign.url, fileToUpload, statusEl);
+    await uploadBlobToSignedUrl(presign.url, fileToUpload, statusEl, contentType);
   } catch (xhrErr) {
     if (statusEl) statusEl.textContent = "Reintentando subida...";
-    await uploadBlobToSignedUrlWithFetch(presign.url, fileToUpload);
+    await uploadBlobToSignedUrlWithFetch(presign.url, fileToUpload, contentType);
   }
   if (statusEl && optimized.optimized && optimized.originalSize && optimized.optimizedSize) {
     const saved = Math.max(0, optimized.originalSize - optimized.optimizedSize);

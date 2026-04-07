@@ -42287,7 +42287,10 @@ class Handler(BaseHTTPRequestHandler):
             empresa_id = (params.get("empresa_id", [""])[0] or "").strip()
             uploaded_only = (params.get("uploaded_only", ["1"])[0] or "1").strip() in ("1", "true", "yes")
             normalized_services = [normalize_service_key(s) for s in services]
-            if source == "seguros" and ("seguros" in normalized_services or not normalized_services):
+            # Cuando el filtro es "seguros", los clientes visibles deben venir del CRM Seguros (tabla `seguros`),
+            # no sólo de relaciones `clientes_empresas` (pueden existir vínculos sin póliza asociada).
+            is_seguros_view = source == "seguros" or (not source and normalized_services == ["seguros"])
+            if is_seguros_view and ("seguros" in normalized_services or not normalized_services):
                 where = ["s.cliente_id IS NOT NULL"]
                 values = []
                 if empresa_id:
@@ -42500,7 +42503,8 @@ class Handler(BaseHTTPRequestHandler):
             empresa_id = (params.get("empresa_id", [""])[0] or "").strip()
             uploaded_only = (params.get("uploaded_only", ["1"])[0] or "1").strip() in ("1", "true", "yes")
             normalized_services = [normalize_service_key(s) for s in services]
-            if source == "seguros" and ("seguros" in normalized_services or not normalized_services):
+            is_seguros_view = source == "seguros" or (not source and normalized_services == ["seguros"])
+            if is_seguros_view and ("seguros" in normalized_services or not normalized_services):
                 where = ["s.cliente_id IS NOT NULL"]
                 values = []
                 if empresa_id:
@@ -44557,7 +44561,8 @@ class Handler(BaseHTTPRequestHandler):
             limit_clause = "LIMIT 500"
             if limit_param.isdigit():
                 limit_clause = f"LIMIT {int(limit_param)}"
-            if source == "seguros" and ("seguros" in normalized_services or not normalized_services):
+            is_seguros_view = source == "seguros" or (not source and normalized_services == ["seguros"])
+            if is_seguros_view and ("seguros" in normalized_services or not normalized_services):
                 where = ["s.cliente_id IS NOT NULL"]
                 values = []
                 if empresa_id:
