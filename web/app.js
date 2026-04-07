@@ -3,7 +3,7 @@
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v42";
+const APP_SW_VERSION = "v43";
 
 // Workspace tenant por defecto del producto (branding de software). Mantiene compatibilidad con slugs legacy.
 const DEFAULT_TENANT_WORKSPACE_SLUG = "verifika2";
@@ -13359,9 +13359,13 @@ const updateExplorerHeader = (empresaName) => {
     }
   }
   if (operativaTab) {
-    operativaTab.classList.toggle("hidden", empresaName === FINCAS_COMPANY);
+    const hideOperativa = empresaName === FINCAS_COMPANY || empresaName === FIN_COMPANY;
+    operativaTab.classList.toggle("hidden", hideOperativa);
     if (empresaName === FINCAS_COMPANY && currentTab === "operativa") {
       setTab("gestoria-dash");
+    }
+    if (empresaName === FIN_COMPANY && currentTab === "operativa") {
+      setTab("fin-crm");
     }
   }
   if (empresaName === FINCAS_COMPANY && currentTab === "alta") {
@@ -13561,15 +13565,26 @@ const openCompany = (empresaName, options = {}) => {
   empresaSelect.value = empresa.id;
   state.currentEmpresaId = empresa.id;
   state.currentEmpresaName = empresa.nombre;
-  setTab("operativa");
+  const preferFinCrm =
+    empresa.nombre === FIN_COMPANY && userCanAccessService("financiaciones");
+  if (preferFinCrm && !state.hipotecaAltaView) {
+    state.hipotecaAltaView = "dashboard";
+  }
+  setTab(preferFinCrm ? "fin-crm" : "operativa");
   updateExplorerHeader(empresa.nombre);
-  setDefaultTableForCompany(
-    state.resumen.find((item) => item.empresa === empresaName)
-  );
-  ensureOperativaTable();
+  if (!preferFinCrm) {
+    setDefaultTableForCompany(
+      state.resumen.find((item) => item.empresa === empresaName)
+    );
+    ensureOperativaTable();
+  }
   updateTableVisibility();
   explorerSection.classList.remove("hidden");
-  loadTable();
+  if (preferFinCrm) {
+    loadFinCrm();
+  } else {
+    loadTable();
+  }
   setPage("empresa");
   setUrlParams(new URLSearchParams({ empresa: slugify(empresaName) }));
   if (currentTab === "crm") {
@@ -13719,7 +13734,8 @@ const openFinCrm = () => {
   if (tableToolbar) tableToolbar.classList.add("hidden");
   if (tableContainer) tableContainer.classList.add("hidden");
   if (tableInfo) tableInfo.classList.add("hidden");
-  setHipotecaAltaView("alta");
+  setHipotecaAltaView(state.hipotecaAltaView || "dashboard");
+  loadFinCrm();
 };
 
 const openServiceCrm = (service) => {
@@ -33078,7 +33094,32 @@ const loadFinAsesoramientos = (empresaId) => {
     renderFinAsesorKpisFromRows(rows);
     renderFinStageBoard(rows);
     if (!rows.length) {
-      finAsesoramientosTable.innerHTML = "<p class='muted'>Sin asesoramientos aún.</p>";
+      finAsesoramientosTable.innerHTML = "";
+      const wrap = document.createElement("div");
+      const msg = document.createElement("p");
+      msg.className = "muted";
+      msg.textContent = "Sin asesoramientos aún.";
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "secondary";
+      btn.textContent = "Crear asesoramiento";
+      btn.addEventListener("click", () => {
+        try {
+          if (finAsesoramientoForm) finAsesoramientoForm.reset();
+          if (finAsesoramientoId) finAsesoramientoId.value = "";
+          if (finAsesoramientoConvert) finAsesoramientoConvert.disabled = true;
+          if (finAsesoramientoForm) {
+            const dateInput = finAsesoramientoForm.querySelector('[name="fecha"]');
+            if (dateInput && !dateInput.value) {
+              dateInput.value = new Date().toISOString().slice(0, 10);
+            }
+            finAsesoramientoForm.scrollIntoView({ behavior: "smooth", block: "start" });
+          }
+        } catch (_) {}
+      });
+      wrap.appendChild(msg);
+      wrap.appendChild(btn);
+      finAsesoramientosTable.appendChild(wrap);
       finAsesoramientosInfo.textContent = "";
       loadFinAlerts(empresaId);
       selectFinAsesoramiento(null);
