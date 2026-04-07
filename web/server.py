@@ -9331,10 +9331,33 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
         if not raw:
             return ""
         raw = raw.replace(" ", "").replace("-", "").replace(".", "")
-        raw = raw.replace("O", "0").replace("I", "1").replace("L", "1").replace("S", "5").replace("B", "8")
         raw = re.sub(r"[^A-Z0-9]", "", raw)
         if len(raw) > 9:
             raw = raw[:9]
+        # Correcciones OCR solo en posiciones que deben ser dígitos.
+        # Importante: NO convertir el prefijo CIF (p.ej. "B") a "8".
+        def fix_digits(chunk):
+            table = str.maketrans({"O": "0", "I": "1", "L": "1", "S": "5", "B": "8"})
+            return str(chunk or "").translate(table)
+        if not raw:
+            return ""
+        if raw[0].isdigit():
+            # DNI: 8 dígitos + letra (o solo dígitos si falta letra).
+            if len(raw) >= 9:
+                return f"{fix_digits(raw[:8])}{raw[8]}"
+            return fix_digits(raw)
+        if raw[0] in "XYZ":
+            # NIE: X/Y/Z + 7 dígitos + letra
+            if len(raw) >= 9:
+                return f"{raw[0]}{fix_digits(raw[1:8])}{raw[8]}"
+            return f"{raw[0]}{fix_digits(raw[1:])}"
+        if raw[0] in "ABCDEFGHJNPQRSUVW":
+            # CIF: letra + 7 dígitos + control (dígito o letra)
+            if len(raw) >= 9:
+                return f"{raw[0]}{fix_digits(raw[1:8])}{raw[8]}"
+            return f"{raw[0]}{fix_digits(raw[1:])}"
+        # Fallback conservador: evita tocar letras válidas.
+        raw = raw.replace("O", "0").replace("I", "1").replace("L", "1").replace("S", "5")
         return raw
     def is_valid_nif(value):
         if not value:
