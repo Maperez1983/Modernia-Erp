@@ -3,7 +3,7 @@
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v40";
+const APP_SW_VERSION = "v42";
 
 // Workspace tenant por defecto del producto (branding de software). Mantiene compatibilidad con slugs legacy.
 const DEFAULT_TENANT_WORKSPACE_SLUG = "verifika2";
@@ -38233,6 +38233,7 @@ const loadTable = () => {
     tablaSelect.value = tabla;
   }
   const showActions = tabla === "hipotecas";
+  const isEditableTable = Boolean(EDITABLE_FIELDS && EDITABLE_FIELDS[tabla]);
   const q = searchInput.value.trim();
   const params = new URLSearchParams({
     tabla,

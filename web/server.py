@@ -44694,12 +44694,41 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 sync_state = {"scheduled": False, "reason": "schedule_failed"}
 
-            current_year = conn.execute("SELECT strftime('%Y','now','localtime') AS y").fetchone()["y"]
+            # Evita depender de funciones SQLite (strftime/datetime) en Postgres: además, algunos valores de fecha
+            # pueden venir como DD/MM/YYYY. Extraemos año/mes de forma robusta con substr/LIKE.
+            current_year = str(datetime.now().year)
+            current_month = datetime.now().strftime("%Y-%m")
+
+            def _year_from_expr(expr):
+                value = f"TRIM(COALESCE({expr}, ''))"
+                head = f"substr({value}, 1, 10)"
+                return (
+                    "CASE "
+                    f"WHEN {head} LIKE '____-__-__' THEN substr({head}, 1, 4) "
+                    f"WHEN {head} LIKE '__/__/____' THEN substr({head}, 7, 4) "
+                    "ELSE NULL END"
+                )
+
+            def _month_from_expr(expr):
+                value = f"TRIM(COALESCE({expr}, ''))"
+                head = f"substr({value}, 1, 10)"
+                return (
+                    "CASE "
+                    f"WHEN {head} LIKE '____-__-__' THEN substr({head}, 1, 7) "
+                    f"WHEN {head} LIKE '__/__/____' THEN substr({head}, 7, 4) || '-' || substr({head}, 4, 2) "
+                    "ELSE NULL END"
+                )
+
+            fallback_date_expr = "COALESCE(NULLIF(fecha_firma, ''), NULLIF(fecha_encargo, ''), created_at)"
+            computed_year_expr = _year_from_expr(fallback_date_expr)
             year_expr = (
-                "COALESCE(NULLIF(TRIM(anio), ''), "
-                "strftime('%Y', COALESCE(NULLIF(fecha_firma, ''), NULLIF(fecha_encargo, ''), created_at)))"
+                "COALESCE("
+                "NULLIF(TRIM(COALESCE(CAST(anio AS TEXT), '')), ''), "
+                + computed_year_expr
+                + ")"
             )
-            signed_year_expr = "strftime('%Y', NULLIF(fecha_firma, ''))"
+            signed_year_expr = _year_from_expr("NULLIF(fecha_firma, '')")
+            signed_month_expr = _month_from_expr("NULLIF(fecha_firma, '')")
             closed_expr = "LOWER(TRIM(COALESCE(estado, ''))) IN ('firmado', 'firmada', 'indemnización', 'indemnizacion')"
             signed_expr = "fecha_firma IS NOT NULL AND TRIM(fecha_firma) <> ''"
             signed_closed_expr = (
@@ -44714,11 +44743,21 @@ class Handler(BaseHTTPRequestHandler):
                 def _pg_date_expr(field):
                     value = f"TRIM(COALESCE({field}, ''))"
                     head = f"substr({value}, 1, 10)"
-                    # Acepta YYYY-MM-DD (y timestamps) y DD/MM/YYYY.
+                    iso_ok = (
+                        f"{head} ~ '^[0-9]{{4}}-[0-9]{{2}}-[0-9]{{2}}$'"
+                        f" AND substr({head}, 6, 2) BETWEEN '01' AND '12'"
+                        f" AND substr({head}, 9, 2) BETWEEN '01' AND '31'"
+                    )
+                    dmy_ok = (
+                        f"{head} ~ '^[0-9]{{2}}/[0-9]{{2}}/[0-9]{{4}}$'"
+                        f" AND substr({head}, 4, 2) BETWEEN '01' AND '12'"
+                        f" AND substr({head}, 1, 2) BETWEEN '01' AND '31'"
+                    )
+                    # Acepta YYYY-MM-DD (y timestamps) y DD/MM/YYYY, evitando que `to_date` falle con valores inválidos.
                     return (
                         "CASE "
-                        f"WHEN {head} LIKE '____-__-__' THEN to_date({head}, 'YYYY-MM-DD') "
-                        f"WHEN {head} LIKE '__/__/____' THEN to_date({head}, 'DD/MM/YYYY') "
+                        f"WHEN {iso_ok} THEN to_date({head}, 'YYYY-MM-DD') "
+                        f"WHEN {dmy_ok} THEN to_date({head}, 'DD/MM/YYYY') "
                         "ELSE NULL END"
                     )
 
@@ -44871,17 +44910,14 @@ class Handler(BaseHTTPRequestHandler):
             ).fetchone()
 
             firmadas_mes = conn.execute(
-                """
+                f"""
                 SELECT COUNT(*) AS total
                 FROM hipotecas
                 WHERE empresa_id = ?
-                  AND """
-                + signed_expr
-                + """
-                  AND length(fecha_firma) >= 7
-                  AND substr(NULLIF(fecha_firma, ''), 1, 7) = substr(datetime('now','localtime'), 1, 7)
+                  AND {signed_expr}
+                  AND {signed_month_expr} = ?
                 """,
-                (empresa_id,),
+                (empresa_id, current_month),
             ).fetchone()
 
             series_totales = available_years
