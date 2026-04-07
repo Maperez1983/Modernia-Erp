@@ -22726,6 +22726,76 @@ def ensure_workspace_persona_for_self(conn, workspace_id, session):
                     pass
                 return candidate_id
 
+        # 3) Fallback robusto: match por tokens del nombre (ignora acentos y mayúsculas) cuando el nombre no coincide exacto.
+        # Solo vinculamos si hay 1 candidato claro (evita enlaces erróneos).
+        if user_full_name:
+            try:
+                target_tokens = [t for t in normalize_lookup_text(user_full_name).split() if t and t not in {"DE", "DEL", "LA", "LAS", "LOS", "Y"}]
+            except Exception:
+                target_tokens = []
+            essential = []
+            if target_tokens:
+                essential.append(target_tokens[0])
+                if len(target_tokens) > 1:
+                    essential.append(target_tokens[-1])
+            essential = [t for t in dict.fromkeys(essential) if t]
+            if essential:
+                try:
+                    rows = conn.execute(
+                        """
+                        SELECT id, nombre, COALESCE(usuario_id, '') AS usuario_id,
+                               COALESCE(empresa_id, '') AS empresa_id,
+                               COALESCE(source, '') AS source
+                        FROM workspace_registro_personal
+                        WHERE workspace_id = ?
+                          AND COALESCE(activo, 1) = 1
+                          AND COALESCE(usuario_id, '') = ''
+                        ORDER BY COALESCE(updated_at, created_at) DESC
+                        LIMIT 1200
+                        """,
+                        (ws_id,),
+                    ).fetchall()
+                except Exception:
+                    rows = []
+                matches = []
+                for row in rows or []:
+                    name = str(row_value(row, "nombre") or "").strip()
+                    if not name:
+                        continue
+                    try:
+                        name_tokens = set(normalize_lookup_text(name).split())
+                    except Exception:
+                        name_tokens = set()
+                    if not name_tokens:
+                        continue
+                    if all(tok in name_tokens for tok in essential):
+                        matches.append(row)
+                        if len(matches) > 2:
+                            break
+                if len(matches) == 1:
+                    candidate = matches[0]
+                    candidate_id = str(row_value(candidate, "id") or row_value(candidate, 0) or "").strip()
+                    if candidate_id:
+                        updates = ["usuario_id = ?", "usuario_manual = 1"]
+                        params = [user_id]
+                        source = str(row_value(candidate, "source") or "").strip()
+                        if not source or source == "auto":
+                            updates.append("source = 'manual'")
+                        empresa_id = str(row_value(candidate, "empresa_id") or "").strip()
+                        if not empresa_id and empresa_default:
+                            updates.append("empresa_id = ?")
+                            params.append(empresa_default)
+                            updates.append("empresa_manual = 1")
+                        conn.execute(
+                            f"UPDATE workspace_registro_personal SET {', '.join(updates)}, updated_at = datetime(?) WHERE workspace_id = ? AND id = ?",
+                            [*params, now, ws_id, candidate_id],
+                        )
+                        try:
+                            conn.commit()
+                        except Exception:
+                            pass
+                        return candidate_id
+
         # Si no existe ficha, solo auto-creamos si el usuario está habilitado para fichar.
         time_enabled = int(row_value(user_row, "registro_horario_activo", 0) or 0) == 1
         if not time_enabled:
