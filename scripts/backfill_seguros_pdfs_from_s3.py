@@ -350,16 +350,23 @@ def main():
     matched_fuzzy = 0
     fuzzy_no_candidate = 0
     fuzzy_ambiguous = 0
+    poliza_candidate_counts = Counter()
+    pdfs_with_candidate = 0
+    skipped_non_seguros = 0
 
     for key in keys:
         name = original_filename_from_key(key)
         # Ignora documentos claramente fuera de Seguros aunque estén en el prefijo.
         upper_name = normalize_company_token(name)
         if any(word in upper_name for word in ("FINANCIACIONES", "HIPOTECA", "HIPOTECAS", "NOMINA", "NÓMINA", "RENTA", "IRPF")):
+            skipped_non_seguros += 1
             no_match += 1
             continue
         tokens = extract_tokens_from_filename(name)
         poliza_candidate = pick_poliza_candidate(tokens)
+        if poliza_candidate:
+            pdfs_with_candidate += 1
+            poliza_candidate_counts[poliza_candidate] += 1
         chosen = ""
         chosen_token = ""
         for tok in tokens:
@@ -451,9 +458,15 @@ def main():
     print(f"s3_region={region}")
     print(f"s3_prefix={prefix}")
     print(f"s3_pdfs_scanned={len(keys)}")
+    print(f"s3_pdfs_skipped_non_seguros={skipped_non_seguros}")
     print(f"seguros_total={len(seguros)}")
     print(f"seguros_missing_pdf={len(missing)}")
     print(f"candidates_by_poliza={len(by_poliza)}")
+    print(f"s3_pdfs_with_poliza_candidate={pdfs_with_candidate}")
+    print(f"s3_poliza_candidates_unique={len(poliza_candidate_counts)}")
+    dupes = [(k, v) for k, v in poliza_candidate_counts.most_common(8) if v > 1]
+    if dupes:
+        print("s3_poliza_candidates_dupes=" + ",".join(f"{k}:{v}" for k, v in dupes))
     print(f"matched_updates={len(matched)}")
     print(f"matched_direct={matched_direct}")
     print(f"matched_fuzzy={matched_fuzzy}")
