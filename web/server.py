@@ -16428,6 +16428,9 @@ def sanitize_renta_entry(entry):
     if not isinstance(entry, dict):
         return {}
     sanitized = dict(entry)
+    ejercicio = str(entry.get("ejercicio") or "").strip()
+    if ejercicio:
+        sanitized["ejercicio"] = ejercicio
 
     raw_work = coerce_renta_money(entry.get("rendimientos_trabajo_total"))
     raw_activities = coerce_renta_money(entry.get("rendimientos_actividades_economicas_total"))
@@ -16518,6 +16521,15 @@ def sanitize_renta_entry(entry):
     sanitized["dni_permanente"] = 1 if str(entry.get("dni_permanente") or "").strip().lower() in {"1", "true", "yes", "si", "sí"} else 0
     sanitized["dni_label"] = renta_dni_label(sanitized)
     sanitized["pendiente_presentacion"] = 1 if sanitized["estado_presentacion"] == "Borrador" else 0
+    # Cobro/estado (regla negocio): Renta ejercicio 2024 se considera cobrada (histórico).
+    cobrada_raw = entry.get("cobrada")
+    cobrada_val = 1 if str(cobrada_raw or "").strip().lower() in {"1", "true", "yes", "si", "sí", "on"} else 0
+    if ejercicio == "2024":
+        cobrada_val = 1
+    sanitized["cobrada"] = cobrada_val
+    sanitized["forma_cobro"] = str(entry.get("forma_cobro") or "").strip()
+    sanitized["precio_servicio"] = coerce_renta_money(entry.get("precio_servicio"))
+    sanitized["responsable"] = str(entry.get("responsable") or "").strip()
     return sanitized
 
 

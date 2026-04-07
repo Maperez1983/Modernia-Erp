@@ -1793,6 +1793,9 @@ def build_renta_entry(record: dict, ejercicio: str | None = None, estado_present
     estado_presentacion = detect_renta_doc_status(
         estado_presentacion or record.get("estado_presentacion") or record.get("doc_status")
     )
+    cobrada_import = 1 if str(record.get("cobrada") or "").strip().lower() in {"1", "true", "yes", "si", "sí"} else 0
+    if ejercicio == "2024":
+        cobrada_import = 1
     patrimonio = {
         "base_imponible_general": record.get("base_imponible_general"),
         "base_imponible_ahorro": record.get("base_imponible_ahorro"),
@@ -1834,7 +1837,7 @@ def build_renta_entry(record: dict, ejercicio: str | None = None, estado_present
         "source_file_count": record.get("source_file_count") or 0,
         "precio_servicio": record.get("precio_servicio"),
         "responsable": record.get("responsable") or "",
-        "cobrada": 1 if str(record.get("cobrada") or "").strip().lower() in {"1", "true", "yes", "si", "sí"} else 0,
+        "cobrada": cobrada_import,
         "forma_cobro": record.get("forma_cobro") or "",
         "estado_presentacion": estado_presentacion,
         "doc_status": estado_presentacion,
