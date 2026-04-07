@@ -4023,10 +4023,10 @@ const renderCompanyCards = () => {
       return letters.toUpperCase();
     };
 
-	    const appendPersonalCard = () => {
-      const employee = timeProfile?.employee || null;
-      const homePersona = state.homeTimeStatus?.persona || null;
-      const personaId = String(employee?.id || homePersona?.id || "").trim();
+		    const appendPersonalCard = () => {
+	      const employee = timeProfile?.employee || null;
+	      const homePersona = state.homeTimeStatus?.persona || null;
+	      const personaId = String(employee?.id || homePersona?.id || "").trim();
 		      const isAdmin = isPrivilegedUser(user) || canAccessAdminPanel(user);
 		      // La card "Personal" siempre abre RRHH en modo self, incluso para admins.
 		      // Así no te manda a "Equipo" y siempre ves tu espacio personal.
@@ -4064,13 +4064,18 @@ const renderCompanyCards = () => {
         const rem = months % 12;
         return years > 0 ? `${years}a ${rem}m` : `${months}m`;
       })();
-      const subtitle = (employee || homePersona)
-        ? `${companyLabel} · ${entryLabel}${seniority ? ` · Antigüedad ${seniority}` : ""}`
-        : "Completa tu ficha y documentación en RRHH.";
-	      const card = document.createElement("div");
-	      card.className = "company-card personal-card";
-	      card.dataset.action = "rrhh-home";
-	      if (personaId) card.dataset.rrhhPersona = personaId;
+	      const subtitle = (employee || homePersona)
+	        ? `${companyLabel} · ${entryLabel}${seniority ? ` · Antigüedad ${seniority}` : ""}`
+	        : "Completa tu ficha y documentación en RRHH.";
+	      const timeLabel = (() => {
+	        const status = state.homeTimeStatus || null;
+	        const personaOk = Boolean(String(status?.persona?.id || "").trim());
+	        return personaOk ? "Fichar" : "Registro horario";
+	      })();
+		      const card = document.createElement("div");
+		      card.className = "company-card personal-card";
+		      card.dataset.action = "rrhh-home";
+		      if (personaId) card.dataset.rrhhPersona = personaId;
 	      card.innerHTML = `
 	        <div class="company-card-head">
           <div class="rrhh-avatar">
@@ -4081,14 +4086,14 @@ const renderCompanyCards = () => {
             <div class="company-meta">${escapeHtml(displayName)}</div>
             <div class="company-meta">${escapeHtml(subtitle)}</div>
           </div>
-	        </div>
-	        <div class="workspace-home-card-actions">
-	          <a class="card-link" href="${rrhhHref}" data-action="rrhh-home">Abrir</a>
-	          ${state.homeTimeStatus?.workspace_id ? `<button type="button" class="secondary ghost button-inline" data-action="time-punch">Fichar</button>` : ""}
-	        </div>
-	      `;
-	      coreCards.appendChild(card);
-	    };
+		        </div>
+		        <div class="workspace-home-card-actions">
+		          <a class="card-link" href="${rrhhHref}" data-action="rrhh-home">Abrir</a>
+		          <button type="button" class="secondary ghost button-inline" data-action="time-punch">${timeLabel}</button>
+		        </div>
+		      `;
+		      coreCards.appendChild(card);
+		    };
 
     const appendServiceCard = (serviceKey) => {
       const service = normalizeSimple(serviceKey);
@@ -12514,19 +12519,27 @@ const renderHomeTimePunchModal = () => {
   _homeTimePunchBody.querySelector("[data-home-time-checkout]")?.addEventListener("click", () => runToggle("checkout"));
 };
 
-const openHomeTimePunchModal = ({ persist = false } = {}) => {
-  ensureHomeTimePunchModal();
-  if (!state.homeTimeStatus) {
-    // Best-effort refresh before rendering (home puede estar sin workspace cargado).
-    api("/api/home_time_status")
-      .then((next) => { state.homeTimeStatus = next && next.ok ? next : state.homeTimeStatus; })
-      .catch(() => {});
-  }
-  renderHomeTimePunchModal();
-  _homeTimePunchModal?.classList.remove("hidden");
-  document.body.classList.add("modal-open");
-  if (persist) {
-    // If opened explicitly, don't auto-open again in the same render loop.
+	const openHomeTimePunchModal = ({ persist = false } = {}) => {
+	  ensureHomeTimePunchModal();
+	  const refresh = async () => {
+	    try {
+	      const next = await api("/api/home_time_status");
+	      if (next && next.ok) {
+	        state.homeTimeStatus = next;
+	      }
+	    } catch {}
+	  };
+	  // Refresca siempre (best-effort) para que el modal y el botón no "dependan" del orden de carga.
+	  // Evita que desaparezca el acceso a fichaje cuando /api/home_time_status falla temporalmente.
+	  refresh().then(() => {
+	    renderHomeTimePunchModal();
+	    renderCompanyCards();
+	  });
+	  renderHomeTimePunchModal();
+	  _homeTimePunchModal?.classList.remove("hidden");
+	  document.body.classList.add("modal-open");
+	  if (persist) {
+	    // If opened explicitly, don't auto-open again in the same render loop.
     _homeTimePunchLastActionAt = Date.now();
   }
 };
