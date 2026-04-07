@@ -41868,7 +41868,7 @@ class Handler(BaseHTTPRequestHandler):
                         conn,
                         uploaded_only,
                         empresa_id=empresa_id,
-                        uploaded_clause=uploaded_policy_filter("s"),
+                        uploaded_clause=uploaded_policy_filter(),
                     )
                 )
                 total = conn.execute(
@@ -42081,7 +42081,7 @@ class Handler(BaseHTTPRequestHandler):
                         conn,
                         uploaded_only,
                         empresa_id=empresa_id,
-                        uploaded_clause=uploaded_policy_filter("s"),
+                        uploaded_clause=uploaded_policy_filter(),
                     )
                 )
                 rows = conn.execute(
@@ -44146,7 +44146,7 @@ class Handler(BaseHTTPRequestHandler):
                         conn,
                         uploaded_only,
                         empresa_id=empresa_id,
-                        uploaded_clause=uploaded_policy_filter("s"),
+                        uploaded_clause=uploaded_policy_filter(),
                     )
                 )
                 where_clause = f"WHERE {' AND '.join(where)}"
@@ -47722,7 +47722,7 @@ class Handler(BaseHTTPRequestHandler):
                         conn,
                         uploaded_only,
                         empresa_id=empresa_id,
-                        uploaded_clause=uploaded_policy_filter("t"),
+                        uploaded_clause=uploaded_policy_filter(),
                     )
                 )
 
