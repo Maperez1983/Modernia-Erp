@@ -880,6 +880,9 @@ CREATE TABLE IF NOT EXISTS auditoria (
   FOREIGN KEY (empresa_id) REFERENCES empresas(id)
 );
 
+CREATE INDEX IF NOT EXISTS idx_auditoria_empresa_created
+ON auditoria (empresa_id, created_at);
+
 -- Eventos de etapa (para métricas de embudo y conversión a lo largo del tiempo).
 -- Nota: se alimenta desde el backend cuando se crea/actualiza una captación o se mueve de etapa.
 CREATE TABLE IF NOT EXISTS crm_stage_events (

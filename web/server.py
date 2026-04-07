@@ -17747,6 +17747,24 @@ def ensure_tables(db_path):
             _migration_mark(conn, "perf_indexes_v3")
     except Exception:
         pass
+    # Índices extra (iteración 4): auditoría (reduce 502/timeout al cargar actividad reciente).
+    try:
+        if not _migration_done(conn, "perf_indexes_v4"):
+            backend = _backend_name(conn)
+            idx_prefix = "CREATE INDEX"
+            if backend == "postgres":
+                idx_prefix = "CREATE INDEX CONCURRENTLY"
+            index_sql = [
+                f"{idx_prefix} IF NOT EXISTS idx_auditoria_empresa_created ON auditoria (empresa_id, created_at)",
+            ]
+            for sql in index_sql:
+                try:
+                    conn.execute(sql)
+                except Exception:
+                    pass
+            _migration_mark(conn, "perf_indexes_v4")
+    except Exception:
+        pass
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS ocr_jobs (
@@ -44311,7 +44329,7 @@ class Handler(BaseHTTPRequestHandler):
                 limit_clause = f"LIMIT {int(limit)}"
             rows = conn.execute(
                 f"""
-                SELECT a.id, a.entidad, a.entidad_id, a.accion, a.usuario, a.detalles, a.created_at,
+                SELECT a.id, a.entidad, a.entidad_id, a.accion, a.usuario, a.created_at,
                        COALESCE(c.nombre, '') AS cliente
                 FROM auditoria a
                 LEFT JOIN clientes c ON c.id = a.entidad_id

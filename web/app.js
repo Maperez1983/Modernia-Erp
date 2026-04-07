@@ -19977,47 +19977,52 @@ const loadGestoriaAuditoria = () => {
     gestoriaAuditTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
     return;
   }
-  api(`/api/auditoria?empresa_id=${empresa.id}&limit=50`).then((data) => {
-    const rows = data.rows || [];
-    if (!rows.length) {
-      gestoriaAuditTable.innerHTML = "<p class='muted'>Sin actividad reciente.</p>";
-      gestoriaAuditInfo.textContent = "";
-      return;
-    }
-    const table = document.createElement("table");
-    const thead = document.createElement("thead");
-    const trHead = document.createElement("tr");
-    ["fecha", "usuario", "accion", "cliente", "entidad"].forEach((col) => {
-      const th = document.createElement("th");
-      th.textContent = formatHeader(col);
-      trHead.appendChild(th);
-    });
-    thead.appendChild(trHead);
-    table.appendChild(thead);
-    const tbody = document.createElement("tbody");
-    rows.forEach((row) => {
-      const tr = document.createElement("tr");
-      const values = [
-        row.created_at || "-",
-        row.usuario || "-",
-        row.accion || "-",
-        row.cliente || "-",
-        row.entidad || "-",
-      ];
-      const cols = ["fecha", "usuario", "accion", "cliente", "entidad"];
-      values.forEach((value, idx) => {
-        const td = document.createElement("td");
-        const formatted = formatCell(cols[idx], value);
-        td.textContent = formatted === null ? "" : formatted;
-        tr.appendChild(td);
+  api(`/api/auditoria?empresa_id=${empresa.id}&limit=50`)
+    .then((data) => {
+      const rows = data.rows || [];
+      if (!rows.length) {
+        gestoriaAuditTable.innerHTML = "<p class='muted'>Sin actividad reciente.</p>";
+        gestoriaAuditInfo.textContent = "";
+        return;
+      }
+      const table = document.createElement("table");
+      const thead = document.createElement("thead");
+      const trHead = document.createElement("tr");
+      ["fecha", "usuario", "accion", "cliente", "entidad"].forEach((col) => {
+        const th = document.createElement("th");
+        th.textContent = formatHeader(col);
+        trHead.appendChild(th);
       });
-      tbody.appendChild(tr);
+      thead.appendChild(trHead);
+      table.appendChild(thead);
+      const tbody = document.createElement("tbody");
+      rows.forEach((row) => {
+        const tr = document.createElement("tr");
+        const values = [
+          row.created_at || "-",
+          row.usuario || "-",
+          row.accion || "-",
+          row.cliente || "-",
+          row.entidad || "-",
+        ];
+        const cols = ["fecha", "usuario", "accion", "cliente", "entidad"];
+        values.forEach((value, idx) => {
+          const td = document.createElement("td");
+          const formatted = formatCell(cols[idx], value);
+          td.textContent = formatted === null ? "" : formatted;
+          tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+      gestoriaAuditTable.innerHTML = "";
+      gestoriaAuditTable.appendChild(table);
+      gestoriaAuditInfo.textContent = `Mostrando ${rows.length} movimientos.`;
+    })
+    .catch(() => {
+      gestoriaAuditTable.innerHTML = "<p class='muted'>No se pudo cargar la auditoría ahora. Reintenta en unos segundos.</p>";
+      gestoriaAuditInfo.textContent = "";
     });
-    table.appendChild(tbody);
-    gestoriaAuditTable.innerHTML = "";
-    gestoriaAuditTable.appendChild(table);
-    gestoriaAuditInfo.textContent = `Mostrando ${rows.length} movimientos.`;
-  });
 };
 
 
