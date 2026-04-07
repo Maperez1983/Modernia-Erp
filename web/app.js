@@ -4141,32 +4141,22 @@ const renderCompanyCards = () => {
       coreCards.appendChild(card);
     };
 
-    if (!isPriv) {
-      appendPersonalCard();
-      // Cards de servicios asignados: el usuario no admin debe poder entrar directamente al servicio.
-      try {
-        const services = expandServiceAliases(parseServiceList(user?.servicio || ""));
-        const mapped = new Set();
-        services.forEach((key) => {
-          if (key === "hipotecas") key = "financiaciones";
-          if (["inmobiliaria", "gestoria", "seguros", "financiaciones"].includes(key)) mapped.add(key);
-        });
-        Array.from(mapped).forEach((key) => appendServiceCard(key));
-      } catch {}
-      const workspaceCard = document.createElement("div");
-      workspaceCard.className = "company-card";
-      workspaceCard.dataset.action = "holding-tenant";
-      workspaceCard.innerHTML = `
-        <h3>Workspace ${getWorkspaceDisplayName(state.currentWorkspaceName || workspaceSlug || DEFAULT_TENANT_WORKSPACE_SLUG)}</h3>
-        <div class="company-meta">Entrada operativa al grupo y a sus empresas activas.</div>
-        <div class="company-meta">Desde aquí eliges empresa y luego trabajas en clientes y módulos.</div>
-        <a class="card-link" href="?holding=1&mode=tenant&workspace=${encodeURIComponent(workspaceSlug)}&view=overview" data-action="holding-tenant">Entrar</a>
-      `;
-      coreCards.appendChild(workspaceCard);
-      // Prompt de fichaje (solo si aplica al usuario).
-      maybeAutoShowHomeTimePunchModal();
-      return;
-    }
+	    if (!isPriv) {
+	      appendPersonalCard();
+	      // Cards de servicios asignados: el usuario no admin debe poder entrar directamente al servicio.
+	      try {
+	        const services = expandServiceAliases(parseServiceList(user?.servicio || ""));
+	        const mapped = new Set();
+	        services.forEach((key) => {
+	          if (key === "hipotecas") key = "financiaciones";
+	          if (["inmobiliaria", "gestoria", "seguros", "financiaciones"].includes(key)) mapped.add(key);
+	        });
+	        Array.from(mapped).forEach((key) => appendServiceCard(key));
+	      } catch {}
+	      // Prompt de fichaje (solo si aplica al usuario).
+	      maybeAutoShowHomeTimePunchModal();
+	      return;
+	    }
 
     appendPersonalCard();
     const platformCard = document.createElement("div");
