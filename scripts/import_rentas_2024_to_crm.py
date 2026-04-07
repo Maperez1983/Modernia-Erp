@@ -227,27 +227,63 @@ def clean_ocr_text_value(value: object) -> str:
     text = re.sub(r"\s+", " ", text).strip(" ,.;:-")
     return compact_spaces(text)
 
+def fix_ocr_digits(value: object, *, allow_b: bool = False) -> str:
+    text = str(value or "")
+    if not text:
+        return ""
+    mapping = {"O": "0", "o": "0", "I": "1", "i": "1", "L": "1", "l": "1", "S": "5", "s": "5"}
+    if allow_b:
+        mapping.update({"B": "8", "b": "8"})
+    return text.translate(str.maketrans(mapping))
 
 def normalize_nif_candidate(value: object) -> str:
-    text = compact_spaces(value).upper().replace(" ", "").replace(".", "").replace("-", "")
-    return text
+    raw = compact_spaces(value).upper().replace(" ", "").replace(".", "").replace("-", "")
+    if not raw:
+        return ""
+    raw = re.sub(r"[^A-Z0-9]", "", raw)
+    if len(raw) > 12:
+        raw = raw[:12]
+    def fix_digits(chunk: str) -> str:
+        return fix_ocr_digits(chunk, allow_b=True).upper()
+    if not raw:
+        return ""
+    if raw[0].isdigit():
+        # DNI: 8 dígitos + letra.
+        if len(raw) >= 9:
+            return f"{fix_digits(raw[:8])}{raw[8]}"
+        return fix_digits(raw)
+    if raw[0] in "XYZ":
+        # NIE: X/Y/Z + 7 dígitos + letra.
+        if len(raw) >= 9:
+            return f"{raw[0]}{fix_digits(raw[1:8])}{raw[8]}"
+        return f"{raw[0]}{fix_digits(raw[1:])}"
+    if raw[0] in "ABCDEFGHJNPQRSUVW":
+        # CIF: letra + 7 dígitos + control (dígito o letra).
+        if len(raw) >= 9:
+            return f"{raw[0]}{fix_digits(raw[1:8])}{raw[8]}"
+        return f"{raw[0]}{fix_digits(raw[1:])}"
+    # Fallback conservador: solo corrige confusiones comunes, no fuerza prefijos.
+    return fix_ocr_digits(raw, allow_b=False).upper()
 
 
 def looks_like_nif(value: object) -> bool:
     text = normalize_nif_candidate(value)
-    if not re.fullmatch(r"[A-Z0-9]{8,10}", text):
+    if not text or text in {"DECLARANTE", "CONYUGE"}:
         return False
-    if not any(ch.isdigit() for ch in text):
-        return False
-    if text in {"DECLARANTE", "CONYUGE"}:
-        return False
-    return True
+    if re.fullmatch(r"[0-9]{8}[A-Z]", text):
+        return True
+    if re.fullmatch(r"[XYZ][0-9]{7}[A-Z]", text):
+        return True
+    if re.fullmatch(r"[ABCDEFGHJNPQRSUVW][0-9]{7}[0-9A-Z]", text):
+        return True
+    return False
 
 
 def parse_money(raw: object) -> float | None:
     text = compact_spaces(raw)
     if not text:
         return None
+    text = fix_ocr_digits(text, allow_b=True)
     text = text.replace("€", "").replace("%", "").replace(" ", "")
     if "," in text and "." in text:
         text = text.replace(".", "").replace(",", ".")
@@ -425,7 +461,13 @@ def parse_date_ddmmyyyy(raw: object) -> str:
     text = compact_spaces(raw)
     if not text:
         return ""
+    text = fix_ocr_digits(text, allow_b=False)
     for fmt in ("%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d", "%d%m%Y"):
+        try:
+            return datetime.strptime(text, fmt).date().isoformat()
+        except ValueError:
+            continue
+    for fmt in ("%d/%m/%y", "%d-%m-%y"):
         try:
             return datetime.strptime(text, fmt).date().isoformat()
         except ValueError:

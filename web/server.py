@@ -5089,28 +5089,17 @@ def s3_get_object_bytes(key):
 
 
 def decode_seguros_payload(payload, *, conn=None, session=None):
-    data_uri = payload.get("file_base64") or payload.get("data")
-    s3_key = (payload.get("s3_key") or "").strip()
-    pdf_bytes = None
-    if s3_key:
-        safe_key = _normalize_s3_key(s3_key)
-        if conn is not None and session is not None:
-            ok, err = _s3_key_visible_for_user(conn, session, safe_key)
-            if not ok:
-                raise ValueError(err or "No autorizado")
-        pdf_bytes, s3_err = s3_get_object_bytes(safe_key)
-        if not pdf_bytes:
-            raise ValueError(f"S3: {s3_err}")
-    else:
-        if not data_uri:
-            raise ValueError("Archivo requerido")
-        if "," in data_uri:
-            data_uri = data_uri.split(",", 1)[1]
-        try:
-            pdf_bytes = base64.b64decode(data_uri)
-        except Exception:
-            raise ValueError("Base64 invalido")
-    return pdf_bytes
+    raw_bytes, mime, source_hint = decode_document_payload(payload, conn=conn, session=session)
+    if not mime:
+        if raw_bytes.startswith(b"%PDF"):
+            mime = "application/pdf"
+        elif raw_bytes.startswith(b"\xff\xd8\xff"):
+            mime = "image/jpeg"
+        elif raw_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
+            mime = "image/png"
+        else:
+            mime = "application/pdf"
+    return raw_bytes, mime, source_hint
 
 
 def decode_document_payload(payload, *, conn=None, session=None):
@@ -6638,7 +6627,7 @@ def apply_gestoria_import_lote(conn, lote_id, empresa_id, now, limit=None):
     return {"applied": applied, "errors": errors, "lote": lote}
 
 def process_seguros_ocr(payload, conn, *, session=None):
-    pdf_bytes = decode_seguros_payload(payload, conn=conn, session=session)
+    raw_bytes, mime, payload_hint = decode_seguros_payload(payload, conn=conn, session=session)
     fast_mode = str(payload.get("fast_mode") or "").strip().lower() in ("1", "true", "yes", "on")
     tmp_path = None
     text = ""
@@ -6649,6 +6638,7 @@ def process_seguros_ocr(payload, conn, *, session=None):
             str(payload.get("filename") or ""),
             str(payload.get("s3_key") or ""),
             str(payload.get("source_hint") or ""),
+            str(payload_hint or ""),
         ]
     ).strip()
     hinted_company = detect_company_from_metadata(source_hint)
@@ -6665,14 +6655,39 @@ def process_seguros_ocr(payload, conn, *, session=None):
         confidence = float(quality.get("confidence") or 0)
         return required_valid * 100 + required_filled * 10 + int(confidence * 100)
     try:
-        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp_file:
-            tmp_file.write(pdf_bytes)
+        suffix = ".pdf"
+        if mime and mime.startswith("image/"):
+            if "png" in mime:
+                suffix = ".png"
+            else:
+                suffix = ".jpg"
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp_file:
+            tmp_file.write(raw_bytes)
             tmp_path = tmp_file.name
-        text, err_detail, method = extract_pdf_text(tmp_path)
-        if not text:
-            raise RuntimeError(err_detail or "No se pudo extraer texto")
-        fields = parse_poliza_text(text, source_hint=source_hint, hinted_company=hinted_company)
-        candidate_fields.append(("pdf_text", normalize_extracted_fields(fields), 1.0))
+        fields = {}
+        if mime == "application/pdf":
+            text, err_detail, method = extract_pdf_text(tmp_path)
+            if not text:
+                raise RuntimeError(err_detail or "No se pudo extraer texto")
+            fields = parse_poliza_text(text, source_hint=source_hint, hinted_company=hinted_company)
+            candidate_fields.append(("pdf_text", normalize_extracted_fields(fields), 1.0))
+        else:
+            method = "vision" if external_ocr_available() else "tesseract"
+            image_text = ""
+            image_err = ""
+            if external_ocr_available():
+                vision_bytes = prepare_image_bytes_for_vision(tmp_path)
+                if vision_bytes:
+                    image_text, image_err = ocr_image_external(vision_bytes)
+            if not image_text:
+                image_text, image_err = ocr_pdf_first_page(tmp_path)
+            text = image_text or ""
+            if image_err and not err_detail:
+                err_detail = image_err
+            if not text:
+                raise RuntimeError(err_detail or "No se pudo extraer texto")
+            fields = parse_poliza_text(text, source_hint=source_hint, hinted_company=hinted_company)
+            candidate_fields.append(("image_text", normalize_extracted_fields(fields), 1.02))
         best_quality = compute_ocr_quality(fields, required_keys)
         if (not fast_mode) and (
             not any(str(value or "").strip() for value in fields.values()) or (
@@ -6682,7 +6697,9 @@ def process_seguros_ocr(payload, conn, *, session=None):
             or not fields.get("fecha_efecto")
             )
         ):
-            ocr_text, ocr_err = ocr_pdf_all_pages(tmp_path, use_external=external_ocr_available())
+            ocr_text, ocr_err = ("", "")
+            if mime == "application/pdf":
+                ocr_text, ocr_err = ocr_pdf_all_pages(tmp_path, use_external=external_ocr_available())
             if ocr_text:
                 ocr_fields = parse_poliza_text(ocr_text, source_hint=source_hint, hinted_company=hinted_company)
                 candidate_fields.append(("ocr_all_pages", normalize_extracted_fields(ocr_fields), 1.05))
@@ -6697,7 +6714,7 @@ def process_seguros_ocr(payload, conn, *, session=None):
         doc_text = ""
         missing_required = any(not fields.get(key) for key in required_keys)
         if (missing_required or candidate_score(best_quality) < 250) and docai_available() and not fast_mode:
-            doc_text, doc_fields, doc_err = ocr_image_docai(pdf_bytes, "application/pdf")
+            doc_text, doc_fields, doc_err = ocr_image_docai(raw_bytes, mime)
             if doc_err and not err_detail:
                 err_detail = doc_err
             doc_mapped = map_docai_poliza_fields(doc_fields)
