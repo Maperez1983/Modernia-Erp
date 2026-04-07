@@ -4037,6 +4037,26 @@ const renderCompanyCards = () => {
 	    const workspaceScoped = enabledModules.size > 0;
 	    const timeProfile = findCurrentUserTimeProfile();
 	    const workspaceSlug = resolveDefaultTenantWorkspaceSlug();
+      const dedupeCoreCards = () => {
+        // Defensive: evita duplicados por estados intermedios / renderizados repetidos.
+        try {
+          const seen = new Set();
+          Array.from(coreCards.children || []).forEach((node) => {
+            if (!node || node.nodeType !== 1) return;
+            const el = node;
+            const actionKey = String(el.dataset?.action || "").trim();
+            const titleKey = String(el.querySelector?.("h3")?.textContent || "").trim();
+            const hrefKey = String(el.querySelector?.("a.card-link")?.getAttribute?.("href") || "").trim();
+            const key = `${actionKey}::${hrefKey}::${titleKey}`;
+            if (!titleKey && !actionKey && !hrefKey) return;
+            if (seen.has(key)) {
+              el.remove();
+              return;
+            }
+            seen.add(key);
+          });
+        } catch {}
+      };
 
 	    const buildInitials = (value) => {
       const parts = String(value || "")
@@ -4185,6 +4205,7 @@ const renderCompanyCards = () => {
 	      } catch {}
 	      // Prompt de fichaje (solo si aplica al usuario).
 	      maybeAutoShowHomeTimePunchModal();
+        dedupeCoreCards();
 	      return;
 	    }
 
@@ -4200,7 +4221,7 @@ const renderCompanyCards = () => {
     `;
     coreCards.appendChild(platformCard);
 
-    const tenantCard = document.createElement("div");
+	    const tenantCard = document.createElement("div");
     tenantCard.className = "company-card";
     tenantCard.dataset.action = "holding-tenant";
     tenantCard.innerHTML = `
@@ -4211,23 +4232,7 @@ const renderCompanyCards = () => {
     `;
 	    coreCards.appendChild(tenantCard);
 	    maybeAutoShowHomeTimePunchModal();
-      // Defensive: evita duplicados por estados intermedios / renderizados repetidos.
-      try {
-        const seen = new Set();
-        Array.from(coreCards.children || []).forEach((node) => {
-          if (!node || node.nodeType !== 1) return;
-          const el = node;
-          const actionKey = String(el.dataset?.action || "").trim();
-          const titleKey = String(el.querySelector?.("h3")?.textContent || "").trim();
-          const key = `${actionKey}::${titleKey}`;
-          if (!titleKey && !actionKey) return;
-          if (seen.has(key)) {
-            el.remove();
-            return;
-          }
-          seen.add(key);
-        });
-      } catch {}
+      dedupeCoreCards();
 	  }
 	};
 
