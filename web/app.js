@@ -41261,7 +41261,7 @@ if (segurosBdtOcrCompania) {
 }
 
 if (segurosUpdateButton) {
-  segurosUpdateButton.addEventListener("click", () => {
+  segurosUpdateButton.addEventListener("click", async () => {
     if (segurosUpdateStatus) segurosUpdateStatus.textContent = "";
     const recordId = segurosUpdateSelect ? segurosUpdateSelect.value : "";
     if (!recordId) {
@@ -41277,93 +41277,91 @@ if (segurosUpdateButton) {
       if (segurosUpdateStatus) segurosUpdateStatus.textContent = "El archivo debe ser PDF.";
       return;
     }
-    if (segurosUpdateStatus) segurosUpdateStatus.textContent = "Procesando OCR...";
-    const reader = new FileReader();
-    reader.onload = async () => {
-      const payload = {
-        filename: file.name,
-        content: reader.result,
-      };
-      let upload = null;
-      try {
-        upload = await uploadFileToS3(file, "seguros", segurosUpdateStatus);
-      } catch (err) {
-        if (segurosUpdateStatus) {
-          segurosUpdateStatus.textContent = `Error al subir: ${err.message}`;
-        }
-        return;
+
+    if (segurosUpdateStatus) segurosUpdateStatus.textContent = "Subiendo póliza...";
+    let upload = null;
+    try {
+      upload = await uploadFileToS3(file, "seguros", segurosUpdateStatus);
+    } catch (err) {
+      if (segurosUpdateStatus) segurosUpdateStatus.textContent = `Error al subir: ${err.message}`;
+      return;
+    }
+    if (!upload?.key) {
+      if (segurosUpdateStatus) segurosUpdateStatus.textContent = "No se pudo obtener clave del documento.";
+      return;
+    }
+
+    try {
+      await postJsonWithDbRetry("/api/seguros_update", {
+        empresa_nombre: FINCAS_COMPANY,
+        id: recordId,
+        poliza_key: upload.key || "",
+        poliza_url: upload.public_url || "",
+      });
+    } catch (err) {
+      if (segurosUpdateStatus) {
+        segurosUpdateStatus.textContent = `Póliza subida, pero falló al guardar en CRM: ${err.message}`;
       }
-      fetch("/api/seguros_ocr", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      })
-        .then((res) => res.json())
-        .then((data) => {
-          if (data.error) {
-            if (segurosUpdateStatus) {
-              segurosUpdateStatus.textContent = data.detail || data.error;
-            }
-            return;
-          }
-          const fields = data.fields || {};
-          const enrichPayload = {
-            empresa_nombre: FINCAS_COMPANY,
-            id: recordId,
-            tomador: fields.tomador || "",
-            nif: fields.dni || "",
-            telefono: fields.telefono || "",
-            email: fields.email || "",
-            direccion: fields.direccion || "",
-            fecha_nacimiento: fields.fecha_nacimiento || "",
-            compania: fields.compania || "",
-            ramo: fields.ramo || "",
-            poliza_numero: fields.poliza_numero || "",
-            prima_neta: fields.prima_neta || "",
-            prima_total: fields.prima_total || "",
-            fecha_efecto: fields.fecha_efecto || "",
-            fecha_vencimiento: fields.fecha_vencimiento || "",
-          };
-          if (upload) {
-            fetch("/api/seguros_update", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                empresa_nombre: FINCAS_COMPANY,
-                id: recordId,
-                poliza_key: upload.key || "",
-                poliza_url: upload.public_url || "",
-              }),
-            }).catch(() => {});
-          }
-          fetch("/api/seguros_enrich", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(enrichPayload),
-          })
-            .then((res) => res.json())
-            .then((resp) => {
-              if (resp.error) {
-                if (segurosUpdateStatus) {
-                  segurosUpdateStatus.textContent = resp.error;
-                }
-                return;
-              }
-              if (segurosUpdateStatus) {
-                segurosUpdateStatus.textContent = "Datos completados.";
-              }
-              resetSegurosUpdatePanel();
-              loadSegurosCrm();
-            })
-            .catch(() => {
-              if (segurosUpdateStatus) segurosUpdateStatus.textContent = "Error al completar.";
-            });
-        })
-        .catch(() => {
-          if (segurosUpdateStatus) segurosUpdateStatus.textContent = "Error al leer el PDF.";
-        });
+      return;
+    }
+
+    if (segurosUpdateStatus) segurosUpdateStatus.textContent = "Póliza subida. Procesando OCR...";
+    let data = null;
+    try {
+      data = await runSegurosOcrDirectPayload(
+        { s3_key: upload.key, filename: file.name },
+        { timeoutMs: 180000 }
+      );
+    } catch (err) {
+      if (segurosUpdateStatus) {
+        segurosUpdateStatus.textContent = `Póliza subida. OCR falló: ${err?.message || "Error"}`;
+      }
+      resetSegurosUpdatePanel();
+      loadSegurosCrm();
+      return;
+    }
+    if (data?.error) {
+      if (segurosUpdateStatus) {
+        segurosUpdateStatus.textContent = `Póliza subida. OCR: ${data.detail || data.error}`;
+      }
+      resetSegurosUpdatePanel();
+      loadSegurosCrm();
+      return;
+    }
+
+    const fields = data?.fields || {};
+    const enrichPayload = {
+      empresa_nombre: FINCAS_COMPANY,
+      id: recordId,
+      tomador: fields.tomador || "",
+      nif: fields.dni || "",
+      telefono: fields.telefono || "",
+      email: fields.email || "",
+      direccion: fields.direccion || "",
+      fecha_nacimiento: fields.fecha_nacimiento || "",
+      compania: fields.compania || "",
+      ramo: fields.ramo || "",
+      poliza_numero: fields.poliza_numero || "",
+      prima_neta: fields.prima_neta || "",
+      prima_total: fields.prima_total || "",
+      fecha_efecto: fields.fecha_efecto || "",
+      fecha_vencimiento: fields.fecha_vencimiento || "",
     };
-    reader.readAsDataURL(file);
+
+    try {
+      await postJsonWithDbRetry("/api/seguros_enrich", enrichPayload, { timeoutMs: 30000 });
+    } catch (err) {
+      if (segurosUpdateStatus) {
+        segurosUpdateStatus.textContent = `Póliza subida. Error al completar: ${err.message}`;
+      }
+      resetSegurosUpdatePanel();
+      loadSegurosCrm();
+      return;
+    }
+
+    if (segurosUpdateStatus) segurosUpdateStatus.textContent = "Póliza subida y datos completados.";
+    resetSegurosUpdatePanel();
+    loadSegurosCrm();
   });
 }
 
