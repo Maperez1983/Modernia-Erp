@@ -387,16 +387,15 @@ def main():
         if chosen:
             matched_direct += 1
         if not chosen:
-            # Fuzzy-match: si el PDF tiene nº de póliza pero en DB falta, intentamos enlazar
-            # usando compañía/ramo/tomador por similitud.
-            if not poliza_candidate:
-                fuzzy_no_candidate += 1
-                no_match += 1
-                continue
-            if poliza_candidate in used_polizas:
+            # Fuzzy-match: intenta enlazar aunque falte `poliza_numero` en la BD.
+            # - Si el PDF trae candidato (nº póliza), lo usamos como guardrail.
+            # - Si NO trae candidato, usamos únicamente similitud de compañía/ramo/tomador con umbrales más estrictos.
+
+            if poliza_candidate and poliza_candidate in used_polizas:
                 # ya usado por otro match; evita duplicados.
                 no_match += 1
                 continue
+
             words = extract_words_from_filename(name)
             comp_hint = ""
             for comp in sorted(known_companies, key=len, reverse=True):
@@ -404,42 +403,70 @@ def main():
                     comp_hint = comp
                     break
             ramo_hint = infer_ramo_from_filename(name)
+
             candidates = []
             if comp_hint or ramo_hint:
-                candidates = by_comp_ramo.get((comp_hint, ramo_hint), []) or by_comp_ramo.get((comp_hint, ""), []) or []
+                candidates = (
+                    by_comp_ramo.get((comp_hint, ramo_hint), [])
+                    or by_comp_ramo.get((comp_hint, ""), [])
+                    or []
+                )
             if not candidates:
                 candidates = missing_rows
+
             scored = []
             for row in candidates:
                 if row["id"] in used_seguros:
                     continue
                 score = 0
                 if comp_hint and row["compania"] and row["compania"] == comp_hint:
-                    score += 4
+                    score += 5
                 if ramo_hint and row["ramo"] and ramo_hint and row["ramo"] == ramo_hint:
                     score += 3
                 # overlap tomador tokens
                 tom = row["tomador"] or ""
+                overlap = 0
                 if tom and words:
-                    overlap = 0
-                    for w in words[:20]:
+                    for w in words[:24]:
                         if len(w) < 4:
                             continue
                         if w in tom:
                             overlap += 1
-                    score += min(8, overlap)
-                scored.append((score, row["id"]))
-            scored.sort(reverse=True, key=lambda x: x[0])
-            if not scored or scored[0][0] < 6:
+                score += min(10, overlap)
+                scored.append((score, overlap, row["id"]))
+
+            scored.sort(reverse=True, key=lambda x: (x[0], x[1]))
+
+            # Umbrales:
+            # - con candidato de póliza: toleramos score >= 6 (ya era el umbral)
+            # - sin candidato: exige compañía y overlap >= 2, y score >= 9
+            if not scored:
+                if not poliza_candidate:
+                    fuzzy_no_candidate += 1
                 no_match += 1
                 continue
+
+            best_score, best_overlap, best_id = scored[0]
+            if poliza_candidate:
+                if best_score < 6:
+                    no_match += 1
+                    continue
+            else:
+                if not comp_hint or best_overlap < 2 or best_score < 9:
+                    fuzzy_no_candidate += 1
+                    no_match += 1
+                    continue
+
             # Si el segundo está muy cerca, lo consideramos ambiguo.
-            if len(scored) > 1 and (scored[0][0] - scored[1][0]) < 2:
-                fuzzy_ambiguous += 1
-                no_match += 1
-                continue
-            chosen = scored[0][1]
-            chosen_token = poliza_candidate
+            if len(scored) > 1:
+                second = scored[1]
+                if (best_score - second[0]) < 2:
+                    fuzzy_ambiguous += 1
+                    no_match += 1
+                    continue
+
+            chosen = best_id
+            chosen_token = poliza_candidate  # puede estar vacío
             matched_fuzzy += 1
 
         if not chosen:
