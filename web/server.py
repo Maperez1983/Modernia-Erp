@@ -22491,6 +22491,126 @@ def enforce_workspace_membership(conn, session, workspace_id, *, write=False):
         return False, "No autorizado"
     member = fetch_workspace_member(conn, ws_id, uid)
     if not member:
+        # Autoreparación (legacy / alta de usuarios):
+        # cuando se activa APP_WORKSPACE_MEMBERSHIP_ENFORCE en instalaciones existentes,
+        # puede haber usuarios válidos sin fila en workspace_miembros. Intentamos auto-vincular
+        # en casos "seguros" para no bloquear el acceso (home, RRHH, servicios).
+        try:
+            user_row = conn.execute(
+                """
+                SELECT id, activo, servicio, rol, registro_horario_activo, email, nombre, apellido
+                FROM usuarios
+                WHERE id = ?
+                LIMIT 1
+                """,
+                (uid,),
+            ).fetchone()
+        except Exception:
+            user_row = None
+        if user_row and int(row_value(user_row, "activo", 0) or 0) == 1:
+            user_email = normalize_email(row_value(user_row, "email") or "")
+            user_full_name = " ".join(
+                part
+                for part in [
+                    str(row_value(user_row, "nombre") or "").strip(),
+                    str(row_value(user_row, "apellido") or "").strip(),
+                ]
+                if part
+            ).strip()
+            time_enabled = int(row_value(user_row, "registro_horario_activo", 0) or 0) == 1
+            services = _normalize_service_tokens(row_value(user_row, "servicio") or "")
+            has_service = bool(services)
+            # Evidencias de pertenencia:
+            has_persona = False
+            try:
+                if conn.execute(
+                    """
+                    SELECT 1
+                    FROM workspace_registro_personal
+                    WHERE workspace_id = ? AND COALESCE(activo, 1) = 1 AND usuario_id = ?
+                    LIMIT 1
+                    """,
+                    (ws_id, uid),
+                ).fetchone():
+                    has_persona = True
+            except Exception:
+                has_persona = False
+            if not has_persona and user_email:
+                try:
+                    if conn.execute(
+                        """
+                        SELECT 1
+                        FROM workspace_registro_personal
+                        WHERE workspace_id = ?
+                          AND COALESCE(activo, 1) = 1
+                          AND LOWER(TRIM(COALESCE(email, ''))) = LOWER(TRIM(?))
+                        LIMIT 1
+                        """,
+                        (ws_id, user_email),
+                    ).fetchone():
+                        has_persona = True
+                except Exception:
+                    pass
+            if not has_persona and user_full_name:
+                try:
+                    if conn.execute(
+                        """
+                        SELECT 1
+                        FROM workspace_registro_personal
+                        WHERE workspace_id = ?
+                          AND COALESCE(activo, 1) = 1
+                          AND LOWER(TRIM(COALESCE(nombre, ''))) = LOWER(TRIM(?))
+                        LIMIT 1
+                        """,
+                        (ws_id, user_full_name),
+                    ).fetchone():
+                        has_persona = True
+                except Exception:
+                    pass
+
+            # Si hay un único workspace, mantenemos comportamiento legacy (casi seguro en despliegues single-tenant).
+            single_workspace = False
+            try:
+                ws_count_row = conn.execute("SELECT COUNT(*) AS total FROM workspaces").fetchone()
+                ws_total = int(row_value(ws_count_row, "total", 0) or row_value(ws_count_row, 0) or 0)
+                single_workspace = ws_total == 1
+            except Exception:
+                single_workspace = False
+
+            # Además, permitimos auto-vincular en el workspace "default" si el usuario tiene servicios o fichaje activo.
+            is_default = False
+            try:
+                ws_row = conn.execute("SELECT nombre, slug FROM workspaces WHERE id = ? LIMIT 1", (ws_id,)).fetchone()
+            except Exception:
+                ws_row = None
+            try:
+                ws_slug = normalize_workspace_slug(row_value(ws_row, "slug") or row_value(ws_row, "nombre") or "")
+                default_slug = normalize_workspace_slug(DEFAULT_WORKSPACE_NAME)
+                is_default = ws_slug in {
+                    default_slug,
+                    "verifika2",
+                    "modernia",
+                    "grupomodernia",
+                    "grupo-modernia",
+                    "grupo_modernia",
+                }
+            except Exception:
+                is_default = False
+
+            should_autojoin = bool(single_workspace or has_persona or (is_default and (time_enabled or has_service)))
+            if should_autojoin:
+                try:
+                    ensure_workspace_core_tables(conn)
+                except Exception:
+                    pass
+                now_ts = datetime.now(timezone.utc).isoformat()
+                ensure_workspace_member(conn, ws_id, uid, role="Miembro", now=now_ts)
+                try:
+                    conn.commit()
+                except Exception:
+                    pass
+                member = fetch_workspace_member(conn, ws_id, uid)
+    if not member:
         return False, "No autorizado"
     if write and not workspace_member_can_write(member.get("rol")):
         return False, "No autorizado"
@@ -40483,6 +40603,25 @@ class Handler(BaseHTTPRequestHandler):
                 ws_rows = fetch_workspace_rows_for_user(conn, session) or []
             except Exception:
                 ws_rows = []
+            # Si el usuario aún no es miembro de ningún workspace (p. ej. alta legacy),
+            # intentamos usar el workspace por defecto para poder auto-vincularlo y permitir fichaje.
+            if not ws_rows:
+                try:
+                    default_slug = normalize_workspace_slug(DEFAULT_WORKSPACE_NAME)
+                    default_row = conn.execute(
+                        """
+                        SELECT id, nombre, slug
+                        FROM workspaces
+                        WHERE slug = ? OR nombre = ?
+                        ORDER BY created_at ASC
+                        LIMIT 1
+                        """,
+                        (default_slug, DEFAULT_WORKSPACE_NAME),
+                    ).fetchone()
+                except Exception:
+                    default_row = None
+                if default_row:
+                    ws_rows = [dict(default_row)]
             chosen = None
             try:
                 if ws_rows:
