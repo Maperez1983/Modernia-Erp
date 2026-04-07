@@ -32720,6 +32720,11 @@ const loadGestoriaBdt = async () => {
   if (!gestoriaBdtTable || !gestoriaBdtInfo) {
     return;
   }
+  if (!userCanAccessService("gestoria")) {
+    gestoriaBdtTable.innerHTML = "<p class='muted'>Sin permisos para Gestoría.</p>";
+    gestoriaBdtInfo.textContent = "";
+    return;
+  }
   const empresa = state.empresas.find((item) => item.nombre === FINCAS_COMPANY);
   if (!empresa) {
     gestoriaBdtTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
@@ -33849,12 +33854,26 @@ const loadSegurosOportunidades = (empresaId) => {
   if (!segurosCrmOportunidades) {
     return;
   }
+  if (!empresaId) {
+    segurosCrmOportunidades.innerHTML = "<p class='muted'>Sin empresa.</p>";
+    return;
+  }
+  const canGestoria = userCanAccessService("gestoria");
   const segurosParams = new URLSearchParams({ tabla: "seguros", empresa_id: empresaId });
   const gestoriaParams = new URLSearchParams({ tabla: "gestoria", empresa_id: empresaId });
   Promise.all([
-    api(`/api/tabla?${segurosParams.toString()}`),
-    api(`/api/tabla?${gestoriaParams.toString()}`),
+    api(`/api/tabla?${segurosParams.toString()}`).catch(() => null),
+    canGestoria ? api(`/api/tabla?${gestoriaParams.toString()}`).catch(() => null) : Promise.resolve(null),
   ]).then(([segurosData, gestoriaData]) => {
+    if (!segurosData || !Array.isArray(segurosData.columns)) {
+      segurosCrmOportunidades.innerHTML = "<p class='muted'>No se pudieron cargar oportunidades.</p>";
+      return;
+    }
+    if (!gestoriaData || !Array.isArray(gestoriaData.columns)) {
+      // Usuario solo seguros: no debe disparar error ni promesas rechazadas por falta de permisos.
+      segurosCrmOportunidades.innerHTML = "<p class='muted'>Oportunidades disponibles al tener acceso a Gestoría.</p>";
+      return;
+    }
     const tomadorIndex = segurosData.columns.indexOf("tomador");
     const clienteIndex = gestoriaData.columns.indexOf("cliente");
     const tomadores = new Set(
