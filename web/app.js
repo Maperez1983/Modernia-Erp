@@ -13719,10 +13719,14 @@ const slugify = (value) =>
     .replace(/\s+/g, "-")
     .replace(/[^a-z0-9-]/g, "");
 
-const setUrlParams = (params) => {
+const setUrlParams = (params, { replace = false } = {}) => {
   const url = new URL(window.location.href);
   url.search = params.toString();
-  history.pushState({}, "", url.toString());
+  if (replace) {
+    history.replaceState({}, "", url.toString());
+  } else {
+    history.pushState({}, "", url.toString());
+  }
 };
 
 const setPage = (page) => {
@@ -13885,6 +13889,25 @@ const resolveCrmInmoEmpresaNombre = () => resolveCrmInmoEmpresa()?.nombre || "";
 const resolveCrmInmoEmpresaId = () => resolveCrmInmoEmpresa()?.id || "";
 
 const openCrmInmobiliario = () => {
+  const fromHome = state.currentPage === "home";
+  const hadRouteParams = (() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      return (
+        params.has("crm")
+        || params.has("empresa")
+        || params.has("clientes")
+        || params.has("cliente")
+        || params.has("poliza")
+        || params.has("holding")
+        || params.has("admin")
+        || params.has("agenda")
+        || params.has("portal_token")
+      );
+    } catch {
+      return false;
+    }
+  })();
   if (!userCanAccessService("inmobiliaria")) return;
   if (!state.empresas.length) {
     api("/api/empresas")
@@ -13921,6 +13944,14 @@ const openCrmInmobiliario = () => {
   currentParams.delete("poliza");
   currentParams.set("crm", "inmo");
   setUrlParams(currentParams);
+  // UX admin: si llega desde Home (sin ruta explícita), no persistimos un deep-link que haga
+  // que un hard refresh "arranque" dentro del CRM en vez de mostrar la Home.
+  try {
+    const user = getAuthScopeUser();
+    if (fromHome && !hadRouteParams && user && isPrivilegedUser(user)) {
+      setUrlParams(new URLSearchParams(), { replace: true });
+    }
+  } catch {}
 };
 
 const ensureCrmOpen = (action) => {
@@ -13942,14 +13973,58 @@ const openInmuebleFromAgenda = (inmuebleId) => {
 };
 
 const openGestoriaCrm = () => {
+  const fromHome = state.currentPage === "home";
+  const hadRouteParams = (() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      return (
+        params.has("crm")
+        || params.has("empresa")
+        || params.has("clientes")
+        || params.has("cliente")
+        || params.has("poliza")
+        || params.has("holding")
+        || params.has("admin")
+        || params.has("agenda")
+        || params.has("portal_token")
+      );
+    } catch {
+      return false;
+    }
+  })();
   if (!userCanAccessService("gestoria")) return;
   openCompany(FINCAS_COMPANY, { allowRestricted: true });
   setTab("gestoria-dash");
   updateTableVisibility();
   loadGestoriaDashboard();
+  try {
+    const user = getAuthScopeUser();
+    if (fromHome && !hadRouteParams && user && isPrivilegedUser(user)) {
+      setUrlParams(new URLSearchParams(), { replace: true });
+    }
+  } catch {}
 };
 
 const openSegurosCrm = () => {
+  const fromHome = state.currentPage === "home";
+  const hadRouteParams = (() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      return (
+        params.has("crm")
+        || params.has("empresa")
+        || params.has("clientes")
+        || params.has("cliente")
+        || params.has("poliza")
+        || params.has("holding")
+        || params.has("admin")
+        || params.has("agenda")
+        || params.has("portal_token")
+      );
+    } catch {
+      return false;
+    }
+  })();
   if (!userCanAccessService("seguros")) return;
   openCompany(FINCAS_COMPANY, { allowRestricted: true });
   setTab("seguros-crm");
@@ -13968,9 +14043,34 @@ const openSegurosCrm = () => {
   if (state.currentEmpresaId) {
     renderFincasDashboard(state.currentEmpresaId);
   }
+  try {
+    const user = getAuthScopeUser();
+    if (fromHome && !hadRouteParams && user && isPrivilegedUser(user)) {
+      setUrlParams(new URLSearchParams(), { replace: true });
+    }
+  } catch {}
 };
 
 const openFinCrm = () => {
+  const fromHome = state.currentPage === "home";
+  const hadRouteParams = (() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      return (
+        params.has("crm")
+        || params.has("empresa")
+        || params.has("clientes")
+        || params.has("cliente")
+        || params.has("poliza")
+        || params.has("holding")
+        || params.has("admin")
+        || params.has("agenda")
+        || params.has("portal_token")
+      );
+    } catch {
+      return false;
+    }
+  })();
   if (!userCanAccessService("financiaciones")) return;
   openCompany(FIN_COMPANY, { allowRestricted: true });
   setTab("fin-crm");
@@ -13983,6 +14083,12 @@ const openFinCrm = () => {
   if (tableInfo) tableInfo.classList.add("hidden");
   setHipotecaAltaView(state.hipotecaAltaView || "dashboard");
   loadFinCrm();
+  try {
+    const user = getAuthScopeUser();
+    if (fromHome && !hadRouteParams && user && isPrivilegedUser(user)) {
+      setUrlParams(new URLSearchParams(), { replace: true });
+    }
+  } catch {}
 };
 
 const openServiceCrm = (service) => {
