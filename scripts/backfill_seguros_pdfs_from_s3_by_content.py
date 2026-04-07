@@ -271,6 +271,7 @@ def main():
 
     conn = open_pg()
     seguros = fetch_seguros(conn, empresa_id)
+    print(f"scanning_pdfs={len(keys)} seguros_rows={len(seguros)} dry_run={1 if args.dry_run else 0}", flush=True)
 
     by_poliza = defaultdict(list)
     missing_key_rows = []
@@ -299,7 +300,14 @@ def main():
     used_seguros = set()
     used_polizas = set()
 
-    for key in keys:
+    for idx, key in enumerate(keys, start=1):
+        if idx == 1 or idx % 10 == 0:
+            # Progress heartbeat (important in Render shell; extraction can take time).
+            print(
+                f"progress scanned={idx}/{len(keys)} matched={len(matched)} "
+                f"already_linked={already_linked} no_text={no_text} ambiguous={ambiguous}",
+                flush=True,
+            )
         if key in existing_keys:
             already_linked += 1
             continue
@@ -436,4 +444,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
