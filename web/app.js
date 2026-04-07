@@ -23195,116 +23195,123 @@ const renderFinDashboard = (empresaId) => {
   }
   finDashboardSection.classList.remove("hidden");
   updateTableVisibility();
-  api(`/api/hipoteca_dashboard?empresa_id=${empresaId}`).then((data) => {
-    const currentYear = String(data?.current_year || new Date().getFullYear());
-    const totals = data?.totals || {};
-    const kpis = [
-      {
-        title: `Hipotecas ${currentYear}`,
-        value: numberFormatter.format(data?.current?.total || 0),
-        note: `Totales: ${numberFormatter.format(totals?.total || 0)}`,
-      },
-      {
-        title: "Firmadas mes",
-        value: numberFormatter.format(data?.current?.firmadas_mes || 0),
-        note: "Mes actual",
-      },
-      {
-        title: "Hipotecas en estudio",
-        value: numberFormatter.format(data?.current?.operaciones_estudio || 0),
-        note: `Total: ${numberFormatter.format(totals?.operaciones_estudio || 0)}`,
-      },
-      {
-        title: "Rentabilidad negocio",
-        value: formatPercentOrDash(data?.current?.rentabilidad_ratio),
-        note: `Total: ${formatPercentOrDash(totals?.rentabilidad_ratio)}`,
-      },
-      {
-        title: "Porcentaje medio",
-        value: formatPercent(data?.current?.porcentaje_medio),
-        note: "Financiación",
-      },
-      {
-        title: "Comisión total",
-        value: euroFormatter.format(data?.current?.comision_total || 0),
-        note: `Total: ${euroFormatter.format(totals?.comision_total || 0)}`,
-      },
-    ];
+  api(`/api/hipoteca_dashboard?empresa_id=${empresaId}`)
+    .then((data) => {
+      const currentYear = String(data?.current_year || new Date().getFullYear());
+      const totals = data?.totals || {};
+      const kpis = [
+        {
+          title: `Hipotecas ${currentYear}`,
+          value: numberFormatter.format(data?.current?.total || 0),
+          note: `Totales: ${numberFormatter.format(totals?.total || 0)}`,
+        },
+        {
+          title: "Firmadas mes",
+          value: numberFormatter.format(data?.current?.firmadas_mes || 0),
+          note: "Mes actual",
+        },
+        {
+          title: "Hipotecas en estudio",
+          value: numberFormatter.format(data?.current?.operaciones_estudio || 0),
+          note: `Total: ${numberFormatter.format(totals?.operaciones_estudio || 0)}`,
+        },
+        {
+          title: "Rentabilidad negocio",
+          value: formatPercentOrDash(data?.current?.rentabilidad_ratio),
+          note: `Total: ${formatPercentOrDash(totals?.rentabilidad_ratio)}`,
+        },
+        {
+          title: "Porcentaje medio",
+          value: formatPercent(data?.current?.porcentaje_medio),
+          note: "Financiación",
+        },
+        {
+          title: "Comisión total",
+          value: euroFormatter.format(data?.current?.comision_total || 0),
+          note: `Total: ${euroFormatter.format(totals?.comision_total || 0)}`,
+        },
+      ];
 
-    finDashboardKpis.innerHTML = "";
-    kpis.forEach((kpi) => {
-      const card = document.createElement("div");
-      card.className = "card";
-      card.innerHTML = `
-        <h3>${kpi.title}</h3>
-        <div class="muted">${kpi.value}</div>
-        <div class="muted">${kpi.note}</div>
-      `;
-      finDashboardKpis.appendChild(card);
+      finDashboardKpis.innerHTML = "";
+      kpis.forEach((kpi) => {
+        const card = document.createElement("div");
+        card.className = "card";
+        card.innerHTML = `
+          <h3>${kpi.title}</h3>
+          <div class="muted">${kpi.value}</div>
+          <div class="muted">${kpi.note}</div>
+        `;
+        finDashboardKpis.appendChild(card);
+      });
+
+      const years = buildYearIndex([data.series_totales]);
+      drawBarChart(
+        finHipotecasChart,
+        years,
+        [
+          {
+            label: "Hipotecas",
+            values: alignSeries(years, data.series_totales),
+            color: "#824c45",
+            format: (value) => numberFormatter.format(value),
+          },
+        ],
+        { legend: false, showValues: true }
+      );
+
+      const comisionYears = buildYearIndex([data.series_comision]);
+      drawBarChart(
+        finComisionChart,
+        comisionYears,
+        [
+          {
+            label: "Comisión",
+            values: alignSeries(comisionYears, data.series_comision),
+            color: "#d7b04c",
+            format: (value) => euroFormatter.format(value),
+          },
+        ],
+        { legend: false, showValues: true }
+      );
+
+      const entidadLabels = (data.series_entidades || []).map((item) => resolveHipotecaBankBrand(item.label).displayName);
+      const entidadValues = (data.series_entidades || []).map((item) => item.total);
+      drawBarChart(
+        finEntidadChart,
+        entidadLabels.length ? entidadLabels : ["Sin datos"],
+        [
+          {
+            label: "Entidad",
+            values: entidadValues.length ? entidadValues : [0],
+            color: "#7e8878",
+            format: (value) => numberFormatter.format(value),
+          },
+        ],
+        { legend: false, showValues: true }
+      );
+
+      const officeLabels = (data.series_oficinas || []).map((item) => item.label);
+      const officeValues = (data.series_oficinas || []).map((item) => item.total);
+      drawBarChart(
+        finOficinaChart,
+        officeLabels.length ? officeLabels : ["Sin datos"],
+        [
+          {
+            label: "Oficina",
+            values: officeValues.length ? officeValues : [0],
+            color: "#cca33c",
+            format: (value) => numberFormatter.format(value),
+          },
+        ],
+        { legend: false, showValues: true }
+      );
+    })
+    .catch((error) => {
+      const message = error?.data?.error || error?.message || "No se pudo cargar el dashboard.";
+      if (finDashboardKpis) {
+        finDashboardKpis.innerHTML = `<p class='muted'>${message}</p>`;
+      }
     });
-
-    const years = buildYearIndex([data.series_totales]);
-    drawBarChart(
-      finHipotecasChart,
-      years,
-      [
-        {
-          label: "Hipotecas",
-          values: alignSeries(years, data.series_totales),
-          color: "#824c45",
-          format: (value) => numberFormatter.format(value),
-        },
-      ],
-      { legend: false, showValues: true }
-    );
-
-    const comisionYears = buildYearIndex([data.series_comision]);
-    drawBarChart(
-      finComisionChart,
-      comisionYears,
-      [
-        {
-          label: "Comisión",
-          values: alignSeries(comisionYears, data.series_comision),
-          color: "#d7b04c",
-          format: (value) => euroFormatter.format(value),
-        },
-      ],
-      { legend: false, showValues: true }
-    );
-
-    const entidadLabels = data.series_entidades.map((item) => resolveHipotecaBankBrand(item.label).displayName);
-    const entidadValues = data.series_entidades.map((item) => item.total);
-    drawBarChart(
-      finEntidadChart,
-      entidadLabels,
-      [
-        {
-          label: "Entidad",
-          values: entidadValues,
-          color: "#7e8878",
-          format: (value) => numberFormatter.format(value),
-        },
-      ],
-      { legend: false, showValues: true }
-    );
-
-    const officeLabels = data.series_oficinas.map((item) => item.label);
-    const officeValues = data.series_oficinas.map((item) => item.total);
-    drawBarChart(
-      finOficinaChart,
-      officeLabels,
-      [
-        {
-          label: "Oficina",
-          values: officeValues,
-          color: "#cca33c",
-          format: (value) => numberFormatter.format(value),
-        },
-      ],
-      { legend: false, showValues: true }
-    );
-  });
 };
 
 const loadHomeDashboard = () => {

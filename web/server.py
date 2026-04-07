@@ -44139,14 +44139,40 @@ class Handler(BaseHTTPRequestHandler):
                 " AND fecha_firma IS NOT NULL AND TRIM(fecha_firma) <> ''"
             )
             estudio_expr = "LOWER(TRIM(COALESCE(estado, ''))) IN ('estudio', 'en estudio')"
-            duration_expr = (
-                "CASE "
-                "WHEN fecha_encargo IS NOT NULL AND TRIM(fecha_encargo) <> '' "
-                " AND fecha_firma IS NOT NULL AND TRIM(fecha_firma) <> '' "
-                " AND julianday(fecha_firma) IS NOT NULL AND julianday(fecha_encargo) IS NOT NULL "
-                "THEN julianday(fecha_firma) - julianday(fecha_encargo) "
-                "ELSE NULL END"
-            )
+
+            # julianday() existe en SQLite pero NO en Postgres.
+            if db_is_postgres_enabled():
+
+                def _pg_date_expr(field):
+                    value = f"TRIM(COALESCE({field}, ''))"
+                    head = f"substr({value}, 1, 10)"
+                    # Acepta YYYY-MM-DD (y timestamps) y DD/MM/YYYY.
+                    return (
+                        "CASE "
+                        f"WHEN {head} LIKE '____-__-__' THEN to_date({head}, 'YYYY-MM-DD') "
+                        f"WHEN {head} LIKE '__/__/____' THEN to_date({head}, 'DD/MM/YYYY') "
+                        "ELSE NULL END"
+                    )
+
+                firma_date = _pg_date_expr("fecha_firma")
+                encargo_date = _pg_date_expr("fecha_encargo")
+                duration_expr = (
+                    "CASE "
+                    "WHEN fecha_encargo IS NOT NULL AND TRIM(fecha_encargo) <> '' "
+                    " AND fecha_firma IS NOT NULL AND TRIM(fecha_firma) <> '' "
+                    f" AND {firma_date} IS NOT NULL AND {encargo_date} IS NOT NULL "
+                    f"THEN ({firma_date} - {encargo_date})::double precision "
+                    "ELSE NULL END"
+                )
+            else:
+                duration_expr = (
+                    "CASE "
+                    "WHEN fecha_encargo IS NOT NULL AND TRIM(fecha_encargo) <> '' "
+                    " AND fecha_firma IS NOT NULL AND TRIM(fecha_firma) <> '' "
+                    " AND julianday(fecha_firma) IS NOT NULL AND julianday(fecha_encargo) IS NOT NULL "
+                    "THEN julianday(fecha_firma) - julianday(fecha_encargo) "
+                    "ELSE NULL END"
+                )
 
             available_years = conn.execute(
                 """
