@@ -152,7 +152,12 @@ def main():
     )
     parser.add_argument("--empresa-id", default="", help="Filtra por empresa_id.")
     parser.add_argument("--s3-prefix", default="seguros/", help="Prefijo S3 a listar (default: seguros/).")
-    parser.add_argument("--limit-sample", type=int, default=12, help="Muestra una muestra de keys (default 12).")
+    parser.add_argument(
+        "--limit-sample",
+        type=int,
+        default=0,
+        help="Muestra una muestra de keys S3 (default 0; usa >0 si lo necesitas).",
+    )
     args = parser.parse_args()
 
     conn, backend = open_db(args)
@@ -207,4 +212,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
