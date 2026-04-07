@@ -35921,6 +35921,10 @@ const renderGestoriaRentaCrmCards = (rows = []) => {
   board.className = "gestoria-renta-board";
   rows.forEach((row) => {
     const entry = row?.renta_latest || {};
+    const cobroBadge = (() => {
+      const cobrada = Number(entry.cobrada || 0) === 1;
+      return cobrada ? "Cobrada" : "Pendiente cobro";
+    })();
     const dniMeta = getRentaDniMeta(entry);
     const result = formatRentaResult(entry.resultado_declaracion);
     const casilla505 =
@@ -35938,9 +35942,9 @@ const renderGestoriaRentaCrmCards = (rows = []) => {
       <div class="gestoria-renta-overview-top">
         <div>
           <strong>${entry.ejercicio || "2024"}</strong>
-          <span class="crm-badge">${row.estado || "Alta"}</span>
+          <span class="crm-badge">${cobroBadge}</span>
         </div>
-        <div class="muted">${row.doc_count || 0} PDF</div>
+        <div class="muted">${row.doc_count || 0} PDF · Servicio ${row.estado || "Alta"}</div>
       </div>
       <h4>${formatNombreCliente(row.nombre || "") || "-"}</h4>
       <div class="muted">${row.nif || "-"}</div>
