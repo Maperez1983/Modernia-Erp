@@ -26915,6 +26915,10 @@ class Handler(BaseHTTPRequestHandler):
             return
         except DbUnavailableError:
             try:
+                Handler._record_api_error(self.path, DbUnavailableError("db_unavailable"))
+            except Exception:
+                pass
+            try:
                 json_response(self, {"error": "DB no disponible", "detail": "Reintenta en unos segundos."}, status=503)
             except Exception:
                 try:
@@ -26937,6 +26941,10 @@ class Handler(BaseHTTPRequestHandler):
                 pass
             # Evita que una excepción no controlada se traduzca en 502 (Render).
             try:
+                try:
+                    Handler._record_api_error(self.path, exc)
+                except Exception:
+                    pass
                 if str(self.path or "").startswith("/api/"):
                     json_response(self, {"error": "API error"}, status=500)
                 else:
@@ -27379,6 +27387,10 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as exc:
             try:
                 print(f"[ERROR] POST {self.path}: {type(exc).__name__}: {exc}")
+            except Exception:
+                pass
+            try:
+                Handler._record_api_error(self.path, exc)
             except Exception:
                 pass
             # Backpressure: pool saturado -> 503 con Retry-After (evita toast genérico “API error”).
