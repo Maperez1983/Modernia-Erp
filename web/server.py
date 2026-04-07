@@ -22526,7 +22526,7 @@ def ensure_workspace_persona_for_self(conn, workspace_id, session):
             return ""
         user_row = conn.execute(
             """
-            SELECT id, nombre, apellido, usuario, email, activo, registro_horario_activo
+            SELECT id, nombre, apellido, usuario, email, activo, servicio, registro_horario_activo
             FROM usuarios
             WHERE id = ?
             LIMIT 1
@@ -22537,7 +22537,14 @@ def ensure_workspace_persona_for_self(conn, workspace_id, session):
             return ""
         if int(row_value(user_row, "activo", 1) or 0) != 1:
             return ""
-        if int(row_value(user_row, "registro_horario_activo", 0) or 0) != 1:
+        time_enabled = int(row_value(user_row, "registro_horario_activo", 0) or 0) == 1
+        if not time_enabled:
+            # Fallback: para evitar que nuevos usuarios se queden sin fichar, habilitamos
+            # el auto-vínculo si su servicio parece "operativo" (inmobiliaria/gestoría/seguros/etc.).
+            service_raw = str(row_value(user_row, "servicio", "") or "").strip().lower()
+            if any(token in service_raw for token in ("gestor", "inmobili", "seguro", "finca", "financia", "obra", "reforma", "rrhh", "laboral")):
+                time_enabled = True
+        if not time_enabled:
             return ""
 
         # Preferimos una ficha manual, pero aceptamos cualquier ficha vinculada y la "promovemos".

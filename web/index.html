@@ -9,7 +9,7 @@
     <meta name="apple-mobile-web-app-title" content="Verifika²" />
     <title>Verifika² · CRM & Portal</title>
     <link rel="stylesheet" href="styles.css?v=159" />
-    <link rel="manifest" href="manifest.webmanifest?v=16" />
+    <link rel="manifest" href="manifest.webmanifest?v=17" />
     <link rel="icon" href="/icons/ios/v28/icon-192.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/icons/ios/v28/apple-touch-icon-180.png" />
     <link rel="apple-touch-icon" sizes="167x167" href="/icons/ios/v27/apple-touch-icon-167.png" />
@@ -5537,6 +5537,45 @@
               <div class="form-card">
                 <div class="section-head">
                   <div>
+                    <h4>Hipotecas en estudio</h4>
+                    <p class="muted">Operaciones ya convertidas a hipoteca y pendientes de avanzar.</p>
+                  </div>
+                  <div class="crm-actions">
+                    <button type="button" id="finHipotecasEstudioRefresh" class="secondary">Recargar</button>
+                  </div>
+                </div>
+                <div id="finHipotecasEstudioTable"></div>
+                <div class="footer" id="finHipotecasEstudioInfo"></div>
+              </div>
+              <div class="crm-focus-card">
+                <div class="form-card">
+                  <div class="section-head">
+                    <div>
+                      <h4>Operación seleccionada</h4>
+                      <p class="muted" id="finSelectedHipotecaLabel">Selecciona una hipoteca para planificar su operativa.</p>
+                    </div>
+                    <div class="crm-actions">
+                      <button type="button" id="finHipotecaCreateAction" class="secondary">Crear acción</button>
+                    </div>
+                  </div>
+                  <div id="finHipotecaWorkflowStatus" class="crm-focus-list"></div>
+                </div>
+                <div class="form-card">
+                  <div class="section-head">
+                    <div>
+                      <h4>Acciones previstas</h4>
+                      <p class="muted">Agenda vinculada a esta hipoteca.</p>
+                    </div>
+                  </div>
+                  <div id="finHipotecaAccionesTable"></div>
+                  <div class="footer" id="finHipotecaAccionesInfo"></div>
+                </div>
+              </div>
+            </div>
+            <div class="crm-summary-grid" style="margin-top: 16px;">
+              <div class="form-card">
+                <div class="section-head">
+                  <div>
                     <h4>Ficha de asesoramiento</h4>
                     <p class="muted">Base económica del expediente hipotecario.</p>
                   </div>
@@ -7632,7 +7671,7 @@
     <script src="ui-foundation.js?v=2"></script>
     <script src="app-auth.js?v=9"></script>
     <script src="app-routing.js?v=7"></script>
-    <script src="app.js?v=414"></script>
+    <script src="app.js?v=415"></script>
     <script>
       (function () {
         if (!("serviceWorker" in navigator)) return;
