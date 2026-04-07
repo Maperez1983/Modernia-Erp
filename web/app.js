@@ -2369,6 +2369,7 @@ const actionModalStatus = document.getElementById("actionModalStatus");
 const actionModalOpenCliente = document.getElementById("actionModalOpenCliente");
 const finAgendaTable = document.getElementById("finAgendaTable");
 const finAgendaInfo = document.getElementById("finAgendaInfo");
+const finSimOpenFromAgenda = document.getElementById("finSimOpenFromAgenda");
 const gestoriaFacturasTable = document.getElementById("gestoriaFacturasTable");
 const crmNuevaCaptacionBtn = document.getElementById("crmNuevaCaptacionBtn");
 const crmNuevaCompraventaBtn = document.getElementById("crmNuevaCompraventaBtn");

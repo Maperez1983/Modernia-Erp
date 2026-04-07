@@ -22565,69 +22565,26 @@ def ensure_workspace_persona_for_self(conn, workspace_id, session):
             return ""
         if int(row_value(user_row, "activo", 1) or 0) != 1:
             return ""
-        time_enabled = int(row_value(user_row, "registro_horario_activo", 0) or 0) == 1
-        if not time_enabled:
-            # Fallback: para evitar que nuevos usuarios se queden sin fichar, habilitamos
-            # el auto-vínculo si su servicio parece "operativo" (inmobiliaria/gestoría/seguros/etc.).
-            service_raw = str(row_value(user_row, "servicio", "") or "").strip().lower()
-            if any(token in service_raw for token in ("gestor", "inmobili", "seguro", "finca", "financia", "obra", "reforma", "rrhh", "laboral")):
-                time_enabled = True
-        if not time_enabled:
-            return ""
-
+        # Preferimos respetar fichas existentes: si ya hay una ficha vinculada (aunque sea legacy sin usuario_manual),
+        # la promovemos y devolvemos.
         user_email = normalize_email(row_value(user_row, "email") or "")
+        user_full_name = " ".join(
+            part
+            for part in [
+                str(row_value(user_row, "nombre") or "").strip(),
+                str(row_value(user_row, "apellido") or "").strip(),
+            ]
+            if part
+        ).strip()
 
-        # Si existe una ficha con el mismo email (y sin usuario_id), la vinculamos.
-        # Esto evita que el usuario vea "sin ficha" aunque RRHH ya haya creado su registro.
-        if user_email:
-            try:
-                email_rows = conn.execute(
-                    """
-                    SELECT id, COALESCE(usuario_id, '') AS usuario_id,
-                           COALESCE(usuario_manual, 0) AS usuario_manual,
-                           COALESCE(empresa_id, '') AS empresa_id,
-                           COALESCE(source, '') AS source
-                    FROM workspace_registro_personal
-                    WHERE workspace_id = ?
-                      AND LOWER(TRIM(COALESCE(email, ''))) = LOWER(TRIM(?))
-                      AND COALESCE(activo, 1) = 1
-                    ORDER BY COALESCE(updated_at, created_at) DESC
-                    LIMIT 2
-                    """,
-                    (ws_id, user_email),
-                ).fetchall()
-            except Exception:
-                email_rows = []
-            if email_rows and len(email_rows) == 1:
-                candidate = email_rows[0]
-                candidate_id = str(row_value(candidate, "id") or row_value(candidate, 0) or "").strip()
-                existing_uid = str(row_value(candidate, "usuario_id") or "").strip()
-                if candidate_id and (not existing_uid or existing_uid == user_id):
-                    # Empresa por defecto: usamos la primera empresa vinculada al workspace.
-                    empresa_ids = fetch_workspace_company_ids(conn, ws_id)
-                    empresa_default = str(empresa_ids[0] if empresa_ids else "").strip()
-                    updates = ["usuario_id = ?", "usuario_manual = 1"]
-                    params = [user_id]
-                    source = str(row_value(candidate, "source") or "").strip()
-                    if not source or source == "auto":
-                        updates.append("source = 'manual'")
-                    empresa_id = str(row_value(candidate, "empresa_id") or "").strip()
-                    if not empresa_id and empresa_default:
-                        updates.append("empresa_id = ?")
-                        params.append(empresa_default)
-                        updates.append("empresa_manual = 1")
-                    now = datetime.now(timezone.utc).isoformat()
-                    conn.execute(
-                        f"UPDATE workspace_registro_personal SET {', '.join(updates)}, updated_at = datetime(?) WHERE workspace_id = ? AND id = ?",
-                        [*params, now, ws_id, candidate_id],
-                    )
-                    try:
-                        conn.commit()
-                    except Exception:
-                        pass
-                    return candidate_id
+        # Empresa por defecto: usamos la primera empresa vinculada al workspace.
+        # Importante: fetch_workspace_company_ids() hace backfill cuando workspace_empresas está vacío.
+        empresa_ids = fetch_workspace_company_ids(conn, ws_id)
+        empresa_default = str(empresa_ids[0] if empresa_ids else "").strip()
 
-        # Preferimos una ficha manual, pero aceptamos cualquier ficha vinculada y la "promovemos".
+        now = datetime.now(timezone.utc).isoformat()
+
+        # 0) Si ya tiene ficha con usuario_id (aunque usuario_manual=0), la promovemos.
         persona = conn.execute(
             """
             SELECT id, empresa_id, COALESCE(usuario_manual, 0) AS usuario_manual, COALESCE(source, '') AS source
@@ -22638,13 +22595,6 @@ def ensure_workspace_persona_for_self(conn, workspace_id, session):
             """,
             (ws_id, user_id),
         ).fetchone()
-
-        # Empresa por defecto: usamos la primera empresa vinculada al workspace.
-        # Importante: fetch_workspace_company_ids() hace backfill cuando workspace_empresas está vacío.
-        empresa_ids = fetch_workspace_company_ids(conn, ws_id)
-        empresa_default = str(empresa_ids[0] if empresa_ids else "").strip()
-
-        now = datetime.now(timezone.utc).isoformat()
         if persona:
             persona_id = str(row_value(persona, "id") or row_value(persona, 0) or "").strip()
             if not persona_id:
@@ -22673,17 +22623,124 @@ def ensure_workspace_persona_for_self(conn, workspace_id, session):
                     pass
             return persona_id
 
+        # 1) Si existe una ficha con el mismo email (y sin usuario_id), la vinculamos.
+        # Esto evita que el usuario vea "sin ficha" aunque RRHH ya haya creado su registro.
+        if user_email:
+            try:
+                email_rows = conn.execute(
+                    """
+                    SELECT id, COALESCE(usuario_id, '') AS usuario_id,
+                           COALESCE(empresa_id, '') AS empresa_id,
+                           COALESCE(source, '') AS source
+                    FROM workspace_registro_personal
+                    WHERE workspace_id = ?
+                      AND LOWER(TRIM(COALESCE(email, ''))) = LOWER(TRIM(?))
+                      AND COALESCE(activo, 1) = 1
+                    ORDER BY COALESCE(updated_at, created_at) DESC
+                    LIMIT 6
+                    """,
+                    (ws_id, user_email),
+                ).fetchall()
+            except Exception:
+                email_rows = []
+            candidates = []
+            for row in email_rows or []:
+                cid = str(row_value(row, "id") or row_value(row, 0) or "").strip()
+                existing_uid = str(row_value(row, "usuario_id") or "").strip()
+                if not cid:
+                    continue
+                if existing_uid and existing_uid != user_id:
+                    continue
+                candidates.append(row)
+            if len(candidates) == 1:
+                candidate = candidates[0]
+                candidate_id = str(row_value(candidate, "id") or row_value(candidate, 0) or "").strip()
+                updates = ["usuario_id = ?", "usuario_manual = 1"]
+                params = [user_id]
+                source = str(row_value(candidate, "source") or "").strip()
+                if not source or source == "auto":
+                    updates.append("source = 'manual'")
+                empresa_id = str(row_value(candidate, "empresa_id") or "").strip()
+                if not empresa_id and empresa_default:
+                    updates.append("empresa_id = ?")
+                    params.append(empresa_default)
+                    updates.append("empresa_manual = 1")
+                conn.execute(
+                    f"UPDATE workspace_registro_personal SET {', '.join(updates)}, updated_at = datetime(?) WHERE workspace_id = ? AND id = ?",
+                    [*params, now, ws_id, candidate_id],
+                )
+                try:
+                    conn.commit()
+                except Exception:
+                    pass
+                return candidate_id
+
+        # 2) Fallback: link por nombre completo exacto (evita casos con email vacío o compartido).
+        if user_full_name:
+            try:
+                name_rows = conn.execute(
+                    """
+                    SELECT id, COALESCE(usuario_id, '') AS usuario_id,
+                           COALESCE(empresa_id, '') AS empresa_id,
+                           COALESCE(source, '') AS source
+                    FROM workspace_registro_personal
+                    WHERE workspace_id = ?
+                      AND LOWER(TRIM(COALESCE(nombre, ''))) = LOWER(TRIM(?))
+                      AND COALESCE(activo, 1) = 1
+                    ORDER BY COALESCE(updated_at, created_at) DESC
+                    LIMIT 6
+                    """,
+                    (ws_id, user_full_name),
+                ).fetchall()
+            except Exception:
+                name_rows = []
+            candidates = []
+            for row in name_rows or []:
+                cid = str(row_value(row, "id") or row_value(row, 0) or "").strip()
+                existing_uid = str(row_value(row, "usuario_id") or "").strip()
+                if not cid:
+                    continue
+                if existing_uid and existing_uid != user_id:
+                    continue
+                candidates.append(row)
+            if len(candidates) == 1:
+                candidate = candidates[0]
+                candidate_id = str(row_value(candidate, "id") or row_value(candidate, 0) or "").strip()
+                updates = ["usuario_id = ?", "usuario_manual = 1"]
+                params = [user_id]
+                source = str(row_value(candidate, "source") or "").strip()
+                if not source or source == "auto":
+                    updates.append("source = 'manual'")
+                empresa_id = str(row_value(candidate, "empresa_id") or "").strip()
+                if not empresa_id and empresa_default:
+                    updates.append("empresa_id = ?")
+                    params.append(empresa_default)
+                    updates.append("empresa_manual = 1")
+                conn.execute(
+                    f"UPDATE workspace_registro_personal SET {', '.join(updates)}, updated_at = datetime(?) WHERE workspace_id = ? AND id = ?",
+                    [*params, now, ws_id, candidate_id],
+                )
+                try:
+                    conn.commit()
+                except Exception:
+                    pass
+                return candidate_id
+
+        # Si no existe ficha, solo auto-creamos si el usuario está habilitado para fichar.
+        time_enabled = int(row_value(user_row, "registro_horario_activo", 0) or 0) == 1
+        if not time_enabled:
+            # Fallback: para evitar que nuevos usuarios se queden sin fichar, habilitamos
+            # el auto-vínculo si su servicio parece "operativo" (inmobiliaria/gestoría/seguros/etc.).
+            service_raw = str(row_value(user_row, "servicio", "") or "").strip().lower()
+            if any(token in service_raw for token in ("gestor", "inmobili", "seguro", "finca", "financia", "obra", "reforma", "rrhh", "laboral")):
+                time_enabled = True
+        if not time_enabled:
+            return ""
+
         # Sin ficha: creamos una mínima para permitir fichaje self.
         if not empresa_default:
             return ""
-        full_name = " ".join(
-            part
-            for part in [
-                str(row_value(user_row, "nombre") or "").strip(),
-                str(row_value(user_row, "apellido") or "").strip(),
-            ]
-            if part
-        ).strip()
+        full_name = user_full_name
         if not full_name:
             full_name = str(row_value(user_row, "usuario") or row_value(user_row, "email") or "Empleado").strip() or "Empleado"
         persona_id = os.urandom(16).hex()
@@ -40371,6 +40428,55 @@ class Handler(BaseHTTPRequestHandler):
                             ws_pick = str(row_value(row, "workspace_id") or row_value(row, 0) or "").strip() if row else ""
                             if ws_pick:
                                 chosen = next((it for it in ws_rows if str(it.get("id") or "").strip() == ws_pick), None)
+                        # Si no hay vínculo directo, intentamos localizar el workspace por email/nombre en fichas (unlinked).
+                        if not chosen and workspace_ids:
+                            user_email = normalize_email(session.get("email") or "")
+                            if user_email:
+                                try:
+                                    placeholders = ",".join(["?"] * len(workspace_ids))
+                                    rows = conn.execute(
+                                        f"""
+                                        SELECT DISTINCT workspace_id
+                                        FROM workspace_registro_personal
+                                        WHERE COALESCE(activo, 1) = 1
+                                          AND LOWER(TRIM(COALESCE(email, ''))) = LOWER(TRIM(?))
+                                          AND workspace_id IN ({placeholders})
+                                        ORDER BY COALESCE(updated_at, created_at) DESC
+                                        LIMIT 2
+                                        """,
+                                        (user_email, *workspace_ids),
+                                    ).fetchall()
+                                except Exception:
+                                    rows = []
+                                picks = [str(row_value(r, "workspace_id") or row_value(r, 0) or "").strip() for r in (rows or [])]
+                                picks = [p for p in picks if p]
+                                if len(picks) == 1:
+                                    chosen = next((it for it in ws_rows if str(it.get("id") or "").strip() == picks[0]), None)
+                            if not chosen:
+                                full_name = " ".join(
+                                    part for part in [str(session.get("nombre") or "").strip(), str(session.get("apellido") or "").strip()] if part
+                                ).strip()
+                                if full_name:
+                                    try:
+                                        placeholders = ",".join(["?"] * len(workspace_ids))
+                                        rows = conn.execute(
+                                            f"""
+                                            SELECT DISTINCT workspace_id
+                                            FROM workspace_registro_personal
+                                            WHERE COALESCE(activo, 1) = 1
+                                              AND LOWER(TRIM(COALESCE(nombre, ''))) = LOWER(TRIM(?))
+                                              AND workspace_id IN ({placeholders})
+                                            ORDER BY COALESCE(updated_at, created_at) DESC
+                                            LIMIT 2
+                                            """,
+                                            (full_name, *workspace_ids),
+                                        ).fetchall()
+                                    except Exception:
+                                        rows = []
+                                    picks = [str(row_value(r, "workspace_id") or row_value(r, 0) or "").strip() for r in (rows or [])]
+                                    picks = [p for p in picks if p]
+                                    if len(picks) == 1:
+                                        chosen = next((it for it in ws_rows if str(it.get("id") or "").strip() == picks[0]), None)
                         # Heurística por slug/nombre (soft default).
                         if not chosen:
                             slug_targets = [
