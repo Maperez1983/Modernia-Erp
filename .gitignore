@@ -4,6 +4,9 @@ vision-sa.json
 data/.DS_Store
 data/*.sqlite
 data/*.bak_*
+data/rentas_*_preview*.json
+data/rentas_*_preview*.csv
+data/rentas_*_review_queue*.json
 *.sqlite-wal
 *.sqlite-shm
 *.sqlite-journal

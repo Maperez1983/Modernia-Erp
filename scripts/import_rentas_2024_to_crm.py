@@ -1258,14 +1258,43 @@ def parse_datos_fiscales_text(text: str) -> dict:
     if not text:
         return data
     flat = compact_spaces(text.replace("\n", " "))
-    match = re.search(r"NIF:\s*([A-Z0-9]+)", text)
-    if match:
-        data["cliente_nif"] = match.group(1)
+    # En algunos PDFs el layout sale como: "NIF: NOMBRE: 79018863V ...".
+    # Extrae NIF de forma robusta y valida el patrón para evitar que capture "NOMBRE".
+    nif_candidate = ""
+    for haystack in (flat, text):
+        match = re.search(r"\bNIF\s*:\s*(?:NOMBRE\s*:)?\s*([A-Z0-9]{8,12})\b", haystack, re.IGNORECASE)
+        if match:
+            maybe = normalize_nif_candidate(match.group(1))
+            if looks_like_nif(maybe):
+                nif_candidate = maybe
+                break
+        match = re.search(r"\bNIF\b[\s:]+([A-Z0-9]{8,12})\b", haystack, re.IGNORECASE)
+        if match:
+            maybe = normalize_nif_candidate(match.group(1))
+            if looks_like_nif(maybe):
+                nif_candidate = maybe
+                break
+    if nif_candidate:
+        data["cliente_nif"] = nif_candidate
         data["cliente_nif_source"] = "datos_fiscales"
     match = re.search(r"NOMBRE:\s*(.+?)(?:\n\s*\n|DOMICILIO FISCAL)", text, re.DOTALL)
     if match:
-        data["cliente_nombre"] = compact_spaces(match.group(1))
+        nombre = compact_spaces(match.group(1))
+        # Si el bloque comienza con un NIF (por layout: "NOMBRE: <NIF> <APELLIDOS...>"),
+        # separarlo y usarlo como NIF si no lo tenemos ya.
+        tokens = [t for t in nombre.split() if t]
+        if tokens:
+            first = normalize_nif_candidate(tokens[0])
+            if looks_like_nif(first):
+                if not looks_like_nif(data.get("cliente_nif")):
+                    data["cliente_nif"] = first
+                    data["cliente_nif_source"] = "datos_fiscales"
+                nombre = compact_spaces(" ".join(tokens[1:]))
+        data["cliente_nombre"] = nombre
         data["cliente_nombre_source"] = "datos_fiscales"
+    if data.get("cliente_nif") and not looks_like_nif(data.get("cliente_nif")):
+        data.pop("cliente_nif", None)
+        data.pop("cliente_nif_source", None)
     via = re.search(r"Tipo Vía\s+([A-ZÁÉÍÓÚÜÑ ]+)", text)
     nombre_via = re.search(r"Nombre largo Vía\s+([A-ZÁÉÍÓÚÜÑ0-9 ]+)", text)
     numero = re.search(r"\nNUM\s+([0-9A-Z]+)", text)
@@ -1370,8 +1399,9 @@ def parse_notas_text(text: str) -> dict:
 
 def build_record_key(fields: dict, pdf_path: Path) -> str:
     nif = compact_spaces(fields.get("cliente_nif"))
-    if nif:
-        return nif.upper()
+    nif_norm = normalize_nif_candidate(nif) if nif else ""
+    if nif_norm and looks_like_nif(nif_norm):
+        return nif_norm.upper()
     folder = pdf_path.parent.name if "RENTAS CLIENTES" in str(pdf_path.parent.parent) else ""
     if folder:
         return slug(folder)
