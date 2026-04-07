@@ -1146,7 +1146,10 @@ def uploaded_policy_filter(alias=""):
         f"OR COALESCE({prefix}poliza_url, '') <> '' "
         "OR EXISTS ("
         "  SELECT 1 FROM gestoria_docs gd "
-        "  WHERE LOWER(COALESCE(gd.referencia_tipo, '')) = 'seguros' "
+        "  WHERE ("
+        "    LOWER(TRIM(COALESCE(gd.referencia_tipo, ''))) = 'seguros' "
+        "    OR LOWER(TRIM(COALESCE(gd.tipo, ''))) = 'seguros' "
+        "  )"
         f"    AND gd.referencia_id = {outer_id}"
         ")"
         ")"
@@ -15782,7 +15785,11 @@ def ensure_seguro_doc_link(conn, seguro_row, now, calidad_ocr=None, campos_ocr="
     poliza_url = (seguro_row["poliza_url"] or "").strip()
     if not cliente_id or not empresa_id or (not poliza_key and not poliza_url):
         return None
-    where = ["cliente_id = ?", "empresa_id = ?", "LOWER(COALESCE(referencia_tipo, '')) = 'seguros'"]
+    where = [
+        "cliente_id = ?",
+        "empresa_id = ?",
+        "(LOWER(TRIM(COALESCE(referencia_tipo, ''))) = 'seguros' OR LOWER(TRIM(COALESCE(tipo, ''))) = 'seguros')",
+    ]
     values = [cliente_id, empresa_id]
     key_or_url = []
     if poliza_key:
@@ -15802,6 +15809,7 @@ def ensure_seguro_doc_link(conn, seguro_row, now, calidad_ocr=None, campos_ocr="
             """
             UPDATE gestoria_docs
             SET referencia_id = COALESCE(?, referencia_id),
+                referencia_tipo = COALESCE(NULLIF(referencia_tipo, ''), 'seguros'),
                 nombre = COALESCE(NULLIF(?, ''), nombre),
                 tipo = COALESCE(NULLIF(?, ''), tipo),
                 fecha = COALESCE(NULLIF(?, ''), fecha),
@@ -15834,7 +15842,8 @@ def ensure_seguro_doc_link(conn, seguro_row, now, calidad_ocr=None, campos_ocr="
     by_ref = conn.execute(
         """
         SELECT id FROM gestoria_docs
-        WHERE referencia_tipo = 'seguros' AND referencia_id = ?
+        WHERE (LOWER(TRIM(COALESCE(referencia_tipo, ''))) = 'seguros' OR LOWER(TRIM(COALESCE(tipo, ''))) = 'seguros')
+          AND referencia_id = ?
         LIMIT 1
         """,
         (seguro_row["id"],),
@@ -15845,6 +15854,7 @@ def ensure_seguro_doc_link(conn, seguro_row, now, calidad_ocr=None, campos_ocr="
             UPDATE gestoria_docs
             SET cliente_id = ?,
                 empresa_id = ?,
+                referencia_tipo = COALESCE(NULLIF(referencia_tipo, ''), 'seguros'),
                 doc_key = COALESCE(NULLIF(?, ''), doc_key),
                 doc_url = COALESCE(NULLIF(?, ''), doc_url),
                 estado = COALESCE(NULLIF(?, ''), estado),
