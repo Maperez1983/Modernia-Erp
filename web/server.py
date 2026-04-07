@@ -2057,7 +2057,16 @@ def ensure_workspace_membership_backfill(conn):
             ensure_workspace_member(conn, ws_id, uid, role="Miembro", now=now)
         # 2) Si sigue vacío y solo hay 1 workspace, mantenemos comportamiento legacy.
         try:
-            any_member = conn.execute("SELECT 1 FROM workspace_miembros LIMIT 1").fetchone()
+            # Considera "vacío" si no hay ningún miembro válido (usuario existente y activo).
+            any_member = conn.execute(
+                """
+                SELECT 1
+                FROM workspace_miembros mem
+                JOIN usuarios u ON u.id = mem.usuario_id
+                WHERE COALESCE(u.activo, 1) = 1
+                LIMIT 1
+                """
+            ).fetchone()
         except Exception:
             any_member = None
         if not any_member and len(workspaces) == 1:
@@ -17304,6 +17313,13 @@ def ensure_tables(db_path):
             _migration_mark(conn, "workspace_membership_backfill_v1")
     except Exception:
         pass
+    # Backfill v2: repara instalaciones donde hay miembros "fantasma" y usuarios reales quedan sin acceso.
+    try:
+        if not _migration_done(conn, "workspace_membership_backfill_v2"):
+            ensure_workspace_membership_backfill(conn)
+            _migration_mark(conn, "workspace_membership_backfill_v2")
+    except Exception:
+        pass
     # Índices de rendimiento (evita scans completos que saturan Postgres en planes pequeños).
     try:
         if not _migration_done(conn, "perf_indexes_v1"):
@@ -18653,38 +18669,50 @@ def fetch_workspace_rows_for_user(conn, session):
     Legacy: si no activamos el enforcement multi-tenant, devolvemos todo como siempre.
     En modo enforce: admins ven todo; resto ve solo workspaces donde es miembro.
     """
-    if not WORKSPACE_MEMBERSHIP_ENFORCE:
-        return fetch_workspace_rows(conn)
     if workspace_actor_is_privileged(conn, session):
         return fetch_workspace_rows(conn)
     user_id = str((session or {}).get("user_id") or "").strip()
     if not user_id:
-        return []
-    rows = conn.execute(
-        """
-        SELECT
-          w.id,
-          w.nombre,
-          w.slug,
-          w.estado,
-          w.plan,
-          w.kind,
-          w.descripcion,
-          w.logo_url,
-          w.primary_color,
-          w.accent_color,
-          COUNT(DISTINCT we.empresa_id) AS empresas_total,
-          COUNT(DISTINCT CASE WHEN COALESCE(wm.enabled, 0) = 1 THEN wm.modulo_key END) AS modulos_activos
-        FROM workspaces w
-        JOIN workspace_miembros mem ON mem.workspace_id = w.id AND mem.usuario_id = ?
-        LEFT JOIN workspace_empresas we ON we.workspace_id = w.id
-        LEFT JOIN workspace_modulos wm ON wm.workspace_id = w.id
-        GROUP BY w.id, w.nombre, w.slug, w.estado, w.plan, w.kind, w.descripcion, w.logo_url, w.primary_color, w.accent_color
-        ORDER BY w.nombre COLLATE NOCASE ASC
-        """,
-        (user_id,),
-    ).fetchall()
-    return [dict(row) for row in rows]
+        return [] if WORKSPACE_MEMBERSHIP_ENFORCE else fetch_workspace_rows(conn)
+
+    membership_rows = []
+    try:
+        membership_rows = conn.execute(
+            """
+            SELECT
+              w.id,
+              w.nombre,
+              w.slug,
+              w.estado,
+              w.plan,
+              w.kind,
+              w.descripcion,
+              w.logo_url,
+              w.primary_color,
+              w.accent_color,
+              COUNT(DISTINCT we.empresa_id) AS empresas_total,
+              COUNT(DISTINCT CASE WHEN COALESCE(wm.enabled, 0) = 1 THEN wm.modulo_key END) AS modulos_activos
+            FROM workspaces w
+            JOIN workspace_miembros mem ON mem.workspace_id = w.id AND mem.usuario_id = ?
+            LEFT JOIN workspace_empresas we ON we.workspace_id = w.id
+            LEFT JOIN workspace_modulos wm ON wm.workspace_id = w.id
+            GROUP BY w.id, w.nombre, w.slug, w.estado, w.plan, w.kind, w.descripcion, w.logo_url, w.primary_color, w.accent_color
+            ORDER BY w.nombre COLLATE NOCASE ASC
+            """,
+            (user_id,),
+        ).fetchall()
+    except Exception:
+        membership_rows = []
+
+    if WORKSPACE_MEMBERSHIP_ENFORCE:
+        return [dict(row) for row in (membership_rows or [])]
+
+    # Soft membership: si ya existen filas de miembros para el usuario, devolvemos solo esas (evita que un
+    # usuario no admin "caiga" en el primer workspace por orden alfabético cuando hay varios clientes).
+    if membership_rows:
+        return [dict(row) for row in membership_rows]
+
+    return fetch_workspace_rows(conn)
 
 
 def ensure_workspace_facturacion_table(conn):
@@ -22559,18 +22587,10 @@ def ensure_workspace_persona_for_self(conn, workspace_id, session):
             (ws_id, user_id),
         ).fetchone()
 
-        # Empresa por defecto: si el tenant tiene empresas asociadas, usamos la primera.
-        empresa_default_row = conn.execute(
-            """
-            SELECT empresa_id
-            FROM workspace_empresas
-            WHERE workspace_id = ?
-            ORDER BY COALESCE(updated_at, created_at) DESC
-            LIMIT 1
-            """,
-            (ws_id,),
-        ).fetchone()
-        empresa_default = str(row_value(empresa_default_row, "empresa_id") or row_value(empresa_default_row, 0) or "").strip()
+        # Empresa por defecto: usamos la primera empresa vinculada al workspace.
+        # Importante: fetch_workspace_company_ids() hace backfill cuando workspace_empresas está vacío.
+        empresa_ids = fetch_workspace_company_ids(conn, ws_id)
+        empresa_default = str(empresa_ids[0] if empresa_ids else "").strip()
 
         now = datetime.now(timezone.utc).isoformat()
         if persona:
@@ -31111,19 +31131,10 @@ class Handler(BaseHTTPRequestHandler):
                 # Compat/self: si la ficha no tenía empresa, intentamos asignarla desde el tenant.
                 now_fix = app_now().strftime("%Y-%m-%d %H:%M:%S")
                 try:
-                    empresa_default_row = conn.execute(
-                        """
-                        SELECT empresa_id
-                        FROM workspace_empresas
-                        WHERE workspace_id = ?
-                        ORDER BY COALESCE(updated_at, created_at) DESC
-                        LIMIT 1
-                        """,
-                        (workspace_id,),
-                    ).fetchone()
+                    empresa_ids = fetch_workspace_company_ids(conn, workspace_id)
                 except Exception:
-                    empresa_default_row = None
-                empresa_id = str(row_value(empresa_default_row, "empresa_id") or row_value(empresa_default_row, 0) or "").strip()
+                    empresa_ids = []
+                empresa_id = str(empresa_ids[0] if empresa_ids else "").strip()
                 if empresa_id:
                     try:
                         conn.execute(
@@ -40260,6 +40271,94 @@ class Handler(BaseHTTPRequestHandler):
                         "empresas_total": total_empresas,
                         "modulos_activos_total": total_modulos_activos,
                     },
+                },
+            )
+            return
+
+        if path == "/api/home_time_status":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            # Resolve workspace preferido: el tenant por defecto (slug verifika2) si existe.
+            ws_rows = []
+            try:
+                ws_rows = fetch_workspace_rows_for_user(conn, session) or []
+            except Exception:
+                ws_rows = []
+            default_slug = normalize_workspace_slug(DEFAULT_WORKSPACE_NAME)
+            chosen = None
+            for row in ws_rows:
+                if str(row.get("slug") or "").strip() == default_slug:
+                    chosen = row
+                    break
+            if not chosen and ws_rows:
+                chosen = ws_rows[0]
+            workspace_id = str((chosen or {}).get("id") or "").strip()
+            if not workspace_id:
+                json_response(self, {"ok": True, "workspace_id": "", "persona": None, "today": {}, "note": "no_workspace"})
+                return
+            ok, err = enforce_workspace_membership(conn, session, workspace_id)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            user_id = str(session.get("user_id") or "").strip()
+            persona_id = workspace_persona_id_for_user(conn, workspace_id, user_id) if user_id else ""
+            if not persona_id:
+                persona_id = ensure_workspace_persona_for_self(conn, workspace_id, session)
+            persona = None
+            if persona_id:
+                try:
+                    persona_row = conn.execute(
+                        """
+                        SELECT p.id, p.nombre, p.empresa_id, COALESCE(e.nombre, '') AS empresa_nombre
+                        FROM workspace_registro_personal p
+                        LEFT JOIN empresas e ON e.id = p.empresa_id
+                        WHERE p.workspace_id = ? AND p.id = ?
+                        LIMIT 1
+                        """,
+                        (workspace_id, persona_id),
+                    ).fetchone()
+                except Exception:
+                    persona_row = None
+                if persona_row:
+                    persona = {
+                        "id": str(row_value(persona_row, "id") or "").strip(),
+                        "nombre": str(row_value(persona_row, "nombre") or "").strip(),
+                        "empresa_id": str(row_value(persona_row, "empresa_id") or "").strip(),
+                        "empresa_nombre": str(row_value(persona_row, "empresa_nombre") or "").strip(),
+                    }
+            now_dt = app_now()
+            fecha = now_dt.date().isoformat()
+            today_payload = {"fecha": fecha, "open": False, "checkin": "", "checkout": ""}
+            if persona and persona.get("id"):
+                try:
+                    entry = conn.execute(
+                        """
+                        SELECT hora_inicio, COALESCE(hora_fin, '') AS hora_fin
+                        FROM workspace_registro_horario
+                        WHERE workspace_id = ? AND persona_id = ? AND fecha = ?
+                        ORDER BY hora_inicio DESC
+                        LIMIT 1
+                        """,
+                        (workspace_id, persona.get("id"), fecha),
+                    ).fetchone()
+                except Exception:
+                    entry = None
+                if entry:
+                    checkin = str(row_value(entry, "hora_inicio") or "").strip()
+                    checkout = str(row_value(entry, "hora_fin") or "").strip()
+                    today_payload["checkin"] = checkin
+                    today_payload["checkout"] = checkout
+                    today_payload["open"] = bool(checkin and not checkout)
+            json_response(
+                self,
+                {
+                    "ok": True,
+                    "workspace_id": workspace_id,
+                    "workspace_slug": str((chosen or {}).get("slug") or "").strip(),
+                    "persona": persona,
+                    "today": today_payload,
                 },
             )
             return

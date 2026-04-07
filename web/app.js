@@ -1375,6 +1375,7 @@ const state = {
   lastCreatedClientId: "",
   currentPage: "home",
   prevPage: "home",
+  homeTimeStatus: null,
   prevModule: "empresas",
   prevTab: "operativa",
   crmWorkspaceView: "resumen",
@@ -3169,6 +3170,25 @@ const resolveRestrictedCompanyAccess = (empresaName) => {
   return "";
 };
 
+const resolveDefaultTenantWorkspaceSlug = () => {
+  try {
+    const fromStatus = String(state?.homeTimeStatus?.workspace_slug || "").trim();
+    if (fromStatus) return normalizeTenantWorkspaceSlug(fromStatus, DEFAULT_TENANT_WORKSPACE_SLUG);
+  } catch {}
+  try {
+    const fromCurrent = String(state?.currentWorkspaceTarget || state?.currentWorkspaceName || "").trim();
+    if (fromCurrent) return normalizeTenantWorkspaceSlug(fromCurrent, DEFAULT_TENANT_WORKSPACE_SLUG);
+  } catch {}
+  try {
+    const rows = Array.isArray(state?.workspaces) ? state.workspaces : [];
+    if (rows.length === 1) {
+      const value = String(rows[0]?.slug || rows[0]?.nombre || rows[0]?.id || "").trim();
+      if (value) return normalizeTenantWorkspaceSlug(value, DEFAULT_TENANT_WORKSPACE_SLUG);
+    }
+  } catch {}
+  return DEFAULT_TENANT_WORKSPACE_SLUG;
+};
+
 const getAuthScopeUser = () => {
   if (state.authUser && (state.authUser.usuario || state.authUser.id)) {
     return state.authUser;
@@ -3985,9 +4005,7 @@ const renderCompanyCards = () => {
 	    const enabledModules = new Set(state.currentWorkspaceEnabledModules || []);
 	    const workspaceScoped = enabledModules.size > 0;
 	    const timeProfile = findCurrentUserTimeProfile();
-	    const workspaceSlug = normalizeTenantWorkspaceSlug(
-	      state.currentWorkspaceTarget || state.currentWorkspaceName || DEFAULT_TENANT_WORKSPACE_SLUG
-	    );
+	    const workspaceSlug = resolveDefaultTenantWorkspaceSlug();
 
 	    const buildInitials = (value) => {
       const parts = String(value || "")
@@ -4000,25 +4018,31 @@ const renderCompanyCards = () => {
     };
 
 	    const appendPersonalCard = () => {
-		      const employee = timeProfile?.employee || null;
-		      const personaId = String(employee?.id || "").trim();
+      const employee = timeProfile?.employee || null;
+      const homePersona = state.homeTimeStatus?.persona || null;
+      const personaId = String(employee?.id || homePersona?.id || "").trim();
 		      const isAdmin = isPrivilegedUser(user) || canAccessAdminPanel(user);
 		      // La card "Personal" siempre abre RRHH en modo self, incluso para admins.
 		      // Así no te manda a "Equipo" y siempre ves tu espacio personal.
 		      const rrhhHref = `?holding=1&mode=tenant&workspace=${encodeURIComponent(workspaceSlug)}&view=rrhh&rrhh=self`;
-		      const displayName =
-		        employee?.nombre
-		        || `${user?.nombre || ""} ${user?.apellido || ""}`.trim()
+      const displayName =
+        employee?.nombre
+        || homePersona?.nombre
+        || `${user?.nombre || ""} ${user?.apellido || ""}`.trim()
 	        || user?.usuario
         || user?.email
         || "Usuario";
       const companyLabel =
         employee?.empresa_nombre
+        || homePersona?.empresa_nombre
         || getWorkspaceDisplayName(state.currentWorkspaceName || workspaceSlug || DEFAULT_TENANT_WORKSPACE_SLUG);
       const photoUrl = String(employee?.foto_url || "").trim();
+      const homeToday = state.homeTimeStatus?.today || null;
       const entryLabel = timeProfile?.latestEntry
         ? `${timeProfile.latestEntry.hora_inicio || "--:--"}${timeProfile.latestEntry.hora_fin ? ` - ${timeProfile.latestEntry.hora_fin}` : " · Abierto"}`
-        : "Sin fichaje de hoy";
+        : (homeToday?.checkin
+          ? `${homeToday.checkin || "--:--"}${homeToday.checkout ? ` - ${homeToday.checkout}` : " · Abierto"}`
+          : "Sin fichaje de hoy");
       const seniority = (() => {
         const iso = String(employee?.fecha_alta || "").slice(0, 10);
         if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return "";
@@ -4034,7 +4058,7 @@ const renderCompanyCards = () => {
         const rem = months % 12;
         return years > 0 ? `${years}a ${rem}m` : `${months}m`;
       })();
-      const subtitle = employee
+      const subtitle = (employee || homePersona)
         ? `${companyLabel} · ${entryLabel}${seniority ? ` · Antigüedad ${seniority}` : ""}`
         : "Completa tu ficha y documentación en RRHH.";
 	      const card = document.createElement("div");
@@ -4054,7 +4078,7 @@ const renderCompanyCards = () => {
 	        </div>
 	        <div class="workspace-home-card-actions">
 	          <a class="card-link" href="${rrhhHref}" data-action="rrhh-home">Abrir</a>
-	          ${personaId ? `<button type="button" class="secondary ghost button-inline" data-action="time-punch">Fichar</button>` : ""}
+	          ${state.homeTimeStatus?.workspace_id ? `<button type="button" class="secondary ghost button-inline" data-action="time-punch">Fichar</button>` : ""}
 	        </div>
 	      `;
 	      coreCards.appendChild(card);
@@ -4113,14 +4137,24 @@ const renderCompanyCards = () => {
 
     if (!isPriv) {
       appendPersonalCard();
+      // Cards de servicios asignados: el usuario no admin debe poder entrar directamente al servicio.
+      try {
+        const services = expandServiceAliases(parseServiceList(user?.servicio || ""));
+        const mapped = new Set();
+        services.forEach((key) => {
+          if (key === "hipotecas") key = "financiaciones";
+          if (["inmobiliaria", "gestoria", "seguros", "financiaciones"].includes(key)) mapped.add(key);
+        });
+        Array.from(mapped).forEach((key) => appendServiceCard(key));
+      } catch {}
       const workspaceCard = document.createElement("div");
       workspaceCard.className = "company-card";
       workspaceCard.dataset.action = "holding-tenant";
       workspaceCard.innerHTML = `
-        <h3>Workspace ${getWorkspaceDisplayName(state.currentWorkspaceName || DEFAULT_TENANT_WORKSPACE_SLUG)}</h3>
+        <h3>Workspace ${getWorkspaceDisplayName(state.currentWorkspaceName || workspaceSlug || DEFAULT_TENANT_WORKSPACE_SLUG)}</h3>
         <div class="company-meta">Entrada operativa al grupo y a sus empresas activas.</div>
         <div class="company-meta">Desde aquí eliges empresa y luego trabajas en clientes y módulos.</div>
-        <a class="card-link" href="?holding=1&mode=tenant&workspace=${encodeURIComponent(DEFAULT_TENANT_WORKSPACE_SLUG)}&view=overview" data-action="holding-tenant">Entrar</a>
+        <a class="card-link" href="?holding=1&mode=tenant&workspace=${encodeURIComponent(workspaceSlug)}&view=overview" data-action="holding-tenant">Entrar</a>
       `;
       coreCards.appendChild(workspaceCard);
       // Prompt de fichaje (solo si aplica al usuario).
@@ -4147,7 +4181,7 @@ const renderCompanyCards = () => {
       <h3>Workspace ${getWorkspaceDisplayName(state.currentWorkspaceName || DEFAULT_TENANT_WORKSPACE_SLUG)}</h3>
       <div class="company-meta">Espacio del grupo donde viven sus empresas, clientes, módulos y operativa diaria.</div>
       <div class="company-meta">Primero entras al workspace y desde ahí eliges la empresa con la que quieres trabajar.</div>
-      <a class="card-link" href="?holding=1&mode=tenant&workspace=${encodeURIComponent(DEFAULT_TENANT_WORKSPACE_SLUG)}&view=overview" data-action="holding-tenant">Entrar</a>
+      <a class="card-link" href="?holding=1&mode=tenant&workspace=${encodeURIComponent(workspaceSlug)}&view=overview" data-action="holding-tenant">Entrar</a>
     `;
     coreCards.appendChild(tenantCard);
     maybeAutoShowHomeTimePunchModal();
@@ -12423,22 +12457,27 @@ const renderHomeTimePunchModal = () => {
   ensureHomeTimePunchModal();
   if (!_homeTimePunchBody) return;
   const user = getAuthScopeUser();
-  const profile = findCurrentUserTimeProfile();
-  const employee = profile?.employee || null;
-  const personaId = String(employee?.id || "").trim();
-  const latest = profile?.latestEntry || null;
-  const open = latest && !String(latest.hora_fin || "").trim();
-  const label = latest
-    ? `${latest.hora_inicio || "--:--"}${latest.hora_fin ? ` - ${latest.hora_fin}` : " · Abierto"}`
+  const status = state.homeTimeStatus || null;
+  const personaId = String(status?.persona?.id || "").trim();
+  const today = status?.today || {};
+  const open = Boolean(today?.open);
+  const checkin = String(today?.checkin || "").trim();
+  const checkout = String(today?.checkout || "").trim();
+  const label = checkin
+    ? `${checkin}${checkout ? ` - ${checkout}` : " · Abierto"}`
     : "Sin fichaje de hoy";
-  if (!state.currentWorkspaceId || !personaId) {
+  if (!status?.workspace_id) {
+    _homeTimePunchBody.innerHTML = `<p class="muted">Cargando registro horario…</p>`;
+    return;
+  }
+  if (!personaId) {
     _homeTimePunchBody.innerHTML = `
       <p class="muted">No tienes ficha de registro horario vinculada todavía.</p>
-      <p class="muted">Pide a administración que te active y vincule el registro horario para poder fichar.</p>
+      <p class="muted">Entra en el workspace para que se cree/vincule automáticamente o pide a administración que lo revise.</p>
     `;
     return;
   }
-  const canCheckIn = !open;
+  const canCheckIn = !checkin;
   const canCheckOut = Boolean(open);
   _homeTimePunchBody.innerHTML = `
     <div class="workspace-time-preview">
@@ -12451,22 +12490,24 @@ const renderHomeTimePunchModal = () => {
   `;
   const runToggle = async (action) => {
     try {
-      const isSelf = Boolean(user?.id && String(employee?.usuario_id || "") === String(user.id));
+      const isSelf = Boolean(user?.id);
       const geo = isSelf ? await getGeoLocation(3500) : null;
       const resp = await fetch("/api/workspace_registro_horario_toggle", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          workspace_id: state.currentWorkspaceId,
+          workspace_id: status.workspace_id,
           persona_id: personaId,
-          empresa_id: employee?.empresa_id || "",
           action,
           ...(geo ? { geo } : {}),
         }),
       }).then((res) => res.json());
       if (resp?.error) throw new Error(resp.error);
       _homeTimePunchLastActionAt = Date.now();
-      await loadWorkspaceDetail(state.currentWorkspaceId);
+      try {
+        const next = await api("/api/home_time_status");
+        state.homeTimeStatus = next && next.ok ? next : state.homeTimeStatus;
+      } catch {}
       renderCompanyCards();
       closeHomeTimePunchModal({ persist: false });
     } catch (error) {
@@ -12479,6 +12520,12 @@ const renderHomeTimePunchModal = () => {
 
 const openHomeTimePunchModal = ({ persist = false } = {}) => {
   ensureHomeTimePunchModal();
+  if (!state.homeTimeStatus) {
+    // Best-effort refresh before rendering (home puede estar sin workspace cargado).
+    api("/api/home_time_status")
+      .then((next) => { state.homeTimeStatus = next && next.ok ? next : state.homeTimeStatus; })
+      .catch(() => {});
+  }
   renderHomeTimePunchModal();
   _homeTimePunchModal?.classList.remove("hidden");
   document.body.classList.add("modal-open");
@@ -12497,12 +12544,12 @@ const maybeAutoShowHomeTimePunchModal = () => {
     if (!uid) return;
     const day = new Date().toISOString().slice(0, 10);
     if (localStorage.getItem(`crm_home_punch_hide_${uid}_${day}`) === "1") return;
-    const profile = findCurrentUserTimeProfile();
-    const employee = profile?.employee || null;
-    if (!employee?.id) return;
-    const latest = profile?.latestEntry || null;
-    const open = latest && !String(latest.hora_fin || "").trim();
-    const needsAction = !latest || open;
+    const status = state.homeTimeStatus || null;
+    const personaId = String(status?.persona?.id || "").trim();
+    if (!personaId) return;
+    const today = status?.today || {};
+    const open = Boolean(today?.open);
+    const needsAction = !String(today?.checkin || "").trim() || open;
     if (!needsAction) return;
     const key = `${uid}:${day}:${open ? "open" : "none"}`;
     if (_homeTimePunchAutoShownKey === key) return;
@@ -14237,7 +14284,7 @@ const openHolding = (options = {}) => {
     }
   }
   state.currentWorkspaceEntryMode = mode;
-  state.currentWorkspaceTarget = requestedWorkspace || (mode === "tenant" ? DEFAULT_TENANT_WORKSPACE_SLUG : "");
+  state.currentWorkspaceTarget = requestedWorkspace || (mode === "tenant" ? resolveDefaultTenantWorkspaceSlug() : "");
   state.workspaceRrhhEntry = requestedRrhh === "self" ? "self" : "";
   state.workspaceRrhhJumpPersonaId = requestedPersona;
   const engineKey = normalizeSimple(requestedEngine);
@@ -38869,19 +38916,22 @@ const init = async () => {
     // Se re-renderiza automáticamente conforme llegan datos (resumen, workspace, etc.).
     renderCompanyCards();
 
-  const results = await Promise.allSettled([
-    api("/api/empresas"),
-    api("/api/tablas"),
-    api("/api/resumen"),
-  ]);
+    const results = await Promise.allSettled([
+      api("/api/empresas"),
+      api("/api/tablas"),
+      api("/api/resumen"),
+      api("/api/home_time_status"),
+    ]);
 
     const empresas = results[0].status === "fulfilled" ? results[0].value : [];
     const tablas = results[1].status === "fulfilled" ? results[1].value : [];
     const resumen = results[2].status === "fulfilled" ? results[2].value : [];
+    const homeTimeStatus = results[3].status === "fulfilled" ? results[3].value : null;
 
     state.empresas = empresas;
     state.tablas = tablas;
     state.resumen = resumen;
+    state.homeTimeStatus = homeTimeStatus && homeTimeStatus.ok ? homeTimeStatus : null;
 
     empresaSelect.appendChild(createOption("", "Todas las empresas"));
     empresas.forEach((empresa) => {
@@ -39047,11 +39097,11 @@ if (coreCards) {
     } else if (action === "holding-admin") {
       openHolding({ mode: "platform", view: "overview" });
     } else if (action === "holding-tenant") {
-      openHolding({ mode: "tenant", workspace: DEFAULT_TENANT_WORKSPACE_SLUG, view: "overview" });
+      openHolding({ mode: "tenant", workspace: resolveDefaultTenantWorkspaceSlug(), view: "overview" });
     } else if (action === "time-punch") {
       openHomeTimePunchModal({ persist: true });
     } else if (action === "time-home") {
-      openHolding({ mode: "tenant", workspace: DEFAULT_TENANT_WORKSPACE_SLUG, view: "motores", engine: "registro_horario" });
+      openHolding({ mode: "tenant", workspace: resolveDefaultTenantWorkspaceSlug(), view: "motores", engine: "registro_horario" });
       window.setTimeout(() => {
         focusWorkspaceEngine("registro_horario", workspaceTimeSummary, { forceTenantView: true });
       }, 250);
