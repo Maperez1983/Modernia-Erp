@@ -41334,7 +41334,7 @@ if (segurosUpdateButton) {
       empresa_nombre: FINCAS_COMPANY,
       id: recordId,
       tomador: fields.tomador || "",
-      nif: fields.dni || "",
+      nif: fields.nif || fields.dni || "",
       telefono: fields.telefono || "",
       email: fields.email || "",
       direccion: fields.direccion || "",
