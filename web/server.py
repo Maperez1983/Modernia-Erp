@@ -99,12 +99,32 @@ S3_AUTH_CACHE_LOCK = threading.Lock()
 S3_AUTH_CACHE = {}  # {(user_id, key): (expires_ts, ok)}
 
 
+def ensure_s3_grants_table(conn):
+    if not conn:
+        return
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS s3_grants (
+          user_id TEXT NOT NULL,
+          key TEXT NOT NULL,
+          expires_at REAL NOT NULL,
+          created_at REAL NOT NULL,
+          PRIMARY KEY (user_id, key)
+        )
+        """
+    )
+    try:
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_s3_grants_expires_at ON s3_grants (expires_at)")
+    except Exception:
+        pass
+
+
 def _normalize_s3_key(key):
     raw = str(key or "").strip().replace("\\", "/")
     return raw.lstrip("/")
 
 
-def _s3_grant_key(session, key, *, ttl_seconds=None):
+def _s3_grant_key(session, key, *, ttl_seconds=None, conn=None):
     if not session:
         return
     uid = str(session.get("user_id") or "").strip()
@@ -133,9 +153,24 @@ def _s3_grant_key(session, key, *, ttl_seconds=None):
                 S3_GRANTS[uid] = {k: exp for k, exp in items}
     except Exception:
         return
+    if not conn:
+        return
+    try:
+        ensure_s3_grants_table(conn)
+        conn.execute(
+            """
+            INSERT INTO s3_grants (user_id, key, expires_at, created_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(user_id, key) DO UPDATE SET
+              expires_at=excluded.expires_at
+            """,
+            (uid, safe, float(expires), float(time.time())),
+        )
+    except Exception:
+        return
 
 
-def _s3_key_granted(session, key):
+def _s3_key_granted(session, key, *, conn=None):
     if not session:
         return False
     uid = str(session.get("user_id") or "").strip()
@@ -151,6 +186,31 @@ def _s3_key_granted(session, key):
                 return True
             if exp:
                 bucket.pop(safe, None)
+    except Exception:
+        return False
+    if not conn:
+        return False
+    try:
+        ensure_s3_grants_table(conn)
+        row = conn.execute(
+            "SELECT expires_at FROM s3_grants WHERE user_id = ? AND key = ?",
+            (uid, safe),
+        ).fetchone()
+        exp = float(row[0] if row else 0)
+        if exp and exp > now_ts:
+            try:
+                with S3_GRANTS_LOCK:
+                    bucket = S3_GRANTS.get(uid) or {}
+                    bucket[safe] = exp
+                    S3_GRANTS[uid] = bucket
+            except Exception:
+                pass
+            return True
+        if exp:
+            try:
+                conn.execute("DELETE FROM s3_grants WHERE user_id = ? AND key = ?", (uid, safe))
+            except Exception:
+                pass
     except Exception:
         return False
     return False
@@ -171,7 +231,7 @@ def _s3_key_visible_for_user(conn, session, key):
     safe_key = _normalize_s3_key(key)
     if not uid or not safe_key:
         return False, "No autorizado"
-    if _s3_key_granted(session, safe_key):
+    if _s3_key_granted(session, safe_key, conn=conn):
         return True, ""
 
     cache_key = (uid, safe_key)
@@ -17585,6 +17645,7 @@ def ensure_tables(db_path):
     except Exception:
         apply_schema_file(conn, ROOT.parent / "schema.sql")
     ensure_auth_sessions_table(conn)
+    ensure_s3_grants_table(conn)
     ensure_column(conn, "empresas", "logo_url", "logo_url TEXT")
     ensure_column(conn, "empresas", "nif", "nif TEXT")
     ensure_column(conn, "empresas", "direccion", "direccion TEXT")
@@ -28895,7 +28956,7 @@ class Handler(BaseHTTPRequestHandler):
             public_url = f"https://{bucket}.s3.{region}.amazonaws.com/{key}"
             try:
                 session = getattr(self, "auth_session", None) or self._current_session()
-                _s3_grant_key(session, key)
+                _s3_grant_key(session, key, conn=conn)
             except Exception:
                 pass
             json_response(self, {"url": url, "key": key, "public_url": public_url})
@@ -28940,7 +29001,7 @@ class Handler(BaseHTTPRequestHandler):
             public_url = f"https://{bucket}.s3.{region}.amazonaws.com/{key}"
             try:
                 session = getattr(self, "auth_session", None) or self._current_session()
-                _s3_grant_key(session, key)
+                _s3_grant_key(session, key, conn=conn)
             except Exception:
                 pass
             json_response(
@@ -28970,7 +29031,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             try:
                 session = getattr(self, "auth_session", None) or self._current_session()
-                if S3_SCOPE_ENFORCE and (not workspace_actor_is_privileged(conn, session)) and (not _s3_key_granted(session, key)):
+                if S3_SCOPE_ENFORCE and (not workspace_actor_is_privileged(conn, session)) and (not _s3_key_granted(session, key, conn=conn)):
                     json_response(self, {"error": "No autorizado"}, status=403)
                     return
             except Exception:
@@ -29004,7 +29065,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             try:
                 session = getattr(self, "auth_session", None) or self._current_session()
-                if S3_SCOPE_ENFORCE and (not workspace_actor_is_privileged(conn, session)) and (not _s3_key_granted(session, key)):
+                if S3_SCOPE_ENFORCE and (not workspace_actor_is_privileged(conn, session)) and (not _s3_key_granted(session, key, conn=conn)):
                     json_response(self, {"error": "No autorizado"}, status=403)
                     return
             except Exception:
@@ -29037,7 +29098,7 @@ class Handler(BaseHTTPRequestHandler):
             public_url = f"https://{bucket}.s3.{region}.amazonaws.com/{key}"
             try:
                 session = getattr(self, "auth_session", None) or self._current_session()
-                _s3_grant_key(session, key)
+                _s3_grant_key(session, key, conn=conn)
             except Exception:
                 pass
             json_response(self, {"ok": True, "key": key, "public_url": public_url})
@@ -29055,7 +29116,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             try:
                 session = getattr(self, "auth_session", None) or self._current_session()
-                if S3_SCOPE_ENFORCE and (not workspace_actor_is_privileged(conn, session)) and (not _s3_key_granted(session, key)):
+                if S3_SCOPE_ENFORCE and (not workspace_actor_is_privileged(conn, session)) and (not _s3_key_granted(session, key, conn=conn)):
                     json_response(self, {"error": "No autorizado"}, status=403)
                     return
             except Exception:
