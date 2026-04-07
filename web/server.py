@@ -1649,6 +1649,288 @@ def compute_seguros_contabilidad_totals(conn, empresa_id, year=None):
     return {"ingresos": round(ingresos, 2), "gastos": round(gastos, 2)}
 
 
+def compute_fincas_seguros_dashboard_payload(conn, empresa_id, year, uploaded_only):
+    empresa_id = str(empresa_id or "").strip()
+    year = str(year or "").strip()
+    if not year:
+        try:
+            year = conn.execute("SELECT strftime('%Y','now','localtime') AS y").fetchone()["y"]
+        except Exception:
+            year = str(datetime.now().year)
+
+    uploaded_clause = uploaded_policy_filter("s")
+    uploaded_param = resolve_uploaded_only_param(
+        conn,
+        uploaded_only,
+        empresa_id=empresa_id,
+        table="seguros",
+        uploaded_clause=uploaded_policy_filter(),
+    )
+
+    estado_bucket_expr = seguro_estado_bucket_expr("s")
+    fecha_efecto_date = seguro_date_sql("fecha_efecto", "s")
+    year_expr = f"COALESCE(STRFTIME('%Y', {fecha_efecto_date}), STRFTIME('%Y', s.created_at))"
+    month_expr = f"COALESCE(STRFTIME('%Y-%m', {fecha_efecto_date}), STRFTIME('%Y-%m', s.created_at))"
+    compania_expr = "LOWER(TRIM(COALESCE(s.compania, '')))"
+    exclude_sin_seguro = f"({compania_expr} != 'sin seguro')"
+
+    def _money_sql(expr):
+        # Intenta normalizar importes en formato texto (ej: "7.397,96 €") a REAL.
+        # En Postgres, COALESCE exige tipos compatibles; castear a TEXT evita errores
+        # cuando la columna ya es numérica.
+        base = f"COALESCE(CAST({expr} AS TEXT), '')"
+        cleaned = (
+            f"REPLACE(REPLACE(REPLACE(REPLACE({base}, '€', ''), ' ', ''), '.', ''), ',', '.')"
+        )
+        return f"CAST(NULLIF({cleaned}, '') AS REAL)"
+
+    def _count_buckets(where_extra_sql, params_extra):
+        return conn.execute(
+            f"""
+            SELECT
+              SUM(CASE WHEN {estado_bucket_expr} = 'presupuesto' THEN 1 ELSE 0 END) AS presupuesto,
+              SUM(CASE WHEN {estado_bucket_expr} = 'contratada' THEN 1 ELSE 0 END) AS contratada,
+              SUM(CASE WHEN {estado_bucket_expr} = 'en_vigor' THEN 1 ELSE 0 END) AS en_vigor,
+              SUM(CASE WHEN {estado_bucket_expr} = 'rechazada' THEN 1 ELSE 0 END) AS rechazada
+            FROM seguros s
+            WHERE s.empresa_id = ?
+              AND ({uploaded_clause} OR ? = 0)
+              AND {exclude_sin_seguro}
+              {where_extra_sql}
+            """,
+            [empresa_id, uploaded_param, *params_extra],
+        ).fetchone()
+
+    current_row = _count_buckets("AND " + year_expr + " = ?", [year])
+    totals_row = _count_buckets("", [])
+
+    presupuesto = int(row_value(current_row, "presupuesto", 0) or 0)
+    contratada = int(row_value(current_row, "contratada", 0) or 0)
+    en_vigor = int(row_value(current_row, "en_vigor", 0) or 0)
+    rechazada = int(row_value(current_row, "rechazada", 0) or 0)
+    aceptadas = contratada + en_vigor
+    total_cerradas = aceptadas + rechazada
+    conversion = (aceptadas / total_cerradas * 100.0) if total_cerradas else 0.0
+
+    presupuesto_total = int(row_value(totals_row, "presupuesto", 0) or 0)
+    contratada_total = int(row_value(totals_row, "contratada", 0) or 0)
+    en_vigor_total = int(row_value(totals_row, "en_vigor", 0) or 0)
+    rechazada_total = int(row_value(totals_row, "rechazada", 0) or 0)
+    aceptadas_total = contratada_total + en_vigor_total
+    total_cerradas_total = aceptadas_total + rechazada_total
+    conversion_total = (aceptadas_total / total_cerradas_total * 100.0) if total_cerradas_total else 0.0
+
+    series_rows = conn.execute(
+        f"""
+        SELECT
+          {year_expr} AS year,
+          SUM(CASE WHEN {estado_bucket_expr} = 'presupuesto' THEN 1 ELSE 0 END) AS presupuesto,
+          SUM(CASE WHEN {estado_bucket_expr} = 'contratada' THEN 1 ELSE 0 END) AS contratada,
+          SUM(CASE WHEN {estado_bucket_expr} = 'en_vigor' THEN 1 ELSE 0 END) AS en_vigor,
+          SUM(CASE WHEN {estado_bucket_expr} = 'rechazada' THEN 1 ELSE 0 END) AS rechazada
+        FROM seguros s
+        WHERE s.empresa_id = ?
+          AND ({uploaded_clause} OR ? = 0)
+          AND {exclude_sin_seguro}
+          AND {year_expr} IS NOT NULL
+        GROUP BY {year_expr}
+        ORDER BY {year_expr}
+        """,
+        (empresa_id, uploaded_param),
+    ).fetchall()
+    series_payload = []
+    for row in series_rows:
+        row_dict = dict(row)
+        accepted_row = int(row_dict.get("contratada") or 0) + int(row_dict.get("en_vigor") or 0)
+        closed_row = accepted_row + int(row_dict.get("rechazada") or 0)
+        row_dict["conversion"] = (accepted_row / closed_row * 100.0) if closed_row else 0.0
+        series_payload.append(row_dict)
+
+    month_rows = conn.execute(
+        f"""
+        SELECT
+          {month_expr} AS month,
+          SUM(CASE WHEN {estado_bucket_expr} = 'en_vigor' THEN 1 ELSE 0 END) AS altas
+        FROM seguros s
+        WHERE s.empresa_id = ?
+          AND ({uploaded_clause} OR ? = 0)
+          AND {exclude_sin_seguro}
+          AND {year_expr} = ?
+          AND {month_expr} IS NOT NULL
+        GROUP BY {month_expr}
+        ORDER BY {month_expr}
+        """,
+        (empresa_id, uploaded_param, year),
+    ).fetchall()
+    series_en_vigor_mes = []
+    acumulado = 0
+    for row in month_rows:
+        altas = int(row_value(row, "altas", 0) or 0)
+        acumulado += altas
+        series_en_vigor_mes.append(
+            {
+                "month": row_value(row, "month", "") or "",
+                "altas": altas,
+                "acumulado": acumulado,
+            }
+        )
+
+    responsables = conn.execute(
+        f"""
+        SELECT
+          COALESCE(NULLIF(TRIM(s.colaborador), ''), 'Sin asignar') AS label,
+          COUNT(*) AS total
+        FROM seguros s
+        WHERE s.empresa_id = ?
+          AND ({uploaded_clause} OR ? = 0)
+          AND {exclude_sin_seguro}
+          AND {year_expr} = ?
+        GROUP BY 1
+        ORDER BY total DESC
+        """,
+        (empresa_id, uploaded_param, year),
+    ).fetchall()
+
+    comision_companias = conn.execute(
+        f"""
+        SELECT
+          COALESCE(NULLIF(TRIM(s.compania), ''), 'Sin compañía') AS label,
+          SUM(COALESCE({_money_sql('s.comision')}, 0)) AS total
+        FROM seguros s
+        WHERE s.empresa_id = ?
+          AND ({uploaded_clause} OR ? = 0)
+          AND {exclude_sin_seguro}
+          AND {year_expr} = ?
+        GROUP BY 1
+        ORDER BY total DESC
+        """,
+        (empresa_id, uploaded_param, year),
+    ).fetchall()
+
+    comision_ramos = conn.execute(
+        f"""
+        SELECT
+          COALESCE(NULLIF(TRIM(s.ramo), ''), 'Sin ramo') AS label,
+          SUM(COALESCE({_money_sql('s.comision')}, 0)) AS total
+        FROM seguros s
+        WHERE s.empresa_id = ?
+          AND ({uploaded_clause} OR ? = 0)
+          AND {exclude_sin_seguro}
+          AND {year_expr} = ?
+        GROUP BY 1
+        ORDER BY total DESC
+        """,
+        (empresa_id, uploaded_param, year),
+    ).fetchall()
+
+    prima_companias = conn.execute(
+        f"""
+        SELECT
+          COALESCE(NULLIF(TRIM(s.compania), ''), 'Sin compañía') AS label,
+          SUM(COALESCE({_money_sql('s.prima_total')}, 0)) AS total
+        FROM seguros s
+        WHERE s.empresa_id = ?
+          AND ({uploaded_clause} OR ? = 0)
+          AND {exclude_sin_seguro}
+          AND {year_expr} = ?
+        GROUP BY 1
+        ORDER BY total DESC
+        """,
+        (empresa_id, uploaded_param, year),
+    ).fetchall()
+
+    prima_ramos = conn.execute(
+        f"""
+        SELECT
+          COALESCE(NULLIF(TRIM(s.ramo), ''), 'Sin ramo') AS label,
+          SUM(COALESCE({_money_sql('s.prima_total')}, 0)) AS total
+        FROM seguros s
+        WHERE s.empresa_id = ?
+          AND ({uploaded_clause} OR ? = 0)
+          AND {exclude_sin_seguro}
+          AND {year_expr} = ?
+        GROUP BY 1
+        ORDER BY total DESC
+        """,
+        (empresa_id, uploaded_param, year),
+    ).fetchall()
+
+    fecha_venc_date = seguro_date_sql("fecha_vencimiento", "s")
+    fecha_venc_eff = f"COALESCE({fecha_venc_date}, DATE({fecha_efecto_date}, '+1 year'))"
+    month_venc_expr = f"STRFTIME('%Y-%m', {fecha_venc_eff})"
+    renov_series = conn.execute(
+        f"""
+        SELECT
+          {month_venc_expr} AS month,
+          SUM(CASE WHEN {estado_bucket_expr} = 'en_vigor' THEN 1 ELSE 0 END) AS renovaciones,
+          SUM(CASE WHEN {estado_bucket_expr} = 'anulada' THEN 1 ELSE 0 END) AS anulaciones
+        FROM seguros s
+        WHERE s.empresa_id = ?
+          AND ({uploaded_clause} OR ? = 0)
+          AND {exclude_sin_seguro}
+          AND {month_venc_expr} IS NOT NULL
+          AND SUBSTR({month_venc_expr}, 1, 4) = ?
+        GROUP BY {month_venc_expr}
+        ORDER BY {month_venc_expr}
+        """,
+        (empresa_id, uploaded_param, year),
+    ).fetchall()
+
+    oportunidades_abiertas = conn.execute(
+        f"""
+        SELECT
+          COALESCE(NULLIF(TRIM(s.ramo), ''), 'Sin ramo') AS label,
+          COUNT(*) AS total
+        FROM seguros s
+        WHERE s.empresa_id = ?
+          AND ({uploaded_clause} OR ? = 0)
+          AND {exclude_sin_seguro}
+          AND {year_expr} = ?
+          AND {estado_bucket_expr} = 'presupuesto'
+        GROUP BY 1
+        ORDER BY total DESC
+        """,
+        (empresa_id, uploaded_param, year),
+    ).fetchall()
+
+    cont = compute_seguros_contabilidad_totals(conn, empresa_id, year=year)
+    ingresos = float(cont.get("ingresos") or 0.0)
+    gastos = float(cont.get("gastos") or 0.0)
+    rentabilidad = ingresos - gastos
+    margen_rentabilidad = (rentabilidad / ingresos * 100.0) if ingresos else 0.0
+
+    current = {
+        "year": year,
+        "presupuesto": presupuesto,
+        "contratada": contratada,
+        "en_vigor": en_vigor,
+        "rechazada": rechazada,
+        "aceptadas": aceptadas,
+        "conversion": conversion,
+        "presupuesto_total": presupuesto_total,
+        "contratada_total": contratada_total,
+        "en_vigor_total": en_vigor_total,
+        "rechazada_total": rechazada_total,
+        "aceptadas_total": aceptadas_total,
+        "conversion_total": conversion_total,
+        "rentabilidad": round(rentabilidad, 2),
+        "margen_rentabilidad": round(margen_rentabilidad, 2),
+    }
+
+    return {
+        "current": current,
+        "series": series_payload,
+        "series_en_vigor_mes": series_en_vigor_mes,
+        "responsables": [dict(r) for r in responsables],
+        "comision_companias": [dict(r) for r in comision_companias],
+        "comision_ramos": [dict(r) for r in comision_ramos],
+        "prima_companias": [dict(r) for r in prima_companias],
+        "prima_ramos": [dict(r) for r in prima_ramos],
+        "renovaciones_anulaciones_mes": [dict(r) for r in renov_series],
+        "oportunidades_abiertas": [dict(r) for r in oportunidades_abiertas],
+    }
+
+
 def normalize_auto_seguro_commission_assignments(conn, now=None):
     now = now or datetime.now(timezone.utc).isoformat()
     try:
@@ -45976,6 +46258,22 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
             self.end_headers()
             self.wfile.write(content)
+            return
+
+        if path == "/api/fincas_seguros_dashboard":
+            empresa_id = (params.get("empresa_id", [""])[0] or "").strip()
+            year = (params.get("year", [""])[0] or "").strip()
+            uploaded_only = (params.get("uploaded_only", ["0"])[0] or "0").strip() in ("1", "true", "yes")
+            if not empresa_id:
+                json_response(self, {"error": "empresa_id requerido"}, status=400)
+                return
+            try:
+                payload = compute_fincas_seguros_dashboard_payload(conn, empresa_id, year, uploaded_only)
+            except Exception as exc:
+                Handler._record_api_error("/api/fincas_seguros_dashboard", exc)
+                json_response(self, {"error": "Base de datos ocupada. Reintenta."}, status=503)
+                return
+            json_response(self, payload)
             return
 
         if path == "/api/fincas_stats":

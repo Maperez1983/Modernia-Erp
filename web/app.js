@@ -2809,7 +2809,9 @@ const SEGUROS_RAMOS_CATALOGO = [
   "Caza",
 ];
 const SEGUROS_LEGACY_STATUS_KEY = "migrado legado";
-const SEGUROS_ONLY_UPLOADED_MODE = true;
+// Por defecto mostramos TODAS las pólizas (aunque no tengan PDF enlazado).
+// El modo "solo subidas" se dejó para depurar migraciones SQLite->Postgres, pero confunde los KPIs.
+const SEGUROS_ONLY_UPLOADED_MODE = false;
 const SEGUROS_DISABLE_BDT_LINKING = false;
 
 const createOption = (value, label) => {
@@ -30661,7 +30663,7 @@ const loadSegurosKpis = () => {
       card.innerHTML = `<div class="kpi-label">${label}</div><div class="kpi-value">${value}</div>`;
       wrapper.appendChild(card);
     };
-    addKpi("Pólizas cargadas", data.total || 0);
+    addKpi("Pólizas registradas", data.total || 0);
     addKpi("Pólizas en vigor", data.en_vigor || 0);
     addKpi("Vencen 30 días", data.vencen_30 || 0);
     addKpi("Con faltantes", data.faltantes || 0);
