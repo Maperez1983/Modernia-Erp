@@ -23237,7 +23237,9 @@ const renderFincasDashboard = (empresaId) => {
     empresa_id: empresaId,
     year: selectedYear,
   });
-  params.set("uploaded_only", SEGUROS_ONLY_UPLOADED_MODE ? "1" : "0");
+  // Dashboard/KPIs deben reflejar toda la cartera (en vigor, etc.),
+  // no solo pólizas con PDF ya enlazado.
+  params.set("uploaded_only", "0");
   api(`/api/fincas_seguros_dashboard?${params.toString()}`).then((data) => {
     if (!fincasDashboardKpis) {
       return;
@@ -30830,7 +30832,9 @@ const loadSegurosKpis = () => {
     segurosKpis.appendChild(wrapper);
   };
   const params = new URLSearchParams({ empresa_id: empresa.id });
-  params.set("uploaded_only", SEGUROS_ONLY_UPLOADED_MODE ? "1" : "0");
+  // KPIs deben reflejar toda la cartera (en vigor, vencimientos, primas),
+  // independientemente de si el PDF está enlazado.
+  params.set("uploaded_only", "0");
   api(`/api/seguros_kpis?${params.toString()}`)
     .then((data) => {
       state.segurosKpisCache = data || {};

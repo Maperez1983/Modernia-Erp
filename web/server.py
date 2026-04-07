@@ -47378,39 +47378,51 @@ class Handler(BaseHTTPRequestHandler):
             if not empresa_id:
                 json_response(self, {"error": "empresa_id requerido"}, status=400)
                 return
-            estado_expr = "LOWER(TRIM(estado))"
             in_vigor_expr = in_vigor_policy_filter()
             uploaded_clause = uploaded_policy_filter()
             compania_expr = "LOWER(TRIM(compania))"
             exclude_sin_seguro = f"({compania_expr} IS NULL OR {compania_expr} = '' OR {compania_expr} != 'sin seguro')"
             uploaded_param = resolve_uploaded_only_param(conn, uploaded_only, empresa_id=empresa_id, uploaded_clause=uploaded_clause)
+
+            # Normaliza importes almacenados como texto (ej: "7.397,96 €") a REAL.
+            base_money = "COALESCE(CAST(s.prima_total AS TEXT), '')"
+            cleaned_money = (
+                "REPLACE(REPLACE(REPLACE(REPLACE("
+                + base_money
+                + ", '€', ''), ' ', ''), '.', ''), ',', '.')"
+            )
+            prima_total_sql = f"CAST(NULLIF({cleaned_money}, '') AS REAL)"
+
             total = conn.execute(
                 f"""
                 SELECT COUNT(*) AS total
-                FROM seguros
-                WHERE empresa_id = ?
+                FROM seguros s
+                WHERE s.empresa_id = ?
                   AND ({uploaded_clause} OR ? = 0)
+                  AND {exclude_sin_seguro}
                 """,
                 (empresa_id, uploaded_param),
             ).fetchone()
             en_vigor = conn.execute(
                 f"""
                 SELECT COUNT(*) AS total
-                FROM seguros
-                WHERE empresa_id = ?
+                FROM seguros s
+                WHERE s.empresa_id = ?
                   AND ({uploaded_clause} OR ? = 0)
                   AND {in_vigor_expr}
+                  AND {exclude_sin_seguro}
                 """,
                 (empresa_id, uploaded_param),
             ).fetchone()
             vencen_30 = conn.execute(
                 f"""
                 SELECT COUNT(*) AS total
-                FROM seguros
-                WHERE empresa_id = ?
+                FROM seguros s
+                WHERE s.empresa_id = ?
                   AND ({uploaded_clause} OR ? = 0)
                   AND COALESCE(fecha_vencimiento, DATE(fecha_efecto, '+1 year')) IS NOT NULL
                   AND {in_vigor_expr}
+                  AND {exclude_sin_seguro}
                   AND DATE(COALESCE(fecha_vencimiento, DATE(fecha_efecto, '+1 year'))) BETWEEN DATE('now','localtime')
                       AND DATE('now','localtime','+30 days')
                 """,
@@ -47419,8 +47431,8 @@ class Handler(BaseHTTPRequestHandler):
             faltantes = conn.execute(
                 f"""
                 SELECT COUNT(*) AS total
-                FROM seguros
-                WHERE empresa_id = ?
+                FROM seguros s
+                WHERE s.empresa_id = ?
                   AND ({uploaded_clause} OR ? = 0)
                   AND (
                     tomador IS NULL OR TRIM(tomador) = '' OR
@@ -47429,6 +47441,7 @@ class Handler(BaseHTTPRequestHandler):
                     fecha_efecto IS NULL OR TRIM(fecha_efecto) = ''
                   )
                   AND {in_vigor_expr}
+                  AND {exclude_sin_seguro}
                 """,
                 (empresa_id, uploaded_param),
             ).fetchone()
@@ -47444,11 +47457,12 @@ class Handler(BaseHTTPRequestHandler):
             ).fetchall()
             primas = conn.execute(
                 f"""
-                SELECT SUM(prima_total) AS total
-                FROM seguros
-                WHERE empresa_id = ?
+                SELECT SUM(COALESCE({prima_total_sql}, 0)) AS total
+                FROM seguros s
+                WHERE s.empresa_id = ?
                   AND ({uploaded_clause} OR ? = 0)
                   AND {in_vigor_expr}
+                  AND {exclude_sin_seguro}
                 """,
                 (empresa_id, uploaded_param),
             ).fetchone()
