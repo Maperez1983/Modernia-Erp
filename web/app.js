@@ -13369,7 +13369,9 @@ const updateExplorerHeader = (empresaName) => {
     setTab("gestoria-crm");
   }
   if (crmTab) {
-    const showCrm = userCanAccessService("inmobiliaria");
+    // El CRM (tab "crm") es el CRM inmobiliario. Para la empresa de Financiaciones
+    // mostramos un tab específico (fin-crm) para evitar confusión.
+    const showCrm = userCanAccessService("inmobiliaria") && empresaName !== FIN_COMPANY;
     crmTab.classList.toggle("hidden", !showCrm);
     if (!showCrm && currentTab === "crm") {
       setTab("operativa");
@@ -13443,8 +13445,12 @@ const updateExplorerHeader = (empresaName) => {
     segurosCrmTab.classList.add("hidden");
   }
   if (finCrmTab) {
-    // CRM Financiaciones se accede desde la home, no como pestaña interna
-    finCrmTab.classList.add("hidden");
+    // CRM Financiaciones: visible al abrir la empresa de Financiaciones.
+    const showFinCrm = empresaName === FIN_COMPANY && userCanAccessService("financiaciones");
+    finCrmTab.classList.toggle("hidden", !showFinCrm);
+    if (!showFinCrm && currentTab === "fin-crm") {
+      setTab("operativa");
+    }
   }
   if (finSimTab) {
     const showSim = empresaName === FIN_COMPANY;
