@@ -1301,7 +1301,7 @@ const RoutingModule = window.CRMAppRouting || null;
 (function setupClientDiagnostics() {
   const banner = document.getElementById("uiErrorToast") || document.getElementById("renewalAlert");
   if (!banner) return;
-  const show = (title, detail) => {
+	const show = (title, detail) => {
     try {
       banner.classList.remove("hidden");
       banner.innerHTML = "";
@@ -1321,24 +1321,38 @@ const RoutingModule = window.CRMAppRouting || null;
       + (err?.stack || event?.message || "Error desconocido");
     show("Error en la interfaz", detail);
   });
-  window.addEventListener("unhandledrejection", (event) => {
-    const reason = event?.reason;
-    const isAuthError =
-      (reason && Number(reason.status || 0) === 401)
-      || (reason && reason.isAuthError === true)
-      || /no autenticad/i.test(String(reason?.message || reason || ""));
-    // Si expira sesión y alguna promesa no la captura, evitamos ensuciar la UI:
-    // `api()` ya llama a `handleAuthExpired()` en 401.
-    if (isAuthError) {
-      try {
-        event.preventDefault();
-      } catch {}
-      return;
-    }
-    const detail = (reason?.message ? `${reason.message}\n` : "")
-      + (reason?.stack || String(reason || "Promise rechazada"));
-    show("Error interno (promesa)", detail);
-    try {
+	  window.addEventListener("unhandledrejection", (event) => {
+	    const reason = event?.reason;
+	    const isAuthError =
+	      (reason && Number(reason.status || 0) === 401)
+	      || (reason && reason.isAuthError === true)
+	      || /no autenticad/i.test(String(reason?.message || reason || ""));
+	    const isPermissionError =
+	      (reason && Number(reason.status || 0) === 403)
+	      || /sin permisos para este servicio/i.test(String(reason?.message || reason || ""));
+	    // Si expira sesión y alguna promesa no la captura, evitamos ensuciar la UI:
+	    // `api()` ya llama a `handleAuthExpired()` en 401.
+	    if (isAuthError) {
+	      try {
+	        event.preventDefault();
+	      } catch {}
+	      return;
+	    }
+	    // Si el backend bloquea una llamada por permisos, no debe romper la experiencia con un banner global.
+	    // Esto suele ocurrir en widgets opcionales (cross-servicio) y debe fallar de forma silenciosa.
+	    if (isPermissionError) {
+	      try {
+	        console.warn("Promise rejection ignored (permissions):", reason);
+	      } catch {}
+	      try {
+	        event.preventDefault();
+	      } catch {}
+	      return;
+	    }
+	    const detail = (reason?.message ? `${reason.message}\n` : "")
+	      + (reason?.stack || String(reason || "Promise rechazada"));
+	    show("Error interno (promesa)", detail);
+	    try {
       // Safari/Chrome: evita el mensaje "Unhandled Promise Rejection" en consola cuando ya lo mostramos en UI.
       event.preventDefault();
     } catch {}
@@ -4648,11 +4662,11 @@ const loadWorkspaceCompanyScopedPanels = async () => {
     ? `&empresa_id=${encodeURIComponent(state.currentWorkspaceCompanyId)}`
     : "";
   const [gestoriaOverview, segurosOverview, finOverview, inmoOverview, serviceDesks] = await Promise.all([
-    api(`/api/workspace_gestoria_overview?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}${companyQuery}`),
-    api(`/api/workspace_seguros_overview?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}${companyQuery}`),
-    api(`/api/workspace_fin_overview?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}${companyQuery}`),
-    api(`/api/workspace_inmo_overview?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}${companyQuery}`),
-    api(`/api/workspace_service_desks?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}${companyQuery}`),
+    safeWorkspaceApi(`/api/workspace_gestoria_overview?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}${companyQuery}`, {}),
+    safeWorkspaceApi(`/api/workspace_seguros_overview?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}${companyQuery}`, {}),
+    safeWorkspaceApi(`/api/workspace_fin_overview?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}${companyQuery}`, {}),
+    safeWorkspaceApi(`/api/workspace_inmo_overview?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}${companyQuery}`, {}),
+    safeWorkspaceApi(`/api/workspace_service_desks?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}${companyQuery}`, {}),
   ]);
   renderWorkspaceGestoriaOverview(gestoriaOverview || {});
   renderWorkspaceSegurosOverview(segurosOverview || {});
