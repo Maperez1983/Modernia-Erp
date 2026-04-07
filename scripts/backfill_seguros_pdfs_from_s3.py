@@ -16,6 +16,30 @@ if str(ROOT) not in sys.path:
 SAFE_SPLIT_RE = re.compile(r"[_\-\s]+")
 TOKEN_RE = re.compile(r"[A-Za-z0-9]{6,}")
 SPLIT_NUM_RE = re.compile(r"(?<![0-9])(\d{6,})[ _\\-](\d{1,3})(?![0-9])")
+WORD_RE = re.compile(r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]{3,}")
+STOPWORD_TOKENS = {
+    "POLIZA",
+    "POLIZAS",
+    "SEGURO",
+    "SEGUROS",
+    "DOCUMENTO",
+    "DOC",
+    "PDF",
+    "SCAN",
+    "ESCANEO",
+    "ESCANEO",
+    "FIRMADO",
+    "FIRMADA",
+    "MODERNIA",
+    "MALAGA",
+    "MÁLAGA",
+    "FINANCIACIONES",
+    "FINANCIACION",
+    "HIPOTECA",
+    "HIPOTECAS",
+    "GESTORIA",
+    "RENTA",
+}
 PLACEHOLDER_VALUES = {"poliza_key", "poliza_url", "doc_key", "doc_url"}
 
 
@@ -39,6 +63,66 @@ def is_placeholder_value(value: str) -> bool:
     if not raw:
         return False
     return raw.lower() in PLACEHOLDER_VALUES
+
+
+def normalize_company_token(value: str) -> str:
+    text = str(value or "").upper()
+    text = re.sub(r"\s+", " ", text).strip()
+    # mantén letras/números (algunas compañías llevan números)
+    text = re.sub(r"[^A-Z0-9 ]", "", text).strip()
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def normalize_ramo_token(value: str) -> str:
+    text = str(value or "").upper()
+    text = re.sub(r"\s+", " ", text).strip()
+    text = re.sub(r"[^A-Z ]", "", text).strip()
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def is_date_token(token: str) -> bool:
+    t = str(token or "").strip()
+    if not re.fullmatch(r"\d{8}", t):
+        return False
+    year = int(t[:4])
+    month = int(t[4:6])
+    day = int(t[6:8])
+    return 2000 <= year <= 2100 and 1 <= month <= 12 and 1 <= day <= 31
+
+
+def infer_ramo_from_filename(name: str) -> str:
+    key = normalize_ramo_token(name)
+    if not key:
+        return ""
+    if "IMPAGO" in key or "PROTECCION" in key or "PROTECCIÓN" in key:
+        return "PROTECCIÓN DE PAGOS"
+    if "DEFENSA" in key or "JURID" in key or "ARAG" in key:
+        return "DEFENSA JURÍDICA"
+    if "SALUD" in key or "SANIT" in key or "DKV" in key:
+        return "SALUD"
+    if "DECES" in key:
+        return "DECESOS"
+    if "ACCIDENT" in key:
+        return "ACCIDENTES"
+    if "VIDA" in key:
+        return "VIDA"
+    if "AHORRO" in key:
+        return "AHORRO"
+    if "VIAJE" in key or "VIAJ" in key:
+        return "VIAJE"
+    if "COMUNIDAD" in key:
+        return "COMUNIDAD"
+    if "COMERCIO" in key or "PYME" in key or "LOCAL" in key:
+        return "COMERCIO"
+    if "HOGAR" in key:
+        return "HOGAR"
+    if "AUTO" in key or "AUTOMOV" in key or "VEHIC" in key or "MOTO" in key or "MOTOR" in key:
+        return "AUTO"
+    if "RC" in key or "RESPONSABILIDAD" in key:
+        return "RESPONSABILIDAD CIVIL"
+    return ""
 
 
 def looks_like_stamp_parts(parts: list[str]) -> bool:
@@ -74,7 +158,7 @@ def extract_tokens_from_filename(name: str) -> list[str]:
         if not norm:
             continue
         # Excluye tokens muy genéricos
-        if norm in {"POLIZA", "POLIZAS", "SEGURO", "SEGUROS", "DOCUMENTO", "DOC"}:
+        if norm in STOPWORD_TOKENS:
             continue
         tokens.append(norm)
     # orden estable y únicos
@@ -83,6 +167,39 @@ def extract_tokens_from_filename(name: str) -> list[str]:
         if t not in out:
             out.append(t)
     return out
+
+
+def extract_words_from_filename(name: str) -> list[str]:
+    text = str(name or "")
+    out: list[str] = []
+    for raw in WORD_RE.findall(text):
+        token = normalize_company_token(raw).replace(" ", "").strip()
+        if not token:
+            continue
+        if token in STOPWORD_TOKENS:
+            continue
+        if token not in out:
+            out.append(token)
+    return out
+
+
+def pick_poliza_candidate(tokens: list[str]) -> str:
+    best = ""
+    for tok in tokens:
+        t = normalize_poliza_token(tok)
+        if not t:
+            continue
+        if is_date_token(t):
+            continue
+        # Evita confundir timestamps cortos.
+        if re.fullmatch(r"\d{6}", t):
+            continue
+        has_digit = any(ch.isdigit() for ch in t)
+        if not has_digit:
+            continue
+        if len(t) > len(best):
+            best = t
+    return best
 
 
 def s3_client_and_conf():
@@ -201,15 +318,48 @@ def main():
             continue
         by_poliza[pol].append(s["id"])
 
+    # Índices para fuzzy-match cuando la póliza en DB no tiene `poliza_numero`.
+    missing_rows = []
+    by_comp_ramo = defaultdict(list)
+    known_companies = set()
+    for s in missing:
+        comp = normalize_company_token(s.get("compania") or "")
+        ramo = normalize_ramo_token(s.get("ramo") or "")
+        tom = normalize_company_token(s.get("tomador") or "").replace(" ", "")
+        row = {
+            "id": s["id"],
+            "compania": comp,
+            "ramo": ramo,
+            "tomador": tom,
+            "raw_compania": s.get("compania") or "",
+            "raw_ramo": s.get("ramo") or "",
+            "raw_tomador": s.get("tomador") or "",
+        }
+        missing_rows.append(row)
+        by_comp_ramo[(comp, ramo)].append(row)
+        if comp:
+            known_companies.add(comp)
+
     matched = []
     ambiguous = 0
     no_match = 0
     token_hits = Counter()
     used_seguros = set()
+    used_polizas = set()
+    matched_direct = 0
+    matched_fuzzy = 0
+    fuzzy_no_candidate = 0
+    fuzzy_ambiguous = 0
 
     for key in keys:
         name = original_filename_from_key(key)
+        # Ignora documentos claramente fuera de Seguros aunque estén en el prefijo.
+        upper_name = normalize_company_token(name)
+        if any(word in upper_name for word in ("FINANCIACIONES", "HIPOTECA", "HIPOTECAS", "NOMINA", "NÓMINA", "RENTA", "IRPF")):
+            no_match += 1
+            continue
         tokens = extract_tokens_from_filename(name)
+        poliza_candidate = pick_poliza_candidate(tokens)
         chosen = ""
         chosen_token = ""
         for tok in tokens:
@@ -227,10 +377,70 @@ def main():
                 chosen = ""
                 chosen_token = ""
                 break
+        if chosen:
+            matched_direct += 1
+        if not chosen:
+            # Fuzzy-match: si el PDF tiene nº de póliza pero en DB falta, intentamos enlazar
+            # usando compañía/ramo/tomador por similitud.
+            if not poliza_candidate:
+                fuzzy_no_candidate += 1
+                no_match += 1
+                continue
+            if poliza_candidate in used_polizas:
+                # ya usado por otro match; evita duplicados.
+                no_match += 1
+                continue
+            words = extract_words_from_filename(name)
+            comp_hint = ""
+            for comp in sorted(known_companies, key=len, reverse=True):
+                if comp and comp.replace(" ", "") in upper_name.replace(" ", ""):
+                    comp_hint = comp
+                    break
+            ramo_hint = infer_ramo_from_filename(name)
+            candidates = []
+            if comp_hint or ramo_hint:
+                candidates = by_comp_ramo.get((comp_hint, ramo_hint), []) or by_comp_ramo.get((comp_hint, ""), []) or []
+            if not candidates:
+                candidates = missing_rows
+            scored = []
+            for row in candidates:
+                if row["id"] in used_seguros:
+                    continue
+                score = 0
+                if comp_hint and row["compania"] and row["compania"] == comp_hint:
+                    score += 4
+                if ramo_hint and row["ramo"] and ramo_hint and row["ramo"] == ramo_hint:
+                    score += 3
+                # overlap tomador tokens
+                tom = row["tomador"] or ""
+                if tom and words:
+                    overlap = 0
+                    for w in words[:20]:
+                        if len(w) < 4:
+                            continue
+                        if w in tom:
+                            overlap += 1
+                    score += min(8, overlap)
+                scored.append((score, row["id"]))
+            scored.sort(reverse=True, key=lambda x: x[0])
+            if not scored or scored[0][0] < 6:
+                no_match += 1
+                continue
+            # Si el segundo está muy cerca, lo consideramos ambiguo.
+            if len(scored) > 1 and (scored[0][0] - scored[1][0]) < 2:
+                fuzzy_ambiguous += 1
+                no_match += 1
+                continue
+            chosen = scored[0][1]
+            chosen_token = poliza_candidate
+            matched_fuzzy += 1
+
         if not chosen:
             no_match += 1
             continue
         used_seguros.add(chosen)
+        if chosen_token:
+            used_polizas.add(chosen_token)
         public_url = f"https://{bucket}.s3.{region}.amazonaws.com/{key}"
         matched.append((chosen, key, public_url, chosen_token, name))
 
@@ -245,6 +455,10 @@ def main():
     print(f"seguros_missing_pdf={len(missing)}")
     print(f"candidates_by_poliza={len(by_poliza)}")
     print(f"matched_updates={len(matched)}")
+    print(f"matched_direct={matched_direct}")
+    print(f"matched_fuzzy={matched_fuzzy}")
+    print(f"fuzzy_no_poliza_candidate={fuzzy_no_candidate}")
+    print(f"fuzzy_ambiguous={fuzzy_ambiguous}")
     print(f"no_match={no_match}")
     print(f"ambiguous={ambiguous}")
     common = token_hits.most_common(8)
@@ -266,7 +480,7 @@ def main():
         return
 
     updated = 0
-    for seguro_id, key, url, _tok, _name in matched:
+    for seguro_id, key, url, tok, _name in matched:
         conn.execute(
             """
             UPDATE seguros
@@ -278,6 +492,10 @@ def main():
                   WHEN COALESCE(TRIM(poliza_url), '') = '' OR LOWER(TRIM(poliza_url)) IN ('poliza_url', 'doc_url') THEN %s
                   ELSE poliza_url
                 END,
+                poliza_numero = CASE
+                  WHEN COALESCE(TRIM(poliza_numero), '') = '' THEN %s
+                  ELSE poliza_numero
+                END,
                 updated_at = %s
             WHERE id = %s
               AND (
@@ -285,7 +503,7 @@ def main():
                 OR COALESCE(TRIM(poliza_url), '') = '' OR LOWER(TRIM(poliza_url)) IN ('poliza_url', 'doc_url')
               )
             """,
-            (key, url, now, seguro_id),
+            (key, url, tok or None, now, seguro_id),
         )
         updated += 1
     conn.commit()
