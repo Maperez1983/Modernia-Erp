@@ -425,17 +425,23 @@ def main():
 
     applied = 0
     for seguro_id, key, url, poliza, _src in matched:
+        poliza_val = (poliza or "").strip()
         conn.execute(
             """
             UPDATE seguros
             SET poliza_key = CASE WHEN COALESCE(TRIM(poliza_key), '') = '' THEN %s ELSE poliza_key END,
                 poliza_url = CASE WHEN COALESCE(TRIM(poliza_url), '') = '' THEN %s ELSE poliza_url END,
-                poliza_numero = CASE WHEN COALESCE(TRIM(poliza_numero), '') = '' AND %s IS NOT NULL THEN %s ELSE poliza_numero END,
+                poliza_numero = CASE
+                  WHEN COALESCE(TRIM(poliza_numero), '') = ''
+                   AND COALESCE(%s::text, '') <> ''
+                  THEN %s::text
+                  ELSE poliza_numero
+                END,
                 updated_at = %s
             WHERE id = %s
               AND (COALESCE(TRIM(poliza_key), '') = '' OR COALESCE(TRIM(poliza_url), '') = '')
             """,
-            (key, url, poliza or None, poliza or None, now, seguro_id),
+            (key, url, poliza_val, poliza_val, now, seguro_id),
         )
         applied += 1
     conn.commit()
