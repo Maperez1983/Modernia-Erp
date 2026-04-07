@@ -16551,6 +16551,10 @@ def collect_gestoria_renta_card_items(conn, empresa_id, q="", estado="", limit=5
         "LOWER(ce.servicio) IN ('gestoria', 'gestoría', "
         "'administracion fincas', 'administración fincas')"
     )
+    service_filter_exists = (
+        "LOWER(ce2.servicio) IN ('gestoria', 'gestoría', "
+        "'administracion fincas', 'administración fincas')"
+    )
     rows = conn.execute(
         f"""
         SELECT
@@ -16565,16 +16569,35 @@ def collect_gestoria_renta_card_items(conn, empresa_id, q="", estado="", limit=5
           c.provincia,
           cg.tipo_cliente,
           cg.renta_detalles,
-          ce.estado AS servicio_estado
+          (
+            SELECT ce2.estado
+            FROM clientes_empresas ce2
+            WHERE ce2.empresa_id = ?
+              AND ce2.cliente_id = c.id
+              AND {service_filter_exists}
+            ORDER BY
+              CASE
+                WHEN LOWER(COALESCE(ce2.estado, '')) = 'activo' THEN 3
+                WHEN LOWER(COALESCE(ce2.estado, '')) = 'alta' THEN 2
+                WHEN LOWER(COALESCE(ce2.estado, '')) = 'pendiente' THEN 1
+                ELSE 0
+              END DESC,
+              ce2.updated_at DESC
+            LIMIT 1
+          ) AS servicio_estado
         FROM cliente_gestoria cg
         JOIN clientes c ON c.id = cg.cliente_id
-        JOIN clientes_empresas ce ON ce.cliente_id = c.id
-        WHERE ce.empresa_id = ?
-          AND {service_filter}
-          AND COALESCE(cg.mod_renta, 0) = 1
+        WHERE COALESCE(cg.mod_renta, 0) = 1
+          AND EXISTS (
+            SELECT 1
+            FROM clientes_empresas ce
+            WHERE ce.empresa_id = ?
+              AND ce.cliente_id = c.id
+              AND {service_filter}
+          )
         ORDER BY c.updated_at DESC, c.nombre COLLATE NOCASE ASC
         """,
-        (empresa_id,),
+        (empresa_id, empresa_id),
     ).fetchall()
     items = []
     for row in rows:
