@@ -154,6 +154,10 @@ def try_extract_poliza_numero(text: str) -> str:
         norm = normalize_poliza_token(cand)
         if not norm or len(norm) < 6:
             continue
+        if sum(1 for ch in norm if ch.isdigit()) < 2:
+            continue
+        if len(norm) > 24:
+            continue
         # evita fechas tipo 20260330...
         if re.fullmatch(r"\d{8}", norm):
             continue
@@ -187,8 +191,36 @@ def extract_pdf_text_fast(pdf_path: str) -> tuple[str, str, str]:
     text, err = pdftotext_extract(pdf_path, pages=2)
     if text and len(text.strip()) >= 30:
         return text, "", "pdftotext(2p)"
+    text6, err6 = pdftotext_extract(pdf_path, pages=6)
+    if text6 and len(text6.strip()) >= 30:
+        return text6, "", "pdftotext(6p)"
     full_text, full_err, src = extract_pdf_text(pdf_path)
-    return full_text, full_err or err, src
+    return full_text, full_err or err6 or err, src
+
+
+def find_poliza_token_in_filename(filename: str, poliza_tokens: set[str]) -> str:
+    """
+    Busca tokens de póliza ya existentes en DB dentro del nombre del PDF.
+    Evita falsos positivos para tokens cortos numéricos.
+    """
+    name_norm = normalize_poliza_token(filename or "")
+    if not name_norm:
+        return ""
+    hits: list[str] = []
+    for token in poliza_tokens:
+        if not token:
+            continue
+        if token.isdigit() and len(token) < 10:
+            continue
+        if (not token.isdigit()) and len(token) < 6:
+            continue
+        if token in name_norm:
+            hits.append(token)
+    if not hits:
+        return ""
+    # preferir el más largo (más específico)
+    hits.sort(key=len, reverse=True)
+    return hits[0]
 
 
 def open_pg():
@@ -285,7 +317,12 @@ def main():
         if not (s.get("poliza_key") or s.get("poliza_url")):
             missing_key_rows.append(s)
 
-    known_companies = {normalize_company_token(s.get("compania") or "") for s in missing_key_rows if (s.get("compania") or "").strip()}
+    known_companies = {
+        normalize_company_token(s.get("compania") or "")
+        for s in missing_key_rows
+        if (s.get("compania") or "").strip()
+    }
+    poliza_tokens = set(by_poliza.keys())
 
     matched = []
     no_text = 0
@@ -311,6 +348,26 @@ def main():
         if key in existing_keys:
             already_linked += 1
             continue
+
+        chosen_id = ""
+        chosen_poliza = ""
+
+        # 0) Match rápido por nombre de fichero (si ya tenemos nº póliza en DB)
+        fname = os.path.basename(key)
+        poliza_from_name = find_poliza_token_in_filename(fname, poliza_tokens)
+        if poliza_from_name:
+            ids = by_poliza.get(poliza_from_name) or []
+            if len(ids) == 1 and ids[0] not in used_seguros and poliza_from_name not in used_polizas:
+                chosen_id = ids[0]
+                chosen_poliza = poliza_from_name
+                used_seguros.add(chosen_id)
+                used_polizas.add(chosen_poliza)
+                public_url = f"https://{bucket}.s3.{region}.amazonaws.com/{key}"
+                matched.append((chosen_id, key, public_url, chosen_poliza, "filename"))
+                if args.max_updates and args.max_updates > 0 and len(matched) >= args.max_updates:
+                    break
+                continue
+            # si es ambiguo, dejamos que el contenido decida
         pdf_bytes = download_s3_pdf(key)
         if not pdf_bytes:
             no_text += 1
