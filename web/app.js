@@ -22130,7 +22130,7 @@ const HIPOTECA_BANK_BRANDS = [
   {
     name: "Bankinter",
     short: "Bankinter",
-    logo: "",
+    logo: "/assets/logos/bankinter.svg",
     color: "#f58220",
     aliases: ["bankinter", "bankinter consumer finance", "bankinter consumer"],
   },
@@ -22179,7 +22179,7 @@ const HIPOTECA_BANK_BRANDS = [
   {
     name: "ING",
     short: "ING",
-    logo: "",
+    logo: "/assets/logos/ing.svg",
     color: "#ff6200",
     aliases: ["ing", "ing direct", "ing bank"],
   },
@@ -39127,53 +39127,86 @@ if (coreCards) {
     }
     const action = target.dataset.action;
     const authUser = getAuthScopeUser();
+    const fallbackLink = target.tagName === "A" ? target : target.querySelector("a[href]");
+    const fallbackHref = (() => {
+      const raw = fallbackLink?.getAttribute ? fallbackLink.getAttribute("href") : "";
+      return String(raw || "").trim();
+    })();
+    const fallbackUrl = (() => {
+      try {
+        if (!fallbackHref) return null;
+        return new URL(fallbackHref, window.location.origin);
+      } catch {
+        return null;
+      }
+    })();
+    const fallbackNavigate = () => {
+      try {
+        if (fallbackLink && fallbackLink.href) {
+          window.location.href = fallbackLink.href;
+        } else if (fallbackUrl) {
+          window.location.href = fallbackUrl.toString();
+        }
+      } catch {}
+    };
+    const workspaceFromFallback = (() => {
+      try {
+        const raw = fallbackUrl?.searchParams?.get("workspace") || "";
+        return normalizeTenantWorkspaceSlug(String(raw || "").trim(), "");
+      } catch {
+        return "";
+      }
+    })();
     // Si aún no hay sesión en memoria (boot lento / SW viejo), dejamos que el enlace navegue normal.
     if (!authUser?.id) {
-      const fallbackLink = target.tagName === "A" ? target : target.querySelector("a[href]");
-      if (fallbackLink && fallbackLink.href) {
-        window.location.href = fallbackLink.href;
-      }
+      fallbackNavigate();
       return;
     }
     if (target.tagName === "A") {
       event.preventDefault();
     }
-    if (action === "holding") {
-      openHolding();
-    } else if (action === "holding-admin") {
-      openHolding({ mode: "platform", view: "overview" });
-    } else if (action === "holding-tenant") {
-      openHolding({ mode: "tenant", workspace: resolveDefaultTenantWorkspaceSlug(), view: "overview" });
-    } else if (action === "time-punch") {
-      openHomeTimePunchModal({ persist: true });
-    } else if (action === "time-home") {
-      openHolding({ mode: "tenant", workspace: resolveDefaultTenantWorkspaceSlug(), view: "motores", engine: "registro_horario" });
-      window.setTimeout(() => {
-        focusWorkspaceEngine("registro_horario", workspaceTimeSummary, { forceTenantView: true });
-      }, 250);
-    } else if (action === "crm-inmo") {
-      openCrmInmobiliario();
-    } else if (action === "crm-gestoria") {
-      openGestoriaCrm();
-    } else if (action === "crm-seguros") {
-      openSegurosCrm();
-    } else if (action === "crm-fin") {
-      openFinCrm();
-    } else if (action === "clientes") {
-      openClientesModule();
-    } else if (action === "agenda") {
-      openAgenda();
-	    } else if (action === "admin") {
-	      openAdmin();
-	    } else if (action === "rrhh-home") {
-	      const workspace = normalizeTenantWorkspaceSlug(
-	        state.currentWorkspaceTarget || state.currentWorkspaceName || DEFAULT_TENANT_WORKSPACE_SLUG
-	      );
-	      // La card Personal siempre abre RRHH en modo self (también para admins).
-	      openHolding({ mode: "tenant", workspace, view: "rrhh", rrhh: "self" });
-	    }
-	  });
-	}
+    try {
+      if (action === "holding") {
+        openHolding();
+      } else if (action === "holding-admin") {
+        openHolding({ mode: "platform", view: "overview" });
+      } else if (action === "holding-tenant") {
+        openHolding({ mode: "tenant", workspace: workspaceFromFallback || resolveDefaultTenantWorkspaceSlug(), view: "overview" });
+      } else if (action === "time-punch") {
+        openHomeTimePunchModal({ persist: true });
+      } else if (action === "time-home") {
+        openHolding({ mode: "tenant", workspace: workspaceFromFallback || resolveDefaultTenantWorkspaceSlug(), view: "motores", engine: "registro_horario" });
+        window.setTimeout(() => {
+          focusWorkspaceEngine("registro_horario", workspaceTimeSummary, { forceTenantView: true });
+        }, 250);
+      } else if (action === "crm-inmo") {
+        openCrmInmobiliario();
+      } else if (action === "crm-gestoria") {
+        openGestoriaCrm();
+      } else if (action === "crm-seguros") {
+        openSegurosCrm();
+      } else if (action === "crm-fin") {
+        openFinCrm();
+      } else if (action === "clientes") {
+        openClientesModule();
+      } else if (action === "agenda") {
+        openAgenda();
+	      } else if (action === "admin") {
+	        openAdmin();
+	      } else if (action === "rrhh-home") {
+	        const workspace = normalizeTenantWorkspaceSlug(
+	          workspaceFromFallback || state.currentWorkspaceTarget || state.currentWorkspaceName || DEFAULT_TENANT_WORKSPACE_SLUG
+	        );
+	        // La card Personal siempre abre RRHH en modo self (también para admins).
+	        openHolding({ mode: "tenant", workspace, view: "rrhh", rrhh: "self" });
+	      }
+    } catch (error) {
+      // Importante: si hay un error JS al abrir (estado incompleto / caché vieja),
+      // no bloqueamos el acceso: navegamos al href real.
+      fallbackNavigate();
+    }
+  });
+}
 
 viewTabs.addEventListener("click", (event) => {
   const btn = closestFromEvent(event, ".tab");
