@@ -22526,7 +22526,8 @@ def workspace_persona_id_for_user(conn, workspace_id, user_id):
         """
         SELECT id
         FROM workspace_registro_personal
-        WHERE workspace_id = ? AND usuario_id = ? AND COALESCE(usuario_manual, 0) = 1 AND COALESCE(activo, 1) = 1
+        WHERE workspace_id = ? AND usuario_id = ? AND COALESCE(activo, 1) = 1
+        ORDER BY COALESCE(usuario_manual, 0) DESC, COALESCE(updated_at, created_at) DESC
         LIMIT 1
         """,
         (workspace_id, user_id),
@@ -40713,7 +40714,8 @@ class Handler(BaseHTTPRequestHandler):
                         SELECT p.*, COALESCE(e.nombre, '') AS empresa_nombre
                         FROM workspace_registro_personal p
                         LEFT JOIN empresas e ON e.id = p.empresa_id
-                        WHERE p.workspace_id = ? AND p.usuario_id = ? AND COALESCE(p.usuario_manual, 0) = 1 AND COALESCE(p.activo, 1) = 1
+                        WHERE p.workspace_id = ? AND p.usuario_id = ? AND COALESCE(p.activo, 1) = 1
+                        ORDER BY COALESCE(p.usuario_manual, 0) DESC, COALESCE(p.updated_at, p.created_at) DESC
                         LIMIT 1
                         """,
                         (workspace_id, user_id),
@@ -40998,7 +41000,8 @@ class Handler(BaseHTTPRequestHandler):
                     SELECT p.*, COALESCE(e.nombre, '') AS empresa_nombre
                     FROM workspace_registro_personal p
                     LEFT JOIN empresas e ON e.id = p.empresa_id
-                    WHERE p.workspace_id = ? AND p.usuario_id = ? AND COALESCE(p.usuario_manual, 0) = 1 AND COALESCE(p.activo, 1) = 1
+                    WHERE p.workspace_id = ? AND p.usuario_id = ? AND COALESCE(p.activo, 1) = 1
+                    ORDER BY COALESCE(p.usuario_manual, 0) DESC, COALESCE(p.updated_at, p.created_at) DESC
                     LIMIT 1
                     """,
                     (workspace_id, user_id),

@@ -2343,6 +2343,9 @@ const finAgendaClienteId = document.getElementById("finAgendaClienteId");
 const finAgendaClientes = document.getElementById("finAgendaClientes");
 const finSelectedAsesoramientoLabel = document.getElementById("finSelectedAsesoramientoLabel");
 const finCreateRecommendedAction = document.getElementById("finCreateRecommendedAction");
+const finOpenAsesoramiento = document.getElementById("finOpenAsesoramiento");
+const finOpenAgenda = document.getElementById("finOpenAgenda");
+const finOpenSimFromAsesoramiento = document.getElementById("finOpenSimFromAsesoramiento");
 const finHipotecasEstudioRefresh = document.getElementById("finHipotecasEstudioRefresh");
 const finHipotecasEstudioTable = document.getElementById("finHipotecasEstudioTable");
 const finHipotecasEstudioInfo = document.getElementById("finHipotecasEstudioInfo");
@@ -2597,6 +2600,8 @@ const hipotecaFormStatus = document.getElementById("hipotecaFormStatus");
 const hipotecaTabs = document.getElementById("hipotecaTabs");
 const hipotecaDashboardPanel = document.getElementById("hipotecaDashboardPanel");
 const hipotecaAltaPanel = document.getElementById("hipotecaAltaPanel");
+const hipotecaAsesoramientoPanel = document.getElementById("hipotecaAsesoramientoPanel");
+const hipotecaAgendaPanel = document.getElementById("hipotecaAgendaPanel");
 const hipotecaBdtPanel = document.getElementById("hipotecaBdtPanel");
 const hipotecaContabilidadPanel = document.getElementById("hipotecaContabilidadPanel");
 const hipotecaWorkflowStageBoard = document.getElementById("hipotecaWorkflowStageBoard");
@@ -22183,9 +22188,17 @@ const HIPOTECA_BANK_BRANDS = [
 const resolveHipotecaBankBrand = (label) => {
   const raw = String(label || "").trim();
   const normalized = normalizeSimple(raw);
-  const brand = HIPOTECA_BANK_BRANDS.find((item) =>
+  let brand = HIPOTECA_BANK_BRANDS.find((item) =>
     item.aliases.some((alias) => normalizeSimple(alias) === normalized)
   );
+  if (!brand && normalized) {
+    brand = HIPOTECA_BANK_BRANDS.find((item) =>
+      item.aliases.some((alias) => {
+        const aliasNorm = normalizeSimple(alias);
+        return aliasNorm && (normalized.includes(aliasNorm) || aliasNorm.includes(normalized));
+      })
+    );
+  }
   if (brand) {
     return {
       ...brand,
@@ -22240,10 +22253,11 @@ const renderHipotecaEntityKpis = (rows = [], selectedYear = "") => {
       logo.alt = brand.displayName;
       logo.loading = "lazy";
       logo.addEventListener("error", () => {
-        logo.replaceWith(Object.assign(document.createElement("span"), {
-          className: "hipoteca-bank-badge",
-          textContent: brand.short,
-        }));
+        const badge = document.createElement("span");
+        badge.className = "hipoteca-bank-badge";
+        badge.style.background = brand.color;
+        badge.textContent = brand.short;
+        logo.replaceWith(badge);
       }, { once: true });
       wrapper.appendChild(logo);
     } else {
@@ -22641,7 +22655,12 @@ const setHipotecaAltaView = (view) => {
     return;
   }
   const next =
-    view === "alta" || view === "bdt" || view === "dashboard" || view === "contabilidad"
+    view === "alta" ||
+    view === "asesoramiento" ||
+    view === "agenda" ||
+    view === "bdt" ||
+    view === "dashboard" ||
+    view === "contabilidad"
       ? view
       : "dashboard";
   state.hipotecaAltaView = next;
@@ -22650,6 +22669,12 @@ const setHipotecaAltaView = (view) => {
   }
   if (hipotecaAltaPanel) {
     hipotecaAltaPanel.classList.toggle("hidden", next !== "alta");
+  }
+  if (hipotecaAsesoramientoPanel) {
+    hipotecaAsesoramientoPanel.classList.toggle("hidden", next !== "asesoramiento");
+  }
+  if (hipotecaAgendaPanel) {
+    hipotecaAgendaPanel.classList.toggle("hidden", next !== "agenda");
   }
   if (hipotecaBdtPanel) {
     hipotecaBdtPanel.classList.toggle("hidden", next !== "bdt");
@@ -22665,6 +22690,13 @@ const setHipotecaAltaView = (view) => {
   }
   if (next === "bdt") {
     loadHipotecaBdt(true);
+    loadFinHipotecasRegistradas();
+  }
+  if (next === "agenda") {
+    const empresa = state.empresas.find((item) => item.nombre === FIN_COMPANY);
+    if (empresa?.id) {
+      loadFinWorkflowActions(empresa.id);
+    }
   }
   if (next === "contabilidad") {
     loadHipotecaContabilidadHipotecas().catch(() => {});
@@ -33042,35 +33074,39 @@ const loadFinCrm = () => {
   }
   loadFinInmobiliarias();
   populateAgendaClientes(finAgendaClientes, finAgendaClienteInput, finAgendaClienteId);
-  populateAgendaClientes(finCrmClientes, finCrmClienteInput, finCrmClienteId);
-  const q = finCrmSearch ? finCrmSearch.value.trim() : "";
-  if (finCrmTable && finCrmInfo) {
-    const params = new URLSearchParams({
-      tabla: "hipotecas",
-      empresa_id: empresa.id,
-      q,
-    });
-    api(`/api/tabla?${params.toString()}`).then((data) => {
-      const columns = data.columns || [];
-      let rows = data.rows || [];
-      const filtroCliente = finCrmClienteInput ? finCrmClienteInput.value.trim().toLowerCase() : "";
-      if (filtroCliente) {
-        const clienteIndex = columns.indexOf("cliente");
-        if (clienteIndex >= 0) {
-          rows = rows.filter((row) =>
-            String(row[clienteIndex] || "").toLowerCase().includes(filtroCliente)
-          );
-        }
-      }
-      renderTableInto({ columns, rows }, finCrmTable, finCrmInfo, "Hipotecas");
-    });
-  }
   loadFinAsesoramientos(empresa.id);
-  loadFinHipotecasEstudio(empresa.id);
-  loadFinWorkflowActions(empresa.id);
   bindMoneyInputs(finAsesoramientoForm);
   bindIngresosConjuntos(finAsesoramientoForm);
   bindLoanToggles(finAsesoramientoForm);
+};
+
+const loadFinHipotecasRegistradas = () => {
+  if (!finCrmTable || !finCrmInfo) return;
+  const empresa = state.empresas.find((e) => e.nombre === FIN_COMPANY);
+  if (!empresa?.id) {
+    finCrmTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
+    finCrmInfo.textContent = "";
+    return;
+  }
+  populateAgendaClientes(finCrmClientes, finCrmClienteInput, finCrmClienteId);
+  const q = finCrmSearch ? finCrmSearch.value.trim() : "";
+  const params = new URLSearchParams({
+    tabla: "hipotecas",
+    empresa_id: empresa.id,
+    q,
+  });
+  api(`/api/tabla?${params.toString()}`).then((data) => {
+    const columns = data.columns || [];
+    let rows = data.rows || [];
+    const filtroCliente = finCrmClienteInput ? finCrmClienteInput.value.trim().toLowerCase() : "";
+    if (filtroCliente) {
+      const clienteIndex = columns.indexOf("cliente");
+      if (clienteIndex >= 0) {
+        rows = rows.filter((row) => String(row[clienteIndex] || "").toLowerCase().includes(filtroCliente));
+      }
+    }
+    renderTableInto({ columns, rows }, finCrmTable, finCrmInfo, "Hipotecas");
+  });
 };
 
 const loadFinInmobiliarias = () => {
@@ -33332,6 +33368,7 @@ const loadFinAsesoramientos = (empresaId) => {
           if (finAsesoramientoForm) finAsesoramientoForm.reset();
           if (finAsesoramientoId) finAsesoramientoId.value = "";
           if (finAsesoramientoConvert) finAsesoramientoConvert.disabled = true;
+          setHipotecaAltaView("asesoramiento");
           if (finAsesoramientoForm) {
             const dateInput = finAsesoramientoForm.querySelector('[name="fecha"]');
             if (dateInput && !dateInput.value) {
@@ -33409,6 +33446,7 @@ const loadFinAsesoramientos = (empresaId) => {
       editBtn.textContent = "Abrir";
       editBtn.addEventListener("click", () => {
         selectFinAsesoramiento(row);
+        setHipotecaAltaView("asesoramiento");
         if (finAsesoramientoForm) {
           finAsesoramientoForm.scrollIntoView({ behavior: "smooth", block: "start" });
         }
@@ -33420,7 +33458,9 @@ const loadFinAsesoramientos = (empresaId) => {
         selectFinAsesoramiento(row);
         try {
           await createRecommendedFinAction();
-          loadFinCrm();
+          setHipotecaAltaView("agenda");
+          const empresa = state.empresas.find((e) => e.nombre === FIN_COMPANY);
+          if (empresa?.id) loadFinWorkflowActions(empresa.id);
         } catch (error) {
           window.alert(error.message || "No se pudo crear la siguiente tarea.");
         }
@@ -34023,7 +34063,7 @@ const selectFinAsesoramiento = (row) => {
   updateFinSelectedSummary();
   syncFinAgendaContext();
   const empresa = state.empresas.find((item) => item.nombre === FIN_COMPANY);
-  if (empresa?.id) {
+  if (empresa?.id && (state.hipotecaAltaView || "dashboard") === "agenda") {
     loadFinWorkflowActions(empresa.id);
   }
   renderFinStageBoard(state.finAsesoramientosRows || []);
@@ -34048,6 +34088,11 @@ const saveFinActionResolution = async (row, result, estado = "Hecho") => {
 
 const loadFinWorkflowActions = (empresaId) => {
   if (!finAgendaTable || !finAgendaInfo || !empresaId) return;
+  if (!state.finSelectedAsesoramientoId) {
+    finAgendaTable.innerHTML = "<p class='muted'>Selecciona un expediente en Workflow para ver su agenda.</p>";
+    finAgendaInfo.textContent = "";
+    return;
+  }
   const params = new URLSearchParams({ servicio: "financiaciones", empresa_id: empresaId });
   if (state.finSelectedAsesoramientoId) {
     params.set("asesoramiento_id", state.finSelectedAsesoramientoId);
@@ -40610,14 +40655,14 @@ if (segurosContabilidadForm) {
 if (finCrmSearch) {
   finCrmSearch.addEventListener("input", () => {
     scheduleSave("fin-crm-search", () => {
-      loadFinCrm();
+      loadFinHipotecasRegistradas();
     }, 300);
   });
 }
 
 if (finCrmClienteInput) {
   finCrmClienteInput.addEventListener("change", () => {
-    loadFinCrm();
+    loadFinHipotecasRegistradas();
   });
 }
 
@@ -41292,7 +41337,7 @@ if (segurosUpdateButton) {
 if (finCrmSearch) {
   finCrmSearch.addEventListener("input", () => {
     scheduleSave("fin-crm-search", () => {
-      loadFinCrm();
+      loadFinHipotecasRegistradas();
     }, 300);
   });
 }
@@ -44781,10 +44826,33 @@ if (finCreateRecommendedAction) {
     }
     try {
       await createRecommendedFinAction();
-      loadFinCrm();
+      setHipotecaAltaView("agenda");
+      const empresa = state.empresas.find((e) => e.nombre === FIN_COMPANY);
+      if (empresa?.id) loadFinWorkflowActions(empresa.id);
     } catch (error) {
       window.alert(error.message || "No se pudo crear la tarea recomendada.");
     }
+  });
+}
+
+if (finOpenAsesoramiento) {
+  finOpenAsesoramiento.addEventListener("click", () => {
+    setHipotecaAltaView("asesoramiento");
+    if (finAsesoramientoForm) {
+      finAsesoramientoForm.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  });
+}
+
+if (finOpenAgenda) {
+  finOpenAgenda.addEventListener("click", () => {
+    setHipotecaAltaView("agenda");
+  });
+}
+
+if (finOpenSimFromAsesoramiento) {
+  finOpenSimFromAsesoramiento.addEventListener("click", () => {
+    setTab("fin-sim");
   });
 }
 
