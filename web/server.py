@@ -3475,6 +3475,10 @@ def delete_hipoteca_record(conn, record_id):
     row = conn.execute("SELECT id FROM hipotecas WHERE id = ?", (record_id,)).fetchone()
     if not row:
         return False
+    try:
+        trash_backup_row(conn, "hipotecas", record_id, reason="api/hipotecas_delete", now=datetime.now(timezone.utc).isoformat())
+    except Exception:
+        pass
     conn.execute("DELETE FROM hipotecas WHERE id = ?", (record_id,))
     return True
 
@@ -3513,6 +3517,10 @@ def delete_gestoria_contabilidad_record(conn, record_id, now=None):
                 now,
             ),
         )
+    try:
+        trash_backup_row(conn, "gestoria_contabilidad", record_id, reason="api/gestoria_contabilidad_delete", now=now)
+    except Exception:
+        pass
     conn.execute("DELETE FROM gestoria_contabilidad WHERE id = ?", (record_id,))
     return True
 
@@ -5475,6 +5483,16 @@ def ensure_gestoria_import_schema(conn):
         ON gestoria_import_eventos (lote_id, created_at)
         """
     )
+    # Compat: el importador usa campos de deduplicación/hash en `gestoria_facturas`.
+    # En datasets legacy/tests la tabla puede existir sin estas columnas.
+    try:
+        ensure_column(conn, "gestoria_facturas", "archivo_hash", "archivo_hash TEXT")
+    except Exception:
+        pass
+    try:
+        ensure_column(conn, "gestoria_facturas", "dedupe_key", "dedupe_key TEXT")
+    except Exception:
+        pass
 
 
 def log_gestoria_import_event(conn, lote_id, tipo, now, documento_id=None, factura_id=None, detalle=None, payload=None):
@@ -11996,9 +12014,8 @@ def sync_inmueble_stage_for_action(conn, inmueble_id, destino, now):
     destino_label = {
         "inmueble": "Inmueble",
         "noticia": "Noticia",
-        # Legacy: "Adquisición" pasa a ser "Inmueble".
-        "valoracion": "Inmueble",
-        "adquisicion": "Inmueble",
+        "valoracion": "Valoración",
+        "adquisicion": "Adquisición",
         "encargo": "Encargo",
         "propuesta": "Propuesta",
         "reservado": "Reservado",
@@ -12089,6 +12106,18 @@ INMO_STAGE_CHECKLISTS = {
         "Completar dirección y zona",
         "Identificar propietario(s)",
         "Definir siguiente paso comercial",
+    ],
+    "Valoración": [
+        "Recopilar información de mercado",
+        "Preparar valoración",
+        "Compartir valoración con propietario",
+        "Definir estrategia comercial",
+    ],
+    "Adquisición": [
+        "Concertar cita de adquisición",
+        "Recopilar documentación del propietario",
+        "Validar datos (Catastro/nota simple)",
+        "Transformar en noticia si es positivo",
     ],
     "Noticia": [
         "Registrar lead y origen",
@@ -17243,6 +17272,7 @@ def ensure_tables(db_path):
             pass
 
     _meta_tables(conn)
+    ensure_crm_trash_schema(conn)
     # Evita ejecutar `schema.sql` completo en cada cold start si ya está aplicado.
     try:
         schema_path = ROOT.parent / "schema.sql"
@@ -18345,6 +18375,92 @@ def ensure_tables(db_path):
     except Exception:
         pass
     conn.close()
+
+
+def ensure_crm_trash_schema(conn):
+    """
+    Tabla de "papelera" para recuperar borrados accidentales.
+    No implementa soft-delete; simplemente guarda un snapshot JSON antes de un DELETE.
+    """
+    try:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS crm_trash (
+              id TEXT PRIMARY KEY,
+              table_name TEXT NOT NULL,
+              row_id TEXT NOT NULL,
+              empresa_id TEXT,
+              workspace_id TEXT,
+              deleted_by TEXT,
+              reason TEXT,
+              row_json TEXT NOT NULL,
+              created_at TEXT NOT NULL
+            )
+            """
+        )
+    except Exception:
+        return
+    try:
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_crm_trash_table_row ON crm_trash (table_name, row_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_crm_trash_empresa ON crm_trash (empresa_id, created_at)")
+    except Exception:
+        pass
+
+
+def _row_to_dict(row):
+    if row is None:
+        return {}
+    try:
+        return dict(row)
+    except Exception:
+        try:
+            if hasattr(row, "keys"):
+                return {k: row[k] for k in row.keys()}
+        except Exception:
+            pass
+    return {}
+
+
+def trash_backup_row(conn, table_name, row_id, *, empresa_id=None, workspace_id=None, deleted_by=None, reason=None, now="now"):
+    """
+    Guarda en `crm_trash` el registro actual antes de borrarlo.
+    Best-effort: nunca debe romper el borrado si falla el backup.
+    """
+    try:
+        ensure_crm_trash_schema(conn)
+    except Exception:
+        return
+    try:
+        table = str(table_name or "").strip()
+        rid = str(row_id or "").strip()
+        if not table or not rid:
+            return
+        row = conn.execute(f"SELECT * FROM {table} WHERE id = ? LIMIT 1", (rid,)).fetchone()
+        if not row:
+            return
+        payload = _row_to_dict(row)
+        conn.execute(
+            """
+            INSERT INTO crm_trash (
+              id, table_name, row_id, empresa_id, workspace_id, deleted_by, reason, row_json, created_at
+            ) VALUES (
+              ?, ?, ?, ?, ?, ?, ?, ?, datetime(?)
+            )
+            """,
+            (
+                os.urandom(16).hex(),
+                table,
+                rid,
+                str(empresa_id or payload.get("empresa_id") or "").strip() or None,
+                str(workspace_id or "").strip() or None,
+                str(deleted_by or "").strip() or None,
+                str(reason or "").strip() or None,
+                json.dumps(payload, ensure_ascii=False, default=str),
+                now,
+            ),
+        )
+    except Exception:
+        return
 
 
 def ensure_usuarios_schema(conn):
@@ -26094,6 +26210,137 @@ def safe_resolve_under(base_dir, rel_path):
     return candidate
 
 
+class DbMismatchError(RuntimeError):
+    pass
+
+
+def _table_exists_sqlite(conn, table_name: str) -> bool:
+    try:
+        row = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=? LIMIT 1",
+            (str(table_name or ""),),
+        ).fetchone()
+        return bool(row)
+    except Exception:
+        return False
+
+
+def _count_table_sqlite(db_path: str, table_name: str) -> int:
+    if not db_path or not table_name:
+        return 0
+    p = Path(db_path)
+    if not p.exists() or p.is_dir():
+        return 0
+    try:
+        conn = sqlite3.connect(str(p))
+        try:
+            if not _table_exists_sqlite(conn, table_name):
+                return 0
+            row = conn.execute(f"SELECT COUNT(*) AS n FROM {table_name}").fetchone()
+            if not row:
+                return 0
+            try:
+                return int(row[0] or 0)
+            except Exception:
+                return int(row.get("n") or 0)
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+    except Exception:
+        return 0
+
+
+def _count_table_postgres(conn, table_name: str) -> int:
+    if not conn or not table_name:
+        return 0
+    try:
+        row = conn.execute(f"SELECT COUNT(*) AS n FROM {table_name}").fetchone()
+    except Exception:
+        return 0
+    if not row:
+        return 0
+    return int(row_value(row, "n", 0) or 0)
+
+
+def _data_guard_snapshot(conn, sqlite_db_path: str) -> dict:
+    # Tablas críticas para los módulos con más “valor” y mayor riesgo percibido.
+    critical_tables = (
+        # Core CRM
+        "empresas",
+        "clientes",
+        # Seguros
+        "seguros",
+        "seguros_comisiones",
+        # Gestoría / renta
+        "cliente_gestoria",
+        "gestoria_docs",
+        "gestoria_contabilidad",
+        # Inmobiliaria
+        "inmuebles",
+        "captaciones",
+        "inmueble_docs",
+        "operaciones_inmobiliarias",
+        "visitas",
+    )
+    pg_counts = {t: _count_table_postgres(conn, t) for t in critical_tables}
+    sqlite_counts = {t: _count_table_sqlite(sqlite_db_path, t) for t in critical_tables}
+    def _sum(d, keys):
+        return int(sum(int(d.get(k) or 0) for k in keys))
+    pg_total = _sum(pg_counts, critical_tables)
+    sqlite_total = _sum(sqlite_counts, critical_tables)
+    return {
+        "tables": list(critical_tables),
+        "postgres": {"total": pg_total, "counts": pg_counts},
+        "sqlite": {"total": sqlite_total, "counts": sqlite_counts, "path": str(sqlite_db_path or "")},
+    }
+
+
+def _run_data_continuity_guard(sqlite_db_path: str) -> dict:
+    """
+    Evita el escenario “parece que han desaparecido datos” cuando:
+      - Postgres está habilitado, pero vacío (o casi vacío)
+      - y el SQLite persistente (/var/data/...) sí contiene datos
+
+    En ese caso, marcamos la DB como no-ready con un error explícito (DbMismatchError),
+    para evitar que el front cargue tablas vacías y el usuario piense que se borró todo.
+    """
+    enabled = (os.environ.get("APP_DB_GUARD", "1") or "1").strip().lower() not in ("0", "false", "no", "off")
+    if not enabled or (not db_is_postgres_enabled()):
+        return {"ok": True, "skipped": True, "reason": "disabled_or_not_postgres"}
+
+    # Umbral: si SQLite tiene datos “reales” y Postgres está “vacío”, bloqueamos.
+    try:
+        min_sqlite_total = int(os.environ.get("APP_DB_GUARD_SQLITE_MIN_ROWS", "50") or 50)
+    except Exception:
+        min_sqlite_total = 50
+    try:
+        max_pg_total = int(os.environ.get("APP_DB_GUARD_PG_MAX_ROWS", "5") or 5)
+    except Exception:
+        max_pg_total = 5
+    min_sqlite_total = max(1, min(1000000, min_sqlite_total))
+    max_pg_total = max(0, min(1000000, max_pg_total))
+
+    conn = open_postgres_conn(with_row_factory=True)
+    try:
+        snap = _data_guard_snapshot(conn, sqlite_db_path)
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+    sqlite_total = int(snap.get("sqlite", {}).get("total") or 0)
+    pg_total = int(snap.get("postgres", {}).get("total") or 0)
+    if sqlite_total >= min_sqlite_total and pg_total <= max_pg_total:
+        raise DbMismatchError(
+            "Postgres está habilitado pero parece vacío mientras SQLite tiene datos. "
+            "Esto suele indicar que falta migrar SQLite→Postgres o que se cambió el backend por configuración."
+        )
+    return {"ok": True, "snapshot": snap}
+
+
 class Handler(BaseHTTPRequestHandler):
     db_path = DB_DEFAULT
     ocr_db_path = OCR_DB_DEFAULT
@@ -26113,6 +26360,8 @@ class Handler(BaseHTTPRequestHandler):
     _api_err_lock = threading.Lock()
     _api_err_ring = []  # newest last; items are small dicts (no secrets)
     _started_at = datetime.now().isoformat()
+    _data_guard_done = False
+    _data_guard_result = {}
 
     @staticmethod
     def _record_api_error(path, exc):
@@ -26216,6 +26465,12 @@ class Handler(BaseHTTPRequestHandler):
             Handler._db_ready_last_attempt_at = now_ts
             try:
                 ensure_tables(self.db_path)
+                # Guard de continuidad de datos: evita “tablas vacías” por backend/migración.
+                if (not Handler._data_guard_done) and db_is_postgres_enabled():
+                    try:
+                        Handler._data_guard_result = _run_data_continuity_guard(self.db_path)
+                    finally:
+                        Handler._data_guard_done = True
                 Handler._db_ready = True
                 Handler._db_ready_last_error = ""
             except Exception as exc:
@@ -26245,6 +26500,11 @@ class Handler(BaseHTTPRequestHandler):
                                 if Handler._db_ready:
                                     return
                                 ensure_tables(db_path)
+                                if (not Handler._data_guard_done) and db_is_postgres_enabled():
+                                    try:
+                                        Handler._data_guard_result = _run_data_continuity_guard(db_path)
+                                    finally:
+                                        Handler._data_guard_done = True
                                 Handler._db_ready = True
                                 Handler._db_ready_last_error = ""
                                 Handler._db_ready_last_attempt_at = time.time()
@@ -26756,6 +27016,7 @@ class Handler(BaseHTTPRequestHandler):
                     "pid": os.getpid(),
                     "db_ready": bool(Handler._db_ready),
                     "db_ready_last_error": str(getattr(Handler, "_db_ready_last_error", "") or ""),
+                    "data_guard": getattr(Handler, "_data_guard_result", {}) or {},
                     "build_tag": "workspace_boot_v1",
                     "db_dsn_source": db_source,
                     "db_host": db_host,
@@ -28056,6 +28317,17 @@ class Handler(BaseHTTPRequestHandler):
             if not trabajo_id:
                 json_response(self, {"error": "id requerido"}, status=400)
                 return
+            try:
+                trash_backup_row(
+                    conn,
+                    "gestoria_trabajos",
+                    trabajo_id,
+                    deleted_by=str(payload.get("usuario") or "").strip() or None,
+                    reason="api/gestoria_trabajos_delete",
+                    now=now,
+                )
+            except Exception:
+                pass
             conn.execute("DELETE FROM gestoria_trabajos WHERE id = ?", (trabajo_id,))
             audit("gestoria_trabajo", trabajo_id, "eliminar", None, payload.get("usuario"))
         elif parsed.path == "/api/gestoria_docs":
@@ -28135,6 +28407,17 @@ class Handler(BaseHTTPRequestHandler):
             if not doc_id:
                 json_response(self, {"error": "id requerido"}, status=400)
                 return
+            try:
+                trash_backup_row(
+                    conn,
+                    "gestoria_docs",
+                    doc_id,
+                    deleted_by=str(payload.get("usuario") or "").strip() or None,
+                    reason="api/gestoria_docs_delete",
+                    now=now,
+                )
+            except Exception:
+                pass
             conn.execute("DELETE FROM gestoria_docs WHERE id = ?", (doc_id,))
             audit("gestoria_doc", doc_id, "eliminar", None, payload.get("usuario"))
         elif parsed.path == "/api/gestoria_import_lotes":
@@ -34547,6 +34830,17 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "Registro no encontrado"}, status=404)
                 return
             log_seguro_event(conn, row, "eliminacion", now, payload={"origen": "api/seguros_delete"})
+            try:
+                trash_backup_row(
+                    conn,
+                    "seguros",
+                    record_id,
+                    deleted_by=_session_user_label(getattr(self, "auth_session", None) or self._current_session()) or None,
+                    reason="api/seguros_delete",
+                    now=now,
+                )
+            except Exception:
+                pass
             conn.execute("DELETE FROM seguros_checklist WHERE poliza_id = ?", (record_id,))
             conn.execute(
                 """
@@ -34556,6 +34850,22 @@ class Handler(BaseHTTPRequestHandler):
                 """,
                 (f"%{record_id}%",),
             )
+            conn.execute(
+                """
+                SELECT id FROM gestoria_docs
+                WHERE referencia_tipo = 'seguros'
+                  AND referencia_id = ?
+                """,
+                (record_id,),
+            ).fetchall()
+            try:
+                actor = _session_user_label(getattr(self, "auth_session", None) or self._current_session()) or None
+                for doc in (doc_rows or []):
+                    doc_id = str(row_value(doc, "id", "") or "").strip()
+                    if doc_id:
+                        trash_backup_row(conn, "gestoria_docs", doc_id, deleted_by=actor, reason="cascade:seguros_delete", now=now)
+            except Exception:
+                pass
             conn.execute(
                 """
                 DELETE FROM gestoria_docs
@@ -35111,6 +35421,11 @@ class Handler(BaseHTTPRequestHandler):
             if not record_id:
                 json_response(self, {"error": "id requerido"}, status=400)
                 return
+            try:
+                actor = _session_user_label(getattr(self, "auth_session", None) or self._current_session()) or None
+                trash_backup_row(conn, "seguros_campanas", record_id, deleted_by=actor, reason="api/seguros_campanas_delete", now=now)
+            except Exception:
+                pass
             conn.execute("DELETE FROM seguros_campanas WHERE id = ?", (record_id,))
         elif parsed.path == "/api/seguros_comisiones":
             conn.execute(
@@ -35159,6 +35474,11 @@ class Handler(BaseHTTPRequestHandler):
             if not record_id:
                 json_response(self, {"error": "id requerido"}, status=400)
                 return
+            try:
+                actor = _session_user_label(getattr(self, "auth_session", None) or self._current_session()) or None
+                trash_backup_row(conn, "seguros_comisiones", record_id, deleted_by=actor, reason="api/seguros_comisiones_delete", now=now)
+            except Exception:
+                pass
             conn.execute("DELETE FROM seguros_comisiones WHERE id = ?", (record_id,))
         elif parsed.path == "/api/seguros_checklist_generate":
             poliza_id = payload.get("poliza_id")
@@ -36846,7 +37166,23 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "Captación no encontrada"}, status=404)
                 return
             inmueble_id = str(captacion["inmueble_id"] or "").strip()
+            actor = _session_user_label(getattr(self, "auth_session", None) or self._current_session()) or None
+            try:
+                trash_backup_row(conn, "captaciones", record_id, deleted_by=actor, reason="api/captacion_delete", now=now)
+            except Exception:
+                pass
             if inmueble_id:
+                try:
+                    trash_backup_row(conn, "inmuebles", inmueble_id, deleted_by=actor, reason="cascade:captacion_delete", now=now)
+                except Exception:
+                    pass
+                try:
+                    for doc in conn.execute("SELECT id FROM inmueble_docs WHERE inmueble_id = ?", (inmueble_id,)).fetchall():
+                        doc_id = str(row_value(doc, "id", "") or "").strip()
+                        if doc_id:
+                            trash_backup_row(conn, "inmueble_docs", doc_id, deleted_by=actor, reason="cascade:captacion_delete", now=now)
+                except Exception:
+                    pass
                 conn.execute("DELETE FROM inmueble_checklist WHERE inmueble_id = ?", (inmueble_id,))
                 conn.execute("DELETE FROM inmueble_docs WHERE inmueble_id = ?", (inmueble_id,))
                 conn.execute("DELETE FROM inmueble_propietarios WHERE inmueble_id = ?", (inmueble_id,))
@@ -36866,9 +37202,8 @@ class Handler(BaseHTTPRequestHandler):
                 destino_map = {
                     "noticia": "Noticia",
                     "inmueble": "Inmueble",
-                    # Legacy: "Adquisición" pasa a ser "Inmueble".
-                    "valoracion": "Inmueble",
-                    "adquisicion": "Inmueble",
+                    "valoracion": "Valoración",
+                    "adquisicion": "Adquisición",
                     "encargo": "Encargo",
                     "propuesta": "Propuesta",
                     "reservado": "Reservado",
@@ -37571,6 +37906,58 @@ class Handler(BaseHTTPRequestHandler):
             if not inmueble:
                 json_response(self, {"error": "Inmueble no encontrado"}, status=404)
                 return
+            actor = _session_user_label(getattr(self, "auth_session", None) or self._current_session()) or None
+            try:
+                trash_backup_row(conn, "inmuebles", inmueble_id, deleted_by=actor, reason="api/inmueble_delete", now=now)
+            except Exception:
+                pass
+            # Backup cascadas principales (best-effort).
+            try:
+                for doc in conn.execute("SELECT id FROM inmueble_docs WHERE inmueble_id = ?", (inmueble_id,)).fetchall():
+                    doc_id = str(row_value(doc, "id", "") or "").strip()
+                    if doc_id:
+                        trash_backup_row(conn, "inmueble_docs", doc_id, deleted_by=actor, reason="cascade:inmueble_delete", now=now)
+            except Exception:
+                pass
+            try:
+                for cap in conn.execute("SELECT id FROM captaciones WHERE inmueble_id = ?", (inmueble_id,)).fetchall():
+                    cap_id = str(row_value(cap, "id", "") or "").strip()
+                    if cap_id:
+                        trash_backup_row(conn, "captaciones", cap_id, deleted_by=actor, reason="cascade:inmueble_delete", now=now)
+            except Exception:
+                pass
+            try:
+                for vis in conn.execute("SELECT id FROM visitas WHERE inmueble_id = ?", (inmueble_id,)).fetchall():
+                    vis_id = str(row_value(vis, "id", "") or "").strip()
+                    if vis_id:
+                        trash_backup_row(conn, "visitas", vis_id, deleted_by=actor, reason="cascade:inmueble_delete", now=now)
+            except Exception:
+                pass
+            try:
+                for act in conn.execute("SELECT id FROM acciones WHERE inmueble_id = ?", (inmueble_id,)).fetchall():
+                    act_id = str(row_value(act, "id", "") or "").strip()
+                    if act_id:
+                        trash_backup_row(conn, "acciones", act_id, deleted_by=actor, reason="cascade:inmueble_delete", now=now)
+            except Exception:
+                pass
+            try:
+                # Docs de gestoría vinculados a docs del inmueble.
+                doc_rows = conn.execute(
+                    """
+                    SELECT gd.id
+                    FROM gestoria_docs gd
+                    JOIN inmueble_docs d ON d.id = gd.referencia_id
+                    WHERE LOWER(COALESCE(gd.referencia_tipo, '')) = 'inmobiliaria'
+                      AND d.inmueble_id = ?
+                    """,
+                    (inmueble_id,),
+                ).fetchall()
+                for gd in (doc_rows or []):
+                    gd_id = str(row_value(gd, "id", "") or "").strip()
+                    if gd_id:
+                        trash_backup_row(conn, "gestoria_docs", gd_id, deleted_by=actor, reason="cascade:inmueble_delete", now=now)
+            except Exception:
+                pass
             conn.execute(
                 """
                 DELETE FROM gestoria_docs
@@ -40693,6 +41080,21 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": f"S3 no configurado{detail}"}, status=400)
                 return
             bucket, _region = s3_config()
+            # Evita redirigir/firmar objetos inexistentes (acaban mostrando XML NoSuchKey en el navegador).
+            try:
+                client.head_object(Bucket=bucket, Key=key)
+            except Exception as exc:
+                code = ""
+                try:
+                    code = str((getattr(exc, "response", {}) or {}).get("Error", {}).get("Code", "") or "")
+                except Exception:
+                    code = ""
+                msg = str(exc or "")
+                if code in {"NoSuchKey", "404", "NotFound"} or "NoSuchKey" in msg or "404" in msg:
+                    json_response(self, {"error": "Archivo no encontrado"}, status=404)
+                    return
+                json_response(self, {"error": "No se pudo acceder al archivo"}, status=502)
+                return
             try:
                 url = client.generate_presigned_url(
                     "get_object",
@@ -40729,6 +41131,20 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": f"S3 no configurado{detail}"}, status=400)
                 return
             bucket, _region = s3_config()
+            try:
+                client.head_object(Bucket=bucket, Key=key)
+            except Exception as exc:
+                code = ""
+                try:
+                    code = str((getattr(exc, "response", {}) or {}).get("Error", {}).get("Code", "") or "")
+                except Exception:
+                    code = ""
+                msg = str(exc or "")
+                if code in {"NoSuchKey", "404", "NotFound"} or "NoSuchKey" in msg or "404" in msg:
+                    json_response(self, {"error": "Archivo no encontrado"}, status=404)
+                    return
+                json_response(self, {"error": "No se pudo acceder al archivo"}, status=502)
+                return
             try:
                 url = client.generate_presigned_url(
                     "get_object",
