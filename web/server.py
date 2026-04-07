@@ -1728,6 +1728,7 @@ def compute_fincas_seguros_dashboard_payload(conn, empresa_id, year, uploaded_on
     )
 
     estado_bucket_expr = seguro_estado_bucket_expr("s")
+    in_vigor_expr = in_vigor_policy_filter("s")
     fecha_efecto_date = seguro_date_sql("fecha_efecto", "s")
     year_expr = f"COALESCE(STRFTIME('%Y', {fecha_efecto_date}), STRFTIME('%Y', s.created_at))"
     month_expr = f"COALESCE(STRFTIME('%Y-%m', {fecha_efecto_date}), STRFTIME('%Y-%m', s.created_at))"
@@ -1835,6 +1836,7 @@ def compute_fincas_seguros_dashboard_payload(conn, empresa_id, year, uploaded_on
             }
         )
 
+    # KPIs "cartera" (en vigor) deben basarse en pólizas activas, no en el año de efecto.
     responsables = conn.execute(
         f"""
         SELECT
@@ -1844,11 +1846,11 @@ def compute_fincas_seguros_dashboard_payload(conn, empresa_id, year, uploaded_on
         WHERE s.empresa_id = ?
           AND ({uploaded_clause} OR ? = 0)
           AND {exclude_sin_seguro}
-          AND {year_expr} = ?
+          AND {in_vigor_expr}
         GROUP BY 1
         ORDER BY total DESC
         """,
-        (empresa_id, uploaded_param, year),
+        (empresa_id, uploaded_param),
     ).fetchall()
 
     comision_companias = conn.execute(
@@ -1860,11 +1862,11 @@ def compute_fincas_seguros_dashboard_payload(conn, empresa_id, year, uploaded_on
         WHERE s.empresa_id = ?
           AND ({uploaded_clause} OR ? = 0)
           AND {exclude_sin_seguro}
-          AND {year_expr} = ?
+          AND {in_vigor_expr}
         GROUP BY 1
         ORDER BY total DESC
         """,
-        (empresa_id, uploaded_param, year),
+        (empresa_id, uploaded_param),
     ).fetchall()
 
     comision_ramos = conn.execute(
@@ -1876,11 +1878,11 @@ def compute_fincas_seguros_dashboard_payload(conn, empresa_id, year, uploaded_on
         WHERE s.empresa_id = ?
           AND ({uploaded_clause} OR ? = 0)
           AND {exclude_sin_seguro}
-          AND {year_expr} = ?
+          AND {in_vigor_expr}
         GROUP BY 1
         ORDER BY total DESC
         """,
-        (empresa_id, uploaded_param, year),
+        (empresa_id, uploaded_param),
     ).fetchall()
 
     prima_companias = conn.execute(
@@ -1892,11 +1894,11 @@ def compute_fincas_seguros_dashboard_payload(conn, empresa_id, year, uploaded_on
         WHERE s.empresa_id = ?
           AND ({uploaded_clause} OR ? = 0)
           AND {exclude_sin_seguro}
-          AND {year_expr} = ?
+          AND {in_vigor_expr}
         GROUP BY 1
         ORDER BY total DESC
         """,
-        (empresa_id, uploaded_param, year),
+        (empresa_id, uploaded_param),
     ).fetchall()
 
     prima_ramos = conn.execute(
@@ -1908,11 +1910,11 @@ def compute_fincas_seguros_dashboard_payload(conn, empresa_id, year, uploaded_on
         WHERE s.empresa_id = ?
           AND ({uploaded_clause} OR ? = 0)
           AND {exclude_sin_seguro}
-          AND {year_expr} = ?
+          AND {in_vigor_expr}
         GROUP BY 1
         ORDER BY total DESC
         """,
-        (empresa_id, uploaded_param, year),
+        (empresa_id, uploaded_param),
     ).fetchall()
 
     fecha_venc_date = seguro_date_sql("fecha_vencimiento", "s")

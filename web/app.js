@@ -23317,17 +23317,17 @@ const renderFincasDashboard = (empresaId) => {
         note: `Margen ${(Number(current.margen_rentabilidad || 0)).toFixed(1)}%`,
       },
       {
-        title: `Comisionado ${current.year || effectiveSelectedYear}`,
+        title: "Comisionado (cartera en vigor)",
         value: euroFormatter.format(comisionTotalYear),
-        note: comisionTotalYear > 0 ? "Total anual estimado" : "Sin comisiones en el año",
+        note: comisionTotalYear > 0 ? "Estimación sobre pólizas en vigor" : "Sin datos de comisión",
       },
       {
-        title: `Top compañía ${current.year || effectiveSelectedYear}`,
+        title: "Top compañía (en vigor)",
         value: topCompania ? euroFormatter.format(topCompania.total || 0) : euroFormatter.format(0),
         note: topCompania ? topCompania.label : "Sin datos",
       },
       {
-        title: `Top ramo ${current.year || effectiveSelectedYear}`,
+        title: "Top ramo (en vigor)",
         value: topRamo ? euroFormatter.format(topRamo.total || 0) : euroFormatter.format(0),
         note: topRamo ? topRamo.label : "Sin datos",
       },
