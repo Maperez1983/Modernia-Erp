@@ -3969,7 +3969,7 @@ const renderCompanyCards = () => {
       return letters.toUpperCase();
     };
 
-		    const appendPersonalCard = () => {
+	    const appendPersonalCard = () => {
 		      const employee = timeProfile?.employee || null;
 		      const personaId = String(employee?.id || "").trim();
 		      const isAdmin = isPrivilegedUser(user) || canAccessAdminPanel(user);
@@ -4021,8 +4021,11 @@ const renderCompanyCards = () => {
             <div class="company-meta">${escapeHtml(displayName)}</div>
             <div class="company-meta">${escapeHtml(subtitle)}</div>
           </div>
-        </div>
-	        <a class="card-link" href="${rrhhHref}" data-action="rrhh-home">Abrir</a>
+	        </div>
+	        <div class="workspace-home-card-actions">
+	          <a class="card-link" href="${rrhhHref}" data-action="rrhh-home">Abrir</a>
+	          ${personaId ? `<button type="button" class="secondary ghost button-inline" data-action="time-punch">Fichar</button>` : ""}
+	        </div>
 	      `;
 	      coreCards.appendChild(card);
 	    };
@@ -4090,6 +4093,8 @@ const renderCompanyCards = () => {
         <a class="card-link" href="?holding=1&mode=tenant&workspace=${encodeURIComponent(DEFAULT_TENANT_WORKSPACE_SLUG)}&view=overview" data-action="holding-tenant">Entrar</a>
       `;
       coreCards.appendChild(workspaceCard);
+      // Prompt de fichaje (solo si aplica al usuario).
+      maybeAutoShowHomeTimePunchModal();
       return;
     }
 
@@ -4115,6 +4120,7 @@ const renderCompanyCards = () => {
       <a class="card-link" href="?holding=1&mode=tenant&workspace=${encodeURIComponent(DEFAULT_TENANT_WORKSPACE_SLUG)}&view=overview" data-action="holding-tenant">Entrar</a>
     `;
     coreCards.appendChild(tenantCard);
+    maybeAutoShowHomeTimePunchModal();
   }
 };
 
@@ -10263,7 +10269,6 @@ const renderWorkspaceRrhhHub = () => {
         const authUser = getAuthScopeUser();
         const isSelf = Boolean(
           authUser?.id
-          && Number(emp?.usuario_manual || 0) === 1
           && String(emp?.usuario_id || "") === String(authUser.id)
         );
         const geo = isSelf ? await getGeoLocation(3500) : null;
@@ -12272,13 +12277,12 @@ const renderWorkspaceTimeEmployeePreview = () => {
       <div class="muted" style="margin-top:10px;">Mes activo: ${month || "actual"} · Exportes desde el panel derecho.</div>
     </div>
   `;
-  const runToggle = async (action) => {
+      const runToggle = async (action) => {
     if (!state.currentWorkspaceId) return;
     try {
       const authUser = getAuthScopeUser();
       const isSelf = Boolean(
         authUser?.id
-        && Number(employee?.usuario_manual || 0) === 1
         && String(employee?.usuario_id || "") === String(authUser.id)
       );
       const geo = isSelf ? await getGeoLocation(3500) : null;
@@ -12320,11 +12324,10 @@ const findCurrentUserTimeProfile = () => {
   if (!authUser?.id) return null;
   const employees = state.workspaceTimeEmployees || [];
   const entries = state.currentWorkspaceData?.timeRows || [];
-  const employee = employees.find(
-    (row) =>
-      Number(row?.usuario_manual || 0) === 1 &&
-      String(row?.usuario_id || "") === String(authUser.id)
-  );
+  const uid = String(authUser.id);
+  const employee =
+    employees.find((row) => Number(row?.usuario_manual || 0) === 1 && String(row?.usuario_id || "") === uid)
+    || employees.find((row) => String(row?.usuario_id || "") === uid);
   if (!employee) return null;
   const today = new Date().toISOString().slice(0, 10);
   const todayEntries = entries.filter((row) => String(row.usuario_id || "") === String(authUser.id) && String(row.fecha || "") === today);
@@ -12334,6 +12337,148 @@ const findCurrentUserTimeProfile = () => {
     return bVal.localeCompare(aVal);
   })[0] || null;
   return { employee, latestEntry };
+};
+
+let _homeTimePunchModal = null;
+let _homeTimePunchBody = null;
+let _homeTimePunchClose = null;
+let _homeTimePunchAutoShownKey = "";
+let _homeTimePunchLastActionAt = 0;
+
+const ensureHomeTimePunchModal = () => {
+  if (_homeTimePunchModal) return;
+  const modal = document.createElement("div");
+  modal.id = "homeTimePunchModal";
+  modal.className = "modal hidden";
+  modal.innerHTML = `
+    <div class="modal-content hipoteca-ficha-modal-content">
+      <div class="modal-header">
+        <div>
+          <h3>Registro horario</h3>
+          <p class="muted">Entrada y salida de hoy.</p>
+        </div>
+        <button type="button" class="secondary ghost" data-home-time-close>Cerrar</button>
+      </div>
+      <div class="modal-body">
+        <div id="homeTimePunchBody"></div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  _homeTimePunchModal = modal;
+  _homeTimePunchBody = modal.querySelector("#homeTimePunchBody");
+  _homeTimePunchClose = modal.querySelector("[data-home-time-close]");
+  const close = () => closeHomeTimePunchModal({ persist: true });
+  _homeTimePunchClose?.addEventListener("click", close);
+  modal.addEventListener("click", (event) => {
+    if (event.target === modal) close();
+  });
+};
+
+const closeHomeTimePunchModal = ({ persist = false } = {}) => {
+  if (!_homeTimePunchModal) return;
+  _homeTimePunchModal.classList.add("hidden");
+  document.body.classList.remove("modal-open");
+  if (persist) {
+    try {
+      const user = getAuthScopeUser();
+      const uid = String(user?.id || "").trim();
+      const day = new Date().toISOString().slice(0, 10);
+      if (uid) localStorage.setItem(`crm_home_punch_hide_${uid}_${day}`, "1");
+    } catch {}
+  }
+};
+
+const renderHomeTimePunchModal = () => {
+  ensureHomeTimePunchModal();
+  if (!_homeTimePunchBody) return;
+  const user = getAuthScopeUser();
+  const profile = findCurrentUserTimeProfile();
+  const employee = profile?.employee || null;
+  const personaId = String(employee?.id || "").trim();
+  const latest = profile?.latestEntry || null;
+  const open = latest && !String(latest.hora_fin || "").trim();
+  const label = latest
+    ? `${latest.hora_inicio || "--:--"}${latest.hora_fin ? ` - ${latest.hora_fin}` : " · Abierto"}`
+    : "Sin fichaje de hoy";
+  if (!state.currentWorkspaceId || !personaId) {
+    _homeTimePunchBody.innerHTML = `
+      <p class="muted">No tienes ficha de registro horario vinculada todavía.</p>
+      <p class="muted">Pide a administración que te active y vincule el registro horario para poder fichar.</p>
+    `;
+    return;
+  }
+  const canCheckIn = !open;
+  const canCheckOut = Boolean(open);
+  _homeTimePunchBody.innerHTML = `
+    <div class="workspace-time-preview">
+      <div class="muted">Hoy: ${escapeHtml(label)}</div>
+      <div class="form-actions" style="margin-top:10px;">
+        <button type="button" class="secondary ghost button-inline" data-home-time-checkin ${canCheckIn ? "" : "disabled"}>Fichar entrada</button>
+        <button type="button" class="secondary ghost button-inline" data-home-time-checkout ${canCheckOut ? "" : "disabled"}>Fichar salida</button>
+      </div>
+    </div>
+  `;
+  const runToggle = async (action) => {
+    try {
+      const isSelf = Boolean(user?.id && String(employee?.usuario_id || "") === String(user.id));
+      const geo = isSelf ? await getGeoLocation(3500) : null;
+      const resp = await fetch("/api/workspace_registro_horario_toggle", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          workspace_id: state.currentWorkspaceId,
+          persona_id: personaId,
+          empresa_id: employee?.empresa_id || "",
+          action,
+          ...(geo ? { geo } : {}),
+        }),
+      }).then((res) => res.json());
+      if (resp?.error) throw new Error(resp.error);
+      _homeTimePunchLastActionAt = Date.now();
+      await loadWorkspaceDetail(state.currentWorkspaceId);
+      renderCompanyCards();
+      closeHomeTimePunchModal({ persist: false });
+    } catch (error) {
+      alert(error.message || "No se pudo fichar.");
+    }
+  };
+  _homeTimePunchBody.querySelector("[data-home-time-checkin]")?.addEventListener("click", () => runToggle("checkin"));
+  _homeTimePunchBody.querySelector("[data-home-time-checkout]")?.addEventListener("click", () => runToggle("checkout"));
+};
+
+const openHomeTimePunchModal = ({ persist = false } = {}) => {
+  ensureHomeTimePunchModal();
+  renderHomeTimePunchModal();
+  _homeTimePunchModal?.classList.remove("hidden");
+  document.body.classList.add("modal-open");
+  if (persist) {
+    // If opened explicitly, don't auto-open again in the same render loop.
+    _homeTimePunchLastActionAt = Date.now();
+  }
+};
+
+const maybeAutoShowHomeTimePunchModal = () => {
+  try {
+    if (state.currentPage !== "home") return;
+    if (Date.now() - Number(_homeTimePunchLastActionAt || 0) < 60_000) return;
+    const user = getAuthScopeUser();
+    const uid = String(user?.id || "").trim();
+    if (!uid) return;
+    const day = new Date().toISOString().slice(0, 10);
+    if (localStorage.getItem(`crm_home_punch_hide_${uid}_${day}`) === "1") return;
+    const profile = findCurrentUserTimeProfile();
+    const employee = profile?.employee || null;
+    if (!employee?.id) return;
+    const latest = profile?.latestEntry || null;
+    const open = latest && !String(latest.hora_fin || "").trim();
+    const needsAction = !latest || open;
+    if (!needsAction) return;
+    const key = `${uid}:${day}:${open ? "open" : "none"}`;
+    if (_homeTimePunchAutoShownKey === key) return;
+    _homeTimePunchAutoShownKey = key;
+    openHomeTimePunchModal({ persist: false });
+  } catch {}
 };
 
 const renderWorkspaceTimeSummary = (summary = null) => {
@@ -38630,6 +38775,8 @@ if (coreCards) {
       openHolding({ mode: "platform", view: "overview" });
     } else if (action === "holding-tenant") {
       openHolding({ mode: "tenant", workspace: DEFAULT_TENANT_WORKSPACE_SLUG, view: "overview" });
+    } else if (action === "time-punch") {
+      openHomeTimePunchModal({ persist: true });
     } else if (action === "time-home") {
       openHolding({ mode: "tenant", workspace: DEFAULT_TENANT_WORKSPACE_SLUG, view: "motores", engine: "registro_horario" });
       window.setTimeout(() => {

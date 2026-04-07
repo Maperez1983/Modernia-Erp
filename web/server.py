@@ -22511,6 +22511,142 @@ def workspace_persona_id_for_user(conn, workspace_id, user_id):
         return str(row[0] or "")
 
 
+def ensure_workspace_persona_for_self(conn, workspace_id, session):
+    """
+    Garantiza que un usuario no privilegiado con `registro_horario_activo=1` tenga una ficha
+    de `workspace_registro_personal` vinculada (usuario_id + usuario_manual=1) y con empresa_id,
+    para poder fichar desde la app.
+    """
+    try:
+        ws_id = str(workspace_id or "").strip()
+        if not ws_id or not session or workspace_session_is_privileged(session):
+            return ""
+        user_id = str(session.get("user_id") or "").strip()
+        if not user_id:
+            return ""
+        user_row = conn.execute(
+            """
+            SELECT id, nombre, apellido, usuario, email, activo, registro_horario_activo
+            FROM usuarios
+            WHERE id = ?
+            LIMIT 1
+            """,
+            (user_id,),
+        ).fetchone()
+        if not user_row:
+            return ""
+        if int(row_value(user_row, "activo", 1) or 0) != 1:
+            return ""
+        if int(row_value(user_row, "registro_horario_activo", 0) or 0) != 1:
+            return ""
+
+        # Preferimos una ficha manual, pero aceptamos cualquier ficha vinculada y la "promovemos".
+        persona = conn.execute(
+            """
+            SELECT id, empresa_id, COALESCE(usuario_manual, 0) AS usuario_manual, COALESCE(source, '') AS source
+            FROM workspace_registro_personal
+            WHERE workspace_id = ? AND usuario_id = ? AND COALESCE(activo, 1) = 1
+            ORDER BY COALESCE(usuario_manual, 0) DESC, COALESCE(updated_at, created_at) DESC
+            LIMIT 1
+            """,
+            (ws_id, user_id),
+        ).fetchone()
+
+        # Empresa por defecto: si el tenant tiene empresas asociadas, usamos la primera.
+        empresa_default_row = conn.execute(
+            """
+            SELECT empresa_id
+            FROM workspace_empresas
+            WHERE workspace_id = ?
+            ORDER BY COALESCE(updated_at, created_at) DESC
+            LIMIT 1
+            """,
+            (ws_id,),
+        ).fetchone()
+        empresa_default = str(row_value(empresa_default_row, "empresa_id") or row_value(empresa_default_row, 0) or "").strip()
+
+        now = datetime.now(timezone.utc).isoformat()
+        if persona:
+            persona_id = str(row_value(persona, "id") or row_value(persona, 0) or "").strip()
+            if not persona_id:
+                return ""
+            updates = []
+            params = []
+            usuario_manual = int(row_value(persona, "usuario_manual", 0) or 0)
+            if usuario_manual != 1:
+                updates.append("usuario_manual = 1")
+            source = str(row_value(persona, "source") or "").strip()
+            if not source or source == "auto":
+                updates.append("source = 'manual'")
+            empresa_id = str(row_value(persona, "empresa_id") or "").strip()
+            if not empresa_id and empresa_default:
+                updates.append("empresa_id = ?")
+                params.append(empresa_default)
+                updates.append("empresa_manual = 1")
+            if updates:
+                conn.execute(
+                    f"UPDATE workspace_registro_personal SET {', '.join(updates)}, updated_at = datetime(?) WHERE workspace_id = ? AND id = ?",
+                    [*params, now, ws_id, persona_id],
+                )
+                try:
+                    conn.commit()
+                except Exception:
+                    pass
+            return persona_id
+
+        # Sin ficha: creamos una mínima para permitir fichaje self.
+        if not empresa_default:
+            return ""
+        full_name = " ".join(
+            part
+            for part in [
+                str(row_value(user_row, "nombre") or "").strip(),
+                str(row_value(user_row, "apellido") or "").strip(),
+            ]
+            if part
+        ).strip()
+        if not full_name:
+            full_name = str(row_value(user_row, "usuario") or row_value(user_row, "email") or "Empleado").strip() or "Empleado"
+        persona_id = os.urandom(16).hex()
+        conn.execute(
+            """
+            INSERT INTO workspace_registro_personal (
+              id, workspace_id, empresa_id, empresa_manual,
+              usuario_id, usuario_manual, source,
+              nombre, nif, email, telefono,
+              tipo_contrato, tipo_jornada, horas_pactadas_dia, horas_pactadas_semana,
+              fecha_alta, fecha_baja, activo, notas,
+              created_at, updated_at
+            ) VALUES (
+              ?, ?, ?, 1,
+              ?, 1, 'manual',
+              ?, NULL, ?, NULL,
+              NULL, 'Completa', NULL, NULL,
+              NULL, NULL, 1, ?,
+              datetime(?), datetime(?)
+            )
+            """,
+            (
+                persona_id,
+                ws_id,
+                empresa_default,
+                user_id,
+                full_name,
+                str(row_value(user_row, "email") or "").strip() or None,
+                "Auto-creado para permitir fichaje (registro horario activo).",
+                now,
+                now,
+            ),
+        )
+        try:
+            conn.commit()
+        except Exception:
+            pass
+        return persona_id
+    except Exception:
+        return ""
+
+
 def log_workspace_registro_audit(conn, workspace_id, *, empresa_id=None, persona_id=None, entity_type="", entity_id="", action="", actor=None, before=None, after=None, now=None):
     now_ts = now or datetime.now().isoformat()
     session = actor or {}
@@ -27069,24 +27205,14 @@ class Handler(BaseHTTPRequestHandler):
                                 except Exception:
                                     pass
                         except Exception as exc:
-                            # Si ya estuvimos "ready", evitamos falsos negativos por picos (pool saturado,
-                            # timeouts cortos, etc.). El front ya gestionará errores reales en /api/*.
-                            if Handler._db_ready:
-                                status = 200
-                                body = f"ok backend={backend}".encode("utf-8")
-                            else:
-                                # En arranque (no-ready) sí reportamos 503 para que el front espere.
-                                try:
-                                    Handler._mark_db_unavailable(exc)
-                                except Exception:
-                                    pass
-                                try:
-                                    Handler._trigger_db_bootstrap_async(self.db_path)
-                                except Exception:
-                                    pass
-                                status = 503
-                                err = (type(exc).__name__ or "Error").strip() or "Error"
-                                body = f"db_unavailable backend={backend} err={err}".encode("utf-8")
+                            Handler._mark_db_unavailable(exc)
+                            try:
+                                Handler._trigger_db_bootstrap_async(self.db_path)
+                            except Exception:
+                                pass
+                            status = 503
+                            err = (type(exc).__name__ or "Error").strip() or "Error"
+                            body = f"db_unavailable backend={backend} err={err}".encode("utf-8")
                         Handler._health_last_at = now_ts
                         Handler._health_last_status = status
                         Handler._health_last_body = body
@@ -30975,8 +31101,38 @@ class Handler(BaseHTTPRequestHandler):
                     return
             empresa_id = str(persona_row["empresa_id"] or "").strip()
             if not empresa_id:
-                json_response(self, {"error": "empresa_id requerido"}, status=400)
-                return
+                # Compat/self: si la ficha no tenía empresa, intentamos asignarla desde el tenant.
+                now_fix = app_now().strftime("%Y-%m-%d %H:%M:%S")
+                try:
+                    empresa_default_row = conn.execute(
+                        """
+                        SELECT empresa_id
+                        FROM workspace_empresas
+                        WHERE workspace_id = ?
+                        ORDER BY COALESCE(updated_at, created_at) DESC
+                        LIMIT 1
+                        """,
+                        (workspace_id,),
+                    ).fetchone()
+                except Exception:
+                    empresa_default_row = None
+                empresa_id = str(row_value(empresa_default_row, "empresa_id") or row_value(empresa_default_row, 0) or "").strip()
+                if empresa_id:
+                    try:
+                        conn.execute(
+                            """
+                            UPDATE workspace_registro_personal
+                            SET empresa_id = ?, empresa_manual = 1, updated_at = datetime(?)
+                            WHERE workspace_id = ? AND id = ?
+                            """,
+                            (empresa_id, now_fix, workspace_id, persona_id),
+                        )
+                        conn.commit()
+                    except Exception:
+                        pass
+                if not empresa_id:
+                    json_response(self, {"error": "empresa_id requerido"}, status=400)
+                    return
             now_dt = app_now()
             fecha = now_dt.date().isoformat()
             if is_workspace_time_month_locked(conn, workspace_id, fecha, empresa_id=str(persona_row["empresa_id"] or "").strip()):
@@ -40149,6 +40305,9 @@ class Handler(BaseHTTPRequestHandler):
             if session and not privileged:
                 user_id = str(session.get("user_id") or "").strip()
                 persona_id = workspace_persona_id_for_user(conn, workspace_id, user_id)
+                if not persona_id:
+                    # Auto-vincula si el usuario tiene registro horario activado.
+                    persona_id = ensure_workspace_persona_for_self(conn, workspace_id, session)
                 # Non-priv: forzamos empresa_id vacío como en endpoints.
                 empresa_id = ""
 
@@ -41793,6 +41952,8 @@ class Handler(BaseHTTPRequestHandler):
             cliente_id = params.get("cliente_id", [""])[0]
             inmueble_id = params.get("inmueble_id", [""])[0]
             asesoramiento_id = params.get("asesoramiento_id", [""])[0]
+            related_id = params.get("related_id", [""])[0]
+            related_tipo = params.get("related_tipo", [""])[0]
             if not servicio:
                 json_response(self, {"error": "servicio requerido"}, status=400)
                 return
@@ -41812,6 +41973,8 @@ class Handler(BaseHTTPRequestHandler):
                   AND (? = '' OR a.cliente_id = ?)
                   AND (? = '' OR a.inmueble_id = ?)
                   AND (? = '' OR a.asesoramiento_id = ?)
+                  AND (? = '' OR a.related_id = ?)
+                  AND (? = '' OR LOWER(COALESCE(a.related_tipo, '')) = LOWER(?))
                 ORDER BY a.fecha DESC, a.hora DESC
                 LIMIT 300
                 """,
@@ -41825,6 +41988,10 @@ class Handler(BaseHTTPRequestHandler):
                     inmueble_id,
                     asesoramiento_id,
                     asesoramiento_id,
+                    related_id,
+                    related_id,
+                    related_tipo,
+                    related_tipo,
                 ),
             ).fetchall()
             json_response(self, {"rows": [dict(r) for r in rows]})
@@ -41869,6 +42036,40 @@ class Handler(BaseHTTPRequestHandler):
                         filtered.append(row)
                 data = filtered
             json_response(self, {"rows": data})
+            return
+
+        if path == "/api/fin_hipotecas_estudio":
+            empresa_id = params.get("empresa_id", [""])[0]
+            if not empresa_id:
+                json_response(self, {"error": "empresa_id requerido"}, status=400)
+                return
+            rows = conn.execute(
+                """
+                SELECT
+                  h.id,
+                  h.cliente,
+                  h.cliente_id,
+                  COALESCE(c.telefono, '') AS telefono,
+                  COALESCE(c.email, '') AS email,
+                  h.banco,
+                  h.oficina,
+                  h.fecha_encargo,
+                  h.fecha_firma,
+                  h.estado,
+                  h.asesor,
+                  h.updated_at,
+                  h.created_at
+                FROM hipotecas h
+                LEFT JOIN clientes c ON c.id = h.cliente_id
+                WHERE h.empresa_id = ?
+                  AND LOWER(TRIM(COALESCE(h.estado, ''))) IN ('estudio', 'en estudio')
+                  AND (h.fecha_firma IS NULL OR TRIM(COALESCE(h.fecha_firma, '')) = '')
+                ORDER BY COALESCE(NULLIF(TRIM(COALESCE(h.fecha_encargo, '')), ''), h.updated_at, h.created_at) DESC
+                LIMIT 500
+                """,
+                (empresa_id,),
+            ).fetchall()
+            json_response(self, {"rows": [dict(r) for r in rows]})
             return
 
         if path == "/api/seguros_ofertas":
