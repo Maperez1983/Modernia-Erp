@@ -15,6 +15,7 @@ if str(ROOT) not in sys.path:
 
 SAFE_SPLIT_RE = re.compile(r"[_\-\s]+")
 TOKEN_RE = re.compile(r"[A-Za-z0-9]{6,}")
+SPLIT_NUM_RE = re.compile(r"(?<![0-9])(\d{6,})[ _\\-](\d{1,3})(?![0-9])")
 PLACEHOLDER_VALUES = {"poliza_key", "poliza_url", "doc_key", "doc_url"}
 
 
@@ -63,6 +64,11 @@ def original_filename_from_key(key: str) -> str:
 def extract_tokens_from_filename(name: str) -> list[str]:
     text = str(name or "")
     tokens = []
+    # 1) Números largos partidos (ej: "82124000009210 0" -> "821240000092100")
+    for m in SPLIT_NUM_RE.finditer(text):
+        merged = normalize_poliza_token((m.group(1) or "") + (m.group(2) or ""))
+        if merged:
+            tokens.append(merged)
     for raw in TOKEN_RE.findall(text):
         norm = normalize_poliza_token(raw)
         if not norm:
