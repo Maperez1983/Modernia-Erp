@@ -27139,6 +27139,10 @@ class Handler(BaseHTTPRequestHandler):
     def _resolve_required_service(self, path, params=None, payload=None):
         params = params or {}
         payload = payload or {}
+        # Seguros dashboard reutiliza el endpoint histórico "fincas_seguros_dashboard".
+        # Debe estar accesible para usuarios con servicio Seguros (no requiere Fincas).
+        if path.startswith("/api/fincas_seguros_"):
+            return "seguros"
         if path in {"/api/gestoria_contabilidad", "/api/gestoria_contabilidad_update", "/api/gestoria_contabilidad_delete"}:
             hinted = normalize_service_key(
                 payload.get("servicio")
