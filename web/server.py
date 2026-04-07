@@ -44676,8 +44676,11 @@ class Handler(BaseHTTPRequestHandler):
             if not empresa_id:
                 json_response(self, {"error": "empresa_id requerido"}, status=400)
                 return
-            sync_hipotecas_contabilidad_entries(conn, empresa_id)
-            conn.commit()
+            # No ejecutes sync pesado dentro del request: puede tardar mucho y provocar 502/timeouts.
+            try:
+                sync_state = schedule_hipotecas_contabilidad_sync(self.db_path, empresa_id)
+            except Exception:
+                sync_state = {"scheduled": False, "reason": "schedule_failed"}
 
             current_year = conn.execute("SELECT strftime('%Y','now','localtime') AS y").fetchone()["y"]
             year_expr = (
@@ -45086,6 +45089,7 @@ class Handler(BaseHTTPRequestHandler):
                     "series_entidades": [dict(r) for r in entity_total_rows],
                     "entity_kpis": entities,
                     "series_oficinas": [dict(r) for r in series_oficinas],
+                    "hipotecas_sync": sync_state,
                 },
             )
             return
