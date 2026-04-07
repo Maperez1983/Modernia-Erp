@@ -4209,10 +4209,27 @@ const renderCompanyCards = () => {
       <div class="company-meta">Primero entras al workspace y desde ahí eliges la empresa con la que quieres trabajar.</div>
       <a class="card-link" href="?holding=1&mode=tenant&workspace=${encodeURIComponent(workspaceSlug)}&view=overview" data-action="holding-tenant">Entrar</a>
     `;
-    coreCards.appendChild(tenantCard);
-    maybeAutoShowHomeTimePunchModal();
-  }
-};
+	    coreCards.appendChild(tenantCard);
+	    maybeAutoShowHomeTimePunchModal();
+      // Defensive: evita duplicados por estados intermedios / renderizados repetidos.
+      try {
+        const seen = new Set();
+        Array.from(coreCards.children || []).forEach((node) => {
+          if (!node || node.nodeType !== 1) return;
+          const el = node;
+          const actionKey = String(el.dataset?.action || "").trim();
+          const titleKey = String(el.querySelector?.("h3")?.textContent || "").trim();
+          const key = `${actionKey}::${titleKey}`;
+          if (!titleKey && !actionKey) return;
+          if (seen.has(key)) {
+            el.remove();
+            return;
+          }
+          seen.add(key);
+        });
+      } catch {}
+	  }
+	};
 
 const getClientesCardCount = () => {
   const clientesCountRaw =
