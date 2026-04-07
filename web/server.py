@@ -1676,6 +1676,7 @@ def seguros_contabilidad_where_clause(alias="gc"):
     p = alias.strip() or "gc"
     return (
         f"(({p}.seguro_id IS NOT NULL AND TRIM({p}.seguro_id) <> '') "
+        f"OR ({p}.poliza_numero IS NOT NULL AND TRIM({p}.poliza_numero) <> '') "
         f"OR UPPER(COALESCE({p}.notas, '')) LIKE 'AUTO CRM SEGUROS%' "
         f"OR UPPER(COALESCE({p}.notas, '')) LIKE '[SEGUROS]%' "
         f"OR UPPER(TRIM(COALESCE({p}.gestion, ''))) IN ('COMISION EMISION', 'COMISION RENOVACION', 'REGULARIZACION', 'REGULARIZACIÓN', 'EXTORNO') "
@@ -47428,37 +47429,53 @@ class Handler(BaseHTTPRequestHandler):
             prima_total_sql = f"CAST(NULLIF({cleaned_money}, '') AS REAL)"
 
             poliza_key_expr = "COALESCE(NULLIF(TRIM(s.poliza_numero), ''), s.id)"
+            poliza_strict_expr = "NULLIF(TRIM(s.poliza_numero), '')"
 
             total = conn.execute(
                 f"""
-                SELECT COUNT(DISTINCT {poliza_key_expr}) AS total
+                SELECT COUNT(DISTINCT {poliza_strict_expr}) AS total
                 FROM seguros s
                 WHERE s.empresa_id = ?
                   AND ({uploaded_clause} OR ? = 0)
                   AND {exclude_sin_seguro}
+                  AND {poliza_strict_expr} IS NOT NULL
                 """,
                 (empresa_id, uploaded_param),
             ).fetchone()
             en_vigor = conn.execute(
                 f"""
-                SELECT COUNT(DISTINCT {poliza_key_expr}) AS total
+                SELECT COUNT(DISTINCT {poliza_strict_expr}) AS total
                 FROM seguros s
                 WHERE s.empresa_id = ?
                   AND ({uploaded_clause} OR ? = 0)
                   AND {in_vigor_expr}
                   AND {exclude_sin_seguro}
+                  AND {poliza_strict_expr} IS NOT NULL
+                """,
+                (empresa_id, uploaded_param),
+            ).fetchone()
+            en_vigor_sin_numero = conn.execute(
+                f"""
+                SELECT COUNT(*) AS total
+                FROM seguros s
+                WHERE s.empresa_id = ?
+                  AND ({uploaded_clause} OR ? = 0)
+                  AND {in_vigor_expr}
+                  AND {exclude_sin_seguro}
+                  AND {poliza_strict_expr} IS NULL
                 """,
                 (empresa_id, uploaded_param),
             ).fetchone()
             vencen_30 = conn.execute(
                 f"""
-                SELECT COUNT(DISTINCT {poliza_key_expr}) AS total
+                SELECT COUNT(DISTINCT {poliza_strict_expr}) AS total
                 FROM seguros s
                 WHERE s.empresa_id = ?
                   AND ({uploaded_clause} OR ? = 0)
                   AND COALESCE(fecha_vencimiento, DATE(fecha_efecto, '+1 year')) IS NOT NULL
                   AND {in_vigor_expr}
                   AND {exclude_sin_seguro}
+                  AND {poliza_strict_expr} IS NOT NULL
                   AND DATE(COALESCE(fecha_vencimiento, DATE(fecha_efecto, '+1 year'))) BETWEEN DATE('now','localtime')
                       AND DATE('now','localtime','+30 days')
                 """,
@@ -47466,7 +47483,7 @@ class Handler(BaseHTTPRequestHandler):
             ).fetchone()
             faltantes = conn.execute(
                 f"""
-                SELECT COUNT(DISTINCT {poliza_key_expr}) AS total
+                SELECT COUNT(DISTINCT {poliza_strict_expr}) AS total
                 FROM seguros s
                 WHERE s.empresa_id = ?
                   AND ({uploaded_clause} OR ? = 0)
@@ -47478,6 +47495,7 @@ class Handler(BaseHTTPRequestHandler):
                   )
                   AND {in_vigor_expr}
                   AND {exclude_sin_seguro}
+                  AND {poliza_strict_expr} IS NOT NULL
                 """,
                 (empresa_id, uploaded_param),
             ).fetchone()
@@ -47496,13 +47514,14 @@ class Handler(BaseHTTPRequestHandler):
                 SELECT SUM(t.prima_total) AS total
                 FROM (
                   SELECT
-                    {poliza_key_expr} AS poliza_key,
+                    {poliza_strict_expr} AS poliza_key,
                     MAX(COALESCE({prima_total_sql}, 0)) AS prima_total
                   FROM seguros s
                   WHERE s.empresa_id = ?
                     AND ({uploaded_clause} OR ? = 0)
                     AND {in_vigor_expr}
                     AND {exclude_sin_seguro}
+                    AND {poliza_strict_expr} IS NOT NULL
                   GROUP BY 1
                 ) t
                 """,
@@ -47520,6 +47539,7 @@ class Handler(BaseHTTPRequestHandler):
                 {
                     "total": total["total"] if total else 0,
                     "en_vigor": en_vigor["total"] if en_vigor else 0,
+                    "en_vigor_sin_numero": en_vigor_sin_numero["total"] if en_vigor_sin_numero else 0,
                     "vencen_30": vencen_30["total"] if vencen_30 else 0,
                     "faltantes": faltantes["total"] if faltantes else 0,
                     "prima_total": primas["total"] if primas and primas["total"] is not None else 0,

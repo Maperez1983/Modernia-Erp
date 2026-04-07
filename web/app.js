@@ -30821,8 +30821,11 @@ const loadSegurosKpis = () => {
       card.innerHTML = `<div class="kpi-label">${label}</div><div class="kpi-value">${value}</div>`;
       wrapper.appendChild(card);
     };
-    addKpi("Pólizas registradas (únicas)", data.total || 0);
-    addKpi("Pólizas en vigor (únicas)", data.en_vigor || 0);
+    addKpi("Pólizas registradas (con nº)", data.total || 0);
+    addKpi("Pólizas en vigor (con nº)", data.en_vigor || 0);
+    if (Number(data.en_vigor_sin_numero || 0) > 0) {
+      addKpi("En vigor sin nº póliza", data.en_vigor_sin_numero || 0);
+    }
     addKpi("Vencen 30 días", data.vencen_30 || 0);
     addKpi("Con faltantes", data.faltantes || 0);
     addKpi(
