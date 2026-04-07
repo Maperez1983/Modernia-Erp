@@ -39115,6 +39115,9 @@ const init = async () => {
     // Pintado inmediato: el panel no debe quedarse vacío mientras cargan APIs.
     // Se re-renderiza automáticamente conforme llegan datos (resumen, workspace, etc.).
     renderCompanyCards();
+    // UX: el banner de campaña renta debe funcionar aunque entremos por deep-link
+    // y `loadGestoriaDashboard()` todavía no se haya ejecutado.
+    bindGestoriaRentaCampaignBanner();
 
     const results = await Promise.allSettled([
       api("/api/empresas"),
