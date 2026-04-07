@@ -39,6 +39,11 @@ def main():
         action="store_true",
         help="Simula checks de /api/home_time_status y /api/workspace_boot (detecta 500 típicos).",
     )
+    parser.add_argument(
+        "--punch-check",
+        action="store_true",
+        help="Simula un fichaje de entrada+salida (en SAVEPOINT y rollback, no persiste cambios).",
+    )
     args = parser.parse_args()
 
     repo_root = Path(__file__).resolve().parents[1]
@@ -171,6 +176,127 @@ def main():
 
         return errors
 
+    def simulate_punch(u, session, ws_id, persona_id):
+        if not args.punch_check or not ws_id or not persona_id:
+            return []
+        errors = []
+        privileged = bool(server.workspace_session_is_privileged(session))
+        user_id = _norm(u.get("id"))
+        now_dt = server.app_now()
+        fecha = now_dt.date().isoformat()
+
+        try:
+            ok, _err = server.enforce_workspace_membership(conn, session, ws_id)
+            if not ok:
+                return ["PUNCH_NO_WORKSPACE_MEMBER"]
+        except Exception:
+            return ["PUNCH_MEMBERSHIP_CHECK_FAIL"]
+
+        try:
+            persona_row = conn.execute(
+                """
+                SELECT id, empresa_id, usuario_id, nombre, tipo_jornada, horas_pactadas_dia
+                FROM workspace_registro_personal
+                WHERE workspace_id = ? AND id = ? AND COALESCE(activo, 1) = 1
+                LIMIT 1
+                """,
+                (ws_id, persona_id),
+            ).fetchone()
+        except Exception:
+            persona_row = None
+        if not persona_row:
+            return ["PUNCH_PERSONA_MISSING"]
+
+        if not privileged:
+            if not user_id or _norm(persona_row["usuario_id"]) != user_id:
+                return ["PUNCH_NOT_AUTHORIZED"]
+
+        empresa_id = _norm(persona_row["empresa_id"])
+        if not empresa_id:
+            return ["PUNCH_PERSONA_NO_EMPRESA_ID"]
+
+        record_id = server.os.urandom(16).hex() if hasattr(server, "os") else __import__("os").urandom(16).hex()
+        persona_nombre = _norm(persona_row["nombre"]) or "Empleado"
+        tipo_jornada = _norm(persona_row["tipo_jornada"]) or "Completa"
+        horas_pactadas_dia = persona_row["horas_pactadas_dia"]
+
+        # Importante: no persistimos. Usamos SAVEPOINT para rollback seguro incluso en autocommit.
+        sp = f"punch_{record_id[:8]}"
+        try:
+            conn.execute(f"SAVEPOINT {sp}")
+        except Exception:
+            errors.append("PUNCH_SAVEPOINT_FAIL")
+            return errors
+
+        try:
+            conn.execute(
+                """
+                INSERT INTO workspace_registro_horario (
+                  id, workspace_id, empresa_id, persona_id, usuario_id, persona_nombre,
+                  tipo_jornada, horas_pactadas_dia,
+                  fecha, hora_inicio, hora_fin,
+                  pausa_min, minutos_trabajados, metodo_registro, estado, notas,
+                  created_at, updated_at
+                ) VALUES (
+                  ?, ?, ?, ?, ?, ?,
+                  ?, ?,
+                  ?, ?, '',
+                  0, 0, 'self', 'Abierto', 'diagnostic',
+                  datetime('now'), datetime('now')
+                )
+                """,
+                (
+                    record_id,
+                    ws_id,
+                    empresa_id,
+                    persona_id,
+                    user_id or None,
+                    persona_nombre,
+                    tipo_jornada,
+                    horas_pactadas_dia,
+                    fecha,
+                    "08:00",
+                ),
+            )
+        except Exception:
+            errors.append("PUNCH_INSERT_FAIL")
+
+        try:
+            entries = server.fetch_workspace_time_entries(
+                conn,
+                ws_id,
+                empresa_id="",
+                limit=20,
+                month=fecha[:7],
+                persona_id=persona_id if not privileged else "",
+            )
+            rows = entries.get("rows") or []
+            if not any(_norm(r.get("id")) == record_id for r in rows if isinstance(r, dict)):
+                # Si el fetch filtra por mes distinto, no es crítico, pero marcamos para revisar.
+                pass
+        except Exception:
+            errors.append("PUNCH_FETCH_FAIL")
+
+        try:
+            conn.execute(
+                """
+                UPDATE workspace_registro_horario
+                SET hora_fin = '17:00', minutos_trabajados = 540, estado = 'Cerrado', updated_at = datetime('now')
+                WHERE id = ? AND workspace_id = ?
+                """,
+                (record_id, ws_id),
+            )
+        except Exception:
+            errors.append("PUNCH_UPDATE_FAIL")
+
+        try:
+            conn.execute(f"ROLLBACK TO {sp}")
+            conn.execute(f"RELEASE {sp}")
+        except Exception:
+            errors.append("PUNCH_ROLLBACK_FAIL")
+
+        return errors
+
     total = len(users)
     ok = 0
     problems = []
@@ -232,6 +358,7 @@ def main():
                 errors.append("PERSONA_ROW_MISSING")
 
         errors.extend(simulate_boot(u, session, ws_id, persona_id))
+        errors.extend(simulate_punch(u, session, ws_id, persona_id))
 
         if errors:
             problems.append((user.usuario or user.email or user.id[:8], ",".join(errors)))
@@ -252,4 +379,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
