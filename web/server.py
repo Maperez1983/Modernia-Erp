@@ -17359,6 +17359,25 @@ def ensure_tables(db_path):
             _migration_mark(conn, "perf_indexes_v2")
     except Exception:
         pass
+    # Índices extra (iteración 3): contabilidad hipotecas/seguros (reduce scans en tablas grandes).
+    try:
+        if not _migration_done(conn, "perf_indexes_v3"):
+            backend = _backend_name(conn)
+            idx_prefix = "CREATE INDEX"
+            if backend == "postgres":
+                idx_prefix = "CREATE INDEX CONCURRENTLY"
+            index_sql = [
+                f"{idx_prefix} IF NOT EXISTS idx_gestoria_contabilidad_empresa_hipoteca ON gestoria_contabilidad (empresa_id, hipoteca_id)",
+                f"{idx_prefix} IF NOT EXISTS idx_gestoria_contabilidad_empresa_seguro ON gestoria_contabilidad (empresa_id, seguro_id)",
+            ]
+            for sql in index_sql:
+                try:
+                    conn.execute(sql)
+                except Exception:
+                    pass
+            _migration_mark(conn, "perf_indexes_v3")
+    except Exception:
+        pass
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS ocr_jobs (
@@ -26341,6 +26360,95 @@ def _run_data_continuity_guard(sqlite_db_path: str) -> dict:
     return {"ok": True, "snapshot": snap}
 
 
+def _bool_param(params, key, default=False):
+    try:
+        raw = (params.get(key, [""])[0] or "").strip().lower()
+    except Exception:
+        raw = ""
+    if not raw:
+        return bool(default)
+    return raw in ("1", "true", "yes", "si", "sí", "on")
+
+
+def _hipotecas_sync_enabled():
+    return (os.environ.get("APP_HIPOTECAS_CONTAB_AUTO_SYNC", "1") or "1").strip().lower() not in ("0", "false", "no", "off")
+
+
+def _hipotecas_sync_interval_seconds():
+    try:
+        return max(10, min(3600, int(os.environ.get("APP_HIPOTECAS_CONTAB_SYNC_INTERVAL_SECONDS", "300") or 300)))
+    except Exception:
+        return 300
+
+
+def schedule_hipotecas_contabilidad_sync(db_path, empresa_id):
+    """
+    Programa un sync de contabilidad de hipotecas fuera del request (evita 502/timeouts en PWA/iOS).
+    - Single-flight por empresa_id.
+    - Throttling por intervalo.
+    """
+    eid = str(empresa_id or "").strip()
+    if not eid:
+        return {"scheduled": False, "reason": "missing_empresa_id"}
+    if not _hipotecas_sync_enabled():
+        return {"scheduled": False, "reason": "disabled"}
+    interval_s = _hipotecas_sync_interval_seconds()
+    now_ts = time.time()
+    with Handler._hipotecas_sync_lock:
+        state = Handler._hipotecas_sync_state.get(eid) or {}
+        if state.get("running"):
+            return {"scheduled": False, "reason": "already_running", **state}
+        last_done = float(state.get("last_done") or 0.0)
+        last_started = float(state.get("last_started") or 0.0)
+        # Evita spam si se llama repetidamente: si acabó hace poco o está "stuck" arrancando, no reprogrames.
+        if last_done and (now_ts - last_done) < interval_s:
+            return {"scheduled": False, "reason": "throttled", **state}
+        if last_started and (now_ts - last_started) < 10.0:
+            return {"scheduled": False, "reason": "starting", **state}
+        state = {
+            "running": True,
+            "last_started": now_ts,
+            "last_done": last_done,
+            "last_error": str(state.get("last_error") or "").strip(),
+        }
+        Handler._hipotecas_sync_state[eid] = state
+
+    def _run():
+        err = ""
+        try:
+            conn = get_db(db_path)
+            try:
+                sync_hipotecas_contabilidad_entries(conn, eid)
+                try:
+                    conn.commit()
+                except Exception:
+                    pass
+            finally:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+        except Exception as exc:
+            err = f"{type(exc).__name__}: {exc}"
+            try:
+                Handler._record_api_error("/bg/hipotecas_contabilidad_sync", exc)
+            except Exception:
+                pass
+        finally:
+            done_ts = time.time()
+            with Handler._hipotecas_sync_lock:
+                Handler._hipotecas_sync_state[eid] = {
+                    "running": False,
+                    "last_started": state.get("last_started") or now_ts,
+                    "last_done": done_ts,
+                    "last_error": err,
+                }
+
+    t = threading.Thread(target=_run, name=f"hipotecas-sync-{eid[:8]}", daemon=True)
+    t.start()
+    return {"scheduled": True, **state}
+
+
 class Handler(BaseHTTPRequestHandler):
     db_path = DB_DEFAULT
     ocr_db_path = OCR_DB_DEFAULT
@@ -26362,6 +26470,8 @@ class Handler(BaseHTTPRequestHandler):
     _started_at = datetime.now().isoformat()
     _data_guard_done = False
     _data_guard_result = {}
+    _hipotecas_sync_lock = threading.Lock()
+    _hipotecas_sync_state = {}  # {empresa_id: {running, last_started, last_done, last_error}}
 
     @staticmethod
     def _record_api_error(path, exc):
@@ -42492,98 +42602,125 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/gestoria_contabilidad":
-            empresa_id = params.get("empresa_id", [""])[0]
-            if not empresa_id:
-                json_response(self, {"error": "empresa_id requerido"}, status=400)
-                return
-            q = params.get("q", [""])[0].strip()
-            limit_raw = (params.get("limit", ["300"])[0] or "300").strip()
             try:
-                limit = int(limit_raw)
-            except ValueError:
-                limit = 300
-            limit = max(1, min(limit, 1000))
-            seguros_only = (params.get("seguros_only", ["0"])[0] or "0").strip() in ("1", "true", "yes")
-            hipotecas_only = (params.get("hipotecas_only", ["0"])[0] or "0").strip() in ("1", "true", "yes")
-            if hipotecas_only:
-                sync_hipotecas_contabilidad_entries(conn, empresa_id)
-                conn.commit()
-            where = ["gc.empresa_id = ?"]
-            values = [empresa_id]
-            if seguros_only:
-                where.append(seguros_contabilidad_where_clause("gc"))
-            if hipotecas_only:
-                where.append(hipotecas_contabilidad_where_clause("gc"))
-            if q:
-                where.append("(gc.concepto LIKE ? OR c.nombre LIKE ? OR h.cliente LIKE ? OR h.banco LIKE ?)")
-                values.extend([f"%{q}%", f"%{q}%", f"%{q}%", f"%{q}%"])
-            where_clause = " AND ".join(where)
-            summary = conn.execute(
-                f"""
-                SELECT
-                  COUNT(*) AS total_rows,
-                  SUM(CASE WHEN LOWER(TRIM(COALESCE(gc.tipo, ''))) = 'gasto' THEN COALESCE(gc.importe, 0) ELSE 0 END) AS gastos,
-                  SUM(CASE WHEN LOWER(TRIM(COALESCE(gc.tipo, ''))) = 'gasto' THEN 0 ELSE COALESCE(gc.importe, 0) END) AS ingresos
-                FROM gestoria_contabilidad gc
-                LEFT JOIN clientes c ON c.id = gc.cliente_id
-                LEFT JOIN seguros s ON s.id = gc.seguro_id
-                LEFT JOIN hipotecas h ON h.id = gc.hipoteca_id
-                WHERE {where_clause}
-                """,
-                values,
-            ).fetchone()
-            rows = conn.execute(
-                f"""
-                SELECT gc.id, gc.fecha, gc.concepto, gc.gestion, gc.tipo, gc.importe, gc.notas,
-                       gc.cliente_id, gc.cliente_ids_json, gc.seguro_id, gc.hipoteca_id, s.cliente_id AS seguro_cliente_id,
-                       COALESCE(NULLIF(gc.poliza_numero, ''), s.poliza_numero, '') AS poliza_numero,
-                       COALESCE(c.nombre, h.cliente, '') AS cliente,
-                       COALESCE(h.cliente, '') AS hipoteca_cliente,
-                       COALESCE(h.banco, '') AS hipoteca_banco,
-                       COALESCE(h.estado, '') AS hipoteca_estado,
-                       COALESCE(h.fecha_firma, '') AS hipoteca_fecha_firma
-                FROM gestoria_contabilidad gc
-                LEFT JOIN clientes c ON c.id = gc.cliente_id
-                LEFT JOIN seguros s ON s.id = gc.seguro_id
-                LEFT JOIN hipotecas h ON h.id = gc.hipoteca_id
-                WHERE {where_clause}
-                ORDER BY gc.fecha DESC
-                LIMIT ?
-                """,
-                [*values, limit],
-            ).fetchall()
-            out_rows = []
-            for raw in rows:
-                row = dict(raw)
-                seguro_cliente_id = str(row.get("seguro_cliente_id") or "").strip()
-                notas_up = str(row.get("notas") or "").upper()
-                if seguro_cliente_id and notas_up.startswith("AUTO CRM SEGUROS"):
-                    assigned = parse_cliente_ids_payload(row.get("cliente_ids_json"))
-                    if not assigned and row.get("cliente_id"):
-                        assigned = [str(row.get("cliente_id")).strip()]
-                    if len(assigned) != 1 or assigned[0] != seguro_cliente_id:
-                        row["cliente_id"] = seguro_cliente_id
-                        row["cliente_ids_json"] = json.dumps([seguro_cliente_id], ensure_ascii=False)
-                row.pop("seguro_cliente_id", None)
-                out_rows.append(row)
-            ingresos = round(parse_money_value(summary["ingresos"] if summary else 0), 2)
-            gastos = round(parse_money_value(summary["gastos"] if summary else 0), 2)
-            resultado = round(ingresos - gastos, 2)
-            rentabilidad_ratio = round(resultado / gastos, 4) if abs(gastos) >= 0.005 else None
-            json_response(
-                self,
-                {
-                    "rows": out_rows,
-                    "total_rows": int(summary["total_rows"] or 0) if summary else 0,
-                    "summary": {
-                        "ingresos": ingresos,
-                        "gastos": gastos,
-                        "resultado": resultado,
-                        "rentabilidad_ratio": rentabilidad_ratio,
+                empresa_id = params.get("empresa_id", [""])[0]
+                if not empresa_id:
+                    json_response(self, {"error": "empresa_id requerido"}, status=400)
+                    return
+                q = params.get("q", [""])[0].strip()
+                limit_raw = (params.get("limit", ["300"])[0] or "300").strip()
+                try:
+                    limit = int(limit_raw)
+                except ValueError:
+                    limit = 300
+                limit = max(1, min(limit, 1000))
+                seguros_only = _bool_param(params, "seguros_only", default=False)
+                hipotecas_only = _bool_param(params, "hipotecas_only", default=False)
+                want_sync = _bool_param(params, "sync", default=False)
+                sync_state = {}
+                # Importante: NO ejecutar sync pesado dentro del request (provoca 502/timeouts).
+                if hipotecas_only and (want_sync or _hipotecas_sync_enabled()):
+                    try:
+                        sync_state = schedule_hipotecas_contabilidad_sync(self.db_path, empresa_id)
+                    except Exception:
+                        sync_state = {"scheduled": False, "reason": "schedule_failed"}
+
+                where = ["gc.empresa_id = ?"]
+                values = [empresa_id]
+                if seguros_only:
+                    where.append(seguros_contabilidad_where_clause("gc"))
+                if hipotecas_only:
+                    where.append(hipotecas_contabilidad_where_clause("gc"))
+                if q:
+                    where.append("(gc.concepto LIKE ? OR c.nombre LIKE ? OR h.cliente LIKE ? OR h.banco LIKE ?)")
+                    values.extend([f"%{q}%", f"%{q}%", f"%{q}%", f"%{q}%"])
+                where_clause = " AND ".join(where)
+                summary = None
+                try:
+                    summary = conn.execute(
+                        f"""
+                        SELECT
+                          COUNT(*) AS total_rows,
+                          SUM(CASE WHEN LOWER(TRIM(COALESCE(gc.tipo, ''))) = 'gasto' THEN COALESCE(gc.importe, 0) ELSE 0 END) AS gastos,
+                          SUM(CASE WHEN LOWER(TRIM(COALESCE(gc.tipo, ''))) = 'gasto' THEN 0 ELSE COALESCE(gc.importe, 0) END) AS ingresos
+                        FROM gestoria_contabilidad gc
+                        LEFT JOIN clientes c ON c.id = gc.cliente_id
+                        LEFT JOIN seguros s ON s.id = gc.seguro_id
+                        LEFT JOIN hipotecas h ON h.id = gc.hipoteca_id
+                        WHERE {where_clause}
+                        """,
+                        values,
+                    ).fetchone()
+                except Exception as exc:
+                    Handler._record_api_error("/api/gestoria_contabilidad:summary", exc)
+                    summary = {"total_rows": 0, "gastos": 0, "ingresos": 0}
+
+                rows = []
+                try:
+                    rows = conn.execute(
+                        f"""
+                        SELECT gc.id, gc.fecha, gc.concepto, gc.gestion, gc.tipo, gc.importe, gc.notas,
+                               gc.cliente_id, gc.cliente_ids_json, gc.seguro_id, gc.hipoteca_id, s.cliente_id AS seguro_cliente_id,
+                               COALESCE(NULLIF(gc.poliza_numero, ''), s.poliza_numero, '') AS poliza_numero,
+                               COALESCE(c.nombre, h.cliente, '') AS cliente,
+                               COALESCE(h.cliente, '') AS hipoteca_cliente,
+                               COALESCE(h.banco, '') AS hipoteca_banco,
+                               COALESCE(h.estado, '') AS hipoteca_estado,
+                               COALESCE(h.fecha_firma, '') AS hipoteca_fecha_firma
+                        FROM gestoria_contabilidad gc
+                        LEFT JOIN clientes c ON c.id = gc.cliente_id
+                        LEFT JOIN seguros s ON s.id = gc.seguro_id
+                        LEFT JOIN hipotecas h ON h.id = gc.hipoteca_id
+                        WHERE {where_clause}
+                        ORDER BY gc.fecha DESC
+                        LIMIT ?
+                        """,
+                        [*values, limit],
+                    ).fetchall()
+                except Exception as exc:
+                    Handler._record_api_error("/api/gestoria_contabilidad:rows", exc)
+                    json_response(self, {"error": "Base de datos ocupada. Reintenta.", "detail": "gestoria_contabilidad_rows_failed"}, status=503)
+                    return
+
+                out_rows = []
+                for raw in rows:
+                    row = dict(raw)
+                    seguro_cliente_id = str(row.get("seguro_cliente_id") or "").strip()
+                    notas_up = str(row.get("notas") or "").upper()
+                    if seguro_cliente_id and notas_up.startswith("AUTO CRM SEGUROS"):
+                        assigned = parse_cliente_ids_payload(row.get("cliente_ids_json"))
+                        if not assigned and row.get("cliente_id"):
+                            assigned = [str(row.get("cliente_id")).strip()]
+                        if len(assigned) != 1 or assigned[0] != seguro_cliente_id:
+                            row["cliente_id"] = seguro_cliente_id
+                            row["cliente_ids_json"] = json.dumps([seguro_cliente_id], ensure_ascii=False)
+                    row.pop("seguro_cliente_id", None)
+                    out_rows.append(row)
+
+                ingresos = round(parse_money_value(row_value(summary, "ingresos", 0) if summary else 0), 2)
+                gastos = round(parse_money_value(row_value(summary, "gastos", 0) if summary else 0), 2)
+                total_rows = int(row_value(summary, "total_rows", 0) if summary else 0)
+                resultado = round(ingresos - gastos, 2)
+                rentabilidad_ratio = round(resultado / gastos, 4) if abs(gastos) >= 0.005 else None
+                json_response(
+                    self,
+                    {
+                        "rows": out_rows,
+                        "total_rows": total_rows,
+                        "summary": {
+                            "ingresos": ingresos,
+                            "gastos": gastos,
+                            "resultado": resultado,
+                            "rentabilidad_ratio": rentabilidad_ratio,
+                        },
+                        "hipotecas_sync": sync_state if hipotecas_only else {},
                     },
-                },
-            )
-            return
+                )
+                return
+            except Exception as exc:
+                Handler._record_api_error("/api/gestoria_contabilidad", exc)
+                json_response(self, {"error": "Error interno"}, status=500)
+                return
 
         if path == "/api/gestoria_facturas":
             cliente_id = params.get("cliente_id", [""])[0]
