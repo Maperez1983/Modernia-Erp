@@ -2257,7 +2257,7 @@ def parse_iso_date(value):
     if not raw:
         return None
     head = raw.split("T", 1)[0].split(" ", 1)[0]
-    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y"):
+    for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%d/%m/%Y", "%d-%m-%Y", "%d/%m/%y", "%d-%m-%y"):
         try:
             return datetime.strptime(head, fmt).date()
         except Exception:
@@ -45925,10 +45925,10 @@ class Handler(BaseHTTPRequestHandler):
             )
             return
 
-        if path == "/api/fincas_seguros_dashboard":
-            empresa_id = params.get("empresa_id", [""])[0]
-            year = params.get("year", [""])[0]
-            uploaded_only = (params.get("uploaded_only", ["1"])[0] or "1").strip() in ("1", "true", "yes")
+            if path == "/api/fincas_seguros_dashboard":
+                empresa_id = params.get("empresa_id", [""])[0]
+                year = params.get("year", [""])[0]
+                uploaded_only = (params.get("uploaded_only", ["1"])[0] or "1").strip() in ("1", "true", "yes")
             if not empresa_id:
                 json_response(self, {"error": "empresa_id requerido"}, status=400)
                 return
@@ -45979,12 +45979,15 @@ class Handler(BaseHTTPRequestHandler):
                 else "TRIM(COALESCE(fecha_efecto, '')) GLOB '[0-3][0-9]-[0-1][0-9]-[1-2][0-9][0-9][0-9]'"
             )
             max_year = datetime.now().year + 1
+            max_year_2 = int(max_year % 100)
             if is_pg:
                 fecha_head = "substr(TRIM(COALESCE(fecha_efecto, '')), 1, 10)"
                 created_head = "substr(TRIM(COALESCE(created_at, '')), 1, 10)"
                 iso_match = f"{fecha_head} ~ '^[0-9]{{4}}-[0-9]{{2}}-[0-9]{{2}}$'"
-                dmy_dash_match = f"{fecha_head} ~ '^[0-9]{{2}}-[0-9]{{2}}-[0-9]{{4}}$'"
-                dmy_slash_match = f"{fecha_head} ~ '^[0-9]{{2}}/[0-9]{{2}}/[0-9]{{4}}$'"
+                dmy_dash_match = f"{fecha_head} ~ '^[0-9]{{1,2}}-[0-9]{{1,2}}-[0-9]{{4}}$'"
+                dmy_slash_match = f"{fecha_head} ~ '^[0-9]{{1,2}}/[0-9]{{1,2}}/[0-9]{{4}}$'"
+                dmy_dash_match_2 = f"{fecha_head} ~ '^[0-9]{{1,2}}-[0-9]{{1,2}}-[0-9]{{2}}$'"
+                dmy_slash_match_2 = f"{fecha_head} ~ '^[0-9]{{1,2}}/[0-9]{{1,2}}/[0-9]{{2}}$'"
                 created_year_match = f"{created_head} ~ '^[0-9]{{4}}'"
                 year_expr = (
                     "COALESCE("
@@ -45993,16 +45996,31 @@ class Handler(BaseHTTPRequestHandler):
                     f"  AND CAST(substr({fecha_head}, 1, 4) AS INTEGER) BETWEEN 2000 AND {max_year} "
                     f"THEN substr({fecha_head}, 1, 4) "
                     f"WHEN {dmy_slash_match} "
-                    f"  AND CAST(substr({fecha_head}, 7, 4) AS INTEGER) BETWEEN 2000 AND {max_year} "
-                    f"THEN substr({fecha_head}, 7, 4) "
+                    f"  AND CAST(right({fecha_head}, 4) AS INTEGER) BETWEEN 2000 AND {max_year} "
+                    f"THEN right({fecha_head}, 4) "
                     f"WHEN {dmy_dash_match} "
-                    f"  AND CAST(substr({fecha_head}, 7, 4) AS INTEGER) BETWEEN 2000 AND {max_year} "
-                    f"THEN substr({fecha_head}, 7, 4) "
+                    f"  AND CAST(right({fecha_head}, 4) AS INTEGER) BETWEEN 2000 AND {max_year} "
+                    f"THEN right({fecha_head}, 4) "
+                    f"WHEN {dmy_slash_match_2} "
+                    f"  AND CAST('20' || right({fecha_head}, 2) AS INTEGER) BETWEEN 2000 AND {max_year} "
+                    f"  AND CAST(right({fecha_head}, 2) AS INTEGER) BETWEEN 0 AND {max_year_2} "
+                    f"THEN '20' || right({fecha_head}, 2) "
+                    f"WHEN {dmy_dash_match_2} "
+                    f"  AND CAST('20' || right({fecha_head}, 2) AS INTEGER) BETWEEN 2000 AND {max_year} "
+                    f"  AND CAST(right({fecha_head}, 2) AS INTEGER) BETWEEN 0 AND {max_year_2} "
+                    f"THEN '20' || right({fecha_head}, 2) "
                     "ELSE NULL END, "
                     f"CASE WHEN {created_year_match} THEN substr({created_head}, 1, 4) ELSE NULL END"
                     ")"
                 )
             else:
+                fecha_head = "substr(TRIM(COALESCE(fecha_efecto, '')), 1, 10)"
+                created_head = "substr(TRIM(COALESCE(created_at, '')), 1, 10)"
+                iso_match = f"{fecha_head} GLOB '[1-2][0-9][0-9][0-9]-[0-1][0-9]-[0-3][0-9]'"
+                dmy_slash_yyyy = f"{fecha_head} LIKE '%/%/%' AND substr({fecha_head}, -4) GLOB '[1-2][0-9][0-9][0-9]'"
+                dmy_dash_yyyy = f"{fecha_head} LIKE '%-%-%' AND ({iso_match}) = 0 AND substr({fecha_head}, -4) GLOB '[1-2][0-9][0-9][0-9]'"
+                dmy_slash_yy = f"{fecha_head} LIKE '%/%/%' AND substr({fecha_head}, -2) GLOB '[0-9][0-9]'"
+                dmy_dash_yy = f"{fecha_head} LIKE '%-%-%' AND ({iso_match}) = 0 AND substr({fecha_head}, -2) GLOB '[0-9][0-9]'"
                 year_expr = (
                     "COALESCE("
                     "CASE "
@@ -46010,16 +46028,26 @@ class Handler(BaseHTTPRequestHandler):
                     "  AND CAST(STRFTIME('%Y', DATE(fecha_efecto)) AS INTEGER) BETWEEN 2000 "
                     "      AND (CAST(STRFTIME('%Y','now','localtime') AS INTEGER) + 1) "
                     "THEN STRFTIME('%Y', DATE(fecha_efecto)) "
-                    f"WHEN {slash_match} "
-                    "  AND CAST(SUBSTR(TRIM(fecha_efecto), 7, 4) AS INTEGER) BETWEEN 2000 "
+                    f"WHEN {iso_match} "
+                    "  AND CAST(substr(" + fecha_head + ", 1, 4) AS INTEGER) BETWEEN 2000 "
                     "      AND (CAST(STRFTIME('%Y','now','localtime') AS INTEGER) + 1) "
-                    "THEN SUBSTR(TRIM(fecha_efecto), 7, 4) "
-                    f"WHEN {dash_match} "
-                    "  AND CAST(SUBSTR(TRIM(fecha_efecto), 7, 4) AS INTEGER) BETWEEN 2000 "
+                    "THEN substr(" + fecha_head + ", 1, 4) "
+                    f"WHEN {dmy_slash_yyyy} "
+                    "  AND CAST(substr(" + fecha_head + ", -4) AS INTEGER) BETWEEN 2000 "
                     "      AND (CAST(STRFTIME('%Y','now','localtime') AS INTEGER) + 1) "
-                    "THEN SUBSTR(TRIM(fecha_efecto), 7, 4) "
+                    "THEN substr(" + fecha_head + ", -4) "
+                    f"WHEN {dmy_dash_yyyy} "
+                    "  AND CAST(substr(" + fecha_head + ", -4) AS INTEGER) BETWEEN 2000 "
+                    "      AND (CAST(STRFTIME('%Y','now','localtime') AS INTEGER) + 1) "
+                    "THEN substr(" + fecha_head + ", -4) "
+                    f"WHEN {dmy_slash_yy} "
+                    f"  AND CAST(substr({fecha_head}, -2) AS INTEGER) BETWEEN 0 AND {max_year_2} "
+                    f"THEN '20' || substr({fecha_head}, -2) "
+                    f"WHEN {dmy_dash_yy} "
+                    f"  AND CAST(substr({fecha_head}, -2) AS INTEGER) BETWEEN 0 AND {max_year_2} "
+                    f"THEN '20' || substr({fecha_head}, -2) "
                     "ELSE NULL END, "
-                    "STRFTIME('%Y', created_at)"
+                    f"STRFTIME('%Y', {created_head})"
                     ")"
                 )
             exclude_sin_seguro = f"({compania_expr} IS NULL OR {compania_expr} = '' OR {compania_expr} != 'sin seguro')"

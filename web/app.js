@@ -23107,49 +23107,50 @@ const renderFincasDashboard = (empresaId) => {
       });
       return clean || rows[0] || null;
     };
-    const topCompania = pickTopReal(comisionCompanias);
-    const topRamo = pickTopReal(comisionRamos);
-    const comisionTotalYear = comisionCompanias.reduce(
-      (acc, item) => acc + Number(item?.total || 0),
-      0
-    );
-    const kpis = [
-      {
-        title: `Conversión ${current.year || effectiveSelectedYear}`,
-        value:
-          Number((current.aceptadas || 0) + (current.rechazada || 0)) > 0
-            ? `${(current.conversion || 0).toFixed(1)}%`
-            : "-",
-        note:
-          Number((current.aceptadas || 0) + (current.rechazada || 0)) > 0
-            ? "Aceptadas / (Aceptadas + Rechazadas)"
-            : "Sin cierres en el año",
-        action: () => openSegurosBdtFromDashboard({ estadoMode: "en_vigor" }),
-      },
-      {
-        title: `En vigor ${current.year || effectiveSelectedYear}`,
-        value: numberFormatter.format(current.en_vigor || 0),
-        note: "Pólizas activas",
-        action: () => openSegurosBdtFromDashboard({ estadoMode: "en_vigor" }),
-      },
-      {
-        title: `Presupuestos ${current.year || effectiveSelectedYear}`,
-        value: numberFormatter.format(current.presupuesto || 0),
-        note: "En estado Presupuesto",
-        action: () =>
-          openSegurosBdtFromDashboard({
-            estadoMode: "no_vigor",
-            estadoContains: "presupuesto",
-          }),
-      },
-      {
-        title: `Rechazadas ${current.year || effectiveSelectedYear}`,
-        value: numberFormatter.format(current.rechazada || 0),
-        note: "No aceptadas",
-        action: () =>
-          openSegurosBdtFromDashboard({
-            estadoMode: "no_vigor",
-            estadoContains: "rechaz",
+	    const topCompania = pickTopReal(comisionCompanias);
+	    const topRamo = pickTopReal(comisionRamos);
+	    const comisionTotalYear = comisionCompanias.reduce(
+	      (acc, item) => acc + Number(item?.total || 0),
+	      0
+	    );
+	    const yearLabel = current.year || effectiveSelectedYear;
+	    const kpis = [
+	      {
+	        title: "Conversión (total)",
+	        value:
+	          Number((current.aceptadas_total || 0) + (current.rechazada_total || 0)) > 0
+	            ? `${(current.conversion_total || 0).toFixed(1)}%`
+	            : "-",
+	        note:
+	          Number((current.aceptadas || 0) + (current.rechazada || 0)) > 0
+	            ? `En ${yearLabel}: ${(current.conversion || 0).toFixed(1)}%`
+	            : `Sin cierres en ${yearLabel}`,
+	        action: () => openSegurosBdtFromDashboard({ estadoMode: "en_vigor" }),
+	      },
+	      {
+	        title: "En vigor (total)",
+	        value: numberFormatter.format(current.en_vigor_total ?? current.en_vigor ?? 0),
+	        note: "Pólizas activas",
+	        action: () => openSegurosBdtFromDashboard({ estadoMode: "en_vigor" }),
+	      },
+	      {
+	        title: "Presupuestos (total)",
+	        value: numberFormatter.format(current.presupuesto_total ?? current.presupuesto ?? 0),
+	        note: `En ${yearLabel}: ${numberFormatter.format(current.presupuesto || 0)}`,
+	        action: () =>
+	          openSegurosBdtFromDashboard({
+	            estadoMode: "no_vigor",
+	            estadoContains: "presupuesto",
+	          }),
+	      },
+	      {
+	        title: "Rechazadas (total)",
+	        value: numberFormatter.format(current.rechazada_total ?? current.rechazada ?? 0),
+	        note: `En ${yearLabel}: ${numberFormatter.format(current.rechazada || 0)}`,
+	        action: () =>
+	          openSegurosBdtFromDashboard({
+	            estadoMode: "no_vigor",
+	            estadoContains: "rechaz",
           }),
       },
       {
