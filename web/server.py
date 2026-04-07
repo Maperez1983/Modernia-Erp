@@ -47379,10 +47379,19 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "empresa_id requerido"}, status=400)
                 return
             in_vigor_expr = in_vigor_policy_filter()
-            uploaded_clause = uploaded_policy_filter()
+            # Importante: muchas queries usan alias `s`. El filtro de subida debe ser:
+            # - sin alias para el "probe" (resolve_uploaded_only_param)
+            # - con alias para las queries principales (EXISTS usa la PK de la tabla externa)
+            uploaded_clause_probe = uploaded_policy_filter()
+            uploaded_clause = uploaded_policy_filter("s")
             compania_expr = "LOWER(TRIM(compania))"
             exclude_sin_seguro = f"({compania_expr} IS NULL OR {compania_expr} = '' OR {compania_expr} != 'sin seguro')"
-            uploaded_param = resolve_uploaded_only_param(conn, uploaded_only, empresa_id=empresa_id, uploaded_clause=uploaded_clause)
+            uploaded_param = resolve_uploaded_only_param(
+                conn,
+                uploaded_only,
+                empresa_id=empresa_id,
+                uploaded_clause=uploaded_clause_probe,
+            )
 
             # Normaliza importes almacenados como texto (ej: "7.397,96 €") a REAL.
             base_money = "COALESCE(CAST(s.prima_total AS TEXT), '')"
