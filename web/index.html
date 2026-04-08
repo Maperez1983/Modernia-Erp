@@ -230,6 +230,10 @@
 	                  Empresa
 	                  <input name="nombre" disabled />
 	                </label>
+                  <label>
+                    Razón social
+                    <input name="razon_social" placeholder="Ej. Modernia Asesores S.L." />
+                  </label>
 	                <label>
 	                  CIF/NIF
 	                  <input name="nif" placeholder="B12345678" />
@@ -238,6 +242,54 @@
 	                  Dirección
 	                  <input name="direccion" placeholder="C/ ... · Ciudad" />
 	                </label>
+                  <label class="span-2">
+                    Dirección fiscal
+                    <input name="direccion_fiscal" placeholder="(si es distinta)" />
+                  </label>
+                  <label>
+                    Teléfono
+                    <input name="telefono" placeholder="+34 ..." />
+                  </label>
+                  <label>
+                    Email
+                    <input name="email" type="email" placeholder="info@empresa.com" />
+                  </label>
+                  <label class="span-2">
+                    Web
+                    <input name="web" placeholder="https://..." />
+                  </label>
+                  <label>
+                    Contacto (nombre)
+                    <input name="contacto_nombre" placeholder="Persona responsable" />
+                  </label>
+                  <label>
+                    Contacto (email)
+                    <input name="contacto_email" type="email" placeholder="contacto@..." />
+                  </label>
+                  <label>
+                    Contacto (teléfono)
+                    <input name="contacto_telefono" placeholder="+34 ..." />
+                  </label>
+                  <label class="span-2">
+                    Logo (URL)
+                    <input name="logo_url" placeholder="https://..." />
+                  </label>
+                  <div class="span-2" style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">
+                    <div style="min-width:180px">
+                      <div class="muted" style="margin-bottom:6px">Vista previa</div>
+                      <div style="width:180px;height:64px;border:1px solid #e1e5ea;border-radius:12px;display:flex;align-items:center;justify-content:center;background:#fff;overflow:hidden">
+                        <img id="workspaceCompanyLogoPreview" alt="" style="max-width:170px;max-height:56px;object-fit:contain" />
+                      </div>
+                    </div>
+                    <div style="flex:1;min-width:240px">
+                      <div class="muted" style="margin-bottom:6px">Subir logo (PNG/JPG/SVG)</div>
+                      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+                        <input id="workspaceCompanyLogoFile" type="file" accept="image/*" />
+                        <button type="button" id="workspaceCompanyLogoUploadBtn" class="secondary ghost">Subir</button>
+                        <span id="workspaceCompanyLogoStatus" class="muted"></span>
+                      </div>
+                    </div>
+                  </div>
 	                <label class="span-2">
 	                  Sector / actividad
 	                  <input name="sector" placeholder="Ej. Administración de fincas, inmobiliaria..." />
@@ -270,6 +322,18 @@
 	                  Vacaciones días/año
 	                  <input name="vacaciones_dias_anuales" placeholder="22" />
 	                </label>
+                  <label class="span-2">
+                    IBAN (para facturas/remesas)
+                    <input name="iban" placeholder="ES00 0000 0000 00 0000000000" />
+                  </label>
+                  <label>
+                    BIC/SWIFT
+                    <input name="bic" placeholder="XXXXESXX" />
+                  </label>
+                  <label class="span-2">
+                    Banco
+                    <input name="banco_nombre" placeholder="Ej. Banco Santander" />
+                  </label>
 	                <div class="form-actions span-2">
 	                  <button type="submit">Guardar empresa</button>
 	                  <span id="workspaceCompanyFormStatus" class="muted"></span>
@@ -327,7 +391,7 @@
             </div>
             <div id="workspaceEngineTabs" class="workspace-engine-nav">
               <button type="button" class="tab active" data-workspace-engine-tab="documental">Documental</button>
-              <button type="button" class="tab" data-workspace-engine-tab="facturacion">Facturación</button>
+              <button type="button" class="tab" data-workspace-engine-tab="facturacion">Presupuestos · Facturación</button>
               <button type="button" class="tab" data-workspace-engine-tab="facturas_recibidas">Facturas recibidas</button>
               <button type="button" class="tab" data-workspace-engine-tab="portal_cliente">Portal cliente</button>
               <button type="button" class="tab" data-workspace-engine-tab="registro_horario">Registro horario</button>
@@ -353,8 +417,8 @@
               <div class="form-card">
                 <div class="section-head">
                   <div>
-                    <h3>Presupuestos del grupo</h3>
-                    <p class="muted">Propuestas comerciales para reformas, gestoría y fincas dentro del motor económico del workspace.</p>
+                    <h3>Presupuestos y encargos (por empresa)</h3>
+                    <p class="muted">Cada presupuesto se emite desde una empresa del grupo (logo + datos fiscales) y puede generar hoja de encargo.</p>
                   </div>
                 </div>
                 <div id="workspaceBudgetSummary"></div>
@@ -7641,7 +7705,7 @@
     <script src="ui-foundation.js?v=2"></script>
     <script src="app-auth.js?v=10"></script>
     <script src="app-routing.js?v=7"></script>
-    <script src="app.js?v=431"></script>
+    <script src="app.js?v=432"></script>
     <script>
       (function () {
         if (!("serviceWorker" in navigator)) return;

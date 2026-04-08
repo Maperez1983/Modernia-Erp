@@ -16432,6 +16432,13 @@ def sanitize_renta_entry(entry):
         return {}
     sanitized = dict(entry)
     ejercicio = str(entry.get("ejercicio") or "").strip()
+    if not ejercicio:
+        ejercicio = str(sanitized.get("ejercicio") or "").strip()
+    if not re.match(r"^20[0-9]{2}$", ejercicio or ""):
+        entry_id = str(sanitized.get("id") or entry.get("id") or "").strip()
+        match = re.match(r"^renta-(20[0-9]{2})-", entry_id)
+        if match:
+            ejercicio = match.group(1)
     if ejercicio:
         sanitized["ejercicio"] = ejercicio
 
@@ -17725,8 +17732,19 @@ def ensure_tables(db_path):
     ensure_auth_sessions_table(conn)
     ensure_s3_grants_table(conn)
     ensure_column(conn, "empresas", "logo_url", "logo_url TEXT")
+    ensure_column(conn, "empresas", "razon_social", "razon_social TEXT")
     ensure_column(conn, "empresas", "nif", "nif TEXT")
     ensure_column(conn, "empresas", "direccion", "direccion TEXT")
+    ensure_column(conn, "empresas", "direccion_fiscal", "direccion_fiscal TEXT")
+    ensure_column(conn, "empresas", "telefono", "telefono TEXT")
+    ensure_column(conn, "empresas", "email", "email TEXT")
+    ensure_column(conn, "empresas", "web", "web TEXT")
+    ensure_column(conn, "empresas", "contacto_nombre", "contacto_nombre TEXT")
+    ensure_column(conn, "empresas", "contacto_email", "contacto_email TEXT")
+    ensure_column(conn, "empresas", "contacto_telefono", "contacto_telefono TEXT")
+    ensure_column(conn, "empresas", "iban", "iban TEXT")
+    ensure_column(conn, "empresas", "bic", "bic TEXT")
+    ensure_column(conn, "empresas", "banco_nombre", "banco_nombre TEXT")
     ensure_column(conn, "empresas", "sector", "sector TEXT")
     ensure_column(conn, "empresas", "cnae", "cnae TEXT")
     ensure_column(conn, "empresas", "cnaes_json", "cnaes_json TEXT")
@@ -24953,8 +24971,25 @@ def fetch_workspace_invoice_pdf_payload(conn, invoice_id, workspace_id=None, tok
         return None
     invoice = conn.execute(
         """
-        SELECT wf.*, COALESCE(w.nombre, '') AS workspace_nombre, COALESCE(e.nombre, '') AS empresa_nombre,
-               COALESCE(c.nombre, '') AS cliente_nombre, COALESCE(c.nif, '') AS cliente_nif, COALESCE(c.email, '') AS cliente_email
+        SELECT
+          wf.*,
+          COALESCE(w.nombre, '') AS workspace_nombre,
+          COALESCE(e.nombre, '') AS empresa_nombre,
+          COALESCE(e.logo_url, '') AS empresa_logo_url,
+          COALESCE(e.razon_social, '') AS empresa_razon_social,
+          COALESCE(e.nif, '') AS empresa_nif,
+          COALESCE(e.direccion, '') AS empresa_direccion,
+          COALESCE(e.direccion_fiscal, '') AS empresa_direccion_fiscal,
+          COALESCE(e.telefono, '') AS empresa_telefono,
+          COALESCE(e.email, '') AS empresa_email,
+          COALESCE(e.web, '') AS empresa_web,
+          COALESCE(e.iban, '') AS empresa_iban,
+          COALESCE(e.bic, '') AS empresa_bic,
+          COALESCE(e.banco_nombre, '') AS empresa_banco_nombre,
+          COALESCE(c.nombre, '') AS cliente_nombre,
+          COALESCE(c.nif, '') AS cliente_nif,
+          COALESCE(c.email, '') AS cliente_email,
+          COALESCE(c.telefono, '') AS cliente_telefono
         FROM workspace_facturacion wf
         LEFT JOIN workspaces w ON w.id = wf.workspace_id
         LEFT JOIN empresas e ON e.id = wf.empresa_id
@@ -24980,8 +25015,26 @@ def fetch_workspace_invoice_pdf_payload(conn, invoice_id, workspace_id=None, tok
     return {
         "invoice": dict(invoice),
         "workspace": {"nombre": invoice["workspace_nombre"]},
-        "company": {"nombre": invoice["empresa_nombre"]},
-        "client": {"nombre": invoice["cliente_nombre"], "nif": invoice["cliente_nif"], "email": invoice["cliente_email"]},
+        "company": {
+            "nombre": invoice["empresa_nombre"],
+            "logo_url": invoice["empresa_logo_url"],
+            "razon_social": invoice["empresa_razon_social"],
+            "nif": invoice["empresa_nif"],
+            "direccion": invoice["empresa_direccion"],
+            "direccion_fiscal": invoice["empresa_direccion_fiscal"],
+            "telefono": invoice["empresa_telefono"],
+            "email": invoice["empresa_email"],
+            "web": invoice["empresa_web"],
+            "iban": invoice["empresa_iban"],
+            "bic": invoice["empresa_bic"],
+            "banco_nombre": invoice["empresa_banco_nombre"],
+        },
+        "client": {
+            "nombre": invoice["cliente_nombre"],
+            "nif": invoice["cliente_nif"],
+            "email": invoice["cliente_email"],
+            "telefono": invoice["cliente_telefono"],
+        },
         "collections": [dict(row) for row in collections],
     }
 
@@ -25070,8 +25123,19 @@ def fetch_workspace_detail(conn, workspace_id):
         SELECT
           e.id,
           e.nombre,
+          COALESCE(e.razon_social, '') AS razon_social,
           COALESCE(e.nif, '') AS nif,
           COALESCE(e.direccion, '') AS direccion,
+          COALESCE(e.direccion_fiscal, '') AS direccion_fiscal,
+          COALESCE(e.telefono, '') AS telefono,
+          COALESCE(e.email, '') AS email,
+          COALESCE(e.web, '') AS web,
+          COALESCE(e.contacto_nombre, '') AS contacto_nombre,
+          COALESCE(e.contacto_email, '') AS contacto_email,
+          COALESCE(e.contacto_telefono, '') AS contacto_telefono,
+          COALESCE(e.iban, '') AS iban,
+          COALESCE(e.bic, '') AS bic,
+          COALESCE(e.banco_nombre, '') AS banco_nombre,
           COALESCE(e.sector, '') AS sector,
           COALESCE(e.cnae, '') AS cnae,
           COALESCE(e.cnaes_json, '') AS cnaes_json,
@@ -25755,63 +25819,89 @@ def format_eur(value):
 
 
 def build_workspace_invoice_pdf(invoice, workspace, company, client, collections):
-    lines = [
-        workspace.get("nombre") or "Workspace",
-        company.get("nombre") or "Empresa",
-        "",
-        f"Factura: {'-'.join(part for part in [invoice.get('serie'), invoice.get('numero')] if part) or invoice.get('id') or '-'}",
-        f"Fecha emisión: {invoice.get('fecha_emision') or '-'}",
-        f"Fecha vencimiento: {invoice.get('fecha_vencimiento') or '-'}",
-        f"Estado: {invoice.get('estado') or '-'}",
-        f"Cliente: {client.get('nombre') or '-'}",
-        f"NIF: {client.get('nif') or '-'}",
-        "",
-        f"Concepto: {invoice.get('concepto') or '-'}",
-        f"Servicio: {invoice.get('servicio') or '-'}",
-        "",
-        f"Subtotal: {format_eur(invoice.get('subtotal'))}",
-        f"Impuestos: {format_eur(invoice.get('impuestos'))}",
-        f"Total: {format_eur(invoice.get('total'))}",
-        f"Cobrado: {format_eur(sum(float(item.get('importe') or 0.0) for item in collections))}",
-        f"Pendiente: {format_eur(max(float(invoice.get('total') or 0.0) - sum(float(item.get('importe') or 0.0) for item in collections), 0.0))}",
-        "",
+    invoice_ref = "-".join(part for part in [invoice.get("serie"), invoice.get("numero")] if part) or invoice.get("id") or "-"
+    company_name = company.get("nombre") or workspace.get("nombre") or "Empresa"
+    cobrado = 0.0
+    try:
+        cobrado = sum(float(item.get("importe") or 0.0) for item in (collections or []))
+    except Exception:
+        cobrado = 0.0
+    try:
+        total_val = float(invoice.get("total") or 0.0)
+    except Exception:
+        total_val = 0.0
+    pendiente = max(total_val - cobrado, 0.0)
+
+    sections = [
+        (
+            "Emisor",
+            [
+                ("Empresa", company_name),
+                ("Razón social", company.get("razon_social") or company_name),
+                ("CIF/NIF", company.get("nif") or "-"),
+                ("Dirección", company.get("direccion_fiscal") or company.get("direccion") or "-"),
+                ("Teléfono", company.get("telefono") or "-"),
+                ("Email", company.get("email") or "-"),
+                ("Web", company.get("web") or "-"),
+                ("IBAN", company.get("iban") or "-"),
+                ("BIC/SWIFT", company.get("bic") or "-"),
+            ],
+        ),
+        (
+            "Factura",
+            [
+                ("Número", invoice_ref),
+                ("Fecha emisión", invoice.get("fecha_emision") or "-"),
+                ("Fecha vencimiento", invoice.get("fecha_vencimiento") or "-"),
+                ("Estado", invoice.get("estado") or "-"),
+                ("Servicio", invoice.get("servicio") or "-"),
+                ("Concepto", invoice.get("concepto") or "-"),
+            ],
+        ),
+        (
+            "Cliente",
+            [
+                ("Nombre", client.get("nombre") or "-"),
+                ("CIF/NIF", client.get("nif") or "-"),
+                ("Teléfono", client.get("telefono") or "-"),
+                ("Email", client.get("email") or "-"),
+            ],
+        ),
+        (
+            "Importes",
+            [
+                ("Subtotal", format_eur(invoice.get("subtotal") or 0)),
+                ("Impuestos", format_eur(invoice.get("impuestos") or 0)),
+                ("Total", format_eur(invoice.get("total") or 0)),
+                ("Cobrado", format_eur(cobrado)),
+                ("Pendiente", format_eur(pendiente)),
+            ],
+        ),
     ]
     if collections:
-        lines.append("Cobros aplicados:")
-        for item in collections[:8]:
-            lines.append(
-                f"- {item.get('fecha_cobro') or '-'} · {item.get('metodo') or '-'} · {format_eur(item.get('importe'))}"
+        sections.append(
+            (
+                "Cobros aplicados",
+                [
+                    f"{item.get('fecha_cobro') or '-'} · {item.get('metodo') or '-'} · {format_eur(item.get('importe') or 0)}"
+                    for item in (collections or [])[:12]
+                ],
             )
-        lines.append("")
-    if invoice.get("notas"):
-        lines.append(f"Notas: {invoice.get('notas')}")
-    font_obj = "1 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj\n"
-    page_lines = []
-    y = 800
-    for raw in lines[:38]:
-        page_lines.append(f"BT /F1 11 Tf 48 {y} Td ({_pdf_escape(raw)}) Tj ET")
-        y -= 18
-    content_stream = "\n".join(page_lines).encode("latin-1", "replace")
-    objects = []
-    objects.append("1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n")
-    objects.append("2 0 obj << /Type /Pages /Count 1 /Kids [3 0 R] >> endobj\n")
-    objects.append(
-        "3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >> endobj\n"
+        )
+    notas = str(invoice.get("notas") or "").strip()
+    if notas:
+        sections.append(("Notas", [notas]))
+    footer = [
+        f"Documento emitido por {company_name}.",
+        "Esta factura se genera desde el motor de facturación del workspace y debe revisarse antes de su envío definitivo.",
+    ]
+    return build_branded_document_pdf(
+        "FACTURA",
+        f"{company_name} · {invoice_ref}",
+        sections,
+        footer,
+        brand_logo_url=company.get("logo_url"),
     )
-    objects.append(font_obj)
-    objects.append(f"5 0 obj << /Length {len(content_stream)} >> stream\n".encode("latin-1") + content_stream + b"\nendstream\nendobj\n")
-    pdf = bytearray(b"%PDF-1.4\n")
-    offsets = [0]
-    for obj in objects:
-        offsets.append(len(pdf))
-        pdf.extend(obj if isinstance(obj, bytes) else obj.encode("latin-1"))
-    xref_pos = len(pdf)
-    pdf.extend(f"xref\n0 {len(offsets)}\n".encode("latin-1"))
-    pdf.extend(b"0000000000 65535 f \n")
-    for offset in offsets[1:]:
-        pdf.extend(f"{offset:010d} 00000 n \n".encode("latin-1"))
-    pdf.extend(f"trailer << /Size {len(offsets)} /Root 1 0 R >>\nstartxref\n{xref_pos}\n%%EOF\n".encode("latin-1"))
-    return bytes(pdf)
 
 
 def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
@@ -29958,6 +30048,14 @@ class Handler(BaseHTTPRequestHandler):
 
             updates = []
             values = []
+            if "logo_url" in payload:
+                logo_url = str(payload.get("logo_url") or "").strip() or None
+                updates.append("logo_url = ?")
+                values.append(logo_url)
+            if "razon_social" in payload:
+                razon_social = str(payload.get("razon_social") or "").strip() or None
+                updates.append("razon_social = ?")
+                values.append(razon_social)
             if "nif" in payload:
                 nif = str(payload.get("nif") or "").strip() or None
                 updates.append("nif = ?")
@@ -29966,6 +30064,46 @@ class Handler(BaseHTTPRequestHandler):
                 direccion = str(payload.get("direccion") or "").strip() or None
                 updates.append("direccion = ?")
                 values.append(direccion)
+            if "direccion_fiscal" in payload:
+                direccion_fiscal = str(payload.get("direccion_fiscal") or "").strip() or None
+                updates.append("direccion_fiscal = ?")
+                values.append(direccion_fiscal)
+            if "telefono" in payload:
+                telefono = str(payload.get("telefono") or "").strip() or None
+                updates.append("telefono = ?")
+                values.append(telefono)
+            if "email" in payload:
+                email = str(payload.get("email") or "").strip() or None
+                updates.append("email = ?")
+                values.append(email)
+            if "web" in payload:
+                web_url = str(payload.get("web") or "").strip() or None
+                updates.append("web = ?")
+                values.append(web_url)
+            if "contacto_nombre" in payload:
+                contacto_nombre = str(payload.get("contacto_nombre") or "").strip() or None
+                updates.append("contacto_nombre = ?")
+                values.append(contacto_nombre)
+            if "contacto_email" in payload:
+                contacto_email = str(payload.get("contacto_email") or "").strip() or None
+                updates.append("contacto_email = ?")
+                values.append(contacto_email)
+            if "contacto_telefono" in payload:
+                contacto_telefono = str(payload.get("contacto_telefono") or "").strip() or None
+                updates.append("contacto_telefono = ?")
+                values.append(contacto_telefono)
+            if "iban" in payload:
+                iban = str(payload.get("iban") or "").strip() or None
+                updates.append("iban = ?")
+                values.append(iban)
+            if "bic" in payload:
+                bic = str(payload.get("bic") or "").strip() or None
+                updates.append("bic = ?")
+                values.append(bic)
+            if "banco_nombre" in payload:
+                banco_nombre = str(payload.get("banco_nombre") or "").strip() or None
+                updates.append("banco_nombre = ?")
+                values.append(banco_nombre)
             if "sector" in payload:
                 sector = str(payload.get("sector") or "").strip() or None
                 updates.append("sector = ?")
@@ -40959,8 +41097,19 @@ class Handler(BaseHTTPRequestHandler):
                   id,
                   nombre,
                   COALESCE(logo_url, '') AS logo_url,
+                  COALESCE(razon_social, '') AS razon_social,
                   COALESCE(nif, '') AS nif,
                   COALESCE(direccion, '') AS direccion,
+                  COALESCE(direccion_fiscal, '') AS direccion_fiscal,
+                  COALESCE(telefono, '') AS telefono,
+                  COALESCE(email, '') AS email,
+                  COALESCE(web, '') AS web,
+                  COALESCE(contacto_nombre, '') AS contacto_nombre,
+                  COALESCE(contacto_email, '') AS contacto_email,
+                  COALESCE(contacto_telefono, '') AS contacto_telefono,
+                  COALESCE(iban, '') AS iban,
+                  COALESCE(bic, '') AS bic,
+                  COALESCE(banco_nombre, '') AS banco_nombre,
                   COALESCE(sector, '') AS sector,
                   COALESCE(cnae, '') AS cnae,
                   COALESCE(cnaes_json, '') AS cnaes_json,

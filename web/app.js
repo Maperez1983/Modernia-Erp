@@ -1615,6 +1615,10 @@ const workspaceCompanyFormStatus = document.getElementById("workspaceCompanyForm
 const workspaceCompanyCnaeQuery = document.getElementById("workspaceCompanyCnaeQuery");
 const workspaceCompanyCnaeResults = document.getElementById("workspaceCompanyCnaeResults");
 const workspaceCompanyCnaes = document.getElementById("workspaceCompanyCnaes");
+const workspaceCompanyLogoPreview = document.getElementById("workspaceCompanyLogoPreview");
+const workspaceCompanyLogoFile = document.getElementById("workspaceCompanyLogoFile");
+const workspaceCompanyLogoUploadBtn = document.getElementById("workspaceCompanyLogoUploadBtn");
+const workspaceCompanyLogoStatus = document.getElementById("workspaceCompanyLogoStatus");
 const workspaceMembers = document.getElementById("workspaceMembers");
 const workspaceLinks = document.getElementById("workspaceLinks");
 	const workspaceModules = document.getElementById("workspaceModules");
@@ -6121,14 +6125,23 @@ const renderWorkspaceCompanies = (rows = []) => {
         .map(
           (row) => `
             <div class="workspace-chip workspace-company-chip${String(row.id || "") === activeId ? " is-active" : ""}">
-              <div>
-                <strong>${row.nombre || "-"}</strong>
-                <span>${row.rol || "operativa"} · ${Number(row.activo || 0) === 1 ? "activa" : "inactiva"}</span>
-                <div class="muted">
-                  ${row.nif ? `CIF/NIF: ${escapeHtml(String(row.nif || ""))}` : "Sin CIF/NIF"}
-                  ${row.direccion ? ` · ${escapeHtml(String(row.direccion || ""))}` : ""}
-                  ${row._cnaes && row._cnaes.length ? ` · CNAE: ${escapeHtml(String(row._cnaes.join(", ")))}` : ""}
-                  ${row.convenio_nombre ? ` · Convenio: ${escapeHtml(String(row.convenio_nombre || ""))}` : ""}
+              <div style="display:flex;gap:12px;align-items:flex-start">
+                ${
+                  row.logo_url
+                    ? `<img src="${escapeHtml(String(row.logo_url || ""))}" alt="" loading="lazy" style="width:44px;height:44px;object-fit:contain;border-radius:10px;background:#fff;border:1px solid #e1e5ea;padding:6px" />`
+                    : `<div style="width:44px;height:44px;border-radius:10px;background:#f5f7f9;border:1px solid #e1e5ea;display:flex;align-items:center;justify-content:center;color:#7a8690;font-weight:700">${escapeHtml(String((row.nombre || "E").slice(0, 1)).toUpperCase())}</div>`
+                }
+                <div>
+                  <strong>${row.nombre || "-"}</strong>
+                  <span>${row.rol || "operativa"} · ${Number(row.activo || 0) === 1 ? "activa" : "inactiva"}</span>
+                  <div class="muted">
+                    ${row.nif ? `CIF/NIF: ${escapeHtml(String(row.nif || ""))}` : "Sin CIF/NIF"}
+                    ${row.direccion ? ` · ${escapeHtml(String(row.direccion || ""))}` : ""}
+                    ${row.telefono ? ` · ${escapeHtml(String(row.telefono || ""))}` : ""}
+                    ${row.email ? ` · ${escapeHtml(String(row.email || ""))}` : ""}
+                    ${row._cnaes && row._cnaes.length ? ` · CNAE: ${escapeHtml(String(row._cnaes.join(", ")))}` : ""}
+                    ${row.convenio_nombre ? ` · Convenio: ${escapeHtml(String(row.convenio_nombre || ""))}` : ""}
+                  </div>
                 </div>
               </div>
               <div class="workspace-company-chip-actions">
@@ -6142,13 +6155,35 @@ const renderWorkspaceCompanies = (rows = []) => {
                   class="secondary ghost"
                   data-workspace-company-enter="${row.nombre || ""}"
                 >Entrar en empresa</button>
+                <button
+                  type="button"
+                  class="secondary ghost"
+                  data-workspace-company-budgets="${row.id || ""}"
+                >Presupuestos</button>
+                <button
+                  type="button"
+                  class="secondary ghost"
+                  data-workspace-company-billing="${row.id || ""}"
+                >Facturación</button>
 	                <button
 	                  type="button"
 	                  class="secondary ghost"
 	                  data-workspace-company-edit="${row.id || ""}"
 	                  data-workspace-company-edit-name="${escapeHtml(String(row.nombre || ""))}"
+                    data-workspace-company-edit-logo="${escapeHtml(String(row.logo_url || ""))}"
+                    data-workspace-company-edit-razon="${escapeHtml(String(row.razon_social || ""))}"
 	                  data-workspace-company-edit-nif="${escapeHtml(String(row.nif || ""))}"
 	                  data-workspace-company-edit-dir="${escapeHtml(String(row.direccion || ""))}"
+                    data-workspace-company-edit-dir-fiscal="${escapeHtml(String(row.direccion_fiscal || ""))}"
+                    data-workspace-company-edit-tel="${escapeHtml(String(row.telefono || ""))}"
+                    data-workspace-company-edit-email="${escapeHtml(String(row.email || ""))}"
+                    data-workspace-company-edit-web="${escapeHtml(String(row.web || ""))}"
+                    data-workspace-company-edit-contacto-nombre="${escapeHtml(String(row.contacto_nombre || ""))}"
+                    data-workspace-company-edit-contacto-email="${escapeHtml(String(row.contacto_email || ""))}"
+                    data-workspace-company-edit-contacto-telefono="${escapeHtml(String(row.contacto_telefono || ""))}"
+                    data-workspace-company-edit-iban="${escapeHtml(String(row.iban || ""))}"
+                    data-workspace-company-edit-bic="${escapeHtml(String(row.bic || ""))}"
+                    data-workspace-company-edit-banco="${escapeHtml(String(row.banco_nombre || ""))}"
 	                  data-workspace-company-edit-sector="${escapeHtml(String(row.sector || ""))}"
                   data-workspace-company-edit-cnae="${escapeHtml(String(row.cnae || ""))}"
                   data-workspace-company-edit-cnaes="${escapeHtml(String((row._cnaes || []).join(", ")))}"
@@ -6192,6 +6227,22 @@ const renderWorkspaceCompanies = (rows = []) => {
       openCompany(companyName, { allowRestricted: true });
     });
   });
+  workspaceCompanies.querySelectorAll("[data-workspace-company-budgets]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const companyId = String(button.dataset.workspaceCompanyBudgets || "").trim();
+      if (!companyId) return;
+      setWorkspaceCompanyContext(companyId);
+      await focusWorkspaceEngine("facturacion", workspaceBudgetForm?.closest(".form-card") || null, { scroll: true });
+    });
+  });
+  workspaceCompanies.querySelectorAll("[data-workspace-company-billing]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const companyId = String(button.dataset.workspaceCompanyBilling || "").trim();
+      if (!companyId) return;
+      setWorkspaceCompanyContext(companyId);
+      await focusWorkspaceEngine("facturacion", workspaceBillingForm?.closest(".form-card") || null, { scroll: true });
+    });
+  });
 	  workspaceCompanies.querySelectorAll("[data-workspace-company-edit]").forEach((button) => {
 	    button.addEventListener("click", async () => {
 	      if (!canEdit) return;
@@ -6206,8 +6257,20 @@ const renderWorkspaceCompanies = (rows = []) => {
 	      };
 	      set("id", companyId);
 	      set("nombre", String(button.dataset.workspaceCompanyEditName || ""));
+        set("logo_url", String(button.dataset.workspaceCompanyEditLogo || ""));
+        set("razon_social", String(button.dataset.workspaceCompanyEditRazon || ""));
 	      set("nif", String(button.dataset.workspaceCompanyEditNif || ""));
 	      set("direccion", String(button.dataset.workspaceCompanyEditDir || ""));
+        set("direccion_fiscal", String(button.dataset.workspaceCompanyEditDirFiscal || ""));
+        set("telefono", String(button.dataset.workspaceCompanyEditTel || ""));
+        set("email", String(button.dataset.workspaceCompanyEditEmail || ""));
+        set("web", String(button.dataset.workspaceCompanyEditWeb || ""));
+        set("contacto_nombre", String(button.dataset.workspaceCompanyEditContactoNombre || ""));
+        set("contacto_email", String(button.dataset.workspaceCompanyEditContactoEmail || ""));
+        set("contacto_telefono", String(button.dataset.workspaceCompanyEditContactoTelefono || ""));
+        set("iban", String(button.dataset.workspaceCompanyEditIban || ""));
+        set("bic", String(button.dataset.workspaceCompanyEditBic || ""));
+        set("banco_nombre", String(button.dataset.workspaceCompanyEditBanco || ""));
 	      set("sector", String(button.dataset.workspaceCompanyEditSector || ""));
 	      if (workspaceCompanyCnaes) {
 	        workspaceCompanyCnaes.value = String(button.dataset.workspaceCompanyEditCnaes || "");
@@ -6216,6 +6279,12 @@ const renderWorkspaceCompanies = (rows = []) => {
 	      set("convenio_nombre", String(button.dataset.workspaceCompanyEditConvenio || ""));
 	      set("vacaciones_modo", String(button.dataset.workspaceCompanyEditVacModo || "habiles"));
 	      set("vacaciones_dias_anuales", String(button.dataset.workspaceCompanyEditVacDias || ""));
+        if (workspaceCompanyLogoStatus) workspaceCompanyLogoStatus.textContent = "";
+        if (workspaceCompanyLogoPreview) {
+          const url = String(button.dataset.workspaceCompanyEditLogo || "").trim();
+          workspaceCompanyLogoPreview.src = url || "";
+          workspaceCompanyLogoPreview.classList.toggle("hidden", !url);
+        }
 	      if (typeof workspaceCompanyEditor.scrollIntoView === "function") {
 	        workspaceCompanyEditor.scrollIntoView({ behavior: "smooth", block: "start" });
 	      }
@@ -41627,6 +41696,9 @@ if (workspaceCompanyEditorClose && workspaceCompanyEditor) {
     if (workspaceCompanyFormStatus) workspaceCompanyFormStatus.textContent = "";
     if (workspaceCompanyCnaeResults) workspaceCompanyCnaeResults.innerHTML = "";
     if (workspaceCompanyCnaeQuery) workspaceCompanyCnaeQuery.value = "";
+    if (workspaceCompanyLogoStatus) workspaceCompanyLogoStatus.textContent = "";
+    if (workspaceCompanyLogoPreview) workspaceCompanyLogoPreview.src = "";
+    if (workspaceCompanyLogoFile) workspaceCompanyLogoFile.value = "";
   });
 }
 
@@ -41651,6 +41723,93 @@ if (workspaceCompanyForm) {
     } catch (error) {
       if (workspaceCompanyFormStatus) workspaceCompanyFormStatus.textContent = error?.message || "No se pudo guardar la empresa.";
     }
+  });
+}
+
+const previewWorkspaceCompanyLogoFile = () => {
+  if (!workspaceCompanyLogoFile || !workspaceCompanyLogoPreview) return;
+  const file = workspaceCompanyLogoFile.files && workspaceCompanyLogoFile.files[0];
+  if (!file) {
+    workspaceCompanyLogoPreview.src = "";
+    return;
+  }
+  try {
+    const url = URL.createObjectURL(file);
+    workspaceCompanyLogoPreview.src = url;
+  } catch {}
+};
+
+const uploadWorkspaceCompanyLogo = async () => {
+  if (!workspaceCompanyForm) return;
+  if (!state.currentWorkspaceId) {
+    if (workspaceCompanyLogoStatus) workspaceCompanyLogoStatus.textContent = "Workspace no seleccionado.";
+    return;
+  }
+  const empresaId = String(workspaceCompanyForm.querySelector('[name="id"]')?.value || "").trim();
+  if (!empresaId) {
+    if (workspaceCompanyLogoStatus) workspaceCompanyLogoStatus.textContent = "Empresa no seleccionada.";
+    return;
+  }
+  const file = workspaceCompanyLogoFile?.files && workspaceCompanyLogoFile.files[0];
+  if (!file) {
+    if (workspaceCompanyLogoStatus) workspaceCompanyLogoStatus.textContent = "Selecciona un archivo.";
+    return;
+  }
+  const maxBytes = 6 * 1024 * 1024;
+  if (Number(file.size || 0) > maxBytes) {
+    if (workspaceCompanyLogoStatus) workspaceCompanyLogoStatus.textContent = "Logo demasiado grande (máx. 6MB).";
+    return;
+  }
+  if (workspaceCompanyLogoStatus) workspaceCompanyLogoStatus.textContent = "Subiendo logo...";
+  const originalName = String(file.name || "logo").trim() || "logo";
+  const extMatch = originalName.match(/\.[a-z0-9]{2,8}$/i);
+  const ext = extMatch ? extMatch[0].toLowerCase() : "";
+  const safeExt = ext && ext.length <= 9 ? ext : "";
+  const filename = `empresa_${empresaId}_${Date.now()}${safeExt || ".png"}`;
+  try {
+    const presign = await postJsonWithDbRetry("/api/s3_presign", {
+      filename,
+      content_type: String(file.type || "application/octet-stream"),
+      prefix: "company_logos",
+    });
+    if (presign?.error) throw new Error(presign.error);
+    if (!presign?.url || !presign?.public_url) throw new Error("No se pudo firmar la subida.");
+    const putRes = await fetch(presign.url, {
+      method: "PUT",
+      headers: { "Content-Type": String(file.type || "application/octet-stream") },
+      body: file,
+    });
+    if (!putRes.ok) {
+      throw new Error(`No se pudo subir a S3 (${putRes.status}).`);
+    }
+    const update = await postJsonWithDbRetry("/api/empresa_update", {
+      workspace_id: state.currentWorkspaceId,
+      id: empresaId,
+      logo_url: presign.public_url,
+    });
+    if (update?.error) throw new Error(update.error);
+    const logoInput = workspaceCompanyForm.querySelector('[name="logo_url"]');
+    if (logoInput) logoInput.value = presign.public_url;
+    if (workspaceCompanyLogoPreview) workspaceCompanyLogoPreview.src = presign.public_url;
+    if (workspaceCompanyLogoStatus) workspaceCompanyLogoStatus.textContent = "Logo actualizado.";
+    try {
+      const empresas = await api("/api/empresas");
+      state.empresas = Array.isArray(empresas) ? empresas : state.empresas;
+      renderCompanyCards();
+    } catch {}
+    await loadWorkspaceDetail(state.currentWorkspaceId);
+  } catch (error) {
+    if (workspaceCompanyLogoStatus) workspaceCompanyLogoStatus.textContent = error?.message || "No se pudo subir el logo.";
+  }
+};
+
+if (workspaceCompanyLogoFile) {
+  workspaceCompanyLogoFile.addEventListener("change", previewWorkspaceCompanyLogoFile);
+}
+
+if (workspaceCompanyLogoUploadBtn) {
+  workspaceCompanyLogoUploadBtn.addEventListener("click", () => {
+    void uploadWorkspaceCompanyLogo();
   });
 }
 
