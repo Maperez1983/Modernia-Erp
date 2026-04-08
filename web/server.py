@@ -551,6 +551,7 @@ AUTH_PUBLIC_POST_ENDPOINTS = {
     "/api/logout",
     "/api/auth_set_password",
     "/api/workspace_portal_upload",
+    "/api/workspace_portal_presign",
     "/api/workspace_kiosk_toggle",
 }
 AUTH_SESSIONS = {}
@@ -29847,7 +29848,7 @@ class Handler(BaseHTTPRequestHandler):
         # Centralizado para no depender de checks individuales.
         if WORKSPACE_MEMBERSHIP_ENFORCE and isinstance(payload, dict) and str(parsed.path or "").startswith("/api/workspace_"):
             # Public workspace endpoints (portal) use tokens instead of session.
-            if parsed.path not in {"/api/workspace_portal_upload"}:
+            if parsed.path not in {"/api/workspace_portal_upload", "/api/workspace_portal_presign"}:
                 session = getattr(self, "auth_session", None) or self._current_session()
                 if not session:
                     json_response(self, {"error": "No autenticado"}, status=401)
@@ -32455,6 +32456,58 @@ class Handler(BaseHTTPRequestHandler):
             conn.commit()
             json_response(self, {"ok": True, "id": record_id})
             return
+        elif parsed.path == "/api/workspace_portal_presign":
+            token = str(payload.get("token") or "").strip()
+            filename = str(payload.get("filename") or payload.get("nombre") or "").strip() or "archivo.pdf"
+            content_type = str(payload.get("content_type") or "").strip() or "application/octet-stream"
+            if not token:
+                json_response(self, {"error": "token requerido"}, status=400)
+                return
+            portal = conn.execute(
+                """
+                SELECT id, workspace_id, cliente_id, estado, COALESCE(importador_facturas, 0) AS importador_facturas
+                FROM workspace_portal_clientes
+                WHERE token = ?
+                LIMIT 1
+                """,
+                (token,),
+            ).fetchone()
+            if not portal:
+                json_response(self, {"error": "portal no encontrado"}, status=404)
+                return
+            if str(portal.get("estado") or "").strip().lower() == "pausado":
+                json_response(self, {"error": "portal pausado"}, status=403)
+                return
+            client = s3_client()
+            if not client:
+                bucket, region = s3_config()
+                missing = []
+                if not bucket:
+                    missing.append("AWS_S3_BUCKET")
+                if not region:
+                    missing.append("AWS_REGION")
+                if not S3_BOTO3_AVAILABLE:
+                    missing.append("boto3")
+                detail = f" (faltan: {', '.join(missing)})" if missing else ""
+                json_response(self, {"error": f"S3 no configurado{detail}"}, status=400)
+                return
+            bucket, region = s3_config()
+            category = str(payload.get("category") or "").strip().lower()
+            subdir = "facturas" if category in {"factura", "facturas", "invoice", "invoices"} else "docs"
+            prefix = f"portal/{portal['workspace_id']}/{portal['id']}/{subdir}"
+            key = s3_safe_key(prefix, filename)
+            try:
+                url = client.generate_presigned_url(
+                    "put_object",
+                    Params={"Bucket": bucket, "Key": key, "ContentType": content_type},
+                    ExpiresIn=900,
+                )
+            except Exception:
+                json_response(self, {"error": "No se pudo firmar la subida"}, status=500)
+                return
+            public_url = f"https://{bucket}.s3.{region}.amazonaws.com/{key}"
+            json_response(self, {"url": url, "key": key, "public_url": public_url})
+            return
         elif parsed.path == "/api/workspace_portal_upload":
             token = str(payload.get("token") or "").strip()
             nombre = str(payload.get("nombre") or "").strip()
@@ -32473,6 +32526,20 @@ class Handler(BaseHTTPRequestHandler):
             if not portal:
                 json_response(self, {"error": "portal no encontrado"}, status=404)
                 return
+            doc_key = str(payload.get("doc_key") or "").strip()
+            if not doc_key:
+                json_response(self, {"error": "doc_key requerido (usa workspace_portal_presign)"}, status=400)
+                return
+            allowed_prefix = f"portal/{portal['workspace_id']}/{portal['id']}/"
+            if not doc_key.startswith(allowed_prefix):
+                json_response(self, {"error": "doc_key fuera de alcance del portal"}, status=403)
+                return
+            bucket, region = s3_config()
+            doc_url = ""
+            if bucket and region:
+                doc_url = f"https://{bucket}.s3.{region}.amazonaws.com/{doc_key}"
+            if not doc_url:
+                doc_url = str(payload.get("doc_url") or "").strip()
             empresa_ids = fetch_workspace_company_ids(conn, portal["workspace_id"])
             empresa_id = empresa_ids[0] if empresa_ids else None
             if not empresa_id:
@@ -32512,8 +32579,8 @@ class Handler(BaseHTTPRequestHandler):
                     (payload.get("clasificacion") or (request_row["clasificacion"] if request_row else "")).strip() or None,
                     (payload.get("prioridad") or "").strip() or "Normal",
                     (payload.get("estado") or "").strip() or "Pendiente",
-                    (payload.get("doc_key") or "").strip() or None,
-                    (payload.get("doc_url") or "").strip() or None,
+                    doc_key or None,
+                    doc_url or None,
                     "portal_requerimiento" if request_row else None,
                     request_row["id"] if request_row else None,
                     (payload.get("notas") or "").strip() or None,

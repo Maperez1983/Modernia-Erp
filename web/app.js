@@ -378,19 +378,17 @@ const uploadMultipartPartToSignedUrl = (url, blob, onPartProgress) =>
   });
 
 const uploadFileMultipartToS3 = async (file, prefix, statusEl) => {
-  const start = await fetch("/api/s3_multipart_start", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
+  const empresaNombre = String(state?.currentEmpresaName || state?.currentEmpresaNameFallback || "").trim();
+  const enrich = (payload = {}) => (empresaNombre && !("empresa_nombre" in payload) ? { ...payload, empresa_nombre: empresaNombre } : payload);
+  const start = await apiPost(
+    "/api/s3_multipart_start",
+    enrich({
       filename: file.name || "archivo.bin",
       content_type: guessMimeType(file),
       prefix: prefix || "docs",
       size: file.size || 0,
-    }),
-  }).then((res) => res.json());
-  if (start.error) {
-    throw new Error(start.error);
-  }
+    })
+  );
   const key = start.key || "";
   const uploadId = start.upload_id || "";
   const partSize = Math.max(5 * 1024 * 1024, Number(start.part_size || 8 * 1024 * 1024));
@@ -411,15 +409,15 @@ const uploadFileMultipartToS3 = async (file, prefix, statusEl) => {
     statusEl.textContent = `Subiendo a la nube... ${pct}%`;
   };
 
-const uploadOnePart = async (partNumber) => {
+	const uploadOnePart = async (partNumber) => {
     const startByte = (partNumber - 1) * partSize;
     const endByte = Math.min(startByte + partSize, file.size);
     const blob = file.slice(startByte, endByte);
-    const presign = await apiPost("/api/s3_multipart_presign", {
+    const presign = await apiPost("/api/s3_multipart_presign", enrich({
       key,
       upload_id: uploadId,
       part_number: partNumber,
-    });
+    }));
     if (presign.error || !presign.url) {
       throw new Error(presign.error || "No se pudo firmar parte multipart.");
     }
@@ -445,10 +443,10 @@ const uploadOnePart = async (partNumber) => {
       () => worker()
     );
     await Promise.all(workers);
-    const complete = await apiPost("/api/s3_multipart_complete", {
+    const complete = await apiPost("/api/s3_multipart_complete", enrich({
       key,
       upload_id: uploadId,
-    });
+    }));
     if (complete.error) {
       throw new Error(complete.error);
     }
@@ -458,10 +456,10 @@ const uploadOnePart = async (partNumber) => {
     };
   } catch (err) {
     try {
-      await apiPost("/api/s3_multipart_abort", {
+      await apiPost("/api/s3_multipart_abort", enrich({
         key,
         upload_id: uploadId,
-      });
+      }));
     } catch {}
     throw err;
   }
@@ -485,12 +483,17 @@ const uploadFileToS3 = async (file, prefix, statusEl) => {
     }
     return multipartResult;
   }
-	    if (statusEl) statusEl.textContent = "Firmando subida...";
-  const presign = await apiPost("/api/s3_presign", {
+  const empresaNombre = String(state?.currentEmpresaName || state?.currentEmpresaNameFallback || "").trim();
+  const presignPayload = {
     filename: fileToUpload.name || "archivo.pdf",
     content_type: contentType || "application/octet-stream",
     prefix: prefix || "seguros",
-  });
+  };
+  if (empresaNombre && !("empresa_nombre" in presignPayload)) {
+    presignPayload.empresa_nombre = empresaNombre;
+  }
+  if (statusEl) statusEl.textContent = "Firmando subida...";
+  const presign = await apiPost("/api/s3_presign", presignPayload);
   if (presign.error) {
     throw new Error(presign.error);
   }
@@ -513,6 +516,58 @@ const uploadFileToS3 = async (file, prefix, statusEl) => {
     statusEl.textContent = "Subida completada.";
   }
   return presign;
+};
+
+const uploadFileToPortalS3 = async (file, token, statusEl, category = "") => {
+  if (!file) return null;
+  const optimized = await maybeCompressUploadFile(file, statusEl);
+  const fileToUpload = optimized.file || file;
+  const contentType = guessMimeType(fileToUpload) || "application/octet-stream";
+  const payload = {
+    token,
+    filename: fileToUpload.name || "archivo.pdf",
+    content_type: contentType,
+    category: String(category || "").trim(),
+  };
+  if (statusEl) statusEl.textContent = "Firmando subida...";
+  let res;
+  try {
+    res = await fetchWithTimeout("/api/workspace_portal_presign", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify(payload),
+    });
+  } catch (err) {
+    throw new Error("No se pudo conectar con el servidor.");
+  }
+  let data = null;
+  try {
+    data = await res.json();
+  } catch {
+    data = null;
+  }
+  if (!res.ok || data?.error) {
+    const msg = (data && data.error) || `HTTP ${res.status}`;
+    throw new Error(msg);
+  }
+  if (!data?.url || !data?.key) {
+    throw new Error("Presign inválido.");
+  }
+  try {
+    await uploadBlobToSignedUrl(data.url, fileToUpload, statusEl, contentType);
+  } catch (xhrErr) {
+    if (statusEl) statusEl.textContent = "Reintentando subida...";
+    await uploadBlobToSignedUrlWithFetch(data.url, fileToUpload, contentType);
+  }
+  if (statusEl && optimized.optimized && optimized.originalSize && optimized.optimizedSize) {
+    const saved = Math.max(0, optimized.originalSize - optimized.optimizedSize);
+    const pct = optimized.originalSize ? Math.round((saved / optimized.originalSize) * 100) : 0;
+    statusEl.textContent = `Subida completada. Imagen optimizada (-${pct}%).`;
+  } else if (statusEl) {
+    statusEl.textContent = "Subida completada.";
+  }
+  return { key: data.key, public_url: data.public_url || "" };
 };
 
 const extractS3KeyFromUrl = (value = "") => {
@@ -13695,7 +13750,7 @@ const setWorkspaceFincasTab = (tab = "dashboard") => {
     panel.hidden = isHidden;
   });
   if (normalized === "dashboard") {
-    void refreshWorkspaceFincasCommunities({ silent: true });
+    void refreshWorkspaceFincasCommunities({ silent: true, force: true });
     renderWorkspaceFincasDashboard();
     void refreshWorkspaceFincasLedger({ silent: true });
   }
@@ -13711,7 +13766,13 @@ const setWorkspaceFincasTab = (tab = "dashboard") => {
   }
   if (normalized === "presupuestos") {
     try {
+      hydrateWorkspaceCompanySelects();
+      renderFincasServiciosIncluidos(workspaceFincasBudgetServiciosIncluidos);
+      const wsField = workspaceFincasBudgetQuickForm?.querySelector('[name="workspace_id"]');
+      if (wsField) wsField.value = state.currentWorkspaceId || "";
+      syncWorkspaceFincasBudgetBranding();
       syncWorkspaceFincasBudgetQuickComputed();
+      renderWorkspaceFincasBudgetsList();
     } catch {}
   }
 };
@@ -15526,8 +15587,11 @@ const openWorkspacePortalPublic = async (token) => {
           return;
         }
         try {
-          if (uploadStatus) uploadStatus.textContent = "Subiendo archivo...";
-          const upload = await uploadFileToS3(file, "workspace", uploadStatus);
+	          if (uploadStatus) uploadStatus.textContent = "Subiendo archivo...";
+	          const classificationHint = String(formData.get("clasificacion") || "").trim();
+	          const nameHint = String(formData.get("nombre") || "").trim();
+	          const isInvoice = /factura|ticket|recibo/i.test(`${classificationHint} ${nameHint} ${file.name || ""}`);
+	          const upload = await uploadFileToPortalS3(file, token, uploadStatus, isInvoice ? "factura" : "docs");
           const payload = {
             token,
             nombre: String(formData.get("nombre") || "").trim(),
