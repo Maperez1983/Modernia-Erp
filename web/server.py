@@ -26593,7 +26593,7 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
     margin_x, top_margin, bottom_margin = 84, 72, 84
     servicio_key = normalize_service_key(budget.get("servicio") or "")
     fincas_logo = _load_asset_logo("logos/fincas-velazquez.png", max_width=420) if servicio_key == "fincas" else None
-    colegio_logo = _load_asset_logo("logos/colegio-administradores.png", max_width=260) if servicio_key == "fincas" else None
+    colegio_logo = _load_asset_logo("logos/colegio-administradores-v2.png", max_width=260) if servicio_key == "fincas" else None
     brand_logo = _load_brand_logo(company.get("logo_url"), max_width=420 if servicio_key == "fincas" else 360)
     logo = brand_logo or fincas_logo
     font_title = _document_font(44, bold=True)

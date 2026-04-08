@@ -13899,7 +13899,7 @@ const syncWorkspaceFincasBudgetBranding = () => {
     workspaceFincasBudgetCompanyLogo.classList.toggle("hidden", !src);
   }
   if (workspaceFincasBudgetColegioLogo) {
-    workspaceFincasBudgetColegioLogo.src = "/assets/logos/colegio-administradores.png";
+    workspaceFincasBudgetColegioLogo.src = "/assets/logos/colegio-administradores-v2.png";
     workspaceFincasBudgetColegioLogo.classList.remove("hidden");
   }
 };
@@ -13913,7 +13913,7 @@ const syncGestoriaBudgetBranding = () => {
     gestoriaBudgetCompanyLogo.classList.toggle("hidden", !src);
   }
   if (gestoriaBudgetColegioLogo) {
-    gestoriaBudgetColegioLogo.src = "/assets/logos/colegio-administradores.png";
+    gestoriaBudgetColegioLogo.src = "/assets/logos/colegio-administradores-v2.png";
     gestoriaBudgetColegioLogo.classList.remove("hidden");
   }
 };
