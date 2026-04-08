@@ -46226,6 +46226,40 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, {"rows": [dict(r) for r in rows]})
             return
 
+        if path == "/api/audit_inmobiliaria":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            if not workspace_actor_is_privileged(conn, session):
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
+            responsable = (params.get("responsable", [""])[0] or "").strip()
+            pattern = f"%{responsable.strip()}%" if responsable else "%"
+            rows = conn.execute(
+                """
+                SELECT
+                  e.id AS empresa_id,
+                  e.nombre AS empresa_nombre,
+                  (SELECT COUNT(*) FROM inmuebles i WHERE i.empresa_id = e.id) AS inmuebles_total,
+                  (SELECT COUNT(*) FROM inmuebles i WHERE i.empresa_id = e.id AND LOWER(COALESCE(i.responsable, '')) LIKE LOWER(?)) AS inmuebles_responsable,
+                  (SELECT COUNT(*) FROM captaciones c WHERE c.empresa_id = e.id) AS captaciones_total,
+                  (SELECT COUNT(*) FROM captaciones c WHERE c.empresa_id = e.id AND LOWER(COALESCE(c.responsable, '')) LIKE LOWER(?)) AS captaciones_responsable,
+                  (SELECT COUNT(*) FROM operaciones_inmobiliarias o WHERE o.empresa_id = e.id) AS operaciones_total
+                FROM empresas e
+                ORDER BY inmuebles_total DESC, captaciones_total DESC, e.nombre COLLATE NOCASE ASC
+                """,
+                (pattern, pattern),
+            ).fetchall()
+            json_response(
+                self,
+                {
+                    "responsable": responsable,
+                    "rows": [dict(r) for r in rows],
+                },
+            )
+            return
+
         if path == "/api/compraventas":
             empresa_id = params.get("empresa_id", [""])[0]
             q = params.get("q", [""])[0].strip()

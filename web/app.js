@@ -14618,11 +14618,8 @@ const resolveCrmInmoEmpresa = () => {
   const explicit = resolveEmpresaById(state.crmInmoEmpresaId);
   if (explicit) return explicit;
 
-  // 2) Si el usuario ya está trabajando sobre una empresa, úsala.
-  const current = resolveEmpresaById(state.currentEmpresaId);
-  if (current) return current;
-
-  // 3) Fallback: intenta la empresa mapeada para el servicio; si no existe, usa la primera disponible.
+  // 2) Fallback: intenta la empresa mapeada para el servicio; si no existe, usa la primera disponible.
+  // Nota: NO usamos `state.currentEmpresaId` porque puede venir de otro servicio (Seguros/Hipotecas) y dejar el CRM Inmobiliaria vacío.
   const preferredName = SERVICE_COMPANY_MAP?.Inmobiliaria || DASHBOARD_COMPANY;
   const preferred = state.empresas.find((e) => e.nombre === preferredName) || null;
   if (preferred) return preferred;
