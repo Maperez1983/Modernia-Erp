@@ -311,7 +311,11 @@ def seed_workspace_service_matrix(conn, now=None):
 
 def _normalize_s3_key(key):
     raw = str(key or "").strip().replace("\\", "/")
-    return raw.lstrip("/")
+    safe = raw.lstrip("/")
+    # Evita placeholders accidentales (algunos scripts/CSV usan estos literales como “valor vacío”).
+    if safe.lower() in {"poliza_key", "poliza_url", "doc_key", "doc_url"}:
+        return ""
+    return safe
 
 
 def _s3_grant_key(session, key, *, ttl_seconds=None, conn=None):

@@ -3,7 +3,7 @@
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v68";
+const APP_SW_VERSION = "v69";
 
 // Workspace tenant por defecto del producto (branding de software). Mantiene compatibilidad con slugs legacy.
 const DEFAULT_TENANT_WORKSPACE_SLUG = "verifika2";
@@ -573,8 +573,12 @@ const uploadFileToPortalS3 = async (file, token, statusEl, category = "") => {
 const extractS3KeyFromUrl = (value = "") => {
   const raw = String(value || "").trim();
   if (!raw) return "";
+  const placeholderValues = new Set(["poliza_key", "poliza_url", "doc_key", "doc_url"]);
+  if (placeholderValues.has(raw.toLowerCase())) return "";
   if (raw.startsWith("s3://")) {
-    return raw.slice(5).replace(/^\/+/, "");
+    const key = raw.slice(5).replace(/^\/+/, "");
+    if (placeholderValues.has(key.toLowerCase())) return "";
+    return key;
   }
   try {
     const u = new URL(raw);
@@ -583,6 +587,7 @@ const extractS3KeyFromUrl = (value = "") => {
     const isS3 = host.includes(".s3.") || host === "s3.amazonaws.com" || host.includes(".s3-");
     if (!isAws || !isS3) return "";
     const key = decodeURIComponent(String(u.pathname || "").replace(/^\/+/, ""));
+    if (placeholderValues.has(key.toLowerCase())) return "";
     return key;
   } catch {
     return "";
@@ -602,6 +607,8 @@ const buildPhotoSrc = (photoUrl = "") => {
 const buildS3RedirectSrcFromKey = (key = "") => {
   const raw = String(key || "").trim();
   if (!raw) return "";
+  const lower = raw.toLowerCase();
+  if (lower === "poliza_key" || lower === "poliza_url" || lower === "doc_key" || lower === "doc_url") return "";
   return `/api/s3_redirect?key=${encodeURIComponent(raw)}`;
 };
 
