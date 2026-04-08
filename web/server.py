@@ -1560,6 +1560,50 @@ def normalize_poliza_key(value):
     text = re.sub(r"[^A-Z0-9]", "", text)
     return text
 
+
+def guess_poliza_from_filename(filename):
+    """
+    Intenta extraer un número de póliza desde un nombre de archivo o key S3.
+
+    Se usa para backfills cuando el PDF existe en S3 pero la DB perdió el vínculo
+    (seguros.poliza_key / seguros.poliza_url).
+    """
+    name = os.path.basename(str(filename or ""))
+    if not name:
+        return ""
+    # 1) Token cerca de la palabra póliza/poliza
+    m = re.search(r"(?i)\bp[oó]?liza\b[^A-Z0-9]{0,12}([A-Z0-9-]{6,32})\b", name)
+    if m and re.search(r"\d", m.group(1) or ""):
+        return m.group(1)
+
+    # 2) Formatos típicos con guion (ej: 23-92198503)
+    candidates = re.findall(r"\b\d{2}-\d{7,12}\b", name)
+    # 3) Tokens numéricos largos
+    candidates += re.findall(r"\b[0-9]{6,20}\b", name)
+    # 4) Alfanuméricos (ej: GAG09412, BASWZ1733315598407A)
+    candidates += re.findall(r"\b[A-Z]{2,10}[0-9]{4,22}[A-Z]?\b", name.upper())
+    if not candidates:
+        return ""
+
+    normed = []
+    for cand in candidates:
+        token = str(cand or "").strip()
+        if not token:
+            continue
+        # evita años/fechas sueltas
+        if len(token) == 4 and token.startswith(("19", "20")):
+            continue
+        if len(token) == 8 and token.startswith(("19", "20")):
+            continue
+        if not re.search(r"\d", token):
+            continue
+        normed.append(token)
+
+    if not normed:
+        return ""
+    normed = sorted(set(normed), key=lambda s: (len(s), s), reverse=True)
+    return normed[0]
+
 def normalize_company_key(value):
     if not value:
         return ""
@@ -29943,8 +29987,8 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path not in (
             "/api/movimientos",
             "/api/hipotecas",
-            "/api/hipotecas/firmar",
-            "/api/hipotecas_update",
+	            "/api/hipotecas/firmar",
+	            "/api/hipotecas_update",
             "/api/hipotecas_delete",
             "/api/gestoria",
             "/api/gestoria_trabajos",
@@ -29968,19 +30012,20 @@ class Handler(BaseHTTPRequestHandler):
             "/api/fin_asesoramiento_ocr_guided",
             "/api/fin_asesoramiento_ocr_auto",
             "/api/seguros",
-            "/api/seguros_update",
-            "/api/seguros_cambio_compania",
-            "/api/seguros_delete",
-            "/api/seguros_poliza_accion",
-            "/api/seguros_enrich",
-            "/api/seguros_reclamacion",
-            "/api/seguros_reclamacion_update",
-            "/api/seguros_reclamacion_delete",
-            "/api/seguros_ipid_register",
-            "/api/fin_asesoramientos",
-            "/api/fin_asesoramientos_update",
-            "/api/fin_asesoramientos_convert",
-            "/api/seguros_ofertas",
+	            "/api/seguros_update",
+	            "/api/seguros_cambio_compania",
+	            "/api/seguros_delete",
+	            "/api/seguros_poliza_accion",
+	            "/api/seguros_enrich",
+	            "/api/seguros_backfill_s3",
+	            "/api/seguros_reclamacion",
+	            "/api/seguros_reclamacion_update",
+	            "/api/seguros_reclamacion_delete",
+	            "/api/seguros_ipid_register",
+	            "/api/fin_asesoramientos",
+	            "/api/fin_asesoramientos_update",
+	            "/api/fin_asesoramientos_convert",
+	            "/api/seguros_ofertas",
             "/api/seguros_ofertas_update",
             "/api/seguros_ofertas_delete",
             "/api/seguros_preferencias",
@@ -38563,6 +38608,159 @@ class Handler(BaseHTTPRequestHandler):
             log_seguro_event(conn, row, "ipid_entregado", now, payload={"ipid_id": ipid_id, "fecha": fecha_entrega})
             json_response(self, {"ok": True, "id": ipid_id})
             conn.commit()
+            return
+        elif parsed.path == "/api/seguros_backfill_s3":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            if not workspace_actor_is_privileged(conn, session):
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
+
+            empresa_id = str(payload.get("empresa_id") or "").strip()
+            empresa_nombre = str(payload.get("empresa_nombre") or "").strip()
+            if not empresa_id and empresa_nombre:
+                row_empresa = conn.execute("SELECT id FROM empresas WHERE nombre = ? LIMIT 1", (empresa_nombre,)).fetchone()
+                if row_empresa:
+                    empresa_id = str(row_empresa["id"] or "").strip()
+            prefix = str(payload.get("prefix") or "seguros").strip()
+            prefix = prefix.strip().lstrip("/")
+            if prefix and not prefix.endswith("/"):
+                prefix = prefix + "/"
+            dry_run = str(payload.get("dry_run") or payload.get("apply") or "").strip().lower() not in {"1", "true", "yes", "si", "sí", "on"}
+            max_objects = payload.get("max_objects")
+            try:
+                max_objects = int(max_objects) if max_objects not in (None, "") else 0
+            except Exception:
+                max_objects = 0
+            max_objects = max(0, min(50000, max_objects or 0))
+
+            # Carga pólizas candidatas (solo las que no tienen key/url aún).
+            where = ["1=1"]
+            values = []
+            if empresa_id:
+                where.append("empresa_id = ?")
+                values.append(empresa_id)
+            rows = conn.execute(
+                f"""
+                SELECT id, poliza_numero, poliza_key, poliza_url
+                FROM seguros
+                WHERE {' AND '.join(where)}
+                """,
+                values,
+            ).fetchall()
+            buckets = defaultdict(list)
+            already = 0
+            for r in rows:
+                poliza_num = (r["poliza_numero"] or "").strip()
+                norm = normalize_poliza_key(poliza_num)
+                if not norm:
+                    continue
+                poliza_key = (r["poliza_key"] or "").strip()
+                poliza_url = (r["poliza_url"] or "").strip()
+                if poliza_key or poliza_url:
+                    already += 1
+                    continue
+                buckets[norm].append(str(r["id"]))
+
+            client = s3_client()
+            if not client:
+                json_response(self, {"error": "S3 no configurado"}, status=400)
+                return
+            bucket, region = s3_config()
+            if not bucket or not region:
+                json_response(self, {"error": "S3 no configurado"}, status=400)
+                return
+
+            scanned = 0
+            guessed = 0
+            matched = 0
+            updates = []
+            unmatched = []
+            duplicates = 0
+            used_policy_ids = set()
+            continuation = None
+            while True:
+                kwargs = {"Bucket": bucket, "Prefix": prefix or ""}
+                if continuation:
+                    kwargs["ContinuationToken"] = continuation
+                listed = client.list_objects_v2(**kwargs)
+                contents = listed.get("Contents") or []
+                for obj in contents:
+                    key = str(obj.get("Key") or "").strip()
+                    if not key:
+                        continue
+                    scanned += 1
+                    if max_objects and scanned > max_objects:
+                        break
+                    # solo PDFs
+                    if not key.lower().endswith(".pdf"):
+                        continue
+                    poliza_guess = guess_poliza_from_filename(key)
+                    poliza_norm = normalize_poliza_key(poliza_guess)
+                    if not poliza_norm:
+                        continue
+                    guessed += 1
+                    candidates = buckets.get(poliza_norm) or []
+                    if not candidates:
+                        unmatched.append(key)
+                        continue
+                    # evita asignar el mismo seguro a múltiples ficheros
+                    picked = None
+                    while candidates:
+                        cid = candidates.pop(0)
+                        if cid not in used_policy_ids:
+                            picked = cid
+                            break
+                    if not picked:
+                        duplicates += 1
+                        continue
+                    used_policy_ids.add(picked)
+                    matched += 1
+                    public_url = f"https://{bucket}.s3.{region}.amazonaws.com/{key}"
+                    updates.append((key, public_url, now, picked))
+                if max_objects and scanned > max_objects:
+                    break
+                if listed.get("IsTruncated"):
+                    continuation = listed.get("NextContinuationToken")
+                    if not continuation:
+                        break
+                else:
+                    break
+
+            updated = 0
+            if updates and not dry_run:
+                # Solo rellenamos si sigue vacío (no pisamos datos existentes).
+                conn.executemany(
+                    """
+                    UPDATE seguros
+                    SET poliza_key = ?, poliza_url = ?, updated_at = datetime(?)
+                    WHERE id = ?
+                      AND (COALESCE(TRIM(poliza_key), '') = '' AND COALESCE(TRIM(poliza_url), '') = '')
+                    """,
+                    updates,
+                )
+                updated = len(updates)
+                conn.commit()
+
+            json_response(
+                self,
+                {
+                    "ok": True,
+                    "dry_run": bool(dry_run),
+                    "empresa_id": empresa_id,
+                    "prefix": prefix,
+                    "polizas_candidates": sum(len(v) for v in buckets.values()),
+                    "polizas_already_linked": already,
+                    "objects_scanned": scanned,
+                    "objects_with_poliza_guess": guessed,
+                    "matched": matched,
+                    "updated": updated,
+                    "duplicates_skipped": duplicates,
+                    "unmatched_sample": unmatched[:50],
+                },
+            )
             return
         elif parsed.path == "/api/seguros_enrich":
             record_id = payload.get("id")
