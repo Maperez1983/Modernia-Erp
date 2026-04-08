@@ -1731,11 +1731,16 @@ const workspaceFincasLedgerForm = document.getElementById("workspaceFincasLedger
 const workspaceFincasLedgerResetBtn = document.getElementById("workspaceFincasLedgerResetBtn");
 const workspaceFincasLedgerStatus = document.getElementById("workspaceFincasLedgerStatus");
 const workspaceFincasLedgerList = document.getElementById("workspaceFincasLedgerList");
-const workspaceFincasColegioLogo = document.getElementById("workspaceFincasColegioLogo");
+const workspaceFincasBudgetCompanyLogo = document.getElementById("workspaceFincasBudgetCompanyLogo");
+const workspaceFincasBudgetColegioLogo = document.getElementById("workspaceFincasBudgetColegioLogo");
+const workspaceFincasBudgetServiciosIncluidos = document.getElementById("workspaceFincasBudgetServiciosIncluidos");
 const workspaceFincasBudgetQuickForm = document.getElementById("workspaceFincasBudgetQuickForm");
-const workspaceFincasBudgetHero = document.getElementById("workspaceFincasBudgetHero");
 const workspaceFincasBudgetOpenEngine = document.getElementById("workspaceFincasBudgetOpenEngine");
 const workspaceFincasBudgetQuickStatus = document.getElementById("workspaceFincasBudgetQuickStatus");
+const workspaceFincasBudgetsEstadoFilter = document.getElementById("workspaceFincasBudgetsEstadoFilter");
+const workspaceFincasBudgetsRefreshBtn = document.getElementById("workspaceFincasBudgetsRefreshBtn");
+const workspaceFincasBudgetsTable = document.getElementById("workspaceFincasBudgetsTable");
+const workspaceFincasBudgetsInfo = document.getElementById("workspaceFincasBudgetsInfo");
 const workspaceFincasIncidentForm = document.getElementById("workspaceFincasIncidentForm");
 const workspaceFincasIncidentResetBtn = document.getElementById("workspaceFincasIncidentResetBtn");
 const workspaceFincasIncidentStatus = document.getElementById("workspaceFincasIncidentStatus");
@@ -2017,6 +2022,9 @@ const segurosCrmSection = document.getElementById("segurosCrmSection");
 const finCrmSection = document.getElementById("finCrmSection");
 const finSimSection = document.getElementById("finSimSection");
 const gestoriaFactSection = document.getElementById("gestoriaFactSection");
+const gestoriaBudgetCompanyLogo = document.getElementById("gestoriaBudgetCompanyLogo");
+const gestoriaBudgetColegioLogo = document.getElementById("gestoriaBudgetColegioLogo");
+const gestoriaBudgetServiciosIncluidos = document.getElementById("gestoriaBudgetServiciosIncluidos");
 const gestoriaBudgetQuickForm = document.getElementById("gestoriaBudgetQuickForm");
 const gestoriaBudgetQuickStatus = document.getElementById("gestoriaBudgetQuickStatus");
 const gestoriaBudgetsServicioFilter = document.getElementById("gestoriaBudgetsServicioFilter");
@@ -11948,7 +11956,7 @@ const hydrateWorkspaceCompanySelects = () => {
   const companies = state.currentWorkspaceDetail?.companies || [];
   const defaultCompanyId = state.currentWorkspaceCompanyId || companies[0]?.id || "";
   const html = companies.map((row) => `<option value="${row.id}">${row.nombre || "-"}</option>`).join("");
-  [workspaceBillingForm, workspaceBudgetForm, workspaceInboxForm, workspaceSeriesForm, workspaceTimeForm, workspaceTimeEmployeeForm, workspaceFincasCommunityForm, workspaceRemittancesForm, workspaceFincasProviderForm].forEach((form) => {
+  [workspaceBillingForm, workspaceBudgetForm, workspaceInboxForm, workspaceSeriesForm, workspaceTimeForm, workspaceTimeEmployeeForm, workspaceFincasCommunityForm, workspaceRemittancesForm, workspaceFincasProviderForm, workspaceFincasBudgetQuickForm].forEach((form) => {
     const select = form?.querySelector('[name="empresa_id"]');
     if (select) {
       select.innerHTML = html;
@@ -14705,6 +14713,16 @@ const resolveCrmFinEmpresa = () => {
   return state.empresas[0] || null;
 };
 
+const resolveEmpresaForServiceKey = (serviceKey = "") => {
+  const key = normalizeSimple(String(serviceKey || ""));
+  if (!key) return null;
+  if (key === "seguros") return resolveCrmSegurosEmpresa();
+  if (key === "gestoria" || key === "fincas" || key === "gestoria_fincas") return resolveCrmGestoriaEmpresa();
+  if (key === "inmobiliaria" || key === "inmo") return resolveCrmInmoEmpresa();
+  if (key === "financiaciones" || key === "hipotecas") return resolveCrmFinEmpresa();
+  return resolveEmpresaById(state.currentEmpresaId);
+};
+
 const openCrmInmobiliario = () => {
   const fromHome = state.currentPage === "home";
   const hadRouteParams = (() => {
@@ -14892,9 +14910,6 @@ const openSegurosCrm = () => {
   if (tableContainer) tableContainer.classList.add("hidden");
   if (tableInfo) tableInfo.classList.add("hidden");
   loadSegurosCrm();
-  if (state.currentEmpresaId) {
-    renderFincasDashboard(state.currentEmpresaId);
-  }
   try {
     const user = getAuthScopeUser();
     if (fromHome && !hadRouteParams && user && isPrivilegedUser(user)) {
@@ -19801,7 +19816,7 @@ const loadAllSegurosForContabilidad = async () => {
   if (Array.isArray(segurosContabilidadAllCache)) {
     return segurosContabilidadAllCache;
   }
-  const empresa = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
+  const empresa = resolveCrmSegurosEmpresa();
   if (!empresa) return [];
   try {
     const params = new URLSearchParams({
@@ -19837,7 +19852,7 @@ const loadClientesForSegurosContabilidad = async () => {
   if (Array.isArray(segurosContabilidadClientesCache)) {
     return segurosContabilidadClientesCache;
   }
-  const empresa = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
+  const empresa = resolveCrmSegurosEmpresa();
   const params = new URLSearchParams({ servicio: "seguros" });
   if (empresa?.id) {
     params.set("empresa_id", empresa.id);
@@ -19987,7 +20002,7 @@ const ensureSelectedPolizaOption = (selectEl, seguroId, polizaNumero = "") => {
 
 const loadGestoriaContabilidad = () => {
   if (!gestoriaContabilidadTable || !gestoriaContabilidadInfo) return;
-  const empresa = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
+  const empresa = resolveCrmGestoriaEmpresa();
   if (!empresa) {
     gestoriaContabilidadTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
     return;
@@ -20145,7 +20160,7 @@ const loadGestoriaContabilidad = () => {
 
 const loadSegurosContabilidad = () => {
   if (!segurosContabilidadTable || !segurosContabilidadInfo) return;
-  const empresa = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
+  const empresa = resolveCrmSegurosEmpresa();
   if (!empresa) {
     segurosContabilidadTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
     segurosContabilidadInfo.textContent = "";
@@ -20526,7 +20541,7 @@ const createGestoriaContaChecklist = () => {
 
 const loadGestoriaContaQueue = () => {
   if (!gestoriaContaQueueTable || !gestoriaContaQueueInfo) return;
-  const empresa = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
+  const empresa = resolveCrmGestoriaEmpresa();
   if (!empresa) {
     gestoriaContaQueueTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
     return;
@@ -20576,7 +20591,7 @@ const loadGestoriaContaQueue = () => {
 
 const loadGestoriaTrabajosOverview = () => {
   if (!gestoriaTrabajosTable || !gestoriaTrabajosInfo) return;
-  const empresa = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
+  const empresa = resolveCrmGestoriaEmpresa();
   if (!empresa) {
     gestoriaTrabajosTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
     return;
@@ -20641,7 +20656,7 @@ const loadGestoriaTrabajosOverview = () => {
 
 const loadGestoriaModelosOverview = () => {
   if (!gestoriaModelosOverviewTable || !gestoriaModelosOverviewInfo) return;
-  const empresa = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
+  const empresa = resolveCrmGestoriaEmpresa();
   if (!empresa) {
     gestoriaModelosOverviewTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
     return;
@@ -20692,7 +20707,7 @@ const loadGestoriaModelosOverview = () => {
 
 const loadGestoriaPipeline = () => {
   if (!gestoriaPipeline) return;
-  const empresa = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
+  const empresa = resolveCrmGestoriaEmpresa();
   if (!empresa) {
     gestoriaPipeline.innerHTML = "<p class='muted'>Sin empresa.</p>";
     return;
@@ -20783,7 +20798,7 @@ const loadGestoriaPipeline = () => {
 
 const loadGestoriaDocsRecent = () => {
   if (!gestoriaDocsRecent || !gestoriaDocsRecentInfo) return;
-  const empresa = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
+  const empresa = resolveCrmGestoriaEmpresa();
   if (!empresa) {
     gestoriaDocsRecent.innerHTML = "<p class='muted'>Sin empresa.</p>";
     return;
@@ -20847,7 +20862,7 @@ const loadGestoriaDocsRecent = () => {
 
 const loadGestoriaAuditoria = () => {
   if (!gestoriaAuditTable || !gestoriaAuditInfo) return;
-  const empresa = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
+  const empresa = resolveCrmGestoriaEmpresa();
   if (!empresa) {
     gestoriaAuditTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
     return;
@@ -30745,7 +30760,7 @@ const loadGestoriaCrm = async () => {
   loadGestoriaPipeline();
   loadGestoriaDocsRecent();
   loadGestoriaAuditoria();
-  const empresa = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
+  const empresa = resolveCrmGestoriaEmpresa();
   if (!empresa) {
     gestoriaCrmTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
     return;
@@ -31019,7 +31034,7 @@ const loadGestoriaDocsWorkspace = () => {
 };
 
 const loadGestoriaDashboard = () => {
-  const empresa = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
+  const empresa = resolveCrmGestoriaEmpresa();
   if (!empresa) return;
   bindGestoriaDashboardKpis();
   bindGestoriaRentaCampaignBanner();
@@ -31477,7 +31492,7 @@ const loadSegurosCrm = () => {
   if (!segurosCrmTable || !segurosCrmInfo) {
     return;
   }
-  const empresa = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
+  const empresa = resolveCrmSegurosEmpresa();
   if (!empresa) {
     segurosCrmTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
     state.segurosCrmData = null;
@@ -31672,7 +31687,7 @@ const openSegurosBdtFromDashboard = ({ estadoMode = "all", estadoContains = "" }
 
 const loadSegurosKpis = () => {
   if (!segurosKpis) return;
-  const empresa = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
+  const empresa = resolveCrmSegurosEmpresa();
   if (!empresa) {
     segurosKpis.innerHTML = "<p class='muted'>Sin empresa.</p>";
     return;
@@ -32201,7 +32216,7 @@ const loadSegurosReclamaciones = (empresaId) => {
 
 const loadSegurosAlertas = () => {
   if (!segurosAlertasList) return;
-  const empresa = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
+  const empresa = resolveCrmSegurosEmpresa();
   if (!empresa) {
     segurosAlertasList.innerHTML = "<p class='muted'>Sin empresa.</p>";
     state.segurosRenovarPendientesIds = [];
@@ -33572,7 +33587,7 @@ const createClienteFromOcr = async (type, fields) => {
 };
 
 const ensureSegurosBdtData = async (forceRefresh = false) => {
-  const empresa = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
+  const empresa = resolveCrmSegurosEmpresa();
   if (!empresa) return null;
   if (!forceRefresh && state.segurosBdtCache && state.segurosBdtCache.empresaId === empresa.id) {
     return state.segurosBdtCache.data;
@@ -35519,11 +35534,16 @@ const submitGestoriaTrabajoForm = async (form, statusEl, afterSubmit) => {
     if (statusEl) statusEl.textContent = "Selecciona un cliente.";
     return;
   }
+  const empresa = resolveCrmGestoriaEmpresa();
+  if (!empresa) {
+    if (statusEl) statusEl.textContent = "Sin empresa.";
+    return;
+  }
   if (statusEl) statusEl.textContent = "Guardando...";
   const formData = new FormData(form);
   const payload = Object.fromEntries(formData.entries());
   payload.cliente_id = state.currentClienteId;
-  payload.empresa_nombre = FINCAS_COMPANY;
+  payload.empresa_nombre = empresa.nombre;
   payload.usuario = getCurrentUser();
   try {
     const res = await fetch("/api/gestoria_trabajos", {
@@ -35666,7 +35686,7 @@ const loadGestoriaDocs = (clienteId) => {
 
 const loadGestoriaClienteAgenda = (clienteId) => {
   if (!gestoriaClienteAgendaTable || !gestoriaClienteAgendaInfo) return;
-  const empresa = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
+  const empresa = resolveCrmGestoriaEmpresa();
   if (!empresa) {
     gestoriaClienteAgendaTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
     return;
@@ -35717,7 +35737,7 @@ const loadGestoriaClienteAgenda = (clienteId) => {
 
 const loadGestoriaClienteDashboard = (clienteId) => {
   if (!clienteId || !gestoriaClienteKpis) return;
-  const empresa = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
+  const empresa = resolveCrmGestoriaEmpresa();
   if (!empresa) return;
   const modelosReq = api(`/api/gestoria_modelos?cliente_id=${clienteId}`);
   const trabajosReq = api(`/api/gestoria_trabajos?cliente_id=${clienteId}`);
@@ -36248,7 +36268,7 @@ const buildPlantillaConversorRows = (diario = []) => {
 
 const loadGestoriaClienteLibros = (clienteId) => {
   if (!clienteId || !gestoriaClienteLibroDiarioTable) return;
-  const empresa = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
+  const empresa = resolveCrmGestoriaEmpresa();
   if (!empresa) return;
   const qs = new URLSearchParams({ empresa_id: empresa.id, cliente_id: clienteId });
   api(`/api/gestoria_libros?${qs.toString()}`)
@@ -36555,6 +36575,11 @@ const submitGestoriaRentaDocument = async (forcedStatus = "") => {
     if (gestoriaRentaDocumentoStatus) gestoriaRentaDocumentoStatus.textContent = "Selecciona un cliente.";
     return;
   }
+  const empresa = resolveCrmGestoriaEmpresa();
+  if (!empresa) {
+    if (gestoriaRentaDocumentoStatus) gestoriaRentaDocumentoStatus.textContent = "Sin empresa.";
+    return;
+  }
   const row = state.currentClienteGestoriaData || {};
   const entry = getSelectedRentaEntry(row);
   if (!entry?.id) {
@@ -36566,7 +36591,7 @@ const submitGestoriaRentaDocument = async (forcedStatus = "") => {
   const formData = new FormData(gestoriaRentaDocumentoForm);
   const payload = Object.fromEntries(formData.entries());
   payload.usuario = getCurrentUser();
-  payload.empresa_nombre = FINCAS_COMPANY;
+  payload.empresa_nombre = empresa.nombre;
   payload.cliente_id = state.currentClienteId;
   payload.entry_id = entry.id;
   payload.ejercicio = entry.ejercicio || payload.entry_ejercicio || new Date().getFullYear();
@@ -37411,7 +37436,7 @@ const renderGestoriaBudgetsList = (rows = []) => {
 };
 
 const loadGestoriaFact = () => {
-  const empresa = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
+  const empresa = resolveCrmGestoriaEmpresa();
   if (!empresa) return;
   if (gestoriaBudgetsInfo) gestoriaBudgetsInfo.textContent = "Cargando presupuestos...";
   const servicio = String(gestoriaBudgetsServicioFilter?.value || "fincas").trim().toLowerCase();
@@ -40444,7 +40469,7 @@ viewTabs.addEventListener("click", (event) => {
     return;
   }
   if (currentTab === "gestoria-agenda") {
-    const empresa = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
+    const empresa = resolveCrmGestoriaEmpresa();
     if (empresa) {
       loadAcciones("gestoria", empresa.id, gestoriaAgendaTable, gestoriaAgendaInfo);
     }
@@ -41418,7 +41443,7 @@ if (segurosEventosRefresh) {
 if (segurosPolizaAccionForm) {
   segurosPolizaAccionForm.addEventListener("submit", async (event) => {
     event.preventDefault();
-    const empresa = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
+    const empresa = resolveCrmSegurosEmpresa();
     if (!empresa) return;
     const id = segurosPolizaAccionId ? segurosPolizaAccionId.value : "";
     if (!id) {
@@ -41458,7 +41483,7 @@ if (segurosPolizaAccionTipo) {
 if (segurosIpidForm) {
   segurosIpidForm.addEventListener("submit", async (event) => {
     event.preventDefault();
-    const empresa = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
+    const empresa = resolveCrmSegurosEmpresa();
     if (!empresa) return;
     const seguroId = segurosIpidPolizaId ? segurosIpidPolizaId.value : "";
     if (!seguroId) {
@@ -41490,7 +41515,7 @@ if (segurosIpidForm) {
 if (segurosReclamacionForm) {
   segurosReclamacionForm.addEventListener("submit", async (event) => {
     event.preventDefault();
-    const empresa = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
+    const empresa = resolveCrmSegurosEmpresa();
     if (!empresa) return;
     const seguroId = segurosReclamacionPolizaId ? segurosReclamacionPolizaId.value : "";
     if (!seguroId) {
@@ -41841,6 +41866,11 @@ if (segurosContabilidadForm) {
     if (segurosContabilidadStatus) {
       segurosContabilidadStatus.textContent = "Guardando...";
     }
+    const empresa = resolveCrmSegurosEmpresa();
+    if (!empresa) {
+      if (segurosContabilidadStatus) segurosContabilidadStatus.textContent = "Sin empresa.";
+      return;
+    }
     const formData = new FormData(segurosContabilidadForm);
     const payload = Object.fromEntries(formData.entries());
     if (segurosContabilidadClientesMulti) {
@@ -41851,7 +41881,7 @@ if (segurosContabilidadForm) {
       payload.cliente_ids_json = selected;
       payload.cliente_id = selected[0] || payload.cliente_id || "";
     }
-    payload.empresa_nombre = FINCAS_COMPANY;
+    payload.empresa_nombre = empresa.nombre;
     const rawNotas = String(payload.notas || "").trim();
     if (!/^(\[SEGUROS\]|Auto CRM Seguros)/i.test(rawNotas)) {
       payload.notas = rawNotas ? `[SEGUROS] ${rawNotas}` : "[SEGUROS]";
@@ -43697,7 +43727,7 @@ if (gestoriaBudgetQuickForm) {
   syncGestoriaBudgetQuickComputed();
   gestoriaBudgetQuickForm.addEventListener("submit", async (event) => {
     event.preventDefault();
-    const empresa = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
+    const empresa = resolveCrmGestoriaEmpresa();
     if (!empresa) return;
     if (gestoriaBudgetQuickStatus) gestoriaBudgetQuickStatus.textContent = "Creando presupuesto...";
     try {
@@ -45097,9 +45127,14 @@ if (gestoriaDocsForm) {
     if (gestoriaDocsStatus) {
       gestoriaDocsStatus.textContent = "Guardando...";
     }
+    const empresa = resolveCrmGestoriaEmpresa();
+    if (!empresa) {
+      if (gestoriaDocsStatus) gestoriaDocsStatus.textContent = "Sin empresa.";
+      return;
+    }
     const formData = new FormData(gestoriaDocsForm);
     const payload = Object.fromEntries(formData.entries());
-    payload.empresa_nombre = FINCAS_COMPANY;
+    payload.empresa_nombre = empresa.nombre;
     payload.usuario = getCurrentUser();
     const file =
       gestoriaDocsFile && gestoriaDocsFile.files && gestoriaDocsFile.files.length
@@ -45161,9 +45196,14 @@ if (gestoriaClienteDocsForm) {
     if (gestoriaClienteDocsStatus) {
       gestoriaClienteDocsStatus.textContent = "Guardando...";
     }
+    const empresa = resolveCrmGestoriaEmpresa();
+    if (!empresa) {
+      if (gestoriaClienteDocsStatus) gestoriaClienteDocsStatus.textContent = "Sin empresa.";
+      return;
+    }
     const formData = new FormData(gestoriaClienteDocsForm);
     const payload = Object.fromEntries(formData.entries());
-    payload.empresa_nombre = FINCAS_COMPANY;
+    payload.empresa_nombre = empresa.nombre;
     payload.usuario = getCurrentUser();
     payload.cliente_id = state.currentClienteId;
     const file =
@@ -45236,7 +45276,12 @@ if (clienteDocsUploadForm) {
     const uploadPrefix = ["seguros", "gestoria", "inmobiliaria", "financiaciones"].includes(serviceKey)
       ? serviceKey
       : "docs";
-    payload.empresa_nombre = FINCAS_COMPANY;
+    const empresa = resolveEmpresaForServiceKey(serviceKey);
+    if (!empresa) {
+      if (clienteDocsUploadStatus) clienteDocsUploadStatus.textContent = "Sin empresa.";
+      return;
+    }
+    payload.empresa_nombre = empresa.nombre;
     payload.usuario = getCurrentUser();
     payload.cliente_id = state.currentClienteId;
     payload.referencia_tipo = serviceKey;
@@ -45439,7 +45484,12 @@ if (gestoriaDocForm) {
     const formData = new FormData(gestoriaDocForm);
     const payload = Object.fromEntries(formData.entries());
     payload.cliente_id = state.currentClienteId;
-    payload.empresa_nombre = FINCAS_COMPANY;
+    const empresa = resolveCrmGestoriaEmpresa();
+    if (!empresa) {
+      if (gestoriaDocStatus) gestoriaDocStatus.textContent = "Sin empresa.";
+      return;
+    }
+    payload.empresa_nombre = empresa.nombre;
     fetch("/api/gestoria_docs", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -45475,10 +45525,15 @@ if (gestoriaClienteAgendaForm) {
     if (gestoriaClienteAgendaStatus) {
       gestoriaClienteAgendaStatus.textContent = "Guardando...";
     }
+    const empresa = resolveCrmGestoriaEmpresa();
+    if (!empresa) {
+      if (gestoriaClienteAgendaStatus) gestoriaClienteAgendaStatus.textContent = "Sin empresa.";
+      return;
+    }
     const formData = new FormData(gestoriaClienteAgendaForm);
     const payload = Object.fromEntries(formData.entries());
     payload.cliente_id = state.currentClienteId;
-    payload.empresa_nombre = FINCAS_COMPANY;
+    payload.empresa_nombre = empresa.nombre;
     payload.servicio = "gestoria";
     fetch("/api/acciones", {
       method: "POST",
@@ -45783,7 +45838,12 @@ if (gestoriaCrmForm) {
     }
     const formData = new FormData(gestoriaCrmForm);
     const payload = Object.fromEntries(formData.entries());
-    payload.empresa_nombre = FINCAS_COMPANY;
+    const empresa = resolveCrmGestoriaEmpresa();
+    if (!empresa) {
+      if (gestoriaCrmStatus) gestoriaCrmStatus.textContent = "Sin empresa.";
+      return;
+    }
+    payload.empresa_nombre = empresa.nombre;
     payload.usuario = getCurrentUser();
     fetch("/api/gestoria", {
       method: "POST",
@@ -45818,9 +45878,14 @@ if (gestoriaTrabajoForm) {
     if (gestoriaTrabajoStatus) {
       gestoriaTrabajoStatus.textContent = "Guardando...";
     }
+    const empresa = resolveCrmGestoriaEmpresa();
+    if (!empresa) {
+      if (gestoriaTrabajoStatus) gestoriaTrabajoStatus.textContent = "Sin empresa.";
+      return;
+    }
     const formData = new FormData(gestoriaTrabajoForm);
     const payload = Object.fromEntries(formData.entries());
-    payload.empresa_nombre = FINCAS_COMPANY;
+    payload.empresa_nombre = empresa.nombre;
     payload.usuario = getCurrentUser();
     if (!payload.cliente_id && state.currentClienteId) {
       payload.cliente_id = state.currentClienteId;
@@ -45882,13 +45947,18 @@ if (gestoriaAgendaForm) {
     if (gestoriaAgendaStatus) {
       gestoriaAgendaStatus.textContent = "Guardando...";
     }
+    const empresa = resolveCrmGestoriaEmpresa();
+    if (!empresa) {
+      if (gestoriaAgendaStatus) gestoriaAgendaStatus.textContent = "Sin empresa.";
+      return;
+    }
     const formData = new FormData(gestoriaAgendaForm);
     const payload = Object.fromEntries(formData.entries());
     Object.assign(
       payload,
       resolveClienteFromInput(gestoriaAgendaClienteInput, gestoriaAgendaClienteId)
     );
-    payload.empresa_nombre = FINCAS_COMPANY;
+    payload.empresa_nombre = empresa.nombre;
     payload.servicio = "gestoria";
     fetch("/api/acciones", {
       method: "POST",
@@ -45907,10 +45977,7 @@ if (gestoriaAgendaForm) {
           gestoriaAgendaStatus.textContent = "Guardado.";
         }
         gestoriaAgendaForm.reset();
-        const empresa = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
-        if (empresa) {
-          loadAcciones("gestoria", empresa.id, gestoriaAgendaTable, gestoriaAgendaInfo);
-        }
+        loadAcciones("gestoria", empresa.id, gestoriaAgendaTable, gestoriaAgendaInfo);
       })
       .catch(() => {
         if (gestoriaAgendaStatus) {
@@ -45935,9 +46002,14 @@ if (gestoriaContabilidadForm) {
     if (gestoriaContabilidadStatus) {
       gestoriaContabilidadStatus.textContent = "Guardando...";
     }
+    const empresa = resolveCrmGestoriaEmpresa();
+    if (!empresa) {
+      if (gestoriaContabilidadStatus) gestoriaContabilidadStatus.textContent = "Sin empresa.";
+      return;
+    }
     const formData = new FormData(gestoriaContabilidadForm);
     const payload = Object.fromEntries(formData.entries());
-    payload.empresa_nombre = FINCAS_COMPANY;
+    payload.empresa_nombre = empresa.nombre;
     fetch("/api/gestoria_contabilidad", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -46104,10 +46176,15 @@ if (gestoriaImportReviewForm) {
       return;
     }
     if (gestoriaImportReviewStatus) gestoriaImportReviewStatus.textContent = "Guardando revisión...";
+    const empresa = resolveCrmGestoriaEmpresa();
+    if (!empresa) {
+      if (gestoriaImportReviewStatus) gestoriaImportReviewStatus.textContent = "Sin empresa.";
+      return;
+    }
     const formData = new FormData(gestoriaImportReviewForm);
     const payload = Object.fromEntries(formData.entries());
     payload.id = doc.id;
-    payload.empresa_nombre = FINCAS_COMPANY;
+    payload.empresa_nombre = empresa.nombre;
     ["base_detectada", "cuota_iva_detectada", "total_detectado"].forEach((field) => {
       payload[field] = payload[field] === "" ? "" : parseMoneyValue(payload[field]);
     });
@@ -46146,7 +46223,7 @@ if (gestoriaClienteLibrosTabs) {
 if (gestoriaClienteLibroExcelBtn) {
   gestoriaClienteLibroExcelBtn.addEventListener("click", async () => {
     const clienteId = String(state.currentClienteId || "").trim();
-    const empresa = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
+    const empresa = resolveCrmGestoriaEmpresa();
     if (!clienteId || !empresa?.id) {
       if (gestoriaClienteLibroExcelStatus) {
         gestoriaClienteLibroExcelStatus.textContent = "Cliente o empresa no disponible.";
@@ -46290,13 +46367,18 @@ if (segurosAgendaForm) {
     if (segurosAgendaStatus) {
       segurosAgendaStatus.textContent = "Guardando...";
     }
+    const empresa = resolveCrmSegurosEmpresa();
+    if (!empresa) {
+      if (segurosAgendaStatus) segurosAgendaStatus.textContent = "Sin empresa.";
+      return;
+    }
     const formData = new FormData(segurosAgendaForm);
     const payload = Object.fromEntries(formData.entries());
     Object.assign(
       payload,
       resolveClienteFromInput(segurosAgendaClienteInput, segurosAgendaClienteId)
     );
-    payload.empresa_nombre = FINCAS_COMPANY;
+    payload.empresa_nombre = empresa.nombre;
     payload.servicio = "seguros";
     fetch("/api/acciones", {
       method: "POST",
@@ -46315,10 +46397,7 @@ if (segurosAgendaForm) {
           segurosAgendaStatus.textContent = "Guardado.";
         }
         segurosAgendaForm.reset();
-        const empresa = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
-        if (empresa) {
-          loadAcciones("seguros", empresa.id, segurosAgendaTable, segurosAgendaInfo);
-        }
+        loadAcciones("seguros", empresa.id, segurosAgendaTable, segurosAgendaInfo);
       })
       .catch(() => {
         if (segurosAgendaStatus) {
@@ -46833,7 +46912,12 @@ if (fincasBdtForm) {
     }
     const formData = new FormData(fincasBdtForm);
     const payload = Object.fromEntries(formData.entries());
-    payload.empresa_nombre = FINCAS_COMPANY;
+    const empresa = resolveEmpresaForServiceKey("fincas") || resolveCrmGestoriaEmpresa();
+    if (!empresa) {
+      if (fincasBdtFormStatus) fincasBdtFormStatus.textContent = "Sin empresa.";
+      return;
+    }
+    payload.empresa_nombre = empresa.nombre;
     fetch("/api/movimientos", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -46982,7 +47066,12 @@ if (fincasSegurosForm) {
     }
     const formData = new FormData(fincasSegurosForm);
     const payload = Object.fromEntries(formData.entries());
-    payload.empresa_nombre = FINCAS_COMPANY;
+    const empresa = resolveEmpresaForServiceKey("seguros") || resolveCrmSegurosEmpresa();
+    if (!empresa) {
+      if (fincasSegurosFormStatus) fincasSegurosFormStatus.textContent = "Sin empresa.";
+      return;
+    }
+    payload.empresa_nombre = empresa.nombre;
     fetch("/api/seguros", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
