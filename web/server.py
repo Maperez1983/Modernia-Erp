@@ -9502,6 +9502,7 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
         tokens = re.sub(r"[^A-Z0-9]", " ", str(text_value).upper()).split()
         if not tokens:
             return ""
+        from collections import Counter
         labels = {
             "DNI",
             "NIF",
@@ -9513,6 +9514,45 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
             "NIF/CIF",
             "CIF/NIF",
         }
+        # Señales de contexto para intentar evitar capturar CIF/NIF de la aseguradora/mediador.
+        actor_tokens = {"TOMADOR", "ASEGURADO", "CONTRATANTE", "TITULAR"}
+        insurer_tokens = {
+            "OCASO",
+            "MAPFRE",
+            "AXA",
+            "ALLIANZ",
+            "REALE",
+            "ZURICH",
+            "GENERALI",
+            "SANTALUCIA",
+            "CATALANA",
+            "OCCIDENT",
+            "PELAYO",
+            "FIATC",
+            "EUROINS",
+            "HELVETIA",
+            "CASER",
+            "LIBERTY",
+            "DIRECT",
+        }
+        actor_idxs = [i for i, t in enumerate(tokens) if t in actor_tokens]
+        insurer_idxs = [i for i, t in enumerate(tokens) if t in insurer_tokens]
+        candidates = []
+
+        def add_candidate(value, idx, *, from_label=False):
+            if not value:
+                return
+            candidates.append({"value": value, "idx": int(idx or 0), "from_label": bool(from_label)})
+
+        def near(idxs, pos, dist):
+            if not idxs:
+                return False
+            p = int(pos or 0)
+            for i in idxs:
+                if abs(i - p) <= dist:
+                    return True
+            return False
+
         # 1) Buscar tras etiqueta
         for idx, tok in enumerate(tokens):
             key = tok.replace("/", "")
@@ -9523,7 +9563,7 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
                         continue
                     cand = normalize_nif_candidate(combined, infer_control_letter=True)
                     if cand:
-                        return cand
+                        add_candidate(cand, idx, from_label=True)
         # 2) Fallback: escaneo conservador por ventanas cortas
         for start in range(len(tokens)):
             combined = ""
@@ -9537,8 +9577,85 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
                     continue
                 cand = normalize_nif_candidate(combined, infer_control_letter=False)
                 if cand:
-                    return cand
-        return ""
+                    add_candidate(cand, start, from_label=False)
+
+        if not candidates:
+            return ""
+        freq = Counter(c["value"] for c in candidates)
+        for c in candidates:
+            value = c["value"]
+            pos = c["idx"]
+            is_personal = bool(value and (value[0].isdigit() or value[0] in "XYZ"))
+            score = 100 if is_personal else 70
+            if c.get("from_label"):
+                score += 60
+            actor_near = near(actor_idxs, pos, 140)
+            insurer_near = near(insurer_idxs, pos, 90)
+            if actor_near:
+                score += 45
+            if insurer_near and not actor_near:
+                score -= 80
+            elif insurer_near and actor_near:
+                score -= 25
+            f = int(freq.get(value) or 0)
+            if f >= 8:
+                score -= 40
+            elif f >= 4:
+                score -= 20
+            c["score"] = score
+        best = max(candidates, key=lambda c: (c.get("score") or 0, c.get("from_label") or False, -int(freq.get(c["value"]) or 0)))
+        # Umbral para no devolver CIF/NIF muy probablemente de la aseguradora.
+        if (best.get("score") or 0) < 55:
+            return ""
+        return best["value"]
+
+    def find_best_personal_nif_in_text(text_value):
+        """
+        Variante que intenta devolver SOLO DNI/NIE (no CIF), para casos donde el tomador
+        parece persona física y el OCR captura CIF de aseguradora/mediador.
+        """
+        if not text_value:
+            return ""
+        tokens = re.sub(r"[^A-Z0-9]", " ", str(text_value).upper()).split()
+        if not tokens:
+            return ""
+        labels = {"DNI", "NIF", "DOCUMENTO", "DOC", "DNINIF", "DNI/NIF"}
+        candidates = []
+        def is_personal(v):
+            return bool(v and (v[0].isdigit() or v[0] in "XYZ"))
+        def add(v, idx, from_label):
+            if v and is_personal(v):
+                candidates.append((v, int(idx or 0), bool(from_label)))
+        # tras etiqueta
+        for idx, tok in enumerate(tokens):
+            key = tok.replace("/", "")
+            if tok in labels or key in labels:
+                for end in range(idx + 1, min(idx + 7, len(tokens))):
+                    combined = "".join(tokens[idx + 1 : end + 1])
+                    if len(combined) < 7 or len(combined) > 12:
+                        continue
+                    cand = normalize_nif_candidate(combined, infer_control_letter=True)
+                    if cand:
+                        add(cand, idx, True)
+        # ventanas cortas
+        for start in range(len(tokens)):
+            combined = ""
+            digits = 0
+            for end in range(start, min(start + 4, len(tokens))):
+                combined += tokens[end]
+                digits += sum(ch.isdigit() for ch in tokens[end])
+                if len(combined) > 12:
+                    break
+                if digits < 7:
+                    continue
+                cand = normalize_nif_candidate(combined, infer_control_letter=True)
+                if cand:
+                    add(cand, start, False)
+        if not candidates:
+            return ""
+        # prioriza los que vienen tras etiqueta
+        candidates.sort(key=lambda it: (it[2], it[0]), reverse=True)
+        return candidates[0][0]
     def normalize_ocr_date(value):
         if not value:
             return ""
@@ -11098,9 +11215,13 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
             and len((fields.get("tomador") or "").split()) >= 2
         )
         if looks_company_id and looks_person_name:
-            fields["dni"] = ""
-            if fields.get("nif") == dni_norm:
-                fields["nif"] = ""
+            # Si existe un DNI/NIE en el documento, preferirlo; si no, conservar el CIF
+            # (hay pólizas de comunidades/empresas donde el tomador puede no detectarse bien).
+            personal = find_best_personal_nif_in_text(text)
+            if personal:
+                fields["dni"] = personal
+                if not fields.get("nif"):
+                    fields["nif"] = personal
     if fields.get("fecha_efecto") and fields.get("fecha_vencimiento"):
         efecto = parse_iso_date(fields.get("fecha_efecto"))
         venc = parse_iso_date(fields.get("fecha_vencimiento"))
