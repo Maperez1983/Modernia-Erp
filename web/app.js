@@ -6266,18 +6266,18 @@ const renderWorkspaceCompanies = (rows = []) => {
   });
   workspaceCompanies.innerHTML = `
     <div class="workspace-chip-list">
-      ${normalizedRows
-        .map(
-          (row) => `
-            <div class="workspace-chip workspace-company-chip${String(row.id || "") === activeId ? " is-active" : ""}">
-              <div style="display:flex;gap:12px;align-items:flex-start">
-                ${
-                  row.logo_url
-                    ? `<img src="${escapeHtml(String(row.logo_url || ""))}" alt="" loading="lazy" style="width:44px;height:44px;object-fit:contain;border-radius:10px;background:#fff;border:1px solid #e1e5ea;padding:6px" />`
-                    : `<div style="width:44px;height:44px;border-radius:10px;background:#f5f7f9;border:1px solid #e1e5ea;display:flex;align-items:center;justify-content:center;color:#7a8690;font-weight:700">${escapeHtml(String((row.nombre || "E").slice(0, 1)).toUpperCase())}</div>`
-                }
-                <div>
-                  <strong>${row.nombre || "-"}</strong>
+	      ${normalizedRows
+	        .map(
+	          (row) => `
+	            <div class="workspace-chip workspace-company-chip${String(row.id || "") === activeId ? " is-active" : ""}">
+	              <div style="display:flex;gap:12px;align-items:flex-start">
+	                ${
+	                  row.logo_url
+	                    ? `<img src="${escapeHtml(buildPhotoSrc(String(row.logo_url || "")))}" alt="" loading="lazy" style="width:44px;height:44px;object-fit:contain;border-radius:10px;background:#fff;border:1px solid #e1e5ea;padding:6px" />`
+	                    : `<div style="width:44px;height:44px;border-radius:10px;background:#f5f7f9;border:1px solid #e1e5ea;display:flex;align-items:center;justify-content:center;color:#7a8690;font-weight:700">${escapeHtml(String((row.nombre || "E").slice(0, 1)).toUpperCase())}</div>`
+	                }
+	                <div>
+	                  <strong>${row.nombre || "-"}</strong>
                   <span>${row.rol || "operativa"} · ${Number(row.activo || 0) === 1 ? "activa" : "inactiva"}</span>
                   <div class="muted">
                     ${row.nif ? `CIF/NIF: ${escapeHtml(String(row.nif || ""))}` : "Sin CIF/NIF"}
@@ -6454,15 +6454,16 @@ const renderWorkspaceCompanies = (rows = []) => {
 	      set("vacaciones_modo", String(button.dataset.workspaceCompanyEditVacModo || "habiles"));
 	      set("vacaciones_dias_anuales", String(button.dataset.workspaceCompanyEditVacDias || ""));
         if (workspaceCompanyLogoStatus) workspaceCompanyLogoStatus.textContent = "";
-        if (workspaceCompanyLogoPreview) {
-          const url = String(button.dataset.workspaceCompanyEditLogo || "").trim();
-          workspaceCompanyLogoPreview.src = url || "";
-          workspaceCompanyLogoPreview.classList.toggle("hidden", !url);
-        }
-	      if (typeof workspaceCompanyEditor.scrollIntoView === "function") {
-	        workspaceCompanyEditor.scrollIntoView({ behavior: "smooth", block: "start" });
-	      }
-	    });
+	        if (workspaceCompanyLogoPreview) {
+	          const url = String(button.dataset.workspaceCompanyEditLogo || "").trim();
+	          const safeSrc = url ? buildPhotoSrc(url) : "";
+	          workspaceCompanyLogoPreview.src = safeSrc;
+	          workspaceCompanyLogoPreview.classList.toggle("hidden", !safeSrc);
+	        }
+		      if (typeof workspaceCompanyEditor.scrollIntoView === "function") {
+		        workspaceCompanyEditor.scrollIntoView({ behavior: "smooth", block: "start" });
+		      }
+		    });
 	  });
   workspaceCompanies.querySelectorAll("[data-workspace-company-unlink]").forEach((button) => {
     button.addEventListener("click", async () => {
@@ -43909,7 +43910,7 @@ const uploadWorkspaceCompanyLogo = async () => {
   const extMatch = originalName.match(/\.[a-z0-9]{2,8}$/i);
   const ext = extMatch ? extMatch[0].toLowerCase() : "";
   const safeExt = ext && ext.length <= 9 ? ext : "";
-  const filename = `empresa_${empresaId}_${Date.now()}${safeExt || ".png"}`;
+	  const filename = `empresa_${empresaId}_${Date.now()}${safeExt || ".png"}`;
   try {
     const presign = await postJsonWithDbRetry("/api/s3_presign", {
       filename,
@@ -43919,6 +43920,7 @@ const uploadWorkspaceCompanyLogo = async () => {
     });
     if (presign?.error) throw new Error(presign.error);
     if (!presign?.url || !presign?.public_url) throw new Error("No se pudo firmar la subida.");
+    const storedLogoUrl = presign?.key ? `s3://${String(presign.key || "").trim()}` : String(presign.public_url || "").trim();
     const putRes = await fetch(presign.url, {
       method: "PUT",
       headers: { "Content-Type": String(file.type || "application/octet-stream") },
@@ -43930,13 +43932,13 @@ const uploadWorkspaceCompanyLogo = async () => {
     const update = await postJsonWithDbRetry("/api/empresa_update", {
       workspace_id: state.currentWorkspaceId,
       id: empresaId,
-      logo_url: presign.public_url,
+      logo_url: storedLogoUrl,
       empresa_nombre: empresaNombre,
     });
     if (update?.error) throw new Error(update.error);
     const logoInput = workspaceCompanyForm.querySelector('[name="logo_url"]');
-    if (logoInput) logoInput.value = presign.public_url;
-    if (workspaceCompanyLogoPreview) workspaceCompanyLogoPreview.src = presign.public_url;
+    if (logoInput) logoInput.value = storedLogoUrl;
+    if (workspaceCompanyLogoPreview) workspaceCompanyLogoPreview.src = buildPhotoSrc(storedLogoUrl);
     if (workspaceCompanyLogoStatus) workspaceCompanyLogoStatus.textContent = "Logo actualizado.";
     try {
       const empresas = await api("/api/empresas");

@@ -579,6 +579,23 @@ def _s3_key_visible_for_user(conn, session, key):
             ok = bool(row)
         except Exception:
             ok = False
+    if not ok and safe_key.startswith("company_logos/"):
+        try:
+            # Logos de empresas: visibles para miembros del workspace vinculado a esa empresa.
+            row = conn.execute(
+                """
+                SELECT 1
+                FROM empresas e
+                JOIN workspace_empresas we ON we.empresa_id = e.id
+                JOIN workspace_miembros m ON m.workspace_id = we.workspace_id AND m.usuario_id = ?
+                WHERE e.logo_url = ? OR e.logo_url = ? OR e.logo_url LIKE ?
+                LIMIT 1
+                """,
+                (uid, s3_url_value, safe_key, f"%/{safe_key}"),
+            ).fetchone()
+            ok = bool(row)
+        except Exception:
+            ok = False
 
     try:
         with S3_AUTH_CACHE_LOCK:
@@ -27842,9 +27859,11 @@ def _document_font(size=18, bold=False):
 
 
 def _load_brand_logo(logo_url=None, max_width=520):
+    raw = str(logo_url).strip() if logo_url else ""
     logo_path = None
-    if logo_url:
-        raw = str(logo_url).strip()
+    logo = None
+
+    if raw:
         if raw.startswith("/assets/"):
             candidate = ASSETS / raw.replace("/assets/", "", 1)
             if candidate.exists():
@@ -27853,16 +27872,42 @@ def _load_brand_logo(logo_url=None, max_width=520):
             candidate = ROOT / raw
             if candidate.exists():
                 logo_path = candidate
-    if logo_path is None:
-        logo_path = ASSETS / "verifika2" / "verifika2_wordmark_check_green_transparent.png"
+        else:
+            # Permite logos subidos a S3 (solo prefijo company_logos/).
+            safe_key = ""
+            try:
+                if raw.startswith("s3://"):
+                    safe_key = _normalize_s3_key(raw[5:])
+                elif raw.startswith("/api/s3_redirect") or raw.startswith("/api/s3_url"):
+                    parsed = urllib.parse.urlparse(raw)
+                    key = urllib.parse.parse_qs(parsed.query or "").get("key", [""])[0]
+                    safe_key = _normalize_s3_key(key)
+                else:
+                    parsed = urllib.parse.urlparse(raw)
+                    host = str(parsed.hostname or "").lower()
+                    if host.endswith("amazonaws.com") and ("s3" in host):
+                        safe_key = _normalize_s3_key(urllib.parse.unquote(parsed.path or "").lstrip("/"))
+            except Exception:
+                safe_key = ""
+            if safe_key and safe_key.startswith("company_logos/"):
+                raw_bytes, _err = s3_get_object_bytes(safe_key)
+                if raw_bytes:
+                    try:
+                        logo = Image.open(BytesIO(raw_bytes)).convert("RGBA")
+                    except Exception:
+                        logo = None
+
+    if logo is None:
+        if logo_path is None:
+            logo_path = ASSETS / "verifika2" / "verifika2_wordmark_check_green_transparent.png"
+            if not logo_path.exists():
+                logo_path = ASSETS / "verifika2" / "verifika2_wordmark_check_green.png"
         if not logo_path.exists():
-            logo_path = ASSETS / "verifika2" / "verifika2_wordmark_check_green.png"
-    if not logo_path.exists():
-        return None
-    try:
-        logo = Image.open(logo_path).convert("RGBA")
-    except Exception:
-        return None
+            return None
+        try:
+            logo = Image.open(logo_path).convert("RGBA")
+        except Exception:
+            return None
     if logo.width > max_width:
         ratio = max_width / float(logo.width)
         logo = logo.resize((int(logo.width * ratio), int(logo.height * ratio)), Image.LANCZOS)
