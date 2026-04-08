@@ -7154,3 +7154,45 @@ body.theme-operativa .meta-status .status span {
   gap: 10px;
   margin-top: 10px;
 }
+
+.budget-quick-layout {
+  display: grid;
+  gap: 14px;
+}
+
+.budget-quick-aside {
+  display: grid;
+  gap: 12px;
+}
+
+.budget-quick-form.form-grid {
+  grid-template-columns: repeat(2, minmax(220px, 1fr));
+}
+
+.budget-quick-form .span-2 {
+  grid-column: 1 / -1;
+}
+
+.budget-quick-form h4 {
+  margin: 8px 0 0;
+  font-size: 14px;
+  color: var(--ink);
+}
+
+@media (max-width: 680px) {
+  .budget-quick-form.form-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (min-width: 1100px) {
+  .budget-quick-layout {
+    grid-template-columns: minmax(0, 1fr) 380px;
+    align-items: start;
+  }
+
+  .budget-quick-aside {
+    position: sticky;
+    top: 18px;
+  }
+}

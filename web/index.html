@@ -1507,141 +1507,147 @@
           <div id="workspaceFincasLedgerList"></div>
         </div>
 
-        <div class="form-card crm-workspace-view" data-workspace-view="fincas" data-fincas-tab="presupuestos">
-          <div class="section-head">
-            <div>
-              <h3>Presupuestos (Administración de fincas)</h3>
-              <p class="muted">Formulario completo (comunidad + solicitante + edificio) con cálculo automático e IVA 21%.</p>
-            </div>
-          </div>
-          <div class="budget-brand-strip">
-            <div class="budget-brand-logos">
-              <img id="workspaceFincasBudgetCompanyLogo" src="/assets/logos/fincas-velazquez.png" alt="Logo empresa" />
-              <img id="workspaceFincasBudgetColegioLogo" src="/assets/logos/colegio-administradores-v2.png" alt="Colegio de Administradores" />
-            </div>
-            <div class="muted">Colegiado nº 3079</div>
+	        <div class="form-card crm-workspace-view" data-workspace-view="fincas" data-fincas-tab="presupuestos">
+	          <div class="section-head">
+	            <div>
+	              <h3>Presupuestos (Administración de fincas)</h3>
+	              <p class="muted">Formulario completo (comunidad + solicitante + edificio) con cálculo automático e IVA 21%.</p>
+	            </div>
 	          </div>
-	          <form id="workspaceFincasBudgetQuickForm" class="form-grid">
-	            <input type="hidden" name="comunidad_id" />
-	            <input type="hidden" name="edificio_foto_key" />
-	            <label class="span-2">
-	              Empresa emisora
-	              <select name="empresa_id" required></select>
-		            </label>
-	            <label class="span-2">
-	              Precargar datos (opcional)
-	              <select name="comunidad_id_lookup"></select>
-	            </label>
-	            <div class="span-2 muted">Si la comunidad no está gestionada, deja este selector en “Nueva comunidad / no gestionada” y rellena los datos manualmente.</div>
-            <h4 class="span-2">Datos de la comunidad</h4>
-            <label class="span-2">
-              Denominación social
-              <input name="comunidad_denominacion" required placeholder="Ej. Comunidad Propietarios C/ Velázquez 12" />
-            </label>
-	            <label class="span-2">
-	              Dirección
-	              <input name="comunidad_direccion" required placeholder="Calle, número, localidad" />
-	            </label>
-	            <div class="span-2 hidden" id="workspaceFincasBudgetMapWrap">
-	              <iframe
-	                id="workspaceFincasBudgetMap"
-	                title="Mapa presupuesto"
-	                style="width:100%;height:240px;border:0;border-radius:14px;background:#f3f4f6;"
-	                loading="lazy"
-	                referrerpolicy="no-referrer-when-downgrade"
-	              ></iframe>
+	          <div class="budget-brand-strip">
+	            <div class="budget-brand-logos">
+	              <img id="workspaceFincasBudgetCompanyLogo" src="/assets/logos/fincas-velazquez.png" alt="Logo empresa" />
+	              <img id="workspaceFincasBudgetColegioLogo" src="/assets/logos/colegio-administradores-v2.png" alt="Colegio de Administradores" />
 	            </div>
-	            <label>
-	              CIF
-	              <input name="comunidad_cif" required placeholder="Ej. H12345678" />
-	            </label>
-	            <label>
-	              Ref. catastral
-	              <input name="referencia_catastral" placeholder="Opcional" />
-	            </label>
-	            <label>
-	              Estado
-	              <select name="estado">
-	                <option>Borrador</option>
-                <option>Estudio</option>
-                <option>Aceptado</option>
-                <option>Rechazado</option>
-              </select>
-            </label>
-            <h4 class="span-2">Datos del presidente / solicitante</h4>
-            <label class="span-2">
-              Nombre
-              <input name="solicitante_nombre" required />
-            </label>
-            <label>
-              DNI
-              <input name="solicitante_dni" required />
-            </label>
-            <label>
-              Teléfono
-              <input name="solicitante_telefono" />
-            </label>
-            <label class="span-2">
-              Dirección
-              <input name="solicitante_direccion" />
-            </label>
-            <label class="span-2">
-              Email
-              <input name="solicitante_email" type="email" />
-            </label>
-            <h4 class="span-2">Datos del edificio</h4>
-            <label>
-              Viviendas
-              <input name="num_vecinos" type="number" min="0" step="1" value="0" />
-            </label>
-            <label>
-              Locales
-              <input name="num_locales" type="number" min="0" step="1" value="0" />
-            </label>
-            <label>
-              Aparcamientos
-              <input name="num_aparcamientos" type="number" min="0" step="1" value="0" />
-            </label>
-	            <label>
-	              Base sugerida (sin IVA)
-	              <input name="subtotal_sugerido" type="text" inputmode="decimal" readonly />
-	            </label>
-	            <label>
-	              Subtotal (sin IVA)
-	              <input name="subtotal" type="text" inputmode="decimal" placeholder="Auto. Vacía para recalcular" />
-	            </label>
-	            <label>
-	              IVA (21%)
-	              <input name="impuestos" type="text" inputmode="decimal" readonly />
-	            </label>
-	            <label>
-	              Total (con IVA)
-	              <input name="total" type="text" inputmode="decimal" readonly />
-	            </label>
-	            <label class="span-2">
-	              Foto del edificio (opcional)
-	              <input id="workspaceFincasBudgetBuildingPhoto" type="file" accept="image/*" />
-	              <div id="workspaceFincasBudgetBuildingPhotoStatus" class="muted"></div>
-	              <img id="workspaceFincasBudgetBuildingPhotoPreview" class="hidden" alt="Foto edificio" style="margin-top:10px;width:100%;max-width:720px;max-height:220px;object-fit:cover;border-radius:14px;border:1px solid rgba(0,0,0,0.06);" />
-	            </label>
-            <label class="span-2">
-              Título (opcional)
-              <input name="titulo" placeholder="Si lo dejas en blanco se autogenera" />
-            </label>
-            <label class="span-2">
-              Carta de presentación (opcional)
-              <textarea name="carta_presentacion" rows="5" placeholder="Texto adicional que aparecerá en la carta de presentación del PDF."></textarea>
-            </label>
-            <div class="span-2" id="workspaceFincasBudgetServiciosIncluidos"></div>
-            <div class="span-2" id="workspaceFincasBudgetHero"></div>
-	            <div class="form-actions span-2">
-	              <button type="submit">Crear presupuesto + PDF</button>
-	              <button type="button" id="workspaceFincasBudgetOpenEngine" class="secondary ghost">Abrir motor de presupuestos</button>
-	              <button type="button" id="workspaceFincasBudgetResetBtn" class="secondary ghost">Nuevo</button>
-	              <span id="workspaceFincasBudgetQuickStatus" class="muted"></span>
-	            </div>
-          </form>
-        </div>
+	            <div class="muted">Colegiado nº 3079</div>
+		          </div>
+		          <div class="budget-quick-layout">
+		            <div class="budget-quick-main">
+		              <form id="workspaceFincasBudgetQuickForm" class="form-grid budget-quick-form">
+		                <input type="hidden" name="comunidad_id" />
+		                <input type="hidden" name="edificio_foto_key" />
+		                <label class="span-2">
+		                  Empresa emisora
+		                  <select name="empresa_id" required></select>
+		                </label>
+		                <label class="span-2">
+		                  Precargar datos (opcional)
+		                  <select name="comunidad_id_lookup"></select>
+		                </label>
+		                <div class="span-2 muted">Si la comunidad no está gestionada, deja este selector en “Nueva comunidad / no gestionada” y rellena los datos manualmente.</div>
+		                <h4 class="span-2">Datos de la comunidad</h4>
+		                <label class="span-2">
+		                  Denominación social
+		                  <input name="comunidad_denominacion" required placeholder="Ej. Comunidad Propietarios C/ Velázquez 12" />
+		                </label>
+		                <label class="span-2">
+		                  Dirección
+		                  <input name="comunidad_direccion" required placeholder="Calle, número, localidad" />
+		                </label>
+		                <div class="span-2 hidden" id="workspaceFincasBudgetMapWrap">
+		                  <iframe
+		                    id="workspaceFincasBudgetMap"
+		                    title="Mapa presupuesto"
+		                    style="width:100%;height:240px;border:0;border-radius:14px;background:#f3f4f6;"
+		                    loading="lazy"
+		                    referrerpolicy="no-referrer-when-downgrade"
+		                  ></iframe>
+		                </div>
+		                <label>
+		                  CIF
+		                  <input name="comunidad_cif" required placeholder="Ej. H12345678" />
+		                </label>
+		                <label>
+		                  Ref. catastral
+		                  <input name="referencia_catastral" placeholder="Opcional" />
+		                </label>
+		                <label class="span-2">
+		                  Estado
+		                  <select name="estado">
+		                    <option>Borrador</option>
+		                    <option>Estudio</option>
+		                    <option>Aceptado</option>
+		                    <option>Rechazado</option>
+		                  </select>
+		                </label>
+		                <h4 class="span-2">Datos del presidente / solicitante</h4>
+		                <label class="span-2">
+		                  Nombre
+		                  <input name="solicitante_nombre" required />
+		                </label>
+		                <label>
+		                  DNI
+		                  <input name="solicitante_dni" required />
+		                </label>
+		                <label>
+		                  Teléfono
+		                  <input name="solicitante_telefono" />
+		                </label>
+		                <label class="span-2">
+		                  Dirección
+		                  <input name="solicitante_direccion" />
+		                </label>
+		                <label class="span-2">
+		                  Email
+		                  <input name="solicitante_email" type="email" />
+		                </label>
+		                <h4 class="span-2">Datos del edificio</h4>
+		                <label>
+		                  Viviendas
+		                  <input name="num_vecinos" type="number" min="0" step="1" value="0" />
+		                </label>
+		                <label>
+		                  Locales
+		                  <input name="num_locales" type="number" min="0" step="1" value="0" />
+		                </label>
+		                <label>
+		                  Aparcamientos
+		                  <input name="num_aparcamientos" type="number" min="0" step="1" value="0" />
+		                </label>
+		                <label>
+		                  Base sugerida (sin IVA)
+		                  <input name="subtotal_sugerido" type="text" inputmode="decimal" readonly />
+		                </label>
+		                <label>
+		                  Subtotal (sin IVA)
+		                  <input name="subtotal" type="text" inputmode="decimal" placeholder="Auto. Vacía para recalcular" />
+		                </label>
+		                <label>
+		                  IVA (21%)
+		                  <input name="impuestos" type="text" inputmode="decimal" readonly />
+		                </label>
+		                <label>
+		                  Total (con IVA)
+		                  <input name="total" type="text" inputmode="decimal" readonly />
+		                </label>
+		                <label class="span-2">
+		                  Foto del edificio (opcional)
+		                  <input id="workspaceFincasBudgetBuildingPhoto" type="file" accept="image/*" />
+		                  <div id="workspaceFincasBudgetBuildingPhotoStatus" class="muted"></div>
+		                  <img id="workspaceFincasBudgetBuildingPhotoPreview" class="hidden" alt="Foto edificio" style="margin-top:10px;width:100%;max-width:720px;max-height:220px;object-fit:cover;border-radius:14px;border:1px solid rgba(0,0,0,0.06);" />
+		                </label>
+		                <label class="span-2">
+		                  Título (opcional)
+		                  <input name="titulo" placeholder="Si lo dejas en blanco se autogenera" />
+		                </label>
+		                <label class="span-2">
+		                  Carta de presentación (opcional)
+		                  <textarea name="carta_presentacion" rows="5" placeholder="Texto adicional que aparecerá en la carta de presentación del PDF."></textarea>
+		                </label>
+		                <div class="span-2" id="workspaceFincasBudgetServiciosIncluidos"></div>
+		                <div class="form-actions span-2">
+		                  <button type="submit">Crear presupuesto + PDF</button>
+		                  <button type="button" id="workspaceFincasBudgetOpenEngine" class="secondary ghost">Abrir motor de presupuestos</button>
+		                  <button type="button" id="workspaceFincasBudgetResetBtn" class="secondary ghost">Nuevo</button>
+		                  <span id="workspaceFincasBudgetQuickStatus" class="muted"></span>
+		                </div>
+		              </form>
+		            </div>
+		            <aside class="budget-quick-aside">
+		              <div id="workspaceFincasBudgetHero"></div>
+		            </aside>
+		          </div>
+	        </div>
 
         <div class="form-card crm-workspace-view" data-workspace-view="fincas" data-fincas-tab="presupuestos">
           <div class="section-head">
