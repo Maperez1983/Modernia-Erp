@@ -30508,6 +30508,10 @@ class Handler(BaseHTTPRequestHandler):
             "/api/s3_multipart_presign",
             "/api/s3_multipart_complete",
             "/api/s3_multipart_abort",
+            # Empresa master data is not scoped by empresa_nombre; it is controlled by workspace membership.
+            "/api/empresa_update",
+            "/api/empresa_create",
+            "/api/empresa_delete",
         ):
             if not empresa_nombre:
                 json_response(self, {"error": "empresa_nombre requerido"}, status=400)
