@@ -30646,6 +30646,10 @@ class Handler(BaseHTTPRequestHandler):
             "/api/legal_library_import",
             "/api/copilot_web_fetch",
             "/api/copilot_web_ask",
+            # Empresa master data is not scoped by empresa_nombre; it is controlled by workspace membership.
+            "/api/empresa_update",
+            "/api/empresa_create",
+            "/api/empresa_delete",
         ):
             empresa = conn.execute(
                 "SELECT id FROM empresas WHERE nombre = ?",
