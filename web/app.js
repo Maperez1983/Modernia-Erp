@@ -3,7 +3,7 @@
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v64";
+const APP_SW_VERSION = "v66";
 
 // Workspace tenant por defecto del producto (branding de software). Mantiene compatibilidad con slugs legacy.
 const DEFAULT_TENANT_WORKSPACE_SLUG = "verifika2";
@@ -14294,28 +14294,64 @@ const syncWorkspaceFincasBudgetQuickComputed = (options = {}) => {
   const totalInput = workspaceFincasBudgetQuickForm.querySelector('[name="total"]');
   if (suggestedInput) suggestedInput.value = formatEurosCompact(suggestedSubtotal);
 
+  const manualSource = String(workspaceFincasBudgetQuickForm?.dataset?.manualSource || "").trim();
   const rawSubtotal = String(subtotalInput?.value || "").trim();
-  const hasManual = Boolean(subtotalInput?.dataset?.manual) && Boolean(rawSubtotal);
-  const useManual = hasManual && !options.forceAuto;
+  const rawTotal = String(totalInput?.value || "").trim();
   let subtotal = suggestedSubtotal;
 
-  if (useManual) {
-    subtotal = Math.max(0, parseMoneyValue(rawSubtotal));
-  } else if (rawSubtotal) {
+  const hasSubtotal = Boolean(rawSubtotal);
+  const hasTotal = Boolean(rawTotal);
+  const useManualTotal = !options.forceAuto && hasTotal && (manualSource === "total" || (!hasSubtotal && manualSource !== "subtotal"));
+  const useManualSubtotal = !options.forceAuto && hasSubtotal && !useManualTotal;
+
+  if (options.forceAuto) {
+    try {
+      delete workspaceFincasBudgetQuickForm.dataset.manualSource;
+    } catch {}
+    try {
+      if (subtotalInput) delete subtotalInput.dataset.manual;
+      if (totalInput) delete totalInput.dataset.manual;
+    } catch {}
+  }
+
+  if (useManualTotal) {
+    subtotal = Math.max(0, parseMoneyValue(rawTotal) / (1 + FINCAS_IVA_PCT));
+    if (totalInput) totalInput.dataset.manual = "1";
+    if (subtotalInput) subtotalInput.dataset.manual = "1";
+    if (subtotalInput) subtotalInput.value = formatEurosCompact(subtotal);
+  } else if (useManualSubtotal) {
     subtotal = Math.max(0, parseMoneyValue(rawSubtotal));
     if (subtotalInput) subtotalInput.dataset.manual = "1";
+    if (totalInput) delete totalInput.dataset.manual;
+  } else if (hasSubtotal) {
+    subtotal = Math.max(0, parseMoneyValue(rawSubtotal));
+    if (subtotalInput) subtotalInput.dataset.manual = "1";
+    if (workspaceFincasBudgetQuickForm) workspaceFincasBudgetQuickForm.dataset.manualSource = "subtotal";
+  } else if (hasTotal) {
+    subtotal = Math.max(0, parseMoneyValue(rawTotal) / (1 + FINCAS_IVA_PCT));
+    if (totalInput) totalInput.dataset.manual = "1";
+    if (subtotalInput) subtotalInput.dataset.manual = "1";
+    if (workspaceFincasBudgetQuickForm) workspaceFincasBudgetQuickForm.dataset.manualSource = "total";
+    if (subtotalInput) subtotalInput.value = formatEurosCompact(subtotal);
   } else {
     if (subtotalInput) {
       delete subtotalInput.dataset.manual;
       subtotalInput.value = formatEurosCompact(suggestedSubtotal);
     }
+    if (totalInput) delete totalInput.dataset.manual;
+    try {
+      delete workspaceFincasBudgetQuickForm.dataset.manualSource;
+    } catch {}
     subtotal = suggestedSubtotal;
   }
 
   const impuestos = Math.round(subtotal * FINCAS_IVA_PCT * 100) / 100;
   const total = Math.round((subtotal + impuestos) * 100) / 100;
   if (ivaInput) ivaInput.value = formatEurosCompact(impuestos);
-  if (totalInput) totalInput.value = formatEurosCompact(total);
+  if (totalInput) {
+    const keepRawTotal = useManualTotal && !options.normalizeTotal && !options.forceAuto;
+    if (!keepRawTotal || !rawTotal) totalInput.value = formatEurosCompact(total);
+  }
   if (subtotalInput && (options.normalizeSubtotal || options.forceAuto) && String(subtotalInput.value || "").trim()) {
     subtotalInput.value = formatEurosCompact(subtotal);
   }
@@ -44841,32 +44877,68 @@ if (workspaceFincasBudgetQuickForm) {
       });
     });
   }
-  ["num_vecinos", "num_locales", "num_aparcamientos"].forEach((name) => {
-    const input = workspaceFincasBudgetQuickForm.querySelector(`[name="${name}"]`);
-    input?.addEventListener("input", () => syncWorkspaceFincasBudgetQuickComputed());
-  });
-  const subtotalInput = workspaceFincasBudgetQuickForm.querySelector('[name="subtotal"]');
-	  if (subtotalInput) {
-	    subtotalInput.addEventListener("input", () => {
-	      const raw = String(subtotalInput.value || "").trim();
+	["num_vecinos", "num_locales", "num_aparcamientos"].forEach((name) => {
+	    const input = workspaceFincasBudgetQuickForm.querySelector(`[name="${name}"]`);
+	    input?.addEventListener("input", () => syncWorkspaceFincasBudgetQuickComputed());
+	  });
+	  const subtotalInput = workspaceFincasBudgetQuickForm.querySelector('[name="subtotal"]');
+		  if (subtotalInput) {
+		    subtotalInput.addEventListener("input", () => {
+		      const raw = String(subtotalInput.value || "").trim();
+		      if (!raw) {
+		        delete subtotalInput.dataset.manual;
+		        try {
+		          if (workspaceFincasBudgetQuickForm) delete workspaceFincasBudgetQuickForm.dataset.manualSource;
+		        } catch {}
+		      } else {
+		        subtotalInput.dataset.manual = "1";
+		        try {
+		          if (workspaceFincasBudgetQuickForm) workspaceFincasBudgetQuickForm.dataset.manualSource = "subtotal";
+		        } catch {}
+		      }
+		      syncWorkspaceFincasBudgetQuickComputed();
+		    });
+		    subtotalInput.addEventListener("blur", () => {
+		      if (String(subtotalInput.value || "").trim()) {
+		        subtotalInput.dataset.manual = "1";
+		        try {
+		          if (workspaceFincasBudgetQuickForm) workspaceFincasBudgetQuickForm.dataset.manualSource = "subtotal";
+		        } catch {}
+		        syncWorkspaceFincasBudgetQuickComputed({ normalizeSubtotal: true, normalizeTotal: true });
+		      }
+		    });
+		  }
+	  const totalInput = workspaceFincasBudgetQuickForm.querySelector('[name="total"]');
+	  if (totalInput) {
+	    totalInput.addEventListener("input", () => {
+	      const raw = String(totalInput.value || "").trim();
 	      if (!raw) {
-	        delete subtotalInput.dataset.manual;
+	        delete totalInput.dataset.manual;
+	        try {
+	          if (workspaceFincasBudgetQuickForm) delete workspaceFincasBudgetQuickForm.dataset.manualSource;
+	        } catch {}
 	      } else {
-	        subtotalInput.dataset.manual = "1";
+	        totalInput.dataset.manual = "1";
+	        try {
+	          if (workspaceFincasBudgetQuickForm) workspaceFincasBudgetQuickForm.dataset.manualSource = "total";
+	        } catch {}
 	      }
 	      syncWorkspaceFincasBudgetQuickComputed();
 	    });
-	    subtotalInput.addEventListener("blur", () => {
-	      if (String(subtotalInput.value || "").trim()) {
-	        subtotalInput.dataset.manual = "1";
-	        syncWorkspaceFincasBudgetQuickComputed({ normalizeSubtotal: true });
+	    totalInput.addEventListener("blur", () => {
+	      if (String(totalInput.value || "").trim()) {
+	        totalInput.dataset.manual = "1";
+	        try {
+	          if (workspaceFincasBudgetQuickForm) workspaceFincasBudgetQuickForm.dataset.manualSource = "total";
+	        } catch {}
+	        syncWorkspaceFincasBudgetQuickComputed({ normalizeSubtotal: true, normalizeTotal: true });
 	      }
 	    });
 	  }
-  if (workspaceFincasBudgetBuildingPhoto) {
-    workspaceFincasBudgetBuildingPhoto.addEventListener("change", async () => {
-      const file = workspaceFincasBudgetBuildingPhoto.files?.[0];
-      if (!file) return;
+	  if (workspaceFincasBudgetBuildingPhoto) {
+	    workspaceFincasBudgetBuildingPhoto.addEventListener("change", async () => {
+	      const file = workspaceFincasBudgetBuildingPhoto.files?.[0];
+	      if (!file) return;
       const hidden = workspaceFincasBudgetQuickForm.querySelector('[name="edificio_foto_key"]');
       try {
         if (workspaceFincasBudgetBuildingPhotoStatus) workspaceFincasBudgetBuildingPhotoStatus.textContent = "Subiendo foto...";
@@ -44887,30 +44959,49 @@ if (workspaceFincasBudgetQuickForm) {
       }
     });
   }
-  workspaceFincasBudgetQuickForm.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    if (!state.currentWorkspaceId) {
-      if (workspaceFincasBudgetQuickStatus) workspaceFincasBudgetQuickStatus.textContent = "Selecciona un workspace.";
-      return;
-    }
-    syncWorkspaceFincasBudgetQuickComputed();
-    const formData = new FormData(workspaceFincasBudgetQuickForm);
-    const values = Object.fromEntries(formData.entries());
-    const fecha = new Date().toISOString().slice(0, 10);
-    const communityId = String(values.comunidad_id || "").trim();
+	  workspaceFincasBudgetQuickForm.addEventListener("submit", async (event) => {
+	    event.preventDefault();
+	    if (!state.currentWorkspaceId) {
+	      if (workspaceFincasBudgetQuickStatus) workspaceFincasBudgetQuickStatus.textContent = "Selecciona un workspace.";
+	      return;
+	    }
+	    let pdfWindow = null;
+	    try {
+	      pdfWindow = window.open("about:blank", "_blank");
+	      if (pdfWindow) {
+	        pdfWindow.document.title = "Generando PDF...";
+	        pdfWindow.document.body.innerHTML = `<div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;padding:24px;color:#111827;">
+	          <h2 style="margin:0 0 10px;font-size:18px;">Generando PDF…</h2>
+	          <p style="margin:0;color:#6b7280;font-size:13px;">En unos segundos se cargará el presupuesto.</p>
+	        </div>`;
+	      }
+	    } catch {}
+	    syncWorkspaceFincasBudgetQuickComputed();
+	    const formData = new FormData(workspaceFincasBudgetQuickForm);
+	    const values = Object.fromEntries(formData.entries());
+	    const fecha = new Date().toISOString().slice(0, 10);
+	    const communityId = String(values.comunidad_id || "").trim();
     const community = communityId
       ? (((state.currentWorkspaceData || {}).fincasCommunities || []).find((row) => String(row.id || "") === communityId) || null)
       : null;
-    const numVecinos = Number(values.num_vecinos || 0) || 0;
-    const numLocales = Number(values.num_locales || 0) || 0;
-    const numAparcamientos = Number(values.num_aparcamientos || 0) || 0;
-    const suggestedSubtotal = Number(computeFincasCuotaSuggestedClient({ num_vecinos: numVecinos, num_locales: numLocales, num_aparcamientos: numAparcamientos }) || 0) || 0;
-    const subtotal = String(values.subtotal || "").trim()
-      ? Math.max(0, parseMoneyValue(values.subtotal))
-      : suggestedSubtotal;
-    const impuestos = Math.round(subtotal * FINCAS_IVA_PCT * 100) / 100;
-    const total = Math.round((subtotal + impuestos) * 100) / 100;
-    const totals = { subtotal, impuestos, total };
+	    const numVecinos = Number(values.num_vecinos || 0) || 0;
+	    const numLocales = Number(values.num_locales || 0) || 0;
+	    const numAparcamientos = Number(values.num_aparcamientos || 0) || 0;
+	    const suggestedSubtotal = Number(computeFincasCuotaSuggestedClient({ num_vecinos: numVecinos, num_locales: numLocales, num_aparcamientos: numAparcamientos }) || 0) || 0;
+	    const manualSource = String(workspaceFincasBudgetQuickForm?.dataset?.manualSource || "").trim();
+	    const rawSubtotal = String(values.subtotal || "").trim();
+	    const rawTotal = String(values.total || "").trim();
+	    let subtotal = suggestedSubtotal;
+	    if (manualSource === "total" && rawTotal) {
+	      subtotal = Math.max(0, parseMoneyValue(rawTotal) / (1 + FINCAS_IVA_PCT));
+	    } else if (rawSubtotal) {
+	      subtotal = Math.max(0, parseMoneyValue(rawSubtotal));
+	    } else if (rawTotal) {
+	      subtotal = Math.max(0, parseMoneyValue(rawTotal) / (1 + FINCAS_IVA_PCT));
+	    }
+	    const impuestos = Math.round(subtotal * FINCAS_IVA_PCT * 100) / 100;
+	    const total = Math.round((subtotal + impuestos) * 100) / 100;
+	    const totals = { subtotal, impuestos, total };
     const lineas = buildFincasBudgetLineas({ num_vecinos: numVecinos, num_locales: numLocales, num_aparcamientos: numAparcamientos });
     const serviciosIncluidos = readFincasServiciosIncluidos(workspaceFincasBudgetServiciosIncluidos);
     const comunidadName = String(values.comunidad_denominacion || community?.nombre || "").trim() || "Comunidad";
@@ -44962,16 +45053,31 @@ if (workspaceFincasBudgetQuickForm) {
         body: JSON.stringify(payload),
       }).then((res) => res.json());
       if (data?.error) throw new Error(data.error);
-      const budgetId = String(data.id || "").trim();
-      if (!budgetId) throw new Error("No se pudo crear el presupuesto.");
-      if (workspaceFincasBudgetQuickStatus) workspaceFincasBudgetQuickStatus.textContent = "Presupuesto creado. Abriendo PDF...";
-      window.open(`/api/workspace_presupuesto_pdf?id=${encodeURIComponent(budgetId)}&workspace_id=${encodeURIComponent(state.currentWorkspaceId)}`, "_blank", "noopener,noreferrer");
-      await loadWorkspaceDetail(state.currentWorkspaceId);
-    } catch (error) {
-      if (workspaceFincasBudgetQuickStatus) workspaceFincasBudgetQuickStatus.textContent = error?.message || "No se pudo crear el presupuesto.";
-    }
-  });
-}
+	      const budgetId = String(data.id || "").trim();
+	      if (!budgetId) throw new Error("No se pudo crear el presupuesto.");
+	      const pdfUrl = `/api/workspace_presupuesto_pdf?id=${encodeURIComponent(budgetId)}&workspace_id=${encodeURIComponent(state.currentWorkspaceId)}`;
+	      if (workspaceFincasBudgetQuickStatus) {
+	        workspaceFincasBudgetQuickStatus.innerHTML = `Presupuesto creado. <a href="${pdfUrl}" target="_blank" rel="noopener noreferrer">Abrir PDF</a>`;
+	      }
+	      if (pdfWindow && !pdfWindow.closed) {
+	        try {
+	          pdfWindow.location = pdfUrl;
+	        } catch {
+	          window.open(pdfUrl, "_blank");
+	        }
+	      } else {
+	        // Popup bloqueado: deja enlace en estado y abre en esta pestaña como fallback suave.
+	        window.open(pdfUrl, "_blank");
+	      }
+	      await loadWorkspaceDetail(state.currentWorkspaceId);
+	    } catch (error) {
+	      if (workspaceFincasBudgetQuickStatus) workspaceFincasBudgetQuickStatus.textContent = error?.message || "No se pudo crear el presupuesto.";
+	      try {
+	        if (pdfWindow && !pdfWindow.closed) pdfWindow.close();
+	      } catch {}
+	    }
+	  });
+	}
 
 if (workspaceFincasBudgetResetBtn) {
   workspaceFincasBudgetResetBtn.addEventListener("click", () => {
