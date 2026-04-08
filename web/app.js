@@ -23418,9 +23418,11 @@ const saveHipotecaFicha = (event) => {
   if (!recordId) return;
   const status = panel.querySelector("#hipotecaFichaStatus");
   if (status) status.textContent = "Guardando cambios...";
+  const empresa = resolveCrmFinEmpresa();
   const payload = {
     id: recordId,
-    empresa_nombre: resolveCrmFinEmpresaNombre(),
+    empresa_id: empresa?.id || "",
+    empresa_nombre: empresa?.nombre || resolveCrmFinEmpresaNombre(),
   };
   let fields = [];
   try {
@@ -23675,6 +23677,7 @@ const vincularHipotecaSeleccionada = async () => {
       "/api/hipotecas_update",
       {
         id: selectedId,
+        empresa_id: empresa.id,
         empresa_nombre: empresa.nombre,
         cliente_id: clienteId,
         cliente: clienteNombrePersistido,
@@ -26109,14 +26112,22 @@ const sendTableUpdate = (table, recordId, column, value, statusEl = null) => {
   if (infoTarget) {
     infoTarget.textContent = "Actualizando...";
   }
-  const empresaNombre =
+  const empresa =
     table === "hipotecas"
-      ? resolveCrmFinEmpresaNombre()
+      ? resolveCrmFinEmpresa()
       : table === "seguros"
-        ? resolveCrmSegurosEmpresaNombre()
-        : resolveCrmGestoriaEmpresaNombre();
+        ? resolveCrmSegurosEmpresa()
+        : resolveCrmGestoriaEmpresa();
+  const empresaNombre =
+    (empresa?.nombre || "").trim()
+      || (table === "hipotecas"
+        ? resolveCrmFinEmpresaNombre()
+        : table === "seguros"
+          ? resolveCrmSegurosEmpresaNombre()
+          : resolveCrmGestoriaEmpresaNombre());
   const payload = {
     id: recordId,
+    empresa_id: empresa?.id || "",
     empresa_nombre: empresaNombre,
     [column]: value,
   };
@@ -35195,20 +35206,21 @@ const renderFinSelectedHipoteca = () => {
       select.appendChild(createOption(opt, opt));
     });
     select.value = estado;
-    select.addEventListener("change", async () => {
+      select.addEventListener("change", async () => {
       try {
+        const empresa = resolveCrmFinEmpresa();
         await fetch("/api/hipotecas_update", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             id: row.id,
             estado: select.value,
-            empresa_nombre: resolveCrmFinEmpresaNombre(),
+            empresa_id: empresa?.id || "",
+            empresa_nombre: empresa?.nombre || resolveCrmFinEmpresaNombre(),
           }),
         }).then((res) => res.json()).then((data) => {
           if (data?.error) throw new Error(data.error);
         });
-        const empresa = resolveCrmFinEmpresa();
         if (empresa?.id) {
           await loadFinHipotecasEstudio(empresa.id);
         }
@@ -37743,10 +37755,11 @@ const deleteSeguro = (id) => {
 };
 
 const deleteHipoteca = (id) => {
+  const empresa = resolveCrmFinEmpresa();
   return fetch("/api/hipotecas_delete", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ id, empresa_nombre: resolveCrmFinEmpresaNombre() }),
+    body: JSON.stringify({ id, empresa_id: empresa?.id || "", empresa_nombre: empresa?.nombre || resolveCrmFinEmpresaNombre() }),
   }).then((res) => res.json());
 };
 

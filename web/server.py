@@ -9443,16 +9443,101 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
             or re.match(r"^[XYZ][0-9]{7}[A-Z]$", value)
             or re.match(r"^[ABCDEFGHJNPQRSUVW][0-9]{7}[0-9A-Z]$", value)
         )
-    def normalize_nif_candidate(value):
+    def normalize_nif_candidate(value, *, infer_control_letter=False):
         if not value:
             return ""
         candidate = normalize_nif_ocr(value)
+        if infer_control_letter:
+            # Para DNI/NIE sin letra (o con letra mal OCR a dígito), intenta completar la letra
+            # SOLO cuando el contexto indica que es un NIF (p.ej. aparece tras "DNI/NIF/CIF").
+            dni_letters = "TRWAGMYFPDXBNJZSQVHLCKE"
+            def infer_dni(digits8):
+                try:
+                    return f"{digits8}{dni_letters[int(digits8) % 23]}"
+                except Exception:
+                    return ""
+            def infer_nie(prefix, digits7):
+                try:
+                    prefix_map = {"X": "0", "Y": "1", "Z": "2"}
+                    base = prefix_map.get(prefix, "")
+                    if not base:
+                        return ""
+                    num = f"{base}{digits7}"
+                    return f"{prefix}{digits7}{dni_letters[int(num) % 23]}"
+                except Exception:
+                    return ""
+            # DNI: 8 dígitos (sin letra) o 8 dígitos + (dígito OCR de letra)
+            if re.fullmatch(r"[0-9]{8}", candidate):
+                inferred = infer_dni(candidate)
+                if inferred:
+                    candidate = inferred
+            elif re.fullmatch(r"[0-9]{8}[0-9]", candidate):
+                inferred = infer_dni(candidate[:8])
+                if inferred:
+                    candidate = inferred
+            # NIE: X/Y/Z + 7 dígitos (sin letra) o + (dígito OCR)
+            elif re.fullmatch(r"[XYZ][0-9]{7}", candidate):
+                inferred = infer_nie(candidate[0], candidate[1:])
+                if inferred:
+                    candidate = inferred
+            elif re.fullmatch(r"[XYZ][0-9]{7}[0-9]", candidate):
+                inferred = infer_nie(candidate[0], candidate[1:8])
+                if inferred:
+                    candidate = inferred
         if is_valid_nif(candidate):
             return candidate
         if len(candidate) >= 9:
             candidate = candidate[:9]
             if is_valid_nif(candidate):
                 return candidate
+        return ""
+
+    def find_best_nif_in_text(text_value):
+        """
+        Busca DNI/NIE/CIF aunque venga con espacios/puntos/guiones, priorizando contexto
+        cercano a etiquetas (DNI/NIF/CIF/DOCUMENTO).
+        """
+        if not text_value:
+            return ""
+        tokens = re.sub(r"[^A-Z0-9]", " ", str(text_value).upper()).split()
+        if not tokens:
+            return ""
+        labels = {
+            "DNI",
+            "NIF",
+            "CIF",
+            "DOCUMENTO",
+            "DOC",
+            "DNINIF",
+            "DNI/NIF",
+            "NIF/CIF",
+            "CIF/NIF",
+        }
+        # 1) Buscar tras etiqueta
+        for idx, tok in enumerate(tokens):
+            key = tok.replace("/", "")
+            if tok in labels or key in labels:
+                for end in range(idx + 1, min(idx + 7, len(tokens))):
+                    combined = "".join(tokens[idx + 1 : end + 1])
+                    if len(combined) < 7 or len(combined) > 12:
+                        continue
+                    cand = normalize_nif_candidate(combined, infer_control_letter=True)
+                    if cand:
+                        return cand
+        # 2) Fallback: escaneo conservador por ventanas cortas
+        for start in range(len(tokens)):
+            combined = ""
+            digits = 0
+            for end in range(start, min(start + 4, len(tokens))):
+                combined += tokens[end]
+                digits += sum(ch.isdigit() for ch in tokens[end])
+                if len(combined) > 12:
+                    break
+                if digits < 7:
+                    continue
+                cand = normalize_nif_candidate(combined, infer_control_letter=False)
+                if cand:
+                    return cand
         return ""
     def normalize_ocr_date(value):
         if not value:
@@ -10286,8 +10371,13 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
     if not fields["dni"]:
         fields["dni"] = line_pick(["DNI", "NIF", "CIF", "Documento"])
     if fields.get("dni"):
-        normalized_dni = normalize_nif_candidate(fields["dni"])
+        normalized_dni = normalize_nif_candidate(fields["dni"], infer_control_letter=True)
         fields["dni"] = normalized_dni or ""
+    if not fields.get("dni"):
+        # Busca NIF incluso con separadores OCR (espacios, puntos, guiones).
+        best = find_best_nif_in_text(text)
+        if best:
+            fields["dni"] = best
     if not fields.get("dni"):
         personal_ids = re.findall(r"\b(?:[0-9]{8}[A-Z]|[XYZ][0-9]{7}[A-Z])\b", text.upper())
         if personal_ids:
@@ -17240,9 +17330,10 @@ def ensure_cliente_for_financiacion(conn, empresa_id, nombre, nif, now, extra=No
     link = conn.execute(
         """
         SELECT id FROM clientes_empresas
-        WHERE cliente_id = ? AND empresa_id = ? AND servicio = ?
+        WHERE cliente_id = ? AND empresa_id = ? AND LOWER(servicio) = 'financiaciones'
+        LIMIT 1
         """,
-        (cliente_id, empresa_id, "financiaciones"),
+        (cliente_id, empresa_id),
     ).fetchone()
     if not link:
         conn.execute(
@@ -18284,6 +18375,36 @@ def ensure_tables(db_path):
     ensure_column(conn, "asesoramientos_financiacion", "cliente2_prestamo_resto", "cliente2_prestamo_resto REAL")
     ensure_column(conn, "asesoramientos_financiacion", "calidad_ocr", "calidad_ocr TEXT")
     ensure_column(conn, "asesoramientos_financiacion", "campos_ocr", "campos_ocr TEXT")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS hipotecas (
+          id TEXT PRIMARY KEY,
+          empresa_id TEXT,
+          cliente TEXT,
+          cliente_id TEXT,
+          banco TEXT,
+          precio REAL,
+          importe_hipoteca REAL,
+          porcentaje REAL,
+          entrada REAL,
+          comision REAL,
+          oficina TEXT,
+          fecha_encargo TEXT,
+          encargo TEXT,
+          tipo_hipoteca TEXT,
+          fecha_firma TEXT,
+          cesion REAL,
+          comision_juan REAL,
+          comision_modernia REAL,
+          inmobiliaria_compra TEXT,
+          asesor TEXT,
+          estado TEXT,
+          anio INTEGER,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS gestoria_contabilidad (
@@ -36862,6 +36983,17 @@ class Handler(BaseHTTPRequestHandler):
             if not record_id:
                 json_response(self, {"error": "id requerido"}, status=400)
                 return
+            target_row = conn.execute(
+                "SELECT id, empresa_id FROM asesoramientos_financiacion WHERE id = ? LIMIT 1",
+                (record_id,),
+            ).fetchone()
+            if not target_row:
+                json_response(self, {"error": "Registro no encontrado"}, status=404)
+                return
+            row_empresa_id = str(target_row["empresa_id"] or "").strip()
+            if row_empresa_id and row_empresa_id != str(empresa["id"] or "").strip():
+                json_response(self, {"error": "Asesoramiento fuera del scope de empresa"}, status=403)
+                return
             cliente1_id = ensure_cliente_for_financiacion(
                 conn,
                 empresa["id"],
@@ -36940,6 +37072,8 @@ class Handler(BaseHTTPRequestHandler):
                 "campos_ocr",
             )
             updates = {key: payload.get(key) for key in allowed if key in payload}
+            if not row_empresa_id:
+                updates["empresa_id"] = empresa["id"]
             if cliente1_id:
                 updates["cliente1_id"] = cliente1_id
             if cliente2_id:
@@ -36980,6 +37114,19 @@ class Handler(BaseHTTPRequestHandler):
             if not row:
                 json_response(self, {"error": "Registro no encontrado"}, status=404)
                 return
+            row_empresa_id = str(row["empresa_id"] or "").strip()
+            if row_empresa_id and row_empresa_id != str(empresa["id"] or "").strip():
+                json_response(self, {"error": "Asesoramiento fuera del scope de empresa"}, status=403)
+                return
+            if not row_empresa_id:
+                conn.execute(
+                    "UPDATE asesoramientos_financiacion SET empresa_id = ?, updated_at = datetime(?) WHERE id = ?",
+                    (empresa["id"], now, record_id),
+                )
+                row = conn.execute(
+                    "SELECT * FROM asesoramientos_financiacion WHERE id = ?",
+                    (record_id,),
+                ).fetchone()
             hipoteca_id = convert_fin_asesoramiento_to_hipoteca(conn, empresa["id"], row, now)
             json_response(self, {"hipoteca_id": hipoteca_id})
         elif parsed.path == "/api/hipotecas_update":
@@ -36990,6 +37137,30 @@ class Handler(BaseHTTPRequestHandler):
             current_row = conn.execute("SELECT * FROM hipotecas WHERE id = ?", (record_id,)).fetchone()
             if not current_row:
                 json_response(self, {"error": "Registro no encontrado"}, status=404)
+                return
+            req_empresa_id = str(payload.get("empresa_id") or "").strip()
+            if req_empresa_id:
+                empresa_exists = conn.execute(
+                    "SELECT id FROM empresas WHERE id = ? LIMIT 1",
+                    (req_empresa_id,),
+                ).fetchone()
+                if not empresa_exists:
+                    json_response(self, {"error": "empresa_id no válido"}, status=400)
+                    return
+            if (not req_empresa_id) and str(payload.get("empresa_nombre") or "").strip():
+                req_empresa_nombre = str(payload.get("empresa_nombre") or "").strip()
+                empresa_row = conn.execute(
+                    "SELECT id FROM empresas WHERE nombre = ? LIMIT 1",
+                    (req_empresa_nombre,),
+                ).fetchone()
+                if empresa_row:
+                    req_empresa_id = str(empresa_row["id"] or "").strip()
+            row_empresa_id = str(current_row["empresa_id"] or "").strip()
+            if row_empresa_id and req_empresa_id and row_empresa_id != req_empresa_id:
+                json_response(self, {"error": "Hipoteca fuera del scope de empresa"}, status=403)
+                return
+            if (not row_empresa_id) and (not req_empresa_id):
+                json_response(self, {"error": "empresa_id requerido"}, status=400)
                 return
             aliases = {
                 "entidad": "banco",
@@ -37024,6 +37195,8 @@ class Handler(BaseHTTPRequestHandler):
             for alias, target in aliases.items():
                 if alias in payload:
                     updates[target] = payload.get(alias)
+            if (not row_empresa_id) and req_empresa_id:
+                updates["empresa_id"] = req_empresa_id
             if not updates:
                 json_response(self, {"error": "Sin cambios"}, status=400)
                 return
@@ -37073,11 +37246,40 @@ class Handler(BaseHTTPRequestHandler):
                 f"UPDATE hipotecas SET {set_clause}, updated_at = datetime(?) WHERE id = ?",
                 values,
             )
+            effective_empresa_id = row_empresa_id or req_empresa_id
+            effective_cliente_id = str(updates.get("cliente_id") or current_row["cliente_id"] or "").strip()
+            if effective_cliente_id and effective_empresa_id:
+                ensure_cliente_servicio_link(conn, effective_cliente_id, effective_empresa_id, "financiaciones", now)
             audit("hipoteca", record_id, "actualizar", json.dumps(payload), payload.get("usuario"))
         elif parsed.path == "/api/hipotecas_delete":
             record_id = payload.get("id")
             if not record_id:
                 json_response(self, {"error": "id requerido"}, status=400)
+                return
+            row = conn.execute("SELECT id, empresa_id FROM hipotecas WHERE id = ? LIMIT 1", (record_id,)).fetchone()
+            if not row:
+                json_response(self, {"error": "Registro no encontrado"}, status=404)
+                return
+            req_empresa_id = str(payload.get("empresa_id") or "").strip()
+            if req_empresa_id:
+                empresa_exists = conn.execute(
+                    "SELECT id FROM empresas WHERE id = ? LIMIT 1",
+                    (req_empresa_id,),
+                ).fetchone()
+                if not empresa_exists:
+                    json_response(self, {"error": "empresa_id no válido"}, status=400)
+                    return
+            if (not req_empresa_id) and str(payload.get("empresa_nombre") or "").strip():
+                req_empresa_nombre = str(payload.get("empresa_nombre") or "").strip()
+                empresa_row = conn.execute(
+                    "SELECT id FROM empresas WHERE nombre = ? LIMIT 1",
+                    (req_empresa_nombre,),
+                ).fetchone()
+                if empresa_row:
+                    req_empresa_id = str(empresa_row["id"] or "").strip()
+            row_empresa_id = str(row["empresa_id"] or "").strip()
+            if row_empresa_id and req_empresa_id and row_empresa_id != req_empresa_id:
+                json_response(self, {"error": "Hipoteca fuera del scope de empresa"}, status=403)
                 return
             deleted = delete_hipoteca_record(conn, record_id)
             if not deleted:
