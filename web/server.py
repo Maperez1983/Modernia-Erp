@@ -29161,6 +29161,19 @@ class Handler(BaseHTTPRequestHandler):
             return
 
     @staticmethod
+    def _safe_exc_detail(exc):
+        try:
+            name = str(type(exc).__name__ or "Error")[:80]
+            msg = str(exc or "")
+            msg = re.sub(r"postgres(?:ql)?://[^\\s]+", "postgresql://<redacted>", msg, flags=re.IGNORECASE)
+            msg = re.sub(r"Bearer\\s+[A-Za-z0-9._\\-]+", "Bearer <redacted>", msg, flags=re.IGNORECASE)
+            msg = msg.replace("\n", " ").strip()
+            detail = f"{name}: {msg}" if msg else name
+            return detail[:220]
+        except Exception:
+            return "Error interno"
+
+    @staticmethod
     def _recent_api_errors(limit=10):
         try:
             n = max(0, min(int(limit or 10), 30))
@@ -29613,7 +29626,7 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception:
                     pass
                 if str(self.path or "").startswith("/api/"):
-                    json_response(self, {"error": "API error"}, status=500)
+                    json_response(self, {"error": "API error", "detail": Handler._safe_exc_detail(exc)}, status=500)
                 else:
                     self.send_error(500, "Server error")
             except Exception:
@@ -30073,7 +30086,7 @@ class Handler(BaseHTTPRequestHandler):
                         pass
                     json_response(self, {"error": "DB no disponible", "detail": "Reintenta en unos segundos."}, status=503)
                 else:
-                    json_response(self, {"error": "API error"}, status=500)
+                    json_response(self, {"error": "API error", "detail": Handler._safe_exc_detail(exc)}, status=500)
             except Exception:
                 try:
                     self.send_error(500, "API error")

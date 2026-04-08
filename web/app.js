@@ -3,7 +3,7 @@
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v67";
+const APP_SW_VERSION = "v68";
 
 // Workspace tenant por defecto del producto (branding de software). Mantiene compatibilidad con slugs legacy.
 const DEFAULT_TENANT_WORKSPACE_SLUG = "verifika2";
@@ -45045,19 +45045,14 @@ if (workspaceFincasBudgetQuickForm) {
       if (workspaceFincasBudgetQuickStatus) workspaceFincasBudgetQuickStatus.textContent = "La comunidad no tiene empresa asignada.";
       return;
     }
-    if (workspaceFincasBudgetQuickStatus) workspaceFincasBudgetQuickStatus.textContent = "Generando presupuesto...";
-    try {
-      const data = await fetch("/api/workspace_presupuestos", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      }).then((res) => res.json());
-      if (data?.error) throw new Error(data.error);
-	      const budgetId = String(data.id || "").trim();
-	      if (!budgetId) throw new Error("No se pudo crear el presupuesto.");
-	      const pdfUrl = `/api/workspace_presupuesto_pdf?id=${encodeURIComponent(budgetId)}&workspace_id=${encodeURIComponent(state.currentWorkspaceId)}`;
-	      if (workspaceFincasBudgetQuickStatus) {
-	        workspaceFincasBudgetQuickStatus.innerHTML = `Presupuesto creado. <a href="${pdfUrl}" target="_blank" rel="noopener noreferrer">Abrir PDF</a>`;
+	    if (workspaceFincasBudgetQuickStatus) workspaceFincasBudgetQuickStatus.textContent = "Generando presupuesto...";
+	    try {
+	      const data = await apiPost("/api/workspace_presupuestos", payload);
+		      const budgetId = String(data.id || "").trim();
+		      if (!budgetId) throw new Error("No se pudo crear el presupuesto.");
+		      const pdfUrl = `/api/workspace_presupuesto_pdf?id=${encodeURIComponent(budgetId)}&workspace_id=${encodeURIComponent(state.currentWorkspaceId)}`;
+		      if (workspaceFincasBudgetQuickStatus) {
+		        workspaceFincasBudgetQuickStatus.innerHTML = `Presupuesto creado. <a href="${pdfUrl}" target="_blank" rel="noopener noreferrer">Abrir PDF</a>`;
 	      }
 	      if (pdfWindow && !pdfWindow.closed) {
 	        try {
