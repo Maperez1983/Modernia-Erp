@@ -38628,7 +38628,12 @@ class Handler(BaseHTTPRequestHandler):
             prefix = prefix.strip().lstrip("/")
             if prefix and not prefix.endswith("/"):
                 prefix = prefix + "/"
-            dry_run = str(payload.get("dry_run") or payload.get("apply") or "").strip().lower() not in {"1", "true", "yes", "si", "sí", "on"}
+            truthy = {"1", "true", "yes", "si", "sí", "on"}
+            apply_flag = str(payload.get("apply") or "").strip().lower() in truthy
+            if "dry_run" in payload:
+                dry_run = str(payload.get("dry_run") or "").strip().lower() in truthy
+            else:
+                dry_run = not apply_flag
             max_objects = payload.get("max_objects")
             try:
                 max_objects = int(max_objects) if max_objects not in (None, "") else 0
@@ -38663,6 +38668,7 @@ class Handler(BaseHTTPRequestHandler):
                     already += 1
                     continue
                 buckets[norm].append(str(r["id"]))
+            candidates_total = sum(len(v) for v in buckets.values())
 
             client = s3_client()
             if not client:
@@ -38751,7 +38757,7 @@ class Handler(BaseHTTPRequestHandler):
                     "dry_run": bool(dry_run),
                     "empresa_id": empresa_id,
                     "prefix": prefix,
-                    "polizas_candidates": sum(len(v) for v in buckets.values()),
+                    "polizas_candidates": candidates_total,
                     "polizas_already_linked": already,
                     "objects_scanned": scanned,
                     "objects_with_poliza_guess": guessed,
