@@ -40,7 +40,7 @@ import unicodedata
 from email.message import EmailMessage
 from email.header import decode_header
 from email.utils import parseaddr
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 try:
     from .auth_security import hash_password as runtime_hash_password
     from .auth_security import needs_password_rehash
@@ -20576,17 +20576,18 @@ def ensure_workspace_product_tables(conn):
     )
     conn.execute(
         """
-        CREATE TABLE IF NOT EXISTS workspace_fincas_comunidades (
-          id TEXT PRIMARY KEY,
-          workspace_id TEXT NOT NULL,
-          empresa_id TEXT,
-          nombre TEXT NOT NULL,
-          referencia_catastral TEXT,
-          cif TEXT,
-          direccion TEXT,
-          presidente TEXT,
-          secretario TEXT,
-          estado TEXT NOT NULL DEFAULT 'Activa',
+	        CREATE TABLE IF NOT EXISTS workspace_fincas_comunidades (
+	          id TEXT PRIMARY KEY,
+	          workspace_id TEXT NOT NULL,
+	          empresa_id TEXT,
+	          nombre TEXT NOT NULL,
+	          referencia_catastral TEXT,
+	          cif TEXT,
+	          direccion TEXT,
+	          foto_edificio_key TEXT,
+	          presidente TEXT,
+	          secretario TEXT,
+	          estado TEXT NOT NULL DEFAULT 'Activa',
           num_vecinos INTEGER,
           num_locales INTEGER,
           num_trasteros INTEGER,
@@ -20604,6 +20605,7 @@ def ensure_workspace_product_tables(conn):
     ensure_column(conn, "workspace_fincas_comunidades", "num_aparcamientos", "num_aparcamientos INTEGER")
     ensure_column(conn, "workspace_fincas_comunidades", "cuota_sugerida", "cuota_sugerida REAL")
     ensure_column(conn, "workspace_fincas_comunidades", "referencia_catastral", "referencia_catastral TEXT")
+    ensure_column(conn, "workspace_fincas_comunidades", "foto_edificio_key", "foto_edificio_key TEXT")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS workspace_fincas_incidencias (
@@ -25465,12 +25467,13 @@ def fetch_workspace_fincas_comunidades(conn, workspace_id, limit=30):
           c.empresa_id,
           COALESCE(e.nombre, '') AS empresa_nombre,
           c.nombre,
-          COALESCE(c.referencia_catastral, '') AS referencia_catastral,
-          c.cif,
-          c.direccion,
-          c.presidente,
-          c.secretario,
-          c.estado,
+	          COALESCE(c.referencia_catastral, '') AS referencia_catastral,
+	          c.cif,
+	          c.direccion,
+	          COALESCE(c.foto_edificio_key, '') AS foto_edificio_key,
+	          c.presidente,
+	          c.secretario,
+	          c.estado,
           c.num_vecinos,
           c.num_locales,
           c.num_trasteros,
@@ -27049,14 +27052,15 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
         draw.text((box[0] + 24, box[1] + 58), base_text, fill=ink, font=font_table)
         y = box[3] + 24
 
-        ensure_space(190)
-        box2 = (margin_x, y, page_width - margin_x, y + 170)
+        ensure_space(240)
+        box2 = (margin_x, y, page_width - margin_x, y + 210)
         draw.rounded_rectangle(box2, radius=24, fill=(252, 252, 252), outline=border)
         draw.text((box2[0] + 24, box2[1] + 18), "DATOS COMUNIDAD / SOLICITANTE", fill=primary, font=font_section)
         lines = [
             f"Comunidad: {str(calc.get('comunidad_denominacion') or client.get('nombre') or '-').strip() or '-'}",
             f"Dirección: {str(calc.get('comunidad_direccion') or '-').strip() or '-'}",
             f"CIF: {str(calc.get('comunidad_cif') or client.get('nif') or '-').strip() or '-'}",
+            f"Referencia catastral: {str(calc.get('referencia_catastral') or '-').strip() or '-'}",
             f"Solicitante: {str(calc.get('solicitante_nombre') or '-').strip() or '-'} · DNI {str(calc.get('solicitante_dni') or '-').strip() or '-'}",
             f"Teléfono: {str(calc.get('solicitante_telefono') or client.get('telefono') or '-').strip() or '-'} · Email: {str(calc.get('solicitante_email') or client.get('email') or '-').strip() or '-'}",
         ]
@@ -27066,7 +27070,58 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
             draw.multiline_text((box2[0] + 24, y_txt), "\n".join(wrapped), fill=ink, font=font_table, spacing=4)
             sample_box = draw.textbbox((box2[0] + 24, y_txt), "Ag", font=font_table)
             y_txt += (sample_box[3] - sample_box[1] + 8) * len(wrapped)
-        y = box2[3] + 24
+        y = max(box2[3], y_txt + 10) + 24
+
+        addr_for_map = str(calc.get("comunidad_direccion") or "").strip()
+        photo_key = str(calc.get("edificio_foto_key") or "").strip()
+        map_url = ""
+        qr_img = None
+        if addr_for_map:
+            map_url = f"https://www.google.com/maps/search/?api=1&query={urllib.parse.quote(addr_for_map)}"
+            try:
+                import qrcode
+
+                qr_img = qrcode.make(map_url).convert("RGBA").resize((180, 180))
+            except Exception:
+                qr_img = None
+        building_photo = None
+        if photo_key:
+            try:
+                raw_bytes, _err = s3_get_object_bytes(photo_key)
+                if raw_bytes:
+                    building_photo = Image.open(BytesIO(raw_bytes))
+            except Exception:
+                building_photo = None
+        if qr_img or building_photo:
+            ensure_space(330)
+            box_media = (margin_x, y, page_width - margin_x, y + 300)
+            draw.rounded_rectangle(box_media, radius=24, fill=(247, 248, 252), outline=border)
+            draw.text((box_media[0] + 24, box_media[1] + 18), "MAPA / EDIFICIO", fill=primary, font=font_section)
+            inner_left = box_media[0] + 24
+            inner_top = box_media[1] + 62
+            photo_w, photo_h = 660, 210
+            gap = 24
+            qr_x = inner_left
+            if building_photo:
+                try:
+                    photo = building_photo.convert("RGB")
+                    photo = ImageOps.fit(photo, (photo_w, photo_h), method=Image.LANCZOS)
+                    image.paste(photo, (inner_left, inner_top))
+                    draw.rounded_rectangle(
+                        (inner_left, inner_top, inner_left + photo_w, inner_top + photo_h),
+                        radius=20,
+                        outline=border,
+                        width=2,
+                    )
+                except Exception:
+                    building_photo = None
+                qr_x = inner_left + photo_w + gap
+            if qr_img:
+                image.paste(qr_img, (qr_x, inner_top), qr_img)
+                draw.text((qr_x + 200, inner_top + 6), "Escanea para ver el mapa", fill=ink, font=font_table)
+                addr_lines = _pdf_wrap_lines(addr_for_map or "-", width=34)
+                draw.multiline_text((qr_x + 200, inner_top + 40), "\n".join(addr_lines[:4]), fill=muted, font=font_footer, spacing=4)
+            y = box_media[3] + 24
 
         servicios_incluidos = calc.get("servicios_incluidos") if isinstance(calc, dict) else None
         if isinstance(servicios_incluidos, list) and servicios_incluidos:
@@ -35595,11 +35650,13 @@ class Handler(BaseHTTPRequestHandler):
                 calculo["comunidad_denominacion"] = str(payload.get("comunidad_denominacion") or payload.get("cliente_lookup") or "").strip()
                 calculo["comunidad_direccion"] = str(payload.get("comunidad_direccion") or "").strip()
                 calculo["comunidad_cif"] = str(payload.get("comunidad_cif") or payload.get("cliente_nif") or "").strip()
+                calculo["referencia_catastral"] = str(payload.get("referencia_catastral") or "").strip()
                 calculo["solicitante_nombre"] = str(payload.get("solicitante_nombre") or "").strip()
                 calculo["solicitante_dni"] = str(payload.get("solicitante_dni") or "").strip()
                 calculo["solicitante_telefono"] = str(payload.get("solicitante_telefono") or payload.get("cliente_telefono") or "").strip()
                 calculo["solicitante_direccion"] = str(payload.get("solicitante_direccion") or "").strip()
                 calculo["solicitante_email"] = str(payload.get("solicitante_email") or payload.get("cliente_email") or "").strip()
+                calculo["edificio_foto_key"] = str(payload.get("edificio_foto_key") or "").strip()
                 calculo["carta_presentacion"] = str(payload.get("carta_presentacion") or "").strip()
                 colegiado_raw = str(payload.get("colegiado_numero") or "").strip()
                 calculo["colegiado_numero"] = colegiado_raw if colegiado_raw else "3079"
@@ -35822,6 +35879,7 @@ class Handler(BaseHTTPRequestHandler):
                 (payload.get("referencia_catastral") or "").strip() or None,
                 (payload.get("cif") or "").strip() or None,
                 (payload.get("direccion") or "").strip() or None,
+                (payload.get("foto_edificio_key") or "").strip() or None,
                 (payload.get("presidente") or "").strip() or None,
                 (payload.get("secretario") or "").strip() or None,
                 (payload.get("estado") or "").strip() or "Activa",
@@ -35836,7 +35894,7 @@ class Handler(BaseHTTPRequestHandler):
                 conn.execute(
                     """
                     UPDATE workspace_fincas_comunidades
-                    SET workspace_id = ?, empresa_id = ?, nombre = ?, referencia_catastral = ?, cif = ?, direccion = ?, presidente = ?,
+                    SET workspace_id = ?, empresa_id = ?, nombre = ?, referencia_catastral = ?, cif = ?, direccion = ?, foto_edificio_key = ?, presidente = ?,
                         secretario = ?, estado = ?, num_vecinos = ?, num_locales = ?, num_trasteros = ?,
                         num_aparcamientos = ?, cuota_sugerida = ?, cuota_mensual = ?, updated_at = datetime(?)
                     WHERE id = ? AND workspace_id = ?
@@ -35848,15 +35906,16 @@ class Handler(BaseHTTPRequestHandler):
                 conn.execute(
                     """
                     INSERT INTO workspace_fincas_comunidades (
-                      id, workspace_id, empresa_id, nombre, referencia_catastral, cif, direccion, presidente, secretario,
+                      id, workspace_id, empresa_id, nombre, referencia_catastral, cif, direccion, foto_edificio_key, presidente, secretario,
                       estado, num_vecinos, num_locales, num_trasteros, num_aparcamientos, cuota_sugerida, cuota_mensual, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
                     """,
                     (record_id, *values, now, now),
                 )
             conn.commit()
             json_response(self, {"ok": True, "id": record_id})
             return
+
         elif parsed.path == "/api/workspace_fincas_incidencias":
             workspace_id = str(payload.get("workspace_id") or "").strip()
             comunidad_id = str(payload.get("comunidad_id") or "").strip()
@@ -36349,25 +36408,28 @@ class Handler(BaseHTTPRequestHandler):
             comunidad_nombre = str(calc.get("comunidad_denominacion") or budget["titulo"] or "Comunidad").strip()
             comunidad_cif = str(calc.get("comunidad_cif") or "").strip() or None
             comunidad_direccion = str(calc.get("comunidad_direccion") or "").strip() or None
+            referencia_catastral = str(calc.get("referencia_catastral") or "").strip() or None
+            foto_edificio_key = str(calc.get("edificio_foto_key") or "").strip() or None
             presidente = str(calc.get("solicitante_nombre") or "").strip() or None
             cuota_mensual = round(float(budget["subtotal"] or cuota_sugerida or 0.0), 2)
             comunidad_id = os.urandom(16).hex()
             conn.execute(
                 """
                 INSERT INTO workspace_fincas_comunidades (
-                  id, workspace_id, empresa_id, nombre, referencia_catastral, cif, direccion, presidente, secretario,
+                  id, workspace_id, empresa_id, nombre, referencia_catastral, cif, direccion, foto_edificio_key, presidente, secretario,
                   estado, num_vecinos, num_locales, num_trasteros, num_aparcamientos, cuota_sugerida, cuota_mensual,
                   created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
                 """,
                 (
                     comunidad_id,
                     workspace_id,
                     str(budget["empresa_id"] or "").strip() or None,
                     comunidad_nombre,
-                    None,
+                    referencia_catastral,
                     comunidad_cif,
                     comunidad_direccion,
+                    foto_edificio_key,
                     presidente,
                     None,
                     "Activa",
