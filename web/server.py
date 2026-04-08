@@ -35991,21 +35991,29 @@ class Handler(BaseHTTPRequestHandler):
                 """,
                 (seguimiento_accion_id, encargo_accion_id, now, record_id, workspace_id),
             )
-            auto_created = run_workspace_automations(
-                conn,
-                workspace_id,
-                "presupuesto_created",
-                {
-                    "presupuesto_id": record_id,
-                    "empresa_id": empresa_id,
-                    "cliente_id": cliente_id,
-                    "servicio": servicio,
-                    "cliente_nombre": cliente_nombre,
-                    "estado": estado,
-                    "importe": total,
-                },
-                now,
-            )
+            auto_created = 0
+            try:
+                auto_created = run_workspace_automations(
+                    conn,
+                    workspace_id,
+                    "presupuesto_created",
+                    {
+                        "presupuesto_id": record_id,
+                        "empresa_id": empresa_id,
+                        "cliente_id": cliente_id,
+                        "servicio": servicio,
+                        "cliente_nombre": cliente_nombre,
+                        "estado": estado,
+                        "importe": total,
+                    },
+                    now,
+                )
+            except Exception as exc:
+                # No bloquea la creación del presupuesto si falla el módulo de automatizaciones (migración pendiente, etc.).
+                try:
+                    print(f"[WARN] run_workspace_automations presupuesto_created: {type(exc).__name__}: {exc}")
+                except Exception:
+                    pass
             conn.commit()
             json_response(self, {"ok": True, "id": record_id, "automation_actions": auto_created})
             return
