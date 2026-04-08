@@ -352,6 +352,31 @@ CREATE TABLE IF NOT EXISTS workspace_presupuesto_lineas (
   FOREIGN KEY (presupuesto_id) REFERENCES workspace_presupuestos(id)
 );
 
+CREATE TABLE IF NOT EXISTS workspace_contratos (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL,
+  empresa_id TEXT NOT NULL,
+  cliente_id TEXT,
+  servicio TEXT,
+  template_key TEXT,
+  titulo TEXT,
+  estado TEXT,
+  fecha TEXT,
+  doc_key TEXT,
+  doc_url TEXT,
+  body_json TEXT,
+  notas TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (workspace_id) REFERENCES workspaces(id),
+  FOREIGN KEY (empresa_id) REFERENCES empresas(id),
+  FOREIGN KEY (cliente_id) REFERENCES clientes(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_workspace_contratos_workspace_id ON workspace_contratos(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_workspace_contratos_empresa_id ON workspace_contratos(empresa_id);
+CREATE INDEX IF NOT EXISTS idx_workspace_contratos_cliente_id ON workspace_contratos(cliente_id);
+
 CREATE TABLE IF NOT EXISTS workspace_fincas_comunidades (
   id TEXT PRIMARY KEY,
   workspace_id TEXT NOT NULL,
