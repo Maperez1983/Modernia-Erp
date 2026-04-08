@@ -1526,11 +1526,12 @@
             <label class="span-2">
               Empresa emisora
               <select name="empresa_id" required></select>
-            </label>
-            <label class="span-2">
-              Comunidad (para precargar datos, opcional)
-              <select name="comunidad_id_lookup"></select>
-            </label>
+	            </label>
+	            <label class="span-2">
+	              Precargar datos (opcional)
+	              <select name="comunidad_id_lookup"></select>
+	            </label>
+	            <div class="span-2 muted">Si la comunidad no está gestionada, deja este selector en “Nueva comunidad / no gestionada” y rellena los datos manualmente.</div>
             <h4 class="span-2">Datos de la comunidad</h4>
             <label class="span-2">
               Denominación social
@@ -1613,11 +1614,12 @@
             </label>
             <div class="span-2" id="workspaceFincasBudgetServiciosIncluidos"></div>
             <div class="span-2" id="workspaceFincasBudgetHero"></div>
-            <div class="form-actions span-2">
-              <button type="submit">Crear presupuesto + PDF</button>
-              <button type="button" id="workspaceFincasBudgetOpenEngine" class="secondary ghost">Abrir motor de presupuestos</button>
-              <span id="workspaceFincasBudgetQuickStatus" class="muted"></span>
-            </div>
+	            <div class="form-actions span-2">
+	              <button type="submit">Crear presupuesto + PDF</button>
+	              <button type="button" id="workspaceFincasBudgetOpenEngine" class="secondary ghost">Abrir motor de presupuestos</button>
+	              <button type="button" id="workspaceFincasBudgetResetBtn" class="secondary ghost">Nuevo</button>
+	              <span id="workspaceFincasBudgetQuickStatus" class="muted"></span>
+	            </div>
           </form>
         </div>
 

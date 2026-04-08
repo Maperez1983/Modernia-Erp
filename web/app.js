@@ -1802,6 +1802,7 @@ const workspaceFincasBudgetServiciosIncluidos = document.getElementById("workspa
 const workspaceFincasBudgetHero = document.getElementById("workspaceFincasBudgetHero");
 const workspaceFincasBudgetQuickForm = document.getElementById("workspaceFincasBudgetQuickForm");
 const workspaceFincasBudgetOpenEngine = document.getElementById("workspaceFincasBudgetOpenEngine");
+const workspaceFincasBudgetResetBtn = document.getElementById("workspaceFincasBudgetResetBtn");
 const workspaceFincasBudgetQuickStatus = document.getElementById("workspaceFincasBudgetQuickStatus");
 const workspaceFincasBudgetsEstadoFilter = document.getElementById("workspaceFincasBudgetsEstadoFilter");
 const workspaceFincasBudgetsRefreshBtn = document.getElementById("workspaceFincasBudgetsRefreshBtn");
@@ -4774,7 +4775,7 @@ const renderWorkspaceCompanyScopedData = () => {
   renderWorkspaceFincasIncidentList(incidentRows);
   renderWorkspaceFincasMeetingList(meetingRows);
   hydrateWorkspaceCommunitySelect(communityRows);
-  hydrateWorkspaceFincasBudgetQuickSelect(communityRows);
+  hydrateWorkspaceFincasBudgetQuickSelect({ communities: communityRows, budgets: budgetRows });
   hydrateWorkspaceProviderSelect(providerRows);
   try {
     const ledgerRows = Array.isArray(state.workspaceFincasLedgerRows) ? state.workspaceFincasLedgerRows : [];
@@ -13917,14 +13918,66 @@ const syncGestoriaBudgetBranding = () => {
   }
 };
 
-const hydrateWorkspaceFincasBudgetQuickSelect = (rows = []) => {
+const hydrateWorkspaceFincasBudgetQuickSelect = ({ communities = [], budgets = [] } = {}) => {
   if (!workspaceFincasBudgetQuickForm) return;
   const select = workspaceFincasBudgetQuickForm.querySelector('[name="comunidad_id_lookup"]');
   if (!select) return;
-  const items = Array.isArray(rows) ? rows : [];
-  select.innerHTML = ["<option value=\"\">Selecciona una comunidad</option>"]
-    .concat(items.map((row) => `<option value="${escapeHtml(String(row.id || ""))}">${escapeHtml(String(row.nombre || "-"))}</option>`))
-    .join("");
+  const previous = String(select.value || "");
+  const communityItems = Array.isArray(communities) ? communities : [];
+  const budgetItems = Array.isArray(budgets) ? budgets : [];
+
+  const budgetCandidates = [];
+  const seen = new Set();
+  budgetItems
+    .filter((row) => normalizeBudgetServiceKey(row?.servicio || "") === "fincas")
+    .slice()
+    .sort((a, b) => String(b?.fecha || "").localeCompare(String(a?.fecha || "")))
+    .forEach((row) => {
+      const calc = parseWorkspaceBudgetCalc(row);
+      const denominacion = String(calc.comunidad_denominacion || row?.cliente_lookup || row?.cliente_nombre || row?.titulo || "").trim();
+      if (!denominacion) return;
+      const cif = String(calc.comunidad_cif || row?.cliente_nif || "").trim();
+      const direccion = String(calc.comunidad_direccion || "").trim();
+      const key = normalizeSimple(`${denominacion}|${cif}|${direccion}`);
+      if (!key || seen.has(key)) return;
+      seen.add(key);
+      budgetCandidates.push({
+        id: String(row?.id || "").trim(),
+        denominacion,
+        fecha: String(row?.fecha || "").trim(),
+        direccion,
+      });
+    });
+
+  const options = [`<option value="">Nueva comunidad / no gestionada</option>`];
+  if (communityItems.length) {
+    options.push(`<optgroup label="Comunidades gestionadas">`);
+    options.push(
+      ...communityItems.map((row) =>
+        `<option value="comunidad:${escapeHtml(String(row.id || ""))}">${escapeHtml(String(row.nombre || "-"))}</option>`
+      )
+    );
+    options.push(`</optgroup>`);
+  }
+  if (budgetCandidates.length) {
+    options.push(`<optgroup label="Presupuestos anteriores (no gestionadas)">`);
+    options.push(
+      ...budgetCandidates
+        .filter((row) => row.id)
+        .map((row) => {
+          const tail = [row.direccion, row.fecha].filter(Boolean).join(" · ");
+          const label = tail ? `${row.denominacion} · ${tail}` : row.denominacion;
+          return `<option value="presupuesto:${escapeHtml(row.id)}">${escapeHtml(label)}</option>`;
+        })
+    );
+    options.push(`</optgroup>`);
+  }
+  select.innerHTML = options.join("");
+  if (previous && Array.from(select.options).some((opt) => opt.value === previous)) {
+    select.value = previous;
+  } else {
+    select.value = "";
+  }
 };
 
 const syncWorkspaceFincasBudgetQuickComputed = () => {
@@ -13984,6 +14037,85 @@ const applyWorkspaceFincasBudgetQuickCommunity = (communityId) => {
     set("num_locales", community.num_locales ?? 0);
     set("num_aparcamientos", community.num_aparcamientos ?? 0);
   }
+  syncWorkspaceFincasBudgetQuickComputed();
+};
+
+const applyWorkspaceFincasBudgetQuickBudget = (budgetId) => {
+  if (!workspaceFincasBudgetQuickForm) return;
+  const id = String(budgetId || "").trim();
+  const budget = ((state.currentWorkspaceData || {}).budgetRows || []).find((row) => String(row.id || "") === id) || null;
+  const hidden = workspaceFincasBudgetQuickForm.querySelector('[name="comunidad_id"]');
+  if (hidden) hidden.value = "";
+  if (!budget) return;
+  const calc = parseWorkspaceBudgetCalc(budget);
+  const set = (name, value) => {
+    const input = workspaceFincasBudgetQuickForm.querySelector(`[name="${name}"]`);
+    if (input) input.value = value ?? "";
+  };
+  set("empresa_id", budget.empresa_id || "");
+  set("comunidad_denominacion", String(calc.comunidad_denominacion || budget.cliente_lookup || budget.titulo || "").trim());
+  set("comunidad_direccion", String(calc.comunidad_direccion || "").trim());
+  set("comunidad_cif", String(calc.comunidad_cif || budget.cliente_nif || "").trim());
+  set("solicitante_nombre", String(calc.solicitante_nombre || "").trim());
+  set("solicitante_dni", String(calc.solicitante_dni || "").trim());
+  set("solicitante_telefono", String(calc.solicitante_telefono || budget.cliente_telefono || "").trim());
+  set("solicitante_direccion", String(calc.solicitante_direccion || "").trim());
+  set("solicitante_email", String(calc.solicitante_email || budget.cliente_email || "").trim());
+  set("num_vecinos", calc.num_vecinos ?? 0);
+  set("num_locales", calc.num_locales ?? 0);
+  set("num_aparcamientos", calc.num_aparcamientos ?? 0);
+  try {
+    syncWorkspaceFincasBudgetBranding();
+  } catch {}
+  syncWorkspaceFincasBudgetQuickComputed();
+};
+
+const applyWorkspaceFincasBudgetQuickPrefill = (rawValue) => {
+  const value = String(rawValue || "").trim();
+  if (!value) {
+    const hidden = workspaceFincasBudgetQuickForm?.querySelector('[name="comunidad_id"]');
+    if (hidden) hidden.value = "";
+    syncWorkspaceFincasBudgetQuickComputed();
+    return;
+  }
+  if (value.startsWith("comunidad:")) {
+    applyWorkspaceFincasBudgetQuickCommunity(value.slice("comunidad:".length));
+    return;
+  }
+  if (value.startsWith("presupuesto:")) {
+    applyWorkspaceFincasBudgetQuickBudget(value.slice("presupuesto:".length));
+    return;
+  }
+  applyWorkspaceFincasBudgetQuickCommunity(value);
+};
+
+const resetWorkspaceFincasBudgetQuickForm = () => {
+  if (!workspaceFincasBudgetQuickForm) return;
+  const set = (name, value) => {
+    const input = workspaceFincasBudgetQuickForm.querySelector(`[name="${name}"]`);
+    if (input) input.value = value ?? "";
+  };
+  const hidden = workspaceFincasBudgetQuickForm.querySelector('[name="comunidad_id"]');
+  if (hidden) hidden.value = "";
+  const lookup = workspaceFincasBudgetQuickForm.querySelector('[name="comunidad_id_lookup"]');
+  if (lookup) lookup.value = "";
+  set("titulo", "");
+  set("estado", "Borrador");
+  set("comunidad_denominacion", "");
+  set("comunidad_direccion", "");
+  set("comunidad_cif", "");
+  set("solicitante_nombre", "");
+  set("solicitante_dni", "");
+  set("solicitante_telefono", "");
+  set("solicitante_direccion", "");
+  set("solicitante_email", "");
+  set("num_vecinos", 0);
+  set("num_locales", 0);
+  set("num_aparcamientos", 0);
+  set("carta_presentacion", "");
+  try {
+    syncWorkspaceFincasBudgetBranding();
+  } catch {}
   syncWorkspaceFincasBudgetQuickComputed();
 };
 
@@ -44223,7 +44355,7 @@ if (workspaceFincasBudgetQuickForm) {
   const select = workspaceFincasBudgetQuickForm.querySelector('[name="comunidad_id_lookup"]');
   if (select) {
     select.addEventListener("change", () => {
-      applyWorkspaceFincasBudgetQuickCommunity(select.value || "");
+      applyWorkspaceFincasBudgetQuickPrefill(select.value || "");
     });
   }
   ["num_vecinos", "num_locales", "num_aparcamientos"].forEach((name) => {
@@ -44305,6 +44437,13 @@ if (workspaceFincasBudgetQuickForm) {
     } catch (error) {
       if (workspaceFincasBudgetQuickStatus) workspaceFincasBudgetQuickStatus.textContent = error?.message || "No se pudo crear el presupuesto.";
     }
+  });
+}
+
+if (workspaceFincasBudgetResetBtn) {
+  workspaceFincasBudgetResetBtn.addEventListener("click", () => {
+    resetWorkspaceFincasBudgetQuickForm();
+    if (workspaceFincasBudgetQuickStatus) workspaceFincasBudgetQuickStatus.textContent = "";
   });
 }
 
