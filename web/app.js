@@ -631,12 +631,17 @@ const buildSegurosOcrPayload = async (file, statusEl) => {
   return { file_base64: fileBase64, filename: file.name };
 };
 
-const startSegurosOcrJob = async (payload) =>
-  postJsonWithRetryBasic("/api/seguros_ocr_async", payload, {
+const startSegurosOcrJob = async (payload) => {
+  const safePayload = payload && typeof payload === "object" ? payload : {};
+  if (!safePayload.empresa_nombre) {
+    safePayload.empresa_nombre = resolveCrmSegurosEmpresaNombre();
+  }
+  return postJsonWithRetryBasic("/api/seguros_ocr_async", safePayload, {
     maxRetries: 5,
     baseDelayMs: 450,
     timeoutMs: 30000,
   });
+};
 
 const postJsonWithRetryBasic = async (url, payload, options = {}) => {
   const maxRetries = Math.max(1, Number(options.maxRetries || 4));
@@ -688,12 +693,17 @@ const postJsonWithRetryBasic = async (url, payload, options = {}) => {
   throw lastError || new Error("Error de red");
 };
 
-const runSegurosOcrDirectPayload = async (payload, options = {}) =>
-  postJsonWithRetryBasic("/api/seguros_ocr", payload, {
+const runSegurosOcrDirectPayload = async (payload, options = {}) => {
+  const safePayload = payload && typeof payload === "object" ? payload : {};
+  if (!safePayload.empresa_nombre) {
+    safePayload.empresa_nombre = resolveCrmSegurosEmpresaNombre();
+  }
+  return postJsonWithRetryBasic("/api/seguros_ocr", safePayload, {
     maxRetries: options.maxRetries || 4,
     baseDelayMs: options.baseDelayMs || 450,
     timeoutMs: options.timeoutMs || 120000,
   });
+};
 
 const runSegurosOcrDirect = async (file, extraPayload = {}) => {
   const fileBase64 = await fileToBase64(file);
@@ -998,7 +1008,7 @@ const runSegurosBdtRowOcr = async (recordId, file, statusEl, rowMap = {}) => {
     label: levelMeta.label,
   });
   if (!ok) return;
-  const enrichPayload = { empresa_nombre: FINCAS_COMPANY, id: recordId, ...fields };
+  const enrichPayload = { empresa_nombre: resolveCrmSegurosEmpresaNombre(), id: recordId, ...fields };
   if (fields.nif || fields.dni) {
     const lookup = await lookupClienteByNif(fields.nif || fields.dni);
     if (lookup?.found) {
@@ -1018,12 +1028,12 @@ const runSegurosBdtRowOcr = async (recordId, file, statusEl, rowMap = {}) => {
     return;
   }
   if (upload && upload.key) {
-   await apiPost("/api/seguros_update", {
-      empresa_nombre: FINCAS_COMPANY,
-      id: recordId,
-      poliza_key: upload.key,
-      poliza_url: upload.public_url || "",
-   });
+	   await apiPost("/api/seguros_update", {
+	      empresa_nombre: resolveCrmSegurosEmpresaNombre(),
+	      id: recordId,
+	      poliza_key: upload.key,
+	      poliza_url: upload.public_url || "",
+	   });
   }
   if (statusEl) statusEl.textContent = "OCR aplicado y póliza cargada.";
   loadSegurosCrm();
@@ -1244,7 +1254,7 @@ const runClienteSegurosDocOcr = async (row, statusEl, buttonEl) => {
     let seguroId = String(row.seguro_id || row.referencia_id || "").trim();
     if (seguroId) {
       const enrichResp = await postJsonWithDbRetry("/api/seguros_enrich", {
-          empresa_nombre: FINCAS_COMPANY,
+          empresa_nombre: resolveCrmSegurosEmpresaNombre(),
           id: seguroId,
           cliente_id: payloadBase.cliente_id,
           tomador: payloadBase.tomador,
@@ -1260,7 +1270,7 @@ const runClienteSegurosDocOcr = async (row, statusEl, buttonEl) => {
         throw new Error(enrichResp.error);
       }
       const updateResp = await postJsonWithDbRetry("/api/seguros_update", {
-          empresa_nombre: FINCAS_COMPANY,
+          empresa_nombre: resolveCrmSegurosEmpresaNombre(),
           id: seguroId,
           cliente_id: payloadBase.cliente_id,
           poliza_numero: payloadBase.poliza_numero,
@@ -1274,7 +1284,7 @@ const runClienteSegurosDocOcr = async (row, statusEl, buttonEl) => {
       }
     } else {
       const createResp = await postJsonWithDbRetry("/api/seguros", {
-          empresa_nombre: FINCAS_COMPANY,
+          empresa_nombre: resolveCrmSegurosEmpresaNombre(),
           cliente_id: payloadBase.cliente_id,
           mes_creacion: mesCreacion,
           estado: "Contratada",
@@ -4612,7 +4622,12 @@ const updateWorkspaceEntryChrome = () => {
   workspaceViewButtons.forEach((button) => {
     const viewKey = button.dataset.workspaceViewTab || "";
     if (tenantOperationalMode) {
-      const shouldShow = viewKey === "operations" || (viewKey === "tenant" && canManageWorkspace);
+      const shouldShow =
+        viewKey === "operations"
+        || viewKey === "fincas"
+        || viewKey === "rrhh"
+        || (viewKey === "motores" && canManageWorkspace)
+        || (viewKey === "tenant" && canManageWorkspace);
       button.classList.toggle("hidden", !shouldShow);
       button.disabled = viewKey === "tenant" && !canManageWorkspace;
       return;
@@ -4884,7 +4899,8 @@ const setWorkspaceView = (view = "overview", options = {}) => {
   if (tenantMode && normalized === "overview") {
     normalized = "operations";
   }
-  if (tenantMode && !forceTenantView && normalized !== "tenant") {
+  const tenantAllowed = new Set(["operations", "fincas", "rrhh", "motores"]);
+  if (tenantMode && !forceTenantView && normalized !== "tenant" && !tenantAllowed.has(normalized)) {
     normalized = "operations";
   }
   if (tenantMode && normalized === "tenant") {
@@ -13593,7 +13609,7 @@ const renderWorkspaceFincasDashboard = () => {
   const communityIds = new Set(communities.map((row) => String(row.id || "")).filter(Boolean));
   const comuneros = communities.reduce((acc, row) => acc + (Number(row.num_vecinos || 0) || 0), 0);
   const cuotaMensual = communities.reduce((acc, row) => acc + (Number(row.cuota_mensual || 0) || 0), 0);
-  const budgets = filterWorkspaceRowsByCompany(raw.budgetRows || []).filter((row) => normalizeSimple(row.servicio || "") === "fincas");
+  const budgets = filterWorkspaceRowsByCompany(raw.budgetRows || []).filter((row) => normalizeBudgetServiceKey(row.servicio || "") === "fincas");
   const budgetsTotal = budgets.length;
   const budgetsAccepted = budgets.filter((row) => normalizeSimple(row.estado || "") === "aceptado").length;
   const budgetsRatio = budgetsTotal > 0 ? `${((budgetsAccepted / budgetsTotal) * 100).toFixed(0)}%` : "-";
@@ -13777,6 +13793,62 @@ const setWorkspaceFincasTab = (tab = "dashboard") => {
   }
 };
 
+const FINCAS_IVA_PCT = 0.21;
+
+const FINCAS_SERVICIOS_DEFAULT = [
+  "Atención y gestión de incidencias (priorización por urgencia)",
+  "Gestión y control de proveedores y mantenimientos",
+  "Convocatoria y asistencia a junta ordinaria anual",
+  "Gestión de juntas extraordinarias (según necesidad)",
+  "Contabilidad de la comunidad (ingresos/gastos) y reporting",
+  "Gestión de cobros, seguimiento e impagados",
+  "Custodia y gestión documental (actas, contratos, facturas)",
+  "Cumplimiento LPH: comunicaciones y soporte administrativo",
+];
+
+const renderFincasServiciosIncluidos = (container) => {
+  if (!container) return;
+  const items = FINCAS_SERVICIOS_DEFAULT.slice();
+  container.innerHTML = `
+    <div class="form-card" style="padding:14px;margin:0;">
+      <div class="section-head">
+        <div>
+          <h4>Servicios incluidos</h4>
+          <p class="muted">Selecciona qué incluye el presupuesto (se usará también para el contrato).</p>
+        </div>
+      </div>
+      <div class="budget-services-grid">
+        ${items.map((text) => `
+          <label class="inline-check">
+            <input type="checkbox" value="${escapeHtml(text)}" checked />
+            ${escapeHtml(text)}
+          </label>
+        `).join("")}
+      </div>
+    </div>
+  `;
+};
+
+const readFincasServiciosIncluidos = (container) => {
+  if (!container) return [];
+  return Array.from(container.querySelectorAll('input[type="checkbox"]'))
+    .filter((input) => input && input.checked)
+    .map((input) => String(input.value || "").trim())
+    .filter(Boolean);
+};
+
+const normalizeBudgetServiceKey = (value = "") => {
+  const raw = normalizeSimple(value || "");
+  if (!raw) return "";
+  if (raw.includes("fincas")) return "fincas";
+  if (raw.includes("administracion") && raw.includes("finc")) return "fincas";
+  if (raw.includes("gestoria")) return "gestoria";
+  if (raw.includes("seguro")) return "seguros";
+  if (raw.includes("inmo")) return "inmobiliaria";
+  if (raw.includes("financi") || raw.includes("hipoteca")) return "financiaciones";
+  return raw;
+};
+
 const computeFincasCuotaSuggestedClient = ({ num_vecinos = 0, num_locales = 0, num_trasteros = 0, num_aparcamientos = 0 } = {}) =>
   Math.max(
     60,
@@ -13785,6 +13857,42 @@ const computeFincasCuotaSuggestedClient = ({ num_vecinos = 0, num_locales = 0, n
       + (Number(num_trasteros || 0) || 0)
       + (Number(num_aparcamientos || 0) || 0)
   );
+
+const computeFincasBudgetTotalsClient = (values = {}) => {
+  const subtotal = Number(computeFincasCuotaSuggestedClient(values) || 0) || 0;
+  const impuestos = Math.round(subtotal * FINCAS_IVA_PCT * 100) / 100;
+  const total = Math.round((subtotal + impuestos) * 100) / 100;
+  return { subtotal, impuestos, total };
+};
+
+const syncWorkspaceFincasBudgetBranding = () => {
+  if (!workspaceFincasBudgetCompanyLogo && !workspaceFincasBudgetColegioLogo) return;
+  const empresaId = String(workspaceFincasBudgetQuickForm?.querySelector('[name="empresa_id"]')?.value || "").trim();
+  const company = state.empresas.find((row) => String(row.id || "") === empresaId) || null;
+  const src = buildPhotoSrc(company?.logo_url || "") || "/assets/logos/fincas-velazquez.png";
+  if (workspaceFincasBudgetCompanyLogo) {
+    workspaceFincasBudgetCompanyLogo.src = src;
+    workspaceFincasBudgetCompanyLogo.classList.toggle("hidden", !src);
+  }
+  if (workspaceFincasBudgetColegioLogo) {
+    workspaceFincasBudgetColegioLogo.src = "/assets/logos/colegio-administradores.png";
+    workspaceFincasBudgetColegioLogo.classList.remove("hidden");
+  }
+};
+
+const syncGestoriaBudgetBranding = () => {
+  if (!gestoriaBudgetCompanyLogo && !gestoriaBudgetColegioLogo) return;
+  const empresa = resolveCrmGestoriaEmpresa();
+  const src = buildPhotoSrc(empresa?.logo_url || "") || "/assets/logos/fincas-velazquez.png";
+  if (gestoriaBudgetCompanyLogo) {
+    gestoriaBudgetCompanyLogo.src = src;
+    gestoriaBudgetCompanyLogo.classList.toggle("hidden", !src);
+  }
+  if (gestoriaBudgetColegioLogo) {
+    gestoriaBudgetColegioLogo.src = "/assets/logos/colegio-administradores.png";
+    gestoriaBudgetColegioLogo.classList.remove("hidden");
+  }
+};
 
 const hydrateWorkspaceFincasBudgetQuickSelect = (rows = []) => {
   if (!workspaceFincasBudgetQuickForm) return;
@@ -13801,21 +13909,29 @@ const syncWorkspaceFincasBudgetQuickComputed = () => {
   const numVecinos = Number(workspaceFincasBudgetQuickForm.querySelector('[name="num_vecinos"]')?.value || 0) || 0;
   const numLocales = Number(workspaceFincasBudgetQuickForm.querySelector('[name="num_locales"]')?.value || 0) || 0;
   const numAparcamientos = Number(workspaceFincasBudgetQuickForm.querySelector('[name="num_aparcamientos"]')?.value || 0) || 0;
-  const cuota = computeFincasCuotaSuggestedClient({ num_vecinos: numVecinos, num_locales: numLocales, num_aparcamientos: numAparcamientos });
-  const cuotaInput = workspaceFincasBudgetQuickForm.querySelector('[name="cuota_sugerida"]');
-  if (cuotaInput) cuotaInput.value = cuota.toFixed(2);
+  const totals = computeFincasBudgetTotalsClient({ num_vecinos: numVecinos, num_locales: numLocales, num_aparcamientos: numAparcamientos });
+  const suggestedInput = workspaceFincasBudgetQuickForm.querySelector('[name="subtotal_sugerido"]');
+  const subtotalInput = workspaceFincasBudgetQuickForm.querySelector('[name="subtotal"]');
+  const ivaInput = workspaceFincasBudgetQuickForm.querySelector('[name="impuestos"]');
+  const totalInput = workspaceFincasBudgetQuickForm.querySelector('[name="total"]');
+  if (suggestedInput) suggestedInput.value = totals.subtotal.toFixed(2);
+  if (subtotalInput) subtotalInput.value = totals.subtotal.toFixed(2);
+  if (ivaInput) ivaInput.value = totals.impuestos.toFixed(2);
+  if (totalInput) totalInput.value = totals.total.toFixed(2);
   if (workspaceFincasBudgetHero) {
     workspaceFincasBudgetHero.innerHTML = `
       <div class="workspace-home-detail-card" style="padding:16px;">
         <div class="section-head">
           <div>
-            <h4>Cuota propuesta</h4>
-            <p class="muted">5 € por vivienda + 1 € por local/aparcamiento (mínimo 60 €).</p>
+            <h4>Resumen económico</h4>
+            <p class="muted">5 € por vivienda + 1 € por local/aparcamiento (mínimo 60 €) + IVA 21%.</p>
           </div>
         </div>
         <div class="workspace-summary-kpis">
-          <div class="workspace-mini-kpi"><span>Mensual</span><strong>${euroFormatter.format(cuota)}</strong></div>
-          <div class="workspace-mini-kpi"><span>Anual</span><strong>${euroFormatter.format(cuota * 12)}</strong></div>
+          <div class="workspace-mini-kpi"><span>Subtotal</span><strong>${euroFormatter.format(totals.subtotal)}</strong></div>
+          <div class="workspace-mini-kpi"><span>IVA (21%)</span><strong>${euroFormatter.format(totals.impuestos)}</strong></div>
+          <div class="workspace-mini-kpi"><span>Total</span><strong>${euroFormatter.format(totals.total)}</strong></div>
+          <div class="workspace-mini-kpi"><span>Total anual</span><strong>${euroFormatter.format(totals.total * 12)}</strong></div>
           <div class="workspace-mini-kpi"><span>Viviendas</span><strong>${numberFormatter.format(numVecinos)}</strong></div>
           <div class="workspace-mini-kpi"><span>Locales</span><strong>${numberFormatter.format(numLocales)}</strong></div>
           <div class="workspace-mini-kpi"><span>Aparcamientos</span><strong>${numberFormatter.format(numAparcamientos)}</strong></div>
@@ -13836,6 +13952,11 @@ const applyWorkspaceFincasBudgetQuickCommunity = (communityId) => {
       const input = workspaceFincasBudgetQuickForm.querySelector(`[name="${name}"]`);
       if (input) input.value = value ?? "";
     };
+    set("empresa_id", community.empresa_id || "");
+    set("comunidad_denominacion", community.nombre || "");
+    set("comunidad_direccion", community.direccion || "");
+    set("comunidad_cif", community.cif || "");
+    set("solicitante_nombre", community.presidente || "");
     set("num_vecinos", community.num_vecinos ?? 0);
     set("num_locales", community.num_locales ?? 0);
     set("num_aparcamientos", community.num_aparcamientos ?? 0);
@@ -14457,6 +14578,7 @@ const updateExplorerHeader = (empresaName) => {
   }
   const canInmo = userCanAccessService("inmobiliaria");
   const canGestoria = userCanAccessService("gestoria");
+  const canFincas = userCanAccessService("fincas");
   const canSeguros = userCanAccessService("seguros");
   const canFin = userCanAccessService("financiaciones");
   updateCompanySummary(empresaName);
@@ -14505,7 +14627,7 @@ const updateExplorerHeader = (empresaName) => {
     if (!canGestoria && currentTab === "gestoria-agenda") setTab("operativa");
   }
   if (gestoriaFactTab) {
-    const showFact = canGestoria;
+    const showFact = canGestoria || canFincas;
     gestoriaFactTab.classList.toggle("hidden", !showFact);
     if (!showFact && currentTab === "gestoria-fact") {
       setTab("gestoria-conta");
@@ -14734,6 +14856,10 @@ const resolveCrmInmoEmpresa = () => {
 
 const resolveCrmInmoEmpresaNombre = () => resolveCrmInmoEmpresa()?.nombre || "";
 const resolveCrmInmoEmpresaId = () => resolveCrmInmoEmpresa()?.id || "";
+
+const resolveCrmSegurosEmpresaNombre = () => resolveCrmSegurosEmpresa()?.nombre || FINCAS_COMPANY;
+const resolveCrmGestoriaEmpresaNombre = () => resolveCrmGestoriaEmpresa()?.nombre || FINCAS_COMPANY;
+const resolveCrmFinEmpresaNombre = () => resolveCrmFinEmpresa()?.nombre || FIN_COMPANY;
 
 const resolveCrmSegurosEmpresa = () => {
   const explicit = resolveEmpresaById(state.crmSegurosEmpresaId);
@@ -15045,7 +15171,15 @@ const openServiceCrm = (service) => {
     openCrmInmobiliario();
     return;
   }
-  if (service === "Gestoría" || service === "Administración Fincas") {
+  if (service === "Administración Fincas" || service === "Fincas") {
+    if (state.currentPage === "holding" && (state.currentWorkspaceEntryMode || "platform") === "tenant") {
+      focusWorkspaceView("fincas", workspaceFincasCommunityForm, { scroll: true, forceTenantView: true });
+      return;
+    }
+    openHolding({ mode: "tenant", workspace: resolveDefaultTenantWorkspaceSlug(), view: "fincas" });
+    return;
+  }
+  if (service === "Gestoría") {
     openGestoriaCrm();
     return;
   }
@@ -15358,7 +15492,7 @@ const openHolding = (options = {}) => {
     .toLowerCase();
   if (mode === "tenant" && !canManageWorkspace) {
     const viewKey = normalizeSimple(requestedView);
-    if (viewKey && !["operations", "rrhh"].includes(viewKey)) {
+    if (viewKey && !["operations", "rrhh", "fincas"].includes(viewKey)) {
       requestedView = "";
     }
   }
@@ -37440,9 +37574,15 @@ const syncGestoriaBudgetQuickComputed = () => {
     num_trasteros: gestoriaBudgetQuickForm.querySelector('[name="num_trasteros"]')?.value ?? 0,
     num_aparcamientos: gestoriaBudgetQuickForm.querySelector('[name="num_aparcamientos"]')?.value ?? 0,
   };
-  const cuota = computeFincasCuotaSuggestedClient(values);
-  const input = gestoriaBudgetQuickForm.querySelector('[name="cuota_sugerida"]');
-  if (input) input.value = Number(cuota || 0).toFixed(2);
+  const totals = computeFincasBudgetTotalsClient(values);
+  const suggested = gestoriaBudgetQuickForm.querySelector('[name="subtotal_sugerido"]');
+  const subtotal = gestoriaBudgetQuickForm.querySelector('[name="subtotal"]');
+  const iva = gestoriaBudgetQuickForm.querySelector('[name="impuestos"]');
+  const total = gestoriaBudgetQuickForm.querySelector('[name="total"]');
+  if (suggested) suggested.value = Number(totals.subtotal || 0).toFixed(2);
+  if (subtotal) subtotal.value = Number(totals.subtotal || 0).toFixed(2);
+  if (iva) iva.value = Number(totals.impuestos || 0).toFixed(2);
+  if (total) total.value = Number(totals.total || 0).toFixed(2);
 };
 
 const renderGestoriaBudgetsList = (rows = []) => {
@@ -42063,15 +42203,15 @@ if (segurosOcrButton) {
           return null;
         }
         try {
-          return await runSegurosOcrDirectPayload(
-            { ...payload, empresa_nombre: FINCAS_COMPANY, fast_mode: 1 },
-            { timeoutMs: 180000 }
-          );
+	          return await runSegurosOcrDirectPayload(
+	            { ...payload, fast_mode: 1 },
+	            { timeoutMs: 180000 }
+	          );
         } catch (_directErr) {
           if (segurosOcrStatus) {
             segurosOcrStatus.textContent = "OCR directo lento. Reintentando en cola...";
           }
-          const job = await startSegurosOcrJob({ ...payload, empresa_nombre: FINCAS_COMPANY });
+	          const job = await startSegurosOcrJob({ ...payload });
           if (!job || job.error || !job.job_id) {
             throw new Error(job?.detail || job?.error || "No se pudo iniciar OCR.");
           }
@@ -42169,14 +42309,14 @@ if (segurosBdtOcrButton) {
           }
           return null;
         }
-        return startSegurosOcrJob({ ...payload, empresa_nombre: FINCAS_COMPANY });
+	        return startSegurosOcrJob({ ...payload });
       })
       .then(async (job) => {
         if (!job || job.error || !job.job_id) {
           if (segurosBdtOcrStatus) {
             segurosBdtOcrStatus.textContent = "OCR en cola falló. Reintentando en modo directo...";
           }
-          return runSegurosOcrDirect(file, { empresa_nombre: FINCAS_COMPANY });
+	          return runSegurosOcrDirect(file, {});
         }
         if (segurosBdtOcrStatus) segurosBdtOcrStatus.textContent = "OCR en cola...";
         try {
@@ -42190,7 +42330,7 @@ if (segurosBdtOcrButton) {
           if (segurosBdtOcrStatus) {
             segurosBdtOcrStatus.textContent = "OCR asíncrono falló. Reintentando en modo directo...";
           }
-          return runSegurosOcrDirect(file, { empresa_nombre: FINCAS_COMPANY });
+	          return runSegurosOcrDirect(file, {});
         }
       })
       .then((data) => {
@@ -42244,8 +42384,9 @@ if (segurosOcrSave) {
   segurosOcrSave.addEventListener("click", async () => {
     const recordId = segurosOcrSave.dataset.recordId;
     if (recordId) {
+      const empresaNombre = resolveCrmSegurosEmpresaNombre();
       const payload = {
-        empresa_nombre: FINCAS_COMPANY,
+        empresa_nombre: empresaNombre,
         id: recordId,
         cliente_id: state.segurosOcrClienteId || "",
         estado: "Contratada",
@@ -42305,7 +42446,7 @@ if (segurosOcrSave) {
             return;
           }
           const enrichPayload = {
-            empresa_nombre: FINCAS_COMPANY,
+            empresa_nombre: empresaNombre,
             id: recordId,
             cliente_id: payload.cliente_id || "",
             tomador: payload.tomador || "",
@@ -42399,11 +42540,12 @@ if (segurosBdtOcrLink) {
         return;
       }
     }
+    const empresaNombre = resolveCrmSegurosEmpresaNombre();
     fetch("/api/seguros_update", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        empresa_nombre: FINCAS_COMPANY,
+        empresa_nombre: empresaNombre,
         id: recordId,
         cliente_id: fields.cliente_id || "",
       }),
@@ -42417,7 +42559,7 @@ if (segurosBdtOcrLink) {
         const resp = await fetch("/api/seguros_enrich", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ empresa_nombre: FINCAS_COMPANY, id: recordId, ...fields }),
+          body: JSON.stringify({ empresa_nombre: empresaNombre, id: recordId, ...fields }),
         }).then((res) => res.json());
         if (resp?.error) {
           if (segurosBdtOcrStatus) segurosBdtOcrStatus.textContent = resp.error;
@@ -42428,7 +42570,7 @@ if (segurosBdtOcrLink) {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              empresa_nombre: FINCAS_COMPANY,
+              empresa_nombre: empresaNombre,
               id: recordId,
               cliente_id: fields.cliente_id || "",
               poliza_key: upload.key || "",
@@ -42554,6 +42696,7 @@ if (segurosBdtOcrCompania) {
 if (segurosUpdateButton) {
   segurosUpdateButton.addEventListener("click", async () => {
     if (segurosUpdateStatus) segurosUpdateStatus.textContent = "";
+    const empresaNombre = resolveCrmSegurosEmpresaNombre();
     const recordId = segurosUpdateSelect ? segurosUpdateSelect.value : "";
     if (!recordId) {
       if (segurosUpdateStatus) segurosUpdateStatus.textContent = "Selecciona una póliza.";
@@ -42584,7 +42727,7 @@ if (segurosUpdateButton) {
 
     try {
       await postJsonWithDbRetry("/api/seguros_update", {
-        empresa_nombre: FINCAS_COMPANY,
+        empresa_nombre: empresaNombre,
         id: recordId,
         poliza_key: upload.key || "",
         poliza_url: upload.public_url || "",
@@ -42622,7 +42765,7 @@ if (segurosUpdateButton) {
 
     const fields = data?.fields || {};
     const enrichPayload = {
-      empresa_nombre: FINCAS_COMPANY,
+      empresa_nombre: empresaNombre,
       id: recordId,
       tomador: fields.tomador || "",
       nif: fields.nif || fields.dni || "",
@@ -45979,12 +46122,13 @@ if (gestoriaTrabajoForm) {
         accionFecha = due.toISOString().slice(0, 10);
       }
     }
-        if (accionFecha) {
-          const accionPayload = {
-            empresa_nombre: FINCAS_COMPANY,
-            cliente_id: payload.cliente_id || "",
-            fecha: accionFecha,
-            tipo: payload.tipo_trabajo || "Gestión",
+	        if (accionFecha) {
+	          const empresaNombre = resolveCrmGestoriaEmpresaNombre();
+	          const accionPayload = {
+	            empresa_nombre: empresaNombre,
+	            cliente_id: payload.cliente_id || "",
+	            fecha: accionFecha,
+	            tipo: payload.tipo_trabajo || "Gestión",
             estado: "Pendiente",
             servicio: "gestoria",
           };
@@ -46169,7 +46313,8 @@ if (gestoriaContaTasksBtn) {
 
 if (gestoriaContaQueueBtn) {
   gestoriaContaQueueBtn.addEventListener("click", () => {
-    openCompany(FINCAS_COMPANY);
+    const empresa = resolveCrmGestoriaEmpresa();
+    if (empresa?.nombre) openCompany(empresa.nombre);
     setTab("gestoria-conta");
     loadGestoriaContabilidad();
     loadGestoriaContaQueue();
@@ -46178,7 +46323,8 @@ if (gestoriaContaQueueBtn) {
 
 if (gestoriaImportQueueBtn) {
   gestoriaImportQueueBtn.addEventListener("click", () => {
-    openCompany(FINCAS_COMPANY);
+    const empresa = resolveCrmGestoriaEmpresa();
+    if (empresa?.nombre) openCompany(empresa.nombre);
     setTab("gestoria-conta");
     loadGestoriaContabilidad();
     loadGestoriaContaQueue();
@@ -46211,8 +46357,9 @@ if (gestoriaImportApplyBtn) {
     }
     if (gestoriaImportDocsInfo) gestoriaImportDocsInfo.textContent = "Aplicando lote...";
     try {
+      const empresaNombre = resolveCrmGestoriaEmpresaNombre();
       const data = await postJsonWithDbRetry("/api/gestoria_import_aplicar", {
-        empresa_nombre: FINCAS_COMPANY,
+        empresa_nombre: empresaNombre,
         lote_id: loteId,
       });
       if (gestoriaImportDocsInfo) {
@@ -47080,12 +47227,13 @@ if (gestoriaAltaForm) {
         if (gestoriaAltaStatus) gestoriaAltaStatus.textContent = clienteData.error;
         return;
       }
+      const gestoriaEmpresa = resolveCrmGestoriaEmpresa() || fincas;
       await fetch("/api/clientes_link", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           cliente_id: clienteId,
-          empresa_id: fincas.id,
+          empresa_id: gestoriaEmpresa?.id || fincas.id,
           servicio: "Gestoría",
           estado: payload.estado || "Alta",
           fecha_inicio: payload.fecha || "",
@@ -47096,7 +47244,7 @@ if (gestoriaAltaForm) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          empresa_nombre: FINCAS_COMPANY,
+          empresa_nombre: gestoriaEmpresa?.nombre || resolveCrmGestoriaEmpresaNombre(),
           cliente: buildDisplayName(clientePayload),
           fecha: payload.fecha || "",
           cuota: payload.cuota || "",
