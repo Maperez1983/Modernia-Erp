@@ -2017,6 +2017,13 @@ const segurosCrmSection = document.getElementById("segurosCrmSection");
 const finCrmSection = document.getElementById("finCrmSection");
 const finSimSection = document.getElementById("finSimSection");
 const gestoriaFactSection = document.getElementById("gestoriaFactSection");
+const gestoriaBudgetQuickForm = document.getElementById("gestoriaBudgetQuickForm");
+const gestoriaBudgetQuickStatus = document.getElementById("gestoriaBudgetQuickStatus");
+const gestoriaBudgetsServicioFilter = document.getElementById("gestoriaBudgetsServicioFilter");
+const gestoriaBudgetsEstadoFilter = document.getElementById("gestoriaBudgetsEstadoFilter");
+const gestoriaBudgetsRefreshBtn = document.getElementById("gestoriaBudgetsRefreshBtn");
+const gestoriaBudgetsTable = document.getElementById("gestoriaBudgetsTable");
+const gestoriaBudgetsInfo = document.getElementById("gestoriaBudgetsInfo");
 const gestoriaCrmSearch = document.getElementById("gestoriaCrmSearch");
 const gestoriaCrmClientes = document.getElementById("gestoriaCrmClientes");
 const gestoriaCrmTipo = document.getElementById("gestoriaCrmTipo");
@@ -14429,7 +14436,7 @@ const updateExplorerHeader = (empresaName) => {
     if (!canGestoria && currentTab === "gestoria-agenda") setTab("operativa");
   }
   if (gestoriaFactTab) {
-    const showFact = false;
+    const showFact = canGestoria;
     gestoriaFactTab.classList.toggle("hidden", !showFact);
     if (!showFact && currentTab === "gestoria-fact") {
       setTab("gestoria-conta");
@@ -37313,10 +37320,122 @@ const setupCatalogoInputs = () => {
   }
 };
 
+const ensureGestoriaBudgetsWorkspaceId = async () => {
+  if (state.currentWorkspaceId) return state.currentWorkspaceId;
+  if (state.gestoriaBudgetWorkspaceId) return state.gestoriaBudgetWorkspaceId;
+  try {
+    const cached = localStorage.getItem("crm.gestoriaBudgetWorkspaceId") || "";
+    if (cached) {
+      state.gestoriaBudgetWorkspaceId = cached;
+      return cached;
+    }
+  } catch {}
+  const data = await api("/api/workspaces");
+  const rows = Array.isArray(data?.rows) ? data.rows : [];
+  const picked = String(rows[0]?.id || "").trim();
+  if (!picked) {
+    throw new Error("No hay workspaces disponibles para crear presupuestos.");
+  }
+  state.gestoriaBudgetWorkspaceId = picked;
+  try {
+    localStorage.setItem("crm.gestoriaBudgetWorkspaceId", picked);
+  } catch {}
+  return picked;
+};
+
+const syncGestoriaBudgetQuickComputed = () => {
+  if (!gestoriaBudgetQuickForm) return;
+  const values = {
+    num_vecinos: gestoriaBudgetQuickForm.querySelector('[name="num_vecinos"]')?.value ?? 0,
+    num_locales: gestoriaBudgetQuickForm.querySelector('[name="num_locales"]')?.value ?? 0,
+    num_trasteros: gestoriaBudgetQuickForm.querySelector('[name="num_trasteros"]')?.value ?? 0,
+    num_aparcamientos: gestoriaBudgetQuickForm.querySelector('[name="num_aparcamientos"]')?.value ?? 0,
+  };
+  const cuota = computeFincasCuotaSuggestedClient(values);
+  const input = gestoriaBudgetQuickForm.querySelector('[name="cuota_sugerida"]');
+  if (input) input.value = Number(cuota || 0).toFixed(2);
+};
+
+const renderGestoriaBudgetsList = (rows = []) => {
+  if (!gestoriaBudgetsTable) return;
+  const items = Array.isArray(rows) ? rows : [];
+  if (!items.length) {
+    gestoriaBudgetsTable.innerHTML = "<p class='muted'>Sin presupuestos todavía.</p>";
+    return;
+  }
+  const table = document.createElement("table");
+  const thead = document.createElement("thead");
+  const trHead = document.createElement("tr");
+  ["fecha", "cliente", "titulo", "servicio", "estado", "total", "acciones"].forEach((col) => {
+    const th = document.createElement("th");
+    th.textContent = formatHeader(col);
+    trHead.appendChild(th);
+  });
+  thead.appendChild(trHead);
+  table.appendChild(thead);
+  const tbody = document.createElement("tbody");
+  items.forEach((row) => {
+    const tr = document.createElement("tr");
+    const estado = String(row.estado || "").trim();
+    const total = euroFormatter.format(Number(row.total || 0));
+    const servicio = String(row.servicio || "").trim() || "-";
+    const pdfHref = `/api/workspace_presupuesto_pdf?id=${encodeURIComponent(String(row.id || ""))}&workspace_id=${encodeURIComponent(String(row.workspace_id || ""))}`;
+    const encargoHref = `/api/workspace_presupuesto_encargo_pdf?id=${encodeURIComponent(String(row.id || ""))}&workspace_id=${encodeURIComponent(String(row.workspace_id || ""))}`;
+    const actions = `
+      <a class="secondary ghost button-inline" href="${pdfHref}" target="_blank" rel="noreferrer">PDF</a>
+      ${normalizeSimple(estado) === "aceptado" ? `<a class="secondary ghost button-inline" href="${encargoHref}" target="_blank" rel="noreferrer">Encargo</a>` : ""}
+    `;
+    const cells = [
+      formatCell("fecha", row.fecha) || row.fecha || "-",
+      escapeHtml(row.cliente_nombre || "-"),
+      escapeHtml(row.titulo || "Presupuesto"),
+      escapeHtml(SERVICE_LABELS[servicio] || servicio),
+      escapeHtml(estado || "-"),
+      escapeHtml(total),
+      actions,
+    ];
+    cells.forEach((value, index) => {
+      const td = document.createElement("td");
+      if (index === cells.length - 1) {
+        td.innerHTML = value;
+      } else {
+        td.innerHTML = value;
+      }
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  gestoriaBudgetsTable.innerHTML = "";
+  gestoriaBudgetsTable.appendChild(table);
+};
+
 const loadGestoriaFact = () => {
-  if (!gestoriaFacturasTable) return;
-  gestoriaFacturasTable.innerHTML =
-    "<p class='muted'>Sin facturas cargadas. Se integrará en fase 2.</p>";
+  const empresa = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
+  if (!empresa) return;
+  if (gestoriaBudgetsInfo) gestoriaBudgetsInfo.textContent = "Cargando presupuestos...";
+  const servicio = String(gestoriaBudgetsServicioFilter?.value || "fincas").trim().toLowerCase();
+  const estado = String(gestoriaBudgetsEstadoFilter?.value || "all").trim();
+  const params = new URLSearchParams({
+    empresa_id: empresa.id,
+    limit: "120",
+  });
+  if (servicio && servicio !== "all") params.set("servicio", servicio);
+  if (estado && estado !== "all") params.set("estado", estado);
+  api(`/api/empresa_presupuestos?${params.toString()}`)
+    .then((data) => {
+      const rows = Array.isArray(data?.rows) ? data.rows : [];
+      renderGestoriaBudgetsList(rows);
+      if (gestoriaBudgetsInfo) {
+        const labelServicio = servicio === "all" ? "Todos" : (SERVICE_LABELS[servicio] || servicio);
+        const labelEstado = estado === "all" ? "Todos" : estado;
+        gestoriaBudgetsInfo.textContent = `${rows.length} presupuestos · ${labelServicio} · ${labelEstado}`;
+      }
+    })
+    .catch((error) => {
+      if (gestoriaBudgetsTable) gestoriaBudgetsTable.innerHTML = `<p class='muted'>${escapeHtml(error?.message || "No se pudieron cargar los presupuestos.")}</p>`;
+      if (gestoriaBudgetsInfo) gestoriaBudgetsInfo.textContent = "";
+    });
 };
 
 const loadAgendaGeneral = () => {
@@ -43549,6 +43668,89 @@ if (workspaceFincasBudgetOpenEngine) {
       applyWorkspaceBudgetTemplate({ force: true });
       syncWorkspaceBudgetComputedFields({ forceSubtotal: true, forceTotal: true });
     } catch {}
+  });
+}
+
+if (gestoriaBudgetsRefreshBtn) {
+  gestoriaBudgetsRefreshBtn.addEventListener("click", () => {
+    if (currentTab === "gestoria-fact") loadGestoriaFact();
+  });
+}
+
+if (gestoriaBudgetsServicioFilter) {
+  gestoriaBudgetsServicioFilter.addEventListener("change", () => {
+    if (currentTab === "gestoria-fact") loadGestoriaFact();
+  });
+}
+
+if (gestoriaBudgetsEstadoFilter) {
+  gestoriaBudgetsEstadoFilter.addEventListener("change", () => {
+    if (currentTab === "gestoria-fact") loadGestoriaFact();
+  });
+}
+
+if (gestoriaBudgetQuickForm) {
+  ["num_vecinos", "num_locales", "num_trasteros", "num_aparcamientos"].forEach((name) => {
+    const input = gestoriaBudgetQuickForm.querySelector(`[name="${name}"]`);
+    input?.addEventListener("input", () => syncGestoriaBudgetQuickComputed());
+  });
+  syncGestoriaBudgetQuickComputed();
+  gestoriaBudgetQuickForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const empresa = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
+    if (!empresa) return;
+    if (gestoriaBudgetQuickStatus) gestoriaBudgetQuickStatus.textContent = "Creando presupuesto...";
+    try {
+      syncGestoriaBudgetQuickComputed();
+      const formData = new FormData(gestoriaBudgetQuickForm);
+      const values = Object.fromEntries(formData.entries());
+      const workspaceId = await ensureGestoriaBudgetsWorkspaceId();
+      const lookup = String(values.cliente_lookup || "").trim();
+      if (!lookup) throw new Error("Indica la comunidad / cliente.");
+      const titulo =
+        String(values.titulo || "").trim()
+          || `Administración de comunidad · ${lookup}`;
+      const payload = {
+        id: "",
+        workspace_id: workspaceId,
+        empresa_id: empresa.id,
+        servicio: "fincas",
+        titulo,
+        estado: values.estado || "Borrador",
+        fecha: new Date().toISOString().slice(0, 10),
+        cliente_lookup: lookup,
+        cliente_nif: values.cliente_nif || "",
+        cliente_telefono: "",
+        cliente_email: "",
+        num_vecinos: values.num_vecinos || 0,
+        num_locales: values.num_locales || 0,
+        num_trasteros: values.num_trasteros || 0,
+        num_aparcamientos: values.num_aparcamientos || 0,
+        impuestos: 0,
+        observaciones: "",
+        lineas: [],
+      };
+      const data = await fetch("/api/workspace_presupuestos", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }).then((res) => res.json());
+      if (data?.error) throw new Error(data.error);
+      const budgetId = String(data.id || "").trim();
+      if (!budgetId) throw new Error("No se pudo crear el presupuesto.");
+      if (gestoriaBudgetQuickStatus) gestoriaBudgetQuickStatus.textContent = "Presupuesto creado. Abriendo PDF...";
+      window.open(
+        `/api/workspace_presupuesto_pdf?id=${encodeURIComponent(budgetId)}&workspace_id=${encodeURIComponent(workspaceId)}`,
+        "_blank",
+        "noopener,noreferrer"
+      );
+      loadGestoriaFact();
+      window.setTimeout(() => {
+        if (gestoriaBudgetQuickStatus) gestoriaBudgetQuickStatus.textContent = "";
+      }, 1800);
+    } catch (error) {
+      if (gestoriaBudgetQuickStatus) gestoriaBudgetQuickStatus.textContent = error?.message || "No se pudo crear el presupuesto.";
+    }
   });
 }
 

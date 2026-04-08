@@ -1974,7 +1974,7 @@
           <button class="tab hidden" data-tab="gestoria-agenda" id="gestoriaAgendaTab">Campañas</button>
           <button class="tab hidden" data-tab="seguros-crm" id="segurosCrmTab">CRM Seguros</button>
           <button class="tab hidden" data-tab="fin-crm" id="finCrmTab">CRM Financiaciones</button>
-          <button class="tab hidden" data-tab="gestoria-fact" id="gestoriaFactTab">Facturación</button>
+          <button class="tab hidden" data-tab="gestoria-fact" id="gestoriaFactTab">Presupuestos</button>
           <button class="tab hidden" data-tab="gestoria-conta" id="gestoriaContaTab">Contabilidad</button>
 	          <button class="tab" data-tab="alta">Alta</button>
           <button class="tab hidden" data-tab="fin-sim" id="finSimTab">Simulador</button>
@@ -3835,14 +3835,89 @@
         <div id="gestoriaFactSection" class="hidden">
           <div class="crm-header">
             <div>
-              <h3>Gestoría · Facturas</h3>
-              <p class="muted">Facturación del servicio y preparación de salida al software externo.</p>
+              <h3>Gestoría · Presupuestos</h3>
+              <p class="muted">Presupuestos de administración de fincas y gestoría (con PDF y nota de encargo).</p>
             </div>
           </div>
           <div class="form-card">
-            <h3>Facturas del servicio</h3>
-            <p class="muted">En la fase 2 se conectará con el software de facturación.</p>
-            <div id="gestoriaFacturasTable"></div>
+            <div class="section-head">
+              <div>
+                <h3>Presupuesto rápido (Fincas)</h3>
+                <p class="muted">5 € por vivienda + 1 € por local, trastero o aparcamiento (mín. 60 €/mes).</p>
+              </div>
+            </div>
+            <form id="gestoriaBudgetQuickForm" class="form-grid">
+              <label class="span-2">
+                Comunidad / Cliente
+                <input name="cliente_lookup" required placeholder="Ej. C/ Ejemplo 12 · Comunidad" />
+              </label>
+              <label>
+                CIF (opcional)
+                <input name="cliente_nif" placeholder="Opcional" />
+              </label>
+              <label>
+                Estado
+                <select name="estado">
+                  <option>Borrador</option>
+                  <option>Estudio</option>
+                  <option>Aceptado</option>
+                  <option>Rechazado</option>
+                </select>
+              </label>
+              <label>
+                Viviendas
+                <input name="num_vecinos" type="number" min="0" step="1" value="0" />
+              </label>
+              <label>
+                Locales
+                <input name="num_locales" type="number" min="0" step="1" value="0" />
+              </label>
+              <label>
+                Trasteros
+                <input name="num_trasteros" type="number" min="0" step="1" value="0" />
+              </label>
+              <label>
+                Aparcamientos
+                <input name="num_aparcamientos" type="number" min="0" step="1" value="0" />
+              </label>
+              <label>
+                Base mensual sugerida
+                <input name="cuota_sugerida" type="number" step="0.01" readonly />
+              </label>
+              <label class="span-2">
+                Título (opcional)
+                <input name="titulo" placeholder="Se autogenera si lo dejas en blanco" />
+              </label>
+              <div class="form-actions span-2">
+                <button type="submit">Crear presupuesto + PDF</button>
+                <span id="gestoriaBudgetQuickStatus" class="muted"></span>
+              </div>
+            </form>
+          </div>
+          <div class="form-card">
+            <div class="section-head">
+              <div>
+                <h3>Listado de presupuestos</h3>
+                <p class="muted">Filtra por servicio y abre el PDF o la nota de encargo.</p>
+              </div>
+              <div class="toolbar">
+                <select id="gestoriaBudgetsServicioFilter">
+                  <option value="fincas" selected>Fincas</option>
+                  <option value="gestoria">Gestoría</option>
+                  <option value="all">Todos</option>
+                </select>
+                <select id="gestoriaBudgetsEstadoFilter">
+                  <option value="all" selected>Todos</option>
+                  <option value="Borrador">Borrador</option>
+                  <option value="Estudio">Estudio</option>
+                  <option value="Aceptado">Aceptado</option>
+                  <option value="Rechazado">Rechazado</option>
+                </select>
+                <button type="button" class="secondary ghost" id="gestoriaBudgetsRefreshBtn">Recargar</button>
+              </div>
+            </div>
+            <div id="gestoriaBudgetsTable"></div>
+            <div class="footer" id="gestoriaBudgetsInfo"></div>
           </div>
         </div>
         <div id="segurosCrmSection" class="hidden">

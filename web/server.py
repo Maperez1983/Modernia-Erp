@@ -24618,6 +24618,61 @@ def fetch_workspace_presupuestos(conn, workspace_id, limit=40):
     return {"rows": items}
 
 
+def fetch_empresa_presupuestos(conn, empresa_id, servicio=None, estado=None, limit=120):
+    empresa_id = str(empresa_id or "").strip()
+    if not empresa_id:
+        return {"rows": []}
+    servicio_key = normalize_service_key(servicio or "")
+    estado_key = normalize_lookup_text(estado or "").lower().strip()
+    where = ["p.empresa_id = ?"]
+    params = [empresa_id]
+    if servicio_key and servicio_key not in {"all", "*"}:
+        if servicio_key == "fincas":
+            where.append("LOWER(COALESCE(p.servicio, '')) IN ('fincas', 'administracion fincas', 'administracion de fincas')")
+        elif servicio_key == "gestoria":
+            where.append("LOWER(COALESCE(p.servicio, '')) IN ('gestoria', 'gestoría')")
+        else:
+            where.append("LOWER(COALESCE(p.servicio, '')) = ?")
+            params.append(servicio_key)
+    if estado_key and estado_key not in {"all", "*"}:
+        where.append("LOWER(COALESCE(p.estado, '')) = ?")
+        params.append(estado_key)
+    rows = conn.execute(
+        f"""
+        SELECT
+          p.id,
+          p.workspace_id,
+          p.empresa_id,
+          p.cliente_id,
+          COALESCE(e.nombre, '') AS empresa_nombre,
+          COALESCE(c.nombre, '') AS cliente_nombre,
+          p.servicio,
+          p.titulo,
+          p.estado,
+          p.fecha,
+          p.fecha_seguimiento,
+          p.encargo_estado,
+          p.fecha_encargo,
+          p.total,
+          p.created_at,
+          p.updated_at,
+          (
+            SELECT COUNT(*)
+            FROM workspace_presupuesto_lineas l
+            WHERE l.presupuesto_id = p.id
+          ) AS lineas_total
+        FROM workspace_presupuestos p
+        LEFT JOIN empresas e ON e.id = p.empresa_id
+        LEFT JOIN clientes c ON c.id = p.cliente_id
+        WHERE {" AND ".join(where)}
+        ORDER BY COALESCE(p.fecha, p.updated_at, p.created_at) DESC, p.updated_at DESC
+        LIMIT ?
+        """,
+        (*params, max(1, min(int(limit or 120), 300))),
+    ).fetchall()
+    return {"rows": [dict(row) for row in rows]}
+
+
 def fetch_workspace_contratos(conn, workspace_id, empresa_id=None, limit=50):
     empresa_id = str(empresa_id or "").strip()
     where = ["ct.workspace_id = ?"]
@@ -28645,6 +28700,9 @@ class Handler(BaseHTTPRequestHandler):
         if path in {"/api/acciones", "/api/acciones_update"}:
             raw = payload.get("servicio") or (params.get("servicio", [""])[0] if params else "")
             return normalize_service_key(raw)
+        if path == "/api/empresa_presupuestos":
+            # Endpoint compartido: Gestoría y Administración de Fincas consultan el mismo pool de presupuestos.
+            return "gestoria_fincas"
         if path == "/api/workspace_presupuestos":
             raw = normalize_service_key(payload.get("servicio") or (params.get("servicio", [""])[0] if params else "") or "")
             return raw if raw in {"gestoria", "fincas"} else ""
@@ -28681,6 +28739,9 @@ class Handler(BaseHTTPRequestHandler):
         if not required:
             return True
         required = normalize_service_key(required)
+        if required == "gestoria_fincas":
+            if "gestoria" in allowed or "fincas" in allowed:
+                return True
         if required in {"financiaciones", "hipotecas"}:
             if "financiaciones" in allowed or "hipotecas" in allowed:
                 return True
@@ -43377,6 +43438,17 @@ class Handler(BaseHTTPRequestHandler):
             if empresa_id:
                 payload["rows"] = [row for row in (payload.get("rows") or []) if str(row.get("empresa_id") or "") == empresa_id]
             json_response(self, payload)
+            return
+
+        if path == "/api/empresa_presupuestos":
+            empresa_id = (params.get("empresa_id", [""])[0] or "").strip()
+            servicio = (params.get("servicio", [""])[0] or "").strip()
+            estado = (params.get("estado", [""])[0] or "").strip()
+            limit = params.get("limit", ["120"])[0]
+            if not empresa_id:
+                json_response(self, {"error": "empresa_id requerido"}, status=400)
+                return
+            json_response(self, fetch_empresa_presupuestos(conn, empresa_id, servicio=servicio, estado=estado, limit=limit))
             return
 
         if path == "/api/workspace_contrato_catalog":
