@@ -43893,6 +43893,7 @@ const uploadWorkspaceCompanyLogo = async () => {
     if (workspaceCompanyLogoStatus) workspaceCompanyLogoStatus.textContent = "Empresa no seleccionada.";
     return;
   }
+  const empresaNombre = String(workspaceCompanyForm.querySelector('[name="nombre"]')?.value || "").trim();
   const file = workspaceCompanyLogoFile?.files && workspaceCompanyLogoFile.files[0];
   if (!file) {
     if (workspaceCompanyLogoStatus) workspaceCompanyLogoStatus.textContent = "Selecciona un archivo.";
@@ -43914,6 +43915,7 @@ const uploadWorkspaceCompanyLogo = async () => {
       filename,
       content_type: String(file.type || "application/octet-stream"),
       prefix: "company_logos",
+      empresa_nombre: empresaNombre,
     });
     if (presign?.error) throw new Error(presign.error);
     if (!presign?.url || !presign?.public_url) throw new Error("No se pudo firmar la subida.");
@@ -43929,6 +43931,7 @@ const uploadWorkspaceCompanyLogo = async () => {
       workspace_id: state.currentWorkspaceId,
       id: empresaId,
       logo_url: presign.public_url,
+      empresa_nombre: empresaNombre,
     });
     if (update?.error) throw new Error(update.error);
     const logoInput = workspaceCompanyForm.querySelector('[name="logo_url"]');

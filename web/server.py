@@ -29824,13 +29824,13 @@ class Handler(BaseHTTPRequestHandler):
 <body>
   <h2>Kiosko de fichaje</h2>
   <div class="card">
-	    <p class="muted">Fichaje rápido por QR. Escanea tu QR (o pega el token). Si tu empresa ha configurado PIN de kiosko, introdúcelo.</p>
+    <p class="muted">Fichaje rápido por QR. Escanea tu QR (o pega el token). Si tu empresa ha configurado PIN de kiosko, introdúcelo.</p>
     <label class="muted">Token (QR)
       <input id="tokenInput" autocomplete="off" placeholder="Pega token o abre /kiosk?token=..." value="{html.escape(token) if token else ""}" />
     </label>
-	    <label class="muted">PIN kiosko (si aplica)
-	      <input id="pinInput" type="password" inputmode="numeric" autocomplete="off" placeholder="PIN (opcional)" />
-	    </label>
+    <label class="muted">PIN kiosko (si aplica)
+      <input id="pinInput" type="password" inputmode="numeric" autocomplete="off" placeholder="PIN (opcional)" />
+    </label>
     <div class="row">
       <button id="punchBtn">Fichar ahora</button>
       <button id="refreshBtn" class="secondary">Actualizar estado</button>
@@ -29889,7 +29889,7 @@ class Handler(BaseHTTPRequestHandler):
       const token = readToken();
       const pin = readPin();
       if (!token) {{ statusEl.textContent = "Token vacío."; return; }}
-	      // PIN: si no está configurado, el backend lo ignorará; si está configurado, devolverá 403.
+      // PIN: si no está configurado, el backend lo ignorará; si está configurado, devolverá 403.
       punchBtn.disabled = true;
       statusEl.textContent = "Enviando…";
       const geo = await getGeo(3500);
@@ -30042,8 +30042,8 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path not in (
             "/api/movimientos",
             "/api/hipotecas",
-	            "/api/hipotecas/firmar",
-	            "/api/hipotecas_update",
+            "/api/hipotecas/firmar",
+            "/api/hipotecas_update",
             "/api/hipotecas_delete",
             "/api/gestoria",
             "/api/gestoria_trabajos",
@@ -30067,20 +30067,20 @@ class Handler(BaseHTTPRequestHandler):
             "/api/fin_asesoramiento_ocr_guided",
             "/api/fin_asesoramiento_ocr_auto",
             "/api/seguros",
-	            "/api/seguros_update",
-	            "/api/seguros_cambio_compania",
-	            "/api/seguros_delete",
-	            "/api/seguros_poliza_accion",
-	            "/api/seguros_enrich",
-	            "/api/seguros_backfill_s3",
-	            "/api/seguros_reclamacion",
-	            "/api/seguros_reclamacion_update",
-	            "/api/seguros_reclamacion_delete",
-	            "/api/seguros_ipid_register",
-	            "/api/fin_asesoramientos",
-	            "/api/fin_asesoramientos_update",
-	            "/api/fin_asesoramientos_convert",
-	            "/api/seguros_ofertas",
+            "/api/seguros_update",
+            "/api/seguros_cambio_compania",
+            "/api/seguros_delete",
+            "/api/seguros_poliza_accion",
+            "/api/seguros_enrich",
+            "/api/seguros_backfill_s3",
+            "/api/seguros_reclamacion",
+            "/api/seguros_reclamacion_update",
+            "/api/seguros_reclamacion_delete",
+            "/api/seguros_ipid_register",
+            "/api/fin_asesoramientos",
+            "/api/fin_asesoramientos_update",
+            "/api/fin_asesoramientos_convert",
+            "/api/seguros_ofertas",
             "/api/seguros_ofertas_update",
             "/api/seguros_ofertas_delete",
             "/api/seguros_preferencias",
@@ -30706,13 +30706,17 @@ class Handler(BaseHTTPRequestHandler):
             "/api/empresa_create",
             "/api/empresa_delete",
         ):
-            empresa = conn.execute(
-                "SELECT id FROM empresas WHERE nombre = ?",
-                (empresa_nombre,),
-            ).fetchone()
-            if not empresa:
-                json_response(self, {"error": "Empresa no encontrada"}, status=400)
-                return
+            # `empresa_nombre` puede venir vacío en endpoints no-CRM (p.ej. S3 presign)
+            # o en operaciones de master-data (empresas del workspace). En esos casos no
+            # hacemos lookup y auditamos sin empresa_id.
+            if empresa_nombre:
+                empresa = conn.execute(
+                    "SELECT id FROM empresas WHERE nombre = ?",
+                    (empresa_nombre,),
+                ).fetchone()
+                if not empresa:
+                    json_response(self, {"error": "Empresa no encontrada"}, status=400)
+                    return
 
         now = "now"
         def audit(entidad, entidad_id, accion, detalles=None, usuario=None):
