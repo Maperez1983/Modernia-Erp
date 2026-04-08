@@ -43831,6 +43831,14 @@ if (workspaceCompanyForm) {
     const payload = Object.fromEntries(new FormData(workspaceCompanyForm).entries());
     payload.workspace_id = state.currentWorkspaceId;
     payload.id = payload.id || payload.empresa_id || "";
+    if (!payload.id) {
+      // Fallback: si el editor se abrió sin id por algún motivo, usa la empresa activa del workspace.
+      payload.id = String(state.currentWorkspaceCompanyId || "").trim();
+    }
+    if (!payload.id) {
+      if (workspaceCompanyFormStatus) workspaceCompanyFormStatus.textContent = "Empresa no seleccionada.";
+      return;
+    }
     // El campo `nombre` está deshabilitado en el formulario (no entra en FormData).
     // Backend no lo necesita para actualizar, pero lo añadimos por compatibilidad/claridad.
     if (!payload.nombre) {
