@@ -15038,6 +15038,16 @@ const openGestoriaServiceTab = (targetTab = "gestoria-dash") => {
   state.crmGestoriaEmpresaId = empresa.id;
   setStoredServiceCompanyId("gestoria", empresa.id);
   setTab(targetTab);
+  try {
+    const currentParams = new URLSearchParams(window.location.search);
+    currentParams.delete("empresa");
+    currentParams.delete("clientes");
+    currentParams.delete("cliente");
+    // Mantener deep-links de póliza si se usan (Seguros); en Gestoría no aplica.
+    currentParams.set("crm", "gestoria");
+    currentParams.set("tab", targetTab);
+    setUrlParams(currentParams);
+  } catch {}
   updateTableVisibility();
   if (targetTab === "gestoria-crm") {
     loadGestoriaCrm();
@@ -15090,6 +15100,15 @@ const openSegurosCrm = () => {
   state.crmSegurosEmpresaId = empresa.id;
   setStoredServiceCompanyId("seguros", empresa.id);
   setTab("seguros-crm");
+  try {
+    const currentParams = new URLSearchParams(window.location.search);
+    currentParams.delete("empresa");
+    currentParams.delete("clientes");
+    currentParams.delete("cliente");
+    currentParams.set("crm", "seguros");
+    currentParams.delete("tab");
+    setUrlParams(currentParams);
+  } catch {}
   updateTableVisibility();
   if (segurosCrmSearch) segurosCrmSearch.value = "";
   if (segurosCrmClienteInput) segurosCrmClienteInput.value = "";
@@ -15137,6 +15156,15 @@ const openFinCrm = () => {
   state.crmFinEmpresaId = empresa.id;
   setStoredServiceCompanyId("financiaciones", empresa.id);
   setTab("fin-crm");
+  try {
+    const currentParams = new URLSearchParams(window.location.search);
+    currentParams.delete("empresa");
+    currentParams.delete("clientes");
+    currentParams.delete("cliente");
+    currentParams.set("crm", "fin");
+    currentParams.set("tab", "fin-crm");
+    setUrlParams(currentParams);
+  } catch {}
   updateTableVisibility();
   setCrmMode("fin");
   if (viewTabs) viewTabs.classList.add("hidden");
@@ -15162,6 +15190,15 @@ const openFinServiceTab = (targetTab = "fin-crm") => {
   state.crmFinEmpresaId = empresa.id;
   setStoredServiceCompanyId("financiaciones", empresa.id);
   setTab(targetTab);
+  try {
+    const currentParams = new URLSearchParams(window.location.search);
+    currentParams.delete("empresa");
+    currentParams.delete("clientes");
+    currentParams.delete("cliente");
+    currentParams.set("crm", "fin");
+    currentParams.set("tab", targetTab);
+    setUrlParams(currentParams);
+  } catch {}
   updateTableVisibility();
   setCrmMode("fin");
   if (targetTab === "fin-sim") {
@@ -15868,8 +15905,10 @@ const handleRoute = () => {
     openInmuebleDetail,
     openInmuebleFromCaptacion,
     openGestoriaCrm,
+    openGestoriaServiceTab,
     openSegurosCrm,
     openFinCrm,
+    openFinServiceTab,
     openWorkspacePortalPublic,
     openClienteDetail,
     openSeguroById,

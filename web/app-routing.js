@@ -63,7 +63,12 @@
         return;
       }
       if (crm === "gestoria") {
-        deps.openGestoriaCrm();
+        const tab = (params.get("tab") || "").trim();
+        if (tab && typeof deps.openGestoriaServiceTab === "function") {
+          deps.openGestoriaServiceTab(tab);
+        } else {
+          deps.openGestoriaCrm();
+        }
         deps.ui?.refreshContext(deps.state);
         return;
       }
@@ -73,7 +78,12 @@
         return;
       }
       if (crm === "fin") {
-        deps.openFinCrm();
+        const tab = (params.get("tab") || "").trim();
+        if (tab && typeof deps.openFinServiceTab === "function") {
+          deps.openFinServiceTab(tab);
+        } else {
+          deps.openFinCrm();
+        }
         deps.ui?.refreshContext(deps.state);
         return;
       }
