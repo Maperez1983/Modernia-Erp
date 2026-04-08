@@ -14379,6 +14379,10 @@ const updateExplorerHeader = (empresaName) => {
     explorerTitle.textContent = "Explorador de datos";
     explorerSubtitle.textContent = "Filtra por empresa, módulo y texto.";
   }
+  const canInmo = userCanAccessService("inmobiliaria");
+  const canGestoria = userCanAccessService("gestoria");
+  const canSeguros = userCanAccessService("seguros");
+  const canFin = userCanAccessService("financiaciones");
   updateCompanySummary(empresaName);
   if (aieTab) {
     aieTab.classList.toggle("hidden", empresaName !== AIE_COMPANY);
@@ -14401,51 +14405,28 @@ const updateExplorerHeader = (empresaName) => {
     setTab("gestoria-crm");
   }
   if (crmTab) {
-    // El CRM (tab "crm") es el CRM inmobiliario. Para la empresa de Financiaciones
-    // mostramos un tab específico (fin-crm) para evitar confusión. En Fincas
-    // escondemos el acceso para no mezclar el CRM inmobiliario con el CRM del servicio.
-    const showCrm =
-      userCanAccessService("inmobiliaria") &&
-      empresaName !== FIN_COMPANY &&
-      empresaName !== FINCAS_COMPANY;
-    crmTab.classList.toggle("hidden", !showCrm);
-    if (!showCrm && currentTab === "crm") {
-      if (empresaName === FIN_COMPANY) {
-        setTab("fin-crm");
-      } else if (empresaName === FINCAS_COMPANY) {
-        setTab("gestoria-dash");
-      } else {
-        setTab("operativa");
-      }
+    // Fase 1: el servicio manda (no la empresa actualmente abierta).
+    // La empresa "interna" del servicio se resuelve al abrir el CRM (openCrmInmobiliario).
+    crmTab.classList.toggle("hidden", !canInmo);
+    if (!canInmo && currentTab === "crm") {
+      setTab("operativa");
     }
   }
   if (fincasCrmTab) {
-    const showGestoria = empresaName === FINCAS_COMPANY;
-    fincasCrmTab.classList.toggle("hidden", !showGestoria);
-    if (!showGestoria && currentTab === "gestoria-crm") {
-      setTab("operativa");
-    }
+    fincasCrmTab.classList.toggle("hidden", !canGestoria);
+    if (!canGestoria && currentTab === "gestoria-crm") setTab("operativa");
   }
   if (gestoriaDashTab) {
-    const showDash = empresaName === FINCAS_COMPANY;
-    gestoriaDashTab.classList.toggle("hidden", !showDash);
-    if (!showDash && currentTab === "gestoria-dash") {
-      setTab("operativa");
-    }
+    gestoriaDashTab.classList.toggle("hidden", !canGestoria);
+    if (!canGestoria && currentTab === "gestoria-dash") setTab("operativa");
   }
   if (gestoriaDocsTab) {
-    const showDocs = empresaName === FINCAS_COMPANY;
-    gestoriaDocsTab.classList.toggle("hidden", !showDocs);
-    if (!showDocs && currentTab === "gestoria-docs") {
-      setTab("operativa");
-    }
+    gestoriaDocsTab.classList.toggle("hidden", !canGestoria);
+    if (!canGestoria && currentTab === "gestoria-docs") setTab("operativa");
   }
   if (gestoriaAgendaTab) {
-    const showAgenda = empresaName === FINCAS_COMPANY;
-    gestoriaAgendaTab.classList.toggle("hidden", !showAgenda);
-    if (!showAgenda && currentTab === "gestoria-agenda") {
-      setTab("operativa");
-    }
+    gestoriaAgendaTab.classList.toggle("hidden", !canGestoria);
+    if (!canGestoria && currentTab === "gestoria-agenda") setTab("operativa");
   }
   if (gestoriaFactTab) {
     const showFact = false;
@@ -14455,51 +14436,20 @@ const updateExplorerHeader = (empresaName) => {
     }
   }
   if (gestoriaContaTab) {
-    const showConta = empresaName === FINCAS_COMPANY;
-    gestoriaContaTab.classList.toggle("hidden", !showConta);
-    if (!showConta && currentTab === "gestoria-conta") {
-      setTab("operativa");
-    }
-  }
-  if (gestoriaDashTab) {
-    const showDash = empresaName === FINCAS_COMPANY;
-    gestoriaDashTab.classList.toggle("hidden", !showDash);
-    if (!showDash && currentTab === "gestoria-dash") {
-      setTab("operativa");
-    }
-  }
-  if (gestoriaDocsTab) {
-    const showDocs = empresaName === FINCAS_COMPANY;
-    gestoriaDocsTab.classList.toggle("hidden", !showDocs);
-    if (!showDocs && currentTab === "gestoria-docs") {
-      setTab("operativa");
-    }
-  }
-  if (gestoriaAgendaTab) {
-    const showAgenda = empresaName === FINCAS_COMPANY;
-    gestoriaAgendaTab.classList.toggle("hidden", !showAgenda);
-    if (!showAgenda && currentTab === "gestoria-agenda") {
-      setTab("operativa");
-    }
+    gestoriaContaTab.classList.toggle("hidden", !canGestoria);
+    if (!canGestoria && currentTab === "gestoria-conta") setTab("operativa");
   }
   if (segurosCrmTab) {
-    // CRM Seguros se accede desde la home, no como pestaña interna
-    segurosCrmTab.classList.add("hidden");
+    segurosCrmTab.classList.toggle("hidden", !canSeguros);
+    if (!canSeguros && currentTab === "seguros-crm") setTab("operativa");
   }
   if (finCrmTab) {
-    // CRM Financiaciones: visible al abrir la empresa de Financiaciones.
-    const showFinCrm = empresaName === FIN_COMPANY && userCanAccessService("financiaciones");
-    finCrmTab.classList.toggle("hidden", !showFinCrm);
-    if (!showFinCrm && currentTab === "fin-crm") {
-      setTab("operativa");
-    }
+    finCrmTab.classList.toggle("hidden", !canFin);
+    if (!canFin && currentTab === "fin-crm") setTab("operativa");
   }
   if (finSimTab) {
-    const showSim = empresaName === FIN_COMPANY;
-    finSimTab.classList.toggle("hidden", !showSim);
-    if (!showSim && currentTab === "fin-sim") {
-      setTab("operativa");
-    }
+    finSimTab.classList.toggle("hidden", !canFin);
+    if (!canFin && currentTab === "fin-sim") setTab("operativa");
   }
 };
 
@@ -14854,20 +14804,46 @@ const openGestoriaCrm = () => {
     }
   })();
   if (!userCanAccessService("gestoria")) return;
-  const empresa = resolveCrmGestoriaEmpresa();
-  if (!empresa) return;
-  openCompany(empresa.nombre, { allowRestricted: true });
-  state.crmGestoriaEmpresaId = empresa.id;
-  setStoredServiceCompanyId("gestoria", empresa.id);
-  setTab("gestoria-dash");
-  updateTableVisibility();
-  loadGestoriaDashboard();
+  openGestoriaServiceTab("gestoria-dash");
   try {
     const user = getAuthScopeUser();
     if (fromHome && !hadRouteParams && user && isPrivilegedUser(user)) {
       setUrlParams(new URLSearchParams(), { replace: true });
     }
   } catch {}
+};
+
+const openGestoriaServiceTab = (targetTab = "gestoria-dash") => {
+  if (!userCanAccessService("gestoria")) return;
+  const empresa = resolveCrmGestoriaEmpresa();
+  if (!empresa) return;
+  openCompany(empresa.nombre, { allowRestricted: true });
+  state.crmGestoriaEmpresaId = empresa.id;
+  setStoredServiceCompanyId("gestoria", empresa.id);
+  setTab(targetTab);
+  updateTableVisibility();
+  if (targetTab === "gestoria-crm") {
+    loadGestoriaCrm();
+    return;
+  }
+  if (targetTab === "gestoria-docs") {
+    loadGestoriaDocsWorkspace();
+    return;
+  }
+  if (targetTab === "gestoria-conta") {
+    loadGestoriaContabilidad();
+    loadGestoriaContaQueue();
+    return;
+  }
+  if (targetTab === "gestoria-agenda") {
+    loadAcciones("gestoria", empresa.id, gestoriaAgendaTable, gestoriaAgendaInfo);
+    return;
+  }
+  if (targetTab === "gestoria-fact") {
+    loadGestoriaFact();
+    return;
+  }
+  loadGestoriaDashboard();
 };
 
 const openSegurosCrm = () => {
@@ -14962,6 +14938,22 @@ const openFinCrm = () => {
       setUrlParams(new URLSearchParams(), { replace: true });
     }
   } catch {}
+};
+
+const openFinServiceTab = (targetTab = "fin-crm") => {
+  if (!userCanAccessService("financiaciones")) return;
+  const empresa = resolveCrmFinEmpresa();
+  if (!empresa) return;
+  openCompany(empresa.nombre, { allowRestricted: true });
+  state.crmFinEmpresaId = empresa.id;
+  setStoredServiceCompanyId("financiaciones", empresa.id);
+  setTab(targetTab);
+  updateTableVisibility();
+  setCrmMode("fin");
+  if (targetTab === "fin-sim") {
+    initFinSimulator();
+  }
+  loadFinCrm();
 };
 
 const openServiceCrm = (service) => {
@@ -31272,7 +31264,11 @@ const openGestoriaCrmWithFilters = ({
   search = "",
 } = {}) => {
   if (!userCanAccessService("gestoria")) return;
-  openCompany(FINCAS_COMPANY, { allowRestricted: true });
+  const empresa = resolveCrmGestoriaEmpresa();
+  if (!empresa) return;
+  openCompany(empresa.nombre, { allowRestricted: true });
+  state.crmGestoriaEmpresaId = empresa.id;
+  setStoredServiceCompanyId("gestoria", empresa.id);
   setTab("gestoria-crm");
   updateTableVisibility();
   setGestoriaCrmView("crm");
@@ -31318,7 +31314,11 @@ const openGestoriaCrmWithFilters = ({
 
 const openGestoriaTrabajosWithFilters = ({ tipo = "", estado = "", target = gestoriaCrmSection } = {}) => {
   if (!userCanAccessService("gestoria")) return;
-  openCompany(FINCAS_COMPANY, { allowRestricted: true });
+  const empresa = resolveCrmGestoriaEmpresa();
+  if (!empresa) return;
+  openCompany(empresa.nombre, { allowRestricted: true });
+  state.crmGestoriaEmpresaId = empresa.id;
+  setStoredServiceCompanyId("gestoria", empresa.id);
   setTab("gestoria-crm");
   updateTableVisibility();
   setGestoriaCrmView("crm");
@@ -31335,7 +31335,11 @@ const openGestoriaTrabajosWithFilters = ({ tipo = "", estado = "", target = gest
 
 const openGestoriaRentaCampaign = () => {
   if (!userCanAccessService("gestoria")) return;
-  openCompany(FINCAS_COMPANY, { allowRestricted: true });
+  const empresa = resolveCrmGestoriaEmpresa();
+  if (!empresa) return;
+  openCompany(empresa.nombre, { allowRestricted: true });
+  state.crmGestoriaEmpresaId = empresa.id;
+  setStoredServiceCompanyId("gestoria", empresa.id);
   setTab("gestoria-crm");
   updateTableVisibility();
   setGestoriaCrmView("crm");
@@ -40266,7 +40270,26 @@ if (coreCards) {
 viewTabs.addEventListener("click", (event) => {
   const btn = closestFromEvent(event, ".tab");
   if (!btn) return;
-  setTab(btn.dataset.tab);
+  const requestedTab = String(btn.dataset.tab || "").trim();
+  // Fase 1 (guardarraíl): los CRMs de servicio no dependen de la empresa "actual".
+  // Si el usuario navega por pestañas, garantizamos que el contexto (empresa interna) sea el correcto.
+  if (requestedTab === "crm") {
+    openCrmInmobiliario();
+    return;
+  }
+  if (requestedTab === "seguros-crm") {
+    openSegurosCrm();
+    return;
+  }
+  if (requestedTab === "fin-crm" || requestedTab === "fin-sim") {
+    openFinServiceTab(requestedTab);
+    return;
+  }
+  if (requestedTab.startsWith("gestoria-")) {
+    openGestoriaServiceTab(requestedTab);
+    return;
+  }
+  setTab(requestedTab);
   if (state.currentModule === "clientes") {
     loadClientesTable();
     updateTableVisibility();
@@ -46221,6 +46244,27 @@ if (empresaSelect) {
     const empresaName = state.empresas.find((e) => e.id === empresaSelect.value)?.nombre || "";
     state.currentEmpresaId = empresaSelect.value;
     state.currentEmpresaName = empresaName;
+    // Fase 1 (guardarraíl): si el usuario cambia la empresa mientras está en un CRM de servicio,
+    // tratamos el cambio como un cambio de "empresa interna" para ese servicio y recargamos el CRM,
+    // evitando que se mezcle con el explorador/operativa y parezca que "desaparecen datos".
+    if (currentTab === "seguros-crm") {
+      state.crmSegurosEmpresaId = empresaSelect.value;
+      setStoredServiceCompanyId("seguros", empresaSelect.value);
+      openSegurosCrm();
+      return;
+    }
+    if (currentTab === "fin-crm" || currentTab === "fin-sim") {
+      state.crmFinEmpresaId = empresaSelect.value;
+      setStoredServiceCompanyId("financiaciones", empresaSelect.value);
+      openFinServiceTab(currentTab);
+      return;
+    }
+    if (String(currentTab || "").startsWith("gestoria-")) {
+      state.crmGestoriaEmpresaId = empresaSelect.value;
+      setStoredServiceCompanyId("gestoria", empresaSelect.value);
+      openGestoriaServiceTab(currentTab);
+      return;
+    }
     if (currentTab === "crm") {
       // El CRM inmobiliario usa la empresa seleccionada como contexto.
       state.crmInmoEmpresaId = empresaSelect.value;
