@@ -14370,11 +14370,21 @@ const updateExplorerHeader = (empresaName) => {
   }
   if (crmTab) {
     // El CRM (tab "crm") es el CRM inmobiliario. Para la empresa de Financiaciones
-    // mostramos un tab específico (fin-crm) para evitar confusión.
-    const showCrm = userCanAccessService("inmobiliaria") && empresaName !== FIN_COMPANY;
+    // mostramos un tab específico (fin-crm) para evitar confusión. En Fincas
+    // escondemos el acceso para no mezclar el CRM inmobiliario con el CRM del servicio.
+    const showCrm =
+      userCanAccessService("inmobiliaria") &&
+      empresaName !== FIN_COMPANY &&
+      empresaName !== FINCAS_COMPANY;
     crmTab.classList.toggle("hidden", !showCrm);
     if (!showCrm && currentTab === "crm") {
-      setTab("operativa");
+      if (empresaName === FIN_COMPANY) {
+        setTab("fin-crm");
+      } else if (empresaName === FINCAS_COMPANY) {
+        setTab("gestoria-dash");
+      } else {
+        setTab("operativa");
+      }
     }
   }
   if (fincasCrmTab) {
