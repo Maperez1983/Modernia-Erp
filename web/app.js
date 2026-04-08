@@ -43831,12 +43831,29 @@ if (workspaceCompanyForm) {
     const payload = Object.fromEntries(new FormData(workspaceCompanyForm).entries());
     payload.workspace_id = state.currentWorkspaceId;
     payload.id = payload.id || payload.empresa_id || "";
+    // El campo `nombre` está deshabilitado en el formulario (no entra en FormData).
+    // Backend no lo necesita para actualizar, pero lo añadimos por compatibilidad/claridad.
+    if (!payload.nombre) {
+      const nombreEl = workspaceCompanyForm.querySelector('[name="nombre"]');
+      if (nombreEl) payload.nombre = String(nombreEl.value || "").trim();
+    }
     payload.cnaes = parseCnaesInput(workspaceCompanyCnaes?.value || "").join(", ");
     try {
       const data = await postJsonWithDbRetry("/api/empresa_update", payload);
       if (data?.error) throw new Error(data.error);
       if (workspaceCompanyFormStatus) workspaceCompanyFormStatus.textContent = "Empresa guardada.";
-      await loadWorkspaceDetail(state.currentWorkspaceId);
+      // Recarga best-effort: si falla, no anula el guardado.
+      try {
+        await loadWorkspaceDetail(state.currentWorkspaceId);
+      } catch (reloadError) {
+        console.error("Reload workspace after empresa_update failed:", reloadError);
+        if (workspaceCompanyFormStatus) {
+          const msg = String(reloadError?.message || reloadError || "").trim();
+          workspaceCompanyFormStatus.textContent = msg
+            ? `Empresa guardada, pero no se pudo recargar: ${msg}`
+            : "Empresa guardada, pero no se pudo recargar el workspace.";
+        }
+      }
       if (workspaceCompanyEditor) workspaceCompanyEditor.classList.add("hidden");
     } catch (error) {
       if (workspaceCompanyFormStatus) workspaceCompanyFormStatus.textContent = error?.message || "No se pudo guardar la empresa.";
