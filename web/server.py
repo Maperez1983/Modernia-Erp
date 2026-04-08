@@ -1279,6 +1279,63 @@ def seguro_estado_bucket_expr(alias=""):
 def in_vigor_policy_filter(alias=""):
     return f"({seguro_estado_bucket_expr(alias)} = 'en_vigor')"
 
+def seguro_estado_bucket_value(seguro_row, *, today=None):
+    """
+    Python equivalent (best-effort) of `seguro_estado_bucket_expr` for row-based decisions.
+
+    Used for side effects like accounting upserts where we don't want to depend on the
+    stored `estado` string being updated when the dates already imply "en vigor".
+    """
+    if not seguro_row:
+        return "presupuesto"
+    row = seguro_row if isinstance(seguro_row, dict) else dict(seguro_row)
+    estado_key = normalize_lookup_text(row.get("estado"))
+    estado_poliza_key = normalize_lookup_text(row.get("estado_poliza"))
+    if today is None:
+        today = datetime.now().date()
+
+    if estado_key in ("PRESUPUESTO", "PRESUPUESTOS", "PROYECTO", "PENDIENTE"):
+        return "presupuesto"
+    if estado_key in ("RECHAZADA", "RECHAZADO", "NO ACEPTADA", "NO ACEPTADO", "DENEGADA", "DENEGADO"):
+        return "rechazada"
+    if estado_key.startswith("RECHAZADA ") or estado_key.startswith("RECHAZADO "):
+        return "rechazada"
+    if estado_key in ("ANULADA", "ANULADO", "CANCELADA", "CANCELADO", "BAJA"):
+        return "anulada"
+    if estado_poliza_key in ("ANULADA", "CANCELADA", "BAJA", "SUSTITUIDA"):
+        return "anulada"
+
+    fecha_efecto = parse_iso_date(row.get("fecha_efecto"))
+    fecha_venc = parse_iso_date(row.get("fecha_vencimiento"))
+    if fecha_efecto and fecha_efecto > today:
+        return "contratada"
+
+    if fecha_efecto and fecha_efecto <= today:
+        # +1 year approximation (close to SQLite DATE('+1 year') for our use)
+        eff_venc = fecha_venc or (fecha_efecto + timedelta(days=365))
+        if (fecha_venc is None) or (eff_venc >= today):
+            return "en_vigor"
+
+    if estado_key in ("CONTRATADA", "CONTRATADO", "CONTRATO"):
+        return "contratada"
+    if estado_key in (
+        "EN VIGOR",
+        "ENVIGOR",
+        "VIGENTE",
+        "POLIZA",
+        "PÓLIZA",
+        "POLIZA EN VIGOR",
+        "ACTIVO",
+        "ACTIVA",
+        "ALTA",
+        "EMITIDA",
+        "RECIBIDO",
+    ):
+        return "en_vigor"
+    if (not estado_key) and estado_poliza_key in ("ACTIVA", "ACTIVO", "EN VIGOR", "VIGENTE"):
+        return "en_vigor"
+    return "presupuesto"
+
 def normalize_poliza_key(value):
     if not value:
         return ""
@@ -1554,10 +1611,8 @@ def upsert_seguro_comision_contabilidad(conn, seguro_row, now, movimiento="emisi
         return None
     is_renovacion = normalize_lookup_text(movimiento) in ("RENOVACION", "RENOVAR", "RENEW")
     if not is_renovacion:
-        estado = normalize_seguro_estado_value(
-            seguro_row.get("estado") if isinstance(seguro_row, dict) else seguro_row["estado"]
-        )
-        if estado != "En vigor":
+        bucket = seguro_estado_bucket_value(seguro_row)
+        if bucket != "en_vigor":
             return None
     gestion = "Comisión renovación" if is_renovacion else "Comisión emisión"
     concepto = "Comisión renovación póliza" if is_renovacion else "Comisión emisión póliza"
@@ -24545,6 +24600,118 @@ def fetch_workspace_presupuestos(conn, workspace_id, limit=40):
     return {"rows": items}
 
 
+def fetch_workspace_contratos(conn, workspace_id, empresa_id=None, limit=50):
+    empresa_id = str(empresa_id or "").strip()
+    where = ["ct.workspace_id = ?"]
+    params = [workspace_id]
+    if empresa_id:
+        where.append("ct.empresa_id = ?")
+        params.append(empresa_id)
+    rows = conn.execute(
+        f"""
+        SELECT
+          ct.id,
+          ct.workspace_id,
+          ct.empresa_id,
+          ct.cliente_id,
+          COALESCE(e.nombre, '') AS empresa_nombre,
+          COALESCE(c.nombre, '') AS cliente_nombre,
+          COALESCE(c.nif, '') AS cliente_nif,
+          COALESCE(c.telefono, '') AS cliente_telefono,
+          COALESCE(c.email, '') AS cliente_email,
+          ct.servicio,
+          ct.template_key,
+          ct.titulo,
+          ct.estado,
+          ct.fecha,
+          COALESCE(ct.doc_url, '') AS doc_url,
+          COALESCE(ct.doc_key, '') AS doc_key,
+          COALESCE(ct.notas, '') AS notas,
+          ct.created_at,
+          ct.updated_at
+        FROM workspace_contratos ct
+        LEFT JOIN empresas e ON e.id = ct.empresa_id
+        LEFT JOIN clientes c ON c.id = ct.cliente_id
+        WHERE {" AND ".join(where)}
+        ORDER BY COALESCE(ct.fecha, ct.updated_at, ct.created_at) DESC, ct.updated_at DESC
+        LIMIT ?
+        """,
+        (*params, max(1, min(int(limit or 50), 200))),
+    ).fetchall()
+    return {"rows": [dict(row) for row in rows]}
+
+
+def fetch_workspace_contract_pdf_payload(conn, contract_id, workspace_id=None):
+    if not contract_id or not workspace_id:
+        return None
+    row = conn.execute(
+        """
+        SELECT
+          ct.*,
+          COALESCE(w.nombre, '') AS workspace_nombre,
+          COALESCE(e.nombre, '') AS empresa_nombre,
+          COALESCE(e.logo_url, '') AS empresa_logo_url,
+          COALESCE(e.razon_social, '') AS empresa_razon_social,
+          COALESCE(e.nif, '') AS empresa_nif,
+          COALESCE(e.direccion, '') AS empresa_direccion,
+          COALESCE(e.direccion_fiscal, '') AS empresa_direccion_fiscal,
+          COALESCE(e.telefono, '') AS empresa_telefono,
+          COALESCE(e.email, '') AS empresa_email,
+          COALESCE(e.web, '') AS empresa_web,
+          COALESCE(e.iban, '') AS empresa_iban,
+          COALESCE(e.bic, '') AS empresa_bic,
+          COALESCE(e.banco_nombre, '') AS empresa_banco_nombre,
+          COALESCE(c.nombre, '') AS cliente_nombre,
+          COALESCE(c.nif, '') AS cliente_nif,
+          COALESCE(c.email, '') AS cliente_email,
+          COALESCE(c.telefono, '') AS cliente_telefono
+        FROM workspace_contratos ct
+        LEFT JOIN workspaces w ON w.id = ct.workspace_id
+        LEFT JOIN empresas e ON e.id = ct.empresa_id
+        LEFT JOIN clientes c ON c.id = ct.cliente_id
+        WHERE ct.id = ? AND ct.workspace_id = ?
+        LIMIT 1
+        """,
+        (contract_id, workspace_id),
+    ).fetchone()
+    if not row:
+        return None
+    body_json = str(row["body_json"] or "").strip()
+    body = {}
+    if body_json:
+        try:
+            body = json.loads(body_json)
+            if not isinstance(body, dict):
+                body = {}
+        except Exception:
+            body = {}
+    return {
+        "contract": dict(row),
+        "workspace": {"nombre": row["workspace_nombre"]},
+        "company": {
+            "nombre": row["empresa_nombre"],
+            "logo_url": row["empresa_logo_url"],
+            "razon_social": row["empresa_razon_social"],
+            "nif": row["empresa_nif"],
+            "direccion": row["empresa_direccion"],
+            "direccion_fiscal": row["empresa_direccion_fiscal"],
+            "telefono": row["empresa_telefono"],
+            "email": row["empresa_email"],
+            "web": row["empresa_web"],
+            "iban": row["empresa_iban"],
+            "bic": row["empresa_bic"],
+            "banco_nombre": row["empresa_banco_nombre"],
+        },
+        "client": {
+            "nombre": row["cliente_nombre"],
+            "nif": row["cliente_nif"],
+            "email": row["cliente_email"],
+            "telefono": row["cliente_telefono"],
+        },
+        "body": body,
+    }
+
+
 def fetch_workspace_fincas_comunidades(conn, workspace_id, limit=30):
     rows = conn.execute(
         """
@@ -26895,6 +27062,217 @@ def build_branded_text_document_pdf(title, subtitle, body_lines, footer_lines=No
     return buffer.getvalue()
 
 
+def get_workspace_contract_templates():
+    # Nota: plantillas operativas (borrador). Requieren revisión jurídica antes de uso masivo.
+    # El objetivo es desbloquear el flujo de "generar mandato/contrato" por servicio, con marca y datos de empresa.
+    return {
+        "gestoria_herencia": {
+            "label": "Gestoría · Encargo herencia",
+            "servicio": "gestoria",
+            "title": "Hoja de encargo · Tramitación de herencia",
+            "sections": [
+                (
+                    "Objeto del encargo",
+                    [
+                        "Tramitación integral de expediente de herencia: recopilación documental, coordinación con notaría y presentación de impuestos y registros según proceda.",
+                        "El alcance exacto dependerá de la documentación aportada y de las circunstancias familiares y patrimoniales del causante.",
+                    ],
+                ),
+                (
+                    "Documentación mínima",
+                    [
+                        "Certificado de defunción, certificado de últimas voluntades y certificado de seguros.",
+                        "DNI/NIE de herederos, libro de familia (si aplica) y testamento (si existe).",
+                        "Relación de bienes y deudas (inmuebles, cuentas, vehículos, préstamos, etc.).",
+                    ],
+                ),
+                (
+                    "Condiciones económicas",
+                    [
+                        "Honorarios: a concretar en presupuesto/aceptación (importe fijo y/o variable).",
+                        "Gastos y suplidos: se repercutirán al cliente (notaría, registros, tasas, copias, etc.).",
+                    ],
+                ),
+            ],
+            "footer": [
+                "Documento operativo generado por el sistema. Requiere validación jurídica definitiva antes de su uso masivo en producción.",
+                "Firma cliente ____________________ · Firma prestador ____________________",
+            ],
+        },
+        "gestoria_tramitacion_estandar": {
+            "label": "Gestoría · Tramitación estándar",
+            "servicio": "gestoria",
+            "title": "Mandato de trabajo · Tramitación estándar",
+            "sections": [
+                (
+                    "Objeto del encargo",
+                    [
+                        "Tramitación administrativa estándar (según caso): altas/bajas, certificados, presentación telemática, gestiones ante administraciones y seguimiento.",
+                        "El cliente autoriza a la gestoría a presentar documentación en su nombre cuando proceda.",
+                    ],
+                ),
+                (
+                    "Plazos y comunicación",
+                    [
+                        "Los plazos dependen de la administración competente y de la disponibilidad documental.",
+                        "Las comunicaciones se realizarán por email/WhatsApp/portal de cliente, según preferencia.",
+                    ],
+                ),
+                (
+                    "Condiciones económicas",
+                    [
+                        "Honorarios: a concretar en presupuesto/aceptación.",
+                        "Gastos y tasas oficiales: a cargo del cliente.",
+                    ],
+                ),
+            ],
+            "footer": [
+                "Documento operativo generado por el sistema. Requiere validación jurídica definitiva antes de su uso masivo en producción.",
+                "Firma cliente ____________________ · Firma prestador ____________________",
+            ],
+        },
+        "gestoria_prestacion_autonomo": {
+            "label": "Gestoría · Prestación servicios (Autónomo)",
+            "servicio": "gestoria",
+            "title": "Contrato de prestación de servicios · Gestión de autónomos",
+            "sections": [
+                (
+                    "Servicios incluidos",
+                    [
+                        "Gestión fiscal y contable: revisión periódica de facturas, modelos tributarios y asesoramiento recurrente.",
+                        "Gestión laboral (si aplica): altas/bajas, nóminas y seguros sociales.",
+                    ],
+                ),
+                (
+                    "Obligaciones del cliente",
+                    [
+                        "Aportar facturas y documentación en plazo (preferiblemente mediante el módulo Importador Facturas).",
+                        "Comunicar cambios de actividad, domicilio, cuenta bancaria o circunstancias relevantes.",
+                    ],
+                ),
+                (
+                    "Duración y precio",
+                    [
+                        "Duración: indefinida con renovación mensual, salvo pacto distinto.",
+                        "Precio: cuota mensual según presupuesto aceptado. Servicios extraordinarios se presupuestan aparte.",
+                    ],
+                ),
+            ],
+            "footer": [
+                "Documento operativo generado por el sistema. Requiere validación jurídica definitiva antes de su uso masivo en producción.",
+                "Firma cliente ____________________ · Firma prestador ____________________",
+            ],
+        },
+        "gestoria_prestacion_empresa": {
+            "label": "Gestoría · Prestación servicios (Empresa)",
+            "servicio": "gestoria",
+            "title": "Contrato de prestación de servicios · Gestión de empresas",
+            "sections": [
+                (
+                    "Servicios incluidos",
+                    [
+                        "Gestión fiscal y contable: contabilidad, cierres, modelos y asesoramiento recurrente.",
+                        "Gestión laboral (si aplica): nóminas, seguros sociales y gestión de incidencias.",
+                        "Soporte documental y comunicaciones con administraciones según encargo.",
+                    ],
+                ),
+                (
+                    "Obligaciones del cliente",
+                    [
+                        "Aportar documentación y autorizaciones necesarias en plazo.",
+                        "Mantener actualizados poderes/representación y datos societarios básicos.",
+                    ],
+                ),
+                (
+                    "Duración y precio",
+                    [
+                        "Duración: indefinida con renovación mensual, salvo pacto distinto.",
+                        "Precio: cuota mensual según presupuesto aceptado. Servicios extraordinarios se presupuestan aparte.",
+                    ],
+                ),
+            ],
+            "footer": [
+                "Documento operativo generado por el sistema. Requiere validación jurídica definitiva antes de su uso masivo en producción.",
+                "Firma cliente ____________________ · Firma prestador ____________________",
+            ],
+        },
+        "fincas_contrato_comunidad": {
+            "label": "Fincas · Contrato gestión de comunidad",
+            "servicio": "fincas",
+            "title": "Contrato de administración de fincas · Comunidad de propietarios",
+            "sections": [
+                (
+                    "Objeto",
+                    [
+                        "Prestación del servicio de administración de la comunidad: contabilidad, gestión de cobros y pagos, incidencias y coordinación de proveedores.",
+                        "Convocatoria y asistencia a juntas según acuerdo y condiciones pactadas.",
+                    ],
+                ),
+                (
+                    "Alcance operativo",
+                    [
+                        "Uso del portal para requerimientos, documentos y control de incidencias.",
+                        "Archivado de documentación y trazabilidad de actuaciones.",
+                    ],
+                ),
+                (
+                    "Honorarios y duración",
+                    [
+                        "Honorarios: según presupuesto aceptado (cuota mensual/vecino u otro criterio).",
+                        "Duración: anual renovable salvo preaviso.",
+                    ],
+                ),
+            ],
+            "footer": [
+                "Documento operativo generado por el sistema. Requiere validación jurídica definitiva antes de su uso masivo en producción.",
+                "Firma comunidad ____________________ · Firma administración ____________________",
+            ],
+        },
+    }
+
+
+def build_workspace_contract_pdf(template_key, company, client, payload=None):
+    payload = payload or {}
+    templates = get_workspace_contract_templates()
+    tmpl = templates.get(template_key)
+    if not tmpl:
+        return None
+    company_name = company.get("nombre") or "Empresa"
+    client_name = client.get("nombre") or "Cliente"
+    title = str(tmpl.get("title") or "Contrato").strip()
+    subtitle = f"{company_name} · {client_name}"
+    sections = [
+        (
+            "Partes",
+            [
+                ("Prestador", company_name),
+                ("Razón social", company.get("razon_social") or company_name),
+                ("CIF/NIF", company.get("nif") or "-"),
+                ("Dirección", company.get("direccion_fiscal") or company.get("direccion") or "-"),
+                ("Cliente", client_name),
+                ("CIF/NIF cliente", client.get("nif") or "-"),
+                ("Email cliente", client.get("email") or "-"),
+                ("Teléfono cliente", client.get("telefono") or "-"),
+            ],
+        )
+    ]
+    for heading, lines in (tmpl.get("sections") or []):
+        sections.append((heading, lines))
+    extra = str(payload.get("clausulas_extra") or "").strip()
+    if extra:
+        extra_lines = [line.strip() for line in extra.splitlines() if line.strip()]
+        if extra_lines:
+            sections.append(("Cláusulas adicionales", extra_lines))
+    footer = list(tmpl.get("footer") or [])
+    return build_branded_document_pdf(
+        title,
+        subtitle,
+        sections,
+        footer,
+        brand_logo_url=company.get("logo_url"),
+    )
+
+
 def build_inmueble_consumo_sale_sheet_pdf(company, inmueble, captacion, docs):
     price = format_eur(inmueble.get("precio_objetivo") or captacion.get("precio_objetivo") or 0)
     locality = " · ".join([part for part in [inmueble.get("zona"), inmueble.get("poblacion"), inmueble.get("provincia")] if part]) or "Pendiente"
@@ -27447,6 +27825,118 @@ def schedule_hipotecas_contabilidad_sync(db_path, empresa_id):
     t.start()
     return {"scheduled": True, **state}
 
+def _seguros_sync_enabled():
+    return (os.environ.get("APP_SEGUROS_CONTAB_AUTO_SYNC", "1") or "1").strip().lower() not in ("0", "false", "no", "off")
+
+def _seguros_sync_interval_seconds():
+    try:
+        return max(10, min(3600, int(os.environ.get("APP_SEGUROS_CONTAB_SYNC_INTERVAL_SECONDS", "300") or 300)))
+    except Exception:
+        return 300
+
+
+def sync_seguros_contabilidad_entries(conn, empresa_id, now=None, limit=None):
+    """
+    Backfill best-effort: ensure there is an automatic "Comisión emisión" entry
+    in `gestoria_contabilidad` for policies that are effectively "en vigor".
+    """
+    now = now or datetime.now(timezone.utc).isoformat()
+    eid = str(empresa_id or "").strip()
+    if not eid:
+        return {"processed": 0, "upserted": 0}
+    sql = """
+        SELECT *
+        FROM seguros
+        WHERE empresa_id = ?
+          AND COALESCE(TRIM(comision), '') <> ''
+    """
+    values = [eid]
+    if limit:
+        sql += " LIMIT ?"
+        values.append(int(limit))
+    rows = conn.execute(sql, values).fetchall()
+    processed = 0
+    upserted = 0
+    for raw in rows:
+        processed += 1
+        try:
+            cont_id = upsert_seguro_comision_contabilidad(conn, raw, now, movimiento="emision")
+        except Exception:
+            cont_id = None
+        if cont_id:
+            upserted += 1
+    return {"processed": processed, "upserted": upserted}
+
+
+def schedule_seguros_contabilidad_sync(db_path, empresa_id):
+    """
+    Programa un sync de contabilidad de seguros fuera del request.
+    - Single-flight por empresa_id.
+    - Throttling por intervalo.
+    """
+    eid = str(empresa_id or "").strip()
+    if not eid:
+        return {"scheduled": False, "reason": "missing_empresa_id"}
+    if not _seguros_sync_enabled():
+        return {"scheduled": False, "reason": "disabled"}
+    interval_s = _seguros_sync_interval_seconds()
+    now_ts = time.time()
+    with Handler._seguros_sync_lock:
+        state = Handler._seguros_sync_state.get(eid) or {}
+        if state.get("running"):
+            return {"scheduled": False, "reason": "already_running", **state}
+        last_done = float(state.get("last_done") or 0.0)
+        last_started = float(state.get("last_started") or 0.0)
+        if last_done and (now_ts - last_done) < interval_s:
+            return {"scheduled": False, "reason": "throttled", **state}
+        if last_started and (now_ts - last_started) < 4.0:
+            return {"scheduled": False, "reason": "starting", **state}
+        state = {
+            "running": True,
+            "last_started": now_ts,
+            "last_done": last_done,
+            "last_error": str(state.get("last_error") or "").strip(),
+            "last_result": state.get("last_result") or {},
+        }
+        Handler._seguros_sync_state[eid] = state
+
+    def _run():
+        err = ""
+        result = {}
+        try:
+            conn = get_db(db_path)
+            try:
+                result = sync_seguros_contabilidad_entries(conn, eid)
+                try:
+                    conn.commit()
+                except Exception:
+                    pass
+            finally:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+        except Exception as exc:
+            err = f"{type(exc).__name__}: {exc}"
+            try:
+                Handler._record_api_error("/bg/seguros_contabilidad_sync", exc)
+            except Exception:
+                pass
+        finally:
+            done_ts = time.time()
+            with Handler._seguros_sync_lock:
+                Handler._seguros_sync_state[eid] = {
+                    "running": False,
+                    "last_started": state.get("last_started") or now_ts,
+                    "last_done": done_ts,
+                    "last_error": err,
+                    "last_result": result,
+                }
+
+    t = threading.Thread(target=_run, name=f"seguros-sync-{eid[:8]}", daemon=True)
+    t.start()
+    return {"scheduled": True, **state}
+
 
 class Handler(BaseHTTPRequestHandler):
     db_path = DB_DEFAULT
@@ -27471,6 +27961,8 @@ class Handler(BaseHTTPRequestHandler):
     _data_guard_result = {}
     _hipotecas_sync_lock = threading.Lock()
     _hipotecas_sync_state = {}  # {empresa_id: {running, last_started, last_done, last_error}}
+    _seguros_sync_lock = threading.Lock()
+    _seguros_sync_state = {}  # {empresa_id: {running, last_started, last_done, last_error, last_result}}
 
     @staticmethod
     def _record_api_error(path, exc):
@@ -34094,6 +34586,153 @@ class Handler(BaseHTTPRequestHandler):
             )
             conn.commit()
             json_response(self, {"ok": True, "id": record_id, "automation_actions": auto_created})
+            return
+        elif parsed.path == "/api/workspace_contratos":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            empresa_id = str(payload.get("empresa_id") or "").strip()
+            record_id = str(payload.get("id") or "").strip()
+            template_key = str(payload.get("template_key") or "").strip()
+            titulo = str(payload.get("titulo") or "").strip()
+            estado = str(payload.get("estado") or "Borrador").strip() or "Borrador"
+            fecha = str(payload.get("fecha") or "").strip() or datetime.now().date().isoformat()
+            notas = str(payload.get("notas") or "").strip() or None
+            clausulas_extra = str(payload.get("clausulas_extra") or "").strip()
+            store_pdf = str(payload.get("store_pdf") or "").strip().lower() in {"1", "true", "si", "sí", "on", "yes"}
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            if not workspace_id or not empresa_id or not template_key or not titulo:
+                json_response(self, {"error": "workspace_id, empresa_id, template_key y titulo requeridos"}, status=400)
+                return
+            ok, err = enforce_workspace_membership(conn, session, workspace_id)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            templates = get_workspace_contract_templates()
+            tmpl = templates.get(template_key)
+            if not tmpl:
+                json_response(self, {"error": "plantilla no encontrada"}, status=404)
+                return
+            servicio = normalize_service_key(tmpl.get("servicio") or payload.get("servicio") or "gestoria")
+            current = None
+            if record_id:
+                current = conn.execute(
+                    "SELECT * FROM workspace_contratos WHERE id = ? AND workspace_id = ? LIMIT 1",
+                    (record_id, workspace_id),
+                ).fetchone()
+                if not current:
+                    json_response(self, {"error": "contrato no encontrado"}, status=404)
+                    return
+            cliente_id_raw = str(payload.get("cliente_id") or "").strip() or None
+            cliente_id, cliente_nombre = ensure_workspace_budget_client(
+                conn,
+                workspace_id=workspace_id,
+                empresa_id=empresa_id,
+                servicio=servicio,
+                cliente_id=cliente_id_raw,
+                cliente_lookup=payload.get("cliente_lookup") or "",
+                cliente_nif=payload.get("cliente_nif") or "",
+                cliente_telefono=payload.get("cliente_telefono") or "",
+                cliente_email=payload.get("cliente_email") or "",
+                fecha_inicio=fecha,
+                now=now,
+            )
+            servicio_label = workspace_budget_service_label(servicio)
+            try:
+                conn.execute(
+                    """
+                    UPDATE clientes_empresas
+                    SET estado = 'Contrato', updated_at = datetime(?)
+                    WHERE cliente_id = ? AND empresa_id = ? AND LOWER(servicio) = LOWER(?)
+                    """,
+                    (now, cliente_id, empresa_id, servicio_label),
+                )
+            except Exception:
+                pass
+            body = {"clausulas_extra": clausulas_extra}
+            body_json = json.dumps(body, ensure_ascii=False) if body else None
+            values = (
+                workspace_id,
+                empresa_id,
+                cliente_id,
+                servicio,
+                template_key,
+                titulo,
+                estado,
+                fecha or None,
+                body_json,
+                notas,
+            )
+            if record_id:
+                conn.execute(
+                    """
+                    UPDATE workspace_contratos
+                    SET workspace_id = ?, empresa_id = ?, cliente_id = ?, servicio = ?, template_key = ?, titulo = ?,
+                        estado = ?, fecha = ?, body_json = ?, notas = ?, updated_at = datetime(?)
+                    WHERE id = ? AND workspace_id = ?
+                    """,
+                    (*values, now, record_id, workspace_id),
+                )
+            else:
+                record_id = os.urandom(16).hex()
+                conn.execute(
+                    """
+                    INSERT INTO workspace_contratos (
+                      id, workspace_id, empresa_id, cliente_id, servicio, template_key, titulo, estado, fecha,
+                      doc_key, doc_url, body_json, notas, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', ?, ?, datetime(?), datetime(?))
+                    """,
+                    (record_id, *values, now, now),
+                )
+            doc_url = str(current["doc_url"] or "").strip() if current else ""
+            if store_pdf:
+                pdf_payload = fetch_workspace_contract_pdf_payload(conn, record_id, workspace_id=workspace_id)
+                if not pdf_payload:
+                    json_response(self, {"error": "contrato no encontrado"}, status=404)
+                    return
+                pdf_bytes = build_workspace_contract_pdf(
+                    pdf_payload["contract"].get("template_key"),
+                    pdf_payload["company"],
+                    pdf_payload["client"],
+                    pdf_payload.get("body") or {},
+                )
+                if not pdf_bytes:
+                    json_response(self, {"error": "no se pudo generar el PDF"}, status=500)
+                    return
+                client_s3 = s3_client()
+                if not client_s3:
+                    json_response(self, {"error": "S3 no configurado"}, status=400)
+                    return
+                bucket, region = s3_config()
+                prefix = f"contratos/{workspace_id}/{empresa_id}"
+                filename = f"contrato_{template_key}_{record_id}.pdf"
+                key = s3_safe_key(prefix, filename)
+                try:
+                    client_s3.put_object(
+                        Bucket=bucket,
+                        Key=key,
+                        Body=pdf_bytes,
+                        ContentType="application/pdf",
+                    )
+                except Exception:
+                    json_response(self, {"error": "No se pudo guardar el PDF en S3"}, status=500)
+                    return
+                doc_url = f"https://{bucket}.s3.{region}.amazonaws.com/{key}"
+                try:
+                    _s3_grant_key(session, key, conn=conn)
+                except Exception:
+                    pass
+                conn.execute(
+                    """
+                    UPDATE workspace_contratos
+                    SET doc_key = ?, doc_url = ?, updated_at = datetime(?)
+                    WHERE id = ? AND workspace_id = ?
+                    """,
+                    (key, doc_url, now, record_id, workspace_id),
+                )
+            conn.commit()
+            json_response(self, {"ok": True, "id": record_id, "doc_url": doc_url})
             return
         elif parsed.path == "/api/workspace_fincas_proveedores":
             workspace_id = str(payload.get("workspace_id") or "").strip()
@@ -42258,10 +42897,89 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/workspace_presupuestos":
             workspace_id = params.get("workspace_id", [""])[0]
             limit = params.get("limit", ["40"])[0]
+            empresa_id = (params.get("empresa_id", [""])[0] or "").strip()
             if not workspace_id:
                 json_response(self, {"error": "workspace_id requerido"}, status=400)
                 return
-            json_response(self, fetch_workspace_presupuestos(conn, workspace_id, limit=limit))
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            ok, err = enforce_workspace_membership(conn, session, workspace_id)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            payload = fetch_workspace_presupuestos(conn, workspace_id, limit=limit)
+            if empresa_id:
+                payload["rows"] = [row for row in (payload.get("rows") or []) if str(row.get("empresa_id") or "") == empresa_id]
+            json_response(self, payload)
+            return
+
+        if path == "/api/workspace_contrato_catalog":
+            templates = get_workspace_contract_templates()
+            json_response(
+                self,
+                {
+                    "templates": [
+                        {
+                            "key": key,
+                            "label": str(meta.get("label") or key),
+                            "servicio": str(meta.get("servicio") or ""),
+                            "title": str(meta.get("title") or ""),
+                        }
+                        for key, meta in templates.items()
+                    ]
+                },
+            )
+            return
+
+        if path == "/api/workspace_contratos":
+            workspace_id = (params.get("workspace_id", [""])[0] or "").strip()
+            empresa_id = (params.get("empresa_id", [""])[0] or "").strip()
+            limit = params.get("limit", ["50"])[0]
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            ok, err = enforce_workspace_membership(conn, session, workspace_id)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            json_response(self, fetch_workspace_contratos(conn, workspace_id, empresa_id=empresa_id, limit=limit))
+            return
+
+        if path == "/api/workspace_contrato_pdf":
+            contract_id = (params.get("id", [""])[0] or "").strip()
+            workspace_id = (params.get("workspace_id", [""])[0] or "").strip()
+            if not contract_id or not workspace_id:
+                json_response(self, {"error": "id y workspace_id requeridos"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            ok, err = enforce_workspace_membership(conn, session, workspace_id)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            payload = fetch_workspace_contract_pdf_payload(conn, contract_id, workspace_id=workspace_id)
+            if not payload:
+                json_response(self, {"error": "contrato no encontrado"}, status=404)
+                return
+            pdf_bytes = build_workspace_contract_pdf(
+                payload["contract"].get("template_key"),
+                payload["company"],
+                payload["client"],
+                payload.get("body") or {},
+            )
+            if not pdf_bytes:
+                json_response(self, {"error": "plantilla no encontrada"}, status=404)
+                return
+            filename = f"contrato_{contract_id}.pdf"
+            binary_response(self, pdf_bytes, content_type="application/pdf", filename=filename)
             return
 
         if path == "/api/workspace_presupuesto_pdf":
@@ -43948,12 +44666,18 @@ class Handler(BaseHTTPRequestHandler):
                 hipotecas_only = _bool_param(params, "hipotecas_only", default=False)
                 want_sync = _bool_param(params, "sync", default=False)
                 sync_state = {}
+                seguros_sync_state = {}
                 # Importante: NO ejecutar sync pesado dentro del request (provoca 502/timeouts).
                 if hipotecas_only and (want_sync or _hipotecas_sync_enabled()):
                     try:
                         sync_state = schedule_hipotecas_contabilidad_sync(self.db_path, empresa_id)
                     except Exception:
                         sync_state = {"scheduled": False, "reason": "schedule_failed"}
+                if seguros_only and (want_sync or _seguros_sync_enabled()):
+                    try:
+                        seguros_sync_state = schedule_seguros_contabilidad_sync(self.db_path, empresa_id)
+                    except Exception:
+                        seguros_sync_state = {"scheduled": False, "reason": "schedule_failed"}
 
                 where = ["gc.empresa_id = ?"]
                 values = [empresa_id]
@@ -44044,6 +44768,7 @@ class Handler(BaseHTTPRequestHandler):
                             "rentabilidad_ratio": rentabilidad_ratio,
                         },
                         "hipotecas_sync": sync_state if hipotecas_only else {},
+                        "seguros_sync": seguros_sync_state if seguros_only else {},
                     },
                 )
                 return
@@ -47549,7 +48274,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/seguros_kpis":
             empresa_id = params.get("empresa_id", [""])[0]
-            uploaded_only = (params.get("uploaded_only", ["1"])[0] or "1").strip() in ("1", "true", "yes")
+            uploaded_only = (params.get("uploaded_only", ["0"])[0] or "0").strip() in ("1", "true", "yes")
             if not empresa_id:
                 json_response(self, {"error": "empresa_id requerido"}, status=400)
                 return
@@ -47577,12 +48302,22 @@ class Handler(BaseHTTPRequestHandler):
             )
             prima_total_sql = f"CAST(NULLIF({cleaned_money}, '') AS REAL)"
 
-            poliza_key_expr = "COALESCE(NULLIF(TRIM(s.poliza_numero), ''), s.id)"
             poliza_strict_expr = "NULLIF(TRIM(s.poliza_numero), '')"
+            poliza_key_expr = f"COALESCE({poliza_strict_expr}, s.id)"
 
             total = conn.execute(
                 f"""
-                SELECT COUNT(DISTINCT {poliza_strict_expr}) AS total
+                SELECT COUNT(*) AS total
+                FROM seguros s
+                WHERE s.empresa_id = ?
+                  AND ({uploaded_clause} OR ? = 0)
+                  AND {exclude_sin_seguro}
+                """,
+                (empresa_id, uploaded_param),
+            ).fetchone()
+            total_con_numero = conn.execute(
+                f"""
+                SELECT COUNT(*) AS total
                 FROM seguros s
                 WHERE s.empresa_id = ?
                   AND ({uploaded_clause} OR ? = 0)
@@ -47593,7 +48328,18 @@ class Handler(BaseHTTPRequestHandler):
             ).fetchone()
             en_vigor = conn.execute(
                 f"""
-                SELECT COUNT(DISTINCT {poliza_strict_expr}) AS total
+                SELECT COUNT(*) AS total
+                FROM seguros s
+                WHERE s.empresa_id = ?
+                  AND ({uploaded_clause} OR ? = 0)
+                  AND {in_vigor_expr}
+                  AND {exclude_sin_seguro}
+                """,
+                (empresa_id, uploaded_param),
+            ).fetchone()
+            en_vigor_con_numero = conn.execute(
+                f"""
+                SELECT COUNT(*) AS total
                 FROM seguros s
                 WHERE s.empresa_id = ?
                   AND ({uploaded_clause} OR ? = 0)
@@ -47617,14 +48363,13 @@ class Handler(BaseHTTPRequestHandler):
             ).fetchone()
             vencen_30 = conn.execute(
                 f"""
-                SELECT COUNT(DISTINCT {poliza_strict_expr}) AS total
+                SELECT COUNT(*) AS total
                 FROM seguros s
                 WHERE s.empresa_id = ?
                   AND ({uploaded_clause} OR ? = 0)
                   AND COALESCE(fecha_vencimiento, DATE(fecha_efecto, '+1 year')) IS NOT NULL
                   AND {in_vigor_expr}
                   AND {exclude_sin_seguro}
-                  AND {poliza_strict_expr} IS NOT NULL
                   AND DATE(COALESCE(fecha_vencimiento, DATE(fecha_efecto, '+1 year'))) BETWEEN DATE('now','localtime')
                       AND DATE('now','localtime','+30 days')
                 """,
@@ -47632,7 +48377,7 @@ class Handler(BaseHTTPRequestHandler):
             ).fetchone()
             faltantes = conn.execute(
                 f"""
-                SELECT COUNT(DISTINCT {poliza_strict_expr}) AS total
+                SELECT COUNT(*) AS total
                 FROM seguros s
                 WHERE s.empresa_id = ?
                   AND ({uploaded_clause} OR ? = 0)
@@ -47644,7 +48389,6 @@ class Handler(BaseHTTPRequestHandler):
                   )
                   AND {in_vigor_expr}
                   AND {exclude_sin_seguro}
-                  AND {poliza_strict_expr} IS NOT NULL
                 """,
                 (empresa_id, uploaded_param),
             ).fetchone()
@@ -47663,14 +48407,13 @@ class Handler(BaseHTTPRequestHandler):
                 SELECT SUM(t.prima_total) AS total
                 FROM (
                   SELECT
-                    {poliza_strict_expr} AS poliza_key,
+                    {poliza_key_expr} AS poliza_key,
                     MAX(COALESCE({prima_total_sql}, 0)) AS prima_total
                   FROM seguros s
                   WHERE s.empresa_id = ?
                     AND ({uploaded_clause} OR ? = 0)
                     AND {in_vigor_expr}
                     AND {exclude_sin_seguro}
-                    AND {poliza_strict_expr} IS NOT NULL
                   GROUP BY 1
                 ) t
                 """,
@@ -47687,7 +48430,9 @@ class Handler(BaseHTTPRequestHandler):
                 self,
                 {
                     "total": total["total"] if total else 0,
+                    "total_con_numero": total_con_numero["total"] if total_con_numero else 0,
                     "en_vigor": en_vigor["total"] if en_vigor else 0,
+                    "en_vigor_con_numero": en_vigor_con_numero["total"] if en_vigor_con_numero else 0,
                     "en_vigor_sin_numero": en_vigor_sin_numero["total"] if en_vigor_sin_numero else 0,
                     "vencen_30": vencen_30["total"] if vencen_30 else 0,
                     "faltantes": faltantes["total"] if faltantes else 0,

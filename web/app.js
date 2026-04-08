@@ -6965,6 +6965,11 @@ const renderWorkspaceHomeDetail = (container, enabledKeys = new Set()) => {
 
 const renderWorkspaceCopilotHub = () => {
   if (!workspaceCopilotHub) return;
+  const companies = Array.isArray(state.currentWorkspaceDetail?.companies) ? state.currentWorkspaceDetail.companies : [];
+  const activeCompanyId = String(state.currentWorkspaceCompanyId || companies[0]?.id || "").trim();
+  const companyOptionsHtml = companies
+    .map((row) => `<option value="${escapeHtml(String(row.id || ""))}">${escapeHtml(String(row.nombre || "-"))}</option>`)
+    .join("");
   workspaceCopilotHub.innerHTML = `
     <div class="workspace-home-detail-card">
       <div class="section-head">
@@ -6988,6 +6993,76 @@ const renderWorkspaceCopilotHub = () => {
         </button>
       </div>
     </div>
+    <div class="workspace-home-detail-card" style="margin-top:14px">
+      <div class="section-head">
+        <div>
+          <h4>Mandatos y contratos</h4>
+          <p class="muted">Genera documentos por servicio con los datos y logo de la empresa (borrador operativo).</p>
+        </div>
+      </div>
+      <form id="workspaceContractForm" class="form-grid">
+        <input type="hidden" name="id" />
+        <input type="hidden" name="workspace_id" value="${escapeHtml(String(state.currentWorkspaceId || ""))}" />
+        <input type="hidden" name="cliente_id" />
+        <label>
+          Empresa
+          <select name="empresa_id" required>${companyOptionsHtml}</select>
+        </label>
+        <label>
+          Plantilla
+          <select name="template_key" required></select>
+        </label>
+        <label>
+          Fecha
+          <input name="fecha" type="date" />
+        </label>
+        <label class="span-2">
+          Cliente final
+          <input name="cliente_lookup" id="workspaceContractClienteLookup" list="workspaceClientOptions" placeholder="Busca por nombre o DNI del cliente final" />
+        </label>
+        <label>
+          DNI / NIF cliente final
+          <input name="cliente_nif" placeholder="Opcional si es alta rápida" />
+        </label>
+        <label>
+          Teléfono cliente final
+          <input name="cliente_telefono" />
+        </label>
+        <label>
+          Email cliente final
+          <input name="cliente_email" type="email" />
+        </label>
+        <label class="span-2">
+          Título
+          <input name="titulo" required placeholder="Ej. Herencia Juan Pérez · Gestión autónomo · Comunidad C.P. ..." />
+        </label>
+        <label>
+          Estado
+          <select name="estado">
+            <option value="Borrador">Borrador</option>
+            <option value="Enviado">Enviado</option>
+            <option value="Firmada">Firmada</option>
+            <option value="Anulada">Anulada</option>
+          </select>
+        </label>
+        <label class="span-2">
+          Cláusulas adicionales (opcional)
+          <textarea name="clausulas_extra" rows="4" placeholder="Añade cláusulas o condiciones particulares (una por línea)."></textarea>
+        </label>
+        <label class="span-2">
+          Notas internas (opcional)
+          <textarea name="notas" rows="2"></textarea>
+        </label>
+        <div class="form-actions span-2">
+          <button type="submit">Guardar</button>
+          <button type="button" id="workspaceContractPdfBtn" class="secondary ghost">Ver PDF</button>
+          <button type="button" id="workspaceContractStoreBtn" class="secondary">Guardar + PDF (S3)</button>
+          <button type="button" id="workspaceContractNewBtn" class="secondary ghost">Nuevo</button>
+          <span id="workspaceContractStatus" class="muted"></span>
+        </div>
+      </form>
+      <div id="workspaceContractsList"></div>
+    </div>
   `;
   workspaceCopilotHub.querySelectorAll("[data-workspace-copilot-open]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -7005,6 +7080,205 @@ const renderWorkspaceCopilotHub = () => {
       }
     });
   });
+
+  const contractForm = document.getElementById("workspaceContractForm");
+  const contractStatus = document.getElementById("workspaceContractStatus");
+  const contractTemplates = contractForm?.querySelector('[name="template_key"]');
+  const contractEmpresa = contractForm?.querySelector('[name="empresa_id"]');
+  const contractIdField = contractForm?.querySelector('[name="id"]');
+  const contractPdfBtn = document.getElementById("workspaceContractPdfBtn");
+  const contractStoreBtn = document.getElementById("workspaceContractStoreBtn");
+  const contractNewBtn = document.getElementById("workspaceContractNewBtn");
+  const contractList = document.getElementById("workspaceContractsList");
+  const contractLookup = document.getElementById("workspaceContractClienteLookup");
+
+  const fillContractFormDefaults = () => {
+    if (!contractForm) return;
+    if (contractEmpresa && activeCompanyId) {
+      try {
+        contractEmpresa.value = activeCompanyId;
+      } catch {}
+    }
+    const dateInput = contractForm.querySelector('[name="fecha"]');
+    if (dateInput && !String(dateInput.value || "").trim()) {
+      dateInput.value = new Date().toISOString().slice(0, 10);
+    }
+  };
+
+  const loadContractTemplates = async () => {
+    if (!contractTemplates) return;
+    contractTemplates.innerHTML = "<option value=\"\">Cargando...</option>";
+    try {
+      const catalog = await api("/api/workspace_contrato_catalog");
+      const rows = Array.isArray(catalog?.templates) ? catalog.templates : [];
+      if (!rows.length) {
+        contractTemplates.innerHTML = "<option value=\"\">Sin plantillas</option>";
+        return;
+      }
+      contractTemplates.innerHTML = rows
+        .map((row) => `<option value="${escapeHtml(String(row.key || ""))}">${escapeHtml(String(row.label || row.key || ""))}</option>`)
+        .join("");
+    } catch (error) {
+      contractTemplates.innerHTML = "<option value=\"\">Error cargando</option>";
+    }
+  };
+
+  const renderContractsList = (rows = []) => {
+    if (!contractList) return;
+    const items = Array.isArray(rows) ? rows : [];
+    if (!items.length) {
+      contractList.innerHTML = "<p class='muted'>Sin contratos recientes.</p>";
+      return;
+    }
+    contractList.innerHTML = `
+      <div class="crm-mini-list">
+        ${items.slice(0, 40).map((row) => `
+          <button type="button" class="crm-mini-row" data-contract-open="${escapeHtml(String(row.id || ""))}">
+            <div>
+              <strong>${escapeHtml(String(row.titulo || "Contrato"))}</strong>
+              <div class="muted">${escapeHtml(String(row.empresa_nombre || ""))}${row.cliente_nombre ? ` · ${escapeHtml(String(row.cliente_nombre || ""))}` : ""}</div>
+            </div>
+            <div class="muted" style="text-align:right">
+              <div>${escapeHtml(String(row.estado || "Borrador"))}${row.fecha ? ` · ${escapeHtml(String(row.fecha || ""))}` : ""}</div>
+              <div>${row.doc_url ? "PDF guardado" : "PDF no guardado"}</div>
+            </div>
+          </button>
+        `).join("")}
+      </div>
+      <div class="muted" style="margin-top:8px">Tip: usa “Guardar + PDF (S3)” para que el documento quede archivado.</div>
+    `;
+    contractList.querySelectorAll("[data-contract-open]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        if (!contractForm) return;
+        const id = String(btn.dataset.contractOpen || "").trim();
+        const row = items.find((it) => String(it.id || "") === id);
+        if (!row) return;
+        const set = (name, value) => {
+          const el = contractForm.querySelector(`[name="${name}"]`);
+          if (el) el.value = value ?? "";
+        };
+        set("id", row.id || "");
+        set("empresa_id", row.empresa_id || "");
+        set("template_key", row.template_key || "");
+        set("fecha", row.fecha || "");
+        set("estado", row.estado || "Borrador");
+        set("titulo", row.titulo || "");
+        set("cliente_id", row.cliente_id || "");
+        if (contractLookup) contractLookup.value = row.cliente_nombre || "";
+        set("cliente_nif", row.cliente_nif || "");
+        set("cliente_telefono", row.cliente_telefono || "");
+        set("cliente_email", row.cliente_email || "");
+        set("notas", row.notas || "");
+        if (contractStatus) contractStatus.textContent = row.doc_url ? "Contrato cargado (PDF en S3)." : "Contrato cargado.";
+        if (typeof contractForm.scrollIntoView === "function") {
+          contractForm.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+      });
+    });
+  };
+
+  const refreshContracts = async () => {
+    if (!state.currentWorkspaceId) return;
+    const empresaId = String(contractEmpresa?.value || state.currentWorkspaceCompanyId || "").trim();
+    const companyQuery = empresaId ? `&empresa_id=${encodeURIComponent(empresaId)}` : "";
+    try {
+      const data = await api(`/api/workspace_contratos?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}${companyQuery}&limit=60`);
+      renderContractsList(data?.rows || []);
+    } catch (error) {
+      if (contractList) contractList.innerHTML = "<p class='muted'>No se pudieron cargar los contratos.</p>";
+    }
+  };
+
+  if (contractEmpresa) {
+    contractEmpresa.addEventListener("change", () => {
+      void refreshContracts();
+    });
+  }
+
+  if (contractForm) {
+    contractForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      if (!state.currentWorkspaceId) {
+        if (contractStatus) contractStatus.textContent = "Workspace no seleccionado.";
+        return;
+      }
+      if (contractStatus) contractStatus.textContent = "Guardando contrato...";
+      const formData = new FormData(contractForm);
+      const payload = Object.fromEntries(formData.entries());
+      payload.workspace_id = state.currentWorkspaceId;
+      payload.id = payload.id || "";
+      payload.cliente_lookup = contractLookup?.value?.trim() || payload.cliente_lookup || "";
+      try {
+        const data = await postJsonWithDbRetry("/api/workspace_contratos", payload);
+        if (data?.error) throw new Error(data.error);
+        if (contractIdField) contractIdField.value = data.id || payload.id || "";
+        if (contractStatus) contractStatus.textContent = "Contrato guardado.";
+        await refreshContracts();
+      } catch (error) {
+        if (contractStatus) contractStatus.textContent = error?.message || "No se pudo guardar.";
+      }
+    });
+  }
+
+  const openContractPdf = () => {
+    const id = String(contractIdField?.value || "").trim();
+    if (!id || !state.currentWorkspaceId) {
+      if (contractStatus) contractStatus.textContent = "Guarda el contrato primero.";
+      return;
+    }
+    window.open(`/api/workspace_contrato_pdf?id=${encodeURIComponent(id)}&workspace_id=${encodeURIComponent(state.currentWorkspaceId)}`, "_blank", "noopener,noreferrer");
+  };
+
+  if (contractPdfBtn) {
+    contractPdfBtn.addEventListener("click", openContractPdf);
+  }
+
+  if (contractStoreBtn) {
+    contractStoreBtn.addEventListener("click", async () => {
+      if (!contractForm) return;
+      if (!state.currentWorkspaceId) {
+        if (contractStatus) contractStatus.textContent = "Workspace no seleccionado.";
+        return;
+      }
+      if (contractStatus) contractStatus.textContent = "Guardando y subiendo PDF...";
+      const formData = new FormData(contractForm);
+      const payload = Object.fromEntries(formData.entries());
+      payload.workspace_id = state.currentWorkspaceId;
+      payload.store_pdf = 1;
+      payload.id = payload.id || "";
+      payload.cliente_lookup = contractLookup?.value?.trim() || payload.cliente_lookup || "";
+      try {
+        const data = await postJsonWithDbRetry("/api/workspace_contratos", payload);
+        if (data?.error) throw new Error(data.error);
+        if (contractIdField) contractIdField.value = data.id || payload.id || "";
+        if (contractStatus) contractStatus.textContent = data.doc_url ? "PDF guardado en S3." : "Contrato guardado.";
+        await refreshContracts();
+        if (data?.doc_url) {
+          window.open(String(data.doc_url), "_blank", "noopener,noreferrer");
+        } else {
+          openContractPdf();
+        }
+      } catch (error) {
+        if (contractStatus) contractStatus.textContent = error?.message || "No se pudo subir el PDF.";
+      }
+    });
+  }
+
+  if (contractNewBtn) {
+    contractNewBtn.addEventListener("click", () => {
+      if (!contractForm) return;
+      contractForm.reset();
+      if (contractIdField) contractIdField.value = "";
+      const hiddenClient = contractForm.querySelector('[name="cliente_id"]');
+      if (hiddenClient) hiddenClient.value = "";
+      if (contractLookup) contractLookup.value = "";
+      fillContractFormDefaults();
+      if (contractStatus) contractStatus.textContent = "Preparado para un contrato nuevo.";
+    });
+  }
+
+  fillContractFormDefaults();
+  void loadContractTemplates().then(() => refreshContracts());
 };
 
 const normalizeWorkspaceRrhhTab = (value = "") => {
