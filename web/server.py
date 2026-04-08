@@ -19925,6 +19925,7 @@ def ensure_workspace_product_tables(conn):
           workspace_id TEXT NOT NULL,
           empresa_id TEXT,
           nombre TEXT NOT NULL,
+          referencia_catastral TEXT,
           cif TEXT,
           direccion TEXT,
           presidente TEXT,
@@ -19946,6 +19947,7 @@ def ensure_workspace_product_tables(conn):
     ensure_column(conn, "workspace_fincas_comunidades", "num_trasteros", "num_trasteros INTEGER")
     ensure_column(conn, "workspace_fincas_comunidades", "num_aparcamientos", "num_aparcamientos INTEGER")
     ensure_column(conn, "workspace_fincas_comunidades", "cuota_sugerida", "cuota_sugerida REAL")
+    ensure_column(conn, "workspace_fincas_comunidades", "referencia_catastral", "referencia_catastral TEXT")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS workspace_fincas_incidencias (
@@ -19998,6 +20000,22 @@ def ensure_workspace_product_tables(conn):
           orden_dia TEXT,
           acuerdos TEXT,
           proxima_fecha TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workspace_fincas_contabilidad (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          comunidad_id TEXT,
+          fecha TEXT,
+          tipo TEXT NOT NULL DEFAULT 'Gasto',
+          concepto TEXT NOT NULL,
+          importe REAL NOT NULL DEFAULT 0,
+          notas TEXT,
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL
         )
@@ -24624,6 +24642,7 @@ def fetch_workspace_contratos(conn, workspace_id, empresa_id=None, limit=50):
           ct.titulo,
           ct.estado,
           ct.fecha,
+          COALESCE(ct.body_json, '') AS body_json,
           COALESCE(ct.doc_url, '') AS doc_url,
           COALESCE(ct.doc_key, '') AS doc_key,
           COALESCE(ct.notas, '') AS notas,
@@ -24638,7 +24657,21 @@ def fetch_workspace_contratos(conn, workspace_id, empresa_id=None, limit=50):
         """,
         (*params, max(1, min(int(limit or 50), 200))),
     ).fetchall()
-    return {"rows": [dict(row) for row in rows]}
+    items = [dict(row) for row in rows]
+    for item in items:
+        body_json = str(item.get("body_json") or "").strip()
+        body = {}
+        if body_json:
+            try:
+                body = json.loads(body_json)
+                if not isinstance(body, dict):
+                    body = {}
+            except Exception:
+                body = {}
+        item["clausulas_extra"] = str(body.get("clausulas_extra") or "").strip()
+        item["body_text"] = str(body.get("body_text") or "").strip()
+        item.pop("body_json", None)
+    return {"rows": items}
 
 
 def fetch_workspace_contract_pdf_payload(conn, contract_id, workspace_id=None):
@@ -24721,6 +24754,7 @@ def fetch_workspace_fincas_comunidades(conn, workspace_id, limit=30):
           c.empresa_id,
           COALESCE(e.nombre, '') AS empresa_nombre,
           c.nombre,
+          COALESCE(c.referencia_catastral, '') AS referencia_catastral,
           c.cif,
           c.direccion,
           c.presidente,
@@ -24837,6 +24871,38 @@ def fetch_workspace_fincas_juntas(conn, workspace_id, limit=40):
         LIMIT ?
         """,
         (workspace_id, max(1, min(int(limit or 40), 100))),
+    ).fetchall()
+    return {"rows": [dict(row) for row in rows]}
+
+
+def fetch_workspace_fincas_contabilidad(conn, workspace_id, limit=80, comunidad_id=None):
+    comunidad_id = str(comunidad_id or "").strip()
+    where = ["l.workspace_id = ?"]
+    params = [workspace_id]
+    if comunidad_id:
+        where.append("l.comunidad_id = ?")
+        params.append(comunidad_id)
+    rows = conn.execute(
+        f"""
+        SELECT
+          l.id,
+          l.workspace_id,
+          l.comunidad_id,
+          COALESCE(c.nombre, '') AS comunidad_nombre,
+          l.fecha,
+          l.tipo,
+          l.concepto,
+          l.importe,
+          l.notas,
+          l.created_at,
+          l.updated_at
+        FROM workspace_fincas_contabilidad l
+        LEFT JOIN workspace_fincas_comunidades c ON c.id = l.comunidad_id
+        WHERE {' AND '.join(where)}
+        ORDER BY COALESCE(l.fecha, l.created_at) DESC, l.updated_at DESC
+        LIMIT ?
+        """,
+        (*params, max(1, min(int(limit or 80), 200))),
     ).fetchall()
     return {"rows": [dict(row) for row in rows]}
 
@@ -26108,7 +26174,10 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
     border = (223, 228, 231)
     page_width, page_height = 1240, 1754
     margin_x, top_margin, bottom_margin = 84, 72, 84
-    logo = _load_brand_logo(company.get("logo_url"), max_width=360)
+    servicio_key = normalize_service_key(budget.get("servicio") or "")
+    fincas_logo = _load_asset_logo("logos/fincas-velazquez.png", max_width=420) if servicio_key == "fincas" else None
+    colegio_logo = _load_asset_logo("logos/colegio-administradores.png", max_width=260) if servicio_key == "fincas" else None
+    logo = fincas_logo or _load_brand_logo(company.get("logo_url"), max_width=360)
     font_title = _document_font(44, bold=True)
     font_subtitle = _document_font(20, bold=False)
     font_chip = _document_font(16, bold=True)
@@ -26120,7 +26189,7 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
     font_total = _document_font(28, bold=True)
     font_footer = _document_font(14, bold=False)
     pages = []
-    servicio_label = normalize_service_key(budget.get("servicio") or "") or "-"
+    servicio_label = servicio_key or "-"
     ref_label = budget.get("id") or "-"
 
     def new_page(include_cards=False):
@@ -26166,6 +26235,67 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
             draw.text((right[0] + 24, right[1] + 226), f"Pago {budget.get('forma_pago') or 'Pendiente'}", fill=ink, font=font_table)
             current_y = left[3] + 34
         return image, draw, current_y
+
+    if servicio_key == "fincas":
+        cover = Image.new("RGB", (page_width, page_height), "white")
+        cover_draw = ImageDraw.Draw(cover)
+        cover_draw.rounded_rectangle((0, 0, page_width, 240), radius=0, fill=primary)
+        cover_draw.polygon([(page_width - 240, 0), (page_width, 0), (page_width, 200)], fill=accent)
+        cover_title = "CARTA DE PRESENTACIÓN"
+        cover_draw.text((margin_x, top_margin + 12), cover_title, fill="white", font=font_title)
+        subtitle = "Administración de fincas · Propuesta de servicios"
+        cover_draw.text((margin_x, top_margin + 86), subtitle, fill=(240, 246, 248), font=font_subtitle)
+        if fincas_logo:
+            cover.paste(fincas_logo, (margin_x, 22), fincas_logo)
+        if colegio_logo:
+            cover.paste(colegio_logo, (page_width - margin_x - colegio_logo.width, 32), colegio_logo)
+        else:
+            cover_draw.text((page_width - margin_x - 360, 44), "Colegio de Administradores", fill=(240, 246, 248), font=font_subtitle)
+
+        client_name = str(client.get("nombre") or budget.get("titulo") or "").strip() or "Comunidad"
+        fecha_txt = str(budget.get("fecha") or "").strip() or datetime.now().date().isoformat()
+        try:
+            fecha_txt = format_spanish_long_date_capitalized(fecha_txt)
+        except Exception:
+            pass
+        n_viv = int(calc.get("num_vecinos") or 0)
+        n_loc = int(calc.get("num_locales") or 0)
+        n_tra = int(calc.get("num_trasteros") or 0)
+        n_ap = int(calc.get("num_aparcamientos") or 0)
+        cuota = float(calc.get("cuota_sugerida") or budget.get("subtotal") or budget.get("total") or 0.0)
+        cuota = max(0.0, cuota)
+        cuerpo = [
+            f"{fecha_txt}",
+            "",
+            f"A la atención de {client_name}:",
+            "",
+            "Le remitimos nuestra propuesta de servicios de administración de fincas para su comunidad, con una cuota calculada de forma objetiva a partir de las unidades del edificio.",
+            "",
+            f"Cálculo base: {n_viv} viviendas × 5 € + {n_loc} locales × 1 € + {n_ap} aparcamientos × 1 €"
+            + (f" + {n_tra} trasteros × 1 €" if n_tra else "")
+            + " (mínimo 60 €).",
+            f"Cuota mensual propuesta: {format_eur_short(cuota)} · Total anual: {format_eur_short(cuota * 12)}.",
+            "",
+            "Quedamos a su disposición para concretar alcance, fechas de implantación y condiciones particulares de la comunidad.",
+            "",
+            "Atentamente,",
+            f"{company.get('nombre') or workspace.get('nombre') or 'Fincas Velazquez'}",
+        ]
+        y_cover = 278
+        cover_draw.rounded_rectangle((margin_x, y_cover, page_width - margin_x, page_height - bottom_margin - 22), radius=28, fill=(252, 252, 252), outline=border)
+        text_x = margin_x + 34
+        text_y = y_cover + 30
+        for line in cuerpo:
+            if not str(line).strip():
+                text_y += 18
+                continue
+            wrapped = _pdf_wrap_lines(line, width=98)
+            cover_draw.multiline_text((text_x, text_y), "\n".join(wrapped), fill=ink, font=font_table, spacing=6)
+            sample_box = cover_draw.textbbox((text_x, text_y), "Ag", font=font_table)
+            text_y += (sample_box[3] - sample_box[1] + 8) * len(wrapped)
+        footer_cover = "Documento generado automáticamente desde el CRM. La propuesta económica se detalla en las páginas siguientes."
+        cover_draw.multiline_text((margin_x, page_height - bottom_margin), "\n".join(_pdf_wrap_lines(footer_cover, width=108)), fill=muted, font=font_footer, spacing=4)
+        pages.append(cover)
 
     image, draw, y = new_page(include_cards=True)
     usable_bottom = page_height - bottom_margin
@@ -26921,6 +27051,23 @@ def _load_brand_logo(logo_url=None, max_width=520):
     return logo
 
 
+def _load_asset_logo(asset_rel=None, max_width=520):
+    raw = str(asset_rel or "").strip().lstrip("/")
+    if not raw:
+        return None
+    candidate = ASSETS / raw
+    if not candidate.exists():
+        return None
+    try:
+        logo = Image.open(candidate).convert("RGBA")
+    except Exception:
+        return None
+    if logo.width > max_width:
+        ratio = max_width / float(logo.width)
+        logo = logo.resize((int(logo.width * ratio), int(logo.height * ratio)), Image.LANCZOS)
+    return logo
+
+
 def _pil_multiline(draw, text, font, width, line_gap=8):
     lines = _pdf_wrap_lines(text, width=width)
     sample = "Ag"
@@ -27231,6 +27378,138 @@ def get_workspace_contract_templates():
     }
 
 
+def _load_legal_payload_for_area(area_key):
+    area_key = normalize_service_key(area_key or "")
+    if not area_key:
+        return {}
+    candidate = ROOT.parent / "docs" / f"legal_{area_key}.json"
+    if not candidate.exists():
+        return {}
+    try:
+        payload = json.loads(candidate.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    topics = payload.get("topics") or {}
+    if not isinstance(topics, dict):
+        topics = {}
+    payload["topics"] = topics
+    return payload
+
+
+def _select_contract_legal_topics(area_key, seed_text, max_topics=7):
+    payload = _load_legal_payload_for_area(area_key)
+    topics = payload.get("topics") or {}
+    if not topics:
+        return []
+    seed = normalize_lookup_text(seed_text or "")
+    seed_tokens = {token for token in re.split(r"[^A-Z0-9]+", seed) if len(token) >= 4}
+    ranked = []
+    for key, meta in topics.items():
+        if not isinstance(meta, dict):
+            continue
+        summary = str(meta.get("summary") or "").strip()
+        title = str(meta.get("title") or key).strip()
+        keywords = meta.get("keywords") or []
+        keyword_tokens = set()
+        for kw in keywords if isinstance(keywords, list) else []:
+            kw_norm = normalize_lookup_text(kw or "")
+            keyword_tokens.update({token for token in re.split(r"[^A-Z0-9]+", kw_norm) if len(token) >= 4})
+        score = len(seed_tokens.intersection(keyword_tokens))
+        title_norm = normalize_lookup_text(title or "")
+        if title_norm:
+            title_tokens = {token for token in re.split(r"[^A-Z0-9]+", title_norm) if len(token) >= 4}
+            score += 0.4 * len(seed_tokens.intersection(title_tokens))
+        score += 0.1 if summary else 0
+        ranked.append((score, key, title, summary, meta.get("legal_basis") or []))
+    ranked.sort(key=lambda row: (row[0], len(row[3] or "")), reverse=True)
+    selected = ranked[: max(1, min(int(max_topics or 7), 12))]
+    out = []
+    for score, key, title, summary, legal_basis in selected:
+        basis = []
+        if isinstance(legal_basis, list):
+            basis = [str(item).strip() for item in legal_basis if str(item).strip()]
+        elif isinstance(legal_basis, str):
+            basis = [legal_basis.strip()] if legal_basis.strip() else []
+        out.append({"key": key, "title": title, "summary": summary, "legal_basis": basis})
+    return out
+
+
+def _extract_json_object(text):
+    raw = str(text or "").strip()
+    if not raw:
+        return None, "Respuesta vacía"
+    try:
+        parsed = json.loads(raw)
+        if isinstance(parsed, dict):
+            return parsed, ""
+        return None, "JSON no es un objeto"
+    except Exception:
+        pass
+    start = raw.find("{")
+    end = raw.rfind("}")
+    if start >= 0 and end > start:
+        chunk = raw[start : end + 1]
+        try:
+            parsed = json.loads(chunk)
+            if isinstance(parsed, dict):
+                return parsed, ""
+            return None, "JSON extraído no es un objeto"
+        except Exception as exc:
+            return None, f"No se pudo parsear JSON: {exc}"
+    return None, "No se encontró JSON en la respuesta"
+
+
+def build_workspace_contract_copilot_prompt(template_key, template_meta, company, client, user_notes=None):
+    service_key = normalize_service_key(template_meta.get("servicio") or "")
+    title = str(template_meta.get("title") or "").strip()
+    label = str(template_meta.get("label") or template_key).strip()
+    section_headings = [heading for heading, _ in (template_meta.get("sections") or []) if str(heading or "").strip()]
+    seed_text = " ".join([label, title, " ".join(section_headings)])
+    legal_topics = _select_contract_legal_topics(service_key, seed_text)
+    legal_lines = []
+    for item in legal_topics:
+        basis = "; ".join(item.get("legal_basis") or [])
+        line = f"- {item.get('title')}: {item.get('summary')}"
+        if basis:
+            line += f" (Base: {basis})"
+        legal_lines.append(line)
+    if not legal_lines:
+        legal_lines = ["- No hay biblioteca legal interna para este servicio (usa criterio general y añade disclaimers)."]
+    company_name = str(company.get("nombre") or "").strip() or "Empresa"
+    client_name = str(client.get("nombre") or "").strip() or "Cliente"
+    company_nif = str(company.get("nif") or "").strip()
+    client_nif = str(client.get("nif") or "").strip()
+    notes = str(user_notes or "").strip()
+    notes_block = f"\nNotas del usuario:\n{notes}\n" if notes else ""
+
+    return (
+        "Tarea: genera un BORRADOR de contrato/mandato para un CRM en España.\n"
+        "Importante: NO eres abogado. No des asesoramiento legal definitivo. Devuelve un borrador operativo y añade advertencias.\n"
+        "Formato de salida: responde SOLO con JSON válido (sin texto extra) con las claves:\n"
+        "- body_text: string con el texto completo del documento (sin Markdown), con cláusulas numeradas y saltos de línea.\n"
+        "- clausulas_extra: string con condiciones particulares (1 por línea). Puede ser vacío.\n"
+        "- warning: string breve de advertencia legal/revisión.\n\n"
+        f"Plantilla seleccionada: {template_key}\n"
+        f"Etiqueta: {label}\n"
+        f"Título sugerido del documento: {title or 'Contrato'}\n"
+        f"Servicio: {service_key or 'general'}\n\n"
+        "Partes (datos disponibles):\n"
+        f"- Prestador: {company_name} ({company_nif or 'CIF/NIF pendiente'})\n"
+        f"- Cliente: {client_name} ({client_nif or 'CIF/NIF pendiente'})\n\n"
+        "Biblioteca legal interna (España) — usa estas ideas como guía (no inventes normativa si no aparece aquí):\n"
+        + "\n".join(legal_lines)
+        + notes_block
+        + "\nInstrucciones de redacción:\n"
+        "- Escribe en español (España), formal pero claro.\n"
+        "- Incluye: objeto, alcance, obligaciones del cliente, obligaciones del prestador, precio/honorarios (si no hay dato, pon 'según presupuesto'), duración, resolución, protección de datos, confidencialidad, comunicaciones, jurisdicción/competencia.\n"
+        "- Si es 'administración de fincas', considera propiedad horizontal y junta.\n"
+        "- Si es 'gestoría', considera prestación de servicios y aportación documental.\n"
+        "- Termina con un bloque de firmas.\n"
+    )
+
+
 def build_workspace_contract_pdf(template_key, company, client, payload=None):
     payload = payload or {}
     templates = get_workspace_contract_templates()
@@ -27241,6 +27520,36 @@ def build_workspace_contract_pdf(template_key, company, client, payload=None):
     client_name = client.get("nombre") or "Cliente"
     title = str(tmpl.get("title") or "Contrato").strip()
     subtitle = f"{company_name} · {client_name}"
+    body_text = str(payload.get("body_text") or "").strip()
+    if body_text:
+        lower_head = body_text[:400].lower()
+        include_partes = not ("prestador" in lower_head and "cliente" in lower_head)
+        body_lines = []
+        if include_partes:
+            body_lines.extend(
+                [
+                    "PARTES",
+                    f"Prestador: {company_name}",
+                    f"Razón social: {company.get('razon_social') or company_name}",
+                    f"CIF/NIF: {company.get('nif') or '-'}",
+                    f"Dirección: {company.get('direccion_fiscal') or company.get('direccion') or '-'}",
+                    "",
+                    f"Cliente: {client_name}",
+                    f"CIF/NIF cliente: {client.get('nif') or '-'}",
+                    f"Email cliente: {client.get('email') or '-'}",
+                    f"Teléfono cliente: {client.get('telefono') or '-'}",
+                    "",
+                ]
+            )
+        body_lines.extend([line.rstrip() for line in body_text.splitlines()])
+        footer = list(tmpl.get("footer") or [])
+        return build_branded_text_document_pdf(
+            title,
+            subtitle,
+            body_lines,
+            footer_lines=footer,
+            brand_logo_url=company.get("logo_url"),
+        )
     sections = [
         (
             "Partes",
@@ -29057,13 +29366,16 @@ class Handler(BaseHTTPRequestHandler):
 	            "/api/workspace_rrhh_ausencia_estado",
 	            "/api/workspace_rrhh_gasto",
 	            "/api/workspace_rrhh_gasto_estado",
-	            "/api/workspace_rrhh_documento",
-	            "/api/workspace_rrhh_reset",
-	            "/api/workspace_presupuestos",
-	            "/api/workspace_fincas_comunidades",
-	            "/api/workspace_fincas_incidencias",
-	            "/api/workspace_fincas_proveedores",
-	            "/api/workspace_fincas_juntas",
+            "/api/workspace_rrhh_documento",
+            "/api/workspace_rrhh_reset",
+            "/api/workspace_presupuestos",
+            "/api/workspace_contratos",
+            "/api/workspace_contrato_copilot",
+            "/api/workspace_fincas_comunidades",
+            "/api/workspace_fincas_incidencias",
+            "/api/workspace_fincas_proveedores",
+            "/api/workspace_fincas_juntas",
+            "/api/workspace_fincas_contabilidad",
         ):
             json_response(self, {"error": "Endpoint no valido"}, status=404)
             return
@@ -34489,6 +34801,7 @@ class Handler(BaseHTTPRequestHandler):
                 workspace_id,
                 empresa_id,
                 nombre,
+                (payload.get("referencia_catastral") or "").strip() or None,
                 (payload.get("cif") or "").strip() or None,
                 (payload.get("direccion") or "").strip() or None,
                 (payload.get("presidente") or "").strip() or None,
@@ -34505,7 +34818,7 @@ class Handler(BaseHTTPRequestHandler):
                 conn.execute(
                     """
                     UPDATE workspace_fincas_comunidades
-                    SET workspace_id = ?, empresa_id = ?, nombre = ?, cif = ?, direccion = ?, presidente = ?,
+                    SET workspace_id = ?, empresa_id = ?, nombre = ?, referencia_catastral = ?, cif = ?, direccion = ?, presidente = ?,
                         secretario = ?, estado = ?, num_vecinos = ?, num_locales = ?, num_trasteros = ?,
                         num_aparcamientos = ?, cuota_sugerida = ?, cuota_mensual = ?, updated_at = datetime(?)
                     WHERE id = ? AND workspace_id = ?
@@ -34517,9 +34830,9 @@ class Handler(BaseHTTPRequestHandler):
                 conn.execute(
                     """
                     INSERT INTO workspace_fincas_comunidades (
-                      id, workspace_id, empresa_id, nombre, cif, direccion, presidente, secretario,
+                      id, workspace_id, empresa_id, nombre, referencia_catastral, cif, direccion, presidente, secretario,
                       estado, num_vecinos, num_locales, num_trasteros, num_aparcamientos, cuota_sugerida, cuota_mensual, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
                     """,
                     (record_id, *values, now, now),
                 )
@@ -34598,6 +34911,7 @@ class Handler(BaseHTTPRequestHandler):
             fecha = str(payload.get("fecha") or "").strip() or datetime.now().date().isoformat()
             notas = str(payload.get("notas") or "").strip() or None
             clausulas_extra = str(payload.get("clausulas_extra") or "").strip()
+            body_text = str(payload.get("body_text") or "").strip()
             store_pdf = str(payload.get("store_pdf") or "").strip().lower() in {"1", "true", "si", "sí", "on", "yes"}
             if not session:
                 json_response(self, {"error": "No autenticado"}, status=401)
@@ -34651,6 +34965,8 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 pass
             body = {"clausulas_extra": clausulas_extra}
+            if body_text:
+                body["body_text"] = body_text
             body_json = json.dumps(body, ensure_ascii=False) if body else None
             values = (
                 workspace_id,
@@ -34734,6 +35050,91 @@ class Handler(BaseHTTPRequestHandler):
             conn.commit()
             json_response(self, {"ok": True, "id": record_id, "doc_url": doc_url})
             return
+        elif parsed.path == "/api/workspace_contrato_copilot":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            empresa_id = str(payload.get("empresa_id") or "").strip()
+            template_key = str(payload.get("template_key") or "").strip()
+            user_notes = str(payload.get("user_notes") or payload.get("notas") or payload.get("notes") or "").strip()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            if not workspace_id or not empresa_id or not template_key:
+                json_response(self, {"error": "workspace_id, empresa_id y template_key requeridos"}, status=400)
+                return
+            ok, err = enforce_workspace_membership(conn, session, workspace_id)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            if not openai_available():
+                json_response(self, {"error": "OPENAI_API_KEY no configurada"}, status=400)
+                return
+            templates = get_workspace_contract_templates()
+            tmpl = templates.get(template_key)
+            if not tmpl:
+                json_response(self, {"error": "plantilla no encontrada"}, status=404)
+                return
+            empresa = conn.execute(
+                """
+                SELECT id, nombre, razon_social, nif, direccion, direccion_fiscal, telefono, email, web, iban, bic, banco_nombre, logo_url
+                FROM empresas
+                WHERE id = ?
+                LIMIT 1
+                """,
+                (empresa_id,),
+            ).fetchone()
+            if not empresa:
+                json_response(self, {"error": "empresa no encontrada"}, status=404)
+                return
+            cliente_id = str(payload.get("cliente_id") or "").strip()
+            client_row = None
+            if cliente_id:
+                client_row = conn.execute(
+                    "SELECT id, nombre, nif, email, telefono FROM clientes WHERE id = ? LIMIT 1",
+                    (cliente_id,),
+                ).fetchone()
+            if not client_row:
+                client_row = {
+                    "id": "",
+                    "nombre": str(payload.get("cliente_nombre") or payload.get("cliente_lookup") or "Cliente").strip() or "Cliente",
+                    "nif": str(payload.get("cliente_nif") or "").strip(),
+                    "email": str(payload.get("cliente_email") or "").strip(),
+                    "telefono": str(payload.get("cliente_telefono") or "").strip(),
+                }
+            prompt = build_workspace_contract_copilot_prompt(
+                template_key,
+                tmpl,
+                dict(empresa),
+                dict(client_row) if not isinstance(client_row, dict) else client_row,
+                user_notes=user_notes,
+            )
+            output, oerr = call_openai(
+                prompt,
+                temperature=0.2,
+                max_tokens=1400,
+                system_text="Eres un copiloto que redacta borradores de contratos para un CRM en España. Responde SOLO con JSON válido.",
+            )
+            if oerr:
+                json_response(self, {"error": oerr}, status=502)
+                return
+            parsed_json, perr = _extract_json_object(output)
+            if perr:
+                json_response(self, {"error": "No se pudo interpretar la respuesta del copiloto", "detail": perr}, status=502)
+                return
+            body_text = str(parsed_json.get("body_text") or "").strip()
+            clausulas_extra = str(parsed_json.get("clausulas_extra") or "").strip()
+            warning = str(parsed_json.get("warning") or "").strip()
+            json_response(
+                self,
+                {
+                    "ok": True,
+                    "template_key": template_key,
+                    "body_text": body_text,
+                    "clausulas_extra": clausulas_extra,
+                    "warning": warning,
+                },
+            )
+            return
         elif parsed.path == "/api/workspace_fincas_proveedores":
             workspace_id = str(payload.get("workspace_id") or "").strip()
             empresa_id = str(payload.get("empresa_id") or "").strip()
@@ -34813,6 +35214,69 @@ class Handler(BaseHTTPRequestHandler):
                     INSERT INTO workspace_fincas_juntas (
                       id, workspace_id, comunidad_id, fecha, tipo, estado, orden_dia, acuerdos, proxima_fecha, created_at, updated_at
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                    """,
+                    (record_id, *values, now, now),
+                )
+            conn.commit()
+            json_response(self, {"ok": True, "id": record_id})
+            return
+        elif parsed.path == "/api/workspace_fincas_contabilidad":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            record_id = str(payload.get("id") or "").strip()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            ok, err = enforce_workspace_membership(conn, session, workspace_id)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            tipo = str(payload.get("tipo") or "Gasto").strip() or "Gasto"
+            if tipo not in {"Ingreso", "Gasto"}:
+                tipo = "Gasto"
+            concepto = str(payload.get("concepto") or "").strip()
+            if not concepto:
+                json_response(self, {"error": "concepto requerido"}, status=400)
+                return
+            importe = parse_money_value(payload.get("importe"))
+            if importe is None:
+                json_response(self, {"error": "importe requerido"}, status=400)
+                return
+            values = (
+                workspace_id,
+                (payload.get("comunidad_id") or "").strip() or None,
+                (payload.get("fecha") or "").strip() or None,
+                tipo,
+                concepto,
+                round(float(importe), 2),
+                (payload.get("notas") or "").strip() or None,
+            )
+            if record_id:
+                current = conn.execute(
+                    "SELECT id FROM workspace_fincas_contabilidad WHERE id = ? AND workspace_id = ? LIMIT 1",
+                    (record_id, workspace_id),
+                ).fetchone()
+                if not current:
+                    json_response(self, {"error": "movimiento no encontrado"}, status=404)
+                    return
+                conn.execute(
+                    """
+                    UPDATE workspace_fincas_contabilidad
+                    SET workspace_id = ?, comunidad_id = ?, fecha = ?, tipo = ?, concepto = ?, importe = ?, notas = ?, updated_at = datetime(?)
+                    WHERE id = ? AND workspace_id = ?
+                    """,
+                    (*values, now, record_id, workspace_id),
+                )
+            else:
+                record_id = os.urandom(16).hex()
+                conn.execute(
+                    """
+                    INSERT INTO workspace_fincas_contabilidad (
+                      id, workspace_id, comunidad_id, fecha, tipo, concepto, importe, notas, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
                     """,
                     (record_id, *values, now, now),
                 )
@@ -43046,6 +43510,24 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "workspace_id requerido"}, status=400)
                 return
             json_response(self, fetch_workspace_fincas_juntas(conn, workspace_id, limit=limit))
+            return
+
+        if path == "/api/workspace_fincas_contabilidad":
+            workspace_id = (params.get("workspace_id", [""])[0] or "").strip()
+            limit = params.get("limit", ["80"])[0]
+            comunidad_id = (params.get("comunidad_id", [""])[0] or "").strip()
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            ok, err = enforce_workspace_membership(conn, session, workspace_id)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            json_response(self, fetch_workspace_fincas_contabilidad(conn, workspace_id, limit=limit, comunidad_id=comunidad_id))
             return
 
         if path == "/api/workspace_automatizacion_logs":
