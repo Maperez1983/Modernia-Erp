@@ -1,4 +1,5 @@
 import unittest
+import re
 from pathlib import Path
 
 
@@ -31,6 +32,18 @@ class FrontendSmokeTests(unittest.TestCase):
         self.assertIn("data/*.bak_*", gitignore)
         self.assertIn("*.sqlite-wal", gitignore)
         self.assertIn("__pycache__/", gitignore)
+
+    def test_workspace_fincas_opens_workspace_module(self):
+        app_js = (WEB_DIR / "app.js").read_text(encoding="utf-8")
+        self.assertNotIn("fincas: () => openCompany(FINCAS_COMPANY, { allowRestricted: true })", app_js)
+        self.assertIn('fincas: () => focusWorkspaceView("fincas"', app_js)
+        self.assertIsNotNone(
+            re.search(
+                r"\bfincas\s*:\s*{.*?action\s*:\s*\(\)\s*=>\s*{.*?if\s*\(isTenantWorkspaceMode\(\)\)\s*{.*?focusWorkspaceView\(\s*[\"']fincas[\"']",
+                app_js,
+                re.S,
+            )
+        )
 
 
 if __name__ == "__main__":

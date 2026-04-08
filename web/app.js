@@ -4996,7 +4996,7 @@ const WORKSPACE_LAUNCHERS = {
     actionLabel: "Ver módulo",
     action: () => {
       if (isTenantWorkspaceMode()) {
-        openCompany(FINCAS_COMPANY, { allowRestricted: true });
+        focusWorkspaceView("fincas", workspaceFincasCommunityForm, { scroll: true, forceTenantView: true });
         return;
       }
       focusWorkspaceView("fincas", workspaceFincasCommunityForm);
@@ -6913,7 +6913,7 @@ const renderWorkspaceHomeDetail = (container, enabledKeys = new Set()) => {
       inmobiliaria: () => openCrmInmobiliario(),
       financiacion: () => openFinCrm(),
       reformas: () => openCompany(REFORMAS_COMPANY, { allowRestricted: true }),
-      fincas: () => openCompany(FINCAS_COMPANY, { allowRestricted: true }),
+      fincas: () => focusWorkspaceView("fincas", workspaceFincasCommunityForm, { scroll: true, forceTenantView: true }),
       crm360: () => openClientesModule(),
     };
     const serviceAction = serviceActions[containerKey];
@@ -19385,11 +19385,23 @@ const loadSegurosContabilidad = () => {
     seguros_only: "1",
     q,
   });
+  params.set("sync", "1");
   api(`/api/gestoria_contabilidad?${params.toString()}`).then(async (data) => {
     const rows = data.rows || [];
     if (!rows.length) {
-      segurosContabilidadTable.innerHTML = "<p class='muted'>Sin asientos contables de seguros.</p>";
+      const syncState = data.seguros_sync || {};
+      const running = Boolean(syncState?.running);
+      const scheduled = Boolean(syncState?.scheduled);
+      const msg = (running || scheduled)
+        ? "Generando asientos contables de seguros…"
+        : "Sin asientos contables de seguros.";
+      segurosContabilidadTable.innerHTML = `<p class='muted'>${msg}</p>`;
       segurosContabilidadInfo.textContent = "";
+      if (running || scheduled) {
+        window.setTimeout(() => {
+          loadSegurosContabilidad();
+        }, 1500);
+      }
       return;
     }
     const clienteIds = [
@@ -30890,8 +30902,14 @@ const loadSegurosKpis = () => {
       card.innerHTML = `<div class="kpi-label">${label}</div><div class="kpi-value">${value}</div>`;
       wrapper.appendChild(card);
     };
-    addKpi("Pólizas registradas (con nº)", data.total || 0);
-    addKpi("Pólizas en vigor (con nº)", data.en_vigor || 0);
+    addKpi("Pólizas registradas", data.total || 0);
+    if (Number(data.total_con_numero || 0) > 0) {
+      addKpi("Con nº póliza", data.total_con_numero || 0);
+    }
+    addKpi("Pólizas en vigor", data.en_vigor || 0);
+    if (Number(data.en_vigor_con_numero || 0) > 0) {
+      addKpi("En vigor (con nº)", data.en_vigor_con_numero || 0);
+    }
     if (Number(data.en_vigor_sin_numero || 0) > 0) {
       addKpi("En vigor sin nº póliza", data.en_vigor_sin_numero || 0);
     }
