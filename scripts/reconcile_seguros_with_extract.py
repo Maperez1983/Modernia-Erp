@@ -121,6 +121,8 @@ def fetch_seguros(conn, empresa_id: str) -> list[dict[str, Any]]:
           produccion, colaborador,
           estado, estado_poliza,
           poliza_key, poliza_url,
+          cliente_id,
+          (SELECT nif FROM clientes WHERE clientes.id = seguros.cliente_id) AS cliente_nif,
           created_at, updated_at
         FROM seguros
         WHERE empresa_id = %s
@@ -140,6 +142,28 @@ def fetch_seguros(conn, empresa_id: str) -> list[dict[str, Any]]:
 
 def clean_text(v: Any) -> str:
     s = str(v or "").strip()
+    return s
+
+
+def normalize_nif(value: Any) -> str:
+    return clean_text(value).upper().replace(" ", "").replace("-", "").replace(".", "")
+
+
+def normalize_date(value: Any) -> str:
+    s = clean_text(value)
+    if not s:
+        return ""
+    # YYYY-MM-DD
+    if len(s) == 10 and s[4] == "-" and s[7] == "-":
+        return s
+    # DD/MM/YYYY o DD-MM-YYYY
+    for sep in ("/", "-"):
+        if sep in s:
+            parts = s.split(sep)
+            if len(parts) == 3 and len(parts[2]) == 4:
+                dd, mm, yy = parts[0].zfill(2), parts[1].zfill(2), parts[2]
+                if dd.isdigit() and mm.isdigit() and yy.isdigit():
+                    return f"{yy}-{mm}-{dd}"
     return s
 
 
@@ -258,9 +282,15 @@ def main() -> None:
 
         seguros = fetch_seguros(conn, empresa_id)
         seguros_by_key: dict[Key, dict[str, Any]] = {}
+        seguros_by_nif_company: dict[tuple[str, str], list[dict[str, Any]]] = {}
         for s in seguros:
             k = normalize_key(s.get("poliza_numero") or "", s.get("compania") or "")
             if not k.poliza_norm:
+                # index por NIF+compañía para fallback si hay cliente vinculado
+                nif_norm = normalize_nif(s.get("cliente_nif") or "")
+                comp_norm = normalize_company_key(clean_text(s.get("compania") or ""))
+                if nif_norm and comp_norm:
+                    seguros_by_nif_company.setdefault((nif_norm, comp_norm), []).append(s)
                 continue
             # Si hay colisión, nos quedamos con el que tenga más datos (heurística simple)
             prev = seguros_by_key.get(k)
@@ -279,9 +309,12 @@ def main() -> None:
             extract_rows = [r for r in extract_rows if (r.get("doc_kind") or "") == "poliza"]
 
         matched = 0
+        matched_by_policy = 0
+        matched_by_nif_fallback = 0
         update_rows: list[dict[str, Any]] = []
         missing_in_crm: list[dict[str, Any]] = []
         used_db_ids: set[str] = set()
+        ambiguous_fallback: list[dict[str, Any]] = []
 
         for r in extract_rows:
             pol = clean_text(r.get("poliza_numero") or "")
@@ -290,6 +323,42 @@ def main() -> None:
             if not k.poliza_norm:
                 continue
             db_row = seguros_by_key.get(k)
+            matched_via_fallback = False
+            if not db_row:
+                # fallback: si el CSV tiene nif/dni, intenta casar con seguros sin poliza_numero vía cliente_nif+compañía
+                nif_norm = normalize_nif(r.get("nif") or r.get("dni") or "")
+                comp_norm = normalize_company_key(comp)
+                candidates = seguros_by_nif_company.get((nif_norm, comp_norm), []) if (nif_norm and comp_norm) else []
+                if candidates:
+                    # Prioriza: póliza vacía + fecha_efecto más parecida
+                    eff = normalize_date(r.get("fecha_efecto") or "")
+                    ranked = []
+                    for c in candidates:
+                        c_pol = clean_text(c.get("poliza_numero") or "")
+                        c_eff = normalize_date(c.get("fecha_efecto") or "")
+                        score = 0
+                        if not c_pol:
+                            score += 10
+                        if eff and c_eff and eff == c_eff:
+                            score += 5
+                        ranked.append((score, c))
+                    ranked.sort(key=lambda t: t[0], reverse=True)
+                    # Si el mejor candidato es claramente único (score estrictamente mayor)
+                    if len(ranked) == 1 or ranked[0][0] > ranked[1][0]:
+                        db_row = ranked[0][1]
+                        matched_by_nif_fallback += 1
+                        matched_via_fallback = True
+                    else:
+                        ambiguous_fallback.append(
+                            {
+                                "poliza_numero": pol,
+                                "compania": comp,
+                                "nif": nif_norm,
+                                "fecha_efecto": eff,
+                                "candidates": [clean_text(x.get("id") or "") for _s, x in ranked[:6]],
+                            }
+                        )
+
             if not db_row:
                 missing_in_crm.append(
                     {
@@ -306,6 +375,8 @@ def main() -> None:
                 continue
 
             matched += 1
+            if not matched_via_fallback:
+                matched_by_policy += 1
             used_db_ids.add(clean_text(db_row.get("id") or ""))
             updates = build_updates(db_row, r)
             if updates:
@@ -347,6 +418,9 @@ def main() -> None:
             "crm_seguros_total": len(seguros),
             "crm_seguros_indexed_by_poliza": len(seguros_by_key),
             "matched_by_poliza_compania": matched,
+            "matched_by_policy_key": matched_by_policy,
+            "matched_by_nif_fallback": matched_by_nif_fallback,
+            "ambiguous_nif_fallback": len(ambiguous_fallback),
             "missing_in_crm": len(missing_in_crm),
             "unmatched_in_extract": len(unmatched_in_extract),
             "updates_proposed": len(update_rows),
@@ -355,6 +429,7 @@ def main() -> None:
                 "updates_csv": str(updates_path),
                 "missing_in_crm_csv": str(missing_in_crm_path),
                 "unmatched_in_extract_csv": str(unmatched_in_extract_path),
+                "ambiguous_fallback_json": str(out_dir / f"{base}_ambiguous_fallback.json"),
                 "summary_json": str(summary_path),
             },
         }
@@ -362,6 +437,9 @@ def main() -> None:
         write_csv(update_rows, updates_path)
         write_csv(missing_in_crm, missing_in_crm_path)
         write_csv(unmatched_in_extract, unmatched_in_extract_path)
+        (out_dir / f"{base}_ambiguous_fallback.json").write_text(
+            json.dumps(ambiguous_fallback, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
         summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
         print(json.dumps(summary, ensure_ascii=False, indent=2))
     finally:
@@ -373,4 +451,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

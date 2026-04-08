@@ -45,6 +45,8 @@ from web.server import (  # noqa: E402
 
 DEFAULT_FIELDS = (
     "tomador",
+    "nif",
+    "dni",
     "poliza_numero",
     "compania",
     "ramo",
