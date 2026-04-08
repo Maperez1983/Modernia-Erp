@@ -13400,6 +13400,7 @@ const renderWorkspaceFincasCommunityList = (rows = []) => {
               <div>
                 <strong>${row.nombre || "-"}</strong>
                 <div class="muted">${row.direccion || row.empresa_nombre || "-"}</div>
+                <div class="muted">${row.cif ? `CIF: ${escapeHtml(String(row.cif))} · ` : ""}${row.presidente ? `Presidente: ${escapeHtml(String(row.presidente))}` : ""}</div>
                 <div class="muted">${row.referencia_catastral ? `Catastro: ${row.referencia_catastral} · ` : ""}${numberFormatter.format(Number(row.num_vecinos || 0))} viviendas · ${numberFormatter.format(Number(row.num_locales || 0))} locales · ${numberFormatter.format(Number(row.num_trasteros || 0))} trasteros · ${numberFormatter.format(Number(row.num_aparcamientos || 0))} aparcamientos</div>
               </div>
               <div class="workspace-billing-meta">
