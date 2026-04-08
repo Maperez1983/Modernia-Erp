@@ -16,4 +16,9 @@ web/uploads/
 reports/catastro/
 reports/aon_miconversor/
 reports/miconversor_autonomos_ocr.xlsx
+reports/seguros_extract_*.csv
+reports/seguros_extract_*.json
+reports/seguros_extract_*_summary.json
+reports/seguros_analyze_*.csv
+reports/seguros_analyze_*.json
 .venv/
