@@ -3,7 +3,7 @@
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v63";
+const APP_SW_VERSION = "v64";
 
 // Workspace tenant por defecto del producto (branding de software). Mantiene compatibilidad con slugs legacy.
 const DEFAULT_TENANT_WORKSPACE_SLUG = "verifika2";
@@ -1811,6 +1811,8 @@ const workspaceFincasBudgetCompanyLogo = document.getElementById("workspaceFinca
 const workspaceFincasBudgetColegioLogo = document.getElementById("workspaceFincasBudgetColegioLogo");
 const workspaceFincasBudgetServiciosIncluidos = document.getElementById("workspaceFincasBudgetServiciosIncluidos");
 const workspaceFincasBudgetHero = document.getElementById("workspaceFincasBudgetHero");
+const workspaceFincasBudgetMapActions = document.getElementById("workspaceFincasBudgetMapActions");
+const workspaceFincasBudgetMapLink = document.getElementById("workspaceFincasBudgetMapLink");
 const workspaceFincasBudgetMapWrap = document.getElementById("workspaceFincasBudgetMapWrap");
 const workspaceFincasBudgetMap = document.getElementById("workspaceFincasBudgetMap");
 const workspaceFincasBudgetBuildingPhoto = document.getElementById("workspaceFincasBudgetBuildingPhoto");
@@ -13591,22 +13593,33 @@ const syncWorkspaceFincasCommunityMap = () => {
     workspaceFincasCommunityMap.removeAttribute("src");
     return;
   }
-  const q = encodeURIComponent(addr);
+  const normalizedAddr = /españa|spain/i.test(addr) ? addr : `${addr}, España`;
+  const q = encodeURIComponent(normalizedAddr);
   workspaceFincasCommunityMapWrap.classList.remove("hidden");
-  workspaceFincasCommunityMap.setAttribute("src", `https://www.google.com/maps?q=${q}&output=embed`);
+  workspaceFincasCommunityMap.setAttribute("src", `https://www.google.com/maps?hl=es&z=16&output=embed&q=${q}`);
 };
 
 const syncWorkspaceFincasBudgetMap = () => {
   if (!workspaceFincasBudgetQuickForm || !workspaceFincasBudgetMapWrap || !workspaceFincasBudgetMap) return;
   const addr = String(workspaceFincasBudgetQuickForm.querySelector('[name="comunidad_direccion"]')?.value || "").trim();
   if (!addr) {
+    try {
+      workspaceFincasBudgetMapActions?.classList?.add("hidden");
+    } catch {}
     workspaceFincasBudgetMapWrap.classList.add("hidden");
     workspaceFincasBudgetMap.removeAttribute("src");
     return;
   }
-  const q = encodeURIComponent(addr);
+  const normalizedAddr = /españa|spain/i.test(addr) ? addr : `${addr}, España`;
+  const q = encodeURIComponent(normalizedAddr);
+  try {
+    if (workspaceFincasBudgetMapActions && workspaceFincasBudgetMapLink) {
+      workspaceFincasBudgetMapLink.href = `https://www.google.com/maps/search/?api=1&query=${q}`;
+      workspaceFincasBudgetMapActions.classList.remove("hidden");
+    }
+  } catch {}
   workspaceFincasBudgetMapWrap.classList.remove("hidden");
-  workspaceFincasBudgetMap.setAttribute("src", `https://www.google.com/maps?q=${q}&output=embed`);
+  workspaceFincasBudgetMap.setAttribute("src", `https://www.google.com/maps?hl=es&z=16&output=embed&q=${q}`);
 };
 
 const fillWorkspaceFincasCommunityForm = (record = null) => {

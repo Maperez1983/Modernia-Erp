@@ -1526,11 +1526,11 @@
 		              <form id="workspaceFincasBudgetQuickForm" class="form-grid budget-quick-form">
 		                <input type="hidden" name="comunidad_id" />
 		                <input type="hidden" name="edificio_foto_key" />
-		                <label class="span-2">
+		                <label>
 		                  Empresa emisora
 		                  <select name="empresa_id" required></select>
 		                </label>
-		                <label class="span-2">
+		                <label>
 		                  Precargar datos (opcional)
 		                  <select name="comunidad_id_lookup"></select>
 		                </label>
@@ -1544,6 +1544,9 @@
 		                  Dirección
 		                  <input name="comunidad_direccion" required placeholder="Calle, número, localidad" />
 		                </label>
+		                <div class="span-2 budget-map-actions hidden" id="workspaceFincasBudgetMapActions">
+		                  <a id="workspaceFincasBudgetMapLink" target="_blank" rel="noopener">Abrir en Google Maps</a>
+		                </div>
 		                <div class="span-2 hidden" id="workspaceFincasBudgetMapWrap">
 		                  <iframe
 		                    id="workspaceFincasBudgetMap"
@@ -1561,7 +1564,7 @@
 		                  Ref. catastral
 		                  <input name="referencia_catastral" placeholder="Opcional" />
 		                </label>
-		                <label class="span-2">
+		                <label>
 		                  Estado
 		                  <select name="estado">
 		                    <option>Borrador</option>
@@ -1571,7 +1574,7 @@
 		                  </select>
 		                </label>
 		                <h4 class="span-2">Datos del presidente / solicitante</h4>
-		                <label class="span-2">
+		                <label>
 		                  Nombre
 		                  <input name="solicitante_nombre" required />
 		                </label>
@@ -1583,13 +1586,13 @@
 		                  Teléfono
 		                  <input name="solicitante_telefono" />
 		                </label>
+		                <label>
+		                  Email
+		                  <input name="solicitante_email" type="email" />
+		                </label>
 		                <label class="span-2">
 		                  Dirección
 		                  <input name="solicitante_direccion" />
-		                </label>
-		                <label class="span-2">
-		                  Email
-		                  <input name="solicitante_email" type="email" />
 		                </label>
 		                <h4 class="span-2">Datos del edificio</h4>
 		                <label>

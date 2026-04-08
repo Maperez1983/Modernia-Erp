@@ -7179,6 +7179,36 @@ body.theme-operativa .meta-status .status span {
   color: var(--ink);
 }
 
+.budget-quick-form label {
+  align-content: start;
+}
+
+.budget-quick-form input:not([type="file"]),
+.budget-quick-form select {
+  min-height: 38px;
+}
+
+.budget-quick-form textarea {
+  resize: vertical;
+  min-height: 120px;
+}
+
+.budget-map-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: -4px;
+}
+
+.budget-map-actions a {
+  font-size: 12px;
+  color: var(--muted);
+  text-decoration: underline;
+}
+
+.budget-map-actions a:hover {
+  color: var(--ink);
+}
+
 @media (max-width: 680px) {
   .budget-quick-form.form-grid {
     grid-template-columns: 1fr;
