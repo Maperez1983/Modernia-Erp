@@ -1569,6 +1569,9 @@ const state = {
   currentWorkspaceClientData: null,
   currentWorkspaceClients: [],
   currentWorkspaceView: "overview",
+  currentWorkspaceTenantSection: "",
+  workspaceCompanySearchQuery: "",
+  workspaceCompanyShowInactive: false,
   workspaceFincasTab: "dashboard",
   currentWorkspaceData: {},
   workspaceBillingRows: [],
@@ -1661,6 +1664,8 @@ const holdingOrgChart = document.getElementById("holdingOrgChart");
 const workspaceKpis = document.getElementById("workspaceKpis");
 const workspaceViewTabs = document.getElementById("workspaceViewTabs");
 const workspaceEngineTabs = document.getElementById("workspaceEngineTabs");
+const workspaceTenantTabs = document.getElementById("workspaceTenantTabs");
+const workspaceTenantContext = document.getElementById("workspaceTenantContext");
 const workspaceMotoresBackBtn = document.getElementById("workspaceMotoresBackBtn");
 const workspaceCompanySwitcher = document.getElementById("workspaceCompanySwitcher");
 const workspaceOverviewHealth = document.getElementById("workspaceOverviewHealth");
@@ -1840,6 +1845,7 @@ const workspaceFincasMeetingStatus = document.getElementById("workspaceFincasMee
 const workspaceFincasMeetingList = document.getElementById("workspaceFincasMeetingList");
 const workspaceViewPanels = Array.from(document.querySelectorAll("[data-workspace-view]"));
 const workspaceViewButtons = Array.from(document.querySelectorAll("[data-workspace-view-tab]"));
+const workspaceTenantButtons = Array.from(document.querySelectorAll("[data-workspace-tenant-tab]"));
 const workspaceEngineButtons = Array.from(document.querySelectorAll("[data-workspace-engine-tab]"));
 // Scope engine panels to the Motores view to avoid hiding content from other workspace tabs.
 const workspaceEnginePanels = Array.from(document.querySelectorAll("[data-workspace-engine]")).filter((panel) =>
@@ -4602,6 +4608,49 @@ const findWorkspaceRecord = (rows = [], identifier = "") => {
   }) || null;
 };
 
+const renderWorkspaceTenantContext = () => {
+  if (!workspaceTenantContext) return;
+  const workspace = state.currentWorkspaceDetail?.workspace || null;
+  if (!workspace) {
+    workspaceTenantContext.innerHTML = "";
+    workspaceTenantContext.classList.add("hidden");
+    workspaceTenantContext.hidden = true;
+    return;
+  }
+
+  workspaceTenantContext.classList.remove("hidden");
+  workspaceTenantContext.hidden = false;
+
+  const name = getWorkspaceDisplayName(workspace);
+  const kind = String(workspace.kind || "").trim();
+  const estado = String(workspace.estado || "").trim();
+  const plan = String(workspace.plan || "").trim();
+  const companiesTotal = Number(workspace.empresas_total || state.currentWorkspaceDetail?.companies?.length || 0);
+  const modulesTotal = Number(workspace.modulos_activos || (state.currentWorkspaceEnabledModules || []).length || 0);
+  const metaParts = [kind, plan, estado].filter(Boolean);
+  const counts = [
+    companiesTotal ? `${numberFormatter.format(companiesTotal)} empresas` : "",
+    modulesTotal ? `${numberFormatter.format(modulesTotal)} módulos` : "",
+  ].filter(Boolean);
+
+  workspaceTenantContext.innerHTML = `
+    <div>
+      <strong>${escapeHtml(String(name || "Workspace"))}</strong>
+      <div class="muted">${escapeHtml(metaParts.join(" · "))}${counts.length ? ` · ${escapeHtml(counts.join(" · "))}` : ""}</div>
+    </div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+      <button type="button" class="secondary ghost" data-workspace-tenant-jump="general">Datos</button>
+      <button type="button" class="secondary ghost" data-workspace-tenant-jump="empresas">Empresas</button>
+    </div>
+  `;
+  workspaceTenantContext.querySelectorAll("[data-workspace-tenant-jump]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const section = button.dataset.workspaceTenantJump || "general";
+      setWorkspaceTenantSection(section, { scroll: true });
+    });
+  });
+};
+
 const updateWorkspaceEntryChrome = () => {
   const mode = state.currentWorkspaceEntryMode || "platform";
   const authUser = getAuthScopeUser();
@@ -4667,6 +4716,7 @@ const updateWorkspaceEntryChrome = () => {
     button.classList.remove("hidden");
     button.disabled = false;
   });
+  renderWorkspaceTenantContext();
 };
 
 const setWorkspaceCompanyContext = (companyId = "", options = {}) => {
@@ -4909,6 +4959,43 @@ const normalizeWorkspaceEngineKey = (value = "") => {
   return "documental";
 };
 
+const normalizeTenantSectionKey = (value = "") => {
+  const key = String(value || "").trim().toLowerCase();
+  if (["general", "empresas", "usuarios", "modulos", "módulos", "permisos"].includes(key)) {
+    if (key === "módulos") return "modulos";
+    return key;
+  }
+  return "general";
+};
+
+const setWorkspaceTenantSection = (section = "general", options = {}) => {
+  const { persist = true, scroll = false } = options;
+  const normalized = normalizeTenantSectionKey(section);
+  state.currentWorkspaceTenantSection = normalized;
+  if (persist) {
+    try {
+      localStorage.setItem("crm.workspaceTenantSection", normalized);
+    } catch {}
+  }
+  if (workspaceTenantTabs) {
+    workspaceTenantTabs.querySelectorAll("[data-workspace-tenant-tab]").forEach((button) => {
+      button.classList.toggle("active", normalizeTenantSectionKey(button.dataset.workspaceTenantTab || "") === normalized);
+    });
+  }
+  const panels = Array.from(document.querySelectorAll("[data-tenant-section]")).filter((panel) =>
+    Boolean(panel.closest('[data-workspace-view="tenant"]'))
+  );
+  panels.forEach((panel) => {
+    const panelKey = normalizeTenantSectionKey(panel.dataset.tenantSection || "");
+    const isHidden = panelKey !== normalized;
+    panel.classList.toggle("hidden", isHidden);
+    panel.hidden = isHidden;
+  });
+  if (scroll && workspaceTenantTabs && typeof workspaceTenantTabs.scrollIntoView === "function") {
+    workspaceTenantTabs.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+};
+
 const setWorkspaceEngineView = (engine = "documental") => {
   const normalized = normalizeWorkspaceEngineKey(engine);
   state.currentWorkspaceEngineView = normalized;
@@ -4953,6 +5040,15 @@ const setWorkspaceView = (view = "overview", options = {}) => {
     panel.classList.toggle("hidden", isHidden);
     panel.hidden = isHidden;
   });
+  if (normalized === "tenant") {
+    let desired = "general";
+    try {
+      desired = normalizeTenantSectionKey(localStorage.getItem("crm.workspaceTenantSection") || "");
+    } catch {
+      desired = "general";
+    }
+    setWorkspaceTenantSection(state.currentWorkspaceTenantSection || desired, { persist: false });
+  }
   if (normalized === "motores") {
     setWorkspaceEngineView(state.currentWorkspaceEngineView || "documental");
   }
@@ -6267,11 +6363,49 @@ const renderWorkspaceCompanies = (rows = []) => {
     return { ...row, _cnaes: unique };
   });
   workspaceCompanies.innerHTML = `
+    <div class="workspace-context-strip">
+      <div>
+        <strong>Empresas operativas</strong>
+        <span class="muted" data-workspace-company-visible-count></span>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;justify-content:flex-end">
+        <input
+          type="search"
+          inputmode="search"
+          autocomplete="off"
+          placeholder="Buscar empresa..."
+          data-workspace-company-search-input
+          style="min-width:220px"
+        />
+        <label class="muted" style="display:flex;align-items:center;gap:8px;white-space:nowrap">
+          <input type="checkbox" data-workspace-company-show-inactive />
+          <span>Inactivas</span>
+        </label>
+      </div>
+    </div>
     <div class="workspace-chip-list">
       ${normalizedRows
         .map(
           (row) => `
-            <div class="workspace-chip workspace-company-chip${String(row.id || "") === activeId ? " is-active" : ""}">
+            <div
+              class="workspace-chip workspace-company-chip${String(row.id || "") === activeId ? " is-active" : ""}"
+              data-workspace-company-chip="${escapeHtml(String(row.id || ""))}"
+              data-workspace-company-active="${Number(row.activo || 0) === 1 ? "1" : "0"}"
+              data-workspace-company-search="${escapeHtml(
+                normalizeSimple(
+                  [
+                    row.nombre,
+                    row.razon_social,
+                    row.nif,
+                    row.cnae,
+                    (row._cnaes || []).join(" "),
+                    row.convenio_nombre,
+                  ]
+                    .filter(Boolean)
+                    .join(" ")
+                )
+              )}"
+            >
               <div class="workspace-company-chip-head">
                 <div class="workspace-company-avatar">
                   ${
@@ -6290,11 +6424,13 @@ const renderWorkspaceCompanies = (rows = []) => {
                       }</span>
                     </div>
                   </div>
+                  ${
+                    row.razon_social && normalizeSimple(String(row.razon_social || "")) !== normalizeSimple(String(row.nombre || ""))
+                      ? `<div class="muted">${escapeHtml(String(row.razon_social || ""))}</div>`
+                      : ""
+                  }
                   <div class="workspace-company-chip-meta">
                     <span>${row.nif ? `CIF/NIF: ${escapeHtml(String(row.nif || ""))}` : "Sin CIF/NIF"}</span>
-                    ${row.direccion ? `<span>${escapeHtml(String(row.direccion || ""))}</span>` : ""}
-                    ${row.telefono ? `<span>${escapeHtml(String(row.telefono || ""))}</span>` : ""}
-                    ${row.email ? `<span>${escapeHtml(String(row.email || ""))}</span>` : ""}
                     ${row._cnaes && row._cnaes.length ? `<span>CNAE: ${escapeHtml(String(row._cnaes.join(", ")))}</span>` : ""}
                     ${row.convenio_nombre ? `<span>Convenio: ${escapeHtml(String(row.convenio_nombre || ""))}</span>` : ""}
                   </div>
@@ -6371,33 +6507,83 @@ const renderWorkspaceCompanies = (rows = []) => {
     ${
       canEdit
         ? `
-    <div class="form-card" style="margin-top:14px" data-workspace-service-matrix-card>
-      <div class="section-head">
-        <div>
-          <h3>Matriz servicio-empresa</h3>
-          <p class="muted">Configura qué empresas se sugieren por servicio (para autoselección y presupuestos, con logos y datos de empresa).</p>
+    <details class="workspace-advanced-details">
+      <summary>Servicios ↔ Empresas (opcional)</summary>
+      <div class="form-card" data-workspace-service-matrix-card style="margin-top:10px">
+        <div class="section-head">
+          <div>
+            <h3>Matriz servicio-empresa</h3>
+            <p class="muted">Configura qué empresas se sugieren por servicio (autoselección y presupuestos, con logos y datos).</p>
+          </div>
+          <button type="button" class="secondary ghost" data-workspace-service-matrix-refresh>Actualizar</button>
         </div>
-        <button type="button" class="secondary ghost" data-workspace-service-matrix-refresh>Actualizar</button>
+        <div class="form-grid">
+          <label class="span-2">
+            Servicio
+            <select data-workspace-service-matrix-service></select>
+          </label>
+          <div class="span-2">
+            <div class="crm-mini-list" data-workspace-service-matrix-companies></div>
+            <p class="muted" style="margin-top:10px">Marca empresas permitidas y elige la empresa por defecto (⭐). El logo/razón social/etc. se edita en “Editar datos”.</p>
+          </div>
+          <div class="form-actions span-2">
+            <button type="button" class="secondary" data-workspace-service-matrix-save>Guardar</button>
+            <span class="muted" data-workspace-service-matrix-status></span>
+          </div>
+        </div>
       </div>
-      <div class="form-grid">
-        <label class="span-2">
-          Servicio
-          <select data-workspace-service-matrix-service></select>
-        </label>
-        <div class="span-2">
-          <div class="crm-mini-list" data-workspace-service-matrix-companies></div>
-          <p class="muted" style="margin-top:10px">Marca empresas permitidas y elige la empresa por defecto (⭐). La edición de logo/razón social/etc. se hace en “Editar” de cada empresa.</p>
-        </div>
-        <div class="form-actions span-2">
-          <button type="button" class="secondary" data-workspace-service-matrix-save>Guardar</button>
-          <span class="muted" data-workspace-service-matrix-status></span>
-        </div>
-      </div>
-    </div>
+    </details>
     `
         : ""
     }
   `;
+  const companySearchInput = workspaceCompanies.querySelector("[data-workspace-company-search-input]");
+  const companyShowInactiveInput = workspaceCompanies.querySelector("[data-workspace-company-show-inactive]");
+  const companyVisibleCount = workspaceCompanies.querySelector("[data-workspace-company-visible-count]");
+  if (companySearchInput) {
+    try {
+      companySearchInput.value = String(state.workspaceCompanySearchQuery || "");
+    } catch {}
+  }
+  if (companyShowInactiveInput) {
+    companyShowInactiveInput.checked = Boolean(state.workspaceCompanyShowInactive);
+  }
+
+  const applyCompanyFilters = () => {
+    const query = normalizeSimple(String(companySearchInput?.value ?? state.workspaceCompanySearchQuery ?? ""));
+    const showInactive = Boolean(companyShowInactiveInput?.checked ?? state.workspaceCompanyShowInactive);
+    state.workspaceCompanySearchQuery = companySearchInput ? String(companySearchInput.value || "") : String(state.workspaceCompanySearchQuery || "");
+    state.workspaceCompanyShowInactive = showInactive;
+
+    const chips = Array.from(workspaceCompanies.querySelectorAll("[data-workspace-company-chip]"));
+    let visible = 0;
+    chips.forEach((chip) => {
+      const id = String(chip.dataset.workspaceCompanyChip || "");
+      const searchKey = String(chip.dataset.workspaceCompanySearch || "");
+      const isActive = id && id === String(activeId || "");
+      const isInactive = String(chip.dataset.workspaceCompanyActive || "0") !== "1";
+      const matchesQuery = !query || searchKey.includes(query);
+      const allow = (matchesQuery || isActive) && (showInactive || !isInactive || isActive);
+      chip.classList.toggle("hidden", !allow);
+      chip.hidden = !allow;
+      if (allow) visible += 1;
+    });
+    if (companyVisibleCount) {
+      companyVisibleCount.textContent = `Mostrando ${numberFormatter.format(visible)} de ${numberFormatter.format(chips.length)}`;
+    }
+  };
+
+  if (companySearchInput) {
+    companySearchInput.addEventListener("input", () => {
+      applyCompanyFilters();
+    });
+  }
+  if (companyShowInactiveInput) {
+    companyShowInactiveInput.addEventListener("change", () => {
+      applyCompanyFilters();
+    });
+  }
+  applyCompanyFilters();
   workspaceCompanies.querySelectorAll("[data-workspace-company-focus]").forEach((button) => {
     button.addEventListener("click", () => {
       const companyId = button.dataset.workspaceCompanyFocus || "";
@@ -43831,6 +44017,13 @@ workspaceViewButtons.forEach((button) => {
       state.workspaceRrhhEntry = isPrivilegedUser(user) ? "" : "self";
     }
     setWorkspaceView(view, { scroll: true, forceTenantView: tenantMode && normalizeSimple(view) !== "operations" });
+  });
+});
+
+workspaceTenantButtons.forEach((button) => {
+  button.addEventListener("click", () => {
+    const section = String(button.dataset.workspaceTenantTab || "general").trim() || "general";
+    setWorkspaceTenantSection(section, { scroll: true });
   });
 });
 

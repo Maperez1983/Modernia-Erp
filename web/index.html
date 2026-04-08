@@ -8,7 +8,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Verifika²" />
     <title>Verifika² · CRM & Portal</title>
-    <link rel="stylesheet" href="styles.css?v=160" />
+    <link rel="stylesheet" href="styles.css?v=161" />
     <link rel="manifest" href="manifest.webmanifest?v=17" />
     <link rel="icon" href="/icons/ios/v28/icon-192.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/icons/ios/v28/apple-touch-icon-180.png" />
@@ -100,8 +100,8 @@
             <div id="workspaceModuleHealth"></div>
           </div>
         </div>
-        <div id="workspaceOverviewCommercial" class="workspace-central-layout crm-workspace-view" data-workspace-view="overview">
-          <div class="form-card">
+	        <div id="workspaceOverviewCommercial" class="workspace-central-layout crm-workspace-view" data-workspace-view="overview">
+	          <div class="form-card">
             <div class="section-head">
               <div>
                 <h3>Paquete Comercial</h3>
@@ -118,17 +118,27 @@
               </div>
             </div>
             <div id="workspaceOnboardingActions"></div>
-          </div>
-        </div>
-        <div class="form-card crm-workspace-view" data-workspace-view="tenant">
-          <div class="section-head">
-            <div>
-              <h3>Matriz de Accesos</h3>
-              <p class="muted">Plantillas de permisos recomendadas por perfil para mantener el producto gobernable.</p>
+	          </div>
+	        </div>
+	        <div id="workspaceTenantTabs" class="crm-workspace-tabs workspace-tenant-tabs crm-workspace-view" data-workspace-view="tenant">
+	          <button class="tab active" type="button" data-workspace-tenant-tab="general">General</button>
+	          <button class="tab" type="button" data-workspace-tenant-tab="empresas">Empresas</button>
+	          <button class="tab" type="button" data-workspace-tenant-tab="usuarios">Usuarios</button>
+	          <button class="tab" type="button" data-workspace-tenant-tab="modulos">Módulos</button>
+	          <button class="tab" type="button" data-workspace-tenant-tab="permisos">Permisos</button>
+	        </div>
+          <div id="workspaceTenantContext" class="workspace-context-strip crm-workspace-view" data-workspace-view="tenant"></div>
+	        <div class="crm-workspace-view" data-workspace-view="tenant" data-tenant-section="permisos">
+            <div class="form-card">
+              <div class="section-head">
+                <div>
+                  <h3>Matriz de Accesos</h3>
+                  <p class="muted">Plantillas de permisos recomendadas por perfil para mantener el producto gobernable.</p>
+                </div>
+              </div>
+              <div id="workspacePermissionMatrix"></div>
             </div>
-          </div>
-          <div id="workspacePermissionMatrix"></div>
-        </div>
+	        </div>
         <div id="workspaceOverviewLauncherCard" class="form-card crm-workspace-view" data-workspace-view="operations">
           <div class="section-head">
             <div>
@@ -138,12 +148,12 @@
           </div>
           <div id="workspaceLauncher"></div>
         </div>
-        <div class="workspace-central-layout crm-workspace-view" data-workspace-view="tenant">
-          <div class="form-card">
-            <div class="section-head">
-              <div>
-                <h3>Workspaces</h3>
-                <p class="muted">Cada workspace agrupa las empresas y módulos de un cliente dentro de Verifika².</p>
+	        <div class="workspace-central-layout crm-workspace-view" data-workspace-view="tenant" data-tenant-section="general">
+	          <div class="form-card">
+	            <div class="section-head">
+	              <div>
+	                <h3>Workspaces</h3>
+	                <p class="muted">Cada workspace agrupa las empresas y módulos de un cliente dentro de Verifika².</p>
               </div>
             </div>
             <div id="workspaceList"></div>
@@ -202,19 +212,19 @@
                 <button type="submit">Guardar workspace</button>
                 <span id="workspaceFormStatus" class="muted"></span>
               </div>
-            </form>
-          </div>
-        </div>
-        <div class="workspace-central-layout crm-workspace-view" data-workspace-view="tenant">
-	          <div class="form-card">
-	            <div class="section-head">
-	              <div>
-	                <h3>Empresas del grupo</h3>
-	                <p class="muted">Sociedades operativas que viven dentro del workspace.</p>
-	              </div>
-	            </div>
-	            <div id="workspaceCompanies"></div>
-	            <div id="workspaceCompanyEditor" class="form-card hidden" style="margin-top: 14px;">
+	            </form>
+	          </div>
+	        </div>
+	        <div class="crm-workspace-view" data-workspace-view="tenant" data-tenant-section="empresas">
+            <div class="form-card">
+              <div class="section-head">
+                <div>
+                  <h3>Empresas del grupo</h3>
+                  <p class="muted">Sociedades operativas que viven dentro del workspace.</p>
+                </div>
+              </div>
+              <div id="workspaceCompanies"></div>
+              <div id="workspaceCompanyEditor" class="form-card hidden" style="margin-top: 14px;">
 	              <div class="section-head">
 	                <div>
 	                  <h3>Editar empresa</h3>
@@ -338,28 +348,33 @@
 	                  <button type="submit">Guardar empresa</button>
 	                  <span id="workspaceCompanyFormStatus" class="muted"></span>
 	                </div>
-	              </form>
-	            </div>
-	          </div>
-          <div class="form-card">
-            <div class="section-head">
-              <div>
-                <h3>Miembros</h3>
-                <p class="muted">Usuarios con acceso a este workspace (recomendado para modo comercial multi-tenant).</p>
-              </div>
+		              </form>
+		            </div>
+		          </div>
             </div>
-            <div id="workspaceMembers"></div>
-          </div>
-          <div class="form-card">
-            <div class="section-head">
-              <div>
-                <h3>Módulos del producto</h3>
-                <p class="muted">Activa o pausa verticales y motores transversales por workspace.</p>
+	        </div>
+	        <div class="crm-workspace-view" data-workspace-view="tenant" data-tenant-section="usuarios">
+            <div class="form-card">
+              <div class="section-head">
+                <div>
+                  <h3>Miembros</h3>
+                  <p class="muted">Usuarios con acceso a este workspace (recomendado para modo comercial multi-tenant).</p>
+                </div>
               </div>
+              <div id="workspaceMembers"></div>
             </div>
-            <div id="workspaceModules"></div>
-          </div>
-        </div>
+	        </div>
+	        <div class="crm-workspace-view" data-workspace-view="tenant" data-tenant-section="modulos">
+            <div class="form-card">
+              <div class="section-head">
+                <div>
+                  <h3>Módulos del producto</h3>
+                  <p class="muted">Activa o pausa verticales y motores transversales por workspace.</p>
+                </div>
+              </div>
+              <div id="workspaceModules"></div>
+            </div>
+	        </div>
         <div class="form-card crm-workspace-view" data-workspace-view="clients">
           <div class="section-head">
             <div>
@@ -8094,7 +8109,7 @@
     <script src="ui-foundation.js?v=2"></script>
     <script src="app-auth.js?v=10"></script>
     <script src="app-routing.js?v=7"></script>
-    <script src="app.js?v=436"></script>
+    <script src="app.js?v=437"></script>
     <script>
       (function () {
         if (!("serviceWorker" in navigator)) return;
@@ -8122,7 +8137,7 @@
           }
         } catch {}
         window.addEventListener("load", function () {
-          navigator.serviceWorker.register("/sw.js?v=66").catch(function () {});
+          navigator.serviceWorker.register("/sw.js?v=67").catch(function () {});
         });
       })();
     </script>

@@ -2905,6 +2905,35 @@ body.crm-fin #companySummary {
   background: rgba(248, 244, 236, 0.92);
 }
 
+.workspace-advanced-details {
+  margin-top: 14px;
+}
+
+.workspace-advanced-details summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px dashed rgba(60, 110, 113, 0.24);
+  background: rgba(248, 244, 236, 0.72);
+  color: var(--ink);
+  font-weight: 750;
+}
+
+.workspace-advanced-details summary::-webkit-details-marker {
+  display: none;
+}
+
+.workspace-advanced-details summary::after {
+  content: "▾";
+  float: right;
+  color: var(--muted);
+}
+
+.workspace-advanced-details[open] summary::after {
+  content: "▴";
+}
+
 .workspace-summary-list,
 .workspace-document-list {
   display: grid;
@@ -3106,6 +3135,16 @@ body.crm-fin #companySummary {
   background:
     linear-gradient(180deg, rgba(255, 251, 244, 0.98), rgba(244, 238, 227, 0.96)),
     #fff;
+}
+
+.workspace-tenant-tabs {
+  position: static;
+  top: auto;
+  z-index: 1;
+}
+
+.workspace-tenant-tabs .tab {
+  min-width: 104px;
 }
 
 .crm-workspace-tabs .tab {
