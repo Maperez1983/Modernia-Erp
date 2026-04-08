@@ -25896,9 +25896,7 @@ const renderTable = (data, options = {}) => {
               return;
             }
             loadTable();
-            const empresa = state.empresas.find(
-              (item) => item.nombre === FIN_COMPANY
-            );
+            const empresa = resolveCrmFinEmpresa();
             if (empresa) {
               renderFinDashboard(empresa.id);
             }
@@ -37682,7 +37680,7 @@ const loadGestoriaFact = () => {
 const loadAgendaGeneral = () => {
   if (!agendaGeneral) return;
   const fincas = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
-  const fin = state.empresas.find((e) => e.nombre === FIN_COMPANY);
+  const fin = resolveCrmFinEmpresa();
   const tasks = [];
   const allowed = state.currentUserServices || [];
   const allowService = (value) => {
@@ -37749,7 +37747,7 @@ const loadClienteHipotecasFicha = async (cliente = null, empresasActivas = []) =
     .map((row) => empresaByName.get(row.empresa))
     .filter(Boolean);
   if (!finEmpresaIds.length) {
-    const fin = (state.empresas || []).find((item) => item.nombre === FIN_COMPANY);
+    const fin = resolveCrmFinEmpresa();
     if (fin?.id) finEmpresaIds = [fin.id];
   }
   if (!finEmpresaIds.length) {
@@ -37892,7 +37890,7 @@ const renderClienteDatosEconomicos = (cliente = {}, economicData = {}) => {
     const statusEl = form.querySelector("#clienteEconomicosStatus");
     if (statusEl) statusEl.textContent = "Guardando...";
     const payload = Object.fromEntries(new FormData(form).entries());
-    payload.empresa_nombre = FIN_COMPANY;
+    payload.empresa_nombre = resolveCrmFinEmpresaNombre();
     payload.cliente1_id = payload.cliente1_id || cliente.id || "";
     payload.cliente1_ingresos = toNumber(payload.cliente1_ingresos);
     payload.cliente2_ingresos = toNumber(payload.cliente2_ingresos);
@@ -41389,7 +41387,11 @@ if (actionModalSave) {
       return;
     }
     const empresaNombre =
-      service === "financiaciones" ? FIN_COMPANY : FINCAS_COMPANY;
+      service === "financiaciones"
+        ? resolveCrmFinEmpresaNombre()
+        : service === "seguros"
+          ? resolveCrmSegurosEmpresaNombre()
+          : resolveCrmGestoriaEmpresaNombre();
     const clienteData = resolveClienteFromInput(actionModalClienteInput, actionModalClienteId);
     const payload = {
       id: currentActionEdit ? currentActionEdit.id : undefined,
@@ -41456,7 +41458,7 @@ if (actionModalSave) {
         closeActionEditor();
         loadAgendaGeneral();
         const fincas = state.empresas.find((e) => e.nombre === FINCAS_COMPANY);
-        const fin = state.empresas.find((e) => e.nombre === FIN_COMPANY);
+        const fin = resolveCrmFinEmpresa();
         if (fincas) {
           loadAcciones("gestoria", fincas.id, gestoriaAgendaTable, gestoriaAgendaInfo);
           loadAcciones("seguros", fincas.id, segurosAgendaTable, segurosAgendaInfo);
@@ -44907,7 +44909,7 @@ if (finAsesoramientoForm) {
     event.preventDefault();
     const formData = new FormData(finAsesoramientoForm);
     const payload = Object.fromEntries(formData.entries());
-    payload.empresa_nombre = FIN_COMPANY;
+    payload.empresa_nombre = resolveCrmFinEmpresaNombre();
     payload.cliente1_ingresos = toNumber(payload.cliente1_ingresos);
     payload.cliente2_ingresos = toNumber(payload.cliente2_ingresos);
     payload.ingresos_conjuntos = toNumber(payload.ingresos_conjuntos);
@@ -44974,7 +44976,7 @@ if (finAsesoramientoConvert) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         id: recordId,
-        empresa_nombre: FIN_COMPANY,
+        empresa_nombre: resolveCrmFinEmpresaNombre(),
       }),
     })
       .then((res) => res.json())
@@ -45008,7 +45010,7 @@ if (finChecklistGenerate) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         asesoramiento_id: recordId,
-        empresa_nombre: FIN_COMPANY,
+        empresa_nombre: resolveCrmFinEmpresaNombre(),
       }),
     })
       .then((res) => res.json())
@@ -45038,7 +45040,7 @@ if (finCopilotForm) {
     const formData = new FormData(finCopilotForm);
     const payload = Object.fromEntries(formData.entries());
     payload.asesoramiento_id = recordId;
-    payload.empresa_nombre = FIN_COMPANY;
+    payload.empresa_nombre = resolveCrmFinEmpresaNombre();
     if (finCopilotStatus) finCopilotStatus.textContent = "Generando...";
     fetch("/api/ai_fin_copilot", {
       method: "POST",
@@ -45059,7 +45061,7 @@ if (finCopilotForm) {
 if (finAsesoramientosSearch) {
   finAsesoramientosSearch.addEventListener("input", () => {
     scheduleSave("fin-asesoramientos-search", () => {
-      const empresa = state.empresas.find((e) => e.nombre === FIN_COMPANY);
+      const empresa = resolveCrmFinEmpresa();
       if (empresa) loadFinAsesoramientos(empresa.id);
     }, 250);
   });
@@ -46642,7 +46644,7 @@ if (finAgendaForm) {
       payload,
       resolveClienteFromInput(finAgendaClienteInput, finAgendaClienteId)
     );
-    payload.empresa_nombre = FIN_COMPANY;
+    payload.empresa_nombre = resolveCrmFinEmpresaNombre();
     payload.servicio = "financiaciones";
     fetch("/api/acciones", {
       method: "POST",
@@ -46662,7 +46664,7 @@ if (finAgendaForm) {
         }
         finAgendaForm.reset();
         syncFinAgendaContext();
-        const empresa = state.empresas.find((e) => e.nombre === FIN_COMPANY);
+        const empresa = resolveCrmFinEmpresa();
         if (empresa) {
           loadFinWorkflowActions(empresa.id);
         }
@@ -46684,7 +46686,7 @@ if (finCreateRecommendedAction) {
     try {
       await createRecommendedFinAction();
       setHipotecaAltaView("agenda");
-      const empresa = state.empresas.find((e) => e.nombre === FIN_COMPANY);
+      const empresa = resolveCrmFinEmpresa();
       if (empresa?.id) loadFinWorkflowActions(empresa.id);
     } catch (error) {
       window.alert(error.message || "No se pudo crear la tarea recomendada.");
@@ -46715,14 +46717,14 @@ if (finOpenSimFromAsesoramiento) {
 
 if (finHipotecasEstudioRefresh) {
   finHipotecasEstudioRefresh.addEventListener("click", () => {
-    const empresa = state.empresas.find((e) => e.nombre === FIN_COMPANY);
+    const empresa = resolveCrmFinEmpresa();
     if (empresa?.id) loadFinHipotecasEstudio(empresa.id);
   });
 }
 
 if (finHipotecaCreateAction) {
   finHipotecaCreateAction.addEventListener("click", () => {
-    const empresa = state.empresas.find((e) => e.nombre === FIN_COMPANY);
+    const empresa = resolveCrmFinEmpresa();
     const row = state.finSelectedHipoteca;
     if (!empresa?.id || !row?.id) {
       window.alert("Selecciona primero una hipoteca en estudio.");
@@ -47690,7 +47692,7 @@ if (hipotecaContabilidadForm) {
     }
     const formData = new FormData(hipotecaContabilidadForm);
     const payload = Object.fromEntries(formData.entries());
-    payload.empresa_nombre = FIN_COMPANY;
+    payload.empresa_nombre = resolveCrmFinEmpresaNombre();
     payload.servicio = "financiaciones";
     const rawNotas = String(payload.notas || "").trim();
     if (!/^(\[HIPOTECAS\]|Auto CRM Hipotecas)/i.test(rawNotas)) {
@@ -47789,7 +47791,7 @@ if (hipotecaClienteForm) {
       }
 
       const clienteId = data.id || newClienteId;
-      const empresaFin = state.empresas.find((e) => e.nombre === FIN_COMPANY);
+      const empresaFin = resolveCrmFinEmpresa();
       if (empresaFin?.id) {
         await postJsonWithDbRetry(
           "/api/clientes_link",
@@ -47915,7 +47917,7 @@ if (hipotecaForm) {
     }
     const formData = new FormData(hipotecaForm);
     const payload = Object.fromEntries(formData.entries());
-    payload.empresa_nombre = FIN_COMPANY;
+    payload.empresa_nombre = resolveCrmFinEmpresaNombre();
     if (!payload.anio && payload.fecha_firma) {
       payload.anio = String(payload.fecha_firma).slice(0, 4);
     }
