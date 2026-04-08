@@ -599,6 +599,12 @@ const buildPhotoSrc = (photoUrl = "") => {
   return raw;
 };
 
+const buildS3RedirectSrcFromKey = (key = "") => {
+  const raw = String(key || "").trim();
+  if (!raw) return "";
+  return `/api/s3_redirect?key=${encodeURIComponent(raw)}`;
+};
+
 const fileToBase64 = (file) =>
   new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -1550,6 +1556,8 @@ const state = {
   })(),
   currentWorkspaceDetail: null,
   currentWorkspaceEnabledModules: [],
+  currentWorkspaceServiceMatrixRows: [],
+  currentWorkspaceServiceCompanyDefaults: {},
   currentWorkspaceName: "",
   legalCatalog: null,
   legalCurrentArea: "inmobiliaria",
@@ -1790,6 +1798,9 @@ const workspaceFincasCommunityStatus = document.getElementById("workspaceFincasC
 const workspaceFincasCommunityList = document.getElementById("workspaceFincasCommunityList");
 const workspaceFincasCommunityMapWrap = document.getElementById("workspaceFincasCommunityMapWrap");
 const workspaceFincasCommunityMap = document.getElementById("workspaceFincasCommunityMap");
+const workspaceFincasCommunityBuildingPhoto = document.getElementById("workspaceFincasCommunityBuildingPhoto");
+const workspaceFincasCommunityBuildingPhotoPreview = document.getElementById("workspaceFincasCommunityBuildingPhotoPreview");
+const workspaceFincasCommunityBuildingPhotoStatus = document.getElementById("workspaceFincasCommunityBuildingPhotoStatus");
 const workspaceFincasTabs = document.getElementById("workspaceFincasTabs");
 const workspaceFincasDashboardKpis = document.getElementById("workspaceFincasDashboardKpis");
 const workspaceFincasLedgerForm = document.getElementById("workspaceFincasLedgerForm");
@@ -1800,6 +1811,11 @@ const workspaceFincasBudgetCompanyLogo = document.getElementById("workspaceFinca
 const workspaceFincasBudgetColegioLogo = document.getElementById("workspaceFincasBudgetColegioLogo");
 const workspaceFincasBudgetServiciosIncluidos = document.getElementById("workspaceFincasBudgetServiciosIncluidos");
 const workspaceFincasBudgetHero = document.getElementById("workspaceFincasBudgetHero");
+const workspaceFincasBudgetMapWrap = document.getElementById("workspaceFincasBudgetMapWrap");
+const workspaceFincasBudgetMap = document.getElementById("workspaceFincasBudgetMap");
+const workspaceFincasBudgetBuildingPhoto = document.getElementById("workspaceFincasBudgetBuildingPhoto");
+const workspaceFincasBudgetBuildingPhotoPreview = document.getElementById("workspaceFincasBudgetBuildingPhotoPreview");
+const workspaceFincasBudgetBuildingPhotoStatus = document.getElementById("workspaceFincasBudgetBuildingPhotoStatus");
 const workspaceFincasBudgetQuickForm = document.getElementById("workspaceFincasBudgetQuickForm");
 const workspaceFincasBudgetOpenEngine = document.getElementById("workspaceFincasBudgetOpenEngine");
 const workspaceFincasBudgetResetBtn = document.getElementById("workspaceFincasBudgetResetBtn");
@@ -3128,6 +3144,15 @@ const parseServiceList = (value) =>
     .split(/[|,/;]+/)
     .map((item) => normalizeSimple(item))
     .filter(Boolean);
+
+const normalizeWorkspaceServiceKey = (value) => {
+  const raw = normalizeSimple(value);
+  if (!raw) return "";
+  if (raw === "hipotecas" || raw === "financiacion") return "financiaciones";
+  if (raw === "administracion fincas" || raw === "administracion de fincas" || raw === "admin de fincas") return "fincas";
+  if (raw.includes("fincas")) return "fincas";
+  return raw;
+};
 
 const ADMIN_SERVICE_OPTIONS = [
   "Gestoría",
@@ -13345,6 +13370,19 @@ const syncWorkspaceFincasCommunityMap = () => {
   workspaceFincasCommunityMap.setAttribute("src", `https://www.google.com/maps?q=${q}&output=embed`);
 };
 
+const syncWorkspaceFincasBudgetMap = () => {
+  if (!workspaceFincasBudgetQuickForm || !workspaceFincasBudgetMapWrap || !workspaceFincasBudgetMap) return;
+  const addr = String(workspaceFincasBudgetQuickForm.querySelector('[name="comunidad_direccion"]')?.value || "").trim();
+  if (!addr) {
+    workspaceFincasBudgetMapWrap.classList.add("hidden");
+    workspaceFincasBudgetMap.removeAttribute("src");
+    return;
+  }
+  const q = encodeURIComponent(addr);
+  workspaceFincasBudgetMapWrap.classList.remove("hidden");
+  workspaceFincasBudgetMap.setAttribute("src", `https://www.google.com/maps?q=${q}&output=embed`);
+};
+
 const fillWorkspaceFincasCommunityForm = (record = null) => {
   if (!workspaceFincasCommunityForm) return;
   hydrateWorkspaceCompanySelects();
@@ -13366,9 +13404,10 @@ const fillWorkspaceFincasCommunityForm = (record = null) => {
     num_aparcamientos: "",
     cuota_sugerida: "",
     cuota_mensual: "",
+    foto_edificio_key: "",
     ...(record || {}),
   };
-  ["id", "workspace_id", "empresa_id", "nombre", "referencia_catastral", "cif", "direccion", "presidente", "secretario", "estado", "num_vecinos", "num_locales", "num_trasteros", "num_aparcamientos", "cuota_sugerida", "cuota_mensual"].forEach((field) => {
+  ["id", "workspace_id", "empresa_id", "nombre", "referencia_catastral", "cif", "direccion", "presidente", "secretario", "estado", "num_vecinos", "num_locales", "num_trasteros", "num_aparcamientos", "cuota_sugerida", "cuota_mensual", "foto_edificio_key"].forEach((field) => {
     const input = workspaceFincasCommunityForm.querySelector(`[name="${field}"]`);
     if (input) input.value = payload[field] ?? "";
   });
@@ -13381,9 +13420,21 @@ const fillWorkspaceFincasCommunityForm = (record = null) => {
         + (Number(payload.num_trasteros || 0) || 0)
         + (Number(payload.num_aparcamientos || 0) || 0)
     );
-    suggestedInput.value = suggested.toFixed(2);
+    suggestedInput.value = formatEurosCompact(suggested);
   }
+  try {
+    const cuotaInput = workspaceFincasCommunityForm.querySelector('[name="cuota_mensual"]');
+    if (cuotaInput && String(cuotaInput.value || "").trim()) {
+      cuotaInput.value = formatEurosCompact(parseMoneyValue(cuotaInput.value));
+    }
+  } catch {}
   syncWorkspaceFincasCommunityMap();
+  if (workspaceFincasCommunityBuildingPhotoPreview) {
+    const key = String(payload.foto_edificio_key || "").trim();
+    const src = buildS3RedirectSrcFromKey(key);
+    workspaceFincasCommunityBuildingPhotoPreview.src = src;
+    workspaceFincasCommunityBuildingPhotoPreview.classList.toggle("hidden", !src);
+  }
 };
 
 const renderWorkspaceFincasCommunityList = (rows = []) => {
@@ -13403,11 +13454,12 @@ const renderWorkspaceFincasCommunityList = (rows = []) => {
                 <div class="muted">${row.direccion || row.empresa_nombre || "-"}</div>
                 <div class="muted">${row.cif ? `CIF: ${escapeHtml(String(row.cif))} · ` : ""}${row.presidente ? `Presidente: ${escapeHtml(String(row.presidente))}` : ""}</div>
                 <div class="muted">${row.referencia_catastral ? `Catastro: ${row.referencia_catastral} · ` : ""}${numberFormatter.format(Number(row.num_vecinos || 0))} viviendas · ${numberFormatter.format(Number(row.num_locales || 0))} locales · ${numberFormatter.format(Number(row.num_trasteros || 0))} trasteros · ${numberFormatter.format(Number(row.num_aparcamientos || 0))} aparcamientos</div>
+                ${row.foto_edificio_key ? `<div style="margin-top:10px;"><img alt="Foto edificio" src="${buildS3RedirectSrcFromKey(row.foto_edificio_key)}" style="width:100%;max-width:420px;max-height:140px;object-fit:cover;border-radius:12px;border:1px solid rgba(0,0,0,0.06);" /></div>` : ""}
               </div>
               <div class="workspace-billing-meta">
                 <span>${row.estado || "Activa"}</span>
-                <span>Sug. ${euroFormatter.format(Number(row.cuota_sugerida || 0))}</span>
-                <span>${euroFormatter.format(Number(row.cuota_mensual || 0))}</span>
+                <span>Sug. ${formatEurosCompact(Number(row.cuota_sugerida || 0))}</span>
+                <span>${formatEurosCompact(Number(row.cuota_mensual || 0))}</span>
                 <span>${numberFormatter.format(Number(row.incidencias_abiertas || 0))} abiertas</span>
                 <button type="button" class="secondary ghost" data-community-edit="${row.id}">Editar</button>
               </div>
@@ -13799,6 +13851,7 @@ const setWorkspaceFincasTab = (tab = "dashboard") => {
       if (wsField) wsField.value = state.currentWorkspaceId || "";
       syncWorkspaceFincasBudgetBranding();
       syncWorkspaceFincasBudgetQuickComputed();
+      syncWorkspaceFincasBudgetMap();
       renderWorkspaceFincasBudgetsList();
     };
     try {
@@ -14032,12 +14085,24 @@ const applyWorkspaceFincasBudgetQuickCommunity = (communityId) => {
     set("comunidad_denominacion", community.nombre || "");
     set("comunidad_direccion", community.direccion || "");
     set("comunidad_cif", community.cif || "");
+    set("referencia_catastral", community.referencia_catastral || "");
     set("solicitante_nombre", community.presidente || "");
     set("num_vecinos", community.num_vecinos ?? 0);
     set("num_locales", community.num_locales ?? 0);
     set("num_aparcamientos", community.num_aparcamientos ?? 0);
+    set("edificio_foto_key", community.foto_edificio_key || "");
+    if (workspaceFincasBudgetBuildingPhotoPreview) {
+      const src = buildS3RedirectSrcFromKey(community.foto_edificio_key || "");
+      workspaceFincasBudgetBuildingPhotoPreview.src = src;
+      workspaceFincasBudgetBuildingPhotoPreview.classList.toggle("hidden", !src);
+    }
   }
+  try {
+    const subtotalInput = workspaceFincasBudgetQuickForm.querySelector('[name="subtotal"]');
+    if (subtotalInput) delete subtotalInput.dataset.manual;
+  } catch {}
   syncWorkspaceFincasBudgetQuickComputed();
+  syncWorkspaceFincasBudgetMap();
 };
 
 const applyWorkspaceFincasBudgetQuickBudget = (budgetId) => {
@@ -14056,6 +14121,7 @@ const applyWorkspaceFincasBudgetQuickBudget = (budgetId) => {
   set("comunidad_denominacion", String(calc.comunidad_denominacion || budget.cliente_lookup || budget.titulo || "").trim());
   set("comunidad_direccion", String(calc.comunidad_direccion || "").trim());
   set("comunidad_cif", String(calc.comunidad_cif || budget.cliente_nif || "").trim());
+  set("referencia_catastral", String(calc.referencia_catastral || "").trim());
   set("solicitante_nombre", String(calc.solicitante_nombre || "").trim());
   set("solicitante_dni", String(calc.solicitante_dni || "").trim());
   set("solicitante_telefono", String(calc.solicitante_telefono || budget.cliente_telefono || "").trim());
@@ -14064,10 +14130,21 @@ const applyWorkspaceFincasBudgetQuickBudget = (budgetId) => {
   set("num_vecinos", calc.num_vecinos ?? 0);
   set("num_locales", calc.num_locales ?? 0);
   set("num_aparcamientos", calc.num_aparcamientos ?? 0);
+  set("edificio_foto_key", String(calc.edificio_foto_key || "").trim());
+  if (workspaceFincasBudgetBuildingPhotoPreview) {
+    const src = buildS3RedirectSrcFromKey(String(calc.edificio_foto_key || "").trim());
+    workspaceFincasBudgetBuildingPhotoPreview.src = src;
+    workspaceFincasBudgetBuildingPhotoPreview.classList.toggle("hidden", !src);
+  }
   try {
     syncWorkspaceFincasBudgetBranding();
   } catch {}
+  try {
+    const subtotalInput = workspaceFincasBudgetQuickForm.querySelector('[name="subtotal"]');
+    if (subtotalInput) delete subtotalInput.dataset.manual;
+  } catch {}
   syncWorkspaceFincasBudgetQuickComputed();
+  syncWorkspaceFincasBudgetMap();
 };
 
 const applyWorkspaceFincasBudgetQuickPrefill = (rawValue) => {
@@ -14076,6 +14153,7 @@ const applyWorkspaceFincasBudgetQuickPrefill = (rawValue) => {
     const hidden = workspaceFincasBudgetQuickForm?.querySelector('[name="comunidad_id"]');
     if (hidden) hidden.value = "";
     syncWorkspaceFincasBudgetQuickComputed();
+    syncWorkspaceFincasBudgetMap();
     return;
   }
   if (value.startsWith("comunidad:")) {
@@ -14104,6 +14182,7 @@ const resetWorkspaceFincasBudgetQuickForm = () => {
   set("comunidad_denominacion", "");
   set("comunidad_direccion", "");
   set("comunidad_cif", "");
+  set("referencia_catastral", "");
   set("solicitante_nombre", "");
   set("solicitante_dni", "");
   set("solicitante_telefono", "");
@@ -14112,11 +14191,28 @@ const resetWorkspaceFincasBudgetQuickForm = () => {
   set("num_vecinos", 0);
   set("num_locales", 0);
   set("num_aparcamientos", 0);
+  set("edificio_foto_key", "");
   set("carta_presentacion", "");
+  try {
+    const subtotalInput = workspaceFincasBudgetQuickForm.querySelector('[name="subtotal"]');
+    if (subtotalInput) delete subtotalInput.dataset.manual;
+  } catch {}
+  if (workspaceFincasBudgetBuildingPhotoPreview) {
+    workspaceFincasBudgetBuildingPhotoPreview.removeAttribute("src");
+    workspaceFincasBudgetBuildingPhotoPreview.classList.add("hidden");
+  }
+  if (workspaceFincasBudgetBuildingPhotoStatus) {
+    workspaceFincasBudgetBuildingPhotoStatus.textContent = "";
+  }
+  if (workspaceFincasBudgetMapWrap && workspaceFincasBudgetMap) {
+    workspaceFincasBudgetMapWrap.classList.add("hidden");
+    workspaceFincasBudgetMap.removeAttribute("src");
+  }
   try {
     syncWorkspaceFincasBudgetBranding();
   } catch {}
   syncWorkspaceFincasBudgetQuickComputed();
+  syncWorkspaceFincasBudgetMap();
 };
 
 const parseWorkspaceBudgetCalc = (row = {}) => {
@@ -14648,6 +14744,8 @@ const loadWorkspaceDetail = async (workspaceId) => {
   state.currentWorkspaceData = {};
   state.workspaceTimeEmployees = [];
   state.workspaceTimeSummary = null;
+  state.currentWorkspaceServiceMatrixRows = [];
+  state.currentWorkspaceServiceCompanyDefaults = {};
   let detail = null;
   detail = await safeWorkspaceApi(`/api/workspace_detail?id=${encodeURIComponent(workspaceId)}`, null);
   if (!detail || !detail.workspace) {
@@ -14667,6 +14765,14 @@ const loadWorkspaceDetail = async (workspaceId) => {
   state.currentWorkspaceDetail = detail;
   state.currentWorkspaceEnabledModules = getWorkspaceEnabledModules(detail.modules || []);
   state.currentWorkspaceName = detail.workspace?.nombre || "";
+  {
+    const matrix = await safeWorkspaceApi(
+      `/api/workspace_service_matrix?workspace_id=${encodeURIComponent(workspaceId)}`,
+      { rows: [], defaults: {} }
+    );
+    state.currentWorkspaceServiceMatrixRows = Array.isArray(matrix?.rows) ? matrix.rows : [];
+    state.currentWorkspaceServiceCompanyDefaults = matrix?.defaults && typeof matrix.defaults === "object" ? matrix.defaults : {};
+  }
   if (!state.currentWorkspaceTarget) {
     state.currentWorkspaceTarget = detail.workspace?.slug || detail.workspace?.nombre || "";
   }
@@ -15315,6 +15421,18 @@ const setStoredServiceCompanyId = (serviceKey = "", empresaId = "") => {
   } catch {}
 };
 
+const getWorkspaceDefaultCompanyIdForServiceKey = (serviceKey = "") => {
+  const key = normalizeWorkspaceServiceKey(serviceKey);
+  if (!key) return "";
+  const defaults = state.currentWorkspaceServiceCompanyDefaults || {};
+  return String(defaults[key] || "").trim();
+};
+
+const resolveWorkspaceDefaultEmpresa = (serviceKey = "") => {
+  const id = getWorkspaceDefaultCompanyIdForServiceKey(serviceKey);
+  return id ? resolveEmpresaById(id) : null;
+};
+
 const resolveCrmInmoEmpresa = () => {
   // 1) Si ya hay empresa "Inmo" fijada (p.ej. usuario cambiando de ficha), úsala.
   const explicit = resolveEmpresaById(state.crmInmoEmpresaId);
@@ -15322,6 +15440,9 @@ const resolveCrmInmoEmpresa = () => {
 
   const stored = resolveEmpresaById(getStoredServiceCompanyId("inmobiliaria"));
   if (stored) return stored;
+
+  const fromMatrix = resolveWorkspaceDefaultEmpresa("inmobiliaria");
+  if (fromMatrix) return fromMatrix;
 
   // 2) Fallback: intenta la empresa mapeada para el servicio; si no existe, usa la primera disponible.
   // Nota: NO usamos `state.currentEmpresaId` porque puede venir de otro servicio (Seguros/Hipotecas) y dejar el CRM Inmobiliaria vacío.
@@ -15348,6 +15469,8 @@ const resolveCrmSegurosEmpresa = () => {
   if (explicit) return explicit;
   const stored = resolveEmpresaById(getStoredServiceCompanyId("seguros"));
   if (stored) return stored;
+  const fromMatrix = resolveWorkspaceDefaultEmpresa("seguros");
+  if (fromMatrix) return fromMatrix;
   const preferredName = SERVICE_COMPANY_MAP?.Seguros || FINCAS_COMPANY;
   const preferred = state.empresas.find((e) => e.nombre === preferredName) || null;
   if (preferred) return preferred;
@@ -15361,6 +15484,8 @@ const resolveCrmGestoriaEmpresa = () => {
   if (explicit) return explicit;
   const stored = resolveEmpresaById(getStoredServiceCompanyId("gestoria"));
   if (stored) return stored;
+  const fromMatrix = resolveWorkspaceDefaultEmpresa("gestoria");
+  if (fromMatrix) return fromMatrix;
   const preferredName = SERVICE_COMPANY_MAP?.["Gestoría"] || FINCAS_COMPANY;
   const preferred = state.empresas.find((e) => e.nombre === preferredName) || null;
   if (preferred) return preferred;
@@ -15374,6 +15499,8 @@ const resolveCrmFinEmpresa = () => {
   if (explicit) return explicit;
   const stored = resolveEmpresaById(getStoredServiceCompanyId("financiaciones"));
   if (stored) return stored;
+  const fromMatrix = resolveWorkspaceDefaultEmpresa("financiaciones");
+  if (fromMatrix) return fromMatrix;
   const preferredName = SERVICE_COMPANY_MAP?.Hipotecas || FIN_COMPANY;
   const preferred = state.empresas.find((e) => e.nombre === preferredName) || null;
   if (preferred) return preferred;
@@ -22322,6 +22449,14 @@ const updateGestoriaModuleTabsFromForm = () => {
 
 const syncEmpresaFromServicio = (service) => {
   if (!clientesEmpresaSelect || !service) return;
+  const matrixDefaultId = getWorkspaceDefaultCompanyIdForServiceKey(normalizeWorkspaceServiceKey(service));
+  if (matrixDefaultId) {
+    const matchById = state.empresas.find((e) => String(e.id || "") === String(matrixDefaultId));
+    if (matchById) {
+      clientesEmpresaSelect.value = matchById.id;
+      return;
+    }
+  }
   const targetName = SERVICE_COMPANY_MAP[service];
   if (!targetName) return;
   const match = state.empresas.find((e) => e.nombre === targetName);
@@ -22341,6 +22476,14 @@ const populateEmpresasSelect = (selectEl) => {
 
 const syncAssignEmpresaFromServicio = (service) => {
   if (!clienteAssignEmpresa || !service) return;
+  const matrixDefaultId = getWorkspaceDefaultCompanyIdForServiceKey(normalizeWorkspaceServiceKey(service));
+  if (matrixDefaultId) {
+    const matchById = state.empresas.find((e) => String(e.id || "") === String(matrixDefaultId));
+    if (matchById) {
+      clienteAssignEmpresa.value = matchById.id;
+      return;
+    }
+  }
   const targetName = SERVICE_COMPANY_MAP[service];
   if (!targetName) return;
   const match = state.empresas.find((e) => e.nombre === targetName);
@@ -25891,9 +26034,17 @@ const buildClientesLinkRow = (data = {}) => {
   populateServiciosSelect(servicioSelect, defaultService);
   servicioLabel.appendChild(servicioSelect);
   if (!data.empresa_id && defaultService) {
-    const targetName = SERVICE_COMPANY_MAP[defaultService];
-    const match = state.empresas.find((e) => e.nombre === targetName);
-    if (match) empresaSelect.value = match.id;
+    const matrixDefaultId = getWorkspaceDefaultCompanyIdForServiceKey(normalizeWorkspaceServiceKey(defaultService));
+    const matchById = matrixDefaultId
+      ? state.empresas.find((e) => String(e.id || "") === String(matrixDefaultId))
+      : null;
+    if (matchById) {
+      empresaSelect.value = matchById.id;
+    } else {
+      const targetName = SERVICE_COMPANY_MAP[defaultService];
+      const match = state.empresas.find((e) => e.nombre === targetName);
+      if (match) empresaSelect.value = match.id;
+    }
   }
 
   const estadoLabel = document.createElement("label");
@@ -25973,8 +26124,12 @@ const autoLinkCurrentUserServices = async (clienteId) => {
   services.forEach((serviceNorm) => {
     const label = getServiceLabelFromNormalized(serviceNorm);
     if (!label) return;
+    const matrixDefaultId = getWorkspaceDefaultCompanyIdForServiceKey(serviceNorm);
+    const empresaFromMatrix = matrixDefaultId
+      ? state.empresas.find((e) => String(e.id || "") === String(matrixDefaultId))
+      : null;
     const companyName = SERVICE_COMPANY_MAP[label];
-    const empresa = state.empresas.find((e) => e.nombre === companyName);
+    const empresa = empresaFromMatrix || state.empresas.find((e) => e.nombre === companyName);
     if (!empresa) return;
     requests.push(
       fetch("/api/clientes_link", {
@@ -33661,11 +33816,12 @@ const renderSegurosPresupuestos = (data) => {
     discardBtn.addEventListener("click", () => {
       const ok = window.confirm("¿Descartar este presupuesto?");
       if (!ok) return;
+      const empresaNombre = resolveCrmSegurosEmpresaNombre();
       fetch("/api/seguros_update", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          empresa_nombre: FINCAS_COMPANY,
+          empresa_nombre: empresaNombre,
           id: row[idIndex],
           estado: "Descartado",
         }),
@@ -34693,7 +34849,7 @@ const saveSegurosOcrRecord = async () => {
     ? seguroOcrFechaVencimiento.value
     : addOneYear(fechaEfecto);
   const payload = {
-    empresa_nombre: FINCAS_COMPANY,
+    empresa_nombre: resolveCrmSegurosEmpresaNombre(),
     cliente_id: state.segurosOcrClienteId || "",
     ocr_quality: state.segurosOcrQuality || null,
     mes_creacion: mesCreacion,
@@ -39725,7 +39881,7 @@ const openClienteSeguroDetail = (row, cliente = {}, options = {}) => {
     saveBtn.addEventListener("click", async () => {
       status.textContent = "";
       const mode = actionSelect.value;
-      const payload = { id: row.id, empresa_nombre: FINCAS_COMPANY };
+      const payload = { id: row.id, empresa_nombre: resolveCrmSegurosEmpresaNombre() };
       const today = new Date().toISOString().slice(0, 10);
       let endpoint = "/api/seguros_update";
       if (mode === "contratar") {
@@ -40008,7 +40164,7 @@ const openClienteSeguroDetail = (row, cliente = {}, options = {}) => {
             : toNumber(row.porcentaje || "");
         const payload = {
           id: row.id,
-          empresa_nombre: FINCAS_COMPANY,
+          empresa_nombre: resolveCrmSegurosEmpresaNombre(),
           tomador: tomadorValue,
           compania: editCompania.value.trim(),
           ramo: editRamo.value.trim(),
@@ -44275,9 +44431,34 @@ if (workspaceFincasCommunityForm) {
       );
       const suggestedInput = workspaceFincasCommunityForm.querySelector('[name="cuota_sugerida"]');
       const cuotaInput = workspaceFincasCommunityForm.querySelector('[name="cuota_mensual"]');
-      if (suggestedInput) suggestedInput.value = suggested.toFixed(2);
-      if (cuotaInput && !cuotaInput.value) cuotaInput.value = suggested.toFixed(2);
+      if (suggestedInput) suggestedInput.value = formatEurosCompact(suggested);
+      if (cuotaInput && !String(cuotaInput.value || "").trim()) cuotaInput.value = formatEurosCompact(suggested);
     });
+  });
+}
+
+if (workspaceFincasCommunityBuildingPhoto) {
+  workspaceFincasCommunityBuildingPhoto.addEventListener("change", async () => {
+    const file = workspaceFincasCommunityBuildingPhoto.files?.[0];
+    if (!file) return;
+    const hidden = workspaceFincasCommunityForm?.querySelector('[name="foto_edificio_key"]');
+    try {
+      if (workspaceFincasCommunityBuildingPhotoStatus) workspaceFincasCommunityBuildingPhotoStatus.textContent = "Subiendo foto...";
+      const upload = await uploadFileToS3(file, `fincas_edificios/${state.currentWorkspaceId || "workspace"}`, workspaceFincasCommunityBuildingPhotoStatus);
+      const key = String(upload?.key || "").trim();
+      if (hidden) hidden.value = key;
+      const src = buildS3RedirectSrcFromKey(key);
+      if (workspaceFincasCommunityBuildingPhotoPreview) {
+        workspaceFincasCommunityBuildingPhotoPreview.src = src;
+        workspaceFincasCommunityBuildingPhotoPreview.classList.toggle("hidden", !src);
+      }
+    } catch (error) {
+      if (workspaceFincasCommunityBuildingPhotoStatus) workspaceFincasCommunityBuildingPhotoStatus.textContent = error?.message || "No se pudo subir la foto.";
+    } finally {
+      try {
+        workspaceFincasCommunityBuildingPhoto.value = "";
+      } catch {}
+    }
   });
 }
 
@@ -44358,10 +44539,62 @@ if (workspaceFincasBudgetQuickForm) {
       applyWorkspaceFincasBudgetQuickPrefill(select.value || "");
     });
   }
+  const addrInput = workspaceFincasBudgetQuickForm.querySelector('[name="comunidad_direccion"]');
+  if (addrInput) {
+    let mapTimer = 0;
+    ["input", "change"].forEach((eventName) => {
+      addrInput.addEventListener(eventName, () => {
+        if (mapTimer) window.clearTimeout(mapTimer);
+        mapTimer = window.setTimeout(() => syncWorkspaceFincasBudgetMap(), 240);
+      });
+    });
+  }
   ["num_vecinos", "num_locales", "num_aparcamientos"].forEach((name) => {
     const input = workspaceFincasBudgetQuickForm.querySelector(`[name="${name}"]`);
     input?.addEventListener("input", () => syncWorkspaceFincasBudgetQuickComputed());
   });
+  const subtotalInput = workspaceFincasBudgetQuickForm.querySelector('[name="subtotal"]');
+  if (subtotalInput) {
+    subtotalInput.addEventListener("input", () => {
+      const raw = String(subtotalInput.value || "").trim();
+      if (!raw) {
+        delete subtotalInput.dataset.manual;
+      } else {
+        subtotalInput.dataset.manual = "1";
+      }
+      syncWorkspaceFincasBudgetQuickComputed();
+    });
+    subtotalInput.addEventListener("blur", () => {
+      if (String(subtotalInput.value || "").trim()) {
+        subtotalInput.dataset.manual = "1";
+        syncWorkspaceFincasBudgetQuickComputed({ forceSubtotal: true });
+      }
+    });
+  }
+  if (workspaceFincasBudgetBuildingPhoto) {
+    workspaceFincasBudgetBuildingPhoto.addEventListener("change", async () => {
+      const file = workspaceFincasBudgetBuildingPhoto.files?.[0];
+      if (!file) return;
+      const hidden = workspaceFincasBudgetQuickForm.querySelector('[name="edificio_foto_key"]');
+      try {
+        if (workspaceFincasBudgetBuildingPhotoStatus) workspaceFincasBudgetBuildingPhotoStatus.textContent = "Subiendo foto...";
+        const upload = await uploadFileToS3(file, `fincas_edificios/${state.currentWorkspaceId || "workspace"}`, workspaceFincasBudgetBuildingPhotoStatus);
+        const key = String(upload?.key || "").trim();
+        if (hidden) hidden.value = key;
+        const src = buildS3RedirectSrcFromKey(key);
+        if (workspaceFincasBudgetBuildingPhotoPreview) {
+          workspaceFincasBudgetBuildingPhotoPreview.src = src;
+          workspaceFincasBudgetBuildingPhotoPreview.classList.toggle("hidden", !src);
+        }
+      } catch (error) {
+        if (workspaceFincasBudgetBuildingPhotoStatus) workspaceFincasBudgetBuildingPhotoStatus.textContent = error?.message || "No se pudo subir la foto.";
+      } finally {
+        try {
+          workspaceFincasBudgetBuildingPhoto.value = "";
+        } catch {}
+      }
+    });
+  }
   workspaceFincasBudgetQuickForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (!state.currentWorkspaceId) {
@@ -44379,7 +44612,13 @@ if (workspaceFincasBudgetQuickForm) {
     const numVecinos = Number(values.num_vecinos || 0) || 0;
     const numLocales = Number(values.num_locales || 0) || 0;
     const numAparcamientos = Number(values.num_aparcamientos || 0) || 0;
-    const totals = computeFincasBudgetTotalsClient({ num_vecinos: numVecinos, num_locales: numLocales, num_aparcamientos: numAparcamientos });
+    const suggestedSubtotal = Number(computeFincasCuotaSuggestedClient({ num_vecinos: numVecinos, num_locales: numLocales, num_aparcamientos: numAparcamientos }) || 0) || 0;
+    const subtotal = String(values.subtotal || "").trim()
+      ? Math.max(0, parseMoneyValue(values.subtotal))
+      : suggestedSubtotal;
+    const impuestos = Math.round(subtotal * FINCAS_IVA_PCT * 100) / 100;
+    const total = Math.round((subtotal + impuestos) * 100) / 100;
+    const totals = { subtotal, impuestos, total };
     const lineas = buildFincasBudgetLineas({ num_vecinos: numVecinos, num_locales: numLocales, num_aparcamientos: numAparcamientos });
     const serviciosIncluidos = readFincasServiciosIncluidos(workspaceFincasBudgetServiciosIncluidos);
     const comunidadName = String(values.comunidad_denominacion || community?.nombre || "").trim() || "Comunidad";
@@ -44400,6 +44639,7 @@ if (workspaceFincasBudgetQuickForm) {
       comunidad_denominacion: comunidadName,
       comunidad_direccion: String(values.comunidad_direccion || "").trim(),
       comunidad_cif: String(values.comunidad_cif || "").trim(),
+      referencia_catastral: String(values.referencia_catastral || "").trim(),
       solicitante_nombre: String(values.solicitante_nombre || "").trim(),
       solicitante_dni: String(values.solicitante_dni || "").trim(),
       solicitante_telefono: String(values.solicitante_telefono || "").trim(),
@@ -44407,6 +44647,7 @@ if (workspaceFincasBudgetQuickForm) {
       solicitante_email: String(values.solicitante_email || "").trim(),
       carta_presentacion: String(values.carta_presentacion || "").trim(),
       colegiado_numero: "3079",
+      edificio_foto_key: String(values.edificio_foto_key || "").trim(),
       servicios_incluidos: serviciosIncluidos,
       num_vecinos: numVecinos,
       num_locales: numLocales,

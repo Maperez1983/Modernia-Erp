@@ -119,6 +119,196 @@ def ensure_s3_grants_table(conn):
         pass
 
 
+def fetch_workspace_service_matrix(conn, workspace_id):
+    ws_id = str(workspace_id or "").strip()
+    if not ws_id:
+        return {"rows": [], "defaults": {}}
+    # Best-effort: si no existe la tabla (instalaciones antiguas), devolvemos vacío.
+    try:
+        conn.execute("SELECT 1 FROM workspace_servicio_empresas LIMIT 1").fetchone()
+    except Exception:
+        return {"rows": [], "defaults": {}}
+
+    rows = []
+    try:
+        rows = conn.execute(
+            """
+            SELECT
+              wse.id,
+              wse.workspace_id,
+              wse.servicio_key,
+              wse.empresa_id,
+              COALESCE(wse.enabled, 1) AS enabled,
+              COALESCE(wse.is_default, 0) AS is_default,
+              COALESCE(wse.sort_order, 0) AS sort_order,
+              COALESCE(wse.notas, '') AS notas,
+              COALESCE(e.nombre, '') AS empresa_nombre
+            FROM workspace_servicio_empresas wse
+            LEFT JOIN empresas e ON e.id = wse.empresa_id
+            WHERE wse.workspace_id = ?
+            ORDER BY LOWER(COALESCE(wse.servicio_key, '')) ASC,
+                     COALESCE(wse.sort_order, 0) ASC,
+                     COALESCE(wse.is_default, 0) DESC,
+                     LOWER(COALESCE(e.nombre, '')) ASC
+            """,
+            (ws_id,),
+        ).fetchall()
+    except Exception:
+        rows = []
+
+    out = []
+    defaults = {}
+    for row in rows or []:
+        payload = dict(row)
+        service_key = normalize_service_key(payload.get("servicio_key"))
+        payload["servicio_key"] = service_key
+        out.append(payload)
+        try:
+            if int(payload.get("is_default") or 0) == 1 and service_key and service_key not in defaults:
+                defaults[service_key] = str(payload.get("empresa_id") or "").strip()
+        except Exception:
+            pass
+    return {"rows": out, "defaults": defaults}
+
+
+def seed_workspace_service_matrix(conn, now=None):
+    """
+    Inicializa la matriz `workspace_servicio_empresas` en instalaciones legacy.
+    Importante: no sobreescribe configuración existente; solo rellena servicios que aún no tienen filas.
+    """
+    # Tabla opcional: si no existe, no hacemos nada.
+    try:
+        conn.execute("SELECT 1 FROM workspace_servicio_empresas LIMIT 1").fetchone()
+    except Exception:
+        return
+
+    now = str(now or datetime.now(timezone.utc).isoformat())
+    ws_rows = []
+    try:
+        ws_rows = conn.execute("SELECT id FROM workspaces").fetchall()
+    except Exception:
+        ws_rows = []
+    workspace_ids = [str(row_value(r, "id") or row_value(r, 0) or "").strip() for r in (ws_rows or [])]
+    workspace_ids = [w for w in workspace_ids if w]
+    if not workspace_ids:
+        return
+
+    for ws_id in workspace_ids:
+        existing_rows = []
+        try:
+            existing_rows = conn.execute(
+                "SELECT DISTINCT servicio_key FROM workspace_servicio_empresas WHERE workspace_id = ?",
+                (ws_id,),
+            ).fetchall()
+        except Exception:
+            existing_rows = []
+        existing = {
+            normalize_service_key(row_value(r, "servicio_key") or row_value(r, 0) or "")
+            for r in (existing_rows or [])
+            if normalize_service_key(row_value(r, "servicio_key") or row_value(r, 0) or "")
+        }
+        for raw_service_key, company_names in (WORKSPACE_SERVICE_COMPANY_SUGGESTIONS or {}).items():
+            service_key = normalize_service_key(raw_service_key)
+            if not service_key or service_key in existing:
+                continue
+            desired_default = str(WORKSPACE_SERVICE_COMPANY_DEFAULTS.get(service_key) or "").strip()
+            inserted = []
+            inserted_has_default = False
+            sort_order = 0
+            for name in (company_names or []):
+                name = str(name or "").strip()
+                if not name:
+                    continue
+                empresa_row = None
+                try:
+                    empresa_row = conn.execute(
+                        "SELECT id FROM empresas WHERE nombre = ? LIMIT 1",
+                        (name,),
+                    ).fetchone()
+                except Exception:
+                    empresa_row = None
+                empresa_id = str(row_value(empresa_row, "id") or row_value(empresa_row, 0) or "").strip() if empresa_row else ""
+                if not empresa_id:
+                    continue
+                is_default = 1 if (desired_default and name == desired_default) else 0
+                if is_default:
+                    inserted_has_default = True
+                try:
+                    conn.execute(
+                        """
+                        INSERT INTO workspace_servicio_empresas (
+                          id, workspace_id, servicio_key, empresa_id, enabled, is_default, sort_order, notas, created_at, updated_at
+                        ) VALUES (
+                          ?, ?, ?, ?, 1, ?, ?, '', datetime(?), datetime(?)
+                        )
+                        ON CONFLICT (workspace_id, servicio_key, empresa_id) DO NOTHING
+                        """,
+                        (os.urandom(16).hex(), ws_id, service_key, empresa_id, is_default, sort_order, now, now),
+                    )
+                except Exception:
+                    try:
+                        conn.execute(
+                            """
+                            INSERT OR IGNORE INTO workspace_servicio_empresas (
+                              id, workspace_id, servicio_key, empresa_id, enabled, is_default, sort_order, notas, created_at, updated_at
+                            ) VALUES (
+                              ?, ?, ?, ?, 1, ?, ?, '', datetime(?), datetime(?)
+                            )
+                            """,
+                            (os.urandom(16).hex(), ws_id, service_key, empresa_id, is_default, sort_order, now, now),
+                        )
+                    except Exception:
+                        pass
+                inserted.append(empresa_id)
+                sort_order += 10
+
+            if not inserted:
+                continue
+
+            # Si no pudimos asignar default explícito, elegimos el primero insertado.
+            if not inserted_has_default:
+                try:
+                    conn.execute(
+                        """
+                        UPDATE workspace_servicio_empresas
+                        SET is_default = 1, updated_at = datetime(?)
+                        WHERE workspace_id = ? AND servicio_key = ? AND empresa_id = ?
+                        """,
+                        (now, ws_id, service_key, inserted[0]),
+                    )
+                except Exception:
+                    pass
+
+            # Normaliza: 1 solo default por servicio.
+            try:
+                default_row = conn.execute(
+                    """
+                    SELECT empresa_id
+                    FROM workspace_servicio_empresas
+                    WHERE workspace_id = ? AND servicio_key = ? AND COALESCE(is_default, 0) = 1
+                    ORDER BY COALESCE(sort_order, 0) ASC
+                    LIMIT 1
+                    """,
+                    (ws_id, service_key),
+                ).fetchone()
+            except Exception:
+                default_row = None
+            default_empresa_id = str(row_value(default_row, "empresa_id") or row_value(default_row, 0) or "").strip() if default_row else ""
+            if default_empresa_id:
+                try:
+                    conn.execute(
+                        """
+                        UPDATE workspace_servicio_empresas
+                        SET is_default = CASE WHEN empresa_id = ? THEN 1 ELSE 0 END,
+                            updated_at = datetime(?)
+                        WHERE workspace_id = ? AND servicio_key = ?
+                        """,
+                        (default_empresa_id, now, ws_id, service_key),
+                    )
+                except Exception:
+                    pass
+
+
 def _normalize_s3_key(key):
     raw = str(key or "").strip().replace("\\", "/")
     return raw.lstrip("/")
@@ -805,6 +995,32 @@ WORKSPACE_TIME_SERVICE_COMPANY_MAP = {
     "hipotecas": ["Financiaciones Modernia"],
     "reformas": ["Inmovere Proyect SL", "Grupo Modernia"],
     "obras": ["Inmovere Proyect SL", "Grupo Modernia"],
+}
+
+# Matriz retrocompatible servicio->empresas (por workspace).
+# Nota: hoy existen mapas hardcodeados en frontend/backend para sugerir una empresa por servicio.
+# Esta matriz permite configurar N empresas por servicio + un default, sin romper instalaciones legacy.
+WORKSPACE_SERVICE_COMPANY_SUGGESTIONS = {
+    "inmobiliaria": ["Estudio Velazquez 2012 SL"],
+    "gestoria": ["Fincas Velazquez", "Grupo Modernia"],
+    "fincas": ["Fincas Velazquez"],
+    "seguros": ["Fincas Velazquez"],
+    "financiaciones": ["Financiaciones Modernia"],
+    "obras": ["Inmovere Proyect SL", "Grupo Modernia"],
+    "reformas": ["Inmovere Proyect SL", "Grupo Modernia"],
+    "inversion": ["Inversure"],
+}
+
+# Defaults elegidos para mantener el comportamiento anterior de autoselección en UI.
+WORKSPACE_SERVICE_COMPANY_DEFAULTS = {
+    "inmobiliaria": "Estudio Velazquez 2012 SL",
+    "gestoria": "Fincas Velazquez",
+    "fincas": "Fincas Velazquez",
+    "seguros": "Fincas Velazquez",
+    "financiaciones": "Financiaciones Modernia",
+    "obras": "Grupo Modernia",
+    "reformas": "Grupo Modernia",
+    "inversion": "Inversure",
 }
 LEGAL_COPILOT_CACHE = {"mtime": None, "topics": None}
 LEGAL_RADAR_SOURCES_CACHE = {"mtime": None, "payload": None}
@@ -2425,6 +2641,33 @@ def ensure_workspace_core_tables(conn):
     try:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_workspace_links_source ON workspace_links (source_workspace_id, enabled, link_type)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_workspace_links_target ON workspace_links (target_workspace_id, enabled, link_type)")
+    except Exception:
+        pass
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workspace_servicio_empresas (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          servicio_key TEXT NOT NULL,
+          empresa_id TEXT NOT NULL,
+          enabled INTEGER NOT NULL DEFAULT 1,
+          is_default INTEGER NOT NULL DEFAULT 0,
+          sort_order INTEGER NOT NULL DEFAULT 0,
+          notas TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          UNIQUE (workspace_id, servicio_key, empresa_id)
+        )
+        """
+    )
+    try:
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_workspace_servicio_empresas_ws_service_enabled ON workspace_servicio_empresas (workspace_id, servicio_key, enabled)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_workspace_servicio_empresas_ws_service_default ON workspace_servicio_empresas (workspace_id, servicio_key, is_default)"
+        )
     except Exception:
         pass
 
@@ -18023,6 +18266,13 @@ def ensure_tables(db_path):
     ensure_workspace_core_tables(conn)
     ensure_workspace_facturacion_table(conn)
     ensure_workspace_product_tables(conn)
+    # Seed retrocompatible: matriz servicio->empresas (por workspace).
+    try:
+        if not _migration_done(conn, "workspace_service_matrix_seed_v1"):
+            seed_workspace_service_matrix(conn, now=app_now().isoformat())
+            _migration_mark(conn, "workspace_service_matrix_seed_v1")
+    except Exception:
+        pass
     # Backfills legacy: ejecutar una vez por DB (puede ser caro en Postgres grande).
     try:
         if not _migration_done(conn, "workspace_membership_backfill_v1"):
@@ -31740,6 +31990,153 @@ class Handler(BaseHTTPRequestHandler):
             conn.commit()
             json_response(self, {"ok": True})
             return
+        elif parsed.path == "/api/workspace_service_matrix_upsert":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not workspace_actor_is_privileged(conn, session):
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
+            ensure_workspace_core_tables(conn)
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            empresa_id = str(payload.get("empresa_id") or "").strip()
+            servicio_key_raw = payload.get("servicio_key")
+            if servicio_key_raw is None:
+                servicio_key_raw = payload.get("service_key")
+            if servicio_key_raw is None:
+                servicio_key_raw = payload.get("servicio")
+            servicio_key = normalize_service_key(servicio_key_raw or "")
+            if not workspace_id or not empresa_id or not servicio_key:
+                json_response(self, {"error": "workspace_id, servicio_key y empresa_id requeridos"}, status=400)
+                return
+            empresa = conn.execute("SELECT id FROM empresas WHERE id = ? LIMIT 1", (empresa_id,)).fetchone()
+            if not empresa:
+                json_response(self, {"error": "Empresa no encontrada"}, status=400)
+                return
+            enabled_raw = str(payload.get("enabled", 1)).strip().lower()
+            enabled = 1 if enabled_raw in {"1", "true", "yes", "si", "sí", "on"} else 0
+            default_raw = str(payload.get("is_default", 0)).strip().lower()
+            is_default = 1 if default_raw in {"1", "true", "yes", "si", "sí", "on"} else 0
+            try:
+                sort_order = int(payload.get("sort_order") or 0)
+            except Exception:
+                sort_order = 0
+            notas = str(payload.get("notas") or "").strip()
+
+            existing = conn.execute(
+                """
+                SELECT id
+                FROM workspace_servicio_empresas
+                WHERE workspace_id = ? AND servicio_key = ? AND empresa_id = ?
+                LIMIT 1
+                """,
+                (workspace_id, servicio_key, empresa_id),
+            ).fetchone()
+            if existing:
+                conn.execute(
+                    """
+                    UPDATE workspace_servicio_empresas
+                    SET enabled = ?,
+                        is_default = ?,
+                        sort_order = ?,
+                        notas = ?,
+                        updated_at = datetime(?)
+                    WHERE id = ?
+                    """,
+                    (enabled, is_default, sort_order, notas, now, str(existing["id"])),
+                )
+            else:
+                conn.execute(
+                    """
+                    INSERT INTO workspace_servicio_empresas (
+                      id, workspace_id, servicio_key, empresa_id, enabled, is_default, sort_order, notas, created_at, updated_at
+                    ) VALUES (
+                      ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                    )
+                    """,
+                    (
+                        os.urandom(16).hex(),
+                        workspace_id,
+                        servicio_key,
+                        empresa_id,
+                        enabled,
+                        is_default,
+                        sort_order,
+                        notas,
+                        now,
+                        now,
+                    ),
+                )
+            if is_default:
+                try:
+                    conn.execute(
+                        """
+                        UPDATE workspace_servicio_empresas
+                        SET is_default = 0, updated_at = datetime(?)
+                        WHERE workspace_id = ? AND servicio_key = ? AND empresa_id <> ?
+                        """,
+                        (now, workspace_id, servicio_key, empresa_id),
+                    )
+                except Exception:
+                    pass
+            conn.commit()
+            json_response(self, {"ok": True})
+            return
+        elif parsed.path == "/api/workspace_service_matrix_delete":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not workspace_actor_is_privileged(conn, session):
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
+            ensure_workspace_core_tables(conn)
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            empresa_id = str(payload.get("empresa_id") or "").strip()
+            servicio_key = normalize_service_key(payload.get("servicio_key") or payload.get("service_key") or payload.get("servicio") or "")
+            if not workspace_id or not empresa_id or not servicio_key:
+                json_response(self, {"error": "workspace_id, servicio_key y empresa_id requeridos"}, status=400)
+                return
+            row = conn.execute(
+                """
+                SELECT id, COALESCE(is_default, 0) AS is_default
+                FROM workspace_servicio_empresas
+                WHERE workspace_id = ? AND servicio_key = ? AND empresa_id = ?
+                LIMIT 1
+                """,
+                (workspace_id, servicio_key, empresa_id),
+            ).fetchone()
+            if not row:
+                json_response(self, {"ok": True, "deleted": False})
+                return
+            was_default = 1 if int(row["is_default"] or 0) == 1 else 0
+            conn.execute("DELETE FROM workspace_servicio_empresas WHERE id = ?", (str(row["id"]),))
+            if was_default:
+                try:
+                    pick = conn.execute(
+                        """
+                        SELECT empresa_id
+                        FROM workspace_servicio_empresas
+                        WHERE workspace_id = ? AND servicio_key = ? AND COALESCE(enabled, 1) = 1
+                        ORDER BY COALESCE(sort_order, 0) ASC
+                        LIMIT 1
+                        """,
+                        (workspace_id, servicio_key),
+                    ).fetchone()
+                except Exception:
+                    pick = None
+                next_empresa_id = str(row_value(pick, "empresa_id") or row_value(pick, 0) or "").strip() if pick else ""
+                if next_empresa_id:
+                    try:
+                        conn.execute(
+                            """
+                            UPDATE workspace_servicio_empresas
+                            SET is_default = CASE WHEN empresa_id = ? THEN 1 ELSE 0 END,
+                                updated_at = datetime(?)
+                            WHERE workspace_id = ? AND servicio_key = ?
+                            """,
+                            (next_empresa_id, now, workspace_id, servicio_key),
+                        )
+                    except Exception:
+                        pass
+            conn.commit()
+            json_response(self, {"ok": True, "deleted": True})
+            return
         elif parsed.path == "/api/workspace_member_upsert":
             session = getattr(self, "auth_session", None) or self._current_session()
             if not workspace_actor_is_privileged(conn, session):
@@ -43225,6 +43622,14 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": err or "No autorizado"}, status=403)
                 return
             json_response(self, {"rows": fetch_workspace_link_rows(conn, workspace_id)})
+            return
+
+        if path == "/api/workspace_service_matrix":
+            workspace_id = (params.get("workspace_id", [""])[0] or "").strip()
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            json_response(self, fetch_workspace_service_matrix(conn, workspace_id))
             return
 
         if path == "/api/workspace_detail":

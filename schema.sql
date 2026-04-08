@@ -70,6 +70,22 @@ CREATE TABLE IF NOT EXISTS workspace_modulos (
   FOREIGN KEY (workspace_id) REFERENCES workspaces(id)
 );
 
+CREATE TABLE IF NOT EXISTS workspace_servicio_empresas (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL,
+  servicio_key TEXT NOT NULL,
+  empresa_id TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  is_default INTEGER NOT NULL DEFAULT 0,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  notas TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (workspace_id, servicio_key, empresa_id),
+  FOREIGN KEY (workspace_id) REFERENCES workspaces(id),
+  FOREIGN KEY (empresa_id) REFERENCES empresas(id)
+);
+
 CREATE TABLE IF NOT EXISTS workspace_facturacion (
   id TEXT PRIMARY KEY,
   workspace_id TEXT NOT NULL,
