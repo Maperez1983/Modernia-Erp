@@ -30217,6 +30217,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/workspace_registro_notifications",
             "/api/workspace_document_assign",
             "/api/workspace_portal_upload",
+            "/api/workspace_company_logo_upload",
             "/api/workspace_cobros",
             "/api/workspace_remesas",
             "/api/workspace_portal_requerimientos",
@@ -32146,6 +32147,106 @@ class Handler(BaseHTTPRequestHandler):
             )
             conn.commit()
             json_response(self, {"ok": True})
+            return
+        elif parsed.path == "/api/workspace_company_logo_upload":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not workspace_actor_is_privileged(conn, session):
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            empresa_id = str(payload.get("empresa_id") or payload.get("id") or "").strip()
+            filename = str(payload.get("filename") or "logo.png").strip() or "logo.png"
+            content_type = str(payload.get("content_type") or "").strip() or "application/octet-stream"
+            data_uri = str(payload.get("file_base64") or payload.get("data") or "").strip()
+            if not workspace_id or not empresa_id or not data_uri:
+                json_response(self, {"error": "workspace_id, empresa_id y file_base64 requeridos"}, status=400)
+                return
+
+            ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            linked = conn.execute(
+                "SELECT 1 FROM workspace_empresas WHERE workspace_id = ? AND empresa_id = ? LIMIT 1",
+                (workspace_id, empresa_id),
+            ).fetchone()
+            if not linked:
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
+
+            mime_from_data_uri = ""
+            b64_value = data_uri
+            if "," in data_uri:
+                header, b64_value = data_uri.split(",", 1)
+                header = header.strip().lower()
+                if header.startswith("data:") and ";base64" in header:
+                    try:
+                        mime_from_data_uri = header.split("data:", 1)[1].split(";", 1)[0].strip()
+                    except Exception:
+                        mime_from_data_uri = ""
+            try:
+                raw_bytes = base64.b64decode(b64_value)
+            except Exception:
+                json_response(self, {"error": "Base64 invalido"}, status=400)
+                return
+            if not raw_bytes:
+                json_response(self, {"error": "Archivo vacio"}, status=400)
+                return
+            max_bytes = 6 * 1024 * 1024
+            if len(raw_bytes) > max_bytes:
+                json_response(self, {"error": "Logo demasiado grande (máx. 6MB)"}, status=413)
+                return
+
+            effective_type = (mime_from_data_uri or content_type or "").strip().lower()
+            if not effective_type.startswith("image/"):
+                json_response(self, {"error": "Solo se permiten imágenes"}, status=400)
+                return
+
+            client = s3_client()
+            if not client:
+                bucket, region = s3_config()
+                missing = []
+                if not bucket:
+                    missing.append("AWS_S3_BUCKET")
+                if not region:
+                    missing.append("AWS_REGION")
+                if not S3_BOTO3_AVAILABLE:
+                    missing.append("boto3")
+                detail = f" (faltan: {', '.join(missing)})" if missing else ""
+                json_response(self, {"error": f"S3 no configurado{detail}"}, status=400)
+                return
+
+            bucket, _region = s3_config()
+            key = s3_safe_key("company_logos", filename)
+            try:
+                client.put_object(
+                    Bucket=bucket,
+                    Key=key,
+                    Body=raw_bytes,
+                    ContentType=effective_type,
+                )
+            except Exception:
+                json_response(self, {"error": "No se pudo subir el logo"}, status=502)
+                return
+            try:
+                _s3_grant_key(session, key, conn=conn)
+            except Exception:
+                pass
+
+            logo_url = f"s3://{key}"
+            cols = table_columns(conn, "empresas") or set()
+            if "updated_at" in cols:
+                conn.execute(
+                    "UPDATE empresas SET logo_url = ?, updated_at = datetime(?) WHERE id = ?",
+                    (logo_url, now, empresa_id),
+                )
+            else:
+                conn.execute(
+                    "UPDATE empresas SET logo_url = ? WHERE id = ?",
+                    (logo_url, empresa_id),
+                )
+            conn.commit()
+            json_response(self, {"ok": True, "key": key, "logo_url": logo_url})
             return
         elif parsed.path == "/api/workspace_service_matrix_upsert":
             session = getattr(self, "auth_session", None) or self._current_session()

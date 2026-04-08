@@ -43918,37 +43918,28 @@ const uploadWorkspaceCompanyLogo = async () => {
     if (workspaceCompanyLogoStatus) workspaceCompanyLogoStatus.textContent = "Logo demasiado grande (máx. 6MB).";
     return;
   }
-  if (workspaceCompanyLogoStatus) workspaceCompanyLogoStatus.textContent = "Subiendo logo...";
-  const originalName = String(file.name || "logo").trim() || "logo";
+  if (workspaceCompanyLogoStatus) workspaceCompanyLogoStatus.textContent = "Preparando logo...";
+  const optimized = await maybeCompressUploadFile(file, workspaceCompanyLogoStatus);
+  const fileToUpload = optimized.file || file;
+  const originalName = String(fileToUpload.name || file.name || "logo").trim() || "logo";
   const extMatch = originalName.match(/\.[a-z0-9]{2,8}$/i);
   const ext = extMatch ? extMatch[0].toLowerCase() : "";
   const safeExt = ext && ext.length <= 9 ? ext : "";
-	  const filename = `empresa_${empresaId}_${Date.now()}${safeExt || ".png"}`;
+  const filename = `empresa_${empresaId}_${Date.now()}${safeExt || ".png"}`;
   try {
-    const presign = await postJsonWithDbRetry("/api/s3_presign", {
-      filename,
-      content_type: String(file.type || "application/octet-stream"),
-      prefix: "company_logos",
-      empresa_nombre: empresaNombre,
-    });
-    if (presign?.error) throw new Error(presign.error);
-    if (!presign?.url || !presign?.public_url) throw new Error("No se pudo firmar la subida.");
-    const storedLogoUrl = presign?.key ? `s3://${String(presign.key || "").trim()}` : String(presign.public_url || "").trim();
-    const putRes = await fetch(presign.url, {
-      method: "PUT",
-      headers: { "Content-Type": String(file.type || "application/octet-stream") },
-      body: file,
-    });
-    if (!putRes.ok) {
-      throw new Error(`No se pudo subir a S3 (${putRes.status}).`);
-    }
-    const update = await postJsonWithDbRetry("/api/empresa_update", {
+    if (workspaceCompanyLogoStatus) workspaceCompanyLogoStatus.textContent = "Subiendo logo...";
+    const dataUri = await fileToBase64(fileToUpload);
+    const resp = await postJsonWithDbRetry("/api/workspace_company_logo_upload", {
       workspace_id: state.currentWorkspaceId,
-      id: empresaId,
-      logo_url: storedLogoUrl,
-      empresa_nombre: empresaNombre,
+      empresa_id: empresaId,
+      filename,
+      content_type: String(fileToUpload.type || file.type || "application/octet-stream"),
+      file_base64: dataUri,
     });
-    if (update?.error) throw new Error(update.error);
+    const storedLogoUrl =
+      String(resp?.logo_url || "").trim()
+      || (resp?.key ? `s3://${String(resp.key || "").trim()}` : "");
+    if (!storedLogoUrl) throw new Error("No se pudo guardar el logo.");
     const logoInput = workspaceCompanyForm.querySelector('[name="logo_url"]');
     if (logoInput) logoInput.value = storedLogoUrl;
     if (workspaceCompanyLogoPreview) workspaceCompanyLogoPreview.src = buildPhotoSrc(storedLogoUrl);
