@@ -13791,7 +13791,7 @@ const setWorkspaceFincasTab = (tab = "dashboard") => {
     void refreshWorkspaceFincasLedger({ silent: true });
   }
   if (normalized === "presupuestos") {
-    try {
+    const setupBudgetsUi = () => {
       hydrateWorkspaceCompanySelects();
       renderFincasServiciosIncluidos(workspaceFincasBudgetServiciosIncluidos);
       const wsField = workspaceFincasBudgetQuickForm?.querySelector('[name="workspace_id"]');
@@ -13799,7 +13799,20 @@ const setWorkspaceFincasTab = (tab = "dashboard") => {
       syncWorkspaceFincasBudgetBranding();
       syncWorkspaceFincasBudgetQuickComputed();
       renderWorkspaceFincasBudgetsList();
+    };
+    try {
+      setupBudgetsUi();
     } catch {}
+    const companies = state.currentWorkspaceDetail?.companies || [];
+    if (!companies.length && state.currentWorkspaceId) {
+      void ensureWorkspaceCompaniesLoaded()
+        .then(() => {
+          try {
+            setupBudgetsUi();
+          } catch {}
+        })
+        .catch(() => {});
+    }
   }
 };
 
