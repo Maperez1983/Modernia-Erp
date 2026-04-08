@@ -26233,7 +26233,8 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
     servicio_key = normalize_service_key(budget.get("servicio") or "")
     fincas_logo = _load_asset_logo("logos/fincas-velazquez.png", max_width=420) if servicio_key == "fincas" else None
     colegio_logo = _load_asset_logo("logos/colegio-administradores.png", max_width=260) if servicio_key == "fincas" else None
-    logo = fincas_logo or _load_brand_logo(company.get("logo_url"), max_width=360)
+    brand_logo = _load_brand_logo(company.get("logo_url"), max_width=420 if servicio_key == "fincas" else 360)
+    logo = brand_logo or fincas_logo
     font_title = _document_font(44, bold=True)
     font_subtitle = _document_font(20, bold=False)
     font_chip = _document_font(16, bold=True)
@@ -26301,14 +26302,21 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
         cover_draw.text((margin_x, top_margin + 12), cover_title, fill="white", font=font_title)
         subtitle = "Administración de fincas · Propuesta de servicios"
         cover_draw.text((margin_x, top_margin + 86), subtitle, fill=(240, 246, 248), font=font_subtitle)
-        if fincas_logo:
-            cover.paste(fincas_logo, (margin_x, 22), fincas_logo)
+        if logo:
+            cover.paste(logo, (margin_x, 22), logo)
         if colegio_logo:
             cover.paste(colegio_logo, (page_width - margin_x - colegio_logo.width, 32), colegio_logo)
+            colegiado = str(calc.get("colegiado_numero") or "3079").strip() or "3079"
+            cover_draw.text(
+                (page_width - margin_x - colegio_logo.width, 32 + colegio_logo.height + 10),
+                f"Colegiado nº {colegiado}",
+                fill=(240, 246, 248),
+                font=_document_font(16, True),
+            )
         else:
             cover_draw.text((page_width - margin_x - 360, 44), "Colegio de Administradores", fill=(240, 246, 248), font=font_subtitle)
 
-        client_name = str(client.get("nombre") or budget.get("titulo") or "").strip() or "Comunidad"
+        client_name = str(calc.get("comunidad_denominacion") or client.get("nombre") or budget.get("titulo") or "").strip() or "Comunidad"
         fecha_txt = str(budget.get("fecha") or "").strip() or datetime.now().date().isoformat()
         try:
             fecha_txt = format_spanish_long_date_capitalized(fecha_txt)
@@ -26318,8 +26326,9 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
         n_loc = int(calc.get("num_locales") or 0)
         n_tra = int(calc.get("num_trasteros") or 0)
         n_ap = int(calc.get("num_aparcamientos") or 0)
-        cuota = float(calc.get("cuota_sugerida") or budget.get("subtotal") or budget.get("total") or 0.0)
-        cuota = max(0.0, cuota)
+        subtotal = float(budget.get("subtotal") or calc.get("cuota_sugerida") or 0.0)
+        impuestos = float(budget.get("impuestos") or 0.0)
+        total = float(budget.get("total") or 0.0) if float(budget.get("total") or 0.0) else max(0.0, subtotal + impuestos)
         cuerpo = [
             f"{fecha_txt}",
             "",
@@ -26330,13 +26339,20 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
             f"Cálculo base: {n_viv} viviendas × 5 € + {n_loc} locales × 1 € + {n_ap} aparcamientos × 1 €"
             + (f" + {n_tra} trasteros × 1 €" if n_tra else "")
             + " (mínimo 60 €).",
-            f"Cuota mensual propuesta: {format_eur_short(cuota)} · Total anual: {format_eur_short(cuota * 12)}.",
+            f"Cuota mensual propuesta (sin IVA): {format_eur_short(subtotal)} · IVA (21%): {format_eur_short(impuestos)} · Total mensual (con IVA): {format_eur_short(total)}.",
+            f"Total anual (con IVA): {format_eur_short(total * 12)}.",
             "",
             "Quedamos a su disposición para concretar alcance, fechas de implantación y condiciones particulares de la comunidad.",
+        ]
+        extra_letter = str(calc.get("carta_presentacion") or "").strip()
+        if extra_letter:
+            cuerpo.extend(["", "Carta de presentación adicional:", ""])
+            cuerpo.extend([line.rstrip() for line in extra_letter.splitlines()])
+        cuerpo.extend([
             "",
             "Atentamente,",
             f"{company.get('nombre') or workspace.get('nombre') or 'Fincas Velazquez'}",
-        ]
+        ])
         y_cover = 278
         cover_draw.rounded_rectangle((margin_x, y_cover, page_width - margin_x, page_height - bottom_margin - 22), radius=28, fill=(252, 252, 252), outline=border)
         text_x = margin_x + 34
@@ -26363,7 +26379,7 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
         pages.append(image)
         image, draw, y = new_page(include_cards=False)
 
-    if normalize_service_key(budget.get("servicio") or "") == "administracion fincas":
+    if servicio_key == "fincas":
         ensure_space(120)
         box = (margin_x, y, page_width - margin_x, y + 100)
         draw.rounded_rectangle(box, radius=24, fill=(247, 250, 242), outline=border)
@@ -26377,6 +26393,42 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
         )
         draw.text((box[0] + 24, box[1] + 58), base_text, fill=ink, font=font_table)
         y = box[3] + 24
+
+        ensure_space(190)
+        box2 = (margin_x, y, page_width - margin_x, y + 170)
+        draw.rounded_rectangle(box2, radius=24, fill=(252, 252, 252), outline=border)
+        draw.text((box2[0] + 24, box2[1] + 18), "DATOS COMUNIDAD / SOLICITANTE", fill=primary, font=font_section)
+        lines = [
+            f"Comunidad: {str(calc.get('comunidad_denominacion') or client.get('nombre') or '-').strip() or '-'}",
+            f"Dirección: {str(calc.get('comunidad_direccion') or '-').strip() or '-'}",
+            f"CIF: {str(calc.get('comunidad_cif') or client.get('nif') or '-').strip() or '-'}",
+            f"Solicitante: {str(calc.get('solicitante_nombre') or '-').strip() or '-'} · DNI {str(calc.get('solicitante_dni') or '-').strip() or '-'}",
+            f"Teléfono: {str(calc.get('solicitante_telefono') or client.get('telefono') or '-').strip() or '-'} · Email: {str(calc.get('solicitante_email') or client.get('email') or '-').strip() or '-'}",
+        ]
+        y_txt = box2[1] + 58
+        for line in lines:
+            wrapped = _pdf_wrap_lines(line, width=104)
+            draw.multiline_text((box2[0] + 24, y_txt), "\n".join(wrapped), fill=ink, font=font_table, spacing=4)
+            sample_box = draw.textbbox((box2[0] + 24, y_txt), "Ag", font=font_table)
+            y_txt += (sample_box[3] - sample_box[1] + 8) * len(wrapped)
+        y = box2[3] + 24
+
+        servicios_incluidos = calc.get("servicios_incluidos") if isinstance(calc, dict) else None
+        if isinstance(servicios_incluidos, list) and servicios_incluidos:
+            service_lines = []
+            for item in servicios_incluidos[:10]:
+                text = str(item or "").strip()
+                if not text:
+                    continue
+                service_lines.extend(_pdf_wrap_lines(f"• {text}", width=104))
+            if service_lines:
+                required_h = 64 + len(service_lines) * 22
+                ensure_space(required_h + 24)
+                box3 = (margin_x, y, page_width - margin_x, y + required_h)
+                draw.rounded_rectangle(box3, radius=24, fill=(247, 248, 252), outline=border)
+                draw.text((box3[0] + 24, box3[1] + 18), "SERVICIOS INCLUIDOS", fill=primary, font=font_section)
+                draw.multiline_text((box3[0] + 24, box3[1] + 58), "\n".join(service_lines), fill=ink, font=font_table, spacing=4)
+                y = box3[3] + 24
 
     ensure_space(70)
     draw.text((margin_x, y), "PARTIDAS PRESUPUESTADAS", fill=primary, font=font_section)
@@ -34728,6 +34780,30 @@ class Handler(BaseHTTPRequestHandler):
                     "num_trasteros": parse_non_negative_int(payload.get("num_trasteros")),
                     "num_aparcamientos": parse_non_negative_int(payload.get("num_aparcamientos")),
                 }
+                # Datos de la comunidad / solicitante (para PDF y contrato).
+                calculo["comunidad_denominacion"] = str(payload.get("comunidad_denominacion") or payload.get("cliente_lookup") or "").strip()
+                calculo["comunidad_direccion"] = str(payload.get("comunidad_direccion") or "").strip()
+                calculo["comunidad_cif"] = str(payload.get("comunidad_cif") or payload.get("cliente_nif") or "").strip()
+                calculo["solicitante_nombre"] = str(payload.get("solicitante_nombre") or "").strip()
+                calculo["solicitante_dni"] = str(payload.get("solicitante_dni") or "").strip()
+                calculo["solicitante_telefono"] = str(payload.get("solicitante_telefono") or payload.get("cliente_telefono") or "").strip()
+                calculo["solicitante_direccion"] = str(payload.get("solicitante_direccion") or "").strip()
+                calculo["solicitante_email"] = str(payload.get("solicitante_email") or payload.get("cliente_email") or "").strip()
+                calculo["carta_presentacion"] = str(payload.get("carta_presentacion") or "").strip()
+                colegiado_raw = str(payload.get("colegiado_numero") or "").strip()
+                calculo["colegiado_numero"] = colegiado_raw if colegiado_raw else "3079"
+                servicios_raw = payload.get("servicios_incluidos")
+                servicios = []
+                if isinstance(servicios_raw, list):
+                    servicios = [str(item or "").strip() for item in servicios_raw if str(item or "").strip()]
+                elif isinstance(servicios_raw, str) and servicios_raw.strip():
+                    try:
+                        parsed = json.loads(servicios_raw)
+                        if isinstance(parsed, list):
+                            servicios = [str(item or "").strip() for item in parsed if str(item or "").strip()]
+                    except Exception:
+                        servicios = []
+                calculo["servicios_incluidos"] = servicios
                 calculo["cuota_sugerida"] = compute_fincas_cuota_sugerida(
                     calculo["num_vecinos"],
                     calculo["num_locales"],
@@ -34751,6 +34827,9 @@ class Handler(BaseHTTPRequestHandler):
             subtotal_manual = round(parse_money_value(payload.get("subtotal")), 2) or 0.0
             subtotal = subtotal_manual if subtotal_manual > 0 else subtotal_calculado
             impuestos = round(parse_money_value(payload.get("impuestos")), 2) or 0.0
+            # IVA por defecto para fincas (21%) si no se ha informado explícitamente.
+            if servicio in {"administracion fincas", "fincas"} and impuestos <= 0 and subtotal > 0:
+                impuestos = round(subtotal * 0.21, 2)
             total_manual = round(parse_money_value(payload.get("total")), 2) or 0.0
             total = total_manual if total_manual > 0 else round(subtotal + impuestos, 2)
             estado = normalize_workspace_budget_state(payload.get("estado") or (current["estado"] if current else "") or "Borrador")
@@ -35410,6 +35489,97 @@ class Handler(BaseHTTPRequestHandler):
                 )
             conn.commit()
             json_response(self, {"ok": True, "id": record_id})
+            return
+        elif parsed.path == "/api/workspace_fincas_convert_presupuesto":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            presupuesto_id = str(payload.get("presupuesto_id") or "").strip()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            if not workspace_id or not presupuesto_id:
+                json_response(self, {"error": "workspace_id y presupuesto_id requeridos"}, status=400)
+                return
+            ok, err = enforce_workspace_membership(conn, session, workspace_id)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            budget = conn.execute(
+                """
+                SELECT id, workspace_id, empresa_id, cliente_id, servicio, estado, referencia_tipo, referencia_id,
+                       titulo, subtotal, impuestos, total, calculo_json
+                FROM workspace_presupuestos
+                WHERE id = ? AND workspace_id = ?
+                LIMIT 1
+                """,
+                (presupuesto_id, workspace_id),
+            ).fetchone()
+            if not budget:
+                json_response(self, {"error": "presupuesto no encontrado"}, status=404)
+                return
+            if normalize_lookup_text(budget["estado"] or "") != "aceptado":
+                json_response(self, {"error": "solo se puede convertir un presupuesto aceptado"}, status=400)
+                return
+            if normalize_lookup_text(budget["referencia_tipo"] or "") == "comunidad" and str(budget["referencia_id"] or "").strip():
+                json_response(self, {"ok": True, "comunidad_id": str(budget["referencia_id"] or "").strip(), "already": True})
+                return
+            calc = {}
+            try:
+                calc = json.loads(budget["calculo_json"] or "{}") if budget["calculo_json"] else {}
+                if not isinstance(calc, dict):
+                    calc = {}
+            except Exception:
+                calc = {}
+            num_vecinos = parse_non_negative_int(calc.get("num_vecinos"))
+            num_locales = parse_non_negative_int(calc.get("num_locales"))
+            num_trasteros = parse_non_negative_int(calc.get("num_trasteros"))
+            num_aparcamientos = parse_non_negative_int(calc.get("num_aparcamientos"))
+            cuota_sugerida = compute_fincas_cuota_sugerida(num_vecinos, num_locales, num_trasteros, num_aparcamientos)
+            comunidad_nombre = str(calc.get("comunidad_denominacion") or budget["titulo"] or "Comunidad").strip()
+            comunidad_cif = str(calc.get("comunidad_cif") or "").strip() or None
+            comunidad_direccion = str(calc.get("comunidad_direccion") or "").strip() or None
+            presidente = str(calc.get("solicitante_nombre") or "").strip() or None
+            cuota_mensual = round(float(budget["subtotal"] or cuota_sugerida or 0.0), 2)
+            comunidad_id = os.urandom(16).hex()
+            conn.execute(
+                """
+                INSERT INTO workspace_fincas_comunidades (
+                  id, workspace_id, empresa_id, nombre, referencia_catastral, cif, direccion, presidente, secretario,
+                  estado, num_vecinos, num_locales, num_trasteros, num_aparcamientos, cuota_sugerida, cuota_mensual,
+                  created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                """,
+                (
+                    comunidad_id,
+                    workspace_id,
+                    str(budget["empresa_id"] or "").strip() or None,
+                    comunidad_nombre,
+                    None,
+                    comunidad_cif,
+                    comunidad_direccion,
+                    presidente,
+                    None,
+                    "Activa",
+                    num_vecinos,
+                    num_locales,
+                    num_trasteros,
+                    num_aparcamientos,
+                    cuota_sugerida,
+                    cuota_mensual,
+                    now,
+                    now,
+                ),
+            )
+            conn.execute(
+                """
+                UPDATE workspace_presupuestos
+                SET referencia_tipo = ?, referencia_id = ?, updated_at = datetime(?)
+                WHERE id = ? AND workspace_id = ?
+                """,
+                ("comunidad", comunidad_id, now, presupuesto_id, workspace_id),
+            )
+            conn.commit()
+            json_response(self, {"ok": True, "comunidad_id": comunidad_id})
             return
         elif parsed.path == "/api/workspace_document_assign":
             workspace_id = str(payload.get("workspace_id") or "").strip()

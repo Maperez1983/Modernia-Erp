@@ -3289,7 +3289,7 @@ const resolveRestrictedCompanyAccess = (empresaName) => {
   if (empresaName === DASHBOARD_COMPANY && userCanAccessService("inmobiliaria")) {
     return "inmobiliaria";
   }
-  if (empresaName === FIN_COMPANY && userCanAccessService("financiaciones")) {
+  if (empresaName === resolveCrmFinEmpresaNombre() && userCanAccessService("financiaciones")) {
     return "financiaciones";
   }
   const fincasServices = [
@@ -4081,7 +4081,8 @@ const getYearValue = (series, year) => {
 
 const buildCompanyMeta = (item, selectedYear) => {
   const isEstudio = item.empresa === DASHBOARD_COMPANY;
-  const isFin = item.empresa === FIN_COMPANY;
+  const finEmpresa = resolveCrmFinEmpresa();
+  const isFin = !!finEmpresa && item.empresa === finEmpresa.nombre;
   const isFincas = item.empresa === FINCAS_COMPANY;
   if (isEstudio && state.homeDashboard && selectedYear) {
     const ventas = getYearValue(state.homeDashboard.ventas, selectedYear);
@@ -14589,12 +14590,13 @@ const updateExplorerHeader = (empresaName) => {
     }
   }
   if (operativaTab) {
-    const hideOperativa = empresaName === FINCAS_COMPANY || empresaName === FIN_COMPANY;
+    const hideOperativa =
+      empresaName === FINCAS_COMPANY || empresaName === resolveCrmFinEmpresaNombre();
     operativaTab.classList.toggle("hidden", hideOperativa);
     if (empresaName === FINCAS_COMPANY && currentTab === "operativa") {
       setTab("gestoria-dash");
     }
-    if (empresaName === FIN_COMPANY && currentTab === "operativa") {
+    if (empresaName === resolveCrmFinEmpresaNombre() && currentTab === "operativa") {
       setTab("fin-crm");
     }
   }
@@ -14755,8 +14757,11 @@ const openCompany = (empresaName, options = {}) => {
   empresaSelect.value = empresa.id;
   state.currentEmpresaId = empresa.id;
   state.currentEmpresaName = empresa.nombre;
-  const preferFinCrm =
-    empresa.nombre === FIN_COMPANY && userCanAccessService("financiaciones");
+  const preferFinCrm = (() => {
+    if (!userCanAccessService("financiaciones")) return false;
+    const finEmpresa = resolveCrmFinEmpresa();
+    return !!finEmpresa && String(finEmpresa.id) === String(empresa.id);
+  })();
   if (preferFinCrm && !state.hipotecaAltaView) {
     state.hipotecaAltaView = "dashboard";
   }
@@ -22117,7 +22122,7 @@ const updateTableVisibility = () => {
   if (finSimSection) {
     finSimSection.classList.toggle(
       "hidden",
-      currentTab !== "fin-sim" || isClientePage || selectedCompany !== FIN_COMPANY
+      currentTab !== "fin-sim" || isClientePage
     );
   }
   if (altaSection) {
@@ -22132,10 +22137,9 @@ const updateTableVisibility = () => {
     aieSection.classList.toggle("hidden", currentTab !== "aie" || isClientePage);
   }
   if (hipotecaSection) {
-    const company = state.empresas.find((e) => e.id === empresaSelect.value)?.nombre;
     hipotecaSection.classList.toggle(
       "hidden",
-      isClientePage || currentTab !== "fin-crm" || company !== FIN_COMPANY
+      isClientePage || currentTab !== "fin-crm"
     );
   }
   updateFincasBdtTabs();
@@ -22705,7 +22709,7 @@ const loadHipotecaBdt = (forceRefresh = false) => {
   if (!hipotecaBdtTable || !hipotecaBdtInfo) {
     return;
   }
-  const empresa = state.empresas.find((e) => e.nombre === FIN_COMPANY);
+  const empresa = resolveCrmFinEmpresa();
   if (!empresa?.id) {
     hipotecaBdtTable.innerHTML = "<p class='muted'>Sin empresa de hipotecas configurada.</p>";
     hipotecaBdtInfo.textContent = "";
@@ -22928,7 +22932,7 @@ const buildHipotecaFichaFormFields = (panel, columns = []) => {
 const fetchHipotecaRowById = async (recordId) => {
   const id = String(recordId || "").trim();
   if (!id) return null;
-  const empresa = state.empresas.find((item) => item.nombre === FIN_COMPANY);
+  const empresa = resolveCrmFinEmpresa();
   if (!empresa) return null;
   const params = new URLSearchParams({
     tabla: "hipotecas",
@@ -22958,7 +22962,7 @@ const openHipotecaFichaPrint = (recordId) => {
 };
 
 const downloadHipotecasFirmadasExcel = () => {
-  const empresa = state.empresas.find((item) => item.nombre === FIN_COMPANY);
+  const empresa = resolveCrmFinEmpresa();
   if (!empresa?.id) return;
   const params = new URLSearchParams({ empresa_id: empresa.id });
   const year = String(hipotecaBdtExportYear?.value || "").trim();
@@ -23045,7 +23049,7 @@ const saveHipotecaFicha = (event) => {
   if (status) status.textContent = "Guardando cambios...";
   const payload = {
     id: recordId,
-    empresa_nombre: FIN_COMPANY,
+    empresa_nombre: resolveCrmFinEmpresaNombre(),
   };
   let fields = [];
   try {
@@ -23268,7 +23272,7 @@ const vincularHipotecaSeleccionada = async () => {
     hipotecaBdtVincularStatus.textContent = "Selecciona una hipoteca para vincular.";
     return;
   }
-  const empresa = state.empresas.find((e) => e.nombre === FIN_COMPANY);
+  const empresa = resolveCrmFinEmpresa();
   if (!empresa?.id) {
     hipotecaBdtVincularStatus.textContent = "Empresa de Financiaciones no disponible.";
     return;
@@ -23300,7 +23304,7 @@ const vincularHipotecaSeleccionada = async () => {
       "/api/hipotecas_update",
       {
         id: selectedId,
-        empresa_nombre: FIN_COMPANY,
+        empresa_nombre: empresa.nombre,
         cliente_id: clienteId,
         cliente: clienteNombrePersistido,
       },
@@ -23528,7 +23532,7 @@ const loadHipotecaDashboard = () => {
   ) {
     return;
   }
-  const empresa = state.empresas.find((e) => e.nombre === FIN_COMPANY);
+  const empresa = resolveCrmFinEmpresa();
   if (!empresa?.id) {
     hipotecaDashboardKpis.innerHTML = "<p class='muted'>Sin empresa de hipotecas configurada.</p>";
     if (hipotecaDashboardInfo) hipotecaDashboardInfo.textContent = "";
@@ -23712,7 +23716,7 @@ const loadHipotecaDashboard = () => {
 
 const loadHipotecaContabilidadHipotecas = async () => {
   if (!hipotecaContabilidadHipoteca) return [];
-  const empresa = state.empresas.find((e) => e.nombre === FIN_COMPANY);
+  const empresa = resolveCrmFinEmpresa();
   if (!empresa?.id) return [];
   const data = await api(`/api/hipoteca_bdt?empresa_id=${empresa.id}&limit=1000`);
   const columns = data?.columns || [];
@@ -23751,7 +23755,7 @@ const loadHipotecaContabilidadHipotecas = async () => {
 
 const loadHipotecaContabilidad = () => {
   if (!hipotecaContabilidadTable || !hipotecaContabilidadInfo) return;
-  const empresa = state.empresas.find((e) => e.nombre === FIN_COMPANY);
+  const empresa = resolveCrmFinEmpresa();
   if (!empresa?.id) {
     hipotecaContabilidadTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
     hipotecaContabilidadInfo.textContent = "";
@@ -23920,7 +23924,7 @@ const setHipotecaAltaView = (view) => {
     loadFinHipotecasRegistradas();
   }
   if (next === "agenda") {
-    const empresa = state.empresas.find((item) => item.nombre === FIN_COMPANY);
+    const empresa = resolveCrmFinEmpresa();
     if (empresa?.id) {
       loadFinWorkflowActions(empresa.id);
     }
@@ -23988,7 +23992,9 @@ const drawSignedBarChart = (canvas, labels, values, color) => {
 };
 
 const renderDashboard = (empresaName, empresaId) => {
-  if (!empresaId || (empresaName !== DASHBOARD_COMPANY && empresaName !== FIN_COMPANY && empresaName !== FINCAS_COMPANY)) {
+  const finEmpresa = resolveCrmFinEmpresa();
+  const isFin = !!finEmpresa && String(finEmpresa.id) === String(empresaId || "");
+  if (!empresaId || (empresaName !== DASHBOARD_COMPANY && !isFin && empresaName !== FINCAS_COMPANY)) {
     dashboardSection.classList.add("hidden");
     if (finDashboardSection) {
       finDashboardSection.classList.add("hidden");
@@ -24000,7 +24006,7 @@ const renderDashboard = (empresaName, empresaId) => {
     return;
   }
 
-  if (empresaName === FIN_COMPANY) {
+  if (isFin) {
     dashboardSection.classList.add("hidden");
     if (fincasDashboardSection) {
       fincasDashboardSection.classList.add("hidden");
@@ -24868,7 +24874,7 @@ const loadHomeDashboard = () => {
 };
 
 const loadHomeHipotecaStats = () => {
-  const fin = state.empresas.find((empresa) => empresa.nombre === FIN_COMPANY);
+  const fin = resolveCrmFinEmpresa();
   if (!fin) {
     return Promise.resolve();
   }
@@ -25732,9 +25738,15 @@ const sendTableUpdate = (table, recordId, column, value, statusEl = null) => {
   if (infoTarget) {
     infoTarget.textContent = "Actualizando...";
   }
+  const empresaNombre =
+    table === "hipotecas"
+      ? resolveCrmFinEmpresaNombre()
+      : table === "seguros"
+        ? resolveCrmSegurosEmpresaNombre()
+        : resolveCrmGestoriaEmpresaNombre();
   const payload = {
     id: recordId,
-    empresa_nombre: table === "hipotecas" ? FIN_COMPANY : FINCAS_COMPANY,
+    empresa_nombre: empresaNombre,
     [column]: value,
   };
   return fetch(endpoint, {
@@ -34323,7 +34335,7 @@ const openSegurosPresupuestoEdit = (columns, row) => {
 };
 
 const loadFinCrm = () => {
-  const empresa = state.empresas.find((e) => e.nombre === FIN_COMPANY);
+  const empresa = resolveCrmFinEmpresa();
   if (!empresa) {
     if (finCrmTable) {
       finCrmTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
@@ -34340,7 +34352,7 @@ const loadFinCrm = () => {
 
 const loadFinHipotecasRegistradas = () => {
   if (!finCrmTable || !finCrmInfo) return;
-  const empresa = state.empresas.find((e) => e.nombre === FIN_COMPANY);
+  const empresa = resolveCrmFinEmpresa();
   if (!empresa?.id) {
     finCrmTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
     finCrmInfo.textContent = "";
@@ -34581,7 +34593,7 @@ const loadFinChecklist = (asesoramientoId) => {
           body: JSON.stringify({
             id: row.id,
             estado: select.value,
-            empresa_nombre: FIN_COMPANY,
+            empresa_nombre: resolveCrmFinEmpresaNombre(),
           }),
         }).catch(() => {});
       });
@@ -34717,7 +34729,7 @@ const loadFinAsesoramientos = (empresaId) => {
         try {
           await createRecommendedFinAction();
           setHipotecaAltaView("agenda");
-          const empresa = state.empresas.find((e) => e.nombre === FIN_COMPANY);
+          const empresa = resolveCrmFinEmpresa();
           if (empresa?.id) loadFinWorkflowActions(empresa.id);
         } catch (error) {
           window.alert(error.message || "No se pudo crear la siguiente tarea.");
@@ -34734,7 +34746,7 @@ const loadFinAsesoramientos = (empresaId) => {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             id: row.id,
-            empresa_nombre: FIN_COMPANY,
+            empresa_nombre: resolveCrmFinEmpresaNombre(),
           }),
         })
           .then((res) => res.json())
@@ -34763,7 +34775,7 @@ const selectFinHipoteca = (row) => {
   state.finSelectedHipoteca = row || null;
   state.finSelectedHipotecaId = row?.id || "";
   renderFinSelectedHipoteca();
-  const empresa = state.empresas.find((e) => e.nombre === FIN_COMPANY);
+  const empresa = resolveCrmFinEmpresa();
   if (empresa?.id) {
     loadFinHipotecaActions(empresa.id);
   }
@@ -34822,12 +34834,12 @@ const renderFinSelectedHipoteca = () => {
           body: JSON.stringify({
             id: row.id,
             estado: select.value,
-            empresa_nombre: FIN_COMPANY,
+            empresa_nombre: resolveCrmFinEmpresaNombre(),
           }),
         }).then((res) => res.json()).then((data) => {
           if (data?.error) throw new Error(data.error);
         });
-        const empresa = state.empresas.find((e) => e.nombre === FIN_COMPANY);
+        const empresa = resolveCrmFinEmpresa();
         if (empresa?.id) {
           await loadFinHipotecasEstudio(empresa.id);
         }
@@ -35334,7 +35346,7 @@ const selectFinAsesoramiento = (row) => {
   }
   updateFinSelectedSummary();
   syncFinAgendaContext();
-  const empresa = state.empresas.find((item) => item.nombre === FIN_COMPANY);
+  const empresa = resolveCrmFinEmpresa();
   if (empresa?.id && (state.hipotecaAltaView || "dashboard") === "agenda") {
     loadFinWorkflowActions(empresa.id);
   }
@@ -35345,7 +35357,7 @@ const saveFinActionResolution = async (row, result, estado = "Hecho") => {
   if (!row?.id) return;
   const payload = {
     id: row.id,
-    empresa_nombre: FIN_COMPANY,
+    empresa_nombre: resolveCrmFinEmpresaNombre(),
     estado,
     resultado_cierre: result || "",
   };
@@ -35451,12 +35463,12 @@ const loadFinWorkflowActions = (empresaId) => {
 };
 
 const createRecommendedFinAction = async () => {
-  const empresa = state.empresas.find((item) => item.nombre === FIN_COMPANY);
+  const empresa = resolveCrmFinEmpresa();
   const row = state.finSelectedAsesoramiento;
   const next = getFinRecommendedAction(row);
   if (!empresa?.id || !row || !next) return;
   const payload = {
-    empresa_nombre: FIN_COMPANY,
+    empresa_nombre: empresa.nombre,
     servicio: "financiaciones",
     asesoramiento_id: row.id,
     cliente_id: row.cliente1_id || "",
@@ -37365,7 +37377,7 @@ const deleteHipoteca = (id) => {
   return fetch("/api/hipotecas_delete", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ id, empresa_nombre: FIN_COMPANY }),
+    body: JSON.stringify({ id, empresa_nombre: resolveCrmFinEmpresaNombre() }),
   }).then((res) => res.json());
 };
 

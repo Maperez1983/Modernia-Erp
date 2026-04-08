@@ -1511,35 +1511,107 @@
           <div class="section-head">
             <div>
               <h3>Presupuestos (Administración de fincas)</h3>
-              <p class="muted">Calcula automáticamente la cuota y genera un PDF con carta de presentación.</p>
+              <p class="muted">Formulario completo (comunidad + solicitante + edificio) con cálculo automático e IVA 21%.</p>
             </div>
           </div>
-          <div style="display:flex;gap:18px;align-items:center;flex-wrap:wrap;margin-bottom:12px;">
-            <img src="/assets/logos/fincas-velazquez.png" alt="Fincas Velazquez" style="height:48px;object-fit:contain;" />
-            <img id="workspaceFincasColegioLogo" src="/assets/logos/colegio-administradores.png" alt="Colegio de Administradores" style="height:48px;object-fit:contain;" />
+          <div class="budget-brand-strip">
+            <div class="budget-brand-logos">
+              <img id="workspaceFincasBudgetCompanyLogo" src="/assets/logos/fincas-velazquez.png" alt="Logo empresa" />
+              <img id="workspaceFincasBudgetColegioLogo" src="/assets/logos/colegio-administradores.png" alt="Colegio de Administradores" />
+            </div>
+            <div class="muted">Colegiado nº 3079</div>
           </div>
           <form id="workspaceFincasBudgetQuickForm" class="form-grid">
             <input type="hidden" name="comunidad_id" />
             <label class="span-2">
-              Comunidad
+              Empresa emisora
+              <select name="empresa_id" required></select>
+            </label>
+            <label class="span-2">
+              Comunidad (para precargar datos, opcional)
               <select name="comunidad_id_lookup"></select>
             </label>
+            <h4 class="span-2">Datos de la comunidad</h4>
+            <label class="span-2">
+              Denominación social
+              <input name="comunidad_denominacion" required placeholder="Ej. Comunidad Propietarios C/ Velázquez 12" />
+            </label>
+            <label class="span-2">
+              Dirección
+              <input name="comunidad_direccion" required placeholder="Calle, número, localidad" />
+            </label>
+            <label>
+              CIF
+              <input name="comunidad_cif" required placeholder="Ej. H12345678" />
+            </label>
+            <label>
+              Estado
+              <select name="estado">
+                <option>Borrador</option>
+                <option>Estudio</option>
+                <option>Aceptado</option>
+                <option>Rechazado</option>
+              </select>
+            </label>
+            <h4 class="span-2">Datos del presidente / solicitante</h4>
+            <label class="span-2">
+              Nombre
+              <input name="solicitante_nombre" required />
+            </label>
+            <label>
+              DNI
+              <input name="solicitante_dni" required />
+            </label>
+            <label>
+              Teléfono
+              <input name="solicitante_telefono" />
+            </label>
+            <label class="span-2">
+              Dirección
+              <input name="solicitante_direccion" />
+            </label>
+            <label class="span-2">
+              Email
+              <input name="solicitante_email" type="email" />
+            </label>
+            <h4 class="span-2">Datos del edificio</h4>
             <label>
               Viviendas
-              <input name="num_vecinos" type="number" min="0" step="1" />
+              <input name="num_vecinos" type="number" min="0" step="1" value="0" />
             </label>
             <label>
               Locales
-              <input name="num_locales" type="number" min="0" step="1" />
+              <input name="num_locales" type="number" min="0" step="1" value="0" />
             </label>
             <label>
               Aparcamientos
-              <input name="num_aparcamientos" type="number" min="0" step="1" />
+              <input name="num_aparcamientos" type="number" min="0" step="1" value="0" />
             </label>
             <label>
-              Base mensual sugerida
-              <input name="cuota_sugerida" type="number" step="0.01" readonly />
+              Base sugerida (sin IVA)
+              <input name="subtotal_sugerido" type="number" step="0.01" readonly />
             </label>
+            <label>
+              Subtotal (sin IVA)
+              <input name="subtotal" type="number" step="0.01" readonly />
+            </label>
+            <label>
+              IVA (21%)
+              <input name="impuestos" type="number" step="0.01" readonly />
+            </label>
+            <label>
+              Total (con IVA)
+              <input name="total" type="number" step="0.01" readonly />
+            </label>
+            <label class="span-2">
+              Título (opcional)
+              <input name="titulo" placeholder="Si lo dejas en blanco se autogenera" />
+            </label>
+            <label class="span-2">
+              Carta de presentación (opcional)
+              <textarea name="carta_presentacion" rows="5" placeholder="Texto adicional que aparecerá en la carta de presentación del PDF."></textarea>
+            </label>
+            <div class="span-2" id="workspaceFincasBudgetServiciosIncluidos"></div>
             <div class="span-2" id="workspaceFincasBudgetHero"></div>
             <div class="form-actions span-2">
               <button type="submit">Crear presupuesto + PDF</button>
@@ -1547,6 +1619,27 @@
               <span id="workspaceFincasBudgetQuickStatus" class="muted"></span>
             </div>
           </form>
+        </div>
+
+        <div class="form-card crm-workspace-view" data-workspace-view="fincas" data-fincas-tab="presupuestos">
+          <div class="section-head">
+            <div>
+              <h3>Listado de presupuestos</h3>
+              <p class="muted">Acepta/rechaza, genera contrato y convierte a comunidad activa.</p>
+            </div>
+            <div class="toolbar">
+              <select id="workspaceFincasBudgetsEstadoFilter">
+                <option value="all" selected>Todos</option>
+                <option value="Borrador">Borrador</option>
+                <option value="Estudio">Estudio</option>
+                <option value="Aceptado">Aceptado</option>
+                <option value="Rechazado">Rechazado</option>
+              </select>
+              <button type="button" class="secondary ghost" id="workspaceFincasBudgetsRefreshBtn">Recargar</button>
+            </div>
+          </div>
+          <div id="workspaceFincasBudgetsTable"></div>
+          <div class="footer" id="workspaceFincasBudgetsInfo"></div>
         </div>
 
         <div class="workspace-central-layout crm-workspace-view" data-workspace-view="fincas" data-fincas-tab="comunidades">
@@ -3846,15 +3939,14 @@
                 <p class="muted">5 € por vivienda + 1 € por local, trastero o aparcamiento (mín. 60 €/mes).</p>
               </div>
             </div>
+            <div class="budget-brand-strip">
+              <div class="budget-brand-logos">
+                <img id="gestoriaBudgetCompanyLogo" src="/assets/logos/fincas-velazquez.png" alt="Logo empresa" />
+                <img id="gestoriaBudgetColegioLogo" src="/assets/logos/colegio-administradores.png" alt="Colegio de Administradores" />
+              </div>
+              <div class="muted">Colegiado nº 3079</div>
+            </div>
             <form id="gestoriaBudgetQuickForm" class="form-grid">
-              <label class="span-2">
-                Comunidad / Cliente
-                <input name="cliente_lookup" required placeholder="Ej. C/ Ejemplo 12 · Comunidad" />
-              </label>
-              <label>
-                CIF (opcional)
-                <input name="cliente_nif" placeholder="Opcional" />
-              </label>
               <label>
                 Estado
                 <select name="estado">
@@ -3863,6 +3955,38 @@
                   <option>Aceptado</option>
                   <option>Rechazado</option>
                 </select>
+              </label>
+              <label class="span-2">
+                Denominación social
+                <input name="comunidad_denominacion" required placeholder="Ej. Comunidad Propietarios C/ Velázquez 12" />
+              </label>
+              <label class="span-2">
+                Dirección
+                <input name="comunidad_direccion" required placeholder="Calle, número, localidad" />
+              </label>
+              <label>
+                CIF
+                <input name="comunidad_cif" required placeholder="Ej. H12345678" />
+              </label>
+              <label class="span-2">
+                Nombre presidente/solicitante
+                <input name="solicitante_nombre" required />
+              </label>
+              <label>
+                DNI solicitante
+                <input name="solicitante_dni" required />
+              </label>
+              <label>
+                Teléfono solicitante
+                <input name="solicitante_telefono" />
+              </label>
+              <label class="span-2">
+                Dirección solicitante
+                <input name="solicitante_direccion" />
+              </label>
+              <label class="span-2">
+                Email solicitante
+                <input name="solicitante_email" type="email" />
               </label>
               <label>
                 Viviendas
@@ -3882,12 +4006,29 @@
               </label>
               <label>
                 Base mensual sugerida
-                <input name="cuota_sugerida" type="number" step="0.01" readonly />
+                <input name="subtotal_sugerido" type="number" step="0.01" readonly />
+              </label>
+              <label>
+                Subtotal (sin IVA)
+                <input name="subtotal" type="number" step="0.01" readonly />
+              </label>
+              <label>
+                IVA (21%)
+                <input name="impuestos" type="number" step="0.01" readonly />
+              </label>
+              <label>
+                Total (con IVA)
+                <input name="total" type="number" step="0.01" readonly />
               </label>
               <label class="span-2">
                 Título (opcional)
                 <input name="titulo" placeholder="Se autogenera si lo dejas en blanco" />
               </label>
+              <label class="span-2">
+                Carta de presentación (opcional)
+                <textarea name="carta_presentacion" rows="4" placeholder="Texto adicional para la carta del PDF."></textarea>
+              </label>
+              <div class="span-2" id="gestoriaBudgetServiciosIncluidos"></div>
               <div class="form-actions span-2">
                 <button type="submit">Crear presupuesto + PDF</button>
                 <span id="gestoriaBudgetQuickStatus" class="muted"></span>
