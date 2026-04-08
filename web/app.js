@@ -13418,7 +13418,14 @@ const renderWorkspaceFincasCommunityList = (rows = []) => {
   workspaceFincasCommunityList.querySelectorAll("[data-community-edit]").forEach((button) => {
     button.addEventListener("click", () => {
       const record = rows.find((row) => String(row.id || "") === String(button.dataset.communityEdit || ""));
-      if (record) fillWorkspaceFincasCommunityForm(record);
+      if (record) {
+        fillWorkspaceFincasCommunityForm(record);
+        try {
+          if (typeof workspaceFincasCommunityForm?.scrollIntoView === "function") {
+            workspaceFincasCommunityForm.scrollIntoView({ behavior: "smooth", block: "start" });
+          }
+        } catch {}
+      }
     });
   });
 };

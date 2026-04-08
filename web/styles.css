@@ -924,6 +924,9 @@ body.crm-fin #companySummary {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 10px;
+  /* Evita que elementos con `grid-column: span 2` creen columnas implícitas que “invadan”
+     otras zonas cuando el grid colapsa a 1 columna (p.ej. mapas/iframes en layouts estrechos). */
+  grid-auto-columns: 0;
 }
 
 .form-grid.inmo-grid {
