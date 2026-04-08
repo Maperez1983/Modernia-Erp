@@ -24779,7 +24779,7 @@ def fetch_workspace_fincas_comunidades(conn, workspace_id, limit=30):
         ORDER BY c.updated_at DESC, c.nombre COLLATE NOCASE ASC
         LIMIT ?
         """,
-        (workspace_id, max(1, min(int(limit or 30), 100))),
+        (workspace_id, max(1, min(int(limit or 30), 500))),
     ).fetchall()
     return {"rows": [dict(row) for row in rows]}
 

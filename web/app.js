@@ -1393,6 +1393,9 @@ const state = {
   currentEmpresaId: "",
   currentEmpresaName: "",
   crmInmoEmpresaId: "",
+  crmSegurosEmpresaId: "",
+  crmGestoriaEmpresaId: "",
+  crmFinEmpresaId: "",
   currentModule: "empresas",
   currentInmuebleId: "",
   currentInmuebleOriginView: "inmuebles",
@@ -13532,9 +13535,10 @@ const renderWorkspaceFincasDashboard = () => {
   const gastos = relevantLedger
     .filter((row) => normalizeSimple(row.tipo || "") === "gasto")
     .reduce((acc, row) => acc + (Number(row.importe || 0) || 0), 0);
+  const ctxLabel = getWorkspaceCompanyContextLabel();
 
   const kpis = [
-    { label: "Comunidades", value: numberFormatter.format(communities.length || 0), note: "Total activas en el workspace" },
+    { label: "Comunidades", value: numberFormatter.format(communities.length || 0), note: `Contexto: ${ctxLabel}` },
     { label: "Comuneros", value: numberFormatter.format(comuneros || 0), note: "Suma de viviendas" },
     { label: "Cuota mensual", value: euroFormatter.format(cuotaMensual || 0), note: "Suma de cuotas por comunidad" },
     { label: "Ingresos", value: euroFormatter.format(ingresos || 0), note: "Desde contabilidad (ingresos)" },
@@ -13554,6 +13558,30 @@ const renderWorkspaceFincasDashboard = () => {
     </div>
     <p class="muted">Tip: registra movimientos en la pestaña Contabilidad para que el dashboard se alimente automáticamente.</p>
   `;
+};
+
+let _workspaceFincasCommunitiesLastFetchAt = 0;
+const refreshWorkspaceFincasCommunities = async ({ force = false, silent = false } = {}) => {
+  if (!state.currentWorkspaceId) return;
+  const nowTs = Date.now();
+  if (!force && _workspaceFincasCommunitiesLastFetchAt && (nowTs - _workspaceFincasCommunitiesLastFetchAt) < 1500) {
+    return;
+  }
+  _workspaceFincasCommunitiesLastFetchAt = nowTs;
+  try {
+    const data = await api(`/api/workspace_fincas_comunidades?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}&limit=500`);
+    const rows = Array.isArray(data?.rows) ? data.rows : [];
+    state.currentWorkspaceData = {
+      ...(state.currentWorkspaceData || {}),
+      fincasCommunities: rows,
+    };
+    renderWorkspaceCompanyScopedData();
+    if (!silent && workspaceFincasCommunityStatus) workspaceFincasCommunityStatus.textContent = "";
+  } catch (error) {
+    if (!silent && workspaceFincasCommunityStatus) {
+      workspaceFincasCommunityStatus.textContent = error?.message || "No se pudieron refrescar las comunidades.";
+    }
+  }
 };
 
 const fillWorkspaceFincasLedgerForm = (record = null) => {
@@ -13652,8 +13680,12 @@ const setWorkspaceFincasTab = (tab = "dashboard") => {
     panel.hidden = isHidden;
   });
   if (normalized === "dashboard") {
+    void refreshWorkspaceFincasCommunities({ silent: true });
     renderWorkspaceFincasDashboard();
     void refreshWorkspaceFincasLedger({ silent: true });
+  }
+  if (normalized === "comunidades") {
+    void refreshWorkspaceFincasCommunities({ silent: true });
   }
   if (normalized === "contabilidad") {
     try {
@@ -14623,10 +14655,43 @@ const resolveEmpresaById = (empresaId) => {
   return state.empresas.find((e) => e.id === id) || null;
 };
 
+const SERVICE_COMPANY_STORAGE = {
+  inmobiliaria: "crm.serviceCompany.inmobiliaria",
+  seguros: "crm.serviceCompany.seguros",
+  gestoria: "crm.serviceCompany.gestoria",
+  financiaciones: "crm.serviceCompany.financiaciones",
+};
+
+const getStoredServiceCompanyId = (serviceKey = "") => {
+  const key = SERVICE_COMPANY_STORAGE[String(serviceKey || "").trim().toLowerCase()] || "";
+  if (!key) return "";
+  try {
+    return String(localStorage.getItem(key) || "").trim();
+  } catch {
+    return "";
+  }
+};
+
+const setStoredServiceCompanyId = (serviceKey = "", empresaId = "") => {
+  const key = SERVICE_COMPANY_STORAGE[String(serviceKey || "").trim().toLowerCase()] || "";
+  if (!key) return;
+  try {
+    const id = String(empresaId || "").trim();
+    if (!id) {
+      localStorage.removeItem(key);
+      return;
+    }
+    localStorage.setItem(key, id);
+  } catch {}
+};
+
 const resolveCrmInmoEmpresa = () => {
   // 1) Si ya hay empresa "Inmo" fijada (p.ej. usuario cambiando de ficha), úsala.
   const explicit = resolveEmpresaById(state.crmInmoEmpresaId);
   if (explicit) return explicit;
+
+  const stored = resolveEmpresaById(getStoredServiceCompanyId("inmobiliaria"));
+  if (stored) return stored;
 
   // 2) Fallback: intenta la empresa mapeada para el servicio; si no existe, usa la primera disponible.
   // Nota: NO usamos `state.currentEmpresaId` porque puede venir de otro servicio (Seguros/Hipotecas) y dejar el CRM Inmobiliaria vacío.
@@ -14643,6 +14708,45 @@ const resolveCrmInmoEmpresa = () => {
 
 const resolveCrmInmoEmpresaNombre = () => resolveCrmInmoEmpresa()?.nombre || "";
 const resolveCrmInmoEmpresaId = () => resolveCrmInmoEmpresa()?.id || "";
+
+const resolveCrmSegurosEmpresa = () => {
+  const explicit = resolveEmpresaById(state.crmSegurosEmpresaId);
+  if (explicit) return explicit;
+  const stored = resolveEmpresaById(getStoredServiceCompanyId("seguros"));
+  if (stored) return stored;
+  const preferredName = SERVICE_COMPANY_MAP?.Seguros || FINCAS_COMPANY;
+  const preferred = state.empresas.find((e) => e.nombre === preferredName) || null;
+  if (preferred) return preferred;
+  const fincas = state.empresas.find((e) => normalizeSimple(e.nombre).includes("fincas")) || null;
+  if (fincas) return fincas;
+  return state.empresas[0] || null;
+};
+
+const resolveCrmGestoriaEmpresa = () => {
+  const explicit = resolveEmpresaById(state.crmGestoriaEmpresaId);
+  if (explicit) return explicit;
+  const stored = resolveEmpresaById(getStoredServiceCompanyId("gestoria"));
+  if (stored) return stored;
+  const preferredName = SERVICE_COMPANY_MAP?.["Gestoría"] || FINCAS_COMPANY;
+  const preferred = state.empresas.find((e) => e.nombre === preferredName) || null;
+  if (preferred) return preferred;
+  const fincas = state.empresas.find((e) => normalizeSimple(e.nombre).includes("fincas")) || null;
+  if (fincas) return fincas;
+  return state.empresas[0] || null;
+};
+
+const resolveCrmFinEmpresa = () => {
+  const explicit = resolveEmpresaById(state.crmFinEmpresaId);
+  if (explicit) return explicit;
+  const stored = resolveEmpresaById(getStoredServiceCompanyId("financiaciones"));
+  if (stored) return stored;
+  const preferredName = SERVICE_COMPANY_MAP?.Hipotecas || FIN_COMPANY;
+  const preferred = state.empresas.find((e) => e.nombre === preferredName) || null;
+  if (preferred) return preferred;
+  const fin = state.empresas.find((e) => normalizeSimple(e.nombre).includes("financi")) || null;
+  if (fin) return fin;
+  return state.empresas[0] || null;
+};
 
 const openCrmInmobiliario = () => {
   const fromHome = state.currentPage === "home";
@@ -14684,6 +14788,7 @@ const openCrmInmobiliario = () => {
   // Asegura contexto de empresa (necesario para endpoints que requieren empresa_nombre).
   openCompany(empresa.nombre, { allowRestricted: true });
   state.crmInmoEmpresaId = empresa.id;
+  setStoredServiceCompanyId("inmobiliaria", empresa.id);
   setTab("crm");
   updateTableVisibility();
   syncCrmLegalAvailability();
@@ -14749,7 +14854,11 @@ const openGestoriaCrm = () => {
     }
   })();
   if (!userCanAccessService("gestoria")) return;
-  openCompany(FINCAS_COMPANY, { allowRestricted: true });
+  const empresa = resolveCrmGestoriaEmpresa();
+  if (!empresa) return;
+  openCompany(empresa.nombre, { allowRestricted: true });
+  state.crmGestoriaEmpresaId = empresa.id;
+  setStoredServiceCompanyId("gestoria", empresa.id);
   setTab("gestoria-dash");
   updateTableVisibility();
   loadGestoriaDashboard();
@@ -14782,7 +14891,11 @@ const openSegurosCrm = () => {
     }
   })();
   if (!userCanAccessService("seguros")) return;
-  openCompany(FINCAS_COMPANY, { allowRestricted: true });
+  const empresa = resolveCrmSegurosEmpresa();
+  if (!empresa) return;
+  openCompany(empresa.nombre, { allowRestricted: true });
+  state.crmSegurosEmpresaId = empresa.id;
+  setStoredServiceCompanyId("seguros", empresa.id);
   setTab("seguros-crm");
   updateTableVisibility();
   if (segurosCrmSearch) segurosCrmSearch.value = "";
@@ -14828,7 +14941,11 @@ const openFinCrm = () => {
     }
   })();
   if (!userCanAccessService("financiaciones")) return;
-  openCompany(FIN_COMPANY, { allowRestricted: true });
+  const empresa = resolveCrmFinEmpresa();
+  if (!empresa) return;
+  openCompany(empresa.nombre, { allowRestricted: true });
+  state.crmFinEmpresaId = empresa.id;
+  setStoredServiceCompanyId("financiaciones", empresa.id);
   setTab("fin-crm");
   updateTableVisibility();
   setCrmMode("fin");
@@ -43692,7 +43809,7 @@ if (workspaceFincasCommunityForm) {
       }).then((res) => res.json());
       if (data?.error) throw new Error(data.error);
       if (workspaceFincasCommunityStatus) workspaceFincasCommunityStatus.textContent = "Comunidad guardada.";
-      await loadWorkspaceDetail(state.currentWorkspaceId);
+      await refreshWorkspaceFincasCommunities({ force: true, silent: true });
     } catch (error) {
       if (workspaceFincasCommunityStatus) workspaceFincasCommunityStatus.textContent = error.message || "No se pudo guardar.";
     }
