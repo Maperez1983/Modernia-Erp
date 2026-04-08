@@ -1799,6 +1799,7 @@ const workspaceFincasLedgerList = document.getElementById("workspaceFincasLedger
 const workspaceFincasBudgetCompanyLogo = document.getElementById("workspaceFincasBudgetCompanyLogo");
 const workspaceFincasBudgetColegioLogo = document.getElementById("workspaceFincasBudgetColegioLogo");
 const workspaceFincasBudgetServiciosIncluidos = document.getElementById("workspaceFincasBudgetServiciosIncluidos");
+const workspaceFincasBudgetHero = document.getElementById("workspaceFincasBudgetHero");
 const workspaceFincasBudgetQuickForm = document.getElementById("workspaceFincasBudgetQuickForm");
 const workspaceFincasBudgetOpenEngine = document.getElementById("workspaceFincasBudgetOpenEngine");
 const workspaceFincasBudgetQuickStatus = document.getElementById("workspaceFincasBudgetQuickStatus");
@@ -13963,6 +13964,329 @@ const applyWorkspaceFincasBudgetQuickCommunity = (communityId) => {
     set("num_aparcamientos", community.num_aparcamientos ?? 0);
   }
   syncWorkspaceFincasBudgetQuickComputed();
+};
+
+const parseWorkspaceBudgetCalc = (row = {}) => {
+  try {
+    const raw = row?.calculo_json;
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+};
+
+const buildFincasBudgetLineas = ({ num_vecinos = 0, num_locales = 0, num_aparcamientos = 0 } = {}) => {
+  const viviendas = Math.max(0, Number(num_vecinos || 0) || 0);
+  const locales = Math.max(0, Number(num_locales || 0) || 0);
+  const aparcamientos = Math.max(0, Number(num_aparcamientos || 0) || 0);
+  const base = (viviendas * 5) + (locales * 1) + (aparcamientos * 1);
+  const ajuste = base < 60 ? (60 - base) : 0;
+  const lineas = [];
+  if (viviendas) {
+    lineas.push({
+      orden: 1,
+      categoria: "Edificio",
+      concepto: "Viviendas (5 €/unidad)",
+      cantidad: viviendas,
+      unidad: "vivienda",
+      precio_unitario: 5,
+      descuento_pct: 0,
+      total_linea: Math.round(viviendas * 5 * 100) / 100,
+    });
+  }
+  if (locales) {
+    lineas.push({
+      orden: lineas.length + 1,
+      categoria: "Edificio",
+      concepto: "Locales (1 €/unidad)",
+      cantidad: locales,
+      unidad: "local",
+      precio_unitario: 1,
+      descuento_pct: 0,
+      total_linea: Math.round(locales * 1 * 100) / 100,
+    });
+  }
+  if (aparcamientos) {
+    lineas.push({
+      orden: lineas.length + 1,
+      categoria: "Edificio",
+      concepto: "Aparcamientos (1 €/unidad)",
+      cantidad: aparcamientos,
+      unidad: "plaza",
+      precio_unitario: 1,
+      descuento_pct: 0,
+      total_linea: Math.round(aparcamientos * 1 * 100) / 100,
+    });
+  }
+  if (ajuste > 0) {
+    lineas.push({
+      orden: lineas.length + 1,
+      categoria: "Cuota",
+      concepto: "Ajuste mínimo (cuota mínima 60 €)",
+      cantidad: 1,
+      unidad: "mes",
+      precio_unitario: Math.round(ajuste * 100) / 100,
+      descuento_pct: 0,
+      total_linea: Math.round(ajuste * 100) / 100,
+    });
+  }
+  return lineas;
+};
+
+const refreshWorkspaceBudgets = async ({ silent = false } = {}) => {
+  if (!state.currentWorkspaceId) return;
+  const data = await api(`/api/workspace_presupuestos?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}&limit=250`);
+  state.currentWorkspaceData = {
+    ...(state.currentWorkspaceData || {}),
+    budgetRows: Array.isArray(data?.rows) ? data.rows : [],
+  };
+  renderWorkspaceCompanyScopedData();
+  if (!silent && workspaceFincasBudgetsInfo) workspaceFincasBudgetsInfo.textContent = "";
+};
+
+const buildWorkspacePresupuestoUpdatePayloadFromRow = (row = {}, overrides = {}) => {
+  const calc = parseWorkspaceBudgetCalc(row);
+  const serviciosIncluidos = Array.isArray(calc.servicios_incluidos) ? calc.servicios_incluidos : [];
+  const payload = {
+    id: String(row.id || "").trim(),
+    workspace_id: state.currentWorkspaceId || String(row.workspace_id || "").trim(),
+    empresa_id: String(row.empresa_id || "").trim(),
+    cliente_id: String(row.cliente_id || "").trim(),
+    servicio: normalizeBudgetServiceKey(row.servicio || "") || "fincas",
+    referencia_tipo: row.referencia_tipo || "",
+    referencia_id: row.referencia_id || "",
+    titulo: row.titulo || "Presupuesto",
+    estado: row.estado || "Borrador",
+    fecha: row.fecha || new Date().toISOString().slice(0, 10),
+    fecha_seguimiento: row.fecha_seguimiento || "",
+    motivo_estado: row.motivo_estado || "",
+    responsable: row.responsable || "",
+    forma_pago: row.forma_pago || "",
+    encargo_estado: row.encargo_estado || "",
+    fecha_encargo: row.fecha_encargo || "",
+    observaciones: row.observaciones || "",
+    subtotal: row.subtotal ?? "",
+    impuestos: row.impuestos ?? "",
+    total: row.total ?? "",
+    cliente_lookup: row.cliente_nombre || calc.comunidad_denominacion || "",
+    cliente_nif: row.cliente_nif || calc.comunidad_cif || "",
+    cliente_telefono: row.cliente_telefono || calc.solicitante_telefono || "",
+    cliente_email: row.cliente_email || calc.solicitante_email || "",
+    num_vecinos: calc.num_vecinos ?? 0,
+    num_locales: calc.num_locales ?? 0,
+    num_trasteros: calc.num_trasteros ?? 0,
+    num_aparcamientos: calc.num_aparcamientos ?? 0,
+    comunidad_denominacion: calc.comunidad_denominacion || row.cliente_nombre || "",
+    comunidad_direccion: calc.comunidad_direccion || "",
+    comunidad_cif: calc.comunidad_cif || row.cliente_nif || "",
+    solicitante_nombre: calc.solicitante_nombre || "",
+    solicitante_dni: calc.solicitante_dni || "",
+    solicitante_telefono: calc.solicitante_telefono || row.cliente_telefono || "",
+    solicitante_direccion: calc.solicitante_direccion || "",
+    solicitante_email: calc.solicitante_email || row.cliente_email || "",
+    carta_presentacion: calc.carta_presentacion || "",
+    colegiado_numero: calc.colegiado_numero || "3079",
+    servicios_incluidos: serviciosIncluidos,
+    lineas: Array.isArray(row.lineas) ? row.lineas : [],
+  };
+  return { ...payload, ...(overrides || {}) };
+};
+
+const updateWorkspacePresupuestoFromRow = async (row = {}, overrides = {}) => {
+  const payload = buildWorkspacePresupuestoUpdatePayloadFromRow(row, overrides);
+  const res = await fetch("/api/workspace_presupuestos", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  }).then((r) => r.json());
+  if (res?.error) throw new Error(res.error);
+  await refreshWorkspaceBudgets({ silent: true });
+  await refreshWorkspaceFincasCommunities({ silent: true });
+  renderWorkspaceFincasDashboard();
+  renderWorkspaceFincasBudgetsList();
+  return res;
+};
+
+const buildFincasContractPayloadFromBudgetRow = (row = {}) => {
+  const calc = parseWorkspaceBudgetCalc(row);
+  const comunidad = String(calc.comunidad_denominacion || row.cliente_nombre || row.titulo || "Comunidad").trim() || "Comunidad";
+  const servicios = Array.isArray(calc.servicios_incluidos) ? calc.servicios_incluidos : [];
+  const serviciosLines = servicios.length ? servicios.map((s) => `- ${String(s || "").trim()}`).filter(Boolean).join("\n") : "";
+  const cuota = euroFormatter.format(Number(row.subtotal || 0));
+  const iva = euroFormatter.format(Number(row.impuestos || 0));
+  const total = euroFormatter.format(Number(row.total || 0));
+  const extra = [
+    "Servicios incluidos (según presupuesto):",
+    serviciosLines || "- (sin detalle)",
+    "",
+    `Condiciones económicas: cuota mensual ${cuota} + IVA ${iva} = ${total}.`,
+  ].join("\n");
+  return {
+    workspace_id: state.currentWorkspaceId || row.workspace_id,
+    empresa_id: row.empresa_id,
+    servicio: "fincas",
+    template_key: "fincas_contrato_comunidad",
+    titulo: `Contrato · Administración de fincas · ${comunidad}`,
+    estado: "Borrador",
+    fecha: new Date().toISOString().slice(0, 10),
+    cliente_id: row.cliente_id || "",
+    cliente_lookup: comunidad,
+    cliente_nif: calc.comunidad_cif || row.cliente_nif || "",
+    cliente_telefono: calc.solicitante_telefono || row.cliente_telefono || "",
+    cliente_email: calc.solicitante_email || row.cliente_email || "",
+    clausulas_extra: extra,
+  };
+};
+
+const renderWorkspaceFincasBudgetsList = () => {
+  if (!workspaceFincasBudgetsTable) return;
+  const raw = state.currentWorkspaceData || {};
+  const all = filterWorkspaceRowsByCompany(raw.budgetRows || []);
+  let items = all.filter((row) => normalizeBudgetServiceKey(row.servicio || "") === "fincas");
+  const filterEstado = String(workspaceFincasBudgetsEstadoFilter?.value || "all").trim();
+  if (filterEstado && filterEstado !== "all") {
+    items = items.filter((row) => String(row.estado || "").trim() === filterEstado);
+  }
+  if (!items.length) {
+    workspaceFincasBudgetsTable.innerHTML = "<p class='muted'>Sin presupuestos todavía.</p>";
+    if (workspaceFincasBudgetsInfo) workspaceFincasBudgetsInfo.textContent = "0 presupuestos";
+    return;
+  }
+  workspaceFincasBudgetsTable.innerHTML = `
+    <div class="workspace-billing-list">
+      ${items.slice(0, 120).map((row) => {
+        const estado = String(row.estado || "").trim() || "-";
+        const isAccepted = normalizeSimple(estado) === "aceptado";
+        const hasCommunityRef = normalizeSimple(row.referencia_tipo || "") === "comunidad" && String(row.referencia_id || "").trim();
+        const pdfHref = `/api/workspace_presupuesto_pdf?id=${encodeURIComponent(String(row.id || ""))}&workspace_id=${encodeURIComponent(String(row.workspace_id || state.currentWorkspaceId || ""))}`;
+        const total = euroFormatter.format(Number(row.total || 0));
+        const meta = [
+          row.fecha || "",
+          estado,
+          (row.cliente_nombre || "").trim() ? `Cliente: ${row.cliente_nombre}` : "",
+          hasCommunityRef ? "Comunidad vinculada" : "",
+        ].filter(Boolean).join(" · ");
+        return `
+          <div class="workspace-billing-row">
+            <div>
+              <strong>${escapeHtml(row.titulo || "Presupuesto")}</strong>
+              <div class="muted">${escapeHtml(meta || "-")}</div>
+            </div>
+            <div class="workspace-billing-meta">
+              <span>${escapeHtml(total)}</span>
+              <a class="secondary ghost button-inline" href="${pdfHref}" target="_blank" rel="noreferrer">PDF</a>
+              ${!isAccepted ? `<button type="button" class="secondary ghost button-inline" data-fincas-budget-accept="${escapeHtml(String(row.id || ""))}">Aceptar</button>` : ""}
+              ${normalizeSimple(estado) !== "rechazado" ? `<button type="button" class="secondary ghost button-inline" data-fincas-budget-reject="${escapeHtml(String(row.id || ""))}">Rechazar</button>` : ""}
+              ${isAccepted ? `<button type="button" class="secondary ghost button-inline" data-fincas-budget-contract="${escapeHtml(String(row.id || ""))}">Contrato</button>` : ""}
+              ${isAccepted && !hasCommunityRef ? `<button type="button" class="secondary ghost button-inline" data-fincas-budget-convert="${escapeHtml(String(row.id || ""))}">Convertir</button>` : ""}
+              ${hasCommunityRef ? `<button type="button" class="secondary ghost button-inline" data-fincas-budget-open-community="${escapeHtml(String(row.referencia_id || ""))}">Comunidad</button>` : ""}
+            </div>
+          </div>
+        `;
+      }).join("")}
+    </div>
+  `;
+
+  const findRow = (id) => items.find((row) => String(row.id || "") === String(id || ""));
+
+  workspaceFincasBudgetsTable.querySelectorAll("[data-fincas-budget-accept]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const row = findRow(btn.dataset.fincasBudgetAccept || "");
+      if (!row) return;
+      try {
+        if (workspaceFincasBudgetsInfo) workspaceFincasBudgetsInfo.textContent = "Marcando como aceptado...";
+        await updateWorkspacePresupuestoFromRow(row, { estado: "Aceptado", motivo_estado: "" });
+        if (workspaceFincasBudgetsInfo) workspaceFincasBudgetsInfo.textContent = "Presupuesto aceptado.";
+      } catch (error) {
+        if (workspaceFincasBudgetsInfo) workspaceFincasBudgetsInfo.textContent = error?.message || "No se pudo aceptar.";
+      }
+    });
+  });
+
+  workspaceFincasBudgetsTable.querySelectorAll("[data-fincas-budget-reject]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const row = findRow(btn.dataset.fincasBudgetReject || "");
+      if (!row) return;
+      const motivo = window.prompt("Motivo del rechazo (opcional):", row.motivo_estado || "") || "";
+      try {
+        if (workspaceFincasBudgetsInfo) workspaceFincasBudgetsInfo.textContent = "Marcando como rechazado...";
+        await updateWorkspacePresupuestoFromRow(row, { estado: "Rechazado", motivo_estado: motivo });
+        if (workspaceFincasBudgetsInfo) workspaceFincasBudgetsInfo.textContent = "Presupuesto rechazado (archivado).";
+      } catch (error) {
+        if (workspaceFincasBudgetsInfo) workspaceFincasBudgetsInfo.textContent = error?.message || "No se pudo rechazar.";
+      }
+    });
+  });
+
+  workspaceFincasBudgetsTable.querySelectorAll("[data-fincas-budget-convert]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const budgetId = String(btn.dataset.fincasBudgetConvert || "").trim();
+      if (!budgetId || !state.currentWorkspaceId) return;
+      try {
+        if (workspaceFincasBudgetsInfo) workspaceFincasBudgetsInfo.textContent = "Convirtiendo a comunidad activa...";
+        const res = await fetch("/api/workspace_fincas_convert_presupuesto", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ workspace_id: state.currentWorkspaceId, presupuesto_id: budgetId }),
+        }).then((r) => r.json());
+        if (res?.error) throw new Error(res.error);
+        await refreshWorkspaceFincasCommunities({ force: true, silent: true });
+        const comunidadId = String(res.comunidad_id || "").trim();
+        if (comunidadId) {
+          setWorkspaceFincasTab("comunidades");
+          const record = ((state.currentWorkspaceData || {}).fincasCommunities || []).find((row) => String(row.id || "") === comunidadId) || null;
+          if (record) fillWorkspaceFincasCommunityForm(record);
+        }
+        if (workspaceFincasBudgetsInfo) workspaceFincasBudgetsInfo.textContent = "Comunidad creada desde presupuesto aceptado.";
+      } catch (error) {
+        if (workspaceFincasBudgetsInfo) workspaceFincasBudgetsInfo.textContent = error?.message || "No se pudo convertir.";
+      }
+    });
+  });
+
+  workspaceFincasBudgetsTable.querySelectorAll("[data-fincas-budget-contract]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const row = findRow(btn.dataset.fincasBudgetContract || "");
+      if (!row || !state.currentWorkspaceId) return;
+      try {
+        if (workspaceFincasBudgetsInfo) workspaceFincasBudgetsInfo.textContent = "Generando contrato...";
+        const payload = buildFincasContractPayloadFromBudgetRow(row);
+        const res = await fetch("/api/workspace_contratos", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }).then((r) => r.json());
+        if (res?.error) throw new Error(res.error);
+        const contractId = String(res.id || "").trim();
+        if (contractId) {
+          window.open(`/api/workspace_contrato_pdf?id=${encodeURIComponent(contractId)}&workspace_id=${encodeURIComponent(state.currentWorkspaceId)}`, "_blank", "noopener,noreferrer");
+        }
+        if (workspaceFincasBudgetsInfo) workspaceFincasBudgetsInfo.textContent = "Contrato creado.";
+      } catch (error) {
+        if (workspaceFincasBudgetsInfo) workspaceFincasBudgetsInfo.textContent = error?.message || "No se pudo generar el contrato.";
+      }
+    });
+  });
+
+  workspaceFincasBudgetsTable.querySelectorAll("[data-fincas-budget-open-community]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const id = String(btn.dataset.fincasBudgetOpenCommunity || "").trim();
+      if (!id) return;
+      try {
+        await refreshWorkspaceFincasCommunities({ silent: true });
+      } catch {}
+      setWorkspaceFincasTab("comunidades");
+      const record = ((state.currentWorkspaceData || {}).fincasCommunities || []).find((row) => String(row.id || "") === id) || null;
+      if (record) fillWorkspaceFincasCommunityForm(record);
+    });
+  });
+
+  if (workspaceFincasBudgetsInfo) {
+    const suffix = filterEstado && filterEstado !== "all" ? ` · ${filterEstado}` : "";
+    workspaceFincasBudgetsInfo.textContent = `${items.length} presupuestos${suffix}`;
+  }
 };
 
 const renderWorkspaceDocumentHub = (data = {}) => {
@@ -43855,9 +44179,9 @@ if (workspaceFincasLedgerForm) {
   });
 }
 
-if (workspaceFincasColegioLogo) {
-  workspaceFincasColegioLogo.addEventListener("error", () => {
-    workspaceFincasColegioLogo.classList.add("hidden");
+if (workspaceFincasBudgetColegioLogo) {
+  workspaceFincasBudgetColegioLogo.addEventListener("error", () => {
+    workspaceFincasBudgetColegioLogo.classList.add("hidden");
   });
 }
 
@@ -43878,36 +44202,54 @@ if (workspaceFincasBudgetQuickForm) {
       if (workspaceFincasBudgetQuickStatus) workspaceFincasBudgetQuickStatus.textContent = "Selecciona un workspace.";
       return;
     }
-    const communityId = String(workspaceFincasBudgetQuickForm.querySelector('[name="comunidad_id"]')?.value || "").trim();
-    const community = ((state.currentWorkspaceData || {}).fincasCommunities || []).find((row) => String(row.id || "") === communityId) || null;
-    if (!community) {
-      if (workspaceFincasBudgetQuickStatus) workspaceFincasBudgetQuickStatus.textContent = "Selecciona una comunidad.";
-      return;
-    }
     syncWorkspaceFincasBudgetQuickComputed();
     const formData = new FormData(workspaceFincasBudgetQuickForm);
     const values = Object.fromEntries(formData.entries());
     const fecha = new Date().toISOString().slice(0, 10);
+    const communityId = String(values.comunidad_id || "").trim();
+    const community = communityId
+      ? (((state.currentWorkspaceData || {}).fincasCommunities || []).find((row) => String(row.id || "") === communityId) || null)
+      : null;
+    const numVecinos = Number(values.num_vecinos || 0) || 0;
+    const numLocales = Number(values.num_locales || 0) || 0;
+    const numAparcamientos = Number(values.num_aparcamientos || 0) || 0;
+    const totals = computeFincasBudgetTotalsClient({ num_vecinos: numVecinos, num_locales: numLocales, num_aparcamientos: numAparcamientos });
+    const lineas = buildFincasBudgetLineas({ num_vecinos: numVecinos, num_locales: numLocales, num_aparcamientos: numAparcamientos });
+    const serviciosIncluidos = readFincasServiciosIncluidos(workspaceFincasBudgetServiciosIncluidos);
+    const comunidadName = String(values.comunidad_denominacion || community?.nombre || "").trim() || "Comunidad";
     const payload = {
       id: "",
       workspace_id: state.currentWorkspaceId,
-      empresa_id: community.empresa_id || state.currentWorkspaceCompanyId || "",
+      empresa_id: String(values.empresa_id || community?.empresa_id || state.currentWorkspaceCompanyId || "").trim(),
       servicio: "fincas",
-      titulo: `Administración de comunidad · ${community.nombre || "Comunidad"}`,
-      estado: "Borrador",
+      titulo: String(values.titulo || "").trim() || `Administración de comunidad · ${comunidadName}`,
+      estado: String(values.estado || "Borrador").trim() || "Borrador",
       fecha,
-      referencia_tipo: "comunidad",
-      referencia_id: community.id,
-      cliente_lookup: community.nombre || "",
-      cliente_nif: community.cif || "",
-      cliente_telefono: "",
-      cliente_email: "",
-      num_vecinos: values.num_vecinos || 0,
-      num_locales: values.num_locales || 0,
-      num_aparcamientos: values.num_aparcamientos || 0,
-      impuestos: 0,
+      referencia_tipo: community ? "comunidad" : "",
+      referencia_id: community?.id || "",
+      cliente_lookup: comunidadName,
+      cliente_nif: String(values.comunidad_cif || "").trim(),
+      cliente_telefono: String(values.solicitante_telefono || "").trim(),
+      cliente_email: String(values.solicitante_email || "").trim(),
+      comunidad_denominacion: comunidadName,
+      comunidad_direccion: String(values.comunidad_direccion || "").trim(),
+      comunidad_cif: String(values.comunidad_cif || "").trim(),
+      solicitante_nombre: String(values.solicitante_nombre || "").trim(),
+      solicitante_dni: String(values.solicitante_dni || "").trim(),
+      solicitante_telefono: String(values.solicitante_telefono || "").trim(),
+      solicitante_direccion: String(values.solicitante_direccion || "").trim(),
+      solicitante_email: String(values.solicitante_email || "").trim(),
+      carta_presentacion: String(values.carta_presentacion || "").trim(),
+      colegiado_numero: "3079",
+      servicios_incluidos: serviciosIncluidos,
+      num_vecinos: numVecinos,
+      num_locales: numLocales,
+      num_aparcamientos: numAparcamientos,
+      subtotal: totals.subtotal,
+      impuestos: totals.impuestos,
+      total: totals.total,
       observaciones: "",
-      lineas: [],
+      lineas,
     };
     if (!String(payload.empresa_id || "").trim()) {
       if (workspaceFincasBudgetQuickStatus) workspaceFincasBudgetQuickStatus.textContent = "La comunidad no tiene empresa asignada.";
@@ -43958,6 +44300,24 @@ if (workspaceFincasBudgetOpenEngine) {
       applyWorkspaceBudgetTemplate({ force: true });
       syncWorkspaceBudgetComputedFields({ forceSubtotal: true, forceTotal: true });
     } catch {}
+  });
+}
+
+if (workspaceFincasBudgetsRefreshBtn) {
+  workspaceFincasBudgetsRefreshBtn.addEventListener("click", async () => {
+    try {
+      if (workspaceFincasBudgetsInfo) workspaceFincasBudgetsInfo.textContent = "Recargando...";
+      await refreshWorkspaceBudgets({ silent: true });
+      renderWorkspaceFincasBudgetsList();
+    } catch (error) {
+      if (workspaceFincasBudgetsInfo) workspaceFincasBudgetsInfo.textContent = error?.message || "No se pudieron recargar.";
+    }
+  });
+}
+
+if (workspaceFincasBudgetsEstadoFilter) {
+  workspaceFincasBudgetsEstadoFilter.addEventListener("change", () => {
+    renderWorkspaceFincasBudgetsList();
   });
 }
 
