@@ -105,12 +105,24 @@ class ExtractResult:
         return row
 
 
-def iter_pdfs(root: Path) -> list[Path]:
+def _should_exclude(path: Path, exclude_substrs: tuple[str, ...]) -> bool:
+    if not exclude_substrs:
+        return False
+    s_fold = str(path).casefold()
+    for sub in exclude_substrs:
+        if sub and sub.casefold() in s_fold:
+            return True
+    return False
+
+
+def iter_pdfs(root: Path, *, exclude_substrs: tuple[str, ...] = ()) -> list[Path]:
     out: list[Path] = []
     for p in root.rglob("*"):
         if not p.is_file():
             continue
         if p.suffix.lower() != ".pdf":
+            continue
+        if _should_exclude(p, exclude_substrs):
             continue
         out.append(p)
     return out
@@ -135,18 +147,38 @@ def candidate_score(quality: dict) -> int:
 
 def guess_poliza_from_filename(filename: str) -> str:
     name = os.path.basename(filename or "")
-    m = re.search(r"(?i)\bpoliza\b[^0-9]{0,10}([0-9]{6,16})\b", name)
-    if m:
+    # 1) Nº cerca de la palabra "póliza" (alfanumérico, pero con al menos 1 dígito)
+    m = re.search(r"(?i)\bpoliza\b[^A-Z0-9]{0,12}([A-Z0-9-]{6,24})\b", name)
+    if m and re.search(r"\d", m.group(1) or ""):
         return m.group(1)
-    candidates = re.findall(r"\b[0-9]{6,16}\b", name)
+
+    # 2) Casos típicos AXA: 23-92198503
+    candidates = re.findall(r"\b\d{2}-\d{7,10}\b", name)
+    # 3) Tokens numéricos largos
+    candidates += re.findall(r"\b[0-9]{6,16}\b", name)
+    # 4) Tokens alfanuméricos (ej. GAG09412, BASWZ1733315598407A)
+    candidates += re.findall(r"\b[A-Z]{2,8}[0-9]{4,18}[A-Z]?\b", name.upper())
     if not candidates:
         return ""
-    candidates.sort(key=lambda s: (len(s), s), reverse=True)
-    for cand in candidates:
-        if len(cand) == 8 and cand.startswith(("19", "20")):
+
+    normed: list[str] = []
+    for c in candidates:
+        c = str(c or "").strip()
+        if not c:
             continue
-        return cand
-    return candidates[0]
+        # Evita años/fechas sueltas
+        if len(c) == 4 and c.startswith(("19", "20")):
+            continue
+        if len(c) == 8 and c.startswith(("19", "20")):
+            continue
+        if not re.search(r"\d", c):
+            continue
+        normed.append(c)
+    if not normed:
+        return ""
+
+    normed = sorted(set(normed), key=lambda s: (len(s), s), reverse=True)
+    return normed[0]
 
 
 def extract_one(pdf_path: Path, *, use_ocr: bool, ocr_external: bool, required_keys: tuple[str, ...]) -> ExtractResult:
@@ -242,6 +274,17 @@ def write_csv(rows: list[dict], out_path: Path) -> None:
 def main() -> None:
     ap = argparse.ArgumentParser(description="Extrae campos de pólizas desde PDFs locales y genera CSV/JSON.")
     ap.add_argument("--root", required=True, help="Directorio raíz donde buscar PDFs.")
+    ap.add_argument(
+        "--include-years",
+        default="",
+        help="Si se indica (p.ej. 2024,2025,2026), solo analiza esas carpetas dentro de --root.",
+    )
+    ap.add_argument(
+        "--exclude-path-substr",
+        action="append",
+        default=[],
+        help="Excluye rutas que contengan este texto (repetible). Ej: --exclude-path-substr RECAPITULACION",
+    )
     ap.add_argument("--out-dir", default=str(ROOT / "reports"), help="Directorio de salida (CSV/JSON).")
     ap.add_argument("--limit", type=int, default=0, help="Limita nº de PDFs a procesar (0=sin límite).")
     ap.add_argument("--use-ocr", action="store_true", help="Habilita OCR en fallback (más lento, más fiable).")
@@ -269,8 +312,23 @@ def main() -> None:
     if not required_keys:
         required_keys = ("tomador", "poliza_numero", "compania", "fecha_efecto")
 
-    pdfs = iter_pdfs(root)
-    pdfs.sort()
+    exclude_substrs = tuple([str(x or "").strip() for x in (args.exclude_path_substr or []) if str(x or "").strip()])
+    include_years = [y.strip() for y in str(args.include_years or "").split(",") if y.strip()]
+
+    roots: list[Path] = []
+    if include_years:
+        for y in include_years:
+            yp = (root / y).resolve()
+            if yp.exists():
+                roots.append(yp)
+    else:
+        roots = [root]
+
+    pdfs: list[Path] = []
+    for rp in roots:
+        pdfs.extend(iter_pdfs(rp, exclude_substrs=exclude_substrs))
+
+    pdfs = sorted(set(pdfs))
     if args.limit and args.limit > 0:
         pdfs = pdfs[: int(args.limit)]
 
@@ -284,6 +342,10 @@ def main() -> None:
     rows: list[dict] = []
 
     print(f"root={root}", flush=True)
+    if include_years:
+        print(f"include_years={','.join(include_years)}", flush=True)
+    if exclude_substrs:
+        print(f"exclude_path_substr={','.join(exclude_substrs)}", flush=True)
     print(f"pdfs={len(pdfs)} use_ocr={bool(args.use_ocr)} ocr_external={bool(args.ocr_external)}", flush=True)
     for idx, pdf in enumerate(pdfs, start=1):
         res = extract_one(pdf, use_ocr=bool(args.use_ocr), ocr_external=bool(args.ocr_external), required_keys=required_keys)
@@ -341,4 +403,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
