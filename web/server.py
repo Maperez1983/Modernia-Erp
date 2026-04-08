@@ -18302,6 +18302,125 @@ def ensure_tables(db_path):
             _migration_mark(conn, "inmobiliaria_backfills_v1")
     except Exception:
         pass
+    # Backfills financiaciones (Phase 2): asegura `empresa_id` para hipotecas/asesoramientos legacy.
+    # Objetivo: evitar que el servicio "Financiaciones" quede vacío por registros antiguos sin scope.
+    try:
+        if not _migration_done(conn, "financiaciones_scope_backfill_v1"):
+            fin_empresa_id = ""
+            # Intenta resolver la empresa del servicio por nombre (mapa central).
+            fin_names = []
+            try:
+                fin_names.extend(WORKSPACE_TIME_SERVICE_COMPANY_MAP.get("financiaciones") or [])
+                fin_names.extend(WORKSPACE_TIME_SERVICE_COMPANY_MAP.get("hipotecas") or [])
+            except Exception:
+                fin_names = []
+            # Fallback defensivo.
+            if not fin_names:
+                fin_names = ["Financiaciones Modernia"]
+            for name in fin_names:
+                try:
+                    row = conn.execute(
+                        "SELECT id FROM empresas WHERE nombre = ? LIMIT 1",
+                        (str(name),),
+                    ).fetchone()
+                    if row and (row.get("id") if hasattr(row, "get") else row[0]):
+                        fin_empresa_id = str(row.get("id") if hasattr(row, "get") else row[0] or "").strip()
+                        if fin_empresa_id:
+                            break
+                except Exception:
+                    continue
+
+            if fin_empresa_id:
+                now_iso = app_now().isoformat()
+                try:
+                    conn.execute(
+                        """
+                        UPDATE hipotecas
+                        SET empresa_id = ?
+                        WHERE empresa_id IS NULL OR TRIM(empresa_id) = ''
+                        """,
+                        (fin_empresa_id,),
+                    )
+                except Exception:
+                    pass
+                try:
+                    conn.execute(
+                        """
+                        UPDATE asesoramientos_financiacion
+                        SET empresa_id = ?
+                        WHERE empresa_id IS NULL OR TRIM(empresa_id) = ''
+                        """,
+                        (fin_empresa_id,),
+                    )
+                except Exception:
+                    pass
+                # Contabilidad vinculada a hipotecas: si falta empresa_id, herédala del scope de financiaciones.
+                try:
+                    conn.execute(
+                        """
+                        UPDATE gestoria_contabilidad
+                        SET empresa_id = ?
+                        WHERE (empresa_id IS NULL OR TRIM(empresa_id) = '')
+                          AND hipoteca_id IS NOT NULL AND TRIM(hipoteca_id) <> ''
+                        """,
+                        (fin_empresa_id,),
+                    )
+                except Exception:
+                    pass
+                # Enlaza clientes al servicio (para que el CRM 360/servicios no "pierda" cartera).
+                try:
+                    rows = conn.execute(
+                        """
+                        SELECT DISTINCT cliente_id
+                        FROM hipotecas
+                        WHERE empresa_id = ?
+                          AND cliente_id IS NOT NULL
+                          AND TRIM(cliente_id) <> ''
+                        """,
+                        (fin_empresa_id,),
+                    ).fetchall()
+                    for r in rows or []:
+                        try:
+                            cid = str(r.get("cliente_id") if hasattr(r, "get") else r[0] or "").strip()
+                        except Exception:
+                            cid = ""
+                        if cid:
+                            try:
+                                ensure_cliente_servicio_link(conn, cid, fin_empresa_id, "financiaciones", now_iso)
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
+                try:
+                    rows = conn.execute(
+                        """
+                        SELECT cliente1_id, cliente2_id
+                        FROM asesoramientos_financiacion
+                        WHERE empresa_id = ?
+                        """,
+                        (fin_empresa_id,),
+                    ).fetchall()
+                    for r in rows or []:
+                        if hasattr(r, "get"):
+                            candidates = [r.get("cliente1_id"), r.get("cliente2_id")]
+                        else:
+                            try:
+                                candidates = [r[0], r[1]]
+                            except Exception:
+                                candidates = []
+                        for raw in candidates:
+                            cid = str(raw or "").strip()
+                            if not cid:
+                                continue
+                            try:
+                                ensure_cliente_servicio_link(conn, cid, fin_empresa_id, "financiaciones", now_iso)
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
+                _migration_mark(conn, "financiaciones_scope_backfill_v1")
+    except Exception:
+        pass
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS operaciones_inmobiliarias (
