@@ -3100,6 +3100,8 @@ const formatEuros = (value) => {
   return euroFormatter.format(Number.isFinite(num) ? num : 0);
 };
 
+const formatEurosCompact = (value) => formatEuros(value).replace(/\s/g, "");
+
 const numberFormatter = new Intl.NumberFormat("es-ES");
 const quantityFormatter = new Intl.NumberFormat("es-ES", {
   minimumFractionDigits: 0,
@@ -6355,6 +6357,35 @@ const renderWorkspaceCompanies = (rows = []) => {
         )
         .join("")}
     </div>
+    ${
+      canEdit
+        ? `
+    <div class="form-card" style="margin-top:14px" data-workspace-service-matrix-card>
+      <div class="section-head">
+        <div>
+          <h3>Matriz servicio-empresa</h3>
+          <p class="muted">Configura qué empresas se sugieren por servicio (para autoselección y presupuestos, con logos y datos de empresa).</p>
+        </div>
+        <button type="button" class="secondary ghost" data-workspace-service-matrix-refresh>Actualizar</button>
+      </div>
+      <div class="form-grid">
+        <label class="span-2">
+          Servicio
+          <select data-workspace-service-matrix-service></select>
+        </label>
+        <div class="span-2">
+          <div class="crm-mini-list" data-workspace-service-matrix-companies></div>
+          <p class="muted" style="margin-top:10px">Marca empresas permitidas y elige la empresa por defecto (⭐). La edición de logo/razón social/etc. se hace en “Editar” de cada empresa.</p>
+        </div>
+        <div class="form-actions span-2">
+          <button type="button" class="secondary" data-workspace-service-matrix-save>Guardar</button>
+          <span class="muted" data-workspace-service-matrix-status></span>
+        </div>
+      </div>
+    </div>
+    `
+        : ""
+    }
   `;
   workspaceCompanies.querySelectorAll("[data-workspace-company-focus]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -6468,6 +6499,200 @@ const renderWorkspaceCompanies = (rows = []) => {
       }
     });
   });
+
+  // Matriz servicio->empresa (solo admin).
+  if (canEdit) {
+    const card = workspaceCompanies.querySelector("[data-workspace-service-matrix-card]");
+    const serviceSelect = workspaceCompanies.querySelector("[data-workspace-service-matrix-service]");
+    const companiesBox = workspaceCompanies.querySelector("[data-workspace-service-matrix-companies]");
+    const saveBtn = workspaceCompanies.querySelector("[data-workspace-service-matrix-save]");
+    const refreshBtn = workspaceCompanies.querySelector("[data-workspace-service-matrix-refresh]");
+    const status = workspaceCompanies.querySelector("[data-workspace-service-matrix-status]");
+    const wsId = String(state.currentWorkspaceId || "").trim();
+    const escapeSelectorValue = (value) => {
+      const raw = String(value || "");
+      if (globalThis.CSS && typeof CSS.escape === "function") return CSS.escape(raw);
+      return raw.replace(/["\\]/g, "\\$&");
+    };
+
+    const SERVICE_CHOICES = [
+      { key: "gestoria", label: "Gestoría" },
+      { key: "seguros", label: "Seguros" },
+      { key: "inmobiliaria", label: "Inmobiliaria" },
+      { key: "financiaciones", label: "Financiaciones (Hipotecas)" },
+      { key: "fincas", label: "Administración de fincas" },
+      { key: "obras", label: "Obras" },
+      { key: "reformas", label: "Reformas" },
+      { key: "inversion", label: "Inversión" },
+    ];
+
+    const getMatrixRowsForService = (serviceKey) => {
+      const key = normalizeWorkspaceServiceKey(serviceKey);
+      const all = Array.isArray(state.currentWorkspaceServiceMatrixRows) ? state.currentWorkspaceServiceMatrixRows : [];
+      return all.filter((row) => normalizeWorkspaceServiceKey(row?.servicio_key || "") === key);
+    };
+
+    const renderMatrixForService = (serviceKey) => {
+      if (!card || !serviceSelect || !companiesBox) return;
+      const key = normalizeWorkspaceServiceKey(serviceKey);
+      const rowsForService = getMatrixRowsForService(key);
+      const enabled = new Set(
+        rowsForService
+          .filter((row) => Number(row?.enabled ?? 1) === 1)
+          .map((row) => String(row?.empresa_id || "").trim())
+          .filter(Boolean)
+      );
+      const defaultId = String((state.currentWorkspaceServiceCompanyDefaults || {})[key] || "").trim();
+
+      const companies = normalizedRows || [];
+      const pickDefault = (() => {
+        if (defaultId && enabled.has(defaultId)) return defaultId;
+        const first = companies.find((c) => enabled.has(String(c?.id || "").trim()));
+        return first ? String(first.id || "").trim() : "";
+      })();
+
+      companiesBox.innerHTML = companies
+        .map((empresa) => {
+          const empresaId = String(empresa?.id || "").trim();
+          const checked = enabled.has(empresaId);
+          const isDefault = empresaId && empresaId === pickDefault;
+          const logo = String(empresa?.logo_url || "").trim();
+          return `
+          <div class="crm-mini-row" style="display:flex;align-items:center;justify-content:space-between;gap:12px">
+            <label style="display:flex;align-items:center;gap:10px">
+              <input type="checkbox" data-matrix-empresa-enable value="${escapeHtml(empresaId)}" ${checked ? "checked" : ""} />
+              ${
+                logo
+                  ? `<img src="${escapeHtml(logo)}" alt="" loading="lazy" style="width:26px;height:26px;object-fit:contain;border-radius:8px;background:#fff;border:1px solid #e1e5ea;padding:4px" />`
+                  : `<span style="width:26px;height:26px;border-radius:8px;background:#f5f7f9;border:1px solid #e1e5ea;display:flex;align-items:center;justify-content:center;color:#7a8690;font-weight:700;font-size:12px">${escapeHtml(String((empresa?.nombre || "E").slice(0, 1)).toUpperCase())}</span>`
+              }
+              <span>${escapeHtml(String(empresa?.nombre || "-"))}</span>
+            </label>
+            <label class="muted" title="Empresa por defecto para este servicio" style="display:flex;align-items:center;gap:8px">
+              <input type="radio" name="workspaceMatrixDefaultCompany" data-matrix-empresa-default value="${escapeHtml(empresaId)}" ${isDefault ? "checked" : ""} />
+              <span>⭐</span>
+            </label>
+          </div>
+        `;
+        })
+        .join("");
+
+      // Si el usuario marca/desmarca, mantenemos coherencia mínima en UI.
+      companiesBox.querySelectorAll("[data-matrix-empresa-enable]").forEach((input) => {
+        input.addEventListener("change", () => {
+          const empresaId = String(input.value || "").trim();
+          const defaultRadio = companiesBox.querySelector(`[data-matrix-empresa-default][value="${escapeSelectorValue(empresaId)}"]`);
+          if (!defaultRadio) return;
+          if (input.checked) {
+            // Si no hay default marcado, marca este.
+            const anyDefault = companiesBox.querySelector("[data-matrix-empresa-default]:checked");
+            if (!anyDefault) defaultRadio.checked = true;
+          } else if (defaultRadio.checked) {
+            // Si desmarca el default, intenta mover el default a otro marcado.
+            const firstChecked = companiesBox.querySelector("[data-matrix-empresa-enable]:checked");
+            if (firstChecked) {
+              const nextId = String(firstChecked.value || "").trim();
+              const nextRadio = companiesBox.querySelector(`[data-matrix-empresa-default][value="${escapeSelectorValue(nextId)}"]`);
+              if (nextRadio) nextRadio.checked = true;
+            }
+          }
+        });
+      });
+    };
+
+    const hydrateServiceOptions = () => {
+      if (!serviceSelect) return;
+      const current = String(serviceSelect.value || "").trim();
+      serviceSelect.innerHTML = "";
+      SERVICE_CHOICES.forEach((item) => {
+        serviceSelect.appendChild(createOption(item.key, item.label));
+      });
+      const candidate = normalizeWorkspaceServiceKey(current) || normalizeWorkspaceServiceKey((SERVICE_CHOICES[0] || {}).key);
+      serviceSelect.value = candidate;
+      renderMatrixForService(candidate);
+    };
+
+    const refreshMatrixState = async () => {
+      if (!wsId) return;
+      if (status) status.textContent = "Actualizando...";
+      const matrix = await safeWorkspaceApi(
+        `/api/workspace_service_matrix?workspace_id=${encodeURIComponent(wsId)}`,
+        { rows: [], defaults: {} }
+      );
+      state.currentWorkspaceServiceMatrixRows = Array.isArray(matrix?.rows) ? matrix.rows : [];
+      state.currentWorkspaceServiceCompanyDefaults = matrix?.defaults && typeof matrix.defaults === "object" ? matrix.defaults : {};
+      if (status) status.textContent = "Actualizado.";
+      hydrateServiceOptions();
+    };
+
+    if (serviceSelect) {
+      serviceSelect.addEventListener("change", () => {
+        const key = normalizeWorkspaceServiceKey(serviceSelect.value || "");
+        renderMatrixForService(key);
+      });
+    }
+    if (refreshBtn) {
+      refreshBtn.addEventListener("click", () => {
+        refreshMatrixState().catch(() => {
+          if (status) status.textContent = "No se pudo actualizar.";
+        });
+      });
+    }
+    if (saveBtn) {
+      saveBtn.addEventListener("click", async () => {
+        if (!wsId) return;
+        const serviceKey = normalizeWorkspaceServiceKey(serviceSelect?.value || "");
+        if (!serviceKey) return;
+        if (status) status.textContent = "Guardando...";
+        const currentRows = getMatrixRowsForService(serviceKey);
+        const currentEmpresaIds = new Set(currentRows.map((r) => String(r?.empresa_id || "").trim()).filter(Boolean));
+
+        const checkedInputs = Array.from(companiesBox?.querySelectorAll?.("[data-matrix-empresa-enable]:checked") || []);
+        const checked = checkedInputs.map((el) => String(el.value || "").trim()).filter(Boolean);
+        const checkedSet = new Set(checked);
+        const defaultRadio = companiesBox?.querySelector?.("[data-matrix-empresa-default]:checked");
+        let defaultId = String(defaultRadio?.value || "").trim();
+        if (!defaultId || !checkedSet.has(defaultId)) {
+          defaultId = checked[0] || "";
+        }
+        if (defaultId && !checkedSet.has(defaultId)) checkedSet.add(defaultId);
+
+        const toDelete = Array.from(currentEmpresaIds).filter((id) => !checkedSet.has(id));
+        const toUpsert = Array.from(checkedSet);
+
+        try {
+          // Upserts (enabled=1) + default.
+          const upserts = toUpsert.map((empresaId, idx) =>
+            postJsonWithDbRetry("/api/workspace_service_matrix_upsert", {
+              workspace_id: wsId,
+              servicio_key: serviceKey,
+              empresa_id: empresaId,
+              enabled: 1,
+              is_default: empresaId === defaultId ? 1 : 0,
+              sort_order: idx * 10,
+            })
+          );
+          // Deletes (solo si existían).
+          const deletes = toDelete.map((empresaId) =>
+            postJsonWithDbRetry("/api/workspace_service_matrix_delete", {
+              workspace_id: wsId,
+              servicio_key: serviceKey,
+              empresa_id: empresaId,
+            })
+          );
+          await Promise.all([...upserts, ...deletes]);
+          await refreshMatrixState();
+          if (status) status.textContent = "Guardado.";
+        } catch (error) {
+          console.error(error);
+          if (status) status.textContent = error?.message || "No se pudo guardar.";
+        }
+      });
+    }
+
+    // Paint inicial.
+    hydrateServiceOptions();
+  }
 };
 
 const renderWorkspaceMembers = (rows = []) => {
@@ -14033,20 +14258,44 @@ const hydrateWorkspaceFincasBudgetQuickSelect = ({ communities = [], budgets = [
   }
 };
 
-const syncWorkspaceFincasBudgetQuickComputed = () => {
+const syncWorkspaceFincasBudgetQuickComputed = (options = {}) => {
   if (!workspaceFincasBudgetQuickForm) return;
   const numVecinos = Number(workspaceFincasBudgetQuickForm.querySelector('[name="num_vecinos"]')?.value || 0) || 0;
   const numLocales = Number(workspaceFincasBudgetQuickForm.querySelector('[name="num_locales"]')?.value || 0) || 0;
   const numAparcamientos = Number(workspaceFincasBudgetQuickForm.querySelector('[name="num_aparcamientos"]')?.value || 0) || 0;
-  const totals = computeFincasBudgetTotalsClient({ num_vecinos: numVecinos, num_locales: numLocales, num_aparcamientos: numAparcamientos });
+  const suggestedSubtotal =
+    Number(computeFincasCuotaSuggestedClient({ num_vecinos: numVecinos, num_locales: numLocales, num_aparcamientos: numAparcamientos }) || 0) || 0;
   const suggestedInput = workspaceFincasBudgetQuickForm.querySelector('[name="subtotal_sugerido"]');
   const subtotalInput = workspaceFincasBudgetQuickForm.querySelector('[name="subtotal"]');
   const ivaInput = workspaceFincasBudgetQuickForm.querySelector('[name="impuestos"]');
   const totalInput = workspaceFincasBudgetQuickForm.querySelector('[name="total"]');
-  if (suggestedInput) suggestedInput.value = totals.subtotal.toFixed(2);
-  if (subtotalInput) subtotalInput.value = totals.subtotal.toFixed(2);
-  if (ivaInput) ivaInput.value = totals.impuestos.toFixed(2);
-  if (totalInput) totalInput.value = totals.total.toFixed(2);
+  if (suggestedInput) suggestedInput.value = formatEurosCompact(suggestedSubtotal);
+
+  const rawSubtotal = String(subtotalInput?.value || "").trim();
+  const hasManual = Boolean(subtotalInput?.dataset?.manual) && Boolean(rawSubtotal);
+  const useManual = hasManual && !options.forceAuto;
+  let subtotal = suggestedSubtotal;
+
+  if (useManual) {
+    subtotal = Math.max(0, parseMoneyValue(rawSubtotal));
+  } else if (rawSubtotal) {
+    subtotal = Math.max(0, parseMoneyValue(rawSubtotal));
+    if (subtotalInput) subtotalInput.dataset.manual = "1";
+  } else {
+    if (subtotalInput) {
+      delete subtotalInput.dataset.manual;
+      subtotalInput.value = formatEurosCompact(suggestedSubtotal);
+    }
+    subtotal = suggestedSubtotal;
+  }
+
+  const impuestos = Math.round(subtotal * FINCAS_IVA_PCT * 100) / 100;
+  const total = Math.round((subtotal + impuestos) * 100) / 100;
+  if (ivaInput) ivaInput.value = formatEurosCompact(impuestos);
+  if (totalInput) totalInput.value = formatEurosCompact(total);
+  if (subtotalInput && (options.normalizeSubtotal || options.forceAuto) && String(subtotalInput.value || "").trim()) {
+    subtotalInput.value = formatEurosCompact(subtotal);
+  }
   if (workspaceFincasBudgetHero) {
     workspaceFincasBudgetHero.innerHTML = `
       <div class="workspace-home-detail-card" style="padding:16px;">
@@ -14057,10 +14306,10 @@ const syncWorkspaceFincasBudgetQuickComputed = () => {
           </div>
         </div>
         <div class="workspace-summary-kpis">
-          <div class="workspace-mini-kpi"><span>Subtotal</span><strong>${euroFormatter.format(totals.subtotal)}</strong></div>
-          <div class="workspace-mini-kpi"><span>IVA (21%)</span><strong>${euroFormatter.format(totals.impuestos)}</strong></div>
-          <div class="workspace-mini-kpi"><span>Total</span><strong>${euroFormatter.format(totals.total)}</strong></div>
-          <div class="workspace-mini-kpi"><span>Total anual</span><strong>${euroFormatter.format(totals.total * 12)}</strong></div>
+          <div class="workspace-mini-kpi"><span>Subtotal</span><strong>${formatEurosCompact(subtotal)}</strong></div>
+          <div class="workspace-mini-kpi"><span>IVA (21%)</span><strong>${formatEurosCompact(impuestos)}</strong></div>
+          <div class="workspace-mini-kpi"><span>Total</span><strong>${formatEurosCompact(total)}</strong></div>
+          <div class="workspace-mini-kpi"><span>Total anual</span><strong>${formatEurosCompact(total * 12)}</strong></div>
           <div class="workspace-mini-kpi"><span>Viviendas</span><strong>${numberFormatter.format(numVecinos)}</strong></div>
           <div class="workspace-mini-kpi"><span>Locales</span><strong>${numberFormatter.format(numLocales)}</strong></div>
           <div class="workspace-mini-kpi"><span>Aparcamientos</span><strong>${numberFormatter.format(numAparcamientos)}</strong></div>
@@ -44554,23 +44803,23 @@ if (workspaceFincasBudgetQuickForm) {
     input?.addEventListener("input", () => syncWorkspaceFincasBudgetQuickComputed());
   });
   const subtotalInput = workspaceFincasBudgetQuickForm.querySelector('[name="subtotal"]');
-  if (subtotalInput) {
-    subtotalInput.addEventListener("input", () => {
-      const raw = String(subtotalInput.value || "").trim();
-      if (!raw) {
-        delete subtotalInput.dataset.manual;
-      } else {
-        subtotalInput.dataset.manual = "1";
-      }
-      syncWorkspaceFincasBudgetQuickComputed();
-    });
-    subtotalInput.addEventListener("blur", () => {
-      if (String(subtotalInput.value || "").trim()) {
-        subtotalInput.dataset.manual = "1";
-        syncWorkspaceFincasBudgetQuickComputed({ forceSubtotal: true });
-      }
-    });
-  }
+	  if (subtotalInput) {
+	    subtotalInput.addEventListener("input", () => {
+	      const raw = String(subtotalInput.value || "").trim();
+	      if (!raw) {
+	        delete subtotalInput.dataset.manual;
+	      } else {
+	        subtotalInput.dataset.manual = "1";
+	      }
+	      syncWorkspaceFincasBudgetQuickComputed();
+	    });
+	    subtotalInput.addEventListener("blur", () => {
+	      if (String(subtotalInput.value || "").trim()) {
+	        subtotalInput.dataset.manual = "1";
+	        syncWorkspaceFincasBudgetQuickComputed({ normalizeSubtotal: true });
+	      }
+	    });
+	  }
   if (workspaceFincasBudgetBuildingPhoto) {
     workspaceFincasBudgetBuildingPhoto.addEventListener("change", async () => {
       const file = workspaceFincasBudgetBuildingPhoto.files?.[0];
