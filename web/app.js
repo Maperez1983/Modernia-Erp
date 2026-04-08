@@ -6268,26 +6268,35 @@ const renderWorkspaceCompanies = (rows = []) => {
   });
   workspaceCompanies.innerHTML = `
     <div class="workspace-chip-list">
-	      ${normalizedRows
-	        .map(
-	          (row) => `
-	            <div class="workspace-chip workspace-company-chip${String(row.id || "") === activeId ? " is-active" : ""}">
-	              <div style="display:flex;gap:12px;align-items:flex-start">
-	                ${
-	                  row.logo_url
-	                    ? `<img src="${escapeHtml(buildPhotoSrc(String(row.logo_url || "")))}" alt="" loading="lazy" style="width:44px;height:44px;object-fit:contain;border-radius:10px;background:#fff;border:1px solid #e1e5ea;padding:6px" />`
-	                    : `<div style="width:44px;height:44px;border-radius:10px;background:#f5f7f9;border:1px solid #e1e5ea;display:flex;align-items:center;justify-content:center;color:#7a8690;font-weight:700">${escapeHtml(String((row.nombre || "E").slice(0, 1)).toUpperCase())}</div>`
-	                }
-	                <div>
-	                  <strong>${row.nombre || "-"}</strong>
-                  <span>${row.rol || "operativa"} · ${Number(row.activo || 0) === 1 ? "activa" : "inactiva"}</span>
-                  <div class="muted">
-                    ${row.nif ? `CIF/NIF: ${escapeHtml(String(row.nif || ""))}` : "Sin CIF/NIF"}
-                    ${row.direccion ? ` · ${escapeHtml(String(row.direccion || ""))}` : ""}
-                    ${row.telefono ? ` · ${escapeHtml(String(row.telefono || ""))}` : ""}
-                    ${row.email ? ` · ${escapeHtml(String(row.email || ""))}` : ""}
-                    ${row._cnaes && row._cnaes.length ? ` · CNAE: ${escapeHtml(String(row._cnaes.join(", ")))}` : ""}
-                    ${row.convenio_nombre ? ` · Convenio: ${escapeHtml(String(row.convenio_nombre || ""))}` : ""}
+      ${normalizedRows
+        .map(
+          (row) => `
+            <div class="workspace-chip workspace-company-chip${String(row.id || "") === activeId ? " is-active" : ""}">
+              <div class="workspace-company-chip-head">
+                <div class="workspace-company-avatar">
+                  ${
+                    row.logo_url
+                      ? `<img src="${escapeHtml(buildPhotoSrc(String(row.logo_url || "")))}" alt="" loading="lazy" />`
+                      : `<div class="workspace-company-initials">${escapeHtml(String((row.nombre || "E").slice(0, 2)).toUpperCase())}</div>`
+                  }
+                </div>
+                <div class="workspace-company-chip-body">
+                  <div class="workspace-company-chip-title">
+                    <div class="workspace-company-name">${escapeHtml(String(row.nombre || "-"))}</div>
+                    <div class="workspace-company-tags">
+                      <span class="workspace-tag">${escapeHtml(String(row.rol || "operativa"))}</span>
+                      <span class="workspace-tag ${Number(row.activo || 0) === 1 ? "ok" : "muted"}">${
+                        Number(row.activo || 0) === 1 ? "activa" : "inactiva"
+                      }</span>
+                    </div>
+                  </div>
+                  <div class="workspace-company-chip-meta">
+                    <span>${row.nif ? `CIF/NIF: ${escapeHtml(String(row.nif || ""))}` : "Sin CIF/NIF"}</span>
+                    ${row.direccion ? `<span>${escapeHtml(String(row.direccion || ""))}</span>` : ""}
+                    ${row.telefono ? `<span>${escapeHtml(String(row.telefono || ""))}</span>` : ""}
+                    ${row.email ? `<span>${escapeHtml(String(row.email || ""))}</span>` : ""}
+                    ${row._cnaes && row._cnaes.length ? `<span>CNAE: ${escapeHtml(String(row._cnaes.join(", ")))}</span>` : ""}
+                    ${row.convenio_nombre ? `<span>Convenio: ${escapeHtml(String(row.convenio_nombre || ""))}</span>` : ""}
                   </div>
                 </div>
               </div>
