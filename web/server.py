@@ -26913,7 +26913,9 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
     fincas_logo = _load_asset_logo("logos/fincas-velazquez.png", max_width=420) if servicio_key == "fincas" else None
     colegio_logo = _load_asset_logo("logos/colegio-administradores-v2.png", max_width=260) if servicio_key == "fincas" else None
     brand_logo = _load_brand_logo(company.get("logo_url"), max_width=420 if servicio_key == "fincas" else 360)
-    logo = brand_logo or fincas_logo
+    # En presupuestos de Fincas, la cabecera siempre usa la marca "Fincas Velazquez"
+    # (la empresa emisora puede tener un logo genérico/legacy como Modernia en la DB).
+    logo = fincas_logo if servicio_key == "fincas" else (brand_logo or fincas_logo)
     font_title = _document_font(44, bold=True)
     font_subtitle = _document_font(20, bold=False)
     font_chip = _document_font(16, bold=True)
