@@ -33,6 +33,46 @@ def _load_env_file() -> None:
 
 _load_env_file()
 
+_CONN_TRACKER = None
+_CONN_TRACKER_LOCK = threading.Lock()
+
+
+def set_conn_tracker(callback):
+    """
+    Register a connection tracker callback (best-effort).
+
+    The web server uses this to auto-close DB connections opened during a request
+    even if a code path forgets to close them (important with Postgres pools).
+
+    Returns a token that can be passed to `reset_conn_tracker()` to restore the
+    previous tracker.
+    """
+    global _CONN_TRACKER
+    with _CONN_TRACKER_LOCK:
+        prev = _CONN_TRACKER
+        _CONN_TRACKER = callback
+        return prev
+
+
+def reset_conn_tracker(token):
+    """Restore a previous tracker token returned by `set_conn_tracker()`."""
+    global _CONN_TRACKER
+    with _CONN_TRACKER_LOCK:
+        _CONN_TRACKER = token
+
+
+def _notify_conn_tracker(conn):
+    cb = None
+    with _CONN_TRACKER_LOCK:
+        cb = _CONN_TRACKER
+    if not cb:
+        return
+    try:
+        cb(conn)
+    except Exception:
+        # Best effort: never fail opening a connection because tracking failed.
+        return
+
 
 def is_postgres_enabled():
     forced = (os.environ.get("APP_DB_BACKEND") or "").strip().lower()
@@ -311,6 +351,7 @@ def open_sqlite_conn(db_path, with_row_factory=False):
         conn.execute("PRAGMA synchronous=NORMAL")
     except Exception:
         pass
+    _notify_conn_tracker(conn)
     return conn
 
 
@@ -405,6 +446,7 @@ def open_postgres_conn(with_row_factory=False, *, skip_compat=False, connect_tim
                             wrapped.rollback()
                         except Exception:
                             pass
+    _notify_conn_tracker(wrapped)
     return wrapped
 
 
