@@ -12192,12 +12192,13 @@ const fillWorkspaceBudgetForm = (record = null) => {
     num_trasteros: "",
     num_aparcamientos: "",
     lineas_texto: "",
+    carta_presentacion: "",
     plantilla_key: "",
     seguimiento_accion_id: "",
     encargo_accion_id: "",
     ...(record || {}),
   };
-  ["id", "workspace_id", "empresa_id", "cliente_id", "cliente_nif", "cliente_telefono", "cliente_email", "servicio", "referencia_tipo", "referencia_id", "titulo", "estado", "fecha", "fecha_seguimiento", "motivo_estado", "responsable", "forma_pago", "encargo_estado", "fecha_encargo", "observaciones", "subtotal_sugerido", "subtotal", "impuestos", "total", "num_vecinos", "num_locales", "num_trasteros", "num_aparcamientos", "lineas_texto", "seguimiento_accion_id", "encargo_accion_id"].forEach((field) => {
+  ["id", "workspace_id", "empresa_id", "cliente_id", "cliente_nif", "cliente_telefono", "cliente_email", "servicio", "referencia_tipo", "referencia_id", "titulo", "estado", "fecha", "fecha_seguimiento", "motivo_estado", "responsable", "forma_pago", "encargo_estado", "fecha_encargo", "observaciones", "subtotal_sugerido", "subtotal", "impuestos", "total", "num_vecinos", "num_locales", "num_trasteros", "num_aparcamientos", "lineas_texto", "carta_presentacion", "seguimiento_accion_id", "encargo_accion_id"].forEach((field) => {
     const input = workspaceBudgetForm.querySelector(`[name="${field}"]`);
     if (input) input.value = payload[field] ?? "";
   });

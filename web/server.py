@@ -27073,8 +27073,13 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
             "",
             "Le remitimos nuestra propuesta de servicios de administración de fincas para su comunidad, con una cuota calculada de forma objetiva a partir de las unidades del edificio.",
             "",
-            f"Cálculo base: {n_viv} viviendas × 5 € + {n_loc} locales × 1 € + {n_ap} aparcamientos × 1 €"
-            + (f" + {n_tra} trasteros × 1 €" if n_tra else "")
+            "Cálculo base: "
+            + " + ".join(
+                [f"{n_viv} viviendas × 5 €"]
+                + ([f"{n_loc} locales × 1 €"] if n_loc else [])
+                + ([f"{n_ap} aparcamientos × 1 €"] if n_ap else [])
+                + ([f"{n_tra} trasteros × 1 €"] if n_tra else [])
+            )
             + " (mínimo 60 €).",
             f"Cuota mensual propuesta (sin IVA): {format_eur_short(subtotal)} · IVA (21%): {format_eur_short(impuestos)} · Total mensual (con IVA): {format_eur_short(total)}.",
             f"Total anual (con IVA): {format_eur_short(total * 12)}.",
@@ -27121,13 +27126,18 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
         box = (margin_x, y, page_width - margin_x, y + 100)
         draw.rounded_rectangle(box, radius=24, fill=(247, 250, 242), outline=border)
         draw.text((box[0] + 24, box[1] + 18), "BASE DE CÁLCULO COMUNIDAD", fill=primary, font=font_section)
-        base_text = (
-            f"{calc.get('num_vecinos') or 0} vecinos · "
-            f"{calc.get('num_locales') or 0} locales · "
-            f"{calc.get('num_trasteros') or 0} trasteros · "
-            f"{calc.get('num_aparcamientos') or 0} aparcamientos · "
-            f"Base sugerida {format_eur(calc.get('cuota_sugerida') or 0)}"
-        )
+        n_vec = int(calc.get("num_vecinos") or 0)
+        n_loc = int(calc.get("num_locales") or 0)
+        n_tra = int(calc.get("num_trasteros") or 0)
+        n_ap = int(calc.get("num_aparcamientos") or 0)
+        parts = [f"{n_vec} vecinos"]
+        if n_loc:
+            parts.append(f"{n_loc} locales")
+        if n_tra:
+            parts.append(f"{n_tra} trasteros")
+        if n_ap:
+            parts.append(f"{n_ap} aparcamientos")
+        base_text = " · ".join(parts) + f" · Base sugerida {format_eur(calc.get('cuota_sugerida') or 0)}"
         draw.text((box[0] + 24, box[1] + 58), base_text, fill=ink, font=font_table)
         y = box[3] + 24
 
@@ -27155,8 +27165,62 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
         photo_key = str(calc.get("edificio_foto_key") or "").strip()
         map_url = ""
         qr_img = None
+        map_img = None
+
+        def _parse_float(value):
+            try:
+                return float(value)
+            except Exception:
+                return None
+
+        def _fetch_static_map(lat, lon, width, height, zoom=16):
+            try:
+                params = urllib.parse.urlencode(
+                    {
+                        "center": f"{lat},{lon}",
+                        "zoom": str(int(zoom)),
+                        "size": f"{int(width)}x{int(height)}",
+                        "maptype": "mapnik",
+                        "markers": f"{lat},{lon},red-pushpin",
+                    }
+                )
+                req = urllib.request.Request(
+                    f"https://staticmap.openstreetmap.de/staticmap.php?{params}",
+                    headers={
+                        "User-Agent": "Verifika2CRM/1.0 (contacto@grupomodernia.es)",
+                        "Accept-Language": "es",
+                    },
+                )
+                with urllib.request.urlopen(req, timeout=8) as response:
+                    raw = response.read()
+                if not raw:
+                    return None
+                return Image.open(BytesIO(raw)).convert("RGB")
+            except Exception:
+                return None
+
         if addr_for_map:
             map_url = f"https://www.google.com/maps/search/?api=1&query={urllib.parse.quote(addr_for_map)}"
+            lat = (
+                _parse_float(calc.get("map_lat"))
+                or _parse_float(calc.get("lat"))
+                or _parse_float(calc.get("comunidad_lat"))
+            )
+            lon = (
+                _parse_float(calc.get("map_lon"))
+                or _parse_float(calc.get("lon"))
+                or _parse_float(calc.get("comunidad_lon"))
+            )
+            if lat is None or lon is None:
+                try:
+                    result = fetch_geocode_coordinates(addr_for_map)
+                    lat = _parse_float(result.get("lat"))
+                    lon = _parse_float(result.get("lon"))
+                except Exception:
+                    lat = None
+                    lon = None
+            if lat is not None and lon is not None:
+                map_img = _fetch_static_map(lat, lon, 660, 210, zoom=16)
             try:
                 import qrcode
 
@@ -27171,35 +27235,47 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
                     building_photo = Image.open(BytesIO(raw_bytes))
             except Exception:
                 building_photo = None
-        if qr_img or building_photo:
+        if map_img or qr_img or building_photo:
             ensure_space(330)
             box_media = (margin_x, y, page_width - margin_x, y + 300)
             draw.rounded_rectangle(box_media, radius=24, fill=(247, 248, 252), outline=border)
             draw.text((box_media[0] + 24, box_media[1] + 18), "MAPA / EDIFICIO", fill=primary, font=font_section)
             inner_left = box_media[0] + 24
             inner_top = box_media[1] + 62
-            photo_w, photo_h = 660, 210
+            photo_h = 210
             gap = 24
-            qr_x = inner_left
+            # Preferimos mapa embebido; si hay foto del edificio, se muestra a la derecha.
+            inner_right = box_media[2] - 24
+            available_w = max(320, int(inner_right - inner_left))
+            map_x = inner_left
+            if building_photo:
+                map_w = max(420, int(available_w * 0.62))
+                photo_w = max(260, available_w - map_w - gap)
+            else:
+                map_w = available_w
+                photo_w = 0
+            right_x = inner_left + map_w + gap
+            if map_img:
+                try:
+                    preview = ImageOps.fit(map_img, (map_w, photo_h), method=Image.LANCZOS)
+                    image.paste(preview, (map_x, inner_top))
+                    draw.rounded_rectangle((map_x, inner_top, map_x + map_w, inner_top + photo_h), radius=20, outline=border, width=2)
+                except Exception:
+                    map_img = None
             if building_photo:
                 try:
                     photo = building_photo.convert("RGB")
                     photo = ImageOps.fit(photo, (photo_w, photo_h), method=Image.LANCZOS)
-                    image.paste(photo, (inner_left, inner_top))
-                    draw.rounded_rectangle(
-                        (inner_left, inner_top, inner_left + photo_w, inner_top + photo_h),
-                        radius=20,
-                        outline=border,
-                        width=2,
-                    )
+                    image.paste(photo, (right_x, inner_top))
+                    draw.rounded_rectangle((right_x, inner_top, right_x + photo_w, inner_top + photo_h), radius=20, outline=border, width=2)
                 except Exception:
                     building_photo = None
-                qr_x = inner_left + photo_w + gap
-            if qr_img:
-                image.paste(qr_img, (qr_x, inner_top), qr_img)
-                draw.text((qr_x + 200, inner_top + 6), "Escanea para ver el mapa", fill=ink, font=font_table)
+            elif qr_img and not map_img:
+                # Fallback: QR si no se pudo obtener mapa estático.
+                image.paste(qr_img, (map_x, inner_top), qr_img)
+                draw.text((map_x + 200, inner_top + 6), "Escanea para ver el mapa", fill=ink, font=font_table)
                 addr_lines = _pdf_wrap_lines(addr_for_map or "-", width=34)
-                draw.multiline_text((qr_x + 200, inner_top + 40), "\n".join(addr_lines[:4]), fill=muted, font=font_footer, spacing=4)
+                draw.multiline_text((map_x + 200, inner_top + 40), "\n".join(addr_lines[:4]), fill=muted, font=font_footer, spacing=4)
             y = box_media[3] + 24
 
         servicios_incluidos = calc.get("servicios_incluidos") if isinstance(calc, dict) else None
@@ -45122,6 +45198,52 @@ class Handler(BaseHTTPRequestHandler):
             if not payload:
                 json_response(self, {"error": "presupuesto no encontrado"}, status=404)
                 return
+            # Mejora de UX: intenta resolver coordenadas (con cache) para poder incrustar un mapa estático en el PDF.
+            try:
+                budget_row = payload.get("budget") or {}
+                servicio_key = normalize_service_key(budget_row.get("servicio") or "")
+                if servicio_key == "fincas":
+                    calc = {}
+                    try:
+                        calc = json.loads(budget_row.get("calculo_json") or "{}") if budget_row.get("calculo_json") else {}
+                        if not isinstance(calc, dict):
+                            calc = {}
+                    except Exception:
+                        calc = {}
+                    addr = str(calc.get("comunidad_direccion") or "").strip()
+                    has_coords = bool(str(calc.get("map_lat") or "").strip() and str(calc.get("map_lon") or "").strip())
+                    if addr and not has_coords:
+                        cached = get_geocode_cache(conn, addr) or None
+                        result = cached
+                        if not result:
+                            try:
+                                result = fetch_geocode_coordinates(addr)
+                            except Exception:
+                                result = None
+                        if result and result.get("ok") and result.get("lat") and result.get("lon"):
+                            try:
+                                now_iso = datetime.now(timezone.utc).isoformat()
+                                upsert_geocode_cache(
+                                    conn,
+                                    addr,
+                                    "",
+                                    "",
+                                    "",
+                                    result.get("lat"),
+                                    result.get("lon"),
+                                    result.get("display_name") or addr,
+                                    result.get("provider") or "geocode",
+                                    now_iso,
+                                )
+                                conn.commit()
+                            except Exception:
+                                pass
+                            calc["map_lat"] = result.get("lat")
+                            calc["map_lon"] = result.get("lon")
+                            budget_row["calculo_json"] = json.dumps(calc, ensure_ascii=False)
+                            payload["budget"] = budget_row
+            except Exception:
+                pass
             pdf_bytes = build_workspace_budget_pdf(payload["budget"], payload["workspace"], payload["company"], payload["client"], payload["lineas"])
             filename = f"presupuesto_{budget_id}.pdf"
             binary_response(self, pdf_bytes, content_type="application/pdf", filename=filename)

@@ -554,6 +554,10 @@
                       Partidas
                       <textarea name="lineas_texto" rows="5" placeholder="Una línea por partida. Formato: categoría | concepto | cantidad | unidad | precio | dto%"></textarea>
                     </label>
+                    <label class="span-2" data-budget-fincas="1">
+                      Carta de presentación (opcional)
+                      <textarea name="carta_presentacion" rows="5" placeholder="Texto adicional que aparecerá en la carta de presentación del PDF."></textarea>
+                    </label>
                     <p class="muted span-2" id="workspaceBudgetConfigHelp"></p>
                     <label class="span-2">
                       Motivo / tracking
@@ -8081,7 +8085,7 @@
     <script src="ui-foundation.js?v=2"></script>
     <script src="app-auth.js?v=10"></script>
     <script src="app-routing.js?v=7"></script>
-    <script src="app.js?v=434"></script>
+    <script src="app.js?v=435"></script>
     <script>
       (function () {
         if (!("serviceWorker" in navigator)) return;
