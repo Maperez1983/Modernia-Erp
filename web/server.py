@@ -30467,6 +30467,11 @@ class Handler(BaseHTTPRequestHandler):
             send_file(self, ROOT / "index.html")
             return
 
+        if parsed.path == "/manual/inmobiliaria":
+            # Página de documentación (sin auth) para generar capturas del módulo Inmobiliaria.
+            send_file(self, ROOT / "manual_inmobiliaria.html")
+            return
+
         if parsed.path.startswith("/assets/"):
             rel = parsed.path.replace("/assets/", "", 1)
             safe_path = safe_resolve_under(ASSETS, rel)

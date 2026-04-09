@@ -1,0 +1,523 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Manual Inmobiliaria · Verifika²</title>
+    <link rel="stylesheet" href="/styles.css?v=162" />
+    <style>
+      body {
+        background: #f5f7fb;
+      }
+      header {
+        position: sticky;
+        top: 0;
+        z-index: 50;
+      }
+      .manual-shell {
+        max-width: 1280px;
+        margin: 0 auto;
+        padding: 18px 18px 64px;
+        display: grid;
+        gap: 14px;
+      }
+      .manual-nav {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      .manual-nav a {
+        text-decoration: none;
+      }
+      .manual-page {
+        display: none;
+      }
+      .manual-page.is-active {
+        display: block;
+      }
+      .manual-kicker {
+        font-family: var(--font-ui);
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .manual-screen {
+        border-radius: 20px;
+        border: 1px solid rgba(11, 29, 51, 0.14);
+        overflow: hidden;
+        background: rgba(255, 255, 255, 0.94);
+      }
+      .manual-screen .tabs {
+        border-radius: 0;
+        border-left: none;
+        border-right: none;
+        border-top: none;
+      }
+      .manual-sample-grid {
+        display: grid;
+        grid-template-columns: 1.2fr 0.8fr;
+        gap: 12px;
+        padding: 12px;
+      }
+      @media (max-width: 960px) {
+        .manual-sample-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+      .manual-table {
+        width: 100%;
+        border-collapse: collapse;
+        background: #fff;
+      }
+      .manual-table th,
+      .manual-table td {
+        padding: 10px 12px;
+        border-bottom: 1px solid rgba(11, 29, 51, 0.08);
+        font-size: 13px;
+      }
+      .manual-table th {
+        text-align: left;
+        background: rgba(242, 193, 78, 0.12);
+        font-family: var(--font-ui);
+      }
+      .manual-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 10px;
+        border-radius: 999px;
+        border: 1px solid rgba(11, 29, 51, 0.14);
+        background: rgba(255, 255, 255, 0.9);
+        font-family: var(--font-ui);
+        font-size: 11px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--ink);
+      }
+      .manual-pill.is-encargo {
+        border-color: rgba(34, 197, 94, 0.34);
+        background: rgba(34, 197, 94, 0.12);
+      }
+      .manual-pill.is-noticia {
+        border-color: rgba(242, 193, 78, 0.42);
+        background: rgba(242, 193, 78, 0.14);
+      }
+      .manual-pill.is-cerrado {
+        opacity: 0.75;
+      }
+      .manual-ficha-head {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 14px 14px 10px;
+        border-bottom: 1px solid rgba(11, 29, 51, 0.08);
+        background: linear-gradient(140deg, rgba(255, 255, 255, 0.92), rgba(245, 247, 251, 0.92));
+      }
+      .manual-ficha-head strong {
+        font-family: var(--font-display);
+        font-size: 18px;
+      }
+      .manual-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+      }
+      .manual-actions .btn.secondary {
+        padding: 8px 12px;
+        border-radius: 12px;
+      }
+      .manual-actions .btn {
+        padding: 8px 12px;
+        border-radius: 12px;
+      }
+      .manual-legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        padding: 12px 14px;
+        border-top: 1px solid rgba(11, 29, 51, 0.08);
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .manual-highlight {
+        font-weight: 700;
+        color: var(--ink);
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="brand" style="cursor:default">
+        <img src="/assets/verifika2/verifika2_wordmark_traced_dark.svg" alt="Verifika²" />
+        <div class="brand-copy">
+          <span class="brand-kicker">Manual</span>
+          <h1>CRM Inmobiliaria</h1>
+          <p>Capturas para documentación interna (abril 2026).</p>
+        </div>
+      </div>
+      <div class="meta">
+        <div class="meta-status">
+          <div class="status"><span></span><strong>Modo documentación</strong></div>
+          <div>Estas pantallas son un ejemplo, pero usan el CSS real del CRM.</div>
+        </div>
+      </div>
+    </header>
+
+    <main class="manual-shell">
+      <section>
+        <div class="section-head">
+          <div>
+            <div class="manual-kicker">Navegación</div>
+            <h2>Pantallas clave</h2>
+            <p class="muted">Cada botón abre una pantalla (para capturarla en PDF).</p>
+          </div>
+        </div>
+        <div class="manual-nav">
+          <a class="btn secondary ghost" href="/manual/inmobiliaria?page=1">1. Resumen</a>
+          <a class="btn secondary ghost" href="/manual/inmobiliaria?page=2">2. Pipeline</a>
+          <a class="btn secondary ghost" href="/manual/inmobiliaria?page=3">3. Inmuebles</a>
+          <a class="btn secondary ghost" href="/manual/inmobiliaria?page=4">4. Ficha inmueble</a>
+          <a class="btn secondary ghost" href="/manual/inmobiliaria?page=5">5. Demandas</a>
+          <a class="btn secondary ghost" href="/manual/inmobiliaria?page=6">6. PDFs</a>
+        </div>
+      </section>
+
+      <section class="manual-page" data-page="1">
+        <div class="section-head">
+          <div>
+            <div class="manual-kicker">Paso 1</div>
+            <h2>Resumen del CRM Inmobiliaria</h2>
+            <p class="muted">KPIs y accesos directos. Punto de entrada para el equipo.</p>
+          </div>
+          <span class="pill">Ejemplo</span>
+        </div>
+        <div class="manual-screen">
+          <div class="tabs" style="border-bottom:1px solid rgba(11,29,51,0.08)">
+            <button class="tab active" type="button">Resumen</button>
+            <button class="tab" type="button">Análisis</button>
+            <button class="tab" type="button">Pipeline</button>
+            <button class="tab" type="button">Inmuebles</button>
+            <button class="tab" type="button">Demandas</button>
+            <button class="tab" type="button">Visitas</button>
+            <button class="tab" type="button">Agenda</button>
+          </div>
+          <div class="manual-sample-grid">
+            <div class="grid crm-kpis">
+              <div class="card kpi-card">
+                <h3>Pipeline activo</h3>
+                <div class="kpi-value">18</div>
+                <div class="muted">Noticia · Encargo · Propuesta</div>
+              </div>
+              <div class="card kpi-card">
+                <h3>Inmuebles activos</h3>
+                <div class="kpi-value">62</div>
+                <div class="muted">Inventario</div>
+              </div>
+              <div class="card kpi-card">
+                <h3>Visitas semana</h3>
+                <div class="kpi-value">9</div>
+                <div class="muted">Agenda</div>
+              </div>
+              <div class="card kpi-card">
+                <h3>Compraventas</h3>
+                <div class="kpi-value">4</div>
+                <div class="muted">Mes en curso</div>
+              </div>
+            </div>
+            <div class="form-card">
+              <h3>Checklist diario</h3>
+              <div class="crm-mini-list">
+                <div class="workspace-check-item"><span class="manual-highlight">Revisar avisos</span><span class="muted">5</span></div>
+                <div class="workspace-check-item"><span class="manual-highlight">Llamadas pendientes</span><span class="muted">8</span></div>
+                <div class="workspace-check-item"><span class="manual-highlight">Visitas hoy</span><span class="muted">2</span></div>
+                <div class="workspace-check-item"><span class="manual-highlight">Propuestas sin respuesta</span><span class="muted">3</span></div>
+              </div>
+              <p class="muted" style="margin:10px 0 0">Recomendación: convertir KPIs en acciones (agenda) cada mañana.</p>
+            </div>
+          </div>
+          <div class="manual-legend">
+            <span class="manual-pill is-noticia">Noticia</span>
+            <span class="manual-pill is-encargo">Encargo</span>
+            <span class="manual-pill">Propuesta</span>
+            <span class="manual-pill is-cerrado">Cerrado</span>
+            <span>Los PDFs solo aparecen cuando el inmueble está en <span class="manual-highlight">Encargo</span>.</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="manual-page" data-page="2">
+        <div class="section-head">
+          <div>
+            <div class="manual-kicker">Paso 2</div>
+            <h2>Pipeline (captaciones)</h2>
+            <p class="muted">Mueve los inmuebles por etapa comercial con trazabilidad.</p>
+          </div>
+        </div>
+        <div class="manual-screen">
+          <div class="manual-ficha-head">
+            <div>
+              <strong>Pipeline</strong>
+              <div class="muted">Filtra por etapa, zona y responsable. Abre fichas desde aquí.</div>
+            </div>
+            <div class="manual-actions">
+              <button class="btn" type="button">Nuevo inmueble</button>
+              <button class="btn secondary" type="button">Nueva demanda</button>
+            </div>
+          </div>
+          <div style="padding:12px">
+            <table class="manual-table">
+              <thead>
+                <tr>
+                  <th>Etapa</th>
+                  <th>Dirección</th>
+                  <th>Zona</th>
+                  <th>Precio</th>
+                  <th>Responsable</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><span class="manual-pill is-noticia">Noticia</span></td>
+                  <td>Av. Andalucía 12, Málaga</td>
+                  <td>Centro</td>
+                  <td>165.000 €</td>
+                  <td>M. Pérez</td>
+                </tr>
+                <tr>
+                  <td><span class="manual-pill is-encargo">Encargo</span></td>
+                  <td>C/ Larios 4, Málaga</td>
+                  <td>Centro</td>
+                  <td>310.000 €</td>
+                  <td>A. Chacón</td>
+                </tr>
+                <tr>
+                  <td><span class="manual-pill">Propuesta</span></td>
+                  <td>Paseo Marítimo 88, Málaga</td>
+                  <td>Oeste</td>
+                  <td>245.000 €</td>
+                  <td>M. Pérez</td>
+                </tr>
+              </tbody>
+            </table>
+            <p class="muted" style="margin:10px 2px 0">
+              Reglas recomendadas: antes de pasar a <span class="manual-highlight">Encargo</span>, sube documentación mínima
+              y valida propietarios; antes de <span class="manual-highlight">Reserva/Arras</span>, registra visita y propuesta.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section class="manual-page" data-page="3">
+        <div class="section-head">
+          <div>
+            <div class="manual-kicker">Paso 3</div>
+            <h2>Listado de inmuebles</h2>
+            <p class="muted">Inventario y acceso al expediente.</p>
+          </div>
+        </div>
+        <div class="manual-screen" style="padding:12px">
+          <div class="workspace-client-toolbar">
+            <input value="Buscar por dirección, ref catastral, zona..." />
+            <button type="button">Filtrar</button>
+            <button type="button" class="secondary">Exportar</button>
+          </div>
+          <table class="manual-table">
+            <thead>
+              <tr>
+                <th>Estado</th>
+                <th>Dirección</th>
+                <th>Ref. catastral</th>
+                <th>M2</th>
+                <th>Hab</th>
+                <th>Baños</th>
+                <th>Precio</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><span class="manual-pill is-encargo">Encargo</span></td>
+                <td>C/ Larios 4, Málaga</td>
+                <td>1234567UF7613N0001AB</td>
+                <td>78</td>
+                <td>2</td>
+                <td>1</td>
+                <td>310.000 €</td>
+              </tr>
+              <tr>
+                <td><span class="manual-pill is-noticia">Noticia</span></td>
+                <td>Av. Andalucía 12, Málaga</td>
+                <td>-</td>
+                <td>62</td>
+                <td>2</td>
+                <td>1</td>
+                <td>165.000 €</td>
+              </tr>
+              <tr>
+                <td><span class="manual-pill">Propuesta</span></td>
+                <td>Paseo Marítimo 88, Málaga</td>
+                <td>0000000UF0000N0000ZZ</td>
+                <td>95</td>
+                <td>3</td>
+                <td>2</td>
+                <td>245.000 €</td>
+              </tr>
+            </tbody>
+          </table>
+          <p class="muted" style="margin:10px 2px 0">Desde aquí debes poder abrir ficha, ver documentos, propietarios y actividad.</p>
+        </div>
+      </section>
+
+      <section class="manual-page" data-page="4">
+        <div class="section-head">
+          <div>
+            <div class="manual-kicker">Paso 4</div>
+            <h2>Ficha de inmueble (expediente)</h2>
+            <p class="muted">Datos, propietarios, compradores, documentos, checklist y estado.</p>
+          </div>
+        </div>
+        <div class="manual-screen">
+          <div class="manual-ficha-head">
+            <div>
+              <strong>C/ Larios 4, Málaga</strong>
+              <div class="muted">REF: INMO-0021 · Estado: Encargo · Zona: Centro</div>
+            </div>
+            <div class="manual-actions">
+              <button class="btn secondary" type="button">Guardar</button>
+              <button class="btn secondary" type="button">Borrar</button>
+            </div>
+          </div>
+          <div class="tabs" style="border-bottom:1px solid rgba(11,29,51,0.08)">
+            <button class="tab active" type="button">Datos</button>
+            <button class="tab" type="button">Demandas</button>
+            <button class="tab" type="button">Actividad</button>
+            <button class="tab" type="button">Docs</button>
+            <button class="tab" type="button">Estado</button>
+          </div>
+          <div class="manual-sample-grid">
+            <div class="form-card">
+              <h3>Datos principales</h3>
+              <div class="workspace-client-meta">
+                <span>Tipo: Piso</span>
+                <span>M2: 78</span>
+                <span>Hab: 2</span>
+                <span>Baños: 1</span>
+                <span>Precio objetivo: 310.000 €</span>
+              </div>
+              <p class="muted" style="margin:10px 0 0">Incluye lat/lon para mapa. Completa referencia catastral para catastro y documentos.</p>
+            </div>
+            <div class="form-card">
+              <h3>Propietarios</h3>
+              <div class="crm-mini-list">
+                <div class="workspace-check-item"><span class="manual-highlight">Juan García</span><span class="muted">DNI 1234</span></div>
+                <div class="workspace-check-item"><span class="manual-highlight">María López</span><span class="muted">DNI 5678</span></div>
+              </div>
+              <p class="muted" style="margin:10px 0 0">Recomendación: teléfono y email actualizados para firma/avisos.</p>
+            </div>
+            <div class="form-card">
+              <h3>Compradores interesados</h3>
+              <div class="crm-mini-list">
+                <div class="workspace-check-item"><span class="manual-highlight">Demanda #D-102</span><span class="muted">Visita 2026-04-10</span></div>
+                <div class="workspace-check-item"><span class="manual-highlight">Demanda #D-095</span><span class="muted">Llamar mañana</span></div>
+              </div>
+            </div>
+            <div class="form-card">
+              <h3>Documentos</h3>
+              <div class="crm-mini-list">
+                <div class="workspace-check-item"><span class="manual-highlight">Nota simple</span><span class="muted">v2</span></div>
+                <div class="workspace-check-item"><span class="manual-highlight">Encargo firmado</span><span class="muted">v1</span></div>
+                <div class="workspace-check-item"><span class="manual-highlight">Certificado energético</span><span class="muted">v1</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="manual-legend">
+            <span>Desde <span class="manual-highlight">Estado</span> se mueve el inmueble por etapas y se valida checklist.</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="manual-page" data-page="5">
+        <div class="section-head">
+          <div>
+            <div class="manual-kicker">Paso 5</div>
+            <h2>Demandas y matching</h2>
+            <p class="muted">Define necesidades del comprador y cruza con inventario.</p>
+          </div>
+        </div>
+        <div class="manual-screen" style="padding:12px">
+          <div class="grid workspace-mini-kpis">
+            <div class="workspace-mini-kpi"><span>Demandas activas</span><strong>24</strong></div>
+            <div class="workspace-mini-kpi"><span>En visita</span><strong>7</strong></div>
+            <div class="workspace-mini-kpi"><span>Propuesta enviada</span><strong>4</strong></div>
+            <div class="workspace-mini-kpi"><span>Cierre potencial</span><strong>2</strong></div>
+          </div>
+          <div class="manual-sample-grid">
+            <div class="form-card">
+              <h3>Demanda (ejemplo)</h3>
+              <p class="muted" style="margin-top:0">Zona: Centro · Precio máx: 260.000 € · M2 mín: 70 · Hab: 2</p>
+              <div class="workspace-check-item"><span class="manual-highlight">Fase</span><span class="muted">En visita</span></div>
+              <div class="workspace-check-item"><span class="manual-highlight">Cliente</span><span class="muted">Ana Ruiz</span></div>
+              <div class="workspace-check-item"><span class="manual-highlight">Prioridad</span><span class="muted">Alta</span></div>
+            </div>
+            <div class="form-card">
+              <h3>Matching (top 3)</h3>
+              <div class="crm-mini-list">
+                <div class="workspace-check-item"><span class="manual-highlight">C/ Carretería 22</span><span class="muted">245.000 € · 75m2</span></div>
+                <div class="workspace-check-item"><span class="manual-highlight">C/ Granada 9</span><span class="muted">259.000 € · 71m2</span></div>
+                <div class="workspace-check-item"><span class="manual-highlight">C/ Larios 4</span><span class="muted">310.000 € · 78m2</span></div>
+              </div>
+              <p class="muted" style="margin:10px 0 0">Si hay huecos de datos (m2/precio), el matching puede ser incompleto.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="manual-page" data-page="6">
+        <div class="section-head">
+          <div>
+            <div class="manual-kicker">Paso 6</div>
+            <h2>PDFs (solo en Encargo)</h2>
+            <p class="muted">Documentos automáticos: hoja de visita, ficha, nota precio, nota de encargo, DIA alquiler.</p>
+          </div>
+        </div>
+        <div class="manual-screen">
+          <div class="manual-ficha-head">
+            <div>
+              <strong>Documentos disponibles</strong>
+              <div class="muted">Visible cuando el estado comercial es Encargo.</div>
+            </div>
+            <div class="manual-actions">
+              <span class="manual-pill is-encargo">Encargo</span>
+            </div>
+          </div>
+          <div style="padding:12px">
+            <div class="inline-actions">
+              <button class="secondary" type="button">Hoja de visita PDF</button>
+              <button class="secondary" type="button">Ficha venta PDF</button>
+              <button class="secondary" type="button">Nota precio PDF</button>
+              <button class="secondary" type="button">Nota encargo PDF</button>
+              <button class="secondary" type="button">DIA alquiler PDF</button>
+            </div>
+            <p class="muted" style="margin:12px 2px 0">
+              Comportamiento esperado: al generar, el PDF se guarda en <span class="manual-highlight">Documentos del inmueble</span> y si ya existe,
+              se reemplaza (no duplica) cuando procede.
+            </p>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <script>
+      (function () {
+        const params = new URLSearchParams(window.location.search || "");
+        const page = String(params.get("page") || "1").trim();
+        document.querySelectorAll(".manual-page").forEach((el) => {
+          el.classList.toggle("is-active", el.getAttribute("data-page") === page);
+        });
+      })();
+    </script>
+  </body>
+</html>
+

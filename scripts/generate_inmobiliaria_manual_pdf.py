@@ -1,23 +1,70 @@
 #!/usr/bin/env python3
 """
-Genera un PDF (manual) del CRM Inmobiliaria basado en la UI/flujo actuales.
+Genera un PDF (manual) del CRM Inmobiliaria, incluyendo capturas reales del UI.
 
-Objetivo:
-- Explicar "cómo funciona" y "cómo debería funcionar" el módulo.
-- Servir como guía operativa para el equipo (checklists y buenas prácticas).
-
-No usa DB. Se apoya en el builder de PDFs ya presente en web/server.py.
+Cómo funciona:
+- Levanta el servidor del CRM y abre /manual/inmobiliaria?page=N (página sin auth).
+- Usa Google Chrome headless para sacar capturas PNG.
+- Compone un PDF multipágina con texto + capturas.
 """
 
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
+import subprocess
 import sys
+import time
+
+
+CHROME_BIN = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+
+
+def _fit_image(img, max_w, max_h):
+    from PIL import Image
+
+    w, h = img.size
+    if w <= 0 or h <= 0:
+        return img
+    ratio = min(float(max_w) / float(w), float(max_h) / float(h))
+    ratio = min(1.0, ratio)
+    nw, nh = int(w * ratio), int(h * ratio)
+    if nw <= 0 or nh <= 0:
+        return img
+    if (nw, nh) == (w, h):
+        return img
+    return img.resize((nw, nh), Image.LANCZOS)
+
+
+def _chrome_screenshot(url, out_png, window=(1600, 1000), scale=2, budget_ms=2400):
+    out_png = str(Path(out_png).expanduser().resolve())
+    w, h = int(window[0]), int(window[1])
+    args = [
+        CHROME_BIN,
+        "--headless=new",
+        "--disable-gpu",
+        "--hide-scrollbars",
+        "--no-first-run",
+        "--no-default-browser-check",
+        "--disable-extensions",
+        f"--force-device-scale-factor={float(scale)}",
+        f"--window-size={w},{h}",
+        f"--virtual-time-budget={int(budget_ms)}",
+        f"--screenshot={out_png}",
+        url,
+    ]
+    subprocess.run(args, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return out_png
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
+    ap.add_argument(
+        "--base-url",
+        default=os.environ.get("CRM_BASE_URL", "") or "http://127.0.0.1:8010",
+        help="Base URL del servidor del CRM (por defecto http://127.0.0.1:8010)",
+    )
     ap.add_argument(
         "--out",
         default="/tmp/manual_crm_inmobiliaria_verifika2.pdf",
@@ -31,149 +78,153 @@ def main() -> int:
 
     from web import server
 
-    title = "MANUAL · CRM INMOBILIARIA"
-    subtitle = (
+    base_url = str(args.base_url).rstrip("/")
+    pages = [
+        ("Paso 1 · Resumen", f"{base_url}/manual/inmobiliaria?page=1"),
+        ("Paso 2 · Pipeline", f"{base_url}/manual/inmobiliaria?page=2"),
+        ("Paso 3 · Inmuebles", f"{base_url}/manual/inmobiliaria?page=3"),
+        ("Paso 4 · Ficha inmueble", f"{base_url}/manual/inmobiliaria?page=4"),
+        ("Paso 5 · Demandas", f"{base_url}/manual/inmobiliaria?page=5"),
+        ("Paso 6 · PDFs", f"{base_url}/manual/inmobiliaria?page=6"),
+    ]
+
+    tmp_dir = Path("/tmp") / f"manual_inmo_{int(time.time())}"
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+
+    # Capturas PNG.
+    screenshots = []
+    for idx, (label, url) in enumerate(pages, start=1):
+        out_png = tmp_dir / f"screen_{idx:02d}.png"
+        try:
+            _chrome_screenshot(url, out_png, window=(1600, 980), scale=2, budget_ms=2600)
+            screenshots.append((label, str(out_png)))
+        except Exception:
+            # Si falla Chrome/servidor, seguimos sin capturas.
+            screenshots.append((label, ""))
+
+    # Composición a PDF con Pillow.
+    from PIL import Image, ImageDraw
+
+    page_w, page_h = 1240, 1754
+    margin_x, top_margin, bottom_margin = 90, 70, 90
+    content_w = page_w - (margin_x * 2)
+
+    logo = server._load_asset_logo("verifika2/verifika2_wordmark_check_green_transparent.png", max_width=520)
+    font_title = server._document_font(34, bold=True)
+    font_subtitle = server._document_font(18, bold=False)
+    font_h2 = server._document_font(22, bold=True)
+    font_body = server._document_font(17, bold=False)
+    font_footer = server._document_font(14, bold=False)
+
+    def new_page(title, subtitle):
+        img = Image.new("RGB", (page_w, page_h), "white")
+        draw = ImageDraw.Draw(img)
+        y = top_margin
+        if logo:
+            img.paste(logo, (margin_x, y), logo)
+            y += logo.height + 22
+        draw.text((margin_x, y), title, fill=(48, 54, 58), font=font_title)
+        box = draw.textbbox((margin_x, y), title, font=font_title)
+        y = box[3] + 10
+        if subtitle:
+            lines, line_h, total_h = server._pil_multiline(draw, subtitle, font_subtitle, width=96, line_gap=6)
+            draw.multiline_text((margin_x, y), "\n".join(lines), fill=(110, 116, 120), font=font_subtitle, spacing=6)
+            y += total_h + 10
+        return img, draw, y
+
+    pages_out = []
+
+    cover_title = "MANUAL · CRM INMOBILIARIA"
+    cover_sub = (
         "Guia operativa del modulo Inmobiliaria dentro de Verifika².\n"
-        "Version: abril 2026.\n"
-        "Nota: este manual describe el comportamiento actual del CRM (UI y endpoints) y la forma recomendada de uso."
+        "Incluye capturas (modo documentación) y reglas de funcionamiento recomendadas.\n"
+        "Abril 2026."
     )
-
-    sections = [
-        (
-            "Objetivo del modulo",
-            [
-                "Controlar el pipeline comercial (noticia, encargo, propuesta, reserva, arras, cierre).",
-                "Centralizar el expediente del inmueble: datos, propietarios, compradores, visitas, documentos, checklist y auditoria.",
-                "Operar con trazabilidad: acciones, agenda y documentacion generada (PDFs).",
-            ],
-        ),
-        (
-            "Acceso y contexto (workspace y empresa)",
-            [
-                "Entra en el CRM, selecciona tu usuario y el workspace del cliente.",
-                "Selecciona la empresa operativa de inmobiliaria (normalmente Estudio Velazquez 2012 SL).",
-                "Abre la pestaña Inmobiliaria (CRM inmobiliario).",
-            ],
-        ),
-        (
-            "Estructura de pantallas (tabs)",
-            [
-                ("Resumen", "KPIs, proximos hitos, pendientes y enlaces rapidos."),
-                ("Analisis", "Panel de series y comparativas anuales (ventas, alquileres, comisiones)."),
-                ("Pipeline", "Captaciones/pipeline por etapa y accesos a ficha."),
-                ("Inmuebles", "Inventario y expedientes. Entrada principal al detalle."),
-                ("Alquileres", "Seguimiento de alquileres y actividad asociada."),
-                ("Compraventas", "Historico de operaciones y estado."),
-                ("Demandas", "Demandas de compradores/inquilinos y matching con inmuebles."),
-                ("Visitas", "Visitas registradas por inmueble/demanda."),
-                ("Agenda", "Acciones planificadas y seguimiento comercial."),
-                ("Informadores", "Origenes/colaboradores y trazabilidad."),
-                ("Edificios/Complejos", "Agrupacion de inmuebles por edificio/urbanizacion."),
-                ("Copiloto legal", "Ayuda operativa para dudas legales habituales."),
-            ],
-        ),
-        (
-            "Nuevo inmueble (alta rapida)",
-            [
-                "Boton: 'Nuevo inmueble'.",
-                "Rellena como minimo direccion, localidad y tipo (lo demas se puede completar despues).",
-                "Si tienes referencia catastral, guardala desde el inicio para facilitar catastro, mapa y documentacion.",
-            ],
-        ),
-        (
-            "Pipeline (captaciones) y etapas",
-            [
-                "La etapa comercial se refleja en la ficha del inmueble y/o captacion vinculada.",
-                "Cambios de etapa: desde la ficha, pestaña Estado, usando los botones (Noticia, Encargo, Propuesta, Reservado, Arras, Vendido, Cerrado, Alquiler).",
-                "Recomendacion: antes de avanzar a Encargo, sube documentacion minima y valida datos de propietario.",
-            ],
-        ),
-        (
-            "Ficha de inmueble (expediente)",
-            [
-                "Cabecera: direccion, referencia y estado comercial.",
-                "Datos: tipo inmueble, m2, habitaciones, banos, precio objetivo/valoracion, zona, coordenadas (lat/lon).",
-                "Propietarios: enlaza clientes propietarios y mantén telefono/email actualizados.",
-                "Compradores: lista de interesados (vinculados a demandas) y sus proximas acciones.",
-                "Documentos: subida de archivos (PDF, imagen, office). El sistema guarda historico por version.",
-                "Checklist: tareas sugeridas por etapa (generable) para no olvidar pasos operativos.",
-                "Timeline/auditoria: historial de documentos, acciones y cambios.",
-            ],
-        ),
-        (
-            "Mapa y ubicacion",
-            [
-                "Completa lat/lon (o usa sincronizacion/consulta de catastro cuando aplique).",
-                "El mapa se usa para vista rapida y para documentos (ej: presupuestos/otros).",
-                "Si no hay coordenadas, el sistema puede mostrar informacion limitada.",
-            ],
-        ),
-        (
-            "Demandas y matching",
-            [
-                "Crea una demanda para comprador/inquilino con zona, presupuesto maximo y requisitos (m2, habitaciones, banos).",
-                "Usa el matching desde demanda o desde inmueble para encontrar candidatos compatibles.",
-                "Recomendacion: mantén la demanda en una fase/estado coherente para priorizar seguimientos.",
-            ],
-        ),
-        (
-            "Visitas y agenda (acciones)",
-            [
-                "Registra visitas vinculandolas a un inmueble y, si existe, a una demanda.",
-                "Programa proximas acciones (llamada, visita, propuesta, seguimiento) con fecha/hora y responsable.",
-                "Objetivo: que el pipeline sea accionable, no solo un listado de fichas.",
-            ],
-        ),
-        (
-            "PDFs disponibles en inmobiliaria (cuando procede)",
-            [
-                "Hoja de visita PDF (solo visible cuando el inmueble esta en Encargo).",
-                "Nota de encargo PDF (documento comercial/mandato, editable via datos del expediente).",
-                "Ficha venta PDF y Nota precio PDF (consumo; requiere Encargo).",
-                "DIA alquiler PDF (consumo; requiere Encargo).",
-                "Nota: los PDFs se guardan en los documentos del inmueble y se pueden regenerar.",
-            ],
-        ),
-        (
-            "Comportamiento esperado (checklist de calidad)",
-            [
-                "Alta: crear inmueble debe ser inmediato y no exigir datos no esenciales.",
-                "Expediente: cambios en ficha deben guardarse sin bloquear (autosave) y con estado claro de guardado.",
-                "Permisos: usuarios con acceso al servicio Inmobiliaria deben ver inmuebles, demandas, visitas y documentos del servicio.",
-                "PDFs: visibles y generables solo cuando la etapa lo permite (Encargo), sin errores de layout ni textos legacy.",
-                "Matching: al menos por empresa + zona + presupuesto + requisitos basicos, con resultados consistentes.",
-            ],
-        ),
-        (
-            "Puntos tipicos de incidencia (para detectar errores)",
-            [
-                "Botones ocultos por estado: si el estado no es exactamente 'Encargo', los PDFs no aparecen.",
-                "Datos inconsistentes entre captacion e inmueble (estado comercial, precio objetivo).",
-                "Documentos: versiones duplicadas si se regeneran PDFs sin reemplazo (debe reemplazar si asi se indica).",
-                "Mapa: ausencia de lat/lon o errores de sincronizacion pueden dejar la ficha sin visualizacion.",
-            ],
-        ),
+    img, draw, y = new_page(cover_title, cover_sub)
+    intro = [
+        "Este manual se estructura como un flujo de trabajo:",
+        "  1) Revisar Resumen y convertir KPIs en acciones.",
+        "  2) Gestionar Pipeline por etapa (Noticia, Encargo, Propuesta, ...).",
+        "  3) Trabajar expediente (propietarios, documentos, checklist).",
+        "  4) Gestionar Demandas y Matching.",
+        "  5) Registrar Visitas y seguimiento (Agenda).",
+        "  6) Generar PDFs cuando aplica (solo Encargo).",
+        "",
+        "Si algo no coincide con lo descrito, registra pasos de reproducción (usuario, empresa, inmueble/demanda).",
     ]
+    for line in intro:
+        lines, line_h, total_h = server._pil_multiline(draw, line, font_body, width=100, line_gap=6)
+        draw.multiline_text((margin_x, y), "\n".join(lines), fill=(25, 28, 31), font=font_body, spacing=6)
+        y += total_h + 4
+    pages_out.append(img)
 
-    footer = [
-        "Documento interno. Si detectas un comportamiento distinto al descrito, anota: usuario, workspace, empresa y pasos para reproducir.",
-        "Verifika² · Manual CRM Inmobiliaria.",
-    ]
+    for idx, (label, png_path) in enumerate(screenshots, start=1):
+        img, draw, y = new_page(label, "Captura del UI (ejemplo) usando el estilo real del CRM.")
+        if png_path:
+            try:
+                shot = Image.open(png_path).convert("RGB")
+                shot = _fit_image(shot, content_w, page_h - y - bottom_margin - 120)
+                x = margin_x + int((content_w - shot.width) / 2)
+                img.paste(shot, (x, y))
+                y += shot.height + 16
+            except Exception:
+                pass
 
-    pdf_bytes = server.build_branded_document_pdf(
-        title,
-        subtitle,
-        sections,
-        footer_lines=footer,
-        brand_logo_url="/assets/verifika2/verifika2_wordmark_check_green_transparent.png",
-    )
+        bullets = {
+            1: [
+                "Revisar avisos, visitas del dia y propuestas sin respuesta.",
+                "Crear acciones (agenda) desde pendientes para que el pipeline sea accionable.",
+                "KPI esperado: todo lo importante debe tener proxima accion y responsable.",
+            ],
+            2: [
+                "Pipeline refleja etapa comercial. Mueve por etapa desde la ficha (Estado).",
+                "Recomendado: no pasar a Encargo sin documentacion minima y propietarios validados.",
+                "Error tipico: estados inconsistentes entre captacion e inmueble (botones desaparecen).",
+            ],
+            3: [
+                "Listado: busca por direccion, ref catastral o zona.",
+                "Esperado: abrir ficha siempre funciona; no debe volver a Home por routing.",
+                "Calidad de datos: m2/hab/banos/precio deben estar para matching fiable.",
+            ],
+            4: [
+                "Expediente: datos + propietarios + compradores + docs + checklist + auditoria.",
+                "Autosave: cambios deben guardar con feedback (sin perderse).",
+                "Mapa: completa lat/lon para ubicacion; ref catastral para catastro/documentos.",
+            ],
+            5: [
+                "Demandas: zona, presupuesto, requisitos (m2/hab/banos), fase y estado.",
+                "Matching: debe filtrar por empresa y aplicar reglas basicas; revisar campos vacios.",
+                "Trabajo diario: convertir matching en visitas y acciones con fecha.",
+            ],
+            6: [
+                "PDFs solo aparecen en Encargo: hoja visita, ficha venta, nota precio, nota encargo, DIA alquiler.",
+                "Esperado: al generar, se guarda en Docs y si ya existe se reemplaza cuando procede (sin duplicar).",
+                "Error tipico: estado mal escrito (no exactamente 'Encargo') oculta botones.",
+            ],
+        }.get(idx, [])
+
+        if bullets:
+            draw.text((margin_x, y), "Qué hacer / qué esperar", fill=(60, 67, 72), font=font_h2)
+            box = draw.textbbox((margin_x, y), "Qué hacer / qué esperar", font=font_h2)
+            y = box[3] + 10
+            for b in bullets:
+                text = f"• {b}"
+                lines, line_h, total_h = server._pil_multiline(draw, text, font_body, width=100, line_gap=6)
+                draw.multiline_text((margin_x, y), "\n".join(lines), fill=(25, 28, 31), font=font_body, spacing=6)
+                y += total_h + 4
+
+        footer = "Verifika² · Manual CRM Inmobiliaria · Capturas en /manual/inmobiliaria"
+        draw.text((margin_x, page_h - bottom_margin + 26), footer, fill=(106, 111, 116), font=font_footer)
+        pages_out.append(img)
 
     out_path = Path(args.out).expanduser().resolve()
-    out_path.write_bytes(pdf_bytes)
+    if len(pages_out) == 1:
+        pages_out[0].save(out_path, format="PDF", resolution=150.0)
+    else:
+        pages_out[0].save(out_path, format="PDF", resolution=150.0, save_all=True, append_images=pages_out[1:])
     print(str(out_path))
     return 0
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
