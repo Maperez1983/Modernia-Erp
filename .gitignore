@@ -12,3 +12,6 @@ __pycache__/
 web/uploads/
 reports/catastro/
 .venv/
+.venv_demo/
+.venv_pdf/
+reports/

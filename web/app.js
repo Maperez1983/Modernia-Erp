@@ -24965,7 +24965,7 @@ const loadHipotecaDashboard = () => {
           {
             label: "Comisión cliente",
             values: alignSeries(comisionYears, data?.series_comision || []),
-            color: "#7e8878",
+            color: "#334155",
             format: (value) => euroFormatter.format(value),
           },
         ],
@@ -25473,7 +25473,7 @@ const renderDashboard = (empresaName, empresaId) => {
                 {
                   label: "Precio cierre",
                   values: alignSeries(facturadoYears, data.cierres || []),
-                  color: "#7e8878",
+                  color: "#334155",
                   format: (value) => euroFormatter.format(value),
                 },
               ]
@@ -25481,7 +25481,7 @@ const renderDashboard = (empresaName, empresaId) => {
                 {
                   label: "Gastos",
                   values: alignSeries(facturadoYears, data.gastos),
-                  color: "#7e8878",
+                  color: "#334155",
                   format: (value) => euroFormatter.format(value),
                 },
               ]),
@@ -26076,7 +26076,7 @@ const renderFinDashboard = (empresaId) => {
           {
             label: "Entidad",
             values: entidadValues.length ? entidadValues : [0],
-            color: "#7e8878",
+            color: "#334155",
             format: (value) => numberFormatter.format(value),
           },
         ],
@@ -28811,7 +28811,7 @@ const renderCrmResumenYtdBoard = async ({ force = false } = {}) => {
           {
             label: "Citas",
             values: alignMonthlySeries(series.citas_by_month, months, "total"),
-            color: "#3c6e71",
+            color: "#22C55E",
             format: (value) => numberFormatter.format(value),
           },
         ],
@@ -28831,7 +28831,7 @@ const renderCrmResumenYtdBoard = async ({ force = false } = {}) => {
           {
             label: "Comisión alquileres",
             values: alignMonthlySeries(series.alquileres_by_month, months, "comision"),
-            color: "#7e8878",
+            color: "#334155",
             format: (value) => euroFormatter.format(value),
           },
         ],
@@ -28852,7 +28852,7 @@ const renderCrmResumenYtdBoard = async ({ force = false } = {}) => {
           {
             label: "Total",
             values: embudoValues,
-            color: "#7e8878",
+            color: "#334155",
             format: (value) => numberFormatter.format(value),
           },
         ],
@@ -49517,7 +49517,7 @@ const redrawDashboardOnResize = () => {
         {
           label: "Gastos",
           values: alignSeries(facturadoYears, lastDashboardData.gastos),
-          color: "#7e8878",
+          color: "#334155",
           format: (value) => euroFormatter.format(value),
         },
       ],
