@@ -8,7 +8,7 @@ const APP_SW_VERSION = "v68";
 // Workspace tenant por defecto del producto (branding de software). Mantiene compatibilidad con slugs legacy.
 const DEFAULT_TENANT_WORKSPACE_SLUG = "verifika2";
 const LEGACY_TENANT_WORKSPACE_SLUGS = new Set(["modernia", "grupomodernia", "grupo-modernia"]);
-const DEFAULT_TENANT_WORKSPACE_NAME = "Modernia";
+const DEFAULT_TENANT_WORKSPACE_NAME = "Verifika²";
 const normalizeSlugLike = (value) =>
   String(value || "")
     .trim()
@@ -17992,12 +17992,13 @@ const createWordmarkLogoDataUri = (label, options = {}) => {
 
 const COMPANY_LOGOS = {
   "FINCAS VELAZQUEZ": "/assets/logos/fincas-velazquez.png",
-  "FINANCIACIONES MODERNIA": "/assets/grupo_modernia_logo.png",
+  // Rebranding: evitamos mostrar el logo legacy "Grupo Modernia" en dashboards del CRM (identidad Verifika²).
+  "FINANCIACIONES MODERNIA": "/assets/verifika2/verifika2_wordmark_traced_dark.svg",
   "INVERSURE HOMES": "/assets/logos/inversure-homes.svg",
   "INMOVERE PROYECT": "/assets/logos/xp-renova.svg",
   "XP RENOVA": "/assets/logos/xp-renova.svg",
-  "MODERNIA ASESORES": "/assets/grupo_modernia_logo.png",
-  "GRUPO MODERNIA": "/assets/grupo_modernia_logo.png",
+  "MODERNIA ASESORES": "/assets/verifika2/verifika2_wordmark_traced_dark.svg",
+  "GRUPO MODERNIA": "/assets/verifika2/verifika2_wordmark_traced_dark.svg",
   ALLIANZ: "/assets/logos/allianz.svg",
   ARAG: "/assets/logos/arag.svg",
   AXA: "/assets/logos/axa.svg",
