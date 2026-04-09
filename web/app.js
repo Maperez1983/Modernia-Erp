@@ -49346,14 +49346,17 @@ if (hipotecaForm) {
       .replace(/[\u0300-\u036f]/g, "")
       .trim();
 
-  const MALAGA_BONUS_OFFICES = new Set([
-    "modernia norte",
-    "modernia oeste",
-    "modernia centro",
-    "malaga norte",
-    "malaga oeste",
-    "malaga centro",
-  ]);
+	  const MALAGA_BONUS_OFFICES = new Set([
+	    "modernia norte",
+	    "modernia oeste",
+	    "modernia centro",
+	    "verifika2 norte",
+	    "verifika2 oeste",
+	    "verifika2 centro",
+	    "malaga norte",
+	    "malaga oeste",
+	    "malaga centro",
+	  ]);
 
   const canonicalOffice = (value) =>
     normalizeText(value)
