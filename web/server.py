@@ -19746,7 +19746,7 @@ def ensure_usuarios_schema(conn):
     if total_users == 0:
         conn.execute(
             "INSERT INTO usuarios (id, nombre, apellido, usuario, email, servicio, rol, activo, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))",
-            (os.urandom(16).hex(), "Administrador", "General", "admin", "admin@liv.local", "Administración", "Administrador", 1),
+            (os.urandom(16).hex(), "Administrador", "General", "admin", "admin@verifika2.local", "Administración", "Administrador", 1),
         )
     flagged_count_row = conn.execute(
         "SELECT COUNT(*) AS total FROM usuarios WHERE COALESCE(registro_horario_activo, 0) = 1"
