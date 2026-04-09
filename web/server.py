@@ -26042,6 +26042,55 @@ def fetch_workspace_budget_pdf_payload(conn, budget_id, workspace_id=None):
     ).fetchone()
     if not budget:
         return None
+    budget = dict(budget)
+
+    # Enriquecimiento Fincas: si el presupuesto está vinculado a una comunidad,
+    # aseguramos que `calculo_json` contenga dirección/foto/cif para PDF (mapa/foto).
+    try:
+        servicio_key = normalize_service_key(budget.get("servicio") or "")
+        if servicio_key == "fincas" and normalize_simple(budget.get("referencia_tipo") or "") == "comunidad":
+            comunidad_id = str(budget.get("referencia_id") or "").strip()
+            if comunidad_id:
+                comunidad = conn.execute(
+                    """
+                    SELECT
+                      COALESCE(nombre, '') AS nombre,
+                      COALESCE(cif, '') AS cif,
+                      COALESCE(direccion, '') AS direccion,
+                      COALESCE(referencia_catastral, '') AS referencia_catastral,
+                      COALESCE(foto_edificio_key, '') AS foto_edificio_key
+                    FROM workspace_fincas_comunidades
+                    WHERE id = ? AND workspace_id = ?
+                    LIMIT 1
+                    """,
+                    (comunidad_id, workspace_id),
+                ).fetchone()
+            else:
+                comunidad = None
+
+            if comunidad:
+                calc = {}
+                try:
+                    calc = json.loads(budget.get("calculo_json") or "{}") if budget.get("calculo_json") else {}
+                    if not isinstance(calc, dict):
+                        calc = {}
+                except Exception:
+                    calc = {}
+                # Solo rellenamos si faltan para no pisar lo que el usuario haya escrito en el formulario.
+                if not str(calc.get("comunidad_denominacion") or "").strip():
+                    calc["comunidad_denominacion"] = str(row_value(comunidad, "nombre") or "").strip()
+                if not str(calc.get("comunidad_cif") or "").strip():
+                    calc["comunidad_cif"] = str(row_value(comunidad, "cif") or "").strip()
+                if not str(calc.get("comunidad_direccion") or "").strip():
+                    calc["comunidad_direccion"] = str(row_value(comunidad, "direccion") or "").strip()
+                if not str(calc.get("referencia_catastral") or "").strip():
+                    calc["referencia_catastral"] = str(row_value(comunidad, "referencia_catastral") or "").strip()
+                # Foto: el PDF mira `edificio_foto_key`.
+                if not str(calc.get("edificio_foto_key") or "").strip():
+                    calc["edificio_foto_key"] = str(row_value(comunidad, "foto_edificio_key") or "").strip()
+                budget["calculo_json"] = json.dumps(calc, ensure_ascii=False)
+    except Exception:
+        pass
     lineas = conn.execute(
         """
         SELECT orden, categoria, concepto, cantidad, unidad, precio_unitario, descuento_pct, total_linea
@@ -26052,7 +26101,7 @@ def fetch_workspace_budget_pdf_payload(conn, budget_id, workspace_id=None):
         (budget_id,),
     ).fetchall()
     return {
-        "budget": dict(budget),
+        "budget": budget,
         "workspace": {
             "nombre": budget["workspace_nombre"],
             "primary_color": budget["workspace_primary_color"],
@@ -26937,6 +26986,76 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
     servicio_label = servicio_key or "-"
     ref_label = budget.get("id") or "-"
 
+    def _build_fincas_presentation_letter_lines():
+        client_name = str(calc.get("comunidad_denominacion") or client.get("nombre") or budget.get("titulo") or "").strip() or "Comunidad"
+        fecha_txt = str(budget.get("fecha") or "").strip() or datetime.now().date().isoformat()
+        try:
+            fecha_txt = format_spanish_long_date_capitalized(fecha_txt)
+        except Exception:
+            pass
+        n_viv = int(calc.get("num_vecinos") or 0)
+        n_loc = int(calc.get("num_locales") or 0)
+        n_tra = int(calc.get("num_trasteros") or 0)
+        n_ap = int(calc.get("num_aparcamientos") or 0)
+        subtotal = float(budget.get("subtotal") or calc.get("cuota_sugerida") or 0.0)
+        impuestos = float(budget.get("impuestos") or 0.0)
+        total = float(budget.get("total") or 0.0) if float(budget.get("total") or 0.0) else max(0.0, subtotal + impuestos)
+
+        cuerpo = [
+            f"{fecha_txt}",
+            "",
+            f"A la atención de {client_name}:",
+            "",
+            "Le remitimos nuestra propuesta de servicios de administración de fincas para su comunidad, con una cuota calculada de forma objetiva a partir de las unidades del edificio.",
+            "",
+            "Cálculo base: "
+            + " + ".join(
+                [f"{n_viv} viviendas × 5 €"]
+                + ([f"{n_loc} locales × 1 €"] if n_loc else [])
+                + ([f"{n_ap} aparcamientos × 1 €"] if n_ap else [])
+                + ([f"{n_tra} trasteros × 1 €"] if n_tra else [])
+            )
+            + " (mínimo 60 €).",
+            f"Cuota mensual propuesta (sin IVA): {format_eur_short(subtotal)} · IVA (21%): {format_eur_short(impuestos)} · Total mensual (con IVA): {format_eur_short(total)}.",
+            f"Total anual (con IVA): {format_eur_short(total * 12)}.",
+            "",
+            "Quedamos a su disposición para concretar alcance, fechas de implantación y condiciones particulares de la comunidad.",
+        ]
+
+        extra_letter = str(calc.get("carta_presentacion") or "").strip()
+        if extra_letter:
+            # Permite insertar variables del formulario dentro de la carta opcional.
+            try:
+                template_vars = {
+                    "comunidad_denominacion": str(calc.get("comunidad_denominacion") or client_name or "").strip(),
+                    "comunidad_direccion": str(calc.get("comunidad_direccion") or "").strip(),
+                    "comunidad_cif": str(calc.get("comunidad_cif") or "").strip(),
+                    "solicitante_nombre": str(calc.get("solicitante_nombre") or "").strip(),
+                    "solicitante_dni": str(calc.get("solicitante_dni") or "").strip(),
+                    "solicitante_telefono": str(calc.get("solicitante_telefono") or "").strip(),
+                    "solicitante_email": str(calc.get("solicitante_email") or "").strip(),
+                    "colegiado_numero": str(calc.get("colegiado_numero") or "3079").strip() or "3079",
+                    "fecha": str(fecha_txt or "").strip(),
+                    "subtotal": format_eur_short(subtotal),
+                    "impuestos": format_eur_short(impuestos),
+                    "total": format_eur_short(total),
+                    "total_anual": format_eur_short(total * 12),
+                }
+                for key, value in template_vars.items():
+                    extra_letter = extra_letter.replace(f"{{{{{key}}}}}", value or "")
+            except Exception:
+                pass
+            cuerpo.extend(["", *[line.rstrip() for line in extra_letter.splitlines()]])
+
+        cuerpo.extend(
+            [
+                "",
+                "Atentamente,",
+                f"{company.get('nombre') or workspace.get('nombre') or 'Fincas Velazquez'}",
+            ]
+        )
+        return cuerpo
+
     def _trim_transparent(img):
         if not img:
             return None
@@ -27011,6 +27130,15 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
                 (page_width - margin_x - 340, 34, page_width - margin_x, 34 + 126),
                 padding=14,
             )
+        # Si es Fincas, colocamos el logo del colegio debajo del logo principal (sin tapar cabecera).
+        if servicio_key == "fincas" and colegio_logo:
+            _paste_logo_box(
+                image,
+                draw,
+                colegio_logo,
+                (page_width - margin_x - 340, 34 + 126 + 10, page_width - margin_x, 34 + 126 + 10 + 86),
+                padding=10,
+            )
         current_y = 296
         if include_cards:
             left = (margin_x, current_y, margin_x + 560, current_y + 250)
@@ -27031,119 +27159,6 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
             draw.text((right[0] + 24, right[1] + 226), f"Pago {budget.get('forma_pago') or 'Pendiente'}", fill=ink, font=font_table)
             current_y = left[3] + 34
         return image, draw, current_y
-
-    if servicio_key == "fincas":
-        cover = Image.new("RGB", (page_width, page_height), "white")
-        cover_draw = ImageDraw.Draw(cover)
-        cover_draw.rounded_rectangle((0, 0, page_width, 240), radius=0, fill=primary)
-        cover_draw.polygon([(page_width - 240, 0), (page_width, 0), (page_width, 200)], fill=accent)
-        cover_title = "CARTA DE PRESENTACIÓN"
-        subtitle = "Administración de fincas · Propuesta de servicios"
-        title_x = margin_x
-        if logo:
-            # Evita que el logo se monte sobre el título.
-            _paste_logo_box(
-                cover,
-                cover_draw,
-                logo,
-                (margin_x, 20, margin_x + 250, 20 + 90),
-                padding=10,
-            )
-            title_x = margin_x + 270
-        cover_draw.text((title_x, top_margin + 12), cover_title, fill="white", font=font_title)
-        cover_draw.text((title_x, top_margin + 86), subtitle, fill=(240, 246, 248), font=font_subtitle)
-        if colegio_logo:
-            colegio_box = (page_width - margin_x - 340, 24, page_width - margin_x, 24 + 90)
-            _paste_logo_box(cover, cover_draw, colegio_logo, colegio_box, padding=10)
-            colegiado = str(calc.get("colegiado_numero") or "3079").strip() or "3079"
-            cover_draw.text(
-                (colegio_box[0], colegio_box[3] + 10),
-                f"Colegiado nº {colegiado}",
-                fill=(240, 246, 248),
-                font=_document_font(16, True),
-            )
-        else:
-            cover_draw.text((page_width - margin_x - 360, 44), "Colegio de Administradores", fill=(240, 246, 248), font=font_subtitle)
-
-        client_name = str(calc.get("comunidad_denominacion") or client.get("nombre") or budget.get("titulo") or "").strip() or "Comunidad"
-        fecha_txt = str(budget.get("fecha") or "").strip() or datetime.now().date().isoformat()
-        try:
-            fecha_txt = format_spanish_long_date_capitalized(fecha_txt)
-        except Exception:
-            pass
-        n_viv = int(calc.get("num_vecinos") or 0)
-        n_loc = int(calc.get("num_locales") or 0)
-        n_tra = int(calc.get("num_trasteros") or 0)
-        n_ap = int(calc.get("num_aparcamientos") or 0)
-        subtotal = float(budget.get("subtotal") or calc.get("cuota_sugerida") or 0.0)
-        impuestos = float(budget.get("impuestos") or 0.0)
-        total = float(budget.get("total") or 0.0) if float(budget.get("total") or 0.0) else max(0.0, subtotal + impuestos)
-        cuerpo = [
-            f"{fecha_txt}",
-            "",
-            f"A la atención de {client_name}:",
-            "",
-            "Le remitimos nuestra propuesta de servicios de administración de fincas para su comunidad, con una cuota calculada de forma objetiva a partir de las unidades del edificio.",
-            "",
-            "Cálculo base: "
-            + " + ".join(
-                [f"{n_viv} viviendas × 5 €"]
-                + ([f"{n_loc} locales × 1 €"] if n_loc else [])
-                + ([f"{n_ap} aparcamientos × 1 €"] if n_ap else [])
-                + ([f"{n_tra} trasteros × 1 €"] if n_tra else [])
-            )
-            + " (mínimo 60 €).",
-            f"Cuota mensual propuesta (sin IVA): {format_eur_short(subtotal)} · IVA (21%): {format_eur_short(impuestos)} · Total mensual (con IVA): {format_eur_short(total)}.",
-            f"Total anual (con IVA): {format_eur_short(total * 12)}.",
-            "",
-            "Quedamos a su disposición para concretar alcance, fechas de implantación y condiciones particulares de la comunidad.",
-        ]
-        extra_letter = str(calc.get("carta_presentacion") or "").strip()
-        if extra_letter:
-            # Permite insertar variables del formulario dentro de la carta opcional.
-            # Ejemplos: {{comunidad_denominacion}}, {{comunidad_direccion}}
-            try:
-                template_vars = {
-                    "comunidad_denominacion": str(calc.get("comunidad_denominacion") or client_name or "").strip(),
-                    "comunidad_direccion": str(calc.get("comunidad_direccion") or "").strip(),
-                    "comunidad_cif": str(calc.get("comunidad_cif") or "").strip(),
-                    "solicitante_nombre": str(calc.get("solicitante_nombre") or "").strip(),
-                    "solicitante_dni": str(calc.get("solicitante_dni") or "").strip(),
-                    "solicitante_telefono": str(calc.get("solicitante_telefono") or "").strip(),
-                    "solicitante_email": str(calc.get("solicitante_email") or "").strip(),
-                    "colegiado_numero": str(calc.get("colegiado_numero") or "3079").strip() or "3079",
-                    "fecha": str(fecha_txt or "").strip(),
-                    "subtotal": format_eur_short(subtotal),
-                    "impuestos": format_eur_short(impuestos),
-                    "total": format_eur_short(total),
-                    "total_anual": format_eur_short(total * 12),
-                }
-                for key, value in template_vars.items():
-                    extra_letter = extra_letter.replace(f"{{{{{key}}}}}", value or "")
-            except Exception:
-                pass
-            cuerpo.extend(["", "Carta de presentación adicional:", ""])
-            cuerpo.extend([line.rstrip() for line in extra_letter.splitlines()])
-        cuerpo.extend([
-            "",
-            "Atentamente,",
-            f"{company.get('nombre') or workspace.get('nombre') or 'Fincas Velazquez'}",
-        ])
-        y_cover = 278
-        cover_draw.rounded_rectangle((margin_x, y_cover, page_width - margin_x, page_height - bottom_margin - 22), radius=28, fill=(252, 252, 252), outline=border)
-        text_x = margin_x + 34
-        text_y = y_cover + 30
-        for line in cuerpo:
-            if not str(line).strip():
-                text_y += 18
-                continue
-            wrapped = _pdf_wrap_lines(line, width=98)
-            cover_draw.multiline_text((text_x, text_y), "\n".join(wrapped), fill=ink, font=font_table, spacing=6)
-            sample_box = cover_draw.textbbox((text_x, text_y), "Ag", font=font_table)
-            text_y += (sample_box[3] - sample_box[1] + 8) * len(wrapped)
-        footer_cover = "Documento generado automáticamente desde el CRM. La propuesta económica se detalla en las páginas siguientes."
-        cover_draw.multiline_text((margin_x, page_height - bottom_margin), "\n".join(_pdf_wrap_lines(footer_cover, width=108)), fill=muted, font=font_footer, spacing=4)
-        pages.append(cover)
 
     image, draw, y = new_page(include_cards=True)
     usable_bottom = page_height - bottom_margin
@@ -27196,7 +27211,12 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
         y = max(box2[3], y_txt + 10) + 24
 
         addr_for_map = str(calc.get("comunidad_direccion") or "").strip()
-        photo_key = str(calc.get("edificio_foto_key") or "").strip()
+        photo_key = str(
+            calc.get("edificio_foto_key")
+            or calc.get("foto_edificio_key")
+            or calc.get("comunidad_foto_key")
+            or ""
+        ).strip()
         map_url = ""
         qr_img = None
         map_img = None
@@ -27374,9 +27394,13 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
             inner_right = box_media[2] - 24
             available_w = max(320, int(inner_right - inner_left))
             map_x = inner_left
-            if building_photo:
+            if map_img and building_photo:
                 map_w = max(420, int(available_w * 0.62))
                 photo_w = max(260, available_w - map_w - gap)
+            elif building_photo and not map_img:
+                # Si no hay mapa, damos prioridad a la foto (el QR deja de ser protagonista).
+                map_w = 0
+                photo_w = available_w
             else:
                 map_w = available_w
                 photo_w = 0
@@ -27392,16 +27416,24 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
                 try:
                     photo = building_photo.convert("RGB")
                     photo = ImageOps.fit(photo, (photo_w, photo_h), method=Image.LANCZOS)
-                    image.paste(photo, (right_x, inner_top))
-                    draw.rounded_rectangle((right_x, inner_top, right_x + photo_w, inner_top + photo_h), radius=20, outline=border, width=2)
+                    photo_x = right_x if map_img else map_x
+                    image.paste(photo, (photo_x, inner_top))
+                    draw.rounded_rectangle((photo_x, inner_top, photo_x + photo_w, inner_top + photo_h), radius=20, outline=border, width=2)
                 except Exception:
                     building_photo = None
-            elif qr_img and not map_img:
-                # Fallback: QR si no se pudo obtener mapa estático.
-                image.paste(qr_img, (map_x, inner_top), qr_img)
-                draw.text((map_x + 200, inner_top + 6), "Escanea para ver el mapa", fill=ink, font=font_table)
-                addr_lines = _pdf_wrap_lines(addr_for_map or "-", width=34)
-                draw.multiline_text((map_x + 200, inner_top + 40), "\n".join(addr_lines[:4]), fill=muted, font=font_footer, spacing=4)
+            if qr_img and not map_img:
+                # Fallback: QR solo como soporte (no como "mapa" principal).
+                try:
+                    qr_small = qr_img.copy()
+                    qr_small.thumbnail((140, 140), Image.LANCZOS)
+                    qx = box_media[2] - 24 - qr_small.width
+                    qy = inner_top + (photo_h - qr_small.height)
+                    image.paste(qr_small, (qx, qy), qr_small)
+                    draw.text((map_x, inner_top + 6), "Ver ubicación", fill=ink, font=font_table)
+                    addr_lines = _pdf_wrap_lines(addr_for_map or "-", width=66)
+                    draw.multiline_text((map_x, inner_top + 40), "\n".join(addr_lines[:3]), fill=muted, font=font_footer, spacing=4)
+                except Exception:
+                    pass
             y = box_media[3] + 24
 
         servicios_incluidos = calc.get("servicios_incluidos") if isinstance(calc, dict) else None
@@ -27490,6 +27522,75 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
     draw.multiline_text((margin_x, page_height - bottom_margin), "\n".join(footer_lines), fill=muted, font=font_footer, spacing=4)
 
     pages.append(image)
+
+    # Anexo final: carta de presentación (Fincas).
+    if servicio_key == "fincas":
+        try:
+            cuerpo = _build_fincas_presentation_letter_lines()
+        except Exception:
+            cuerpo = []
+        if cuerpo:
+            annex = Image.new("RGB", (page_width, page_height), "white")
+            annex_draw = ImageDraw.Draw(annex)
+            annex_draw.rounded_rectangle((0, 0, page_width, 220), radius=0, fill=primary)
+            annex_draw.polygon([(page_width - 240, 0), (page_width, 0), (page_width, 190)], fill=accent)
+
+            # Logos a la izquierda, en columna (colegio debajo del logo principal).
+            logo_x0 = margin_x
+            if logo:
+                _paste_logo_box(
+                    annex,
+                    annex_draw,
+                    logo,
+                    (logo_x0, 20, logo_x0 + 250, 20 + 90),
+                    padding=10,
+                )
+            if colegio_logo:
+                _paste_logo_box(
+                    annex,
+                    annex_draw,
+                    colegio_logo,
+                    (logo_x0, 120, logo_x0 + 250, 120 + 78),
+                    padding=10,
+                )
+                colegiado = str(calc.get("colegiado_numero") or "3079").strip() or "3079"
+                annex_draw.text(
+                    (logo_x0 + 270, 148),
+                    f"Colegiado nº {colegiado}",
+                    fill=(240, 246, 248),
+                    font=_document_font(16, True),
+                )
+
+            annex_draw.text((margin_x, top_margin + 8), "ANEXO · CARTA DE PRESENTACIÓN", fill="white", font=_document_font(34, True))
+            annex_draw.text((margin_x, top_margin + 66), "Administración de fincas", fill=(240, 246, 248), font=font_subtitle)
+
+            y_cover = 248
+            annex_draw.rounded_rectangle(
+                (margin_x, y_cover, page_width - margin_x, page_height - bottom_margin - 22),
+                radius=28,
+                fill=(252, 252, 252),
+                outline=border,
+            )
+            text_x = margin_x + 34
+            text_y = y_cover + 30
+            for line in cuerpo:
+                if not str(line).strip():
+                    text_y += 18
+                    continue
+                wrapped = _pdf_wrap_lines(line, width=98)
+                annex_draw.multiline_text((text_x, text_y), "\n".join(wrapped), fill=ink, font=font_table, spacing=6)
+                sample_box = annex_draw.textbbox((text_x, text_y), "Ag", font=font_table)
+                text_y += (sample_box[3] - sample_box[1] + 8) * len(wrapped)
+
+            footer_cover = "Anexo generado automáticamente desde el CRM. La propuesta económica figura en las páginas anteriores."
+            annex_draw.multiline_text(
+                (margin_x, page_height - bottom_margin),
+                "\n".join(_pdf_wrap_lines(footer_cover, width=108)),
+                fill=muted,
+                font=font_footer,
+                spacing=4,
+            )
+            pages.append(annex)
     buffer = BytesIO()
     if len(pages) == 1:
         pages[0].save(buffer, format="PDF", resolution=150.0)
