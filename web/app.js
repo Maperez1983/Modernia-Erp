@@ -4398,7 +4398,7 @@ const refreshClientesCardCount = () => {
 const WORKSPACE_CATEGORY_LABELS = {
   core: "Core",
   vertical: "Vertical",
-  motor: "Motor",
+  motor: "Transversal",
 };
 
 const WORKSPACE_MODULE_STRUCTURE = {
@@ -4446,55 +4446,55 @@ const WORKSPACE_MODULE_STRUCTURE = {
   },
   documental: {
     section: "workspace_engines",
-    family: "Motor transversal",
+    family: "Transversal",
     badge: "Core operativo",
     description: "Entrada documental, unificación de archivos y revisión operativa del workspace.",
   },
   dashboard: {
     section: "workspace_engines",
-    family: "Motor transversal",
+    family: "Transversal",
     badge: "Core analítico",
     description: "KPIs ejecutivos y lectura consolidada del workspace dentro de Verifika².",
   },
   facturacion: {
     section: "workspace_engines",
-    family: "Motor transversal",
+    family: "Transversal",
     badge: "Core económico",
     description: "Facturación, cobros, remesas y control económico compartido.",
   },
   facturas_recibidas: {
     section: "workspace_engines",
-    family: "Motor transversal",
+    family: "Transversal",
     badge: "Core económico",
     description: "Recepción documental y operativa de facturas de proveedores.",
   },
   portal_cliente: {
     section: "workspace_engines",
-    family: "Motor transversal",
+    family: "Transversal",
     badge: "Experiencia cliente",
     description: "Portal de acceso, requerimientos y entrega documental del cliente final.",
   },
   registro_horario: {
     section: "workspace_engines",
-    family: "Motor transversal",
+    family: "Transversal",
     badge: "People ops",
     description: "Fichajes y control laboral ligados al workspace.",
   },
   rrhh: {
     section: "workspace_engines",
-    family: "Motor transversal",
+    family: "Transversal",
     badge: "People ops",
     description: "Plantilla, ausencias, gastos y portal empleado sobre el workspace.",
   },
   automatizaciones: {
     section: "workspace_engines",
-    family: "Motor transversal",
+    family: "Transversal",
     badge: "Escalabilidad",
     description: "Reglas y automatismos que conectan servicios, portal y documental.",
   },
   copilot: {
     section: "workspace_engines",
-    family: "Motor transversal",
+    family: "Transversal",
     badge: "Asistencia",
     description: "Asistencia inteligente para soporte legal, comercial y operativo por servicio.",
   },
@@ -4513,7 +4513,7 @@ const WORKSPACE_SECTION_DEFINITIONS = [
   },
   {
     key: "workspace_engines",
-    title: "Motores transversales",
+    title: "Módulos transversales",
     subtitle: "Capas compartidas del workspace: documental, facturación, portal, horario y automatización.",
   },
 ];
@@ -5448,13 +5448,13 @@ const WORKSPACE_HOME_CONTAINERS = [
   },
   {
     key: "shared",
-    title: "Motores comunes",
+    title: "Transversales comunes",
     kicker: "Transversal",
     description: "Capas compartidas del grupo para documental, facturación, portal, horario y automatización.",
     modules: ["documental", "facturacion", "facturas_recibidas", "portal_cliente", "automatizaciones", "copilot"],
     planned: [],
     action: () => focusWorkspaceEngine("documental", workspaceDocumentHub, { forceTenantView: true }),
-    actionLabel: "Configurar motores",
+    actionLabel: "Configurar transversales",
   },
 ];
 
@@ -11871,7 +11871,7 @@ const renderWorkspaceModules = (rows = []) => {
       <strong>Arquitectura del workspace</strong>
       <p class="muted">
         En Verifika², el workspace activa un <strong>CRM principal</strong> y encima cuelgan sus <strong>subservicios</strong>.
-        Los módulos restantes funcionan como <strong>motores transversales</strong> del workspace.
+        Los módulos restantes funcionan como <strong>módulos transversales</strong> del workspace.
       </p>
       <div class="workspace-module-explainer-meta">
         <span>${numberFormatter.format(activeTotal)} módulos activos</span>
@@ -11927,10 +11927,6 @@ const renderWorkspaceModules = (rows = []) => {
   workspaceModules.querySelectorAll("[data-workspace-section-jump]").forEach((button) => {
     button.addEventListener("click", () => {
       const sectionKey = button.dataset.workspaceSectionJump || "";
-      if (sectionKey === "workspace_engines") {
-        focusWorkspaceEngine("documental", workspaceDocumentHub, { forceTenantView: true });
-        return;
-      }
       const target = workspaceModules.querySelector(`[data-workspace-section="${sectionKey}"]`);
       if (target && typeof target.scrollIntoView === "function") {
         target.scrollIntoView({ behavior: "smooth", block: "start" });
