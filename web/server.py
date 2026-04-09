@@ -27088,6 +27088,28 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
         ]
         extra_letter = str(calc.get("carta_presentacion") or "").strip()
         if extra_letter:
+            # Permite insertar variables del formulario dentro de la carta opcional.
+            # Ejemplos: {{comunidad_denominacion}}, {{comunidad_direccion}}
+            try:
+                template_vars = {
+                    "comunidad_denominacion": str(calc.get("comunidad_denominacion") or client_name or "").strip(),
+                    "comunidad_direccion": str(calc.get("comunidad_direccion") or "").strip(),
+                    "comunidad_cif": str(calc.get("comunidad_cif") or "").strip(),
+                    "solicitante_nombre": str(calc.get("solicitante_nombre") or "").strip(),
+                    "solicitante_dni": str(calc.get("solicitante_dni") or "").strip(),
+                    "solicitante_telefono": str(calc.get("solicitante_telefono") or "").strip(),
+                    "solicitante_email": str(calc.get("solicitante_email") or "").strip(),
+                    "colegiado_numero": str(calc.get("colegiado_numero") or "3079").strip() or "3079",
+                    "fecha": str(fecha_txt or "").strip(),
+                    "subtotal": format_eur_short(subtotal),
+                    "impuestos": format_eur_short(impuestos),
+                    "total": format_eur_short(total),
+                    "total_anual": format_eur_short(total * 12),
+                }
+                for key, value in template_vars.items():
+                    extra_letter = extra_letter.replace(f"{{{{{key}}}}}", value or "")
+            except Exception:
+                pass
             cuerpo.extend(["", "Carta de presentación adicional:", ""])
             cuerpo.extend([line.rstrip() for line in extra_letter.splitlines()])
         cuerpo.extend([
