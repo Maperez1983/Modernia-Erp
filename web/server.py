@@ -35177,92 +35177,39 @@ class Handler(BaseHTTPRequestHandler):
             conn.commit()
             json_response(self, {"ok": True, "id": record_id, "automation_actions": auto_created})
             return
-        elif parsed.path == "/api/workspace_presupuesto_duplicate":
+        elif parsed.path == "/api/workspace_presupuesto_delete":
             workspace_id = str(payload.get("workspace_id") or "").strip()
-            source_id = str(payload.get("id") or payload.get("presupuesto_id") or "").strip()
-            if not workspace_id or not source_id:
+            budget_id = str(payload.get("id") or payload.get("presupuesto_id") or "").strip()
+            if not workspace_id or not budget_id:
                 json_response(self, {"error": "workspace_id e id requeridos"}, status=400)
                 return
-            original = conn.execute(
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            ok, err = enforce_workspace_membership(conn, session, workspace_id)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            row = conn.execute(
                 "SELECT * FROM workspace_presupuestos WHERE id = ? AND workspace_id = ? LIMIT 1",
-                (source_id, workspace_id),
+                (budget_id, workspace_id),
             ).fetchone()
-            if not original:
+            if not row:
                 json_response(self, {"error": "presupuesto no encontrado"}, status=404)
                 return
-            original_lines = conn.execute(
-                "SELECT * FROM workspace_presupuesto_lineas WHERE presupuesto_id = ? ORDER BY orden ASC",
-                (source_id,),
-            ).fetchall()
-            now_date = datetime.now(timezone.utc).date().isoformat()
-            base_title = str(original.get("titulo") or "Presupuesto").strip() or "Presupuesto"
-            if "(copia" in base_title.lower():
-                new_title = base_title
-            else:
-                new_title = f"{base_title} (copia)"
-            new_id = os.urandom(16).hex()
-            conn.execute(
-                """
-                INSERT INTO workspace_presupuestos (
-                  id, workspace_id, empresa_id, cliente_id, servicio, referencia_tipo, referencia_id,
-                  titulo, estado, fecha, fecha_seguimiento, motivo_estado, responsable, forma_pago, encargo_estado,
-                  fecha_encargo, observaciones, subtotal, impuestos, total, calculo_json, seguimiento_accion_id,
-                  encargo_accion_id, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
-                """,
-                (
-                    new_id,
-                    workspace_id,
-                    original.get("empresa_id"),
-                    original.get("cliente_id"),
-                    original.get("servicio"),
-                    original.get("referencia_tipo"),
-                    original.get("referencia_id"),
-                    new_title,
-                    "Borrador",
-                    now_date,
-                    None,
-                    None,
-                    original.get("responsable"),
-                    original.get("forma_pago"),
-                    None,
-                    None,
-                    original.get("observaciones"),
-                    original.get("subtotal"),
-                    original.get("impuestos"),
-                    original.get("total"),
-                    original.get("calculo_json"),
-                    None,
-                    None,
-                    now,
-                    now,
-                ),
-            )
-            for idx, line in enumerate(original_lines or [], start=1):
-                conn.execute(
-                    """
-                    INSERT INTO workspace_presupuesto_lineas (
-                      id, presupuesto_id, orden, categoria, concepto, cantidad, unidad, precio_unitario, descuento_pct, total_linea,
-                      created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
-                    """,
-                    (
-                        os.urandom(16).hex(),
-                        new_id,
-                        idx,
-                        line.get("categoria"),
-                        line.get("concepto"),
-                        line.get("cantidad"),
-                        line.get("unidad"),
-                        line.get("precio_unitario"),
-                        line.get("descuento_pct"),
-                        line.get("total_linea"),
-                        now,
-                        now,
-                    ),
-                )
+            try:
+                close_workspace_budget_action(conn, row.get("seguimiento_accion_id"), now=now, status="Cancelado")
+            except Exception:
+                pass
+            try:
+                close_workspace_budget_action(conn, row.get("encargo_accion_id"), now=now, status="Cancelado")
+            except Exception:
+                pass
+            conn.execute("DELETE FROM workspace_presupuesto_lineas WHERE presupuesto_id = ?", (budget_id,))
+            conn.execute("DELETE FROM workspace_presupuestos WHERE id = ? AND workspace_id = ?", (budget_id, workspace_id))
             conn.commit()
-            json_response(self, {"ok": True, "id": new_id})
+            json_response(self, {"ok": True})
             return
         elif parsed.path == "/api/workspace_fincas_convert_presupuesto":
             workspace_id = str(payload.get("workspace_id") or "").strip()

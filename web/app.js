@@ -11730,8 +11730,8 @@ const renderWorkspaceBudgetList = (rows = []) => {
             ${normalizeSimple(row.estado || "") !== "estudio" ? `<button type="button" class="secondary ghost" data-budget-status="${row.id}" data-budget-next="Estudio">Estudio</button>` : ""}
             ${normalizeSimple(row.estado || "") !== "aceptado" ? `<button type="button" class="secondary ghost" data-budget-status="${row.id}" data-budget-next="Aceptado">Aceptar</button>` : ""}
             ${normalizeSimple(row.estado || "") !== "rechazado" ? `<button type="button" class="secondary ghost" data-budget-status="${row.id}" data-budget-next="Rechazado">Rechazar</button>` : ""}
-            <button type="button" class="secondary ghost" data-budget-duplicate="${row.id}">Duplicar</button>
             <button type="button" class="secondary ghost" data-budget-edit="${row.id}">Editar</button>
+            <button type="button" class="secondary ghost" data-budget-delete="${row.id}">Borrar</button>
           </div>
         </div>
       `).join("")}
@@ -11795,38 +11795,22 @@ const renderWorkspaceBudgetList = (rows = []) => {
     });
   });
 
-  workspaceBudgetList.querySelectorAll("[data-budget-duplicate]").forEach((button) => {
+  workspaceBudgetList.querySelectorAll("[data-budget-delete]").forEach((button) => {
     button.addEventListener("click", async () => {
-      const row = state.workspaceBudgetRows.find((item) => String(item.id || "") === String(button.dataset.budgetDuplicate || ""));
+      const row = state.workspaceBudgetRows.find((item) => String(item.id || "") === String(button.dataset.budgetDelete || ""));
       if (!row || !state.currentWorkspaceId) return;
+      if (!confirm("¿Seguro que quieres borrar este presupuesto? Esta acción no se puede deshacer.")) return;
       try {
         button.disabled = true;
-        const resp = await fetch("/api/workspace_presupuesto_duplicate", {
+        const resp = await fetch("/api/workspace_presupuesto_delete", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ workspace_id: state.currentWorkspaceId, id: row.id }),
         }).then((res) => res.json());
         if (resp?.error) throw new Error(resp.error);
         await loadWorkspaceDetail(state.currentWorkspaceId);
-        const newId = String(resp?.id || "").trim();
-        const newRow = (state.currentWorkspaceData?.budgetRows || []).find((item) => String(item.id || "") === newId) || null;
-        if (newRow) {
-          const calc = (() => { try { return JSON.parse(newRow.calculo_json || "{}") || {}; } catch { return {}; } })();
-          fillWorkspaceBudgetForm({
-            ...newRow,
-            ...calc,
-            cliente_lookup: newRow.cliente_nombre ? `${newRow.cliente_nombre}${newRow.cliente_nif ? ` · ${newRow.cliente_nif}` : ""}` : "",
-            cliente_nif: newRow.cliente_nif || "",
-            cliente_telefono: newRow.cliente_telefono || "",
-            cliente_email: newRow.cliente_email || "",
-            lineas_texto: stringifyWorkspaceBudgetLines(newRow.lineas || []),
-            subtotal_sugerido: calc.cuota_sugerida || newRow.subtotal || "",
-          });
-          if (workspaceBudgetStatus) workspaceBudgetStatus.textContent = "Duplicado listo para editar.";
-          workspaceBudgetForm?.scrollIntoView({ behavior: "smooth", block: "start" });
-        }
       } catch (error) {
-        alert(error?.message || "No se pudo duplicar el presupuesto.");
+        alert(error?.message || "No se pudo borrar el presupuesto.");
       } finally {
         button.disabled = false;
       }
@@ -37752,8 +37736,8 @@ const renderInteractiveBudgetsList = (rows = [], { tableEl, infoEl, onRefresh } 
               ${normalizeSimple(estado) !== "estudio" ? `<button type="button" class="secondary ghost button-inline" data-budget-status="${escapeHtml(String(row.id || ""))}" data-budget-next="Estudio">Estudio</button>` : ""}
               ${normalizeSimple(estado) !== "aceptado" ? `<button type="button" class="secondary ghost button-inline" data-budget-status="${escapeHtml(String(row.id || ""))}" data-budget-next="Aceptado">Aceptar</button>` : ""}
               ${normalizeSimple(estado) !== "rechazado" ? `<button type="button" class="secondary ghost button-inline" data-budget-status="${escapeHtml(String(row.id || ""))}" data-budget-next="Rechazado">Rechazar</button>` : ""}
-              <button type="button" class="secondary ghost button-inline" data-budget-duplicate="${escapeHtml(String(row.id || ""))}">Duplicar</button>
               <button type="button" class="secondary ghost button-inline" data-budget-edit="${escapeHtml(String(row.id || ""))}">Editar</button>
+              <button type="button" class="secondary ghost button-inline" data-budget-delete="${escapeHtml(String(row.id || ""))}">Borrar</button>
             </div>
           </div>
         `;
@@ -37780,41 +37764,28 @@ const renderInteractiveBudgetsList = (rows = [], { tableEl, infoEl, onRefresh } 
     });
   });
 
-  tableEl.querySelectorAll("[data-budget-duplicate]").forEach((button) => {
+  tableEl.querySelectorAll("[data-budget-delete]").forEach((button) => {
     button.addEventListener("click", async () => {
-      const id = button.dataset.budgetDuplicate || "";
+      const id = button.dataset.budgetDelete || "";
       const row = findRow(id);
       if (!row) return;
+      if (!confirm("¿Seguro que quieres borrar este presupuesto? Esta acción no se puede deshacer.")) return;
       try {
         button.disabled = true;
-        const resp = await fetch("/api/workspace_presupuesto_duplicate", {
+        const resp = await fetch("/api/workspace_presupuesto_delete", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ workspace_id: row.workspace_id, id: row.id }),
         }).then((res) => res.json());
         if (resp?.error) throw new Error(resp.error);
-        const newId = String(resp?.id || "").trim();
-        if (!newId) throw new Error("No se pudo duplicar el presupuesto.");
         if (typeof onRefresh === "function") onRefresh();
-        // Abrimos motor y editamos la copia (si está ya en memoria, mejor).
-        try {
-          focusWorkspaceEngine("facturacion", workspaceBudgetForm, { scroll: true, forceTenantView: true });
-        } catch {}
         if (state.currentWorkspaceId && String(row.workspace_id || "") === String(state.currentWorkspaceId || "")) {
           try {
             await loadWorkspaceDetail(state.currentWorkspaceId);
           } catch {}
         }
-        const fresh = (state.currentWorkspaceData?.budgetRows || []).find((item) => String(item.id || "") === newId) || null;
-        if (fresh) {
-          fillWorkspaceBudgetForm(resolveBudgetEnginePayloadFromRow(fresh));
-          applyWorkspaceBudgetServiceMode();
-          applyWorkspaceBudgetTemplate({ force: true });
-          syncWorkspaceBudgetComputedFields({ forceSubtotal: false, forceTotal: false });
-          if (workspaceBudgetStatus) workspaceBudgetStatus.textContent = "Duplicado listo para editar.";
-        }
       } catch (error) {
-        alert(error?.message || "No se pudo duplicar el presupuesto.");
+        alert(error?.message || "No se pudo borrar el presupuesto.");
       } finally {
         button.disabled = false;
       }
