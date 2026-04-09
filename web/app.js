@@ -4651,6 +4651,16 @@ const renderWorkspaceTenantContext = () => {
   });
 };
 
+const shouldShowWorkspaceCompanySwitcher = () => {
+  const mode = state.currentWorkspaceEntryMode || "platform";
+  if (mode === "tenant") return false;
+  const companies = state.currentWorkspaceDetail?.companies || [];
+  if (!Array.isArray(companies) || companies.length <= 1) return false;
+  const view = String(state.currentWorkspaceView || "overview").trim().toLowerCase();
+  // Solo cuando afecta al trabajo diario (evita confusión en Configuración/Clientes/Resumen).
+  return ["operations", "fincas", "rrhh", "motores"].includes(view);
+};
+
 const updateWorkspaceEntryChrome = () => {
   const mode = state.currentWorkspaceEntryMode || "platform";
   const authUser = getAuthScopeUser();
@@ -4698,7 +4708,9 @@ const updateWorkspaceEntryChrome = () => {
     panel.dataset.workspaceView = operationsTargetView;
   });
   if (workspaceViewTabs) workspaceViewTabs.classList.remove("hidden");
-  if (workspaceCompanySwitcher) workspaceCompanySwitcher.classList.toggle("hidden", tenantOperationalMode);
+  if (workspaceCompanySwitcher) {
+    workspaceCompanySwitcher.classList.toggle("hidden", tenantOperationalMode || !shouldShowWorkspaceCompanySwitcher());
+  }
   if (workspaceOverviewLauncherCard) workspaceOverviewLauncherCard.classList.toggle("tenant-home-card", tenantOperationalMode);
   workspaceViewButtons.forEach((button) => {
     const viewKey = button.dataset.workspaceViewTab || "";
@@ -4937,7 +4949,7 @@ const renderWorkspaceCompanySwitcher = (rows = []) => {
     workspaceCompanySwitcher.classList.add("hidden");
     return;
   }
-  workspaceCompanySwitcher.classList.remove("hidden");
+  workspaceCompanySwitcher.classList.toggle("hidden", !shouldShowWorkspaceCompanySwitcher());
   const activeId = String(state.currentWorkspaceCompanyId || companies[0]?.id || "");
   workspaceCompanySwitcher.innerHTML = `
     <div class="workspace-company-switcher-card">
@@ -5081,6 +5093,9 @@ const setWorkspaceView = (view = "overview", options = {}) => {
     setWorkspaceFincasTab(state.workspaceFincasTab || "dashboard");
   }
   syncHoldingUrlParams();
+  if (workspaceCompanySwitcher) {
+    workspaceCompanySwitcher.classList.toggle("hidden", !shouldShowWorkspaceCompanySwitcher());
+  }
   if (scroll && workspaceViewTabs) {
     workspaceViewTabs.scrollIntoView({ behavior: "smooth", block: "start" });
   }
