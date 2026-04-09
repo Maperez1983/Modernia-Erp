@@ -6366,10 +6366,6 @@ const renderWorkspaceList = (rows = []) => {
 
 const renderWorkspaceCompanies = (rows = []) => {
   if (!workspaceCompanies) return;
-  if (!rows.length) {
-    workspaceCompanies.innerHTML = "<p class='muted'>Sin empresas operativas asociadas.</p>";
-    return;
-  }
   const canEdit = (() => {
     try {
       const authUser = getAuthScopeUser();
@@ -6378,7 +6374,110 @@ const renderWorkspaceCompanies = (rows = []) => {
       return false;
     }
   })();
-  const activeId = String(state.currentWorkspaceCompanyId || rows[0]?.id || "");
+  const items = Array.isArray(rows) ? rows : [];
+  const activeId = String(state.currentWorkspaceCompanyId || items[0]?.id || "");
+  const linkedIds = new Set(items.map((row) => String(row?.id || "").trim()).filter(Boolean));
+  const allCompanies = Array.isArray(state.empresas) ? state.empresas : [];
+  const linkableCompanies = allCompanies
+    .filter((row) => Number(row?.activo ?? 1) === 1)
+    .filter((row) => {
+      const id = String(row?.id || "").trim();
+      return Boolean(id) && !linkedIds.has(id);
+    })
+    .sort((a, b) => String(a?.nombre || "").localeCompare(String(b?.nombre || ""), "es", { sensitivity: "base" }));
+  const linkOptionsHtml = linkableCompanies
+    .map((row) => {
+      const label = `${row.nombre || "-"}${row.nif ? ` · ${row.nif}` : ""}`;
+      return `<option value="${escapeHtml(label)}" data-company-id="${escapeHtml(String(row.id || ""))}"></option>`;
+    })
+    .join("");
+  const linkPanelHtml = canEdit
+    ? `
+      <div class="form-card" style="margin-bottom: 12px;">
+        <div class="section-head">
+          <div>
+            <h3>Vincular empresa</h3>
+            <p class="muted">Añade una empresa operativa existente del sistema a este workspace.</p>
+          </div>
+          <button type="button" class="secondary ghost" data-workspace-company-link-refresh>Actualizar</button>
+        </div>
+        <div class="row" style="gap:10px;align-items:flex-end;flex-wrap:wrap">
+          <label style="min-width:280px;flex:1">
+            Empresa
+            <input data-workspace-company-link-input list="workspaceCompanyLinkOptions" placeholder="Escribe para buscar..." />
+          </label>
+          <datalist id="workspaceCompanyLinkOptions">${linkOptionsHtml}</datalist>
+          <label style="min-width:170px">
+            Rol
+            <select data-workspace-company-link-role>
+              <option value="operativa" selected>Operativa</option>
+              <option value="holding">Holding</option>
+              <option value="marca">Marca</option>
+            </select>
+          </label>
+          <button type="button" class="secondary" data-workspace-company-link-btn>Vincular</button>
+          <span class="muted" data-workspace-company-link-status></span>
+        </div>
+        <p class="muted" style="margin:10px 0 0">
+          Si no aparece en la lista, crea la empresa en el sistema y pulsa “Actualizar”.
+        </p>
+      </div>
+    `
+    : "";
+  if (!items.length) {
+    workspaceCompanies.innerHTML = `${linkPanelHtml}<p class='muted'>Sin empresas operativas asociadas.</p>`;
+    const refreshBtn = workspaceCompanies.querySelector("[data-workspace-company-link-refresh]");
+    const status = workspaceCompanies.querySelector("[data-workspace-company-link-status]");
+    if (refreshBtn) {
+      refreshBtn.addEventListener("click", async () => {
+        try {
+          if (status) status.textContent = "Actualizando...";
+          const empresas = await api("/api/empresas");
+          state.empresas = Array.isArray(empresas) ? empresas : [];
+          renderWorkspaceCompanies(items);
+          if (status) status.textContent = "Actualizado.";
+        } catch (error) {
+          if (status) status.textContent = error?.message || "No se pudo actualizar.";
+        }
+      });
+    }
+    const linkBtn = workspaceCompanies.querySelector("[data-workspace-company-link-btn]");
+    if (linkBtn) {
+      linkBtn.addEventListener("click", async () => {
+        const input = workspaceCompanies.querySelector("[data-workspace-company-link-input]");
+        const roleSelect = workspaceCompanies.querySelector("[data-workspace-company-link-role]");
+        const lookup = String(input?.value || "").trim();
+        const role = String(roleSelect?.value || "operativa").trim() || "operativa";
+        if (!lookup) {
+          if (status) status.textContent = "Selecciona una empresa.";
+          return;
+        }
+        const normalized = normalizeSimple(lookup);
+        const match =
+          linkableCompanies.find((row) => normalizeSimple(`${row.nombre || ""}${row.nif ? ` · ${row.nif}` : ""}`) === normalized)
+          || linkableCompanies.find((row) => normalizeSimple(String(row.nombre || "")) === normalized)
+          || linkableCompanies.find((row) => String(row.id || "").trim() === lookup);
+        const empresaId = String(match?.id || "").trim();
+        if (!empresaId) {
+          if (status) status.textContent = "No encuentro esa empresa. Pulsa “Actualizar”.";
+          return;
+        }
+        try {
+          if (status) status.textContent = "Vinculando...";
+          await postJsonWithDbRetry("/api/workspace_empresa_link", {
+            workspace_id: state.currentWorkspaceId,
+            empresa_id: empresaId,
+            rol,
+          });
+          if (status) status.textContent = "Empresa vinculada.";
+          await loadWorkspaceDetail(state.currentWorkspaceId);
+        } catch (error) {
+          if (status) status.textContent = error?.message || "No se pudo vincular.";
+        }
+      });
+    }
+    return;
+  }
   const normalizedRows = (rows || []).map((row) => {
     const raw = String(row?.cnaes_json || "").trim();
     let cnaes = [];
@@ -6405,6 +6504,7 @@ const renderWorkspaceCompanies = (rows = []) => {
     return { ...row, _cnaes: unique };
   });
   workspaceCompanies.innerHTML = `
+    ${linkPanelHtml}
     <div class="workspace-context-strip">
       <div>
         <strong>Empresas operativas</strong>
@@ -6589,6 +6689,59 @@ const renderWorkspaceCompanies = (rows = []) => {
   }
   if (companyShowInactiveInput) {
     companyShowInactiveInput.checked = Boolean(state.workspaceCompanyShowInactive);
+  }
+  {
+    const refreshBtn = workspaceCompanies.querySelector("[data-workspace-company-link-refresh]");
+    const status = workspaceCompanies.querySelector("[data-workspace-company-link-status]");
+    if (refreshBtn) {
+      refreshBtn.addEventListener("click", async () => {
+        try {
+          if (status) status.textContent = "Actualizando...";
+          const empresas = await api("/api/empresas");
+          state.empresas = Array.isArray(empresas) ? empresas : [];
+          renderWorkspaceCompanies(items);
+          if (status) status.textContent = "Actualizado.";
+        } catch (error) {
+          if (status) status.textContent = error?.message || "No se pudo actualizar.";
+        }
+      });
+    }
+    const linkBtn = workspaceCompanies.querySelector("[data-workspace-company-link-btn]");
+    const linkInput = workspaceCompanies.querySelector("[data-workspace-company-link-input]");
+    const roleSelect = workspaceCompanies.querySelector("[data-workspace-company-link-role]");
+    if (linkBtn) {
+      linkBtn.addEventListener("click", async () => {
+        if (!canEdit) return;
+        const lookup = String(linkInput?.value || "").trim();
+        const role = String(roleSelect?.value || "operativa").trim() || "operativa";
+        if (!lookup) {
+          if (status) status.textContent = "Selecciona una empresa.";
+          return;
+        }
+        const normalized = normalizeSimple(lookup);
+        const match =
+          linkableCompanies.find((row) => normalizeSimple(`${row.nombre || ""}${row.nif ? ` · ${row.nif}` : ""}`) === normalized)
+          || linkableCompanies.find((row) => normalizeSimple(String(row.nombre || "")) === normalized)
+          || linkableCompanies.find((row) => String(row.id || "").trim() === lookup);
+        const empresaId = String(match?.id || "").trim();
+        if (!empresaId) {
+          if (status) status.textContent = "No encuentro esa empresa. Pulsa “Actualizar”.";
+          return;
+        }
+        try {
+          if (status) status.textContent = "Vinculando...";
+          await postJsonWithDbRetry("/api/workspace_empresa_link", {
+            workspace_id: state.currentWorkspaceId,
+            empresa_id: empresaId,
+            rol: role || "operativa",
+          });
+          if (status) status.textContent = "Empresa vinculada.";
+          await loadWorkspaceDetail(state.currentWorkspaceId);
+        } catch (error) {
+          if (status) status.textContent = error?.message || "No se pudo vincular.";
+        }
+      });
+    }
   }
 
   const applyCompanyFilters = () => {
