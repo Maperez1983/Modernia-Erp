@@ -20605,18 +20605,18 @@ def ensure_workspace_product_tables(conn):
     )
     conn.execute(
         """
-	        CREATE TABLE IF NOT EXISTS workspace_fincas_comunidades (
-	          id TEXT PRIMARY KEY,
-	          workspace_id TEXT NOT NULL,
-	          empresa_id TEXT,
-	          nombre TEXT NOT NULL,
-	          referencia_catastral TEXT,
-	          cif TEXT,
-	          direccion TEXT,
-	          foto_edificio_key TEXT,
-	          presidente TEXT,
-	          secretario TEXT,
-	          estado TEXT NOT NULL DEFAULT 'Activa',
+            CREATE TABLE IF NOT EXISTS workspace_fincas_comunidades (
+              id TEXT PRIMARY KEY,
+              workspace_id TEXT NOT NULL,
+              empresa_id TEXT,
+              nombre TEXT NOT NULL,
+              referencia_catastral TEXT,
+              cif TEXT,
+              direccion TEXT,
+              foto_edificio_key TEXT,
+              presidente TEXT,
+              secretario TEXT,
+              estado TEXT NOT NULL DEFAULT 'Activa',
           num_vecinos INTEGER,
           num_locales INTEGER,
           num_trasteros INTEGER,
@@ -25496,13 +25496,13 @@ def fetch_workspace_fincas_comunidades(conn, workspace_id, limit=30):
           c.empresa_id,
           COALESCE(e.nombre, '') AS empresa_nombre,
           c.nombre,
-	          COALESCE(c.referencia_catastral, '') AS referencia_catastral,
-	          c.cif,
-	          c.direccion,
-	          COALESCE(c.foto_edificio_key, '') AS foto_edificio_key,
-	          c.presidente,
-	          c.secretario,
-	          c.estado,
+              COALESCE(c.referencia_catastral, '') AS referencia_catastral,
+              c.cif,
+              c.direccion,
+              COALESCE(c.foto_edificio_key, '') AS foto_edificio_key,
+              c.presidente,
+              c.secretario,
+              c.estado,
           c.num_vecinos,
           c.num_locales,
           c.num_trasteros,
@@ -27643,34 +27643,39 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
             annex_draw.rounded_rectangle((0, 0, page_width, 220), radius=0, fill=primary)
             annex_draw.polygon([(page_width - 240, 0), (page_width, 0), (page_width, 190)], fill=accent)
 
-            # Logos a la izquierda, en columna (colegio debajo del logo principal).
-            logo_x0 = margin_x
+            # Header limpio: título a la izquierda, logos a la derecha (colegio debajo de Fincas).
+            annex_draw.text(
+                (margin_x, top_margin + 8),
+                "ANEXO · CARTA DE PRESENTACIÓN",
+                fill="white",
+                font=_document_font(34, True),
+            )
+            annex_draw.text(
+                (margin_x, top_margin + 66),
+                "Administración de fincas",
+                fill=(240, 246, 248),
+                font=font_subtitle,
+            )
+
+            col_w = 300
+            x0 = page_width - margin_x - col_w
+            x1 = page_width - margin_x
+            stack_bottom = 0
             if logo:
-                _paste_logo_box(
-                    annex,
-                    annex_draw,
-                    logo,
-                    (logo_x0, 20, logo_x0 + 250, 20 + 90),
-                    padding=10,
-                )
+                logo_box = (x0, 24, x1, 24 + 112)
+                _paste_logo_box(annex, annex_draw, logo, logo_box, padding=14)
+                stack_bottom = logo_box[3]
             if colegio_logo:
-                _paste_logo_box(
-                    annex,
-                    annex_draw,
-                    colegio_logo,
-                    (logo_x0, 120, logo_x0 + 250, 120 + 78),
-                    padding=10,
-                )
+                top = (stack_bottom or 24) + 10
+                colegio_box = (x0, top, x1, top + 74)
+                _paste_logo_box(annex, annex_draw, colegio_logo, colegio_box, padding=10)
                 colegiado = str(calc.get("colegiado_numero") or "3079").strip() or "3079"
                 annex_draw.text(
-                    (logo_x0 + 270, 148),
+                    (x0, colegio_box[3] + 6),
                     f"Colegiado nº {colegiado}",
                     fill=(240, 246, 248),
                     font=_document_font(16, True),
                 )
-
-            annex_draw.text((margin_x, top_margin + 8), "ANEXO · CARTA DE PRESENTACIÓN", fill="white", font=_document_font(34, True))
-            annex_draw.text((margin_x, top_margin + 66), "Administración de fincas", fill=(240, 246, 248), font=font_subtitle)
 
             y_cover = 248
             annex_draw.rounded_rectangle(
@@ -27688,7 +27693,15 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
                 # Soporte de negritas con **...** para hacer la lectura menos monotona.
                 rich_lines = _wrap_rich_text(line, width_chars=98)
                 for parts in rich_lines:
-                    _draw_rich_line(annex_draw, text_x, text_y, parts, font_table, _document_font(16, True), ink)
+                    _draw_rich_line(
+                        annex_draw,
+                        text_x,
+                        text_y,
+                        parts,
+                        font_table,
+                        _document_font(16, True),
+                        ink,
+                    )
                     sample_box = annex_draw.textbbox((text_x, text_y), "Ag", font=font_table)
                     text_y += (sample_box[3] - sample_box[1] + 8)
 
