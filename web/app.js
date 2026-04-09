@@ -5048,6 +5048,12 @@ const setWorkspaceView = (view = "overview", options = {}) => {
   const { scroll = false, forceTenantView = false } = options;
   let normalized = normalizeWorkspaceViewKey(view);
   const tenantMode = (state.currentWorkspaceEntryMode || "platform") === "tenant";
+  const platformMode = !tenantMode;
+  // Modo plataforma (admin): el workspace es una pantalla de configuración.
+  // La operativa vive en el panel principal, no como pestañas dentro de Workspaces.
+  if (platformMode && !["overview", "tenant"].includes(normalized)) {
+    normalized = "overview";
+  }
   if (tenantMode && normalized === "overview") {
     normalized = "operations";
   }
