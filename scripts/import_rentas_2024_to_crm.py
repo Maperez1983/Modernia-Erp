@@ -227,63 +227,27 @@ def clean_ocr_text_value(value: object) -> str:
     text = re.sub(r"\s+", " ", text).strip(" ,.;:-")
     return compact_spaces(text)
 
-def fix_ocr_digits(value: object, *, allow_b: bool = False) -> str:
-    text = str(value or "")
-    if not text:
-        return ""
-    mapping = {"O": "0", "o": "0", "I": "1", "i": "1", "L": "1", "l": "1", "S": "5", "s": "5"}
-    if allow_b:
-        mapping.update({"B": "8", "b": "8"})
-    return text.translate(str.maketrans(mapping))
 
 def normalize_nif_candidate(value: object) -> str:
-    raw = compact_spaces(value).upper().replace(" ", "").replace(".", "").replace("-", "")
-    if not raw:
-        return ""
-    raw = re.sub(r"[^A-Z0-9]", "", raw)
-    if len(raw) > 12:
-        raw = raw[:12]
-    def fix_digits(chunk: str) -> str:
-        return fix_ocr_digits(chunk, allow_b=True).upper()
-    if not raw:
-        return ""
-    if raw[0].isdigit():
-        # DNI: 8 dígitos + letra.
-        if len(raw) >= 9:
-            return f"{fix_digits(raw[:8])}{raw[8]}"
-        return fix_digits(raw)
-    if raw[0] in "XYZ":
-        # NIE: X/Y/Z + 7 dígitos + letra.
-        if len(raw) >= 9:
-            return f"{raw[0]}{fix_digits(raw[1:8])}{raw[8]}"
-        return f"{raw[0]}{fix_digits(raw[1:])}"
-    if raw[0] in "ABCDEFGHJNPQRSUVW":
-        # CIF: letra + 7 dígitos + control (dígito o letra).
-        if len(raw) >= 9:
-            return f"{raw[0]}{fix_digits(raw[1:8])}{raw[8]}"
-        return f"{raw[0]}{fix_digits(raw[1:])}"
-    # Fallback conservador: solo corrige confusiones comunes, no fuerza prefijos.
-    return fix_ocr_digits(raw, allow_b=False).upper()
+    text = compact_spaces(value).upper().replace(" ", "").replace(".", "").replace("-", "")
+    return text
 
 
 def looks_like_nif(value: object) -> bool:
     text = normalize_nif_candidate(value)
-    if not text or text in {"DECLARANTE", "CONYUGE"}:
+    if not re.fullmatch(r"[A-Z0-9]{8,10}", text):
         return False
-    if re.fullmatch(r"[0-9]{8}[A-Z]", text):
-        return True
-    if re.fullmatch(r"[XYZ][0-9]{7}[A-Z]", text):
-        return True
-    if re.fullmatch(r"[ABCDEFGHJNPQRSUVW][0-9]{7}[0-9A-Z]", text):
-        return True
-    return False
+    if not any(ch.isdigit() for ch in text):
+        return False
+    if text in {"DECLARANTE", "CONYUGE"}:
+        return False
+    return True
 
 
 def parse_money(raw: object) -> float | None:
     text = compact_spaces(raw)
     if not text:
         return None
-    text = fix_ocr_digits(text, allow_b=True)
     text = text.replace("€", "").replace("%", "").replace(" ", "")
     if "," in text and "." in text:
         text = text.replace(".", "").replace(",", ".")
@@ -461,13 +425,7 @@ def parse_date_ddmmyyyy(raw: object) -> str:
     text = compact_spaces(raw)
     if not text:
         return ""
-    text = fix_ocr_digits(text, allow_b=False)
     for fmt in ("%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d", "%d%m%Y"):
-        try:
-            return datetime.strptime(text, fmt).date().isoformat()
-        except ValueError:
-            continue
-    for fmt in ("%d/%m/%y", "%d-%m-%y"):
         try:
             return datetime.strptime(text, fmt).date().isoformat()
         except ValueError:
@@ -1258,43 +1216,14 @@ def parse_datos_fiscales_text(text: str) -> dict:
     if not text:
         return data
     flat = compact_spaces(text.replace("\n", " "))
-    # En algunos PDFs el layout sale como: "NIF: NOMBRE: 79018863V ...".
-    # Extrae NIF de forma robusta y valida el patrón para evitar que capture "NOMBRE".
-    nif_candidate = ""
-    for haystack in (flat, text):
-        match = re.search(r"\bNIF\s*:\s*(?:NOMBRE\s*:)?\s*([A-Z0-9]{8,12})\b", haystack, re.IGNORECASE)
-        if match:
-            maybe = normalize_nif_candidate(match.group(1))
-            if looks_like_nif(maybe):
-                nif_candidate = maybe
-                break
-        match = re.search(r"\bNIF\b[\s:]+([A-Z0-9]{8,12})\b", haystack, re.IGNORECASE)
-        if match:
-            maybe = normalize_nif_candidate(match.group(1))
-            if looks_like_nif(maybe):
-                nif_candidate = maybe
-                break
-    if nif_candidate:
-        data["cliente_nif"] = nif_candidate
+    match = re.search(r"NIF:\s*([A-Z0-9]+)", text)
+    if match:
+        data["cliente_nif"] = match.group(1)
         data["cliente_nif_source"] = "datos_fiscales"
     match = re.search(r"NOMBRE:\s*(.+?)(?:\n\s*\n|DOMICILIO FISCAL)", text, re.DOTALL)
     if match:
-        nombre = compact_spaces(match.group(1))
-        # Si el bloque comienza con un NIF (por layout: "NOMBRE: <NIF> <APELLIDOS...>"),
-        # separarlo y usarlo como NIF si no lo tenemos ya.
-        tokens = [t for t in nombre.split() if t]
-        if tokens:
-            first = normalize_nif_candidate(tokens[0])
-            if looks_like_nif(first):
-                if not looks_like_nif(data.get("cliente_nif")):
-                    data["cliente_nif"] = first
-                    data["cliente_nif_source"] = "datos_fiscales"
-                nombre = compact_spaces(" ".join(tokens[1:]))
-        data["cliente_nombre"] = nombre
+        data["cliente_nombre"] = compact_spaces(match.group(1))
         data["cliente_nombre_source"] = "datos_fiscales"
-    if data.get("cliente_nif") and not looks_like_nif(data.get("cliente_nif")):
-        data.pop("cliente_nif", None)
-        data.pop("cliente_nif_source", None)
     via = re.search(r"Tipo Vía\s+([A-ZÁÉÍÓÚÜÑ ]+)", text)
     nombre_via = re.search(r"Nombre largo Vía\s+([A-ZÁÉÍÓÚÜÑ0-9 ]+)", text)
     numero = re.search(r"\nNUM\s+([0-9A-Z]+)", text)
@@ -1399,9 +1328,8 @@ def parse_notas_text(text: str) -> dict:
 
 def build_record_key(fields: dict, pdf_path: Path) -> str:
     nif = compact_spaces(fields.get("cliente_nif"))
-    nif_norm = normalize_nif_candidate(nif) if nif else ""
-    if nif_norm and looks_like_nif(nif_norm):
-        return nif_norm.upper()
+    if nif:
+        return nif.upper()
     folder = pdf_path.parent.name if "RENTAS CLIENTES" in str(pdf_path.parent.parent) else ""
     if folder:
         return slug(folder)
@@ -1823,9 +1751,6 @@ def build_renta_entry(record: dict, ejercicio: str | None = None, estado_present
     estado_presentacion = detect_renta_doc_status(
         estado_presentacion or record.get("estado_presentacion") or record.get("doc_status")
     )
-    cobrada_import = 1 if str(record.get("cobrada") or "").strip().lower() in {"1", "true", "yes", "si", "sí"} else 0
-    if ejercicio == "2024":
-        cobrada_import = 1
     patrimonio = {
         "base_imponible_general": record.get("base_imponible_general"),
         "base_imponible_ahorro": record.get("base_imponible_ahorro"),
@@ -1867,7 +1792,7 @@ def build_renta_entry(record: dict, ejercicio: str | None = None, estado_present
         "source_file_count": record.get("source_file_count") or 0,
         "precio_servicio": record.get("precio_servicio"),
         "responsable": record.get("responsable") or "",
-        "cobrada": cobrada_import,
+        "cobrada": 1 if str(record.get("cobrada") or "").strip().lower() in {"1", "true", "yes", "si", "sí"} else 0,
         "forma_cobro": record.get("forma_cobro") or "",
         "estado_presentacion": estado_presentacion,
         "doc_status": estado_presentacion,

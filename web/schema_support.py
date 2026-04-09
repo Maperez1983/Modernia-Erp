@@ -29,34 +29,7 @@ def apply_schema_file(conn, schema_path):
     text = path.read_text(encoding="utf-8")
     backend = _detect_backend(conn)
     if backend != "postgres":
-        # SQLite: ejecuta statement a statement para que un índice que referencia columnas
-        # recién añadidas no tumbe el arranque en BDs legacy (los ALTER vendrán después).
-        statements = []
-        buff = []
-        for line in text.splitlines():
-            buff.append(line)
-        script = "\n".join(buff)
-        for stmt in script.split(";"):
-            stmt = stmt.strip()
-            if not stmt:
-                continue
-            statements.append(stmt)
-        for stmt in statements:
-            head = stmt.lstrip()[:40].upper()
-            try:
-                conn.execute(stmt)
-            except Exception as exc:
-                # Los "CREATE INDEX IF NOT EXISTS ..." pueden fallar en BDs existentes si la tabla
-                # aún no tiene columnas nuevas (migradas vía ensure_column). Lo ignoramos para que
-                # el resto de migraciones (ALTER TABLE) se apliquen y luego se creen índices.
-                msg = str(exc or "").lower()
-                is_index = head.startswith("CREATE INDEX") or head.startswith("CREATE UNIQUE INDEX")
-                if is_index and ("no such column" in msg or "no such table" in msg):
-                    continue
-                # PRAGMA es best-effort en algunos entornos.
-                if head.startswith("PRAGMA "):
-                    continue
-                raise
+        conn.executescript(text)
         return True
     # Postgres: execute statements one by one (ignore SQLite PRAGMA).
     statements = []
@@ -76,23 +49,7 @@ def apply_schema_file(conn, schema_path):
             continue
         statements.append(stmt)
     for stmt in statements:
-        head = stmt.lstrip()[:60].upper()
-        try:
-            conn.execute(stmt)
-        except Exception as exc:
-            # Best-effort: en despliegues legacy el schema.sql puede incluir índices sobre columnas
-            # que se añaden después con ensure_column(). Si intentamos crear el índice antes,
-            # Postgres falla con "column ... does not exist" y tumba el arranque.
-            msg = str(exc or "").lower()
-            is_index = head.startswith("CREATE INDEX") or head.startswith("CREATE UNIQUE INDEX")
-            if is_index and (
-                "does not exist" in msg
-                or "undefinedcolumn" in msg
-                or "undefinedtable" in msg
-                or "relation" in msg and "does not exist" in msg
-            ):
-                continue
-            raise
+        conn.execute(stmt)
     return True
 
 

@@ -5,19 +5,8 @@ CREATE TABLE IF NOT EXISTS empresas (
   nombre TEXT NOT NULL UNIQUE,
   activo INTEGER NOT NULL DEFAULT 1,
   logo_url TEXT,
-  razon_social TEXT,
   nif TEXT,
   direccion TEXT,
-  direccion_fiscal TEXT,
-  telefono TEXT,
-  email TEXT,
-  web TEXT,
-  contacto_nombre TEXT,
-  contacto_email TEXT,
-  contacto_telefono TEXT,
-  iban TEXT,
-  bic TEXT,
-  banco_nombre TEXT,
   sector TEXT,
   cnae TEXT,
   cnaes_json TEXT,
@@ -68,22 +57,6 @@ CREATE TABLE IF NOT EXISTS workspace_modulos (
   updated_at TEXT NOT NULL,
   UNIQUE (workspace_id, modulo_key),
   FOREIGN KEY (workspace_id) REFERENCES workspaces(id)
-);
-
-CREATE TABLE IF NOT EXISTS workspace_servicio_empresas (
-  id TEXT PRIMARY KEY,
-  workspace_id TEXT NOT NULL,
-  servicio_key TEXT NOT NULL,
-  empresa_id TEXT NOT NULL,
-  enabled INTEGER NOT NULL DEFAULT 1,
-  is_default INTEGER NOT NULL DEFAULT 0,
-  sort_order INTEGER NOT NULL DEFAULT 0,
-  notas TEXT,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL,
-  UNIQUE (workspace_id, servicio_key, empresa_id),
-  FOREIGN KEY (workspace_id) REFERENCES workspaces(id),
-  FOREIGN KEY (empresa_id) REFERENCES empresas(id)
 );
 
 CREATE TABLE IF NOT EXISTS workspace_facturacion (
@@ -173,7 +146,6 @@ CREATE TABLE IF NOT EXISTS workspace_portal_clientes (
   cliente_id TEXT NOT NULL,
   email_acceso TEXT,
   estado TEXT NOT NULL DEFAULT 'Invitado',
-  importador_facturas INTEGER NOT NULL DEFAULT 0,
   token TEXT,
   ultimo_acceso_at TEXT,
   created_at TEXT NOT NULL,
@@ -351,31 +323,6 @@ CREATE TABLE IF NOT EXISTS workspace_presupuesto_lineas (
   updated_at TEXT NOT NULL,
   FOREIGN KEY (presupuesto_id) REFERENCES workspace_presupuestos(id)
 );
-
-CREATE TABLE IF NOT EXISTS workspace_contratos (
-  id TEXT PRIMARY KEY,
-  workspace_id TEXT NOT NULL,
-  empresa_id TEXT NOT NULL,
-  cliente_id TEXT,
-  servicio TEXT,
-  template_key TEXT,
-  titulo TEXT,
-  estado TEXT,
-  fecha TEXT,
-  doc_key TEXT,
-  doc_url TEXT,
-  body_json TEXT,
-  notas TEXT,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL,
-  FOREIGN KEY (workspace_id) REFERENCES workspaces(id),
-  FOREIGN KEY (empresa_id) REFERENCES empresas(id),
-  FOREIGN KEY (cliente_id) REFERENCES clientes(id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_workspace_contratos_workspace_id ON workspace_contratos(workspace_id);
-CREATE INDEX IF NOT EXISTS idx_workspace_contratos_empresa_id ON workspace_contratos(empresa_id);
-CREATE INDEX IF NOT EXISTS idx_workspace_contratos_cliente_id ON workspace_contratos(cliente_id);
 
 CREATE TABLE IF NOT EXISTS workspace_fincas_comunidades (
   id TEXT PRIMARY KEY,
@@ -747,8 +694,6 @@ CREATE TABLE IF NOT EXISTS gestoria_facturas (
   iva_pct REAL,
   estado_ocr TEXT,
   doc_key TEXT,
-  archivo_hash TEXT,
-  dedupe_key TEXT,
   raw_text TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
@@ -756,10 +701,6 @@ CREATE TABLE IF NOT EXISTS gestoria_facturas (
   FOREIGN KEY (cliente_id) REFERENCES clientes(id),
   FOREIGN KEY (tercero_id) REFERENCES gestoria_terceros(id)
 );
-
-CREATE INDEX IF NOT EXISTS idx_gestoria_facturas_cliente_fecha ON gestoria_facturas (empresa_id, cliente_id, fecha_emision);
-CREATE INDEX IF NOT EXISTS idx_gestoria_facturas_hash ON gestoria_facturas (empresa_id, cliente_id, archivo_hash);
-CREATE INDEX IF NOT EXISTS idx_gestoria_facturas_dedupe ON gestoria_facturas (empresa_id, cliente_id, dedupe_key);
 
 CREATE TABLE IF NOT EXISTS gestoria_asientos (
   id TEXT PRIMARY KEY,
@@ -931,9 +872,6 @@ CREATE TABLE IF NOT EXISTS auditoria (
   created_at TEXT NOT NULL,
   FOREIGN KEY (empresa_id) REFERENCES empresas(id)
 );
-
-CREATE INDEX IF NOT EXISTS idx_auditoria_empresa_created
-ON auditoria (empresa_id, created_at);
 
 -- Eventos de etapa (para métricas de embudo y conversión a lo largo del tiempo).
 -- Nota: se alimenta desde el backend cuando se crea/actualiza una captación o se mueve de etapa.
@@ -1648,22 +1586,6 @@ CREATE TABLE IF NOT EXISTS usuarios (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
-
--- Invitaciones persistentes (evita que reenviar invalide enlaces previos).
-CREATE TABLE IF NOT EXISTS auth_invites (
-  token TEXT PRIMARY KEY,
-  user_id TEXT NOT NULL,
-  expires_at TEXT,
-  created_at TEXT NOT NULL,
-  sent_at TEXT,
-  used_at TEXT,
-  revoked_at TEXT,
-  notes TEXT,
-  FOREIGN KEY (user_id) REFERENCES usuarios(id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_auth_invites_user_id ON auth_invites(user_id);
-CREATE INDEX IF NOT EXISTS idx_auth_invites_expires ON auth_invites(expires_at, used_at, revoked_at);
 
 -- Cache persistente de geocodificación (reduce dependencias de terceros).
 CREATE TABLE IF NOT EXISTS geocode_cache (

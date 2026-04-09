@@ -23,7 +23,7 @@
   <text x="160" y="86" text-anchor="middle" font-family="Space Grotesk, Source Sans 3, sans-serif" font-size="18" font-weight="700" fill="#0B1D33" letter-spacing="1.8">
     VERIFICADO
   </text>
-  <text x="160" y="238" text-anchor="middle" font-family="Space Grotesk, Source Sans 3, sans-serif" font-size="26" font-weight="700" fill="#0B1D33">
-    verifika²
+  <text x="160" y="246" text-anchor="middle" font-family="Space Grotesk, Source Sans 3, sans-serif" font-size="28" font-weight="700" fill="#0B1D33">
+    verifika<tspan font-size="18" baseline-shift="super">2</tspan>
   </text>
 </svg>

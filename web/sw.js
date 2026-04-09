@@ -5,7 +5,7 @@
  * - Never caches /api or /uploads
  */
 
-const CACHE_VERSION = "v69";
+const CACHE_VERSION = "v26";
 const SHELL_CACHE = `verifika2-shell-${CACHE_VERSION}`;
 const RUNTIME_CACHE = `verifika2-runtime-${CACHE_VERSION}`;
 const FONTS_CACHE = `verifika2-fonts-${CACHE_VERSION}`;
@@ -13,20 +13,19 @@ const FONTS_CACHE = `verifika2-fonts-${CACHE_VERSION}`;
 const SHELL_URLS = [
   "/",
   "/index.html",
-  "/styles.css?v=161",
+  "/styles.css?v=157",
   "/ui-foundation.js?v=2",
-  "/app-auth.js?v=10",
+  "/app-auth.js?v=9",
   "/app-routing.js?v=7",
-  "/app.js?v=437",
-  "/manifest.webmanifest?v=17",
+  "/app.js?v=397",
+  "/manifest.webmanifest?v=9",
   "/assets/verifika2/verifika2_mark.svg",
   "/assets/verifika2/verifika2_badge_gold.svg",
   "/assets/verifika2/verifika2_badge_silver.svg",
   "/assets/verifika2/verifika2_badge_carbon.svg",
-  "/icons/ios/v28/icon-192.png",
-  "/icons/ios/v28/icon-512.png",
-  "/icons/ios/v28/apple-touch-icon-180.png",
-  "/assets/logos/colegio-administradores-v2.png",
+  "/icons/ios/v23/icon-192.png",
+  "/icons/ios/v23/icon-512.png",
+  "/icons/ios/v23/apple-touch-icon-180.png",
 ];
 
 const isSameOrigin = (url) => {
@@ -48,7 +47,6 @@ const isFontRequest = (url) => {
 
 const isCacheablePath = (pathname) => {
   if (!pathname) return false;
-  if (pathname === "/sw.js") return false;
   if (pathname.startsWith("/api/")) return false;
   if (pathname.startsWith("/uploads/")) return false;
   return true;

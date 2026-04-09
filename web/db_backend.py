@@ -4,7 +4,6 @@ import re
 import sqlite3
 import threading
 import time
-import contextvars
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -33,37 +32,6 @@ def _load_env_file() -> None:
 
 
 _load_env_file()
-
-_CONN_TRACKER = contextvars.ContextVar("crm_conn_tracker", default=None)
-
-
-def set_conn_tracker(tracker):
-    """
-    Instala un tracker (callable(conn)) en el contexto actual.
-    Se usa desde el handler HTTP para garantizar que cualquier conexión abierta
-    durante el request se cierre aunque haya excepciones.
-    """
-    return _CONN_TRACKER.set(tracker)
-
-
-def reset_conn_tracker(token):
-    try:
-        _CONN_TRACKER.reset(token)
-    except Exception:
-        pass
-
-
-def _track_conn(conn):
-    tracker = None
-    try:
-        tracker = _CONN_TRACKER.get()
-    except Exception:
-        tracker = None
-    if tracker and conn is not None:
-        try:
-            tracker(conn)
-        except Exception:
-            pass
 
 
 def is_postgres_enabled():
@@ -343,7 +311,6 @@ def open_sqlite_conn(db_path, with_row_factory=False):
         conn.execute("PRAGMA synchronous=NORMAL")
     except Exception:
         pass
-    _track_conn(conn)
     return conn
 
 
@@ -438,7 +405,6 @@ def open_postgres_conn(with_row_factory=False, *, skip_compat=False, connect_tim
                             wrapped.rollback()
                         except Exception:
                             pass
-    _track_conn(wrapped)
     return wrapped
 
 
@@ -456,11 +422,9 @@ def _pg_pool_configured():
     try:
         # Default (Render): necesitamos algo más de margen porque iOS/PWA hace bursts de requests
         # (health/me/assets) y 4 conexiones puede saturarse fácilmente durante bootstrap o queries lentas.
-        # Por defecto: 8 conexiones es suficiente para bursts de PWA/iOS en un ThreadingHTTPServer,
-        # sin penalizar planes pequeños de Postgres (cada conexión consume RAM en el servidor).
-        _PG_POOL_MAX = int(os.environ.get("APP_PG_POOL_MAX", "8") or 8)
+        _PG_POOL_MAX = int(os.environ.get("APP_PG_POOL_MAX", "16") or 16)
     except Exception:
-        _PG_POOL_MAX = 8
+        _PG_POOL_MAX = 16
     try:
         _PG_POOL_WAIT_S = float(os.environ.get("APP_PG_POOL_WAIT_SECONDS", "15") or 15)
     except Exception:

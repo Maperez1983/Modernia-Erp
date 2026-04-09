@@ -40,7 +40,7 @@ import unicodedata
 from email.message import EmailMessage
 from email.header import decode_header
 from email.utils import parseaddr
-from PIL import Image, ImageDraw, ImageFont, ImageOps
+from PIL import Image, ImageDraw, ImageFont
 try:
     from .auth_security import hash_password as runtime_hash_password
     from .auth_security import needs_password_rehash
@@ -117,196 +117,6 @@ def ensure_s3_grants_table(conn):
         conn.execute("CREATE INDEX IF NOT EXISTS idx_s3_grants_expires_at ON s3_grants (expires_at)")
     except Exception:
         pass
-
-
-def fetch_workspace_service_matrix(conn, workspace_id):
-    ws_id = str(workspace_id or "").strip()
-    if not ws_id:
-        return {"rows": [], "defaults": {}}
-    # Best-effort: si no existe la tabla (instalaciones antiguas), devolvemos vacío.
-    try:
-        conn.execute("SELECT 1 FROM workspace_servicio_empresas LIMIT 1").fetchone()
-    except Exception:
-        return {"rows": [], "defaults": {}}
-
-    rows = []
-    try:
-        rows = conn.execute(
-            """
-            SELECT
-              wse.id,
-              wse.workspace_id,
-              wse.servicio_key,
-              wse.empresa_id,
-              COALESCE(wse.enabled, 1) AS enabled,
-              COALESCE(wse.is_default, 0) AS is_default,
-              COALESCE(wse.sort_order, 0) AS sort_order,
-              COALESCE(wse.notas, '') AS notas,
-              COALESCE(e.nombre, '') AS empresa_nombre
-            FROM workspace_servicio_empresas wse
-            LEFT JOIN empresas e ON e.id = wse.empresa_id
-            WHERE wse.workspace_id = ?
-            ORDER BY LOWER(COALESCE(wse.servicio_key, '')) ASC,
-                     COALESCE(wse.sort_order, 0) ASC,
-                     COALESCE(wse.is_default, 0) DESC,
-                     LOWER(COALESCE(e.nombre, '')) ASC
-            """,
-            (ws_id,),
-        ).fetchall()
-    except Exception:
-        rows = []
-
-    out = []
-    defaults = {}
-    for row in rows or []:
-        payload = dict(row)
-        service_key = normalize_service_key(payload.get("servicio_key"))
-        payload["servicio_key"] = service_key
-        out.append(payload)
-        try:
-            if int(payload.get("is_default") or 0) == 1 and service_key and service_key not in defaults:
-                defaults[service_key] = str(payload.get("empresa_id") or "").strip()
-        except Exception:
-            pass
-    return {"rows": out, "defaults": defaults}
-
-
-def seed_workspace_service_matrix(conn, now=None):
-    """
-    Inicializa la matriz `workspace_servicio_empresas` en instalaciones legacy.
-    Importante: no sobreescribe configuración existente; solo rellena servicios que aún no tienen filas.
-    """
-    # Tabla opcional: si no existe, no hacemos nada.
-    try:
-        conn.execute("SELECT 1 FROM workspace_servicio_empresas LIMIT 1").fetchone()
-    except Exception:
-        return
-
-    now = str(now or datetime.now(timezone.utc).isoformat())
-    ws_rows = []
-    try:
-        ws_rows = conn.execute("SELECT id FROM workspaces").fetchall()
-    except Exception:
-        ws_rows = []
-    workspace_ids = [str(row_value(r, "id") or row_value(r, 0) or "").strip() for r in (ws_rows or [])]
-    workspace_ids = [w for w in workspace_ids if w]
-    if not workspace_ids:
-        return
-
-    for ws_id in workspace_ids:
-        existing_rows = []
-        try:
-            existing_rows = conn.execute(
-                "SELECT DISTINCT servicio_key FROM workspace_servicio_empresas WHERE workspace_id = ?",
-                (ws_id,),
-            ).fetchall()
-        except Exception:
-            existing_rows = []
-        existing = {
-            normalize_service_key(row_value(r, "servicio_key") or row_value(r, 0) or "")
-            for r in (existing_rows or [])
-            if normalize_service_key(row_value(r, "servicio_key") or row_value(r, 0) or "")
-        }
-        for raw_service_key, company_names in (WORKSPACE_SERVICE_COMPANY_SUGGESTIONS or {}).items():
-            service_key = normalize_service_key(raw_service_key)
-            if not service_key or service_key in existing:
-                continue
-            desired_default = str(WORKSPACE_SERVICE_COMPANY_DEFAULTS.get(service_key) or "").strip()
-            inserted = []
-            inserted_has_default = False
-            sort_order = 0
-            for name in (company_names or []):
-                name = str(name or "").strip()
-                if not name:
-                    continue
-                empresa_row = None
-                try:
-                    empresa_row = conn.execute(
-                        "SELECT id FROM empresas WHERE nombre = ? LIMIT 1",
-                        (name,),
-                    ).fetchone()
-                except Exception:
-                    empresa_row = None
-                empresa_id = str(row_value(empresa_row, "id") or row_value(empresa_row, 0) or "").strip() if empresa_row else ""
-                if not empresa_id:
-                    continue
-                is_default = 1 if (desired_default and name == desired_default) else 0
-                if is_default:
-                    inserted_has_default = True
-                try:
-                    conn.execute(
-                        """
-                        INSERT INTO workspace_servicio_empresas (
-                          id, workspace_id, servicio_key, empresa_id, enabled, is_default, sort_order, notas, created_at, updated_at
-                        ) VALUES (
-                          ?, ?, ?, ?, 1, ?, ?, '', datetime(?), datetime(?)
-                        )
-                        ON CONFLICT (workspace_id, servicio_key, empresa_id) DO NOTHING
-                        """,
-                        (os.urandom(16).hex(), ws_id, service_key, empresa_id, is_default, sort_order, now, now),
-                    )
-                except Exception:
-                    try:
-                        conn.execute(
-                            """
-                            INSERT OR IGNORE INTO workspace_servicio_empresas (
-                              id, workspace_id, servicio_key, empresa_id, enabled, is_default, sort_order, notas, created_at, updated_at
-                            ) VALUES (
-                              ?, ?, ?, ?, 1, ?, ?, '', datetime(?), datetime(?)
-                            )
-                            """,
-                            (os.urandom(16).hex(), ws_id, service_key, empresa_id, is_default, sort_order, now, now),
-                        )
-                    except Exception:
-                        pass
-                inserted.append(empresa_id)
-                sort_order += 10
-
-            if not inserted:
-                continue
-
-            # Si no pudimos asignar default explícito, elegimos el primero insertado.
-            if not inserted_has_default:
-                try:
-                    conn.execute(
-                        """
-                        UPDATE workspace_servicio_empresas
-                        SET is_default = 1, updated_at = datetime(?)
-                        WHERE workspace_id = ? AND servicio_key = ? AND empresa_id = ?
-                        """,
-                        (now, ws_id, service_key, inserted[0]),
-                    )
-                except Exception:
-                    pass
-
-            # Normaliza: 1 solo default por servicio.
-            try:
-                default_row = conn.execute(
-                    """
-                    SELECT empresa_id
-                    FROM workspace_servicio_empresas
-                    WHERE workspace_id = ? AND servicio_key = ? AND COALESCE(is_default, 0) = 1
-                    ORDER BY COALESCE(sort_order, 0) ASC
-                    LIMIT 1
-                    """,
-                    (ws_id, service_key),
-                ).fetchone()
-            except Exception:
-                default_row = None
-            default_empresa_id = str(row_value(default_row, "empresa_id") or row_value(default_row, 0) or "").strip() if default_row else ""
-            if default_empresa_id:
-                try:
-                    conn.execute(
-                        """
-                        UPDATE workspace_servicio_empresas
-                        SET is_default = CASE WHEN empresa_id = ? THEN 1 ELSE 0 END,
-                            updated_at = datetime(?)
-                        WHERE workspace_id = ? AND servicio_key = ?
-                        """,
-                        (default_empresa_id, now, ws_id, service_key),
-                    )
-                except Exception:
-                    pass
 
 
 def _normalize_s3_key(key):
@@ -583,23 +393,6 @@ def _s3_key_visible_for_user(conn, session, key):
             ok = bool(row)
         except Exception:
             ok = False
-    if not ok and safe_key.startswith("company_logos/"):
-        try:
-            # Logos de empresas: visibles para miembros del workspace vinculado a esa empresa.
-            row = conn.execute(
-                """
-                SELECT 1
-                FROM empresas e
-                JOIN workspace_empresas we ON we.empresa_id = e.id
-                JOIN workspace_miembros m ON m.workspace_id = we.workspace_id AND m.usuario_id = ?
-                WHERE e.logo_url = ? OR e.logo_url = ? OR e.logo_url LIKE ?
-                LIMIT 1
-                """,
-                (uid, s3_url_value, safe_key, f"%/{safe_key}"),
-            ).fetchone()
-            ok = bool(row)
-        except Exception:
-            ok = False
 
     try:
         with S3_AUTH_CACHE_LOCK:
@@ -762,7 +555,6 @@ AUTH_PUBLIC_POST_ENDPOINTS = {
     "/api/logout",
     "/api/auth_set_password",
     "/api/workspace_portal_upload",
-    "/api/workspace_portal_presign",
     "/api/workspace_kiosk_toggle",
 }
 AUTH_SESSIONS = {}
@@ -1016,32 +808,6 @@ WORKSPACE_TIME_SERVICE_COMPANY_MAP = {
     "hipotecas": ["Financiaciones Modernia"],
     "reformas": ["Inmovere Proyect SL", "Grupo Modernia"],
     "obras": ["Inmovere Proyect SL", "Grupo Modernia"],
-}
-
-# Matriz retrocompatible servicio->empresas (por workspace).
-# Nota: hoy existen mapas hardcodeados en frontend/backend para sugerir una empresa por servicio.
-# Esta matriz permite configurar N empresas por servicio + un default, sin romper instalaciones legacy.
-WORKSPACE_SERVICE_COMPANY_SUGGESTIONS = {
-    "inmobiliaria": ["Estudio Velazquez 2012 SL"],
-    "gestoria": ["Fincas Velazquez", "Grupo Modernia"],
-    "fincas": ["Fincas Velazquez"],
-    "seguros": ["Fincas Velazquez"],
-    "financiaciones": ["Financiaciones Modernia"],
-    "obras": ["Inmovere Proyect SL", "Grupo Modernia"],
-    "reformas": ["Inmovere Proyect SL", "Grupo Modernia"],
-    "inversion": ["Inversure"],
-}
-
-# Defaults elegidos para mantener el comportamiento anterior de autoselección en UI.
-WORKSPACE_SERVICE_COMPANY_DEFAULTS = {
-    "inmobiliaria": "Estudio Velazquez 2012 SL",
-    "gestoria": "Fincas Velazquez",
-    "fincas": "Fincas Velazquez",
-    "seguros": "Fincas Velazquez",
-    "financiaciones": "Financiaciones Modernia",
-    "obras": "Grupo Modernia",
-    "reformas": "Grupo Modernia",
-    "inversion": "Inversure",
 }
 LEGAL_COPILOT_CACHE = {"mtime": None, "topics": None}
 LEGAL_RADAR_SOURCES_CACHE = {"mtime": None, "payload": None}
@@ -1580,50 +1346,6 @@ def normalize_poliza_key(value):
     text = re.sub(r"\s+", "", str(value).upper())
     text = re.sub(r"[^A-Z0-9]", "", text)
     return text
-
-
-def guess_poliza_from_filename(filename):
-    """
-    Intenta extraer un número de póliza desde un nombre de archivo o key S3.
-
-    Se usa para backfills cuando el PDF existe en S3 pero la DB perdió el vínculo
-    (seguros.poliza_key / seguros.poliza_url).
-    """
-    name = os.path.basename(str(filename or ""))
-    if not name:
-        return ""
-    # 1) Token cerca de la palabra póliza/poliza
-    m = re.search(r"(?i)\bp[oó]?liza\b[^A-Z0-9]{0,12}([A-Z0-9-]{6,32})\b", name)
-    if m and re.search(r"\d", m.group(1) or ""):
-        return m.group(1)
-
-    # 2) Formatos típicos con guion (ej: 23-92198503)
-    candidates = re.findall(r"\b\d{2}-\d{7,12}\b", name)
-    # 3) Tokens numéricos largos
-    candidates += re.findall(r"\b[0-9]{6,20}\b", name)
-    # 4) Alfanuméricos (ej: GAG09412, BASWZ1733315598407A)
-    candidates += re.findall(r"\b[A-Z]{2,10}[0-9]{4,22}[A-Z]?\b", name.upper())
-    if not candidates:
-        return ""
-
-    normed = []
-    for cand in candidates:
-        token = str(cand or "").strip()
-        if not token:
-            continue
-        # evita años/fechas sueltas
-        if len(token) == 4 and token.startswith(("19", "20")):
-            continue
-        if len(token) == 8 and token.startswith(("19", "20")):
-            continue
-        if not re.search(r"\d", token):
-            continue
-        normed.append(token)
-
-    if not normed:
-        return ""
-    normed = sorted(set(normed), key=lambda s: (len(s), s), reverse=True)
-    return normed[0]
 
 def normalize_company_key(value):
     if not value:
@@ -2706,33 +2428,6 @@ def ensure_workspace_core_tables(conn):
     try:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_workspace_links_source ON workspace_links (source_workspace_id, enabled, link_type)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_workspace_links_target ON workspace_links (target_workspace_id, enabled, link_type)")
-    except Exception:
-        pass
-
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS workspace_servicio_empresas (
-          id TEXT PRIMARY KEY,
-          workspace_id TEXT NOT NULL,
-          servicio_key TEXT NOT NULL,
-          empresa_id TEXT NOT NULL,
-          enabled INTEGER NOT NULL DEFAULT 1,
-          is_default INTEGER NOT NULL DEFAULT 0,
-          sort_order INTEGER NOT NULL DEFAULT 0,
-          notas TEXT,
-          created_at TEXT NOT NULL,
-          updated_at TEXT NOT NULL,
-          UNIQUE (workspace_id, servicio_key, empresa_id)
-        )
-        """
-    )
-    try:
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_workspace_servicio_empresas_ws_service_enabled ON workspace_servicio_empresas (workspace_id, servicio_key, enabled)"
-        )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_workspace_servicio_empresas_ws_service_default ON workspace_servicio_empresas (workspace_id, servicio_key, is_default)"
-        )
     except Exception:
         pass
 
@@ -9751,47 +9446,10 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
             or re.match(r"^[XYZ][0-9]{7}[A-Z]$", value)
             or re.match(r"^[ABCDEFGHJNPQRSUVW][0-9]{7}[0-9A-Z]$", value)
         )
-    def normalize_nif_candidate(value, *, infer_control_letter=False):
+    def normalize_nif_candidate(value):
         if not value:
             return ""
         candidate = normalize_nif_ocr(value)
-        if infer_control_letter:
-            # Para DNI/NIE sin letra (o con letra mal OCR a dígito), intenta completar la letra
-            # SOLO cuando el contexto indica que es un NIF (p.ej. aparece tras "DNI/NIF/CIF").
-            dni_letters = "TRWAGMYFPDXBNJZSQVHLCKE"
-            def infer_dni(digits8):
-                try:
-                    return f"{digits8}{dni_letters[int(digits8) % 23]}"
-                except Exception:
-                    return ""
-            def infer_nie(prefix, digits7):
-                try:
-                    prefix_map = {"X": "0", "Y": "1", "Z": "2"}
-                    base = prefix_map.get(prefix, "")
-                    if not base:
-                        return ""
-                    num = f"{base}{digits7}"
-                    return f"{prefix}{digits7}{dni_letters[int(num) % 23]}"
-                except Exception:
-                    return ""
-            # DNI: 8 dígitos (sin letra) o 8 dígitos + (dígito OCR de letra)
-            if re.fullmatch(r"[0-9]{8}", candidate):
-                inferred = infer_dni(candidate)
-                if inferred:
-                    candidate = inferred
-            elif re.fullmatch(r"[0-9]{8}[0-9]", candidate):
-                inferred = infer_dni(candidate[:8])
-                if inferred:
-                    candidate = inferred
-            # NIE: X/Y/Z + 7 dígitos (sin letra) o + (dígito OCR)
-            elif re.fullmatch(r"[XYZ][0-9]{7}", candidate):
-                inferred = infer_nie(candidate[0], candidate[1:])
-                if inferred:
-                    candidate = inferred
-            elif re.fullmatch(r"[XYZ][0-9]{7}[0-9]", candidate):
-                inferred = infer_nie(candidate[0], candidate[1:8])
-                if inferred:
-                    candidate = inferred
         if is_valid_nif(candidate):
             return candidate
         if len(candidate) >= 9:
@@ -9799,171 +9457,6 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
             if is_valid_nif(candidate):
                 return candidate
         return ""
-
-    def find_best_nif_in_text(text_value):
-        """
-        Busca DNI/NIE/CIF aunque venga con espacios/puntos/guiones, priorizando contexto
-        cercano a etiquetas (DNI/NIF/CIF/DOCUMENTO).
-        """
-        if not text_value:
-            return ""
-        tokens = re.sub(r"[^A-Z0-9]", " ", str(text_value).upper()).split()
-        if not tokens:
-            return ""
-        from collections import Counter
-        labels = {
-            "DNI",
-            "NIF",
-            "CIF",
-            "DOCUMENTO",
-            "DOC",
-            "DNINIF",
-            "DNI/NIF",
-            "NIF/CIF",
-            "CIF/NIF",
-        }
-        # Señales de contexto para intentar evitar capturar CIF/NIF de la aseguradora/mediador.
-        actor_tokens = {"TOMADOR", "ASEGURADO", "CONTRATANTE", "TITULAR"}
-        insurer_tokens = {
-            "OCASO",
-            "MAPFRE",
-            "AXA",
-            "ALLIANZ",
-            "REALE",
-            "ZURICH",
-            "GENERALI",
-            "SANTALUCIA",
-            "CATALANA",
-            "OCCIDENT",
-            "PELAYO",
-            "FIATC",
-            "EUROINS",
-            "HELVETIA",
-            "CASER",
-            "LIBERTY",
-            "DIRECT",
-        }
-        actor_idxs = [i for i, t in enumerate(tokens) if t in actor_tokens]
-        insurer_idxs = [i for i, t in enumerate(tokens) if t in insurer_tokens]
-        candidates = []
-
-        def add_candidate(value, idx, *, from_label=False):
-            if not value:
-                return
-            candidates.append({"value": value, "idx": int(idx or 0), "from_label": bool(from_label)})
-
-        def near(idxs, pos, dist):
-            if not idxs:
-                return False
-            p = int(pos or 0)
-            for i in idxs:
-                if abs(i - p) <= dist:
-                    return True
-            return False
-
-        # 1) Buscar tras etiqueta
-        for idx, tok in enumerate(tokens):
-            key = tok.replace("/", "")
-            if tok in labels or key in labels:
-                for end in range(idx + 1, min(idx + 7, len(tokens))):
-                    combined = "".join(tokens[idx + 1 : end + 1])
-                    if len(combined) < 7 or len(combined) > 12:
-                        continue
-                    cand = normalize_nif_candidate(combined, infer_control_letter=True)
-                    if cand:
-                        add_candidate(cand, idx, from_label=True)
-        # 2) Fallback: escaneo conservador por ventanas cortas
-        for start in range(len(tokens)):
-            combined = ""
-            digits = 0
-            for end in range(start, min(start + 4, len(tokens))):
-                combined += tokens[end]
-                digits += sum(ch.isdigit() for ch in tokens[end])
-                if len(combined) > 12:
-                    break
-                if digits < 7:
-                    continue
-                cand = normalize_nif_candidate(combined, infer_control_letter=False)
-                if cand:
-                    add_candidate(cand, start, from_label=False)
-
-        if not candidates:
-            return ""
-        freq = Counter(c["value"] for c in candidates)
-        for c in candidates:
-            value = c["value"]
-            pos = c["idx"]
-            is_personal = bool(value and (value[0].isdigit() or value[0] in "XYZ"))
-            score = 100 if is_personal else 70
-            if c.get("from_label"):
-                score += 60
-            actor_near = near(actor_idxs, pos, 140)
-            insurer_near = near(insurer_idxs, pos, 90)
-            if actor_near:
-                score += 45
-            if insurer_near and not actor_near:
-                score -= 80
-            elif insurer_near and actor_near:
-                score -= 25
-            f = int(freq.get(value) or 0)
-            if f >= 8:
-                score -= 40
-            elif f >= 4:
-                score -= 20
-            c["score"] = score
-        best = max(candidates, key=lambda c: (c.get("score") or 0, c.get("from_label") or False, -int(freq.get(c["value"]) or 0)))
-        # Umbral para no devolver CIF/NIF muy probablemente de la aseguradora.
-        if (best.get("score") or 0) < 55:
-            return ""
-        return best["value"]
-
-    def find_best_personal_nif_in_text(text_value):
-        """
-        Variante que intenta devolver SOLO DNI/NIE (no CIF), para casos donde el tomador
-        parece persona física y el OCR captura CIF de aseguradora/mediador.
-        """
-        if not text_value:
-            return ""
-        tokens = re.sub(r"[^A-Z0-9]", " ", str(text_value).upper()).split()
-        if not tokens:
-            return ""
-        labels = {"DNI", "NIF", "DOCUMENTO", "DOC", "DNINIF", "DNI/NIF"}
-        candidates = []
-        def is_personal(v):
-            return bool(v and (v[0].isdigit() or v[0] in "XYZ"))
-        def add(v, idx, from_label):
-            if v and is_personal(v):
-                candidates.append((v, int(idx or 0), bool(from_label)))
-        # tras etiqueta
-        for idx, tok in enumerate(tokens):
-            key = tok.replace("/", "")
-            if tok in labels or key in labels:
-                for end in range(idx + 1, min(idx + 7, len(tokens))):
-                    combined = "".join(tokens[idx + 1 : end + 1])
-                    if len(combined) < 7 or len(combined) > 12:
-                        continue
-                    cand = normalize_nif_candidate(combined, infer_control_letter=True)
-                    if cand:
-                        add(cand, idx, True)
-        # ventanas cortas
-        for start in range(len(tokens)):
-            combined = ""
-            digits = 0
-            for end in range(start, min(start + 4, len(tokens))):
-                combined += tokens[end]
-                digits += sum(ch.isdigit() for ch in tokens[end])
-                if len(combined) > 12:
-                    break
-                if digits < 7:
-                    continue
-                cand = normalize_nif_candidate(combined, infer_control_letter=True)
-                if cand:
-                    add(cand, start, False)
-        if not candidates:
-            return ""
-        # prioriza los que vienen tras etiqueta
-        candidates.sort(key=lambda it: (it[2], it[0]), reverse=True)
-        return candidates[0][0]
     def normalize_ocr_date(value):
         if not value:
             return ""
@@ -10796,13 +10289,8 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
     if not fields["dni"]:
         fields["dni"] = line_pick(["DNI", "NIF", "CIF", "Documento"])
     if fields.get("dni"):
-        normalized_dni = normalize_nif_candidate(fields["dni"], infer_control_letter=True)
+        normalized_dni = normalize_nif_candidate(fields["dni"])
         fields["dni"] = normalized_dni or ""
-    if not fields.get("dni"):
-        # Busca NIF incluso con separadores OCR (espacios, puntos, guiones).
-        best = find_best_nif_in_text(text)
-        if best:
-            fields["dni"] = best
     if not fields.get("dni"):
         personal_ids = re.findall(r"\b(?:[0-9]{8}[A-Z]|[XYZ][0-9]{7}[A-Z])\b", text.upper())
         if personal_ids:
@@ -11523,13 +11011,9 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
             and len((fields.get("tomador") or "").split()) >= 2
         )
         if looks_company_id and looks_person_name:
-            # Si existe un DNI/NIE en el documento, preferirlo; si no, conservar el CIF
-            # (hay pólizas de comunidades/empresas donde el tomador puede no detectarse bien).
-            personal = find_best_personal_nif_in_text(text)
-            if personal:
-                fields["dni"] = personal
-                if not fields.get("nif"):
-                    fields["nif"] = personal
+            fields["dni"] = ""
+            if fields.get("nif") == dni_norm:
+                fields["nif"] = ""
     if fields.get("fecha_efecto") and fields.get("fecha_vencimiento"):
         efecto = parse_iso_date(fields.get("fecha_efecto"))
         venc = parse_iso_date(fields.get("fecha_vencimiento"))
@@ -17759,10 +17243,9 @@ def ensure_cliente_for_financiacion(conn, empresa_id, nombre, nif, now, extra=No
     link = conn.execute(
         """
         SELECT id FROM clientes_empresas
-        WHERE cliente_id = ? AND empresa_id = ? AND LOWER(servicio) = 'financiaciones'
-        LIMIT 1
+        WHERE cliente_id = ? AND empresa_id = ? AND servicio = ?
         """,
-        (cliente_id, empresa_id),
+        (cliente_id, empresa_id, "financiaciones"),
     ).fetchone()
     if not link:
         conn.execute(
@@ -18331,13 +17814,6 @@ def ensure_tables(db_path):
     ensure_workspace_core_tables(conn)
     ensure_workspace_facturacion_table(conn)
     ensure_workspace_product_tables(conn)
-    # Seed retrocompatible: matriz servicio->empresas (por workspace).
-    try:
-        if not _migration_done(conn, "workspace_service_matrix_seed_v1"):
-            seed_workspace_service_matrix(conn, now=app_now().isoformat())
-            _migration_mark(conn, "workspace_service_matrix_seed_v1")
-    except Exception:
-        pass
     # Backfills legacy: ejecutar una vez por DB (puede ser caro en Postgres grande).
     try:
         if not _migration_done(conn, "workspace_membership_backfill_v1"):
@@ -18617,125 +18093,6 @@ def ensure_tables(db_path):
             _migration_mark(conn, "inmobiliaria_backfills_v1")
     except Exception:
         pass
-    # Backfills financiaciones (Phase 2): asegura `empresa_id` para hipotecas/asesoramientos legacy.
-    # Objetivo: evitar que el servicio "Financiaciones" quede vacío por registros antiguos sin scope.
-    try:
-        if not _migration_done(conn, "financiaciones_scope_backfill_v1"):
-            fin_empresa_id = ""
-            # Intenta resolver la empresa del servicio por nombre (mapa central).
-            fin_names = []
-            try:
-                fin_names.extend(WORKSPACE_TIME_SERVICE_COMPANY_MAP.get("financiaciones") or [])
-                fin_names.extend(WORKSPACE_TIME_SERVICE_COMPANY_MAP.get("hipotecas") or [])
-            except Exception:
-                fin_names = []
-            # Fallback defensivo.
-            if not fin_names:
-                fin_names = ["Financiaciones Modernia"]
-            for name in fin_names:
-                try:
-                    row = conn.execute(
-                        "SELECT id FROM empresas WHERE nombre = ? LIMIT 1",
-                        (str(name),),
-                    ).fetchone()
-                    if row and (row.get("id") if hasattr(row, "get") else row[0]):
-                        fin_empresa_id = str(row.get("id") if hasattr(row, "get") else row[0] or "").strip()
-                        if fin_empresa_id:
-                            break
-                except Exception:
-                    continue
-
-            if fin_empresa_id:
-                now_iso = app_now().isoformat()
-                try:
-                    conn.execute(
-                        """
-                        UPDATE hipotecas
-                        SET empresa_id = ?
-                        WHERE empresa_id IS NULL OR TRIM(empresa_id) = ''
-                        """,
-                        (fin_empresa_id,),
-                    )
-                except Exception:
-                    pass
-                try:
-                    conn.execute(
-                        """
-                        UPDATE asesoramientos_financiacion
-                        SET empresa_id = ?
-                        WHERE empresa_id IS NULL OR TRIM(empresa_id) = ''
-                        """,
-                        (fin_empresa_id,),
-                    )
-                except Exception:
-                    pass
-                # Contabilidad vinculada a hipotecas: si falta empresa_id, herédala del scope de financiaciones.
-                try:
-                    conn.execute(
-                        """
-                        UPDATE gestoria_contabilidad
-                        SET empresa_id = ?
-                        WHERE (empresa_id IS NULL OR TRIM(empresa_id) = '')
-                          AND hipoteca_id IS NOT NULL AND TRIM(hipoteca_id) <> ''
-                        """,
-                        (fin_empresa_id,),
-                    )
-                except Exception:
-                    pass
-                # Enlaza clientes al servicio (para que el CRM 360/servicios no "pierda" cartera).
-                try:
-                    rows = conn.execute(
-                        """
-                        SELECT DISTINCT cliente_id
-                        FROM hipotecas
-                        WHERE empresa_id = ?
-                          AND cliente_id IS NOT NULL
-                          AND TRIM(cliente_id) <> ''
-                        """,
-                        (fin_empresa_id,),
-                    ).fetchall()
-                    for r in rows or []:
-                        try:
-                            cid = str(r.get("cliente_id") if hasattr(r, "get") else r[0] or "").strip()
-                        except Exception:
-                            cid = ""
-                        if cid:
-                            try:
-                                ensure_cliente_servicio_link(conn, cid, fin_empresa_id, "financiaciones", now_iso)
-                            except Exception:
-                                pass
-                except Exception:
-                    pass
-                try:
-                    rows = conn.execute(
-                        """
-                        SELECT cliente1_id, cliente2_id
-                        FROM asesoramientos_financiacion
-                        WHERE empresa_id = ?
-                        """,
-                        (fin_empresa_id,),
-                    ).fetchall()
-                    for r in rows or []:
-                        if hasattr(r, "get"):
-                            candidates = [r.get("cliente1_id"), r.get("cliente2_id")]
-                        else:
-                            try:
-                                candidates = [r[0], r[1]]
-                            except Exception:
-                                candidates = []
-                        for raw in candidates:
-                            cid = str(raw or "").strip()
-                            if not cid:
-                                continue
-                            try:
-                                ensure_cliente_servicio_link(conn, cid, fin_empresa_id, "financiaciones", now_iso)
-                            except Exception:
-                                pass
-                except Exception:
-                    pass
-                _migration_mark(conn, "financiaciones_scope_backfill_v1")
-    except Exception:
-        pass
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS operaciones_inmobiliarias (
@@ -18930,36 +18287,6 @@ def ensure_tables(db_path):
     ensure_column(conn, "asesoramientos_financiacion", "cliente2_prestamo_resto", "cliente2_prestamo_resto REAL")
     ensure_column(conn, "asesoramientos_financiacion", "calidad_ocr", "calidad_ocr TEXT")
     ensure_column(conn, "asesoramientos_financiacion", "campos_ocr", "campos_ocr TEXT")
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS hipotecas (
-          id TEXT PRIMARY KEY,
-          empresa_id TEXT,
-          cliente TEXT,
-          cliente_id TEXT,
-          banco TEXT,
-          precio REAL,
-          importe_hipoteca REAL,
-          porcentaje REAL,
-          entrada REAL,
-          comision REAL,
-          oficina TEXT,
-          fecha_encargo TEXT,
-          encargo TEXT,
-          tipo_hipoteca TEXT,
-          fecha_firma TEXT,
-          cesion REAL,
-          comision_juan REAL,
-          comision_modernia REAL,
-          inmobiliaria_compra TEXT,
-          asesor TEXT,
-          estado TEXT,
-          anio INTEGER,
-          created_at TEXT NOT NULL,
-          updated_at TEXT NOT NULL
-        )
-        """
-    )
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS gestoria_contabilidad (
@@ -20597,18 +19924,17 @@ def ensure_workspace_product_tables(conn):
     )
     conn.execute(
         """
-	        CREATE TABLE IF NOT EXISTS workspace_fincas_comunidades (
-	          id TEXT PRIMARY KEY,
-	          workspace_id TEXT NOT NULL,
-	          empresa_id TEXT,
-	          nombre TEXT NOT NULL,
-	          referencia_catastral TEXT,
-	          cif TEXT,
-	          direccion TEXT,
-	          foto_edificio_key TEXT,
-	          presidente TEXT,
-	          secretario TEXT,
-	          estado TEXT NOT NULL DEFAULT 'Activa',
+        CREATE TABLE IF NOT EXISTS workspace_fincas_comunidades (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          empresa_id TEXT,
+          nombre TEXT NOT NULL,
+          referencia_catastral TEXT,
+          cif TEXT,
+          direccion TEXT,
+          presidente TEXT,
+          secretario TEXT,
+          estado TEXT NOT NULL DEFAULT 'Activa',
           num_vecinos INTEGER,
           num_locales INTEGER,
           num_trasteros INTEGER,
@@ -20626,7 +19952,6 @@ def ensure_workspace_product_tables(conn):
     ensure_column(conn, "workspace_fincas_comunidades", "num_aparcamientos", "num_aparcamientos INTEGER")
     ensure_column(conn, "workspace_fincas_comunidades", "cuota_sugerida", "cuota_sugerida REAL")
     ensure_column(conn, "workspace_fincas_comunidades", "referencia_catastral", "referencia_catastral TEXT")
-    ensure_column(conn, "workspace_fincas_comunidades", "foto_edificio_key", "foto_edificio_key TEXT")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS workspace_fincas_incidencias (
@@ -25488,13 +24813,12 @@ def fetch_workspace_fincas_comunidades(conn, workspace_id, limit=30):
           c.empresa_id,
           COALESCE(e.nombre, '') AS empresa_nombre,
           c.nombre,
-	          COALESCE(c.referencia_catastral, '') AS referencia_catastral,
-	          c.cif,
-	          c.direccion,
-	          COALESCE(c.foto_edificio_key, '') AS foto_edificio_key,
-	          c.presidente,
-	          c.secretario,
-	          c.estado,
+          COALESCE(c.referencia_catastral, '') AS referencia_catastral,
+          c.cif,
+          c.direccion,
+          c.presidente,
+          c.secretario,
+          c.estado,
           c.num_vecinos,
           c.num_locales,
           c.num_trasteros,
@@ -26930,6 +26254,31 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
     servicio_label = servicio_key or "-"
     ref_label = budget.get("id") or "-"
 
+    def _fit_image_to_box(img, max_w, max_h):
+        if not img:
+            return None
+        out = img.copy()
+        try:
+            out.thumbnail((int(max_w), int(max_h)), Image.LANCZOS)
+        except Exception:
+            pass
+        return out
+
+    def _paste_logo_box(image, draw, logo_img, box, padding=14):
+        if not logo_img:
+            return
+        x0, y0, x1, y1 = [int(v) for v in box]
+        # Caja blanca para evitar que el logo "ensucie" la cabecera (logos con fondo o márgenes grandes).
+        draw.rounded_rectangle((x0, y0, x1, y1), radius=22, fill=(255, 255, 255), outline=border)
+        inner_w = max(10, (x1 - x0) - (padding * 2))
+        inner_h = max(10, (y1 - y0) - (padding * 2))
+        fitted = _fit_image_to_box(logo_img, inner_w, inner_h)
+        if not fitted:
+            return
+        px = x0 + padding + int((inner_w - fitted.width) / 2)
+        py = y0 + padding + int((inner_h - fitted.height) / 2)
+        image.paste(fitted, (px, py), fitted)
+
     def new_page(include_cards=False):
         image = Image.new("RGB", (page_width, page_height), "white")
         draw = ImageDraw.Draw(image)
@@ -26952,7 +26301,14 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
             draw.text((chip_x + 15, chip_y), chip, fill="white", font=font_chip)
             chip_x += chip_w + 12
         if logo:
-            image.paste(logo, (page_width - margin_x - logo.width, top_margin + 8), logo)
+            # Mantén el logo en una caja fija para no solapar chips/títulos.
+            _paste_logo_box(
+                image,
+                draw,
+                logo,
+                (page_width - margin_x - 340, 34, page_width - margin_x, 34 + 126),
+                padding=14,
+            )
         current_y = 296
         if include_cards:
             left = (margin_x, current_y, margin_x + 560, current_y + 250)
@@ -26980,24 +26336,31 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
         cover_draw.rounded_rectangle((0, 0, page_width, 240), radius=0, fill=primary)
         cover_draw.polygon([(page_width - 240, 0), (page_width, 0), (page_width, 200)], fill=accent)
         cover_title = "CARTA DE PRESENTACIÓN"
-        cover_draw.text((margin_x, top_margin + 12), cover_title, fill="white", font=font_title)
+        # Logo y título no deben pisarse: el logo va en caja fija y el texto se desplaza a la derecha.
+        cover_logo_box = (margin_x, 26, margin_x + 320, 26 + 120)
+        title_x = cover_logo_box[2] + 24
+        cover_draw.text((title_x, top_margin + 12), cover_title, fill="white", font=font_title)
         subtitle = "Administración de fincas · Propuesta de servicios"
-        cover_draw.text((margin_x, top_margin + 86), subtitle, fill=(240, 246, 248), font=font_subtitle)
+        cover_draw.text((title_x, top_margin + 86), subtitle, fill=(240, 246, 248), font=font_subtitle)
         if logo:
-            cover.paste(logo, (margin_x, 22), logo)
+            _paste_logo_box(cover, cover_draw, logo, cover_logo_box, padding=14)
         if colegio_logo:
-            cover.paste(colegio_logo, (page_width - margin_x - colegio_logo.width, 32), colegio_logo)
-            colegiado = str(calc.get("colegiado_numero") or "3079").strip() or "3079"
-            cover_draw.text(
-                (page_width - margin_x - colegio_logo.width, 32 + colegio_logo.height + 10),
-                f"Colegiado nº {colegiado}",
-                fill=(240, 246, 248),
-                font=_document_font(16, True),
+            _paste_logo_box(
+                cover,
+                cover_draw,
+                colegio_logo,
+                (page_width - margin_x - 260, 30, page_width - margin_x, 30 + 120),
+                padding=12,
             )
+            try:
+                colegiado_txt = f"Nº colegiado {int(calc.get('colegiado_numero') or 3079)}"
+            except Exception:
+                colegiado_txt = "Nº colegiado 3079"
+            cover_draw.text((page_width - margin_x - 260, 30 + 120 + 10), colegiado_txt, fill=(240, 246, 248), font=font_chip)
         else:
             cover_draw.text((page_width - margin_x - 360, 44), "Colegio de Administradores", fill=(240, 246, 248), font=font_subtitle)
 
-        client_name = str(calc.get("comunidad_denominacion") or client.get("nombre") or budget.get("titulo") or "").strip() or "Comunidad"
+        client_name = str(client.get("nombre") or budget.get("titulo") or "").strip() or "Comunidad"
         fecha_txt = str(budget.get("fecha") or "").strip() or datetime.now().date().isoformat()
         try:
             fecha_txt = format_spanish_long_date_capitalized(fecha_txt)
@@ -27007,9 +26370,14 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
         n_loc = int(calc.get("num_locales") or 0)
         n_tra = int(calc.get("num_trasteros") or 0)
         n_ap = int(calc.get("num_aparcamientos") or 0)
-        subtotal = float(budget.get("subtotal") or calc.get("cuota_sugerida") or 0.0)
-        impuestos = float(budget.get("impuestos") or 0.0)
-        total = float(budget.get("total") or 0.0) if float(budget.get("total") or 0.0) else max(0.0, subtotal + impuestos)
+        cuota = float(calc.get("cuota_sugerida") or budget.get("subtotal") or budget.get("total") or 0.0)
+        cuota = max(0.0, cuota)
+        servicios = calc.get("servicios_incluidos") or []
+        if not isinstance(servicios, list):
+            servicios = []
+        servicios = [str(item or "").strip() for item in servicios if str(item or "").strip()]
+        carta_txt = str(calc.get("carta_presentacion") or "").strip()
+        carta_lines = [line.rstrip() for line in carta_txt.splitlines()] if carta_txt else []
         cuerpo = [
             f"{fecha_txt}",
             "",
@@ -27020,20 +26388,27 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
             f"Cálculo base: {n_viv} viviendas × 5 € + {n_loc} locales × 1 € + {n_ap} aparcamientos × 1 €"
             + (f" + {n_tra} trasteros × 1 €" if n_tra else "")
             + " (mínimo 60 €).",
-            f"Cuota mensual propuesta (sin IVA): {format_eur_short(subtotal)} · IVA (21%): {format_eur_short(impuestos)} · Total mensual (con IVA): {format_eur_short(total)}.",
-            f"Total anual (con IVA): {format_eur_short(total * 12)}.",
-            "",
-            "Quedamos a su disposición para concretar alcance, fechas de implantación y condiciones particulares de la comunidad.",
+            f"Cuota mensual propuesta: {format_eur_short(cuota)} · Total anual: {format_eur_short(cuota * 12)}.",
         ]
-        extra_letter = str(calc.get("carta_presentacion") or "").strip()
-        if extra_letter:
-            cuerpo.extend(["", "Carta de presentación adicional:", ""])
-            cuerpo.extend([line.rstrip() for line in extra_letter.splitlines()])
-        cuerpo.extend([
-            "",
+        if servicios:
+            cuerpo.extend(["", "Servicios incluidos (resumen):"])
+            cuerpo.extend([f"• {item}" for item in servicios[:14]])
+        if carta_lines:
+            cuerpo.extend(["", "Carta de presentación:"])
+            cuerpo.extend(carta_lines[:40])
+        cuerpo.extend(
+            [
+                "",
+                "Quedamos a su disposición para concretar alcance, fechas de implantación y condiciones particulares de la comunidad.",
+                "",
+            ]
+        )
+        cuerpo.extend(
+            [
             "Atentamente,",
             f"{company.get('nombre') or workspace.get('nombre') or 'Fincas Velazquez'}",
-        ])
+            ]
+        )
         y_cover = 278
         cover_draw.rounded_rectangle((margin_x, y_cover, page_width - margin_x, page_height - bottom_margin - 22), radius=28, fill=(252, 252, 252), outline=border)
         text_x = margin_x + 34
@@ -27060,108 +26435,194 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
         pages.append(image)
         image, draw, y = new_page(include_cards=False)
 
+    def _budget_map_query():
+        denom = str(calc.get("comunidad_denominacion") or client.get("nombre") or "").strip()
+        address = str(calc.get("comunidad_direccion") or "").strip()
+        query = " ".join([part for part in [address, denom] if part]).strip()
+        return query
+
+    def _qr_code_image(url, size=160):
+        url = str(url or "").strip()
+        if not url:
+            return None
+        try:
+            import qrcode  # lazy import (optional dependency)
+        except Exception:
+            return None
+        try:
+            qr = qrcode.QRCode(border=1, box_size=10)
+            qr.add_data(url)
+            qr.make(fit=True)
+            img = qr.make_image(fill_color="black", back_color="white").convert("RGBA")
+            img = _fit_image_to_box(img, size, size)
+            return img
+        except Exception:
+            return None
+
+    def _fetch_url_bytes(url, timeout=2.5):
+        url = str(url or "").strip()
+        if not url:
+            return b""
+        try:
+            req = urllib.request.Request(
+                url,
+                headers={
+                    "User-Agent": "Verifika2CRM/1.0 (budget-pdf)",
+                    "Accept": "*/*",
+                },
+            )
+            with urllib.request.urlopen(req, timeout=float(timeout or 2.5)) as resp:
+                return resp.read() or b""
+        except Exception:
+            return b""
+
+    def _try_build_static_map(query, max_w=640, max_h=220):
+        query = str(query or "").strip()
+        if not query:
+            return None
+        # Best-effort: geocodifica con Nominatim y pide un static map sin API key (fallback a QR si falla).
+        try:
+            geo_url = "https://nominatim.openstreetmap.org/search?" + urllib.parse.urlencode(
+                {"q": query, "format": "json", "limit": "1"},
+                doseq=True,
+            )
+            geo_raw = _fetch_url_bytes(geo_url, timeout=1.8)
+            if not geo_raw:
+                return None
+            geo = json.loads(geo_raw.decode("utf-8", errors="ignore") or "[]")
+            if not isinstance(geo, list) or not geo:
+                return None
+            lat = str(geo[0].get("lat") or "").strip()
+            lon = str(geo[0].get("lon") or "").strip()
+            if not lat or not lon:
+                return None
+            map_url = (
+                "https://staticmap.openstreetmap.de/staticmap.php?"
+                + urllib.parse.urlencode(
+                    {
+                        "center": f"{lat},{lon}",
+                        "zoom": "16",
+                        "size": "640x320",
+                        "markers": f"{lat},{lon},red-pushpin",
+                    }
+                )
+            )
+            img_bytes = _fetch_url_bytes(map_url, timeout=2.8)
+            if not img_bytes:
+                return None
+            map_img = Image.open(BytesIO(img_bytes)).convert("RGBA")
+            return _fit_image_to_box(map_img, max_w, max_h)
+        except Exception:
+            return None
+
     if servicio_key == "fincas":
-        ensure_space(120)
-        box = (margin_x, y, page_width - margin_x, y + 100)
+        ensure_space(170)
+        box = (margin_x, y, page_width - margin_x, y + 140)
         draw.rounded_rectangle(box, radius=24, fill=(247, 250, 242), outline=border)
         draw.text((box[0] + 24, box[1] + 18), "BASE DE CÁLCULO COMUNIDAD", fill=primary, font=font_section)
-        base_text = (
-            f"{calc.get('num_vecinos') or 0} vecinos · "
-            f"{calc.get('num_locales') or 0} locales · "
-            f"{calc.get('num_trasteros') or 0} trasteros · "
-            f"{calc.get('num_aparcamientos') or 0} aparcamientos · "
-            f"Base sugerida {format_eur(calc.get('cuota_sugerida') or 0)}"
-        )
-        draw.text((box[0] + 24, box[1] + 58), base_text, fill=ink, font=font_table)
+        denom = str(calc.get("comunidad_denominacion") or client.get("nombre") or "-").strip() or "-"
+        cif = str(calc.get("comunidad_cif") or client.get("nif") or "-").strip() or "-"
+        direccion = str(calc.get("comunidad_direccion") or "").strip()
+        base_lines = [
+            f"{denom} · CIF {cif}",
+            direccion,
+            (
+                f"{calc.get('num_vecinos') or 0} viviendas · "
+                f"{calc.get('num_locales') or 0} locales · "
+                f"{calc.get('num_trasteros') or 0} trasteros · "
+                f"{calc.get('num_aparcamientos') or 0} aparcamientos · "
+                f"Base {format_eur(budget.get('subtotal') or calc.get('cuota_sugerida') or 0)}"
+            ),
+        ]
+        text_y = box[1] + 58
+        for line in base_lines:
+            if not str(line).strip():
+                continue
+            wrapped = _pdf_wrap_lines(line, width=102)
+            draw.multiline_text((box[0] + 24, text_y), "\n".join(wrapped), fill=ink, font=font_table, spacing=6)
+            sample_box = draw.textbbox((box[0] + 24, text_y), "Ag", font=font_table)
+            text_y += (sample_box[3] - sample_box[1] + 8) * len(wrapped)
         y = box[3] + 24
 
-        ensure_space(240)
-        box2 = (margin_x, y, page_width - margin_x, y + 210)
-        draw.rounded_rectangle(box2, radius=24, fill=(252, 252, 252), outline=border)
-        draw.text((box2[0] + 24, box2[1] + 18), "DATOS COMUNIDAD / SOLICITANTE", fill=primary, font=font_section)
-        lines = [
-            f"Comunidad: {str(calc.get('comunidad_denominacion') or client.get('nombre') or '-').strip() or '-'}",
-            f"Dirección: {str(calc.get('comunidad_direccion') or '-').strip() or '-'}",
-            f"CIF: {str(calc.get('comunidad_cif') or client.get('nif') or '-').strip() or '-'}",
-            f"Referencia catastral: {str(calc.get('referencia_catastral') or '-').strip() or '-'}",
-            f"Solicitante: {str(calc.get('solicitante_nombre') or '-').strip() or '-'} · DNI {str(calc.get('solicitante_dni') or '-').strip() or '-'}",
-            f"Teléfono: {str(calc.get('solicitante_telefono') or client.get('telefono') or '-').strip() or '-'} · Email: {str(calc.get('solicitante_email') or client.get('email') or '-').strip() or '-'}",
+        # Datos comunidad / solicitante (no obligatorios, pero visibles en la ficha).
+        ensure_space(210)
+        box = (margin_x, y, page_width - margin_x, y + 176)
+        draw.rounded_rectangle(box, radius=24, fill=soft, outline=border)
+        draw.text((box[0] + 24, box[1] + 18), "DATOS COMUNIDAD / SOLICITANTE", fill=primary, font=font_section)
+        denom = str(calc.get("comunidad_denominacion") or client.get("nombre") or "-").strip() or "-"
+        direccion = str(calc.get("comunidad_direccion") or "").strip() or "-"
+        cif = str(calc.get("comunidad_cif") or client.get("nif") or "").strip()
+        ref_cat = str(calc.get("referencia_catastral") or "").strip()
+        sol_nombre = str(calc.get("solicitante_nombre") or "").strip()
+        sol_dni = str(calc.get("solicitante_dni") or "").strip()
+        sol_tel = str(calc.get("solicitante_telefono") or client.get("telefono") or "").strip()
+        sol_email = str(calc.get("solicitante_email") or client.get("email") or "").strip()
+        rows = [
+            f"Comunidad: {denom}",
+            f"Dirección: {direccion}",
+            ("CIF: " + cif) if cif else "CIF: -",
+            ("Referencia catastral: " + ref_cat) if ref_cat else "Referencia catastral: -",
+            "Solicitante: " + (" · ".join([part for part in [("PRESIDENTE" if sol_nombre else ""), sol_nombre] if part]) or "-"),
+            "Solicitante: DNI " + (sol_dni or "-") + f" · Tel. {sol_tel or '-'} · Email {sol_email or '-'}",
         ]
-        y_txt = box2[1] + 58
-        for line in lines:
-            wrapped = _pdf_wrap_lines(line, width=104)
-            draw.multiline_text((box2[0] + 24, y_txt), "\n".join(wrapped), fill=ink, font=font_table, spacing=4)
-            sample_box = draw.textbbox((box2[0] + 24, y_txt), "Ag", font=font_table)
-            y_txt += (sample_box[3] - sample_box[1] + 8) * len(wrapped)
-        y = max(box2[3], y_txt + 10) + 24
+        text_y = box[1] + 58
+        for line in rows:
+            wrapped = _pdf_wrap_lines(line, width=112)
+            draw.multiline_text((box[0] + 24, text_y), "\n".join(wrapped), fill=ink, font=_document_font(16, False), spacing=6)
+            sample_box = draw.textbbox((box[0] + 24, text_y), "Ag", font=_document_font(16, False))
+            text_y += (sample_box[3] - sample_box[1] + 8) * len(wrapped)
+        y = box[3] + 24
 
-        addr_for_map = str(calc.get("comunidad_direccion") or "").strip()
-        photo_key = str(calc.get("edificio_foto_key") or "").strip()
-        map_url = ""
-        qr_img = None
-        if addr_for_map:
-            map_url = f"https://www.google.com/maps/search/?api=1&query={urllib.parse.quote(addr_for_map)}"
-            try:
-                import qrcode
+        # Mapa (vista previa) + QR
+        ensure_space(270)
+        map_box = (margin_x, y, page_width - margin_x, y + 236)
+        draw.rounded_rectangle(map_box, radius=24, fill=(247, 249, 252), outline=border)
+        draw.text((map_box[0] + 24, map_box[1] + 18), "MAPA / EDIFICIO", fill=primary, font=font_section)
+        map_query = _budget_map_query()
+        maps_url = f"https://www.google.com/maps/search/?api=1&query={urllib.parse.quote(map_query)}" if map_query else ""
+        qr_img = _qr_code_image(maps_url, size=150) if maps_url else None
+        if qr_img:
+            cover_x = map_box[0] + 24
+            cover_y = map_box[1] + 66
+            draw.rounded_rectangle((cover_x - 4, cover_y - 4, cover_x + 160, cover_y + 160), radius=18, fill="white", outline=border)
+            image.paste(qr_img, (cover_x, cover_y), qr_img)
+            draw.text((cover_x + 180, cover_y + 6), "Escanea para ver el mapa", fill=muted, font=font_label)
+            if map_query:
+                addr_lines = _pdf_wrap_lines(map_query, width=56)
+                draw.multiline_text((cover_x + 180, cover_y + 34), "\n".join(addr_lines[:3]), fill=ink, font=_document_font(16, False), spacing=4)
+        static_map = _try_build_static_map(map_query, max_w=640, max_h=160) if map_query else None
+        if static_map:
+            x0 = page_width - margin_x - 640
+            y0 = map_box[1] + 66
+            draw.rounded_rectangle((x0 - 2, y0 - 2, x0 + 640 + 2, y0 + 160 + 2), radius=18, fill="white", outline=border)
+            image.paste(static_map, (x0, y0), static_map)
+        y = map_box[3] + 24
 
-                qr_img = qrcode.make(map_url).convert("RGBA").resize((180, 180))
-            except Exception:
-                qr_img = None
-        building_photo = None
-        if photo_key:
-            try:
-                raw_bytes, _err = s3_get_object_bytes(photo_key)
-                if raw_bytes:
-                    building_photo = Image.open(BytesIO(raw_bytes))
-            except Exception:
-                building_photo = None
-        if qr_img or building_photo:
-            ensure_space(330)
-            box_media = (margin_x, y, page_width - margin_x, y + 300)
-            draw.rounded_rectangle(box_media, radius=24, fill=(247, 248, 252), outline=border)
-            draw.text((box_media[0] + 24, box_media[1] + 18), "MAPA / EDIFICIO", fill=primary, font=font_section)
-            inner_left = box_media[0] + 24
-            inner_top = box_media[1] + 62
-            photo_w, photo_h = 660, 210
-            gap = 24
-            qr_x = inner_left
-            if building_photo:
-                try:
-                    photo = building_photo.convert("RGB")
-                    photo = ImageOps.fit(photo, (photo_w, photo_h), method=Image.LANCZOS)
-                    image.paste(photo, (inner_left, inner_top))
-                    draw.rounded_rectangle(
-                        (inner_left, inner_top, inner_left + photo_w, inner_top + photo_h),
-                        radius=20,
-                        outline=border,
-                        width=2,
-                    )
-                except Exception:
-                    building_photo = None
-                qr_x = inner_left + photo_w + gap
-            if qr_img:
-                image.paste(qr_img, (qr_x, inner_top), qr_img)
-                draw.text((qr_x + 200, inner_top + 6), "Escanea para ver el mapa", fill=ink, font=font_table)
-                addr_lines = _pdf_wrap_lines(addr_for_map or "-", width=34)
-                draw.multiline_text((qr_x + 200, inner_top + 40), "\n".join(addr_lines[:4]), fill=muted, font=font_footer, spacing=4)
-            y = box_media[3] + 24
+        # Servicios incluidos (lista compacta)
+        servicios = calc.get("servicios_incluidos") or []
+        servicios = [str(item or "").strip() for item in (servicios or []) if str(item or "").strip()]
+        if servicios:
+            lines = [f"• {item}" for item in servicios[:16]]
+        else:
+            lines = ["• (Sin servicios listados en la ficha)"]
+        # Altura dinámica: base + nº de líneas.
+        lines_wrapped = []
+        for item in lines:
+            lines_wrapped.extend(_pdf_wrap_lines(item, width=108))
+        h = 74 + len(lines_wrapped) * 22
+        ensure_space(min(420, h))
+        box = (margin_x, y, page_width - margin_x, y + min(420, h))
+        draw.rounded_rectangle(box, radius=24, fill=(252, 252, 252), outline=border)
+        draw.text((box[0] + 24, box[1] + 18), "SERVICIOS INCLUIDOS", fill=primary, font=font_section)
+        text_y = box[1] + 60
+        for line in lines_wrapped[:16]:
+            draw.text((box[0] + 24, text_y), line, fill=ink, font=_document_font(16, False))
+            text_y += 22
+        y = box[3] + 24
 
-        servicios_incluidos = calc.get("servicios_incluidos") if isinstance(calc, dict) else None
-        if isinstance(servicios_incluidos, list) and servicios_incluidos:
-            service_lines = []
-            for item in servicios_incluidos[:10]:
-                text = str(item or "").strip()
-                if not text:
-                    continue
-                service_lines.extend(_pdf_wrap_lines(f"• {text}", width=104))
-            if service_lines:
-                required_h = 64 + len(service_lines) * 22
-                ensure_space(required_h + 24)
-                box3 = (margin_x, y, page_width - margin_x, y + required_h)
-                draw.rounded_rectangle(box3, radius=24, fill=(247, 248, 252), outline=border)
-                draw.text((box3[0] + 24, box3[1] + 18), "SERVICIOS INCLUIDOS", fill=primary, font=font_section)
-                draw.multiline_text((box3[0] + 24, box3[1] + 58), "\n".join(service_lines), fill=ink, font=font_table, spacing=4)
-                y = box3[3] + 24
+        # Forzamos salto de página para que las partidas queden en página 3.
+        pages.append(image)
+        image, draw, y = new_page(include_cards=False)
 
     ensure_space(70)
     draw.text((margin_x, y), "PARTIDAS PRESUPUESTADAS", fill=primary, font=font_section)
@@ -27865,11 +27326,9 @@ def _document_font(size=18, bold=False):
 
 
 def _load_brand_logo(logo_url=None, max_width=520):
-    raw = str(logo_url).strip() if logo_url else ""
     logo_path = None
-    logo = None
-
-    if raw:
+    if logo_url:
+        raw = str(logo_url).strip()
         if raw.startswith("/assets/"):
             candidate = ASSETS / raw.replace("/assets/", "", 1)
             if candidate.exists():
@@ -27878,42 +27337,16 @@ def _load_brand_logo(logo_url=None, max_width=520):
             candidate = ROOT / raw
             if candidate.exists():
                 logo_path = candidate
-        else:
-            # Permite logos subidos a S3 (solo prefijo company_logos/).
-            safe_key = ""
-            try:
-                if raw.startswith("s3://"):
-                    safe_key = _normalize_s3_key(raw[5:])
-                elif raw.startswith("/api/s3_redirect") or raw.startswith("/api/s3_url"):
-                    parsed = urllib.parse.urlparse(raw)
-                    key = urllib.parse.parse_qs(parsed.query or "").get("key", [""])[0]
-                    safe_key = _normalize_s3_key(key)
-                else:
-                    parsed = urllib.parse.urlparse(raw)
-                    host = str(parsed.hostname or "").lower()
-                    if host.endswith("amazonaws.com") and ("s3" in host):
-                        safe_key = _normalize_s3_key(urllib.parse.unquote(parsed.path or "").lstrip("/"))
-            except Exception:
-                safe_key = ""
-            if safe_key and safe_key.startswith("company_logos/"):
-                raw_bytes, _err = s3_get_object_bytes(safe_key)
-                if raw_bytes:
-                    try:
-                        logo = Image.open(BytesIO(raw_bytes)).convert("RGBA")
-                    except Exception:
-                        logo = None
-
-    if logo is None:
-        if logo_path is None:
-            logo_path = ASSETS / "verifika2" / "verifika2_wordmark_check_green_transparent.png"
-            if not logo_path.exists():
-                logo_path = ASSETS / "verifika2" / "verifika2_wordmark_check_green.png"
+    if logo_path is None:
+        logo_path = ASSETS / "verifika2" / "verifika2_wordmark_check_green_transparent.png"
         if not logo_path.exists():
-            return None
-        try:
-            logo = Image.open(logo_path).convert("RGBA")
-        except Exception:
-            return None
+            logo_path = ASSETS / "verifika2" / "verifika2_wordmark_check_green.png"
+    if not logo_path.exists():
+        return None
+    try:
+        logo = Image.open(logo_path).convert("RGBA")
+    except Exception:
+        return None
     if logo.width > max_width:
         ratio = max_width / float(logo.width)
         logo = logo.resize((int(logo.width * ratio), int(logo.height * ratio)), Image.LANCZOS)
@@ -29167,19 +28600,6 @@ class Handler(BaseHTTPRequestHandler):
             return
 
     @staticmethod
-    def _safe_exc_detail(exc):
-        try:
-            name = str(type(exc).__name__ or "Error")[:80]
-            msg = str(exc or "")
-            msg = re.sub(r"postgres(?:ql)?://[^\\s]+", "postgresql://<redacted>", msg, flags=re.IGNORECASE)
-            msg = re.sub(r"Bearer\\s+[A-Za-z0-9._\\-]+", "Bearer <redacted>", msg, flags=re.IGNORECASE)
-            msg = msg.replace("\n", " ").strip()
-            detail = f"{name}: {msg}" if msg else name
-            return detail[:220]
-        except Exception:
-            return "Error interno"
-
-    @staticmethod
     def _recent_api_errors(limit=10):
         try:
             n = max(0, min(int(limit or 10), 30))
@@ -29632,7 +29052,7 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception:
                     pass
                 if str(self.path or "").startswith("/api/"):
-                    json_response(self, {"error": "API error", "detail": Handler._safe_exc_detail(exc)}, status=500)
+                    json_response(self, {"error": "API error"}, status=500)
                 else:
                     self.send_error(500, "Server error")
             except Exception:
@@ -29888,13 +29308,13 @@ class Handler(BaseHTTPRequestHandler):
 <body>
   <h2>Kiosko de fichaje</h2>
   <div class="card">
-    <p class="muted">Fichaje rápido por QR. Escanea tu QR (o pega el token). Si tu empresa ha configurado PIN de kiosko, introdúcelo.</p>
+	    <p class="muted">Fichaje rápido por QR. Escanea tu QR (o pega el token). Si tu empresa ha configurado PIN de kiosko, introdúcelo.</p>
     <label class="muted">Token (QR)
       <input id="tokenInput" autocomplete="off" placeholder="Pega token o abre /kiosk?token=..." value="{html.escape(token) if token else ""}" />
     </label>
-    <label class="muted">PIN kiosko (si aplica)
-      <input id="pinInput" type="password" inputmode="numeric" autocomplete="off" placeholder="PIN (opcional)" />
-    </label>
+	    <label class="muted">PIN kiosko (si aplica)
+	      <input id="pinInput" type="password" inputmode="numeric" autocomplete="off" placeholder="PIN (opcional)" />
+	    </label>
     <div class="row">
       <button id="punchBtn">Fichar ahora</button>
       <button id="refreshBtn" class="secondary">Actualizar estado</button>
@@ -29953,7 +29373,7 @@ class Handler(BaseHTTPRequestHandler):
       const token = readToken();
       const pin = readPin();
       if (!token) {{ statusEl.textContent = "Token vacío."; return; }}
-      // PIN: si no está configurado, el backend lo ignorará; si está configurado, devolverá 403.
+	      // PIN: si no está configurado, el backend lo ignorará; si está configurado, devolverá 403.
       punchBtn.disabled = true;
       statusEl.textContent = "Enviando…";
       const geo = await getGeo(3500);
@@ -30092,7 +29512,7 @@ class Handler(BaseHTTPRequestHandler):
                         pass
                     json_response(self, {"error": "DB no disponible", "detail": "Reintenta en unos segundos."}, status=503)
                 else:
-                    json_response(self, {"error": "API error", "detail": Handler._safe_exc_detail(exc)}, status=500)
+                    json_response(self, {"error": "API error"}, status=500)
             except Exception:
                 try:
                     self.send_error(500, "API error")
@@ -30136,7 +29556,6 @@ class Handler(BaseHTTPRequestHandler):
             "/api/seguros_delete",
             "/api/seguros_poliza_accion",
             "/api/seguros_enrich",
-            "/api/seguros_backfill_s3",
             "/api/seguros_reclamacion",
             "/api/seguros_reclamacion_update",
             "/api/seguros_reclamacion_delete",
@@ -30236,26 +29655,25 @@ class Handler(BaseHTTPRequestHandler):
             "/api/workspace_registro_notifications",
             "/api/workspace_document_assign",
             "/api/workspace_portal_upload",
-            "/api/workspace_company_logo_upload",
             "/api/workspace_cobros",
             "/api/workspace_remesas",
-            "/api/workspace_portal_requerimientos",
-            "/api/workspace_registro_personal",
-            "/api/workspace_registro_personal_delete",
-            "/api/workspace_registro_personal_self_photo",
-            "/api/workspace_registro_horario",
+	            "/api/workspace_portal_requerimientos",
+	            "/api/workspace_registro_personal",
+	            "/api/workspace_registro_personal_delete",
+	            "/api/workspace_registro_personal_self_photo",
+	            "/api/workspace_registro_horario",
             "/api/workspace_registro_horario_toggle",
             "/api/workspace_kiosk_toggle",
             "/api/workspace_kiosk_token",
-            "/api/workspace_registro_alerts",
-            "/api/workspace_registro_usuario_toggle",
-            "/api/workspace_registro_periodo_lock",
-            "/api/workspace_rrhh_profile",
-            "/api/workspace_rrhh_turnos",
-            "/api/workspace_rrhh_ausencia",
-            "/api/workspace_rrhh_ausencia_estado",
-            "/api/workspace_rrhh_gasto",
-            "/api/workspace_rrhh_gasto_estado",
+	            "/api/workspace_registro_alerts",
+	            "/api/workspace_registro_usuario_toggle",
+	            "/api/workspace_registro_periodo_lock",
+	            "/api/workspace_rrhh_profile",
+	            "/api/workspace_rrhh_turnos",
+	            "/api/workspace_rrhh_ausencia",
+	            "/api/workspace_rrhh_ausencia_estado",
+	            "/api/workspace_rrhh_gasto",
+	            "/api/workspace_rrhh_gasto_estado",
             "/api/workspace_rrhh_documento",
             "/api/workspace_rrhh_reset",
             "/api/workspace_presupuestos",
@@ -30628,10 +30046,6 @@ class Handler(BaseHTTPRequestHandler):
             "/api/s3_multipart_presign",
             "/api/s3_multipart_complete",
             "/api/s3_multipart_abort",
-            # Empresa master data is not scoped by empresa_nombre; it is controlled by workspace membership.
-            "/api/empresa_update",
-            "/api/empresa_create",
-            "/api/empresa_delete",
         ):
             if not empresa_nombre:
                 json_response(self, {"error": "empresa_nombre requerido"}, status=400)
@@ -30680,7 +30094,7 @@ class Handler(BaseHTTPRequestHandler):
         # Centralizado para no depender de checks individuales.
         if WORKSPACE_MEMBERSHIP_ENFORCE and isinstance(payload, dict) and str(parsed.path or "").startswith("/api/workspace_"):
             # Public workspace endpoints (portal) use tokens instead of session.
-            if parsed.path not in {"/api/workspace_portal_upload", "/api/workspace_portal_presign"}:
+            if parsed.path not in {"/api/workspace_portal_upload"}:
                 session = getattr(self, "auth_session", None) or self._current_session()
                 if not session:
                     json_response(self, {"error": "No autenticado"}, status=401)
@@ -30766,22 +30180,14 @@ class Handler(BaseHTTPRequestHandler):
             "/api/legal_library_import",
             "/api/copilot_web_fetch",
             "/api/copilot_web_ask",
-            # Empresa master data is not scoped by empresa_nombre; it is controlled by workspace membership.
-            "/api/empresa_update",
-            "/api/empresa_create",
-            "/api/empresa_delete",
         ):
-            # `empresa_nombre` puede venir vacío en endpoints no-CRM (p.ej. S3 presign)
-            # o en operaciones de master-data (empresas del workspace). En esos casos no
-            # hacemos lookup y auditamos sin empresa_id.
-            if empresa_nombre:
-                empresa = conn.execute(
-                    "SELECT id FROM empresas WHERE nombre = ?",
-                    (empresa_nombre,),
-                ).fetchone()
-                if not empresa:
-                    json_response(self, {"error": "Empresa no encontrada"}, status=400)
-                    return
+            empresa = conn.execute(
+                "SELECT id FROM empresas WHERE nombre = ?",
+                (empresa_nombre,),
+            ).fetchone()
+            if not empresa:
+                json_response(self, {"error": "Empresa no encontrada"}, status=400)
+                return
 
         now = "now"
         def audit(entidad, entidad_id, accion, detalles=None, usuario=None):
@@ -32167,253 +31573,6 @@ class Handler(BaseHTTPRequestHandler):
             conn.commit()
             json_response(self, {"ok": True})
             return
-        elif parsed.path == "/api/workspace_company_logo_upload":
-            session = getattr(self, "auth_session", None) or self._current_session()
-            if not workspace_actor_is_privileged(conn, session):
-                json_response(self, {"error": "No autorizado"}, status=403)
-                return
-            workspace_id = str(payload.get("workspace_id") or "").strip()
-            empresa_id = str(payload.get("empresa_id") or payload.get("id") or "").strip()
-            filename = str(payload.get("filename") or "logo.png").strip() or "logo.png"
-            content_type = str(payload.get("content_type") or "").strip() or "application/octet-stream"
-            data_uri = str(payload.get("file_base64") or payload.get("data") or "").strip()
-            if not workspace_id or not empresa_id or not data_uri:
-                json_response(self, {"error": "workspace_id, empresa_id y file_base64 requeridos"}, status=400)
-                return
-
-            ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
-            if not ok:
-                json_response(self, {"error": err or "No autorizado"}, status=403)
-                return
-            linked = conn.execute(
-                "SELECT 1 FROM workspace_empresas WHERE workspace_id = ? AND empresa_id = ? LIMIT 1",
-                (workspace_id, empresa_id),
-            ).fetchone()
-            if not linked:
-                json_response(self, {"error": "No autorizado"}, status=403)
-                return
-
-            mime_from_data_uri = ""
-            b64_value = data_uri
-            if "," in data_uri:
-                header, b64_value = data_uri.split(",", 1)
-                header = header.strip().lower()
-                if header.startswith("data:") and ";base64" in header:
-                    try:
-                        mime_from_data_uri = header.split("data:", 1)[1].split(";", 1)[0].strip()
-                    except Exception:
-                        mime_from_data_uri = ""
-            try:
-                raw_bytes = base64.b64decode(b64_value)
-            except Exception:
-                json_response(self, {"error": "Base64 invalido"}, status=400)
-                return
-            if not raw_bytes:
-                json_response(self, {"error": "Archivo vacio"}, status=400)
-                return
-            max_bytes = 6 * 1024 * 1024
-            if len(raw_bytes) > max_bytes:
-                json_response(self, {"error": "Logo demasiado grande (máx. 6MB)"}, status=413)
-                return
-
-            effective_type = (mime_from_data_uri or content_type or "").strip().lower()
-            if not effective_type.startswith("image/"):
-                json_response(self, {"error": "Solo se permiten imágenes"}, status=400)
-                return
-
-            client = s3_client()
-            if not client:
-                bucket, region = s3_config()
-                missing = []
-                if not bucket:
-                    missing.append("AWS_S3_BUCKET")
-                if not region:
-                    missing.append("AWS_REGION")
-                if not S3_BOTO3_AVAILABLE:
-                    missing.append("boto3")
-                detail = f" (faltan: {', '.join(missing)})" if missing else ""
-                json_response(self, {"error": f"S3 no configurado{detail}"}, status=400)
-                return
-
-            bucket, _region = s3_config()
-            key = s3_safe_key("company_logos", filename)
-            try:
-                client.put_object(
-                    Bucket=bucket,
-                    Key=key,
-                    Body=raw_bytes,
-                    ContentType=effective_type,
-                )
-            except Exception:
-                json_response(self, {"error": "No se pudo subir el logo"}, status=502)
-                return
-            try:
-                _s3_grant_key(session, key, conn=conn)
-            except Exception:
-                pass
-
-            logo_url = f"s3://{key}"
-            cols = table_columns(conn, "empresas") or set()
-            if "updated_at" in cols:
-                conn.execute(
-                    "UPDATE empresas SET logo_url = ?, updated_at = datetime(?) WHERE id = ?",
-                    (logo_url, now, empresa_id),
-                )
-            else:
-                conn.execute(
-                    "UPDATE empresas SET logo_url = ? WHERE id = ?",
-                    (logo_url, empresa_id),
-                )
-            conn.commit()
-            json_response(self, {"ok": True, "key": key, "logo_url": logo_url})
-            return
-        elif parsed.path == "/api/workspace_service_matrix_upsert":
-            session = getattr(self, "auth_session", None) or self._current_session()
-            if not workspace_actor_is_privileged(conn, session):
-                json_response(self, {"error": "No autorizado"}, status=403)
-                return
-            ensure_workspace_core_tables(conn)
-            workspace_id = str(payload.get("workspace_id") or "").strip()
-            empresa_id = str(payload.get("empresa_id") or "").strip()
-            servicio_key_raw = payload.get("servicio_key")
-            if servicio_key_raw is None:
-                servicio_key_raw = payload.get("service_key")
-            if servicio_key_raw is None:
-                servicio_key_raw = payload.get("servicio")
-            servicio_key = normalize_service_key(servicio_key_raw or "")
-            if not workspace_id or not empresa_id or not servicio_key:
-                json_response(self, {"error": "workspace_id, servicio_key y empresa_id requeridos"}, status=400)
-                return
-            empresa = conn.execute("SELECT id FROM empresas WHERE id = ? LIMIT 1", (empresa_id,)).fetchone()
-            if not empresa:
-                json_response(self, {"error": "Empresa no encontrada"}, status=400)
-                return
-            enabled_raw = str(payload.get("enabled", 1)).strip().lower()
-            enabled = 1 if enabled_raw in {"1", "true", "yes", "si", "sí", "on"} else 0
-            default_raw = str(payload.get("is_default", 0)).strip().lower()
-            is_default = 1 if default_raw in {"1", "true", "yes", "si", "sí", "on"} else 0
-            try:
-                sort_order = int(payload.get("sort_order") or 0)
-            except Exception:
-                sort_order = 0
-            notas = str(payload.get("notas") or "").strip()
-
-            existing = conn.execute(
-                """
-                SELECT id
-                FROM workspace_servicio_empresas
-                WHERE workspace_id = ? AND servicio_key = ? AND empresa_id = ?
-                LIMIT 1
-                """,
-                (workspace_id, servicio_key, empresa_id),
-            ).fetchone()
-            if existing:
-                conn.execute(
-                    """
-                    UPDATE workspace_servicio_empresas
-                    SET enabled = ?,
-                        is_default = ?,
-                        sort_order = ?,
-                        notas = ?,
-                        updated_at = datetime(?)
-                    WHERE id = ?
-                    """,
-                    (enabled, is_default, sort_order, notas, now, str(existing["id"])),
-                )
-            else:
-                conn.execute(
-                    """
-                    INSERT INTO workspace_servicio_empresas (
-                      id, workspace_id, servicio_key, empresa_id, enabled, is_default, sort_order, notas, created_at, updated_at
-                    ) VALUES (
-                      ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
-                    )
-                    """,
-                    (
-                        os.urandom(16).hex(),
-                        workspace_id,
-                        servicio_key,
-                        empresa_id,
-                        enabled,
-                        is_default,
-                        sort_order,
-                        notas,
-                        now,
-                        now,
-                    ),
-                )
-            if is_default:
-                try:
-                    conn.execute(
-                        """
-                        UPDATE workspace_servicio_empresas
-                        SET is_default = 0, updated_at = datetime(?)
-                        WHERE workspace_id = ? AND servicio_key = ? AND empresa_id <> ?
-                        """,
-                        (now, workspace_id, servicio_key, empresa_id),
-                    )
-                except Exception:
-                    pass
-            conn.commit()
-            json_response(self, {"ok": True})
-            return
-        elif parsed.path == "/api/workspace_service_matrix_delete":
-            session = getattr(self, "auth_session", None) or self._current_session()
-            if not workspace_actor_is_privileged(conn, session):
-                json_response(self, {"error": "No autorizado"}, status=403)
-                return
-            ensure_workspace_core_tables(conn)
-            workspace_id = str(payload.get("workspace_id") or "").strip()
-            empresa_id = str(payload.get("empresa_id") or "").strip()
-            servicio_key = normalize_service_key(payload.get("servicio_key") or payload.get("service_key") or payload.get("servicio") or "")
-            if not workspace_id or not empresa_id or not servicio_key:
-                json_response(self, {"error": "workspace_id, servicio_key y empresa_id requeridos"}, status=400)
-                return
-            row = conn.execute(
-                """
-                SELECT id, COALESCE(is_default, 0) AS is_default
-                FROM workspace_servicio_empresas
-                WHERE workspace_id = ? AND servicio_key = ? AND empresa_id = ?
-                LIMIT 1
-                """,
-                (workspace_id, servicio_key, empresa_id),
-            ).fetchone()
-            if not row:
-                json_response(self, {"ok": True, "deleted": False})
-                return
-            was_default = 1 if int(row["is_default"] or 0) == 1 else 0
-            conn.execute("DELETE FROM workspace_servicio_empresas WHERE id = ?", (str(row["id"]),))
-            if was_default:
-                try:
-                    pick = conn.execute(
-                        """
-                        SELECT empresa_id
-                        FROM workspace_servicio_empresas
-                        WHERE workspace_id = ? AND servicio_key = ? AND COALESCE(enabled, 1) = 1
-                        ORDER BY COALESCE(sort_order, 0) ASC
-                        LIMIT 1
-                        """,
-                        (workspace_id, servicio_key),
-                    ).fetchone()
-                except Exception:
-                    pick = None
-                next_empresa_id = str(row_value(pick, "empresa_id") or row_value(pick, 0) or "").strip() if pick else ""
-                if next_empresa_id:
-                    try:
-                        conn.execute(
-                            """
-                            UPDATE workspace_servicio_empresas
-                            SET is_default = CASE WHEN empresa_id = ? THEN 1 ELSE 0 END,
-                                updated_at = datetime(?)
-                            WHERE workspace_id = ? AND servicio_key = ?
-                            """,
-                            (next_empresa_id, now, workspace_id, servicio_key),
-                        )
-                    except Exception:
-                        pass
-            conn.commit()
-            json_response(self, {"ok": True, "deleted": True})
-            return
         elif parsed.path == "/api/workspace_member_upsert":
             session = getattr(self, "auth_session", None) or self._current_session()
             if not workspace_actor_is_privileged(conn, session):
@@ -33543,58 +32702,6 @@ class Handler(BaseHTTPRequestHandler):
             conn.commit()
             json_response(self, {"ok": True, "id": record_id})
             return
-        elif parsed.path == "/api/workspace_portal_presign":
-            token = str(payload.get("token") or "").strip()
-            filename = str(payload.get("filename") or payload.get("nombre") or "").strip() or "archivo.pdf"
-            content_type = str(payload.get("content_type") or "").strip() or "application/octet-stream"
-            if not token:
-                json_response(self, {"error": "token requerido"}, status=400)
-                return
-            portal = conn.execute(
-                """
-                SELECT id, workspace_id, cliente_id, estado, COALESCE(importador_facturas, 0) AS importador_facturas
-                FROM workspace_portal_clientes
-                WHERE token = ?
-                LIMIT 1
-                """,
-                (token,),
-            ).fetchone()
-            if not portal:
-                json_response(self, {"error": "portal no encontrado"}, status=404)
-                return
-            if str(portal.get("estado") or "").strip().lower() == "pausado":
-                json_response(self, {"error": "portal pausado"}, status=403)
-                return
-            client = s3_client()
-            if not client:
-                bucket, region = s3_config()
-                missing = []
-                if not bucket:
-                    missing.append("AWS_S3_BUCKET")
-                if not region:
-                    missing.append("AWS_REGION")
-                if not S3_BOTO3_AVAILABLE:
-                    missing.append("boto3")
-                detail = f" (faltan: {', '.join(missing)})" if missing else ""
-                json_response(self, {"error": f"S3 no configurado{detail}"}, status=400)
-                return
-            bucket, region = s3_config()
-            category = str(payload.get("category") or "").strip().lower()
-            subdir = "facturas" if category in {"factura", "facturas", "invoice", "invoices"} else "docs"
-            prefix = f"portal/{portal['workspace_id']}/{portal['id']}/{subdir}"
-            key = s3_safe_key(prefix, filename)
-            try:
-                url = client.generate_presigned_url(
-                    "put_object",
-                    Params={"Bucket": bucket, "Key": key, "ContentType": content_type},
-                    ExpiresIn=900,
-                )
-            except Exception:
-                json_response(self, {"error": "No se pudo firmar la subida"}, status=500)
-                return
-            public_url = f"https://{bucket}.s3.{region}.amazonaws.com/{key}"
-            json_response(self, {"url": url, "key": key, "public_url": public_url})
-            return
         elif parsed.path == "/api/workspace_portal_upload":
             token = str(payload.get("token") or "").strip()
             nombre = str(payload.get("nombre") or "").strip()
@@ -33613,20 +32720,6 @@ class Handler(BaseHTTPRequestHandler):
             if not portal:
                 json_response(self, {"error": "portal no encontrado"}, status=404)
                 return
-            doc_key = str(payload.get("doc_key") or "").strip()
-            if not doc_key:
-                json_response(self, {"error": "doc_key requerido (usa workspace_portal_presign)"}, status=400)
-                return
-            allowed_prefix = f"portal/{portal['workspace_id']}/{portal['id']}/"
-            if not doc_key.startswith(allowed_prefix):
-                json_response(self, {"error": "doc_key fuera de alcance del portal"}, status=403)
-                return
-            bucket, region = s3_config()
-            doc_url = ""
-            if bucket and region:
-                doc_url = f"https://{bucket}.s3.{region}.amazonaws.com/{doc_key}"
-            if not doc_url:
-                doc_url = str(payload.get("doc_url") or "").strip()
             empresa_ids = fetch_workspace_company_ids(conn, portal["workspace_id"])
             empresa_id = empresa_ids[0] if empresa_ids else None
             if not empresa_id:
@@ -33666,8 +32759,8 @@ class Handler(BaseHTTPRequestHandler):
                     (payload.get("clasificacion") or (request_row["clasificacion"] if request_row else "")).strip() or None,
                     (payload.get("prioridad") or "").strip() or "Normal",
                     (payload.get("estado") or "").strip() or "Pendiente",
-                    doc_key or None,
-                    doc_url or None,
+                    (payload.get("doc_key") or "").strip() or None,
+                    (payload.get("doc_url") or "").strip() or None,
                     "portal_requerimiento" if request_row else None,
                     request_row["id"] if request_row else None,
                     (payload.get("notas") or "").strip() or None,
@@ -35809,44 +34902,71 @@ class Handler(BaseHTTPRequestHandler):
             lineas = parse_workspace_presupuesto_lineas(payload.get("lineas"))
             calculo = {}
             if servicio in {"administracion fincas", "fincas"}:
-                calculo = {
-                    "num_vecinos": parse_non_negative_int(payload.get("num_vecinos")),
-                    "num_locales": parse_non_negative_int(payload.get("num_locales")),
-                    "num_trasteros": parse_non_negative_int(payload.get("num_trasteros")),
-                    "num_aparcamientos": parse_non_negative_int(payload.get("num_aparcamientos")),
-                }
-                # Datos de la comunidad / solicitante (para PDF y contrato).
-                calculo["comunidad_denominacion"] = str(payload.get("comunidad_denominacion") or payload.get("cliente_lookup") or "").strip()
-                calculo["comunidad_direccion"] = str(payload.get("comunidad_direccion") or "").strip()
-                calculo["comunidad_cif"] = str(payload.get("comunidad_cif") or payload.get("cliente_nif") or "").strip()
-                calculo["referencia_catastral"] = str(payload.get("referencia_catastral") or "").strip()
-                calculo["solicitante_nombre"] = str(payload.get("solicitante_nombre") or "").strip()
-                calculo["solicitante_dni"] = str(payload.get("solicitante_dni") or "").strip()
-                calculo["solicitante_telefono"] = str(payload.get("solicitante_telefono") or payload.get("cliente_telefono") or "").strip()
-                calculo["solicitante_direccion"] = str(payload.get("solicitante_direccion") or "").strip()
-                calculo["solicitante_email"] = str(payload.get("solicitante_email") or payload.get("cliente_email") or "").strip()
-                calculo["edificio_foto_key"] = str(payload.get("edificio_foto_key") or "").strip()
-                calculo["carta_presentacion"] = str(payload.get("carta_presentacion") or "").strip()
-                colegiado_raw = str(payload.get("colegiado_numero") or "").strip()
-                calculo["colegiado_numero"] = colegiado_raw if colegiado_raw else "3079"
-                servicios_raw = payload.get("servicios_incluidos")
-                servicios = []
-                if isinstance(servicios_raw, list):
-                    servicios = [str(item or "").strip() for item in servicios_raw if str(item or "").strip()]
-                elif isinstance(servicios_raw, str) and servicios_raw.strip():
+                # Preserva campos del cálculo cuando el editor no los envía (evita perder carta/servicios al modificar).
+                prev_calc = {}
+                if current and current.get("calculo_json"):
                     try:
-                        parsed = json.loads(servicios_raw)
-                        if isinstance(parsed, list):
-                            servicios = [str(item or "").strip() for item in parsed if str(item or "").strip()]
+                        prev_calc = json.loads(current.get("calculo_json") or "{}") or {}
+                        if not isinstance(prev_calc, dict):
+                            prev_calc = {}
                     except Exception:
-                        servicios = []
-                calculo["servicios_incluidos"] = servicios
+                        prev_calc = {}
+                calculo = dict(prev_calc or {})
+                calculo.update(
+                    {
+                        "num_vecinos": parse_non_negative_int(payload.get("num_vecinos")),
+                        "num_locales": parse_non_negative_int(payload.get("num_locales")),
+                        "num_trasteros": parse_non_negative_int(payload.get("num_trasteros")),
+                        "num_aparcamientos": parse_non_negative_int(payload.get("num_aparcamientos")),
+                    }
+                )
                 calculo["cuota_sugerida"] = compute_fincas_cuota_sugerida(
                     calculo["num_vecinos"],
                     calculo["num_locales"],
                     calculo["num_trasteros"],
                     calculo["num_aparcamientos"],
                 )
+                # Estos campos solo se actualizan si vienen en el payload (permite preservar en ediciones parciales).
+                if "comunidad_denominacion" in payload:
+                    calculo["comunidad_denominacion"] = str(payload.get("comunidad_denominacion") or "").strip() or None
+                if "comunidad_direccion" in payload:
+                    calculo["comunidad_direccion"] = str(payload.get("comunidad_direccion") or "").strip() or None
+                if "comunidad_cif" in payload:
+                    calculo["comunidad_cif"] = str(payload.get("comunidad_cif") or "").strip() or None
+                if "solicitante_nombre" in payload:
+                    calculo["solicitante_nombre"] = str(payload.get("solicitante_nombre") or "").strip() or None
+                if "solicitante_dni" in payload:
+                    calculo["solicitante_dni"] = str(payload.get("solicitante_dni") or "").strip() or None
+                if "solicitante_telefono" in payload:
+                    calculo["solicitante_telefono"] = str(payload.get("solicitante_telefono") or "").strip() or None
+                if "solicitante_direccion" in payload:
+                    calculo["solicitante_direccion"] = str(payload.get("solicitante_direccion") or "").strip() or None
+                if "solicitante_email" in payload:
+                    calculo["solicitante_email"] = str(payload.get("solicitante_email") or "").strip() or None
+                if "carta_presentacion" in payload:
+                    calculo["carta_presentacion"] = str(payload.get("carta_presentacion") or "").strip() or None
+                servicios_raw = payload.get("servicios_incluidos")
+                if "servicios_incluidos" in payload:
+                    servicios = []
+                    if isinstance(servicios_raw, list):
+                        servicios = [str(item or "").strip() for item in servicios_raw if str(item or "").strip()]
+                    elif isinstance(servicios_raw, str):
+                        raw_text = servicios_raw.strip()
+                        if raw_text:
+                            try:
+                                parsed = json.loads(raw_text)
+                                if isinstance(parsed, list):
+                                    servicios = [str(item or "").strip() for item in parsed if str(item or "").strip()]
+                                else:
+                                    servicios = [line.strip() for line in raw_text.splitlines() if line.strip()]
+                            except Exception:
+                                servicios = [line.strip() for line in raw_text.splitlines() if line.strip()]
+                    calculo["servicios_incluidos"] = servicios
+                try:
+                    colegiado = int(payload.get("colegiado_numero") or 3079)
+                except Exception:
+                    colegiado = 3079
+                calculo["colegiado_numero"] = colegiado
                 if not lineas:
                     lineas = [
                         {
@@ -35863,12 +34983,16 @@ class Handler(BaseHTTPRequestHandler):
             subtotal_calculado = round(sum(float(item.get("total_linea") or 0.0) for item in lineas), 2)
             subtotal_manual = round(parse_money_value(payload.get("subtotal")), 2) or 0.0
             subtotal = subtotal_manual if subtotal_manual > 0 else subtotal_calculado
-            impuestos = round(parse_money_value(payload.get("impuestos")), 2) or 0.0
-            # IVA por defecto para fincas (21%) si no se ha informado explícitamente.
-            if servicio in {"administracion fincas", "fincas"} and impuestos <= 0 and subtotal > 0:
+            impuestos_raw = payload.get("impuestos")
+            impuestos_parsed = parse_money_value(impuestos_raw)
+            impuestos_manual = round(impuestos_parsed, 2) if impuestos_parsed is not None else None
+            impuestos = impuestos_manual if impuestos_manual is not None else 0.0
+            if servicio in {"administracion fincas", "fincas"} and (impuestos_manual is None or impuestos_manual == 0.0):
                 impuestos = round(subtotal * 0.21, 2)
-            total_manual = round(parse_money_value(payload.get("total")), 2) or 0.0
-            total = total_manual if total_manual > 0 else round(subtotal + impuestos, 2)
+            total_raw = payload.get("total")
+            total_parsed = parse_money_value(total_raw)
+            total_manual = round(total_parsed, 2) if total_parsed is not None else None
+            total = total_manual if total_manual is not None and total_manual > 0 else round(subtotal + impuestos, 2)
             estado = normalize_workspace_budget_state(payload.get("estado") or (current["estado"] if current else "") or "Borrador")
             fecha_base = (payload.get("fecha") or "").strip() or (current["fecha"] if current else "") or datetime.now().date().isoformat()
             fecha_seguimiento = (payload.get("fecha_seguimiento") or "").strip() or (current["fecha_seguimiento"] if current else "") or ""
@@ -35922,6 +35046,31 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 conn.execute("DELETE FROM workspace_presupuesto_lineas WHERE presupuesto_id = ?", (record_id,))
             else:
+                # Deduplicación best-effort: evita múltiples altas idénticas por doble submit/reintentos rápidos.
+                try:
+                    calc_blob = json.dumps(calculo or {}, ensure_ascii=False, sort_keys=True) if calculo else ""
+                    recent = conn.execute(
+                        """
+                        SELECT id, calculo_json
+                        FROM workspace_presupuestos
+                        WHERE workspace_id = ? AND empresa_id = ? AND servicio = ? AND titulo = ? AND COALESCE(fecha, '') = COALESCE(?, '')
+                          AND ABS(COALESCE(total, 0) - ?) < 0.01
+                          AND created_at >= datetime('now', '-30 seconds')
+                        ORDER BY created_at DESC
+                        LIMIT 5
+                        """,
+                        (workspace_id, empresa_id, servicio, titulo, fecha_base or "", total or 0.0),
+                    ).fetchall()
+                    for candidate in recent or []:
+                        try:
+                            cand_calc = json.dumps(json.loads(candidate["calculo_json"] or "{}") or {}, ensure_ascii=False, sort_keys=True)
+                        except Exception:
+                            cand_calc = candidate["calculo_json"] or ""
+                        if cand_calc == calc_blob:
+                            json_response(self, {"ok": True, "id": str(candidate["id"] or ""), "deduped": True})
+                            return
+                except Exception:
+                    pass
                 record_id = os.urandom(16).hex()
                 conn.execute(
                     """
@@ -36010,31 +35159,194 @@ class Handler(BaseHTTPRequestHandler):
                 """,
                 (seguimiento_accion_id, encargo_accion_id, now, record_id, workspace_id),
             )
-            auto_created = 0
-            try:
-                auto_created = run_workspace_automations(
-                    conn,
-                    workspace_id,
-                    "presupuesto_created",
-                    {
-                        "presupuesto_id": record_id,
-                        "empresa_id": empresa_id,
-                        "cliente_id": cliente_id,
-                        "servicio": servicio,
-                        "cliente_nombre": cliente_nombre,
-                        "estado": estado,
-                        "importe": total,
-                    },
-                    now,
-                )
-            except Exception as exc:
-                # No bloquea la creación del presupuesto si falla el módulo de automatizaciones (migración pendiente, etc.).
-                try:
-                    print(f"[WARN] run_workspace_automations presupuesto_created: {type(exc).__name__}: {exc}")
-                except Exception:
-                    pass
+            auto_created = run_workspace_automations(
+                conn,
+                workspace_id,
+                "presupuesto_created",
+                {
+                    "presupuesto_id": record_id,
+                    "empresa_id": empresa_id,
+                    "cliente_id": cliente_id,
+                    "servicio": servicio,
+                    "cliente_nombre": cliente_nombre,
+                    "estado": estado,
+                    "importe": total,
+                },
+                now,
+            )
             conn.commit()
             json_response(self, {"ok": True, "id": record_id, "automation_actions": auto_created})
+            return
+        elif parsed.path == "/api/workspace_presupuesto_duplicate":
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            source_id = str(payload.get("id") or payload.get("presupuesto_id") or "").strip()
+            if not workspace_id or not source_id:
+                json_response(self, {"error": "workspace_id e id requeridos"}, status=400)
+                return
+            original = conn.execute(
+                "SELECT * FROM workspace_presupuestos WHERE id = ? AND workspace_id = ? LIMIT 1",
+                (source_id, workspace_id),
+            ).fetchone()
+            if not original:
+                json_response(self, {"error": "presupuesto no encontrado"}, status=404)
+                return
+            original_lines = conn.execute(
+                "SELECT * FROM workspace_presupuesto_lineas WHERE presupuesto_id = ? ORDER BY orden ASC",
+                (source_id,),
+            ).fetchall()
+            now_date = datetime.now(timezone.utc).date().isoformat()
+            base_title = str(original.get("titulo") or "Presupuesto").strip() or "Presupuesto"
+            if "(copia" in base_title.lower():
+                new_title = base_title
+            else:
+                new_title = f"{base_title} (copia)"
+            new_id = os.urandom(16).hex()
+            conn.execute(
+                """
+                INSERT INTO workspace_presupuestos (
+                  id, workspace_id, empresa_id, cliente_id, servicio, referencia_tipo, referencia_id,
+                  titulo, estado, fecha, fecha_seguimiento, motivo_estado, responsable, forma_pago, encargo_estado,
+                  fecha_encargo, observaciones, subtotal, impuestos, total, calculo_json, seguimiento_accion_id,
+                  encargo_accion_id, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                """,
+                (
+                    new_id,
+                    workspace_id,
+                    original.get("empresa_id"),
+                    original.get("cliente_id"),
+                    original.get("servicio"),
+                    original.get("referencia_tipo"),
+                    original.get("referencia_id"),
+                    new_title,
+                    "Borrador",
+                    now_date,
+                    None,
+                    None,
+                    original.get("responsable"),
+                    original.get("forma_pago"),
+                    None,
+                    None,
+                    original.get("observaciones"),
+                    original.get("subtotal"),
+                    original.get("impuestos"),
+                    original.get("total"),
+                    original.get("calculo_json"),
+                    None,
+                    None,
+                    now,
+                    now,
+                ),
+            )
+            for idx, line in enumerate(original_lines or [], start=1):
+                conn.execute(
+                    """
+                    INSERT INTO workspace_presupuesto_lineas (
+                      id, presupuesto_id, orden, categoria, concepto, cantidad, unidad, precio_unitario, descuento_pct, total_linea,
+                      created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                    """,
+                    (
+                        os.urandom(16).hex(),
+                        new_id,
+                        idx,
+                        line.get("categoria"),
+                        line.get("concepto"),
+                        line.get("cantidad"),
+                        line.get("unidad"),
+                        line.get("precio_unitario"),
+                        line.get("descuento_pct"),
+                        line.get("total_linea"),
+                        now,
+                        now,
+                    ),
+                )
+            conn.commit()
+            json_response(self, {"ok": True, "id": new_id})
+            return
+        elif parsed.path == "/api/workspace_fincas_convert_presupuesto":
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            presupuesto_id = str(payload.get("presupuesto_id") or "").strip()
+            if not workspace_id or not presupuesto_id:
+                json_response(self, {"error": "workspace_id y presupuesto_id requeridos"}, status=400)
+                return
+            budget_row = conn.execute(
+                "SELECT * FROM workspace_presupuestos WHERE id = ? AND workspace_id = ? LIMIT 1",
+                (presupuesto_id, workspace_id),
+            ).fetchone()
+            if not budget_row:
+                json_response(self, {"error": "presupuesto no encontrado"}, status=404)
+                return
+            if normalize_service_key(budget_row["servicio"] or "") != "fincas":
+                json_response(self, {"error": "Solo presupuestos de fincas"}, status=400)
+                return
+            if normalize_workspace_budget_state(budget_row["estado"] or "") != "Aceptado":
+                json_response(self, {"error": "El presupuesto debe estar Aceptado para convertirlo"}, status=400)
+                return
+            existing_tipo = str(budget_row["referencia_tipo"] or "").strip()
+            existing_id = str(budget_row["referencia_id"] or "").strip()
+            if normalize_lookup_text(existing_tipo).lower().strip() == "comunidad" and existing_id:
+                existing = conn.execute(
+                    "SELECT id FROM workspace_fincas_comunidades WHERE id = ? AND workspace_id = ? LIMIT 1",
+                    (existing_id, workspace_id),
+                ).fetchone()
+                if existing:
+                    json_response(self, {"ok": True, "comunidad_id": existing_id, "presupuesto_id": presupuesto_id})
+                    return
+            calc = {}
+            try:
+                calc = json.loads(budget_row["calculo_json"] or "{}") if budget_row["calculo_json"] else {}
+                if not isinstance(calc, dict):
+                    calc = {}
+            except Exception:
+                calc = {}
+            nombre = str(calc.get("comunidad_denominacion") or "").strip() or str(budget_row["titulo"] or "").strip() or "Comunidad"
+            empresa_id = str(budget_row["empresa_id"] or "").strip()
+            num_vecinos = parse_non_negative_int(calc.get("num_vecinos"))
+            num_locales = parse_non_negative_int(calc.get("num_locales"))
+            num_trasteros = parse_non_negative_int(calc.get("num_trasteros"))
+            num_aparcamientos = parse_non_negative_int(calc.get("num_aparcamientos"))
+            cuota_sugerida = compute_fincas_cuota_sugerida(num_vecinos, num_locales, num_trasteros, num_aparcamientos)
+            cuota_mensual = round(parse_money_value(budget_row["subtotal"]), 2) if budget_row["subtotal"] is not None else cuota_sugerida
+            comunidad_id = os.urandom(16).hex()
+            conn.execute(
+                """
+                INSERT INTO workspace_fincas_comunidades (
+                  id, workspace_id, empresa_id, nombre, referencia_catastral, cif, direccion, presidente, secretario,
+                  estado, num_vecinos, num_locales, num_trasteros, num_aparcamientos, cuota_sugerida, cuota_mensual, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                """,
+                (
+                    comunidad_id,
+                    workspace_id,
+                    empresa_id,
+                    nombre,
+                    None,
+                    str(calc.get("comunidad_cif") or "").strip() or None,
+                    str(calc.get("comunidad_direccion") or "").strip() or None,
+                    str(calc.get("solicitante_nombre") or "").strip() or None,
+                    None,
+                    "Activa",
+                    num_vecinos,
+                    num_locales,
+                    num_trasteros,
+                    num_aparcamientos,
+                    cuota_sugerida,
+                    cuota_mensual or cuota_sugerida,
+                    now,
+                    now,
+                ),
+            )
+            conn.execute(
+                """
+                UPDATE workspace_presupuestos
+                SET referencia_tipo = ?, referencia_id = ?, updated_at = datetime(?)
+                WHERE id = ? AND workspace_id = ?
+                """,
+                ("comunidad", comunidad_id, now, presupuesto_id, workspace_id),
+            )
+            conn.commit()
+            json_response(self, {"ok": True, "comunidad_id": comunidad_id, "presupuesto_id": presupuesto_id})
             return
         elif parsed.path == "/api/workspace_fincas_comunidades":
             workspace_id = str(payload.get("workspace_id") or "").strip()
@@ -36056,7 +35368,6 @@ class Handler(BaseHTTPRequestHandler):
                 (payload.get("referencia_catastral") or "").strip() or None,
                 (payload.get("cif") or "").strip() or None,
                 (payload.get("direccion") or "").strip() or None,
-                (payload.get("foto_edificio_key") or "").strip() or None,
                 (payload.get("presidente") or "").strip() or None,
                 (payload.get("secretario") or "").strip() or None,
                 (payload.get("estado") or "").strip() or "Activa",
@@ -36071,7 +35382,7 @@ class Handler(BaseHTTPRequestHandler):
                 conn.execute(
                     """
                     UPDATE workspace_fincas_comunidades
-                    SET workspace_id = ?, empresa_id = ?, nombre = ?, referencia_catastral = ?, cif = ?, direccion = ?, foto_edificio_key = ?, presidente = ?,
+                    SET workspace_id = ?, empresa_id = ?, nombre = ?, referencia_catastral = ?, cif = ?, direccion = ?, presidente = ?,
                         secretario = ?, estado = ?, num_vecinos = ?, num_locales = ?, num_trasteros = ?,
                         num_aparcamientos = ?, cuota_sugerida = ?, cuota_mensual = ?, updated_at = datetime(?)
                     WHERE id = ? AND workspace_id = ?
@@ -36083,16 +35394,15 @@ class Handler(BaseHTTPRequestHandler):
                 conn.execute(
                     """
                     INSERT INTO workspace_fincas_comunidades (
-                      id, workspace_id, empresa_id, nombre, referencia_catastral, cif, direccion, foto_edificio_key, presidente, secretario,
+                      id, workspace_id, empresa_id, nombre, referencia_catastral, cif, direccion, presidente, secretario,
                       estado, num_vecinos, num_locales, num_trasteros, num_aparcamientos, cuota_sugerida, cuota_mensual, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
                     """,
                     (record_id, *values, now, now),
                 )
             conn.commit()
             json_response(self, {"ok": True, "id": record_id})
             return
-
         elif parsed.path == "/api/workspace_fincas_incidencias":
             workspace_id = str(payload.get("workspace_id") or "").strip()
             comunidad_id = str(payload.get("comunidad_id") or "").strip()
@@ -36536,100 +35846,6 @@ class Handler(BaseHTTPRequestHandler):
                 )
             conn.commit()
             json_response(self, {"ok": True, "id": record_id})
-            return
-        elif parsed.path == "/api/workspace_fincas_convert_presupuesto":
-            session = getattr(self, "auth_session", None) or self._current_session()
-            workspace_id = str(payload.get("workspace_id") or "").strip()
-            presupuesto_id = str(payload.get("presupuesto_id") or "").strip()
-            if not session:
-                json_response(self, {"error": "No autenticado"}, status=401)
-                return
-            if not workspace_id or not presupuesto_id:
-                json_response(self, {"error": "workspace_id y presupuesto_id requeridos"}, status=400)
-                return
-            ok, err = enforce_workspace_membership(conn, session, workspace_id)
-            if not ok:
-                json_response(self, {"error": err or "No autorizado"}, status=403)
-                return
-            budget = conn.execute(
-                """
-                SELECT id, workspace_id, empresa_id, cliente_id, servicio, estado, referencia_tipo, referencia_id,
-                       titulo, subtotal, impuestos, total, calculo_json
-                FROM workspace_presupuestos
-                WHERE id = ? AND workspace_id = ?
-                LIMIT 1
-                """,
-                (presupuesto_id, workspace_id),
-            ).fetchone()
-            if not budget:
-                json_response(self, {"error": "presupuesto no encontrado"}, status=404)
-                return
-            if normalize_lookup_text(budget["estado"] or "") != "aceptado":
-                json_response(self, {"error": "solo se puede convertir un presupuesto aceptado"}, status=400)
-                return
-            if normalize_lookup_text(budget["referencia_tipo"] or "") == "comunidad" and str(budget["referencia_id"] or "").strip():
-                json_response(self, {"ok": True, "comunidad_id": str(budget["referencia_id"] or "").strip(), "already": True})
-                return
-            calc = {}
-            try:
-                calc = json.loads(budget["calculo_json"] or "{}") if budget["calculo_json"] else {}
-                if not isinstance(calc, dict):
-                    calc = {}
-            except Exception:
-                calc = {}
-            num_vecinos = parse_non_negative_int(calc.get("num_vecinos"))
-            num_locales = parse_non_negative_int(calc.get("num_locales"))
-            num_trasteros = parse_non_negative_int(calc.get("num_trasteros"))
-            num_aparcamientos = parse_non_negative_int(calc.get("num_aparcamientos"))
-            cuota_sugerida = compute_fincas_cuota_sugerida(num_vecinos, num_locales, num_trasteros, num_aparcamientos)
-            comunidad_nombre = str(calc.get("comunidad_denominacion") or budget["titulo"] or "Comunidad").strip()
-            comunidad_cif = str(calc.get("comunidad_cif") or "").strip() or None
-            comunidad_direccion = str(calc.get("comunidad_direccion") or "").strip() or None
-            referencia_catastral = str(calc.get("referencia_catastral") or "").strip() or None
-            foto_edificio_key = str(calc.get("edificio_foto_key") or "").strip() or None
-            presidente = str(calc.get("solicitante_nombre") or "").strip() or None
-            cuota_mensual = round(float(budget["subtotal"] or cuota_sugerida or 0.0), 2)
-            comunidad_id = os.urandom(16).hex()
-            conn.execute(
-                """
-                INSERT INTO workspace_fincas_comunidades (
-                  id, workspace_id, empresa_id, nombre, referencia_catastral, cif, direccion, foto_edificio_key, presidente, secretario,
-                  estado, num_vecinos, num_locales, num_trasteros, num_aparcamientos, cuota_sugerida, cuota_mensual,
-                  created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
-                """,
-                (
-                    comunidad_id,
-                    workspace_id,
-                    str(budget["empresa_id"] or "").strip() or None,
-                    comunidad_nombre,
-                    referencia_catastral,
-                    comunidad_cif,
-                    comunidad_direccion,
-                    foto_edificio_key,
-                    presidente,
-                    None,
-                    "Activa",
-                    num_vecinos,
-                    num_locales,
-                    num_trasteros,
-                    num_aparcamientos,
-                    cuota_sugerida,
-                    cuota_mensual,
-                    now,
-                    now,
-                ),
-            )
-            conn.execute(
-                """
-                UPDATE workspace_presupuestos
-                SET referencia_tipo = ?, referencia_id = ?, updated_at = datetime(?)
-                WHERE id = ? AND workspace_id = ?
-                """,
-                ("comunidad", comunidad_id, now, presupuesto_id, workspace_id),
-            )
-            conn.commit()
-            json_response(self, {"ok": True, "comunidad_id": comunidad_id})
             return
         elif parsed.path == "/api/workspace_document_assign":
             workspace_id = str(payload.get("workspace_id") or "").strip()
@@ -37912,17 +37128,6 @@ class Handler(BaseHTTPRequestHandler):
             if not record_id:
                 json_response(self, {"error": "id requerido"}, status=400)
                 return
-            target_row = conn.execute(
-                "SELECT id, empresa_id FROM asesoramientos_financiacion WHERE id = ? LIMIT 1",
-                (record_id,),
-            ).fetchone()
-            if not target_row:
-                json_response(self, {"error": "Registro no encontrado"}, status=404)
-                return
-            row_empresa_id = str(target_row["empresa_id"] or "").strip()
-            if row_empresa_id and row_empresa_id != str(empresa["id"] or "").strip():
-                json_response(self, {"error": "Asesoramiento fuera del scope de empresa"}, status=403)
-                return
             cliente1_id = ensure_cliente_for_financiacion(
                 conn,
                 empresa["id"],
@@ -38001,8 +37206,6 @@ class Handler(BaseHTTPRequestHandler):
                 "campos_ocr",
             )
             updates = {key: payload.get(key) for key in allowed if key in payload}
-            if not row_empresa_id:
-                updates["empresa_id"] = empresa["id"]
             if cliente1_id:
                 updates["cliente1_id"] = cliente1_id
             if cliente2_id:
@@ -38043,19 +37246,6 @@ class Handler(BaseHTTPRequestHandler):
             if not row:
                 json_response(self, {"error": "Registro no encontrado"}, status=404)
                 return
-            row_empresa_id = str(row["empresa_id"] or "").strip()
-            if row_empresa_id and row_empresa_id != str(empresa["id"] or "").strip():
-                json_response(self, {"error": "Asesoramiento fuera del scope de empresa"}, status=403)
-                return
-            if not row_empresa_id:
-                conn.execute(
-                    "UPDATE asesoramientos_financiacion SET empresa_id = ?, updated_at = datetime(?) WHERE id = ?",
-                    (empresa["id"], now, record_id),
-                )
-                row = conn.execute(
-                    "SELECT * FROM asesoramientos_financiacion WHERE id = ?",
-                    (record_id,),
-                ).fetchone()
             hipoteca_id = convert_fin_asesoramiento_to_hipoteca(conn, empresa["id"], row, now)
             json_response(self, {"hipoteca_id": hipoteca_id})
         elif parsed.path == "/api/hipotecas_update":
@@ -38066,30 +37256,6 @@ class Handler(BaseHTTPRequestHandler):
             current_row = conn.execute("SELECT * FROM hipotecas WHERE id = ?", (record_id,)).fetchone()
             if not current_row:
                 json_response(self, {"error": "Registro no encontrado"}, status=404)
-                return
-            req_empresa_id = str(payload.get("empresa_id") or "").strip()
-            if req_empresa_id:
-                empresa_exists = conn.execute(
-                    "SELECT id FROM empresas WHERE id = ? LIMIT 1",
-                    (req_empresa_id,),
-                ).fetchone()
-                if not empresa_exists:
-                    json_response(self, {"error": "empresa_id no válido"}, status=400)
-                    return
-            if (not req_empresa_id) and str(payload.get("empresa_nombre") or "").strip():
-                req_empresa_nombre = str(payload.get("empresa_nombre") or "").strip()
-                empresa_row = conn.execute(
-                    "SELECT id FROM empresas WHERE nombre = ? LIMIT 1",
-                    (req_empresa_nombre,),
-                ).fetchone()
-                if empresa_row:
-                    req_empresa_id = str(empresa_row["id"] or "").strip()
-            row_empresa_id = str(current_row["empresa_id"] or "").strip()
-            if row_empresa_id and req_empresa_id and row_empresa_id != req_empresa_id:
-                json_response(self, {"error": "Hipoteca fuera del scope de empresa"}, status=403)
-                return
-            if (not row_empresa_id) and (not req_empresa_id):
-                json_response(self, {"error": "empresa_id requerido"}, status=400)
                 return
             aliases = {
                 "entidad": "banco",
@@ -38124,8 +37290,6 @@ class Handler(BaseHTTPRequestHandler):
             for alias, target in aliases.items():
                 if alias in payload:
                     updates[target] = payload.get(alias)
-            if (not row_empresa_id) and req_empresa_id:
-                updates["empresa_id"] = req_empresa_id
             if not updates:
                 json_response(self, {"error": "Sin cambios"}, status=400)
                 return
@@ -38175,40 +37339,11 @@ class Handler(BaseHTTPRequestHandler):
                 f"UPDATE hipotecas SET {set_clause}, updated_at = datetime(?) WHERE id = ?",
                 values,
             )
-            effective_empresa_id = row_empresa_id or req_empresa_id
-            effective_cliente_id = str(updates.get("cliente_id") or current_row["cliente_id"] or "").strip()
-            if effective_cliente_id and effective_empresa_id:
-                ensure_cliente_servicio_link(conn, effective_cliente_id, effective_empresa_id, "financiaciones", now)
             audit("hipoteca", record_id, "actualizar", json.dumps(payload), payload.get("usuario"))
         elif parsed.path == "/api/hipotecas_delete":
             record_id = payload.get("id")
             if not record_id:
                 json_response(self, {"error": "id requerido"}, status=400)
-                return
-            row = conn.execute("SELECT id, empresa_id FROM hipotecas WHERE id = ? LIMIT 1", (record_id,)).fetchone()
-            if not row:
-                json_response(self, {"error": "Registro no encontrado"}, status=404)
-                return
-            req_empresa_id = str(payload.get("empresa_id") or "").strip()
-            if req_empresa_id:
-                empresa_exists = conn.execute(
-                    "SELECT id FROM empresas WHERE id = ? LIMIT 1",
-                    (req_empresa_id,),
-                ).fetchone()
-                if not empresa_exists:
-                    json_response(self, {"error": "empresa_id no válido"}, status=400)
-                    return
-            if (not req_empresa_id) and str(payload.get("empresa_nombre") or "").strip():
-                req_empresa_nombre = str(payload.get("empresa_nombre") or "").strip()
-                empresa_row = conn.execute(
-                    "SELECT id FROM empresas WHERE nombre = ? LIMIT 1",
-                    (req_empresa_nombre,),
-                ).fetchone()
-                if empresa_row:
-                    req_empresa_id = str(empresa_row["id"] or "").strip()
-            row_empresa_id = str(row["empresa_id"] or "").strip()
-            if row_empresa_id and req_empresa_id and row_empresa_id != req_empresa_id:
-                json_response(self, {"error": "Hipoteca fuera del scope de empresa"}, status=403)
                 return
             deleted = delete_hipoteca_record(conn, record_id)
             if not deleted:
@@ -38855,165 +37990,6 @@ class Handler(BaseHTTPRequestHandler):
             log_seguro_event(conn, row, "ipid_entregado", now, payload={"ipid_id": ipid_id, "fecha": fecha_entrega})
             json_response(self, {"ok": True, "id": ipid_id})
             conn.commit()
-            return
-        elif parsed.path == "/api/seguros_backfill_s3":
-            session = getattr(self, "auth_session", None) or self._current_session()
-            if not session:
-                json_response(self, {"error": "No autenticado"}, status=401)
-                return
-            if not workspace_actor_is_privileged(conn, session):
-                json_response(self, {"error": "No autorizado"}, status=403)
-                return
-
-            empresa_id = str(payload.get("empresa_id") or "").strip()
-            empresa_nombre = str(payload.get("empresa_nombre") or "").strip()
-            if not empresa_id and empresa_nombre:
-                row_empresa = conn.execute("SELECT id FROM empresas WHERE nombre = ? LIMIT 1", (empresa_nombre,)).fetchone()
-                if row_empresa:
-                    empresa_id = str(row_empresa["id"] or "").strip()
-            prefix = str(payload.get("prefix") or "seguros").strip()
-            prefix = prefix.strip().lstrip("/")
-            if prefix and not prefix.endswith("/"):
-                prefix = prefix + "/"
-            truthy = {"1", "true", "yes", "si", "sí", "on"}
-            apply_flag = str(payload.get("apply") or "").strip().lower() in truthy
-            if "dry_run" in payload:
-                dry_run = str(payload.get("dry_run") or "").strip().lower() in truthy
-            else:
-                dry_run = not apply_flag
-            max_objects = payload.get("max_objects")
-            try:
-                max_objects = int(max_objects) if max_objects not in (None, "") else 0
-            except Exception:
-                max_objects = 0
-            max_objects = max(0, min(50000, max_objects or 0))
-
-            # Carga pólizas candidatas (solo las que no tienen key/url aún).
-            where = ["1=1"]
-            values = []
-            if empresa_id:
-                where.append("empresa_id = ?")
-                values.append(empresa_id)
-            rows = conn.execute(
-                f"""
-                SELECT id, poliza_numero, poliza_key, poliza_url
-                FROM seguros
-                WHERE {' AND '.join(where)}
-                """,
-                values,
-            ).fetchall()
-            buckets = defaultdict(list)
-            already = 0
-            for r in rows:
-                poliza_num = (r["poliza_numero"] or "").strip()
-                norm = normalize_poliza_key(poliza_num)
-                if not norm:
-                    continue
-                poliza_key = (r["poliza_key"] or "").strip()
-                poliza_url = (r["poliza_url"] or "").strip()
-                if poliza_key or poliza_url:
-                    already += 1
-                    continue
-                buckets[norm].append(str(r["id"]))
-            candidates_total = sum(len(v) for v in buckets.values())
-
-            client = s3_client()
-            if not client:
-                json_response(self, {"error": "S3 no configurado"}, status=400)
-                return
-            bucket, region = s3_config()
-            if not bucket or not region:
-                json_response(self, {"error": "S3 no configurado"}, status=400)
-                return
-
-            scanned = 0
-            guessed = 0
-            matched = 0
-            updates = []
-            unmatched = []
-            duplicates = 0
-            used_policy_ids = set()
-            continuation = None
-            while True:
-                kwargs = {"Bucket": bucket, "Prefix": prefix or ""}
-                if continuation:
-                    kwargs["ContinuationToken"] = continuation
-                listed = client.list_objects_v2(**kwargs)
-                contents = listed.get("Contents") or []
-                for obj in contents:
-                    key = str(obj.get("Key") or "").strip()
-                    if not key:
-                        continue
-                    scanned += 1
-                    if max_objects and scanned > max_objects:
-                        break
-                    # solo PDFs
-                    if not key.lower().endswith(".pdf"):
-                        continue
-                    poliza_guess = guess_poliza_from_filename(key)
-                    poliza_norm = normalize_poliza_key(poliza_guess)
-                    if not poliza_norm:
-                        continue
-                    guessed += 1
-                    candidates = buckets.get(poliza_norm) or []
-                    if not candidates:
-                        unmatched.append(key)
-                        continue
-                    # evita asignar el mismo seguro a múltiples ficheros
-                    picked = None
-                    while candidates:
-                        cid = candidates.pop(0)
-                        if cid not in used_policy_ids:
-                            picked = cid
-                            break
-                    if not picked:
-                        duplicates += 1
-                        continue
-                    used_policy_ids.add(picked)
-                    matched += 1
-                    public_url = f"https://{bucket}.s3.{region}.amazonaws.com/{key}"
-                    updates.append((key, public_url, now, picked))
-                if max_objects and scanned > max_objects:
-                    break
-                if listed.get("IsTruncated"):
-                    continuation = listed.get("NextContinuationToken")
-                    if not continuation:
-                        break
-                else:
-                    break
-
-            updated = 0
-            if updates and not dry_run:
-                # Solo rellenamos si sigue vacío (no pisamos datos existentes).
-                conn.executemany(
-                    """
-                    UPDATE seguros
-                    SET poliza_key = ?, poliza_url = ?, updated_at = datetime(?)
-                    WHERE id = ?
-                      AND (COALESCE(TRIM(poliza_key), '') = '' AND COALESCE(TRIM(poliza_url), '') = '')
-                    """,
-                    updates,
-                )
-                updated = len(updates)
-                conn.commit()
-
-            json_response(
-                self,
-                {
-                    "ok": True,
-                    "dry_run": bool(dry_run),
-                    "empresa_id": empresa_id,
-                    "prefix": prefix,
-                    "polizas_candidates": candidates_total,
-                    "polizas_already_linked": already,
-                    "objects_scanned": scanned,
-                    "objects_with_poliza_guess": guessed,
-                    "matched": matched,
-                    "updated": updated,
-                    "duplicates_skipped": duplicates,
-                    "unmatched_sample": unmatched[:50],
-                },
-            )
             return
         elif parsed.path == "/api/seguros_enrich":
             record_id = payload.get("id")
@@ -44073,14 +43049,6 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": err or "No autorizado"}, status=403)
                 return
             json_response(self, {"rows": fetch_workspace_link_rows(conn, workspace_id)})
-            return
-
-        if path == "/api/workspace_service_matrix":
-            workspace_id = (params.get("workspace_id", [""])[0] or "").strip()
-            if not workspace_id:
-                json_response(self, {"error": "workspace_id requerido"}, status=400)
-                return
-            json_response(self, fetch_workspace_service_matrix(conn, workspace_id))
             return
 
         if path == "/api/workspace_detail":

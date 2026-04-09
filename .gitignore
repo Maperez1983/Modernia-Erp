@@ -4,9 +4,6 @@ vision-sa.json
 data/.DS_Store
 data/*.sqlite
 data/*.bak_*
-data/rentas_*_preview*.json
-data/rentas_*_preview*.csv
-data/rentas_*_review_queue*.json
 *.sqlite-wal
 *.sqlite-shm
 *.sqlite-journal
@@ -14,11 +11,4 @@ __pycache__/
 .pytest_cache/
 web/uploads/
 reports/catastro/
-reports/aon_miconversor/
-reports/miconversor_autonomos_ocr.xlsx
-reports/seguros_extract_*.csv
-reports/seguros_extract_*.json
-reports/seguros_extract_*_summary.json
-reports/seguros_analyze_*.csv
-reports/seguros_analyze_*.json
 .venv/

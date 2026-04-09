@@ -93,27 +93,6 @@ Cuenta
 """
 
 
-FISCALES_INLINE_SAMPLE = """
-Consulta de Datos Fiscales 2024
-DATOS IDENTIFICATIVOS
-NIF: NOMBRE: 79018863V RODRIGUEZ MEDEL ESPERANZA LIBERTAD
-DOMICILIO FISCAL
-Tipo Vía
-CALLE
-Nombre largo Vía
-NAVEGANTE ISIDORO
-NUM
-15
-Código Postal Municipio
-29130
-ALHAURÍN DE LA TORRE
-Provincia
-MALAGA
-Cuenta
-3650938313
-"""
-
-
 MODELO_ACTIVITY_SAMPLE = """
 INFORMACIÓN DE LA PRESENTACIÓN DE LA DECLARACIÓN
 Modelo 100
@@ -593,11 +572,6 @@ class RentasImportTests(unittest.TestCase):
         self.assertEqual(parsed["poblacion"], "ALHAURÍN DE LA TORRE")
         self.assertEqual(parsed["provincia"], "MALAGA")
         self.assertIn("3650938313", parsed["cuentas_detectadas"])
-
-    def test_parse_datos_fiscales_handles_inline_layout(self):
-        parsed = parse_datos_fiscales_text(FISCALES_INLINE_SAMPLE)
-        self.assertEqual(parsed["cliente_nif"], "79018863V")
-        self.assertEqual(parsed["cliente_nombre"], "RODRIGUEZ MEDEL ESPERANZA LIBERTAD")
 
     def test_parse_datos_fiscales_uses_public_aids_as_income_fallback(self):
         parsed = parse_datos_fiscales_text(FISCALES_AYUDAS_SAMPLE)
