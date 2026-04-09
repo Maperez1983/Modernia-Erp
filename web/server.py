@@ -28284,7 +28284,7 @@ def build_inmueble_visit_sheet_pdf(company, inmueble, captacion, owners, buyer, 
         (
             "Condiciones de la visita",
             [
-                "El cliente visitante reconoce haber visitado el inmueble con intermediación de ESTUDIO VELAZQUEZ / MODERNIA.",
+                f"El cliente visitante reconoce haber visitado el inmueble con intermediación de {str((company or {}).get('nombre') or 'la agencia').strip()}.",
                 "Cualquier negociación, reserva o compraventa/alquiler posterior sobre este inmueble deberá canalizarse a través de la agencia.",
             ],
         ),
