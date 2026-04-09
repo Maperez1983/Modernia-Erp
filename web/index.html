@@ -8,7 +8,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Verifika²" />
     <title>Verifika² · CRM & Portal</title>
-    <link rel="stylesheet" href="styles.css?v=160" />
+    <link rel="stylesheet" href="styles.css?v=161" />
     <link rel="manifest" href="manifest.webmanifest?v=17" />
     <link rel="icon" href="/icons/ios/v28/icon-192.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/icons/ios/v28/apple-touch-icon-180.png" />
@@ -129,15 +129,6 @@
             <div id="workspaceOnboardingActions"></div>
           </div>
         </div>
-        <div class="form-card crm-workspace-view" data-workspace-view="tenant" data-tenant-section="permisos">
-          <div class="section-head">
-            <div>
-              <h3>Matriz de Accesos</h3>
-              <p class="muted">Plantillas de permisos recomendadas por perfil para mantener el producto gobernable.</p>
-            </div>
-          </div>
-          <div id="workspacePermissionMatrix"></div>
-        </div>
         <div id="workspaceOverviewLauncherCard" class="form-card crm-workspace-view" data-workspace-view="operations">
           <div class="section-head">
             <div>
@@ -147,110 +138,125 @@
           </div>
           <div id="workspaceLauncher"></div>
         </div>
-        <div class="workspace-central-layout crm-workspace-view" data-workspace-view="tenant" data-tenant-section="general">
-          <div class="form-card">
-            <div class="section-head">
-              <div>
-                <h3>Workspaces</h3>
-                <p class="muted">Cada workspace agrupa las empresas y módulos de un cliente dentro de Verifika².</p>
+        <div class="workspace-config-layout crm-workspace-view" data-workspace-view="tenant">
+          <aside class="workspace-config-side">
+            <div class="form-card">
+              <div class="section-head">
+                <div>
+                  <h3>Workspaces</h3>
+                  <p class="muted">Selecciona un workspace para configurarlo.</p>
+                </div>
               </div>
+              <div id="workspaceList"></div>
             </div>
-            <div id="workspaceList"></div>
-          </div>
-          <div class="form-card">
-            <div class="section-head">
-              <div>
-                <h3>Configuración del workspace</h3>
-                <p class="muted">Define branding, estado y plan comercial del workspace dentro de Verifika².</p>
+            <div class="form-card">
+              <div class="section-head">
+                <div>
+                  <h3>Configuración</h3>
+                  <p class="muted">Nombre, estado, plan y branding.</p>
+                </div>
+                <div class="toolbar">
+                  <button type="button" id="workspaceNewCustomerBtn" class="secondary ghost">Nuevo cliente</button>
+                  <button type="button" id="workspaceNewBtn" class="secondary ghost">Nuevo workspace</button>
+                </div>
               </div>
-              <div class="toolbar">
-                <button type="button" id="workspaceNewCustomerBtn" class="secondary ghost">Nuevo cliente</button>
-                <button type="button" id="workspaceNewBtn" class="secondary ghost">Nuevo workspace</button>
-              </div>
+              <form id="workspaceForm" class="form-grid">
+                <input type="hidden" name="id" />
+                <label>
+                  Nombre del workspace
+                  <input name="nombre" required />
+                </label>
+                <label>
+                  Slug
+                  <input name="slug" />
+                </label>
+                <label>
+                  Estado
+                  <select name="estado">
+                    <option>Activo</option>
+                    <option>Implantación</option>
+                    <option>Pausa</option>
+                    <option>Archivo</option>
+                  </select>
+                </label>
+                <label>
+                  Plan
+                  <select name="plan">
+                    <option>Base</option>
+                    <option>Pro</option>
+                    <option>Enterprise</option>
+                  </select>
+                </label>
+                <label>
+                  Color principal
+                  <input name="primary_color" placeholder="#0B1D33" />
+                </label>
+                <label>
+                  Color acento
+                  <input name="accent_color" placeholder="#F2C14E" />
+                </label>
+                <label class="span-2">
+                  Descripción
+                  <textarea name="descripcion" rows="3"></textarea>
+                </label>
+                <div class="form-actions">
+                  <button type="submit">Guardar</button>
+                  <span id="workspaceFormStatus" class="muted"></span>
+                </div>
+              </form>
             </div>
-            <form id="workspaceForm" class="form-grid">
-              <input type="hidden" name="id" />
-              <label>
-                Nombre del workspace
-                <input name="nombre" required />
-              </label>
-              <label>
-                Slug
-                <input name="slug" />
-              </label>
-              <label>
-                Estado
-                <select name="estado">
-                  <option>Activo</option>
-                  <option>Implantación</option>
-                  <option>Pausa</option>
-                  <option>Archivo</option>
-                </select>
-              </label>
-              <label>
-                Plan
-                <select name="plan">
-                  <option>Base</option>
-                  <option>Pro</option>
-                  <option>Enterprise</option>
-                </select>
-              </label>
-              <label>
-                Color principal
-                <input name="primary_color" placeholder="#0B1D33" />
-              </label>
-              <label>
-                Color acento
-                <input name="accent_color" placeholder="#F2C14E" />
-              </label>
-              <label class="span-2">
-                Descripción
-                <textarea name="descripcion" rows="3"></textarea>
-              </label>
-              <div class="form-actions">
-                <button type="submit">Guardar workspace</button>
-                <span id="workspaceFormStatus" class="muted"></span>
+          </aside>
+          <section class="workspace-config-main">
+            <div class="form-card" data-tenant-section="general">
+              <h3>Mapa societario</h3>
+              <p class="muted">Relación operativa entre empresas del grupo dentro del workspace actual.</p>
+              <div id="holdingOrgChart" class="org-chart"></div>
+            </div>
+            <div class="form-card" data-tenant-section="permisos">
+              <div class="section-head">
+                <div>
+                  <h3>Matriz de accesos</h3>
+                  <p class="muted">Plantillas de permisos recomendadas por perfil.</p>
+                </div>
               </div>
-            </form>
-          </div>
-        </div>
-        <div class="workspace-central-layout crm-workspace-view" data-workspace-view="tenant" data-tenant-section="empresas">
-	          <div class="form-card">
-	            <div class="section-head">
-	              <div>
-	                <h3>Empresas del grupo</h3>
-	                <p class="muted">Sociedades operativas que viven dentro del workspace.</p>
-	              </div>
-	            </div>
-	            <div id="workspaceCompanies"></div>
-	            <div id="workspaceCompanyEditor" class="form-card hidden" style="margin-top: 14px;">
-	              <div class="section-head">
-	                <div>
-	                  <h3>Editar empresa</h3>
-	                  <p class="muted">CIF/dirección, sector, convenio y CNAE (múltiples).</p>
-	                </div>
-	                <div class="toolbar">
-	                  <button type="button" id="workspaceCompanyEditorClose" class="secondary ghost">Cerrar</button>
-	                </div>
-	              </div>
-	              <form id="workspaceCompanyForm" class="form-grid">
-	                <input type="hidden" name="id" />
-	                <label>
-	                  Empresa
-	                  <input name="nombre" disabled />
-	                </label>
+              <div id="workspacePermissionMatrix"></div>
+            </div>
+            <div class="form-card" data-tenant-section="empresas">
+              <div class="section-head">
+                <div>
+                  <h3>Empresas</h3>
+                  <p class="muted">Sociedades operativas que viven dentro del workspace.</p>
+                </div>
+              </div>
+              <div id="workspaceCompanies"></div>
+              <div id="workspaceCompanyEditor" class="form-card hidden" style="margin-top: 14px;">
+                <div class="section-head">
+                  <div>
+                    <h3>Editar empresa</h3>
+                    <p class="muted">CIF/dirección, sector, convenio y CNAE (múltiples).</p>
+                  </div>
+                  <div class="toolbar">
+                    <button type="button" id="workspaceCompanyEditorClose" class="secondary ghost">Cerrar</button>
+                  </div>
+                </div>
+                <form id="workspaceCompanyForm" class="form-grid">
+                  <input type="hidden" name="id" />
+                  <label>
+                    Empresa
+                    <input name="nombre" disabled />
+                  </label>
                   <label>
                     Razón social
                     <input name="razon_social" placeholder="Ej. Modernia Asesores S.L." />
                   </label>
-	                <label>
-	                  CIF/NIF
-	                  <input name="nif" placeholder="B12345678" />
-	                </label>
-	                <label class="span-2">
-	                  Dirección
-	                  <input name="direccion" placeholder="C/ ... · Ciudad" />
-	                </label>
+                  <label>
+                    CIF/NIF
+                    <input name="nif" placeholder="B12345678" />
+                  </label>
+                  <label class="span-2">
+                    Dirección
+                    <input name="direccion" placeholder="C/ ... · Ciudad" />
+                  </label>
                   <label class="span-2">
                     Dirección fiscal
                     <input name="direccion_fiscal" placeholder="(si es distinta)" />
@@ -299,38 +305,38 @@
                       </div>
                     </div>
                   </div>
-	                <label class="span-2">
-	                  Sector / actividad
-	                  <input name="sector" placeholder="Ej. Administración de fincas, inmobiliaria..." />
-	                </label>
-	                <label class="span-2">
-	                  Buscar CNAE por actividad (texto)
-	                  <input id="workspaceCompanyCnaeQuery" placeholder="Ej. gestión de comunidades, asesoría laboral..." />
-	                </label>
-	                <div id="workspaceCompanyCnaeResults" class="crm-mini-list span-2"></div>
-	                <label class="span-2">
-	                  CNAE(s) (separados por coma)
-	                  <input id="workspaceCompanyCnaes" name="cnaes" placeholder="68.32, 69.20" />
-	                </label>
-	                <label class="span-2">
-	                  Convenio (nombre o referencia)
-	                  <input name="convenio_nombre" placeholder="Ej. Oficinas y despachos provincial..." />
-	                </label>
-	                <label>
-	                  Convenio key (interno)
-	                  <input name="convenio_key" placeholder="oficinas_y_despachos" />
-	                </label>
-	                <label>
-	                  Vacaciones (modo)
-	                  <select name="vacaciones_modo">
-	                    <option value="habiles">Hábiles</option>
-	                    <option value="naturales">Naturales</option>
-	                  </select>
-	                </label>
-	                <label>
-	                  Vacaciones días/año
-	                  <input name="vacaciones_dias_anuales" placeholder="22" />
-	                </label>
+                  <label class="span-2">
+                    Sector / actividad
+                    <input name="sector" placeholder="Ej. Administración de fincas, inmobiliaria..." />
+                  </label>
+                  <label class="span-2">
+                    Buscar CNAE por actividad (texto)
+                    <input id="workspaceCompanyCnaeQuery" placeholder="Ej. gestión de comunidades, asesoría laboral..." />
+                  </label>
+                  <div id="workspaceCompanyCnaeResults" class="crm-mini-list span-2"></div>
+                  <label class="span-2">
+                    CNAE(s) (separados por coma)
+                    <input id="workspaceCompanyCnaes" name="cnaes" placeholder="68.32, 69.20" />
+                  </label>
+                  <label class="span-2">
+                    Convenio (nombre o referencia)
+                    <input name="convenio_nombre" placeholder="Ej. Oficinas y despachos provincial..." />
+                  </label>
+                  <label>
+                    Convenio key (interno)
+                    <input name="convenio_key" placeholder="oficinas_y_despachos" />
+                  </label>
+                  <label>
+                    Vacaciones (modo)
+                    <select name="vacaciones_modo">
+                      <option value="habiles">Hábiles</option>
+                      <option value="naturales">Naturales</option>
+                    </select>
+                  </label>
+                  <label>
+                    Vacaciones días/año
+                    <input name="vacaciones_dias_anuales" placeholder="22" />
+                  </label>
                   <label class="span-2">
                     IBAN (para facturas/remesas)
                     <input name="iban" placeholder="ES00 0000 0000 00 0000000000" />
@@ -343,42 +349,43 @@
                     Banco
                     <input name="banco_nombre" placeholder="Ej. Banco Santander" />
                   </label>
-	                <div class="form-actions span-2">
-	                  <button type="submit">Guardar empresa</button>
-	                  <span id="workspaceCompanyFormStatus" class="muted"></span>
-	                </div>
-	              </form>
-	            </div>
-	          </div>
-        </div>
-        <div class="workspace-central-layout crm-workspace-view" data-workspace-view="tenant" data-tenant-section="usuarios">
-          <div class="form-card">
-            <div class="section-head">
-              <div>
-                <h3>Miembros</h3>
-                <p class="muted">Usuarios con acceso a este workspace (recomendado para modo comercial multi-tenant).</p>
+                  <div class="form-actions span-2">
+                    <button type="submit">Guardar empresa</button>
+                    <span id="workspaceCompanyFormStatus" class="muted"></span>
+                  </div>
+                </form>
               </div>
             </div>
-            <div id="workspaceMembers"></div>
-          </div>
-          <div class="form-card">
-            <div class="section-head">
-              <div>
-                <h3>Vínculos</h3>
-                <p class="muted">Relaciones Gestoría ↔ Cliente (alta comercial multi-tenant).</p>
+            <div class="workspace-central-layout" data-tenant-section="usuarios">
+              <div class="form-card">
+                <div class="section-head">
+                  <div>
+                    <h3>Miembros</h3>
+                    <p class="muted">Usuarios con acceso a este workspace.</p>
+                  </div>
+                </div>
+                <div id="workspaceMembers"></div>
+              </div>
+              <div class="form-card">
+                <div class="section-head">
+                  <div>
+                    <h3>Vínculos</h3>
+                    <p class="muted">Relaciones Gestoría ↔ Cliente.</p>
+                  </div>
+                </div>
+                <div id="workspaceLinks"></div>
               </div>
             </div>
-            <div id="workspaceLinks"></div>
-          </div>
-        </div>
-        <div class="form-card crm-workspace-view" data-workspace-view="tenant" data-tenant-section="modulos">
-          <div class="section-head">
-            <div>
-              <h3>Módulos del producto</h3>
-              <p class="muted">Activa o pausa verticales y motores transversales por workspace.</p>
+            <div class="form-card" data-tenant-section="modulos">
+              <div class="section-head">
+                <div>
+                  <h3>Módulos</h3>
+                  <p class="muted">Activa o pausa verticales y motores transversales.</p>
+                </div>
+              </div>
+              <div id="workspaceModules"></div>
             </div>
-          </div>
-          <div id="workspaceModules"></div>
+          </section>
         </div>
         <div class="form-card crm-workspace-view" data-workspace-view="clients">
           <div class="section-head">
@@ -1967,11 +1974,6 @@
             </form>
             <div id="workspaceFincasMeetingList"></div>
           </div>
-        </div>
-        <div class="form-card crm-workspace-view" data-workspace-view="tenant" data-tenant-section="general">
-          <h3>Mapa societario</h3>
-          <p class="muted">Relación operativa entre empresas del grupo dentro del workspace actual.</p>
-          <div id="holdingOrgChart" class="org-chart"></div>
         </div>
         </div>
       </section>

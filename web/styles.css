@@ -3029,6 +3029,31 @@ body.crm-fin #companySummary {
   min-width: max-content;
 }
 
+.workspace-config-layout {
+  display: grid;
+  grid-template-columns: minmax(320px, 420px) minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.workspace-config-side {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+}
+
+.workspace-config-main {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+}
+
+@media (max-width: 980px) {
+  .workspace-config-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
 .crm-workspace-view {
   display: grid;
   gap: 14px;
