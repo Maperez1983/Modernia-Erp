@@ -26986,6 +26986,82 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
     servicio_label = servicio_key or "-"
     ref_label = budget.get("id") or "-"
 
+    def _parse_bold_segments(text):
+        # Mini-markdown: soporta **negrita** dentro de una misma línea.
+        # Devolvemos [(segmento, bold_bool), ...]
+        raw = str(text or "")
+        if "**" not in raw:
+            return [(raw, False)]
+        out = []
+        buf = ""
+        bold = False
+        i = 0
+        while i < len(raw):
+            if raw[i : i + 2] == "**":
+                if buf:
+                    out.append((buf, bold))
+                    buf = ""
+                bold = not bold
+                i += 2
+                continue
+            buf += raw[i]
+            i += 1
+        if buf:
+            out.append((buf, bold))
+        # Si hay un cierre sin abrir (bold True al final), lo tratamos como texto normal.
+        if out and out[-1][1] and raw.count("**") % 2 == 1:
+            flattened = "".join(seg for seg, _ in out)
+            return [(flattened, False)]
+        return out or [(raw, False)]
+
+    def _wrap_rich_text(text, width_chars=98):
+        # Wrapping aproximado por nº de caracteres (como _pdf_wrap_lines),
+        # pero preservando qué palabras van en bold.
+        segments = _parse_bold_segments(text)
+        words = []
+        for seg, is_bold in segments:
+            parts = str(seg).split(" ")
+            for idx, part in enumerate(parts):
+                if part == "" and idx == 0:
+                    continue
+                if part == "":
+                    # espacios múltiples: los colapsamos.
+                    continue
+                words.append((part, is_bold))
+        if not words:
+            return [[("", False)]]
+        lines = []
+        current = []
+        current_len = 0
+        for word, is_bold in words:
+            add_len = len(word) + (1 if current else 0)
+            if current and (current_len + add_len) > max(20, int(width_chars or 98)):
+                lines.append(current)
+                current = []
+                current_len = 0
+            if current:
+                current.append((" ", False))
+                current_len += 1
+            current.append((word, is_bold))
+            current_len += len(word)
+        if current:
+            lines.append(current)
+        return lines
+
+    def _draw_rich_line(draw, x, y, parts, font_regular, font_bold, fill):
+        cursor_x = x
+        for chunk, is_bold in parts:
+            if not chunk:
+                continue
+            font = font_bold if is_bold else font_regular
+            draw.text((cursor_x, y), chunk, fill=fill, font=font)
+            try:
+                box = draw.textbbox((cursor_x, y), chunk, font=font)
+                cursor_x = box[2]
+            except Exception:
+                cursor_x += int(len(chunk) * 10)
+        return cursor_x
+
     def _build_fincas_presentation_letter_lines():
         client_name = str(calc.get("comunidad_denominacion") or client.get("nombre") or budget.get("titulo") or "").strip() or "Comunidad"
         fecha_txt = str(budget.get("fecha") or "").strip() or datetime.now().date().isoformat()
@@ -27016,8 +27092,8 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
                 + ([f"{n_tra} trasteros × 1 €"] if n_tra else [])
             )
             + " (mínimo 60 €).",
-            f"Cuota mensual propuesta (sin IVA): {format_eur_short(subtotal)} · IVA (21%): {format_eur_short(impuestos)} · Total mensual (con IVA): {format_eur_short(total)}.",
-            f"Total anual (con IVA): {format_eur_short(total * 12)}.",
+            f"Cuota mensual propuesta (sin IVA): **{format_eur_short(subtotal)}** · IVA (21%): **{format_eur_short(impuestos)}** · Total mensual (con IVA): **{format_eur_short(total)}**.",
+            f"Total anual (con IVA): **{format_eur_short(total * 12)}**.",
             "",
             "Quedamos a su disposición para concretar alcance, fechas de implantación y condiciones particulares de la comunidad.",
         ]
@@ -27103,43 +27179,74 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
     def new_page(include_cards=False):
         image = Image.new("RGB", (page_width, page_height), "white")
         draw = ImageDraw.Draw(image)
-        draw.rounded_rectangle((0, 0, page_width, 250), radius=0, fill=primary)
-        draw.polygon([(page_width - 220, 0), (page_width, 0), (page_width, 180)], fill=accent)
-        draw.text((margin_x, top_margin), "PRESUPUESTO", fill="white", font=font_title)
-        draw.text((margin_x, top_margin + 62), company.get("nombre") or workspace.get("nombre") or "Workspace", fill=(240, 246, 248), font=font_subtitle)
-        chip_y = top_margin + 116
+        # Precalcula el stack de logos (sin dibujar) para que chips y contenido nunca se solapen.
+        logo_stack_bottom = 0
+        fincas_logo_box = None
+        fincas_colegio_box = None
+        if servicio_key == "fincas":
+            col_w = 300
+            x0 = page_width - margin_x - col_w
+            x1 = page_width - margin_x
+            if logo:
+                fincas_logo_box = (x0, 28, x1, 28 + 112)
+                logo_stack_bottom = max(logo_stack_bottom, fincas_logo_box[3])
+            if colegio_logo:
+                top = (logo_stack_bottom or 28) + 10
+                fincas_colegio_box = (x0, top, x1, top + 74)
+                logo_stack_bottom = max(logo_stack_bottom, fincas_colegio_box[3])
+        else:
+            if logo:
+                logo_stack_bottom = max(logo_stack_bottom, 34 + 126)
+
+        chip_y = max(top_margin + 116, (logo_stack_bottom + 18) if logo_stack_bottom else (top_margin + 116))
         chips = [
             f"REF {ref_label[:12]}",
             f"FECHA {budget.get('fecha') or '-'}",
             f"ESTADO {budget.get('estado') or 'Borrador'}",
             f"SERVICIO {servicio_label.upper()}",
         ]
+        header_h = max(250, int(chip_y + 54))
+        draw.rounded_rectangle((0, 0, page_width, header_h), radius=0, fill=primary)
+        draw.polygon([(page_width - 220, 0), (page_width, 0), (page_width, 180)], fill=accent)
+
+        draw.text((margin_x, top_margin), "PRESUPUESTO", fill="white", font=font_title)
+        draw.text(
+            (margin_x, top_margin + 62),
+            company.get("nombre") or workspace.get("nombre") or "Workspace",
+            fill=(240, 246, 248),
+            font=font_subtitle,
+        )
+
+        # Logos en columna derecha.
+        if logo:
+            if servicio_key == "fincas" and fincas_logo_box:
+                _paste_logo_box(image, draw, logo, fincas_logo_box, padding=14)
+            elif servicio_key != "fincas":
+                _paste_logo_box(
+                    image,
+                    draw,
+                    logo,
+                    (page_width - margin_x - 340, 34, page_width - margin_x, 34 + 126),
+                    padding=14,
+                )
+        if servicio_key == "fincas" and colegio_logo and fincas_colegio_box:
+            _paste_logo_box(image, draw, colegio_logo, fincas_colegio_box, padding=10)
+
+        # Chips (siempre por debajo del stack de logos).
         chip_x = margin_x
         for chip in chips:
             box = draw.textbbox((chip_x, chip_y), chip, font=font_chip)
             chip_w = (box[2] - box[0]) + 30
-            draw.rounded_rectangle((chip_x, chip_y - 8, chip_x + chip_w, chip_y + 26), radius=18, fill=(94, 137, 139), outline=(255, 255, 255))
+            draw.rounded_rectangle(
+                (chip_x, chip_y - 8, chip_x + chip_w, chip_y + 26),
+                radius=18,
+                fill=(94, 137, 139),
+                outline=(255, 255, 255),
+            )
             draw.text((chip_x + 15, chip_y), chip, fill="white", font=font_chip)
             chip_x += chip_w + 12
-        if logo:
-            # Logo en caja fija para evitar solapes con chips/títulos.
-            _paste_logo_box(
-                image,
-                draw,
-                logo,
-                (page_width - margin_x - 340, 34, page_width - margin_x, 34 + 126),
-                padding=14,
-            )
-        # Si es Fincas, colocamos el logo del colegio debajo del logo principal (sin tapar cabecera).
-        if servicio_key == "fincas" and colegio_logo:
-            _paste_logo_box(
-                image,
-                draw,
-                colegio_logo,
-                (page_width - margin_x - 340, 34 + 126 + 10, page_width - margin_x, 34 + 126 + 10 + 86),
-                padding=10,
-            )
-        current_y = 296
+
+        current_y = max(296, header_h + 46)
         if include_cards:
             left = (margin_x, current_y, margin_x + 560, current_y + 250)
             right = (page_width - margin_x - 420, current_y, page_width - margin_x, current_y + 250)
@@ -27577,10 +27684,12 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
                 if not str(line).strip():
                     text_y += 18
                     continue
-                wrapped = _pdf_wrap_lines(line, width=98)
-                annex_draw.multiline_text((text_x, text_y), "\n".join(wrapped), fill=ink, font=font_table, spacing=6)
-                sample_box = annex_draw.textbbox((text_x, text_y), "Ag", font=font_table)
-                text_y += (sample_box[3] - sample_box[1] + 8) * len(wrapped)
+                # Soporte de negritas con **...** para hacer la lectura menos monotona.
+                rich_lines = _wrap_rich_text(line, width_chars=98)
+                for parts in rich_lines:
+                    _draw_rich_line(annex_draw, text_x, text_y, parts, font_table, _document_font(16, True), ink)
+                    sample_box = annex_draw.textbbox((text_x, text_y), "Ag", font=font_table)
+                    text_y += (sample_box[3] - sample_box[1] + 8)
 
             footer_cover = "Anexo generado automáticamente desde el CRM. La propuesta económica figura en las páginas anteriores."
             annex_draw.multiline_text(
