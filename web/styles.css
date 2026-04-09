@@ -3016,6 +3016,19 @@ body.crm-fin #companySummary {
   scroll-snap-align: start;
 }
 
+#workspaceTenantTabs {
+  position: static;
+  top: auto;
+  z-index: 1;
+  justify-content: flex-start;
+  padding: 6px;
+  gap: 8px;
+}
+
+#workspaceTenantTabs .tab {
+  min-width: max-content;
+}
+
 .crm-workspace-view {
   display: grid;
   gap: 14px;

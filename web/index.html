@@ -8,7 +8,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Verifika²" />
     <title>Verifika² · CRM & Portal</title>
-    <link rel="stylesheet" href="styles.css?v=159" />
+    <link rel="stylesheet" href="styles.css?v=160" />
     <link rel="manifest" href="manifest.webmanifest?v=17" />
     <link rel="icon" href="/icons/ios/v28/icon-192.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/icons/ios/v28/apple-touch-icon-180.png" />
@@ -77,6 +77,15 @@
             <button class="tab" type="button" data-workspace-view-tab="motores">Motores</button>
             <button class="tab" type="button" data-workspace-view-tab="fincas">Fincas</button>
           </div>
+          <div class="crm-workspace-view" data-workspace-view="tenant">
+            <div class="crm-workspace-tabs" id="workspaceTenantTabs">
+              <button class="tab active" type="button" data-workspace-tenant-tab="general">General</button>
+              <button class="tab" type="button" data-workspace-tenant-tab="permisos">Permisos</button>
+              <button class="tab" type="button" data-workspace-tenant-tab="empresas">Empresas</button>
+              <button class="tab" type="button" data-workspace-tenant-tab="usuarios">Usuarios</button>
+              <button class="tab" type="button" data-workspace-tenant-tab="modulos">Módulos</button>
+            </div>
+          </div>
         <div id="workspaceCompanySwitcher" class="workspace-company-switcher"></div>
         <div class="grid workspace-kpis crm-workspace-view" id="workspaceKpis" data-workspace-view="overview"></div>
         <div id="workspaceOverviewHealth" class="workspace-central-layout crm-workspace-view" data-workspace-view="overview">
@@ -120,7 +129,7 @@
             <div id="workspaceOnboardingActions"></div>
           </div>
         </div>
-        <div class="form-card crm-workspace-view" data-workspace-view="tenant">
+        <div class="form-card crm-workspace-view" data-workspace-view="tenant" data-tenant-section="permisos">
           <div class="section-head">
             <div>
               <h3>Matriz de Accesos</h3>
@@ -138,7 +147,7 @@
           </div>
           <div id="workspaceLauncher"></div>
         </div>
-        <div class="workspace-central-layout crm-workspace-view" data-workspace-view="tenant">
+        <div class="workspace-central-layout crm-workspace-view" data-workspace-view="tenant" data-tenant-section="general">
           <div class="form-card">
             <div class="section-head">
               <div>
@@ -205,7 +214,7 @@
             </form>
           </div>
         </div>
-        <div class="workspace-central-layout crm-workspace-view" data-workspace-view="tenant">
+        <div class="workspace-central-layout crm-workspace-view" data-workspace-view="tenant" data-tenant-section="empresas">
 	          <div class="form-card">
 	            <div class="section-head">
 	              <div>
@@ -341,6 +350,8 @@
 	              </form>
 	            </div>
 	          </div>
+        </div>
+        <div class="workspace-central-layout crm-workspace-view" data-workspace-view="tenant" data-tenant-section="usuarios">
           <div class="form-card">
             <div class="section-head">
               <div>
@@ -353,12 +364,21 @@
           <div class="form-card">
             <div class="section-head">
               <div>
-                <h3>Módulos del producto</h3>
-                <p class="muted">Activa o pausa verticales y motores transversales por workspace.</p>
+                <h3>Vínculos</h3>
+                <p class="muted">Relaciones Gestoría ↔ Cliente (alta comercial multi-tenant).</p>
               </div>
             </div>
-            <div id="workspaceModules"></div>
+            <div id="workspaceLinks"></div>
           </div>
+        </div>
+        <div class="form-card crm-workspace-view" data-workspace-view="tenant" data-tenant-section="modulos">
+          <div class="section-head">
+            <div>
+              <h3>Módulos del producto</h3>
+              <p class="muted">Activa o pausa verticales y motores transversales por workspace.</p>
+            </div>
+          </div>
+          <div id="workspaceModules"></div>
         </div>
         <div class="form-card crm-workspace-view" data-workspace-view="clients">
           <div class="section-head">
@@ -1948,7 +1968,7 @@
             <div id="workspaceFincasMeetingList"></div>
           </div>
         </div>
-        <div class="form-card crm-workspace-view" data-workspace-view="tenant">
+        <div class="form-card crm-workspace-view" data-workspace-view="tenant" data-tenant-section="general">
           <h3>Mapa societario</h3>
           <p class="muted">Relación operativa entre empresas del grupo dentro del workspace actual.</p>
           <div id="holdingOrgChart" class="org-chart"></div>
