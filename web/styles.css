@@ -1382,13 +1382,22 @@ body.crm-fin #companySummary {
   margin-bottom: 10px;
   border-radius: 16px;
   border: 1px solid rgba(60, 110, 113, 0.18);
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(238, 242, 239, 0.96));
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(226, 232, 240, 0.96));
   text-align: left;
 }
 
 .workspace-list-item.is-active {
   border-color: rgba(60, 110, 113, 0.52);
   box-shadow: 0 12px 28px rgba(43, 43, 43, 0.08);
+}
+
+.workspace-list-item strong {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.workspace-list-item .muted {
+  color: rgba(var(--ink-rgb), 0.72);
 }
 
 .workspace-list-meta {
