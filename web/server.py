@@ -26967,11 +26967,13 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
     page_width, page_height = 1240, 1754
     margin_x, top_margin, bottom_margin = 84, 72, 84
     servicio_key = normalize_service_key(budget.get("servicio") or "")
-    fincas_logo = _load_asset_logo("logos/fincas-velazquez.png", max_width=420) if servicio_key == "fincas" else None
-    colegio_logo = _load_asset_logo("logos/colegio-administradores-v2.png", max_width=260) if servicio_key == "fincas" else None
-    brand_logo = _load_brand_logo(company.get("logo_url"), max_width=420 if servicio_key == "fincas" else 360)
+    is_fincas = servicio_key == "fincas"
+    fincas_logo = _load_asset_logo("logos/fincas-velazquez.png", max_width=420) if is_fincas else None
+    colegio_logo = _load_asset_logo("logos/colegio-administradores-v2.png", max_width=260) if is_fincas else None
+    brand_logo = _load_brand_logo(company.get("logo_url"), max_width=420 if is_fincas else 360)
     # En Fincas, forzamos marca Fincas Velazquez (la empresa emisora puede tener un logo genérico/legacy).
-    logo = fincas_logo if servicio_key == "fincas" and fincas_logo else (brand_logo or fincas_logo)
+    logo = fincas_logo if is_fincas and fincas_logo else (brand_logo or fincas_logo)
+    display_company_name = "Fincas Velazquez" if is_fincas else (company.get("nombre") or workspace.get("nombre") or "Workspace")
     font_title = _document_font(44, bold=True)
     font_subtitle = _document_font(20, bold=False)
     font_chip = _document_font(16, bold=True)
@@ -27212,7 +27214,7 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
         draw.text((margin_x, top_margin), "PRESUPUESTO", fill="white", font=font_title)
         draw.text(
             (margin_x, top_margin + 62),
-            company.get("nombre") or workspace.get("nombre") or "Workspace",
+            display_company_name,
             fill=(240, 246, 248),
             font=font_subtitle,
         )
@@ -27266,7 +27268,6 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
             draw.text((right[0] + 24, right[1] + 226), f"Pago {budget.get('forma_pago') or 'Pendiente'}", fill=ink, font=font_table)
             current_y = left[3] + 34
         return image, draw, current_y
-
     image, draw, y = new_page(include_cards=True)
     usable_bottom = page_height - bottom_margin
 
@@ -27293,7 +27294,7 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
             parts.append(f"{n_tra} trasteros")
         if n_ap:
             parts.append(f"{n_ap} aparcamientos")
-        base_text = " · ".join(parts) + f" · Base sugerida {format_eur(calc.get('cuota_sugerida') or 0)}"
+        base_text = " · ".join(parts)
         draw.text((box[0] + 24, box[1] + 58), base_text, fill=ink, font=font_table)
         y = box[3] + 24
 
