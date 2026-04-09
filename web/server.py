@@ -18329,7 +18329,19 @@ def ensure_tables(db_path):
     ensure_workspace_product_tables(conn)
     # Seed retrocompatible: matriz servicio->empresas (por workspace).
     try:
-        if not _migration_done(conn, "workspace_service_matrix_seed_v1"):
+        should_seed = not _migration_done(conn, "workspace_service_matrix_seed_v1")
+        if not should_seed:
+            # Instalaciones donde la migración se marcó pero la tabla quedó vacía (p. ej. fallos transitorios):
+            # re-seed idempotente (solo inserta servicios que no existan).
+            try:
+                conn.execute("SELECT 1 FROM workspace_servicio_empresas LIMIT 1").fetchone()
+                count_row = conn.execute("SELECT COUNT(*) AS total FROM workspace_servicio_empresas").fetchone()
+                total = int(row_value(count_row, "total", 0) or row_value(count_row, 0) or 0)
+                if total == 0:
+                    should_seed = True
+            except Exception:
+                pass
+        if should_seed:
             seed_workspace_service_matrix(conn, now=app_now().isoformat())
             _migration_mark(conn, "workspace_service_matrix_seed_v1")
     except Exception:
@@ -27195,7 +27207,97 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
             except Exception:
                 return None
 
+        def _fetch_static_map_tiles(lat, lon, width, height, zoom=16):
+            import math
+
+            try:
+                lat = float(lat)
+                lon = float(lon)
+            except Exception:
+                return None
+            if not (math.isfinite(lat) and math.isfinite(lon)):
+                return None
+            # Web mercator valid range.
+            lat = max(-85.0511, min(85.0511, lat))
+            lon = ((lon + 180.0) % 360.0) - 180.0
+
+            tile_size = 256
+            z = max(1, min(int(zoom or 16), 19))
+            scale = (2 ** z) * tile_size
+
+            def _world_px(lat_deg, lon_deg):
+                x = (lon_deg + 180.0) / 360.0 * scale
+                siny = math.sin(math.radians(lat_deg))
+                y = (0.5 - math.log((1 + siny) / (1 - siny)) / (4 * math.pi)) * scale
+                return x, y
+
+            cx, cy = _world_px(lat, lon)
+            tlx = cx - (float(width) / 2.0)
+            tly = cy - (float(height) / 2.0)
+            brx = tlx + float(width)
+            bry = tly + float(height)
+
+            max_tile = (2 ** z) - 1
+            tx0 = int(math.floor(tlx / tile_size))
+            ty0 = int(math.floor(tly / tile_size))
+            tx1 = int(math.floor((brx - 1) / tile_size))
+            ty1 = int(math.floor((bry - 1) / tile_size))
+
+            # OSM tiles: wrap X, clamp Y.
+            def _wrap_x(tx):
+                return int(tx) % (2 ** z)
+
+            def _clamp_y(ty):
+                return max(0, min(max_tile, int(ty)))
+
+            cols = (tx1 - tx0 + 1)
+            rows = (ty1 - ty0 + 1)
+            if cols <= 0 or rows <= 0 or cols > 10 or rows > 10:
+                return None
+
+            base = Image.new("RGB", (cols * tile_size, rows * tile_size), (238, 240, 242))
+            for iy in range(rows):
+                ty = _clamp_y(ty0 + iy)
+                for ix in range(cols):
+                    tx = _wrap_x(tx0 + ix)
+                    url = f"https://tile.openstreetmap.org/{z}/{tx}/{ty}.png"
+                    try:
+                        req = urllib.request.Request(
+                            url,
+                            headers={
+                                "User-Agent": "Verifika2CRM/1.0 (contacto@grupomodernia.es)",
+                                "Accept-Language": "es",
+                            },
+                        )
+                        with urllib.request.urlopen(req, timeout=8) as response:
+                            raw = response.read()
+                        if raw:
+                            tile = Image.open(BytesIO(raw)).convert("RGB")
+                            base.paste(tile, (ix * tile_size, iy * tile_size))
+                    except Exception:
+                        # keep placeholder tile
+                        pass
+
+            ox = int(round(tlx - (tx0 * tile_size)))
+            oy = int(round(tly - (ty0 * tile_size)))
+            crop = base.crop((ox, oy, ox + int(width), oy + int(height)))
+
+            # Marker
+            try:
+                draw_map = ImageDraw.Draw(crop)
+                mx = int(round(cx - tlx))
+                my = int(round(cy - tly))
+                r = 10
+                draw_map.ellipse((mx - r, my - r, mx + r, my + r), fill=(210, 36, 36), outline=(255, 255, 255), width=3)
+            except Exception:
+                pass
+            return crop
+
         def _fetch_static_map(lat, lon, width, height, zoom=16):
+            # Prefer tiles (map image, no QR). Fallback to staticmap service if tiles are blocked.
+            img = _fetch_static_map_tiles(lat, lon, width, height, zoom=zoom)
+            if img:
+                return img
             try:
                 params = urllib.parse.urlencode(
                     {
@@ -27243,12 +27345,14 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
                     lon = None
             if lat is not None and lon is not None:
                 map_img = _fetch_static_map(lat, lon, 660, 210, zoom=16)
-            try:
-                import qrcode
+            # Solo generamos QR como fallback si no conseguimos mapa estático.
+            if not map_img:
+                try:
+                    import qrcode
 
-                qr_img = qrcode.make(map_url).convert("RGBA").resize((180, 180))
-            except Exception:
-                qr_img = None
+                    qr_img = qrcode.make(map_url).convert("RGBA").resize((180, 180))
+                except Exception:
+                    qr_img = None
         building_photo = None
         if photo_key:
             try:

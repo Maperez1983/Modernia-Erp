@@ -4783,6 +4783,24 @@ const filterWorkspaceRowsByCompany = (rows = [], field = "empresa_id") => {
   return items.filter((row) => String(row?.[field] || "").trim() === companyId);
 };
 
+const shouldScopeFincasByCompany = () => {
+  const authUser = getAuthScopeUser();
+  if (!authUser) return true;
+  if (isPrivilegedUser(authUser)) return true;
+  // Un usuario no admin con el servicio de Fincas debe poder ver la operativa de Fincas
+  // aunque la empresa activa no coincida con la del registro.
+  try {
+    if (userCanAccessService("fincas")) return false;
+  } catch {}
+  return true;
+};
+
+const filterWorkspaceFincasRowsByCompany = (rows = [], field = "empresa_id") => {
+  const items = Array.isArray(rows) ? rows : [];
+  if (!shouldScopeFincasByCompany()) return items;
+  return filterWorkspaceRowsByCompany(items, field);
+};
+
 const filterWorkspaceDocumentHubData = (payload = {}) => {
   const rows = Array.isArray(payload.rows) ? payload.rows : [];
   const companyName = normalizeSimple(state.currentWorkspaceCompanyName || "");
@@ -4810,7 +4828,7 @@ const renderWorkspaceCompanyScopedData = () => {
   const timeRows = filterWorkspaceRowsByCompany(raw.timeRows || []);
   const timeEmployees = filterWorkspaceRowsByCompany(raw.timeEmployees || []);
   const timePeriods = filterWorkspaceRowsByCompany(raw.timePeriods || []);
-  const communityRows = filterWorkspaceRowsByCompany(raw.fincasCommunities || []);
+  const communityRows = filterWorkspaceFincasRowsByCompany(raw.fincasCommunities || []);
   const communityIds = new Set(communityRows.map((row) => String(row.id || "")).filter(Boolean));
   const providerRows = (raw.fincasProviders || []).filter((row) => {
     const rowCompanyId = String(row?.empresa_id || "").trim();
@@ -4854,7 +4872,10 @@ const renderWorkspaceCompanyScopedData = () => {
   renderWorkspaceFincasIncidentList(incidentRows);
   renderWorkspaceFincasMeetingList(meetingRows);
   hydrateWorkspaceCommunitySelect(communityRows);
-  hydrateWorkspaceFincasBudgetQuickSelect({ communities: communityRows, budgets: budgetRows });
+  hydrateWorkspaceFincasBudgetQuickSelect({
+    communities: communityRows,
+    budgets: shouldScopeFincasByCompany() ? budgetRows : (Array.isArray(raw.budgetRows) ? raw.budgetRows : []),
+  });
   hydrateWorkspaceProviderSelect(providerRows);
   try {
     const ledgerRows = Array.isArray(state.workspaceFincasLedgerRows) ? state.workspaceFincasLedgerRows : [];
@@ -14103,11 +14124,14 @@ const normalizeWorkspaceFincasTab = (value = "") => {
 const renderWorkspaceFincasDashboard = () => {
   if (!workspaceFincasDashboardKpis) return;
   const raw = state.currentWorkspaceData || {};
-  const communities = filterWorkspaceRowsByCompany(raw.fincasCommunities || []);
+  const communities = filterWorkspaceFincasRowsByCompany(raw.fincasCommunities || []);
   const communityIds = new Set(communities.map((row) => String(row.id || "")).filter(Boolean));
   const comuneros = communities.reduce((acc, row) => acc + (Number(row.num_vecinos || 0) || 0), 0);
   const cuotaMensual = communities.reduce((acc, row) => acc + (Number(row.cuota_mensual || 0) || 0), 0);
-  const budgets = filterWorkspaceRowsByCompany(raw.budgetRows || []).filter((row) => normalizeBudgetServiceKey(row.servicio || "") === "fincas");
+  const budgetsBase = shouldScopeFincasByCompany()
+    ? filterWorkspaceRowsByCompany(raw.budgetRows || [])
+    : (Array.isArray(raw.budgetRows) ? raw.budgetRows : []);
+  const budgets = budgetsBase.filter((row) => normalizeBudgetServiceKey(row.servicio || "") === "fincas");
   const budgetsTotal = budgets.length;
   const budgetsAccepted = budgets.filter((row) => normalizeSimple(row.estado || "") === "aceptado").length;
   const budgetsRatio = budgetsTotal > 0 ? `${((budgetsAccepted / budgetsTotal) * 100).toFixed(0)}%` : "-";
@@ -14233,14 +14257,14 @@ const refreshWorkspaceFincasLedger = async ({ force = false, silent = false } = 
     return;
   }
   try {
-    _workspaceFincasLedgerLastFetchAt = nowTs;
-    const data = await api(`/api/workspace_fincas_contabilidad?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}&limit=200`);
-    state.workspaceFincasLedgerRows = Array.isArray(data?.rows) ? data.rows : [];
-    const communityRows = filterWorkspaceRowsByCompany((state.currentWorkspaceData || {}).fincasCommunities || []);
-    const communityIds = new Set(communityRows.map((row) => String(row.id || "")).filter(Boolean));
-    const filtered = state.workspaceFincasLedgerRows.filter((row) => !row.comunidad_id || communityIds.has(String(row.comunidad_id || "")));
-    hydrateWorkspaceCommunitySelect(communityRows);
-    renderWorkspaceFincasLedgerList(filtered);
+	    _workspaceFincasLedgerLastFetchAt = nowTs;
+	    const data = await api(`/api/workspace_fincas_contabilidad?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}&limit=200`);
+	    state.workspaceFincasLedgerRows = Array.isArray(data?.rows) ? data.rows : [];
+	    const communityRows = filterWorkspaceFincasRowsByCompany((state.currentWorkspaceData || {}).fincasCommunities || []);
+	    const communityIds = new Set(communityRows.map((row) => String(row.id || "")).filter(Boolean));
+	    const filtered = state.workspaceFincasLedgerRows.filter((row) => !row.comunidad_id || communityIds.has(String(row.comunidad_id || "")));
+	    hydrateWorkspaceCommunitySelect(communityRows);
+	    renderWorkspaceFincasLedgerList(filtered);
     renderWorkspaceFincasDashboard();
     if (!silent && workspaceFincasLedgerStatus) workspaceFincasLedgerStatus.textContent = "";
   } catch (error) {
@@ -14887,7 +14911,9 @@ const buildFincasContractPayloadFromBudgetRow = (row = {}) => {
 const renderWorkspaceFincasBudgetsList = () => {
   if (!workspaceFincasBudgetsTable) return;
   const raw = state.currentWorkspaceData || {};
-  const all = filterWorkspaceRowsByCompany(raw.budgetRows || []);
+  const all = shouldScopeFincasByCompany()
+    ? filterWorkspaceRowsByCompany(raw.budgetRows || [])
+    : (Array.isArray(raw.budgetRows) ? raw.budgetRows : []);
   let items = all.filter((row) => normalizeBudgetServiceKey(row.servicio || "") === "fincas");
   const filterEstado = String(workspaceFincasBudgetsEstadoFilter?.value || "all").trim();
   if (filterEstado && filterEstado !== "all") {
