@@ -965,6 +965,7 @@ CREATE TABLE IF NOT EXISTS inmuebles (
   empresa_id TEXT,
   referencia TEXT,
   titulo TEXT,
+  tipo_operacion TEXT,
   direccion TEXT,
   direccion_numero TEXT,
   interior TEXT,

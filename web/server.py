@@ -19505,6 +19505,7 @@ def ensure_tables(db_path):
     # CRM inmobiliaria: campos Tecnocloud (inmuebles/captaciones/pedidos).
     for col_name, col_sql in {
         "titulo": "titulo TEXT",
+        "tipo_operacion": "tipo_operacion TEXT",
         "direccion_numero": "direccion_numero TEXT",
         "interior": "interior TEXT",
         "escalera": "escalera TEXT",
@@ -41458,6 +41459,17 @@ class Handler(BaseHTTPRequestHandler):
             for key in ("anio_construccion", "habitaciones", "banos", "probabilidad"):
                 if key in updates:
                     updates[key] = parse_optional_int(updates.get(key))
+            inferred_tipo_operacion = ""
+            if "necesidad_venta_alquiler" in updates:
+                raw = str(updates.get("necesidad_venta_alquiler") or "").strip().lower()
+                if raw in {"arrendamiento", "renta"}:
+                    raw = "alquiler"
+                if raw in {"venta", "alquiler"}:
+                    inferred_tipo_operacion = raw
+                elif "alquil" in raw or "arrend" in raw or "renta" in raw:
+                    inferred_tipo_operacion = "alquiler"
+                elif "venta" in raw or "comprav" in raw:
+                    inferred_tipo_operacion = "venta"
             if "etapa" in updates and "situacion_comercial" not in updates:
                 updates["situacion_comercial"] = updates["etapa"]
             next_stage = str(updates.get("situacion_comercial") or updates.get("etapa") or "").strip()
@@ -41508,6 +41520,8 @@ class Handler(BaseHTTPRequestHandler):
                 inm_updates["planificacion_encargo"] = updates["planificacion_encargo"]
             if "fecha_ultima_renov_rebaja" in updates:
                 inm_updates["fecha_ultima_renov_rebaja"] = updates["fecha_ultima_renov_rebaja"]
+            if inferred_tipo_operacion:
+                inm_updates["tipo_operacion"] = inferred_tipo_operacion
             if inm_updates:
                 inm_set = ", ".join([f"{key} = ?" for key in inm_updates])
                 inm_values = list(inm_updates.values()) + [now, inmueble_id]
@@ -42115,6 +42129,7 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "inmueble_id requerido"}, status=400)
                 return
             allowed = (
+                "tipo_operacion",
                 "referencia",
                 "titulo",
                 "referencia_catastral",
@@ -42189,6 +42204,13 @@ class Handler(BaseHTTPRequestHandler):
             for bool_key in ("propietario_localizado", "no_molestar", "planificado", "con_inquilino"):
                 if bool_key in updates:
                     updates[bool_key] = parse_boolish(updates[bool_key])
+            if "tipo_operacion" in updates:
+                tipo_operacion = str(updates.get("tipo_operacion") or "").strip().lower()
+                if tipo_operacion in {"arrendamiento", "renta"}:
+                    tipo_operacion = "alquiler"
+                if tipo_operacion not in {"venta", "alquiler"}:
+                    tipo_operacion = "venta"
+                updates["tipo_operacion"] = tipo_operacion
             set_clause = ", ".join([f"{key} = ?" for key in updates])
             values = list(updates.values()) + [now, inmueble_id]
             conn.execute(
@@ -42235,6 +42257,20 @@ class Handler(BaseHTTPRequestHandler):
                 cap_updates["planificacion_encargo"] = updates["planificacion_encargo"]
             if "fecha_ultima_renov_rebaja" in updates:
                 cap_updates["fecha_ultima_renov_rebaja"] = updates["fecha_ultima_renov_rebaja"]
+            if "tipo_operacion" in updates:
+                # Mantén alineado el contexto de captación con el tipo de operación del inmueble.
+                # Evita pisar campos libres si el usuario ya escribió una descripción no estándar.
+                try:
+                    cap_row = conn.execute(
+                        "SELECT necesidad_venta_alquiler FROM captaciones WHERE inmueble_id = ? LIMIT 1",
+                        (inmueble_id,),
+                    ).fetchone()
+                    cap_current = str((cap_row["necesidad_venta_alquiler"] if cap_row else "") or "").strip()
+                except Exception:
+                    cap_current = ""
+                cap_current_norm = normalize_lookup_text(cap_current or "")
+                if (not cap_current) or (cap_current_norm in {"venta", "alquiler", "arrendamiento", "renta"}):
+                    cap_updates["necesidad_venta_alquiler"] = updates["tipo_operacion"]
             if cap_updates:
                 cap_set = ", ".join([f"{key} = ?" for key in cap_updates])
                 cap_values = list(cap_updates.values()) + [now, inmueble_id]
@@ -48708,7 +48744,7 @@ class Handler(BaseHTTPRequestHandler):
             ).fetchall()
             docs = conn.execute(
                 """
-                SELECT nombre, url, tipo, estado, version, plantilla_clave, origen_tipo, origen_id
+                SELECT nombre, url, tipo, estado, version, plantilla_clave, origen_tipo, origen_id, payload_json
                 FROM inmueble_docs
                 WHERE inmueble_id = ?
                 ORDER BY version DESC, created_at DESC
@@ -48824,8 +48860,12 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "Captación no encontrada"}, status=404)
                 return
             status = str(captacion["situacion_comercial"] or inmueble["estado"] or "").strip().lower()
-            if status != "encargo":
-                json_response(self, {"error": "La nota de encargo solo está disponible para inmuebles en Encargo"}, status=400)
+            if status not in {"encargo", "noticia"}:
+                json_response(
+                    self,
+                    {"error": "La nota de encargo solo está disponible para inmuebles en Noticia o Encargo"},
+                    status=400,
+                )
                 return
             owners = get_inmueble_propietarios(conn, inmueble_id)
 

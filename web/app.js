@@ -18608,6 +18608,35 @@ const normalizeCrmMainEtapa = (value) => {
   return "Inmueble";
 };
 
+const normalizeInmoTipoOperacion = (value) => {
+  const key = normalizeSimple(value || "");
+  if (!key) return "";
+  if (key.includes("alquil") || key.includes("arrend") || key.includes("renta")) return "alquiler";
+  if (key.includes("venta") || key.includes("comprav")) return "venta";
+  if (key === "alquiler" || key === "venta") return key;
+  return "";
+};
+
+const resolveInmuebleTipoOperacion = (inmueble = {}, captacion = {}, docs = []) => {
+  const direct = normalizeInmoTipoOperacion(inmueble?.tipo_operacion);
+  if (direct) return direct;
+  const cap = normalizeInmoTipoOperacion(captacion?.tipo_operacion || captacion?.necesidad_venta_alquiler);
+  if (cap) return cap;
+  const doc = Array.isArray(docs)
+    ? docs.find((item) => normalizeSimple(item?.plantilla_clave || "") === "nota_encargo" || normalizeSimple(item?.tipo || "") === "nota de encargo")
+    : null;
+  if (doc && doc.payload_json) {
+    try {
+      const payload = typeof doc.payload_json === "string" ? JSON.parse(doc.payload_json) : doc.payload_json;
+      const inferred = normalizeInmoTipoOperacion(payload?.tipo_operacion);
+      if (inferred) return inferred;
+    } catch (_) {
+      // ignore
+    }
+  }
+  return "venta";
+};
+
 const INMOBILIARIA_ASESORES = [
   "Bárbara Salazar",
   "Sebastián Lallana",
@@ -18673,6 +18702,16 @@ const INMUEBLE_CHECKLISTS = {
 const INMUEBLE_FIELDS = [
   // Resumen
   { key: "titulo", label: "Inmueble", type: "text", section: "Resumen" },
+  {
+    key: "tipo_operacion",
+    label: "Operación",
+    type: "select",
+    options: [
+      { value: "venta", label: "Venta" },
+      { value: "alquiler", label: "Alquiler" },
+    ],
+    section: "Resumen",
+  },
   { key: "tipo_inmueble", label: "Tipo", type: "text", section: "Resumen" },
   { key: "subtipologia", label: "Subtipología", type: "text", section: "Resumen" },
   { key: "categoria", label: "Categoría", type: "text", section: "Resumen" },
@@ -18704,7 +18743,7 @@ const INMUEBLE_FIELDS = [
   { key: "provincia", label: "Provincia", type: "text", section: "Dirección" },
 
   // Precio
-  { key: "precio_objetivo", label: "Precio objetivo venta", type: "number", section: "Precio", hidden: true },
+  { key: "precio_objetivo", label: "Precio objetivo", type: "number", section: "Precio" },
   { key: "precio_encargo", label: "Precio encargo", type: "number", section: "Precio" },
   { key: "precio_pedido_cliente", label: "Precio propietario", type: "number", section: "Precio" },
   { key: "honorarios", label: "Honorarios agencia", type: "number", section: "Precio" },
@@ -18786,6 +18825,67 @@ const INMUEBLE_FIELDS = [
   { key: "banos", label: "Baños", type: "number", section: "Características" },
   { key: "descripcion", label: "Descripción / notas", type: "textarea", section: "Notas internas" },
 ];
+
+// En la ficha de Encargo solo mostramos lo esencial (evita duplicidades con la sección de Captación).
+const INMUEBLE_FIELDS_MAP = Object.fromEntries(
+  INMUEBLE_FIELDS.filter((field) => field && field.key).map((field) => [field.key, field])
+);
+
+const INMUEBLE_FIELDS_ENCARGO = [
+  // Resumen
+  "titulo",
+  "tipo_operacion",
+  "tipo_inmueble",
+  "situacion_ocupacion",
+  "ocupado_por",
+  // Dirección
+  "direccion",
+  "direccion_numero",
+  "interior",
+  "escalera",
+  "edificio",
+  "zona",
+  "codigo_postal",
+  "poblacion",
+  "provincia",
+  // Precio / duración
+  "precio_objetivo",
+  "precio_encargo",
+  "honorarios",
+  "planificacion_encargo",
+  // Equipo
+  "asesor",
+  "responsable",
+  // Contacto propietario
+  "propietario_telefono",
+  "propietario_email",
+  // Catastro / referencias
+  "referencia_catastral",
+  "referencia",
+  // Características mínimas
+  "m2",
+  "habitaciones",
+  "banos",
+  // Nota interna breve
+  "descripcion",
+]
+  .map((key) => INMUEBLE_FIELDS_MAP[key])
+  .filter(Boolean);
+
+const INMUEBLE_FIELDS_HIDE_FOR_ALQUILER = new Set([
+  "precio_pedido_cliente",
+  "fecha_valoracion",
+  "desviacion_pct",
+  "precio_valoracion",
+  "valor_referencia",
+]);
+
+const filterInmuebleFieldsForOperacion = (fields, tipoOperacion = "venta") => {
+  const tipo = normalizeInmoTipoOperacion(tipoOperacion) || "venta";
+  if (!Array.isArray(fields)) return [];
+  if (tipo !== "alquiler") return fields;
+  return fields.filter((field) => field && !INMUEBLE_FIELDS_HIDE_FOR_ALQUILER.has(field.key));
+};
 
 const CAPTACION_FIELDS = [
   {
@@ -18873,6 +18973,26 @@ const CAPTACION_FIELDS = [
     section: "Pipeline",
   },
   { key: "notas", label: "Notas", type: "textarea", section: "Notas internas" },
+];
+
+// En la ficha de Encargo solo mostramos lo esencial para no saturar al equipo.
+const CAPTACION_FIELDS_ENCARGO = [
+  { key: "urgencia", label: "Urgencia", type: "select", options: ["Baja", "Media", "Alta"], section: "Seguimiento" },
+  { key: "proxima_accion", label: "Próxima acción", type: "text", section: "Seguimiento" },
+  { key: "fecha_contacto", label: "Fecha contacto", type: "date", section: "Seguimiento" },
+  { key: "modalidad_ultimo_contacto", label: "Modalidad último contacto", type: "text", section: "Seguimiento" },
+  { key: "estado_contacto", label: "Estado de contacto", type: "text", section: "Seguimiento" },
+  {
+    key: "encargo_competencia",
+    label: "Encargo competencia",
+    type: "select",
+    options: [
+      { value: "0", label: "No" },
+      { value: "1", label: "Sí" },
+    ],
+    section: "Seguimiento",
+  },
+  { key: "notas", label: "Notas internas", type: "textarea", section: "Notas internas" },
 ];
 
 const CLIENTE_FIELDS = [
@@ -19691,6 +19811,22 @@ const openInmuebleConsumoPdf = (kind) => {
 const openInmuebleNotaEncargoPdf = () => {
   if (!state.currentInmuebleId) return;
   const inmueble = state.currentInmueble || state.currentInmuebleContext?.inmueble || {};
+  const captacion = state.currentInmuebleContext?.captacion || {};
+  const docs = Array.isArray(state.currentInmuebleContext?.docs) ? state.currentInmuebleContext.docs : [];
+  const tipoOperacionDefault = resolveInmuebleTipoOperacion(inmueble, captacion, docs);
+  const lastEncargoDoc =
+    docs.find((doc) => normalizeSimple(doc?.plantilla_clave || "") === "nota_encargo" || normalizeSimple(doc?.tipo || "") === "nota de encargo") || null;
+  let lastEncargoPayload = {};
+  if (lastEncargoDoc && lastEncargoDoc.payload_json) {
+    try {
+      lastEncargoPayload =
+        typeof lastEncargoDoc.payload_json === "string"
+          ? JSON.parse(lastEncargoDoc.payload_json)
+          : (lastEncargoDoc.payload_json || {});
+    } catch (_) {
+      lastEncargoPayload = {};
+    }
+  }
 
   const addMonths = (isoDate, months) => {
     const base = isoDate ? new Date(`${isoDate}T00:00:00`) : new Date();
@@ -19848,7 +19984,7 @@ const openInmuebleNotaEncargoPdf = () => {
         honorariosRaw > 0 && honorariosRaw <= 25 ? String(honorariosRaw) : "4";
 
       form?.reset();
-      setValue("tipo_operacion", "venta");
+      setValue("tipo_operacion", tipoOperacionDefault || "venta");
       setValue("precio_venta", defaultPrice);
       setValue("honorarios_pct", defaultHonorariosPct);
       setValue("renta_mensual", defaultPrice);
@@ -19869,6 +20005,38 @@ const openInmuebleNotaEncargoPdf = () => {
       setValue("otros", "");
       setValue("lugar_firma", String(inmueble.poblacion || inmueble.provincia || "").trim());
       setValue("copilot_mejoras", "");
+
+      // Prefill con la última nota de encargo generada (persistencia real del formulario).
+      if (lastEncargoPayload && typeof lastEncargoPayload === "object") {
+        [
+          "tipo_operacion",
+          "precio_venta",
+          "renta_mensual",
+          "honorarios_pct",
+          "honorarios_mensualidades",
+          "plazo_arrendamiento",
+          "destino_arrendamiento",
+          "fianza_tipo",
+          "garantia_adicional",
+          "entrega_fecha",
+          "iva_pct",
+          "fecha_inicio",
+          "fecha_fin",
+          "fecha_venta_desde",
+          "fecha_venta_antes",
+          "datos_registrales",
+          "m2_utiles",
+          "cargas",
+          "otros",
+          "lugar_firma",
+        ].forEach((key) => {
+          const value = lastEncargoPayload[key];
+          if (value === null || value === undefined) return;
+          const text = String(value || "").trim();
+          if (!text) return;
+          setValue(key, text);
+        });
+      }
 
       const syncTipoUi = () => {
         const tipo = String(form?.querySelector('[name="tipo_operacion"]')?.value || "venta").trim();
@@ -19959,7 +20127,7 @@ const openInmuebleNotaEncargoPdf = () => {
         }
       };
 
-      generateBtn.onclick = () => {
+      generateBtn.onclick = async () => {
         const values = readValues();
         const tipo = values.tipo_operacion || "venta";
         if (tipo === "alquiler") {
@@ -19993,6 +20161,22 @@ const openInmuebleNotaEncargoPdf = () => {
           alert("Fecha fin requerida.");
           return;
         }
+        // Persistencia: guarda la operación y los importes principales en la ficha del inmueble.
+        try {
+          const updates = { tipo_operacion: tipo };
+          if (tipo === "alquiler") {
+            updates.precio_objetivo = values.renta_mensual;
+            updates.precio_encargo = values.renta_mensual;
+            updates.honorarios = values.honorarios_mensualidades;
+          } else {
+            updates.precio_objetivo = values.precio_venta;
+            updates.precio_encargo = values.precio_venta;
+            updates.honorarios = values.honorarios_pct;
+          }
+          await saveInmuebleFields(updates);
+        } catch (_) {
+          // No bloquea la generación del PDF.
+        }
         const params = new URLSearchParams({ id: state.currentInmuebleId });
         [
           "tipo_operacion",
@@ -20000,6 +20184,7 @@ const openInmuebleNotaEncargoPdf = () => {
           "renta_mensual",
           "honorarios_pct",
           "honorarios_mensualidades",
+          "honorarios_text",
           "plazo_arrendamiento",
           "destino_arrendamiento",
           "fianza_tipo",
@@ -20074,6 +20259,58 @@ const validateInmuebleStageTransition = (stage, inmueble = {}, captacion = {}, p
   };
 };
 
+const rerenderCurrentInmuebleGrids = () => {
+  const inmueble = state.currentInmuebleContext?.inmueble || state.currentInmueble || {};
+  const captacion = state.currentInmuebleContext?.captacion || {};
+  const docs = state.currentInmuebleContext?.docs || [];
+  state.currentInmuebleOperacionTipo = resolveInmuebleTipoOperacion(inmueble, captacion, docs);
+  const etapaMain = normalizeCrmMainEtapa(inmueble.estado || captacion.etapa || "");
+  if (inmuebleDatosGrid) {
+    const baseFields = etapaMain === "Encargo" ? INMUEBLE_FIELDS_ENCARGO : INMUEBLE_FIELDS;
+    const fields = filterInmuebleFieldsForOperacion(baseFields, state.currentInmuebleOperacionTipo);
+    renderEditableGrid(inmuebleDatosGrid, fields, inmueble, "inmueble");
+  }
+  if (inmuebleCaptacionGrid) {
+    const fields = etapaMain === "Encargo" ? CAPTACION_FIELDS_ENCARGO : CAPTACION_FIELDS;
+    renderEditableGrid(inmuebleCaptacionGrid, fields, captacion, "captacion");
+  }
+  refreshCurrentInmuebleProfile();
+  refreshInmuebleVisitSheetButton();
+};
+
+const saveInmuebleFields = async (updates = {}) => {
+  if (!state.currentInmuebleId) return { error: "Selecciona un inmueble." };
+  setInmuebleSaveStatus("Guardando...");
+  try {
+    const data = await postJsonWithDbRetry(
+      "/api/inmueble_update",
+      { inmueble_id: state.currentInmuebleId, ...(updates || {}) },
+      { maxRetries: 6, baseDelayMs: 350, timeoutMs: 20000 }
+    );
+    if (data?.error) return data;
+    Object.entries(updates || {}).forEach(([field, value]) => {
+      if (state.currentInmueble) {
+        state.currentInmueble[field] = value;
+      }
+      if (state.currentInmuebleContext?.inmueble) {
+        state.currentInmuebleContext.inmueble[field] = value;
+      }
+    });
+    refreshCurrentInmuebleHeader();
+    setInmuebleSaveStatus("Guardado · cambios aplicados");
+    loadCrmInmuebles();
+    refreshCurrentInmuebleProfile();
+    refreshInmuebleVisitSheetButton();
+    if (Object.prototype.hasOwnProperty.call(updates || {}, "tipo_operacion")) {
+      rerenderCurrentInmuebleGrids();
+    }
+    return data;
+  } catch (error) {
+    setInmuebleSaveStatus(error?.message || "Error al guardar.");
+    return { error: error?.message || "Error al guardar." };
+  }
+};
+
 const saveInmuebleField = (field, value) => {
   if (!state.currentInmuebleId) {
     return;
@@ -20088,47 +20325,7 @@ const saveInmuebleField = (field, value) => {
       return;
     }
   }
-  setInmuebleSaveStatus("Guardando...");
-  fetch("/api/inmueble_update", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      inmueble_id: state.currentInmuebleId,
-      [field]: value,
-    }),
-  })
-    .then((res) => res.json())
-    .then((data) => {
-      if (data.error) {
-        setInmuebleSaveStatus(data.error);
-        return;
-      }
-      if (state.currentInmueble) {
-        state.currentInmueble[field] = value;
-      }
-      if (state.currentInmuebleContext?.inmueble) {
-        state.currentInmuebleContext.inmueble[field] = value;
-      }
-      refreshCurrentInmuebleHeader();
-      if (field === "estado" && inmuebleEstadoInfo) {
-        if (state.currentInmueble) {
-          state.currentInmueble.estado = value;
-        }
-        inmuebleEstadoInfo.textContent = `Estado actual: ${value || "-"}`;
-        generateInmuebleChecklist(value);
-        loadInmuebleChecklist(state.currentInmuebleId, value);
-      }
-      if (field === "lat" || field === "lon") {
-        updateInmuebleMapFromInputs();
-      }
-      refreshCurrentInmuebleProfile();
-      refreshInmuebleVisitSheetButton();
-      setInmuebleSaveStatus("Guardado · cambios aplicados");
-      loadCrmInmuebles();
-    })
-    .catch(() => {
-      setInmuebleSaveStatus("Error al guardar.");
-    });
+  void saveInmuebleFields({ [field]: value });
 };
 
 const saveCaptacionField = (field, value) => {
@@ -20146,39 +20343,24 @@ const saveCaptacionField = (field, value) => {
     }
   }
   setInmuebleSaveStatus("Guardando...");
-  fetch("/api/captacion_update", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      inmueble_id: state.currentInmuebleId,
-      [field]: value,
-    }),
-  })
-    .then((res) => res.json())
+  postJsonWithDbRetry(
+    "/api/captacion_update",
+    { inmueble_id: state.currentInmuebleId, [field]: value },
+    { maxRetries: 6, baseDelayMs: 350, timeoutMs: 20000 }
+  )
     .then((data) => {
-      if (data.error) {
+      if (data?.error) {
         setInmuebleSaveStatus(data.error);
         return;
       }
       if (state.currentInmuebleContext?.captacion) {
         state.currentInmuebleContext.captacion[field] = value;
       }
-      if (field === "etapa") {
-        if (state.currentInmueble) {
-          state.currentInmueble.estado = value;
-        }
-        if (state.currentInmuebleContext?.inmueble) {
-          state.currentInmuebleContext.inmueble.estado = value;
-        }
-        generateInmuebleChecklist(value);
-        loadInmuebleChecklist(state.currentInmuebleId, value);
-      }
-      refreshCurrentInmuebleProfile();
-      refreshInmuebleVisitSheetButton();
       setInmuebleSaveStatus("Guardado · cambios aplicados");
+      refreshCurrentInmuebleProfile();
     })
-    .catch(() => {
-      setInmuebleSaveStatus("Error al guardar.");
+    .catch((error) => {
+      setInmuebleSaveStatus(error?.message || "Error al guardar.");
     });
 };
 
@@ -20373,6 +20555,16 @@ const renderEditableGrid = (grid, fields, data, target) => {
   };
   const showOwnerPrice = (target === "inmueble" || target === "captacion") && isInmoEarlyStage(inmoStageKey);
   const showEncargoPrice = (target === "inmueble" || target === "captacion") && !isInmoEarlyStage(inmoStageKey);
+  const currentOperacion =
+    (isInmueble || target === "captacion")
+      ? (state.currentInmuebleOperacionTipo
+        || resolveInmuebleTipoOperacion(
+          state.currentInmuebleContext?.inmueble || {},
+          state.currentInmuebleContext?.captacion || {},
+          state.currentInmuebleContext?.docs || []
+        ))
+      : "";
+  const operacionIsAlquiler = normalizeInmoTipoOperacion(currentOperacion) === "alquiler";
   const sectionCopy = {
     Resumen: "Tipo, ocupación y datos esenciales para entender el expediente.",
     Dirección: "Dirección completa (se usa para detectar duplicados y para Catastro).",
@@ -20434,14 +20626,26 @@ const renderEditableGrid = (grid, fields, data, target) => {
     } else {
       label.textContent = field.label;
     }
+    if ((isInmueble || target === "captacion") && field.key) {
+      const overrides = {
+        precio_objetivo: operacionIsAlquiler ? "Renta objetivo (€/mes)" : "Precio objetivo venta (EUR)",
+        precio_encargo: operacionIsAlquiler ? "Renta pactada (€/mes)" : "Precio encargo (EUR)",
+        precio_pedido_cliente: operacionIsAlquiler ? "Renta pedida (€/mes)" : "Precio pedido cliente (EUR)",
+        honorarios: operacionIsAlquiler ? "Honorarios (mensualidades)" : "Honorarios (% sin IVA)",
+        planificacion_encargo: operacionIsAlquiler ? "Duración encargo (meses)" : "Duración encargo (meses)",
+      };
+      if (overrides[field.key]) {
+        label.textContent = overrides[field.key];
+      }
+    }
     if (target === "inmueble" || target === "captacion") {
       const requiredBadge = document.createElement("span");
       requiredBadge.className = "editable-field-hint";
       const priceKey = showOwnerPrice ? "precio_pedido_cliente" : "precio_encargo";
-      if ((field.key === "direccion") || (field.key === "tipo_inmueble") || (field.key === priceKey) || (field.key === "honorarios") || (field.key === "situacion_ocupacion") || (field.key === "propietario")) {
+      if ((field.key === "direccion") || (field.key === "tipo_operacion") || (field.key === "tipo_inmueble") || (field.key === priceKey) || (field.key === "honorarios") || (field.key === "situacion_ocupacion") || (field.key === "propietario")) {
         requiredBadge.textContent = "Clave";
       } else if (field.key === "referencia_catastral") {
-        requiredBadge.textContent = "Obligatorio desde reservado";
+        requiredBadge.textContent = "Obligatorio para cierre";
       } else if (field.key === "proxima_accion" || field.key === "asesor") {
         requiredBadge.textContent = "Seguimiento";
       }
@@ -31298,6 +31502,8 @@ const openInmuebleDetail = (id, originView = "") => {
         demandas: [],
         visitas: [],
       };
+      state.currentInmuebleOperacionTipo = resolveInmuebleTipoOperacion(inmueble, captacion, data.docs || []);
+      const etapaMain = normalizeCrmMainEtapa(inmueble.estado || captacion.etapa || "");
       if (hasPendingPrefill) {
         applyPendingInmuebleCitaPrefill();
       }
@@ -31312,10 +31518,13 @@ const openInmuebleDetail = (id, originView = "") => {
             .join(" · ") || "Referencia sin asignar";
       }
       if (inmuebleDatosGrid) {
-        renderEditableGrid(inmuebleDatosGrid, INMUEBLE_FIELDS, inmueble, "inmueble");
+        const baseFields = etapaMain === "Encargo" ? INMUEBLE_FIELDS_ENCARGO : INMUEBLE_FIELDS;
+        const fields = filterInmuebleFieldsForOperacion(baseFields, state.currentInmuebleOperacionTipo);
+        renderEditableGrid(inmuebleDatosGrid, fields, inmueble, "inmueble");
       }
       if (inmuebleCaptacionGrid) {
-        renderEditableGrid(inmuebleCaptacionGrid, CAPTACION_FIELDS, captacion, "captacion");
+        const fields = etapaMain === "Encargo" ? CAPTACION_FIELDS_ENCARGO : CAPTACION_FIELDS;
+        renderEditableGrid(inmuebleCaptacionGrid, fields, captacion, "captacion");
         renderPropietariosEditor(data.propietarios || []);
       }
       if (inmuebleDemandaCliente) {
