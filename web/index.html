@@ -2985,12 +2985,12 @@
               <div class="form-card">
                 <div class="section-head">
                   <div>
-                    <h3>Generar encargo</h3>
-                    <p class="muted">Convierte la ficha a Encargo y crea/actualiza la operación usando los datos del inmueble y propietarios.</p>
+                    <h3>Hoja de encargo</h3>
+                    <p class="muted">Genera la hoja de encargo (PDF editable) con datos del propietario, del inmueble y condiciones. La fase del inmueble se actualiza al cerrar la cita correspondiente.</p>
                   </div>
                 </div>
                 <div class="form-actions">
-                  <button type="button" class="secondary" id="inmuebleGenerarEncargoBtn">Generar encargo</button>
+                  <button type="button" class="secondary" id="inmuebleGenerarEncargoBtn">Generar hoja de encargo</button>
                   <span class="muted" id="inmuebleGenerarEncargoStatus"></span>
                 </div>
               </div>
@@ -3188,9 +3188,9 @@
                   <label>
                     Estado
                     <select name="estado">
-                      <option>Pendiente</option>
-                      <option>Completada</option>
-                      <option>Cancelada</option>
+                      <option value="Pendiente">Programada</option>
+                      <option value="Completada">Realizada</option>
+                      <option value="Cancelada">Cancelada</option>
                     </select>
                   </label>
                   <label>
@@ -3269,21 +3269,14 @@
               <div class="form-card">
                 <div class="section-head">
                   <div>
-                    <h3>Conversión comercial</h3>
-                    <p class="muted">Mueve el inmueble por inventario, noticia, encargo, propuesta, reserva, arras o cierre desde su expediente.</p>
+                    <h3>Fase del inmueble</h3>
+                    <p class="muted">La fase se actualiza al cerrar una cita (Actividad) marcándola como Realizada. Evita saltos manuales para mantener trazabilidad.</p>
+                  </div>
+                  <div class="form-actions">
+                    <button type="button" class="secondary" id="inmuebleGoActividadBtn">Ir a citas</button>
                   </div>
                 </div>
-                <div class="inline-actions">
-                  <button type="button" class="ghost" id="inmuebleConvertInmuebleBtn">Inmueble</button>
-                  <button type="button" class="ghost" id="inmuebleConvertNoticiaBtn">Noticia</button>
-                  <button type="button" class="secondary" id="inmuebleConvertEncargoBtn">Encargo</button>
-                  <button type="button" class="secondary" id="inmuebleConvertPropuestaBtn">Propuesta</button>
-                  <button type="button" class="secondary" id="inmuebleConvertReservadoBtn">Reservado</button>
-                  <button type="button" class="secondary" id="inmuebleConvertArrasBtn">Contrato de arras</button>
-                  <button type="button" class="secondary" id="inmuebleConvertVentaBtn">Vendido</button>
-                  <button type="button" class="ghost" id="inmuebleConvertCerradoBtn">Cerrado negativamente</button>
-                  <button type="button" class="secondary" id="inmuebleConvertAlquilerBtn">Alquiler</button>
-                </div>
+                <div id="inmuebleEstadoInfo" class="muted"></div>
               </div>
               <div class="form-card">
                 <div class="section-head">
@@ -3305,7 +3298,6 @@
                 <div id="inmuebleChecklistTable"></div>
                 <div class="footer" id="inmuebleChecklistInfo"></div>
               </div>
-              <div id="inmuebleEstadoInfo" class="muted"></div>
             </div>
           </div>
         </div>

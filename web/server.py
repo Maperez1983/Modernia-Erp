@@ -12937,8 +12937,17 @@ def ensure_captacion_for_inmueble(conn, empresa_id, inmueble_id, now):
     if not inmueble:
         return None
     captacion_id = os.urandom(16).hex()
-    situacion = str(inmueble["estado"] or "Noticia").strip() or "Noticia"
-    etapa = "Encargo" if normalize_lookup_text(situacion) == "encargo" else situacion
+    situacion = str(inmueble["estado"] or "Inmueble").strip() or "Inmueble"
+    situacion_norm = normalize_lookup_text(situacion).lower()
+    if situacion_norm in {"", "inventario"}:
+        situacion = "Inmueble"
+        situacion_norm = "inmueble"
+    # Normaliza estados legacy a 5 fases principales.
+    if situacion_norm in {"reservado", "reserva", "arras", "contrato de arras", "contrato privado", "escritura", "escritura publica", "firma escritura", "firma escritura publica"}:
+        etapa = "Vendido"
+        situacion = "Vendido"
+    else:
+        etapa = situacion
     conn.execute(
         """
         INSERT INTO captaciones (
@@ -12982,12 +12991,14 @@ def sync_inmueble_stage_for_action(conn, inmueble_id, destino, now):
     destino_label = {
         "inmueble": "Inmueble",
         "noticia": "Noticia",
-        "valoracion": "Valoración",
-        "adquisicion": "Adquisición",
+        # Compat: etapas antiguas; se normalizan a las 5 fases principales.
+        "valoracion": "Inmueble",
+        "adquisicion": "Noticia",
         "encargo": "Encargo",
         "propuesta": "Propuesta",
-        "reservado": "Reservado",
-        "arras": "Contrato de arras",
+        # En el flujo simplificado, Reserva/Arras forman parte de "Vendido" (post-aceptación).
+        "reservado": "Vendido",
+        "arras": "Vendido",
         "vendido": "Vendido",
         "compraventa": "Vendido",
         "cerrado_negativamente": "Cerrado negativamente",
@@ -13415,7 +13426,8 @@ INMO_ACTION_RESULT_OPTIONS = {
     "cita_comprador": {"Estudio", "No interesa", "Interesado"},
     "cita_gestion_encargo": {"Realizada", "Reprogramar", "No realizada"},
     "cita_general": {"Realizada", "Reprogramar", "No realizada"},
-    "cita_propuesta": {"Se realiza propuesta", "No se realiza"},
+    # Simplificado: la propuesta se resuelve en 3 resultados (rechazada / aprobada / negociación).
+    "cita_propuesta": {"Rechazada", "Aprobada", "En negociación"},
     "cita_propietarios": {"Aceptada", "Rechazada", "Contraoferta"},
     "cita_contraoferta": {"Aceptada", "Rechazada"},
     "cita_notaria": {"Firmada", "Reprogramar", "No realizada"},
@@ -16514,8 +16526,9 @@ def resolve_owner_nifs_from_cliente_ids(conn, cliente_ids):
     return normalized
 
 
-def detect_inmobiliaria_duplicates(conn, empresa_id, *, direccion="", owner_nifs=None, scope="captacion"):
+def detect_inmobiliaria_duplicates(conn, empresa_id, *, direccion="", referencia_catastral="", owner_nifs=None, scope="captacion"):
     direccion_norm = normalize_inmobiliaria_address(direccion)
+    refcat_norm = re.sub(r"[^A-Z0-9]", "", str(referencia_catastral or "").upper()) or ""
     owner_nifs = [normalize_nif(item) for item in (owner_nifs or []) if normalize_nif(item)]
     owner_nif_set = set(owner_nifs)
     duplicates = []
@@ -16545,6 +16558,9 @@ def detect_inmobiliaria_duplicates(conn, empresa_id, *, direccion="", owner_nifs
         reasons = []
         if direccion_norm and normalize_inmobiliaria_address(row["direccion"]) == direccion_norm:
             reasons.append("misma dirección")
+        row_refcat = re.sub(r"[^A-Z0-9]", "", str(row["referencia_catastral"] or "").upper()) or ""
+        if refcat_norm and row_refcat and row_refcat == refcat_norm:
+            reasons.append("misma referencia catastral")
         row_nifs = {
             normalize_nif(part)
             for part in re.split(r"[|,]", str(row["propietario_nifs"] or ""))
@@ -40709,6 +40725,7 @@ class Handler(BaseHTTPRequestHandler):
                     conn,
                     empresa["id"],
                     direccion=direccion,
+                    referencia_catastral=payload.get("referencia_catastral"),
                     owner_nifs=[
                         payload.get("propietario1_nif"),
                         payload.get("propietario2_nif"),
@@ -41043,6 +41060,7 @@ class Handler(BaseHTTPRequestHandler):
                     conn,
                     empresa["id"],
                     direccion=payload.get("direccion"),
+                    referencia_catastral=payload.get("referencia_catastral"),
                     owner_nifs=resolve_owner_nifs_from_cliente_ids(conn, propietarios),
                     scope="captacion",
                 )
@@ -41307,6 +41325,14 @@ class Handler(BaseHTTPRequestHandler):
             if not record_id or not etapa:
                 json_response(self, {"error": "id y etapa requeridos"}, status=400)
                 return
+            allow_manual = str(payload.get("allow_manual_stage") or "").strip().lower() in {"1", "true", "yes", "si", "sí"}
+            if not allow_manual:
+                json_response(
+                    self,
+                    {"error": "La fase del inmueble se actualiza cerrando citas. (Actualización manual deshabilitada)"},
+                    status=400,
+                )
+                return
             try:
                 prev = conn.execute(
                     "SELECT etapa, situacion_comercial, inmueble_id, responsable, asesor FROM captaciones WHERE id = ? LIMIT 1",
@@ -41395,8 +41421,6 @@ class Handler(BaseHTTPRequestHandler):
                 "necesidad_venta_alquiler",
                 "canal",
                 "tipo_procedencia",
-                "etapa",
-                "situacion_comercial",
                 "situacion_ocupacion",
                 "ocupado_por",
                 "noticia_verificada",
@@ -42143,7 +42167,6 @@ class Handler(BaseHTTPRequestHandler):
                 "con_inquilino",
                 "planificacion_encargo",
                 "fecha_ultima_renov_rebaja",
-                "estado",
                 "lat",
                 "lon",
             )
@@ -43439,17 +43462,8 @@ class Handler(BaseHTTPRequestHandler):
                 },
                 now=now,
             )
-            if normalize_inmo_action_type(tipo) == "cita_adquisicion":
-                inmueble_id = str(payload.get("inmueble_id") or "").strip()
-                if inmueble_id:
-                    inmueble = conn.execute(
-                        "SELECT estado FROM inmuebles WHERE id = ? LIMIT 1",
-                        (inmueble_id,),
-                    ).fetchone()
-                    estado_actual = normalize_lookup_text((inmueble["estado"] if inmueble else "") or "").lower()
-                    if estado_actual in {"", "noticia"}:
-                        sync_inmueble_stage_for_action(conn, inmueble_id, "adquisicion", now)
-            elif servicio_norm == "financiaciones":
+            # El cambio de fase se hace al cerrar la cita (no al crearla), para evitar saltos involuntarios.
+            if servicio_norm == "financiaciones":
                 if action_row and str(action_row["estado"] or "").strip().lower() != "pendiente":
                     apply_fin_action_workflow(conn, empresa["id"], action_row, now)
             conn.commit()
@@ -43551,10 +43565,37 @@ class Handler(BaseHTTPRequestHandler):
                 resultado_norm = normalize_lookup_text(resultado_final).lower()
                 destino = ""
                 if resultado_norm == "positivo":
-                    destino = estado_siguiente_final or "Noticia"
+                    if estado_siguiente_final:
+                        destino = estado_siguiente_final
+                    else:
+                        # Default según fase actual: Inmueble -> Noticia, Noticia -> Encargo.
+                        inm_row = conn.execute(
+                            "SELECT estado FROM inmuebles WHERE id = ? LIMIT 1",
+                            (inmueble_id,),
+                        ).fetchone()
+                        estado_actual = normalize_lookup_text((inm_row["estado"] if inm_row else "") or "").lower()
+                        destino = "Encargo" if estado_actual == "noticia" else "Noticia"
                 elif resultado_norm == "negativo":
                     destino = estado_siguiente_final or "Cerrado negativamente"
                 if destino:
+                    # Ratificación rápida de datos clave al convertir a Encargo.
+                    if normalize_lookup_text(destino).lower() == "encargo":
+                        precio_encargo = parse_money_value(payload.get("precio_encargo"))
+                        honorarios = parse_money_value(payload.get("honorarios"))
+                        duracion = str(payload.get("duracion_encargo") or payload.get("duracion_encargo_meses") or "").strip()
+                        inm_updates = {}
+                        if precio_encargo is not None:
+                            inm_updates["precio_encargo"] = precio_encargo
+                        if honorarios is not None:
+                            inm_updates["honorarios"] = honorarios
+                        if duracion:
+                            inm_updates["planificacion_encargo"] = duracion
+                        if inm_updates:
+                            set_clause = ", ".join([f"{key} = ?" for key in inm_updates])
+                            conn.execute(
+                                f"UPDATE inmuebles SET {set_clause}, updated_at = datetime(?) WHERE id = ?",
+                                (*list(inm_updates.values()), now, inmueble_id),
+                            )
                     sync_inmueble_stage_for_action(conn, inmueble_id, destino, now)
             elif tipo_norm == "cita_comprador" and inmueble_id and estado_final.lower() != "pendiente":
                 if normalize_lookup_text(resultado_final).lower() == "interesado":
@@ -43713,59 +43754,146 @@ class Handler(BaseHTTPRequestHandler):
                 if normalize_lookup_text(resultado_final).lower() == "aceptada":
                     sync_inmueble_stage_for_action(conn, inmueble_id, "reservado", now)
             elif tipo_norm == "cita_propuesta" and inmueble_id and estado_final.lower() != "pendiente":
-                if normalize_lookup_text(resultado_final).lower() == "se realiza propuesta":
-                    documento_tipo = str(
-                        updates.get("documento_tipo") if "documento_tipo" in updates else current["documento_tipo"] or "Propuesta de compra"
-                    ).strip() or "Propuesta de compra"
-                    buyer = conn.execute(
-                        "SELECT nombre, nif, telefono, email FROM clientes WHERE id = ? LIMIT 1",
-                        (action_row["cliente_id"],),
-                    ).fetchone()
-                    inmueble = conn.execute(
-                        "SELECT * FROM inmuebles WHERE id = ? LIMIT 1",
-                        (inmueble_id,),
-                    ).fetchone()
-                    if inmueble:
-                        pdf_bytes = build_inmueble_negotiation_offer_pdf(
-                            dict(empresa) if empresa else {},
-                            dict(inmueble),
-                            dict(buyer) if buyer else {},
-                            dict(action_row),
-                        )
-                        nombre = f"{documento_tipo} · {buyer['nombre'] if buyer and buyer['nombre'] else inmueble['direccion'] or 'Inmueble'}"
-                        filename_base = f"negociacion_{slugify_text(inmueble['direccion'] or inmueble['referencia'] or record_id)[:50] or record_id}"
-                        persist_generated_inmueble_pdf(
-                            conn,
-                            inmueble_id,
-                            documento_tipo,
-                            nombre,
-                            pdf_bytes,
-                            filename_base,
-                            now,
-                            replace_existing=False,
-                        )
-                    next_id = os.urandom(16).hex()
+                resultado_norm = normalize_lookup_text(resultado_final).lower()
+                documento_tipo = str(
+                    updates.get("documento_tipo") if "documento_tipo" in updates else current["documento_tipo"] or "Propuesta de compra"
+                ).strip() or "Propuesta de compra"
+                buyer_id = str((action_row["cliente_id"] if action_row else current["cliente_id"]) or "").strip()
+                buyer = (
                     conn.execute(
-                        """
-                        INSERT INTO acciones (
-                          id, empresa_id, servicio, cliente_id, inmueble_id, cliente_nombre,
-                          fecha, hora, tipo, responsable, estado, created_at, updated_at
-                        ) VALUES (
-                          ?, ?, 'inmobiliaria', ?, ?, ?, date('now', '+1 day'), '12:00', ?, ?, 'Pendiente', datetime(?), datetime(?)
-                        )
-                        """,
-                        (
-                            next_id,
-                            empresa["id"],
-                            action_row["cliente_id"],
-                            inmueble_id,
-                            action_row["cliente_nombre"],
-                            "Cita aceptación propietarios",
-                            action_row["responsable"],
-                            now,
-                            now,
-                        ),
+                        "SELECT id, nombre, nif, telefono, email FROM clientes WHERE id = ? LIMIT 1",
+                        (buyer_id,),
+                    ).fetchone()
+                    if buyer_id
+                    else None
+                )
+                inmueble = conn.execute(
+                    "SELECT * FROM inmuebles WHERE id = ? LIMIT 1",
+                    (inmueble_id,),
+                ).fetchone()
+
+                # Genera un PDF de propuesta/negociación cuando procede.
+                if inmueble and resultado_norm in {"en negociacion", "en negociación", "aprobada"}:
+                    pdf_bytes = build_inmueble_negotiation_offer_pdf(
+                        dict(empresa) if empresa else {},
+                        dict(inmueble),
+                        dict(buyer) if buyer else {},
+                        dict(action_row) if action_row else dict(current),
                     )
+                    nombre = f"{documento_tipo} · {buyer['nombre'] if buyer and buyer['nombre'] else inmueble['direccion'] or 'Inmueble'}"
+                    filename_base = f"negociacion_{slugify_text(inmueble['direccion'] or inmueble['referencia'] or record_id)[:50] or record_id}"
+                    persist_generated_inmueble_pdf(
+                        conn,
+                        inmueble_id,
+                        documento_tipo,
+                        nombre,
+                        pdf_bytes,
+                        filename_base,
+                        now,
+                        replace_existing=False,
+                    )
+
+                if resultado_norm in {"en negociacion", "en negociación"}:
+                    sync_inmueble_stage_for_action(conn, inmueble_id, "propuesta", now)
+                elif resultado_norm == "rechazada":
+                    # Vuelve a Encargo (seguimos con el expediente abierto, pero sin propuesta activa).
+                    sync_inmueble_stage_for_action(conn, inmueble_id, "encargo", now)
+                elif resultado_norm == "aprobada":
+                    # Aceptación: pasa a Vendido y crea/actualiza operación para controlar Contrato privado / Escritura.
+                    sync_inmueble_stage_for_action(conn, inmueble_id, "vendido", now)
+                    try:
+                        precio_propuesta = parse_money_value(
+                            (action_row["importe_propuesta"] if action_row else current["importe_propuesta"]) or payload.get("precio_propuesta")
+                        )
+                    except Exception:
+                        precio_propuesta = None
+                    fecha_propuesta = str((action_row["fecha"] if action_row else current["fecha"]) or "").strip()
+                    fecha_contrato = str(payload.get("fecha_contrato") or "").strip()
+                    fecha_escritura = str(payload.get("fecha_escritura") or "").strip()
+                    op_estado = str(payload.get("operacion_estado") or "Contrato privado").strip() or "Contrato privado"
+                    existing = conn.execute(
+                        """
+                        SELECT id
+                        FROM operaciones_inmobiliarias
+                        WHERE empresa_id = ?
+                          AND inmueble_id = ?
+                          AND LOWER(COALESCE(tipo_operacion, 'venta')) = 'venta'
+                        ORDER BY updated_at DESC, created_at DESC
+                        LIMIT 1
+                        """,
+                        (empresa["id"], inmueble_id),
+                    ).fetchone()
+                    op_id = existing["id"] if existing else os.urandom(16).hex()
+                    refcat = re.sub(r"[^A-Z0-9]", "", str((inmueble["referencia_catastral"] if inmueble else "") or "").upper()) or None
+                    direccion = str((inmueble["direccion"] if inmueble else "") or "").strip() or None
+                    buyer_nombre = str((buyer["nombre"] if buyer else "") or "").strip() or None
+                    buyer_nif = normalize_nif(buyer["nif"] if buyer else "") or None
+                    buyer_tel = str((buyer["telefono"] if buyer else "") or "").strip() or None
+                    buyer_email = normalize_email(buyer["email"] if buyer else "") or None
+                    if existing:
+                        conn.execute(
+                            """
+                            UPDATE operaciones_inmobiliarias
+                            SET estado = ?, fecha_propuesta = ?, precio_propuesta = ?,
+                                fecha_contrato = COALESCE(NULLIF(?, ''), fecha_contrato),
+                                fecha_escritura = COALESCE(NULLIF(?, ''), fecha_escritura),
+                                inmueble_id = ?, direccion = ?, referencia_catastral = ?,
+                                contraparte1_id = ?, contraparte_nombre = ?, contraparte_nif = ?,
+                                contraparte_telefono = ?, contraparte_email = ?,
+                                updated_at = datetime(?)
+                            WHERE id = ?
+                            """,
+                            (
+                                op_estado,
+                                fecha_propuesta or None,
+                                precio_propuesta,
+                                fecha_contrato,
+                                fecha_escritura,
+                                inmueble_id,
+                                direccion,
+                                refcat,
+                                buyer_id or None,
+                                buyer_nombre,
+                                buyer_nif,
+                                buyer_tel,
+                                buyer_email,
+                                now,
+                                op_id,
+                            ),
+                        )
+                    else:
+                        conn.execute(
+                            """
+                            INSERT INTO operaciones_inmobiliarias (
+                              id, empresa_id, tipo_operacion, estado,
+                              inmueble_id, direccion, referencia_catastral,
+                              contraparte1_id, contraparte_nombre, contraparte_nif, contraparte_telefono, contraparte_email,
+                              fecha_propuesta, fecha_contrato, fecha_escritura, precio_propuesta,
+                              created_at, updated_at
+                            ) VALUES (
+                              ?, ?, 'venta', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, datetime(?), datetime(?)
+                            )
+                            """,
+                            (
+                                op_id,
+                                empresa["id"],
+                                op_estado,
+                                inmueble_id,
+                                direccion,
+                                refcat,
+                                buyer_id or None,
+                                buyer_nombre,
+                                buyer_nif,
+                                buyer_tel,
+                                buyer_email,
+                                fecha_propuesta or None,
+                                fecha_contrato,
+                                fecha_escritura,
+                                precio_propuesta,
+                                now,
+                                now,
+                            ),
+                        )
             response_payload = {"ok": True}
             if "financiacion_oportunidad_id" in updates:
                 response_payload["financiacion_oportunidad_id"] = updates["financiacion_oportunidad_id"]

@@ -2700,9 +2700,10 @@ const inmuebleTabDocs = document.getElementById("inmuebleTabDocs");
 const inmuebleTabEstado = document.getElementById("inmuebleTabEstado");
 const inmuebleGenerarEncargoTabBtn = document.getElementById("inmuebleGenerarEncargoTabBtn");
 const inmuebleTabGenerarEncargo = document.getElementById("inmuebleTabGenerarEncargo");
-const inmuebleGenerarEncargoBtn = document.getElementById("inmuebleGenerarEncargoBtn");
-const inmuebleGenerarEncargoStatus = document.getElementById("inmuebleGenerarEncargoStatus");
-const inmuebleGoEstadoBtn = document.getElementById("inmuebleGoEstadoBtn");
+ const inmuebleGenerarEncargoBtn = document.getElementById("inmuebleGenerarEncargoBtn");
+ const inmuebleGenerarEncargoStatus = document.getElementById("inmuebleGenerarEncargoStatus");
+ const inmuebleGoEstadoBtn = document.getElementById("inmuebleGoEstadoBtn");
+ const inmuebleGoActividadBtn = document.getElementById("inmuebleGoActividadBtn");
 const inmuebleDocsForm = document.getElementById("inmuebleDocsForm");
 const inmuebleDocsFile = document.getElementById("inmuebleDocsFile");
 const inmuebleDocsStatus = document.getElementById("inmuebleDocsStatus");
@@ -18588,17 +18589,24 @@ const isValidDocumento = (value) => {
   return false;
 };
 
-const CRM_ETAPAS = [
-  "Inmueble",
-  "Noticia",
-  "Encargo",
-  "Propuesta",
-  "Reservado",
-  "Contrato de arras",
-  "Vendido",
-  "Cerrado negativamente",
-  "Alquiler",
-];
+// CRM Inmobiliario: 5 fases principales (el resto se trata como histórico/extra).
+const CRM_ETAPAS_MAIN = ["Inmueble", "Noticia", "Encargo", "Propuesta", "Vendido"];
+const CRM_ETAPAS_EXTRA = ["Cerrado negativamente", "Alquiler"];
+const CRM_ETAPAS = [...CRM_ETAPAS_MAIN, ...CRM_ETAPAS_EXTRA];
+
+const normalizeCrmMainEtapa = (value) => {
+  const key = normalizeSimple(value || "");
+  if (!key) return "Inmueble";
+  if (key.includes("noticia")) return "Noticia";
+  if (key.includes("encargo")) return "Encargo";
+  if (key.includes("propuest")) return "Propuesta";
+  if (key.includes("vend") || key.includes("comprav") || key.includes("reser") || key.includes("arras") || key.includes("escrit")) {
+    return "Vendido";
+  }
+  if (key.includes("cerrado")) return "Cerrado negativamente";
+  if (key.includes("alquil")) return "Alquiler";
+  return "Inmueble";
+};
 
 const INMOBILIARIA_ASESORES = [
   "Bárbara Salazar",
@@ -18663,48 +18671,55 @@ const INMUEBLE_CHECKLISTS = {
 };
 
 const INMUEBLE_FIELDS = [
-  { key: "estado", label: "Estado", type: "select", options: CRM_ETAPAS, section: "Prioridad comercial" },
-  { key: "focalizacion", label: "Focalización", type: "text", section: "Prioridad comercial" },
-  { key: "estado_contacto", label: "Estado de contacto", type: "text", section: "Prioridad comercial" },
+  // Resumen
+  { key: "titulo", label: "Inmueble", type: "text", section: "Resumen" },
+  { key: "tipo_inmueble", label: "Tipo", type: "text", section: "Resumen" },
+  { key: "subtipologia", label: "Subtipología", type: "text", section: "Resumen" },
+  { key: "categoria", label: "Categoría", type: "text", section: "Resumen" },
   {
-    key: "planificado",
-    label: "Planificado",
+    key: "situacion_ocupacion",
+    label: "Situación de ocupación",
     type: "select",
-    options: [
-      { value: "0", label: "No" },
-      { value: "1", label: "Sí" },
-    ],
-    section: "Prioridad comercial",
+    options: ["Libre", "Ocupado", "Alquilado"],
+    section: "Resumen",
   },
-  { key: "fecha_planificacion", label: "Fecha planificación", type: "date", section: "Prioridad comercial" },
   {
-    key: "no_molestar",
-    label: "No molestar",
+    key: "ocupado_por",
+    label: "Ocupado por",
     type: "select",
-    options: [
-      { value: "0", label: "No" },
-      { value: "1", label: "Sí" },
-    ],
-    section: "Prioridad comercial",
+    options: ["", "Propietario", "Inquilino", "Familiar", "Tercero", "Desconocido"],
+    section: "Resumen",
   },
-  { key: "tipo_inmueble", label: "Tipo", type: "text", section: "Prioridad comercial" },
-  { key: "subtipologia", label: "Subtipología", type: "text", section: "Prioridad comercial" },
-  { key: "titulo", label: "Inmueble", type: "text", section: "Prioridad comercial" },
-  { key: "direccion", label: "Dirección", type: "text", section: "Prioridad comercial" },
-  { key: "direccion_numero", label: "Número", type: "text", section: "Prioridad comercial" },
-  { key: "interior", label: "Interior", type: "text", section: "Prioridad comercial" },
-  { key: "escalera", label: "Escalera", type: "text", section: "Prioridad comercial" },
-  { key: "edificio", label: "Edificio", type: "text", section: "Prioridad comercial" },
-  { key: "precio_objetivo", label: "Precio objetivo venta", type: "number", section: "Prioridad comercial" },
-  { key: "precio_encargo", label: "Precio encargo", type: "number", section: "Prioridad comercial" },
-  { key: "precio_pedido_cliente", label: "Precio pedido cliente", type: "number", section: "Prioridad comercial" },
-  { key: "fecha_valoracion", label: "Fecha valoración", type: "date", section: "Prioridad comercial" },
-  { key: "desviacion_pct", label: "Desviación (%)", type: "number", section: "Prioridad comercial" },
-  { key: "honorarios", label: "Honorarios agencia", type: "number", section: "Prioridad comercial" },
-  { key: "asesor", label: "Asesor", type: "select", options: INMOBILIARIA_ASESORES, section: "Prioridad comercial" },
-  { key: "responsable", label: "Responsable", type: "text", section: "Prioridad comercial" },
-  { key: "categoria", label: "Categoría", type: "text", section: "Prioridad comercial" },
-  { key: "informador_nombre", label: "Informador relacionado", type: "text", section: "Prioridad comercial" },
+
+  // Dirección
+  { key: "direccion", label: "Dirección", type: "text", section: "Dirección" },
+  { key: "direccion_numero", label: "Número", type: "text", section: "Dirección" },
+  { key: "interior", label: "Interior", type: "text", section: "Dirección" },
+  { key: "escalera", label: "Escalera", type: "text", section: "Dirección" },
+  { key: "edificio", label: "Edificio", type: "text", section: "Dirección" },
+  { key: "zona", label: "Zona", type: "text", section: "Dirección" },
+  { key: "codigo_postal", label: "Código postal", type: "text", section: "Dirección" },
+  { key: "localidad", label: "Localidad", type: "text", section: "Dirección" },
+  { key: "poblacion", label: "Población", type: "text", section: "Dirección" },
+  { key: "provincia", label: "Provincia", type: "text", section: "Dirección" },
+
+  // Precio
+  { key: "precio_objetivo", label: "Precio objetivo venta", type: "number", section: "Precio" },
+  { key: "precio_encargo", label: "Precio encargo", type: "number", section: "Precio" },
+  { key: "precio_pedido_cliente", label: "Precio pedido cliente", type: "number", section: "Precio" },
+  { key: "honorarios", label: "Honorarios agencia", type: "number", section: "Precio" },
+  { key: "fecha_valoracion", label: "Fecha valoración", type: "date", section: "Precio" },
+  { key: "desviacion_pct", label: "Desviación (%)", type: "number", section: "Precio" },
+  { key: "precio_valoracion", label: "Valoración interna", type: "number", section: "Precio" },
+  { key: "valor_referencia", label: "Valor de referencia", type: "number", section: "Precio" },
+
+  // Equipo y origen
+  { key: "asesor", label: "Asesor", type: "select", options: INMOBILIARIA_ASESORES, section: "Equipo" },
+  { key: "responsable", label: "Responsable", type: "text", section: "Equipo" },
+  { key: "informador_nombre", label: "Informador relacionado", type: "text", section: "Equipo" },
+  { key: "focalizacion", label: "Focalización", type: "text", section: "Equipo" },
+
+  // Contacto propietario
   {
     key: "propietario_localizado",
     label: "Propietario localizado",
@@ -18713,32 +18728,41 @@ const INMUEBLE_FIELDS = [
       { value: "0", label: "No" },
       { value: "1", label: "Sí" },
     ],
-    section: "Prioridad comercial",
+    section: "Contacto propietario",
   },
+  { key: "propietario_telefono", label: "Tel. propietario", type: "text", section: "Contacto propietario" },
+  { key: "propietario_email", label: "Email propietario", type: "text", section: "Contacto propietario" },
+  { key: "estado_contacto", label: "Estado de contacto", type: "text", section: "Contacto propietario" },
+  { key: "modalidad_ultimo_contacto", label: "Modalidad último contacto", type: "text", section: "Contacto propietario" },
   {
-    key: "situacion_ocupacion",
-    label: "Situación de ocupación",
+    key: "no_molestar",
+    label: "No molestar",
     type: "select",
-    options: ["Libre", "Ocupado", "Alquilado"],
-    section: "Prioridad comercial",
+    options: [
+      { value: "0", label: "No" },
+      { value: "1", label: "Sí" },
+    ],
+    section: "Contacto propietario",
   },
+
+  // Planificación y seguimiento
   {
-    key: "ocupado_por",
-    label: "Ocupado por",
+    key: "planificado",
+    label: "Planificado",
     type: "select",
-    options: ["", "Propietario", "Inquilino", "Familiar", "Tercero", "Desconocido"],
-    section: "Prioridad comercial",
+    options: [
+      { value: "0", label: "No" },
+      { value: "1", label: "Sí" },
+    ],
+    section: "Seguimiento",
   },
-  { key: "estado_inmueble", label: "Estado inmueble", type: "text", section: "Seguimiento" },
-  { key: "potencial_adquisicion", label: "Potencial adquisición", type: "text", section: "Seguimiento" },
+  { key: "fecha_planificacion", label: "Fecha planificación", type: "date", section: "Seguimiento" },
+  { key: "planificacion_encargo", label: "Planificación encargo", type: "text", section: "Seguimiento" },
   { key: "fecha_primer_contacto", label: "Fecha 1er contacto", type: "date", section: "Seguimiento" },
   { key: "ultima_fecha_contacto", label: "Última fecha contacto", type: "date", section: "Seguimiento" },
-  { key: "modalidad_ultimo_contacto", label: "Modalidad último contacto", type: "text", section: "Seguimiento" },
-  { key: "anio_reforma", label: "Año reforma", type: "number", section: "Seguimiento" },
-  { key: "planificacion_encargo", label: "Planificación encargo", type: "text", section: "Seguimiento" },
   { key: "fecha_ultima_renov_rebaja", label: "Última renov./rebaja", type: "date", section: "Seguimiento" },
-  { key: "propietario_telefono", label: "Tel. propietario", type: "text", section: "Seguimiento" },
-  { key: "propietario_email", label: "Email propietario", type: "text", section: "Seguimiento" },
+  { key: "estado_inmueble", label: "Estado inmueble", type: "text", section: "Seguimiento" },
+  { key: "potencial_adquisicion", label: "Potencial adquisición", type: "text", section: "Seguimiento" },
   {
     key: "con_inquilino",
     label: "Con inquilino",
@@ -18749,19 +18773,18 @@ const INMUEBLE_FIELDS = [
     ],
     section: "Seguimiento",
   },
-  { key: "zona", label: "Zona", type: "text", section: "Ubicación y Catastro" },
-  { key: "codigo_postal", label: "Código postal", type: "text", section: "Ubicación y Catastro" },
-  { key: "localidad", label: "Localidad", type: "text", section: "Ubicación y Catastro" },
-  { key: "poblacion", label: "Población", type: "text", section: "Ubicación y Catastro" },
-  { key: "provincia", label: "Provincia", type: "text", section: "Ubicación y Catastro" },
+
+  // Catastro / referencias
   { key: "referencia_catastral", label: "Referencia catastral", type: "text", section: "Ubicación y Catastro" },
   { key: "referencia", label: "Referencia interna", type: "text", section: "Ubicación y Catastro" },
+
+  // Características (detalle)
   { key: "m2", label: "m²", type: "number", section: "Características" },
   { key: "anio_construccion", label: "Año construcción", type: "number", section: "Características" },
+  { key: "anio_reforma", label: "Año reforma", type: "number", section: "Características" },
   { key: "habitaciones", label: "Habitaciones", type: "number", section: "Características" },
   { key: "banos", label: "Baños", type: "number", section: "Características" },
-  { key: "precio_valoracion", label: "Valoración interna", type: "number", section: "Referencia económica" },
-  { key: "valor_referencia", label: "Valor de referencia", type: "number", section: "Referencia económica" },
+  { key: "descripcion", label: "Descripción / notas", type: "textarea", section: "Notas internas" },
 ];
 
 const CAPTACION_FIELDS = [
@@ -18782,7 +18805,6 @@ const CAPTACION_FIELDS = [
   { key: "propietario_telefono", label: "Tel. propietario", type: "text", section: "Propiedad y origen" },
   { key: "propietario_email", label: "Email propietario", type: "text", section: "Propiedad y origen" },
   { key: "urgencia", label: "Urgencia", type: "select", options: ["Baja", "Media", "Alta"], section: "Propiedad y origen" },
-  { key: "etapa", label: "Etapa", type: "select", options: CRM_ETAPAS, section: "Pipeline" },
   {
     key: "noticia_verificada",
     label: "Noticia verificada",
@@ -19590,12 +19612,16 @@ const refreshInmuebleVisitSheetButton = () => {
   const inmueble = state.currentInmueble || state.currentInmuebleContext?.inmueble || {};
   const captacion = state.currentInmuebleContext?.captacion || {};
   const status = String(captacion.situacion_comercial || inmueble.estado || "").trim().toLowerCase();
-  const visible = status === "encargo";
-  inmuebleVisitaPdfBtn.classList.toggle("hidden", !visible);
-  inmuebleVentaFichaPdfBtn?.classList.toggle("hidden", !visible);
-  inmuebleVentaPrecioPdfBtn?.classList.toggle("hidden", !visible);
-  inmuebleEncargoPdfBtn?.classList.toggle("hidden", !visible);
-  inmuebleAlquilerDiaPdfBtn?.classList.toggle("hidden", !visible);
+  const isEncargo = status === "encargo";
+  const isNoticia = status === "noticia";
+  const isAlquiler = status === "alquiler";
+  // Hoja de encargo disponible desde Noticia (generación) y Encargo (uso operativo).
+  inmuebleEncargoPdfBtn?.classList.toggle("hidden", !(isEncargo || isNoticia));
+  // Documentación de visita/venta solo cuando ya es Encargo.
+  inmuebleVisitaPdfBtn.classList.toggle("hidden", !isEncargo);
+  inmuebleVentaFichaPdfBtn?.classList.toggle("hidden", !isEncargo);
+  inmuebleVentaPrecioPdfBtn?.classList.toggle("hidden", !isEncargo);
+  inmuebleAlquilerDiaPdfBtn?.classList.toggle("hidden", !isAlquiler);
 };
 
 const resolveVisitSheetDemandaId = () => {
@@ -20325,6 +20351,12 @@ const renderEditableGrid = (grid, fields, data, target) => {
   const isJuridica = target === "cliente" && tipoPersonaValue === "jurídica";
   const isInmueble = target === "inmueble";
   const sectionCopy = {
+    Resumen: "Tipo, ocupación y datos esenciales para entender el expediente.",
+    Dirección: "Dirección completa (se usa para detectar duplicados y para Catastro).",
+    Precio: "Precio objetivo, precio de encargo y honorarios.",
+    Equipo: "Asignación y origen del expediente.",
+    "Contacto propietario": "Contacto y estado de relación con la propiedad.",
+    Seguimiento: "Planificación y trazabilidad interna (sin cambiar fase manualmente).",
     "Prioridad comercial": "Datos que definen el objetivo y la situación comercial del inmueble.",
     "Ubicación y Catastro": "Localización, referencia catastral y soporte de geolocalización.",
     "Características": "Información física y descriptiva útil para comercialización y matching.",
@@ -27725,28 +27757,66 @@ const renderTableInto = (data, container, infoEl, label) => {
         });
       });
       actions.appendChild(openLink);
-      [
-        ["Inmueble", "inmueble", "ghost"],
-        ["Noticia", "noticia", "ghost"],
-        ["Encargo", "encargo", "secondary"],
-        ["Propuesta", "propuesta", "secondary"],
-        ["Reservado", "reservado", "secondary"],
-        ["Contrato de arras", "arras", "secondary"],
-        ["Vendido", "compraventa", "secondary"],
-        ["Cerrado negativamente", "cerrado_negativamente", "ghost"],
-        ["Alquiler", "alquiler", "secondary"],
-      ].forEach(([text, destino, cssClass]) => {
+      const etapaMain = normalizeCrmMainEtapa(rowMap?.etapa || "");
+      const citaConfig = (() => {
+        if (etapaMain === "Inmueble" || etapaMain === "Noticia") {
+          return {
+            label: "Programar adquisición",
+            tipo: "Cita de adquisición",
+            asunto: "Cita de adquisición",
+            statusText:
+              "Programa la cita (Programada). Al marcarla como Realizada podrás transformar a Noticia (o a Encargo si ya era Noticia).",
+          };
+        }
+        if (etapaMain === "Encargo") {
+          return {
+            label: "Programar visita",
+            tipo: "Cita de venta/alquiler",
+            asunto: "Cita de venta",
+            statusText: "Programa la visita. Al cerrarla podrás preparar propuesta si hay interés.",
+          };
+        }
+        if (etapaMain === "Propuesta") {
+          return {
+            label: "Programar propuesta",
+            tipo: "Cita de propuesta de compra/alquiler",
+            asunto: "Cita de propuesta",
+            statusText: "Cierra la propuesta como Rechazada / En negociación / Aprobada (si es Aprobada pasará a Vendido).",
+          };
+        }
+        if (etapaMain === "Vendido") {
+          return {
+            label: "Programar notaría",
+            tipo: "Cita notaria",
+            asunto: "Cita notaría",
+            statusText: "Registra hitos post-aceptación (contrato privado, notaría, etc.).",
+          };
+        }
+        return null;
+      })();
+      if (citaConfig) {
         const btn = document.createElement("button");
         btn.type = "button";
-        btn.className = cssClass;
-        btn.textContent = text;
+        btn.className = "secondary";
+        btn.textContent = citaConfig.label;
         btn.addEventListener("click", (event) => {
           event.preventDefault();
           event.stopPropagation();
-          runCaptacionConversion(recordId, rowMap, destino);
+          queueInmuebleCitaPrefill({
+            tipo: citaConfig.tipo,
+            asunto: citaConfig.asunto,
+            statusText: citaConfig.statusText,
+          });
+          ensureCrmOpen(() => {
+            if (inmuebleLinkId) {
+              openInmuebleDetail(inmuebleLinkId, "captaciones");
+              return;
+            }
+            openInmuebleFromCaptacion(String(recordId || "").trim(), "captaciones");
+          });
         });
         actions.appendChild(btn);
-      });
+      }
       td.appendChild(actions);
       tr.appendChild(td);
     }
@@ -27890,21 +27960,53 @@ const prepareInmuebleAcquisitionAppointment = () => {
   const siguienteSelect = inmuebleActividadForm.querySelector('select[name="estado_siguiente"]');
   if (siguienteSelect) siguienteSelect.value = "";
   if (inmuebleActividadStatus) {
-    inmuebleActividadStatus.textContent = "Programa aquí la cita de adquisición. Al cerrarla con resultado positivo podrás pasar el inmueble a Noticia.";
+    inmuebleActividadStatus.textContent =
+      "Programa aquí la cita de adquisición. Al cerrarla como Realizada con resultado Positivo, el inmueble avanzará a Noticia (o a Encargo si ya estaba en Noticia).";
+  }
+};
+
+const queueInmuebleCitaPrefill = (prefill = null) => {
+  state.pendingInmuebleCitaPrefill = prefill;
+};
+
+const applyPendingInmuebleCitaPrefill = () => {
+  const prefill = state.pendingInmuebleCitaPrefill;
+  if (!prefill) return;
+  state.pendingInmuebleCitaPrefill = null;
+  setInmuebleTab("actividad");
+  if (!inmuebleActividadForm) return;
+  const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000);
+  const fechaInput = inmuebleActividadForm.querySelector('input[name="fecha"]');
+  const horaInput = inmuebleActividadForm.querySelector('input[name="hora"]');
+  const asuntoInput = inmuebleActividadForm.querySelector('input[name="asunto"]');
+  const tipoSelect = inmuebleActividadForm.querySelector('select[name="tipo"]');
+  const estadoSelect = inmuebleActividadForm.querySelector('select[name="estado"]');
+  if (tipoSelect && prefill.tipo) tipoSelect.value = prefill.tipo;
+  if (estadoSelect) estadoSelect.value = "Pendiente";
+  if (fechaInput && !String(fechaInput.value || "").trim()) fechaInput.value = tomorrow.toISOString().slice(0, 10);
+  if (horaInput && !String(horaInput.value || "").trim()) horaInput.value = "10:00";
+  if (asuntoInput && prefill.asunto && !String(asuntoInput.value || "").trim()) asuntoInput.value = prefill.asunto;
+  syncInmuebleWorkflowForm();
+  if (prefill.estado_siguiente) {
+    const nextSelect = inmuebleActividadForm.querySelector('select[name="estado_siguiente"]');
+    if (nextSelect) nextSelect.value = prefill.estado_siguiente;
+  }
+  if (inmuebleActividadStatus && prefill.statusText) {
+    inmuebleActividadStatus.textContent = prefill.statusText;
   }
 };
 
 const INMO_WORKFLOW_RESULT_OPTIONS = {
   "Cita de adquisición": ["Positivo", "Negativo", "Reprogramar", "No realizada"],
   "Cita de venta/alquiler": ["Estudio", "No interesa", "Interesado"],
-  "Cita de propuesta de compra/alquiler": ["Se realiza propuesta", "No se realiza"],
+  "Cita de propuesta de compra/alquiler": ["Rechazada", "Aprobada", "En negociación"],
   "Cita acept. de la propuesta": ["Aceptada", "Rechazada", "Contraoferta"],
   "Post-aceptación": ["Firmada", "Reprogramar", "No realizada"],
   "Cita de gestión encargo (seguimiento)": ["Realizada", "Reprogramar", "No realizada"],
   "Cita general (no comercial)": ["Realizada", "Reprogramar", "No realizada"],
   "Estudio financiero": ["Viable", "No viable", "Pendiente documentación"],
   "Cita comprador": ["Estudio", "No interesa", "Interesado"],
-  "Cita propuesta": ["Se realiza propuesta", "No se realiza"],
+  "Cita propuesta": ["Rechazada", "Aprobada", "En negociación"],
   "Cita aceptación propietarios": ["Aceptada", "Rechazada", "Contraoferta"],
   "Cita aceptación contraoferta": ["Aceptada", "Rechazada"],
   "Cita notaria": ["Firmada", "Reprogramar", "No realizada"],
@@ -27953,7 +28055,9 @@ const syncInmuebleWorkflowForm = () => {
     if (type === "Cita de adquisición") {
       const resultFinal = String(resultSelect?.value || "").trim();
       if (resultFinal === "Positivo") {
-        nextOptions = ["Noticia", "Encargo"];
+        const etapaActual = normalizeCrmMainEtapa(state.currentInmuebleContext?.inmueble?.estado || "");
+        // Inmueble -> Noticia, Noticia -> Encargo
+        nextOptions = etapaActual === "Noticia" ? ["Encargo"] : ["Noticia"];
       } else if (resultFinal === "Negativo") {
         nextOptions = ["Cerrado negativamente"];
       }
@@ -27961,7 +28065,13 @@ const syncInmuebleWorkflowForm = () => {
     nextSelect.innerHTML = "";
     nextSelect.appendChild(createOption("", nextOptions.length ? "Sin cambio automático" : "No aplica"));
     nextOptions.forEach((opt) => nextSelect.appendChild(createOption(opt, opt)));
-    nextSelect.value = nextOptions.includes(current) ? current : "";
+    if (nextOptions.includes(current)) {
+      nextSelect.value = current;
+    } else if (!current && nextOptions.length === 1) {
+      nextSelect.value = nextOptions[0];
+    } else {
+      nextSelect.value = "";
+    }
   }
   refreshInmuebleActividadClientesCandidates(type);
 };
@@ -28131,18 +28241,17 @@ const loadCrmCaptaciones = () => {
       : [];
     rowMaps.forEach((row) => {
       if (!row) return;
-      if (row.etapa === "Adquisición") row.etapa = "Inmueble";
-      if (!row.etapa) row.etapa = "Inmueble";
+      // Normaliza etapas legacy (Reservado/Arras/etc.) al pipeline de 5 fases.
+      row.etapa = normalizeCrmMainEtapa(row.etapa || "") || "Inmueble";
     });
     cachedCrmCaptaciones = rowMaps;
     const etapaIndex = data.columns.indexOf("etapa");
     const idIndex = data.columns.indexOf("id");
-    // Compat legacy: algunos entornos tenían "Adquisición" como etapa. Ahora se llama "Inmueble".
+    // Compat: normaliza etapas legacy al pipeline de 5 fases.
     if (Array.isArray(data.rows) && etapaIndex >= 0) {
       data.rows.forEach((row) => {
         if (!Array.isArray(row)) return;
-        if (row[etapaIndex] === "Adquisición") row[etapaIndex] = "Inmueble";
-        if (!row[etapaIndex]) row[etapaIndex] = "Inmueble";
+        row[etapaIndex] = normalizeCrmMainEtapa(row[etapaIndex] || "") || "Inmueble";
       });
     }
     const activeEtapa = crmEtapaFilter?.value || crmEtapaFilterMirror?.value || "";
@@ -28326,7 +28435,7 @@ const loadCrmAlquileres = () => {
 };
 
 const renderCrmPipeline = (counts = {}, activeEtapa = "") => {
-  const etapas = [...CRM_ETAPAS];
+  const etapas = [...CRM_ETAPAS_MAIN];
   [crmPipeline, crmCaptacionesStageSummary].forEach((container) => {
     if (!container) return;
     container.innerHTML = "";
@@ -28357,7 +28466,7 @@ const renderCrmKanban = (data) => {
   const direccionIndex = data.columns.indexOf("direccion");
   const zonaIndex = data.columns.indexOf("zona");
   const proximaIndex = data.columns.indexOf("proxima_accion");
-  const etapas = [...CRM_ETAPAS];
+  const etapas = [...CRM_ETAPAS_MAIN];
   const grouped = new Map(etapas.map((e) => [e, []]));
   data.rows.forEach((row) => {
     const etapa = row[etapaIndex] || "Inmueble";
@@ -28374,21 +28483,6 @@ const renderCrmKanban = (data) => {
       column.className = "crm-kanban-column";
       column.innerHTML = `<h4>${etapa}</h4>`;
       column.dataset.etapa = etapa;
-      column.addEventListener("dragover", (event) => {
-        event.preventDefault();
-        column.classList.add("drag-over");
-      });
-      column.addEventListener("dragleave", () => {
-        column.classList.remove("drag-over");
-      });
-      column.addEventListener("drop", (event) => {
-        event.preventDefault();
-        column.classList.remove("drag-over");
-        const id = event.dataTransfer.getData("text/plain");
-        if (id) {
-          updateCaptacionEtapa(id, etapa);
-        }
-      });
       const rows = grouped.get(etapa) || [];
       rows.slice(0, 5).forEach((row) => {
         const rowId = row[idIndex];
@@ -28406,7 +28500,6 @@ const renderCrmKanban = (data) => {
           : `/?crm=inmo&captacion=${encodeURIComponent(captacionId)}`;
         const verifikaBadge = buildVerifika2Badge(isVerified, { compact: true });
         card.innerHTML = `
-          <div class="crm-kanban-handle" draggable="true" title="Arrastra para cambiar de etapa" aria-label="Arrastrar"></div>
           <div class="crm-kanban-titleline">
             <strong>${row[propietarioIndex] || "Propietario"}</strong>
             ${verifikaBadge}
@@ -28415,16 +28508,8 @@ const renderCrmKanban = (data) => {
           <div class="muted">${row[proximaIndex] || "Sin próxima acción"}</div>
           <div class="inline-actions"><a class="ghost" href="${deepLink}" data-open="${inmuebleId ? "inmueble" : "captacion"}">Abrir ficha</a></div>
         `;
-        const handle = card.querySelector(".crm-kanban-handle");
-        if (handle) {
-          handle.addEventListener("dragstart", (event) => {
-            event.dataTransfer.setData("text/plain", captacionId || rowId);
-            event.dataTransfer.effectAllowed = "move";
-          });
-        }
         // Click en tarjeta/link: abrir la ficha sin reload (más robusto en Render).
         const openFn = (event) => {
-          if (event?.target?.closest?.(".crm-kanban-handle")) return;
           if (event?.metaKey || event?.ctrlKey || event?.shiftKey || event?.altKey) return;
           event?.preventDefault?.();
           event?.stopPropagation?.();
@@ -29060,12 +29145,7 @@ const renderCrmResumenDashboard = () => {
   hydrateCrmResumenFilters();
 
   const normalizeStageLabel = (raw) => {
-    const text = String(raw || "").trim();
-    if (!text) return "Inmueble";
-    if (text === "Adquisición") return "Inmueble";
-    const key = normalizeSimple(text);
-    if (key === "historico vendido") return "Vendido";
-    return text;
+    return normalizeCrmMainEtapa(String(raw || "").trim());
   };
 
   const isClosedStage = (raw) => {
@@ -29496,14 +29576,13 @@ const renderCrmResumenDashboard = () => {
         if (stage === "Inmueble") reasons.push("En entrada (sin cualificar)");
         else if (stage === "Noticia") reasons.push("Noticia: cualificar y siguiente acción");
         else if (stage === "Propuesta") reasons.push("Propuesta pendiente");
-        else if (stage === "Reservado") reasons.push("Reserva pendiente");
-        else if (stage === "Contrato de arras") reasons.push("Arras: preparar escritura");
+        else if (stage === "Vendido") reasons.push("Post-aceptación: contrato / notaría");
         const proxima = String(row.proxima_accion || "").trim();
         if (!proxima) reasons.push("Sin próxima acción");
         let score = reasons.length;
         if (stage === "Inmueble") score += 2;
         if (stage === "Propuesta") score += 2;
-        if (stage === "Contrato de arras") score += 1;
+        if (stage === "Vendido") score += 1;
         return {
           id: row.id || "",
           title: row.direccion || "Sin dirección",
@@ -29541,19 +29620,9 @@ const renderCrmResumenDashboard = () => {
 };
 
 const updateCaptacionEtapa = (id, etapa) => {
-  fetch("/api/captaciones_update", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ id, etapa }),
-  })
-    .then((res) => res.json())
-    .then((data) => {
-      if (data.error) {
-        alert(data.error);
-        return;
-      }
-      loadCrmCaptaciones();
-    });
+  void id;
+  void etapa;
+  alert("La fase del inmueble se actualiza cerrando citas (no por arrastre/manual).");
 };
 
 let cachedCrmInmuebles = [];
@@ -30451,10 +30520,18 @@ const normalizeInmoActionType = (value) => {
     "cita general no comercial": "cita_general",
     "cita propuesta": "cita_propuesta",
     "cita de propuesta": "cita_propuesta",
+    "cita de propuesta de compra/alquiler": "cita_propuesta",
+    "cita de propuesta de compra alquiler": "cita_propuesta",
+    "cita acept. de la propuesta": "cita_propietarios",
+    "cita acept de la propuesta": "cita_propietarios",
+    "cita aceptacion de la propuesta": "cita_propietarios",
     "cita propietarios": "cita_propietarios",
     "cita de propietarios": "cita_propietarios",
+    "cita aceptación propietarios": "cita_propietarios",
+    "cita aceptacion propietarios": "cita_propietarios",
     "cita contraoferta": "cita_contraoferta",
     "cita aceptacion contraoferta": "cita_contraoferta",
+    "cita aceptación contraoferta": "cita_contraoferta",
     "cita notaria": "cita_notaria",
     "cita de notaria": "cita_notaria",
     "post-aceptacion": "cita_notaria",
@@ -30469,7 +30546,7 @@ const INMO_ACTION_RESULT_OPTIONS = {
   cita_comprador: ["Estudio", "No interesa", "Interesado"],
   cita_gestion_encargo: ["Realizada", "Reprogramar", "No realizada"],
   cita_general: ["Realizada", "Reprogramar", "No realizada"],
-  cita_propuesta: ["Se realiza propuesta", "No se realiza"],
+  cita_propuesta: ["Rechazada", "En negociación", "Aprobada"],
   cita_propietarios: ["Aceptada", "Rechazada", "Contraoferta"],
   cita_contraoferta: ["Aceptada", "Rechazada"],
   cita_notaria: ["Firmada", "Reprogramar", "No realizada"],
@@ -31116,6 +31193,7 @@ const resolveInmuebleDetailRef = async (rowMap = {}, fallbackId = "") => {
 
 const openInmuebleDetail = (id, originView = "") => {
   if (!inmuebleDetail) return;
+  const hasPendingPrefill = Boolean(state.pendingInmuebleCitaPrefill);
   state.currentInmuebleId = id;
   state.currentInmuebleOriginView = originView || state.crmWorkspaceView || "inmuebles";
   state.currentInmueble = null;
@@ -31144,6 +31222,9 @@ const openInmuebleDetail = (id, originView = "") => {
         demandas: [],
         visitas: [],
       };
+      if (hasPendingPrefill) {
+        applyPendingInmuebleCitaPrefill();
+      }
       syncInmuebleGenerarEncargoTab(inmueble);
       if (inmuebleTitle) {
         inmuebleTitle.textContent = inmueble.direccion || "Ficha de inmueble";
@@ -31221,7 +31302,9 @@ const openInmuebleDetail = (id, originView = "") => {
         crmWorkspaceShell.classList.add("hidden");
       }
       inmuebleDetail.classList.remove("hidden");
-      setInmuebleTab("datos");
+      if (!hasPendingPrefill) {
+        setInmuebleTab("datos");
+      }
     })
     .catch((error) => {
       if (inmuebleSaveStatus) inmuebleSaveStatus.textContent = error?.message || "Error al cargar.";
@@ -31819,6 +31902,12 @@ const loadInmuebleActividad = (inmuebleId, empresaId) => {
   if (!inmuebleActividadTable || !inmuebleId || !empresaId) {
     return;
   }
+  const prettyEstado = (value) => {
+    const key = normalizeSimple(value || "");
+    if (key === "pendiente") return "Programada";
+    if (key === "completada") return "Realizada";
+    return value || "-";
+  };
   const accionesReq = api(
     `/api/acciones?servicio=inmobiliaria&empresa_id=${empresaId}&inmueble_id=${inmuebleId}`
   );
@@ -31834,7 +31923,7 @@ const loadInmuebleActividad = (inmuebleId, empresaId) => {
           ...acciones.map((row) => ({
             kind: "accion",
             title: row.tipo || "Acción",
-            status: row.estado || "Pendiente",
+            status: prettyEstado(row.estado || "Pendiente"),
             date: row.fecha,
             meta: { responsable: row.responsable, resultado: row.resultado_cierre, hora: row.hora },
           })),
@@ -31907,8 +31996,17 @@ const loadInmuebleActividad = (inmuebleId, empresaId) => {
     table.appendChild(thead);
     const tbody = document.createElement("tbody");
     rows.forEach((row) => {
-      const tr = document.createElement("tr");
-      const values = [row.fecha || "-", row.hora || "-", row.tipo || "-", row.cliente || "-", row.responsable || "-", row.estado || "-", row.resultado_cierre || "-", row.notas || "-"];
+          const tr = document.createElement("tr");
+          const values = [
+            row.fecha || "-",
+            row.hora || "-",
+            row.tipo || "-",
+            row.cliente || "-",
+            row.responsable || "-",
+            prettyEstado(row.estado || "-"),
+            row.resultado_cierre || "-",
+            row.notas || "-",
+          ];
       const cols = ["fecha", "hora", "tipo", "cliente", "responsable", "estado", "resultado", "notas"];
       values.forEach((value, idx) => {
         const td = document.createElement("td");
@@ -31917,14 +32015,8 @@ const loadInmuebleActividad = (inmuebleId, empresaId) => {
         tr.appendChild(td);
       });
       const actionsTd = document.createElement("td");
-      const normalizedType = String(row.tipo || "").trim().toLowerCase();
-      const closableTypes = new Set([
-        "cita de adquisición",
-        "cita comprador",
-        "cita propuesta",
-        "cita aceptación propietarios",
-        "cita aceptación contraoferta",
-      ]);
+      const normalizedType = normalizeInmoActionType(row.tipo || "");
+      const closableTypes = new Set(["cita_adquisicion", "cita_comprador", "cita_propuesta", "cita_propietarios", "cita_contraoferta"]);
       const isPending = String(row.estado || "").trim().toLowerCase() === "pendiente";
       if (closableTypes.has(normalizedType) && isPending) {
         const closeBtn = document.createElement("button");
@@ -32214,7 +32306,8 @@ const closeInmuebleWorkflowAction = (row, empresaId) => {
     });
 
   const type = String(row.tipo || "").trim();
-  if (type === "Cita de adquisición") {
+  const normType = normalizeInmoActionType(type);
+  if (normType === "cita_adquisicion") {
     const openAcquisitionCloseModal = () =>
       new Promise((resolve) => {
         let modal = document.getElementById("inmoActionCloseModal");
@@ -32270,9 +32363,15 @@ const closeInmuebleWorkflowAction = (row, empresaId) => {
           if (!nextWrap || !nextSelect) return;
           if (value === "Positivo") {
             nextWrap.classList.remove("hidden");
-            fillSelect(nextSelect, ["Noticia", "Encargo"], "Sin cambio automático");
-            nextSelect.value = "Noticia";
-            setHint("Si eliges Noticia, aparecerá la pestaña “Generar encargo” en la ficha.");
+            const etapaActual = normalizeCrmMainEtapa(state.currentInmuebleContext?.inmueble?.estado || state.currentInmueble?.estado || "");
+            const nextOptions = etapaActual === "Noticia" ? ["Encargo"] : ["Noticia"];
+            fillSelect(nextSelect, nextOptions, "Sin cambio automático");
+            nextSelect.value = nextOptions[0] || "";
+            setHint(
+              nextSelect.value === "Encargo"
+                ? "Se ratificarán precio, duración y honorarios antes de generar la hoja de encargo."
+                : "Al pasar a Noticia, la ficha queda cualificada para preparar el encargo."
+            );
             return;
           }
           if (value === "Negativo") {
@@ -32289,7 +32388,7 @@ const closeInmuebleWorkflowAction = (row, empresaId) => {
         };
 
         if (titleEl) titleEl.textContent = "Cerrar cita de adquisición";
-        fillSelect(resultSelect, INMO_WORKFLOW_RESULT_OPTIONS["Cita de adquisición"] || [], "Selecciona resultado");
+        fillSelect(resultSelect, INMO_ACTION_RESULT_OPTIONS.cita_adquisicion || [], "Selecciona resultado");
         fillSelect(nextSelect, [], "No aplica");
         if (resultSelect) {
           resultSelect.value = "";
@@ -32314,9 +32413,23 @@ const closeInmuebleWorkflowAction = (row, empresaId) => {
               alert("Selecciona un resultado.");
               return;
             }
+            const estadoSiguiente = String(nextSelect?.value || "").trim();
+            const extra = {};
+            if (resultado === "Positivo" && estadoSiguiente === "Encargo") {
+              const precio = window.prompt("Precio de encargo (EUR)", "");
+              if (precio === null) return;
+              if (String(precio).trim()) extra.precio_encargo = String(precio).trim();
+              const honorarios = window.prompt("Honorarios / comisión (EUR o % según criterio interno)", "");
+              if (honorarios === null) return;
+              if (String(honorarios).trim()) extra.honorarios = String(honorarios).trim();
+              const duracion = window.prompt("Duración del encargo (meses)", "6");
+              if (duracion === null) return;
+              if (String(duracion).trim()) extra.duracion_encargo_meses = String(duracion).trim();
+            }
             cleanup({
               resultado,
-              estado_siguiente: String(nextSelect?.value || "").trim(),
+              estado_siguiente: estadoSiguiente,
+              ...extra,
             });
           };
         }
@@ -32337,6 +32450,11 @@ const closeInmuebleWorkflowAction = (row, empresaId) => {
         documento_tipo: "",
         importe_propuesta: "",
       };
+      ["precio_encargo", "honorarios", "duracion_encargo_meses"].forEach((key) => {
+        if (data[key] !== undefined) {
+          payload[key] = data[key];
+        }
+      });
       if (data.resultado !== "Positivo" && data.resultado !== "Negativo") {
         payload.estado = "Cancelada";
         payload.estado_siguiente = "";
@@ -32346,23 +32464,23 @@ const closeInmuebleWorkflowAction = (row, empresaId) => {
     return;
   }
 
-  const workflows = {
-    "Cita de adquisición": {
-      options: INMO_WORKFLOW_RESULT_OPTIONS["Cita de adquisición"],
-      followup: (payload) => {
-        if (payload.resultado_cierre === "Positivo") {
-          payload.estado_siguiente = window.confirm("¿Pasar el inmueble a Encargo?") ? "Encargo" : "";
-        } else if (payload.resultado_cierre === "Negativo") {
-          payload.estado_siguiente = window.confirm("¿Cerrar el inmueble negativamente?") ? "Cerrado negativamente" : "";
-        } else {
-          payload.estado = "Cancelada";
-        }
+    const workflows = {
+      cita_adquisicion: {
+        options: INMO_ACTION_RESULT_OPTIONS.cita_adquisicion,
+        followup: (payload) => {
+          if (payload.resultado_cierre === "Positivo") {
+            payload.estado_siguiente = window.confirm("¿Transformar directamente a Encargo? (Si no, pasará a Noticia)") ? "Encargo" : "Noticia";
+          } else if (payload.resultado_cierre === "Negativo") {
+            payload.estado_siguiente = window.confirm("¿Cerrar el inmueble negativamente?") ? "Cerrado negativamente" : "";
+          } else {
+            payload.estado = "Cancelada";
+          }
+        },
       },
-    },
-    "Cita comprador": {
-      options: INMO_WORKFLOW_RESULT_OPTIONS["Cita comprador"],
-      followup: async (payload) => {
-        if (payload.resultado_cierre !== "Interesado") return;
+      cita_comprador: {
+        options: INMO_ACTION_RESULT_OPTIONS.cita_comprador,
+        followup: async (payload) => {
+          if (payload.resultado_cierre !== "Interesado") return;
         const necesitaFinanciacion = window.confirm(
           "¿El comprador necesita financiación? Si aceptas, se generará una oportunidad en CRM Financiaciones."
         );
@@ -32391,11 +32509,12 @@ const closeInmuebleWorkflowAction = (row, empresaId) => {
           payload.fin_cliente1_dni = clienteBase.nif;
         }
       },
-    },
-    "Cita propuesta": {
-      options: INMO_WORKFLOW_RESULT_OPTIONS["Cita propuesta"],
-      followup: (payload) => {
-        if (payload.resultado_cierre !== "Se realiza propuesta") return;
+      },
+      cita_propuesta: {
+        options: INMO_ACTION_RESULT_OPTIONS.cita_propuesta,
+        followup: (payload) => {
+          if (!["En negociación", "Aprobada", "Rechazada"].includes(payload.resultado_cierre)) return;
+          if (payload.resultado_cierre === "Rechazada") return;
         const docRaw = window.prompt(
           "Documento a generar:\n1. Propuesta de compra\n2. Promesa de compra",
           "1"
@@ -32406,17 +32525,28 @@ const closeInmuebleWorkflowAction = (row, empresaId) => {
         if (amount !== null && String(amount).trim()) {
           payload.importe_propuesta = String(amount).trim();
         }
+        if (payload.resultado_cierre === "Aprobada") {
+          const fechaContrato = window.prompt("Fecha contrato privado (YYYY-MM-DD, opcional)", "");
+          if (fechaContrato !== null && String(fechaContrato).trim()) {
+            payload.fecha_contrato = String(fechaContrato).trim();
+          }
+          const fechaEscritura = window.prompt("Fecha escritura pública (YYYY-MM-DD, opcional)", "");
+          if (fechaEscritura !== null && String(fechaEscritura).trim()) {
+            payload.fecha_escritura = String(fechaEscritura).trim();
+          }
+          payload.operacion_estado = "Contrato privado";
+        }
+        },
       },
-    },
-    "Cita aceptación propietarios": {
-      options: INMO_WORKFLOW_RESULT_OPTIONS["Cita aceptación propietarios"],
-    },
-    "Cita aceptación contraoferta": {
-      options: INMO_WORKFLOW_RESULT_OPTIONS["Cita aceptación contraoferta"],
-    },
-  };
-  const workflow = workflows[type];
-  if (!workflow) return;
+      cita_propietarios: {
+        options: INMO_ACTION_RESULT_OPTIONS.cita_propietarios,
+      },
+      cita_contraoferta: {
+        options: INMO_ACTION_RESULT_OPTIONS.cita_contraoferta,
+      },
+    };
+    const workflow = workflows[normType];
+    if (!workflow) return;
   const message = workflow.options.map((opt, index) => `${index + 1}. ${opt}`).join("\n");
   const raw = window.prompt(`Resultado de ${type}:\n${message}`, "1");
   if (raw === null) return;
@@ -46171,7 +46301,24 @@ if (inmuebleAlquilerDiaPdfBtn) {
 
 if (inmuebleGoEstadoBtn) {
   inmuebleGoEstadoBtn.addEventListener("click", () => {
-    setInmuebleTab("estado");
+    const etapaMain = normalizeCrmMainEtapa(state.currentInmuebleContext?.inmueble?.estado || "");
+    const tipo = etapaMain === "Encargo"
+      ? "Cita de venta/alquiler"
+      : etapaMain === "Propuesta"
+        ? "Cita de propuesta de compra/alquiler"
+        : "Cita de adquisición";
+    queueInmuebleCitaPrefill({
+      tipo,
+      asunto: tipo,
+      statusText: "Registra la cita y ciérrala para que el inmueble avance de fase.",
+    });
+    applyPendingInmuebleCitaPrefill();
+  });
+}
+
+if (inmuebleGoActividadBtn) {
+  inmuebleGoActividadBtn.addEventListener("click", () => {
+    setInmuebleTab("actividad");
   });
 }
 
@@ -46232,7 +46379,7 @@ if (inmuebleConvertAlquilerBtn) {
 if (inmuebleGenerarEncargoBtn) {
   inmuebleGenerarEncargoBtn.addEventListener("click", () => {
     if (inmuebleGenerarEncargoStatus) inmuebleGenerarEncargoStatus.textContent = "";
-    runCurrentInmuebleConversion("encargo");
+    openInmuebleNotaEncargoPdf();
   });
 }
 
