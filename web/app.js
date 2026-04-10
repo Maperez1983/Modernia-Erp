@@ -48526,6 +48526,68 @@ const submitInmobiliariaWithDuplicateCheck = async ({
   return { ok: true, data };
 };
 
+const submitCompraventaWithDuplicateActivation = async ({ payload, statusEl, onSuccess }) => {
+  const endpoint = "/api/compraventas";
+  const postPayload = async (body) => {
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    let data = null;
+    try {
+      data = await res.json();
+    } catch (_) {
+      data = null;
+    }
+    return { res, data };
+  };
+
+  let { res, data } = await postPayload(payload);
+  if (res.status === 409 && data?.code === "duplicate_detected") {
+    const duplicates = Array.isArray(data?.duplicates) ? data.duplicates : [];
+    const duplicateText = formatInmobiliariaDuplicateSummary(duplicates);
+    const inmuebleDup = duplicates.find((item) => String(item?.type || "") === "inmueble" && item?.id);
+    if (statusEl) {
+      statusEl.textContent = duplicateText
+        ? `Duplicado detectado. ${duplicateText.replace(/\n/g, " | ")}`
+        : "Duplicado detectado.";
+    }
+
+    if (inmuebleDup) {
+      const link = window.confirm(
+        `Se han detectado posibles duplicados (misma referencia catastral y/o dirección):\n\n${duplicateText || "- Inmueble similar existente"}\n\n¿Quieres vincular esta compraventa al inmueble existente (activar en Inmuebles) en vez de crear un duplicado?`
+      );
+      if (link) {
+        ({ res, data } = await postPayload({ ...payload, inmueble_id: inmuebleDup.id, allow_duplicate: "1" }));
+      } else {
+        const confirmed = window.confirm(
+          `¿Quieres guardar de todos modos creando un duplicado?\n\n${duplicateText || "- Inmueble similar existente"}`
+        );
+        if (!confirmed) {
+          return { duplicateCancelled: true, data };
+        }
+        ({ res, data } = await postPayload({ ...payload, allow_duplicate: "1" }));
+      }
+    } else {
+      const confirmed = window.confirm(
+        `Se han detectado posibles duplicados:\n\n${duplicateText || "- Registro similar existente"}\n\n¿Quieres guardar de todos modos?`
+      );
+      if (!confirmed) {
+        return { duplicateCancelled: true, data };
+      }
+      ({ res, data } = await postPayload({ ...payload, allow_duplicate: "1" }));
+    }
+  }
+
+  if (!res.ok || data?.error) {
+    throw new Error(data?.error || `HTTP ${res.status}`);
+  }
+  if (statusEl) statusEl.textContent = "Compraventa guardada.";
+  if (typeof onSuccess === "function") onSuccess(data);
+  return { ok: true, data };
+};
+
 
 if (segurosAgendaForm) {
   segurosAgendaForm.addEventListener("submit", (event) => {
@@ -48965,11 +49027,9 @@ if (compraventaForm) {
     const payload = Object.fromEntries(formData.entries());
     payload.empresa_nombre = resolveCrmInmoEmpresaNombre();
     try {
-      const result = await submitInmobiliariaWithDuplicateCheck({
-        endpoint: "/api/compraventas",
+      const result = await submitCompraventaWithDuplicateActivation({
         payload,
         statusEl: compraventaFormStatus,
-        successMessage: "Compraventa guardada.",
         onSuccess: () => {
           compraventaForm.reset();
           const oficinaField = compraventaForm.querySelector('[name="oficina"]');

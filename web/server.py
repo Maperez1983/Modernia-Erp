@@ -12688,7 +12688,7 @@ def ensure_inmueble_for_compraventa(conn, empresa_id, payload, now):
             referencia_catastral or None,
             payload.get("tipo_inmueble") or "Piso",
             precio_objetivo,
-            "Compraventa",
+            "Inmueble",
             now,
             now,
         ),
@@ -40720,7 +40720,8 @@ class Handler(BaseHTTPRequestHandler):
                 if not direccion:
                     json_response(self, {"error": "direccion requerida"}, status=400)
                     return
-                allow_duplicate = str(payload.get("allow_duplicate") or "").strip().lower() in {"1", "true", "yes", "si"}
+                inmueble_id_hint = str(payload.get("inmueble_id") or "").strip()
+                allow_duplicate = bool(inmueble_id_hint) or str(payload.get("allow_duplicate") or "").strip().lower() in {"1", "true", "yes", "si"}
                 duplicate_matches = detect_inmobiliaria_duplicates(
                     conn,
                     empresa["id"],
@@ -40732,7 +40733,7 @@ class Handler(BaseHTTPRequestHandler):
                     ],
                     scope="compraventa",
                 )
-                if duplicate_matches and not allow_duplicate:
+                if duplicate_matches and not allow_duplicate and not inmueble_id_hint:
                     json_response(
                         self,
                         {
@@ -40795,7 +40796,32 @@ class Handler(BaseHTTPRequestHandler):
                         "direccion": "",
                     },
                 )
-                inmueble_id = ensure_inmueble_for_compraventa(conn, empresa["id"], payload, now)
+                inmueble_id = inmueble_id_hint
+                if inmueble_id:
+                    inm = conn.execute(
+                        "SELECT id, referencia_catastral, direccion FROM inmuebles WHERE id = ? AND empresa_id = ? LIMIT 1",
+                        (inmueble_id, empresa["id"]),
+                    ).fetchone()
+                    if not inm:
+                        json_response(self, {"error": "inmueble_id no válido"}, status=400)
+                        return
+                    try:
+                        updates = {}
+                        refcat_norm = re.sub(r"[^A-Z0-9]", "", str(payload.get("referencia_catastral") or "").upper())
+                        if refcat_norm and not str(inm["referencia_catastral"] or "").strip():
+                            updates["referencia_catastral"] = refcat_norm
+                        if direccion and not str(inm["direccion"] or "").strip():
+                            updates["direccion"] = direccion
+                        if updates:
+                            set_clause = ", ".join([f"{k} = ?" for k in updates])
+                            conn.execute(
+                                f"UPDATE inmuebles SET {set_clause}, updated_at = datetime(?) WHERE id = ?",
+                                [*updates.values(), now, inmueble_id],
+                            )
+                    except Exception:
+                        pass
+                else:
+                    inmueble_id = ensure_inmueble_for_compraventa(conn, empresa["id"], payload, now)
                 if not contraparte1_id and not contraparte2_id:
                     buyer = resolve_inmobiliaria_contact_candidate(
                         conn,
@@ -41055,7 +41081,8 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 if propietario_principal_id and propietario_principal_id not in propietarios:
                     propietarios.append(propietario_principal_id)
-                allow_duplicate = str(payload.get("allow_duplicate") or "").strip().lower() in {"1", "true", "yes", "si"}
+                inmueble_id_hint = str(payload.get("inmueble_id") or "").strip()
+                allow_duplicate = bool(inmueble_id_hint) or str(payload.get("allow_duplicate") or "").strip().lower() in {"1", "true", "yes", "si"}
                 duplicate_matches = detect_inmobiliaria_duplicates(
                     conn,
                     empresa["id"],
@@ -41064,7 +41091,7 @@ class Handler(BaseHTTPRequestHandler):
                     owner_nifs=resolve_owner_nifs_from_cliente_ids(conn, propietarios),
                     scope="captacion",
                 )
-                if duplicate_matches and not allow_duplicate:
+                if duplicate_matches and not allow_duplicate and not inmueble_id_hint:
                     json_response(
                         self,
                         {
