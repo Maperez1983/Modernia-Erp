@@ -23421,6 +23421,41 @@ const updateTableVisibility = () => {
     "";
   const isSegurosCrmVisible = segurosCrmSection && !segurosCrmSection.classList.contains("hidden");
   const isFinCrmVisible = finCrmSection && !finCrmSection.classList.contains("hidden");
+
+  // Contexto de servicio: cuando estás dentro de un CRM vertical, el header no debe mostrar
+  // pestañas de otros servicios (Seguros/Financiaciones/Campañas/etc) porque confunde.
+  // Los accesos a otros verticales se hacen desde Home/Workspaces, no desde el tab-bar del vertical actual.
+  if (viewTabs) {
+    const allowedByContext = (() => {
+      if (currentTab === "crm") return new Set(["operativa", "crm"]);
+      if (currentTab === "seguros-crm") return new Set(["operativa", "seguros-crm"]);
+      if (currentTab === "fin-crm" || currentTab === "fin-sim") return new Set(["operativa", "fin-crm", "fin-sim"]);
+      if (
+        ["gestoria-dash", "gestoria-crm", "gestoria-docs", "gestoria-agenda", "gestoria-fact", "gestoria-conta"].includes(
+          currentTab
+        )
+      ) {
+        return new Set([
+          "operativa",
+          "gestoria-dash",
+          "gestoria-crm",
+          "gestoria-docs",
+          "gestoria-agenda",
+          "gestoria-fact",
+          "gestoria-conta",
+        ]);
+      }
+      if (currentTab === "aie") return new Set(["operativa", "aie"]);
+      return null;
+    })();
+
+    viewTabs.querySelectorAll(".tab").forEach((btn) => {
+      const key = String(btn.dataset.tab || "").trim();
+      if (!key) return;
+      btn.classList.toggle("hidden-context", Boolean(allowedByContext) && !allowedByContext.has(key));
+    });
+  }
+
   if (viewTabs) {
     viewTabs.classList.toggle(
       "hidden",
