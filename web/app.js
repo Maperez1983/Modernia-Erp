@@ -18704,13 +18704,13 @@ const INMUEBLE_FIELDS = [
   { key: "provincia", label: "Provincia", type: "text", section: "Dirección" },
 
   // Precio
-  { key: "precio_objetivo", label: "Precio objetivo venta", type: "number", section: "Precio" },
+  { key: "precio_objetivo", label: "Precio objetivo venta", type: "number", section: "Precio", hidden: true },
   { key: "precio_encargo", label: "Precio encargo", type: "number", section: "Precio" },
-  { key: "precio_pedido_cliente", label: "Precio pedido cliente", type: "number", section: "Precio" },
+  { key: "precio_pedido_cliente", label: "Precio propietario", type: "number", section: "Precio" },
   { key: "honorarios", label: "Honorarios agencia", type: "number", section: "Precio" },
   { key: "fecha_valoracion", label: "Fecha valoración", type: "date", section: "Precio" },
   { key: "desviacion_pct", label: "Desviación (%)", type: "number", section: "Precio" },
-  { key: "precio_valoracion", label: "Valoración interna", type: "number", section: "Precio" },
+  { key: "precio_valoracion", label: "Precio valoración", type: "number", section: "Precio" },
   { key: "valor_referencia", label: "Valor de referencia", type: "number", section: "Precio" },
 
   // Equipo y origen
@@ -18831,7 +18831,7 @@ const CAPTACION_FIELDS = [
   },
   { key: "probabilidad", label: "Probabilidad (%)", type: "number", section: "Pipeline" },
   { key: "precio_encargo", label: "Precio encargo", type: "number", section: "Pipeline" },
-  { key: "precio_pedido_cliente", label: "Precio pedido cliente", type: "number", section: "Pipeline" },
+  { key: "precio_pedido_cliente", label: "Precio propietario", type: "number", section: "Pipeline" },
   { key: "fecha_valoracion", label: "Fecha valoración", type: "date", section: "Pipeline" },
   { key: "desviacion_pct", label: "Desviación (%)", type: "number", section: "Pipeline" },
   { key: "proxima_accion", label: "Próxima acción", type: "text", section: "Pipeline" },
@@ -20036,12 +20036,17 @@ const getInmuebleStageRequirements = (stage, inmueble = {}, captacion = {}, prop
   const hasPropietario =
     String(captacion.propietario || "").trim() ||
     (Array.isArray(propietarios) && propietarios.length > 0);
+  const isEarly = normalized === "inmueble" || normalized === "noticia" || normalized === "adquisicion";
+  const stagePrice = isEarly
+    ? (Number(inmueble.precio_pedido_cliente || 0) || Number(inmueble.precio_objetivo || 0) || 0)
+    : (Number(inmueble.precio_encargo || 0) || Number(inmueble.precio_objetivo || 0) || Number(inmueble.precio_pedido_cliente || 0) || 0);
+  const stagePriceLabel = isEarly ? "Precio propietario" : "Precio encargo";
   const checks = {
     direccion: { label: "Dirección", ok: Boolean(String(inmueble.direccion || "").trim()) },
     poblacion: { label: "Población", ok: Boolean(String(inmueble.poblacion || "").trim()) },
     provincia: { label: "Provincia", ok: Boolean(String(inmueble.provincia || "").trim()) },
     tipo: { label: "Tipo de inmueble", ok: Boolean(String(inmueble.tipo_inmueble || "").trim()) },
-    precio: { label: "Precio objetivo", ok: Number(inmueble.precio_objetivo || 0) > 0 },
+    precio: { label: stagePriceLabel, ok: Number(stagePrice || 0) > 0 },
     honorarios: { label: "Honorarios agencia", ok: Number(inmueble.honorarios || 0) > 0 },
     ocupacion: { label: "Situación de ocupación", ok: Boolean(String(inmueble.situacion_ocupacion || "").trim()) },
     propietario: { label: "Propietario vinculado", ok: Boolean(hasPropietario) },
@@ -20049,6 +20054,7 @@ const getInmuebleStageRequirements = (stage, inmueble = {}, captacion = {}, prop
   };
   const stageMap = {
     noticia: ["direccion", "poblacion", "provincia", "tipo", "propietario"],
+    inmueble: ["direccion", "poblacion", "provincia", "tipo", "propietario"],
     adquisicion: ["direccion", "poblacion", "provincia", "tipo", "propietario"],
     encargo: ["direccion", "poblacion", "provincia", "tipo", "precio", "honorarios", "ocupacion", "propietario"],
     reservado: ["direccion", "poblacion", "provincia", "tipo", "precio", "honorarios", "ocupacion", "propietario", "catastro"],
@@ -20350,10 +20356,27 @@ const renderEditableGrid = (grid, fields, data, target) => {
     target === "cliente" ? String(data?.tipo_persona || "").toLowerCase() : "";
   const isJuridica = target === "cliente" && tipoPersonaValue === "jurídica";
   const isInmueble = target === "inmueble";
+  const resolveInmoStageKey = () => {
+    try {
+      if (target === "captacion") return normalizeSimple(data?.situacion_comercial || "");
+      if (target === "inmueble") {
+        const contextStage = normalizeSimple(state?.currentInmuebleContext?.captacion?.situacion_comercial || "");
+        return contextStage || normalizeSimple(data?.estado || "");
+      }
+    } catch {}
+    return normalizeSimple(data?.estado || data?.situacion_comercial || "");
+  };
+  const inmoStageKey = resolveInmoStageKey();
+  const isInmoEarlyStage = (key) => {
+    const k = normalizeSimple(key || "");
+    return !k || k === "inmueble" || k === "noticia";
+  };
+  const showOwnerPrice = (target === "inmueble" || target === "captacion") && isInmoEarlyStage(inmoStageKey);
+  const showEncargoPrice = (target === "inmueble" || target === "captacion") && !isInmoEarlyStage(inmoStageKey);
   const sectionCopy = {
     Resumen: "Tipo, ocupación y datos esenciales para entender el expediente.",
     Dirección: "Dirección completa (se usa para detectar duplicados y para Catastro).",
-    Precio: "Precio objetivo, precio de encargo y honorarios.",
+    Precio: "Precio propietario (Noticia) o precio encargo (desde Encargo) + valoración y honorarios.",
     Equipo: "Asignación y origen del expediente.",
     "Contacto propietario": "Contacto y estado de relación con la propiedad.",
     Seguimiento: "Planificación y trazabilidad interna (sin cambiar fase manualmente).",
@@ -20372,6 +20395,12 @@ const renderEditableGrid = (grid, fields, data, target) => {
   fields.forEach((field) => {
     if (field && field.hidden) {
       return;
+    }
+    // Simplificación precios Inmobiliaria: solo 2 precios visibles según etapa.
+    if (target === "inmueble" || target === "captacion") {
+      if (field.key === "precio_objetivo") return;
+      if (field.key === "precio_pedido_cliente" && !showOwnerPrice) return;
+      if (field.key === "precio_encargo" && !showEncargoPrice) return;
     }
     if (target === "cliente" && field.key === "apellidos" && isJuridica) {
       return;
@@ -20408,7 +20437,8 @@ const renderEditableGrid = (grid, fields, data, target) => {
     if (target === "inmueble" || target === "captacion") {
       const requiredBadge = document.createElement("span");
       requiredBadge.className = "editable-field-hint";
-      if ((field.key === "direccion") || (field.key === "tipo_inmueble") || (field.key === "precio_objetivo") || (field.key === "honorarios") || (field.key === "situacion_ocupacion") || (field.key === "propietario")) {
+      const priceKey = showOwnerPrice ? "precio_pedido_cliente" : "precio_encargo";
+      if ((field.key === "direccion") || (field.key === "tipo_inmueble") || (field.key === priceKey) || (field.key === "honorarios") || (field.key === "situacion_ocupacion") || (field.key === "propietario")) {
         requiredBadge.textContent = "Clave";
       } else if (field.key === "referencia_catastral") {
         requiredBadge.textContent = "Obligatorio desde reservado";
@@ -27912,10 +27942,11 @@ const buildCaptacionConversionPayload = (rowMap, destino) => {
     destino,
     empresa_nombre: resolveCrmInmoEmpresaNombre(),
   };
+  const fallbackPrice = rowMap.precio_encargo || rowMap.precio_pedido_cliente || rowMap.precio_objetivo || "";
   if (destino === "encargo") {
     const precio = window.prompt(
       "Precio de encargo (opcional). Déjalo vacío para mantener el actual.",
-      rowMap.precio_objetivo || ""
+      fallbackPrice
     );
     if (precio !== null && String(precio).trim()) {
       payload.precio_encargo = String(precio).trim();
@@ -27939,7 +27970,7 @@ const buildCaptacionConversionPayload = (rowMap, destino) => {
     }
     const precio = window.prompt(
       "Precio de venta (opcional).",
-      rowMap.precio_objetivo || ""
+      fallbackPrice
     );
     if (precio === null) return null;
     if (String(precio).trim()) {
@@ -27957,7 +27988,7 @@ const buildCaptacionConversionPayload = (rowMap, destino) => {
     }
     const precio = window.prompt(
       "Renta mensual o importe del alquiler (opcional).",
-      rowMap.precio_objetivo || ""
+      fallbackPrice
     );
     if (precio === null) return null;
     if (String(precio).trim()) {
@@ -29681,6 +29712,23 @@ const refreshCurrentInmuebleProfile = () => {
   const demandas = Array.isArray(context.demandas) ? context.demandas : [];
   const visitas = Array.isArray(context.visitas) ? context.visitas : [];
 
+  const resolveInmoStageKey = () => {
+    const key = normalizeSimple(captacion.situacion_comercial || inmueble.estado || "");
+    return key;
+  };
+  const isInmoEarlyStage = (key) => {
+    const k = normalizeSimple(key || "");
+    return !k || k === "inmueble" || k === "noticia";
+  };
+  const getInmoPrimaryPrice = () => {
+    const early = isInmoEarlyStage(resolveInmoStageKey());
+    if (early) {
+      return Number(inmueble.precio_pedido_cliente || 0) || Number(inmueble.precio_objetivo || 0) || 0;
+    }
+    return Number(inmueble.precio_encargo || 0) || Number(inmueble.precio_objetivo || 0) || Number(inmueble.precio_pedido_cliente || 0) || 0;
+  };
+  const getInmoPrimaryPriceLabel = () => (isInmoEarlyStage(resolveInmoStageKey()) ? "Precio propietario" : "Precio encargo");
+
   if (inmuebleSummaryCard) {
     const address = inmueble.direccion || "Sin dirección";
     const locality = [inmueble.zona, inmueble.poblacion].filter(Boolean).join(" · ");
@@ -29696,9 +29744,10 @@ const refreshCurrentInmuebleProfile = () => {
       inmueble.habitaciones ? `${inmueble.habitaciones} hab.` : "",
       inmueble.banos ? `${inmueble.banos} baños` : "",
     ].filter(Boolean).join(" · ");
+    const primaryPrice = getInmoPrimaryPrice();
     const priceLine = [
-      inmueble.precio_objetivo ? `Objetivo venta ${formatDisplayCell("precio_objetivo", inmueble.precio_objetivo)}` : "",
-      inmueble.precio_valoracion ? `Valoración interna ${formatDisplayCell("precio_valoracion", inmueble.precio_valoracion)}` : "",
+      primaryPrice ? `${getInmoPrimaryPriceLabel()} ${formatDisplayCell("precio_objetivo", primaryPrice)}` : "",
+      inmueble.precio_valoracion ? `Valoración ${formatDisplayCell("precio_valoracion", inmueble.precio_valoracion)}` : "",
     ].filter(Boolean).join(" · ");
     const ownerNames = propietarios.map((item) => item.nombre).filter(Boolean);
     const metrics = [
@@ -29895,6 +29944,11 @@ const buildCrmInmueblesCatalogNode = (rows = []) => {
   const list = document.createElement("div");
   list.className = "inmueble-catalog";
   rows.forEach((row) => {
+    const stageKey = normalizeSimple(row?.estado || "");
+    const early = !stageKey || stageKey === "inmueble" || stageKey === "noticia";
+    const primaryPrice = early
+      ? (Number(row.precio_pedido_cliente || 0) || Number(row.precio_objetivo || 0) || 0)
+      : (Number(row.precio_encargo || 0) || Number(row.precio_objetivo || 0) || Number(row.precio_pedido_cliente || 0) || 0);
     const item = document.createElement("button");
     item.type = "button";
     item.className = "inmueble-catalog-card";
@@ -29912,7 +29966,7 @@ const buildCrmInmueblesCatalogNode = (rows = []) => {
         <span>${row.habitaciones ? `${row.habitaciones} hab.` : "hab. n/d"}</span>
         <span>${row.banos ? `${row.banos} baños` : "baños n/d"}</span>
       </div>
-      <div class="inmueble-catalog-price">${row.precio_objetivo ? formatDisplayCell("precio_objetivo", row.precio_objetivo) : "Precio pendiente"}</div>
+      <div class="inmueble-catalog-price">${primaryPrice ? formatDisplayCell("precio_objetivo", primaryPrice) : "Precio pendiente"}</div>
       <div class="inmueble-catalog-owners">${row.propietarios || "Sin propietarios enlazados"}</div>
     `;
     item.addEventListener("click", () => openInmuebleDetail(row.id));
@@ -30006,7 +30060,11 @@ const loadCrmInmuebles = () => {
     const sinCatastro = rows.filter((row) => !String(row.referencia_catastral || "").trim()).length;
     const sinPropietarios = rows.filter((row) => !String(row.propietarios || row.propietario || "").trim()).length;
     const sinPricing = rows.filter((row) => {
-      const objetivo = Number(row.precio_objetivo || 0);
+      const stageKey = normalizeSimple(row?.estado || "");
+      const early = !stageKey || stageKey === "inmueble" || stageKey === "noticia";
+      const objetivo = early
+        ? (Number(row.precio_pedido_cliente || 0) || Number(row.precio_objetivo || 0) || 0)
+        : (Number(row.precio_encargo || 0) || Number(row.precio_objetivo || 0) || Number(row.precio_pedido_cliente || 0) || 0);
       const valoracion = Number(row.precio_valoracion || 0);
       return (!Number.isFinite(objetivo) || objetivo <= 0) && (!Number.isFinite(valoracion) || valoracion <= 0);
     }).length;
@@ -30028,7 +30086,7 @@ const loadCrmInmuebles = () => {
         title: "Sin pricing",
         value: sinPricing,
         meta: "Valoración",
-        summary: "Faltan precio objetivo o valoración de adquisición.",
+        summary: "Falta precio propietario/encargo y/o valoración.",
       },
       {
         title: "En noticia",
@@ -31536,6 +31594,11 @@ const loadInmuebleDemandas = (inmuebleId) => {
       return;
     }
     const inmueble = state.currentInmueble || {};
+    const stageKey = normalizeSimple(state.currentInmuebleContext?.captacion?.situacion_comercial || inmueble.estado || "");
+    const earlyStage = !stageKey || stageKey === "inmueble" || stageKey === "noticia";
+    const inmueblePrimaryPrice = earlyStage
+      ? (Number(inmueble.precio_pedido_cliente || 0) || Number(inmueble.precio_objetivo || 0) || 0)
+      : (Number(inmueble.precio_encargo || 0) || Number(inmueble.precio_objetivo || 0) || Number(inmueble.precio_pedido_cliente || 0) || 0);
     const iterRows = Array.isArray(state.currentInmuebleContext?.compradores) ? state.currentInmuebleContext.compradores : [];
     const iterDemandaIds = new Set(iterRows.map((r) => String(r.demanda_id || r.id || "").trim()).filter(Boolean));
     const table = document.createElement("table");
@@ -31553,7 +31616,7 @@ const loadInmuebleDemandas = (inmuebleId) => {
       const constraints = [
         { key: "tipo", val: row.tipo, match: !row.tipo || row.tipo === inmueble.tipo_inmueble },
         { key: "zona", val: row.zona, match: !row.zona || (inmueble.zona || "").toLowerCase().includes(String(row.zona).toLowerCase()) },
-        { key: "precio_max", val: row.precio_max, match: !row.precio_max || Number(inmueble.precio_objetivo || 0) <= Number(row.precio_max) },
+        { key: "precio_max", val: row.precio_max, match: !row.precio_max || Number(inmueblePrimaryPrice || 0) <= Number(row.precio_max) },
         { key: "m2_min", val: row.m2_min, match: !row.m2_min || Number(inmueble.m2 || 0) >= Number(row.m2_min) },
         { key: "habitaciones_min", val: row.habitaciones_min, match: !row.habitaciones_min || Number(inmueble.habitaciones || 0) >= Number(row.habitaciones_min) },
         { key: "banos_min", val: row.banos_min, match: !row.banos_min || Number(inmueble.banos || 0) >= Number(row.banos_min) },
