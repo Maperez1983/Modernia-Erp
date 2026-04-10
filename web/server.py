@@ -27,6 +27,7 @@ import xml.etree.ElementTree as ET
 import socket
 import ipaddress
 import calendar
+from decimal import Decimal
 from io import BytesIO
 from copy import copy as shallow_copy
 from datetime import datetime, timedelta, timezone, date
@@ -26942,7 +26943,26 @@ def fetch_workspace_document_hub(conn, workspace_id, limit=20):
 
 
 def json_response(handler, data, status=200, cookies=None, extra_headers=None):
-    payload = json.dumps(data, ensure_ascii=False).encode("utf-8")
+    def _json_default(value):  # noqa: ANN001
+        # Postgres puede devolver Decimal (NUMERIC/ROUND/AVG). JSON estándar no lo soporta.
+        if isinstance(value, Decimal):
+            try:
+                if value == value.to_integral_value():
+                    return int(value)
+            except Exception:
+                pass
+            try:
+                return float(value)
+            except Exception:
+                return str(value)
+        if isinstance(value, (datetime, date)):
+            try:
+                return value.isoformat()
+            except Exception:
+                return str(value)
+        return str(value)
+
+    payload = json.dumps(data, ensure_ascii=False, default=_json_default).encode("utf-8")
     handler.send_response(status)
     handler.send_header("Access-Control-Allow-Origin", "*")
     handler.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
