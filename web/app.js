@@ -29711,6 +29711,7 @@ const refreshCurrentInmuebleProfile = () => {
   const docs = Array.isArray(context.docs) ? context.docs : [];
   const demandas = Array.isArray(context.demandas) ? context.demandas : [];
   const visitas = Array.isArray(context.visitas) ? context.visitas : [];
+  const ownerNames = propietarios.map((item) => item.nombre).filter(Boolean);
 
   const resolveInmoStageKey = () => {
     const key = normalizeSimple(captacion.situacion_comercial || inmueble.estado || "");
@@ -29749,7 +29750,6 @@ const refreshCurrentInmuebleProfile = () => {
       primaryPrice ? `${getInmoPrimaryPriceLabel()} ${formatDisplayCell("precio_objetivo", primaryPrice)}` : "",
       inmueble.precio_valoracion ? `Valoración ${formatDisplayCell("precio_valoracion", inmueble.precio_valoracion)}` : "",
     ].filter(Boolean).join(" · ");
-    const ownerNames = propietarios.map((item) => item.nombre).filter(Boolean);
     const metrics = [
       {
         label: "Estado",
