@@ -12937,17 +12937,8 @@ def ensure_captacion_for_inmueble(conn, empresa_id, inmueble_id, now):
     if not inmueble:
         return None
     captacion_id = os.urandom(16).hex()
-    situacion = str(inmueble["estado"] or "Inmueble").strip() or "Inmueble"
-    situacion_norm = normalize_lookup_text(situacion).lower()
-    if situacion_norm in {"", "inventario"}:
-        situacion = "Inmueble"
-        situacion_norm = "inmueble"
-    # Normaliza estados legacy a 5 fases principales.
-    if situacion_norm in {"reservado", "reserva", "arras", "contrato de arras", "contrato privado", "escritura", "escritura publica", "firma escritura", "firma escritura publica"}:
-        etapa = "Vendido"
-        situacion = "Vendido"
-    else:
-        etapa = situacion
+    situacion = str(inmueble["estado"] or "Noticia").strip() or "Noticia"
+    etapa = "Encargo" if normalize_lookup_text(situacion) == "encargo" else situacion
     conn.execute(
         """
         INSERT INTO captaciones (
@@ -12991,14 +12982,12 @@ def sync_inmueble_stage_for_action(conn, inmueble_id, destino, now):
     destino_label = {
         "inmueble": "Inmueble",
         "noticia": "Noticia",
-        # Compat: etapas antiguas; se normalizan a las 5 fases principales.
-        "valoracion": "Inmueble",
-        "adquisicion": "Noticia",
+        "valoracion": "Valoración",
+        "adquisicion": "Adquisición",
         "encargo": "Encargo",
         "propuesta": "Propuesta",
-        # En el flujo simplificado, Reserva/Arras forman parte de "Vendido" (post-aceptación).
-        "reservado": "Vendido",
-        "arras": "Vendido",
+        "reservado": "Reservado",
+        "arras": "Contrato de arras",
         "vendido": "Vendido",
         "compraventa": "Vendido",
         "cerrado_negativamente": "Cerrado negativamente",
@@ -13426,8 +13415,7 @@ INMO_ACTION_RESULT_OPTIONS = {
     "cita_comprador": {"Estudio", "No interesa", "Interesado"},
     "cita_gestion_encargo": {"Realizada", "Reprogramar", "No realizada"},
     "cita_general": {"Realizada", "Reprogramar", "No realizada"},
-    # Simplificado: la propuesta se resuelve en 3 resultados (rechazada / aprobada / negociación).
-    "cita_propuesta": {"Rechazada", "Aprobada", "En negociación"},
+    "cita_propuesta": {"Se realiza propuesta", "No se realiza"},
     "cita_propietarios": {"Aceptada", "Rechazada", "Contraoferta"},
     "cita_contraoferta": {"Aceptada", "Rechazada"},
     "cita_notaria": {"Firmada", "Reprogramar", "No realizada"},
@@ -16526,9 +16514,8 @@ def resolve_owner_nifs_from_cliente_ids(conn, cliente_ids):
     return normalized
 
 
-def detect_inmobiliaria_duplicates(conn, empresa_id, *, direccion="", referencia_catastral="", owner_nifs=None, scope="captacion"):
+def detect_inmobiliaria_duplicates(conn, empresa_id, *, direccion="", owner_nifs=None, scope="captacion"):
     direccion_norm = normalize_inmobiliaria_address(direccion)
-    refcat_norm = re.sub(r"[^A-Z0-9]", "", str(referencia_catastral or "").upper()) or ""
     owner_nifs = [normalize_nif(item) for item in (owner_nifs or []) if normalize_nif(item)]
     owner_nif_set = set(owner_nifs)
     duplicates = []
@@ -16558,9 +16545,6 @@ def detect_inmobiliaria_duplicates(conn, empresa_id, *, direccion="", referencia
         reasons = []
         if direccion_norm and normalize_inmobiliaria_address(row["direccion"]) == direccion_norm:
             reasons.append("misma dirección")
-        row_refcat = re.sub(r"[^A-Z0-9]", "", str(row["referencia_catastral"] or "").upper()) or ""
-        if refcat_norm and row_refcat and row_refcat == refcat_norm:
-            reasons.append("misma referencia catastral")
         row_nifs = {
             normalize_nif(part)
             for part in re.split(r"[|,]", str(row["propietario_nifs"] or ""))
@@ -18345,19 +18329,7 @@ def ensure_tables(db_path):
     ensure_workspace_product_tables(conn)
     # Seed retrocompatible: matriz servicio->empresas (por workspace).
     try:
-        should_seed = not _migration_done(conn, "workspace_service_matrix_seed_v1")
-        if not should_seed:
-            # Instalaciones donde la migración se marcó pero la tabla quedó vacía (p. ej. fallos transitorios):
-            # re-seed idempotente (solo inserta servicios que no existan).
-            try:
-                conn.execute("SELECT 1 FROM workspace_servicio_empresas LIMIT 1").fetchone()
-                count_row = conn.execute("SELECT COUNT(*) AS total FROM workspace_servicio_empresas").fetchone()
-                total = int(row_value(count_row, "total", 0) or row_value(count_row, 0) or 0)
-                if total == 0:
-                    should_seed = True
-            except Exception:
-                pass
-        if should_seed:
+        if not _migration_done(conn, "workspace_service_matrix_seed_v1"):
             seed_workspace_service_matrix(conn, now=app_now().isoformat())
             _migration_mark(conn, "workspace_service_matrix_seed_v1")
     except Exception:
@@ -18846,6 +18818,103 @@ def ensure_tables(db_path):
     }.items():
         try:
             ensure_column(conn, "operaciones_inmobiliarias", col_name, f"{col_name} {col_type}")
+        except Exception:
+            pass
+
+    # Tablas legacy usadas por KPIs/dashboard: en DBs antiguas (importadas) pueden faltar columnas.
+    try:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS movimientos (
+              id TEXT PRIMARY KEY,
+              empresa_id TEXT,
+              concepto TEXT NOT NULL,
+              pisos_vendidos TEXT,
+              comision REAL,
+              asesor TEXT,
+              anio INTEGER,
+              mes TEXT,
+              sl TEXT,
+              tipo TEXT,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL,
+              FOREIGN KEY (empresa_id) REFERENCES empresas(id)
+            )
+            """
+        )
+    except Exception:
+        pass
+    for col_name, col_sql in {
+        "empresa_id": "empresa_id TEXT",
+        "concepto": "concepto TEXT NOT NULL",
+        "pisos_vendidos": "pisos_vendidos TEXT",
+        "comision": "comision REAL",
+        "asesor": "asesor TEXT",
+        "anio": "anio INTEGER",
+        "mes": "mes TEXT",
+        "sl": "sl TEXT",
+        "tipo": "tipo TEXT",
+        "created_at": "created_at TEXT NOT NULL",
+        "updated_at": "updated_at TEXT NOT NULL",
+    }.items():
+        try:
+            ensure_column(conn, "movimientos", col_name, col_sql)
+        except Exception:
+            pass
+
+    try:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS alquileres (
+              id TEXT PRIMARY KEY,
+              empresa_id TEXT,
+              fecha TEXT,
+              direccion TEXT,
+              propietario TEXT,
+              telefono TEXT,
+              precio REAL,
+              seguro TEXT,
+              hacienda TEXT,
+              comision TEXT,
+              importe_comision REAL,
+              total REAL,
+              inquilino TEXT,
+              telefono2 TEXT,
+              agente TEXT,
+              numero_alquileres REAL,
+              tipo TEXT,
+              oficina TEXT,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL,
+              FOREIGN KEY (empresa_id) REFERENCES empresas(id)
+            )
+            """
+        )
+    except Exception:
+        pass
+    for col_name, col_sql in {
+        "empresa_id": "empresa_id TEXT",
+        "fecha": "fecha TEXT",
+        "direccion": "direccion TEXT",
+        "propietario": "propietario TEXT",
+        "telefono": "telefono TEXT",
+        "precio": "precio REAL",
+        "seguro": "seguro TEXT",
+        "hacienda": "hacienda TEXT",
+        "comision": "comision TEXT",
+        "importe_comision": "importe_comision REAL",
+        "total": "total REAL",
+        "inquilino": "inquilino TEXT",
+        "telefono2": "telefono2 TEXT",
+        "agente": "agente TEXT",
+        "numero_alquileres": "numero_alquileres REAL",
+        "tipo": "tipo TEXT",
+        "oficina": "oficina TEXT",
+        "created_at": "created_at TEXT NOT NULL",
+        "updated_at": "updated_at TEXT NOT NULL",
+    }.items():
+        try:
+            ensure_column(conn, "alquileres", col_name, col_sql)
         except Exception:
             pass
     conn.execute(
@@ -19502,6 +19571,9 @@ def ensure_tables(db_path):
     ensure_column(conn, "inmuebles", "ocupado_por", "ocupado_por TEXT")
     ensure_column(conn, "inmuebles", "anio_construccion", "anio_construccion INTEGER")
     ensure_column(conn, "captaciones", "anio_construccion", "anio_construccion INTEGER")
+    # Auditoría ligera: quién creó registros en inmobiliaria.
+    ensure_column(conn, "inmuebles", "created_by", "created_by TEXT")
+    ensure_column(conn, "captaciones", "created_by", "created_by TEXT")
     # CRM inmobiliaria: campos Tecnocloud (inmuebles/captaciones/pedidos).
     for col_name, col_sql in {
         "titulo": "titulo TEXT",
@@ -19762,7 +19834,7 @@ def ensure_usuarios_schema(conn):
     if total_users == 0:
         conn.execute(
             "INSERT INTO usuarios (id, nombre, apellido, usuario, email, servicio, rol, activo, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))",
-            (os.urandom(16).hex(), "Administrador", "General", "admin", "admin@verifika2.local", "Administración", "Administrador", 1),
+            (os.urandom(16).hex(), "Administrador", "General", "admin", "admin@liv.local", "Administración", "Administrador", 1),
         )
     flagged_count_row = conn.execute(
         "SELECT COUNT(*) AS total FROM usuarios WHERE COALESCE(registro_horario_activo, 0) = 1"
@@ -20621,18 +20693,18 @@ def ensure_workspace_product_tables(conn):
     )
     conn.execute(
         """
-            CREATE TABLE IF NOT EXISTS workspace_fincas_comunidades (
-              id TEXT PRIMARY KEY,
-              workspace_id TEXT NOT NULL,
-              empresa_id TEXT,
-              nombre TEXT NOT NULL,
-              referencia_catastral TEXT,
-              cif TEXT,
-              direccion TEXT,
-              foto_edificio_key TEXT,
-              presidente TEXT,
-              secretario TEXT,
-              estado TEXT NOT NULL DEFAULT 'Activa',
+	        CREATE TABLE IF NOT EXISTS workspace_fincas_comunidades (
+	          id TEXT PRIMARY KEY,
+	          workspace_id TEXT NOT NULL,
+	          empresa_id TEXT,
+	          nombre TEXT NOT NULL,
+	          referencia_catastral TEXT,
+	          cif TEXT,
+	          direccion TEXT,
+	          foto_edificio_key TEXT,
+	          presidente TEXT,
+	          secretario TEXT,
+	          estado TEXT NOT NULL DEFAULT 'Activa',
           num_vecinos INTEGER,
           num_locales INTEGER,
           num_trasteros INTEGER,
@@ -25512,13 +25584,13 @@ def fetch_workspace_fincas_comunidades(conn, workspace_id, limit=30):
           c.empresa_id,
           COALESCE(e.nombre, '') AS empresa_nombre,
           c.nombre,
-              COALESCE(c.referencia_catastral, '') AS referencia_catastral,
-              c.cif,
-              c.direccion,
-              COALESCE(c.foto_edificio_key, '') AS foto_edificio_key,
-              c.presidente,
-              c.secretario,
-              c.estado,
+	          COALESCE(c.referencia_catastral, '') AS referencia_catastral,
+	          c.cif,
+	          c.direccion,
+	          COALESCE(c.foto_edificio_key, '') AS foto_edificio_key,
+	          c.presidente,
+	          c.secretario,
+	          c.estado,
           c.num_vecinos,
           c.num_locales,
           c.num_trasteros,
@@ -26058,55 +26130,6 @@ def fetch_workspace_budget_pdf_payload(conn, budget_id, workspace_id=None):
     ).fetchone()
     if not budget:
         return None
-    budget = dict(budget)
-
-    # Enriquecimiento Fincas: si el presupuesto está vinculado a una comunidad,
-    # aseguramos que `calculo_json` contenga dirección/foto/cif para PDF (mapa/foto).
-    try:
-        servicio_key = normalize_service_key(budget.get("servicio") or "")
-        if servicio_key == "fincas" and normalize_simple(budget.get("referencia_tipo") or "") == "comunidad":
-            comunidad_id = str(budget.get("referencia_id") or "").strip()
-            if comunidad_id:
-                comunidad = conn.execute(
-                    """
-                    SELECT
-                      COALESCE(nombre, '') AS nombre,
-                      COALESCE(cif, '') AS cif,
-                      COALESCE(direccion, '') AS direccion,
-                      COALESCE(referencia_catastral, '') AS referencia_catastral,
-                      COALESCE(foto_edificio_key, '') AS foto_edificio_key
-                    FROM workspace_fincas_comunidades
-                    WHERE id = ? AND workspace_id = ?
-                    LIMIT 1
-                    """,
-                    (comunidad_id, workspace_id),
-                ).fetchone()
-            else:
-                comunidad = None
-
-            if comunidad:
-                calc = {}
-                try:
-                    calc = json.loads(budget.get("calculo_json") or "{}") if budget.get("calculo_json") else {}
-                    if not isinstance(calc, dict):
-                        calc = {}
-                except Exception:
-                    calc = {}
-                # Solo rellenamos si faltan para no pisar lo que el usuario haya escrito en el formulario.
-                if not str(calc.get("comunidad_denominacion") or "").strip():
-                    calc["comunidad_denominacion"] = str(row_value(comunidad, "nombre") or "").strip()
-                if not str(calc.get("comunidad_cif") or "").strip():
-                    calc["comunidad_cif"] = str(row_value(comunidad, "cif") or "").strip()
-                if not str(calc.get("comunidad_direccion") or "").strip():
-                    calc["comunidad_direccion"] = str(row_value(comunidad, "direccion") or "").strip()
-                if not str(calc.get("referencia_catastral") or "").strip():
-                    calc["referencia_catastral"] = str(row_value(comunidad, "referencia_catastral") or "").strip()
-                # Foto: el PDF mira `edificio_foto_key`.
-                if not str(calc.get("edificio_foto_key") or "").strip():
-                    calc["edificio_foto_key"] = str(row_value(comunidad, "foto_edificio_key") or "").strip()
-                budget["calculo_json"] = json.dumps(calc, ensure_ascii=False)
-    except Exception:
-        pass
     lineas = conn.execute(
         """
         SELECT orden, categoria, concepto, cantidad, unidad, precio_unitario, descuento_pct, total_linea
@@ -26117,7 +26140,7 @@ def fetch_workspace_budget_pdf_payload(conn, budget_id, workspace_id=None):
         (budget_id,),
     ).fetchall()
     return {
-        "budget": budget,
+        "budget": dict(budget),
         "workspace": {
             "nombre": budget["workspace_nombre"],
             "primary_color": budget["workspace_primary_color"],
@@ -26983,13 +27006,11 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
     page_width, page_height = 1240, 1754
     margin_x, top_margin, bottom_margin = 84, 72, 84
     servicio_key = normalize_service_key(budget.get("servicio") or "")
-    is_fincas = servicio_key == "fincas"
-    fincas_logo = _load_asset_logo("logos/fincas-velazquez.png", max_width=420) if is_fincas else None
-    colegio_logo = _load_asset_logo("logos/colegio-administradores-v2.png", max_width=260) if is_fincas else None
-    brand_logo = _load_brand_logo(company.get("logo_url"), max_width=420 if is_fincas else 360)
+    fincas_logo = _load_asset_logo("logos/fincas-velazquez.png", max_width=420) if servicio_key == "fincas" else None
+    colegio_logo = _load_asset_logo("logos/colegio-administradores-v2.png", max_width=260) if servicio_key == "fincas" else None
+    brand_logo = _load_brand_logo(company.get("logo_url"), max_width=420 if servicio_key == "fincas" else 360)
     # En Fincas, forzamos marca Fincas Velazquez (la empresa emisora puede tener un logo genérico/legacy).
-    logo = fincas_logo if is_fincas and fincas_logo else (brand_logo or fincas_logo)
-    display_company_name = "Fincas Velazquez" if is_fincas else (company.get("nombre") or workspace.get("nombre") or "Workspace")
+    logo = fincas_logo if servicio_key == "fincas" and fincas_logo else (brand_logo or fincas_logo)
     font_title = _document_font(44, bold=True)
     font_subtitle = _document_font(20, bold=False)
     font_chip = _document_font(16, bold=True)
@@ -27003,152 +27024,6 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
     pages = []
     servicio_label = servicio_key or "-"
     ref_label = budget.get("id") or "-"
-
-    def _parse_bold_segments(text):
-        # Mini-markdown: soporta **negrita** dentro de una misma línea.
-        # Devolvemos [(segmento, bold_bool), ...]
-        raw = str(text or "")
-        if "**" not in raw:
-            return [(raw, False)]
-        out = []
-        buf = ""
-        bold = False
-        i = 0
-        while i < len(raw):
-            if raw[i : i + 2] == "**":
-                if buf:
-                    out.append((buf, bold))
-                    buf = ""
-                bold = not bold
-                i += 2
-                continue
-            buf += raw[i]
-            i += 1
-        if buf:
-            out.append((buf, bold))
-        # Si hay un cierre sin abrir (bold True al final), lo tratamos como texto normal.
-        if out and out[-1][1] and raw.count("**") % 2 == 1:
-            flattened = "".join(seg for seg, _ in out)
-            return [(flattened, False)]
-        return out or [(raw, False)]
-
-    def _wrap_rich_text(text, width_chars=98):
-        # Wrapping aproximado por nº de caracteres (como _pdf_wrap_lines),
-        # pero preservando qué palabras van en bold.
-        segments = _parse_bold_segments(text)
-        words = []
-        for seg, is_bold in segments:
-            parts = str(seg).split(" ")
-            for idx, part in enumerate(parts):
-                if part == "" and idx == 0:
-                    continue
-                if part == "":
-                    # espacios múltiples: los colapsamos.
-                    continue
-                words.append((part, is_bold))
-        if not words:
-            return [[("", False)]]
-        lines = []
-        current = []
-        current_len = 0
-        for word, is_bold in words:
-            add_len = len(word) + (1 if current else 0)
-            if current and (current_len + add_len) > max(20, int(width_chars or 98)):
-                lines.append(current)
-                current = []
-                current_len = 0
-            if current:
-                current.append((" ", False))
-                current_len += 1
-            current.append((word, is_bold))
-            current_len += len(word)
-        if current:
-            lines.append(current)
-        return lines
-
-    def _draw_rich_line(draw, x, y, parts, font_regular, font_bold, fill):
-        cursor_x = x
-        for chunk, is_bold in parts:
-            if not chunk:
-                continue
-            font = font_bold if is_bold else font_regular
-            draw.text((cursor_x, y), chunk, fill=fill, font=font)
-            try:
-                box = draw.textbbox((cursor_x, y), chunk, font=font)
-                cursor_x = box[2]
-            except Exception:
-                cursor_x += int(len(chunk) * 10)
-        return cursor_x
-
-    def _build_fincas_presentation_letter_lines():
-        client_name = str(calc.get("comunidad_denominacion") or client.get("nombre") or budget.get("titulo") or "").strip() or "Comunidad"
-        fecha_txt = str(budget.get("fecha") or "").strip() or datetime.now().date().isoformat()
-        try:
-            fecha_txt = format_spanish_long_date_capitalized(fecha_txt)
-        except Exception:
-            pass
-        n_viv = int(calc.get("num_vecinos") or 0)
-        n_loc = int(calc.get("num_locales") or 0)
-        n_tra = int(calc.get("num_trasteros") or 0)
-        n_ap = int(calc.get("num_aparcamientos") or 0)
-        subtotal = float(budget.get("subtotal") or calc.get("cuota_sugerida") or 0.0)
-        impuestos = float(budget.get("impuestos") or 0.0)
-        total = float(budget.get("total") or 0.0) if float(budget.get("total") or 0.0) else max(0.0, subtotal + impuestos)
-
-        cuerpo = [
-            f"{fecha_txt}",
-            "",
-            f"A la atención de {client_name}:",
-            "",
-            "Le remitimos nuestra propuesta de servicios de administración de fincas para su comunidad, con una cuota calculada de forma objetiva a partir de las unidades del edificio.",
-            "",
-            "Cálculo base: "
-            + " + ".join(
-                [f"{n_viv} viviendas × 5 €"]
-                + ([f"{n_loc} locales × 1 €"] if n_loc else [])
-                + ([f"{n_ap} aparcamientos × 1 €"] if n_ap else [])
-                + ([f"{n_tra} trasteros × 1 €"] if n_tra else [])
-            )
-            + " (mínimo 60 €).",
-            f"Cuota mensual propuesta (sin IVA): **{format_eur_short(subtotal)}** · IVA (21%): **{format_eur_short(impuestos)}** · Total mensual (con IVA): **{format_eur_short(total)}**.",
-            f"Total anual (con IVA): **{format_eur_short(total * 12)}**.",
-            "",
-            "Quedamos a su disposición para concretar alcance, fechas de implantación y condiciones particulares de la comunidad.",
-        ]
-
-        extra_letter = str(calc.get("carta_presentacion") or "").strip()
-        if extra_letter:
-            # Permite insertar variables del formulario dentro de la carta opcional.
-            try:
-                template_vars = {
-                    "comunidad_denominacion": str(calc.get("comunidad_denominacion") or client_name or "").strip(),
-                    "comunidad_direccion": str(calc.get("comunidad_direccion") or "").strip(),
-                    "comunidad_cif": str(calc.get("comunidad_cif") or "").strip(),
-                    "solicitante_nombre": str(calc.get("solicitante_nombre") or "").strip(),
-                    "solicitante_dni": str(calc.get("solicitante_dni") or "").strip(),
-                    "solicitante_telefono": str(calc.get("solicitante_telefono") or "").strip(),
-                    "solicitante_email": str(calc.get("solicitante_email") or "").strip(),
-                    "colegiado_numero": str(calc.get("colegiado_numero") or "3079").strip() or "3079",
-                    "fecha": str(fecha_txt or "").strip(),
-                    "subtotal": format_eur_short(subtotal),
-                    "impuestos": format_eur_short(impuestos),
-                    "total": format_eur_short(total),
-                    "total_anual": format_eur_short(total * 12),
-                }
-                for key, value in template_vars.items():
-                    extra_letter = extra_letter.replace(f"{{{{{key}}}}}", value or "")
-            except Exception:
-                pass
-            cuerpo.extend(["", *[line.rstrip() for line in extra_letter.splitlines()]])
-
-        cuerpo.extend(
-            [
-                "",
-                "Atentamente,",
-                f"{company.get('nombre') or workspace.get('nombre') or 'Fincas Velazquez'}",
-            ]
-        )
-        return cuerpo
 
     def _trim_transparent(img):
         if not img:
@@ -27197,74 +27072,34 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
     def new_page(include_cards=False):
         image = Image.new("RGB", (page_width, page_height), "white")
         draw = ImageDraw.Draw(image)
-        # Precalcula el stack de logos (sin dibujar) para que chips y contenido nunca se solapen.
-        logo_stack_bottom = 0
-        fincas_logo_box = None
-        fincas_colegio_box = None
-        if servicio_key == "fincas":
-            col_w = 300
-            x0 = page_width - margin_x - col_w
-            x1 = page_width - margin_x
-            if logo:
-                fincas_logo_box = (x0, 28, x1, 28 + 112)
-                logo_stack_bottom = max(logo_stack_bottom, fincas_logo_box[3])
-            if colegio_logo:
-                top = (logo_stack_bottom or 28) + 10
-                fincas_colegio_box = (x0, top, x1, top + 74)
-                logo_stack_bottom = max(logo_stack_bottom, fincas_colegio_box[3])
-        else:
-            if logo:
-                logo_stack_bottom = max(logo_stack_bottom, 34 + 126)
-
-        chip_y = max(top_margin + 116, (logo_stack_bottom + 18) if logo_stack_bottom else (top_margin + 116))
+        draw.rounded_rectangle((0, 0, page_width, 250), radius=0, fill=primary)
+        draw.polygon([(page_width - 220, 0), (page_width, 0), (page_width, 180)], fill=accent)
+        draw.text((margin_x, top_margin), "PRESUPUESTO", fill="white", font=font_title)
+        draw.text((margin_x, top_margin + 62), company.get("nombre") or workspace.get("nombre") or "Workspace", fill=(240, 246, 248), font=font_subtitle)
+        chip_y = top_margin + 116
         chips = [
             f"REF {ref_label[:12]}",
             f"FECHA {budget.get('fecha') or '-'}",
             f"ESTADO {budget.get('estado') or 'Borrador'}",
             f"SERVICIO {servicio_label.upper()}",
         ]
-        header_h = max(250, int(chip_y + 54))
-        draw.rounded_rectangle((0, 0, page_width, header_h), radius=0, fill=primary)
-        draw.polygon([(page_width - 220, 0), (page_width, 0), (page_width, 180)], fill=accent)
-
-        draw.text((margin_x, top_margin), "PRESUPUESTO", fill="white", font=font_title)
-        draw.text(
-            (margin_x, top_margin + 62),
-            display_company_name,
-            fill=(240, 246, 248),
-            font=font_subtitle,
-        )
-
-        # Logos en columna derecha.
-        if logo:
-            if servicio_key == "fincas" and fincas_logo_box:
-                _paste_logo_box(image, draw, logo, fincas_logo_box, padding=14)
-            elif servicio_key != "fincas":
-                _paste_logo_box(
-                    image,
-                    draw,
-                    logo,
-                    (page_width - margin_x - 340, 34, page_width - margin_x, 34 + 126),
-                    padding=14,
-                )
-        if servicio_key == "fincas" and colegio_logo and fincas_colegio_box:
-            _paste_logo_box(image, draw, colegio_logo, fincas_colegio_box, padding=10)
-
-        # Chips (siempre por debajo del stack de logos).
         chip_x = margin_x
         for chip in chips:
             box = draw.textbbox((chip_x, chip_y), chip, font=font_chip)
             chip_w = (box[2] - box[0]) + 30
-            draw.rounded_rectangle(
-                (chip_x, chip_y - 8, chip_x + chip_w, chip_y + 26),
-                radius=18,
-                fill=(94, 137, 139),
-                outline=(255, 255, 255),
-            )
+            draw.rounded_rectangle((chip_x, chip_y - 8, chip_x + chip_w, chip_y + 26), radius=18, fill=(94, 137, 139), outline=(255, 255, 255))
             draw.text((chip_x + 15, chip_y), chip, fill="white", font=font_chip)
             chip_x += chip_w + 12
-
-        current_y = max(296, header_h + 46)
+        if logo:
+            # Logo en caja fija para evitar solapes con chips/títulos.
+            _paste_logo_box(
+                image,
+                draw,
+                logo,
+                (page_width - margin_x - 340, 34, page_width - margin_x, 34 + 126),
+                padding=14,
+            )
+        current_y = 296
         if include_cards:
             left = (margin_x, current_y, margin_x + 560, current_y + 250)
             right = (page_width - margin_x - 420, current_y, page_width - margin_x, current_y + 250)
@@ -27284,6 +27119,93 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
             draw.text((right[0] + 24, right[1] + 226), f"Pago {budget.get('forma_pago') or 'Pendiente'}", fill=ink, font=font_table)
             current_y = left[3] + 34
         return image, draw, current_y
+
+    if servicio_key == "fincas":
+        cover = Image.new("RGB", (page_width, page_height), "white")
+        cover_draw = ImageDraw.Draw(cover)
+        cover_draw.rounded_rectangle((0, 0, page_width, 240), radius=0, fill=primary)
+        cover_draw.polygon([(page_width - 240, 0), (page_width, 0), (page_width, 200)], fill=accent)
+        cover_title = "CARTA DE PRESENTACIÓN"
+        subtitle = "Administración de fincas · Propuesta de servicios"
+        title_x = margin_x
+        if logo:
+            # Evita que el logo se monte sobre el título.
+            _paste_logo_box(
+                cover,
+                cover_draw,
+                logo,
+                (margin_x, 20, margin_x + 250, 20 + 90),
+                padding=10,
+            )
+            title_x = margin_x + 270
+        cover_draw.text((title_x, top_margin + 12), cover_title, fill="white", font=font_title)
+        cover_draw.text((title_x, top_margin + 86), subtitle, fill=(240, 246, 248), font=font_subtitle)
+        if colegio_logo:
+            colegio_box = (page_width - margin_x - 340, 24, page_width - margin_x, 24 + 90)
+            _paste_logo_box(cover, cover_draw, colegio_logo, colegio_box, padding=10)
+            colegiado = str(calc.get("colegiado_numero") or "3079").strip() or "3079"
+            cover_draw.text(
+                (colegio_box[0], colegio_box[3] + 10),
+                f"Colegiado nº {colegiado}",
+                fill=(240, 246, 248),
+                font=_document_font(16, True),
+            )
+        else:
+            cover_draw.text((page_width - margin_x - 360, 44), "Colegio de Administradores", fill=(240, 246, 248), font=font_subtitle)
+
+        client_name = str(calc.get("comunidad_denominacion") or client.get("nombre") or budget.get("titulo") or "").strip() or "Comunidad"
+        fecha_txt = str(budget.get("fecha") or "").strip() or datetime.now().date().isoformat()
+        try:
+            fecha_txt = format_spanish_long_date_capitalized(fecha_txt)
+        except Exception:
+            pass
+        n_viv = int(calc.get("num_vecinos") or 0)
+        n_loc = int(calc.get("num_locales") or 0)
+        n_tra = int(calc.get("num_trasteros") or 0)
+        n_ap = int(calc.get("num_aparcamientos") or 0)
+        subtotal = float(budget.get("subtotal") or calc.get("cuota_sugerida") or 0.0)
+        impuestos = float(budget.get("impuestos") or 0.0)
+        total = float(budget.get("total") or 0.0) if float(budget.get("total") or 0.0) else max(0.0, subtotal + impuestos)
+        cuerpo = [
+            f"{fecha_txt}",
+            "",
+            f"A la atención de {client_name}:",
+            "",
+            "Le remitimos nuestra propuesta de servicios de administración de fincas para su comunidad, con una cuota calculada de forma objetiva a partir de las unidades del edificio.",
+            "",
+            f"Cálculo base: {n_viv} viviendas × 5 € + {n_loc} locales × 1 € + {n_ap} aparcamientos × 1 €"
+            + (f" + {n_tra} trasteros × 1 €" if n_tra else "")
+            + " (mínimo 60 €).",
+            f"Cuota mensual propuesta (sin IVA): {format_eur_short(subtotal)} · IVA (21%): {format_eur_short(impuestos)} · Total mensual (con IVA): {format_eur_short(total)}.",
+            f"Total anual (con IVA): {format_eur_short(total * 12)}.",
+            "",
+            "Quedamos a su disposición para concretar alcance, fechas de implantación y condiciones particulares de la comunidad.",
+        ]
+        extra_letter = str(calc.get("carta_presentacion") or "").strip()
+        if extra_letter:
+            cuerpo.extend(["", "Carta de presentación adicional:", ""])
+            cuerpo.extend([line.rstrip() for line in extra_letter.splitlines()])
+        cuerpo.extend([
+            "",
+            "Atentamente,",
+            f"{company.get('nombre') or workspace.get('nombre') or 'Fincas Velazquez'}",
+        ])
+        y_cover = 278
+        cover_draw.rounded_rectangle((margin_x, y_cover, page_width - margin_x, page_height - bottom_margin - 22), radius=28, fill=(252, 252, 252), outline=border)
+        text_x = margin_x + 34
+        text_y = y_cover + 30
+        for line in cuerpo:
+            if not str(line).strip():
+                text_y += 18
+                continue
+            wrapped = _pdf_wrap_lines(line, width=98)
+            cover_draw.multiline_text((text_x, text_y), "\n".join(wrapped), fill=ink, font=font_table, spacing=6)
+            sample_box = cover_draw.textbbox((text_x, text_y), "Ag", font=font_table)
+            text_y += (sample_box[3] - sample_box[1] + 8) * len(wrapped)
+        footer_cover = "Documento generado automáticamente desde el CRM. La propuesta económica se detalla en las páginas siguientes."
+        cover_draw.multiline_text((margin_x, page_height - bottom_margin), "\n".join(_pdf_wrap_lines(footer_cover, width=108)), fill=muted, font=font_footer, spacing=4)
+        pages.append(cover)
+
     image, draw, y = new_page(include_cards=True)
     usable_bottom = page_height - bottom_margin
 
@@ -27299,18 +27221,13 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
         box = (margin_x, y, page_width - margin_x, y + 100)
         draw.rounded_rectangle(box, radius=24, fill=(247, 250, 242), outline=border)
         draw.text((box[0] + 24, box[1] + 18), "BASE DE CÁLCULO COMUNIDAD", fill=primary, font=font_section)
-        n_vec = int(calc.get("num_vecinos") or 0)
-        n_loc = int(calc.get("num_locales") or 0)
-        n_tra = int(calc.get("num_trasteros") or 0)
-        n_ap = int(calc.get("num_aparcamientos") or 0)
-        parts = [f"{n_vec} vecinos"]
-        if n_loc:
-            parts.append(f"{n_loc} locales")
-        if n_tra:
-            parts.append(f"{n_tra} trasteros")
-        if n_ap:
-            parts.append(f"{n_ap} aparcamientos")
-        base_text = " · ".join(parts)
+        base_text = (
+            f"{calc.get('num_vecinos') or 0} vecinos · "
+            f"{calc.get('num_locales') or 0} locales · "
+            f"{calc.get('num_trasteros') or 0} trasteros · "
+            f"{calc.get('num_aparcamientos') or 0} aparcamientos · "
+            f"Base sugerida {format_eur(calc.get('cuota_sugerida') or 0)}"
+        )
         draw.text((box[0] + 24, box[1] + 58), base_text, fill=ink, font=font_table)
         y = box[3] + 24
 
@@ -27335,168 +27252,17 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
         y = max(box2[3], y_txt + 10) + 24
 
         addr_for_map = str(calc.get("comunidad_direccion") or "").strip()
-        photo_key = str(
-            calc.get("edificio_foto_key")
-            or calc.get("foto_edificio_key")
-            or calc.get("comunidad_foto_key")
-            or ""
-        ).strip()
+        photo_key = str(calc.get("edificio_foto_key") or "").strip()
         map_url = ""
         qr_img = None
-        map_img = None
-
-        def _parse_float(value):
-            try:
-                return float(value)
-            except Exception:
-                return None
-
-        def _fetch_static_map_tiles(lat, lon, width, height, zoom=16):
-            import math
-
-            try:
-                lat = float(lat)
-                lon = float(lon)
-            except Exception:
-                return None
-            if not (math.isfinite(lat) and math.isfinite(lon)):
-                return None
-            # Web mercator valid range.
-            lat = max(-85.0511, min(85.0511, lat))
-            lon = ((lon + 180.0) % 360.0) - 180.0
-
-            tile_size = 256
-            z = max(1, min(int(zoom or 16), 19))
-            scale = (2 ** z) * tile_size
-
-            def _world_px(lat_deg, lon_deg):
-                x = (lon_deg + 180.0) / 360.0 * scale
-                siny = math.sin(math.radians(lat_deg))
-                y = (0.5 - math.log((1 + siny) / (1 - siny)) / (4 * math.pi)) * scale
-                return x, y
-
-            cx, cy = _world_px(lat, lon)
-            tlx = cx - (float(width) / 2.0)
-            tly = cy - (float(height) / 2.0)
-            brx = tlx + float(width)
-            bry = tly + float(height)
-
-            max_tile = (2 ** z) - 1
-            tx0 = int(math.floor(tlx / tile_size))
-            ty0 = int(math.floor(tly / tile_size))
-            tx1 = int(math.floor((brx - 1) / tile_size))
-            ty1 = int(math.floor((bry - 1) / tile_size))
-
-            # OSM tiles: wrap X, clamp Y.
-            def _wrap_x(tx):
-                return int(tx) % (2 ** z)
-
-            def _clamp_y(ty):
-                return max(0, min(max_tile, int(ty)))
-
-            cols = (tx1 - tx0 + 1)
-            rows = (ty1 - ty0 + 1)
-            if cols <= 0 or rows <= 0 or cols > 10 or rows > 10:
-                return None
-
-            base = Image.new("RGB", (cols * tile_size, rows * tile_size), (238, 240, 242))
-            for iy in range(rows):
-                ty = _clamp_y(ty0 + iy)
-                for ix in range(cols):
-                    tx = _wrap_x(tx0 + ix)
-                    url = f"https://tile.openstreetmap.org/{z}/{tx}/{ty}.png"
-                    try:
-                        req = urllib.request.Request(
-                            url,
-                            headers={
-                                "User-Agent": "Verifika2CRM/1.0 (contacto@grupomodernia.es)",
-                                "Accept-Language": "es",
-                            },
-                        )
-                        with urllib.request.urlopen(req, timeout=8) as response:
-                            raw = response.read()
-                        if raw:
-                            tile = Image.open(BytesIO(raw)).convert("RGB")
-                            base.paste(tile, (ix * tile_size, iy * tile_size))
-                    except Exception:
-                        # keep placeholder tile
-                        pass
-
-            ox = int(round(tlx - (tx0 * tile_size)))
-            oy = int(round(tly - (ty0 * tile_size)))
-            crop = base.crop((ox, oy, ox + int(width), oy + int(height)))
-
-            # Marker
-            try:
-                draw_map = ImageDraw.Draw(crop)
-                mx = int(round(cx - tlx))
-                my = int(round(cy - tly))
-                r = 10
-                draw_map.ellipse((mx - r, my - r, mx + r, my + r), fill=(210, 36, 36), outline=(255, 255, 255), width=3)
-            except Exception:
-                pass
-            return crop
-
-        def _fetch_static_map(lat, lon, width, height, zoom=16):
-            # Prefer tiles (map image, no QR). Fallback to staticmap service if tiles are blocked.
-            img = _fetch_static_map_tiles(lat, lon, width, height, zoom=zoom)
-            if img:
-                return img
-            try:
-                params = urllib.parse.urlencode(
-                    {
-                        "center": f"{lat},{lon}",
-                        "zoom": str(int(zoom)),
-                        "size": f"{int(width)}x{int(height)}",
-                        "maptype": "mapnik",
-                        "markers": f"{lat},{lon},red-pushpin",
-                    }
-                )
-                req = urllib.request.Request(
-                    f"https://staticmap.openstreetmap.de/staticmap.php?{params}",
-                    headers={
-                        "User-Agent": "Verifika2CRM/1.0 (contacto@grupomodernia.es)",
-                        "Accept-Language": "es",
-                    },
-                )
-                with urllib.request.urlopen(req, timeout=8) as response:
-                    raw = response.read()
-                if not raw:
-                    return None
-                return Image.open(BytesIO(raw)).convert("RGB")
-            except Exception:
-                return None
-
         if addr_for_map:
             map_url = f"https://www.google.com/maps/search/?api=1&query={urllib.parse.quote(addr_for_map)}"
-            lat = (
-                _parse_float(calc.get("map_lat"))
-                or _parse_float(calc.get("lat"))
-                or _parse_float(calc.get("comunidad_lat"))
-            )
-            lon = (
-                _parse_float(calc.get("map_lon"))
-                or _parse_float(calc.get("lon"))
-                or _parse_float(calc.get("comunidad_lon"))
-            )
-            if lat is None or lon is None:
-                try:
-                    result = fetch_geocode_coordinates(addr_for_map)
-                    lat = _parse_float(result.get("lat"))
-                    lon = _parse_float(result.get("lon"))
-                except Exception:
-                    lat = None
-                    lon = None
-            if lat is not None and lon is not None:
-                map_img = _fetch_static_map(lat, lon, 660, 210, zoom=16)
-            # Solo generamos QR como fallback si no conseguimos mapa estático.
-            if not map_img:
-                try:
-                    import qrcode
+            try:
+                import qrcode
 
-                    qr_img = qrcode.make(map_url).convert("RGBA").resize((180, 180))
-                except Exception:
-                    qr_img = None
+                qr_img = qrcode.make(map_url).convert("RGBA").resize((180, 180))
+            except Exception:
+                qr_img = None
         building_photo = None
         if photo_key:
             try:
@@ -27505,59 +27271,35 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
                     building_photo = Image.open(BytesIO(raw_bytes))
             except Exception:
                 building_photo = None
-        if map_img or qr_img or building_photo:
+        if qr_img or building_photo:
             ensure_space(330)
             box_media = (margin_x, y, page_width - margin_x, y + 300)
             draw.rounded_rectangle(box_media, radius=24, fill=(247, 248, 252), outline=border)
             draw.text((box_media[0] + 24, box_media[1] + 18), "MAPA / EDIFICIO", fill=primary, font=font_section)
             inner_left = box_media[0] + 24
             inner_top = box_media[1] + 62
-            photo_h = 210
+            photo_w, photo_h = 660, 210
             gap = 24
-            # Preferimos mapa embebido; si hay foto del edificio, se muestra a la derecha.
-            inner_right = box_media[2] - 24
-            available_w = max(320, int(inner_right - inner_left))
-            map_x = inner_left
-            if map_img and building_photo:
-                map_w = max(420, int(available_w * 0.62))
-                photo_w = max(260, available_w - map_w - gap)
-            elif building_photo and not map_img:
-                # Si no hay mapa, damos prioridad a la foto (el QR deja de ser protagonista).
-                map_w = 0
-                photo_w = available_w
-            else:
-                map_w = available_w
-                photo_w = 0
-            right_x = inner_left + map_w + gap
-            if map_img:
-                try:
-                    preview = ImageOps.fit(map_img, (map_w, photo_h), method=Image.LANCZOS)
-                    image.paste(preview, (map_x, inner_top))
-                    draw.rounded_rectangle((map_x, inner_top, map_x + map_w, inner_top + photo_h), radius=20, outline=border, width=2)
-                except Exception:
-                    map_img = None
+            qr_x = inner_left
             if building_photo:
                 try:
                     photo = building_photo.convert("RGB")
                     photo = ImageOps.fit(photo, (photo_w, photo_h), method=Image.LANCZOS)
-                    photo_x = right_x if map_img else map_x
-                    image.paste(photo, (photo_x, inner_top))
-                    draw.rounded_rectangle((photo_x, inner_top, photo_x + photo_w, inner_top + photo_h), radius=20, outline=border, width=2)
+                    image.paste(photo, (inner_left, inner_top))
+                    draw.rounded_rectangle(
+                        (inner_left, inner_top, inner_left + photo_w, inner_top + photo_h),
+                        radius=20,
+                        outline=border,
+                        width=2,
+                    )
                 except Exception:
                     building_photo = None
-            if qr_img and not map_img:
-                # Fallback: QR solo como soporte (no como "mapa" principal).
-                try:
-                    qr_small = qr_img.copy()
-                    qr_small.thumbnail((140, 140), Image.LANCZOS)
-                    qx = box_media[2] - 24 - qr_small.width
-                    qy = inner_top + (photo_h - qr_small.height)
-                    image.paste(qr_small, (qx, qy), qr_small)
-                    draw.text((map_x, inner_top + 6), "Ver ubicación", fill=ink, font=font_table)
-                    addr_lines = _pdf_wrap_lines(addr_for_map or "-", width=66)
-                    draw.multiline_text((map_x, inner_top + 40), "\n".join(addr_lines[:3]), fill=muted, font=font_footer, spacing=4)
-                except Exception:
-                    pass
+                qr_x = inner_left + photo_w + gap
+            if qr_img:
+                image.paste(qr_img, (qr_x, inner_top), qr_img)
+                draw.text((qr_x + 200, inner_top + 6), "Escanea para ver el mapa", fill=ink, font=font_table)
+                addr_lines = _pdf_wrap_lines(addr_for_map or "-", width=34)
+                draw.multiline_text((qr_x + 200, inner_top + 40), "\n".join(addr_lines[:4]), fill=muted, font=font_footer, spacing=4)
             y = box_media[3] + 24
 
         servicios_incluidos = calc.get("servicios_incluidos") if isinstance(calc, dict) else None
@@ -27646,90 +27388,6 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
     draw.multiline_text((margin_x, page_height - bottom_margin), "\n".join(footer_lines), fill=muted, font=font_footer, spacing=4)
 
     pages.append(image)
-
-    # Anexo final: carta de presentación (Fincas).
-    if servicio_key == "fincas":
-        try:
-            cuerpo = _build_fincas_presentation_letter_lines()
-        except Exception:
-            cuerpo = []
-        if cuerpo:
-            annex = Image.new("RGB", (page_width, page_height), "white")
-            annex_draw = ImageDraw.Draw(annex)
-            annex_draw.rounded_rectangle((0, 0, page_width, 220), radius=0, fill=primary)
-            annex_draw.polygon([(page_width - 240, 0), (page_width, 0), (page_width, 190)], fill=accent)
-
-            # Header limpio: título a la izquierda, logos a la derecha (colegio debajo de Fincas).
-            annex_draw.text(
-                (margin_x, top_margin + 8),
-                "ANEXO · CARTA DE PRESENTACIÓN",
-                fill="white",
-                font=_document_font(34, True),
-            )
-            annex_draw.text(
-                (margin_x, top_margin + 66),
-                "Administración de fincas",
-                fill=(240, 246, 248),
-                font=font_subtitle,
-            )
-
-            col_w = 300
-            x0 = page_width - margin_x - col_w
-            x1 = page_width - margin_x
-            stack_bottom = 0
-            if logo:
-                logo_box = (x0, 24, x1, 24 + 112)
-                _paste_logo_box(annex, annex_draw, logo, logo_box, padding=14)
-                stack_bottom = logo_box[3]
-            if colegio_logo:
-                top = (stack_bottom or 24) + 10
-                colegio_box = (x0, top, x1, top + 74)
-                _paste_logo_box(annex, annex_draw, colegio_logo, colegio_box, padding=10)
-                colegiado = str(calc.get("colegiado_numero") or "3079").strip() or "3079"
-                annex_draw.text(
-                    (x0, colegio_box[3] + 6),
-                    f"Colegiado nº {colegiado}",
-                    fill=(240, 246, 248),
-                    font=_document_font(16, True),
-                )
-
-            y_cover = 248
-            annex_draw.rounded_rectangle(
-                (margin_x, y_cover, page_width - margin_x, page_height - bottom_margin - 22),
-                radius=28,
-                fill=(252, 252, 252),
-                outline=border,
-            )
-            text_x = margin_x + 34
-            text_y = y_cover + 30
-            for line in cuerpo:
-                if not str(line).strip():
-                    text_y += 18
-                    continue
-                # Soporte de negritas con **...** para hacer la lectura menos monotona.
-                rich_lines = _wrap_rich_text(line, width_chars=98)
-                for parts in rich_lines:
-                    _draw_rich_line(
-                        annex_draw,
-                        text_x,
-                        text_y,
-                        parts,
-                        font_table,
-                        _document_font(16, True),
-                        ink,
-                    )
-                    sample_box = annex_draw.textbbox((text_x, text_y), "Ag", font=font_table)
-                    text_y += (sample_box[3] - sample_box[1] + 8)
-
-            footer_cover = "Anexo generado automáticamente desde el CRM. La propuesta económica figura en las páginas anteriores."
-            annex_draw.multiline_text(
-                (margin_x, page_height - bottom_margin),
-                "\n".join(_pdf_wrap_lines(footer_cover, width=108)),
-                fill=muted,
-                font=font_footer,
-                spacing=4,
-            )
-            pages.append(annex)
     buffer = BytesIO()
     if len(pages) == 1:
         pages[0].save(buffer, format="PDF", resolution=150.0)
@@ -28300,7 +27958,7 @@ def build_inmueble_visit_sheet_pdf(company, inmueble, captacion, owners, buyer, 
         (
             "Condiciones de la visita",
             [
-                f"El cliente visitante reconoce haber visitado el inmueble con intermediación de {str((company or {}).get('nombre') or 'la agencia').strip()}.",
+                "El cliente visitante reconoce haber visitado el inmueble con intermediación de ESTUDIO VELAZQUEZ / MODERNIA.",
                 "Cualquier negociación, reserva o compraventa/alquiler posterior sobre este inmueble deberá canalizarse a través de la agencia.",
             ],
         ),
@@ -30481,11 +30139,6 @@ class Handler(BaseHTTPRequestHandler):
 
         if parsed.path == "/" or parsed.path == "":
             send_file(self, ROOT / "index.html")
-            return
-
-        if parsed.path == "/manual/inmobiliaria":
-            # Página de documentación (sin auth) para generar capturas del módulo Inmobiliaria.
-            send_file(self, ROOT / "manual_inmobiliaria.html")
             return
 
         if parsed.path.startswith("/assets/"):
@@ -40725,7 +40378,6 @@ class Handler(BaseHTTPRequestHandler):
                     conn,
                     empresa["id"],
                     direccion=direccion,
-                    referencia_catastral=payload.get("referencia_catastral"),
                     owner_nifs=[
                         payload.get("propietario1_nif"),
                         payload.get("propietario2_nif"),
@@ -41038,6 +40690,13 @@ class Handler(BaseHTTPRequestHandler):
                 return
         elif parsed.path == "/api/captaciones":
             try:
+                session = getattr(self, "auth_session", None) or self._current_session()
+                actor_usuario = str((session.get("usuario") if session else "") or "").strip()
+                # Si no vienen asignados, por defecto atribuimos la creación al usuario autenticado.
+                asesor_value = str(payload.get("asesor") or "").strip() or actor_usuario
+                responsable_value = str(payload.get("responsable") or "").strip() or asesor_value or actor_usuario
+                created_by_value = actor_usuario or None
+
                 propietarios = payload.get("propietarios") or []
                 if isinstance(propietarios, str):
                     propietarios = [p for p in propietarios.split(",") if p]
@@ -41060,7 +40719,6 @@ class Handler(BaseHTTPRequestHandler):
                     conn,
                     empresa["id"],
                     direccion=payload.get("direccion"),
-                    referencia_catastral=payload.get("referencia_catastral"),
                     owner_nifs=resolve_owner_nifs_from_cliente_ids(conn, propietarios),
                     scope="captacion",
                 )
@@ -41131,8 +40789,8 @@ class Handler(BaseHTTPRequestHandler):
                         parse_optional_float(payload.get("desviacion_pct")),
                         parse_optional_float(payload.get("valor_referencia")),
                         parse_optional_float(payload.get("honorarios")),
-                        payload.get("asesor"),
-                        payload.get("responsable"),
+                        asesor_value or None,
+                        responsable_value or None,
                         payload.get("descripcion"),
                         payload.get("categoria"),
                         payload.get("situacion_ocupacion"),
@@ -41233,13 +40891,46 @@ class Handler(BaseHTTPRequestHandler):
                         payload.get("fecha_ultima_renov_rebaja"),
                         payload.get("propietario_telefono"),
                         payload.get("propietario_email"),
-                        payload.get("asesor"),
-                        payload.get("responsable"),
+                        asesor_value or None,
+                        responsable_value or None,
                         payload.get("notas"),
                         now,
                         now,
                     ),
                 )
+                if created_by_value:
+                    try:
+                        ensure_column(conn, "inmuebles", "created_by", "created_by TEXT")
+                        ensure_column(conn, "captaciones", "created_by", "created_by TEXT")
+                    except Exception:
+                        pass
+                    try:
+                        conn.execute(
+                            "UPDATE inmuebles SET created_by = COALESCE(NULLIF(created_by, ''), ?) WHERE id = ?",
+                            (created_by_value, inmueble_id),
+                        )
+                    except Exception:
+                        pass
+                    try:
+                        conn.execute(
+                            "UPDATE captaciones SET created_by = COALESCE(NULLIF(created_by, ''), ?) WHERE id = ?",
+                            (created_by_value, captacion_id),
+                        )
+                    except Exception:
+                        pass
+                try:
+                    audit_event(
+                        conn,
+                        empresa["id"],
+                        "inmueble",
+                        inmueble_id,
+                        "Crear inmueble",
+                        usuario=created_by_value,
+                        detalles={"direccion": payload.get("direccion") or "", "origen": "api/captaciones"},
+                        now=now,
+                    )
+                except Exception:
+                    pass
                 for cliente_id in propietarios:
                     ensure_inmueble_propietario_link(conn, inmueble_id, cliente_id, now)
                 try:
@@ -41252,7 +40943,7 @@ class Handler(BaseHTTPRequestHandler):
                         now=now,
                         from_etapa=None,
                         session=session,
-                        responsable=payload.get("responsable") or payload.get("asesor"),
+                        responsable=responsable_value or asesor_value,
                     )
                 except Exception:
                     pass
@@ -41324,14 +41015,6 @@ class Handler(BaseHTTPRequestHandler):
             etapa = payload.get("etapa")
             if not record_id or not etapa:
                 json_response(self, {"error": "id y etapa requeridos"}, status=400)
-                return
-            allow_manual = str(payload.get("allow_manual_stage") or "").strip().lower() in {"1", "true", "yes", "si", "sí"}
-            if not allow_manual:
-                json_response(
-                    self,
-                    {"error": "La fase del inmueble se actualiza cerrando citas. (Actualización manual deshabilitada)"},
-                    status=400,
-                )
                 return
             try:
                 prev = conn.execute(
@@ -41421,6 +41104,8 @@ class Handler(BaseHTTPRequestHandler):
                 "necesidad_venta_alquiler",
                 "canal",
                 "tipo_procedencia",
+                "etapa",
+                "situacion_comercial",
                 "situacion_ocupacion",
                 "ocupado_por",
                 "noticia_verificada",
@@ -42167,6 +41852,7 @@ class Handler(BaseHTTPRequestHandler):
                 "con_inquilino",
                 "planificacion_encargo",
                 "fecha_ultima_renov_rebaja",
+                "estado",
                 "lat",
                 "lon",
             )
@@ -43462,8 +43148,17 @@ class Handler(BaseHTTPRequestHandler):
                 },
                 now=now,
             )
-            # El cambio de fase se hace al cerrar la cita (no al crearla), para evitar saltos involuntarios.
-            if servicio_norm == "financiaciones":
+            if normalize_inmo_action_type(tipo) == "cita_adquisicion":
+                inmueble_id = str(payload.get("inmueble_id") or "").strip()
+                if inmueble_id:
+                    inmueble = conn.execute(
+                        "SELECT estado FROM inmuebles WHERE id = ? LIMIT 1",
+                        (inmueble_id,),
+                    ).fetchone()
+                    estado_actual = normalize_lookup_text((inmueble["estado"] if inmueble else "") or "").lower()
+                    if estado_actual in {"", "noticia"}:
+                        sync_inmueble_stage_for_action(conn, inmueble_id, "adquisicion", now)
+            elif servicio_norm == "financiaciones":
                 if action_row and str(action_row["estado"] or "").strip().lower() != "pendiente":
                     apply_fin_action_workflow(conn, empresa["id"], action_row, now)
             conn.commit()
@@ -43565,37 +43260,10 @@ class Handler(BaseHTTPRequestHandler):
                 resultado_norm = normalize_lookup_text(resultado_final).lower()
                 destino = ""
                 if resultado_norm == "positivo":
-                    if estado_siguiente_final:
-                        destino = estado_siguiente_final
-                    else:
-                        # Default según fase actual: Inmueble -> Noticia, Noticia -> Encargo.
-                        inm_row = conn.execute(
-                            "SELECT estado FROM inmuebles WHERE id = ? LIMIT 1",
-                            (inmueble_id,),
-                        ).fetchone()
-                        estado_actual = normalize_lookup_text((inm_row["estado"] if inm_row else "") or "").lower()
-                        destino = "Encargo" if estado_actual == "noticia" else "Noticia"
+                    destino = estado_siguiente_final or "Noticia"
                 elif resultado_norm == "negativo":
                     destino = estado_siguiente_final or "Cerrado negativamente"
                 if destino:
-                    # Ratificación rápida de datos clave al convertir a Encargo.
-                    if normalize_lookup_text(destino).lower() == "encargo":
-                        precio_encargo = parse_money_value(payload.get("precio_encargo"))
-                        honorarios = parse_money_value(payload.get("honorarios"))
-                        duracion = str(payload.get("duracion_encargo") or payload.get("duracion_encargo_meses") or "").strip()
-                        inm_updates = {}
-                        if precio_encargo is not None:
-                            inm_updates["precio_encargo"] = precio_encargo
-                        if honorarios is not None:
-                            inm_updates["honorarios"] = honorarios
-                        if duracion:
-                            inm_updates["planificacion_encargo"] = duracion
-                        if inm_updates:
-                            set_clause = ", ".join([f"{key} = ?" for key in inm_updates])
-                            conn.execute(
-                                f"UPDATE inmuebles SET {set_clause}, updated_at = datetime(?) WHERE id = ?",
-                                (*list(inm_updates.values()), now, inmueble_id),
-                            )
                     sync_inmueble_stage_for_action(conn, inmueble_id, destino, now)
             elif tipo_norm == "cita_comprador" and inmueble_id and estado_final.lower() != "pendiente":
                 if normalize_lookup_text(resultado_final).lower() == "interesado":
@@ -43754,146 +43422,59 @@ class Handler(BaseHTTPRequestHandler):
                 if normalize_lookup_text(resultado_final).lower() == "aceptada":
                     sync_inmueble_stage_for_action(conn, inmueble_id, "reservado", now)
             elif tipo_norm == "cita_propuesta" and inmueble_id and estado_final.lower() != "pendiente":
-                resultado_norm = normalize_lookup_text(resultado_final).lower()
-                documento_tipo = str(
-                    updates.get("documento_tipo") if "documento_tipo" in updates else current["documento_tipo"] or "Propuesta de compra"
-                ).strip() or "Propuesta de compra"
-                buyer_id = str((action_row["cliente_id"] if action_row else current["cliente_id"]) or "").strip()
-                buyer = (
+                if normalize_lookup_text(resultado_final).lower() == "se realiza propuesta":
+                    documento_tipo = str(
+                        updates.get("documento_tipo") if "documento_tipo" in updates else current["documento_tipo"] or "Propuesta de compra"
+                    ).strip() or "Propuesta de compra"
+                    buyer = conn.execute(
+                        "SELECT nombre, nif, telefono, email FROM clientes WHERE id = ? LIMIT 1",
+                        (action_row["cliente_id"],),
+                    ).fetchone()
+                    inmueble = conn.execute(
+                        "SELECT * FROM inmuebles WHERE id = ? LIMIT 1",
+                        (inmueble_id,),
+                    ).fetchone()
+                    if inmueble:
+                        pdf_bytes = build_inmueble_negotiation_offer_pdf(
+                            dict(empresa) if empresa else {},
+                            dict(inmueble),
+                            dict(buyer) if buyer else {},
+                            dict(action_row),
+                        )
+                        nombre = f"{documento_tipo} · {buyer['nombre'] if buyer and buyer['nombre'] else inmueble['direccion'] or 'Inmueble'}"
+                        filename_base = f"negociacion_{slugify_text(inmueble['direccion'] or inmueble['referencia'] or record_id)[:50] or record_id}"
+                        persist_generated_inmueble_pdf(
+                            conn,
+                            inmueble_id,
+                            documento_tipo,
+                            nombre,
+                            pdf_bytes,
+                            filename_base,
+                            now,
+                            replace_existing=False,
+                        )
+                    next_id = os.urandom(16).hex()
                     conn.execute(
-                        "SELECT id, nombre, nif, telefono, email FROM clientes WHERE id = ? LIMIT 1",
-                        (buyer_id,),
-                    ).fetchone()
-                    if buyer_id
-                    else None
-                )
-                inmueble = conn.execute(
-                    "SELECT * FROM inmuebles WHERE id = ? LIMIT 1",
-                    (inmueble_id,),
-                ).fetchone()
-
-                # Genera un PDF de propuesta/negociación cuando procede.
-                if inmueble and resultado_norm in {"en negociacion", "en negociación", "aprobada"}:
-                    pdf_bytes = build_inmueble_negotiation_offer_pdf(
-                        dict(empresa) if empresa else {},
-                        dict(inmueble),
-                        dict(buyer) if buyer else {},
-                        dict(action_row) if action_row else dict(current),
-                    )
-                    nombre = f"{documento_tipo} · {buyer['nombre'] if buyer and buyer['nombre'] else inmueble['direccion'] or 'Inmueble'}"
-                    filename_base = f"negociacion_{slugify_text(inmueble['direccion'] or inmueble['referencia'] or record_id)[:50] or record_id}"
-                    persist_generated_inmueble_pdf(
-                        conn,
-                        inmueble_id,
-                        documento_tipo,
-                        nombre,
-                        pdf_bytes,
-                        filename_base,
-                        now,
-                        replace_existing=False,
-                    )
-
-                if resultado_norm in {"en negociacion", "en negociación"}:
-                    sync_inmueble_stage_for_action(conn, inmueble_id, "propuesta", now)
-                elif resultado_norm == "rechazada":
-                    # Vuelve a Encargo (seguimos con el expediente abierto, pero sin propuesta activa).
-                    sync_inmueble_stage_for_action(conn, inmueble_id, "encargo", now)
-                elif resultado_norm == "aprobada":
-                    # Aceptación: pasa a Vendido y crea/actualiza operación para controlar Contrato privado / Escritura.
-                    sync_inmueble_stage_for_action(conn, inmueble_id, "vendido", now)
-                    try:
-                        precio_propuesta = parse_money_value(
-                            (action_row["importe_propuesta"] if action_row else current["importe_propuesta"]) or payload.get("precio_propuesta")
-                        )
-                    except Exception:
-                        precio_propuesta = None
-                    fecha_propuesta = str((action_row["fecha"] if action_row else current["fecha"]) or "").strip()
-                    fecha_contrato = str(payload.get("fecha_contrato") or "").strip()
-                    fecha_escritura = str(payload.get("fecha_escritura") or "").strip()
-                    op_estado = str(payload.get("operacion_estado") or "Contrato privado").strip() or "Contrato privado"
-                    existing = conn.execute(
                         """
-                        SELECT id
-                        FROM operaciones_inmobiliarias
-                        WHERE empresa_id = ?
-                          AND inmueble_id = ?
-                          AND LOWER(COALESCE(tipo_operacion, 'venta')) = 'venta'
-                        ORDER BY updated_at DESC, created_at DESC
-                        LIMIT 1
+                        INSERT INTO acciones (
+                          id, empresa_id, servicio, cliente_id, inmueble_id, cliente_nombre,
+                          fecha, hora, tipo, responsable, estado, created_at, updated_at
+                        ) VALUES (
+                          ?, ?, 'inmobiliaria', ?, ?, ?, date('now', '+1 day'), '12:00', ?, ?, 'Pendiente', datetime(?), datetime(?)
+                        )
                         """,
-                        (empresa["id"], inmueble_id),
-                    ).fetchone()
-                    op_id = existing["id"] if existing else os.urandom(16).hex()
-                    refcat = re.sub(r"[^A-Z0-9]", "", str((inmueble["referencia_catastral"] if inmueble else "") or "").upper()) or None
-                    direccion = str((inmueble["direccion"] if inmueble else "") or "").strip() or None
-                    buyer_nombre = str((buyer["nombre"] if buyer else "") or "").strip() or None
-                    buyer_nif = normalize_nif(buyer["nif"] if buyer else "") or None
-                    buyer_tel = str((buyer["telefono"] if buyer else "") or "").strip() or None
-                    buyer_email = normalize_email(buyer["email"] if buyer else "") or None
-                    if existing:
-                        conn.execute(
-                            """
-                            UPDATE operaciones_inmobiliarias
-                            SET estado = ?, fecha_propuesta = ?, precio_propuesta = ?,
-                                fecha_contrato = COALESCE(NULLIF(?, ''), fecha_contrato),
-                                fecha_escritura = COALESCE(NULLIF(?, ''), fecha_escritura),
-                                inmueble_id = ?, direccion = ?, referencia_catastral = ?,
-                                contraparte1_id = ?, contraparte_nombre = ?, contraparte_nif = ?,
-                                contraparte_telefono = ?, contraparte_email = ?,
-                                updated_at = datetime(?)
-                            WHERE id = ?
-                            """,
-                            (
-                                op_estado,
-                                fecha_propuesta or None,
-                                precio_propuesta,
-                                fecha_contrato,
-                                fecha_escritura,
-                                inmueble_id,
-                                direccion,
-                                refcat,
-                                buyer_id or None,
-                                buyer_nombre,
-                                buyer_nif,
-                                buyer_tel,
-                                buyer_email,
-                                now,
-                                op_id,
-                            ),
-                        )
-                    else:
-                        conn.execute(
-                            """
-                            INSERT INTO operaciones_inmobiliarias (
-                              id, empresa_id, tipo_operacion, estado,
-                              inmueble_id, direccion, referencia_catastral,
-                              contraparte1_id, contraparte_nombre, contraparte_nif, contraparte_telefono, contraparte_email,
-                              fecha_propuesta, fecha_contrato, fecha_escritura, precio_propuesta,
-                              created_at, updated_at
-                            ) VALUES (
-                              ?, ?, 'venta', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, datetime(?), datetime(?)
-                            )
-                            """,
-                            (
-                                op_id,
-                                empresa["id"],
-                                op_estado,
-                                inmueble_id,
-                                direccion,
-                                refcat,
-                                buyer_id or None,
-                                buyer_nombre,
-                                buyer_nif,
-                                buyer_tel,
-                                buyer_email,
-                                fecha_propuesta or None,
-                                fecha_contrato,
-                                fecha_escritura,
-                                precio_propuesta,
-                                now,
-                                now,
-                            ),
-                        )
+                        (
+                            next_id,
+                            empresa["id"],
+                            action_row["cliente_id"],
+                            inmueble_id,
+                            action_row["cliente_nombre"],
+                            "Cita aceptación propietarios",
+                            action_row["responsable"],
+                            now,
+                            now,
+                        ),
+                    )
             response_payload = {"ok": True}
             if "financiacion_oportunidad_id" in updates:
                 response_payload["financiacion_oportunidad_id"] = updates["financiacion_oportunidad_id"]
@@ -45681,52 +45262,6 @@ class Handler(BaseHTTPRequestHandler):
             if not payload:
                 json_response(self, {"error": "presupuesto no encontrado"}, status=404)
                 return
-            # Mejora de UX: intenta resolver coordenadas (con cache) para poder incrustar un mapa estático en el PDF.
-            try:
-                budget_row = payload.get("budget") or {}
-                servicio_key = normalize_service_key(budget_row.get("servicio") or "")
-                if servicio_key == "fincas":
-                    calc = {}
-                    try:
-                        calc = json.loads(budget_row.get("calculo_json") or "{}") if budget_row.get("calculo_json") else {}
-                        if not isinstance(calc, dict):
-                            calc = {}
-                    except Exception:
-                        calc = {}
-                    addr = str(calc.get("comunidad_direccion") or "").strip()
-                    has_coords = bool(str(calc.get("map_lat") or "").strip() and str(calc.get("map_lon") or "").strip())
-                    if addr and not has_coords:
-                        cached = get_geocode_cache(conn, addr) or None
-                        result = cached
-                        if not result:
-                            try:
-                                result = fetch_geocode_coordinates(addr)
-                            except Exception:
-                                result = None
-                        if result and result.get("ok") and result.get("lat") and result.get("lon"):
-                            try:
-                                now_iso = datetime.now(timezone.utc).isoformat()
-                                upsert_geocode_cache(
-                                    conn,
-                                    addr,
-                                    "",
-                                    "",
-                                    "",
-                                    result.get("lat"),
-                                    result.get("lon"),
-                                    result.get("display_name") or addr,
-                                    result.get("provider") or "geocode",
-                                    now_iso,
-                                )
-                                conn.commit()
-                            except Exception:
-                                pass
-                            calc["map_lat"] = result.get("lat")
-                            calc["map_lon"] = result.get("lon")
-                            budget_row["calculo_json"] = json.dumps(calc, ensure_ascii=False)
-                            payload["budget"] = budget_row
-            except Exception:
-                pass
             pdf_bytes = build_workspace_budget_pdf(payload["budget"], payload["workspace"], payload["company"], payload["client"], payload["lineas"])
             filename = f"presupuesto_{budget_id}.pdf"
             binary_response(self, pdf_bytes, content_type="application/pdf", filename=filename)
@@ -48486,10 +48021,6 @@ class Handler(BaseHTTPRequestHandler):
                   i.habitaciones,
                   i.banos,
                   i.precio_objetivo,
-                  i.precio_encargo,
-                  i.precio_pedido_cliente,
-                  i.precio_valoracion,
-                  i.desviacion_pct,
                   i.estado,
                   GROUP_CONCAT(c.nombre, ' | ') AS propietarios
                 FROM inmuebles i
@@ -48757,6 +48288,10 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"inmueble_id": inmueble_id, "created": False})
                 return
             new_id = os.urandom(16).hex()
+            session = getattr(self, "auth_session", None) or self._current_session()
+            actor_usuario = str((session.get("usuario") if session else "") or "").strip()
+            created_by_value = actor_usuario or None
+            asesor_value = str(row_value(captacion, "asesor", "") or "").strip() or created_by_value
             now = datetime.utcnow().isoformat()
             conn.execute(
                 """
@@ -48790,6 +48325,37 @@ class Handler(BaseHTTPRequestHandler):
                 "UPDATE captaciones SET inmueble_id = ?, updated_at = ? WHERE id = ?",
                 (new_id, now, captacion_id),
             )
+            try:
+                if asesor_value or created_by_value:
+                    try:
+                        ensure_column(conn, "inmuebles", "created_by", "created_by TEXT")
+                    except Exception:
+                        pass
+                    conn.execute(
+                        """
+                        UPDATE inmuebles
+                        SET asesor = COALESCE(NULLIF(asesor, ''), ?),
+                            created_by = COALESCE(NULLIF(created_by, ''), ?),
+                            updated_at = COALESCE(updated_at, ?)
+                        WHERE id = ?
+                        """,
+                        (asesor_value or None, created_by_value, now, new_id),
+                    )
+            except Exception:
+                pass
+            try:
+                audit_event(
+                    conn,
+                    str(captacion["empresa_id"] or "").strip(),
+                    "inmueble",
+                    new_id,
+                    "Crear inmueble",
+                    usuario=created_by_value,
+                    detalles={"origen": "api/inmueble_ensure", "captacion_id": captacion_id},
+                    now=now,
+                )
+            except Exception:
+                pass
             json_response(self, {"inmueble_id": new_id, "created": True})
             return
 
@@ -51367,168 +50933,207 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "empresa_id requerido"}, status=400)
                 return
 
-            empresa_row = conn.execute(
-                "SELECT id, nombre FROM empresas WHERE id = ? LIMIT 1",
-                (empresa_id,),
-            ).fetchone()
+            try:
+                empresa_row = conn.execute(
+                    "SELECT id, nombre FROM empresas WHERE id = ? LIMIT 1",
+                    (empresa_id,),
+                ).fetchone()
+            except Exception:
+                empresa_row = None
             empresa_nombre = str(empresa_row["nombre"] or "").strip() if empresa_row else ""
             if empresa_nombre == "Estudio Velazquez 2012 SL":
-                ventas = conn.execute(
-                    """
-                    SELECT anio AS year, COUNT(*) AS total
-                    FROM operaciones_inmobiliarias
-                    WHERE empresa_id = ?
-                      AND LOWER(COALESCE(tipo_operacion, 'venta')) = 'venta'
-                      AND anio IS NOT NULL
-                    GROUP BY anio
-                    ORDER BY anio
-                    """,
-                    (empresa_id,),
-                ).fetchall()
+                try:
+                    ventas = conn.execute(
+                        """
+                        SELECT anio AS year, COUNT(*) AS total
+                        FROM operaciones_inmobiliarias
+                        WHERE empresa_id = ?
+                          AND LOWER(COALESCE(tipo_operacion, 'venta')) = 'venta'
+                          AND anio IS NOT NULL
+                        GROUP BY anio
+                        ORDER BY anio
+                        """,
+                        (empresa_id,),
+                    ).fetchall()
+                except Exception:
+                    ventas = []
 
-                comision_series = conn.execute(
-                    """
-                    SELECT anio AS year, ROUND(SUM(COALESCE(comision, 0)), 2) AS total
-                    FROM movimientos
-                    WHERE empresa_id = ?
-                      AND UPPER(TRIM(concepto)) = 'COMPRAVENTA'
-                      AND anio IS NOT NULL
-                    GROUP BY anio
-                    ORDER BY anio
-                    """,
-                    (empresa_id,),
-                ).fetchall()
+                try:
+                    comision_series = conn.execute(
+                        """
+                        SELECT anio AS year, ROUND(SUM(COALESCE(comision, 0)), 2) AS total
+                        FROM movimientos
+                        WHERE empresa_id = ?
+                          AND UPPER(TRIM(concepto)) = 'COMPRAVENTA'
+                          AND anio IS NOT NULL
+                        GROUP BY anio
+                        ORDER BY anio
+                        """,
+                        (empresa_id,),
+                    ).fetchall()
+                except Exception:
+                    comision_series = []
 
-                volumen_cierre = conn.execute(
-                    """
-                    SELECT anio AS year,
-                           ROUND(SUM(COALESCE(precio_escritura, precio_propuesta, precio_contrato, 0)), 2) AS total
-                    FROM operaciones_inmobiliarias
-                    WHERE empresa_id = ?
-                      AND LOWER(COALESCE(tipo_operacion, 'venta')) = 'venta'
-                      AND anio IS NOT NULL
-                    GROUP BY anio
-                    ORDER BY anio
-                    """,
-                    (empresa_id,),
-                ).fetchall()
+                try:
+                    volumen_cierre = conn.execute(
+                        """
+                        SELECT anio AS year,
+                               ROUND(SUM(COALESCE(precio_escritura, precio_propuesta, precio_contrato, 0)), 2) AS total
+                        FROM operaciones_inmobiliarias
+                        WHERE empresa_id = ?
+                          AND LOWER(COALESCE(tipo_operacion, 'venta')) = 'venta'
+                          AND anio IS NOT NULL
+                        GROUP BY anio
+                        ORDER BY anio
+                        """,
+                        (empresa_id,),
+                    ).fetchall()
+                except Exception:
+                    volumen_cierre = []
 
-                volumen_salida = conn.execute(
-                    """
-                    SELECT anio AS year,
-                           ROUND(SUM(COALESCE(precio_encargo, 0)), 2) AS total
-                    FROM operaciones_inmobiliarias
-                    WHERE empresa_id = ?
-                      AND LOWER(COALESCE(tipo_operacion, 'venta')) = 'venta'
-                      AND anio IS NOT NULL
-                    GROUP BY anio
-                    ORDER BY anio
-                    """,
-                    (empresa_id,),
-                ).fetchall()
+                try:
+                    volumen_salida = conn.execute(
+                        """
+                        SELECT anio AS year,
+                               ROUND(SUM(COALESCE(precio_encargo, 0)), 2) AS total
+                        FROM operaciones_inmobiliarias
+                        WHERE empresa_id = ?
+                          AND LOWER(COALESCE(tipo_operacion, 'venta')) = 'venta'
+                          AND anio IS NOT NULL
+                        GROUP BY anio
+                        ORDER BY anio
+                        """,
+                        (empresa_id,),
+                    ).fetchall()
+                except Exception:
+                    volumen_salida = []
 
-                captaciones_series = conn.execute(
-                    """
-                    SELECT substr(COALESCE(NULLIF(updated_at, ''), created_at), 1, 4) AS year,
-                           COUNT(*) AS total
-                    FROM captaciones
-                    WHERE empresa_id = ?
-                    GROUP BY substr(COALESCE(NULLIF(updated_at, ''), created_at), 1, 4)
-                    ORDER BY year
-                    """,
-                    (empresa_id,),
-                ).fetchall()
+                try:
+                    captaciones_series = conn.execute(
+                        """
+                        SELECT substr(COALESCE(NULLIF(updated_at, ''), created_at), 1, 4) AS year,
+                               COUNT(*) AS total
+                        FROM captaciones
+                        WHERE empresa_id = ?
+                        GROUP BY substr(COALESCE(NULLIF(updated_at, ''), created_at), 1, 4)
+                        ORDER BY year
+                        """,
+                        (empresa_id,),
+                    ).fetchall()
+                except Exception:
+                    captaciones_series = []
 
-                inmuebles_series = conn.execute(
-                    """
-                    SELECT substr(COALESCE(NULLIF(updated_at, ''), created_at), 1, 4) AS year,
-                           COUNT(*) AS total
-                    FROM inmuebles
-                    WHERE empresa_id = ?
-                    GROUP BY substr(COALESCE(NULLIF(updated_at, ''), created_at), 1, 4)
-                    ORDER BY year
-                    """,
-                    (empresa_id,),
-                ).fetchall()
+                try:
+                    inmuebles_series = conn.execute(
+                        """
+                        SELECT substr(COALESCE(NULLIF(updated_at, ''), created_at), 1, 4) AS year,
+                               COUNT(*) AS total
+                        FROM inmuebles
+                        WHERE empresa_id = ?
+                        GROUP BY substr(COALESCE(NULLIF(updated_at, ''), created_at), 1, 4)
+                        ORDER BY year
+                        """,
+                        (empresa_id,),
+                    ).fetchall()
+                except Exception:
+                    inmuebles_series = []
 
-                visitas_series = conn.execute(
-                    """
-                    SELECT anio AS year, SUM(COALESCE(num_visitas, 0)) AS total
-                    FROM operaciones_inmobiliarias
-                    WHERE empresa_id = ?
-                      AND LOWER(COALESCE(tipo_operacion, 'venta')) = 'venta'
-                      AND anio IS NOT NULL
-                    GROUP BY anio
-                    ORDER BY anio
-                    """,
-                    (empresa_id,),
-                ).fetchall()
+                try:
+                    visitas_series = conn.execute(
+                        """
+                        SELECT anio AS year, SUM(COALESCE(num_visitas, 0)) AS total
+                        FROM operaciones_inmobiliarias
+                        WHERE empresa_id = ?
+                          AND LOWER(COALESCE(tipo_operacion, 'venta')) = 'venta'
+                          AND anio IS NOT NULL
+                        GROUP BY anio
+                        ORDER BY anio
+                        """,
+                        (empresa_id,),
+                    ).fetchall()
+                except Exception:
+                    visitas_series = []
 
-                plazos_series = conn.execute(
-                    """
-                    SELECT anio AS year,
-                           ROUND(AVG(CASE WHEN COALESCE(dias_hasta_venta, 0) > 0 THEN dias_hasta_venta END), 1) AS total
-                    FROM operaciones_inmobiliarias
-                    WHERE empresa_id = ?
-                      AND LOWER(COALESCE(tipo_operacion, 'venta')) = 'venta'
-                      AND anio IS NOT NULL
-                    GROUP BY anio
-                    ORDER BY anio
-                    """,
-                    (empresa_id,),
-                ).fetchall()
+                try:
+                    plazos_series = conn.execute(
+                        """
+                        SELECT anio AS year,
+                               ROUND(AVG(CASE WHEN COALESCE(dias_hasta_venta, 0) > 0 THEN dias_hasta_venta END), 1) AS total
+                        FROM operaciones_inmobiliarias
+                        WHERE empresa_id = ?
+                          AND LOWER(COALESCE(tipo_operacion, 'venta')) = 'venta'
+                          AND anio IS NOT NULL
+                        GROUP BY anio
+                        ORDER BY anio
+                        """,
+                        (empresa_id,),
+                    ).fetchall()
+                except Exception:
+                    plazos_series = []
 
-                summary = conn.execute(
-                    """
-                    SELECT
-                      COUNT(*) AS compraventas_total,
-                      ROUND(AVG(CASE WHEN COALESCE(precio_escritura, precio_propuesta, precio_contrato, 0) > 0
-                        THEN COALESCE(precio_escritura, precio_propuesta, precio_contrato) END), 2) AS ticket_medio,
-                      ROUND(AVG(CASE WHEN COALESCE(dias_hasta_venta, 0) > 0 THEN dias_hasta_venta END), 1) AS plazo_medio_dias,
-                      ROUND(AVG(CASE WHEN desviacion_pct IS NOT NULL THEN desviacion_pct END), 2) AS desviacion_media_pct,
-                      SUM(COALESCE(num_visitas, 0)) AS visitas_total,
-                      ROUND(AVG(CASE WHEN COALESCE(num_visitas, 0) > 0 THEN num_visitas END), 1) AS visitas_media
-                    FROM operaciones_inmobiliarias
-                    WHERE empresa_id = ?
-                      AND LOWER(COALESCE(tipo_operacion, 'venta')) = 'venta'
-                    """,
-                    (empresa_id,),
-                ).fetchone()
+                try:
+                    summary = conn.execute(
+                        """
+                        SELECT
+                          COUNT(*) AS compraventas_total,
+                          ROUND(AVG(CASE WHEN COALESCE(precio_escritura, precio_propuesta, precio_contrato, 0) > 0
+                            THEN COALESCE(precio_escritura, precio_propuesta, precio_contrato) END), 2) AS ticket_medio,
+                          ROUND(AVG(CASE WHEN COALESCE(dias_hasta_venta, 0) > 0 THEN dias_hasta_venta END), 1) AS plazo_medio_dias,
+                          ROUND(AVG(CASE WHEN desviacion_pct IS NOT NULL THEN desviacion_pct END), 2) AS desviacion_media_pct,
+                          SUM(COALESCE(num_visitas, 0)) AS visitas_total,
+                          ROUND(AVG(CASE WHEN COALESCE(num_visitas, 0) > 0 THEN num_visitas END), 1) AS visitas_media
+                        FROM operaciones_inmobiliarias
+                        WHERE empresa_id = ?
+                          AND LOWER(COALESCE(tipo_operacion, 'venta')) = 'venta'
+                        """,
+                        (empresa_id,),
+                    ).fetchone()
+                except Exception:
+                    summary = None
 
-                captacion_summary = conn.execute(
-                    """
-                    SELECT
-                      COUNT(*) AS captaciones_total,
-                      SUM(CASE WHEN LOWER(COALESCE(etapa, '')) NOT IN ('cerrado negativamente', 'vendido', 'alquiler') THEN 1 ELSE 0 END) AS captaciones_activas
-                    FROM captaciones
-                    WHERE empresa_id = ?
-                    """,
-                    (empresa_id,),
-                ).fetchone()
+                try:
+                    captacion_summary = conn.execute(
+                        """
+                        SELECT
+                          COUNT(*) AS captaciones_total,
+                          SUM(CASE WHEN LOWER(COALESCE(etapa, '')) NOT IN ('cerrado negativamente', 'vendido', 'alquiler') THEN 1 ELSE 0 END) AS captaciones_activas
+                        FROM captaciones
+                        WHERE empresa_id = ?
+                        """,
+                        (empresa_id,),
+                    ).fetchone()
+                except Exception:
+                    captacion_summary = None
 
-                inmuebles_total = conn.execute(
-                    """
-                    SELECT COUNT(*) AS total
-                    FROM inmuebles
-                    WHERE empresa_id = ?
-                    """,
-                    (empresa_id,),
-                ).fetchone()
+                try:
+                    inmuebles_total = conn.execute(
+                        """
+                        SELECT COUNT(*) AS total
+                        FROM inmuebles
+                        WHERE empresa_id = ?
+                        """,
+                        (empresa_id,),
+                    ).fetchone()
+                except Exception:
+                    inmuebles_total = None
 
-                alquileres = conn.execute(
-                    """
-                    SELECT substr(NULLIF(fecha, ''), 1, 4) AS year,
-                           COUNT(*) AS total,
-                           SUM(COALESCE(precio, 0)) AS facturado
-                    FROM alquileres
-                    WHERE empresa_id = ?
-                      AND fecha IS NOT NULL
-                      AND length(fecha) >= 4
-                    GROUP BY substr(NULLIF(fecha, ''), 1, 4)
-                    ORDER BY substr(NULLIF(fecha, ''), 1, 4)
-                    """,
-                    (empresa_id,),
-                ).fetchall()
+                try:
+                    alquileres = conn.execute(
+                        """
+                        SELECT substr(NULLIF(fecha, ''), 1, 4) AS year,
+                               COUNT(*) AS total,
+                               SUM(COALESCE(precio, 0)) AS facturado
+                        FROM alquileres
+                        WHERE empresa_id = ?
+                          AND fecha IS NOT NULL
+                          AND length(fecha) >= 4
+                        GROUP BY substr(NULLIF(fecha, ''), 1, 4)
+                        ORDER BY substr(NULLIF(fecha, ''), 1, 4)
+                        """,
+                        (empresa_id,),
+                    ).fetchall()
+                except Exception:
+                    alquileres = []
 
                 json_response(
                     self,
@@ -51559,56 +51164,68 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 return
 
-            ventas = conn.execute(
-                """
-                SELECT anio AS year, COUNT(*) AS total
-                FROM movimientos
-                WHERE empresa_id = ?
-                  AND UPPER(TRIM(concepto)) = 'COMPRAVENTA'
-                GROUP BY anio
-                ORDER BY anio
-                """,
-                (empresa_id,),
-            ).fetchall()
+            try:
+                ventas = conn.execute(
+                    """
+                    SELECT anio AS year, COUNT(*) AS total
+                    FROM movimientos
+                    WHERE empresa_id = ?
+                      AND UPPER(TRIM(concepto)) = 'COMPRAVENTA'
+                    GROUP BY anio
+                    ORDER BY anio
+                    """,
+                    (empresa_id,),
+                ).fetchall()
+            except Exception:
+                ventas = []
 
-            ingresos = conn.execute(
-                """
-                SELECT anio AS year, SUM(COALESCE(comision, 0)) AS total
-                FROM movimientos
-                WHERE empresa_id = ?
-                  AND LOWER(TRIM(tipo)) = 'ingreso'
-                GROUP BY anio
-                ORDER BY anio
-                """,
-                (empresa_id,),
-            ).fetchall()
+            try:
+                ingresos = conn.execute(
+                    """
+                    SELECT anio AS year, SUM(COALESCE(comision, 0)) AS total
+                    FROM movimientos
+                    WHERE empresa_id = ?
+                      AND LOWER(TRIM(tipo)) = 'ingreso'
+                    GROUP BY anio
+                    ORDER BY anio
+                    """,
+                    (empresa_id,),
+                ).fetchall()
+            except Exception:
+                ingresos = []
 
-            gastos = conn.execute(
-                """
-                SELECT anio AS year, SUM(COALESCE(comision, 0)) AS total
-                FROM movimientos
-                WHERE empresa_id = ?
-                  AND LOWER(TRIM(tipo)) = 'gasto'
-                GROUP BY anio
-                ORDER BY anio
-                """,
-                (empresa_id,),
-            ).fetchall()
+            try:
+                gastos = conn.execute(
+                    """
+                    SELECT anio AS year, SUM(COALESCE(comision, 0)) AS total
+                    FROM movimientos
+                    WHERE empresa_id = ?
+                      AND LOWER(TRIM(tipo)) = 'gasto'
+                    GROUP BY anio
+                    ORDER BY anio
+                    """,
+                    (empresa_id,),
+                ).fetchall()
+            except Exception:
+                gastos = []
 
-            alquileres = conn.execute(
-                """
-                SELECT substr(NULLIF(fecha, ''), 1, 4) AS year,
-                       COUNT(*) AS total,
-                       SUM(COALESCE(precio, 0)) AS facturado
-                FROM alquileres
-                WHERE empresa_id = ?
-                  AND fecha IS NOT NULL
-                  AND length(fecha) >= 4
-                GROUP BY substr(NULLIF(fecha, ''), 1, 4)
-                ORDER BY substr(NULLIF(fecha, ''), 1, 4)
-                """,
-                (empresa_id,),
-            ).fetchall()
+            try:
+                alquileres = conn.execute(
+                    """
+                    SELECT substr(NULLIF(fecha, ''), 1, 4) AS year,
+                           COUNT(*) AS total,
+                           SUM(COALESCE(precio, 0)) AS facturado
+                    FROM alquileres
+                    WHERE empresa_id = ?
+                      AND fecha IS NOT NULL
+                      AND length(fecha) >= 4
+                    GROUP BY substr(NULLIF(fecha, ''), 1, 4)
+                    ORDER BY substr(NULLIF(fecha, ''), 1, 4)
+                    """,
+                    (empresa_id,),
+                ).fetchall()
+            except Exception:
+                alquileres = []
 
             json_response(
                 self,
