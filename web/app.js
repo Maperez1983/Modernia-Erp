@@ -1907,6 +1907,7 @@ const captacionForm = document.getElementById("captacionForm");
 const captacionFormStatus = document.getElementById("captacionFormStatus");
 const compraventaForm = document.getElementById("compraventaForm");
 const compraventaFormStatus = document.getElementById("compraventaFormStatus");
+const compraventaCerrarBtn = document.getElementById("compraventaCerrarBtn");
 const demandaForm = document.getElementById("demandaForm");
 const demandaFormStatus = document.getElementById("demandaFormStatus");
 const demandaCliente = document.getElementById("demandaCliente");
@@ -30384,8 +30385,14 @@ const loadCrmCompraventas = () => {
       return estado === "manual" || origen === "formulario";
     }).length;
     const historicoCount = rows.filter((row) => {
-      const estado = String(row.estado || "").trim().toLowerCase();
-      return estado === "importado historico";
+      const estado = normalizeSimple(row.estado || "");
+      return (
+        estado === "importado historico"
+        || estado === "cerrada positiva"
+        || estado === "cerrado positivo"
+        || estado === "cerrada"
+        || estado === "cerrado"
+      );
     }).length;
     const escrituradas = rows.filter((row) => String(row.fecha_escritura || "").trim()).length;
     const conDocumentacion = rows.filter((row) => {
@@ -30441,6 +30448,7 @@ const loadCrmCompraventas = () => {
       "num_visitas",
       "estado_documental",
       "docs",
+      "accion",
     ].forEach((col) => {
       const th = document.createElement("th");
       th.textContent = formatHeader(col);
@@ -30491,6 +30499,7 @@ const loadCrmCompraventas = () => {
         row.num_visitas,
         row.estado_documental || "-",
         null,
+        null,
       ];
       const rowColumns = [
         "direccion",
@@ -30512,6 +30521,7 @@ const loadCrmCompraventas = () => {
         "num_visitas",
         "estado_documental",
         "docs",
+        "accion",
       ];
       rowValues.forEach((value, idx) => {
         const td = document.createElement("td");
@@ -30527,6 +30537,42 @@ const loadCrmCompraventas = () => {
             const first = visitas.split("|")[0].trim();
             addDocLink(td, "Visitas", first);
           }
+        } else if (col === "accion") {
+          td.className = "pill-group";
+
+          const fichaBtn = document.createElement("button");
+          fichaBtn.type = "button";
+          fichaBtn.className = "secondary ghost button-inline";
+          fichaBtn.textContent = "Abrir ficha";
+
+          const editBtn = document.createElement("button");
+          editBtn.type = "button";
+          editBtn.className = "secondary ghost button-inline";
+          editBtn.textContent = "Editar";
+
+          fichaBtn.addEventListener("click", () => {
+            const inmuebleId = String(row.inmueble_id || "").trim();
+            if (!inmuebleId) {
+              alert("Esta compraventa no tiene inmueble vinculado.");
+              return;
+            }
+            ensureCrmOpen(() => {
+              setCrmWorkspaceView("inmuebles");
+              openInmuebleDetail(inmuebleId, "compraventas");
+            });
+          });
+
+          editBtn.addEventListener("click", () => {
+            const recordId = String(row.id || "").trim();
+            if (!recordId) {
+              alert("Id de compraventa no disponible.");
+              return;
+            }
+            openCompraventaEditor(recordId);
+          });
+
+          td.appendChild(fichaBtn);
+          td.appendChild(editBtn);
         } else {
           const formatted = formatCell(col, value);
           td.textContent = formatted === null ? "" : formatted;
@@ -30551,6 +30597,86 @@ const loadCrmCompraventas = () => {
       crmCompraventasTable.innerHTML = "<p class='muted'>No se pudieron cargar las compraventas.</p>";
       console.error("loadCrmCompraventas failed:", error);
     });
+};
+
+const resetCompraventaEditor = () => {
+  if (!compraventaForm) return;
+  compraventaForm.reset();
+  const oficinaField = compraventaForm.querySelector('[name="oficina"]');
+  if (oficinaField) {
+    oficinaField.value = "Estudio Velazquez";
+  }
+  const idField = compraventaForm.querySelector('[name="id"]');
+  if (idField) idField.value = "";
+  if (compraventaCerrarBtn) compraventaCerrarBtn.classList.add("hidden");
+  if (compraventaFormStatus) compraventaFormStatus.textContent = "";
+};
+
+const fillCompraventaForm = (row = {}) => {
+  if (!compraventaForm) return;
+  const setValue = (name, value) => {
+    const field = compraventaForm.querySelector(`[name="${name}"]`);
+    if (!field) return;
+    field.value = value === null || value === undefined ? "" : String(value);
+  };
+  setValue("id", row.id || "");
+  setValue("direccion", row.direccion || "");
+  setValue("referencia_catastral", row.referencia_catastral || "");
+  setValue("oficina", row.oficina || "Estudio Velazquez");
+  setValue("responsable_gestion", row.responsable_gestion || "");
+  setValue("agente", row.agente || "");
+  setValue("origen_inmueble", row.origen_inmueble || "");
+  setValue("fecha_encargo", row.fecha_encargo || "");
+  setValue("fecha_propuesta", row.fecha_propuesta || "");
+  setValue("fecha_escritura", row.fecha_escritura || "");
+  setValue("precio_encargo", row.precio_encargo || "");
+  setValue("precio_propuesta", row.precio_propuesta || "");
+  setValue("precio_escritura", row.precio_escritura || "");
+  setValue("honorarios", row.honorarios || "");
+  setValue("num_visitas", row.num_visitas || "");
+  setValue("propietario1_nombre", row.propietario1_nombre || "");
+  setValue("propietario1_nif", row.propietario1_nif || "");
+  setValue("propietario1_telefono", row.propietario1_telefono || "");
+  setValue("propietario1_email", row.propietario1_email || "");
+  setValue("propietario2_nombre", row.propietario2_nombre || "");
+  setValue("propietario2_nif", row.propietario2_nif || "");
+  setValue("propietario2_telefono", row.propietario2_telefono || "");
+  setValue("propietario2_email", row.propietario2_email || "");
+  setValue("contraparte1_nombre", row.contraparte1_nombre || "");
+  setValue("contraparte1_nif", row.contraparte1_nif || "");
+  setValue("contraparte1_telefono", row.contraparte1_telefono || "");
+  setValue("contraparte1_email", row.contraparte1_email || "");
+  setValue("contraparte2_nombre", row.contraparte2_nombre || "");
+  setValue("contraparte2_nif", row.contraparte2_nif || "");
+  setValue("contraparte2_telefono", row.contraparte2_telefono || "");
+  setValue("contraparte2_email", row.contraparte2_email || "");
+  setValue("doc_nota_encargo_path", row.doc_nota_encargo_path || "");
+  setValue("doc_propuesta_path", row.doc_propuesta_path || "");
+  setValue("doc_escritura_path", row.doc_escritura_path || "");
+  setValue("doc_nota_simple_path", row.doc_nota_simple_path || "");
+  setValue("doc_partes_visita_paths", row.doc_partes_visita_paths || "");
+  setValue("notas", row.notas || "");
+  if (compraventaCerrarBtn) {
+    const editing = Boolean(String(row.id || "").trim());
+    compraventaCerrarBtn.classList.toggle("hidden", !editing);
+  }
+};
+
+const openCompraventaEditor = async (recordId) => {
+  resetCompraventaEditor();
+  if (compraventaFormStatus) compraventaFormStatus.textContent = "Cargando compraventa...";
+  goToEstudioAlta("compraventa");
+  try {
+    const empresa = resolveCrmInmoEmpresa();
+    if (!empresa) throw new Error("Sin empresa inmobiliaria.");
+    const params = new URLSearchParams({ empresa_id: empresa.id, id: String(recordId || "").trim() });
+    const data = await api(`/api/compraventas?${params.toString()}`);
+    if (!data?.row) throw new Error(data?.error || "Compraventa no encontrada.");
+    fillCompraventaForm(data.row);
+    if (compraventaFormStatus) compraventaFormStatus.textContent = `Editando ${String(recordId).slice(0, 8)}…`;
+  } catch (error) {
+    if (compraventaFormStatus) compraventaFormStatus.textContent = error?.message || "No se pudo cargar.";
+  }
 };
 
 const loadCrmDemandas = () => {
@@ -42997,6 +43123,7 @@ if (crmNuevaCaptacionBtn) {
 
 if (crmNuevaCompraventaBtn) {
   crmNuevaCompraventaBtn.addEventListener("click", () => {
+    resetCompraventaEditor();
     goToEstudioAlta("compraventa");
   });
 }
@@ -49315,6 +49442,7 @@ if (compraventaForm) {
     const formData = new FormData(compraventaForm);
     const payload = Object.fromEntries(formData.entries());
     payload.empresa_nombre = resolveCrmInmoEmpresaNombre();
+    const editingId = String(payload.id || "").trim();
     try {
       const result = await submitInmobiliariaWithDuplicateCheck({
         endpoint: "/api/compraventas",
@@ -49322,10 +49450,10 @@ if (compraventaForm) {
         statusEl: compraventaFormStatus,
         successMessage: "Compraventa guardada.",
         onSuccess: () => {
-          compraventaForm.reset();
-          const oficinaField = compraventaForm.querySelector('[name="oficina"]');
-          if (oficinaField) {
-            oficinaField.value = "Estudio Velazquez";
+          if (editingId) {
+            if (compraventaFormStatus) compraventaFormStatus.textContent = "Compraventa actualizada.";
+          } else {
+            resetCompraventaEditor();
           }
           loadCrmInmuebles();
           loadCrmCompraventas();
@@ -49338,6 +49466,38 @@ if (compraventaForm) {
       if (compraventaFormStatus) {
         compraventaFormStatus.textContent = error?.message || "Error al guardar.";
       }
+    }
+  });
+}
+
+if (compraventaCerrarBtn) {
+  compraventaCerrarBtn.addEventListener("click", async () => {
+    if (!compraventaForm) return;
+    const idField = compraventaForm.querySelector('[name="id"]');
+    const recordId = String(idField?.value || "").trim();
+    if (!recordId) {
+      alert("No hay compraventa seleccionada.");
+      return;
+    }
+    if (!window.confirm("¿Cerrar positivamente esta compraventa y pasar el inmueble a histórico?")) {
+      return;
+    }
+    if (compraventaFormStatus) compraventaFormStatus.textContent = "Cerrando compraventa...";
+    try {
+      const resp = await apiPost("/api/compraventas_close", { id: recordId });
+      if (resp?.error) throw new Error(resp.error);
+      if (compraventaFormStatus) compraventaFormStatus.textContent = "Cerrada y pasada a histórico.";
+      loadCrmInmuebles();
+      loadCrmCompraventas();
+      const inmuebleId = String(resp?.inmueble_id || "").trim();
+      if (inmuebleId) {
+        ensureCrmOpen(() => {
+          setCrmWorkspaceView("inmuebles");
+          openInmuebleDetail(inmuebleId, "compraventas");
+        });
+      }
+    } catch (error) {
+      if (compraventaFormStatus) compraventaFormStatus.textContent = error?.message || "No se pudo cerrar.";
     }
   });
 }

@@ -40502,6 +40502,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         elif parsed.path == "/api/compraventas":
             try:
+                incoming_id = str(payload.get("id") or "").strip()
                 direccion = normalize_person_name(payload.get("direccion"))
                 if not direccion:
                     json_response(self, {"error": "direccion requerida"}, status=400)
@@ -40517,6 +40518,12 @@ class Handler(BaseHTTPRequestHandler):
                     ],
                     scope="compraventa",
                 )
+                if incoming_id and duplicate_matches:
+                    duplicate_matches = [
+                        item
+                        for item in duplicate_matches
+                        if not (item.get("type") == "compraventa" and str(item.get("id") or "").strip() == incoming_id)
+                    ]
                 if duplicate_matches and not allow_duplicate:
                     json_response(
                         self,
@@ -40650,20 +40657,32 @@ class Handler(BaseHTTPRequestHandler):
                 contraparte_email = " | ".join(
                     [item for item in [normalize_email(payload.get("contraparte1_email")), normalize_email(payload.get("contraparte2_email"))] if item]
                 )
-                existing = conn.execute(
-                    """
-                    SELECT id
-                    FROM operaciones_inmobiliarias
-                    WHERE empresa_id = ?
-                      AND LOWER(COALESCE(tipo_operacion, 'venta')) = 'venta'
-                      AND UPPER(COALESCE(direccion, '')) = UPPER(?)
-                      AND COALESCE(fecha_escritura, '') = COALESCE(?, '')
-                    ORDER BY updated_at DESC, created_at DESC
-                    LIMIT 1
-                    """,
-                    (empresa["id"], direccion, fecha_escritura),
-                ).fetchone()
-                record_id = existing["id"] if existing else os.urandom(16).hex()
+                existing = None
+                record_id = ""
+                if incoming_id:
+                    existing = conn.execute(
+                        "SELECT id FROM operaciones_inmobiliarias WHERE id = ? AND empresa_id = ? LIMIT 1",
+                        (incoming_id, empresa["id"]),
+                    ).fetchone()
+                    if not existing:
+                        json_response(self, {"error": "Compraventa no encontrada"}, status=404)
+                        return
+                    record_id = incoming_id
+                else:
+                    existing = conn.execute(
+                        """
+                        SELECT id
+                        FROM operaciones_inmobiliarias
+                        WHERE empresa_id = ?
+                          AND LOWER(COALESCE(tipo_operacion, 'venta')) = 'venta'
+                          AND UPPER(COALESCE(direccion, '')) = UPPER(?)
+                          AND COALESCE(fecha_escritura, '') = COALESCE(?, '')
+                        ORDER BY updated_at DESC, created_at DESC
+                        LIMIT 1
+                        """,
+                        (empresa["id"], direccion, fecha_escritura),
+                    ).fetchone()
+                    record_id = existing["id"] if existing else os.urandom(16).hex()
                 payload_json = json.dumps(
                     {
                         "origen": "formulario",
@@ -40821,6 +40840,63 @@ class Handler(BaseHTTPRequestHandler):
                     pass
                 json_response(self, {"error": f"compraventas_error: {type(exc).__name__}: {exc}"}, status=500)
                 return
+        elif parsed.path == "/api/compraventas_close":
+            record_id = str(payload.get("id") or "").strip()
+            if not record_id:
+                json_response(self, {"error": "id requerido"}, status=400)
+                return
+            row = conn.execute(
+                "SELECT * FROM operaciones_inmobiliarias WHERE id = ? AND empresa_id = ? LIMIT 1",
+                (record_id, empresa["id"]),
+            ).fetchone()
+            if not row:
+                json_response(self, {"error": "Compraventa no encontrada"}, status=404)
+                return
+            now = datetime.utcnow().isoformat()
+            try:
+                conn.execute(
+                    "UPDATE operaciones_inmobiliarias SET estado = ?, updated_at = datetime(?) WHERE id = ?",
+                    ("Cerrada positiva", now, record_id),
+                )
+            except Exception:
+                pass
+
+            inmueble_id = str(row["inmueble_id"] or "").strip()
+            if not inmueble_id:
+                try:
+                    inmueble_id = ensure_inmueble_for_compraventa(
+                        conn,
+                        empresa["id"],
+                        {
+                            "direccion": row["direccion"],
+                            "referencia_catastral": row["referencia_catastral"],
+                            "precio_encargo": row["precio_encargo"],
+                            "tipo_inmueble": "Piso",
+                        },
+                        now,
+                    )
+                    conn.execute(
+                        "UPDATE operaciones_inmobiliarias SET inmueble_id = ?, updated_at = datetime(?) WHERE id = ?",
+                        (inmueble_id, now, record_id),
+                    )
+                except Exception:
+                    inmueble_id = ""
+
+            if inmueble_id:
+                try:
+                    conn.execute(
+                        "UPDATE inmuebles SET estado = ?, updated_at = datetime(?) WHERE id = ?",
+                        ("Historico vendido", now, inmueble_id),
+                    )
+                except Exception:
+                    pass
+
+            try:
+                conn.commit()
+            except Exception:
+                pass
+            json_response(self, {"ok": True, "id": record_id, "inmueble_id": inmueble_id})
+            return
         elif parsed.path == "/api/inmueble_renovar":
             inmueble_id = str(payload.get("inmueble_id") or payload.get("id") or "").strip()
             if not inmueble_id:
@@ -48403,9 +48479,20 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/compraventas":
             empresa_id = params.get("empresa_id", [""])[0]
+            record_id = (params.get("id", [""])[0] or "").strip()
             q = params.get("q", [""])[0].strip()
             if not empresa_id:
                 json_response(self, {"error": "empresa_id requerido"}, status=400)
+                return
+            if record_id:
+                row = conn.execute(
+                    "SELECT * FROM operaciones_inmobiliarias WHERE id = ? AND empresa_id = ? LIMIT 1",
+                    (record_id, empresa_id),
+                ).fetchone()
+                if not row:
+                    json_response(self, {"error": "Compraventa no encontrada"}, status=404)
+                    return
+                json_response(self, {"row": dict(row)})
                 return
             where = ["empresa_id = ?", "LOWER(COALESCE(tipo_operacion, 'venta')) = 'venta'"]
             values = [empresa_id]

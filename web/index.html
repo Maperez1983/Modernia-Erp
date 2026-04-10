@@ -5399,6 +5399,7 @@
               <h3>Alta Compraventa · Estudio Velazquez 2012 SL</h3>
               <p class="muted">Registro operativo para ventas nuevas y carga manual de expedientes recientes.</p>
               <form id="compraventaForm">
+                <input type="hidden" name="id" />
                 <div class="form-grid inmo-grid">
                   <label class="span-2">
                     Dirección
@@ -5555,6 +5556,7 @@
                 </div>
                 <div class="form-actions">
                   <button type="submit">Guardar compraventa</button>
+                  <button type="button" id="compraventaCerrarBtn" class="secondary ghost hidden">Cerrar positivamente (Histórico)</button>
                   <span id="compraventaFormStatus" class="muted"></span>
                 </div>
               </form>
