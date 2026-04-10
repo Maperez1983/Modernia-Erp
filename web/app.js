@@ -23459,6 +23459,16 @@ const updateTableVisibility = () => {
   // Los accesos a otros verticales se hacen desde Home/Workspaces, no desde el tab-bar del vertical actual.
   if (viewTabs) {
     const allowedByContext = (() => {
+      // Deep link/contexto: `crm=inmo|seguros|fin` debe restringir el tab-bar aunque el usuario
+      // esté visualizando "Dashboard/Operativa" (porque el contexto sigue siendo el CRM vertical).
+      try {
+        const crmContext = normalizeSimple(new URLSearchParams(window.location.search || "").get("crm") || "");
+        if (crmContext === "inmo" || crmContext === "inmobiliaria") return new Set(["operativa", "crm"]);
+        if (crmContext === "seguros") return new Set(["operativa", "seguros-crm"]);
+        if (crmContext === "fin" || crmContext === "financiaciones" || crmContext === "hipotecas") {
+          return new Set(["operativa", "fin-crm", "fin-sim"]);
+        }
+      } catch {}
       if (currentTab === "crm") return new Set(["operativa", "crm"]);
       if (currentTab === "seguros-crm") return new Set(["operativa", "seguros-crm"]);
       if (currentTab === "fin-crm" || currentTab === "fin-sim") return new Set(["operativa", "fin-crm", "fin-sim"]);
