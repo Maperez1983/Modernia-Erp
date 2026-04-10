@@ -18324,6 +18324,102 @@ def ensure_tables(db_path):
         apply_schema_file(conn, ROOT.parent / "schema.sql")
     ensure_auth_sessions_table(conn)
     ensure_s3_grants_table(conn)
+    # Backfill/compat: algunos datasets legacy no tenían todavía tablas base usadas en el dashboard.
+    # Evita 500 en endpoints como `/api/dashboard` cuando se despliegan nuevas vistas.
+    try:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS movimientos (
+              id TEXT PRIMARY KEY,
+              empresa_id TEXT,
+              concepto TEXT,
+              pisos_vendidos TEXT,
+              comision REAL,
+              asesor TEXT,
+              anio INTEGER,
+              mes TEXT,
+              sl TEXT,
+              tipo TEXT,
+              created_at TEXT,
+              updated_at TEXT,
+              FOREIGN KEY (empresa_id) REFERENCES empresas(id)
+            )
+            """
+        )
+    except Exception:
+        pass
+    for col_name, col_sql in {
+        "empresa_id": "empresa_id TEXT",
+        "concepto": "concepto TEXT",
+        "pisos_vendidos": "pisos_vendidos TEXT",
+        "comision": "comision REAL",
+        "asesor": "asesor TEXT",
+        "anio": "anio INTEGER",
+        "mes": "mes TEXT",
+        "sl": "sl TEXT",
+        "tipo": "tipo TEXT",
+        "created_at": "created_at TEXT",
+        "updated_at": "updated_at TEXT",
+    }.items():
+        try:
+            ensure_column(conn, "movimientos", col_name, col_sql)
+        except Exception:
+            pass
+    try:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS alquileres (
+              id TEXT PRIMARY KEY,
+              empresa_id TEXT,
+              fecha TEXT,
+              direccion TEXT,
+              propietario TEXT,
+              telefono TEXT,
+              precio REAL,
+              seguro TEXT,
+              hacienda TEXT,
+              comision TEXT,
+              importe_comision REAL,
+              total REAL,
+              inquilino TEXT,
+              telefono2 TEXT,
+              agente TEXT,
+              numero_alquileres REAL,
+              tipo TEXT,
+              oficina TEXT,
+              created_at TEXT,
+              updated_at TEXT,
+              FOREIGN KEY (empresa_id) REFERENCES empresas(id)
+            )
+            """
+        )
+    except Exception:
+        pass
+    for col_name, col_sql in {
+        "empresa_id": "empresa_id TEXT",
+        "fecha": "fecha TEXT",
+        "direccion": "direccion TEXT",
+        "propietario": "propietario TEXT",
+        "telefono": "telefono TEXT",
+        "precio": "precio REAL",
+        "seguro": "seguro TEXT",
+        "hacienda": "hacienda TEXT",
+        "comision": "comision TEXT",
+        "importe_comision": "importe_comision REAL",
+        "total": "total REAL",
+        "inquilino": "inquilino TEXT",
+        "telefono2": "telefono2 TEXT",
+        "agente": "agente TEXT",
+        "numero_alquileres": "numero_alquileres REAL",
+        "tipo": "tipo TEXT",
+        "oficina": "oficina TEXT",
+        "created_at": "created_at TEXT",
+        "updated_at": "updated_at TEXT",
+    }.items():
+        try:
+            ensure_column(conn, "alquileres", col_name, col_sql)
+        except Exception:
+            pass
     ensure_column(conn, "empresas", "logo_url", "logo_url TEXT")
     ensure_column(conn, "empresas", "razon_social", "razon_social TEXT")
     ensure_column(conn, "empresas", "nif", "nif TEXT")
