@@ -18420,6 +18420,17 @@ def ensure_tables(db_path):
             ensure_column(conn, "alquileres", col_name, col_sql)
         except Exception:
             pass
+    # Compat: dashboards y vistas CRM agrupan por `created_at/updated_at`. En algunos datasets legacy
+    # estas columnas no existían aunque la tabla sí (CREATE TABLE IF NOT EXISTS no altera).
+    for table_name in ("captaciones", "inmuebles", "operaciones_inmobiliarias"):
+        for col_name, col_sql in {
+            "created_at": "created_at TEXT",
+            "updated_at": "updated_at TEXT",
+        }.items():
+            try:
+                ensure_column(conn, table_name, col_name, col_sql)
+            except Exception:
+                pass
     ensure_column(conn, "empresas", "logo_url", "logo_url TEXT")
     ensure_column(conn, "empresas", "razon_social", "razon_social TEXT")
     ensure_column(conn, "empresas", "nif", "nif TEXT")
