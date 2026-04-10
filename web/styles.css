@@ -2790,6 +2790,31 @@ body.crm-fin #companySummary {
   background: rgba(255, 255, 255, 0.92);
 }
 
+button.workspace-mini-kpi {
+  font: inherit;
+  color: inherit;
+  text-align: left;
+}
+
+.workspace-mini-kpi--link {
+  cursor: pointer;
+}
+
+.workspace-mini-kpi--link:hover {
+  border-color: rgba(60, 110, 113, 0.28);
+  box-shadow: 0 10px 24px rgba(20, 34, 31, 0.08);
+  transform: translateY(-1px);
+}
+
+.workspace-mini-kpi--link:active {
+  transform: translateY(0);
+}
+
+.workspace-mini-kpi--link:focus-visible {
+  outline: 2px solid rgba(60, 110, 113, 0.55);
+  outline-offset: 2px;
+}
+
 .workspace-mini-kpi span {
   color: var(--muted);
   font-size: 12px;

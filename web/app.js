@@ -6147,12 +6147,24 @@ const renderWorkspaceInmoOverview = (payload = {}) => {
       : `<p class="muted">${emptyText}</p>`;
   workspaceInmoOverview.innerHTML = `
     <div class="workspace-gestoria-grid workspace-mini-kpis">
-      <div class="workspace-mini-kpi"><span>Inmuebles</span><strong>${numberFormatter.format(Number(counts.inmuebles || 0))}</strong></div>
-      <div class="workspace-mini-kpi"><span>Pipeline activo</span><strong>${numberFormatter.format(Number(counts.captaciones_activas || 0))}</strong></div>
-      <div class="workspace-mini-kpi"><span>Compraventas</span><strong>${numberFormatter.format(Number(counts.compraventas || 0))}</strong></div>
-      <div class="workspace-mini-kpi"><span>Volumen cierre</span><strong>${formatEuros(Number(counts.volumen_cierre || 0))}</strong></div>
-      <div class="workspace-mini-kpi"><span>Visitas programadas</span><strong>${numberFormatter.format(Number(counts.visitas_programadas || 0))}</strong></div>
-      <div class="workspace-mini-kpi"><span>Demandas activas</span><strong>${numberFormatter.format(Number(counts.demandas_activas || 0))}</strong></div>
+      <button type="button" class="workspace-mini-kpi workspace-mini-kpi--link" data-open-crm="inmo" data-open-crm-view="inmuebles">
+        <span>Inmuebles</span><strong>${numberFormatter.format(Number(counts.inmuebles || 0))}</strong>
+      </button>
+      <button type="button" class="workspace-mini-kpi workspace-mini-kpi--link" data-open-crm="inmo" data-open-crm-view="captaciones">
+        <span>Pipeline activo</span><strong>${numberFormatter.format(Number(counts.captaciones_activas || 0))}</strong>
+      </button>
+      <button type="button" class="workspace-mini-kpi workspace-mini-kpi--link" data-open-crm="inmo" data-open-crm-view="compraventas">
+        <span>Compraventas</span><strong>${numberFormatter.format(Number(counts.compraventas || 0))}</strong>
+      </button>
+      <button type="button" class="workspace-mini-kpi workspace-mini-kpi--link" data-open-crm="inmo" data-open-crm-view="compraventas">
+        <span>Volumen cierre</span><strong>${formatEuros(Number(counts.volumen_cierre || 0))}</strong>
+      </button>
+      <button type="button" class="workspace-mini-kpi workspace-mini-kpi--link" data-open-crm="inmo" data-open-crm-view="visitas" data-visitas-estado="pendiente">
+        <span>Visitas programadas</span><strong>${numberFormatter.format(Number(counts.visitas_programadas || 0))}</strong>
+      </button>
+      <button type="button" class="workspace-mini-kpi workspace-mini-kpi--link" data-open-crm="inmo" data-open-crm-view="demandas" data-demandas-estado="activa">
+        <span>Demandas activas</span><strong>${numberFormatter.format(Number(counts.demandas_activas || 0))}</strong>
+      </button>
     </div>
     <div class="workspace-gestoria-columns">
       <div class="workspace-gestoria-card">
@@ -6221,6 +6233,23 @@ const renderWorkspaceInmoOverview = (payload = {}) => {
       </div>
     </div>
   `;
+
+  workspaceInmoOverview.querySelectorAll(".workspace-mini-kpi[data-open-crm='inmo']").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const view = String(btn.dataset.openCrmView || "resumen").trim();
+      const demandaEstado = String(btn.dataset.demandasEstado || "").trim();
+      const visitaEstado = String(btn.dataset.visitasEstado || "").trim();
+      ensureCrmOpen(() => {
+        if (view === "demandas" && demandaEstado && crmDemandaEstadoFilter) {
+          crmDemandaEstadoFilter.value = demandaEstado;
+        }
+        if (view === "visitas" && visitaEstado && crmVisitaEstadoFilter) {
+          crmVisitaEstadoFilter.value = visitaEstado;
+        }
+        setCrmWorkspaceView(view);
+      });
+    });
+  });
 };
 
 const renderWorkspaceServiceDesks = (payload = {}) => {
