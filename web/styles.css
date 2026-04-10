@@ -3385,6 +3385,19 @@ tr.is-selected td {
   outline-offset: 2px;
 }
 
+/* CRM Inmobiliaria: dashboard compacto (solo KPIs principales). */
+body.crm-context-inmo #crmViewResumen .crm-summary-grid {
+  display: none;
+}
+
+.crm-resumen-compact-note {
+  display: none;
+}
+
+body.crm-context-inmo .crm-resumen-compact-note {
+  display: block;
+}
+
 .kpi-value {
   font-size: 28px;
   font-weight: 600;

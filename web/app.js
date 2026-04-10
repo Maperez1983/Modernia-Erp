@@ -23442,6 +23442,15 @@ const updateTableVisibility = () => {
   if (explorerSection) {
     explorerSection.classList.toggle("operativa-mode", currentTab === "operativa");
   }
+  // Contexto CRM: usado para simplificar el dashboard (y para evitar mezclar verticales).
+  let crmContext = "";
+  try {
+    crmContext = normalizeSimple(new URLSearchParams(window.location.search || "").get("crm") || "");
+  } catch {
+    crmContext = "";
+  }
+  document.body.classList.toggle("crm-context-inmo", crmContext === "inmo" || crmContext === "inmobiliaria");
+
   const isClientePage = state.currentPage === "cliente";
   const isClientesModule = state.currentModule === "clientes";
   const isServiceCrm = ["crm", "gestoria-crm", "gestoria-docs", "seguros-crm", "fin-crm", "gestoria-fact", "gestoria-conta", "gestoria-agenda", "gestoria-dash"].includes(currentTab);
@@ -23462,7 +23471,6 @@ const updateTableVisibility = () => {
       // Deep link/contexto: `crm=inmo|seguros|fin` debe restringir el tab-bar aunque el usuario
       // esté visualizando "Dashboard/Operativa" (porque el contexto sigue siendo el CRM vertical).
       try {
-        const crmContext = normalizeSimple(new URLSearchParams(window.location.search || "").get("crm") || "");
         if (crmContext === "inmo" || crmContext === "inmobiliaria") return new Set(["operativa", "crm"]);
         if (crmContext === "seguros") return new Set(["operativa", "seguros-crm"]);
         if (crmContext === "fin" || crmContext === "financiaciones" || crmContext === "hipotecas") {
