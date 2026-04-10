@@ -29946,12 +29946,24 @@ const buildCrmInmueblesCatalogNode = (rows = []) => {
   rows.forEach((row) => {
     const stageKey = normalizeSimple(row?.estado || "");
     const early = !stageKey || stageKey === "inmueble" || stageKey === "noticia";
+    const encargoPrice = Number(row.precio_encargo || 0) || 0;
+    const ownerPrice = Number(row.precio_pedido_cliente || 0) || 0;
+    const valoracion = Number(row.precio_valoracion || 0) || 0;
     const primaryPrice = early
-      ? (Number(row.precio_pedido_cliente || 0) || Number(row.precio_objetivo || 0) || 0)
-      : (Number(row.precio_encargo || 0) || Number(row.precio_objetivo || 0) || Number(row.precio_pedido_cliente || 0) || 0);
+      ? (ownerPrice || Number(row.precio_objetivo || 0) || 0)
+      : (encargoPrice || Number(row.precio_objetivo || 0) || ownerPrice || 0);
+    const primaryLabel = early ? "Propietario" : "Encargo";
+    const pctFromDb = Number(row.desviacion_pct);
+    const deviationPct = Number.isFinite(pctFromDb) && pctFromDb !== 0
+      ? pctFromDb
+      : (primaryPrice > 0 && valoracion > 0 ? ((valoracion - primaryPrice) / primaryPrice) * 100 : 0);
+    const deviationClass = deviationPct > 0.05 ? "is-pos" : deviationPct < -0.05 ? "is-neg" : "is-flat";
     const item = document.createElement("button");
     item.type = "button";
     item.className = "inmueble-catalog-card";
+    const primaryText = primaryPrice ? `${primaryLabel} ${formatDisplayCell("precio_objetivo", primaryPrice)}` : "Precio pendiente";
+    const valoracionText = valoracion ? `Valoración ${formatDisplayCell("precio_valoracion", valoracion)}` : "";
+    const deviationText = primaryPrice && valoracion ? `Desv ${deviationPct.toFixed(1)}%` : "";
     item.innerHTML = `
       <div class="inmueble-catalog-head">
         <div>
@@ -29966,7 +29978,11 @@ const buildCrmInmueblesCatalogNode = (rows = []) => {
         <span>${row.habitaciones ? `${row.habitaciones} hab.` : "hab. n/d"}</span>
         <span>${row.banos ? `${row.banos} baños` : "baños n/d"}</span>
       </div>
-      <div class="inmueble-catalog-price">${primaryPrice ? formatDisplayCell("precio_objetivo", primaryPrice) : "Precio pendiente"}</div>
+      <div class="inmueble-catalog-pricing">
+        <div class="inmueble-catalog-price">${primaryText}</div>
+        ${valoracionText ? `<div class="inmueble-catalog-subprice">${valoracionText}</div>` : ""}
+        ${deviationText ? `<span class="inmueble-catalog-deviation ${deviationClass}">${deviationText}</span>` : ""}
+      </div>
       <div class="inmueble-catalog-owners">${row.propietarios || "Sin propietarios enlazados"}</div>
     `;
     item.addEventListener("click", () => openInmuebleDetail(row.id));

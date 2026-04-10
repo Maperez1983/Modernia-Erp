@@ -48486,6 +48486,10 @@ class Handler(BaseHTTPRequestHandler):
                   i.habitaciones,
                   i.banos,
                   i.precio_objetivo,
+                  i.precio_encargo,
+                  i.precio_pedido_cliente,
+                  i.precio_valoracion,
+                  i.desviacion_pct,
                   i.estado,
                   GROUP_CONCAT(c.nombre, ' | ') AS propietarios
                 FROM inmuebles i
