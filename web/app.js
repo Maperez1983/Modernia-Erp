@@ -27750,9 +27750,22 @@ const renderTableInto = (data, container, infoEl, label) => {
     "estado_renovacion",
     "cliente_id",
   ];
+  // Pipeline Inmobiliaria: vista compacta por defecto (evita tablas interminables).
+  const pipelineCompactColumns = [
+    "direccion",
+    "propietario",
+    "etapa",
+    "proxima_accion",
+    "fecha_contacto",
+    "responsable",
+    "precio_pedido_cliente",
+    "precio_encargo",
+  ];
   const displayColumns =
     label === "Seguros"
       ? segurosCompactColumns.filter((col) => columns.includes(col))
+      : (label === "Pipeline" || label === "Captaciones")
+        ? pipelineCompactColumns.filter((col) => columns.includes(col))
       : columns.filter((col) => col !== "id" && col !== "poliza_key" && col !== "poliza_url");
   const idIndex = columns.indexOf("id");
   const clienteIdIndex = columns.indexOf("cliente_id");
