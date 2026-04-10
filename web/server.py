@@ -12688,7 +12688,8 @@ def ensure_inmueble_for_compraventa(conn, empresa_id, payload, now):
             referencia_catastral or None,
             payload.get("tipo_inmueble") or "Piso",
             precio_objetivo,
-            "Inmueble",
+            # Compraventas: cierres ya terminados -> histórico (Vendido).
+            "Vendido",
             now,
             now,
         ),
@@ -40821,7 +40822,9 @@ class Handler(BaseHTTPRequestHandler):
                     except Exception:
                         pass
                 else:
-                    inmueble_id = ensure_inmueble_for_compraventa(conn, empresa["id"], payload, now)
+                    # Compraventas: por defecto no creamos un inmueble nuevo (son operaciones ya cerradas).
+                    # Si hay duplicado, el frontend propondrá vincular la operación al inmueble existente.
+                    inmueble_id = ""
                 if not contraparte1_id and not contraparte2_id:
                     buyer = resolve_inmobiliaria_contact_candidate(
                         conn,
@@ -40840,8 +40843,14 @@ class Handler(BaseHTTPRequestHandler):
                         payload["contraparte1_telefono"] = buyer.get("telefono")
                     if buyer.get("email") and not payload.get("contraparte1_email"):
                         payload["contraparte1_email"] = buyer.get("email")
-                ensure_inmueble_propietario_link(conn, inmueble_id, propietario1_id, now)
-                ensure_inmueble_propietario_link(conn, inmueble_id, propietario2_id, now)
+                if inmueble_id:
+                    ensure_inmueble_propietario_link(conn, inmueble_id, propietario1_id, now)
+                    ensure_inmueble_propietario_link(conn, inmueble_id, propietario2_id, now)
+                    # Al vincular una compraventa, cerramos el inmueble como vendido.
+                    try:
+                        sync_inmueble_stage_for_action(conn, inmueble_id, "vendido", now)
+                    except Exception:
+                        pass
 
                 fecha_encargo = (payload.get("fecha_encargo") or "").strip()
                 fecha_propuesta = (payload.get("fecha_propuesta") or "").strip()
@@ -40926,7 +40935,7 @@ class Handler(BaseHTTPRequestHandler):
                     payload.get("expediente_hash"),
                     parse_iso_date(fecha_operacion).year if parse_iso_date(fecha_operacion) else None,
                     iso_month_label(fecha_operacion),
-                    inmueble_id,
+                    inmueble_id or None,
                     direccion,
                     re.sub(r"[^A-Z0-9]", "", str(payload.get("referencia_catastral") or "").upper()) or None,
                     propietario1_id,
