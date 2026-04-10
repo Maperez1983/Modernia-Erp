@@ -12658,6 +12658,8 @@ def ensure_inmueble_for_compraventa(conn, empresa_id, payload, now):
     precio_objetivo = parse_money_value(payload.get("precio_encargo")) or None
     if inmueble:
         updates = {}
+        if "tipo_operacion" in inmueble.keys() and not str(inmueble.get("tipo_operacion") or "").strip():
+            updates["tipo_operacion"] = "venta"
         if referencia_catastral and not str(inmueble["referencia_catastral"] or "").strip():
             updates["referencia_catastral"] = referencia_catastral
         if direccion and not str(inmueble["direccion"] or "").strip():
@@ -12675,7 +12677,7 @@ def ensure_inmueble_for_compraventa(conn, empresa_id, payload, now):
     conn.execute(
         """
         INSERT INTO inmuebles (
-          id, empresa_id, referencia, direccion, referencia_catastral, tipo_inmueble, precio_objetivo, estado, created_at, updated_at
+          id, empresa_id, referencia, direccion, referencia_catastral, tipo_operacion, tipo_inmueble, precio_objetivo, estado, created_at, updated_at
         ) VALUES (
           ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
         )
@@ -12686,9 +12688,10 @@ def ensure_inmueble_for_compraventa(conn, empresa_id, payload, now):
             slugify_text(direccion or referencia_catastral or inmueble_id),
             direccion or None,
             referencia_catastral or None,
+            "venta",
             payload.get("tipo_inmueble") or "Piso",
             precio_objetivo,
-            "Compraventa",
+            "Historico vendido",
             now,
             now,
         ),
@@ -16540,6 +16543,7 @@ def detect_inmobiliaria_duplicates(conn, empresa_id, *, direccion="", referencia
           i.direccion,
           i.referencia,
           i.referencia_catastral,
+          i.estado,
           cpt.id AS captacion_id,
           cpt.propietario,
           cpt.etapa,
@@ -16580,6 +16584,7 @@ def detect_inmobiliaria_duplicates(conn, empresa_id, *, direccion="", referencia
                 "subtype": "captacion" if row["captacion_id"] else "inmueble",
                 "propietario": row["propietario"] or "",
                 "referencia_catastral": row["referencia_catastral"] or "",
+                "estado": row["estado"] or "",
                 "reasons": reasons,
             }
         )
@@ -41037,6 +41042,170 @@ class Handler(BaseHTTPRequestHandler):
                     pass
                 json_response(self, {"error": f"compraventas_error: {type(exc).__name__}: {exc}"}, status=500)
                 return
+        elif parsed.path == "/api/inmueble_renovar":
+            inmueble_id = str(payload.get("inmueble_id") or payload.get("id") or "").strip()
+            if not inmueble_id:
+                json_response(self, {"error": "inmueble_id requerido"}, status=400)
+                return
+            inmueble = conn.execute(
+                "SELECT * FROM inmuebles WHERE id = ? AND empresa_id = ? LIMIT 1",
+                (inmueble_id, empresa["id"]),
+            ).fetchone()
+            if not inmueble:
+                json_response(self, {"error": "Inmueble no encontrado"}, status=404)
+                return
+            current_estado = str(inmueble.get("estado") if isinstance(inmueble, dict) else inmueble["estado"] or "").strip()
+            estado_norm = normalize_lookup_text(current_estado).lower()
+            is_closed = estado_norm in {"vendido", "historico vendido", "cerrado negativamente"} or ("vend" in estado_norm) or ("cerrado" in estado_norm)
+            if not is_closed:
+                json_response(
+                    self,
+                    {"error": "El inmueble ya está activo. Abre la ficha existente para continuar."},
+                    status=400,
+                )
+                return
+
+            # En la renovación NO se duplica el inmueble: se reabre y se crea una nueva captación vinculada
+            # para volver a operar sobre el mismo expediente, manteniendo el histórico (compraventas/operaciones).
+            updates = {}
+            # Completa datos base si estaban vacíos (no pisa lo existente).
+            for key in (
+                "tipo_operacion",
+                "referencia_catastral",
+                "direccion",
+                "direccion_numero",
+                "codigo_postal",
+                "poblacion",
+                "provincia",
+                "zona",
+                "tipo_inmueble",
+                "subtipologia",
+                "m2",
+                "habitaciones",
+                "banos",
+                "precio_objetivo",
+                "asesor",
+                "responsable",
+            ):
+                if key not in payload:
+                    continue
+                incoming = payload.get(key)
+                if incoming is None:
+                    continue
+                incoming_str = str(incoming).strip()
+                if not incoming_str:
+                    continue
+                current_value = ""
+                try:
+                    current_value = str(inmueble.get(key) or "").strip() if isinstance(inmueble, dict) else str(inmueble[key] or "").strip()
+                except Exception:
+                    current_value = ""
+                if current_value:
+                    continue
+                updates[key] = incoming_str
+            # Normaliza tipo_operacion si viene.
+            if "tipo_operacion" in updates:
+                raw_tipo = str(updates.get("tipo_operacion") or "").strip().lower()
+                if raw_tipo in {"arrendamiento", "renta"}:
+                    raw_tipo = "alquiler"
+                if raw_tipo not in {"venta", "alquiler"}:
+                    raw_tipo = "venta"
+                updates["tipo_operacion"] = raw_tipo
+            # Normaliza refcat.
+            if "referencia_catastral" in updates:
+                updates["referencia_catastral"] = re.sub(r"[^A-Z0-9]", "", str(updates["referencia_catastral"] or "").upper()) or None
+            # Parseos numéricos básicos.
+            if "m2" in updates:
+                updates["m2"] = parse_optional_float(updates.get("m2"))
+            for k in ("habitaciones", "banos"):
+                if k in updates:
+                    updates[k] = parse_optional_int(updates.get(k))
+            if "precio_objetivo" in updates:
+                updates["precio_objetivo"] = parse_optional_float(updates.get("precio_objetivo"))
+
+            if updates:
+                set_clause = ", ".join([f"{key} = ?" for key in updates])
+                conn.execute(
+                    f"UPDATE inmuebles SET {set_clause}, updated_at = datetime(?) WHERE id = ?",
+                    (*list(updates.values()), now, inmueble_id),
+                )
+
+            # Reabre el inmueble.
+            conn.execute(
+                "UPDATE inmuebles SET estado = ?, updated_at = datetime(?) WHERE id = ?",
+                ("Inmueble", now, inmueble_id),
+            )
+            captacion_id = os.urandom(16).hex()
+            inm_row = conn.execute("SELECT * FROM inmuebles WHERE id = ? LIMIT 1", (inmueble_id,)).fetchone()
+            conn.execute(
+                """
+                INSERT INTO captaciones (
+                  id, empresa_id, inmueble_id, propietario, tipo_inmueble, direccion, codigo_postal, poblacion, provincia,
+                  zona, m2, anio_construccion, habitaciones, banos, precio_objetivo, precio_valoracion, etapa, situacion_comercial,
+                  responsable, asesor, created_at, updated_at
+                ) VALUES (
+                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                )
+                """,
+                (
+                    captacion_id,
+                    empresa["id"],
+                    inmueble_id,
+                    None,
+                    inm_row["tipo_inmueble"] if inm_row else None,
+                    inm_row["direccion"] if inm_row else None,
+                    inm_row["codigo_postal"] if inm_row else None,
+                    inm_row["poblacion"] if inm_row else None,
+                    inm_row["provincia"] if inm_row else None,
+                    inm_row["zona"] if inm_row else None,
+                    inm_row["m2"] if inm_row else None,
+                    (inm_row["anio_construccion"] if inm_row and "anio_construccion" in inm_row.keys() else None),
+                    inm_row["habitaciones"] if inm_row else None,
+                    inm_row["banos"] if inm_row else None,
+                    inm_row["precio_objetivo"] if inm_row else None,
+                    inm_row["precio_valoracion"] if inm_row else None,
+                    "Inmueble",
+                    "Inmueble",
+                    (inm_row["responsable"] if inm_row else None),
+                    (inm_row["asesor"] if inm_row else None),
+                    now,
+                    now,
+                ),
+            )
+            try:
+                session = getattr(self, "auth_session", None) or self._current_session()
+            except Exception:
+                session = None
+            try:
+                log_crm_stage_event(
+                    conn,
+                    empresa["id"],
+                    inmueble_id,
+                    captacion_id,
+                    "Inmueble",
+                    now=now,
+                    from_etapa=current_estado,
+                    session=session,
+                    responsable=str((inm_row["responsable"] if inm_row else "") or "").strip(),
+                )
+            except Exception:
+                pass
+            try:
+                audit_event(
+                    conn,
+                    empresa["id"],
+                    "inmueble",
+                    inmueble_id,
+                    "Renovar ficha inmueble",
+                    usuario=payload.get("usuario"),
+                    detalles={"from_estado": current_estado, "to_estado": "Inmueble", "captacion_id": captacion_id},
+                    now=now,
+                )
+            except Exception:
+                pass
+            conn.commit()
+            json_response(self, {"ok": True, "inmueble_id": inmueble_id, "captacion_id": captacion_id})
+            return
         elif parsed.path == "/api/captaciones":
             try:
                 propietarios = payload.get("propietarios") or []
@@ -49225,6 +49394,31 @@ class Handler(BaseHTTPRequestHandler):
             if not inmueble_id:
                 json_response(self, {"error": "inmueble_id requerido"}, status=400)
                 return
+            oper_rows = conn.execute(
+                """
+                SELECT
+                  id,
+                  tipo_operacion,
+                  estado,
+                  fecha_encargo,
+                  fecha_propuesta,
+                  fecha_contrato,
+                  fecha_escritura,
+                  fecha_operacion,
+                  precio_encargo,
+                  precio_propuesta,
+                  precio_contrato,
+                  precio_escritura,
+                  precio_renta,
+                  created_at,
+                  updated_at
+                FROM operaciones_inmobiliarias
+                WHERE inmueble_id = ?
+                ORDER BY COALESCE(NULLIF(fecha_escritura, ''), NULLIF(fecha_operacion, ''), updated_at, created_at) DESC
+                LIMIT 50
+                """,
+                (inmueble_id,),
+            ).fetchall()
             docs_rows = conn.execute(
                 """
                 SELECT id, nombre, tipo, estado, version, url, created_at, updated_at
@@ -49254,6 +49448,43 @@ class Handler(BaseHTTPRequestHandler):
                 (inmueble_id, inmueble_id, inmueble_id),
             ).fetchall()
             items = []
+            for row in oper_rows:
+                try:
+                    tipo_op = str(row.get("tipo_operacion") or row["tipo_operacion"] or "").strip().lower()
+                except Exception:
+                    tipo_op = ""
+                label = "Compraventa" if tipo_op != "alquiler" else "Alquiler"
+                try:
+                    fecha = (
+                        row.get("fecha_escritura")
+                        or row.get("fecha_operacion")
+                        or row.get("fecha_contrato")
+                        or row.get("fecha_propuesta")
+                        or row.get("fecha_encargo")
+                        or ""
+                    )
+                except Exception:
+                    try:
+                        fecha = row["fecha_escritura"] or row["fecha_operacion"] or row["fecha_contrato"] or row["fecha_propuesta"] or row["fecha_encargo"] or ""
+                    except Exception:
+                        fecha = ""
+                try:
+                    precio = row.get("precio_escritura") or row.get("precio_contrato") or row.get("precio_propuesta") or row.get("precio_renta") or row.get("precio_encargo")
+                except Exception:
+                    try:
+                        precio = row["precio_escritura"] or row["precio_contrato"] or row["precio_propuesta"] or row["precio_renta"] or row["precio_encargo"]
+                    except Exception:
+                        precio = None
+                items.append(
+                    {
+                        "kind": "operacion",
+                        "id": row["id"],
+                        "title": f"{label} (histórico)",
+                        "status": row["estado"] or "Histórico",
+                        "meta": {"responsable": "Histórico", "resultado": f"{fecha} · {precio}" if (fecha or precio) else ""},
+                        "date": row["updated_at"] or row["created_at"] or fecha,
+                    }
+                )
             for row in docs_rows:
                 items.append({
                     "kind": "documento",

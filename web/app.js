@@ -30222,9 +30222,10 @@ const loadCrmInmuebles = () => {
   };
   const estadoToBucket = (raw) => {
     const key = normalizeSimple(raw || "");
-    if (key === "historico vendido") return "vendido";
-    if (key === "vendido") return "vendido";
-    if (key === "cerrado negativamente") return "cerrado";
+    if (key.includes("historico") && key.includes("vend")) return "vendido";
+    if (key.includes("comprav")) return "vendido";
+    if (key.includes("vend")) return "vendido";
+    if (key.includes("cerrado")) return "cerrado";
     return "activo";
   };
   const filterRowsByEstado = (rows = [], filterKey = "activos") => {
@@ -48681,12 +48682,101 @@ const formatInmobiliariaDuplicateSummary = (duplicates = []) =>
     })
     .join("\n");
 
+const canRenewInmuebleDuplicate = (item = {}) => {
+  const key = normalizeSimple(item?.estado || item?.etapa || "");
+  if (!key) return false;
+  if (key.includes("historico")) return true;
+  if (key.includes("vend")) return true;
+  if (key.includes("cerrado")) return true;
+  return false;
+};
+
+const openInmobiliariaDuplicateModal = (duplicates = [], { title = "Posible duplicado detectado" } = {}) =>
+  new Promise((resolve) => {
+    const items = Array.isArray(duplicates) ? duplicates.filter((d) => d && d.type === "inmueble") : [];
+    if (!items.length) {
+      resolve({ action: "force" });
+      return;
+    }
+    const modal = document.createElement("div");
+    modal.className = "modal";
+    modal.innerHTML = `
+      <div class="modal-content">
+        <div class="modal-header">
+          <div>
+            <h3 style="margin:0;">${escapeHtml(title)}</h3>
+            <p class="muted" style="margin:4px 0 0;">Selecciona un inmueble existente o fuerza el guardado como duplicado.</p>
+          </div>
+          <button type="button" class="ghost" data-close>✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="crm-focus-list" style="gap:8px;" data-list></div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="secondary ghost" data-cancel>Cancelar</button>
+          <button type="button" class="secondary" data-force>Guardar duplicado</button>
+          <button type="button" class="secondary" data-open>Abrir ficha</button>
+          <button type="button" data-renew>Renovar ficha</button>
+        </div>
+      </div>
+    `;
+    const close = (result) => {
+      document.body.classList.remove("modal-open");
+      modal.remove();
+      resolve(result);
+    };
+    const list = modal.querySelector("[data-list]");
+    let selectedId = String(items[0]?.id || "").trim();
+    items.slice(0, 10).forEach((item, idx) => {
+      const id = String(item?.id || "").trim();
+      const reasons = Array.isArray(item?.reasons) ? item.reasons.join(", ") : "";
+      const estado = String(item?.estado || item?.etapa || "").trim();
+      const card = document.createElement("label");
+      card.className = "crm-focus-link";
+      card.style.display = "grid";
+      card.style.gridTemplateColumns = "18px 1fr";
+      card.style.gap = "10px";
+      card.style.alignItems = "start";
+      card.innerHTML = `
+        <input type="radio" name="dup_choice" ${idx === 0 ? "checked" : ""} />
+        <div>
+          <strong>${escapeHtml(item?.label || item?.direccion || "Inmueble existente")}</strong>
+          <span>${escapeHtml([estado, reasons].filter(Boolean).join(" · ") || "Registro existente")}</span>
+        </div>
+      `;
+      card.addEventListener("change", () => {
+        selectedId = id;
+        const selectedItem = items.find((d) => String(d?.id || "").trim() === selectedId) || {};
+        const renewBtn = modal.querySelector("[data-renew]");
+        if (renewBtn) {
+          renewBtn.disabled = !canRenewInmuebleDuplicate(selectedItem);
+          renewBtn.title = renewBtn.disabled ? "Solo se puede renovar un inmueble vendido/cerrado/histórico." : "";
+        }
+      });
+      list?.appendChild(card);
+    });
+    const renewBtn = modal.querySelector("[data-renew]");
+    if (renewBtn) {
+      const selectedItem = items.find((d) => String(d?.id || "").trim() === selectedId) || {};
+      renewBtn.disabled = !canRenewInmuebleDuplicate(selectedItem);
+      renewBtn.title = renewBtn.disabled ? "Solo se puede renovar un inmueble vendido/cerrado/histórico." : "";
+    }
+    modal.querySelector("[data-close]")?.addEventListener("click", () => close({ action: "cancel" }));
+    modal.querySelector("[data-cancel]")?.addEventListener("click", () => close({ action: "cancel" }));
+    modal.querySelector("[data-force]")?.addEventListener("click", () => close({ action: "force" }));
+    modal.querySelector("[data-open]")?.addEventListener("click", () => close({ action: "open", inmuebleId: selectedId }));
+    modal.querySelector("[data-renew]")?.addEventListener("click", () => close({ action: "renew", inmuebleId: selectedId }));
+    document.body.appendChild(modal);
+    document.body.classList.add("modal-open");
+  });
+
 const submitInmobiliariaWithDuplicateCheck = async ({
   endpoint,
   payload,
   statusEl,
   successMessage,
   onSuccess,
+  duplicateMode = "",
 }) => {
   const postPayload = async (allowDuplicate = false) => {
     const res = await fetch(endpoint, {
@@ -48708,19 +48798,57 @@ const submitInmobiliariaWithDuplicateCheck = async ({
 
   let { res, data } = await postPayload(false);
   if (res.status === 409 && data?.code === "duplicate_detected") {
-    const duplicateText = formatInmobiliariaDuplicateSummary(data?.duplicates || []);
-    if (statusEl) {
-      statusEl.textContent = duplicateText
-        ? `Posible duplicado detectado. ${duplicateText.replace(/\n/g, " | ")}`
-        : "Posible duplicado detectado.";
+    if (duplicateMode === "captacion") {
+      const choice = await openInmobiliariaDuplicateModal(data?.duplicates || []);
+      if (choice?.action === "cancel") {
+        return { duplicateCancelled: true, data };
+      }
+      if (choice?.action === "open" && choice?.inmuebleId) {
+        if (statusEl) statusEl.textContent = "Duplicado detectado: abriendo la ficha existente…";
+        try {
+          openInmuebleDetail(choice.inmuebleId, "captaciones");
+        } catch {}
+        if (typeof onSuccess === "function") onSuccess({ duplicated: true, opened: true, inmueble_id: choice.inmuebleId });
+        return { ok: true, handledDuplicate: true, action: "open", inmueble_id: choice.inmuebleId };
+      }
+      if (choice?.action === "renew" && choice?.inmuebleId) {
+        if (statusEl) statusEl.textContent = "Renovando ficha…";
+        const renewRes = await fetch("/api/inmueble_renovar", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...payload, inmueble_id: choice.inmuebleId }),
+        });
+        const renewData = await renewRes.json().catch(() => ({}));
+        if (!renewRes.ok || renewData?.error) {
+          throw new Error(renewData?.error || `HTTP ${renewRes.status}`);
+        }
+        if (statusEl) statusEl.textContent = "Ficha renovada.";
+        try {
+          openInmuebleDetail(renewData.inmueble_id || choice.inmuebleId, "captaciones");
+        } catch {}
+        if (typeof onSuccess === "function") onSuccess({ renewed: true, ...renewData });
+        return { ok: true, handledDuplicate: true, action: "renew", ...renewData };
+      }
+      if (choice?.action === "force") {
+        ({ res, data } = await postPayload(true));
+      } else {
+        return { duplicateCancelled: true, data };
+      }
+    } else {
+      const duplicateText = formatInmobiliariaDuplicateSummary(data?.duplicates || []);
+      if (statusEl) {
+        statusEl.textContent = duplicateText
+          ? `Posible duplicado detectado. ${duplicateText.replace(/\n/g, " | ")}`
+          : "Posible duplicado detectado.";
+      }
+      const confirmed = window.confirm(
+        `Se han detectado posibles duplicados:\n\n${duplicateText || "- Registro similar existente"}\n\n¿Quieres guardar de todos modos?`
+      );
+      if (!confirmed) {
+        return { duplicateCancelled: true, data };
+      }
+      ({ res, data } = await postPayload(true));
     }
-    const confirmed = window.confirm(
-      `Se han detectado posibles duplicados:\n\n${duplicateText || "- Registro similar existente"}\n\n¿Quieres guardar de todos modos?`
-    );
-    if (!confirmed) {
-      return { duplicateCancelled: true, data };
-    }
-    ({ res, data } = await postPayload(true));
   }
 
   if (!res.ok || data?.error) {
@@ -49143,6 +49271,7 @@ if (captacionForm) {
         payload,
         statusEl: captacionFormStatus,
         successMessage: "Guardado.",
+        duplicateMode: "captacion",
         onSuccess: () => {
           captacionForm.reset();
           if (captacionPropietarioStatus) captacionPropietarioStatus.textContent = "";
