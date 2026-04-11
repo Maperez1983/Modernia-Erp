@@ -22757,6 +22757,31 @@ def fetch_workspace_time_users(conn, workspace_id, empresa_id=None, only_enabled
     company_ids = resolve_workspace_company_ids(conn, workspace_id, empresa_id=empresa_id)
     if not company_ids:
         return {"rows": []}
+    # Importante (multi-tenant): los usuarios visibles en RRHH/Registro horario deben ser
+    # los miembros del workspace, no el listado global del sistema.
+    # En instalaciones legacy 1-workspace, mantenemos el comportamiento anterior.
+    multi_tenant = False
+    try:
+        multi_tenant = int((conn.execute("SELECT COUNT(*) FROM workspaces").fetchone() or [0])[0] or 0) > 1
+    except Exception:
+        multi_tenant = False
+    join_sql = ""
+    member_where = ""
+    member_params = []
+    if multi_tenant:
+        try:
+            ensure_workspace_core_tables(conn)
+            members_count = int(
+                (conn.execute("SELECT COUNT(*) FROM workspace_miembros WHERE workspace_id = ?", (workspace_id,)).fetchone() or [0])[0]
+                or 0
+            )
+        except Exception:
+            members_count = 0
+        if members_count <= 0:
+            return {"rows": []}
+        join_sql = "JOIN workspace_miembros mem ON mem.usuario_id = u.id"
+        member_where = " AND mem.workspace_id = ?"
+        member_params = [workspace_id]
     company_rows = conn.execute(
         f"""
         SELECT id, nombre
@@ -22767,7 +22792,7 @@ def fetch_workspace_time_users(conn, workspace_id, empresa_id=None, only_enabled
     ).fetchall()
     company_name_map = {str(row["id"]): str(row["nombre"] or "") for row in company_rows}
     where = ["COALESCE(u.activo, 1) = 1"]
-    params = []
+    params = list(member_params)
     if only_enabled:
         where.append("COALESCE(u.registro_horario_activo, 0) = 1")
     rows = conn.execute(
@@ -22783,7 +22808,8 @@ def fetch_workspace_time_users(conn, workspace_id, empresa_id=None, only_enabled
           u.activo,
           COALESCE(u.registro_horario_activo, 0) AS registro_horario_activo
         FROM usuarios u
-        WHERE {" AND ".join(where)}
+        {join_sql}
+        WHERE {" AND ".join(where)}{member_where}
         ORDER BY u.nombre COLLATE NOCASE ASC, u.apellido COLLATE NOCASE ASC
         LIMIT ?
         """,

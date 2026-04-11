@@ -3,7 +3,7 @@
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v76";
+const APP_SW_VERSION = "v77";
 
 // Workspace tenant por defecto del producto (branding de software). Mantiene compatibilidad con slugs legacy.
 const DEFAULT_TENANT_WORKSPACE_SLUG = "verifika2";
@@ -13275,9 +13275,10 @@ const fillWorkspaceTimeForm = (record = null) => {
 };
 
 const getWorkspaceTimeEligibleUsers = () => {
+  const tenantMode = isTenantWorkspaceMode();
   const sourceRows = (state.workspaceTimeUsers && state.workspaceTimeUsers.length)
     ? state.workspaceTimeUsers
-    : state.usersList;
+    : (tenantMode ? [] : state.usersList);
   const seen = new Set();
   const deduped = (sourceRows || []).filter((user) => {
     if (Number(user.activo ?? 1) !== 1) return false;
