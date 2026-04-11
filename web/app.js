@@ -3,7 +3,7 @@
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v79";
+const APP_SW_VERSION = "v80";
 
 // Workspace tenant por defecto del producto (branding de software). Mantiene compatibilidad con slugs legacy.
 const DEFAULT_TENANT_WORKSPACE_SLUG = "verifika2";
@@ -1554,6 +1554,7 @@ const state = {
       return "";
     }
   })(),
+  currentWorkspaceMemberRole: "",
   currentWorkspaceDetail: null,
   currentWorkspaceEnabledModules: [],
   currentWorkspaceServiceMatrixRows: [],
@@ -2540,9 +2541,20 @@ const finSimOpenFromAgenda = document.getElementById("finSimOpenFromAgenda");
 const gestoriaFacturasTable = document.getElementById("gestoriaFacturasTable");
 const crmNuevaCaptacionBtn = document.getElementById("crmNuevaCaptacionBtn");
 const crmNuevaCompraventaBtn = document.getElementById("crmNuevaCompraventaBtn");
+const crmNuevaDemandaBtn = document.getElementById("crmNuevaDemandaBtn");
+const crmGlobalSearch = document.getElementById("crmGlobalSearch");
+const crmGlobalSearchResults = document.getElementById("crmGlobalSearchResults");
+const crmLightningSidebar = document.getElementById("crmLightningSidebar");
+const crmQuickNewBtn = document.getElementById("crmQuickNewBtn");
+const crmQuickNewMenu = document.getElementById("crmQuickNewMenu");
+const crmRecentBtn = document.getElementById("crmRecentBtn");
+const crmRecentMenu = document.getElementById("crmRecentMenu");
+const crmRecentList = document.getElementById("crmRecentList");
+const crmRecentClearBtn = document.getElementById("crmRecentClearBtn");
 const crmWorkspaceShell = document.getElementById("crmWorkspaceShell");
 const crmWorkspaceTabs = document.getElementById("crmWorkspaceTabs");
 const crmViewResumen = document.getElementById("crmViewResumen");
+const crmQuickSearchCard = document.getElementById("crmQuickSearchCard");
 const crmViewAnalisis = document.getElementById("crmViewAnalisis");
 const crmViewCaptaciones = document.getElementById("crmViewCaptaciones");
 const crmViewInmuebles = document.getElementById("crmViewInmuebles");
@@ -2597,12 +2609,12 @@ const crmEdificiosTipoFilter = document.getElementById("crmEdificiosTipoFilter")
 const crmEdificiosSearch = document.getElementById("crmEdificiosSearch");
 const crmEdificiosTable = document.getElementById("crmEdificiosTable");
 const crmEdificiosInfo = document.getElementById("crmEdificiosInfo");
-	const inmoLegalCopilotForm = document.getElementById("inmoLegalCopilotForm");
-	const inmoLegalArea = document.getElementById("inmoLegalArea");
-	const inmoLegalTopic = document.getElementById("inmoLegalTopic");
-	const inmoLegalQuestion = document.getElementById("inmoLegalQuestion");
-	const inmoLegalAskBtn = document.getElementById("inmoLegalAskBtn");
-	const inmoLegalStatus = document.getElementById("inmoLegalStatus");
+const inmoLegalCopilotForm = document.getElementById("inmoLegalCopilotForm");
+const inmoLegalArea = document.getElementById("inmoLegalArea");
+const inmoLegalTopic = document.getElementById("inmoLegalTopic");
+const inmoLegalQuestion = document.getElementById("inmoLegalQuestion");
+const inmoLegalAskBtn = document.getElementById("inmoLegalAskBtn");
+const inmoLegalStatus = document.getElementById("inmoLegalStatus");
 	const inmoLegalResponse = document.getElementById("inmoLegalResponse");
 	const copilotWebForm = document.getElementById("copilotWebForm");
 	const copilotWebUrl = document.getElementById("copilotWebUrl");
@@ -2651,7 +2663,6 @@ const crmDemandasTable = document.getElementById("crmDemandasTable");
 const crmDemandasInfo = document.getElementById("crmDemandasInfo");
 const crmDemandaSearch = document.getElementById("crmDemandaSearch");
 const crmDemandaEstadoFilter = document.getElementById("crmDemandaEstadoFilter");
-const crmNuevaDemandaBtn = document.getElementById("crmNuevaDemandaBtn");
 const demandaDetail = document.getElementById("demandaDetail");
 const demandaBackBtn = document.getElementById("demandaBackBtn");
 const demandaMatching = document.getElementById("demandaMatching");
@@ -3190,6 +3201,18 @@ const resolveWorkspaceModuleKeyFromAdminServiceLabel = (label = "") => {
   return "";
 };
 
+const getWorkspaceAccessServiceOptions = () => {
+  const options = Array.isArray(ADMIN_SERVICE_OPTIONS) ? ADMIN_SERVICE_OPTIONS : [];
+  if (!isTenantWorkspaceMode()) return options;
+  const enabledKeys = new Set(state.currentWorkspaceEnabledModules || []);
+  if (!enabledKeys.size) return options;
+  return options.filter((label) => {
+    const moduleKey = resolveWorkspaceModuleKeyFromAdminServiceLabel(label);
+    if (!moduleKey) return true; // Dirección / Administración (no son módulos).
+    return enabledKeys.has(moduleKey);
+  });
+};
+
 const ADMIN_ROLE_OPTIONS = [
   "Lectura",
   "Gestoría",
@@ -3316,6 +3339,17 @@ const isPrivilegedRole = (value) => {
 const isPrivilegedUser = (user) => {
   if (!user) return false;
   return isPrivilegedRole(user.rol);
+};
+
+const isWorkspaceMemberManagerRole = (value) => {
+  const normalized = normalizeSimple(value);
+  return normalized === "owner" || normalized === "admin";
+};
+
+const canManageCurrentWorkspace = () => {
+  const user = getAuthScopeUser();
+  if (user && isPrivilegedUser(user)) return true;
+  return isWorkspaceMemberManagerRole(state.currentWorkspaceMemberRole || "");
 };
 
 const canAccessAdminPanel = (user) => {
@@ -4742,7 +4776,7 @@ const shouldShowWorkspaceCompanySwitcher = () => {
 const updateWorkspaceEntryChrome = () => {
   const mode = state.currentWorkspaceEntryMode || "platform";
   const authUser = getAuthScopeUser();
-  const canManageWorkspace = Boolean(authUser && isPrivilegedUser(authUser));
+  const canManageWorkspace = Boolean(authUser && canManageCurrentWorkspace());
   const workspaceSource =
     state.currentWorkspaceDetail?.workspace?.nombre
     || state.currentWorkspaceName
@@ -6462,7 +6496,7 @@ const renderWorkspaceCompanies = (rows = []) => {
   const canEdit = (() => {
     try {
       const authUser = getAuthScopeUser();
-      return Boolean(authUser && isPrivilegedUser(authUser));
+      return Boolean(authUser && canManageCurrentWorkspace());
     } catch (error) {
       return false;
     }
@@ -7298,7 +7332,7 @@ const renderWorkspaceCompanies = (rows = []) => {
 const renderWorkspaceMembers = (rows = []) => {
   if (!workspaceMembers) return;
   const authUser = getAuthScopeUser();
-  const canManage = Boolean(authUser && isPrivilegedUser(authUser));
+  const canManage = Boolean(authUser && canManageCurrentWorkspace());
   if (!state.currentWorkspaceId) {
     workspaceMembers.innerHTML = "<p class='muted'>Selecciona un workspace.</p>";
     return;
@@ -7422,7 +7456,7 @@ const renderWorkspaceMembers = (rows = []) => {
 const renderWorkspaceLinks = (rows = []) => {
   if (!workspaceLinks) return;
   const authUser = getAuthScopeUser();
-  const canManage = Boolean(authUser && isPrivilegedUser(authUser));
+  const canManage = Boolean(authUser && canManageCurrentWorkspace());
   if (!state.currentWorkspaceId) {
     workspaceLinks.innerHTML = "<p class='muted'>Selecciona un workspace.</p>";
     return;
@@ -7564,7 +7598,7 @@ const renderWorkspaceLauncher = (workspace = {}, modules = []) => {
 	  };
 	  const enabledKeys = new Set(enabled.map((row) => row.modulo_key));
 	  const workspaceAuthUser = getAuthScopeUser();
-	  const tenantNonAdmin = Boolean(isTenantWorkspaceMode() && workspaceAuthUser && !isPrivilegedUser(workspaceAuthUser));
+		  const tenantNonAdmin = Boolean(isTenantWorkspaceMode() && workspaceAuthUser && !canManageCurrentWorkspace());
 	  let tenantEnabledKeys = enabledKeys;
 	  if (isTenantWorkspaceMode()) {
 	    if (tenantNonAdmin) {
@@ -7713,10 +7747,10 @@ const refreshWorkspaceHomeAlerts = async () => {
 
   const now = new Date();
   const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-  const isPrivileged = isPrivilegedUser(user);
-  const personaId = isPrivileged ? String(resolveWorkspacePersonaForAuthUser() || "").trim() : "";
-  const personaQuery = isPrivileged && personaId ? `&persona_id=${encodeURIComponent(personaId)}` : "";
-  if (!isPrivileged || personaId) {
+  const isManager = canManageCurrentWorkspace();
+  const personaId = isManager ? String(resolveWorkspacePersonaForAuthUser() || "").trim() : "";
+  const personaQuery = isManager && personaId ? `&persona_id=${encodeURIComponent(personaId)}` : "";
+  if (!isManager || personaId) {
     const timeRows = await safeWorkspaceApi(
       `/api/workspace_registro_horario?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}&month=${encodeURIComponent(month)}&limit=40${personaQuery}`,
       { rows: [] }
@@ -7726,7 +7760,7 @@ const refreshWorkspaceHomeAlerts = async () => {
     state.workspaceHomeTimeRows = [];
   }
 
-  if (isPrivileged) {
+  if (isManager) {
     const resp = await safeWorkspaceApi(
       `/api/workspace_rrhh_ausencias?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}`,
       { rows: [] }
@@ -7824,7 +7858,7 @@ const renderWorkspaceHomeAlerts = () => {
   }
 
   // 3) RRHH pendientes (solo admins).
-  if (isPrivilegedUser(user) && (!enabledModules.size || enabledModules.has("rrhh"))) {
+  if (canManageCurrentWorkspace() && (!enabledModules.size || enabledModules.has("rrhh"))) {
     const rows = Array.isArray(state.workspaceRrhhAusenciasAllRows) ? state.workspaceRrhhAusenciasAllRows : [];
     const pending = rows.filter((row) => String(row?.estado || "").trim() === "Solicitada");
     if (pending.length) {
@@ -9613,7 +9647,7 @@ const renderWorkspaceRrhhHub = () => {
                       <strong>Servicios visibles</strong>
                       <div class="muted">Marca qué módulos verá este usuario.</div>
                       <div class="rrhh-service-grid" data-rrhh-service-scope="${escapeHtml(String(user.id || ""))}">
-                        ${ADMIN_SERVICE_OPTIONS.map((label) => {
+                        ${getWorkspaceAccessServiceOptions().map((label) => {
                           const key = normalizeSimple(label);
                           const selected = parseServiceList(user?.servicio || "").includes(key);
                           return `
@@ -9652,7 +9686,7 @@ const renderWorkspaceRrhhHub = () => {
                             </select>
                           </label>
                           <div class="span-2 rrhh-service-grid" data-rrhh-service-scope="new">
-                            ${ADMIN_SERVICE_OPTIONS.map((label) => `
+                            ${getWorkspaceAccessServiceOptions().map((label) => `
                               <label class="inline-check">
                                 <input type="checkbox" data-rrhh-service-check="${escapeHtml(label)}" />
                                 ${escapeHtml(label)}
@@ -10987,7 +11021,7 @@ const renderWorkspaceRrhhHub = () => {
       userServicesSaveBtn.disabled = true;
       if (status) status.textContent = "Guardando...";
       try {
-        const resp = await apiPost("/api/usuarios_update", { id: userId, servicio });
+        const resp = await apiPost("/api/usuarios_update", { id: userId, servicio, workspace_id: state.currentWorkspaceId });
         if (resp?.error) throw new Error(resp.error);
         if (Array.isArray(state.usersList)) {
           state.usersList = state.usersList.map((u) => (String(u?.id || "").trim() === userId ? { ...u, servicio } : u));
@@ -11125,7 +11159,7 @@ const renderWorkspaceRrhhHub = () => {
       passBtn.disabled = true;
       if (accessStatus) accessStatus.textContent = "Generando contraseña...";
       try {
-        const resp = await apiPost("/api/usuarios_update", { id: userId, password });
+        const resp = await apiPost("/api/usuarios_update", { id: userId, password, workspace_id: state.currentWorkspaceId });
         if (resp?.error) throw new Error(resp.error);
         if (tempPassInput) tempPassInput.value = password;
         if (accessStatus) accessStatus.textContent = "Contraseña generada.";
@@ -11505,10 +11539,10 @@ const renderWorkspaceRrhhHub = () => {
       if (!isWorkspaceRrhhManager()) return;
       const msg =
         "Esto borrará TODAS las fichas RRHH del workspace.\n\n" +
-        "Opcionalmente también puede borrar todos los usuarios heredados (dejando tu admin para seguir entrando).\n\n" +
+        "Opcionalmente también puede desvincular a todos los miembros del workspace (dejando tu acceso para seguir entrando).\n\n" +
         "¿Quieres continuar?";
       if (!window.confirm(msg)) return;
-      const deleteUsers = window.confirm("¿También quieres borrar los usuarios heredados (usuarios del sistema)?");
+      const deleteUsers = window.confirm("¿También quieres desvincular a los miembros del workspace?");
       resetBtn.disabled = true;
       try {
         await apiPost("/api/workspace_rrhh_reset", {
@@ -13519,8 +13553,7 @@ const hydrateWorkspaceTimeEmployeeSelect = (rows = []) => {
 };
 
 const isWorkspaceTimeManager = () => {
-  const authUser = getAuthScopeUser();
-  return Boolean(authUser && isPrivilegedUser(authUser));
+  return canManageCurrentWorkspace();
 };
 
 const applyWorkspaceTimeMode = () => {
@@ -15657,6 +15690,7 @@ const safeWorkspaceApi = async (path, fallback) => {
 const clearCurrentWorkspaceUi = () => {
   state.currentWorkspaceDetail = null;
   state.currentWorkspaceEnabledModules = [];
+  state.currentWorkspaceMemberRole = "";
   state.currentWorkspaceName = "";
   state.currentWorkspaceClientId = "";
   state.currentWorkspaceClientData = null;
@@ -15716,6 +15750,13 @@ const clearCurrentWorkspaceUi = () => {
 const loadWorkspaceDetail = async (workspaceId) => {
   if (!workspaceId) return;
   state.currentWorkspaceId = workspaceId;
+  state.currentWorkspaceMemberRole = "";
+  try {
+    const wsRow = (state.workspaces || []).find((row) => String(row?.id || "") === String(workspaceId || ""));
+    if (wsRow && wsRow.member_role != null) {
+      state.currentWorkspaceMemberRole = String(wsRow.member_role || "").trim();
+    }
+  } catch {}
   try {
     localStorage.setItem("crm.currentWorkspaceId", String(workspaceId || ""));
   } catch {}
@@ -15738,8 +15779,9 @@ const loadWorkspaceDetail = async (workspaceId) => {
   }
   hideUiToast();
   const authUser = getAuthScopeUser();
-  const canManageWorkspace = Boolean(authUser && isPrivilegedUser(authUser));
-  if (canManageWorkspace) {
+  const isSuperAdmin = Boolean(authUser && isPrivilegedUser(authUser));
+  let canManageWorkspace = Boolean(authUser && canManageCurrentWorkspace());
+  if (isSuperAdmin) {
     await safeWorkspaceApi("/api/usuarios", { rows: [] }).then((data) => {
       state.usersList = data.rows || [];
       populateResponsableSelects();
@@ -15773,6 +15815,16 @@ const loadWorkspaceDetail = async (workspaceId) => {
       loadWorkspaceDetail(workspaceId).catch(() => {});
     }, delayMs);
     return;
+  }
+  try {
+    if (detail.member_role != null) {
+      state.currentWorkspaceMemberRole = String(detail.member_role || "").trim();
+    }
+  } catch {}
+  if (detail && typeof detail.can_manage_workspace !== "undefined") {
+    canManageWorkspace = Boolean(authUser && (isSuperAdmin || Boolean(detail.can_manage_workspace) || canManageCurrentWorkspace()));
+  } else {
+    canManageWorkspace = Boolean(authUser && canManageCurrentWorkspace());
   }
   state.currentWorkspaceDetail = detail;
   state.currentWorkspaceEnabledModules = getWorkspaceEnabledModules(detail.modules || []);
@@ -16638,6 +16690,382 @@ const ensureCrmOpen = (action) => {
   }
   openCrmInmobiliario();
   setTimeout(action, 360);
+};
+
+const getCrmSearchTargetForView = (view = "") => {
+  const nextView = String(view || "").trim();
+  if (nextView === "inmuebles") return crmInmuebleSearchMirror;
+  if (nextView === "alquileres") return crmAlquilerSearch;
+  if (nextView === "compraventas") return crmCompraventaSearch;
+  if (nextView === "demandas") return crmDemandaSearch;
+  if (nextView === "visitas") return crmVisitaSearch;
+  if (nextView === "agenda") return crmAgendaSearch;
+  if (nextView === "informadores") return crmInformadoresSearch;
+  if (nextView === "edificios") return crmEdificiosSearch;
+  return null;
+};
+
+const syncCrmGlobalSearchUi = (view = "") => {
+  if (!crmGlobalSearch) return;
+  const current = String(state.crmGlobalSearch || "");
+  if (crmGlobalSearch.value !== current) {
+    crmGlobalSearch.value = current;
+  }
+  const target = getCrmSearchTargetForView(view);
+  const placeholder = String(target?.getAttribute?.("placeholder") || "").trim();
+  crmGlobalSearch.placeholder = placeholder || (String(view || "").trim() ? "Buscar en esta vista…" : "Buscar…");
+};
+
+const syncCrmGlobalSearchTargetValue = (view = "") => {
+  const target = getCrmSearchTargetForView(view);
+  if (!target) return;
+  const q = String(state.crmGlobalSearch || "");
+  if (target.value !== q) {
+    target.value = q;
+  }
+};
+
+const applyCrmGlobalSearchToCurrentView = () => {
+  const view = String(state.crmWorkspaceView || "resumen").trim() || "resumen";
+  syncCrmGlobalSearchTargetValue(view);
+  if (view === "captaciones") {
+    loadCrmCaptaciones();
+  } else if (view === "inmuebles") {
+    loadCrmInmuebles();
+  } else if (view === "alquileres") {
+    loadCrmAlquileres();
+  } else if (view === "compraventas") {
+    loadCrmCompraventas();
+  } else if (view === "demandas") {
+    loadCrmDemandas();
+  } else if (view === "visitas") {
+    loadCrmVisitas();
+  } else if (view === "agenda") {
+    loadCrmAgenda();
+  } else if (view === "informadores") {
+    loadCrmInformadores();
+  } else if (view === "edificios") {
+    loadCrmEdificios();
+  }
+};
+
+const setCrmQuickNewOpen = (open = false) => {
+  if (!crmQuickNewMenu || !crmQuickNewBtn) return;
+  const next = Boolean(open);
+  crmQuickNewMenu.classList.toggle("hidden", !next);
+  crmQuickNewBtn.setAttribute("aria-expanded", next ? "true" : "false");
+};
+
+const setCrmRecentOpen = (open = false) => {
+  if (!crmRecentMenu || !crmRecentBtn) return;
+  const next = Boolean(open);
+  crmRecentMenu.classList.toggle("hidden", !next);
+  crmRecentBtn.setAttribute("aria-expanded", next ? "true" : "false");
+  if (next) {
+    setCrmQuickNewOpen(false);
+    renderCrmRecentMenu();
+  }
+};
+
+const getCrmRecentStorageKey = () => {
+  const empresaId = String(state.crmInmoEmpresaId || "").trim();
+  return `crm.inmo.recent.${empresaId || "global"}`;
+};
+
+const loadCrmRecentItems = () => {
+  try {
+    const raw = localStorage.getItem(getCrmRecentStorageKey());
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+};
+
+const saveCrmRecentItems = (items = []) => {
+  try {
+    const trimmed = Array.isArray(items) ? items.slice(0, 10) : [];
+    localStorage.setItem(getCrmRecentStorageKey(), JSON.stringify(trimmed));
+  } catch {}
+};
+
+const pushCrmRecentItem = (item = {}) => {
+  const next = {
+    kind: String(item.kind || "").trim() || "inmueble",
+    id: String(item.id || "").trim(),
+    title: String(item.title || "").trim(),
+    meta: String(item.meta || "").trim(),
+    view: String(item.view || "").trim(),
+    inmuebleId: String(item.inmuebleId || "").trim(),
+    ts: Number(item.ts || Date.now()) || Date.now(),
+  };
+  if (!next.id && !next.inmuebleId) return;
+  const items = loadCrmRecentItems();
+  const signature = `${next.kind}:${next.id || next.inmuebleId}`;
+  const filtered = items.filter((row) => `${row?.kind || ""}:${row?.id || row?.inmuebleId || ""}` !== signature);
+  filtered.unshift(next);
+  saveCrmRecentItems(filtered);
+  if (crmRecentMenu && !crmRecentMenu.classList.contains("hidden")) {
+    renderCrmRecentMenu();
+  }
+};
+
+const renderCrmRecentMenu = () => {
+  if (!crmRecentList) return;
+  const items = loadCrmRecentItems();
+  crmRecentList.innerHTML = "";
+  if (!items.length) {
+    const p = document.createElement("p");
+    p.className = "muted";
+    p.textContent = "Sin elementos recientes.";
+    crmRecentList.appendChild(p);
+    return;
+  }
+  items.slice(0, 10).forEach((row) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "crm-recent-item";
+    btn.dataset.crmRecentKind = String(row?.kind || "");
+    if (row?.id) btn.dataset.crmRecentId = String(row.id);
+    if (row?.inmuebleId) btn.dataset.crmRecentInmuebleId = String(row.inmuebleId);
+    if (row?.view) btn.dataset.crmRecentView = String(row.view);
+    const strong = document.createElement("strong");
+    strong.textContent = row?.title || row?.id || row?.inmuebleId || "Elemento";
+    btn.appendChild(strong);
+    if (row?.meta) {
+      const meta = document.createElement("div");
+      meta.className = "muted";
+      meta.textContent = row.meta;
+      btn.appendChild(meta);
+    }
+    crmRecentList.appendChild(btn);
+  });
+};
+
+const openCrmRecentItem = (row = {}) => {
+  const kind = String(row.kind || "").trim();
+  const view = String(row.view || "").trim();
+  const id = String(row.id || "").trim();
+  const inmuebleId = String(row.inmuebleId || "").trim();
+  setCrmRecentOpen(false);
+  setCrmGlobalSearchResultsOpen(false);
+  ensureCrmOpen(() => {
+    if (kind === "compraventa" && id) {
+      openCompraventaEditor(id);
+      return;
+    }
+    if (kind === "demanda" && id) {
+      setCrmWorkspaceView("demandas");
+      openDemandaDetail(id);
+      return;
+    }
+    if (kind === "visita" && inmuebleId) {
+      setCrmWorkspaceView("visitas");
+      openInmuebleDetail(inmuebleId, "visitas");
+      return;
+    }
+    if (kind === "pipeline" && inmuebleId) {
+      setCrmWorkspaceView("captaciones");
+      openInmuebleDetail(inmuebleId, "captaciones");
+      return;
+    }
+    const targetView = view || "inmuebles";
+    if (inmuebleId) {
+      setCrmWorkspaceView(targetView);
+      openInmuebleDetail(inmuebleId, targetView);
+    } else if (id) {
+      // Fallback: si no sabemos abrirlo por detalle, filtramos en la vista.
+      state.crmGlobalSearch = id;
+      setCrmWorkspaceView(targetView);
+      applyCrmGlobalSearchToCurrentView();
+    }
+  });
+};
+
+const setCrmGlobalSearchResultsOpen = (open = false) => {
+  if (!crmGlobalSearchResults) return;
+  crmGlobalSearchResults.classList.toggle("hidden", !open);
+};
+
+const renderCrmGlobalSearchResults = () => {
+  if (!crmGlobalSearchResults) return;
+  const raw = String(state.crmGlobalSearch || "").trim();
+  const needle = normalizeSimple(raw);
+  if (!needle || needle.length < 2) {
+    crmGlobalSearchResults.innerHTML = "";
+    setCrmGlobalSearchResultsOpen(false);
+    return;
+  }
+
+  const MAX_PER_GROUP = 6;
+  const groups = [];
+  const pushGroup = (title, items) => {
+    const trimmed = Array.isArray(items) ? items.slice(0, MAX_PER_GROUP) : [];
+    if (!trimmed.length) return;
+    groups.push({ title, items: trimmed });
+  };
+
+  const matchIncludes = (value) => normalizeSimple(value).includes(needle);
+
+  const inmuebles = (Array.isArray(cachedCrmInmuebles) ? cachedCrmInmuebles : []).filter((row) => {
+    const hay = [row?.referencia, row?.direccion, row?.poblacion, row?.provincia, row?.propietarios, row?.propietario]
+      .map((v) => String(v || ""))
+      .join(" ");
+    return matchIncludes(hay);
+  });
+  pushGroup(
+    "Inmuebles",
+    inmuebles.map((row) => ({
+      kind: "inmueble",
+      view: "inmuebles",
+      inmuebleId: String(row?.id || "").trim(),
+      title: row?.direccion || row?.referencia || "Inmueble",
+      meta: [row?.referencia || "", row?.poblacion || "", row?.estado || ""].filter(Boolean).join(" · "),
+      pill: "Inmueble",
+    }))
+  );
+
+  const pipeline = (Array.isArray(cachedCrmCaptaciones) ? cachedCrmCaptaciones : []).filter((row) => {
+    const hay = [row?.direccion, row?.propietario, row?.telefono, row?.email, row?.etapa].map((v) => String(v || "")).join(" ");
+    return matchIncludes(hay);
+  });
+  pushGroup(
+    "Pipeline",
+    pipeline.map((row) => ({
+      kind: "pipeline",
+      view: "captaciones",
+      inmuebleId: String(row?.inmueble_id || row?.id || "").trim(),
+      title: row?.direccion || row?.propietario || "Expediente",
+      meta: [row?.etapa || "", row?.proxima_accion || ""].filter(Boolean).join(" · "),
+      pill: "Pipeline",
+    }))
+  );
+
+  const demandas = (Array.isArray(cachedCrmDemandas) ? cachedCrmDemandas : []).filter((row) => {
+    const hay = [row?.cliente, row?.tipo, row?.zona, row?.estado, row?.prioridad].map((v) => String(v || "")).join(" ");
+    return matchIncludes(hay);
+  });
+  pushGroup(
+    "Pedidos",
+    demandas.map((row) => ({
+      kind: "demanda",
+      view: "demandas",
+      id: String(row?.id || "").trim(),
+      title: row?.cliente || "Pedido",
+      meta: [row?.tipo || "", row?.zona || "", row?.estado || ""].filter(Boolean).join(" · "),
+      pill: "Pedido",
+    }))
+  );
+
+  const compraventas = (Array.isArray(cachedCrmCompraventas) ? cachedCrmCompraventas : []).filter((row) => {
+    const hay = [row?.id, row?.direccion, row?.vendedor, row?.comprador, row?.estado].map((v) => String(v || "")).join(" ");
+    return matchIncludes(hay);
+  });
+  pushGroup(
+    "Compraventas",
+    compraventas.map((row) => ({
+      kind: "compraventa",
+      id: String(row?.id || "").trim(),
+      title: row?.direccion || `Compraventa ${String(row?.id || "").slice(0, 8)}`,
+      meta: [row?.estado || "", row?.comprador || row?.vendedor || ""].filter(Boolean).join(" · "),
+      pill: "Compraventa",
+    }))
+  );
+
+  const visitas = (Array.isArray(cachedCrmVisitas) ? cachedCrmVisitas : []).filter((row) => {
+    const hay = [row?.inmueble, row?.cliente, row?.asesor, row?.estado, row?.fecha].map((v) => String(v || "")).join(" ");
+    return matchIncludes(hay);
+  });
+  pushGroup(
+    "Visitas",
+    visitas.map((row) => ({
+      kind: "visita",
+      view: "visitas",
+      inmuebleId: String(row?.inmueble_id || "").trim(),
+      title: row?.inmueble || "Visita",
+      meta: [row?.fecha || "", row?.hora || "", row?.estado || ""].filter(Boolean).join(" · "),
+      pill: "Visita",
+    }))
+  );
+
+  crmGlobalSearchResults.innerHTML = "";
+  if (!groups.length) {
+    const empty = document.createElement("div");
+    empty.className = "muted";
+    empty.style.padding = "8px 6px";
+    empty.textContent = "Sin resultados en datos cargados. Pulsa Enter para filtrar la vista actual.";
+    crmGlobalSearchResults.appendChild(empty);
+    setCrmGlobalSearchResultsOpen(true);
+    return;
+  }
+
+  groups.forEach((group) => {
+    const wrap = document.createElement("div");
+    wrap.className = "crm-global-group";
+    const title = document.createElement("div");
+    title.className = "crm-global-group-title";
+    title.textContent = group.title;
+    wrap.appendChild(title);
+    group.items.forEach((item) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "crm-global-item";
+      btn.dataset.crmGlobalKind = item.kind;
+      if (item.view) btn.dataset.crmGlobalView = item.view;
+      if (item.id) btn.dataset.crmGlobalId = item.id;
+      if (item.inmuebleId) btn.dataset.crmGlobalInmuebleId = item.inmuebleId;
+      const left = document.createElement("div");
+      const strong = document.createElement("strong");
+      strong.textContent = item.title || "Elemento";
+      left.appendChild(strong);
+      if (item.meta) {
+        const meta = document.createElement("div");
+        meta.className = "muted";
+        meta.textContent = item.meta;
+        left.appendChild(meta);
+      }
+      btn.appendChild(left);
+      const pill = document.createElement("span");
+      pill.className = "crm-global-pill";
+      pill.textContent = item.pill || "";
+      btn.appendChild(pill);
+      wrap.appendChild(btn);
+    });
+    crmGlobalSearchResults.appendChild(wrap);
+  });
+  setCrmGlobalSearchResultsOpen(true);
+};
+
+const applyCrmTecnocloudQuickSearch = (token = "") => {
+  const raw = String(token || "").trim();
+  if (!raw) return;
+  const [scope, ...rest] = raw.split(":");
+  const value = rest.join(":");
+  ensureCrmOpen(() => {
+    if (scope === "captaciones") {
+      if (crmCaptacionesQuickFilter) crmCaptacionesQuickFilter.value = value || "";
+      setCrmWorkspaceView("captaciones");
+      loadCrmCaptaciones();
+      return;
+    }
+    if (scope === "demandas") {
+      if (crmDemandaEstadoFilter) crmDemandaEstadoFilter.value = value || "";
+      setCrmWorkspaceView("demandas");
+      loadCrmDemandas();
+      return;
+    }
+    if (scope === "visitas") {
+      if (crmVisitaEstadoFilter) crmVisitaEstadoFilter.value = value || "";
+      setCrmWorkspaceView("visitas");
+      loadCrmVisitas();
+      return;
+    }
+    if (scope === "agenda") {
+      if (crmAgendaEstadoFilter) crmAgendaEstadoFilter.value = value || "";
+      setCrmWorkspaceView("agenda");
+      loadCrmAgenda();
+    }
+  });
 };
 
 const openInmuebleFromAgenda = (inmuebleId) => {
@@ -24327,6 +24755,12 @@ const setCrmWorkspaceView = (view = "resumen") => {
     });
   }
 
+  if (crmLightningSidebar) {
+    crmLightningSidebar.querySelectorAll("[data-crm-view]").forEach((btn) => {
+      btn.classList.toggle("active", btn.dataset.crmView === nextView);
+    });
+  }
+
   const viewMap = {
     resumen: crmViewResumen,
     analisis: crmViewAnalisis,
@@ -24346,6 +24780,12 @@ const setCrmWorkspaceView = (view = "resumen") => {
       node.classList.toggle("hidden", key !== nextView);
     }
   });
+
+  setCrmQuickNewOpen(false);
+  setCrmRecentOpen(false);
+  setCrmGlobalSearchResultsOpen(false);
+  syncCrmGlobalSearchUi(nextView);
+  syncCrmGlobalSearchTargetValue(nextView);
 
   if (crmWorkspaceShell && inmuebleDetail && !inmuebleDetail.classList.contains("hidden")) {
     inmuebleDetail.classList.add("hidden");
@@ -28817,6 +29257,10 @@ const loadCrmCaptaciones = () => {
     empresa_id: empresa.id,
   });
   params.set("include_id", "1");
+  const q = String(state.crmGlobalSearch || "").trim();
+  if (state.crmWorkspaceView === "captaciones" && q) {
+    params.set("q", q);
+  }
   api(`/api/tabla?${params.toString()}`)
     .then((data) => {
     const rowMaps = Array.isArray(data.rows)
@@ -30989,6 +31433,13 @@ const openCompraventaEditor = async (recordId) => {
     const data = await api(`/api/compraventas?${params.toString()}`);
     if (!data?.row) throw new Error(data?.error || "Compraventa no encontrada.");
     fillCompraventaForm(data.row);
+    pushCrmRecentItem({
+      kind: "compraventa",
+      id: String(recordId || "").trim(),
+      view: "compraventas",
+      title: data.row?.direccion || `Compraventa ${String(recordId).slice(0, 8)}`,
+      meta: [data.row?.estado || "", data.row?.comprador || data.row?.vendedor || ""].filter(Boolean).join(" · "),
+    });
     if (compraventaFormStatus) compraventaFormStatus.textContent = `Editando ${String(recordId).slice(0, 8)}…`;
   } catch (error) {
     if (compraventaFormStatus) compraventaFormStatus.textContent = error?.message || "No se pudo cargar.";
@@ -31738,6 +32189,17 @@ const openDemandaDetail = (id) => {
   if (!demandaDetail) return;
   const empresa = resolveCrmInmoEmpresa();
   if (!empresa) return;
+  try {
+    const key = String(id || "").trim();
+    const row = (Array.isArray(cachedCrmDemandas) ? cachedCrmDemandas : []).find((item) => String(item?.id || "").trim() === key);
+    pushCrmRecentItem({
+      kind: "demanda",
+      id: key,
+      view: "demandas",
+      title: row?.cliente || `Pedido ${key.slice(0, 8)}`,
+      meta: [row?.tipo || "", row?.zona || "", row?.estado || ""].filter(Boolean).join(" · "),
+    });
+  } catch {}
   api(`/api/matching?empresa_id=${empresa.id}&demanda_id=${id}`).then((data) => {
     if (demandaTitle) {
       demandaTitle.textContent = "Matching de demanda";
@@ -31973,6 +32435,19 @@ const openInmuebleDetail = (id, originView = "") => {
             .filter(Boolean)
             .join(" · ") || "Referencia sin asignar";
       }
+      pushCrmRecentItem({
+        kind: "inmueble",
+        inmuebleId: String(id || "").trim(),
+        view: String(state.currentInmuebleOriginView || originView || state.crmWorkspaceView || "inmuebles").trim() || "inmuebles",
+        title: inmueble.direccion || inmueble.referencia || "Ficha de inmueble",
+        meta: [
+          inmueble.referencia || "",
+          inmueble.poblacion || "",
+          inmueble.estado || captacion.etapa || "",
+        ]
+          .filter(Boolean)
+          .join(" · "),
+      });
       if (inmuebleDatosGrid) {
         const baseFields = etapaMain === "Encargo" ? INMUEBLE_FIELDS_ENCARGO : INMUEBLE_FIELDS;
         const fields = filterInmuebleFieldsForOperacion(baseFields, state.currentInmuebleOperacionTipo);
@@ -43117,6 +43592,139 @@ if (crmWorkspaceTabs) {
   });
 }
 
+if (crmLightningSidebar) {
+  crmLightningSidebar.addEventListener("click", (event) => {
+    const btn = closestFromEvent(event, "[data-crm-view]");
+    if (!btn) return;
+    setCrmWorkspaceView(btn.dataset.crmView);
+  });
+}
+
+if (crmQuickNewBtn && crmQuickNewMenu) {
+  crmQuickNewBtn.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const isOpen = !crmQuickNewMenu.classList.contains("hidden");
+    setCrmQuickNewOpen(!isOpen);
+  });
+}
+
+if (crmQuickNewMenu) {
+  crmQuickNewMenu.addEventListener("click", (event) => {
+    const btn = closestFromEvent(event, "button");
+    if (!btn) return;
+    // Cierra el menú tras disparar la acción asociada al botón.
+    setTimeout(() => setCrmQuickNewOpen(false), 0);
+  });
+}
+
+if (crmGlobalSearch) {
+  crmGlobalSearch.addEventListener("input", () => {
+    state.crmGlobalSearch = crmGlobalSearch.value || "";
+    renderCrmGlobalSearchResults();
+    scheduleSave("crm-global-search", () => applyCrmGlobalSearchToCurrentView(), 220);
+  });
+
+  crmGlobalSearch.addEventListener("focus", () => {
+    setCrmQuickNewOpen(false);
+    setCrmRecentOpen(false);
+    renderCrmGlobalSearchResults();
+  });
+
+  crmGlobalSearch.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      setCrmGlobalSearchResultsOpen(false);
+      return;
+    }
+    if (event.key === "Escape") {
+      setCrmGlobalSearchResultsOpen(false);
+      return;
+    }
+  });
+}
+
+if (crmGlobalSearchResults) {
+  crmGlobalSearchResults.addEventListener("click", (event) => {
+    const btn = closestFromEvent(event, "[data-crm-global-kind]");
+    if (!btn) return;
+    const kind = String(btn.dataset.crmGlobalKind || "").trim();
+    const view = String(btn.dataset.crmGlobalView || "").trim();
+    const id = String(btn.dataset.crmGlobalId || "").trim();
+    const inmuebleId = String(btn.dataset.crmGlobalInmuebleId || "").trim();
+    setCrmGlobalSearchResultsOpen(false);
+    openCrmRecentItem({ kind, view, id, inmuebleId });
+  });
+}
+
+if (crmQuickNewMenu && crmQuickNewBtn) {
+  document.addEventListener("click", (event) => {
+    if (crmQuickNewMenu.classList.contains("hidden")) return;
+    const target = event.target;
+    if (crmQuickNewMenu.contains(target)) return;
+    if (crmQuickNewBtn.contains(target)) return;
+    setCrmQuickNewOpen(false);
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    setCrmQuickNewOpen(false);
+  });
+}
+
+if (crmRecentBtn && crmRecentMenu) {
+  crmRecentBtn.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const isOpen = !crmRecentMenu.classList.contains("hidden");
+    setCrmRecentOpen(!isOpen);
+  });
+}
+
+if (crmRecentClearBtn) {
+  crmRecentClearBtn.addEventListener("click", () => {
+    saveCrmRecentItems([]);
+    renderCrmRecentMenu();
+  });
+}
+
+if (crmRecentList) {
+  crmRecentList.addEventListener("click", (event) => {
+    const btn = closestFromEvent(event, "[data-crm-recent-kind]");
+    if (!btn) return;
+    const kind = String(btn.dataset.crmRecentKind || "").trim();
+    const view = String(btn.dataset.crmRecentView || "").trim();
+    const id = String(btn.dataset.crmRecentId || "").trim();
+    const inmuebleId = String(btn.dataset.crmRecentInmuebleId || "").trim();
+    openCrmRecentItem({ kind, view, id, inmuebleId });
+  });
+}
+
+if (crmRecentMenu && crmRecentBtn) {
+  document.addEventListener("click", (event) => {
+    if (crmRecentMenu.classList.contains("hidden")) return;
+    const target = event.target;
+    if (crmRecentMenu.contains(target)) return;
+    if (crmRecentBtn.contains(target)) return;
+    setCrmRecentOpen(false);
+  });
+}
+
+if (crmGlobalSearchResults && crmGlobalSearch) {
+  document.addEventListener("click", (event) => {
+    if (crmGlobalSearchResults.classList.contains("hidden")) return;
+    const target = event.target;
+    if (crmGlobalSearchResults.contains(target)) return;
+    if (crmGlobalSearch.contains(target)) return;
+    setCrmGlobalSearchResultsOpen(false);
+  });
+}
+
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return;
+  setCrmRecentOpen(false);
+  setCrmGlobalSearchResultsOpen(false);
+});
+
 if (inmoLegalCopilotForm) {
   inmoLegalCopilotForm.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -43429,6 +44037,14 @@ if (crmSection) {
     if (actionLink) {
       goToEstudioAlta(actionLink.dataset.crmAction || "compraventa");
     }
+  });
+}
+
+if (crmQuickSearchCard) {
+  crmQuickSearchCard.addEventListener("click", (event) => {
+    const btn = closestFromEvent(event, "[data-crm-quick]");
+    if (!btn) return;
+    applyCrmTecnocloudQuickSearch(btn.dataset.crmQuick || "");
   });
 }
 

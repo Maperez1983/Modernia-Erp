@@ -20150,13 +20150,14 @@ def fetch_workspace_rows_for_user(conn, session):
               w.logo_url,
               w.primary_color,
               w.accent_color,
+              COALESCE(mem.rol, '') AS member_role,
               COUNT(DISTINCT we.empresa_id) AS empresas_total,
               COUNT(DISTINCT CASE WHEN COALESCE(wm.enabled, 0) = 1 THEN wm.modulo_key END) AS modulos_activos
             FROM workspaces w
             JOIN workspace_miembros mem ON mem.workspace_id = w.id AND mem.usuario_id = ?
             LEFT JOIN workspace_empresas we ON we.workspace_id = w.id
             LEFT JOIN workspace_modulos wm ON wm.workspace_id = w.id
-            GROUP BY w.id, w.nombre, w.slug, w.estado, w.plan, w.kind, w.descripcion, w.logo_url, w.primary_color, w.accent_color
+            GROUP BY w.id, w.nombre, w.slug, w.estado, w.plan, w.kind, w.descripcion, w.logo_url, w.primary_color, w.accent_color, mem.rol
             ORDER BY w.nombre COLLATE NOCASE ASC
             """,
             (user_id,),
@@ -23826,6 +23827,31 @@ def workspace_actor_is_privileged(conn, session):
     except Exception:
         pass
     return workspace_session_is_privileged({"rol": row["rol"] or "", "servicio": row["servicio"] or ""})
+
+
+def workspace_actor_can_manage_workspace(conn, session, workspace_id):
+    """
+    Permisos de administración limitados al workspace.
+    - Admin global (usuarios.rol) puede gestionar cualquier workspace.
+    - Owner/Admin en workspace_miembros puede gestionar ese workspace.
+    """
+    if workspace_actor_is_privileged(conn, session):
+        return True
+    if not conn or not session:
+        return False
+    ws_id = str(workspace_id or "").strip()
+    user_id = str(session.get("user_id") or "").strip()
+    if not ws_id or not user_id:
+        return False
+    try:
+        ensure_workspace_core_tables(conn)
+    except Exception:
+        pass
+    member = fetch_workspace_member(conn, ws_id, user_id)
+    if not member:
+        return False
+    role_norm = _normalize_workspace_member_role(member.get("rol") or "")
+    return role_norm in {"Owner", "Admin"}
 
 
 def _normalize_workspace_member_role(value):
@@ -32037,14 +32063,34 @@ class Handler(BaseHTTPRequestHandler):
             return
         elif parsed.path == "/api/usuarios_update":
             session = getattr(self, "auth_session", None) or self._current_session()
-            if not workspace_actor_is_privileged(conn, session):
-                json_response(self, {"error": "No autorizado"}, status=403)
-                return
             user_id = payload.get("id")
             if not user_id:
                 json_response(self, {"error": "id requerido"}, status=400)
                 return
             workspace_id = str(payload.get("workspace_id") or "").strip()
+            is_global_admin = workspace_actor_is_privileged(conn, session)
+            if not is_global_admin:
+                # Workspace-admin: sólo permite cambios acotados y sólo sobre miembros del workspace.
+                if not session or not workspace_id or not workspace_actor_can_manage_workspace(conn, session, workspace_id):
+                    json_response(self, {"error": "No autorizado"}, status=403)
+                    return
+                try:
+                    ensure_workspace_core_tables(conn)
+                except Exception:
+                    pass
+                target_is_member = False
+                try:
+                    target_is_member = bool(
+                        conn.execute(
+                            "SELECT 1 FROM workspace_miembros WHERE workspace_id = ? AND usuario_id = ? LIMIT 1",
+                            (workspace_id, user_id),
+                        ).fetchone()
+                    )
+                except Exception:
+                    target_is_member = False
+                if not target_is_member:
+                    json_response(self, {"error": "No autorizado"}, status=403)
+                    return
             if workspace_id and "servicio" in payload:
                 workspace = conn.execute(
                     "SELECT 1 FROM workspaces WHERE id = ? LIMIT 1",
@@ -32060,11 +32106,13 @@ class Handler(BaseHTTPRequestHandler):
                     json_response(self, {"error": f"Este workspace no tiene activados: {', '.join(labels)}."}, status=400)
                     return
             allowed = ("nombre", "apellido", "usuario", "email", "servicio", "rol", "activo", "password", "registro_horario_activo")
+            if not is_global_admin:
+                allowed = ("servicio", "password", "registro_horario_activo", "activo")
             updates = []
             values = []
             incoming_usuario = normalize_username(payload.get("usuario")) if "usuario" in payload else ""
             incoming_email = normalize_email(payload.get("email")) if "email" in payload else ""
-            conflict = _usuarios_conflict_id(conn, usuario=incoming_usuario, email=incoming_email, exclude_id=user_id)
+            conflict = _usuarios_conflict_id(conn, usuario=incoming_usuario, email=incoming_email, exclude_id=user_id) if is_global_admin else None
             if conflict:
                 if conflict["field"] == "usuario":
                     json_response(self, {"error": "usuario ya en uso"}, status=409)
@@ -32843,14 +32891,14 @@ class Handler(BaseHTTPRequestHandler):
             return
         elif parsed.path == "/api/workspace_member_upsert":
             session = getattr(self, "auth_session", None) or self._current_session()
-            if not workspace_actor_is_privileged(conn, session):
-                json_response(self, {"error": "No autorizado"}, status=403)
-                return
             workspace_id = str(payload.get("workspace_id") or "").strip()
             login = str(payload.get("login") or "").strip()
             role = _normalize_workspace_member_role(payload.get("role") or "Miembro")
             if not workspace_id or not login:
                 json_response(self, {"error": "workspace_id y login requeridos"}, status=400)
+                return
+            if not workspace_actor_can_manage_workspace(conn, session, workspace_id):
+                json_response(self, {"error": "No autorizado"}, status=403)
                 return
             matches = fetch_active_users_by_login(conn, login)
             if not matches:
@@ -32885,13 +32933,13 @@ class Handler(BaseHTTPRequestHandler):
             return
         elif parsed.path == "/api/workspace_member_delete":
             session = getattr(self, "auth_session", None) or self._current_session()
-            if not workspace_actor_is_privileged(conn, session):
-                json_response(self, {"error": "No autorizado"}, status=403)
-                return
             workspace_id = str(payload.get("workspace_id") or "").strip()
             user_id = str(payload.get("usuario_id") or "").strip()
             if not workspace_id or not user_id:
                 json_response(self, {"error": "workspace_id y usuario_id requeridos"}, status=400)
+                return
+            if not workspace_actor_can_manage_workspace(conn, session, workspace_id):
+                json_response(self, {"error": "No autorizado"}, status=403)
                 return
             conn.execute(
                 "DELETE FROM workspace_miembros WHERE workspace_id = ? AND usuario_id = ?",
@@ -32902,12 +32950,12 @@ class Handler(BaseHTTPRequestHandler):
             return
         elif parsed.path == "/api/workspace_members_reset":
             session = getattr(self, "auth_session", None) or self._current_session()
-            if not workspace_actor_is_privileged(conn, session):
-                json_response(self, {"error": "No autorizado"}, status=403)
-                return
             workspace_id = str(payload.get("workspace_id") or "").strip()
             if not workspace_id:
                 json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            if not workspace_actor_can_manage_workspace(conn, session, workspace_id):
+                json_response(self, {"error": "No autorizado"}, status=403)
                 return
             ensure_workspace_core_tables(conn)
             current_user_id = str((session or {}).get("user_id") or "").strip()
@@ -33090,9 +33138,6 @@ class Handler(BaseHTTPRequestHandler):
             return
         elif parsed.path == "/api/workspace_update":
             session = getattr(self, "auth_session", None) or self._current_session()
-            if not workspace_actor_is_privileged(conn, session):
-                json_response(self, {"error": "No autorizado"}, status=403)
-                return
             workspace_id = str(payload.get("id") or "").strip()
             nombre = str(payload.get("nombre") or "").strip()
             slug_value = normalize_workspace_slug(payload.get("slug") or nombre)
@@ -33100,6 +33145,14 @@ class Handler(BaseHTTPRequestHandler):
             if not nombre:
                 json_response(self, {"error": "nombre requerido"}, status=400)
                 return
+            if workspace_id:
+                if not workspace_actor_can_manage_workspace(conn, session, workspace_id):
+                    json_response(self, {"error": "No autorizado"}, status=403)
+                    return
+            else:
+                if not workspace_actor_is_privileged(conn, session):
+                    json_response(self, {"error": "No autorizado"}, status=403)
+                    return
             existing_slug = conn.execute(
                 "SELECT id FROM workspaces WHERE slug = ? AND id != ? LIMIT 1",
                 (slug_value, workspace_id),
@@ -33179,12 +33232,17 @@ class Handler(BaseHTTPRequestHandler):
             return
         elif parsed.path == "/api/workspace_module_update":
             session = getattr(self, "auth_session", None) or self._current_session()
-            if not workspace_actor_is_privileged(conn, session):
-                json_response(self, {"error": "No autorizado"}, status=403)
-                return
             record_id = str(payload.get("id") or "").strip()
             if not record_id:
                 json_response(self, {"error": "id requerido"}, status=400)
+                return
+            row = conn.execute("SELECT workspace_id FROM workspace_modulos WHERE id = ? LIMIT 1", (record_id,)).fetchone()
+            workspace_id = str(row_value(row, "workspace_id") or row_value(row, 0) or "").strip() if row else ""
+            if not workspace_id:
+                json_response(self, {"error": "módulo no encontrado"}, status=404)
+                return
+            if not workspace_actor_can_manage_workspace(conn, session, workspace_id):
+                json_response(self, {"error": "No autorizado"}, status=403)
                 return
             enabled = 1 if str(payload.get("enabled") or "").strip().lower() in {"1", "true", "yes", "si", "sí"} else 0
             conn.execute(
@@ -34291,7 +34349,7 @@ class Handler(BaseHTTPRequestHandler):
             fecha = str(payload.get("fecha") or "").strip()
             hora_inicio = str(payload.get("hora_inicio") or "").strip()
             session = getattr(self, "auth_session", None) or self._current_session()
-            if session and not workspace_session_is_privileged(session):
+            if not session or not workspace_actor_can_manage_workspace(conn, session, workspace_id):
                 json_response(self, {"error": "No autorizado"}, status=403)
                 return
             if not workspace_id or not empresa_id or not persona_nombre or not fecha or not hora_inicio:
@@ -35297,14 +35355,14 @@ class Handler(BaseHTTPRequestHandler):
             return
         elif parsed.path == "/api/workspace_rrhh_reset":
             session = getattr(self, "auth_session", None) or self._current_session()
-            if not workspace_session_is_privileged(session):
-                json_response(self, {"error": "No autorizado"}, status=403)
-                return
             workspace_id = str(payload.get("workspace_id") or "").strip()
             if not workspace_id:
                 json_response(self, {"error": "workspace_id requerido"}, status=400)
                 return
-            delete_users_flag = str(payload.get("delete_users") or "").strip().lower() in {"1", "true", "si", "sí", "on"}
+            if not session or not workspace_actor_can_manage_workspace(conn, session, workspace_id):
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
+            delete_members_flag = str(payload.get("delete_users") or "").strip().lower() in {"1", "true", "si", "sí", "on"}
             user_id = str(session.get("user_id") or "").strip() if session else ""
             try:
                 # Borra toda la operativa RRHH/registro asociada al workspace.
@@ -35324,17 +35382,31 @@ class Handler(BaseHTTPRequestHandler):
                         conn.execute(sql, params)
                     except Exception:
                         pass
-                # Opcional: borra usuarios del sistema (heredados), manteniendo el usuario actual para no perder el acceso.
-                deleted_users = 0
-                if delete_users_flag:
+                # Opcional (seguro): desvincula miembros del workspace (NO borra cuentas globales).
+                deleted_members = 0
+                if delete_members_flag:
+                    try:
+                        ensure_workspace_core_tables(conn)
+                    except Exception:
+                        pass
                     if user_id:
-                        deleted_users_row = conn.execute("SELECT COUNT(*) AS total FROM usuarios WHERE id != ?", (user_id,)).fetchone()
-                        deleted_users = int(row_value(deleted_users_row, "total", 0) or 0)
-                        conn.execute("DELETE FROM usuarios WHERE id != ?", (user_id,))
+                        deleted_row = conn.execute(
+                            "SELECT COUNT(*) AS total FROM workspace_miembros WHERE workspace_id = ? AND usuario_id != ?",
+                            (workspace_id, user_id),
+                        ).fetchone()
+                        deleted_members = int(row_value(deleted_row, "total", 0) or 0)
+                        conn.execute(
+                            "DELETE FROM workspace_miembros WHERE workspace_id = ? AND usuario_id != ?",
+                            (workspace_id, user_id),
+                        )
+                        ensure_workspace_member(conn, workspace_id, user_id, role="Owner", now=now)
                     else:
-                        deleted_users_row = conn.execute("SELECT COUNT(*) AS total FROM usuarios").fetchone()
-                        deleted_users = int(row_value(deleted_users_row, "total", 0) or 0)
-                        conn.execute("DELETE FROM usuarios")
+                        deleted_row = conn.execute(
+                            "SELECT COUNT(*) AS total FROM workspace_miembros WHERE workspace_id = ?",
+                            (workspace_id,),
+                        ).fetchone()
+                        deleted_members = int(row_value(deleted_row, "total", 0) or 0)
+                        conn.execute("DELETE FROM workspace_miembros WHERE workspace_id = ?", (workspace_id,))
                 conn.commit()
             except Exception as exc:
                 try:
@@ -35343,18 +35415,32 @@ class Handler(BaseHTTPRequestHandler):
                     pass
                 json_response(self, {"error": str(exc) or "No se pudo resetear RRHH"}, status=500)
                 return
-            json_response(self, {"ok": True, "workspace_id": workspace_id, "deleted_users": int(deleted_users or 0)})
+            json_response(self, {"ok": True, "workspace_id": workspace_id, "deleted_members": int(deleted_members or 0)})
             return
         elif parsed.path == "/api/workspace_registro_usuario_toggle":
             session = getattr(self, "auth_session", None) or self._current_session()
-            if not workspace_session_is_privileged(session):
-                json_response(self, {"error": "No autorizado"}, status=403)
-                return
             workspace_id = str(payload.get("workspace_id") or "").strip()
             usuario_id = str(payload.get("usuario_id") or payload.get("id") or "").strip()
             enabled = 1 if str(payload.get("enabled") or payload.get("registro_horario_activo") or "").strip().lower() in {"1", "true", "si", "sí", "on"} else 0
             if not workspace_id or not usuario_id:
                 json_response(self, {"error": "workspace_id y usuario_id requeridos"}, status=400)
+                return
+            if not session or not workspace_actor_can_manage_workspace(conn, session, workspace_id):
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
+            try:
+                ensure_workspace_core_tables(conn)
+            except Exception:
+                pass
+            try:
+                if not conn.execute(
+                    "SELECT 1 FROM workspace_miembros WHERE workspace_id = ? AND usuario_id = ? LIMIT 1",
+                    (workspace_id, usuario_id),
+                ).fetchone():
+                    json_response(self, {"error": "No autorizado"}, status=403)
+                    return
+            except Exception:
+                json_response(self, {"error": "No autorizado"}, status=403)
                 return
             prev_user = conn.execute(
                 "SELECT id, nombre, apellido, usuario, email, servicio, rol, activo, COALESCE(registro_horario_activo, 0) AS registro_horario_activo FROM usuarios WHERE id = ? LIMIT 1",
@@ -35389,10 +35475,10 @@ class Handler(BaseHTTPRequestHandler):
             return
         elif parsed.path == "/api/workspace_registro_periodo_lock":
             session = getattr(self, "auth_session", None) or self._current_session()
-            if not workspace_session_is_privileged(session):
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            if not session or not workspace_actor_can_manage_workspace(conn, session, workspace_id):
                 json_response(self, {"error": "No autorizado"}, status=403)
                 return
-            workspace_id = str(payload.get("workspace_id") or "").strip()
             month = str(payload.get("month") or payload.get("mes") or "").strip()
             empresa_id = str(payload.get("empresa_id") or "").strip() or None
             locked = 1 if str(payload.get("locked") or payload.get("bloqueado") or "").strip().lower() in {"1", "true", "si", "sí", "on"} else 0
@@ -44879,6 +44965,20 @@ class Handler(BaseHTTPRequestHandler):
             if not payload:
                 json_response(self, {"error": "workspace no encontrado"}, status=404)
                 return
+            # Contexto del actor (rol dentro del workspace) para el front en modo tenant.
+            session = getattr(self, "auth_session", None) or self._current_session()
+            member_role = ""
+            try:
+                if session and workspace_actor_is_privileged(conn, session):
+                    member_role = "Owner"
+                elif session:
+                    uid = str(session.get("user_id") or "").strip()
+                    member = fetch_workspace_member(conn, workspace_id, uid) if uid else None
+                    member_role = str((member or {}).get("rol") or "").strip()
+            except Exception:
+                member_role = ""
+            payload["member_role"] = member_role
+            payload["can_manage_workspace"] = bool(workspace_actor_can_manage_workspace(conn, session, workspace_id)) if session else False
             json_response(self, payload)
             return
 
@@ -44893,9 +44993,7 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "workspace_id requerido"}, status=400)
                 return
             session = getattr(self, "auth_session", None) or self._current_session()
-            privileged = True
-            if session and not workspace_session_is_privileged(session):
-                privileged = False
+            privileged = bool(session and workspace_actor_can_manage_workspace(conn, session, workspace_id))
 
             # RRHH (horario): aplica el mismo control que endpoints individuales.
             persona_id = ""
@@ -45012,7 +45110,7 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "workspace_id requerido"}, status=400)
                 return
             session = getattr(self, "auth_session", None) or self._current_session()
-            if not workspace_actor_is_privileged(conn, session):
+            if not session or not workspace_actor_can_manage_workspace(conn, session, workspace_id):
                 json_response(self, {"error": "No autorizado"}, status=403)
                 return
             rows = conn.execute(
@@ -45208,7 +45306,8 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "workspace_id requerido"}, status=400)
                 return
             session = getattr(self, "auth_session", None) or self._current_session()
-            if session and not workspace_session_is_privileged(session):
+            can_manage = bool(session and workspace_actor_can_manage_workspace(conn, session, workspace_id))
+            if session and not can_manage:
                 user_id = str(session.get("user_id") or "").strip()
                 if not user_id:
                     json_response(self, {"error": "No autenticado"}, status=401)
@@ -45244,7 +45343,7 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "workspace_id requerido"}, status=400)
                 return
             session = getattr(self, "auth_session", None) or self._current_session()
-            if session and not workspace_session_is_privileged(session):
+            if not session or not workspace_actor_can_manage_workspace(conn, session, workspace_id):
                 json_response(self, {"error": "No autorizado"}, status=403)
                 return
             json_response(self, fetch_workspace_registro_periodos(conn, workspace_id, empresa_id=empresa_id))
@@ -45258,7 +45357,7 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "workspace_id requerido"}, status=400)
                 return
             session = getattr(self, "auth_session", None) or self._current_session()
-            if session and not workspace_session_is_privileged(session):
+            if not session or not workspace_actor_can_manage_workspace(conn, session, workspace_id):
                 json_response(self, {"rows": []})
                 return
             json_response(
@@ -45283,7 +45382,8 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "workspace_id requerido"}, status=400)
                 return
             session = getattr(self, "auth_session", None) or self._current_session()
-            if session and not workspace_session_is_privileged(session):
+            can_manage = bool(session and workspace_actor_can_manage_workspace(conn, session, workspace_id))
+            if session and not can_manage:
                 user_id = str(session.get("user_id") or "").strip()
                 persona_id = workspace_persona_id_for_user(conn, workspace_id, user_id)
                 empresa_id = ""
@@ -45312,7 +45412,8 @@ class Handler(BaseHTTPRequestHandler):
                 return
             session = getattr(self, "auth_session", None) or self._current_session()
             persona_id = ""
-            if session and not workspace_session_is_privileged(session):
+            can_manage = bool(session and workspace_actor_can_manage_workspace(conn, session, workspace_id))
+            if session and not can_manage:
                 user_id = str(session.get("user_id") or "").strip()
                 persona_id = workspace_persona_id_for_user(conn, workspace_id, user_id)
                 empresa_id = ""
@@ -45329,7 +45430,8 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "workspace_id requerido"}, status=400)
                 return
             session = getattr(self, "auth_session", None) or self._current_session()
-            if session and not workspace_session_is_privileged(session):
+            can_manage = bool(session and workspace_actor_can_manage_workspace(conn, session, workspace_id))
+            if session and not can_manage:
                 user_id = str(session.get("user_id") or "").strip()
                 persona_id = workspace_persona_id_for_user(conn, workspace_id, user_id)
                 if not persona_id:
@@ -45346,7 +45448,8 @@ class Handler(BaseHTTPRequestHandler):
                 return
             session = getattr(self, "auth_session", None) or self._current_session()
             persona_id = ""
-            if session and not workspace_session_is_privileged(session):
+            can_manage = bool(session and workspace_actor_can_manage_workspace(conn, session, workspace_id))
+            if session and not can_manage:
                 user_id = str(session.get("user_id") or "").strip()
                 persona_id = workspace_persona_id_for_user(conn, workspace_id, user_id)
                 if not persona_id:
@@ -45412,13 +45515,13 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/workspace_kiosk_qr":
             session = getattr(self, "auth_session", None) or self._current_session()
-            if not workspace_actor_is_privileged(conn, session):
-                json_response(self, {"error": "No autorizado"}, status=403)
-                return
             workspace_id = (params.get("workspace_id", [""])[0] or "").strip()
             persona_id = (params.get("persona_id", [""])[0] or "").strip()
             if not workspace_id or not persona_id:
                 json_response(self, {"error": "workspace_id y persona_id requeridos"}, status=400)
+                return
+            if not session or not workspace_actor_can_manage_workspace(conn, session, workspace_id):
+                json_response(self, {"error": "No autorizado"}, status=403)
                 return
             row = conn.execute(
                 """
@@ -45463,7 +45566,8 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "workspace_id requerido"}, status=400)
                 return
             session = getattr(self, "auth_session", None) or self._current_session()
-            if session and not workspace_session_is_privileged(session):
+            can_manage = bool(session and workspace_actor_can_manage_workspace(conn, session, workspace_id))
+            if session and not can_manage:
                 user_id = str(session.get("user_id") or "").strip()
                 persona_id = workspace_persona_id_for_user(conn, workspace_id, user_id)
                 if not persona_id:
@@ -45478,7 +45582,7 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "workspace_id requerido"}, status=400)
                 return
             session = getattr(self, "auth_session", None) or self._current_session()
-            if session and not workspace_session_is_privileged(session):
+            if not session or not workspace_actor_can_manage_workspace(conn, session, workspace_id):
                 json_response(self, {"error": "No autorizado"}, status=403)
                 return
             created = run_workspace_time_missing_sweep(conn, workspace_id)
@@ -45492,7 +45596,7 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "workspace_id requerido"}, status=400)
                 return
             session = getattr(self, "auth_session", None) or self._current_session()
-            if session and not workspace_session_is_privileged(session):
+            if not session or not workspace_actor_can_manage_workspace(conn, session, workspace_id):
                 json_response(self, {"error": "No autorizado"}, status=403)
                 return
             payload = fetch_workspace_time_sweep_status()
@@ -45512,7 +45616,8 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "workspace_id y persona_id requeridos"}, status=400)
                 return
             session = getattr(self, "auth_session", None) or self._current_session()
-            if session and not workspace_session_is_privileged(session):
+            can_manage = bool(session and workspace_actor_can_manage_workspace(conn, session, workspace_id))
+            if session and not can_manage:
                 user_id = str(session.get("user_id") or "").strip()
                 own_persona = workspace_persona_id_for_user(conn, workspace_id, user_id)
                 if not own_persona or own_persona != persona_id:
@@ -45528,7 +45633,8 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "workspace_id y persona_id requeridos"}, status=400)
                 return
             session = getattr(self, "auth_session", None) or self._current_session()
-            if session and not workspace_session_is_privileged(session):
+            can_manage = bool(session and workspace_actor_can_manage_workspace(conn, session, workspace_id))
+            if session and not can_manage:
                 user_id = str(session.get("user_id") or "").strip()
                 own_persona = workspace_persona_id_for_user(conn, workspace_id, user_id)
                 if not own_persona or own_persona != persona_id:
@@ -45546,7 +45652,8 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "workspace_id requerido"}, status=400)
                 return
             session = getattr(self, "auth_session", None) or self._current_session()
-            if session and not workspace_session_is_privileged(session):
+            can_manage = bool(session and workspace_actor_can_manage_workspace(conn, session, workspace_id))
+            if session and not can_manage:
                 user_id = str(session.get("user_id") or "").strip()
                 persona_id = workspace_persona_id_for_user(conn, workspace_id, user_id)
                 empresa_id = ""
@@ -45563,7 +45670,7 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "workspace_id requerido"}, status=400)
                 return
             session = getattr(self, "auth_session", None) or self._current_session()
-            if session and not workspace_session_is_privileged(session):
+            if not session or not workspace_actor_can_manage_workspace(conn, session, workspace_id):
                 json_response(self, {"error": "No autorizado"}, status=403)
                 return
             json_response(self, fetch_workspace_rrhh_vacaciones_summary(conn, workspace_id, year=year))
@@ -45578,7 +45685,8 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "workspace_id requerido"}, status=400)
                 return
             session = getattr(self, "auth_session", None) or self._current_session()
-            if session and not workspace_session_is_privileged(session):
+            can_manage = bool(session and workspace_actor_can_manage_workspace(conn, session, workspace_id))
+            if session and not can_manage:
                 user_id = str(session.get("user_id") or "").strip()
                 persona_id = workspace_persona_id_for_user(conn, workspace_id, user_id)
                 empresa_id = ""
@@ -45596,7 +45704,8 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "workspace_id requerido"}, status=400)
                 return
             session = getattr(self, "auth_session", None) or self._current_session()
-            if session and not workspace_session_is_privileged(session):
+            can_manage = bool(session and workspace_actor_can_manage_workspace(conn, session, workspace_id))
+            if session and not can_manage:
                 user_id = str(session.get("user_id") or "").strip()
                 persona_id = workspace_persona_id_for_user(conn, workspace_id, user_id)
                 empresa_id = ""
@@ -45613,7 +45722,8 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "workspace_id requerido"}, status=400)
                 return
             session = getattr(self, "auth_session", None) or self._current_session()
-            if session and not workspace_session_is_privileged(session):
+            can_manage = bool(session and workspace_actor_can_manage_workspace(conn, session, workspace_id))
+            if session and not can_manage:
                 user_id = str(session.get("user_id") or "").strip()
                 own_persona = workspace_persona_id_for_user(conn, workspace_id, user_id)
                 if not own_persona:
@@ -45707,7 +45817,8 @@ class Handler(BaseHTTPRequestHandler):
                 return
             session = getattr(self, "auth_session", None) or self._current_session()
             persona_id = ""
-            if session and not workspace_session_is_privileged(session):
+            can_manage = bool(session and workspace_actor_can_manage_workspace(conn, session, workspace_id))
+            if session and not can_manage:
                 user_id = str(session.get("user_id") or "").strip()
                 persona_id = workspace_persona_id_for_user(conn, workspace_id, user_id)
                 empresa_id = ""
@@ -45728,7 +45839,7 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "workspace_id requerido"}, status=400)
                 return
             session = getattr(self, "auth_session", None) or self._current_session()
-            if session and not workspace_session_is_privileged(session):
+            if not session or not workspace_actor_can_manage_workspace(conn, session, workspace_id):
                 json_response(self, {"error": "No autorizado"}, status=403)
                 return
             month_text = str(month or "").strip()
