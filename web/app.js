@@ -4367,10 +4367,10 @@ const renderCompanyCards = () => {
     tenantCard.className = "company-card";
     tenantCard.dataset.action = "holding-tenant";
     tenantCard.innerHTML = `
-      <h3>Workspace ${getWorkspaceDisplayName(state.currentWorkspaceName || DEFAULT_TENANT_WORKSPACE_SLUG)}</h3>
-      <div class="company-meta">Espacio del grupo donde viven sus empresas, clientes, módulos y operativa diaria.</div>
-      <div class="company-meta">Primero entras al workspace y desde ahí eliges la empresa con la que quieres trabajar.</div>
-      <a class="card-link" href="?holding=1&mode=tenant&workspace=${encodeURIComponent(workspaceSlug)}&view=overview" data-action="holding-tenant">Entrar</a>
+      <h3>Workspaces</h3>
+      <div class="company-meta">Acceso al listado completo de workspaces disponibles.</div>
+      <div class="company-meta">Selecciona un workspace y entra en su configuración u operativa.</div>
+      <a class="card-link" href="?holding=1&mode=platform&view=tenant" data-action="holding-tenant">Entrar</a>
     `;
 	    coreCards.appendChild(tenantCard);
 	    maybeAutoShowHomeTimePunchModal();
