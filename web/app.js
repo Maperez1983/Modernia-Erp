@@ -3,7 +3,7 @@
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v74";
+const APP_SW_VERSION = "v75";
 
 // Workspace tenant por defecto del producto (branding de software). Mantiene compatibilidad con slugs legacy.
 const DEFAULT_TENANT_WORKSPACE_SLUG = "verifika2";
@@ -6471,6 +6471,42 @@ const renderWorkspaceCompanies = (rows = []) => {
       return `<option value="${escapeHtml(label)}" data-company-id="${escapeHtml(String(row.id || ""))}"></option>`;
     })
     .join("");
+  const createPanelHtml = canEdit
+    ? `
+      <div class="form-card" style="margin-bottom: 12px;">
+        <div class="section-head">
+          <div>
+            <h3>Crear empresa</h3>
+            <p class="muted">Crea una empresa nueva en el sistema y la vincula automáticamente a este workspace.</p>
+          </div>
+        </div>
+        <div class="row" style="gap:10px;align-items:flex-end;flex-wrap:wrap">
+          <label style="min-width:280px;flex:1">
+            Nombre
+            <input data-workspace-company-create-name placeholder="Modernia Centro SL" />
+          </label>
+          <label style="min-width:170px">
+            NIF (opcional)
+            <input data-workspace-company-create-nif placeholder="B12345678" />
+          </label>
+          <label style="min-width:280px;flex:1">
+            Dirección (opcional)
+            <input data-workspace-company-create-address placeholder="Calle..., 28000 Madrid" />
+          </label>
+          <label style="min-width:170px">
+            Rol
+            <select data-workspace-company-create-role>
+              <option value="operativa" selected>Operativa</option>
+              <option value="holding">Holding</option>
+              <option value="marca">Marca</option>
+            </select>
+          </label>
+          <button type="button" class="secondary" data-workspace-company-create-btn>Crear y vincular</button>
+          <span class="muted" data-workspace-company-create-status></span>
+        </div>
+      </div>
+    `
+    : "";
   const linkPanelHtml = canEdit
     ? `
       <div class="form-card" style="margin-bottom: 12px;">
@@ -6505,7 +6541,7 @@ const renderWorkspaceCompanies = (rows = []) => {
     `
     : "";
   if (!items.length) {
-    workspaceCompanies.innerHTML = `${linkPanelHtml}<p class='muted'>Sin empresas operativas asociadas.</p>`;
+    workspaceCompanies.innerHTML = `${createPanelHtml}${linkPanelHtml}<p class='muted'>Sin empresas operativas asociadas.</p>`;
     const refreshBtn = workspaceCompanies.querySelector("[data-workspace-company-link-refresh]");
     const status = workspaceCompanies.querySelector("[data-workspace-company-link-status]");
     if (refreshBtn) {
@@ -6556,6 +6592,44 @@ const renderWorkspaceCompanies = (rows = []) => {
         }
       });
     }
+    const createBtn = workspaceCompanies.querySelector("[data-workspace-company-create-btn]");
+    const createStatus = workspaceCompanies.querySelector("[data-workspace-company-create-status]");
+    if (createBtn) {
+      createBtn.addEventListener("click", async () => {
+        const nameInput = workspaceCompanies.querySelector("[data-workspace-company-create-name]");
+        const nifInput = workspaceCompanies.querySelector("[data-workspace-company-create-nif]");
+        const addressInput = workspaceCompanies.querySelector("[data-workspace-company-create-address]");
+        const roleSelect = workspaceCompanies.querySelector("[data-workspace-company-create-role]");
+        const nombre = String(nameInput?.value || "").trim();
+        const nif = String(nifInput?.value || "").trim();
+        const direccion = String(addressInput?.value || "").trim();
+        const rol = String(roleSelect?.value || "operativa").trim() || "operativa";
+        if (!nombre) {
+          if (createStatus) createStatus.textContent = "Indica un nombre.";
+          return;
+        }
+        try {
+          if (createStatus) createStatus.textContent = "Creando...";
+          const created = await postJsonWithDbRetry("/api/empresa_create", {
+            nombre,
+            nif: nif || undefined,
+            direccion: direccion || undefined,
+          });
+          const empresaId = String(created?.id || "").trim();
+          if (!empresaId) throw new Error("No se pudo crear la empresa.");
+          if (createStatus) createStatus.textContent = "Vinculando...";
+          await postJsonWithDbRetry("/api/workspace_empresa_link", {
+            workspace_id: state.currentWorkspaceId,
+            empresa_id: empresaId,
+            rol,
+          });
+          if (createStatus) createStatus.textContent = "Empresa creada y vinculada.";
+          await loadWorkspaceDetail(state.currentWorkspaceId);
+        } catch (error) {
+          if (createStatus) createStatus.textContent = error?.message || "No se pudo crear/vincular.";
+        }
+      });
+    }
     return;
   }
   const normalizedRows = (rows || []).map((row) => {
@@ -6584,6 +6658,7 @@ const renderWorkspaceCompanies = (rows = []) => {
     return { ...row, _cnaes: unique };
   });
   workspaceCompanies.innerHTML = `
+    ${createPanelHtml}
     ${linkPanelHtml}
     <div class="workspace-context-strip">
       <div>
@@ -6819,6 +6894,45 @@ const renderWorkspaceCompanies = (rows = []) => {
           await loadWorkspaceDetail(state.currentWorkspaceId);
         } catch (error) {
           if (status) status.textContent = error?.message || "No se pudo vincular.";
+        }
+      });
+    }
+    const createBtn = workspaceCompanies.querySelector("[data-workspace-company-create-btn]");
+    const createStatus = workspaceCompanies.querySelector("[data-workspace-company-create-status]");
+    if (createBtn) {
+      createBtn.addEventListener("click", async () => {
+        if (!canEdit) return;
+        const nameInput = workspaceCompanies.querySelector("[data-workspace-company-create-name]");
+        const nifInput = workspaceCompanies.querySelector("[data-workspace-company-create-nif]");
+        const addressInput = workspaceCompanies.querySelector("[data-workspace-company-create-address]");
+        const roleSelect = workspaceCompanies.querySelector("[data-workspace-company-create-role]");
+        const nombre = String(nameInput?.value || "").trim();
+        const nif = String(nifInput?.value || "").trim();
+        const direccion = String(addressInput?.value || "").trim();
+        const rol = String(roleSelect?.value || "operativa").trim() || "operativa";
+        if (!nombre) {
+          if (createStatus) createStatus.textContent = "Indica un nombre.";
+          return;
+        }
+        try {
+          if (createStatus) createStatus.textContent = "Creando...";
+          const created = await postJsonWithDbRetry("/api/empresa_create", {
+            nombre,
+            nif: nif || undefined,
+            direccion: direccion || undefined,
+          });
+          const empresaId = String(created?.id || "").trim();
+          if (!empresaId) throw new Error("No se pudo crear la empresa.");
+          if (createStatus) createStatus.textContent = "Vinculando...";
+          await postJsonWithDbRetry("/api/workspace_empresa_link", {
+            workspace_id: state.currentWorkspaceId,
+            empresa_id: empresaId,
+            rol,
+          });
+          if (createStatus) createStatus.textContent = "Empresa creada y vinculada.";
+          await loadWorkspaceDetail(state.currentWorkspaceId);
+        } catch (error) {
+          if (createStatus) createStatus.textContent = error?.message || "No se pudo crear/vincular.";
         }
       });
     }
