@@ -3244,6 +3244,34 @@ body.crm-fin #companySummary {
   margin-top: 12px;
 }
 
+#crmSection .crm-home-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(320px, 0.75fr);
+  gap: 14px;
+  align-items: start;
+}
+
+#crmSection .crm-home-left,
+#crmSection .crm-home-right {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+#crmSection .crm-home-cards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+#crmSection .crm-home-kpis {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+#crmSection details.crm-home-quicksearch {
+  margin-top: 4px;
+}
+
 #crmSection .crm-lightning-brand {
   display: grid;
   gap: 2px;
@@ -3724,6 +3752,18 @@ body.crm-fin #companySummary {
 @media (max-width: 980px) {
   #crmSection .crm-lightning-shell {
     grid-template-columns: 1fr;
+  }
+
+  #crmSection .crm-home-grid {
+    grid-template-columns: 1fr;
+  }
+
+  #crmSection .crm-home-cards {
+    grid-template-columns: 1fr;
+  }
+
+  #crmSection .crm-home-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   #crmSection .crm-lightning-sidebar {

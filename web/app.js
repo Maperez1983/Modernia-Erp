@@ -2542,13 +2542,15 @@ const gestoriaFacturasTable = document.getElementById("gestoriaFacturasTable");
 const crmNuevaCaptacionBtn = document.getElementById("crmNuevaCaptacionBtn");
 const crmNuevaCompraventaBtn = document.getElementById("crmNuevaCompraventaBtn");
 const crmNuevaDemandaBtn = document.getElementById("crmNuevaDemandaBtn");
-const crmGlobalSearch = document.getElementById("crmGlobalSearch");
-const crmGlobalSearchResults = document.getElementById("crmGlobalSearchResults");
-const crmLightningSidebar = document.getElementById("crmLightningSidebar");
-const crmQuickNewBtn = document.getElementById("crmQuickNewBtn");
-const crmQuickNewMenu = document.getElementById("crmQuickNewMenu");
-const crmRecentBtn = document.getElementById("crmRecentBtn");
-const crmRecentMenu = document.getElementById("crmRecentMenu");
+	const crmGlobalSearch = document.getElementById("crmGlobalSearch");
+	const crmGlobalSearchResults = document.getElementById("crmGlobalSearchResults");
+	const crmBrandTitle = document.getElementById("crmBrandTitle");
+	const crmBrandSubtitle = document.getElementById("crmBrandSubtitle");
+	const crmLightningSidebar = document.getElementById("crmLightningSidebar");
+	const crmQuickNewBtn = document.getElementById("crmQuickNewBtn");
+	const crmQuickNewMenu = document.getElementById("crmQuickNewMenu");
+	const crmRecentBtn = document.getElementById("crmRecentBtn");
+	const crmRecentMenu = document.getElementById("crmRecentMenu");
 const crmRecentList = document.getElementById("crmRecentList");
 const crmRecentClearBtn = document.getElementById("crmRecentClearBtn");
 const crmWorkspaceShell = document.getElementById("crmWorkspaceShell");
@@ -2565,15 +2567,18 @@ const crmViewVisitas = document.getElementById("crmViewVisitas");
 const crmViewAgenda = document.getElementById("crmViewAgenda");
 const crmViewInformadores = document.getElementById("crmViewInformadores");
 const crmViewEdificios = document.getElementById("crmViewEdificios");
-const crmViewLegal = document.getElementById("crmViewLegal");
-const crmResumenPulse = document.getElementById("crmResumenPulse");
-const crmResumenHoy = document.getElementById("crmResumenHoy");
-const crmResumenAlertas = document.getElementById("crmResumenAlertas");
-const crmResumenActividad = document.getElementById("crmResumenActividad");
-const crmResumenInmuebles = document.getElementById("crmResumenInmuebles");
-const crmResumenDireccionKpis = document.getElementById("crmResumenDireccionKpis");
-const crmResumenTopDesviacion = document.getElementById("crmResumenTopDesviacion");
-const crmResumenTopPlazo = document.getElementById("crmResumenTopPlazo");
+	const crmViewLegal = document.getElementById("crmViewLegal");
+	const crmResumenPulse = document.getElementById("crmResumenPulse");
+	const crmResumenHoy = document.getElementById("crmResumenHoy");
+	const crmResumenAlertas = document.getElementById("crmResumenAlertas");
+	const crmInicioNoticias = document.getElementById("crmInicioNoticias");
+	const crmInicioEncargos = document.getElementById("crmInicioEncargos");
+	const crmInicioPedidos = document.getElementById("crmInicioPedidos");
+	const crmResumenActividad = document.getElementById("crmResumenActividad");
+	const crmResumenInmuebles = document.getElementById("crmResumenInmuebles");
+	const crmResumenDireccionKpis = document.getElementById("crmResumenDireccionKpis");
+	const crmResumenTopDesviacion = document.getElementById("crmResumenTopDesviacion");
+	const crmResumenTopPlazo = document.getElementById("crmResumenTopPlazo");
 const crmResumenRange = document.getElementById("crmResumenRange");
 const crmResumenDesde = document.getElementById("crmResumenDesde");
 const crmResumenHasta = document.getElementById("crmResumenHasta");
@@ -16618,6 +16623,13 @@ const resolveEmpresaForServiceKey = (serviceKey = "") => {
   return resolveEmpresaById(state.currentEmpresaId);
 };
 
+const syncCrmInmoBrand = (empresaNombre = "") => {
+  if (!crmBrandTitle || !crmBrandSubtitle) return;
+  const company = String(empresaNombre || state.currentEmpresaName || "").trim();
+  crmBrandTitle.textContent = company || "Inmobiliaria";
+  crmBrandSubtitle.textContent = "CRM inmobiliario";
+};
+
 const openCrmInmobiliario = () => {
   const fromHome = state.currentPage === "home";
   const hadRouteParams = (() => {
@@ -16672,6 +16684,7 @@ const openCrmInmobiliario = () => {
   }
   // Asegura contexto de empresa (necesario para endpoints que requieren empresa_nombre).
   openCompany(empresa.nombre, { allowRestricted: true });
+  syncCrmInmoBrand(empresa.nombre);
   state.crmInmoEmpresaId = empresa.id;
   setStoredServiceCompanyId("inmobiliaria", empresa.id);
   setTab("crm");
@@ -24449,7 +24462,10 @@ const updateTableVisibility = () => {
   } catch {
     crmContext = "";
   }
-  document.body.classList.toggle("crm-context-inmo", crmContext === "inmo" || crmContext === "inmobiliaria");
+  document.body.classList.toggle(
+    "crm-context-inmo",
+    currentTab === "crm" || crmContext === "inmo" || crmContext === "inmobiliaria"
+  );
 
   const isClientePage = state.currentPage === "cliente";
   const isClientesModule = state.currentModule === "clientes";
@@ -29691,12 +29707,13 @@ const renderCrmActionList = (container, items = [], emptyMessage = "Sin elemento
       if (item.captacionId) attrs.push(`data-captacion-id="${escapeHtml(item.captacionId)}"`);
       if (item.crmView) attrs.push(`data-crm-view="${escapeHtml(item.crmView)}"`);
       if (item.etapa) attrs.push(`data-etapa="${escapeHtml(item.etapa)}"`);
+      if (item.crmQuick) attrs.push(`data-crm-quick="${escapeHtml(item.crmQuick)}"`);
       const href = item.inmuebleId
         ? `/?crm=inmo&inmueble=${encodeURIComponent(item.inmuebleId)}`
         : item.captacionId
           ? `/?crm=inmo&captacion=${encodeURIComponent(item.captacionId)}`
           : "";
-      const tag = href ? "a" : item.crmView ? "button" : "div";
+      const tag = href ? "a" : item.crmQuick || item.crmView ? "button" : "div";
       const typeAttr = tag === "button" ? ' type="button"' : "";
       const hrefAttr = tag === "a" ? ` href="${escapeHtml(href)}"` : "";
       return `
@@ -29727,6 +29744,16 @@ const renderCrmActionList = (container, items = [], emptyMessage = "Sin elemento
         }
         ensureCrmOpen(() => openInmuebleDetail(ensured, "resumen"));
       }
+    });
+  });
+  container.querySelectorAll("[data-crm-quick]").forEach((btn) => {
+    btn.addEventListener("click", (event) => {
+      if (!(event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)) {
+        event.preventDefault?.();
+      }
+      const token = String(btn.dataset.crmQuick || "").trim();
+      if (!token) return;
+      applyCrmTecnocloudQuickSearch(token);
     });
   });
   container.querySelectorAll("[data-crm-view]").forEach((btn) => {
@@ -30379,14 +30406,6 @@ const renderCrmResumenDashboard = () => {
   if (crmResumenPulse) {
     renderCrmMiniCards(crmResumenPulse, [
       {
-        title: "Entrada (inventario)",
-        value: stageCount("Inmueble"),
-        meta: "Inmueble",
-        summary: "Fichas en inventario por cualificar (pasar a Noticia).",
-        crmView: "captaciones",
-        etapa: "Inmueble",
-      },
-      {
         title: "Noticias vivas",
         value: stageCount("Noticia"),
         meta: "Noticia",
@@ -30403,36 +30422,116 @@ const renderCrmResumenDashboard = () => {
         etapa: "Encargo",
       },
       {
-        title: "Propuestas",
-        value: stageCount("Propuesta"),
-        meta: "Oferta",
-        summary: "Ofertas presentadas pendientes de respuesta o contraoferta.",
-        crmView: "captaciones",
-        etapa: "Propuesta",
-      },
-      {
-        title: "Arras",
-        value: stageCount("Contrato de arras"),
-        meta: "Pre-cierre",
-        summary: "Arras firmadas: coordinación pre-escritura y firma.",
-        crmView: "captaciones",
-        etapa: "Contrato de arras",
-      },
-      {
-        title: "Demandas activas",
+        title: "Pedidos",
         value: demandas.filter((row) => normalizeSimple(row.estado || "") === "activa").length,
         meta: "Compradores",
-        summary: "Base compradora con potencial de matching o visita.",
+        summary: "Pedidos activos para matching o visita.",
         crmView: "demandas",
       },
-      {
-        title: "Visitas abiertas",
-        value: visitas.filter((row) => normalizeSimple(row.estado || "").includes("pendiente")).length,
-        meta: "Agenda",
-        summary: "Citas todavía sin resultado o cierre comercial.",
-        crmView: "visitas",
-      },
     ]);
+  }
+
+  if (crmInicioNoticias || crmInicioEncargos || crmInicioPedidos) {
+    const activeStages = new Set(["Inmueble", "Noticia", "Encargo", "Propuesta", "Reservado", "Contrato de arras"]);
+    const missingNext = activePipelineItems.filter((row) => activeStages.has(String(row.stage || "")) && !String(row.proxima_accion || "").trim()).length;
+    const noticiasVivas = stageCount("Noticia");
+    const noticiasSinVerificar = activePipelineItems.filter((row) => String(row.stage || "") === "Noticia" && !row.noticia_verificada).length;
+
+    const activeEncargos = stageCount("Encargo");
+    const pendingPropuestas = stageCount("Propuesta");
+    const pendingArras = stageCount("Contrato de arras");
+    const encargosSinAccion = activePipelineItems.filter((row) => String(row.stage || "") === "Encargo" && !String(row.proxima_accion || "").trim()).length;
+
+    const demandasActivas = demandas.filter((row) => normalizeSimple(row.estado || "") === "activa").length;
+    const pendingVisits = visitas.filter((row) => normalizeSimple(row.estado || "").includes("pendiente")).length;
+    const urgentDemandas = demandas.filter((row) => normalizeSimple(row.prioridad || "") === "alta" && normalizeSimple(row.estado || "") === "activa").length;
+
+    if (crmInicioNoticias) {
+      renderCrmActionList(
+        crmInicioNoticias,
+        [
+          {
+            title: "Noticias vivas",
+            summary: `${noticiasVivas} oportunidades en fase Noticia.`,
+            crmView: "captaciones",
+            etapa: "Noticia",
+          },
+          {
+            title: "Noticias sin verificar",
+            summary: `${noticiasSinVerificar} noticias pendientes de verificar.`,
+            crmQuick: "captaciones:quick_noticia_sin_verificar",
+          },
+          {
+            title: "Pipeline sin próxima acción",
+            summary: `${missingNext} inmuebles sin siguiente paso definido.`,
+            crmQuick: "captaciones:quick_sin_proxima_accion",
+          },
+        ],
+        "Sin foco de noticias."
+      );
+    }
+
+    if (crmInicioEncargos) {
+      renderCrmActionList(
+        crmInicioEncargos,
+        [
+          {
+            title: "Encargos activos",
+            summary: `${activeEncargos} expedientes en comercialización activa.`,
+            crmView: "captaciones",
+            etapa: "Encargo",
+          },
+          {
+            title: "Encargos sin siguiente acción",
+            summary: `${encargosSinAccion} encargos sin próximo hito definido.`,
+            crmView: "captaciones",
+            etapa: "Encargo",
+          },
+          {
+            title: "Propuestas pendientes",
+            summary: `${pendingPropuestas} propuestas/ofertas a la espera de aceptación.`,
+            crmView: "captaciones",
+            etapa: "Propuesta",
+          },
+          {
+            title: "Arras pendientes",
+            summary: `${pendingArras} expedientes en fase de arras.`,
+            crmView: "captaciones",
+            etapa: "Contrato de arras",
+          },
+        ],
+        "Sin foco de encargos."
+      );
+    }
+
+    if (crmInicioPedidos) {
+      renderCrmActionList(
+        crmInicioPedidos,
+        [
+          {
+            title: "Demandas activas",
+            summary: `${demandasActivas} compradores en seguimiento.`,
+            crmQuick: "demandas:activa",
+          },
+          {
+            title: "Demandas urgentes",
+            summary: `${urgentDemandas} compradores de prioridad alta.`,
+            crmView: "demandas",
+          },
+          {
+            title: "Visitas pendientes",
+            summary: `${pendingVisits} visitas por cerrar resultado.`,
+            crmQuick: "visitas:pendiente",
+          },
+          {
+            title: "Act./Citas pendientes",
+            summary: "Acciones y citas pendientes de cierre.",
+            crmQuick: "agenda:Pendiente",
+          },
+        ],
+        "Sin foco de pedidos."
+      );
+    }
   }
 
   if (crmResumenHoy) {
@@ -30495,7 +30594,7 @@ const renderCrmResumenDashboard = () => {
         .map((row) => ({
           crmView: "demandas",
           title: row.cliente || "Demanda prioritaria",
-          meta: `${row.zona || "Zona abierta"} · ${row.tipo || "Tipo pendiente"}`,
+          meta: `${row.tipo || "Tipo pendiente"}`,
           summary: "Revisar matching, visita o redefinir la búsqueda.",
           priority: 3,
         })),
@@ -30634,7 +30733,7 @@ const renderCrmResumenDashboard = () => {
         return {
           id: row.id || "",
           title: row.direccion || "Sin dirección",
-          meta: [row.stage || row.estado, row.zona, row.poblacion].filter(Boolean).join(" · ") || "Ubicación pendiente",
+          meta: [row.stage || row.estado, row.poblacion].filter(Boolean).join(" · ") || "Ubicación pendiente",
           summary: proxima || reasons[0] || "Ficha activa",
           score,
         };

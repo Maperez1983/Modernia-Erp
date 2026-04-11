@@ -8,7 +8,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Verifika²" />
     <title>Verifika² · CRM & Portal</title>
-    <link rel="stylesheet" href="styles.css?v=166" />
+    <link rel="stylesheet" href="styles.css?v=167" />
     <link rel="manifest" href="manifest.webmanifest?v=17" />
     <link rel="icon" href="/icons/ios/v28/icon-192.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/icons/ios/v28/apple-touch-icon-180.png" />
@@ -2198,11 +2198,11 @@
             </aside>
 
             <div class="crm-lightning-main">
-              <div class="crm-lightning-topbar">
-                <div class="crm-lightning-brand">
-                  <div class="crm-lightning-brand-title">Modernia</div>
-                  <div class="crm-lightning-brand-sub">Lightning</div>
-                </div>
+	              <div class="crm-lightning-topbar">
+	                <div class="crm-lightning-brand">
+	                  <div class="crm-lightning-brand-title" id="crmBrandTitle">Inmobiliaria</div>
+	                  <div class="crm-lightning-brand-sub" id="crmBrandSubtitle">CRM</div>
+	                </div>
 
                 <div id="crmWorkspaceTabs" class="crm-workspace-tabs crm-lightning-tabs" role="tablist" aria-label="Menú superior Tecnocloud-like">
                   <button type="button" class="tab active" data-crm-view="resumen">Inicio</button>
@@ -2223,136 +2223,122 @@
                 </div>
               </div>
 
-              <div class="crm-lightning-content">
-                <div id="crmWorkspaceShell" class="crm-workspace-shell">
-                  <div id="crmWorkspace">
-              <div id="crmViewResumen" class="crm-workspace-view">
-                <div class="form-card crm-resumen-compact-note">
-                  <div class="section-head">
-                    <div>
-                      <h3>Inicio</h3>
-                      <p class="muted">Vista limpia para el trabajo diario. Usa el menú superior o lateral para entrar a cada listado.</p>
-                    </div>
-                  </div>
-                </div>
-                <div class="form-card crm-quicksearch-card" id="crmQuickSearchCard">
-                  <div class="section-head">
-                    <div>
-                      <h3>Búsquedas principales</h3>
-                      <p class="muted">Atajos para priorizar el trabajo diario.</p>
-                    </div>
-                  </div>
-                  <div class="crm-quicksearch-grid" role="list">
-                    <button type="button" class="crm-quicksearch" data-crm-quick="captaciones:quick_sin_contacto_120">Pipeline · Sin contacto &gt;120 días</button>
-                    <button type="button" class="crm-quicksearch" data-crm-quick="captaciones:quick_noticia_sin_verificar">Pipeline · Noticias sin verificar</button>
-                    <button type="button" class="crm-quicksearch" data-crm-quick="captaciones:quick_sin_proxima_accion">Pipeline · Sin próxima acción</button>
-                    <button type="button" class="crm-quicksearch" data-crm-quick="demandas:activa">Pedidos · Activas</button>
-                    <button type="button" class="crm-quicksearch" data-crm-quick="visitas:pendiente">Visitas · Pendientes</button>
-                    <button type="button" class="crm-quicksearch" data-crm-quick="agenda:Pendiente">Act./Citas · Pendientes</button>
-                  </div>
-                </div>
-                <div class="crm-summary-grid">
-                  <div class="form-card crm-focus-card">
-                    <div class="section-head">
-                      <div>
-                        <h3>Panel comercial</h3>
-                        <p class="muted">Lectura rápida y acceso directo a expedientes.</p>
-                      </div>
-                    </div>
-                    <div id="crmResumenPulse" class="crm-mini-list"></div>
-                    <div class="crm-quick-actions">
-                      <button type="button" class="crm-quick-action" data-crm-action="captacion">
-                        <strong>Nuevo inmueble</strong>
-                        <span>Alta inicial del inmueble, propietario y canal de entrada</span>
-                      </button>
-                      <button type="button" class="crm-quick-action" data-crm-action="compraventa">
-                        <strong>Nueva compraventa</strong>
-                        <span>Venta nueva con precios, honorarios y documentación</span>
-                      </button>
-                      <button type="button" class="crm-quick-action" data-crm-action="demanda">
-                        <strong>Nuevo pedido</strong>
-                        <span>Pedido de comprador con matching posterior</span>
-                      </button>
-                    </div>
-                  </div>
-                  <div class="form-card crm-focus-card">
-                    <div class="section-head">
-                      <div>
-                        <h3>Trabajo de hoy</h3>
-                        <p class="muted">Qué inmuebles requieren llamada, cita, documentación o siguiente hito.</p>
-                      </div>
-                    </div>
-                    <div id="crmResumenHoy" class="crm-focus-list"></div>
-                  </div>
-                </div>
-                <details class="crm-advanced" id="crmAdvancedResumen">
-                  <summary>Informes y alertas (avanzado)</summary>
-                  <div class="form-card" id="crmResumenYtdBoard">
-                    <div class="section-head">
-                      <div>
-                        <h3 id="crmResumenYtdTitle">KPIs del año</h3>
-                        <p class="muted">Ventas, comisiones, captación y actividad comercial (YTD).</p>
-                      </div>
-                    </div>
-                    <div class="crm-resumen-toolbar">
-                      <label>
-                        Año
-                        <select id="crmResumenYtdYear"></select>
-                      </label>
-                      <label class="hidden" id="crmResumenYtdResponsableWrap">
-                        Asesor
-                        <select id="crmResumenYtdResponsable">
-                          <option value="">Todos</option>
-                        </select>
-                      </label>
-                    </div>
-                    <div id="crmResumenYtdKpis" class="crm-mini-list"></div>
-                    <div class="grid dashboard-charts crm-ytd-charts">
-                      <div class="chart-card">
-                        <h4>Actividad y cierres (mes)</h4>
-                        <canvas id="crmYtdOperacionesChart"></canvas>
-                      </div>
-                      <div class="chart-card">
-                        <h4>Comisiones (mes)</h4>
-                        <canvas id="crmYtdComisionesChart"></canvas>
-                      </div>
-                      <div class="chart-card">
-                        <h4>Embudo (YTD)</h4>
-                        <canvas id="crmYtdEmbudoChart"></canvas>
-                      </div>
-                    </div>
-                    <div class="crm-split">
-                      <div>
-                        <div class="section-head compact">
-                          <div>
-                            <h4>Próximas</h4>
-                            <p class="muted">Citas, visitas y acciones en los próximos 7 días.</p>
-                          </div>
-                        </div>
-                        <div id="crmResumenProximas" class="crm-focus-list"></div>
-                      </div>
-                      <div>
-                        <div class="section-head compact">
-                          <div>
-                            <h4>Pendientes</h4>
-                            <p class="muted">Acciones/visitas vencidas que requieren cierre.</p>
-                          </div>
-                        </div>
-                        <div id="crmResumenPendientes" class="crm-focus-list"></div>
-                      </div>
-                    </div>
-                  </div>
-                  <div class="form-card">
-                    <div class="section-head">
-                      <div>
-                        <h3>Alertas del pipeline</h3>
-                        <p class="muted">Incidencias de calidad y expedientes inmobiliarios que se están quedando bloqueados.</p>
-                      </div>
-                    </div>
-                    <div id="crmResumenAlertas" class="crm-focus-list"></div>
-                  </div>
-                </details>
-              </div>
+	              <div class="crm-lightning-content">
+	                <div id="crmWorkspaceShell" class="crm-workspace-shell">
+	                  <div id="crmWorkspace">
+	              <div id="crmViewResumen" class="crm-workspace-view">
+	                <div class="form-card">
+	                  <div class="section-head">
+	                    <div>
+	                      <h3>Inicio</h3>
+	                      <p class="muted">Homepage tipo Tecnocloud: KPIs, gestión y agenda. (Sin “Zona”, según vuestra metodología.)</p>
+	                    </div>
+	                  </div>
+	                </div>
+
+	                <div class="crm-home-grid">
+	                  <div class="crm-home-left">
+	                    <div class="form-card">
+	                      <div class="section-head compact">
+	                        <div>
+	                          <h4>KPIs rápidos</h4>
+	                          <p class="muted">Entrada diaria y acceso directo a listados.</p>
+	                        </div>
+	                      </div>
+	                      <div id="crmResumenPulse" class="crm-mini-list crm-home-kpis"></div>
+	                    </div>
+
+	                    <div class="crm-home-cards">
+	                      <div class="form-card">
+	                        <div class="section-head compact">
+	                          <div>
+	                            <h4>Gestión noticias</h4>
+	                            <p class="muted">Valorar, verificar y planificar próxima acción.</p>
+	                          </div>
+	                        </div>
+	                        <div id="crmInicioNoticias" class="crm-focus-list"></div>
+	                      </div>
+	                      <div class="form-card">
+	                        <div class="section-head compact">
+	                          <div>
+	                            <h4>Gestión encargos</h4>
+	                            <p class="muted">Comercialización activa y negociación.</p>
+	                          </div>
+	                        </div>
+	                        <div id="crmInicioEncargos" class="crm-focus-list"></div>
+	                      </div>
+	                      <div class="form-card">
+	                        <div class="section-head compact">
+	                          <div>
+	                            <h4>Gestión pedidos</h4>
+	                            <p class="muted">Seguimiento comprador y matching/visitas.</p>
+	                          </div>
+	                        </div>
+	                        <div id="crmInicioPedidos" class="crm-focus-list"></div>
+	                      </div>
+	                      <div class="form-card">
+	                        <div class="section-head compact">
+	                          <div>
+	                            <h4>Alertas</h4>
+	                            <p class="muted">Bloqueos y faltantes que frenan el pipeline.</p>
+	                          </div>
+	                        </div>
+	                        <div id="crmResumenAlertas" class="crm-focus-list"></div>
+	                      </div>
+	                    </div>
+
+	                    <details class="crm-advanced crm-home-quicksearch" id="crmAdvancedResumen">
+	                      <summary>Otras búsquedas</summary>
+	                      <div class="form-card crm-quicksearch-card" id="crmQuickSearchCard">
+	                        <div class="section-head compact">
+	                          <div>
+	                            <h4>Búsquedas principales</h4>
+	                            <p class="muted">Atajos para priorizar el trabajo diario.</p>
+	                          </div>
+	                        </div>
+	                        <div class="crm-quicksearch-grid" role="list">
+	                          <button type="button" class="crm-quicksearch" data-crm-quick="captaciones:quick_sin_contacto_120">Pipeline · Sin contacto &gt;120 días</button>
+	                          <button type="button" class="crm-quicksearch" data-crm-quick="captaciones:quick_noticia_sin_verificar">Pipeline · Noticias sin verificar</button>
+	                          <button type="button" class="crm-quicksearch" data-crm-quick="captaciones:quick_sin_proxima_accion">Pipeline · Sin próxima acción</button>
+	                          <button type="button" class="crm-quicksearch" data-crm-quick="demandas:activa">Pedidos · Activas</button>
+	                          <button type="button" class="crm-quicksearch" data-crm-quick="visitas:pendiente">Visitas · Pendientes</button>
+	                          <button type="button" class="crm-quicksearch" data-crm-quick="agenda:Pendiente">Act./Citas · Pendientes</button>
+	                        </div>
+	                      </div>
+	                    </details>
+	                  </div>
+
+	                  <div class="crm-home-right">
+	                    <div class="form-card crm-focus-card">
+	                      <div class="section-head compact">
+	                        <div>
+	                          <h4>Calendario · Actividades</h4>
+	                          <p class="muted">Pendientes prioritarios (pipeline + visitas + pedidos).</p>
+	                        </div>
+	                      </div>
+	                      <div id="crmResumenHoy" class="crm-focus-list"></div>
+	                    </div>
+	                    <div class="form-card crm-focus-card">
+	                      <div class="section-head compact">
+	                        <div>
+	                          <h4>Actividades recientes</h4>
+	                          <p class="muted">Últimos movimientos en visitas, ventas y alquileres.</p>
+	                        </div>
+	                      </div>
+	                      <div id="crmResumenActividad" class="crm-recent"></div>
+	                    </div>
+	                    <div class="form-card crm-focus-card">
+	                      <div class="section-head compact">
+	                        <div>
+	                          <h4>Inmuebles foco</h4>
+	                          <p class="muted">Fichas que piden documentación o siguiente paso.</p>
+	                        </div>
+	                      </div>
+	                      <div id="crmResumenInmuebles" class="crm-focus-list"></div>
+	                    </div>
+	                  </div>
+	                </div>
+	              </div>
               <div id="crmViewAnalisis" class="crm-workspace-view hidden">
                 <div class="form-card">
                   <div class="section-head">
@@ -8209,7 +8195,7 @@
     <script src="ui-foundation.js?v=3"></script>
     <script src="app-auth.js?v=10"></script>
     <script src="app-routing.js?v=7"></script>
-    <script src="app.js?v=454"></script>
+    <script src="app.js?v=455"></script>
     <script>
       (function () {
         if (!("serviceWorker" in navigator)) return;
