@@ -1465,13 +1465,85 @@ body.crm-fin #companySummary {
 
 .workspace-company-chip {
   grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
+  align-items: flex-start;
   gap: 12px;
 }
 
 .workspace-company-chip.is-active {
   border-color: rgba(242, 193, 78, 0.24);
   background: linear-gradient(135deg, rgba(248, 250, 252, 0.98), rgba(241, 245, 249, 0.95));
+}
+
+.workspace-company-chip-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.workspace-company-avatar {
+  width: 64px;
+  height: 64px;
+  flex: 0 0 64px;
+  border-radius: 16px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid rgba(11, 29, 51, 0.12);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.workspace-company-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+.workspace-company-initials {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  letter-spacing: 0.8px;
+  color: rgba(var(--ink-rgb), 0.74);
+  background:
+    linear-gradient(135deg, rgba(242, 193, 78, 0.18), rgba(255, 255, 255, 0.92));
+}
+
+.workspace-company-chip-body {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.workspace-company-chip-title {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.workspace-company-name {
+  font-weight: 800;
+  color: var(--ink);
+  line-height: 1.15;
+}
+
+.workspace-company-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.workspace-company-chip-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
 }
 
 .workspace-company-chip-actions {
