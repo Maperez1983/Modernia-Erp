@@ -32820,6 +32820,51 @@ class Handler(BaseHTTPRequestHandler):
             conn.commit()
             json_response(self, {"ok": True})
             return
+        elif parsed.path == "/api/workspace_members_reset":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not workspace_actor_is_privileged(conn, session):
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            ensure_workspace_core_tables(conn)
+            current_user_id = str((session or {}).get("user_id") or "").strip()
+            # No dejamos el workspace sin ningún admin por accidente: re-añadimos al actor como Owner si existe.
+            try:
+                if current_user_id:
+                    ensure_workspace_member(conn, workspace_id, current_user_id, role="Owner", now=now)
+            except Exception:
+                pass
+            removed = 0
+            try:
+                if current_user_id:
+                    removed = int(
+                        (conn.execute(
+                            "SELECT COUNT(*) FROM workspace_miembros WHERE workspace_id = ? AND usuario_id != ?",
+                            (workspace_id, current_user_id),
+                        ).fetchone() or [0])[0]
+                        or 0
+                    )
+                    conn.execute(
+                        "DELETE FROM workspace_miembros WHERE workspace_id = ? AND usuario_id != ?",
+                        (workspace_id, current_user_id),
+                    )
+                else:
+                    removed = int(
+                        (conn.execute(
+                            "SELECT COUNT(*) FROM workspace_miembros WHERE workspace_id = ?",
+                            (workspace_id,),
+                        ).fetchone() or [0])[0]
+                        or 0
+                    )
+                    conn.execute("DELETE FROM workspace_miembros WHERE workspace_id = ?", (workspace_id,))
+            except Exception:
+                removed = 0
+            conn.commit()
+            json_response(self, {"ok": True, "removed": removed})
+            return
         elif parsed.path == "/api/workspace_customer_create":
             session = getattr(self, "auth_session", None) or self._current_session()
             if not workspace_actor_is_privileged(conn, session):

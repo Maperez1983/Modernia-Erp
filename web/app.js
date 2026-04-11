@@ -3,7 +3,7 @@
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v77";
+const APP_SW_VERSION = "v78";
 
 // Workspace tenant por defecto del producto (branding de software). Mantiene compatibilidad con slugs legacy.
 const DEFAULT_TENANT_WORKSPACE_SLUG = "verifika2";
@@ -7313,8 +7313,13 @@ const renderWorkspaceMembers = (rows = []) => {
     .join("");
   workspaceMembers.innerHTML = `
     <div class="workspace-context-strip">
-      <strong>Acceso al workspace</strong>
-      <span class="muted">Añade usuarios por email/usuario y asigna rol.</span>
+      <div>
+        <strong>Acceso al workspace</strong>
+        <div class="muted">Añade usuarios por email/usuario y asigna rol.</div>
+      </div>
+      <div class="workspace-company-chip-actions">
+        <button type="button" class="secondary danger" id="workspaceMemberResetBtn">Reset miembros</button>
+      </div>
     </div>
     <div class="row" style="gap:10px;align-items:flex-end;flex-wrap:wrap">
       <label style="min-width:280px;flex:1">
@@ -7339,6 +7344,7 @@ const renderWorkspaceMembers = (rows = []) => {
   const roleSelect = document.getElementById("workspaceMemberRole");
   const addBtn = document.getElementById("workspaceMemberAddBtn");
   const status = document.getElementById("workspaceMemberStatus");
+  const resetBtn = document.getElementById("workspaceMemberResetBtn");
   if (addBtn) {
     addBtn.addEventListener("click", async () => {
       const login = String(loginInput?.value || "").trim();
@@ -7359,6 +7365,24 @@ const renderWorkspaceMembers = (rows = []) => {
         renderWorkspaceMembers(state.currentWorkspaceMembers);
       } catch (error) {
         if (status) status.textContent = error?.message || "No se pudo añadir.";
+      }
+    });
+  }
+  if (resetBtn) {
+    resetBtn.addEventListener("click", async () => {
+      if (!window.confirm("¿Resetear miembros? Esto quita a todos los usuarios del workspace excepto a tu usuario.")) return;
+      try {
+        if (status) status.textContent = "Reseteando...";
+        const resp = await postJsonWithDbRetry("/api/workspace_members_reset", {
+          workspace_id: state.currentWorkspaceId,
+        });
+        const removed = Number(resp?.removed || 0) || 0;
+        const members = await safeWorkspaceApi(`/api/workspace_members?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}`, { rows: [] });
+        state.currentWorkspaceMembers = members.rows || [];
+        renderWorkspaceMembers(state.currentWorkspaceMembers);
+        if (status) status.textContent = removed ? `Miembros eliminados: ${removed}.` : "Sin cambios.";
+      } catch (error) {
+        if (status) status.textContent = error?.message || "No se pudo resetear.";
       }
     });
   }
