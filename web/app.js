@@ -4386,8 +4386,6 @@ const renderCompanyCards = () => {
           const recentAt = Number(state.homeWorkspacesFetchedAt || 0) || 0;
           let rows = recentRows && (now - recentAt) < 60_000 ? recentRows : null;
           if (!rows) {
-            const health = await probeDbHealth();
-            if (!health.ok) return;
             const data = await safeWorkspaceApi("/api/workspaces", null);
             rows = Array.isArray(data?.rows) ? data.rows : null;
             if (rows) {
