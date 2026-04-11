@@ -3,7 +3,7 @@
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v73";
+const APP_SW_VERSION = "v74";
 
 // Workspace tenant por defecto del producto (branding de software). Mantiene compatibilidad con slugs legacy.
 const DEFAULT_TENANT_WORKSPACE_SLUG = "verifika2";
@@ -16153,8 +16153,25 @@ const openCompany = (empresaName, options = {}) => {
     }
   }
   setCrmMode("");
+  if (isTenantWorkspaceMode()) {
+    const companies = state.currentWorkspaceDetail?.companies || [];
+    if (Array.isArray(companies) && companies.length) {
+      state.empresas = companies;
+      if (empresaSelect) {
+        empresaSelect.innerHTML = "";
+        empresaSelect.appendChild(createOption("", "Todas las empresas"));
+        companies.forEach((item) => {
+          empresaSelect.appendChild(createOption(item.id, item.nombre));
+        });
+      }
+    }
+  }
   const empresa = state.empresas.find((e) => e.nombre === empresaName);
   if (!empresa) {
+    if (isTenantWorkspaceMode()) {
+      alert("Este workspace no tiene empresas vinculadas (o no está cargado). Ve a Workspaces → Empresas para vincular/crear la empresa de este cliente.");
+      return;
+    }
     if (!state.empresas.length) {
       api("/api/empresas")
         .then((empresas) => {
@@ -16381,6 +16398,21 @@ const openCrmInmobiliario = () => {
     }
   })();
   if (!userCanAccessService("inmobiliaria")) return;
+  if (isTenantWorkspaceMode()) {
+    const companies = state.currentWorkspaceDetail?.companies || [];
+    if (!Array.isArray(companies) || !companies.length) {
+      alert("Este workspace no tiene empresas vinculadas. Ve a Workspaces → Empresas para vincular/crear la empresa de este cliente.");
+      return;
+    }
+    state.empresas = companies;
+    if (empresaSelect) {
+      empresaSelect.innerHTML = "";
+      empresaSelect.appendChild(createOption("", "Todas las empresas"));
+      companies.forEach((item) => {
+        empresaSelect.appendChild(createOption(item.id, item.nombre));
+      });
+    }
+  }
   if (!state.empresas.length) {
     api("/api/empresas")
       .then((empresas) => {
@@ -16477,6 +16509,21 @@ const openGestoriaCrm = () => {
 
 const openGestoriaServiceTab = (targetTab = "gestoria-dash") => {
   if (!userCanAccessService("gestoria")) return;
+  if (isTenantWorkspaceMode()) {
+    const companies = state.currentWorkspaceDetail?.companies || [];
+    if (!Array.isArray(companies) || !companies.length) {
+      alert("Este workspace no tiene empresas vinculadas. Ve a Workspaces → Empresas para vincular/crear la empresa de este cliente.");
+      return;
+    }
+    state.empresas = companies;
+    if (empresaSelect) {
+      empresaSelect.innerHTML = "";
+      empresaSelect.appendChild(createOption("", "Todas las empresas"));
+      companies.forEach((item) => {
+        empresaSelect.appendChild(createOption(item.id, item.nombre));
+      });
+    }
+  }
   const empresa = resolveCrmGestoriaEmpresa();
   if (!empresa) return;
   openCompany(empresa.nombre, { allowRestricted: true });
@@ -16539,6 +16586,21 @@ const openSegurosCrm = () => {
     }
   })();
   if (!userCanAccessService("seguros")) return;
+  if (isTenantWorkspaceMode()) {
+    const companies = state.currentWorkspaceDetail?.companies || [];
+    if (!Array.isArray(companies) || !companies.length) {
+      alert("Este workspace no tiene empresas vinculadas. Ve a Workspaces → Empresas para vincular/crear la empresa de este cliente.");
+      return;
+    }
+    state.empresas = companies;
+    if (empresaSelect) {
+      empresaSelect.innerHTML = "";
+      empresaSelect.appendChild(createOption("", "Todas las empresas"));
+      companies.forEach((item) => {
+        empresaSelect.appendChild(createOption(item.id, item.nombre));
+      });
+    }
+  }
   const empresa = resolveCrmSegurosEmpresa();
   if (!empresa) return;
   openCompany(empresa.nombre, { allowRestricted: true });
@@ -16595,6 +16657,21 @@ const openFinCrm = () => {
     }
   })();
   if (!userCanAccessService("financiaciones")) return;
+  if (isTenantWorkspaceMode()) {
+    const companies = state.currentWorkspaceDetail?.companies || [];
+    if (!Array.isArray(companies) || !companies.length) {
+      alert("Este workspace no tiene empresas vinculadas. Ve a Workspaces → Empresas para vincular/crear la empresa de este cliente.");
+      return;
+    }
+    state.empresas = companies;
+    if (empresaSelect) {
+      empresaSelect.innerHTML = "";
+      empresaSelect.appendChild(createOption("", "Todas las empresas"));
+      companies.forEach((item) => {
+        empresaSelect.appendChild(createOption(item.id, item.nombre));
+      });
+    }
+  }
   const empresa = resolveCrmFinEmpresa();
   if (!empresa) return;
   openCompany(empresa.nombre, { allowRestricted: true });
