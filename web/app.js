@@ -16713,7 +16713,7 @@ const syncCrmGlobalSearchUi = (view = "") => {
   }
   const target = getCrmSearchTargetForView(view);
   const placeholder = String(target?.getAttribute?.("placeholder") || "").trim();
-  crmGlobalSearch.placeholder = placeholder || (String(view || "").trim() ? "Buscar en esta vista…" : "Buscar…");
+  crmGlobalSearch.placeholder = placeholder || (String(view || "").trim() ? "Search in this view..." : "Search...");
 };
 
 const syncCrmGlobalSearchTargetValue = (view = "") => {
@@ -43586,17 +43586,41 @@ if (estudioAltaTabs) {
 
 if (crmWorkspaceTabs) {
   crmWorkspaceTabs.addEventListener("click", (event) => {
+    const action = closestFromEvent(event, "[data-crm-action]");
+    if (action && String(action.dataset.crmAction || "").trim() === "clientes") {
+      openClientesModule();
+      return;
+    }
     const btn = closestFromEvent(event, "[data-crm-view]");
     if (!btn) return;
-    setCrmWorkspaceView(btn.dataset.crmView);
+    const view = String(btn.dataset.crmView || "").trim();
+    setCrmWorkspaceView(view);
+    const etapa = String(btn.dataset.etapa || "").trim();
+    if (view === "captaciones" && etapa) {
+      if (crmEtapaFilter) crmEtapaFilter.value = etapa;
+      if (crmEtapaFilterMirror) crmEtapaFilterMirror.value = etapa;
+      loadCrmCaptaciones();
+    }
   });
 }
 
 if (crmLightningSidebar) {
   crmLightningSidebar.addEventListener("click", (event) => {
+    const action = closestFromEvent(event, "[data-crm-action]");
+    if (action && String(action.dataset.crmAction || "").trim() === "clientes") {
+      openClientesModule();
+      return;
+    }
     const btn = closestFromEvent(event, "[data-crm-view]");
     if (!btn) return;
-    setCrmWorkspaceView(btn.dataset.crmView);
+    const view = String(btn.dataset.crmView || "").trim();
+    setCrmWorkspaceView(view);
+    const etapa = String(btn.dataset.etapa || "").trim();
+    if (view === "captaciones" && etapa) {
+      if (crmEtapaFilter) crmEtapaFilter.value = etapa;
+      if (crmEtapaFilterMirror) crmEtapaFilterMirror.value = etapa;
+      loadCrmCaptaciones();
+    }
   });
 }
 

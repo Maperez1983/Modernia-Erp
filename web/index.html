@@ -2128,55 +2128,139 @@
           <button class="tab hidden" data-tab="aie" id="aieTab">Personal AIE</button>
         </div>
         <div id="crmSection" class="hidden">
-          <div class="crm-header crm-header-stack">
-            <div>
-              <h3>CRM Inmobiliario</h3>
-              <p class="muted">Control de pipeline, inmuebles, compraventas, demandas y visitas.</p>
-            </div>
-            <div class="crm-actions">
-              <button type="button" id="crmNuevaCaptacionBtn">Nuevo inmueble</button>
-              <button type="button" id="crmNuevaCompraventaBtn" class="secondary">Nueva compraventa</button>
-              <button type="button" id="crmNuevaDemandaBtn" class="secondary">Nueva demanda</button>
-            </div>
-          </div>
-          <div class="grid crm-kpis">
-            <div class="card kpi-card kpi-clickable" data-crm-view="captaciones">
-              <h3>Pipeline activo</h3>
-              <div class="kpi-value" id="crmKpiCaptaciones">0</div>
-              <div class="muted">Pipeline</div>
-            </div>
-            <div class="card kpi-card kpi-clickable" data-crm-view="inmuebles">
-              <h3>Inmuebles activos</h3>
-              <div class="kpi-value" id="crmKpiInmuebles">0</div>
-              <div class="muted">Inventario</div>
-            </div>
-            <div class="card kpi-card kpi-clickable" data-crm-view="captaciones">
-              <h3>Etapa más activa</h3>
-              <div class="kpi-value" id="crmKpiEtapa">-</div>
-              <div class="muted">Pipeline</div>
-            </div>
-            <div class="card kpi-card kpi-clickable" data-crm-view="compraventas">
-              <h3>Compraventas</h3>
-              <div class="kpi-value" id="crmKpiCompraventas">0</div>
-              <div class="muted">Histórico visible</div>
-            </div>
-          </div>
-            <div id="crmWorkspaceShell" class="crm-workspace-shell">
-            <div id="crmWorkspaceTabs" class="crm-workspace-tabs">
-              <button type="button" class="tab active" data-crm-view="resumen">Resumen</button>
-              <button type="button" class="tab" data-crm-view="analisis">Análisis</button>
-              <button type="button" class="tab" data-crm-view="captaciones">Pipeline</button>
-              <button type="button" class="tab" data-crm-view="inmuebles">Inmuebles</button>
-              <button type="button" class="tab" data-crm-view="alquileres">Alquileres</button>
-                    <button type="button" class="tab" data-crm-view="compraventas">Compraventas</button>
-                    <button type="button" class="tab" data-crm-view="demandas">Demandas</button>
-                    <button type="button" class="tab" data-crm-view="visitas">Visitas</button>
-                    <button type="button" class="tab" data-crm-view="agenda">Agenda</button>
-                    <button type="button" class="tab" data-crm-view="informadores">Informadores</button>
-                    <button type="button" class="tab" data-crm-view="edificios">Edificios/Complejos</button>
-                    <button type="button" class="tab" data-crm-view="legal">Copiloto legal</button>
+          <div class="crm-lightning-shell">
+            <aside id="crmLightningSidebar" class="crm-lightning-sidebar" aria-label="Navegación CRM inmobiliaria">
+              <button
+                type="button"
+                class="crm-side-item crm-side-new"
+                id="crmQuickNewBtn"
+                title="Crear nuevo"
+                aria-haspopup="menu"
+                aria-controls="crmQuickNewMenu"
+              >
+                <span class="crm-side-ico">+</span>
+                <span class="crm-side-txt">Nuevo</span>
+              </button>
+              <div id="crmQuickNewMenu" class="crm-quick-new-menu hidden" role="menu" aria-label="Crear nuevo">
+                <button type="button" id="crmNuevaCaptacionBtn">Nuevo inmueble</button>
+                <button type="button" id="crmNuevaCompraventaBtn" class="secondary">Nueva compraventa</button>
+                <button type="button" id="crmNuevaDemandaBtn" class="secondary">Nuevo pedido</button>
+              </div>
+              <div class="crm-side-sep"></div>
+              <button
+                type="button"
+                class="crm-side-item"
+                id="crmRecentBtn"
+                title="Elementos recientes"
+                aria-haspopup="dialog"
+                aria-controls="crmRecentMenu"
+              >
+                <span class="crm-side-ico">RE</span>
+                <span class="crm-side-txt">Recientes</span>
+              </button>
+              <div id="crmRecentMenu" class="crm-recent-menu hidden" role="dialog" aria-label="Elementos recientes">
+                <div class="crm-recent-head">
+                  <strong>Elementos recientes</strong>
+                  <button type="button" class="secondary ghost" id="crmRecentClearBtn">Limpiar</button>
+                </div>
+                <div id="crmRecentList" class="crm-recent-list"></div>
+              </div>
+              <button type="button" class="crm-side-item active" data-crm-view="resumen" title="Inicio">
+                <span class="crm-side-ico">IN</span>
+                <span class="crm-side-txt">Inicio</span>
+              </button>
+              <button type="button" class="crm-side-item" data-crm-action="clientes" title="Clientes">
+                <span class="crm-side-ico">CL</span>
+                <span class="crm-side-txt">Clientes</span>
+              </button>
+              <button type="button" class="crm-side-item" data-crm-view="inmuebles" title="Inmuebles">
+                <span class="crm-side-ico">IM</span>
+                <span class="crm-side-txt">Inmuebles</span>
+              </button>
+              <button type="button" class="crm-side-item" data-crm-view="captaciones" data-etapa="Noticia" title="Noticias">
+                <span class="crm-side-ico">NO</span>
+                <span class="crm-side-txt">Noticias</span>
+              </button>
+              <button type="button" class="crm-side-item" data-crm-view="captaciones" data-etapa="Encargo" title="Encargos">
+                <span class="crm-side-ico">EN</span>
+                <span class="crm-side-txt">Encargos</span>
+              </button>
+              <button type="button" class="crm-side-item" data-crm-view="demandas" title="Pedidos">
+                <span class="crm-side-ico">PE</span>
+                <span class="crm-side-txt">Pedidos</span>
+              </button>
+              <button type="button" class="crm-side-item" data-crm-view="agenda" title="Actividades y citas">
+                <span class="crm-side-ico">AC</span>
+                <span class="crm-side-txt">Act./Citas</span>
+              </button>
+              <button type="button" class="crm-side-item" data-crm-view="analisis" title="Búsq./Informes">
+                <span class="crm-side-ico">IF</span>
+                <span class="crm-side-txt">Búsq./Inf.</span>
+              </button>
+              <div class="crm-side-grow"></div>
+              <button type="button" class="crm-side-item" data-crm-view="legal" title="Legal/Fiscal">
+                <span class="crm-side-ico">LG</span>
+                <span class="crm-side-txt">Legal</span>
+              </button>
+            </aside>
+
+            <div class="crm-lightning-main">
+              <div class="crm-lightning-topbar">
+                <div class="crm-lightning-brand">
+                  <div class="crm-lightning-brand-title">Modernia</div>
+                  <div class="crm-lightning-brand-sub">CRM inmobiliario</div>
+                </div>
+
+                <div id="crmWorkspaceTabs" class="crm-workspace-tabs crm-lightning-tabs" role="tablist" aria-label="Menú superior Tecnocloud-like">
+                  <button type="button" class="tab active" data-crm-view="resumen">Inicio</button>
+                  <button type="button" class="tab" data-crm-action="clientes">Clientes</button>
+                  <button type="button" class="tab" data-crm-view="inmuebles">Inmuebles</button>
+                  <button type="button" class="tab" data-crm-view="captaciones" data-etapa="Noticia">Noticias</button>
+                  <button type="button" class="tab" data-crm-view="captaciones" data-etapa="Encargo">Encargos</button>
+                  <button type="button" class="tab" data-crm-view="demandas">Pedidos</button>
+                  <button type="button" class="tab" data-crm-view="agenda">Act./Citas</button>
+                  <button type="button" class="tab" data-crm-view="analisis">Búsq./Informes</button>
+                </div>
+
+                <div class="crm-lightning-topbar-right">
+                  <div class="crm-global-searchbox">
+                    <input id="crmGlobalSearch" class="crm-lightning-search" placeholder="Search..." autocomplete="off" />
+                    <div id="crmGlobalSearchResults" class="crm-global-results hidden" role="listbox" aria-label="Resultados de búsqueda"></div>
                   </div>
-            <div id="crmWorkspace">
+                </div>
+              </div>
+
+              <div class="crm-lightning-content">
+                <div class="crm-header crm-header-stack">
+                  <div>
+                    <h3>CRM Inmobiliario</h3>
+                    <p class="muted">Control de pipeline, inmuebles, compraventas, demandas y visitas.</p>
+                  </div>
+                </div>
+                <div class="grid crm-kpis">
+                  <div class="card kpi-card kpi-clickable" data-crm-view="captaciones">
+                    <h3>Pipeline activo</h3>
+                    <div class="kpi-value" id="crmKpiCaptaciones">0</div>
+                    <div class="muted">Pipeline</div>
+                  </div>
+                  <div class="card kpi-card kpi-clickable" data-crm-view="inmuebles">
+                    <h3>Inmuebles activos</h3>
+                    <div class="kpi-value" id="crmKpiInmuebles">0</div>
+                    <div class="muted">Inventario</div>
+                  </div>
+                  <div class="card kpi-card kpi-clickable" data-crm-view="captaciones">
+                    <h3>Etapa más activa</h3>
+                    <div class="kpi-value" id="crmKpiEtapa">-</div>
+                    <div class="muted">Pipeline</div>
+                  </div>
+                  <div class="card kpi-card kpi-clickable" data-crm-view="compraventas">
+                    <h3>Compraventas</h3>
+                    <div class="kpi-value" id="crmKpiCompraventas">0</div>
+                    <div class="muted">Histórico visible</div>
+                  </div>
+                </div>
+                <div id="crmWorkspaceShell" class="crm-workspace-shell">
+                  <div id="crmWorkspace">
               <div id="crmViewResumen" class="crm-workspace-view">
                 <div class="form-card crm-resumen-compact-note">
                   <div class="section-head">
@@ -2184,6 +2268,22 @@
                       <h3>Dashboard compacto</h3>
                       <p class="muted">Aquí mostramos solo los KPIs principales. Usa las pestañas (Pipeline, Inmuebles, Demandas, Visitas, Agenda) para la operativa.</p>
                     </div>
+                  </div>
+                </div>
+                <div class="form-card crm-quicksearch-card" id="crmQuickSearchCard">
+                  <div class="section-head">
+                    <div>
+                      <h3>Búsquedas principales</h3>
+                      <p class="muted">Atajos para priorizar el trabajo diario (estilo Tecnocloud, sin Gestión zona).</p>
+                    </div>
+                  </div>
+                  <div class="crm-quicksearch-grid" role="list">
+                    <button type="button" class="crm-quicksearch" data-crm-quick="captaciones:quick_sin_contacto_120">Pipeline · Sin contacto &gt;120 días</button>
+                    <button type="button" class="crm-quicksearch" data-crm-quick="captaciones:quick_noticia_sin_verificar">Pipeline · Noticias sin verificar</button>
+                    <button type="button" class="crm-quicksearch" data-crm-quick="captaciones:quick_sin_proxima_accion">Pipeline · Sin próxima acción</button>
+                    <button type="button" class="crm-quicksearch" data-crm-quick="demandas:activa">Pedidos · Activas</button>
+                    <button type="button" class="crm-quicksearch" data-crm-quick="visitas:pendiente">Visitas · Pendientes</button>
+                    <button type="button" class="crm-quicksearch" data-crm-quick="agenda:Pendiente">Act./Citas · Pendientes</button>
                   </div>
                 </div>
                 <div class="crm-summary-grid">
@@ -3305,6 +3405,9 @@
                 </div>
                 <div id="inmuebleChecklistTable"></div>
                 <div class="footer" id="inmuebleChecklistInfo"></div>
+              </div>
+            </div>
+          </div>
               </div>
             </div>
           </div>
