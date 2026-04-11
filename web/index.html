@@ -2155,7 +2155,13 @@
                 aria-haspopup="dialog"
                 aria-controls="crmRecentMenu"
               >
-                <span class="crm-side-ico">RE</span>
+                <span class="crm-side-ico" aria-hidden="true">
+                  <svg viewBox="0 0 24 24">
+                    <path d="M12 8v5l3 2" />
+                    <path d="M12 21a9 9 0 1 0-9-9" />
+                    <path d="M3 12v-3h3" />
+                  </svg>
+                </span>
                 <span class="crm-side-txt">Recientes</span>
               </button>
               <div id="crmRecentMenu" class="crm-recent-menu hidden" role="dialog" aria-label="Elementos recientes">
@@ -2166,42 +2172,87 @@
                 <div id="crmRecentList" class="crm-recent-list"></div>
               </div>
               <button type="button" class="crm-side-item active" data-crm-view="resumen" title="Inicio">
-                <span class="crm-side-ico">IN</span>
+                <span class="crm-side-ico" aria-hidden="true">
+                  <svg viewBox="0 0 24 24">
+                    <path d="M3 10.5 12 3l9 7.5" />
+                    <path d="M5 10v10h14V10" />
+                    <path d="M9 20v-6h6v6" />
+                  </svg>
+                </span>
                 <span class="crm-side-txt">Inicio</span>
               </button>
               <button type="button" class="crm-side-item" data-crm-action="clientes" title="Clientes">
-                <span class="crm-side-ico">CL</span>
+                <span class="crm-side-ico" aria-hidden="true">
+                  <svg viewBox="0 0 24 24">
+                    <path d="M16 11a4 4 0 1 0-8 0" />
+                    <path d="M4 21a8 8 0 0 1 16 0" />
+                  </svg>
+                </span>
                 <span class="crm-side-txt">Clientes</span>
               </button>
               <button type="button" class="crm-side-item" data-crm-view="inmuebles" title="Inmuebles">
-                <span class="crm-side-ico">IM</span>
+                <span class="crm-side-ico" aria-hidden="true">
+                  <svg viewBox="0 0 24 24">
+                    <path d="M4 21V9l8-6 8 6v12" />
+                    <path d="M9 21v-6h6v6" />
+                  </svg>
+                </span>
                 <span class="crm-side-txt">Inmuebles</span>
               </button>
               <button type="button" class="crm-side-item" data-crm-view="captaciones" data-etapa="Noticia" title="Noticias">
-                <span class="crm-side-ico">NO</span>
+                <span class="crm-side-ico" aria-hidden="true">
+                  <svg viewBox="0 0 24 24">
+                    <path d="M4 5h12v14H4z" />
+                    <path d="M16 8h4v11h-4" />
+                    <path d="M7 8h6" />
+                    <path d="M7 12h6" />
+                    <path d="M7 16h6" />
+                  </svg>
+                </span>
                 <span class="crm-side-txt">Noticias</span>
               </button>
               <button type="button" class="crm-side-item" data-crm-view="captaciones" data-etapa="Encargo" title="Encargos">
-                <span class="crm-side-ico">EN</span>
+                <span class="crm-side-ico" aria-hidden="true">
+                  <svg viewBox="0 0 24 24">
+                    <path d="M9 6V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v1" />
+                    <path d="M4 8h16v13H4z" />
+                    <path d="M9 12h6" />
+                  </svg>
+                </span>
                 <span class="crm-side-txt">Encargos</span>
               </button>
-              <button type="button" class="crm-side-item" data-crm-view="demandas" title="Pedidos">
-                <span class="crm-side-ico">PE</span>
+              <button type="button" class="crm-side-item" data-crm-view="demandas" data-crm-quick="demandas:activa" title="Pedidos">
+                <span class="crm-side-ico" aria-hidden="true">
+                  <svg viewBox="0 0 24 24">
+                    <path d="M9 4h6l1 2h4v16H4V6h4z" />
+                    <path d="M8 11h8" />
+                    <path d="M8 15h8" />
+                  </svg>
+                </span>
                 <span class="crm-side-txt">Pedidos</span>
               </button>
-              <button type="button" class="crm-side-item" data-crm-view="agenda" title="Actividades y citas">
-                <span class="crm-side-ico">AC</span>
+              <button type="button" class="crm-side-item" data-crm-view="agenda" data-crm-quick="agenda:Pendiente" title="Actividades y citas">
+                <span class="crm-side-ico" aria-hidden="true">
+                  <svg viewBox="0 0 24 24">
+                    <path d="M7 3v3" />
+                    <path d="M17 3v3" />
+                    <path d="M4 7h16" />
+                    <path d="M5 7v14h14V7" />
+                    <path d="m9 14 2 2 4-4" />
+                  </svg>
+                </span>
                 <span class="crm-side-txt">Act./Citas</span>
               </button>
               <button type="button" class="crm-side-item" data-crm-view="analisis" title="Búsq./Informes">
-                <span class="crm-side-ico">IF</span>
+                <span class="crm-side-ico" aria-hidden="true">
+                  <svg viewBox="0 0 24 24">
+                    <circle cx="11" cy="11" r="6" />
+                    <path d="M20 20l-4.2-4.2" />
+                  </svg>
+                </span>
                 <span class="crm-side-txt">Búsq./Inf.</span>
               </button>
               <div class="crm-side-grow"></div>
-              <button type="button" class="crm-side-item" data-crm-view="legal" title="Legal/Fiscal">
-                <span class="crm-side-ico">LG</span>
-                <span class="crm-side-txt">Legal</span>
-              </button>
             </aside>
 
             <div class="crm-lightning-main">
@@ -2217,8 +2268,8 @@
                   <button type="button" class="tab" data-crm-view="inmuebles">Inmuebles</button>
                   <button type="button" class="tab" data-crm-view="captaciones" data-etapa="Noticia">Noticias</button>
                   <button type="button" class="tab" data-crm-view="captaciones" data-etapa="Encargo">Encargos</button>
-                  <button type="button" class="tab" data-crm-view="demandas">Pedidos</button>
-                  <button type="button" class="tab" data-crm-view="agenda">Act./Citas</button>
+                  <button type="button" class="tab" data-crm-view="demandas" data-crm-quick="demandas:activa">Pedidos</button>
+                  <button type="button" class="tab" data-crm-view="agenda" data-crm-quick="agenda:Pendiente">Act./Citas</button>
                   <button type="button" class="tab" data-crm-view="analisis">Búsq./Informes</button>
                 </div>
 

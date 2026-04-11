@@ -43591,6 +43591,11 @@ if (crmWorkspaceTabs) {
       openClientesModule();
       return;
     }
+    const quick = closestFromEvent(event, "[data-crm-quick]");
+    if (quick) {
+      applyCrmTecnocloudQuickSearch(String(quick.dataset.crmQuick || "").trim());
+      return;
+    }
     const btn = closestFromEvent(event, "[data-crm-view]");
     if (!btn) return;
     const view = String(btn.dataset.crmView || "").trim();
@@ -43609,6 +43614,11 @@ if (crmLightningSidebar) {
     const action = closestFromEvent(event, "[data-crm-action]");
     if (action && String(action.dataset.crmAction || "").trim() === "clientes") {
       openClientesModule();
+      return;
+    }
+    const quick = closestFromEvent(event, "[data-crm-quick]");
+    if (quick) {
+      applyCrmTecnocloudQuickSearch(String(quick.dataset.crmQuick || "").trim());
       return;
     }
     const btn = closestFromEvent(event, "[data-crm-view]");

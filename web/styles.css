@@ -3105,8 +3105,8 @@ body.crm-fin #companySummary {
   border-radius: 18px;
   border: 1px solid rgba(15, 23, 42, 0.12);
   background:
-    radial-gradient(circle at 35% 10%, rgba(34, 197, 94, 0.26), transparent 52%),
-    linear-gradient(180deg, rgba(11, 29, 51, 0.98), rgba(15, 39, 66, 0.98));
+    radial-gradient(circle at 35% 10%, rgba(var(--sage-rgb), 0.26), transparent 52%),
+    linear-gradient(180deg, rgba(var(--ink-rgb), 0.98), rgba(15, 39, 66, 0.98));
   color: rgba(247, 244, 238, 0.92);
 }
 
@@ -3129,12 +3129,12 @@ body.crm-fin #companySummary {
 }
 
 #crmSection .crm-side-item.active {
-  background: rgba(34, 197, 94, 0.14);
-  border-color: rgba(34, 197, 94, 0.34);
+  background: rgba(var(--sage-rgb), 0.14);
+  border-color: rgba(var(--sage-rgb), 0.34);
 }
 
 #crmSection .crm-side-item:focus-visible {
-  outline: 3px solid rgba(34, 197, 94, 0.45);
+  outline: 3px solid rgba(var(--sage-rgb), 0.45);
   outline-offset: 2px;
 }
 
@@ -3153,9 +3153,19 @@ body.crm-fin #companySummary {
   line-height: 1;
 }
 
+#crmSection .crm-side-ico svg {
+  width: 18px;
+  height: 18px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 #crmSection .crm-side-new .crm-side-ico {
-  background: rgba(34, 197, 94, 0.24);
-  border-color: rgba(34, 197, 94, 0.45);
+  background: rgba(var(--sage-rgb), 0.24);
+  border-color: rgba(var(--sage-rgb), 0.45);
   font-size: 20px;
   letter-spacing: 0;
 }
@@ -3191,7 +3201,7 @@ body.crm-fin #companySummary {
   gap: 12px;
   padding: 10px 12px;
   border-radius: 18px;
-  border: 1px solid rgba(130, 76, 69, 0.12);
+  border: 1px solid rgba(var(--gold-rgb), 0.28);
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(244, 238, 227, 0.94)),
     #fff;
