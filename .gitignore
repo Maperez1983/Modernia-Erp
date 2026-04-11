@@ -12,6 +12,17 @@ __pycache__/
 web/uploads/
 reports/catastro/
 .venv/
+.venv_cdx/
 .venv_demo/
 .venv_pdf/
+_scratch/
+
+# Previews locales (no versionar)
+data/rentas_2024_preview*
+data/rentas_2024_review_queue*
+
+# Copias manuales locales (no versionar)
+web/* 2.js
+web/* 2.py
+web/* 2.css
 reports/
