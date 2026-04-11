@@ -23692,7 +23692,7 @@ def workspace_session_is_privileged(session):
         return False
     rol = normalize_lookup_text(session.get("rol") or "")
     # `normalize_lookup_text` devuelve tokens en MAYÚSCULAS (sin acentos).
-    if rol in {"ADMINISTRADOR", "ADMIN", "DIRECCION", "CONTROL"}:
+    if rol in {"ADMINISTRADOR", "ADMIN", "DIRECCION", "CONTROL", "ADMINISTRACION"}:
         return True
     return False
 
