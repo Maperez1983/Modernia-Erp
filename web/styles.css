@@ -3208,6 +3208,41 @@ body.crm-fin #companySummary {
   box-shadow: 0 10px 18px rgba(11, 29, 51, 0.10);
 }
 
+#crmSection details.crm-advanced {
+  border-radius: 16px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: rgba(255, 255, 255, 0.75);
+  padding: 10px 12px;
+}
+
+#crmSection details.crm-advanced summary {
+  cursor: pointer;
+  user-select: none;
+  font-family: var(--font-ui);
+  font-weight: 600;
+  color: rgba(var(--ink-rgb), 0.78);
+  list-style: none;
+}
+
+#crmSection details.crm-advanced summary::-webkit-details-marker {
+  display: none;
+}
+
+#crmSection details.crm-advanced summary::before {
+  content: "▸";
+  display: inline-block;
+  margin-right: 8px;
+  transform: translateY(-1px);
+}
+
+#crmSection details.crm-advanced[open] summary::before {
+  content: "▾";
+}
+
+#crmSection details.crm-advanced .form-card {
+  margin-top: 12px;
+}
+
 #crmSection .crm-lightning-brand {
   display: grid;
   gap: 2px;

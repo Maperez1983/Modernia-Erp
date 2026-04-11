@@ -2282,42 +2282,14 @@
               </div>
 
               <div class="crm-lightning-content">
-                <div class="crm-header crm-header-stack">
-                  <div>
-                    <h3>CRM Inmobiliario</h3>
-                    <p class="muted">Control de pipeline, inmuebles, compraventas, demandas y visitas.</p>
-                  </div>
-                </div>
-                <div class="grid crm-kpis">
-                  <div class="card kpi-card kpi-clickable" data-crm-view="captaciones">
-                    <h3>Pipeline activo</h3>
-                    <div class="kpi-value" id="crmKpiCaptaciones">0</div>
-                    <div class="muted">Pipeline</div>
-                  </div>
-                  <div class="card kpi-card kpi-clickable" data-crm-view="inmuebles">
-                    <h3>Inmuebles activos</h3>
-                    <div class="kpi-value" id="crmKpiInmuebles">0</div>
-                    <div class="muted">Inventario</div>
-                  </div>
-                  <div class="card kpi-card kpi-clickable" data-crm-view="captaciones">
-                    <h3>Etapa más activa</h3>
-                    <div class="kpi-value" id="crmKpiEtapa">-</div>
-                    <div class="muted">Pipeline</div>
-                  </div>
-                  <div class="card kpi-card kpi-clickable" data-crm-view="compraventas">
-                    <h3>Compraventas</h3>
-                    <div class="kpi-value" id="crmKpiCompraventas">0</div>
-                    <div class="muted">Histórico visible</div>
-                  </div>
-                </div>
                 <div id="crmWorkspaceShell" class="crm-workspace-shell">
                   <div id="crmWorkspace">
               <div id="crmViewResumen" class="crm-workspace-view">
                 <div class="form-card crm-resumen-compact-note">
                   <div class="section-head">
                     <div>
-                      <h3>Dashboard compacto</h3>
-                      <p class="muted">Aquí mostramos solo los KPIs principales. Usa las pestañas (Pipeline, Inmuebles, Demandas, Visitas, Agenda) para la operativa.</p>
+                      <h3>Inicio</h3>
+                      <p class="muted">Vista limpia para el trabajo diario. Usa el menú superior o lateral para entrar a cada listado.</p>
                     </div>
                   </div>
                 </div>
@@ -2342,7 +2314,7 @@
                     <div class="section-head">
                       <div>
                         <h3>Panel comercial</h3>
-                        <p class="muted">Lectura rápida del negocio vivo y acceso directo a los expedientes más calientes.</p>
+                        <p class="muted">Lectura rápida y acceso directo a expedientes.</p>
                       </div>
                     </div>
                     <div id="crmResumenPulse" class="crm-mini-list"></div>
@@ -2356,8 +2328,8 @@
                         <span>Venta nueva con precios, honorarios y documentación</span>
                       </button>
                       <button type="button" class="crm-quick-action" data-crm-action="demanda">
-                        <strong>Nueva demanda</strong>
-                        <span>Comprador potencial con matching posterior</span>
+                        <strong>Nuevo pedido</strong>
+                        <span>Pedido de comprador con matching posterior</span>
                       </button>
                     </div>
                   </div>
@@ -2371,70 +2343,73 @@
                     <div id="crmResumenHoy" class="crm-focus-list"></div>
                   </div>
                 </div>
-                <div class="form-card" id="crmResumenYtdBoard">
-                  <div class="section-head">
-                    <div>
-                      <h3 id="crmResumenYtdTitle">KPIs del año</h3>
-                      <p class="muted">Ventas, comisiones, captación y actividad comercial (YTD).</p>
-                    </div>
-                  </div>
-                  <div class="crm-resumen-toolbar">
-                    <label>
-                      Año
-                      <select id="crmResumenYtdYear"></select>
-                    </label>
-                    <label class="hidden" id="crmResumenYtdResponsableWrap">
-                      Asesor
-                      <select id="crmResumenYtdResponsable">
-                        <option value="">Todos</option>
-                      </select>
-                    </label>
-                  </div>
-                  <div id="crmResumenYtdKpis" class="crm-mini-list"></div>
-                  <div class="grid dashboard-charts crm-ytd-charts">
-                    <div class="chart-card">
-                      <h4>Actividad y cierres (mes)</h4>
-                      <canvas id="crmYtdOperacionesChart"></canvas>
-                    </div>
-                    <div class="chart-card">
-                      <h4>Comisiones (mes)</h4>
-                      <canvas id="crmYtdComisionesChart"></canvas>
-                    </div>
-                    <div class="chart-card">
-                      <h4>Embudo (YTD)</h4>
-                      <canvas id="crmYtdEmbudoChart"></canvas>
-                    </div>
-                  </div>
-                  <div class="crm-split">
-                    <div>
-                      <div class="section-head compact">
-                        <div>
-                          <h4>Próximas</h4>
-                          <p class="muted">Citas, visitas y acciones en los próximos 7 días.</p>
-                        </div>
+                <details class="crm-advanced" id="crmAdvancedResumen">
+                  <summary>Informes y alertas (avanzado)</summary>
+                  <div class="form-card" id="crmResumenYtdBoard">
+                    <div class="section-head">
+                      <div>
+                        <h3 id="crmResumenYtdTitle">KPIs del año</h3>
+                        <p class="muted">Ventas, comisiones, captación y actividad comercial (YTD).</p>
                       </div>
-                      <div id="crmResumenProximas" class="crm-focus-list"></div>
                     </div>
-                    <div>
-                      <div class="section-head compact">
-                        <div>
-                          <h4>Pendientes</h4>
-                          <p class="muted">Acciones/visitas vencidas que requieren cierre.</p>
-                        </div>
+                    <div class="crm-resumen-toolbar">
+                      <label>
+                        Año
+                        <select id="crmResumenYtdYear"></select>
+                      </label>
+                      <label class="hidden" id="crmResumenYtdResponsableWrap">
+                        Asesor
+                        <select id="crmResumenYtdResponsable">
+                          <option value="">Todos</option>
+                        </select>
+                      </label>
+                    </div>
+                    <div id="crmResumenYtdKpis" class="crm-mini-list"></div>
+                    <div class="grid dashboard-charts crm-ytd-charts">
+                      <div class="chart-card">
+                        <h4>Actividad y cierres (mes)</h4>
+                        <canvas id="crmYtdOperacionesChart"></canvas>
                       </div>
-                      <div id="crmResumenPendientes" class="crm-focus-list"></div>
+                      <div class="chart-card">
+                        <h4>Comisiones (mes)</h4>
+                        <canvas id="crmYtdComisionesChart"></canvas>
+                      </div>
+                      <div class="chart-card">
+                        <h4>Embudo (YTD)</h4>
+                        <canvas id="crmYtdEmbudoChart"></canvas>
+                      </div>
+                    </div>
+                    <div class="crm-split">
+                      <div>
+                        <div class="section-head compact">
+                          <div>
+                            <h4>Próximas</h4>
+                            <p class="muted">Citas, visitas y acciones en los próximos 7 días.</p>
+                          </div>
+                        </div>
+                        <div id="crmResumenProximas" class="crm-focus-list"></div>
+                      </div>
+                      <div>
+                        <div class="section-head compact">
+                          <div>
+                            <h4>Pendientes</h4>
+                            <p class="muted">Acciones/visitas vencidas que requieren cierre.</p>
+                          </div>
+                        </div>
+                        <div id="crmResumenPendientes" class="crm-focus-list"></div>
+                      </div>
                     </div>
                   </div>
-                </div>
-                <div class="form-card">
-                  <div class="section-head">
-                    <div>
-                      <h3>Alertas del pipeline</h3>
-                      <p class="muted">Incidencias de calidad y expedientes inmobiliarios que se están quedando bloqueados.</p>
+                  <div class="form-card">
+                    <div class="section-head">
+                      <div>
+                        <h3>Alertas del pipeline</h3>
+                        <p class="muted">Incidencias de calidad y expedientes inmobiliarios que se están quedando bloqueados.</p>
+                      </div>
                     </div>
+                    <div id="crmResumenAlertas" class="crm-focus-list"></div>
                   </div>
-                  <div id="crmResumenAlertas" class="crm-focus-list"></div>
-                </div>
+                </details>
               </div>
               <div id="crmViewAnalisis" class="crm-workspace-view hidden">
                 <div class="form-card">
@@ -2630,11 +2605,11 @@
                   <div class="form-card">
                     <div class="section-head">
                       <div>
-                        <h3>Demandas</h3>
-                        <p class="muted">Compradores activos, filtros de búsqueda y acceso a matching.</p>
+                        <h3>Pedidos</h3>
+                        <p class="muted">Pedidos de compradores, filtros de búsqueda y acceso a matching.</p>
                       </div>
                       <div class="inline-actions">
-                        <input id="crmDemandaSearch" placeholder="Buscar por cliente, zona o tipo..." />
+                        <input id="crmDemandaSearch" placeholder="Buscar por cliente o tipo..." />
                         <select id="crmDemandaEstadoFilter">
                           <option value="">Todos los estados</option>
                           <option value="activa">Activa</option>

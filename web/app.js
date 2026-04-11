@@ -16952,7 +16952,7 @@ const renderCrmGlobalSearchResults = () => {
       view: "demandas",
       id: String(row?.id || "").trim(),
       title: row?.cliente || "Pedido",
-      meta: [row?.tipo || "", row?.zona || "", row?.estado || ""].filter(Boolean).join(" · "),
+      meta: [row?.tipo || "", row?.estado || ""].filter(Boolean).join(" · "),
       pill: "Pedido",
     }))
   );
