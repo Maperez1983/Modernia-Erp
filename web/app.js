@@ -3,7 +3,7 @@
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v69";
+const APP_SW_VERSION = "v70";
 
 // Workspace tenant por defecto del producto (branding de software). Mantiene compatibilidad con slugs legacy.
 const DEFAULT_TENANT_WORKSPACE_SLUG = "verifika2";
@@ -2249,6 +2249,7 @@ const gestoriaKpiEmpresas = document.getElementById("gestoriaKpiEmpresas");
 const gestoriaKpiPuntuales = document.getElementById("gestoriaKpiPuntuales");
 const gestoriaKpiModelosMes = document.getElementById("gestoriaKpiModelosMes");
 const gestoriaKpiRentasPendientes = document.getElementById("gestoriaKpiRentasPendientes");
+const gestoriaRentasPendientesCount = document.getElementById("gestoriaRentasPendientesCount");
 const gestoriaKpiGestionesCurso = document.getElementById("gestoriaKpiGestionesCurso");
 const gestoriaKpiGestionesEspera = document.getElementById("gestoriaKpiGestionesEspera");
 const gestoriaKpiGestionesVencidas = document.getElementById("gestoriaKpiGestionesVencidas");
@@ -33377,6 +33378,7 @@ const loadGestoriaDashboard = () => {
     if (gestoriaKpiPuntuales) gestoriaKpiPuntuales.textContent = counts.puntuales ?? 0;
     if (gestoriaKpiModelosMes) gestoriaKpiModelosMes.textContent = counts.modelos_mes ?? 0;
     if (gestoriaKpiRentasPendientes) gestoriaKpiRentasPendientes.textContent = counts.rentas_pendientes_presentar ?? 0;
+    if (gestoriaRentasPendientesCount) gestoriaRentasPendientesCount.textContent = counts.rentas_pendientes_presentar ?? 0;
     if (gestoriaKpiPresupuestosEstudio) gestoriaKpiPresupuestosEstudio.textContent = counts.presupuestos_estudio ?? 0;
     if (gestoriaKpiEncargosPendientes) gestoriaKpiEncargosPendientes.textContent = counts.encargos_pendientes ?? 0;
 

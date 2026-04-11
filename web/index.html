@@ -3730,11 +3730,6 @@
                 <div class="muted">Próximas presentaciones</div>
               </div>
               <div class="card kpi-card">
-                <h3>Rentas pendientes</h3>
-                <div class="kpi-value" id="gestoriaKpiRentasPendientes">0</div>
-                <div class="muted">Borradores por presentar</div>
-              </div>
-              <div class="card kpi-card">
                 <h3>Gestiones en curso</h3>
                 <div class="kpi-value" id="gestoriaKpiGestionesCurso">0</div>
                 <div class="muted">Trabajo activo</div>
@@ -3785,7 +3780,7 @@
               </div>
             </div>
             <div class="form-card">
-              <h3>Rentas pendientes de presentar</h3>
+              <h3>Rentas pendientes de presentar <span id="gestoriaRentasPendientesCount" class="pill">0</span></h3>
               <p class="muted">Borradores cargados que todavía no tienen declaración presentada.</p>
               <div id="gestoriaAlertRentasPendientes"></div>
             </div>
@@ -8100,7 +8095,7 @@
     <script src="ui-foundation.js?v=2"></script>
     <script src="app-auth.js?v=10"></script>
     <script src="app-routing.js?v=7"></script>
-    <script src="app.js?v=442"></script>
+    <script src="app.js?v=443"></script>
     <script>
       (function () {
         if (!("serviceWorker" in navigator)) return;
