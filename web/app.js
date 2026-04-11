@@ -3,7 +3,7 @@
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v81";
+const APP_SW_VERSION = "v82";
 
 // Workspace tenant por defecto del producto (branding de software). Mantiene compatibilidad con slugs legacy.
 const DEFAULT_TENANT_WORKSPACE_SLUG = "verifika2";
@@ -2706,10 +2706,19 @@ const inmuebleSaveStatus = document.getElementById("inmuebleSaveStatus");
 const inmuebleTecnoMeta = document.getElementById("inmuebleTecnoMeta");
 const inmuebleTecnoKpis = document.getElementById("inmuebleTecnoKpis");
 const inmuebleTecnoStages = document.getElementById("inmuebleTecnoStages");
+const inmuebleTecnoEmailBtn = document.getElementById("inmuebleTecnoEmailBtn");
+const inmuebleTecnoPosBtn = document.getElementById("inmuebleTecnoPosBtn");
+const inmuebleTecnoPrintBtn = document.getElementById("inmuebleTecnoPrintBtn");
+const inmuebleTecnoPrintMenu = document.getElementById("inmuebleTecnoPrintMenu");
+const inmuebleTecnoCampaignBtn = document.getElementById("inmuebleTecnoCampaignBtn");
+const inmuebleTecnoValoracionBtn = document.getElementById("inmuebleTecnoValoracionBtn");
 const inmuebleTecnoSideDemandasOpen = document.getElementById("inmuebleTecnoSideDemandasOpen");
 const inmuebleTecnoSideDemandasList = document.getElementById("inmuebleTecnoSideDemandasList");
+const inmuebleTecnoSideDemandasCount = document.getElementById("inmuebleTecnoSideDemandasCount");
 const inmuebleTecnoSideActividadOpen = document.getElementById("inmuebleTecnoSideActividadOpen");
 const inmuebleTecnoSideActividadList = document.getElementById("inmuebleTecnoSideActividadList");
+const inmuebleTecnoSideActividadCount = document.getElementById("inmuebleTecnoSideActividadCount");
+const inmuebleTecnoSideNuevaActividad = document.getElementById("inmuebleTecnoSideNuevaActividad");
 const inmuebleTecnoSidePropietarioCard = document.getElementById("inmuebleTecnoSidePropietarioCard");
 const inmuebleTabDatos = document.getElementById("inmuebleTabDatos");
 const inmuebleTabCaptacion = document.getElementById("inmuebleTabCaptacion");
@@ -16895,6 +16904,11 @@ const setCrmGlobalSearchResultsOpen = (open = false) => {
   crmGlobalSearchResults.classList.toggle("hidden", !open);
 };
 
+const setInmuebleTecnoPrintMenuOpen = (open = false) => {
+  if (!inmuebleTecnoPrintMenu) return;
+  inmuebleTecnoPrintMenu.classList.toggle("hidden", !open);
+};
+
 const renderCrmGlobalSearchResults = () => {
   if (!crmGlobalSearchResults) return;
   const raw = String(state.crmGlobalSearch || "").trim();
@@ -30729,11 +30743,28 @@ const renderInmuebleTecnocloudPanels = ({
   }
 
   if (inmuebleTecnoKpis) {
+    const isPlanned = String(captacion.planificado || inmueble.planificado || "").trim() === "1";
+    const now = Date.now();
+    const withinDays = (row, days) => {
+      const raw = String(row?.fecha || row?.created_at || "").trim();
+      if (!raw) return false;
+      const ts = Date.parse(raw.length > 10 ? raw : `${raw}T00:00:00`);
+      if (!Number.isFinite(ts)) return false;
+      return (now - ts) <= (days * 24 * 60 * 60 * 1000);
+    };
+    const citasVenta30 = (Array.isArray(actividad) ? actividad : []).filter((row) => {
+      const tipo = normalizeSimple(row?.tipo || "");
+      if (!tipo.includes("cita")) return false;
+      return withinDays(row, 30);
+    }).length;
+    const gestiones15 = (Array.isArray(actividad) ? actividad : []).filter((row) => withinDays(row, 15)).length;
+    const hasValoracion = Boolean(Number(inmueble.precio_valoracion || 0));
+
     const kpis = [
-      { label: "Fase", value: stageLabel || "-" },
-      { label: "Pedidos", value: String((Array.isArray(demandas) ? demandas.length : 0) || 0) },
-      { label: "Act./Citas", value: String((Array.isArray(actividad) ? actividad.length : 0) || 0) },
-      { label: "Docs", value: String((Array.isArray(docs) ? docs.length : 0) || 0) },
+      { label: "Planificado", value: isPlanned ? "✓" : "✗" },
+      { label: "Citas venta (30 días)", value: String(citasVenta30) },
+      { label: "Actividades (15 días)", value: String(gestiones15) },
+      { label: "Valoración", value: hasValoracion ? "✓" : "✗" },
     ];
     inmuebleTecnoKpis.innerHTML = kpis
       .map(
@@ -30763,6 +30794,9 @@ const renderInmuebleTecnocloudPanels = ({
 
   if (inmuebleTecnoSideDemandasList) {
     const items = Array.isArray(demandas) ? demandas.slice(0, 5) : [];
+    if (inmuebleTecnoSideDemandasCount) {
+      inmuebleTecnoSideDemandasCount.textContent = String(Array.isArray(demandas) ? demandas.length : 0);
+    }
     if (!items.length) {
       inmuebleTecnoSideDemandasList.innerHTML = "<p class='muted'>Sin pedidos compatibles.</p>";
     } else {
@@ -30783,6 +30817,9 @@ const renderInmuebleTecnocloudPanels = ({
 
   if (inmuebleTecnoSideActividadList) {
     const items = Array.isArray(actividad) ? actividad.slice(0, 5) : [];
+    if (inmuebleTecnoSideActividadCount) {
+      inmuebleTecnoSideActividadCount.textContent = String(Array.isArray(actividad) ? actividad.length : 0);
+    }
     if (!items.length) {
       inmuebleTecnoSideActividadList.innerHTML = "<p class='muted'>Sin actividad registrada.</p>";
     } else {
@@ -32523,6 +32560,13 @@ const initCrmInmoLinkInterceptor = () => {
     },
     true
   );
+
+  document.addEventListener("click", (event) => {
+    if (inmuebleTecnoPrintMenu && inmuebleTecnoPrintBtn) {
+      const inside = event.target?.closest?.("#inmuebleTecnoPrintMenu, #inmuebleTecnoPrintBtn");
+      if (!inside) setInmuebleTecnoPrintMenuOpen(false);
+    }
+  });
 };
 
 // Registrar cuanto antes (no esperar a `init()`), para que los clicks en enlaces del CRM
@@ -47886,6 +47930,95 @@ if (inmuebleTecnoSideActividadOpen) {
   inmuebleTecnoSideActividadOpen.addEventListener("click", () => {
     setInmuebleTab("actividad");
     window.scrollTo({ top: 0, behavior: "smooth" });
+  });
+}
+
+if (inmuebleTecnoSideNuevaActividad) {
+  inmuebleTecnoSideNuevaActividad.addEventListener("click", () => {
+    const etapaMain = normalizeCrmMainEtapa(state.currentInmuebleContext?.inmueble?.estado || "");
+    const tipo = etapaMain === "Encargo" ? "Cita de gestión encargo (seguimiento)" : "Llamada";
+    queueInmuebleCitaPrefill({
+      tipo,
+      asunto: tipo,
+      statusText: "Registra la acción y guárdala para mantener trazabilidad.",
+    });
+    applyPendingInmuebleCitaPrefill();
+  });
+}
+
+if (inmuebleTecnoEmailBtn) {
+  inmuebleTecnoEmailBtn.addEventListener("click", () => {
+    queueInmuebleCitaPrefill({
+      tipo: "Email",
+      asunto: "Envío mail",
+      statusText: "Email preparado. Completa asunto/notas y guarda para registrar el envío.",
+    });
+    applyPendingInmuebleCitaPrefill();
+  });
+}
+
+if (inmuebleTecnoCampaignBtn) {
+  inmuebleTecnoCampaignBtn.addEventListener("click", () => {
+    queueInmuebleCitaPrefill({
+      tipo: "Email",
+      asunto: "Campaña email",
+      statusText: "Campaña email preparada. Completa contenido en notas y guarda para registrar.",
+    });
+    applyPendingInmuebleCitaPrefill();
+  });
+}
+
+if (inmuebleTecnoPosBtn) {
+  inmuebleTecnoPosBtn.addEventListener("click", () => {
+    setInmuebleTab("datos");
+    if (inmuebleGeocodeBtn) {
+      inmuebleGeocodeBtn.click();
+      return;
+    }
+    alert("No se pudo abrir la herramienta de posición.");
+  });
+}
+
+if (inmuebleTecnoValoracionBtn) {
+  inmuebleTecnoValoracionBtn.addEventListener("click", () => {
+    if (inmuebleVentaPrecioPdfBtn && !inmuebleVentaPrecioPdfBtn.classList.contains("hidden")) {
+      inmuebleVentaPrecioPdfBtn.click();
+      return;
+    }
+    alert("Informe de valoración: pendiente de configurar en este entorno.");
+  });
+}
+
+if (inmuebleTecnoPrintBtn && inmuebleTecnoPrintMenu) {
+  inmuebleTecnoPrintBtn.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const isOpen = !inmuebleTecnoPrintMenu.classList.contains("hidden");
+    setInmuebleTecnoPrintMenuOpen(!isOpen);
+  });
+}
+
+if (inmuebleTecnoPrintMenu) {
+  inmuebleTecnoPrintMenu.addEventListener("click", (event) => {
+    const btn = closestFromEvent(event, "button[data-print]");
+    if (!btn) return;
+    const key = String(btn.dataset.print || "").trim();
+    setInmuebleTecnoPrintMenuOpen(false);
+    if (key === "venta_ficha") {
+      openInmuebleConsumoPdf("venta_ficha");
+      return;
+    }
+    if (key === "venta_precio") {
+      openInmuebleConsumoPdf("venta_precio");
+      return;
+    }
+    if (key === "visita") {
+      openInmuebleVisitSheetPdf();
+      return;
+    }
+    if (key === "encargo") {
+      openInmuebleNotaEncargoPdf();
+    }
   });
 }
 

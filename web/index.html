@@ -8,7 +8,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Verifika²" />
     <title>Verifika² · CRM & Portal</title>
-    <link rel="stylesheet" href="styles.css?v=165" />
+    <link rel="stylesheet" href="styles.css?v=166" />
     <link rel="manifest" href="manifest.webmanifest?v=17" />
     <link rel="icon" href="/icons/ios/v28/icon-192.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/icons/ios/v28/apple-touch-icon-180.png" />
@@ -3006,6 +3006,21 @@
             <div id="inmuebleTecnoMeta" class="inmueble-tecno-meta"></div>
             <div id="inmuebleTecnoKpis" class="inmueble-tecno-kpis"></div>
             <div id="inmuebleTecnoStages" class="inmueble-tecno-stages" aria-label="Fase del inmueble"></div>
+            <div id="inmuebleTecnoActions" class="inmueble-tecno-actions" aria-label="Acciones rápidas">
+              <button type="button" class="secondary ghost" id="inmuebleTecnoEmailBtn">Envío mail</button>
+              <button type="button" class="secondary ghost" id="inmuebleTecnoPosBtn">Modifica posición</button>
+              <div class="inmueble-tecno-printwrap">
+                <button type="button" class="secondary ghost" id="inmuebleTecnoPrintBtn" aria-haspopup="menu" aria-controls="inmuebleTecnoPrintMenu">Impresiones</button>
+                <div id="inmuebleTecnoPrintMenu" class="inmueble-tecno-printmenu hidden" role="menu" aria-label="Impresiones">
+                  <button type="button" data-print="venta_ficha">Ficha venta (PDF)</button>
+                  <button type="button" data-print="venta_precio">Nota precio (PDF)</button>
+                  <button type="button" data-print="visita">Hoja visita (PDF)</button>
+                  <button type="button" data-print="encargo">Nota encargo (PDF)</button>
+                </div>
+              </div>
+              <button type="button" class="secondary ghost" id="inmuebleTecnoCampaignBtn">Crea campaña email</button>
+              <button type="button" class="secondary ghost" id="inmuebleTecnoValoracionBtn">Informe valoración</button>
+            </div>
             <div class="tabs" id="inmuebleTabs">
               <button class="tab active" type="button" data-tab="datos">Información</button>
               <button class="tab hidden" type="button" data-tab="generar_encargo" id="inmuebleGenerarEncargoTabBtn">Generar encargo</button>
@@ -3380,7 +3395,7 @@
                 <div class="form-card" id="inmuebleTecnoSideDemandas">
                   <div class="section-head">
                     <div>
-                      <h3>Pedidos relacionados</h3>
+                      <h3>Pedidos relacionados <span class="pill" id="inmuebleTecnoSideDemandasCount">0</span></h3>
                       <p class="muted">Matching automático según datos del inmueble.</p>
                     </div>
                     <button type="button" class="secondary ghost" id="inmuebleTecnoSideDemandasOpen">Ver todo</button>
@@ -3390,10 +3405,13 @@
                 <div class="form-card" id="inmuebleTecnoSideActividad">
                   <div class="section-head">
                     <div>
-                      <h3>Actividades y citas</h3>
+                      <h3>Actividades y citas <span class="pill" id="inmuebleTecnoSideActividadCount">0</span></h3>
                       <p class="muted">Últimas acciones vinculadas al inmueble.</p>
                     </div>
-                    <button type="button" class="secondary ghost" id="inmuebleTecnoSideActividadOpen">Ver todo</button>
+                    <div class="form-actions">
+                      <button type="button" class="secondary" id="inmuebleTecnoSideNuevaActividad">Nueva</button>
+                      <button type="button" class="secondary ghost" id="inmuebleTecnoSideActividadOpen">Ver todo</button>
+                    </div>
                   </div>
                   <div id="inmuebleTecnoSideActividadList"></div>
                 </div>
@@ -8191,7 +8209,7 @@
     <script src="ui-foundation.js?v=3"></script>
     <script src="app-auth.js?v=10"></script>
     <script src="app-routing.js?v=7"></script>
-    <script src="app.js?v=453"></script>
+    <script src="app.js?v=454"></script>
     <script>
       (function () {
         if (!("serviceWorker" in navigator)) return;

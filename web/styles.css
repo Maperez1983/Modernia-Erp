@@ -3506,6 +3506,80 @@ body.crm-fin #companySummary {
   margin: 10px 0 10px;
 }
 
+#inmuebleDetail .inmueble-tecno-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin: 0 0 12px;
+}
+
+#inmuebleDetail .inmueble-tecno-actions button {
+  border-radius: 10px;
+  padding: 8px 10px;
+  font-size: 12px;
+}
+
+#inmuebleDetail .inmueble-tecno-printwrap {
+  position: relative;
+}
+
+#inmuebleDetail .inmueble-tecno-printmenu {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 60;
+  min-width: 220px;
+  padding: 10px;
+  border-radius: 14px;
+  border: 1px solid rgba(15, 23, 42, 0.16);
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 16px 28px rgba(11, 29, 51, 0.18);
+}
+
+#inmuebleDetail .inmueble-tecno-printmenu.hidden {
+  display: none;
+}
+
+#inmuebleDetail .inmueble-tecno-printmenu button {
+  width: 100%;
+  text-align: left;
+  justify-content: flex-start;
+}
+
+#inmuebleDetail #inmuebleTabs {
+  position: sticky;
+  top: 14px;
+  z-index: 10;
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid rgba(15, 23, 42, 0.10);
+  border-radius: 14px;
+  padding: 8px 10px;
+  gap: 18px;
+}
+
+#inmuebleDetail #inmuebleTabs .tab {
+  min-width: max-content;
+  background: transparent;
+  border: none;
+  padding: 6px 0;
+  border-bottom: 3px solid transparent;
+  border-radius: 0;
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(var(--ink-rgb), 0.74);
+}
+
+#inmuebleDetail #inmuebleTabs .tab:hover {
+  color: rgba(var(--ink-rgb), 0.92);
+}
+
+#inmuebleDetail #inmuebleTabs .tab.active {
+  color: rgba(var(--sage-rgb), 1);
+  border-bottom-color: rgba(var(--sage-rgb), 0.95);
+}
+
 #inmuebleDetail .inmueble-tecno-meta .meta-item {
   display: grid;
   gap: 2px;
@@ -3567,7 +3641,8 @@ body.crm-fin #companySummary {
 }
 
 #inmuebleDetail .inmueble-tecno-stage {
-  padding: 6px 12px;
+  position: relative;
+  padding: 7px 14px;
   border-radius: 999px;
   border: 1px solid rgba(15, 23, 42, 0.10);
   background: rgba(255, 255, 255, 0.95);
@@ -3581,6 +3656,19 @@ body.crm-fin #companySummary {
   border-color: rgba(var(--sage-rgb), 0.40);
   background: rgba(var(--sage-rgb), 0.14);
   color: rgba(var(--ink-rgb), 0.92);
+}
+
+#inmuebleDetail .inmueble-tecno-stage.active::after {
+  content: "";
+  position: absolute;
+  right: -10px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 0;
+  height: 0;
+  border-top: 9px solid transparent;
+  border-bottom: 9px solid transparent;
+  border-left: 10px solid rgba(var(--sage-rgb), 0.38);
 }
 
 #inmuebleDetail .inmueble-tecno-grid {
@@ -3597,6 +3685,17 @@ body.crm-fin #companySummary {
 
 #inmuebleDetail .inmueble-tecno-side .form-card {
   margin: 0;
+}
+
+#inmuebleDetail .inmueble-tecno-side .pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 8px;
+  font-size: 11px;
+  border-radius: 999px;
 }
 
 #inmuebleDetail #inmuebleTecnoSideDemandasList,
