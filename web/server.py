@@ -20945,6 +20945,32 @@ def fetch_workspace_company_ids(conn, workspace_id):
         return empresa_ids
     if not WORKSPACE_AUTO_LINK_COMPANIES:
         return []
+    # Safety: en entornos multi-workspace, nunca debemos auto-vincular "todas las empresas" a un
+    # workspace vacío (crearía contaminación de datos entre clientes).
+    # Solo permitimos el autolink en setups legacy de 1 workspace, o en el workspace legacy del "grupo".
+    try:
+        ws_total_row = conn.execute("SELECT COUNT(*) AS total FROM workspaces").fetchone()
+        ws_total = int(row_value(ws_total_row, "total") or row_value(ws_total_row, 0) or 0)
+    except Exception:
+        ws_total = 0
+    if ws_total > 1:
+        try:
+            ws_row = conn.execute("SELECT slug, nombre FROM workspaces WHERE id = ? LIMIT 1", (ws_id,)).fetchone()
+        except Exception:
+            ws_row = None
+        ws_slug = str(row_value(ws_row, "slug") or "") if ws_row else ""
+        ws_name = str(row_value(ws_row, "nombre") or "") if ws_row else ""
+        ws_key = normalize_workspace_slug(ws_slug or ws_name or "")
+        legacy_group_keys = {
+            "modernia",
+            "grupomodernia",
+            "grupo-modernia",
+            "verifika",
+            "verifika2",
+            "verifika-2",
+        }
+        if ws_key not in legacy_group_keys:
+            return []
     # Backfill: si el workspace no tiene empresas asociadas, no podemos mostrar RRHH/operativa.
     # Creamos los links por defecto usando empresas activas existentes.
     try:
