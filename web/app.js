@@ -3,7 +3,7 @@
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v70";
+const APP_SW_VERSION = "v71";
 
 // Workspace tenant por defecto del producto (branding de software). Mantiene compatibilidad con slugs legacy.
 const DEFAULT_TENANT_WORKSPACE_SLUG = "verifika2";
@@ -7410,32 +7410,17 @@ const renderWorkspaceLauncher = (workspace = {}, modules = []) => {
 	    if (tenantNonAdmin) {
 	      const services = expandServiceAliases(parseServiceList(workspaceAuthUser?.servicio || ""));
 	      tenantEnabledKeys = new Set();
-	      tenantEnabledKeys.add("rrhh");
-	      tenantEnabledKeys.add("registro_horario");
-	      if (services.includes("inmobiliaria")) tenantEnabledKeys.add("inmobiliaria");
-	      if (services.includes("seguros")) tenantEnabledKeys.add("seguros");
-	      if (services.includes("gestoria")) tenantEnabledKeys.add("gestoria");
-	      if (services.includes("financiaciones") || services.includes("hipotecas")) tenantEnabledKeys.add("financiacion");
-	      if (services.includes("fincas") || services.includes("administracion fincas") || services.includes("administracion de fincas")) tenantEnabledKeys.add("fincas");
-	      if (services.includes("reformas") || services.includes("obras")) tenantEnabledKeys.add("reformas");
+        // Siempre respetamos los módulos habilitados del workspace.
+        if (enabledKeys.has("rrhh")) tenantEnabledKeys.add("rrhh");
+        if (enabledKeys.has("registro_horario")) tenantEnabledKeys.add("registro_horario");
+	      if (services.includes("inmobiliaria") && enabledKeys.has("inmobiliaria")) tenantEnabledKeys.add("inmobiliaria");
+	      if (services.includes("seguros") && enabledKeys.has("seguros")) tenantEnabledKeys.add("seguros");
+	      if (services.includes("gestoria") && enabledKeys.has("gestoria")) tenantEnabledKeys.add("gestoria");
+	      if ((services.includes("financiaciones") || services.includes("hipotecas")) && enabledKeys.has("financiacion")) tenantEnabledKeys.add("financiacion");
+	      if ((services.includes("fincas") || services.includes("administracion fincas") || services.includes("administracion de fincas")) && enabledKeys.has("fincas")) tenantEnabledKeys.add("fincas");
+	      if ((services.includes("reformas") || services.includes("obras")) && enabledKeys.has("reformas")) tenantEnabledKeys.add("reformas");
 	    } else {
-	      enabledKeys.add("crm360");
-	      enabledKeys.add("gestoria");
-	      enabledKeys.add("seguros");
-	      enabledKeys.add("inmobiliaria");
-	      enabledKeys.add("financiacion");
-	      enabledKeys.add("fincas");
-	      enabledKeys.add("documental");
-	      enabledKeys.add("facturacion");
-	      enabledKeys.add("facturas_recibidas");
-	      enabledKeys.add("portal_cliente");
-	      enabledKeys.add("registro_horario");
-	      enabledKeys.add("rrhh");
-	      enabledKeys.add("automatizaciones");
-	      enabledKeys.add("reformas");
-	      if (isGrupoModerniaWorkspace() || enabledKeys.has("copilot")) {
-	        enabledKeys.add("copilot");
-	      }
+        // Admin en modo tenant: muestra únicamente los módulos realmente habilitados para este workspace.
 	      tenantEnabledKeys = enabledKeys;
 	    }
 	  }
