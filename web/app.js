@@ -3,7 +3,7 @@
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v68";
+const APP_SW_VERSION = "v69";
 
 // Workspace tenant por defecto del producto (branding de software). Mantiene compatibilidad con slugs legacy.
 const DEFAULT_TENANT_WORKSPACE_SLUG = "verifika2";
@@ -4363,16 +4363,80 @@ const renderCompanyCards = () => {
     `;
     coreCards.appendChild(platformCard);
 
-	    const tenantCard = document.createElement("div");
-    tenantCard.className = "company-card";
-    tenantCard.dataset.action = "holding-tenant";
-    tenantCard.innerHTML = `
+	    const homeWorkspacesCard = document.createElement("div");
+    homeWorkspacesCard.className = "company-card";
+    homeWorkspacesCard.dataset.action = "holding-workspaces";
+    homeWorkspacesCard.innerHTML = `
       <h3>Workspaces</h3>
-      <div class="company-meta">Acceso al listado completo de workspaces disponibles.</div>
-      <div class="company-meta">Selecciona un workspace y entra en su configuración u operativa.</div>
-      <a class="card-link" href="?holding=1&mode=platform&view=tenant" data-action="holding-tenant">Entrar</a>
+      <div class="company-meta">Cargando lista de workspaces...</div>
+      <div class="company-meta">Selecciona dónde quieres entrar.</div>
+      <a class="card-link" href="?holding=1&mode=platform&view=tenant" data-action="holding-workspaces">Ver listado</a>
     `;
-	    coreCards.appendChild(tenantCard);
+	    coreCards.appendChild(homeWorkspacesCard);
+
+      // En el home (admins) mostramos cada workspace como card independiente.
+      // Esto evita confusión con "Workspace Verifika²" cuando hay múltiples workspaces.
+      try {
+        const renderId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+        state.homeWorkspacesRenderId = renderId;
+        (async () => {
+          // Evita llamadas repetidas si el home se repinta varias veces.
+          const now = Date.now();
+          const recentRows = Array.isArray(state.homeWorkspacesRows) ? state.homeWorkspacesRows : null;
+          const recentAt = Number(state.homeWorkspacesFetchedAt || 0) || 0;
+          let rows = recentRows && (now - recentAt) < 60_000 ? recentRows : null;
+          if (!rows) {
+            const health = await probeDbHealth();
+            if (!health.ok) return;
+            const data = await safeWorkspaceApi("/api/workspaces", null);
+            rows = Array.isArray(data?.rows) ? data.rows : null;
+            if (rows) {
+              state.homeWorkspacesRows = rows;
+              state.homeWorkspacesFetchedAt = Date.now();
+            }
+          }
+          if (state.homeWorkspacesRenderId !== renderId) return;
+          if (!rows || !rows.length) return;
+          if (!coreCards || !coreCards.contains(homeWorkspacesCard)) return;
+
+          // Reemplaza la card "Workspaces" por N cards, una por workspace.
+          try {
+            homeWorkspacesCard.remove();
+          } catch {}
+          rows.forEach((row) => {
+            const workspaceId = String(row?.id || "").trim();
+            const rawName = String(row?.nombre || row?.name || row?.slug || row?.id || "").trim();
+            const brandedName = getWorkspaceDisplayName(row);
+            const showBranding =
+              rawName
+              && brandedName
+              && normalizeWorkspaceIdentifier(rawName) !== normalizeWorkspaceIdentifier(brandedName);
+            const meta = [
+              String(row?.kind || "").trim() || "Directo",
+              String(row?.plan || "").trim() || "Enterprise",
+              String(row?.estado || "").trim() || "Activo",
+            ].filter(Boolean);
+            const counts = [
+              `Empresas: ${numberFormatter.format(Number(row?.empresas_total || 0) || 0)}`,
+              `Módulos: ${numberFormatter.format(Number(row?.modulos_activos || 0) || 0)}`,
+            ];
+            const card = document.createElement("div");
+            card.className = "company-card";
+            card.dataset.action = `home-workspace:${workspaceId || rawName || brandedName}`;
+            const href = workspaceId
+              ? `?holding=1&mode=tenant&workspace=${encodeURIComponent(workspaceId)}&view=operations`
+              : `?holding=1&mode=platform&view=tenant`;
+            card.innerHTML = `
+              <h3>${escapeHtml(rawName || brandedName || "Workspace")}</h3>
+              <div class="company-meta">${escapeHtml(meta.join(" · "))}${showBranding ? ` · Marca: ${escapeHtml(brandedName)}` : ""}</div>
+              <div class="company-meta">${escapeHtml(counts.join(" · "))}</div>
+              <a class="card-link" href="${href}">Entrar</a>
+            `;
+            coreCards.appendChild(card);
+          });
+          dedupeCoreCards();
+        })();
+      } catch {}
 	    maybeAutoShowHomeTimePunchModal();
       dedupeCoreCards();
 	  }

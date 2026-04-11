@@ -5,7 +5,7 @@
  * - Never caches /api or /uploads
  */
 
-const CACHE_VERSION = "v28";
+const CACHE_VERSION = "v69";
 const SHELL_CACHE = `verifika2-shell-${CACHE_VERSION}`;
 const RUNTIME_CACHE = `verifika2-runtime-${CACHE_VERSION}`;
 const FONTS_CACHE = `verifika2-fonts-${CACHE_VERSION}`;
@@ -13,19 +13,19 @@ const FONTS_CACHE = `verifika2-fonts-${CACHE_VERSION}`;
 const SHELL_URLS = [
   "/",
   "/index.html",
-  "/styles.css?v=157",
+  "/styles.css?v=163",
   "/ui-foundation.js?v=2",
-  "/app-auth.js?v=9",
+  "/app-auth.js?v=10",
   "/app-routing.js?v=7",
-  "/app.js?v=435",
-  "/manifest.webmanifest?v=9",
+  "/app.js?v=442",
+  "/manifest.webmanifest?v=17",
   "/assets/verifika2/verifika2_mark.svg",
   "/assets/verifika2/verifika2_badge_gold.svg",
   "/assets/verifika2/verifika2_badge_silver.svg",
   "/assets/verifika2/verifika2_badge_carbon.svg",
-  "/icons/ios/v23/icon-192.png",
-  "/icons/ios/v23/icon-512.png",
-  "/icons/ios/v23/apple-touch-icon-180.png",
+  "/icons/ios/v28/icon-192.png",
+  "/icons/ios/v28/icon-512.png",
+  "/icons/ios/v28/apple-touch-icon-180.png",
 ];
 
 const isSameOrigin = (url) => {
