@@ -8,7 +8,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Verifika²" />
     <title>Verifika² · CRM & Portal</title>
-    <link rel="stylesheet" href="styles.css?v=164" />
+    <link rel="stylesheet" href="styles.css?v=165" />
     <link rel="manifest" href="manifest.webmanifest?v=17" />
     <link rel="icon" href="/icons/ios/v28/icon-192.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/icons/ios/v28/apple-touch-icon-180.png" />
@@ -2139,19 +2139,42 @@
                 aria-controls="crmQuickNewMenu"
               >
                 <span class="crm-side-ico">+</span>
-                <span class="crm-side-txt">Nuevo</span>
+                <span class="crm-side-txt">Nuevas<br />Oport.</span>
               </button>
               <div id="crmQuickNewMenu" class="crm-quick-new-menu hidden" role="menu" aria-label="Crear nuevo">
                 <button type="button" id="crmNuevaCaptacionBtn">Nuevo inmueble</button>
                 <button type="button" id="crmNuevaCompraventaBtn" class="secondary">Nueva compraventa</button>
                 <button type="button" id="crmNuevaDemandaBtn" class="secondary">Nuevo pedido</button>
               </div>
-              <div class="crm-side-sep"></div>
+              <button type="button" class="crm-side-item" data-crm-view="agenda" title="Agenda">
+                <span class="crm-side-ico" aria-hidden="true">
+                  <svg viewBox="0 0 24 24">
+                    <path d="M7 3v3" />
+                    <path d="M17 3v3" />
+                    <path d="M4 7h16" />
+                    <path d="M5 7v14h14V7" />
+                    <path d="m9 14 2 2 4-4" />
+                  </svg>
+                </span>
+                <span class="crm-side-txt">Agenda</span>
+              </button>
+              <button type="button" class="crm-side-item" data-crm-view="analisis" title="Gestión objetivos">
+                <span class="crm-side-ico" aria-hidden="true">
+                  <svg viewBox="0 0 24 24">
+                    <path d="M4 19V5" />
+                    <path d="M4 19h16" />
+                    <path d="M7 16v-6" />
+                    <path d="M12 16V9" />
+                    <path d="M17 16V7" />
+                  </svg>
+                </span>
+                <span class="crm-side-txt">Objetivos</span>
+              </button>
               <button
                 type="button"
                 class="crm-side-item"
                 id="crmRecentBtn"
-                title="Elementos recientes"
+                title="Recientes"
                 aria-haspopup="dialog"
                 aria-controls="crmRecentMenu"
               >
@@ -2171,87 +2194,6 @@
                 </div>
                 <div id="crmRecentList" class="crm-recent-list"></div>
               </div>
-              <button type="button" class="crm-side-item active" data-crm-view="resumen" title="Inicio">
-                <span class="crm-side-ico" aria-hidden="true">
-                  <svg viewBox="0 0 24 24">
-                    <path d="M3 10.5 12 3l9 7.5" />
-                    <path d="M5 10v10h14V10" />
-                    <path d="M9 20v-6h6v6" />
-                  </svg>
-                </span>
-                <span class="crm-side-txt">Inicio</span>
-              </button>
-              <button type="button" class="crm-side-item" data-crm-action="clientes" title="Clientes">
-                <span class="crm-side-ico" aria-hidden="true">
-                  <svg viewBox="0 0 24 24">
-                    <path d="M16 11a4 4 0 1 0-8 0" />
-                    <path d="M4 21a8 8 0 0 1 16 0" />
-                  </svg>
-                </span>
-                <span class="crm-side-txt">Clientes</span>
-              </button>
-              <button type="button" class="crm-side-item" data-crm-view="inmuebles" title="Inmuebles">
-                <span class="crm-side-ico" aria-hidden="true">
-                  <svg viewBox="0 0 24 24">
-                    <path d="M4 21V9l8-6 8 6v12" />
-                    <path d="M9 21v-6h6v6" />
-                  </svg>
-                </span>
-                <span class="crm-side-txt">Inmuebles</span>
-              </button>
-              <button type="button" class="crm-side-item" data-crm-view="captaciones" data-etapa="Noticia" title="Noticias">
-                <span class="crm-side-ico" aria-hidden="true">
-                  <svg viewBox="0 0 24 24">
-                    <path d="M4 5h12v14H4z" />
-                    <path d="M16 8h4v11h-4" />
-                    <path d="M7 8h6" />
-                    <path d="M7 12h6" />
-                    <path d="M7 16h6" />
-                  </svg>
-                </span>
-                <span class="crm-side-txt">Noticias</span>
-              </button>
-              <button type="button" class="crm-side-item" data-crm-view="captaciones" data-etapa="Encargo" title="Encargos">
-                <span class="crm-side-ico" aria-hidden="true">
-                  <svg viewBox="0 0 24 24">
-                    <path d="M9 6V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v1" />
-                    <path d="M4 8h16v13H4z" />
-                    <path d="M9 12h6" />
-                  </svg>
-                </span>
-                <span class="crm-side-txt">Encargos</span>
-              </button>
-              <button type="button" class="crm-side-item" data-crm-view="demandas" data-crm-quick="demandas:activa" title="Pedidos">
-                <span class="crm-side-ico" aria-hidden="true">
-                  <svg viewBox="0 0 24 24">
-                    <path d="M9 4h6l1 2h4v16H4V6h4z" />
-                    <path d="M8 11h8" />
-                    <path d="M8 15h8" />
-                  </svg>
-                </span>
-                <span class="crm-side-txt">Pedidos</span>
-              </button>
-              <button type="button" class="crm-side-item" data-crm-view="agenda" data-crm-quick="agenda:Pendiente" title="Actividades y citas">
-                <span class="crm-side-ico" aria-hidden="true">
-                  <svg viewBox="0 0 24 24">
-                    <path d="M7 3v3" />
-                    <path d="M17 3v3" />
-                    <path d="M4 7h16" />
-                    <path d="M5 7v14h14V7" />
-                    <path d="m9 14 2 2 4-4" />
-                  </svg>
-                </span>
-                <span class="crm-side-txt">Act./Citas</span>
-              </button>
-              <button type="button" class="crm-side-item" data-crm-view="analisis" title="Búsq./Informes">
-                <span class="crm-side-ico" aria-hidden="true">
-                  <svg viewBox="0 0 24 24">
-                    <circle cx="11" cy="11" r="6" />
-                    <path d="M20 20l-4.2-4.2" />
-                  </svg>
-                </span>
-                <span class="crm-side-txt">Búsq./Inf.</span>
-              </button>
               <div class="crm-side-grow"></div>
             </aside>
 
@@ -2259,7 +2201,7 @@
               <div class="crm-lightning-topbar">
                 <div class="crm-lightning-brand">
                   <div class="crm-lightning-brand-title">Modernia</div>
-                  <div class="crm-lightning-brand-sub">CRM inmobiliario</div>
+                  <div class="crm-lightning-brand-sub">Lightning</div>
                 </div>
 
                 <div id="crmWorkspaceTabs" class="crm-workspace-tabs crm-lightning-tabs" role="tablist" aria-label="Menú superior Tecnocloud-like">
@@ -3061,15 +3003,19 @@
                 <button class="ghost" type="button" id="inmuebleBackBtn">Volver</button>
               </div>
             </div>
-            <p class="muted">La ficha del inmueble es editable y se guarda automáticamente. En Datos se concentra el formulario operativo, el seguimiento comercial y la geolocalización.</p>
+            <div id="inmuebleTecnoMeta" class="inmueble-tecno-meta"></div>
+            <div id="inmuebleTecnoKpis" class="inmueble-tecno-kpis"></div>
+            <div id="inmuebleTecnoStages" class="inmueble-tecno-stages" aria-label="Fase del inmueble"></div>
             <div class="tabs" id="inmuebleTabs">
-              <button class="tab active" type="button" data-tab="datos">Datos</button>
+              <button class="tab active" type="button" data-tab="datos">Información</button>
               <button class="tab hidden" type="button" data-tab="generar_encargo" id="inmuebleGenerarEncargoTabBtn">Generar encargo</button>
-              <button class="tab" type="button" data-tab="demandas">Demandas</button>
-              <button class="tab" type="button" data-tab="actividad">Actividad</button>
-              <button class="tab" type="button" data-tab="docs">Repositorio</button>
+              <button class="tab" type="button" data-tab="demandas">Pedidos</button>
+              <button class="tab" type="button" data-tab="actividad">Act./Citas</button>
+              <button class="tab" type="button" data-tab="docs">Imágenes/Adjuntos</button>
               <button class="tab" type="button" data-tab="estado">Estado</button>
             </div>
+            <div class="inmueble-tecno-grid">
+              <div class="inmueble-tecno-main">
             <div id="inmuebleTabDatos">
               <div class="inmueble-profile inmueble-profile-top">
                 <div id="inmuebleSummaryCard" class="inmueble-summary-card"></div>
@@ -3137,11 +3083,11 @@
                 <div class="footer" id="inmuebleCompradoresInfo"></div>
               </div>
               <div class="form-card">
-                <h3>Demandas compatibles</h3>
+                <h3>Pedidos compatibles</h3>
                 <div id="inmuebleDemandasTable"></div>
               </div>
               <div class="form-card">
-                <h3>Nueva demanda</h3>
+                <h3>Nuevo pedido</h3>
                 <form id="inmuebleDemandaForm">
                   <div class="form-grid">
                     <label>
@@ -3154,10 +3100,6 @@
                         <option>Compra</option>
                         <option>Alquiler</option>
                       </select>
-                    </label>
-                    <label>
-                      Zona
-                      <input name="zona" />
                     </label>
                     <label>
                       Precio máximo
@@ -3432,6 +3374,39 @@
                 <div id="inmuebleChecklistTable"></div>
                 <div class="footer" id="inmuebleChecklistInfo"></div>
               </div>
+            </div>
+              </div>
+              <aside class="inmueble-tecno-side" aria-label="Panel lateral del inmueble">
+                <div class="form-card" id="inmuebleTecnoSideDemandas">
+                  <div class="section-head">
+                    <div>
+                      <h3>Pedidos relacionados</h3>
+                      <p class="muted">Matching automático según datos del inmueble.</p>
+                    </div>
+                    <button type="button" class="secondary ghost" id="inmuebleTecnoSideDemandasOpen">Ver todo</button>
+                  </div>
+                  <div id="inmuebleTecnoSideDemandasList"></div>
+                </div>
+                <div class="form-card" id="inmuebleTecnoSideActividad">
+                  <div class="section-head">
+                    <div>
+                      <h3>Actividades y citas</h3>
+                      <p class="muted">Últimas acciones vinculadas al inmueble.</p>
+                    </div>
+                    <button type="button" class="secondary ghost" id="inmuebleTecnoSideActividadOpen">Ver todo</button>
+                  </div>
+                  <div id="inmuebleTecnoSideActividadList"></div>
+                </div>
+                <div class="form-card" id="inmuebleTecnoSidePropietario">
+                  <div class="section-head">
+                    <div>
+                      <h3>Propietario</h3>
+                      <p class="muted">Datos principales del titular.</p>
+                    </div>
+                  </div>
+                  <div id="inmuebleTecnoSidePropietarioCard"></div>
+                </div>
+              </aside>
             </div>
           </div>
               </div>
@@ -5312,10 +5287,6 @@
                     <input name="referencia_catastral" />
                   </label>
                   <label>
-                    Zona
-                    <input name="zona" />
-                  </label>
-                  <label>
                     Informador relacionado
                     <input name="informador_nombre" placeholder="Nombre del informador" />
                   </label>
@@ -5735,10 +5706,6 @@
                       <option>Visita</option>
                       <option>Negociaciones avanzadas</option>
                     </select>
-                  </label>
-                  <label>
-                    Zona
-                    <input name="zona" />
                   </label>
                   <label>
                     Tipología
@@ -8224,7 +8191,7 @@
     <script src="ui-foundation.js?v=3"></script>
     <script src="app-auth.js?v=10"></script>
     <script src="app-routing.js?v=7"></script>
-    <script src="app.js?v=452"></script>
+    <script src="app.js?v=453"></script>
     <script>
       (function () {
         if (!("serviceWorker" in navigator)) return;

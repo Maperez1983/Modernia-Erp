@@ -3,7 +3,7 @@
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v80";
+const APP_SW_VERSION = "v81";
 
 // Workspace tenant por defecto del producto (branding de software). Mantiene compatibilidad con slugs legacy.
 const DEFAULT_TENANT_WORKSPACE_SLUG = "verifika2";
@@ -2703,6 +2703,14 @@ const inmuebleDeleteBtn = document.getElementById("inmuebleDeleteBtn");
 const inmuebleGeocodeBtn = document.getElementById("inmuebleGeocodeBtn");
 const inmuebleTabs = document.getElementById("inmuebleTabs");
 const inmuebleSaveStatus = document.getElementById("inmuebleSaveStatus");
+const inmuebleTecnoMeta = document.getElementById("inmuebleTecnoMeta");
+const inmuebleTecnoKpis = document.getElementById("inmuebleTecnoKpis");
+const inmuebleTecnoStages = document.getElementById("inmuebleTecnoStages");
+const inmuebleTecnoSideDemandasOpen = document.getElementById("inmuebleTecnoSideDemandasOpen");
+const inmuebleTecnoSideDemandasList = document.getElementById("inmuebleTecnoSideDemandasList");
+const inmuebleTecnoSideActividadOpen = document.getElementById("inmuebleTecnoSideActividadOpen");
+const inmuebleTecnoSideActividadList = document.getElementById("inmuebleTecnoSideActividadList");
+const inmuebleTecnoSidePropietarioCard = document.getElementById("inmuebleTecnoSidePropietarioCard");
 const inmuebleTabDatos = document.getElementById("inmuebleTabDatos");
 const inmuebleTabCaptacion = document.getElementById("inmuebleTabCaptacion");
 const inmuebleTabDemandas = document.getElementById("inmuebleTabDemandas");
@@ -16942,7 +16950,7 @@ const renderCrmGlobalSearchResults = () => {
   );
 
   const demandas = (Array.isArray(cachedCrmDemandas) ? cachedCrmDemandas : []).filter((row) => {
-    const hay = [row?.cliente, row?.tipo, row?.zona, row?.estado, row?.prioridad].map((v) => String(v || "")).join(" ");
+    const hay = [row?.cliente, row?.tipo, row?.estado, row?.prioridad].map((v) => String(v || "")).join(" ");
     return matchIncludes(hay);
   });
   pushGroup(
@@ -19481,7 +19489,6 @@ const INMUEBLE_FIELDS = [
   { key: "interior", label: "Interior", type: "text", section: "Dirección" },
   { key: "escalera", label: "Escalera", type: "text", section: "Dirección" },
   { key: "edificio", label: "Edificio", type: "text", section: "Dirección" },
-  { key: "zona", label: "Zona", type: "text", section: "Dirección" },
   { key: "codigo_postal", label: "Código postal", type: "text", section: "Dirección" },
   { key: "localidad", label: "Localidad", type: "text", section: "Dirección" },
   { key: "poblacion", label: "Población", type: "text", section: "Dirección" },
@@ -30681,6 +30688,141 @@ const buildVerifika2Badge = (isVerified, { compact = false } = {}) => {
   `;
 };
 
+const renderInmuebleTecnocloudPanels = ({
+  inmueble = {},
+  captacion = {},
+  propietarios = [],
+  docs = [],
+  demandas = [],
+  visitas = [],
+  actividad = [],
+} = {}) => {
+  const stageLabel = normalizeCrmMainEtapa(inmueble.estado || captacion.etapa || captacion.situacion_comercial || "");
+
+  if (inmuebleTecnoMeta) {
+    const createdAt = String(captacion.created_at || "").trim();
+    const ageDays = (() => {
+      if (!createdAt) return "";
+      const ts = Date.parse(createdAt);
+      if (!Number.isFinite(ts)) return "";
+      return String(Math.max(0, Math.floor((Date.now() - ts) / (1000 * 60 * 60 * 24))));
+    })();
+    const meta = [
+      { label: "Dirección", value: String(inmueble.direccion || "").trim() },
+      { label: "Tipología", value: String(inmueble.tipo_inmueble || "").trim() },
+      { label: "Subtipología", value: String(inmueble.subtipologia || "").trim() },
+      { label: "Localidad", value: [inmueble.poblacion, inmueble.provincia].filter(Boolean).join(" · ") },
+      { label: "Antigüedad", value: ageDays ? `${ageDays} días` : "" },
+    ].filter((item) => String(item.value || "").trim());
+    inmuebleTecnoMeta.innerHTML = meta.length
+      ? meta
+          .map(
+            (item) => `
+              <div class="meta-item">
+                <span>${escapeHtml(item.label)}</span>
+                <strong>${escapeHtml(item.value)}</strong>
+              </div>
+            `
+          )
+          .join("")
+      : "";
+  }
+
+  if (inmuebleTecnoKpis) {
+    const kpis = [
+      { label: "Fase", value: stageLabel || "-" },
+      { label: "Pedidos", value: String((Array.isArray(demandas) ? demandas.length : 0) || 0) },
+      { label: "Act./Citas", value: String((Array.isArray(actividad) ? actividad.length : 0) || 0) },
+      { label: "Docs", value: String((Array.isArray(docs) ? docs.length : 0) || 0) },
+    ];
+    inmuebleTecnoKpis.innerHTML = kpis
+      .map(
+        (item) => `
+          <div class="inmueble-tecno-kpi">
+            <span>${escapeHtml(item.label)}</span>
+            <strong>${escapeHtml(item.value)}</strong>
+          </div>
+        `
+      )
+      .join("");
+  }
+
+  if (inmuebleTecnoStages) {
+    const stages = ["Inmueble", "Noticia", "Encargo"];
+    const normalizedKnown = new Set(stages.map((s) => normalizeSimple(s)));
+    if (stageLabel && !normalizedKnown.has(normalizeSimple(stageLabel))) {
+      stages.push(stageLabel);
+    }
+    inmuebleTecnoStages.innerHTML = stages
+      .map((label) => {
+        const active = normalizeSimple(label) === normalizeSimple(stageLabel);
+        return `<span class="inmueble-tecno-stage${active ? " active" : ""}">${escapeHtml(label)}</span>`;
+      })
+      .join("");
+  }
+
+  if (inmuebleTecnoSideDemandasList) {
+    const items = Array.isArray(demandas) ? demandas.slice(0, 5) : [];
+    if (!items.length) {
+      inmuebleTecnoSideDemandasList.innerHTML = "<p class='muted'>Sin pedidos compatibles.</p>";
+    } else {
+      inmuebleTecnoSideDemandasList.innerHTML = items
+        .map((row) => {
+          const title = String(row?.cliente || "").trim() || "Pedido";
+          const meta = [row?.tipo || "", row?.estado || ""].filter(Boolean).join(" · ");
+          return `
+            <div class="inmueble-tecno-minirow">
+              <strong>${escapeHtml(title)}</strong>
+              <div class="muted">${escapeHtml(meta || "-")}</div>
+            </div>
+          `;
+        })
+        .join("");
+    }
+  }
+
+  if (inmuebleTecnoSideActividadList) {
+    const items = Array.isArray(actividad) ? actividad.slice(0, 5) : [];
+    if (!items.length) {
+      inmuebleTecnoSideActividadList.innerHTML = "<p class='muted'>Sin actividad registrada.</p>";
+    } else {
+      inmuebleTecnoSideActividadList.innerHTML = items
+        .map((row) => {
+          const title = String(row?.tipo || "").trim() || "Actividad";
+          const date = row?.fecha ? formatCell("fecha", row.fecha) : "-";
+          const meta = [row?.hora || "", row?.estado || ""].filter(Boolean).join(" · ");
+          return `
+            <div class="inmueble-tecno-minirow">
+              <strong>${escapeHtml(title)}</strong>
+              <div class="muted">${escapeHtml([date, meta].filter(Boolean).join(" · ") || "-")}</div>
+            </div>
+          `;
+        })
+        .join("");
+    }
+  }
+
+  if (inmuebleTecnoSidePropietarioCard) {
+    const list = Array.isArray(propietarios) ? propietarios : [];
+    const first = list[0] || {};
+    if (!list.length) {
+      inmuebleTecnoSidePropietarioCard.innerHTML = "<p class='muted'>Sin propietario enlazado.</p>";
+    } else {
+      const name = String(first.nombre || "").trim() || "Propietario";
+      const phone = String(first.telefono || "").trim();
+      const email = String(first.email || "").trim();
+      const extra = list.length > 1 ? `+${list.length - 1} más` : "";
+      inmuebleTecnoSidePropietarioCard.innerHTML = `
+        <div class="inmueble-tecno-minirow">
+          <strong>${escapeHtml(name)}</strong>
+          <div class="muted">${escapeHtml([phone, email].filter(Boolean).join(" · ") || "-")}</div>
+          ${extra ? `<div class="muted">${escapeHtml(extra)}</div>` : ""}
+        </div>
+      `;
+    }
+  }
+};
+
 const refreshCurrentInmuebleProfile = () => {
   const context = state.currentInmuebleContext || {};
   const inmueble = context.inmueble || {};
@@ -30689,6 +30831,7 @@ const refreshCurrentInmuebleProfile = () => {
   const docs = Array.isArray(context.docs) ? context.docs : [];
   const demandas = Array.isArray(context.demandas) ? context.demandas : [];
   const visitas = Array.isArray(context.visitas) ? context.visitas : [];
+  const actividad = Array.isArray(context.actividad) ? context.actividad : [];
 
   const resolveInmoStageKey = () => {
     const key = normalizeSimple(captacion.situacion_comercial || inmueble.estado || "");
@@ -30709,7 +30852,7 @@ const refreshCurrentInmuebleProfile = () => {
 
   if (inmuebleSummaryCard) {
     const address = inmueble.direccion || "Sin dirección";
-    const locality = [inmueble.zona, inmueble.poblacion].filter(Boolean).join(" · ");
+    const locality = [inmueble.poblacion, inmueble.provincia].filter(Boolean).join(" · ");
     const isVerified = String(captacion.noticia_verificada ?? "").trim() === "1";
     const topBadges = [
       buildVerifika2Badge(isVerified),
@@ -30790,7 +30933,6 @@ const refreshCurrentInmuebleProfile = () => {
       {
         title: "Localización",
         items: [
-          ["Zona", inmueble.zona],
           ["Población", inmueble.poblacion],
           ["Provincia", inmueble.provincia],
           ["CP", inmueble.codigo_postal],
@@ -30845,6 +30987,16 @@ const refreshCurrentInmuebleProfile = () => {
       )
       .join("");
   }
+
+  renderInmuebleTecnocloudPanels({
+    inmueble,
+    captacion,
+    propietarios,
+    docs,
+    demandas,
+    visitas,
+    actividad,
+  });
 
   if (inmuebleEstadoValidation) {
     const requirements = getInmuebleStageRequirements(inmueble.estado || captacion.etapa || "", inmueble, captacion, propietarios);
@@ -32744,7 +32896,7 @@ const loadInmuebleDemandas = (inmuebleId) => {
     const table = document.createElement("table");
     const thead = document.createElement("thead");
     const trHead = document.createElement("tr");
-    ["score", "cliente", "tipo", "zona", "precio_max", "m2_min", "habitaciones_min", "banos_min", "estado", "accion"].forEach((col) => {
+    ["score", "cliente", "tipo", "precio_max", "m2_min", "habitaciones_min", "banos_min", "estado", "accion"].forEach((col) => {
       const th = document.createElement("th");
       th.textContent = formatHeader(col);
       trHead.appendChild(th);
@@ -32755,7 +32907,6 @@ const loadInmuebleDemandas = (inmuebleId) => {
     const scored = rows.map((row) => {
       const constraints = [
         { key: "tipo", val: row.tipo, match: !row.tipo || row.tipo === inmueble.tipo_inmueble },
-        { key: "zona", val: row.zona, match: !row.zona || (inmueble.zona || "").toLowerCase().includes(String(row.zona).toLowerCase()) },
         { key: "precio_max", val: row.precio_max, match: !row.precio_max || Number(inmueblePrimaryPrice || 0) <= Number(row.precio_max) },
         { key: "m2_min", val: row.m2_min, match: !row.m2_min || Number(inmueble.m2 || 0) >= Number(row.m2_min) },
         { key: "habitaciones_min", val: row.habitaciones_min, match: !row.habitaciones_min || Number(inmueble.habitaciones || 0) >= Number(row.habitaciones_min) },
@@ -32774,7 +32925,6 @@ const loadInmuebleDemandas = (inmuebleId) => {
         `${score}%`,
         row.cliente || "-",
         row.tipo || "-",
-        row.zona || "-",
         row.precio_max,
         row.m2_min,
         row.habitaciones_min,
@@ -32782,7 +32932,7 @@ const loadInmuebleDemandas = (inmuebleId) => {
         row.estado || "-",
         "",
       ];
-      const cols = ["score", "cliente", "tipo", "zona", "precio_max", "m2_min", "habitaciones_min", "banos_min", "estado", "accion"];
+      const cols = ["score", "cliente", "tipo", "precio_max", "m2_min", "habitaciones_min", "banos_min", "estado", "accion"];
       values.forEach((value, idx) => {
         const td = document.createElement("td");
         const formatted = formatCell(cols[idx], value);
@@ -33137,6 +33287,11 @@ const loadInmuebleActividad = (inmuebleId, empresaId) => {
   Promise.all([accionesReq, visitasReq, timelineReq]).then(([accionesData, visitasData, timelineData]) => {
     const acciones = accionesData.rows || [];
     const visitas = visitasData.rows || [];
+    if (state.currentInmuebleId === inmuebleId && state.currentInmuebleContext) {
+      state.currentInmuebleContext.actividad = Array.isArray(acciones) ? acciones : [];
+      state.currentInmuebleContext.visitas = Array.isArray(visitas) ? visitas : [];
+      refreshCurrentInmuebleProfile();
+    }
     const unifiedTimeline = Array.isArray(timelineData?.rows) ? timelineData.rows : [];
     const timeline = unifiedTimeline.length
       ? unifiedTimeline
@@ -47717,6 +47872,20 @@ if (inmuebleGoEstadoBtn) {
 if (inmuebleGoActividadBtn) {
   inmuebleGoActividadBtn.addEventListener("click", () => {
     setInmuebleTab("actividad");
+  });
+}
+
+if (inmuebleTecnoSideDemandasOpen) {
+  inmuebleTecnoSideDemandasOpen.addEventListener("click", () => {
+    setInmuebleTab("demandas");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  });
+}
+
+if (inmuebleTecnoSideActividadOpen) {
+  inmuebleTecnoSideActividadOpen.addEventListener("click", () => {
+    setInmuebleTab("actividad");
+    window.scrollTo({ top: 0, behavior: "smooth" });
   });
 }
 

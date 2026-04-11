@@ -49655,9 +49655,6 @@ class Handler(BaseHTTPRequestHandler):
                 return
             where = ["empresa_id = ?"]
             values = [empresa_id]
-            if demanda["zona"]:
-                where.append("LOWER(zona) LIKE ?")
-                values.append(f"%{demanda['zona'].lower()}%")
             if demanda["precio_max"]:
                 where.append("precio_objetivo <= ?")
                 values.append(demanda["precio_max"])
@@ -49698,9 +49695,6 @@ class Handler(BaseHTTPRequestHandler):
                 return
             where = ["d.empresa_id = ?"]
             values = [inmueble["empresa_id"]]
-            if inmueble["zona"]:
-                where.append("LOWER(d.zona) LIKE ?")
-                values.append(f"%{inmueble['zona'].lower()}%")
             if inmueble["precio_objetivo"]:
                 where.append("(d.precio_max IS NULL OR d.precio_max >= ?)")
                 values.append(inmueble["precio_objetivo"])
