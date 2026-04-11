@@ -15615,9 +15615,10 @@ const loadWorkspaceDetail = async (workspaceId) => {
     state.currentWorkspaceServiceMatrixRows = Array.isArray(matrix?.rows) ? matrix.rows : [];
     state.currentWorkspaceServiceCompanyDefaults = matrix?.defaults && typeof matrix.defaults === "object" ? matrix.defaults : {};
   }
-  if (!state.currentWorkspaceTarget) {
-    state.currentWorkspaceTarget = detail.workspace?.slug || detail.workspace?.nombre || "";
-  }
+  // Mantén la URL alineada con el workspace seleccionado.
+  // Usamos `id` para evitar ambigüedad entre slugs legacy (modernia/verifika2) y nombres rebrandeados.
+  state.currentWorkspaceTarget = String(detail.workspace?.id || workspaceId || "").trim() || String(workspaceId || "").trim();
+  syncHoldingUrlParams();
   const companies = detail.companies || [];
   const tenantOperationalMode = (state.currentWorkspaceEntryMode || "platform") === "tenant";
   const companyMatch = companies.find((row) => String(row.id || "") === String(state.currentWorkspaceCompanyId || ""));
