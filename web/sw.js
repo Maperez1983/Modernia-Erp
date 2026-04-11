@@ -5,7 +5,7 @@
  * - Never caches /api or /uploads
  */
 
-const CACHE_VERSION = "v72";
+const CACHE_VERSION = "v73";
 const SHELL_CACHE = `verifika2-shell-${CACHE_VERSION}`;
 const RUNTIME_CACHE = `verifika2-runtime-${CACHE_VERSION}`;
 const FONTS_CACHE = `verifika2-fonts-${CACHE_VERSION}`;
@@ -14,10 +14,10 @@ const SHELL_URLS = [
   "/",
   "/index.html",
   "/styles.css?v=163",
-  "/ui-foundation.js?v=2",
+  "/ui-foundation.js?v=3",
   "/app-auth.js?v=10",
   "/app-routing.js?v=7",
-  "/app.js?v=445",
+  "/app.js?v=446",
   "/manifest.webmanifest?v=17",
   "/assets/verifika2/verifika2_mark.svg",
   "/assets/verifika2/verifika2_badge_gold.svg",

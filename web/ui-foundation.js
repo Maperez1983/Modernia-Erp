@@ -546,10 +546,10 @@
     return contextBar;
   };
 
-  const syncContextBar = (state) => {
-    ensureContextBar();
-    if (!contextBar || !contextTitle || !contextMeta || !contextDrafts) return;
-    const visibleSection = Array.from(document.querySelectorAll("main > section")).find(isVisible);
+	  const syncContextBar = (state) => {
+	    ensureContextBar();
+	    if (!contextBar || !contextTitle || !contextMeta || !contextDrafts) return;
+	    const visibleSection = Array.from(document.querySelectorAll("main > section")).find(isVisible);
     const title =
       visibleSection?.querySelector("h2, .section-head h2, .modal-header h3")?.textContent?.trim() ||
       state?.currentEmpresaName ||
@@ -558,18 +558,24 @@
     const visibleSearch = Array.from(
       document.querySelectorAll('input[type="search"], input[id*="Search"], input[placeholder*="Buscar"], input[placeholder*="buscar"]')
     ).find(isVisible);
-    contextTitle.textContent = title || "Inicio";
-    contextMeta.textContent = [state?.currentEmpresaName || "", activeTab, visibleSearch ? "Búsqueda disponible" : ""]
-      .filter(Boolean)
-      .join(" · ") || "Atajos: / buscar · Esc cerrar modal";
-    if (dirtyForms.size) {
-      contextDrafts.textContent = `${dirtyForms.size} borrador${dirtyForms.size === 1 ? "" : "es"}`;
-      contextDrafts.classList.remove("hidden");
-    } else {
-      contextDrafts.textContent = "";
-      contextDrafts.classList.add("hidden");
-    }
-  };
+	    contextTitle.textContent = title || "Inicio";
+	    contextMeta.textContent = [state?.currentEmpresaName || "", activeTab, visibleSearch ? "Búsqueda disponible" : ""]
+	      .filter(Boolean)
+	      .join(" · ") || "Atajos: / buscar · Esc cerrar modal";
+	    const visibleDirtyCount = Array.from(dirtyForms).reduce((acc, formId) => {
+	      const form = document.getElementById(formId);
+	      if (!form) return acc;
+	      if (!isVisible(form)) return acc;
+	      return acc + 1;
+	    }, 0);
+	    if (visibleDirtyCount) {
+	      contextDrafts.textContent = `${visibleDirtyCount} borrador${visibleDirtyCount === 1 ? "" : "es"}`;
+	      contextDrafts.classList.remove("hidden");
+	    } else {
+	      contextDrafts.textContent = "";
+	      contextDrafts.classList.add("hidden");
+	    }
+	  };
 
   const enhanceStatusNodes = (root = document) => {
     Array.from(root.querySelectorAll('[id$="Status"], #dbStatus, #authLoginStatus, #authActivateStatus')).forEach(styleStatusNode);
