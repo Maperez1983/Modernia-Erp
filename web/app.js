@@ -3,7 +3,7 @@
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v71";
+const APP_SW_VERSION = "v72";
 
 // Workspace tenant por defecto del producto (branding de software). Mantiene compatibilidad con slugs legacy.
 const DEFAULT_TENANT_WORKSPACE_SLUG = "verifika2";
@@ -5442,6 +5442,7 @@ const WORKSPACE_HOME_CONTAINERS = [
     title: "Clientes",
     kicker: "CRM base",
     description: "Ficha 360, relación con clientes finales y punto de entrada común del grupo.",
+    requireAny: ["crm360"],
     modules: ["crm360", "documental", "portal_cliente"],
     planned: [],
     action: WORKSPACE_LAUNCHERS.crm360?.action || null,
@@ -5452,6 +5453,7 @@ const WORKSPACE_HOME_CONTAINERS = [
     title: "Gestoría",
     kicker: "Subservicio",
     description: "Renta, modelos, seguimiento de trabajos y control documental de asesoría.",
+    requireAny: ["gestoria"],
     modules: ["gestoria", "documental", "facturacion", "automatizaciones", "copilot"],
     action: WORKSPACE_LAUNCHERS.gestoria?.action || null,
     actionLabel: "Abrir gestoría",
@@ -5461,6 +5463,7 @@ const WORKSPACE_HOME_CONTAINERS = [
     title: "Seguros",
     kicker: "Subservicio",
     description: "Cartera, renovaciones, oportunidades y seguimiento comercial.",
+    requireAny: ["seguros"],
     modules: ["seguros", "documental", "automatizaciones", "copilot"],
     action: WORKSPACE_LAUNCHERS.seguros?.action || null,
     actionLabel: "Abrir seguros",
@@ -5470,6 +5473,7 @@ const WORKSPACE_HOME_CONTAINERS = [
     title: "Inmobiliaria",
     kicker: "Subservicio",
     description: "Pipeline, inmuebles, compraventas, alquileres y visitas.",
+    requireAny: ["inmobiliaria"],
     modules: ["inmobiliaria", "documental", "facturacion", "automatizaciones", "copilot"],
     action: WORKSPACE_LAUNCHERS.inmobiliaria?.action || null,
     actionLabel: "Abrir inmobiliaria",
@@ -5479,6 +5483,7 @@ const WORKSPACE_HOME_CONTAINERS = [
     title: "Financiación",
     kicker: "Subservicio",
     description: "Pipeline hipotecario, expedientes, firmas y bancos.",
+    requireAny: ["financiacion"],
     modules: ["financiacion", "documental", "portal_cliente", "automatizaciones", "copilot"],
     action: WORKSPACE_LAUNCHERS.financiacion?.action || null,
     actionLabel: "Abrir financiación",
@@ -5488,6 +5493,7 @@ const WORKSPACE_HOME_CONTAINERS = [
     title: "Reformas",
     kicker: "Subservicio",
     description: "Obras, seguimiento comercial y documentación técnica.",
+    requireAny: ["reformas"],
     modules: ["reformas", "documental", "facturacion", "automatizaciones", "copilot"],
     action: WORKSPACE_LAUNCHERS.reformas?.action || null,
     actionLabel: "Abrir reformas",
@@ -5497,6 +5503,7 @@ const WORKSPACE_HOME_CONTAINERS = [
     title: "Fincas",
     kicker: "Subservicio",
     description: "Comunidades, incidencias, juntas y seguimiento.",
+    requireAny: ["fincas"],
     modules: ["fincas", "documental", "facturacion", "automatizaciones", "copilot"],
     action: WORKSPACE_LAUNCHERS.fincas?.action || null,
     actionLabel: "Abrir fincas",
@@ -5506,6 +5513,7 @@ const WORKSPACE_HOME_CONTAINERS = [
     title: "RRHH",
     kicker: "Transversal",
     description: "Plantilla, ausencias, gastos y documentación del equipo.",
+    requireAny: ["rrhh", "registro_horario"],
     modules: ["rrhh", "registro_horario"],
     planned: ["Portal empleado"],
     action: WORKSPACE_LAUNCHERS.rrhh?.action || null,
@@ -5516,6 +5524,7 @@ const WORKSPACE_HOME_CONTAINERS = [
     title: "Transversales comunes",
     kicker: "Transversal",
     description: "Capas compartidas del grupo para documental, facturación, portal, horario y automatización.",
+    requireAny: ["documental", "facturacion", "facturas_recibidas", "portal_cliente", "automatizaciones", "copilot"],
     modules: ["documental", "facturacion", "facturas_recibidas", "portal_cliente", "automatizaciones", "copilot"],
     planned: [],
     action: () => focusWorkspaceEngine("documental", workspaceDocumentHub, { forceTenantView: true }),
@@ -7424,17 +7433,20 @@ const renderWorkspaceLauncher = (workspace = {}, modules = []) => {
 	      tenantEnabledKeys = enabledKeys;
 	    }
 	  }
-	  workspaceLauncher.innerHTML = `
-	    <div id="workspaceHomeAlerts"></div>
-	    <div class="workspace-home-grid">
-	      ${WORKSPACE_HOME_CONTAINERS
-	        .filter((container) => !(isTenantWorkspaceMode() && container.key === "shared"))
-	        .map((container) => {
-	          const availableModules = container.modules.filter((moduleKey) => tenantEnabledKeys.has(moduleKey));
-	          if (!availableModules.length && container.key !== "shared") return "";
-	          if (!availableModules.length && container.key === "shared") return "";
-	          return `
-	            <article class="workspace-home-card" ${typeof container.action === "function" ? `data-workspace-home-action="${container.key}" role="button" tabindex="0"` : ""}>
+		  workspaceLauncher.innerHTML = `
+		    <div id="workspaceHomeAlerts"></div>
+		    <div class="workspace-home-grid">
+		      ${WORKSPACE_HOME_CONTAINERS
+		        .map((container) => {
+              const requiredOk = !Array.isArray(container.requireAny)
+                || !container.requireAny.length
+                || container.requireAny.some((moduleKey) => tenantEnabledKeys.has(moduleKey));
+              if (!requiredOk) return "";
+		          const availableModules = container.modules.filter((moduleKey) => tenantEnabledKeys.has(moduleKey));
+		          if (!availableModules.length && container.key !== "shared") return "";
+		          if (!availableModules.length && container.key === "shared") return "";
+		          return `
+		            <article class="workspace-home-card" ${typeof container.action === "function" ? `data-workspace-home-action="${container.key}" role="button" tabindex="0"` : ""}>
 	              <div class="workspace-home-card-head">
 	                <div>
 	                  <span class="workspace-home-kicker">${container.kicker}</span>
