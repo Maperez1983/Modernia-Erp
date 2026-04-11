@@ -3,7 +3,7 @@
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v78";
+const APP_SW_VERSION = "v79";
 
 // Workspace tenant por defecto del producto (branding de software). Mantiene compatibilidad con slugs legacy.
 const DEFAULT_TENANT_WORKSPACE_SLUG = "verifika2";
@@ -3176,6 +3176,19 @@ const ADMIN_SERVICE_OPTIONS = [
   "Dirección",
   "Administración",
 ];
+
+const resolveWorkspaceModuleKeyFromAdminServiceLabel = (label = "") => {
+  const normalized = normalizeSimple(label);
+  if (!normalized) return "";
+  if (["direccion", "administracion"].includes(normalized)) return "";
+  if (normalized.includes("gestoria")) return "gestoria";
+  if (normalized.includes("seguros")) return "seguros";
+  if (normalized.includes("inmobiliaria")) return "inmobiliaria";
+  if (normalized.includes("financi") || normalized.includes("hipotec")) return "financiacion";
+  if (normalized.includes("fincas")) return "fincas";
+  if (normalized.includes("reformas") || normalized.includes("obras")) return "reformas";
+  return "";
+};
 
 const ADMIN_ROLE_OPTIONS = [
   "Lectura",
@@ -8762,14 +8775,16 @@ const renderWorkspaceRrhhHub = () => {
         const nameB = `${b.nombre || ""} ${b.apellido || ""}`.trim() || b.usuario || "";
         return nameA.localeCompare(nameB, "es", { sensitivity: "base" });
       });
-    const selectedId = String(state.workspaceRrhhSelectedUserId || "").trim();
-    const selected = rows.find((row) => String(row.id || "") === selectedId) || null;
-    const servicesSelected = new Set(parseAdminServices(selected?.servicio || ""));
-    const roleOptions = (typeof ADMIN_ROLE_OPTIONS !== "undefined" && Array.isArray(ADMIN_ROLE_OPTIONS))
-      ? ADMIN_ROLE_OPTIONS
-      : ["Lectura", "Gestoría", "Seguros", "Inmobiliaria", "Financiaciones", "Administrador"];
-    const statusText = selected ? "Edita usuario y permisos." : "Crea un usuario del sistema (login) o selecciona uno para editar.";
-    return `
+	    const selectedId = String(state.workspaceRrhhSelectedUserId || "").trim();
+	    const selected = rows.find((row) => String(row.id || "") === selectedId) || null;
+	    const servicesSelected = new Set(parseAdminServices(selected?.servicio || ""));
+	    const enabledModules = new Set(state.currentWorkspaceEnabledModules || []);
+	    const enforceWorkspaceModuleServices = enabledModules.size > 0;
+	    const roleOptions = (typeof ADMIN_ROLE_OPTIONS !== "undefined" && Array.isArray(ADMIN_ROLE_OPTIONS))
+	      ? ADMIN_ROLE_OPTIONS
+	      : ["Lectura", "Gestoría", "Seguros", "Inmobiliaria", "Financiaciones", "Administrador"];
+	    const statusText = selected ? "Edita usuario y permisos." : "Crea un usuario del sistema (login) o selecciona uno para editar.";
+	    return `
       <div class="workspace-rrhh-panel-card">
         <div class="section-head">
           <div>
@@ -8797,22 +8812,27 @@ const renderWorkspaceRrhhHub = () => {
                 Email
                 <input name="email" type="email" value="${escapeHtml(selected?.email || "")}" required />
               </label>
-              <label class="span-2">
-                Servicios permitidos
-                <div class="admin-service-multi workspace-rrhh-user-services">
-                  ${(typeof ADMIN_SERVICE_OPTIONS !== "undefined" ? ADMIN_SERVICE_OPTIONS : SERVICE_OPTIONS)
-                    .map((label) => {
-                      const checked = servicesSelected.has(label);
-                      return `
-                        <label class="admin-service-option">
-                          <input type="checkbox" data-rrhh-user-service value="${escapeHtml(label)}" ${checked ? "checked" : ""} />
-                          <span>${escapeHtml(label)}</span>
-                        </label>
-                      `;
-                    })
-                    .join("")}
-                </div>
-              </label>
+	              <label class="span-2">
+	                Servicios permitidos
+	                <div class="admin-service-multi workspace-rrhh-user-services">
+	                  ${(typeof ADMIN_SERVICE_OPTIONS !== "undefined" ? ADMIN_SERVICE_OPTIONS : SERVICE_OPTIONS)
+	                    .map((label) => {
+	                      const checked = servicesSelected.has(label);
+	                      const requiredModule = resolveWorkspaceModuleKeyFromAdminServiceLabel(label);
+	                      const allowed = !enforceWorkspaceModuleServices || !requiredModule || enabledModules.has(requiredModule);
+	                      const disabled = !allowed && !checked;
+	                      const hint = !allowed && requiredModule ? " (no activo en este workspace)" : "";
+	                      return `
+	                        <label class="admin-service-option">
+	                          <input type="checkbox" data-rrhh-user-service value="${escapeHtml(label)}" ${checked ? "checked" : ""} ${disabled ? "disabled" : ""} />
+	                          <span>${escapeHtml(label)}${escapeHtml(hint)}</span>
+	                        </label>
+	                      `;
+	                    })
+	                    .join("")}
+	                </div>
+	                ${enforceWorkspaceModuleServices ? `<div class="muted">Solo puedes asignar módulos que estén activados en este workspace.</div>` : ""}
+	              </label>
               <label>
                 Rol
                 <select name="rol">
@@ -11635,20 +11655,33 @@ const renderWorkspaceRrhhHub = () => {
       const form = new FormData(userForm);
       const payload = Object.fromEntries(form.entries());
       const userId = String(payload.id || "").trim();
-      const services = Array.from(userForm.querySelectorAll("[data-rrhh-user-service]"))
-        .filter((el) => el && el.checked)
-        .map((el) => String(el.value || "").trim())
-        .filter(Boolean);
-      payload.servicio = joinAdminServices(services);
-      payload.registro_horario_activo = userForm.querySelector('[name="registro_horario_activo"]')?.checked ? 1 : 0;
+	      const services = Array.from(userForm.querySelectorAll("[data-rrhh-user-service]"))
+	        .filter((el) => el && el.checked)
+	        .map((el) => String(el.value || "").trim())
+	        .filter(Boolean);
+	      const enabledModules = new Set(state.currentWorkspaceEnabledModules || []);
+	      const enforceWorkspaceModuleServices = enabledModules.size > 0;
+	      if (enforceWorkspaceModuleServices) {
+	        const invalid = services.filter((label) => {
+	          const required = resolveWorkspaceModuleKeyFromAdminServiceLabel(label);
+	          return required && !enabledModules.has(required);
+	        });
+	        if (invalid.length) {
+	          if (status) status.textContent = `Este workspace no tiene activados: ${invalid.join(", ")}.`;
+	          return;
+	        }
+	      }
+	      payload.servicio = joinAdminServices(services);
+	      payload.registro_horario_activo = userForm.querySelector('[name="registro_horario_activo"]')?.checked ? 1 : 0;
       if (!payload.servicio) {
         if (status) status.textContent = "Selecciona al menos un servicio.";
         return;
       }
-      if (!String(payload.password || "").trim()) delete payload.password;
-      try {
-        const path = userId ? "/api/usuarios_update" : "/api/usuarios";
-        const res = await fetch(path, {
+	      if (!String(payload.password || "").trim()) delete payload.password;
+	      if (state.currentWorkspaceId) payload.workspace_id = state.currentWorkspaceId;
+	      try {
+	        const path = userId ? "/api/usuarios_update" : "/api/usuarios";
+	        const res = await fetch(path, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),

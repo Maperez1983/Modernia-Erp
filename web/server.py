@@ -1292,6 +1292,57 @@ def parse_services_param(raw):
             expanded.append(aliases[service])
     return list(dict.fromkeys(expanded))
 
+
+WORKSPACE_USER_SERVICE_MODULE_LABELS = {
+    "gestoria": "Gestoría",
+    "seguros": "Seguros",
+    "inmobiliaria": "Inmobiliaria",
+    "financiacion": "Financiación",
+    "fincas": "Admin de fincas",
+    "reformas": "Reformas",
+}
+
+
+def resolve_workspace_module_key_for_user_service(service):
+    key = normalize_action_key(service)
+    if not key:
+        return ""
+    if key in {"direccion", "administracion"}:
+        return ""
+    if key == "gestoria":
+        return "gestoria"
+    if key == "seguros":
+        return "seguros"
+    if key == "inmobiliaria":
+        return "inmobiliaria"
+    if key in {"financiaciones", "financiacion", "hipotecas"}:
+        return "financiacion"
+    if key in {"fincas", "admin_de_fincas", "administracion_fincas", "administracion_de_fincas"}:
+        return "fincas"
+    if key in {"reformas", "obras"}:
+        return "reformas"
+    return ""
+
+
+def validate_usuario_services_for_workspace(conn, workspace_id, servicio_raw):
+    if not workspace_id or not servicio_raw:
+        return []
+    enabled_rows = conn.execute(
+        """
+        SELECT modulo_key
+        FROM workspace_modulos
+        WHERE workspace_id = ? AND COALESCE(enabled, 0) = 1
+        """,
+        (workspace_id,),
+    ).fetchall()
+    enabled = {str(row_value(row, "modulo_key") or "").strip() for row in enabled_rows if row_value(row, "modulo_key")}
+    invalid = set()
+    for item in parse_services_param(servicio_raw):
+        module_key = resolve_workspace_module_key_for_user_service(item)
+        if module_key and module_key not in enabled:
+            invalid.add(module_key)
+    return sorted(invalid)
+
 def cliente_has_servicio(conn, cliente_id, servicios):
     if not cliente_id or not servicios:
         return True
@@ -31784,6 +31835,7 @@ class Handler(BaseHTTPRequestHandler):
             usuario = normalize_username(payload.get("usuario"))
             email = normalize_email(payload.get("email"))
             servicio = str(payload.get("servicio") or "").strip()
+            workspace_id = str(payload.get("workspace_id") or "").strip()
             password = str(payload.get("password") or "")
             registro_horario_activo = 1 if str(payload.get("registro_horario_activo") or "0").strip().lower() in {"1", "true", "si", "sí", "on"} else 0
             if not nombre:
@@ -31801,6 +31853,19 @@ class Handler(BaseHTTPRequestHandler):
             if not servicio:
                 json_response(self, {"error": "servicio requerido"}, status=400)
                 return
+            if workspace_id:
+                workspace = conn.execute(
+                    "SELECT 1 FROM workspaces WHERE id = ? LIMIT 1",
+                    (workspace_id,),
+                ).fetchone()
+                if not workspace:
+                    json_response(self, {"error": "workspace no encontrado"}, status=404)
+                    return
+                invalid_modules = validate_usuario_services_for_workspace(conn, workspace_id, servicio)
+                if invalid_modules:
+                    labels = [WORKSPACE_USER_SERVICE_MODULE_LABELS.get(key, key) for key in invalid_modules]
+                    json_response(self, {"error": f"Este workspace no tiene activados: {', '.join(labels)}."}, status=400)
+                    return
             if password and len(password) < 8:
                 json_response(self, {"error": "La contraseña debe tener al menos 8 caracteres"}, status=400)
                 return
@@ -31979,6 +32044,21 @@ class Handler(BaseHTTPRequestHandler):
             if not user_id:
                 json_response(self, {"error": "id requerido"}, status=400)
                 return
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            if workspace_id and "servicio" in payload:
+                workspace = conn.execute(
+                    "SELECT 1 FROM workspaces WHERE id = ? LIMIT 1",
+                    (workspace_id,),
+                ).fetchone()
+                if not workspace:
+                    json_response(self, {"error": "workspace no encontrado"}, status=404)
+                    return
+                incoming_servicio = str(payload.get("servicio") or "").strip()
+                invalid_modules = validate_usuario_services_for_workspace(conn, workspace_id, incoming_servicio)
+                if invalid_modules:
+                    labels = [WORKSPACE_USER_SERVICE_MODULE_LABELS.get(key, key) for key in invalid_modules]
+                    json_response(self, {"error": f"Este workspace no tiene activados: {', '.join(labels)}."}, status=400)
+                    return
             allowed = ("nombre", "apellido", "usuario", "email", "servicio", "rol", "activo", "password", "registro_horario_activo")
             updates = []
             values = []
