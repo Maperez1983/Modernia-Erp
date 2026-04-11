@@ -6342,11 +6342,17 @@ const renderWorkspaceList = (rows = []) => {
   workspaceList.innerHTML = rows
     .map((row) => {
       const isActive = String(row.id || "") === String(selectedId || "");
+      const rawName = String(row?.nombre || row?.name || row?.slug || row?.id || "").trim();
+      const displayName = getWorkspaceDisplayName(row);
+      const showLegacyName =
+        rawName &&
+        displayName &&
+        normalizeWorkspaceIdentifier(rawName) !== normalizeWorkspaceIdentifier(displayName);
       return `
         <button type="button" class="workspace-list-item${isActive ? " is-active" : ""}" data-workspace-id="${row.id}">
           <div>
-            <strong>${getWorkspaceDisplayName(row)}</strong>
-            <div class="muted">${escapeHtml(String(row.kind || "Directo"))} · ${row.plan || "Enterprise"} · ${row.estado || "Activo"}</div>
+            <strong>${escapeHtml(displayName)}</strong>
+            <div class="muted">${escapeHtml(String(row.kind || "Directo"))} · ${row.plan || "Enterprise"} · ${row.estado || "Activo"}${showLegacyName ? ` · ${escapeHtml(rawName)}` : ""}</div>
             ${row.descripcion ? `<div class="muted">${row.descripcion}</div>` : ""}
           </div>
           <div class="workspace-list-meta">
