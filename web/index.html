@@ -2227,15 +2227,6 @@
 	                <div id="crmWorkspaceShell" class="crm-workspace-shell">
 	                  <div id="crmWorkspace">
 	              <div id="crmViewResumen" class="crm-workspace-view">
-	                <div class="form-card">
-	                  <div class="section-head">
-	                    <div>
-	                      <h3>Inicio</h3>
-	                      <p class="muted">Homepage tipo Tecnocloud: KPIs, gestión y agenda. (Sin “Zona”, según vuestra metodología.)</p>
-	                    </div>
-	                  </div>
-	                </div>
-
 	                <div class="crm-home-grid">
 	                  <div class="crm-home-left">
 	                    <div class="form-card">
@@ -2391,8 +2382,8 @@
                   <div class="form-card">
                     <div class="section-head">
                       <div>
-                        <h3>Pipeline inmobiliario</h3>
-                        <p class="muted">Arrastra para avanzar estado y detectar rápido los cuellos de botella comerciales.</p>
+                        <h3>Pipeline inmobiliario (lista)</h3>
+                        <p class="muted">Vista tipo Tecnocloud para operar rápido y con máxima claridad.</p>
                       </div>
 	                      <select id="crmEtapaFilterMirror">
 	                        <option value="">Todas las etapas</option>
@@ -2416,27 +2407,18 @@
 	                      </select>
 	                    </div>
                     <div id="crmCaptacionesStageSummary" class="crm-pipeline"></div>
-                    <div id="crmCaptacionesKanban" class="crm-kanban"></div>
+                    <div id="crmCaptacionesTable"></div>
+                    <div class="footer" id="crmCaptacionesInfo"></div>
                   </div>
                   <div class="form-card">
                     <div class="section-head">
                       <div>
-                        <h3>Control operativo</h3>
-                        <p class="muted">Expedientes bloqueados, llamadas pendientes y citas que requieren cierre.</p>
+                        <h3>Pendientes operativos</h3>
+                        <p class="muted">Bloqueos y acciones rápidas para limpiar y mover el pipeline.</p>
                       </div>
                     </div>
                     <div id="crmCaptacionesOps" class="crm-focus-list"></div>
                   </div>
-                </div>
-                <div class="form-card">
-                  <div class="section-head">
-                    <div>
-                      <h3>Mesa de expedientes</h3>
-                      <p class="muted">Base operativa para seguimiento, adquisición, reserva y cierre con vista de lista.</p>
-                    </div>
-                  </div>
-                  <div id="crmCaptacionesTable"></div>
-                  <div class="footer" id="crmCaptacionesInfo"></div>
                 </div>
               </div>
               <div id="crmViewInmuebles" class="crm-workspace-view hidden">
@@ -8178,7 +8160,7 @@
     <script src="ui-foundation.js?v=3"></script>
     <script src="app-auth.js?v=10"></script>
     <script src="app-routing.js?v=7"></script>
-    <script src="app.js?v=459"></script>
+    <script src="app.js?v=460"></script>
     <script>
       (function () {
         if (!("serviceWorker" in navigator)) return;
@@ -8206,7 +8188,7 @@
           }
         } catch {}
         window.addEventListener("load", function () {
-	          navigator.serviceWorker.register("/sw.js?v=65").catch(function () {});
+	          navigator.serviceWorker.register("/sw.js?v=66").catch(function () {});
         });
       })();
     </script>

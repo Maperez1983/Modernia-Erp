@@ -19617,6 +19617,9 @@ def ensure_tables(db_path):
         )
         """
     )
+    # Compat: bases antiguas podían carecer de campos base en `clientes`.
+    ensure_column(conn, "clientes", "fecha_nacimiento", "fecha_nacimiento TEXT")
+    ensure_column(conn, "clientes", "direccion", "direccion TEXT")
     ensure_column(conn, "clientes", "tipo_persona", "tipo_persona TEXT")
     ensure_column(conn, "clientes", "codigo_postal", "codigo_postal TEXT")
     ensure_column(conn, "clientes", "poblacion", "poblacion TEXT")

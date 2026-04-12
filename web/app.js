@@ -18090,9 +18090,16 @@ const updateCompanySummary = (empresaName) => {
   companySummary.classList.remove("hidden");
   companySummaryTitle.textContent = empresaName;
   if (empresaName === "Clientes") {
-    companySummarySubtitle.textContent = "Modulo maestro de clientes compartido.";
+    const svc = String(state.clientesContextService || "").trim();
+    const empresa = resolveEmpresaById(String(state.clientesContextEmpresaId || "").trim());
+    companySummarySubtitle.textContent = svc
+      ? `Clientes filtrados por servicio: ${svc}`
+      : "Modulo maestro de clientes compartido.";
     if (companySummaryMeta) {
-      companySummaryMeta.textContent = "Asignacion por empresa y servicio.";
+      const parts = [];
+      if (empresa?.nombre) parts.push(empresa.nombre);
+      parts.push("Asignacion por empresa y servicio.");
+      companySummaryMeta.textContent = parts.join(" · ");
     }
     return;
   }
@@ -19442,7 +19449,7 @@ const INMOBILIARIA_ASESORES = [
 const INMUEBLE_CHECKLISTS = {
   Inmueble: [
     "Alta básica de la ficha",
-    "Completar dirección y zona",
+    "Completar dirección",
     "Identificar propietario(s)",
     "Definir siguiente paso comercial",
   ],
@@ -19638,7 +19645,6 @@ const INMUEBLE_FIELDS_ENCARGO = [
   "interior",
   "escalera",
   "edificio",
-  "zona",
   "codigo_postal",
   "poblacion",
   "provincia",
@@ -30886,21 +30892,18 @@ const updateCaptacionEtapa = async (id, etapa, { fromEtapa = "", label = "" } = 
   const msg = `Cambiar etapa${title ? ` (${title})` : ""}:\n${from || "Actual"} → ${nextEtapa}\n\n¿Confirmas el cambio?`;
   if (!window.confirm(msg)) return;
   try {
-    const response = await fetch("/api/captaciones_update", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "same-origin",
-      body: JSON.stringify({ id: recordId, etapa: nextEtapa }),
-    });
-    let data = null;
-    try {
-      data = await response.json();
-    } catch {
-      data = null;
-    }
-    if (!response.ok || data?.error) {
-      throw new Error(data?.error || `HTTP ${response.status}`);
-    }
+    const empresaNombre = resolveCrmInmoEmpresaNombre();
+    const data = await postJsonWithDbRetry(
+      "/api/captaciones_update",
+      {
+        empresa_nombre: empresaNombre,
+        id: recordId,
+        etapa: nextEtapa,
+        allow_manual_stage: 1,
+      },
+      { maxRetries: 5, baseDelayMs: 350, timeoutMs: 15000 }
+    );
+    if (data?.error) throw new Error(data.error);
     loadCrmCaptaciones();
     window.setTimeout(() => loadCrmInmuebles(), 120);
     renderCrmResumenDashboard();
@@ -31015,7 +31018,7 @@ const renderInmuebleTecnocloudPanels = ({
   }
 
   if (inmuebleTecnoStages) {
-    const stages = ["Inmueble", "Noticia", "Encargo"];
+    const stages = ["Inmueble", "Noticia", "Encargo", "Propuesta", "Vendido"];
     const normalizedKnown = new Set(stages.map((s) => normalizeSimple(s)));
     if (stageLabel && !normalizedKnown.has(normalizeSimple(stageLabel))) {
       stages.push(stageLabel);
