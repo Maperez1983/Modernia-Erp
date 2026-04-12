@@ -8,7 +8,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Verifika²" />
     <title>Verifika² · CRM & Portal</title>
-    <link rel="stylesheet" href="styles.css?v=172" />
+    <link rel="stylesheet" href="styles.css?v=173" />
     <link rel="manifest" href="manifest.webmanifest?v=17" />
     <link rel="icon" href="/icons/ios/v28/icon-192.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/icons/ios/v28/apple-touch-icon-180.png" />
@@ -2129,23 +2129,43 @@
         </div>
         <div id="crmSection" class="hidden">
           <div class="crm-lightning-shell">
-            <aside id="crmLightningSidebar" class="crm-lightning-sidebar" aria-label="Navegación CRM inmobiliaria">
-              <button
-                type="button"
-                class="crm-side-item crm-side-new"
-                id="crmQuickNewBtn"
-                title="Crear nuevo"
-                aria-haspopup="menu"
-                aria-controls="crmQuickNewMenu"
-              >
-                <span class="crm-side-ico">+</span>
-                <span class="crm-side-txt">Nuevas<br />Oport.</span>
-              </button>
-              <div id="crmQuickNewMenu" class="crm-quick-new-menu hidden" role="menu" aria-label="Crear nuevo">
-                <button type="button" id="crmNuevaCaptacionBtn">Nuevo inmueble</button>
-                <button type="button" id="crmNuevaCompraventaBtn" class="secondary">Nueva compraventa</button>
-                <button type="button" id="crmNuevaDemandaBtn" class="secondary">Nuevo pedido</button>
-              </div>
+	            <aside id="crmLightningSidebar" class="crm-lightning-sidebar" aria-label="Navegación CRM inmobiliaria">
+	              <button
+	                type="button"
+	                class="crm-side-item crm-side-new"
+	                id="crmQuickNewBtn"
+	                title="Crear nuevo"
+	                aria-haspopup="dialog"
+	                aria-controls="crmInsertModal"
+	              >
+	                <span class="crm-side-ico">+</span>
+	                <span class="crm-side-txt">Nuevas<br />Oport.</span>
+	              </button>
+	              <div id="crmInsertModal" class="crm-insert-modal hidden" role="dialog" aria-modal="true" aria-label="Insertar">
+	                <div class="crm-insert-card">
+	                  <div class="crm-insert-head">
+	                    <strong>Insertar</strong>
+	                    <button type="button" class="secondary ghost" id="crmInsertCloseBtn" aria-label="Cerrar">✕</button>
+	                  </div>
+	                  <div class="crm-insert-search">
+	                    <input id="crmInsertSearch" placeholder="Filtra..." autocomplete="off" />
+	                  </div>
+	                  <div class="crm-insert-list" id="crmInsertList" role="list">
+	                    <button type="button" class="crm-insert-item" data-crm-insert="captacion">
+	                      <span class="crm-insert-ico" aria-hidden="true">🏠</span>
+	                      <span class="crm-insert-label">Inmueble</span>
+	                    </button>
+	                    <button type="button" class="crm-insert-item" data-crm-insert="demanda">
+	                      <span class="crm-insert-ico" aria-hidden="true">⚡</span>
+	                      <span class="crm-insert-label">Pedido</span>
+	                    </button>
+	                    <button type="button" class="crm-insert-item" data-crm-insert="compraventa">
+	                      <span class="crm-insert-ico" aria-hidden="true">🧾</span>
+	                      <span class="crm-insert-label">Compraventa</span>
+	                    </button>
+	                  </div>
+	                </div>
+	              </div>
               <button type="button" class="crm-side-item" data-crm-view="agenda" title="Agenda">
                 <span class="crm-side-ico" aria-hidden="true">
                   <svg viewBox="0 0 24 24">
@@ -2215,13 +2235,13 @@
 	                  <button type="button" class="tab" data-crm-view="analisis">Búsq./Informes</button>
 	                </div>
 
-                <div class="crm-lightning-topbar-right">
-                  <button type="button" class="secondary" id="crmTopNewBtn" aria-haspopup="menu" aria-controls="crmQuickNewMenu">
-                    + Nuevo
-                  </button>
-                  <div class="crm-global-searchbox">
-                    <input id="crmGlobalSearch" class="crm-lightning-search" placeholder="Buscar..." autocomplete="off" />
-                    <div id="crmGlobalSearchResults" class="crm-global-results hidden" role="listbox" aria-label="Resultados de búsqueda"></div>
+	                <div class="crm-lightning-topbar-right">
+	                  <button type="button" class="secondary" id="crmTopNewBtn" aria-haspopup="dialog" aria-controls="crmInsertModal">
+	                    + Nuevo
+	                  </button>
+	                  <div class="crm-global-searchbox">
+	                    <input id="crmGlobalSearch" class="crm-lightning-search" placeholder="Buscar..." autocomplete="off" />
+	                    <div id="crmGlobalSearchResults" class="crm-global-results hidden" role="listbox" aria-label="Resultados de búsqueda"></div>
                   </div>
                 </div>
               </div>
@@ -2942,7 +2962,7 @@
               </div>
             </div>
           </div>
-          <div id="inmuebleDetail" class="form-card hidden">
+	          <div id="inmuebleDetail" class="form-card hidden">
             <div class="section-head">
               <div>
                 <h3 id="inmuebleTitle">Ficha de inmueble</h3>
@@ -2977,36 +2997,19 @@
               <button type="button" class="secondary ghost" id="inmuebleTecnoCampaignBtn">Crea campaña email</button>
               <button type="button" class="secondary ghost" id="inmuebleTecnoValoracionBtn">Informe valoración</button>
             </div>
-            <div class="tabs" id="inmuebleTabs">
-              <button class="tab active" type="button" data-tab="datos">Información</button>
-              <button class="tab hidden" type="button" data-tab="generar_encargo" id="inmuebleGenerarEncargoTabBtn">Generar encargo</button>
-              <button class="tab" type="button" data-tab="demandas">Pedidos</button>
-              <button class="tab" type="button" data-tab="actividad">Act./Citas</button>
-              <button class="tab" type="button" data-tab="docs">Imágenes/Adjuntos</button>
-              <button class="tab" type="button" data-tab="estado">Estado</button>
-            </div>
-            <div class="inmueble-tecno-grid">
-              <div class="inmueble-tecno-main">
-            <div id="inmuebleTabDatos">
-              <div class="inmueble-profile inmueble-profile-top">
-                <div id="inmuebleSummaryCard" class="inmueble-summary-card"></div>
-                <div class="inmueble-profile-side">
-                  <div class="form-card inmueble-map-card">
-                    <div class="section-head">
-                      <div>
-                        <h3>Mapa y geolocalización</h3>
-                        <p class="muted">Vista rápida de localización y apoyo para Catastro.</p>
-                      </div>
-                      <div class="form-actions">
-                        <button class="secondary" type="button" id="inmuebleGeocodeBtn">Localizar</button>
-                      </div>
-                    </div>
-                    <div id="inmuebleMap" class="map-box"></div>
-                  </div>
-                  <div id="inmuebleFactsPanel" class="inmueble-facts-panel"></div>
-                </div>
-              </div>
-              <div class="inmueble-data-workspace">
+	            <div class="tabs" id="inmuebleTabs">
+	              <button class="tab active" type="button" data-tab="datos">Información</button>
+	              <button class="tab" type="button" data-tab="evolucion">Evolución inmueble</button>
+	              <button class="tab" type="button" data-tab="imagenes">Imágenes</button>
+	              <button class="tab" type="button" data-tab="adjuntos">Archivos adjuntos</button>
+	            </div>
+	            <div class="inmueble-tecno-grid">
+	              <div class="inmueble-tecno-main">
+	            <div id="inmuebleTabDatos">
+	              <div class="inmueble-profile inmueble-profile-top">
+	                <div id="inmuebleSummaryCard" class="inmueble-summary-card"></div>
+	              </div>
+	              <div class="inmueble-data-workspace">
                 <div class="form-card">
                   <div class="section-head">
                     <div>
@@ -3031,8 +3034,8 @@
                   </div>
                 </div>
               </div>
-            </div>
-            <div id="inmuebleTabGenerarEncargo" class="hidden">
+	            </div>
+	            <div id="inmuebleTabGenerarEncargo" class="hidden">
               <div class="form-card">
                 <div class="section-head">
                   <div>
@@ -3046,7 +3049,7 @@
                 </div>
               </div>
             </div>
-            <div id="inmuebleTabDemandas" class="hidden">
+	            <div id="inmuebleTabDemandas" class="hidden">
               <div class="form-card">
                 <h3>Iteración con compradores</h3>
                 <p class="muted">Lista operativa de compradores para este inmueble (contacto, próxima acción, notas).</p>
@@ -3159,7 +3162,7 @@
                 <div class="footer" id="inmuebleVisitasInfo"></div>
               </div>
             </div>
-            <div id="inmuebleTabActividad" class="hidden">
+	            <div id="inmuebleTabActividad" class="hidden">
               <div class="form-card">
                 <h3>Actividad</h3>
                 <p class="muted">Acciones y seguimiento asociado al inmueble.</p>
@@ -3276,43 +3279,50 @@
                 </form>
               </div>
             </div>
-            <div id="inmuebleTabDocs" class="hidden">
-              <div class="form-card">
-                <h3>Repositorio del inmueble</h3>
-                <p class="muted">Sube escrituras, nota simple, contratos y fotos (puedes seleccionar varios archivos).</p>
-                <form id="inmuebleDocsForm" class="form-grid">
-                  <label>
-                    Tipo
-                    <select name="tipo">
-                      <option>Escritura</option>
-                      <option>Nota simple</option>
-                      <option>Contrato</option>
-                      <option>Fotos</option>
-                      <option>Plano</option>
-                      <option>Certificado</option>
-                      <option>Otros</option>
-                    </select>
-                  </label>
-                  <label>
-                    Nombre documento
-                    <input name="nombre" placeholder="Ej: Nota simple noviembre" />
-                  </label>
-                  <label class="span-2">
-                    Archivo
-                    <input name="archivo" id="inmuebleDocsFile" type="file" multiple accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg,.webp" />
-                  </label>
-                  <div class="form-actions">
-                    <button type="submit">Subir documento</button>
-                    <span id="inmuebleDocsStatus" class="muted"></span>
-                  </div>
-                </form>
-              </div>
-              <div class="form-card">
-                <h3>Archivos del inmueble</h3>
-                <div id="inmuebleDocsList"></div>
-              </div>
-            </div>
-            <div id="inmuebleTabEstado" class="hidden">
+	            <div id="inmuebleTabImagenes" class="hidden">
+	              <div class="form-card">
+	                <h3>Imágenes</h3>
+	                <p class="muted">Fotos del inmueble.</p>
+	                <div id="inmuebleFotosList"></div>
+	              </div>
+	            </div>
+	            <div id="inmuebleTabAdjuntos" class="hidden">
+	              <div class="form-card">
+	                <h3>Archivos adjuntos</h3>
+	                <p class="muted">Documentos del inmueble (escrituras, notas simples, contratos, etc.).</p>
+	                <form id="inmuebleDocsForm" class="form-grid">
+	                  <label>
+	                    Tipo
+	                    <select name="tipo">
+	                      <option>Escritura</option>
+	                      <option>Nota simple</option>
+	                      <option>Contrato</option>
+	                      <option>Fotos</option>
+	                      <option>Plano</option>
+	                      <option>Certificado</option>
+	                      <option>Otros</option>
+	                    </select>
+	                  </label>
+	                  <label>
+	                    Nombre documento
+	                    <input name="nombre" placeholder="Ej: Nota simple noviembre" />
+	                  </label>
+	                  <label class="span-2">
+	                    Archivo
+	                    <input name="archivo" id="inmuebleDocsFile" type="file" multiple accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg,.webp" />
+	                  </label>
+	                  <div class="form-actions">
+	                    <button type="submit">Subir documento</button>
+	                    <span id="inmuebleDocsStatus" class="muted"></span>
+	                  </div>
+	                </form>
+	              </div>
+	              <div class="form-card">
+	                <h3>Documentos</h3>
+	                <div id="inmuebleAdjuntosList"></div>
+	              </div>
+	            </div>
+	            <div id="inmuebleTabEstado" class="hidden">
               <div class="form-card">
                 <div class="section-head">
                   <div>
@@ -8165,7 +8175,7 @@
     <script src="ui-foundation.js?v=3"></script>
     <script src="app-auth.js?v=10"></script>
     <script src="app-routing.js?v=7"></script>
-    <script src="app.js?v=463"></script>
+    <script src="app.js?v=464"></script>
     <script>
       (function () {
         if (!("serviceWorker" in navigator)) return;
@@ -8193,7 +8203,7 @@
           }
         } catch {}
         window.addEventListener("load", function () {
-	          navigator.serviceWorker.register("/sw.js?v=69").catch(function () {});
+	          navigator.serviceWorker.register("/sw.js?v=70").catch(function () {});
         });
       })();
     </script>

@@ -2552,11 +2552,14 @@ const crmNuevaDemandaBtn = document.getElementById("crmNuevaDemandaBtn");
 	const crmGlobalSearch = document.getElementById("crmGlobalSearch");
 	const crmGlobalSearchResults = document.getElementById("crmGlobalSearchResults");
 	const crmBrandTitle = document.getElementById("crmBrandTitle");
-	const crmBrandSubtitle = document.getElementById("crmBrandSubtitle");
-	const crmLightningSidebar = document.getElementById("crmLightningSidebar");
-	const crmQuickNewBtn = document.getElementById("crmQuickNewBtn");
-	const crmQuickNewMenu = document.getElementById("crmQuickNewMenu");
-  const crmTopNewBtn = document.getElementById("crmTopNewBtn");
+		const crmBrandSubtitle = document.getElementById("crmBrandSubtitle");
+		const crmLightningSidebar = document.getElementById("crmLightningSidebar");
+		const crmQuickNewBtn = document.getElementById("crmQuickNewBtn");
+		const crmInsertModal = document.getElementById("crmInsertModal");
+		const crmInsertCloseBtn = document.getElementById("crmInsertCloseBtn");
+		const crmInsertSearch = document.getElementById("crmInsertSearch");
+		const crmInsertList = document.getElementById("crmInsertList");
+	  const crmTopNewBtn = document.getElementById("crmTopNewBtn");
 	const crmRecentBtn = document.getElementById("crmRecentBtn");
 	const crmRecentMenu = document.getElementById("crmRecentMenu");
 const crmRecentList = document.getElementById("crmRecentList");
@@ -2743,12 +2746,14 @@ const inmuebleTecnoSideNuevaActividad = document.getElementById("inmuebleTecnoSi
 const inmuebleTecnoSidePropietarioCard = document.getElementById("inmuebleTecnoSidePropietarioCard");
 const inmuebleTabDatos = document.getElementById("inmuebleTabDatos");
 const inmuebleTabCaptacion = document.getElementById("inmuebleTabCaptacion");
-const inmuebleTabDemandas = document.getElementById("inmuebleTabDemandas");
-const inmuebleTabVisitas = document.getElementById("inmuebleTabVisitas");
-const inmuebleTabActividad = document.getElementById("inmuebleTabActividad");
-const inmuebleTabMapa = document.getElementById("inmuebleTabMapa");
-const inmuebleTabDocs = document.getElementById("inmuebleTabDocs");
-const inmuebleTabEstado = document.getElementById("inmuebleTabEstado");
+	const inmuebleTabDemandas = document.getElementById("inmuebleTabDemandas");
+	const inmuebleTabVisitas = document.getElementById("inmuebleTabVisitas");
+	const inmuebleTabActividad = document.getElementById("inmuebleTabActividad");
+	const inmuebleTabMapa = document.getElementById("inmuebleTabMapa");
+	const inmuebleTabDocs = document.getElementById("inmuebleTabDocs");
+	const inmuebleTabImagenes = document.getElementById("inmuebleTabImagenes");
+	const inmuebleTabAdjuntos = document.getElementById("inmuebleTabAdjuntos");
+	const inmuebleTabEstado = document.getElementById("inmuebleTabEstado");
 const inmuebleGenerarEncargoTabBtn = document.getElementById("inmuebleGenerarEncargoTabBtn");
 const inmuebleTabGenerarEncargo = document.getElementById("inmuebleTabGenerarEncargo");
  const inmuebleGenerarEncargoBtn = document.getElementById("inmuebleGenerarEncargoBtn");
@@ -2791,11 +2796,13 @@ const inmuebleDemandaCliente = document.getElementById("inmuebleDemandaCliente")
 const inmuebleVisitaForm = document.getElementById("inmuebleVisitaForm");
 const inmuebleVisitaStatus = document.getElementById("inmuebleVisitaStatus");
 const inmuebleVisitaDemanda = document.getElementById("inmuebleVisitaDemanda");
-const inmuebleVisitasTable = document.getElementById("inmuebleVisitasTable");
-const inmuebleVisitasInfo = document.getElementById("inmuebleVisitasInfo");
-const inmuebleMap = document.getElementById("inmuebleMap");
-const inmuebleDocsList = document.getElementById("inmuebleDocsList");
-const inmuebleEstadoInfo = document.getElementById("inmuebleEstadoInfo");
+	const inmuebleVisitasTable = document.getElementById("inmuebleVisitasTable");
+	const inmuebleVisitasInfo = document.getElementById("inmuebleVisitasInfo");
+	const inmuebleMap = document.getElementById("inmuebleMap");
+	const inmuebleDocsList = document.getElementById("inmuebleDocsList");
+	const inmuebleFotosList = document.getElementById("inmuebleFotosList");
+	const inmuebleAdjuntosList = document.getElementById("inmuebleAdjuntosList");
+	const inmuebleEstadoInfo = document.getElementById("inmuebleEstadoInfo");
 const inmuebleEstadoValidation = document.getElementById("inmuebleEstadoValidation");
 const inmuebleTitle = document.getElementById("inmuebleTitle");
 const inmuebleSubtitle = document.getElementById("inmuebleSubtitle");
@@ -16811,14 +16818,31 @@ const applyCrmGlobalSearchToCurrentView = () => {
   }
 };
 
+const filterCrmInsertList = () => {
+  if (!crmInsertList) return;
+  const q = normalizeSimple(crmInsertSearch ? crmInsertSearch.value : "");
+  crmInsertList.querySelectorAll("button[data-crm-insert]").forEach((btn) => {
+    const label = normalizeSimple(btn.textContent || "");
+    btn.classList.toggle("hidden", Boolean(q) && !label.includes(q));
+  });
+};
+
 const setCrmQuickNewOpen = (open = false) => {
-  if (!crmQuickNewMenu) return;
+  if (!crmInsertModal) return;
   const next = Boolean(open);
-  crmQuickNewMenu.classList.toggle("hidden", !next);
+  crmInsertModal.classList.toggle("hidden", !next);
   [crmQuickNewBtn, crmTopNewBtn].forEach((btn) => {
     if (!btn) return;
     btn.setAttribute("aria-expanded", next ? "true" : "false");
   });
+  if (next) {
+    setCrmRecentOpen(false);
+    if (crmInsertSearch) {
+      crmInsertSearch.value = "";
+      setTimeout(() => crmInsertSearch.focus(), 0);
+    }
+    filterCrmInsertList();
+  }
 };
 
 const setCrmRecentOpen = (open = false) => {
@@ -33148,17 +33172,29 @@ const openDemandaDetail = (id) => {
   });
 };
 
+const normalizeInmuebleTabKey = (tab) => {
+  const key = String(tab || "").trim();
+  if (!key) return "datos";
+  if (key === "actividad") return "evolucion";
+  if (key === "docs") return "adjuntos";
+  return key;
+};
+
 const setInmuebleTab = (tab) => {
   if (!inmuebleTabs) return;
+  const key = normalizeInmuebleTabKey(tab);
   inmuebleTabs.querySelectorAll(".tab").forEach((btn) => {
-    btn.classList.toggle("active", btn.dataset.tab === tab);
+    btn.classList.toggle("active", btn.dataset.tab === key);
   });
-  if (inmuebleTabDatos) inmuebleTabDatos.classList.toggle("hidden", tab !== "datos");
-  if (inmuebleTabGenerarEncargo) inmuebleTabGenerarEncargo.classList.toggle("hidden", tab !== "generar_encargo");
-  if (inmuebleTabDemandas) inmuebleTabDemandas.classList.toggle("hidden", tab !== "demandas");
-  if (inmuebleTabActividad) inmuebleTabActividad.classList.toggle("hidden", tab !== "actividad");
-  if (inmuebleTabDocs) inmuebleTabDocs.classList.toggle("hidden", tab !== "docs");
-  if (inmuebleTabEstado) inmuebleTabEstado.classList.toggle("hidden", tab !== "estado");
+  if (inmuebleTabDatos) inmuebleTabDatos.classList.toggle("hidden", key !== "datos");
+  if (inmuebleTabActividad) inmuebleTabActividad.classList.toggle("hidden", key !== "evolucion");
+  if (inmuebleTabImagenes) inmuebleTabImagenes.classList.toggle("hidden", key !== "imagenes");
+  if (inmuebleTabAdjuntos) inmuebleTabAdjuntos.classList.toggle("hidden", key !== "adjuntos");
+  // Legacy tabs (solo accesibles desde acciones laterales si existen).
+  if (inmuebleTabGenerarEncargo) inmuebleTabGenerarEncargo.classList.toggle("hidden", key !== "generar_encargo");
+  if (inmuebleTabDemandas) inmuebleTabDemandas.classList.toggle("hidden", key !== "demandas");
+  if (inmuebleTabEstado) inmuebleTabEstado.classList.toggle("hidden", key !== "estado");
+  if (inmuebleTabDocs) inmuebleTabDocs.classList.toggle("hidden", key !== "docs");
 };
 
 const syncInmuebleGenerarEncargoTab = (inmueble = {}) => {
@@ -33791,11 +33827,7 @@ const loadInmuebleVisitas = (inmuebleId, empresaId) => {
 };
 
 const renderInmuebleDocs = (rows = []) => {
-  if (!inmuebleDocsList) return;
-  if (!rows.length) {
-    inmuebleDocsList.innerHTML = "<p class='muted'>Sin documentos.</p>";
-    return;
-  }
+  const items = Array.isArray(rows) ? rows : [];
   const isPhotoRow = (row) => {
     const tipo = normalizeSimple(row?.tipo || "");
     if (tipo.includes("foto")) return true;
@@ -33805,80 +33837,82 @@ const renderInmuebleDocs = (rows = []) => {
 
   const photos = [];
   const docs = [];
-  (rows || []).forEach((row) => {
+  items.forEach((row) => {
     if (isPhotoRow(row)) photos.push(row);
     else docs.push(row);
   });
 
-  const wrapper = document.createElement("div");
-  wrapper.className = "inmueble-repo";
-
-  if (photos.length) {
-    const block = document.createElement("div");
-    block.innerHTML = `<div class="muted" style="margin-bottom:10px;">Fotos (${photos.length})</div>`;
-    const grid = document.createElement("div");
-    grid.className = "inmueble-media-grid";
-    photos.forEach((row) => {
-      const url = row.url ? buildPhotoSrc(row.url) : "";
-      const name = row.nombre || "Foto";
-      const estado = row.estado || "Vigente";
-      const a = document.createElement("a");
-      a.className = "inmueble-media-item";
-      a.href = url || "#";
-      a.target = "_blank";
-      a.rel = "noreferrer";
-      a.innerHTML = `
-        ${url ? `<img src="${escapeHtml(url)}" loading="lazy" alt="" />` : `<div class="muted">Sin imagen</div>`}
-        <div class="inmueble-media-meta">
-          <div class="inmueble-media-name">${escapeHtml(name)}</div>
-          <div class="muted">${escapeHtml(estado)}</div>
-        </div>
-      `;
-      grid.appendChild(a);
-    });
-    block.appendChild(grid);
-    wrapper.appendChild(block);
+  if (inmuebleFotosList) {
+    if (!photos.length) {
+      inmuebleFotosList.innerHTML = "<p class='muted'>Sin imágenes.</p>";
+    } else {
+      const grid = document.createElement("div");
+      grid.className = "inmueble-media-grid";
+      photos.forEach((row) => {
+        const url = row.url ? buildPhotoSrc(row.url) : "";
+        const name = row.nombre || "Foto";
+        const estado = row.estado || "Vigente";
+        const a = document.createElement("a");
+        a.className = "inmueble-media-item";
+        a.href = url || "#";
+        a.target = "_blank";
+        a.rel = "noreferrer";
+        a.innerHTML = `
+          ${url ? `<img src="${escapeHtml(url)}" loading="lazy" alt="" />` : `<div class="muted">Sin imagen</div>`}
+          <div class="inmueble-media-meta">
+            <div class="inmueble-media-name">${escapeHtml(name)}</div>
+            <div class="muted">${escapeHtml(estado)}</div>
+          </div>
+        `;
+        grid.appendChild(a);
+      });
+      inmuebleFotosList.innerHTML = "";
+      inmuebleFotosList.appendChild(grid);
+    }
   }
 
-  if (docs.length) {
-    const block = document.createElement("div");
-    block.style.marginTop = photos.length ? "18px" : "0";
-    block.innerHTML = `<div class="muted" style="margin-bottom:10px;">Documentos (${docs.length})</div>`;
-    const list = document.createElement("div");
-    list.className = "inline-list";
-    docs.forEach((row) => {
-      const item = document.createElement("div");
-      item.className = "inline-row";
-      const name = row.nombre || row.url || "Documento";
-      const tipo = row.tipo || "Documento";
-      const version = row.version ? `v${row.version}` : "";
-      const estado = row.estado || "Sin estado";
-      const plantilla = row.plantilla_clave || "";
-      const origen = [row.origen_tipo, row.origen_id].filter(Boolean).join(" · ");
-      const reviewers = [row.reviewed_by, row.reviewed_at ? formatCell("fecha", String(row.reviewed_at).slice(0, 10)) : ""].filter(Boolean).join(" · ");
-      const href = row.url ? buildPhotoSrc(row.url) : "";
-      const link = href ? `<a href="${escapeHtml(href)}" target="_blank" rel="noreferrer">Ver</a>` : "";
-      item.innerHTML = `
-        <div>
-          <strong>${escapeHtml(name)}</strong>
-          <div class="muted">${escapeHtml(tipo)}${plantilla ? ` · plantilla ${escapeHtml(plantilla)}` : ""}</div>
-          ${origen ? `<div class="muted">Origen: ${escapeHtml(origen)}</div>` : ""}
-          ${reviewers ? `<div class="muted">Revisión: ${escapeHtml(reviewers)}</div>` : ""}
-        </div>
-        <div class="inmueble-summary-badges">
-          ${version ? `<span class="inmueble-chip">${escapeHtml(version)}</span>` : ""}
-          <span class="inmueble-badge tone-${normalizeSimple(estado).includes("vigente") ? "accent" : "soft"}">${escapeHtml(estado)}</span>
-        </div>
-        <div>${link}</div>
-      `;
-      list.appendChild(item);
-    });
-    block.appendChild(list);
-    wrapper.appendChild(block);
+  if (inmuebleAdjuntosList) {
+    if (!docs.length) {
+      inmuebleAdjuntosList.innerHTML = "<p class='muted'>Sin adjuntos.</p>";
+    } else {
+      const list = document.createElement("div");
+      list.className = "inline-list";
+      docs.forEach((row) => {
+        const item = document.createElement("div");
+        item.className = "inline-row";
+        const name = row.nombre || row.url || "Documento";
+        const tipo = row.tipo || "Documento";
+        const version = row.version ? `v${row.version}` : "";
+        const estado = row.estado || "Sin estado";
+        const plantilla = row.plantilla_clave || "";
+        const origen = [row.origen_tipo, row.origen_id].filter(Boolean).join(" · ");
+        const reviewers = [
+          row.reviewed_by,
+          row.reviewed_at ? formatCell("fecha", String(row.reviewed_at).slice(0, 10)) : "",
+        ]
+          .filter(Boolean)
+          .join(" · ");
+        const href = row.url ? buildPhotoSrc(row.url) : "";
+        const link = href ? `<a href="${escapeHtml(href)}" target="_blank" rel="noreferrer">Ver</a>` : "";
+        item.innerHTML = `
+          <div>
+            <strong>${escapeHtml(name)}</strong>
+            <div class="muted">${escapeHtml(tipo)}${plantilla ? ` · plantilla ${escapeHtml(plantilla)}` : ""}</div>
+            ${origen ? `<div class="muted">Origen: ${escapeHtml(origen)}</div>` : ""}
+            ${reviewers ? `<div class="muted">Revisión: ${escapeHtml(reviewers)}</div>` : ""}
+          </div>
+          <div class="inmueble-summary-badges">
+            ${version ? `<span class="inmueble-chip">${escapeHtml(version)}</span>` : ""}
+            <span class="inmueble-badge tone-${normalizeSimple(estado).includes("vigente") ? "accent" : "soft"}">${escapeHtml(estado)}</span>
+          </div>
+          <div>${link}</div>
+        `;
+        list.appendChild(item);
+      });
+      inmuebleAdjuntosList.innerHTML = "";
+      inmuebleAdjuntosList.appendChild(list);
+    }
   }
-
-  inmuebleDocsList.innerHTML = "";
-  inmuebleDocsList.appendChild(wrapper);
 };
 
 const loadInmuebleDocs = (inmuebleId) => {
@@ -44520,30 +44554,50 @@ if (crmLightningSidebar) {
   });
 }
 
-if (crmQuickNewBtn && crmQuickNewMenu) {
+if (crmQuickNewBtn && crmInsertModal) {
   crmQuickNewBtn.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
-    const isOpen = !crmQuickNewMenu.classList.contains("hidden");
+    const isOpen = !crmInsertModal.classList.contains("hidden");
     setCrmQuickNewOpen(!isOpen);
   });
 }
 
-if (crmTopNewBtn && crmQuickNewMenu) {
+if (crmTopNewBtn && crmInsertModal) {
   crmTopNewBtn.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
-    const isOpen = !crmQuickNewMenu.classList.contains("hidden");
+    const isOpen = !crmInsertModal.classList.contains("hidden");
     setCrmQuickNewOpen(!isOpen);
   });
 }
 
-if (crmQuickNewMenu) {
-  crmQuickNewMenu.addEventListener("click", (event) => {
-    const btn = closestFromEvent(event, "button");
+if (crmInsertCloseBtn) {
+  crmInsertCloseBtn.addEventListener("click", () => {
+    setCrmQuickNewOpen(false);
+  });
+}
+
+if (crmInsertSearch) {
+  crmInsertSearch.addEventListener("input", () => {
+    filterCrmInsertList();
+  });
+}
+
+if (crmInsertList) {
+  crmInsertList.addEventListener("click", (event) => {
+    const btn = closestFromEvent(event, "button[data-crm-insert]");
     if (!btn) return;
-    // Cierra el menú tras disparar la acción asociada al botón.
-    setTimeout(() => setCrmQuickNewOpen(false), 0);
+    const key = String(btn.dataset.crmInsert || "").trim();
+    setCrmQuickNewOpen(false);
+    if (key === "captacion") {
+      goToEstudioAlta("captacion");
+    } else if (key === "demanda") {
+      goToEstudioAlta("demanda");
+    } else if (key === "compraventa") {
+      resetCompraventaEditor();
+      goToEstudioAlta("compraventa");
+    }
   });
 }
 
@@ -44585,11 +44639,11 @@ if (crmGlobalSearchResults) {
   });
 }
 
-if (crmQuickNewMenu && (crmQuickNewBtn || crmTopNewBtn)) {
+if (crmInsertModal && (crmQuickNewBtn || crmTopNewBtn)) {
   document.addEventListener("click", (event) => {
-    if (crmQuickNewMenu.classList.contains("hidden")) return;
+    if (crmInsertModal.classList.contains("hidden")) return;
     const target = event.target;
-    if (crmQuickNewMenu.contains(target)) return;
+    if (target && target.closest && target.closest(".crm-insert-card")) return;
     if (crmQuickNewBtn && crmQuickNewBtn.contains(target)) return;
     if (crmTopNewBtn && crmTopNewBtn.contains(target)) return;
     setCrmQuickNewOpen(false);
@@ -48686,11 +48740,27 @@ if (inmuebleTecnoCampaignBtn) {
 if (inmuebleTecnoPosBtn) {
   inmuebleTecnoPosBtn.addEventListener("click", () => {
     setInmuebleTab("datos");
-    if (inmuebleGeocodeBtn) {
-      inmuebleGeocodeBtn.click();
-      return;
+    const inm = state.currentInmuebleContext?.inmueble || {};
+    const address = [
+      String(inm.direccion || "").trim(),
+      String(inm.poblacion || "").trim(),
+      String(inm.provincia || "").trim(),
+      "España",
+    ]
+      .filter(Boolean)
+      .join(", ");
+    const url = address
+      ? `https://www.openstreetmap.org/search?query=${encodeURIComponent(address)}`
+      : "https://www.openstreetmap.org/";
+    try {
+      window.open(url, "_blank", "noopener");
+    } catch {
+      // Si el navegador bloquea popups, al menos dejamos el link en el portapapeles si existe la API.
+      try {
+        navigator.clipboard?.writeText?.(url);
+      } catch {}
+      alert("No se pudo abrir el mapa en una pestaña nueva.");
     }
-    alert("No se pudo abrir la herramienta de posición.");
   });
 }
 
