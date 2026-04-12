@@ -5909,19 +5909,17 @@ body.crm-context-inmo .crm-resumen-compact-note {
 }
 
 .crm-kanban {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: 14px;
   align-items: flex-start;
-  overflow-x: auto;
-  overflow-y: hidden;
+  overflow: visible;
   padding: 4px 2px 12px;
-  scroll-snap-type: x proximity;
 }
 
 .crm-kanban-column {
-  flex: 0 0 280px;
-  min-width: 280px;
-  max-width: 280px;
+  min-width: 0;
+  max-width: none;
   min-height: 220px;
   background: #fffdf8;
   border: 1px solid #e4ded4;
@@ -5931,7 +5929,6 @@ body.crm-context-inmo .crm-resumen-compact-note {
   align-content: start;
   gap: 10px;
   align-self: flex-start;
-  scroll-snap-align: start;
 }
 
 .crm-kanban-column h4 {

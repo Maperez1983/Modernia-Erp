@@ -29399,34 +29399,58 @@ const loadCrmCaptaciones = () => {
     });
     renderCrmPipeline(counts, activeEtapa);
     if (crmCaptacionesOps) {
-      const ops = [...rowMaps]
-        .filter((rowMap) => matchQuick(rowMap))
-        .map((row) => {
-          const etapa = String(row.etapa || "Noticia").trim();
-          let summary = String(row.proxima_accion || "").trim();
-          let score = 0;
-          if (!summary) {
-            score += 4;
-            summary = "Sin próxima acción definida.";
-          }
-          const verificada = String(row.noticia_verificada ?? "").trim();
-          if (etapa === "Noticia" && verificada !== "1") {
-            score += 3;
-            summary = summary ? `${summary} · Noticia sin verificar` : "Noticia sin verificar.";
-          }
-          if (etapa === "Noticia") score += 3;
-          if (etapa === "Inmueble") score += 2;
-          return {
-            inmuebleId: row.inmueble_id || "",
-            captacionId: row.inmueble_id ? "" : String(row.id || "").trim(),
-            title: row.direccion || row.propietario || "Expediente sin dirección",
-            meta: `${row.propietario || "Propietario pendiente"} · ${etapa}`,
-            summary,
-            score,
-          };
-        })
-        .sort((a, b) => b.score - a.score || a.title.localeCompare(b.title, "es"))
-        .slice(0, 6);
+      const activeRowMaps = rowMaps.filter((rowMap) => matchQuick(rowMap));
+      const safeDaysSince = (value) => {
+        const days = daysSince(value);
+        return Number.isFinite(days) ? days : Number.POSITIVE_INFINITY;
+      };
+      const isPisosVacios = (rowMap) => {
+        const ocupacion = normalizeSimple(rowMap?.situacion_ocupacion || "");
+        const ocupadoPor = normalizeSimple(rowMap?.ocupado_por || "");
+        return ocupacion === "libre" || ocupadoPor === "vacio" || ocupadoPor === "vacío";
+      };
+      const isAlquilado = (rowMap) => {
+        const ocupacion = normalizeSimple(rowMap?.situacion_ocupacion || "");
+        const ocupadoPor = normalizeSimple(rowMap?.ocupado_por || "");
+        return ocupacion.includes("alquil") || ocupadoPor.includes("inquilin");
+      };
+      const missingNext = activeRowMaps.filter((row) => !String(row.proxima_accion || "").trim()).length;
+      const noticiasSinVerificar = activeRowMaps.filter((row) => String(row.etapa || "").trim() === "Noticia" && String(row.noticia_verificada ?? "").trim() !== "1").length;
+      const sinContacto120 = activeRowMaps.filter((row) => safeDaysSince(row.fecha_contacto) > 120).length;
+      const pisosVacios = activeRowMaps.filter(isPisosVacios).length;
+      const alquilados = activeRowMaps.filter(isAlquilado).length;
+      const ops = [
+        {
+          title: "Sin próxima acción",
+          meta: `${missingNext} expedientes`,
+          summary: "Revisar y programar siguiente paso.",
+          crmQuick: "captaciones:quick_sin_proxima_accion",
+        },
+        {
+          title: "Noticias sin verificar",
+          meta: `${noticiasSinVerificar} noticias`,
+          summary: "Valorar/verificar para avanzar el pipeline.",
+          crmQuick: "captaciones:quick_noticia_sin_verificar",
+        },
+        {
+          title: "Sin contacto >120 días",
+          meta: `${sinContacto120} expedientes`,
+          summary: "Reactivar o cerrar para limpiar cartera.",
+          crmQuick: "captaciones:quick_sin_contacto_120",
+        },
+        {
+          title: "Pisos vacíos",
+          meta: `${pisosVacios} inmuebles`,
+          summary: "Oportunidades de entrada rápidas.",
+          crmQuick: "captaciones:quick_pisos_vacios",
+        },
+        {
+          title: "Alquilados (inquilinos)",
+          meta: `${alquilados} inmuebles`,
+          summary: "Cartera con inquilino (seguimiento).",
+          crmQuick: "captaciones:quick_alquilados",
+        },
+      ];
       renderCrmActionList(crmCaptacionesOps, ops, "Sin bloqueos operativos en el pipeline.");
     }
     if (crmKpiCaptaciones) {
