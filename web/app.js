@@ -16467,18 +16467,30 @@ const openCompany = (empresaName, options = {}) => {
   window.scrollTo({ top: 0, behavior: state.booting ? "auto" : "smooth" });
 };
 
-const openClientesModule = () => {
+const openClientesModule = (opts = {}) => {
   const user = getAuthScopeUser();
   if (!canAccessSharedHomeModules(user)) {
     goHome();
     return;
   }
+  const service = String(opts.service || "").trim().toLowerCase();
+  const empresaId = String(opts.empresa_id || opts.empresaId || "").trim();
+  state.clientesContextService = service;
+  state.clientesContextEmpresaId = empresaId;
   if (homeSection) {
     homeSection.classList.add("hidden");
   }
   setModule("clientes");
   setPage("empresa");
   setUrlParams(new URLSearchParams({ clientes: "1" }));
+};
+
+const getClientesContextServiceParam = () => {
+  if (state.currentModule === "clientes") {
+    const svc = String(state.clientesContextService || "").trim();
+    if (svc) return svc;
+  }
+  return getServiceFilterParam();
 };
 
 const resolveEmpresaById = (empresaId) => {
@@ -18124,6 +18136,11 @@ const updateBdtFiltersVisibility = () => {
 };
 
 const setModule = (moduleName) => {
+  // Limpia overrides contextuales al salir del módulo de clientes.
+  if (moduleName !== "clientes") {
+    state.clientesContextService = "";
+    state.clientesContextEmpresaId = "";
+  }
   state.currentModule = moduleName;
   const operativaTab = viewTabs.querySelector('[data-tab="operativa"]');
   if (operativaTab) {
@@ -18133,7 +18150,13 @@ const setModule = (moduleName) => {
     state.currentEmpresaId = "";
     state.currentEmpresaName = "";
     state.currentClienteId = "";
-    empresaSelect.value = "";
+    const preferredEmpresaId = String(state.clientesContextEmpresaId || "").trim();
+    if (preferredEmpresaId && empresaSelect) {
+      const hasOption = Array.from(empresaSelect.options || []).some((opt) => String(opt.value || "") === preferredEmpresaId);
+      empresaSelect.value = hasOption ? preferredEmpresaId : "";
+    } else if (empresaSelect) {
+      empresaSelect.value = "";
+    }
     updateExplorerHeader("Clientes");
     explorerSection.classList.remove("hidden");
     setTab("operativa");
@@ -27439,7 +27462,7 @@ const loadHomeFincasStats = (year) => {
 };
 
 const loadClientesStats = () => {
-  const rawServiceParam = getServiceFilterParam();
+  const rawServiceParam = getClientesContextServiceParam();
   const serviceParam =
     rawServiceParam || (SEGUROS_ONLY_UPLOADED_MODE ? "seguros" : "");
   const params = new URLSearchParams();
@@ -27467,7 +27490,7 @@ const loadClientesCardStats = () => {
 };
 
 const loadClientesList = () => {
-  const rawServiceParam = getServiceFilterParam();
+  const rawServiceParam = getClientesContextServiceParam();
   const serviceParam =
     rawServiceParam || (SEGUROS_ONLY_UPLOADED_MODE ? "seguros" : "");
   const params = new URLSearchParams();
@@ -27637,7 +27660,7 @@ const loadClientesDashboard = () => {
   if (estado) {
     params.set("estado", estado);
   }
-  const rawServiceParam = getServiceFilterParam();
+  const rawServiceParam = getClientesContextServiceParam();
   const serviceParam = rawServiceParam || (SEGUROS_ONLY_UPLOADED_MODE ? "seguros" : "");
   if (serviceParam) {
     params.set("servicio", serviceParam);
@@ -28054,7 +28077,7 @@ const loadClientesTable = () => {
   if (estado) {
     params.set("estado", estado);
   }
-  const rawServiceParam = getServiceFilterParam();
+  const rawServiceParam = getClientesContextServiceParam();
   const serviceParam =
     rawServiceParam || (SEGUROS_ONLY_UPLOADED_MODE ? "seguros" : "");
   if (serviceParam) {
@@ -43089,7 +43112,7 @@ const openClienteDetail = (id) => {
   setPage("cliente");
   updateTableVisibility();
   setUrlParams(new URLSearchParams({ cliente: id }));
-  const serviceParam = getServiceFilterParam();
+  const serviceParam = getClientesContextServiceParam();
   const params = new URLSearchParams({ id });
   if (serviceParam) {
     params.set("servicio", serviceParam);
@@ -44076,7 +44099,7 @@ if (crmWorkspaceTabs) {
   crmWorkspaceTabs.addEventListener("click", (event) => {
     const action = closestFromEvent(event, "[data-crm-action]");
     if (action && String(action.dataset.crmAction || "").trim() === "clientes") {
-      openClientesModule();
+      openClientesModule({ service: "inmobiliaria", empresaId: resolveCrmInmoEmpresaId() });
       return;
     }
     const quick = closestFromEvent(event, "[data-crm-quick]");
@@ -44101,7 +44124,7 @@ if (crmLightningSidebar) {
   crmLightningSidebar.addEventListener("click", (event) => {
     const action = closestFromEvent(event, "[data-crm-action]");
     if (action && String(action.dataset.crmAction || "").trim() === "clientes") {
-      openClientesModule();
+      openClientesModule({ service: "inmobiliaria", empresaId: resolveCrmInmoEmpresaId() });
       return;
     }
     const quick = closestFromEvent(event, "[data-crm-quick]");
