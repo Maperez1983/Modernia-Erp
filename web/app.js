@@ -2556,6 +2556,7 @@ const crmNuevaDemandaBtn = document.getElementById("crmNuevaDemandaBtn");
 	const crmLightningSidebar = document.getElementById("crmLightningSidebar");
 	const crmQuickNewBtn = document.getElementById("crmQuickNewBtn");
 	const crmQuickNewMenu = document.getElementById("crmQuickNewMenu");
+  const crmTopNewBtn = document.getElementById("crmTopNewBtn");
 	const crmRecentBtn = document.getElementById("crmRecentBtn");
 	const crmRecentMenu = document.getElementById("crmRecentMenu");
 const crmRecentList = document.getElementById("crmRecentList");
@@ -16796,10 +16797,13 @@ const applyCrmGlobalSearchToCurrentView = () => {
 };
 
 const setCrmQuickNewOpen = (open = false) => {
-  if (!crmQuickNewMenu || !crmQuickNewBtn) return;
+  if (!crmQuickNewMenu) return;
   const next = Boolean(open);
   crmQuickNewMenu.classList.toggle("hidden", !next);
-  crmQuickNewBtn.setAttribute("aria-expanded", next ? "true" : "false");
+  [crmQuickNewBtn, crmTopNewBtn].forEach((btn) => {
+    if (!btn) return;
+    btn.setAttribute("aria-expanded", next ? "true" : "false");
+  });
 };
 
 const setCrmRecentOpen = (open = false) => {
@@ -18163,7 +18167,10 @@ const setModule = (moduleName) => {
   state.currentModule = moduleName;
   const operativaTab = viewTabs.querySelector('[data-tab="operativa"]');
   if (operativaTab) {
-    operativaTab.classList.toggle("hidden", moduleName === "clientes");
+    // En el módulo de clientes, la pestaña "operativa" actúa como "Listado de clientes".
+    // Mantenerla visible evita que el usuario se quede solo con "Alta" sin poder volver al listado.
+    operativaTab.classList.remove("hidden");
+    operativaTab.textContent = moduleName === "clientes" ? "Clientes" : "Dashboard";
   }
   if (moduleName === "clientes") {
     state.currentEmpresaId = "";
@@ -24517,6 +24524,41 @@ const updateTableVisibility = () => {
   // Los accesos a otros verticales se hacen desde Home/Workspaces, no desde el tab-bar del vertical actual.
   if (viewTabs) {
     const allowedByContext = (() => {
+      // Si el usuario entra en Clientes desde un vertical (p.ej. Inmobiliaria),
+      // restringimos el tab-bar a lo mínimo necesario para esa operativa.
+      if (isClientesModule) {
+        const ctxService = normalizeSimple(state.clientesContextService || "");
+        if (ctxService) {
+          const allowed = new Set(["operativa", "alta"]);
+          if (ctxService === "inmobiliaria" || ctxService === "inmo") {
+            allowed.add("crm");
+          } else if (ctxService === "seguros") {
+            allowed.add("seguros-crm");
+          } else if (ctxService === "financiaciones" || ctxService === "hipotecas" || ctxService === "fin") {
+            allowed.add("fin-crm");
+            allowed.add("fin-sim");
+          } else if (ctxService === "gestoria") {
+            [
+              "gestoria-dash",
+              "gestoria-crm",
+              "gestoria-docs",
+              "gestoria-agenda",
+              "gestoria-fact",
+              "gestoria-conta",
+            ].forEach((key) => allowed.add(key));
+          } else if (ctxService === "fincas") {
+            [
+              "gestoria-dash",
+              "gestoria-crm",
+              "gestoria-docs",
+              "gestoria-agenda",
+              "gestoria-fact",
+              "gestoria-conta",
+            ].forEach((key) => allowed.add(key));
+          }
+          return allowed;
+        }
+      }
       // Deep link/contexto: `crm=inmo|seguros|fin` debe restringir el tab-bar aunque el usuario
       // esté visualizando "Dashboard/Operativa" (porque el contexto sigue siendo el CRM vertical).
       try {
@@ -44193,6 +44235,15 @@ if (crmQuickNewBtn && crmQuickNewMenu) {
   });
 }
 
+if (crmTopNewBtn && crmQuickNewMenu) {
+  crmTopNewBtn.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const isOpen = !crmQuickNewMenu.classList.contains("hidden");
+    setCrmQuickNewOpen(!isOpen);
+  });
+}
+
 if (crmQuickNewMenu) {
   crmQuickNewMenu.addEventListener("click", (event) => {
     const btn = closestFromEvent(event, "button");
@@ -44240,12 +44291,13 @@ if (crmGlobalSearchResults) {
   });
 }
 
-if (crmQuickNewMenu && crmQuickNewBtn) {
+if (crmQuickNewMenu && (crmQuickNewBtn || crmTopNewBtn)) {
   document.addEventListener("click", (event) => {
     if (crmQuickNewMenu.classList.contains("hidden")) return;
     const target = event.target;
     if (crmQuickNewMenu.contains(target)) return;
-    if (crmQuickNewBtn.contains(target)) return;
+    if (crmQuickNewBtn && crmQuickNewBtn.contains(target)) return;
+    if (crmTopNewBtn && crmTopNewBtn.contains(target)) return;
     setCrmQuickNewOpen(false);
   });
 

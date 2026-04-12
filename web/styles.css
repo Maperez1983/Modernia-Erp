@@ -3425,8 +3425,10 @@ body.crm-fin #companySummary {
   border-bottom-color: rgba(var(--gold-rgb), 0.92);
 }
 #crmSection .crm-lightning-topbar-right {
-  display: grid;
-  justify-items: end;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
 }
 
 #crmSection .crm-global-searchbox {

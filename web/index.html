@@ -8,7 +8,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Verifika²" />
     <title>Verifika² · CRM & Portal</title>
-    <link rel="stylesheet" href="styles.css?v=170" />
+    <link rel="stylesheet" href="styles.css?v=171" />
     <link rel="manifest" href="manifest.webmanifest?v=17" />
     <link rel="icon" href="/icons/ios/v28/icon-192.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/icons/ios/v28/apple-touch-icon-180.png" />
@@ -2216,6 +2216,9 @@
                 </div>
 
                 <div class="crm-lightning-topbar-right">
+                  <button type="button" class="secondary" id="crmTopNewBtn" aria-haspopup="menu" aria-controls="crmQuickNewMenu">
+                    + Nuevo
+                  </button>
                   <div class="crm-global-searchbox">
                     <input id="crmGlobalSearch" class="crm-lightning-search" placeholder="Buscar..." autocomplete="off" />
                     <div id="crmGlobalSearchResults" class="crm-global-results hidden" role="listbox" aria-label="Resultados de búsqueda"></div>
@@ -8160,7 +8163,7 @@
     <script src="ui-foundation.js?v=3"></script>
     <script src="app-auth.js?v=10"></script>
     <script src="app-routing.js?v=7"></script>
-    <script src="app.js?v=461"></script>
+    <script src="app.js?v=462"></script>
     <script>
       (function () {
         if (!("serviceWorker" in navigator)) return;
@@ -8188,7 +8191,7 @@
           }
         } catch {}
         window.addEventListener("load", function () {
-	          navigator.serviceWorker.register("/sw.js?v=67").catch(function () {});
+	          navigator.serviceWorker.register("/sw.js?v=68").catch(function () {});
         });
       })();
     </script>
