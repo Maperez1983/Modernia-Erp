@@ -49595,8 +49595,23 @@ class Handler(BaseHTTPRequestHandler):
                 return
             rows = conn.execute(
                 """
-               SELECT d.id, d.tipo, d.zona, d.precio_max, d.m2_min,
-                       d.habitaciones_min, d.banos_min, d.estado, d.prioridad,
+               SELECT d.id,
+                       d.pedido,
+                       d.tipo,
+                       d.tipologia,
+                       d.subtipologia,
+                       d.fase,
+                       d.pedido_web,
+                       d.fecha_insercion,
+                       d.created_at,
+                       d.updated_at,
+                       d.zona,
+                       d.precio_max,
+                       d.m2_min,
+                       d.habitaciones_min,
+                       d.banos_min,
+                       d.estado,
+                       d.prioridad,
                        d.cliente_id,
                        c.nombre AS cliente
                 FROM demandas d

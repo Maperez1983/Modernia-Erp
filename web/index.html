@@ -8,7 +8,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Verifika²" />
     <title>Verifika² · CRM & Portal</title>
-    <link rel="stylesheet" href="styles.css?v=167" />
+    <link rel="stylesheet" href="styles.css?v=169" />
     <link rel="manifest" href="manifest.webmanifest?v=17" />
     <link rel="icon" href="/icons/ios/v28/icon-192.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/icons/ios/v28/apple-touch-icon-180.png" />
@@ -2217,7 +2217,7 @@
 
                 <div class="crm-lightning-topbar-right">
                   <div class="crm-global-searchbox">
-                    <input id="crmGlobalSearch" class="crm-lightning-search" placeholder="Search..." autocomplete="off" />
+                    <input id="crmGlobalSearch" class="crm-lightning-search" placeholder="Buscar..." autocomplete="off" />
                     <div id="crmGlobalSearchResults" class="crm-global-results hidden" role="listbox" aria-label="Resultados de búsqueda"></div>
                   </div>
                 </div>
@@ -2279,11 +2279,11 @@
 	                      <div class="form-card">
 	                        <div class="section-head compact">
 	                          <div>
-	                            <h4>Alertas</h4>
-	                            <p class="muted">Bloqueos y faltantes que frenan el pipeline.</p>
+	                            <h4>Gestión inmuebles</h4>
+	                            <p class="muted">Catastro, propietario y atajos de revisión.</p>
 	                          </div>
 	                        </div>
-	                        <div id="crmResumenAlertas" class="crm-focus-list"></div>
+	                        <div id="crmInicioInmuebles" class="crm-focus-list"></div>
 	                      </div>
 	                    </div>
 
@@ -2317,24 +2317,6 @@
 	                        </div>
 	                      </div>
 	                      <div id="crmResumenHoy" class="crm-focus-list"></div>
-	                    </div>
-	                    <div class="form-card crm-focus-card">
-	                      <div class="section-head compact">
-	                        <div>
-	                          <h4>Actividades recientes</h4>
-	                          <p class="muted">Últimos movimientos en visitas, ventas y alquileres.</p>
-	                        </div>
-	                      </div>
-	                      <div id="crmResumenActividad" class="crm-recent"></div>
-	                    </div>
-	                    <div class="form-card crm-focus-card">
-	                      <div class="section-head compact">
-	                        <div>
-	                          <h4>Inmuebles foco</h4>
-	                          <p class="muted">Fichas que piden documentación o siguiente paso.</p>
-	                        </div>
-	                      </div>
-	                      <div id="crmResumenInmuebles" class="crm-focus-list"></div>
 	                    </div>
 	                  </div>
 	                </div>
@@ -2463,7 +2445,7 @@
                     <div class="section-head">
                       <div>
                         <h3>Inmuebles</h3>
-                        <p class="muted">Busca por referencia, dirección, zona o estado.</p>
+                        <p class="muted">Busca por referencia, dirección o estado.</p>
                       </div>
                       <div class="inline-actions">
                         <select id="crmInmuebleEstadoFilterMirror" title="Filtrar por estado">
@@ -2546,6 +2528,7 @@
                         </select>
                       </div>
                     </div>
+                    <div id="crmDemandasSteps" class="crm-stage-steps" role="tablist" aria-label="Fases de pedidos"></div>
                     <div id="crmDemandasMini" class="crm-mini-list"></div>
                     <div id="crmDemandasTable"></div>
                     <div class="footer" id="crmDemandasInfo"></div>
@@ -2736,7 +2719,7 @@
                     </select>
                   </div>
                   <div class="inline-row">
-                    <input id="crmEdificiosSearch" placeholder="Buscar por inmueble, zona, responsable..." />
+                    <input id="crmEdificiosSearch" placeholder="Buscar por inmueble o responsable..." />
                   </div>
                   <div id="crmEdificiosTable"></div>
                   <div class="footer" id="crmEdificiosInfo"></div>
@@ -8195,7 +8178,7 @@
     <script src="ui-foundation.js?v=3"></script>
     <script src="app-auth.js?v=10"></script>
     <script src="app-routing.js?v=7"></script>
-    <script src="app.js?v=455"></script>
+    <script src="app.js?v=457"></script>
     <script>
       (function () {
         if (!("serviceWorker" in navigator)) return;
@@ -8223,7 +8206,7 @@
           }
         } catch {}
         window.addEventListener("load", function () {
-          navigator.serviceWorker.register("/sw.js?v=62").catch(function () {});
+	          navigator.serviceWorker.register("/sw.js?v=63").catch(function () {});
         });
       })();
     </script>
