@@ -8,7 +8,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Verifika²" />
     <title>Verifika² · CRM & Portal</title>
-    <link rel="stylesheet" href="styles.css?v=171" />
+    <link rel="stylesheet" href="styles.css?v=172" />
     <link rel="manifest" href="manifest.webmanifest?v=17" />
     <link rel="icon" href="/icons/ios/v28/icon-192.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/icons/ios/v28/apple-touch-icon-180.png" />
@@ -2204,16 +2204,16 @@
 	                  <div class="crm-lightning-brand-sub" id="crmBrandSubtitle">CRM</div>
 	                </div>
 
-                <div id="crmWorkspaceTabs" class="crm-workspace-tabs crm-lightning-tabs" role="tablist" aria-label="Menú superior Tecnocloud-like">
-                  <button type="button" class="tab active" data-crm-view="resumen">Inicio</button>
-                  <button type="button" class="tab" data-crm-action="clientes">Clientes</button>
-                  <button type="button" class="tab" data-crm-view="inmuebles">Inmuebles</button>
-                  <button type="button" class="tab" data-crm-view="captaciones" data-etapa="Noticia">Noticias</button>
-                  <button type="button" class="tab" data-crm-view="captaciones" data-etapa="Encargo">Encargos</button>
-                  <button type="button" class="tab" data-crm-view="demandas" data-crm-quick="demandas:activa">Pedidos</button>
-                  <button type="button" class="tab" data-crm-view="agenda" data-crm-quick="agenda:Pendiente">Act./Citas</button>
-                  <button type="button" class="tab" data-crm-view="analisis">Búsq./Informes</button>
-                </div>
+	                <div id="crmWorkspaceTabs" class="crm-workspace-tabs crm-lightning-tabs" role="tablist" aria-label="Menú superior Tecnocloud-like">
+	                  <button type="button" class="tab active" data-crm-view="resumen">Inicio</button>
+	                  <button type="button" class="tab" data-crm-view="clientes">Clientes</button>
+	                  <button type="button" class="tab" data-crm-view="inmuebles">Inmuebles</button>
+	                  <button type="button" class="tab" data-crm-view="captaciones" data-etapa="Noticia">Noticias</button>
+	                  <button type="button" class="tab" data-crm-view="captaciones" data-etapa="Encargo">Encargos</button>
+	                  <button type="button" class="tab" data-crm-view="demandas" data-crm-quick="demandas:activa">Pedidos</button>
+	                  <button type="button" class="tab" data-crm-view="agenda" data-crm-quick="agenda:Pendiente">Act./Citas</button>
+	                  <button type="button" class="tab" data-crm-view="analisis">Búsq./Informes</button>
+	                </div>
 
                 <div class="crm-lightning-topbar-right">
                   <button type="button" class="secondary" id="crmTopNewBtn" aria-haspopup="menu" aria-controls="crmQuickNewMenu">
@@ -2380,39 +2380,42 @@
                   </div>
                 </div>
               </div>
-              <div id="crmViewCaptaciones" class="crm-workspace-view hidden">
-                <div class="crm-split crm-ops-split">
-                  <div class="form-card">
-                    <div class="section-head">
-                      <div>
-                        <h3>Pipeline inmobiliario (lista)</h3>
-                        <p class="muted">Vista tipo Tecnocloud para operar rápido y con máxima claridad.</p>
-                      </div>
-	                      <select id="crmEtapaFilterMirror">
-	                        <option value="">Todas las etapas</option>
-	                        <option>Inmueble</option>
-	                        <option>Noticia</option>
-	                        <option>Encargo</option>
-	                        <option>Propuesta</option>
-	                        <option>Reservado</option>
-	                        <option>Contrato de arras</option>
-	                        <option>Vendido</option>
-	                        <option>Cerrado negativamente</option>
-	                        <option>Alquiler</option>
-	                      </select>
-	                      <select id="crmCaptacionesQuickFilter">
-	                        <option value="">Búsquedas rápidas</option>
-	                        <option value="quick_pisos_vacios">Pisos vacíos</option>
-	                        <option value="quick_alquilados">Alquilados (inquilinos)</option>
-	                        <option value="quick_sin_contacto_120">Sin contacto &gt;120 días</option>
-	                        <option value="quick_noticia_sin_verificar">Noticias sin verificar</option>
-	                        <option value="quick_sin_proxima_accion">Sin próxima acción</option>
-	                      </select>
-	                    </div>
-                    <div id="crmCaptacionesStageSummary" class="crm-pipeline"></div>
-                    <div id="crmCaptacionesTable"></div>
-                    <div class="footer" id="crmCaptacionesInfo"></div>
-                  </div>
+	              <div id="crmViewCaptaciones" class="crm-workspace-view hidden">
+	                <div class="crm-split crm-ops-split">
+	                  <div class="form-card">
+	                    <div class="section-head">
+	                      <div>
+	                        <h3>Pipeline inmobiliario (lista)</h3>
+	                        <p class="muted">Vista tipo Tecnocloud para operar rápido y con máxima claridad.</p>
+	                      </div>
+	                      <div class="inline-actions">
+		                      <select id="crmEtapaFilterMirror">
+		                        <option value="">Todas las etapas</option>
+		                        <option>Inmueble</option>
+		                        <option>Noticia</option>
+		                        <option>Encargo</option>
+		                        <option>Propuesta</option>
+		                        <option>Reservado</option>
+		                        <option>Contrato de arras</option>
+		                        <option>Vendido</option>
+		                        <option>Cerrado negativamente</option>
+		                        <option>Alquiler</option>
+		                      </select>
+		                      <select id="crmCaptacionesQuickFilter">
+		                        <option value="">Búsquedas rápidas</option>
+		                        <option value="quick_pisos_vacios">Pisos vacíos</option>
+		                        <option value="quick_alquilados">Alquilados (inquilinos)</option>
+		                        <option value="quick_sin_contacto_120">Sin contacto &gt;120 días</option>
+		                        <option value="quick_noticia_sin_verificar">Noticias sin verificar</option>
+		                        <option value="quick_sin_proxima_accion">Sin próxima acción</option>
+		                      </select>
+	                        <button type="button" class="secondary" id="crmCaptacionesNewBtn">+ Nuevo inmueble</button>
+	                      </div>
+		                    </div>
+	                    <div id="crmCaptacionesStageSummary" class="crm-pipeline"></div>
+	                    <div id="crmCaptacionesTable"></div>
+	                    <div class="footer" id="crmCaptacionesInfo"></div>
+	                  </div>
                   <div class="form-card">
                     <div class="section-head">
                       <div>
@@ -2423,50 +2426,49 @@
                     <div id="crmCaptacionesOps" class="crm-focus-list"></div>
                   </div>
                 </div>
-              </div>
-              <div id="crmViewInmuebles" class="crm-workspace-view hidden">
-                <div class="crm-split">
-                  <div class="form-card">
-                    <div class="section-head">
-                      <div>
-                        <h3>Inmuebles</h3>
-                        <p class="muted">Busca por referencia, dirección o estado.</p>
-                      </div>
-                      <div class="inline-actions">
-                        <select id="crmInmuebleEstadoFilterMirror" title="Filtrar por estado">
-                          <option value="activos">Activos</option>
-                          <option value="vendidos">Vendidos (incl. histórico)</option>
-                          <option value="cerrados">Cerrados negativos</option>
-                          <option value="todos">Todos</option>
-                        </select>
-                        <input id="crmInmuebleSearchMirror" placeholder="Buscar inmueble..." />
-                      </div>
-                    </div>
-                    <div id="crmInmueblesTableMirror"></div>
-                    <div class="footer" id="crmInmueblesInfoMirror"></div>
-                  </div>
-                  <div class="stack">
-                    <div class="form-card">
-                      <div class="section-head">
-                        <div>
-                          <h3>Calidad del inventario</h3>
-                          <p class="muted">Control rápido de Catastro, propietarios, pricing y madurez del stock.</p>
-                        </div>
-                      </div>
-                      <div id="crmInmueblesQuality" class="crm-mini-list"></div>
-                    </div>
-                    <div class="form-card">
-                      <div class="section-head">
-                        <div>
-                          <h3>Acciones recomendadas</h3>
-                          <p class="muted">Atajos para sanear fichas y priorizar el inventario con más riesgo operativo.</p>
-                        </div>
-                      </div>
-                      <div id="crmInmueblesOps" class="crm-focus-list"></div>
-                    </div>
-                  </div>
-                </div>
-              </div>
+	              </div>
+	              <div id="crmViewClientes" class="crm-workspace-view hidden">
+	                <div class="form-card">
+	                  <div class="section-head">
+	                    <div>
+	                      <h3>Clientes</h3>
+	                      <p class="muted">Solo clientes vinculados al servicio Inmobiliaria en esta empresa.</p>
+	                    </div>
+	                    <div class="inline-actions">
+	                      <select id="crmClientesFilter" title="Filtro">
+	                        <option value="recientes">Clientes recientes</option>
+	                        <option value="todos">Todos</option>
+	                        <option value="informadores">Informadores</option>
+	                        <option value="web">Clientes web genéricos</option>
+	                      </select>
+	                      <input id="crmClientesSearch" placeholder="Buscar en la lista..." />
+	                    </div>
+	                  </div>
+	                  <div id="crmClientesTable"></div>
+	                  <div class="footer" id="crmClientesInfo"></div>
+	                </div>
+	              </div>
+	              <div id="crmViewInmuebles" class="crm-workspace-view hidden">
+	                <div class="form-card">
+	                  <div class="section-head">
+	                    <div>
+	                      <h3>Inmuebles</h3>
+	                      <p class="muted">Busca por referencia, dirección o estado.</p>
+	                    </div>
+	                    <div class="inline-actions">
+	                      <select id="crmInmuebleEstadoFilterMirror" title="Filtrar por estado">
+	                        <option value="activos">Activos</option>
+	                        <option value="vendidos">Vendidos (incl. histórico)</option>
+	                        <option value="cerrados">Cerrados negativos</option>
+	                        <option value="todos">Todos</option>
+	                      </select>
+	                      <input id="crmInmuebleSearchMirror" placeholder="Buscar inmueble..." />
+	                    </div>
+	                  </div>
+	                  <div id="crmInmueblesTableMirror"></div>
+	                  <div class="footer" id="crmInmueblesInfoMirror"></div>
+	                </div>
+	              </div>
               <div id="crmViewAlquileres" class="crm-workspace-view hidden">
                 <div id="crmAlquileresMini" class="crm-mini-list"></div>
                   <div class="form-card">
@@ -8163,7 +8165,7 @@
     <script src="ui-foundation.js?v=3"></script>
     <script src="app-auth.js?v=10"></script>
     <script src="app-routing.js?v=7"></script>
-    <script src="app.js?v=462"></script>
+    <script src="app.js?v=463"></script>
     <script>
       (function () {
         if (!("serviceWorker" in navigator)) return;
@@ -8191,7 +8193,7 @@
           }
         } catch {}
         window.addEventListener("load", function () {
-	          navigator.serviceWorker.register("/sw.js?v=68").catch(function () {});
+	          navigator.serviceWorker.register("/sw.js?v=69").catch(function () {});
         });
       })();
     </script>

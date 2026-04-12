@@ -48604,17 +48604,23 @@ class Handler(BaseHTTPRequestHandler):
                 where_clause = f"WHERE {' AND '.join(where)}"
                 rows = conn.execute(
                     f"""
-                    SELECT
-                      {select_id}
-                      c.nombre,
-                      c.tipo_persona,
-                      c.nif,
-                      c.telefono,
-                      c.email,
-                      c.fecha_nacimiento,
-                      c.direccion,
-                      c.codigo_postal,
-                      c.poblacion,
+	                    SELECT
+	                      {select_id}
+	                      c.nombre,
+	                      c.tipo_persona,
+	                      c.nif,
+	                      c.telefono,
+	                      c.movil,
+	                      c.otro_telefono,
+	                      c.email,
+	                      c.id_personal,
+	                      c.cliente_generico_web,
+	                      c.tiene_pedido,
+	                      c.perfil,
+	                      c.fecha_nacimiento,
+	                      c.direccion,
+	                      c.codigo_postal,
+	                      c.poblacion,
                       c.provincia,
                       GROUP_CONCAT(e.nombre, ' | ') AS empresas,
                       GROUP_CONCAT(COALESCE(NULLIF(ce.servicio, ''), 'seguros'), ' | ') AS servicios
@@ -48651,17 +48657,23 @@ class Handler(BaseHTTPRequestHandler):
                 join_clause = "JOIN clientes_empresas ce ON ce.cliente_id = c.id" if services else "LEFT JOIN clientes_empresas ce ON ce.cliente_id = c.id"
                 rows = conn.execute(
                     f"""
-                    SELECT
-                      {select_id}
-                      c.nombre,
-                      c.tipo_persona,
-                      c.nif,
-                      c.telefono,
-                      c.email,
-                      c.fecha_nacimiento,
-                      c.direccion,
-                      c.codigo_postal,
-                      c.poblacion,
+	                    SELECT
+	                      {select_id}
+	                      c.nombre,
+	                      c.tipo_persona,
+	                      c.nif,
+	                      c.telefono,
+	                      c.movil,
+	                      c.otro_telefono,
+	                      c.email,
+	                      c.id_personal,
+	                      c.cliente_generico_web,
+	                      c.tiene_pedido,
+	                      c.perfil,
+	                      c.fecha_nacimiento,
+	                      c.direccion,
+	                      c.codigo_postal,
+	                      c.poblacion,
                       c.provincia,
                       GROUP_CONCAT(e.nombre, ' | ') AS empresas,
                       GROUP_CONCAT(ce.servicio, ' | ') AS servicios
@@ -48680,7 +48692,13 @@ class Handler(BaseHTTPRequestHandler):
                 "tipo_persona",
                 "nif",
                 "telefono",
+                "movil",
+                "otro_telefono",
                 "email",
+                "id_personal",
+                "cliente_generico_web",
+                "tiene_pedido",
+                "perfil",
                 "fecha_nacimiento",
                 "direccion",
                 "codigo_postal",

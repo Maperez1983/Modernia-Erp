@@ -3319,6 +3319,77 @@ body.crm-fin #companySummary {
   font-size: 12px;
 }
 
+#crmSection .crm-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.18);
+  margin-top: 4px;
+}
+
+#crmSection .crm-dot.tone-ok {
+  background: #22c55e;
+}
+
+#crmSection .crm-dot.tone-warn {
+  background: #f59e0b;
+}
+
+#crmSection .crm-dot.tone-info {
+  background: #38bdf8;
+}
+
+#crmSection .crm-dot.tone-neutral {
+  background: rgba(15, 23, 42, 0.32);
+}
+
+#crmSection table.crm-captaciones-table,
+#crmSection table.crm-clientes-table {
+  table-layout: fixed;
+}
+
+#crmSection table.crm-captaciones-table th:first-child,
+#crmSection table.crm-captaciones-table td:first-child {
+  width: 18px;
+}
+
+#crmSection table.crm-captaciones-table th:nth-child(2),
+#crmSection table.crm-captaciones-table td:nth-child(2) {
+  width: 290px;
+}
+
+#crmSection table.crm-captaciones-table th:nth-child(4),
+#crmSection table.crm-captaciones-table td:nth-child(4) {
+  width: 110px;
+}
+
+#crmSection table.crm-captaciones-table th:nth-child(8),
+#crmSection table.crm-captaciones-table td:nth-child(8) {
+  width: 120px;
+}
+
+#crmSection table.crm-captaciones-table th:nth-child(10),
+#crmSection table.crm-captaciones-table td:nth-child(10) {
+  width: 92px;
+}
+
+#crmSection table.crm-captaciones-table td {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#crmSection table.crm-captaciones-table td.crm-dense-main {
+  white-space: normal;
+}
+
+#crmSection table.crm-clientes-table td {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 #crmSection .crm-dense-icon {
   display: inline-flex;
   align-items: center;

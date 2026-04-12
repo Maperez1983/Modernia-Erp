@@ -2561,15 +2561,20 @@ const crmNuevaDemandaBtn = document.getElementById("crmNuevaDemandaBtn");
 	const crmRecentMenu = document.getElementById("crmRecentMenu");
 const crmRecentList = document.getElementById("crmRecentList");
 const crmRecentClearBtn = document.getElementById("crmRecentClearBtn");
-const crmWorkspaceShell = document.getElementById("crmWorkspaceShell");
-const crmWorkspaceTabs = document.getElementById("crmWorkspaceTabs");
-const crmViewResumen = document.getElementById("crmViewResumen");
-const crmQuickSearchCard = document.getElementById("crmQuickSearchCard");
-const crmViewAnalisis = document.getElementById("crmViewAnalisis");
-const crmViewCaptaciones = document.getElementById("crmViewCaptaciones");
-const crmViewInmuebles = document.getElementById("crmViewInmuebles");
-const crmViewAlquileres = document.getElementById("crmViewAlquileres");
-const crmViewCompraventas = document.getElementById("crmViewCompraventas");
+	const crmWorkspaceShell = document.getElementById("crmWorkspaceShell");
+	const crmWorkspaceTabs = document.getElementById("crmWorkspaceTabs");
+	const crmViewResumen = document.getElementById("crmViewResumen");
+	const crmQuickSearchCard = document.getElementById("crmQuickSearchCard");
+	const crmViewClientes = document.getElementById("crmViewClientes");
+	const crmClientesFilter = document.getElementById("crmClientesFilter");
+	const crmClientesSearch = document.getElementById("crmClientesSearch");
+	const crmClientesTable = document.getElementById("crmClientesTable");
+	const crmClientesInfo = document.getElementById("crmClientesInfo");
+	const crmViewAnalisis = document.getElementById("crmViewAnalisis");
+	const crmViewCaptaciones = document.getElementById("crmViewCaptaciones");
+	const crmViewInmuebles = document.getElementById("crmViewInmuebles");
+	const crmViewAlquileres = document.getElementById("crmViewAlquileres");
+	const crmViewCompraventas = document.getElementById("crmViewCompraventas");
 	const crmViewDemandas = document.getElementById("crmViewDemandas");
 	const crmViewVisitas = document.getElementById("crmViewVisitas");
 	const crmViewAgenda = document.getElementById("crmViewAgenda");
@@ -2695,15 +2700,16 @@ const crmVisitaEstadoFilter = document.getElementById("crmVisitaEstadoFilter");
 const crmKanban = document.getElementById("crmKanban");
 const crmCaptacionesKanban = document.getElementById("crmCaptacionesKanban");
 const crmPipeline = document.getElementById("crmPipeline");
-const crmEtapaFilter = document.getElementById("crmEtapaFilter");
-const crmEtapaFilterMirror = document.getElementById("crmEtapaFilterMirror");
-const crmCaptacionesQuickFilter = document.getElementById("crmCaptacionesQuickFilter");
-const crmCaptacionesStageSummary = document.getElementById("crmCaptacionesStageSummary");
-const crmCaptacionesOps = document.getElementById("crmCaptacionesOps");
-const crmInmueblesOps = document.getElementById("crmInmueblesOps");
-const crmDemandasPriority = document.getElementById("crmDemandasPriority");
-const crmVisitasAgenda = document.getElementById("crmVisitasAgenda");
-const crmKpiCaptaciones = document.getElementById("crmKpiCaptaciones");
+	const crmEtapaFilter = document.getElementById("crmEtapaFilter");
+	const crmEtapaFilterMirror = document.getElementById("crmEtapaFilterMirror");
+	const crmCaptacionesQuickFilter = document.getElementById("crmCaptacionesQuickFilter");
+	const crmCaptacionesStageSummary = document.getElementById("crmCaptacionesStageSummary");
+	const crmCaptacionesOps = document.getElementById("crmCaptacionesOps");
+	const crmCaptacionesNewBtn = document.getElementById("crmCaptacionesNewBtn");
+	const crmInmueblesOps = document.getElementById("crmInmueblesOps");
+	const crmDemandasPriority = document.getElementById("crmDemandasPriority");
+	const crmVisitasAgenda = document.getElementById("crmVisitasAgenda");
+	const crmKpiCaptaciones = document.getElementById("crmKpiCaptaciones");
 const crmKpiInmuebles = document.getElementById("crmKpiInmuebles");
 const crmKpiEtapa = document.getElementById("crmKpiEtapa");
 const crmKpiCompraventas = document.getElementById("crmKpiCompraventas");
@@ -2928,7 +2934,13 @@ const CLIENTES_SOURCE_COLUMNS = [
   "tipo_persona",
   "nif",
   "telefono",
+  "movil",
+  "otro_telefono",
   "email",
+  "id_personal",
+  "cliente_generico_web",
+  "tiene_pedido",
+  "perfil",
   "fecha_nacimiento",
   "direccion",
   "codigo_postal",
@@ -2941,15 +2953,15 @@ const CLIENTES_SOURCE_COLUMNS = [
 const CLIENTES_COLUMNS = [
   "apellidos",
   "nombre",
-  "servicios",
-  "nif",
   "telefono",
+  "movil",
+  "otro_telefono",
   "email",
-  "fecha_nacimiento",
   "direccion",
-  "codigo_postal",
   "poblacion",
   "provincia",
+  "servicios",
+  "nif",
 ];
 
 const CLIENTES_COLUMNS_STORAGE = "crm_clientes_columns";
@@ -16741,6 +16753,7 @@ const ensureCrmOpen = (action) => {
 
 const getCrmSearchTargetForView = (view = "") => {
   const nextView = String(view || "").trim();
+  if (nextView === "clientes") return crmClientesSearch;
   if (nextView === "inmuebles") return crmInmuebleSearchMirror;
   if (nextView === "alquileres") return crmAlquilerSearch;
   if (nextView === "compraventas") return crmCompraventaSearch;
@@ -16777,6 +16790,8 @@ const applyCrmGlobalSearchToCurrentView = () => {
   syncCrmGlobalSearchTargetValue(view);
   if (view === "captaciones") {
     loadCrmCaptaciones();
+  } else if (view === "clientes") {
+    loadCrmClientes();
   } else if (view === "inmuebles") {
     loadCrmInmuebles();
   } else if (view === "alquileres") {
@@ -16902,6 +16917,10 @@ const openCrmRecentItem = (row = {}) => {
   ensureCrmOpen(() => {
     if (kind === "compraventa" && id) {
       openCompraventaEditor(id);
+      return;
+    }
+    if (kind === "cliente" && id) {
+      openClienteDetail(id);
       return;
     }
     if (kind === "demanda" && id) {
@@ -24840,13 +24859,14 @@ const updateEstudioAltaTabs = () => {
 };
 
 const setCrmWorkspaceView = (view = "resumen") => {
-  const allowed = new Set([
-    "resumen",
-    "analisis",
-    "captaciones",
-    "inmuebles",
-    "alquileres",
-    "compraventas",
+	const allowed = new Set([
+	  "resumen",
+	  "clientes",
+	  "analisis",
+	  "captaciones",
+	  "inmuebles",
+	  "alquileres",
+	  "compraventas",
     "demandas",
     "visitas",
     "agenda",
@@ -24873,13 +24893,14 @@ const setCrmWorkspaceView = (view = "resumen") => {
     });
   }
 
-  const viewMap = {
-    resumen: crmViewResumen,
-    analisis: crmViewAnalisis,
-    captaciones: crmViewCaptaciones,
-    inmuebles: crmViewInmuebles,
-    alquileres: crmViewAlquileres,
-    compraventas: crmViewCompraventas,
+	const viewMap = {
+	  resumen: crmViewResumen,
+	  clientes: crmViewClientes,
+	  analisis: crmViewAnalisis,
+	  captaciones: crmViewCaptaciones,
+	  inmuebles: crmViewInmuebles,
+	  alquileres: crmViewAlquileres,
+	  compraventas: crmViewCompraventas,
     demandas: crmViewDemandas,
     visitas: crmViewVisitas,
     agenda: crmViewAgenda,
@@ -24904,13 +24925,15 @@ const setCrmWorkspaceView = (view = "resumen") => {
     crmWorkspaceShell.classList.remove("hidden");
   }
 
-  if (nextView === "captaciones") {
-    loadCrmCaptaciones();
-  } else if (nextView === "analisis") {
-    renderCrmResumenDashboard();
-  } else if (nextView === "inmuebles") {
-    loadCrmInmuebles();
-  } else if (nextView === "alquileres") {
+	if (nextView === "captaciones") {
+	  loadCrmCaptaciones();
+	} else if (nextView === "clientes") {
+	  loadCrmClientes();
+	} else if (nextView === "analisis") {
+	  renderCrmResumenDashboard();
+	} else if (nextView === "inmuebles") {
+	  loadCrmInmuebles();
+	} else if (nextView === "alquileres") {
     loadCrmAlquileres();
   } else if (nextView === "compraventas") {
     loadCrmCompraventas();
@@ -24929,12 +24952,13 @@ const setCrmWorkspaceView = (view = "resumen") => {
       inmoLegalResponse.innerHTML = "<div class='muted'>Selecciona un tema o escribe una pregunta para obtener una guía operativa.</div>";
     }
     loadLegalCatalog().then(() => loadLegalRadarItems());
-  } else {
-    loadCrmCaptaciones();
-    loadCrmInmuebles();
-    loadCrmAlquileres();
-    loadCrmCompraventas();
-    loadCrmDemandas();
+	} else {
+	  loadCrmCaptaciones();
+	  loadCrmClientes();
+	  loadCrmInmuebles();
+	  loadCrmAlquileres();
+	  loadCrmCompraventas();
+	  loadCrmDemandas();
     loadCrmVisitas();
     loadCrmAgenda();
     loadCrmInformadores();
@@ -29355,6 +29379,281 @@ const runCurrentInmuebleConversion = (destino) => {
     });
 };
 
+let cachedCrmClientesEmpresaId = "";
+let crmClientesReloadTimer = null;
+
+const buildCrmClientesDenseTableNode = (rows = []) => {
+  const items = Array.isArray(rows) ? rows : [];
+  if (!items.length) return null;
+  const table = document.createElement("table");
+  table.className = "crm-dense-table crm-clientes-table";
+  const thead = document.createElement("thead");
+  thead.innerHTML = `
+    <tr>
+      <th>Cliente</th>
+      <th>Teléfono</th>
+      <th>Móvil</th>
+      <th>Email</th>
+      <th>Dirección</th>
+      <th>Localidad</th>
+    </tr>
+  `;
+  table.appendChild(thead);
+  const tbody = document.createElement("tbody");
+  items.forEach((row) => {
+    const tr = document.createElement("tr");
+    const id = String(row.id || "").trim();
+    const open = () => {
+      if (!id) return;
+      pushCrmRecentItem({
+        kind: "cliente",
+        id,
+        title: String(row.nombre || "").trim() || "Cliente",
+        meta: [row.telefono || row.movil || "", row.email || ""].filter(Boolean).join(" · "),
+        view: "clientes",
+        ts: Date.now(),
+      });
+      openClienteDetail(id);
+    };
+    if (id) {
+      tr.addEventListener("click", open);
+    }
+    const nameCell = document.createElement("td");
+    const kicker = [row.nif || "", row.servicios || ""].filter(Boolean).join(" · ");
+    nameCell.className = "crm-dense-main";
+    nameCell.innerHTML = `<strong>${escapeHtml(row.nombre || "Sin nombre")}</strong>${kicker ? `<div class="muted">${escapeHtml(kicker)}</div>` : ""}`;
+    tr.appendChild(nameCell);
+
+    const telefonoCell = document.createElement("td");
+    telefonoCell.textContent = String(row.telefono || "");
+    tr.appendChild(telefonoCell);
+
+    const movilCell = document.createElement("td");
+    movilCell.textContent = String(row.movil || "");
+    tr.appendChild(movilCell);
+
+    const emailCell = document.createElement("td");
+    emailCell.textContent = String(row.email || "");
+    tr.appendChild(emailCell);
+
+    const direccionCell = document.createElement("td");
+    direccionCell.textContent = String(row.direccion || "");
+    tr.appendChild(direccionCell);
+
+    const locCell = document.createElement("td");
+    locCell.textContent = [row.poblacion || "", row.provincia || ""].filter(Boolean).join(" · ");
+    tr.appendChild(locCell);
+
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  return table;
+};
+
+const scheduleCrmClientesReload = ({ force = false } = {}) => {
+  if (crmClientesReloadTimer) {
+    window.clearTimeout(crmClientesReloadTimer);
+    crmClientesReloadTimer = null;
+  }
+  crmClientesReloadTimer = window.setTimeout(() => {
+    crmClientesReloadTimer = null;
+    loadCrmClientes({ force });
+  }, 180);
+};
+
+const loadCrmClientes = async ({ force = false } = {}) => {
+  if (!crmClientesTable) return;
+  const empresa = resolveCrmInmoEmpresa();
+  if (!empresa) {
+    crmClientesTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
+    if (crmClientesInfo) crmClientesInfo.textContent = "";
+    return;
+  }
+  const empresaId = String(empresa.id || "").trim();
+  const shouldFetch = force || !cachedCrmClientes.length || cachedCrmClientesEmpresaId !== empresaId;
+  if (shouldFetch) {
+    const params = new URLSearchParams({
+      include_id: "1",
+      limit: "500",
+      empresa_id: empresaId,
+      servicio: "inmobiliaria",
+    });
+    const data = await api(`/api/clientes?${params.toString()}`).catch(() => null);
+    if (!data || !Array.isArray(data.columns) || !Array.isArray(data.rows)) {
+      crmClientesTable.innerHTML = "<p class='muted'>No se pudieron cargar los clientes.</p>";
+      if (crmClientesInfo) crmClientesInfo.textContent = "";
+      return;
+    }
+    cachedCrmClientes = data.rows.map((row) => buildRowMap(row, data.columns));
+    cachedCrmClientesEmpresaId = empresaId;
+  }
+
+  const filterKey = String(crmClientesFilter?.value || "recientes").trim().toLowerCase();
+  const q = String(crmClientesSearch?.value || "").trim().toLowerCase();
+  const all = Array.isArray(cachedCrmClientes) ? cachedCrmClientes : [];
+
+  const byQuery = (row) => {
+    if (!q) return true;
+    const hay = [
+      row.nombre,
+      row.nif,
+      row.telefono,
+      row.movil,
+      row.email,
+      row.direccion,
+      row.poblacion,
+      row.provincia,
+    ]
+      .map((v) => String(v || "").toLowerCase())
+      .join(" ");
+    return hay.includes(q);
+  };
+
+  const applyPresetFilter = (rows) => {
+    if (filterKey === "todos") return rows;
+    if (filterKey === "informadores") {
+      return rows.filter((row) => normalizeSimple(row.perfil || "").includes("informador"));
+    }
+    if (filterKey === "web") {
+      return rows.filter((row) => String(row.cliente_generico_web || "").trim() === "1");
+    }
+    if (filterKey === "recientes") {
+      const recent = loadCrmRecentItems().filter((item) => String(item?.kind || "") === "cliente" && item?.id);
+      const ordered = recent
+        .map((item) => rows.find((row) => String(row.id || "").trim() === String(item.id)))
+        .filter(Boolean);
+      if (ordered.length) return ordered;
+      return rows.slice(0, 50);
+    }
+    return rows;
+  };
+
+  const filtered = applyPresetFilter(all).filter(byQuery);
+
+  crmClientesTable.innerHTML = "";
+  const node = buildCrmClientesDenseTableNode(filtered);
+  if (!node) {
+    crmClientesTable.innerHTML = "<p class='muted'>Sin clientes.</p>";
+  } else {
+    crmClientesTable.appendChild(node);
+  }
+  if (crmClientesInfo) {
+    crmClientesInfo.textContent = `Mostrando ${filtered.length} clientes.`;
+  }
+};
+
+const resolveCaptacionCodePrefix = (etapa) => {
+  const stage = normalizeCrmMainEtapa(etapa || "") || "Inmueble";
+  if (stage === "Inmueble") return "IN";
+  if (stage === "Noticia") return "NT";
+  return "EN";
+};
+
+const resolveCaptacionDotTone = (row = {}) => {
+  const stage = normalizeCrmMainEtapa(row.etapa || "") || "Inmueble";
+  if (stage === "Encargo" || stage === "Propuesta" || stage === "Vendido") return "ok";
+  if (stage === "Noticia") return "info";
+  if (String(row.proxima_accion || "").trim()) return "neutral";
+  return "warn";
+};
+
+const buildCrmCaptacionesDenseTableNode = (rows = []) => {
+  const items = Array.isArray(rows) ? rows : [];
+  if (!items.length) return null;
+  const table = document.createElement("table");
+  table.className = "crm-dense-table crm-captaciones-table";
+  const thead = document.createElement("thead");
+  thead.innerHTML = `
+    <tr>
+      <th></th>
+      <th>Inmueble</th>
+      <th>Propietario</th>
+      <th>Tel.</th>
+      <th>Subtipología</th>
+      <th>Motivación</th>
+      <th>Necesidad</th>
+      <th>Precio</th>
+      <th>Próxima acción</th>
+      <th>Etapa</th>
+    </tr>
+  `;
+  table.appendChild(thead);
+  const tbody = document.createElement("tbody");
+  items.forEach((row) => {
+    const tr = document.createElement("tr");
+    const captacionId = String(row.id || "").trim();
+    const inmuebleId = String(row.inmueble_id || "").trim();
+    tr.addEventListener("click", () => {
+      ensureCrmOpen(() => {
+        if (inmuebleId) {
+          openInmuebleDetail(inmuebleId, "captaciones");
+          return;
+        }
+        if (captacionId) {
+          openInmuebleFromCaptacion(captacionId, "captaciones");
+        }
+      });
+    });
+
+    const dotTd = document.createElement("td");
+    dotTd.innerHTML = `<span class="crm-dot tone-${escapeHtml(resolveCaptacionDotTone(row))}" aria-hidden="true"></span>`;
+    tr.appendChild(dotTd);
+
+    const stage = normalizeCrmMainEtapa(row.etapa || "") || "Inmueble";
+    const prefix = resolveCaptacionCodePrefix(stage);
+    const isVerified = String(row?.noticia_verificada ?? "").trim() === "1";
+    const address = String(row.direccion || "").trim() || "-";
+    const localidad = [row.poblacion || "", row.provincia || ""].filter(Boolean).join(" · ");
+    const inmuebleTd = document.createElement("td");
+    inmuebleTd.className = "crm-dense-main";
+    inmuebleTd.innerHTML = `
+      <strong>${escapeHtml(`${prefix} - ${address}`)}</strong>
+      <div class="muted">${escapeHtml(localidad || "-")}</div>
+      ${buildVerifika2Badge(isVerified, { compact: true })}
+    `;
+    tr.appendChild(inmuebleTd);
+
+    const propietarioTd = document.createElement("td");
+    propietarioTd.textContent = String(row.propietario || "").trim();
+    tr.appendChild(propietarioTd);
+
+    const telTd = document.createElement("td");
+    telTd.textContent = String(row.propietario_telefono || "").trim();
+    tr.appendChild(telTd);
+
+    const subTd = document.createElement("td");
+    subTd.textContent = String(row.subtipologia || "").trim();
+    tr.appendChild(subTd);
+
+    const motivTd = document.createElement("td");
+    motivTd.textContent = String(row.motivacion || "").trim();
+    tr.appendChild(motivTd);
+
+    const necTd = document.createElement("td");
+    necTd.textContent = String(row.necesidad_venta_alquiler || "").trim();
+    tr.appendChild(necTd);
+
+    const precioTd = document.createElement("td");
+    const early = stage === "Inmueble" || stage === "Noticia";
+    const precio = early ? row.precio_pedido_cliente || row.precio_objetivo : row.precio_encargo || row.precio_objetivo;
+    const formatted = formatCell("precio_objetivo", precio);
+    precioTd.textContent = formatted === null ? "" : formatted;
+    tr.appendChild(precioTd);
+
+    const proximaTd = document.createElement("td");
+    proximaTd.textContent = String(row.proxima_accion || "").trim();
+    tr.appendChild(proximaTd);
+
+    const etapaTd = document.createElement("td");
+    etapaTd.textContent = stage;
+    tr.appendChild(etapaTd);
+
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  return table;
+};
+
 const loadCrmCaptaciones = () => {
   if (!crmCaptacionesTable) {
     return;
@@ -29447,19 +29746,19 @@ const loadCrmCaptaciones = () => {
       }
       return true;
     };
-    const baseRows = data.rows.filter((row, index) => matchQuick(rowMaps[index]));
-    const filteredRows = baseRows.filter((row) => {
+    const baseRowMaps = rowMaps.filter((rowMap) => matchQuick(rowMap));
+    const filteredRowMaps = baseRowMaps.filter((rowMap) => {
       if (!activeEtapa) return true;
-      return row[etapaIndex] === activeEtapa;
+      return String(rowMap?.etapa || "") === String(activeEtapa || "");
     });
     const counts = {};
-    baseRows.forEach((row) => {
-      const etapa = row[etapaIndex] || "Sin etapa";
+    baseRowMaps.forEach((row) => {
+      const etapa = row?.etapa || "Sin etapa";
       counts[etapa] = (counts[etapa] || 0) + 1;
     });
     renderCrmPipeline(counts, activeEtapa);
     if (crmCaptacionesOps) {
-      const activeRowMaps = rowMaps.filter((rowMap) => matchQuick(rowMap));
+      const activeRowMaps = baseRowMaps;
       const safeDaysSince = (value) => {
         const days = daysSince(value);
         return Number.isFinite(days) ? days : Number.POSITIVE_INFINITY;
@@ -29514,20 +29813,25 @@ const loadCrmCaptaciones = () => {
       renderCrmActionList(crmCaptacionesOps, ops, "Sin bloqueos operativos en el pipeline.");
     }
     if (crmKpiCaptaciones) {
-      crmKpiCaptaciones.textContent = String(data.rows.length);
+      crmKpiCaptaciones.textContent = String(baseRowMaps.length);
     }
     if (crmKpiEtapa) {
       const maxEtapa = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
       crmKpiEtapa.textContent = maxEtapa ? maxEtapa[0] : "-";
     }
-    renderCrmKanban({ columns: data.columns, rows: baseRows });
     renderCrmResumenDashboard();
-    renderTableInto(
-      { columns: data.columns, rows: filteredRows },
-      crmCaptacionesTable,
-      crmCaptacionesInfo,
-      "Pipeline"
-    );
+    crmCaptacionesTable.innerHTML = "";
+    const node = buildCrmCaptacionesDenseTableNode(filteredRowMaps);
+    if (!node) {
+      crmCaptacionesTable.innerHTML = "<p class='muted'>Sin expedientes en el pipeline.</p>";
+    } else {
+      crmCaptacionesTable.appendChild(node);
+    }
+    if (crmCaptacionesInfo) {
+      crmCaptacionesInfo.textContent = activeEtapa
+        ? `Mostrando ${filteredRowMaps.length} expedientes en ${activeEtapa}.`
+        : `Mostrando ${filteredRowMaps.length} expedientes.`;
+    }
     })
     .catch((error) => {
       if (Number(error?.status || 0) === 401) return;
@@ -30967,6 +31271,7 @@ const updateCaptacionEtapa = async (id, etapa, { fromEtapa = "", label = "" } = 
 };
 
 let cachedCrmInmuebles = [];
+let cachedCrmClientes = [];
 let cachedCrmAlquileres = [];
 let cachedCrmDemandas = [];
 let cachedCrmCaptaciones = [];
@@ -31072,14 +31377,13 @@ const renderInmuebleTecnocloudPanels = ({
   }
 
   if (inmuebleTecnoStages) {
-    const stages = ["Inmueble", "Noticia", "Encargo", "Propuesta", "Vendido"];
-    const normalizedKnown = new Set(stages.map((s) => normalizeSimple(s)));
-    if (stageLabel && !normalizedKnown.has(normalizeSimple(stageLabel))) {
-      stages.push(stageLabel);
-    }
+    // Tecnocloud: barra superior simple (Inmueble → Noticia → Encargo).
+    // Las fases posteriores se siguen mostrando en badges/estado, pero aquí mantenemos la claridad visual.
+    const stages = ["Inmueble", "Noticia", "Encargo"];
+    const activeStage = stageLabel === "Inmueble" || stageLabel === "Noticia" ? stageLabel : "Encargo";
     inmuebleTecnoStages.innerHTML = stages
       .map((label) => {
-        const active = normalizeSimple(label) === normalizeSimple(stageLabel);
+        const active = normalizeSimple(label) === normalizeSimple(activeStage);
         return `<span class="inmueble-tecno-stage${active ? " active" : ""}">${escapeHtml(label)}</span>`;
       })
       .join("");
@@ -44178,11 +44482,6 @@ if (estudioAltaTabs) {
 
 if (crmWorkspaceTabs) {
   crmWorkspaceTabs.addEventListener("click", (event) => {
-    const action = closestFromEvent(event, "[data-crm-action]");
-    if (action && String(action.dataset.crmAction || "").trim() === "clientes") {
-      openClientesModule({ service: "inmobiliaria", empresaId: resolveCrmInmoEmpresaId() });
-      return;
-    }
     const quick = closestFromEvent(event, "[data-crm-quick]");
     if (quick) {
       applyCrmTecnocloudQuickSearch(String(quick.dataset.crmQuick || "").trim());
@@ -44203,11 +44502,6 @@ if (crmWorkspaceTabs) {
 
 if (crmLightningSidebar) {
   crmLightningSidebar.addEventListener("click", (event) => {
-    const action = closestFromEvent(event, "[data-crm-action]");
-    if (action && String(action.dataset.crmAction || "").trim() === "clientes") {
-      openClientesModule({ service: "inmobiliaria", empresaId: resolveCrmInmoEmpresaId() });
-      return;
-    }
     const quick = closestFromEvent(event, "[data-crm-quick]");
     if (quick) {
       applyCrmTecnocloudQuickSearch(String(quick.dataset.crmQuick || "").trim());
@@ -44724,6 +45018,24 @@ if (crmEtapaFilterMirror) {
 if (crmCaptacionesQuickFilter) {
   crmCaptacionesQuickFilter.addEventListener("change", () => {
     loadCrmCaptaciones();
+  });
+}
+
+if (crmCaptacionesNewBtn) {
+  crmCaptacionesNewBtn.addEventListener("click", () => {
+    goToEstudioAlta("captacion");
+  });
+}
+
+if (crmClientesFilter) {
+  crmClientesFilter.addEventListener("change", () => {
+    loadCrmClientes();
+  });
+}
+
+if (crmClientesSearch) {
+  crmClientesSearch.addEventListener("input", () => {
+    scheduleCrmClientesReload();
   });
 }
 
