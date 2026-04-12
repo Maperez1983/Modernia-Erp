@@ -3315,6 +3315,18 @@ const buildRrhhContractTypeOptions = (currentValue = "") => {
 
 const expandServiceAliases = (services) => {
   const set = new Set(services || []);
+  // Normaliza alias habituales en `usuarios.servicio` (evita negar acceso por etiquetas distintas).
+  // Ej: "CRM inmobiliario" debe comportarse como "inmobiliaria".
+  Array.from(set).forEach((svc) => {
+    const key = normalizeSimple(svc);
+    if (!key) return;
+    if (key === "inmo" || key === "crm inmo" || key === "crm inmobiliario" || key === "crm inmobiliaria") {
+      set.add("inmobiliaria");
+    }
+    if (key.includes("inmobiliaria")) {
+      set.add("inmobiliaria");
+    }
+  });
   if (set.has("financiaciones")) set.add("hipotecas");
   if (set.has("hipotecas")) set.add("financiaciones");
   if (set.has("administracion fincas")) set.add("administracion de fincas");
