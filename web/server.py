@@ -43673,66 +43673,66 @@ class Handler(BaseHTTPRequestHandler):
                 record_ids = payload.get("id")
             if isinstance(record_ids, str):
                 record_ids = [record_ids]
-                if not isinstance(record_ids, list):
-                    record_ids = []
-                record_ids = [str(rid or "").strip() for rid in record_ids]
-                record_ids = [rid for rid in record_ids if rid]
-                if not record_ids:
-                    json_response(self, {"error": "ids requerido"}, status=400)
-                    return
-                empresa_id = str(payload.get("empresa_id") or "").strip() or str(empresa.get("id") or "").strip()
-                if not empresa_id:
-                    json_response(self, {"error": "empresa_id requerido"}, status=400)
-                    return
-                updates = {}
-                for key in (
-                    "fase",
-                    "estado",
-                    "responsable",
-                    "pedido",
-                    "tipologia",
-                    "subtipologia",
-                    "motivo",
-                    "agencia_insercion",
-                    "origen",
-                    "pedido_web",
-                    "anuncio_mi_cartera",
-                    "presentacion_servicio",
-                    "fecha_insercion",
-                    "motivo_ultimo_contacto",
-                    "fecha_ultimo_contacto_interno",
-                    "fecha_prox_act_cita",
-                    "fecha_ultima_cita_venta_red",
-                    "estado_contacto",
-                    "notas",
-                ):
-                    if key in payload:
-                        updates[key] = payload.get(key)
-                if not updates:
-                    json_response(self, {"error": "Sin cambios"}, status=400)
-                    return
-                for bool_key in ("pedido_web", "anuncio_mi_cartera", "presentacion_servicio"):
-                    if bool_key in updates:
-                        updates[bool_key] = parse_boolish(updates.get(bool_key))
-                set_clause = ", ".join([f"{key} = ?" for key in updates])
-                values = list(updates.values())
-                placeholders = ",".join(["?"] * len(record_ids))
-                values.extend([now, empresa_id])
-                values.extend(record_ids)
-                conn.execute(
-                    f"UPDATE demandas SET {set_clause}, updated_at = datetime(?) WHERE empresa_id = ? AND id IN ({placeholders})",
-                    values,
-                )
-                audit_event(
-                    conn,
-                    empresa_id,
-                    "demanda",
-                    record_ids[0] if record_ids else None,
-                    "Actualizar pedido",
-                    usuario=payload.get("usuario"),
-                    detalles={"ids": record_ids[:50], "updates": {k: updates.get(k) for k in list(updates)[:30]}},
-                    now=now,
-                )
+            if not isinstance(record_ids, list):
+                record_ids = []
+            record_ids = [str(rid or "").strip() for rid in record_ids]
+            record_ids = [rid for rid in record_ids if rid]
+            if not record_ids:
+                json_response(self, {"error": "ids requerido"}, status=400)
+                return
+            empresa_id = str(payload.get("empresa_id") or "").strip() or str(empresa.get("id") or "").strip()
+            if not empresa_id:
+                json_response(self, {"error": "empresa_id requerido"}, status=400)
+                return
+            updates = {}
+            for key in (
+                "fase",
+                "estado",
+                "responsable",
+                "pedido",
+                "tipologia",
+                "subtipologia",
+                "motivo",
+                "agencia_insercion",
+                "origen",
+                "pedido_web",
+                "anuncio_mi_cartera",
+                "presentacion_servicio",
+                "fecha_insercion",
+                "motivo_ultimo_contacto",
+                "fecha_ultimo_contacto_interno",
+                "fecha_prox_act_cita",
+                "fecha_ultima_cita_venta_red",
+                "estado_contacto",
+                "notas",
+            ):
+                if key in payload:
+                    updates[key] = payload.get(key)
+            if not updates:
+                json_response(self, {"error": "Sin cambios"}, status=400)
+                return
+            for bool_key in ("pedido_web", "anuncio_mi_cartera", "presentacion_servicio"):
+                if bool_key in updates:
+                    updates[bool_key] = parse_boolish(updates.get(bool_key))
+            set_clause = ", ".join([f"{key} = ?" for key in updates])
+            values = list(updates.values())
+            placeholders = ",".join(["?"] * len(record_ids))
+            values.extend([now, empresa_id])
+            values.extend(record_ids)
+            conn.execute(
+                f"UPDATE demandas SET {set_clause}, updated_at = datetime(?) WHERE empresa_id = ? AND id IN ({placeholders})",
+                values,
+            )
+            audit_event(
+                conn,
+                empresa_id,
+                "demanda",
+                record_ids[0] if record_ids else None,
+                "Actualizar pedido",
+                usuario=payload.get("usuario"),
+                detalles={"ids": record_ids[:50], "updates": {k: updates.get(k) for k in list(updates)[:30]}},
+                now=now,
+            )
             conn.commit()
             json_response(self, {"ok": True, "updated": len(record_ids)})
             return
@@ -45351,6 +45351,104 @@ class Handler(BaseHTTPRequestHandler):
                 "certified": bool(int(row_value(row, "certificado") or 0)),
             }
             json_response(self, {"ok": True, "listing": listing})
+            return
+
+        if path == "/api/portal_leads_recent":
+            # Listado de leads ingeridos (CRM). Requiere rol admin o token Bearer.
+            token_header = str(self.headers.get("Authorization") or "").strip()
+            bearer = ""
+            if token_header.lower().startswith("bearer "):
+                bearer = token_header.split(" ", 1)[1].strip()
+            expected = str(os.environ.get("PORTAL_INGEST_TOKEN") or "").strip()
+
+            allowed = False
+            if expected and bearer:
+                try:
+                    allowed = secrets.compare_digest(bearer, expected)
+                except Exception:
+                    allowed = False
+
+            if not allowed:
+                session = self._current_session()
+                if not session:
+                    json_response(self, {"ok": False, "error": "unauthorized"}, status=401)
+                    return
+                rol = normalize_service_key(session.get("rol") or "")
+                if rol not in {"administrador", "admin", "direccion", "administracion", "control"}:
+                    json_response(self, {"ok": False, "error": "forbidden"}, status=403)
+                    return
+                allowed = True
+
+            limit = (params.get("limit", ["50"])[0] or "50").strip()
+            inmueble_id = (params.get("inmueble_id", [""])[0] or "").strip()
+            empresa_id = (params.get("empresa_id", [""])[0] or "").strip()
+            intent = (params.get("intent", [""])[0] or "").strip().lower()
+            try:
+                limit_n = max(1, min(200, int(limit or "50")))
+            except Exception:
+                limit_n = 50
+
+            ensure_portal_leads_schema(conn)
+
+            where = ["1=1"]
+            values = []
+            if inmueble_id:
+                where.append("inmueble_id = ?")
+                values.append(inmueble_id)
+            if empresa_id:
+                where.append("empresa_id = ?")
+                values.append(empresa_id)
+            if intent in {"info", "visita", "contacto"}:
+                where.append("LOWER(COALESCE(intent,'')) = ?")
+                values.append(intent)
+
+            where_clause = " AND ".join(where) if where else "1=1"
+            rows = conn.execute(
+                f"""
+                SELECT
+                  id,
+                  hub_lead_id,
+                  created_at,
+                  empresa_id,
+                  inmueble_id,
+                  listing_title,
+                  listing_city,
+                  persona,
+                  intent,
+                  contact,
+                  name,
+                  note,
+                  source_path,
+                  source_href
+                FROM portal_leads
+                WHERE {where_clause}
+                ORDER BY created_at DESC
+                LIMIT {int(limit_n)}
+                """,
+                values,
+            ).fetchall()
+
+            leads = []
+            for r in rows or []:
+                leads.append(
+                    {
+                        "id": row_value(r, "id"),
+                        "hub_lead_id": row_value(r, "hub_lead_id"),
+                        "created_at": row_value(r, "created_at"),
+                        "empresa_id": row_value(r, "empresa_id"),
+                        "inmueble_id": row_value(r, "inmueble_id"),
+                        "listing_title": row_value(r, "listing_title"),
+                        "listing_city": row_value(r, "listing_city"),
+                        "persona": row_value(r, "persona"),
+                        "intent": row_value(r, "intent"),
+                        "contact": row_value(r, "contact"),
+                        "name": row_value(r, "name"),
+                        "note": row_value(r, "note"),
+                        "source_path": row_value(r, "source_path"),
+                        "source_href": row_value(r, "source_href"),
+                    }
+                )
+            json_response(self, {"ok": True, "leads": leads})
             return
 
         if path == "/api/debug_auth":
@@ -50505,48 +50603,48 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, {"rows": items[:250]})
             return
 
-            if path == "/api/demandas":
-                empresa_id = params.get("empresa_id", [""])[0]
-                if not empresa_id:
-                    json_response(self, {"error": "empresa_id requerido"}, status=400)
-                    return
-                rows = conn.execute(
-                    """
-                   SELECT
-                           d.id,
-                           COALESCE(NULLIF(TRIM(d.fase), ''), 'Pedidos a analizar') AS fase,
-                           COALESCE(NULLIF(TRIM(d.estado), ''), 'Activa') AS estado,
-                           d.pedido,
-                           d.tipologia,
-                           d.subtipologia,
-                           d.motivo,
-                           d.tipo,
-                           d.precio_max,
-                           d.m2_min,
-                           d.habitaciones_min,
-                           d.banos_min,
-                           COALESCE(d.pedido_web, 0) AS pedido_web,
-                           COALESCE(d.anuncio_mi_cartera, 0) AS anuncio_mi_cartera,
-                           COALESCE(d.presentacion_servicio, 0) AS presentacion_servicio,
-                           d.responsable,
-                           d.created_at,
-                           d.updated_at,
-                           d.cliente_id,
-                           c.nombre AS cliente,
-                           CASE
-                             WHEN LOWER(COALESCE(c.tipo, '')) LIKE '%propiet%'
-                               OR LOWER(COALESCE(c.perfil, '')) LIKE '%propiet%'
-                             THEN 1 ELSE 0
-                           END AS cliente_propietario
-                    FROM demandas d
-                    LEFT JOIN clientes c ON c.id = d.cliente_id
-                    WHERE d.empresa_id = ?
-                    ORDER BY d.created_at DESC
-                    """,
-                    (empresa_id,),
-                ).fetchall()
-                json_response(self, {"rows": [dict(r) for r in rows]})
+        if path == "/api/demandas":
+            empresa_id = params.get("empresa_id", [""])[0]
+            if not empresa_id:
+                json_response(self, {"error": "empresa_id requerido"}, status=400)
                 return
+            rows = conn.execute(
+                """
+               SELECT
+                       d.id,
+                       COALESCE(NULLIF(TRIM(d.fase), ''), 'Pedidos a analizar') AS fase,
+                       COALESCE(NULLIF(TRIM(d.estado), ''), 'Activa') AS estado,
+                       d.pedido,
+                       d.tipologia,
+                       d.subtipologia,
+                       d.motivo,
+                       d.tipo,
+                       d.precio_max,
+                       d.m2_min,
+                       d.habitaciones_min,
+                       d.banos_min,
+                       COALESCE(d.pedido_web, 0) AS pedido_web,
+                       COALESCE(d.anuncio_mi_cartera, 0) AS anuncio_mi_cartera,
+                       COALESCE(d.presentacion_servicio, 0) AS presentacion_servicio,
+                       d.responsable,
+                       d.created_at,
+                       d.updated_at,
+                       d.cliente_id,
+                       c.nombre AS cliente,
+                       CASE
+                         WHEN LOWER(COALESCE(c.tipo, '')) LIKE '%propiet%'
+                           OR LOWER(COALESCE(c.perfil, '')) LIKE '%propiet%'
+                         THEN 1 ELSE 0
+                       END AS cliente_propietario
+                FROM demandas d
+                LEFT JOIN clientes c ON c.id = d.cliente_id
+                WHERE d.empresa_id = ?
+                ORDER BY d.created_at DESC
+                """,
+                (empresa_id,),
+            ).fetchall()
+            json_response(self, {"rows": [dict(r) for r in rows]})
+            return
 
         if path == "/api/visitas":
             empresa_id = params.get("empresa_id", [""])[0]
