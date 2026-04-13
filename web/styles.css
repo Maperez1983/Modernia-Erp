@@ -6061,6 +6061,25 @@ body.crm-context-inmo .crm-resumen-compact-note {
   font-size: 9px;
 }
 
+.inmueble-badge.portal {
+  gap: 6px;
+  background: rgba(11, 29, 51, 0.08);
+  border-color: rgba(11, 29, 51, 0.22);
+  color: #0b1d33;
+}
+
+.inmueble-badge.portal.on {
+  background: rgba(34, 197, 94, 0.14);
+  border-color: rgba(34, 197, 94, 0.35);
+  color: #14532d;
+}
+
+.inmueble-badge.certified {
+  background: rgba(242, 193, 78, 0.18);
+  border-color: rgba(242, 193, 78, 0.65);
+  color: var(--ink);
+}
+
 .inmueble-badge.tone-accent {
   background: #824c45;
   color: #fff;
@@ -6132,6 +6151,23 @@ body.crm-context-inmo .crm-resumen-compact-note {
   border-radius: 12px;
   border: 1px solid rgba(130, 76, 69, 0.1);
   background: rgba(255, 255, 255, 0.74);
+}
+
+.inmueble-summary-ownerline--portal {
+  grid-column: 1 / -1;
+}
+
+.inmueble-summary-ownerline--portal strong {
+  flex: 1;
+}
+
+.inmueble-summary-portal-btn {
+  margin-left: auto;
+}
+
+.inmueble-summary-portal-status {
+  font-size: 12px;
+  color: #64748b;
 }
 
 .inmueble-summary-ownerline strong {

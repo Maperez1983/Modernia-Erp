@@ -32126,6 +32126,25 @@ const buildVerifika2Badge = (isVerified, { compact = false } = {}) => {
   `;
 };
 
+const buildPortalBadge = (isPublished) => {
+  const on = Boolean(isPublished);
+  return `
+    <span class="inmueble-badge portal${on ? " on" : " off"}" title="Visibilidad en el portal público">
+      <span>Portal</span>
+      <span>${on ? "Publicado" : "Oculto"}</span>
+    </span>
+  `;
+};
+
+const buildCertifiedBadge = (isCertified) => {
+  if (!isCertified) return "";
+  return `
+    <span class="inmueble-badge certified" title="Certificado premium (idoneidad)">
+      <span>Certificado</span>
+    </span>
+  `;
+};
+
 const renderInmuebleTecnocloudPanels = ({
   inmueble = {},
   captacion = {},
@@ -32398,8 +32417,12 @@ const refreshCurrentInmuebleProfile = () => {
     const address = inmueble.direccion || "Sin dirección";
     const locality = [inmueble.poblacion, inmueble.provincia].filter(Boolean).join(" · ");
     const isVerified = String(captacion.noticia_verificada ?? "").trim() === "1";
+    const isPublished = String(inmueble.portal_publicado ?? "").trim() === "1";
+    const isCertified = String(inmueble.certificado ?? "").trim() === "1";
     const topBadges = [
       buildVerifika2Badge(isVerified),
+      buildCertifiedBadge(isCertified),
+      buildPortalBadge(isPublished),
       buildInmuebleBadge(inmueble.estado || "Sin estado", "accent"),
       buildInmuebleBadge(inmueble.tipo_inmueble || "Sin tipo"),
       captacion.etapa ? buildInmuebleBadge(captacion.etapa, "soft") : "",
@@ -32468,8 +32491,50 @@ const refreshCurrentInmuebleProfile = () => {
           <span class="inmueble-summary-ownerlabel">Actividad</span>
           <strong>${docs.length} docs · ${visitas.length} visitas · ${demandas.length} demandas</strong>
         </div>
+        <div class="inmueble-summary-ownerline inmueble-summary-ownerline--portal">
+          <span class="inmueble-summary-ownerlabel">Portal</span>
+          <strong>${isPublished ? "Publicado" : "Oculto"}</strong>
+          <button type="button" class="secondary ghost button-inline inmueble-summary-portal-btn" id="inmueblePortalToggleBtn">
+            ${isPublished ? "Ocultar" : "Publicar"}
+          </button>
+          <span class="muted inmueble-summary-portal-status" id="inmueblePortalToggleStatus">
+            ${isVerified ? "" : "Aparece en portal cuando esté verificado."}
+          </span>
+        </div>
       </div>
     `;
+
+    const portalBtn = inmuebleSummaryCard.querySelector("#inmueblePortalToggleBtn");
+    const portalStatus = inmuebleSummaryCard.querySelector("#inmueblePortalToggleStatus");
+    if (portalBtn) {
+      portalBtn.onclick = async (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const next = isPublished ? 0 : 1;
+        if (portalStatus) portalStatus.textContent = "Guardando...";
+        portalBtn.disabled = true;
+        try {
+          const res = await apiPost("/api/portal_publish_update", {
+            listing_id: inmueble.id,
+            published: next,
+          });
+          if (res?.error) throw new Error(res.error);
+          if (state.currentInmuebleContext?.inmueble) {
+            state.currentInmuebleContext.inmueble.portal_publicado = next;
+          }
+          refreshCurrentInmuebleProfile();
+          loadCrmInmuebles();
+          window.setTimeout(() => {
+            const s = inmuebleSummaryCard.querySelector("#inmueblePortalToggleStatus");
+            if (s) s.textContent = "Guardado.";
+          }, 0);
+        } catch (err) {
+          if (portalStatus) portalStatus.textContent = err?.message || "No se pudo actualizar el portal.";
+        } finally {
+          portalBtn.disabled = false;
+        }
+      };
+    }
   }
 
   if (inmuebleFactsPanel) {
@@ -32669,7 +32734,17 @@ const buildCrmInmueblesDenseTableNode = (rows = []) => {
     const stage = normalizeCrmMainEtapa(row?.estado || "") || "Inmueble";
     const prefix = resolveCaptacionCodePrefix(stage);
     const address = String(row.direccion || "").trim() || "Sin dirección";
-    const subtitle = [row.subtipologia || "", stage ? `Estado: ${stage}` : ""].filter(Boolean).join(" · ");
+    const portalRaw = String(row.portal_publicado ?? "").trim();
+    const portalLabel = portalRaw === "1" ? "Portal: publicado" : "";
+    const verifiedLabel = String(row.noticia_verificada ?? "").trim() === "1" ? "Verificado" : "";
+    const certifiedLabel = String(row.certificado ?? "").trim() === "1" ? "Certificado" : "";
+    const subtitle = [
+      row.subtipologia || "",
+      stage ? `Estado: ${stage}` : "",
+      verifiedLabel,
+      certifiedLabel,
+      portalLabel,
+    ].filter(Boolean).join(" · ");
     inmuebleTd.innerHTML = `<strong>${escapeHtml(`${prefix} - ${address}`)}</strong>${subtitle ? `<div class="muted">${escapeHtml(subtitle)}</div>` : ""}`;
     tr.appendChild(inmuebleTd);
 

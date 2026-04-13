@@ -31037,18 +31037,21 @@ class Handler(BaseHTTPRequestHandler):
             "/api/inmueble_compradores",
                 "/api/inmueble_propietarios_update",
                 "/api/inmueble_docs",
-                "/api/inmueble_servicios_update",
-                "/api/inmueble_checklist_generate",
-                "/api/inmueble_checklist_update",
-            "/api/demandas",
-            "/api/visitas",
-            "/api/usuarios",
-            "/api/usuarios_update",
-            "/api/usuarios_delete",
+	            "/api/inmueble_servicios_update",
+	            "/api/inmueble_checklist_generate",
+	            "/api/inmueble_checklist_update",
+	            "/api/demandas",
+	            "/api/demandas_update",
+	            "/api/visitas",
+	            "/api/usuarios",
+	            "/api/usuarios_update",
+	            "/api/usuarios_delete",
             "/api/usuarios_invitar",
             "/api/login",
             "/api/logout",
             "/api/auth_set_password",
+            "/api/portal_leads_ingest",
+            "/api/portal_publish_update",
             "/api/workspace_customer_create",
             "/api/empresa_create",
             "/api/workspace_empresa_link",
@@ -43740,7 +43743,7 @@ class Handler(BaseHTTPRequestHandler):
             if not record_ids:
                 json_response(self, {"error": "ids requerido"}, status=400)
                 return
-            empresa_id = str(payload.get("empresa_id") or "").strip() or str(empresa.get("id") or "").strip()
+            empresa_id = str(payload.get("empresa_id") or "").strip() or str((empresa["id"] if empresa else "") or "").strip()
             if not empresa_id:
                 json_response(self, {"error": "empresa_id requerido"}, status=400)
                 return
@@ -49764,6 +49767,14 @@ class Handler(BaseHTTPRequestHandler):
             if not empresa_id:
                 json_response(self, {"error": "empresa_id requerido"}, status=400)
                 return
+            try:
+                ensure_column(conn, "inmuebles", "portal_publicado", "portal_publicado INTEGER NOT NULL DEFAULT 0")
+            except Exception:
+                pass
+            try:
+                ensure_column(conn, "inmuebles", "certificado", "certificado INTEGER NOT NULL DEFAULT 0")
+            except Exception:
+                pass
             where = ["i.empresa_id = ?"]
             values = [empresa_id]
             if q:
@@ -49808,6 +49819,9 @@ class Handler(BaseHTTPRequestHandler):
                   i.lat,
                   i.lon,
                   i.estado,
+                  COALESCE(i.portal_publicado, 0) AS portal_publicado,
+                  COALESCE(i.certificado, 0) AS certificado,
+                  COALESCE(cap.noticia_verificada, 0) AS noticia_verificada,
                   GROUP_CONCAT(c.nombre, ' | ') AS propietarios
                 FROM inmuebles i
                 LEFT JOIN captaciones cap ON cap.id = (
