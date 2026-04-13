@@ -1024,6 +1024,22 @@ body.crm-fin #companySummary {
   white-space: nowrap;
 }
 
+.form-grid .crm-inline-input {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.form-grid .crm-inline-input input,
+.form-grid .crm-inline-input select {
+  flex: 1 1 320px;
+}
+
+.form-grid .crm-inline-input .catastro-button {
+  flex: 0 0 auto;
+}
+
 .admin-layout {
   display: grid;
   gap: 14px;
