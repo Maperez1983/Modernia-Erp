@@ -30866,6 +30866,13 @@ class Handler(BaseHTTPRequestHandler):
                     if mapped and mapped.exists():
                         send_file(self, mapped)
                         return
+
+                # Iconos propios (ej. /icons/catastro.png)
+                rel = "/".join(parts[1:]) if len(parts) > 1 else ""
+                mapped = safe_resolve_under(ROOT / "icons", rel)
+                if mapped and mapped.exists() and mapped.is_file():
+                    send_file(self, mapped)
+                    return
             except Exception:
                 pass
 

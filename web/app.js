@@ -22344,7 +22344,7 @@ const updateCaptacionMap = (lat, lon) => {
 };
 
 const CATASTRO_ICON_HTML = `
-  <img class="catastro-logo-img" src="icons/catastro.png" alt="" loading="lazy" />
+  <img class="catastro-logo-img" src="/icons/catastro.png" alt="" loading="lazy" />
 `.trim();
 
 const buildCatastroButtonInner = (label) =>
@@ -46917,9 +46917,12 @@ if (crmCaptacionCatastroOpen) {
       const provincia = String(form?.querySelector?.('select[name="provincia"]')?.value || "").trim();
       const address = [direccion, poblacion, provincia, "España"].filter(Boolean).join(", ");
       const url = buildCatastroUrl("", address);
-      window.open(url, "_blank", "noopener");
+      const win = window.open(url, "_blank", "noopener,noreferrer");
+      if (!win) window.location.href = url;
     } catch {
-      window.open("https://www.sedecatastro.gob.es/", "_blank", "noopener");
+      const fallback = "https://www.sedecatastro.gob.es/";
+      const win = window.open(fallback, "_blank", "noopener,noreferrer");
+      if (!win) window.location.href = fallback;
     }
   });
 }
@@ -54095,7 +54098,8 @@ if (captacionForm) {
       const direccion = String(getCaptacionField("direccion")?.value || "").trim();
       const ref = String(getCaptacionField("referencia_catastral")?.value || "").trim();
       const url = buildCatastroUrl(ref, direccion);
-      window.open(url, "_blank", "noopener");
+      const win = window.open(url, "_blank", "noopener,noreferrer");
+      if (!win) window.location.href = url;
     });
   }
   captacionForm.addEventListener("submit", async (event) => {
