@@ -1136,6 +1136,16 @@ CREATE TABLE IF NOT EXISTS inmueble_checklist (
   FOREIGN KEY (inmueble_id) REFERENCES inmuebles(id)
 );
 
+CREATE TABLE IF NOT EXISTS inmueble_servicios (
+  id TEXT PRIMARY KEY,
+  inmueble_id TEXT NOT NULL,
+  servicio TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (inmueble_id, servicio),
+  FOREIGN KEY (inmueble_id) REFERENCES inmuebles(id)
+);
+
 CREATE TABLE IF NOT EXISTS seguros_ofertas (
   id TEXT PRIMARY KEY,
   cliente_id TEXT,

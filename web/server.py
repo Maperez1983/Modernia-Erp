@@ -19376,6 +19376,18 @@ def ensure_tables(db_path):
     )
     conn.execute(
         """
+        CREATE TABLE IF NOT EXISTS inmueble_servicios (
+          id TEXT PRIMARY KEY,
+          inmueble_id TEXT NOT NULL,
+          servicio TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          UNIQUE (inmueble_id, servicio)
+        )
+        """
+    )
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS seguros_ofertas (
           id TEXT PRIMARY KEY,
           cliente_id TEXT,
@@ -20866,18 +20878,18 @@ def ensure_workspace_product_tables(conn):
     )
     conn.execute(
         """
-	        CREATE TABLE IF NOT EXISTS workspace_fincas_comunidades (
-	          id TEXT PRIMARY KEY,
-	          workspace_id TEXT NOT NULL,
-	          empresa_id TEXT,
-	          nombre TEXT NOT NULL,
-	          referencia_catastral TEXT,
-	          cif TEXT,
-	          direccion TEXT,
-	          foto_edificio_key TEXT,
-	          presidente TEXT,
-	          secretario TEXT,
-	          estado TEXT NOT NULL DEFAULT 'Activa',
+            CREATE TABLE IF NOT EXISTS workspace_fincas_comunidades (
+              id TEXT PRIMARY KEY,
+              workspace_id TEXT NOT NULL,
+              empresa_id TEXT,
+              nombre TEXT NOT NULL,
+              referencia_catastral TEXT,
+              cif TEXT,
+              direccion TEXT,
+              foto_edificio_key TEXT,
+              presidente TEXT,
+              secretario TEXT,
+              estado TEXT NOT NULL DEFAULT 'Activa',
           num_vecinos INTEGER,
           num_locales INTEGER,
           num_trasteros INTEGER,
@@ -25834,13 +25846,13 @@ def fetch_workspace_fincas_comunidades(conn, workspace_id, limit=30):
           c.empresa_id,
           COALESCE(e.nombre, '') AS empresa_nombre,
           c.nombre,
-	          COALESCE(c.referencia_catastral, '') AS referencia_catastral,
-	          c.cif,
-	          c.direccion,
-	          COALESCE(c.foto_edificio_key, '') AS foto_edificio_key,
-	          c.presidente,
-	          c.secretario,
-	          c.estado,
+              COALESCE(c.referencia_catastral, '') AS referencia_catastral,
+              c.cif,
+              c.direccion,
+              COALESCE(c.foto_edificio_key, '') AS foto_edificio_key,
+              c.presidente,
+              c.secretario,
+              c.estado,
           c.num_vecinos,
           c.num_locales,
           c.num_trasteros,
@@ -30637,10 +30649,11 @@ class Handler(BaseHTTPRequestHandler):
             "/api/inmueble_update",
             "/api/inmueble_delete",
             "/api/inmueble_compradores",
-            "/api/inmueble_propietarios_update",
-            "/api/inmueble_docs",
-            "/api/inmueble_checklist_generate",
-            "/api/inmueble_checklist_update",
+                "/api/inmueble_propietarios_update",
+                "/api/inmueble_docs",
+                "/api/inmueble_servicios_update",
+                "/api/inmueble_checklist_generate",
+                "/api/inmueble_checklist_update",
             "/api/demandas",
             "/api/visitas",
             "/api/usuarios",
@@ -30993,10 +31006,11 @@ class Handler(BaseHTTPRequestHandler):
             "/api/usuarios_delete",
             "/api/usuarios_invitar",
             "/api/auth_set_password",
-            "/api/cliente_gestoria_update",
-            "/api/inmueble_docs",
-            "/api/inmueble_checklist_generate",
-            "/api/inmueble_checklist_update",
+                "/api/cliente_gestoria_update",
+                "/api/inmueble_docs",
+                "/api/inmueble_servicios_update",
+                "/api/inmueble_checklist_generate",
+                "/api/inmueble_checklist_update",
             "/api/gestoria_modelos",
             "/api/gestoria_trabajos",
             "/api/gestoria_docs",
@@ -42806,6 +42820,51 @@ class Handler(BaseHTTPRequestHandler):
                     (os.urandom(16).hex(), inmueble_id, cliente_id, now, now),
                 )
             sync_inmueble_docs_for_inmueble(conn, inmueble_id, now)
+            conn.commit()
+            json_response(self, {"ok": True})
+            return
+        elif parsed.path == "/api/inmueble_servicios_update":
+            inmueble_id = str(payload.get("inmueble_id") or "").strip()
+            servicios = payload.get("servicios", [])
+            if not inmueble_id:
+                json_response(self, {"error": "inmueble_id requerido"}, status=400)
+                return
+            if not isinstance(servicios, list):
+                json_response(self, {"error": "servicios invalido"}, status=400)
+                return
+            exists = conn.execute(
+                "SELECT id FROM inmuebles WHERE id = ? LIMIT 1",
+                (inmueble_id,),
+            ).fetchone()
+            if not exists:
+                json_response(self, {"error": "Inmueble no encontrado"}, status=404)
+                return
+            cleaned = []
+            for value in servicios:
+                label = str(value or "").strip()
+                if not label:
+                    continue
+                if label not in cleaned:
+                    cleaned.append(label[:80])
+            conn.execute("DELETE FROM inmueble_servicios WHERE inmueble_id = ?", (inmueble_id,))
+            for label in cleaned:
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO inmueble_servicios (
+                      id, inmueble_id, servicio, created_at, updated_at
+                    ) VALUES (
+                      ?, ?, ?, datetime(?), datetime(?)
+                    )
+                    """,
+                    (os.urandom(16).hex(), inmueble_id, label, now, now),
+                )
+            try:
+                audit("inmueble_servicios", inmueble_id, "Actualizar servicios", usuario=payload.get("usuario"))
+            except Exception:
+                pass
+            conn.commit()
+            json_response(self, {"ok": True, "servicios": cleaned})
+            return
         elif parsed.path == "/api/inmueble_propietario_create":
             inmueble_id = str(payload.get("inmueble_id") or "").strip()
             nombre = str(payload.get("nombre") or "").strip()
@@ -42840,7 +42899,10 @@ class Handler(BaseHTTPRequestHandler):
                 "SELECT id, nombre, nif, telefono, email FROM clientes WHERE id = ? LIMIT 1",
                 (cliente_id,),
             ).fetchone()
-            json_response(self, {"ok": True, "cliente": dict(cliente) if cliente else {"id": cliente_id, "nombre": nombre}})
+            json_response(
+                self,
+                {"ok": True, "cliente": dict(cliente) if cliente else {"id": cliente_id, "nombre": nombre}},
+            )
             return
         elif parsed.path == "/api/inmueble_compradores":
             inmueble_id = str(payload.get("inmueble_id") or "").strip()
@@ -48604,23 +48666,23 @@ class Handler(BaseHTTPRequestHandler):
                 where_clause = f"WHERE {' AND '.join(where)}"
                 rows = conn.execute(
                     f"""
-	                    SELECT
-	                      {select_id}
-	                      c.nombre,
-	                      c.tipo_persona,
-	                      c.nif,
-	                      c.telefono,
-	                      c.movil,
-	                      c.otro_telefono,
-	                      c.email,
-	                      c.id_personal,
-	                      c.cliente_generico_web,
-	                      c.tiene_pedido,
-	                      c.perfil,
-	                      c.fecha_nacimiento,
-	                      c.direccion,
-	                      c.codigo_postal,
-	                      c.poblacion,
+                        SELECT
+                          {select_id}
+                          c.nombre,
+                          c.tipo_persona,
+                          c.nif,
+                          c.telefono,
+                          c.movil,
+                          c.otro_telefono,
+                          c.email,
+                          c.id_personal,
+                          c.cliente_generico_web,
+                          c.tiene_pedido,
+                          c.perfil,
+                          c.fecha_nacimiento,
+                          c.direccion,
+                          c.codigo_postal,
+                          c.poblacion,
                       c.provincia,
                       GROUP_CONCAT(e.nombre, ' | ') AS empresas,
                       GROUP_CONCAT(COALESCE(NULLIF(ce.servicio, ''), 'seguros'), ' | ') AS servicios
@@ -48657,23 +48719,23 @@ class Handler(BaseHTTPRequestHandler):
                 join_clause = "JOIN clientes_empresas ce ON ce.cliente_id = c.id" if services else "LEFT JOIN clientes_empresas ce ON ce.cliente_id = c.id"
                 rows = conn.execute(
                     f"""
-	                    SELECT
-	                      {select_id}
-	                      c.nombre,
-	                      c.tipo_persona,
-	                      c.nif,
-	                      c.telefono,
-	                      c.movil,
-	                      c.otro_telefono,
-	                      c.email,
-	                      c.id_personal,
-	                      c.cliente_generico_web,
-	                      c.tiene_pedido,
-	                      c.perfil,
-	                      c.fecha_nacimiento,
-	                      c.direccion,
-	                      c.codigo_postal,
-	                      c.poblacion,
+                        SELECT
+                          {select_id}
+                          c.nombre,
+                          c.tipo_persona,
+                          c.nif,
+                          c.telefono,
+                          c.movil,
+                          c.otro_telefono,
+                          c.email,
+                          c.id_personal,
+                          c.cliente_generico_web,
+                          c.tiene_pedido,
+                          c.perfil,
+                          c.fecha_nacimiento,
+                          c.direccion,
+                          c.codigo_postal,
+                          c.poblacion,
                       c.provincia,
                       GROUP_CONCAT(e.nombre, ' | ') AS empresas,
                       GROUP_CONCAT(ce.servicio, ' | ') AS servicios
@@ -48722,9 +48784,12 @@ class Handler(BaseHTTPRequestHandler):
             values = [empresa_id]
             if q:
                 where.append(
-                    "(i.referencia LIKE ? OR i.referencia_catastral LIKE ? OR i.direccion LIKE ? OR i.zona LIKE ? OR i.estado LIKE ? OR c.nombre LIKE ?)"
+                    "("
+                    "i.referencia LIKE ? OR i.referencia_catastral LIKE ? OR i.direccion LIKE ? OR i.zona LIKE ? OR i.estado LIKE ? OR "
+                    "c.nombre LIKE ? OR cap.propietario LIKE ? OR cap.motivacion LIKE ? OR cap.necesidad_venta_alquiler LIKE ?"
+                    ")"
                 )
-                values.extend([f"%{q}%"] * 6)
+                values.extend([f"%{q}%"] * 9)
             where_clause = " AND ".join(where)
             rows = conn.execute(
                 f"""
@@ -48732,21 +48797,42 @@ class Handler(BaseHTTPRequestHandler):
                   i.id,
                   i.referencia,
                   i.direccion,
+                  i.direccion_numero,
                   i.referencia_catastral,
                   i.codigo_postal,
+                  i.localidad,
                   i.poblacion,
                   i.provincia,
                   i.zona,
-                  i.tipo_inmueble,
+                  COALESCE(NULLIF(i.focalizacion, ''), cap.focalizacion) AS focalizacion,
+                  COALESCE(NULLIF(i.tipo_inmueble, ''), cap.tipo_inmueble) AS tipo_inmueble,
+                  COALESCE(NULLIF(i.subtipologia, ''), cap.subtipologia) AS subtipologia,
                   i.m2,
                   i.habitaciones,
                   i.banos,
+                  i.propietario_telefono,
+                  i.propietario_email,
+                  i.informador_nombre,
                   i.precio_objetivo,
+                  i.precio_pedido_cliente,
+                  COALESCE(NULLIF(i.precio_encargo, 0), cap.precio_encargo) AS precio_encargo,
+                  cap.motivacion,
+                  cap.necesidad_venta_alquiler,
+                  cap.proxima_accion,
+                  cap.propietario AS propietario_principal,
+                  i.propietario_localizado,
                   i.lat,
                   i.lon,
                   i.estado,
                   GROUP_CONCAT(c.nombre, ' | ') AS propietarios
                 FROM inmuebles i
+                LEFT JOIN captaciones cap ON cap.id = (
+                  SELECT id
+                  FROM captaciones
+                  WHERE inmueble_id = i.id
+                  ORDER BY COALESCE(NULLIF(updated_at, ''), created_at) DESC, created_at DESC
+                  LIMIT 1
+                )
                 LEFT JOIN inmueble_propietarios ip ON ip.inmueble_id = i.id
                 LEFT JOIN clientes c ON c.id = ip.cliente_id
                 WHERE {where_clause}
@@ -48984,6 +49070,15 @@ class Handler(BaseHTTPRequestHandler):
                 """,
                 (inmueble_id,),
             ).fetchall()
+            servicios = []
+            try:
+                servicio_rows = conn.execute(
+                    "SELECT servicio FROM inmueble_servicios WHERE inmueble_id = ? ORDER BY servicio",
+                    (inmueble_id,),
+                ).fetchall()
+                servicios = [str(r["servicio"] or "").strip() for r in servicio_rows if str(r["servicio"] or "").strip()]
+            except Exception:
+                servicios = []
             captacion = conn.execute(
                 """
                 SELECT *
@@ -49000,9 +49095,23 @@ class Handler(BaseHTTPRequestHandler):
                     "inmueble": dict(inmueble),
                     "propietarios": [dict(r) for r in propietarios],
                     "docs": [dict(r) for r in docs],
+                    "servicios": servicios,
                     "captacion": dict(captacion) if captacion else {},
                 },
             )
+            return
+
+        if path == "/api/inmueble_servicios":
+            inmueble_id = (params.get("inmueble_id", [""])[0] or params.get("id", [""])[0] or "").strip()
+            if not inmueble_id:
+                json_response(self, {"error": "inmueble_id requerido"}, status=400)
+                return
+            rows = conn.execute(
+                "SELECT servicio FROM inmueble_servicios WHERE inmueble_id = ? ORDER BY servicio",
+                (inmueble_id,),
+            ).fetchall()
+            servicios = [str(r["servicio"] or "").strip() for r in rows if str(r["servicio"] or "").strip()]
+            json_response(self, {"servicios": servicios})
             return
 
         if path == "/api/inmueble_ensure":

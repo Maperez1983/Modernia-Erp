@@ -3060,6 +3060,53 @@ body.crm-fin #companySummary {
   background: rgba(255, 251, 244, 0.72);
 }
 
+.map-box-leaflet-wrap {
+  position: relative;
+  width: 100%;
+  min-height: 220px;
+  border-radius: 12px;
+  overflow: hidden;
+  background: rgba(255, 251, 244, 0.72);
+  border: 0;
+}
+
+.map-box-leaflet {
+  width: 100%;
+  height: 220px;
+}
+
+.map-box-leaflet-controls {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  display: inline-flex;
+  gap: 0;
+  z-index: 500;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid rgba(15, 23, 42, 0.14);
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(6px);
+}
+
+.map-box-leaflet-controls button {
+  border-radius: 0 !important;
+  border: none !important;
+  padding: 6px 10px !important;
+  font-weight: 900;
+  font-size: 12px;
+  color: rgba(var(--ink-rgb), 0.72) !important;
+}
+
+.map-box-leaflet-controls button + button {
+  border-left: 1px solid rgba(15, 23, 42, 0.12) !important;
+}
+
+.map-box-leaflet-controls button.active {
+  background: rgba(var(--gold-rgb), 0.18) !important;
+  color: rgba(var(--ink-rgb), 0.92) !important;
+}
+
 .map-box-meta {
   display: flex;
   justify-content: space-between;
@@ -3439,22 +3486,29 @@ body.crm-fin #companySummary {
   width: 100%;
   border-collapse: collapse;
   font-size: 12.5px;
+  table-layout: fixed;
 }
 
 #crmSection table.crm-dense-table th,
 #crmSection table.crm-dense-table td {
-  padding: 8px 10px;
-  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+  padding: 6px 10px;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.10);
   vertical-align: top;
+}
+
+#crmSection table.crm-dense-table td.crm-dense-main {
+  white-space: normal;
 }
 
 #crmSection table.crm-dense-table th {
   text-align: left;
   font-family: var(--font-ui);
-  font-size: 11px;
-  letter-spacing: 0.4px;
-  text-transform: uppercase;
-  color: rgba(var(--ink-rgb), 0.65);
+  font-size: 12px;
+  letter-spacing: 0;
+  text-transform: none;
+  color: rgba(var(--ink-rgb), 0.78);
+  background: rgba(248, 250, 252, 0.95);
+  border-bottom: 1px solid rgba(15, 23, 42, 0.12);
 }
 
 #crmSection table.crm-dense-table tr {
@@ -3462,7 +3516,7 @@ body.crm-fin #companySummary {
 }
 
 #crmSection table.crm-dense-table tr:hover td {
-  background: rgba(var(--gold-rgb), 0.10);
+  background: rgba(15, 23, 42, 0.03);
 }
 
 #crmSection .crm-dense-main strong {
@@ -3471,6 +3525,17 @@ body.crm-fin #companySummary {
 
 #crmSection .crm-dense-main .muted {
   font-size: 12px;
+}
+
+#crmSection .crm-dense-select {
+  display: grid;
+  place-items: center;
+  width: 24px;
+}
+
+#crmSection .crm-dense-select input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
 }
 
 #crmSection .crm-dot {
@@ -3488,6 +3553,10 @@ body.crm-fin #companySummary {
 
 #crmSection .crm-dot.tone-warn {
   background: #f59e0b;
+}
+
+#crmSection .crm-dot.tone-bad {
+  background: #ef4444;
 }
 
 #crmSection .crm-dot.tone-info {
@@ -3544,6 +3613,179 @@ body.crm-fin #companySummary {
   text-overflow: ellipsis;
 }
 
+#crmSection table.crm-clientes-table th:nth-child(1),
+#crmSection table.crm-clientes-table td:nth-child(1) {
+  width: 380px;
+}
+
+#crmSection table.crm-clientes-table th:nth-child(2),
+#crmSection table.crm-clientes-table td:nth-child(2) {
+  width: 240px;
+}
+
+#crmSection table.crm-clientes-table th:nth-child(3),
+#crmSection table.crm-clientes-table td:nth-child(3) {
+  width: 160px;
+}
+
+#crmSection table.crm-clientes-table th:nth-child(4),
+#crmSection table.crm-clientes-table td:nth-child(4) {
+  width: 180px;
+}
+
+#crmSection table.crm-inmuebles-table td,
+#crmSection table.crm-demandas-table td,
+#crmSection table.crm-agenda-table td {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#crmSection table.crm-inmuebles-table th:nth-child(1),
+#crmSection table.crm-inmuebles-table td:nth-child(1) {
+  width: 18px;
+}
+
+#crmSection table.crm-inmuebles-table th:nth-child(2),
+#crmSection table.crm-inmuebles-table td:nth-child(2) {
+  width: 110px;
+}
+
+#crmSection table.crm-inmuebles-table th:nth-child(3),
+#crmSection table.crm-inmuebles-table td:nth-child(3) {
+  width: 360px;
+}
+
+#crmSection table.crm-inmuebles-table th:nth-child(4),
+#crmSection table.crm-inmuebles-table td:nth-child(4) {
+  width: 170px;
+}
+
+#crmSection table.crm-inmuebles-table th:nth-child(5),
+#crmSection table.crm-inmuebles-table td:nth-child(5) {
+  width: 130px;
+}
+
+#crmSection table.crm-inmuebles-table th:nth-child(6),
+#crmSection table.crm-inmuebles-table td:nth-child(6) {
+  width: 140px;
+}
+
+#crmSection table.crm-inmuebles-table th:nth-child(7),
+#crmSection table.crm-inmuebles-table td:nth-child(7) {
+  width: 150px;
+}
+
+#crmSection table.crm-inmuebles-table th:nth-child(8),
+#crmSection table.crm-inmuebles-table td:nth-child(8) {
+  width: 160px;
+}
+
+#crmSection table.crm-inmuebles-table th:nth-child(9),
+#crmSection table.crm-inmuebles-table td:nth-child(9) {
+  width: 120px;
+}
+
+#crmSection table.crm-demandas-table th:nth-child(1),
+#crmSection table.crm-demandas-table td:nth-child(1) {
+  width: 34px;
+}
+
+#crmSection table.crm-demandas-table th:nth-child(2),
+#crmSection table.crm-demandas-table td:nth-child(2) {
+  width: 320px;
+}
+
+#crmSection table.crm-demandas-table th:nth-child(3),
+#crmSection table.crm-demandas-table td:nth-child(3) {
+  width: 220px;
+}
+
+#crmSection table.crm-demandas-table th:nth-child(4),
+#crmSection table.crm-demandas-table td:nth-child(4) {
+  width: 110px;
+}
+
+#crmSection table.crm-demandas-table th:nth-child(5),
+#crmSection table.crm-demandas-table td:nth-child(5) {
+  width: 90px;
+}
+
+#crmSection table.crm-demandas-table th:nth-child(6),
+#crmSection table.crm-demandas-table td:nth-child(6) {
+  width: 160px;
+}
+
+#crmSection table.crm-demandas-table th:nth-child(7),
+#crmSection table.crm-demandas-table td:nth-child(7) {
+  width: 220px;
+}
+
+#crmSection table.crm-demandas-table th:nth-child(8),
+#crmSection table.crm-demandas-table td:nth-child(8) {
+  width: 120px;
+}
+
+#crmSection table.crm-demandas-table th:nth-child(9),
+#crmSection table.crm-demandas-table td:nth-child(9) {
+  width: 120px;
+}
+
+#crmSection table.crm-demandas-table th:nth-child(10),
+#crmSection table.crm-demandas-table td:nth-child(10) {
+  width: 180px;
+}
+
+#crmSection table.crm-demandas-table th:nth-child(5),
+#crmSection table.crm-demandas-table td:nth-child(5) {
+  width: 110px;
+}
+
+#crmSection table.crm-demandas-table th:nth-child(6),
+#crmSection table.crm-demandas-table td:nth-child(6) {
+  width: 200px;
+}
+
+#crmSection table.crm-demandas-table th:nth-child(7),
+#crmSection table.crm-demandas-table td:nth-child(7) {
+  width: 110px;
+}
+
+#crmSection table.crm-agenda-table th:nth-child(1),
+#crmSection table.crm-agenda-table td:nth-child(1) {
+  width: 110px;
+}
+
+#crmSection table.crm-agenda-table th:nth-child(2),
+#crmSection table.crm-agenda-table td:nth-child(2) {
+  width: 80px;
+}
+
+#crmSection table.crm-agenda-table th:nth-child(3),
+#crmSection table.crm-agenda-table td:nth-child(3) {
+  width: 340px;
+}
+
+#crmSection table.crm-agenda-table th:nth-child(4),
+#crmSection table.crm-agenda-table td:nth-child(4) {
+  width: 220px;
+}
+
+#crmSection table.crm-agenda-table th:nth-child(5),
+#crmSection table.crm-agenda-table td:nth-child(5) {
+  width: 170px;
+}
+
+#crmSection table.crm-agenda-table th:nth-child(6),
+#crmSection table.crm-agenda-table td:nth-child(6) {
+  width: 170px;
+}
+
+#crmSection table.crm-agenda-table th:nth-child(7),
+#crmSection table.crm-agenda-table td:nth-child(7) {
+  width: 120px;
+}
+
 #crmSection .crm-dense-icon {
   display: inline-flex;
   align-items: center;
@@ -3561,6 +3803,13 @@ body.crm-fin #companySummary {
   border-color: rgba(var(--sage-rgb), 0.35);
   background: rgba(var(--sage-rgb), 0.10);
   color: rgba(var(--sage-rgb), 1);
+}
+
+#crmSection .crm-pillstack {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 2px;
 }
 
 #crmSection .crm-home-grid {
@@ -3987,7 +4236,7 @@ body.crm-fin #companySummary {
   border-radius: 8px;
   padding: 8px;
   max-width: 100%;
-  overflow-x: auto;
+  overflow-x: hidden;
 }
 
 #crmSection .tc-title {
@@ -4074,8 +4323,8 @@ body.crm-fin #companySummary {
 #crmSection .tc-listleft select,
 #crmSection .tc-listright select {
   padding: 7px 10px;
-  border-radius: 999px;
-  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 6px;
+  border: 1px solid rgba(15, 23, 42, 0.16);
   background: #fff;
   color: var(--ink);
   max-width: 360px;
@@ -4084,10 +4333,377 @@ body.crm-fin #companySummary {
 #crmSection .tc-listright input {
   min-width: min(340px, 42vw);
   padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(15, 23, 42, 0.16);
+  background: #fff;
+  color: var(--ink);
+}
+
+#crmSection .tc-seg {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 999px;
+  overflow: hidden;
+  background: #fff;
+}
+
+#crmSection .tc-seg-btn {
+  padding: 7px 10px;
+  border: none;
+  background: transparent;
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+  user-select: none;
+}
+
+#crmSection .tc-seg-btn + .tc-seg-btn {
+  border-left: 1px solid rgba(15, 23, 42, 0.10);
+}
+
+#crmSection .tc-seg-btn.active {
+  background: rgba(var(--gold-rgb), 0.16);
+  color: var(--ink);
+}
+
+#crmSection .tc-agenda-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+#crmSection .tc-agenda-nav input {
+  padding: 7px 10px;
   border-radius: 999px;
   border: 1px solid rgba(15, 23, 42, 0.12);
   background: #fff;
   color: var(--ink);
+}
+
+#crmSection .crm-agenda-calendar {
+  padding: 10px 2px 0;
+}
+
+#crmSection .crm-agenda-calendar .agenda-week-grid {
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+#crmSection .crm-agenda-calendar .agenda-week-day {
+  min-width: 0;
+}
+
+#crmSection .crm-agenda-calendar .agenda-week-title {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#crmSection .crm-agenda-calendar .tc-agenda-shell {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+@media (max-width: 980px) {
+  #crmSection .crm-agenda-calendar .tc-agenda-shell {
+    grid-template-columns: 1fr;
+  }
+}
+
+#crmSection .crm-agenda-calendar .tc-agenda-left {
+  display: grid;
+  gap: 10px;
+}
+
+#crmSection .crm-agenda-calendar .tc-agenda-mini,
+#crmSection .crm-agenda-calendar .tc-agenda-people {
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 8px;
+  background: #fff;
+  padding: 10px;
+}
+
+#crmSection .crm-agenda-calendar .tc-agenda-mini-title {
+  font-weight: 900;
+  font-size: 12px;
+  text-transform: capitalize;
+  color: rgba(var(--ink-rgb), 0.88);
+  margin-bottom: 8px;
+}
+
+#crmSection .crm-agenda-calendar .tc-agenda-mini-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 4px;
+}
+
+#crmSection .crm-agenda-calendar .tc-agenda-mini-dow {
+  font-size: 11px;
+  text-align: center;
+  color: rgba(var(--ink-rgb), 0.55);
+  padding-bottom: 2px;
+}
+
+#crmSection .crm-agenda-calendar .tc-agenda-mini-day {
+  border: 1px solid rgba(15, 23, 42, 0.10);
+  border-radius: 6px;
+  background: #fff;
+  color: rgba(var(--ink-rgb), 0.85);
+  font-size: 12px;
+  padding: 6px 0;
+  cursor: pointer;
+}
+
+#crmSection .crm-agenda-calendar .tc-agenda-mini-day:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+#crmSection .crm-agenda-calendar .tc-agenda-mini-day.active {
+  border-color: rgba(var(--gold-rgb), 0.65);
+  background: rgba(var(--gold-rgb), 0.16);
+  color: rgba(var(--ink-rgb), 0.92);
+  font-weight: 900;
+}
+
+#crmSection .crm-agenda-calendar .tc-agenda-people-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+#crmSection .crm-agenda-calendar .tc-agenda-people-actions {
+  display: flex;
+  gap: 8px;
+  margin: 8px 0;
+  flex-wrap: wrap;
+}
+
+#crmSection .crm-agenda-calendar .tc-agenda-people-list {
+  display: grid;
+  gap: 6px;
+  max-height: 220px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+#crmSection .crm-agenda-calendar .tc-agenda-people-item {
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+  color: rgba(var(--ink-rgb), 0.86);
+}
+
+#crmSection .crm-agenda-calendar .tc-agenda-cancelled {
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  gap: 8px;
+  align-items: center;
+  margin-top: 10px;
+  font-size: 12px;
+  color: rgba(var(--ink-rgb), 0.62);
+}
+
+#crmSection .crm-agenda-calendar .tc-agenda-right {
+  min-width: 0;
+}
+
+#crmSection .crm-agenda-calendar .tc-agenda-date {
+  font-family: var(--font-display);
+  font-size: 18px;
+  text-align: center;
+  margin: 6px 0 10px;
+  color: rgba(var(--ink-rgb), 0.92);
+}
+
+#crmSection .crm-agenda-calendar .tc-week-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 10px;
+}
+
+#crmSection .crm-agenda-calendar .tc-week-day {
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 8px;
+  background: #fff;
+  padding: 8px;
+  min-width: 0;
+}
+
+#crmSection .crm-agenda-calendar .tc-week-dayhead {
+  font-size: 12px;
+  font-weight: 900;
+  color: rgba(var(--ink-rgb), 0.78);
+  margin-bottom: 8px;
+}
+
+#crmSection .crm-agenda-calendar .tc-week-list {
+  display: grid;
+  gap: 8px;
+}
+
+#crmSection .crm-agenda-calendar .tc-week-event {
+  width: 100%;
+  text-align: left;
+  border-radius: 10px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  padding: 8px 10px;
+  background: rgba(248, 250, 252, 0.92);
+  display: grid;
+  gap: 3px;
+  cursor: pointer;
+}
+
+#crmSection .crm-agenda-calendar .tc-week-event.cancelled {
+  opacity: 0.55;
+}
+
+#crmSection .crm-agenda-calendar .tc-day-scroll {
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 8px;
+  overflow: auto;
+  background: #fff;
+}
+
+#crmSection .crm-agenda-calendar .tc-day-grid {
+  display: grid;
+  min-width: 0;
+  width: 100%;
+}
+
+#crmSection .crm-agenda-calendar .tc-day-corner {
+  position: sticky;
+  top: 0;
+  left: 0;
+  z-index: 3;
+  background: rgba(248, 250, 252, 0.95);
+  border-right: 1px solid rgba(15, 23, 42, 0.12);
+  border-bottom: 1px solid rgba(15, 23, 42, 0.12);
+}
+
+#crmSection .crm-agenda-calendar .tc-day-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: rgba(248, 250, 252, 0.95);
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.12);
+  border-right: 1px solid rgba(15, 23, 42, 0.12);
+  font-weight: 900;
+  font-size: 12px;
+  color: rgba(var(--ink-rgb), 0.82);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#crmSection .crm-agenda-calendar .tc-time-axis {
+  border-right: 1px solid rgba(15, 23, 42, 0.12);
+  background: #fff;
+}
+
+#crmSection .crm-agenda-calendar .tc-time-row {
+  padding: 5px 8px;
+  font-size: 11px;
+  color: rgba(var(--ink-rgb), 0.58);
+  border-bottom: 1px solid rgba(15, 23, 42, 0.07);
+  box-sizing: border-box;
+}
+
+#crmSection .crm-agenda-calendar .tc-day-col {
+  position: relative;
+  border-right: 1px solid rgba(15, 23, 42, 0.08);
+  background:
+    repeating-linear-gradient(
+      to bottom,
+      rgba(255, 255, 255, 1) 0,
+      rgba(255, 255, 255, 1) 25px,
+      rgba(15, 23, 42, 0.06) 25px,
+      rgba(15, 23, 42, 0.06) 26px
+    );
+}
+
+#crmSection .crm-agenda-calendar .tc-day-event {
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  border-radius: 8px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  padding: 6px 8px;
+  background: rgba(248, 250, 252, 0.95);
+  text-align: left;
+  display: grid;
+  gap: 2px;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+#crmSection .crm-agenda-calendar .tc-day-event.cancelled {
+  opacity: 0.55;
+}
+
+#crmSection .crm-agenda-calendar .tc-day-event-time {
+  font-weight: 900;
+  font-size: 11px;
+  color: rgba(var(--ink-rgb), 0.76);
+}
+
+#crmSection .crm-agenda-calendar .tc-day-event-title {
+  font-weight: 900;
+  font-size: 12px;
+  color: rgba(var(--ink-rgb), 0.92);
+}
+
+#crmSection .crm-agenda-calendar .tc-day-event-meta {
+  font-size: 11px;
+  color: rgba(var(--ink-rgb), 0.62);
+}
+
+#crmSection .crm-agenda-calendar .tone-magenta {
+  background: rgba(226, 70, 170, 0.14);
+  border-color: rgba(226, 70, 170, 0.26);
+}
+
+#crmSection .crm-agenda-calendar .tone-teal {
+  background: rgba(0, 155, 180, 0.14);
+  border-color: rgba(0, 155, 180, 0.26);
+}
+
+#crmSection .crm-agenda-calendar .tone-red {
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.26);
+}
+
+#crmSection .crm-agenda-calendar .tone-orange {
+  background: rgba(249, 115, 22, 0.14);
+  border-color: rgba(249, 115, 22, 0.26);
+}
+
+#crmSection .crm-agenda-calendar .tone-purple {
+  background: rgba(168, 85, 247, 0.14);
+  border-color: rgba(168, 85, 247, 0.26);
+}
+
+#crmSection .crm-agenda-calendar .tone-dark {
+  background: rgba(15, 23, 42, 0.10);
+  border-color: rgba(15, 23, 42, 0.18);
+}
+
+#crmSection .crm-agenda-calendar .tone-gray,
+#crmSection .crm-agenda-calendar .tone-neutral {
+  background: rgba(148, 163, 184, 0.14);
+  border-color: rgba(148, 163, 184, 0.28);
+}
+
+#crmSection .crm-agenda-calendar .tone-black {
+  background: rgba(2, 6, 23, 0.12);
+  border-color: rgba(2, 6, 23, 0.22);
 }
 
 #crmSection .tc-azbar {
@@ -4421,9 +5037,105 @@ body.crm-context-inmo #inmuebleDetail .inmueble-advanced {
 
 #inmuebleDetail .inmueble-tecno-grid {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1fr) 360px;
   gap: 14px;
   align-items: start;
+}
+
+#inmuebleDetail [data-layout="tecno"] {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+#inmuebleDetail .tc-accordion {
+  border: 1px solid rgba(15, 23, 42, 0.10);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.92);
+  overflow: hidden;
+}
+
+#inmuebleDetail .tc-accordion summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 10px 12px;
+  font-family: var(--font-ui);
+  font-weight: 900;
+  font-size: 12px;
+  color: rgba(var(--ink-rgb), 0.84);
+  background: rgba(248, 250, 252, 0.9);
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+#inmuebleDetail .tc-accordion summary::-webkit-details-marker {
+  display: none;
+}
+
+#inmuebleDetail .tc-accordion summary::before {
+  content: "▾";
+  display: inline-block;
+  font-size: 12px;
+  color: rgba(var(--ink-rgb), 0.55);
+}
+
+#inmuebleDetail .tc-accordion:not([open]) summary::before {
+  content: "▸";
+}
+
+#inmuebleDetail .tc-accordion-body {
+  padding: 8px 12px 4px;
+  display: grid;
+  gap: 0;
+}
+
+#inmuebleDetail .tc-accordion-copy {
+  margin: 2px 0 10px;
+  font-size: 12px;
+}
+
+#inmuebleDetail .tc-fieldrow {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+  align-items: start;
+}
+
+#inmuebleDetail .tc-fieldrow:last-child {
+  border-bottom: none;
+}
+
+#inmuebleDetail .tc-fieldlabel {
+  font-size: 12px;
+  font-weight: 700;
+  color: rgba(var(--ink-rgb), 0.72);
+  padding-top: 6px;
+}
+
+#inmuebleDetail .tc-fieldvalue .inline-input {
+  width: 100%;
+  font-size: 12.5px;
+  border-radius: 10px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: rgba(255, 255, 255, 0.96);
+  padding: 7px 10px;
+}
+
+#inmuebleDetail .tc-fieldvalue textarea.inline-input {
+  min-height: 80px;
+  resize: vertical;
+}
+
+#inmuebleDetail .tc-fieldvalue .editable-card-help {
+  margin-top: 6px;
+}
+
+#inmuebleDetail .tc-fieldvalue .catastro-actions {
+  margin-top: 8px;
 }
 
 #inmuebleDetail .inmueble-tecno-side {
@@ -4467,6 +5179,56 @@ body.crm-context-inmo #inmuebleDetail .inmueble-advanced {
 
 #inmuebleDetail .inmueble-tecno-minirow .muted {
   font-size: 12px;
+}
+
+#inmuebleDetail .tc-servgrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+#inmuebleDetail .tc-servitem {
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: rgba(248, 250, 252, 0.75);
+  border-radius: 14px;
+  padding: 10px 8px;
+  display: grid;
+  place-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+#inmuebleDetail .tc-servico {
+  width: 34px;
+  height: 34px;
+  border-radius: 12px;
+  border: 1px solid rgba(15, 23, 42, 0.10);
+  background: rgba(255, 255, 255, 0.9);
+  display: grid;
+  place-items: center;
+  font-size: 18px;
+}
+
+#inmuebleDetail .tc-servlabel {
+  font-size: 11px;
+  font-weight: 800;
+  color: rgba(var(--ink-rgb), 0.78);
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+#inmuebleDetail .tc-servmore {
+  width: 100%;
+  margin-top: 10px;
+}
+
+@media (max-width: 720px) {
+  #inmuebleDetail .tc-servgrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 720px) {
@@ -5123,6 +5885,10 @@ body.crm-context-inmo .crm-resumen-compact-note {
   grid-template-columns: minmax(0, 1.25fr) minmax(320px, 0.85fr);
   gap: 10px;
   align-items: start;
+}
+
+#inmuebleDetail .inmueble-tecno-main .inmueble-data-workspace {
+  grid-template-columns: 1fr;
 }
 
 .inmueble-summary-card,
@@ -6288,6 +7054,35 @@ body.crm-context-inmo .crm-resumen-compact-note {
   gap: 10px;
   align-items: center;
   justify-content: flex-end;
+}
+
+.crm-services-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+@media (max-width: 560px) {
+  .crm-services-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.crm-service-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: rgba(248, 250, 252, 0.92);
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.crm-service-item input {
+  width: 16px;
+  height: 16px;
 }
 
 .cliente-seguro-modal-content {

@@ -3,7 +3,7 @@
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v96";
+const APP_SW_VERSION = "v97";
 
 // Workspace tenant por defecto del producto (branding de software). Mantiene compatibilidad con slugs legacy.
 const DEFAULT_TENANT_WORKSPACE_SLUG = "verifika2";
@@ -1553,6 +1553,22 @@ const state = {
       return "a_analizar";
     }
   })(),
+  crmAgendaPeople: (() => {
+    try {
+      const raw = localStorage.getItem("crm.agenda.people") || "[]";
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed.map((v) => String(v || "").trim()).filter(Boolean) : [];
+    } catch {
+      return [];
+    }
+  })(),
+  crmAgendaShowCancelled: (() => {
+    try {
+      return (localStorage.getItem("crm.agenda.showCancelled") || "0") === "1";
+    } catch {
+      return false;
+    }
+  })(),
   segurosRamosSource: null,
   segurosComisionesRows: null,
   segurosCrmData: null,
@@ -2579,6 +2595,10 @@ const crmNuevaDemandaBtn = document.getElementById("crmNuevaDemandaBtn");
 			const crmClienteCloseBtn = document.getElementById("crmClienteCloseBtn");
 			const crmClienteCreateForm = document.getElementById("crmClienteCreateForm");
 			const crmClienteCreateStatus = document.getElementById("crmClienteCreateStatus");
+			const crmCaptacionModal = document.getElementById("crmCaptacionModal");
+			const crmCaptacionCloseBtn = document.getElementById("crmCaptacionCloseBtn");
+			const crmCaptacionCreateForm = document.getElementById("crmCaptacionCreateForm");
+			const crmCaptacionCreateStatus = document.getElementById("crmCaptacionCreateStatus");
 		  const crmTopNewBtn = document.getElementById("crmTopNewBtn");
 	const crmRecentBtn = document.getElementById("crmRecentBtn");
 	const crmRecentMenu = document.getElementById("crmRecentMenu");
@@ -2626,13 +2646,20 @@ const crmRecentClearBtn = document.getElementById("crmRecentClearBtn");
 			const crmRelacionesSearch = document.getElementById("crmRelacionesSearch");
 			const crmRelacionesTable = document.getElementById("crmRelacionesTable");
 			const crmRelacionesInfo = document.getElementById("crmRelacionesInfo");
-		const crmViewVisitas = document.getElementById("crmViewVisitas");
-		const crmViewAgenda = document.getElementById("crmViewAgenda");
-		const crmAgendaAz = document.getElementById("crmAgendaAz");
-		const crmAgendaPrintBtn = document.getElementById("crmAgendaPrintBtn");
-		const crmViewInformadores = document.getElementById("crmViewInformadores");
-		const crmViewEdificios = document.getElementById("crmViewEdificios");
-		const crmViewLegal = document.getElementById("crmViewLegal");
+			const crmViewVisitas = document.getElementById("crmViewVisitas");
+			const crmViewAgenda = document.getElementById("crmViewAgenda");
+			const crmAgendaAz = document.getElementById("crmAgendaAz");
+			const crmAgendaPrintBtn = document.getElementById("crmAgendaPrintBtn");
+			const crmAgendaViewSeg = document.getElementById("crmAgendaViewSeg");
+			const crmAgendaNav = document.getElementById("crmAgendaNav");
+			const crmAgendaPrev = document.getElementById("crmAgendaPrev");
+			const crmAgendaToday = document.getElementById("crmAgendaToday");
+			const crmAgendaNext = document.getElementById("crmAgendaNext");
+			const crmAgendaDay = document.getElementById("crmAgendaDay");
+			const crmAgendaCalendar = document.getElementById("crmAgendaCalendar");
+			const crmViewInformadores = document.getElementById("crmViewInformadores");
+			const crmViewEdificios = document.getElementById("crmViewEdificios");
+			const crmViewLegal = document.getElementById("crmViewLegal");
 		const crmResumenPulse = document.getElementById("crmResumenPulse");
 		const crmResumenHoy = document.getElementById("crmResumenHoy");
 		const crmResumenAlertas = document.getElementById("crmResumenAlertas");
@@ -2796,7 +2823,9 @@ const inmuebleTecnoSideActividadOpen = document.getElementById("inmuebleTecnoSid
 const inmuebleTecnoSideActividadList = document.getElementById("inmuebleTecnoSideActividadList");
 const inmuebleTecnoSideActividadCount = document.getElementById("inmuebleTecnoSideActividadCount");
 const inmuebleTecnoSideNuevaActividad = document.getElementById("inmuebleTecnoSideNuevaActividad");
-const inmuebleTecnoSidePropietarioCard = document.getElementById("inmuebleTecnoSidePropietarioCard");
+const inmuebleTecnoSidePersonasCard = document.getElementById("inmuebleTecnoSidePersonasCard");
+const inmuebleTecnoSideServiciosList = document.getElementById("inmuebleTecnoSideServiciosList");
+const inmuebleTecnoSideServiciosEdit = document.getElementById("inmuebleTecnoSideServiciosEdit");
 const inmuebleTabDatos = document.getElementById("inmuebleTabDatos");
 const inmuebleTabCaptacion = document.getElementById("inmuebleTabCaptacion");
 	const inmuebleTabDemandas = document.getElementById("inmuebleTabDemandas");
@@ -16907,6 +16936,7 @@ const setCrmQuickNewOpen = (open = false) => {
   if (next) {
     setCrmRecentOpen(false);
     setCrmClienteModalOpen(false);
+    setCrmCaptacionModalOpen(false);
     if (crmInsertSearch) {
       crmInsertSearch.value = "";
       setTimeout(() => crmInsertSearch.focus(), 0);
@@ -16928,6 +16958,24 @@ const setCrmClienteModalOpen = (open = false) => {
     } catch {}
     setTimeout(() => {
       const input = crmClienteCreateForm?.querySelector?.('input[name="nombre"]');
+      if (input && input.focus) input.focus();
+    }, 0);
+  }
+};
+
+const setCrmCaptacionModalOpen = (open = false) => {
+  if (!crmCaptacionModal) return;
+  const next = Boolean(open);
+  crmCaptacionModal.classList.toggle("hidden", !next);
+  if (next) {
+    setCrmQuickNewOpen(false);
+    setCrmRecentOpen(false);
+    if (crmCaptacionCreateStatus) crmCaptacionCreateStatus.textContent = "";
+    try {
+      crmCaptacionCreateForm?.reset?.();
+    } catch {}
+    setTimeout(() => {
+      const input = crmCaptacionCreateForm?.querySelector?.('input[name="direccion"]');
       if (input && input.focus) input.focus();
     }, 0);
   }
@@ -16984,6 +17032,57 @@ const createCrmClienteQuick = async (payload = {}) => {
   );
 
   return clienteId;
+};
+
+const createCrmCaptacionQuick = async (payload = {}) => {
+  const empresaNombre = String(resolveCrmInmoEmpresaNombre?.() || "").trim();
+  if (!empresaNombre) {
+    throw new Error("Sin empresa Inmobiliaria.");
+  }
+  const direccion = String(payload?.direccion || "").trim();
+  if (!direccion) {
+    throw new Error("Falta la dirección del inmueble.");
+  }
+  const body = {
+    empresa_nombre: empresaNombre,
+    etapa: "Inmueble",
+    direccion,
+  };
+  [
+    "poblacion",
+    "provincia",
+    "tipo_inmueble",
+    "subtipologia",
+    "propietario",
+    "propietario_telefono",
+    "necesidad_venta_alquiler",
+  ].forEach((key) => {
+    const value = String(payload?.[key] || "").trim();
+    if (value) body[key] = value;
+  });
+  if (String(payload?.allow_duplicate || "").trim()) {
+    body.allow_duplicate = "1";
+  }
+
+  const res = await fetch("/api/captaciones", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "same-origin",
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || data?.error) {
+    if (res.status === 409 && data?.code === "duplicate_detected") {
+      throw new Error("Posible duplicado detectado. Marca “Permitir duplicado” si quieres forzar el alta.");
+    }
+    throw new Error(data?.error || "No se pudo crear el inmueble.");
+  }
+  const captacionId = String(data?.id || "").trim();
+  const inmuebleId = String(data?.inmueble_id || "").trim();
+  if (!inmuebleId) {
+    throw new Error("El inmueble se creó sin id.");
+  }
+  return { captacionId, inmuebleId };
 };
 
 const setCrmRecentOpen = (open = false) => {
@@ -21614,6 +21713,7 @@ const saveClienteEmpresaField = (relId, field, value) => {
 
 const renderEditableGrid = (grid, fields, data, target) => {
   if (!grid) return;
+  const useTecnoLayout = String(grid.dataset.layout || "").trim().toLowerCase() === "tecno";
   grid.classList.remove("editable-grid--inmueble", "editable-grid--captacion", "editable-grid--cliente");
   grid.classList.add(`editable-grid--${target}`);
   grid.innerHTML = "";
@@ -21667,6 +21767,7 @@ const renderEditableGrid = (grid, fields, data, target) => {
   const inputMap = {};
   const cardMap = {};
   let currentSection = "";
+  let currentSectionBody = grid;
   fields.forEach((field) => {
     if (field && field.hidden) {
       return;
@@ -21686,16 +21787,37 @@ const renderEditableGrid = (grid, fields, data, target) => {
     }
     if (field.section && field.section !== currentSection) {
       currentSection = field.section;
-      const section = document.createElement("div");
-      section.className = "form-section";
-      section.innerHTML = `
-        <strong>${field.section}</strong>
-        ${sectionCopy[field.section] ? `<span>${sectionCopy[field.section]}</span>` : ""}
-      `;
-      grid.appendChild(section);
+      if (useTecnoLayout) {
+        const details = document.createElement("details");
+        details.className = "tc-accordion";
+        details.open = true;
+        const summary = document.createElement("summary");
+        summary.textContent = field.section;
+        details.appendChild(summary);
+        const body = document.createElement("div");
+        body.className = "tc-accordion-body";
+        if (sectionCopy[field.section]) {
+          const copy = document.createElement("div");
+          copy.className = "tc-accordion-copy muted";
+          copy.textContent = sectionCopy[field.section];
+          body.appendChild(copy);
+        }
+        details.appendChild(body);
+        grid.appendChild(details);
+        currentSectionBody = body;
+      } else {
+        const section = document.createElement("div");
+        section.className = "form-section";
+        section.innerHTML = `
+          <strong>${field.section}</strong>
+          ${sectionCopy[field.section] ? `<span>${sectionCopy[field.section]}</span>` : ""}
+        `;
+        grid.appendChild(section);
+        currentSectionBody = grid;
+      }
     }
     const card = document.createElement("div");
-    card.className = "card editable-card";
+    card.className = useTecnoLayout ? "tc-fieldrow" : "card editable-card";
     if (isInmueble) {
       if (field.section === "Ubicación y Catastro") card.classList.add("editable-card--location");
       if (field.section === "Coordenadas") card.classList.add("editable-card--technical");
@@ -21705,7 +21827,8 @@ const renderEditableGrid = (grid, fields, data, target) => {
     if (target === "cliente") {
       cardMap[field.key] = card;
     }
-    const label = document.createElement("h3");
+    const label = document.createElement(useTecnoLayout ? "div" : "h3");
+    if (useTecnoLayout) label.className = "tc-fieldlabel";
     if (target === "cliente" && field.key === "nombre") {
       label.textContent = isJuridica ? "Nombre social" : "Nombre";
     } else if (target === "cliente" && field.key === "nif") {
@@ -21741,6 +21864,11 @@ const renderEditableGrid = (grid, fields, data, target) => {
       }
     }
     card.appendChild(label);
+    const valueWrap = useTecnoLayout ? document.createElement("div") : card;
+    if (useTecnoLayout) {
+      valueWrap.className = "tc-fieldvalue";
+      card.appendChild(valueWrap);
+    }
 
     let input;
     const currentValue =
@@ -21843,15 +21971,15 @@ const renderEditableGrid = (grid, fields, data, target) => {
       }
       input.addEventListener("blur", saveHandler);
     }
-    card.appendChild(input);
+    valueWrap.appendChild(input);
     if (status) {
-      card.appendChild(status);
+      valueWrap.appendChild(status);
     }
     if (isInmueble && field.key === "referencia_catastral") {
       const hint = document.createElement("p");
       hint.className = "muted editable-card-help";
       hint.textContent = "Busca la referencia desde la dirección y genera la ficha PDF para dejar constancia en el expediente.";
-      card.appendChild(hint);
+      valueWrap.appendChild(hint);
       const actions = document.createElement("div");
       actions.className = "catastro-actions";
       const openBtn = document.createElement("button");
@@ -21886,9 +22014,9 @@ const renderEditableGrid = (grid, fields, data, target) => {
         await syncInmuebleCatastroFicha(inputMap);
       });
       actions.appendChild(syncBtn);
-      card.appendChild(actions);
+      valueWrap.appendChild(actions);
     }
-    grid.appendChild(card);
+    currentSectionBody.appendChild(card);
   });
 
   if (target === "cliente" && inputMap.codigo_postal) {
@@ -21998,10 +22126,22 @@ let inmuebleGeocodeTimer = null;
 let lastGeocodeKey = "";
 let lastGeocodeAt = 0;
 
+const leafletMapInstances = new WeakMap();
+
 const renderMapPreview = (container, lat, lon, address = "") => {
   if (!container) return;
+  const destroyLeaflet = () => {
+    const existing = leafletMapInstances.get(container);
+    if (existing?.map) {
+      try {
+        existing.map.remove();
+      } catch {}
+    }
+    leafletMapInstances.delete(container);
+  };
   const geocodeState = String(container.dataset.geocode || "").trim();
   if (!lat || !lon) {
+    destroyLeaflet();
     const safeAddress = String(address || "").trim();
     const searchUrl = safeAddress
       ? `https://www.openstreetmap.org/search?query=${encodeURIComponent(safeAddress)}`
@@ -22023,32 +22163,120 @@ const renderMapPreview = (container, lat, lon, address = "") => {
     return;
   }
   container.dataset.geocode = "ok";
+  const cleanAddress = String(address || "").trim();
   const center = `${lat},${lon}`;
-  // Usamos embed oficial de OpenStreetMap para evitar depender de un proveedor de "static maps" externo.
-  const delta = 0.006;
-  const bbox = [
-    Number(lon) - delta,
-    Number(lat) - delta,
-    Number(lon) + delta,
-    Number(lat) + delta,
-  ];
-  const embedUrl = `https://www.openstreetmap.org/export/embed.html?bbox=${encodeURIComponent(
-    `${bbox[0]},${bbox[1]},${bbox[2]},${bbox[3]}`
-  )}&layer=mapnik&marker=${encodeURIComponent(`${lat},${lon}`)}`;
   const osmUrl = `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lon}#map=16/${lat}/${lon}`;
+
+  const canLeaflet = typeof window !== "undefined" && window.L && typeof window.L.map === "function";
+  if (!canLeaflet) {
+    destroyLeaflet();
+    // Fallback sin Leaflet: embed Google Maps (similar al widget de Tecnocloud) con
+    // toggle Mapa/Satélite. Si Google no carga, el enlace a OSM sigue disponible.
+    const googleBase = `https://www.google.com/maps?q=${encodeURIComponent(`${lat},${lon}`)}&z=16&output=embed`;
+    const googleSat = `https://www.google.com/maps?q=${encodeURIComponent(`${lat},${lon}`)}&z=16&t=k&output=embed`;
+    container.innerHTML = `
+      <div class="map-box-leaflet-wrap">
+        <iframe
+          class="map-box-embed"
+          title="Mapa de localización ${escapeHtml(cleanAddress || center)}"
+          loading="lazy"
+          src="${googleBase}"
+        ></iframe>
+        <div class="map-box-leaflet-controls" role="group" aria-label="Capa de mapa">
+          <button type="button" class="secondary ghost active" data-layer="street">Mapa</button>
+          <button type="button" class="secondary ghost" data-layer="satellite">Satélite</button>
+        </div>
+      </div>
+      <div class="map-box-meta">
+        <span class="muted">${escapeHtml(cleanAddress || center)}</span>
+        <a class="muted" href="${osmUrl}" target="_blank" rel="noreferrer">Abrir en OpenStreetMap</a>
+      </div>
+    `;
+    const iframe = container.querySelector("iframe.map-box-embed");
+    const controls = container.querySelector(".map-box-leaflet-controls");
+    if (iframe && controls) {
+      controls.addEventListener("click", (event) => {
+        const btn = event.target?.closest?.("button[data-layer]");
+        if (!btn) return;
+        const layer = String(btn.dataset.layer || "street");
+        controls.querySelectorAll("button[data-layer]").forEach((b) => b.classList.toggle("active", b === btn));
+        iframe.src = layer === "satellite" ? googleSat : googleBase;
+      });
+    }
+    return;
+  }
+
+  destroyLeaflet();
   container.innerHTML = `
-    <iframe
-      class="map-box-embed"
-      title="Mapa de localización ${escapeHtml(address || center)}"
-      loading="lazy"
-      referrerpolicy="no-referrer"
-      src="${embedUrl}"
-    ></iframe>
+    <div class="map-box-leaflet-wrap">
+      <div class="map-box-leaflet" aria-label="Mapa ${escapeHtml(cleanAddress || center)}"></div>
+      <div class="map-box-leaflet-controls" role="group" aria-label="Capa de mapa">
+        <button type="button" class="secondary ghost active" data-layer="street">Mapa</button>
+        <button type="button" class="secondary ghost" data-layer="satellite">Satélite</button>
+      </div>
+    </div>
     <div class="map-box-meta">
-      <span class="muted">${escapeHtml(address || center)}</span>
+      <span class="muted">${escapeHtml(cleanAddress || center)}</span>
       <a class="muted" href="${osmUrl}" target="_blank" rel="noreferrer">Abrir en OpenStreetMap</a>
     </div>
   `;
+
+  const mapEl = container.querySelector(".map-box-leaflet");
+  if (!mapEl) return;
+  const map = window.L.map(mapEl, { zoomControl: false, attributionControl: true, scrollWheelZoom: true });
+  try {
+    window.L.control.zoom({ position: "topright" }).addTo(map);
+  } catch {}
+  const street = window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 20,
+    attribution: "&copy; OpenStreetMap contributors",
+  });
+  const satellite = window.L.tileLayer(
+    "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    {
+      maxZoom: 20,
+      attribution: "Tiles &copy; Esri",
+    }
+  );
+  street.addTo(map);
+  const marker = window.L.marker([Number(lat), Number(lon)]);
+  marker.addTo(map);
+  map.setView([Number(lat), Number(lon)], 16);
+  leafletMapInstances.set(container, { map, marker, street, satellite, active: "street" });
+
+  const setLayer = (layerKey) => {
+    const inst = leafletMapInstances.get(container);
+    if (!inst?.map) return;
+    const next = String(layerKey || "street");
+    if (next === inst.active) return;
+    try {
+      if (inst.active === "street") inst.map.removeLayer(inst.street);
+      if (inst.active === "satellite") inst.map.removeLayer(inst.satellite);
+    } catch {}
+    try {
+      if (next === "satellite") inst.satellite.addTo(inst.map);
+      else inst.street.addTo(inst.map);
+    } catch {}
+    inst.active = next === "satellite" ? "satellite" : "street";
+    const buttons = Array.from(container.querySelectorAll(".map-box-leaflet-controls button[data-layer]"));
+    buttons.forEach((btn) => btn.classList.toggle("active", btn.dataset.layer === inst.active));
+  };
+
+  const controls = container.querySelector(".map-box-leaflet-controls");
+  if (controls) {
+    controls.addEventListener("click", (event) => {
+      const btn = event.target?.closest?.("button[data-layer]");
+      if (!btn) return;
+      setLayer(btn.dataset.layer);
+    });
+  }
+
+  // Leaflet necesita invalidar tamaños si el contenedor se abre/cierra con animaciones.
+  window.setTimeout(() => {
+    try {
+      map.invalidateSize();
+    } catch {}
+  }, 60);
 };
 
 const updateInmuebleMap = (lat, lon, address = "") => {
@@ -29648,17 +29876,25 @@ let crmClientesReloadTimer = null;
 const buildCrmClientesDenseTableNode = (rows = []) => {
   const items = Array.isArray(rows) ? rows : [];
   if (!items.length) return null;
+  const extractNumero = (direccion = "") => {
+    const raw = String(direccion || "").trim();
+    if (!raw) return "";
+    const match = raw.match(/\b(\d{1,4})\b(?!.*\b\d{1,4}\b)/);
+    return match ? match[1] : "";
+  };
   const table = document.createElement("table");
   table.className = "crm-dense-table crm-clientes-table";
   const thead = document.createElement("thead");
   thead.innerHTML = `
     <tr>
+      <th style="width:34px;"></th>
       <th>Cliente</th>
-      <th>Teléfono</th>
-      <th>Móvil</th>
-      <th>Email</th>
+      <th style="width:130px;">Móvil</th>
+      <th style="width:130px;">Teléfono</th>
+      <th style="width:140px;">Otro teléfono</th>
       <th>Dirección</th>
-      <th>Localidad</th>
+      <th style="width:72px;">Nº</th>
+      <th style="width:170px;">Localidad</th>
     </tr>
   `;
   table.appendChild(thead);
@@ -29681,27 +29917,39 @@ const buildCrmClientesDenseTableNode = (rows = []) => {
     if (id) {
       tr.addEventListener("click", open);
     }
+    const selectCell = document.createElement("td");
+    selectCell.className = "crm-dense-select";
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.addEventListener("click", (event) => event.stopPropagation());
+    selectCell.appendChild(checkbox);
+    tr.appendChild(selectCell);
+
     const nameCell = document.createElement("td");
-    const kicker = [row.nif || "", row.servicios || ""].filter(Boolean).join(" · ");
+    const kicker = [row.nif || "", row.email || ""].filter(Boolean).join(" · ");
     nameCell.className = "crm-dense-main";
     nameCell.innerHTML = `<strong>${escapeHtml(row.nombre || "Sin nombre")}</strong>${kicker ? `<div class="muted">${escapeHtml(kicker)}</div>` : ""}`;
     tr.appendChild(nameCell);
 
-    const telefonoCell = document.createElement("td");
-    telefonoCell.textContent = String(row.telefono || "");
-    tr.appendChild(telefonoCell);
-
     const movilCell = document.createElement("td");
-    movilCell.textContent = String(row.movil || "");
+    movilCell.textContent = String(row.movil || "").trim();
     tr.appendChild(movilCell);
 
-    const emailCell = document.createElement("td");
-    emailCell.textContent = String(row.email || "");
-    tr.appendChild(emailCell);
+    const telCell = document.createElement("td");
+    telCell.textContent = String(row.telefono || "").trim();
+    tr.appendChild(telCell);
 
-    const direccionCell = document.createElement("td");
-    direccionCell.textContent = String(row.direccion || "");
-    tr.appendChild(direccionCell);
+    const otroCell = document.createElement("td");
+    otroCell.textContent = String(row.otro_telefono || "").trim();
+    tr.appendChild(otroCell);
+
+    const dirCell = document.createElement("td");
+    dirCell.textContent = String(row.direccion || "").trim();
+    tr.appendChild(dirCell);
+
+    const numCell = document.createElement("td");
+    numCell.textContent = extractNumero(row.direccion || "");
+    tr.appendChild(numCell);
 
     const locCell = document.createElement("td");
     locCell.textContent = [row.poblacion || "", row.provincia || ""].filter(Boolean).join(" · ");
@@ -31955,23 +32203,96 @@ const renderInmuebleTecnocloudPanels = ({
     }
   }
 
-  if (inmuebleTecnoSidePropietarioCard) {
-    const list = Array.isArray(propietarios) ? propietarios : [];
-    const first = list[0] || {};
+  const compradores = Array.isArray(state.currentInmuebleContext?.compradores)
+    ? state.currentInmuebleContext.compradores
+    : [];
+  const servicios = Array.isArray(state.currentInmuebleContext?.servicios)
+    ? state.currentInmuebleContext.servicios
+    : [];
+
+  if (inmuebleTecnoSidePersonasCard) {
+    const ownerNames = (Array.isArray(propietarios) ? propietarios : [])
+      .map((p) => String(p?.nombre || "").trim())
+      .filter(Boolean);
+    const buyerNames = compradores
+      .map((row) => String(row?.cliente || "").trim())
+      .filter(Boolean);
+    const uniqueBuyers = Array.from(new Set(buyerNames));
+    const informador = String(captacion?.informador_nombre || "").trim();
+    const asesor = String(inmueble?.asesor || captacion?.asesor || "").trim();
+
+    const personasRows = [
+      {
+        label: `Propietarios${ownerNames.length ? ` (${ownerNames.length})` : ""}`,
+        value: ownerNames.length ? ownerNames.slice(0, 2).join(", ") + (ownerNames.length > 2 ? ` · +${ownerNames.length - 2} más` : "") : "Sin enlazar",
+      },
+      {
+        label: `Compradores${uniqueBuyers.length ? ` (${uniqueBuyers.length})` : ""}`,
+        value: uniqueBuyers.length ? uniqueBuyers.slice(0, 2).join(", ") + (uniqueBuyers.length > 2 ? ` · +${uniqueBuyers.length - 2} más` : "") : "-",
+      },
+      { label: "Informador", value: informador || "-" },
+      { label: "Asesor", value: asesor || "-" },
+    ];
+
+    inmuebleTecnoSidePersonasCard.innerHTML = personasRows
+      .map(
+        (item) => `
+          <div class="inmueble-tecno-minirow">
+            <strong>${escapeHtml(item.label)}</strong>
+            <div class="muted">${escapeHtml(item.value)}</div>
+          </div>
+        `
+      )
+      .join("");
+  }
+
+  if (inmuebleTecnoSideServiciosList) {
+    const list = (Array.isArray(servicios) ? servicios : [])
+      .map((s) => String(s || "").trim())
+      .filter(Boolean);
     if (!list.length) {
-      inmuebleTecnoSidePropietarioCard.innerHTML = "<p class='muted'>Sin propietario enlazado.</p>";
+      inmuebleTecnoSideServiciosList.innerHTML = "<p class='muted'>Sin servicios definidos.</p>";
     } else {
-      const name = String(first.nombre || "").trim() || "Propietario";
-      const phone = String(first.telefono || "").trim();
-      const email = String(first.email || "").trim();
-      const extra = list.length > 1 ? `+${list.length - 1} más` : "";
-      inmuebleTecnoSidePropietarioCard.innerHTML = `
-        <div class="inmueble-tecno-minirow">
-          <strong>${escapeHtml(name)}</strong>
-          <div class="muted">${escapeHtml([phone, email].filter(Boolean).join(" · ") || "-")}</div>
-          ${extra ? `<div class="muted">${escapeHtml(extra)}</div>` : ""}
+      const iconFor = (label) => {
+        const key = normalizeSimple(label || "");
+        if (key.includes("bañ") || key.includes("bano") || key.includes("aseo")) return "🛁";
+        if (key.includes("cocin")) return "🍳";
+        if (key.includes("calef")) return "🔥";
+        if (key.includes("ascens")) return "🛗";
+        if (key.includes("terraza") || key.includes("balcon") || key.includes("balcón")) return "🌤";
+        if (key.includes("garaje") || key.includes("parking")) return "🚗";
+        if (key.includes("traster")) return "📦";
+        if (key.includes("piscin")) return "🏊";
+        if (key.includes("jardin") || key.includes("jardín")) return "🌿";
+        if (key.includes("aire") || key.includes("a/a") || key.includes("acond")) return "❄️";
+        return "＋";
+      };
+      const quick = list.slice(0, 8);
+      inmuebleTecnoSideServiciosList.innerHTML = `
+        <div class="tc-servgrid" role="list">
+          ${quick
+            .map(
+              (s) => `
+                <div class="tc-servitem" role="listitem">
+                  <div class="tc-servico" aria-hidden="true">${escapeHtml(iconFor(s))}</div>
+                  <div class="tc-servlabel">${escapeHtml(s)}</div>
+                </div>
+              `
+            )
+            .join("")}
         </div>
+        <button type="button" class="secondary ghost tc-servmore" data-open-servicios="1">Ver/Editar todos</button>
       `;
+      const openBtn = inmuebleTecnoSideServiciosList.querySelector("[data-open-servicios]");
+      if (openBtn) {
+        openBtn.onclick = (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          if (inmuebleTecnoSideServiciosEdit) {
+            inmuebleTecnoSideServiciosEdit.click();
+          }
+        };
+      }
     }
   }
 };
@@ -32225,10 +32546,20 @@ const buildCrmInmueblesDenseTableNode = (rows = []) => {
     return null;
   }
   const table = document.createElement("table");
-  table.className = "crm-dense-table";
+  table.className = "crm-dense-table crm-inmuebles-table";
   const thead = document.createElement("thead");
   const trHead = document.createElement("tr");
-  ["Ref", "Dirección", "Población", "Tipo", "m²", "Hab", "Baños", "Precio", "Estado", "Propietarios"].forEach((label) => {
+  [
+    "",
+    "Focalización",
+    "Inmueble",
+    "Propietario",
+    "Tel. propietario",
+    "Subtipología",
+    "Motivación",
+    "Necesidad",
+    "Precio encargo",
+  ].forEach((label) => {
     const th = document.createElement("th");
     th.textContent = label;
     trHead.appendChild(th);
@@ -32237,43 +32568,53 @@ const buildCrmInmueblesDenseTableNode = (rows = []) => {
   table.appendChild(thead);
   const tbody = document.createElement("tbody");
   rows.forEach((row) => {
-    const stageKey = normalizeSimple(row?.estado || "");
-    const early = !stageKey || stageKey === "inmueble" || stageKey === "noticia";
-    const primaryPrice = early
-      ? (Number(row.precio_pedido_cliente || 0) || Number(row.precio_objetivo || 0) || 0)
-      : (Number(row.precio_encargo || 0) || Number(row.precio_objetivo || 0) || Number(row.precio_pedido_cliente || 0) || 0);
     const tr = document.createElement("tr");
     tr.addEventListener("click", () => openInmuebleDetail(row.id));
-    const values = [
-      row.referencia || "",
-      row.direccion || "Sin dirección",
-      row.poblacion || "",
-      row.tipo_inmueble || "",
-      row.m2,
-      row.habitaciones,
-      row.banos,
-      primaryPrice || row.precio_objetivo,
-      row.estado || "",
-      row.propietarios || "",
-    ];
-    const colNames = ["referencia", "direccion", "poblacion", "tipo_inmueble", "m2", "habitaciones", "banos", "precio_objetivo", "estado", "propietarios"];
-    values.forEach((value, idx) => {
-      const td = document.createElement("td");
-      const colName = colNames[idx];
-      if (colName === "direccion") {
-        td.className = "crm-dense-main";
-        const kicker = [row.referencia_catastral ? "Catastro" : "", row.referencia_catastral ? String(row.referencia_catastral).slice(0, 10) : ""]
-          .filter(Boolean)
-          .join(" ");
-        td.innerHTML = `<strong>${escapeHtml(String(value || ""))}</strong>${kicker ? `<div class="muted">${escapeHtml(kicker)}</div>` : ""}`;
-      } else if (colName === "propietarios") {
-        td.textContent = String(value || "").replace(/\s+\|\s+/g, " · ");
-      } else {
-        const formatted = formatCell(colName, value);
-        td.textContent = formatted === null ? "" : formatted;
-      }
-      tr.appendChild(td);
-    });
+    const locatedRaw = String(row.propietario_localizado ?? "").trim();
+    const tone = locatedRaw === "1" ? "ok" : locatedRaw === "0" ? "bad" : "neutral";
+    const dotTd = document.createElement("td");
+    dotTd.innerHTML = `<span class="crm-dot tone-${escapeHtml(tone)}" aria-hidden="true"></span>`;
+    tr.appendChild(dotTd);
+
+    const focTd = document.createElement("td");
+    focTd.textContent = String(row.focalizacion || "");
+    tr.appendChild(focTd);
+
+    const inmuebleTd = document.createElement("td");
+    inmuebleTd.className = "crm-dense-main";
+    const stage = normalizeCrmMainEtapa(row?.estado || "") || "Inmueble";
+    const prefix = resolveCaptacionCodePrefix(stage);
+    const address = String(row.direccion || "").trim() || "Sin dirección";
+    const locality = [row.poblacion || "", row.provincia || ""].filter(Boolean).join(" · ");
+    inmuebleTd.innerHTML = `<strong>${escapeHtml(`${prefix} - ${address}`)}</strong>${locality ? `<div class="muted">${escapeHtml(locality)}</div>` : ""}`;
+    tr.appendChild(inmuebleTd);
+
+    const propTd = document.createElement("td");
+    propTd.textContent = String(row.propietario_principal || row.propietarios || row.propietario || "")
+      .trim()
+      .replace(/\s+\|\s+/g, " · ");
+    tr.appendChild(propTd);
+
+    const telTd = document.createElement("td");
+    telTd.textContent = String(row.propietario_telefono || "").trim();
+    tr.appendChild(telTd);
+
+    const subTd = document.createElement("td");
+    subTd.textContent = String(row.subtipologia || "").trim();
+    tr.appendChild(subTd);
+
+    const motTd = document.createElement("td");
+    motTd.textContent = String(row.motivacion || "").trim();
+    tr.appendChild(motTd);
+
+    const necTd = document.createElement("td");
+    necTd.textContent = String(row.necesidad_venta_alquiler || "").trim();
+    tr.appendChild(necTd);
+
+    const precioTd = document.createElement("td");
+    precioTd.textContent = formatCell("precio_objetivo", row.precio_encargo || row.precio_objetivo) || "";
+    tr.appendChild(precioTd);
+
     tbody.appendChild(tr);
   });
   table.appendChild(tbody);
@@ -32361,7 +32702,16 @@ const loadCrmInmuebles = () => {
     const allRows = data.rows || [];
     cachedCrmInmuebles = allRows;
     const az = String(state.crmAz?.inmuebles || "").trim().toUpperCase();
-    const rows = filterRowsByEstado(allRows, estadoFilter).filter((row) =>
+    const presetKey = normalizeSimple(crmInmueblesPreset?.value || "inmuebles_recientes");
+    const presetFiltered = (() => {
+      // Tecnocloud: selector de vistas (Inmuebles recientes / Inmuebles / Noticias / Encargos).
+      const stage = (row) => normalizeCrmMainEtapa(row?.estado || "") || "Inmueble";
+      if (presetKey === "inmuebles") return allRows.filter((row) => stage(row) === "Inmueble");
+      if (presetKey === "noticias") return allRows.filter((row) => stage(row) === "Noticia");
+      if (presetKey === "encargos") return allRows.filter((row) => stage(row) === "Encargo");
+      return allRows;
+    })();
+    const rows = filterRowsByEstado(presetFiltered, estadoFilter).filter((row) =>
       matchTcAz(az, row?.referencia || row?.direccion || "")
     );
     renderCrmInmueblesRecent(rows);
@@ -33203,85 +33553,91 @@ const loadCrmDemandas = () => {
       crmDemandasSteps.appendChild(btn);
     });
   };
-  const renderDemandasDenseTable = (rows = []) => {
-    const table = document.createElement("table");
-    table.className = "crm-dense-table";
-    const thead = document.createElement("thead");
-    const trHead = document.createElement("tr");
-    ["Pedido", "Cliente", "Alta", "Web", "Estado", "Prioridad", "Precio máx", "m² mín", "Hab", "Baños", ""].forEach((label) => {
-      const th = document.createElement("th");
-      th.textContent = label;
-      trHead.appendChild(th);
-    });
-    thead.appendChild(trHead);
-    table.appendChild(thead);
-    const tbody = document.createElement("tbody");
-    rows.forEach((row) => {
-      const tr = document.createElement("tr");
-      tr.addEventListener("click", () => openDemandaDetail(row.id));
-      const pedidoCell = document.createElement("td");
-      pedidoCell.className = "crm-dense-main";
-      const title = String(row.pedido || row.tipo || "Pedido").trim();
-      const typeParts = [row.tipologia, row.subtipologia].filter(Boolean).join(" · ");
-      const metaParts = [row.fase || "", row.tipo && row.pedido ? row.tipo : "", typeParts].filter(Boolean).join(" · ");
-      pedidoCell.innerHTML = `<strong>${escapeHtml(title)}</strong>${metaParts ? `<div class="muted">${escapeHtml(metaParts)}</div>` : ""}`;
-      tr.appendChild(pedidoCell);
+	  const renderDemandasDenseTable = (rows = []) => {
+	    const table = document.createElement("table");
+	    table.className = "crm-dense-table crm-demandas-table";
+	    const thead = document.createElement("thead");
+	    const trHead = document.createElement("tr");
+	    [
+	      "",
+	      "Pedido",
+	      "Cliente",
+	      "Fecha creación",
+	      "Pedido WEB",
+	      "Tipología",
+	      "Requisitos",
+	      "Precio máx",
+	      "Estado",
+	      "Fase",
+	    ].forEach((label) => {
+	      const th = document.createElement("th");
+	      th.textContent = label;
+	      trHead.appendChild(th);
+	    });
+	    thead.appendChild(trHead);
+	    table.appendChild(thead);
+	    const tbody = document.createElement("tbody");
+	    rows.forEach((row) => {
+	      const tr = document.createElement("tr");
+	      tr.addEventListener("click", () => openDemandaDetail(row.id));
+	      const selectTd = document.createElement("td");
+	      selectTd.className = "crm-dense-select";
+	      const checkbox = document.createElement("input");
+	      checkbox.type = "checkbox";
+	      checkbox.addEventListener("click", (event) => event.stopPropagation());
+	      selectTd.appendChild(checkbox);
+	      tr.appendChild(selectTd);
 
-      const clienteTd = document.createElement("td");
-      clienteTd.textContent = String(row.cliente || "-");
-      tr.appendChild(clienteTd);
+	      const pedidoCell = document.createElement("td");
+	      pedidoCell.className = "crm-dense-main";
+	      const title = String(row.pedido || row.tipo || "Pedido").trim();
+	      const typeParts = [row.tipologia, row.subtipologia].filter(Boolean).join(" · ");
+	      const metaParts = [row.tipo && row.pedido ? row.tipo : "", typeParts].filter(Boolean).join(" · ");
+	      pedidoCell.innerHTML = `<strong>${escapeHtml(title)}</strong>${metaParts ? `<div class="muted">${escapeHtml(metaParts)}</div>` : ""}`;
+	      tr.appendChild(pedidoCell);
 
-      const altaTd = document.createElement("td");
-      const created = String(row.created_at || row.fecha_insercion || "").trim();
-      altaTd.textContent = created ? created.slice(0, 10) : "-";
-      tr.appendChild(altaTd);
+	      const clienteTd = document.createElement("td");
+	      clienteTd.textContent = String(row.cliente || "-");
+	      tr.appendChild(clienteTd);
 
-      const webTd = document.createElement("td");
-      const isWeb = String(row.pedido_web ?? "").trim() === "1" || String(row.pedido_web ?? "").trim().toLowerCase() === "true";
-      webTd.innerHTML = `<span class="crm-dense-icon${isWeb ? " yes" : ""}">${isWeb ? "✓" : "·"}</span>`;
-      tr.appendChild(webTd);
+	      const createdTd = document.createElement("td");
+	      const created = String(row.created_at || row.fecha_insercion || "").trim();
+	      createdTd.textContent = created ? created.slice(0, 10) : "-";
+	      tr.appendChild(createdTd);
 
-      const estadoTd = document.createElement("td");
-      estadoTd.textContent = String(row.estado || "-");
-      tr.appendChild(estadoTd);
+	      const webTd = document.createElement("td");
+	      webTd.textContent = String(row.pedido_web || "").trim() ? "✓" : "✕";
+	      tr.appendChild(webTd);
 
-      const prioTd = document.createElement("td");
-      prioTd.textContent = String(row.prioridad || "-");
-      tr.appendChild(prioTd);
+	      const tipoTd = document.createElement("td");
+	      tipoTd.textContent = [row.tipologia || "", row.subtipologia || ""].filter(Boolean).join(" · ") || "-";
+	      tr.appendChild(tipoTd);
 
-      const precioTd = document.createElement("td");
-      precioTd.textContent = formatCell("precio_max", row.precio_max) || "";
-      tr.appendChild(precioTd);
+	      const reqTd = document.createElement("td");
+	      const reqParts = [
+	        row.m2_min ? `m² ≥ ${row.m2_min}` : "",
+	        row.habitaciones_min ? `Hab ≥ ${row.habitaciones_min}` : "",
+	        row.banos_min ? `Baños ≥ ${row.banos_min}` : "",
+	      ].filter(Boolean);
+	      reqTd.textContent = reqParts.join(" · ") || "-";
+	      tr.appendChild(reqTd);
 
-      const m2Td = document.createElement("td");
-      m2Td.textContent = formatCell("m2_min", row.m2_min) || "";
-      tr.appendChild(m2Td);
+	      const precioTd = document.createElement("td");
+	      precioTd.textContent = formatCell("precio_max", row.precio_max) || "";
+	      tr.appendChild(precioTd);
 
-      const habTd = document.createElement("td");
-      habTd.textContent = formatCell("habitaciones_min", row.habitaciones_min) || "";
-      tr.appendChild(habTd);
+	      const estadoTd = document.createElement("td");
+	      estadoTd.textContent = String(row.estado || "-");
+	      tr.appendChild(estadoTd);
 
-      const banosTd = document.createElement("td");
-      banosTd.textContent = formatCell("banos_min", row.banos_min) || "";
-      tr.appendChild(banosTd);
+	      const faseTd = document.createElement("td");
+	      faseTd.textContent = String(row.fase || "-");
+	      tr.appendChild(faseTd);
 
-      const actionTd = document.createElement("td");
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "secondary ghost button-inline";
-      btn.textContent = "Matching";
-      btn.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        openDemandaDetail(row.id);
-      });
-      actionTd.appendChild(btn);
-      tr.appendChild(actionTd);
-
-      tbody.appendChild(tr);
-    });
-    table.appendChild(tbody);
-    crmDemandasTable.innerHTML = "";
+	      tbody.appendChild(tr);
+	    });
+	    table.appendChild(tbody);
+	    crmDemandasTable.innerHTML = "";
     crmDemandasTable.appendChild(table);
   };
   const params = new URLSearchParams({ empresa_id: empresa.id });
@@ -33696,30 +34052,618 @@ const openCrmAgendaEditModal = (row) => {
   document.body.classList.add("modal-open");
 };
 
+const normalizeCrmAgendaView = (raw) => {
+  const value = normalizeSimple(raw || "");
+  if (value === "list" || value === "lista") return "list";
+  if (value === "day" || value === "dia" || value === "d\u00eda") return "day";
+  if (value === "week" || value === "semana") return "week";
+  return "week";
+};
+
+const initCrmAgendaPrefsIfNeeded = () => {
+  if (!state.crmAgendaView) {
+    let view = "week";
+    let day = formatAgendaDate(new Date());
+    try {
+      view = normalizeCrmAgendaView(localStorage.getItem("crm.agenda.view") || view);
+    } catch {}
+    try {
+      const storedDay = String(localStorage.getItem("crm.agenda.day") || "").trim();
+      if (storedDay) day = storedDay;
+    } catch {}
+    state.crmAgendaView = view;
+    state.crmAgendaAnchorDay = day;
+  }
+  if (!state.crmAgendaAnchorDay) {
+    state.crmAgendaAnchorDay = formatAgendaDate(new Date());
+  }
+  if (crmAgendaDay) {
+    crmAgendaDay.value = String(state.crmAgendaAnchorDay || "").trim();
+  }
+};
+
+const persistCrmAgendaPrefs = () => {
+  try {
+    localStorage.setItem("crm.agenda.view", String(state.crmAgendaView || "week"));
+    localStorage.setItem("crm.agenda.day", String(state.crmAgendaAnchorDay || ""));
+  } catch {}
+};
+
+const setCrmAgendaView = (nextView) => {
+  initCrmAgendaPrefsIfNeeded();
+  state.crmAgendaView = normalizeCrmAgendaView(nextView || "week");
+  persistCrmAgendaPrefs();
+  renderCrmAgendaWorkspace();
+};
+
+const setCrmAgendaAnchorDay = (dayKey) => {
+  initCrmAgendaPrefsIfNeeded();
+  const key = String(dayKey || "").trim();
+  if (!key) return;
+  state.crmAgendaAnchorDay = key;
+  persistCrmAgendaPrefs();
+  renderCrmAgendaWorkspace();
+};
+
+const shiftCrmAgendaAnchorDay = (deltaDays) => {
+  initCrmAgendaPrefsIfNeeded();
+  const base = parseAgendaDate(state.crmAgendaAnchorDay) || new Date();
+  base.setDate(base.getDate() + Number(deltaDays || 0));
+  state.crmAgendaAnchorDay = formatAgendaDate(base);
+  persistCrmAgendaPrefs();
+  renderCrmAgendaWorkspace();
+};
+
+const syncCrmAgendaControls = () => {
+  initCrmAgendaPrefsIfNeeded();
+  const view = normalizeCrmAgendaView(state.crmAgendaView || "week");
+  if (crmAgendaViewSeg) {
+    Array.from(crmAgendaViewSeg.querySelectorAll("button[data-crm-agenda-view]")).forEach((btn) => {
+      const key = normalizeCrmAgendaView(btn.dataset.crmAgendaView || "");
+      btn.classList.toggle("active", key === view);
+      btn.setAttribute("aria-selected", key === view ? "true" : "false");
+    });
+  }
+  const showCalendar = view !== "list";
+  if (crmAgendaNav) crmAgendaNav.classList.toggle("hidden", !showCalendar);
+  if (crmAgendaCalendar) crmAgendaCalendar.classList.toggle("hidden", !showCalendar);
+  if (crmAgendaTable) crmAgendaTable.classList.toggle("hidden", showCalendar);
+  if (crmAgendaAz) crmAgendaAz.classList.toggle("hidden", showCalendar);
+  if (crmAgendaDay && state.crmAgendaAnchorDay) crmAgendaDay.value = state.crmAgendaAnchorDay;
+};
+
+const buildCrmAgendaDenseTableNode = (rows = []) => {
+  const items = Array.isArray(rows) ? rows : [];
+  if (!items.length) return null;
+  const table = document.createElement("table");
+  table.className = "crm-dense-table crm-agenda-table";
+  const thead = document.createElement("thead");
+  thead.innerHTML = `
+    <tr>
+      <th style="width:34px;"></th>
+      <th>Fecha</th>
+      <th>Hora</th>
+      <th>Asunto</th>
+      <th>Cliente</th>
+      <th>Tipo</th>
+      <th>Responsable</th>
+      <th>Estado</th>
+    </tr>
+  `;
+  table.appendChild(thead);
+  const tbody = document.createElement("tbody");
+  items.forEach((row) => {
+    const tr = document.createElement("tr");
+    tr.addEventListener("click", () => openCrmAgendaEditModal(row));
+
+    const selectTd = document.createElement("td");
+    selectTd.className = "crm-dense-select";
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.addEventListener("click", (event) => event.stopPropagation());
+    selectTd.appendChild(checkbox);
+    tr.appendChild(selectTd);
+
+    const fechaTd = document.createElement("td");
+    fechaTd.textContent = formatCell("fecha", row.fecha) || "";
+    tr.appendChild(fechaTd);
+
+    const horaTd = document.createElement("td");
+    horaTd.textContent = String(row.hora || "").trim();
+    tr.appendChild(horaTd);
+
+    const asuntoTd = document.createElement("td");
+    asuntoTd.className = "crm-dense-main";
+    const asunto = String(row.asunto || row.tipo || "Actividad").trim();
+    const kicker = [row.modalidad_contacto || "", row.hora_fin ? `Fin ${row.hora_fin}` : ""].filter(Boolean).join(" · ");
+    asuntoTd.innerHTML = `<strong>${escapeHtml(asunto)}</strong>${kicker ? `<div class="muted">${escapeHtml(kicker)}</div>` : ""}`;
+    tr.appendChild(asuntoTd);
+
+    const clienteTd = document.createElement("td");
+    clienteTd.textContent = String(row.cliente || "").trim();
+    tr.appendChild(clienteTd);
+
+    const tipoTd = document.createElement("td");
+    tipoTd.textContent = String(row.tipo || "").trim();
+    tr.appendChild(tipoTd);
+
+    const respTd = document.createElement("td");
+    respTd.textContent = String(row.responsable || "").trim();
+    tr.appendChild(respTd);
+
+    const estadoTd = document.createElement("td");
+    estadoTd.textContent = String(row.estado || "").trim();
+    tr.appendChild(estadoTd);
+
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  return table;
+};
+
+const getCrmAgendaEventHour = (value) => {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+  const hour = Number(raw.split(":")[0]);
+  return Number.isFinite(hour) ? hour : null;
+};
+
+const buildCrmAgendaEventNode = (row) => {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  const estadoKey = normalizeSimple(row?.estado || "pendiente").replace(/\s+/g, "-");
+  btn.className = `agenda-day-row agenda-event estado-${estadoKey}`;
+  const asunto = String(row?.asunto || row?.tipo || "Actividad").trim();
+  const cliente = String(row?.cliente || "").trim();
+  const responsable = String(row?.responsable || "").trim();
+  const meta = [cliente, responsable].filter(Boolean).join(" · ");
+  btn.innerHTML = `
+    <div class="agenda-time">${escapeHtml(String(row?.hora || "").trim() || "—")}</div>
+    <div class="agenda-info">
+      <div class="agenda-title">${escapeHtml(asunto)}</div>
+      ${meta ? `<div class="agenda-meta">${escapeHtml(meta)}</div>` : ""}
+    </div>
+  `;
+  btn.addEventListener("click", () => openCrmAgendaEditModal(row));
+  return btn;
+};
+
+const renderCrmAgendaCalendar = (rows = []) => {
+  if (!crmAgendaCalendar) return;
+  initCrmAgendaPrefsIfNeeded();
+  const view = normalizeCrmAgendaView(state.crmAgendaView || "week");
+  const anchor = parseAgendaDate(state.crmAgendaAnchorDay) || new Date();
+  const items = Array.isArray(rows) ? rows : [];
+
+  const persistAgendaUiPrefs = () => {
+    try {
+      localStorage.setItem("crm.agenda.people", JSON.stringify(Array.isArray(state.crmAgendaPeople) ? state.crmAgendaPeople : []));
+      localStorage.setItem("crm.agenda.showCancelled", state.crmAgendaShowCancelled ? "1" : "0");
+    } catch {}
+  };
+
+  const isCancelled = (row) => {
+    const key = normalizeSimple(row?.estado || "");
+    return key.includes("cancel") || key.includes("anulad");
+  };
+
+  const normalizePersonKey = (value) => normalizeSimple(String(value || "").trim());
+
+  const buildPeopleCandidates = () => {
+    const used = new Set();
+    const out = [];
+    const add = (raw) => {
+      const name = String(raw || "").trim();
+      if (!name) return;
+      const key = normalizePersonKey(name);
+      if (!key || used.has(key)) return;
+      used.add(key);
+      out.push(name);
+    };
+    (Array.isArray(INMOBILIARIA_ASESORES) ? INMOBILIARIA_ASESORES : []).forEach(add);
+    add(getCurrentUser());
+    items.forEach((row) => add(row?.responsable));
+    return out;
+  };
+
+  const candidates = buildPeopleCandidates();
+  const candidateKeyMap = new Map(candidates.map((name) => [normalizePersonKey(name), name]));
+  const storedSelection = Array.isArray(state.crmAgendaPeople) ? state.crmAgendaPeople : [];
+  const selection = storedSelection
+    .map((name) => candidateKeyMap.get(normalizePersonKey(name)) || "")
+    .filter(Boolean);
+  if (!selection.length) {
+    // Tecnocloud: por defecto, agenda centrada en el usuario activo (evita scroll horizontal).
+    const current = String(getCurrentUser() || "").trim();
+    const currentKey = normalizePersonKey(current);
+    const preferred = currentKey ? candidateKeyMap.get(currentKey) : "";
+    state.crmAgendaPeople = preferred ? [preferred] : candidates.slice(0, 1);
+    persistAgendaUiPrefs();
+  } else {
+    state.crmAgendaPeople = selection.slice();
+  }
+  const selectedKeys = new Set((state.crmAgendaPeople || []).map(normalizePersonKey));
+
+  const within = (dateKey, start, end) => {
+    const d = parseAgendaDate(dateKey);
+    if (!d) return false;
+    return d >= start && d <= end;
+  };
+
+  const parseTimeToMinutes = (value) => {
+    const raw = String(value || "").trim();
+    if (!raw) return null;
+    const parts = raw.split(":");
+    const h = Number(parts[0]);
+    const m = Number(parts[1] || 0);
+    if (!Number.isFinite(h) || !Number.isFinite(m)) return null;
+    return h * 60 + m;
+  };
+
+  const resolveEventTone = (row) => {
+    const tipo = normalizeSimple(row?.tipo || "");
+    if (tipo.includes("adquis")) return "magenta";
+    if (tipo.includes("gestion encargo") || tipo.includes("gestión encargo") || tipo.includes("encargo")) return "teal";
+    if (tipo.includes("venta") || tipo.includes("alquiler")) return "red";
+    if (tipo.includes("acept")) return "orange";
+    if (tipo.includes("post")) return "purple";
+    if (tipo.includes("zona")) return "dark";
+    if (tipo.includes("personal")) return "gray";
+    if (tipo.includes("reunion") || tipo.includes("reunión") || tipo.includes("curso")) return "black";
+    return "neutral";
+  };
+
+  const buildMiniMonth = () => {
+    const month = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
+    const monthEnd = new Date(anchor.getFullYear(), anchor.getMonth() + 1, 0);
+    const daysInMonth = monthEnd.getDate();
+    const firstDow = (month.getDay() + 6) % 7; // lunes=0
+    const wrap = document.createElement("div");
+    wrap.className = "tc-agenda-mini";
+    const title = document.createElement("div");
+    title.className = "tc-agenda-mini-title";
+    title.textContent = anchor.toLocaleDateString("es-ES", { month: "long", year: "numeric" });
+    wrap.appendChild(title);
+    const grid = document.createElement("div");
+    grid.className = "tc-agenda-mini-grid";
+    const labels = ["Lu", "Ma", "Mi", "Ju", "Vi", "Sa", "Do"];
+    labels.forEach((lab) => {
+      const el = document.createElement("div");
+      el.className = "tc-agenda-mini-dow";
+      el.textContent = lab;
+      grid.appendChild(el);
+    });
+    const totalCells = 42;
+    for (let i = 0; i < totalCells; i += 1) {
+      const dayNum = i - firstDow + 1;
+      const cell = document.createElement("button");
+      cell.type = "button";
+      cell.className = "tc-agenda-mini-day";
+      if (dayNum < 1 || dayNum > daysInMonth) {
+        cell.disabled = true;
+        cell.textContent = "";
+      } else {
+        cell.textContent = String(dayNum);
+        const dayDate = new Date(anchor.getFullYear(), anchor.getMonth(), dayNum);
+        const key = formatAgendaDate(dayDate);
+        const isActive = key === formatAgendaDate(anchor);
+        cell.classList.toggle("active", isActive);
+        cell.addEventListener("click", () => setCrmAgendaAnchorDay(key));
+      }
+      grid.appendChild(cell);
+    }
+    wrap.appendChild(grid);
+    return wrap;
+  };
+
+  const buildPeoplePanel = () => {
+    const panel = document.createElement("div");
+    panel.className = "tc-agenda-people";
+
+    const head = document.createElement("div");
+    head.className = "tc-agenda-people-head";
+    const title = document.createElement("strong");
+    title.textContent = "Usuario";
+    head.appendChild(title);
+    panel.appendChild(head);
+
+    const buttons = document.createElement("div");
+    buttons.className = "tc-agenda-people-actions";
+    const allBtn = document.createElement("button");
+    allBtn.type = "button";
+    allBtn.className = "secondary ghost";
+    allBtn.textContent = "Todo";
+    allBtn.addEventListener("click", () => {
+      state.crmAgendaPeople = candidates.slice();
+      persistAgendaUiPrefs();
+      renderCrmAgendaWorkspace();
+    });
+    const mineBtn = document.createElement("button");
+    mineBtn.type = "button";
+    mineBtn.className = "secondary ghost";
+    mineBtn.textContent = "Mi agenda";
+    mineBtn.addEventListener("click", () => {
+      const me = String(getCurrentUser() || "").trim();
+      state.crmAgendaPeople = me ? [me] : candidates.slice(0, 1);
+      persistAgendaUiPrefs();
+      renderCrmAgendaWorkspace();
+    });
+    buttons.appendChild(allBtn);
+    buttons.appendChild(mineBtn);
+    panel.appendChild(buttons);
+
+    const list = document.createElement("div");
+    list.className = "tc-agenda-people-list";
+    candidates.forEach((name) => {
+      const label = document.createElement("label");
+      label.className = "tc-agenda-people-item";
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.checked = selectedKeys.has(normalizePersonKey(name));
+      checkbox.addEventListener("change", () => {
+        const picked = Array.from(list.querySelectorAll('input[type="checkbox"]'))
+          .map((inputEl, idx) => (inputEl.checked ? candidates[idx] : null))
+          .filter(Boolean);
+        state.crmAgendaPeople = picked.length ? picked : candidates.slice();
+        persistAgendaUiPrefs();
+        renderCrmAgendaWorkspace();
+      });
+      const span = document.createElement("span");
+      span.textContent = name;
+      label.appendChild(checkbox);
+      label.appendChild(span);
+      list.appendChild(label);
+    });
+    panel.appendChild(list);
+
+    const cancelledWrap = document.createElement("label");
+    cancelledWrap.className = "tc-agenda-cancelled";
+    const cancelled = document.createElement("input");
+    cancelled.type = "checkbox";
+    cancelled.checked = Boolean(state.crmAgendaShowCancelled);
+    cancelled.addEventListener("change", () => {
+      state.crmAgendaShowCancelled = Boolean(cancelled.checked);
+      persistAgendaUiPrefs();
+      renderCrmAgendaWorkspace();
+    });
+    const cancelledText = document.createElement("span");
+    cancelledText.textContent = "Muestra las citas anuladas";
+    cancelledWrap.appendChild(cancelled);
+    cancelledWrap.appendChild(cancelledText);
+    panel.appendChild(cancelledWrap);
+
+    return panel;
+  };
+
+  const humanDate = (dateObj) => {
+    const text = dateObj.toLocaleDateString("es-ES", { weekday: "short", day: "2-digit", month: "long", year: "numeric" });
+    return text.charAt(0).toLowerCase() + text.slice(1);
+  };
+
+  const filterBySelectedPeople = (row) => {
+    if (!selectedKeys.size) return true;
+    const respKey = normalizePersonKey(row?.responsable || "");
+    if (!respKey) return true;
+    return selectedKeys.has(respKey);
+  };
+
+  const baseFiltered = items.filter((row) => {
+    if (!state.crmAgendaShowCancelled && isCancelled(row)) return false;
+    return filterBySelectedPeople(row);
+  });
+
+  crmAgendaCalendar.innerHTML = "";
+  const shell = document.createElement("div");
+  shell.className = "tc-agenda-shell";
+
+  const left = document.createElement("div");
+  left.className = "tc-agenda-left";
+  left.appendChild(buildMiniMonth());
+  left.appendChild(buildPeoplePanel());
+  shell.appendChild(left);
+
+  const right = document.createElement("div");
+  right.className = "tc-agenda-right";
+  const title = document.createElement("div");
+  title.className = "tc-agenda-date";
+  title.textContent = humanDate(anchor);
+  right.appendChild(title);
+
+  if (view === "week") {
+    const weekStart = getWeekStart(anchor);
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekStart.getDate() + 6);
+    const weekGrid = document.createElement("div");
+    weekGrid.className = "tc-week-grid";
+    for (let i = 0; i < 7; i += 1) {
+      const day = new Date(weekStart);
+      day.setDate(weekStart.getDate() + i);
+      const key = formatAgendaDate(day);
+      const dayCol = document.createElement("div");
+      dayCol.className = "tc-week-day";
+      const dayHead = document.createElement("div");
+      dayHead.className = "tc-week-dayhead";
+      dayHead.textContent = day.toLocaleDateString("es-ES", { weekday: "short", day: "2-digit", month: "2-digit" });
+      dayCol.appendChild(dayHead);
+      const dayList = document.createElement("div");
+      dayList.className = "tc-week-list";
+      const dayRows = baseFiltered
+        .filter((row) => String(row?.fecha || "").slice(0, 10) === key)
+        .sort((a, b) => String(a.hora || "").localeCompare(String(b.hora || "")));
+      if (!dayRows.length) {
+        const empty = document.createElement("div");
+        empty.className = "muted";
+        empty.textContent = "Sin citas";
+        dayList.appendChild(empty);
+      } else {
+        dayRows.slice(0, 18).forEach((row) => {
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = `tc-week-event tone-${resolveEventTone(row)}${isCancelled(row) ? " cancelled" : ""}`;
+          const when = String(row.hora || "").trim() || "—";
+          const asunto = String(row.asunto || row.tipo || "Cita").trim();
+          const who = String(row.responsable || "").trim();
+          btn.innerHTML = `<strong>${escapeHtml(when)} · ${escapeHtml(asunto)}</strong>${who ? `<div class="muted">${escapeHtml(who)}</div>` : ""}`;
+          btn.addEventListener("click", () => openCrmAgendaEditModal(row));
+          dayList.appendChild(btn);
+        });
+        if (dayRows.length > 18) {
+          const more = document.createElement("div");
+          more.className = "muted";
+          more.textContent = `+${dayRows.length - 18} más`;
+          dayList.appendChild(more);
+        }
+      }
+      dayCol.appendChild(dayList);
+      weekGrid.appendChild(dayCol);
+    }
+    right.appendChild(weekGrid);
+    shell.appendChild(right);
+    crmAgendaCalendar.appendChild(shell);
+    return;
+  }
+
+  // Día (timeline por usuario, estilo Tecnocloud).
+  const dayKey = formatAgendaDate(anchor);
+  const dayRows = baseFiltered
+    .filter((row) => String(row?.fecha || "").slice(0, 10) === dayKey)
+    .slice()
+    .sort((a, b) => String(a.hora || "").localeCompare(String(b.hora || "")));
+  const people = (Array.isArray(state.crmAgendaPeople) && state.crmAgendaPeople.length ? state.crmAgendaPeople : candidates)
+    .filter((name) => candidateKeyMap.has(normalizePersonKey(name)));
+  const peopleSafe = people.length ? people : candidates.slice(0, 1);
+
+  const START_HOUR = 8;
+  const END_HOUR = 20;
+  const SLOT_MIN = 30;
+  const SLOT_H = 26;
+  const slots = Math.ceil(((END_HOUR - START_HOUR) * 60) / SLOT_MIN);
+  const bodyHeight = slots * SLOT_H;
+
+  const grid = document.createElement("div");
+  grid.className = "tc-day-grid";
+  grid.style.gridTemplateColumns = `72px repeat(${peopleSafe.length}, minmax(0, 1fr))`;
+  grid.style.gridTemplateRows = "34px auto";
+
+  const corner = document.createElement("div");
+  corner.className = "tc-day-corner";
+  grid.appendChild(corner);
+
+  peopleSafe.forEach((name) => {
+    const head = document.createElement("div");
+    head.className = "tc-day-head";
+    head.textContent = name;
+    grid.appendChild(head);
+  });
+
+  const axis = document.createElement("div");
+  axis.className = "tc-time-axis";
+  axis.style.height = `${bodyHeight}px`;
+  for (let i = 0; i < slots; i += 1) {
+    const minutes = START_HOUR * 60 + i * SLOT_MIN;
+    const h = Math.floor(minutes / 60);
+    const m = minutes % 60;
+    const row = document.createElement("div");
+    row.className = "tc-time-row";
+    row.style.height = `${SLOT_H}px`;
+    row.textContent = `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+    axis.appendChild(row);
+  }
+  grid.appendChild(axis);
+
+  const makeCol = (name) => {
+    const col = document.createElement("div");
+    col.className = "tc-day-col";
+    col.style.height = `${bodyHeight}px`;
+    const events = dayRows.filter((row) => {
+      const respKey = normalizePersonKey(row?.responsable || "");
+      return !respKey || respKey === normalizePersonKey(name);
+    });
+    events.forEach((row) => {
+      const start = parseTimeToMinutes(row.hora);
+      const end = parseTimeToMinutes(row.hora_fin);
+      const startMin = start === null ? START_HOUR * 60 : start;
+      const endMin = end === null ? startMin + 30 : Math.max(end, startMin + 15);
+      const clampedStart = Math.max(START_HOUR * 60, Math.min(startMin, END_HOUR * 60));
+      const clampedEnd = Math.max(START_HOUR * 60, Math.min(endMin, END_HOUR * 60));
+      const top = ((clampedStart - START_HOUR * 60) / SLOT_MIN) * SLOT_H;
+      const height = Math.max(SLOT_H, ((clampedEnd - clampedStart) / SLOT_MIN) * SLOT_H);
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = `tc-day-event tone-${resolveEventTone(row)}${isCancelled(row) ? " cancelled" : ""}`;
+      btn.style.top = `${top}px`;
+      btn.style.height = `${height}px`;
+      const asunto = String(row.asunto || row.tipo || "Cita").trim();
+      const cliente = String(row.cliente || "").trim();
+      const when = String(row.hora || "").trim() || "—";
+      btn.innerHTML = `<div class="tc-day-event-time">${escapeHtml(when)}</div><div class="tc-day-event-title">${escapeHtml(asunto)}</div>${cliente ? `<div class="tc-day-event-meta">${escapeHtml(cliente)}</div>` : ""}`;
+      btn.addEventListener("click", () => openCrmAgendaEditModal(row));
+      col.appendChild(btn);
+    });
+    return col;
+  };
+
+  peopleSafe.forEach((name) => grid.appendChild(makeCol(name)));
+  const scroll = document.createElement("div");
+  scroll.className = "tc-day-scroll";
+  scroll.appendChild(grid);
+  right.appendChild(scroll);
+
+  shell.appendChild(right);
+  crmAgendaCalendar.appendChild(shell);
+};
+
+const renderCrmAgendaWorkspace = () => {
+  syncCrmAgendaControls();
+  const all = Array.isArray(state.crmAgendaRowsAll) ? state.crmAgendaRowsAll : [];
+  const filtered = Array.isArray(state.crmAgendaRowsFiltered) ? state.crmAgendaRowsFiltered : all;
+  const view = normalizeCrmAgendaView(state.crmAgendaView || "week");
+
+  if (view === "list") {
+    if (crmAgendaTable) {
+      crmAgendaTable.innerHTML = "";
+      const node = buildCrmAgendaDenseTableNode(filtered);
+      if (!node) {
+        crmAgendaTable.innerHTML = "<p class='muted'>Sin acciones.</p>";
+      } else {
+        crmAgendaTable.appendChild(node);
+      }
+    }
+  } else {
+    renderCrmAgendaCalendar(filtered);
+  }
+
+  if (crmAgendaInfo) {
+    crmAgendaInfo.textContent = `Mostrando ${filtered.length} de ${all.length} acciones.`;
+  }
+};
+
 const loadCrmAgenda = () => {
-  if (!crmAgendaTable) {
+  if (!crmAgendaTable && !crmAgendaCalendar) {
     return;
   }
   ensureCrmAgendaSelectors().catch(() => {});
   const empresa = resolveCrmInmoEmpresa();
   if (!empresa) {
-    crmAgendaTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
+    if (crmAgendaTable) crmAgendaTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
+    if (crmAgendaCalendar) crmAgendaCalendar.innerHTML = "";
     return;
   }
+  initCrmAgendaPrefsIfNeeded();
   const params = new URLSearchParams({ empresa_id: empresa.id, servicio: "inmobiliaria" });
   api(`/api/acciones?${params.toString()}`).then((data) => {
-		    const rows = Array.isArray(data.rows) ? data.rows : [];
-        state.crmAgendaRowsAll = rows;
-        renderCrmHomeAgendaPreview();
-		    const q = String(crmAgendaSearch?.value || "").trim().toLowerCase();
-		    const estadoFilter = normalizeSimple(crmAgendaEstadoFilter?.value || "");
-		    const az = String(state.crmAz?.agenda || "").trim().toUpperCase();
-		    const filtered = rows.filter((row) => {
-	      if (!matchTcAz(az, row.cliente || row.asunto || row.tipo || "")) return false;
-	      const haystack = [
-	        row.asunto,
-	        row.cliente,
-	        row.tipo,
+    const rows = Array.isArray(data.rows) ? data.rows : [];
+    state.crmAgendaRowsAll = rows;
+    renderCrmHomeAgendaPreview();
+    const q = String(crmAgendaSearch?.value || "").trim().toLowerCase();
+    const estadoFilter = normalizeSimple(crmAgendaEstadoFilter?.value || "");
+    const az = String(state.crmAz?.agenda || "").trim().toUpperCase();
+    state.crmAgendaRowsFiltered = rows.filter((row) => {
+      if (!matchTcAz(az, row.cliente || row.asunto || row.tipo || "")) return false;
+      const haystack = [
+        row.asunto,
+        row.cliente,
+        row.tipo,
         row.responsable,
         row.modalidad_contacto,
         row.estado,
@@ -33730,74 +34674,7 @@ const loadCrmAgenda = () => {
       if (estadoFilter && normalizeSimple(row.estado || "") !== estadoFilter) return false;
       return true;
     });
-
-    const table = document.createElement("table");
-    const thead = document.createElement("thead");
-    const trh = document.createElement("tr");
-    ["fecha", "hora", "hora_fin", "asunto", "cliente", "tipo", "modalidad_contacto", "responsable", "estado", "accion"].forEach((col) => {
-      const th = document.createElement("th");
-      th.textContent = formatHeader(col);
-      trh.appendChild(th);
-    });
-    thead.appendChild(trh);
-    table.appendChild(thead);
-    const tbody = document.createElement("tbody");
-    filtered.forEach((row) => {
-      const tr = document.createElement("tr");
-      const cells = [
-        row.fecha || "",
-        row.hora || "",
-        row.hora_fin || "",
-        row.asunto || "",
-        row.cliente || "",
-        row.tipo || "",
-        row.modalidad_contacto || "",
-        row.responsable || "",
-        row.estado || "",
-      ];
-      const colNames = ["fecha", "hora", "hora_fin", "asunto", "cliente", "tipo", "modalidad_contacto", "responsable", "estado"];
-      cells.forEach((val, idx) => {
-        const td = document.createElement("td");
-        td.textContent = formatCell(colNames[idx], val) || "";
-        tr.appendChild(td);
-      });
-      const actionTd = document.createElement("td");
-      const openBtns = document.createElement("div");
-      openBtns.className = "inline-row";
-      if (row.inmueble_id) {
-        const b = document.createElement("button");
-        b.type = "button";
-        b.textContent = "Inmueble";
-        b.addEventListener("click", () => openInmuebleFromAgenda(row.inmueble_id));
-        openBtns.appendChild(b);
-      }
-      if (row.cliente_id) {
-        const b = document.createElement("button");
-        b.type = "button";
-        b.className = "secondary";
-        b.textContent = "Cliente";
-        b.addEventListener("click", () => openClienteDetail(row.cliente_id));
-        openBtns.appendChild(b);
-      }
-      const editBtn = document.createElement("button");
-      editBtn.type = "button";
-      editBtn.className = "ghost";
-      editBtn.textContent = "Editar";
-      editBtn.addEventListener("click", () => openCrmAgendaEditModal(row));
-      openBtns.appendChild(editBtn);
-      if (!openBtns.children.length) {
-        openBtns.textContent = "-";
-      }
-      actionTd.appendChild(openBtns);
-      tr.appendChild(actionTd);
-      tbody.appendChild(tr);
-    });
-    table.appendChild(tbody);
-    crmAgendaTable.innerHTML = "";
-    crmAgendaTable.appendChild(table);
-    if (crmAgendaInfo) {
-      crmAgendaInfo.textContent = `Mostrando ${filtered.length} de ${rows.length} acciones.`;
-    }
+    renderCrmAgendaWorkspace();
   });
 };
 
@@ -34185,6 +35062,127 @@ const resolveInmuebleDetailRef = async (rowMap = {}, fallbackId = "") => {
   return String(rowMap?.id || "").trim();
 };
 
+const INMUEBLE_SERVICIOS_CATALOG = [
+  "Ascensor",
+  "Garaje",
+  "Trastero",
+  "Terraza",
+  "Balcón",
+  "Piscina",
+  "Jardín",
+  "Aire acondicionado",
+  "Calefacción",
+  "Amueblado",
+  "Acceso PMR",
+  "Portero",
+  "Vistas",
+  "Reforma reciente",
+];
+
+const openInmuebleServiciosModal = () => {
+  if (!state.currentInmuebleId) {
+    alert("No hay inmueble seleccionado.");
+    return;
+  }
+  let modal = document.getElementById("inmuebleServiciosModal");
+  if (!modal) {
+    modal = document.createElement("div");
+    modal.id = "inmuebleServiciosModal";
+    modal.className = "modal hidden";
+    modal.innerHTML = `
+      <div class="modal-content" style="max-width: 760px;">
+        <div class="modal-header">
+          <div>
+            <h3>Servicios del inmueble</h3>
+            <p class="muted" style="margin:0;">Marca características rápidas para operar igual de limpio que en Tecnocloud.</p>
+          </div>
+          <button type="button" class="secondary ghost" data-serv-close>Cerrar</button>
+        </div>
+        <form class="modal-body" data-serv-form>
+          <div class="crm-services-grid" data-serv-list></div>
+          <div class="modal-actions">
+            <span class="muted" data-serv-status></span>
+            <button type="submit">Guardar</button>
+          </div>
+        </form>
+      </div>
+    `;
+    modal.addEventListener("click", (event) => {
+      if (event.target === modal) {
+        modal.classList.add("hidden");
+        modal.classList.remove("open");
+        document.body.classList.remove("modal-open");
+      }
+    });
+    document.body.appendChild(modal);
+  }
+
+  const closeBtn = modal.querySelector("[data-serv-close]");
+  const form = modal.querySelector("[data-serv-form]");
+  const list = modal.querySelector("[data-serv-list]");
+  const statusEl = modal.querySelector("[data-serv-status]");
+
+  const cleanup = () => {
+    modal.classList.add("hidden");
+    modal.classList.remove("open");
+    document.body.classList.remove("modal-open");
+    if (statusEl) statusEl.textContent = "";
+  };
+
+  closeBtn?.addEventListener("click", cleanup, { once: true });
+
+  const selected = new Set(
+    (Array.isArray(state.currentInmuebleContext?.servicios) ? state.currentInmuebleContext.servicios : [])
+      .map((s) => String(s || "").trim())
+      .filter(Boolean)
+  );
+
+  if (list) {
+    list.innerHTML = INMUEBLE_SERVICIOS_CATALOG.map((label) => {
+      const safe = escapeHtml(label);
+      const checked = selected.has(label) ? "checked" : "";
+      return `
+        <label class="crm-service-item">
+          <input type="checkbox" name="servicios" value="${safe}" ${checked} />
+          <span>${safe}</span>
+        </label>
+      `;
+    }).join("");
+  }
+
+  if (form) {
+    form.onsubmit = async (event) => {
+      event.preventDefault();
+      if (statusEl) statusEl.textContent = "Guardando...";
+      const selectedValues = Array.from(form.querySelectorAll('input[name="servicios"]:checked'))
+        .map((el) => String(el.value || "").trim())
+        .filter(Boolean);
+      try {
+        const data = await apiPost("/api/inmueble_servicios_update", {
+          inmueble_id: state.currentInmuebleId,
+          servicios: selectedValues,
+        });
+        if (data?.error) {
+          if (statusEl) statusEl.textContent = data.error;
+          return;
+        }
+        if (state.currentInmuebleContext) {
+          state.currentInmuebleContext.servicios = Array.isArray(data?.servicios) ? data.servicios : selectedValues;
+        }
+        refreshCurrentInmuebleProfile();
+        if (statusEl) statusEl.textContent = "Guardado.";
+        window.setTimeout(cleanup, 250);
+      } catch (err) {
+        if (statusEl) statusEl.textContent = err?.message || "No se pudo guardar.";
+      }
+    };
+  }
+
+  modal.classList.remove("hidden");
+  modal.classList.add("open");
+  document.body.classList.add("modal-open");
+};
+
 const openInmuebleDetail = (id, originView = "") => {
   if (!inmuebleDetail) return;
   const hasPendingPrefill = Boolean(state.pendingInmuebleCitaPrefill);
@@ -34208,14 +35206,16 @@ const openInmuebleDetail = (id, originView = "") => {
       const inmueble = data.inmueble || {};
       state.currentInmueble = inmueble;
       const captacion = data.captacion || {};
-      state.currentInmuebleContext = {
-        inmueble,
-        captacion,
-        propietarios: data.propietarios || [],
-        docs: data.docs || [],
-        demandas: [],
-        visitas: [],
-      };
+	      state.currentInmuebleContext = {
+	        inmueble,
+	        captacion,
+	        propietarios: data.propietarios || [],
+	        docs: data.docs || [],
+	        servicios: Array.isArray(data.servicios) ? data.servicios : [],
+	        demandas: [],
+	        visitas: [],
+	        compradores: [],
+	      };
       state.currentInmuebleOperacionTipo = resolveInmuebleTipoOperacion(inmueble, captacion, data.docs || []);
       const etapaMain = normalizeCrmMainEtapa(inmueble.estado || captacion.etapa || "");
       if (hasPendingPrefill) {
@@ -34503,6 +35503,7 @@ const loadInmuebleCompradores = (inmuebleId) => {
       const rows = Array.isArray(data?.rows) ? data.rows : [];
       if (state.currentInmuebleId === inmuebleId && state.currentInmuebleContext) {
         state.currentInmuebleContext.compradores = rows;
+        refreshCurrentInmuebleProfile();
       }
       renderInmuebleCompradores(rows, inmuebleId);
       // Re-render matching para desactivar botones "Añadir" ya presentes en iteración.
@@ -45481,7 +46482,7 @@ if (crmInsertList) {
     const key = String(btn.dataset.crmInsert || "").trim();
     setCrmQuickNewOpen(false);
     if (key === "captacion") {
-      goToEstudioAlta("captacion");
+      setCrmCaptacionModalOpen(true);
     } else if (key === "demanda") {
       goToEstudioAlta("demanda");
     } else if (key === "actividad") {
@@ -45545,6 +46546,58 @@ if (crmClienteModal) {
   document.addEventListener("keydown", (event) => {
     if (event.key !== "Escape") return;
     setCrmClienteModalOpen(false);
+  });
+}
+
+if (crmCaptacionCloseBtn) {
+  crmCaptacionCloseBtn.addEventListener("click", () => setCrmCaptacionModalOpen(false));
+}
+
+if (crmCaptacionCreateForm) {
+  crmCaptacionCreateForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (crmCaptacionCreateStatus) crmCaptacionCreateStatus.textContent = "Creando inmueble...";
+    const form = new FormData(crmCaptacionCreateForm);
+    const payload = Object.fromEntries(form.entries());
+    try {
+      const result = await createCrmCaptacionQuick(payload);
+      if (crmCaptacionCreateStatus) crmCaptacionCreateStatus.textContent = "Inmueble creado.";
+      setCrmCaptacionModalOpen(false);
+      setCrmWorkspaceView("captaciones");
+      loadCrmCaptaciones();
+      loadCrmInmuebles();
+      if (result?.inmuebleId) {
+        try {
+          pushCrmRecentItem({
+            kind: "inmueble",
+            view: "captaciones",
+            id: result.inmuebleId,
+            title: String(payload?.direccion || "").trim() || "Inmueble",
+            meta: [payload?.poblacion || "", payload?.provincia || ""].filter(Boolean).join(" · "),
+            ts: Date.now(),
+          });
+        } catch {}
+        ensureCrmOpen(() => openInmuebleDetail(result.inmuebleId, "captaciones"));
+      }
+    } catch (error) {
+      if (crmCaptacionCreateStatus) {
+        crmCaptacionCreateStatus.textContent = error?.message || "No se pudo crear el inmueble.";
+      }
+    }
+  });
+}
+
+if (crmCaptacionModal) {
+  document.addEventListener("click", (event) => {
+    if (crmCaptacionModal.classList.contains("hidden")) return;
+    const target = event.target;
+    if (target && target.closest && target.closest(".crm-insert-card")) return;
+    setCrmCaptacionModalOpen(false);
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    setCrmCaptacionModalOpen(false);
   });
 }
 
@@ -46036,7 +47089,7 @@ if (crmInicioAgendaBtn) {
 
 if (crmNuevaCaptacionBtn) {
   crmNuevaCaptacionBtn.addEventListener("click", () => {
-    goToEstudioAlta("captacion");
+    setCrmCaptacionModalOpen(true);
   });
 }
 
@@ -46079,28 +47132,13 @@ if (crmCaptacionesQuickFilter) {
 
 if (crmCaptacionesNewBtn) {
   crmCaptacionesNewBtn.addEventListener("click", () => {
-    goToEstudioAlta("captacion");
+    setCrmCaptacionModalOpen(true);
   });
 }
 
 if (crmInmueblesPreset) {
   crmInmueblesPreset.addEventListener("change", () => {
-    const key = String(crmInmueblesPreset.value || "").trim();
-    if (key === "noticias") {
-      setCrmWorkspaceView("captaciones");
-      if (crmEtapaFilter) crmEtapaFilter.value = "Noticia";
-      if (crmEtapaFilterMirror) crmEtapaFilterMirror.value = "Noticia";
-      loadCrmCaptaciones();
-      return;
-    }
-    if (key === "encargos") {
-      setCrmWorkspaceView("captaciones");
-      if (crmEtapaFilter) crmEtapaFilter.value = "Encargo";
-      if (crmEtapaFilterMirror) crmEtapaFilterMirror.value = "Encargo";
-      loadCrmCaptaciones();
-      return;
-    }
-    // "Inmuebles" / "Inmuebles recientes": nos mantenemos en stock.
+    // Tecnocloud: el selector cambia el listado dentro de Inmuebles (no redirige).
     setCrmWorkspaceView("inmuebles");
     loadCrmInmuebles();
   });
@@ -46245,6 +47283,40 @@ if (crmAgendaSearch) {
 if (crmAgendaEstadoFilter) {
   crmAgendaEstadoFilter.addEventListener("change", () => {
     loadCrmAgenda();
+  });
+}
+
+if (crmAgendaViewSeg) {
+  crmAgendaViewSeg.addEventListener("click", (event) => {
+    const btn = event.target?.closest?.("button[data-crm-agenda-view]");
+    if (!btn) return;
+    setCrmAgendaView(btn.dataset.crmAgendaView || "week");
+  });
+}
+
+if (crmAgendaPrev) {
+  crmAgendaPrev.addEventListener("click", () => {
+    const view = normalizeCrmAgendaView(state.crmAgendaView || "week");
+    shiftCrmAgendaAnchorDay(view === "week" ? -7 : -1);
+  });
+}
+
+if (crmAgendaNext) {
+  crmAgendaNext.addEventListener("click", () => {
+    const view = normalizeCrmAgendaView(state.crmAgendaView || "week");
+    shiftCrmAgendaAnchorDay(view === "week" ? 7 : 1);
+  });
+}
+
+if (crmAgendaToday) {
+  crmAgendaToday.addEventListener("click", () => {
+    setCrmAgendaAnchorDay(formatAgendaDate(new Date()));
+  });
+}
+
+if (crmAgendaDay) {
+  crmAgendaDay.addEventListener("change", () => {
+    setCrmAgendaAnchorDay(crmAgendaDay.value);
   });
 }
 
@@ -49855,6 +50927,12 @@ if (inmuebleTecnoSideNuevaActividad) {
       statusText: "Registra la acción y guárdala para mantener trazabilidad.",
     });
     applyPendingInmuebleCitaPrefill();
+  });
+}
+
+if (inmuebleTecnoSideServiciosEdit) {
+  inmuebleTecnoSideServiciosEdit.addEventListener("click", () => {
+    openInmuebleServiciosModal();
   });
 }
 
