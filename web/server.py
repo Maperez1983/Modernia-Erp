@@ -18251,7 +18251,7 @@ def ensure_tables(db_path):
         except Exception:
             pass
     else:
-        conn = open_sqlite_conn(db_path, with_row_factory=False)
+        conn = open_sqlite_conn(db_path, with_row_factory=True)
 
     def _backend_name(_conn):
         backend = getattr(_conn, "__crm_backend__", "") or ""
@@ -48742,6 +48742,8 @@ class Handler(BaseHTTPRequestHandler):
                   i.habitaciones,
                   i.banos,
                   i.precio_objetivo,
+                  i.lat,
+                  i.lon,
                   i.estado,
                   GROUP_CONCAT(c.nombre, ' | ') AS propietarios
                 FROM inmuebles i

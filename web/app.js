@@ -3,7 +3,7 @@
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v92";
+const APP_SW_VERSION = "v93";
 
 // Workspace tenant por defecto del producto (branding de software). Mantiene compatibilidad con slugs legacy.
 const DEFAULT_TENANT_WORKSPACE_SLUG = "verifika2";
@@ -2575,10 +2575,15 @@ const crmNuevaDemandaBtn = document.getElementById("crmNuevaDemandaBtn");
 	const crmRecentMenu = document.getElementById("crmRecentMenu");
 const crmRecentList = document.getElementById("crmRecentList");
 const crmRecentClearBtn = document.getElementById("crmRecentClearBtn");
-	const crmWorkspaceShell = document.getElementById("crmWorkspaceShell");
-	const crmWorkspaceTabs = document.getElementById("crmWorkspaceTabs");
+		const crmWorkspaceShell = document.getElementById("crmWorkspaceShell");
+		const crmWorkspaceTabs = document.getElementById("crmWorkspaceTabs");
 		const crmViewResumen = document.getElementById("crmViewResumen");
 		const crmInicioBoard = document.getElementById("crmInicioBoard");
+		const crmInicioContactarBtn = document.getElementById("crmInicioContactarBtn");
+		const crmInicioObjetivosBtn = document.getElementById("crmInicioObjetivosBtn");
+		const crmInicioMapaBtn = document.getElementById("crmInicioMapaBtn");
+		const crmInicioPanelBtn = document.getElementById("crmInicioPanelBtn");
+		const crmInicioAgendaBtn = document.getElementById("crmInicioAgendaBtn");
 			const crmQuickSearchCard = document.getElementById("crmQuickSearchCard");
 			const crmViewClientes = document.getElementById("crmViewClientes");
 		const crmClientesFilter = document.getElementById("crmClientesFilter");
@@ -2589,16 +2594,29 @@ const crmRecentClearBtn = document.getElementById("crmRecentClearBtn");
 		const crmClientesPrintBtn = document.getElementById("crmClientesPrintBtn");
 		const crmViewAnalisis = document.getElementById("crmViewAnalisis");
 		const crmViewCaptaciones = document.getElementById("crmViewCaptaciones");
-		const crmViewInmuebles = document.getElementById("crmViewInmuebles");
-		const crmInmueblesPreset = document.getElementById("crmInmueblesPreset");
-		const crmInmueblesAz = document.getElementById("crmInmueblesAz");
-		const crmInmueblesPrintBtn = document.getElementById("crmInmueblesPrintBtn");
-		const crmInmueblesMapBtn = document.getElementById("crmInmueblesMapBtn");
+			const crmViewInmuebles = document.getElementById("crmViewInmuebles");
+			const crmViewMapaInmuebles = document.getElementById("crmViewMapaInmuebles");
+			const crmMapaInmueblesTipo = document.getElementById("crmMapaInmueblesTipo");
+			const crmMapaInmueblesRefresh = document.getElementById("crmMapaInmueblesRefresh");
+			const crmMapaInmueblesPrint = document.getElementById("crmMapaInmueblesPrint");
+			const crmMapaInmueblesSearch = document.getElementById("crmMapaInmueblesSearch");
+			const crmMapaInmueblesList = document.getElementById("crmMapaInmueblesList");
+			const crmMapaInmueblesInfo = document.getElementById("crmMapaInmueblesInfo");
+			const crmMapaInmueblesMap = document.getElementById("crmMapaInmueblesMap");
+			const crmInmueblesPreset = document.getElementById("crmInmueblesPreset");
+			const crmInmueblesAz = document.getElementById("crmInmueblesAz");
+			const crmInmueblesPrintBtn = document.getElementById("crmInmueblesPrintBtn");
+			const crmInmueblesMapBtn = document.getElementById("crmInmueblesMapBtn");
 		const crmViewAlquileres = document.getElementById("crmViewAlquileres");
 		const crmViewCompraventas = document.getElementById("crmViewCompraventas");
-		const crmViewDemandas = document.getElementById("crmViewDemandas");
-		const crmDemandasAz = document.getElementById("crmDemandasAz");
-		const crmDemandasPrintBtn = document.getElementById("crmDemandasPrintBtn");
+			const crmViewDemandas = document.getElementById("crmViewDemandas");
+			const crmDemandasAz = document.getElementById("crmDemandasAz");
+			const crmDemandasPrintBtn = document.getElementById("crmDemandasPrintBtn");
+			const crmViewRelaciones = document.getElementById("crmViewRelaciones");
+			const crmRelacionesRefresh = document.getElementById("crmRelacionesRefresh");
+			const crmRelacionesSearch = document.getElementById("crmRelacionesSearch");
+			const crmRelacionesTable = document.getElementById("crmRelacionesTable");
+			const crmRelacionesInfo = document.getElementById("crmRelacionesInfo");
 		const crmViewVisitas = document.getElementById("crmViewVisitas");
 		const crmViewAgenda = document.getElementById("crmViewAgenda");
 		const crmAgendaAz = document.getElementById("crmAgendaAz");
@@ -16784,9 +16802,11 @@ const getCrmSearchTargetForView = (view = "") => {
   const nextView = String(view || "").trim();
   if (nextView === "clientes") return crmClientesSearch;
   if (nextView === "inmuebles") return crmInmuebleSearchMirror;
+  if (nextView === "mapa_inmuebles") return crmMapaInmueblesSearch;
   if (nextView === "alquileres") return crmAlquilerSearch;
   if (nextView === "compraventas") return crmCompraventaSearch;
   if (nextView === "demandas") return crmDemandaSearch;
+  if (nextView === "relaciones") return crmRelacionesSearch;
   if (nextView === "visitas") return crmVisitaSearch;
   if (nextView === "agenda") return crmAgendaSearch;
   if (nextView === "informadores") return crmInformadoresSearch;
@@ -16942,6 +16962,8 @@ const createCrmClienteQuick = async (payload = {}) => {
 const setCrmRecentOpen = (open = false) => {
   if (!crmRecentMenu || !crmRecentBtn) return;
   const next = Boolean(open);
+  const isDocked = crmRecentMenu.classList.contains("crm-recent-menu--docked");
+  if (isDocked && !next) return;
   crmRecentMenu.classList.toggle("hidden", !next);
   crmRecentBtn.setAttribute("aria-expanded", next ? "true" : "false");
   if (next) {
@@ -20746,12 +20768,16 @@ const buildInmuebleDisplayAddress = (source = {}) => {
 
 const refreshCurrentInmuebleHeader = () => {
   const inmueble = state.currentInmueble || state.currentInmuebleContext?.inmueble || {};
+  const captacion = state.currentInmuebleContext?.captacion || {};
+  const stageLabel = normalizeCrmMainEtapa(
+    inmueble.estado || captacion.etapa || captacion.situacion_comercial || ""
+  );
   if (inmuebleTitle) {
     inmuebleTitle.textContent = inmueble.direccion || "Ficha de inmueble";
   }
   if (inmuebleSubtitle) {
     inmuebleSubtitle.textContent =
-      [inmueble.referencia || "", inmueble.referencia_catastral || "", inmueble.poblacion || ""]
+      [stageLabel || "", inmueble.referencia || "", inmueble.referencia_catastral || "", inmueble.poblacion || ""]
         .filter(Boolean)
         .join(" · ") || "Referencia sin asignar";
   }
@@ -24812,6 +24838,7 @@ const updateTableVisibility = () => {
     viewTabs.classList.toggle(
       "hidden",
       isClientePage ||
+        currentTab === "crm" ||
         currentTab === "seguros-crm" ||
         currentTab === "fin-crm" ||
         isSegurosCrmVisible ||
@@ -25057,15 +25084,17 @@ const setCrmWorkspaceView = (view = "resumen") => {
 	  "analisis",
 	  "captaciones",
 	  "inmuebles",
+	  "mapa_inmuebles",
 	  "alquileres",
 	  "compraventas",
     "demandas",
+    "relaciones",
     "visitas",
     "agenda",
     "informadores",
     "edificios",
     "legal",
-  ]);
+	  ]);
   let nextView = allowed.has(view) ? view : "resumen";
   if (nextView === "legal" && !canUseLegalCopilot()) {
     nextView = "resumen";
@@ -25086,21 +25115,23 @@ const setCrmWorkspaceView = (view = "resumen") => {
     });
   }
 
-	const viewMap = {
-	  resumen: crmViewResumen,
-	  clientes: crmViewClientes,
-	  analisis: crmViewAnalisis,
-	  captaciones: crmViewCaptaciones,
-	  inmuebles: crmViewInmuebles,
-	  alquileres: crmViewAlquileres,
-	  compraventas: crmViewCompraventas,
-    demandas: crmViewDemandas,
-    visitas: crmViewVisitas,
-    agenda: crmViewAgenda,
-    informadores: crmViewInformadores,
-    edificios: crmViewEdificios,
-    legal: crmViewLegal,
-  };
+		const viewMap = {
+		  resumen: crmViewResumen,
+		  clientes: crmViewClientes,
+		  analisis: crmViewAnalisis,
+		  captaciones: crmViewCaptaciones,
+		  inmuebles: crmViewInmuebles,
+		  mapa_inmuebles: crmViewMapaInmuebles,
+		  alquileres: crmViewAlquileres,
+		  compraventas: crmViewCompraventas,
+	    demandas: crmViewDemandas,
+	    relaciones: crmViewRelaciones,
+	    visitas: crmViewVisitas,
+	    agenda: crmViewAgenda,
+	    informadores: crmViewInformadores,
+	    edificios: crmViewEdificios,
+	    legal: crmViewLegal,
+	  };
   Object.entries(viewMap).forEach(([key, node]) => {
     if (node) {
       node.classList.toggle("hidden", key !== nextView);
@@ -25124,18 +25155,22 @@ const setCrmWorkspaceView = (view = "resumen") => {
 	  loadCrmClientes();
 	} else if (nextView === "analisis") {
 	  renderCrmResumenDashboard();
-	} else if (nextView === "inmuebles") {
-	  loadCrmInmuebles();
-	} else if (nextView === "alquileres") {
-    loadCrmAlquileres();
-  } else if (nextView === "compraventas") {
-    loadCrmCompraventas();
-  } else if (nextView === "demandas") {
-    loadCrmDemandas();
-  } else if (nextView === "visitas") {
-    loadCrmVisitas();
-  } else if (nextView === "agenda") {
-    loadCrmAgenda();
+	  } else if (nextView === "inmuebles") {
+		  loadCrmInmuebles();
+		} else if (nextView === "mapa_inmuebles") {
+		  loadCrmMapaInmuebles();
+	  } else if (nextView === "alquileres") {
+	    loadCrmAlquileres();
+	  } else if (nextView === "compraventas") {
+	    loadCrmCompraventas();
+	  } else if (nextView === "demandas") {
+	    loadCrmDemandas();
+	  } else if (nextView === "relaciones") {
+	    loadCrmRelacionesCruce();
+	  } else if (nextView === "visitas") {
+	    loadCrmVisitas();
+	  } else if (nextView === "agenda") {
+	    loadCrmAgenda();
   } else if (nextView === "informadores") {
     loadCrmInformadores();
   } else if (nextView === "edificios") {
@@ -25145,19 +25180,21 @@ const setCrmWorkspaceView = (view = "resumen") => {
       inmoLegalResponse.innerHTML = "<div class='muted'>Selecciona un tema o escribe una pregunta para obtener una guía operativa.</div>";
     }
     loadLegalCatalog().then(() => loadLegalRadarItems());
-	} else {
-	  loadCrmCaptaciones();
-	  loadCrmClientes();
-	  loadCrmInmuebles();
-	  loadCrmAlquileres();
-	  loadCrmCompraventas();
-	  loadCrmDemandas();
-    loadCrmVisitas();
-    loadCrmAgenda();
-    loadCrmInformadores();
-    loadCrmEdificios();
-  }
-};
+	  } else {
+		  loadCrmCaptaciones();
+		  loadCrmClientes();
+		  loadCrmInmuebles();
+		  loadCrmMapaInmuebles();
+		  loadCrmAlquileres();
+		  loadCrmCompraventas();
+		  loadCrmDemandas();
+		  loadCrmRelacionesCruce();
+	    loadCrmVisitas();
+	    loadCrmAgenda();
+	    loadCrmInformadores();
+	    loadCrmEdificios();
+	  }
+	};
 
 const escapeHtml = (value) =>
   String(value ?? "")
@@ -29704,6 +29741,16 @@ const loadCrmClientes = async ({ force = false } = {}) => {
 
   const applyPresetFilter = (rows) => {
     if (filterKey === "todos") return rows;
+    if (filterKey === "contactar") {
+      // Tecnocloud: lista priorizada por tiempo sin contacto. Si aún no tenemos esa trazabilidad,
+      // aproximamos el concepto con clientes que tienen pedido o vienen de web genérico.
+      const pick = rows.filter((row) => {
+        const tienePedido = String(row.tiene_pedido || "").trim() === "1";
+        const esWeb = String(row.cliente_generico_web || "").trim() === "1";
+        return tienePedido || esWeb;
+      });
+      return pick.length ? pick.slice(0, 120) : rows.slice(0, 120);
+    }
     if (filterKey === "informadores") {
       return rows.filter((row) => normalizeSimple(row.perfil || "").includes("informador"));
     }
@@ -31594,6 +31641,8 @@ let cachedCrmDemandas = [];
 let cachedCrmCaptaciones = [];
 let cachedCrmCompraventas = [];
 let cachedCrmVisitas = [];
+let cachedCrmMapaInmueblesEmpresaId = "";
+let cachedCrmMapaInmuebles = [];
 
 const formatDisplayCell = (col, value, fallback = "-") => {
   if (value === null || value === undefined || value === "") return fallback;
@@ -32246,6 +32295,369 @@ const loadCrmInmuebles = () => {
         target.innerHTML = "<p class='muted'>No se pudieron cargar los inmuebles.</p>";
       });
       console.error("loadCrmInmuebles failed:", error);
+    });
+};
+
+const openCrmPrintWindow = ({ title = "Impresión", html = "" } = {}) => {
+  const win = window.open("", "_blank", "noopener,noreferrer");
+  if (!win) {
+    alert("No se pudo abrir la ventana de impresión (popup bloqueado).");
+    return;
+  }
+  win.document.open();
+  win.document.write(`<!doctype html>
+    <html lang="es">
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>${escapeHtml(title)}</title>
+        <style>
+          body{font-family:system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif;padding:18px;color:#0f172a;}
+          h1{font-size:18px;margin:0 0 12px;}
+          table{width:100%;border-collapse:collapse;font-size:12px;}
+          th,td{padding:8px 10px;border-bottom:1px solid #e2e8f0;text-align:left;vertical-align:top;}
+          th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#475569;}
+        </style>
+      </head>
+      <body>
+        <h1>${escapeHtml(title)}</h1>
+        ${html}
+        <script>window.focus(); setTimeout(()=>window.print(), 200);</script>
+      </body>
+    </html>`);
+  win.document.close();
+};
+
+const normalizeCrmMapaTipo = (raw) => {
+  const key = normalizeSimple(raw || "");
+  if (key.includes("notic")) return "noticias";
+  if (key.includes("encarg")) return "encargos";
+  return "inmuebles";
+};
+
+const filterCrmMapaByTipo = (rows = [], tipo = "inmuebles") => {
+  const items = Array.isArray(rows) ? rows : [];
+  const wanted = normalizeCrmMapaTipo(tipo);
+  return items.filter((row) => {
+    const etapa = normalizeCrmMainEtapa(row?.estado || "") || "Inmueble";
+    if (wanted === "inmuebles") return etapa === "Inmueble";
+    if (wanted === "noticias") return etapa === "Noticia";
+    if (wanted === "encargos") return etapa === "Encargo" || etapa === "Propuesta";
+    return true;
+  });
+};
+
+const renderCrmMapaInmuebles = (rows = []) => {
+  if (!crmMapaInmueblesList) return;
+  const tipo = normalizeCrmMapaTipo(crmMapaInmueblesTipo?.value || "inmuebles");
+  const q = String(crmMapaInmueblesSearch?.value || "").trim().toLowerCase();
+  const base = filterCrmMapaByTipo(rows, tipo);
+  const filtered = base.filter((row) => {
+    if (!q) return true;
+    const hay = [
+      row.referencia,
+      row.direccion,
+      row.referencia_catastral,
+      row.poblacion,
+      row.provincia,
+      row.zona,
+      row.propietarios,
+    ]
+      .map((v) => String(v || "").toLowerCase())
+      .join(" ");
+    return hay.includes(q);
+  });
+
+  crmMapaInmueblesList.innerHTML = "";
+  if (!filtered.length) {
+    crmMapaInmueblesList.innerHTML = "<p class='muted'>Sin resultados.</p>";
+    renderMapPreview(crmMapaInmueblesMap, null, null, "");
+    if (crmMapaInmueblesInfo) crmMapaInmueblesInfo.textContent = "";
+    return;
+  }
+
+  const selectedId = String(state.crmMapaInmueblesSelectedId || "").trim();
+  const pickInitial = () => {
+    const preferred = filtered.find((row) => String(row.id || "").trim() === selectedId);
+    if (preferred) return preferred;
+    return filtered.find((row) => Number(row.lat) && Number(row.lon)) || filtered[0];
+  };
+
+  const selectRow = (row) => {
+    state.crmMapaInmueblesSelectedId = String(row?.id || "").trim();
+    crmMapaInmueblesList.querySelectorAll("[data-map-row]").forEach((btn) => {
+      btn.classList.toggle("active", String(btn.dataset.mapRow || "") === state.crmMapaInmueblesSelectedId);
+    });
+    const address = buildInmuebleDisplayAddress(row) || String(row?.direccion || "").trim();
+    renderMapPreview(crmMapaInmueblesMap, Number(row.lat) || null, Number(row.lon) || null, address);
+  };
+
+  filtered.forEach((row) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "crm-map-row";
+    btn.dataset.mapRow = String(row.id || "");
+    const ref = String(row.referencia || "").trim();
+    const address = buildInmuebleDisplayAddress(row) || String(row.direccion || "").trim() || "Sin dirección";
+    const localidad = [row.poblacion || "", row.provincia || ""].filter(Boolean).join(" · ");
+    const etapa = normalizeCrmMainEtapa(row?.estado || "") || "";
+    const owner = String(row.propietarios || "").trim();
+    btn.innerHTML = `
+      <strong>${escapeHtml(ref ? `${ref} · ${address}` : address)}</strong>
+      <div class="muted">${escapeHtml([localidad, etapa].filter(Boolean).join(" · ") || "-")}</div>
+      ${owner ? `<div class="muted">${escapeHtml(owner)}</div>` : ""}
+    `;
+    btn.addEventListener("click", () => selectRow(row));
+    crmMapaInmueblesList.appendChild(btn);
+  });
+
+  const initial = pickInitial();
+  if (initial) selectRow(initial);
+  if (crmMapaInmueblesInfo) {
+    const label = tipo === "inmuebles" ? "Inmuebles" : tipo === "noticias" ? "Noticias" : "Encargos";
+    crmMapaInmueblesInfo.textContent = `Mostrando ${filtered.length} ${label.toLowerCase()}.`;
+  }
+};
+
+const loadCrmMapaInmuebles = ({ force = false } = {}) => {
+  if (!crmMapaInmueblesList) return;
+  const empresa = resolveCrmInmoEmpresa();
+  if (!empresa) {
+    crmMapaInmueblesList.innerHTML = "<p class='muted'>Sin empresa.</p>";
+    if (crmMapaInmueblesInfo) crmMapaInmueblesInfo.textContent = "";
+    renderMapPreview(crmMapaInmueblesMap, null, null, "");
+    return;
+  }
+  const empresaId = String(empresa.id || "").trim();
+  const shouldFetch =
+    force || !cachedCrmMapaInmuebles.length || cachedCrmMapaInmueblesEmpresaId !== empresaId;
+  if (!shouldFetch) {
+    renderCrmMapaInmuebles(cachedCrmMapaInmuebles);
+    return;
+  }
+  crmMapaInmueblesList.innerHTML = "<p class='muted'>Cargando mapa...</p>";
+  api(`/api/inmuebles?empresa_id=${encodeURIComponent(empresaId)}`)
+    .then((data) => {
+      const rows = Array.isArray(data?.rows) ? data.rows : [];
+      cachedCrmMapaInmueblesEmpresaId = empresaId;
+      cachedCrmMapaInmuebles = rows;
+      renderCrmMapaInmuebles(rows);
+    })
+    .catch(() => {
+      crmMapaInmueblesList.innerHTML = "<p class='muted'>No se pudo cargar el mapa.</p>";
+      if (crmMapaInmueblesInfo) crmMapaInmueblesInfo.textContent = "";
+      renderMapPreview(crmMapaInmueblesMap, null, null, "");
+    });
+};
+
+const loadCrmRelacionesCruce = ({ force = false } = {}) => {
+  if (!crmRelacionesTable) return;
+  const empresa = resolveCrmInmoEmpresa();
+  if (!empresa) {
+    crmRelacionesTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
+    if (crmRelacionesInfo) crmRelacionesInfo.textContent = "";
+    return;
+  }
+  const empresaId = String(empresa.id || "").trim();
+  crmRelacionesTable.innerHTML = "<p class='muted'>Calculando relaciones...</p>";
+  Promise.all([
+    api(`/api/inmuebles?empresa_id=${encodeURIComponent(empresaId)}`),
+    api(`/api/demandas?empresa_id=${encodeURIComponent(empresaId)}`),
+  ])
+    .then(([inmoData, demData]) => {
+      const inmuebles = Array.isArray(inmoData?.rows) ? inmoData.rows : [];
+      const demandas = Array.isArray(demData?.rows) ? demData.rows : [];
+      cachedCrmInmuebles = inmuebles;
+      cachedCrmDemandas = demandas;
+
+      const q = String(crmRelacionesSearch?.value || "").trim().toLowerCase();
+      const isClosed = (row) => normalizeSimple(row?.estado || "").includes("cerrad");
+      const activeDemandas = demandas.filter((d) => !isClosed(d));
+
+      const scoreMatch = (demanda, inmueble) => {
+        let score = 0;
+        const precioMax = Number(demanda?.precio_max || 0);
+        const precio = Number(inmueble?.precio_objetivo || 0);
+        if (precioMax > 0 && precio > 0) {
+          const ratio = precio / precioMax;
+          if (ratio <= 1) score += Math.max(0, 40 - Math.round((1 - ratio) * 20));
+          else return -1;
+        } else {
+          score += 10;
+        }
+        const m2Min = Number(demanda?.m2_min || 0);
+        const m2 = Number(inmueble?.m2 || 0);
+        if (m2Min > 0 && m2 > 0) {
+          if (m2 >= m2Min) score += 15;
+          else return -1;
+        } else {
+          score += 5;
+        }
+        const habMin = Number(demanda?.habitaciones_min || 0);
+        const hab = Number(inmueble?.habitaciones || 0);
+        if (habMin > 0 && hab > 0) {
+          if (hab >= habMin) score += 10;
+          else return -1;
+        } else {
+          score += 3;
+        }
+        const banMin = Number(demanda?.banos_min || 0);
+        const ban = Number(inmueble?.banos || 0);
+        if (banMin > 0 && ban > 0) {
+          if (ban >= banMin) score += 6;
+          else return -1;
+        } else {
+          score += 2;
+        }
+        const etapa = normalizeCrmMainEtapa(inmueble?.estado || "") || "";
+        if (etapa === "Inmueble" || etapa === "Noticia") score += 8;
+        if (etapa === "Vendido") return -1;
+        return score;
+      };
+
+      const pairs = [];
+      activeDemandas.forEach((demanda) => {
+        const matches = inmuebles
+          .map((inmueble) => ({ inmueble, score: scoreMatch(demanda, inmueble) }))
+          .filter((hit) => hit.score >= 0)
+          .sort((a, b) => b.score - a.score)
+          .slice(0, 5);
+        matches.forEach((hit) => {
+          pairs.push({
+            demanda,
+            inmueble: hit.inmueble,
+            score: hit.score,
+          });
+        });
+      });
+
+      const filteredPairs = pairs.filter((pair) => {
+        if (!q) return true;
+        const hay = [
+          pair?.demanda?.cliente,
+          pair?.demanda?.pedido,
+          pair?.demanda?.tipo,
+          pair?.demanda?.tipologia,
+          pair?.demanda?.subtipologia,
+          pair?.inmueble?.referencia,
+          pair?.inmueble?.direccion,
+          pair?.inmueble?.poblacion,
+          pair?.inmueble?.provincia,
+          pair?.inmueble?.zona,
+        ]
+          .map((v) => String(v || "").toLowerCase())
+          .join(" ");
+        return hay.includes(q);
+      });
+
+      const table = document.createElement("table");
+      table.className = "crm-dense-table";
+      const thead = document.createElement("thead");
+      thead.innerHTML = `
+        <tr>
+          <th>Pedido</th>
+          <th>Cliente</th>
+          <th>Requisitos</th>
+          <th>Inmueble</th>
+          <th>Precio</th>
+          <th>m²</th>
+          <th>Hab</th>
+          <th>Baños</th>
+          <th>Score</th>
+          <th></th>
+        </tr>
+      `;
+      table.appendChild(thead);
+      const tbody = document.createElement("tbody");
+      filteredPairs
+        .slice()
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 250)
+        .forEach((pair) => {
+          const tr = document.createElement("tr");
+          tr.addEventListener("click", () => {
+            const inmuebleId = String(pair?.inmueble?.id || "").trim();
+            if (inmuebleId) openInmuebleDetail(inmuebleId, "relaciones");
+          });
+          const demandaTitle = pair?.demanda?.pedido || pair?.demanda?.tipo || "Pedido";
+          const demandaMeta = [pair?.demanda?.fase, pair?.demanda?.estado].filter(Boolean).join(" · ");
+          const pedidoTd = document.createElement("td");
+          pedidoTd.className = "crm-dense-main";
+          pedidoTd.innerHTML = `<strong>${escapeHtml(demandaTitle)}</strong>${demandaMeta ? `<div class="muted">${escapeHtml(demandaMeta)}</div>` : ""}`;
+          tr.appendChild(pedidoTd);
+
+          const clienteTd = document.createElement("td");
+          clienteTd.textContent = String(pair?.demanda?.cliente || "-");
+          tr.appendChild(clienteTd);
+
+          const reqTd = document.createElement("td");
+          const reqParts = [
+            pair?.demanda?.precio_max ? `≤ ${formatCell("precio_max", pair.demanda.precio_max)}` : "",
+            pair?.demanda?.m2_min ? `≥ ${formatCell("m2_min", pair.demanda.m2_min)} m²` : "",
+            pair?.demanda?.habitaciones_min ? `Hab ≥ ${pair.demanda.habitaciones_min}` : "",
+            pair?.demanda?.banos_min ? `Baños ≥ ${pair.demanda.banos_min}` : "",
+          ].filter(Boolean);
+          reqTd.textContent = reqParts.join(" · ") || "-";
+          tr.appendChild(reqTd);
+
+          const inmTd = document.createElement("td");
+          inmTd.className = "crm-dense-main";
+          const inmAddress = buildInmuebleDisplayAddress(pair?.inmueble) || pair?.inmueble?.direccion || "-";
+          const inmStage = normalizeCrmMainEtapa(pair?.inmueble?.estado || "") || "";
+          inmTd.innerHTML = `<strong>${escapeHtml(pair?.inmueble?.referencia || inmAddress)}</strong><div class="muted">${escapeHtml([inmAddress, inmStage].filter(Boolean).join(" · ") || "-")}</div>`;
+          tr.appendChild(inmTd);
+
+          const precioTd = document.createElement("td");
+          precioTd.textContent = formatCell("precio_objetivo", pair?.inmueble?.precio_objetivo) || "";
+          tr.appendChild(precioTd);
+
+          const m2Td = document.createElement("td");
+          m2Td.textContent = formatCell("m2", pair?.inmueble?.m2) || "";
+          tr.appendChild(m2Td);
+
+          const habTd = document.createElement("td");
+          habTd.textContent = formatCell("habitaciones", pair?.inmueble?.habitaciones) || "";
+          tr.appendChild(habTd);
+
+          const banTd = document.createElement("td");
+          banTd.textContent = formatCell("banos", pair?.inmueble?.banos) || "";
+          tr.appendChild(banTd);
+
+          const scoreTd = document.createElement("td");
+          scoreTd.textContent = String(pair.score || 0);
+          tr.appendChild(scoreTd);
+
+          const actionTd = document.createElement("td");
+          const openDemBtn = document.createElement("button");
+          openDemBtn.type = "button";
+          openDemBtn.className = "secondary ghost button-inline";
+          openDemBtn.textContent = "Abrir pedido";
+          openDemBtn.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            const demandaId = String(pair?.demanda?.id || "").trim();
+            if (demandaId) openDemandaDetail(demandaId);
+          });
+          actionTd.appendChild(openDemBtn);
+          tr.appendChild(actionTd);
+
+          tbody.appendChild(tr);
+        });
+      table.appendChild(tbody);
+
+      crmRelacionesTable.innerHTML = "";
+      if (!filteredPairs.length) {
+        crmRelacionesTable.innerHTML = "<p class='muted'>Sin relaciones encontradas.</p>";
+      } else {
+        crmRelacionesTable.appendChild(table);
+      }
+      if (crmRelacionesInfo) {
+        crmRelacionesInfo.textContent = `Mostrando ${Math.min(filteredPairs.length, 250)} relaciones (top matches por pedido).`;
+      }
+    })
+    .catch(() => {
+      crmRelacionesTable.innerHTML = "<p class='muted'>No se pudieron calcular las relaciones.</p>";
+      if (crmRelacionesInfo) crmRelacionesInfo.textContent = "";
     });
 };
 
@@ -44845,6 +45257,18 @@ if (crmLightningSidebar) {
       applyCrmTecnocloudQuickSearch(String(quick.dataset.crmQuick || "").trim());
       return;
     }
+    const adminBtn = closestFromEvent(event, "[data-crm-admin]");
+    if (adminBtn) {
+      const key = String(adminBtn.dataset.crmAdmin || "").trim();
+      if (key === "users") {
+        openAdmin();
+        return;
+      }
+      if (key === "workspaces") {
+        openHolding({ mode: "tenant", view: "overview" });
+        return;
+      }
+    }
     const btn = closestFromEvent(event, "[data-crm-view]");
     if (!btn) return;
     const view = String(btn.dataset.crmView || "").trim();
@@ -45046,6 +45470,7 @@ if (crmRecentList) {
 
 if (crmRecentMenu && crmRecentBtn) {
   document.addEventListener("click", (event) => {
+    if (crmRecentMenu.classList.contains("crm-recent-menu--docked")) return;
     if (crmRecentMenu.classList.contains("hidden")) return;
     const target = event.target;
     if (crmRecentMenu.contains(target)) return;
@@ -45066,7 +45491,9 @@ if (crmGlobalSearchResults && crmGlobalSearch) {
 
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;
-  setCrmRecentOpen(false);
+  if (!crmRecentMenu || !crmRecentMenu.classList.contains("crm-recent-menu--docked")) {
+    setCrmRecentOpen(false);
+  }
   setCrmGlobalSearchResultsOpen(false);
 });
 
@@ -45393,6 +45820,41 @@ if (crmQuickSearchCard) {
   });
 }
 
+if (crmInicioMapaBtn) {
+  crmInicioMapaBtn.addEventListener("click", () => {
+    setCrmWorkspaceView("mapa_inmuebles");
+    loadCrmMapaInmuebles({ force: true });
+  });
+}
+
+if (crmInicioContactarBtn) {
+  crmInicioContactarBtn.addEventListener("click", () => {
+    setCrmWorkspaceView("clientes");
+    if (crmClientesFilter) {
+      crmClientesFilter.value = "contactar";
+    }
+    loadCrmClientes();
+  });
+}
+
+if (crmInicioObjetivosBtn) {
+  crmInicioObjetivosBtn.addEventListener("click", () => {
+    setCrmWorkspaceView("analisis");
+  });
+}
+
+if (crmInicioPanelBtn) {
+  crmInicioPanelBtn.addEventListener("click", () => {
+    setCrmWorkspaceView("analisis");
+  });
+}
+
+if (crmInicioAgendaBtn) {
+  crmInicioAgendaBtn.addEventListener("click", () => {
+    setCrmWorkspaceView("agenda");
+  });
+}
+
 if (crmNuevaCaptacionBtn) {
   crmNuevaCaptacionBtn.addEventListener("click", () => {
     goToEstudioAlta("captacion");
@@ -45467,19 +45929,34 @@ if (crmInmueblesPreset) {
 
 if (crmInmueblesMapBtn) {
   crmInmueblesMapBtn.addEventListener("click", () => {
-    // Tecnocloud: mapa con stock de la zona. Aquí abrimos el mapa externo con búsqueda.
-    const empresa = resolveCrmInmoEmpresa();
-    const base = String(empresa?.nombre || "").trim();
-    const q = String(crmInmuebleSearchMirror?.value || "").trim();
-    const query = [q, base].filter(Boolean).join(" ");
-    const url = query
-      ? `https://www.openstreetmap.org/search?query=${encodeURIComponent(query)}`
-      : "https://www.openstreetmap.org/";
-    try {
-      window.open(url, "_blank", "noopener");
-    } catch {
-      alert("No se pudo abrir el mapa en una pestaña nueva.");
-    }
+    setCrmWorkspaceView("mapa_inmuebles");
+    loadCrmMapaInmuebles({ force: true });
+  });
+}
+
+if (crmInmueblesPrintBtn) {
+  crmInmueblesPrintBtn.addEventListener("click", () => {
+    const rows = Array.isArray(cachedCrmInmuebles) ? cachedCrmInmuebles : [];
+    const html = `
+      <table>
+        <thead><tr><th>Referencia</th><th>Dirección</th><th>Estado</th><th>Propietarios</th></tr></thead>
+        <tbody>
+          ${rows
+            .slice(0, 500)
+            .map((row) => {
+              const address = buildInmuebleDisplayAddress(row) || row.direccion || "";
+              return `<tr>
+                <td>${escapeHtml(row.referencia || "")}</td>
+                <td>${escapeHtml(address)}</td>
+                <td>${escapeHtml(row.estado || "")}</td>
+                <td>${escapeHtml(row.propietarios || row.propietario || "")}</td>
+              </tr>`;
+            })
+            .join("")}
+        </tbody>
+      </table>
+    `;
+    openCrmPrintWindow({ title: "Listado de inmuebles", html });
   });
 }
 
@@ -45492,6 +45969,91 @@ if (crmClientesFilter) {
 if (crmClientesSearch) {
   crmClientesSearch.addEventListener("input", () => {
     scheduleCrmClientesReload();
+  });
+}
+
+if (crmClientesPrintBtn) {
+  crmClientesPrintBtn.addEventListener("click", () => {
+    const rows = Array.isArray(cachedCrmClientes) ? cachedCrmClientes : [];
+    const html = `
+      <table>
+        <thead><tr><th>Nombre</th><th>Teléfono</th><th>Móvil</th><th>Email</th><th>Dirección</th></tr></thead>
+        <tbody>
+          ${rows
+            .slice(0, 500)
+            .map((row) => {
+              return `<tr>
+                <td>${escapeHtml(row.nombre || "")}</td>
+                <td>${escapeHtml(row.telefono || "")}</td>
+                <td>${escapeHtml(row.movil || "")}</td>
+                <td>${escapeHtml(row.email || "")}</td>
+                <td>${escapeHtml(row.direccion || "")}</td>
+              </tr>`;
+            })
+            .join("")}
+        </tbody>
+      </table>
+    `;
+    openCrmPrintWindow({ title: "Listado de clientes", html });
+  });
+}
+
+if (crmMapaInmueblesTipo) {
+  crmMapaInmueblesTipo.addEventListener("change", () => loadCrmMapaInmuebles());
+}
+
+if (crmMapaInmueblesSearch) {
+  crmMapaInmueblesSearch.addEventListener("input", () => {
+    scheduleSave("crm-mapa-search", () => loadCrmMapaInmuebles(), 250);
+  });
+}
+
+if (crmMapaInmueblesRefresh) {
+  crmMapaInmueblesRefresh.addEventListener("click", () => loadCrmMapaInmuebles({ force: true }));
+}
+
+if (crmMapaInmueblesPrint) {
+  crmMapaInmueblesPrint.addEventListener("click", () => {
+    const tipo = normalizeCrmMapaTipo(crmMapaInmueblesTipo?.value || "inmuebles");
+    const q = String(crmMapaInmueblesSearch?.value || "").trim().toLowerCase();
+    const base = filterCrmMapaByTipo(cachedCrmMapaInmuebles, tipo).filter((row) => {
+      if (!q) return true;
+      const hay = [row.referencia, row.direccion, row.poblacion, row.provincia, row.propietarios]
+        .map((v) => String(v || "").toLowerCase())
+        .join(" ");
+      return hay.includes(q);
+    });
+    const html = `
+      <table>
+        <thead><tr><th>Referencia</th><th>Dirección</th><th>Etapa</th><th>Propietarios</th></tr></thead>
+        <tbody>
+          ${base
+            .slice(0, 500)
+            .map((row) => {
+              const address = buildInmuebleDisplayAddress(row) || row.direccion || "";
+              const etapa = normalizeCrmMainEtapa(row?.estado || "") || "";
+              return `<tr>
+                <td>${escapeHtml(row.referencia || "")}</td>
+                <td>${escapeHtml(address)}</td>
+                <td>${escapeHtml(etapa)}</td>
+                <td>${escapeHtml(row.propietarios || "")}</td>
+              </tr>`;
+            })
+            .join("")}
+        </tbody>
+      </table>
+    `;
+    openCrmPrintWindow({ title: `Mapa de ${tipo}`, html });
+  });
+}
+
+if (crmRelacionesRefresh) {
+  crmRelacionesRefresh.addEventListener("click", () => loadCrmRelacionesCruce({ force: true }));
+}
+
+if (crmRelacionesSearch) {
+  crmRelacionesSearch.addEventListener("input", () => {
+    scheduleSave("crm-relaciones-search", () => loadCrmRelacionesCruce(), 250);
   });
 }
 

@@ -3090,8 +3090,8 @@ body.crm-fin #companySummary {
 /* CRM "Lightning" (Tecnocloud-like) shell */
 #crmSection .crm-lightning-shell {
   display: grid;
-  grid-template-columns: 72px 1fr;
-  gap: 0;
+  grid-template-columns: 280px 1fr;
+  gap: 14px;
   align-items: start;
 }
 
@@ -3100,13 +3100,75 @@ body.crm-fin #companySummary {
   top: 14px;
   align-self: start;
   display: grid;
-  gap: 12px;
-  padding: 12px 8px;
-  border-radius: 16px;
-  border: 1px solid rgba(var(--gold-rgb), 0.22);
-  background:
-    linear-gradient(180deg, rgba(11, 29, 51, 0.96), rgba(6, 15, 28, 0.96));
-  color: rgba(255, 255, 255, 0.96);
+  gap: 10px;
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(15, 23, 42, 0.10);
+  background: #ffffff;
+  color: var(--ink);
+}
+
+#crmSection .tc-sidehead {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(var(--gold-rgb), 0.30);
+  background: rgba(var(--ink-rgb), 0.94);
+  color: rgba(255, 255, 255, 0.98);
+  font-family: var(--font-ui);
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  cursor: pointer;
+}
+
+#crmSection .tc-sidehead:hover {
+  background: rgba(var(--ink-rgb), 1);
+}
+
+#crmSection .tc-sidebox {
+  border-radius: 8px;
+  border: 1px solid rgba(15, 23, 42, 0.10);
+  background: rgba(248, 250, 252, 0.7);
+  overflow: hidden;
+}
+
+#crmSection .tc-sidebox-title {
+  padding: 8px 10px;
+  background: rgba(var(--gold-rgb), 0.10);
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+  color: rgba(var(--ink-rgb), 0.82);
+  font-family: var(--font-ui);
+  font-weight: 800;
+  font-size: 12px;
+}
+
+#crmSection .tc-sidebox-links {
+  display: grid;
+  gap: 2px;
+  padding: 6px;
+}
+
+#crmSection .tc-sidelink {
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: rgba(var(--ink-rgb), 0.78);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+#crmSection .tc-sidelink:hover {
+  border-color: rgba(var(--gold-rgb), 0.30);
+  background: rgba(var(--gold-rgb), 0.10);
+  color: rgba(var(--ink-rgb), 0.92);
 }
 
 #crmSection .crm-side-item {
@@ -3143,9 +3205,9 @@ body.crm-fin #companySummary {
   display: grid;
   place-items: center;
   border-radius: 14px;
-  background: rgba(var(--gold-rgb), 0.92);
-  border: 1px solid rgba(var(--gold-rgb), 0.85);
-  color: rgba(11, 29, 51, 0.98);
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(15, 23, 42, 0.10);
+  color: rgba(5, 150, 105, 0.98);
   font-family: var(--font-ui);
   font-size: 12px;
   font-weight: 700;
@@ -3164,8 +3226,8 @@ body.crm-fin #companySummary {
 }
 
 #crmSection .crm-side-new .crm-side-ico {
-  background: rgba(var(--gold-rgb), 0.98);
-  border-color: rgba(var(--gold-rgb), 0.98);
+  background: rgba(255, 255, 255, 0.98);
+  border-color: rgba(15, 23, 42, 0.12);
   font-size: 20px;
   letter-spacing: 0;
 }
@@ -3201,13 +3263,11 @@ body.crm-fin #companySummary {
   grid-template-columns: auto 1fr auto;
   align-items: center;
   gap: 12px;
-  padding: 10px 12px;
-  border-radius: 16px;
+  padding: 8px 10px;
+  border-radius: 8px;
   border: 1px solid rgba(15, 23, 42, 0.10);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(255, 255, 255, 0.96)),
-    rgba(255, 255, 255, 0.96);
-  box-shadow: 0 10px 18px rgba(11, 29, 51, 0.08);
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: none;
 }
 
 #crmSection details.crm-advanced {
@@ -3493,13 +3553,93 @@ body.crm-fin #companySummary {
 
 #crmSection .crm-workspace-tabs.crm-lightning-tabs .tab.active {
   color: rgba(var(--ink-rgb), 0.92);
-  border-bottom-color: rgba(var(--gold-rgb), 0.92);
+  border-bottom-color: rgba(var(--gold-rgb), 0.75);
+}
+
+#crmSection .tc-shortcuts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 12px 2px 6px;
+}
+
+#crmSection .tc-shortcuts button {
+  border-radius: 10px;
+  padding: 10px 14px;
+}
+
+#crmSection .tc-home-block {
+  padding: 10px 2px 2px;
+}
+
+#crmSection .crm-map-split {
+  display: grid;
+  grid-template-columns: minmax(280px, 360px) 1fr;
+  gap: 12px;
+  padding-top: 12px;
+}
+
+@media (max-width: 980px) {
+  #crmSection .crm-map-split {
+    grid-template-columns: 1fr;
+  }
+}
+
+#crmSection .crm-map-list {
+  min-width: 0;
+}
+
+#crmSection .crm-map-row {
+  width: 100%;
+  display: grid;
+  gap: 3px;
+  padding: 10px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(15, 23, 42, 0.10);
+  background: rgba(255, 255, 255, 0.92);
+  text-align: left;
+  cursor: pointer;
+}
+
+#crmSection .crm-map-row + .crm-map-row {
+  margin-top: 10px;
+}
+
+#crmSection .crm-map-row:hover {
+  border-color: rgba(var(--gold-rgb), 0.35);
+  background: rgba(var(--gold-rgb), 0.10);
+}
+
+#crmSection .crm-map-row.active {
+  border-color: rgba(var(--gold-rgb), 0.55);
+  background: rgba(var(--gold-rgb), 0.14);
+}
+
+#crmSection .crm-map-row strong {
+  font-size: 13px;
+  color: rgba(var(--ink-rgb), 0.92);
+}
+
+#crmSection .crm-map-row .muted {
+  font-size: 12px;
+}
+
+#crmSection .crm-map-canvas {
+  min-width: 0;
+}
+
+#crmSection #crmMapaInmueblesMap.map-box {
+  min-height: 520px;
 }
 #crmSection .crm-lightning-topbar-right {
   display: flex;
   align-items: center;
   justify-content: flex-end;
   gap: 10px;
+}
+
+#crmSection #crmTopNewBtn {
+  display: none;
 }
 
 #crmSection .crm-global-searchbox {
@@ -3640,6 +3780,16 @@ body.crm-fin #companySummary {
   backdrop-filter: blur(2px);
 }
 
+#crmSection .crm-insert-modal--dropdown {
+  position: static;
+  inset: auto;
+  z-index: auto;
+  display: block;
+  padding: 0;
+  background: transparent;
+  backdrop-filter: none;
+}
+
 #crmSection .crm-insert-modal.hidden {
   display: none;
 }
@@ -3653,6 +3803,15 @@ body.crm-fin #companySummary {
   background: rgba(255, 255, 255, 0.98);
   box-shadow: 0 22px 48px rgba(11, 29, 51, 0.22);
   padding: 16px;
+}
+
+#crmSection .crm-insert-modal--dropdown .crm-insert-card {
+  width: 100%;
+  max-height: 520px;
+  border-radius: 8px;
+  border: 1px solid rgba(15, 23, 42, 0.10);
+  box-shadow: none;
+  padding: 12px;
 }
 
 #crmSection .crm-insert-head {
@@ -3885,6 +4044,19 @@ body.crm-fin #companySummary {
   box-shadow: 0 16px 28px rgba(11, 29, 51, 0.18);
 }
 
+#crmSection .crm-recent-menu--docked {
+  position: static;
+  top: auto;
+  left: auto;
+  z-index: auto;
+  width: 100%;
+  padding: 0;
+  border-radius: 8px;
+  border: 1px solid rgba(15, 23, 42, 0.10);
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: none;
+}
+
 #crmSection .crm-recent-menu.hidden {
   display: none;
 }
@@ -3902,6 +4074,10 @@ body.crm-fin #companySummary {
   gap: 8px;
   max-height: min(420px, 55vh);
   overflow: auto;
+}
+
+#crmSection .crm-recent-menu--docked .crm-recent-list {
+  max-height: 260px;
 }
 
 #crmSection .crm-recent-item {
@@ -4041,7 +4217,7 @@ body.crm-fin #companySummary {
 }
 
 #inmuebleDetail .inmueble-tecno-kpis {
-  display: grid;
+  display: none;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
   margin-bottom: 10px;
@@ -4068,7 +4244,7 @@ body.crm-fin #companySummary {
 }
 
 #inmuebleDetail .inmueble-tecno-stages {
-  display: flex;
+  display: none;
   gap: 8px;
   align-items: center;
   padding: 8px 10px;
@@ -4112,7 +4288,7 @@ body.crm-fin #companySummary {
 
 #inmuebleDetail .inmueble-tecno-grid {
   display: grid;
-  grid-template-columns: 1.35fr 0.65fr;
+  grid-template-columns: 1fr;
   gap: 14px;
   align-items: start;
 }
@@ -4179,13 +4355,11 @@ body.crm-fin #companySummary {
 
   #crmSection .crm-lightning-sidebar {
     position: static;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 8px;
+    grid-template-columns: 1fr;
+    gap: 10px;
   }
 
-  #crmSection .crm-side-txt {
-    display: none;
-  }
+  #crmSection .crm-side-txt { display: none; }
 
   #crmSection .crm-quick-new-menu {
     left: 12px;
