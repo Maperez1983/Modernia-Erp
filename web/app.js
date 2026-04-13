@@ -3,7 +3,7 @@
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v93";
+const APP_SW_VERSION = "v95";
 
 // Workspace tenant por defecto del producto (branding de software). Mantiene compatibilidad con slugs legacy.
 const DEFAULT_TENANT_WORKSPACE_SLUG = "verifika2";
@@ -210,6 +210,15 @@ const randomId = () => {
   const bytes = new Uint8Array(16);
   crypto.getRandomValues(bytes);
   return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+};
+
+const isDateWithinLastDays = (rawDate, days = 5) => {
+  const value = String(rawDate || "").trim();
+  if (!value) return false;
+  const ts = Date.parse(value.length > 10 ? value : `${value}T00:00:00`);
+  if (!Number.isFinite(ts)) return false;
+  const windowMs = Math.max(1, Number(days) || 0) * 24 * 60 * 60 * 1000;
+  return (Date.now() - ts) <= windowMs;
 };
 
 const setCrmMode = (mode = "") => {
@@ -2624,13 +2633,17 @@ const crmRecentClearBtn = document.getElementById("crmRecentClearBtn");
 		const crmViewInformadores = document.getElementById("crmViewInformadores");
 		const crmViewEdificios = document.getElementById("crmViewEdificios");
 		const crmViewLegal = document.getElementById("crmViewLegal");
-	const crmResumenPulse = document.getElementById("crmResumenPulse");
-	const crmResumenHoy = document.getElementById("crmResumenHoy");
-	const crmResumenAlertas = document.getElementById("crmResumenAlertas");
-	const crmInicioNoticias = document.getElementById("crmInicioNoticias");
-	const crmInicioEncargos = document.getElementById("crmInicioEncargos");
-	const crmInicioPedidos = document.getElementById("crmInicioPedidos");
-	const crmInicioInmuebles = document.getElementById("crmInicioInmuebles");
+		const crmResumenPulse = document.getElementById("crmResumenPulse");
+		const crmResumenHoy = document.getElementById("crmResumenHoy");
+		const crmResumenAlertas = document.getElementById("crmResumenAlertas");
+		const crmHomePanelNoticias = document.getElementById("crmHomePanelNoticias");
+		const crmHomePanelEncargos = document.getElementById("crmHomePanelEncargos");
+		const crmHomePanelPedidos = document.getElementById("crmHomePanelPedidos");
+		const crmHomePanelObjetivos = document.getElementById("crmHomePanelObjetivos");
+		const crmInicioNoticias = document.getElementById("crmInicioNoticias");
+		const crmInicioEncargos = document.getElementById("crmInicioEncargos");
+		const crmInicioPedidos = document.getElementById("crmInicioPedidos");
+		const crmInicioInmuebles = document.getElementById("crmInicioInmuebles");
 	const crmResumenActividad = document.getElementById("crmResumenActividad");
 	const crmResumenInmuebles = document.getElementById("crmResumenInmuebles");
 	const crmResumenDireccionKpis = document.getElementById("crmResumenDireccionKpis");
@@ -21644,6 +21657,10 @@ const renderEditableGrid = (grid, fields, data, target) => {
     if (field && field.hidden) {
       return;
     }
+    // Tecnocloud: "Zona" es prescindible para este flujo (no borramos datos, solo ocultamos el campo).
+    if ((target === "inmueble" || target === "captacion") && normalizeSimple(field.key || "") === "zona") {
+      return;
+    }
     // Simplificación precios Inmobiliaria: solo 2 precios visibles según etapa.
     if (target === "inmueble" || target === "captacion") {
       if (field.key === "precio_objetivo") return;
@@ -24760,6 +24777,8 @@ const updateTableVisibility = () => {
   // pestañas de otros servicios (Seguros/Financiaciones/Campañas/etc) porque confunde.
   // Los accesos a otros verticales se hacen desde Home/Workspaces, no desde el tab-bar del vertical actual.
   if (viewTabs) {
+    // Dentro del CRM inmobiliario el tab-bar general se considera duplicado (confunde).
+    viewTabs.classList.toggle("hidden", currentTab === "crm");
     const allowedByContext = (() => {
       // Si el usuario entra en Clientes desde un vertical (p.ej. Inmobiliaria),
       // restringimos el tab-bar a lo mínimo necesario para esa operativa.
@@ -30903,6 +30922,34 @@ const renderCrmResumenYtdBoard = async ({ force = false } = {}) => {
 
 let crmInicioDragPayload = null;
 
+const renderCrmHomeAgendaPreview = () => {
+  const container = document.getElementById("crmHomeAgendaPreview");
+  if (!container) return;
+  const rows = Array.isArray(state.crmAgendaRowsAll) ? state.crmAgendaRowsAll : [];
+  if (!rows.length) {
+    container.innerHTML = "<p class='muted'>Sin actividades registradas.</p>";
+    return;
+  }
+  const isDone = (row) => normalizeSimple(row?.estado || "") === "realizada";
+  const items = rows
+    .filter((row) => !isDone(row))
+    .map((row) => {
+      const fecha = String(row?.fecha || "").trim();
+      const hora = String(row?.hora || "").trim();
+      const ts = parseCrmDateTime(fecha, hora) || 0;
+      return { ...row, __ts: ts };
+    })
+    .sort((a, b) => (a.__ts || 0) - (b.__ts || 0))
+    .slice(0, 8)
+    .map((row) => ({
+      crmView: "agenda",
+      title: row.asunto || row.tipo || "Actividad",
+      meta: [row.fecha || "", row.hora || ""].filter(Boolean).join(" ").trim(),
+      summary: [row.cliente || "", row.estado || ""].filter(Boolean).join(" · "),
+    }));
+  renderCrmActionList(container, items, "Sin próximas acciones.");
+};
+
 const renderCrmInicioBoard = (pipelineItems = []) => {
   if (!crmInicioBoard) return;
   const items = Array.isArray(pipelineItems) ? pipelineItems : [];
@@ -31069,6 +31116,25 @@ const renderCrmResumenDashboard = () => {
     .filter((row) => row && String(row.inmueble_id || "").trim());
   const stageCount = (name) => pipelineItems.filter((row) => row.stage === name).length;
   const activePipelineItems = pipelineItems.filter((row) => !isClosedStage(row.stage));
+
+  const kpiNoticias = document.getElementById("crmHomeKpiNoticias");
+  if (kpiNoticias) {
+    kpiNoticias.textContent = String(stageCount("Noticia"));
+  }
+  const kpiClientesWeb = document.getElementById("crmHomeKpiClientesWeb");
+  if (kpiClientesWeb) {
+    const rows = Array.isArray(cachedCrmClientes) ? cachedCrmClientes : [];
+    const count = rows.filter((row) => String(row?.cliente_generico_web || "").trim() === "1").length;
+    kpiClientesWeb.textContent = String(count);
+  }
+  const kpiPedidosNuevos = document.getElementById("crmHomeKpiPedidosNuevos");
+  if (kpiPedidosNuevos) {
+    const rows = Array.isArray(cachedCrmDemandas) ? cachedCrmDemandas : [];
+    const count = rows.filter((row) => isDateWithinLastDays(row?.created_at || row?.updated_at || "", 5)).length;
+    kpiPedidosNuevos.textContent = String(count);
+  }
+
+  renderCrmHomeAgendaPreview();
 
   if (crmInicioBoard) {
     renderCrmInicioBoard(pipelineItems);
@@ -31506,6 +31572,79 @@ const renderCrmResumenDashboard = () => {
       },
     ];
     renderCrmActionList(crmResumenAlertas, alerts, "Sin alertas activas.");
+  }
+
+  // Home Tecnocloud-like: paneles de gestión (sin duplicar el dashboard general).
+  if (crmHomePanelNoticias || crmHomePanelEncargos || crmHomePanelPedidos || crmHomePanelObjetivos) {
+    const stageLabel = (row) => normalizeStageLabel(row?.stage || row?.etapa || row?.estado || "");
+    const isNoticia = (row) => stageLabel(row) === "Noticia";
+    const isEncargo = (row) => stageLabel(row) === "Encargo";
+    const isPropuesta = (row) => stageLabel(row) === "Propuesta";
+
+    const noticias = activePipelineItems.filter(isNoticia);
+    const noticiasSinVerificar = noticias.filter((row) => !row.noticia_verificada).length;
+    const noticiasSinProxima = noticias.filter((row) => !String(row.proxima_accion || "").trim()).length;
+    const noticiasValoradas = noticias.filter((row) => {
+      const valor = Number(row.precio_valoracion || 0);
+      const desvi = Number(row.desviacion_pct || 0);
+      return (Number.isFinite(valor) && valor > 0) || (Number.isFinite(desvi) && desvi > 0 && desvi <= 10);
+    }).length;
+
+    const encargos = activePipelineItems.filter((row) => isEncargo(row) || isPropuesta(row));
+    const encargosActivos = encargos.filter(isEncargo).length;
+    const propuestasPendientes = encargos.filter(isPropuesta).length;
+    const encargosSinProxima = encargos.filter((row) => !String(row.proxima_accion || "").trim()).length;
+
+    const pendingVisits = visitas.filter((row) => normalizeSimple(row.estado || "").includes("pendiente")).length;
+    const demandasActivas = demandas.filter((row) => normalizeSimple(row.estado || "") === "activa").length;
+    const urgentDemandas = demandas.filter((row) => normalizeSimple(row.prioridad || "") === "alta" && normalizeSimple(row.estado || "") === "activa").length;
+
+    if (crmHomePanelNoticias) {
+      renderCrmActionList(
+        crmHomePanelNoticias,
+        [
+          { title: "Noticias sin verificar", summary: `${noticiasSinVerificar} pendientes.`, crmQuick: "captaciones:quick_noticia_sin_verificar" },
+          { title: "Noticias valoradas / <10%", summary: `${noticiasValoradas} con valoración o desviación baja.`, crmView: "captaciones", etapa: "Noticia" },
+          { title: "Sin próxima acción", summary: `${noticiasSinProxima} sin siguiente paso.`, crmQuick: "captaciones:quick_sin_proxima_accion" },
+        ],
+        "Sin noticias pendientes."
+      );
+    }
+
+    if (crmHomePanelEncargos) {
+      renderCrmActionList(
+        crmHomePanelEncargos,
+        [
+          { title: "Encargos activos", summary: `${encargosActivos} en comercialización.`, crmView: "captaciones", etapa: "Encargo" },
+          { title: "Propuestas pendientes", summary: `${propuestasPendientes} a la espera.`, crmView: "captaciones", etapa: "Propuesta" },
+          { title: "Sin próxima acción", summary: `${encargosSinProxima} sin siguiente hito.`, crmQuick: "captaciones:quick_sin_proxima_accion" },
+        ],
+        "Sin encargos/propuestas pendientes."
+      );
+    }
+
+    if (crmHomePanelPedidos) {
+      renderCrmActionList(
+        crmHomePanelPedidos,
+        [
+          { title: "Demandas activas", summary: `${demandasActivas} compradores.`, crmView: "demandas", crmQuick: "demandas:activa" },
+          { title: "Demandas urgentes", summary: `${urgentDemandas} prioridad alta.`, crmView: "demandas" },
+          { title: "Visitas por cerrar", summary: `${pendingVisits} pendientes de resultado.`, crmQuick: "visitas:pendiente" },
+        ],
+        "Sin foco de pedidos."
+      );
+    }
+
+    if (crmHomePanelObjetivos) {
+      renderCrmActionList(
+        crmHomePanelObjetivos,
+        [
+          { title: "Informe análisis de datos", summary: "KPIs y embudo comercial.", crmView: "analisis" },
+          { title: "Objetivos", summary: "Revisar metas por asesor/agencia.", crmView: "analisis" },
+        ],
+        "Sin objetivos configurados."
+      );
+    }
   }
 
   if (crmResumenActividad) {
@@ -33555,11 +33694,13 @@ const loadCrmAgenda = () => {
   }
   const params = new URLSearchParams({ empresa_id: empresa.id, servicio: "inmobiliaria" });
   api(`/api/acciones?${params.toString()}`).then((data) => {
-	    const rows = Array.isArray(data.rows) ? data.rows : [];
-	    const q = String(crmAgendaSearch?.value || "").trim().toLowerCase();
-	    const estadoFilter = normalizeSimple(crmAgendaEstadoFilter?.value || "");
-	    const az = String(state.crmAz?.agenda || "").trim().toUpperCase();
-	    const filtered = rows.filter((row) => {
+		    const rows = Array.isArray(data.rows) ? data.rows : [];
+        state.crmAgendaRowsAll = rows;
+        renderCrmHomeAgendaPreview();
+		    const q = String(crmAgendaSearch?.value || "").trim().toLowerCase();
+		    const estadoFilter = normalizeSimple(crmAgendaEstadoFilter?.value || "");
+		    const az = String(state.crmAz?.agenda || "").trim().toUpperCase();
+		    const filtered = rows.filter((row) => {
 	      if (!matchTcAz(az, row.cliente || row.asunto || row.tipo || "")) return false;
 	      const haystack = [
 	        row.asunto,
@@ -45027,6 +45168,13 @@ brandHome.addEventListener("click", () => {
   goHome();
 });
 
+const crmExitBtn = document.getElementById("crmExitBtn");
+if (crmExitBtn) {
+  crmExitBtn.addEventListener("click", () => {
+    goHome();
+  });
+}
+
 if (coreCards) {
   coreCards.addEventListener("click", (event) => {
     const target = closestFromEvent(event, "[data-action]");
@@ -45802,7 +45950,24 @@ if (crmSection) {
   crmSection.addEventListener("click", (event) => {
     const kpiLink = closestFromEvent(event, ".kpi-clickable[data-crm-view], .crm-focus-link[data-crm-view]");
     if (kpiLink) {
-      setCrmWorkspaceView(kpiLink.dataset.crmView);
+      const view = String(kpiLink.dataset.crmView || "").trim();
+      if (view) setCrmWorkspaceView(view);
+      const etapa = String(kpiLink.dataset.etapa || "").trim();
+      if (view === "captaciones" && etapa) {
+        if (crmEtapaFilter) crmEtapaFilter.value = etapa;
+        if (crmEtapaFilterMirror) crmEtapaFilterMirror.value = etapa;
+        loadCrmCaptaciones();
+      }
+      const quick = String(kpiLink.dataset.crmQuick || "").trim();
+      if (quick) {
+        applyCrmTecnocloudQuickSearch(quick);
+      }
+      return;
+    }
+    const quickLink = closestFromEvent(event, "[data-crm-quick]");
+    if (quickLink) {
+      const token = String(quickLink.dataset.crmQuick || "").trim();
+      if (token) applyCrmTecnocloudQuickSearch(token);
       return;
     }
     const actionLink = closestFromEvent(event, ".crm-quick-action[data-crm-action]");

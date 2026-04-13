@@ -58,6 +58,48 @@ body.auth-locked main {
   visibility: hidden;
 }
 
+/* Cuando el usuario está dentro del CRM inmobiliario queremos "modo app": sin header global ni alertas generales. */
+body.crm-context-inmo header {
+  display: none;
+}
+
+body.crm-context-inmo #renewalAlert,
+body.crm-context-inmo #legalRadarAlert {
+  display: none;
+}
+
+body.crm-context-inmo main {
+  max-width: none;
+  padding: 0;
+}
+
+body.crm-context-inmo #explorerSection {
+  border: none;
+  border-top: none;
+  box-shadow: none;
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
+}
+
+body.crm-context-inmo #explorerSection > .section-head {
+  display: none;
+}
+
+/* Dentro del CRM inmobiliario no debe verse el tab-bar general ni los elementos del explorador legacy. */
+body.crm-context-inmo #viewTabs,
+body.crm-context-inmo #companySummary,
+body.crm-context-inmo #tableToolbar,
+body.crm-context-inmo #tableContainer,
+body.crm-context-inmo #tableInfo,
+body.crm-context-inmo #bdtSection {
+  display: none !important;
+}
+
+body.crm-context-inmo {
+  overflow-x: hidden;
+}
+
 body.modal-open {
   overflow: hidden;
 }
@@ -3090,7 +3132,7 @@ body.crm-fin #companySummary {
 /* CRM "Lightning" (Tecnocloud-like) shell */
 #crmSection .crm-lightning-shell {
   display: grid;
-  grid-template-columns: 280px 1fr;
+  grid-template-columns: 110px 1fr;
   gap: 14px;
   align-items: start;
 }
@@ -3102,10 +3144,12 @@ body.crm-fin #companySummary {
   display: grid;
   gap: 10px;
   padding: 12px;
-  border-radius: 8px;
+  border-radius: 16px;
   border: 1px solid rgba(15, 23, 42, 0.10);
-  background: #ffffff;
-  color: var(--ink);
+  background:
+    radial-gradient(circle at 30% -20%, rgba(255, 255, 255, 0.18), transparent 58%),
+    linear-gradient(180deg, rgba(var(--sage-rgb), 0.92), rgba(19, 122, 72, 0.92));
+  color: rgba(255, 255, 255, 0.98);
 }
 
 #crmSection .tc-sidehead {
@@ -3185,13 +3229,13 @@ body.crm-fin #companySummary {
 }
 
 #crmSection .crm-side-item:hover {
-  background: rgba(255, 255, 255, 0.12);
-  border-color: rgba(255, 255, 255, 0.20);
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.18);
 }
 
 #crmSection .crm-side-item.active {
-  background: rgba(255, 255, 255, 0.16);
-  border-color: rgba(255, 255, 255, 0.24);
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.26);
 }
 
 #crmSection .crm-side-item:focus-visible {
@@ -3205,9 +3249,9 @@ body.crm-fin #companySummary {
   display: grid;
   place-items: center;
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.92);
-  border: 1px solid rgba(15, 23, 42, 0.10);
-  color: rgba(5, 150, 105, 0.98);
+  background: rgba(255, 255, 255, 0.16);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  color: rgba(255, 255, 255, 0.98);
   font-family: var(--font-ui);
   font-size: 12px;
   font-weight: 700;
@@ -3226,8 +3270,9 @@ body.crm-fin #companySummary {
 }
 
 #crmSection .crm-side-new .crm-side-ico {
-  background: rgba(255, 255, 255, 0.98);
-  border-color: rgba(15, 23, 42, 0.12);
+  background: rgba(255, 255, 255, 0.96);
+  border-color: rgba(255, 255, 255, 0.55);
+  color: rgba(19, 122, 72, 0.98);
   font-size: 20px;
   letter-spacing: 0;
 }
@@ -3241,12 +3286,61 @@ body.crm-fin #companySummary {
 
 #crmSection .crm-side-sep {
   height: 1px;
-  background: rgba(248, 250, 252, 0.12);
+  background: rgba(255, 255, 255, 0.22);
   margin: 4px 6px 2px;
 }
 
 #crmSection .crm-side-grow {
   min-height: 8px;
+}
+
+#crmSection details.crm-side-more {
+  position: relative;
+  border: none;
+  background: transparent;
+  padding: 0;
+}
+
+#crmSection details.crm-side-more summary {
+  width: 100%;
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  padding: 10px 6px;
+  border-radius: 14px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+}
+
+#crmSection details.crm-side-more summary:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+#crmSection details.crm-side-more summary::before {
+  display: none;
+}
+
+#crmSection .crm-side-more-panel {
+  display: none;
+}
+
+#crmSection details.crm-side-more[open] .crm-side-more-panel {
+  display: grid;
+  gap: 10px;
+  position: absolute;
+  left: calc(100% + 10px);
+  bottom: 0;
+  width: min(360px, 72vw);
+  padding: 12px;
+  border-radius: 16px;
+  border: 1px solid rgba(15, 23, 42, 0.16);
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 16px 28px rgba(11, 29, 51, 0.18);
+  color: var(--ink);
+  z-index: 55;
 }
 
 #crmSection .crm-lightning-main {
@@ -3498,9 +3592,25 @@ body.crm-fin #companySummary {
 }
 
 #crmSection .crm-lightning-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 2px 8px 2px 4px;
+}
+
+#crmSection .crm-lightning-logo {
+  width: 34px;
+  height: 34px;
+  object-fit: contain;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(15, 23, 42, 0.10);
+  padding: 4px;
+}
+
+#crmSection .crm-lightning-brand-copy {
   display: grid;
   gap: 2px;
-  padding: 2px 8px 2px 4px;
 }
 
 #crmSection .crm-lightning-brand-title {
@@ -3526,11 +3636,9 @@ body.crm-fin #companySummary {
   border-radius: 0;
   border: none;
   background: transparent;
-  flex-wrap: nowrap;
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
-  scroll-snap-type: x proximity;
-  gap: 16px;
+  flex-wrap: wrap;
+  overflow-x: visible;
+  gap: 12px;
 }
 
 #crmSection .crm-workspace-tabs.crm-lightning-tabs .tab {
@@ -3544,7 +3652,6 @@ body.crm-fin #companySummary {
   font-size: 13px;
   font-weight: 600;
   color: rgba(var(--ink-rgb), 0.74);
-  scroll-snap-align: start;
 }
 
 #crmSection .crm-workspace-tabs.crm-lightning-tabs .tab:hover {
@@ -3639,7 +3746,11 @@ body.crm-fin #companySummary {
 }
 
 #crmSection #crmTopNewBtn {
-  display: none;
+  display: inline-flex;
+}
+
+#crmSection #crmExitBtn {
+  display: inline-flex;
 }
 
 #crmSection .crm-global-searchbox {
@@ -3875,6 +3986,8 @@ body.crm-fin #companySummary {
   border: 1px solid rgba(15, 23, 42, 0.10);
   border-radius: 8px;
   padding: 8px;
+  max-width: 100%;
+  overflow-x: auto;
 }
 
 #crmSection .tc-title {
@@ -4106,6 +4219,26 @@ body.crm-fin #companySummary {
   font-size: 12px;
 }
 
+body.crm-context-inmo #inmuebleDetail > .section-head {
+  padding: 0;
+  border: none;
+  background: transparent;
+}
+
+body.crm-context-inmo #inmuebleDetail > .section-head .form-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+body.crm-context-inmo #inmuebleDetail > .section-head .form-actions > :not(#inmuebleBackBtn):not(#inmuebleSaveStatus) {
+  display: none;
+}
+
+body.crm-context-inmo #inmuebleDetail .inmueble-advanced {
+  display: none;
+}
+
 #inmuebleDetail .form-section span {
   display: inline;
 }
@@ -4217,7 +4350,7 @@ body.crm-fin #companySummary {
 }
 
 #inmuebleDetail .inmueble-tecno-kpis {
-  display: none;
+  display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
   margin-bottom: 10px;
@@ -4244,7 +4377,7 @@ body.crm-fin #companySummary {
 }
 
 #inmuebleDetail .inmueble-tecno-stages {
-  display: none;
+  display: flex;
   gap: 8px;
   align-items: center;
   padding: 8px 10px;
@@ -4252,7 +4385,7 @@ body.crm-fin #companySummary {
   border: 1px solid rgba(15, 23, 42, 0.10);
   background: rgba(248, 250, 252, 0.92);
   margin-bottom: 12px;
-  overflow-x: auto;
+  overflow-x: visible;
 }
 
 #inmuebleDetail .inmueble-tecno-stage {
