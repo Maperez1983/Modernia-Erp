@@ -4642,6 +4642,30 @@ def verify_password(password, password_hash):
     return runtime_verify_password(password, password_hash)
 
 
+def normalize_password_input(value):
+    """
+    Normaliza entrada de password para evitar fallos por copiado/pegado:
+    - recorta espacios/saltos al principio/fin
+    - elimina caracteres zero-width comunes (WhatsApp/Slack)
+    - normaliza unicode (NFKC)
+
+    Nota: en verificación de credenciales probamos primero el valor raw para
+    no romper contraseñas existentes que incluyan espacios intencionalmente.
+    """
+    try:
+        text = str(value or "")
+    except Exception:
+        return ""
+    try:
+        text = unicodedata.normalize("NFKC", text)
+    except Exception:
+        pass
+    # Zero-width chars: ZWSP, ZWNJ, ZWJ, BOM
+    for ch in ("\u200b", "\u200c", "\u200d", "\ufeff"):
+        text = text.replace(ch, "")
+    return text.strip()
+
+
 def _cleanup_expired_sessions():
     now = time.time()
     expired = []
@@ -30767,8 +30791,9 @@ class Handler(BaseHTTPRequestHandler):
 
         if parsed.path == "/api/login":
             usuario_raw = str(payload.get("usuario") or payload.get("email") or "").strip()
-            password = str(payload.get("password") or "")
-            if not usuario_raw or not password:
+            password_raw = str(payload.get("password") or "")
+            password_norm = normalize_password_input(password_raw)
+            if not usuario_raw or not password_norm:
                 json_response(self, {"error": "usuario y contraseña requeridos"}, status=400)
                 return
             ip = _get_client_ip(self)
@@ -30798,14 +30823,19 @@ class Handler(BaseHTTPRequestHandler):
             first_password_set = False
             stored_hash = row["password_hash"]
             if stored_hash:
-                if not verify_password(password, stored_hash):
+                password_used = None
+                if verify_password(password_raw, stored_hash):
+                    password_used = password_raw
+                elif password_norm != password_raw and verify_password(password_norm, stored_hash):
+                    password_used = password_norm
+                if not password_used:
                     register_login_attempt(ip, usuario_raw, ok=False)
                     json_response(self, {"error": "Usuario o contraseña incorrectos"}, status=401)
                     return
                 if needs_password_rehash(stored_hash):
                     conn.execute(
                         "UPDATE usuarios SET password_hash = ?, updated_at = datetime('now') WHERE id = ?",
-                        (hash_password(password), row["id"]),
+                        (hash_password(password_used), row["id"]),
                     )
                     conn.commit()
                     row = conn.execute(
@@ -30820,12 +30850,12 @@ class Handler(BaseHTTPRequestHandler):
                     register_login_attempt(ip, usuario_raw, ok=False)
                     json_response(self, {"error": "Usuario sin contraseña inicializada"}, status=403)
                     return
-                if len(password) < 8:
+                if len(password_norm) < 8:
                     json_response(self, {"error": "La contraseña debe tener al menos 8 caracteres"}, status=400)
                     return
                 conn.execute(
                     "UPDATE usuarios SET password_hash = ?, updated_at = datetime('now') WHERE id = ?",
-                    (hash_password(password), row["id"]),
+                    (hash_password(password_norm), row["id"]),
                 )
                 conn.commit()
                 first_password_set = True
@@ -30851,7 +30881,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if parsed.path == "/api/auth_set_password":
             token = str(payload.get("token") or "").strip()
-            password = str(payload.get("password") or "")
+            password = normalize_password_input(payload.get("password"))
             if not token or not password:
                 json_response(self, {"error": "token y password requeridos"}, status=400)
                 return
