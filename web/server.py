@@ -45222,6 +45222,10 @@ class Handler(BaseHTTPRequestHandler):
                 limit_n = max(1, min(200, int(limit or "60")))
             except Exception:
                 limit_n = 60
+            try:
+                ensure_column(conn, "inmuebles", "certificado", "certificado INTEGER NOT NULL DEFAULT 0")
+            except Exception:
+                pass
 
             where = [
                 "EXISTS (SELECT 1 FROM captaciones c WHERE c.inmueble_id = i.id AND COALESCE(c.noticia_verificada, 0) = 1)"
@@ -45237,10 +45241,6 @@ class Handler(BaseHTTPRequestHandler):
                 where.append("(LOWER(COALESCE(i.titulo, '')) LIKE ? OR LOWER(COALESCE(i.descripcion, '')) LIKE ?)")
                 values.extend([f"%{q}%", f"%{q}%"])
             if certificado_only:
-                try:
-                    ensure_column(conn, "inmuebles", "certificado", "certificado INTEGER NOT NULL DEFAULT 0")
-                except Exception:
-                    pass
                 where.append("COALESCE(i.certificado, 0) = 1")
 
             where_clause = " AND ".join(where) if where else "1=1"
@@ -45301,6 +45301,10 @@ class Handler(BaseHTTPRequestHandler):
             if not inmueble_id:
                 json_response(self, {"ok": False, "error": "missing_id"}, status=400)
                 return
+            try:
+                ensure_column(conn, "inmuebles", "certificado", "certificado INTEGER NOT NULL DEFAULT 0")
+            except Exception:
+                pass
             row = conn.execute(
                 """
                 SELECT
