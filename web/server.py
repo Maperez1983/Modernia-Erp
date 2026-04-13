@@ -18262,6 +18262,238 @@ def open_sqlite_conn(db_path, with_row_factory=False):
     return conn
 
 
+def _sqlite_table_columns(conn, table_name: str) -> set:
+    if not conn or not table_name:
+        return set()
+    try:
+        rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+    except Exception:
+        return set()
+    cols = set()
+    for row in rows or []:
+        try:
+            # PRAGMA table_info returns: cid, name, type, notnull, dflt_value, pk
+            cols.add(str(row[1] or "").strip())
+        except Exception:
+            continue
+    return {c for c in cols if c}
+
+
+def _sqlite_select_all_with_columns(conn, table_name: str, columns: list[str]) -> list:
+    if not conn or not table_name:
+        return []
+    try:
+        if not _table_exists_sqlite(conn, table_name):
+            return []
+    except Exception:
+        return []
+    cols_existing = _sqlite_table_columns(conn, table_name)
+    if not cols_existing:
+        return []
+    select_exprs = []
+    for col in columns or []:
+        col = str(col or "").strip()
+        if not col:
+            continue
+        if col in cols_existing:
+            select_exprs.append(col)
+        else:
+            select_exprs.append(f"NULL AS {col}")
+    if not select_exprs:
+        return []
+    sql = f"SELECT {', '.join(select_exprs)} FROM {table_name}"
+    try:
+        return conn.execute(sql).fetchall() or []
+    except Exception:
+        return []
+
+
+def _sync_auth_from_sqlite_to_postgres(pg_conn, sqlite_db_path: str) -> dict:
+    """
+    Best-effort: when Postgres is enabled but legacy SQLite still contains auth/workspace data,
+    copy users/memberships to Postgres to avoid "usuarios desaparecidos".
+
+    Runs one-way (SQLite -> Postgres). Designed to be safe to call multiple times.
+    """
+    if not pg_conn:
+        return {"ok": False, "reason": "missing_pg_conn"}
+    try:
+        backend = getattr(pg_conn, "__crm_backend__", "") or ""
+    except Exception:
+        backend = ""
+    if backend != "postgres":
+        return {"ok": True, "skipped": True, "reason": "not_postgres_backend"}
+
+    sqlite_path = str(sqlite_db_path or "").strip()
+    if not sqlite_path:
+        return {"ok": True, "skipped": True, "reason": "missing_sqlite_path"}
+    try:
+        p = Path(sqlite_path)
+    except Exception:
+        p = None
+    if not p or (not p.exists()):
+        return {"ok": True, "skipped": True, "reason": "sqlite_not_found"}
+
+    sqlite_conn = None
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        sqlite_conn = open_sqlite_conn(str(p), with_row_factory=True)
+
+        # --- usuarios ---
+        user_cols = [
+            "id",
+            "nombre",
+            "apellido",
+            "usuario",
+            "email",
+            "servicio",
+            "rol",
+            "registro_horario_activo",
+            "password_hash",
+            "activo",
+            "invite_token",
+            "invite_expires_at",
+            "invite_sent_at",
+            "created_at",
+            "updated_at",
+        ]
+        sqlite_users = _sqlite_select_all_with_columns(sqlite_conn, "usuarios", user_cols)
+        try:
+            sqlite_users_total = int((sqlite_conn.execute("SELECT COUNT(*) AS n FROM usuarios").fetchone() or {}).get("n") or 0)
+        except Exception:
+            try:
+                sqlite_users_total = int((sqlite_conn.execute("SELECT COUNT(*) FROM usuarios").fetchone() or [0])[0] or 0)
+            except Exception:
+                sqlite_users_total = len(sqlite_users or [])
+        try:
+            pg_users_total = int(row_value(pg_conn.execute("SELECT COUNT(*) AS n FROM usuarios").fetchone(), "n", 0) or 0)
+        except Exception:
+            pg_users_total = 0
+
+        users_upserted = 0
+        users_skipped = 0
+        if sqlite_users_total > pg_users_total and sqlite_users_total > 0:
+            for row in sqlite_users or []:
+                user_id = str(row_value(row, "id", "") or "").strip()
+                if not user_id:
+                    users_skipped += 1
+                    continue
+                payload = {
+                    "id": user_id,
+                    "nombre": str(row_value(row, "nombre", "") or "").strip() or "Usuario",
+                    "apellido": str(row_value(row, "apellido", "") or "").strip() or None,
+                    "usuario": str(row_value(row, "usuario", "") or "").strip() or None,
+                    "email": str(row_value(row, "email", "") or "").strip() or None,
+                    "servicio": str(row_value(row, "servicio", "") or "").strip() or None,
+                    "rol": str(row_value(row, "rol", "") or "").strip() or None,
+                    "registro_horario_activo": int(row_value(row, "registro_horario_activo", 0) or 0),
+                    "password_hash": str(row_value(row, "password_hash", "") or "").strip() or None,
+                    "activo": int(row_value(row, "activo", 1) or 1),
+                    "invite_token": str(row_value(row, "invite_token", "") or "").strip() or None,
+                    "invite_expires_at": str(row_value(row, "invite_expires_at", "") or "").strip() or None,
+                    "invite_sent_at": str(row_value(row, "invite_sent_at", "") or "").strip() or None,
+                    "created_at": str(row_value(row, "created_at", "") or "").strip() or now,
+                    "updated_at": str(row_value(row, "updated_at", "") or "").strip() or now,
+                }
+                try:
+                    pg_conn.execute(
+                        """
+                        INSERT INTO usuarios (
+                          id, nombre, apellido, usuario, email, servicio, rol,
+                          registro_horario_activo, password_hash, activo,
+                          invite_token, invite_expires_at, invite_sent_at,
+                          created_at, updated_at
+                        ) VALUES (
+                          ?, ?, ?, ?, ?, ?, ?,
+                          ?, ?, ?,
+                          ?, ?, ?,
+                          ?, ?
+                        )
+                        ON CONFLICT (id) DO UPDATE
+                        SET nombre = EXCLUDED.nombre,
+                            apellido = COALESCE(NULLIF(usuarios.apellido, ''), EXCLUDED.apellido),
+                            usuario = COALESCE(NULLIF(usuarios.usuario, ''), EXCLUDED.usuario),
+                            email = COALESCE(NULLIF(usuarios.email, ''), EXCLUDED.email),
+                            servicio = COALESCE(NULLIF(usuarios.servicio, ''), EXCLUDED.servicio),
+                            rol = COALESCE(NULLIF(usuarios.rol, ''), EXCLUDED.rol),
+                            registro_horario_activo = GREATEST(COALESCE(usuarios.registro_horario_activo, 0), COALESCE(EXCLUDED.registro_horario_activo, 0)),
+                            password_hash = COALESCE(NULLIF(usuarios.password_hash, ''), EXCLUDED.password_hash),
+                            activo = GREATEST(COALESCE(usuarios.activo, 1), COALESCE(EXCLUDED.activo, 1)),
+                            invite_token = COALESCE(NULLIF(usuarios.invite_token, ''), EXCLUDED.invite_token),
+                            invite_expires_at = COALESCE(NULLIF(usuarios.invite_expires_at, ''), EXCLUDED.invite_expires_at),
+                            invite_sent_at = COALESCE(NULLIF(usuarios.invite_sent_at, ''), EXCLUDED.invite_sent_at),
+                            created_at = COALESCE(NULLIF(usuarios.created_at, ''), EXCLUDED.created_at),
+                            updated_at = EXCLUDED.updated_at
+                        """,
+                        (
+                            payload["id"],
+                            payload["nombre"],
+                            payload["apellido"],
+                            payload["usuario"],
+                            payload["email"],
+                            payload["servicio"],
+                            payload["rol"],
+                            payload["registro_horario_activo"],
+                            payload["password_hash"],
+                            payload["activo"],
+                            payload["invite_token"],
+                            payload["invite_expires_at"],
+                            payload["invite_sent_at"],
+                            payload["created_at"],
+                            payload["updated_at"],
+                        ),
+                    )
+                    users_upserted += 1
+                except Exception:
+                    users_skipped += 1
+
+        # --- workspace_miembros (best-effort) ---
+        memb_cols = ["id", "workspace_id", "usuario_id", "rol", "created_at", "updated_at"]
+        sqlite_membs = _sqlite_select_all_with_columns(sqlite_conn, "workspace_miembros", memb_cols)
+        memb_upserted = 0
+        memb_skipped = 0
+        for row in sqlite_membs or []:
+            ws_id = str(row_value(row, "workspace_id", "") or "").strip()
+            uid = str(row_value(row, "usuario_id", "") or "").strip()
+            if not ws_id or not uid:
+                memb_skipped += 1
+                continue
+            mid = str(row_value(row, "id", "") or "").strip() or os.urandom(16).hex()
+            rol = str(row_value(row, "rol", "") or "").strip() or "Miembro"
+            created_at = str(row_value(row, "created_at", "") or "").strip() or now
+            updated_at = str(row_value(row, "updated_at", "") or "").strip() or now
+            try:
+                pg_conn.execute(
+                    """
+                    INSERT INTO workspace_miembros (id, workspace_id, usuario_id, rol, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT (workspace_id, usuario_id) DO UPDATE
+                    SET rol = EXCLUDED.rol,
+                        updated_at = EXCLUDED.updated_at
+                    """,
+                    (mid, ws_id, uid, rol, created_at, updated_at),
+                )
+                memb_upserted += 1
+            except Exception:
+                memb_skipped += 1
+
+        return {
+            "ok": True,
+            "sqlite_users_total": sqlite_users_total,
+            "pg_users_total": pg_users_total,
+            "users_upserted": users_upserted,
+            "users_skipped": users_skipped,
+            "memberships_upserted": memb_upserted,
+            "memberships_skipped": memb_skipped,
+        }
+    finally:
+        try:
+            if sqlite_conn:
+                sqlite_conn.close()
+        except Exception:
+            pass
+
+
 def ensure_tables(db_path):
     if db_is_postgres_enabled():
         conn = open_postgres_conn(with_row_factory=False)
@@ -19641,6 +19873,19 @@ def ensure_tables(db_path):
         "CREATE INDEX IF NOT EXISTS idx_postal_cp ON postal_catalogo(codigo_postal)"
     )
     ensure_usuarios_schema(conn)
+    # Sync auth tables from legacy SQLite when Postgres is enabled (prevents "usuarios desaparecidos").
+    try:
+        if db_is_postgres_enabled() and (not _migration_done(conn, "auth_sync_sqlite_to_pg_v1")):
+            sync_res = _sync_auth_from_sqlite_to_postgres(conn, db_path)
+            try:
+                if int(sync_res.get("users_upserted") or 0) > 0:
+                    # Asegura acceso en instalaciones multi-workspace tras recuperar usuarios.
+                    ensure_workspace_membership_backfill(conn)
+            except Exception:
+                pass
+            _migration_mark(conn, "auth_sync_sqlite_to_pg_v1")
+    except Exception:
+        pass
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS cnae_catalogo (
@@ -43085,7 +43330,12 @@ class Handler(BaseHTTPRequestHandler):
             )
             audit("inmueble_docs", doc_id, "Subir documento", usuario=payload.get("usuario"))
             sync_inmueble_docs_for_inmueble(conn, inmueble_id, now)
+            conn.commit()
+            json_response(self, {"ok": True, "id": doc_id, "url": url})
+            return
+
         elif parsed.path == "/api/demandas":
+            demanda_id = os.urandom(16).hex()
             cliente_id = payload.get("cliente_id")
             if not cliente_id:
                 cliente_id = ensure_cliente_for_inmobiliaria(
@@ -43116,7 +43366,7 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 """,
                 (
-                    os.urandom(16).hex(),
+                    demanda_id,
                     empresa["id"],
                     cliente_id,
                     payload.get("focalizacion"),
@@ -43150,7 +43400,82 @@ class Handler(BaseHTTPRequestHandler):
                     now,
                 ),
             )
+            conn.commit()
+            json_response(self, {"ok": True, "id": demanda_id})
+            return
+
+        elif parsed.path == "/api/demandas_update":
+            record_ids = payload.get("ids")
+            if record_ids is None:
+                record_ids = payload.get("id")
+            if isinstance(record_ids, str):
+                record_ids = [record_ids]
+                if not isinstance(record_ids, list):
+                    record_ids = []
+                record_ids = [str(rid or "").strip() for rid in record_ids]
+                record_ids = [rid for rid in record_ids if rid]
+                if not record_ids:
+                    json_response(self, {"error": "ids requerido"}, status=400)
+                    return
+                empresa_id = str(payload.get("empresa_id") or "").strip() or str(empresa.get("id") or "").strip()
+                if not empresa_id:
+                    json_response(self, {"error": "empresa_id requerido"}, status=400)
+                    return
+                updates = {}
+                for key in (
+                    "fase",
+                    "estado",
+                    "responsable",
+                    "pedido",
+                    "tipologia",
+                    "subtipologia",
+                    "motivo",
+                    "agencia_insercion",
+                    "origen",
+                    "pedido_web",
+                    "anuncio_mi_cartera",
+                    "presentacion_servicio",
+                    "fecha_insercion",
+                    "motivo_ultimo_contacto",
+                    "fecha_ultimo_contacto_interno",
+                    "fecha_prox_act_cita",
+                    "fecha_ultima_cita_venta_red",
+                    "estado_contacto",
+                    "notas",
+                ):
+                    if key in payload:
+                        updates[key] = payload.get(key)
+                if not updates:
+                    json_response(self, {"error": "Sin cambios"}, status=400)
+                    return
+                for bool_key in ("pedido_web", "anuncio_mi_cartera", "presentacion_servicio"):
+                    if bool_key in updates:
+                        updates[bool_key] = parse_boolish(updates.get(bool_key))
+                set_clause = ", ".join([f"{key} = ?" for key in updates])
+                values = list(updates.values())
+                placeholders = ",".join(["?"] * len(record_ids))
+                values.extend([now, empresa_id])
+                values.extend(record_ids)
+                conn.execute(
+                    f"UPDATE demandas SET {set_clause}, updated_at = datetime(?) WHERE empresa_id = ? AND id IN ({placeholders})",
+                    values,
+                )
+                audit_event(
+                    conn,
+                    empresa_id,
+                    "demanda",
+                    record_ids[0] if record_ids else None,
+                    "Actualizar pedido",
+                    usuario=payload.get("usuario"),
+                    detalles={"ids": record_ids[:50], "updates": {k: updates.get(k) for k in list(updates)[:30]}},
+                    now=now,
+                )
+            conn.commit()
+            json_response(self, {"ok": True, "updated": len(record_ids)})
+            return
+
         elif parsed.path == "/api/visitas":
+            visita_id = os.urandom(16).hex()
             conn.execute(
                 """
                 INSERT INTO visitas (
@@ -43161,7 +43486,7 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 """,
                 (
-                    os.urandom(16).hex(),
+                    visita_id,
                     empresa["id"],
                     payload.get("inmueble_id"),
                     payload.get("demanda_id"),
@@ -43174,6 +43499,9 @@ class Handler(BaseHTTPRequestHandler):
                     now,
                 ),
             )
+            conn.commit()
+            json_response(self, {"ok": True, "id": visita_id})
+            return
         elif parsed.path == "/api/clientes":
             nombre = payload.get("nombre")
             if not nombre:
@@ -49758,41 +50086,48 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, {"rows": items[:250]})
             return
 
-        if path == "/api/demandas":
-            empresa_id = params.get("empresa_id", [""])[0]
-            if not empresa_id:
-                json_response(self, {"error": "empresa_id requerido"}, status=400)
+            if path == "/api/demandas":
+                empresa_id = params.get("empresa_id", [""])[0]
+                if not empresa_id:
+                    json_response(self, {"error": "empresa_id requerido"}, status=400)
+                    return
+                rows = conn.execute(
+                    """
+                   SELECT
+                           d.id,
+                           COALESCE(NULLIF(TRIM(d.fase), ''), 'Pedidos a analizar') AS fase,
+                           COALESCE(NULLIF(TRIM(d.estado), ''), 'Activa') AS estado,
+                           d.pedido,
+                           d.tipologia,
+                           d.subtipologia,
+                           d.motivo,
+                           d.tipo,
+                           d.precio_max,
+                           d.m2_min,
+                           d.habitaciones_min,
+                           d.banos_min,
+                           COALESCE(d.pedido_web, 0) AS pedido_web,
+                           COALESCE(d.anuncio_mi_cartera, 0) AS anuncio_mi_cartera,
+                           COALESCE(d.presentacion_servicio, 0) AS presentacion_servicio,
+                           d.responsable,
+                           d.created_at,
+                           d.updated_at,
+                           d.cliente_id,
+                           c.nombre AS cliente,
+                           CASE
+                             WHEN LOWER(COALESCE(c.tipo, '')) LIKE '%propiet%'
+                               OR LOWER(COALESCE(c.perfil, '')) LIKE '%propiet%'
+                             THEN 1 ELSE 0
+                           END AS cliente_propietario
+                    FROM demandas d
+                    LEFT JOIN clientes c ON c.id = d.cliente_id
+                    WHERE d.empresa_id = ?
+                    ORDER BY d.created_at DESC
+                    """,
+                    (empresa_id,),
+                ).fetchall()
+                json_response(self, {"rows": [dict(r) for r in rows]})
                 return
-            rows = conn.execute(
-                """
-               SELECT d.id,
-                       d.pedido,
-                       d.tipo,
-                       d.tipologia,
-                       d.subtipologia,
-                       d.fase,
-                       d.pedido_web,
-                       d.fecha_insercion,
-                       d.created_at,
-                       d.updated_at,
-                       d.zona,
-                       d.precio_max,
-                       d.m2_min,
-                       d.habitaciones_min,
-                       d.banos_min,
-                       d.estado,
-                       d.prioridad,
-                       d.cliente_id,
-                       c.nombre AS cliente
-                FROM demandas d
-                LEFT JOIN clientes c ON c.id = d.cliente_id
-                WHERE d.empresa_id = ?
-                ORDER BY d.created_at DESC
-                """,
-                (empresa_id,),
-            ).fetchall()
-            json_response(self, {"rows": [dict(r) for r in rows]})
-            return
 
         if path == "/api/visitas":
             empresa_id = params.get("empresa_id", [""])[0]
