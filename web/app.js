@@ -17058,6 +17058,7 @@ const createCrmCaptacionQuick = async (payload = {}) => {
     "provincia",
     "tipo_inmueble",
     "subtipologia",
+    "referencia_catastral",
     "propietario",
     "propietario_telefono",
     "necesidad_venta_alquiler",

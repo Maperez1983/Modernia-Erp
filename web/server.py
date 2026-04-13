@@ -16602,8 +16602,9 @@ def resolve_owner_nifs_from_cliente_ids(conn, cliente_ids):
     return normalized
 
 
-def detect_inmobiliaria_duplicates(conn, empresa_id, *, direccion="", owner_nifs=None, scope="captacion"):
+def detect_inmobiliaria_duplicates(conn, empresa_id, *, direccion="", referencia_catastral="", owner_nifs=None, scope="captacion"):
     direccion_norm = normalize_inmobiliaria_address(direccion)
+    ref_norm = re.sub(r"[^A-Z0-9]", "", str(referencia_catastral or "").upper())
     owner_nifs = [normalize_nif(item) for item in (owner_nifs or []) if normalize_nif(item)]
     owner_nif_set = set(owner_nifs)
     duplicates = []
@@ -16634,6 +16635,9 @@ def detect_inmobiliaria_duplicates(conn, empresa_id, *, direccion="", owner_nifs
         reasons = []
         if direccion_norm and normalize_inmobiliaria_address(row["direccion"]) == direccion_norm:
             reasons.append("misma dirección")
+        row_ref = re.sub(r"[^A-Z0-9]", "", str(row["referencia_catastral"] or "").upper())
+        if ref_norm and row_ref and row_ref == ref_norm:
+            reasons.append("misma referencia catastral")
         row_nifs = {
             normalize_nif(part)
             for part in re.split(r"[|,]", str(row["propietario_nifs"] or ""))
@@ -41397,6 +41401,7 @@ class Handler(BaseHTTPRequestHandler):
                     conn,
                     empresa["id"],
                     direccion=direccion,
+                    referencia_catastral=payload.get("referencia_catastral") or payload.get("ref_catastral") or payload.get("rc"),
                     owner_nifs=[
                         payload.get("propietario1_nif"),
                         payload.get("propietario2_nif"),
@@ -41977,6 +41982,7 @@ class Handler(BaseHTTPRequestHandler):
                     conn,
                     empresa["id"],
                     direccion=payload.get("direccion"),
+                    referencia_catastral=payload.get("referencia_catastral"),
                     owner_nifs=resolve_owner_nifs_from_cliente_ids(conn, propietarios),
                     scope="captacion",
                 )
