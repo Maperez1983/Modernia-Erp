@@ -751,6 +751,7 @@ AUTH_PUBLIC_GET_ENDPOINTS = {
     "/api/auth_invite_status",
     "/api/portal_inmuebles",
     "/api/portal_inmueble",
+    "/api/portal_leads_recent",
     "/api/workspace_portal_public",
     "/api/workspace_factura_pdf_public",
     "/api/workspace_kiosk_status",
@@ -761,6 +762,7 @@ AUTH_PUBLIC_POST_ENDPOINTS = {
     "/api/logout",
     "/api/auth_set_password",
     "/api/portal_leads_ingest",
+    "/api/portal_publish_update",
     "/api/workspace_portal_upload",
     "/api/workspace_portal_presign",
     "/api/workspace_kiosk_toggle",
@@ -31352,6 +31354,64 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, {"ok": True})
             return
 
+        if parsed.path == "/api/portal_publish_update":
+            # Control de publicación (CRM -> Portal). Requiere rol admin o token Bearer.
+            token_header = str(self.headers.get("Authorization") or "").strip()
+            bearer = ""
+            if token_header.lower().startswith("bearer "):
+                bearer = token_header.split(" ", 1)[1].strip()
+            expected = str(os.environ.get("PORTAL_ADMIN_TOKEN") or os.environ.get("PORTAL_INGEST_TOKEN") or "").strip()
+            portal_admin = False
+            if expected and bearer:
+                try:
+                    portal_admin = secrets.compare_digest(bearer, expected)
+                except Exception:
+                    portal_admin = False
+            if not portal_admin:
+                session = self._current_session()
+                if not session:
+                    json_response(self, {"ok": False, "error": "unauthorized"}, status=401)
+                    return
+                rol = normalize_service_key(session.get("rol") or "")
+                if rol not in {"administrador", "admin", "direccion", "administracion", "control"}:
+                    json_response(self, {"ok": False, "error": "forbidden"}, status=403)
+                    return
+                portal_admin = True
+
+            listing_id = str(payload.get("listing_id") or payload.get("id") or "").strip() if isinstance(payload, dict) else ""
+            published_raw = payload.get("published") if isinstance(payload, dict) else 0
+            if not listing_id:
+                json_response(self, {"ok": False, "error": "missing_listing_id"}, status=400)
+                return
+            published = 1 if str(published_raw).strip().lower() in {"1", "true", "yes", "on", "si", "sí"} else 0
+
+            conn = get_db(self.db_path)
+            self._track_conn(conn)
+            try:
+                ensure_column(conn, "inmuebles", "portal_publicado", "portal_publicado INTEGER NOT NULL DEFAULT 0")
+            except Exception:
+                pass
+            try:
+                updated = conn.execute(
+                    "UPDATE inmuebles SET portal_publicado = ?, updated_at = datetime('now') WHERE id = ?",
+                    (published, listing_id),
+                )
+            except Exception:
+                updated = conn.execute(
+                    "UPDATE inmuebles SET portal_publicado = ? WHERE id = ?",
+                    (published, listing_id),
+                )
+            try:
+                changed = getattr(updated, "rowcount", None)
+            except Exception:
+                changed = None
+            conn.commit()
+            if changed == 0:
+                json_response(self, {"ok": False, "error": "not_found"}, status=404)
+                return
+            json_response(self, {"ok": True})
+            return
+
         if parsed.path == "/api/portal_leads_ingest":
             # Ingest de leads desde el portal (Lead Hub -> CRM). Autenticado por token.
             token_header = str(self.headers.get("Authorization") or "").strip()
@@ -45218,6 +45278,7 @@ class Handler(BaseHTTPRequestHandler):
             ciudad = (params.get("ciudad", [""])[0] or "").strip().lower()
             operacion = (params.get("operacion", [""])[0] or "").strip().lower()
             certificado_only = (params.get("certificado", ["0"])[0] or "0").strip().lower() in {"1", "true", "yes", "si", "sí", "on"}
+            show_all = (params.get("all", ["0"])[0] or "0").strip().lower() in {"1", "true", "yes", "on"}
             try:
                 limit_n = max(1, min(200, int(limit or "60")))
             except Exception:
@@ -45226,11 +45287,35 @@ class Handler(BaseHTTPRequestHandler):
                 ensure_column(conn, "inmuebles", "certificado", "certificado INTEGER NOT NULL DEFAULT 0")
             except Exception:
                 pass
+            try:
+                ensure_column(conn, "inmuebles", "portal_publicado", "portal_publicado INTEGER NOT NULL DEFAULT 0")
+            except Exception:
+                pass
+
+            portal_admin = False
+            try:
+                token_header = str(self.headers.get("Authorization") or "").strip()
+                bearer = token_header.split(" ", 1)[1].strip() if token_header.lower().startswith("bearer ") else ""
+                expected = str(os.environ.get("PORTAL_ADMIN_TOKEN") or os.environ.get("PORTAL_INGEST_TOKEN") or "").strip()
+                if expected and bearer and secrets.compare_digest(bearer, expected):
+                    portal_admin = True
+            except Exception:
+                portal_admin = False
+            if not portal_admin:
+                try:
+                    session = self._current_session()
+                    rol = normalize_service_key((session or {}).get("rol") or "")
+                    if rol in {"administrador", "admin", "direccion", "administracion", "control"}:
+                        portal_admin = True
+                except Exception:
+                    portal_admin = False
 
             where = [
                 "EXISTS (SELECT 1 FROM captaciones c WHERE c.inmueble_id = i.id AND COALESCE(c.noticia_verificada, 0) = 1)"
             ]
             values = []
+            if not (show_all and portal_admin):
+                where.append("COALESCE(i.portal_publicado, 0) = 1")
             if operacion in {"venta", "alquiler"}:
                 where.append("LOWER(COALESCE(i.tipo_operacion, '')) LIKE ?")
                 values.append(f"%{operacion}%")
@@ -45259,7 +45344,8 @@ class Handler(BaseHTTPRequestHandler):
                   COALESCE(NULLIF(TRIM(i.descripcion), ''), '') AS descripcion,
                   COALESCE(i.updated_at, i.created_at, '') AS updated_at,
                   COALESCE(i.created_at, '') AS created_at,
-                  COALESCE(i.certificado, 0) AS certificado
+                  COALESCE(i.certificado, 0) AS certificado,
+                  COALESCE(i.portal_publicado, 0) AS portal_publicado
                 FROM inmuebles i
                 WHERE {where_clause}
                 ORDER BY COALESCE(NULLIF(i.updated_at, ''), i.created_at) DESC
@@ -45290,6 +45376,7 @@ class Handler(BaseHTTPRequestHandler):
                         "description": row_value(r, "descripcion") or "",
                         "verifiedAt": verified_at or "",
                         "certified": bool(int(row_value(r, "certificado") or 0)),
+                        "published": bool(int(row_value(r, "portal_publicado") or 0)),
                     }
                 )
 
@@ -45301,10 +45388,33 @@ class Handler(BaseHTTPRequestHandler):
             if not inmueble_id:
                 json_response(self, {"ok": False, "error": "missing_id"}, status=400)
                 return
+            show_all = (params.get("all", ["0"])[0] or "0").strip().lower() in {"1", "true", "yes", "on"}
             try:
                 ensure_column(conn, "inmuebles", "certificado", "certificado INTEGER NOT NULL DEFAULT 0")
             except Exception:
                 pass
+            try:
+                ensure_column(conn, "inmuebles", "portal_publicado", "portal_publicado INTEGER NOT NULL DEFAULT 0")
+            except Exception:
+                pass
+
+            portal_admin = False
+            try:
+                token_header = str(self.headers.get("Authorization") or "").strip()
+                bearer = token_header.split(" ", 1)[1].strip() if token_header.lower().startswith("bearer ") else ""
+                expected = str(os.environ.get("PORTAL_ADMIN_TOKEN") or os.environ.get("PORTAL_INGEST_TOKEN") or "").strip()
+                if expected and bearer and secrets.compare_digest(bearer, expected):
+                    portal_admin = True
+            except Exception:
+                portal_admin = False
+            if not portal_admin:
+                try:
+                    session = self._current_session()
+                    rol = normalize_service_key((session or {}).get("rol") or "")
+                    if rol in {"administrador", "admin", "direccion", "administracion", "control"}:
+                        portal_admin = True
+                except Exception:
+                    portal_admin = False
             row = conn.execute(
                 """
                 SELECT
@@ -45320,7 +45430,8 @@ class Handler(BaseHTTPRequestHandler):
                   COALESCE(NULLIF(TRIM(i.descripcion), ''), '') AS descripcion,
                   COALESCE(i.updated_at, i.created_at, '') AS updated_at,
                   COALESCE(i.created_at, '') AS created_at,
-                  COALESCE(i.certificado, 0) AS certificado
+                  COALESCE(i.certificado, 0) AS certificado,
+                  COALESCE(i.portal_publicado, 0) AS portal_publicado
                 FROM inmuebles i
                 WHERE i.id = ?
                 LIMIT 1
@@ -45330,6 +45441,14 @@ class Handler(BaseHTTPRequestHandler):
             if not row:
                 json_response(self, {"ok": False, "error": "not_found"}, status=404)
                 return
+            if not (show_all and portal_admin):
+                try:
+                    if int(row_value(row, "portal_publicado") or 0) != 1:
+                        json_response(self, {"ok": False, "error": "not_found"}, status=404)
+                        return
+                except Exception:
+                    json_response(self, {"ok": False, "error": "not_found"}, status=404)
+                    return
             op = _portal_operation(row_value(row, "tipo_operacion") or "")
             ptype = _portal_property_type(row_value(row, "tipo_inmueble") or "")
             price_label = _portal_format_price_label(op, row_value(row, "precio") or 0)
@@ -45349,6 +45468,7 @@ class Handler(BaseHTTPRequestHandler):
                 "description": row_value(row, "descripcion") or "",
                 "verifiedAt": verified_at or "",
                 "certified": bool(int(row_value(row, "certificado") or 0)),
+                "published": bool(int(row_value(row, "portal_publicado") or 0)),
             }
             json_response(self, {"ok": True, "listing": listing})
             return
