@@ -46963,6 +46963,8 @@ if (crmCaptacionCreateForm) {
           const parts = [];
           const estado = String(dup?.estado || "").trim();
           if (estado) parts.push(`Estado: ${estado}`);
+          const refCat = String(dup?.referencia_catastral || "").trim();
+          if (refCat) parts.push(`Ref. catastral: ${refCat}`);
           if (reasons.length) parts.push(`Motivo: ${reasons.join(", ")}`);
           meta.textContent = parts.join(" · ") || "Revisa la ficha para confirmar.";
           left.appendChild(meta);
