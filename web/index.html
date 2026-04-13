@@ -2211,15 +2211,91 @@
 		                    </label>
 		                    <label>
 		                      Población
-		                      <input name="poblacion" placeholder="Ej. Málaga" />
+		                      <input name="poblacion" list="inmoPoblacionOptions" placeholder="Ej. Málaga" />
 		                    </label>
 		                    <label>
 		                      Provincia
-		                      <input name="provincia" placeholder="Ej. Málaga" />
+		                      <select name="provincia" class="inmo-province-select">
+		                        <option value=""></option>
+		                        <option>Álava</option>
+		                        <option>Albacete</option>
+		                        <option>Alicante</option>
+		                        <option>Almería</option>
+		                        <option>Asturias</option>
+		                        <option>Ávila</option>
+		                        <option>Badajoz</option>
+		                        <option>Barcelona</option>
+		                        <option>Burgos</option>
+		                        <option>Cáceres</option>
+		                        <option>Cádiz</option>
+		                        <option>Cantabria</option>
+		                        <option>Castellón</option>
+		                        <option>Ciudad Real</option>
+		                        <option>Córdoba</option>
+		                        <option>A Coruña</option>
+		                        <option>Cuenca</option>
+		                        <option>Girona</option>
+		                        <option>Granada</option>
+		                        <option>Guadalajara</option>
+		                        <option>Guipúzcoa</option>
+		                        <option>Huelva</option>
+		                        <option>Huesca</option>
+		                        <option>Illes Balears</option>
+		                        <option>Jaén</option>
+		                        <option>La Rioja</option>
+		                        <option>Las Palmas</option>
+		                        <option>León</option>
+		                        <option>Lleida</option>
+		                        <option>Lugo</option>
+		                        <option>Madrid</option>
+		                        <option>Málaga</option>
+		                        <option>Murcia</option>
+		                        <option>Navarra</option>
+		                        <option>Ourense</option>
+		                        <option>Palencia</option>
+		                        <option>Pontevedra</option>
+		                        <option>Salamanca</option>
+		                        <option>Santa Cruz de Tenerife</option>
+		                        <option>Segovia</option>
+		                        <option>Sevilla</option>
+		                        <option>Soria</option>
+		                        <option>Tarragona</option>
+		                        <option>Teruel</option>
+		                        <option>Toledo</option>
+		                        <option>Valencia</option>
+		                        <option>Valladolid</option>
+		                        <option>Vizcaya</option>
+		                        <option>Zamora</option>
+		                        <option>Zaragoza</option>
+		                        <option>Ceuta</option>
+		                        <option>Melilla</option>
+		                      </select>
 		                    </label>
 		                    <label>
 		                      Tipo inmueble
-		                      <input name="tipo_inmueble" placeholder="Ej. Piso" />
+		                      <select name="tipo_inmueble" class="inmo-tipo-select">
+		                        <option value=""></option>
+		                        <option>Piso</option>
+		                        <option>Ático</option>
+		                        <option>Bajo</option>
+		                        <option>Dúplex</option>
+		                        <option>Casa</option>
+		                        <option>Chalet</option>
+		                        <option>Adosado</option>
+		                        <option>Pareado</option>
+		                        <option>Villa</option>
+		                        <option>Finca</option>
+		                        <option>Local</option>
+		                        <option>Oficina</option>
+		                        <option>Nave</option>
+		                        <option>Garaje</option>
+		                        <option>Trastero</option>
+		                        <option>Terreno</option>
+		                        <option>Solar</option>
+		                        <option>Edificio</option>
+		                        <option>Hotel</option>
+		                        <option>Otro</option>
+		                      </select>
 		                    </label>
 		                    <label>
 		                      Subtipología
@@ -2239,6 +2315,12 @@
 		                        <option value=""></option>
 		                        <option>Venta</option>
 		                        <option>Alquiler</option>
+		                        <option>Alquiler con opción a compra</option>
+		                        <option>Traspaso</option>
+		                        <option>Permuta</option>
+		                        <option>Cesión</option>
+		                        <option>Subrogación</option>
+		                        <option>Otro</option>
 		                      </select>
 		                    </label>
 		                    <label class="span-2" style="display:flex;gap:10px;align-items:center;">
@@ -2252,6 +2334,59 @@
 		                  </form>
 		                </div>
 		              </div>
+		              <datalist id="inmoPoblacionOptions">
+		                <option value="A Coruña"></option>
+		                <option value="Albacete"></option>
+		                <option value="Alicante"></option>
+		                <option value="Almería"></option>
+		                <option value="Ávila"></option>
+		                <option value="Badajoz"></option>
+		                <option value="Barcelona"></option>
+		                <option value="Bilbao"></option>
+		                <option value="Burgos"></option>
+		                <option value="Cáceres"></option>
+		                <option value="Cádiz"></option>
+		                <option value="Castellón de la Plana"></option>
+		                <option value="Ceuta"></option>
+		                <option value="Ciudad Real"></option>
+		                <option value="Córdoba"></option>
+		                <option value="Cuenca"></option>
+		                <option value="Donostia / San Sebastián"></option>
+		                <option value="Girona"></option>
+		                <option value="Granada"></option>
+		                <option value="Guadalajara"></option>
+		                <option value="Huelva"></option>
+		                <option value="Huesca"></option>
+		                <option value="Jaén"></option>
+		                <option value="Las Palmas de Gran Canaria"></option>
+		                <option value="León"></option>
+		                <option value="Lleida"></option>
+		                <option value="Logroño"></option>
+		                <option value="Lugo"></option>
+		                <option value="Madrid"></option>
+		                <option value="Málaga"></option>
+		                <option value="Melilla"></option>
+		                <option value="Murcia"></option>
+		                <option value="Ourense"></option>
+		                <option value="Oviedo"></option>
+		                <option value="Palencia"></option>
+		                <option value="Pamplona"></option>
+		                <option value="Pontevedra"></option>
+		                <option value="Salamanca"></option>
+		                <option value="Santa Cruz de Tenerife"></option>
+		                <option value="Santander"></option>
+		                <option value="Segovia"></option>
+		                <option value="Sevilla"></option>
+		                <option value="Soria"></option>
+		                <option value="Tarragona"></option>
+		                <option value="Teruel"></option>
+		                <option value="Toledo"></option>
+		                <option value="Valencia"></option>
+		                <option value="Valladolid"></option>
+		                <option value="Vitoria-Gasteiz"></option>
+		                <option value="Zamora"></option>
+		                <option value="Zaragoza"></option>
+		              </datalist>
 
 		              <div class="crm-side-sep" aria-hidden="true"></div>
 		              <button type="button" class="crm-side-item" data-crm-view="captaciones" title="Nuevas oportunidades">
@@ -5421,11 +5556,26 @@
                   <label>
                     Tipo inmueble
                     <select name="tipo_inmueble">
+                      <option value=""></option>
                       <option>Piso</option>
+                      <option>Ático</option>
+                      <option>Bajo</option>
+                      <option>Dúplex</option>
                       <option>Casa</option>
+                      <option>Chalet</option>
+                      <option>Adosado</option>
+                      <option>Pareado</option>
+                      <option>Villa</option>
+                      <option>Finca</option>
                       <option>Local</option>
                       <option>Oficina</option>
+                      <option>Nave</option>
+                      <option>Garaje</option>
+                      <option>Trastero</option>
                       <option>Terreno</option>
+                      <option>Solar</option>
+                      <option>Edificio</option>
+                      <option>Hotel</option>
                       <option>Otro</option>
                     </select>
                   </label>
@@ -5482,11 +5632,65 @@
                   </label>
                   <label>
                     Población
-                    <input name="poblacion" />
+                    <input name="poblacion" list="inmoPoblacionOptions" />
                   </label>
                   <label>
                     Provincia
-                    <input name="provincia" />
+                    <select name="provincia" class="inmo-province-select">
+                      <option value=""></option>
+                      <option>Álava</option>
+                      <option>Albacete</option>
+                      <option>Alicante</option>
+                      <option>Almería</option>
+                      <option>Asturias</option>
+                      <option>Ávila</option>
+                      <option>Badajoz</option>
+                      <option>Barcelona</option>
+                      <option>Burgos</option>
+                      <option>Cáceres</option>
+                      <option>Cádiz</option>
+                      <option>Cantabria</option>
+                      <option>Castellón</option>
+                      <option>Ciudad Real</option>
+                      <option>Córdoba</option>
+                      <option>A Coruña</option>
+                      <option>Cuenca</option>
+                      <option>Girona</option>
+                      <option>Granada</option>
+                      <option>Guadalajara</option>
+                      <option>Guipúzcoa</option>
+                      <option>Huelva</option>
+                      <option>Huesca</option>
+                      <option>Illes Balears</option>
+                      <option>Jaén</option>
+                      <option>La Rioja</option>
+                      <option>Las Palmas</option>
+                      <option>León</option>
+                      <option>Lleida</option>
+                      <option>Lugo</option>
+                      <option>Madrid</option>
+                      <option>Málaga</option>
+                      <option>Murcia</option>
+                      <option>Navarra</option>
+                      <option>Ourense</option>
+                      <option>Palencia</option>
+                      <option>Pontevedra</option>
+                      <option>Salamanca</option>
+                      <option>Santa Cruz de Tenerife</option>
+                      <option>Segovia</option>
+                      <option>Sevilla</option>
+                      <option>Soria</option>
+                      <option>Tarragona</option>
+                      <option>Teruel</option>
+                      <option>Toledo</option>
+                      <option>Valencia</option>
+                      <option>Valladolid</option>
+                      <option>Vizcaya</option>
+                      <option>Zamora</option>
+                      <option>Zaragoza</option>
+                      <option>Ceuta</option>
+                      <option>Melilla</option>
+                    </select>
                   </label>
                   <label>
                     Referencia interna
@@ -5669,7 +5873,17 @@
                   </label>
                   <label class="span-2">
                     Necesidad venta/alquiler
-                    <input name="necesidad_venta_alquiler" />
+                    <select name="necesidad_venta_alquiler">
+                      <option value=""></option>
+                      <option>Venta</option>
+                      <option>Alquiler</option>
+                      <option>Alquiler con opción a compra</option>
+                      <option>Traspaso</option>
+                      <option>Permuta</option>
+                      <option>Cesión</option>
+                      <option>Subrogación</option>
+                      <option>Otro</option>
+                    </select>
                   </label>
                   <label class="span-2">
                     Motivación
