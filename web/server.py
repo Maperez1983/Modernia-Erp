@@ -749,6 +749,8 @@ AUTH_PUBLIC_GET_ENDPOINTS = {
     "/api/build_info",
     "/api/me",
     "/api/auth_invite_status",
+    "/api/portal_inmuebles",
+    "/api/portal_inmueble",
     "/api/workspace_portal_public",
     "/api/workspace_factura_pdf_public",
     "/api/workspace_kiosk_status",
@@ -758,6 +760,7 @@ AUTH_PUBLIC_POST_ENDPOINTS = {
     "/api/login",
     "/api/logout",
     "/api/auth_set_password",
+    "/api/portal_leads_ingest",
     "/api/workspace_portal_upload",
     "/api/workspace_portal_presign",
     "/api/workspace_kiosk_toggle",
@@ -19873,6 +19876,7 @@ def ensure_tables(db_path):
         "CREATE INDEX IF NOT EXISTS idx_postal_cp ON postal_catalogo(codigo_postal)"
     )
     ensure_usuarios_schema(conn)
+    ensure_portal_leads_schema(conn)
     # Sync auth tables from legacy SQLite when Postgres is enabled (prevents "usuarios desaparecidos").
     try:
         if db_is_postgres_enabled() and (not _migration_done(conn, "auth_sync_sqlite_to_pg_v1")):
@@ -20322,6 +20326,43 @@ def ensure_usuarios_schema(conn):
         pass
     try:
         conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_usuarios_email_ci ON usuarios(LOWER(TRIM(email)))")
+    except Exception:
+        pass
+
+
+def ensure_portal_leads_schema(conn):
+    if not conn:
+        return
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS portal_leads (
+          id TEXT PRIMARY KEY,
+          hub_lead_id TEXT,
+          created_at TEXT NOT NULL,
+          empresa_id TEXT,
+          inmueble_id TEXT,
+          listing_title TEXT,
+          listing_city TEXT,
+          persona TEXT,
+          intent TEXT,
+          contact TEXT,
+          name TEXT,
+          note TEXT,
+          source_path TEXT,
+          source_href TEXT,
+          payload_json TEXT
+        )
+        """
+    )
+    try:
+        ensure_column(conn, "portal_leads", "hub_lead_id", "hub_lead_id TEXT")
+    except Exception:
+        pass
+    try:
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_portal_leads_created ON portal_leads(created_at)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_portal_leads_inmueble ON portal_leads(inmueble_id, created_at)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_portal_leads_empresa ON portal_leads(empresa_id, created_at)")
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_portal_leads_hub_lead_id ON portal_leads(hub_lead_id)")
     except Exception:
         pass
 
@@ -27432,6 +27473,80 @@ def format_eur(value):
     return raw.replace(",", "X").replace(".", ",").replace("X", ".") + " €"
 
 
+def _portal_format_price_label(tipo_operacion, amount):
+    try:
+        val = float(amount or 0.0)
+    except Exception:
+        val = 0.0
+    if val <= 0:
+        return ""
+    is_rent = str(tipo_operacion or "").strip().lower() in {"alquiler", "rent", "renta"}
+    label = f"{val:,.0f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    return f"{label} €/mes" if is_rent else f"{label} €"
+
+
+def _portal_property_type(tipo_inmueble):
+    raw = str(tipo_inmueble or "").strip().lower()
+    if "atico" in raw or "ático" in raw:
+        return "ático"
+    if "casa" in raw or "chalet" in raw:
+        return "casa"
+    if "local" in raw:
+        return "local"
+    return "piso"
+
+
+def _portal_operation(tipo_operacion):
+    raw = str(tipo_operacion or "").strip().lower()
+    return "alquiler" if "alquil" in raw or raw == "rent" else "venta"
+
+
+def _portal_details_short(habs, banos, m2):
+    parts = []
+    try:
+        h = int(habs or 0)
+        if h > 0:
+            parts.append(f"{h} hab")
+    except Exception:
+        pass
+    try:
+        b = int(banos or 0)
+        if b > 0:
+            parts.append(f"{b} baños")
+    except Exception:
+        pass
+    try:
+        mm = float(m2 or 0)
+        if mm > 0:
+            parts.append(f"{int(mm)} m²")
+    except Exception:
+        pass
+    return " · ".join(parts)
+
+
+def _portal_details(habs, banos, m2):
+    items = []
+    try:
+        h = int(habs or 0)
+        if h > 0:
+            items.append(f"{h} habitaciones")
+    except Exception:
+        pass
+    try:
+        b = int(banos or 0)
+        if b > 0:
+            items.append(f"{b} baños")
+    except Exception:
+        pass
+    try:
+        mm = float(m2 or 0)
+        if mm > 0:
+            items.append(f"{int(mm)} m²")
+    except Exception:
+        pass
+    return items
+
+
 def build_workspace_invoice_pdf(invoice, workspace, company, client, collections):
     invoice_ref = "-".join(part for part in [invoice.get("serie"), invoice.get("numero")] if part) or invoice.get("id") or "-"
     company_name = company.get("nombre") or workspace.get("nombre") or "Empresa"
@@ -31235,6 +31350,154 @@ class Handler(BaseHTTPRequestHandler):
             )
             conn.commit()
             json_response(self, {"ok": True})
+            return
+
+        if parsed.path == "/api/portal_leads_ingest":
+            # Ingest de leads desde el portal (Lead Hub -> CRM). Autenticado por token.
+            token_header = str(self.headers.get("Authorization") or "").strip()
+            bearer = ""
+            if token_header.lower().startswith("bearer "):
+                bearer = token_header.split(" ", 1)[1].strip()
+            expected = str(os.environ.get("PORTAL_INGEST_TOKEN") or "").strip()
+            if not expected:
+                json_response(self, {"ok": False, "error": "portal_ingest_not_configured"}, status=500)
+                return
+            try:
+                if not bearer or not secrets.compare_digest(bearer, expected):
+                    json_response(self, {"ok": False, "error": "unauthorized"}, status=401)
+                    return
+            except Exception:
+                json_response(self, {"ok": False, "error": "unauthorized"}, status=401)
+                return
+
+            listing = payload.get("listing") if isinstance(payload, dict) else None
+            listing_id = str((listing or {}).get("id") or payload.get("listing_id") or "").strip() if isinstance(payload, dict) else ""
+            if not listing_id:
+                json_response(self, {"ok": False, "error": "missing_listing_id"}, status=400)
+                return
+            intent = str(payload.get("intent") or "").strip().lower() if isinstance(payload, dict) else ""
+            if intent not in {"info", "visita", "contacto"}:
+                intent = "info"
+            persona = str(payload.get("persona") or "").strip().lower() if isinstance(payload, dict) else ""
+            if persona not in {"comprador", "propietario"}:
+                persona = "comprador"
+            contact = str(payload.get("contact") or "").strip() if isinstance(payload, dict) else ""
+            name = str(payload.get("name") or "").strip() if isinstance(payload, dict) else ""
+            note = str(payload.get("note") or "").strip() if isinstance(payload, dict) else ""
+            source = payload.get("source") if isinstance(payload, dict) else None
+            source_path = str((source or {}).get("path") or "").strip() if isinstance(source, dict) else ""
+            source_href = str((source or {}).get("href") or "").strip() if isinstance(source, dict) else ""
+            hub_lead_id = str(payload.get("hub_lead_id") or "").strip() if isinstance(payload, dict) else ""
+
+            conn = get_db(self.db_path)
+            self._track_conn(conn)
+            ensure_portal_leads_schema(conn)
+            conn.commit()
+
+            inmueble = conn.execute(
+                "SELECT id, empresa_id, COALESCE(NULLIF(TRIM(titulo), ''), 'Inmueble') AS titulo, COALESCE(NULLIF(TRIM(poblacion), ''), NULLIF(TRIM(localidad), ''), '') AS poblacion FROM inmuebles WHERE id = ? LIMIT 1",
+                (listing_id,),
+            ).fetchone()
+            if not inmueble:
+                json_response(self, {"ok": False, "error": "listing_not_found"}, status=404)
+                return
+            empresa_id = str(inmueble["empresa_id"] or "").strip() or None
+            listing_title = str(((listing or {}).get("title") if isinstance(listing, dict) else "") or inmueble["titulo"] or "").strip()
+            listing_city = str(((listing or {}).get("city") if isinstance(listing, dict) else "") or inmueble["poblacion"] or "").strip()
+
+            now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+            lead_id = hub_lead_id or os.urandom(16).hex()
+            payload_json = json.dumps(payload, ensure_ascii=False, default=str)
+
+            # Guardamos el lead (idempotente si viene hub_lead_id).
+            try:
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO portal_leads (
+                      id, hub_lead_id, created_at,
+                      empresa_id, inmueble_id,
+                      listing_title, listing_city,
+                      persona, intent, contact, name, note,
+                      source_path, source_href,
+                      payload_json
+                    ) VALUES (
+                      ?, ?, datetime(?),
+                      ?, ?,
+                      ?, ?,
+                      ?, ?, ?, ?, ?,
+                      ?, ?,
+                      ?
+                    )
+                    """,
+                    (
+                        lead_id,
+                        hub_lead_id or None,
+                        now,
+                        empresa_id,
+                        listing_id,
+                        listing_title or None,
+                        listing_city or None,
+                        persona,
+                        intent,
+                        contact or None,
+                        name or None,
+                        note or None,
+                        source_path or None,
+                        source_href or None,
+                        payload_json,
+                    ),
+                )
+            except Exception:
+                pass
+
+            # Creamos una acción visible en CRM (inmobiliaria) para que no se pierda.
+            try:
+                asunto = f"Lead portal: {intent}"
+                notas = "\n".join(
+                    [line for line in [
+                        f"Contacto: {contact}" if contact else "",
+                        f"Nombre: {name}" if name else "",
+                        note,
+                        f"Origen: {source_href}" if source_href else "",
+                    ] if str(line or "").strip()]
+                )
+                conn.execute(
+                    """
+                    INSERT INTO acciones (
+                      id, empresa_id, servicio, inmueble_id,
+                      fecha, hora, asunto, tipo, modalidad_contacto, estado,
+                      notas, related_id, related_tipo,
+                      created_at, updated_at
+                    ) VALUES (
+                      ?, ?, ?, ?,
+                      ?, ?, ?, ?, ?, ?,
+                      ?, ?, ?,
+                      datetime(?), datetime(?)
+                    )
+                    """,
+                    (
+                        os.urandom(16).hex(),
+                        empresa_id,
+                        "inmobiliaria",
+                        listing_id,
+                        now[:10],
+                        None,
+                        asunto,
+                        "Lead portal",
+                        "Portal",
+                        "Pendiente",
+                        notas or None,
+                        lead_id,
+                        "portal_lead",
+                        now,
+                        now,
+                    ),
+                )
+            except Exception:
+                pass
+
+            conn.commit()
+            json_response(self, {"ok": True, "id": lead_id})
             return
 
         empresa_nombre = payload.get("empresa_nombre")
@@ -44949,6 +45212,143 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, {"ok": True, "user": self._auth_user_payload(refreshed_session)})
             return
 
+        if path == "/api/portal_inmuebles":
+            limit = (params.get("limit", ["60"])[0] or "60").strip()
+            q = (params.get("q", [""])[0] or "").strip().lower()
+            ciudad = (params.get("ciudad", [""])[0] or "").strip().lower()
+            operacion = (params.get("operacion", [""])[0] or "").strip().lower()
+            certificado_only = (params.get("certificado", ["0"])[0] or "0").strip().lower() in {"1", "true", "yes", "si", "sí", "on"}
+            try:
+                limit_n = max(1, min(200, int(limit or "60")))
+            except Exception:
+                limit_n = 60
+
+            where = [
+                "EXISTS (SELECT 1 FROM captaciones c WHERE c.inmueble_id = i.id AND COALESCE(c.noticia_verificada, 0) = 1)"
+            ]
+            values = []
+            if operacion in {"venta", "alquiler"}:
+                where.append("LOWER(COALESCE(i.tipo_operacion, '')) LIKE ?")
+                values.append(f"%{operacion}%")
+            if ciudad:
+                where.append("LOWER(COALESCE(i.poblacion, '')) LIKE ?")
+                values.append(f"%{ciudad}%")
+            if q:
+                where.append("(LOWER(COALESCE(i.titulo, '')) LIKE ? OR LOWER(COALESCE(i.descripcion, '')) LIKE ?)")
+                values.extend([f"%{q}%", f"%{q}%"])
+            if certificado_only:
+                try:
+                    ensure_column(conn, "inmuebles", "certificado", "certificado INTEGER NOT NULL DEFAULT 0")
+                except Exception:
+                    pass
+                where.append("COALESCE(i.certificado, 0) = 1")
+
+            where_clause = " AND ".join(where) if where else "1=1"
+            rows = conn.execute(
+                f"""
+                SELECT
+                  i.id,
+                  COALESCE(NULLIF(TRIM(i.titulo), ''), 'Inmueble') AS titulo,
+                  COALESCE(NULLIF(TRIM(i.poblacion), ''), NULLIF(TRIM(i.localidad), ''), '') AS poblacion,
+                  COALESCE(NULLIF(TRIM(i.tipo_operacion), ''), 'Venta') AS tipo_operacion,
+                  COALESCE(NULLIF(TRIM(i.tipo_inmueble), ''), 'Piso') AS tipo_inmueble,
+                  COALESCE(i.precio_encargo, i.precio_objetivo, i.precio_pedido_cliente, 0) AS precio,
+                  COALESCE(i.habitaciones, 0) AS habitaciones,
+                  COALESCE(i.banos, 0) AS banos,
+                  COALESCE(i.m2, 0) AS m2,
+                  COALESCE(NULLIF(TRIM(i.descripcion), ''), '') AS descripcion,
+                  COALESCE(i.updated_at, i.created_at, '') AS updated_at,
+                  COALESCE(i.created_at, '') AS created_at,
+                  COALESCE(i.certificado, 0) AS certificado
+                FROM inmuebles i
+                WHERE {where_clause}
+                ORDER BY COALESCE(NULLIF(i.updated_at, ''), i.created_at) DESC
+                LIMIT {int(limit_n)}
+                """,
+                values,
+            ).fetchall()
+
+            listings = []
+            for r in rows or []:
+                op = _portal_operation(row_value(r, "tipo_operacion") or "")
+                ptype = _portal_property_type(row_value(r, "tipo_inmueble") or "")
+                price_label = _portal_format_price_label(op, row_value(r, "precio") or 0)
+                details_short = _portal_details_short(row_value(r, "habitaciones"), row_value(r, "banos"), row_value(r, "m2"))
+                details = _portal_details(row_value(r, "habitaciones"), row_value(r, "banos"), row_value(r, "m2"))
+                verified_at = str(row_value(r, "updated_at") or row_value(r, "created_at") or "")[:10]
+                listings.append(
+                    {
+                        "id": row_value(r, "id"),
+                        "title": row_value(r, "titulo"),
+                        "city": row_value(r, "poblacion") or "",
+                        "operation": op,
+                        "propertyType": ptype,
+                        "priceLabel": price_label or "",
+                        "priceValue": float(row_value(r, "precio") or 0) if row_value(r, "precio") is not None else 0,
+                        "detailsShort": details_short or "",
+                        "details": details,
+                        "description": row_value(r, "descripcion") or "",
+                        "verifiedAt": verified_at or "",
+                        "certified": bool(int(row_value(r, "certificado") or 0)),
+                    }
+                )
+
+            json_response(self, {"ok": True, "listings": listings})
+            return
+
+        if path == "/api/portal_inmueble":
+            inmueble_id = (params.get("id", [""])[0] or "").strip()
+            if not inmueble_id:
+                json_response(self, {"ok": False, "error": "missing_id"}, status=400)
+                return
+            row = conn.execute(
+                """
+                SELECT
+                  i.id,
+                  COALESCE(NULLIF(TRIM(i.titulo), ''), 'Inmueble') AS titulo,
+                  COALESCE(NULLIF(TRIM(i.poblacion), ''), NULLIF(TRIM(i.localidad), ''), '') AS poblacion,
+                  COALESCE(NULLIF(TRIM(i.tipo_operacion), ''), 'Venta') AS tipo_operacion,
+                  COALESCE(NULLIF(TRIM(i.tipo_inmueble), ''), 'Piso') AS tipo_inmueble,
+                  COALESCE(i.precio_encargo, i.precio_objetivo, i.precio_pedido_cliente, 0) AS precio,
+                  COALESCE(i.habitaciones, 0) AS habitaciones,
+                  COALESCE(i.banos, 0) AS banos,
+                  COALESCE(i.m2, 0) AS m2,
+                  COALESCE(NULLIF(TRIM(i.descripcion), ''), '') AS descripcion,
+                  COALESCE(i.updated_at, i.created_at, '') AS updated_at,
+                  COALESCE(i.created_at, '') AS created_at,
+                  COALESCE(i.certificado, 0) AS certificado
+                FROM inmuebles i
+                WHERE i.id = ?
+                LIMIT 1
+                """,
+                (inmueble_id,),
+            ).fetchone()
+            if not row:
+                json_response(self, {"ok": False, "error": "not_found"}, status=404)
+                return
+            op = _portal_operation(row_value(row, "tipo_operacion") or "")
+            ptype = _portal_property_type(row_value(row, "tipo_inmueble") or "")
+            price_label = _portal_format_price_label(op, row_value(row, "precio") or 0)
+            details_short = _portal_details_short(row_value(row, "habitaciones"), row_value(row, "banos"), row_value(row, "m2"))
+            details = _portal_details(row_value(row, "habitaciones"), row_value(row, "banos"), row_value(row, "m2"))
+            verified_at = str(row_value(row, "updated_at") or row_value(row, "created_at") or "")[:10]
+            listing = {
+                "id": row_value(row, "id"),
+                "title": row_value(row, "titulo"),
+                "city": row_value(row, "poblacion") or "",
+                "operation": op,
+                "propertyType": ptype,
+                "priceLabel": price_label or "",
+                "priceValue": float(row_value(row, "precio") or 0) if row_value(row, "precio") is not None else 0,
+                "detailsShort": details_short or "",
+                "details": details,
+                "description": row_value(row, "descripcion") or "",
+                "verifiedAt": verified_at or "",
+                "certified": bool(int(row_value(row, "certificado") or 0)),
+            }
+            json_response(self, {"ok": True, "listing": listing})
+            return
+
         if path == "/api/debug_auth":
             if str(os.environ.get("APP_DEBUG_AUTH") or "").strip().lower() not in {"1", "true", "yes", "on"}:
                 json_response(self, {"error": "No disponible"}, status=404)
@@ -49451,6 +49851,20 @@ class Handler(BaseHTTPRequestHandler):
                 """,
                 (inmueble_id,),
             ).fetchone()
+            auditoria_rows = []
+            try:
+                auditoria_rows = conn.execute(
+                    """
+                    SELECT entidad, accion, usuario, detalles, created_at
+                    FROM auditoria
+                    WHERE entidad_id = ?
+                    ORDER BY created_at DESC
+                    LIMIT 80
+                    """,
+                    (inmueble_id,),
+                ).fetchall()
+            except Exception:
+                auditoria_rows = []
             json_response(
                 self,
                 {
@@ -49459,6 +49873,7 @@ class Handler(BaseHTTPRequestHandler):
                     "docs": [dict(r) for r in docs],
                     "servicios": servicios,
                     "captacion": dict(captacion) if captacion else {},
+                    "auditoria": [dict(r) for r in auditoria_rows],
                 },
             )
             return
