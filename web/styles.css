@@ -3711,6 +3711,167 @@ body.crm-fin #companySummary {
   color: var(--ink);
 }
 
+#crmSection .tc-listview {
+  background: #ffffff;
+  border: 1px solid rgba(15, 23, 42, 0.10);
+  border-radius: 8px;
+  padding: 8px;
+}
+
+#crmSection .tc-title {
+  font-family: var(--font-display);
+  font-size: 15px;
+}
+
+#crmSection .tc-listhead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 2px 10px;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+}
+
+#crmSection .tc-home-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  gap: 14px;
+  align-items: start;
+}
+
+@media (max-width: 980px) {
+  #crmSection .tc-home-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+#crmSection .tc-home-panel {
+  height: fit-content;
+}
+
+#crmSection .tc-home-pipeline {
+  padding-top: 10px;
+}
+
+#crmSection .tc-home-pipeline-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 2px 8px;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+#crmSection #crmInicioBoard.crm-kanban {
+  margin-top: 10px;
+  padding: 0;
+}
+
+#crmSection .crm-kanban-column {
+  background: #ffffff;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 8px;
+  padding: 10px;
+}
+
+#crmSection .crm-kanban-card {
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 8px;
+  padding: 10px;
+  background: #ffffff;
+  font-size: 12px;
+  display: grid;
+  gap: 6px;
+  cursor: pointer;
+  box-shadow: none;
+}
+
+#crmSection .crm-kanban-handle {
+  border-color: rgba(15, 23, 42, 0.25);
+  background: rgba(255, 255, 255, 0.9);
+}
+
+#crmSection .tc-listleft,
+#crmSection .tc-listright {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+#crmSection .tc-listleft select,
+#crmSection .tc-listright select {
+  padding: 7px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: #fff;
+  color: var(--ink);
+  max-width: 360px;
+}
+
+#crmSection .tc-listright input {
+  min-width: min(340px, 42vw);
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: #fff;
+  color: var(--ink);
+}
+
+#crmSection .tc-azbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  padding: 10px 2px 12px;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+#crmSection .tc-azbar button {
+  padding: 4px 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: #fff;
+  color: var(--ink-soft);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+#crmSection .tc-azbar button.active {
+  border-color: rgba(212, 175, 55, 0.6);
+  color: var(--ink);
+  background: rgba(212, 175, 55, 0.14);
+}
+
+#crmSection .tc-listfoot {
+  padding-top: 10px;
+}
+
+#crmSection .tc-stagebar {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 4px 2px 10px;
+}
+
+#crmSection .tc-stagebar button {
+  padding: 7px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: #fff;
+  color: var(--ink-soft);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+#crmSection .tc-stagebar button.active {
+  background: rgba(212, 175, 55, 0.16);
+  border-color: rgba(212, 175, 55, 0.55);
+  color: var(--ink);
+}
+
 #crmSection .crm-recent-menu {
   position: absolute;
   top: 58px;
@@ -5430,6 +5591,41 @@ body.crm-context-inmo .crm-resumen-compact-note {
 
 .editable-grid--inmueble {
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.editable-grid--inmueble .editable-card {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  padding: 8px 10px;
+  border-radius: 0;
+  border: none;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+  background: transparent;
+}
+
+.editable-grid--inmueble .editable-card h3 {
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.editable-grid--inmueble .inline-input {
+  border-radius: 8px;
+  padding: 7px 10px;
+}
+
+.editable-grid--inmueble .form-section {
+  padding: 10px 10px 8px;
+  border-top: none;
+  background: rgba(248, 250, 252, 0.9);
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+}
+
+.editable-grid--inmueble .form-section strong {
+  font-size: 14px;
 }
 
 .editable-grid--inmueble .form-section,
