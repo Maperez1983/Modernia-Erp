@@ -25086,7 +25086,12 @@ const updateTableVisibility = () => {
       // Si el usuario entra en Clientes desde un vertical (p.ej. Inmobiliaria),
       // restringimos el tab-bar a lo mínimo necesario para esa operativa.
       if (isClientesModule) {
-        const ctxService = normalizeSimple(state.clientesContextService || "");
+        // `state.clientesContextService` puede venir vacío si el usuario ha aterrizado en el módulo
+        // por ruta/URL o por el tab-bar; inferimos servicio a partir del contexto actual (crm=.../tab).
+        const ctxService = normalizeSimple(getClientesContextServiceParam() || "");
+        if (!String(state.clientesContextService || "").trim() && ctxService) {
+          state.clientesContextService = ctxService;
+        }
         if (ctxService) {
           const allowed = new Set(["operativa", "alta"]);
           if (ctxService === "inmobiliaria" || ctxService === "inmo") {
@@ -46710,6 +46715,17 @@ if (estudioAltaTabs) {
 
 if (crmWorkspaceTabs) {
   crmWorkspaceTabs.addEventListener("click", (event) => {
+    const actionBtn = closestFromEvent(event, "[data-crm-action]");
+    if (actionBtn) {
+      const action = String(actionBtn.dataset.crmAction || "").trim();
+      if (action === "recientes") {
+        event.preventDefault();
+        event.stopPropagation();
+        const isOpen = crmRecentMenu ? !crmRecentMenu.classList.contains("hidden") : false;
+        setCrmRecentOpen(!isOpen);
+        return;
+      }
+    }
     const quick = closestFromEvent(event, "[data-crm-quick]");
     if (quick) {
       applyCrmTecnocloudQuickSearch(String(quick.dataset.crmQuick || "").trim());

@@ -2273,7 +2273,7 @@
 
 		              <div class="crm-side-grow" aria-hidden="true"></div>
 
-		              <button class="crm-side-item" id="crmRecentBtn" type="button" title="Recientes" aria-haspopup="dialog" aria-controls="crmRecentMenu">
+		              <button class="crm-side-item hidden" id="crmRecentBtn" type="button" title="Recientes" aria-haspopup="dialog" aria-controls="crmRecentMenu">
 		                <span class="crm-side-ico" aria-hidden="true">🕘</span>
 		                <span class="crm-side-txt">Recientes</span>
 		              </button>
@@ -2324,23 +2324,68 @@
 		                  </div>
 		                </div>
 
-			                <div id="crmWorkspaceTabs" class="crm-workspace-tabs crm-lightning-tabs" role="tablist" aria-label="Menú superior">
-			                  <button type="button" class="tab active" data-crm-view="resumen">Inicio</button>
-			                  <button type="button" class="tab" data-crm-view="clientes">Clientes</button>
-			                  <button type="button" class="tab" data-crm-view="inmuebles">Inmuebles</button>
-			                  <button type="button" class="tab" data-crm-view="captaciones" data-etapa="Noticia">Noticias</button>
-			                  <button type="button" class="tab" data-crm-view="captaciones" data-etapa="Encargo">Encargos</button>
-			                  <button type="button" class="tab" data-crm-view="demandas" data-crm-quick="demandas:activa">Pedidos</button>
-			                  <button type="button" class="tab" data-crm-view="relaciones">Relaciones Cruce</button>
-			                  <button type="button" class="tab" data-crm-view="agenda" data-crm-quick="agenda:Pendiente">Act./Citas</button>
-			                  <button type="button" class="tab" data-crm-view="analisis">Búsq./Informes</button>
+			                <div id="crmWorkspaceTabs" class="crm-workspace-tabs crm-lightning-tabs crm-modulebar" role="navigation" aria-label="Menú Tecnocloud">
+			                  <button type="button" class="secondary" id="crmTopNewBtn" aria-haspopup="dialog" aria-controls="crmInsertModal">
+			                    + Nuevo
+			                  </button>
+			                  <button type="button" class="tab tc-module" data-crm-action="recientes" title="Recientes">
+			                    <span class="tc-mod-ico" aria-hidden="true">
+			                      <svg viewBox="0 0 24 24" fill="none"><path d="M12 7v6l4 2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M12 21a9 9 0 1 0-9-9" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+			                    </span>
+			                    <span class="tc-mod-label">Recientes</span>
+			                  </button>
+			                  <button type="button" class="tab tc-module active" data-crm-view="resumen" title="Inicio">
+			                    <span class="tc-mod-ico" aria-hidden="true">
+			                      <svg viewBox="0 0 24 24" fill="none"><path d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-5v-6H10v6H5a1 1 0 0 1-1-1z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+			                    </span>
+			                    <span class="tc-mod-label">Inicio</span>
+			                  </button>
+			                  <button type="button" class="tab tc-module" data-crm-view="clientes" title="Clientes">
+			                    <span class="tc-mod-ico" aria-hidden="true">
+			                      <svg viewBox="0 0 24 24" fill="none"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z" stroke="currentColor" stroke-width="2"/><path d="M22 21v-2a4 4 0 0 0-3-3.87" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M16 3.13a4 4 0 0 1 0 7.75" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+			                    </span>
+			                    <span class="tc-mod-label">Clientes</span>
+			                  </button>
+			                  <button type="button" class="tab tc-module" data-crm-view="inmuebles" title="Inmuebles">
+			                    <span class="tc-mod-ico" aria-hidden="true">
+			                      <svg viewBox="0 0 24 24" fill="none"><path d="M3 10.5 12 4l9 6.5V20a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M9 21v-7h6v7" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+			                    </span>
+			                    <span class="tc-mod-label">Inmuebles</span>
+			                  </button>
+			                  <button type="button" class="tab tc-module" data-crm-view="captaciones" data-etapa="Noticia" title="Noticias">
+			                    <span class="tc-mod-ico" aria-hidden="true">
+			                      <svg viewBox="0 0 24 24" fill="none"><path d="M4 6h16v14H4z" stroke="currentColor" stroke-width="2"/><path d="M8 10h8M8 14h8M8 18h5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+			                    </span>
+			                    <span class="tc-mod-label">Noticias</span>
+			                  </button>
+			                  <button type="button" class="tab tc-module" data-crm-view="captaciones" data-etapa="Encargo" title="Encargos">
+			                    <span class="tc-mod-ico" aria-hidden="true">
+			                      <svg viewBox="0 0 24 24" fill="none"><path d="M7 7h10v4H7z" stroke="currentColor" stroke-width="2"/><path d="M5 11h14v10H5z" stroke="currentColor" stroke-width="2"/><path d="M8 15h8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+			                    </span>
+			                    <span class="tc-mod-label">Encargos</span>
+			                  </button>
+			                  <button type="button" class="tab tc-module" data-crm-view="demandas" data-crm-quick="demandas:activa" title="Pedidos">
+			                    <span class="tc-mod-ico" aria-hidden="true">
+			                      <svg viewBox="0 0 24 24" fill="none"><path d="M6 7h12l-1 14H7L6 7Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M9 7V5a3 3 0 0 1 6 0v2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+			                    </span>
+			                    <span class="tc-mod-label">Pedidos</span>
+			                  </button>
+			                  <button type="button" class="tab tc-module" data-crm-view="agenda" data-crm-agenda-open="day" title="Act./Citas">
+			                    <span class="tc-mod-ico" aria-hidden="true">
+			                      <svg viewBox="0 0 24 24" fill="none"><path d="M7 3v3M17 3v3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M4 6h16v15H4z" stroke="currentColor" stroke-width="2"/><path d="M8 10h8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+			                    </span>
+			                    <span class="tc-mod-label">Act./Citas</span>
+			                  </button>
+			                  <button type="button" class="tab tc-module" data-crm-view="analisis" title="Búsq./Inf.">
+			                    <span class="tc-mod-ico" aria-hidden="true">
+			                      <svg viewBox="0 0 24 24" fill="none"><path d="M10 18a8 8 0 1 1 5.29-14.03A8 8 0 0 1 10 18Z" stroke="currentColor" stroke-width="2"/><path d="M21 21l-4.35-4.35" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+			                    </span>
+			                    <span class="tc-mod-label">Búsq./Inf.</span>
+			                  </button>
 			                </div>
 
 		                <div class="crm-lightning-topbar-right">
 		                  <button type="button" class="secondary ghost" id="crmExitBtn" title="Volver al panel">Volver</button>
-		                  <button type="button" class="secondary" id="crmTopNewBtn" aria-haspopup="dialog" aria-controls="crmInsertModal">
-		                    + Nuevo
-		                  </button>
 		                  <div class="crm-global-searchbox">
 		                    <input id="crmGlobalSearch" class="crm-lightning-search" placeholder="Buscar..." autocomplete="off" />
 	                    <div id="crmGlobalSearchResults" class="crm-global-results hidden" role="listbox" aria-label="Resultados de búsqueda"></div>
@@ -2354,7 +2399,7 @@
 					              <div id="crmViewResumen" class="crm-workspace-view">
 					                <div class="crm-home-grid tc-home-grid">
 					                  <div class="crm-home-left">
-					                    <div class="crm-home-cards crm-home-kpis" aria-label="KPIs">
+					                    <div class="crm-home-cards crm-home-kpis hidden" aria-label="KPIs">
 					                      <button type="button" class="dashboard-card kpi-clickable" data-crm-view="captaciones" data-etapa="Noticia">
 					                        <div class="kpi-label">Noticias Web activas</div>
 					                        <div class="kpi-value" id="crmHomeKpiNoticias">0</div>
