@@ -3567,9 +3567,75 @@ body.crm-fin #companySummary {
   background: rgba(15, 23, 42, 0.32);
 }
 
+#crmSection .tc-flag {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 1;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+}
+
+#crmSection .tc-flag--ok {
+  background: #16a34a;
+  color: #ffffff;
+  border-color: rgba(22, 163, 74, 0.55);
+}
+
+#crmSection .tc-flag--bad {
+  background: #ef4444;
+  color: #ffffff;
+  border-color: rgba(239, 68, 68, 0.55);
+}
+
+#crmSection .tc-flag--neutral {
+  background: rgba(148, 163, 184, 0.88);
+  color: #ffffff;
+  border-color: rgba(148, 163, 184, 0.55);
+}
+
 #crmSection table.crm-captaciones-table,
-#crmSection table.crm-clientes-table {
+#crmSection table.crm-clientes-table,
+#crmSection table.crm-inmuebles-table {
   table-layout: fixed;
+}
+
+#crmSection table.crm-inmuebles-table th:first-child,
+#crmSection table.crm-inmuebles-table td:first-child {
+  width: 18px;
+}
+
+#crmSection table.crm-inmuebles-table th:nth-child(2),
+#crmSection table.crm-inmuebles-table td:nth-child(2) {
+  width: 120px;
+}
+
+#crmSection table.crm-inmuebles-table th:nth-child(3),
+#crmSection table.crm-inmuebles-table td:nth-child(3) {
+  width: 320px;
+}
+
+#crmSection table.crm-inmuebles-table th:nth-child(4),
+#crmSection table.crm-inmuebles-table td:nth-child(4) {
+  width: 200px;
+}
+
+#crmSection table.crm-inmuebles-table th:nth-child(5),
+#crmSection table.crm-inmuebles-table td:nth-child(5) {
+  width: 140px;
+}
+
+#crmSection table.crm-inmuebles-table th:nth-child(6),
+#crmSection table.crm-inmuebles-table td:nth-child(6) {
+  width: 170px;
+}
+
+#crmSection table.crm-inmuebles-table th:nth-child(7),
+#crmSection table.crm-inmuebles-table td:nth-child(7) {
+  width: 260px;
 }
 
 #crmSection table.crm-captaciones-table th:first-child,
@@ -4233,10 +4299,11 @@ body.crm-fin #companySummary {
 #crmSection .tc-listview {
   background: #ffffff;
   border: 1px solid rgba(15, 23, 42, 0.10);
-  border-radius: 8px;
-  padding: 8px;
+  border-radius: 6px;
+  padding: 6px;
   max-width: 100%;
-  overflow-x: hidden;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 #crmSection .tc-title {
@@ -4732,7 +4799,15 @@ body.crm-fin #companySummary {
 }
 
 #crmSection .tc-listfoot {
-  padding-top: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-top: 1px solid rgba(15, 23, 42, 0.08);
+  background: rgba(248, 250, 252, 0.92);
+  border-radius: 6px;
 }
 
 #crmSection .tc-stagebar {

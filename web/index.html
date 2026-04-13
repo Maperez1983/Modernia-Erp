@@ -2131,10 +2131,10 @@
 	          <div id="crmSection" class="hidden">
 	          <div class="crm-lightning-shell">
 		            <aside id="crmLightningSidebar" class="crm-lightning-sidebar" aria-label="Navegación CRM inmobiliaria">
-		              <button class="crm-side-item crm-side-new" id="crmQuickNewBtn" type="button" title="Crear nuevo" aria-label="Crear nuevo" aria-haspopup="dialog" aria-controls="crmInsertModal">
-		                <span class="crm-side-ico" aria-hidden="true">+</span>
-		                <span class="crm-side-txt">Crear nuevo</span>
-		              </button>
+			              <button class="crm-side-item crm-side-new hidden" id="crmQuickNewBtn" type="button" title="Crear nuevo" aria-label="Crear nuevo" aria-haspopup="dialog" aria-controls="crmInsertModal">
+			                <span class="crm-side-ico" aria-hidden="true">+</span>
+			                <span class="crm-side-txt">Crear nuevo</span>
+			              </button>
 		              <div id="crmInsertModal" class="crm-insert-modal crm-insert-modal--dropdown hidden" role="dialog" aria-modal="false" aria-label="Insertar">
 		                <div class="crm-insert-card">
 		                  <div class="crm-insert-head">
@@ -2258,14 +2258,18 @@
 		                <span class="crm-side-ico" aria-hidden="true">🏠</span>
 		                <span class="crm-side-txt">Nuevas<br />Oport.</span>
 		              </button>
-		              <button type="button" class="crm-side-item" data-crm-view="agenda" data-crm-quick="agenda:Pendiente" title="Agenda">
-		                <span class="crm-side-ico" aria-hidden="true">📅</span>
-		                <span class="crm-side-txt">Agenda</span>
-		              </button>
-		              <button type="button" class="crm-side-item" data-crm-view="analisis" title="Objetivos">
-		                <span class="crm-side-ico" aria-hidden="true">📈</span>
-		                <span class="crm-side-txt">Objetivos</span>
-		              </button>
+			              <button type="button" class="crm-side-item" data-crm-view="agenda" data-crm-agenda-open="day" title="Agenda">
+			                <span class="crm-side-ico" aria-hidden="true">📅</span>
+			                <span class="crm-side-txt">Agenda</span>
+			              </button>
+			              <button type="button" class="crm-side-item" data-crm-manual="inmobiliaria" title="Escuela">
+			                <span class="crm-side-ico" aria-hidden="true">🎓</span>
+			                <span class="crm-side-txt">Escuela</span>
+			              </button>
+			              <button type="button" class="crm-side-item" data-crm-view="analisis" title="Objetivos">
+			                <span class="crm-side-ico" aria-hidden="true">📈</span>
+			                <span class="crm-side-txt">Objetivos</span>
+			              </button>
 
 		              <div class="crm-side-grow" aria-hidden="true"></div>
 
@@ -2570,13 +2574,16 @@
 			                <div class="tc-listview">
 			                  <div class="tc-listhead">
 			                    <div class="tc-listleft">
-			                      <select id="crmInmueblesPreset" title="Inmuebles">
-			                        <option value="inmuebles_recientes">Inmuebles recientes</option>
-			                        <option value="inmuebles">Inmuebles</option>
-			                        <option value="noticias">Noticias Activas</option>
-			                        <option value="encargos">Encargos Activos</option>
-			                      </select>
-			                    </div>
+				                      <select id="crmInmueblesPreset" title="Inmuebles">
+				                        <option value="inmuebles_recientes">Inmuebles recientes</option>
+				                        <option value="inmuebles">Inmuebles</option>
+				                        <option value="noticias">Noticias Activas</option>
+				                        <option value="encargos">Encargos Activos</option>
+				                        <option value="complejos">Complejos</option>
+				                        <option value="edificios">Edificios</option>
+				                        <option value="potencial_adquisicion">Inmuebles potencial adquisición</option>
+				                      </select>
+				                    </div>
 			                    <div class="tc-listright">
 			                      <button type="button" class="secondary ghost" id="crmInmueblesPrintBtn">Impresiones</button>
 			                      <button type="button" class="secondary ghost" id="crmInmueblesMapBtn">Mapa inmuebles</button>
@@ -2734,12 +2741,11 @@
 			                <div class="tc-listview">
 			                  <div class="tc-listhead">
 			                    <div class="tc-listleft">
-			                      <strong class="tc-title">Act./Citas</strong>
-			                      <div class="tc-seg" id="crmAgendaViewSeg" role="tablist" aria-label="Vista agenda">
-			                        <button type="button" class="tc-seg-btn active" data-crm-agenda-view="list">Lista</button>
-			                        <button type="button" class="tc-seg-btn" data-crm-agenda-view="week">Semana</button>
-			                        <button type="button" class="tc-seg-btn" data-crm-agenda-view="day">Día</button>
-			                      </div>
+				                      <strong class="tc-title">Act./Citas</strong>
+				                      <div class="tc-seg" id="crmAgendaViewSeg" role="tablist" aria-label="Vista agenda">
+				                        <button type="button" class="tc-seg-btn" data-crm-agenda-view="day">Día</button>
+				                        <button type="button" class="tc-seg-btn" data-crm-agenda-view="week">Semana</button>
+				                      </div>
 			                      <div class="tc-agenda-nav hidden" id="crmAgendaNav" aria-label="Navegación agenda">
 			                        <button type="button" class="secondary ghost" id="crmAgendaPrev" title="Anterior">‹</button>
 			                        <button type="button" class="secondary ghost" id="crmAgendaToday" title="Hoy">Hoy</button>
@@ -3135,10 +3141,10 @@
             <div id="inmuebleTecnoMeta" class="inmueble-tecno-meta"></div>
             <div id="inmuebleTecnoKpis" class="inmueble-tecno-kpis"></div>
 		            <div id="inmuebleTecnoStages" class="inmueble-tecno-stages" aria-label="Fase del inmueble"></div>
-		            <div id="inmuebleTecnoActions" class="inmueble-tecno-actions" aria-label="Acciones rápidas">
-		              <button type="button" class="secondary ghost" id="inmuebleTecnoEmailBtn">Envío mail</button>
-		              <button type="button" class="secondary ghost" id="inmuebleTecnoPosBtn">Modifica posición</button>
-		              <button type="button" class="secondary ghost" id="inmuebleTecnoCampaignBtn">Campaña email</button>
+			            <div id="inmuebleTecnoActions" class="inmueble-tecno-actions hidden" aria-label="Acciones rápidas">
+			              <button type="button" class="secondary ghost" id="inmuebleTecnoEmailBtn">Envío mail</button>
+			              <button type="button" class="secondary ghost" id="inmuebleTecnoPosBtn">Modifica posición</button>
+			              <button type="button" class="secondary ghost" id="inmuebleTecnoCampaignBtn">Campaña email</button>
 		              <div class="inmueble-tecno-printwrap">
 		                <button type="button" class="secondary ghost" id="inmuebleTecnoPrintBtn" aria-haspopup="menu" aria-controls="inmuebleTecnoPrintMenu">Impresiones</button>
 		                <div id="inmuebleTecnoPrintMenu" class="inmueble-tecno-printmenu hidden" role="menu" aria-label="Impresiones">
@@ -3543,25 +3549,28 @@
                   </div>
                   <div id="inmuebleTecnoSideActividadList"></div>
                 </div>
-	                <div class="form-card" id="inmuebleTecnoSidePropietario">
-	                  <div class="section-head">
-	                    <div>
-	                      <h3>Personas relacionadas</h3>
-	                      <p class="muted">Propietarios, compradores e informadores vinculados al expediente.</p>
-	                    </div>
-	                  </div>
-	                  <div id="inmuebleTecnoSidePersonasCard"></div>
-	                </div>
-	                <div class="form-card" id="inmuebleTecnoSideServicios">
-	                  <div class="section-head">
-	                    <div>
-	                      <h3>Servicios</h3>
-	                      <p class="muted">Características rápidas (para tener la ficha igual de operativa que Tecnocloud).</p>
-	                    </div>
-	                    <button type="button" class="secondary ghost" id="inmuebleTecnoSideServiciosEdit">Editar</button>
-	                  </div>
-	                  <div id="inmuebleTecnoSideServiciosList"></div>
-	                </div>
+		                <div class="form-card" id="inmuebleTecnoSidePropietario">
+		                  <div class="section-head">
+		                    <div>
+		                      <h3>Personas relacionadas <span class="pill" id="inmuebleTecnoSidePersonasCount">0</span></h3>
+		                      <p class="muted">Propietarios, compradores e informadores vinculados al expediente.</p>
+		                    </div>
+		                    <div class="form-actions">
+		                      <button type="button" class="secondary" id="inmuebleTecnoSidePersonasNew">Nuevo</button>
+		                    </div>
+		                  </div>
+		                  <div id="inmuebleTecnoSidePersonasCard"></div>
+		                </div>
+		                <div class="form-card" id="inmuebleTecnoSideServicios">
+		                  <div class="section-head">
+		                    <div>
+		                      <h3>Servicios <span class="pill" id="inmuebleTecnoSideServiciosCount">0</span></h3>
+		                      <p class="muted">Características rápidas (para tener la ficha igual de operativa que Tecnocloud).</p>
+		                    </div>
+		                    <button type="button" class="secondary ghost" id="inmuebleTecnoSideServiciosEdit">Nuevo</button>
+		                  </div>
+		                  <div id="inmuebleTecnoSideServiciosList"></div>
+		                </div>
 	              </aside>
             </div>
           </div>

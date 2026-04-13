@@ -2822,11 +2822,14 @@ const inmuebleTecnoSideDemandasCount = document.getElementById("inmuebleTecnoSid
 const inmuebleTecnoSideActividadOpen = document.getElementById("inmuebleTecnoSideActividadOpen");
 const inmuebleTecnoSideActividadList = document.getElementById("inmuebleTecnoSideActividadList");
 const inmuebleTecnoSideActividadCount = document.getElementById("inmuebleTecnoSideActividadCount");
-const inmuebleTecnoSideNuevaActividad = document.getElementById("inmuebleTecnoSideNuevaActividad");
-const inmuebleTecnoSidePersonasCard = document.getElementById("inmuebleTecnoSidePersonasCard");
-const inmuebleTecnoSideServiciosList = document.getElementById("inmuebleTecnoSideServiciosList");
-const inmuebleTecnoSideServiciosEdit = document.getElementById("inmuebleTecnoSideServiciosEdit");
-const inmuebleTabDatos = document.getElementById("inmuebleTabDatos");
+	const inmuebleTecnoSideNuevaActividad = document.getElementById("inmuebleTecnoSideNuevaActividad");
+	const inmuebleTecnoSidePersonasCard = document.getElementById("inmuebleTecnoSidePersonasCard");
+	const inmuebleTecnoSidePersonasCount = document.getElementById("inmuebleTecnoSidePersonasCount");
+	const inmuebleTecnoSidePersonasNew = document.getElementById("inmuebleTecnoSidePersonasNew");
+	const inmuebleTecnoSideServiciosList = document.getElementById("inmuebleTecnoSideServiciosList");
+	const inmuebleTecnoSideServiciosEdit = document.getElementById("inmuebleTecnoSideServiciosEdit");
+	const inmuebleTecnoSideServiciosCount = document.getElementById("inmuebleTecnoSideServiciosCount");
+	const inmuebleTabDatos = document.getElementById("inmuebleTabDatos");
 const inmuebleTabCaptacion = document.getElementById("inmuebleTabCaptacion");
 	const inmuebleTabDemandas = document.getElementById("inmuebleTabDemandas");
 	const inmuebleTabVisitas = document.getElementById("inmuebleTabVisitas");
@@ -17147,9 +17150,9 @@ const renderTcAzBar = (container, scope, onChange) => {
     return btn;
   };
   container.innerHTML = "";
-  container.appendChild(mkBtn("TODO", ""));
   TC_AZ_LETTERS.forEach((letter) => container.appendChild(mkBtn(letter, letter)));
   container.appendChild(mkBtn("OTROS", "OTROS"));
+  container.appendChild(mkBtn("TODO", ""));
 };
 
 const matchTcAz = (az, raw) => {
@@ -17476,6 +17479,7 @@ const applyCrmTecnocloudQuickSearch = (token = "") => {
     }
     if (scope === "agenda") {
       if (crmAgendaEstadoFilter) crmAgendaEstadoFilter.value = value || "";
+      setCrmAgendaView("list");
       setCrmWorkspaceView("agenda");
       loadCrmAgenda();
     }
@@ -22146,20 +22150,66 @@ const renderMapPreview = (container, lat, lon, address = "") => {
     const searchUrl = safeAddress
       ? `https://www.openstreetmap.org/search?query=${encodeURIComponent(safeAddress)}`
       : "https://www.openstreetmap.org/";
-    const message = safeAddress
-      ? geocodeState === "failed"
-        ? `No se pudo geolocalizar ${safeAddress}. Revisa dirección/población/provincia y vuelve a intentar.`
-        : `Se intentará geolocalizar ${safeAddress} automáticamente.`
-      : "Añade al menos la dirección (mejor si incluyes población o provincia) para dibujar la localización.";
-    container.innerHTML = `
-      <div class="map-box-empty">
-        <strong>Mapa pendiente</strong>
-        <p class="muted">${escapeHtml(message)}</p>
+    if (safeAddress) {
+      // Si todavía no tenemos lat/lon, mostramos igualmente un embed por dirección (muy parecido al widget
+      // de Tecnocloud) y dejamos un botón para reintentar la geolocalización.
+      const googleBase = `https://www.google.com/maps?q=${encodeURIComponent(safeAddress)}&z=16&output=embed`;
+      const googleSat = `https://www.google.com/maps?q=${encodeURIComponent(safeAddress)}&z=16&t=k&output=embed`;
+      const message =
+        geocodeState === "failed"
+          ? `No se pudo geolocalizar ${safeAddress}. Revisa dirección/población/provincia y vuelve a intentar.`
+          : `Se intentará geolocalizar ${safeAddress} automáticamente.`;
+      container.innerHTML = `
+        <div class="map-box-leaflet-wrap">
+          <iframe
+            class="map-box-embed"
+            title="Mapa de localización ${escapeHtml(safeAddress)}"
+            loading="lazy"
+            src="${googleBase}"
+          ></iframe>
+          <div class="map-box-leaflet-controls" role="group" aria-label="Capa de mapa">
+            <button type="button" class="secondary ghost active" data-layer="street">Mapa</button>
+            <button type="button" class="secondary ghost" data-layer="satellite">Satélite</button>
+          </div>
+        </div>
         <div class="map-box-meta">
+          <span class="muted">${escapeHtml(message)}</span>
+          <button type="button" class="secondary ghost" data-map-retry="1">Reintentar geolocalizar</button>
           <a class="muted" href="${searchUrl}" target="_blank" rel="noreferrer">Buscar en OpenStreetMap</a>
         </div>
-      </div>
-    `;
+      `;
+      const iframe = container.querySelector("iframe.map-box-embed");
+      const controls = container.querySelector(".map-box-leaflet-controls");
+      if (iframe && controls) {
+        controls.addEventListener("click", (event) => {
+          const btn = event.target?.closest?.("button[data-layer]");
+          if (!btn) return;
+          const layer = String(btn.dataset.layer || "street");
+          controls.querySelectorAll("button[data-layer]").forEach((b) => b.classList.toggle("active", b === btn));
+          iframe.src = layer === "satellite" ? googleSat : googleBase;
+        });
+      }
+      const retry = container.querySelector("[data-map-retry]");
+      if (retry) {
+        retry.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          geocodeInmuebleAddress(safeAddress, null, null, { force: true });
+        });
+      }
+      return;
+    }
+    const message =
+      "Añade al menos la dirección (mejor si incluyes población o provincia) para dibujar la localización.";
+    container.innerHTML = `
+        <div class="map-box-empty">
+          <strong>Mapa pendiente</strong>
+          <p class="muted">${escapeHtml(message)}</p>
+          <div class="map-box-meta">
+            <a class="muted" href="${searchUrl}" target="_blank" rel="noreferrer">Buscar en OpenStreetMap</a>
+          </div>
+        </div>
+      `;
     return;
   }
   container.dataset.geocode = "ok";
@@ -24998,6 +25048,17 @@ const updateTableVisibility = () => {
   } catch {
     crmContext = "";
   }
+  const isCrmContext =
+    currentTab === "crm" ||
+    currentTab === "seguros-crm" ||
+    currentTab === "fin-crm" ||
+    currentTab === "fin-sim" ||
+    crmContext === "inmo" ||
+    crmContext === "inmobiliaria" ||
+    crmContext === "seguros" ||
+    crmContext === "fin" ||
+    crmContext === "financiaciones" ||
+    crmContext === "hipotecas";
   document.body.classList.toggle(
     "crm-context-inmo",
     currentTab === "crm" || crmContext === "inmo" || crmContext === "inmobiliaria"
@@ -25020,7 +25081,7 @@ const updateTableVisibility = () => {
   // Los accesos a otros verticales se hacen desde Home/Workspaces, no desde el tab-bar del vertical actual.
   if (viewTabs) {
     // Dentro del CRM inmobiliario el tab-bar general se considera duplicado (confunde).
-    viewTabs.classList.toggle("hidden", currentTab === "crm");
+    viewTabs.classList.toggle("hidden", isCrmContext);
     const allowedByContext = (() => {
       // Si el usuario entra en Clientes desde un vertical (p.ej. Inmobiliaria),
       // restringimos el tab-bar a lo mínimo necesario para esa operativa.
@@ -25099,9 +25160,7 @@ const updateTableVisibility = () => {
     viewTabs.classList.toggle(
       "hidden",
       isClientePage ||
-        currentTab === "crm" ||
-        currentTab === "seguros-crm" ||
-        currentTab === "fin-crm" ||
+        isCrmContext ||
         isSegurosCrmVisible ||
         isFinCrmVisible
     );
@@ -32234,6 +32293,14 @@ const renderInmuebleTecnocloudPanels = ({
       { label: "Asesor", value: asesor || "-" },
     ];
 
+    if (inmuebleTecnoSidePersonasCount) {
+      const count =
+        ownerNames.length +
+        uniqueBuyers.length +
+        (informador ? 1 : 0);
+      inmuebleTecnoSidePersonasCount.textContent = String(count);
+    }
+
     inmuebleTecnoSidePersonasCard.innerHTML = personasRows
       .map(
         (item) => `
@@ -32250,6 +32317,9 @@ const renderInmuebleTecnocloudPanels = ({
     const list = (Array.isArray(servicios) ? servicios : [])
       .map((s) => String(s || "").trim())
       .filter(Boolean);
+    if (inmuebleTecnoSideServiciosCount) {
+      inmuebleTecnoSideServiciosCount.textContent = String(list.length);
+    }
     if (!list.length) {
       inmuebleTecnoSideServiciosList.innerHTML = "<p class='muted'>Sin servicios definidos.</p>";
     } else {
@@ -32551,14 +32621,12 @@ const buildCrmInmueblesDenseTableNode = (rows = []) => {
   const trHead = document.createElement("tr");
   [
     "",
-    "Focalización",
+    "Localidad",
     "Inmueble",
     "Propietario",
     "Tel. propietario",
-    "Subtipología",
-    "Motivación",
-    "Necesidad",
-    "Precio encargo",
+    "Informador relac.",
+    "Dirección",
   ].forEach((label) => {
     const th = document.createElement("th");
     th.textContent = label;
@@ -32569,24 +32637,40 @@ const buildCrmInmueblesDenseTableNode = (rows = []) => {
   const tbody = document.createElement("tbody");
   rows.forEach((row) => {
     const tr = document.createElement("tr");
-    tr.addEventListener("click", () => openInmuebleDetail(row.id));
+    tr.addEventListener("click", () => {
+      const inmuebleId = String(row.id || "").trim();
+      if (inmuebleId) {
+        pushCrmRecentItem({
+          kind: "inmueble",
+          inmuebleId,
+          title: String(row.direccion || row.referencia || "").trim() || "Inmueble",
+          meta: [row.poblacion || "", row.provincia || "", row.estado || ""].filter(Boolean).join(" · "),
+          view: "inmuebles",
+          ts: Date.now(),
+        });
+      }
+      openInmuebleDetail(row.id, "inmuebles");
+    });
     const locatedRaw = String(row.propietario_localizado ?? "").trim();
-    const tone = locatedRaw === "1" ? "ok" : locatedRaw === "0" ? "bad" : "neutral";
-    const dotTd = document.createElement("td");
-    dotTd.innerHTML = `<span class="crm-dot tone-${escapeHtml(tone)}" aria-hidden="true"></span>`;
-    tr.appendChild(dotTd);
+    const locatedTone = locatedRaw === "1" ? "ok" : locatedRaw === "0" ? "bad" : "neutral";
+    const flagTd = document.createElement("td");
+    const flagSymbol = locatedTone === "ok" ? "✓" : locatedTone === "bad" ? "✕" : "";
+    flagTd.innerHTML = flagSymbol
+      ? `<span class="tc-flag tc-flag--${escapeHtml(locatedTone)}" aria-label="Propietario localizado">${flagSymbol}</span>`
+      : "";
+    tr.appendChild(flagTd);
 
-    const focTd = document.createElement("td");
-    focTd.textContent = String(row.focalizacion || "");
-    tr.appendChild(focTd);
+    const locTd = document.createElement("td");
+    locTd.textContent = String(row.localidad || row.poblacion || "").trim() || "-";
+    tr.appendChild(locTd);
 
     const inmuebleTd = document.createElement("td");
     inmuebleTd.className = "crm-dense-main";
     const stage = normalizeCrmMainEtapa(row?.estado || "") || "Inmueble";
     const prefix = resolveCaptacionCodePrefix(stage);
     const address = String(row.direccion || "").trim() || "Sin dirección";
-    const locality = [row.poblacion || "", row.provincia || ""].filter(Boolean).join(" · ");
-    inmuebleTd.innerHTML = `<strong>${escapeHtml(`${prefix} - ${address}`)}</strong>${locality ? `<div class="muted">${escapeHtml(locality)}</div>` : ""}`;
+    const subtitle = [row.subtipologia || "", stage ? `Estado: ${stage}` : ""].filter(Boolean).join(" · ");
+    inmuebleTd.innerHTML = `<strong>${escapeHtml(`${prefix} - ${address}`)}</strong>${subtitle ? `<div class="muted">${escapeHtml(subtitle)}</div>` : ""}`;
     tr.appendChild(inmuebleTd);
 
     const propTd = document.createElement("td");
@@ -32599,21 +32683,13 @@ const buildCrmInmueblesDenseTableNode = (rows = []) => {
     telTd.textContent = String(row.propietario_telefono || "").trim();
     tr.appendChild(telTd);
 
-    const subTd = document.createElement("td");
-    subTd.textContent = String(row.subtipologia || "").trim();
-    tr.appendChild(subTd);
+    const infTd = document.createElement("td");
+    infTd.textContent = String(row.informador_nombre || "").trim() || "-";
+    tr.appendChild(infTd);
 
-    const motTd = document.createElement("td");
-    motTd.textContent = String(row.motivacion || "").trim();
-    tr.appendChild(motTd);
-
-    const necTd = document.createElement("td");
-    necTd.textContent = String(row.necesidad_venta_alquiler || "").trim();
-    tr.appendChild(necTd);
-
-    const precioTd = document.createElement("td");
-    precioTd.textContent = formatCell("precio_objetivo", row.precio_encargo || row.precio_objetivo) || "";
-    tr.appendChild(precioTd);
+    const dirTd = document.createElement("td");
+    dirTd.textContent = String(row.direccion || "").trim();
+    tr.appendChild(dirTd);
 
     tbody.appendChild(tr);
   });
@@ -32706,9 +32782,19 @@ const loadCrmInmuebles = () => {
     const presetFiltered = (() => {
       // Tecnocloud: selector de vistas (Inmuebles recientes / Inmuebles / Noticias / Encargos).
       const stage = (row) => normalizeCrmMainEtapa(row?.estado || "") || "Inmueble";
+      const tipo = (row) => normalizeSimple(row?.tipo_inmueble || "");
       if (presetKey === "inmuebles") return allRows.filter((row) => stage(row) === "Inmueble");
       if (presetKey === "noticias") return allRows.filter((row) => stage(row) === "Noticia");
       if (presetKey === "encargos") return allRows.filter((row) => stage(row) === "Encargo");
+      if (presetKey === "edificios") return allRows.filter((row) => tipo(row).includes("edificio"));
+      if (presetKey === "complejos") return allRows.filter((row) => tipo(row).includes("complejo"));
+      if (presetKey === "potencial_adquisicion") {
+        return allRows.filter((row) => {
+          const foc = normalizeSimple(row?.focalizacion || "");
+          const mot = normalizeSimple(row?.motivacion || "");
+          return foc.includes("adquis") || mot.includes("adquis") || stage(row) === "Noticia";
+        });
+      }
       return allRows;
     })();
     const rows = filterRowsByEstado(presetFiltered, estadoFilter).filter((row) =>
@@ -33605,9 +33691,10 @@ const loadCrmDemandas = () => {
 	      createdTd.textContent = created ? created.slice(0, 10) : "-";
 	      tr.appendChild(createdTd);
 
-	      const webTd = document.createElement("td");
-	      webTd.textContent = String(row.pedido_web || "").trim() ? "✓" : "✕";
-	      tr.appendChild(webTd);
+		      const webTd = document.createElement("td");
+		      const isWeb = Boolean(String(row.pedido_web || "").trim());
+		      webTd.innerHTML = `<span class="tc-flag tc-flag--${isWeb ? "ok" : "bad"}" aria-label="Pedido web">${isWeb ? "✓" : "✕"}</span>`;
+		      tr.appendChild(webTd);
 
 	      const tipoTd = document.createElement("td");
 	      tipoTd.textContent = [row.tipologia || "", row.subtipologia || ""].filter(Boolean).join(" · ") || "-";
@@ -34118,6 +34205,7 @@ const syncCrmAgendaControls = () => {
   initCrmAgendaPrefsIfNeeded();
   const view = normalizeCrmAgendaView(state.crmAgendaView || "week");
   if (crmAgendaViewSeg) {
+    crmAgendaViewSeg.classList.toggle("hidden", view === "list");
     Array.from(crmAgendaViewSeg.querySelectorAll("button[data-crm-agenda-view]")).forEach((btn) => {
       const key = normalizeCrmAgendaView(btn.dataset.crmAgendaView || "");
       btn.classList.toggle("active", key === view);
@@ -35170,6 +35258,158 @@ const openInmuebleServiciosModal = () => {
           state.currentInmuebleContext.servicios = Array.isArray(data?.servicios) ? data.servicios : selectedValues;
         }
         refreshCurrentInmuebleProfile();
+        if (statusEl) statusEl.textContent = "Guardado.";
+        window.setTimeout(cleanup, 250);
+      } catch (err) {
+        if (statusEl) statusEl.textContent = err?.message || "No se pudo guardar.";
+      }
+    };
+  }
+
+  modal.classList.remove("hidden");
+  modal.classList.add("open");
+  document.body.classList.add("modal-open");
+};
+
+const openInmueblePersonasModal = async () => {
+  if (!state.currentInmuebleId) {
+    alert("No hay inmueble seleccionado.");
+    return;
+  }
+  const empresa = resolveCrmInmoEmpresa();
+  if (!empresa) {
+    alert("Sin empresa inmobiliaria.");
+    return;
+  }
+  let modal = document.getElementById("inmueblePersonasModal");
+  if (!modal) {
+    modal = document.createElement("div");
+    modal.id = "inmueblePersonasModal";
+    modal.className = "modal hidden";
+    modal.innerHTML = `
+      <div class="modal-content" style="max-width: 760px;">
+        <div class="modal-header">
+          <div>
+            <h3>Personas relacionadas</h3>
+            <p class="muted" style="margin:0;">Selecciona los propietarios (clientes) vinculados al inmueble.</p>
+          </div>
+          <button type="button" class="secondary ghost" data-personas-close>Cerrar</button>
+        </div>
+        <form class="modal-body" data-personas-form>
+          <label class="span-2">
+            Buscar
+            <input type="search" data-personas-search placeholder="Filtra por nombre, NIF o teléfono..." autocomplete="off" />
+          </label>
+          <label class="span-2">
+            Propietarios (clientes)
+            <select multiple size="14" data-personas-select></select>
+            <div class="muted" style="margin-top:6px;">Tip: usa Ctrl/⌘ para seleccionar varios.</div>
+          </label>
+          <div class="modal-actions">
+            <span class="muted" data-personas-status></span>
+            <button type="submit">Guardar</button>
+          </div>
+        </form>
+      </div>
+    `;
+    modal.addEventListener("click", (event) => {
+      if (event.target === modal) {
+        modal.classList.add("hidden");
+        modal.classList.remove("open");
+        document.body.classList.remove("modal-open");
+      }
+    });
+    document.body.appendChild(modal);
+  }
+
+  const closeBtn = modal.querySelector("[data-personas-close]");
+  const form = modal.querySelector("[data-personas-form]");
+  const select = modal.querySelector("select[data-personas-select]");
+  const statusEl = modal.querySelector("[data-personas-status]");
+  const search = modal.querySelector("input[data-personas-search]");
+
+  const cleanup = () => {
+    modal.classList.add("hidden");
+    modal.classList.remove("open");
+    document.body.classList.remove("modal-open");
+    if (statusEl) statusEl.textContent = "";
+  };
+  closeBtn?.addEventListener("click", cleanup, { once: true });
+
+  const selectedIds = new Set(
+    (Array.isArray(state.currentInmuebleContext?.propietarios) ? state.currentInmuebleContext.propietarios : [])
+      .map((p) => String(p?.id || "").trim())
+      .filter(Boolean)
+  );
+
+  let clients = [];
+  try {
+    const params = new URLSearchParams({
+      include_id: "1",
+      limit: "900",
+      empresa_id: String(empresa.id || "").trim(),
+      servicio: "inmobiliaria",
+    });
+    const data = await api(`/api/clientes?${params.toString()}`);
+    if (data && Array.isArray(data.columns) && Array.isArray(data.rows)) {
+      clients = data.rows.map((row) => buildRowMap(row, data.columns));
+    }
+  } catch {}
+
+  const renderOptions = (needle = "") => {
+    if (!select) return;
+    const q = normalizeSimple(needle || "");
+    const items = (Array.isArray(clients) ? clients : []).slice().sort((a, b) => {
+      return String(a.nombre || "").localeCompare(String(b.nombre || ""), "es", { sensitivity: "base" });
+    });
+    select.innerHTML = "";
+    items.forEach((row) => {
+      const id = String(row.id || "").trim();
+      if (!id) return;
+      const hay = normalizeSimple(
+        [row.nombre || "", row.nif || "", row.telefono || "", row.movil || "", row.email || ""].join(" ")
+      );
+      if (q && !hay.includes(q)) return;
+      const opt = document.createElement("option");
+      opt.value = id;
+      opt.selected = selectedIds.has(id);
+      const labelParts = [row.nombre || "Cliente", row.nif || "", row.telefono || row.movil || ""].filter(Boolean);
+      opt.textContent = labelParts.join(" · ");
+      select.appendChild(opt);
+    });
+  };
+  renderOptions("");
+  if (search) {
+    search.value = "";
+    search.oninput = () => renderOptions(search.value);
+  }
+
+  if (form) {
+    form.onsubmit = async (event) => {
+      event.preventDefault();
+      if (statusEl) statusEl.textContent = "Guardando...";
+      const values = Array.from(select?.selectedOptions || [])
+        .map((opt) => String(opt.value || "").trim())
+        .filter(Boolean);
+      try {
+        const data = await apiPost("/api/inmueble_propietarios_update", {
+          inmueble_id: state.currentInmuebleId,
+          cliente_ids: values,
+        });
+        if (data?.error) {
+          if (statusEl) statusEl.textContent = data.error;
+          return;
+        }
+        const idToRow = new Map((Array.isArray(clients) ? clients : []).map((row) => [String(row.id || "").trim(), row]));
+        const propietarios = values
+          .map((id) => idToRow.get(id))
+          .filter(Boolean)
+          .map((row) => ({ id: String(row.id || "").trim(), nombre: String(row.nombre || "").trim() }));
+        if (state.currentInmuebleContext) {
+          state.currentInmuebleContext.propietarios = propietarios;
+        }
+        refreshCurrentInmuebleProfile();
+        loadCrmInmuebles();
         if (statusEl) statusEl.textContent = "Guardado.";
         window.setTimeout(cleanup, 250);
       } catch (err) {
@@ -46403,6 +46643,14 @@ if (crmWorkspaceTabs) {
     const btn = closestFromEvent(event, "[data-crm-view]");
     if (!btn) return;
     const view = String(btn.dataset.crmView || "").trim();
+    if (view === "agenda" && btn.dataset.crmAgendaOpen) {
+      const desired = normalizeCrmAgendaView(btn.dataset.crmAgendaOpen || "day");
+      setCrmAgendaAnchorDay(formatAgendaDate(new Date()));
+      setCrmAgendaView(desired);
+      setCrmWorkspaceView("agenda");
+      loadCrmAgenda();
+      return;
+    }
     setCrmWorkspaceView(view);
     const etapa = String(btn.dataset.etapa || "").trim();
     if (view === "captaciones" && etapa) {
@@ -46419,6 +46667,16 @@ if (crmLightningSidebar) {
     if (quick) {
       applyCrmTecnocloudQuickSearch(String(quick.dataset.crmQuick || "").trim());
       return;
+    }
+    const manualBtn = closestFromEvent(event, "[data-crm-manual]");
+    if (manualBtn) {
+      event.preventDefault();
+      event.stopPropagation();
+      const key = String(manualBtn.dataset.crmManual || "").trim();
+      if (key === "inmobiliaria") {
+        window.open("/manual_inmobiliaria.html", "_blank", "noopener,noreferrer");
+        return;
+      }
     }
     const adminBtn = closestFromEvent(event, "[data-crm-admin]");
     if (adminBtn) {
@@ -50933,6 +51191,12 @@ if (inmuebleTecnoSideNuevaActividad) {
 if (inmuebleTecnoSideServiciosEdit) {
   inmuebleTecnoSideServiciosEdit.addEventListener("click", () => {
     openInmuebleServiciosModal();
+  });
+}
+
+if (inmuebleTecnoSidePersonasNew) {
+  inmuebleTecnoSidePersonasNew.addEventListener("click", () => {
+    openInmueblePersonasModal();
   });
 }
 

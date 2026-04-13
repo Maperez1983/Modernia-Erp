@@ -43922,6 +43922,10 @@ class Handler(BaseHTTPRequestHandler):
             if not current:
                 json_response(self, {"error": "Acción no encontrada"}, status=404)
                 return
+            empresa_id = str(current["empresa_id"] or "").strip()
+            if not empresa_id:
+                json_response(self, {"error": "Acción sin empresa_id"}, status=400)
+                return
             updates = {}
             for key in (
                 "fecha",
@@ -43979,10 +43983,10 @@ class Handler(BaseHTTPRequestHandler):
                 (record_id,),
             ).fetchone()
             if normalize_lookup_text(servicio_final) == "financiaciones" and estado_final.lower() != "pendiente":
-                apply_fin_action_workflow(conn, empresa["id"], action_row, now)
+                apply_fin_action_workflow(conn, empresa_id, action_row, now)
             audit_event(
                 conn,
-                empresa["id"],
+                empresa_id,
                 "accion",
                 record_id,
                 "Actualizar acción",
