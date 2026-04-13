@@ -45275,6 +45275,40 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, {"ok": True, "user": self._auth_user_payload(refreshed_session)})
             return
 
+        if path == "/api/catalogo_poblaciones":
+            try:
+                load_postal_catalog(conn)
+            except Exception:
+                pass
+            q = (params.get("q", [""])[0] or "").strip().lower()
+            provincia = (params.get("provincia", [""])[0] or "").strip()
+            limit = (params.get("limit", ["20000"])[0] or "20000").strip()
+            try:
+                limit_n = max(1, min(50000, int(limit or "20000")))
+            except Exception:
+                limit_n = 20000
+            sql = "SELECT DISTINCT poblacion, provincia FROM postal_catalogo WHERE TRIM(COALESCE(poblacion,'')) <> ''"
+            args = []
+            if provincia:
+                sql += " AND LOWER(TRIM(COALESCE(provincia,''))) = LOWER(?)"
+                args.append(provincia)
+            if q:
+                sql += " AND LOWER(TRIM(poblacion)) LIKE ?"
+                args.append(f"%{q}%")
+            sql += " ORDER BY LOWER(TRIM(poblacion)) ASC LIMIT ?"
+            args.append(limit_n)
+            rows = conn.execute(sql, args).fetchall()
+            items = [
+                {
+                    "poblacion": str(row_value(r, "poblacion") or "").strip(),
+                    "provincia": str(row_value(r, "provincia") or "").strip(),
+                }
+                for r in rows
+                if str(row_value(r, "poblacion") or "").strip()
+            ]
+            json_response(self, {"ok": True, "items": items})
+            return
+
         if path == "/api/portal_inmuebles":
             limit = (params.get("limit", ["60"])[0] or "60").strip()
             q = (params.get("q", [""])[0] or "").strip().lower()

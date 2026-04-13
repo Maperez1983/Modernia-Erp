@@ -2599,6 +2599,7 @@ const crmNuevaDemandaBtn = document.getElementById("crmNuevaDemandaBtn");
 			const crmCaptacionCloseBtn = document.getElementById("crmCaptacionCloseBtn");
 			const crmCaptacionCreateForm = document.getElementById("crmCaptacionCreateForm");
 			const crmCaptacionCreateStatus = document.getElementById("crmCaptacionCreateStatus");
+			const crmCaptacionCreateDuplicates = document.getElementById("crmCaptacionCreateDuplicates");
 		  const crmTopNewBtn = document.getElementById("crmTopNewBtn");
 	const crmRecentBtn = document.getElementById("crmRecentBtn");
 	const crmRecentMenu = document.getElementById("crmRecentMenu");
@@ -17076,7 +17077,10 @@ const createCrmCaptacionQuick = async (payload = {}) => {
   const data = await res.json().catch(() => ({}));
   if (!res.ok || data?.error) {
     if (res.status === 409 && data?.code === "duplicate_detected") {
-      throw new Error("Posible duplicado detectado. Marca “Permitir duplicado” si quieres forzar el alta.");
+      const err = new Error("Posible duplicado detectado. Abre la ficha existente para comprobarlo o marca “Permitir duplicado” si quieres forzar el alta.");
+      err.code = "duplicate_detected";
+      err.duplicates = Array.isArray(data?.duplicates) ? data.duplicates : [];
+      throw err;
     }
     throw new Error(data?.error || "No se pudo crear el inmueble.");
   }
@@ -46906,6 +46910,10 @@ if (crmCaptacionCreateForm) {
   crmCaptacionCreateForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (crmCaptacionCreateStatus) crmCaptacionCreateStatus.textContent = "Creando inmueble...";
+    if (crmCaptacionCreateDuplicates) {
+      crmCaptacionCreateDuplicates.classList.add("hidden");
+      crmCaptacionCreateDuplicates.textContent = "";
+    }
     const form = new FormData(crmCaptacionCreateForm);
     const payload = Object.fromEntries(form.entries());
     try {
@@ -46931,6 +46939,54 @@ if (crmCaptacionCreateForm) {
     } catch (error) {
       if (crmCaptacionCreateStatus) {
         crmCaptacionCreateStatus.textContent = error?.message || "No se pudo crear el inmueble.";
+      }
+      const duplicates = Array.isArray(error?.duplicates) ? error.duplicates : [];
+      if (duplicates.length && crmCaptacionCreateDuplicates) {
+        crmCaptacionCreateDuplicates.classList.remove("hidden");
+        crmCaptacionCreateDuplicates.textContent = "";
+        const title = document.createElement("strong");
+        title.textContent = "Posibles duplicados";
+        crmCaptacionCreateDuplicates.appendChild(title);
+        duplicates.slice(0, 10).forEach((dup) => {
+          const item = document.createElement("div");
+          item.className = "crm-dup-item";
+
+          const left = document.createElement("div");
+          const label = document.createElement("div");
+          label.className = "crm-dup-label";
+          label.textContent = String(dup?.label || dup?.direccion || "Registro existente");
+          left.appendChild(label);
+
+          const meta = document.createElement("div");
+          meta.className = "crm-dup-meta";
+          const reasons = Array.isArray(dup?.reasons) ? dup.reasons : [];
+          const parts = [];
+          const estado = String(dup?.estado || "").trim();
+          if (estado) parts.push(`Estado: ${estado}`);
+          if (reasons.length) parts.push(`Motivo: ${reasons.join(", ")}`);
+          meta.textContent = parts.join(" · ") || "Revisa la ficha para confirmar.";
+          left.appendChild(meta);
+
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "secondary";
+          btn.textContent = "Abrir ficha";
+          btn.addEventListener("click", () => {
+            try {
+              const id = String(dup?.id || "").trim();
+              if (!id) return;
+              setCrmCaptacionModalOpen(false);
+              setCrmWorkspaceView("captaciones");
+              loadCrmCaptaciones();
+              loadCrmInmuebles();
+              ensureCrmOpen(() => openInmuebleDetail(id, "captaciones"));
+            } catch {}
+          });
+
+          item.appendChild(left);
+          item.appendChild(btn);
+          crmCaptacionCreateDuplicates.appendChild(item);
+        });
       }
     }
   });
@@ -55117,4 +55173,88 @@ let dashboardResizeTimer = null;
 window.addEventListener("resize", () => {
   clearTimeout(dashboardResizeTimer);
   dashboardResizeTimer = setTimeout(redrawDashboardOnResize, 120);
+});
+
+// --- CRM Inmobiliaria: catálogo de poblaciones (todas) -----------------------
+let INMO_POBLACIONES_CACHE = null;
+let INMO_POBLACIONES_LOADING = null;
+let INMO_DATALIST_FILTER_KEY = "";
+
+const loadInmoPoblacionesCatalog = async () => {
+  if (Array.isArray(INMO_POBLACIONES_CACHE) && INMO_POBLACIONES_CACHE.length) {
+    return INMO_POBLACIONES_CACHE;
+  }
+  if (INMO_POBLACIONES_LOADING) return INMO_POBLACIONES_LOADING;
+  INMO_POBLACIONES_LOADING = (async () => {
+    const data = await api("/api/catalogo_poblaciones?limit=50000");
+    const items = Array.isArray(data?.items) ? data.items : [];
+    INMO_POBLACIONES_CACHE = items
+      .map((item) => ({
+        poblacion: String(item?.poblacion || "").trim(),
+        provincia: String(item?.provincia || "").trim(),
+      }))
+      .filter((item) => item.poblacion);
+    return INMO_POBLACIONES_CACHE;
+  })().finally(() => {
+    INMO_POBLACIONES_LOADING = null;
+  });
+  return INMO_POBLACIONES_LOADING;
+};
+
+const getInmoProvinciaFromContext = (el) => {
+  try {
+    const form = el?.closest?.("form");
+    const sel = form?.querySelector?.('select.inmo-province-select[name="provincia"]');
+    return String(sel?.value || "").trim();
+  } catch {
+    return "";
+  }
+};
+
+const renderInmoPoblacionDatalist = async (provincia = "") => {
+  const datalist = document.getElementById("inmoPoblacionOptions");
+  if (!datalist) return;
+
+  const provKey = normalizeSimple(provincia || "");
+  if (INMO_DATALIST_FILTER_KEY === provKey && datalist.childElementCount > 0) return;
+
+  let items = [];
+  try {
+    items = await loadInmoPoblacionesCatalog();
+  } catch {
+    items = [];
+  }
+
+  const filtered = provKey
+    ? items.filter((item) => normalizeSimple(item.provincia || "") === provKey)
+    : items;
+
+  datalist.innerHTML = "";
+  const frag = document.createDocumentFragment();
+  filtered.forEach((item) => {
+    const opt = document.createElement("option");
+    opt.value = item.poblacion;
+    frag.appendChild(opt);
+  });
+  datalist.appendChild(frag);
+  INMO_DATALIST_FILTER_KEY = provKey;
+};
+
+document.addEventListener("focusin", (event) => {
+  const target = event.target;
+  if (!target || !target.getAttribute) return;
+  const list = target.getAttribute("list");
+  if (list !== "inmoPoblacionOptions") return;
+  const provincia = getInmoProvinciaFromContext(target);
+  renderInmoPoblacionDatalist(provincia);
+});
+
+document.addEventListener("change", (event) => {
+  const target = event.target;
+  if (!target || !target.classList || !target.classList.contains("inmo-province-select")) return;
+  try {
+    const form = target.closest("form");
+    const pop = form?.querySelector?.('input[list="inmoPoblacionOptions"][name="poblacion"]');
+    if (pop) renderInmoPoblacionDatalist(String(target.value || "").trim());
+  } catch {}
 });

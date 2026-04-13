@@ -4283,6 +4283,51 @@ body.crm-fin #companySummary {
   padding: 12px;
 }
 
+#crmSection .crm-dup-panel {
+  margin-top: 10px;
+  border-radius: 14px;
+  border: 1px solid rgba(242, 193, 78, 0.40);
+  background: rgba(242, 193, 78, 0.14);
+  padding: 12px;
+}
+
+#crmSection .crm-dup-panel.hidden {
+  display: none;
+}
+
+#crmSection .crm-dup-panel strong {
+  display: block;
+  font-family: var(--font-ui);
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+
+#crmSection .crm-dup-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(15, 23, 42, 0.10);
+  background: rgba(255, 255, 255, 0.95);
+  padding: 10px 12px;
+  margin-top: 8px;
+}
+
+#crmSection .crm-dup-item .crm-dup-label {
+  font-weight: 700;
+  font-size: 13px;
+}
+
+#crmSection .crm-dup-item .crm-dup-meta {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.35;
+}
+
 #crmSection .crm-insert-head {
   display: flex;
   align-items: center;
