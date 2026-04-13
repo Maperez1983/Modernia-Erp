@@ -2207,7 +2207,15 @@
 		                  <form id="crmCaptacionCreateForm" class="form-grid">
 		                    <label class="span-2">
 		                      Dirección
-		                      <input name="direccion" required placeholder="Ej. Calle Molina 2" />
+		                      <div class="inline-row">
+		                        <input name="direccion" required placeholder="Ej. Calle Molina 2" />
+		                        <button type="button" id="crmCaptacionCatastroOpen" class="secondary catastro-button" title="Abrir Catastro">
+		                          <span class="catastro-icon catastro-icon--catastro" aria-hidden="true">
+		                            <img class="catastro-logo-img" src="icons/catastro.png" alt="" loading="lazy" />
+		                          </span>
+		                          <span>Abrir Catastro</span>
+		                        </button>
+		                      </div>
 		                    </label>
 		                    <label>
 		                      Población

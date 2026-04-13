@@ -2600,6 +2600,7 @@ const crmNuevaDemandaBtn = document.getElementById("crmNuevaDemandaBtn");
 			const crmCaptacionCreateForm = document.getElementById("crmCaptacionCreateForm");
 			const crmCaptacionCreateStatus = document.getElementById("crmCaptacionCreateStatus");
 			const crmCaptacionCreateDuplicates = document.getElementById("crmCaptacionCreateDuplicates");
+			const crmCaptacionCatastroOpen = document.getElementById("crmCaptacionCatastroOpen");
 		  const crmTopNewBtn = document.getElementById("crmTopNewBtn");
 	const crmRecentBtn = document.getElementById("crmRecentBtn");
 	const crmRecentMenu = document.getElementById("crmRecentMenu");
@@ -46904,6 +46905,22 @@ if (crmClienteModal) {
 
 if (crmCaptacionCloseBtn) {
   crmCaptacionCloseBtn.addEventListener("click", () => setCrmCaptacionModalOpen(false));
+}
+
+if (crmCaptacionCatastroOpen) {
+  crmCaptacionCatastroOpen.addEventListener("click", () => {
+    try {
+      const form = crmCaptacionCreateForm;
+      const direccion = String(form?.querySelector?.('input[name="direccion"]')?.value || "").trim();
+      const poblacion = String(form?.querySelector?.('input[name="poblacion"]')?.value || "").trim();
+      const provincia = String(form?.querySelector?.('select[name="provincia"]')?.value || "").trim();
+      const address = [direccion, poblacion, provincia, "España"].filter(Boolean).join(", ");
+      const url = buildCatastroUrl("", address);
+      window.open(url, "_blank", "noopener");
+    } catch {
+      window.open("https://www.sedecatastro.gob.es/", "_blank", "noopener");
+    }
+  });
 }
 
 if (crmCaptacionCreateForm) {
