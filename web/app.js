@@ -3,7 +3,7 @@
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v95";
+const APP_SW_VERSION = "v96";
 
 // Workspace tenant por defecto del producto (branding de software). Mantiene compatibilidad con slugs legacy.
 const DEFAULT_TENANT_WORKSPACE_SLUG = "verifika2";
@@ -16575,6 +16575,20 @@ const getClientesContextServiceParam = () => {
     const svc = String(state.clientesContextService || "").trim();
     if (svc) return svc;
   }
+  // Si estamos dentro de un CRM vertical, el maestro de clientes debe quedar acotado al servicio del vertical.
+  // Evita que en Inmobiliaria aparezcan clientes de Seguros/Gestoría/etc.
+  try {
+    if (currentTab === "crm") return "inmobiliaria";
+    if (currentTab === "seguros-crm") return "seguros";
+    if (currentTab === "gestoria-crm" || currentTab === "gestoria-dash" || currentTab === "gestoria-docs" || currentTab === "gestoria-agenda" || currentTab === "gestoria-fact" || currentTab === "gestoria-conta") {
+      return "gestoria";
+    }
+    if (currentTab === "fin-crm" || currentTab === "fin-sim") return "financiaciones";
+    const crmParam = normalizeSimple(new URLSearchParams(window.location.search || "").get("crm") || "");
+    if (crmParam === "inmo" || crmParam === "inmobiliaria") return "inmobiliaria";
+    if (crmParam === "seguros") return "seguros";
+    if (crmParam === "fin" || crmParam === "financiaciones" || crmParam === "hipotecas") return "financiaciones";
+  } catch {}
   return getServiceFilterParam();
 };
 
