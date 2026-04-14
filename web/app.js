@@ -26790,12 +26790,31 @@ const ensureHipotecaFichaPanel = () => {
             <h4>Parte prestataria</h4>
             <div class="form-grid">
               <label class="span-2">
+                <span>Prestatario 1 · Fuente</span>
+                <select data-json="cliente_inmueble_json" data-path="prestataria.p1.source">
+                  <option value=""></option>
+                  <option value="c1">C1 (Cliente)</option>
+                  <option value="c2">C2 (Cliente)</option>
+                  <option value="manual">Manual</option>
+                </select>
+              </label>
+              <label class="span-2">
                 <span>Prestatario 1 · Nombre</span>
                 <input data-json="cliente_inmueble_json" data-path="prestataria.p1.nombre" />
               </label>
               <label>
                 <span>Prestatario 1 · NIF/NIE</span>
                 <input data-json="cliente_inmueble_json" data-path="prestataria.p1.nif" />
+              </label>
+              <label class="span-2">
+                <span>Prestatario 2 · Fuente</span>
+                <select data-json="cliente_inmueble_json" data-path="prestataria.p2.source">
+                  <option value=""></option>
+                  <option value="c1">C1 (Cliente)</option>
+                  <option value="c2">C2 (Cliente)</option>
+                  <option value="manual">Manual</option>
+                  <option value="none">No aplica</option>
+                </select>
               </label>
               <label class="span-2">
                 <span>Prestatario 2 · Nombre</span>
@@ -26959,6 +26978,14 @@ const ensureHipotecaFichaPanel = () => {
         </div>
 
         <div id="hipotecaFichaTabLiquidacion" class="stack hidden">
+          <div id="hipotecaLiquidacionTabs" class="tabs" style="margin-bottom: 12px;">
+            <button class="tab active" type="button" data-hipoteca-liq-tab="comprador">Liquidación comprador</button>
+            <button class="tab" type="button" data-hipoteca-liq-tab="vendedor">Liquidación vendedor</button>
+            <button class="tab" type="button" data-hipoteca-liq-tab="cheques">Cuadre de cheques</button>
+            <button class="tab" type="button" data-hipoteca-liq-tab="notaria">Parte notaría</button>
+          </div>
+
+          <div id="hipotecaLiquidacionPanelComprador" class="stack">
           <div class="form-card">
             <h4>Liquidación comprador</h4>
             <div class="form-grid">
@@ -27096,7 +27123,9 @@ const ensureHipotecaFichaPanel = () => {
               </label>
             </div>
           </div>
+          </div>
 
+          <div id="hipotecaLiquidacionPanelVendedor" class="stack hidden">
           <div class="form-card">
             <h4>Liquidación vendedor</h4>
             <div class="form-grid">
@@ -27192,7 +27221,9 @@ const ensureHipotecaFichaPanel = () => {
               </label>
             </div>
           </div>
+          </div>
 
+          <div id="hipotecaLiquidacionPanelCheques" class="stack hidden">
           <div class="form-card">
             <h4>Cuadre de cheques</h4>
             <div class="form-grid">
@@ -27258,7 +27289,9 @@ const ensureHipotecaFichaPanel = () => {
               </label>
             </div>
           </div>
+          </div>
 
+          <div id="hipotecaLiquidacionPanelNotaria" class="stack hidden">
           <div class="form-card">
             <h4>Notaría (parte)</h4>
             <div class="form-grid">
@@ -27334,6 +27367,7 @@ const ensureHipotecaFichaPanel = () => {
               </label>
             </div>
           </div>
+          </div>
         </div>
         <div class="form-actions">
           <button type="button" id="hipotecaFichaPdf" class="secondary">Generar PDF</button>
@@ -27360,6 +27394,9 @@ const ensureHipotecaFichaPanel = () => {
   });
   panel.querySelectorAll('#hipotecaFichaTabs [data-hipoteca-ficha-tab]')?.forEach((btn) => {
     btn.addEventListener("click", () => setHipotecaFichaTab(btn.dataset.hipotecaFichaTab));
+  });
+  panel.querySelectorAll('#hipotecaLiquidacionTabs [data-hipoteca-liq-tab]')?.forEach((btn) => {
+    btn.addEventListener("click", () => setHipotecaLiquidacionTab(btn.dataset.hipotecaLiqTab));
   });
   panel.querySelector("#hipotecaFichaForm")?.addEventListener("submit", saveHipotecaFicha);
   panel.addEventListener("click", (event) => {
@@ -27407,6 +27444,20 @@ const setHipotecaFichaTab = (tabKey) => {
   panel.querySelector("#hipotecaFichaTabLiquidacion")?.classList.toggle("hidden", key !== "liquidacion");
 };
 
+const setHipotecaLiquidacionTab = (tabKey) => {
+  const panel = ensureHipotecaFichaPanel();
+  if (!panel) return;
+  const key = tabKey === "vendedor" || tabKey === "cheques" || tabKey === "notaria" ? tabKey : "comprador";
+  panel.dataset.liqTab = key;
+  panel.querySelectorAll("#hipotecaLiquidacionTabs .tab").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.hipotecaLiqTab === key);
+  });
+  panel.querySelector("#hipotecaLiquidacionPanelComprador")?.classList.toggle("hidden", key !== "comprador");
+  panel.querySelector("#hipotecaLiquidacionPanelVendedor")?.classList.toggle("hidden", key !== "vendedor");
+  panel.querySelector("#hipotecaLiquidacionPanelCheques")?.classList.toggle("hidden", key !== "cheques");
+  panel.querySelector("#hipotecaLiquidacionPanelNotaria")?.classList.toggle("hidden", key !== "notaria");
+};
+
 const safeParseJsonObject = (raw) => {
   try {
     const text = String(raw || "").trim();
@@ -27441,6 +27492,54 @@ const getNestedValue = (obj, path) => {
     cursor = cursor[key];
   }
   return cursor;
+};
+
+const normalizePrestatariaSource = (value) => {
+  const raw = String(value || "").trim().toLowerCase();
+  if (!raw) return "";
+  if (raw === "c1" || raw === "cliente1" || raw === "1") return "c1";
+  if (raw === "c2" || raw === "cliente2" || raw === "2") return "c2";
+  if (raw === "none" || raw === "ninguno" || raw === "no aplica") return "none";
+  if (raw === "manual") return "manual";
+  return raw;
+};
+
+const syncHipotecaPrestatariaFromClientes = (panel, clienteInmueble) => {
+  if (!panel) return;
+  const obj = clienteInmueble && typeof clienteInmueble === "object" ? clienteInmueble : {};
+  const c1 = getNestedValue(obj, "comprador.c1") || {};
+  const c2 = getNestedValue(obj, "comprador.c2") || {};
+
+  const applyParty = (partyKey, source) => {
+    const src = normalizePrestatariaSource(source);
+    const nombreEl = panel.querySelector(`[data-json="cliente_inmueble_json"][data-path="prestataria.${partyKey}.nombre"]`);
+    const nifEl = panel.querySelector(`[data-json="cliente_inmueble_json"][data-path="prestataria.${partyKey}.nif"]`);
+    if (!nombreEl || !nifEl) return;
+
+    if (src === "none") {
+      nombreEl.value = "";
+      nifEl.value = "";
+      nombreEl.disabled = true;
+      nifEl.disabled = true;
+      return;
+    }
+    if (src === "c1" || src === "c2") {
+      const ref = src === "c1" ? c1 : c2;
+      nombreEl.value = String(ref?.nombre || "").trim();
+      nifEl.value = String(ref?.nif || "").trim();
+      nombreEl.disabled = true;
+      nifEl.disabled = true;
+      return;
+    }
+    // manual o vacío => editable
+    nombreEl.disabled = false;
+    nifEl.disabled = false;
+  };
+
+  const p1Source = getNestedValue(obj, "prestataria.p1.source");
+  const p2Source = getNestedValue(obj, "prestataria.p2.source");
+  applyParty("p1", p1Source);
+  applyParty("p2", p2Source);
 };
 
 const normalizeMoneyLike = (value) => {
@@ -27494,6 +27593,63 @@ const computeHipotecaLiquidacionComputed = (data) => {
   comprador.hipoteca = hip;
   comprador.entregas = entregas;
   return liq;
+};
+
+const setLiquidacionFieldIfEmpty = (panel, path, value) => {
+  if (!panel) return false;
+  const normalized = String(value ?? "").trim();
+  if (!normalized) return false;
+  const el = panel.querySelector(`[data-json="liquidacion_json"][data-path="${path}"]`);
+  if (!el) return false;
+  if (String(el.value || "").trim()) return false;
+  el.value = normalized;
+  return true;
+};
+
+const setLiquidacionMoneyIfEmpty = (panel, path, value) => {
+  if (!panel) return false;
+  const parsed = toNumber(value);
+  if (parsed === null) return false;
+  const el = panel.querySelector(`[data-json="liquidacion_json"][data-path="${path}"]`);
+  if (!el) return false;
+  if (String(el.value || "").trim()) return false;
+  el.value = String(parsed);
+  return true;
+};
+
+const autofillHipotecaLiquidacionFromFicha = (panel) => {
+  if (!panel) return;
+  try {
+    const cliente = String(panel.querySelector('[name="cliente"]')?.value || "").trim();
+    const banco = String(panel.querySelector('[name="banco"]')?.value || "").trim();
+    const fechaFirma = String(panel.querySelector('[name="fecha_firma"]')?.value || "").trim();
+    const precio = panel.querySelector('[name="precio"]')?.value ?? "";
+    const importeHipoteca = panel.querySelector('[name="importe_hipoteca"]')?.value ?? "";
+    const clienteInmueble = collectHipotecaFichaJson(panel, "cliente_inmueble_json");
+    const direccion = String(getNestedValue(clienteInmueble, "inmueble.direccion") || "").trim();
+    const localidad = String(getNestedValue(clienteInmueble, "inmueble.localidad") || "").trim();
+    const provincia = String(getNestedValue(clienteInmueble, "inmueble.provincia") || "").trim();
+    const c1Nombre = String(getNestedValue(clienteInmueble, "comprador.c1.nombre") || "").trim();
+    const c2Nombre = String(getNestedValue(clienteInmueble, "comprador.c2.nombre") || "").trim();
+
+    setLiquidacionFieldIfEmpty(panel, "comprador.cliente", cliente || c1Nombre);
+    setLiquidacionFieldIfEmpty(panel, "comprador.vivienda", direccion);
+    setLiquidacionFieldIfEmpty(panel, "comprador.localidad", localidad);
+    setLiquidacionFieldIfEmpty(panel, "comprador.provincia", provincia);
+    setLiquidacionMoneyIfEmpty(panel, "comprador.precio_compra", precio);
+    setLiquidacionMoneyIfEmpty(panel, "comprador.escriturado", precio);
+    setLiquidacionMoneyIfEmpty(panel, "comprador.hipoteca.capital", importeHipoteca);
+    setLiquidacionMoneyIfEmpty(panel, "comprador.entregas.prestamo_concedido", importeHipoteca);
+    setLiquidacionMoneyIfEmpty(panel, "cuadre.prestamo_concedido", importeHipoteca);
+    setLiquidacionFieldIfEmpty(panel, "notaria.entidad", banco);
+    setLiquidacionFieldIfEmpty(panel, "notaria.op_referencia", cliente || c1Nombre);
+    if (fechaFirma) setLiquidacionFieldIfEmpty(panel, "notaria.fecha_hora_firma", fechaFirma);
+
+    if (c2Nombre) {
+      setLiquidacionFieldIfEmpty(panel, "vendedor.cliente", c2Nombre);
+    }
+  } catch {}
+  refreshHipotecaLiquidacionComputedControls(panel);
 };
 
 const refreshHipotecaLiquidacionComputedControls = (panel) => {
@@ -27657,6 +27813,14 @@ const openHipotecaFicha = async (recordId, prefetched = null) => {
   if (!String(getNestedValue(clienteInmueble, "comprador.c1.nombre") || "").trim() && fallbackCliente) {
     setNestedValue(clienteInmueble, "comprador.c1.nombre", fallbackCliente);
   }
+  // Parte prestataria: por defecto, 1º prestatario = C1 y 2º prestatario = C2 (si existe).
+  const c2Nombre = String(getNestedValue(clienteInmueble, "comprador.c2.nombre") || "").trim();
+  if (!String(getNestedValue(clienteInmueble, "prestataria.p1.source") || "").trim()) {
+    setNestedValue(clienteInmueble, "prestataria.p1.source", "c1");
+  }
+  if (!String(getNestedValue(clienteInmueble, "prestataria.p2.source") || "").trim()) {
+    setNestedValue(clienteInmueble, "prestataria.p2.source", c2Nombre ? "c2" : "none");
+  }
   if (!String(getNestedValue(liquidacion, "comprador.cliente") || "").trim() && fallbackCliente) {
     setNestedValue(liquidacion, "comprador.cliente", fallbackCliente);
   }
@@ -27687,12 +27851,41 @@ const openHipotecaFicha = async (recordId, prefetched = null) => {
   fillHipotecaFichaJson(panel, "cliente_inmueble_json", clienteInmueble);
   fillHipotecaFichaJson(panel, "hipoteca_detalle_json", hipotecaDetalle);
   fillHipotecaFichaJson(panel, "liquidacion_json", liquidacion);
+  setHipotecaLiquidacionTab(panel.dataset.liqTab || "comprador");
+  syncHipotecaPrestatariaFromClientes(panel, clienteInmueble);
+  autofillHipotecaLiquidacionFromFicha(panel);
   refreshHipotecaLiquidacionComputedControls(panel);
 
   if (panel.dataset.liquidacionListeners !== "1") {
     panel.dataset.liquidacionListeners = "1";
     panel.querySelectorAll('[data-json="liquidacion_json"][data-path]:not([readonly])').forEach((el) => {
       el.addEventListener("change", () => refreshHipotecaLiquidacionComputedControls(panel));
+    });
+  }
+  if (panel.dataset.prestatariaListeners !== "1") {
+    panel.dataset.prestatariaListeners = "1";
+    panel.querySelectorAll('[data-json="cliente_inmueble_json"][data-path^="prestataria."][data-path$=".source"]').forEach((el) => {
+      el.addEventListener("change", () => {
+        const fresh = collectHipotecaFichaJson(panel, "cliente_inmueble_json");
+        syncHipotecaPrestatariaFromClientes(panel, fresh);
+      });
+    });
+  }
+  if (panel.dataset.liquidacionAutofillListeners !== "1") {
+    panel.dataset.liquidacionAutofillListeners = "1";
+    panel.querySelector('[name="cliente"]')?.addEventListener("change", () => autofillHipotecaLiquidacionFromFicha(panel));
+    panel.querySelector('[name="banco"]')?.addEventListener("change", () => autofillHipotecaLiquidacionFromFicha(panel));
+    panel.querySelector('[name="fecha_firma"]')?.addEventListener("change", () => autofillHipotecaLiquidacionFromFicha(panel));
+    panel.querySelector('[name="precio"]')?.addEventListener("change", () => autofillHipotecaLiquidacionFromFicha(panel));
+    panel.querySelector('[name="importe_hipoteca"]')?.addEventListener("change", () => autofillHipotecaLiquidacionFromFicha(panel));
+    panel.querySelectorAll('[data-json="cliente_inmueble_json"][data-path^="inmueble."]').forEach((el) => {
+      el.addEventListener("change", () => autofillHipotecaLiquidacionFromFicha(panel));
+    });
+    panel.querySelectorAll('[data-json="cliente_inmueble_json"][data-path^="comprador.c1."]').forEach((el) => {
+      el.addEventListener("change", () => autofillHipotecaLiquidacionFromFicha(panel));
+    });
+    panel.querySelectorAll('[data-json="cliente_inmueble_json"][data-path^="comprador.c2."]').forEach((el) => {
+      el.addEventListener("change", () => autofillHipotecaLiquidacionFromFicha(panel));
     });
   }
   const status = panel.querySelector("#hipotecaFichaStatus");
