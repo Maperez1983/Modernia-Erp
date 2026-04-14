@@ -27726,6 +27726,14 @@ const ensureHipotecaFichaPanel = () => {
                 <span>Año</span>
                 <input name="anio" type="number" min="1990" max="2100" />
               </label>
+              <label>
+                <span>Interés</span>
+                <input data-json="hipoteca_detalle_json" data-path="condiciones.interes" inputmode="decimal" placeholder="Ej: 3,05 o 0,0305" />
+              </label>
+              <label>
+                <span>Cuota</span>
+                <input data-json="hipoteca_detalle_json" data-path="condiciones.cuota" inputmode="decimal" placeholder="€/mes" />
+              </label>
             </div>
           </div>
           <div class="form-card">
@@ -27878,8 +27886,8 @@ const ensureHipotecaFichaPanel = () => {
                 <input data-json="liquidacion_json" data-path="comprador.hipoteca.seguro_vida" inputmode="decimal" />
               </label>
               <label>
-                <span>Total seguros (auto)</span>
-                <input data-json="liquidacion_json" data-path="comprador.hipoteca.total_seguros" inputmode="decimal" readonly />
+                <span>Total gastos bloque (auto)</span>
+                <input data-json="liquidacion_json" data-path="comprador.hipoteca.total_bloque" inputmode="decimal" readonly />
               </label>
             </div>
           </div>
@@ -28426,6 +28434,7 @@ const computeHipotecaLiquidacionComputed = (data) => {
 
   const totalSeguros = Number(hip.seguro_hogar || 0) + Number(hip.seguro_vida || 0);
   hip.total_seguros = round2(totalSeguros);
+  hip.total_bloque = round2(Number(hip.total_gastos || 0) + Number(hip.total_seguros || 0));
 
   const sumaNecesaria =
     Number(comprador.precio_compra || 0) +
@@ -28606,11 +28615,14 @@ const autofillHipotecaLiquidacionFromFicha = (panel) => {
     const precio = panel.querySelector('[name="precio"]')?.value ?? "";
     const importeHipoteca = panel.querySelector('[name="importe_hipoteca"]')?.value ?? "";
     const clienteInmueble = collectHipotecaFichaJson(panel, "cliente_inmueble_json");
+    const hipotecaDetalle = collectHipotecaFichaJson(panel, "hipoteca_detalle_json");
     const direccion = String(getNestedValue(clienteInmueble, "inmueble.direccion") || "").trim();
     const localidad = String(getNestedValue(clienteInmueble, "inmueble.localidad") || "").trim();
     const provincia = String(getNestedValue(clienteInmueble, "inmueble.provincia") || "").trim();
     const c1Nombre = String(getNestedValue(clienteInmueble, "comprador.c1.nombre") || "").trim();
     const c2Nombre = String(getNestedValue(clienteInmueble, "comprador.c2.nombre") || "").trim();
+    const interes = getNestedValue(hipotecaDetalle, "condiciones.interes");
+    const cuota = getNestedValue(hipotecaDetalle, "condiciones.cuota");
 
     setLiquidacionFieldIfEmpty(panel, "comprador.cliente", cliente || c1Nombre);
     setLiquidacionFieldIfEmpty(panel, "comprador.vivienda", direccion);
@@ -28624,6 +28636,8 @@ const autofillHipotecaLiquidacionFromFicha = (panel) => {
     setLiquidacionFieldIfEmpty(panel, "notaria.entidad", banco);
     setLiquidacionFieldIfEmpty(panel, "notaria.op_referencia", cliente || c1Nombre);
     if (fechaFirma) setLiquidacionFieldIfEmpty(panel, "notaria.fecha_hora_firma", fechaFirma);
+    setLiquidacionMoneyIfEmpty(panel, "prestamo.interes", interes);
+    setLiquidacionMoneyIfEmpty(panel, "prestamo.cuota_inicial", cuota);
 
     if (c2Nombre) {
       setLiquidacionFieldIfEmpty(panel, "vendedor.cliente", c2Nombre);
@@ -28639,7 +28653,7 @@ const refreshHipotecaLiquidacionComputedControls = (panel) => {
   const targets = [
     "comprador.gastos_compraventa.total",
     "comprador.hipoteca.total_gastos",
-    "comprador.hipoteca.total_seguros",
+    "comprador.hipoteca.total_bloque",
     "comprador.suma_total_necesaria",
     "comprador.suma_total_entregada",
     "comprador.sobran_en_cuenta",
@@ -28805,8 +28819,10 @@ const setupHipotecaFichaMoneyInputs = (panel) => {
         jsonKey === "liquidacion_json" &&
         (path.startsWith("comprador.") || path.startsWith("vendedor.") || path.startsWith("cuadre.")) &&
         !path.startsWith("prestamo.");
+      const isHipotecaDetalleMoney =
+        jsonKey === "hipoteca_detalle_json" && ["condiciones.cuota"].includes(path);
       const isHipotecaMoney = !jsonKey && !path; // inputs name=... de la ficha (precio, comision, etc).
-      if (!isLiquidacionMoney && !isHipotecaMoney) return;
+      if (!isLiquidacionMoney && !isHipotecaDetalleMoney && !isHipotecaMoney) return;
       el.addEventListener("blur", () => {
         const next = formatMoneyInputValue(el.value ?? "");
         if (String(next || "").trim()) el.value = next;
