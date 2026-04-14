@@ -53269,6 +53269,10 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "Tabla no valida"}, status=400)
                 return
 
+            def quote_ident(value: str) -> str:
+                # SQLite identifiers: double-quote and escape double quotes.
+                return '"' + str(value or "").replace('"', '""') + '"'
+
             empresa_id = params.get("empresa_id", [""])[0]
             q = params.get("q", [""])[0].strip()
             uploaded_only = (params.get("uploaded_only", ["1"])[0] or "1").strip() in ("1", "true", "yes")
@@ -53309,25 +53313,26 @@ class Handler(BaseHTTPRequestHandler):
 
             if q:
                 if field_filter and field_filter in visible_columns:
-                    where.append(f"t.{field_filter} LIKE ?")
+                    where.append(f"t.{quote_ident(field_filter)} LIKE ?")
                     values.append(f"%{q}%")
                 else:
-                    likes = " OR ".join([f"t.{col} LIKE ?" for col in text_columns])
-                    where.append(f"({likes})")
-                    values.extend([f"%{q}%"] * len(text_columns))
+                    if text_columns:
+                        likes = " OR ".join([f"t.{quote_ident(col)} LIKE ?" for col in text_columns])
+                        where.append(f"({likes})")
+                        values.extend([f"%{q}%"] * len(text_columns))
 
             if estado_filter and "estado" in visible_columns:
-                where.append("t.estado = ?")
+                where.append(f"t.{quote_ident('estado')} = ?")
                 values.append(estado_filter)
             if tipo_filter and "tipo" in visible_columns:
-                where.append("t.tipo = ?")
+                where.append(f"t.{quote_ident('tipo')} = ?")
                 values.append(tipo_filter)
             if perfil_filter and "perfil" in visible_columns:
-                where.append("t.perfil LIKE ?")
+                where.append(f"t.{quote_ident('perfil')} LIKE ?")
                 values.append(f"%{perfil_filter}%")
 
             where_clause = f"WHERE {' AND '.join(where)}" if where else ""
-            select_cols = ", ".join([f"t.{col}" for col in visible_columns])
+            select_cols = ", ".join([f"t.{quote_ident(col)}" for col in visible_columns])
             limit_clause = "LIMIT 200"
             if limit_param.isdigit():
                 limit_clause = f"LIMIT {int(limit_param)}"
@@ -53347,7 +53352,7 @@ class Handler(BaseHTTPRequestHandler):
                 order_clause = "ORDER BY t.created_at DESC"
             query = (
                 f"SELECT e.nombre AS empresa, {select_cols} "
-                f"FROM {tabla} t "
+                f"FROM {quote_ident(tabla)} t "
                 "LEFT JOIN empresas e ON e.id = t.empresa_id "
                 f"{where_clause} "
                 f"{order_clause} "
