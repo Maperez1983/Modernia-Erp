@@ -28027,6 +28027,7 @@ const ensureHipotecaFichaPanel = () => {
           <div class="form-card">
             <h4>Cuadre de cheques</h4>
             <p class="muted">Se autocompleta con los datos de “Comprador” y “Vendedor”.</p>
+            <div id="hipotecaCuadreCheck" class="ui-status is-empty"></div>
             <div class="form-grid">
               <label>
                 <span>Préstamo concedido</span>
@@ -28493,7 +28494,13 @@ const computeHipotecaLiquidacionComputed = (data) => {
   cuadreGastos.com_apertura = hip.comision_apertura ?? "";
   cuadre.comision_cheques = hip.comision_cheques ?? "";
   cuadre.cuota_socio = hip.cuota_socio ?? "";
-  cuadre.sobran_en_cuenta = comprador.sobran_en_cuenta ?? "";
+  const sobranCuadre =
+    Number(cuadre.prestamo_concedido || 0) +
+    Number(entregas.senal || 0) +
+    Number(entregas.transf_modernia || 0) +
+    Number(cuadre.ingreso_en_cuenta || 0) -
+    Number(comprador.suma_total_necesaria || 0);
+  cuadre.sobran_en_cuenta = round2(sobranCuadre);
 
   if (
     (cuadreCheq1.beneficiario ?? "") === "" &&
@@ -28648,6 +28655,27 @@ const refreshHipotecaLiquidacionComputedControls = (panel) => {
     const val = getNestedValue(computed, path);
     el.value = val === null || val === undefined || val === "" ? "" : formatMoneyInputValue(val);
   });
+
+  const check = panel.querySelector("#hipotecaCuadreCheck");
+  if (check) {
+    const sobranComprador = toNumber(getNestedValue(computed, "comprador.sobran_en_cuenta"));
+    const sobranCuadre = toNumber(getNestedValue(computed, "cuadre.sobran_en_cuenta"));
+    if (sobranComprador === null || sobranCuadre === null) {
+      check.classList.remove("is-error", "is-success");
+      check.classList.add("is-empty");
+      check.textContent = "";
+    } else if (Math.abs(sobranComprador - sobranCuadre) <= 0.01) {
+      check.classList.remove("is-error", "is-empty");
+      check.classList.add("is-success");
+      check.textContent = `Cuadre OK: sobrantes coinciden (${formatMoneyInputValue(sobranComprador)}).`;
+    } else {
+      check.classList.remove("is-success", "is-empty");
+      check.classList.add("is-error");
+      check.textContent = `Error de cuadre: sobrante comprador (${formatMoneyInputValue(
+        sobranComprador
+      )}) ≠ sobrante cheques (${formatMoneyInputValue(sobranCuadre)}).`;
+    }
+  }
 };
 
 const collectHipotecaFichaJson = (panel, jsonKey) => {
