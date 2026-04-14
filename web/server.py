@@ -20063,6 +20063,8 @@ def ensure_tables(db_path):
         "titulo": "titulo TEXT",
         "tipo_operacion": "tipo_operacion TEXT",
         "direccion_numero": "direccion_numero TEXT",
+        "planta": "planta TEXT",
+        "puerta": "puerta TEXT",
         "interior": "interior TEXT",
         "escalera": "escalera TEXT",
         "edificio": "edificio TEXT",
@@ -20103,6 +20105,8 @@ def ensure_tables(db_path):
         "focalizacion": "focalizacion TEXT",
         "subtipologia": "subtipologia TEXT",
         "direccion_numero": "direccion_numero TEXT",
+        "planta": "planta TEXT",
+        "puerta": "puerta TEXT",
         "interior": "interior TEXT",
         "escalera": "escalera TEXT",
         "edificio": "edificio TEXT",
@@ -42065,8 +42069,18 @@ class Handler(BaseHTTPRequestHandler):
                             payload["direccion_numero"] = parts.get("numero")
                         if not str(payload.get("escalera") or "").strip() and parts.get("escalera"):
                             payload["escalera"] = parts.get("escalera")
+                        if not str(payload.get("planta") or "").strip() and parts.get("planta"):
+                            payload["planta"] = parts.get("planta")
+                        if not str(payload.get("puerta") or "").strip() and parts.get("puerta"):
+                            payload["puerta"] = parts.get("puerta")
+                        # Compat: si no hay planta/puerta explícitos, guardamos una versión “humana” en `interior`.
                         if not str(payload.get("interior") or "").strip():
-                            interior = " ".join([str(parts.get("planta") or "").strip(), str(parts.get("puerta") or "").strip()]).strip()
+                            interior = " ".join(
+                                [
+                                    str(payload.get("planta") or "").strip(),
+                                    str(payload.get("puerta") or "").strip(),
+                                ]
+                            ).strip()
                             if interior:
                                 payload["interior"] = interior
                 except Exception:
@@ -42074,7 +42088,7 @@ class Handler(BaseHTTPRequestHandler):
                 conn.execute(
                     """
                     INSERT INTO inmuebles (
-                      id, empresa_id, referencia, titulo, referencia_catastral, tipo_operacion, direccion, direccion_numero, interior, escalera, edificio,
+                      id, empresa_id, referencia, titulo, referencia_catastral, tipo_operacion, direccion, direccion_numero, planta, puerta, interior, escalera, edificio,
                       codigo_postal, localidad, poblacion, provincia, zona, focalizacion, tipo_inmueble, subtipologia,
                       m2, anio_construccion, anio_reforma, habitaciones, banos, precio_objetivo, precio_encargo, precio_valoracion,
                       precio_pedido_cliente, fecha_valoracion, desviacion_pct,
@@ -42089,7 +42103,7 @@ class Handler(BaseHTTPRequestHandler):
                       planificacion_encargo, fecha_ultima_renov_rebaja,
                       estado, lat, lon, created_at, updated_at
                     ) VALUES (
-                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
                     )
                     """,
                     (
@@ -42101,6 +42115,8 @@ class Handler(BaseHTTPRequestHandler):
                         payload.get("tipo_operacion"),
                         payload.get("direccion"),
                         payload.get("direccion_numero"),
+                        payload.get("planta"),
+                        payload.get("puerta"),
                         payload.get("interior"),
                         payload.get("escalera"),
                         payload.get("edificio"),
@@ -42158,7 +42174,7 @@ class Handler(BaseHTTPRequestHandler):
                 conn.execute(
                     """
                     INSERT INTO captaciones (
-                      id, empresa_id, inmueble_id, propietario, focalizacion, tipo_inmueble, subtipologia, direccion, direccion_numero, interior, escalera, edificio,
+                      id, empresa_id, inmueble_id, propietario, focalizacion, tipo_inmueble, subtipologia, direccion, direccion_numero, planta, puerta, interior, escalera, edificio,
                       codigo_postal, localidad, poblacion, provincia, zona, m2, anio_construccion, habitaciones, banos,
                       precio_objetivo, precio_encargo, precio_valoracion, precio_pedido_cliente, fecha_valoracion, desviacion_pct,
                       urgencia, motivo, motivacion, necesidad_venta_alquiler, tipo_operacion, canal, tipo_procedencia,
@@ -42170,7 +42186,7 @@ class Handler(BaseHTTPRequestHandler):
                       propietario_telefono, propietario_email,
                       asesor, responsable, notas, created_at, updated_at
                     ) VALUES (
-                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
                     )
                     """,
                     (
@@ -42183,6 +42199,8 @@ class Handler(BaseHTTPRequestHandler):
                         payload.get("subtipologia"),
                         payload.get("direccion"),
                         payload.get("direccion_numero"),
+                        payload.get("planta"),
+                        payload.get("puerta"),
                         payload.get("interior"),
                         payload.get("escalera"),
                         payload.get("edificio"),
@@ -42417,6 +42435,8 @@ class Handler(BaseHTTPRequestHandler):
                 "subtipologia",
                 "direccion",
                 "direccion_numero",
+                "planta",
+                "puerta",
                 "interior",
                 "escalera",
                 "edificio",
@@ -42506,6 +42526,8 @@ class Handler(BaseHTTPRequestHandler):
                 "subtipologia",
                 "direccion",
                 "direccion_numero",
+                "planta",
+                "puerta",
                 "interior",
                 "escalera",
                 "edificio",
@@ -43914,20 +43936,76 @@ class Handler(BaseHTTPRequestHandler):
                 return
             nombre_norm = re.sub(r"\s+", " ", str(nombre)).strip()
             nif = (payload.get("nif") or "").strip()
-            dup = None
-            if nif:
-                nif_norm = re.sub(r"\s+", "", nif).upper()
-                dup = conn.execute(
-                    "SELECT id FROM clientes WHERE REPLACE(UPPER(nif), ' ', '') = ?",
-                    (nif_norm,),
-                ).fetchone()
-            if not dup:
-                dup = conn.execute(
-                    "SELECT id FROM clientes WHERE TRIM(UPPER(nombre)) = ?",
-                    (nombre_norm.upper(),),
-                ).fetchone()
-            if dup:
-                json_response(self, {"error": "Cliente duplicado", "id": dup["id"]}, status=409)
+            telefono = re.sub(r"\s+", "", str(payload.get("telefono") or "").strip())
+            movil = re.sub(r"\s+", "", str(payload.get("movil") or "").strip())
+            email = str(payload.get("email") or "").strip().lower()
+
+            nif_norm = re.sub(r"\s+", "", nif).upper() if nif else ""
+            tel_norm = re.sub(r"[^\d+]", "", telefono) if telefono else ""
+            mov_norm = re.sub(r"[^\d+]", "", movil) if movil else ""
+            email_norm = email
+
+            # Dedupe ampliado (Tecnocloud “reconciliación”): nif / email / móvil / teléfono / nombre exacto.
+            where = []
+            params = []
+            if nif_norm:
+                where.append("REPLACE(UPPER(nif), ' ', '') = ?")
+                params.append(nif_norm)
+            if email_norm:
+                where.append("LOWER(TRIM(email)) = ?")
+                params.append(email_norm)
+            if mov_norm:
+                where.append("REPLACE(REPLACE(REPLACE(movil, ' ', ''), '-', ''), '.', '') = ?")
+                params.append(mov_norm)
+            if tel_norm:
+                where.append("REPLACE(REPLACE(REPLACE(telefono, ' ', ''), '-', ''), '.', '') = ?")
+                params.append(tel_norm)
+            # Nombre exacto como último recurso (evita duplicar “Juan Pérez” en altas manuales).
+            where.append("TRIM(UPPER(nombre)) = ?")
+            params.append(nombre_norm.upper())
+
+            dup_rows = []
+            try:
+                query = f"SELECT id, nombre, nif, telefono, movil, email FROM clientes WHERE ({' OR '.join(where)}) LIMIT 8"
+                dup_rows = conn.execute(query, tuple(params)).fetchall()
+            except Exception:
+                dup_rows = []
+            if dup_rows:
+                matches = []
+                for row in dup_rows:
+                    reasons = []
+                    if nif_norm and re.sub(r"\s+", "", str(row["nif"] or "")).upper() == nif_norm:
+                        reasons.append("mismo documento")
+                    if email_norm and str(row["email"] or "").strip().lower() == email_norm:
+                        reasons.append("mismo email")
+                    if mov_norm and re.sub(r"[^\d+]", "", str(row["movil"] or "")) == mov_norm:
+                        reasons.append("mismo móvil")
+                    if tel_norm and re.sub(r"[^\d+]", "", str(row["telefono"] or "")) == tel_norm:
+                        reasons.append("mismo teléfono")
+                    if str(row["nombre"] or "").strip().upper() == nombre_norm.upper():
+                        reasons.append("mismo nombre")
+                    matches.append(
+                        {
+                            "id": row["id"],
+                            "nombre": row["nombre"] or "",
+                            "nif": row["nif"] or "",
+                            "telefono": row["telefono"] or "",
+                            "movil": row["movil"] or "",
+                            "email": row["email"] or "",
+                            "reasons": reasons,
+                        }
+                    )
+                json_response(
+                    self,
+                    {
+                        "error": "Posible cliente duplicado",
+                        "code": "duplicate_cliente",
+                        "matches": matches,
+                        # Compat con callers antiguos
+                        "id": matches[0]["id"] if matches else None,
+                    },
+                    status=409,
+                )
                 return
             cliente_id = payload.get("id") or os.urandom(16).hex()
             conn.execute(

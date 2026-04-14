@@ -2595,6 +2595,7 @@ const crmNuevaDemandaBtn = document.getElementById("crmNuevaDemandaBtn");
 			const crmClienteCloseBtn = document.getElementById("crmClienteCloseBtn");
 			const crmClienteCreateForm = document.getElementById("crmClienteCreateForm");
 			const crmClienteCreateStatus = document.getElementById("crmClienteCreateStatus");
+			const crmClienteCreateDuplicates = document.getElementById("crmClienteCreateDuplicates");
 			const crmCaptacionModal = document.getElementById("crmCaptacionModal");
 			const crmCaptacionCloseBtn = document.getElementById("crmCaptacionCloseBtn");
 			const crmCaptacionCreateForm = document.getElementById("crmCaptacionCreateForm");
@@ -2859,6 +2860,7 @@ const inmuebleTabGenerarEncargo = document.getElementById("inmuebleTabGenerarEnc
  const inmuebleGenerarEncargoBtn = document.getElementById("inmuebleGenerarEncargoBtn");
  const inmuebleGenerarEncargoStatus = document.getElementById("inmuebleGenerarEncargoStatus");
  const inmuebleGoEstadoBtn = document.getElementById("inmuebleGoEstadoBtn");
+ const inmuebleGuidedBtn = document.getElementById("inmuebleGuidedBtn");
  const inmuebleGoActividadBtn = document.getElementById("inmuebleGoActividadBtn");
 const inmuebleDocsForm = document.getElementById("inmuebleDocsForm");
 const inmuebleDocsFile = document.getElementById("inmuebleDocsFile");
@@ -17042,6 +17044,16 @@ const maybeReturnToCrmCaptacionCreate = () => {
   }, 0);
 };
 
+const maybeReturnToCrmClienteCreate = () => {
+  if (peekReturnDraftCtx() !== "crm_cliente_create") return;
+  if (!crmClienteModal) return;
+  window.setTimeout(() => {
+    try {
+      setCrmClienteModalOpen(true);
+    } catch {}
+  }, 0);
+};
+
 const maybeReturnToAltaCaptacion = () => {
   if (peekReturnDraftCtx() !== "alta_captacion") return;
   const restored = consumeReturnDraft("alta_captacion");
@@ -17072,9 +17084,24 @@ const setCrmClienteModalOpen = (open = false) => {
     setCrmQuickNewOpen(false);
     setCrmRecentOpen(false);
     if (crmClienteCreateStatus) crmClienteCreateStatus.textContent = "";
-    try {
-      crmClienteCreateForm?.reset?.();
-    } catch {}
+    if (crmClienteCreateDuplicates) {
+      crmClienteCreateDuplicates.classList.add("hidden");
+      crmClienteCreateDuplicates.textContent = "";
+    }
+    const restored = consumeReturnDraft("crm_cliente_create");
+    if (restored?.payload && crmClienteCreateForm) {
+      applyDraftToForm(crmClienteCreateForm, restored.payload);
+      if (crmClienteCreateStatus) crmClienteCreateStatus.textContent = "Borrador restaurado.";
+      const focusName = String(restored?.focusName || "").trim();
+      if (focusName) {
+        const el = crmClienteCreateForm.querySelector(`[name="${CSS.escape(focusName)}"]`);
+        if (el && el.focus) window.setTimeout(() => el.focus(), 0);
+      }
+    } else {
+      try {
+        crmClienteCreateForm?.reset?.();
+      } catch {}
+    }
     setTimeout(() => {
       const input = crmClienteCreateForm?.querySelector?.('input[name="nombre"]');
       if (input && input.focus) input.focus();
@@ -17108,14 +17135,18 @@ const setCrmCaptacionModalOpen = (open = false) => {
       const input = crmCaptacionCreateForm?.querySelector?.('input[name="direccion"]');
       if (input && input.focus) input.focus();
     }, 0);
+    try {
+      bindPostalLookup(crmCaptacionCreateForm);
+    } catch {}
   }
 };
 
-const createCrmClienteQuick = async (payload = {}) => {
+const createCrmClienteQuick = async (payload = {}, opts = {}) => {
   const empresa = resolveCrmInmoEmpresa();
   if (!empresa?.id) {
     throw new Error("Sin empresa Inmobiliaria.");
   }
+  const preferExisting = opts?.preferExisting !== false;
   const nombre = String(payload?.nombre || "").trim();
   if (!nombre) {
     throw new Error("Falta el nombre del cliente.");
@@ -17125,9 +17156,11 @@ const createCrmClienteQuick = async (payload = {}) => {
     tipo_persona: "Física",
     nombre,
   };
+  const nif = String(payload?.nif || payload?.dni || "").trim();
   const telefono = String(payload?.telefono || "").trim();
   const email = String(payload?.email || "").trim();
   const direccion = String(payload?.direccion || "").trim();
+  if (nif) clientePayload.nif = nif;
   if (telefono) clientePayload.telefono = telefono;
   if (email) clientePayload.email = email;
   if (direccion) clientePayload.direccion = direccion;
@@ -17138,13 +17171,24 @@ const createCrmClienteQuick = async (payload = {}) => {
     body: JSON.stringify(clientePayload),
   });
   const data = await response.json().catch(() => ({}));
+  let clienteId = "";
   if (data?.error) {
-    if (response.status === 409 && data.id) {
-      return String(data.id || "").trim();
+    if (response.status === 409 && (data?.code === "duplicate_cliente" || data?.id)) {
+      if (preferExisting) {
+        // En flujos automáticos (alta propietario), preferimos reutilizar el primero.
+        clienteId = String(data.id || (Array.isArray(data?.matches) ? data.matches?.[0]?.id : "") || "").trim();
+      } else {
+        const err = new Error("Posible cliente duplicado. Revisa los candidatos y reutiliza el existente o ajusta los datos.");
+        err.code = "duplicate_cliente";
+        err.matches = Array.isArray(data?.matches) ? data.matches : [];
+        throw err;
+      }
+    } else {
+      throw new Error(data.error);
     }
-    throw new Error(data.error);
+  } else {
+    clienteId = String(data?.id || clientePayload.id || "").trim();
   }
-  const clienteId = String(data?.id || clientePayload.id || "").trim();
   if (!clienteId) {
     throw new Error("No se pudo crear el cliente.");
   }
@@ -17184,6 +17228,10 @@ const createCrmCaptacionQuick = async (payload = {}) => {
     "tipo_inmueble",
     "subtipologia",
     "referencia_catastral",
+    "direccion_numero",
+    "planta",
+    "puerta",
+    "codigo_postal",
     "propietario",
     "propietario_telefono",
     "necesidad_venta_alquiler",
@@ -19961,6 +20009,86 @@ const INMOBILIARIA_ASESORES = [
   "Daniel García",
 ];
 
+const INMOBILIARIA_TIPOS_INMUEBLE = [
+  "",
+  "Piso",
+  "Ático",
+  "Bajo",
+  "Dúplex",
+  "Casa",
+  "Chalet",
+  "Adosado",
+  "Pareado",
+  "Villa",
+  "Finca",
+  "Local",
+  "Oficina",
+  "Nave",
+  "Garaje",
+  "Trastero",
+  "Terreno",
+  "Solar",
+  "Edificio",
+  "Hotel",
+  "Otro",
+];
+
+const SPAIN_PROVINCES = [
+  "",
+  "Álava",
+  "Albacete",
+  "Alicante",
+  "Almería",
+  "Asturias",
+  "Ávila",
+  "Badajoz",
+  "Barcelona",
+  "Burgos",
+  "Cáceres",
+  "Cádiz",
+  "Cantabria",
+  "Castellón",
+  "Ciudad Real",
+  "Córdoba",
+  "A Coruña",
+  "Cuenca",
+  "Girona",
+  "Granada",
+  "Guadalajara",
+  "Guipúzcoa",
+  "Huelva",
+  "Huesca",
+  "Illes Balears",
+  "Jaén",
+  "La Rioja",
+  "Las Palmas",
+  "León",
+  "Lleida",
+  "Lugo",
+  "Madrid",
+  "Málaga",
+  "Murcia",
+  "Navarra",
+  "Ourense",
+  "Palencia",
+  "Pontevedra",
+  "Salamanca",
+  "Santa Cruz de Tenerife",
+  "Segovia",
+  "Sevilla",
+  "Soria",
+  "Tarragona",
+  "Teruel",
+  "Toledo",
+  "Valencia",
+  "Valladolid",
+  "Vizcaya",
+  "Zamora",
+  "Zaragoza",
+  "Ceuta",
+  "Melilla",
+];
+
 const normalizeInmobiliariaPersona = (value, candidates = INMOBILIARIA_ASESORES) => {
   const raw = String(value || "").trim();
   if (!raw) return "";
@@ -20061,7 +20189,7 @@ const INMUEBLE_FIELDS = [
     ],
     section: "Resumen",
   },
-  { key: "tipo_inmueble", label: "Tipo", type: "text", section: "Resumen" },
+  { key: "tipo_inmueble", label: "Tipo", type: "select", options: INMOBILIARIA_TIPOS_INMUEBLE, section: "Resumen" },
   { key: "subtipologia", label: "Subtipología", type: "text", section: "Resumen" },
   { key: "categoria", label: "Categoría", type: "text", section: "Resumen" },
   {
@@ -20082,13 +20210,14 @@ const INMUEBLE_FIELDS = [
   // Dirección
   { key: "direccion", label: "Dirección", type: "text", section: "Dirección" },
   { key: "direccion_numero", label: "Número", type: "text", section: "Dirección" },
-  { key: "interior", label: "Interior", type: "text", section: "Dirección" },
+  { key: "planta", label: "Planta", type: "text", section: "Dirección" },
+  { key: "puerta", label: "Puerta", type: "text", section: "Dirección" },
   { key: "escalera", label: "Escalera", type: "text", section: "Dirección" },
   { key: "edificio", label: "Edificio", type: "text", section: "Dirección" },
   { key: "codigo_postal", label: "Código postal", type: "text", section: "Dirección" },
   { key: "localidad", label: "Localidad", type: "text", section: "Dirección" },
-  { key: "poblacion", label: "Población", type: "text", section: "Dirección" },
-  { key: "provincia", label: "Provincia", type: "text", section: "Dirección" },
+  { key: "poblacion", label: "Población", type: "text", section: "Dirección", list: "inmoPoblacionOptions" },
+  { key: "provincia", label: "Provincia", type: "select", options: SPAIN_PROVINCES, section: "Dirección" },
 
   // Precio
   { key: "precio_objetivo", label: "Precio objetivo", type: "number", section: "Precio" },
@@ -20189,7 +20318,8 @@ const INMUEBLE_FIELDS_ENCARGO = [
   // Dirección
   "direccion",
   "direccion_numero",
-  "interior",
+  "planta",
+  "puerta",
   "escalera",
   "edificio",
   "codigo_postal",
@@ -22095,6 +22225,11 @@ const renderEditableGrid = (grid, fields, data, target) => {
       } else {
         input.value = currentValue || "";
       }
+    }
+    if (input && input.tagName === "INPUT" && field.list) {
+      try {
+        input.setAttribute("list", String(field.list || "").trim());
+      } catch {}
     }
     input.classList.add("inline-input");
     input.dataset.target = target;
@@ -36233,6 +36368,8 @@ const openInmuebleDetail = (id, originView = "") => {
       const normalizedInmueble = {
         ...inmueble,
         titulo: String(inmueble.titulo || "").trim() ? inmueble.titulo : (inmueble.direccion || inmueble.referencia || ""),
+        planta: String(inmueble.planta || "").trim() ? inmueble.planta : "",
+        puerta: String(inmueble.puerta || "").trim() ? inmueble.puerta : (String(inmueble.interior || "").trim() || ""),
         asesor: normalizeInmobiliariaPersona(inmueble.asesor),
         responsable: normalizeInmobiliariaPersona(inmueble.responsable),
         categoria: String(inmueble.categoria || "").trim() ? inmueble.categoria : inferInmobiliariaCategoria(inmueble.tipo_inmueble),
@@ -36241,6 +36378,8 @@ const openInmuebleDetail = (id, originView = "") => {
       const captacion = data.captacion || {};
       const normalizedCaptacion = {
         ...captacion,
+        planta: String(captacion.planta || "").trim() ? captacion.planta : "",
+        puerta: String(captacion.puerta || "").trim() ? captacion.puerta : (String(captacion.interior || "").trim() || ""),
         asesor: normalizeInmobiliariaPersona(captacion.asesor),
         responsable: normalizeInmobiliariaPersona(captacion.responsable),
       };
@@ -36290,6 +36429,9 @@ const openInmuebleDetail = (id, originView = "") => {
         const baseFields = etapaMain === "Encargo" ? INMUEBLE_FIELDS_ENCARGO : INMUEBLE_FIELDS;
         const fields = filterInmuebleFieldsForOperacion(baseFields, state.currentInmuebleOperacionTipo);
         renderEditableGrid(inmuebleDatosGrid, fields, normalizedInmueble, "inmueble");
+        try {
+          bindPostalLookup(inmuebleDatosGrid);
+        } catch {}
       }
       if (inmuebleCaptacionGrid) {
         const fields = etapaMain === "Encargo" ? CAPTACION_FIELDS_ENCARGO : CAPTACION_FIELDS;
@@ -46863,6 +47005,7 @@ const closeClienteDetail = () => {
   );
   // Si veníamos de un alta rápida (duplicados / comprobación), reabrimos el modal con los datos intactos.
   maybeReturnToCrmCaptacionCreate();
+  maybeReturnToCrmClienteCreate();
   maybeReturnToAltaCaptacion();
 };
 
@@ -47581,15 +47724,20 @@ if (crmClienteCreateForm) {
   crmClienteCreateForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (crmClienteCreateStatus) crmClienteCreateStatus.textContent = "Creando cliente...";
+    if (crmClienteCreateDuplicates) {
+      crmClienteCreateDuplicates.classList.add("hidden");
+      crmClienteCreateDuplicates.textContent = "";
+    }
     const form = new FormData(crmClienteCreateForm);
     const payload = {
       nombre: form.get("nombre"),
+      nif: form.get("nif"),
       telefono: form.get("telefono"),
       email: form.get("email"),
       direccion: form.get("direccion"),
     };
     try {
-      const clienteId = await createCrmClienteQuick(payload);
+      const clienteId = await createCrmClienteQuick(payload, { preferExisting: false });
       if (crmClienteCreateStatus) crmClienteCreateStatus.textContent = "Cliente creado.";
       setCrmClienteModalOpen(false);
       setCrmWorkspaceView("clientes");
@@ -47600,6 +47748,43 @@ if (crmClienteCreateForm) {
         } catch {}
       }
     } catch (error) {
+      if (error?.code === "duplicate_cliente" && crmClienteCreateDuplicates) {
+        const matches = Array.isArray(error?.matches) ? error.matches : [];
+        const list = document.createElement("div");
+        list.innerHTML = `<strong>Posible duplicado</strong><p class="muted" style="margin:6px 0 0">Revisa el cliente existente y reutilízalo si corresponde.</p>`;
+        const actions = document.createElement("div");
+        matches.slice(0, 6).forEach((row) => {
+          const item = document.createElement("div");
+          item.className = "crm-dup-item";
+          const left = document.createElement("div");
+          const reasons = Array.isArray(row?.reasons) && row.reasons.length ? ` · ${row.reasons.join(", ")}` : "";
+          const meta = [row?.nif, row?.movil || row?.telefono, row?.email].filter(Boolean).join(" · ");
+          left.innerHTML = `<div class="crm-dup-label">${escapeHtml(String(row?.nombre || "Cliente").trim() || "Cliente")}${escapeHtml(reasons)}</div><div class="crm-dup-meta">${escapeHtml(meta || "Sin datos de contacto")}</div>`;
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "secondary ghost button-inline";
+          btn.textContent = "Abrir ficha";
+          btn.addEventListener("click", () => {
+            try {
+              const draftPayload = Object.fromEntries(new FormData(crmClienteCreateForm).entries());
+              const focusName = String(document.activeElement?.getAttribute?.("name") || "").trim();
+              setReturnDraft("crm_cliente_create", draftPayload, { focusName });
+            } catch {}
+            setCrmClienteModalOpen(false);
+            openClientesModule();
+            openClienteDetail(String(row?.id || "").trim());
+          });
+          item.appendChild(left);
+          item.appendChild(btn);
+          actions.appendChild(item);
+        });
+        crmClienteCreateDuplicates.innerHTML = "";
+        crmClienteCreateDuplicates.appendChild(list);
+        crmClienteCreateDuplicates.appendChild(actions);
+        crmClienteCreateDuplicates.classList.remove("hidden");
+        if (crmClienteCreateStatus) crmClienteCreateStatus.textContent = "Revisa duplicados.";
+        return;
+      }
       if (crmClienteCreateStatus) crmClienteCreateStatus.textContent = error?.message || "No se pudo crear el cliente.";
     }
   });
@@ -51962,6 +52147,7 @@ if (inmuebleBackBtn) {
     state.currentInmuebleOriginView = "inmuebles";
     // Si el usuario estaba creando un inmueble y abrió una ficha para comprobar duplicado, reabrimos el alta con su borrador.
     maybeReturnToCrmCaptacionCreate();
+    maybeReturnToCrmClienteCreate();
     maybeReturnToAltaCaptacion();
   });
 }
@@ -52058,6 +52244,56 @@ if (inmuebleGoEstadoBtn) {
       statusText: "Registra la cita y ciérrala para que el inmueble avance de fase.",
     });
     applyPendingInmuebleCitaPrefill();
+  });
+}
+
+if (inmuebleGuidedBtn) {
+  inmuebleGuidedBtn.addEventListener("click", () => {
+    const ctx = state.currentInmuebleContext || {};
+    const inmueble = ctx.inmueble || {};
+    const captacion = ctx.captacion || {};
+    const etapaMain = normalizeCrmMainEtapa(inmueble.estado || captacion.etapa || captacion.situacion_comercial || "");
+    const warnings = [];
+    if (etapaMain === "Noticia" && String(captacion.noticia_verificada ?? "").trim() !== "1") {
+      warnings.push("La noticia no está verificada (INDICIO). Verifica si el propietario confirma la venta.");
+    }
+    if (!String(captacion.proxima_accion || "").trim()) {
+      warnings.push("No hay próxima acción programada. El método exige dejar siempre el siguiente paso.");
+    }
+    const message =
+      warnings.length
+        ? `Proceso guiado (${etapaMain || "Inmueble"}):\n\n- ${warnings.join("\n- ")}\n\n¿Quieres crear ahora la próxima acción?`
+        : `Proceso guiado (${etapaMain || "Inmueble"}):\n\n¿Quieres crear ahora la próxima acción?`;
+    const ok = window.confirm(message);
+    if (!ok) return;
+    const tipo =
+      etapaMain === "Encargo"
+        ? "Cita de gestión encargo (seguimiento)"
+        : etapaMain === "Propuesta"
+          ? "Cita de propuesta"
+          : etapaMain === "Noticia"
+            ? "Llamada propietario (verificar noticia)"
+            : "Llamada";
+    const id = String(state.currentInmuebleId || "").trim();
+    const captacionId = String(captacion.id || "").trim();
+    openActionCreator("", "", "inmobiliaria", {
+      lock_service: true,
+      servicio: "inmobiliaria",
+      inmueble_id: id,
+      ...(captacionId ? { related_tipo: "captacion", related_id: captacionId } : {}),
+    });
+    if (actionModalTipo) actionModalTipo.value = tipo;
+    if (actionModalNotas && warnings.length) {
+      actionModalNotas.value = `Checklist guiado:\n- ${warnings.join("\n- ")}`;
+    }
+    if (warnings.some((w) => w.includes("no está verificada"))) {
+      const wantsVerify = window.confirm("¿Marcar la noticia como verificada ahora?");
+      if (wantsVerify) {
+        try {
+          saveCaptacionField("noticia_verificada", "1");
+        } catch {}
+      }
+    }
   });
 }
 

@@ -2180,6 +2180,10 @@
 		                      <input name="nombre" required />
 		                    </label>
 		                    <label>
+		                      DNI/CIF (opcional)
+		                      <input name="nif" />
+		                    </label>
+		                    <label>
 		                      Teléfono / móvil
 		                      <input name="telefono" />
 		                    </label>
@@ -2195,6 +2199,7 @@
 		                      <button type="submit">Crear</button>
 		                      <span id="crmClienteCreateStatus" class="muted"></span>
 		                    </div>
+		                    <div id="crmClienteCreateDuplicates" class="crm-dup-panel hidden span-2" aria-live="polite"></div>
 		                  </form>
 		                </div>
 		              </div>
@@ -2216,6 +2221,22 @@
 		                          <span>Abrir Catastro</span>
 		                        </button>
 		                      </div>
+		                    </label>
+		                    <label>
+		                      Número
+		                      <input name="direccion_numero" placeholder="Ej. 14" />
+		                    </label>
+		                    <label>
+		                      Planta
+		                      <input name="planta" placeholder="Ej. 1º" />
+		                    </label>
+		                    <label>
+		                      Puerta
+		                      <input name="puerta" placeholder="Ej. B" />
+		                    </label>
+		                    <label>
+		                      Código postal
+		                      <input name="codigo_postal" placeholder="Ej. 29001" inputmode="numeric" />
 		                    </label>
 		                    <label>
 		                      Población
@@ -2506,6 +2527,23 @@
 					                        <button type="button" class="tc-quickbtn" id="crmInicioPanelBtn">Panel de control</button>
 					                        <button type="button" class="tc-quickbtn" id="crmInicioMapaBtn">Mapa inmuebles</button>
 					                        <button type="button" class="tc-quickbtn" id="crmInicioAgendaBtn">Agenda</button>
+					                      </div>
+					                    </div>
+					                    <div class="tc-listview tc-home-panel" aria-label="Búsquedas principales">
+					                      <div class="tc-listhead">
+					                        <div class="tc-listleft">
+					                          <strong class="tc-title">Búsquedas principales</strong>
+					                        </div>
+					                      </div>
+					                      <div class="tc-quickgrid">
+					                        <button type="button" class="tc-quickbtn kpi-clickable" data-crm-view="captaciones" data-crm-quick="captaciones:quick_pisos_vacios">Pisos vacíos</button>
+					                        <button type="button" class="tc-quickbtn kpi-clickable" data-crm-view="captaciones" data-crm-quick="captaciones:quick_alquilados">Alquilados</button>
+					                        <button type="button" class="tc-quickbtn kpi-clickable" data-crm-view="captaciones" data-crm-quick="captaciones:quick_sin_contacto_120">Sin contacto &gt;120</button>
+					                        <button type="button" class="tc-quickbtn kpi-clickable" data-crm-view="captaciones" data-crm-quick="captaciones:quick_sin_proxima_accion">Sin próxima acción</button>
+					                        <button type="button" class="tc-quickbtn kpi-clickable" data-crm-view="captaciones" data-crm-quick="captaciones:quick_noticia_sin_verificar">Noticias sin verificar</button>
+					                        <button type="button" class="tc-quickbtn kpi-clickable" data-crm-view="captaciones" data-etapa="Noticia">Todas las noticias</button>
+					                        <button type="button" class="tc-quickbtn kpi-clickable" data-crm-view="captaciones" data-etapa="Encargo">Encargos</button>
+					                        <button type="button" class="tc-quickbtn kpi-clickable" data-crm-view="demandas" data-crm-quick="demandas:activa">Pedidos activos</button>
 					                      </div>
 					                    </div>
 					                    <div class="crm-home-cards" aria-label="Gestión">
@@ -3338,6 +3376,7 @@
                         <p class="muted">Seguimiento del expediente, asesor responsable y próxima acción sobre la vivienda.</p>
                       </div>
                       <div class="form-actions">
+                        <button class="secondary ghost" type="button" id="inmuebleGuidedBtn">Proceso guiado</button>
                         <button class="secondary" type="button" id="inmuebleGoEstadoBtn">Cambiar estado</button>
                       </div>
                     </div>
