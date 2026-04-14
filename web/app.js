@@ -17353,10 +17353,12 @@ const filterCrmInsertList = () => {
 const positionCrmInsertModal = (anchorEl) => {
   if (!crmInsertModal || !anchorEl) return;
   const rect = anchorEl.getBoundingClientRect();
+  const sidebarRect = crmLightningSidebar ? crmLightningSidebar.getBoundingClientRect() : null;
   const viewportW = window.innerWidth || document.documentElement.clientWidth || 0;
   const desiredWidth = Math.min(380, Math.max(280, Math.floor(viewportW - 32)));
   let left = rect.left + rect.width / 2 - desiredWidth / 2;
-  left = Math.max(16, Math.min(left, viewportW - desiredWidth - 16));
+  const minLeft = sidebarRect ? Math.round(sidebarRect.right + 12) : 16;
+  left = Math.max(minLeft, Math.min(left, viewportW - desiredWidth - 16));
   const top = Math.max(16, rect.bottom + 10);
   crmInsertModal.style.setProperty("--crm-insert-left", `${Math.round(left)}px`);
   crmInsertModal.style.setProperty("--crm-insert-top", `${Math.round(top)}px`);
